@@ -4,7 +4,7 @@
 //! stored as the raw display values, so the shell looks the same when shown side by side.
 //! Metrics are in egui points (1 pt = 2 px on a Retina display).
 
-use egui::{Color32, Context, FontData, FontDefinitions, FontFamily, FontId, TextStyle};
+use egui::{Color32, Context, FontData, FontDefinitions, FontFamily, FontId, Galley, TextStyle};
 
 const fn rgb(r: u8, g: u8, b: u8) -> Color32 {
     Color32::from_rgb(r, g, b)
@@ -18,6 +18,12 @@ pub mod color {
     pub const APP_BG: Color32 = rgb(0x00, 0x00, 0x00);
     pub const TITLE_BAR: Color32 = rgb(0x32, 0x35, 0x36);
     pub const TITLE_TEXT: Color32 = rgb(0xaf, 0xb2, 0xb2);
+    /// 1px highlight along the top edge of the title bar.
+    pub const TITLE_HIGHLIGHT: Color32 = rgb(0x4f, 0x52, 0x53);
+    pub const TRAFFIC_CLOSE: Color32 = rgb(0xeb, 0x69, 0x5d);
+    pub const TRAFFIC_MIN: Color32 = rgb(0xf4, 0xbf, 0x4f);
+    pub const TRAFFIC_ZOOM: Color32 = rgb(0x60, 0xc4, 0x53);
+    pub const TRAFFIC_IDLE: Color32 = rgb(0x5a, 0x5d, 0x5e);
     pub const PANEL: Color32 = rgb(0x1d, 0x1d, 0x1d);
     /// Darker wells: search fields, dropdowns, list separators.
     pub const FIELD: Color32 = rgb(0x0e, 0x0e, 0x0e);
@@ -33,6 +39,26 @@ pub mod color {
     /// Focus border, hot text, current-time indicator, links.
     pub const ACCENT: Color32 = rgb(0x58, 0x95, 0xed);
     pub const ACCENT_DIM: Color32 = rgb(0x28, 0x59, 0xa8);
+    pub const ACCENT_HOVER: Color32 = rgb(0x7d, 0xae, 0xf3);
+    /// 1pt border of the focused panel frame.
+    pub const FOCUS: Color32 = rgb(0x57, 0x94, 0xec);
+    /// Gray rule under hot text fields in the Properties panel.
+    pub const UNDERLINE: Color32 = rgb(0x6a, 0x6a, 0x6a);
+    /// Keyframe navigator diamond when the playhead is not on a key.
+    pub const KEY_OFF: Color32 = rgb(0x8c, 0x8c, 0x8c);
+    /// Dropdown fields (Parent & Link, viewer resolution).
+    pub const DROPDOWN: Color32 = rgb(0x00, 0x00, 0x00);
+    pub const FIELD_HOVER: Color32 = rgb(0x16, 0x16, 0x16);
+    /// Empty switch cells in the timeline.
+    pub const SWITCH_BG: Color32 = rgb(0x0e, 0x0e, 0x0e);
+    /// Underline of the active tab and active tab text.
+    pub const TAB_ACTIVE: Color32 = rgb(0xd0, 0xd0, 0xd0);
+    pub const TAB_INACTIVE: Color32 = rgb(0xb0, 0xb0, 0xb0);
+    pub const TAB_CLOSE: Color32 = rgb(0x96, 0x96, 0x96);
+    /// Separator before the tab overflow chevron.
+    pub const TAB_SEPARATOR: Color32 = rgb(0x4b, 0x4b, 0x4b);
+    /// Drop-zone highlight while dragging a panel tab.
+    pub const DROP_ZONE: Color32 = Color32::from_rgba_premultiplied(0x2c, 0x4a, 0x76, 0x80);
     /// Background of the selected tool in the toolbar.
     pub const TOOL_SELECTED: Color32 = rgb(0x2f, 0x6a, 0xdf);
     pub const BUTTON_ON: Color32 = rgb(0x3d, 0x3d, 0x3d);
@@ -96,15 +122,28 @@ pub mod metrics {
     pub const TOOLBAR_H: f32 = 40.0;
     pub const PANEL_GAP: f32 = 4.0;
     pub const TOOLBAR_GAP: f32 = 2.0;
-    pub const TAB_BAR_H: f32 = 25.0;
-    pub const STACK_HEADER_H: f32 = 30.0;
+    /// Tab row of a panel frame; also the header of the expanded panel in a stack.
+    pub const TAB_BAR_H: f32 = 28.0;
+    /// Header of a collapsed panel in a stacked frame.
+    pub const STACK_HEADER_H: f32 = 24.0;
     pub const ROW_H: f32 = 17.0;
-    pub const FONT_SIZE: f32 = 12.0;
-    pub const SMALL_FONT_SIZE: f32 = 11.0;
+    /// AE uses Adobe Clean; SF at 11.5pt matches its text widths within ~1%.
+    pub const FONT_SIZE: f32 = 11.5;
+    pub const SMALL_FONT_SIZE: f32 = 10.5;
 }
 
 pub fn font(size: f32) -> FontId {
     FontId::new(size, FontFamily::Proportional)
+}
+
+/// Distance from the top of a single-line galley to its text baseline,
+/// so text can be placed on baselines measured from AE.
+pub fn baseline_offset(galley: &Galley) -> f32 {
+    galley
+        .rows
+        .first()
+        .and_then(|r| r.row.glyphs.first().map(|g| r.pos.y + g.pos.y))
+        .unwrap_or(galley.size().y * 0.8)
 }
 
 pub fn body() -> FontId {
