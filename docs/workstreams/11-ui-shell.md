@@ -41,12 +41,19 @@
 
 ## 进度
 
-- [ ] 外壳与停靠
-- [ ] 主题与图标
+- [ ] 外壳与停靠（进行中：按 AE 工作区模型 Splitter/Frame 自绘停靠，见下方说明）
+- [ ] 主题与图标（进行中：已对照本机 AE 2026 测量颜色与尺寸，写入 `bae-ui::theme`）
 - [ ] 通用控件
 - [ ] 快捷键系统
 - [ ] 工作区预设与保存
 - [ ] 历史面板与 Agent 面板
 - [ ] 输入法验证报告
 
+### 进展记录
+
+- 2026-11-19：建立 Cargo 工作区骨架（`crates/*`）与 `bae-ui` crate；主题 token 取自本机 After Effects 2026 默认亮度下的实测像素值（面板 #1d1d1d、文字 #b1b1b1、强调蓝 #5895ed、焦点框 1pt、面板间距 4pt、标题栏 19pt、工具栏 40pt、图层行 17pt）。界面字体使用系统字体（SF / 苹方），不打包字体。
+- 停靠方案：egui_dock 的标签样式无法还原 AE 的标签（下划线激活态、☰ 面板菜单、× 关闭、焦点蓝框、堆叠面板），因此在 `bae-ui` 内实现与 AE 工作区文件同构的 Splitter/Frame 停靠树。如需回到 egui_dock，替换范围只在 `bae-ui::dock`。
+
 ## 请求（其他工作流在这里留言）
+
+- 致 01 core/foundation：本分支临时加入了根 `Cargo.toml`（成员 `crates/*`，因为空通配会报错）和 `rust-toolchain.toml`，以便 UI crate 能单独构建；foundation 合并后以 foundation 的版本为准。

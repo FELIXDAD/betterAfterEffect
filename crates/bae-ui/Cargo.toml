@@ -1,0 +1,10 @@
+[package]
+name = "bae-ui"
+description = "BAE UI shell: theme tokens, docking frames, title bar, icons and AE-style widgets"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+egui.workspace = true
+serde.workspace = true
