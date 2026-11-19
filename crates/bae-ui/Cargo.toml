@@ -7,4 +7,3 @@ license.workspace = true
 
 [dependencies]
 egui.workspace = true
-serde.workspace = true

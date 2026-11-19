@@ -123,7 +123,10 @@ const LATIN_FONTS: &[(&str, u32)] = &[
 ];
 const CJK_FONTS: &[(&str, u32)] = &[
     ("/System/Library/Fonts/PingFang.ttc", 0),
-    ("/System/Library/AssetsV2/com_apple_MobileAsset_Font8/86ba2c91f017a3749571a82f2c6d890ac7ffb2fb.asset/AssetData/PingFang.ttc", 0),
+    (
+        "/System/Library/AssetsV2/com_apple_MobileAsset_Font8/86ba2c91f017a3749571a82f2c6d890ac7ffb2fb.asset/AssetData/PingFang.ttc",
+        0,
+    ),
     ("/System/Library/Fonts/STHeiti Light.ttc", 0),
     ("/System/Library/Fonts/Hiragino Sans GB.ttc", 0),
     ("C:\\Windows\\Fonts\\msyh.ttc", 0),
