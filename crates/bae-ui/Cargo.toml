@@ -7,3 +7,8 @@ license.workspace = true
 
 [dependencies]
 egui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+eframe.workspace = true
