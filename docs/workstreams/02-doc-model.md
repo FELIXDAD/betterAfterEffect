@@ -1,0 +1,52 @@
+# 02 · 文档模型与命令总线
+
+| 项 | 内容 |
+|---|---|
+| 分支 | `core/doc-model` |
+| Orca 工作区 | `bae-02-doc-model` |
+| 阶段 | P0（最优先：所有人都依赖它） |
+| 依赖 | 无 |
+| 负责目录 | `crates/bae-model/`、`docs/spec/` |
+
+## 目标
+
+实现 USD 式分层的工程数据模型、命令总线、撤销重做和工程文件格式。**先尽快把公共类型和 trait 合并进 `dev`**（哪怕内部还是简单实现），让 P1 工作流可以开始。
+
+## 要做
+
+- **基础类型**：`Stage`、`Sublayer`、`PrimPath`、`Prim`、`PrimType`、`Attribute`、`Value`（Float、Int、Bool、String、Vec2、Vec3、Color、Bezier 路径、Enum、AssetRef、PrimRef 等）、`Keyframe`、`Time`（flicks，见架构文档 4.4）。
+- **分层组合**：层叠顺序、Edit Target、意见强弱解析、Reference（包括跨工程文件）；查询"某个属性的值来自哪一层"；把覆盖下推/合并到更弱的层。
+- **存储**：每个 Sublayer 用一个 Loro 文档存储（Prim 树用 movable tree，属性用 map）。
+- **命令系统**：`Op`、`Command`、`Transaction`、`CommandRegistry`（参数 JSON Schema 用 schemars 生成）；命令带作者；按作者撤销/重做（只撤销自己的修改）。
+- **事件**：`StageEvent` 订阅，包含受影响的 Prim 路径和时间范围。
+- **Prim schema 初版**：Project、Folder、Comp、Layer（各种类）、形状内容、Mask、Effect、Artboard、Board/Panel、Shot、Sequence/Track/Clip、Asset。字段先覆盖 M1 需要的，并且要能无损表达 AE 的基础工程（与 15 对齐）。
+- **基础命令**：创建/删除/移动/重命名 Prim、设置属性、增删改关键帧、设置引用、新建 Sublayer、切换 Edit Target。
+- **工程文件**：目录包读写（架构文档 4.6）、`.baez` 单文件打包、`bae export-json`（把 Sublayer 导出成可读 JSON）、格式版本号与迁移机制。
+- **文档**：`docs/spec/data-model.md`（概念、Prim 类型与字段）、`docs/spec/project-format.md`（文件格式）。
+
+## 对外接口
+
+- 所有人：`Stage`、`PrimPath`、`Attribute`、`Value`、`Time`、`Command`、`CommandRegistry`、`StageEvent`。
+- 09 协同：每个 Sublayer 底层的 Loro 文档，以及导入/导出增量的接口。
+- 17 Agent：CommandRegistry 的元数据（名字、描述、参数 Schema）。
+
+## 验收
+
+- 1 万个 Prim 的工程打开时间 < 500 ms；单次属性修改到事件发出 < 1 ms。
+- 单元测试覆盖：意见强弱解析、引用、撤销重做、两个 Stage 实例并发修改同一 Sublayer 后合并结果一致。
+- 只依赖纯 Rust 库，不依赖 GPU 或窗口；能在 Linux 上编译测试。
+
+## 不做
+
+- 关键帧插值和表达式求值（03）、网络和文件同步（09）。
+
+## 进度
+
+- [ ] 公共类型与 trait 合并进 dev
+- [ ] 分层组合与引用
+- [ ] 命令、事务、撤销
+- [ ] Prim schema 初版
+- [ ] 工程文件读写
+- [ ] spec 文档
+
+## 请求（其他工作流在这里留言）
