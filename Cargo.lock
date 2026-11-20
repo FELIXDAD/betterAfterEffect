@@ -454,6 +454,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "bae-vector"
+version = "0.1.0"
+dependencies = [
+ "bae-anim",
+ "bae-gpu",
+ "bae-model",
+ "bae-render",
+ "bae-vector",
+ "glam",
+ "kurbo",
+ "parking_lot",
+ "rustc-hash 2.1.3",
+ "serde_json",
+ "vello",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
