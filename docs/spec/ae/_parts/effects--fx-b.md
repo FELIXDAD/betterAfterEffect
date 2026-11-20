@@ -865,3 +865,626 @@ Effect-category name: Perspective (透视). Conventions as stated at the start o
 - **Priority:** P2
 - **Owner:** bae-effects
 - **Notes:** —
+
+## Distort effects
+
+Effect-category name: Distort (扭曲). Conventions as stated at the start of the Blur & Sharpen section. All Distort effects are **inverse-mapping warps**: for every output pixel `p` they compute a source position `s = f⁻¹(p)` in the layer's input buffer and sample it (Best quality: bilinear on premultiplied RGBA, or the effect's own supersampling where an Antialiasing control exists; Draft quality: nearest pixel). Samples outside the input buffer are transparent black unless the effect states a wrap/repeat rule. Popup values are the 1-based numbers AE stores; a menu separator "(-" occupies a number (so the stored value skips it). Positions are in layer pixels (y down) and are scaled by the downsample factor. Lottie: only Displacement Map (`ty: 27`), Twirl (`ty: 30`), Mesh Warp (`ty: 31`), Ripple ("Wavy", `ty: 32`), Spherize (`ty: 33`) and Puppet (`ty: 34`) have dedicated effect types; every other effect exports as a generic effect group (`ty: 5`) identified by `mn` (matchName). Skottie renders Bulge, Corner Pin, Displacement Map and Transform by matchName; lottie-web renders none of the Distort effects.
+
+### AE-FX-355 · Turbulent Displace (湍流置换)
+
+- **What it does:** Warps the layer with a displacement field generated from animated fractal noise (flowing water, heat haze, waving flags, organic wobble on text and shapes).
+- **Exact semantics:**
+  - matchName `ADBE Turbulent Displace`; category Distort; 32 bpc; GPU —. Expands output bounds only when Resize Layer is on; otherwise the result is clipped to the input rect.
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Displacement (置换) | `ADBE Turbulent Displace-0001` | popup | 1 Turbulent | see enum below | — | — |
+  | 2 | Amount (数量) | `-0002` | float slider | 50.0 | slider 0…100; valid −1000…1000 (UNVERIFIED) | ≈ pixels of displacement at Size 100 (UNVERIFIED) | Downsample-scaled. |
+  | 3 | Size (大小) | `-0003` | float slider | 100.0 | slider 2…1000; valid 2…10000 (UNVERIFIED) | pixels (feature size of the base noise octave) | — |
+  | 4 | Offset (Turbulence) (偏移（湍流）) | `-0004` | point | layer centre | any | layer px | Translates the noise field; keyframe to make the turbulence drift. |
+  | 5 | Complexity (复杂度) | `-0005` | float slider | 1.0 | 1…10 (UNVERIFIED valid = slider) | octaves | Fractional values blend the last octave. |
+  | 6 | Evolution (演化) | `-0006` | angle | 0x+0° | any | revolutions + degrees | Each revolution is a new noise state (not periodic unless Cycle Evolution). |
+  | 7 | Evolution Options (演化选项) | `-0007` | group start | — | — | — | Contains 8–10. |
+  | 8 | Cycle Evolution (循环演化) | `-0008` | checkbox | off | — | — | — |
+  | 9 | Cycle (in Revolutions) (循环（旋转次数）)（译名待核） | `-0009` | integer slider | 1 | 1…? (UNVERIFIED slider 1…20, valid 1…1000) | revolutions | Period of the evolution when Cycle Evolution is on. |
+  | 10 | Random Seed (随机植入) | `-0010` | integer slider | 0 | slider 0…1000; valid 0…10000 (UNVERIFIED) | — | Changes the noise pattern without changing its character. |
+  | — | (group end) | `-0011` | group end | — | — | — | — |
+  | 11 | Pinning (固定) | `-0012` | popup | 3 Pin All | see enum below | — | — |
+  | 12 | Resize Layer (调整图层大小) | `-0013` | checkbox | off | — | — | Allows the warped image to extend past the layer bounds. |
+  | 13 | Antialiasing for Best Quality (消除锯齿（最佳品质）)（译名待核） | `-0014` | popup | 1 Low | 1 Low (低), 2 High (高) | — | Only at Best layer quality. |
+
+  - Displacement enum (stored value: name): 1 Turbulent (湍流), 2 Bulge (凸出), 3 Twist (扭转), [4 separator], 5 Turbulent Smoother (湍流较平滑), 6 Bulge Smoother (凸出较平滑), 7 Twist Smoother (扭转较平滑), [8 separator], 9 Vertical Displacement (垂直置换), 10 Horizontal Displacement (水平置换), 11 Cross Displacement (交叉置换). zh-CN enum strings（译名待核）.
+  - Pinning enum: 1 None (无), [2 separator], 3 Pin All (全部固定), 4 Pin Horizontal (水平固定), 5 Pin Vertical (垂直固定), 6 Pin Left (固定左侧), 7 Pin Right (固定右侧), 8 Pin Top (固定顶部), 9 Pin Bottom (固定底部), [10 separator], 11 Pin All Locked, 12 Pin Horizontal Locked, 13 Pin Vertical Locked, 14 Pin Left Locked, 15 Pin Right Locked, 16 Pin Top Locked, 17 Pin Bottom Locked. zh-CN strings（译名待核）.
+
+  ```
+  // AE's noise basis is proprietary; this is the BAE model (shape-compatible, not bit-exact). UNVERIFIED as AE's exact algorithm.
+  evo = evolution_degrees / 360                       // revolutions, continuous
+  if cycle_evolution: evo_phase = 2π * (evo mod cycle) / cycle   // noise loops over a circle in its 4th dim
+  q = (p - offset) / size                             // noise space; offset default = layer centre
+  N(q) = Σ_{k=0}^{ceil(complexity)-1} w_k * noise(q * 2^k, evo, seed) / 2^k,   w_k = 1 except last octave = frac(complexity) (or 1)
+  switch displacement:
+    Turbulent:  d = amount * (N_a(q), N_b(q))          // two decorrelated noise channels
+    Bulge:      d = amount * ∇N(q) * size              // push away from noise peaks (UNVERIFIED sign)
+    Twist:      d = amount * perp(∇N(q)) * size        // curl: swirl around peaks
+    Vertical:   d = (0, amount * N(q))
+    Horizontal: d = (amount * N(q), 0)
+    Cross:      d = amount * (N(q), N(q))             // same value on both axes → diagonal displacement
+    *Smoother:  same as base type with cubic (instead of linear) noise interpolation; slower
+  d *= pin_falloff(p)          // 0 on pinned edges, ramps to 1 toward the interior (ramp width UNVERIFIED)
+  out(p) = sample(in, p + d)   // Best: supersampled per Antialiasing (Low ≈ 1, High ≈ 4×4 UNVERIFIED)
+  ```
+  - Pinned edges: Pin All = all four edges; Pin Horizontal = left and right; Pin Vertical = top and bottom (UNVERIFIED pairing); single-edge pins. "Locked" variants: UNVERIFIED — believed to keep the pinned edges fixed even when Resize Layer expands the output (the unlocked variants pin the *expanded* boundary).
+  - Amount 0 → identity. Negative Amount reverses the displacement direction.
+  - Turbulence is evaluated in layer space, so it moves/scales with the layer transform; keyframe Offset (Turbulence) for drift.
+- **Priority:** P1 — very common in motion design; deterministic noise model needed.
+- **Owner:** bae-effects
+- **Notes:** Evolution / Cycle Evolution / Random Seed semantics identical to Fractal Noise (effects.md [fx-c], Fractal Noise AE-FX-633) and Roughen Edges (AE-FX-324). Help: to loop seamlessly, keyframe Evolution in whole revolutions and set Cycle to a divisor of that count. Lottie: no dedicated `ty`; exported as `ty: 5` with `mn: "ADBE Turbulent Displace"` (players ignore it). BAE decision: AE's noise cannot be reproduced bit-exactly; document BAE's noise as "visually equivalent" and keep it stable across versions (seeded integer hash, no platform-dependent float paths). Implementation hint: share the WGSL fractal-noise module with Fractal Noise; render the displacement field at reduced resolution (noise is smooth) and upsample before the warp pass.
+
+### AE-FX-356 · Displacement Map (置换图)
+
+- **What it does:** Moves each pixel horizontally and vertically by amounts read from a chosen channel of another layer (the map).
+- **Exact semantics:**
+  - matchName `ADBE Displacement Map`; category Distort; 32 bpc; GPU —. Expands output bounds when Expand Output is on (by max |displacement|).
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Displacement Map Layer (置换图层) | `ADBE Displacement Map-0001` | layer | this layer (index 1 when applied to the top layer; "None" = self) (UNVERIFIED: defaults to the effect's own layer) | any layer in comp | — | Read as its **source** (no masks, no effects, no transform). Precompose to use a processed map. |
+  | 2 | Use For Horizontal Displacement (用于水平置换) | `-0002` | popup | 1 Red | enum below | — | — |
+  | 3 | Max Horizontal Displacement (最大水平置换) | `-0003` | float slider | 5.0 | slider −100…100; valid −32000…32000 (UNVERIFIED) | pixels | Downsample-scaled. |
+  | 4 | Use For Vertical Displacement (用于垂直置换) | `-0004` | popup | 2 Green | enum below | — | — |
+  | 5 | Max Vertical Displacement (最大垂直置换) | `-0005` | float slider | 5.0 | same as 3 | pixels | — |
+  | 6 | Displacement Map Behavior (置换图特性)（译名待核） | `-0006` | popup | 1 Center Map | 1 Center Map (中心图), 2 Stretch Map to Fit (伸缩对应图以适合), 3 Tile Map (拼贴图)（译名待核） | — | How a map of a different size is placed. |
+  | 7 | Edge Behavior: Wrap Pixels Around (边缘特性：像素回绕) | `-0007` | checkbox | off | — | — | On: source samples outside the layer wrap to the opposite side. |
+  | 8 | Expand Output (扩展输出) | `-0008` | checkbox | on | — | — | — |
+
+  - Channel enum (both popups; stored value: name): 1 Red (红色), 2 Green (绿色), 3 Blue (蓝色), 4 Alpha, 5 Luminance (明亮度), 6 Hue (色相), 7 Lightness (亮度), 8 Saturation (饱和度), 9 Full (全开), 10 Half (半开), 11 Off (关)（zh 译名待核）.
+
+  ```
+  // map sampling: m = map pixel at the output position p, after placement:
+  //   Center:  map centred on the layer: mp = p - (layerSize - mapSize)/2, outside the map → clamp (UNVERIFIED: edge pixels repeat)
+  //   Stretch: mp = p * mapSize / layerSize
+  //   Tile:    mp = p mod mapSize
+  m = unpremultiply(map(mp))                             // map read in its own colour values, 0…1 (8 bpc: v/255)
+  sel(c) = c==Red: m.r | Green: m.g | Blue: m.b | Alpha: m.a
+         | Luminance: lum(m.rgb) (weights UNVERIFIED: Skottie uses Rec.709 0.2126/0.7152/0.0722; AE may use Rec.601)
+         | Hue/Lightness/Saturation: HSL of m (hue normalised 0…1)
+         | Full: 1.0 | Half: 0.5 | Off: 0.0  (Skottie; UNVERIFIED for AE whether Off means "no displacement")
+  cov(c) = (c ∈ {Red, Green, Blue, Luminance}) ? m.a : 1        // Skottie: R/G/B/Lum displacement scaled by map alpha
+  dx = (sel(h_chan) - 0.5) * 2 * max_h * cov(h_chan)
+  dy = (sel(v_chan) - 0.5) * 2 * max_v * cov(v_chan)
+  s = p + (dx, dy)                                       // value 1.0 samples max px to the right/below → image moves left/up
+  if wrap: s = mod(s, layerSize)
+  out(p) = sample(in, s)                                 // Best quality: bilinear; Draft: nearest
+  out_rect = expand_output ? in_rect.inflate(|max_h|, |max_v|) : in_rect
+  ```
+  - Help: map value 0 → −max, 255 → +max, 128 → no displacement (strictly 128/255 = 0.502 gives +0.4 % of max at 8 bpc).
+  - In 32 bpc map values outside 0…1 extrapolate (displacement beyond ±max). UNVERIFIED whether AE clamps.
+  - If the map layer is the effect's own layer, the layer's source (pre-effect) is used.
+- **Priority:** P1 — standard for glass/heat/texture distortions.
+- **Owner:** bae-effects (+ bae-render)
+- **Notes:** Layer parameters reference the map layer's source at the current comp time (time-remapped/stretched per the map layer's timing) — see effects.md [fx-a] for layer-parameter rules. Lottie: `ty: 27`, `ef` in AE order (layer, h-channel, max h, v-channel, max v, behavior, edge, expand). Skottie implements it (`DisplacementMapEffect.cpp`, HSL selectors approximated). Implementation hint: one fragment pass; map texture sampled with the placement matrix and repeat/clamp address mode.
+
+### AE-FX-357 · Wave Warp (波形变形)
+
+- **What it does:** Distorts the layer with a travelling wave of selectable shape; animates by itself at Wave Speed without keyframes.
+- **Exact semantics:**
+  - matchName `ADBE Wave Warp`; category Distort; 16 bpc; GPU —. Expands output bounds: no (UNVERIFIED; displaced content beyond the layer rect is clipped — users add Grow Bounds or precompose).
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Wave Type (波形类型) | `ADBE Wave Warp-0001` | popup | 1 Sine | enum below | — | — |
+  | 2 | Wave Height (波形高度) | `-0002` | float slider | 10.0 | slider 0…100; valid −32000…32000 (UNVERIFIED) | pixels (amplitude) | Help calls it "distance between wave peaks"; it acts as displacement amplitude (UNVERIFIED peak vs peak-to-peak). |
+  | 3 | Wave Width (波形宽度) | `-0003` | float slider | 40.0 | slider 1…1000; valid 1…32000 (UNVERIFIED) | pixels (wavelength) | — |
+  | 4 | Direction (方向) | `-0004` | angle | 90° | any | degrees | Direction of travel; 0° = up, 90° = right, 225° = upper-right → lower-left. |
+  | 5 | Wave Speed (波形速度) | `-0005` | float slider | 1.0 | slider −5…5 (UNVERIFIED); valid −32000…32000 | cycles per second | Negative reverses travel; 0 = static (animate Phase instead). |
+  | 6 | Pinning (固定) | `-0006` | popup | 1 None | enum below | — | — |
+  | 7 | Phase (相位) | `-0007` | angle | 0x+0° | any | degrees | Starting point in the waveform. |
+  | 8 | Antialiasing (Best Quality) (消除锯齿（最佳品质）)（译名待核） | `-0008` | popup | 1 Low | 1 Low, 2 Medium, 3 High | — | Supersampling only at Best layer quality. |
+
+  - Wave Type enum: 1 Sine (正弦), 2 Square (正方形), 3 Triangle (三角形), 4 Sawtooth (锯齿), 5 Circle (圆形), 6 Semicircle (半圆形), 7 Uncircle (逆圆形), 8 Noise (杂色), 9 Smooth Noise (平滑杂色)（zh 译名待核）.
+  - Pinning enum: 1 None (无), 2 All Edges (全部边缘), 3 Center (中心), [4 separator], 5 Left Edge, 6 Top Edge, 7 Right Edge, 8 Bottom Edge, [9 separator], 10 Horizontal Edges, 11 Vertical Edges（zh 译名待核）.
+
+  ```
+  θ = radians(direction)
+  dir  = (sin θ, -cos θ)                 // travel direction, y down
+  perp = (cos θ,  sin θ)                 // displacement axis (transverse wave); θ=90° → vertical displacement
+  u = dot(p - layer_centre, dir) / width                 // UNVERIFIED origin (layer centre vs layer origin)
+  φ = 2π * (u - speed * t) + radians(phase)              // t = layer-local seconds; wave moves along +dir
+  w(φ) by type, period 2π, range −1…1:
+     Sine: -sin(φ)     // help: phase 0° = midpoint of downward slope, 90° = bottom of trough (sign UNVERIFIED in y-down)
+     Square: sign(-sin φ);  Triangle: triangle wave;  Sawtooth: ramp
+     Circle/Semicircle/Uncircle: circular-arc profiles (exact shapes UNVERIFIED)
+     Noise / Smooth Noise: random per-wavelength values (random, smoothly interpolated for Smooth Noise), seeded per layer (UNVERIFIED)
+  d = height * w(φ) * pin_weight(p)       // pin_weight → 0 at pinned edges/centre, linear ramp (UNVERIFIED)
+  out(p) = sample(in, p - d * perp)
+  ```
+  - The auto-animation is a function of layer time, so the effect is deterministic per frame and loops every `1/|speed|` seconds when Phase is constant.
+- **Priority:** P1 — common for flags, water lines, wobbly text.
+- **Owner:** bae-effects
+- **Notes:** "Wave Height" and "Wave Width" naming is inverted vs intuition only in Adobe's prose; behaviour above is the UI meaning. Lottie: no `ty`; generic `ty: 5`. Implementation hint: single analytic fragment pass; for Antialiasing High use 4–16 jittered samples per pixel only at Best quality.
+
+### AE-FX-358 · Bulge (凸出)
+
+- **What it does:** Magnifies (or pinches) an elliptical region around a centre so it appears to bulge toward or away from the viewer.
+- **Exact semantics:**
+  - matchName `ADBE Bulge`; category Distort; 16 bpc; GPU —. Expands bounds: no.
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Horizontal Radius (水平半径) | `ADBE Bulge-0001` | float slider | 50.0 (UNVERIFIED) | slider 0…250; valid 0…2000 (UNVERIFIED) | pixels | Draggable handle in the Comp viewer. |
+  | 2 | Vertical Radius (垂直半径) | `-0002` | float slider | 50.0 (UNVERIFIED) | same | pixels | — |
+  | 3 | Bulge Center (凸出中心) | `-0003` | point | layer centre | any | layer px | — |
+  | 4 | Bulge Height (凸出高度) | `-0004` | float slider | 1.0 | −4…4 (UNVERIFIED) | — | >0 bulges toward the viewer (magnify), <0 away (pinch). |
+  | 5 | Taper Radius (锥形半径) | `-0005` | float slider | 0.0 | 0…100 (UNVERIFIED) | pixels (UNVERIFIED) | 0 = steep, pronounced bulge; larger = shallower sides. |
+  | 6 | Antialiasing (消除锯齿) | `-0006` | popup | 1 Low | 1 Low (低), 2 High (高) | — | Best quality only. |
+  | 7 | Pin All Edges (固定所有边缘) | `-0007` | checkbox | off | — | — | Prevents the layer edges from moving. |
+
+  ```
+  // Skottie's reverse-engineered model (Taper Radius ignored); good match for Taper 0. UNVERIFIED vs AE for taper > 0.
+  if height == 0: out = in
+  v = (p - centre) / (h_radius, v_radius)          // unit circle = bulge region
+  if |v|² >= 1: out(p) = in(p)
+  a  = |height| / 4
+  R  = (1 + a) / 2 / sqrt(a)
+  e  = 1.3 * a³
+  d_sph = normalize(v) * asin(|v| / R) / asin(1 / R) - v
+  d_exp = v * pow(|v|², e) - v
+  v' = v + sign(height) * (d_sph + d_exp)
+  out(p) = sample(in, centre + v' * (h_radius, v_radius))
+  ```
+  - Pin All Edges: displacement fades to 0 at the layer boundary (only relevant when the ellipse crosses it).
+- **Priority:** P1
+- **Owner:** bae-effects
+- **Notes:** Skottie `BulgeEffect.cpp` binds only Horizontal/Vertical Radius, Center and Height. Lottie: no `ty`; generic `ty: 5` with `mn: "ADBE Bulge"`. Implementation hint: analytic single pass.
+
+### AE-FX-359 · Corner Pin (边角定位)
+
+- **What it does:** Moves the four corners of the layer image to arbitrary points, mapping the image with a perspective (projective) transform; used for screen replacements with the tracker.
+- **Exact semantics:**
+  - matchName `ADBE Corner Pin`; category Distort; 32 bpc; GPU —. Expands output bounds: yes, to the bounding box of the four points (may extend beyond the layer rect).
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Upper Left (左上) | `ADBE Corner Pin-0001` | point | [0, 0] | any | layer px | — |
+  | 2 | Upper Right (右上) | `-0002` | point | [w, 0] | any | layer px | — |
+  | 3 | Lower Left (左下) | `-0003` | point | [0, h] | any | layer px | Note AE order: UL, UR, **LL**, LR. |
+  | 4 | Lower Right (右下) | `-0004` | point | [w, h] | any | layer px | — |
+
+  ```
+  src quad = (0,0), (w,0), (0,h), (w,h)              // the input layer rect (w,h = layer source size)
+  H = homography mapping src corners → (UL, UR, LL, LR)    // 3×3, h33 = 1; solve 8×8 system or Heckbert square→quad
+  for output pixel p:
+      (X, Y, W) = H⁻¹ · (p.x, p.y, 1);  s = (X/W, Y/W)
+      if W <= 0 or s outside [0,w]×[0,h]: transparent
+      out(p) = sample(in, s)                          // Best: bilinear (+ edge antialiasing); Draft: nearest
+  ```
+  - Degenerate quads (three collinear points) → H singular → render nothing (UNVERIFIED AE shows nothing / previous frame). Non-convex ("bow-tie") quads give a folded projective image; AE renders it without error (UNVERIFIED exact appearance).
+  - Only the layer's original rect is pinned; content an earlier effect pushed outside that rect is clipped (UNVERIFIED).
+- **Priority:** P1 — standard for tracked screen replacement.
+- **Owner:** bae-effects (+ bae-ui-motion)
+- **Notes:** The Tracker's "Perspective corner pin" track type writes keyframes to these four properties (see ui-preview-render-io.md [ui-a], Tracker panel). CC Power Pin (later in this section) is the extended variant. Skottie: `CornerPinEffect.cpp` uses `SkMatrix::PolyToPoly` on the four corners (same model). Lottie: no `ty`; generic `ty: 5`. Implementation hint: draw one quad with homogeneous texture coordinates (q-coordinate interpolation) so the GPU interpolates perspective-correctly — no per-pixel matrix inverse and no triangle-split seam.
+
+### AE-FX-360 · Transform effect (变换)
+
+- **What it does:** A full 2D transform (anchor, position, scale, skew, rotation, opacity) applied as an effect, so it can sit anywhere in the effect stack and have its own motion blur with an independent shutter angle.
+- **Exact semantics:**
+  - matchName `ADBE Geometry2`; category Distort; 32 bpc (docsforadobe; Adobe help still says 8/16 bpc); GPU since AE 15.0. Expands output bounds: yes (to the transformed bounding box).
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Anchor Point (锚点) | `ADBE Geometry2-0001` | point | layer centre | any | layer px | — |
+  | 2 | Position (位置) | `-0002` | point | layer centre | any | layer px | — |
+  | 3 | Uniform Scale (统一缩放)（译名待核） | `-0011` | checkbox | on | — | — | On: Scale Height drives both axes and is labelled "Scale"; Scale Width is disabled. Note matchName `-0011` sits third. |
+  | 4 | Scale Height (缩放高度)（译名待核） | `-0003` | float slider | 100.0 | slider 0…100 (UNVERIFIED); valid −10000…10000 (UNVERIFIED) | % | Negative flips. |
+  | 5 | Scale Width (缩放宽度)（译名待核） | `-0004` | float slider | 100.0 | same | % | Ignored while Uniform Scale is on. |
+  | 6 | Skew (倾斜) | `-0005` | float slider | 0.0 | slider −70…70 (UNVERIFIED); valid −85…85 (UNVERIFIED) | degrees | — |
+  | 7 | Skew Axis (倾斜轴) | `-0006` | angle | 0° | any | degrees | Axis along which the skew acts. |
+  | 8 | Rotation (旋转) | `-0007` | angle | 0x+0° | any | degrees | Clockwise positive. |
+  | 9 | Opacity (不透明度) | `-0008` | float slider | 100.0 | 0…100 | % | Multiplies the result. |
+  | 10 | Use Composition's Shutter Angle (使用合成的快门角度)（译名待核） | `-0009` | checkbox | on | — | — | — |
+  | 11 | Shutter Angle (快门角度) | `-0010` | float slider | 0.0 | 0…360 (UNVERIFIED; comp allows 0…720) | degrees | Used when 10 is off. |
+  | 12 | Sampling (采样) | `-0012` | popup | 1 Bilinear | 1 Bilinear (双线性), 2 Bicubic (双立方) | — | Added AE 16.1 (2019) (UNVERIFIED version). |
+
+  ```
+  sx = scale_width/100 (or scale_height/100 if uniform);  sy = scale_height/100
+  M = T(position) · R(rotation) · K(skew, skew_axis) · S(sx, sy) · T(-anchor)
+  K(k, a) = R(a) · [[1, tan(-k)], [0, 1]] · R(-a)     // same skew model as shape-group transforms (UNVERIFIED sign; see shapes.md, group transforms)
+  out(p) = opacity/100 * sample(in, M⁻¹ p)            // Bilinear or Bicubic at Best; nearest at Draft
+  ```
+  - **Motion blur:** when the layer's Motion Blur switch and the comp's Enable Motion Blur are both on, the effect renders its own motion blur: it evaluates its parameters at N sub-frame times across the shutter interval (angle = comp shutter angle, or Shutter Angle when 10 is off; phase and sample count from Composition Settings › Advanced: UNVERIFIED whether phase is honoured) and averages the transformed images. This blur is independent of (and in addition to) layer-transform motion blur. With Shutter Angle 0 there is no effect-level blur.
+  - Applied in layer space after masks and earlier effects, before the layer's own transform (render order: compositing-3d-color.md [cmp-a], Render order).
+- **Priority:** P0 — ubiquitous for secondary transforms, effect-stack transforms and stylised motion blur.
+- **Owner:** bae-effects (+ bae-anim)
+- **Notes:** Skottie: `TransformEffect.cpp` (in uniform mode uses Scale Height for both axes; ignores shutter/sampling). Lottie: no `ty`; generic `ty: 5` with `mn: "ADBE Geometry2"`, values in AE order. Expressions often read `effect("Transform")("Position")`. Implementation hint: a single textured-quad draw with the matrix; for effect motion blur, accumulate N draws into one target in the same pass. BAE decision: provide Bicubic via a 16-tap Catmull-Rom (B=0, C=0.5) kernel (AE's bicubic kernel UNVERIFIED).
+
+### AE-FX-361 · Mirror (镜像)
+
+- **What it does:** Splits the image along a line and reflects one side onto the other.
+- **Exact semantics:**
+  - matchName `ADBE Mirror`; category Distort; 16 bpc; GPU —. Expands bounds: no (UNVERIFIED).
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Reflection Center (反射中心) | `ADBE Mirror-0001` | point | [w, h/2] (right-edge midpoint; AE 26 reports [320,120] on a 320×240 layer) | any | layer px | A point on the mirror line. With the default the line lies on the right edge, so the effect is initially invisible. |
+  | 2 | Reflection Angle (反射角度) | `-0002` | angle | 0x+0° | any | degrees | 0° reflects the left side onto the right; 90° reflects the top onto the bottom. |
+
+  ```
+  n = (cos θ, sin θ)                 // θ = radians(reflection_angle); y down, clockwise positive; normal of the mirror line
+  dist = dot(p - centre, n)
+  s = dist > 0 ? p - 2 * dist * n    // pixels on the +n side are replaced by the reflection of the −n side
+               : p
+  out(p) = sample(in, s)
+  ```
+  - Content reflected from outside the layer rect is transparent.
+- **Priority:** P1
+- **Owner:** bae-effects
+- **Notes:** Lottie: generic `ty: 5`. Implementation hint: trivial single pass; bilinear needed only when the line is not axis-aligned or the centre is fractional.
+
+### AE-FX-362 · Offset (偏移)
+
+- **What it does:** Pans (scrolls) the image inside the layer with wrap-around: what leaves one side re-enters on the opposite side; used to make seamless looping backgrounds.
+- **Exact semantics:**
+  - matchName `ADBE Offset`; category Distort; 16 bpc; GPU since AE 14.2. Expands bounds: no.
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Shift Center To (将中心转换为) | `ADBE Offset-0001` | point | layer centre | any | layer px | New position of the original image centre. |
+  | 2 | Blend With Original (与原始图像混合) | `-0002` | float slider | 0.0 | 0…100 | % | 100 % = effect invisible. |
+
+  ```
+  shift = shift_center_to - (w/2, h/2)
+  s = (p - shift) mod (w, h)               // positive modulo; (w,h) = input layer size
+  e = sample_wrapped(in, s)                // Best: bilinear with wrap addressing (subpixel); Draft: integer shift
+  out = lerp(e, in(p), blend/100)          // premultiplied lerp
+  ```
+- **Priority:** P1 — common with Motion Tile for looping backgrounds.
+- **Owner:** bae-effects
+- **Notes:** Lottie: generic `ty: 5`. Implementation hint: texture sampler with `AddressMode::Repeat`.
+
+### AE-FX-363 · Polar Coordinates (极坐标)
+
+- **What it does:** Remaps the image between rectangular (x, y) and polar (radius, angle) coordinates, e.g. turning a horizontal strip into a ring, with Interpolation blending between identity and full conversion.
+- **Exact semantics:**
+  - matchName `ADBE Polar Coordinates`; category Distort; 32 bpc; GPU —. Expands bounds: no.
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Interpolation (插值) | `ADBE Polar Coordinates-0001` | float slider | 0.0 | 0…100 | % | 0 % = no distortion. |
+  | 2 | Type of Conversion (转换类型) | `-0002` | popup | 2 Polar to Rect | 1 Rect to Polar (矩形到极线), 2 Polar to Rect (极线到矩形) | — | — |
+
+  ```
+  // Layer w×h, centre c = (w/2, h/2). Model follows Photoshop's Polar Coordinates filter; orientation details UNVERIFIED.
+  Rect to Polar   (horizontal lines → circles, vertical lines → radial lines):
+      d = p - c
+      r = sqrt((d.x/(w/2))² + (d.y/(h/2))²)          // normalised (elliptical for non-square layers) UNVERIFIED
+      a = atan2(d.x, -d.y) mod 2π                    // 0 at 12 o'clock, clockwise
+      f(p) = (a / 2π * w,  r * h)                    // UNVERIFIED: top row ↔ centre, bottom row ↔ outer radius
+  Polar to Rect   (inverse: rings → horizontal lines):
+      a = p.x / w * 2π;  r = p.y / h
+      f(p) = c + r * (sin a * w/2, -cos a * h/2)
+  s = lerp(p, f(p), interpolation/100)              // UNVERIFIED: interpolation blends sample positions
+  out(p) = sample(in, s)                            // samples outside → transparent
+  ```
+- **Priority:** P1
+- **Owner:** bae-effects
+- **Notes:** Help example: Rect→Polar treats (x,y) as (r,θ); Polar→Rect treats (r,θ) as (x,y). The default (Polar to Rect at 0 %) is the identity. Lottie: generic `ty: 5`. Verify orientation against AE renders before shipping (golden-image test).
+
+### AE-FX-364 · Twirl (旋转扭曲)
+
+- **What it does:** Rotates the image around a centre with rotation decreasing toward the twirl radius, giving a whirlpool.
+- **Exact semantics:**
+  - matchName `ADBE Twirl`; category Distort; 32 bpc; GPU —. Expands bounds: no.
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Angle (角度) | `ADBE Twirl-0001` | angle | 0x+0° | any | degrees | Positive = clockwise, negative = counter-clockwise. |
+  | 2 | Twirl Radius (旋转扭曲半径) | `-0002` | float slider | 30.0 | slider 0…100; valid 0…100 (UNVERIFIED) | % of max(w, h) | 50 reaches the layer edges. |
+  | 3 | Twirl Center (旋转扭曲中心) | `-0003` | point | layer centre | any | layer px | — |
+
+  ```
+  R = radius/100 * max(w, h)
+  d = p - centre;  r = |d|
+  if r >= R or R == 0: out(p) = in(p)
+  t = 1 - r / R
+  φ = radians(angle) * t * t            // falloff exponent UNVERIFIED (Photoshop-style models use t or t²)
+  s = centre + rotate(d, -φ)            // inverse map; clockwise twirl in y-down space
+  out(p) = sample(in, s)                // AE uses heavy supersampling ("special antialiasing"), slow
+  ```
+- **Priority:** P1
+- **Owner:** bae-effects
+- **Notes:** Lottie: `ty: 30`, `ef` = [Angle (angle), Radius (slider), Center (point)]; lottie-web and Skottie do not render it. Implementation hint: analytic Jacobian-based mip/anisotropic sampling instead of brute supersampling.
+
+### AE-FX-365 · Spherize (球面化)
+
+- **What it does:** Wraps a circular region of the image onto a sphere (magnifying fish-eye bulge).
+- **Exact semantics:**
+  - matchName `ADBE Spherize`; category Distort; 16 bpc; GPU —. Expands bounds: no. Best quality samples at subpixel precision, Draft to the nearest pixel (help).
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Radius (半径) | `ADBE Spherize-0001` | float slider | 0.0 | slider 0…250; valid 0…2500 (UNVERIFIED) | pixels | 0 = no effect. |
+  | 2 | Center of Sphere (球面中心) | `-0002` | point | layer centre | any | layer px | — |
+
+  ```
+  d = p - centre;  r = |d|
+  if r >= R or R == 0: out(p) = in(p)
+  r_src = R * asin(r / R) / (π/2)      // UNVERIFIED model: orthographic view of a sphere; centre magnified ≈ 1.57×, continuous at r = R
+  out(p) = sample(in, centre + d * (r_src / r))
+  ```
+- **Priority:** P1
+- **Owner:** bae-effects
+- **Notes:** Lottie: `ty: 33`, `ef` = [radius (slider), center (point)]; not rendered by lottie-web/Skottie. Negative Radius not allowed (UNVERIFIED). Different from CC Sphere (Perspective, AE-FX-353), which maps the whole layer onto a lit 3D sphere.
+
+### AE-FX-366 · Optics Compensation (光学补偿)
+
+- **What it does:** Adds wide-angle (barrel) lens distortion, or removes it with Reverse Lens Distortion, so CG elements match lens-distorted footage.
+- **Exact semantics:**
+  - matchName `ADBE Optics Compensation`; category Distort; 32 bpc; GPU —. Expands bounds: only via Resize (with Reverse Lens Distortion on).
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Field Of View (FOV) (视场 (FOV)) | `ADBE Optics Compensation-0001` | float slider | 0.0 | 0…180 (UNVERIFIED valid 0…179.9) | degrees | Relative to the layer size along FOV Orientation; 0 = no distortion. |
+  | 2 | Reverse Lens Distortion (反转镜头扭曲) | `-0002` | checkbox | off | — | — | On: removes distortion (pincushion); enables Resize. |
+  | 3 | FOV Orientation (FOV 方向) | `-0003` | popup | 1 Horizontal | 1 Horizontal (水平), 2 Vertical (垂直), 3 Diagonal (对角)（zh 译名待核） | — | Dimension the FOV refers to. |
+  | 4 | View Center (视图中心) | `-0004` | point | layer centre | any | layer px | Optical centre for off-centre lenses. |
+  | 5 | Optimal Pixels (Invalidates Reversal) (最佳像素（使反转无效）)（译名待核） | `-0005` | checkbox | off | — | — | Keeps as much pixel information as possible; distortion then no longer exactly reversible. |
+  | 6 | Resize (调整大小) | `-0006` | popup | 1 Off | 1 Off (关), 2 Max 2X, 3 Max 4X, 4 Unlimited (无限制)（zh 译名待核） | — | Output growth limit when reversing; Unlimited may need large memory. |
+
+  ```
+  // Equidistant-fisheye ↔ rectilinear model, normalised so the reference half-dimension maps to itself. UNVERIFIED as AE's exact model.
+  D = half of reference dimension (w, h or diagonal per FOV Orientation);  φ = radians(FOV)/2
+  d = p - view_center;  r = |d|
+  forward (add barrel, Reverse off):   r_src = D * tan(r * φ / D) / tan(φ)
+  reverse (remove barrel, Reverse on): r_src = D * atan(r * tan(φ) / D) / φ
+  out(p) = sample(in, view_center + d * r_src / r)       // FOV 0 → identity
+  out_rect (reverse, Resize ≠ Off) = in_rect grown to the image of the corners, capped at 2× / 4× / unlimited
+  ```
+  - Reversibility: applying the forward effect and then the same FOV with Reverse on returns the original (exactly only with Optimal Pixels off and identical layer size; help).
+- **Priority:** P1 — VFX compositing; also used as a stylised fisheye.
+- **Owner:** bae-effects
+- **Notes:** Help workflow: adjust FOV on footage until straight lines look straight, then apply that FOV with Reverse Lens Distortion to the CG layer. Precomposing a resized result into a larger comp breaks reversal until the precomp is enlarged. Lottie: generic `ty: 5`.
+
+### AE-FX-367 · Bezier Warp (贝塞尔曲线变形)
+
+- **What it does:** Reshapes the layer by moving the 4 vertices and 8 tangent handles of a closed Bézier outline around the layer; the image is warped to fill the new outline.
+- **Exact semantics:**
+  - matchName `ADBE BEZMESH`; 16 bpc; GPU —. Expands bounds: yes (to the outline's bounding box) (UNVERIFIED).
+  - Parameters (AE 26 order, matchName suffix, default on a w×h layer): Top Left Vertex (上左顶点) `-0001` [0,0]; Top Left Tangent `-0002` [w/3,0]; Top Right Tangent `-0003` [2w/3,0]; Right Top Vertex `-0004` [w,0]; Right Top Tangent `-0005` [w,h/3]; Right Bottom Tangent `-0006` [w,2h/3]; Bottom Right Vertex `-0007` [w,h]; Bottom Right Tangent `-0008` [2w/3,h]; Bottom Left Tangent `-0009` [w/3,h]; Left Bottom Vertex `-0010` [0,h]; Left Bottom Tangent `-0011` [0,2h/3]; Left Top Tangent `-0012` [0,h/3]; Quality (品质) `-0014` float slider 8 (1…10). (Tangent defaults are exactly thirds: AE reports 106.656 for w = 320; zh param names 译名待核.)
+  - Algorithm: Coons-patch (bilinearly blended) surface from the four cubic edge curves; inverse-map each output pixel by tessellating the patch into a grid whose density follows Quality, and rasterise textured triangles (UNVERIFIED AE internals).
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Lottie: generic `ty: 5`. Implementation hint: GPU tessellated mesh draw.
+
+### AE-FX-368 · Detail-preserving Upscale (保留细节放大)
+
+- **What it does:** Enlarges a layer with edge- and detail-preserving resampling (better than bicubic layer scale for low-res sources).
+- **Exact semantics:** matchName `ADBE Upscale`; 32 bpc; GPU —. Controls: Fit to Comp Width / Fit to Comp Height buttons, Scale (缩放, %), Reduce Noise (减少杂色), Detail (详细信息), Alpha (Alpha) popup `ADBE Upscale-0005`: 1 Detail-preserving, 2 Bicubic (help lists "Bilinear/Bicubic"; AE 26 popup strings are Detail-preserving / Bicubic). Defaults UNVERIFIED (Scale 100 %, Reduce Noise 0, Detail 20).
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Same algorithm family as Photoshop's "Preserve Details" image-size resampling. Expands bounds by Scale.
+
+### AE-FX-369 · Liquify (液化)
+
+- **What it does:** Brush-painted distortion (push, twirl, pucker, bloat, shift, reflect, clone, turbulence, reconstruct) stored as a displacement mesh; can be animated via the Distortion Mesh property.
+- **Exact semantics:** matchName `ADBE LIQUIFY`; 16 bpc; GPU —. Tools: Warp, Turbulence, Twirl Clockwise, Twirl Counterclockwise, Pucker, Bloat, Shift Pixels, Reflection, Clone, Reconstruction. Tool Options: Brush Size, Brush Pressure, Freeze Area Mask, Turbulent Jitter, Clone Offset, Reconstruction Mode popup `-0006` (Revert, Displace, Amplitwist, Affine), Stylus Pressure; View Options: View Mesh, Mesh Size popup `-0011` (Small, Medium, Large), Mesh Color popup `-0012` (Red, Yellow, Green, Cyan, Blue, Magenta, Gray); Distortion Mesh (keyframeable arbitrary data), Distortion Mesh Offset, Distortion Percentage. Freeze Area Mask with Mask Opacity / Mask Feather. Can extend beyond layer bounds.
+- **Priority:** P2
+- **Owner:** bae-effects (+ bae-ui-motion)
+- **Notes:** Requires interactive brush UI in the Layer/Comp viewer.
+
+### AE-FX-370 · Magnify (放大)
+
+- **What it does:** Magnifies a circular or square region like a loupe, with feathered edge and blend mode.
+- **Exact semantics:** matchName `ADBE Magnify`; 8 bpc; GPU —. Params (AE order): Shape (形状) popup `-0010` (1 Circle, 2 Square); Center (居中对齐); Magnification (放大率) % (default 200 UNVERIFIED); Link (链接) popup `-0011` (1 None (无), 2 Size To Magnification (大小至放大率), 3 Size & Feather To Magnification (大小和羽化至放大率)); Size (大小) px; Feather (羽化) px; Opacity (不透明度) %; Scaling (缩放) popup `-0008` (1 Standard (标准), 2 Soft (柔和), 3 Scatter (散布)); Blending Mode (混合模式) popup `-0012` (None, Normal, Add, Multiply, Screen, Overlay, Soft Light, Hard Light, Color Dodge, Color Burn, Darken, Lighten, Difference, Exclusion, Hue, Saturation, Color, Luminosity; separators occupy values); Resize Layer (调整图层大小) checkbox.
+  ```
+  inside region: out(p) = blend(in(p), sample(in, center + (p - center) / (mag/100)), mode) * opacity, feathered at the edge
+  ```
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Scatter scaling adds random scatter to avoid blockiness (UNVERIFIED details).
+
+### AE-FX-371 · Mesh Warp (网格变形)
+
+- **What it does:** Distorts the layer by dragging the vertices and Bézier tangents of a rows × columns grid in the Comp viewer.
+- **Exact semantics:** matchName `ADBE MESH WARP`; 16 bpc; GPU —. Params: Rows (行数) (default 7, 1…31 UNVERIFIED), Columns (列数) (default 7), Quality (质量) (default 8, 1…10), Distortion Mesh (扭曲网格) (keyframeable arbitrary-data property; each keyframe stores all vertex positions and tangents). Changing Rows/Columns resets the mesh. Each patch is a bicubic Bézier surface; the image is resampled per Quality.
+- **Priority:** P2
+- **Owner:** bae-effects (+ bae-ui-motion)
+- **Notes:** Lottie: `ty: 31` (Rows, Columns, Quality, and a no-value slot); players do not render it.
+
+### AE-FX-372 · Puppet effect (操控)（译名待核）
+
+- **What it does:** The effect created by the Puppet tools: a triangulated mesh over the layer outline deformed by Position/Advanced/Bend pins, with Overlap and Starch pins.
+- **Exact semantics:** matchName `ADBE FreePin3`; Puppet Engine popup `ADBE FreePin3 Puppet Engine` (1 Legacy, 2 Advanced; AE 16.1 (2019) added Advanced pins and Bend pins); Mesh Rotation Refinement; On Transparent; Auto-traced Shapes / Mesh groups with Triangles, Density, Expansion, and per-pin keyframed Position (and Scale/Rotation for Advanced/Bend pins). Deformation: as-rigid-as-possible mesh deformation (UNVERIFIED solver).
+- **Priority:** P2 — popular character tool, but a large feature on its own.
+- **Owner:** bae-effects (+ bae-ui-motion, bae-motion)
+- **Notes:** Lottie: `ty: 34` (Puppet) — not rendered by players. Puppet tools UI: see ui-preview-render-io.md [ui-b], tools.
+
+### AE-FX-373 · Reshape (改变形状)
+
+- **What it does:** Morphs the image region inside a source mask to the shape of a destination mask, optionally constrained by a boundary mask.
+- **Exact semantics:** matchName `ADBE RESHAPE`; 16 bpc; GPU —. Params: Source Mask (源蒙版), Destination Mask (目标蒙版), Boundary Mask (边界蒙版), Percent (百分比), Elasticity (弹性) popup `-0005` (1 Stiff, 2 Less Stiff, 3 Below Normal, 4 Normal, 5 Absolutely Normal, 6 Above Average, 7 Loose, 8 Liquid, 9 Super Fluid), Correspondence Points (对应点对数), Interpolation Method (插值方法) popup `-0009` (1 Discrete (分离), 2 Linear (线性, default per help), 3 Smooth (平滑)). Correspondence points are added on masks in the Comp viewer (Alt/Option-click).
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Masks used should have mode None. Shares Elasticity/Interpolation enums with Smear.
+
+### AE-FX-374 · Ripple (波纹)
+
+- **What it does:** Concentric ripples travelling out from a centre, auto-animated at Wave Speed.
+- **Exact semantics:**
+  - matchName `ADBE Ripple`; 16 bpc; GPU —. Expands bounds: no.
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Radius (半径) | `ADBE Ripple-0001` | float slider | 0.0 | 0…100 | % of image size | 100 with centred origin reaches the corners (help). |
+  | 2 | Center of Ripple (波纹中心) | `-0002` | point | layer centre | any | layer px | — |
+  | 3 | Type of Conversion (转换类型) | `-0003` | popup | 1 Asymmetric | 1 Asymmetric (不对称), 2 Symmetric (对称)（zh 译名待核） | — | Asymmetric adds lateral motion (more realistic). |
+  | 4 | Wave Speed (波形速度) | `-0004` | float slider | 1.0 | slider −? (UNVERIFIED) | cycles/s | Auto-animates; 0 = static. |
+  | 5 | Wave Width (波形宽度) | `-0005` | float slider | 20.0 | UNVERIFIED | pixels | Distance between peaks. |
+  | 6 | Wave Height (波形高度) | `-0006` | float slider | 20.0 | UNVERIFIED | pixels (UNVERIFIED) | Amplitude. |
+  | 7 | Ripple Phase (波纹相) | `-0007` | angle | 0° | any | degrees | Keyframe with Wave Speed 0 for variable speed. |
+
+  ```
+  d = p - centre; r = |d|; R = radius/100 * half-diagonal (UNVERIFIED normalisation)
+  if r >= R: identity
+  φ = 2π (r / width - speed * t) + radians(phase)
+  amp = height * (1 - r/R)                            // fade to 0 at R (UNVERIFIED)
+  Symmetric:  s = p + normalize(d) * amp * sin φ       // radial only
+  Asymmetric: s = p + amp * (sin φ, cos φ)·(lateral component) (UNVERIFIED)
+  ```
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Lottie: `ty: 32` ("Wavy"), `ef` = Radius, Center, Conversion type, Speed, Width, Height, Phase. Single-wave ripple: Radius 100, Width 90…100 (help).
+
+### AE-FX-375 · Rolling Shutter Repair (果冻效应修复)
+
+- **What it does:** Removes CMOS rolling-shutter skew/wobble from footage using motion analysis.
+- **Exact semantics:** matchName `ADBE Rolling Shutter`; 32 bpc; GPU —. Params: Rolling Shutter Rate (果冻效应率) % (default 50 UNVERIFIED), Scan Direction popup `-0002` (1 Top -> Bottom, 2 Bottom -> Top, 3 Left -> Right, 4 Right -> Left), Advanced: Method popup `-0004` (1 Warp, 2 Pixel Motion), Detailed Analysis, Pixel Motion Detail. Temporal: reads neighbouring frames.
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Computer-vision effect; out of M1.
+
+### AE-FX-376 · Smear (漩涡条纹)
+
+- **What it does:** Moves a mask-defined region of the image along with a moved/rotated/scaled copy of the mask, smearing the surrounding pixels (e.g. stretching a nose).
+- **Exact semantics:** matchName `ADBE SCHMEAR`; 16 bpc; GPU —. Params: Source Mask (源蒙版), Boundary Mask (边界蒙版), Mask Offset (蒙版偏移), Mask Rotation (蒙版旋转), Mask Scale (蒙版缩放), Percent (百分比), Elasticity (弹性) popup `-0007` (same 9 values as Reshape), Interpolation Method (插值方法) popup `-0008` (Discrete, Linear, Smooth).
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** —
+
+### AE-FX-377 · Warp (变形)
+
+- **What it does:** Applies Illustrator/Photoshop-style envelope warp presets (Arc, Flag, Fisheye, …) to the layer.
+- **Exact semantics:** matchName `ADBE WRPMESH`; 16 bpc; GPU —. Params: Warp Style (变形样式) popup `-0001` default 1 Arc: 1 Arc, 2 Arc Lower, 3 Arc Upper, 4 Arch, 5 Bulge, 6 Shell Lower, 7 Shell Upper, 8 Flag, 9 Wave, 10 Fish, 11 Rise, 12 FishEye, 13 Inflate, 14 Twist, 15 Squeeze (AE 26 order); Warp Axis (变形轴) popup `-0002` (1 Horizontal, 2 Vertical); Bend (弯曲) `-0003` default 50 (−100…100); Horizontal Distortion (水平扭曲) `-0004` 0 (−100…100); Vertical Distortion (垂直扭曲) `-0005` 0 (−100…100). zh strings 译名待核.
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Algorithms match Photoshop Warp Text styles (Bézier envelope per style; UNVERIFIED exact control-point tables). AE text layers have no built-in warp; this effect is the AE route.
+
+### AE-FX-378 · Warp Stabilizer (变形稳定器)
+
+- **What it does:** Analyses footage in the background and stabilises it (position/scale/rotation, perspective or subspace warp), with framing and auto-scale options.
+- **Exact semantics:** matchName `ADBE SubspaceStabilizer` (display name "Warp Stabilizer" / docsforadobe "Warp Stabilizer VFX"); 32 bpc; GPU —. Main controls: Analyze/Cancel, Stabilization: Result (Smooth Motion / No Motion), Smoothness %, Method (Position; Position, Scale, Rotation; Perspective; Subspace Warp), Preserve Scale; Borders: Framing (Stabilize Only; Stabilize, Crop; Stabilize, Crop, Auto-scale; Stabilize, Synthesize Edges), Auto-scale, Additional Scale; Advanced: Detailed Analysis, Rolling Shutter Ripple, Crop Less <-> Smooth More, Synthesis Input Range, Synthesis Edge Feather, Synthesis Edge Cropping, Hide Warning Banner, Show Track Points, Track Point Size, Objective (Stabilize / Reverse Stabilization / Apply Motion to Target…), Target layer. Exact enum values UNVERIFIED.
+- **Priority:** P2
+- **Owner:** bae-effects (+ bae-media)
+- **Notes:** Requires precompose when the layer has time remap/other effects before it (AE requirement: layer dimensions must match comp; UNVERIFIED wording). Out of M1.
+
+### AE-FX-379 · CC Bend It (CC 区域弯曲)
+
+- **What it does:** Bends the part of the layer between a Start and End point into an arc, like bending a flexible strip.
+- **Exact semantics:** matchName `CC Bend It`; 16 bpc; GPU —. Params (UNVERIFIED order/defaults): Bend (弯曲) amount; Start (开始) point; End (结束) point; Render Prestart popup `CC Bend It-0004` (1 None, 2 Static, 3 Bend, 4 Mirror); Distort popup `CC Bend It-0005` (1 Legal, 2 Extended).
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Cycore (CC) effects bundled with AE; zh-CN UI keeps the English CC names (Chinese names here are the help-page translations).
+
+### AE-FX-380 · CC Bender (CC 层弯曲)
+
+- **What it does:** Bends the layer between a Base and Top point with selectable bend profiles.
+- **Exact semantics:** matchName `CC Bender`; 16 bpc; GPU —. Params (UNVERIFIED order/defaults): Amount; Style popup `CC Bender-0002` (1 Bend, 2 Marilyn, 3 Sharp, 4 Boxer); Adjust To Distance (checkbox); Top (point); Base (point).
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** —
+
+### AE-FX-381 · CC Blobbylize (CC 融化)
+
+- **What it does:** Creates a lit, blobby liquid surface from a channel of a blob layer and refracts/shades the layer through it.
+- **Exact semantics:** matchName `CC Blobbylize`; 16 bpc; GPU —. Groups (UNVERIFIED defaults): Blobbiness {Blob Layer, Property popup `CC Blobbylize-0003` (1 Red, 2 Green, 3 Blue, 4 Alpha, 5 Luminance, 6 Lightness), Softness, Cut Away}; Light {Using popup `-0022` (1 Effect Light, 2 AE Lights), Light Intensity, Light Color, Light Type popup `-0010` (1 Distant Light, 2 Point Light), Light Height, Light Position, Light Direction}; Shading {Ambient, Diffuse, Specular, Roughness, Metal}.
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** "AE Lights" reads comp light layers (see compositing-3d-color.md [cmp-b], Lights).
+
+### AE-FX-382 · CC Flo Motion (CC 折叠运动)
+
+- **What it does:** Pinches/stretches the image toward or away from two knot points (gravitational flow look).
+- **Exact semantics:** matchName `CC Flo Motion`; 32 bpc; GPU —. Params (UNVERIFIED defaults): Knot 1 (point), Amount 1, Knot 2 (point), Amount 2, Tile Edges (checkbox), Antialiasing popup `CC Flo Motion-0007` (1 Low, 2 Medium, 3 High), Falloff.
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** —
+
+### AE-FX-383 · CC Griddler (CC 方格)
+
+- **What it does:** Cuts the image into a grid of tiles, each showing a scaled/rotated copy of the image (mosaic-of-images look).
+- **Exact semantics:** matchName `CC Griddler`; 32 bpc; GPU —. Params (UNVERIFIED defaults): Horizontal Scale %, Vertical Scale %, Tile Size %, Rotation (angle), Cut Tiles (checkbox).
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** —
+
+### AE-FX-384 · CC Lens (CC 镜头)
+
+- **What it does:** Spherical lens distortion inside a circle, from magnify to inverted fisheye (Convergence).
+- **Exact semantics:** matchName `CC Lens`; 32 bpc; GPU —. Params (UNVERIFIED defaults): Center (point), Size (default 50 % UNVERIFIED), Convergence (−100…100; positive bulges, negative pinches; outside the circle transparent at large sizes UNVERIFIED).
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** —
+
+### AE-FX-385 · CC Page Turn (CC 翻页)
+
+- **What it does:** Simulates a page curl peeling from a corner, showing a back page layer or colour.
+- **Exact semantics:** matchName `CC Page Turn`; 16 bpc; GPU —. Params (UNVERIFIED defaults): Controls popup `CC Page Turn-0008` (1 Classic UI, [2 separator], 3 Top Left Corner, 4 Top Right Corner, 5 Bottom Left Corner, 6 Bottom Right Corner); Fold Position (point); Fold Direction (angle); Fold Radius; Light Direction (angle); Render popup `-0007` (1 Front & Back Page, 2 Back Page, 3 Front Page); Back Page (layer); Back Opacity %; Paper Color.
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Common for book/page transitions.
+
+### AE-FX-386 · CC Power Pin (CC 四角扯动)
+
+- **What it does:** Corner Pin with perspective-correct mapping control, unstretch and per-edge expansion.
+- **Exact semantics:** matchName `CC Power Pin`; 32 bpc; GPU —. Params (UNVERIFIED defaults): Top Left, Top Right, Bottom Left, Bottom Right (points, default layer corners); Perspective % (100 = true projective, 0 = bilinear (affine-per-triangle) mapping); Unstretch (checkbox); Expansion (%) group {Top, Left, Right, Bottom}.
+  ```
+  map = lerp(bilinear_quad_map, homography_map, perspective/100)   // UNVERIFIED blending model
+  expansion enlarges the source rect per edge before pinning
+  ```
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Corner Pin (AE-FX-359) is the core equivalent.
+
+### AE-FX-387 · CC Ripple Pulse (CC 波纹脉冲)
+
+- **What it does:** A single expanding ripple pulse driven by animating Pulse Level (no auto-animation).
+- **Exact semantics:** matchName `CC Ripple Pulse`; 32 bpc; GPU —. Params (UNVERIFIED defaults): Center (point), Pulse Level (Animate) (must be keyframed to produce motion), Time Span (sec), Amplitude, Render Bump Map (checkbox).
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** —
+
+### AE-FX-388 · CC Slant (CC 倾斜)
+
+- **What it does:** Slants (shears) the layer horizontally with optional vertical stretch, keeping a floor line fixed.
+- **Exact semantics:** matchName `CC Slant`; 16 bpc; GPU —. Params (UNVERIFIED defaults): Slant (−100…100), Stretching (checkbox), Height %, Floor (y position), Set Color (checkbox), Color.
+  ```
+  s = (p.x - slant/100 * (floor - p.y), p.y)   // shear about the floor line; UNVERIFIED scale of Slant
+  ```
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** —
+
+### AE-FX-389 · CC Smear (CC 漩涡条纹)
+
+- **What it does:** Smears pixels from a From point toward a To point within a radius (tentacle-like stretch).
+- **Exact semantics:** matchName `CC Smear`; 32 bpc; GPU —. Params (UNVERIFIED defaults): From (point), To (point), Reach %, Radius %; plus a popup `CC Smear-0005` (1 Classic, 2 Round, 3 Bell, 4 Wizard) (parameter name UNVERIFIED; added in a later version).
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Different from Adobe's mask-based Smear (AE-FX-376).
+
+### AE-FX-390 · CC Split (CC 胀裂)
+
+- **What it does:** Splits the layer open along the line between Point A and Point B, pushing both halves apart.
+- **Exact semantics:** matchName `CC Split`; 16 bpc; GPU —. Params (UNVERIFIED defaults): Point A, Point B (points), Split (amount, 0 = closed).
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** —
+
+### AE-FX-391 · CC Split 2 (CC 胀裂 2)
+
+- **What it does:** As CC Split, but the two sides of the split open independently.
+- **Exact semantics:** matchName `CC Split 2`; 16 bpc; GPU —. Params (UNVERIFIED defaults): Point A, Point B, Split 1, Split 2.
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** —
+
+### AE-FX-392 · CC Tiler (CC 平铺)
+
+- **What it does:** Shrinks the layer and tiles it across the layer area (quick wall of copies).
+- **Exact semantics:** matchName `CC Tiler`; 32 bpc; GPU —. Params (UNVERIFIED defaults): Scale (default 100 %; 50 % → 2×2 tiles), Center (point), Blend w. Original %.
+  ```
+  s = centre + ((p - centre) / (scale/100)) wrapped modulo (w, h) about the layer rect
+  out = lerp(sample(in, s), in(p), blend/100)
+  ```
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Cheaper alternative to Motion Tile (AE-FX-325) without phase/mirror.
