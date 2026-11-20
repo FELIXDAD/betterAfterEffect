@@ -1555,7 +1555,7 @@ Three directions, all at runtime:
 
 Opt-in per plugin: manifest `isolation = "out-of-process"` or `"prefer-out-of-process"`,
 the Plugin Manager toggle, or automatically after a crash attributed to the plugin
-(§16.4). AE plugins (20) use the same mechanism by default. In-process stays the default
+(§16 item 5). AE plugins (20) use the same mechanism by default. In-process stays the default
 for BAE plugins (performance first, ARCHITECTURE §2 principle 6).
 
 ### 15.2 Architecture
