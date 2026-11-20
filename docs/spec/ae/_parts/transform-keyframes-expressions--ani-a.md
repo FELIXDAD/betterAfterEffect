@@ -41,7 +41,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   - Reset (重置) next to the group name resets every Transform property to the layer-kind default above. UNVERIFIED: on an animated property Reset does not delete keyframes; it sets/adds a keyframe at the CTI with the default value (observed behaviour); BAE must match this once measured.
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-anim)
-- **Notes:** Scripting: group matchName `ADBE Transform Group`; children `ADBE Anchor Point`, `ADBE Position` (`ADBE Position_0/_1/_2` when separated), `ADBE Scale`, `ADBE Orientation`, `ADBE Rotate X`, `ADBE Rotate Y`, `ADBE Rotate Z` (the 2D "Rotation" is also `ADBE Rotate Z`), `ADBE Opacity`. Expression accessors: `transform.anchorPoint`, `.position`, `.xPosition`, `.scale`, `.rotation`/`.zRotation`, `.orientation`, `.xRotation`, `.yRotation`, `.opacity`, `.pointOfInterest` (see the expression part of this file). Lottie: transform `ks` with `a`, `p` (or split `p.s:true` + `p.x/p.y/p.z`), `s`, `r` (2D) or `rx/ry/rz/or` (3D, layer `ddd:1`), `o`. Older AE (UNVERIFIED: before CS4) put the Null Object anchor at its top-left (0,0); current AE nulls are 100×100 with anchor (50,50). The "Center Anchor Point in New Shape Layers" preference (UNVERIFIED: added in AE 16.1, 2019) lives in Preferences > General (see ui-preview-render-io.md, Preferences).
+- **Notes:** Scripting: group matchName `ADBE Transform Group`; children `ADBE Anchor Point`, `ADBE Position` (`ADBE Position_0/_1/_2` when separated), `ADBE Scale`, `ADBE Orientation`, `ADBE Rotate X`, `ADBE Rotate Y`, `ADBE Rotate Z` (the 2D "Rotation" is also `ADBE Rotate Z`), `ADBE Opacity`. Expression accessors: `transform.anchorPoint`, `.position`, `.xPosition`, `.scale`, `.rotation`/`.zRotation`, `.orientation`, `.xRotation`, `.yRotation`, `.opacity`, `.pointOfInterest` (see the expression part of this file). Lottie: transform `ks` with `a`, `p` (or split `p.s:true` + `p.x/p.y/p.z`), `s`, `r` (2D) or `rx/ry/rz/or` (3D, layer `ddd:1`), `o`. Older AE (UNVERIFIED: before CS4) put the Null Object anchor at its top-left (0,0); current AE nulls are 100×100 with anchor (50,50). The "Center Anchor Point in New Shape Layers" preference (UNVERIFIED: added in AE 16.1, 2019) lives in Preferences > Composition in the current AE help (see ui-preview-render-io.md, Preferences).
 
 ### AE-ANI-002 · Anchor Point (锚点)
 
@@ -985,6 +985,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
     This keeps each component's slope at the keys but not the spatial path between keys exactly (a 1-D cubic per component replaces the arc-length mapping), which is why AE presumably inserts extra keys; measure the key count AE produces for a curved Auto Bezier path before implementing.
   - Recombining: keys are created at the union of the components' key times; values = evaluated components at those times; spatial tangents derived from the per-component curves (each component's Bezier handle becomes one component of the tangent; UNVERIFIED); temporal ease recomputed. AE help: "some information about the motion path and speed is lost because the multiple Bezier curves used to represent the individual components are collapsed into a single Bezier curve at each keyframe".
   - UNVERIFIED: an expression on the combined Position is kept on the leader but not evaluated while separated (the per-dimension X/Y/Z Position expressions are evaluated instead).
+  - Preference "Default Position Properties to Separated Dimensions" (默认将位置属性设为单独尺寸（译名待核）, Preferences > Composition, bool, default off UNVERIFIED): new layers are created with Position already separated.
   - Expressions read `transform.position` as the combined vector even when separated; `transform.xPosition` etc. exist only while separated.
 - **Priority:** P0
 - **Owner:** bae-motion (+ bae-anim, bae-model)
@@ -1169,7 +1170,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 - **Exact semantics:**
   - Drawn elements: the path curve (AE-ANI-036) for the visible time range; one dot per comp frame at the property's evaluated value (dot spacing shows speed; dots are sampled at frame times through the layer's time mapping); a square box per keyframe (filled when selected); Bezier tangent handles of selected keys.
   - Space: the property's parent space mapped to the viewer (layer's parent world matrix for Position; the layer's own world matrix for Anchor Point in the Layer panel); in 3D it is projected through the active view.
-  - Extent preference Preferences > Appearance > Motion Path (运动路径) (AE help): No Motion Path / All Keyframes / No More Than N Keyframes / No More Than <duration> (UNVERIFIED option strings and default, believed No More Than 0:00:15:00). Handle size: Preferences > Appearance > Path Point and Handle Size. Hold segments draw no dots.
+  - Extent preference Preferences > Appearance > Motion Path (运动路径) (current AE help), options in order: No Motion Path (hide keyframes on motion paths) / All Keyframes / No More Than <N> (keyframes before and after the CTI) / Show Keyframes for Duration (<time> before and after the CTI). UNVERIFIED: the default (older AE versions defaulted to a duration limit of 0:00:15:00). Handle size: Preferences > Appearance > Path Point and Handle Size. Hold segments draw no dots.
   - Visibility: View > View Options > Keyframes, Motion Paths, Motion Handles; a Position path is shown when the Position property (or layer) is selected; Anchor Point and effect-point paths appear in the Layer panel (choose the property in the panel's View menu).
 - **Priority:** P0
 - **Owner:** bae-ui-motion (+ bae-anim)
@@ -1195,7 +1196,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 
 - **What it does:** Creates a keyframe with the current value at the CTI, or removes the one there.
 - **Exact semantics:**
-  - Ways: keyframe navigator diamond in the Timeline (toggle), Alt+Shift+property shortcut (Win) / Option+property shortcut (Mac) (P = Position, A = Anchor Point, S = Scale, R = Rotation, T = Opacity, M = Mask Path, F = Mask Feather), Animation > Add <Property> Keyframe (动画 > 添加…关键帧), stopwatch on (AE-ANI-025), or editing the value.
+  - Ways: keyframe navigator diamond in the Timeline (toggle), Alt+Shift+property shortcut (Win) / Option+Shift+property shortcut (Mac; the shortcut reference prints "Option + property shortcut", UNVERIFIED whether Shift is needed on Mac) (P = Position, A = Anchor Point, S = Scale, R = Rotation, T = Opacity, M = Mask Path, F = Mask Feather), Animation > Add <Property> Keyframe (动画 > 添加…关键帧), stopwatch on (AE-ANI-025), or editing the value.
   - The new key's value = the property's current **pre-expression** value at the CTI (the keyframe interpolation result), interpolation per AE-ANI-027. Adding a key between existing keys does not change the curve's values at that time but splits the segment: the new key's ease is chosen so the curve stays as close as possible? UNVERIFIED: AE does not preserve the old curve shape exactly; new key gets default (Linear or inherited) interpolation and neighbouring eases are kept.
   - If the property is not yet animated, adding a key turns the stopwatch on.
   - Removing the last remaining key turns the stopwatch off and the static value becomes that key's value (UNVERIFIED).
@@ -1254,7 +1255,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 - **Exact semantics:**
 
   ```
-  // select >= 2 keys (in one or more properties/layers); Alt/Option-drag the first or last selected key
+  // select >= 3 keys (AE help: "Select at least three keyframes"; one or more properties/layers); Alt/Option-drag the first or last selected key
   anchor = the opposite extreme selected key time (fixed)
   f      = (newExtremeTime - anchor) / (oldExtremeTime - anchor)
   for each selected key: t' = anchor + (t - anchor) * f
@@ -1312,7 +1313,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   - Pasted keys keep temporal/spatial interpolation, eases, roving flags (UNVERIFIED for roving), labels.
 - **Priority:** P0
 - **Owner:** bae-motion (+ bae-model, bae-ui-motion)
-- **Notes:** Clipboard format: BAE-internal (bae-model serialization) plus a text representation (AE-ANI-077). AE 2024+ supports copying keys from multiple layers and pasting to multiple layers without creating new layers (help, "spanning multiple layers"); version UNVERIFIED.
+- **Notes:** Clipboard format: BAE-internal (bae-model serialization) plus a text representation (AE-ANI-077). Copy/cut/paste of keyframes across multiple layers was added in AE 24.4 (May 2024). Source: https://helpx.adobe.com/after-effects/using/whats-new/2024-4.html
 
 ### AE-ANI-075 · Reverse paste keyframes (反向粘贴关键帧（译名待核）)
 
@@ -1320,7 +1321,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 - **Exact semantics:** Ctrl+Shift+V / Cmd+Shift+V. Same targeting as AE-ANI-074, but `t_target = CTI + (t_last − t)` for each copied key (latest key lands at the CTI), and each key's in/out interpolation types, eases and spatial tangents are swapped as in Time-Reverse Keyframes (AE-ANI-079).
 - **Priority:** P2
 - **Owner:** bae-motion
-- **Notes:** Added in a recent AE release (UNVERIFIED: AE 25.x, 2025); listed in the current shortcut reference as "Reverse paste the copied keyframes in the timeline".
+- **Notes:** Added in AE 24.4 (May 2024), works across multiple layers; in 24.4 the pasted easing was not mirrored (a bug Adobe reports fixed in AE 25.2), so BAE follows the 25.2+ behaviour above. Listed in the shortcut reference as "Reverse paste the copied keyframes in the timeline". Source: https://helpx.adobe.com/after-effects/using/whats-new/2024-4.html
 
 ### AE-ANI-076 · Paste a path into a spatial property (将路径粘贴为运动路径)
 
@@ -1489,14 +1490,14 @@ Conventions used in this file (apply to every item unless an item says otherwise
 - **Owner:** bae-anim
 - **Notes:** BAE flicks: `t = n * 705_600_000 * fps_den / fps_num` exactly for common rates (23.976 = 24000/1001, 29.97 = 30000/1001, 59.94 = 60000/1001). Scripting `CompItem.frameDuration`, `displayStartTime`, `displayStartFrame` (AE 17.1+).
 
-### AE-ANI-087 · Layer time from comp time: start time and time stretch (图层时间与时间伸缩)
+### AE-ANI-087 · Layer time from comp time: start time and time stretch (图层时间与时间拉伸)
 
 - **What it does:** Maps comp time to the layer's own (source) time using the layer's Start Time and Stretch.
 - **Exact semantics:**
 
   ```
   // startTime: comp time at which layer/source time 0 occurs (can be negative or beyond comp end)
-  // stretch: percent, 100 = normal; |stretch| < 1 is coerced to ±1 (scripting doc); negative = reversed
+  // stretch: percent in [-9900, 9900], 100 = normal; 0 < |stretch| < 1 is coerced to ±1 (scripting doc); negative = reversed
   layerTime(t_comp) = (t_comp - startTime) * 100 / stretch
   compTime(t_layer) = startTime + t_layer * stretch / 100
   ```
@@ -1509,14 +1510,14 @@ Conventions used in this file (apply to every item unless an item says otherwise
 - **Owner:** bae-anim (+ bae-model)
 - **Notes:** Scripting `Layer.startTime`, `Layer.stretch`, `Layer.inPoint`, `Layer.outPoint`. Lottie layer `st` (start frame), `sr` (stretch factor, 1 = 100 %), `ip`, `op`; lottie-web computes the layer frame as `(compFrame − st) / sr`. Expression `toComp`-style time functions must use the same mapping.
 
-### AE-ANI-088 · Time Stretch dialog (时间伸缩)
+### AE-ANI-088 · Time Stretch dialog (时间拉伸)
 
 - **What it does:** Sets a layer's stretch factor or new duration while holding one point in time fixed.
-- **Exact semantics:** Layer > Time > Time Stretch… (图层 > 时间 > 时间伸缩).
+- **Exact semantics:** Layer > Time > Time Stretch… (图层 > 时间 > 时间拉伸).
 
   | Parameter (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
-  | Stretch Factor (拉伸因数) | float | current stretch | −10000? .. 10000 % (UNVERIFIED limits), \|v\| ≥ 1 | % | |
+  | Stretch Factor (拉伸系数) | float | current stretch | −9900 .. 9900 % (scripting `Layer.stretch` range); values with \|v\| < 1 (except 0) are set to ±1 | % | |
   | New Duration (新持续时间) | time | current | > 0 | timecode | `stretch = newDuration / sourceSpan * 100` |
   | Hold in Place (原位定格) | enum: Layer In-point (图层入点), Current Frame (当前帧), Layer Out-point (图层出点) | Layer In-point | — | — | which comp time stays fixed |
 
@@ -1590,10 +1591,10 @@ Conventions used in this file (apply to every item unless an item says otherwise
 - **What it does:** One-step commands that use Time Remap to hold a frame.
 - **Exact semantics:**
   - Freeze Frame (Layer > Time > Freeze Frame): enables Time Remap (deleting any existing Time Remap keys) and places a single Hold key at the CTI with value = the source time currently shown; the whole layer shows that frame.
-  - Freeze On Last Frame (在最后一帧上冻结（译名待核）): sets Time Remap keys so the layer plays normally and then holds its last frame, and extends the layer Out point to the comp end (AE help). UNVERIFIED key layout: keys at source start (0) and at the last frame time `(lastFrame)/fps` with Hold out.
+  - Freeze On Last Frame (在最后一帧上冻结): sets Time Remap keys so the layer plays normally and then holds its last frame, and extends the layer Out point to the comp end (AE help). UNVERIFIED key layout: keys at source start (0) and at the last frame time `(lastFrame)/fps` with Hold out.
 - **Priority:** P1
 - **Owner:** bae-motion (+ bae-anim)
-- **Notes:** Freeze On Last Frame added in AE 17.1? (UNVERIFIED version, 2020).
+- **Notes:** zh-CN terms 冻结帧 / 在最后一帧上冻结 from the cn help page (Time stretching and time remapping). UNVERIFIED version: a community answer dates Freeze On Last Frame to AE CC 2017 (14.x); Freeze Frame is older.
 
 ### AE-ANI-093 · Nested composition time mapping (嵌套合成的时间映射)
 
@@ -1679,7 +1680,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 - **Owner:** bae-effects (+ bae-anim)
 - **Notes:** Effect parameters: effects.md (Time: Posterize Time). Expression `posterizeTime(fps)`: expression part of this file.
 
-### AE-ANI-098 · Audio under time stretch and time remap (音频的时间伸缩与重映射)
+### AE-ANI-098 · Audio under time stretch and time remap (音频的时间拉伸与重映射)
 
 - **What it does:** Audio follows the layer's time mapping.
 - **Exact semantics:** Audio samples are read at `t_source(t_comp)`; stretching or remapping resamples the audio so pitch changes proportionally to playback speed (no time-stretch pitch preservation). Reverse playback plays audio backwards. Freeze (slope 0) produces silence? UNVERIFIED (AE plays nothing while the remap value is constant).
