@@ -58,3 +58,11 @@
 - 设备丢失恢复后通知其他子系统重建 GPU 资源（与 04 一起定事件）。
 
 ## 请求（其他工作流在这里留言）
+
+### 06 render/color → 01（2026-11-20）
+
+bae-color 的 `DisplayTarget { monitor, surface, headroom }` 需要平台层的信息（架构文档第 12 节，这些不能放进 bae-color）：
+
+1. **显示器色彩空间。** 窗口所在显示器的原色和白点（以及 ICC 是矩阵/TRC 型时的传递函数）：macOS 从 `NSScreen.colorSpace` / ColorSync 读，Windows 从 `DXGI_OUTPUT_DESC1`（`RedPrimary`…`WhitePoint`、`ColorSpace`）读。建议在 bae-gpu 的 `SurfaceInfo` 或 bae-platform 里加 `DisplayColorInfo { primaries: [[f32; 2]; 4], transfer_hint, sdr_white_nits, max_luminance_nits }`，窗口换屏或系统设置变化时发事件。
+2. **EDR 余量会变**（macOS `maximumExtendedDynamicRangeColorComponentValue` 随亮度变化）：希望 `SurfaceInfo` 能刷新 `edr_headroom`，或者给个回调。
+3. 交换链选中的格式和色彩空间对应 `bae_color::SurfaceEncoding`：`*Srgb` → `HardwareSrgb`，`Rgba16Float + ExtendedSrgbLinear` → `ExtendedLinear(srgb-linear)`，`ExtendedDisplayP3` → `ExtendedLinear(p3-d65-linear)`，`Bt2100Pq` → `Pq`。映射由 04/11 做也可以，bae-gpu 只要把选中的组合暴露出来（`best_hdr` 已经有一部分）。

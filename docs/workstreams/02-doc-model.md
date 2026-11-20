@@ -72,3 +72,8 @@
 ### 04 render/compositor → 02（2026-11-20）
 
 1. schema v1 的 `Layer` 缺少「保留基础透明度」（AE 的 T 开关，`AVLayer.preserveTransparency`，AE-CMP-032）。建议加 `boolean("preserve_transparency", false)`。04 的 `MockEvaluator` 已经按这个名字读取。
+
+### 06 render/color → 02（2026-11-20）
+
+1. Footage prim 的"解释素材 > 颜色"还缺两个属性：`color:preserve_rgb`（bool，默认 false，AE"保留 RGB"）和 `color:linear_light`（choice `off|on|on_32bpc`，默认 `off`，AE"解释为线性光"）。现有的 `color_space`（字符串）按"覆盖媒体色彩空间"理解，空 = 按文件标签。bae-color 的 `Interpretation` 对应这三项。
+2. Project prim：`working_space` 存 bae-color 的色彩空间 id（`srgb`、`acescg`……，空 = 无），请在 schema 文档里注明；另外请加 `working_gamma`（choice `2.2|2.4`，默认 `2.2`，AE `workingGamma`，不做色彩管理时使用）。OCIO 引擎相关属性（`color_engine`、`ocio_config`）等 06 的 OCIO PR 再提。
