@@ -94,11 +94,11 @@
     |---|---|---|---|
     | Composition > Add to Render Queue (合成 > 添加到渲染队列) | Ctrl+M | Cmd+M | One item per selected comp (or the active comp); default RS + OM templates for "Movie". |
     | Add active composition or selected items to render queue | Ctrl+Shift+/ (main keyboard) | Cmd+Shift+/ | Same as above. |
-    | Composition > Save Frame As > File… (合成 > 帧另存为 > 文件) | Ctrl+Alt+S | Cmd+Opt+S | Item rendering the single frame at the CTI with the default "Frame" RS/OM templates (AE-UI-645). |
-    | Composition > Pre-render… (合成 > 预渲染) | — | — | Item with default "Pre-Render" templates and Post-Render Action = Import & Replace Usage targeting the comp (AE-UI-638). |
+    | Composition > Save Frame As > File… (合成 > 帧另存为 > 文件) | Ctrl+Alt+S | Cmd+Opt+S | Item rendering the single frame at the CTI with the default "Frame" RS/OM templates (AE-UI-641). |
+    | Composition > Pre-render… (合成 > 预渲染) | — | — | Item with default "Pre-Render" templates and Post-Render Action = Import & Replace Usage targeting the comp (AE-UI-627). |
     | Drag comp(s) from the Project panel into the Render Queue panel | — | — | Item(s) inserted at the drop position. |
     | Drag footage item into the Render Queue panel | — | — | Creates a new comp from the footage (same as New Comp from Selection) and adds it: a format-conversion shortcut. |
-  - Each new item gets: the default Render Settings template for its kind (Movie / Frame / Pre-Render / Movie Proxy / Still Proxy; AE-UI-621), the default Output Module template for its kind (AE-UI-637), and an output file name from the default file-name template (AE-UI-640) in the folder resolved per AE-UI-640.
+  - Each new item gets: the default Render Settings template for its kind (Movie / Frame / Pre-Render / Movie Proxy / Still Proxy; AE-UI-623), the default Output Module template for its kind (AE-UI-639), and an output file name from the default file-name template (AE-UI-640) in the folder resolved per AE-UI-640.
   - If Preferences > Output "Use Default File Name and Folder" is off (UNVERIFIED default), AE prompts with a Save dialog for the output path when adding via Ctrl+M (UNVERIFIED: modern AE no longer prompts and uses the last folder).
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-ui-motion, apps/bae)
@@ -195,7 +195,7 @@
   - Location: a folder named `<project name> Logs` next to the first output module's file, file name `<comp name> <date/time>.txt` (UNVERIFIED: naming pattern).
 - **Priority:** P1
 - **Owner:** apps/bae (+ bae-model)
-- **Notes:** BAE decision: also emit a machine-readable JSON log (`--log-format json` in `bae render`, AE-UI-655) with per-frame render times for benchmarks.
+- **Notes:** BAE decision: also emit a machine-readable JSON log (`--log-format json` in `bae render`, AE-UI-643) with per-frame render times for benchmarks.
 
 ### AE-UI-610 · Render completion notifications and sounds (渲染完成通知)
 
@@ -216,7 +216,7 @@
   - **Composition > Add to Adobe Media Encoder Queue** / File > Export > Add to Adobe Media Encoder Queue (Ctrl+Alt+M / Cmd+Opt+M): sends the comp itself; AME renders it through Dynamic Link with its own presets.
 - **Priority:** P2 — BAE has no AME; covered by background rendering.
 - **Owner:** apps/bae
-- **Notes:** BAE decision: no AME integration. The equivalent is "Render in Background" (separate `bae render` process fed with a snapshot of the project, AE-UI-655) so the user keeps working; keep a menu item with the same position labelled "Queue in Background Renderer". AE 14.0 (CC 2017) added scripting support.
+- **Notes:** BAE decision: no AME integration. The equivalent is "Render in Background" (separate `bae render` process fed with a snapshot of the project, AE-UI-643) so the user keeps working; keep a menu item with the same position labelled "Queue in Background Renderer". AE 14.0 (CC 2017) added scripting support.
 
 ### AE-UI-612 · Application behaviour during rendering (渲染期间的应用行为)
 
@@ -224,7 +224,7 @@
 - **Exact semantics:**
   - AE renders modally: menus and panels are disabled (only Pause/Stop and the Render Queue panel react; scrolling/expanding the queue is allowed).
   - The Composition panel shows each rendered frame as it completes unless Caps Lock is on (or Preferences > Display "Show Rendering Progress in Info Panel and Flowchart" is off — UNVERIFIED relation); turning off the viewer update speeds up simple renders.
-  - The Info panel shows the layer currently being rendered when the Display preference "Show Rendering Progress in Info Panel and Flowchart" is on.
+  - The Info panel shows the layer currently being rendered when the Display preference "Show Rendering Progress in Info Panel and Flowchart" is on (now Preferences > Appearance "Show Rendering Progress in Info Panel", AE-UI-663).
   - Disk full on the output volume → automatic Pause (AE-UI-606).
   - Render Settings apply only to the render item; the comp itself is not changed by them.
 - **Priority:** P1
@@ -256,7 +256,7 @@
     | Resolution (分辨率) [`"Resolution"` = [x,y]] | enum/int pair | Full [1,1] | Current Settings (当前设置) / Full (完整) [1,1] / Half (二分之一) [2,2] / Third (三分之一) [3,3] / Quarter (四分之一) [4,4] / Custom… (自定义) [x,y] | factor | Custom opens "Custom Resolution": Render every x pixels horizontally, y pixels vertically (integer, UNVERIFIED range 1..99). Current Settings uses the comp's Resolution/Down Sample Factor. |
     | Size (大小) | read-only text | "1920 x 1080 → 1920 x 1080" | — | px | `comp size → rendered size`. |
   - Rendered size per axis: `out_w = ceil(comp_w / x)`, `out_h = ceil(comp_h / y)` (UNVERIFIED rounding; see compositing-3d-color.md, Resolution / Down Sample Factor AE-CMP-464 for the downsampling semantics, which are identical for final render).
-  - Reduced-resolution renders keep the comp's pixel aspect ratio; the output module can upscale back (Resize, AE-UI-632).
+  - Reduced-resolution renders keep the comp's pixel aspect ratio; the output module can upscale back (Resize, AE-UI-634).
   - Adobe's advice (not a rule): when rendering below Full, use Draft quality.
 - **Priority:** P0
 - **Owner:** bae-render (+ bae-model, bae-ui-motion)
@@ -285,7 +285,7 @@
 - **Exact semantics:**
   - `"Color Depth"`: Current Settings (当前设置) −1 (default; uses the project's bpc) / 8 bits per channel (8 位/通道) 0 / 16 bits per channel (16 位/通道) 1 / 32 bits per channel (32 位/通道) 2.
   - The whole comp tree renders at that depth (effects that are 8-bpc-only still process in 8 bpc and are flagged in the comp; see effects.md, effect framework bpc).
-  - Output depth is chosen separately in the Output Module (Depth, AE-UI-629); e.g. 32 bpc render into a PNG Millions of Colors output is quantised at encode time.
+  - Output depth is chosen separately in the Output Module (Depth, AE-UI-628); e.g. 32 bpc render into a PNG Millions of Colors output is quantised at encode time.
 - **Priority:** P1
 - **Owner:** bae-render (+ bae-color)
 - **Notes:** Semantics of 8/16/32 bpc (clamping, 16-bit range 0..32768) in compositing-3d-color.md, Project color depth (AE-CMP-443) and Pixel encoding and clamping (AE-CMP-444). BAE decision: BAE's working buffer is RGBA16F by default; "8 bpc" render must still reproduce AE's 8-bpc clamping/quantisation per layer when fidelity mode is on.
@@ -315,7 +315,7 @@
   - DV Settings template = Best Settings with Lower Field First.
 - **Priority:** P2 — interlaced delivery is rare for motion graphics.
 - **Owner:** bae-render (+ bae-media)
-- **Notes:** Field order of footage interpretation (separate fields) is in project-comp-layers.md, Interpret Footage. Cropping one row top/bottom in the Output Module swaps field order (AE-UI-633).
+- **Notes:** Field order of footage interpretation (separate fields) is in project-comp-layers.md, Interpret Footage. Cropping one row top/bottom in the Output Module swaps field order (AE-UI-635).
 
 ### AE-UI-619 · Render Settings: Time Span (时间跨度)
 
@@ -329,14 +329,14 @@
   - Default for new items: comes from the RS template; AE 2026 Best Settings = Work Area Only (observed in a saved AE 2026 project). Older AE versions defaulted Best Settings to Length of Comp (UNVERIFIED).
 - **Priority:** P0
 - **Owner:** bae-model (+ apps/bae)
-- **Notes:** Work area definition: project-comp-layers.md, work area. `bae render` CLI `--start/--end` override this (AE-UI-655).
+- **Notes:** Work area definition: project-comp-layers.md, work area. `bae render` CLI `--start/--end` override this (AE-UI-643).
 
 ### AE-UI-620 · Render Settings: Frame Rate (帧速率)
 
 - **What it does:** Sets the temporal sampling rate of the render without changing the comp.
 - **Exact semantics:**
   - `"Frame Rate"`: Use comp's frame rate (使用合成的帧速率) 0 (default, shows the comp fps in parentheses) / Use this frame rate (使用此帧速率) 1 with a numeric field (`"Use this frame rate"`, fps, UNVERIFIED range 1..999, fractional allowed e.g. 29.97).
-  - The rendered movie frame rate = this render frame rate (output modules encode at this rate; formats with fixed rates show the "Settings mismatch" warning, AE-UI-636).
+  - The rendered movie frame rate = this render frame rate (output modules encode at this rate; formats with fixed rates show the "Settings mismatch" warning, AE-UI-638).
   - Sampling: `t_k = start + k / fps_render`. Rendering a 24 fps comp at 12 fps samples every second comp frame; rendering at 48 fps samples between comp frames (layers with keyframes interpolate; footage holds or frame-blends).
   - Motion blur shutter interval uses the comp's frame duration and shutter angle, not the render rate (UNVERIFIED).
 - **Priority:** P1
