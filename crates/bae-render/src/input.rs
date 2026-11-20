@@ -42,6 +42,8 @@ pub struct RenderComp {
     /// Background colour, straight RGBA in the working space. Not part of the
     /// composite (AE-CMP-010): used by viewers and by outputs without alpha.
     pub background: [f32; 4],
+    /// Shutter angle and phase in degrees (motion blur; passed to effects).
+    pub shutter: [f64; 2],
     /// Layers, **top first** (AE layer index 1 is `layers[0]`). Includes layers
     /// that are not drawn themselves but are referenced as track mattes.
     pub layers: Vec<RenderLayer>,
@@ -58,6 +60,7 @@ impl RenderComp {
             pixel_aspect: 1.0,
             frame_rate: FrameRate::FPS_30,
             background: [0.0, 0.0, 0.0, 1.0],
+            shutter: [180.0, -90.0],
             layers: Vec::new(),
         }
     }

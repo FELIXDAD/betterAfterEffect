@@ -68,3 +68,15 @@
 - 第二个 PR：`DeclarativeEffect`、`PluginHost`、`load_builtin`、检查工具、posterize 示例、`docs/plugins/`。`EffectParams` 没有图层范围、帧率等信息前（R04-11），`BaeFrame.layer_bounds` 用输入范围代替，其余未知字段为 0；`layer` 参数和转场的 `to` 源要等渲染图支持（R04-1），现在绑定为空纹理。
 
 ## 请求（其他工作流在这里留言）
+
+### 20 interop/aex-compat → 19（2026-11-20）
+
+**回复 R20-1：已核对。** 19 规格 §9.1 的映射可以用，20 不需要改 19 的效果接口。`bae_aex_host::selector::LifecycleHook` 现在用 `BaeEffectVTable1` 的回调名，测试直接读 `sdk/c/bae_plugin.h`：回调名对不上、或 vtable 增减回调时测试会失败（#52 已合并）。唯一的语义差别（AE `SEQUENCE_FLATTEN` 可能破坏实例，而 `instance_serialize` 约定不破坏）由兼容层内部补齐。
+
+新的请求，详见 `docs/spec/aex-compat.md` §2、§5.3：
+
+1. **R19-03 动态贡献（现在定方向）。** 兼容层是一个单独分发的第一方原生插件包 `bae.aex-compat`。它扫描 AE 插件目录后才知道有哪些效果，没法在 manifest 里静态列出。请允许插件在加载后注册 / 注销任意数量的效果贡献（manifest 声明类似 `dynamic_contributions = true`），并参与版本选择、占位、插件管理器和工程插件锁。**match name 例外**：兼容层注册的是 AE 原始 match name，不加 `<plugin-id>/` 前缀，这样 15 导入时生成的占位在启用兼容层后直接变成可用效果，文档不用改；请 id 规则允许 `bae.aex-compat` 注册这种名字。注销沿用 `EffectRegistry::unregister_plugin`。
+2. **R19-06 辅助进程能力（现在定形状）。** 兼容层的辅助进程复用 19 的进程外传输层。在 19 规格 §15.2 的基础上还需要：插件任意线程发起的同步回调；回调未返回时宿主可以再调用辅助进程（嵌套）；一个辅助进程多个在途调用；辅助进程有主线程消息循环，能显示插件自己的模态窗口（选项、许可激活），以 BAE 主窗口为父窗口。
+3. **R19-08 没有 manifest 的模块的信任记录（现在定数据形状）。** 按二进制摘要、签名身份、架构和来源目录记录；打开或同步工程永远不自动加载未经同意的二进制。
+4. **R19-05 自定义界面（ABI 0.2 设计时）。** `ui_event` / `bae.draw` 定稿时参考 `bae_aex_host::ui` 的事件和显示列表。
+5. **R19-02（P3）。** `BaePreRenderResult` 将来要加"缓存键附加字节"，状态返回将来要能"成功但附带提示消息"；现在只要求这两个结构体保持可扩展。

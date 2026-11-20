@@ -60,7 +60,7 @@ bae-anim = { path = "crates/bae-anim" }
 bae-agent = { path = "crates/bae-agent" }
 bae-media = { path = "crates/bae-media" }
 bae-sync = { path = "crates/bae-sync" }
-bae-render = { path = "crates/bae-render" }
+bae-render = { path = "crates/bae-render", default-features = false }
 bae-ui = { path = "crates/bae-ui" }
 bae-color = { path = "crates/bae-color" }
 bae-plugin = { path = "crates/bae-plugin" }

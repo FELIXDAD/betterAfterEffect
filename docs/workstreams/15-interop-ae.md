@@ -87,3 +87,9 @@ AE 26.2.1 的对照数据已经用上了（`crates/bae-anim/tests/fixtures/ae-26
 3. **倒放图层**（`layer_stretch_reverse`）：AE 报告的关键帧时间是 −5512 flicks 和 2 s − 5512 flicks，入点 −235200 flicks（−1/3000 s），都是 AE 内部时间量化的结果。导入时同样建议吸附到帧。
 4. `other` 里的属性（`expr_cross_property` 等用的位置、滑块）没有从 AE 读回，03 用的是用例里的输入值；如果方便，采样结果里也带上它们读回的 `attr`。
 
+### 20 interop/aex-compat → 15（2026-11-20）
+
+第三方 AE 效果在 BAE 里以 AE 原始 match name 存在：没有实现时是占位，以后启用 AE 插件兼容层时，兼容层注册同名定义，占位直接变成可用效果。详见 `docs/spec/aex-compat.md` §2.3、§5.4。
+
+1. **R15-01 match name 逐字节保留，区分第一方（现在）。** 导入时不改写第三方 match name（不加前缀、不改大小写）；`ADBE ` 开头的效果只走 15 的原生映射表，永远不交给兼容层；同时记录 AE 显示名，供占位显示。
+2. **R15-02 导入时保留原始效果数据（现在）。** 原 match name、插件版本、按参数 ID 的原始值和关键帧、任意数据值，以及保存的扁平序列数据（写进 Effect Prim 的 `state`）——即使效果映射到了 BAE 原生实现也保留，方便以后切换实现和导回 AE。导入报告标出拿不到序列数据的效果（例如经 ExtendScript 导出时读不到）。
