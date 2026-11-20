@@ -1103,7 +1103,7 @@
     | Track mattes | `tt` 1 Alpha, 2 Alpha Inverted, 3 Luma, 4 Luma Inverted; `td` on the matte layer; AE 23+ any-layer mattes → `tp` (matte parent index) | ✓ |
     | Keyframes | `a: 1`, `k: [{t, s, e?, i:{x,y}, o:{x,y}, h, to, ti}]` — AE speed/influence converted to cubic-bezier `i`/`o` per dimension | ✓ |
     | Expressions | `x` string on the property | ~ (lottie-web only) — BAE default: bake to keyframes |
-    | Effects | `ef` (`ty: 5` expression-control groups: Slider 0, Angle 1, Color 2, Point 3, Checkbox 4, Layer 10, Dropdown 7; Fill 21, Stroke 22, Tint 20, Tritone 23, Pro Levels 24, Drop Shadow 25, Gaussian Blur 29, Displacement Map 27, Mesh Warp 28, Puppet 34) | ~ (UNVERIFIED id list; players support only a subset) |
+    | Effects | `ef` with effect `ty`: 5 Custom Effect (expression controls and any other effect, whose values are typed Slider 0, Angle 1, Color 2, Point 3, Checkbox 4, Ignored 6, Dropdown 7, Layer 10), 20 Tint, 21 Fill, 22 Stroke, 23 Tritone, 24 Pro Levels, 25 Drop Shadow, 26 Radial Wipe, 27 Displacement Map, 28 Set Matte, 29 Gaussian Blur, 30 Twirl, 31 Mesh Warp, 32 Wavy, 33 Spherize, 34 Puppet (lottie-docs effect table) | ~ (players render only a subset) |
     | Layer styles | `sy` (drop shadow, inner shadow, stroke…) | ~ |
     | Motion blur, frame blending, 3D lights/shadows, collapse transformations, continuous rasterization of AI, quality switches | — | ✗ |
 
@@ -1165,7 +1165,7 @@
   | Parameter (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
   | Automatically Save Projects / Save every (保存间隔) | bool + int | on, 20 | 1 … 999 (UNVERIFIED) | minutes | timer counts editing time; no save while rendering (UNVERIFIED) |
-  | Save when starting render queue (启动渲染队列时保存) | bool | off (UNVERIFIED) | — | — | auto-save when Render is pressed |
+  | Save when starting render queue (启动渲染队列时保存) | bool | off (UNVERIFIED) | — | — | auto-save when rendering starts (current help: "when render queue items are added or modified"; UNVERIFIED which events trigger it) |
   | Ask to recover an auto-saved project if AE closes unexpectedly (beta) | bool | on (UNVERIFIED) | — | — | AE 26.x beta |
   | Maximum Project Versions (最大项目版本数) | int | 5 | 1 … 99 (UNVERIFIED) | files | oldest deleted |
   | Auto-Save Location (自动保存位置) | enum | Next to Project (项目旁边) | Next to Project / Custom Location (自定义位置) | — | folder "Adobe After Effects Auto-Save" |
@@ -1184,7 +1184,7 @@
   | Parameter (中文) | Type | Default | Affects (sibling item) |
   |---|---|---|---|
   | Center Anchor Point in New Shape Layers (在新建形状图层中居中放置锚点) | bool | on (UNVERIFIED) | shapes.md, shape tools (anchor at shape centre vs comp centre) |
-  | Create Layers at Composition Start Time (在合成开始时创建图层) | bool | on | project-comp-layers.md [prj-b], layer timing: on ⇒ new layers start at comp start; off ⇒ at the CTI |
+  | Create Layers at Composition Start Time (在合成开始时创建图层) | bool | on | project-comp-layers.md [prj-b], layer timing: on ⇒ new layers start at comp start; off ⇒ at the CTI (the current help page describes the checkbox the other way round, "begin at the current time indicator position, rather than at the composition start"; UNVERIFIED which reading is right for AE 26 — the label and older help match on ⇒ comp start) |
   | Create Split Layers Above Original Layer (在原始图层上方创建拆分图层) | bool | on | project-comp-layers.md [prj-b], Split Layer |
   | Default Spatial Interpolation to Linear (将空间插值默认为线性) | bool | off | transform-keyframes-expressions.md [ani-a], interpolation (new spatial keys Linear instead of Auto Bezier) |
   | Default Position Properties to Separated Dimensions (将默认位置属性设为分离尺寸) | bool | off | [ani-a], separate dimensions (new layers get separated Position) |
