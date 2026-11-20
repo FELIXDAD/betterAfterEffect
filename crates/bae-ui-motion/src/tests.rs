@@ -390,3 +390,20 @@ fn every_english_ui_string_has_chinese() {
         assert!(seen.insert(en), "duplicate {en}");
     }
 }
+
+#[test]
+fn demo_project_builds_and_renders() {
+    let mut h = Harness::new();
+    for inv in crate::demo::steps() {
+        h.exec(&inv);
+    }
+    crate::demo::open(&h.resources, &h.stage);
+    let comp = h.session().lock().active_comp.clone().unwrap();
+    assert_eq!(query::comp_layers(&h.stage, &comp).len(), 4);
+    let e = bae_anim::evaluate_comp(&h.stage, &comp, Time::from_seconds(1.5)).unwrap();
+    assert!(e.errors.is_empty(), "{:?}", e.errors);
+    let mut tl = TimelinePanel::default();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("timeline", &mut tl, Vec::new());
+    h.frame("composition", &mut viewer, Vec::new());
+}

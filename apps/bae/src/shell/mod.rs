@@ -146,7 +146,8 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         .as_ref()
         .is_some_and(|l| l.status == bae_platform::settings::LoadStatus::Missing);
     let workbench_state = loaded.map(|l| l.value.0).unwrap_or_default();
-    let document = Document::new(app.resource::<Arc<HistoryLog>>().cloned());
+    let mut document = Document::new(app.resource::<Arc<HistoryLog>>().cloned());
+    document.add_module_commands(&app);
     let mut workspace = Workspace::new(&mut app, workbench_state);
     workspace.set_extra_commands(document.command_titles());
     if first_run {

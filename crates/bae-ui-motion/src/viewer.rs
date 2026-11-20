@@ -317,6 +317,7 @@ impl Panel for CompositionViewer {
             &to_screen,
             Affine::new(DMat4::IDENTITY),
             1.0,
+            f64::from(view.scale),
             &|s| egui::FontId::proportional(s),
             &mut shapes,
         );

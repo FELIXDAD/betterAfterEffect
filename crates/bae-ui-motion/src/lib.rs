@@ -20,6 +20,7 @@
 
 pub mod actions;
 mod common;
+pub mod demo;
 mod i18n;
 mod panels;
 mod project;

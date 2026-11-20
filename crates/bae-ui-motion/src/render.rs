@@ -428,12 +428,14 @@ fn fill_shape(points: Vec<Pos2>, color: Color32) -> Shape {
 }
 
 /// Paints one comp (recursively for pre-comps) into `shapes`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn paint_comp(
     comp: &EvaluatedComp,
     painter: &egui::Painter,
     to_screen: &dyn Fn(DVec2) -> Pos2,
     outer: Affine,
     opacity: f64,
+    view_scale: f64,
     font: &dyn Fn(f32) -> FontId,
     shapes: &mut Vec<Shape>,
 ) {
@@ -476,7 +478,7 @@ pub(crate) fn paint_comp(
             LayerSource::Comp {
                 nested: Some(nested),
                 ..
-            } => paint_comp(nested, painter, to_screen, xf, alpha, font, shapes),
+            } => paint_comp(nested, painter, to_screen, xf, alpha, view_scale, font, shapes),
             _ => {}
         }
         match layer.kind {
@@ -494,7 +496,7 @@ pub(crate) fn paint_comp(
                             color,
                             width,
                         } => {
-                            let w = (*width * xf.scale()) as f32;
+                            let w = (*width * xf.scale() * view_scale) as f32;
                             for p in polys {
                                 let pts: Vec<Pos2> = p.points.iter().map(|q| screen(*q)).collect();
                                 let stroke =
@@ -511,7 +513,7 @@ pub(crate) fn paint_comp(
             }
             LayerKind::Text => {
                 if let Some(t) = &layer.text {
-                    let size = (t.font_size * xf.scale()) as f32;
+                    let size = (t.font_size * xf.scale() * view_scale) as f32;
                     let color = color32(t.fill_color, alpha);
                     if size >= 1.0 && color.a() > 0 {
                         shapes.push(text_shape(painter, t, size, color, xf, &screen, font));
