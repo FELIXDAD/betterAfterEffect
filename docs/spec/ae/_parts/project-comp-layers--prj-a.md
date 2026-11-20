@@ -27,13 +27,13 @@ Conventions used below: "AE" means the current After Effects release (26.x/27.0,
 - **What it does:** Every project item carries an integer ID that is unique within the project and stable across save/reopen, so scripts, expressions and references can address items independently of name and position.
 - **Exact semantics:**
   - `Item.id`: positive integer, unique among items in the project, persistent in the saved file, never reused while the project is open. AE assigns IDs from a project-wide counter; the numeric values carry no meaning (do not rely on creation order).
-  - `Project.itemByID(id)` returns the item or throws if no item has that ID (AE 13.0 (CC 2014) and later).
-  - Layers have their own IDs (`Layer.id`, `Project.layerByID(id)`, AE 22.0 and later), unique within the project.
+  - `Project.itemByID(id)` returns the Item with that ID (AE 13.0 (CC 2014) and later). UNVERIFIED: result for an ID that no item has (null vs exception; the scripting guide does not say).
+  - Layers have their own IDs (`Layer.id`, `Project.layerByID(id)`, both added in AE 22.0 (2022)), unique within the project. `layerByID` returns null when no layer has the ID and throws when the argument is not an unsigned integer.
   - Duplicate (AE-PRJ-019) and Import of an `.aep` into a project (AE-PRJ-037) assign new IDs to the new items.
   - Items are also addressable by 1-based index in `Project.items` / `FolderItem.items`; indices change when items are added, removed or sorted, IDs do not.
 - **Priority:** P0
 - **Owner:** bae-model
-- **Notes:** UNVERIFIED: `Layer.id` / `layerByID` were added in AE 22.0 (2021). BAE decision: BAE uses Prim paths for addressing and additionally keeps a stable opaque item ID per Prim (needed by expressions `comp("name")` fallbacks, scripting-like agent APIs and the CRDT, where names are not unique). IDs must survive move between folders and rename.
+- **Notes:** Source: https://ae-scripting.docsforadobe.dev/general/project/ (itemByID, layerByID). BAE decision: BAE uses Prim paths for addressing and additionally keeps a stable opaque item ID per Prim (needed by expressions `comp("name")` fallbacks, scripting-like agent APIs and the CRDT, where names are not unique). IDs must survive move between folders and rename.
 
 ### AE-PRJ-003 · New, Open and Close Project (新建项目 / 打开项目 / 关闭项目)
 
@@ -131,12 +131,12 @@ Conventions used below: "AE" means the current After Effects release (26.x/27.0,
   | Maximum Project Versions (最大项目版本数) | int | 5 | UNVERIFIED: 1-99 | count | per project; oldest auto-save deleted when exceeded |
   | Auto-Save Location (自动保存位置) | enum | Next to Project | Next to Project (项目旁边（译名待核）) / Custom Location (自定义位置) | — | Custom takes a folder |
   - Location "Next to Project": a folder named "Adobe After Effects Auto-Save" (UNVERIFIED exact name) is created in the project's folder; backup files are named `<project name> auto-save <n>.aep` with n cycling up to Maximum Project Versions (UNVERIFIED naming).
-  - Untitled projects are also auto-saved (improved Auto-Save of AE 27.0, Nov 2026; older versions only auto-saved saved projects) to the custom or default auto-save location.
+  - Untitled projects are also auto-saved ("improved Auto-Save" of AE 27.0, Nov 2026, first in the AE Beta from Sep 2026; older versions only auto-saved saved projects) to the custom or default auto-save location.
   - Auto-save never overwrites the user's project file and does not clear the dirty flag. Auto-save applies to local projects only.
   - Projects written by the newest auto-save feature do not open in earlier AE versions.
 - **Priority:** P1
 - **Owner:** apps/bae (+ bae-model)
-- **Notes:** UNVERIFIED: the defaults marked above. "Improved Auto-Save" with crash recovery and untitled-project auto-save is listed in What's New for AE 27.0 (Nov 2026). BAE decision: BAE's incremental update logs (ARCHITECTURE 4.6) are append-only and already crash-safe; auto-save in BAE means periodic snapshot compaction plus a bounded set of rollback snapshots in `cache/` or the custom location, with the same user-facing settings.
+- **Notes:** UNVERIFIED: the defaults marked above (20 min and 5 versions are the long-standing AE defaults). "Improved Auto-Save" with crash recovery and untitled-project auto-save is listed in What's New for AE 27.0 (Nov 2026), after an AE Beta preview (build 27.0.044, 2026-09-15). Source: https://helpx.adobe.com/after-effects/desktop/work-with-projects/after-effects-projects/auto-save-and-crash-recovery.html BAE decision: BAE's incremental update logs (ARCHITECTURE 4.6) are append-only and already crash-safe; auto-save in BAE means periodic snapshot compaction plus a bounded set of rollback snapshots in `cache/` or the custom location, with the same user-facing settings.
 
 ### AE-PRJ-011 · Crash recovery (崩溃恢复)
 
@@ -144,7 +144,7 @@ Conventions used below: "AE" means the current After Effects release (26.x/27.0,
 - **Exact semantics:** If the preference in AE-PRJ-010 is on, the next launch offers to open the most recent auto-save. Any auto-save, however opened, opens as an untitled "Recovered Project" (恢复的项目); Save then shows the Save As dialog so the original project is not overwritten unless the user chooses it.
 - **Priority:** P1
 - **Owner:** apps/bae (+ bae-model)
-- **Notes:** Introduced with the improved Auto-Save in AE 27.0 (Nov 2026); the preference is labelled beta. BAE decision: BAE can recover to the last op in the update log rather than the last auto-save; it should still open the recovered state as a distinct, clearly-labelled document until the user confirms.
+- **Notes:** Introduced with the improved Auto-Save in AE 27.0 (Nov 2026); the preference is labelled "(Currently in beta)" in Preferences. BAE decision: BAE can recover to the last op in the update log rather than the last auto-save; it should still open the recovered state as a distinct, clearly-labelled document until the user confirms.
 
 ### AE-PRJ-012 · Project templates (.aet) (模板项目)
 
@@ -395,10 +395,10 @@ Conventions used below: "AE" means the current After Effects release (26.x/27.0,
   | Footage (素材) | merged single footage item |
   | Composition (合成) | comp with document-size layers |
   | Composition - Retain Layer Sizes (合成 - 保留图层尺寸) | comp with cropped layers |
-  Default: UNVERIFIED: Composition - Retain Layer Sizes. Help text describes it as applying when dragging multiple files into a composition; in practice it governs layered still files dragged into AE.
+  Default: UNVERIFIED: Composition - Retain Layer Sizes. The current help text says it controls what AE creates "when you drag multiple files into a composition"; older AE manuals describe the same menu as deciding whether layered still-image files dragged into AE come in as compositions.
 - **Priority:** P1
 - **Owner:** bae-media (+ apps/bae)
-- **Notes:** The task brief's "Default Drag Import As" is this preference (renamed in the AE 26 preferences refresh). UNVERIFIED: old name "Default Drag Import As".
+- **Notes:** The task brief's "Default Drag Import As" is this preference; AE has used the label "Drag Import Multiple Items As" since at least the CS-era manuals (the name was not changed in the AE 26 preferences refresh). Older versions listed only Composition and Composition - Retain Layer Sizes; current help also lists Footage. Source: https://helpx.adobe.com/after-effects/desktop/get-started/preferences-and-settings/preferences.html
 
 ### AE-PRJ-029 · Import As Composition for layered files (导入为合成)
 
