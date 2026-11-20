@@ -973,7 +973,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 - **Exact semantics:**
   - Commands: Animation > Separate Dimensions (动画 > 单独尺寸), right-click Position > Separate Dimensions, or the Graph Editor button. It is a toggle; doing it again recombines.
   - Only Position (layer transform, incl. cameras/lights) supports it. While separated: no spatial interpolation, no motion-path tangents, no roving; the motion path is still drawn (from the evaluated X/Y values) but its keys cannot be edited as a spatial path (UNVERIFIED: AE draws but does not allow dragging tangents).
-  - Separating (AE help: path shape kept, some speed information lost). UNVERIFIED reconstruction:
+  - Separating: AE help states "some information about speed is lost, but the motion path does not change", and the expression reference notes that `numKeys` changes after Separate Dimensions (so AE may add keys while separating). UNVERIFIED reconstruction (simplest form, one key per original key; AE may additionally insert keys to keep the path):
 
     ```
     for each original key k: create key in X, Y(, Z) at time t_k with value component
@@ -982,9 +982,9 @@ Conventions used in this file (apply to every item unless an item says otherwise
     speed_out_d = velocity_d ; influence_out_d = influence_out          // same for the in side
     ```
 
-    This keeps each component's slope at the keys but not the spatial path between keys exactly (a 1-D cubic per component replaces the arc-length mapping).
-  - Recombining: keys are created at the union of the components' key times; values = evaluated components at those times; spatial tangents derived from the per-component curves (each component's Bezier handle becomes one component of the tangent); temporal ease recomputed. Speed and path information may be lost (AE help).
-  - Expressions on Position are kept on the leader? UNVERIFIED: expressions on Position move to... AE keeps the Position expression but disables it while separated (it evaluates per-dimension expressions instead).
+    This keeps each component's slope at the keys but not the spatial path between keys exactly (a 1-D cubic per component replaces the arc-length mapping), which is why AE presumably inserts extra keys; measure the key count AE produces for a curved Auto Bezier path before implementing.
+  - Recombining: keys are created at the union of the components' key times; values = evaluated components at those times; spatial tangents derived from the per-component curves (each component's Bezier handle becomes one component of the tangent; UNVERIFIED); temporal ease recomputed. AE help: "some information about the motion path and speed is lost because the multiple Bezier curves used to represent the individual components are collapsed into a single Bezier curve at each keyframe".
+  - UNVERIFIED: an expression on the combined Position is kept on the leader but not evaluated while separated (the per-dimension X/Y/Z Position expressions are evaluated instead).
   - Expressions read `transform.position` as the combined vector even when separated; `transform.xPosition` etc. exist only while separated.
 - **Priority:** P0
 - **Owner:** bae-motion (+ bae-anim, bae-model)
@@ -997,7 +997,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 - **What it does:** Defines how keyframed colour values (effect Color controls, shape Fill/Stroke Color, light Color, text fill colour animators) blend between keys.
 - **Exact semantics:**
   - Value = RGBA, 4 floats (scripting range 0–1; 32-bpc projects allow > 1 for HDR? UNVERIFIED: colour pickers clamp to 0–1 except in 32-bpc where values above 1 can be typed in some effects).
-  - Interpolation is component-wise on the stored numbers (R, G, B, A independently), with per-component temporal ease (AE-ANI-034). No HSL/hue-path interpolation.
+  - Interpolation is component-wise on the stored numbers (R, G, B, A lerped with the same progress), driven by **one** temporal ease shared by all components (`COLOR` has a single KeyframeEase, AE-ANI-034). No HSL/hue-path interpolation.
   - The stored numbers are in the project's working colour space as encoded values; interpolation is **not** performed in linear light even when "Linearize Working Space" is on (UNVERIFIED; implementers must confirm by keyframing red→green in a linearized project and sampling the midpoint, expected (0.5, 0.5, 0) stored → rendered after linearization).
   - Shape gradient colours (array of stops, see shapes.md, Gradients) interpolate stop-by-stop and component-wise; stop counts must match (shapes.md).
 - **Priority:** P0
@@ -1102,7 +1102,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   | Show Reference Graph (显示参考图表) | draws the other graph type in the background, read-only; its values appear as grey numbers on the right |
 
   - Value graph y-axis: the property value (one curve per dimension, red/green/blue for x/y/z; colour components in channel colours). Speed graph y-axis: units/second.
-  - Speed definition: non-spatial dimension d: `speed_d(t) = dv_d/dt` (signed, one curve per dimension; UNVERIFIED: AE plots per-dimension speed curves for Scale/colour); spatial: `speed(t) = |dP/dt| = ds/dt` (single non-negative curve, px/s along the path).
+  - Speed definition: non-spatial dimension d: `speed_d(t) = dv_d/dt` (signed, one curve per dimension for `TwoD`/`ThreeD` such as Scale; UNVERIFIED: AE plots per-dimension speed curves; colour, having one ease, plausibly shows a single speed curve); spatial: `speed(t) = |dP/dt| = ds/dt` (single non-negative curve, px/s along the path).
   - Expressions: the graph shows the post-expression result as a read-only curve when "Show Post-Expression Graph" (显示后表达式图表) is enabled for the property (expression part of this file / ui file).
   - The Separate Dimensions button at the bottom applies AE-ANI-052.
 - **Priority:** P1
