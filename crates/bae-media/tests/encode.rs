@@ -51,7 +51,7 @@ fn encode(settings: EncodeSettings, frames: u32, input_alpha: AlphaMode) -> Box<
         &mut |_| {},
     )
     .unwrap();
-    assert_eq!(output.files, [path.clone()]);
+    assert_eq!(output.files, std::slice::from_ref(&path));
     assert_eq!(output.frames, u64::from(frames));
     MediaFormats::builtin()
         .open(&path, &OpenOptions::default())

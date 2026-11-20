@@ -21,8 +21,10 @@
 //! outputs from the range start).
 
 mod encode;
+mod trim;
 
 pub use encode::{AvWriterEncoder, AvWriterFormat, default_movie_path};
+pub use trim::AvTrimmer;
 
 use std::path::Path;
 use std::ptr::NonNull;
@@ -769,6 +771,54 @@ impl MediaSource for AvSource {
             color: video.color.clone(),
             pixel_aspect: video.pixel_aspect,
         })
+    }
+
+    /// Keyframes from the sample table (no media data is read): every full
+    /// sync sample, mapped through the track's edit list to frame indices.
+    fn sync_frames(&mut self) -> Option<Vec<i64>> {
+        let count = self.info.video.as_ref().and_then(|v| v.frame_count)?;
+        // SAFETY: AVAssetTrack / AVSampleCursor queries.
+        unsafe {
+            if !self.track.canProvideSampleCursors() {
+                return None;
+            }
+            // Media time → track time of the first non-empty edit.
+            let offset = self
+                .track
+                .segments()
+                .iter()
+                .find(|segment| !segment.isEmpty())
+                .and_then(|segment| {
+                    let mapping = segment.timeMapping();
+                    Some(
+                        cmtime_to_flicks(mapping.target.start)?
+                            - cmtime_to_flicks(mapping.source.start)?,
+                    )
+                })
+                .unwrap_or(0);
+            let cursor = self.track.makeSampleCursorAtFirstSampleInDecodeOrder()?;
+            let mut sync = Vec::new();
+            // A sample table cannot hold more samples than this; stop runaway loops.
+            for _ in 0..count.saturating_mul(4).saturating_add(64) {
+                if cursor.currentSampleSyncInfo().sampleIsFullSync.as_bool() {
+                    let pts = cursor.presentationTimeStamp();
+                    if let Some(flicks) = cmtime_to_flicks(pts) {
+                        let index = self.rate.time_to_frame(Time::from_flicks(
+                            flicks + offset - self.start_flicks + self.frame_duration_flicks() / 2,
+                        ));
+                        if (0..count as i64).contains(&index) {
+                            sync.push(index);
+                        }
+                    }
+                }
+                if cursor.stepInDecodeOrderByCount(1) != 1 {
+                    break;
+                }
+            }
+            sync.sort_unstable();
+            sync.dedup();
+            Some(sync)
+        }
     }
 
     fn decode_gpu(

@@ -108,7 +108,11 @@ pub fn builtin_encoders() -> Vec<Arc<dyn EncoderFormat>> {
 
 /// The trimmers compiled into this crate for the current platform.
 pub fn builtin_trimmers() -> Vec<Arc<dyn Trimmer>> {
-    vec![Arc::new(trim::SequenceTrimmer::new(
+    #[allow(unused_mut)]
+    let mut trimmers: Vec<Arc<dyn Trimmer>> = vec![Arc::new(trim::SequenceTrimmer::new(
         time::DEFAULT_SEQUENCE_RATE,
-    ))]
+    ))];
+    #[cfg(target_vendor = "apple")]
+    trimmers.push(Arc::new(apple::AvTrimmer));
+    trimmers
 }
