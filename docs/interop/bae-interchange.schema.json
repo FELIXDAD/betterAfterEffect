@@ -233,7 +233,7 @@
     "Value": {
       "type": "object",
       "required": ["type", "value"],
-      "properties": {"type": {"type": "string"}},
+      "properties": {"type": {"type": "string"}, "value": true},
       "additionalProperties": false,
       "oneOf": [
         {"properties": {"type": {"const": "float"}, "value": {"type": "number"}}},
