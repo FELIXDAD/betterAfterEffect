@@ -13,6 +13,36 @@ application (or `bae --headless`, or `bae-plugin-runner` in out-of-process mode)
 
 ---
 
+## Contents
+
+- §0 Summary
+- §1 Goals, non-goals, principles
+- §2 Terminology
+- §3 Plugin kinds
+- §4 Implementation forms
+- §5 Package layout and manifest
+- §6 Discovery, installation, versioning, dependencies
+- §7 Runtime lifecycle (load / unload)
+- §8 Effect lifecycle
+- §9 After Effects mapping
+- §10 Render-graph contract (for 04)
+- §11 Declarative WGSL effects
+- §12 Native GPU interop
+- §13 Threading model
+- §14 C ABI: suites, vtables, compatibility policy
+- §15 Out-of-process mode
+- §16 Errors, crashes, diagnostics
+- §17 Script plugins
+- §18 Other contribution kinds
+- §19 Built-in features through the plugin path (dogfooding)
+- §20 Missing plugins and placeholders
+- §21 Trust, permissions, sandboxing
+- §22 Performance budget and acceptance tests
+- §23 Requests to other workstreams (what 01, 02, 04 and others must provide)
+- §24 Open questions and decision log
+
+---
+
 ## 0. Summary
 
 - One extension model for built-in and third-party code. Built-in effects, importers,
