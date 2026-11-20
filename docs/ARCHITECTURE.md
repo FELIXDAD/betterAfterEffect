@@ -249,6 +249,7 @@ Stage ──► bae-anim 在时间 t 求值 ──► EvaluatedComp（这一帧�
 | 安装包（压缩后） | 20 MB |
 | bae-hub 二进制 | 15 MB |
 | M0 阶段应用本体 | 15 MB |
+| M1 起应用本体（可执行文件） | 30 MB（2026-11-20 调整：模型、MCP、界面、音频、渲染陆续接入；上面的应用包和安装包上限不变） |
 
 - release 配置：`lto = "fat"`、`codegen-units = 1`、`strip = true`；性能热点 crate 用 `opt-level = 3`，界面等冷 crate 可以单独设成 `opt-level = "s"`。
 - 不打包：Chromium/WebView、Qt、FFmpeg、OpenColorIO、OpenUSD、中文字体。
