@@ -1,0 +1,27 @@
+[package]
+name = "bae-package"
+description = "BAE project packaging: asset collection and resolution, .baez packing, unpacking, collect files, reports"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# No GPU, window or platform dependencies: packaging commands run headless
+# (agents, CI, the hub). Clip trimming (workstream 08's `bae-media::trim`,
+# which needs the GPU crate) will be injected through a trait, not a dependency.
+[dependencies]
+bae-model.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# Same zip build as bae-model (stored media entries, zip64); no new code in the binary.
+zip.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

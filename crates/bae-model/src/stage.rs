@@ -22,7 +22,9 @@ fn same_file_name(a: &SublayerId, b: &SublayerId) -> bool {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SubscriptionId(u64);
 
-type Subscriber = Box<dyn FnMut(&StageEvent) + Send>;
+// `Sync` so that `&Stage` can be shared across threads for parallel evaluation
+// (bae-anim / bae-render); callbacks are only ever called through `&mut Stage`.
+type Subscriber = Box<dyn FnMut(&StageEvent) + Send + Sync>;
 
 #[derive(Debug)]
 struct UndoEntry {
@@ -191,7 +193,10 @@ impl Stage {
 
     /// Call `f` after every committed change. Callbacks run synchronously on the
     /// thread that changed the stage; keep them cheap (queue work elsewhere).
-    pub fn subscribe(&mut self, f: impl FnMut(&StageEvent) + Send + 'static) -> SubscriptionId {
+    pub fn subscribe(
+        &mut self,
+        f: impl FnMut(&StageEvent) + Send + Sync + 'static,
+    ) -> SubscriptionId {
         let id = SubscriptionId(self.next_subscription);
         self.next_subscription += 1;
         self.subscribers.push((id, Box::new(f)));
