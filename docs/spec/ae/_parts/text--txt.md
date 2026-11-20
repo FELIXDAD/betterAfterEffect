@@ -326,12 +326,13 @@ Conventions used in this file:
   | Parameter (中文) | Type | Default | Range | Units |
   |---|---|---|---|---|
   | Leading (行距) | float or Auto | Auto (自动) | 0.01 – UNVERIFIED max (scripting: 0 is clipped to 0.01) | px |
-  | Auto leading percentage (自动行距, Paragraph panel menu > Justification dialog, 译名待核) | float | 120% | UNVERIFIED: 0 – 500% | % of font size |
+  | Auto leading percentage (自动行距百分比, 译名待核) | float | 120% | UNVERIFIED: 0 – 500% | % of font size |
 
   ```
   autoLeading(line) = autoLeadingPct/100 * max(fontSize of characters on that line)  // UNVERIFIED: AE uses the largest font size on the line
   leading(line)     = autoLeading ? autoLeading(line) : max(leading attribute over characters on the line)
   ```
+  - Auto leading percentage: UNVERIFIED whether AE exposes any UI for it (Photoshop sets it in the Paragraph panel menu > Justification dialog; the AE Paragraph panel help documents no such dialog). BAE: store it per paragraph, default 120%, no UI in M1.
   - Leading is a character attribute in AE (as in Photoshop), the largest value on a line wins; Roman leading measures from the previous baseline to this baseline ("bottom-to-bottom", default). Japanese leading type measures top-to-top (AE-TXT-034).
   - Scripting: `autoLeading` (bool, paragraph-level read), `leading` returns 0 when auto; setting `leading` turns auto off (the scripting guide's text says it sets autoLeading to true; that is a documentation error, UNVERIFIED).
   - Line Spacing animator (AE-TXT-065) offsets lines further without reflow.
@@ -527,7 +528,7 @@ Conventions used in this file:
 
   | Option (中文) | Scripting | Type | Default |
   |---|---|---|---|
-  | Adobe Single-line Composer (Adobe 单行书写器) / Adobe Every-line Composer (Adobe 逐行书写器) | `everyLineComposer` (false = single-line) | bool | UNVERIFIED: false (Single-line) in AE |
+  | Adobe Single-line Composer (Adobe 单行书写器) / Adobe Every-line Composer (Adobe 逐行书写器) | `everyLineComposer` (false = single-line) | bool | UNVERIFIED: AE's factory default not confirmed (Photoshop defaults to Every-line; earlier draft said Single-line) |
   | Auto hyphenate (连字符连接, 译名待核) | `autoHyphenate` (AE 24.0+) | bool | UNVERIFIED: false |
   | Text engine | `composerEngine` | enum `LATIN_CJK_ENGINE` / `UNIVERSAL_TYPE_ENGINE` | `UNIVERSAL_TYPE_ENGINE` for new layers; only Latin/CJK → Universal can be written |
 
@@ -830,7 +831,7 @@ Conventions used in this file:
   - Unavailable (greyed out, ignored) with per-character 3D.
 - **Priority:** P0 — needed to render stroked text correctly.
 - **Owner:** bae-text (+ bae-render)
-- **Notes:** matchName `ADBE Text Render Order`. Not in Lottie (lottie-web uses the document `of` flag only).
+- **Notes:** matchName UNVERIFIED: `ADBE Text Render Order` (not listed in the docsforadobe text matchName table). Not in Lottie (lottie-web uses the document `of` flag only).
 
 ### AE-TXT-050 · Inter-Character Blending (字符间混合)
 
@@ -843,15 +844,15 @@ Conventions used in this file:
 - **Owner:** bae-render (+ bae-text)
 - **Notes:** matchName UNVERIFIED (`ADBE Text Character Blend Mode`). Implementation hint: rendering per character into one buffer with a blend per draw breaks Vello batching; only switch to per-character passes when the mode is not Normal.
 
-### AE-TXT-051 · Variable Font Spacing (可变字体间距, 译名待核)
+### AE-TXT-051 · Variable Font Spacing (变量字体间距)
 
 - **What it does:** Controls how character spacing compensates when variable-font axis animators change glyph widths.
 - **Exact semantics:**
-  - More Options menu `Variable Font Spacing`, values: Adaptive (自适应, 译名待核) / Per-Character (逐字符, 译名待核) / Default (默认). Default: UNVERIFIED (Adaptive).
+  - More Options menu `Variable Font Spacing`, values: Adaptive (自适应) / Per-Character (按字符) / Default (默认). Default: UNVERIFIED (Adaptive). The property appears in More Options only when at least one Variable Font Axes animator property exists on the layer.
     - Adaptive: applies per-character tracking compensation "when appropriate" (heuristic, UNVERIFIED).
     - Per-Character: always adjusts each character's advance to the animated axis values (layout follows the animated width).
     - Default: no compensation; characters keep the spacing of the un-animated font (glyphs may overlap or gap).
-  - Version: appears with variable-font axis animators (AE-TXT-068), UNVERIFIED AE 26.0 (2026).
+  - Version: appears with variable-font axis animators (AE-TXT-068): first public in AE beta 26.0x40 (Nov 2025), shipped in AE 26.x (UNVERIFIED exact release; help page "Working with Variable Font Axes" dated Jun 2026).
 - **Priority:** P2
 - **Owner:** bae-text
 - **Notes:** matchName `ADBE Text Variable Font Spacing`. BAE decision: implement Per-Character and Default exactly; implement Adaptive as Per-Character for weight/width axes only until measured.
