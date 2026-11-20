@@ -68,3 +68,5 @@
   4. `stage.describe` 输出里请直接包含：合成帧速率、时长、工作区域、当前编辑目标、Agent 自己的权限级别、锁提示。
   5. `render.contact_sheet` 每格标出帧号；时间参数接受相对合成开始的整数帧号（也接受时码），由服务器换算 flicks。
   6. 评测集 `docs/agent-guide/evals/` 需要审计日志能导出完整的工具调用序列（含事务边界和写入的工程层）。
+
+- **21 io/packaging（2026-11-20）**：`bae-package`（无 GPU 依赖）提供打包命令 `package.scan`、`package.pack`、`package.collect`、`package.unpack`、`asset.relink`、`asset.set_files`，注册函数是 `bae_package::register_commands(&mut registry)`。请在 `Workspace::new` 里一起注册，Agent 才能调用。这些命令只能看到 Stage，工程位置通过参数 `project`（`.bae` 目录或 `.baez` 文件）传入；如果方便，服务器可以在调用时自动填入当前工程的位置。
