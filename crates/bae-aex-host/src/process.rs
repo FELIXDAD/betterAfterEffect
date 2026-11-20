@@ -5,9 +5,9 @@
 //! only way to run a foreign-architecture binary (x86_64 `.plugin` on Apple
 //! Silicon through Rosetta 2) and it lets a notarized, library-validated BAE
 //! app keep its hardened-runtime entitlements while a separate helper loads
-//! third-party code (spec §"Packaging").
+//! third-party code (spec §3.1).
 //!
-//! Protocol shape (spec §"Out-of-process hosting"):
+//! Protocol shape (spec §2.4):
 //!
 //! * one sandbox process per plug-in *module* (all instances of the module's
 //!   effects share it, matching AE's per-module globals and serialisation);

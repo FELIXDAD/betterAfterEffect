@@ -161,6 +161,48 @@ pub enum Concurrency {
     SerialPerModule,
 }
 
+/// 19's threading level (`BAE_THREADING_*` in `sdk/c/bae_plugin.h`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BaeThreading {
+    /// `BAE_THREADING_SERIAL_GLOBAL`.
+    SerialGlobal,
+    /// `BAE_THREADING_SERIAL_INSTANCE`.
+    SerialInstance,
+    /// `BAE_THREADING_CONCURRENT`.
+    Concurrent,
+}
+
+impl BaeThreading {
+    /// The C macro name.
+    pub fn c_symbol(self) -> &'static str {
+        match self {
+            BaeThreading::SerialGlobal => "BAE_THREADING_SERIAL_GLOBAL",
+            BaeThreading::SerialInstance => "BAE_THREADING_SERIAL_INSTANCE",
+            BaeThreading::Concurrent => "BAE_THREADING_CONCURRENT",
+        }
+    }
+}
+
+impl Concurrency {
+    /// The level the compat host declares to 19 for an AE effect.
+    ///
+    /// - `ParallelWithPrivateState` is `CONCURRENT` for 19; the compat host
+    ///   itself gives each render thread its own writable copy of the
+    ///   sequence data (19 spec §9.2, `MUTABLE_RENDER_SEQUENCE_DATA_SLOWER`).
+    /// - `SerialPerModule` is `SERIAL_GLOBAL`, which 19 enforces per effect;
+    ///   the compat host additionally holds one lock per plug-in module
+    ///   (several effects of one binary share globals), so 19 needs no
+    ///   module-level threading class.
+    pub fn bae_threading(self) -> BaeThreading {
+        match self {
+            Concurrency::Parallel | Concurrency::ParallelWithPrivateState => {
+                BaeThreading::Concurrent
+            }
+            Concurrency::SerialPerModule => BaeThreading::SerialGlobal,
+        }
+    }
+}
+
 /// How the node negotiates its region of interest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RoiModel {
@@ -367,5 +409,19 @@ mod tests {
             c.requirements().concurrency,
             Concurrency::ParallelWithPrivateState
         );
+    }
+
+    #[test]
+    fn threading_names_match_the_c_abi_header() {
+        const HEADER: &str = include_str!("../../../sdk/c/bae_plugin.h");
+        for c in [
+            Concurrency::Parallel,
+            Concurrency::ParallelWithPrivateState,
+            Concurrency::SerialPerModule,
+        ] {
+            let sym = c.bae_threading().c_symbol();
+            assert!(HEADER.contains(&format!("#define {sym} ")), "{sym}");
+        }
+        assert!(HEADER.contains("#define BAE_THREADING_SERIAL_INSTANCE "));
     }
 }

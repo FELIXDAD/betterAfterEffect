@@ -8,9 +8,8 @@
 //! across plug-in versions.
 //!
 //! This module mirrors those definitions ([`ParamDescriptor`]) and decides how
-//! each one is represented in `bae-model` ([`BaeParamMapping`]). The concrete
-//! BAE value types are owned by 02; the shapes requested from 02 are listed
-//! in the spec (requests R02-01 … R02-09).
+//! each one is stored and animated ([`BaeParamMapping`]). The conversion to
+//! the merged 02 types (`bae_model::EffectParamDef`) is in [`crate::model`].
 
 use crate::error::{HostError, Result};
 use crate::geometry::Fixed;
@@ -279,8 +278,8 @@ pub enum Interpolation {
     Static,
 }
 
-/// The `bae-model` value shape an AE param maps onto (names refer to the
-/// 02 effect-param model; see spec R02-01).
+/// The `bae_model::Value` shape an AE param maps onto (see
+/// [`BaeValueShape::value_type`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BaeValueShape {
     /// `Value::Float` (f64 in the model; sliders, angles in degrees).
@@ -295,16 +294,34 @@ pub enum BaeValueShape {
     Point2,
     /// `Value::Vec3`.
     Point3,
-    /// `Value::Enum` (1-based choice index, separators counted).
+    /// `Value::Int` holding the 1-based choice index (separators counted).
     Enum,
     /// `Value::PrimRef` to a layer Prim (or none).
     LayerRef,
     /// `Value::PrimRef` to a mask Prim of the same layer (or none).
     MaskRef,
-    /// `Value::Blob` (opaque bytes, plug-in owned semantics).
+    /// `Value::Bytes` (opaque bytes, plug-in owned semantics).
     Blob,
     /// No stored value (groups, buttons, no-data rows).
     None,
+}
+
+impl BaeValueShape {
+    /// The 02 value type of the `param:NNNN` attribute.
+    pub fn value_type(self) -> Option<bae_model::ValueType> {
+        use bae_model::ValueType as V;
+        Some(match self {
+            BaeValueShape::Float => V::Float,
+            BaeValueShape::Int | BaeValueShape::Enum => V::Int,
+            BaeValueShape::Bool => V::Bool,
+            BaeValueShape::Color => V::Color,
+            BaeValueShape::Point2 => V::Vec2,
+            BaeValueShape::Point3 => V::Vec3,
+            BaeValueShape::LayerRef | BaeValueShape::MaskRef => V::PrimRef,
+            BaeValueShape::Blob => V::Bytes,
+            BaeValueShape::None => return None,
+        })
+    }
 }
 
 /// Decision of how one AE param is stored and animated in BAE.

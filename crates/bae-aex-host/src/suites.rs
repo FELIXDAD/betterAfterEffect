@@ -140,7 +140,7 @@ pub struct SuiteInfo {
     pub hot_path: bool,
 }
 
-/// The catalog the compat host plans against (see spec §"Function suites").
+/// The catalog the compat host plans against (see spec §3.13).
 pub const CATALOG: &[SuiteInfo] = &[
     SuiteInfo {
         key: SuiteKey::PicaBasic,

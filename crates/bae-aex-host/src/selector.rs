@@ -143,68 +143,138 @@ pub enum ExtraKind {
     FlattenedSequenceData,
 }
 
-/// BAE plug-in lifecycle hook (workstream 19) a selector maps onto. The 19
-/// effect interface must expose an equivalent for each of these, or the
-/// compat host cannot be a pure translator (spec request R19-01).
+/// The workstream-19 effect callback a selector is translated to.
+///
+/// The compat host is a native BAE plug-in (`BAE_KIND_EFFECT`, vtable 1 of
+/// `sdk/c/bae_plugin.h`) whose callbacks issue AE selectors; this enum names
+/// those callbacks exactly as the C header does ([`LifecycleHook::c_symbol`]).
+/// The table in [`Selector::info`] is the code form of
+/// `docs/spec/plugin-architecture.md` §9.1 (19's request R20-1), and a unit
+/// test checks every symbol against the header so the two cannot drift.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LifecycleHook {
-    /// Static/about information.
-    About,
-    /// Plug-in-wide initialisation returning capabilities.
-    GlobalInit,
-    /// Plug-in-wide shutdown.
-    GlobalShutdown,
-    /// Parameter definition.
+    /// `global_setup` (L thread).
+    GlobalSetup,
+    /// `global_setdown`.
+    GlobalSetdown,
+    /// `define_params`.
     DefineParams,
-    /// Effect instance creation (fresh state).
+    /// `gpu_device_setup` (per device, before the first `render_gpu` there).
+    GpuDeviceSetup,
+    /// `gpu_device_setdown`.
+    GpuDeviceSetdown,
+    /// `instance_create`: `EDIT` with an empty state for a new instance,
+    /// `EDIT` or `RENDER` with the state blob for load, paste, duplicate and
+    /// remote changes. Compat effects are always `STATEFUL`.
     InstanceCreate,
-    /// Instance state restore from serialized bytes (load, paste, duplicate,
-    /// remote CRDT update).
-    InstanceRestore,
-    /// Instance state serialization (save, copy, sync).
+    /// `instance_serialize`: non-destructive by 19's contract. The compat host
+    /// prefers the plug-in's non-destructive flatten and otherwise flattens
+    /// and immediately re-creates its live state.
     InstanceSerialize,
-    /// Serialized snapshot without disturbing live state (render-thread copy).
-    InstanceSnapshot,
-    /// Instance destruction.
+    /// `instance_destroy`.
     InstanceDestroy,
-    /// Legacy frame preparation (output size/origin).
-    LegacyFramePrepare,
-    /// Legacy full-frame render.
-    LegacyRender,
-    /// Legacy frame finish.
-    LegacyFrameFinish,
-    /// ROI / dependency negotiation before rendering.
-    PlanRender,
-    /// CPU render of a negotiated request.
-    RenderCpu,
-    /// GPU render of a negotiated request.
-    RenderGpu,
-    /// Audio preparation.
-    AudioPrepare,
-    /// Audio render.
-    AudioRender,
-    /// Audio finish.
-    AudioFinish,
-    /// Custom UI event.
-    UiEvent,
-    /// Supervised parameter changed (may rewrite other params).
+    /// `param_changed` (supervised params and buttons).
     ParamChanged,
-    /// Cosmetic parameter UI refresh (may not change values).
-    RefreshParamUi,
-    /// Modal options dialog.
-    OptionsDialog,
-    /// Custom (arbitrary data) value operation: new/copy/flatten/interp/...
-    CustomValueOp,
-    /// Report external file/font dependencies (packaging, 21).
-    ExternalDependencies,
-    /// Private message from another plug-in.
-    PrivateMessage,
-    /// Re-query dynamic capabilities (cache/ROI behaviour).
-    QueryDynamicCaps,
-    /// GPU device attach.
-    GpuAttach,
-    /// GPU device detach.
-    GpuDetach,
+    /// `update_params_ui` (cosmetic only).
+    UpdateParamsUi,
+    /// `query_dynamic_flags`.
+    QueryDynamicFlags,
+    /// `pre_render`: SmartFX pre-render, or synthesised from the legacy
+    /// frame setup (output size and origin).
+    PreRender,
+    /// `render_cpu`: SmartFX render or legacy render.
+    RenderCpu,
+    /// `render_gpu`.
+    RenderGpu,
+    /// `release_frame_data`.
+    ReleaseFrameData,
+    /// `get_dependencies`.
+    GetDependencies,
+    /// `message`: about text (`bae.about`), options dialog
+    /// (`bae.options_dialog`) and private plug-in messages.
+    Message,
+    /// `BaeArbitraryVTable1` (`interpolate`, `compare`, `to_text`,
+    /// `from_text`); new/dispose/copy/flatten are host-managed byte copies.
+    ArbitraryValue,
+    /// Reserved for ABI 0.2: `ui_event` + the `bae.draw` suite
+    /// (`BAE_EFFECT_FLAG_CUSTOM_UI`).
+    UiEvent,
+    /// Reserved contribution kind `BAE_KIND_AUDIO_EFFECT`; audio effects are
+    /// placeholders until BAE has an audio graph.
+    AudioEffect,
+}
+
+/// Where a [`LifecycleHook`] lives in 19's C ABI today.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum HookAbi {
+    /// A function pointer of `BaeEffectVTable1`.
+    EffectVTable1,
+    /// The `BaeArbitraryVTable1` table attached to an ARBITRARY param.
+    ArbitraryVTable1,
+    /// Named in the header but reserved (not callable in ABI 0.1).
+    Reserved,
+}
+
+impl LifecycleHook {
+    /// Every hook, for exhaustive tests.
+    pub const ALL: [LifecycleHook; 20] = [
+        LifecycleHook::GlobalSetup,
+        LifecycleHook::GlobalSetdown,
+        LifecycleHook::DefineParams,
+        LifecycleHook::GpuDeviceSetup,
+        LifecycleHook::GpuDeviceSetdown,
+        LifecycleHook::InstanceCreate,
+        LifecycleHook::InstanceSerialize,
+        LifecycleHook::InstanceDestroy,
+        LifecycleHook::ParamChanged,
+        LifecycleHook::UpdateParamsUi,
+        LifecycleHook::QueryDynamicFlags,
+        LifecycleHook::PreRender,
+        LifecycleHook::RenderCpu,
+        LifecycleHook::RenderGpu,
+        LifecycleHook::ReleaseFrameData,
+        LifecycleHook::GetDependencies,
+        LifecycleHook::Message,
+        LifecycleHook::ArbitraryValue,
+        LifecycleHook::UiEvent,
+        LifecycleHook::AudioEffect,
+    ];
+
+    /// The identifier in `sdk/c/bae_plugin.h`: the vtable field name, or the
+    /// reserved name for hooks that are not callable yet.
+    pub fn c_symbol(self) -> &'static str {
+        match self {
+            LifecycleHook::GlobalSetup => "global_setup",
+            LifecycleHook::GlobalSetdown => "global_setdown",
+            LifecycleHook::DefineParams => "define_params",
+            LifecycleHook::GpuDeviceSetup => "gpu_device_setup",
+            LifecycleHook::GpuDeviceSetdown => "gpu_device_setdown",
+            LifecycleHook::InstanceCreate => "instance_create",
+            LifecycleHook::InstanceSerialize => "instance_serialize",
+            LifecycleHook::InstanceDestroy => "instance_destroy",
+            LifecycleHook::ParamChanged => "param_changed",
+            LifecycleHook::UpdateParamsUi => "update_params_ui",
+            LifecycleHook::QueryDynamicFlags => "query_dynamic_flags",
+            LifecycleHook::PreRender => "pre_render",
+            LifecycleHook::RenderCpu => "render_cpu",
+            LifecycleHook::RenderGpu => "render_gpu",
+            LifecycleHook::ReleaseFrameData => "release_frame_data",
+            LifecycleHook::GetDependencies => "get_dependencies",
+            LifecycleHook::Message => "message",
+            LifecycleHook::ArbitraryValue => "BaeArbitraryVTable1",
+            LifecycleHook::UiEvent => "ui_event",
+            LifecycleHook::AudioEffect => "BAE_KIND_AUDIO_EFFECT",
+        }
+    }
+
+    /// Where the hook lives in the current C ABI.
+    pub fn abi(self) -> HookAbi {
+        match self {
+            LifecycleHook::ArbitraryValue => HookAbi::ArbitraryVTable1,
+            LifecycleHook::UiEvent | LifecycleHook::AudioEffect => HookAbi::Reserved,
+            _ => HookAbi::EffectVTable1,
+        }
+    }
 }
 
 /// Static facts about a selector.
@@ -267,14 +337,22 @@ impl Selector {
         use SelectorGroup as G;
         use ThreadAffinity as T;
         let (group, affinity, params, output, extra, hook, needs_instance) = match self {
-            Selector::About => (G::Global, T::Main, P::None, false, X::None, H::About, false),
+            Selector::About => (
+                G::Global,
+                T::Main,
+                P::None,
+                false,
+                X::None,
+                H::Message,
+                false,
+            ),
             Selector::GlobalSetup => (
                 G::Global,
                 T::MainExclusive,
                 P::None,
                 false,
                 X::None,
-                H::GlobalInit,
+                H::GlobalSetup,
                 false,
             ),
             Selector::GlobalSetdown => (
@@ -283,7 +361,7 @@ impl Selector {
                 P::None,
                 false,
                 X::None,
-                H::GlobalShutdown,
+                H::GlobalSetdown,
                 false,
             ),
             Selector::ParamsSetup => (
@@ -310,7 +388,7 @@ impl Selector {
                 P::NonLayer,
                 false,
                 X::None,
-                H::InstanceRestore,
+                H::InstanceCreate,
                 false,
             ),
             Selector::SequenceFlatten => (
@@ -337,7 +415,7 @@ impl Selector {
                 P::None,
                 false,
                 X::FlattenedSequenceData,
-                H::InstanceSnapshot,
+                H::InstanceSerialize,
                 true,
             ),
             Selector::FrameSetup => (
@@ -346,7 +424,7 @@ impl Selector {
                 P::NonLayer,
                 false,
                 X::None,
-                H::LegacyFramePrepare,
+                H::PreRender,
                 true,
             ),
             Selector::Render => (
@@ -355,7 +433,7 @@ impl Selector {
                 P::All,
                 true,
                 X::None,
-                H::LegacyRender,
+                H::RenderCpu,
                 true,
             ),
             Selector::FrameSetdown => (
@@ -364,7 +442,7 @@ impl Selector {
                 P::NonLayer,
                 false,
                 X::None,
-                H::LegacyFrameFinish,
+                H::ReleaseFrameData,
                 true,
             ),
             Selector::SmartPreRender => (
@@ -373,7 +451,7 @@ impl Selector {
                 P::None,
                 false,
                 X::PreRender,
-                H::PlanRender,
+                H::PreRender,
                 true,
             ),
             Selector::SmartRender => (
@@ -400,7 +478,7 @@ impl Selector {
                 P::NonLayer,
                 false,
                 X::None,
-                H::AudioPrepare,
+                H::AudioEffect,
                 true,
             ),
             Selector::AudioRender => (
@@ -409,7 +487,7 @@ impl Selector {
                 P::NonLayer,
                 false,
                 X::None,
-                H::AudioRender,
+                H::AudioEffect,
                 true,
             ),
             Selector::AudioSetdown => (
@@ -418,7 +496,7 @@ impl Selector {
                 P::None,
                 false,
                 X::None,
-                H::AudioFinish,
+                H::AudioEffect,
                 true,
             ),
             Selector::Event => (
@@ -445,7 +523,7 @@ impl Selector {
                 P::NonLayer,
                 false,
                 X::None,
-                H::RefreshParamUi,
+                H::UpdateParamsUi,
                 true,
             ),
             Selector::DoDialog => (
@@ -454,7 +532,7 @@ impl Selector {
                 P::NonLayer,
                 false,
                 X::None,
-                H::OptionsDialog,
+                H::Message,
                 true,
             ),
             Selector::ArbitraryCallback => (
@@ -463,7 +541,7 @@ impl Selector {
                 P::None,
                 false,
                 X::ArbitraryCallback,
-                H::CustomValueOp,
+                H::ArbitraryValue,
                 false,
             ),
             Selector::GetExternalDependencies => (
@@ -472,7 +550,7 @@ impl Selector {
                 P::NonLayer,
                 false,
                 X::ExternalDependencies,
-                H::ExternalDependencies,
+                H::GetDependencies,
                 true,
             ),
             Selector::CompletelyGeneral => (
@@ -481,7 +559,7 @@ impl Selector {
                 P::None,
                 false,
                 X::AegpMessage,
-                H::PrivateMessage,
+                H::Message,
                 true,
             ),
             Selector::QueryDynamicFlags => (
@@ -490,7 +568,7 @@ impl Selector {
                 P::NonLayer,
                 false,
                 X::None,
-                H::QueryDynamicCaps,
+                H::QueryDynamicFlags,
                 true,
             ),
             Selector::GpuDeviceSetup => (
@@ -499,7 +577,7 @@ impl Selector {
                 P::None,
                 false,
                 X::GpuDeviceSetup,
-                H::GpuAttach,
+                H::GpuDeviceSetup,
                 false,
             ),
             Selector::GpuDeviceSetdown => (
@@ -508,7 +586,7 @@ impl Selector {
                 P::None,
                 false,
                 X::GpuDeviceSetdown,
-                H::GpuDetach,
+                H::GpuDeviceSetdown,
                 false,
             ),
         };
@@ -724,6 +802,19 @@ impl ProtocolTracker {
     }
 }
 
+impl Selector {
+    /// The reserved `message` selector the compat host answers this AE selector
+    /// with (`BAE_MESSAGE_*` in `sdk/c/bae_plugin.h`), if any. Private messages
+    /// (`CompletelyGeneral`) use plug-in-defined selector strings instead.
+    pub fn bae_message(self) -> Option<&'static str> {
+        match self {
+            Selector::About => Some("bae.about"),
+            Selector::DoDialog => Some("bae.options_dialog"),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -742,6 +833,54 @@ mod tests {
             Selector::GlobalSetup.info().affinity,
             ThreadAffinity::MainExclusive
         );
+    }
+
+    /// 19's request R20-1: every hook the table uses must exist in the C ABI
+    /// header with the same name, and every vtable-1 callback of the header
+    /// must be reachable from some AE selector (or be BAE-only on purpose).
+    #[test]
+    fn hooks_match_the_c_abi_header() {
+        const HEADER: &str = include_str!("../../../sdk/c/bae_plugin.h");
+        let vtable = {
+            let start = HEADER
+                .find("typedef struct BaeEffectVTable1")
+                .expect("BaeEffectVTable1 in header");
+            let end = start + HEADER[start..].find("} BaeEffectVTable1;").unwrap();
+            &HEADER[start..end]
+        };
+        for hook in LifecycleHook::ALL {
+            let sym = hook.c_symbol();
+            match hook.abi() {
+                HookAbi::EffectVTable1 => assert!(
+                    vtable.contains(&format!("(*{sym})(")),
+                    "{hook:?}: `{sym}` is not a BaeEffectVTable1 callback"
+                ),
+                HookAbi::ArbitraryVTable1 | HookAbi::Reserved => {
+                    assert!(HEADER.contains(sym), "{hook:?}: `{sym}` not in header")
+                }
+            }
+        }
+        // Every vtable-1 callback is covered by at least one selector.
+        let used: std::collections::HashSet<_> =
+            Selector::ALL.iter().map(|s| s.info().hook).collect();
+        for hook in LifecycleHook::ALL {
+            assert!(used.contains(&hook), "{hook:?} has no AE selector");
+        }
+        let callbacks = vtable.matches("(*").count();
+        let mapped = LifecycleHook::ALL
+            .iter()
+            .filter(|h| h.abi() == HookAbi::EffectVTable1)
+            .count();
+        assert_eq!(
+            callbacks, mapped,
+            "BaeEffectVTable1 gained or lost a callback: update LifecycleHook"
+        );
+        for s in Selector::ALL {
+            if let Some(m) = s.bae_message() {
+                assert_eq!(s.info().hook, LifecycleHook::Message);
+                assert!(HEADER.contains(&format!("\"{m}\"")), "{m} not in header");
+            }
+        }
     }
 
     #[test]

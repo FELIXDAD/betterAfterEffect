@@ -5,8 +5,8 @@
 //! third-party After Effects effect plug-ins (Windows `.aex` DLLs, macOS
 //! `.plugin` bundles) and BAE's own interfaces is designed now, while the core
 //! (02 doc model, 04 render graph, 19 plug-in system) is still malleable.
-//! The full design, every SDK citation, the capability mapping table and the
-//! requests sent to other workstreams are in `docs/spec/aex-compat.md`.
+//! The design (Chinese), the capability mapping table and the requests sent to
+//! other workstreams are in `docs/spec/aex-compat.md`.
 //!
 //! ## Layering
 //!
@@ -18,12 +18,12 @@
 //!        │         effect protocol: selectors, capabilities, params, worlds,
 //!        │         SmartFX checkouts, sequence data, GPU, UI events, suites)
 //!        ▼
-//!   BAE interfaces: bae-model (02) effect Prims + params + opaque state slot,
-//!                   bae-render (04) CPU/GPU-buffer effect nodes + ROI,
-//!                   bae-plugin (19) effect lifecycle + suites + out-of-process
+//!   BAE interfaces: bae-model (02) EffectDef / param:NNNN attrs / `state` bytes,
+//!                   bae-plugin (19) BaeEffectVTable1 callbacks, suites, runner,
+//!                   bae-render (04) `bae_render::Effect` node + CPU nodes + ROI
 //! ```
 //!
-//! ## Design rules (enforced by review, see spec §"Design principles")
+//! ## Design rules (enforced by review, see spec §1)
 //!
 //! 1. **Pay only where used.** Nothing in here is reachable from the render
 //!    hot path of a project that has no AE plug-in nodes. The compat host is
@@ -44,11 +44,12 @@
 //! | module | AE concept | BAE counterpart |
 //! |---|---|---|
 //! | [`pipl`] | PiPL resources, match name, versions | plug-in manifest (19), effect type id (02) |
-//! | [`selector`] | `PF_Cmd_*` selectors, call order | effect lifecycle hooks (19) |
+//! | [`selector`] | `PF_Cmd_*` selectors, call order | `BaeEffectVTable1` callbacks (19) |
 //! | [`caps`] | `PF_OutFlag_*` / `PF_OutFlag2_*` | render-node requirements (04) |
 //! | [`time`] | `current_time`/`time_step`/`time_scale` | flicks (`docs/ARCHITECTURE.md` §4.4) |
 //! | [`geometry`] | `PF_LRect`, `PF_RationalScale`, `PF_Fixed` | render request rects, downsample |
 //! | [`params`] | `PF_ParamDef`, `PF_Param_*`, param flags | effect param model (02) |
+//! | [`model`] | (conversion) | `bae_model::EffectDef` + the gaps it cannot express yet |
 //! | [`pixel`] | `PF_EffectWorld`, 8/16/32 bpc ARGB | CPU-node buffer contract (04) |
 //! | [`smart`] | SmartFX pre-render / render, checkouts | ROI negotiation, dynamic deps (04) |
 //! | [`sequence`] | global / sequence / frame data | opaque per-instance state slot (02) |
@@ -61,7 +62,7 @@
 //!
 //! [`shaders::CONVERT_WGSL`] is a WGSL compute shader that converts between
 //! BAE's RGBA16F working textures and packed AE world layouts on the GPU, so
-//! the CPU never touches pixels it does not have to (spec §"Performance").
+//! the CPU never touches pixels it does not have to (spec §6).
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -70,6 +71,7 @@ pub mod caps;
 pub mod error;
 pub mod geometry;
 pub mod gpu;
+pub mod model;
 pub mod params;
 pub mod pipl;
 pub mod pixel;

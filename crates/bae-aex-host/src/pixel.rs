@@ -166,7 +166,7 @@ impl WorldDesc {
                 reason: "rowbytes smaller than a row",
             });
         }
-        if self.rowbytes % self.depth.bytes_per_channel() != 0 {
+        if !self.rowbytes.is_multiple_of(self.depth.bytes_per_channel()) {
             return Err(HostError::BadBuffer {
                 reason: "rowbytes not a multiple of the channel size",
             });
