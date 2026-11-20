@@ -20,6 +20,7 @@ bae-agent.workspace = true
 bae-app.workspace = true
 bae-gpu.workspace = true
 bae-model.workspace = true
+bae-motion.workspace = true
 bae-platform.workspace = true
 bae-ui.workspace = true
 bae-render = { workspace = true, features = ["media"] }

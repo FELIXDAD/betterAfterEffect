@@ -32,6 +32,8 @@ fn main() -> ExitCode {
         .add_module(model_cli::ModelCliModule)
         .add_module(mcp_cli::McpCliModule)
         .add_module(bae_render::RenderModule)
+        // Motion commands (comp.create, layer.create, key.ease …) for menus and agents.
+        .add_module(bae_motion::MotionModule)
         .add_module(shell::ShellModule);
     // Layer sources drawn by other workstreams (05: shape layers), used by the
     // renderer and `bae render`.

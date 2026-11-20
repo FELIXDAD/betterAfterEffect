@@ -13,6 +13,8 @@ workspace = true
 
 [dependencies]
 bae-model.workspace = true
+# Packaging commands (package.*, asset.relink …), exposed to agents.
+bae-package.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true

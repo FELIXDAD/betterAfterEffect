@@ -236,6 +236,7 @@ dependencies = [
  "bae-app",
  "bae-gpu",
  "bae-model",
+ "bae-motion",
  "bae-platform",
  "bae-render",
  "bae-ui",
@@ -252,10 +253,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bae-aex-host"
+version = "0.1.0"
+dependencies = [
+ "bae-model",
+]
+
+[[package]]
 name = "bae-agent"
 version = "0.1.0"
 dependencies = [
  "bae-model",
+ "bae-package",
  "parking_lot",
  "png",
  "rmcp",
@@ -334,6 +343,20 @@ dependencies = [
  "wgpu-hal",
  "wgpu-types",
  "windows",
+]
+
+[[package]]
+name = "bae-interop-ai"
+version = "0.1.0"
+dependencies = [
+ "bae-anim",
+ "bae-model",
+ "bae-vector",
+ "kurbo",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -428,12 +451,18 @@ dependencies = [
 name = "bae-plugin"
 version = "0.1.0"
 dependencies = [
+ "bae-gpu",
  "bae-model",
  "bae-plugin-sdk",
+ "bae-render",
+ "half",
  "naga",
+ "parking_lot",
+ "rustc-hash 2.1.3",
  "semver",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
  "toml",
 ]
@@ -475,6 +504,7 @@ dependencies = [
  "blake3",
  "notify",
  "rustc-hash 2.1.3",
+ "schemars",
  "serde",
  "serde_json",
  "tempfile",
