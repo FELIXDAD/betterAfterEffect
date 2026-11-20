@@ -867,8 +867,8 @@ Conventions used in this file (apply to every item unless an item says otherwise
   - Clears temporalAutoBezier; temporalContinuous becomes false (UNVERIFIED: Easy Ease keys show the "hourglass" Bezier icon; since both speeds are 0 the curve is smooth anyway).
   - Does **not** change spatial interpolation or spatial tangents: a Position key keeps its Auto Bezier/Linear path; only timing along the path changes.
   - Easy Ease on a Hold-out key: the out type becomes Bezier (removes the hold) (UNVERIFIED).
-  - Influence exact value: 33.33 (AE help "33.33 %"; scripting reads 33.333333? UNVERIFIED which of 33.33 and 100/3).
-  - Also available as buttons at the bottom of the Graph Editor and under Animation > Keyframe Assistant (动画 > 关键帧辅助).
+  - Influence exact value: 33.33 (AE help: "each keyframe has a speed of 0 with an influence of 33.33% on either side"; UNVERIFIED whether scripting reads 33.33 or 33.333333 = 100/3).
+  - Also available as buttons at the bottom of the Graph Editor and under Animation > Keyframe Assistant (动画 > 关键帧助手).
 - **Priority:** P0
 - **Owner:** bae-motion (+ bae-anim, bae-ui-motion)
 - **Notes:** On macOS F9 may be taken by the OS (Mission Control); BAE keymap should still bind it. In Lottie, Easy Ease segments export as `o:{x:0.333,y:0}`, `i:{x:0.667,y:1}` (the familiar "ease" values), which confirms speed 0 / influence 33.33 %.
@@ -884,7 +884,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   | Incoming Velocity: Influence (传入速度：影响) | float | current | 0.1–100 | % | |
   | Outgoing Velocity: Speed (传出速度：速度) | float (per dimension) | current | as above | units/sec | |
   | Outgoing Velocity: Influence (传出速度：影响) | float | current | 0.1–100 | % | |
-  | Continuous (Lock Outgoing and Incoming) (连续（锁定传出和传入）（译名待核）) | bool | key's temporalContinuous | — | — | when on, editing one speed copies it to the other |
+  | Continuous (Lock Outgoing and Incoming) (连续（锁定输入和输出）) | bool | key's temporalContinuous | — | — | when on, editing one speed copies it to the other |
 
   - Multi-dimensional non-spatial properties show one Speed/Influence row per dimension (Dimension 1, 2, 3 for Scale; UNVERIFIED labels).
   - With several keys selected, fields show the first key's values and OK applies the entered values to all selected keys (UNVERIFIED: fields left blank/mixed keep each key's value).
@@ -933,7 +933,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 
 - **What it does:** Turns Hold on or off for the selected keyframes.
 - **Exact semantics:** Animation > Toggle Hold Keyframe (动画 > 切换定格关键帧), Ctrl+Alt+H / Cmd+Opt+H.
-  - If any selected key's out type is not Hold: set out (and in) type to Hold on all selected keys. Otherwise (all Hold): set them back to the interpolation they had before Hold was applied if remembered, else Auto Bezier? UNVERIFIED: AE's shortcut table describes the toggle as "hold or Auto Bezier"; observed behaviour restores the previous type (Linear stays Linear).
+  - If any selected key's out type is not Hold: set the **out** type to Hold on all selected keys (AE help: applies/removes Hold "as outgoing interpolation"; UNVERIFIED whether the in type also changes). Otherwise (all Hold): set them back to the interpolation they had before Hold was applied if remembered, else Auto Bezier? UNVERIFIED: AE's shortcut table describes the toggle as "hold or Auto Bezier"; observed behaviour restores the previous type (Linear stays Linear).
   - Spatial interpolation untouched.
 - **Priority:** P0
 - **Owner:** bae-motion (+ bae-ui-motion)
@@ -1390,7 +1390,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 
 - **What it does:** Bakes an expression's result into keyframes and disables the expression.
 - **Exact semantics:**
-  - Animation > Keyframe Assistant > Convert Expression to Keyframes (动画 > 关键帧辅助 > 将表达式转换为关键帧) on selected properties with expressions.
+  - Animation > Keyframe Assistant > Convert Expression to Keyframes (动画 > 关键帧助手 > 将表达式转换为关键帧) on selected properties with expressions.
   - Samples the post-expression value at every comp frame across the layer's duration (UNVERIFIED: from layer In point to Out point; AE may use the comp duration for layers that extend beyond it), creating one key per frame with Linear temporal (and Linear spatial) interpolation; existing keys are replaced.
   - The expression is kept but disabled (expression enable switch off), so it can be re-enabled.
   - Consecutive identical values still produce keys (no reduction) (UNVERIFIED).
@@ -1460,7 +1460,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 - **Owner:** bae-motion (+ bae-ui-motion)
 - **Notes:** Expression alternative `wiggle()` (expression part of this file).
 
-### AE-ANI-085 · Other Keyframe Assistant entries (其他关键帧辅助命令)
+### AE-ANI-085 · Other Keyframe Assistant entries (其他关键帧助手命令)
 
 - **What it does:** Remaining entries of Animation > Keyframe Assistant.
 - **Exact semantics:** Menu order in current AE: Convert Audio to Keyframes, Convert Expression to Keyframes, Easy Ease, Easy Ease In, Easy Ease Out, Exponential Scale, RPF Camera Import (RPF 摄像机导入), Sequence Layers… (序列图层), Time-Reverse Keyframes (UNVERIFIED order: alphabetical in English).
