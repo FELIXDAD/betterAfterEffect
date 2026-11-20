@@ -952,3 +952,458 @@
 - **Priority:** P1
 - **Owner:** bae-ui-motion (+ bae-render)
 - **Notes:** Cache semantics: ui-preview-render-io.md, preview & cache behaviour (ui-b).
+
+### AE-UI-065 · Composition marker bin and markers in the time graph (合成标记素材箱与时间图表中的标记)
+
+- **What it does:** Displays comp markers on the time ruler and layer markers on layer bars, and provides the gestures that create, move, extend and delete them.
+- **Exact semantics:**
+  - **Comp Marker Bin (合成标记素材箱)**: a button at the right end of the time ruler. Drag out of it onto the ruler → new comp marker at the drop time (Shift snaps). Drag a comp marker back onto the bin → deletes it. Click (no drag) does nothing (UNVERIFIED).
+  - Comp markers are drawn on the time ruler as small house-shaped (pentagon, point down) flags in the marker's label colour with a vertical guide line through the time graph while hovered/dragged (UNVERIFIED: guide line only while dragging); the marker's Comment text is drawn to the right of the flag; numbered markers (0–9, set with Shift+main-keyboard digit, see ui-b) show the digit inside the flag.
+  - Layer markers are drawn on the layer's duration bar row as small triangles/flags (UNVERIFIED shape) in label colour with the comment text to the right, clipped at the next marker.
+  - A marker with duration > 0 is drawn as the flag plus a horizontal span bar to its out time, with a draggable handle at the out end.
+  - Gestures (semantics in project-comp-layers.md, Marker editing operations): double-click = marker settings dialog; drag = move (Shift snaps); drag out-handle = change duration; Alt/Option-drag the flag of a zero-duration marker = create duration; Ctrl/Cmd-click = delete; right-click = marker context menu: Settings (设置), Lock Markers (锁定标记), Delete This Marker (删除此标记), Delete All Markers (删除所有标记), Update Markers From Source (从源更新标记) (precomp layers only), Label ▸ (AE 22.6+).
+  - Hover a marker: tooltip shows its comment and time (UNVERIFIED).
+  - Alt/Option-click two markers (or keyframes): the Info panel shows the duration between them.
+  - `*` on the numeric keypad adds a marker at the CTI on the selected layers, or a comp marker if no layer is selected; works during preview (shortcut details: ui-b).
+- **Priority:** P0
+- **Owner:** bae-ui-motion (+ bae-model)
+- **Notes:** Marker data: project-comp-layers.md, Marker data model / Composition markers / Layer markers. Implementation hint: render marker labels with ellipsis clipping against the next marker x position; collision-free placement is not required (AE overlaps them).
+
+### AE-UI-066 · Layer duration bars (图层持续时间条)
+
+- **What it does:** In layer bar mode each layer is a horizontal bar spanning its In to Out point on the time graph; the bar is the handle for moving, trimming and slipping the layer.
+- **Exact semantics:**
+  - Geometry: x from `inPoint` to `outPoint` in comp time (frame-quantised edges); height = layer row height minus a small inset. Colour = the layer's label colour (AE draws it as a tinted/darker shade of the label colour; selected layers are drawn brighter/highlighted). Layers with label None draw a neutral grey bar (UNVERIFIED shades).
+  - **Untrimmed source region**: for layers with a time-based source (footage, precomp, audio) the part of the source outside In/Out is shown as a pale/translucent extension of the bar (the slip-edit area) at both ends (UNVERIFIED: shown only while the layer is selected/hovered in current AE; always shown in older versions).
+  - Stills, solids, text, shape, null, camera, light, adjustment layers: bar ends are always trimmable without a source limit (project-comp-layers.md, Layer extent limits).
+  - Time-stretched layers (stretch ≠ 100 %) and time-remapped layers draw no special hatching; the Stretch column shows the factor (UNVERIFIED: AE draws no stretch indicator on the bar). Time-reversed layers (negative stretch) draw a diagonal hatch/stripe pattern along the bar (UNVERIFIED pattern).
+  - Bars for layers whose Video and Audio switches are both off are drawn dimmed (UNVERIFIED).
+  - Collapsed layers with keyframes show nothing on the bar; collapsed property groups show grey **summary keyframe dots** (汇总关键帧指示器（译名待核）) on the group row at times where any contained property has a keyframe.
+  - Layers starting before 0 or ending after the comp end are clipped to the time graph extent.
+  - Hover over the bar ends shows the trim cursor; over the bar body the move cursor; over the pale source region the slip cursor.
+- **Priority:** P0
+- **Owner:** bae-ui-motion
+- **Notes:** Data: project-comp-layers.md, Layer time model. Implementation hint: draw all bars in one instanced GPU pass; label colour lookup from Preferences > Labels.
+
+### AE-UI-067 · Layer selection, multiple selection and stacking reorder in the outline (图层选择与在大纲中重新排序)
+
+- **What it does:** Selecting layers in the Timeline (also mirrored in the Composition viewer) and dragging them to new stacking positions.
+- **Exact semantics:**
+  - Click a layer row (name area or bar) = select only that layer (deselects properties/keyframes on other layers). Ctrl-click (Win) / Cmd-click (Mac) toggles a layer in the selection; Shift-click extends a contiguous range from the last clicked layer. Dragging a marquee starting in an empty area of the outline (left part) selects the touched layer rows (UNVERIFIED: AE marquee in the outline selects layers; in the time graph it selects keyframes).
+  - Click empty space below the last layer = deselect all (Ctrl+Shift+A / Cmd+Shift+A also deselects all).
+  - Layer selection is shared with the Composition viewer (selecting in either highlights in both) and is persisted per comp (`Layer.selected`, project-comp-layers.md, Layer selection state).
+  - Keyboard selection: numeric keypad digits select by layer number; Ctrl/Cmd+↑/↓ select previous/next layer, add Shift to extend (full list: ui-b shortcuts).
+  - Locked layers cannot be selected by clicking in the outline (AE flashes the lock switch, UNVERIFIED) and are skipped by Select All (Ctrl/Cmd+A).
+  - **Drag reorder**: press on a selected layer's name/number area and drag vertically; a horizontal insertion line shows the target gap; release moves all selected layers there keeping relative order (project-comp-layers.md, Reorder layers). Dragging near the top/bottom edge auto-scrolls.
+  - Dragging a layer's name onto another layer's Parent pick whip is not supported (only pick whip → target) (UNVERIFIED).
+  - Selecting a property or property group name selects all its keyframes (AE-UI-072).
+- **Priority:** P0
+- **Owner:** bae-ui-motion (+ bae-model, bae-motion)
+- **Notes:** Implementation hint: selection is UI state stored in the doc as non-undoable view state (AE does not put selection changes on the undo stack).
+
+### AE-UI-068 · Moving, trimming and slipping layer bars (移动、修剪和滑动图层条)
+
+- **What it does:** Direct manipulation of layer bars in the time graph.
+- **Exact semantics:**
+  | Gesture | Result | Semantics |
+  |---|---|---|
+  | Drag bar body | moves selected layers in time (all selected move by the same delta) | project-comp-layers.md, Move layers in time |
+  | Drag bar start/end edge | trims In/Out of that layer (all selected layers whose edge is grabbed? — UNVERIFIED: AE trims only the dragged layer) | project-comp-layers.md, Trim layer in/out points |
+  | Drag pale untrimmed region (time-based sources) | slip edit | project-comp-layers.md, Slip edit |
+  | Pan Behind tool (Y) dragging a bar | slip edit | same |
+  | Ctrl-drag (Win) / Cmd-drag (Mac) a bar edge | time-stretches the layer instead of trimming (UNVERIFIED modifier; keyboard equivalents Ctrl/Cmd+Shift+, and Ctrl/Cmd+Alt/Opt+, stretch the In/Out to the CTI) | project-comp-layers.md, Time Stretch dialog |
+  | Shift while dragging | snaps the moving edge/body to CTI, work area edges, comp/layer markers, keyframes and other layers' In/Out points | snapping applies after the drag begins |
+  - While dragging, the Info panel shows the layer's new In, Out and delta (e.g. `In: 0:00:01:00, Out: …, Delta: +0:00:00:12`) (UNVERIFIED exact text).
+  - Each drag is one undo step for all affected layers; drags are frame-quantised to the comp frame rate.
+  - A small tooltip near the pointer shows the current In time while dragging (AE 2020+; UNVERIFIED).
+- **Priority:** P0
+- **Owner:** bae-ui-motion (+ bae-motion)
+- **Notes:** Keyboard alternatives ([, ], Alt+[, Alt+], Alt+PageUp/PageDown…) are in ui-b shortcuts and project-comp-layers.md.
+
+### AE-UI-069 · Property twirl-downs and property rows (属性展开与属性行)
+
+- **What it does:** Each layer row expands into a tree of property groups and properties; each property row shows its name, its value(s) as hot text, and in the time graph its keyframes.
+- **Exact semantics:**
+  - Twirl (展开) triangle: click toggles one level; **Ctrl-click (Win) / Cmd-click (Mac)** a twirl expands/collapses the group and all its descendants recursively (UNVERIFIED modifier: AE help says Ctrl-click expands all subgroups). Clicking the triangle of one selected layer while several are selected toggles all selected (UNVERIFIED).
+  - Group order under a layer follows the property tree (project-comp-layers.md, Layer top-level property groups): e.g. Text, Contents, Masks, Effects, Transform, Layer Styles, Geometry/Material Options, Audio. Groups that are empty are hidden (Masks with no masks etc.).
+  - Reveal shortcuts (A, P, S, R, T, U, UU, E, EE, F, M, MM, L, LL, …; Shift+key adds to the revealed set; "SS" reveals the selected property) show only the requested properties and collapse others: list in ui-b shortcuts.
+  - Property row layout (left to right): A/V column area: (a) keyframe navigator ◀ ◆ ▶ (only when the property has keyframes, AE-UI-070); (b) indent + twirl (only for groups, or for a property with an expression); (c) stopwatch (only for animatable properties); (d) Graph Editor set switch (only when animated, AE-UI-077); (e) property name; (f) value(s) as hot text (AE-UI-070); (g) for some properties: constrain-proportions link (Scale), "Edit…" link (e.g. Source Text has none; Material options none) or a popup (enumerated properties like Mask Mode, blend modes of shape fills) or a checkbox.
+  - Effect group rows in the Timeline show an **fx** switch (效果开关（译名待核）) in the switch area to enable/disable that effect; masks show mode popup, Inverted checkbox and (in the Switches column area) nothing; shape groups and text animators show an eyeball in the A/V column.
+  - Value colours: normal values in the theme's hot-text colour (blue); values computed by an active expression are drawn red (post-expression value); values of properties that are disabled draw grey.
+  - Selecting a property name selects all its keyframes; selecting a group name selects the group (for delete/duplicate/rename).
+  - Double-click a property row name: no effect (UNVERIFIED); double-click a group name: rename (masks, effects, shape groups, animators).
+  - Multi-selected properties of the same type on several layers can be changed together by scrubbing one of them (relative change, transform-keyframes-expressions.md, Change values of multiple keyframes at once).
+  - Property right-click context menu: Reset (重置), Edit Value… (编辑值…), Expression ▸? / Add Expression? (UNVERIFIED), Show Expression Editor? (UNVERIFIED list), Separate Dimensions (单独尺寸) (Position only), Toggle Hold Keyframe, Keyframe Interpolation…, Rove Across Time, Keyframe Velocity…, Keyframe Assistant ▸, Copy Expression Only, Reveal in Timeline? (UNVERIFIED list).
+- **Priority:** P0
+- **Owner:** bae-ui-motion
+- **Notes:** Property tree data: project-comp-layers.md, Property tree structure / Property value types. Implementation hint: flatten the visible tree into a row list each frame (only twirled-open groups) and virtualise.
+
+### AE-UI-070 · Stopwatch, keyframe navigator and property value editing (秒表、关键帧导航器和属性值编辑)
+
+- **What it does:** The per-property controls that turn animation on/off, step between keyframes and edit values directly in the Timeline.
+- **Exact semantics:**
+  - **Stopwatch (秒表)**: inactive (no keyframes) / active (has keyframes). Click inactive → creates a keyframe at the CTI with the current value. Click active → deletes all keyframes, value becomes the value at the CTI (transform-keyframes-expressions.md, Stopwatch and auto-keyframing). **Alt-click (Win) / Option-click (Mac)** → adds the default expression (or removes the existing one) (AE-UI-073).
+  - When the stopwatch is inactive, the time graph shows an I-beam marker under the CTI on that property row (no interpolation).
+  - **Keyframe navigator (关键帧导航器)**: `◀ [box] ▶`. Arrows jump the CTI to the previous / next keyframe of this property (arrow greyed when none in that direction). Middle box: filled diamond = CTI exactly on a keyframe (click removes it); empty box = CTI between keyframes (click adds a keyframe with the current value). Shown only when the property has ≥ 1 keyframe. With the Keys column shown, the navigator moves into that column.
+  - **Value hot text (可拖动值)**: drag horizontally to scrub. Modifiers while scrubbing: **Ctrl (Win) / Cmd (Mac)** = fine (1/10 of normal increment), **Shift** = coarse (10× normal increment) (generic hot text: AE-UI-012). Click = edit as text field (Tab moves to the next value field; Enter commits; Esc cancels). Arithmetic in fields: `+N`, `-N`, `*N`, `/N` applied to the current value (UNVERIFIED in all fields; works in AE since CS5).
+  - Multi-dimensional values (Position, Scale, Anchor Point…) show one hot text per dimension separated by commas; Scale shows the constrain-proportions link to its left.
+  - Editing a value while the stopwatch is active and CTI is not on a keyframe creates a new keyframe (or, with auto-keyframe off and stopwatch off, changes the static value).
+  - **Enable Auto-keyframe (启用自动关键帧)** (Timeline panel menu, default off): editing any interpolable property activates its stopwatch and adds a keyframe (not for popups, checkboxes or Source Text).
+  - **Reset (重置)**: property context menu > Reset sets the default value (adds a keyframe at the CTI if animated; project-comp-layers.md, Reset property and group). Group reset: the group's Reset link/context menu resets every child. Keyboard resets for transforms (e.g. reset Rotation, Scale): ui-b shortcuts.
+  - **Edit Value… (编辑值…)**: context menu opens the type-specific dialog (transform-keyframes-expressions.md, Edit Value dialogs for transform properties).
+- **Priority:** P0
+- **Owner:** bae-ui-motion (+ bae-anim, bae-model)
+- **Notes:** Proportional Scrubbing (AE 25.x, 2025; UNVERIFIED version): when several properties of different layers are selected, scrubbing one scales all proportionally rather than adding the same delta (help page "Proportional Scrubbing in timeline"). BAE decision: implement absolute/relative modes first, proportional later (P2).
+
+### AE-UI-071 · Keyframe icons and indices (关键帧图标与关键帧索引)
+
+- **What it does:** In layer bar mode each keyframe is drawn as an icon whose shape encodes its incoming and outgoing temporal interpolation; alternatively keyframes are drawn as numbers.
+- **Exact semantics:**
+  - The icon is split vertically at the keyframe time: the **left half** shows the incoming interpolation, the **right half** the outgoing interpolation. A half for which there is no adjacent keyframe (in-side of the first key, out-side of the last key) or whose segment is overridden by a preceding Hold is drawn **dark grey** (filled darker) instead of the normal fill.
+  - Shapes (BAE draws its own icons; dimensions relative to an icon box of size `s × s`, centred on the keyframe time, `s ≈ 9–11 px` at 100 % UI scale, UNVERIFIED size):
+    ```
+    half shape by interpolation type (right half; mirror for left half):
+      Linear            -> half diamond: triangle (0,-s/2) (s/2,0) (0,s/2)
+      Bezier / Continuous Bezier / Easy Ease (temporal Bezier, non-auto)
+                        -> half hourglass: polygon (0,0) (s/2,-s/2) (s/2,s/2)
+                           i.e. the full icon is an upright hourglass/bow-tie whose waist is at the centre
+                           (UNVERIFIED: AE's Bezier half has a narrow waist rather than a point)
+      Auto Bezier       -> half circle of radius s/2
+      Hold (outgoing)   -> half square: rect x in [0, s/2], y in [-s/2, s/2]
+                           (in-half after a hold key also shows the square half) (UNVERIFIED geometry)
+    full icons: Linear/Linear = diamond; Ease/Ease = hourglass; AutoBez/AutoBez = circle;
+                Hold/Hold = square; mixed = the two halves combined (e.g. Easy Ease In = left
+                hourglass half + right diamond half).
+    ```
+  - Roving keyframes (spatial properties with Rove Across Time) are drawn as small dots instead of a full icon (UNVERIFIED size: about half the normal icon).
+  - Colours: unselected = light grey fill; selected = highlighted with a blue outline/fill (theme highlight); keyframe colour labels (AE 22.6+) fill the icon with the label colour (transform-keyframes-expressions.md, Keyframe colour labels).
+  - Spatial interpolation is not reflected in layer bar icons (only on the motion path).
+  - **Use Keyframe Indices (使用关键帧索引)** (Timeline panel menu; alternative to **Use Keyframe Icons (使用关键帧图标)**, default icons): each keyframe is drawn as its 1-based index number in a small box (UNVERIFIED box style); numbers renumber as keys are added/removed.
+  - Summary keyframes on collapsed groups: grey dots/small diamonds (AE-UI-066).
+  - Graph Editor keyframes use a different style (AE-UI-081).
+  - Hover a keyframe: tooltip with time and value (and property name in the Graph Editor).
+- **Priority:** P0
+- **Owner:** bae-ui-motion
+- **Notes:** Interpolation semantics: transform-keyframes-expressions.md (Keyframe data model, Hold interpolation, Easy Ease, Auto Bezier, Roving keyframes). Implementation hint: generate icons as SDF/vector paths so any half combination renders crisply at any UI scale; batch all visible keyframes in one draw.
+
+### AE-UI-072 · Keyframe selection, moving and scaling in layer bar mode (在图层条模式下选择、移动和缩放关键帧)
+
+- **What it does:** Mouse interaction with keyframe icons in the time graph.
+- **Exact semantics:**
+  | Gesture | Result |
+  |---|---|
+  | Click a keyframe | selects it (deselects other keys) |
+  | Shift-click | toggles that key in the selection |
+  | Drag a marquee starting on empty time-graph space | selects keys inside; Shift-marquee toggles (marquee over selected keys deselects them) |
+  | Click a property name | selects all keys of that property |
+  | Drag a selected key | moves all selected keys by the same time delta (frame-quantised unless keys between frames are allowed); Shift after drag start snaps to CTI, markers, other keys, In/Out |
+  | Alt/Option-drag the first or last of ≥ 3 selected keys | scales the selection's timing proportionally around the opposite end (transform-keyframes-expressions.md, Scale keyframe timing by Alt-drag) |
+  | Alt/Option+← / → | nudges selected keys one frame earlier/later |
+  | Double-click a key | opens the value dialog for that key (transform-keyframes-expressions.md, Keyframe value dialog); for Source Text keys? (UNVERIFIED) |
+  | Ctrl-click (Win) / Cmd-click (Mac) a key | cycles interpolation: Linear ↔ Auto Bezier; on a Hold key → Linear? (transform-keyframes-expressions.md, Interpolation toggles by click) |
+  | Ctrl+Alt+H / Cmd+Opt+H | Toggle Hold Keyframe |
+  | F9 / Shift+F9 / Ctrl+Shift+F9 (Win); F9 / Shift+F9 / Cmd+Shift+F9 (Mac) | Easy Ease / Easy Ease In / Easy Ease Out |
+  | Alt/Option-click two keys | Info panel shows the duration between them |
+  | Delete / Backspace | deletes selected keys |
+  | Right-click a key | keyframe context menu (below) |
+  - Keyframe context menu (zh-CN from the Adobe help): value readout (first line, disabled), Edit Value… (编辑值), Label ▸ (标签), Select Keyframe Label Group (选择关键帧标签组), Select Equal Keyframes (选择相同关键帧), Select Previous Keyframes (选择前面的关键帧), Select Following Keyframes (选择跟随关键帧), Toggle Hold Keyframe (切换定格关键帧), Keyframe Interpolation… (关键帧插值), Rove Across Time (漂浮穿梭时间), Keyframe Velocity… (关键帧速度), Keyframe Assistant ▸ (关键帧辅助): Convert Audio to Keyframes, Convert Expression to Keyframes, Create Keyframes from Data, Easy Ease, Easy Ease In, Easy Ease Out, Exponential Scale, RPF Camera Import, Sequence Layers, Time-Reverse Keyframes. Select Previous/Following are disabled when more than one key is selected.
+  - Selecting keys also selects their layer; selecting a layer row deselects keys on other layers.
+  - Info panel on selection: shows the selected key's time and interpolation (layer bar mode).
+- **Priority:** P0
+- **Owner:** bae-ui-motion (+ bae-motion)
+- **Notes:** Semantics: transform-keyframes-expressions.md, Keyframe selection model, Drag keyframes in time and snapping, Nudge keyframes, Copy and paste keyframes. Keyframe assistants: transform-keyframes-expressions.md and project-comp-layers.md (Sequence Layers).
+
+### AE-UI-073 · Expression field and expression controls in the Timeline (时间轴中的表达式字段与控件)
+
+- **What it does:** When a property has an expression, an extra row under it shows four expression buttons and the editable expression text.
+- **Exact semantics:**
+  - Add/remove: Alt-click (Win) / Option-click (Mac) the stopwatch, or Animation > Add Expression (添加表达式) (Alt+Shift+= / Opt+Shift+=). Adding inserts the default expression `transform.position`-style self reference (`<group>.<property>` path, e.g. `transform.position`) selected for typing.
+  - The property row gets a twirl; the expression sub-row ("Expression: <Property name>" label) contains, left to right:
+    | Control (中文) | Behaviour |
+    |---|---|
+    | Enable Expression (启用表达式) — "=" icon | toggles `expressionEnabled`; highlighted (blue) when enabled; disabled → strike-through/grey "≠" (UNVERIFIED) and the value shows the pre-expression value |
+    | Show Post-Expression Graph (显示后表达式图表) | toggles drawing of the post-expression curve in the Graph Editor (AE-UI-077) |
+    | Expression pick whip (表达式关联器) | drag onto another property (Timeline, Effect Controls, Composition viewer target) → inserts a reference at the insertion point or replaces the selection (project-comp-layers.md, Property pick whip and expression links) |
+    | Expression Language menu (表达式语言菜单) | hierarchical menu of objects/attributes/methods (Global, Vector Math, Random Numbers, Interpolation, Color Conversion, Other Math, JavaScript Math, Comp, Footage, Layer Sub-objects, Layer General, Layer Properties, Layer 3D, Layer Space Transforms, Camera, Light, Effect, Path Property, Property, Key, MarkerKey, Text, …, UNVERIFIED exact list per AE 26); choosing inserts the call template at the insertion point, replacing the selection |
+  - **Expression field (表达式字段)**: a multi-line code editor in the time-graph area of the row. Clicking enters edit mode with the entire text selected. Enter/Return inserts a newline; commit with **Enter on the numeric keypad** or a click outside the field; Esc cancels? (UNVERIFIED). The field's height is resizable by dragging its bottom edge.
+  - Expression editor features (AE 16.1 (2019)+, toggles in Preferences > Scripting & Expressions, see ui-c): syntax highlighting with configurable colours, line numbers, code folding, autocomplete (Tab/Enter accepts), bracket matching/auto-close, word wrap, font and size (UNVERIFIED list and defaults).
+  - Errors: the property shows a yellow warning triangle next to the enable switch; clicking it shows the full error; the Composition/Layer viewer shows the expression error banner (transform-keyframes-expressions.md, Expression errors and fallback value).
+  - Property context menu Expression items: Copy Expression Only (仅复制表达式), Reveal Expression Errors (显示表达式错误) (layer context), Convert Expression to Keyframes (Animation > Keyframe Assistant). E E (twice quickly) reveals all properties with expressions.
+- **Priority:** P0
+- **Owner:** bae-ui-motion (+ bae-anim)
+- **Notes:** Expression semantics: transform-keyframes-expressions.md [ani-b]. Implementation hint: use a lightweight embedded code editor widget (egui-based) with incremental JS tokenizer for highlighting; never re-evaluate the expression per keystroke—commit on exit.
+
+### AE-UI-074 · Timeline layer context menu (时间轴图层上下文菜单)
+
+- **What it does:** Right-click on a layer row/bar opens a menu with the most common Layer-menu commands.
+- **Exact semantics:**
+  - Approximate order (UNVERIFIED exact order and separators for AE 26): New ▸ (新建), Layer Settings… (图层设置), Open Layer (打开图层), Open Layer Source (打开图层源), Reveal in Explorer / Reveal in Finder (在资源管理器中显示 / 在 Finder 中显示), Mask ▸ (蒙版), Mask and Shape Path ▸ (蒙版和形状路径), Quality ▸ (品质), Switches ▸ (开关), Transform ▸ (变换), Time ▸ (时间), Frame Blending ▸ (帧混合), 3D Layer (3D 图层), Guide Layer (参考图层), Environment Layer (环境图层（译名待核）), Markers ▸ (标记), Blending Mode ▸ (混合模式), Layer Styles ▸ (图层样式), Effect ▸ (效果), Keyframe Assistant ▸ (关键帧辅助), Tracking? (UNVERIFIED), Pre-compose… (预合成), Camera ▸ (摄像机), Create ▸ (创建: Create Shapes from Text / Masks from Text / Shapes from Vector Layer / Keyframes from Data), Auto-trace… (自动追踪), Invert Selection (反向选择), Select Children (选择子项), Rename (重命名), Reveal Expression Errors (显示表达式错误).
+  - Right-clicking a non-selected layer first selects it (only it); right-clicking inside a multi-selection keeps the selection and the commands apply to all selected layers.
+  - Right-click on empty outline space: New ▸ layer submenu, Composition Settings…, Preview?, Switches/Columns? (UNVERIFIED).
+  - Right-click on a column header: Columns ▸ (AE-UI-009); Hide This (隐藏此项（译名待核）).
+- **Priority:** P0
+- **Owner:** bae-ui-motion (+ apps/bae)
+- **Notes:** Each entry invokes the same command as the main Layer menu (menus: ui-b). BAE decision: generate context menus from the same command registry as the main menu, filtered by applicability, so items never drift.
+
+### AE-UI-075 · Dragging items into the Timeline (将项目拖入时间轴)
+
+- **What it does:** Drag-and-drop from the Project panel (or the OS) into the Timeline creates layers at a chosen stacking position and time, or replaces a layer source.
+- **Exact semantics:**
+  - Drop on the **layer outline**: an insertion line between layer rows marks the stacking position; the new layer's In point = CTI, or comp start if Preferences > General > Create Layers at Composition Start Time is on (project-comp-layers.md, New layer placement and new-layer preferences) (UNVERIFIED which applies to drag).
+  - Drop in the **time graph**: the layer's In point = the time under the pointer (a vertical guide and Info panel time follow the drag; Shift snaps to CTI/markers/In-Out points).
+  - Multiple items dropped together become layers stacked in their selection order, all at the same time (sequence them later with Sequence Layers).
+  - **Alt-drag (Win) / Option-drag (Mac)** an item from the Project panel onto an existing layer row → Replace Layer Source (project-comp-layers.md, Replace layer source).
+  - Dropping a comp into itself or into a comp it contains is refused (cycle).
+  - Dropping files from the OS imports them first (project-comp-layers.md, Drag-and-drop import) then adds layers.
+- **Priority:** P0
+- **Owner:** bae-ui-motion (+ bae-motion)
+- **Notes:** Drop onto the Composition viewer: AE-UI-018. Implementation hint: show the insertion indicator and the would-be bar ghost during drag.
+
+### AE-UI-076 · Audio waveform and audio properties in the Timeline (时间轴中的音频波形)
+
+- **What it does:** Layers with audio expose Audio Levels and a Waveform display in the Timeline.
+- **Exact semantics:**
+  - Twirl Audio (音频) > Audio Levels (音频电平) (dB, keyframable) and Waveform (波形). L reveals Audio Levels; LL reveals the Waveform.
+  - The Waveform row draws the source audio amplitude envelope for each channel (stereo: two waveforms) over the layer's duration in the time graph; the row height is larger than a normal property row (UNVERIFIED); drawn post-Audio Levels? (UNVERIFIED: AE draws the source waveform, not affected by Audio Levels).
+  - Waveform drawing respects time stretch and time remap (shows audio as it plays in comp time).
+  - Graph Editor: Show Audio Waveforms option (AE-UI-078) overlays the waveform of selected layers behind the graphs.
+  - Waveform generation is asynchronous: rows show empty until analysis finishes (UNVERIFIED).
+- **Priority:** P1
+- **Owner:** bae-ui-motion (+ bae-media)
+- **Notes:** Audio semantics (levels, Stereo Mixer effect): effects.md (Audio effects). Implementation hint: precompute per-file min/max peak pyramids (e.g. 256-sample buckets, mipmapped) in bae-media and cache them on disk next to the media cache.
+
+## Graph Editor
+
+### AE-UI-077 · Graph Editor layout and mode switch (图表编辑器布局)
+
+- **What it does:** Replaces the layer-bar time graph of a Timeline panel with a 2D graph of property values or speeds over time; the layer outline on the left stays.
+- **Exact semantics:**
+  - Toggle: Graph Editor comp button in the Timeline (AE-UI-058) or Shift+F3. Per-Timeline-panel UI state, not undoable.
+  - Regions: time ruler, work area and navigator at the top (shared with layer bar mode); graph area; vertical value axis labels on the left edge of the graph (current graph type) and grey reference-graph labels on the right (when Show Reference Graph is on); button bar along the bottom (AE-UI-080).
+  - Which properties are drawn: Show Properties menu (AE-UI-078). Each property is drawn with one curve per dimension; curves of multi-dimensional properties use red / green / blue for X / Y / Z (colour components in their channel colour); when several properties are shown, each property's curve colour matches the colour of its value hot text in the layer outline (the outline recolours values while in Graph Editor mode).
+  - **Graph Editor Set switch (图表编辑器集)**: a small graph icon next to the stopwatch on animated (keyframes or expression) properties; when on, the property is in the "Graph Editor Set" (persisted per property, UNVERIFIED persistence).
+  - Expressions: the post-expression curve is drawn (read-only, distinct colour/lighter) when the property's Show Post-Expression Graph switch is on (AE-UI-073).
+  - The CTI line and work area shading are drawn across the graph; layer In/Out braces, layer markers and audio waveforms per AE-UI-079 options.
+  - Hover tooltips (Show Graph Tool Tips): over a keyframe: layer name, property name, time and value; over a segment: same at the hovered time.
+- **Priority:** P1
+- **Owner:** bae-ui-motion (+ bae-anim)
+- **Notes:** Graph semantics (value/speed definitions, editing math): transform-keyframes-expressions.md, Graph Editor graph types / Value graph editing semantics / Speed graph editing semantics. Implementation hint: sample curves adaptively in screen space (≥ 1 sample per pixel column) from bae-anim's analytic `value(t)`/`speed(t)`; draw as GPU polylines.
+
+### AE-UI-078 · Show Properties menu (选择图表编辑器中显示的属性)
+
+- **What it does:** Chooses which properties appear in the Graph Editor.
+- **Exact semantics:**
+  | Option (中文) | Default | Behaviour |
+  |---|---|---|
+  | Show Selected Properties (显示选择的属性) | on | properties selected in the outline |
+  | Show Animated Properties (显示动画属性) | on | all animated properties of the selected layers |
+  | Show Graph Editor Set (显示图表编辑器集) | off (UNVERIFIED defaults) | properties whose Graph Editor Set switch is on, regardless of selection |
+  - Options are independent check items; the union of the enabled sets is shown. With nothing qualifying, the graph area is empty.
+- **Priority:** P1
+- **Owner:** bae-ui-motion
+- **Notes:** —
+
+### AE-UI-079 · Graph Type and Options menu (选择图表类型和选项)
+
+- **What it does:** Selects value vs speed graphs and toggles overlays and editing options.
+- **Exact semantics:** Menu items in AE order (first three are a radio group):
+  | Item (中文) | Default | Behaviour |
+  |---|---|---|
+  | Auto-Select Graph Type (自动选择图表类型) | selected | speed graph for spatial properties, value graph for others |
+  | Edit Value Graph (编辑值图表) | — | value graph for all |
+  | Edit Speed Graph (编辑速度图表) | — | speed graph for all |
+  | Show Reference Graph (显示参考图表) | on (UNVERIFIED) | other graph type drawn in the background, read-only, with grey value labels on the right |
+  | Show Audio Waveforms (显示音频波形) | off (UNVERIFIED) | waveform of each layer that has a property in the Graph Editor |
+  | Show Layer In/Out Points (显示图层的入点/出点) | on (UNVERIFIED) | In and Out points of those layers drawn as curly braces `{` `}` |
+  | Show Layer Markers (显示图层标记) | on (UNVERIFIED) | layer markers drawn as small triangles |
+  | Show Graph Tool Tips (显示图表工具技巧) | on | hover tooltips |
+  | Show Expression Editor (显示表达式编辑器) | off (UNVERIFIED) | shows the expression field of the focused property at the bottom of the Graph Editor |
+  | Allow Keyframes Between Frames (允许帧之间的关键帧) | off | sub-frame key times (transform-keyframes-expressions.md, Allow Keyframes Between Frames) |
+- **Priority:** P1
+- **Owner:** bae-ui-motion
+- **Notes:** These are user preferences persisted across sessions (UNVERIFIED: stored in the preferences file, not the project).
+
+### AE-UI-080 · Graph Editor button bar (图表编辑器底部按钮)
+
+- **What it does:** The row of buttons at the bottom of the Graph Editor.
+- **Exact semantics:** Left to right:
+  | Button (中文) | Type | Action |
+  |---|---|---|
+  | Show Properties (选择图表编辑器中显示的属性) | menu | AE-UI-078 |
+  | Graph Type and Options (选择图表类型和选项) | menu | AE-UI-079 |
+  | Show Transform Box When Multiple Keys Are Selected (当多个关键帧被选中时显示变换框（译名待核）) | toggle, default on | AE-UI-082 |
+  | Snap (对齐) | toggle | snapping of dragged keys (AE-UI-081) |
+  | Auto-Zoom Graph Height (自动缩放图表高度) | toggle, default on (UNVERIFIED) | vertical scale continuously fits the visible curves; disables manual vertical pan/zoom |
+  | Fit Selection to View (使选择适于查看) | button | fits time and value scale to the selected keys |
+  | Fit All Graphs to View (使所有图表适于查看) | button | fits all shown graphs |
+  | Separate Dimensions (单独尺寸) | toggle | Position only (transform-keyframes-expressions.md, Separate Dimensions of Position) |
+  | Edit Selected Keyframes (编辑选定的关键帧（译名待核）) | menu | same as the keyframe context menu (AE-UI-072) |
+  | Convert Selected Keyframes to Hold (将选定的关键帧转换为定格) | button | in+out → Hold |
+  | Convert Selected Keyframes to Linear (将选定的关键帧转换为线性) | button | in+out → Linear |
+  | Convert Selected Keyframes to Auto Bezier (将选定的关键帧转换为自动贝塞尔曲线) | button | in+out → Auto Bezier |
+  | Easy Ease (缓动) | button | F9 |
+  | Easy Ease In (缓入) | button | Shift+F9 |
+  | Easy Ease Out (缓出) | button | Ctrl+Shift+F9 / Cmd+Shift+F9 |
+  - Buttons that need a key selection are disabled when none is selected.
+- **Priority:** P1
+- **Owner:** bae-ui-motion (+ bae-motion)
+- **Notes:** Semantics of conversions and eases: transform-keyframes-expressions.md, Interpolation toggles by click and Graph Editor buttons; Easy Ease. zh-CN strings marked are tooltip texts (UNVERIFIED exact wording).
+
+### AE-UI-081 · Keyframe, handle and curve interaction in the Graph Editor (在图表编辑器中编辑关键帧和手柄)
+
+- **What it does:** Direct manipulation of keys, Bezier direction handles and segments in the graph.
+- **Exact semantics:**
+  - Keyframe drawing: small squares on the curve. Selected = solid yellow; unselected = the curve colour; semi-selected (another key of the same property is selected) = hollow yellow square. Direction handles are drawn for selected keys with Bezier sides: a line from the key to a round handle end (UNVERIFIED colours).
+  | Gesture | Result |
+  |---|---|
+  | Click key / Shift-click / marquee | select / toggle / select inside rectangle |
+  | Alt/Option-click a segment between two keys | selects all keys of that property |
+  | Drag key | value graph: time + value; speed graph: time only; Shift (after start) constrains to horizontal or vertical (UNVERIFIED) |
+  | Drag key while Snap is on | snaps to key values, key times, CTI, In/Out points, markers, work area and comp start/end; an orange line shows the snap target; holding Ctrl/Cmd after the drag starts temporarily toggles snapping |
+  | Drag a direction handle | changes speed and influence (transform-keyframes-expressions.md, Value graph / Speed graph editing semantics) |
+  | Alt/Option-drag a handle | splits the in/out handles (key becomes Bezier with independent handles, continuity broken) (UNVERIFIED modifier) |
+  | Shift-drag a handle (speed graph) | moves the in and out handles of the key together (UNVERIFIED) |
+  | Drag a segment (value graph) | moves both adjacent handles together |
+  | Ctrl/Cmd-click a key | toggles interpolation (Linear ↔ Auto Bezier; Bezier → Linear) |
+  | Pen tool (G) click on a segment | adds a keyframe there; Pen click on a key deletes it? (UNVERIFIED) |
+  | Double-click a key | opens the value dialog (UNVERIFIED in Graph Editor) |
+  | Right-click a key | keyframe context menu (AE-UI-072) |
+  - Info panel while a key/segment is selected: property min and max values and the speed at the CTI.
+  - Pan/zoom: Hand tool drag (or Space/middle-button drag); wheel = vertical pan; Shift+wheel = horizontal pan; Alt/Option+wheel = horizontal zoom; Ctrl/Cmd+wheel = vertical zoom; Zoom tool click = zoom in, Alt/Option-click = zoom out; Zoom-tool Alt/Option-drag left/right = horizontal zoom out/in, up/down = vertical zoom in/out. Vertical pan/zoom is disabled while Auto-Zoom Graph Height is on.
+- **Priority:** P1
+- **Owner:** bae-ui-motion (+ bae-motion, bae-anim)
+- **Notes:** All edits go through bae-motion commands (`MoveKeys`, `SetTemporalEase`, `SetInterpolation`), one undo step per drag.
+
+### AE-UI-082 · Graph Editor transform box UI (图表编辑器变换框)
+
+- **What it does:** When ≥ 2 keys are selected and the Show Transform Box button is on, a free-transform box with 8 handles and a centre anchor point surrounds them.
+- **Exact semantics:**
+  - Box = bounding rectangle of the selected keys in (time, value-screen) space; 4 corner + 4 edge handles; anchor point at the box centre (movable).
+  - Cursor changes: inside = move; over handle = straight double arrow (scale); over anchor = Move Anchor Point cursor.
+  - Modifier gestures and their effects are specified in transform-keyframes-expressions.md, Graph Editor transform box (Shift ratio, Ctrl/Cmd about anchor, Alt/Opt single corner, Ctrl+Alt taper, Ctrl+Alt+Shift one side, negative scale reverses). In a speed graph the box moves/scales keys in time only.
+  - Not shown in layer bar mode (there Alt-drag scaling is used, AE-UI-072).
+- **Priority:** P2
+- **Owner:** bae-ui-motion (+ bae-motion)
+- **Notes:** —
+
+### AE-UI-083 · Graph Editor axes and units (图表编辑器坐标轴与单位)
+
+- **What it does:** Labels the vertical axis so values and speeds can be read.
+- **Exact semantics:**
+  - Horizontal axis: comp time (shared time ruler, Time Display Style).
+  - Value graph vertical labels: the property's own units — pixels for Position/Anchor Point, % for Scale/Opacity, degrees for Rotation, the property's display unit for effect sliders; colour channels 0–1 or 0–255 per the project's colour display (UNVERIFIED).
+  - Speed graph vertical labels: units per second — px/sec, %/sec, °/sec (spatial speed always px/sec in comp space).
+  - Reference graph labels: grey numbers on the right edge.
+  - Gridlines at "nice" intervals (1-2-5 series) adapting to zoom (UNVERIFIED).
+- **Priority:** P1
+- **Owner:** bae-ui-motion
+- **Notes:** Units definitions: transform-keyframes-expressions.md, Speed and influence units and ranges.
+
+## Effect Controls and Effects & Presets
+
+### AE-UI-084 · Effect Controls panel layout (效果控件面板)
+
+- **What it does:** A viewer listing the effects of one layer, top to bottom in render order, each with its parameters as widgets; the most convenient place to edit effect parameters.
+- **Exact semantics:**
+  - Viewer panel (AE-UI-007): tab title `效果控件 <layer name>`; the viewer menu in the tab lists layers whose Effect Controls were opened; lock icon locks it to the current layer. F3 opens/closes it for the selected layer (also Ctrl+Shift+T / Cmd+Shift+T, Layer > Effect Controls). Selecting a different layer retargets an unlocked panel. Applying an effect opens/brings it to front.
+  - Header line: `<comp name> • <layer name>` (UNVERIFIED separator).
+  - Effect header row (per effect), left to right: effect visibility switch (eyeball since AE 26 visual refresh, previously "fx") (AE-UI-087); twirl; effect name (renameable: select + Enter); label swatch (AE 26.x, AE-UI-087); Reset Effect (重置) (text link, an icon since the visual refresh); Animation Presets popup (when enabled in the panel menu, AE-UI-088); About… (关于) (opens the plug-in's about text); informational icons at the right edge (8-bpc-only warning in 16/32-bpc projects, not GPU-accelerated, missing, …) with tooltips.
+  - Parameter rows: stopwatch, parameter name, value widget (AE-UI-085); groups (topics) twirl; the Compositing Options group at the end (effects.md, Compositing Options).
+  - Keyboard: ↑/↓ select previous/next effect; →/← expand/collapse selected effects; Ctrl+` / Cmd+` expands/collapses all property groups of the selected effects; Ctrl/Cmd-click a twirl expands/collapses recursively; Delete removes selected effects; Ctrl/Cmd+D duplicates.
+  - Panel menu: Show Animation Presets (显示动画预设), Show Effect Label Swatch (显示效果标签色板), Use Label Color for Effect Background (使用标签颜色作为效果背景), Collapse All / Expand All? (UNVERIFIED), plus docking items.
+  - Empty state: shows nothing when the layer has no effects (UNVERIFIED: no placeholder text).
+- **Priority:** P0
+- **Owner:** bae-ui-motion
+- **Notes:** Effect framework semantics: effects.md, Effect framework (AE-FX-001…026). Effect parameters also appear in the Timeline under Effects (E reveals).
+
+### AE-UI-085 · Effect parameter widgets (效果参数控件)
+
+- **What it does:** Each effect parameter type has a specific editing widget in Effect Controls (a compact hot-text form is used in the Timeline).
+- **Exact semantics:**
+  | Param type (effects.md item) | Widget in Effect Controls | Interactions |
+  |---|---|---|
+  | Slider / float slider (AE-FX-008) | hot-text value + twirl revealing a horizontal slider with min/max labels | scrub hot text (Ctrl/Cmd fine, Shift coarse); drag slider within slider range; type any value within valid range; right-click > Edit Value… (AE-UI-086) |
+  | Angle (AE-FX-008) | hot text `Nx +D°` + twirl revealing a circular dial | drag on dial sets direction (Shift = 45° steps, UNVERIFIED); scrubbing the hot text crosses revolutions |
+  | Checkbox (AE-FX-009) | checkbox with label text | click toggles (hold-only animation) |
+  | Popup (AE-FX-009) | dropdown | choose item; keyframes are Hold |
+  | Color (AE-FX-010) | swatch + eyedropper | click swatch → colour picker dialog (系统 / Adobe Color Picker per Preferences); eyedropper: click then click a pixel in any viewer (Ctrl/Cmd-click samples a 5×5 average, UNVERIFIED; Alt samples from the original? UNVERIFIED); samples the displayed (post-colour-management?) pixel — see effects.md, Color parameter |
+  | Point / 3D Point (AE-FX-011) | `x, y(, z)` hot text + crosshair (effect point) button | click the crosshair button, then click in the Composition/Layer viewer to set the point; effect control point shown in viewer as a ⊕ handle draggable directly (when the effect is selected) |
+  | Layer (AE-FX-012) | layer popup ("None" + all comp layers by `N. name`) + second popup Source / Masks / Effects | chooses the layer and whether its source, source+masks or source+masks+effects is used |
+  | Button / group / no-value (AE-FX-013) | button, group header, custom UI | — |
+  | Custom UI (e.g. Levels histogram, Curves) | effect-drawn area | effect-specific |
+  - Every animatable parameter has a stopwatch (same behaviour as AE-UI-070); Alt/Opt-click adds an expression (the expression field then appears only in the Timeline).
+  - Right-click a parameter: Reset, Edit Value…, Add Expression? / Copy Expression Only, Reveal in Timeline (在时间轴中显示（译名待核）) (UNVERIFIED list).
+  - Value text uses the parameter's display unit (%, °, px, s); pixel-valued parameters show values in layer pixels regardless of preview resolution.
+- **Priority:** P0
+- **Owner:** bae-ui-motion (+ bae-effects)
+- **Notes:** Implementation hint: widgets are generated from bae-effects parameter descriptors (type, ranges, flags, UI hints) so BAE and third-party effects share one renderer; custom UIs via a small widget trait.
+
+### AE-UI-086 · Edit Value dialog for effect slider ranges (编辑值)
+
+- **What it does:** Lets the user change a slider parameter's slider range for this instance (and type an exact value).
+- **Exact semantics:**
+  | Field (中文) | Type | Default | Notes |
+  |---|---|---|---|
+  | Value (值) | number | current | any value inside valid range |
+  | Slider Range (滑块范围) min / max | number | effect-defined slider min/max | each limited to the valid range |
+  - Units popup for some parameters (e.g. pixels / percent of source / percent of composition for size values) (UNVERIFIED).
+  - OK commits as one undo step; the new slider range is stored per instance (effects.md, Numeric parameters); keyframes are unaffected.
+- **Priority:** P1
+- **Owner:** bae-ui-motion (+ bae-model)
+- **Notes:** Transform-property Edit Value dialogs: transform-keyframes-expressions.md, Edit Value dialogs.
+
+### AE-UI-087 · Effect reorder, enable, reset, labels and Compositing Options UI (效果排序、启用、重置、标签和合成选项)
+
+- **What it does:** Effect-level controls in Effect Controls and in the Timeline Effects group.
+- **Exact semantics:**
+  - **Reorder**: drag an effect header up/down; an insertion line shows the target; drop moves the effect in the stack (render order). Several selected effects move together keeping order. Same gesture works in the Timeline Effects group.
+  - **Enable switch (fx / eyeball)** (效果开关): per-effect on/off (effects.md, Effect switch and layer Effects switch). Alt/Option-click? (UNVERIFIED: no solo-effect modifier in AE).
+  - **Reset Effect (重置效果)**: resets all parameters to defaults (if animated, sets keys at the CTI) (effects.md, Reset effect).
+  - **Effect colour labels** (latest AE, 26.x, UNVERIFIED version): grey swatch = no label; click → label picker (16 label colours + None); with Use Label Color for Effect Background on, the effect row is tinted with the label colour.
+  - **Compositing Options (合成选项)**: last group of every pixel effect: Effect Opacity slider and `+` / `−` buttons that add/remove Mask Reference popups (effects.md, Compositing Options: Effect Opacity / Mask References).
+  - Missing effects show "Missing: <name>" with a warning icon (effects.md, Missing effects).
+- **Priority:** P0
+- **Owner:** bae-ui-motion (+ bae-model)
+- **Notes:** —
+
+### AE-UI-088 · Animation Presets menu in Effect Controls (效果控件中的动画预设菜单)
+
+- **What it does:** Per-effect popup that applies saved presets of that same effect, or saves the current settings.
+- **Exact semantics:**
+  - Visible only when panel menu > Show Animation Presets is on (default on, UNVERIFIED).
+  - Items: None (无), Save Selection as Animation Preset… (将选择项另存为动画预设（译名待核）), separator, then every .ffx found in the Presets folders that contains only this effect (UNVERIFIED filter), shown by preset name.
+  - Choosing a preset sets this effect instance's parameters (and keyframes, offset to the CTI) from the preset instead of adding a new effect.
+- **Priority:** P2
+- **Owner:** bae-ui-motion (+ bae-motion)
+- **Notes:** Preset file semantics: effects.md, Animation Presets (.ffx).
+
+### AE-UI-089 · Effects & Presets panel (效果和预设面板)
+
+- **What it does:** Browsable, searchable tree of all effects (by category) and animation presets.
+- **Exact semantics:**
+  - Layout: search field at top (AE-UI-010); new-preset button? (UNVERIFIED); tree below: `* Animation Presets` (动画预设) root folder (preset subfolders) followed by effect categories (3D Channel, Audio, Blur & Sharpen, Channel, …, Utility; full list effects.md, Effect categories and the Effect menu), each expandable.
+  - Item icons encode type and bit depth: an effect icon with a number 8 / 16 / 32 for the maximum supported bpc; preset icon; GPU-accelerated badge (UNVERIFIED icon set; BAE draws its own).
+  - Search: case-insensitive substring ("contains") match against effect and preset names at any position (e.g. "blur" finds Gaussian Blur, Fast Box Blur, Camera Lens Blur…); results keep their category folders, all expanded; empty folders hidden; clearing restores the previous expansion (UNVERIFIED). Spaces: words must all match? (UNVERIFIED: AE treats the whole string as one substring).
+  - Panel menu (zh-CN from Adobe help): Save Animation Preset… (另存为动画预设), Browse Presets… (浏览预设) (opens Bridge; BAE: open a preset browser or the OS folder), Show Effects for All Color Depths (显示所有颜色深度的效果) (off → only effects supporting the project bit depth are listed), Show GPU Capable Effects Only (仅显示 GPU 支持的效果), Show Effects (显示效果), Show Animation Presets (显示动画预设), Manage Effects… (管理效果) (enable/disable individual third-party effects), Categories (类别) / Explorer Folders – Finder Folders (资源管理器文件夹 / Finder 文件夹) / Alphabetical (按字母顺序) (radio), Reveal in Explorer / Finder, Refresh List (刷新列表).
+  - Presets load only while the panel is shown (AE behaviour); folders whose names are wrapped in parentheses are ignored.
+- **Priority:** P0
+- **Owner:** bae-ui-motion (+ bae-effects)
+- **Notes:** Effect bit-depth and GPU flags: effects.md, Effect bit-depth support / GPU acceleration flag. BAE decision: all BAE built-ins are 32-bpc GPU effects, so the depth/GPU filters mainly matter for plug-ins.
+
+### AE-UI-090 · Applying effects and presets from the panel (从面板应用效果和预设)
+
+- **What it does:** Double-click or drag-and-drop applies effects/presets to layers.
+- **Exact semantics:**
+  | Gesture | Result |
+  |---|---|
+  | Double-click an effect with layers selected | applies it to every selected layer (appended at the bottom of each stack, or below the selected effect in Effect Controls, UNVERIFIED) |
+  | Double-click an effect with no layer selected | nothing |
+  | Double-click a preset with no layer selected | creates a new layer (e.g. text/shape/solid as the preset requires) and applies the preset |
+  | Drag effect/preset onto a layer in the Timeline, Composition viewer (Info panel shows the target layer name) or Effect Controls | applies to that layer only; in Effect Controls the drop position sets the stack position |
+  | Drag onto empty Composition viewer / empty Timeline area | preset: creates a new layer; effect: nothing (UNVERIFIED) |
+  - Presets are applied at the CTI (keyframes offset so the preset's first key lands at the CTI).
+  - Most recent effect: Ctrl+Alt+Shift+E / Cmd+Opt+Shift+E; most recent preset: Ctrl+Alt+Shift+F / Cmd+Opt+Shift+F; Animation > Recent Animation Presets (最近的动画预设).
+  - Each application is one undo step ("Add Effect"/"Apply Preset").
+- **Priority:** P0
+- **Owner:** bae-ui-motion (+ bae-motion)
+- **Notes:** Apply semantics, paste-replace behaviour for single instances: effects.md, Apply, duplicate, copy/paste and delete effects.
