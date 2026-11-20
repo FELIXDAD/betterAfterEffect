@@ -56,6 +56,7 @@ bae-app = { path = "crates/bae-app" }
 bae-platform = { path = "crates/bae-platform" }
 bae-gpu = { path = "crates/bae-gpu" }
 bae-model = { path = "crates/bae-model" }
+bae-anim = { path = "crates/bae-anim" }
 bae-media = { path = "crates/bae-media" }
 bae-sync = { path = "crates/bae-sync" }
 
