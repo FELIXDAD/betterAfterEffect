@@ -41,13 +41,17 @@
 
 ## 进度
 
-- [ ] 外壳与停靠（进行中：停靠、标题栏、工作区切换栏已完成；原生菜单栏、快捷键未做）
+- [x] 外壳与停靠（bae-ui 已接进 `apps/bae`：自绘标题栏、工具栏、工作区栏、停靠树、状态栏；原生菜单项都是命令 id）
 - [x] 主题与图标（颜色与尺寸取自本机 AE 2026；图标用 Painter 自绘，不打包图片）
 - [x] 通用控件（第一批：热文本、秒表、关键帧导航、展开箭头、勾选框、下拉框、搜索框、开关格、时间码）
-- [ ] 快捷键系统
-- [ ] 工作区预设与保存
-- [ ] 历史面板与 Agent 面板
+- [x] `Panel` trait 与面板 / 工作区 / 键位表注册（PR #23，`docs/spec/ui-shell.md`）
+- [x] 快捷键系统（按工作区切换键位表；AE 全局键位；面板作用域；自定义与冲突检查；快捷键编辑器）
+- [x] 工作区预设（动效、审阅、Agent）与保存、重置（AE 语义：当前布局自动记住，"保存"后"重置"回到保存的布局）
+- [x] 历史面板（命令名 + 作者，含协作者和 Agent；数据来自 Stage 事件）
+- [ ] Agent 活动记录、提案面板（等 17 的 PR #20 合并后接 `AuditLog` 和 `proposal::proposals`）
+- [ ] 首次启动选择岗位、编辑工作区对话框、界面亮度设置
 - [ ] 输入法验证报告
+- [ ] 原生多窗口（浮动面板目前画在主窗口内）
 
 ### 进展记录
 
@@ -63,7 +67,14 @@
   - 示例：`cargo run -p bae-ui --example shell`（`--zh` 中文，`--reset` 恢复默认布局）。
   - 与 AE 截图逐像素对比：五个 frame 的位置误差 ≤1pt（有单元测试）；标题、标签文字、×、色块、锁、☰、下划线的位置误差 ≤1.5pt。AE 用 Adobe Clean 字体，我们用系统 SF，11.5pt 时文字宽度与 AE 相差约 1%。
   - 测试：拆分条拖动、标签拖到 frame 边缘重新停靠都用真实的 egui 指针事件在无窗口环境下模拟。
-- 待做：原生菜单栏（muda）、快捷键系统、`Panel` 注册与工作区预设、历史面板、Agent 面板、输入法验证、界面亮度设置。
+- 待做（当时）：原生菜单栏（muda）、快捷键系统、`Panel` 注册与工作区预设、历史面板、Agent 面板、输入法验证、界面亮度设置。
+
+- 2026-11-20（接手）：
+  - PR #23 `[interface]`：`Panel` / `PanelKind` / `PanelContext`（只读 Stage + `invoke(命令 id)`）、`WorkspacePreset`、`Keymap` / `Binding` / `Chord` / `KeymapOverrides`、`ActionInfo`，都注册到 bae-app 的 `Registry`；`UiModule` 给布局里没人注册的面板补占位。说明见 `docs/spec/ui-shell.md`。
+  - `bae_ui::Workbench`：标题栏 + 工具栏 + 工作区栏 + 停靠区 + 状态栏；面板实例按需创建，关闭或切走时保存视图状态；命令 id 解析顺序：焦点面板 → 外壳动作 → `bae-model` 命令。
+  - `apps/bae` 改用 Workbench（去掉 egui_dock 占位）：`Document`（Project + CommandRegistry，撤销/重做走 `Stage::undo/redo`）；菜单项 id = 命令 id；根视口命令走 `egui_winit::process_viewport_commands`；窗口用 `titlebar::viewport_builder` 创建；工作区状态存 `<state>/workspaces.json`。`--smoke-test` 和 `--headless --smoke-test` 都通过，headless 冒烟测试会轮流切换三个工作区；`BAE_SMOKE_SCREENSHOT=<path>` 可以把最后一帧存成 BMP。
+  - 快捷键：键位表随工作区切换；文本框有焦点时不触发打字键和文本编辑键；Cmd+C/X/V 在非文本状态下变成 `edit.copy/cut/paste`；快捷键编辑器（Cmd+Alt+'）可以录制、删除、全部重置，冲突时先确认再替换。
+  - 历史面板：`bae_ui::history::HistoryLog`（应用资源）订阅 Stage 事件，显示命令名、作者（你 / 协作者 / Agent xxx）、撤销/重做；向 02 提了 `StageEvent.label` 和列出撤销栈的请求。
 
 ## 请求（其他工作流在这里留言）
 
