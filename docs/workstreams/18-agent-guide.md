@@ -46,7 +46,7 @@
 
 ## 进度
 
-第一版：PR #7（已合并，2026-11-20）。第二轮：按 17 的 `bae mcp`（#20、#29）和 12 的 `bae-motion`（#41）核对工具名和参数格式。
+第一版：PR #7（已合并）。第二轮：PR #50（已合并），按 17 的 `bae mcp`（#20、#29）和 12 的 `bae-motion`（#41）核对工具名。第三轮：按 17 的 #55（模块命令和打包命令接入 `bae mcp`，时间参数接受帧号和时码）统一更新（2026-11-20）。
 
 - [x] 指南大纲：`docs/agent-guide/README.md` 及 01–08 章
 - [x] 动画规范：`03-animation.md`（时长表、缓动预设与 cubic-bezier 换算、节奏、文字、Logo、转场、镜头运动、卡点）
@@ -56,15 +56,16 @@
 - [x] MCP instructions 精简版：`docs/agent-guide/mcp-instructions/`（英文 / 中文，各不超过 3,000 字符）
 - [x] 评测集：`docs/agent-guide/evals/`，15 个任务（TOML），检查项词汇草案和评审提示
 - [x] 按实际工具名核对（`tools.md`、正文、配方、Skill、MCP instructions、评测检查项）：工具名改用 `bae mcp` 的下划线形式；事务改为 `command_batch`；时间参数写明 flicks / 帧号；值和关键帧按 02 的 JSON；标题出场配方改成可以照抄的调用序列；`en.md` / `zh.md` 通过 17 的 `guide_instructions` 测试
-- [ ] 17 在 MCP 层统一接受帧号后，更新 `tools.md` 第 7 节、配方和 Skill 里的时间参数
-- [ ] 12 的领域命令、21 的打包命令接入 `bae mcp` 后，把 `tools.md` 里的"已实现未接入"改成"可用"，`en.md` 可以提到 `key.ease`
+- [x] 时间参数按 #55 写成帧号字符串 `"12f"`（整数仍是 flicks）：`tools.md` 第 7 节、配方、Skill、instructions
+- [x] 12 的领域命令、21 的打包命令标为可用；instructions 提到 `key_ease`
 - [ ] `attribute_evaluate`、`proposal_describe`、`comment_add`、`marker_add` 等提供后，去掉正文里的替代做法
 - [ ] 评测脚本（依赖 17 的审计日志和工具；可以由 17 或 18 实现）
 - [ ] 动效设计师审阅动画规范（验收条件之一）
 
 ### 受阻 / 待决定
 
-- 时间参数目前是 flicks，17 在考虑 MCP 层换算帧号；`bae mcp` 还没注册 12、21 的命令（见 `tools.md` 第 4、9 节）。
+- 关键帧时间按图层帧写（和 `prim_get` 一致）；要严格按"相对合成开始的帧号"写，需要 02 / 12 在命令 Schema 里标明哪些参数是关键帧时间（17 在 #55 里说明了）。
+- 17 的 instructions 测试目录不含模块命令，所以 `en.md` 里的 `key_ease` 用下划线写；建议 17 让测试也收集模块命令。
 - 分镜格字段名（以及是否增加"转场""声音"两个字段）等 13 定稿。
 
 ### 已决定

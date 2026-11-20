@@ -28,10 +28,10 @@
 示例里的 JSON 只写关键参数，`"...": "..."` 表示省略。工具名、参数格式以 [tools.md](../tools.md) 为准：
 
 - 一个事务 = 一次 `command_batch`；
-- 命令的时间参数是 **flicks**（`帧号 × 每帧 flicks`，30 fps 每帧 23,520,000），渲染工具用**帧号**；
+- 时间参数写帧号字符串 `"12f"`（服务器按合成帧速率换算；**整数是 flicks**），渲染工具的帧号写整数；图层从第 0 帧开始时，关键帧的帧号就是合成帧号；
 - 值带类型标签：`{"type": "vec3", "value": [960, 510, 0]}`；图层的位置、缩放是 vec3；
 - 缓动：`key_set` 放线性关键帧，再用 `key_ease`（`ease_out` 用在起点、`ease_in` 用在终点，`influence` 按预设）。
 
-配方的时间表为了好读写成帧号和 2D 坐标，调用时按上面的规则换算。完整的调用示例见 [标题出场](title-in.md) 第 4 节。
+配方的时间表为了好读写成帧号和 2D 坐标，调用时按上面的规则写。完整的调用示例见 [标题出场](title-in.md) 第 4 节。
 
-**还没有的工具**（见 tools.md）：`marker_add`、`layer_precompose`、`text_add_animator`、`attribute_evaluate`、`proposal_describe`、`comment_add`，以及 13、15 的分镜和导出命令。配方里用到它们的步骤先跳过或用替代做法，并在汇报里写明。12 的 `comp_create`、`layer_create`、`key_ease` 等已实现，但接入 `bae mcp` 之前要用 `prim_create` / `attr_set` / `key_set` 代替。
+**还没有的工具**（见 tools.md）：`marker_add`、`layer_precompose`、`text_add_animator`、`attribute_evaluate`、`proposal_describe`、`comment_add`，以及 13、15 的分镜和导出命令。配方里用到它们的步骤先跳过或用替代做法，并在汇报里写明。
