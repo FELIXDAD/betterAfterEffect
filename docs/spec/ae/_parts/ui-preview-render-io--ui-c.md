@@ -144,7 +144,7 @@
 - **Exact semantics:**
   - **Render**: processes every item with status Queued, top to bottom; items added as Queued during a pause are not picked up (UNVERIFIED). Items with other statuses are skipped.
   - **Pause** → button becomes **Continue**; while paused AE cannot be used for anything else (settings cannot change). AE also auto-pauses when the output disk runs out of space; freeing space and pressing Continue resumes.
-  - **Stop** (click): current item → User Stopped; a **new item is appended directly below it with status Unqueued**, an **incremented output file name**, and Time Span starting at the last successfully rendered frame (so the new item's first frame = last good frame of the stopped item) and the same end. Remaining queued items are not rendered.
+  - **Stop** (click): current item → User Stopped; a **new item with status Unqueued** is added to the queue (UNVERIFIED: inserted directly below the stopped item), with an **incremented output file name**, and Time Span starting at the last successfully rendered frame (so the new item's first frame = last good frame of the stopped item) and the same end. Remaining queued items are not rendered.
   - **Alt+click Stop** (Windows) / **Option+click Stop** (macOS): current item → User Stopped; a new item is added with status **Queued**, the **same output file name** and the **same (full) duration** as the original (start over).
   - End of batch: success chime; a different sound on failure (AE-UI-610).
 - **Priority:** P0 (Render, Stop) / P1 (Pause, resume-from-stop items)
@@ -336,7 +336,7 @@
 - **What it does:** Sets the temporal sampling rate of the render without changing the comp.
 - **Exact semantics:**
   - `"Frame Rate"`: Use comp's frame rate (使用合成的帧速率) 0 (default, shows the comp fps in parentheses) / Use this frame rate (使用此帧速率) 1 with a numeric field (`"Use this frame rate"`, fps, UNVERIFIED range 1..999, fractional allowed e.g. 29.97).
-  - The rendered movie frame rate = this render frame rate (output modules encode at this rate; formats with fixed rates show the "Settings mismatch" warning, AE-UI-638).
+  - This is the **sampling** rate; the comp's own frame rate is unchanged. Adobe's help adds that the frame rate of the final encoded movie is determined by the output module settings: output modules normally encode at this render rate; formats with fixed rates show the "Settings mismatch" warning (AE-UI-638). UNVERIFIED: which current OM formats expose their own frame-rate field.
   - Sampling: `t_k = start + k / fps_render`. Rendering a 24 fps comp at 12 fps samples every second comp frame; rendering at 48 fps samples between comp frames (layers with keyframes interpolate; footage holds or frame-blends).
   - Motion blur shutter interval uses the comp's frame duration and shutter angle, not the render rate (UNVERIFIED).
 - **Priority:** P1
