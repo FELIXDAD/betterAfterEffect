@@ -1,6 +1,6 @@
 # 数据模型（bae-model）
 
-> 状态：PR A（基础类型、存储、命令、撤销、事件）+ PR B（引用、下推/合并）。工程文件、Prim schema 在后续 PR 补充，见文末"还没做"。
+> 状态：PR A（基础类型、存储、命令、撤销、事件）+ PR B（引用、下推/合并）+ PR C（工程文件，见 `project-format.md`）。Prim schema 在 PR D 补充，见文末"还没做"。
 > 代码：`crates/bae-model`。概念来源：`docs/ARCHITECTURE.md` 第 4 节。
 
 ## 1. 概念
@@ -124,6 +124,7 @@ Op（JSON 里 `"op"` 字段区分）：`create_prim`、`delete_prim`、`restore_
 | `sublayer.create` | 新建工程层（默认放在最强） |
 | `sublayer.set_edit_target` | 切换 Edit Target |
 | `opinion.move` | 把某个 Prim 的覆盖（一个属性或全部，含类型、引用、def）从一层移到另一层，即"下推"；`keep: true` 时为复制。源层里变空的 `over` 及其空祖先会被删掉 |
+| `asset.set_file` | 设置或重新链接素材文件（见 `project-format.md` 第 5 节） |
 | `sublayer.merge` | 把一层的全部意见合并进另一层（接受 Agent 的提案层、把岗位层合进 root），一个撤销单元 |
 
 ## 7. 事件
@@ -154,5 +155,4 @@ Op（JSON 里 `"op"` 字段区分）：`create_prim`、`delete_prim`、`restore_
 
 ## 10. 还没做（后续 PR）
 
-- **C：** 工程文件目录包（`project.json` 存层叠顺序）、`.baez`、`bae export-json`、格式版本与迁移；素材引用（相对路径、原始绝对路径、指纹、路径映射、缺失状态）。
 - **D：** Prim schema 初版（各类型的字段和默认值、显示名属性）、效果参数模型（AE 参数类型超集、稳定数字 ID、参数标志、状态数据槽）、插件数据与缺失插件占位。

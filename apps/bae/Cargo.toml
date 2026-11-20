@@ -15,8 +15,10 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+clap.workspace = true
 bae-app.workspace = true
 bae-gpu.workspace = true
+bae-model.workspace = true
 bae-platform.workspace = true
 egui.workspace = true
 egui-wgpu.workspace = true
@@ -24,6 +26,7 @@ egui-winit.workspace = true
 egui_dock.workspace = true
 muda.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 winit.workspace = true
 

@@ -12,6 +12,7 @@
 
 mod headless;
 mod i18n;
+mod model_cli;
 mod shell;
 mod startup;
 mod ui;
@@ -25,6 +26,7 @@ fn main() -> ExitCode {
     builder
         .add_module(bae_platform::PlatformModule)
         .add_module(bae_gpu::GpuModule)
+        .add_module(model_cli::ModelCliModule)
         .add_module(shell::ShellModule);
     // Feature modules from other workstreams are added here, e.g.
     // `.add_module(bae_render::RenderModule)`.

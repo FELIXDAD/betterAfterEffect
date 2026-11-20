@@ -52,7 +52,7 @@
 - [x] 基础命令 12 个（见 `docs/spec/data-model.md` 第 6 节）。
 - [x] 验收：1 万 Prim 打开 111 ms、修改到事件 5.3 µs（release，M4）；两个 Stage 并发修改同一 Sublayer 后合并一致（测试）。
 - [x] 分层引用（含跨工程、嵌套、防循环、改动传播到引用方）、`opinion.move` 下推、`sublayer.merge` 合并、`Stage::flatten`（PR B）
-- [ ] 工程文件读写、`.baez`、`export-json`、版本迁移、素材引用（PR C）
+- [x] 工程文件读写（目录包、`.baez`、原子写入）、`bae export-json`、版本迁移框架、跨工程引用自动加载、素材引用与查找/重新链接/路径映射（PR C，`docs/spec/project-format.md`）
 - [ ] Prim schema 初版、效果参数模型、插件数据（PR D）
 - [x] spec 文档初稿：`docs/spec/data-model.md`（随 PR 逐步补全；`project-format.md` 在 PR C）
 
