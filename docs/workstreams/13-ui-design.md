@@ -51,3 +51,13 @@
 - [ ] 从 Ai 粘贴
 
 ## 请求（其他工作流在这里留言）
+
+- **18 agent/guide（2026-11-20）**：分镜规范（`docs/agent-guide/04-storyboard.md`）建议分镜格在已列字段（镜头号、时长、景别、台词、动作、镜头运动、备注）之外，再加"转场"（到下一镜头）和"声音"（音效、音乐提示）两个字段。字段名定稿后请告诉 18，指南和评测集会同步。
+
+### 14 ui/edit → 13（2026-11-20，Pr 剪辑规划）
+
+依据：`docs/spec/pr/`（Premiere Pro 基础功能清单）和 `docs/spec/pr/edit-model.md`（剪辑数据模型），PR #73。
+
+1. **动态分镜 → 序列**：#68 的 `board.make_animatic` 直接创建 `/sequences/<名>/V1/<片段>`，片段 `source` 指向 Panel。和 14 的模型基本一致，两点请调整：(a) 轨道 Prim 名不要带序号含义——#66 用 `video`、`video_1`…，V1/V2 由子节点顺序决定（插入轨道时不用改名，协同时不冲突）；(b) 时长、`start`、`source_in` 等属性名按 `docs/spec/pr/edit-model.md` 第 5.1 节。片段来源是 Panel 的情况已写进 edit-model.md（第 5.5 节，画面取 `query::panel_picture`）。#66 合并后，建议改为调用 `bae-edit` 的命令（`sequence.create`、`clip.overwrite`）生成，避免两边各写一套序列结构。
+2. **转场字段**：18 建议分镜格加"转场"，生成序列时可以直接映射成片段的 `transition_in`（`match_name` 用 07 注册的过渡 ID）。
+3. Shot 的计划时长（`duration`）已请 02 增加，分镜、动效、剪辑共用（PR-XCH-010）。

@@ -1,0 +1,293 @@
+# BAE (betterAfterEffect) Cargo workspace.
+#
+# This is a *virtual* workspace: there is no root package. Every crate lives in
+# `apps/*`, `crates/*`, `services/*`, `xtask` or `tools/*`, and new crates under
+# those globs are picked up automatically, so adding a crate never touches this file.
+# Only add an entry here when introducing a new `[workspace.dependencies]` pin.
+#
+# Version policy, compatibility matrix and the rationale for every pin:
+# docs/spec/dependencies.md. The most important invariant: wgpu, vello and
+# egui-wgpu must resolve to ONE wgpu, because the renderer, the UI and plugins
+# share a single `wgpu::Device` (`bae_gpu::GpuContext`). `tools/dep-probe`
+# enforces this at compile time.
+
+[workspace]
+resolver = "3"
+# Globs: cargo only expands a glob if it matches at least one entry, otherwise it
+# treats the pattern as a literal path and fails. Each glob directory therefore
+# keeps a tracked README.md (files are ignored by cargo, directories must contain
+# a Cargo.toml).
+members = ["apps/*", "crates/*", "services/*", "xtask", "tools/dep-probe"]
+default-members = ["apps/bae"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100"
+license = "Apache-2.0"
+repository = "https://github.com/FELIXDAD/betterAfterEffect"
+publish = false
+
+[workspace.lints.cargo]
+# The pin list is deliberately ahead of its users: later workstreams adopt the
+# pinned versions instead of picking their own.
+unused_workspace_dependencies = "allow"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unused_lifetimes = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+undocumented_unsafe_blocks = "warn"
+mem_forget = "warn"
+large_stack_arrays = "warn"
+rc_buffer = "warn"
+inefficient_to_string = "warn"
+needless_pass_by_ref_mut = "warn"
+
+[workspace.dependencies]
+# ---- internal crates (path deps; add one line per crate as it lands) ----
+bae-app = { path = "crates/bae-app" }
+bae-platform = { path = "crates/bae-platform" }
+bae-gpu = { path = "crates/bae-gpu" }
+bae-model = { path = "crates/bae-model" }
+bae-anim = { path = "crates/bae-anim" }
+bae-agent = { path = "crates/bae-agent" }
+bae-media = { path = "crates/bae-media" }
+bae-sync = { path = "crates/bae-sync" }
+bae-render = { path = "crates/bae-render", default-features = false }
+bae-ui = { path = "crates/bae-ui" }
+bae-color = { path = "crates/bae-color" }
+bae-plugin = { path = "crates/bae-plugin" }
+bae-plugin-sdk = { path = "crates/bae-plugin-sdk" }
+bae-package = { path = "crates/bae-package" }
+bae-motion = { path = "crates/bae-motion" }
+bae-vector = { path = "crates/bae-vector" }
+
+# ---- GPU, rendering, text (one coherent Linebender/wgpu set) ----
+# Backends: Metal (macOS) + D3D12 (Windows). Vulkan/GLES are opt-in through the
+# `bae-gpu/vulkan` feature (Linux/Android later), not compiled by default.
+wgpu = { version = "30.0.2", default-features = false, features = ["std", "parking_lot", "wgsl", "metal", "dx12"] }
+# Native Metal / D3D12 handle interop for plugins (ARCHITECTURE §14/§15). Must stay
+# on the exact major wgpu uses. Backend features are enabled per target by bae-gpu.
+wgpu-hal = { version = "30.0.2", default-features = false }
+wgpu-types = { version = "30.0.2", default-features = false, features = ["std"] }
+vello = { version = "0.12.0", default-features = false, features = ["wgpu"] }
+peniko = "0.6.1"
+kurbo = "0.13.1"
+parley = { version = "0.13.0", default-features = false, features = ["std", "system"] }
+fontique = { version = "0.13.0", default-features = false, features = ["std", "system"] }
+# 0.49 (not 0.50): the version vello 0.12 and parley 0.13 both use.
+skrifa = "0.49.0"
+
+# ---- UI (egui 0.36: the newest line egui_dock supports) ----
+egui = "0.36.2"
+egui-wgpu = { version = "0.36.2", default-features = false }
+egui-winit = { version = "0.36.2", default-features = false, features = ["clipboard", "links"] }
+egui_dock = "0.21.1"
+egui_kittest = { version = "0.36.2", default-features = false }
+winit = { version = "0.30.13", default-features = false, features = ["rwh_06"] }
+raw-window-handle = "0.6.2"
+muda = { version = "0.21.2", default-features = false }
+
+# ---- document model, collaboration, scripting ----
+loro = "1.18.0"
+rquickjs = "0.14.0"
+
+# ---- serialization, errors, logging, CLI ----
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+schemars = "1.2.3"
+toml = "1.2.1"
+thiserror = "2.0.21"
+anyhow = "1.0.104"
+tracing = "0.1.44"
+# No `env-filter` (pulls regex-automata): filters use `tracing_subscriber::filter::Targets`.
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["std", "fmt", "ansi", "registry", "tracing-log", "smallvec"] }
+clap = { version = "4.6.8", default-features = false, features = ["std", "help", "usage", "error-context", "suggestions", "color", "string"] }
+
+# ---- math, memory, collections, concurrency ----
+glam = "0.34.3"
+bytemuck = { version = "1.25.2", features = ["derive"] }
+half = { version = "2.7.1", features = ["bytemuck"] }
+smallvec = { version = "1.16.6", features = ["union", "const_generics"] }
+rustc-hash = "2.1.3"
+indexmap = "2.14.2"
+# 0.12 (not 0.13): the version wgpu-core uses, avoids two copies in the binary.
+parking_lot = "0.12.5"
+arc-swap = "1.9.5"
+crossbeam-channel = "0.5.17"
+rayon = "1.12.0"
+uuid = { version = "1.29.3", features = ["v4", "v7", "serde"] }
+
+# ---- media and audio ----
+image = { version = "0.25.10", default-features = false }
+exr = { version = "1.74.3", default-features = false }
+png = "0.18.1"
+# 08 reads TIFF directly (image's TIFF path drops AE's alpha, which is tagged
+# "unspecified"); same version image uses, no CCITT fax codec.
+tiff = { version = "0.11.3", default-features = false, features = ["deflate", "jpeg", "lzw"] }
+zune-jpeg = "0.5.15"
+symphonia = { version = "0.6.1", default-features = false }
+cpal = "0.18.2"
+
+# ---- platform bindings ----
+objc2 = "0.6.5"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-metal = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-av-foundation = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-core-video = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-core-media = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-video-toolbox = { version = "0.3.2", default-features = false, features = ["std"] }
+# windows 0.62 is the line wgpu-hal and fontique use; windows-sys 0.61 the one muda uses.
+windows = { version = "0.62.2", default-features = false }
+windows-sys = { version = "0.61.2", default-features = false }
+directories = "6.0.0"
+# File watching for the shared-folder sync transport (bae-sync `watch` feature).
+notify = { version = "8.2.2", default-features = false, features = ["macos_fsevent"] }
+# WebSocket client for the sync hub (bae-sync `hub` feature). No TLS yet: LAN hub.
+tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
+libloading = "0.9.1"
+# Signal handling (SIGTERM from `docker stop` / systemd) in bae-hub on Unix. Already
+# in the graph through std-adjacent crates; this pin only makes it a direct dep.
+libc = "0.2.191"
+
+# ---- plugins, packaging, hashing ----
+cbindgen = { version = "0.29.4", default-features = false }
+zip = { version = "9.8.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+blake3 = "1.8.7"
+# WGSL front end and validator for declarative plugin shaders: the exact naga that
+# wgpu 30.0.2 already links (only `wgsl-in`, which wgpu enables), so no new code.
+naga = { version = "30.0.2", default-features = false, features = ["wgsl-in"] }
+# Plugin versions and dependency requirements (bae-plugin).
+semver = "1.0.28"
+
+# ---- async and services ----
+pollster = "0.4.0"
+futures = { version = "0.3.34", default-features = false, features = ["std"] }
+tokio = { version = "1.54.1", default-features = false }
+rmcp = { version = "3.11.0", default-features = false }
+
+# ---- testing and benchmarks ----
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+insta = { version = "1.49.0", features = ["json"] }
+tempfile = "3.27.0"
+
+# ---------------------------------------------------------------------------
+# Profiles (ARCHITECTURE §11)
+# ---------------------------------------------------------------------------
+
+# Dev: workspace crates unoptimized with line tables (usable backtraces, fast
+# links); every dependency optimized so wgpu/egui/vello are not unusably slow.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 2
+debug = false
+
+# Release: maximum performance and minimum size. `panic = "unwind"` is deliberate:
+# the panic hook (bae-platform) and winit need unwinding so crash recovery can
+# save the project before the process exits.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+debug = false
+panic = "unwind"
+incremental = false
+
+# Cold-path dependencies are optimized for size (ARCHITECTURE §11): CLI, MCP/async
+# runtime, JSON and schemas, archives and hashing, menus/clipboard, URL/Unicode tables,
+# image codecs used at import time, and BAE's own UI/agent/platform glue. Per-frame paths (wgpu, naga, vello, egui painting,
+# loro, bae-render/bae-anim) keep opt-level 3. Measured in the PR that added this.
+[profile.release.package.bae-ui]
+opt-level = "s"
+[profile.release.package.bae-agent]
+opt-level = "s"
+[profile.release.package.bae-platform]
+opt-level = "s"
+[profile.release.package.rmcp]
+opt-level = "s"
+[profile.release.package.tokio]
+opt-level = "s"
+[profile.release.package.tokio-util]
+opt-level = "s"
+[profile.release.package.chrono]
+opt-level = "s"
+[profile.release.package.clap]
+opt-level = "s"
+[profile.release.package.clap_builder]
+opt-level = "s"
+[profile.release.package.clap_lex]
+opt-level = "s"
+[profile.release.package.schemars]
+opt-level = "s"
+[profile.release.package.serde_json]
+opt-level = "s"
+[profile.release.package.zip]
+opt-level = "s"
+[profile.release.package.flate2]
+opt-level = "s"
+[profile.release.package.zlib-rs]
+opt-level = "s"
+[profile.release.package.blake3]
+opt-level = "s"
+[profile.release.package.muda]
+opt-level = "s"
+[profile.release.package.arboard]
+opt-level = "s"
+[profile.release.package.webbrowser]
+opt-level = "s"
+[profile.release.package.url]
+opt-level = "s"
+[profile.release.package.idna]
+opt-level = "s"
+[profile.release.package.icu_collections]
+opt-level = "s"
+[profile.release.package.icu_normalizer]
+opt-level = "s"
+[profile.release.package.icu_properties]
+opt-level = "s"
+[profile.release.package.icu_provider]
+opt-level = "s"
+[profile.release.package.tracing-subscriber]
+opt-level = "s"
+[profile.release.package.directories]
+opt-level = "s"
+[profile.release.package.futures-util]
+opt-level = "s"
+[profile.release.package.futures-executor]
+opt-level = "s"
+[profile.release.package.sha2]
+opt-level = "s"
+[profile.release.package.unicode-normalization]
+opt-level = "s"
+[profile.release.package.uuid]
+opt-level = "s"
+[profile.release.package.anyhow]
+opt-level = "s"
+[profile.release.package.image]
+opt-level = "s"
+[profile.release.package.png]
+opt-level = "s"
+
+# Benchmarks: release code generation plus line tables for profilers.
+[profile.bench]
+inherits = "release"
+debug = "line-tables-only"
+strip = false
+
+# Release with symbols kept, used by `cargo xtask size` for cargo-bloat breakdowns.
+[profile.size-analysis]
+inherits = "release"
+strip = false

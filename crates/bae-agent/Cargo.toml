@@ -1,0 +1,32 @@
+[package]
+name = "bae-agent"
+description = "BAE agent access: MCP server, agent sessions, proposal layers, permissions, audit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bae-model.workspace = true
+# Packaging commands (package.*, asset.relink …), exposed to agents.
+bae-package.workspace = true
+# Named versions and version.revert (no transport features: no network, no watchers).
+bae-sync.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+parking_lot.workspace = true
+png.workspace = true
+
+[dev-dependencies]
+# The official SDK's client checks interoperability (tests only, not linked into bae).
+rmcp = { workspace = true, features = ["client", "transport-async-rw"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "io-util", "macros"] }
+tempfile.workspace = true

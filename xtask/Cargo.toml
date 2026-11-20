@@ -1,0 +1,18 @@
+[package]
+name = "xtask"
+description = "BAE developer tasks: size budget, packaging, benchmarks (cargo xtask <task>)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+zip.workspace = true
+
+[lints]
+workspace = true

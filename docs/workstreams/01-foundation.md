@@ -44,11 +44,25 @@
 
 ## 进度
 
-- [ ] 工作区与工具链
-- [ ] bae-platform
-- [ ] bae-gpu
-- [ ] apps/bae 空窗口
-- [ ] CI 与体积检查
-- [ ] xtask
+- [x] 工作区与工具链：虚拟工作区（`apps/*`、`crates/*`、`services/*`、`xtask`、`tools/dep-probe`）、统一依赖版本（见 `docs/spec/dependencies.md`）、`rust-toolchain.toml`（1.100）、dev/release/bench 配置。
+- [x] bae-platform：目录（含用户级/系统级插件目录）、日志（stderr + 会话文件、轮转）、崩溃报告与紧急保存、单实例、版本化设置、可扩展的命令行子命令注册表。
+- [x] bae-gpu：共享 `GpuContext`、适配器选择与软件回退、可选特性、设备丢失回调与重建、窗口表面（呈现模式、帧延迟、HDR/广色域格式发现）、GPU 计时、异步回读与上传、Metal/D3D12 原生句柄、视口纹理注册表、`bae gpu-info`。
+- [x] apps/bae 空窗口：winit + egui-winit + egui-wgpu（共用设备）、egui_dock 占位工作区、状态栏、muda 原生菜单、事件驱动重绘、窗口位置记忆、`--headless`、`--smoke-test`。说明见 `docs/spec/app-shell.md`。
+- [x] CI 与体积检查：`.github/workflows-pending/ci.yml`（macOS arm64 + Windows x64）。开发 Agent 的 GitHub 令牌没有 `workflow` 权限，推不了 `.github/workflows/`；有权限的人 `git mv` 一下即可启用（见 `.github/workflows-pending/README.md`）。
+- [x] xtask：`size`（预算 `tools/size-budget/budget.toml`）、`dist`（macOS .app / Windows zip）、`bench`。
+
+后续（不阻塞合并）：
+
+- 浮动面板的原生多窗口（每个 egui 视口一个 winit 窗口和 surface，共用同一设备）；目前用 `set_embed_viewports(true)` 画在主窗口内。
+- 第二个实例把命令行参数转给已运行的实例。
+- 设备丢失恢复后通知其他子系统重建 GPU 资源（与 04 一起定事件）。
 
 ## 请求（其他工作流在这里留言）
+
+### 06 render/color → 01（2026-11-20）
+
+bae-color 的 `DisplayTarget { monitor, surface, headroom }` 需要平台层的信息（架构文档第 12 节，这些不能放进 bae-color）：
+
+1. **显示器色彩空间。** 窗口所在显示器的原色和白点（以及 ICC 是矩阵/TRC 型时的传递函数）：macOS 从 `NSScreen.colorSpace` / ColorSync 读，Windows 从 `DXGI_OUTPUT_DESC1`（`RedPrimary`…`WhitePoint`、`ColorSpace`）读。建议在 bae-gpu 的 `SurfaceInfo` 或 bae-platform 里加 `DisplayColorInfo { primaries: [[f32; 2]; 4], transfer_hint, sdr_white_nits, max_luminance_nits }`，窗口换屏或系统设置变化时发事件。
+2. **EDR 余量会变**（macOS `maximumExtendedDynamicRangeColorComponentValue` 随亮度变化）：希望 `SurfaceInfo` 能刷新 `edr_headroom`，或者给个回调。
+3. 交换链选中的格式和色彩空间对应 `bae_color::SurfaceEncoding`：`*Srgb` → `HardwareSrgb`，`Rgba16Float + ExtendedSrgbLinear` → `ExtendedLinear(srgb-linear)`，`ExtendedDisplayP3` → `ExtendedLinear(p3-d65-linear)`，`Bt2100Pq` → `Pq`。映射由 04/11 做也可以，bae-gpu 只要把选中的组合暴露出来（`best_hdr` 已经有一部分）。

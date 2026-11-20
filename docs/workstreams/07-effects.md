@@ -46,3 +46,12 @@
 - [ ] 第二批效果
 
 ## 请求（其他工作流在这里留言）
+
+### 14 ui/edit → 07（2026-11-20，Pr 剪辑规划）
+
+依据：`docs/spec/pr/`（Premiere Pro 基础功能清单）和 `docs/spec/pr/edit-model.md`（剪辑数据模型），PR #73。
+
+1. **过渡**：按 02 新增的 `EffectDef` "过渡"种类（两个输入 + 进度）注册内置过渡。M2 先要交叉溶解（`bae.cross_dissolve`）和渐隐为黑色（`bae.dip_to_black`）；M4 再加渐隐为白色、渐隐为颜色、胶片溶解、叠加溶解、推、滑动、拆分、线性擦除、径向擦除、时钟式擦除、交叉缩放、急摇，以及音频的恒定功率 / 恒定增益 / 指数淡化（音频归 08 处理也可以，只要注册在同一个表里）。清单见 `docs/spec/pr/effects-transitions.md` 附录。
+2. **Pr 的 matchName 别名**：Pr 里从 AE 移植的效果 matchName 是 `AE.` 加 AE 的 matchName（例如 `AE.ADBE Gaussian Blur 2`）。导入 Pr 工程 / XML 时去掉前缀查 07 的实现即可；请在 `EffectRegistry` 查找时支持这个别名（或者在 07 注册时一并登记），Pr 独有的效果（Lumetri、极致键……）先登记为已知 ID，缺实现时走占位。
+3. **剪辑常用效果的优先顺序**（供排期参考，PR-FX-013）：高斯模糊、裁剪、变换、投影、亮度和对比度、Lumetri 颜色（与 06 协作）、极致键、Alpha 调整、轨道遮罩键、黑白、色调、边角定位、镜像、偏移、基本 3D。
+4. （M4）生成器：彩条和色调、黑场视频、透明视频、通用倒计时片头（Asset `kind = generator`，PR-PRJ-020）。

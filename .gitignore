@@ -1,9 +1,30 @@
+# OS / editors
 .DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+!.vscode/extensions.json
+
+# Rust build output (CI and most developers use ./target; some use a shared
+# CARGO_TARGET_DIR outside the repository)
+/target/
+**/*.rs.bk
+*.profraw
+*.profdata
+
+# Tooling
 node_modules/
 dist/
 *.log
 .env
 .env.*
 .claude/settings.local.json
-/target/
 .orchestration/
+
+# Snapshot test leftovers (insta)
+*.pending-snap
+*.snap.new
+
+# Generated packaging output
+/xtask/dist/

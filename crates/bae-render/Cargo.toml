@@ -1,0 +1,58 @@
+[package]
+name = "bae-render"
+description = "BAE GPU compositor: render graph, layer compositing, blend modes, caches, headless rendering"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+default = ["media"]
+# Footage layers decoded by bae-media (PNG/JPEG/WebP/EXR, macOS video). Off in the
+# app until 08's media module is linked there (size budget, see docs/perf.md).
+media = ["dep:bae-media"]
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+bae-anim.workspace = true
+bae-app.workspace = true
+bae-gpu.workspace = true
+bae-media = { workspace = true, optional = true }
+bae-model.workspace = true
+bae-package.workspace = true
+bae-platform.workspace = true
+bytemuck.workspace = true
+clap.workspace = true
+glam.workspace = true
+half.workspace = true
+parking_lot.workspace = true
+png.workspace = true
+rustc-hash.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[[bench]]
+name = "b1"
+harness = false
+required-features = ["media"]
+
+[[test]]
+name = "ae_golden"
+required-features = ["media"]
+
+[[example]]
+name = "ae_compare"
+required-features = ["media"]
+
+[[example]]
+name = "b1_project"
+required-features = ["media"]

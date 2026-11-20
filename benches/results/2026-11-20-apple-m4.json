@@ -1,0 +1,20 @@
+{
+  "description": "1080p30 10 s: 50 animated solids (shape stand-ins, 1/5 Add/Screen/Multiply/Overlay) + 10 animated RGBA textures (text stand-ins) + background",
+  "draw_calls_per_frame": 21,
+  "draws_per_frame": 51,
+  "encode_ms": 0.25275,
+  "eval_ms_mean": 0.09776222333333333,
+  "eval_ms_p95": 0.098917,
+  "export_fps_full": 334.3780790648114,
+  "frames": 300,
+  "gpu": "Apple M4 (Metal, integrated)",
+  "graph_build_ms": 0.00825,
+  "latency_ms_p50": 1.444,
+  "latency_ms_p95": 1.672458,
+  "layers": 61,
+  "passes_per_frame": 8,
+  "preview_fps_full": 851.5392229979354,
+  "preview_fps_half": 1075.858484056654,
+  "scenario": "B1",
+  "scene_build_ms": 22.588832999999997
+}

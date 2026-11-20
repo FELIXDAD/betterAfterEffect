@@ -42,10 +42,56 @@
 
 ## 进度
 
-- [ ] 同步服务端
+- [x] 同步服务端（PR 1，#47）：`services/bae-hub`。
+  - 直接建立在 09 的 `Relay` + `HubTransport::accept` 上，和客户端是同一个 WebSocket 库（tungstenite 0.30）。没有异步运行时，不用 tokio / axum（协调人的决定）。
+  - 每个工程一个 Relay 线程；在线状态和建议性锁由 Relay 转发；工程按需加载、空闲卸载。
+  - 工程日志用 `DirTransport` 存在数据目录里（09 的共享目录日志格式，自动压缩，重启后读回）。
+  - HTTP 接口：`/healthz`、`/v1/info`、`/v1/status`、`/v1/projects`。
+  - 接口说明见 `services/bae-hub/README.md`。
 - [ ] 素材存储
-- [ ] 权限与发现
-- [ ] Docker 与 NAS 部署文档
+- [~] 权限与发现：
+  - 团队令牌已做（PR 1）：只读/可写，可以限定工程；只保存哈希，比较用常数时间；首次启动自动生成。
+  - mDNS 自动发现还没做。
+- [x] Docker 与 NAS 部署文档（PR 2）：
+  - `deploy/docker/Dockerfile`：多架构（amd64 / arm64）；构建阶段直接交叉编译，不需要 QEMU；最终镜像 `FROM scratch`，里面只有一个静态文件。
+  - 其他文件：`compose.yaml`；`scripts/build-linux.sh`（生成 musl 静态单文件压缩包）、`scripts/build-image.sh`（生成可导入的镜像 .tar，或推送到镜像仓库）；systemd 服务；Unraid 模板。
+  - 中文文档：`deploy/README.md`，以及群晖、威联通、Unraid、TrueNAS 的分步说明。
+  - 真机部署验收还没做：这台 Mac 上没有 Docker，也没有 NAS。
 - [ ] 历史快照
 
+### 2026-11-20
+
+- **PR 1 的测试**：8 个端到端测试，客户端是 `HubTransport::connect`：
+  - 收敛，以及重启后从磁盘恢复
+  - HTTP 接口与令牌
+  - 只读
+  - 匿名访问
+  - 在线状态经 Hub 转发
+  - 空闲卸载与重新加载
+  - 10 个客户端的延迟（本机回环 debug 构建，中位数约 5.5 ms）
+  - 数据目录锁
+- **改架构**：第一版用 tokio + axum 写的。09 PR E 合并后，按协调人的要求改成直接用 `HubTransport`。
+- **体积**：去掉 tokio / axum 之后，release 体积见 PR 描述（预算 15 MiB）。在 macOS 上用 `rust-lld` 就能直接交叉编译 musl 静态单文件，不需要 zig 或 Docker。
+- **PR 1 已合并（#47）。**
+- **PR 2 的验证**（只能在本机做）：
+  - `build-linux.sh` 在 macOS 上生成了两个架构的压缩包：x86_64 版 2.4 MiB（程序 5.0 MiB），aarch64 版 2.2 MiB（程序 4.2 MiB）。
+  - 按容器的方式运行（只用环境变量配置）：健康检查、只读令牌、SIGTERM 退出都正常。
+  - compose 和各 NAS 文档里的 YAML 都能正常解析。
+  - 还没验证：Docker 镜像的实际构建，以及在真实 NAS 上部署（任务书验收第 3 条）。需要一台装了 Docker 的机器，或一台 NAS。
+- **给 09 的请求**：写在 09 任务书"请求"一节，共 4 条：
+  - 传输出错时会话丢掉本轮已收到的数据（会丢修改；Hub 这边已经绕开）
+  - WebSocket 单帧 16 MiB 的上限
+  - 写缓冲上限
+  - 按连接设置 `SessionConfig`
+
 ## 请求（其他工作流在这里留言）
+
+### 来自 09 collab/sync（2026-11-20）
+
+09 这边已经准备好了，服务端可以直接用（`crates/bae-sync`，规格见 `docs/spec/sync.md`）：
+
+- **协议和中继逻辑**：`bae_sync::Relay` 是不含网络的 Hub 核心：每个连接 `relay.connect(Box<dyn Transport + Send>)`，定期 `relay.pump()`；它负责增量转发、断线重连后的补齐、在线状态转发（新连接立即收到所有人的状态，连接断开时替它向其他人发"离开"）。持久化用 `relay.docs()`（每个文档 `export_snapshot`）和 `MemDocs::load` / `Relay::with_docs`。一个工程一个 `Relay`。
+- **线上格式**：一条协议消息 = 一个 WebSocket 二进制帧（`Message::encode` / `decode`，见 spec 2.3）。服务端只需要给每个 axum WebSocket 连接实现 `Transport`（例如用 tokio 的 mpsc 通道桥接到跑 `Relay` 的任务或线程）。
+- **客户端约定**（spec 3.1）：URL `ws://<主机>:<端口>/<路径>`，路径/查询参数怎么选工程由你们定；团队 token 放在 `Authorization: Bearer <token>`，拒绝时请回 HTTP 401；目前只用 `ws://`（局域网）。客户端会每 5 秒发 `Hello`、每 5 秒发在线状态心跳，Hub 不需要另做应用层心跳，WebSocket ping 可选。
+- **参考实现**：`crates/bae-sync/tests/hub.rs` 的 `TestHub`（阻塞式，几十行，用 `HubTransport::accept`）展示了完整流程，验收测试里回环延迟中位数 2.9 ms。
+

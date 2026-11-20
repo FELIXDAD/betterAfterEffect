@@ -1,0 +1,10 @@
+[plugin]
+name = "方框模糊（可分离）"
+description = "可分离的方框模糊：先水平模糊到中间纹理，再做垂直模糊。"
+
+[effect.box-blur]
+name = "方框模糊（可分离）"
+keywords = ["模糊", "方框"]
+
+[effect.box-blur.params]
+radius = "模糊半径"

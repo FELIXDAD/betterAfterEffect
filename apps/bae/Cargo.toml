@@ -1,0 +1,39 @@
+[package]
+name = "bae"
+description = "BAE desktop application (assembly only: every feature is an AppModule)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+default-run = "bae"
+
+[[bin]]
+name = "bae"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+bae-agent.workspace = true
+bae-app.workspace = true
+bae-gpu.workspace = true
+bae-model.workspace = true
+bae-motion.workspace = true
+bae-platform.workspace = true
+bae-plugin.workspace = true
+bae-ui.workspace = true
+bae-render = { workspace = true, features = ["media"] }
+bae-vector = { workspace = true, features = ["render"] }
+egui.workspace = true
+egui-wgpu.workspace = true
+egui-winit.workspace = true
+muda.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+winit.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,22 @@
+[package]
+name = "bae-dep-probe"
+description = "Compile-time proof that wgpu, vello, egui-wgpu and parley resolve to one coherent version set"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+egui.workspace = true
+egui-wgpu.workspace = true
+fontique.workspace = true
+kurbo.workspace = true
+parley.workspace = true
+peniko.workspace = true
+skrifa.workspace = true
+vello.workspace = true
+wgpu.workspace = true
+
+[lints]
+workspace = true
