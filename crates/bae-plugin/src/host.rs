@@ -18,7 +18,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use bae_model::EffectRegistry;
+use bae_app::{Owner, Registry};
+use bae_model::{EffectDef, EffectRegistry};
 use bae_render::{Effect, EffectLibrary};
 
 use crate::declarative::DeclarativeEffect;
@@ -128,6 +129,104 @@ pub enum LoadError {
     },
 }
 
+/// Where the host registers plugin effects: the same registries as built-in
+/// effects (spec §19). Implemented for plain registries ([`EffectRegistries`])
+/// and for the application's runtime registries ([`AppEffectRegistries`]).
+pub trait EffectRegistrar {
+    /// Who registered `match_name`, when that is anyone but plugin `plugin_id`.
+    fn foreign_owner(&self, match_name: &str, plugin_id: &str) -> Option<String>;
+
+    /// Registers one effect of plugin `plugin_id` (replacing its own earlier entry).
+    fn register(&mut self, plugin_id: &str, def: EffectDef, effect: Arc<dyn Effect>);
+
+    /// Removes every effect of plugin `plugin_id` (`match_names` are the ones it
+    /// registered). Returns (definitions, implementations) removed.
+    fn unregister(&mut self, plugin_id: &str, match_names: &[String]) -> (usize, usize);
+}
+
+/// Plain effect registries: definitions for the document model and
+/// implementations for a renderer (tests, tools, a renderer outside the app).
+#[derive(Debug, Default)]
+pub struct EffectRegistries {
+    /// Effect definitions.
+    pub definitions: EffectRegistry,
+    /// Effect implementations.
+    pub library: EffectLibrary,
+}
+
+impl EffectRegistrar for EffectRegistries {
+    fn foreign_owner(&self, match_name: &str, plugin_id: &str) -> Option<String> {
+        let existing = self.definitions.get(match_name)?;
+        match existing.plugin.as_ref().map(|p| p.id.as_str()) {
+            Some(owner) if owner == plugin_id => None,
+            Some(owner) => Some(format!("plugin {owner}")),
+            None => Some("a built-in effect".to_owned()),
+        }
+    }
+
+    fn register(&mut self, _plugin_id: &str, def: EffectDef, effect: Arc<dyn Effect>) {
+        self.definitions.register(def);
+        self.library.register(effect);
+    }
+
+    fn unregister(&mut self, plugin_id: &str, match_names: &[String]) -> (usize, usize) {
+        let defs = self.definitions.unregister_plugin(plugin_id);
+        let effects = match_names
+            .iter()
+            .filter(|m| self.library.unregister(m).is_some())
+            .count();
+        (defs, effects)
+    }
+}
+
+/// The application's runtime registries (`bae_app::Registry`), where built-in
+/// modules register their effects too. Plugin entries are owned by
+/// `Owner::Plugin(<plugin-id>)`, so `App::unregister_owner` also removes them.
+#[derive(Clone, Debug)]
+pub struct AppEffectRegistries {
+    /// Effect definitions by match name (UI, agents, AE import, placeholders).
+    pub definitions: Arc<Registry<EffectDef>>,
+    /// Effect implementations by match name (render graph).
+    pub effects: Arc<Registry<dyn Effect>>,
+}
+
+impl EffectRegistrar for AppEffectRegistries {
+    fn foreign_owner(&self, match_name: &str, plugin_id: &str) -> Option<String> {
+        let mine = Owner::plugin(plugin_id);
+        let defs = self.definitions.snapshot();
+        let effects = self.effects.snapshot();
+        let owner = defs
+            .entry(match_name)
+            .map(|e| e.owner().clone())
+            .or_else(|| effects.entry(match_name).map(|e| e.owner().clone()))?;
+        (owner != mine).then(|| owner.to_string())
+    }
+
+    fn register(&mut self, plugin_id: &str, def: EffectDef, effect: Arc<dyn Effect>) {
+        let owner = Owner::plugin(plugin_id);
+        let id = def.match_name.clone();
+        // Conflicts were checked by the host; replace only our own entries.
+        if let Err(error) = self
+            .definitions
+            .replace(owner.clone(), id.as_str(), Arc::new(def))
+        {
+            tracing::warn!("plugin {plugin_id}: effect definition `{id}` not registered: {error}");
+        }
+        if let Err(error) = self.effects.replace(owner, id.as_str(), effect) {
+            tracing::warn!("plugin {plugin_id}: effect `{id}` not registered: {error}");
+        }
+    }
+
+    fn unregister(&mut self, plugin_id: &str, _match_names: &[String]) -> (usize, usize) {
+        let owner = Owner::plugin(plugin_id);
+        // The returned entries are dropped here so that only render graphs
+        // still hold the effects afterwards.
+        let defs = self.definitions.unregister_owner(&owner).len();
+        let effects = self.effects.unregister_owner(&owner).len();
+        (defs, effects)
+    }
+}
+
 /// The plugin host: owns loaded plugins and keeps the effect registries in sync.
 #[derive(Debug, Default)]
 pub struct PluginHost {
@@ -232,14 +331,13 @@ impl PluginHost {
     pub fn load_dirs(
         &mut self,
         dirs: &[PluginDir],
-        definitions: &mut EffectRegistry,
-        library: &mut EffectLibrary,
+        target: &mut dyn EffectRegistrar,
     ) -> (Vec<String>, Vec<(PathBuf, Vec<Diagnostic>)>) {
         let report = Self::scan(dirs);
         let mut problems = report.failed;
         let mut loaded = Vec::new();
         for c in Self::select(&report.candidates) {
-            match self.load_from(&DirSource::new(&c.path), c.scope, definitions, library) {
+            match self.load_from(&DirSource::new(&c.path), c.scope, target) {
                 Ok(p) => loaded.push(p.id().to_owned()),
                 Err(LoadError::Invalid(d)) => problems.push((c.path.clone(), d)),
                 Err(e) => problems.push((
@@ -257,11 +355,10 @@ impl PluginHost {
         &mut self,
         source: &dyn PackageSource,
         scope: Scope,
-        definitions: &mut EffectRegistry,
-        library: &mut EffectLibrary,
+        target: &mut dyn EffectRegistrar,
     ) -> Result<&LoadedPlugin, LoadError> {
         let package = Package::load(source).map_err(LoadError::Invalid)?;
-        self.load_package(package, scope, definitions, library)
+        self.load_package(package, scope, target)
     }
 
     /// Registers an already loaded package.
@@ -269,21 +366,16 @@ impl PluginHost {
         &mut self,
         package: Package,
         scope: Scope,
-        definitions: &mut EffectRegistry,
-        library: &mut EffectLibrary,
+        target: &mut dyn EffectRegistrar,
     ) -> Result<&LoadedPlugin, LoadError> {
         let id = package.id().to_owned();
         // Conflicts with entries owned by someone else.
         for e in &package.effects {
-            if let Some(existing) = definitions.get(&e.def.match_name) {
-                let owner = existing.plugin.as_ref().map(|p| p.id.as_str());
-                if owner != Some(id.as_str()) {
-                    return Err(LoadError::Conflict {
-                        match_name: e.def.match_name.clone(),
-                        owner: owner
-                            .map_or("a built-in effect".to_owned(), |o| format!("plugin {o}")),
-                    });
-                }
+            if let Some(owner) = target.foreign_owner(&e.def.match_name, &id) {
+                return Err(LoadError::Conflict {
+                    match_name: e.def.match_name.clone(),
+                    owner,
+                });
             }
         }
         let effects = DeclarativeEffect::from_package(&package).map_err(LoadError::Invalid)?;
@@ -306,10 +398,9 @@ impl PluginHost {
             ));
         }
 
-        self.unload(&id, definitions, library);
+        self.unload(&id, target);
         for effect in &effects {
-            definitions.register(effect.def().clone());
-            library.register(effect.clone() as Arc<dyn Effect>);
+            target.register(&id, effect.def().clone(), effect.clone() as Arc<dyn Effect>);
         }
         let plugin = LoadedPlugin {
             package,
@@ -322,34 +413,32 @@ impl PluginHost {
 
     /// Unloads a plugin: removes its effect definitions and implementations.
     /// `None` if it was not loaded.
-    pub fn unload(
-        &mut self,
-        id: &str,
-        definitions: &mut EffectRegistry,
-        library: &mut EffectLibrary,
-    ) -> Option<UnloadReport> {
+    pub fn unload(&mut self, id: &str, target: &mut dyn EffectRegistrar) -> Option<UnloadReport> {
         let plugin = self.plugins.remove(id)?;
-        let mut report = UnloadReport {
-            definitions_removed: definitions.unregister_plugin(id),
-            ..UnloadReport::default()
-        };
-        for effect in &plugin.effects {
-            if library.unregister(&effect.def().match_name).is_some() {
-                report.effects_removed += 1;
-            }
+        let names: Vec<String> = plugin
+            .effects
+            .iter()
+            .map(|e| e.def().match_name.clone())
+            .collect();
+        let (definitions_removed, effects_removed) = target.unregister(id, &names);
+        let effects_in_use = plugin
+            .effects
+            .iter()
             // Our own handle is the only one left unless a graph still holds it.
-            if Arc::strong_count(effect) > 1 {
-                report.effects_in_use += 1;
-            }
-        }
-        Some(report)
+            .filter(|e| Arc::strong_count(e) > 1)
+            .count();
+        Some(UnloadReport {
+            definitions_removed,
+            effects_removed,
+            effects_in_use,
+        })
     }
 
     /// Unloads every plugin.
-    pub fn unload_all(&mut self, definitions: &mut EffectRegistry, library: &mut EffectLibrary) {
+    pub fn unload_all(&mut self, target: &mut dyn EffectRegistrar) {
         let ids: Vec<String> = self.plugins.keys().cloned().collect();
         for id in ids {
-            self.unload(&id, definitions, library);
+            self.unload(&id, target);
         }
     }
 
