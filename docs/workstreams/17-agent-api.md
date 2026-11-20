@@ -53,6 +53,8 @@
 - [x] 审计日志：每次工具调用一条（工具、参数、结果 ok / error / denied、写了哪些层、改动数、耗时），内存 + JSON Lines 文件（默认在日志目录的 `agent-audit.jsonl`）。
 - [x] MCP instructions：直接内置 18 的 `docs/agent-guide/mcp-instructions/en.md`（`--instructions zh` 用中文版），后面附一段本服务器说明（工具名写法、用 `command_batch` 代替事务、哪些工具还没有）。测试检查两份文件不超过 3000 字符、提到的工具名都存在或在"暂未提供"名单里。
 - [x] 端到端测试：rmcp 客户端和手写 JSON-RPC 两种方式（`crates/bae-agent/tests/mcp_e2e.rs`），并用真实的 `bae mcp` 二进制走过一遍 stdio。
+- [x] 领域命令接入：`Workspace::new` 注册 bae-package 的命令（`package.*`、`asset.relink` …），带可选顶层 `project` 参数的命令由服务器自动填入当前工程位置；`Workspace::with_commands` 接收模块命令，`bae mcp` 从 `bae_app::Registry<dyn DynCommand>` 收集（bae-motion 的 `MotionModule` 发布在这里）。
+- [x] 帧号和时码：所有 `Time` 参数还接受 `{"frame": 12}`、`"12f"`、时码 `"0:00:00:12"`（`;` 表示丢帧），在事务里按合成帧速率换算成 flicks（帧速率取 `frame_rate` / `fps` 参数或它的默认值，否则取参数里第一个 Prim 路径所在的合成）。时间基准跟参数本身一致：合成时间；图层上的关键帧用图层时间，和 `prim_get` 的 `key_frames` 一致。
 - [ ] `attribute.evaluate`（等 03 的求值）、`selection.get`（等桌面应用接入）、`proposal.describe`、`comment.add`、`history.list`
 - [ ] 速率限制和渲染预算
 - [ ] HTTP 传输（连接正在运行的桌面应用或 Hub，本地 token 认证）
@@ -67,6 +69,8 @@
   3. 建议把指南作为 MCP 资源暴露（如 `bae://agent-guide/03-animation`）。
   4. `stage.describe` 输出里请直接包含：合成帧速率、时长、工作区域、当前编辑目标、Agent 自己的权限级别、锁提示。
   5. `render.contact_sheet` 每格标出帧号；时间参数接受相对合成开始的整数帧号（也接受时码），由服务器换算 flicks。
+     - **17 回复**：已做（帧号、`"12f"`、时码含丢帧）。帧号用参数本身的时间基准：合成时间不变；图层上的关键帧是图层时间，图层从 0 开始、伸缩 100% 时和合成帧号相同。要按合成帧号写图层关键帧，命令参数需要标明"这是关键帧时间"，由 02 / 12 在 schema 里约定后再做。
   6. 评测集 `docs/agent-guide/evals/` 需要审计日志能导出完整的工具调用序列（含事务边界和写入的工程层）。
 
 - **21 io/packaging（2026-11-20）**：`bae-package`（无 GPU 依赖）提供打包命令 `package.scan`、`package.pack`、`package.collect`、`package.unpack`、`asset.relink`、`asset.set_files`，注册函数是 `bae_package::register_commands(&mut registry)`。请在 `Workspace::new` 里一起注册，Agent 才能调用。这些命令只能看到 Stage，工程位置通过参数 `project`（`.bae` 目录或 `.baez` 文件）传入；如果方便，服务器可以在调用时自动填入当前工程的位置。
+  - **17 回复**：已做。`Workspace::new` 注册 bae-package 的命令；顶层可选参数 `project` 由服务器自动填入，工具说明里也写了可以省略。
