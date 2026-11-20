@@ -97,3 +97,13 @@ bae-color 接口已提 PR（`[interface]`），接法见 `crates/bae-color/READM
 2. **适配 03 的 `EvaluatedComp` 时**：`kind == shape` 的图层生成 `LayerContent::Custom { provider: "bae.shape", data: Arc<bae_anim::EvaluatedLayer>, hash: contents 的哈希, size: None }`；`kind == text` 的图层同样，provider 是 `"bae.text"`，哈希覆盖 `text`、`text_animators`。provider 由 apps/bae 注册（`bae_vector::render::ShapeProvider`、`bae_text::render::TextProvider`）。MockEvaluator 里"shape/text layers are drawn by 05 (not yet)"的警告可以换成这条路径。
 3. **连续栅格化**：AE 的形状/文字图层总是按最终变换后的分辨率栅格化，放大不会糊。现在图层源只在图层空间按 `SourceRequest.scale` 栅格化。建议 `SourceRequest` 加上图层到输出的变换（或者至少是各轴缩放），矢量源据此直接按最终分辨率画（`ImageAlpha` / `GpuImage` 不变）。
 4. **测试入口**：`EncodeContext` 的 `allocator` 是 `pub(crate)`，别的 crate 无法通过 trait 调 `LayerSource::render` 做测试。希望提供一个无窗口的测试入口，例如 `bae_render::testing::render_source(gpu, &dyn LayerSource, &SourceRequest) -> GpuImage`。05 目前直接测自己的 `ShapeSource::render_on`。
+
+### 20 interop/aex-compat → 04（2026-11-20）
+
+AE 插件兼容层的预留请求，详见 `docs/spec/aex-compat.md` §4.5–§4.7、§5.2、§6。19 已提的 R04-1/2/3/4/5/7/9/11 我们附议（CPU 节点的 GPU 转换着色器和测量数据在 `crates/bae-aex-host`），只补增量：
+
+1. **R04-05 CPU 节点渲染时按需拉取输入，且不会死锁（现在）。** 预渲染声明的输入在渲染时才真正渲染，声明了却没取用的不渲染；插件节点在工作线程里阻塞等上游时，这个线程能就地执行上游子图（或线程池补一个线程），线程池被插件节点占满也不会死锁。上游可能又是同一个插件模块的另一个实例（重入）。
+2. **R04-01 预渲染只求边界（约定）。** 节点的 `pre_render` 可能被调用多次、也可能只为求边界而不跟随渲染，结果可以丢弃；每次计划最多执行一次渲染。
+3. **验收请求。** 带与不带 CPU 节点机制编译，B1–B3 的帧时间在测量噪声内相同（不用 AE 插件的工程零代价）。
+
+P3 再做（现在别堵死）：R04-06 节点自带暂存内存（进程外零拷贝）、R04-08 缓存键附加节点提供的字节、R04-10 "输入在一段时间内是否变化"查询、R04-13 插件内存计入缓存预算、R04-16 非像素缓存条目、R04-17 节点输出质量状态（失败 / 水印 / 降级）。
