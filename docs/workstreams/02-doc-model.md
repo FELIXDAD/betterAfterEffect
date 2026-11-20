@@ -126,3 +126,20 @@ AE 插件兼容层的预留请求，详见 `docs/spec/aex-compat.md` §4.3–§4
 4. **R02-11 事件来源（现在）。** 在 19:R02-7 的基础上，复制（带来源 Prim）、预合成、撤销恢复被删除的 Prim 要能分辨，兼容层据此决定是否让插件重建实例。
 
 P3 再做（现在别堵死）：R02-05 只有界面的参数值、R02-09 每个效果的实现偏好、R02-12 每个属性的变化戳。
+
+### 14 ui/edit → 02（2026-11-20，Pr 剪辑规划）
+
+依据：`docs/spec/pr/`（Premiere Pro 基础功能清单）和 `docs/spec/pr/edit-model.md`（剪辑数据模型），PR #73。14 现阶段只做框架，下面第 1–5 条是 0.0.1 就要定下来的（以后改要迁移工程），其余可以晚一点。#66（14 PR A）目前把这些作为自定义属性写入。
+
+1. **schema 补充属性**（edit-model.md 第 3–5 节、第 13 节）：
+   - `Sequence`：`mark_in`、`mark_out`（time，可空）、`pixel_aspect`（float 1.0）、`audio_sample_rate`（int 48000）、`audio:master_format`（choice `stereo|5.1|multichannel|mono`）、`start_timecode`（time 0）。
+   - `Track`：`track_kind` 增加 `caption`、`submix`、`master`；新增 `enabled`（bool true）、`locked`、`solo`、`sync_lock`（bool **true**）、`audio:channel_format`（choice `standard|mono|stereo|5.1|adaptive`）。
+   - `Clip`：`name`、`link`（string，链接组）、`group`（string，编组）、`enabled`（bool true）、`reverse`（bool）、`source_channels`（int 列表）；并预留固有效果和时间重映射的属性名：`transform:position` / `scale`（vec2）、`transform:uniform_scale`、`transform:rotation`、`transform:anchor_point`（vec2）、`transform:opacity`、`blend_mode`、`audio:gain`、`audio:level`、`audio:pan`、`time:remap_enabled`、`time:remap`（time，可动画）。
+   - `Asset`：`kind` 增加 `adjustment`、`generator`、`subclip`；`mark_in` / `mark_out`；代理文件引用 `proxy:file:relative` / `original` / `size` / `mtime` / `hash` 与 `proxy:status`（与原文件引用同一套查找和路径映射规则）。
+   - `Marker`：`name`（string）、`marker:type`（choice `comment|chapter|segmentation|web_link|flash_cue`）。
+2. **新 Prim 类型 `Transition`**：片段的子 Prim `transition_in` / `transition_out`，属性 `match_name`、`duration`、`alignment`（`center|start|end|custom`）、`offset`、`reverse`、`param:NNNN`、`plugin:id` / `plugin:version` / `state`（与 Effect 同一套参数机制和插件缺失占位）。两个片段之间的过渡只存在后一个片段的 `transition_in`（edit-model.md 第 6 节）。
+3. **片段属性的关键帧时间基准**：请在 data-model.md 第 10 节"约定"里加一条——`Clip` 上的属性（及其下的效果、蒙版）关键帧用"片段时间" `source_in + (t − start) × speed / 100`，与图层属性用图层时间同一个思路；序列标记用序列时间，来源上的剪辑标记用源时间（edit-model.md 第 5.6 节）。
+4. **`EffectDef` 增加种类**：普通效果 / 过渡（两个输入 + 进度）/ 生成器，`EffectRegistry` 可以按种类列出（07、19 注册过渡用）。
+5. **预演事务**：`Stage::preview_transact(author, |tx| ...)`——执行后回滚，返回将要产生的 `Change` 列表，不发事件、不进撤销栈、不写 Loro。剪辑界面拖动修剪时实时预览、Agent"先看结果再执行"都要用（14 的命令也会提供各自的 `plan_*`，这个是通用兜底）。
+6. （M4）效果的"图层"类参数在剪辑里要能指向 `Track`（例如轨道遮罩键选遮罩轨道），请在 `ParamKind::Layer` 的语义里允许目标是 Track（与 20 的 R02-07 引用型参数一并考虑）。
+7. （M2）`Shot` 增加 `duration`（time，计划时长），作为分镜、动效、剪辑三方的参照（PR-XCH-010）。

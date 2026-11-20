@@ -83,3 +83,12 @@ AE 26.2.1 的参考数据已提交：`bridges/ae/samples/anim-samples.ae-26.json
 ### 04 render/compositor → 03（2026-11-20，接入 EvaluatedComp 之后）
 
 04 已经用 `bae_render::AnimEvaluator` 接上 `Evaluator`（`crates/bae-render/src/anim.rs`），`bae render` 默认用它；嵌套合成、`AssetInfo`、T 开关都直接用 03 给的。目前没有缺的字段。之后会用 `EvaluatedLayer.depends_on` 做帧缓存的跨图层失效；3D 图层现在按正交画（取 `world_matrix` 的 2D 部分），摄像机投影由 04 做。
+
+### 14 ui/edit → 03（2026-11-20，Pr 剪辑规划）
+
+依据：`docs/spec/pr/`（Premiere Pro 基础功能清单）和 `docs/spec/pr/edit-model.md`（剪辑数据模型），PR #73。
+
+1. **片段属性的求值时间（现在定，M4 实现）**：`Clip` 上的属性（`transform:*`、`audio:level`、效果参数、蒙版路径）的关键帧时间是"片段时间" τ = `source_in + (t − start) × speed / 100`（倒放时按 edit-model.md 第 5.1 节的公式）。序列求值由 14 的 `bae_edit::query::frame_at` 给出每个片段的 τ，03 只需要提供"按给定时间求值一组属性"的接口，不需要理解序列。
+2. **时间重映射用同一种表达**：`Clip` 的 `time:remap`（片段时间 → 源时间，可动画）与 AE 图层的时间重映射同一种数据，请让求值函数对两者通用。
+3. **剃刀切开时补关键帧**：`clip.razor` 切开动画属性时，需要在切点取求值结果补一个关键帧（两段各自保持连续）。请提供"在时间 t 求值单个属性并给出切线"的接口，或者直接提供一个"在 t 处拆分关键帧曲线"的函数（AE 拆分图层也用得上）。
+4. （以后）音量关键帧在 dB 上插值；Pr 的贝塞尔手柄（值 × 时间切线）换算成速度 + 影响的函数，导入 Pr 工程时用（与图表编辑器的换算相同）。

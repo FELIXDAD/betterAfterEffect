@@ -96,3 +96,14 @@
 ## 请求（其他工作流在这里留言）
 
 - 21（总协调转达）：从 `.baez` 打开工程时，素材通过 `AssetLocator::locate` 定位，`MediaLibrary` 要能处理 Packaged 条目。——已完成：见上面的 `MediaLocation` / `MediaLibrary::resolve`。
+
+### 14 ui/edit → 08（2026-11-20，Pr 剪辑规划）
+
+依据：`docs/spec/pr/`（Premiere Pro 基础功能清单）和 `docs/spec/pr/edit-model.md`（剪辑数据模型），PR #73。剪辑工作区对 08 依赖最重，按优先级：
+
+1. **（0.0.1 / M2）多轨混音引擎 + 播放时钟**：现在没有模块负责混音。建议在 `bae-media` 里加一个与界面无关的混音模块：输入是 14 的 `frame_at` / `segments` 给出的音频项（来源、源时间、声道映射 `source_channels`、增益 `audio:gain`、音量 `audio:level` 和声像 `audio:pan` 的关键帧、轨道静音/独奏），输出到 cpal；以音频设备为主时钟驱动视频播放（音画同步）。动效工作区的音频预览也用它。M4 再加轨道推子、轨道效果插槽、子混合、主轨表电平、写自动化（PR-AUD-006 至 PR-AUD-010）。
+2. **（M2）导出时混入音频**：H.264 / HEVC / ProRes 导出带声音（`render` 循环里同时拉混音结果），否则剪辑导不出成片。
+3. **（M4）J/K/L 倒放与快速穿梭**：往回读和跳帧解码（长 GOP 素材按 GOP 缓存解码结果）；倍速时音频跟着变速播放（PR-MON-005）。拖动播放头时的音频擦洗（PR-MON-021）。
+4. **（M4）代理**：按收录预设转码生成代理（复用编码器和 `RenderQueue`）、连接代理、`MediaLibrary` 按全局开关解析到代理或原片，`content_hash` 区分两者（PR-EXP-001 至 PR-EXP-003）。代理路径记在 Asset 的 `proxy:file:*`（02 的请求）。
+5. **（M4）波形峰值缓存落盘**（工程 `cache/`），长素材后台生成（PR-AUD-005、PR-AUD-022）。
+6. **（以后）** 源时间码（QuickTime `tmcd` 轨，EDL / XML 需要）、ITU-R BS.1770 响度测量与导出响度标准化（PR-AUD-013、PR-AUD-018）、按音频波形对齐（多机位、合并剪辑）、MP4 章节标记写入（PR-MRK-003）。

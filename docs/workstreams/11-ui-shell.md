@@ -111,3 +111,13 @@
 ## 请求（其他工作流在这里留言）
 
 - 致 01 core/foundation：本分支临时加入了根 `Cargo.toml`（成员 `crates/*`，因为空通配会报错）和 `rust-toolchain.toml`，以便 UI crate 能单独构建；foundation 合并后以 foundation 的版本为准。
+
+### 14 ui/edit → 11（2026-11-20，Pr 剪辑规划）
+
+依据：`docs/spec/pr/`（Premiere Pro 基础功能清单）和 `docs/spec/pr/edit-model.md`（剪辑数据模型），PR #73。
+
+1. **键位按平台覆盖**：Pr 的一些默认键在 macOS 和 Windows 上修饰键不对应（微移剪辑：macOS `Cmd+←/→`、Windows `Alt+←/→`；外滑：macOS `Opt+Cmd+←/→`、Windows `Ctrl+Alt+←/→`），`Binding` 需要能写"只在某个平台生效"或按平台给不同 `Chord`（`docs/spec/pr/shortcuts.md` 开头）。
+2. **共用面板的作用域跟随工作区键位表**：项目面板、效果控件这类两个工作区都用的面板，面板作用域的绑定应该随当前工作区的键位表变化（同一个键在剪辑和动效里含义不同，PR-KEY-014）。
+3. **时间码控件**：支持相对输入（`+10`、`-1.00`）、时间轴获得焦点时直接敲数字进入跳转、显示格式（丢帧 / 非丢帧时间码、帧、英尺+帧）和起始时间码偏移（PR-MON-003）。
+4. **术语表**：请把 `docs/spec/pr/README.md` 第 8 节的剪辑术语（素材箱、序列、源监视器、节目监视器、外滑、内滑、提升、提取……）合并进 `docs/glossary.md`；中文已按 Pr 2026 自带的简体中文词典核对。
+5. （以后）工具键的"按住临时切换、松开恢复"（弹簧键）。

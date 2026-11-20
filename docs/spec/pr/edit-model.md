@@ -89,7 +89,7 @@
 
 | 属性 | 类型 | 默认 | 说明 | 状态 |
 |---|---|---|---|---|
-| `source` | prim_ref | | Asset、Comp（动效合成，实时引用）、Sequence（嵌套）。没有来源的片段只用于字幕项 | 已有 |
+| `source` | prim_ref | | Asset、Comp（动效合成，实时引用）、Sequence（嵌套）、Panel（分镜格，动态分镜用，#68）。没有来源的片段只用于字幕项 | 已有 |
 | `start` | time | 0 | 在序列中的开始时间 | 已有 |
 | `duration` | time | 1 s | 在序列中的长度 | 已有 |
 | `source_in` | time | 0 | 对应的源时间入点 | 已有 |
@@ -159,6 +159,7 @@ Pr 每个视频片段都有"运动""不透明度""时间重映射"，音频片�
 | 颜色遮罩 | Asset `kind = solid` | 复用纯色 |
 | 文字和形状图形（Pr 的图形剪辑） | 序列 `graphics/` 下的 Comp | **BAE 的做法：图形剪辑就是一个内嵌的小动效合成。** 在剪辑工作区用文字工具（T）创建时，`bae-edit` 新建这个 Comp 并放一个片段引用它；基本图形面板编辑它的图层；需要复杂动画时直接在动效工作区打开同一个 Comp。Pr 要在 AE 里做 .mogrt 再导回来，BAE 不需要中间文件 |
 | 嵌套序列 | Sequence | 不能直接或间接引用自己（命令检查，求值时最多 16 层，和 data-model.md 的引用深度一致） |
+| 分镜格 | Panel | 动态分镜（13 的 `board.make_animatic`）生成的片段；画面取分镜格当前的图（已升级为动效的镜头取 Shot 的合成，`bae_storyboard::query::panel_picture`），长度不受限制，和静帧一样 |
 | 多机位片段 | 多机位源序列 | 第 8 节 |
 | 字幕项 | 无来源，在 caption 轨上 | `caption:text`、`caption:style`，以后 |
 
@@ -242,7 +243,7 @@ pub struct SequenceFrame {
 pub struct VideoItem {
     pub clip: PrimPath,
     pub track_index: usize,
-    pub source: ClipSource,       // Asset / Comp / Sequence（嵌套，递归求值）/ Generator / Adjustment
+    pub source: ClipSource,       // Asset / Comp / Sequence（嵌套，递归求值）/ Panel / Generator / Adjustment
     pub source_time: Time,        // 第 5.1 节的换算结果
     pub clip_time: Time,          // 关键帧时间基准（5.6）
     pub repeated_frame: bool,     // 媒体不足、用定格帧补
