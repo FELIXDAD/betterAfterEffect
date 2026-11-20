@@ -63,7 +63,15 @@
 
 ### 体积
 
-`bae render` 接入 `apps/bae` 后，release 二进制从 12.17 MiB 增加到 13.66 MiB（+1.49 MiB，预算 15 MiB）。大部分来自第一次链接进来的 bae-media（PNG/JPEG/WebP/EXR 解码和 macOS 视频解码）和 bae-anim；bae-render 自身的代码不大。
+在 dev（21d55f3，已含 MCP、bae-color）上测 `cargo xtask size`：
+
+| | release 二进制 |
+|---|---:|
+| dev，不含 `bae render` | 14.79 MiB |
+| 加 `bae render`（bae-render + bae-anim，不含素材解码） | 15.22 MiB（+0.43 MiB） |
+| 再加素材解码（bae-media：PNG/JPEG/WebP/EXR、macOS 视频） | 16.23 MiB（+1.44 MiB） |
+
+`cargo bloat` 看 bae-render 自身约 134 KiB，其余是第一次进入应用的 bae-anim 和 bae-media 的解码器（exr、image-webp、zune-jpeg 等）。M0 的应用本体预算是 15 MiB，dev 已经只剩 0.21 MiB，所以：素材解码放在 bae-render 的 `media` 特性里（默认开，crate 自己的测试和基准都用），`apps/bae` 暂时不开，等 08 的媒体模块进入应用时一起开；M1 的应用本体预算单独提 PR 讨论。
 
 ## 5. 历史
 
