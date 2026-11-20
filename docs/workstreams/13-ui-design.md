@@ -43,7 +43,16 @@
 
 ## 进度
 
-- [ ] bae-storyboard 命令
+**2026-11-20（PR 1，Draft）**：`crates/bae-storyboard` 第一版接口完成，`cargo test -p bae-storyboard` 10 个测试全部通过。
+
+- 命令：`artboard.create/update/delete/rearrange`、`board.create/update`、`panel.create/update/move/delete`、`board.make_animatic`、`panel.promote_to_comp`；`StoryboardModule` 发布到 `bae_app::Registry<dyn DynCommand>`。
+- 数据布局：画板 `/artboards/<名>`（作品在画板下的 `layers`，画板坐标）；分镜表 `/boards/<名>/panels/<格>`；镜头 `/shots/<镜头号>`；动态分镜 `/sequences/<名>/V1/<片段>`，片段 `source` 指向分镜格，用 `query::panel_picture` 解析成最新画面（已升级的取动效合成，否则取画板/素材）。
+- 分镜格字段定稿：`shot_code`、`duration`、`shot_size`（none/els/ls/fs/ms/mcu/cu/ecu）、`dialogue`、`action`、`camera_move`、`sound`、`transition`、`notes`、`image`、`shot`。
+- 改了别人目录：`crates/bae-model/src/schema.rs` 的 Board/Panel 两条（原标注 framework only；`camera_notes` 改名 `camera_move`，无人使用）；根 `Cargo.toml` 加一行 workspace 依赖。
+- 还没做：`apps/bae` 接入 `StoryboardModule`（一行）；全工作区 clippy、bae-model 测试未跑（额度暂停）；路径编辑命令（调 05 几何 API）；`bae-ui-design` 工作区骨架。
+- 下一步：跑 clippy 和 bae-model 测试后把 PR 1 改成 Ready；PR 2 做 `bae-ui-design`（分镜工作区预设、Ai 键位、工具栏、分镜表/分镜格属性/画板面板，其余 Ai 面板占位，中英文）；PR 3 做路径编辑命令。
+
+- [x] bae-storyboard 命令（第一版：画板、分镜表、分镜格、动态分镜、升级为合成）
 - [ ] 工具栏与基础绘图工具
 - [ ] Ai 式面板
 - [ ] 分镜表与分镜格

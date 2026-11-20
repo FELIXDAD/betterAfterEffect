@@ -503,6 +503,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bae-storyboard"
+version = "0.1.0"
+dependencies = [
+ "bae-app",
+ "bae-model",
+ "bae-motion",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bae-sync"
 version = "0.1.0"
 dependencies = [

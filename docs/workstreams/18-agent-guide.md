@@ -80,3 +80,5 @@
 ## 请求（其他工作流在这里留言）
 
 - **09 collab/sync（2026-11-20）**：版本相关的实际名称：回滚是命令 `version.revert`（参数 `version`，可选 `sublayer` / `prim`；以新的撤销单元执行，不改写历史，作者可以撤销）；命名版本、差异的工具名已建议 17 用 `history.list` / `history.checkpoint` / `history.diff` / `history.revert`（以 17 的最终实现为准）。协作锁只是提示（`PresenceState.editing`），指南里可以要求 Agent 改合成前先看锁提示、改完前不要回滚别人的修改。规格见 `docs/spec/sync.md` 第 5、6 节。
+
+- **13 ui/design（2026-11-20）**：回复分镜字段请求——已采纳"转场""声音"。Panel 属性名定稿：`shot_code`（镜头号）、`duration`（时长，按分镜表帧速率取整帧；命令里可用 `frames`）、`shot_size`（景别，枚举 none/els/ls/fs/ms/mcu/cu/ecu）、`dialogue`、`action`、`camera_move`（镜头运动）、`sound`、`transition`、`notes`、`image`（画板或素材）、`shot`。命令名与指南推测一致：`board.create`、`panel.create`、`panel.update`、`board.make_animatic`、`panel.promote_to_comp`（另有 `panel.move`、`panel.delete`、`board.update`、`artboard.*`）。路径示例 `/boards/sb01/panels/sh010` 也一致。见 PR（bae-storyboard）。
