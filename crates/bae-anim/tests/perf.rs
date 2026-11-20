@@ -132,7 +132,7 @@ fn thousand_keyframed_layers_per_frame() {
 }
 
 /// Expressions are outside the 2 ms budget; this prints their cost for reference
-/// (100 layers, each with `wiggle` on Position and a cross-layer read on Rotation).
+/// (100 layers, each with `wiggle` on Position and a read of the layer above on Rotation).
 #[test]
 fn expressions_per_frame() {
     let mut stage = build(100);
@@ -144,7 +144,11 @@ fn expressions_per_frame() {
                     ("transform:position", "wiggle(2, 30)".to_owned()),
                     (
                         "transform:rotation",
-                        format!("thisComp.layer({}).rotation + time * 10", (i + 1) % 100 + 1),
+                        if i == 0 {
+                            "time * 10".to_owned()
+                        } else {
+                            "thisComp.layer(index - 1).rotation + 1".to_owned()
+                        },
                     ),
                 ] {
                     tx.apply(Op::SetExpression {

@@ -671,6 +671,15 @@ fn note_dependency(c: usize, l: usize) {
     });
 }
 
+/// Prim path of a property reference: empty means the layer itself.
+fn own<'a>(prim: &'a str, layer: &'a crate::eval::CompiledLayer) -> &'a str {
+    if prim.is_empty() {
+        layer.path.as_str()
+    } else {
+        prim
+    }
+}
+
 fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
     let h = Object::new(ctx.clone())?;
 
@@ -682,7 +691,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 let comp = comp_or_throw(&ctx, c)?;
                 let li = layer_or_throw(&ctx, &comp, l)?;
                 let layer = &comp.layers[li];
-                let Some(prop) = layer.find_prop(&prim, &attr) else {
+                let Some(prop) = layer.find_prop(own(&prim, layer), &attr) else {
                     return throw(&ctx, &format!("property {attr} does not exist"));
                 };
                 note_dependency(c as usize, li);
@@ -703,7 +712,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 };
                 let mut out = components(&v);
                 if !layer.switches.three_d
-                    && prim == layer.path.as_str()
+                    && own(&prim, layer) == layer.path.as_str()
                     && matches!(attr.as_str(), tr::POSITION | tr::ANCHOR_POINT | tr::SCALE)
                 {
                     out.truncate(2);
@@ -721,7 +730,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 let comp = comp_or_throw(&ctx, c)?;
                 let li = layer_or_throw(&ctx, &comp, l)?;
                 let layer = &comp.layers[li];
-                let Some(prop) = layer.find_prop(&prim, &attr) else {
+                let Some(prop) = layer.find_prop(own(&prim, layer), &attr) else {
                     return throw(&ctx, &format!("property {attr} does not exist"));
                 };
                 note_dependency(c as usize, li);
@@ -749,7 +758,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 let dt = (t1 - t0).as_seconds();
                 let mut out: Vec<f64> = a.iter().zip(&b).map(|(a, b)| (b - a) / dt).collect();
                 if !layer.switches.three_d
-                    && prim == layer.path.as_str()
+                    && own(&prim, layer) == layer.path.as_str()
                     && matches!(attr.as_str(), tr::POSITION | tr::ANCHOR_POINT | tr::SCALE)
                 {
                     out.truncate(2);
@@ -768,7 +777,10 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 let li = layer_or_throw(&ctx, &comp, l)?;
                 let layer = &comp.layers[li];
                 let mut out = Vec::new();
-                if let Some(curve) = layer.find_prop(&prim, &attr).and_then(|p| p.curve()) {
+                if let Some(curve) = layer
+                    .find_prop(own(&prim, layer), &attr)
+                    .and_then(|p| p.curve())
+                {
                     for (t, v) in curve.keys() {
                         out.push(layer.timing.comp_time(t).as_seconds());
                         out.extend(components(v));
@@ -796,7 +808,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 };
                 Ok::<_, rquickjs::Error>(
                     layer
-                        .find_prop(&prim, &attr)
+                        .find_prop(own(&prim, layer), &attr)
                         .map_or(1, |p| components(&p.sample_pre(&cx)).len())
                         as i32,
                 )
@@ -1010,9 +1022,19 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
 
     h.set(
         "seed",
-        Function::new(ctx.clone(), |c: i32, l: i32, prim: String, attr: String| {
-            seed_of(c as usize, l as usize, &prim, &attr)
-        })?,
+        Function::new(
+            ctx.clone(),
+            |ctx: Ctx<'js>, c: i32, l: i32, prim: String, attr: String| {
+                let comp = comp_or_throw(&ctx, c)?;
+                let li = layer_or_throw(&ctx, &comp, l)?;
+                Ok::<_, rquickjs::Error>(seed_of(
+                    c as usize,
+                    li,
+                    own(&prim, &comp.layers[li]),
+                    &attr,
+                ))
+            },
+        )?,
     )?;
 
     ctx.globals().set("__h", h)?;

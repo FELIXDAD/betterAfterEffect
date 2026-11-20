@@ -426,16 +426,6 @@ Property.prototype = {
   get propertyIndex() { return 1; },
 };
 
-function __PropGroup(layer, map) { this.__layer = layer; this.__map = map; }
-function __makeGroup(layer, entries) {
-  var g = {};
-  Object.keys(entries).forEach(function (k) {
-    Object.defineProperty(g, k, {
-      get: function () { return __prop(layer.__c, layer.__l, layer.__path, entries[k]); },
-    });
-  });
-  return g;
-}
 var __TRANSFORM = {
   anchorPoint: "transform:anchor_point", position: "transform:position", scale: "transform:scale",
   rotation: "transform:rotation", zRotation: "transform:rotation", xRotation: "transform:rotation_x",
@@ -443,15 +433,24 @@ var __TRANSFORM = {
   pointOfInterest: "transform:point_of_interest", xPosition: "transform:position_x",
   yPosition: "transform:position_y", zPosition: "transform:position_z",
 };
+// The layer's own properties use the empty prim path (the host resolves it).
+function __Transform(layer) { this.__c = layer.__c; this.__l = layer.__l; this.__path = ""; }
+Object.keys(__TRANSFORM).forEach(function (k) {
+  var attr = __TRANSFORM[k];
+  Object.defineProperty(__Transform.prototype, k, {
+    get: function () { return __prop(this.__c, this.__l, this.__path, attr); },
+  });
+});
 
 function Layer(c, l) {
   this.__c = c;
   this.__l = l;
-  var info = __h.layerInfo(c, l);
-  this.__info = info;
-  this.__path = info.path;
+  this.__i = null;
 }
 Layer.prototype = {
+  // Layer facts are fetched on first use (most expressions need none).
+  get __info() { return this.__i || (this.__i = __h.layerInfo(this.__c, this.__l)); },
+  get __path() { return this.__info.path; },
   get name() { return this.__info.name; },
   get index() { return this.__l + 1; },
   get inPoint() { return this.__info.inPoint; },
@@ -473,7 +472,7 @@ Layer.prototype = {
     if (this.__info.sourceComp < 0) throw new Error("Layer source is not a composition");
     return new Comp(this.__info.sourceComp);
   },
-  get transform() { return __makeGroup(this, __TRANSFORM); },
+  get transform() { return new __Transform(this); },
   get anchorPoint() { return this.transform.anchorPoint; },
   get position() { return this.transform.position; },
   get scale() { return this.transform.scale; },
@@ -484,7 +483,7 @@ Layer.prototype = {
   get orientation() { return this.transform.orientation; },
   get opacity() { return this.transform.opacity; },
   get pointOfInterest() { return this.transform.pointOfInterest; },
-  get timeRemap() { return __prop(this.__c, this.__l, this.__path, "time_remap"); },
+  get timeRemap() { return __prop(this.__c, this.__l, "", "time_remap"); },
   sourceTime: function (t) {
     if (t === undefined) t = __now;
     return (t - this.startTime) * 100 / this.stretch;
@@ -530,8 +529,9 @@ Layer.prototype = {
   fromWorldVec: function (p, t) { return this.__xf(3, p, t); },
 };
 
-function Comp(c) { this.__c = c; this.__info = __h.compInfo(c); }
+function Comp(c) { this.__c = c; this.__i = null; }
 Comp.prototype = {
+  get __info() { return this.__i || (this.__i = __h.compInfo(this.__c)); },
   get name() { return this.__info.name; },
   get width() { return this.__info.width; },
   get height() { return this.__info.height; },
