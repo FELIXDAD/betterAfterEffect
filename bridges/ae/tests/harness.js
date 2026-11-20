@@ -287,6 +287,15 @@ eq(man["/assets/frame_0001-0003_png"].sequence, {first: "frame_0001.png", count:
 eq(man["/assets/missing_mov"].path_absolute, "D:/shots/missing.mov", "missing footage path");
 check(man["/assets/missing_mov"].path_relative === undefined, "no relative path across drives");
 check(man["/assets/Red_Solid_1"] === undefined, "solids are not in the manifest");
+eq(attr("/assets/clip_mov", "file:original").value, {type: "string", value: "/Users/test/footage/clip.mov"},
+    "bae-model file:original on the Asset prim");
+eq(attr("/assets/clip_mov", "file:relative").value, {type: "string", value: "../footage/clip.mov"}, "file:relative");
+eq(attr("/assets/clip_mov", "file:size").value, {type: "int", value: 1048576}, "file:size");
+eq(attr("/assets/clip_mov", "file:mtime").value, {type: "int", value: Date.UTC(2026, 10, 1, 8, 30, 0)},
+    "file:mtime in Unix milliseconds");
+eq(attr("/assets/missing_mov", "file:original").value, {type: "string", value: "D:/shots/missing.mov"},
+    "missing footage keeps file:original");
+check(prims["/assets/missing_mov"].attrs["file:size"] === undefined, "no file:size for missing footage");
 
 // ---------------------------------------------------------------- golden file
 

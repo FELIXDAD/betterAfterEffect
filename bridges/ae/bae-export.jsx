@@ -1300,7 +1300,7 @@
             this.setNum(prim, "native_frame_rate", tryGet(src, "nativeFrameRate"), path);
         }
         if (kind === "file" || kind === "sequence") {
-            this.manifestEntry(item, path, kind);
+            this.manifestEntry(item, prim, path, kind);
         }
     };
 
@@ -1354,15 +1354,22 @@
         return parts.join("/");
     };
 
-    Exporter.prototype.manifestEntry = function (item, path, kind) {
+    /**
+     * File facts go twice: as bae-model's Asset attributes (file:original, file:relative, file:size,
+     * file:mtime; docs/spec/project-format.md section 5) so the importer can use them directly, and in
+     * the manifest, which adds the .aep-relative path, image-sequence frames and collected copies.
+     */
+    Exporter.prototype.manifestEntry = function (item, prim, path, kind) {
         var file = tryGet(item, "file");
         var entry = {prim: path};
         var abs = file ? slashPath(file.fsName) : slashPath(tryGet(item.mainSource, "missingFootagePath") || "");
         entry.path_absolute = abs;
+        this.setString(prim, "file:original", abs);
         if (this.options.outputDir) {
             var rel = BAE.relativePath(this.options.outputDir, abs);
             if (rel !== undefined) {
                 entry.path_relative = rel;
+                this.setString(prim, "file:relative", rel);
             }
         }
         if (this.options.projectDir) {
@@ -1375,8 +1382,10 @@
             entry.missing = true;
         } else if (file && file.exists) {
             entry.size = file.length;
+            this.setInt(prim, "file:size", file.length, path);
             if (file.modified) {
                 entry.modified = isoDate(file.modified);
+                this.setInt(prim, "file:mtime", file.modified.getTime(), path);
             }
         }
         if (kind === "sequence") {

@@ -102,7 +102,7 @@ gen_anim_cases.py ──► anim-cases.json ──(在 AE 里运行 bae-anim-sam
 
 ## 4. 给 03 的使用建议
 
-1. 用 `bae-model` 反序列化 `attr`（`AttrSpec` 单独反序列化没问题；注意 `PrimTree` 目前反序列化带关键帧的 JSON 会失败，已报给 02）。
+1. 用 `bae-model` 的 `AttrSpec` 直接反序列化 `attr`。
 2. 按 `layer.start_time`、`layer.stretch` 把合成时间换成 BAE 约定的时间基准（`time.key_time_base` 目前是 `comp`，见交换格式 4.2）。
 3. 在每个 `times[i]` 求值，与 `pre_expression[i]`（以及 `post_expression[i]`）逐分量比较，容差 1e-3。
 4. 已知需要单独看的用例：`spatial_roving`（时间由 AE 重算）、`spatial_speed_clamp`（影响力截断，规格 AE-ANI-035 标了 UNVERIFIED）、`color_ease`（颜色速度的单位，AE-ANI-034 标了 UNVERIFIED）、`opacity_overshoot_clamp`（截断发生在插值之后）、`layer_stretch_reverse`。这些正好是 AE 规格（`docs/spec/ae/transform-keyframes-expressions.md`）里没有核实的地方，用 AE 的数据定下来。

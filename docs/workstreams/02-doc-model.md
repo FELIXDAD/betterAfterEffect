@@ -62,7 +62,7 @@
 
 交换格式草案：`docs/interop/bae-interchange.md`（分支 `interop/ae`）。已按 `docs/spec/data-model.md` 对齐，用 dev 上的 `bae-model` 实测通过（`RestorePrim` → `to_trees` → 重新序列化逐字段一致）。对不上或需要 02 定的地方：
 
-1. **Bug：带关键帧的 `PrimTree` 不能从 JSON 反序列化。** `PrimTree.spec` 用了 `#[serde(flatten)]`，serde 的 flatten 会先把内容缓冲，之后 `AttrSpec.keyframes`（`BTreeMap<Time, _>`）的字符串键 `"0"` 不再转成 `i64`，报 `invalid type: string "0", expected i64`。`AttrSpec`、`PrimSpec` 单独反序列化正常。复现：一个属性带一个关键帧的 `PrimTree`，`to_string` 后 `from_str::<PrimTree>` 失败。建议给 `keyframes` 加自定义的 `#[serde(with = ...)]`（键按字符串解析成 i64，也接受数字），或者 `PrimTree` 不用 flatten；加一个 `PrimTree` JSON 往返测试。影响 `RestorePrim`/粘贴/`export-json` 读回和 15 的导入器。
+1. **（已在 PR #9 修复，15 已复核）Bug：带关键帧的 `PrimTree` 不能从 JSON 反序列化。** `PrimTree.spec` 用了 `#[serde(flatten)]`，serde 的 flatten 会先把内容缓冲，之后 `AttrSpec.keyframes`（`BTreeMap<Time, _>`）的字符串键 `"0"` 不再转成 `i64`，报 `invalid type: string "0", expected i64`。`AttrSpec`、`PrimSpec` 单独反序列化正常。复现：一个属性带一个关键帧的 `PrimTree`，`to_string` 后 `from_str::<PrimTree>` 失败。建议给 `keyframes` 加自定义的 `#[serde(with = ...)]`（键按字符串解析成 i64，也接受数字），或者 `PrimTree` 不用 flatten；加一个 `PrimTree` JSON 往返测试。影响 `RestorePrim`/粘贴/`export-json` 读回和 15 的导入器。
 2. **`Value` 缺文字文档类型。** AE 的「源文本」可以打关键帧，每个关键帧是一整个 TextDocument。提案新增 `text_document` 变体，字段见交换格式 4.7（`text`、`font`、`font_size`、`fill_color`、`justification`……，snake_case）。逐字符样式以后再加。
 3. **内置 Prim 类型**：提案新增 `Marker`（合成/图层标记，属性见交换格式 6.9）、`TextAnimator`、`TextSelector`。草案已经用这三个名字。
 4. **时间和帧率的值类型**：入点、出点、开始时间、时长等草案用 `int`（flicks），帧率用 `float`（AE 原值，导入时换成 `FrameRate`）。如果 02 想加 `time` / `frame_rate` 变体，告诉我改导出脚本。

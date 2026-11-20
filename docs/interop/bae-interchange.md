@@ -251,8 +251,12 @@ AE 的属性树由三种节点组成（`PropertyBase.propertyType`）：`PROPERT
 | `loop` | int | |
 | `conform_frame_rate` | float | 0 = 不覆盖 |
 | `native_frame_rate` | float | |
+| `file:original` | string | 原始绝对路径，`/` 分隔，Windows 保留盘符；缺失素材用 AE 记录的缺失路径 |
+| `file:relative` | string | 相对交换文件所在目录（不在同一卷上时没有） |
+| `file:size` | int | 字节数（缺失时没有） |
+| `file:mtime` | int | 修改时间，Unix 毫秒（缺失时没有） |
 
-文件路径不在 Prim 上，在素材清单里（第 8 节），用 Prim 路径关联。
+`file:*` 四项与 02 的素材引用一致（`docs/spec/project-format.md` 第 5 节），导入器可以直接用 `bae_model::AssetFile::from_prim` 读取，再把 `file:relative` 换算到新工程的基准目录。只有 `asset_kind` 为 `file` / `sequence` 的素材有这几项；图片序列记第一帧。`file:hash` v0 不写（ExtendScript 算哈希太慢）。素材清单（第 8 节）另外记录相对 .aep 的路径、序列帧和收集结果。
 
 ### 6.4 `Comp`
 
@@ -423,7 +427,7 @@ AE 的标记是 `ADBE Marker` 属性上的「关键帧」，值是 `MarkerValue`
 | `sequence` | object | 图片序列：`{first, count}`，`first` 是第一帧文件名，`count` 是导出时找到的帧文件数 |
 | `collected` | string 或 string[] | 收集素材时复制到的位置（相对交换文件）；序列是文件列表 |
 
-这三种路径对应 ARCHITECTURE 第 16 节的查找顺序：相对路径 → 绝对路径 → 按文件名和指纹查找。内容哈希 v0 不算（ExtendScript 太慢），以后由 BAE 导入时补。
+这三种路径对应 ARCHITECTURE 第 16 节的查找顺序：相对路径 → 绝对路径 → 按文件名和指纹查找。`path_absolute`、`path_relative`、`size` 与 Asset Prim 上的 `file:original`、`file:relative`、`file:size` 相同（清单里的 `modified` 是 ISO 时间，Prim 上的 `file:mtime` 是 Unix 毫秒）；导入时以 Prim 上的属性为准，清单用于收集素材和展开序列。内容哈希 v0 不算（ExtendScript 太慢），以后由 BAE 导入时补。
 
 ## 9. 导出报告（`report`）
 
@@ -461,13 +465,13 @@ AE 的标记是 `ADBE Marker` 属性上的「关键帧」，值是 `MarkerValue`
 
 ## 11. 与 02 Prim schema 的对齐状态
 
-对照的是 02 合并进 `dev` 的 `crates/bae-model`（PR #4、#5，`dev` 提交 `d3bb9bd`）和 `docs/spec/data-model.md`。核对方法：用 `bae-model` 的类型反序列化 `bridges/ae/examples/` 的示例，经 `Op::RestorePrim` 写入 Sublayer、`to_trees` 读回，重新序列化与原文件逐字段一致；`bridges/ae/samples/anim-cases.json` 里的 67 个 `AttrSpec` 同样往返一致。02 的 Prim schema（PR D）合并后再核对一次。
+对照的是 02 合并进 `dev` 的 `crates/bae-model`（PR #4、#5、#9，`dev` 提交 `c6d36d6`）、`docs/spec/data-model.md` 和 `docs/spec/project-format.md`。核对方法：用 `bae-model` 的类型直接反序列化 `bridges/ae/examples/` 的示例（`Vec<PrimTree>`），经 `Op::RestorePrim` 写入 Sublayer、`to_trees` 读回，重新序列化与原文件逐字段一致；素材 Prim 用 `AssetFile::from_prim` 读出的路径、大小、修改时间正确；`bridges/ae/samples/anim-cases.json` 里的 67 个 `AttrSpec` 同样往返一致。02 的 Prim schema（PR D）合并后再核对一次。
 
-已经对齐（直接用 02 的形状）：`Value` 的 `{"type","value"}` 标签和各变体；`AttrSpec{value, keyframes, expression}`；`keyframes` 以 flicks 为键；`Keyframe{value, interp_in, interp_out, ease_in, ease_out, spatial_in, spatial_out, flags, label}`；`Ease{speed, influence}`；`KeyframeFlags` 五个开关；`Expression{source, enabled}`；`PrimTree{name, specifier, prim_type, attrs, references, children}`；`LayerKind` 的 token；`Effect.match_name`、`ShapeOperator.operator`；Prim 名字规则（`validate_name`）；属性名规则（`validate_attr_name`，第 4.8 节）；显示名作为属性（`name`）。
+已经对齐（直接用 02 的形状）：素材引用属性 `file:original` / `file:relative` / `file:size` / `file:mtime`；`Value` 的 `{"type","value"}` 标签和各变体；`AttrSpec{value, keyframes, expression}`；`keyframes` 以 flicks 为键；`Keyframe{value, interp_in, interp_out, ease_in, ease_out, spatial_in, spatial_out, flags, label}`；`Ease{speed, influence}`；`KeyframeFlags` 五个开关；`Expression{source, enabled}`；`PrimTree{name, specifier, prim_type, attrs, references, children}`；`LayerKind` 的 token；`Effect.match_name`、`ShapeOperator.operator`；Prim 名字规则（`validate_name`）；属性名规则（`validate_attr_name`，第 4.8 节）；显示名作为属性（`name`）。
 
 对不上、已经写进 02 任务书「请求」的：
 
-0. **`PrimTree` 读不了带关键帧的 JSON**（`#[serde(flatten)]` 与 `BTreeMap<Time, _>` 的字符串键不兼容）。在 02 修好之前，读取方逐个节点反序列化 `PrimSpec` 即可绕过。
+0. ~~`PrimTree` 读不了带关键帧的 JSON~~：02 已在 PR #9（`c6d36d6`）修复，`AttrSpec.keyframes` 现在接受字符串和整数键。
 1. `Value` 没有文字文档类型。提案新增 `text_document`（4.7）。
 2. 没有 `Marker`、`TextAnimator`、`TextSelector` 这三个内置 Prim 类型。草案先用这三个名字（第 6.9、6.10 节）。
 3. 时间型属性（入点、出点、时长……）没有专门的 `Value` 类型，草案用 `int` flicks。是否新增 `time` 变体由 02 定。

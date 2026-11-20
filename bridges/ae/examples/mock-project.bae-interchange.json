@@ -269,6 +269,30 @@
                 "type": "float",
                 "value": 0
               }
+            },
+            "file:original": {
+              "value": {
+                "type": "string",
+                "value": "/Users/test/footage/clip.mov"
+              }
+            },
+            "file:relative": {
+              "value": {
+                "type": "string",
+                "value": "../footage/clip.mov"
+              }
+            },
+            "file:size": {
+              "value": {
+                "type": "int",
+                "value": 1048576
+              }
+            },
+            "file:mtime": {
+              "value": {
+                "type": "int",
+                "value": 1793521800000
+              }
             }
           }
         },
@@ -395,6 +419,30 @@
               "value": {
                 "type": "float",
                 "value": 0
+              }
+            },
+            "file:original": {
+              "value": {
+                "type": "string",
+                "value": "/Users/test/footage/seq/frame_0001.png"
+              }
+            },
+            "file:relative": {
+              "value": {
+                "type": "string",
+                "value": "../footage/seq/frame_0001.png"
+              }
+            },
+            "file:size": {
+              "value": {
+                "type": "int",
+                "value": 2048
+              }
+            },
+            "file:mtime": {
+              "value": {
+                "type": "int",
+                "value": 1793577600000
               }
             }
           }
@@ -528,6 +576,12 @@
               "value": {
                 "type": "float",
                 "value": 0
+              }
+            },
+            "file:original": {
+              "value": {
+                "type": "string",
+                "value": "D:/shots/missing.mov"
               }
             }
           }
