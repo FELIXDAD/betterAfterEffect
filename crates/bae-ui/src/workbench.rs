@@ -431,6 +431,7 @@ impl Workbench {
         self.dock.show(&mut child, &mut host);
         self.apply_panel_requests(cx);
         self.shortcut_window(ui.ctx());
+        ime_follows_caret(ui.ctx());
         std::mem::take(&mut self.requests.invocations)
     }
 
@@ -645,6 +646,18 @@ impl Workbench {
             _ => false,
         }
     }
+}
+
+/// Anchor the IME candidate window at the text caret instead of the whole text
+/// field. egui-winit passes `IMEOutput::rect` to `Window::set_ime_cursor_area`, so
+/// with the field's rect the pinyin candidates open at the field's left edge; AE
+/// (and native macOS / Windows text fields) open them under the caret.
+pub fn ime_follows_caret(ctx: &Context) {
+    ctx.output_mut(|o| {
+        if let Some(ime) = &mut o.ime {
+            ime.rect = ime.cursor_rect;
+        }
+    });
 }
 
 /// Chords a focused text field needs: plain typing, editing and navigation keys,
@@ -1047,6 +1060,73 @@ mod tests {
         assert_eq!(wb.keymap().chords_for("prim.create").count(), 2);
         // Customizations persist.
         assert!(!wb.state().keymaps.get("km").unwrap().is_empty());
+    }
+
+    #[test]
+    fn ime_composition_in_text_fields() {
+        use egui::ImeEvent;
+        let (kinds, presets, keymaps, actions) = registries();
+        let mut wb =
+            Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
+        let stage = Stage::new();
+        let author = AuthorId::system();
+        let resources = Resources::new();
+        let cx = WorkbenchContext {
+            stage: &stage,
+            author: &author,
+            resources: &resources,
+            title: "",
+            dirty: false,
+        };
+        let ctx = Context::default();
+        let run = |wb: &mut Workbench, events: Vec<Event>| {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1400.0, 900.0))),
+                events,
+                ..Default::default()
+            };
+            let mut out = Vec::new();
+            let mut full = ctx.run_ui(input, |ui| out = wb.ui(ui, &cx, |_| {}));
+            full.textures_delta.clear();
+            (out, full.platform_output.ime)
+        };
+        // Cmd+Alt+' equivalent: open the editor; its search field takes focus.
+        assert!(wb.handle(&Invocation::new(ids::KEYBOARD_SHORTCUTS), &cx));
+        run(&mut wb, vec![]);
+        let (_, ime) = run(&mut wb, vec![]);
+        let ime = ime.expect("a focused text field asks for the IME");
+
+        // Pinyin composition; a `U` that slips through as a key event must not
+        // trigger the `U` shortcut while a text field has focus.
+        let preedit = |t: &str| {
+            Event::Ime(ImeEvent::Preedit {
+                text: t.into(),
+                active_range_chars: None,
+            })
+        };
+        let (out, during) = run(
+            &mut wb,
+            vec![preedit("ni'hao"), key(Key::U, Modifiers::NONE)],
+        );
+        assert!(out.is_empty(), "no shortcut fires while composing: {out:?}");
+        let during = during.expect("IME stays enabled while composing");
+        // The candidate window is anchored at the caret, inside the field.
+        assert_eq!(during.rect, during.cursor_rect);
+        assert!(during.cursor_rect.height() <= 24.0);
+        assert!(ime.rect.min.y >= 0.0 && during.cursor_rect.min.x >= ime.rect.min.x);
+
+        // macOS commit sequence (egui-winit docs): Preedit("") then Commit.
+        run(
+            &mut wb,
+            vec![preedit(""), Event::Ime(ImeEvent::Commit("你好".into()))],
+        );
+        assert_eq!(wb.editor.search, "你好");
+        // Backspace removing the whole composition commits nothing.
+        run(&mut wb, vec![preedit("j"), preedit("")]);
+        assert_eq!(wb.editor.search, "你好");
+        // The caret moved after the committed text.
+        let (_, after) = run(&mut wb, vec![]);
+        assert!(after.unwrap().cursor_rect.min.x > ime.cursor_rect.min.x);
     }
 
     #[test]

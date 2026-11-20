@@ -16,6 +16,7 @@
 //! layouts never show an unknown panel. See `docs/spec/ui-shell.md`.
 
 pub mod action;
+pub mod agent;
 pub mod dock;
 pub mod history;
 pub mod i18n;
@@ -84,6 +85,23 @@ impl AppModule for UiModule {
         });
         if let Err(error) = app.register("history", history) {
             debug_assert!(false, "history panel: {error}");
+        }
+        let agent_panels = [
+            (
+                "agent_activity",
+                PanelKind::new("Agent Activity", |_| {
+                    Box::new(agent::ActivityPanel::default())
+                }),
+            ),
+            (
+                "agent_proposals",
+                PanelKind::new("Proposals", |_| Box::new(agent::ProposalsPanel::default())),
+            ),
+        ];
+        for (id, kind) in agent_panels {
+            if let Err(error) = app.register(id, kind) {
+                debug_assert!(false, "{id} panel: {error}");
+            }
         }
     }
 

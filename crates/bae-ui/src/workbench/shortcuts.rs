@@ -25,7 +25,7 @@ pub(super) struct ShortcutEditor {
     pub open: bool,
     /// Focus the search field on the next frame (just opened).
     pub focus_search: bool,
-    search: String,
+    pub search: String,
     /// The row waiting for a key press.
     pub recording: Option<CommandEntry>,
     /// A recorded chord that collides with another binding, awaiting confirmation.
