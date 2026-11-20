@@ -52,8 +52,8 @@ keyframes."transform:position" = [
 
 [expected]
 summary = """
-Agent 用 prim.get 发现 title_main 的位置显示的是自己提案层的值，压住了用户在 anim/shot090 的修改；
-用 attr.clear 清除自己在 agent/eval 里对 title_main 位置的覆盖（或者明确问用户后清除），让用户的 (960, 480) 生效。
+Agent 用 prim_get 发现 title_main 的位置显示的是自己提案层的值，压住了用户在 anim/shot090 的修改；
+用 attr_clear 清除自己在 agent/eval 里对 title_main 位置的覆盖（或者明确问用户后清除），让用户的 (960, 480) 生效。
 把 title_sub 的入场往后挪，使它比主标题晚 4–8 帧（例如第 10–28 帧），写在 agent/eval 里。
 回复中说明发现并移除了旧覆盖。
 """
