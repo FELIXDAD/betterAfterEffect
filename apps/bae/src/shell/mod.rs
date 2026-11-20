@@ -33,8 +33,12 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowId};
 
-use crate::ui::{self, StatusInfo, UiOutput, UiRenderer, Workspace};
-use window_state::WindowState;
+use crate::document::{Document, Outcome};
+use crate::ui::{self, PlaceholderViewer, StatusInfo, UiOutput, UiRenderer, Workspace};
+use bae_ui::Invocation;
+use bae_ui::action::ids;
+use bae_ui::history::HistoryLog;
+use window_state::{WindowState, WorkbenchSettings};
 
 /// The shell's app module (depends on the GPU module).
 #[derive(Debug, Default)]
@@ -47,6 +51,11 @@ impl AppModule for ShellModule {
 
     fn build(&self, app: &mut AppBuilder) {
         app.add_module(bae_gpu::GpuModule);
+        app.add_module(bae_ui::UiModule);
+    }
+
+    fn finish(&self, app: &mut AppBuilder) {
+        ui::register_panels(app);
     }
 }
 
@@ -69,7 +78,7 @@ const LIVE_RESIZE_SETTLE: Duration = Duration::from_millis(250);
 const MAX_DEVICE_RECOVERIES: u32 = 3;
 
 /// Runs the GUI until the window closes. Returns the process exit code.
-pub fn run(app: App, global: &GlobalOptions) -> ExitCode {
+pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     crate::i18n::init_from_env();
     let dirs = app.resource::<AppDirs>().cloned();
 
@@ -116,6 +125,22 @@ pub fn run(app: App, global: &GlobalOptions) -> ExitCode {
         .as_ref()
         .map(|file| file.load().value)
         .unwrap_or_default();
+    // Smoke tests always start from the default layout and never save it.
+    let workbench_file = dirs
+        .as_ref()
+        .filter(|_| global.smoke_test.is_none())
+        .map(|dirs| {
+            SettingsFile::<WorkbenchSettings>::new(
+                dirs.state_file(window_state::WORKBENCH_FILE_NAME),
+            )
+        });
+    let workbench_state = workbench_file
+        .as_ref()
+        .map(|file| file.load().value.0)
+        .unwrap_or_default();
+    let document = Document::new(app.resource::<Arc<HistoryLog>>().cloned());
+    let mut workspace = Workspace::new(&mut app, workbench_state);
+    workspace.set_extra_commands(document.command_titles());
 
     let mut shell = Shell {
         app,
@@ -124,7 +149,10 @@ pub fn run(app: App, global: &GlobalOptions) -> ExitCode {
         window_file,
         window_state,
         menu: None,
-        workspace: Workspace::new(None),
+        workspace,
+        workbench_file,
+        document,
+        pending: Vec::new(),
         viewer: None,
         view: None,
         repaint_at: None,
@@ -169,6 +197,10 @@ struct Shell {
     window_state: WindowState,
     menu: Option<menu::AppMenu>,
     workspace: Workspace,
+    workbench_file: Option<SettingsFile<WorkbenchSettings>>,
+    document: Document,
+    /// Invocations collected during the last frame, run in `about_to_wait`.
+    pending: Vec<Invocation>,
     viewer: Option<ViewportTextureId>,
     view: Option<WindowView>,
     repaint_at: Option<Instant>,
@@ -201,7 +233,12 @@ impl Drop for WindowView {
 
 impl Shell {
     fn create_window(&self, event_loop: &ActiveEventLoop) -> anyhow::Result<Arc<Window>> {
-        let attributes = Window::default_attributes().with_title(bae_platform::APP_NAME);
+        // `bae-ui` draws its own title bar on macOS; the window keeps native
+        // resizing, rounded corners and shadow.
+        let attributes = egui_winit::create_winit_window_attributes(
+            &egui::Context::default(),
+            bae_ui::titlebar::viewport_builder(bae_platform::APP_NAME),
+        );
         let attributes = self.window_state.apply(attributes, event_loop);
         let window = event_loop
             .create_window(attributes)
@@ -245,6 +282,7 @@ impl Shell {
         self.app.insert_resource(gpu.clone());
 
         let egui_ctx = egui::Context::default();
+        bae_ui::theme::apply(&egui_ctx);
         // Extra egui viewports (floating panels) render embedded in the main
         // window until native multi-window support lands.
         egui_ctx.set_embed_viewports(true);
@@ -274,7 +312,14 @@ impl Shell {
                 registry.remove(old);
             }
             self.viewer = ui::publish_placeholder_comp(&gpu, &registry);
-            self.workspace.set_viewer(self.viewer);
+            match self.viewer {
+                Some(id) => {
+                    self.app.insert_resource(PlaceholderViewer(id));
+                }
+                None => {
+                    self.app.remove_resource::<PlaceholderViewer>();
+                }
+            }
         }
 
         let status = StatusInfo {
@@ -309,6 +354,11 @@ impl Shell {
         if self.smoke.is_some() {
             return; // Never let automated runs overwrite the user's layout.
         }
+        if let Some(file) = &self.workbench_file
+            && let Err(error) = file.save(&WorkbenchSettings(self.workspace.state()))
+        {
+            tracing::warn!("cannot save the workspace layout: {error}");
+        }
         self.window_state = WindowState::capture(&view.window, &self.window_state);
         if let Some(file) = &self.window_file
             && let Err(error) = file.save(&self.window_state)
@@ -329,16 +379,40 @@ impl Shell {
         }
     }
 
-    fn on_menu(&mut self, event_loop: &ActiveEventLoop, id: &str) {
-        match id {
-            menu::ids::QUIT => {
+    /// Runs a command id from a menu, shortcut, toolbar or panel: the focused
+    /// panel and the workbench first, then the shell's own actions, then the
+    /// document (undo/redo and `bae-model` commands).
+    fn dispatch(&mut self, event_loop: &ActiveEventLoop, inv: Invocation) {
+        let Some(inv) = self
+            .workspace
+            .handle(inv, &self.document, self.app.resources())
+        else {
+            self.request_redraw();
+            return;
+        };
+        match inv.id.as_str() {
+            ids::QUIT => {
                 self.save_window_state();
                 event_loop.exit();
+                return;
             }
-            menu::ids::ABOUT => self.workspace.show_about(),
-            menu::ids::RESET_WORKSPACE => self.workspace.reset_layout(),
-            other => tracing::info!("menu command `{other}` is not implemented yet"),
+            ids::ABOUT => self.workspace.show_about(),
+            ids::NEW_PROJECT | ids::OPEN_PROJECT | ids::SAVE | ids::SAVE_AS | ids::HELP => {
+                tracing::info!("`{}` is not implemented yet", inv.id);
+            }
+            _ => match self.document.run(&inv) {
+                Outcome::Changed | Outcome::Unchanged => {}
+                Outcome::Unknown => tracing::debug!("no handler for command `{}`", inv.id),
+                Outcome::Failed(error) => tracing::warn!("command `{}` failed: {error}", inv.id),
+            },
         }
+        if let Some(menu) = &mut self.menu {
+            menu.set_undo_state(self.document.undo_state());
+        }
+        self.request_redraw();
+    }
+
+    fn request_redraw(&self) {
         if let Some(view) = &self.view {
             view.window.request_redraw();
         }
@@ -399,8 +473,11 @@ impl Shell {
         let registry = self.app.resource::<Arc<ViewportTextureRegistry>>().cloned();
         let workspace = &mut self.workspace;
         let status = &view.status;
+        let document = &self.document;
+        let resources = self.app.resources();
+        let mut invocations = Vec::new();
         let output = view.egui_ctx.run_ui(input, |ui| {
-            workspace.ui(ui, status, registry.as_deref());
+            invocations = workspace.ui(ui, status, document, resources);
         });
         view.egui_state.handle_platform_output_with_event_loop(
             &view.window,
@@ -513,6 +590,8 @@ impl Shell {
             status.pixels_per_point = output.pixels_per_point;
         }
 
+        // Run after the frame (and outside the borrow of the view).
+        self.pending.extend(invocations);
         if device_lost {
             self.recover_device(event_loop);
             return;
@@ -593,7 +672,7 @@ impl ApplicationHandler<UserEvent> for Shell {
         match self.create_view(window) {
             Ok(view) => {
                 if self.menu.is_none() {
-                    match menu::AppMenu::new() {
+                    match menu::AppMenu::new(&self.workspace.workspaces()) {
                         Ok(menu) => {
                             menu.attach(&view.window);
                             self.menu = Some(menu);
@@ -652,12 +731,17 @@ impl ApplicationHandler<UserEvent> for Shell {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::Repaint { delay } => self.schedule_repaint(delay),
-            UserEvent::Menu(event) => self.on_menu(event_loop, event.id.as_ref()),
+            UserEvent::Menu(event) => {
+                self.dispatch(event_loop, menu::invocation(event.id.as_ref()));
+            }
             UserEvent::DeviceLost => self.recover_device(event_loop),
         }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        for inv in std::mem::take(&mut self.pending) {
+            self.dispatch(event_loop, inv);
+        }
         if let Some(smoke) = &self.smoke {
             if smoke.last_progress.elapsed() > SMOKE_STALL_TIMEOUT {
                 let rendered = smoke.rendered;
