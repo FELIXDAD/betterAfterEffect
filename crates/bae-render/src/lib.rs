@@ -12,7 +12,8 @@
 //!
 //! * [`RenderComp`] / [`RenderLayer`] – the renderer's input (plain data, no GPU
 //!   types); 03 produces it or an adapter converts 03's `EvaluatedComp`.
-//! * [`CompEvaluator`] – evaluation entry point; [`MockEvaluator`] reads a stage.
+//! * [`CompEvaluator`] – evaluation entry point: [`AnimEvaluator`] adapts 03's
+//!   `bae-anim`; [`MockEvaluator`] (static values, linear keys) is kept for tests.
 //! * [`BlendMode`], [`TrackMatteMode`], [`MaskMode`] – AE modes and project tokens.
 //! * [`RenderRequest`] – resolution, ROI, bit depth, working format, colour context.
 //! * [`LayerSource`] / [`SourceProvider`] – how footage (08), shapes and text (05)
@@ -28,6 +29,7 @@
 //! unpremultiplied values where needed. Comp space has y down, pixel `(x, y)`
 //! covers `[x, x + 1) × [y, y + 1)`.
 
+pub mod anim;
 pub mod blend;
 pub mod cache;
 pub mod effect;
@@ -40,12 +42,14 @@ pub mod geom;
 mod gpu;
 pub mod graph;
 pub mod input;
+mod module;
 pub mod png_out;
 pub mod pool;
 mod renderer;
 pub mod request;
 pub mod source;
 
+pub use anim::AnimEvaluator;
 pub use blend::{BlendMode, MaskMode, TrackMatteMode};
 pub use cache::{CacheStats, FrameCache, FrameKey};
 pub use effect::{Effect, EffectLibrary, EffectParams};
@@ -57,6 +61,7 @@ pub use input::{
     CustomContent, Dependency, FootageRef, LayerContent, RenderComp, RenderEffect, RenderLayer,
     RenderMask, TrackMatte,
 };
+pub use module::{RenderModule, frame_file};
 pub use pool::PoolStats;
 pub use renderer::{FrameStats, OutputAlpha, RenderedFrame, Renderer, RendererConfig};
 pub use request::{

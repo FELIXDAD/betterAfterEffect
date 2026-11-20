@@ -68,3 +68,10 @@
    - 遮罩（路径已求值、模式、反转、不透明度、羽化、扩展）、效果（match name、开关、按 `param:NNNN` 序号的参数值）。
 3. 运动模糊：每层的采样时间点（快门角度/相位），04 按这些时间多次合成。
 4. 表达式依赖：如果某层的值依赖别的图层（`thisComp.layer(...)`），请把依赖关系也报出来，04 的帧缓存要据此失效。
+
+### 04 render/compositor → 03（2026-11-20，接入 EvaluatedComp 之后）
+
+04 已经用 `bae_render::AnimEvaluator` 接上 `Evaluator`（`crates/bae-render/src/anim.rs`），`bae render` 默认用它。缺的字段：
+
+1. `EvaluatedLayer` 没有「保留基础透明度」（schema 的 `preserve_transparency`，#19 已加）。04 现在直接从 Stage 读静态值；建议放进 `LayerSwitches`。
+2. 3D 图层目前按正交投影画（取 `world_matrix` 的 2D 部分）。摄像机投影由 04 做，需要的 `camera` / `world_matrix` 已经有了，不需要改。

@@ -489,13 +489,16 @@ impl Builder<'_> {
         if layer_bounds.is_empty() {
             return Ok(None);
         }
-        // Destination bounds in composite units (+1 texel for edge anti-aliasing).
+        // Destination bounds in composite units, grown by the edge ramp: one
+        // target texel, or one layer texel when the layer is magnified.
         let to_units = scale_affine(1.0 / scale) * layer.transform * scale_affine(scale);
+        let magnification = crate::geom::axis_scales(&to_units).max_element();
+        let margin = 1 + (magnification.min(1e4) / 2.0).ceil() as i32;
         let bounds = layer_bounds
             .to_rect()
             .transformed_bounds(&to_units)
             .round_out()
-            .inflate(1)
+            .inflate(margin)
             .intersect(&canvas);
         if bounds.is_empty() {
             return Ok(None);
@@ -842,7 +845,7 @@ mod tests {
         };
         let names: Vec<_> = c.ops.iter().map(|o| o.layer.name().to_owned()).collect();
         assert_eq!(names, ["bottom", "far", "top"]);
-        assert_eq!(c.ops[2].bounds, IRect::new(0, 0, 101, 101));
+        assert_eq!(c.ops[2].bounds, IRect::new(0, 0, 102, 102));
 
         let roi = RenderRequest {
             roi: Some(IRect::new(0, 0, 200, 200)),
@@ -871,7 +874,7 @@ mod tests {
         let NodeKind::Composite(c) = &g.output_node().kind else {
             panic!()
         };
-        assert_eq!(c.ops[0].bounds, IRect::new(49, 49, 151, 101));
+        assert_eq!(c.ops[0].bounds, IRect::new(48, 48, 152, 102));
     }
 
     #[test]
@@ -916,7 +919,7 @@ mod tests {
         };
         assert_eq!(c.ops.len(), 1, "the matte layer itself is hidden");
         let m = c.ops[0].matte.expect("matte");
-        assert_eq!(g.node(m.node).rect, IRect::new(0, 0, 101, 101));
+        assert_eq!(g.node(m.node).rect, IRect::new(0, 0, 102, 102));
 
         // Matte outside the frame: the matted layer disappears (alpha) …
         comp.layers[0].transform = DAffine2::from_translation(DVec2::new(5000.0, 0.0));

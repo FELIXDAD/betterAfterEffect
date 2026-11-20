@@ -1,0 +1,1393 @@
+{
+ "cases": [
+  {
+   "name": "blend_normal",
+   "size": [
+    128,
+    32
+   ],
+   "layers": [
+    {
+     "name": "src0",
+     "solid": [
+      77,
+      153,
+      230
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      16,
+      16
+     ],
+     "mode": "normal",
+     "opacity": 100
+    },
+    {
+     "name": "src1",
+     "solid": [
+      77,
+      153,
+      230
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      48,
+      16
+     ],
+     "mode": "normal",
+     "opacity": 50
+    },
+    {
+     "name": "src2",
+     "solid": [
+      77,
+      153,
+      230
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      80,
+      16
+     ],
+     "mode": "normal",
+     "opacity": 75
+    },
+    {
+     "name": "src3",
+     "solid": [
+      230,
+      200,
+      180
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      112,
+      16
+     ],
+     "mode": "normal",
+     "opacity": 100
+    },
+    {
+     "name": "dst0",
+     "solid": [
+      204,
+      102,
+      51
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      16,
+      16
+     ],
+     "opacity": 100
+    },
+    {
+     "name": "dst1",
+     "solid": [
+      204,
+      102,
+      51
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      48,
+      16
+     ],
+     "opacity": 100
+    },
+    {
+     "name": "dst2",
+     "solid": [
+      204,
+      102,
+      51
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      80,
+      16
+     ],
+     "opacity": 50
+    },
+    {
+     "name": "dst3",
+     "solid": [
+      200,
+      180,
+      150
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      112,
+      16
+     ],
+     "opacity": 100
+    }
+   ]
+  },
+  {
+   "name": "table_normal",
+   "size": [
+    256,
+    256
+   ],
+   "layers": [
+    {
+     "name": "src",
+     "footage": "ramp_y.png",
+     "pos": [
+      128,
+      128
+     ],
+     "mode": "normal"
+    },
+    {
+     "name": "dst",
+     "footage": "ramp_x.png",
+     "pos": [
+      128,
+      128
+     ]
+    }
+   ]
+  },
+  {
+   "name": "blend_add",
+   "size": [
+    128,
+    32
+   ],
+   "layers": [
+    {
+     "name": "src0",
+     "solid": [
+      77,
+      153,
+      230
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      16,
+      16
+     ],
+     "mode": "add",
+     "opacity": 100
+    },
+    {
+     "name": "src1",
+     "solid": [
+      77,
+      153,
+      230
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      48,
+      16
+     ],
+     "mode": "add",
+     "opacity": 50
+    },
+    {
+     "name": "src2",
+     "solid": [
+      77,
+      153,
+      230
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      80,
+      16
+     ],
+     "mode": "add",
+     "opacity": 75
+    },
+    {
+     "name": "src3",
+     "solid": [
+      230,
+      200,
+      180
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      112,
+      16
+     ],
+     "mode": "add",
+     "opacity": 100
+    },
+    {
+     "name": "dst0",
+     "solid": [
+      204,
+      102,
+      51
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      16,
+      16
+     ],
+     "opacity": 100
+    },
+    {
+     "name": "dst1",
+     "solid": [
+      204,
+      102,
+      51
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      48,
+      16
+     ],
+     "opacity": 100
+    },
+    {
+     "name": "dst2",
+     "solid": [
+      204,
+      102,
+      51
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      80,
+      16
+     ],
+     "opacity": 50
+    },
+    {
+     "name": "dst3",
+     "solid": [
+      200,
+      180,
+      150
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      112,
+      16
+     ],
+     "opacity": 100
+    }
+   ]
+  },
+  {
+   "name": "table_add",
+   "size": [
+    256,
+    256
+   ],
+   "layers": [
+    {
+     "name": "src",
+     "footage": "ramp_y.png",
+     "pos": [
+      128,
+      128
+     ],
+     "mode": "add"
+    },
+    {
+     "name": "dst",
+     "footage": "ramp_x.png",
+     "pos": [
+      128,
+      128
+     ]
+    }
+   ]
+  },
+  {
+   "name": "blend_multiply",
+   "size": [
+    128,
+    32
+   ],
+   "layers": [
+    {
+     "name": "src0",
+     "solid": [
+      77,
+      153,
+      230
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      16,
+      16
+     ],
+     "mode": "multiply",
+     "opacity": 100
+    },
+    {
+     "name": "src1",
+     "solid": [
+      77,
+      153,
+      230
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      48,
+      16
+     ],
+     "mode": "multiply",
+     "opacity": 50
+    },
+    {
+     "name": "src2",
+     "solid": [
+      77,
+      153,
+      230
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      80,
+      16
+     ],
+     "mode": "multiply",
+     "opacity": 75
+    },
+    {
+     "name": "src3",
+     "solid": [
+      230,
+      200,
+      180
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      112,
+      16
+     ],
+     "mode": "multiply",
+     "opacity": 100
+    },
+    {
+     "name": "dst0",
+     "solid": [
+      204,
+      102,
+      51
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      16,
+      16
+     ],
+     "opacity": 100
+    },
+    {
+     "name": "dst1",
+     "solid": [
+      204,
+      102,
+      51
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      48,
+      16
+     ],
+     "opacity": 100
+    },
+    {
+     "name": "dst2",
+     "solid": [
+      204,
+      102,
+      51
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      80,
+      16
+     ],
+     "opacity": 50
+    },
+    {
+     "name": "dst3",
+     "solid": [
+      200,
+      180,
+      150
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      112,
+      16
+     ],
+     "opacity": 100
+    }
+   ]
+  },
+  {
+   "name": "table_multiply",
+   "size": [
+    256,
+    256
+   ],
+   "layers": [
+    {
+     "name": "src",
+     "footage": "ramp_y.png",
+     "pos": [
+      128,
+      128
+     ],
+     "mode": "multiply"
+    },
+    {
+     "name": "dst",
+     "footage": "ramp_x.png",
+     "pos": [
+      128,
+      128
+     ]
+    }
+   ]
+  },
+  {
+   "name": "blend_screen",
+   "size": [
+    128,
+    32
+   ],
+   "layers": [
+    {
+     "name": "src0",
+     "solid": [
+      77,
+      153,
+      230
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      16,
+      16
+     ],
+     "mode": "screen",
+     "opacity": 100
+    },
+    {
+     "name": "src1",
+     "solid": [
+      77,
+      153,
+      230
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      48,
+      16
+     ],
+     "mode": "screen",
+     "opacity": 50
+    },
+    {
+     "name": "src2",
+     "solid": [
+      77,
+      153,
+      230
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      80,
+      16
+     ],
+     "mode": "screen",
+     "opacity": 75
+    },
+    {
+     "name": "src3",
+     "solid": [
+      230,
+      200,
+      180
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      112,
+      16
+     ],
+     "mode": "screen",
+     "opacity": 100
+    },
+    {
+     "name": "dst0",
+     "solid": [
+      204,
+      102,
+      51
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      16,
+      16
+     ],
+     "opacity": 100
+    },
+    {
+     "name": "dst1",
+     "solid": [
+      204,
+      102,
+      51
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      48,
+      16
+     ],
+     "opacity": 100
+    },
+    {
+     "name": "dst2",
+     "solid": [
+      204,
+      102,
+      51
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      80,
+      16
+     ],
+     "opacity": 50
+    },
+    {
+     "name": "dst3",
+     "solid": [
+      200,
+      180,
+      150
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      112,
+      16
+     ],
+     "opacity": 100
+    }
+   ]
+  },
+  {
+   "name": "table_screen",
+   "size": [
+    256,
+    256
+   ],
+   "layers": [
+    {
+     "name": "src",
+     "footage": "ramp_y.png",
+     "pos": [
+      128,
+      128
+     ],
+     "mode": "screen"
+    },
+    {
+     "name": "dst",
+     "footage": "ramp_x.png",
+     "pos": [
+      128,
+      128
+     ]
+    }
+   ]
+  },
+  {
+   "name": "blend_overlay",
+   "size": [
+    128,
+    32
+   ],
+   "layers": [
+    {
+     "name": "src0",
+     "solid": [
+      77,
+      153,
+      230
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      16,
+      16
+     ],
+     "mode": "overlay",
+     "opacity": 100
+    },
+    {
+     "name": "src1",
+     "solid": [
+      77,
+      153,
+      230
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      48,
+      16
+     ],
+     "mode": "overlay",
+     "opacity": 50
+    },
+    {
+     "name": "src2",
+     "solid": [
+      77,
+      153,
+      230
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      80,
+      16
+     ],
+     "mode": "overlay",
+     "opacity": 75
+    },
+    {
+     "name": "src3",
+     "solid": [
+      230,
+      200,
+      180
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      112,
+      16
+     ],
+     "mode": "overlay",
+     "opacity": 100
+    },
+    {
+     "name": "dst0",
+     "solid": [
+      204,
+      102,
+      51
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      16,
+      16
+     ],
+     "opacity": 100
+    },
+    {
+     "name": "dst1",
+     "solid": [
+      204,
+      102,
+      51
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      48,
+      16
+     ],
+     "opacity": 100
+    },
+    {
+     "name": "dst2",
+     "solid": [
+      204,
+      102,
+      51
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      80,
+      16
+     ],
+     "opacity": 50
+    },
+    {
+     "name": "dst3",
+     "solid": [
+      200,
+      180,
+      150
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      112,
+      16
+     ],
+     "opacity": 100
+    }
+   ]
+  },
+  {
+   "name": "table_overlay",
+   "size": [
+    256,
+    256
+   ],
+   "layers": [
+    {
+     "name": "src",
+     "footage": "ramp_y.png",
+     "pos": [
+      128,
+      128
+     ],
+     "mode": "overlay"
+    },
+    {
+     "name": "dst",
+     "footage": "ramp_x.png",
+     "pos": [
+      128,
+      128
+     ]
+    }
+   ]
+  },
+  {
+   "name": "matte_alpha",
+   "size": [
+    64,
+    32
+   ],
+   "layers": [
+    {
+     "name": "matte",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      16,
+      16
+     ],
+     "opacity": 50,
+     "enabled": false
+    },
+    {
+     "name": "fill",
+     "solid": [
+      0,
+      255,
+      0
+     ],
+     "size": [
+      64,
+      32
+     ],
+     "pos": [
+      32,
+      16
+     ],
+     "matte": {
+      "layer": 0,
+      "mode": "alpha"
+     }
+    }
+   ]
+  },
+  {
+   "name": "matte_alpha_inverted",
+   "size": [
+    64,
+    32
+   ],
+   "layers": [
+    {
+     "name": "matte",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      16,
+      16
+     ],
+     "opacity": 50,
+     "enabled": false
+    },
+    {
+     "name": "fill",
+     "solid": [
+      0,
+      255,
+      0
+     ],
+     "size": [
+      64,
+      32
+     ],
+     "pos": [
+      32,
+      16
+     ],
+     "matte": {
+      "layer": 0,
+      "mode": "alpha_inverted"
+     }
+    }
+   ]
+  },
+  {
+   "name": "matte_luma",
+   "size": [
+    64,
+    32
+   ],
+   "layers": [
+    {
+     "name": "matte",
+     "solid": [
+      102,
+      102,
+      102
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      16,
+      16
+     ],
+     "opacity": 100,
+     "enabled": false
+    },
+    {
+     "name": "fill",
+     "solid": [
+      0,
+      255,
+      0
+     ],
+     "size": [
+      64,
+      32
+     ],
+     "pos": [
+      32,
+      16
+     ],
+     "matte": {
+      "layer": 0,
+      "mode": "luma"
+     }
+    }
+   ]
+  },
+  {
+   "name": "matte_luma_inverted",
+   "size": [
+    64,
+    32
+   ],
+   "layers": [
+    {
+     "name": "matte",
+     "solid": [
+      102,
+      102,
+      102
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      16,
+      16
+     ],
+     "opacity": 100,
+     "enabled": false
+    },
+    {
+     "name": "fill",
+     "solid": [
+      0,
+      255,
+      0
+     ],
+     "size": [
+      64,
+      32
+     ],
+     "pos": [
+      32,
+      16
+     ],
+     "matte": {
+      "layer": 0,
+      "mode": "luma_inverted"
+     }
+    }
+   ]
+  },
+  {
+   "name": "matte_luma_colors",
+   "size": [
+    256,
+    256
+   ],
+   "layers": [
+    {
+     "name": "matte",
+     "footage": "color_ramp.png",
+     "pos": [
+      128,
+      128
+     ],
+     "enabled": false
+    },
+    {
+     "name": "fill",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      256,
+      256
+     ],
+     "pos": [
+      128,
+      128
+     ],
+     "matte": {
+      "layer": 0,
+      "mode": "luma"
+     }
+    }
+   ]
+  },
+  {
+   "name": "preserve",
+   "size": [
+    64,
+    32
+   ],
+   "layers": [
+    {
+     "name": "top",
+     "solid": [
+      255,
+      0,
+      0
+     ],
+     "size": [
+      64,
+      32
+     ],
+     "pos": [
+      32,
+      16
+     ],
+     "preserve": true
+    },
+    {
+     "name": "bottom",
+     "solid": [
+      0,
+      0,
+      255
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      16,
+      16
+     ],
+     "opacity": 50
+    }
+   ]
+  },
+  {
+   "name": "geo_subpixel",
+   "size": [
+    32,
+    32
+   ],
+   "layers": [
+    {
+     "name": "s",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      10,
+      10
+     ],
+     "pos": [
+      15.75,
+      15.25
+     ]
+    }
+   ]
+  },
+  {
+   "name": "geo_rotate",
+   "size": [
+    32,
+    32
+   ],
+   "layers": [
+    {
+     "name": "s",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      16,
+      16
+     ],
+     "pos": [
+      16,
+      16
+     ],
+     "rot": 30
+    }
+   ]
+  },
+  {
+   "name": "geo_scale_up",
+   "size": [
+    32,
+    32
+   ],
+   "layers": [
+    {
+     "name": "s",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      8,
+      8
+     ],
+     "pos": [
+      16,
+      16
+     ],
+     "scale": [
+      250,
+      250
+     ]
+    }
+   ]
+  },
+  {
+   "name": "geo_scale_down",
+   "size": [
+    32,
+    32
+   ],
+   "layers": [
+    {
+     "name": "s",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      20,
+      20
+     ],
+     "pos": [
+      16,
+      16
+     ],
+     "scale": [
+      33,
+      33
+     ]
+    }
+   ]
+  },
+  {
+   "name": "inner",
+   "size": [
+    16,
+    16
+   ],
+   "inner": true,
+   "layers": [
+    {
+     "name": "s",
+     "solid": [
+      0,
+      0,
+      255
+     ],
+     "size": [
+      8,
+      8
+     ],
+     "pos": [
+      4,
+      4
+     ]
+    }
+   ]
+  },
+  {
+   "name": "geo_precomp_200",
+   "size": [
+    32,
+    32
+   ],
+   "layers": [
+    {
+     "name": "pre",
+     "comp": "inner",
+     "pos": [
+      16,
+      16
+     ],
+     "scale": [
+      200,
+      200
+     ]
+    }
+   ]
+  },
+  {
+   "name": "geo_footage",
+   "size": [
+    128,
+    64
+   ],
+   "layers": [
+    {
+     "name": "label",
+     "footage": "label.png",
+     "pos": [
+      64,
+      32
+     ],
+     "scale": [
+      150,
+      150
+     ],
+     "rot": 10
+    }
+   ]
+  },
+  {
+   "name": "geo_footage_down",
+   "size": [
+    64,
+    32
+   ],
+   "layers": [
+    {
+     "name": "label",
+     "footage": "label.png",
+     "pos": [
+      32,
+      16
+     ],
+     "scale": [
+      40,
+      40
+     ],
+     "rot": -15
+    }
+   ],
+   "tolerance": 12
+  },
+  {
+   "name": "blend_add_partial",
+   "size": [
+    64,
+    32
+   ],
+   "layers": [
+    {
+     "name": "src",
+     "solid": [
+      230,
+      200,
+      180
+     ],
+     "size": [
+      64,
+      32
+     ],
+     "pos": [
+      32,
+      16
+     ],
+     "mode": "add",
+     "opacity": 60
+    },
+    {
+     "name": "dst",
+     "solid": [
+      200,
+      180,
+      150
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "pos": [
+      16,
+      16
+     ],
+     "opacity": 40
+    }
+   ]
+  }
+ ]
+}

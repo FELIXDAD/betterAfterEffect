@@ -29,8 +29,8 @@ fn main() -> ExitCode {
         .add_module(bae_gpu::GpuModule)
         .add_module(model_cli::ModelCliModule)
         .add_module(mcp_cli::McpCliModule)
+        .add_module(bae_render::RenderModule)
         .add_module(shell::ShellModule);
-    // Feature modules from other workstreams are added here, e.g.
-    // `.add_module(bae_render::RenderModule)`.
+    // Feature modules from other workstreams are added here.
     startup::run(builder.build())
 }

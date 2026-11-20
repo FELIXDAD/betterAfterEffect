@@ -12,10 +12,15 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+anyhow.workspace = true
+bae-anim.workspace = true
+bae-app.workspace = true
 bae-gpu.workspace = true
 bae-media.workspace = true
 bae-model.workspace = true
+bae-platform.workspace = true
 bytemuck.workspace = true
+clap.workspace = true
 glam.workspace = true
 parking_lot.workspace = true
 png.workspace = true
@@ -26,3 +31,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[[bench]]
+name = "b1"
+harness = false
