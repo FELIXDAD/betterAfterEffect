@@ -572,11 +572,77 @@ impl SequencePattern {
     }
 }
 
-/// PNG / OpenEXR sequence encoder (one file per frame, written synchronously).
+/// PNG / OpenEXR sequence encoder (one file per frame).
+///
+/// Frames are compressed and written by a few worker threads (files are
+/// independent), so exporting is not limited by one core; the queue is
+/// bounded to keep memory in check at 4K. Errors surface on a later
+/// `push_frame` or on `finish`.
 pub struct ImageSequenceEncoder {
     settings: EncodeSettings,
     pattern: SequencePattern,
     files: Vec<PathBuf>,
+    writer: Arc<SequenceWriter>,
+    pool: Option<WriterPool>,
+}
+
+/// Writes one frame file (shared by the worker threads).
+struct SequenceWriter {
+    settings: EncodeSettings,
+}
+
+struct WriteJob {
+    path: PathBuf,
+    frame: CpuFrame,
+    index: u64,
+}
+
+struct WriterPool {
+    sender: Option<std::sync::mpsc::SyncSender<WriteJob>>,
+    workers: Vec<std::thread::JoinHandle<()>>,
+    error: Arc<parking_lot::Mutex<Option<MediaError>>>,
+}
+
+impl WriterPool {
+    fn new(writer: &Arc<SequenceWriter>) -> Self {
+        let threads = std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(1, 4));
+        let (sender, receiver) = std::sync::mpsc::sync_channel::<WriteJob>(threads);
+        let receiver = Arc::new(parking_lot::Mutex::new(receiver));
+        let error: Arc<parking_lot::Mutex<Option<MediaError>>> = Arc::default();
+        let workers = (0..threads)
+            .map(|_| {
+                let (writer, receiver, error) = (writer.clone(), receiver.clone(), error.clone());
+                std::thread::spawn(move || {
+                    loop {
+                        // Hold the lock only while taking a job.
+                        let Ok(job) = receiver.lock().recv() else {
+                            break;
+                        };
+                        if error.lock().is_some() {
+                            continue;
+                        }
+                        if let Err(e) = writer.write(&job.path, &job.frame, job.index) {
+                            error.lock().get_or_insert(e);
+                        }
+                    }
+                })
+            })
+            .collect();
+        WriterPool {
+            sender: Some(sender),
+            workers,
+            error,
+        }
+    }
+
+    /// Waits for every queued frame; returns the first error.
+    fn join(mut self) -> Result<(), MediaError> {
+        self.sender = None;
+        for worker in self.workers.drain(..) {
+            let _ = worker.join();
+        }
+        self.error.lock().take().map_or(Ok(()), Err)
+    }
 }
 
 impl ImageSequenceEncoder {
@@ -593,11 +659,26 @@ impl ImageSequenceEncoder {
         if !pattern.dir.as_os_str().is_empty() {
             std::fs::create_dir_all(&pattern.dir).map_err(|e| MediaError::io(&pattern.dir, e))?;
         }
+        let writer = Arc::new(SequenceWriter {
+            settings: settings.clone(),
+        });
         Ok(ImageSequenceEncoder {
             settings: settings.clone(),
             pattern,
             files: Vec::new(),
+            pool: Some(WriterPool::new(&writer)),
+            writer,
         })
+    }
+}
+
+impl SequenceWriter {
+    fn write(&self, path: &Path, frame: &CpuFrame, index: u64) -> Result<(), MediaError> {
+        match self.settings.codec {
+            VideoCodec::Png => self.write_png(path, frame),
+            VideoCodec::Exr(compression) => self.write_exr(path, frame, compression, index),
+            other => unreachable!("checked in ImageSequenceEncoder::new: {other:?}"),
+        }
     }
 
     fn write_png(&self, path: &Path, frame: &CpuFrame) -> Result<(), MediaError> {
@@ -674,6 +755,7 @@ impl ImageSequenceEncoder {
         path: &Path,
         frame: &CpuFrame,
         compression: ExrCompression,
+        index: u64,
     ) -> Result<(), MediaError> {
         use exr::prelude::{
             Blocks, Encoding, Image, LineOrder, SpecificChannels, Vec2, WritableImage as _,
@@ -733,7 +815,7 @@ impl ImageSequenceEncoder {
         attributes.pixel_aspect = s.pixel_aspect.as_f64() as f32;
         attributes.chromaticities = exr_chromaticities(s.color.primaries);
         if let Some(tc) = s.start_timecode {
-            let frame_number = tc.to_frame_number(s.frame_rate) + self.files.len() as u64;
+            let frame_number = tc.to_frame_number(s.frame_rate) + index;
             let tc = Timecode::from_frame_number(frame_number, s.frame_rate, tc.drop_frame);
             attributes.time_code = Some(exr::meta::attribute::TimeCode {
                 hours: tc.hours,
@@ -810,12 +892,29 @@ impl Encoder for ImageSequenceEncoder {
 
     fn push_frame(&mut self, frame: &CpuFrame) -> Result<(), MediaError> {
         check_frame_size(&self.settings, frame)?;
-        let number = self.settings.start_number + self.files.len() as i64;
-        let path = self.pattern.path_for(number);
-        match self.settings.codec {
-            VideoCodec::Png => self.write_png(&path, frame)?,
-            VideoCodec::Exr(compression) => self.write_exr(&path, frame, compression)?,
-            other => unreachable!("checked in new: {other:?}"),
+        let index = self.files.len() as u64;
+        let path = self
+            .pattern
+            .path_for(self.settings.start_number + index as i64);
+        match &self.pool {
+            Some(pool) => {
+                if let Some(error) = pool.error.lock().take() {
+                    return Err(error);
+                }
+                // Convert here (cheap when the GPU already did) so workers get
+                // exactly what they write.
+                let (format, alpha) = self.input_format().expect("sequences have a format");
+                let frame = convert_frame_cow(frame, format, alpha).into_owned();
+                let sender = pool.sender.as_ref().expect("open until finish");
+                sender
+                    .send(WriteJob {
+                        path: path.clone(),
+                        frame,
+                        index,
+                    })
+                    .map_err(|_| MediaError::Unsupported("image writer stopped".into()))?;
+            }
+            None => self.writer.write(&path, frame, index)?,
         }
         self.files.push(path);
         Ok(())
@@ -836,14 +935,20 @@ impl Encoder for ImageSequenceEncoder {
         Some((format, s.alpha))
     }
 
-    fn finish(self: Box<Self>) -> Result<EncodeOutput, MediaError> {
+    fn finish(mut self: Box<Self>) -> Result<EncodeOutput, MediaError> {
+        if let Some(pool) = self.pool.take() {
+            pool.join()?;
+        }
         Ok(EncodeOutput {
             frames: self.files.len() as u64,
             files: self.files,
         })
     }
 
-    fn abort(self: Box<Self>) {
+    fn abort(mut self: Box<Self>) {
+        if let Some(pool) = self.pool.take() {
+            let _ = pool.join();
+        }
         for file in &self.files {
             let _ = std::fs::remove_file(file);
         }
