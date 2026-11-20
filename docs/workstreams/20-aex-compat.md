@@ -33,7 +33,12 @@
 
 - [ ] SDK 调研文档
 - [ ] 对 02/04/19 的差距评审与请求
-- [ ] crates/bae-aex-host 骨架
+- [x] crates/bae-aex-host 骨架（PR 1）：只有数据结构和纯函数，不加载任何插件、没有 FFI、没有 Adobe 头文件或 ABI 数值。
+  - 已加入工作区，继承工作区的 package 字段和 lints；不被 `apps/bae` 依赖，release 体积增加 0。
+  - `selector::LifecycleHook` 按 19 的 C 回调名（`BaeEffectVTable1`）一一对应，测试直接读取 `sdk/c/bae_plugin.h` 核对，19 的接口有增减时测试会失败（回应 19 的请求 R20-1）。
+  - `caps::Concurrency` 对应 `BAE_THREADING_*`。
+  - 新增 `model` 模块：把 AE 的参数和效果描述转换成已合并的 `bae_model::EffectDef`，02 目前表达不了的地方列为 `ModelGap`，并注明由哪条预留请求解决。
+  - `bench/roundtrip`：GPU↔CPU 往返基准（独立 package，wgpu 不进入主工作区）。
 - [ ] 性能与合规评估
 
 ## 请求（其他工作流在这里留言）
