@@ -24,10 +24,10 @@ skills/
 
 ```sh
 python3 skills/sync-references.py          # 重新生成 references/
-python3 skills/sync-references.py --check  # 只检查是否过期（适合放进 CI）
+python3 skills/sync-references.py --check  # 只检查是否过期
 ```
 
-只需要 Python 3 标准库。
+只需要 Python 3 标准库。目前不在 CI 里检查（2026-11-20 决定先不加），修改指南的 PR 提交前请手动运行一次 `--check`。
 
 ## 安装
 
