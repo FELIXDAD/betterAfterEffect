@@ -45,7 +45,8 @@ use objc2_video_toolbox::{
 };
 
 use crate::export::{
-    EncodeOutput, EncodeSettings, Encoder, EncoderFormat, ProResProfile, VideoCodec, convert_frame,
+    EncodeOutput, EncodeSettings, Encoder, EncoderFormat, ProResProfile, VideoCodec,
+    convert_frame_cow,
 };
 use crate::frame::{CpuFrame, PixelFormat};
 use crate::meta::{AlphaMode, ColorPrimaries, MatrixCoefficients};
@@ -424,7 +425,7 @@ impl Encoder for AvWriterEncoder {
                 frame.width, frame.height, self.settings.width, self.settings.height
             )));
         }
-        let converted = convert_frame(frame, self.pixel_format, self.frame_alpha);
+        let converted = convert_frame_cow(frame, self.pixel_format, self.frame_alpha);
         let buffer = self.pixel_buffer(&converted)?;
         self.wait_ready()?;
         let rate = self.settings.frame_rate;
@@ -443,6 +444,10 @@ impl Encoder for AvWriterEncoder {
 
     fn frames_written(&self) -> u64 {
         self.frames
+    }
+
+    fn input_format(&self) -> Option<(PixelFormat, AlphaMode)> {
+        Some((self.pixel_format, self.frame_alpha))
     }
 
     fn finish(self: Box<Self>) -> Result<EncodeOutput, MediaError> {
