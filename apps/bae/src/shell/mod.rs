@@ -140,13 +140,18 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
                 dirs.state_file(window_state::WORKBENCH_FILE_NAME),
             )
         });
-    let workbench_state = workbench_file
+    let loaded = workbench_file.as_ref().map(|file| file.load());
+    // First launch: no saved workspaces yet, so ask for the user's role.
+    let first_run = loaded
         .as_ref()
-        .map(|file| file.load().value.0)
-        .unwrap_or_default();
+        .is_some_and(|l| l.status == bae_platform::settings::LoadStatus::Missing);
+    let workbench_state = loaded.map(|l| l.value.0).unwrap_or_default();
     let document = Document::new(app.resource::<Arc<HistoryLog>>().cloned());
     let mut workspace = Workspace::new(&mut app, workbench_state);
     workspace.set_extra_commands(document.command_titles());
+    if first_run {
+        workspace.show_role_picker();
+    }
 
     let mut shell = Shell {
         app,

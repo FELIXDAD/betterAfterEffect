@@ -123,6 +123,13 @@ impl AppMenu {
                 true,
                 None,
             ),
+            &MenuItem::with_id(
+                ids::NEW_WORKSPACE,
+                tr("Save as New Workspace..."),
+                true,
+                None,
+            ),
+            &MenuItem::with_id(ids::EDIT_WORKSPACES, tr("Edit Workspaces..."), true, None),
         ])?;
         window.append(&workspace)?;
         window.append(&PredefinedMenuItem::separator())?;

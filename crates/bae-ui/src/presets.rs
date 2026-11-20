@@ -55,6 +55,9 @@ pub fn motion() -> WorkspacePreset {
         ]),
     )
     .order(0)
+    .description(
+        "Compositions, layers, keyframes, expressions and effects, laid out like After Effects.",
+    )
 }
 
 /// Review: a large viewer with the timeline below; preview and history at the side.
@@ -80,6 +83,7 @@ pub fn review() -> WorkspacePreset {
         ]),
     )
     .order(1)
+    .description("Play back, annotate and compare versions.")
 }
 
 /// Agent: what agents are doing, their proposals, and the result in the viewer.
@@ -105,6 +109,7 @@ pub fn agent() -> WorkspacePreset {
         ]),
     )
     .order(2)
+    .description("Watch what agents do and review their proposals.")
 }
 
 /// Application-wide After Effects shortcuts (Windows `Ctrl` = macOS `Cmd`).

@@ -95,6 +95,11 @@ pub mod ids {
     pub const RESET_WORKSPACE: &str = "workspace.reset";
     /// Save the current layout as the active workspace's saved layout.
     pub const SAVE_WORKSPACE: &str = "workspace.save";
+    /// Save the current layout as a new workspace; params `{"title": "..."}`
+    /// (without params: open Edit Workspaces).
+    pub const NEW_WORKSPACE: &str = "workspace.new";
+    /// Open the Edit Workspaces dialog (reorder, hide, delete).
+    pub const EDIT_WORKSPACES: &str = "workspace.edit";
     /// Open (or focus) a panel; params `{"id": "<panel id>"}`.
     pub const OPEN_PANEL: &str = "window.panel";
     /// Close the focused panel.
@@ -121,6 +126,8 @@ pub(crate) const SHELL_ACTIONS: &[(&str, &str)] = &[
     (ids::SWITCH_WORKSPACE, "Switch Workspace"),
     (ids::RESET_WORKSPACE, "Reset to Saved Layout"),
     (ids::SAVE_WORKSPACE, "Save Changes to this Workspace"),
+    (ids::NEW_WORKSPACE, "Save as New Workspace..."),
+    (ids::EDIT_WORKSPACES, "Edit Workspaces..."),
     (ids::OPEN_PANEL, "Open Panel"),
     (ids::CLOSE_PANEL, "Close Panel"),
     (ids::MAXIMIZE_FRAME, "Maximize Panel Group"),

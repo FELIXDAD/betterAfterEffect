@@ -49,7 +49,8 @@
 - [x] 工作区预设（动效、审阅、Agent）与保存、重置（AE 语义：当前布局自动记住，"保存"后"重置"回到保存的布局）
 - [x] 历史面板（命令名 + 作者，含协作者和 Agent；数据来自 Stage 事件）
 - [x] Agent 活动记录、提案面板（`bae_ui::agent::AgentFeed`；`apps/bae` 用 bae-agent 的 `AuditLog` 和 `proposal::proposals` 实现）
-- [ ] 首次启动选择岗位、编辑工作区对话框、界面亮度设置
+- [x] 首次启动选择岗位、编辑工作区对话框（排序、显示/隐藏、另存为新工作区、删除自定义工作区）
+- [ ] 界面亮度设置（主题色现在是常量，需要把绘制统一经过一个亮度函数）
 - [x] 输入法验证报告（模拟测试通过，候选框改为跟随光标；真实拼音端到端待授权后确认，见下文）
 - [ ] 原生多窗口（浮动面板目前画在主窗口内）
 
@@ -74,6 +75,8 @@
   - `bae_ui::Workbench`：标题栏 + 工具栏 + 工作区栏 + 停靠区 + 状态栏；面板实例按需创建，关闭或切走时保存视图状态；命令 id 解析顺序：焦点面板 → 外壳动作 → `bae-model` 命令。
   - `apps/bae` 改用 Workbench（去掉 egui_dock 占位）：`Document`（Project + CommandRegistry，撤销/重做走 `Stage::undo/redo`）；菜单项 id = 命令 id；根视口命令走 `egui_winit::process_viewport_commands`；窗口用 `titlebar::viewport_builder` 创建；工作区状态存 `<state>/workspaces.json`。`--smoke-test` 和 `--headless --smoke-test` 都通过，headless 冒烟测试会轮流切换三个工作区；`BAE_SMOKE_SCREENSHOT=<path>` 可以把最后一帧存成 BMP。
   - 快捷键：键位表随工作区切换；文本框有焦点时不触发打字键和文本编辑键；Cmd+C/X/V 在非文本状态下变成 `edit.copy/cut/paste`；快捷键编辑器（Cmd+Alt+'）可以录制、删除、全部重置，冲突时先确认再替换。
+  - `KeymapBindings`：模块往已有键位表追加快捷键（12 的时间轴键位），不替换整个键位表；插件卸载时一并撤销。
+  - 首次启动（没有 `workspaces.json`）弹出"欢迎使用 BAE"选岗位；编辑工作区对话框；窗口 > 工作区 菜单加"另存为新工作区…""编辑工作区…"。
   - 历史面板：`bae_ui::history::HistoryLog`（应用资源）订阅 Stage 事件，显示命令名、作者（你 / 协作者 / Agent xxx）、撤销/重做；向 02 提了 `StageEvent.label` 和列出撤销栈的请求。
 
 ### 中文输入法验证报告（2026-11-20）

@@ -11,6 +11,7 @@
 | `Registry<PanelKind>` | 面板类型，如 `"timeline"` | 标题（英文，界面经 `tr()` 翻译）、是否可以开多个、工厂函数 |
 | `Registry<WorkspacePreset>` | 工作区，如 `"motion"` | 标题、默认布局（`dock::Layout`）、使用的键位表 id、在工作区栏里的顺序 |
 | `Registry<Keymap>` | 键位表，如 `"ae"`、`"ai"` | 快捷键列表（`Binding`） |
+| `Registry<KeymapBindings>` | 任意唯一 id，如 `"motion.timeline"` | 模块往某个键位表追加的快捷键（12 的时间轴 `U`、`J`/`K` 等），不必替换整个键位表 |
 | `Registry<ActionInfo>` | 命令 id，如 `"edit.undo"` | 界面层动作的标题；`bae-model` 的命令不用在这里注册 |
 
 `bae_ui::UiModule` 由外壳加载：注册外壳自己的动作；所有模块 build 完之后，给工作区布局里用到、但没有模块注册的面板补一个占位面板（显示"尚未实现"）。所以 12 号先注册 `"timeline"` 也好、晚一点注册也好，布局都不会出错；注册了同名 id 就替换掉占位。
@@ -51,6 +52,7 @@ app.register("timeline", PanelKind::new("Timeline", |spawn| Box::new(Timeline::n
 - `Chord` 写法和 AE 文档一致：`"Cmd+Shift+Z"`、`"Alt+["`、`"U"`。`Cmd` 是平台命令键（macOS 的 ⌘、Windows 的 Ctrl），`Ctrl` 是 macOS 的 Control 键。匹配时同时看逻辑键和物理键，所以 `Shift+[` 能匹配，非拉丁键盘布局下快捷键也有效。
 - `Binding { chord, action, params, when }`：`when` 是面板类型，表示只在这类面板获得焦点时生效；同一个键，面板内的绑定优先于全局绑定。
 - 每个工作区指定一个键位表，切换工作区就切换快捷键。
+- 最终键位表 = 键位表本身 + 所有指向它的 `KeymapBindings` + 用户自定义。模块卸载（插件）时它的 `KeymapBindings` 随之撤销。
 - 自定义：`KeymapOverrides { add, remove }` 保存在用户设置里，`Keymap::with_overrides` 合成最终键位表。`Keymap::conflicts()` 列出同一作用域里重复的键，`Keymap::conflict_for(chord, when)` 在用户确认前检查冲突。
 - 不带修饰键的快捷键（`U`、`P`、`J`、`K` …）在文本框获得键盘焦点时不触发（`Chord::is_typing_key`）。
 

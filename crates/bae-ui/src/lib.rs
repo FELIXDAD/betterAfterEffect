@@ -10,6 +10,7 @@
 //! | `Registry<PanelKind>` | panel kind (`"timeline"`) | a panel type and its factory |
 //! | `Registry<WorkspacePreset>` | workspace (`"motion"`) | default layout + keymap id |
 //! | `Registry<Keymap>` | keymap (`"ae"`) | shortcuts → command ids |
+//! | `Registry<KeymapBindings>` | any (`"motion.timeline"`) | shortcuts a module adds to a keymap |
 //! | `Registry<ActionInfo>` | command id (`"edit.undo"`) | title of a UI-level action |
 //!
 //! Add [`UiModule`] (the shell does) so the built-in actions are registered and
@@ -36,7 +37,7 @@ pub use action::{ActionInfo, Invocation};
 pub use dock::{Dock, DropZone, Frame, FrameId, Layout, Node, PanelHost, PanelId, TabInfo};
 pub use i18n::{Lang, tr};
 pub use icons::Icon;
-pub use keymap::{Binding, Chord, Conflict, Keymap, KeymapOverrides};
+pub use keymap::{Binding, Chord, Conflict, Keymap, KeymapBindings, KeymapOverrides};
 pub use panel::{Panel, PanelContext, PanelKind, PanelRequests, PanelSpawn};
 pub use workbench::{Workbench, WorkbenchContext, WorkbenchState};
 pub use workspace::WorkspacePreset;

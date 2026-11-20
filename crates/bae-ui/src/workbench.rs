@@ -15,6 +15,7 @@
 //! state, shortcut customizations) is saved by the shell.
 
 mod shortcuts;
+mod workspaces;
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -28,7 +29,7 @@ use crate::action::{ActionInfo, Invocation, ids};
 use crate::dock::{Dock, Layout, PanelHost, PanelId, TabInfo};
 use crate::i18n::tr;
 use crate::icons::{self, Icon};
-use crate::keymap::{Chord, Keymap, KeymapOverrides};
+use crate::keymap::{Chord, Keymap, KeymapBindings, KeymapOverrides};
 use crate::panel::{Panel, PanelContext, PanelKind, PanelRequests, PanelSpawn};
 use crate::theme::{color, metrics};
 use crate::workspace::WorkspacePreset;
@@ -55,6 +56,20 @@ pub struct WorkbenchState {
     pub panels: BTreeMap<String, serde_json::Value>,
     /// Shortcut customizations, by keymap id.
     pub keymaps: BTreeMap<String, KeymapOverrides>,
+    /// Workspace bar order chosen in Edit Workspaces (ids; others follow).
+    pub order: Vec<String>,
+    /// Workspaces not shown in the bar (still in Window > Workspace).
+    pub hidden: Vec<String>,
+    /// Workspaces the user created with "Save as New Workspace".
+    pub custom: BTreeMap<String, CustomWorkspace>,
+}
+
+/// A user-created workspace.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CustomWorkspace {
+    pub title: String,
+    pub keymap: String,
+    pub layout: Layout,
 }
 
 /// What the workbench needs from the shell for one frame.
@@ -97,14 +112,17 @@ pub struct Workbench {
     kinds: Arc<Registry<PanelKind>>,
     presets: Arc<Registry<WorkspacePreset>>,
     keymaps: Arc<Registry<Keymap>>,
+    keymap_extensions: Arc<Registry<KeymapBindings>>,
     actions: Arc<Registry<ActionInfo>>,
     /// Model commands `(id, English title)` for the shortcut editor.
     extra_commands: Vec<(String, String)>,
     editor: shortcuts::ShortcutEditor,
+    dialogs: workspaces::Dialogs,
     /// Workspaces sorted by order, rebuilt when the registry changes.
     workspaces: Vec<(String, Arc<WorkspacePreset>)>,
     presets_gen: u64,
     keymaps_gen: u64,
+    extensions_gen: u64,
     active: String,
     keymap: Keymap,
     state: WorkbenchState,
@@ -122,6 +140,15 @@ impl Workbench {
             app.registry::<ActionInfo>(),
             state,
         )
+        .with_keymap_extensions(app.registry::<KeymapBindings>())
+    }
+
+    /// Merge bindings other modules add to keymaps (`Registry<KeymapBindings>`).
+    pub fn with_keymap_extensions(mut self, extensions: Arc<Registry<KeymapBindings>>) -> Self {
+        self.keymap_extensions = extensions;
+        self.extensions_gen = u64::MAX;
+        self.refresh_registries();
+        self
     }
 
     pub fn with_registries(
@@ -137,12 +164,15 @@ impl Workbench {
             kinds,
             presets,
             keymaps,
+            keymap_extensions: Arc::new(Registry::new()),
             actions,
             extra_commands: Vec::new(),
             editor: shortcuts::ShortcutEditor::default(),
+            dialogs: workspaces::Dialogs::default(),
             workspaces: Vec::new(),
             presets_gen: u64::MAX,
             keymaps_gen: u64::MAX,
+            extensions_gen: u64::MAX,
             active: String::new(),
             keymap: Keymap::default(),
             state,
@@ -333,28 +363,29 @@ impl Workbench {
         let generation = self.presets.generation();
         if generation != self.presets_gen {
             self.presets_gen = generation;
-            let snapshot = self.presets.snapshot();
-            let mut list: Vec<(String, Arc<WorkspacePreset>)> = snapshot
-                .iter()
-                .map(|e| (e.id().to_string(), e.item().clone()))
-                .collect();
-            list.sort_by(|a, b| a.1.order.cmp(&b.1.order).then_with(|| a.0.cmp(&b.0)));
-            self.workspaces = list;
+            self.rebuild_workspaces();
         }
-        let generation = self.keymaps.generation();
-        if generation != self.keymaps_gen {
-            self.keymaps_gen = generation;
+        let generations = (
+            self.keymaps.generation(),
+            self.keymap_extensions.generation(),
+        );
+        if generations != (self.keymaps_gen, self.extensions_gen) {
+            (self.keymaps_gen, self.extensions_gen) = generations;
             self.rebuild_keymap();
         }
     }
 
     fn rebuild_keymap(&mut self) {
         let id = self.keymap_id();
-        let base = self
+        let mut base = self
             .keymaps
             .get(&id)
             .map(|k| (*k).clone())
             .unwrap_or_default();
+        let extensions = self.keymap_extensions.snapshot();
+        for e in extensions.iter().filter(|e| e.item().keymap == id) {
+            base.bindings.extend(e.item().bindings.iter().cloned());
+        }
         self.keymap = match self.state.keymaps.get(&id) {
             Some(overrides) => base.with_overrides(overrides),
             None => base,
@@ -431,6 +462,7 @@ impl Workbench {
         self.dock.show(&mut child, &mut host);
         self.apply_panel_requests(cx);
         self.shortcut_window(ui.ctx());
+        self.workspace_dialogs(ui.ctx());
         ime_follows_caret(ui.ctx());
         std::mem::take(&mut self.requests.invocations)
     }
@@ -454,13 +486,13 @@ impl Workbench {
     }
 
     fn workspace_bar(&mut self, ui: &mut Ui, rect: Rect) {
-        let names: Vec<&str> = self
+        let visible: Vec<&(String, Arc<WorkspacePreset>)> = self
             .workspaces
             .iter()
-            .map(|(_, p)| p.title.as_str())
+            .filter(|(id, _)| !self.state.hidden.contains(id) || *id == self.active)
             .collect();
-        let active = self
-            .workspaces
+        let names: Vec<&str> = visible.iter().map(|(_, p)| p.title.as_str()).collect();
+        let active = visible
             .iter()
             .position(|(id, _)| *id == self.active)
             .unwrap_or(0);
@@ -468,7 +500,7 @@ impl Workbench {
             return;
         };
         let inv = match event {
-            widgets::WorkspaceEvent::Switch(i) => match self.workspaces.get(i) {
+            widgets::WorkspaceEvent::Switch(i) => match visible.get(i) {
                 Some((id, _)) => {
                     Invocation::with_params(ids::SWITCH_WORKSPACE, serde_json::json!({ "id": id }))
                 }
@@ -476,8 +508,7 @@ impl Workbench {
             },
             widgets::WorkspaceEvent::Reset => Invocation::new(ids::RESET_WORKSPACE),
             widgets::WorkspaceEvent::Save => Invocation::new(ids::SAVE_WORKSPACE),
-            // The Edit Workspaces dialog is not built yet.
-            widgets::WorkspaceEvent::Edit => return,
+            widgets::WorkspaceEvent::Edit => Invocation::new(ids::EDIT_WORKSPACES),
         };
         self.requests.invocations.push(inv);
     }
@@ -634,6 +665,18 @@ impl Workbench {
             }
             ids::MAXIMIZE_FRAME => {
                 self.dock.toggle_maximize(None);
+                true
+            }
+            ids::EDIT_WORKSPACES => {
+                self.dialogs.edit_open = true;
+                true
+            }
+            ids::NEW_WORKSPACE => {
+                if let Some(title) = inv.params.get("title").and_then(|v| v.as_str()) {
+                    self.save_as_new_workspace(title);
+                } else {
+                    self.dialogs.edit_open = true;
+                }
                 true
             }
             ids::KEYBOARD_SHORTCUTS => {
@@ -1127,6 +1170,95 @@ mod tests {
         // The caret moved after the committed text.
         let (_, after) = run(&mut wb, vec![]);
         assert!(after.unwrap().cursor_rect.min.x > ime.cursor_rect.min.x);
+    }
+
+    #[test]
+    fn user_workspaces_order_hide_delete_and_persist() {
+        let (kinds, presets, keymaps, actions) = registries();
+        let mut wb =
+            Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
+        wb.open_panel("c".into());
+        let id = wb.save_as_new_workspace("  Mine ").unwrap();
+        assert_eq!(wb.active_workspace(), id);
+        assert!(wb.dock().contains(&"c".into()));
+        let titles = |wb: &Workbench| {
+            wb.workspaces()
+                .map(|(_, p)| p.title.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(titles(&wb), ["One", "Two", "Mine"]);
+        wb.move_workspace(&id, -1);
+        wb.move_workspace(&id, -1);
+        wb.move_workspace(&id, -1);
+        assert_eq!(titles(&wb), ["Mine", "One", "Two"]);
+        wb.set_workspace_hidden("two", true);
+        assert!(
+            !wb.delete_workspace(&id),
+            "the active workspace cannot be deleted"
+        );
+        assert!(!wb.delete_workspace("one"), "presets cannot be deleted");
+
+        // Survives a restart, in the same order.
+        let state = wb.state();
+        let (kinds, presets, keymaps, actions) = registries();
+        let mut wb = Workbench::with_registries(kinds, presets, keymaps, actions, state);
+        assert_eq!(wb.active_workspace(), id);
+        assert_eq!(titles(&wb), ["Mine", "One", "Two"]);
+        assert_eq!(wb.state().hidden, ["two"]);
+        wb.switch_workspace("one");
+        assert!(wb.delete_workspace(&id));
+        assert_eq!(titles(&wb), ["One", "Two"]);
+        // Workspace actions are routed through `handle`.
+        let resources = Resources::new();
+        let stage = Stage::new();
+        let author = AuthorId::system();
+        let cx = WorkbenchContext {
+            stage: &stage,
+            author: &author,
+            resources: &resources,
+            title: "",
+            dirty: false,
+        };
+        assert!(wb.handle(
+            &Invocation::with_params(ids::NEW_WORKSPACE, serde_json::json!({ "title": "Two B" })),
+            &cx
+        ));
+        assert_eq!(wb.workspaces().count(), 3);
+        assert!(wb.handle(&Invocation::new(ids::EDIT_WORKSPACES), &cx));
+        frame(&mut wb, vec![]);
+        wb.show_role_picker();
+        frame(&mut wb, vec![]);
+    }
+
+    #[test]
+    fn modules_extend_keymaps() {
+        let (kinds, presets, keymaps, actions) = registries();
+        let extensions = Arc::new(Registry::<KeymapBindings>::new());
+        let mut wb =
+            Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default())
+                .with_keymap_extensions(extensions.clone());
+        extensions
+            .register(
+                Owner::module("motion"),
+                "motion.timeline",
+                KeymapBindings::new("km", vec![Binding::new("J", "timeline.prev_key").when("b")]),
+            )
+            .unwrap();
+        extensions
+            .register(
+                Owner::module("other"),
+                "other",
+                KeymapBindings::new("not-active", vec![Binding::new("K", "x")]),
+            )
+            .unwrap();
+        frame(&mut wb, vec![]);
+        wb.open_panel("b".into());
+        let rest = frame(&mut wb, vec![key(Key::J, Modifiers::NONE)]);
+        assert_eq!(rest, vec![Invocation::new("timeline.prev_key")]);
+        assert!(frame(&mut wb, vec![key(Key::K, Modifiers::NONE)]).is_empty());
+        // Unregistering (plugin unload) removes the shortcut.
+        extensions.unregister("motion.timeline");
+        assert!(frame(&mut wb, vec![key(Key::J, Modifiers::NONE)]).is_empty());
     }
 
     #[test]

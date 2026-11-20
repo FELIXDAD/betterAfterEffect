@@ -104,6 +104,36 @@ const ZH: &[(&str, &str)] = &[
     ("Reset to Saved Layout", "重置为已保存的布局"),
     ("Save Changes to this Workspace", "保存对此工作区所做的更改"),
     ("Edit Workspaces...", "编辑工作区..."),
+    ("Edit Workspaces", "编辑工作区"),
+    ("Save as New Workspace...", "另存为新工作区..."),
+    ("New Workspace", "新建工作区"),
+    ("Show in Bar", "显示在工作区栏"),
+    ("Delete", "删除"),
+    ("Name", "名称"),
+    (
+        "Saves the current layout and shortcuts as a new workspace.",
+        "把当前布局和快捷键存成一个新工作区。",
+    ),
+    ("Welcome to BAE", "欢迎使用 BAE"),
+    (
+        "What do you do? BAE opens the matching workspace; you can switch any time in the workspace bar.",
+        "你主要做什么？BAE 会打开对应的工作区，之后随时可以在工作区栏切换。",
+    ),
+    ("Storyboard", "分镜"),
+    ("Editing", "剪辑"),
+    ("coming later", "以后提供"),
+    (
+        "Compositions, layers, keyframes, expressions and effects, laid out like After Effects.",
+        "合成、图层、关键帧、表达式和效果，界面与 After Effects 一致。",
+    ),
+    (
+        "Play back, annotate and compare versions.",
+        "播放、批注、对比版本。",
+    ),
+    (
+        "Watch what agents do and review their proposals.",
+        "查看 Agent 的操作并审核它们的提案。",
+    ),
     // Shell actions and menus (AE 2026 zh_CN dictionary, MenuID 0002/0003/0152)
     ("Undo", "撤消"),
     ("Redo", "重做"),

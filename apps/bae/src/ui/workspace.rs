@@ -61,6 +61,11 @@ impl Workspace {
         }
     }
 
+    /// Ask for the user's role (first launch).
+    pub fn show_role_picker(&mut self) {
+        self.workbench.show_role_picker();
+    }
+
     /// Model commands listed in the shortcut editor.
     pub fn set_extra_commands(&mut self, commands: Vec<(String, String)>) {
         self.workbench.set_extra_commands(commands);
