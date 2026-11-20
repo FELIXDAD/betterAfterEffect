@@ -321,6 +321,24 @@ fn tiff_depths_and_alpha_modes() {
         pixels
     );
 
+    // AE writes premultiplied pixels tagged "unspecified" (0).
+    set_extra_samples(&rgba8, 0);
+    let mut source = open(&rgba8);
+    assert_eq!(
+        source.info().video.as_ref().unwrap().alpha,
+        AlphaMode::Premultiplied
+    );
+    // The unspecified alpha sample is kept (decoders tend to drop it).
+    assert_eq!(
+        source.decode_cpu(&FrameRequest::new(0)).unwrap().data,
+        pixels
+    );
+    set_extra_samples(&rgba8, 2);
+    assert_eq!(
+        open(&rgba8).info().video.as_ref().unwrap().alpha,
+        AlphaMode::Straight
+    );
+
     // 16-bit RGB keeps precision.
     let rgb16 = dir.path().join("deep.tiff");
     let samples: Vec<u8> = [0x8000_u16, 1, 0xFFFF]
