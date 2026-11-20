@@ -837,3 +837,224 @@
 - **Priority:** P2
 - **Owner:** bae-ui-motion (+ bae-render, bae-media)
 - **Notes:** Preview cache semantics: ui-preview-render-io.md [ui-b], Preview & cache. Implementation hint: export straight from the GPU frame cache to the encoder.
+
+## Headless and multi-frame rendering
+
+### AE-UI-643 · aerender command-line arguments (aerender 命令行参数)
+
+- **What it does:** `aerender` (aerender.exe on Windows, in `Support Files`; `aerender` next to the app on macOS) renders a project's render queue or one comp without the UI; it is the reference for BAE's `bae render` CLI.
+- **Exact semantics:**
+  - Arguments (Adobe's documented set; flags are case-sensitive as written, UNVERIFIED for case):
+
+    | Argument | Value | Default | Meaning |
+    |---|---|---|---|
+    | `-h`, `-help` | — | — | print usage |
+    | `-version` | — | — | print version and exit, no render |
+    | `-v` | `ERRORS` \| `ERRORS_AND_PROGRESS` | `ERRORS_AND_PROGRESS` (UNVERIFIED) | verbosity of messages |
+    | `-reuse` | — | off | render in an already-running AE instance if any (AE stays open afterwards; prefs are written on quit only with `-reuse`) |
+    | `-mem_usage` | `image_cache_percent max_mem_percent` | from prefs | memory limits for this run |
+    | `-mfr` | `ON`\|`OFF` `max_cpu_percent` (1–100) | prefs | Multi-Frame Rendering on/off and CPU cap; cap ignored when OFF (AE 22.0+) |
+    | `-project` | path or URI | currently open project | project to open; error if none |
+    | `-comp` | comp name | — | render the first queueable RQ item for that comp, or add the comp to the queue and render it; without `-comp` the whole queue is rendered as is and only `-project`, `-log`, `-v`, `-mem_usage`, `-close` are honoured |
+    | `-rqindex` | 1-based RQ index | — | render that render-queue item; per-item options apply as with `-comp` |
+    | `-s` | start frame | item's start | first frame (comp frame number) |
+    | `-e` | end frame | item's end | last frame, inclusive |
+    | `-i` | increment | 1 | render every n-th frame and repeat it n−1 times (choppy, faster) |
+    | `-RStemplate` | template name | item's settings | apply a Render Settings template; unknown name = error |
+    | `-OMtemplate` | template name | module's settings | apply an Output Module template; unknown name = error |
+    | `-output` | path or URI | path in project | destination file; `[####]` allowed for sequences |
+    | `-log` | path | stdout | log destination |
+    | `-sound` | `ON`\|`OFF` | `OFF` | play the completion sound |
+    | `-close` | `DO_NOT_SAVE_CHANGES` \| `SAVE_CHANGES` \| `DO_NOT_CLOSE` | `DO_NOT_SAVE_CHANGES` | project handling after render; DO_NOT_CLOSE only with `-reuse` |
+    | `-continueOnMissingFootage` | — | off | do not stop on missing footage; log it and render color bars |
+
+  - Examples (Adobe): `aerender -project p.aep -comp "Composition_1" -s 1 -e 10 -RStemplate "Multi-Machine Settings" -OMtemplate "Multi-Machine Sequence" -output frames[####].psd`; `aerender -project p.aep` renders the whole queue.
+  - The version and build number are printed to stdout first.
+  - With `-comp` and an item already queued, `-s/-e/-i/-RStemplate/-OMtemplate/-output` modify that item for this run only (unless `-close SAVE_CHANGES`).
+- **Priority:** P1 (AE users with render farms / scripts); BAE's own CLI is required by ARCHITECTURE for CI and agents
+- **Owner:** apps/bae (+ bae-media, bae-model)
+- **Notes:** BAE decision: `bae render <project> [--comp NAME | --rq-index N] [--start F --end F --increment N] [--rs-template NAME] [--om-template NAME] [--output PATH] [--log PATH] [--verbose errors|progress] [--continue-on-missing-footage] [--threads/--max-cpu PCT]`; also accept the AE spellings (`-project`, `-comp`, `-s`, `-e`, `-i`, `-RStemplate`, `-OMtemplate`, `-output`, `-rqindex`, `-v`, `-log`, `-continueOnMissingFootage`) as aliases so farm scripts port unchanged; `-reuse`, `-mem_usage`, `-sound`, `-close` accepted and ignored with a warning (BAE CLI never modifies the project file unless `--save`). Project inputs: `.bae`/`.baez` (and `.aep` only if an AEP importer exists).
+
+### AE-UI-644 · Headless render behaviour, exit status and render-only nodes (无界面渲染行为)
+
+- **What it does:** Defines what a command-line render does with errors, missing assets, logging and licensing.
+- **Exact semantics:**
+  - Per-item errors set the item status to **Failed** (AE-UI-602) and the render continues with the next item; the log records the error. Missing footage stops the render unless `-continueOnMissingFootage` (then footage renders as color bars, i.e. the missing-footage placeholder; see project-comp-layers.md, Missing footage).
+  - Missing fonts / effects: AE renders with substitutes and logs a warning (UNVERIFIED for effects: missing effects are skipped as disabled).
+  - Progress lines (`ERRORS_AND_PROGRESS`): one per rendered frame with frame number and timecode, e.g. `PROGRESS: 0:00:00:01 (2): 0 Seconds` (UNVERIFIED exact format).
+  - Exit status: 0 on success, non-zero when any item failed or the project could not be opened (UNVERIFIED: AE returns 0 in some failure cases; scripts parse the log).
+  - Newly launched instances quit after the render; `-reuse` keeps the running instance.
+  - Render-only (non-royalty-bearing) mode: an empty file `ae_render_only_node.txt` in `~/Documents/` or `/Users/Shared/Adobe/` (macOS), `C:\Users\<user>\Documents` or `C:\Users\Public\Documents\Adobe` (Windows) lets aerender/watch folder run without sign-in; such nodes cannot use the UI.
+- **Priority:** P1
+- **Owner:** apps/bae (+ bae-media)
+- **Notes:** BAE decision: exit codes 0 = all items Done, 1 = at least one item Failed, 2 = usage error, 3 = project open/parse error, 4 = missing media without `--continue-on-missing-footage`; machine-readable progress via `--progress json` (one JSON object per frame: `{"item":1,"frame":12,"of":240,"elapsed_ms":…}`) for agents; never needs a GPU window (wgpu surface-less device; software fallback adapter allowed with a warning).
+
+### AE-UI-645 · Multi-Frame Rendering (多帧渲染)
+
+- **What it does:** Since AE 22.0 (2021-10) AE renders several frames concurrently on multiple CPU threads for both previews and Render Queue renders.
+- **Exact semantics:**
+  - Preferences > Memory & Performance (内存和性能) > Performance (性能): **Enable Multi-Frame Rendering** (启用多帧渲染) checkbox, default **on**; **% CPU reserved for other applications** (为其他应用程序保留的 CPU 百分比), slider 0 … 70 %, default 10 %.
+  - The number of concurrent frames is chosen dynamically by AE ("Dynamic Composition Analysis": AE renders a few frames, measures memory/CPU use, then ramps concurrency up; UNVERIFIED name), bounded by cores × (1 − reserved %) and RAM.
+  - Effects/plug-ins that are not MFR-safe force serialised rendering of the comp; such effects show a yellow warning icon in Effect Controls.
+  - Output is identical with MFR on or off (frames are independent); expression state is per frame (no cross-frame globals; expressions that relied on persistent state across frames break — see transform-keyframes-expressions.md [ani-b], evaluation semantics).
+  - Render Queue shows per-item concurrency/CPU in the info popup (AE-UI-607).
+  - Replaced the old "Render Multiple Frames Simultaneously" multiprocessing (separate background processes, removed AE CC 2015 (13.5)).
+  - Speculative Preview (cache frames when idle) builds on MFR; its settings are in Preferences > Previews (AE-UI-6xx).
+- **Priority:** P0 (BAE must render frames concurrently to be "a faster AE"; the preference itself P1)
+- **Owner:** bae-render (+ bae-anim, apps/bae)
+- **Notes:** aerender `-mfr ON|OFF max_cpu_percent`. Implementation hint: BAE's frame graph evaluates `EvaluatedComp` for N frames in parallel on CPU (bae-anim is pure, Send + Sync), and pipelines GPU submissions (one command encoder per frame, ring of readback buffers); encoders consume frames in order through a reorder buffer. Keep the "reserved CPU %" preference to size the CPU pool. BAE decision: GPU work is shared, so concurrency is chosen to keep the GPU queue full, not by CPU core count.
+
+### AE-UI-646 · Watch Folder and network rendering (监视文件夹与网络渲染)
+
+- **What it does:** File > Watch Folder… (文件 > 监视文件夹) puts AE (or the render engine) into a mode that polls a folder for collected projects and renders them; several machines can share one image-sequence render using Skip Existing Files.
+- **Exact semantics:**
+  - Projects arrive via File > Collect Files with "Enable 'Watch Folder' Render" (启用"监视文件夹"渲染) and a maximum machine count; Collect Files writes a Render Control File (RCF, `*_RCF.txt`) that watch-folder instances use to claim work; projects are rendered in alphabetical order.
+  - Watch-folder mode start: Watch Folder command; or a project named `Watch This Folder.aep` (AE watches its folder when opened); or (Windows) `afterfx.exe -wf <folder>`; `-re` starts the render engine instead of the full app.
+  - Multi-machine sequence render: Render Settings "Skip Existing Files" (AE-UI-621) + one output module; each machine renders the next frame whose file does not yet exist (in-progress frames are placeholders), so machines can be stopped/started at any time. A single movie file cannot be split across machines; chain a second item with Post-Render Action to build a movie from the sequence (AE-UI-627).
+  - Segment preferences (Preferences > Output) limit files per folder / movie size (AE-UI-6xx).
+- **Priority:** P2
+- **Owner:** apps/bae (+ bae-package, bae-media)
+- **Notes:** BAE decision: no watch-folder daemon in M1; `bae render` + Skip Existing Files semantics (atomic placeholder creation with `O_EXCL`, then rename on completion) give the same farm capability; Collect Files is owned by bae-package (project-comp-layers.md, Collect Files).
+
+## Import formats
+
+### AE-UI-647 · Still image import formats (静止图像导入格式)
+
+- **What it does:** The raster still formats AE imports as footage (single frame or numbered sequence), with bit depth and the BAE decode path.
+- **Exact semantics:**
+  - Any still format can be imported as an image sequence (see project-comp-layers.md [prj-a], Import; sequence frame rate from Preferences > Import, AE-UI-6xx).
+
+    | Format (中文) | Extensions | AE bit depth on import | AE alpha default | BAE priority | BAE decode path |
+    |---|---|---|---|---|---|
+    | PNG | .png | 8/16 bpc | straight | P0 | `png` / `zune-png` (pure Rust) |
+    | JPEG | .jpg, .jpe, .jpeg | 8 bpc | — | P0 | `zune-jpeg` (pure Rust); EXIF orientation honoured (UNVERIFIED for AE) |
+    | TIFF | .tif, .tiff | 8/16 bpc (32-bit float TIFF read as 32 bpc, UNVERIFIED) | straight unless ExtraSamples says associated | P1 | `tiff` crate |
+    | Photoshop | .psd, .psb | 8/16/32 bpc | per file | P0 (merged), P1 (layers) | own PSD reader, AE-UI-648 |
+    | OpenEXR | .exr, .sxr, .mxr | 32 bpc (half → float) | premultiplied | P1 | `exr` crate; layers/AOVs via EXtractoR-like channel selection, P2 |
+    | DPX / Cineon | .dpx, .cin | converted to project depth; Cineon log settings in Interpret Footage | — | P1 | own reader (10-bit packed) |
+    | Targa | .tga, .vda, .icb, .vst | 8 bpc | per header | P2 | `image` crate |
+    | BMP | .bmp, .rle, .dib | 8 bpc | — | P2 | `image` crate |
+    | GIF (still / first frame) | .gif | 8 bpc | index transparency | P2 | `gif` crate; animated GIF see AE-UI-649 |
+    | Radiance HDR | .hdr, .rgbe, .xyze | 32 bpc | — | P2 | `image` crate |
+    | SGI | .sgi, .bw, .rgb | 16 bpc | — | P2 | — (not planned) |
+    | IFF (Maya) | .iff, .tdi | 8/16 bpc | — | P2 | — (not planned) |
+    | HEIF / HEIC | .heif, .heic | 8 bpc (10-bit HDR: UNVERIFIED) | — | P2 | macOS ImageIO; Windows WIC + HEIF/HEVC extensions (same OS requirement as AE) |
+    | WebP | .webp | not supported by AE (UNVERIFIED for 2026) | — | P1 (BAE extra) | `image-webp` (pure Rust) |
+    | SVG | .svg | AE 25.x/26 beta: imports as composition with cropped layers only (shape layers), not as footage | — | P1 (BAE extra/native: vector → shape layers) | `usvg` → bae-vector shapes |
+    | Camera raw | .crw, .cr2, .nef, .arw, .dng, .raf, .orf, … | via Camera Raw dialog, 16 bpc | — | P2 | not planned (OS RAW decoders via ImageIO/WIC possible) |
+    | RLA/RPF | .rla, .rpf | 16 bpc + camera data | — | P2 | not planned |
+    | ElectricImage, Softimage PIC, PCX (Win), PICT | .img/.ei, .pic, .pcx, .pct | legacy | — | — | not planned |
+
+  - CMYK PSD/AI/EPS are converted to RGB on import; no input profile can be assigned to CMYK files.
+  - Embedded ICC profiles of PSD, TIFF, PNG and JPEG are read and used as the input profile when color management is on (see compositing-3d-color.md, Color management).
+- **Priority:** P0 (PNG, JPEG, PSD merged), P1 (TIFF, EXR, DPX, WebP, SVG), P2 (rest)
+- **Owner:** bae-media
+- **Notes:** Source: Adobe "Supported file formats" (updated 2026-03). ARCHITECTURE §1 fixes image/zune (PNG, JPEG, WebP), exr, psd crates. Import-as choices per extension (AE 2026, measured by py-aep): PSD/PSB/AI/EPS/PDF → Footage, Composition, Composition – Retain Layer Sizes; EXR → Footage or Composition – Retain Layer Sizes (multichannel); SVG → Composition – Retain Layer Sizes only. Implementation hint: decode stills on a worker pool straight into GPU upload buffers; cache decoded frames in the media cache keyed by (path, mtime, interpretation).
+
+### AE-UI-648 · Layered and vector still import: PSD, AI, EPS, PDF (分层与矢量文件导入)
+
+- **What it does:** Imports Photoshop and Illustrator/PostScript/PDF files either merged (footage) or as a composition whose layers map to the source layers.
+- **Exact semantics:**
+  - **PSD/PSB**: Import As Footage (Merged Layers or Choose Layer…, with Footage Dimensions Document Size / Layer Size), Composition, or Composition – Retain Layer Sizes (合成 - 保持图层大小). In Composition mode: each Photoshop layer → AE layer (name, opacity, blend mode, visibility, position), layer groups → nested comps, layer masks / vector masks → masks or track mattes (UNVERIFIED mapping), adjustment layers and fills kept only if "Editable Layer Styles" (可编辑的图层样式) is chosen, otherwise "Merge Layer Styles into Footage" (合并图层样式到素材); text layers import as footage but can be converted with Layer > Create > Convert to Editable Text; video layers and 3D layers are flattened.
+  - **AI / EPS / PS / PDF**: rasterized with continuous rasterization when the layer's Collapse/Continuously Rasterize switch is on (see compositing-3d-color.md [cmp-a], Collapse/continuous rasterize); PDF imports the first page only (Adobe; other pages via the PDF Options dialog, UNVERIFIED). AI with layers imports as composition like PSD. Layer > Create > Create Shapes from Vector Layer converts an AI layer to a shape layer (see shapes.md).
+  - Document size = artboard/crop box (AI: artboard; EPS: bounding box; UNVERIFIED).
+- **Priority:** P0 (PSD merged + Composition import), P1 (AI/PDF via vector path), P2 (EPS/PS)
+- **Owner:** bae-media (+ bae-model, bae-vector)
+- **Notes:** Import dialog options are in project-comp-layers.md [prj-a], Import. BAE decision: PSD via own reader (`psd` crate if adequate); AI files that are PDF-compatible (default since AI 9) and PDFs are parsed with a pure-Rust PDF content parser into bae-vector paths so they stay resolution-independent (P1); pure PostScript/EPS without PDF preview is not supported (P2, needs Ghostscript-class runtime, excluded by ARCHITECTURE).
+
+### AE-UI-649 · Video container and codec import (视频导入格式)
+
+- **What it does:** The video formats AE decodes and how BAE decodes each.
+- **Exact semantics:**
+
+  | Container / codec | Extensions | AE support | BAE priority | BAE decode path |
+  |---|---|---|---|---|
+  | QuickTime: H.264 / HEVC | .mov | import & export | P0 | macOS AVFoundation/VideoToolbox; Windows Media Foundation (HEVC needs the OS HEVC extension) |
+  | QuickTime: Apple ProRes 422 family / 4444 / 4444 XQ (incl. Rec.2020 PQ/HLG tags) | .mov | import & export | P0 | macOS VideoToolbox (hardware on Apple silicon); Windows/Linux: FFmpeg plugin (MF has no ProRes) |
+  | QuickTime: Animation, PNG, uncompressed, DNxHD/HR, CineForm, Photo-JPEG, DV | .mov | import | P1 (Animation/PNG/uncompressed), P2 (others) | pure-Rust decoders for Animation(`rle `)/PNG/uncompressed; others FFmpeg plugin |
+  | MPEG-4 / H.264 / HEVC / AAC | .mp4, .m4v | import (export H.264 only) | P0 | system frameworks |
+  | H.265 elementary | .hevc | import | P2 | system frameworks |
+  | AVCHD / MPEG-TS | .mts, .m2ts, .ts, .m2t | import | P1 | system frameworks (macOS AVFoundation does not open .mts — UNVERIFIED; else FFmpeg plugin) |
+  | MPEG-1 / MPEG-2 PS | .mpg, .mpeg, .m2p, .m2v, .mpe, .mpv, .mod | import | P2 | FFmpeg plugin |
+  | MXF OP1a / OP-Atom (XDCAM, AVC-Intra, DNxHD/HR, ProRes, JPEG 2000, PCM) | .mxf | import | P1 | FFmpeg plugin (no system MXF demuxer) |
+  | XDCAM HD/EX | .mxf, .mp4 | import | P2 | as MXF/MP4 |
+  | 3GPP | .3gp, .3g2, .amc | import | P2 | system frameworks |
+  | AVI (Video for Windows) | .avi | import & export (export Windows only per Adobe page) | P2 | pure-Rust RIFF demuxer for uncompressed/MJPEG; else FFmpeg plugin |
+  | Windows Media | .wmv, .wma, .asf, .asx | import, Windows only | P2 | Media Foundation (Windows only) |
+  | Animated GIF | .gif | import | P1 | `gif` crate (frame delays → variable rate footage conformed to the GIF's base rate, UNVERIFIED for AE) |
+  | DV stream | .dv | import & export | — | not planned |
+  | Flash SWF / FLV / F4V | .swf, .flv, .f4v | import (SWF with alpha, no interactivity) | — | not planned |
+  | Open Media Framework | .omf | import & export, Windows only | — | not planned |
+
+  - Variable frame rate footage is conformed to a constant rate (AE reports the average; see project-comp-layers.md [prj-a], Interpret Footage).
+  - Alpha in video (ProRes 4444, Animation, PNG, CineForm) is interpreted per Interpret Footage (Straight/Premultiplied/Guess).
+  - Embedded color metadata (`colr`/nclc, VUI) drives the media color space when color management is on (AE 24.x+ "media color space"; see compositing-3d-color.md).
+- **Priority:** P0 (MOV/MP4 with H.264, HEVC, ProRes), P1 (MXF, AVCHD, Animation/PNG MOV, GIF), P2 (rest)
+- **Owner:** bae-media
+- **Notes:** BAE decision (ARCHITECTURE §1): system frameworks first, FFmpeg as optional downloaded plugin; the importer must report "needs FFmpeg plugin" per file instead of failing silently. Risk: B2 benchmark (4K ProRes) on Windows depends on the plugin — record as a known gap. Implementation hint: hardware decode into GPU textures (VideoToolbox `CVMetalTexture`, MF DXGI surfaces → wgpu via external memory where possible) to avoid CPU copies; frame-accurate seeking needs a GOP index built on first open and cached in the media cache.
+
+### AE-UI-650 · Camera raw video import (摄像机原始视频导入)
+
+- **What it does:** Cinema-camera raw formats AE decodes through vendor SDKs.
+- **Exact semantics:**
+  - AE imports: RED (.r3d, with RED Image Processing settings in Interpret Footage > More Options / Source Settings), ARRIRAW (incl. MXF/ARRIRAW), Sony X-OCN (incl. VENICE X-OCN in MXF), Canon Cinema RAW Light (.crm), Panasonic camera formats (P2 MXF), CinemaDNG sequences (.dng via Camera Raw). Blackmagic RAW (.braw) is not native (third-party plugin) (UNVERIFIED for 2026).
+  - Source Settings… (源设置) dialog lets the user set debayer/ISO/white balance/colour space per footage item (UNVERIFIED per-format fields).
+- **Priority:** P2
+- **Owner:** bae-media (+ bae-plugin)
+- **Notes:** BAE decision: not in M1; raw decoders are proprietary SDKs → deliver later as optional plugins via bae-plugin's media-importer API.
+
+### AE-UI-651 · Audio import formats (音频导入格式)
+
+- **What it does:** Audio-only files AE imports as audio footage.
+- **Exact semantics:**
+
+  | Format | Extensions | AE support | BAE priority | BAE decode path |
+  |---|---|---|---|---|
+  | WAV / Broadcast WAV | .wav, .bwf | import & export | P0 | pure Rust (`hound`-class or `symphonia`) |
+  | AIFF / AIFC | .aif, .aiff | import & export | P1 | `symphonia` (pure Rust) |
+  | MP3 | .mp3, .mpa, .mpeg, .mpg, .mpe | import & export | P1 | `symphonia` |
+  | AAC / M4A | .aac, .m4a | import & export (export only inside H.264 MP4) | P1 | `symphonia` (AAC-LC) or system frameworks |
+  | MPEG-1 Audio Layer II in WAV | .wav | import | P2 | `symphonia` |
+  | WMA | .wma | import, Windows only | P2 | Media Foundation |
+
+  - Audio in video containers is decoded by the video path (AE-UI-649).
+  - Audio is resampled to the comp/preview rate on playback; BWF timecode metadata is read for the footage start timecode (UNVERIFIED).
+- **Priority:** P0 (WAV, audio inside MOV/MP4), P1 (AIFF, MP3, AAC)
+- **Owner:** bae-media
+- **Notes:** Implementation hint: decode whole audio files to f32 PCM in the media cache on import (small relative to video) so scrubbing and waveform drawing never block on decode. `symphonia` is pure Rust and covers WAV/AIFF/MP3/AAC/FLAC/Vorbis; FLAC/OGG are BAE extras (AE does not import them, UNVERIFIED).
+
+### AE-UI-652 · Project file import: AEP, AEPX, AET, PRPROJ, AAF, C4D, XML (项目文件导入)
+
+- **What it does:** Project-level files AE opens or imports into the current project.
+- **Exact semantics:**
+  - **AEP / AEPX / AET** (After Effects project, XML project, template): File > Open or Import (imports the whole project into a folder named after the file). Saving: File > Save As > Save a Copy As XML (`.aepx`); "Save a Copy As 2x.x" for one major version back (UNVERIFIED version scope).
+  - **Premiere Pro project** (.prproj): Import offers a dialog to choose one sequence or all sequences; each sequence becomes a comp with clips as layers (cuts, opacity, basic transforms; most Premiere effects dropped) (UNVERIFIED detail). Export: File > Export > Adobe Premiere Pro Project.
+  - **AAF** (.aaf): Windows only, import.
+  - **Cinema 4D** (.c4d): imported as footage via the Cineware effect; File > New > MAXON CINEMA 4D File creates one.
+  - **XML** (.xml): Adobe page lists XML import/export (Final Cut Pro XML is not directly importable; FCP XML goes through Premiere) (UNVERIFIED meaning of the XML row).
+  - **Maya camera data** (.ma): imports cameras (baked keyframes) as a comp.
+- **Priority:** P2 for all in BAE (AEP import P2 as a migration aid)
+- **Owner:** bae-media (+ bae-model, bae-motion)
+- **Notes:** Project data model and Import of projects into a folder: project-comp-layers.md [prj-a]. BAE decision: native format `.bae`/`.baez` (bae-package); Lottie JSON import is the documented interchange path (ARCHITECTURE: Lottie import/export); AEP import is a later P2 effort (binary RIFX; py-aep shows it is feasible); never write AEP.
+
+### AE-UI-653 · 3D model import (3D 模型导入)
+
+- **What it does:** Since AE 24.0 (2023-10, UNVERIFIED month) AE imports 3D models as 3D model layers rendered by the Advanced 3D renderer.
+- **Exact semantics:**
+  - Formats: glTF binary (.glb), glTF (.gltf + external resources), OBJ (.obj + .mtl), FBX (.fbx, added later, AE 25.x, UNVERIFIED); embedded animations play on the model layer (AE 24.x+, UNVERIFIED version).
+  - Imported as footage; placing it in a comp creates a 3D Model layer (requires the Advanced 3D renderer; see compositing-3d-color.md [cmp-b], Advanced 3D).
+- **Priority:** P2
+- **Owner:** bae-media (+ bae-render)
+- **Notes:** BAE decision: P2; if built, use `gltf` crate (pure Rust) and convert OBJ/FBX offline. Not part of M1.
+
+### AE-UI-654 · Data file import: JSON, CSV/TSV, MGJSON, JSX (数据文件导入)
+
+- **What it does:** Imports data files as data footage items readable from expressions (`footage("x.json").sourceData`, `.dataValue()`) and, for MGJSON, as data-driven streams on layers.
+- **Exact semantics:**
+  - JSON (.json): strict parser since AE 15.1 (illegal syntax is rejected); JSX (.jsx) may be imported and must contain a JS object literal (UNVERIFIED shape requirement).
+  - CSV (.csv), TSV (.tsv, .txt): tabular, first row = column names; values accessed by `dataValue([col,row])`.
+  - MGJSON (.mgjson): Motion Graphics JSON with sampled streams (time-based data, e.g. GPS/telemetry); dragging to a comp creates a layer with Data properties that can be pick-whipped.
+  - Data items have no frame size (0×0) and cannot be placed as visual layers except MGJSON.
+- **Priority:** P2
+- **Owner:** bae-media (+ bae-anim)
+- **Notes:** Expression API for data footage: transform-keyframes-expressions.md [ani-b], data footage. Implementation hint: parse with `serde_json`/`csv` once on import; expose an immutable value tree to QuickJS.
