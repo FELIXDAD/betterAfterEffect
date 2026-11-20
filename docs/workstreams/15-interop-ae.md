@@ -49,6 +49,7 @@ AE 工程能进来，也能回去。让团队里只用 AE 的人照常工作，�
 - [x] 导出脚本 v0（`bridges/ae/bae-export.jsx`）：合成、图层、变换关键帧（时间缓动、空间切线、连续/自动贝塞尔/漂浮、标签）、表达式、遮罩、形状内容、文字（源文本、动画器、选择器）、效果（matchName + 参数，含图层/遮罩参数）、标记、素材清单与收集、导出报告。**未在 AE 中验证**：只在模拟 DOM 上测过（`bridges/ae/tests/`，约 1.3 万项检查 + 金样），手动测试步骤见 `bridges/ae/README.md` 第 4 节。
 - [x] 交换格式草案 v0.1（`docs/interop/bae-interchange.md` + `bae-interchange.schema.json`）：容器直接用 02 的 `PrimTree`/`AttrSpec`/`Keyframe`/`Value` JSON；AE 属性名用可逆编码的 `ae:` 名字。用 dev 上的 `bae-model` 实测：示例文件经 `Op::RestorePrim` 写入 Sublayer、读回、重新序列化逐字段一致（`text_document` 除外，见请求）；素材 Prim 带 02 的 `file:*` 引用属性，`AssetFile::from_prim` 能直接读。向 02 报告的 `PrimTree` 反序列化 bug 已在 PR #9 修复并复核。
 - [x] 给 03 的对照样例：格式（`docs/interop/ae-anim-samples.md` + schema）、62 个用例（`bridges/ae/samples/anim-cases.json`，由 `gen_anim_cases.py` 生成）、AE 采样脚本 `bridges/ae/bae-anim-samples.jsx`。**AE 参考数据还没生成**，等有 AE 的人跑 README 的 T8。
+- [x] 真机一键实测脚本 `bridges/ae/tests/ae/run-in-ae.jsx`（T1 场景、T4 时间基准、T8 对照用例；全程不弹框，适合 `osascript`）。等 AE 能接收 `DoScript` 后运行。
 - [ ] BAE 侧导入器（`crates/bae-interop-ae`，02 已合并，可以开始）
 - [ ] 导回 AE 的 .jsx（`bae-anim-samples.jsx` 里的 `applyAttr` 是它的雏形）
 - [ ] Lottie
