@@ -770,7 +770,7 @@
   | Parameter (中文) | Type | Default | Units | Notes |
   |---|---|---|---|---|
   | freq (频率) | Number | required | wiggles per second | |
-  | amp (振幅) | Number | required | seconds of time offset | docs say "units of the property"; the example `scale.temporalWiggle(5, 0.2)` shows a time amount (UNVERIFIED unit) |
+  | amp (振幅) | Number | required | UNVERIFIED: seconds of time offset | the reference says "in units of the property to which it is applied" (text copied from wiggle); the documented example `scale.temporalWiggle(5, 0.2)` only makes sense as a time amount |
   | octaves (倍频) | Number | 1 | — | |
   | amp_mult (振幅倍数) | Number | 0.5 | — | |
   | t (时间) | Number | `time` | comp seconds | base time |
@@ -837,7 +837,7 @@
   v(x) = pre-expression keyframed value at comp time x
   ```
   - At t = e + p·D exactly, cycle returns v(s) (first value of the segment).
-  - Not available on Source Text, paths (shape/mask path) and the Levels Histogram per the docs (UNVERIFIED for paths in AE 2026; BAE: support `cycle`/`pingpong` on paths with the same vertex count, error otherwise).
+  - Documented exceptions (properties not expressible as simple numbers in the Timeline): Source Text, path shape properties (mask/shape path) and the Levels effect Histogram. Documented clipping: keyframe counts/durations that are too large are clipped to the maximum; too small gives a constant loop. BAE decision: may additionally support `cycle`/`pingpong` on paths with equal vertex count (an extension, AE errors or does not loop).
   - With 0 keyframes returns `value`; with 1 keyframe returns the constant value.
   - Spatial properties loop along the spatial path (sampling `v` handles that); `offset` adds the vector delta.
 - **Priority:** P0 (`loopOut()` is one of the most common expressions)
@@ -901,7 +901,7 @@
 
   | Method | Parameter (中文) | Type | Returns | Since |
   |---|---|---|---|---|
-  | `nearestKey(t)` | t (时间) | Number, comp seconds | key with minimal \|key.time − t\|; tie → earlier key (UNVERIFIED) | AE ≤ 6.5 |
+  | `nearestKey(t)` | t (时间) | Number, comp seconds | key with minimal \|key.time − t\|; tie → earlier key (UNVERIFIED) | long-standing |
   | `previousKey(t)` | t | Number | last key with time ≤ t; if none, the FIRST key | AE 26.0 (2026), JS engine only |
   | `nextKey(t)` | t | Number | first key with time > t; if none, the LAST key | AE 26.0, JS engine only |
 
@@ -970,7 +970,7 @@
   - Coordinate space: mask paths → layer space (origin top-left of the layer); shape paths → the shape group's space (relative to the group's Transform Anchor Point, i.e. the path's own coordinates); brush strokes → relative to the stroke start (first point = [0,0]).
   - "Rounded to the fourth decimal place": `round(x * 10000) / 10000` on every coordinate.
   - A path property's `value` in an expression is a Path object; returning a Path object (from another path property, or `createPath`) from a path property's expression sets the path (e.g. `thisComp.layer("Shape").content("Shape 1").content("Path 1").path` on a Mask Path). Arithmetic on Path objects is not supported.
-  - Accessors: `mask("Mask 1").maskPath` (also `.path`, UNVERIFIED alias), `content("Shape 1").content("Path 1").path`, brush `effect("Paint")("Brush 1")("Path")` (UNVERIFIED access string).
+  - Accessors: `mask("Mask 1").maskPath` (the reference's own examples also use `mask("Mask 1").path`), `content("Shape 1").content("Path 1").path`, brush `effect("Paint")("Brush 1")("Path")` (UNVERIFIED access string).
 - **Priority:** P1
 - **Owner:** bae-anim (+ bae-vector)
 - **Notes:** Parametric shapes (Rectangle/Ellipse/Polystar) have no path property in AE, so these methods are unavailable on them (UNVERIFIED). BAE shape path model is in shapes.md, Bezier model. Lottie-web: `points()`, `inTangents()`, `outTangents()`, `isClosed()` on shape paths (Lottie `ks.k` with `v`, `i`, `o`, `c`), tangent arrays as offsets.
@@ -998,7 +998,7 @@
   zero-length path: point = first vertex, tangent/normal = [0,0] (lottie-web)
   ```
   - Arc-length percentages do not align with vertices (a three-point path's middle vertex is generally not at 0.5); open vs closed paths with the same points give different results.
-  - `tangentOnPath` equals the normalised `outTangents()` handle only when a vertex lies exactly at that percentage and the handle is non-zero.
+  - `tangentOnPath`/`normalOnPath` return offsets of length exactly 1 from the sampled point; documented: they differ from `outTangents()` even where a user vertex lies at that percentage (those are raw, non-normalised handles). The incoming tangent is `-tangentOnPath()`.
 - **Priority:** P1
 - **Owner:** bae-anim (+ bae-vector)
 - **Notes:** Lottie-web approximates derivatives by sampling `pointOnPath(p + 0.001)`; BAE decision: analytic derivative of the cubic with kurbo's arc-length inversion (accuracy 1e-4 px), which differs from lottie-web only below visible precision. Typical use: attach a layer to a path, `toComp(pointOnPath(linear(time,0,5,0,1)))`.
@@ -1016,7 +1016,7 @@
   | is_closed (是否闭合) | Boolean | `true` | — | AE 16.1 fixed the menu inserting `is_closed` vs `isClosed` (parameter name only) |
 
   - Called as a method of a path property (`thisProperty.createPath(...)` / `myMask.createPath(...)`); a global `createPath` also resolves via implicit scope on path properties.
-  - Mismatched tangent array length (non-empty, ≠ points.length) → error (UNVERIFIED; lottie-web silently fills missing with [0,0]).
+  - Documented: a non-empty tangent array "must be exactly the same" length as `points`; AE's reaction to a mismatch (error vs fill) is UNVERIFIED (lottie-web silently fills missing with [0,0]; BAE: error).
   - Result is valid only as the result of a path property (or argument to further path calls); returning it from a numeric property is an error.
   - Examples: `p.createPath(p.points())` straightens all curves; `p.createPath(p.points(), p.inTangents(), p.outTangents(), false)` opens a closed path.
 - **Priority:** P1
@@ -1083,7 +1083,7 @@
   |---|---|---|
   | `castsShadows` | Number | 0 off, 1 on, 2 Only |
   | `acceptsShadows` | Number | 0 off, 1 on, 2 Only |
-  | `acceptsLights` | Number | 0 off, 1 on |
+  | `acceptsLights` | Number ("Boolean Number") | 0 off, 1 on |
   | `lightTransmission` | Number | percent |
   | `ambient`, `diffuse`, `specular`, `shininess`, `metal` | Number | percent (specular intensity = `specular`) |
 
@@ -1120,8 +1120,8 @@
 
   | Parameter (中文) | Type | Default | Notes |
   |---|---|---|---|
-  | t (时间) | Number | `time` | the help states this method does not use plain comp time (UNVERIFIED: interpreted in layer time, i.e. offset by `startTime`) |
-  | includeExtents (包括范围) | Boolean | `false` | shape layers: add stroke widths and other extents; paragraph text: return the paragraph box |
+  | t (时间) | Number | `time` | comp seconds (documented). For precomp/footage layers the source is sampled at the source time that comp time maps to (UNVERIFIED) |
+  | includeExtents (包括范围（译名待核）) | Boolean | `false` | documented to apply only to shape layers ("increases the size of the layer bounds as necessary", e.g. stroke widths) and paragraph text layers (returns the paragraph box, AE 15.1+); ignored for other layer types |
 
   - Returns a plain object `{top, left, width, height}` (layer-space pixels; `top`/`left` may be negative).
   - Per layer type:
