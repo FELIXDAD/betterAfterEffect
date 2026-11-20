@@ -514,6 +514,60 @@ pub struct MediaInfo {
     pub sequence: Option<SequenceInfo>,
 }
 
+impl MediaInfo {
+    /// Attribute values for the project's `Asset` prim, named as in
+    /// `bae_model::schema` (`kind`, `width`, `height`, `frame_rate`,
+    /// `duration`, `pixel_aspect`, `alpha_mode`, `has_video`, `has_audio`,
+    /// `sequence:first_frame`, `sequence:pattern`). Importers write them through
+    /// model commands. Attributes the file does not determine are left out
+    /// (stills have no rate or duration, opaque sources no alpha mode);
+    /// `file:*` (paths, fingerprint) belong to the importer and `color_space` to
+    /// `bae-color`'s naming.
+    pub fn asset_attributes(&self) -> Vec<(&'static str, bae_model::Value)> {
+        use bae_model::Value;
+        let mut attrs = vec![(
+            "kind",
+            Value::Enum(
+                if self.kind == MediaKind::ImageSequence {
+                    "sequence"
+                } else {
+                    "footage"
+                }
+                .into(),
+            ),
+        )];
+        attrs.push(("has_video", Value::Bool(self.video.is_some())));
+        attrs.push(("has_audio", Value::Bool(!self.audio.is_empty())));
+        if let Some(video) = &self.video {
+            attrs.push(("width", Value::Int(i64::from(video.width))));
+            attrs.push(("height", Value::Int(i64::from(video.height))));
+            attrs.push(("pixel_aspect", Value::Float(video.pixel_aspect.as_f64())));
+            if self.kind != MediaKind::Still {
+                if let Some(rate) = video.frame_rate {
+                    attrs.push(("frame_rate", Value::FrameRate(rate)));
+                }
+                if let Some(duration) = video.duration() {
+                    attrs.push(("duration", Value::Time(duration)));
+                }
+            }
+            let alpha = match video.alpha {
+                AlphaMode::Straight => Some("straight"),
+                AlphaMode::Premultiplied => Some("premultiplied"),
+                AlphaMode::Ignore => Some("ignore"),
+                AlphaMode::Opaque => None,
+            };
+            if let Some(alpha) = alpha {
+                attrs.push(("alpha_mode", Value::Enum(alpha.into())));
+            }
+        }
+        if let Some(sequence) = &self.sequence {
+            attrs.push(("sequence:first_frame", Value::Int(sequence.first)));
+            attrs.push(("sequence:pattern", Value::String(sequence.pattern.clone())));
+        }
+        attrs
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -558,6 +612,63 @@ mod tests {
         assert!(PixelAspect::from_f32(1.0).is_square());
         assert_eq!(PixelAspect::from_f32(2.0), PixelAspect::new(2, 1));
         assert!(PixelAspect::new(0, 5).is_square());
+    }
+
+    #[test]
+    fn asset_attributes_match_the_schema() {
+        use bae_model::{PrimType, schema};
+        let info = MediaInfo {
+            path: "shot_0001.exr".into(),
+            kind: MediaKind::ImageSequence,
+            format: "exr".into(),
+            video: Some(VideoInfo {
+                width: 2048,
+                height: 858,
+                pixel_aspect: PixelAspect::new(2, 1),
+                frame_rate: Some(FrameRate::FPS_24),
+                frame_count: Some(48),
+                bit_depth: 16,
+                sample_type: SampleType::Half,
+                color: ColorInfo::linear_bt709(),
+                alpha: AlphaMode::Premultiplied,
+                codec: "exr/piz".into(),
+            }),
+            audio: Vec::new(),
+            timecode: None,
+            sequence: Some(SequenceInfo {
+                pattern: "shot_####.exr".into(),
+                first: 1,
+                last: 48,
+                missing: Vec::new(),
+            }),
+        };
+        let attrs = info.asset_attributes();
+        assert_eq!(attrs.len(), 11);
+        for (name, value) in &attrs {
+            let def = schema::attr_def(&PrimType::ASSET, name)
+                .unwrap_or_else(|| panic!("{name} is not an Asset attribute"));
+            assert_eq!(def.value_type, value.value_type(), "{name}");
+            if !def.options.is_empty() {
+                let bae_model::Value::Enum(token) = value else {
+                    unreachable!()
+                };
+                assert!(def.options.contains(&token.as_str()), "{name} = {token}");
+            }
+        }
+        let get = |n: &str| {
+            attrs
+                .iter()
+                .find(|(name, _)| *name == n)
+                .map(|(_, v)| v.clone())
+        };
+        assert_eq!(
+            get("duration"),
+            Some(bae_model::Value::Time(Time::from_flicks(2 * 705_600_000)))
+        );
+        assert_eq!(
+            get("alpha_mode"),
+            Some(bae_model::Value::Enum("premultiplied".into()))
+        );
     }
 
     #[test]

@@ -381,12 +381,29 @@ fn remove_stale(dir: &Path, keep: &[PathBuf]) -> Result<(), ProjectError> {
     Ok(())
 }
 
+/// A temporary sibling name that does not collide between processes or machines
+/// writing the same project on a NAS: pid, time and a per-process counter.
+fn temp_path(path: &Path) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    path.with_file_name(format!(".{name}.tmp-{}-{nanos:x}-{n}", std::process::id()))
+}
+
 /// Write via a temporary file and rename, so a crash never leaves a half-written file.
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ProjectError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(io_err(parent))?;
     }
-    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+    let tmp = temp_path(path);
     let mut f = fs::File::create(&tmp).map_err(io_err(&tmp))?;
     f.write_all(bytes).map_err(io_err(&tmp))?;
     f.sync_all().map_err(io_err(&tmp))?;
@@ -432,7 +449,7 @@ fn write_baez(
     stage: &Stage,
     assets: &[BaezAsset],
 ) -> Result<(), ProjectError> {
-    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+    let tmp = temp_path(path);
     let file = fs::File::create(&tmp).map_err(io_err(&tmp))?;
     let mut zip = ZipWriter::new(io::BufWriter::new(file));
     let data = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
