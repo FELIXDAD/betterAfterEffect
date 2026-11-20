@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **Design v0.1** (workstream 19 design phase). Normative for 02, 04, 07 and 20. |
+| Status | **Design v0.1**, reconciled with the merged `bae-model` (02) and `bae-render` (04) interfaces; implemented parts are marked *(implemented)*. Normative for 02, 04, 07 and 20. |
 | Owner | 19 `core/plugins` |
 | ABI | `sdk/c/bae_plugin.h`, ABI 0.1 (major 0 = unstable; first frozen ABI is 1.0 at M1) |
 | Rust | `crates/bae-plugin-sdk` (shared contract + author SDK), `crates/bae-plugin` (host) |
@@ -96,7 +96,7 @@ application (or `bae --headless`, or `bae-plugin-runner` in out-of-process mode)
   IPC and permission checks cost only the node/call that uses them.
 - **P3 Same path.** A declarative effect and a built-in WGSL effect are the *same node
   type* with different data. A built-in Rust effect and a native plugin effect implement
-  the *same trait* (`bae_plugin_sdk::DynEffect`); the native one adds an FFI hop.
+  the *same trait* (`bae_render::Effect`, owned by 04); the native one adds an FFI hop.
 - **P4 Commands only.** Plugins never mutate the document directly. Edits are command
   invocations or ops recorded into the current transaction (ARCHITECTURE §2, principle 1).
 - **P5 Declarative first.** Anything describable as data (effect metadata, params,
@@ -146,7 +146,7 @@ Naming rule (ARCHITECTURE §3): internal Rust modules registered at startup are
 | `[[workspace]]` | data only | workspace registry (11) | UI thread | — |
 | `[[keymap]]` | data only | keymap registry (11) | UI thread | — |
 | `[[expression_library]]` | script (JS module), native | expression function registry (03) | expression threads | `BaeExpressionLibraryVTable1` |
-| `[[script]]` | script | registered as a command `script.<plugin-id>.<id>` (02) | script thread | — |
+| `[[automation]]` | script | registered as a command `script.<plugin-id>.<id>` (02) | script thread | — |
 
 Notes:
 
@@ -189,26 +189,32 @@ Notes:
 
 ### 4.3 One contract, three projections
 
-The canonical effect contract is the Rust trait pair in `bae-plugin-sdk`:
+The render-graph node interface is **`bae_render::Effect`** (04, merged in PR #16):
+`def()` (the `bae_model::EffectDef`), `output_bounds`, `input_roi`,
+`layer_dependencies` and `render(EncodeContext, EffectParams, input, output_roi)`.
+Parameter *definitions* are `bae_model::EffectDef` / `EffectRegistry` (02, merged in
+PR #11). Every form ends up as these two objects:
 
 ```
-bae_plugin_sdk::Effect          author-facing, static types (associated Instance type)
-bae_plugin_sdk::DynEffect       object-safe projection; blanket impl for every Effect
-bae_plugin_sdk::RenderServices  host services during pre-render / render (inputs, abort, parallel_for, gpu)
-bae_plugin_sdk::GpuServices     host-encoded GPU compute + native interop scope
+bae_model::EffectDef         definition: params (AE superset), flags; registered in EffectRegistry
+bae_render::Effect           implementation; registered in bae_render::EffectLibrary
 ```
 
-- **Built-in Rust effects** implement `Effect` and are registered as `Arc<dyn DynEffect>`.
-- **Native plugins**: the plugin implements `Effect` (Rust SDK) or the C vtable directly;
-  `export_plugin!` projects `Effect` onto `BaeEffectVTable1`; the host's `NativeEffect`
-  adapter (in `bae-plugin`) projects the vtable back onto `DynEffect`. Host services go the
-  other way: the host implements `RenderServices` once and exposes it to native plugins as
-  the `bae.render` / `bae.gpu.*` suites by thin `extern "C"` shims.
-- **Declarative effects** are executed by `DeclarativeEffect` (in `bae-plugin`), which
-  implements `DynEffect` on top of `GpuServices`. The render graph (04) therefore sees a
-  single node interface; it MAY downcast (`DynEffect::as_any()` → `DeclarativeEffect`)
-  to inspect the WGSL description for optimizations (fusion of pixel-style chains, §10.9).
+- **Built-in Rust effects** (07) implement `bae_render::Effect` directly.
+- **Declarative effects**: `bae-plugin` turns the manifest into an `EffectDef`
+  (`bae_plugin::effect_def`, *(implemented)*) and a `DeclarativeEffect` that implements
+  `bae_render::Effect` with the generic shader node (§11). The render graph MAY downcast
+  to inspect the WGSL description for optimizations (fusion, §10.9).
+- **Native plugins**: the plugin implements the C vtable (`bae_plugin.h`) directly, or
+  later a Rust author trait in `bae-plugin-sdk` projected onto the vtable by
+  `export_plugin!`; the host's `NativeEffect` adapter (in `bae-plugin`) implements
+  `bae_render::Effect` on top of the vtable. Host services go the other way: the host
+  exposes them to native plugins as the `bae.render` / `bae.gpu.*` suites.
 - The render graph never needs to know which form it is running.
+
+The richer protocol of §8 and §10 (pre-render checkouts, other times, threading
+classes, CPU nodes, instance state) is the target; `bae_render::Effect` grows towards
+it with default methods as 04 implements the executor (requests in §23.3).
 
 ---
 
@@ -244,7 +250,6 @@ one top-level directory). Media/binaries may be stored uncompressed. Max 256 MiB
 | Full id | `<plugin-id>/<contribution-id>` | `com.example.vignette/vignette` |
 | Param key | `[a-z][a-z0-9_]*`, ≤ 64 bytes, unique per effect, not starting with `bae_` | `amount` |
 | Param id | integer 1..=2³¹−1, unique per effect, never reused | `3` |
-| Popup choice id | integer 1..=2³¹−1, unique per param, never reused | `2` |
 | Platform key | `<os>-<arch>`: `macos-aarch64`, `macos-x86_64`, `windows-x86_64`, `windows-aarch64`, `linux-x86_64`, `linux-aarch64` (headless/CI); `ios-aarch64`, `android-aarch64` reserved | |
 
 Plugin ids and contribution ids are case-sensitive ASCII and are what documents store;
@@ -364,9 +369,9 @@ grows = false                            # result rect grows by the mirrored rea
 
 [[effect.texture]]                       # compute style only: intermediates (§11.5)
 name = "blur_h"                          # [a-z][a-z0-9_]*, ≤ 32 bytes; bound as bae_tex_<name>
-format = "working"                       # "working" (default) | "rgba16f" | "rgba32f" | "r16f" | "r32f" | "rg16f" | "rg32f" | "rgba8unorm"
+format = "working"                       # "working" (default) | "rgba16f" | "rgba32f" | "r32f" | "rg32f" | "rgba8unorm" (portable storage formats)
 rect = "output"                          # "output" (default) | "input": which rect it covers
-scale = 1.0                              # (0, 1]: resolution relative to that rect (0.5 = half res)
+scale = 1.0                              # reserved: API 0.1 accepts only 1.0 (reduced-resolution intermediates later)
 
 [[effect.pass]]                          # compute style only: executed in order (§11.5)
 entry = "blur_horizontal"                # @compute entry point in `shader`
@@ -413,17 +418,23 @@ Common keys: `id` (required), `key` (required), `type` (required), `name` (requi
 | `color` | `default` [r,g,b,a] (0..1), `alpha`(false) | f32×4 straight, working space | `vec4<f32>` |
 | `point` | `default` [x,y], `relative`(true: fraction of layer) | f64×2 layer px | `vec2<f32>` render px |
 | `point3d` | `default` [x,y,z], `relative` | f64×3 | `vec3<f32>` |
-| `popup` | `default` (choice id), `choices = [{id=1,name="Circle"}, {separator=true}, …]` | u32 choice id | `u32` |
+| `popup` | `default` (1-based index, default 1), `choices = ["Circle", "Fit Layer"]` (append only) | i64 1-based index (AE) | `u32` |
 | `layer` | `default` ("none"/"self") | layer ref | texture `bae_tex_<key>` + rect |
-| `group` | `collapsed`(false) | — | — |
+| `group` | `end_id` (required: id of the group end, AE counts it as a param), `collapsed`(false); members set `group = "<key>"` and follow it contiguously | — | — |
 | `button` | `label` | — | — |
-| `string` | `default`, `max_length`, `multiline` | UTF-8 | — |
-| `asset` | `extensions` | asset ref | — (native only) |
+| `string` | reserved (API 0.1 has no string param kind in `bae_model`, R02-8) | UTF-8 | — |
+| `asset` | reserved (R02-8) | asset ref | — |
 | `arbitrary` | — (native only) | bytes | — |
 | `path` | — | mask ref | — (native only) |
 
 Param `flags` (manifest spelling): `hidden`, `disabled`, `supervise`, `not-animatable`,
-`hold`, `start-collapsed`, `ui-only`, `no-expressions`, `transition-progress`. Numeric
+`cannot-time-vary`, `start-collapsed`, `ui-only`, `no-expressions`, `transition-progress`.
+The first six map to `bae_model::ParamFlags`; the last three are kept by the plugin host.
+Mapping to `bae_model::ParamKind` *(implemented, `bae_plugin::effect_def`)*: float →
+`Slider`, int → `Slider { integer }`, angle, checkbox, color, point, point3d, popup →
+`Popup { options }`, layer, group → `GroupStart`…`GroupEnd`, button, arbitrary →
+`ArbitraryData`, path. Relative point defaults depend on the layer size and are resolved
+by the effect implementation, not stored in the `EffectDef` (R02-9). Numeric
 `default` MUST lie in `range`; `slider` MUST lie within `range`.
 
 #### 5.3.8 Other contribution tables
@@ -450,7 +461,7 @@ menu = "Layer/Align"                     # optional menu path (well-known Englis
 shortcut = { motion = "Ctrl+Alt+G" }     # optional per-workspace default
 description = "Snap selected layers to an N-pixel grid."   # also the MCP tool description
 
-[[script]]
+[[automation]]                           # AE File > Scripts. Not [[script]]: [script] is the runtime table
 id = "batch-rename"; name = "Batch Rename"; entry = "batchRename"; menu = "File/Scripts"
 
 [[panel]]
@@ -467,7 +478,7 @@ id = "easing"; namespace = "easing"; implementation = "script"; entry = "scripts
 ```
 
 Commands get the registry id `plugin.<plugin-id>.<command-id>` (dots in the plugin id are
-kept), which is also their MCP tool name; scripts get `script.<plugin-id>.<script-id>`.
+kept), which is also their MCP tool name; automation scripts get `script.<plugin-id>.<id>`.
 
 #### 5.3.9 `[exports]`
 
@@ -492,7 +503,7 @@ keywords = ["边缘", "压暗"]
 [effect.vignette.params]
 amount = "数量"
 center = "中心"
-[effect.vignette.choices.shape]          # popup key → choice id → label
+[effect.vignette.choices.shape]          # popup key → 1-based index → label
 1 = "圆形"
 2 = "椭圆"
 
@@ -513,7 +524,7 @@ Missing translations fall back to the manifest strings. Native plugins may also 
 `bae plugin check <dir|file>` and the loader run the same validation (in `bae-plugin`):
 ids/keys syntax and uniqueness; versions parse; `api` major supported; paths safe and
 existing; every `implementation = "native"` contribution has a library for at least one
-platform; `[native]`/`[script]` present iff used; param ids/keys/choice ids unique and
+platform; `[native]`/`[script]` present iff used; param ids/keys unique and
 > 0; defaults within ranges; groups defined before use; declarative effects: shader
 exists, passes/textures consistent (§11.5), expressions parse and reference only defined
 numeric params (§11.7), and the shader compiles against the generated prelude (naga).
@@ -595,8 +606,8 @@ Plugin `version` is semver; it carries a data-compatibility promise:
 
 - Patch and minor releases MUST read every document written by older versions of the
   same major: param ids are never reused or retyped, removed params become hidden (the
-  host keeps their stored values), popup choice ids are never reused, state blobs stay
-  readable.
+  host keeps their stored values), popup choices are only appended (the document stores
+  the 1-based index, as AE does), state blobs stay readable.
 - A major bump MAY break this. The plugin then SHOULD provide migration: declarative
   `[[effect.migration]]` tables (`from = "1"`, `rename = {old_id = new_id}`, `drop = [...]`,
   `defaults = {...}`) or native `message(selector = "bae.migrate")` receiving the old
@@ -825,7 +836,7 @@ stay placeholders (§20 item 5).
   `l10n_key`; dynamic UI changes go through `update_params_ui`.
 - The host converts the definitions into an **effect schema** registered with 02's schema
   registry under (full id, plugin version): stable numeric ids (AE disk ids), keys, types,
-  defaults, ranges, popup choice ids, group structure, flags.
+  defaults, ranges, popup choices, group structure, flags.
 - The document stores values **by param id**. Keys are what WGSL (§11.3), scripts and
   expressions use. Expressions (03) may address a param by key, by its default English
   name or by 1-based definition index (AE `effect("Blur")(1)` semantics).
@@ -1012,8 +1023,8 @@ SDK is copied. 20's `bae-aex-host::selector` encodes the same table (`LifecycleH
 | `CHECKBOX` | `CHECKBOX` |
 | `COLOR` | `COLOR` (float; 8-bit values converted) |
 | `POINT`, `POINT_3D` | `POINT`, `POINT_3D` |
-| `POPUP` | `POPUP` (AE 1-based index `i` ↔ choice id `i`) |
-| `GROUP_START` / `GROUP_END` | `GROUP` + `group_id` of children |
+| `POPUP` | `POPUP` (same 1-based index) |
+| `GROUP_START` / `GROUP_END` | `GROUP` (`end_id` = the GROUP_END index) |
 | `ARBITRARY_DATA` | `ARBITRARY` |
 | `PATH` | `PATH` |
 | `BUTTON` | `BUTTON` |
@@ -1028,7 +1039,7 @@ identity (groups occupy a slot in both).
 ## 10. Render-graph contract (for 04)
 
 This is what `bae-render` implements around an effect node. All of it is form-agnostic:
-the node holds an `Arc<dyn bae_plugin_sdk::DynEffect>` resolved once at graph build (§7.3).
+the node holds an `Arc<dyn bae_render::Effect>` resolved once at graph build (§7.3).
 
 ### 10.1 Request
 
@@ -1142,7 +1153,7 @@ error code per second).
 
 ```text
 graph build (once per graph):
-  entry   = effect_registry.get(full_id)          // Arc<dyn DynEffect>, a lease (§7.3)
+  entry   = effect_library.get(match_name)       // Arc<dyn bae_render::Effect>, a lease (§7.3)
   desc    = entry.description()                   // flags, threading, devices, formats
   flags   = desc.flags ⊕ entry.dynamic_flags(...) // if DYNAMIC_FLAGS
   inst    = render_instance_cache.get_or_create(prim, state_revision)
@@ -1162,7 +1173,7 @@ per frame:
 ### 11.1 Model
 
 A declarative effect is manifest data + WGSL. The host turns it into a
-`DeclarativeEffect` (crate `bae-plugin`) that implements `DynEffect`; 04 executes it with
+`DeclarativeEffect` (crate `bae-plugin`) that implements `bae_render::Effect`; it runs with
 the **same generic shader node, uniform ring, bind-group cache, transient texture pool
 and pipeline cache** as the built-in WGSL effects of 07, which are themselves authored as
 declarative packages embedded in the binary (§19). There is no interpreter, no extra
@@ -1170,76 +1181,78 @@ copy and no extra dispatch: the < 2 % budget (§22) holds by construction.
 
 ### 11.2 Module assembly
 
-The host compiles one WGSL module per (effect, working format, pass) — pixel style has one
-implicit pass. The modules differ only in the prelude's pass target (§11.5):
+*(implemented: `bae_plugin::wgsl`)* The host compiles one WGSL module per (effect,
+working format, pass-target format); pixel style has one implicit pass. The modules
+differ only in the prelude's `bae_out` declaration:
 
 ```
-<generated prelude>       §11.3: structs, bindings, helpers (never written by authors)
-<include files>           §11.10, in manifest order
-<author shader>           `shader = "..."`
-<generated kernel>        pixel style only (§11.4)
+<prelude>       §11.3: structs, bindings, helpers (never written by authors; virtual file)
+<include files> §11.10, in manifest order
+<author shader> `shader = "..."`
+<kernel>        pixel style only (§11.4; virtual file)
 ```
 
-Rules for author code: it MUST NOT declare `@group`/`@binding` resources (all bindings
-come from the prelude, so the host can renumber them for fusion); identifiers starting
-with `bae_` / `Bae` are reserved; `enable f16;` is allowed only if the manifest lists
-`features = ["f16"]` and the device supports it (otherwise the effect is unavailable on
-that device with a diagnostic). Diagnostics map naga spans back to `file:line:column`
-of the include or shader file (the prelude is a separate virtual file).
+Rules for author code (checked on the naga IR at load): it MUST NOT declare
+`@group`/`@binding` resources (all bindings come from the prelude, so the host can
+renumber them for fusion); functions, types, constants and globals starting with `bae_` /
+`Bae` are reserved. With `features = ["f16"]` the host emits `enable f16;` at the top of
+the prelude (authors MUST NOT write it); a device without f16 makes the effect
+unavailable with a diagnostic. Diagnostics map naga spans back to `file:line:column` of
+the include or shader file.
 
 ### 11.3 Generated prelude
 
+Plugin API 0.1 prelude (abridged; `bae_plugin::wgsl::prelude` is the reference):
+
 ```wgsl
-// ---- types (render pixel space, half-open rects) ----
-struct BaeRect { min: vec2<i32>, max: vec2<i32> }
+struct BaeRect { min: vec2<i32>, max: vec2<i32> }   // half-open, render pixels
 
 struct BaeFrame {
-  output_rect: BaeRect,     // rect covered by the pass target (result rect for "output")
+  target_rect: BaeRect,     // rect of the current pass target (= output_rect for "output")
+  output_rect: BaeRect,     // the effect's output rect
   layer_bounds: BaeRect,
   downsample: vec2<f32>,    // (1,1) full res, (0.5,0.5) half ...
-  time: f32,                // layer time in seconds (exact value: time_flicks)
-  time_step: f32,           // seconds per comp frame
-  frame_rate: f32,
+  time: f32,                // layer time in seconds
+  time_step: f32,           // seconds per comp frame (0 if unknown)
+  frame_rate: f32,          // comp frame rate (0 if unknown)
   pixel_aspect: f32,
   shutter_angle: f32,       // degrees
   shutter_phase: f32,
-  flags: u32,               // BAE_FRAME_* below
-  seed: u32,                // stable per effect instance (hash of instance uid): noise seeds
-  frame_index: i32,         // round(time * frame_rate), exact
+  flags: u32,               // BAE_FRAME_LINEAR | BAE_FRAME_FINAL | BAE_FRAME_HIGH_QUALITY
+  seed: u32,                // stable per effect instance: noise seeds
+  frame_index: i32,
   pass_index: u32,
 }
 const BAE_FRAME_LINEAR: u32 = 1u;        // working space is linearized
 const BAE_FRAME_FINAL: u32 = 2u;         // render queue / bae render
 const BAE_FRAME_HIGH_QUALITY: u32 = 4u;
+@group(0) @binding(0) var<uniform> frame: BaeFrame;
 
-struct BaeInputInfo { rect: BaeRect, flags: u32, _pad: u32 }   // flags: 1 = empty, 2 = solid
-
-// ---- one field per numeric param, in definition order (only for effects with such params) ----
+// One field per numeric param, in definition order (absent if the effect has none).
 struct BaeParams {
   amount: f32,              // float, angle (degrees)          → f32
   center: vec2<f32>,        // point (render px)                → vec2<f32>
-  color: vec4<f32>,         // color (straight, working space)  → vec4<f32>
-  shape: u32,               // popup (choice id), checkbox 0/1  → u32
+  color: vec4<f32>,         // color (straight)                 → vec4<f32>
+  shape: u32,               // popup (1-based index), checkbox  → u32
   samples: i32,             // int                              → i32
 }
-
-@group(0) @binding(0) var<uniform> frame: BaeFrame;
 @group(0) @binding(1) var<uniform> params: BaeParams;
-@group(0) @binding(2) var bae_linear: sampler;       // clamp-to-edge
-@group(0) @binding(3) var bae_nearest: sampler;
-// textures, one binding each, declared only if the effect uses them:
-//   bae_tex_input   (self input)          bae_tex_to (transitions)
-//   bae_tex_<key>   (each LAYER param)    bae_tex_<name> (each [[effect.texture]], read side)
-//   bae_out         (storage texture of the current pass target, working or texture format)
-// and per readable texture an info uniform: bae_info_input, bae_info_<key>, ...
+
+// Host-internal: one vec4<i32> rect (min.xy, max.xy) per source; use the helpers.
+@group(0) @binding(2) var<uniform> bae_sources: BaeSources;
+@group(0) @binding(3) var bae_out: texture_storage_2d<FORMAT, write>;   // current pass target
+@group(0) @binding(4..) var bae_tex_<src>: texture_2d<f32>;           // one per source
 ```
 
-Field order and types follow the definition order; the uniform layout is WGSL's
-uniform address-space layout (vec3 align 16, vec4 align 16, struct size rounded to 16);
-the host packs the evaluated values with the same rules (layout computed once at load).
-Params without a WGSL representation (group, button, string, asset, arbitrary, path,
-layer) get no field; layer params get textures instead. Points are in **render pixels**
-(downsample applied); distances are not converted — use `bae_scale(x)`.
+Sources, in binding order: `input`, `to` (transitions), each `layer` param (by key),
+each `[[effect.texture]]` (compute style). Uniform layouts follow WGSL's uniform
+address-space rules; the host reads the member offsets from the naga IR of the compiled
+module, so host packing and shader layout cannot disagree. Params without a WGSL
+representation (group, button, arbitrary, path, layer) get no field; layer params get
+textures instead. Points are in **render pixels** (downsample applied); distances are not
+converted — use `bae_scale(x)`. There are no samplers: `bae_sample_*` is an exact
+bilinear filter over `bae_load_*`, identical for every format (RGBA32F is not filterable
+everywhere) and with AE's transparent-outside semantics.
 
 Helpers (all pure WGSL, inlined by the compiler):
 
@@ -1247,17 +1260,19 @@ Helpers (all pure WGSL, inlined by the compiler):
 |---|---|
 | `bae_load_<src>(p: vec2<i32>) -> vec4<f32>` | texel at render pixel `p`; transparent outside the source rect (AE semantics) |
 | `bae_sample_<src>(p: vec2<f32>) -> vec4<f32>` | bilinear sample at render-pixel position (centers at `.5`); transparent outside |
+| `bae_rect_<src>() -> BaeRect` | the rect the source covers |
 | `bae_store(p: vec2<i32>, c: vec4<f32>)` | write the current pass target |
 | `bae_target_pixel(id: vec3<u32>) -> vec2<i32>` / `bae_in_target(p) -> bool` | invocation id → render pixel of the target, bounds test |
 | `bae_scale(x: f32) -> f32` | full-res distance → render px (`x * frame.downsample.x`) |
 | `bae_to_layer(p: vec2<f32>) -> vec2<f32>` / `bae_from_layer(...)` | render px ↔ full-res layer px |
 | `bae_layer_uv(p) -> vec2<f32>` | 0..1 across `layer_bounds` |
 | `bae_premultiply(c)` / `bae_unpremultiply(c)` | alpha conversions (unpremultiply of alpha 0 returns 0) |
-| `bae_to_linear(c)` / `bae_from_linear(c)` | working ↔ linear light: identity if `BAE_FRAME_LINEAR`, else the sRGB curve |
+| `bae_to_linear(c)` / `bae_from_linear(c)` | working ↔ linear light: identity if `BAE_FRAME_LINEAR`, else the sRGB curve (sign-preserving for HDR) |
 | `bae_luma(c) -> f32` | Rec.709 luma of the working values |
-| `bae_hash(seed: u32, p: vec2<i32>) -> f32` | deterministic 0..1 noise |
+| `bae_hash(seed: u32, p: vec2<i32>) -> f32` | deterministic 0..1 noise (PCG) |
 
-`<src>` is `input`, `to`, a layer-param key or a texture name.
+`<src>` is `input`, `to`, a layer-param key or a texture name. Adding helpers or `BaeFrame`
+fields is a minor API change; renaming or removing them is a major one.
 
 ### 11.4 Styles
 
@@ -1270,9 +1285,10 @@ fn vignette(c: vec4<f32>, px: BaePixel) -> vec4<f32> { ... }            // autho
 ```
 
 It receives the premultiplied input color at the output pixel and returns the output
-color. It MAY read `frame` and `params` and call helper functions; it MUST NOT read any
-texture (checked on the naga IR). The host generates the kernel
-(`@workgroup_size(16, 16)`: load → function → store) and may fuse chains (§10.9).
+color. It MAY read `frame` and `params` and call helper functions; it MUST NOT use any
+texture, directly or through callees (checked on the naga IR at load). The host
+generates the kernel `bae_pixel_main` (`@workgroup_size(16, 16)`: load → function →
+store) and may fuse chains (§10.9).
 Implied flags: `PIXEL_INDEPENDENT`; ROI = identity.
 
 **Compute style** (`style = "compute"`): the author writes `@compute` entry points named by
@@ -1294,16 +1310,15 @@ fn blur_horizontal(@builtin(global_invocation_id) id: vec3<u32>) {
 
 - Passes run in manifest order, each as one dispatch with its own pipeline (derived from
   the entry point) and bind group. The last pass writes `output`.
-- Each pass's module declares every readable source as a sampled texture and **only that
-  pass's target** as `bae_out` (`texture_storage_2d<FORMAT, write>` with the target's
-  format), so `bae_store` always writes the current target. Pipeline layouts are derived
-  from each entry point's static resource use, so unused declarations cost nothing. A pass
-  MUST NOT read its own target.
-- `[[effect.texture]]` intermediates come from the host's transient pool (aliased with
-  other nodes' temporaries when lifetimes do not overlap): size = `ceil(rect size ×
-  scale)`, `rect = "output"` or `"input"`, format `working` or explicit. Sampling helpers
-  account for the scale (`bae_sample_<name>` takes render-pixel coordinates of the full
-  rect). Each texture must be written before it is read.
+- Each pass's module declares every source as a sampled texture and **that pass's
+  target** as `bae_out` (`texture_storage_2d<FORMAT, write>` with the target's format),
+  so `bae_store` always writes the current target. The pass's own target is bound to a
+  1×1 placeholder in that pass. A pass MUST NOT read its own target and MUST list every
+  source it reads in `reads` (both checked at load from the entry point's global uses).
+- `[[effect.texture]]` intermediates come from the host's transient pool: they cover
+  `rect = "output"` or `"input"` at full render resolution (`scale` is reserved), format
+  `working` or one of the portable storage formats. Each texture must be written before
+  it is read.
 - Data-dependent pass structures (pyramids with a param-dependent depth, iterative
   solvers, reductions feeding later passes) are out of scope for v1 declarative effects:
   use native `bae.gpu.compute`. A future `repeat = "<expr>"` key is reserved.
@@ -1338,7 +1353,7 @@ func    := min | max | abs | floor | ceil | sqrt | clamp
 ```
 
 Values are f64; booleans are 0/1; `params.<key>` is allowed for float, int, angle,
-checkbox (0/1) and popup (choice id) params. Expressions are parsed at load into a tiny
+checkbox (0/1) and popup (1-based index) params. Expressions are parsed at load into a tiny
 bytecode, evaluated in `pre_render` with the values at the frame time (no allocation),
 and validated by `bae plugin check`. Division by zero yields 0 and a debug diagnostic.
 
@@ -1608,7 +1623,7 @@ for BAE plugins (performance first, ARCHITECTURE §2 principle 6).
 - Frames: CPU images live in shared-memory slots (POSIX shm / Mach VM on macOS, file
   mappings on Windows) allocated by the host, page-aligned, rows 64-byte aligned, reused
   across frames. The runner hands slot memory to the plugin directly.
-- Host side: `OutOfProcessEffect` implements `DynEffect` and forwards; the render graph
+- Host side: `OutOfProcessEffect` implements `bae_render::Effect` and forwards; the render graph
   cannot tell the difference except for cost.
 
 ### 15.3 Supported subset
@@ -1817,7 +1832,8 @@ until 05 defines the per-glyph evaluation contract.
    - **declarative packages embedded in the binary** (`crates/bae-effects/packages/<id>/`
      with `bae-plugin.toml` + WGSL, `include_str!`'d and registered through
      `DeclarativeEffect::from_embedded`), or
-   - **Rust `bae_plugin_sdk::Effect` implementations** registered as `Arc<dyn DynEffect>`.
+   - **Rust `bae_render::Effect` implementations** registered in `bae_render::EffectLibrary`
+     with their `EffectDef` in `bae_model::EffectRegistry`.
 3. **No private host API for built-ins.** If a built-in needs something the SDK lacks, it is
    added to the SDK (and therefore to the C ABI) first. Compositor-internal operations
    (layer transforms, blend modes, masks, track mattes, motion blur, 3D) are not effects
@@ -1948,13 +1964,13 @@ These are the interfaces 19 needs. IDs are referenced from code and other specs.
 
 | ID | Request |
 |---|---|
-| R01-1 | Keep `Registry<T>` runtime-mutable with `Owner::Plugin(id)`, `unregister_owner`, `Entry::is_unique` (present in 01's branch). Add an **atomic owner swap** for plugin updates: in one batch, remove all entries of `Owner::Plugin(id)` and register the new version's entries, emitting one `RegistryEvent` (§7.4 "Update"). |
+| R01-1 | **Done** (`bae_app::Registry<T>`, `Owner::Plugin`, `App::unregister_owner`, `Entry::is_unique`). Remaining: an **atomic owner swap** for plugin updates (remove all entries of `Owner::Plugin(id)` and register the new version's in one batch with one `RegistryEvent`, §7.4 "Update").|
 | R01-2 | A generic way for `bae-plugin` to reach every contribution registry without depending on each domain crate: e.g. a `PluginRegistries` facade in `bae-app` (or a convention: each registry type is a `Resources` entry implementing a small `ContributionRegistry` trait with `register_plugin_entry` / `remove_owner`). |
 | R01-3 | `bae_gpu::native`: wgpu-hal access to Metal device/queue, D3D12 device/queue/adapter LUID (Vulkan when enabled), native texture handles + formats from `wgpu::Texture`, D3D12 resource-state transitions for handed-out textures, "submit pending work now", and fence helpers (encode signal/wait of an `MTLSharedEvent` / `ID3D12Fence` on the host queue). |
 | R01-4 | `GpuContext` device-lost notification (callback registration) so plugin GPU data is torn down and set up again. |
-| R01-5 | `bae-platform` paths: bundled/system/user plugin directories, per-plugin data and cache directories; CLI flags `--plugin-dir`, `--plugin-dev`, `--safe-mode`, `--plugin-validate`; env `BAE_PLUGIN_PATH`; settings storage for enabled/trusted plugins. |
+| R01-5 | `bae-platform` paths: bundled/system/user plugin directories (**done**: `AppDirs::plugin_dirs`), per-plugin data and cache directories; CLI flags `--plugin-dir`, `--plugin-dev`, `--safe-mode`, `--plugin-validate`; env `BAE_PLUGIN_PATH`; settings storage for enabled/trusted plugins. |
 | R01-6 | Crash handler: a per-thread breadcrumb slot (static TLS, no allocation) that `bae-plugin` writes around every plugin call and that crash reports include; an API to read the last crash's breadcrumb at startup. |
-| R01-7 | Workspace dependency pins: `semver = "1.0.28"` and `naga = "30.0.2"` (the version wgpu 30.0.2 uses; features `wgsl-in`) for `bae-plugin`; `libloading` is already pinned. |
+| R01-7 | **Done in 19's interface PR** (root `Cargo.toml`, two lines): `semver = "1.0.28"`, `naga = "30.0.2"` with `wgsl-in` (the copy wgpu already links). |
 | R01-8 | Packaging (with 21): ship `bae-plugin-runner` next to the app; decide macOS hardened-runtime strategy for third-party dylibs (`disable-library-validation` vs out-of-process only). |
 
 ### 23.2 02 doc-model (`bae-model`)
@@ -1962,18 +1978,22 @@ These are the interfaces 19 needs. IDs are referenced from code and other specs.
 | ID | Request |
 |---|---|
 | R02-1 | Effect Prim fields: `type` = full id `<plugin-id>/<contribution-id>`, writer `plugin_version`, params keyed by stable numeric id (AE disk id) with static value / keyframes / expression, **unknown ids preserved**, opaque **state blob** (bytes, last-writer-wins, synced) + `state_plugin_version`, `enabled`, a stable `instance_uid: u64`. |
-| R02-2 | Effect schema registry, runtime-extensible, keyed by (full id, plugin version): param definitions as a superset of AE types (FLOAT, INT, ANGLE, CHECKBOX, COLOR, POINT, POINT_3D, POPUP with stable choice ids, LAYER, GROUP, ARBITRARY, PATH, BUTTON, STRING, ASSET; GRADIENT/CURVE reserved), flags (§5.3.7), ranges, defaults, groups. Same registry for shape-operator params. |
+| R02-2 | **Done** (PR #11: `EffectDef`, `EffectRegistry`, `ParamKind`, `ParamFlags`, `EffectStatus::MissingPlugin`). Remaining: key the registry by (match name, plugin version) when two versions are installed (§6.4); same registry for shape-operator params. |
 | R02-3 | Cached schema snapshot stored with each effect Prim (or per document per (full id, version)) for placeholder UI (§20). |
 | R02-4 | Effect-logic hooks without a `bae-model` → `bae-plugin` dependency: a trait (e.g. `EffectLogic`) registered per effect type that commands call synchronously: `init_state` on AddEffect (returns the initial blob), `param_changed` during SetParam for supervised params (may append ops to the same transaction, returns state-changed), never invoked for undo/redo/remote ops (§8.5). |
-| R02-5 | Value types: f64 (float, angle, points), i32, bool, `[f32; 4]` straight color, u32 choice id, layer ref (stable layer id), mask ref, asset ref, string, bytes; an interpolation hook for ARBITRARY values (`BaeArbitraryVTable1.interpolate`), used by 03. |
+| R02-5 | Value types: done in `bae_model::Value` (popup = 1-based `Int`, as AE). Remaining: an interpolation hook for ARBITRARY values (`BaeArbitraryVTable1.interpolate`), used by 03. |
 | R02-6 | Project plugin lock in `project.json` (§6.7): `[{id, version, contributions, scope_hint}]`, maintained by AddEffect/plugin update commands. |
 | R02-7 | `StageEvent` granularity down to (effect Prim, param id / state) so render caches invalidate exactly. |
+| R02-8 | `ParamKind::String` (value `String`) and `ParamKind::Asset` (value `AssetRef`) so the manifest's reserved `string` / `asset` params can be enabled. |
+| R02-9 | Relative point defaults: `ParamKind::Point { default_relative: bool }` (or a `DefaultValue::LayerRelative`) so AddEffect writes `fraction × layer size`, as AE's `PF_ADD_POINT` does. Until then `bae-plugin` leaves the `EffectDef` default empty and the effect resolves it against the layer bounds. |
 
 ### 23.3 04 compositor (`bae-render`)
 
 | ID | Request |
 |---|---|
-| R04-1 | Effect node executing `Arc<dyn DynEffect>` per §10: ROI negotiation, request merging, checkouts of self / layer params / other times / transition `to`, frame data release, identity aliasing. |
+| R04-1 | Effect node executing `Arc<dyn bae_render::Effect>` per §10 (output_bounds / input_roi / render exist): request merging, checkouts of layer params / other times / transition `to`, identity aliasing. |
+| R04-11 | `EffectParams` additions for declarative effects (all have AE equivalents): layer bounds at the request scale, comp frame rate and `time_step`, `linear` working-space flag, final/preview flag and quality, shutter angle/phase, a stable per-instance seed. `bae-plugin` fills `BaeFrame` with fallbacks (input rect as layer bounds, 0 for unknowns) until then. |
+| R04-12 | A way to construct `EncodeContext` outside `bae-render` for effect tests (e.g. make `ImageAllocator` public or add `EncodeContext::for_tests(gpu, encoder, format)` with a simple pool). |
 | R04-2 | CPU nodes: GPU conversion kernels for every `BaePixelFormat` (RGBA/BGRA/ARGB × U8/U16/U16_15BIT/F16/F32 × premultiplied/straight), 64-byte-aligned staging rows, async double-buffered readback/upload, graph splitting so GPU work continues while CPU nodes run. |
 | R04-3 | Scheduler honouring `threading`, per-frame abort flags and progress aggregation. |
 | R04-4 | Render request fields of §10.1 (flicks time/time_step, frame rate, downsample x/y, PAR, quality, shutter, color space + linear flag, final/preview/headless, layer bounds, layer duration, render id). |
@@ -2015,6 +2035,11 @@ These are the interfaces 19 needs. IDs are referenced from code and other specs.
 | D8 | Supervision is not re-run for undo/redo/remote ops | deterministic collaboration |
 | D9 | Out-of-process is opt-in for BAE plugins, default for AE plugins | performance first; AE plugins are the unstable ones |
 | D10 | Project-scoped declarative plugins load without a trust prompt | they cannot do harm beyond GPU load; shared projects just work |
+| D11 | Popup values are the 1-based index (AE), choices are append-only; no separate choice ids | matches `bae_model` (merged) and AE projects 1:1 |
+| D12 | Automation scripts are `[[automation]]`, not `[[script]]` | `[script]` is the runtime table; TOML cannot hold both |
+| D13 | The render node trait is `bae_render::Effect` (04); definitions are `bae_model::EffectDef` (02) | both merged first; one trait for built-ins and every plugin form |
+| D14 | No samplers in the WGSL prelude; `bae_sample_*` is bilinear over `bae_load_*` | identical results for every working format (RGBA32F is not filterable everywhere), AE edge semantics |
+| D15 | Uniform member offsets are read from the naga IR of the compiled module | host packing and shader layout cannot drift apart |
 
 ### 24.2 Open
 
