@@ -68,7 +68,7 @@ application (or `bae --headless`, or `bae-plugin-runner` in out-of-process mode)
   type* with different data. A built-in Rust effect and a native plugin effect implement
   the *same trait* (`bae_plugin_sdk::DynEffect`); the native one adds an FFI hop.
 - **P4 Commands only.** Plugins never mutate the document directly. Edits are command
-  invocations or ops recorded into the current transaction (ARCHITECTURE §2.1).
+  invocations or ops recorded into the current transaction (ARCHITECTURE §2, principle 1).
 - **P5 Declarative first.** Anything describable as data (effect metadata, params,
   passes, ROI, workspaces, keymaps) is data in the manifest, so it can be listed,
   validated and cached without loading code.
@@ -319,6 +319,8 @@ devices = ["gpu"]                        # native only: ["cpu"], ["gpu"], ["cpu"
 
 # ---- declarative only ----
 shader = "shaders/vignette.wgsl"         # required for wgsl
+includes = []                            # optional WGSL files concatenated before `shader` (§11.10)
+features = []                            # optional WGSL features: ["f16"] (§11.2)
 style = "pixel"                          # "pixel" | "compute" (§11.4); default: "compute" iff [[effect.pass]] exists
 entry = "vignette"                       # pixel style: name of the pixel function; default = id with '-' → '_'
 identity_when = "params.amount == 0"     # optional expression (§11.7): node is skipped when true
@@ -437,7 +439,17 @@ id = "easing"; namespace = "easing"; implementation = "script"; entry = "scripts
 Commands get the registry id `plugin.<plugin-id>.<command-id>` (dots in the plugin id are
 kept), which is also their MCP tool name; scripts get `script.<plugin-id>.<script-id>`.
 
-#### 5.3.9 Localization (`locales/<bcp47>.toml`)
+#### 5.3.9 `[exports]`
+
+```toml
+[exports]                                # resources dependents may use (§5.3.5)
+wgsl = ["shaders/noise.wgsl"]            # includable as "plugin:<this-id>/shaders/noise.wgsl" (§11.10)
+js = ["scripts/lib.js"]                  # importable as "plugin:<this-id>/scripts/lib.js" (§17.1)
+```
+
+Native plugins export suites at runtime instead (`BaePluginExports.get_suite`, §14.4).
+
+#### 5.3.10 Localization (`locales/<bcp47>.toml`)
 
 ```toml
 [plugin]
@@ -674,7 +686,7 @@ crash-quarantine, or app exit.
    wait until the GPU has passed a fence submitted after the plugin's last command buffer
    (completion handlers registered by the plugin must not run after its code is unmapped).
    The ledger MUST be empty afterwards; a non-empty ledger is a bug reported in debug
-   builds and tests ("no GPU leak" acceptance test, §22.4).
+   builds and tests ("no GPU leak" acceptance test, §22.3).
 6. **Unmap** the library (`dlclose`/`FreeLibrary`). Physical unmapping is best effort:
    macOS does not unmap images that registered thread-local variables (typical for Rust
    cdylibs) — logical unload is guaranteed regardless. Reloading the same id loads the
@@ -772,7 +784,7 @@ handle it, sends `message("bae.migrate")` on M with input
 `{"from_version": "...", "params": [{"id", "key", "value"}...], "state_b64": "..."}` and
 expects the same shape back for the current version. The result is applied as one
 command ("Update effect to version …", undoable). If neither exists, major mismatches
-stay placeholders (§20.5).
+stay placeholders (§20 item 5).
 
 ### 8.4 Parameters
 
@@ -1510,7 +1522,7 @@ Three directions, all at runtime:
    callback, renumbering constants, changing a released suite version.
 3. **Old plugin on new host** (same major): guaranteed. CI keeps the example plugins built
    with every released SDK minor as binary artifacts and runs them against the current
-   host (acceptance test, §22.4).
+   host (acceptance test, §22.3).
 4. **New plugin on old host**: the manifest `api` lets an old host reject it before any code
    loads, with "update BAE". Plugins that use newer suites *optionally* (NULL check) keep
    `api` low.
