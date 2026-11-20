@@ -1305,10 +1305,10 @@
   | `color` | Array[4] | RGBA 0–1 |
   | `coneAngle` | Number | degrees (Spot) |
   | `coneFeather` | Number | percent (Spot) |
-  | `falloff` | Number | menu index of Falloff (None / Smooth / Inverse Square Clamped; 1-based, UNVERIFIED) |
-  | `radius` | Number | px |
-  | `falloffDistance` | Number | px |
-  | `castsShadows` | Number | 1 on / 0 off |
+  | `falloff` | Number | documented as "the cone falloff dropdown option"; menu index of Falloff (None / Smooth / Inverse Square Clamped; 1-based, UNVERIFIED) |
+  | `radius` | Number | px (unit not stated in the reference) |
+  | `falloffDistance` | Number | px (unit not stated in the reference) |
+  | `castsShadows` | Boolean | documented type Boolean (unlike the layer material attribute `castsShadows`, which is a Number 0/1/2) |
   | `shadowDarkness` | Number | percent |
   | `shadowDiffusion` | Number | px |
 
