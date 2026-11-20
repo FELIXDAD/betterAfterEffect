@@ -91,7 +91,101 @@ VISION 的总原则是"当前版本优先做好更快的 AE，剪辑现在只留
 ## 7. 统计（`python3 speclint.py --readme` 生成）
 
 <!-- speclint:begin -->
-（清单写完后生成）
+### 按文件统计
+
+| 文件 | 区域 | M1 | M2 | M3 | M4 | 以后 | 合计 | 含“待核” |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| [project-sequence.md](project-sequence.md) | PRJ | 9 | 0 | 0 | 14 | 5 | 28 | 3 |
+| [monitors.md](monitors.md) | MON | 7 | 0 | 0 | 13 | 2 | 22 | 6 |
+| [timeline-editing.md](timeline-editing.md) | TL | 23 | 0 | 0 | 17 | 5 | 45 | 17 |
+| [effects-transitions.md](effects-transitions.md) | FX | 0 | 0 | 1 | 17 | 5 | 23 | 5 |
+| [keyframes.md](keyframes.md) | KF | 1 | 0 | 0 | 7 | 2 | 10 | 4 |
+| [audio.md](audio.md) | AUD | 2 | 0 | 0 | 7 | 13 | 22 | 5 |
+| [color.md](color.md) | CLR | 0 | 0 | 0 | 6 | 5 | 11 | 2 |
+| [graphics-captions.md](graphics-captions.md) | GFX | 0 | 1 | 0 | 4 | 10 | 15 | 2 |
+| [markers.md](markers.md) | MRK | 1 | 0 | 0 | 7 | 3 | 11 | 4 |
+| [proxy-render-export.md](proxy-render-export.md) | EXP | 0 | 1 | 0 | 11 | 3 | 15 | 1 |
+| [interchange.md](interchange.md) | XCH | 0 | 6 | 0 | 1 | 5 | 12 | 1 |
+| [shortcuts.md](shortcuts.md) | KEY | 9 | 0 | 0 | 4 | 1 | 14 | 4 |
+| **合计** | | **52** | **8** | **1** | **108** | **59** | **228** | **54** |
+
+### 按主负责模块统计
+
+| 模块 | M1 | M2 | M3 | M4 | 以后 | 合计 |
+|---|---:|---:|---:|---:|---:|---:|
+| bae-edit | 24 | 3 | 0 | 45 | 16 | 88 |
+| bae-ui-edit | 22 | 1 | 0 | 41 | 12 | 76 |
+| bae-model | 3 | 0 | 0 | 1 | 3 | 7 |
+| bae-anim | 1 | 0 | 0 | 1 | 0 | 2 |
+| bae-render | 0 | 0 | 0 | 4 | 0 | 4 |
+| bae-media | 0 | 0 | 0 | 7 | 10 | 17 |
+| bae-color | 0 | 0 | 0 | 5 | 4 | 9 |
+| bae-effects | 0 | 0 | 0 | 2 | 3 | 5 |
+| bae-motion | 0 | 0 | 0 | 0 | 3 | 3 |
+| bae-ui | 2 | 0 | 0 | 2 | 0 | 4 |
+| bae-package | 0 | 1 | 0 | 0 | 0 | 1 |
+| bae-agent | 0 | 1 | 0 | 0 | 0 | 1 |
+| bae-plugin | 0 | 0 | 1 | 0 | 0 | 1 |
+| bae-interop-edit | 0 | 2 | 0 | 0 | 8 | 10 |
+
+### M1 清单（0.0.1 框架必须做或预留）
+
+落地的 PR 里把“已做”改成 `[x]` 并写上 PR 号。
+
+| ID | 名称 | 模块 | 已做 |
+|---|---|---|---|
+| [PR-PRJ-001](project-sequence.md) | 项目（Project） | bae-model (+ apps/bae) | [ ] |
+| [PR-PRJ-003](project-sequence.md) | 自动保存（Auto Save） | bae-model (+ bae-sync) | [ ] |
+| [PR-PRJ-005](project-sequence.md) | 撤销与历史记录（Undo / History） | bae-ui (+ bae-model) | [ ] |
+| [PR-PRJ-006](project-sequence.md) | 工作区与模式（Workspaces / Import·Edit·Color·Export） | bae-ui-edit (+ bae-ui) | [ ] |
+| [PR-PRJ-017](project-sequence.md) | 链接媒体、设为脱机、替换素材（Link Media / Make Offline / Replace Footage） | bae-model (+ bae-ui-edit) | [ ] |
+| [PR-PRJ-021](project-sequence.md) | 静止图像默认持续时间（Still Image Default Duration） | bae-edit (+ bae-ui-edit) | [ ] |
+| [PR-PRJ-022](project-sequence.md) | 新建序列与序列预设（New Sequence / Sequence Presets） | bae-edit (+ bae-ui-edit) | [ ] |
+| [PR-PRJ-023](project-sequence.md) | 序列设置（Sequence Settings） | bae-edit (+ bae-model, bae-ui-edit) | [ ] |
+| [PR-PRJ-027](project-sequence.md) | 多条序列与序列标签（Timeline Tabs） | bae-ui-edit (+ bae-ui) | [ ] |
+| [PR-MON-001](monitors.md) | 源监视器（Source Monitor） | bae-ui-edit (+ bae-render, bae-media) | [ ] |
+| [PR-MON-002](monitors.md) | 节目监视器（Program Monitor） | bae-ui-edit (+ bae-render, bae-edit) | [ ] |
+| [PR-MON-004](monitors.md) | 播放与停止（Play / Stop Toggle） | bae-ui-edit (+ bae-media, bae-render) | [ ] |
+| [PR-MON-006](monitors.md) | 逐帧与跳转（Step / Go to Edit / Home·End） | bae-ui-edit (+ bae-edit) | [ ] |
+| [PR-MON-007](monitors.md) | 入点和出点（Mark In / Mark Out） | bae-edit (+ bae-ui-edit) | [ ] |
+| [PR-MON-009](monitors.md) | 三点编辑（Three-Point Editing） | bae-edit (+ bae-ui-edit) | [ ] |
+| [PR-MON-012](monitors.md) | 提升与提取按钮（Lift / Extract） | bae-edit (+ bae-ui-edit) | [ ] |
+| [PR-TL-001](timeline-editing.md) | 时间轴面板与轨道（Timeline Panel / Tracks） | bae-ui-edit (+ bae-edit) | [ ] |
+| [PR-TL-002](timeline-editing.md) | 添加和删除轨道（Add / Delete Tracks） | bae-edit (+ bae-ui-edit) | [ ] |
+| [PR-TL-003](timeline-editing.md) | 轨道头开关（Track Header Controls） | bae-ui-edit (+ bae-edit) | [ ] |
+| [PR-TL-005](timeline-editing.md) | 时间轴缩放与导航（Zoom / Navigate） | bae-ui-edit | [ ] |
+| [PR-TL-006](timeline-editing.md) | 选择（Selection） | bae-ui-edit (+ bae-edit) | [ ] |
+| [PR-TL-007](timeline-editing.md) | 对齐（Snap in Timeline） | bae-ui-edit (+ bae-edit) | [ ] |
+| [PR-TL-008](timeline-editing.md) | 插入编辑（Insert） | bae-edit (+ bae-ui-edit) | [ ] |
+| [PR-TL-009](timeline-editing.md) | 覆盖编辑（Overwrite） | bae-edit (+ bae-ui-edit) | [ ] |
+| [PR-TL-011](timeline-editing.md) | 清除与波纹删除（Clear / Ripple Delete） | bae-edit (+ bae-ui-edit) | [ ] |
+| [PR-TL-013](timeline-editing.md) | 锁定轨道（Lock Track） | bae-edit | [ ] |
+| [PR-TL-014](timeline-editing.md) | 轨道定位（Track Targeting） | bae-ui-edit (+ bae-edit) | [ ] |
+| [PR-TL-015](timeline-editing.md) | 源修补（Source Patching） | bae-ui-edit (+ bae-edit) | [ ] |
+| [PR-TL-016](timeline-editing.md) | 同步锁定（Sync Lock） | bae-edit | [ ] |
+| [PR-TL-018](timeline-editing.md) | 常规修剪（Regular Trim with Selection Tool） | bae-edit (+ bae-ui-edit) | [ ] |
+| [PR-TL-019](timeline-editing.md) | 波纹编辑（Ripple Edit Tool, B） | bae-edit (+ bae-ui-edit) | [ ] |
+| [PR-TL-020](timeline-editing.md) | 滚动编辑（Rolling Edit Tool, N） | bae-edit (+ bae-ui-edit) | [ ] |
+| [PR-TL-023](timeline-editing.md) | 外滑（Slip Tool, Y） | bae-edit (+ bae-ui-edit) | [ ] |
+| [PR-TL-024](timeline-editing.md) | 内滑（Slide Tool, U） | bae-edit (+ bae-ui-edit) | [ ] |
+| [PR-TL-026](timeline-editing.md) | 剃刀与添加编辑（Razor Tool, C / Add Edit） | bae-edit (+ bae-ui-edit) | [ ] |
+| [PR-TL-028](timeline-editing.md) | 移动与微移（Move / Nudge） | bae-edit (+ bae-ui-edit) | [ ] |
+| [PR-TL-031](timeline-editing.md) | 启用与禁用剪辑（Enable） | bae-edit (+ bae-ui-edit, bae-render) | [ ] |
+| [PR-TL-034](timeline-editing.md) | 链接与链接选择项（Link / Unlink / Linked Selection） | bae-edit (+ bae-ui-edit) | [ ] |
+| [PR-TL-036](timeline-editing.md) | 嵌套（Nest） | bae-edit (+ bae-ui-edit, bae-render) | [ ] |
+| [PR-KF-008](keyframes.md) | 关键帧随修剪与速度变化（Keyframes vs Trim / Speed） | bae-anim (+ bae-edit) | [ ] |
+| [PR-AUD-001](audio.md) | 音频轨道类型与主声道（Audio Track Types / Master Track） | bae-edit (+ bae-media, bae-model) | [ ] |
+| [PR-AUD-005](audio.md) | 音频波形（Audio Waveforms） | bae-ui-edit (+ bae-media) | [ ] |
+| [PR-MRK-001](markers.md) | 添加标记（Add Marker） | bae-edit (+ bae-ui-edit) | [ ] |
+| [PR-KEY-001](shortcuts.md) | 剪辑工作区键位表（Premiere Keymap） | bae-ui-edit (+ bae-ui) | [ ] |
+| [PR-KEY-003](shortcuts.md) | 编辑（Edit） | bae-ui-edit (+ bae-edit) | [ ] |
+| [PR-KEY-004](shortcuts.md) | 工具（Tools） | bae-ui-edit | [ ] |
+| [PR-KEY-005](shortcuts.md) | 播放与导航（Playback / Navigation） | bae-ui-edit (+ bae-media) | [ ] |
+| [PR-KEY-006](shortcuts.md) | 入出点与源编辑（Marks / Source Editing） | bae-ui-edit (+ bae-edit) | [ ] |
+| [PR-KEY-007](shortcuts.md) | 时间轴编辑与修剪（Timeline Editing / Trimming） | bae-ui-edit (+ bae-edit) | [ ] |
+| [PR-KEY-008](shortcuts.md) | 时间轴视图（Timeline View） | bae-ui-edit | [ ] |
+| [PR-KEY-009](shortcuts.md) | 标记（Markers） | bae-ui-edit (+ bae-edit) | [ ] |
+| [PR-KEY-014](shortcuts.md) | 与 AE 键位的冲突（Conflicts with AE Keymap） | bae-ui (+ bae-ui-edit) | [ ] |
 <!-- speclint:end -->
 
 ## 8. 常用译名（与 AE 不同或剪辑特有）
