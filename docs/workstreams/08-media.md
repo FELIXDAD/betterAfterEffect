@@ -49,7 +49,7 @@
 - [x] 图像格式：PNG（8/16 位、调色板、tRNS、cICP/sRGB/gAMA/cHRM/iCCP、像素比）、JPEG（zune-jpeg，ICC、JFIF 像素比）、WebP（image-webp）、OpenEXR（half/float，数据窗口放进显示窗口，色度、时码、像素比）。GPU 上传后用 compute pass 转成 RGBA16F 并处理 alpha（预乘/反预乘/强制不透明）。
 - [x] macOS 视频解码：AVFoundation + VideoToolbox（H.264、HEVC、ProRes），IOSurface 支撑的 CVPixelBuffer → CVMetalTexture → wgpu 纹理（wgpu-hal，零拷贝），再转工作格式；8 位源用 BGRA，10 位以上和带 alpha 的 ProRes 4444 用 64RGBAHalf；帧精确 seek（向前小步顺读，其余重建 reader 并从目标帧内 1/8 帧处开始）；29.97 等非整数帧率逐帧验证。
 - [ ] Windows 视频解码：目前只有占位（`media_foundation`，能通过 `cargo clippy --target x86_64-pc-windows-msvc -p bae-media`），实现放下一个 PR。
-- [x] TIFF（静帧和序列）：8 / 16 位整数、32 位浮点，灰度 / RGB，有无 alpha；无压缩、LZW、Deflate、PackBits、JPEG；alpha 方式读 `ExtraSamples` 标签（associated = 预乘，AE 的 "TIFF Sequence with Alpha" 就这样写；没有标签按直通）。与 AE 实际输出的对比还没做成：AE 一直被别的任务占着，两次渲染都在 aectl 里超时（已报告给总协调）。
+- [x] TIFF（静帧和序列）：8 / 16 位整数、32 位浮点，灰度 / RGB，有无 alpha；无压缩、LZW、Deflate、PackBits、JPEG。直接用 `tiff` crate 解码。alpha 方式读 `ExtraSamples`：1 = 预乘，2 或没有这个标签 = 直通，**明确写 0（未指定）= 预乘**——与 AE 2026 实际输出对比发现，AE 的 "TIFF Sequence with Alpha" 写的是预乘像素、标签却是 0，而 `image` 和 `tiff` 都会把这种「未指定」的第 4 个样本丢掉，原来读出来是不透明的；现在遇到这种文件时，先在内存里把这一个标签值改成 1 再解码。用 AE 渲染的文件核对过：alpha 128，颜色是预乘值。
 - [ ] PSD（保留图层）、HEIC
 - [x] 跳帧速度：拖动播放头（连续随机跳帧）不再每次重建 `AVAssetReader`：输出开了 `supportsRandomAccess`，跳帧读单帧时间范围，读完确认范围已读空后用 `resetForReadingTimeRanges` 换位置；往后顺读时切换成开放范围。4K 实测（机器负载较高时 A/B 交替各跑两轮）：拖动 ProRes 422 / 4444 约 8–9 ms/帧（原来 40–54 ms），H.264（GOP 30）约 27 ms/帧（原来约 46 ms，余下主要是从关键帧解码）；顺序解码速度不变。从播放状态跳出的第一次仍要重建（约 40–65 ms）。
 - [x] 打开 `.baez` 里的素材：`MediaLocation`（磁盘文件，或容器里按「存储」方式放入的字节区间）+ `MediaLibrary::resolve`：嵌入条目按容器版本提取一次（保留条目目录结构，序列帧会落在同一目录；原子写入；不可信的条目名不能写到缓存目录外面），返回所有解码器（包括 AVFoundation）都能打开的路径。bae-media 不依赖 bae-package（21 依赖 08），由 bae-package 把 `AssetLocation::Packaged` 映射成 `MediaLocation::Embedded`。以后可以用 AVAssetResourceLoader 按字节区间直接读，省掉提取。
@@ -90,6 +90,7 @@
 - 媒体帧号一律从素材第一帧起算、从 0 开始；序列 `name_0101.png` 的第 0 帧是 0101。
 - 颜色只报告不转换：`GpuFrame` 的值保持素材自身的编码（不线性化），由 06 根据 `ColorInfo` 处理。未标记的素材报告为 `Unspecified`，默认规则由 06 决定。
 - VideoToolbox 把「最大关键帧间隔」当上限，实际可能更密（设 10 时给出每 9 帧一个）；裁片一律以样本表里的关键帧为准。
+- **体积**：`bae-media` 合计 +2,819,536 字节（2.69 MiB，约 2.82 MB），离任务书的 3 MB 预算不远了。后面的格式（HEIC、PSD 合成图）优先用系统框架（macOS ImageIO / Windows WIC），不再加纯 Rust 解码器。
 - 待用户决定：序列缺帧时是报错（现在的做法，合成里显示占位）还是沿用前一帧。
 
 ## 请求（其他工作流在这里留言）
