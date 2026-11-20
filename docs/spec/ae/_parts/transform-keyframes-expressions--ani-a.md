@@ -195,7 +195,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 
   - Default Point of Interest = (W/2, H/2, 0). Default Position is offset up-right-toward-viewer from the comp centre (UNVERIFIED: (W/2 + W/36, H/2 − W/36, −Zoom/3), e.g. (1013.3, 486.7, −888.9) at 1920×1080).
   - Auto-Orient default for spot/parallel lights: Orient Towards Point of Interest. Choosing Off makes the light ignore its POI (AE-ANI-022).
-- **Priority:** P0
+- **Priority:** P1 (lights are commonly used but not needed for basic 2D/3D layout; camera transforms are P0, AE-ANI-009)
 - **Owner:** bae-anim (+ bae-model, bae-render)
 - **Notes:** Lighting/shadow rendering: compositing-3d-color.md (Lights). Lottie light layers are not supported by lottie-web (export ignores them).
 
@@ -810,7 +810,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   - Recompute on any value change of k−1, k, k+1 (including roving re-timing, which does not change tangents).
 - **Priority:** P0
 - **Owner:** bae-anim (+ bae-model)
-- **Notes:** Exported Lottie `to/ti` values from AE give the ground truth for verifying this reconstruction: build a test project, export with bodymovin, compare. Scripting `setSpatialAutoBezierAtKey`, `keySpatialAutoBezier`.
+- **Notes:** Competing unverified community reconstructions (Adobe forum thread "Calculating auto tangent for 3 random points", 2022): tangent direction parallel to `P[k+1] − P[k−1]` with length ≈ 1/3 of the distance to each neighbour (the form above), or uniform Catmull–Rom `outTan = (P[k+1] − P[k−1]) / 6`, `inTan = −outTan`; neither was checked against AE numbers. Exported Lottie `to/ti` values from AE give the ground truth for choosing between them: build a test project, export with bodymovin, compare. Scripting `setSpatialAutoBezierAtKey`, `keySpatialAutoBezier`.
 
 ### AE-ANI-043 · Spatial Continuous Bezier and Bezier (空间连续贝塞尔曲线与贝塞尔曲线)
 
