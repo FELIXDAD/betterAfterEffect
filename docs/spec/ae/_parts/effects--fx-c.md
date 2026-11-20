@@ -846,7 +846,7 @@ Common rule (applies to AE-FX-617…621): every Transition effect except Iris Wi
 
 - **What it does:** Removes a solid black (or white) background by deriving alpha from brightness relative to that background, optionally un-blending the background from semi-transparent colours.
 - **Exact semantics:**
-  - matchName UNVERIFIED (not in the docsforadobe table; added in a 2025 AE release, UNVERIFIED version); category Keying; 8/16/32 bpc (help).
+  - matchName `ADBE Unmult` (AE 26.0 effect dump; not in the docsforadobe table; added in a 2025 AE release, UNVERIFIED version); category Keying; 8/16/32 bpc (help).
   - Parameters (help order): Background Color (背景颜色) {Black, White}; Black Level (黑色阶) (when Black); White Level (白色阶) (when White); Softness (柔和度); Remove Color Matting (移除颜色遮罩); Clip HDR Results (剪切 HDR 结果). Defaults UNVERIFIED.
 
   ```
@@ -880,3 +880,643 @@ Common rule (applies to AE-FX-617…621): every Transition effect except Iris Wi
 - **Priority:** P2
 - **Owner:** bae-effects
 - **Notes:** Spill Suppressor, Color Key and Luma Key live in the Obsolete category in current AE (docsforadobe table) but older templates use them often; BAE should implement Color Key and Luma Key early since they are trivial threshold keys.
+
+## Noise & Grain effects
+
+Effect > Noise & Grain（杂色和颗粒）. Fractal Noise and Turbulent Noise are generators that fill the layer bounds (they composite over the layer's own pixels through their Blending Mode); the rest are filters.
+
+### AE-FX-633 · Fractal Noise (分形杂色)
+
+- **What it does:** Generates animatable grayscale Perlin-style value noise from up to 20 summed octaves, used for clouds, smoke, textures, luma mattes and displacement maps, and composites it over the layer with its own Opacity and Blending Mode.
+- **Exact semantics:**
+  - matchName `ADBE Fractal Noise`; category Noise & Grain; 32 bpc; GPU since AE 14.2 (2017) (docsforadobe table). Does not expand bounds: fills the layer's existing rectangle (on a solid = the solid size; on an adjustment layer = the comp).
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Fractal Type (分形类型) | `ADBE Fractal Noise-0001` | Popup | Basic | see enum below | — | |
+  | 2 | Noise Type (杂色类型（译名待核；帮助文作"噪点类型"）) | `-0002` | Popup | Soft Linear | 1 Block, 2 Linear, 3 Soft Linear, 4 Spline | — | Lottie value = 1-based index. |
+  | 3 | Invert (反转) | `-0003` | Checkbox | off | — | — | |
+  | 4 | Contrast (对比度) | `-0004` | Float slider | 100 | slider 50-400 (UNVERIFIED), valid 0-10000 (UNVERIFIED) | — | |
+  | 5 | Brightness (亮度) | `-0005` | Float slider | 0 | slider -200..200 (UNVERIFIED), valid -10000..10000 (UNVERIFIED) | — | Units of 1/100 of full white. |
+  | 6 | Overflow (溢出) | `-0006` | Popup | Allow HDR Results | 1 Clip (剪切), 2 Soft Clamp (柔和固定（译名待核；帮助文作"软限制"）), 3 Wrap Back (回绕（译名待核；帮助文作"回卷"）), 4 Allow HDR Results (允许 HDR 结果) | — | Default index 4 seen in exported Lottie files. |
+  | 7 | Transform (变换) | `-0007` | Group start | — | — | — | |
+  | 8 | Rotation (旋转) | `-0008` | Angle | 0x+0° | any | degrees | |
+  | 9 | Uniform Scaling (统一缩放) | `-0009` | Checkbox | on | — | — | On: uses Scale; off: Scale Width / Scale Height. |
+  | 10 | Scale (缩放) | `-0010` | Float slider | 100 | slider 20-600 (UNVERIFIED), valid 10-10000 (UNVERIFIED) | % | Disabled when Uniform Scaling off. |
+  | 11 | Scale Width (缩放宽度) | `-0011` | Float slider | 100 | as Scale | % | Enabled only when Uniform Scaling off. |
+  | 12 | Scale Height (缩放高度) | `-0012` | Float slider | 100 | as Scale | % | |
+  | 13 | Offset Turbulence (偏移（湍流）) | `-0013` | Point (2D) | layer centre [w/2, h/2] | any | layer px | Default shown as 250,250 in exported 500×500 files. |
+  | 14 | Perspective Offset (透视位移) | `-0031` | Checkbox | off | — | — | Note the out-of-order matchName (added later). |
+  | 15 | (end Transform) | `-0014` | Group end | — | — | — | |
+  | 16 | Complexity (复杂度) | `-0015` | Float slider | 6.0 | slider 1-20, valid 1-20 (UNVERIFIED) | octaves | Fractional values allowed. |
+  | 17 | Sub Settings (子设置) | `-0016` | Group start | — | — | — | |
+  | 18 | Sub Influence (%) (子影响（%）) | `-0017` | Float slider | 70 | slider 25-100 (UNVERIFIED), valid 0-10000 (UNVERIFIED) | % | |
+  | 19 | Sub Scaling (子缩放) | `-0018` | Float slider | 56 | slider 25-100 (UNVERIFIED), valid 10-10000 (UNVERIFIED) | % | |
+  | 20 | Sub Rotation (子旋转) | `-0019` | Angle | 0x+0° | any | degrees | |
+  | 21 | Sub Offset (子位移) | `-0020` | Point (2D) | [0, 0] | any | px (UNVERIFIED: in octave space, see algorithm) | |
+  | 22 | Center Subscale (中心辅助比例) | `-0021` | Checkbox | off | — | — | |
+  | 23 | (end Sub Settings) | `-0022` | Group end | — | — | — | |
+  | 24 | Evolution (演化) | `-0023` | Angle | 0x+0° | any | revolutions + degrees | Each revolution is a new state (not periodic in 360°). |
+  | 25 | Evolution Options (演化选项) | `-0024` | Group start | — | — | — | |
+  | 26 | Cycle Evolution (循环演化) | `-0025` | Checkbox | off | — | — | |
+  | 27 | Cycle (in Revolutions) (循环（旋转次数）) | `-0026` | Integer slider | 1 | slider 1-? (UNVERIFIED), valid 1-1000 (UNVERIFIED) | revolutions | Enabled only when Cycle Evolution on. |
+  | 28 | Random Seed (随机植入) | `-0027` | Integer slider | 0 | slider 0-1000 (UNVERIFIED), valid -10000..10000 (UNVERIFIED) | — | |
+  | 29 | (end Evolution Options) | `-0028` | Group end | — | — | — | |
+  | 30 | Opacity (不透明度) | `-0029` | Float slider | 100% | 0-100 | % | |
+  | 31 | Blending Mode (混合模式) | `-0030` | Popup | Normal | see enum below | — | |
+
+  - Fractal Type enum (stored 1-based index; `(-` separators occupy an index, from an AE 26.0 dump): 1 Basic (基本), 2 separator, 3 Turbulent Smooth (湍流平滑), 4 Turbulent Basic (湍流基本), 5 Turbulent Sharp (湍流锐化), 6 separator, 7 Dynamic (动态), 8 Dynamic Progressive (动态渐进), 9 Dynamic Twist (动态扭转), 10 separator, 11 Max (最大值), 12 Smeary (模糊), 13 Swirly (漩涡), 14 Rocky (岩石), 15 Cloudy (多云), 16 Terrain (地形), 17 Subscale (辅助比例), 18 Small Bumps (小凸起), 19 Strings (字符串), 20 Threads (线程)（enum 中文均译名待核）.
+  - Blending Mode enum (stored index): 1 None, 2 Normal, 3 sep, 4 Add, 5 Multiply, 6 Screen, 7 Overlay, 8 Soft Light, 9 Hard Light, 10 sep, 11 Color Dodge, 12 Color Burn, 13 sep, 14 Darken, 15 Lighten, 16 Difference, 17 Exclusion, 18 sep, 19 Hue, 20 Saturation, 21 Luminosity. None = output noise only (layer alpha kept, UNVERIFIED: alpha = layer alpha); Hue / Saturation = noise value used as hue / saturation of the original (HSL), no change on grayscale originals; other modes per compositing-3d-color.md, Blend modes.
+
+  ```
+  // Best-known reconstruction (Skottie FractalNoiseEffect + help text). UNVERIFIED in exact constants.
+  // p: layer-space pixel centre.
+  GRID = 64 px at Scale 100                                   // UNVERIFIED base cell size (Skottie constant chosen to match AE visually)
+  M  = translate(OffsetTurbulence) * scale(sx/100, sy/100) * rotate(Rotation) * scale(GRID)   // noise->layer
+  q0 = inverse(M) * p                                         // octave-0 noise coordinates
+  S  = translate(-SubOffset/100) * rotate(-SubRotation) * scale(100/SubScaling)               // per-octave step (cumulative)
+  // Center Subscale off: sub-octaves scale about the noise origin (offset accumulates); on: about the same point as the
+  //   previous octave, so octaves look stacked/duplicated. Perspective Offset on: octave k's offset is divided by its
+  //   cumulative scale (parallax, deeper octaves move less) UNVERIFIED.
+  // Evolution -> two coherent noise "planes" interpolated (smooth when Evolution animates):
+  e      = radians(Evolution) * 0.25                         // UNVERIFIED rate (Skottie: 0.25 plane per radian)
+  if CycleEvolution: P = round(2π*max(Cycle,1)*0.25); e = radians(Evolution) * P/(2π*max(Cycle,1)); else P = ∞
+  seedOff = hash(RandomSeed)                                  // new pattern per seed; animating seed = popping
+  plane0 = mod(floor(e), P) + seedOff ; plane1 = mod(floor(e)+1, P) + seedOff ; w = fract(e)
+  base(q) = lerp(hash3(cell(q), plane0), hash3(cell(q), plane1), w)   // value noise in [0,1]
+  filter(q) by Noise Type:
+     Block       = base at floor(q) (nearest)
+     Linear      = bilinear of the 4 lattice values around q-0.5
+     Soft Linear = bilinear with smoothstep(t) weights
+     Spline      = bicubic (Catmull-Rom UNVERIFIED) of 4x4 lattice values
+  fractal(n) by Fractal Type:  Basic n ; Turbulent Basic 2|n-0.5| ; Turbulent Smooth (2|n-0.5|)^2 ;
+     Turbulent Sharp sqrt(2|n-0.5|) ; others UNVERIFIED (Dynamic*: domain-warped octaves; Max: max over octaves;
+     Smeary/Swirly/Rocky/Cloudy/Terrain/...: per-type remaps) -> BAE must calibrate against AE renders.
+  oct = Complexity; amp = 1; n = 0; wsum = 0; q = q0
+  loop:  wk = amp * min(oct, 1)          // fractional last octave is faded by the fractional part
+         n += wk * fractal(filter(q)); wsum += wk
+         if oct <= 1: break
+         oct -= 1; amp *= SubInfluence/100; q = S * q
+  v = n / wsum                                                // Sub Influence 0 == Complexity 1
+  if Invert: v = 1 - v
+  v = (v - 0.5) * Contrast/100 + 0.5 + Brightness/100         // UNVERIFIED exact form
+  Overflow: Clip -> clamp(v,0,1); Soft Clamp -> smooth sigmoid into (0,1) (UNVERIFIED curve);
+            Wrap Back -> triangle fold: t = mod(v,2); v = t<=1 ? t : 2-t ; Allow HDR -> unchanged (8/16 bpc still clip on store)
+  noise = vec3(v) ; result = blend(Blending Mode, src=noise*Opacity, dst=layer)
+  ```
+  - Edge cases: Scale and Sub Scaling are clamped to their valid minimum (no division by 0); Complexity < 1 behaves as 1; at 8/16 bpc Allow HDR Results equals Clip after quantisation.
+- **Priority:** P1 (the most used generator for textures/mattes; exact pattern match with AE is not achievable without calibration).
+- **Owner:** bae-effects
+- **Notes:** Lottie: generic effect `ty: 5`, `mn: "ADBE Fractal Noise"`, 31 parameter entries (`ix` 1-31) as in the table; Skottie renders it (Basic and the three Turbulent types, Block/Linear/Soft Linear; ignores Invert/Contrast/Brightness/Overflow/Perspective/Center Subscale/Opacity/Blending); lottie-web does not. Help gotcha: for a seamless loop the Evolution keyframes must cover exactly `Cycle` revolutions (or a divisor) and the last frame equals the first. Implementation hint: one WGSL fragment pass, loop count specialised by `ceil(Complexity)` buckets (1,2,3,4,8,20) as Skottie does; hash-based value noise avoids textures. BAE decision: ship Basic/Turbulent*/Max/Dynamic first; the remaining exotic types fall back to Basic with a warning until calibrated. Chinese parameter strings in the table are the zh-CN UI strings as commonly seen in AE tutorials (演化, 随机植入, 中心辅助比例, 透视位移, 子位移)（译名待核）; the zh-CN help page instead writes 演变, 随机种子, 居中子缩放, 噪点类型.
+
+### AE-FX-634 · Noise (杂色)
+
+- **What it does:** Adds random per-pixel variation to the image, either the same value to all channels (monochrome) or independent values per channel (color noise); a new pattern every frame.
+- **Exact semantics:**
+  - Current matchName `ADBE Noise2` (AE 26.0; the docsforadobe table still lists `ADBE Noise`, which AE 26.0 shows in the hidden _Obsolete category; version of the switch UNVERIFIED); category Noise & Grain; 32 bpc (help); GPU — (UNVERIFIED for `ADBE Noise2`).
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Amount of Noise (杂色数量) | `ADBE Noise-0001` / `ADBE Noise2-0001` | Float slider | 0.0% | 0-100 | % | |
+  | 2 | Noise Type (杂色类型) | `-0002` | Checkbox "Use Color Noise" (使用杂色) | on | — | — | Lottie stores 1 = on. |
+  | 3 | Clipping (剪切) | `-0003` | Checkbox "Clip Result Values" (剪切结果值) | on | — | — | No effect in 32 bpc projects (help). |
+
+  ```
+  // UNVERIFIED reconstruction; values straight (un-premultiplied), normalised 0..1
+  a = Amount/100
+  seed = hash(layerId, frameIndex)                 // changes every frame automatically (no Random Seed param)
+  for each pixel: r = Color ? vec3(rnd(seed,p,0), rnd(seed,p,1), rnd(seed,p,2)) : vec3(rnd(seed,p,0))   // uniform [0,1)
+                  c' = c + a * (r - 0.5) * 2        // UNVERIFIED amplitude: at 100% noise spans the full range
+                  if Clipping and bpc < 32: c' = clamp(c', 0, 1)
+                  else (unclipped, 8/16 bpc): out-of-range values wrap (UNVERIFIED) -> "more apparent noise" per help
+  alpha unchanged
+  ```
+- **Priority:** P1
+- **Owner:** bae-effects
+- **Notes:** Help describes Noise Type as "Use Color Noise adds random values to R, G, B individually". The random pattern is a function of time, so it renders identically on re-render (deterministic per frame). Lottie: not supported by lottie-web/Skottie (`ty: 5`, `mn: "ADBE Noise"` in exported files). BAE decision: use a stateless integer hash (PCG) of (pixel, frame, layer) for determinism across GPUs. Parameter Chinese strings from memory of the zh-CN UI（译名待核）; the zh-CN help page writes 噪点数量 / 噪点类型 / 裁切.
+
+### AE-FX-635 · Median (中间值)
+
+- **What it does:** Replaces each pixel by the per-channel median of the pixels in a square neighbourhood of the given Radius; removes salt-and-pepper noise at small radii and gives a painterly look at large radii.
+- **Exact semantics:**
+  - Two effects exist in AE 26.0: **Median** (中间值) `ADBE PS Median` (new; help: 8/16 bpc; parameter list beyond Radius UNVERIFIED) and **Median (Legacy)** (中值（旧版）) `ADBE Median` (docsforadobe: 16 bpc, GPU —). Older projects and presets use `ADBE Median`.
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Radius (半径) | `ADBE Median-0001` | Integer slider | 0 (UNVERIFIED) | slider 0-100? valid 0-255 (UNVERIFIED) | px | 0 = no-op. |
+  | 2 | Operate On Alpha Channel (在 Alpha 通道上运算) | `ADBE Median-0002` | Checkbox | off | — | — | On: alpha is median-filtered too; off: only colour (premultiplied? UNVERIFIED). |
+
+  ```
+  r = Radius (downsampled by preview resolution factor)
+  for each channel c in (R,G,B[,A]): out.c(p) = median{ in.c(q) : |qx-px|<=r, |qy-py|<=r }   // square window, UNVERIFIED vs circular
+  pixels outside the layer read as transparent black (UNVERIFIED: edge clamp)
+  ```
+- **Priority:** P1
+- **Owner:** bae-effects
+- **Notes:** Not separable, cost O(r²) per pixel naively. Implementation hint: per-channel histogram median (Huang / constant-time median with column histograms) on the CPU for 8 bpc, or a GPU bitonic/selection on small radii and a 256-bin histogram search for larger radii; for 32 bpc quantise to 16-bit bins. BAE decision: implement one kernel and map both matchNames onto it.
+
+### AE-FX-636 · Add Grain (添加颗粒)
+
+- **What it does:** Synthesises film-like grain from parameters or film-stock presets, with tonal, colour and animation controls, optionally restricted by a colour/mask matte.
+- **Exact semantics:**
+  - matchName `VISINF Grain Implant`; category Noise & Grain; 16 bpc; GPU —.
+  - Top-level parameters in order: Viewing Mode (查看模式) {Preview (预览) **default**, Blending Matte (混合遮罩), Final Output (最终输出)}; Preset (预设) (film stocks, e.g. Kodak 5248/5279/5287/5293/5298/SFX 200T, Eastman…, Fuji…; list UNVERIFIED); Preview Region (预览区域) group {Center, Width 200, Height 200, Show Box, Box Color}; Tweaking (微调) {Intensity, Size, Softness, Aspect Ratio, Channel Intensities {R,G,B}, Channel Size {R,G,B}} (values relative, 1.0 = neutral); Color (颜色) {Monochromatic, Saturation, Tint Amount, Tint Color}; Application (应用) {Blending Mode (Film/Normal/Multiply/Screen/... UNVERIFIED list), Shadows, Midtones, Highlights, Midpoint, Channel Balance {R,G,B Shadows/Midtones/Highlights}}; Animation (动画) {Animation Speed (default 1.0), Animate Smoothly, Random Seed}; Blend with Original (与原始图像混合) {Amount, Combine Match and Mask Using, Color Matching {...}, Masking Layer, Masking Mode, If Layer Sizes Differ}. Param matchNames `VISINF Grain Implant-NNNN` (numbering UNVERIFIED).
+  - Gotcha: in Preview mode the effect renders grain only inside a 200×200 px box framed in white; the user must switch to Final Output before rendering (whether the render queue overrides this is UNVERIFIED; treat Preview as rendering only the box).
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Animation Speed 0 freezes the grain; Random Seed changes the pattern on the same frame. Implementation hint: band-limited Gaussian noise generated per channel at Size, blurred by Softness, weighted by a tone curve from Shadows/Midtones/Highlights around Midpoint.
+
+### AE-FX-637 · Turbulent Noise (湍流杂色)
+
+- **What it does:** A faster, more modern variant of Fractal Noise whose small features move faster than large ones (turbulence), without cycle/loop controls.
+- **Exact semantics:**
+  - matchName `ADBE AIF Perlin Noise 3D`; category Noise & Grain; 32 bpc; GPU — (docsforadobe).
+  - Parameters as Fractal Noise (AE-FX-633) with the same names, enums and defaults (Fractal Type, Noise Type, Invert, Contrast, Brightness, Overflow, Transform group incl. Perspective Offset, Complexity, Sub Settings {Sub Influence, Sub Scaling, Sub Rotation, Sub Offset}, Evolution, Opacity, Blending Mode), except: no Center Subscale; Evolution Options contains **Turbulence Factor** (湍流因子) and Random Seed instead of Cycle Evolution / Cycle. Param matchNames `ADBE AIF Perlin Noise 3D-NNNN` (exact numbering UNVERIFIED).
+  - Turbulence Factor 0 = all octaves evolve at the same speed (Fractal-Noise-like); larger values make octave k evolve faster (UNVERIFIED model: octave k's evolution rate × (1/SubScaling)^(k·factor)); default UNVERIFIED (believed 0.5 or 1).
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Help: the only reason to prefer Fractal Noise is looping (Cycle Evolution). Noise is genuinely 3D Perlin (gradient) noise sampled in (x, y, evolution) (UNVERIFIED but implied by the matchName), so it is smoother than Fractal Noise's value noise. BAE decision: share the octave loop with AE-FX-633 and switch the basis function.
+
+### AE-FX-638 · Other Noise & Grain effects catalog (其他杂色和颗粒效果)
+
+- **What it does:** Reserves the remaining Noise & Grain effects by matchName so projects round-trip.
+- **Exact semantics:**
+
+  | Effect (中文) | matchName | bpc | GPU | Summary |
+  |---|---|---|---|---|
+  | Dust & Scratches (蒙尘与划痕) | `ADBE Dust & Scratches` | 16 | — | Radius, Threshold: median-like replacement of pixels differing from neighbours by more than Threshold. |
+  | Match Grain (匹配颗粒) | `VISINF Grain Duplication` | 16 | — | Samples grain from a Noise Source Layer and synthesises matching grain; Compensate for Existing Noise; shares Tweaking/Color/Application/Animation/Blend groups with Add Grain. |
+  | Noise Alpha (杂色 Alpha) | `ADBE Noise Alpha2` (old `ADBE Noise Alpha`) | 8 | — | Noise {Uniform Random, Squared Random, Uniform Animation, Squared Animation}, Amount, Original Alpha {Add, Clamp, Scale, Edges}, Overflow {Clip, Wrap Back, Wrap}, Random Seed, Noise Options (Animation): Cycle Noise, Cycle (in Revolutions). |
+  | Noise HLS (杂色 HLS) | `ADBE Noise HLS2` (old `ADBE Noise HLS`) | 8 | — | Noise {Uniform, Squared, Grain}, Hue, Lightness, Saturation, Grain Size, Noise Phase. |
+  | Noise HLS Auto (杂色 HLS 自动) | `ADBE Noise HLS Auto2` (old `ADBE Noise HLS Auto`) | 8 | — | As Noise HLS but animates automatically with Noise Animation Speed. |
+  | Remove Grain (移除颗粒) | `VISINF Grain Removal` | 16 | — | Sample-based denoiser: Noise Reduction Settings, Fine Tuning (Chroma Suppression, Texture, Noise Size Bias, Clean Solid Areas), Temporal Filtering, Unsharp Mask, Sampling, Blend with Original. |
+  | Curl Noise (Curl Noise 效果) | UNVERIFIED (added after AE 26.0) | 32 (UNVERIFIED) | UNVERIFIED | Curl-noise flow-line generator: Input Noise {Internal, This Layer, Other Layer}, Curl Noise {Transform, Curl Generation (Evolution, Turbulence Speed 0-500 default 10, Swirl ±360, Density ±100, Smoothness, Vertical Bias), Flow Options (Sample Count 3-24, Sample Radius 0-200, Flow Softness, Edge Definition, Flow Falloff)}, Output {View, Contrast, Brightness, Clip HDR Results, Channel}. |
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Grain sampling effects (Match/Remove Grain) sample from the source layer ignoring earlier effects and masks (help). Chinese names of Curl Noise not localised on the zh-CN help page（译名待核）.
+
+## Time effects
+
+Effect > Time（时间）. These effects read their own layer (or another layer) at times other than the current time, so the render graph must be able to evaluate a layer's effect input at arbitrary layer times. Cross-reference: time remapping, frame blending and motion-blur sampling in transform-keyframes-expressions.md (Time remap) and compositing-3d-color.md (Motion blur & frame blending rendering).
+
+### AE-FX-639 · Echo (残影)
+
+- **What it does:** Combines the layer's image at the current time with copies from earlier or later times ("echoes"), weighted by a geometric decay and merged with a chosen operator; used for trails, streaks and smears.
+- **Exact semantics:**
+  - matchName `ADBE Echo`; category Time; 32 bpc; GPU —. Does not expand bounds.
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Echo Time (seconds) (残影时间（秒）) | `ADBE Echo-0001` | Float slider | −1 comp frame duration (−0.033 at 30 fps; UNVERIFIED that it follows the comp frame rate) | slider −2..2 (UNVERIFIED), valid −30..30 (UNVERIFIED) | seconds | Negative = past frames, positive = future frames. |
+  | 2 | Number Of Echoes (残影数量) | `-0002` | Integer slider | 1 | slider 0-30 (UNVERIFIED), valid 0-1000 (UNVERIFIED) | — | 0 = current frame only. |
+  | 3 | Starting Intensity (起始强度) | `-0003` | Float slider | 1.00 | 0-1 | factor | Opacity of the first image (the current-time frame) in the sequence. |
+  | 4 | Decay (衰减) | `-0004` | Float slider | 1.00 | 0-1 | ratio | Each echo's opacity = previous × Decay. |
+  | 5 | Echo Operator (残影运算符) | `-0005` | Popup | Add | 1 Add (相加), 2 Maximum (最大值), 3 Minimum (最小值), 4 Screen (滤色), 5 Composite In Back (从后至前组合), 6 Composite In Front (从前至后组合), 7 Blend (混合) | — | Lottie value = index. |
+
+  ```
+  N = NumberOfEchoes ; dt = EchoTime
+  for k in 0..N:
+     t_k = t_layer + k*dt                          // layer-local time; k = 0 is the current frame
+     I_k = effectInput(t_k)                        // premultiplied RGBA of the layer's source + masks + preceding effects at t_k (UNVERIFIED: masks included)
+                                                   // outside the source's duration / before In point the input is transparent (UNVERIFIED for still sources: same image)
+     w_k = StartingIntensity * Decay^k
+  Add:                 O = Σ w_k I_k                               (clamped at 8/16 bpc; overloads to white)
+  Maximum:             O = max_k (w_k I_k)  per channel             (UNVERIFIED: weighted before max)
+  Minimum:             O = min_k (w_k I_k)  per channel             (UNVERIFIED)
+  Screen:              O = 1 - Π_k (1 - w_k I_k)
+  Composite In Back:   O = (w_N I_N) over ... over (w_1 I_1) over (w_0 I_0)    // current frame at the back
+  Composite In Front:  O = (w_0 I_0) over (w_1 I_1) over ... over (w_N I_N)    // current frame in front
+  Blend:               O = Σ w_k I_k / (N+1)                        (UNVERIFIED normalisation; help: "averages the echoes")
+  // over(a, b) = a + b*(1 - a.alpha) on premultiplied values; w_k scales all four channels.
+  ```
+  - Echo Time is evaluated at the current time (animatable); frames are fetched at exact `t_k` (no frame rounding beyond the source's own frame lookup).
+- **Priority:** P1
+- **Owner:** bae-effects (+ bae-render)
+- **Notes:** Help: Echo only echoes change inside the layer (footage motion, animated effects); motion from the layer's own Transform is not echoed, so users precompose. Lottie: exported as `ty: 5`, `mn: "ADBE Echo"`; not rendered by lottie-web/Skottie. Implementation hint: request N+1 upstream evaluations from the render graph (cache-friendly: neighbouring frames are usually cached during playback); accumulate in a 32-bit float target. Number of Echoes × upstream cost can explode, so BAE should cap concurrent fetches and reuse the frame cache.
+
+### AE-FX-640 · Posterize Time (色调分离时间)
+
+- **What it does:** Locks the layer's content to a lower (or different) frame rate by evaluating its source and preceding effects only at quantised times, producing a stepped/strobing look.
+- **Exact semantics:**
+  - matchName `ADBE Posterize Time`; category Time; 32 bpc; GPU —.
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Frame Rate (帧速率) | `ADBE Posterize Time-0001` | Float slider | 24.0 (UNVERIFIED) | slider 1-99 (UNVERIFIED), valid 0.1-999 (UNVERIFIED) | fps | Only Hold interpolation is allowed for its keyframes (help). |
+
+  ```
+  t_q = floor((t_layer - t0) * FrameRate + ε) / FrameRate + t0   // t0 = quantisation origin: comp time 0 (UNVERIFIED vs layer In point/layer time 0)
+  output = effectInput(t_q)            // source, masks (UNVERIFIED) and every effect ABOVE Posterize Time in the stack are evaluated at t_q
+  // Effects BELOW it still evaluate their own parameters at t (UNVERIFIED); layer Transform is never posterized (it is applied after effects).
+  ```
+  - Frame Rate ≥ comp frame rate: no visible change (each comp frame maps to itself).
+- **Priority:** P1 (common for "on twos" / stop-motion looks).
+- **Owner:** bae-effects (+ bae-render)
+- **Notes:** Help: same result as precomposing and enabling the precomp's "Preserve frame rate when nested or in render queue" (see project-comp-layers.md, Composition Settings). The animate-with-Hold-only restriction is enforced by the property (interpolation type locked). Lottie: `ty: 5`, `mn: "ADBE Posterize Time"`; lottie-web ignores it. Expressions on the layer (`posterizeTime()` is a separate expression method, see transform-keyframes-expressions.md) are unrelated. Implementation hint: implemented as a time-mapping node in the render graph, so the frame cache can reuse the quantised frame.
+
+### AE-FX-641 · Time Displacement (时间置换)
+
+- **What it does:** Per pixel, replaces the layer's pixel with the same pixel from another time, chosen by the luminance of a displacement map layer (slit-scan effects).
+- **Exact semantics:**
+  - matchName `ADBE Time Displacement`; category Time; 16 bpc; GPU —. Masks on the same layer are ignored after applying (help).
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Time Displacement Layer (时间置换图层) | `ADBE Time Displacement-0001` | Layer | this layer (UNVERIFIED) | any layer in the comp or None | — | Map is read in its source form (no masks/effects/transforms; help). |
+  | 2 | Max Displacement Time [sec] (最大移位时间 [秒]) | `-0002` | Float slider | 1.0 | slider 0-? / valid −? (UNVERIFIED; negative allowed believed) | seconds | |
+  | 3 | Time Resolution [fps] (时间分辨率 [fps]) | `-0003` | Float slider | 60.0 | slider 1-? (UNVERIFIED) | fps | Number of distinct time slices per second. |
+  | 4 | If Layer Sizes Differ: Stretch Map to Fit (如果图层大小不同：伸缩对应图以适合) | `-0004` | Checkbox | on (UNVERIFIED) | — | — | Off: map centred (help: "in the composition"). |
+
+  ```
+  L = luminance(map(p)) in 8-bit terms 0..255 (higher bpc: L = 255*luma)   // Rec.601 luma UNVERIFIED
+  d = MaxDisplacementTime * (2 * (L - 128) / 256)                        // help formula: 0 -> -max, 128 -> 0, 255 -> +max*(127/128)
+  d_q = round(d * TimeResolution) / TimeResolution                         // quantise to time slices (UNVERIFIED rounding)
+  out(p) = effectInput(t + d_q)(p)                                         // outside the layer duration: transparent (UNVERIFIED)
+  ```
+- **Priority:** P2
+- **Owner:** bae-effects (+ bae-render)
+- **Notes:** Cost = number of distinct `d_q` values in the frame (each a full upstream evaluation). Implementation hint: bucket pixels by slice, fetch each slice frame once, gather in one pass. Lottie: no.
+
+### AE-FX-642 · Other Time effects catalog (其他时间效果)
+
+- **What it does:** Reserves the remaining Time-category effects by matchName so projects round-trip.
+- **Exact semantics:**
+
+  | Effect (中文) | matchName | bpc | GPU | Summary |
+  |---|---|---|---|---|
+  | CC Force Motion Blur (CC Force Motion Blur) | `CC Force Motion Blur` | 32 | — | Renders intermediate sub-frames of the layer and averages them to force motion blur (Motion Blur Samples, Override Shutter Angle, Shutter Angle, Native Motion Blur). |
+  | CC Wide Time (CC Wide Time) | `CC Wide Time` | 32 | — | Blends a number of frames forward/backward (Forward Steps, Backward Steps, Native Motion Blur). |
+  | CC Time Blend (CC Time Blend) | `CC Time Blend` | — | — | Accumulates frames over time with Transfer mode and Accumulation; moved to _Obsolete in AE 26.0. |
+  | CC Time Blend FX (CC Time Blend FX) | `CC Time Blend FX` | — | — | Instance/Clear/Accumulate pair of CC Time Blend; moved to _Obsolete in AE 26.0. |
+  | Pixel Motion Blur (像素运动模糊) | `ADBE OFMotionBlur` | 32 | — | Optical-flow motion blur: Shutter Control {Automatic, Manual}, Shutter Angle, Shutter Samples, Vector Detail. |
+  | Time Difference (时差) | `ADBE Difference` | 8 | — | Colour difference between this layer and a Target layer at Time Offset: Contrast, Absolute Difference, Alpha Channel {Original, Target, Blend, Max, Full On, Lightness Of Result, Max Of Result, Alpha Difference, Alpha Difference Only}. |
+  | Timewarp (时间扭曲) | `ADBE Timewarp` | 32 | — | Retiming with Method {Whole Frames, Frame Mix, Pixel Motion}, Adjust Time By {Speed (default 50), Source Frame}, Tuning (Vector Detail, Smoothing, Error Threshold, Block Size, Weighting), Motion Blur (Shutter Angle, Shutter Samples), Matte Layer, Warp Layer, Show, Source Crops. Masks on the layer are ignored. |
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Pixel Motion Blur and Timewarp Pixel Motion need an optical-flow estimator (shared with frame blending's Pixel Motion mode, see compositing-3d-color.md). Timewarp Speed 50% deliberately samples at ¼ and ¾ frame offsets rather than reusing original frames (help).
+
+## Simulation effects
+
+Effect > Simulation（模拟）. All are P2 for BAE M1. Particle effects are stateful simulations: the frame at time t depends on every earlier step, so they need deterministic, seekable stepping (see the Implementation hint in AE-FX-643).
+
+### AE-FX-643 · CC Particle World (CC 粒子世界（译名待核）)
+
+- **What it does:** A 3D particle emitter (bundled CycoreFX) that births particles from a producer volume, moves them under physics presets, and renders them as lines, sprites, spheres, polygons or textured cards, optionally through the comp camera.
+- **Exact semantics:**
+  - matchName `CC Particle World`; category Simulation; 16 bpc; GPU —. Output fills the layer (particles outside the layer bounds are clipped; users apply it to a comp-size solid).
+  - Main parameter groups in UI order (param matchNames `CC Particle World-NNNN`; most defaults UNVERIFIED):
+    - Grid & Guides (网格和参考线): Position, Radius, Motion Path, Motion Path Frames, Grid, Grid Position {Floor, Producer, World} (`-0056`), Grid Axis {X Axis, Y Axis, Z Axis} (`-0057`), Grid Subdivisions, Grid Size, Horizon, Axis Box.
+    - Birth Rate (出生速率) 1.0; Longevity (sec) (寿命（秒）) 1.0.
+    - Producer (发生器): Position X/Y/Z (0,0,0 = layer centre in CC units where 1.0 ≈ half layer width, UNVERIFIED), Radius X/Y/Z (0.025 believed).
+    - Physics (物理学): Animation (`-0015`) {Explosive (default), Direction Axis, Cone Axis, ─, Viscouse, Twirl, Twirly, Vortex, Fire, ─, Jet Sideways, ─, Fractal Omni, Fractal Uni} (stored index counts separators); Velocity 1.0, Inherit Velocity %, Gravity 0.5, Resistance 0, Extra, Extra Angle, Direction Axis XYZ, Gravity Vector XYZ; Floor group: Floor Position {All, Above Floor, After Floor} (`-0064`), Floor Render {Normal, Reflected on Floor, Projected on Floor} (`-0065`), Floor Action {None, Ice, Glue, Bounce} (`-0066`).
+    - Particle (粒子): Particle Type (`-0023`) {Line (default), Star, ─, Shaded Sphere, Faded Sphere, Darken&Faded Sphere, Bubble, ─, Motion Polygon, Motion Square, TriPolygon, QuadPolygon, Textured TriPolygon, Textured QuadPolygon, Tetrahedron, Cube, ─, Lens Convex, Lens Concave, Lens Fade, Lens Darken Fade, Lens Bubble, ─, Textured Square, Textured Disc, Textured Faded Disc}; Texture {Texture Layer, Scale Velocity, Texture Time {Birth, Current, From Start} (`-0047`)}; Rotation Speed, Initial Rotation, Rotation Axis {X, Y, Z, Any Axis} (`-0071`); Birth Size, Death Size, Size Variation, Max Opacity (75% believed); Color Map (`-0028`) {Custom, Birth to Death (default), Origin to Death, Birth to Origin, Origin Constant}, Birth Color, Death Color, Custom Color Map, Volume Shade, Transfer Mode (`-0039`) {Composite, Screen, Add, Black Matte}.
+    - Extras (额外): Effect Camera, Depth Cue {None, Fade, Fog} (`-0082`), Composite With Original, Random Seed.
+  ```
+  // Simulation contract (BAE): state(t) = step^n(state(t_birth_start)), fixed internal step dt = 1/compFps (UNVERIFIED: CycoreFX sub-steps)
+  per step: emit floor(BirthRate * k) new particles uniformly in the producer ellipsoid (k = UNVERIFIED rate constant per second)
+            v0 = Velocity * dir(Animation preset) * random, gravity along Gravity Vector, drag by Resistance
+            age += dt; kill when age > Longevity * (1 ± random variation)
+  size(age) = lerp(BirthSize, DeathSize, age/life); color via Color Map; opacity = MaxOpacity (fades per type)
+  render with the layer's/comp camera if Effect Camera uses AE camera, else the effect's internal camera
+  ```
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Chinese group names（译名待核）; CycoreFX parameter names are not localised in zh-CN AE (UNVERIFIED). Implementation hint: deterministic per-particle seeding (particle id = emission step × slot) lets BAE recompute any frame by stepping from t=0 with a GPU compute pass and cache checkpoints every N frames for scrubbing. Lottie: none.
+
+### AE-FX-644 · CC Particle Systems II (CC 粒子系统 II（译名待核）)
+
+- **What it does:** A 2D particle emitter (CycoreFX) with a producer point, physics presets and per-particle size/opacity/colour over life.
+- **Exact semantics:**
+  - matchName `CC Particle Systems II`; category Simulation; 32 bpc; GPU —.
+  - Groups in UI order: Birth Rate, Longevity (sec); Producer {Position, Radius X, Radius Y}; Physics {Animation (`-0009`) {Explosive (default), Fractal Explosive, Twirl, Twirly, Vortex, Fire, ─, Direction, Direction Normalized, ─, Jet Sideways}, Velocity, Inherit Velocity %, Gravity, Resistance, Direction, Extra}; Particle {Particle Type (`-0018`) {Line, Star, ─, Shaded Sphere, Faded Sphere (default UNVERIFIED), Shaded&Faded Sphere, Bubble, ─, Motion Polygon, TriPolygon, QuadPolygon, Cube, TetraHedron, Textured TriPolygon, Textured QuadPolygon, ─, Lens Convex, Lens Concave, Lens Fade, Lens Darken Fade, Lens Bubble}, Texture, Rotation Speed, Initial Rotation, Birth Size, Death Size, Size Variation, Opacity Map (`-0022`) {Constant, Fade Out Sharp, Fade Out, Fade In, Fade In and Out, Oscillate}, Max Opacity, Color Map (`-0024`) {Birth to Death, Origin to Death, Birth to Origin, Origin Constant}, Birth Color, Death Color, Transfer Mode (`-0028`) {Composite, Screen, Add, Black Matte}, Ink}; Random Seed.
+  - Simulation contract as AE-FX-643 but in 2D layer pixels.
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Shares the particle core with AE-FX-643 in BAE (2D = Z ignored).
+
+### AE-FX-645 · Particle Playground (粒子运动场)
+
+- **What it does:** Adobe's legacy particle system: generators (Cannon, Grid, Layer Exploder, Particle Exploder) create dots, text characters or layer-mapped sprites that move under Gravity, Repel, Wall and Property Mapper rules; the layer itself becomes invisible except for particles.
+- **Exact semantics:**
+  - matchName `ADBE Playgnd`; category Simulation; 8 bpc; GPU —.
+  - Groups in UI order (with "Options…" dialog for text characters and Auto-Orient Rotation): Cannon (发射) {Position, Barrel Radius (negative = circular barrel, positive = square), Particles Per Second (0 = off; Cannon is the only generator on by default), Direction, Direction Random Spread (±half), Velocity (px/s), Velocity Random Spread, Color, Particle Radius (px)}; Grid (网格) {Position, Width, Height, Particles Across, Particles Down, Color, Particle Radius}; Layer Exploder (图层爆炸) {Explode Layer, Radius of New Particles, Velocity Dispersion}; Particle Exploder (粒子爆炸) {Radius of New Particles, Velocity Dispersion, Affects {...}}; Layer Map (图层映射) {Use Layer, Time Offset Type {Relative, Absolute, Relative Random, Absolute Random} (`ADBE Playgnd-0284`), Time Offset, Affects {...}}; Gravity (重力) {Force, Force Random Spread, Direction, Affects}; Repel (排斥) {Force, Force Radius, Repeller, Affects}; Wall (墙) {Boundary (mask), Affects}; Persistent Property Mapper and Ephemeral Property Mapper (永久属性映射器 / 短暂属性映射器) {Use Layer As Map, Affects, Map Red/Green/Blue To (properties such as Kinetic Friction, Mass, Scale, Speed, Opacity...), Min/Max, Operator (Set, Add, Difference, Subtract, Multiply, Min, Max)}.
+  - Affects sub-group: Particles from {All, None, Cannon, Grid, Layer Exploder, Particle Exploder, and every "A or B (or C)" combination} (16 values, `ADBE Playgnd-0252`), Selection Map, Characters {None, Selection Text 1, Selection Text 2, Selection Text 3} (`-0254`), Older/Younger than, Age Feather.
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Help: very slow; simulation always runs from the layer In point. Chinese group names from the zh-CN help page where shown (发射, 网格, 图层爆炸, 粒子爆炸, 图层映射, 重力, 排斥, 墙), others（译名待核）.
+
+### AE-FX-646 · Other Simulation effects catalog (其他模拟效果)
+
+- **What it does:** Reserves the remaining Simulation effects by matchName so projects round-trip.
+- **Exact semantics:**
+
+  | Effect (中文) | matchName | bpc | GPU | Summary |
+  |---|---|---|---|---|
+  | Card Dance (卡片动画) | `APC CardDanceCam` | 8 | — | Splits the layer into a grid of cards driven by Gradient Layers (Rows & Columns, Back Layer, Gradient Layer 1/2, Rotation Order, Transformation Order, X/Y/Z Position/Rotation/Scale sources, Camera System, Lighting, Material). |
+  | Caustics (焦散) | `APC Caustics` | 8 | — | Renders a water surface's refraction/caustics over a Bottom layer (Bottom, Water {Water Surface, Wave Height, Smoothing, Water Depth, Refractive Index, Surface Color, Surface Opacity, Caustics Strength}, Sky, Lighting, Material). |
+  | Foam (泡沫) | `APC Foam` | 8 | — | Bubble particle simulation (View, Producer, Bubbles, Physics, Zoom, Universe Size, Rendering, Flow Map, Random Seed). |
+  | Shatter (碎片) | `APC Shatter` | 8 | — | Explodes the layer into extruded shapes (View, Render, Shape {Pattern, Custom Shatter Map, Repetitions, Direction, Origin, Extrusion Depth}, Force 1/2, Gradient, Physics, Textures, Camera System, Lighting, Material). |
+  | Wave World (波形环境) | `APC Wave World` | 8 | — | 2D wave-propagation height-map generator (View, Wireframe Controls, Height Map Controls, Simulation, Ground, Producer 1/2). |
+  | CC Ball Action (CC Ball Action) | `CC Ball Action` | 16 | — | Converts the layer into a grid of shaded 3D balls (Scatter, Rotation, Twist, Grid Spacing, Ball Size, Instability State). |
+  | CC Bubbles (CC Bubbles) | `CC Bubbles` | 32 | — | Rising bubbles textured by the layer (Bubble Amount, Speed, Wobble, Bubble Size, Reflection Type, Shading Type). |
+  | CC Drizzle (CC Drizzle) | `CC Drizzle` | 32 | — | Raindrop ripples on a surface (Drip Rate, Longevity, Rippling, Displacement, Ripple Height, Spreading, Light, Shading). |
+  | CC Hair (CC Hair) | `CC Hair` | 16 | — | Grows hair strands over the layer (Length, Thickness, Weight, Constant Mass, Density, Hairfall Map, Hair Color, Light, Shading). |
+  | CC Mr. Mercury (CC Mr. Mercury) | `CC Mr. Mercury` | 32 | — | Liquid-metal blob particles (Radius X/Y, Producer, Direction, Velocity, Birth Rate, Longevity, Gravity, Resistance, Extra, Animation, Blob Influence, Influence Map, Blob Birth/Death Size, Light, Shading). |
+  | CC Pixel Polly (CC Pixel Polly) | `CC Pixel Polly` | 16 | — | Shatters the layer into polygons that fly apart (Force, Gravity, Spinning, Force Center, Direction Randomness, Speed Randomness, Grid Spacing, Object {Polygon, Textured Polygon, Square, Textured Square}, Enable Depth Sort, Start Time). |
+  | CC Rainfall (CC Rainfall) | `CSRainfall` | 32 | — | Procedural rain streaks (Drops, Size, Scene Depth, Speed, Wind, Variation % (Wind), Spread, Color, Opacity, Background Reflection, Transfer Mode, Composite With Original, Extras). |
+  | CC Scatterize (CC Scatterize) | `CC Scatterize` | 16 | — | Scatters the layer's pixels into a cloud (Scatter, Right/Left Twist, Transfer Mode). |
+  | CC Snowfall (CC Snowfall) | `CSSnowfall` | 32 | — | Procedural snow (Flakes, Size, Variation % (Size), Scene Depth, Speed, Variation % (Speed), Wind, Spread, Wiggle, Color, Opacity, Background Illumination, Transfer Mode, Composite With Original, Extras). |
+  | CC Star Burst (CC Star Burst) | `CC Star Burst` | 16 | — | Flies through a field of spheres textured by the layer (Scatter, Speed, Phase, Grid Spacing, Size, Blend w. Original). |
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** CC Rainfall and CC Snowfall are the most used in templates and are stateless functions of time (good first candidates). Card Dance, Caustics, Foam, Shatter and Wave World are 8 bpc legacy effects sharing the "Camera System / Lighting / Material" control groups.
+
+## Audio effects
+
+Effect > Audio（音频）. Audio effects modify the layer's audio stream (not pixels); they are evaluated by the audio render path used for preview and output (see ui-preview-render-io.md, Audio panel and output-module audio).
+
+### AE-FX-647 · Audio effects catalog (音频效果)
+
+- **What it does:** Reserves and summarises AE's built-in audio effects by matchName; all are applied to layers with audio and are rendered in preview/export audio.
+- **Exact semantics:**
+
+  | Effect (中文) | matchName | Parameters (help order) | Summary |
+  |---|---|---|---|
+  | Backwards (倒放) | `ADBE Aud Reverse` | Swap Channels | Plays the layer's audio from last frame to first; timeline frames unchanged. |
+  | Bass & Treble (低音和高音) | `ADBE Aud BT` | Bass, Treble | Shelf boost/cut of low/high frequencies. |
+  | Compressor (压缩器) | `ADBE Aud Compressor` | UNVERIFIED (threshold/ratio/attack/release family) | Dynamic-range compressor (added in a 2025 AE release, UNVERIFIED version). |
+  | De-esser (消除齿音) | UNVERIFIED (not in the AE 26.0 dump) | UNVERIFIED | Sibilance reducer (help page lists it; newer than AE 26.0). |
+  | Delay (延迟) | `ADBE Aud Delay` | Delay Time (ms), Delay Amount, Feedback, Dry Out, Wet Out | Echo: y[n] = dry·x[n] + wet·d[n], d[n] = amount·x[n−D] + feedback·d[n−D] (UNVERIFIED topology). |
+  | Distortion (扭曲) | `ADBE Aud Distortion` | UNVERIFIED | Waveshaping distortion (newer effect). |
+  | Flange & Chorus (变调与合声) | `ADBE Aud_Flange` | Voice Separation Time (ms), Voices, Modulation Rate, Modulation Depth, Voice Phase Change, Invert Phase, Stereo Voices, Dry Out, Wet Out | Modulated short delays. |
+  | Gate (噪声门) | `ADBE Aud Gate` | UNVERIFIED | Noise gate (newer effect). |
+  | High-Low Pass (高通/低通) | `ADBE Aud HiLo` | Filter Options {High Pass, Low Pass}, Cutoff Frequency (Hz), Dry Out, Wet Out | Cut filter (slope UNVERIFIED). |
+  | Modulator (调制器) | `ADBE Aud Modulator` | Modulation Type {Sine, Triangle}, Modulation Rate (Hz), Modulation Depth, Amplitude Modulation | Vibrato + tremolo. |
+  | Parametric EQ (参数均衡) | `ADBE Param EQ` | Frequency Response (graph), Band 1/2/3 Enabled, Frequency, Bandwidth, Boost/Cut | Three peaking bands (band 1 red, 2 green, 3 blue in the graph). |
+  | Reverb (混响) | `ADBE Aud Reverb` | Reverb Time (ms), Diffusion, Decay, Brightness, Dry Out, Wet Out | Algorithmic room reverb. |
+  | Stereo Mixer (立体声混合器) | `ADBE Aud Stereo Mixer` | Left Level, Right Level, Left Pan, Right Pan, Invert Phase | Per-channel level and pan. |
+  | Tone (色调) | `ADBE Aud Tone` | Waveform Options {Sine, Triangle, Saw, Square, White Noise (UNVERIFIED order)}, Frequency 1-5 (Hz; 0 = off), Level | Synthesises up to five tones; works on any layer type except placeholders. |
+- **Priority:** P2 (BAE M1 plays layer audio with level only; audio DSP is post-M1).
+- **Owner:** bae-media
+- **Notes:** The zh-CN help names Tone "色调" (identical to the Tint colour effect's term in some versions)（译名待核）. Audio effect bpc/GPU columns do not apply. Help tip: avoid clicks at the end of a Tone by keyframing Level to 0 on the last frame. Implementation hint: run audio effects in the audio graph at the project sample rate (48 kHz default) with parameters sampled per audio block (keyframes interpolated per block, UNVERIFIED AE block size).
+
+## Text effects
+
+Effect > Text（文本）. Legacy text generators; text layers (text.md) are the modern replacement, and help recommends the "Current Time Format" animation preset on a text layer instead.
+
+### AE-FX-648 · Numbers (数字)
+
+- **What it does:** Draws a number, counter, date, time, timecode or hexadecimal value (sequential, random or current date/time) onto the layer using a chosen font.
+- **Exact semantics:**
+  - matchName `ADBE Numbers2`; category Text; 8 bpc; GPU —. An "Options…" link opens the Font Style dialog (Font, Style, Direction {Horizontal, Vertical}, Alignment {Left, Center, Right}); the font is stored in the effect's arbitrary data (UNVERIFIED storage).
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Type (类型) | `ADBE Numbers2-0001` | Popup | Number | 1 Number (数字), 2 Number [Leading Zeros] (数字 [前导零]), 3 Timecode [30], 4 Timecode [25], 5 Timecode [24], 6 Time (时间), 7 Numerical Date (数字日期), 8 Short Date (短日期), 9 Long Date (长日期), 10 Hexadecimal (十六进制) | — | Leading Zeros = 5 integer digits. |
+  | 2 | Random Values (随机值) | UNVERIFIED | Checkbox | off | — | — | Random within [0, Value]; Value 0 = full range. |
+  | 3 | Value/Offset/Random Max (数值/位移/随机最大) | UNVERIFIED | Float slider | 0 | valid ±30000 for sequential offset (help: "maximum offset 30,000") | — | Meaning depends on Type (dates: days since 1 Jan 1995). |
+  | 4 | Decimal Places (小数位数) | UNVERIFIED | Integer slider | 3 (UNVERIFIED) | 0-5 (UNVERIFIED) | — | |
+  | 5 | Current Time/Date (当前时间/日期) | UNVERIFIED | Checkbox | off | — | — | Uses the wall clock at render time. |
+  | 6 | Position (位置) | UNVERIFIED | Point | layer centre | — | layer px | |
+  | 7 | Display Options (显示选项) | `ADBE Numbers2-0012` | Popup | Fill Only | 1 Fill Only, 2 Stroke Only, 3 Fill Over Stroke, 4 Stroke Over Fill | — | |
+  | 8 | Fill Color (填充颜色) | UNVERIFIED | Color | red (UNVERIFIED) | — | — | |
+  | 9 | Stroke Color (描边颜色) | UNVERIFIED | Color | white (UNVERIFIED) | — | — | |
+  | 10 | Stroke Width (描边宽度) | UNVERIFIED | Float slider | 2.0 (UNVERIFIED) | — | px | |
+  | 11 | Size (大小) | UNVERIFIED | Float slider | 36 (UNVERIFIED) | — | px | |
+  | 12 | Tracking (跟踪) | UNVERIFIED | Integer slider | 0 | — | — | Average distance between characters. |
+  | 13 | Proportional Spacing (比例间距) | UNVERIFIED | Checkbox | on (UNVERIFIED) | — | — | Off = monospaced digits. |
+  | 14 | Composite On Original (在原始图像上合成) | UNVERIFIED | Checkbox | on (UNVERIFIED) | — | — | Off = original not visible. |
+
+  ```
+  Number:      text = format(V, DecimalPlaces)           // V = Value/Offset (animated) ; Random: V = rand(frame) * Max
+  Timecode[N]: text = HH:MM:SS:FF of (layerTime + V) at N fps, non-drop
+  Time:        HH:MM from V (or wall clock if Current Time/Date)
+  Dates:       date = 1995-01-01 + V days (or today + V days with Current Time/Date); leap years honoured
+  Hexadecimal: h = floor(V * 0x10000) (step 0x1 per 0.0000125 ≈ 1/80000 — help; note 1/65536 ≈ 0.0000153, UNVERIFIED which is exact)
+  ```
+- **Priority:** P2
+- **Owner:** bae-effects (+ bae-text)
+- **Notes:** Current Time/Date makes renders non-deterministic. BAE decision: render the string through bae-text layout so CJK fonts work; store the font as a normal effect parameter (font reference) rather than opaque data.
+
+### AE-FX-649 · Timecode (时间码)
+
+- **What it does:** Burns in a timecode, frame number or film feet+frames readout over a box on the layer.
+- **Exact semantics:**
+  - matchName `ADBE Timecode`; category Text; 8 bpc; GPU —.
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Display Format (显示格式) | `ADBE Timecode-0002` | Popup | SMPTE HH:MM:SS:FFF | 1 SMPTE HH:MM:SS:FFF (menu label as stored in AE 26.0; the frame field has as many digits as needed), 2 Frame numbers, 3 Feet + Frames (35mm), 4 Feet + Frames (16mm) | — | 35mm = 16 frames/foot, 16mm = 40 frames/foot. |
+  | 2 | Time Source (时间源) | `ADBE Timecode-0009` | Popup | Layer Source (UNVERIFIED) | 1 Layer Source (图层源), 2 Composition (合成), 3 Custom (自定义) | — | Added in AE 22.x (UNVERIFIED version). |
+  | 3 | Time Units (时间单位) | UNVERIFIED | Float slider | comp frame rate (UNVERIFIED) | — | fps | Custom only; display only. |
+  | 4 | Drop Frame (丢帧) | UNVERIFIED | Checkbox | off | — | — | Custom only; meaningful at 29.97/59.94. |
+  | 5 | Starting Frame (开始帧) | UNVERIFIED | Integer | 0 | — | frames | Custom only; number of the layer's first frame. |
+  | 6 | Text Position (文本位置) | UNVERIFIED | Point | lower centre of layer (UNVERIFIED) | — | comp px (help) | |
+  | 7 | Text Size (文字大小) | UNVERIFIED | Float slider | 48 (UNVERIFIED) | — | points | |
+  | 8 | Text Color (文本颜色) | UNVERIFIED | Color | white | — | — | |
+  | 9 | Show Box (显示方框) | UNVERIFIED | Checkbox | on | — | — | |
+  | 10 | Box Color (方框颜色) | UNVERIFIED | Color | black | — | — | |
+  | 11 | Opacity (不透明度) | UNVERIFIED | Float slider | 100% | 0-100 | % | Box opacity. |
+  | 12 | Composite On Original (在原始图像上合成) | UNVERIFIED | Checkbox | on | — | — | Off: on transparent layer. |
+
+  ```
+  Layer Source: t = source footage timecode at the current source frame (embedded start TC + frame)
+  Composition:  t = comp time incl. comp start timecode (see project-comp-layers.md, Composition Settings start timecode)
+  Custom:       frame = StartingFrame + floor(layerTime * TimeUnits + ε); format with Drop Frame rules (SMPTE DF: skip frames 0,1 each minute except every 10th, scaled for 59.94)
+  Feet+Frames:  feet = floor(frame / k), ff = frame mod k ; k = 16 (35mm) or 40 (16mm)
+  ```
+- **Priority:** P2
+- **Owner:** bae-effects (+ bae-text)
+- **Notes:** Help: does not modify embedded timecode metadata. Timecode formatting must share code with the app's time display (ui-preview-render-io.md).
+
+## Utility effects
+
+Effect > Utility（实用工具）. Colour-pipeline helpers; the colour maths they rely on (working space, linearisation, ICC transforms) is specified in compositing-3d-color.md, Color management.
+
+### AE-FX-650 · Apply Color LUT (应用颜色 LUT)
+
+- **What it does:** Transforms the layer's colours through a 1D/3D lookup table loaded from a file.
+- **Exact semantics:**
+  - matchName `ADBE Apply Color LUT2` (old `ADBE Apply Color LUT` in _Obsolete); category Utility; 32 bpc; GPU —.
+  - Controls: a "Choose LUT…" button (selecting the file is prompted on apply). The LUT data is embedded in the effect so the project renders without the file (UNVERIFIED: embedded vs path only). Further parameters (e.g. interpolation) UNVERIFIED.
+  - Supported formats (help): `.3dl` (incl. floating-point values, 3DMESH/Mesh keywords, ASSIMILATE SCRATCH files), IRIDAS `.cube` (incl. over-range), IRIDAS `.look`, cineSpace `.csp`. 3D LUTs must have all three axes the same size.
+
+  ```
+  // .cube semantics (Resolve/IRIDAS): LUT_3D_SIZE N, DOMAIN_MIN/MAX (default 0..1), data with R varying fastest
+  in = straight (un-premultiplied) RGB of the layer, in the working space as-is (no implicit transform)
+  if LUT_1D: per channel linear interpolation over N entries
+  if LUT_3D: u = (in - domainMin) / (domainMax - domainMin) * (N-1); clamp u to [0, N-1]; trilinear interpolation of the 8 surrounding entries   // UNVERIFIED: AE trilinear vs tetrahedral
+  .3dl: integer outputs scaled by max code value (e.g. 4095 for 12-bit, 1023 for 10-bit) unless floating point; input grid from the first line
+  out = premultiply(lut(in), alpha); values outside the domain clamp at the edge
+  ```
+- **Priority:** P1 (very common for log footage and looks).
+- **Owner:** bae-color (+ bae-effects)
+- **Notes:** Help: AE normally colour-manages with ICC profiles, not LUTs. Implementation hint: upload the LUT as a 3D texture with hardware trilinear filtering (sample at texel centres: `(u + 0.5)/N`); 1D LUTs as 1D textures. BAE decision: also accept the same file formats in Interpret Footage for OCIO-subset workflows (see bae-color).
+
+### AE-FX-651 · Color Profile Converter (颜色配置文件转换器)
+
+- **What it does:** Converts the layer from an input ICC colour profile to an output profile with a rendering intent, independently of project colour management.
+- **Exact semantics:**
+  - matchName `ADBE ProfileToProfile`; category Utility; 32 bpc; GPU —. Profiles used are embedded in the project.
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Input Profile (输入配置文件) | `ADBE ProfileToProfile-0001` | Popup | Project Working Space | 1 Project Working Space, 2 separator, then installed profiles alphabetically (Adobe RGB (1998), Apple RGB, ColorMatch RGB, image P3, ProPhoto RGB, sRGB IEC61966-2.1, … machine-dependent) | — | Stored index depends on the machine's profile list; AE also stores the profile itself (UNVERIFIED mechanism). |
+  | 2 | Linearize Input Profile (线性化输入配置文件) | `-0002` (UNVERIFIED) | Checkbox | off | — | — | Uses the linear-gamma version of the profile. |
+  | 3 | Output Profile (输出配置文件) | `-0003` | Popup | Project Working Space | as Input Profile | — | |
+  | 4 | Linearize Output Profile (线性化输出配置文件) | `-0004` (UNVERIFIED) | Checkbox | off | — | — | |
+  | 5 | Intent (方法) | `-0005` | Popup | Relative Colorimetric | 1 Perceptual (感性), 2 Saturation (饱和度), 3 Relative Colorimetric (相对色度), 4 Absolute Colorimetric (绝对色度) | — | Relative Colorimetric is AE's default intent everywhere. |
+  | 6 | Use Black Point Compensation (使用黑场补偿) | `-0006` (UNVERIFIED) | Checkbox | on | — | — | |
+  | 7 | Scene-ref. Profile Compensation (场景参考配置文件补偿) | `-0007` | Popup | Use Project Setting | 1 Use Project Setting (使用项目设置), 2 On (开), 3 Off (关) | — | |
+
+  ```
+  rgb_lin = profileToXYZ(InputProfile, linearized?)(straight rgb)        // ICC matrix/TRC or LUT-based
+  rgb_out = XYZtoProfile(OutputProfile, linearized?)(chromaticAdapt(rgb_lin), intent, BPC)
+  // 32 bpc: matrix/TRC profiles are applied unclamped (extended range) (UNVERIFIED for LUT profiles)
+  ```
+- **Priority:** P1
+- **Owner:** bae-color (+ bae-effects)
+- **Notes:** Help warns against mixing it with project colour management. Labels of parameters 2, 4, 6 and their Chinese strings（译名待核）.
+
+### AE-FX-652 · Grow Bounds (范围扩散)
+
+- **What it does:** Enlarges the layer's effect buffer by a number of pixels on every side so that the next effect can draw outside the original bounds (useful on collapsed / continuously rasterized layers and with 8/16-bpc effects that do not expand bounds themselves).
+- **Exact semantics:**
+  - matchName `ADBE GROW BOUNDS`; category Utility; 32 bpc; GPU —.
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Pixels (像素) | `ADBE GROW BOUNDS-0001` | Float slider (integer pixels) | 0 (UNVERIFIED) | slider 0-1000 (UNVERIFIED), valid 0-30000 (UNVERIFIED) | px | |
+
+  ```
+  out_rect = in_rect expanded by Pixels on left, top, right, bottom (scaled by preview downsample factor)
+  out pixels = input pixels; new area = transparent black
+  ```
+- **Priority:** P1
+- **Owner:** bae-render (+ bae-effects)
+- **Notes:** Help: unnecessary for 32-bpc effects, which compensate automatically. Lottie: exported as `ty: 5`, `mn: "ADBE GROW BOUNDS"` (seen in exported files); players ignore it. BAE decision: BAE effects declare their own output bounds, so Grow Bounds is mostly a no-op except for layers whose buffer is the comp rectangle (collapse/continuous rasterize); it must still be honoured for imported projects.
+
+### AE-FX-653 · Cineon Converter (Cineon 转换器)
+
+- **What it does:** Converts between 10-bit log (Cineon/DPX printing density) and linear values with adjustable black/white points, gamma and highlight rolloff.
+- **Exact semantics:**
+  - matchName `ADBE Cineon Converter2` (old `ADBE Cineon Converter` in _Obsolete; old enum options appear for old projects); category Utility; 32 bpc; GPU —.
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Conversion Type (转换类型) | `ADBE Cineon Converter2-0001` | Popup | Log to Linear | 1 Linear to Log, 2 Log to Linear, 3 Log to Log | — | |
+  | 2 | 10 Bit Black Point (10 位黑场) | `-0002` (UNVERIFIED) | Integer slider | 95 | 0-1023 | 10-bit code | |
+  | 3 | Internal Black Point (内部黑场) | `-0003` (UNVERIFIED) | Float slider | 0 | 0-1 (UNVERIFIED) | — | |
+  | 4 | 10 Bit White Point (10 位白场) | `-0004` (UNVERIFIED) | Integer slider | 685 | 0-1023 | 10-bit code | |
+  | 5 | Internal White Point (内部白场) | `-0005` (UNVERIFIED) | Float slider | 1.0 | 0-1 (UNVERIFIED) | — | |
+  | 6 | Gamma (灰度系数) | `-0006` (UNVERIFIED) | Float slider | 1.70 | 0.1-5 (UNVERIFIED) | — | |
+  | 7 | Highlight Rolloff (高光滤除) | `-0007` (UNVERIFIED) | Integer slider | 20 (UNVERIFIED) | 0-100 (UNVERIFIED) | 10-bit codes | |
+
+  ```
+  // Standard Kodak conversion (UNVERIFIED how AE folds Gamma and Rolloff in)
+  k = 0.002 / 0.6 * (Gamma/1.7)                      // density per code / negative gamma, scaled by display gamma
+  offset = 10^((Black10 - White10) * k)
+  Log->Lin: lin = (10^((code10 - White10) * k) - offset) / (1 - offset)
+            lin = IntBlack + lin * (IntWhite - IntBlack)
+            highlights within Rolloff codes below White10 are compressed with a soft knee (UNVERIFIED curve); 32 bpc keeps >1.0
+  Lin->Log: inverse of the above ; Log->Log: remaps black/white points between two log encodings
+  ```
+- **Priority:** P2
+- **Owner:** bae-color (+ bae-effects)
+- **Notes:** Help: prefer colour-managed Cineon interpretation (see project-comp-layers.md, Interpret Footage, and compositing-3d-color.md, Color management).
+
+### AE-FX-654 · HDR Compander (HDR 压缩扩展器)
+
+- **What it does:** Compresses 32-bpc HDR values into 0-1 before low-dynamic-range effects and expands them back afterwards (used as a pair).
+- **Exact semantics:**
+  - matchName `ADBE Compander`; category Utility; 32 bpc; GPU —.
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Mode (模式) | `ADBE Compander-0001` | Popup | Compress Range | 1 Compress Range (压缩范围), 2 Expand Range (扩展范围) | — | |
+  | 2 | Gain (增益) | `-0002` (UNVERIFIED) | Float slider | 1.0 (UNVERIFIED) | slider 1-100 (UNVERIFIED) | — | Highest white value to represent. |
+  | 3 | Gamma (灰度系数) | `-0003` (UNVERIFIED) | Float slider | 1.0 (UNVERIFIED) | 0.1-10 (UNVERIFIED) | — | Same values on both instances. |
+
+  ```
+  Compress: v' = (v / Gain)^(1/Gamma)      per colour channel, straight colour (UNVERIFIED exact form)
+  Expand:   v  = Gain * v'^Gamma
+  ```
+- **Priority:** P2
+- **Owner:** bae-color (+ bae-effects)
+- **Notes:** Help: the "Compress-Expand Dynamic Range" animation preset links the two instances with an expression. Chinese parameter strings（译名待核）.
+
+### AE-FX-655 · HDR Highlight Compression (HDR 高光压缩)
+
+- **What it does:** Compresses HDR values so they fit (at Amount 100%) into 0-1, bringing highlight detail into the visible range.
+- **Exact semantics:**
+  - matchName `ADBE HDR ToneMap`; category Utility; 32 bpc; GPU —.
+  - Single parameter Amount (数量) `ADBE HDR ToneMap-0001` (UNVERIFIED matchName), Float slider, default 100% (UNVERIFIED), 0-100 %.
+
+  ```
+  // UNVERIFIED reconstruction: global tone curve chosen so that max channel of the frame maps to 1.0 at Amount 100
+  m = max over pixels of max(r,g,b)
+  c = (m > 1) ? curve(c; m) : c          // e.g. c' = c / (1 + c*(1 - 1/m)) keeps 0..1 nearly unchanged and maps m -> 1
+  out = lerp(c, c', Amount/100)
+  ```
+- **Priority:** P2
+- **Owner:** bae-color (+ bae-effects)
+- **Notes:** Frame-global analysis (needs the whole frame before output) — UNVERIFIED that AE analyses per frame rather than using a fixed curve.
+
+### AE-FX-656 · CC Overbrights (CC 过亮显示（译名待核）)
+
+- **What it does:** Visualises pixel values outside 0-1 in 32-bpc projects (shows which areas are over-range).
+- **Exact semantics:**
+  - matchName `CC Overbrights`; category Utility; 32 bpc; GPU —.
+  - Channel (`CC Overbrights-0001`) {1 RGB Solid, 2 Lightness Solid, 3 Luminance Solid, 4 separator, 5 RGB Clip, 6 Lightness Clip, 7 Luminance Clip}; Clip Color (UNVERIFIED name/default).
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Diagnostic only; BAE may offer the same as a viewer overlay instead. Heading Chinese name not localised（译名待核）.
+
+## Obsolete and Immersive Video effects
+
+### AE-FX-657 · Obsolete effects catalog (过时效果)
+
+- **What it does:** Lists the effects AE still ships in the visible Obsolete category (过时) for compatibility with old projects, plus the rule for the hidden `_Obsolete` category.
+- **Exact semantics:**
+
+  | Effect (中文) | matchName | bpc | GPU | Summary / replacement |
+  |---|---|---|---|---|
+  | Basic 3D (基本 3D) | `ADBE Basic 3D` | 8 | — | Swivel, Tilt, Distance to Image, Specular Highlight, Preview: pseudo-3D plane rotation; replaced by 3D layers. |
+  | Basic Text (基本文字) | `ADBE Basic Text2` | 8 | — | Draws text from a dialog (Fill and Stroke, Size, Tracking, Line Spacing, Composite On Original); replaced by text layers. |
+  | Color Key (颜色键) | `ADBE Color Key` | 16 | — | See AE-FX-632. |
+  | Fast Blur (Legacy) (快速模糊（旧版）) | `ADBE Fast Blur` | 32 | — | Blurriness, Blur Dimensions, Repeat Edge Pixels; see effects.md [fx-b] Blur & Sharpen for the current blur. |
+  | Gaussian Blur (Legacy) (高斯模糊（旧版）) | `ADBE Gaussian Blur` | 32 | — | Blurriness, Blur Dimensions; replaced by `ADBE Gaussian Blur 2` (fx-b). |
+  | Lightning (闪电) | `ADBE Lightning` | 8 | — | Old lightning generator; replaced by Advanced Lightning (AE-FX-616). |
+  | Luma Key (亮度键) | `ADBE Luma Key` | 16 | — | See AE-FX-632. |
+  | Path Text (路径文本) | `ADBE Path Text` | 8 | — | Text along a Bezier/circle/loop/line path with per-character jitter; replaced by text on a path (text.md). |
+  | Reduce Interlace Flicker (减少交错闪烁) | `ADBE Reduce Interlace Flicker` | 32 | — | Softness: vertical blur to reduce interlace twitter. |
+  | Spill Suppressor (溢出抑制器) | `ADBE Spill Suppressor` | 32 | — | See AE-FX-632. |
+  | mocha shape (mocha shape) | `ISL MochaShapeImporter` | 32 | — | See AE-FX-626; the AE 26.0 dump lists it under Obsolete rather than Matte. |
+
+  - Hidden `_Obsolete` category: older matchName versions (e.g. `ADBE Noise`, `ADBE Noise Alpha`, `ADBE Apply Color LUT`, `ADBE Cineon Converter`, `CC Time Blend`) never appear in the Effects menu but must load, render and keep their parameters when opened from old projects; scripting `app.effects` lists them with category `_Obsolete` (AE 26.0 dump).
+- **Priority:** P2
+- **Owner:** bae-effects (+ bae-plugin)
+- **Notes:** BAE decision: when a newer equivalent exists, map the obsolete matchName onto the new BAE implementation with a parameter adapter, but keep the original matchName on save so round-tripping to AE is lossless. The effect framework rule for unknown matchNames (placeholder that keeps parameters) is in effects.md [fx-a]. Chinese names of Basic Text, Path Text and Reduce Interlace Flicker（译名待核）.
+
+### AE-FX-658 · Immersive Video effects catalog (沉浸式视频效果)
+
+- **What it does:** Lists the VR / 360° effects (Effect > Immersive Video) that operate on equirectangular footage.
+- **Exact semantics:**
+
+  | Effect (中文) | matchName | Summary |
+  |---|---|---|
+  | VR Blur (VR 模糊) | `Mettle SkyBox Blur` | Seam-aware blur on equirectangular images. |
+  | VR Chromatic Aberrations (VR 色差) | `Mettle SkyBox Chromatic Aberrat` | Seam-aware chromatic aberration. |
+  | VR Color Gradients (VR 颜色渐变) | `Mettle SkyBox Color Gradients` | Gradient generator with points on the sphere. |
+  | VR Converter (VR 转换器) | `Mettle SkyBox Converter` | Converts between equirectangular, cube-map and other 360° layouts and rotates the sphere. |
+  | VR De-Noise (VR 降噪) | `Mettle SkyBox Denoise` | Seam-aware denoise. |
+  | VR Digital Glitch (VR 数字故障) | `Mettle SkyBox Digital Glitch` | Glitch effect for 360° footage. |
+  | VR Fractal Noise (VR 分形杂色) | `Mettle SkyBox Fractal Noise` | Fractal noise mapped seamlessly onto the sphere. |
+  | VR Glow (VR 发光) | `Mettle SkyBox Glow` | Seam-aware glow. |
+  | VR Plane to Sphere (VR 平面到球面) | `Mettle SkyBox Project 2D` | Projects a flat layer onto the sphere. |
+  | VR Rotate Sphere (VR 旋转球面) | `Mettle SkyBox Rotate Sphere` | Tilt/Pan/Roll of the equirectangular image. |
+  | VR Sharpen (VR 锐化) | `Mettle SkyBox Sharpen` | Seam-aware sharpen. |
+  | VR Sphere to Plane (VR 球面到平面) | `Mettle SkyBox Viewer` | Renders a flat camera view from the sphere. |
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** matchNames from the AE 26.0 effect dump (the docsforadobe first-party table has no Immersive Video section, so bpc/GPU values are UNVERIFIED; believed 32 bpc with GPU). All Chinese names（译名待核）. Implementation hint: implement once as "equirect-aware sampling" (wrap horizontally, pole-aware vertically) that the existing blur/glow/sharpen kernels can reuse.
