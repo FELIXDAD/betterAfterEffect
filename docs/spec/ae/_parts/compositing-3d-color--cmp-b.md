@@ -371,7 +371,7 @@
   blur_radius_px  = coc_diameter_px / 2
   // applied as a disc (iris-shaped, AE-CMP-422) blur of the projected layer image
   ```
-  - Applied per layer, after projection, only to 3D layers; 2D layers are never blurred. Blur varies across a layer that recedes in depth (per-pixel depth). UNVERIFIED: whether Classic 3D uses per-pixel or per-layer-centre depth; per-pixel is believed (since AE 7.0).
+  - Applied per layer, after projection, only to 3D layers; 2D layers are never blurred. Blur varies across a layer that recedes in depth (per-pixel depth). UNVERIFIED: whether Classic 3D uses per-pixel or per-layer-centre depth; per-pixel is believed.
   - Not affected by layer Quality; scaled by preview Resolution (radius / downsample factor).
   - Draft 3D disables DOF (AE-CMP-409).
   - Edge cases: Aperture 0 or Blur Level 0 ⇒ no blur; zc ≤ 0 ⇒ not drawn.
