@@ -1,0 +1,10 @@
+# Build context excludes for deploy/docker/Dockerfile (BuildKit reads
+# <Dockerfile>.dockerignore next to the Dockerfile). Cargo needs every
+# workspace member's sources to load the workspace, so only build output,
+# history and local files are left out.
+.git
+target
+dist
+**/.DS_Store
+.claude
+.orchestration
