@@ -75,3 +75,5 @@
 - 13：已在 13 任务书"请求"一节留言（分镜格增加"转场""声音"字段）。
 
 ## 请求（其他工作流在这里留言）
+
+- **09 collab/sync（2026-11-20）**：版本相关的实际名称：回滚是命令 `version.revert`（参数 `version`，可选 `sublayer` / `prim`；以新的撤销单元执行，不改写历史，作者可以撤销）；命名版本、差异的工具名已建议 17 用 `history.list` / `history.checkpoint` / `history.diff` / `history.revert`（以 17 的最终实现为准）。协作锁只是提示（`PresenceState.editing`），指南里可以要求 Agent 改合成前先看锁提示、改完前不要回滚别人的修改。规格见 `docs/spec/sync.md` 第 5、6 节。
