@@ -1,6 +1,6 @@
 # 数据模型（bae-model）
 
-> 状态：第一版接口（工作流 02 的 PR A）。分层引用、工程文件、Prim schema 在后续 PR 补充，见文末"还没做"。
+> 状态：PR A（基础类型、存储、命令、撤销、事件）+ PR B（引用、下推/合并）。工程文件、Prim schema 在后续 PR 补充，见文末"还没做"。
 > 代码：`crates/bae-model`。概念来源：`docs/ARCHITECTURE.md` 第 4 节。
 
 ## 1. 概念
@@ -28,12 +28,29 @@
 
 ## 2. 合成规则
 
-- **Prim 是否存在：** 至少有一层是 `def`，并且父 Prim 存在。只有 `over` 的路径不算存在（不会出现在遍历里）。
-- **属性：** 从强到弱找到第一个对该属性有意见的层，整条意见（值 + 关键帧 + 表达式）生效。`PrimView::attr_source` 返回生效的层（界面上的"这个值来自哪一层"）。
-- **类型、引用：** 取最强的非空意见。
-- **子 Prim 顺序：** 按最弱的层里的顺序，强层新增的子 Prim 排在后面。
+- **意见的强弱顺序**（`Stage::opinions(path)`，强 → 弱）：
+  1. 本工程层叠里同一路径上的 spec，强层在前；
+  2. 这个 Prim 自己引用的 Prim 的对应 spec；
+  3. 祖先引用进来的对应 spec，近的祖先在前。
+  被引用的内容会递归合成（它自己的层叠和引用），所以引用可以嵌套。
+- **Prim 是否存在：** 父 Prim 存在，并且至少有一条意见是 `def`。只有 `over` 的路径不算存在（不会出现在遍历里）。
+- **属性：** 第一条对该属性有意见的生效，整条意见（值 + 关键帧 + 表达式）一起生效。`PrimView::attr_origin` 返回生效的意见：来自哪个工程、哪一层、层里的哪个路径，以及是不是经过引用来的。界面上"这个值来自哪一层"就用它。
+- **类型、引用：** 取最强的非空意见。同一个 Prim 在多层都写了引用列表时，最强的那份生效（暂不做列表合并）。
+- **子 Prim 顺序：** 最弱的来源（被引用的内容、弱层）里的顺序在前，强的来源新增的子 Prim 排在后面。
 - **在强层里改弱层定义的 Prim：** 命令会自动在目标层为该 Prim 及其祖先补 `over` 空壳（`Transaction::ensure_spec`），再写属性。
-- **删除、移动、改名是命名空间操作：** 作用于层叠里所有在该路径上有意见的层，覆盖会跟着 Prim 走。
+- **删除、移动、改名是命名空间操作：** 作用于层叠里所有在该路径上有意见的层，覆盖会跟着 Prim 走。只能对本工程层叠里有 `def` 的 Prim 做；经引用来的 Prim 只能覆盖属性（报 `ProvidedByReference`）。
+
+### 引用（Reference）
+
+- `Reference { project, prim }`：`project` 为空表示同一工程；否则是另一个工程相对本工程的路径，要先用 `Stage::attach_project(key, stage)` 挂上（PR C 的工程文件会自动加载）。没挂上或目标不存在的引用由 `Stage::unresolved_references()` 列出，界面显示为缺失。
+- 被引用的子树挂在引用方下面，比引用方自己的所有本地意见都弱。在引用方路径下改属性，会在目标层里补 `over` 并写入覆盖，不会改到被引用的原件。
+- 引用只带入目标 Prim 及其子树；目标祖先上的引用不会带进来。
+- 循环引用和超过 16 层的嵌套会被截断，不会死循环。
+- **改动传播：** 修改被引用的内容时，事件里会同时报告引用方路径上的对应改动（嵌套引用也会逐层映射）。目标本身被删除、新建或改了引用时，引用方报 `resynced`。
+
+### 平铺（flatten）
+
+`Stage::flatten()` 把合成结果输出成只有 `def` 的普通 `PrimTree`：每个属性取生效的意见，引用已经展开。用于导出到没有分层概念的格式（AE、Lottie），也用来给 Agent 做摘要。
 
 ## 3. 值与 JSON
 
@@ -80,7 +97,7 @@
 
 ## 5. Op、事务与撤销
 
-Op（JSON 里 `"op"` 字段区分）：`create_prim`、`delete_prim`、`restore_prim`（恢复整棵子树）、`move_prim`（移动 / 改名 / 重排）、`set_prim_type`、`set_value`、`set_keyframe`、`remove_keyframe`、`set_expression`、`set_attr`（整条意见替换或清除）、`set_references`。
+Op（JSON 里 `"op"` 字段区分）：`create_prim`、`delete_prim`、`restore_prim`（恢复整棵子树）、`move_prim`（移动 / 改名 / 重排）、`set_prim_type`、`set_specifier`（def ↔ over）、`set_value`、`set_keyframe`、`remove_keyframe`、`set_expression`、`set_attr`（整条意见替换或清除）、`set_references`。
 
 - 每个 Op 在应用前完成全部校验，失败时这一层不会被改动；应用后返回逆 Op。
 - `Stage::transact(author, label, |tx| ...)`：一个撤销单元。闭包失败时，已经应用的 Op 按逆序撤回，不发事件，也不进撤销栈。提交时给每个被修改的 Loro 文档写一条提交信息 `{"author", "label"}`（供历史和审计）。
@@ -106,6 +123,8 @@ Op（JSON 里 `"op"` 字段区分）：`create_prim`、`delete_prim`、`restore_
 | `prim.set_references` | 设置引用 |
 | `sublayer.create` | 新建工程层（默认放在最强） |
 | `sublayer.set_edit_target` | 切换 Edit Target |
+| `opinion.move` | 把某个 Prim 的覆盖（一个属性或全部，含类型、引用、def）从一层移到另一层，即"下推"；`keep: true` 时为复制。源层里变空的 `over` 及其空祖先会被删掉 |
+| `sublayer.merge` | 把一层的全部意见合并进另一层（接受 Agent 的提案层、把岗位层合进 root），一个撤销单元 |
 
 ## 7. 事件
 
@@ -130,11 +149,10 @@ Op（JSON 里 `"op"` 字段区分）：`create_prim`、`delete_prim`、`restore_
 
 | 指标 | 结果 | 要求 |
 |---|---|---|
-| 打开 1 万个 Prim（每个带一个属性和一个关键帧，快照 2.5 MB） | 111 ms | < 500 ms |
+| 打开 1 万个 Prim（每个带一个属性和一个关键帧，快照 2.5 MB） | 111 ms（空闲时）；160–330 ms（机器满载，load 20） | < 500 ms |
 | 单次属性修改到事件发出（平均 200 次） | 5.3 µs | < 1 ms |
 
 ## 10. 还没做（后续 PR）
 
-- **B：** Reference 的合成（包括跨工程文件）、把覆盖下推/合并到更弱的层。
 - **C：** 工程文件目录包（`project.json` 存层叠顺序）、`.baez`、`bae export-json`、格式版本与迁移；素材引用（相对路径、原始绝对路径、指纹、路径映射、缺失状态）。
 - **D：** Prim schema 初版（各类型的字段和默认值、显示名属性）、效果参数模型（AE 参数类型超集、稳定数字 ID、参数标志、状态数据槽）、插件数据与缺失插件占位。
