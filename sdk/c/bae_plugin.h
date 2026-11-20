@@ -562,7 +562,8 @@ typedef struct BaeParamValues {
 #define BAE_EFFECT_DYNAMIC_FLAGS_MASK                                                       \
     (BAE_EFFECT_FLAG_PIXEL_INDEPENDENT | BAE_EFFECT_FLAG_NON_PARAM_VARY |                  \
      BAE_EFFECT_FLAG_WIDE_TIME_INPUT | BAE_EFFECT_FLAG_USES_SHUTTER |                      \
-     BAE_EFFECT_FLAG_USES_CAMERA | BAE_EFFECT_FLAG_USES_LIGHTS)
+     BAE_EFFECT_FLAG_USES_CAMERA | BAE_EFFECT_FLAG_USES_LIGHTS |                       \
+     BAE_EFFECT_FLAG_NON_DETERMINISTIC)
 
 /* Threading contract for render-side callbacks (pre_render, render_*,
    release_frame_data, RENDER-purpose instance_create/destroy). */
