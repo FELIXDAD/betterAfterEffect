@@ -10,6 +10,7 @@
 //!
 //! This crate has no GPU, window or platform dependencies.
 
+pub mod asset;
 mod attr;
 mod command;
 pub mod commands;
@@ -20,11 +21,13 @@ mod ids;
 mod op;
 mod path;
 mod prim;
+pub mod project;
 mod stage;
 mod sublayer;
 mod time;
 mod value;
 
+pub use asset::{AssetFile, AssetResolver, PathMapping, Resolution};
 pub use attr::{AttrSpec, Ease, Expression, Interpolation, Keyframe, KeyframeFlags};
 pub use command::{Command, CommandError, CommandInfo, CommandOutput, CommandRegistry, DynCommand};
 pub use compose::{Opinion, PrimView};
@@ -34,6 +37,10 @@ pub use ids::{AuthorId, InvalidId, SublayerId};
 pub use op::{Edit, Op};
 pub use path::{PathError, PrimPath, validate_name};
 pub use prim::{LayerKind, PrimSpec, PrimTree, PrimType, Reference, Specifier};
+pub use project::{
+    BaezAsset, OpenOptions, Project, ProjectError, ProjectManifest, export_flattened_json,
+    export_prim_json, export_sublayer_json, extract_baez,
+};
 pub use stage::{Stage, SubscriptionId, Transaction};
 pub use sublayer::Sublayer;
 pub use time::{FrameRate, Time, TimeRange};

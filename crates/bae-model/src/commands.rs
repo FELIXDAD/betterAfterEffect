@@ -8,6 +8,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::asset::AssetFile;
 use crate::attr::{Expression, Keyframe};
 use crate::command::{Command, CommandError, CommandRegistry};
 use crate::error::ModelError;
@@ -36,6 +37,7 @@ pub fn register_builtins(r: &mut CommandRegistry) {
         r.register(SetEditTarget),
         r.register(MoveOpinions),
         r.register(FlattenSublayer),
+        r.register(SetAssetFile),
     ];
     for res in results {
         res.expect("built-in command IDs are unique");
@@ -688,6 +690,34 @@ impl Command for FlattenSublayer {
             for path in top {
                 tx.apply_to(&p.from, Op::DeletePrim { path })?;
             }
+        }
+        Ok(())
+    }
+}
+
+pub struct SetAssetFile;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SetAssetFileParams {
+    /// An existing Asset prim.
+    pub path: PrimPath,
+    /// File reference: relative path, original absolute path and fingerprint
+    /// (use `AssetFile::from_path` to fill it from disk).
+    pub file: AssetFile,
+}
+
+impl Command for SetAssetFile {
+    type Params = SetAssetFileParams;
+    type Output = ();
+    const ID: &'static str = "asset.set_file";
+    const TITLE: &'static str = "Relink Asset";
+    const DESCRIPTION: &'static str = "Set or relink the file an Asset prim points to.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        require_prim(tx, &p.path)?;
+        tx.ensure_spec(&p.path)?;
+        for op in p.file.to_ops(&p.path) {
+            tx.apply(op)?;
         }
         Ok(())
     }

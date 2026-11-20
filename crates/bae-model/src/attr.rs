@@ -21,7 +21,13 @@ use crate::value::Value;
 pub struct AttrSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<Value>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    /// Keyframes by time in flicks. JSON keys are decimal strings (`"0"`); both
+    /// string and integer keys are accepted when reading.
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        deserialize_with = "keyframes_de::deserialize"
+    )]
     pub keyframes: BTreeMap<Time, Keyframe>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expression: Option<Expression>,
@@ -58,6 +64,64 @@ impl AttrSpec {
             .next()
             .map_or(Time::MAX, |(k, _)| k.saturating_add(Time(1)));
         crate::time::TimeRange::new(start, end)
+    }
+}
+
+mod keyframes_de {
+    //! JSON object keys are strings; `#[serde(flatten)]` (used by `PrimTree`) buffers
+    //! them, after which serde no longer converts `"0"` to an integer. Parse the time
+    //! key ourselves so keyframes read back in every context.
+    use std::collections::BTreeMap;
+    use std::fmt;
+
+    use serde::Deserializer;
+    use serde::de::{self, MapAccess, Visitor};
+
+    use super::Keyframe;
+    use crate::time::Time;
+
+    struct TimeKey(i64);
+
+    impl<'de> de::Deserialize<'de> for TimeKey {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            struct V;
+            impl Visitor<'_> for V {
+                type Value = TimeKey;
+                fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.write_str("a time in flicks (integer or decimal string)")
+                }
+                fn visit_i64<E: de::Error>(self, v: i64) -> Result<TimeKey, E> {
+                    Ok(TimeKey(v))
+                }
+                fn visit_u64<E: de::Error>(self, v: u64) -> Result<TimeKey, E> {
+                    i64::try_from(v).map(TimeKey).map_err(E::custom)
+                }
+                fn visit_str<E: de::Error>(self, v: &str) -> Result<TimeKey, E> {
+                    v.trim().parse().map(TimeKey).map_err(E::custom)
+                }
+            }
+            d.deserialize_any(V)
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<BTreeMap<Time, Keyframe>, D::Error> {
+        struct M;
+        impl<'de> Visitor<'de> for M {
+            type Value = BTreeMap<Time, Keyframe>;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a map of time → keyframe")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut out = BTreeMap::new();
+                while let Some((TimeKey(t), k)) = map.next_entry::<TimeKey, Keyframe>()? {
+                    out.insert(Time(t), k);
+                }
+                Ok(out)
+            }
+        }
+        d.deserialize_map(M)
     }
 }
 
@@ -213,6 +277,29 @@ mod tests {
             a.keyframe_influence(Time(30)),
             TimeRange::new(Time(20), Time::MAX)
         );
+    }
+
+    #[test]
+    fn keyframes_read_back_through_flatten() {
+        use crate::prim::{PrimSpec, PrimTree, PrimType};
+        let mut a = AttrSpec::default();
+        a.keyframes.insert(Time(0), Keyframe::linear(1.0));
+        a.keyframes.insert(Time(-5), Keyframe::hold(2.0));
+        let mut spec = PrimSpec::def(PrimType::LAYER);
+        spec.attrs.insert("opacity".into(), a);
+        let tree = PrimTree {
+            name: "title".into(),
+            spec,
+            children: Vec::new(),
+        };
+        let json = serde_json::to_string(&tree).unwrap();
+        assert_eq!(serde_json::from_str::<PrimTree>(&json).unwrap(), tree);
+        // Integer keys (hand-written JSON) are accepted too.
+        let k: AttrSpec = serde_json::from_str(
+            r#"{"keyframes": {"7": {"value": {"type": "float", "value": 1.0}}}}"#,
+        )
+        .unwrap();
+        assert!(k.keyframes.contains_key(&Time(7)));
     }
 
     #[test]
