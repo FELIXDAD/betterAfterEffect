@@ -974,7 +974,8 @@
 - **What it does:** In layer bar mode each layer is a horizontal bar spanning its In to Out point on the time graph; the bar is the handle for moving, trimming and slipping the layer.
 - **Exact semantics:**
   - Geometry: x from `inPoint` to `outPoint` in comp time (frame-quantised edges); height = layer row height minus a small inset. Colour = the layer's label colour (AE draws it as a tinted/darker shade of the label colour; selected layers are drawn brighter/highlighted). Layers with label None draw a neutral grey bar (UNVERIFIED shades).
-  - **Untrimmed source region**: for layers with a time-based source (footage, precomp, audio) the part of the source outside In/Out is shown as a pale/translucent extension of the bar (the slip-edit area) at both ends (UNVERIFIED: shown only while the layer is selected/hovered in current AE; always shown in older versions).
+  - **Slip-edit bar (滑动编辑条（译名待核）)**: after a layer based on moving footage (or a precomp/audio) has been trimmed, a pale rectangle extends the bar over the excluded source frames at either end; it never appears for stills (Adobe help, Trim, extend, or slip-edit a layer).
+  - **Negative layer time**: when a layer is extended before its layer time 0 (time-remapped, shape, still, camera, light, text layers), hash marks along the bottom of the bar mark the portion in negative layer time.
   - Stills, solids, text, shape, null, camera, light, adjustment layers: bar ends are always trimmable without a source limit (project-comp-layers.md, Layer extent limits).
   - Time-stretched layers (stretch ≠ 100 %) and time-remapped layers draw no special hatching; the Stretch column shows the factor (UNVERIFIED: AE draws no stretch indicator on the bar). Time-reversed layers (negative stretch) draw a diagonal hatch/stripe pattern along the bar (UNVERIFIED pattern).
   - Bars for layers whose Video and Audio switches are both off are drawn dimmed (UNVERIFIED).
@@ -1407,3 +1408,366 @@
 - **Priority:** P0
 - **Owner:** bae-ui-motion (+ bae-motion)
 - **Notes:** Apply semantics, paste-replace behaviour for single instances: effects.md, Apply, duplicate, copy/paste and delete effects.
+
+## Character and Paragraph panels
+
+### AE-UI-091 · Character panel (字符面板)
+
+- **What it does:** Shows and edits character-level TextDocument attributes of the current text selection, selected text layers, or the defaults for new text.
+- **Exact semantics:**
+  - Layout (top to bottom; each control maps to a text.md item):
+    | Control (中文) | Widget | Maps to (text.md) |
+    |---|---|---|
+    | Font family (设置字体系列) | searchable dropdown with font previews | Font selection fields (AE-TXT-013); menu details AE-UI-094 |
+    | Font style (设置字体样式) | dropdown | Font selection fields |
+    | Fill / Stroke colour boxes (填充颜色 / 描边颜色) with Swap Fill and Stroke (互换填充和描边（译名待核）), Set to Black / Set to White (设置为黑色 / 设置为白色), No Fill / No Stroke (无填充颜色 / 无描边颜色), eyedropper (吸管) | overlapping swatches (front one is active); click swatch = colour picker; click the back swatch = bring forward | Fill (AE-TXT-015), Stroke (AE-TXT-016) |
+    | Font size (设置字体大小) | hot text + preset dropdown | AE-TXT-014 (px) |
+    | Leading (设置行距) | hot text + dropdown incl. Auto (自动) | AE-TXT-020 |
+    | Kerning (设置两个字符之间的字偶间距) | hot text + dropdown: Metrics (度量标准), Optical (视觉), 0, numbers | AE-TXT-019; manual value only with an insertion point between two characters (disabled for a range) |
+    | Tracking (设置所选字符的字符间距) | hot text + dropdown | AE-TXT-018 (1/1000 em) |
+    | Stroke width (描边宽度) | hot text + dropdown (px) | AE-TXT-016 |
+    | Stroke position (描边位置（译名待核）) | dropdown: Fill Over Stroke (在描边上填充), Stroke Over Fill (在填充上描边), All Fills Over All Strokes (全部填充在全部描边之上), All Strokes Over All Fills (全部描边在全部填充之上) | Fill and stroke paint order (AE-TXT-017) |
+    | Vertical Scale (垂直缩放) / Horizontal Scale (水平缩放) | hot text % | AE-TXT-022 |
+    | Baseline Shift (设置基线偏移) | hot text px | AE-TXT-021 |
+    | Tsume (比例间距) | hot text % | AE-TXT-026 |
+    | Faux Bold (仿粗体), Faux Italic (仿斜体), All Caps (全部大写字母), Small Caps (小型大写字母), Superscript (上标), Subscript (下标) | toggle buttons (All Caps / Small Caps exclusive; Superscript / Subscript exclusive) | AE-TXT-023…025 |
+    | Ligatures (连字), Hindi Digits (印地语数字) (UNVERIFIED presence per AE version) | checkboxes | AE-TXT-027 |
+  - Mixed values across the target show an empty field (or "—"); editing sets all targets to the new value.
+  - Hot text scrubbing behaves as AE-UI-012 (Ctrl/Cmd fine, Shift coarse); with a range selected, Alt+←/→ (Opt) changes kerning/tracking by 20 units (Ctrl/Cmd+Alt: 100) (keyboard: ui-b).
+  - Eyedropper samples any pixel on screen (inside AE viewers: the displayed colour) and sets the front swatch.
+  - Panel menu (UNVERIFIED order): Show Font Names in English (以英文显示字体名称), Reset Character (重置字符), Faux Bold/Italic, All Caps, Small Caps, Superscript, Subscript, Ligatures, No Break (无间断), Line Join ▸ Miter/Round/Bevel (线段连接 ▸ 斜接/圆角/斜面), Standard Vertical Roman Alignment (标准垂直罗马对齐方式), Tate-Chu-Yoko (直排内横排), Fractional Widths? (UNVERIFIED), Show Font Preview? (UNVERIFIED).
+  - Opening: Window > Character (Ctrl+6 / Cmd+6); Auto-Open Panels in the Tools panel opens Character and Paragraph when a type tool becomes active.
+- **Priority:** P0
+- **Owner:** bae-ui-motion (+ bae-text)
+- **Notes:** Field semantics, defaults, ranges and scripting names: text.md (TextDocument section). Implementation hint: the panel reads a merged "style summary" of the target and writes one SetTextStyle command per edit.
+
+### AE-UI-092 · Paragraph panel (段落面板)
+
+- **What it does:** Edits paragraph-level attributes of the paragraphs touched by the selection, of selected text layers, or the defaults for new text.
+- **Exact semantics:**
+  | Control (中文) | Widget | Maps to (text.md) |
+  |---|---|---|
+  | Left Align Text (居左对齐文本), Center Text (居中对齐文本), Right Align Text (居右对齐文本), Justify Last Line Left (最后一行左对齐), Justify Last Line Centered (最后一行居中对齐), Justify Last Line Right (最后一行右对齐), Justify All (两端对齐) | 7 radio buttons (justify variants are enabled only for paragraph text; vertical text shows top/centre/bottom variants) | AE-TXT-028 |
+  | Left-to-Right / Right-to-Left text direction (从左到右 / 从右到左文本方向（译名待核）) | 2 radio buttons (AE 22.x+ with the South Asian / Middle Eastern composer) | AE-TXT-033 |
+  | Indent Left Margin (缩进左边距), Indent Right Margin (缩进右边距), Indent First Line (首行缩进) | hot text px | AE-TXT-029 |
+  | Add Space Before Paragraph (段前添加空格), Add Space After Paragraph (段后添加空格) | hot text px | AE-TXT-030 |
+  - Target: if the insertion point is in a paragraph or text is selected, only the paragraphs at least partially selected; else all text of the selected text layers (and their selected Source Text keyframes); else the defaults for the next text entry.
+  - Panel menu: Roman Hanging Punctuation (罗马式溢出标点), Top-to-Top Leading (顶到顶行距) / Bottom-to-Bottom Leading (底到底行距), Adobe Single-line Composer (Adobe 单行书写器) / Adobe Every-line Composer (Adobe 逐行书写器) (and Middle Eastern & South Asian variants), Hyphenation? (UNVERIFIED), Reset Paragraph (重置段落).
+  - Window > Paragraph (Ctrl+7 / Cmd+7).
+- **Priority:** P0
+- **Owner:** bae-ui-motion (+ bae-text)
+- **Notes:** Semantics: text.md, Paragraph alignment / indents / space / composer / leading type. zh-CN button names are tooltip strings (UNVERIFIED wording).
+
+### AE-UI-093 · Target resolution for Character and Paragraph edits (字符和段落编辑的作用目标)
+
+- **What it does:** Defines what an edit in the Character/Paragraph panels changes.
+- **Exact semantics:**
+  ```
+  if a text layer is in text-edit mode:
+      if a character range is selected:   apply character attrs to that range;
+                                          paragraph attrs to every paragraph touching the range
+      else (insertion point only):        character attrs become the "typing style" at the caret
+                                          (affect only text typed next); paragraph attrs apply to
+                                          the caret's paragraph
+  else if text layers are selected:       apply to ALL characters/paragraphs of every selected text layer;
+                                          if the layer has Source Text keyframes and some are selected,
+                                          apply to those keyframes only (UNVERIFIED: otherwise to the
+                                          keyframe at the CTI / creates one when the stopwatch is on)
+  else:                                   store as defaults for the next new text layer (persisted per user)
+  ```
+  - With the Source Text stopwatch on and no Source Text key selected, a change at a CTI without a key creates a Source Text key (hold) at the CTI (text.md, Source Text keyframes).
+  - Multiple layers: one undo step for all.
+- **Priority:** P0
+- **Owner:** bae-ui-motion (+ bae-text, bae-model)
+- **Notes:** —
+
+### AE-UI-094 · Font menu, favourites and missing fonts in the UI (字体菜单、收藏与缺失字体)
+
+- **What it does:** The font family dropdown is a searchable list with previews, recent fonts, favourites and filters; missing fonts are shown distinctly.
+- **Exact semantics:**
+  - Typing in the closed field filters/jumps to matching family names; ↑/↓ or the mouse wheel over the field steps to the previous/next family and applies it live; Enter/Return accepts, Esc cancels.
+  - Open menu: recent fonts at the top (count = Preferences > Type > Number of Recent Fonts to Display, UNVERIFIED default 10), then all families alphabetically; each row shows the family name and a preview ("Sample" in that font, size per Preferences > Type > Preview Size: Small / Medium / Large, UNVERIFIED default); a star toggles favourite; filter buttons at the top: Show favourites only (star), Show fonts from Adobe (Adobe Fonts), and a font classification filter? (UNVERIFIED).
+  - Families with several styles open a submenu/expander of styles (UNVERIFIED in AE 26: the style is chosen in the separate style dropdown).
+  - Missing font: the family name is shown in square brackets `[FontName]` and the text renders with a substitute (text.md, Missing fonts); Resolve Fonts… (解析字体) dialog from File > Resolve Fonts? (UNVERIFIED menu location).
+  - Duplicate installed copies show an abbreviation suffix in parentheses (e.g. `(T1)`, `(TT)`, `(OTF)`).
+- **Priority:** P1
+- **Owner:** bae-ui-motion (+ bae-text)
+- **Notes:** Font enumeration/matching: text.md, Font enumeration / Font matching on project open / Missing fonts. Implementation hint: render previews lazily (only visible rows) with a glyph cache; enumerate fonts on a background thread at startup.
+
+## Align, Info, Audio and Preview panels
+
+### AE-UI-095 · Align panel (对齐面板)
+
+- **What it does:** Aligns or evenly distributes the selected layers horizontally or vertically, relative to the selection or to the composition frame.
+- **Exact semantics:**
+  - Controls: **Align Layers To (将图层对齐到)** popup: Selection (选区) | Composition (合成) (default Composition, UNVERIFIED); **Align Layers (对齐图层)**: 6 buttons — Left, Horizontal Center, Right, Top, Vertical Center, Bottom; **Distribute Layers (分布图层)**: 6 buttons — Top, Vertical Center, Bottom, Left, Horizontal Center, Right (UNVERIFIED button order).
+  - Enable rules: align needs ≥ 2 layers (Selection) or ≥ 1 layer (Composition); distribute needs ≥ 3 layers. Locked layers are not moved. Text characters are not aligned within a layer.
+  - Math (per layer `L` at the CTI):
+    ```
+    box(L) = axis-aligned bounding box in comp space of L's layer bounds
+             (source rect / sourceRectAtTime for text & shape, see compositing-3d-color.md, Layer bounds)
+             transformed by L's full layer-to-comp matrix (incl. parents)
+    target (Selection):   Left = min(box.x0), Right = max(box.x1), HCenter = (min x0 + max x1)/2,
+                          Top = min(box.y0), Bottom = max(box.y1), VCenter = (min y0 + max y1)/2
+                          i.e. align to the extreme layer edge in that direction (help: "the layer most
+                          closely representing the new alignment")  (UNVERIFIED for centre: AE uses the
+                          centre of the selection's union box)
+    target (Composition): Left = 0, Right = comp.width, HCenter = comp.width/2, Top = 0, ...
+    align:      dx = target - edge(box(L)); move L by dx (comp space)
+    distribute: sort layers by edge e (e.g. top edge); e_first, e_last stay;
+                for layer i (0..n-1): e_i' = e_first + (e_last - e_first) * i/(n-1); move by e_i' - e_i
+    ```
+  - Moving a layer = change Position by the comp-space delta converted into the parent's space (parented layers) — if Position is animated, a keyframe is set/changed at the CTI; with Separate Dimensions the X/Y Position properties change.
+  - 3D layers: AE aligns using the layers' 2D comp-space projection? (UNVERIFIED: help section is titled "in 2D space"; buttons may be disabled for 3D layers).
+  - One undo step ("Align Layers").
+- **Priority:** P1
+- **Owner:** bae-ui-motion (+ bae-motion, bae-anim)
+- **Notes:** Also see Layer > Transform > Center In View (Ctrl/Cmd+Home) and Center Anchor Point in Layer Content (project-comp-layers.md, Fit to Comp and centring commands). BAE decision: put the align/distribute command in bae-motion so scripts and agents can use it.
+
+### AE-UI-096 · Info panel (信息面板)
+
+- **What it does:** Shows the colour and position under the pointer in any viewer, plus context information and transient messages about the current operation.
+- **Exact semantics:**
+  - Upper area: left = R, G, B, A of the pixel under the pointer (with a colour swatch); right = X, Y of the pointer in the viewer's coordinate system (comp pixels in the Composition panel, layer pixels in the Layer panel, footage pixels in the Footage panel); outside the frame values remain from the last position (UNVERIFIED).
+  - Colour value display (panel menu, radio) (UNVERIFIED exact strings/order): Auto Color Display (自动颜色显示) — follows the project bit depth (8 → 0–255, 16 → 0–32768, 32 → decimal); 8-bpc (0-255); 10-bpc (0-1023); 16-bpc (0-32768); Decimal (0.0-1.0) (32-bpc values may exceed 1.0 or be negative); Percent (百分比); Web (hex `#RRGGBB`); HSB (H in degrees, S/B in %). Without Auto, the panel uses the chosen format regardless of project depth.
+  - Values reported are the composited comp pixel at the current preview resolution in working-space values (not display-transformed) (UNVERIFIED; colour management: compositing-3d-color.md).
+  - Lower area (context text), e.g. selected layer: name, Duration, In, Out; while dragging layers: In/Out/Δ; dragging keyframes/markers: time; Alt-click two keys/markers: duration between; selected keyframe: time and interpolation; Graph Editor selection: min/max value and speed; dragging an effect onto the Composition viewer: target layer name; time navigator click: its start/end; during preview: playback fps (green if real-time, red if slower; e.g. `Real-time` / `Non-real-time 12.4 fps`, UNVERIFIED wording) and cached-frame counts; during render: "Rendering..." progress.
+  - Window > Info (Ctrl+2 / Cmd+2).
+- **Priority:** P0
+- **Owner:** bae-ui-motion (+ bae-render, bae-color)
+- **Notes:** Implementation hint: read back the single pixel under the pointer from the last displayed GPU frame (1×1 copy, async map) so hover never triggers a re-render.
+
+### AE-UI-097 · Audio panel (音频面板)
+
+- **What it does:** Shows audio level meters during audio playback and provides level sliders that edit the selected layer's Audio Levels.
+- **Exact semantics:**
+  - Two vertical VU meters (left/right channel) with peak/clip indicators at the top (red when clipping above 0 dBFS; click to reset, UNVERIFIED), a dB scale between them, and two level sliders (L, R) with linked dragging (drag between them moves both; dragging one moves only that channel, UNVERIFIED).
+  - Level sliders edit the selected audio layer's Audio Levels (音频电平) property at the CTI (keyframe if animated); numeric fields at the bottom show the slider values.
+  - Panel menu > Audio Options… (音频选项): Units (单位): Decibels (分贝) | Percentage (百分比); Slider Minimum (滑块最小值): -48 dB | -96 dB | -144 dB (UNVERIFIED values, default -48 dB). Slider top is +12 dB (UNVERIFIED).
+  - Meters update only during previews that include audio and while scrubbing audio.
+  - Window > Audio (Ctrl+4 / Cmd+4).
+- **Priority:** P1
+- **Owner:** bae-ui-motion (+ bae-media)
+- **Notes:** Audio Levels semantics: project-comp-layers.md (Audio-only layer) and effects.md (Audio effects).
+
+### AE-UI-098 · Preview panel layout and controls (预览面板)
+
+- **What it does:** Transport buttons plus per-shortcut preview settings; behaviour is specified in the preview & cache items (ui-b).
+- **Exact semantics:**
+  - Transport row: First Frame (第一帧), Previous Frame (上一帧), Play/Stop (播放/停止), Next Frame (下一帧), Last Frame (最后一帧) buttons (UNVERIFIED exact names); Play/Stop uses the settings of the shortcut currently shown in the Shortcut menu.
+  - Settings (per shortcut; the panel shows the set of the selected shortcut):
+    | Control (中文) | Type | Notes |
+    |---|---|---|
+    | Shortcut (快捷键) | popup: Spacebar, Shift+Spacebar, Numpad 0, Shift+Numpad 0, Alt/Option+Numpad 0 (UNVERIFIED: Numpad − also listed in some help text) | selects which settings set is edited |
+    | Reset (重置) | button | restores defaults for all shortcuts; Alt/Option-click restores CC 2014-like behaviours (Cache Before Playback on for Numpad 0) |
+    | Mute Audio (静音音频（译名待核）) | toggle | |
+    | Include Video (包括视频), Include Audio (包括音频), Include Overlays and Layer Controls (包括叠加和图层控件) | 3 toggles | at least one must stay on (turning off the last one turns another on) |
+    | Loop (循环) | toggle | |
+    | Cache Before Playback (播放前缓存) | checkbox | off by default for all shortcuts |
+    | Range (范围) | popup: Work Area, Work Area Extended By Current Time, Entire Duration, Play Around Current Time (with pre/post-roll dialog) | |
+    | Play From (播放自（译名待核）) | popup: Start of Range, Current Time | |
+    | Frame Rate (帧速率) | popup: Auto or a value | |
+    | Skip (跳过) | popup: 0–N frames | |
+    | Resolution (分辨率) | popup: Auto, Full, Half, Third, Quarter, Custom | overrides the viewer resolution during preview |
+    | Full Screen (全屏) | checkbox | |
+    | On (Spacebar) Stop: If caching, play cached frames (如果缓存，则播放缓存的帧); Move time to preview time (将时间移到预览时间) | checkboxes | |
+  - Defaults per shortcut are listed in ui-b (preview item).
+  - Window > Preview (Ctrl+3 / Cmd+3).
+- **Priority:** P0
+- **Owner:** bae-ui-motion (+ bae-render)
+- **Notes:** Semantics: ui-preview-render-io.md [ui-b], Preview and cache behaviour; preview resolution: compositing-3d-color.md.
+
+## Tools panel
+
+### AE-UI-099 · Tools panel layout and tool groups (工具面板)
+
+- **What it does:** The toolbar (docked horizontally above the panels by default) holding all tools, grouped into flyouts, plus the tool options area, workspace switcher and help search.
+- **Exact semantics:**
+  - Left-to-right groups (default shortcut; flyout members in menu order; behaviours in ui-b, Tools):
+    | Group | Members (中文) | Shortcut |
+    |---|---|---|
+    | Home (主页) | opens the Home screen (AE-UI-013) | — |
+    | Selection (选取工具) | — | V |
+    | Hand (手形工具) | — | H (Space = momentary) |
+    | Zoom (缩放工具) | — | Z |
+    | 3D camera navigation (摄像机导航工具（译名待核）) | Orbit Around Cursor / Scene / Camera POI; Pan Under Cursor / Pan Camera POI; Dolly to Cursor / Scene / Camera POI (AE 22.x+; older: Unified, Orbit, Track XY, Track Z camera tools) | 1, 2, 3 cycle within orbit / pan / dolly (UNVERIFIED keys); C cycles camera tools |
+    | Rotation (旋转工具) | — | W |
+    | Pan Behind (Anchor Point) (向后平移（锚点）工具) | — | Y |
+    | Shape tools | Rectangle (矩形工具), Rounded Rectangle (圆角矩形工具), Ellipse (椭圆工具), Polygon (多边形工具), Star (星形工具) | Q (cycles) |
+    | 3D primitives (AE 26, UNVERIFIED grouping) | Cube (立方体工具), … | — |
+    | Pen tools | Pen (钢笔工具), Add Vertex (添加"顶点"工具), Delete Vertex (删除"顶点"工具), Convert Vertex (转换"顶点"工具), Mask Feather (蒙版羽化工具) | G (cycles) |
+    | Type tools | Horizontal Type (横排文字工具), Vertical Type (直排文字工具) | Ctrl+T / Cmd+T (cycles) |
+    | Paint tools | Brush (画笔工具), Clone Stamp (仿制图章工具), Eraser (橡皮擦工具) | Ctrl+B / Cmd+B (cycles) |
+    | Roto tools | Roto Brush (Roto 笔刷工具), Refine Edge (调整边缘工具) | Alt+W / Opt+W (cycles) |
+    | Puppet tools | Puppet Position Pin (人偶位置控点工具), Puppet Starch Pin (人偶固化控点工具), Puppet Bend Pin (人偶弯曲控点工具), Puppet Advanced Pin (人偶高级控点工具), Puppet Overlap Pin (人偶重叠控点工具) | Ctrl+P / Cmd+P (cycles) |
+  - Flyouts: a group shows its last used member; a small corner triangle marks a flyout; press-and-hold or right-click? (UNVERIFIED) opens the member list; Alt/Option-click the group button cycles members; pressing the shortcut repeatedly cycles.
+  - Tools that need a target that is absent are still selectable (e.g. Puppet without a layer) but do nothing on click (UNVERIFIED).
+  - Right part of the toolbar: tool options area (AE-UI-100), Snapping toggle (对齐), workspace switcher (AE-UI-005, `>>` overflow), Search Help field (搜索帮助) (opens help results; BAE: search commands and docs).
+  - Toolbar can be undocked/redocked as a panel (Window > Tools, Ctrl+1 / Cmd+1); in narrow widths groups collapse into flyouts.
+- **Priority:** P0
+- **Owner:** bae-ui-motion (+ bae-ui)
+- **Notes:** Tool behaviours, modifiers and shortcuts: ui-preview-render-io.md [ui-b], Tools. zh-CN tool names from the BAE glossary where listed; others (译名待核) are best effort — notably 调整边缘工具 vs 优化边缘工具 (ui-b uses 优化边缘工具（译名待核）). Never reuse Adobe tool icons.
+
+### AE-UI-100 · Tool options area (工具选项)
+
+- **What it does:** Context-sensitive controls to the right of the tools that change with the active tool.
+- **Exact semantics:**
+  | Active tool | Options shown (中文) |
+  |---|---|
+  | Selection, Rotation, camera tools (with 3D layers) | axis mode buttons Local / World / View Axis Mode (本地轴模式 / 世界轴模式 / 视图轴模式) (ui-b, Axis modes); Rotation tool adds Set: Orientation / Rotation (设置: 方向 / 旋转) popup for 3D layers |
+  | Selection | Snapping (对齐) checkbox + snapping options menu (snap to edges, centres, corners, mask/shape points, 3D… — ui-b) |
+  | Shape tools | Tool Creates Shape / Tool Creates Mask (工具创建形状 / 工具创建蒙版) toggle (only with a shape layer selected), Fill (填充) swatch + fill-type options (None, Solid, Linear, Radial) with blend mode and opacity, Stroke (描边) swatch + stroke width (px), Add (添加) ▸ menu (shape contents), Bezier Path (贝塞尔曲线路径) checkbox |
+  | Pen | Tool Creates Shape / Mask toggle, Fill, Stroke, width, Add ▸, RotoBezier (RotoBezier) checkbox |
+  | Type tools | Auto-Open Panels (自动打开面板) — opens Character and Paragraph |
+  | Paint tools | Auto-Open Panels — opens Paint and Brushes |
+  | Puppet tools | Mesh: Show (显示), Expansion (扩展), Density (密度); Record Options (记录选项) for Position pin sketching (UNVERIFIED list) |
+  | Roto Brush / Refine Edge | brush size readout? (UNVERIFIED) |
+  | Camera navigation | Set default / Reset? (UNVERIFIED) |
+  - Fill/Stroke swatches: click = colour picker or gradient editor (shape: Gradient Editor dialog); Alt/Option-click the swatch cycles fill type (None → Solid → Linear → Radial) (UNVERIFIED); the fill/stroke labels open the Fill Options / Stroke Options dialogs (fill type buttons, blending mode, opacity, Preview checkbox).
+  - Values set here become defaults for new shapes (persisted per user); changing them with shape layers selected also edits those layers' selected fills/strokes (UNVERIFIED).
+- **Priority:** P0
+- **Owner:** bae-ui-motion
+- **Notes:** Shape fill/stroke semantics: shapes.md; Puppet: effects.md (Distort, Puppet) if covered there.
+
+## Secondary panels
+
+### AE-UI-101 · Properties panel (属性面板)
+
+- **What it does:** A contextual inspector that shows the most relevant properties of the selected layer(s) — Layer Transform, and per type Text (character/paragraph), Shape (Layer Contents: fills, strokes, paths of the first shape group), Essential Properties of precomps — without twirling the Timeline.
+- **Exact semantics:**
+  - Tab title `属性: <layer name>`; with several layers selected, shows shared properties and edits apply to all (UNVERIFIED for mixed types).
+  - Sections (twirlable): Layer Transform (图层变换): Anchor Point, Position, Scale (with constrain link), Rotation, Opacity, each with a stopwatch/keyframe navigator; Text: font, style, size, fill/stroke, tracking, leading, paragraph alignment (same semantics as AE-UI-091/092); Layer Contents (图层内容) / Shape Properties (形状属性) / Shape Transform (形状变换): Fill Color, Stroke Color/Width, Roundness, Skew, Skew Axis…; Essential Properties for precomp layers (AE 23.6 (Aug 2023)).
+  - With nothing selected: shows composition info/settings shortcuts (UNVERIFIED).
+  - Edits are ordinary property edits (keyframe rules as AE-UI-070).
+- **Priority:** P1 (newer panel; not essential to AE users' core workflows)
+- **Owner:** bae-ui-motion
+- **Notes:** Introduced in AE beta Dec 2021 (22.2 beta); shipped in the release line around AE 23.x–24.x (UNVERIFIED exact version). Glossary strings: 属性, 图层变换, 图层内容, 形状属性, 形状变换, 填充颜色, 圆度, 倾斜, 倾斜轴, 重置. BAE decision: this panel is a natural place for agent-friendly "simple mode" editing.
+
+### AE-UI-102 · Tracker panel (跟踪器面板)
+
+- **What it does:** Entry point for motion tracking: starts the 3D camera tracker, Warp Stabilizer, and the point tracker (track/stabilize motion), and drives the point tracker's analysis and application.
+- **Exact semantics:**
+  - Buttons: Track Camera (跟踪摄像机) (applies 3D Camera Tracker effect), Warp Stabilizer (变形稳定器) (applies the effect), Track Motion (跟踪运动), Stabilize Motion (稳定运动) (create a tracker on the selected layer and open the Layer panel).
+  - Point-tracker controls: Motion Source (运动源) popup (layers with video); Current Track (当前跟踪) popup; Track Type (跟踪类型): Stabilize (稳定), Transform (变换), Parallel Corner Pin (平行边角定位), Perspective Corner Pin (透视边角定位), Raw (原始); checkboxes Position (位置), Rotation (旋转), Scale (缩放); Motion Target (运动目标) + Edit Target… (编辑目标); Options… (选项) (Track Name, Tracker Plug-in, Channel: RGB/Luminance/Saturation, Process Before Match: Blur/Enhance, Track Fields, Subpixel Positioning, Adapt Feature On Every Frame, If Confidence is Below N%: Continue Tracking / Stop Tracking / Extrapolate Motion / Adapt Feature — UNVERIFIED list); Analyze (分析): Analyze 1 Frame Backward, Analyze Backward, Analyze Forward, Analyze 1 Frame Forward; Reset (重置); Apply (应用) (with Apply Dimensions X and Y / X only / Y only dialog).
+  - Track points in the Layer panel: each has a feature region (inner box), search region (outer box) and attach point (+); dragging inside moves both regions; dragging region edges resizes; Alt/Option-drag moves only the feature region? (UNVERIFIED); while dragging, the feature region area is magnified 400 % (UNVERIFIED).
+  - Tracking results are stored as Tracker > Track Point properties (Feature Center, Feature Size, Search Offset, Search Size, Confidence, Attach Point, Attach Point Offset) on the source layer, keyframed per frame.
+- **Priority:** P1
+- **Owner:** bae-ui-motion (+ bae-effects, bae-motion)
+- **Notes:** Warp Stabilizer and 3D Camera Tracker semantics: effects.md (Distort / Perspective). Gap: the point-tracker algorithm (feature matching) is not specified in any sibling file; BAE decision pending (owner bae-effects, implementation hint: normalised cross-correlation on GPU with a coarse-to-fine pyramid, sub-pixel by parabolic fit). Window > Tracker.
+
+### AE-UI-103 · Essential Graphics panel (基本图形面板)
+
+- **What it does:** Authoring panel for Motion Graphics templates (.mogrt): pick a primary comp, drag properties in to expose them, group and format controls, export.
+- **Exact semantics:**
+  - Controls: Primary composition (主合成) popup, Name field, Solo Supported Properties (仅显示支持的属性（译名待核）), Add Formatting ▸ (Add Group, Add Comment) (添加格式（译名待核）), Edit Properties… (编辑属性), Export Motion Graphics Template… (导出动态图形模板); property list where dragged-in properties appear as controls (slider, checkbox, color, point, angle, dropdown, text, media replacement) with editable names and ranges.
+  - Responsive Design – Time and Protected Regions are related comp features (project-comp-layers.md, Protected Region and Responsive Design – Time).
+  - Exposed properties also become Essential Properties when the comp is nested (project-comp-layers.md, Essential Properties on precomp layers).
+- **Priority:** P2
+- **Owner:** bae-ui-motion (+ bae-model, bae-package)
+- **Notes:** .mogrt is Premiere-specific; BAE decision: support Essential Properties (precomp overrides) and defer .mogrt export.
+
+### AE-UI-104 · Paint and Brushes panels (绘画面板与画笔面板)
+
+- **What it does:** Settings for the Brush, Clone Stamp and Eraser tools.
+- **Exact semantics:**
+  - **Paint (绘画)**: Opacity (不透明度) %, Flow (流量) %, Mode (模式) (blend mode for the stroke), Channels (通道): RGBA / RGB / Alpha, Duration (时长): Constant (固定), Write On (写入), Single Frame (单帧), Custom (自定义) + frames; Erase (抹除) (Eraser only): Layer Source & Paint / Paint Only / Last Stroke Only; Clone Options (仿制选项) (Clone Stamp only): Preset buttons ×5, Source (源) layer, Aligned (已对齐), Lock Source Time (锁定源时间), Offset (偏移), Source Time Shift (源时间转移), Clone Source Overlay (仿制源叠加) + Difference mode toggle; foreground/background colour swatches with swap and eyedropper.
+  - **Brushes (画笔)**: brush-tip preset list (thumbnails), Diameter (直径) px, Angle (角度) °, Roundness (圆度) %, Hardness (硬度) %, Spacing (间距) %, Brush Dynamics (画笔动态): Size / Angle / Roundness / Opacity / Flow each controlled by Off, Pen Pressure, Pen Tilt, Stylus Wheel; Minimum Size; save/delete preset; panel menu view modes (text only, small/large thumbnails…).
+  - Values are used for the next stroke (the stroke then stores its own copy in the Paint effect's stroke properties).
+- **Priority:** P2
+- **Owner:** bae-ui-motion (+ bae-effects)
+- **Notes:** Paint stroke rendering is the Paint effect (effects.md, if covered; otherwise a gap). Ctrl/Cmd-drag in the Layer panel with a paint tool sets brush diameter, release then drag sets hardness (ui-b, Paint tools). (UNVERIFIED zh-CN for several labels.)
+
+### AE-UI-105 · Content-Aware Fill panel (内容识别填充面板)
+
+- **What it does:** Fills transparent (masked-out) areas of a layer over time using surrounding frames; panel configures and generates a fill layer.
+- **Exact semantics:**
+  | Control (中文) | Type | Default |
+  |---|---|---|
+  | Alpha Expansion (Alpha 扩展) | int px | 0 (UNVERIFIED) |
+  | Fill Method (填充方法): Object (对象), Surface (表面), Edge Blend (边缘混合) | enum | Object |
+  | Lighting Correction (光照校正): None, Subtle, Moderate, Strong | enum | None |
+  | Range (范围): Work Area (工作区域), Entire Duration (整个持续时间) | enum | Work Area |
+  | Create Reference Frame (创建参考帧) | button | opens a Photoshop round trip (BAE: export frame) |
+  | Generate Fill Layer (生成填充图层) | button | renders an image-sequence layer above the target |
+  - A preview of the fill target region (pink overlay) is drawn in the Composition viewer while the panel is active (UNVERIFIED).
+- **Priority:** P2
+- **Owner:** bae-ui-motion (+ bae-effects, bae-media)
+- **Notes:** AE 16.1 (CC 2019). BAE decision: defer (requires heavy ML/patch-match inpainting).
+
+### AE-UI-106 · Libraries, Learn and Lumetri Scopes panels (库、学习和 Lumetri 范围面板)
+
+- **What it does:** Catalog item for three auxiliary panels: Creative Cloud Libraries (assets sync), Learn (in-app tutorials), Lumetri Scopes (video scopes for the active viewer).
+- **Exact semantics:**
+  - Libraries (库): cloud asset browser; drag items into the Project panel/comp. BAE: no equivalent cloud; may map to a local asset library.
+  - Learn (学习): tutorial list (Learn workspace). BAE: optional onboarding.
+  - Lumetri Scopes (Lumetri 范围): Waveform (RGB / Luma / YC), Vectorscope (YUV / HLS), Histogram, Parade (RGB / YUV) for the frame in the active viewer, with clamp/bit-depth options (UNVERIFIED list).
+- **Priority:** P2
+- **Owner:** bae-ui-motion (+ bae-render)
+- **Notes:** BAE decision: only Lumetri-style scopes are worth implementing (GPU compute histograms on the displayed frame).
+
+### AE-UI-107 · Motion Sketch panel (动态草图面板)
+
+- **What it does:** Records a layer's Position as you drag in the Composition viewer, in real time over the work area.
+- **Exact semantics:**
+  | Control (中文) | Type | Default |
+  |---|---|---|
+  | Capture speed at (捕捉速度为) | % | 100 % |
+  | Smoothing (平滑) | number | 1 (UNVERIFIED) |
+  | Show: Wireframe (线框图), Background (背景) | checkboxes | Wireframe off, Background off? (UNVERIFIED) |
+  | Start: / Duration: | readouts (work area) | — |
+  | Start Capture (开始捕捉) | button | arms capture; capture starts at mouse-down in the viewer and ends at mouse-up or work-area end |
+- **Priority:** P2
+- **Owner:** bae-ui-motion (+ bae-motion)
+- **Notes:** Semantics (sampling, smoothing): transform-keyframes-expressions.md, Motion Sketch. Window > Motion Sketch.
+
+### AE-UI-108 · Smoother panel (平滑器面板)
+
+- **What it does:** Simplifies selected keyframes of a property by curve fitting.
+- **Exact semantics:** Controls: Apply To (应用到): Spatial Path (空间路径) | Temporal Graph (时间图表) (auto-selected by property type; Spatial only for spatial properties); Tolerance (容差) (units of the property; default 1, UNVERIFIED); Apply (应用) button (needs ≥ 3 selected keys or the whole property).
+- **Priority:** P2
+- **Owner:** bae-ui-motion (+ bae-motion)
+- **Notes:** Semantics: transform-keyframes-expressions.md, Smoother.
+
+### AE-UI-109 · Wiggler panel (摇摆器面板)
+
+- **What it does:** Adds random deviation keyframes between two or more selected keyframes.
+- **Exact semantics:**
+  | Control (中文) | Type | Default |
+  |---|---|---|
+  | Apply To (应用到): Spatial Path (空间路径) / Temporal Graph (时间图表) | enum | per property |
+  | Noise Type (杂色类型): Smooth (平滑) / Jagged (锯齿) | enum | Smooth |
+  | Dimension (维数): X / Y / (Z) / All the Same (全部相同) / All Independently (全部独立) | enum | All Independently (UNVERIFIED) |
+  | Frequency (频率) | per second | 5.0 |
+  | Magnitude (数量级) | property units | 1.0 |
+  | Apply (应用) | button | — |
+- **Priority:** P2
+- **Owner:** bae-ui-motion (+ bae-motion)
+- **Notes:** Semantics: transform-keyframes-expressions.md, Wiggler.
+
+### AE-UI-110 · Mask Interpolation panel (蒙版插值面板)
+
+- **What it does:** Generates intermediate mask-path keyframes between two selected mask (or shape path) keyframes with smoother, more natural vertex correspondence than default interpolation.
+- **Exact semantics:**
+  | Control (中文) | Type | Default (UNVERIFIED all) |
+  |---|---|---|
+  | Keyframe Rate (关键帧速率) | per second or Auto | Auto |
+  | Keyframe Fields (关键帧字段) (doubles rate) | bool | off |
+  | Use "Linear" Vertex Paths (使用"线性"顶点路径) | bool | off |
+  | Bending Resistance (抗弯强度) | 0–100 | 50 |
+  | Quality (品质) | 0–100 | 50 |
+  | Add Mask Shape Vertices (添加蒙版路径顶点) + amount + unit: Pixels Between Vertices / Total Vertices / Percentage of Outline | bool + number + enum | on, 1 % of outline? |
+  | Matching Method (配合法): Auto, Curve, Polyline | enum | Auto |
+  | Use 1:1 Vertex Matches (使用 1:1 顶点匹配) | bool | off |
+  | First Vertices Match (第一个顶点匹配) | bool | on |
+  | Apply (应用) | button | — |
+- **Priority:** P2
+- **Owner:** bae-ui-motion (+ bae-motion)
+- **Notes:** Gap: the smart mask interpolation algorithm is not specified in a sibling file (default mask path interpolation is in transform-keyframes-expressions.md, Mask path and shape path interpolation). BAE decision: defer.
+
+### AE-UI-111 · Metadata panel (元数据面板)
+
+- **What it does:** Shows and edits XMP metadata of the project and of the selected footage item, and controls which metadata is written to rendered files.
+- **Exact semantics:** Sections Project (项目) and File (文件) with schema groups (Dublin Core, Basic, Rights, Dynamic Media…); editable text fields for writable fields; panel menu for metadata display and search field (UNVERIFIED).
+- **Priority:** P2
+- **Owner:** bae-ui-motion (+ bae-model, bae-media)
+- **Notes:** Data: project-comp-layers.md, Project metadata (XMP). Output-module XMP options: ui-preview-render-io.md [ui-c].
