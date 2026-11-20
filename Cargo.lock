@@ -254,6 +254,7 @@ name = "bae-agent"
 version = "0.1.0"
 dependencies = [
  "bae-model",
+ "bae-package",
  "parking_lot",
  "png",
  "rmcp",
