@@ -1,10 +1,10 @@
 {
   "format": "bae-interchange",
-  "format_version": "0.1.0",
+  "format_version": "0.2.0",
   "profile": "ae",
   "generator": {
     "name": "bae-ae-export",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "host": {
     "app": "After Effects",
@@ -13,7 +13,7 @@
     "os": "Macintosh OS 26.7.3/64",
     "language": "en_US"
   },
-  "exported_at": "2026-11-20T16:25:52Z",
+  "exported_at": "2026-11-20T16:52:21Z",
   "source": {},
   "time": {
     "unit": "flicks",
@@ -26,19 +26,19 @@
       "specifier": "def",
       "prim_type": "Project",
       "attrs": {
-        "bits_per_channel": {
+        "bit_depth": {
           "value": {
-            "type": "int",
-            "value": 8
+            "type": "enum",
+            "value": "8"
           }
         },
-        "linear_blending": {
+        "blend_colors_using_gamma_1": {
           "value": {
             "type": "bool",
             "value": false
           }
         },
-        "linearize_working_space": {
+        "linearize": {
           "value": {
             "type": "bool",
             "value": false
@@ -50,7 +50,7 @@
             "value": "None"
           }
         },
-        "working_gamma": {
+        "ae:workingGamma": {
           "value": {
             "type": "float",
             "value": 2.4
@@ -58,47 +58,47 @@
         },
         "expression_engine": {
           "value": {
-            "type": "string",
-            "value": "javascript-1.0"
+            "type": "enum",
+            "value": "javascript"
           }
         },
-        "display_start_frame": {
+        "ae:displayStartFrame": {
           "value": {
             "type": "int",
             "value": 0
           }
         },
-        "frames_count_type": {
+        "ae:framesCountType": {
           "value": {
             "type": "enum",
             "value": "timecode_conversion"
           }
         },
-        "time_display_type": {
+        "time_display": {
           "value": {
             "type": "enum",
             "value": "timecode"
           }
         },
-        "feet_frames_film_type": {
+        "ae:feetFramesFilmType": {
           "value": {
             "type": "enum",
             "value": "mm35"
           }
         },
-        "footage_timecode_display_start_type": {
+        "ae:footageTimecodeDisplayStartType": {
           "value": {
             "type": "enum",
             "value": "use_source_media"
           }
         },
-        "frames_use_feet_frames": {
+        "ae:framesUseFeetFrames": {
           "value": {
             "type": "bool",
             "value": false
           }
         },
-        "gpu_accel_type": {
+        "ae:gpuAccelType": {
           "value": {
             "type": "enum",
             "value": "metal"
@@ -121,10 +121,10 @@
                 "value": "BAE AE test"
               }
             },
-            "ae_id": {
+            "ae:id": {
               "value": {
                 "type": "int",
-                "value": 933
+                "value": 1
               }
             },
             "label": {
@@ -146,7 +146,7 @@
                 "value": "Solids"
               }
             },
-            "ae_id": {
+            "ae:id": {
               "value": {
                 "type": "int",
                 "value": 27
@@ -167,23 +167,23 @@
       "specifier": "def",
       "children": [
         {
-          "name": "Null_66",
+          "name": "Null_1",
           "specifier": "def",
           "prim_type": "Asset",
           "attrs": {
             "name": {
               "value": {
                 "type": "string",
-                "value": "Null 66"
+                "value": "Null 1"
               }
             },
-            "ae_id": {
+            "ae:id": {
               "value": {
                 "type": "int",
-                "value": 963
+                "value": 32
               }
             },
-            "folder": {
+            "ae:parentFolder": {
               "value": {
                 "type": "prim_ref",
                 "value": "/folders/Solids"
@@ -195,7 +195,7 @@
                 "value": 1
               }
             },
-            "asset_kind": {
+            "kind": {
               "value": {
                 "type": "enum",
                 "value": "solid"
@@ -221,13 +221,7 @@
             },
             "duration": {
               "value": {
-                "type": "int",
-                "value": 0
-              }
-            },
-            "frame_rate": {
-              "value": {
-                "type": "float",
+                "type": "time",
                 "value": 0
               }
             },
@@ -243,13 +237,13 @@
                 "value": false
               }
             },
-            "color": {
+            "solid_color": {
               "value": {
                 "type": "color",
                 "value": [1, 1, 1, 1]
               }
             },
-            "is_still": {
+            "ae:isStill": {
               "value": {
                 "type": "bool",
                 "value": true
@@ -261,25 +255,25 @@
                 "value": "straight"
               }
             },
-            "premul_color": {
+            "premultiply_color": {
               "value": {
                 "type": "color",
                 "value": [0, 0, 0, 1]
               }
             },
-            "invert_alpha": {
+            "ae:invertAlpha": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "field_separation": {
+            "ae:fieldSeparationType": {
               "value": {
                 "type": "enum",
                 "value": "off"
               }
             },
-            "remove_pulldown": {
+            "ae:removePulldown": {
               "value": {
                 "type": "enum",
                 "value": "off"
@@ -291,13 +285,13 @@
                 "value": 1
               }
             },
-            "conform_frame_rate": {
+            "ae:conformFrameRate": {
               "value": {
                 "type": "float",
                 "value": 0
               }
             },
-            "native_frame_rate": {
+            "ae:nativeFrameRate": {
               "value": {
                 "type": "float",
                 "value": 0
@@ -306,23 +300,23 @@
           }
         },
         {
-          "name": "Null_67",
+          "name": "Null_2",
           "specifier": "def",
           "prim_type": "Asset",
           "attrs": {
             "name": {
               "value": {
                 "type": "string",
-                "value": "Null 67"
+                "value": "Null 2"
               }
             },
-            "ae_id": {
+            "ae:id": {
               "value": {
                 "type": "int",
-                "value": 979
+                "value": 48
               }
             },
-            "folder": {
+            "ae:parentFolder": {
               "value": {
                 "type": "prim_ref",
                 "value": "/folders/Solids"
@@ -334,7 +328,7 @@
                 "value": 1
               }
             },
-            "asset_kind": {
+            "kind": {
               "value": {
                 "type": "enum",
                 "value": "solid"
@@ -360,13 +354,7 @@
             },
             "duration": {
               "value": {
-                "type": "int",
-                "value": 0
-              }
-            },
-            "frame_rate": {
-              "value": {
-                "type": "float",
+                "type": "time",
                 "value": 0
               }
             },
@@ -382,13 +370,13 @@
                 "value": false
               }
             },
-            "color": {
+            "solid_color": {
               "value": {
                 "type": "color",
                 "value": [1, 1, 1, 1]
               }
             },
-            "is_still": {
+            "ae:isStill": {
               "value": {
                 "type": "bool",
                 "value": true
@@ -400,25 +388,25 @@
                 "value": "straight"
               }
             },
-            "premul_color": {
+            "premultiply_color": {
               "value": {
                 "type": "color",
                 "value": [0, 0, 0, 1]
               }
             },
-            "invert_alpha": {
+            "ae:invertAlpha": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "field_separation": {
+            "ae:fieldSeparationType": {
               "value": {
                 "type": "enum",
                 "value": "off"
               }
             },
-            "remove_pulldown": {
+            "ae:removePulldown": {
               "value": {
                 "type": "enum",
                 "value": "off"
@@ -430,13 +418,13 @@
                 "value": 1
               }
             },
-            "conform_frame_rate": {
+            "ae:conformFrameRate": {
               "value": {
                 "type": "float",
                 "value": 0
               }
             },
-            "native_frame_rate": {
+            "ae:nativeFrameRate": {
               "value": {
                 "type": "float",
                 "value": 0
@@ -445,23 +433,23 @@
           }
         },
         {
-          "name": "Null_68",
+          "name": "Null_3",
           "specifier": "def",
           "prim_type": "Asset",
           "attrs": {
             "name": {
               "value": {
                 "type": "string",
-                "value": "Null 68"
+                "value": "Null 3"
               }
             },
-            "ae_id": {
+            "ae:id": {
               "value": {
                 "type": "int",
-                "value": 993
+                "value": 62
               }
             },
-            "folder": {
+            "ae:parentFolder": {
               "value": {
                 "type": "prim_ref",
                 "value": "/folders/Solids"
@@ -473,7 +461,7 @@
                 "value": 1
               }
             },
-            "asset_kind": {
+            "kind": {
               "value": {
                 "type": "enum",
                 "value": "solid"
@@ -499,13 +487,7 @@
             },
             "duration": {
               "value": {
-                "type": "int",
-                "value": 0
-              }
-            },
-            "frame_rate": {
-              "value": {
-                "type": "float",
+                "type": "time",
                 "value": 0
               }
             },
@@ -521,13 +503,13 @@
                 "value": false
               }
             },
-            "color": {
+            "solid_color": {
               "value": {
                 "type": "color",
                 "value": [1, 1, 1, 1]
               }
             },
-            "is_still": {
+            "ae:isStill": {
               "value": {
                 "type": "bool",
                 "value": true
@@ -539,25 +521,25 @@
                 "value": "straight"
               }
             },
-            "premul_color": {
+            "premultiply_color": {
               "value": {
                 "type": "color",
                 "value": [0, 0, 0, 1]
               }
             },
-            "invert_alpha": {
+            "ae:invertAlpha": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "field_separation": {
+            "ae:fieldSeparationType": {
               "value": {
                 "type": "enum",
                 "value": "off"
               }
             },
-            "remove_pulldown": {
+            "ae:removePulldown": {
               "value": {
                 "type": "enum",
                 "value": "off"
@@ -569,13 +551,13 @@
                 "value": 1
               }
             },
-            "conform_frame_rate": {
+            "ae:conformFrameRate": {
               "value": {
                 "type": "float",
                 "value": 0
               }
             },
-            "native_frame_rate": {
+            "ae:nativeFrameRate": {
               "value": {
                 "type": "float",
                 "value": 0
@@ -594,13 +576,13 @@
                 "value": "Red Solid 1"
               }
             },
-            "ae_id": {
+            "ae:id": {
               "value": {
                 "type": "int",
-                "value": 959
+                "value": 28
               }
             },
-            "folder": {
+            "ae:parentFolder": {
               "value": {
                 "type": "prim_ref",
                 "value": "/folders/Solids"
@@ -612,7 +594,7 @@
                 "value": 1
               }
             },
-            "asset_kind": {
+            "kind": {
               "value": {
                 "type": "enum",
                 "value": "solid"
@@ -638,13 +620,7 @@
             },
             "duration": {
               "value": {
-                "type": "int",
-                "value": 0
-              }
-            },
-            "frame_rate": {
-              "value": {
-                "type": "float",
+                "type": "time",
                 "value": 0
               }
             },
@@ -660,13 +636,13 @@
                 "value": false
               }
             },
-            "color": {
+            "solid_color": {
               "value": {
                 "type": "color",
                 "value": [1, 0, 0, 1]
               }
             },
-            "is_still": {
+            "ae:isStill": {
               "value": {
                 "type": "bool",
                 "value": true
@@ -678,25 +654,25 @@
                 "value": "straight"
               }
             },
-            "premul_color": {
+            "premultiply_color": {
               "value": {
                 "type": "color",
                 "value": [0, 0, 0, 1]
               }
             },
-            "invert_alpha": {
+            "ae:invertAlpha": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "field_separation": {
+            "ae:fieldSeparationType": {
               "value": {
                 "type": "enum",
                 "value": "off"
               }
             },
-            "remove_pulldown": {
+            "ae:removePulldown": {
               "value": {
                 "type": "enum",
                 "value": "off"
@@ -708,13 +684,13 @@
                 "value": 1
               }
             },
-            "conform_frame_rate": {
+            "ae:conformFrameRate": {
               "value": {
                 "type": "float",
                 "value": 0
               }
             },
-            "native_frame_rate": {
+            "ae:nativeFrameRate": {
               "value": {
                 "type": "float",
                 "value": 0
@@ -739,13 +715,13 @@
                 "value": "Main Comp"
               }
             },
-            "ae_id": {
+            "ae:id": {
               "value": {
                 "type": "int",
-                "value": 946
+                "value": 14
               }
             },
-            "folder": {
+            "ae:parentFolder": {
               "value": {
                 "type": "prim_ref",
                 "value": "/folders/BAE_AE_test"
@@ -757,7 +733,7 @@
                 "value": 15
               }
             },
-            "comment": {
+            "ae:comment": {
               "value": {
                 "type": "string",
                 "value": "hero shot"
@@ -783,19 +759,22 @@
             },
             "frame_rate": {
               "value": {
-                "type": "float",
-                "value": 29.9700317382812
+                "type": "frame_rate",
+                "value": {
+                  "num": 2997,
+                  "den": 100
+                }
               }
             },
             "duration": {
               "value": {
-                "type": "int",
+                "type": "time",
                 "value": 7063063063
               }
             },
             "display_start_time": {
               "value": {
-                "type": "int",
+                "type": "time",
                 "value": 0
               }
             },
@@ -807,13 +786,13 @@
             },
             "work_area_start": {
               "value": {
-                "type": "int",
+                "type": "time",
                 "value": 0
               }
             },
             "work_area_duration": {
               "value": {
-                "type": "int",
+                "type": "time",
                 "value": 7063063063
               }
             },
@@ -835,7 +814,7 @@
                 "value": 16
               }
             },
-            "motion_blur_adaptive_limit": {
+            "ae:motionBlurAdaptiveSampleLimit": {
               "value": {
                 "type": "int",
                 "value": 128
@@ -847,37 +826,37 @@
                 "value": false
               }
             },
-            "frame_blending": {
+            "ae:frameBlending": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "draft_3d": {
+            "ae:draft3d": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "hide_shy_layers": {
+            "ae:hideShyLayers": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "preserve_nested_frame_rate": {
+            "preserve_frame_rate": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "preserve_nested_resolution": {
+            "preserve_resolution": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "drop_frame": {
+            "ae:dropFrame": {
               "value": {
                 "type": "bool",
                 "value": false
@@ -885,11 +864,11 @@
             },
             "renderer": {
               "value": {
-                "type": "string",
-                "value": "ADBE Advanced 3d"
+                "type": "enum",
+                "value": "advanced_3d"
               }
             },
-            "resolution_factor": {
+            "ae:resolutionFactor": {
               "value": {
                 "type": "vec2",
                 "value": [1, 1]
@@ -908,13 +887,13 @@
                   "attrs": {
                     "time": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 706306306
                       }
                     },
                     "duration": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 352800000
                       }
                     },
@@ -930,7 +909,7 @@
                         "value": "Ch1"
                       }
                     },
-                    "event_cue_point": {
+                    "ae:eventCuePoint": {
                       "value": {
                         "type": "bool",
                         "value": true
@@ -945,13 +924,13 @@
                   "attrs": {
                     "time": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 1412612613
                       }
                     },
                     "duration": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 0
                       }
                     },
@@ -961,7 +940,7 @@
                         "value": "beat"
                       }
                     },
-                    "event_cue_point": {
+                    "ae:eventCuePoint": {
                       "value": {
                         "type": "bool",
                         "value": true
@@ -986,7 +965,7 @@
                         "value": "camera"
                       }
                     },
-                    "match_name": {
+                    "ae:matchName": {
                       "value": {
                         "type": "string",
                         "value": "ADBE Camera Layer"
@@ -1004,33 +983,33 @@
                         "value": 4
                       }
                     },
-                    "ae_index": {
+                    "ae:index": {
                       "value": {
                         "type": "int",
                         "value": 1
                       }
                     },
-                    "ae_id": {
+                    "ae:id": {
                       "value": {
                         "type": "int",
-                        "value": 966
+                        "value": 35
                       }
                     },
                     "in_point": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 0
                       }
                     },
                     "out_point": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 7063063063
                       }
                     },
                     "start_time": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 0
                       }
                     },
@@ -1064,13 +1043,13 @@
                         "value": false
                       }
                     },
-                    "adjustment": {
+                    "adjustment_layer": {
                       "value": {
                         "type": "bool",
                         "value": false
                       }
                     },
-                    "environment": {
+                    "ae:environmentLayer": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -1079,7 +1058,7 @@
                     "auto_orient": {
                       "value": {
                         "type": "enum",
-                        "value": "camera_or_point_of_interest"
+                        "value": "towards_point_of_interest"
                       }
                     },
                     "ae:ADBE_Transform_Group:ADBE_Anchor_Point": {
@@ -1245,7 +1224,7 @@
                         "value": "light"
                       }
                     },
-                    "match_name": {
+                    "ae:matchName": {
                       "value": {
                         "type": "string",
                         "value": "ADBE Light Layer"
@@ -1263,33 +1242,33 @@
                         "value": 6
                       }
                     },
-                    "ae_index": {
+                    "ae:index": {
                       "value": {
                         "type": "int",
                         "value": 2
                       }
                     },
-                    "ae_id": {
+                    "ae:id": {
                       "value": {
                         "type": "int",
-                        "value": 965
+                        "value": 34
                       }
                     },
                     "in_point": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 0
                       }
                     },
                     "out_point": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 7063063063
                       }
                     },
                     "start_time": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 0
                       }
                     },
@@ -1323,13 +1302,13 @@
                         "value": false
                       }
                     },
-                    "adjustment": {
+                    "adjustment_layer": {
                       "value": {
                         "type": "bool",
                         "value": false
                       }
                     },
-                    "environment": {
+                    "ae:environmentLayer": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -1338,10 +1317,10 @@
                     "auto_orient": {
                       "value": {
                         "type": "enum",
-                        "value": "camera_or_point_of_interest"
+                        "value": "towards_point_of_interest"
                       }
                     },
-                    "light_type": {
+                    "light:type": {
                       "value": {
                         "type": "enum",
                         "value": "spot"
@@ -1510,7 +1489,7 @@
                         "value": "null"
                       }
                     },
-                    "match_name": {
+                    "ae:matchName": {
                       "value": {
                         "type": "string",
                         "value": "ADBE AV Layer"
@@ -1528,39 +1507,39 @@
                         "value": 1
                       }
                     },
-                    "ae_index": {
+                    "ae:index": {
                       "value": {
                         "type": "int",
                         "value": 3
                       }
                     },
-                    "ae_id": {
+                    "ae:id": {
                       "value": {
                         "type": "int",
-                        "value": 964
+                        "value": 33
                       }
                     },
                     "source": {
                       "value": {
-                        "type": "asset_ref",
-                        "value": "/assets/Null_66"
+                        "type": "prim_ref",
+                        "value": "/assets/Null_1"
                       }
                     },
                     "in_point": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 0
                       }
                     },
                     "out_point": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 7063063063
                       }
                     },
                     "start_time": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 0
                       }
                     },
@@ -1606,13 +1585,13 @@
                         "value": false
                       }
                     },
-                    "adjustment": {
+                    "adjustment_layer": {
                       "value": {
                         "type": "bool",
                         "value": false
                       }
                     },
-                    "environment": {
+                    "ae:environmentLayer": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -1627,7 +1606,7 @@
                     "auto_orient": {
                       "value": {
                         "type": "enum",
-                        "value": "no_auto_orient"
+                        "value": "off"
                       }
                     },
                     "blend_mode": {
@@ -1636,7 +1615,7 @@
                         "value": "normal"
                       }
                     },
-                    "preserve_transparency": {
+                    "ae:preserveTransparency": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -1645,10 +1624,10 @@
                     "track_matte": {
                       "value": {
                         "type": "enum",
-                        "value": "no_track_matte"
+                        "value": "none"
                       }
                     },
-                    "is_track_matte": {
+                    "ae:isTrackMatte": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -1660,7 +1639,7 @@
                         "value": false
                       }
                     },
-                    "effects_active": {
+                    "ae:effectsActive": {
                       "value": {
                         "type": "bool",
                         "value": true
@@ -1678,7 +1657,7 @@
                         "value": false
                       }
                     },
-                    "frame_blending_type": {
+                    "ae:frameBlendingType": {
                       "value": {
                         "type": "enum",
                         "value": "no_frame_blend"
@@ -1690,7 +1669,7 @@
                         "value": "best"
                       }
                     },
-                    "sampling_quality": {
+                    "sampling": {
                       "value": {
                         "type": "enum",
                         "value": "bilinear"
@@ -2489,7 +2468,7 @@
                         "value": "shape"
                       }
                     },
-                    "match_name": {
+                    "ae:matchName": {
                       "value": {
                         "type": "string",
                         "value": "ADBE Vector Layer"
@@ -2507,16 +2486,16 @@
                         "value": 8
                       }
                     },
-                    "ae_index": {
+                    "ae:index": {
                       "value": {
                         "type": "int",
                         "value": 4
                       }
                     },
-                    "ae_id": {
+                    "ae:id": {
                       "value": {
                         "type": "int",
-                        "value": 962
+                        "value": 31
                       }
                     },
                     "parent": {
@@ -2527,19 +2506,19 @@
                     },
                     "in_point": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 0
                       }
                     },
                     "out_point": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 7063063063
                       }
                     },
                     "start_time": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 0
                       }
                     },
@@ -2585,13 +2564,13 @@
                         "value": false
                       }
                     },
-                    "adjustment": {
+                    "adjustment_layer": {
                       "value": {
                         "type": "bool",
                         "value": false
                       }
                     },
-                    "environment": {
+                    "ae:environmentLayer": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -2606,7 +2585,7 @@
                     "auto_orient": {
                       "value": {
                         "type": "enum",
-                        "value": "no_auto_orient"
+                        "value": "off"
                       }
                     },
                     "blend_mode": {
@@ -2615,7 +2594,7 @@
                         "value": "normal"
                       }
                     },
-                    "preserve_transparency": {
+                    "ae:preserveTransparency": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -2624,10 +2603,10 @@
                     "track_matte": {
                       "value": {
                         "type": "enum",
-                        "value": "no_track_matte"
+                        "value": "none"
                       }
                     },
-                    "is_track_matte": {
+                    "ae:isTrackMatte": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -2639,7 +2618,7 @@
                         "value": false
                       }
                     },
-                    "effects_active": {
+                    "ae:effectsActive": {
                       "value": {
                         "type": "bool",
                         "value": true
@@ -2657,7 +2636,7 @@
                         "value": false
                       }
                     },
-                    "frame_blending_type": {
+                    "ae:frameBlendingType": {
                       "value": {
                         "type": "enum",
                         "value": "no_frame_blend"
@@ -2669,7 +2648,7 @@
                         "value": "best"
                       }
                     },
-                    "sampling_quality": {
+                    "sampling": {
                       "value": {
                         "type": "enum",
                         "value": "bilinear"
@@ -4411,13 +4390,13 @@
                           "attrs": {
                             "time": {
                               "value": {
-                                "type": "int",
+                                "type": "time",
                                 "value": 352800000
                               }
                             },
                             "duration": {
                               "value": {
-                                "type": "int",
+                                "type": "time",
                                 "value": 0
                               }
                             },
@@ -4427,7 +4406,7 @@
                                 "value": "layer marker"
                               }
                             },
-                            "event_cue_point": {
+                            "ae:eventCuePoint": {
                               "value": {
                                 "type": "bool",
                                 "value": true
@@ -4456,7 +4435,7 @@
                         "value": "pre_comp"
                       }
                     },
-                    "match_name": {
+                    "ae:matchName": {
                       "value": {
                         "type": "string",
                         "value": "ADBE AV Layer"
@@ -4474,16 +4453,16 @@
                         "value": 15
                       }
                     },
-                    "ae_index": {
+                    "ae:index": {
                       "value": {
                         "type": "int",
                         "value": 5
                       }
                     },
-                    "ae_id": {
+                    "ae:id": {
                       "value": {
                         "type": "int",
-                        "value": 961
+                        "value": 30
                       }
                     },
                     "source": {
@@ -4494,19 +4473,19 @@
                     },
                     "in_point": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 705600000
                       }
                     },
                     "out_point": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 2471365766
                       }
                     },
                     "start_time": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 705600000
                       }
                     },
@@ -4552,13 +4531,13 @@
                         "value": false
                       }
                     },
-                    "adjustment": {
+                    "adjustment_layer": {
                       "value": {
                         "type": "bool",
                         "value": false
                       }
                     },
-                    "environment": {
+                    "ae:environmentLayer": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -4573,7 +4552,7 @@
                     "auto_orient": {
                       "value": {
                         "type": "enum",
-                        "value": "no_auto_orient"
+                        "value": "off"
                       }
                     },
                     "blend_mode": {
@@ -4582,7 +4561,7 @@
                         "value": "normal"
                       }
                     },
-                    "preserve_transparency": {
+                    "ae:preserveTransparency": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -4591,10 +4570,10 @@
                     "track_matte": {
                       "value": {
                         "type": "enum",
-                        "value": "no_track_matte"
+                        "value": "none"
                       }
                     },
-                    "is_track_matte": {
+                    "ae:isTrackMatte": {
                       "value": {
                         "type": "bool",
                         "value": true
@@ -4606,7 +4585,7 @@
                         "value": false
                       }
                     },
-                    "effects_active": {
+                    "ae:effectsActive": {
                       "value": {
                         "type": "bool",
                         "value": true
@@ -4624,7 +4603,7 @@
                         "value": false
                       }
                     },
-                    "frame_blending_type": {
+                    "ae:frameBlendingType": {
                       "value": {
                         "type": "enum",
                         "value": "no_frame_blend"
@@ -4636,7 +4615,7 @@
                         "value": "best"
                       }
                     },
-                    "sampling_quality": {
+                    "sampling": {
                       "value": {
                         "type": "enum",
                         "value": "bilinear"
@@ -5435,7 +5414,7 @@
                         "value": "solid"
                       }
                     },
-                    "match_name": {
+                    "ae:matchName": {
                       "value": {
                         "type": "string",
                         "value": "ADBE AV Layer"
@@ -5453,39 +5432,39 @@
                         "value": 1
                       }
                     },
-                    "ae_index": {
+                    "ae:index": {
                       "value": {
                         "type": "int",
                         "value": 6
                       }
                     },
-                    "ae_id": {
+                    "ae:id": {
                       "value": {
                         "type": "int",
-                        "value": 960
+                        "value": 29
                       }
                     },
                     "source": {
                       "value": {
-                        "type": "asset_ref",
+                        "type": "prim_ref",
                         "value": "/assets/Red_Solid_1"
                       }
                     },
                     "in_point": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 0
                       }
                     },
                     "out_point": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 7063063063
                       }
                     },
                     "start_time": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 0
                       }
                     },
@@ -5531,13 +5510,13 @@
                         "value": false
                       }
                     },
-                    "adjustment": {
+                    "adjustment_layer": {
                       "value": {
                         "type": "bool",
                         "value": false
                       }
                     },
-                    "environment": {
+                    "ae:environmentLayer": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -5552,7 +5531,7 @@
                     "auto_orient": {
                       "value": {
                         "type": "enum",
-                        "value": "no_auto_orient"
+                        "value": "off"
                       }
                     },
                     "blend_mode": {
@@ -5561,7 +5540,7 @@
                         "value": "normal"
                       }
                     },
-                    "preserve_transparency": {
+                    "ae:preserveTransparency": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -5579,7 +5558,7 @@
                         "value": "/comps/Main_Comp/layers/Pre_comp"
                       }
                     },
-                    "is_track_matte": {
+                    "ae:isTrackMatte": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -5591,7 +5570,7 @@
                         "value": false
                       }
                     },
-                    "effects_active": {
+                    "ae:effectsActive": {
                       "value": {
                         "type": "bool",
                         "value": true
@@ -5609,7 +5588,7 @@
                         "value": false
                       }
                     },
-                    "frame_blending_type": {
+                    "ae:frameBlendingType": {
                       "value": {
                         "type": "enum",
                         "value": "no_frame_blend"
@@ -5621,7 +5600,7 @@
                         "value": "best"
                       }
                     },
-                    "sampling_quality": {
+                    "sampling": {
                       "value": {
                         "type": "enum",
                         "value": "bilinear"
@@ -6442,13 +6421,13 @@
                                 "value": true
                               }
                             },
-                            "roto_bezier": {
+                            "ae:rotoBezier": {
                               "value": {
                                 "type": "bool",
                                 "value": false
                               }
                             },
-                            "motion_blur": {
+                            "ae:maskMotionBlur": {
                               "value": {
                                 "type": "enum",
                                 "value": "same_as_layer"
@@ -6463,10 +6442,10 @@
                             "color": {
                               "value": {
                                 "type": "color",
-                                "value": [0.89803921568627, 0.73725490196078, 0.78823529411765, 1]
+                                "value": [0.70980392156863, 0.21960784313725, 0.21960784313725, 1]
                               }
                             },
-                            "feather_falloff": {
+                            "ae:maskFeatherFalloff": {
                               "value": {
                                 "type": "enum",
                                 "value": "smooth"
@@ -6496,7 +6475,18 @@
                                         [0, 0],
                                         [0, 0]
                                       ],
-                                      "closed": true
+                                      "closed": true,
+                                      "feather": [
+                                        {
+                                          "segment": 0,
+                                          "t": 0.5,
+                                          "radius": 20,
+                                          "tension": 0,
+                                          "hold": false,
+                                          "inner": false,
+                                          "corner_angle": 0
+                                        }
+                                      ]
                                     }
                                   },
                                   "interp_in": "linear",
@@ -6536,7 +6526,18 @@
                                         [0, 0],
                                         [0, 0]
                                       ],
-                                      "closed": true
+                                      "closed": true,
+                                      "feather": [
+                                        {
+                                          "segment": 0,
+                                          "t": 0.5,
+                                          "radius": 0,
+                                          "tension": 0,
+                                          "hold": false,
+                                          "inner": false,
+                                          "corner_angle": 0
+                                        }
+                                      ]
                                     }
                                   },
                                   "interp_in": "linear",
@@ -6605,13 +6606,13 @@
                                 "value": false
                               }
                             },
-                            "roto_bezier": {
+                            "ae:rotoBezier": {
                               "value": {
                                 "type": "bool",
                                 "value": false
                               }
                             },
-                            "motion_blur": {
+                            "ae:maskMotionBlur": {
                               "value": {
                                 "type": "enum",
                                 "value": "same_as_layer"
@@ -6626,10 +6627,10 @@
                             "color": {
                               "value": {
                                 "type": "color",
-                                "value": [0.66274509803922, 0.66274509803922, 0.7921568627451, 1]
+                                "value": [0.89411764705882, 0.84705882352941, 0.29803921568627, 1]
                               }
                             },
-                            "feather_falloff": {
+                            "ae:maskFeatherFalloff": {
                               "value": {
                                 "type": "enum",
                                 "value": "smooth"
@@ -6710,19 +6711,19 @@
                                 "value": true
                               }
                             },
-                            "ae:ADBE_Gaussian_Blur_2--0001": {
+                            "param:0001": {
                               "value": {
                                 "type": "float",
                                 "value": 12.5
                               }
                             },
-                            "ae:ADBE_Gaussian_Blur_2--0002": {
+                            "param:0002": {
                               "value": {
                                 "type": "float",
                                 "value": 1
                               }
                             },
-                            "ae:ADBE_Gaussian_Blur_2--0003": {
+                            "param:0003": {
                               "value": {
                                 "type": "float",
                                 "value": 1
@@ -6765,37 +6766,37 @@
                                 "value": true
                               }
                             },
-                            "ae:ADBE_Set_Matte3--0001": {
+                            "param:0001": {
                               "value": {
                                 "type": "prim_ref",
                                 "value": "/comps/Main_Comp/layers/Controller"
                               }
                             },
-                            "ae:ADBE_Set_Matte3--0002": {
+                            "param:0002": {
                               "value": {
                                 "type": "float",
                                 "value": 4
                               }
                             },
-                            "ae:ADBE_Set_Matte3--0003": {
+                            "param:0003": {
                               "value": {
                                 "type": "float",
                                 "value": 0
                               }
                             },
-                            "ae:ADBE_Set_Matte3--0004": {
+                            "param:0004": {
                               "value": {
                                 "type": "float",
                                 "value": 1
                               }
                             },
-                            "ae:ADBE_Set_Matte3--0005": {
+                            "param:0005": {
                               "value": {
                                 "type": "float",
                                 "value": 1
                               }
                             },
-                            "ae:ADBE_Set_Matte3--0006": {
+                            "param:0006": {
                               "value": {
                                 "type": "float",
                                 "value": 1
@@ -6838,7 +6839,7 @@
                                 "value": true
                               }
                             },
-                            "ae:ADBE_CurvesCustom--0002": {
+                            "param:0002": {
                               "value": {
                                 "type": "float",
                                 "value": 1
@@ -6877,13 +6878,13 @@
                 "value": "Pre comp"
               }
             },
-            "ae_id": {
+            "ae:id": {
               "value": {
                 "type": "int",
-                "value": 934
+                "value": 2
               }
             },
-            "folder": {
+            "ae:parentFolder": {
               "value": {
                 "type": "prim_ref",
                 "value": "/folders/BAE_AE_test"
@@ -6915,19 +6916,22 @@
             },
             "frame_rate": {
               "value": {
-                "type": "float",
-                "value": 29.9700317382812
+                "type": "frame_rate",
+                "value": {
+                  "num": 2997,
+                  "den": 100
+                }
               }
             },
             "duration": {
               "value": {
-                "type": "int",
+                "type": "time",
                 "value": 3531531532
               }
             },
             "display_start_time": {
               "value": {
-                "type": "int",
+                "type": "time",
                 "value": 0
               }
             },
@@ -6939,13 +6943,13 @@
             },
             "work_area_start": {
               "value": {
-                "type": "int",
+                "type": "time",
                 "value": 0
               }
             },
             "work_area_duration": {
               "value": {
-                "type": "int",
+                "type": "time",
                 "value": 3531531532
               }
             },
@@ -6967,7 +6971,7 @@
                 "value": 16
               }
             },
-            "motion_blur_adaptive_limit": {
+            "ae:motionBlurAdaptiveSampleLimit": {
               "value": {
                 "type": "int",
                 "value": 128
@@ -6979,37 +6983,37 @@
                 "value": false
               }
             },
-            "frame_blending": {
+            "ae:frameBlending": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "draft_3d": {
+            "ae:draft3d": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "hide_shy_layers": {
+            "ae:hideShyLayers": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "preserve_nested_frame_rate": {
+            "preserve_frame_rate": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "preserve_nested_resolution": {
+            "preserve_resolution": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "drop_frame": {
+            "ae:dropFrame": {
               "value": {
                 "type": "bool",
                 "value": false
@@ -7017,11 +7021,11 @@
             },
             "renderer": {
               "value": {
-                "type": "string",
-                "value": "ADBE Advanced 3d"
+                "type": "enum",
+                "value": "advanced_3d"
               }
             },
-            "resolution_factor": {
+            "ae:resolutionFactor": {
               "value": {
                 "type": "vec2",
                 "value": [1, 1]
@@ -7044,7 +7048,7 @@
                         "value": "text"
                       }
                     },
-                    "match_name": {
+                    "ae:matchName": {
                       "value": {
                         "type": "string",
                         "value": "ADBE Text Layer"
@@ -7062,33 +7066,33 @@
                         "value": 1
                       }
                     },
-                    "ae_index": {
+                    "ae:index": {
                       "value": {
                         "type": "int",
                         "value": 1
                       }
                     },
-                    "ae_id": {
+                    "ae:id": {
                       "value": {
                         "type": "int",
-                        "value": 958
+                        "value": 26
                       }
                     },
                     "in_point": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 0
                       }
                     },
                     "out_point": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 3531531532
                       }
                     },
                     "start_time": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 0
                       }
                     },
@@ -7134,13 +7138,13 @@
                         "value": false
                       }
                     },
-                    "adjustment": {
+                    "adjustment_layer": {
                       "value": {
                         "type": "bool",
                         "value": false
                       }
                     },
-                    "environment": {
+                    "ae:environmentLayer": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -7152,7 +7156,7 @@
                         "value": false
                       }
                     },
-                    "three_d_per_char": {
+                    "ae:threeDPerChar": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -7161,7 +7165,7 @@
                     "auto_orient": {
                       "value": {
                         "type": "enum",
-                        "value": "no_auto_orient"
+                        "value": "off"
                       }
                     },
                     "blend_mode": {
@@ -7170,7 +7174,7 @@
                         "value": "normal"
                       }
                     },
-                    "preserve_transparency": {
+                    "ae:preserveTransparency": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -7179,10 +7183,10 @@
                     "track_matte": {
                       "value": {
                         "type": "enum",
-                        "value": "no_track_matte"
+                        "value": "none"
                       }
                     },
-                    "is_track_matte": {
+                    "ae:isTrackMatte": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -7194,7 +7198,7 @@
                         "value": false
                       }
                     },
-                    "effects_active": {
+                    "ae:effectsActive": {
                       "value": {
                         "type": "bool",
                         "value": true
@@ -7212,7 +7216,7 @@
                         "value": false
                       }
                     },
-                    "frame_blending_type": {
+                    "ae:frameBlendingType": {
                       "value": {
                         "type": "enum",
                         "value": "no_frame_blend"
@@ -7224,7 +7228,7 @@
                         "value": "best"
                       }
                     },
-                    "sampling_quality": {
+                    "sampling": {
                       "value": {
                         "type": "enum",
                         "value": "bilinear"
@@ -7238,29 +7242,27 @@
                             "value": {
                               "text": "Hello\rWorld",
                               "font": "Helvetica",
-                              "font_family": "Helvetica",
-                              "font_style": "Regular",
                               "font_size": 72,
-                              "apply_fill": true,
-                              "apply_stroke": false,
                               "fill_color": [0.92156994342804, 0.92156994342804, 0.92156994342804, 1],
                               "stroke_width": 1,
                               "stroke_over_fill": true,
-                              "justification": "center_justify",
+                              "justification": "center",
                               "tracking": 0,
-                              "leading": 86.4000015258789,
-                              "auto_leading": true,
                               "baseline_shift": 0,
-                              "horizontal_scale": 1,
-                              "vertical_scale": 1,
                               "faux_bold": false,
                               "faux_italic": false,
                               "all_caps": false,
                               "small_caps": false,
+                              "font_family": "Helvetica",
+                              "font_style": "Regular",
+                              "apply_fill": true,
+                              "apply_stroke": false,
+                              "auto_leading": true,
+                              "horizontal_scale": 1,
+                              "vertical_scale": 1,
                               "superscript": false,
                               "subscript": false,
                               "tsume": 0,
-                              "box_text": false,
                               "point_text": true
                             }
                           },
@@ -7285,29 +7287,27 @@
                             "value": {
                               "text": "你好",
                               "font": "Osaka",
-                              "font_family": "Osaka",
-                              "font_style": "Regular",
                               "font_size": 72,
-                              "apply_fill": true,
-                              "apply_stroke": false,
                               "fill_color": [0.92156994342804, 0.92156994342804, 0.92156994342804, 1],
                               "stroke_width": 1,
                               "stroke_over_fill": true,
-                              "justification": "center_justify",
+                              "justification": "center",
                               "tracking": 0,
-                              "leading": 86.4000015258789,
-                              "auto_leading": true,
                               "baseline_shift": 0,
-                              "horizontal_scale": 1,
-                              "vertical_scale": 1,
                               "faux_bold": false,
                               "faux_italic": false,
                               "all_caps": false,
                               "small_caps": false,
+                              "font_family": "Osaka",
+                              "font_style": "Regular",
+                              "apply_fill": true,
+                              "apply_stroke": false,
+                              "auto_leading": true,
+                              "horizontal_scale": 1,
+                              "vertical_scale": 1,
                               "superscript": false,
                               "subscript": false,
                               "tsume": 0,
-                              "box_text": false,
                               "point_text": true
                             }
                           },
@@ -9013,13 +9013,13 @@
                                 "value": false
                               }
                             },
-                            "roto_bezier": {
+                            "ae:rotoBezier": {
                               "value": {
                                 "type": "bool",
                                 "value": false
                               }
                             },
-                            "motion_blur": {
+                            "ae:maskMotionBlur": {
                               "value": {
                                 "type": "enum",
                                 "value": "same_as_layer"
@@ -9034,10 +9034,10 @@
                             "color": {
                               "value": {
                                 "type": "color",
-                                "value": [0.66274509803922, 0.79607843137255, 0.78039215686275, 1]
+                                "value": [0.11764705882353, 0.25098039215686, 0.11764705882353, 1]
                               }
                             },
-                            "feather_falloff": {
+                            "ae:maskFeatherFalloff": {
                               "value": {
                                 "type": "enum",
                                 "value": "smooth"
@@ -9102,13 +9102,13 @@
                 "value": "T4 start 1s"
               }
             },
-            "ae_id": {
+            "ae:id": {
               "value": {
                 "type": "int",
-                "value": 967
+                "value": 36
               }
             },
-            "folder": {
+            "ae:parentFolder": {
               "value": {
                 "type": "prim_ref",
                 "value": "/folders/BAE_AE_test"
@@ -9140,19 +9140,22 @@
             },
             "frame_rate": {
               "value": {
-                "type": "float",
-                "value": 30
+                "type": "frame_rate",
+                "value": {
+                  "num": 30,
+                  "den": 1
+                }
               }
             },
             "duration": {
               "value": {
-                "type": "int",
+                "type": "time",
                 "value": 4233600000
               }
             },
             "display_start_time": {
               "value": {
-                "type": "int",
+                "type": "time",
                 "value": 0
               }
             },
@@ -9164,13 +9167,13 @@
             },
             "work_area_start": {
               "value": {
-                "type": "int",
+                "type": "time",
                 "value": 0
               }
             },
             "work_area_duration": {
               "value": {
-                "type": "int",
+                "type": "time",
                 "value": 4233600000
               }
             },
@@ -9192,7 +9195,7 @@
                 "value": 16
               }
             },
-            "motion_blur_adaptive_limit": {
+            "ae:motionBlurAdaptiveSampleLimit": {
               "value": {
                 "type": "int",
                 "value": 128
@@ -9204,37 +9207,37 @@
                 "value": false
               }
             },
-            "frame_blending": {
+            "ae:frameBlending": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "draft_3d": {
+            "ae:draft3d": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "hide_shy_layers": {
+            "ae:hideShyLayers": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "preserve_nested_frame_rate": {
+            "preserve_frame_rate": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "preserve_nested_resolution": {
+            "preserve_resolution": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "drop_frame": {
+            "ae:dropFrame": {
               "value": {
                 "type": "bool",
                 "value": false
@@ -9242,11 +9245,11 @@
             },
             "renderer": {
               "value": {
-                "type": "string",
-                "value": "ADBE Advanced 3d"
+                "type": "enum",
+                "value": "advanced_3d"
               }
             },
-            "resolution_factor": {
+            "ae:resolutionFactor": {
               "value": {
                 "type": "vec2",
                 "value": [1, 1]
@@ -9259,7 +9262,7 @@
               "specifier": "def",
               "children": [
                 {
-                  "name": "Null_67",
+                  "name": "Null_2",
                   "specifier": "def",
                   "prim_type": "Layer",
                   "attrs": {
@@ -9269,7 +9272,7 @@
                         "value": "null"
                       }
                     },
-                    "match_name": {
+                    "ae:matchName": {
                       "value": {
                         "type": "string",
                         "value": "ADBE AV Layer"
@@ -9278,7 +9281,7 @@
                     "name": {
                       "value": {
                         "type": "string",
-                        "value": "Null 67"
+                        "value": "Null 2"
                       }
                     },
                     "label": {
@@ -9287,39 +9290,39 @@
                         "value": 1
                       }
                     },
-                    "ae_index": {
+                    "ae:index": {
                       "value": {
                         "type": "int",
                         "value": 1
                       }
                     },
-                    "ae_id": {
+                    "ae:id": {
                       "value": {
                         "type": "int",
-                        "value": 980
+                        "value": 49
                       }
                     },
                     "source": {
                       "value": {
-                        "type": "asset_ref",
-                        "value": "/assets/Null_67"
+                        "type": "prim_ref",
+                        "value": "/assets/Null_2"
                       }
                     },
                     "in_point": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 705600000
                       }
                     },
                     "out_point": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 4939200000
                       }
                     },
                     "start_time": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 705600000
                       }
                     },
@@ -9365,13 +9368,13 @@
                         "value": false
                       }
                     },
-                    "adjustment": {
+                    "adjustment_layer": {
                       "value": {
                         "type": "bool",
                         "value": false
                       }
                     },
-                    "environment": {
+                    "ae:environmentLayer": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -9386,7 +9389,7 @@
                     "auto_orient": {
                       "value": {
                         "type": "enum",
-                        "value": "no_auto_orient"
+                        "value": "off"
                       }
                     },
                     "blend_mode": {
@@ -9395,7 +9398,7 @@
                         "value": "normal"
                       }
                     },
-                    "preserve_transparency": {
+                    "ae:preserveTransparency": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -9404,10 +9407,10 @@
                     "track_matte": {
                       "value": {
                         "type": "enum",
-                        "value": "no_track_matte"
+                        "value": "none"
                       }
                     },
-                    "is_track_matte": {
+                    "ae:isTrackMatte": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -9419,7 +9422,7 @@
                         "value": false
                       }
                     },
-                    "effects_active": {
+                    "ae:effectsActive": {
                       "value": {
                         "type": "bool",
                         "value": true
@@ -9437,7 +9440,7 @@
                         "value": false
                       }
                     },
-                    "frame_blending_type": {
+                    "ae:frameBlendingType": {
                       "value": {
                         "type": "enum",
                         "value": "no_frame_blend"
@@ -9449,7 +9452,7 @@
                         "value": "best"
                       }
                     },
-                    "sampling_quality": {
+                    "sampling": {
                       "value": {
                         "type": "enum",
                         "value": "bilinear"
@@ -10270,13 +10273,13 @@
                 "value": "T4 stretch 200"
               }
             },
-            "ae_id": {
+            "ae:id": {
               "value": {
                 "type": "int",
-                "value": 981
+                "value": 50
               }
             },
-            "folder": {
+            "ae:parentFolder": {
               "value": {
                 "type": "prim_ref",
                 "value": "/folders/BAE_AE_test"
@@ -10308,19 +10311,22 @@
             },
             "frame_rate": {
               "value": {
-                "type": "float",
-                "value": 30
+                "type": "frame_rate",
+                "value": {
+                  "num": 30,
+                  "den": 1
+                }
               }
             },
             "duration": {
               "value": {
-                "type": "int",
+                "type": "time",
                 "value": 4233600000
               }
             },
             "display_start_time": {
               "value": {
-                "type": "int",
+                "type": "time",
                 "value": 0
               }
             },
@@ -10332,13 +10338,13 @@
             },
             "work_area_start": {
               "value": {
-                "type": "int",
+                "type": "time",
                 "value": 0
               }
             },
             "work_area_duration": {
               "value": {
-                "type": "int",
+                "type": "time",
                 "value": 4233600000
               }
             },
@@ -10360,7 +10366,7 @@
                 "value": 16
               }
             },
-            "motion_blur_adaptive_limit": {
+            "ae:motionBlurAdaptiveSampleLimit": {
               "value": {
                 "type": "int",
                 "value": 128
@@ -10372,37 +10378,37 @@
                 "value": false
               }
             },
-            "frame_blending": {
+            "ae:frameBlending": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "draft_3d": {
+            "ae:draft3d": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "hide_shy_layers": {
+            "ae:hideShyLayers": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "preserve_nested_frame_rate": {
+            "preserve_frame_rate": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "preserve_nested_resolution": {
+            "preserve_resolution": {
               "value": {
                 "type": "bool",
                 "value": false
               }
             },
-            "drop_frame": {
+            "ae:dropFrame": {
               "value": {
                 "type": "bool",
                 "value": false
@@ -10410,11 +10416,11 @@
             },
             "renderer": {
               "value": {
-                "type": "string",
-                "value": "ADBE Advanced 3d"
+                "type": "enum",
+                "value": "advanced_3d"
               }
             },
-            "resolution_factor": {
+            "ae:resolutionFactor": {
               "value": {
                 "type": "vec2",
                 "value": [1, 1]
@@ -10427,7 +10433,7 @@
               "specifier": "def",
               "children": [
                 {
-                  "name": "Null_68",
+                  "name": "Null_3",
                   "specifier": "def",
                   "prim_type": "Layer",
                   "attrs": {
@@ -10437,7 +10443,7 @@
                         "value": "null"
                       }
                     },
-                    "match_name": {
+                    "ae:matchName": {
                       "value": {
                         "type": "string",
                         "value": "ADBE AV Layer"
@@ -10446,7 +10452,7 @@
                     "name": {
                       "value": {
                         "type": "string",
-                        "value": "Null 68"
+                        "value": "Null 3"
                       }
                     },
                     "label": {
@@ -10455,39 +10461,39 @@
                         "value": 1
                       }
                     },
-                    "ae_index": {
+                    "ae:index": {
                       "value": {
                         "type": "int",
                         "value": 1
                       }
                     },
-                    "ae_id": {
+                    "ae:id": {
                       "value": {
                         "type": "int",
-                        "value": 994
+                        "value": 63
                       }
                     },
                     "source": {
                       "value": {
-                        "type": "asset_ref",
-                        "value": "/assets/Null_68"
+                        "type": "prim_ref",
+                        "value": "/assets/Null_3"
                       }
                     },
                     "in_point": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 705600000
                       }
                     },
                     "out_point": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 9172800000
                       }
                     },
                     "start_time": {
                       "value": {
-                        "type": "int",
+                        "type": "time",
                         "value": 705600000
                       }
                     },
@@ -10533,13 +10539,13 @@
                         "value": false
                       }
                     },
-                    "adjustment": {
+                    "adjustment_layer": {
                       "value": {
                         "type": "bool",
                         "value": false
                       }
                     },
-                    "environment": {
+                    "ae:environmentLayer": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -10554,7 +10560,7 @@
                     "auto_orient": {
                       "value": {
                         "type": "enum",
-                        "value": "no_auto_orient"
+                        "value": "off"
                       }
                     },
                     "blend_mode": {
@@ -10563,7 +10569,7 @@
                         "value": "normal"
                       }
                     },
-                    "preserve_transparency": {
+                    "ae:preserveTransparency": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -10572,10 +10578,10 @@
                     "track_matte": {
                       "value": {
                         "type": "enum",
-                        "value": "no_track_matte"
+                        "value": "none"
                       }
                     },
-                    "is_track_matte": {
+                    "ae:isTrackMatte": {
                       "value": {
                         "type": "bool",
                         "value": false
@@ -10587,7 +10593,7 @@
                         "value": false
                       }
                     },
-                    "effects_active": {
+                    "ae:effectsActive": {
                       "value": {
                         "type": "bool",
                         "value": true
@@ -10605,7 +10611,7 @@
                         "value": false
                       }
                     },
-                    "frame_blending_type": {
+                    "ae:frameBlendingType": {
                       "value": {
                         "type": "enum",
                         "value": "no_frame_blend"
@@ -10617,7 +10623,7 @@
                         "value": "best"
                       }
                     },
-                    "sampling_quality": {
+                    "sampling": {
                       "value": {
                         "type": "enum",
                         "value": "bilinear"
@@ -11455,16 +11461,10 @@
         "match_name": "ADBE Vector Grad Colors"
       },
       {
-        "code": "mask_feather_points",
-        "path": "/comps/Main_Comp/layers/Red_Solid_1/masks/Mask_1",
-        "message": "1 mask feather point(s) not exported",
-        "attr": "ae:ADBE_Mask_Shape"
-      },
-      {
         "code": "custom_value",
         "path": "/comps/Main_Comp/layers/Red_Solid_1/effects/Curves",
         "message": "CUSTOM_VALUE property is not readable from ExtendScript: ADBE CurvesCustom-0001",
-        "attr": "ae:ADBE_CurvesCustom--0001",
+        "attr": "param:0001",
         "match_name": "ADBE CurvesCustom-0001"
       }
     ],
@@ -11479,7 +11479,7 @@
       "effects": 3,
       "masks": 3,
       "markers": 3,
-      "seconds": 0.276
+      "seconds": 0.307
     }
   }
 }
