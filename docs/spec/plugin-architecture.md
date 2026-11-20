@@ -501,7 +501,9 @@ name = "对齐到网格"
 description = "把选中的图层吸附到 N 像素网格。"
 ```
 
-Categories and menu paths use well-known English keys (`Stylize`, `Blur & Sharpen`, …)
+Every contribution kind uses `[<table>.<id>]` with `name`, `description` and `keywords`
+(e.g. `[command.align-to-grid]`, `[script.report-off-grid]`); effects and shape operators
+add `params` and `choices`. Categories and menu paths use well-known English keys (`Stylize`, `Blur & Sharpen`, …)
 that the host translates with Adobe's official Chinese terms (`docs/glossary.md`, 11).
 Missing translations fall back to the manifest strings. Native plugins may also pass
 `l10n_key` in `BaeParamDef` to look up `[effect.<id>.params]`.

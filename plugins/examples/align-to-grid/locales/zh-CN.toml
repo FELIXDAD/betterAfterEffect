@@ -1,0 +1,10 @@
+[plugin]
+name = "对齐到网格"
+description = "把选中图层的位置吸附到 N 像素网格。"
+
+[command.align-to-grid]
+name = "将图层对齐到网格"
+description = "把选中的图层（或指定的图层）的位置吸附到 `size` 像素的网格。"
+
+[script.report-off-grid]
+name = "列出未对齐网格的图层"

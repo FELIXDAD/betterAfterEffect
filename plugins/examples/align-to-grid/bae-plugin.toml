@@ -1,0 +1,35 @@
+# Script plugin: one command (menu + shortcut + MCP tool) and one automation script
+# (docs/spec/plugin-architecture.md §5.3.8, §17). Scripts never run per frame.
+schema_version = 1
+
+[plugin]
+id = "com.example.align-to-grid"
+version = "0.2.0"
+api = "0.1"
+name = "Align to Grid"
+description = "Snaps the position of selected layers to an N-pixel grid."
+authors = ["BAE example plugins"]
+license = "Apache-2.0"
+
+[script]
+entry = "scripts/main.js"
+memory_limit_mb = 16
+
+[permissions]
+project = "write"
+
+[[command]]
+id = "align-to-grid"
+name = "Align Layers to Grid"
+implementation = "script"
+entry = "alignToGrid"
+schema = "schemas/align-to-grid.json"
+menu = "Layer/Transform"
+shortcut = { motion = "Ctrl+Alt+G" }
+description = "Snap the position of the selected layers (or the given layers) to a grid of `size` pixels."
+
+[[script]]
+id = "report-off-grid"
+name = "Report Off-Grid Layers"
+entry = "reportOffGrid"
+menu = "File/Scripts"

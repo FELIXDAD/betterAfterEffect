@@ -1,0 +1,19 @@
+[plugin]
+name = "暗角"
+description = "使图层边缘变暗或着色。"
+
+[effect.vignette]
+name = "暗角"
+keywords = ["暗角", "边缘", "压暗"]
+
+[effect.vignette.params]
+amount = "数量"
+center = "中心"
+radius = "半径"
+softness = "柔和度"
+shape = "形状"
+color = "颜色"
+
+[effect.vignette.choices.shape]
+1 = "圆形"
+2 = "适合图层"

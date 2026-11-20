@@ -1,0 +1,80 @@
+# Declarative WGSL effect, pixel style (docs/spec/plugin-architecture.md §5.3, §11).
+# No native code: the host compiles shaders/vignette.wgsl against a generated prelude
+# and runs it with the same generic shader node as BAE's built-in effects.
+schema_version = 1
+
+[plugin]
+id = "com.example.vignette"
+version = "1.0.0"
+api = "0.1"
+name = "Vignette"
+description = "Darkens or tints the edges of a layer."
+authors = ["BAE example plugins"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "vignette"
+name = "Vignette"
+category = "Stylize"
+class = "filter"
+implementation = "wgsl"
+keywords = ["vignette", "edge", "darken"]
+flags = ["pixel-independent"]
+shader = "shaders/vignette.wgsl"
+style = "pixel"
+entry = "vignette"
+identity_when = "params.amount == 0"
+
+[[effect.param]]
+id = 1
+key = "amount"
+type = "float"
+name = "Amount"
+default = 50.0
+range = [0.0, 100.0]
+precision = 1
+display = "percent"
+
+[[effect.param]]
+id = 2
+key = "center"
+type = "point"
+name = "Center"
+default = [0.5, 0.5]
+relative = true
+
+[[effect.param]]
+id = 3
+key = "radius"
+type = "float"
+name = "Radius"
+default = 0.6
+range = [0.0, 4.0]
+slider = [0.0, 1.5]
+
+[[effect.param]]
+id = 4
+key = "softness"
+type = "float"
+name = "Softness"
+default = 0.5
+range = [0.001, 4.0]
+slider = [0.01, 1.5]
+
+[[effect.param]]
+id = 5
+key = "shape"
+type = "popup"
+name = "Shape"
+default = 1
+choices = [
+  { id = 1, name = "Circle" },
+  { id = 2, name = "Fit Layer" },
+]
+
+[[effect.param]]
+id = 6
+key = "color"
+type = "color"
+name = "Color"
+default = [0.0, 0.0, 0.0, 1.0]
