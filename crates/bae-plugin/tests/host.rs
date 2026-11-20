@@ -176,10 +176,11 @@ fn official_examples_load_through_the_host() {
         [
             "com.example.align-to-grid",
             "com.example.box-blur",
+            "com.example.posterize",
             "com.example.vignette"
         ]
     );
-    assert_eq!(lib.len(), 2);
+    assert_eq!(lib.len(), 3);
     assert!(defs.get("com.example.vignette/vignette").is_some());
     // The script plugin loads (validated) with a warning that it does not run yet.
     assert!(

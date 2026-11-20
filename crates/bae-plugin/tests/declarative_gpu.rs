@@ -401,3 +401,54 @@ fn vignette_example_renders() {
         assert!((a[0] - b[0]).abs() < 2e-3, "{a:?} vs {b:?}");
     }
 }
+
+#[test]
+fn posterize_example_matches_cpu_reference() {
+    let Some(gpu) = context() else { return };
+    let fx = example("posterize");
+    let rect = IRect::from_size(16, 4);
+    let src = Pixels::new(rect, |x, y| {
+        let a = 1.0 - y as f32 * 0.25;
+        let v = x as f32 / 15.0;
+        [v * a, (1.0 - v) * a, 0.5 * a, a]
+    });
+    let input = src.upload(&gpu, F32);
+    let inst = instance("com.example.posterize/posterize", vec![(1, Value::Int(4))]);
+    let out = run(&gpu, &fx, &inst, 1.0, &input, rect, F32);
+    let want = Pixels::new(rect, |x, y| {
+        let c = src.get(x, y);
+        let q = |v: f32| ((v / c[3]).clamp(0.0, 1.0) * 3.0 + 0.5).floor() / 3.0 * c[3];
+        [q(c[0]), q(c[1]), q(c[2]), c[3]]
+    });
+    assert_close(&Pixels::download(&gpu, &out), &want, 1e-5);
+    // levels >= 256 → identity.
+    let inst = instance(
+        "com.example.posterize/posterize",
+        vec![(1, Value::Int(256))],
+    );
+    assert_eq!(
+        run(&gpu, &fx, &inst, 1.0, &input, rect, F32).texture,
+        input.texture
+    );
+}
+
+#[test]
+fn builtin_packages_register_as_built_ins() {
+    let manifest = TINT_MANIFEST
+        .replace("com.example.tint", "bae.effects")
+        .replace(
+            "identity_when",
+            "ae_match_names = [\"ADBE Tint\"]\nidentity_when",
+        );
+    let src = MemorySource::new("builtin:bae.effects")
+        .with_file("bae-plugin.toml", manifest)
+        .with_file("fx.wgsl", TINT_SHADER);
+    let fx = DeclarativeEffect::load_builtin(&src).unwrap().remove(0);
+    assert_eq!(fx.def().match_name, "ADBE Tint");
+    assert_eq!(fx.def().plugin, None);
+    // Third-party ids cannot pose as built-ins.
+    let src = MemorySource::new("x")
+        .with_file("bae-plugin.toml", TINT_MANIFEST)
+        .with_file("fx.wgsl", TINT_SHADER);
+    assert!(DeclarativeEffect::load_builtin(&src).is_err());
+}

@@ -24,7 +24,7 @@ use crate::manifest::{
     EffectClass, EffectDecl, ParamType, PluginInfo, RoiExtent, ShaderStyle, TextureFormat,
     TextureRect,
 };
-use crate::package::{EffectPackage, Package};
+use crate::package::{EffectPackage, Package, PackageSource};
 use crate::wgsl::{self, Source, SourceFile, UniformLayout, WorkingFormat};
 
 /// One numeric parameter as the effect packs it.
@@ -153,6 +153,41 @@ impl DeclarativeEffect {
             .iter()
             .filter(|e| e.decl.implementation == crate::manifest::EffectImplementation::Wgsl)
             .map(|e| Self::new(&package.manifest.plugin, e).map(Arc::new))
+            .collect()
+    }
+
+    /// Built-in effects authored as declarative packages embedded in the
+    /// binary (spec §19), e.g. `MemorySource::new("builtin:bae.effects")
+    /// .with_file("bae-plugin.toml", include_str!(...))`.
+    ///
+    /// The package id must be first-party (`bae.*`). The definitions are those
+    /// of built-ins: `plugin` is `None` (so `EffectRegistry::unregister_plugin`
+    /// never removes them and projects never show them as missing), and the
+    /// `match_name` is the effect's first `ae_match_names` entry when it has one
+    /// (AE projects map 1:1), else `<plugin-id>/<effect-id>`.
+    pub fn load_builtin(source: &dyn PackageSource) -> Result<Vec<Arc<Self>>, Vec<Diagnostic>> {
+        let package = Package::load(source)?;
+        if !crate::id::is_first_party(package.id()) {
+            return Err(vec![Diagnostic::error(
+                crate::manifest::MANIFEST_FILE,
+                format!(
+                    "built-in packages must use a first-party id (bae.*), not `{}`",
+                    package.id()
+                ),
+            )]);
+        }
+        package
+            .effects
+            .iter()
+            .filter(|e| e.decl.implementation == crate::manifest::EffectImplementation::Wgsl)
+            .map(|e| {
+                let mut fx = Self::new(&package.manifest.plugin, e)?;
+                fx.def.plugin = None;
+                if let Some(ae) = e.decl.ae_match_names.first() {
+                    fx.def.match_name = ae.clone();
+                }
+                Ok(Arc::new(fx))
+            })
             .collect()
     }
 
