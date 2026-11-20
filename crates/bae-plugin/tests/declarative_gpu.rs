@@ -146,9 +146,9 @@ fn run(
     format: wgpu::TextureFormat,
 ) -> GpuImage {
     let params = EffectParams {
-        effect: instance,
         time: Time::from_seconds(1.0),
         scale,
+        ..EffectParams::new(instance)
     };
     let mut encoder = gpu
         .device()
@@ -354,9 +354,9 @@ fn box_blur_example_matches_cpu_and_negotiates_roi() {
         vec![(1, Value::Float(2.6))],
     );
     let params = EffectParams {
-        effect: &inst,
         time: Time::ZERO,
         scale: 1.0,
+        ..EffectParams::new(&inst)
     };
     // radius 2.6 → read margin ceil(2.6) = 3 on every side, result grows by 3.
     assert_eq!(fx.output_bounds(&params, layer), IRect::new(-3, -3, 27, 19));

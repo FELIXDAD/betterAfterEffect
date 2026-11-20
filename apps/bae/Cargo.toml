@@ -23,6 +23,8 @@ bae-model.workspace = true
 bae-motion.workspace = true
 bae-platform.workspace = true
 bae-ui.workspace = true
+bae-render = { workspace = true, features = ["media"] }
+bae-vector = { workspace = true, features = ["render"] }
 egui.workspace = true
 egui-wgpu.workspace = true
 egui-winit.workspace = true

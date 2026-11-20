@@ -251,9 +251,9 @@ fn runtime_load_unload_does_not_leak_gpu_resources() {
             .unwrap();
         let effect = host.get("com.example.tint").unwrap().effects[0].clone();
         let params = EffectParams {
-            effect: &inst,
             time: Time::ZERO,
             scale: 1.0,
+            ..EffectParams::new(&inst)
         };
         let mut encoder = gpu
             .device()

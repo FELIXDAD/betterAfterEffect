@@ -238,7 +238,9 @@ dependencies = [
  "bae-model",
  "bae-motion",
  "bae-platform",
+ "bae-render",
  "bae-ui",
+ "bae-vector",
  "clap",
  "egui",
  "egui-wgpu",
@@ -493,13 +495,25 @@ version = "0.1.0"
 name = "bae-render"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "bae-anim",
+ "bae-app",
  "bae-gpu",
+ "bae-media",
  "bae-model",
+ "bae-package",
+ "bae-platform",
+ "bytemuck",
+ "clap",
  "glam",
+ "half",
+ "parking_lot",
+ "png",
  "rustc-hash 2.1.3",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "tracing",
 ]
 
 [[package]]

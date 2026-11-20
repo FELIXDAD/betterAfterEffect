@@ -272,13 +272,13 @@ impl VelloRenderer {
         }
         let texture = self.render(gpu, &scene, width, height)?;
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        Ok(GpuImage {
+        Ok(GpuImage::new(
             texture,
             view,
-            rect: roi,
-            alpha: ImageAlpha::Straight,
-            pixel_scale: 1.0 / scale,
-        })
+            roi,
+            ImageAlpha::Straight,
+            1.0 / scale,
+        ))
     }
 }
 
