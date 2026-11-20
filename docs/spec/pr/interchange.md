@@ -4,7 +4,7 @@
 
 和其他剪辑软件交换时间线（FCP XML、EDL、AAF、OTIO、OMF）、读取 Pr 工程，以及 BAE 剪辑工作区和动效工作区、分镜工作区的衔接（Pr 里靠 Dynamic Link 和"替换为 After Effects 合成"完成的事情）、脚本与 Agent 接口。
 
-**模块：** 交换格式的读写建议放在一个新 crate `bae-interop-edit`（不依赖 GPU，和 `bae-interop-ae` / `bae-interop-ai` 平级），只把外部格式翻译成 `bae-edit` 的命令或 Prim 树，不包含剪辑逻辑。这个 crate 现在没有工作流负责，建议作为 14 的后续阶段，或由协调人另行安排（见 14 任务书）。与动效、分镜的衔接是 `bae-edit` 的命令。
+**模块：** 交换格式的读写建议放在一个新 crate `bae-interop-edit`（不依赖 GPU，和 `bae-interop-ae` / `bae-interop-ai` 平级），只把外部格式翻译成 `bae-edit` 的命令或 Prim 树，不包含剪辑逻辑。这个 crate 归 14，M2 以后开工，0.0.1 不建；工作量大时再拆成工作流 22 `interop/edit`（协调人决定，2026-11-20，见 14 任务书）。与动效、分镜的衔接是 `bae-edit` 的命令。
 
 **交换格式的映射关系（导入导出共用）：**
 

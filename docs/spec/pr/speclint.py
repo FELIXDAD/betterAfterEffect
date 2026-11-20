@@ -32,6 +32,7 @@ import sys
 OWNERS = [
     "bae-edit",
     "bae-ui-edit",
+    "bae-ui-motion",
     "bae-model",
     "bae-anim",
     "bae-render",
