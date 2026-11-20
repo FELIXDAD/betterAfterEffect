@@ -529,11 +529,11 @@ Shared notes for this section: all colour-correction effects operate on straight
 ### AE-FX-038 · Levels (色阶)
 
 - **What it does:** Remaps input range [Input Black, Input White] to [Output Black, Output White] with a gamma curve, for RGB together or for a single channel (R, G, B or Alpha).
-- **Exact semantics:** matchName `ADBE Easy Levels2`; 32 bpc; GPU since AE 14.2 (2017); expands bounds: no (Lottie: not supported directly; exporters convert to Pro Levels `ty: 24`, UNVERIFIED).
+- **Exact semantics:** matchName `ADBE Easy Levels2`; 32 bpc; GPU since AE 14.2 (2017); expands bounds: no (Lottie: no own effect type; Bodymovin converts it to Pro Levels `ty: 24` by switching the Channel menu and reading params 3–7 per channel; Skottie also renders `mn: "ADBE Easy Levels2"` directly).
   | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|---|---|
   | 1 | Channel (通道) | `ADBE Easy Levels2-0001` | popup | 1 = RGB | RGB / Red / Green / Blue / Alpha | — | Selects which channel's five values the controls show and edit. |
-  | 2 | Histogram (直方图) | `ADBE Easy Levels2-0002` | arbitrary data | — | — | — | UI only (histogram of the effect input at the current time); holds per-channel level values (UNVERIFIED). |
+  | 2 | Histogram (直方图) | `ADBE Easy Levels2-0002` | arbitrary data | — | — | — | UI only (histogram of the effect input at the current time). Each of RGB/Red/Green/Blue/Alpha keeps its own five values; params 3–7 show and edit the set of the channel selected in Channel (Bodymovin reads all five sets this way). Where the non-selected sets are stored is internal (UNVERIFIED: in this blob). |
   | 3 | Input Black (输入黑色) | `ADBE Easy Levels2-0003` | float slider | 0.0 | displayed 0…255 (8 bpc), 0…32768 (16 bpc), 0.0…1.0 (32 bpc); valid beyond in 32 bpc (UNVERIFIED limits) | level | Stored normalised (1.0 = white); scripting returns normalised values (AE 26 dump: Input White = 1). |
   | 4 | Input White (输入白色) | `ADBE Easy Levels2-0004` | float slider | 1.0 (255 in 8 bpc display) | as above | level | |
   | 5 | Gamma (灰度系数) | `ADBE Easy Levels2-0005` | float slider | 1.0 | UNVERIFIED: slider 0.1…10 | exponent | Shown as the middle triangle. |
@@ -544,10 +544,12 @@ Shared notes for this section: all colour-correction effects operate on straight
   ```
   map(x; ib, iw, g, ob, ow, clipB, clipW):
       t = (x - ib) / (iw - ib)            // iw == ib: treat as a step at ib (Skottie nudges by epsilon)
-      t = max(t, 0) ^ (1 / g)              // UNVERIFIED for t < 0 with clipping off (Skottie clamps t at 0)
+      // clip active = On, or Off for 32 bpc Color while the project is 8/16 bpc
+      if clipB active: t = max(t, 0)       // below Input Black -> exactly Output Black (per help)
+      if clipW active: t = min(t, 1)       // above Input White -> exactly Output White (per help)
+      t = sign(t) * |t| ^ (1 / g)          // g > 1 brightens; t < 0 only reachable with clip off:
+                                           // UNVERIFIED (mirrored here; Skottie clamps t at 0)
       y = ob + (ow - ob) * t
-      if clipB is On, or (Off for 32 bpc and project bpc != 32): y = max(y, min(ob, ow))
-      if clipW is On, or (Off for 32 bpc and project bpc != 32): y = min(y, max(ob, ow))
       return y
   per pixel (straight colour):
       R1 = map(R; red values)   G1 = map(G; green values)   B1 = map(B; blue values)   // per-channel first
@@ -558,7 +560,7 @@ Shared notes for this section: all colour-correction effects operate on straight
   - In 8/16 bpc results are clamped to 0…1 by the buffer regardless of the clip settings.
 - **Priority:** P0
 - **Owner:** bae-effects
-- **Notes:** Legacy matchName `ADBE Easy Levels` (pre-CS6? UNVERIFIED version; hidden obsolete) used 8-bit-style values. The order per-channel → composite follows lottie-web/Skottie's Pro Levels implementations (lottie-web applies the R/G/B/A component-transfer before the composite one); AE's own order is UNVERIFIED. The Histogram's "auto" buttons do not exist in Levels (see Auto Levels, AE-FX-049). Implementation hint: build a 1D LUT per channel (4096 entries or analytic in-shader for 32 bpc).
+- **Notes:** Legacy matchName `ADBE Easy Levels` (pre-CS6? UNVERIFIED version; hidden obsolete) used 8-bit-style values. The order per-channel → composite follows lottie-web/Skottie's Pro Levels implementations (lottie-web applies the R/G/B/A component-transfer before the composite one); AE's own order is UNVERIFIED. The Histogram's "auto" buttons do not exist in Levels (see Auto Levels, AE-FX-049). Implementation hint: build a 1D LUT per channel (4096 entries or analytic in-shader for 32 bpc). Source: https://helpx.adobe.com/after-effects/using/color-correction-effects.html (clip semantics); https://github.com/bodymovin/bodymovin-extension/blob/master/bundle/jsx/utils/effectsHelper.jsx (`handleEasyLevels`).
 
 ### AE-FX-039 · Levels (Individual Controls) (色阶（单独控件）)
 
@@ -648,8 +650,8 @@ Shared notes for this section: all colour-correction effects operate on straight
 - **Exact semantics:** matchName `ADBE Brightness & Contrast 2`; 32 bpc; GPU since AE 14.1; expands bounds: no.
   | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|---|---|
-  | 1 | Brightness (亮度) | `ADBE Brightness & Contrast 2-0001` | float slider | 0 | −150…150 (legacy mode uses −100…100) | — | |
-  | 2 | Contrast (对比度) | `ADBE Brightness & Contrast 2-0002` | float slider | 0 | −50…100 effective (slider −100…100, negative values below −50 behave as −50, per Skottie) | — | |
+  | 1 | Brightness (亮度) | `ADBE Brightness & Contrast 2-0001` | float slider | 0 | effective −150…150 (legacy mode clamps to −100…100, per Skottie); UNVERIFIED: AE slider/valid limits | — | |
+  | 2 | Contrast (对比度) | `ADBE Brightness & Contrast 2-0002` | float slider | 0 | effective −50…100 (values below −50 behave as −50 in modern mode, per Skottie's measurements; legacy uses −100…100); UNVERIFIED: AE slider/valid limits (assumed −100…100) | — | |
   | 3 | Use Legacy (supports HDR) (使用旧版（支持 HDR）) | `ADBE Brightness & Contrast 2-0003` | checkbox | off | — | — | Legacy mode is the only mode that does not clamp 32 bpc values. |
   ```
   // Modern mode (Skottie's curve fit of AE; approximate):
@@ -797,7 +799,7 @@ Shared notes for this section: all colour-correction effects operate on straight
   ```
 - **Priority:** P1
 - **Owner:** bae-effects
-- **Notes:** Obsolete `ADBE Photo Filter` (8/16 bpc) has a 20-entry menu without the LBA/LBB entries (1 Warming (85), 2 Warming (81), 3 Cooling (80), 4 Cooling (82), 5 Red … 18 Underwater, 19 separator, 20 Custom), so its indices differ from `ADBE PhotoFilterPS`; importers must remap. Imported Photoshop Photo Filter adjustment layers become this effect.
+- **Notes:** Parameter IDs 0001–0004 are taken from the obsolete version's AE 26 dump (Filter, Color, Density, Preserve Luminosity); for `ADBE PhotoFilterPS` only the menu was dumped (UNVERIFIED: same IDs). Obsolete `ADBE Photo Filter` (8/16 bpc) has a 20-entry menu without the LBA/LBB entries (1 Warming (85), 2 Warming (81), 3 Cooling (80), 4 Cooling (82), 5 Red … 18 Underwater, 19 separator, 20 Custom), so its indices differ from `ADBE PhotoFilterPS`; importers must remap. Imported Photoshop Photo Filter adjustment layers become this effect.
 
 ### AE-FX-048 · Channel Mixer (通道混合器)
 
