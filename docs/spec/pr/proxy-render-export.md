@@ -90,7 +90,7 @@
 - **优先级：** M4
 - **BAE 模块：** bae-ui-edit (+ bae-media)
 - **数据模型：** 无
-- **备注：** 对剪辑岗位和 Agent 都是最常用的导出路径，命令 `sequence.export`（序列、范围、预设、路径）应该在 M1 就提供给 Agent（实现依赖 08 的编码和音频混入）。
+- **备注：** 对剪辑岗位和 Agent 都是最常用的导出路径，命令 `sequence.export`（序列、范围、预设、路径）要在 M2"Agent 通过 MCP 操作"之前提供（实现依赖 08 的编码和音频混入），按钮界面在 M4。
 
 ### PR-EXP-011 · 导出队列与后台导出（Media Encoder Queue）
 
