@@ -16,6 +16,16 @@ use kurbo::Point;
 
 fn gpu() -> Option<Arc<GpuContext>> {
     match GpuContext::new_headless(GpuContextDescriptor::default().with_env()) {
+        // Vello crashes the process (STATUS_ACCESS_VIOLATION) on WARP, the software
+        // D3D12 adapter of GPU-less Windows CI runners: skip software adapters like
+        // the no-GPU case (see tests/evaluated.rs).
+        Ok(ctx) if ctx.adapter_info().device_type == vello::wgpu::DeviceType::Cpu => {
+            eprintln!(
+                "skipping Vello GPU test on software adapter {:?}",
+                ctx.adapter_info().name
+            );
+            None
+        }
         Ok(ctx) => Some(ctx),
         Err(error @ GpuError::NoAdapter { .. }) => {
             if std::env::var_os("BAE_REQUIRE_GPU").is_some_and(|v| v == "1") {
