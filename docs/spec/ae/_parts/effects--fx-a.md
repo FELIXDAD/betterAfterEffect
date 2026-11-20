@@ -1348,7 +1348,7 @@ Shared notes for this section: enum lists and parameter-ID positions of popups c
   | 1 | Take Matte From Layer (从图层获取遮罩) | `ADBE Set Matte3-0001` | layer | this layer (index of self, dump value 1 on a 1-layer comp) | — | — | With Source / Masks / Effects & Masks menu (AE-FX-012). |
   | 2 | Use For Matte (用于遮罩) | `-0002` | popup | 4 = Alpha Channel | 1 Red Channel / 2 Green Channel / 3 Blue Channel / 4 Alpha Channel / 5 Luminance / 6 Hue / 7 Lightness / 8 Saturation / 9 Full / 10 Off | — | Lottie uses the same numbers. |
   | 3 | Invert Matte (反转遮罩) | `-0003` | checkbox | off | — | — | |
-  | 4 | Stretch Matte to Fit (伸缩遮罩以适合) | `-0004` | checkbox | on | — | — | AE 26 scripting name of this property is "If Layer Sizes Differ" (UNVERIFIED whether the UI is still a checkbox). Off = matte layer centred. |
+  | 4 | If Layer Sizes Differ: Stretch Matte to Fit (伸缩遮罩以适合) | `-0004` | checkbox | on | — | — | Property name (scripting, AE 26 dump) is "If Layer Sizes Differ"; "Stretch Matte to Fit" is the checkbox label (the enum table lists no popup at 0004). Off = matte layer centred. |
   | 5 | Composite Matte with Original (将遮罩与原始图像合成) | `-0005` | checkbox | on | — | — | On: multiply with existing alpha; off: replace it. |
   | 6 | Premultiply Matte Layer (预乘遮罩图层) | `-0006` | checkbox | on | — | — | |
   ```
@@ -1441,7 +1441,7 @@ Shared notes for this section: enum lists and parameter-ID positions of popups c
   | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|---|---|
   | 1 | Background Color (背景颜色) | `ADBE Remove Color Matting-0001` | color | black [0,0,0] (UNVERIFIED) | — | — | Colour the edges were matted against. |
-  | 2 | Clip HDR Results (剪切 HDR 结果（译名待核）) | `-0002` | checkbox | on | — | — | 32 bpc only matters; off allows values outside 0…1. |
+  | 2 | Clip HDR Results (剪切 HDR 值) | `-0002` | checkbox | on | — | — | 32 bpc only matters; off allows values outside 0…1. The help calls it "Clip HDR Values" (zh 剪切 HDR 值); UNVERIFIED which English string the UI shows. |
   ```
   if A > 0:  C' = (C - (1 - A) * bg) / A          // C straight-stored but actually matted with bg
              if clipHDR: C' = clamp01(C')
@@ -1599,11 +1599,11 @@ Shared notes for this section: enum lists and parameter-ID positions of popups c
 ### AE-FX-082 · CC Composite (CC 合成（译名待核）)
 
 - **What it does:** Re-composites the layer's original (pre-effect) image with the current effect-stack result using a blend mode — typically applied after other effects to bring back the original on top or behind.
-- **Exact semantics:** matchName `CC Composite` per the docsforadobe table and the AE 26 enum table key (an AE 26.0 effect enumeration lists `CS Composite` — UNVERIFIED which one current AE writes; BAE must accept both); 16 bpc; GPU —; expands bounds: no.
+- **Exact semantics:** matchName `CS Composite` (current, Channel category) per the AE 26.0 effect enumeration, which lists `CC Composite` separately as "CC Composite (obsolete)" in the hidden `_Obsolete` category; the docsforadobe table and the AE 26 enum table key (`CC Composite-0002`) refer to that older version. BAE must load both (same parameters assumed, UNVERIFIED for `CS Composite`); 16 bpc; GPU —; expands bounds: no.
   | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|---|---|
-  | 1 | Opacity (不透明度) | `CC Composite-0001` | float slider | 100 | 0…100 | % | |
-  | 2 | Composite Original (合成原始项目（译名待核）) | `-0002` | popup | UNVERIFIED (2 = Behind?) | Copy / Behind / In front / (sep) / Darken / Multiply / Linear Burn / Color Burn / Classic Color Burn / (sep) / Add / Lighten / Screen / Linear Dodge / Color Dodge / Classic Color Dodge / (sep) / Overlay / Soft Light / Hard Light / Linear Light / Vivid Light / Pin Light / Hard Mix / (sep) / Difference / Classic Difference / Exclusion / (sep) / Hue / Saturation / Color / Luminosity / (sep) / Stencil Alpha / Stencil Luma / Silhouette Alpha / Silhouette Luma / (sep) / Add Alpha / Luminescent Premul | — | |
+  | 1 | Opacity (不透明度) | `CS Composite-0001` (obsolete: `CC Composite-0001`) | float slider | 100 | 0…100 | % | |
+  | 2 | Composite Original (合成原始项目（译名待核）) | `-0002` | popup | UNVERIFIED (2 = Behind?) | Copy / Behind / In front / (sep) / Darken / Multiply / Linear Burn / Color Burn / Classic Color Burn / (sep) / Add / Lighten / Screen / Linear Dodge / Color Dodge / Classic Color Dodge / (sep) / Overlay / Soft Light / Hard Light / Linear Light / Vivid Light / Pin Light / Hard Mix / (sep) / Difference / Classic Difference / Exclusion / (sep) / Hue / Saturation / Color / Luminosity / (sep) / Stencil Alpha / Stencil Luma / Silhouette Alpha / Silhouette Luma / (sep) / Add Alpha / Luminescent Premul | — | Menu per the AE 26 enum table for `CC Composite-0002` (obsolete version). |
   | 3 | RGB Only (仅 RGB（译名待核）) | `-0003` | checkbox | off | — | — | Keep the current alpha. |
   ```
   orig = layer pixels before the first effect (after masks; UNVERIFIED)
