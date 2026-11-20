@@ -12,6 +12,9 @@ use crate::error::SyncError;
 use crate::protocol::{DocKey, Message};
 use crate::transport::Transport;
 
+/// Payloads received in one pump, per document: `(version, data)`.
+type Incoming = BTreeMap<DocKey, Vec<(VersionVector, Vec<u8>)>>;
+
 /// Settings of a [`SyncSession`].
 #[derive(Clone, Debug)]
 pub struct SessionConfig {
@@ -108,6 +111,12 @@ impl SyncSession {
         &self.config
     }
 
+    /// Change settings (takes effect on the next pump; the client ID should not
+    /// change while connected).
+    pub fn config_mut(&mut self) -> &mut SessionConfig {
+        &mut self.config
+    }
+
     pub fn client(&self) -> &ClientId {
         &self.config.client
     }
@@ -185,14 +194,16 @@ impl SyncSession {
     ) -> Result<PumpOutcome, SyncError> {
         let mut out = PumpOutcome::default();
         self.maybe_hello(docs, transport, now, &mut out)?;
+        let mut incoming = Incoming::new();
         for _ in 0..self.config.max_messages_per_pump {
             let Some(msg) = transport.recv()? else {
                 break;
             };
             out.received += 1;
             self.stats.messages_received += 1;
-            self.handle(docs, transport, msg, &mut out)?;
+            self.handle(docs, transport, msg, &mut incoming, &mut out)?;
         }
+        self.import(docs, incoming, &mut out);
         // A document that appeared since the last hello (created locally, or the
         // app added a sublayer the remote told us about): announce it so the
         // remote sends its contents.
@@ -238,9 +249,10 @@ impl SyncSession {
 
     fn handle(
         &mut self,
-        docs: &mut dyn DocSet,
+        docs: &dyn DocSet,
         transport: &mut dyn Transport,
         msg: Message,
+        incoming: &mut Incoming,
         out: &mut PumpOutcome,
     ) -> Result<(), SyncError> {
         match msg {
@@ -265,27 +277,8 @@ impl SyncSession {
                 if let Some(remote) = &mut self.remote {
                     remote.entry(doc.clone()).or_default().merge(&version);
                 }
-                if docs
-                    .version(&doc)
-                    .is_some_and(|have| have.includes_vv(&version))
-                {
-                    self.stats.redundant += 1;
-                    return Ok(());
-                }
-                match docs.import(&doc, &data) {
-                    Ok(Imported::Done(event)) => {
-                        self.stats.imports += 1;
-                        if let Some(ev) = event.filter(|e| !e.is_empty()) {
-                            out.events.push(ev);
-                        }
-                    }
-                    Ok(Imported::UnknownDoc) => {
-                        if !out.unknown_docs.contains(&doc) {
-                            out.unknown_docs.push(doc);
-                        }
-                    }
-                    Err(e) => out.errors.push(e),
-                }
+                // Imported after the receive loop, one batch per document.
+                incoming.entry(doc).or_default().push((version, data));
             }
             Message::SnapshotRequest { doc } => {
                 let Some(version) = docs.version(&doc) else {
@@ -303,6 +296,39 @@ impl SyncSession {
             }
         }
         Ok(())
+    }
+
+    /// Import what arrived, one batch per document (one mirror rebuild and one
+    /// event per sublayer instead of one per message).
+    fn import(&mut self, docs: &mut dyn DocSet, incoming: Incoming, out: &mut PumpOutcome) {
+        for (doc, items) in incoming {
+            // A set may create documents on import (the relay does), so a missing
+            // document is only "unknown" if the set says so.
+            let have = docs.version(&doc).unwrap_or_default();
+            let total = items.len();
+            let batch: Vec<(VersionVector, Vec<u8>)> = items
+                .into_iter()
+                .filter(|(version, _)| !have.includes_vv(version))
+                .collect();
+            self.stats.redundant += (total - batch.len()) as u64;
+            if batch.is_empty() {
+                continue;
+            }
+            match docs.import_batch(&doc, &batch) {
+                Ok(Imported::Done(event)) => {
+                    self.stats.imports += batch.len() as u64;
+                    if let Some(ev) = event.filter(|e| !e.is_empty()) {
+                        out.events.push(ev);
+                    }
+                }
+                Ok(Imported::UnknownDoc) => {
+                    if !out.unknown_docs.contains(&doc) {
+                        out.unknown_docs.push(doc);
+                    }
+                }
+                Err(e) => out.errors.push(e),
+            }
+        }
     }
 
     /// Send every document's ops the remote is not known to have. Returns whether
