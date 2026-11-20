@@ -6,7 +6,8 @@
 //! into IOSurface-backed pixel buffers from the writer's pool: `32BGRA` for
 //! 8-bit H.264 / HEVC, `64RGBAHalf` for ProRes and 10-bit HEVC so precision and
 //! alpha survive. Color tags come from the settings' H.273 code points; alpha is
-//! straight for ProRes 4444 and as requested for HEVC with alpha.
+//! written straight or premultiplied as requested (HEVC tags the mode, ProRes
+//! has no flag for it, so readers must be told or guess).
 
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
@@ -157,11 +158,11 @@ impl AvWriterEncoder {
             } else {
                 (PixelFormat::Bgra8, kCVPixelFormatType_32BGRA)
             };
-        let frame_alpha = match (settings.alpha, settings.codec) {
-            (AlphaMode::Opaque | AlphaMode::Ignore, _) => AlphaMode::Opaque,
-            // ProRes 4444 alpha is unassociated.
-            (_, VideoCodec::ProRes(_)) => AlphaMode::Straight,
-            (alpha, _) => alpha,
+        // ProRes carries no alpha-mode flag: write what was asked (AE's
+        // default for "High Quality with Alpha" is premultiplied); HEVC tags it.
+        let frame_alpha = match settings.alpha {
+            AlphaMode::Opaque | AlphaMode::Ignore => AlphaMode::Opaque,
+            alpha => alpha,
         };
 
         // SAFETY: plain AVFoundation calls with valid arguments; the statics

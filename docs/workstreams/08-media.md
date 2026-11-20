@@ -64,6 +64,20 @@
 - [x] 影片裁片（`apple::AvTrimmer`）：直拷整 GOP 的压缩样本（视频和音频轨，AVAssetReader / AVAssetWriter 不带编码设置），或精确帧重编码成 ProRes（默认 422 HQ，有 alpha 时 4444，可在请求里指定编码）。
 - [x] `MediaInfo::asset_attributes()`：按 `bae_model::schema` 的 Asset 属性名输出（kind、width、height、frame_rate、duration、pixel_aspect、alpha_mode、has_video、has_audio、sequence:*），测试里逐项对照 schema 的类型和枚举值。
 
+### 与 AE 2026 渲染结果的对比（`tests/ae_reference.rs`，脚本 `tests/ae/render_refs.jsx`）
+
+测试合成：左半边不透明纯色 (0.75, 0.25, 0.5)，右半边 50% 不透明度纯色 (0.2, 0.6, 0.9)；AE 模板 "H.264 - Match Render Settings - 15 Mbps"、"High Quality"（ProRes 422）、"High Quality with Alpha"（ProRes 4444）。
+
+| | AE | bae-media |
+|---|---|---|
+| 1920×1080 标签（原色 / 传递 / 矩阵 / 范围） | 709 / 709 / 709 / 有限范围 | 相同 |
+| 320×180 标签 | SMPTE-C（601）/ 709 / 601 / 有限范围 | 已改成相同（高度 < 720 用 601） |
+| 纯色解码值（理论值 191.25, 63.75, 127.5） | H.264 190/64/127，ProRes 190.5/64.1/127.2 | 我们编码再解码：H.264 192/64/129，ProRes 191/64/128 |
+| ProRes 4444 alpha | 默认预乘（"Premultiplied (Matted)"），文件里不标记 | 按设置写直通或预乘；读取时文件不标记，默认按直通，`CpuFrame::guess_alpha()` 能判断出预乘（AE「猜测」的做法） |
+
+- 读 AE 的文件颜色正确（与理论值差 ≤ 1.3 个 8 位码值）；我们编码的标签与 AE 一致。
+- `MediaInfo` 现在报告文件里真实的 YCbCr 矩阵和范围；交付的帧仍是全范围 RGB。
+
 ### 说明与待定
 
 - `bae-media` 依赖 `bae-model`（只用 `Time` / `FrameRate`），按 02 的要求避免两套时间体系。
