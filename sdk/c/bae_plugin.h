@@ -209,6 +209,7 @@ typedef struct BaeHost {
 #define BAE_KIND_COMMAND 8u
 #define BAE_KIND_PANEL 9u              /* reserved for native panels */
 #define BAE_KIND_EXPRESSION_LIBRARY 10u
+#define BAE_KIND_AUDIO_EFFECT 11u      /* reserved: audio effects (AE AUDIO_* selectors) */
 
 typedef struct BaeContribution {
     uint32_t struct_size;
@@ -555,6 +556,8 @@ typedef struct BaeParamValues {
 #define BAE_EFFECT_FLAG_DYNAMIC_FLAGS (UINT64_C(1) << 12)    /* call query_dynamic_flags */
 #define BAE_EFFECT_FLAG_GPU_NATIVE (UINT64_C(1) << 13)       /* uses bae.gpu.native */
 #define BAE_EFFECT_FLAG_EXTERNAL_DEPENDENCIES (UINT64_C(1) << 14) /* call get_dependencies */
+#define BAE_EFFECT_FLAG_CUSTOM_UI (UINT64_C(1) << 15)  /* reserved (ABI 0.2): ui_event + bae.draw */
+#define BAE_EFFECT_FLAG_OPTIONS_DIALOG (UINT64_C(1) << 16) /* has an "Options..." action: message(BAE_MESSAGE_OPTIONS_DIALOG) */
 /* Flags query_dynamic_flags may change. */
 #define BAE_EFFECT_DYNAMIC_FLAGS_MASK                                                       \
     (BAE_EFFECT_FLAG_PIXEL_INDEPENDENT | BAE_EFFECT_FLAG_NON_PARAM_VARY |                  \
@@ -789,6 +792,20 @@ typedef struct BaeEffectVTable1 {
     BaeStatus (*message)(void *global, void *instance, const char *selector, BaeBytes input,
                          BaeWriter *output);
 } BaeEffectVTable1;
+
+/*
+ * Well-known `message` selectors (BaeEffectVTable1.message). Selectors starting
+ * with "bae." are reserved for the host; plugins use their own reverse-DNS prefix.
+ *   bae.about           input empty; output UTF-8 about text (AE ABOUT).
+ *   bae.options_dialog  M thread; input empty; output JSON {"changed":bool}.
+ *                       The plugin edits values only through bae.param.edit
+ *                       (AE DO_DIALOG; needs BAE_EFFECT_FLAG_OPTIONS_DIALOG).
+ *   bae.migrate         M thread; input JSON {"from_version","params":[...],"state_b64"};
+ *                       output the same shape for the current version (spec 6.5).
+ */
+#define BAE_MESSAGE_ABOUT "bae.about"
+#define BAE_MESSAGE_OPTIONS_DIALOG "bae.options_dialog"
+#define BAE_MESSAGE_MIGRATE "bae.migrate"
 
 /* ======================================================================= */
 /* 9. Shape operators                                                      */

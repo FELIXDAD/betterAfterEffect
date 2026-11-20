@@ -1,0 +1,15 @@
+[package]
+name = "bae-plugin-sdk"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100"
+license = "Apache-2.0"
+description = "BAE plugin SDK: the stable C ABI mirror, version negotiation and the Rust effect contract shared by plugins and the host."
+publish = false
+
+# No dependencies on purpose: plugin authors build this crate, it must compile
+# fast and must never pull host-side crates (wgpu, bae-model, ...).
+[dependencies]
+
+[lib]
+# rlib only; plugins add `crate-type = ["cdylib"]` in their own crate.
