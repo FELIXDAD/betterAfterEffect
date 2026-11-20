@@ -43,7 +43,7 @@
 
 ## 进度
 
-- [x] MCP 服务器（stdio，rmcp 3.11，`bae mcp`）：一个连接 = 一个 Agent 会话；Agent 名默认取 MCP 客户端名（Claude Code → `claude-code`），`--name` 可指定。
+- [x] MCP 服务器（stdio，`bae mcp`）：协议层自己实现（同步 JSON-RPC，`bae_agent::protocol`），应用不链接 rmcp / tokio（release 比用 rmcp 时小 1.37 MiB，见 #29 / #30），rmcp 的客户端只在测试里检查互通；一个连接 = 一个 Agent 会话；Agent 名默认取 MCP 客户端名（Claude Code → `claude-code`），`--name` 可指定。
 - [x] 从 CommandRegistry 生成工具：工具名 = 命令 ID 把 `.` 换成 `_`（Claude / OpenAI 的工具名只允许 `[a-zA-Z0-9_-]`）；描述、参数 Schema 都来自命令定义；新命令无需改 17 的代码。
 - [x] 查询工具：`stage_describe`（文字摘要，`root` / `detail` / `max_chars`）、`prim_get`（每个属性的来源层和被覆盖的层、关键帧帧号、所在合成的尺寸和帧速率）、`prim_find`、`sublayer_list`、`sublayer_diff`、`schema_get`。
 - [x] 视觉工具：`render_frame`、`render_contact_sheet`（帧号标在每格左上角）。渲染走 `FrameRenderer` trait，现在是占位图（结果里标 `placeholder: true`），04 合并后由 app 注入真正的渲染器。
