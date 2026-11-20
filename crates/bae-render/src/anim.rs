@@ -3,16 +3,14 @@
 //! `bae_anim::Evaluator` does the animation work (AE easing, spatial paths,
 //! parenting, layer time, time remapping, later expressions); this module maps
 //! its [`EvaluatedComp`] onto [`RenderComp`]: world matrices become 2D affines,
-//! sources are resolved (solid assets, footage files, nested comps evaluated at
-//! their source time), tokens become enums.
+//! sources are resolved (solid assets, footage files; nested comps arrive
+//! already evaluated at their mapped time), tokens become enums.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use bae_anim::{EvaluatedComp, EvaluatedLayer, Evaluator, LayerSource};
-use bae_model::{
-    AssetFile, AssetResolver, LayerKind, PrimPath, PrimType, Stage, StageEvent, Time, Value,
-};
+use bae_model::{AssetFile, AssetResolver, LayerKind, PrimPath, Stage, StageEvent, Time};
 use glam::{DAffine2, DMat4, DVec2};
 
 use crate::blend::{BlendMode, MaskMode, TrackMatteMode};
@@ -131,11 +129,7 @@ impl AnimEvaluator {
             self.warn(format!("{}: unknown blend mode `{}`", l.path, l.blend_mode));
             BlendMode::Normal
         });
-        // Not animatable in AE; not part of EvaluatedLayer yet (requested from 03).
-        out.preserve_transparency = stage
-            .prim(&l.path)
-            .and_then(|v| v.value("preserve_transparency").and_then(Value::as_bool))
-            .unwrap_or(false);
+        out.preserve_transparency = l.switches.preserve_transparency;
         out.track_matte = matte_mode(l.track_matte)
             .and_then(|mode| l.track_matte_layer.map(|layer| TrackMatte { layer, mode }));
         if out.active {
@@ -199,44 +193,37 @@ impl AnimEvaluator {
                 }
                 Ok(LayerContent::None)
             }
-            LayerSource::Comp { comp, time } => {
-                let nested = self.eval(stage, comp, *time, depth + 1)?;
-                Ok(LayerContent::Comp(Arc::new(nested)))
-            }
-            LayerSource::Asset { asset, time } => {
-                let Some(view) = stage.prim(asset).filter(|v| v.is_a(&PrimType::ASSET)) else {
-                    self.warn(format!("{}: source {asset} is not an asset", l.path));
-                    return Ok(LayerContent::None);
-                };
-                let int = |n: &str| match view.value(n) {
-                    Some(Value::Int(i)) => (*i).clamp(0, i64::from(u32::MAX)) as u32,
-                    Some(Value::Float(f)) => f.max(0.0) as u32,
-                    _ => 0,
-                };
-                let (w, h) = (int("width"), int("height"));
-                let kind = view
-                    .value("kind")
-                    .and_then(Value::as_str)
-                    .unwrap_or("footage");
-                Ok(match kind {
-                    "solid" => LayerContent::Solid {
-                        color: match view.value("solid_color") {
-                            Some(Value::Color(c)) => c.map(|v| v as f32),
-                            _ => [0.5, 0.5, 0.5, 1.0],
-                        },
-                        width: w,
-                        height: h,
-                    },
-                    "footage" | "sequence" => LayerContent::Footage(FootageRef {
-                        asset: asset.clone(),
-                        file: AssetFile::from_prim(&view)
-                            .and_then(|f| self.assets.resolve(&f).path().map(|p| p.to_path_buf())),
-                        size: (w > 0 && h > 0).then_some([w, h]),
-                        source_time: *time,
-                    }),
-                    _ => LayerContent::None,
-                })
-            }
+            LayerSource::Comp { comp, nested, .. } => match nested {
+                // bae-anim evaluates nested comps itself (at the mapped time).
+                Some(nested) => {
+                    let rc = self.convert(stage, nested, depth + 1)?;
+                    Ok(LayerContent::Comp(Arc::new(rc)))
+                }
+                None => {
+                    self.warn(format!("{}: pre-comp {comp} is missing or cyclic", l.path));
+                    Ok(LayerContent::None)
+                }
+            },
+            LayerSource::Asset { asset, time, info } => Ok(match info.kind.as_str() {
+                "solid" => LayerContent::Solid {
+                    color: info
+                        .solid_color
+                        .unwrap_or([0.5, 0.5, 0.5, 1.0])
+                        .map(|v| v as f32),
+                    width: info.width,
+                    height: info.height,
+                },
+                "footage" | "sequence" => LayerContent::Footage(FootageRef {
+                    asset: asset.clone(),
+                    file: stage
+                        .prim(asset)
+                        .and_then(|view| AssetFile::from_prim(&view))
+                        .and_then(|f| self.assets.resolve(&f).path().map(|p| p.to_path_buf())),
+                    size: (info.width > 0 && info.height > 0).then_some([info.width, info.height]),
+                    source_time: *time,
+                }),
+                _ => LayerContent::None,
+            }),
         }
     }
 }
