@@ -3078,7 +3078,7 @@
   {
    "id": "expr_vector_position",
    "group": "expression",
-   "description": "Array arithmetic on Position",
+   "description": "Array arithmetic on Position (2D layer: value has two components in expressions)",
    "property": [
     "ADBE Transform Group",
     "ADBE Position"
@@ -3111,7 +3111,7 @@
      }
     },
     "expression": {
-     "source": "[value[0] + Math.cos(time) * 100, value[1] + Math.sin(time) * 100, value[2]]",
+     "source": "[value[0] + Math.cos(time) * 100, value[1] + Math.sin(time) * 100]",
      "enabled": true
     }
    }

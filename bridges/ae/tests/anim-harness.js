@@ -130,6 +130,22 @@ eq(byId.spatial_3d.layer.three_d, true, "3D layer flag");
 eq(byId.layer_start_offset.layer.start_time, 705600000, "layer start time");
 eq(byId.scale_per_dimension_ease.attr.keyframes["0"].ease_out.length, 3, "3 eases for ThreeD scale");
 
+// Committed AE reference data must cover exactly the current case ids (re-run T8 after adding cases).
+var REFERENCE = ["../samples/anim-samples.ae-26.json"];
+for (var rf = 0; rf < REFERENCE.length; rf++) {
+    var ref = J.parse(readFile(REFERENCE[rf]));
+    var refIds = [];
+    for (var ri = 0; ri < ref.results.length; ri++) {
+        refIds.push(ref.results[ri].id);
+        check(!ref.results[ri].error, REFERENCE[rf] + ": case " + ref.results[ri].id + " failed in AE: " + ref.results[ri].error);
+    }
+    var caseIds = [];
+    for (var ci = 0; ci < cases.cases.length; ci++) {
+        caseIds.push(cases.cases[ci].id);
+    }
+    eq(refIds.join(","), caseIds.join(","), REFERENCE[rf] + " covers the current cases");
+}
+
 print((failures ? "FAILED: " + failures : "OK") + " (" + checks + " checks)");
 // --dump <path>: keep the mock output, e.g. to validate it against the JSON Schema.
 var ARGS = typeof HARNESS_ARGS !== "undefined" ? HARNESS_ARGS : (typeof arguments !== "undefined" ? arguments : []);

@@ -14,19 +14,27 @@
     global.BAE_AE_TEST_OPTIONS = undefined;
     var here = new File($.fileName).parent;
     var bridge = here.parent.parent;
-    var outDir = new Folder(opts.outDir || (Folder.temp.fsName + "/bae-ae-test"));
-    if (!outDir.exists) {
-        outDir.create();
+    // Folder.create() fails through symlinks, and /tmp is one on macOS: use the real path.
+    var outPath = String(opts.outDir || (Folder.temp.fsName + "/bae-ae-test")).replace(/^\/tmp(\/|$)/, "/private/tmp$1");
+    var outDir = new Folder(outPath);
+    if (!outDir.exists && !outDir.create()) {
+        $.writeln("run-in-ae: cannot create " + outPath);
+        return;
     }
     var logFile = new File(outDir.fsName + "/log.txt");
     logFile.encoding = "UTF-8";
+    logFile.lineFeed = "Unix";  // the macOS default is CR
     logFile.open("w");
+    logFile.close();
     var steps = [];
     var started = new Date().getTime();
 
     function log(s) {
         var line = ((new Date().getTime() - started) / 1000).toFixed(2) + "s " + s;
+        // Open, append, close per line: if AE is killed mid-run the log still shows how far it got.
+        logFile.open("a");
         logFile.writeln(line);
+        logFile.close();
         $.writeln(line);
     }
 
@@ -60,7 +68,6 @@
         log("cannot write result.json: " + e);
     }
     app.endSuppressDialogs(false);
-    logFile.close();
 
     function runAll() {
         log("AE " + app.version + " / " + $.os + " / " + app.isoLanguage);
@@ -329,7 +336,10 @@
             step("anim samples", function () {
                 var major = String(app.version).split(".")[0];
                 var r = BAE_ANIM_SAMPLES.run({casesPath: bridge.fsName + "/samples/anim-cases.json",
-                    outputPath: outDir.fsName + "/anim-samples.ae-" + major + ".json"});
+                    outputPath: outDir.fsName + "/anim-samples.ae-" + major + ".json",
+                    progress: function (id) {
+                        log("  case " + id);
+                    }});
                 log("samples: " + r.doc.results.length + " cases, " + r.failed + " failed");
                 for (var i = 0; i < r.doc.results.length; i++) {
                     if (r.doc.results[i].error) {
@@ -352,6 +362,7 @@
             seconds: (new Date().getTime() - started) / 1000, failed_steps: failed, steps: steps};
         var result = new File(outDir.fsName + "/result.json");
         result.encoding = "UTF-8";
+        result.lineFeed = "Unix";
         result.open("w");
         // bae-export.jsx may have failed to load; fall back to a minimal hand-written summary.
         result.write(B ? B.stringify(summary, "  ") : "{\"failed_steps\": " + failed + ", \"export_script_loaded\": false}");

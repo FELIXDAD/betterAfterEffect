@@ -140,7 +140,7 @@
         for (i = 0; i < times.length; i++) {
             indices.push(prop.nearestKeyIndex(seconds(times[i])));
         }
-        var spatial = prop.isSpatial;
+        var spatial = B.isSpatialType(prop.propertyValueType);
         var dims = isArray(prop.value) ? prop.value.length : 1;
         for (i = 0; i < times.length; i++) {
             kf = spec.keyframes[times[i]];
@@ -310,7 +310,7 @@
                 in_point: B.toFlicks(layer.inPoint), out_point: B.toFlicks(layer.outPoint),
                 three_d: !!layer.threeDLayer};
             result.property = {path: c.property, value_type: valueTypeName(prop.propertyValueType),
-                spatial: !!prop.isSpatial, dimensions: rawToArray(prop.value).length};
+                spatial: B.isSpatialType(prop.propertyValueType), dimensions: rawToArray(prop.value).length};
             result.attr = readBack.spec || {};
             var times = sampleTimes(merge(defaults.sample, c.sample), frameFlicksOf(fr));
             var pre = [];
@@ -360,6 +360,9 @@
                 var only = options.only;
                 if (only && only !== cases.cases[i].id) {
                     continue;
+                }
+                if (options.progress) {
+                    options.progress(cases.cases[i].id);
                 }
                 var r = S.runCase(cases.cases[i], cases.defaults || {}, folder);
                 results.push(r.result);

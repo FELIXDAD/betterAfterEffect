@@ -192,9 +192,11 @@ Prop.prototype.keyTemporalContinuous = function (i) {
 Prop.prototype.keyTemporalAutoBezier = function (i) {
     return !!this._key(i).tab;
 };
+/** AE accepts spatial calls only on TwoD_SPATIAL / ThreeD_SPATIAL, whatever isSpatial says. */
 Prop.prototype._spatialOnly = function () {
-    if (!this.isSpatial) {
-        throw new Error("not a spatial property");
+    var vt = this.propertyValueType;
+    if (vt !== PropertyValueType.TwoD_SPATIAL && vt !== PropertyValueType.ThreeD_SPATIAL) {
+        throw new Error("After Effects error: This property does not have a spatial PropertyValueType");
     }
 };
 Prop.prototype.keyInSpatialTangent = function (i) {
@@ -707,7 +709,11 @@ Group.prototype.addProperty = function (matchName) {
     if (this.matchName !== "ADBE Effect Parade" || !def) {
         throw new Error("mock AE: cannot add " + matchName + " to " + this.matchName);
     }
-    return this.add(named(matchName, matchName, [new Prop(matchName + "-0001", "Value", def[0], def[1])]));
+    var p = new Prop(matchName + "-0001", "Value", def[0], def[1]);
+    if (def[0] === PropertyValueType.COLOR) {
+        p.isSpatial = true;  // what AE 26.2 reports for Color Control
+    }
+    return this.add(named(matchName, matchName, [p]));
 };
 
 function LayerCollection(comp) {

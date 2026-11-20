@@ -74,7 +74,10 @@ function buildFixtureProject() {
         indexed("ADBE Text Selectors", "Selectors", [selector]),
         indexed("ADBE Text Animator Properties", "Properties", [
             new Prop("ADBE Text Opacity", "Opacity", P.OneD, 0),
-            new Prop("ADBE Text Fill Color", "Fill Color", P.COLOR, [1, 0.5, 0, 1])
+            new Prop("ADBE Text Fill Color", "Fill Color", P.COLOR, [1, 0.5, 0, 1]),
+            // AE 26 reports PropertyValueType 161 for the variable-font axes.
+            new Prop("ADBE Text VF Axis 1", "Axis 1", 161, 0),
+            new Prop("ADBE Text VF Axis 2", "Axis 2", 161, 0)
         ])
     ]);
     pre.addLayer(new Layer("ADBE Text Layer", "Title \u6807\u9898", [
@@ -150,7 +153,9 @@ function buildFixtureProject() {
     ]);
     var fill = named("ADBE Vector Graphic - Fill", "Fill 1", [
         new Prop("ADBE Vector Blend Mode", "Blend Mode", P.OneD, 1),
-        new Prop("ADBE Vector Fill Color", "Color", P.COLOR, [0.2, 0.6, 1, 1])
+        new Prop("ADBE Vector Fill Color", "Color", P.COLOR, [0.2, 0.6, 1, 1], {isSpatial: true})
+            .addKey({t: 0, v: [0.2, 0.6, 1, 1], sc: true, sab: true})
+            .addKey({t: 1, v: [1, 0, 0, 1], sc: true})
     ]);
     var gfill = named("ADBE Vector Graphic - G-Fill", "Gradient Fill 1", [
         new Prop("ADBE Vector Grad Type", "Type", P.OneD, 1),

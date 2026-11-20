@@ -4,7 +4,7 @@
 
 机器可读定义：[`ae-anim-samples.schema.json`](ae-anim-samples.schema.json)（同时描述输入和输出两种文件）。
 
-> **状态：AE 参考数据还没有生成。** 本机没有 AE，生成脚本只在模拟的 AE 对象模型上测过（`bridges/ae/tests/anim-harness.js`）。需要有 AE 的同事按 `bridges/ae/README.md` 的测试 T8 跑一次，把结果提交到 `bridges/ae/samples/`。
+> **状态：已有 AE 26.2.1（macOS）的参考数据** `bridges/ae/samples/anim-samples.ae-26.json`，62 个用例全部搭建成功、没有表达式报错。其他 AE 版本的数据以后补（用 `bridges/ae/tests/ae/run-in-ae.jsx` 一键生成，见 `bridges/ae/README.md` 第 4 节）。
 
 ## 1. 流程
 
@@ -105,7 +105,12 @@ gen_anim_cases.py ──► anim-cases.json ──(在 AE 里运行 bae-anim-sam
 1. 用 `bae-model` 的 `AttrSpec` 直接反序列化 `attr`。
 2. 按 `layer.start_time`、`layer.stretch` 把合成时间换成 BAE 约定的时间基准（`time.key_time_base` 目前是 `comp`，见交换格式 4.2）。
 3. 在每个 `times[i]` 求值，与 `pre_expression[i]`（以及 `post_expression[i]`）逐分量比较，容差 1e-3。
-4. 已知需要单独看的用例：`spatial_roving`（时间由 AE 重算）、`spatial_speed_clamp`（影响力截断，规格 AE-ANI-035 标了 UNVERIFIED）、`color_ease`（颜色速度的单位，AE-ANI-034 标了 UNVERIFIED）、`opacity_overshoot_clamp`（截断发生在插值之后）、`layer_stretch_reverse`。这些正好是 AE 规格（`docs/spec/ae/transform-keyframes-expressions.md`）里没有核实的地方，用 AE 的数据定下来。
+4. AE 26.2.1 实测得到的、求值时要注意的事实：
+   - **NTSC 帧率**：AE 按 `n / 29.97`、`n / 23.976` 计帧，不是 `n × 1001/30000`（交换格式 4.2）。`comp_29_97` 的关键帧键是 `0`、`706306306`、`1412612613`，而用例里写的是 `706305600`、`1412611200`：AE 把关键帧挪到了它自己的帧上。`times` 仍是按 `30000/1001` 算的网格，AE 就在这些时刻求值，所以直接用 `attr` 和 `times` 比较就行。
+   - **AE 会改写的关键帧**：`temporal_auto_bezier` 读回的缓动是 AE 算出来的（例如 speed 15、influence 16.666666667）；`spatial_roving` 中间两个关键帧的时间被重算；影响力 0.1% 原样保留。
+   - **不透明度截断**：`opacity_overshoot_clamp` 在 0.5 秒处是 100，截断发生在插值之后。
+   - **二维图层的位置**在表达式里只有两个分量（`value[2]` 是 undefined），在脚本接口里有三个；参考数据里位置的采样是三个数，z 为 0。
+5. 已知需要单独看的用例：`spatial_roving`（时间由 AE 重算）、`spatial_speed_clamp`（影响力截断，规格 AE-ANI-035 标了 UNVERIFIED）、`color_ease`（颜色速度的单位，AE-ANI-034 标了 UNVERIFIED）、`opacity_overshoot_clamp`（截断发生在插值之后）、`layer_stretch_reverse`。这些正好是 AE 规格（`docs/spec/ae/transform-keyframes-expressions.md`）里没有核实的地方，用 AE 的数据定下来。
 
 ## 5. 改用例
 

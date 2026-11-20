@@ -2,7 +2,7 @@
 
 负责：15 `interop/ae`。在 After Effects 里运行的 ExtendScript 脚本（ES3），支持 AE CC 2018（15.0）及以上。
 
-> ⚠ **未在 AE 中验证。** 开发机上没有 After Effects。脚本只在模拟的 AE 对象模型上测过（`tests/`），模拟按 AE 脚本文档编写，不能代替真机。第一次在 AE 里运行请按第 4 节的步骤做，把结果（包括报错和 AE 版本）记到 `docs/workstreams/15-interop-ae.md` 的「进度」一节。
+> **验证状态：** 已在 **AE 26.2.1（macOS）** 上跑通一键实测（`tests/ae/run-in-ae.jsx`：T1 场景、T4 时间基准、T8 的 62 个对照用例全部通过）。其他 AE 版本（CC 2018–2025）、Windows、T2/T3/T5/T6/T7 的手动项还没测，结果请记到 `docs/workstreams/15-interop-ae.md` 的「进度」一节。
 
 | 文件 | 作用 |
 |---|---|
@@ -10,6 +10,8 @@
 | `bae-anim-samples.jsx` | 在 AE 里搭建关键帧/表达式用例并记录 AE 的求值结果，给 03 做对照（格式：`docs/interop/ae-anim-samples.md`） |
 | `samples/gen_anim_cases.py`、`samples/anim-cases.json` | 对照用例的生成器和生成结果 |
 | `examples/mock-project.bae-interchange.json` | 模拟工程的导出结果（不是 AE 的真实输出），也是测试的金样 |
+| `examples/ae26-fixture.bae-interchange.json` | 一键实测在 AE 26.2.1 里搭出的 T1/T4 场景的真实导出结果 |
+| `samples/anim-samples.ae-26.json` | AE 26.2.1 的对照数据（给 03） |
 | `tests/` | 不依赖 AE 的测试：模拟 DOM、ES3 检查、金样对比、Schema 校验；`tests/ae/run-in-ae.jsx` 是在真实 AE 里跑的一键实测 |
 
 ## 1. 准备
@@ -45,7 +47,7 @@ $.evalFile("D:/bae/bridges/ae/bae-export.jsx");
 ```
 
 - Windows：`"C:\Program Files\Adobe\Adobe After Effects 2024\Support Files\AfterFX.exe" -r D:\bae\export-wrapper.jsx`
-- macOS：`osascript -e 'tell application "Adobe After Effects 2024" to DoScriptFile "/Users/me/bae/export-wrapper.jsx"'`
+- macOS：用仓库里的 `tools/ae/aectl run export-wrapper.jsx`（自动启动 AE、等脚本可用，遇到弹框和卡死会恢复；见 `tools/ae/README.md`）。也可以直接 `osascript -e 'tell application "Adobe After Effects 2026" to DoScriptFile "/Users/me/bae/export-wrapper.jsx"'`，但 AE 有模态框时会一直挂起。
 
 结果一行写到 ExtendScript 控制台（`$.writeln`）。`BAE_EXPORT_OPTIONS` 用完会被清空，之后从菜单运行仍会弹对话框。
 
@@ -61,11 +63,17 @@ $.evalFile("D:/bae/bridges/ae/bae-export.jsx");
 
 ### 一键实测（`tests/ae/run-in-ae.jsx`）
 
-T1 的场景、T4 的时间基准合成、T8 的对照用例可以一次跑完：脚本在当前工程里用脚本搭出这些合成（一个撤销步骤），用 `bae-export.jsx` 导出，再跑 62 个对照用例，最后删掉搭建的合成。全程不弹对话框（`app.beginSuppressDialogs`，异常都写进日志），适合用 `osascript` 无人值守运行：
+T1 的场景、T4 的时间基准合成、T8 的对照用例可以一次跑完：脚本在当前工程里用脚本搭出这些合成（一个撤销步骤），用 `bae-export.jsx` 导出，再跑 62 个对照用例，最后删掉搭建的合成。全程不弹对话框（`app.beginSuppressDialogs`，异常都写进日志），在 AE 26.2.1 上约 2 秒跑完：
 
 ```sh
-osascript -e 'tell application "Adobe After Effects 2026" to DoScript "var BAE_AE_TEST_OPTIONS = {outDir: \"/tmp/bae-ae\"}; $.evalFile(\"/path/to/repo/bridges/ae/tests/ae/run-in-ae.jsx\");"'
+tools/ae/aectl eval 'var BAE_AE_TEST_OPTIONS = {outDir: "/private/tmp/bae-ae"}; $.evalFile("'"$PWD"'/bridges/ae/tests/ae/run-in-ae.jsx");' --timeout 900
 ```
+
+注意：
+
+- 输出目录用真实路径（`/private/tmp/...`，不要用 `/tmp/...`）：ExtendScript 的 `Folder.create()` 碰到符号链接会失败。脚本会把 `/tmp/` 开头的路径换成 `/private/tmp/`，建不了目录时只往控制台写一行就退出。
+- 本机同一时间只能有一个 AE，其他工作流（例如 03）也会用：实测要串行跑，跑之前看一眼 `tools/ae/aectl status`。
+- 在 AE 里跑的脚本不能用 `alert()` / `confirm()` / `prompt()`（会弹模态框把调用挂住，ExtendScript 里这几个函数也替换不了），结果一律写文件。
 
 输出目录里：`log.txt`（每一步 ok/FAIL，含 T4 里 `keyTime()` 的实际返回值）、`fixture.bae-interchange.json`（T1、T4 合成的导出结果）、`anim-samples.ae-<主版本号>.json`（T8）、`result.json`（汇总）。选项：`keep: true` 保留搭建的合成以便在 AE 里查看，`skipSamples: true` 跳过对照用例。AE 弹出任何模态框（首次启动、更新提示）时 `DoScript` 会一直挂起，先在 AE 里把它们关掉。
 
@@ -109,7 +117,7 @@ osascript -e 'tell application "Adobe After Effects 2026" to DoScript "var BAE_A
 
 新合成 30 fps；空对象开始时间设为 1 秒；在合成时间 2 秒处给旋转打关键帧（图层时间 1 秒）。导出后看这个关键帧的键：
 
-- 预期 `1411200000`（合成时间 2 秒，对应交换格式 `key_time_base = "comp"`）。
+- 预期 `1411200000`（合成时间 2 秒，对应交换格式 `key_time_base = "comp"`）。**AE 26.2.1 实测符合预期**（伸缩 200% 时也是 2 秒）。
 - 如果是 `705600000`，说明 `keyTime()` 返回的是图层时间：请记下 AE 版本，交换格式要改成 `layer`。
 - 再把图层伸缩改成 200% 重复一次，记下结果。
 
@@ -150,4 +158,13 @@ python3 bridges/ae/tests/validate_schema.py FILE.json # Schema 校验（需要 j
 - 导出结果：Prim 名、属性名符合 02 的规则；所有 `prim_ref` / `asset_ref` 都指向存在的 Prim；关键帧、表达式、遮罩、形状、文字、效果、标记、素材清单的具体值；与金样逐字节一致。
 - 对照脚本：62 个用例都能搭建；用例的 `AttrSpec` 经「写入 AE → 读回」后不变；采样数量和时间正确。
 
-写 ExtendScript 的注意事项：只用 ES3；不要比较两个 AE 对象是否 `===`（同一个对象两次取出来的包装可能不同），用 `id` 或 `index` 比较；读属性一律包 `try`（很多访问器在不适用时直接抛异常）；AE 的全局变量在多次运行之间保留，脚本用到的开关（`BAE_EXPORT_OPTIONS` 等）用完要清空。
+写 ExtendScript 的注意事项（多数是在 AE 26 里实测踩到的）：
+
+- 只用 ES3；源码只用 ASCII，中文写成 `\uXXXX`（无 BOM 的 .jsx 按系统代码页读）。
+- 不要把大量片段 `push` 进同一个数组再 `join`：ExtendScript 的数组越大 `push` 越慢，把 400 KB 的 JSON 拼进一个数组要 50 秒。每个容器各自拼好再交给上一层（见 `bae-export.jsx` 的 `stringifyValue`）。
+- 写文件时设 `file.lineFeed = "Unix"`：macOS 上默认是 CR。
+- 判断空间属性看值类型（`TwoD_SPATIAL` / `ThreeD_SPATIAL`），不要看 `isSpatial`：AE 26 对颜色控制返回 true，但空间相关的调用都会报错。
+- 二维图层的位置在脚本接口里有 3 个分量，在表达式里只有 2 个。
+- 检查 `Folder.create()` 的返回值；路径不要经过符号链接。
+
+其他：不要比较两个 AE 对象是否 `===`（同一个对象两次取出来的包装可能不同），用 `id` 或 `index` 比较；读属性一律包 `try`（很多访问器在不适用时直接抛异常）；AE 的全局变量在多次运行之间保留，脚本用到的开关（`BAE_EXPORT_OPTIONS` 等）用完要清空。

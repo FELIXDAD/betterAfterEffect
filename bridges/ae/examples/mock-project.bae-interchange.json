@@ -1353,6 +1353,18 @@
                                 "type": "color",
                                 "value": [1, 0.5, 0, 1]
                               }
+                            },
+                            "ae:ADBE_Text_Animator_Properties:ADBE_Text_VF_Axis_1": {
+                              "value": {
+                                "type": "float",
+                                "value": 0
+                              }
+                            },
+                            "ae:ADBE_Text_Animator_Properties:ADBE_Text_VF_Axis_2": {
+                              "value": {
+                                "type": "float",
+                                "value": 0
+                              }
                             }
                           },
                           "children": [
@@ -3107,9 +3119,47 @@
                                       }
                                     },
                                     "ae:ADBE_Vector_Fill_Color": {
-                                      "value": {
-                                        "type": "color",
-                                        "value": [0.2, 0.6, 1, 1]
+                                      "keyframes": {
+                                        "0": {
+                                          "value": {
+                                            "type": "color",
+                                            "value": [0.2, 0.6, 1, 1]
+                                          },
+                                          "interp_in": "linear",
+                                          "interp_out": "linear",
+                                          "ease_in": [
+                                            {
+                                              "speed": 0,
+                                              "influence": 16.666667
+                                            }
+                                          ],
+                                          "ease_out": [
+                                            {
+                                              "speed": 0,
+                                              "influence": 16.666667
+                                            }
+                                          ]
+                                        },
+                                        "705600000": {
+                                          "value": {
+                                            "type": "color",
+                                            "value": [1, 0, 0, 1]
+                                          },
+                                          "interp_in": "linear",
+                                          "interp_out": "linear",
+                                          "ease_in": [
+                                            {
+                                              "speed": 0,
+                                              "influence": 16.666667
+                                            }
+                                          ],
+                                          "ease_out": [
+                                            {
+                                              "speed": 0,
+                                              "influence": 16.666667
+                                            }
+                                          ]
+                                        }
                                       }
                                     }
                                   }
@@ -5755,6 +5805,12 @@
         "message": "footage is missing: missing.mov"
       },
       {
+        "code": "unknown_value_type",
+        "path": "/comps/Pre_comp/layers/Title_标题/animators/Animator_1",
+        "message": "PropertyValueType 161 is not in the scripting guide; values of this type are exported by their shape",
+        "attr": "ae:ADBE_Text_Animator_Properties:ADBE_Text_VF_Axis_1"
+      },
+      {
         "code": "expression_error",
         "path": "/comps/Main_Comp/layers/Box",
         "message": "SyntaxError: unexpected end",
@@ -5800,8 +5856,8 @@
       "assets": 5,
       "comps": 3,
       "layers": 12,
-      "properties": 170,
-      "keyframes": 13,
+      "properties": 172,
+      "keyframes": 15,
       "expressions": 2,
       "effects": 4,
       "masks": 3,

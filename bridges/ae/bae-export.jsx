@@ -58,59 +58,47 @@
         }
     }
 
+    /**
+     * Spatial (motion-path) properties by value type. AE 26 reports isSpatial = true for Color
+     * Control colours, yet rejects every spatial call on them: the value type is the reliable test.
+     */
+    BAE.isSpatialType = function (vt) {
+        return vt === PropertyValueType.TwoD_SPATIAL || vt === PropertyValueType.ThreeD_SPATIAL;
+    };
+
     BAE.toFlicks = function (seconds) {
         return Math.round(seconds * FLICKS_PER_SECOND);
     };
 
     // ------------------------------------------------------------------ JSON (ES3)
 
+    var JSON_ESCAPE = {"\"": "\\\"", "\\": "\\\\", "\n": "\\n", "\r": "\\r", "\t": "\\t", "\b": "\\b", "\f": "\\f"};
+
     function quote(s) {
-        var out = ['"'];
-        for (var i = 0; i < s.length; i++) {
-            var c = s.charAt(i);
-            var code = s.charCodeAt(i);
-            if (c === '"') {
-                out.push('\\"');
-            } else if (c === "\\") {
-                out.push("\\\\");
-            } else if (code === 10) {
-                out.push("\\n");
-            } else if (code === 13) {
-                out.push("\\r");
-            } else if (code === 9) {
-                out.push("\\t");
-            } else if (code === 8) {
-                out.push("\\b");
-            } else if (code === 12) {
-                out.push("\\f");
-            } else if (code < 32 || code === 0x2028 || code === 0x2029) {
-                out.push("\\u" + hex(code, 4));
-            } else {
-                out.push(c);
-            }
-        }
-        out.push('"');
-        return out.join("");
+        return "\"" + s.replace(/[\\"\u0000-\u001f\u2028\u2029]/g, function (c) {
+            return JSON_ESCAPE[c] || "\\u" + hex(c.charCodeAt(0), 4);
+        }) + "\"";
     }
 
-    function stringifyInto(v, indent, depth, out) {
+    /**
+     * One JSON value as a string. Every container joins its own parts and hands a single string
+     * up: ExtendScript's Array.push slows down as an array grows (AE 26 took ~50 s to push a
+     * 400 KB document into one array), so no array here is larger than one container.
+     */
+    function stringifyValue(v, indent, depth) {
         if (v === null || v === undefined) {
-            out.push("null");
-            return;
+            return "null";
         }
         var t = typeof v;
         if (t === "number") {
             // Callers replace non-finite numbers before this point; this is the last guard.
-            out.push(isFinite(v) ? (v === 0 ? "0" : String(v)) : "null");
-            return;
+            return isFinite(v) ? (v === 0 ? "0" : String(v)) : "null";
         }
         if (t === "boolean") {
-            out.push(v ? "true" : "false");
-            return;
+            return v ? "true" : "false";
         }
         if (t === "string") {
-            out.push(quote(v));
-            return;
+            return quote(v);
         }
         var nl = "";
         var inner = "";
@@ -120,54 +108,39 @@
             outer = new Array(depth + 1).join(indent);
             inner = outer + indent;
         }
-        var first = true;
+        var parts = [];
         if (isArray(v)) {
             if (v.length === 0) {
-                out.push("[]");
-                return;
+                return "[]";
             }
             // Arrays of numbers stay on one line: vectors, colors, tangents.
             var flat = true;
-            for (var j = 0; j < v.length; j++) {
-                if (typeof v[j] === "object" && v[j] !== null) {
-                    flat = false;
-                    break;
-                }
-            }
-            out.push("[");
             for (var i = 0; i < v.length; i++) {
-                if (!first) {
-                    out.push(flat && indent ? ", " : ",");
+                parts.push(stringifyValue(v[i], indent, depth + 1));
+                if (typeof v[i] === "object" && v[i] !== null) {
+                    flat = false;
                 }
-                if (!flat) {
-                    out.push(nl + inner);
-                }
-                stringifyInto(v[i], indent, depth + 1, out);
-                first = false;
             }
-            out.push(flat ? "]" : nl + outer + "]");
-            return;
+            if (flat) {
+                return "[" + parts.join(indent ? ", " : ",") + "]";
+            }
+            return "[" + nl + inner + parts.join("," + nl + inner) + nl + outer + "]";
         }
-        out.push("{");
+        var sep = indent ? ": " : ":";
         for (var k in v) {
-            if (!hasOwn(v, k) || v[k] === undefined || typeof v[k] === "function") {
-                continue;
+            if (hasOwn(v, k) && v[k] !== undefined && typeof v[k] !== "function") {
+                parts.push(quote(k) + sep + stringifyValue(v[k], indent, depth + 1));
             }
-            if (!first) {
-                out.push(",");
-            }
-            out.push(nl + inner + quote(k) + (indent ? ": " : ":"));
-            stringifyInto(v[k], indent, depth + 1, out);
-            first = false;
         }
-        out.push(first ? "}" : nl + outer + "}");
+        if (parts.length === 0) {
+            return "{}";
+        }
+        return "{" + nl + inner + parts.join("," + nl + inner) + nl + outer + "}";
     }
 
     /** JSON.stringify replacement. `indent` is a string such as "  " or "" for compact output. */
     BAE.stringify = function (v, indent) {
-        var out = [];
-        stringifyInto(v, indent || "", 0, out);
-        return out.join("");
+        return stringifyValue(v, indent || "", 0);
     };
 
     /**
@@ -529,6 +502,7 @@
             effects: 0, masks: 0, markers: 0};
         this.itemPaths = {};     // "$<item id>" -> prim path
         this.manifest = [];
+        this.unknownTypes = {};  // "$<PropertyValueType>" -> true once warned
     }
 
     Exporter.prototype.warn = function (code, path, attr, message) {
@@ -906,7 +880,7 @@
             return;
         }
         var spec = {};
-        var info = {vt: vt, path: ctx.path, key: key, ctx: ctx, spatial: !!tryGet(p, "isSpatial")};
+        var info = {vt: vt, path: ctx.path, key: key, ctx: ctx, spatial: BAE.isSpatialType(vt)};
         try {
             if (numKeys > 0) {
                 spec.keyframes = this.keyframes(p, info);
@@ -1078,7 +1052,44 @@
             }
             return vRef(mp);
         }
-        this.warn("read_error", path, key, "unhandled PropertyValueType " + vt);
+        return this.unknownTypeValue(raw, info);
+    };
+
+    /**
+     * A PropertyValueType the scripting guide does not list (AE 26 reports 161 for the text
+     * animator's variable-font axes): export by the shape of the value, warn once per type.
+     */
+    Exporter.prototype.unknownTypeValue = function (raw, info) {
+        if (!hasOwn(this.unknownTypes, "$" + info.vt)) {
+            this.unknownTypes["$" + info.vt] = true;
+            this.warn("unknown_value_type", info.path, info.key, "PropertyValueType " + info.vt +
+                " is not in the scripting guide; values of this type are exported by their shape");
+        }
+        if (typeof raw === "number") {
+            return vFloat(this.num(raw, info.path, info.key));
+        }
+        if (isArray(raw)) {
+            var nums = [];
+            for (var i = 0; i < raw.length; i++) {
+                if (typeof raw[i] !== "number") {
+                    return undefined;
+                }
+                nums.push(this.num(raw[i], info.path, info.key));
+            }
+            if (nums.length === 2) {
+                return {type: "vec2", value: nums};
+            }
+            if (nums.length === 3) {
+                return {type: "vec3", value: nums};
+            }
+            return {type: "float_list", value: nums};
+        }
+        if (typeof raw === "boolean") {
+            return vBool(raw);
+        }
+        if (typeof raw === "string") {
+            return vString(raw);
+        }
         return undefined;
     };
 
@@ -1781,8 +1792,10 @@
         var base = outFile.name.replace(/\.json$/i, "").replace(/\.bae-interchange$/i, "");
         var dirName = base + ".assets";
         var dir = new Folder(outFile.parent.fsName + "/" + dirName);
-        if (!dir.exists) {
-            dir.create();
+        // Folder.create() fails on paths through a symlink (/tmp on macOS): check, never assume.
+        if (!dir.exists && !dir.create()) {
+            warn("collect_failed", "/assets", "cannot create " + dir.fsName + " (use a real path, e.g. /private/tmp)");
+            return;
         }
         var taken = new NameRegistry();
         var usedFiles = {};
@@ -1795,8 +1808,9 @@
             if (entry.sequence) {
                 var sub = taken.take(entry.prim.substr(entry.prim.lastIndexOf("/") + 1), "sequence");
                 var subDir = new Folder(dir.fsName + "/" + sub);
-                if (!subDir.exists) {
-                    subDir.create();
+                if (!subDir.exists && !subDir.create()) {
+                    warn("collect_failed", entry.prim, "cannot create " + subDir.fsName);
+                    continue;
                 }
                 var list = [];
                 var frames = entry.__frames || [];

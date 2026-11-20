@@ -73,11 +73,12 @@ NaN / ±Infinity 不是合法 JSON：导出脚本遇到时写 `0` 并记一条 `
 ### 4.2 时间
 
 - 单位一律是 **flicks**（1 秒 = 705,600,000），和 02 的 `Time` 一致。所有常见帧率的帧边界都是整数。
-- 导出脚本的换算：`flicks = Math.round(seconds * 705600000)`。29.97 fps 第 n 帧 `n * 1001 / 30000` 秒换算后正好是 `n * 23543520`。
+- 导出脚本的换算：`flicks = Math.round(seconds * 705600000)`，即 AE 给的秒数四舍五入到最近的 flick。
 - 设置项里的时间（入点、出点、开始时间、时长、工作区）用 `{"type": "int", "value": <flicks>}`。
 - 关键帧的时间是 `AttrSpec.keyframes` 这个对象的键：flicks 整数写成十进制字符串（serde_json 对 `BTreeMap<Time, _>` 的写法），例如 `"23543520"`。
-- `time.key_time_base = "comp"`：关键帧和图层标记的时间是 AE 脚本 `Property.keyTime()` 返回的值，即**所在合成的时间**（已经算上图层的开始时间和伸缩）。AE 内部按图层时间存储；导入器需要按图层的 `start_time` 和 `stretch` 换算成 BAE 约定的时间基准（等 02/03 定）。⚠ 这一点按 AE 脚本文档推断，未在 AE 中实测，见 `bridges/ae/README.md` 的测试 T4。
-- 帧率保留 AE 的浮点值（`frame_rate: float`，如 `29.97002997002997`），导入器负责换成有理数（`30000/1001`）。
+- `time.key_time_base = "comp"`：关键帧和图层标记的时间是 AE 脚本 `Property.keyTime()` 返回的值，即**所在合成的时间**（已经算上图层的开始时间和伸缩）。AE 内部按图层时间存储；导入器需要按图层的 `start_time` 和 `stretch` 换算成 BAE 约定的时间基准（等 02/03 定）。**已在 AE 26.2.1 实测**（`bridges/ae/README.md` 的 T4）：图层开始时间 1 秒、伸缩 100% 或 200% 时，合成时间 2 秒处的关键帧 `keyTime()` 都返回 2 秒。
+- 帧率保留 AE 报告的浮点值（`frame_rate: float`），导入器负责换成有理数。
+- **AE 的 NTSC 帧率不是 30000/1001（AE 26.2.1 实测）。** AE 报告的 `frameRate` 是单精度的 29.97（`29.9700317382812`），帧和关键帧落在 `n / 29.97` 秒上，即 AE 内部按 2997/100 计帧，而不是 `n × 1001/30000`。例如第 30 帧是 `706306306` flicks（`30000/1001` 时是 `706305600`），23.976 fps 同理（`n / 23.976`）。这样的时间不是整数 flicks，相对真 NTSC 每秒差约 1 µs（1 ppm）。导入器的做法：AE 的 29.97 / 23.976 / 59.94 合成换成 BAE 的 `30000/1001` / `24000/1001` / `60000/1001`，落在 AE 帧上的时间（与 `n / AE帧率` 相差不到 1 µs）吸附到 BAE 的第 n 帧，其他时间按两个帧率之比缩放。导回 AE 时反过来换算。
 
 ### 4.3 关键帧
 
@@ -88,7 +89,7 @@ NaN / ±Infinity 不是合法 JSON：导出脚本遇到时写 `0` 并记一条 `
 | `value` | `keyValue(i)` | 类型同 4.1 |
 | `interp_in` / `interp_out` | `keyInInterpolationType(i)` / `keyOutInterpolationType(i)` | `"linear"` / `"bezier"` / `"hold"` |
 | `ease_in` / `ease_out` | `keyInTemporalEase(i)` / `keyOutTemporalEase(i)` | `[{speed, influence}]`。`TwoD`/`ThreeD` 非空间属性每维一项，其他（空间属性、颜色、一维、路径、文字）一项。**线性关键帧也照样导出 AE 报告的值**，不省略 |
-| `spatial_in` / `spatial_out` | `keyInSpatialTangent(i)` / `keyOutSpatialTangent(i)` | 只在空间属性（`isSpatial`）上有；相对关键帧值；二维补 z = 0，总是三个数 |
+| `spatial_in` / `spatial_out` | `keyInSpatialTangent(i)` / `keyOutSpatialTangent(i)` | 只在空间属性（值类型 `TwoD_SPATIAL` / `ThreeD_SPATIAL`）上有，不看 `isSpatial`（AE 26 对颜色控制也返回 true）；相对关键帧值；二维补 z = 0，总是三个数 |
 | `flags.temporal_continuous` | `keyTemporalContinuous(i)` | 值为 false 时省略，下同 |
 | `flags.temporal_auto_bezier` | `keyTemporalAutoBezier(i)` | |
 | `flags.spatial_continuous` | `keySpatialContinuous(i)` | 只在空间属性上读 |
@@ -453,7 +454,8 @@ AE 的标记是 `ADBE Marker` 属性上的「关键帧」，值是 `MarkerValue`
 | `non_finite` | warning | 值是 NaN / Infinity，写成了 0 |
 | `unknown_enum` | warning | 枚举值查不到名字 |
 | `missing_footage` | warning | 素材缺失 |
-| `collect_failed` | warning | 收集素材时复制失败 |
+| `collect_failed` | warning | 收集素材时建目录或复制失败 |
+| `unknown_value_type` | warning | 脚本手册里没有的 `PropertyValueType`（AE 26 的文字可变字体轴报 161），按值的形状导出；每种类型只报一次 |
 
 ## 10. v0 已知限制
 
@@ -481,7 +483,8 @@ AE 的标记是 `ADBE Marker` 属性上的「关键帧」，值是 `MarkerValue`
 7. 图层顺序：草案约定 `layers` 的第一个子 Prim 是 AE 最上面的图层。需要 02 确认 BAE 的约定。
 8. 预合成：草案用 `source` 属性（`prim_ref`）指向 `/comps/...`。是否改用 `PrimSpec.references`，由 02 定。
 9. 合成、图层设置项的属性名（第 6 节）是提案，02 定稿后以 02 为准，导出脚本只改这一处的表。
-10. 变换等可动画属性的 BAE 属性名（`transform:position` 一类）由 02 在 PR D 定；交换文件里仍然用 `ae:` 名字，由导入器映射。给 02 的命名建议见 02 任务书「请求」。
+10. **NTSC 帧率**：AE 内部按 2997/100、24000/1001 以外的十进制帧率计帧（4.2），`FrameRate::is_exact()` 对它们为 false。建议 02 在 data-model.md 里写明「AE 的 29.97 导入为 30000/1001」这条约定，03 在对照测试里按帧号比较。
+11. 变换等可动画属性的 BAE 属性名（`transform:position` 一类）由 02 在 PR D 定；交换文件里仍然用 `ae:` 名字，由导入器映射。给 02 的命名建议见 02 任务书「请求」。
 
 ## 12. 版本
 

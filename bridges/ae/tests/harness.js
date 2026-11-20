@@ -235,6 +235,9 @@ eq(attr(BOX + "/contents/Trim_Paths_1", "operator").value, {type: "enum", value:
 eq(attr(BOX + "/contents/Path_1", "ae:ADBE_Vector_Shape").value.value.in_tangents, [[0, 0], [0, -20], [0, 0]],
     "bezier tangents");
 check(hasReport(parsed.report.unsupported, "gradient_colors"), "gradient colors reported");
+var fillColor = attr(BOX + "/contents/Rectangle_1/contents/Fill_1", "ae:ADBE_Vector_Fill_Color").keyframes;
+check(fillColor["0"].flags === undefined && fillColor["0"].spatial_in === undefined,
+    "colour keys never get spatial data, even when AE says isSpatial");
 eq(attr(BOX + "/markers/marker_1", "protected_region").value, {type: "bool", value: true}, "layer marker");
 
 var TITLE = "/comps/Pre_comp/layers/Title_\u6807\u9898";
@@ -249,6 +252,15 @@ eq(prims[TITLE + "/animators/Animator_1"].prim_type, "TextAnimator", "animator t
 eq(prims[TITLE + "/animators/Animator_1/selectors/Range_Selector_1"].prim_type, "TextSelector", "selector type");
 check(!!attr(TITLE + "/animators/Animator_1", "ae:ADBE_Text_Animator_Properties:ADBE_Text_Opacity").value,
     "animator properties flattened");
+eq(attr(TITLE + "/animators/Animator_1", "ae:ADBE_Text_Animator_Properties:ADBE_Text_VF_Axis_2").value,
+    {type: "float", value: 0}, "unknown value type exported by shape");
+var unknownWarnings = 0;
+for (var uw = 0; uw < parsed.report.warnings.length; uw++) {
+    if (parsed.report.warnings[uw].code === "unknown_value_type") {
+        unknownWarnings++;
+    }
+}
+eq(unknownWarnings, 1, "one unknown_value_type warning per type, not per property");
 check(!!attr(TITLE + "/animators/Animator_1/selectors/Range_Selector_1",
     "ae:ADBE_Text_Range_Advanced:ADBE_Text_Range_Units").value, "selector advanced flattened");
 

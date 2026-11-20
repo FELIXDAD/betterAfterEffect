@@ -251,8 +251,8 @@ expr_case("expr_frames", "timeToFrames() and framesToTime()", "timeToFrames(time
 expr_case("expr_posterize", "posterizeTime(4)", "posterizeTime(4); time * 100")
 expr_case("expr_comp_props", "thisComp / thisLayer attributes",
           "thisComp.frameDuration * 1000 + thisLayer.inPoint + thisComp.duration")
-expr_case("expr_vector_position", "Array arithmetic on Position",
-          "[value[0] + Math.cos(time) * 100, value[1] + Math.sin(time) * 100, value[2]]",
+expr_case("expr_vector_position", "Array arithmetic on Position (2D layer: value has two components in expressions)",
+          "[value[0] + Math.cos(time) * 100, value[1] + Math.sin(time) * 100]",
           keys((sec(0), key([200, 540, 0])), (sec(3), key([1720, 540, 0]))), prop=POS)
 expr_case("expr_cross_property", "Reads another keyed property of the same layer", "transform.position[0] / 10",
           other=[{"property": POS, "attr": keys((sec(0), key([200, 540, 0], "bezier", ein=EASY, eout=EASY)),
