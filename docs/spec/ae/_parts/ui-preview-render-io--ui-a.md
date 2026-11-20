@@ -129,7 +129,7 @@
   - Panel menu > **Panel Background Color (面板背景颜色（译名待核）)** for Composition/Layer/Footage viewers (AE 24.x+): 5 grey presets, Select Custom Color..., Custom (last custom). Affects only the pasteboard (fallow area) outside the frame.
 - **Priority:** P0 (viewer menu, auto-switch, lock); P1 (ETLAT, background colour P2)
 - **Owner:** bae-ui-motion (+ bae-ui)
-- **Notes:** Composition-specific viewer features are AE-UI-0xx in "Composition viewer" below; Layer/Footage specifics in "Layer and Footage viewers".
+- **Notes:** Composition-specific viewer features are AE-UI-023..042 in "Composition viewer" below; Layer/Footage specifics in "Layer and Footage viewers".
 
 ### AE-UI-008 · Panel, viewer and context menus (面板菜单、查看器菜单和上下文菜单)
 
@@ -187,7 +187,7 @@
   - Preferences > Previews > Magnification (放大率（译名待核）): Type (Smooth / legacy fixed levels), Behaviour (zoom to cursor / centre), Trackpad Scrolling (scroll vs zoom) (UNVERIFIED: exact labels and value names). AE 25.3 on macOS made trackpad/Mouse scroll pan the view by default; the Trackpad Scrolling preference restores scroll-to-zoom.
 - **Priority:** P0
 - **Owner:** bae-ui-motion (+ bae-ui)
-- **Notes:** Zoom levels themselves: AE-UI-03x (Composition viewer magnification).
+- **Notes:** Zoom levels themselves: AE-UI-024 (Composition viewer magnification).
 
 ### AE-UI-012 · Scrubbable values (hot text) and numeric fields (可拖动数值)
 
@@ -197,7 +197,7 @@
   - Modifiers while dragging: **Ctrl (Win) / Cmd (Mac)** = fine, ×0.1 step; **Shift** = coarse, ×10 step. Modifiers can be pressed/released mid-drag.
   - Click (no drag) → inline edit field with the value selected; Enter (main keyboard) or Tab commits (Tab moves to the next field), Esc cancels; clicking elsewhere commits.
   - Typed arithmetic: value fields and other number entries accept simple arithmetic expressions, e.g. `2*3` → 6, `4/2` → 2, `2e2` → 200 (documented since AE CS3). A relative change is made by typing the operator after the current value in the field (`100` → `100*1.5`). UNVERIFIED: whether parentheses and a leading bare operator (`*2` replacing the selected text) are evaluated.
-  - Values clamp to the property's valid range (e.g. Opacity 0–100); some properties allow out-of-UI-range typing beyond the slider range (effect sliders, see AE-UI-11x Effect Controls).
+  - Values clamp to the property's valid range (e.g. Opacity 0–100); some properties allow out-of-UI-range typing beyond the slider range (effect sliders, see AE-UI-086 Edit Value).
   - Each completed drag is one undo step; while dragging the comp updates live.
   - Up/Down arrow keys in an edit field: UNVERIFIED (believed: no arrow-key increments in AE hot-text fields).
   - **Proportional Scrubbing (按比例拖动（译名待核）)** (AE Beta 26.2, 2026; P2): select the same property on several layers in the order wanted, then Ctrl+Alt-drag (Win) / Cmd+Opt-drag (Mac) its hot text: the first selected layer changes by 0 % of the scrub delta, the last by 100 %, layers in between by proportional shares, i.e. `delta_i = delta × i/(n−1)` for selection index i = 0..n−1 (UNVERIFIED: exactly linear by selection index). For Scale, all layers use the Constrain Proportions state of the last selected layer. Source: https://helpx.adobe.com/after-effects/using/proportional-scrubbing-in-timeline.html
@@ -325,7 +325,7 @@
   | Item / gesture | Result |
   |---|---|
   | Double-click composition | opens the comp in a Composition viewer and its Timeline panel (brings existing tabs to front if already open) |
-  | Double-click footage item (video, still, sequence, solid) | opens it in a Footage panel (shows interpreted footage; AE-UI-0xx Footage viewer) |
+  | Double-click footage item (video, still, sequence, solid) | opens it in a Footage panel (shows interpreted footage; AE-UI-046 Footage viewer) |
   | Alt+double-click (Win) / Option+double-click (Mac) footage | opens the source file in the player application the OS associates with that file type (BAE: open with OS default) |
   | Double-click folder | expands/collapses it (UNVERIFIED) |
   | Double-click placeholder or missing footage | does **not** open a Footage panel (scripting `FootageItem.openInViewer()` notes that missing and placeholder footage cannot be opened by double-clicking). UNVERIFIED: AE instead opens the Replace Footage File dialog so the user can relink. |
@@ -346,7 +346,7 @@
   - Label column can be widened to show label names in place of swatches.
 - **Priority:** P0
 - **Owner:** bae-ui-motion (+ bae-model)
-- **Notes:** The same menu appears in the Timeline label column and in the layer bar context menu (AE-UI-0xx Timeline). Label colours drive the layer bar colour and the viewer handle colour.
+- **Notes:** The same menu appears in the Timeline label column and in the layer bar context menu (AE-UI-074 Timeline). Label colours drive the layer bar colour and the viewer handle colour.
 
 ### AE-UI-021 · Project panel context menu (项目面板上下文菜单)
 
@@ -370,7 +370,7 @@
   - Alt-drag (Option-drag) a tile moves it with its children (UNVERIFIED).
 - **Priority:** P2
 - **Owner:** bae-ui-motion (+ bae-model)
-- **Notes:** Data/semantics: project-comp-layers.md, Project Flowchart. The Mini-Flowchart (comp navigator) is AE-UI-0xx in the Composition viewer section.
+- **Notes:** Data/semantics: project-comp-layers.md, Project Flowchart. The Mini-Flowchart (comp navigator) is AE-UI-035 in the Composition viewer section.
 
 ## Composition viewer
 
@@ -378,23 +378,22 @@
 
 - **What it does:** The Composition panel is the main viewer of the active comp: an image area (pasteboard + comp frame), an optional Composition Navigator bar on top, and a bottom toolbar of view controls; it is also where layers are directly manipulated with tools.
 - **Exact semantics:**
-  - Regions: tab (`Composition <name>` with the viewer menu, AE-UI-007) → Composition Navigator bar (AE-UI-035; shown by default for nested comps) → image area (comp frame centred on a neutral pasteboard; content outside the frame is drawn only for selected layers' bounding boxes/paths, not pixels, unless Extended Viewer is on) → bottom toolbar.
-  - Bottom toolbar, left to right (AE 2023+, UNVERIFIED exact order; older versions differ):
+  - Regions: tab (`Composition <name>` with the viewer menu, AE-UI-007) → top row: Composition Navigator bar (AE-UI-035; shown by default, toggled by the panel menu) with the **Current Renderer** button (当前渲染器（译名待核）) at the upper-right corner of the panel (label shows Classic 3D / Advanced 3D / CINEMA 4D; click opens Composition Settings > 3D Renderer tab) → image area (comp frame centred on a neutral pasteboard; content outside the frame is drawn only for selected layers' bounding boxes/paths, not pixels, unless Extended Viewer is on; in Fast Previews modes other than Off the mode name is drawn in the view's upper-right corner) → bottom toolbar.
+  - Bottom toolbar, left to right (AE 2023+, UNVERIFIED exact order; older versions differ). Always Preview This View and Primary Viewer sit at the lower left (Adobe help, previewing.html):
     | Control (中文) | Item |
     |---|---|
     | Always Preview This View (始终预览此视图) | AE-UI-036 |
-    | Primary Viewer (主查看器（译名待核）) | AE-UI-036 |
+    | Primary Viewer (主查看器) | AE-UI-036 |
     | Magnification ratio (放大率) | AE-UI-024 |
     | Choose grid and guide options (选择网格和参考线选项) | AE-UI-028 |
     | Toggle Mask and Shape Path Visibility (切换蒙版和形状路径可见性) | AE-UI-029 |
-    | Current time (当前时间) | displays CTI in the project time display style; click = Go To Time dialog (AE-UI-0xx Timeline time display) |
+    | Current time (当前时间) | displays CTI in the project time display style; click = Go To Time dialog (AE-UI-060) |
     | Take Snapshot (拍摄快照) / Show Snapshot (显示快照) | AE-UI-031 |
     | Show Channel and Color Management Settings (显示通道及色彩管理设置) | AE-UI-032 |
     | Resolution / Down Sample Factor (分辨率/向下采样系数) | AE-UI-025 |
     | Region of Interest (目标区域) | AE-UI-027 |
     | Toggle Transparency Grid (切换透明网格) | AE-UI-026 |
-    | 3D renderer button (渲染器) | shows Classic 3D / Advanced 3D / CINEMA 4D; click opens Composition Settings > 3D Renderer tab |
-    | Draft 3D (草图 3D), 3D Ground Plane, Extended Viewer | AE-UI-034 |
+    | Draft 3D (草图 3D), 3D Ground Plane (3D 地平面), Extended Viewer (扩展查看器) | AE-UI-034; shown only when the comp contains 3D content |
     | 3D View (3D 视图) popup | AE-UI-030 |
     | Select View Layout (选择视图布局) | AE-UI-030 |
     | Toggle Pixel Aspect Ratio Correction (切换像素长宽比校正) | AE-UI-033 |
@@ -413,10 +412,10 @@
 
 - **What it does:** Controls the on-screen zoom of the Composition, Layer and Footage viewers without changing the comp's resolution.
 - **Exact semantics:**
-  - Magnification ratio popup: Fit (适合), Fit up to 100% (适合 100%（译名待核）; macOS Retina shows "Fit up to 200%" because 200% = 1 device pixel per image pixel), then fixed levels 1.5%, 3.1%, 6.25%, 12.5%, 25%, 33.3%, 50%, 100%, 200%, 400%, 800%, 1600%, 3200%, 6400% (UNVERIFIED: exact smallest levels and labels, e.g. "6.2%"). Ctrl/Cmd while choosing applies to all views of the panel.
-  - Since AE 25.2 (2025) **Smooth Zoom** (Preferences > Previews > Magnification > Type = Smooth; the alternative restores legacy fixed-level zooming (UNVERIFIED: exact label of the legacy value)): the magnification readout is hot text accepting any decimal value; wheel zoom is continuous; max zoom is limited by the image buffer, somewhere between 3200 % and 6400 %.
-  - Keyboard: `.` zoom in, `,` zoom out (to next fixed level, around view centre); `/` (main keyboard) 100%; Shift+/ Fit; **Alt+/ (Opt+/)** Fit up to 100%. Double-click the Hand tool = centre (and fit) the comp in the panel; double-click the Zoom tool = 100% (Win) / 200% (Mac Retina) (UNVERIFIED: Retina value).
-  - Mouse wheel zoom: AE 25.2+ default zooms around the cursor, Alt/Opt+wheel around the view centre (legacy versions: the reverse), see AE-UI-011. While scroll-zooming, Shift speeds up and Ctrl/Cmd slows down. Source: https://helpx.adobe.com/after-effects/using/modifying-using-views.html
+  - Magnification ratio popup (lower-left of the Composition, Layer and Footage panels; default = Fit): Fit (适合), Fit up to 100% (合适大小（最大 100%）; on macOS Retina the entry is "Fit up to 200%" (合适大小（最大 200%）) because 200% = 1 device pixel per image pixel), then fixed levels 1.5%, 3.1%, 6.25%, 12.5%, 25%, 33.3%, 50%, 100%, 200%, 400%, 800%, 1600%, 3200% (3200% is the legacy maximum; UNVERIFIED: exact smallest levels and labels, e.g. "6.2%"). Ctrl/Cmd while choosing applies to all views of the panel.
+  - **Smooth Zoom** (AE 25.3, June 2025; beta in 25.2): Preferences > Previews > Magnification (放大率): Type = Smooth (平滑) / Legacy (旧版, fixed increments); Behavior = Follow Cursor / Centered; Trackpad Scrolling = Zooms / Pans (only with Smooth). UNVERIFIED: defaults of the three settings. With Smooth, the magnification readout is hot text accepting any decimal value, wheel zoom is continuous and snaps to the common levels (33%, 50%, 100%, 200%…), and max zoom can exceed 3200% (up to below the next level 6400%) when the image buffer allows. Holding Alt/Opt while wheel-zooming swaps Follow Cursor ↔ Centered.
+  - Keyboard (Adobe shortcut table): `.` zoom in, `,` zoom out (to next level, around view centre); `/` (main keyboard) 100%; Shift+/ Fit; **Alt+/ (Opt+/)** Fit up to 100%. Double-click the Hand tool = centre the composition in the panel (UNVERIFIED: whether magnification also changes); double-click the Zoom tool = 100% (Win) / 200% (macOS) (Adobe help).
+  - Mouse wheel zoom: default zooms around the cursor, Alt/Opt+wheel around the view centre (legacy versions: the reverse), see AE-UI-011. While scroll-zooming, Shift speeds up and Ctrl/Cmd slows down. Source: https://helpx.adobe.com/after-effects/using/modifying-using-views.html , https://helpx.adobe.com/after-effects/using/whats-new/2025-3.html
   - Pan: Hand tool drag, Space-drag, H-drag, middle-mouse drag; Shift while panning = faster.
   - Magnification is per view, not saved in the project (UNVERIFIED: saved with workspace/viewer state).
   - With Auto resolution, magnification drives the effective resolution (compositing-3d-color.md, Auto resolution).
@@ -430,8 +429,8 @@
 - **Exact semantics:**
   - Resolution / Down Sample Factor popup (分辨率/向下采样系数): Full (完整), Half (二分之一), Third (三分之一), Quarter (四分之一), Custom… (自定义, dialog with horizontal/vertical factors), Auto (自动). The value is a comp setting shared by all views of the comp (stored in Composition Settings). Shortcuts: Ctrl+J (Cmd+J) Full, Ctrl+Shift+J (Cmd+Shift+J) Half, Ctrl+Alt+J (Cmd+Opt+J) Custom (Adobe shortcut table); Ctrl+Alt+Shift+J (Cmd+Opt+Shift+J) Quarter (UNVERIFIED: present in AE's default keymap but not in the Adobe table). UNVERIFIED: menu order (Auto may be listed first). Auto adapts to the zoom of the view with the highest magnification when the panel has several views, and is ignored for comps with Preserve Resolution When Nested. The Layer viewer's resolution is tied to its comp's Composition viewer.
   - When Auto is active, the popup label shows "Auto" and the computed factor in parentheses, e.g. "(Quarter)".
-  - Fast Previews popup (快速预览): Off (Final Quality) (关闭（最终品质）), Adaptive Resolution (自适应分辨率), Draft (草图), Fast Draft (快速草图), Wireframe (线框), separator, Fast Previews Preferences… and GPU Information… (GPU 信息（译名待核）). Shortcuts Ctrl+Alt+1…5 / Cmd+Opt+1…5. The icon changes to show that a non-Off mode is active. Since AE 18.0 Draft/Fast Draft are replaced by Draft 3D in the viewer (compositing-3d-color.md, Fast Previews modes).
-  - Both are view-level settings for the comp (Fast Previews per view, UNVERIFIED).
+  - Fast Previews popup (快速预览): Off (Final Quality) (关（最终品质）), Adaptive Resolution (自适应分辨率), Draft (草图), Fast Draft (快速绘图), Wireframe (线框), separator, Fast Previews Preferences… and GPU Information… (GPU 信息（译名待核）) (UNVERIFIED: the two trailing entries). Shortcuts Ctrl+Alt+1…5 / Cmd+Opt+1…5 in that order (Off, Adaptive, Draft, Fast Draft, Wireframe). The button's lightning-bolt icon turns orange in Draft, Fast Draft and Wireframe, and in Adaptive Resolution while the comp is actually downsampled; in those modes the mode name is drawn in the view's upper-right corner. Draft is available only for (legacy) ray-traced 3D comps; Draft 3D (AE 18.0+) is a separate comp-level switch, not a Fast Previews mode (AE-UI-034; compositing-3d-color.md, Fast Previews modes).
+  - Resolution is a comp setting (all views); Fast Previews is per view (UNVERIFIED: Adobe help only states that Draft 3D and Live Update apply to all views of a comp).
 - **Priority:** P0 (Resolution); P1 (Fast Previews)
 - **Owner:** bae-ui-motion (+ bae-render, bae-model)
 - **Notes:** Semantics: compositing-3d-color.md, Resolution / Down Sample Factor, Auto resolution, Fast Previews modes.
@@ -439,7 +438,7 @@
 ### AE-UI-026 · Toggle Transparency Grid (切换透明网格)
 
 - **What it does:** Toggles whether transparent areas of the comp are shown over a checkerboard instead of the comp background colour.
-- **Exact semantics:** Button toggles per view; off by default (comp background colour shown). Also in the Preview panel and Composition menu? (UNVERIFIED). Grid size and colours are preferences (Preferences > Previews/Appearance, UNVERIFIED). Does not affect output.
+- **Exact semantics:** Button in the Composition, Layer and Footage panels; toggles per view (UNVERIFIED: per view vs per viewer); off by default (comp background colour shown). Grid square size and the two checkerboard colours (default light grey and white, or Custom Color 1 / Color 2) are preferences: Preferences > Grids & Guides > Transparency (AE 26 layout). Does not affect output.
 - **Priority:** P0
 - **Owner:** bae-ui-motion (+ bae-render)
 - **Notes:** Rendering: compositing-3d-color.md, Transparency grid and composition background color.
@@ -448,19 +447,19 @@
 
 - **What it does:** Restricts preview rendering to a user-drawn rectangle of the comp.
 - **Exact semantics:**
-  - Click the button (when no ROI exists) → cursor becomes a marquee; drag in the viewer draws the ROI rectangle; the button stays on. Click the button again toggles the ROI off/on (the rectangle is remembered). Alt/Option-click the button clears the existing ROI and starts drawing a new one (UNVERIFIED).
-  - The ROI has 8 handles; drag handles to resize, drag inside (with the Selection tool) to move.
+  - Button in the Composition, Layer and Footage panels. Click the button (when no ROI exists) → cursor becomes a marquee; drag in the viewer draws the ROI rectangle; the button stays on. Click the button again toggles between the ROI and the full frame (the rectangle is remembered). Alt/Option-click the button discards the ROI and starts drawing a new one.
+  - The ROI has 8 handles; drag its edges or handles to move/resize; Shift-drag a corner handle keeps the aspect ratio. While the ROI is selected, the Info panel shows T, L, B, R edge distances from the comp's upper-left corner.
   - Composition > Crop Comp to Region of Interest (将合成裁剪到目标区域) changes comp size to the ROI (command, see compositing-3d-color.md, Region of Interest).
 - **Priority:** P1
 - **Owner:** bae-ui-motion (+ bae-render)
-- **Notes:** Semantics and the crop command: compositing-3d-color.md, Region of Interest.
+- **Notes:** Semantics and the crop command: compositing-3d-color.md, Region of Interest. Source: https://helpx.adobe.com/after-effects/using/previewing.html (Region of interest).
 
 ### AE-UI-028 · Choose grid and guide options menu (选择网格和参考线选项)
 
 - **What it does:** A viewer popup that toggles each visual aid in the active view.
 - **Exact semantics:**
-  - Menu entries (checkable, per view), in order: Title/Action Safe (标题/动作安全), Proportional Grid (对称网格), Grid (网格), Guides (参考线), Rulers (标尺), 3D Reference Axes (3D 参考轴（译名待核）).
-  - Shortcuts: ' (apostrophe) safe zones; Ctrl+' (Cmd+') grid; Alt+' (Opt+') proportional grid; Ctrl+R (Cmd+R) rulers; Ctrl+; (Cmd+;) guides; snapping to grid / guides and lock guides (see ui-preview-render-io.md, viewer interaction (ui-b)).
+  - Menu entries (checkable, per view; Composition, Layer and Footage panels), in order: Title/Action Safe (标题/动作安全), Proportional Grid (对称网格), Grid (网格), Guides (参考线), Rulers (标尺), 3D Reference Axes (3D 参考轴; Composition panel only, UNVERIFIED).
+  - Shortcuts (Adobe table): ' (apostrophe) safe zones; Ctrl+' (Cmd+') grid; Alt+' (Opt+') proportional grid; Ctrl+R (Cmd+R) rulers; Ctrl+; (Cmd+;) guides; snapping to grid Ctrl+Shift+' (Cmd+Shift+'), snapping to guides Ctrl+Shift+; (Cmd+Shift+;), lock guides Ctrl+Alt+Shift+; (Cmd+Opt+Shift+;) (details: ui-b, AE-UI-357..361).
   - Alt/Option-clicking the button toggles Title/Action Safe without opening the menu (UNVERIFIED).
 - **Priority:** P0
 - **Owner:** bae-ui-motion
@@ -480,9 +479,10 @@
 - **Exact semantics:**
   - 3D View popup (3D 视图): entries and semantics in compositing-3d-color.md, 3D views. View > Switch 3D View ▸ (切换 3D 视图), View > Switch to Last 3D View (切换到上一个 3D 视图; also Esc). F10/F11/F12 switch to the three assignable views (defaults Front, Custom View 1, Active Camera); Shift+F10/F11/F12 assigns the current view to that key (View > Assign Shortcut to ▸). View > Reset Default Camera / Reset 3D View (重置 3D 视图（译名待核）) and View > Look at Selected Layers (查看选定图层) Ctrl+Alt+Shift+\ / Cmd+Opt+Shift+\ , Look at All Layers (查看所有图层): with a camera tool active, F = look at selected 3D layers and Ctrl+Shift+F (Cmd+Shift+F) = look at all 3D layers (Adobe shortcut table).
   - The popup is disabled/hidden for comps without 3D layers? (UNVERIFIED: it is enabled only when the comp contains a 3D layer.)
-  - Select View Layout popup (选择视图布局): 1 View (1 个视图), 2 Views (Horizontal) (2 个视图 - 水平), 2 Views (Vertical)? (UNVERIFIED), 4 Views (4 个视图), 4 Views - Left, 4 Views - Right, 4 Views - Top, 4 Views - Bottom (UNVERIFIED exact list/order), then Share View Options (共享视图选项). Mouse wheel over the popup cycles layouts.
+  - Select View Layout popup (选择视图布局): 1 View, 2 Views - Horizontal, 2 Views - Vertical, 4 Views, 4 Views - Left, 4 Views - Right, 4 Views - Top, 4 Views - Bottom (1 个视图 / 2 个视图 - 水平 / 2 个视图 - 垂直 / 4 个视图 …（译名待核）) (UNVERIFIED: exact labels and order), separator, Share View Options (共享视图选项). Mouse wheel over the popup cycles layouts.
   - Multi-view: each view has its own 3D View, magnification, grid/guide toggles, channel, snapshot display, layer controls; the active view has a highlighted corner/frame; click (or middle-click to avoid changing layer selection) activates a view. Share View Options: grid/guides/etc. settings apply to all views; holding Ctrl/Cmd while changing a setting temporarily reverses sharing.
-  - Show 3D View Labels (panel menu) draws the view name in each view's corner.
+  - Show 3D View Labels (显示 3D 视图标签, panel menu) draws the view name (e.g. Top, Right) in each view.
+  - Previews with several views use the frontmost view for 2D comps and the Active Camera view for 3D comps unless Preview panel menu > Previews Favor Active Camera is off (AE-UI-036).
 - **Priority:** P1
 - **Owner:** bae-ui-motion (+ bae-render)
 - **Notes:** BAE decision: views are UI state (not in the CRDT document); multi-view rendering reuses the evaluated comp and renders one camera per view.
@@ -504,9 +504,9 @@
 
 - **What it does:** Viewer controls to inspect single channels, toggle display colour management, and temporarily change preview exposure in stops.
 - **Exact semantics:**
-  - Show Channel and Color Management Settings popup (显示通道及色彩管理设置): RGB, Red (红色), Green (绿色), Blue (蓝色), Alpha (Alpha), RGB Straight (RGB 直接（译名待核）), separator, Colorize (着色) toggle, separator, Use Display Color Management (使用显示色彩管理) toggle (Shift+/ on numeric keypad), Simulate Output ▸ (模拟输出) (UNVERIFIED order). A coloured outline around the view indicates the shown channel (red/green/blue/white).
+  - Show Channel and Color Management Settings popup (显示通道及色彩管理设置): RGB, Red (红色), Green (绿色), Blue (蓝色), Alpha (Alpha), RGB Straight (RGB 直接), separator, Colorize (着色) toggle, separator, Use Display Color Management (使用显示色彩管理) toggle (Shift+/ on numeric keypad), Simulate Output ▸ (模拟输出) (UNVERIFIED order). A coloured outline around the view indicates the shown channel (red/green/blue/white).
   - Shortcuts: Alt+1/2/3/4 (Opt+1/2/3/4) toggle red/green/blue/alpha as grayscale; Alt+Shift+1/2/3 colourised channels; Alt+Shift+4 (Opt+Shift+4) toggles RGB Straight; repeating returns to RGB. Alt/Option-click the Show Channel button toggles Alpha ↔ RGB. Layer panel only: Alt+5 Alpha Boundary, Alt+6 Alpha Overlay, Alt+X Refine Edge X-ray (AE-UI-044).
-  - Reset Exposure (重置曝光度) button + Adjust Exposure (调整曝光度) hot-text control (f-stops, default 0.0, range UNVERIFIED ±40): drag/enter value; when ≠ 0 the reset button is highlighted (blue); clicking Reset sets 0, clicking again restores the last non-zero value. Per view, never affects output.
+  - Reset Exposure (重置曝光度) button + Adjust Exposure (调整曝光度) hot-text control to its right (f-stops, default 0.0, range UNVERIFIED ±40), in the Composition, Layer and Footage panels: drag/enter value; when ≠ 0 the reset button is blue; clicking Reset sets 0, clicking again restores the most recent non-zero value. Each viewer has its own setting; never affects output.
 - **Priority:** P1
 - **Owner:** bae-ui-motion (+ bae-render, bae-color)
 - **Notes:** Semantics: compositing-3d-color.md, Show Channel views and Viewer exposure; colour management: compositing-3d-color.md, Colour management (display/simulate output).
@@ -523,11 +523,11 @@
 
 - **What it does:** Viewer toolbar buttons for the real-time 3D draft mode and its viewing aids.
 - **Exact semantics:**
-  - Draft 3D (草图 3D) toggle: comp-level, affects all views of the comp (compositing-3d-color.md, Draft 3D mode). When on, two extra buttons appear: 3D Ground Plane (3D 地平面（译名待核）) toggle and Extended Viewer (扩展查看器（译名待核）) toggle; press-and-hold Extended Viewer shows an opacity slider for content outside the comp frame.
-  - The renderer button next to it opens Composition Settings > 3D Renderer.
+  - Draft 3D (草图 3D) toggle: appears in the bottom toolbar only when the comp contains 3D content; comp-level, affects all views of the comp (compositing-3d-color.md, Draft 3D mode); mirrors the Draft 3D comp switch at the top of the Timeline (AE-UI-058). When on, two extra toolbar buttons are enabled: 3D Ground Plane (3D 地平面) toggle (on by default when Draft 3D is turned on) and, next to it, Extended Viewer (扩展查看器) toggle; press-and-hold Extended Viewer shows an opacity slider for content outside the comp frame.
+  - The Current Renderer button is not in this group; it sits at the panel's upper-right corner (AE-UI-023).
 - **Priority:** P1 (Draft 3D); P2 (ground plane, extended viewer)
 - **Owner:** bae-ui-motion (+ bae-render)
-- **Notes:** Semantics: compositing-3d-color.md, 3D Ground Plane and Extended Viewer.
+- **Notes:** AE 18.0 (2021) (3D Design Space: Draft 3D, Ground Plane, Extended Viewer). Semantics: compositing-3d-color.md, 3D Ground Plane and Extended Viewer. Source: https://helpx.adobe.com/after-effects/using/work-in-3D-space.html , https://helpx.adobe.com/after-effects/using/real-time-engine.html
 
 ### AE-UI-035 · Composition Navigator bar and Composition Mini-Flowchart (合成导航器和合成微型流程图)
 
@@ -544,7 +544,7 @@
 - **What it does:** Designates which viewer is used for previews and which drives audio / external video output.
 - **Exact semantics:**
   - Always Preview This View (始终预览此视图) toggle (Composition, Layer, Footage panels): when on for a view, every preview command (Space, numeric 0, etc.) previews that view and brings it to front for the duration of the preview, regardless of which panel is focused. Only one view at a time (enabling it elsewhere disables it here).
-  - Primary Viewer (主查看器（译名待核）) toggle (AE 2017+): defines which viewer/view is used for audio and Mercury Transmit external video preview; only one; when no view is primary, the most recently active view is used.
+  - Primary Viewer (主查看器) toggle (next to Always Preview This View at the lower left of Composition, Layer and Footage panels; UNVERIFIED: introduced in AE 2017): defines which viewer/view is used for audio and Mercury Transmit external video preview; only one; when no view is primary, the most recently active viewer/view is used, and switching to another viewer hands it audio/external-video control.
   - Without either, preview targets the comp of the active panel (Timeline or viewer), honouring locked-viewer rules (AE-UI-007, "ETLAT": Composition viewer locked + another comp's Timeline active → preview targets the locked viewer's comp).
 - **Priority:** P1
 - **Owner:** bae-ui-motion
@@ -558,17 +558,18 @@
     | Option (中文) | Default |
     |---|---|
     | Layer Controls (图层控件) master checkbox | on |
-    | Handles (手柄) | on |
-    | Masks (蒙版) | on |
-    | Effect Controls (效果控件, effect control points) | on |
+    | Handles (图层手柄) | on |
+    | Masks (蒙版和形状路径) | on |
+    | Effect Controls (效果控制点) | on |
     | Motion Path (运动路径) | on |
-    | Motion Path Tangents (运动路径切线) | on |
-    | Camera and Spot Light Wireframes (摄像机和聚光灯线框) / Light wireframes | UNVERIFIED: popup "On Select" / "Off" / "On" |
-    | Camera and Light Wireframes / 3D Reference Axes / Layer Paths (Shape paths) | UNVERIFIED |
-    | Textures (纹理), Lighting (光照) | UNVERIFIED (OpenGL era) |
-  - View > Show Layer Controls (显示图层控件) Ctrl+Shift+H / Cmd+Shift+H toggles the master switch (also hides the 3D reference axes).
-  - Layer controls are drawn only for **selected** layers (handles, masks, motion paths), except mask/shape paths which are drawn for all layers that have the target visible (UNVERIFIED: AE draws masks only of selected layers).
-  - Handle/path colour = layer label colour if Preferences > Appearance > Use Label Colors for Layer Handles and Paths (使用标签颜色用于图层手柄和路径) (default on); vertex/handle size = Preferences > Appearance > Path Point and Handle Size (路径点和手柄大小) (UNVERIFIED default 5 px).
+    | Motion Path Tangents (运动路径切线（译名待核）) | on |
+    | Camera and spot light wireframes (摄像机和光线框) | UNVERIFIED: popup "On Select" / "Off" / "On" |
+    | 3D Reference Axes / Layer Paths (shape paths) | UNVERIFIED |
+    | UNVERIFIED: Textures, Lighting (OpenGL-era options, probably removed) | — |
+    (Adobe help lists the controls as camera and light wireframes, layer handles, mask and shape paths, effect control points and motion path controls; UNVERIFIED: exact dialog labels, order and defaults.)
+  - View > Show Layer Controls (显示图层控件) Ctrl+Shift+H / Cmd+Shift+H toggles the master switch (also shows/hides the 3D reference axes).
+  - Layer controls (handles, mask and shape paths, motion paths, effect control points) are drawn only for **selected** layers (UNVERIFIED for mask paths of unselected layers).
+  - Handle/path colour = layer label colour if Preferences > Appearance > Use Label Colors for Layer Handles and Paths (使用标签颜色用于图层手柄和路径（译名待核）) (default on); vertex/handle size = Preferences > Appearance > Path Point and Handle Size (路径点和手柄大小) (UNVERIFIED default 5 px).
 - **Priority:** P0 (handles, masks, motion path); P1 (others)
 - **Owner:** bae-ui-motion
 - **Notes:** —
@@ -578,19 +579,9 @@
 - **What it does:** A selected 2D layer shows its bounding box with eight handles and its anchor point, allowing direct move/scale/rotate with the Selection and Rotation tools.
 - **Exact semantics:**
   - Drawn for each selected layer: the layer's source rectangle (layer space source bounds, not mask bounds, transformed to comp space) as an outline, 8 square handles (4 corners + 4 edge midpoints), and the anchor point as a circle with crosshair at the layer's anchor in comp space. Shape and text layers without a fixed source use their content bounds (UNVERIFIED: text layers use the text bounding box, shape layers the content bounds).
-  - Selection tool mouse behaviour on the viewer:
-    | Gesture | Effect (one undo step per drag) |
-    |---|---|
-    | click on a layer | selects the topmost layer under the pointer (UNVERIFIED: AE hit-tests the layer's rendered alpha, not only its box) |
-    | drag inside layer | move Position (Shift constrains to horizontal/vertical; snapping per ui-b) |
-    | drag corner/edge handle | change Scale (edge = one axis, corner = both, non-uniform); Shift keeps aspect ratio (UNVERIFIED further modifiers) |
-    | Alt/Option+drag handle | AE 2020+: scale about the opposite handle? (UNVERIFIED) |
-    | near a corner handle outside the box with Selection tool | no rotation (AE requires the Rotation tool W) |
-    | marquee drag on empty area | select layers whose bounds intersect the marquee |
-    | double-click a precomp layer | opens the source comp; double-click a footage layer opens its Layer panel; double-click a text layer enters text editing; double-click a shape/mask path enters free-transform mode |
-  - Arrow keys nudge Position of selected layers by 1 pixel at current magnification (Shift: 10 px); handled by ui-b shortcuts.
-  - Rotation tool (W) drag rotates around the anchor point; Shift constrains to 45° steps.
-  - Pan Behind tool (Y) drag moves the anchor point while compensating Position so the layer does not move visually (the semantic command is in transform-keyframes-expressions.md / bae-motion).
+  - Gestures on these handles are specified once, in ui-b (do not re-implement from this item): click / Shift- or Ctrl/Cmd-click / marquee selection AE-UI-301; drag inside = move Position (Shift constrains to horizontal or vertical) AE-UI-302; drag a corner/side handle = Scale about the anchor (Shift = constrained to the footage frame aspect ratio) AE-UI-303; arrow-key nudge 1 / 10 px at current magnification AE-UI-304; double-click actions (text edit, mask Free Transform, open precomp / Layer panel) AE-UI-306; Rotation tool (W) drag rotates about the anchor, Shift-drag in 15° increments AE-UI-309; Pan Behind tool (Y) moves the anchor point AE-UI-314. The Selection tool has no rotate-near-corner behaviour.
+  - Double-click targets are governed by Preferences > Composition > Opening Layers with Double-click: On Footage Layer Opens (Layer panel or source footage), On Comp Layer Opens (Layer panel or nested composition) (AE 26 layout; UNVERIFIED defaults: Layer panel for footage, nested comp for precomps).
+  - Preferences > Composition > Show Bounding Boxes for Layers Within Pre-Comps draws wireframe boxes for the components of collapsed precomps and per-character 3D text.
 - **Priority:** P0
 - **Owner:** bae-ui-motion (+ bae-motion)
 - **Notes:** Tool shortcuts and full mouse behaviour per tool: ui-preview-render-io.md, tools (ui-b). Each drag must create keyframes when the property's stopwatch is on (at the CTI) and otherwise change the static value (transform-keyframes-expressions.md, Keyframes). Implementation hint: GPU picking with a layer-ID render target makes alpha hit-testing O(1).
@@ -600,9 +591,9 @@
 - **What it does:** For a selected layer whose Position (or Anchor Point, or effect point) is animated, the viewer draws the spatial path with keyframe markers, frame dots and spatial Bezier handles that can be edited directly.
 - **Exact semantics:**
   - Drawing: the path as a line in label colour; keyframes as small hollow squares (filled when selected); dots at each frame time (spacing visualises speed: close dots = slow); Bezier direction handles (tangents) at keyframes with spatial interpolation Bezier/Continuous/Auto (shown when the keyframe is selected or Motion Path Tangents option is on).
-  - Extent: Preferences > Display > Motion Path (运动路径): No Motion Path (无运动路径), All Keyframes (所有关键帧), No More Than N Keyframes (不超过 N 个关键帧, default 15, UNVERIFIED default), Show Keyframes for Duration (No More Than 0:00:15:00, UNVERIFIED default/label).
-  - Editing: drag a keyframe square → changes that keyframe's value (layer moves); drag a direction handle → changes spatial in/out tangents (converts to Bezier; tangent pair stays continuous unless Ctrl/Cmd-drag (Alt in pen-convert) breaks it, UNVERIFIED modifier); Pen tool/Convert Vertex tool (G) on a keyframe toggles linear/auto-bezier spatial interpolation; click a keyframe selects it (Shift-click adds).
-  - Anchor-point path is drawn when the Pan Behind tool is active or Anchor Point is animated and selected (UNVERIFIED); in the Layer panel via View ▸ Anchor Point Path (AE-UI-04x).
+  - Extent: the Motion Path preference (No Motion Path / All Keyframes / No More Than N keyframes / Show Keyframes for Duration; Preferences > Appearance in AE 26, Display in older versions) is specified in ui-b, AE-UI-362.
+  - Editing: drag a keyframe square → changes that keyframe's value (layer moves); drag a direction handle → changes spatial in/out tangents (an Auto Bezier key becomes Continuous Bezier; the pair stays continuous); dragging a handle with the Convert Vertex tool (Pen tool group, G) breaks the pair into independent Bezier handles (UNVERIFIED: Ctrl+Alt / Cmd+Opt as the temporary Convert Vertex modifier over motion-path keys, as for mask vertices); clicking a keyframe with the Convert Vertex tool toggles Linear ↔ Auto Bezier spatial interpolation; click a keyframe selects it (Shift-click adds).
+  - Anchor-point path is drawn when the Pan Behind tool is active or Anchor Point is animated and selected (UNVERIFIED); in the Layer panel via View ▸ Anchor Point Path (AE-UI-044).
 - **Priority:** P0
 - **Owner:** bae-ui-motion (+ bae-anim)
 - **Notes:** Spatial interpolation semantics: transform-keyframes-expressions.md, spatial interpolation / roving. Implementation hint: sample the evaluated position at each frame once per edit (cheap) and cache the polyline.
@@ -612,20 +603,20 @@
 - **What it does:** Mask paths (on any layer) and shape paths of selected layers are drawn with their vertices and can be edited in place in the Composition and Layer panels.
 - **Exact semantics:**
   - Drawing: path outline in the mask's colour (masks have their own colour swatch in the Timeline) or layer label colour for shape paths; vertices as small squares (filled = selected, hollow = unselected); direction handles of selected vertices; the first vertex is drawn larger (UNVERIFIED).
-  - Selection tool: click a vertex selects it; Shift-click toggles; drag selected vertices moves them; drag a segment moves the segment's two vertices (UNVERIFIED); marquee selects vertices; Alt/Option-click a path selects the entire mask/path; double-click a path → **Free Transform Points** (自由变换点) box (Ctrl+T / Cmd+T), drag box handles to scale/rotate the selected vertices about the box anchor; Enter/Esc or double-click outside exits.
+  - Selection tool: click a vertex selects it; Shift-click toggles; drag selected vertices moves them; drag a segment moves the segment's two vertices (UNVERIFIED); marquee selects vertices; Alt/Option-click a mask selects all its points; Ctrl+Alt-click (Cmd+Opt-click) a vertex toggles smooth ↔ corner, Ctrl+Alt-drag (Cmd+Opt-drag) a vertex redraws its Bezier handles; arrow keys move selected points 1 px (Shift 10 px) at current magnification; double-click a mask with the Selection tool (or select the mask in the Timeline and press Ctrl+T / Cmd+T) → **Free Transform Points** (自由变换点) box, drag box handles to scale/rotate the selected vertices about the box anchor (Ctrl/Cmd-drag scales around the centre point); Esc exits (full gesture list: ui-b AE-UI-306, AE-UI-341).
   - Pen-tool family on paths (add/delete/convert vertex, close path, RotoBezier): see shapes.md, Shape tools / Bezier model and ui-preview-render-io.md tools (ui-b).
   - Editing a path when the Path stopwatch is on creates/updates a keyframe at the CTI (shape morphing).
   - With Toggle Mask and Shape Path Visibility off, paths are not drawn or editable (AE-UI-029).
 - **Priority:** P0
 - **Owner:** bae-ui-motion (+ bae-vector)
-- **Notes:** Path data model: shapes.md, Bezier model; mask semantics: compositing-3d-color.md, Masks. Layer-panel mask editing behaves identically but in layer space (AE-UI-04x).
+- **Notes:** Path data model: shapes.md, Bezier model; mask semantics: compositing-3d-color.md, Masks. Layer-panel mask editing behaves identically but in layer space (AE-UI-043/044).
 
 ### AE-UI-041 · 3D transform gizmo and axis modes (3D 变换控件与轴模式)
 
 - **What it does:** A selected 3D layer shows a 3D gizmo with coloured axes for constrained move, rotate and scale; the axis mode chooses the gizmo's orientation.
 - **Exact semantics:**
-  - Axis colours: X red, Y green, Z blue. Since AE 18.0 (2021, 3D Design Space) the gizmo has three modes switched by the active tool or by hovering: Position arrows (drag an arrow = move along that axis; drag the centre square/plane = move in a plane, UNVERIFIED), Scale cubes at the arrow tips (drag = scale along the axis; Shift? uniform), Rotation arcs (drag an arc = rotate about that axis; Shift snaps to 45°, UNVERIFIED). Before 18.0 only axis arrows were shown (Selection tool) and rotation used the Rotation tool's Orientation/Rotation set option.
-  - Axis mode (Tools panel options, AE-UI-0xx Tools): Local Axis Mode (本地轴模式, gizmo aligned to the layer's own orientation), World Axis Mode (世界轴模式, aligned to comp axes), View Axis Mode (视图轴模式, aligned to the current view). Shortcut cycles? (UNVERIFIED).
+  - Axis colours: X red, Y green, Z blue. Since AE 17.5 (October 2020, 3D Design Space) the 3D Transform Gizmo has four modes: Universal (V, all three combined), Position (4: axis arrows), Scale (5: cubes at the arrow tips), Rotation (6: arcs) (Adobe shortcut table); several selected 3D layers share one gizmo. Drag semantics and modifiers are specified in ui-b, AE-UI-312. Before 17.5 only axis arrows were shown and rotation used the Rotation tool.
+  - Axis mode (Tools panel options, AE-UI-100; behaviour ui-b AE-UI-313): Local Axis Mode (本地轴模式, aligned to the layer's own orientation), World Axis Mode (世界轴模式, aligned to comp axes), View Axis Mode (视图轴模式, aligned to the current view).
   - Rotation tool option "Set: Orientation / Rotation" chooses whether rotating with the tool edits Orientation or X/Y/Z Rotation (旋转工具"设置"：方向/旋转).
   - Camera and light layers draw a wireframe (frustum/cone) and point-of-interest line; dragging the POI handle moves the Point of Interest.
   - Ground-plane / 3D reference axes (comp-centre axis tripod) drawn per AE-UI-028/034.
@@ -669,7 +660,7 @@
   - Grid/guides, snapshots, channels, exposure, ROI behave as in the Composition viewer.
 - **Priority:** P1 (Masks/Render P0)
 - **Owner:** bae-ui-motion (+ bae-render, bae-effects)
-- **Notes:** Effect render order: compositing-3d-color.md, render order; Paint/Roto: effects.md and AE-UI-0xx (Paint, Brushes panels).
+- **Notes:** Effect render order: compositing-3d-color.md, render order; Paint/Roto: effects.md and AE-UI-104 (Paint, Brushes panels).
 
 ### AE-UI-045 · Layer panel time ruler and trimming (图层面板时间标尺和修剪)
 
