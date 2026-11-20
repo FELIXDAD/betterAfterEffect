@@ -1,5 +1,5 @@
-//! Still-image formats: PNG (`png`), JPEG (`zune-jpeg`), WebP (`image`'s
-//! `image-webp`) and OpenEXR (`exr`), all pure Rust.
+//! Still-image formats: PNG (`png`), JPEG (`zune-jpeg`), WebP and TIFF
+//! (`image`'s `image-webp` / `tiff`) and OpenEXR (`exr`), all pure Rust.
 //!
 //! Opening reads only the header (size, bit depth, color tags, alpha,
 //! timecode); pixels are decoded on each [`MediaSource::decode_cpu`] call into
@@ -28,6 +28,7 @@ enum StillCodec {
     Png,
     Jpeg,
     WebP,
+    Tiff,
     Exr,
 }
 
@@ -74,6 +75,7 @@ impl MediaSource for StillSource {
             StillCodec::Png => decode_png(path)?,
             StillCodec::Jpeg => decode_jpeg(path)?,
             StillCodec::WebP => decode_webp(path)?,
+            StillCodec::Tiff => decode_tiff(path)?,
             StillCodec::Exr => decode_exr(path)?,
         };
         Ok(CpuFrame {
@@ -434,6 +436,167 @@ fn decode_webp(path: &Path) -> Result<Decoded, MediaError> {
     Ok((width, height, PixelFormat::Rgba8, data))
 }
 
+// ---- TIFF ------------------------------------------------------------------
+
+/// Baseline TIFF (8 / 16-bit integer and 32-bit float, gray / RGB, with or
+/// without alpha; uncompressed, LZW, Deflate, PackBits, JPEG). Alpha mode
+/// from the `ExtraSamples` tag (associated = premultiplied, AE's default for
+/// "TIFF Sequence with Alpha"); the first image of multi-page files.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct TiffFormat;
+
+impl MediaFormat for TiffFormat {
+    fn id(&self) -> &str {
+        "tiff"
+    }
+
+    fn extensions(&self) -> &[&str] {
+        &["tif", "tiff"]
+    }
+
+    fn sniff(&self, header: &[u8]) -> bool {
+        header.starts_with(b"II*\0") || header.starts_with(b"MM\0*")
+    }
+
+    fn is_image(&self) -> bool {
+        true
+    }
+
+    fn open(&self, path: &Path) -> Result<Box<dyn MediaSource>, MediaError> {
+        use image::ImageDecoder as _;
+
+        let mut decoder = image::codecs::tiff::TiffDecoder::new(open_file(path)?)
+            .map_err(|e| MediaError::decode(path, e))?;
+        let (width, height) = decoder.dimensions();
+        let color = decoder.color_type();
+        let (bits, sample_type) = match color.bytes_per_pixel() / color.channel_count() {
+            1 => (8, SampleType::UInt),
+            2 => (16, SampleType::UInt),
+            _ => (32, SampleType::Float),
+        };
+        let mut video = still_video(width, height, bits, sample_type, "tiff");
+        video.alpha = if color.has_alpha() {
+            match tiff_extra_samples(path) {
+                Some(1) => AlphaMode::Premultiplied,
+                _ => AlphaMode::Straight,
+            }
+        } else {
+            AlphaMode::Opaque
+        };
+        video.color.matrix = MatrixCoefficients::Identity;
+        if sample_type == SampleType::Float {
+            video.color.transfer = TransferFunction::Linear;
+        }
+        video.color.icc_profile = decoder.icc_profile().ok().flatten().map(Arc::from);
+        Ok(Box::new(StillSource::new(
+            path,
+            "tiff",
+            StillCodec::Tiff,
+            video,
+        )))
+    }
+}
+
+/// The first `ExtraSamples` value of the first image (0 unspecified, 1
+/// associated alpha, 2 unassociated alpha). Classic TIFF only.
+fn tiff_extra_samples(path: &Path) -> Option<u16> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut file = File::open(path).ok()?;
+    let mut header = [0_u8; 8];
+    file.read_exact(&mut header).ok()?;
+    let big_endian = match &header[..2] {
+        b"II" => false,
+        b"MM" => true,
+        _ => return None,
+    };
+    let u16_at = |b: &[u8]| {
+        let b = [b[0], b[1]];
+        if big_endian {
+            u16::from_be_bytes(b)
+        } else {
+            u16::from_le_bytes(b)
+        }
+    };
+    let u32_at = |b: &[u8]| {
+        let b = [b[0], b[1], b[2], b[3]];
+        if big_endian {
+            u32::from_be_bytes(b)
+        } else {
+            u32::from_le_bytes(b)
+        }
+    };
+    if u16_at(&header[2..4]) != 42 {
+        return None;
+    }
+    file.seek(SeekFrom::Start(u64::from(u32_at(&header[4..8]))))
+        .ok()?;
+    let mut count = [0_u8; 2];
+    file.read_exact(&mut count).ok()?;
+    let count = usize::from(u16_at(&count)).min(4096);
+    let mut entries = vec![0_u8; count * 12];
+    file.read_exact(&mut entries).ok()?;
+    entries.as_chunks::<12>().0.iter().find_map(|entry| {
+        // Tag 338 = ExtraSamples, type 3 = SHORT; the first value sits in the
+        // first two bytes of the value field.
+        (u16_at(&entry[0..2]) == 338 && u16_at(&entry[2..4]) == 3).then(|| u16_at(&entry[8..10]))
+    })
+}
+
+fn decode_tiff(path: &Path) -> Result<Decoded, MediaError> {
+    use image::ImageDecoder as _;
+
+    let decoder = image::codecs::tiff::TiffDecoder::new(open_file(path)?)
+        .map_err(|e| MediaError::decode(path, e))?;
+    let (width, height) = decoder.dimensions();
+    let color = decoder.color_type();
+    let channels = usize::from(color.channel_count());
+    let sample_bytes = usize::from(color.bytes_per_pixel()) / channels;
+    let mut buf = vec![0; decoder.total_bytes() as usize];
+    decoder
+        .read_image(&mut buf)
+        .map_err(|e| MediaError::decode(path, e))?;
+    let pixels = width as usize * height as usize;
+    let (format, data) = match sample_bytes {
+        1 => {
+            let data = if channels == 4 {
+                buf
+            } else {
+                let mut data = Vec::with_capacity(pixels * 4);
+                for px in buf.chunks_exact(channels) {
+                    data.extend_from_slice(&expand_to_rgba(channels, |i| px[i], u8::MAX));
+                }
+                data
+            };
+            (PixelFormat::Rgba8, data)
+        }
+        2 => {
+            // `image` delivers native-endian samples.
+            let mut data = Vec::with_capacity(pixels * 8);
+            for px in buf.chunks_exact(channels * 2) {
+                let s = |i: usize| u16::from_ne_bytes([px[2 * i], px[2 * i + 1]]);
+                for v in expand_to_rgba(channels, s, u16::MAX) {
+                    data.extend_from_slice(&v.to_ne_bytes());
+                }
+            }
+            (PixelFormat::Rgba16, data)
+        }
+        _ => {
+            let mut data = Vec::with_capacity(pixels * 16);
+            for px in buf.chunks_exact(channels * 4) {
+                let s = |i: usize| {
+                    f32::from_ne_bytes([px[4 * i], px[4 * i + 1], px[4 * i + 2], px[4 * i + 3]])
+                };
+                for v in expand_to_rgba(channels, s, 1.0) {
+                    data.extend_from_slice(&v.to_ne_bytes());
+                }
+            }
+            (PixelFormat::Rgba32Float, data)
+        }
+    };
+    Ok((width, height, format, data))
+}
+
 // ---- OpenEXR ---------------------------------------------------------------
 
 /// OpenEXR scanline / tiled, all compressions, half and float RGB(A) in the
@@ -582,6 +745,7 @@ pub(crate) fn formats() -> Vec<Arc<dyn MediaFormat>> {
         Arc::new(PngFormat),
         Arc::new(JpegFormat),
         Arc::new(WebpFormat),
+        Arc::new(TiffFormat),
         Arc::new(ExrFormat),
     ]
 }

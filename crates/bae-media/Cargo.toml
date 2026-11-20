@@ -17,7 +17,7 @@ bytemuck.workspace = true
 exr.workspace = true
 half.workspace = true
 # WebP only (image-webp); PNG / JPEG / EXR use png / zune-jpeg / exr directly.
-image = { workspace = true, features = ["webp"] }
+image = { workspace = true, features = ["tiff", "webp"] }
 parking_lot.workspace = true
 png.workspace = true
 serde.workspace = true

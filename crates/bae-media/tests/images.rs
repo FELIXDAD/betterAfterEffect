@@ -247,3 +247,112 @@ fn image_sequence_with_gap() {
         .unwrap();
     assert_eq!(single.info().kind, MediaKind::Still);
 }
+
+fn save_tiff(path: &Path, data: &[u8], width: u32, height: u32, color: image::ExtendedColorType) {
+    image::save_buffer_with_format(path, data, width, height, color, image::ImageFormat::Tiff)
+        .unwrap();
+}
+
+/// Adds (or replaces) an `ExtraSamples` tag in a little-endian TIFF: writes a
+/// new first IFD at the end of the file with the tag inserted in order.
+fn set_extra_samples(path: &Path, value: u16) {
+    let mut bytes = std::fs::read(path).unwrap();
+    assert_eq!(&bytes[..4], b"II*\0");
+    let ifd = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+    let count = u16::from_le_bytes(bytes[ifd..ifd + 2].try_into().unwrap()) as usize;
+    let mut entries: Vec<[u8; 12]> = (0..count)
+        .map(|i| {
+            bytes[ifd + 2 + i * 12..ifd + 14 + i * 12]
+                .try_into()
+                .unwrap()
+        })
+        .filter(|e: &[u8; 12]| u16::from_le_bytes([e[0], e[1]]) != 338)
+        .collect();
+    let mut tag = [0_u8; 12];
+    tag[0..2].copy_from_slice(&338_u16.to_le_bytes());
+    tag[2..4].copy_from_slice(&3_u16.to_le_bytes()); // SHORT
+    tag[4..8].copy_from_slice(&1_u32.to_le_bytes());
+    tag[8..10].copy_from_slice(&value.to_le_bytes());
+    entries.push(tag);
+    entries.sort_by_key(|e| u16::from_le_bytes([e[0], e[1]]));
+    if bytes.len() % 2 == 1 {
+        bytes.push(0);
+    }
+    let new_ifd = bytes.len() as u32;
+    bytes.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+    for entry in &entries {
+        bytes.extend_from_slice(entry);
+    }
+    bytes.extend_from_slice(&0_u32.to_le_bytes()); // no next IFD
+    bytes[4..8].copy_from_slice(&new_ifd.to_le_bytes());
+    std::fs::write(path, bytes).unwrap();
+}
+
+#[test]
+fn tiff_depths_and_alpha_modes() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // 8-bit RGBA, unassociated alpha → straight.
+    let rgba8 = dir.path().join("a.tif");
+    let pixels = [200_u8, 100, 50, 128, 10, 20, 30, 255];
+    save_tiff(&rgba8, &pixels, 2, 1, image::ExtendedColorType::Rgba8);
+    let mut source = open(&rgba8);
+    assert_eq!(source.info().format, "tiff");
+    let video = source.info().video.clone().unwrap();
+    assert_eq!(
+        (video.width, video.bit_depth, video.alpha),
+        (2, 8, AlphaMode::Straight)
+    );
+    assert_eq!(
+        source.decode_cpu(&FrameRequest::new(0)).unwrap().data,
+        pixels
+    );
+
+    // Associated alpha → premultiplied.
+    set_extra_samples(&rgba8, 1);
+    let mut source = open(&rgba8);
+    assert_eq!(
+        source.info().video.as_ref().unwrap().alpha,
+        AlphaMode::Premultiplied
+    );
+    // Stored values are delivered as stored (tagged premultiplied, not divided).
+    assert_eq!(
+        source.decode_cpu(&FrameRequest::new(0)).unwrap().data,
+        pixels
+    );
+
+    // 16-bit RGB keeps precision.
+    let rgb16 = dir.path().join("deep.tiff");
+    let samples: Vec<u8> = [0x8000_u16, 1, 0xFFFF]
+        .iter()
+        .flat_map(|v| v.to_ne_bytes())
+        .collect();
+    save_tiff(&rgb16, &samples, 1, 1, image::ExtendedColorType::Rgb16);
+    let mut source = open(&rgb16);
+    let video = source.info().video.clone().unwrap();
+    assert_eq!((video.bit_depth, video.alpha), (16, AlphaMode::Opaque));
+    let frame = source.decode_cpu(&FrameRequest::new(0)).unwrap();
+    assert_eq!(frame.format, PixelFormat::Rgba16);
+    assert_close(
+        frame.pixel_f32(0, 0),
+        [32768.0 / 65535.0, 1.0 / 65535.0, 1.0, 1.0],
+        1e-6,
+    );
+
+    // 32-bit float RGBA: HDR values survive, reported linear.
+    let float = dir.path().join("hdr.tif");
+    let samples: Vec<u8> = [2.5_f32, 0.5, 0.25, 1.0]
+        .iter()
+        .flat_map(|v| v.to_ne_bytes())
+        .collect();
+    save_tiff(&float, &samples, 1, 1, image::ExtendedColorType::Rgba32F);
+    let mut source = open(&float);
+    let video = source.info().video.clone().unwrap();
+    assert_eq!(
+        (video.bit_depth, video.sample_type),
+        (32, SampleType::Float)
+    );
+    assert_eq!(video.color.transfer, TransferFunction::Linear);
+    let frame = source.decode_cpu(&FrameRequest::new(0)).unwrap();
+    assert_close(frame.pixel_f32(0, 0), [2.5, 0.5, 0.25, 1.0], 1e-6);
+}

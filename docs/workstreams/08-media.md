@@ -49,8 +49,10 @@
 - [x] 图像格式：PNG（8/16 位、调色板、tRNS、cICP/sRGB/gAMA/cHRM/iCCP、像素比）、JPEG（zune-jpeg，ICC、JFIF 像素比）、WebP（image-webp）、OpenEXR（half/float，数据窗口放进显示窗口，色度、时码、像素比）。GPU 上传后用 compute pass 转成 RGBA16F 并处理 alpha（预乘/反预乘/强制不透明）。
 - [x] macOS 视频解码：AVFoundation + VideoToolbox（H.264、HEVC、ProRes），IOSurface 支撑的 CVPixelBuffer → CVMetalTexture → wgpu 纹理（wgpu-hal，零拷贝），再转工作格式；8 位源用 BGRA，10 位以上和带 alpha 的 ProRes 4444 用 64RGBAHalf；帧精确 seek（向前小步顺读，其余重建 reader 并从目标帧内 1/8 帧处开始）；29.97 等非整数帧率逐帧验证。
 - [ ] Windows 视频解码：目前只有占位（`media_foundation`，能通过 `cargo clippy --target x86_64-pc-windows-msvc -p bae-media`），实现放下一个 PR。
-- [ ] TIFF、PSD（保留图层）、HEIC
+- [x] TIFF（静帧和序列）：8 / 16 位整数、32 位浮点，灰度 / RGB，有无 alpha；无压缩、LZW、Deflate、PackBits、JPEG；alpha 方式读 `ExtraSamples` 标签（associated = 预乘，AE 的 "TIFF Sequence with Alpha" 就这样写；没有标签按直通）。与 AE 实际输出的对比还没做成：AE 一直被别的任务占着，两次渲染都在 aectl 里超时（已报告给总协调）。
+- [ ] PSD（保留图层）、HEIC
 - [x] 跳帧速度：拖动播放头（连续随机跳帧）不再每次重建 `AVAssetReader`：输出开了 `supportsRandomAccess`，跳帧读单帧时间范围，读完确认范围已读空后用 `resetForReadingTimeRanges` 换位置；往后顺读时切换成开放范围。4K 实测（机器负载较高时 A/B 交替各跑两轮）：拖动 ProRes 422 / 4444 约 8–9 ms/帧（原来 40–54 ms），H.264（GOP 30）约 27 ms/帧（原来约 46 ms，余下主要是从关键帧解码）；顺序解码速度不变。从播放状态跳出的第一次仍要重建（约 40–65 ms）。
+- [x] 打开 `.baez` 里的素材：`MediaLocation`（磁盘文件，或容器里按「存储」方式放入的字节区间）+ `MediaLibrary::resolve`：嵌入条目按容器版本提取一次（保留条目目录结构，序列帧会落在同一目录；原子写入；不可信的条目名不能写到缓存目录外面），返回所有解码器（包括 AVFoundation）都能打开的路径。bae-media 不依赖 bae-package（21 依赖 08），由 bae-package 把 `AssetLocation::Packaged` 映射成 `MediaLocation::Embedded`。以后可以用 AVAssetResourceLoader 按字节区间直接读，省掉提取。
 - [ ] 进一步：播放中跳帧也不重建（有界的播放窗口），以及长 GOP 素材的拖动缓存 / 预读
 - [ ] 预读（后台线程提前解码）、YUV 直出（420v/x420 双平面 + 着色器转换，进一步降低 4K 解码开销）、QuickTime 时码轨、关键帧表（`sync_frames`）
 - [x] 编码导出接口（`export`）：`EncodeSettings`（对应 AE 输出模块：编码、尺寸、帧率、RGB / RGB+Alpha 及直通/预乘、位深、色彩标签、起始编号与时码）、`Encoder` / `EncoderFormat`（注册到 `Registry<dyn EncoderFormat>`）、`MediaEncoders`、`convert_frame`（CPU 像素格式与 alpha 转换）、`FrameReadback`（GPU 帧异步回读，默认 2 帧在途）、`render`（逐帧生产 → 回读 → 编码，进度回调、取消时删除半成品）、`RenderQueue`（运行时队列：排队、取消、重排、重新排队、结果）。工程里保存哪些渲染任务属于文档模型，这里只负责执行。
@@ -91,3 +93,5 @@
 - 待用户决定：序列缺帧时是报错（现在的做法，合成里显示占位）还是沿用前一帧。
 
 ## 请求（其他工作流在这里留言）
+
+- 21（总协调转达）：从 `.baez` 打开工程时，素材通过 `AssetLocator::locate` 定位，`MediaLibrary` 要能处理 Packaged 条目。——已完成：见上面的 `MediaLocation` / `MediaLibrary::resolve`。
