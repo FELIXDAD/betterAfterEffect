@@ -16,6 +16,10 @@ pub enum ModelError {
     },
     #[error("prim {0} does not exist on the stage")]
     NoSuchPrim(PrimPath),
+    #[error(
+        "prim {0} comes from a reference; override its attributes instead of deleting, moving or renaming it"
+    )]
+    ProvidedByReference(PrimPath),
     #[error("a prim spec already exists at {path} in sublayer {sublayer}")]
     PrimExists {
         sublayer: SublayerId,

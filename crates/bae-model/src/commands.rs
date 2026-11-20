@@ -34,6 +34,8 @@ pub fn register_builtins(r: &mut CommandRegistry) {
         r.register(SetReferences),
         r.register(CreateSublayer),
         r.register(SetEditTarget),
+        r.register(MoveOpinions),
+        r.register(FlattenSublayer),
     ];
     for res in results {
         res.expect("built-in command IDs are unique");
@@ -59,6 +61,15 @@ fn require_prim(tx: &Transaction<'_>, path: &PrimPath) -> Result<(), CommandErro
     tx.stage().require_prim(path)?;
     if path.is_root() {
         return Err(ModelError::RootNotEditable.into());
+    }
+    Ok(())
+}
+
+/// Namespace edits need a prim the local layer stack defines.
+fn require_local_prim(tx: &Transaction<'_>, path: &PrimPath) -> Result<(), CommandError> {
+    require_prim(tx, path)?;
+    if !tx.stage().has_local_def(path) {
+        return Err(ModelError::ProvidedByReference(path.clone()).into());
     }
     Ok(())
 }
@@ -123,7 +134,7 @@ impl Command for DeletePrim {
     const DESCRIPTION: &'static str = "Delete a prim and its descendants.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
-        require_prim(tx, &p.path)?;
+        require_local_prim(tx, &p.path)?;
         for id in sublayers_with_spec(tx, &p.path) {
             tx.apply_to(
                 &id,
@@ -154,7 +165,7 @@ fn move_everywhere(
     to: &PrimPath,
     index: Option<usize>,
 ) -> Result<(), CommandError> {
-    require_prim(tx, from)?;
+    require_local_prim(tx, from)?;
     let new_parent = to.parent().ok_or(ModelError::RootNotEditable)?;
     tx.stage().require_prim(&new_parent)?;
     if from != to && tx.stage().has_prim(to) {
@@ -448,6 +459,236 @@ impl Command for SetEditTarget {
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
         tx.set_edit_target(&p.id)?;
+        Ok(())
+    }
+}
+
+/// Move (or copy) one sublayer's opinions about one prim into another sublayer:
+/// a single attribute, or with `attr == None` every attribute plus type, references
+/// and `def`. Opinions already in `to` are replaced. With `remove`, the source
+/// opinions are cleared and specs left empty (over, no opinions, no children) are
+/// deleted, walking up the ancestors.
+pub fn move_opinions(
+    tx: &mut Transaction<'_>,
+    path: &PrimPath,
+    attr: Option<&str>,
+    from: &SublayerId,
+    to: &SublayerId,
+    remove: bool,
+) -> Result<(), CommandError> {
+    if from == to {
+        return Ok(());
+    }
+    let layer = tx
+        .stage()
+        .sublayer(from)
+        .ok_or_else(|| ModelError::UnknownSublayer(from.clone()))?;
+    let spec = layer
+        .spec(path)
+        .ok_or_else(|| ModelError::PrimNotFound {
+            sublayer: from.clone(),
+            path: path.clone(),
+        })?
+        .clone();
+    tx.ensure_spec_in(to, path)?;
+    let names: Vec<String> = match attr {
+        Some(a) if spec.attrs.contains_key(a) => vec![a.to_owned()],
+        Some(_) => Vec::new(),
+        None => spec.attrs.keys().cloned().collect(),
+    };
+    for name in names {
+        let a = spec.attrs[&name].clone();
+        tx.apply_to(
+            to,
+            Op::SetAttr {
+                path: path.clone(),
+                attr: name.clone(),
+                spec: Some(a),
+            },
+        )?;
+        if remove {
+            tx.apply_to(
+                from,
+                Op::SetAttr {
+                    path: path.clone(),
+                    attr: name,
+                    spec: None,
+                },
+            )?;
+        }
+    }
+    if attr.is_none() {
+        let dest = tx
+            .stage()
+            .sublayer(to)
+            .and_then(|s| s.spec(path))
+            .cloned()
+            .unwrap_or_default();
+        if spec.prim_type.is_some() && dest.prim_type != spec.prim_type {
+            tx.apply_to(
+                to,
+                Op::SetPrimType {
+                    path: path.clone(),
+                    prim_type: spec.prim_type.clone(),
+                },
+            )?;
+        }
+        if !spec.references.is_empty() {
+            tx.apply_to(
+                to,
+                Op::SetReferences {
+                    path: path.clone(),
+                    references: spec.references.clone(),
+                },
+            )?;
+        }
+        if spec.specifier == Specifier::Def && dest.specifier != Specifier::Def {
+            tx.apply_to(
+                to,
+                Op::SetSpecifier {
+                    path: path.clone(),
+                    specifier: Specifier::Def,
+                },
+            )?;
+        }
+        if remove {
+            if spec.prim_type.is_some() {
+                tx.apply_to(
+                    from,
+                    Op::SetPrimType {
+                        path: path.clone(),
+                        prim_type: None,
+                    },
+                )?;
+            }
+            if !spec.references.is_empty() {
+                tx.apply_to(
+                    from,
+                    Op::SetReferences {
+                        path: path.clone(),
+                        references: Vec::new(),
+                    },
+                )?;
+            }
+            if spec.specifier == Specifier::Def {
+                tx.apply_to(
+                    from,
+                    Op::SetSpecifier {
+                        path: path.clone(),
+                        specifier: Specifier::Over,
+                    },
+                )?;
+            }
+        }
+    }
+    if remove {
+        prune_empty_specs(tx, from, path)?;
+    }
+    Ok(())
+}
+
+/// Delete `path` and then its ancestors from `sublayer` while they are empty `over`
+/// specs without children.
+fn prune_empty_specs(
+    tx: &mut Transaction<'_>,
+    sublayer: &SublayerId,
+    path: &PrimPath,
+) -> Result<(), CommandError> {
+    let mut cur = Some(path.clone());
+    while let Some(p) = cur {
+        if p.is_root() {
+            break;
+        }
+        let empty = tx.stage().sublayer(sublayer).is_some_and(|s| {
+            s.spec(&p).is_some_and(|spec| {
+                spec.specifier == Specifier::Over
+                    && spec.attrs.is_empty()
+                    && spec.references.is_empty()
+                    && spec.prim_type.is_none()
+            }) && s.children(&p).is_empty()
+        });
+        if !empty {
+            break;
+        }
+        tx.apply_to(sublayer, Op::DeletePrim { path: p.clone() })?;
+        cur = p.parent();
+    }
+    Ok(())
+}
+
+pub struct MoveOpinions;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct MoveOpinionsParams {
+    pub path: PrimPath,
+    /// One attribute to move; omitted moves every attribute plus type, references and def.
+    #[serde(default)]
+    pub attr: Option<String>,
+    /// Sublayer the opinions are taken from (usually a stronger one).
+    pub from: SublayerId,
+    /// Sublayer they are written into (usually a weaker one, e.g. root).
+    pub to: SublayerId,
+    /// Keep the opinions in `from` too (copy instead of move). Default false.
+    #[serde(default)]
+    pub keep: bool,
+}
+
+impl Command for MoveOpinions {
+    type Params = MoveOpinionsParams;
+    type Output = ();
+    const ID: &'static str = "opinion.move";
+    const TITLE: &'static str = "Push Down Overrides";
+    const DESCRIPTION: &'static str = "Move a prim's overrides (one attribute or all) from one sublayer into another, e.g. push an animator's override down into the root sublayer.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        move_opinions(tx, &p.path, p.attr.as_deref(), &p.from, &p.to, !p.keep)
+    }
+}
+
+pub struct FlattenSublayer;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct FlattenSublayerParams {
+    /// Sublayer whose opinions are merged (e.g. agent/claude-01 after review).
+    pub from: SublayerId,
+    /// Sublayer they are merged into; its conflicting opinions are replaced.
+    pub into: SublayerId,
+    /// Keep the opinions in `from` (copy). Default false: `from` ends up empty.
+    #[serde(default)]
+    pub keep: bool,
+}
+
+impl Command for FlattenSublayer {
+    type Params = FlattenSublayerParams;
+    type Output = ();
+    const ID: &'static str = "sublayer.merge";
+    const TITLE: &'static str = "Merge Sublayer";
+    const DESCRIPTION: &'static str = "Merge every opinion of one sublayer into another (accept an agent's proposal layer, flatten a department layer into root).";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        let layer = tx
+            .stage()
+            .sublayer(&p.from)
+            .ok_or_else(|| ModelError::UnknownSublayer(p.from.clone()))?;
+        // Parents before children so `def`s land before their descendants.
+        let mut paths: Vec<PrimPath> = layer.paths().cloned().collect();
+        paths.sort_by_key(|a| a.depth());
+        tx.stage()
+            .sublayer(&p.into)
+            .ok_or_else(|| ModelError::UnknownSublayer(p.into.clone()))?;
+        for path in &paths {
+            move_opinions(tx, path, None, &p.from, &p.into, false)?;
+        }
+        if !p.keep {
+            let top: Vec<PrimPath> = tx
+                .stage()
+                .sublayer(&p.from)
+                .map(|s| s.children(&PrimPath::root()))
+                .unwrap_or_default();
+            for path in top {
+                tx.apply_to(&p.from, Op::DeletePrim { path })?;
+            }
+        }
         Ok(())
     }
 }

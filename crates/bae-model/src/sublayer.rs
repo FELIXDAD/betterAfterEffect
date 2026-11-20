@@ -276,6 +276,19 @@ impl Sublayer {
                     changes: vec![Change::PrimChanged { path: path.clone() }],
                 })
             }
+            Op::SetSpecifier { path, specifier } => {
+                let id = self.editable_id(path)?;
+                self.tree.get_meta(id)?.insert(K_SPEC, specifier.as_str())?;
+                let node = self.nodes.get_mut(&id).expect("mirror");
+                let old = std::mem::replace(&mut node.spec.specifier, *specifier);
+                Ok(Applied {
+                    inverse: Op::SetSpecifier {
+                        path: path.clone(),
+                        specifier: old,
+                    },
+                    changes: vec![Change::Resynced { path: path.clone() }],
+                })
+            }
             Op::SetReferences { path, references } => {
                 let id = self.editable_id(path)?;
                 let meta = self.tree.get_meta(id)?;
@@ -291,7 +304,7 @@ impl Sublayer {
                         path: path.clone(),
                         references: old,
                     },
-                    changes: vec![Change::PrimChanged { path: path.clone() }],
+                    changes: vec![Change::Resynced { path: path.clone() }],
                 })
             }
             Op::SetValue { path, attr, value } => {
@@ -795,10 +808,11 @@ fn diff(old: &FxHashMap<TreeID, Node>, new: &FxHashMap<TreeID, Node>) -> Vec<Cha
         if o.path != n.path {
             moves.push((o.path.clone(), n.path.clone()));
         }
-        if o.spec.specifier != n.spec.specifier
-            || o.spec.prim_type != n.spec.prim_type
-            || o.spec.references != n.spec.references
-        {
+        if o.spec.references != n.spec.references || o.spec.specifier != n.spec.specifier {
+            changes.push(Change::Resynced {
+                path: n.path.clone(),
+            });
+        } else if o.spec.prim_type != n.spec.prim_type {
             changes.push(Change::PrimChanged {
                 path: n.path.clone(),
             });
