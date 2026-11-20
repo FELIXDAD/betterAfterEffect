@@ -77,3 +77,10 @@
 
 1. Footage prim 的"解释素材 > 颜色"还缺两个属性：`color:preserve_rgb`（bool，默认 false，AE"保留 RGB"）和 `color:linear_light`（choice `off|on|on_32bpc`，默认 `off`，AE"解释为线性光"）。现有的 `color_space`（字符串）按"覆盖媒体色彩空间"理解，空 = 按文件标签。bae-color 的 `Interpretation` 对应这三项。
 2. Project prim：`working_space` 存 bae-color 的色彩空间 id（`srgb`、`acescg`……，空 = 无），请在 schema 文档里注明；另外请加 `working_gamma`（choice `2.2|2.4`，默认 `2.2`，AE `workingGamma`，不做色彩管理时使用）。OCIO 引擎相关属性（`color_engine`、`ocio_config`）等 06 的 OCIO PR 再提。
+
+### 19 core/plugins → 02（2026-11-20）
+
+插件宿主已经把清单里的参数映射成 `bae_model::EffectDef`（`bae_plugin::effect_def`，规格 `docs/spec/plugin-architecture.md` §5.3.7），`match_name` = `<插件 ID>/<效果 ID>`，弹出菜单沿用 AE 的 1 起始序号。还差两点：
+
+1. **R02-8 字符串和素材参数。** `ParamKind` 加 `String`（值 `Value::String`）和 `Asset`（值 `Value::AssetRef`）。清单里的 `string` / `asset` 参数类型先保留不开放，等这两个类型合并后再打开。
+2. **R02-9 相对坐标的点参数默认值。** AE 的 `PF_ADD_POINT` 默认值是图层尺寸的比例（例如 50%,50% = 图层中心），添加效果时才换算成像素。`EffectParamDef.default` 是静态值，表达不了。建议 `ParamKind::Point { default_relative: bool }`（或 `DefaultValue` 加一种"按图层尺寸换算"），由添加效果的命令写入 `比例 × 图层尺寸`。在这之前，插件宿主在 `EffectDef` 里不填这类默认值，渲染时由效果按图层范围自行换算。
