@@ -231,7 +231,8 @@ dependencies = [
 name = "bae-gpu"
 version = "0.1.0"
 dependencies = [
- "arc-swap",
+ "bae-app",
+ "bae-platform",
  "parking_lot",
  "pollster",
  "serde",
@@ -240,6 +241,8 @@ dependencies = [
  "tracing",
  "wgpu",
  "wgpu-hal",
+ "wgpu-types",
+ "windows",
 ]
 
 [[package]]
@@ -285,6 +288,9 @@ name = "bitflags"
 version = "2.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
+dependencies = [
+ "serde_core",
+]
 
 [[package]]
 name = "block2"
@@ -1270,6 +1276,8 @@ checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -1577,6 +1585,7 @@ dependencies = [
  "hashbrown 0.17.1",
  "indexmap",
  "rustc-hash 1.1.0",
+ "serde",
  "thiserror 2.0.21",
 ]
 
@@ -3483,6 +3492,7 @@ dependencies = [
  "log",
  "naga-types",
  "raw-window-handle",
+ "serde",
  "static_assertions",
  "web-sys",
 ]

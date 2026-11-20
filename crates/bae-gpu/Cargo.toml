@@ -14,25 +14,28 @@ default = []
 vulkan = ["wgpu/vulkan", "wgpu-hal/vulkan"]
 
 [dependencies]
-arc-swap.workspace = true
+bae-app.workspace = true
+bae-platform.workspace = true
 parking_lot.workspace = true
 pollster.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 wgpu.workspace = true
+# Serialize for wgpu::Limits / Features in the gpu-info JSON report.
+wgpu-types = { workspace = true, features = ["serde"] }
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 wgpu-hal = { workspace = true, features = ["metal"] }
 
 [target.'cfg(windows)'.dependencies]
 wgpu-hal = { workspace = true, features = ["dx12"] }
+# `windows::core::Interface::as_raw` for D3D12 handles (same 0.62 line as wgpu-hal).
+windows.workspace = true
 
 [target.'cfg(not(any(target_vendor = "apple", windows)))'.dependencies]
 wgpu-hal.workspace = true
-
-[dev-dependencies]
-serde_json.workspace = true
 
 [lints]
 workspace = true
