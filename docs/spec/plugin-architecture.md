@@ -1755,3 +1755,225 @@ the project plugin lock (§6.7).
 
 Reserved (`[[text_selector]]`, `BAE_KIND_TEXT_SELECTOR`): parsed and listed, never loaded,
 until 05 defines the per-glyph evaluation contract.
+
+---
+
+## 19. Built-in features through the plugin path (dogfooding)
+
+1. Built-in effects, importers, exporters, codecs, commands, panels, workspaces and
+   keymaps register into the **same registries** with the **same descriptors** as plugins,
+   with `Owner::Module(<module>)` instead of `Owner::Plugin(<id>)`.
+2. Built-in effects (07) are authored either as
+   - **declarative packages embedded in the binary** (`crates/bae-effects/packages/<id>/`
+     with `bae-plugin.toml` + WGSL, `include_str!`'d and registered through
+     `DeclarativeEffect::from_embedded`), or
+   - **Rust `bae_plugin_sdk::Effect` implementations** registered as `Arc<dyn DynEffect>`.
+3. **No private host API for built-ins.** If a built-in needs something the SDK lacks, it is
+   added to the SDK (and therefore to the C ABI) first. Compositor-internal operations
+   (layer transforms, blend modes, masks, track mattes, motion blur, 3D) are not effects
+   and are exempt.
+4. Built-in effects use the plugin id `bae.effects` (`bae.effects/gaussian-blur`) and declare
+   `ae_match_names` for AE import (15/20).
+5. Built-in packages are in the *bundled* scope but compiled in: no file IO, no parsing
+   cost at startup beyond registering descriptors (manifests parsed lazily on first use or
+   at build time via a `const` table).
+6. Acceptance (implementation wave): 07 ships at least one pixel-style effect, one
+   multi-pass compute effect and one Rust CPU/GPU effect through these paths, and a CI test
+   enumerates all built-ins via the plugin registries.
+
+---
+
+## 20. Missing plugins and placeholders
+
+1. **Document data** (02) for an effect: `type = "<plugin-id>/<contribution-id>"`, writer
+   `plugin_version`, values by param id (static values, keyframes, expressions), state blob
+   + `state_plugin_version`, enabled flag, and a **cached schema snapshot** (names, types,
+   groups) so a missing plugin's params can still be listed.
+2. **Render**: placeholders are removed from the graph (identity, §10.8) and flagged; a
+   final render warns (or fails, if configured).
+3. **UI**: Effect Controls shows "Missing plugin: <name> (<id> <version>)" with the cached
+   params (raw values editable, nothing interpreted); the Plugin Manager lists missing
+   plugins with the projects that use them.
+4. **Round trip**: commands never touch unknown data, so saving keeps everything; AE export
+   (15) writes the original matchName and parameter data back.
+5. **Version cases**: newer document than installed plugin (same major) → unknown param ids
+   are preserved and hidden, the state blob is passed with `state_plugin_version` and the
+   plugin may refuse it (`BAE_ERR_PARSE` → placeholder); different major → migration
+   (§8.3.4) or placeholder with an "update plugin" action.
+6. **Runtime unload** turns live effects into placeholders without changing the document
+   (§7.4); re-installing brings them back at the next graph build.
+
+---
+
+## 21. Trust, permissions, sandboxing
+
+### 21.1 Trust by form
+
+| Form | Risk | Measure |
+|---|---|---|
+| Declarative WGSL | GPU hang / excessive work (no host API, no memory unsafety: WGSL access is bounds-checked by naga/wgpu) | dispatch-size limits, GPU timeout handling, device-loss recovery |
+| Script | whatever the granted API allows | QuickJS isolation + enforced permissions (§17.4) + time/memory limits |
+| Native | full user privileges, in-process memory access | consent at install; permissions are declarations shown to the user and checked only on host-mediated APIs; out-of-process mode for crash isolation (not security) |
+
+### 21.2 Scopes and consent
+
+- Bundled and system plugins are trusted; user plugins are trusted after the install
+  consent dialog (permissions, native code, platforms).
+- **Project plugins** (`<Project>.bae/plugins/`) travel with shared projects: declarative
+  packages load automatically (they cannot do harm beyond GPU load); script and native
+  plugins load only after the user trusts them for this project (stored in user settings,
+  keyed by project id + plugin content hash; a changed hash asks again).
+- Agents installing plugins (`plugin.install` via MCP) need the highest agent permission
+  tier and still trigger the consent dialog for native/script code.
+
+### 21.3 Permissions (manifest `[permissions]`)
+
+`has_permission(name)` strings: `project:read`, `project:write`,
+`filesystem:<read|write>:<scope>`, `network:<origin>`, `clipboard:<read|write>`, `process`,
+`gpu_native`, `render`. Enforcement: scripts — always (host functions check);
+native — host-mediated APIs check (`bae.command.invoke` of mutating commands needs
+`project:write`; `bae.gpu.native` needs `gpu_native`), everything else is on trust.
+
+### 21.4 Integrity and signing
+
+At install the host records a content hash of the package; a modified installed package
+is reported in the Plugin Manager. Code signing and a marketplace are out of scope (§1.2).
+
+---
+
+## 22. Performance budget and acceptance tests
+
+### 22.1 Budgets
+
+Reference hardware: Apple M1 and an RTX 3060-class Windows PC (ARCHITECTURE §11).
+
+| Item | Budget | Measured by |
+|---|---|---|
+| Declarative effect vs the equivalent built-in | **< 2 %** frame time (design target 0: same node) | bench `plugin_overhead`: 1080p, 10-effect chain, declarative vs built-in, median of 200 frames |
+| Fused chain of N pixel-style effects | ≈ one load + one store + N × ALU | same bench, fused vs unfused |
+| Registry lookups on the frame path | 0 (resolved at graph build) | review + bench |
+| Native in-process callback overhead | ≤ 50 ns per call (indirect call + arg struct) | microbench in `bae-plugin` |
+| Host bookkeeping per native node per frame | ≤ 2 µs (pre_render plumbing, checkouts) | microbench |
+| `bae.gpu.compute` dispatch vs built-in dispatch | ≤ 1 µs extra CPU, 0 GPU | microbench |
+| `bae.gpu.native` begin/end | ≤ 50 µs CPU (one extra submit) | bench |
+| CPU-node round trip, 1080p, RGBA16F ↔ RGBA F32 premultiplied | ≤ 4 ms latency on M1, ≤ 6 ms on RTX 3060; no throughput loss when pipelined | bench `cpu_node_roundtrip` (04) |
+| CPU-node round trip, 1080p, RGBA U8 | ≤ 1.5 ms | same |
+| Out-of-process extra per frame | ≤ 0.3 ms + one memcpy per direction | bench |
+| Startup scan | ≤ 0.5 ms per cached plugin; ≤ 50 ms for 100 plugins | bench `scan` |
+| First use of a native plugin | ≤ 20 ms, off the UI thread | trace |
+| Declarative compile + pipelines | ≤ 30 ms per effect, async, cached | trace |
+| Memory of an installed, unused plugin | manifest only (< 10 KB) | test |
+| `bae-plugin` release size | ≤ 300 KB; no new large dependencies (naga, libloading, rquickjs are already in the app) | `cargo xtask size` |
+
+Arithmetic behind the CPU-node row: 1920×1080 RGBA16F = 16.6 MB on the GPU, 33.2 MB as
+RGBA F32. Readback and upload are each ~33 MB at ≥ 20 GB/s effective (unified memory on
+M1; PCIe 4 ×16 on the 3060) ≈ 1.7 ms each, plus two conversion kernels (< 0.2 ms) and
+mapping overhead. U8 moves 8.3 MB per direction.
+
+### 22.2 Hot-path rules (for 04 and 19 implementers)
+
+No allocation, lock or registry lookup per frame on the plugin path; uniform data through
+the ring buffer; bind groups cached by resource identity; transient textures pooled;
+`is_aborted` is an atomic load; breadcrumbs are TLS stores; suite tables are cached by
+the plugin; checkouts recorded in pre-sized per-frame arenas.
+
+### 22.3 Acceptance tests (from the workstream brief)
+
+1. **Declarative overhead** < 2 % vs the same effect built in (bench above, CI trend).
+2. **ABI stability**: the native examples built with the oldest supported SDK of the current
+   major (binary artifacts kept by CI) load and render correctly on the current host.
+3. **Runtime load/unload without restart and without GPU leaks**: load → use in a rendered
+   project → unload, 100 times; afterwards the plugin's `GpuResourceLedger` is empty, wgpu's
+   resource report is back to baseline and RSS growth is bounded.
+4. **Crash isolation**: a test plugin that crashes on frame N in out-of-process mode leaves
+   the host running; the node shows the error; the runner restarts; rendering continues.
+
+---
+
+## 23. Requests to other workstreams
+
+These are the interfaces 19 needs. IDs are referenced from code and other specs.
+
+### 23.1 01 foundation (`bae-app`, `bae-gpu`, `bae-platform`)
+
+| ID | Request |
+|---|---|
+| R01-1 | Keep `Registry<T>` runtime-mutable with `Owner::Plugin(id)`, `unregister_owner`, `Entry::is_unique` (present in 01's branch). Add an **atomic owner swap** for plugin updates: in one batch, remove all entries of `Owner::Plugin(id)` and register the new version's entries, emitting one `RegistryEvent` (§7.4 "Update"). |
+| R01-2 | A generic way for `bae-plugin` to reach every contribution registry without depending on each domain crate: e.g. a `PluginRegistries` facade in `bae-app` (or a convention: each registry type is a `Resources` entry implementing a small `ContributionRegistry` trait with `register_plugin_entry` / `remove_owner`). |
+| R01-3 | `bae_gpu::native`: wgpu-hal access to Metal device/queue, D3D12 device/queue/adapter LUID (Vulkan when enabled), native texture handles + formats from `wgpu::Texture`, D3D12 resource-state transitions for handed-out textures, "submit pending work now", and fence helpers (encode signal/wait of an `MTLSharedEvent` / `ID3D12Fence` on the host queue). |
+| R01-4 | `GpuContext` device-lost notification (callback registration) so plugin GPU data is torn down and set up again. |
+| R01-5 | `bae-platform` paths: bundled/system/user plugin directories, per-plugin data and cache directories; CLI flags `--plugin-dir`, `--plugin-dev`, `--safe-mode`, `--plugin-validate`; env `BAE_PLUGIN_PATH`; settings storage for enabled/trusted plugins. |
+| R01-6 | Crash handler: a per-thread breadcrumb slot (static TLS, no allocation) that `bae-plugin` writes around every plugin call and that crash reports include; an API to read the last crash's breadcrumb at startup. |
+| R01-7 | Workspace dependency pins: `semver = "1.0.28"` and `naga = "30.0.2"` (the version wgpu 30.0.2 uses; features `wgsl-in`) for `bae-plugin`; `libloading` is already pinned. |
+| R01-8 | Packaging (with 21): ship `bae-plugin-runner` next to the app; decide macOS hardened-runtime strategy for third-party dylibs (`disable-library-validation` vs out-of-process only). |
+
+### 23.2 02 doc-model (`bae-model`)
+
+| ID | Request |
+|---|---|
+| R02-1 | Effect Prim fields: `type` = full id `<plugin-id>/<contribution-id>`, writer `plugin_version`, params keyed by stable numeric id (AE disk id) with static value / keyframes / expression, **unknown ids preserved**, opaque **state blob** (bytes, last-writer-wins, synced) + `state_plugin_version`, `enabled`, a stable `instance_uid: u64`. |
+| R02-2 | Effect schema registry, runtime-extensible, keyed by (full id, plugin version): param definitions as a superset of AE types (FLOAT, INT, ANGLE, CHECKBOX, COLOR, POINT, POINT_3D, POPUP with stable choice ids, LAYER, GROUP, ARBITRARY, PATH, BUTTON, STRING, ASSET; GRADIENT/CURVE reserved), flags (§5.3.7), ranges, defaults, groups. Same registry for shape-operator params. |
+| R02-3 | Cached schema snapshot stored with each effect Prim (or per document per (full id, version)) for placeholder UI (§20). |
+| R02-4 | Effect-logic hooks without a `bae-model` → `bae-plugin` dependency: a trait (e.g. `EffectLogic`) registered per effect type that commands call synchronously: `init_state` on AddEffect (returns the initial blob), `param_changed` during SetParam for supervised params (may append ops to the same transaction, returns state-changed), never invoked for undo/redo/remote ops (§8.5). |
+| R02-5 | Value types: f64 (float, angle, points), i32, bool, `[f32; 4]` straight color, u32 choice id, layer ref (stable layer id), mask ref, asset ref, string, bytes; an interpolation hook for ARBITRARY values (`BaeArbitraryVTable1.interpolate`), used by 03. |
+| R02-6 | Project plugin lock in `project.json` (§6.7): `[{id, version, contributions, scope_hint}]`, maintained by AddEffect/plugin update commands. |
+| R02-7 | `StageEvent` granularity down to (effect Prim, param id / state) so render caches invalidate exactly. |
+
+### 23.3 04 compositor (`bae-render`)
+
+| ID | Request |
+|---|---|
+| R04-1 | Effect node executing `Arc<dyn DynEffect>` per §10: ROI negotiation, request merging, checkouts of self / layer params / other times / transition `to`, frame data release, identity aliasing. |
+| R04-2 | CPU nodes: GPU conversion kernels for every `BaePixelFormat` (RGBA/BGRA/ARGB × U8/U16/U16_15BIT/F16/F32 × premultiplied/straight), 64-byte-aligned staging rows, async double-buffered readback/upload, graph splitting so GPU work continues while CPU nodes run. |
+| R04-3 | Scheduler honouring `threading`, per-frame abort flags and progress aggregation. |
+| R04-4 | Render request fields of §10.1 (flicks time/time_step, frame rate, downsample x/y, PAR, quality, shutter, color space + linear flag, final/preview/headless, layer bounds, layer duration, render id). |
+| R04-5 | Cache keys and dependency-based invalidation per §10.3–§10.4 (`UI_ONLY` excluded, `NON_PARAM_VARY`, `NON_DETERMINISTIC`, state revision, dynamic flags). |
+| R04-6 | Generic WGSL shader node used by **both** built-in and declarative effects: uniform ring with dynamic offsets, bind-group cache, transient texture pool with aliasing, pipeline cache with async pre-warm, pixel-style fusion (§10.9). 19 supplies prelude generation, validation and `DeclarativeEffect`; 04 supplies execution. |
+| R04-7 | `bae.gpu.native` scope support (with R01-3): flush pending work, transition textures, fences, keep textures alive until the plugin's signal. |
+| R04-8 | Attribution of GPU objects created on behalf of a plugin (pipelines, pooled temporaries) to its `GpuResourceLedger` for leak checks. |
+| R04-9 | Error policy of §10.10 and the "continue on effect errors" render setting. |
+| R04-10 | Benchmarks `plugin_overhead` and `cpu_node_roundtrip` in the bench harness (§22). |
+
+### 23.4 Other workstreams
+
+| ID | Request |
+|---|---|
+| R03-1 | Expression function registry with namespaces; JS module loading for expression libraries; arbitrary-value interpolation hook (R02-5); param access by key / name / index (§8.4). |
+| R05-1 | Shape-operator registry and evaluation order contract (§18.1); text-selector contract later. |
+| R07-1 | Author built-in effects as embedded declarative packages or SDK `Effect`s (§19), with `ae_match_names`; no private host API. |
+| R08-1 | Codec registry with priorities; planar formats and GPU conversion (§18.4). |
+| R11-1 | Plugin Manager UI (states, diagnostics, enable/trust/isolation toggles), declarative script panels, workspace/keymap registries, placeholder Effect Controls, reserved custom-draw area for ABI 0.2. |
+| R17-1 | MCP tools generated from plugin commands (id, description, schema) honouring permission tiers (§17.7). |
+| R20-1 | Confirm the selector and flag mapping of §9 against `bae-aex-host::selector`; requests R19-01/04/05 of 20 are covered by §9.1, §12 and the reserved `ui_event`/`bae.draw`. |
+| R21-1 | Embed declarative/script plugins used by a project into `.baez` / Collect Files (`<Project>.bae/plugins/`), use `get_dependencies` for collection, package `bae-plugin-runner`. |
+
+---
+
+## 24. Open questions and decision log
+
+### 24.1 Decisions
+
+| # | Decision | Why |
+|---|---|---|
+| D1 | One plugin API version for ABI, declarative interface and script API | one compatibility story for users and authors |
+| D2 | C ABI with frozen suites + extensible structs (AE PICA / OpenFX style), not a Rust ABI | Rust has no stable ABI; plugins must survive host upgrades |
+| D3 | Native params come from `define_params`; the manifest copy is optional and must match | listing without loading code, without two sources of truth |
+| D4 | Effects are stateless unless `STATEFUL` | zero cost for the common case |
+| D5 | `checkout_id` 0 = self input; NULL `pre_render` = identity ROI | simple effects need no pre-render code |
+| D6 | Render errors pass the input through with a diagnostic | previews keep working; final renders still fail loudly |
+| D7 | Declarative effects have no per-frame host logic beyond ROI bytecode | guarantees the < 2 % budget |
+| D8 | Supervision is not re-run for undo/redo/remote ops | deterministic collaboration |
+| D9 | Out-of-process is opt-in for BAE plugins, default for AE plugins | performance first; AE plugins are the unstable ones |
+| D10 | Project-scoped declarative plugins load without a trust prompt | they cannot do harm beyond GPU load; shared projects just work |
+
+### 24.2 Open
+
+1. Licensing of the plugin API and SDK (ARCHITECTURE §14 "许可"): undecided.
+2. WASM as a sandboxed portable CPU form (contracts are form-agnostic).
+3. Custom UI (`ui_event`, `bae.draw`) details for ABI 0.2, with 11/12 and 20.
+4. `bae.scene` contents (camera, lights, comp info) with 04 and 20.
+5. Audio effects (`BAE_KIND_AUDIO_EFFECT`) once BAE has an audio graph.
+6. Multi-GPU (`device_index`).
+7. Out-of-process `bae.gpu.compute` via record/replay; OS sandbox profiles for runners.
+8. Text selectors with 05.
+9. Signing, marketplace, paid plugins.
