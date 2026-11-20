@@ -8,7 +8,12 @@ Conventions for this part (apply to every item below unless the item says otherw
 - bpc/GPU columns come from the docsforadobe first-party match-name table (`docs/matchnames/effects/firstparty.md`); "GPU —" means no Mercury GPU path is listed.
 - Pixel-unit parameters scale with the downsample factor (see effects.md, Downsample-factor scaling of pixel parameters); point parameters are in layer space.
 - Unless stated, generator effects render inside the layer's existing bounds and do **not** expand them (see effects.md, Output bounds expansion; Grow Bounds below).
-- "Blending Mode" menus on Generate effects ("None" + the layer blend modes) composite the generated image over the effect input; "None" outputs the generated image only. Formulas for the modes: compositing-3d-color.md, Blend modes. UNVERIFIED: exact menu order after "None, Normal"; BAE stores the mode by stable name, not by index.
+- "Blending Mode" menus on Generate effects composite the generated image over the effect input; "None" outputs the generated image only. Formulas for the modes: compositing-3d-color.md, Blend modes. Exact menus (AE 26.0 popup table; stored value = 1-based option index, `(-` separators occupy an index):
+  - Grid, Checkerboard, Circle: 1 None, 2 Normal, 3 Stencil Alpha, 4 sep, 5 Add, 6 Multiply, 7 Screen, 8 Overlay, 9 Soft Light, 10 Hard Light, 11 sep, 12 Color Dodge, 13 Color Burn, 14 sep, 15 Darken, 16 Lighten, 17 Difference, 18 Exclusion, 19 sep, 20 Hue, 21 Saturation, 22 Color, 23 Luminosity.
+  - 4-Color Gradient: the same without Stencil Alpha (1 None, 2 Normal, 3 sep, 4 Add, 5 Multiply, … 18 sep, 19 Hue, 20 Saturation, 21 Color, 22 Luminosity).
+  - Fractal Noise / Turbulent Noise: as 4-Color Gradient but without Color (… 19 Hue, 20 Saturation, 21 Luminosity).
+  - "Stencil Alpha" here = generated alpha multiplies the input (input shows only where the pattern is). BAE stores the mode by stable name and maps the index per effect on import, because the indices differ between effects.
+  - Source: AE 26.0x67 popup-option table (third-party ExtendScript enumeration, cached as research/fx-c/ae26-enums-fxc.txt). Defaults marked "(AE 26 dump)" in this part come from a third-party ExtendScript dump of AE 26.0x67 (`property.value` right after apply on a 320×240 layer at 30 fps, research/fx-c/ae26-dump-fxc.txt); layer-relative defaults are converted to W/H fractions.
 
 ### AE-FX-600 · Fill (填充)
 
@@ -20,7 +25,7 @@ Conventions for this part (apply to every item below unless the item says otherw
   |---|---|---|---|---|---|---|---|
   | 1 | Fill Mask (填充蒙版) | `ADBE Fill-0001` (obs.) | Mask reference popup | None | None or any mask on this layer | — | Lottie exports as `ty: 10`, value = mask index (0 = None). |
   | 2 | All Masks (所有蒙版) | `ADBE Fill-0007` (obs.) | Checkbox | Off | — | — | When on, Fill Mask is ignored and the union of all masks (by their modes, see below) is filled. |
-  | 3 | Color (颜色) | `ADBE Fill-0002` (obs.) | Color | (255, 0, 0) red (UNVERIFIED) | any | RGB | |
+  | 3 | Color (颜色) | `ADBE Fill-0002` (obs.) | Color | (255, 0, 0) red (AE 26 dump) | any | RGB | |
   | 4 | Invert (反转) | `ADBE Fill-0006` (obs.) | Checkbox | Off | — | — | Inverts the fill matte. |
   | 5 | Horizontal Feather (水平羽化) | `ADBE Fill-0003` (obs.) | Float slider | 0 | slider 0-50, valid 0-1000 (UNVERIFIED) | px | Box/Gaussian softening of the matte along x. |
   | 6 | Vertical Feather (垂直羽化) | `ADBE Fill-0004` (obs.) | Float slider | 0 | slider 0-50, valid 0-1000 (UNVERIFIED) | px | Along y. |
@@ -50,9 +55,9 @@ Conventions for this part (apply to every item below unless the item says otherw
 
   | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|---|---|
-  | 1 | Start of Ramp (渐变起点) | `ADBE Ramp-0001` (obs.) | Point | (layerW/2, 0) | any | px, layer space | |
+  | 1 | Start of Ramp (渐变起点) | `ADBE Ramp-0001` (obs.) | Point | (W/2, 0) (AE 26 dump) | any | px, layer space | |
   | 2 | Start Color (起始颜色) | `ADBE Ramp-0002` (obs.) | Color | (0,0,0) black | any | RGB | |
-  | 3 | End of Ramp (渐变终点) | `ADBE Ramp-0003` (obs.) | Point | (layerW/2, layerH) | any | px | |
+  | 3 | End of Ramp (渐变终点) | `ADBE Ramp-0003` (obs.) | Point | (W/2, H) (AE 26 dump) | any | px | |
   | 4 | End Color (结束颜色) | `ADBE Ramp-0004` (obs.) | Color | (255,255,255) white | any | RGB | |
   | 5 | Ramp Shape (渐变形状) | `ADBE Ramp-0005` (obs.) | Popup | Linear Ramp | 1 = Linear Ramp (线性渐变), 2 = Radial Ramp (径向渐变) | — | Skottie treats value 1 as linear, anything else as radial. |
   | 6 | Ramp Scatter (渐变散射) | `ADBE Ramp-0006` (obs.) | Float slider | 0 | slider 0-256? valid 0-512 (UNVERIFIED) | — | Dither amount. |
@@ -257,28 +262,29 @@ Conventions for this part (apply to every item below unless the item says otherw
 
   | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|---|---|
-  | 1 | Start Point (起始点) | `ADBE Laser-0001` | Point | (UNVERIFIED) | any | px | |
-  | 2 | End Point (结束点) | `-0002` | Point | (UNVERIFIED) | any | px | |
-  | 3 | Length (长度) | `-0003` | Float slider | 30% (UNVERIFIED) | 0-100% | Percent | Visible beam length as % of the path; reaches max when Time = 50% at Length 100%. |
-  | 4 | Time (时间) | `-0004` | Float slider | 0% (UNVERIFIED) | 0-100% | Percent | Travel progress from start to end; animate it to "shoot". |
-  | 5 | Start Thickness (起始厚度) | `-0005` | Float slider | 8 (UNVERIFIED) | 0-? | px | |
-  | 6 | Ending Thickness (结束厚度) | `-0006` | Float slider | 8 (UNVERIFIED) | 0-? | px | |
-  | 7 | Softness (柔和度) | `-0007` | Float slider | 50% (UNVERIFIED) | 0-100% | Percent | Glow falloff. |
-  | 8 | Inside Color (内部颜色) | `-0008` | Color | white | any | RGB | |
-  | 9 | Outside Color (外部颜色) | `-0009` | Color | (UNVERIFIED) | any | RGB | |
-  | 10 | 3D Perspective (3D 透视) | `-0010` | Checkbox | On (UNVERIFIED) | — | — | Thickness varies with start/end thickness as if receding when Time is animated. |
-  | 11 | Composite On Original (在原始图像上合成) | `-0011` | Checkbox | Off | — | — | |
+  | 1 | Starting Point (起始点) | `ADBE Laser-0001` (AE 26 dump) | Point | (0.1·W, H/2) (AE 26 dump: [32,120] on 320×240) | any | px | |
+  | 2 | Ending Point (结束点) | `-0002` | Point | (0.9·W, H/2) (AE 26 dump) | any | px | |
+  | 3 | Length (长度) | `-0003` | Float slider | 25% (AE 26 dump, stored 0.25) | 0-100% | Percent (0-1) | Visible beam length as % of the path; help: at 100% the visible length is maximal when Time = 50%. |
+  | 4 | Time (时间) | `-0004` | Float slider | 50% (AE 26 dump, stored 0.5) | 0-100% | Percent (0-1) | Travel progress from start to end; animate 0→100% to "shoot". |
+  | 5 | Starting Thickness (起始厚度（译名待核）) | `-0005` | Float slider | 8 (AE 26 dump) | 0-? (UNVERIFIED) | px | |
+  | 6 | Ending Thickness (结束厚度（译名待核）) | `-0006` | Float slider | 8 (AE 26 dump) | 0-? (UNVERIFIED) | px | |
+  | 7 | Softness (柔和度) | `-0007` | Float slider | 50% (AE 26 dump, stored 0.5) | 0-100% | Percent (0-1) | Glow falloff. |
+  | 8 | Inside Color (内部颜色) | `-0008` | Color | (255, 190, 250) pale pink (AE 26 dump RGBA [1, 0.745, 0.980, 0.725]; the stored 4th component is not used as opacity, UNVERIFIED) | any | RGB | Core colour. |
+  | 9 | Outside Color (外部颜色) | `-0009` | Color | (255, 25, 25) red (AE 26 dump RGBA [1, 0.098, 0.098, 0.588]) | any | RGB | Glow colour. |
+  | 10 | 3D Perspective (3D 透视) | `-0010` | Checkbox | On (AE 26 dump) | — | — | Thickness varies with start/end thickness as if receding when Time is animated. |
+  | 11 | Composite On Original (在原始图像上合成) | `-0011` | Checkbox | Off (AE 26 dump) | — | — | |
 
   ```
   // UNVERIFIED reconstruction. u in [0,1] along Start->End.
-  head = Time ; tail = Time - Length * f(Time)   // help: Length 100% gives max visible length at Time 50%
+  head = Time * (1 + Length) ; tail = head - Length   // fits the help statement: Length 100% -> whole path visible at Time 50%;
+                                                       // defaults (25%, 50%) give a beam centred on the path
   visible segment = [clamp(tail,0,1), clamp(head,0,1)]
   thickness(u) = 3DPerspective ? perspective_lerp(StartT, EndT, u) : lerp(StartT, EndT, u)
   render capsule along the visible segment with core = Inside Color, glow (Softness) = Outside Color
   ```
 - **Priority:** P2
 - **Owner:** bae-effects
-- **Notes:** Help: looks best with motion blur on and shutter angle 360° (compositing-3d-color.md, Motion blur rendering). param matchNames derived (UNVERIFIED).
+- **Notes:** Help: looks best with motion blur on and shutter angle 360° (compositing-3d-color.md, Motion blur rendering). Parameter names and matchNames are from the AE 26.0 dump (the UI says "Starting/Ending Point" and "Starting/Ending Thickness").
 
 ### AE-FX-608 · Lens Flare (镜头光晕)
 
@@ -312,7 +318,7 @@ Conventions for this part (apply to every item below unless the item says otherw
 
   | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|---|---|
-  | 1 | Path (路径) | `ADBE Stroke-0001` (obs.) | Mask reference popup | None | None or a mask | — | Lottie `ty: 10`. |
+  | 1 | Path (路径) | `ADBE Stroke-0001` (obs.) | Mask reference popup | None | None or a mask | — | Lottie `ty: 10`. Defaults of this table confirmed by the AE 26 dump. |
   | 2 | All Masks (所有蒙版) | `-0010` (obs.) | Checkbox | Off | — | — | Strokes every mask. |
   | 3 | Stroke Sequentially (顺序描边) | `-0011` (obs.) | Checkbox | On | — | — | With All Masks: Start/End run across masks one after another (in mask order) instead of on each mask simultaneously. |
   | 4 | Color (颜色) | `-0002` (obs.) | Color | white | any | RGB | |
@@ -356,9 +362,9 @@ Conventions for this part (apply to every item below unless the item says otherw
   | 5 | Brush Opacity (画笔不透明度) | `-0005` | Float slider | 100% | 0-100% | Percent | |
   | 6 | Stroke Length (secs) (描边长度(秒)) | `-0006` | Float slider | 0 = permanent (UNVERIFIED) | ≥ 0 | s | Each dab stays visible this long; 0 = forever. |
   | 7 | Brush Spacing (secs) (画笔间距(秒)) | `-0007` | Float slider | (UNVERIFIED) | > 0 | s | Time interval between dabs. |
-  | 8 | Paint Time Properties (绘画时间属性) | `-0008` | Popup | None | None / Opacity / Color (UNVERIFIED) | — | Whether paint props are sampled per dab over time. |
-  | 9 | Brush Time Properties (画笔时间属性) | `-0009` | Popup | None | None / Size / Hardness / Size & Hardness (UNVERIFIED) | — | |
-  | 10 | Paint Style (绘画样式) | `-0010` | Popup | On Original Image | On Original Image (在原始图像上) / On Transparent (在透明背景上) / Reveal Original Image (显示原始图像) | — | |
+  | 8 | Paint Time Properties (绘画时间属性) | `-0008` | Popup | None | 1 None, 2 Opacity, 3 Color (AE 26 popup table) | — | Whether paint props are sampled per dab over time. |
+  | 9 | Brush Time Properties (画笔时间属性) | `-0009` | Popup | None | 1 None, 2 Size, 3 Hardness, 4 Size & Hardness (AE 26 popup table) | — | |
+  | 10 | Paint Style (绘画样式) | `-0010` | Popup | On Original Image | 1 On Original Image (在原始图像上), 2 On Transparent (在透明背景上), 3 Reveal Original Image (显示原始图像) | — | |
 
   ```
   // History-dependent: render(t) = union of dabs at times tk = layerIn + k*Spacing, tk <= t
@@ -373,7 +379,37 @@ Conventions for this part (apply to every item below unless the item says otherw
 - **What it does:** Fills or strokes mask regions with an animated hand-drawn zig-zag scribble line.
 - **Exact semantics:**
   - matchName `ADBE Scribble Fill`; category Generate; 8 bpc; GPU —.
-  - Parameters in AE order (defaults UNVERIFIED unless shown): Scribble (涂抹) {Single Mask, All Masks, All Masks Using Modes}; Mask (蒙版); Fill Type (填充类型) {Inside, Center Edge, Inside Edge, Outside Edge, Left Edge, Right Edge}; Edge Options (边缘选项) group: Edge Width (边缘宽度), End Cap (端点) {Round, Butt, Projecting}, Join (连接) {Round, Miter, Bevel}, Miter Limit (斜接限制); Start/End Apply To (起始/结束应用于) (UNVERIFIED placement); Color (颜色); Opacity (不透明度); Angle (角度); Stroke Width (描边宽度) (slider to 50); Stroke Options (描边选项) group: Curviness (弯曲度), Curviness Variation (弯曲度变化), Spacing (间距), Spacing Variation (间距变化), Path Overlap (路径重叠), Path Overlap Variation (路径重叠变化); Start (起始); End (结束); Fill Paths Sequentially (顺序填充路径); Wiggle Type (摆动类型) {Static, Jumpy, Smooth}; Wiggles/Second (摆动/秒); Random Seed (随机植入); Composite (合成) {On Original Image, On Transparent, Reveal Original Image}.
+  - Parameters in AE order with AE 26 dump defaults and param matchNames (`ADBE Scribble Fill-NNNN`; the suffixes are not in UI order). Popup values are stored 1-based indices that count separators (AE 26 popup table).
+
+  | # | Parameter (中文) | param matchName | Type | Default | Range / enum | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Scribble (涂写) | `-0064` | Popup | Single Mask (stored 3) | 1 None (hidden), 2 sep, 3 Single Mask, 4 All Masks, 5 All Masks Using Modes | — | |
+  | 2 | Mask (蒙版) | `-0002` | Mask reference | None (0) | a mask on the layer | — | Used with Single Mask. |
+  | 3 | Fill Type (填充类型) | `-0050` | Popup | Inside | 1 Inside, 2 Centered Edge, 3 Inside Edge, 4 Outside Edge, 5 Left Edge, 6 Right Edge | — | Left/Right Edge follow the mask's drawing direction. |
+  | — | Edge Options (边缘选项) | `-0009` / end `-0021` | (group) | — | — | — | |
+  | 4 | Edge Width (边缘宽度) | `-0052` | Float slider | 20 | ≥ 0 | px | Edge fill types only. |
+  | 5 | End Cap (末端端点) | `-0056` | Popup | Round | 1 Round, 2 Butt, 3 Projecting | — | |
+  | 6 | Join (连接) | `-0054` | Popup | Round | 1 Round, 2 Bevel, 3 Miter | — | |
+  | 7 | Miter Limit (尖角限制) | `-0058` | Float slider | 4 | 1-500 (help) | × stroke width | |
+  | 8 | Start/End Apply To (开始/末端应用于) | `-0068` | Popup | Scribble Result (stored 2) | 1 Mask Path, 2 Scribble Result | — | Inside the Edge Options group. |
+  | 9 | Color (颜色) | `-0006` | Color | white | any | RGB | |
+  | 10 | Opacity (不透明度) | `-0024` | Float slider | 100% (stored 1) | 0-100% | Percent (0-1) | |
+  | 11 | Angle (角度) | `-0010` | Angle | 60° | any | degrees | Hatch direction. |
+  | 12 | Stroke Width (描边宽度) | `-0008` | Float slider | 2 | 0.1-50 (help) | px | |
+  | — | Stroke Options (描边选项) | `-0031` / end `-0045` | (group) | — | — | — | |
+  | 13 | Curviness (曲度) | `-0012` | Float slider | 5% (stored 0.05) | 0-100% | Percent (0-1) | Help: 0-100 range of turn roundness. |
+  | 14 | Curviness Variation (曲度变化) | `-0066` | Float slider | 1% (stored 0.01) | 0-100% | Percent (0-1) | |
+  | 15 | Spacing (间距) | `-0060` | Float slider | 5 | ≥ 0 | px | Distance between hatch lines. |
+  | 16 | Spacing Variation (间距变化) | `-0062` | Float slider | 1 | ≥ 0 | px | |
+  | 17 | Path Overlap (路径重叠) | `-0038` | Float slider | 0 | negative = end inside, positive = overshoot outside | px | |
+  | 18 | Path Overlap Variation (路径重叠变化（译名待核）) | `-0040` | Float slider | 5 | ≥ 0 | px | |
+  | 19 | Start (开始) | `-0030` | Float slider | 0% | 0-100% | Percent (0-100) | |
+  | 20 | End (结束) | `-0032` | Float slider | 100% | 0-100% | Percent (0-100) | |
+  | 21 | Fill Paths Sequentially (顺序填充路径) | `-0028` | Checkbox | On | — | — | With All Masks: Start/End run over the total length. |
+  | 22 | Wiggle Type (摆动类型) | `-0048` | Popup | Smooth (stored 3) | 1 Static (静态), 2 Jumpy (跳跃式), 3 Smooth (平滑式) | — | |
+  | 23 | Wiggles/Second (摇摆/秒) | `-0044` | Float slider | 10 | ≥ 0 | per second | |
+  | 24 | Random Seed (随机植入（译名待核）) | `-0046` | Integer slider | 1 | — | — | |
+  | 25 | Composite (合成) | `-0026` | Popup | On Transparent (stored 2) | 1 On Original Image, 2 On Transparent, 3 Reveal Original Image | — | |
   ```
   generate parallel hatch lines at Angle across the fill region (Spacing ± variation),
   connect consecutive lines with curved turns (Curviness ± variation), overshoot by Path Overlap,
@@ -382,14 +418,21 @@ Conventions for this part (apply to every item below unless the item says otherw
   ```
 - **Priority:** P2
 - **Owner:** bae-effects (+ bae-vector)
-- **Notes:** Chinese names of sub-parameters are best guesses（译名待核）. Deterministic per Random Seed.
+- **Notes:** Chinese parameter names from the zh-CN Generate effects help page except where marked. Deterministic per Random Seed. Source: AE 26 dump and popup table (research/fx-c/ae26-dump-fxc.txt, ae26-enums-fxc.txt).
 
 ### AE-FX-612 · Radio Waves (无线电波)
 
 - **What it does:** Emits expanding wave outlines (polygon, image contour or mask shape) from a producer point.
 - **Exact semantics:**
   - matchName `APC Radio Waves`; category Generate; 8 bpc; GPU —.
-  - Parameters in AE order: Producer Point (产生点); Parameters Are Set At (参数设置为) {Birth, Each Frame}; Render Quality (渲染品质); Wave Type (波浪类型) {Polygon, Image Contours, Mask}; Polygon group: Sides (边), Curve Size (曲线大小), Curvyness (曲线弯曲度), Star (星形), Star Depth (星深度); Image Contour group: Source Layer, Source Center, Value Channel, Invert Input, Value Threshold, Pre-Blur, Tolerance, Contour; Mask (蒙版); Wave Motion group: Frequency (频率, waves/s), Expansion (扩展), Orientation (方向), Direction (方向), Velocity (速率), Spin (旋转), Lifespan (sec) (寿命(秒)), Reflection (反射); Stroke group: Profile (配置文件) {Square, Sine, …}, Color (颜色), Opacity (不透明度), Fade-in Time (淡入时间), Fade-out Time (淡出时间), Start Width (开始宽度), End Width (末端宽度). Defaults UNVERIFIED.
+  - Parameters in AE order with AE 26 dump defaults (param matchNames `APC Radio Waves-NNNN`, suffix in brackets; not in UI order; popups stored as 1-based index):
+    - Producer Point (产生点) [`-0004`] = layer centre; Parameters Are Set At (参数设置为) [`-0006`] {1 Birth (生成), 2 Each Frame (每帧)} = Birth; Render Quality (渲染品质) [`-0064`] = 4 (oversampling factor, Best quality only); Wave Type (波形类型) [`-0002`] {1 Polygon (多边形), 2 Image Contours (图像等高线), 3 Mask (蒙版)} = Polygon.
+    - Polygon group [`-0068`…`-0023`]: Sides (边) [`-0008`] = 64; Curve Size (曲线大小) [`-0010`] = 0; Curvyness (曲线弯曲度) [`-0012`] = 0; Star (星形) [`-0014`] = off; Star Depth (星深度) [`-0016`] = −0.5.
+    - Image Contour group [`-0070`…`-0043`]: Source Layer (源图层) [`-0018`] = layer 1 (this layer, UNVERIFIED reading of the stored index); Source Center (源中心) [`-0020`] = layer centre; Value Channel (值通道) [`-0022`] {1 Intensity, 2 Red, 3 Green, 4 Blue, 5 Alpha, 6 Hue, 7 Lightness, 8 Saturation, 9 Value} = Alpha; Invert Input (反转输入) [`-0024`] = off; Value Threshold (值阈值) [`-0026`] = 127; Pre-Blur (预模糊) [`-0028`] = 0; Tolerance (容差) [`-0030`] = 0.5; Contour (等高线) [`-0032`] = 1.
+    - Mask group [`-0072`…`-0049`]: Mask (蒙版) [`-0066`] = None.
+    - Wave Motion group (波动) [`-0051`…`-0069`]: Frequency (频率) [`-0034`] = 1 (waves/s); Expansion (扩展) [`-0036`] = 5; Orientation (方向) [`-0038`] = 0°; Direction (方向) [`-0042`] = 90°; Velocity (速率) [`-0040`] = 0; Spin (旋转) [`-0044`] = 0; Lifespan (sec) (寿命（秒）) [`-0056`] = 10; Reflection (反射) [`-0062`] = off.
+    - Stroke group (描边) [`-0071`…`-0087`]: Profile (配置文件) [`-0048`] {1 Square (正方形), 2 Triangle, 3 Sawtooth Out, 4 Sawtooth In, 5 Gaussian, 6 Bell, 7 Sine (正弦)} = Square; Color (颜色) [`-0046`] = (0, 0, 255) blue; Opacity (不透明度) [`-0054`] = 100% (stored 1); Fade-in Time (淡入时间) [`-0058`] = 0 s; Fade-out Time (淡出时间) [`-0060`] = 5 s; Start Width (开始宽度) [`-0050`] = 5; End Width (末端宽度) [`-0052`] = 5.
+    - Help: Fade-in/Fade-out longer than Lifespan are shortened to Lifespan; if they overlap, the wave never reaches full opacity.
   ```
   waves born at t_k = k / Frequency; wave age a = t - t_k (alive while a < Lifespan)
   radius(a) = Expansion * a ; offset along Direction by Velocity * a ; rotation = Orientation + Spin * a
@@ -398,14 +441,14 @@ Conventions for this part (apply to every item below unless the item says otherw
   ```
 - **Priority:** P2
 - **Owner:** bae-effects
-- **Notes:** Sub-parameter Chinese names（译名待核）. History-independent (each wave is a closed-form function of its birth time) — cheap to scrub.
+- **Notes:** Chinese names from the zh-CN help page; Profile values other than Square/Sine（译名待核）. Source: AE 26 dump and popup table. History-independent (each wave is a closed-form function of its birth time) — cheap to scrub.
 
 ### AE-FX-613 · Audio Spectrum (音频频谱)
 
 - **What it does:** Draws the frequency spectrum of an audio layer as bars, lines or dots along a line or mask path.
 - **Exact semantics:**
   - matchName `ADBE AudSpect`; category Generate; 32 bpc; GPU —.
-  - Parameters in AE order: Audio Layer (音频层); Start Point (起始点), End Point (结束点) (used when Path = None); Path (路径); Use Polar Path (使用极坐标路径); Start Frequency (起始频率), End Frequency (结束频率) (Hz); Frequency Bands (频段); Maximum Height (最大高度); Audio Duration (音频持续时间) (ms); Audio Offset (音频偏移) (ms); Thickness (厚度); Softness (柔和度); Inside Color (内部颜色), Outside Color (外部颜色); Blend Overlapping Colors (混合叠加颜色); Hue Interpolation (色相插值); Dynamic Hue Phase (动态色相); Color Symmetry (颜色对称); Display Options (显示选项) {Digital, Analog Lines, Analog Dots}; Side Options (面选项) {Side A, Side B, Side A & B}; Duration Averaging (持续时间平均化); Composite On Original (在原始图像上合成). Defaults UNVERIFIED.
+  - Parameters in AE order: Audio Layer (音频层); Start Point (起始点), End Point (结束点) (used when Path = None); Path (路径); Use Polar Path (使用极坐标路径); Start Frequency (起始频率), End Frequency (结束频率) (Hz); Frequency Bands (频段); Maximum Height (最大高度); Audio Duration (音频持续时间) (ms); Audio Offset (音频偏移) (ms); Thickness (粗细); Softness (柔和度); Inside Color (内部颜色), Outside Color (外部颜色); Blend Overlapping Colors (混合叠加颜色); Hue Interpolation (色相插值); Dynamic Hue Phase (动态色相); Color Symmetry (颜色对称); Display Options (显示选项) {1 Digital, 2 Analog lines, 3 Analog dots} (`ADBE AudSpect-0020`); Side Options (面选项) {1 Side A, 2 Side B, 3 Side A & B} (`ADBE AudSpect-0021`); Duration Averaging (持续时间平均化); Composite On Original (在原始图像上合成). Defaults UNVERIFIED.
   ```
   window = audio samples of AudioLayer source in [t + Offset - Duration/2, t + Offset + Duration/2]
   spectrum = |FFT(window)| ; bands = log/linear bins between StartFreq and EndFreq (UNVERIFIED spacing)
@@ -413,21 +456,21 @@ Conventions for this part (apply to every item below unless the item says otherw
   ```
 - **Priority:** P2
 - **Owner:** bae-effects (+ bae-media)
-- **Notes:** Help: uses the audio **source** footage, ignoring time remapping, effects, stretch and levels — precompose to include them. Masks with modes other than None clip the output. Sub-parameter Chinese names（译名待核）.
+- **Notes:** Help: uses the audio **source** footage, ignoring time remapping, effects, stretch and levels — precompose to include them. Masks with modes other than None clip the output. Chinese parameter names from the zh-CN Generate effects help page.
 
 ### AE-FX-614 · Audio Waveform (音频波形)
 
 - **What it does:** Draws the audio waveform of an audio layer along a line or mask path.
 - **Exact semantics:**
   - matchName `ADBE AudWave`; category Generate; 32 bpc; GPU —.
-  - Parameters in AE order: Audio Layer (音频层); Start Point, End Point; Path (路径); Displayed Samples (显示的范例); Maximum Height (最大高度); Audio Duration (音频持续时间) (ms); Audio Offset (音频偏移) (ms); Thickness (厚度); Softness (柔和度); Inside Color, Outside Color (内部颜色/外部颜色); Waveform Options (波形选项) {Mono, Left, Right} (non-stereo layers play as Mono); Display Options (显示选项) {Digital, Analog Lines, Analog Dots}; Composite On Original (在原始图像上合成). Defaults UNVERIFIED.
+  - Parameters in AE order: Audio Layer (音频层); Start Point, End Point; Path (路径); Displayed Samples (显示的范例); Maximum Height (最大高度); Audio Duration (音频持续时间) (ms); Audio Offset (音频偏移) (ms); Thickness (粗细); Softness (柔和度); Inside Color, Outside Color (内部颜色/外部颜色); Waveform Options (波形选项) {1 Mono, 2 Left, 3 Right} (`ADBE AudWave-0014`; non-stereo layers play as Mono); Display Options (显示选项) {1 Digital, 2 Analog lines, 3 Analog dots} (`ADBE AudWave-0015`); Composite On Original (在原始图像上合成). Defaults UNVERIFIED.
   ```
   samples = DisplayedSamples points resampled from the source audio window around t + Offset (Duration long)
   y_i = MaxHeight * sample_i ; place along path/line ; draw per Display Options with Thickness/Softness
   ```
 - **Priority:** P2
 - **Owner:** bae-effects (+ bae-media)
-- **Notes:** Same source-audio caveat as Audio Spectrum. Sub-parameter Chinese names（译名待核）.
+- **Notes:** Same source-audio caveat as Audio Spectrum. Chinese parameter names from the zh-CN Generate effects help page.
 
 ### AE-FX-615 · Eyedropper Fill (吸管填充)
 
@@ -439,12 +482,12 @@ Conventions for this part (apply to every item below unless the item says otherw
   |---|---|---|---|---|---|---|---|
   | 1 | Sample Point (采样点) | `ADBE Eyedropper Fill-0001` | Point | layer centre (UNVERIFIED) | any | px | |
   | 2 | Sample Radius (采样半径) | `-0002` | Float slider | (UNVERIFIED) | ≥ 0 | px | |
-  | 3 | Average Pixel Color (平均像素颜色) | `-0003` | Popup | (UNVERIFIED) | Skip Empty / All / All Premultiplied / Including Alpha | — | Skip Empty ignores transparent pixels; All includes their RGB; All Premultiplied averages premultiplied; Including Alpha also averages alpha. |
+  | 3 | Average Pixel Color (平均像素颜色) | `-0003` | Popup | (UNVERIFIED) | 1 Skip Empty (跳过空白), 2 All (全部), 3 All Premultiplied (全部预乘), 4 Including Alpha (包括 Alpha) (AE 26 popup table) | — | Skip Empty ignores transparent pixels; All includes their RGB; All Premultiplied averages premultiplied; Including Alpha also averages alpha. |
   | 4 | Maintain Original Alpha (保持原始 Alpha) | `-0004` | Checkbox | Off | — | — | On: original alpha stencils the sampled colour. |
   | 5 | Blend With Original (与原始图像混合) | `-0005` | Float slider | 0% | 0-100% | Percent | |
 - **Priority:** P2
 - **Owner:** bae-effects
-- **Notes:** Implementation hint: a single reduction pass (compute shader) over the sample disc, then a fill pass. Chinese parameter names（译名待核）.
+- **Notes:** Implementation hint: a single reduction pass (compute shader) over the sample disc, then a fill pass. Chinese parameter names from the zh-CN help page.
 
 ### AE-FX-616 · Other Generate effects catalog (其他生成效果)
 
@@ -480,7 +523,7 @@ Common rule (applies to AE-FX-617…621): every Transition effect except Iris Wi
   | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|---|---|
   | 1 | Transition Completion (过渡完成) | `ADBE Linear Wipe-0001` (obs.) | Float slider | 0% | 0-100% | Percent (0-100) | |
-  | 2 | Wipe Angle (擦除角度) | `-0002` (obs.) | Angle | 0x+90.0° | any | degrees | Direction of travel; 90° travels left→right (left side disappears first); 0° travels bottom→top (UNVERIFIED for 0°, follows the clockwise-from-up convention). |
+  | 2 | Wipe Angle (擦除角度) | `-0002` (obs.) | Angle | 0x+90.0° (AE 26 dump) | any | degrees | Direction of travel (help: at 90° the wipe travels left→right, the left side disappears first). Angles run clockwise from up, so 0° travels bottom→top and 180° top→bottom (Skottie reference implementation, which follows AE). |
   | 3 | Feather (羽化) | `-0003` (obs.) | Float slider | 0 | slider 0-?, valid 0-32000? (UNVERIFIED) | px | Width of the soft edge. |
 
   ```
@@ -523,6 +566,7 @@ Common rule (applies to AE-FX-617…621): every Transition effect except Iris Wi
   Counterclockwise: hidden = (360 - a) < 360*c        // i.e. a > 360*(1-c)
   Both:             hidden = min(a, 360 - a) < 180*c
   m = hidden ? 0 : 1 ; if Feather > 0: m = blur(m, Feather)   // UNVERIFIED: AE feathers angularly vs spatially
+  // sector maths matches Skottie RadialWipeEffect (sweep from StartAngle-90° in Skia's clockwise-from-+x convention)
   out = src * m
   ```
 - **Priority:** P1
@@ -539,19 +583,19 @@ Common rule (applies to AE-FX-617…621): every Transition effect except Iris Wi
   |---|---|---|---|---|---|---|---|
   | 1 | Transition Completion (过渡完成) | `ADBE Venetian Blinds-0001` (obs.) | Float slider | 0% | 0-100% | Percent (0-100) | |
   | 2 | Direction (方向) | `-0002` (obs.) | Angle | 0x+0.0° | any | degrees | Orientation of the strip progression. |
-  | 3 | Width (宽度) | `-0003` (obs.) | Float slider | 10 (UNVERIFIED) | slider 1-?, valid ≥ 1 (Skottie clamps to ≥ 1) | px | Strip period. |
+  | 3 | Width (宽度) | `-0003` (obs.) | Float slider | 20 (AE 26 dump) | slider range UNVERIFIED; values < 1 behave as 1 (Skottie clamps) | px | Strip period (one transparent + one opaque part). |
   | 4 | Feather (羽化) | `-0004` (obs.) | Float slider | 0 | ≥ 0 | px | |
 
   ```
-  c = Completion/100 ; P = max(1, Width) ; θ = radians(-Direction)
-  u = fract(dot(p - (W/2, H/2), (cos θ, sin θ)) / P)     // position inside the strip period, 0..1 (UNVERIFIED phase origin)
+  c = Completion/100 ; P = max(1, Width) ; D = radians(Direction)
+  u = fract(dot(p - (W/2, H/2), (cos D, sin D)) / P)     // y-down layer space; periods start at the layer centre (Skottie)
   hidden = u < c                                         // each strip's hidden part grows from one side
   feather: soften the two transitions of each period over Feather px (Skottie: 3*Feather, min 0.5 px)
   out = src * (hidden ? 0 : 1)  (with soft ramps)
   ```
 - **Priority:** P1
 - **Owner:** bae-effects
-- **Notes:** Help: Draft animates strips with pixel precision, Best with sub-pixel precision. UNVERIFIED: whether Direction 0° yields horizontal or vertical strips in AE (Skottie varies the mask along (cos(−Direction), sin(−Direction)), giving vertical strips at 0°) — confirm with a reference render before M1.
+- **Notes:** Help: Draft animates strips with pixel precision, Best with sub-pixel precision. Orientation per Skottie `VenetianBlindsEffect.cpp` (gradient vector (cos D, sin D) in y-down space): Direction 0° gives vertical strips whose transparent part grows left→right; 90° gives horizontal strips growing top→bottom. UNVERIFIED against an AE reference render (confirm before M1). The help page says 8/16 bpc; the docsforadobe table says 32 bpc (newer).
 
 ### AE-FX-620 · Block Dissolve (块溶解)
 
@@ -631,7 +675,7 @@ Common rule (applies to AE-FX-617…621): every Transition effect except Iris Wi
   ```
 - **Priority:** P2
 - **Owner:** bae-effects
-- **Notes:** UNVERIFIED: AE hides the inside of the iris (revealing the layer below); confirm direction with a reference render. Chinese parameter names（译名待核）.
+- **Notes:** Defaults confirmed by the AE 26 dump (Iris Points 6, radii 0, Rotation 0, Feather 0, centre = layer centre); help: 6-32 points, and when Outer Radius and/or Inner Radius is 0 the iris is not visible (layer unchanged). Help describes it as a radial transition that reveals the underlying layer, i.e. the inside of the iris is transparent. Chinese strings 外径 / 内径 / 使用内径 are from the zh-CN help page; 光圈中心 / 光圈点（译名待核）.
 
 ### AE-FX-623 · Other Transition effects catalog (其他过渡效果)
 
