@@ -176,8 +176,8 @@ bae_plugin_sdk::GpuServices     host-encoded GPU compute + native interop scope
   the `bae.render` / `bae.gpu.*` suites by thin `extern "C"` shims.
 - **Declarative effects** are executed by `DeclarativeEffect` (in `bae-plugin`), which
   implements `DynEffect` on top of `GpuServices`. The render graph (04) therefore sees a
-  single node interface; it MAY call `DynEffect::as_declarative()` to inspect the WGSL
-  description for optimizations (pass fusion of pixel-independent chains, §10.9).
+  single node interface; it MAY downcast (`DynEffect::as_any()` → `DeclarativeEffect`)
+  to inspect the WGSL description for optimizations (fusion of pixel-style chains, §10.9).
 - The render graph never needs to know which form it is running.
 
 ---
@@ -319,18 +319,38 @@ devices = ["gpu"]                        # native only: ["cpu"], ["gpu"], ["cpu"
 
 # ---- declarative only ----
 shader = "shaders/vignette.wgsl"         # required for wgsl
+style = "pixel"                          # "pixel" | "compute" (§11.4); default: "compute" iff [[effect.pass]] exists
+entry = "vignette"                       # pixel style: name of the pixel function; default = id with '-' → '_'
 identity_when = "params.amount == 0"     # optional expression (§11.7): node is skipped when true
 [effect.roi]                             # optional (§11.6)
-extent = "input"                         # "input" (default for filter) | "layer" (default for generator) | "infinite"
-read = "0"                               # or read_left/read_right/read_top/read_bottom
+extent = "input"                         # "input" (default for filter/transition) | "layer" (default for generator) | "infinite"
+read = "0"                               # expression, full-res layer px, all sides; or read_left/read_right/read_top/read_bottom
 grows = false                            # result rect grows by the mirrored read footprint
 
 [[effect.param]]                         # declarative: authoritative; native: optional listing copy (must match)
 # ... §5.3.7
 
-[[effect.texture]]                       # declarative intermediates (§11.5)
-[[effect.pass]]                          # declarative passes (§11.5)
+[[effect.texture]]                       # compute style only: intermediates (§11.5)
+name = "blur_h"                          # [a-z][a-z0-9_]*, ≤ 32 bytes; bound as bae_tex_<name>
+format = "working"                       # "working" (default) | "rgba16f" | "rgba32f" | "r16f" | "r32f" | "rg16f" | "rg32f" | "rgba8unorm"
+rect = "output"                          # "output" (default) | "input": which rect it covers
+scale = 1.0                              # (0, 1]: resolution relative to that rect (0.5 = half res)
+
+[[effect.pass]]                          # compute style only: executed in order (§11.5)
+entry = "blur_horizontal"                # @compute entry point in `shader`
+reads = ["input"]                        # "input", "to" (transitions), layer-param keys, texture names
+writes = "blur_h"                        # "output" or a texture name
+
+[[effect.migration]]                     # optional, any implementation (§6.5)
+from = "1"                               # semver requirement on the version that wrote the data
+rename = { radius_px = "radius" }        # old param key → new key
+drop = ["legacy_mode"]
+defaults = { quality = 2 }               # values for params that did not exist
 ```
+
+Pixel style (`style = "pixel"`) MUST NOT have `[[effect.texture]]` or `[[effect.pass]]`;
+compute style MUST have ≥ 1 pass and the last pass MUST write `output`. A texture MUST be
+written by an earlier pass before it is read. `entry` is invalid for compute style.
 
 Effect `flags` (manifest spelling → C flag):
 
@@ -550,14 +570,16 @@ with an explanation, never loaded).
 There is one plugin API version `MAJOR.MINOR` (C ABI = `BAE_ABI_VERSION`, declarative
 interface, script API). Rules:
 
-1. **Manifest check (no code loaded):** plugin `api = "A.a"`; host API `H.h`; host
-   supports majors `S` (e.g. {H, H−1}). Accept iff `A ∈ S` and (`A < H` or `a ≤ h`).
+1. **Manifest check (no code loaded):** plugin `api = "A.a"`; host API `H.h`. Accept iff
+   `A == H` and `a ≤ h`, or `A` is an older stable major served by a compatibility shim
+   whose newest minor is `s` and `a ≤ s`. The host then *presents* the newest version
+   of major `A` it implements (`H.h`, or `A.s` through a shim) as `BaeHost.abi_version`.
 2. **Binary check (native, after `bae_plugin_entry`):** `abi_required` MUST equal the
    manifest `api` (stale-manifest guard); the host re-applies rule 1 to `abi_required`;
    `abi_built` is informational (it tells the host which struct sizes the plugin knows).
 3. **Plugin check:** the plugin sees `BaeHost.abi_version` and MAY refuse with
-   `BAE_ERR_VERSION_MISMATCH` (the SDK does this automatically when the host is older
-   than `abi_required`).
+   `BAE_ERR_VERSION_MISMATCH` (the SDK does this automatically when the presented
+   version is a different major or an older minor than `abi_required`).
 4. **Feature negotiation:** optional features are discovered at runtime:
    `get_suite(name, version)` returns NULL when unsupported; `BaeHost.capabilities` lists
    host features; extensible structs are read with `BAE_HAS_FIELD`.
@@ -565,8 +587,10 @@ interface, script API). Rules:
    compatibility shim that presents the old suites/vtables. Policy (§14.6): each major
    is supported for at least two years after its successor ships.
 
-Major 0 (this draft) is exempt: 0.x hosts accept only the exact same 0.x minor or newer
-minors that are explicitly declared compatible in `bae-plugin` (`COMPATIBLE_0X_MINORS`).
+Major 0 (this draft) is exempt from "older minors keep working": a host `0.h` accepts a
+plugin requiring `0.a` iff `a == h` or `a` is an older minor the host explicitly lists as
+still compatible (`HostApiSupport::compatible_0x_minors`); 0.x plugins never run on a
+stable (≥ 1) host. Reference implementation and tests: `bae_plugin_sdk::version`.
 
 ### 6.7 Project plugin lock
 
