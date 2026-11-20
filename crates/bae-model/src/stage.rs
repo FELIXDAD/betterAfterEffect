@@ -13,6 +13,11 @@ use crate::sublayer::Sublayer;
 /// Maximum undo steps kept per author.
 const UNDO_LIMIT: usize = 1000;
 
+/// Sublayer IDs that differ only in case map to the same file on macOS/Windows.
+fn same_file_name(a: &SublayerId, b: &SublayerId) -> bool {
+    a.as_str().eq_ignore_ascii_case(b.as_str())
+}
+
 /// Handle returned by [`Stage::subscribe`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SubscriptionId(u64);
@@ -77,12 +82,13 @@ impl Stage {
             .last()
             .cloned()
             .ok_or(ModelError::NotInStack(SublayerId::root()))?;
-        let mut map = FxHashMap::default();
+        let mut map: FxHashMap<SublayerId, Sublayer> = FxHashMap::default();
         for s in sublayers {
             let id = s.id().clone();
-            if map.insert(id.clone(), s).is_some() {
+            if map.keys().any(|k| same_file_name(k, &id)) {
                 return Err(ModelError::SublayerExists(id));
             }
+            map.insert(id, s);
         }
         Ok(Stage {
             sublayers: map,
@@ -131,7 +137,7 @@ impl Stage {
     /// Add a loaded sublayer at `index` in the stack (0 = strongest).
     pub fn insert_sublayer(&mut self, sublayer: Sublayer, index: usize) -> Result<StageEvent> {
         let id = sublayer.id().clone();
-        if self.sublayers.contains_key(&id) {
+        if self.sublayers.keys().any(|k| same_file_name(k, &id)) {
             return Err(ModelError::SublayerExists(id));
         }
         self.sublayers.insert(id.clone(), sublayer);
@@ -388,6 +394,26 @@ impl Stage {
     // ---- sync ----
 
     /// Import updates (or a snapshot) for one sublayer from a collaborator.
+    /// Import several update blobs for one sublayer in one go: the mirror is rebuilt
+    /// once and one event is emitted (use this for bursts of small hub updates).
+    pub fn import_updates_batch(
+        &mut self,
+        sublayer: &SublayerId,
+        blobs: &[Vec<u8>],
+    ) -> Result<StageEvent> {
+        let layer = self
+            .sublayers
+            .get_mut(sublayer)
+            .ok_or_else(|| ModelError::UnknownSublayer(sublayer.clone()))?;
+        let changes = layer.import_batch(blobs)?;
+        Ok(self.publish(StageEvent {
+            origin: EventOrigin::Remote,
+            author: None,
+            sublayers: vec![sublayer.clone()],
+            changes,
+        }))
+    }
+
     pub fn import_updates(&mut self, sublayer: &SublayerId, bytes: &[u8]) -> Result<StageEvent> {
         let layer = self
             .sublayers

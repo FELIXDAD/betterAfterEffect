@@ -142,6 +142,10 @@ Op（JSON 里 `"op"` 字段区分）：`create_prim`、`delete_prim`、`restore_
 - `Sublayer::doc()`：底层 Loro 文档（只读使用；直接写入会绕过镜像）。
 - `Sublayer::version()`、`export_snapshot()`、`export_updates(&since)`、`Sublayer::from_snapshot(id, bytes)`。
 - `Stage::import_updates(sublayer, bytes)`：导入远端增量，返回并广播 `origin = remote` 的事件。
+- `Stage::import_updates_batch(sublayer, &[blob])`：一次导入多条增量，只重建一次镜像、只发一个事件（Hub 模式下一秒内收到很多小增量时用这个）。
+- `Sublayer::node_path(TreeID)` / `node_id(path)`：Loro 树节点和 Prim 路径互查（按 Prim 列历史差异时用），节点 ID 在改名、移动后不变。
+- 每个工程层的 Loro 文档都开启了提交时间戳（`set_record_timestamp`），历史里每次提交都有时间。
+- 只有大小写不同的工程层 ID（`Anim` 和 `anim`）会被拒绝，因为在 macOS 和 Windows 上它们会落到同一个文件。
 - `bae_model::loro` 重新导出了 Loro crate，版本由 `bae-model` 决定。
 
 ## 9. 性能（验收）
@@ -161,6 +165,7 @@ Op（JSON 里 `"op"` 字段区分）：`create_prim`、`delete_prim`、`restore_
 
 - **单位**与 AE 一致：缩放和不透明度用百分比，角度用度，位置用像素，时间用 flicks。AE 的值可以 1:1 搬过来。
 - **关键帧的时间基准**：图层上的属性（以及它下面的遮罩、效果、形状内容、标记）的关键帧用**图层时间**，移动图层时关键帧跟着走，和 AE 内部一致；`合成时间 = start_time + 图层时间 × stretch / 100`。合成上的属性用合成时间。03 求值时负责换算。
+- **AE 的十进制帧率**（回复 15 第 10 条）：AE 报告的 29.97、23.976、59.94 是十进制数（第 30 帧在 `30/29.97` 秒），不能被 flicks 整除。导入时一律换成 NTSC 有理数（`FrameRate::from_fps`：29.97 → 30000/1001 等），时间按帧号对齐（关键帧在第 n 帧就存 `frame_to_time(n)`）。两种算法一小时只差约 0.1 帧，以帧号为准，导回 AE 时也按帧号换算。不能被 flicks 整除的帧率也能用，`frame_to_time` 向上取整，保证 `time_to_frame` 能还原同一帧。
 - **图层顺序**：合成下 `layers` 文件夹里的第一个子 Prim 是最上面的图层（AE 序号 1）。
 - **图层来源**：预合成、素材、纯色都用图层的 `source` 属性（`prim_ref` 指向 Comp 或 Asset）。`references` 用于实例化其他工程（或本工程）里的 Prim 子树，例如链接的 Ai 画板、共享的角色资产。
 - **属性命名**：图层变换是 `transform:anchor_point`、`transform:position`（vec3；`transform:separate_dimensions` 打开时用 `transform:position_x/_y/_z`）、`transform:scale`（vec3，百分比）、`transform:orientation`、`transform:rotation_x`、`transform:rotation_y`、`transform:rotation`、`transform:opacity`、`transform:point_of_interest`（摄像机、灯光）。图层设置是 `name`、`kind`、`source`、`start_time`、`in_point`、`out_point`、`stretch`、`parent`、`blend_mode`、`track_matte`、`track_matte_layer`、`three_d`、`adjustment_layer`、`motion_blur`……。按图层种类区分的属性带前缀：`text:source`、`camera:*`、`light:*`、`audio:levels`、`material:*`。遮罩是单独的 `Mask` Prim，属性不加前缀：`path`、`mode`、`inverted`、`feather`、`opacity`、`expansion`。完整列表以 `schema.rs` 为准。

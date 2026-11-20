@@ -29,6 +29,7 @@ tools/ae/aectl stop                       # 不保存关闭工程并结束 AE
 | "Unable to execute script file. Scripting Plugin is not installed." | AE 还没加载完脚本插件（或者卡在上面那个框）时就发了 DoScript | 用户级 `Scripts/Startup/bae_automation_ready.jsx` 在脚本可用时写出 `ready.json`，等它出现后才发脚本 |
 | 弹 "A copy of your project was saved at …/After Effects Crash_N.aep" | 用 `SIGTERM` 结束、甚至正常 `app.quit()`，AE 都会走崩溃流程 | 结束 AE 一律用 `SIGKILL`；`stop` 先不保存关闭工程再结束进程 |
 | 脚本里调用了 `alert()` 等 | 原生模态框 | 主线程连续 3 次（约 9 秒）处在阻塞式模态循环里（`OS_Dialog::ModalLoop`、`runModalForWindow`、`_doModalLoop`），就判定卡住：保存现场 → 结束 → 清理 → 下次自动重启 |
+| 主线程停在同一个不在执行脚本的调用栈上不动（实际遇到过：挂载磁盘卷时卡在 `DiskArbitration → NetFS → NSXPC` 的同步等待里） | 不是对话框，但 AE 永远不会去执行脚本 | 有脚本在等结果时，连续约 30 秒（10 次采样）主线程调用栈完全一样、并且不在执行 ExtendScript，就判定卡死，按同样的流程恢复 |
 | 长脚本运行时主线程出现 `runModalSession` | AE 在跑长操作时一边处理一边刷新界面，并没有在等人点 | 不算卡住 |
 | 需要"允许脚本写入文件和访问网络" | 偏好 `Pref_SCRIPTING_FILE_NETWORK_SECURITY` | AE 关着的时候由 `aectl install` 打开（会先备份） |
 
@@ -38,4 +39,4 @@ tools/ae/aectl stop                       # 不保存关闭工程并结束 AE
 
 - 只支持 macOS。Windows 版以后再说（AfterFX.exe `-r` / COM）。
 - 恢复时会丢掉 AE 里没保存的内容。自动化脚本应该自己保存需要的结果。
-- 同一时间只跑一个 AE 实例，多个 Agent 要排队用（`aectl` 不加锁，调用方自己串行）。
+- 同一时间只有一个 AE 实例。`start` / `eval` / `run` / `stop` 会拿一把互斥锁（`/private/tmp/bae-ae-automation/lock.d`），多个 Agent 同时调用时会自动排队（默认最多等 30 分钟，`--lock-timeout` 可调），持锁的进程退出后锁自动释放。用完**不要** `stop`：后面的调用会复用正在运行的 AE，`stop` 只在 AE 出问题时用。
