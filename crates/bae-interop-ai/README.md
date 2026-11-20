@@ -20,7 +20,7 @@ bridges/ai 导出的 JSON ─┼─► AiDocument ──plan_import──► Com
 | `CommandBatch` / `BatchStep` | 命令批次，只用 `prim.create`、`attr.set` 两个内置命令。JSON 形状与 Agent 工具 `command.batch` 的参数一致，Agent 可以先看再提交 |
 | `CommandBatch::execute(&registry, &mut stage, &author)` | 作为**一个撤销步骤**执行，任何一步失败都整体回滚，错误里写明是第几步 |
 | `import_ai(path, &stage, &options)` | 读文件并规划（任务书里的 `import_ai(path) -> 命令批次`） |
-| `read_document(path)` / `read_bytes(name, bytes)` / `sniff(bytes)` | 读取与格式识别（PDF 兼容的 .ai、PDF、桥接 JSON；不带 PDF 兼容的旧 .ai 会提示重新保存） |
+| `read_document(path)` / `read_bytes(name, bytes)` / `sniff(bytes)` | 读取与格式识别。PDF 兼容的 .ai 和 PDF 由内置的 PDF 读取器读（`src/pdf/`，不引入 lopdf 等外部库）；桥接 JSON 由 Illustrator 一侧的 `bridge.rs` 读；不带 PDF 兼容的旧 .ai 会提示重新保存 |
 | `ai.import`（`ImportAi`，`register_commands`） | 同一件事做成命令，菜单「文件 > 导入」和 Agent（MCP）直接调用，参数是 `file` 加 `ImportOptions` 的各项，返回 `ImportReport` |
 | `ImportOptions` | 合成放在哪个文件夹（默认 `/comps`）、导入哪些画板、帧率、时长、是否同时建 `Artboard` Prim、文字怎么导、隐藏内容是否跳过 |
 | `ImportReport` | 新建的合成和画板 Prim、形状图层 / 文字图层 / 路径数量、警告（哪些东西做了近似或没导入） |
@@ -40,14 +40,36 @@ bridges/ai 导出的 JSON ─┼─► AiDocument ──plan_import──► Com
 ## 进度
 
 - [x] 公共接口：中间表示、命令批次、规划器、`ai.import` 命令
-- [ ] .ai / PDF 读取（下一个 PR）
-- [ ] Illustrator 导出脚本 `bridges/ai/` 与 JSON 读取
+- [x] .ai / PDF 读取
+- [ ] Illustrator 导出脚本 `bridges/ai/` 与 JSON 读取（Illustrator 一侧，`interop/ai-bridge`）
 - [ ] 剪贴板粘贴、导出 PDF / SVG / .jsx
+
+## .ai / PDF 读取（`src/pdf/`）
+
+Illustrator 保存 .ai 时默认「创建 PDF 兼容文件」，里面是一份完整的 PDF。读取器按 Illustrator 25–30 的写法解析：
+
+| Illustrator 写法 | 读成 |
+|---|---|
+| 每个画板一页，CropBox = 画板 | `Artboard`（名称按「Artboard N」，PDF 里没有画板名；位置按顺序横排，间隔 20 pt） |
+| 顶层图层 = 可选内容组（OCG），`/D /Order` 是图层顺序，`/OFF` 是隐藏 | `AiLayer`（名称、顺序、可见性）；嵌套的可选内容组读成以子图层命名的编组 |
+| 路径 `m l c v y h re` + `S f f* B B*…` | `AiPath`，几何换到画板空间；填充时省略 `h` 的闭合路径会补上闭合 |
+| 同一路径的填充和描边分两次写 | 合并回一个路径（描边在上） |
+| 渐变 = 剪切路径 + `sh`；渐变描边 = 图案描边 | 线性 / 径向渐变，色标来自函数的分段点（类型 0/2/3/4），焦点偏移换成高光长度和角度 |
+| 编组的不透明度 / 混合模式 = 透明组 Form XObject | `AiGroup`（只包一个路径时并到路径上） |
+| 剪切组 = `W n` 剪切，q/Q 与图层的 BDC/EMC 互相交错 | 按每个对象自己的剪切栈重建剪切组；与画板一样大或包住对象的矩形剪切直接去掉 |
+| 文字：一个 `BT` 里可能有多个文字框，路径文字每个字一个 `Tm` | 按落点拆分成 `AiText`（同一行续写、下一行换行、其余另起一项）；字符用 ToUnicode、简单字体编码，或 Adobe 字符集的 ASCII 段解码 |
+| 颜色：灰度、RGB、CMYK、ICC、索引、专色（Separation / DeviceN）、Lab | 直通 RGB（不做色彩管理，CMYK 用简单公式） |
+| 文件结构：xref 表 / xref 流、对象流、增量更新、Flate / ASCII85 / ASCIIHex / RunLength / LZW、PNG 预测器 | 全部支持；xref 损坏时扫描 `n g obj` 重建；畸形输入只报错不崩溃 |
+
+PDF 里看不到的东西（普通编组、对象和画板的名字、锁定、符号、不透明蒙版、外观的结构）需要 Illustrator 桥接导出。
 
 ## 测试
 
 ```sh
 cargo test -p bae-interop-ai
+cargo run -p bae-interop-ai --example ai_dump -- some.ai   # 看读出来的结构
 ```
+
+`tests/pdf.rs`：在测试里按 Illustrator 的写法生成 PDF（两种交叉引用方式各一份：普通 xref 表，以及 Flate + 对象流 + xref 流），检查图层顺序和可见性、复合路径和虚线描边、线性 / 径向渐变、透明组、剪切组、CID 文字、多画板，再走一遍导入、求值和显示列表；截断和随机改字节的文件不会崩溃，startxref 错误能扫描修复。真机数据（Illustrator 30 导出的 `tests/data/illustrator/*.ai`，由 Illustrator 一侧提供）存在时会逐项检查，不存在时跳过；`BAE_AI_TEST_DATA` 可以指向别的目录。
 
 `tests/import.rs`：在代码里搭一个 Ai 文档（复合路径 + 奇偶填充 + 虚线描边、线性和径向渐变、半透明正片叠底、编组里的文字、剪切组、隐藏锁定图层），生成命令批次、执行、用 03 求值、用 05 生成显示列表，再与文档自己的形状树逐项比对几何、绘画、渐变和不透明度；另外检查撤销、重名、失败回滚、批次 JSON 和命令注册。

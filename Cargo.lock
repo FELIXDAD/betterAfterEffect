@@ -374,6 +374,7 @@ dependencies = [
  "bae-anim",
  "bae-model",
  "bae-vector",
+ "flate2",
  "kurbo",
  "schemars",
  "serde",
