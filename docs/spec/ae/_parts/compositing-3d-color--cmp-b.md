@@ -21,15 +21,15 @@
   - Per-composition setting (Composition Settings > 3D Renderer tab, also the renderer menu at the top-right of the Composition panel).
   - | Renderer (中文) | Since / status | Scripting `CompItem.renderer` string | BAE priority |
     |---|---|---|---|
-    | Classic 3D (经典 3D) | default; called "Advanced 3D" renderer internally before CC 2015 | `ADBE Advanced 3d` | P0 |
-    | CINEMA 4D (CINEMA 4D) | AE CC 2015 (13.5) – deprecated in AE 24.x, no longer shipped for new installs UNVERIFIED: exact removal version | `ADBE Calder` | P2 |
-    | Ray-traced 3D (光线追踪 3D) | AE CS6 (11.0) – removed in AE CC 2015 era UNVERIFIED: hidden since 13.5, fully removed ~AE 2020 | `ADBE Ernst` | P2 (not implemented; load as Classic 3D) |
+    | Classic 3D (经典 3D) | default; the internal id keeps the pre-CS6 name "Advanced 3D" (UI name Classic 3D since CS6) | `ADBE Advanced 3d` | P0 |
+    | CINEMA 4D (CINEMA 4D) | AE CC 2015 (13.5) – still listed in current AE (the Advanced 3D help calls Advanced 3D "an additional rendering option to Classic 3D and Cinema 4D"); since AE 23.0 it needs the Cinema 4D add-on installed via Creative Cloud. UNVERIFIED: any formal deprecation | `ADBE Calder` | P2 |
+    | Ray-traced 3D (光线追踪 3D) | AE CS6 (11.0); labelled deprecated after CINEMA 4D arrived (13.5); removed in AE 17.0 (AE 2020, 2019-11) | `ADBE Ernst` | P2 (not implemented; load as Classic 3D) |
     | Advanced 3D (高级 3D) | AE 24.0 (2023-10) | UNVERIFIED: `ADBE Mercury 3d` | P2 |
-  - The default for new comps is Classic 3D. `CompItem.renderers` lists the installed renderers.
+  - The default for new comps is Classic 3D; adding a 3D model layer switches the comp to Advanced 3D automatically. `CompItem.renderers` lists the installed renderers (strings above; `CompItem.renderer` is read/write).
   - Rendering contract: the renderer is called once per **3D group ("bin")** of contiguous 3D layers (AE-CMP-406); 2D layers are composited by the normal 2D pipeline.
 - **Priority:** P0 (Classic 3D only; others P2)
 - **Owner:** bae-render (+ bae-model)
-- **Notes:** BAE decision: implement Classic 3D semantics first; when loading an AE project whose comp uses CINEMA 4D / Ray-traced / Advanced 3D, keep the renderer string in data, render with the Classic 3D path and show a "renderer substituted" warning. Composition Settings dialog layout: see project-comp-layers.md, Composition Settings.
+- **Notes:** Source for Ray-traced removal: Adobe community thread "AE 17.0 no 3D ray-traced option" (https://community.adobe.com/t5/after-effects-discussions/ae-17-0-no-3d-ray-traced-option/m-p/10736255). BAE decision: implement Classic 3D semantics first; when loading an AE project whose comp uses CINEMA 4D / Ray-traced / Advanced 3D, keep the renderer string in data, render with the Classic 3D path and show a "renderer substituted" warning. Composition Settings dialog layout: see project-comp-layers.md, Composition Settings.
 
 ### AE-CMP-402 · Classic 3D perspective projection pipeline (经典 3D 渲染器)
 
@@ -77,7 +77,7 @@
 
 - **What it does:** Decides which 3D layer appears in front in a 3D group: by depth from the camera, not by Timeline stacking order.
 - **Exact semantics:**
-  - Inside one 3D group (AE-CMP-406) the Classic 3D renderer composites layers by camera-space depth per pixel (it is a depth-resolved renderer since AE 7.0), so the visible result equals: for every comp pixel, collect each layer fragment covering it with its camera-space depth `zc`, sort far→near, composite with each layer's opacity and blend mode.
+  - Inside one 3D group (AE-CMP-406) the Classic 3D renderer composites layers by camera-space depth per pixel (it resolves intersections, AE-CMP-405), so the visible result equals: for every comp pixel, collect each layer fragment covering it with its camera-space depth `zc`, sort far→near, composite with each layer's opacity and blend mode.
   - Ties (exactly coplanar layers, or equal depth at a pixel): the layer higher in the Timeline stacking order (lower index) is in front.
   - Non-intersecting whole-layer ordering, where AE needs one (e.g. for the CPU legacy path and for shadows): sort by camera-space distance of the layer's centre. UNVERIFIED: AE documentation never states whether layer centre or anchor point is used; community reports favour the layer bounding-box centre for Classic 3D. BAE decision: use per-pixel depth (exact) so the question only affects AE-incompatible corner cases.
   - Semi-transparent layers composite correctly in depth order (no order-dependent artefacts) because sorting is per fragment.
@@ -96,7 +96,7 @@
   - Shadows cast across intersections leave a gap near the intersection line whose width depends on the shadow-map resolution (AE-CMP-408).
 - **Priority:** P0
 - **Owner:** bae-render
-- **Notes:** Falls out of AE-CMP-404's per-pixel ordering. Before AE 7.0 the "Standard 3D" renderer sorted whole layers and did not intersect; BAE does not reproduce that.
+- **Notes:** Falls out of AE-CMP-404's per-pixel ordering. Very old AE versions offered a "Standard 3D" renderer that sorted whole layers and did not intersect (UNVERIFIED: the AE version in which the intersecting "Advanced 3D" renderer, today Classic 3D, became the default); BAE does not reproduce Standard 3D.
 
 ### AE-CMP-406 · 3D group splitting by 2D and special layers (3D 图层分组 / 3D 箱)
 
@@ -124,7 +124,7 @@
   - a 3D precomp layer without Collapse Transformations;
   - a collapsed 3D precomp that contains any 2D layer (its content becomes a flat image).
   - Collapsed precomp with all-3D content: its 3D layers join the outer group individually (they intersect and shadow outer layers); in exchange the precomp layer's own blend mode, quality and motion blur switches are ignored.
-  - Lights are not limited by groups: a light lights 3D layers in every group of the comp (subject to the light's own Adjustment Layer scope, AE-CMP-443). Shadows and intersections never cross a group boundary.
+  - Lights are not limited by groups: a light lights 3D layers in every group of the comp (subject to the light's own Adjustment Layer scope, AE-CMP-435). Shadows and intersections never cross a group boundary.
 - **Priority:** P0
 - **Owner:** bae-render
 - **Notes:** "3D bins" is the term used in the AE 3D Design Space help (2023+). Collapse Transformations semantics: see compositing-3d-color.md, Collapse transformations / continuous rasterize. Shadows on a 3D layer with a track matte only stay correct if both are precomposed (non-collapsed); AE quirk, not a BAE requirement.
@@ -157,16 +157,15 @@
 
 ### AE-CMP-409 · Draft 3D mode (草图 3D)
 
-- **What it does:** A comp-level preview switch that makes 3D interaction fast by disabling expensive 3D features; it never affects final renders.
+- **What it does:** A comp-level preview switch that makes 3D interaction fast; it never affects final renders.
 - **Exact semantics:**
-  - Toggle: Draft 3D button at the top of the Timeline panel / Composition panel toolbar (AE 2023+); applies to all views of the comp.
-  - Effect in Classic 3D: disables all lights (layers render unlit, as if no light existed → full brightness), all shadows, and camera depth-of-field blur.
-  - Effect in Advanced 3D: renders with the real-time draft engine; enables the 3D Ground Plane and Extended Viewer buttons (AE-CMP-411).
-  - Render Queue / headless output always renders full quality regardless of Draft 3D.
-  - History: before AE 23.0 (2022-10) the equivalent was the Fast Previews mode "Fast Draft"; in AE 24.0 (2023) Fast Previews was simplified, Fast Draft became Draft 3D and the "Draft" mode was removed. UNVERIFIED: exact version mapping (zh-CN help: 快速绘图命名为草图 3D… "草图"模式已移除).
+  - Toggle: Draft 3D button (Composition panel toolbar in current AE; historically at the top of the Timeline panel); applies to all views of the comp. Scripting `CompItem.draft3d` (Boolean, read/write).
+  - Classic semantics (documented in the Previews help, still valid as the minimum contract): disables all lights (3D layers render unlit, as if no light existed), all shadows, and camera depth-of-field blur.
+  - Since AE 18.0 (2021-03, "3D Design Space") Draft 3D additionally switches the viewer to the GPU real-time draft engine (today the Advanced 3D engine, "only intended for draft quality") and enables the 3D Ground Plane and Extended Viewer buttons (AE-CMP-411). This real-time draft preview replaced the old OpenGL "Fast Draft" Fast Previews mode (AE-CMP-467). Help note: with Draft 3D on, some effects may not render on precomps.
+  - Render Queue / headless output always renders at full quality regardless of Draft 3D.
 - **Priority:** P1
-- **Owner:** bae-render (+ bae-ui-motion)
-- **Notes:** Stored per comp (`CompItem.draft3d`, Boolean, UNVERIFIED name). Fast Previews menu: AE-CMP-467.
+- **Owner:** bae-render (+ bae-ui-motion, bae-model)
+- **Notes:** Stored per comp. Sources: https://helpx.adobe.com/after-effects/using/previewing.html (Preview modes: "Draft 3D … Disables lights, shadows, and depth-of-field blur for cameras"), real-time-engine help page "What is Draft 3D Preview", CG Channel on AE 18.0 (real-time 3D Draft preview replaces the OpenGL Fast Draft mode). BAE decision: implement the classic contract (no lights/shadows/DOF) on the normal renderer; BAE's renderer is already GPU real-time. Fast Previews menu: AE-CMP-467.
 
 ### AE-CMP-410 · 3D views (3D 视图)
 
@@ -184,8 +183,8 @@
 
 - **What it does:** Viewer aids available with Draft 3D: a grid ground plane at comp y-floor and a viewer that shows 3D content outside the comp frame.
 - **Exact semantics:**
-  - Both buttons appear in the Composition panel bottom toolbar when Draft 3D is on (AE 23.0, 2022-10, 3D Design Space; UNVERIFIED version). Ground Plane is on by default when Draft 3D is enabled.
-  - Extended Viewer renders the 3D scene beyond the comp bounds (pasteboard), with an adjustable opacity slider for the out-of-frame region; effects on collapsed precomps may still be clipped at the comp edge.
+  - Both buttons appear in the Composition panel bottom toolbar only when Draft 3D is on. Ground Plane shipped with the real-time Draft 3D preview in AE 18.0 (2021-03); Extended Viewer shortly after (UNVERIFIED: exact 18.x version). Ground Plane is on by default when Draft 3D is enabled; its grid scales progressively while dollying, and a scene-centre locator shows the X/Y/Z axes at the comp centre.
+  - Extended Viewer renders the 3D scene beyond the comp bounds (pasteboard), with an opacity slider (press and hold the button) for the out-of-frame region.
   - Neither affects output.
 - **Priority:** P2
 - **Owner:** bae-ui-motion (+ bae-render)
@@ -197,24 +196,24 @@
 - **Exact semantics:** View > Create Camera from 3D View: new two-node camera layer at the top of the stack, Position/POI/Zoom copied from the current view camera at the current time; becomes the active camera. UNVERIFIED: one-node vs two-node type of the created camera.
 - **Priority:** P2
 - **Owner:** bae-motion (+ bae-ui-motion)
-- **Notes:** AE 23.x 3D Design Space.
+- **Notes:** Part of the 3D Design Space features (AE 18.x, UNVERIFIED exact version).
 
 ### AE-CMP-413 · Advanced 3D renderer (高级 3D 渲染器)
 
-- **What it does:** GPU physically-based composition renderer (AE 24.0, 2023) used for imported 3D models (glTF/GLB/OBJ/FBX), environment lights with HDRI image-based lighting, extrusion and bevels, and Adobe Standard Material on 3D layers.
+- **What it does:** GPU physically-based composition renderer (AE 24.0, 2023-10) used for imported 3D models (GLTF, GLB, OBJ, FBX per current help), environment lights with HDRI image-based lighting, extruded text/shape layers, and Adobe Standard Material on 3D layers. It is the only renderer that can render 3D model layers.
 - **Exact semantics:**
   - Renders 3D groups like Classic 3D (same grouping rules), but layers are shaded with a PBR material (Adobe Standard Material) using Material Options extensions (AE-CMP-441, AE-CMP-442); lights: Parallel/Spot/Point/Ambient and Environment (AE-CMP-439).
-  - Shadows: only Environment lights cast shadows in the early releases (24.x); point/spot shadows later UNVERIFIED.
-  - Renderer Options: shadow-map / quality settings (anti-aliasing, shadow resolution) UNVERIFIED: exact fields.
-  - Requires a supported GPU (Metal on macOS 12+, 16 GB RAM on Apple silicon; DirectX 12 / CUDA class GPU on Windows).
+  - Shadows: Environment light shadows first; current versions allow up to eight shadow-casting Spot and Parallel lights plus one Environment light (Point lights are not listed as shadow casters). UNVERIFIED: version that added Spot/Parallel shadows (25.x).
+  - Advanced 3D Render Options dialog (3D Renderer menu > Rendering Options): Render Quality slider (interactive vs final quality trade-off); Shadows: Resolution (Half 2 MB, Full 16 MB, Double 128 MB), Smoothness (1–32; follows Render Quality unless set), Casting Box Size, Casting Box Center, Fit to Scene button. Resolution/Smoothness apply to Environment-light shadows only.
+  - System requirements (help): macOS 12.0+ with Metal, ≥ 16 GB RAM, Intel Macs need a discrete GPU with ≥ 4 GB VRAM; Windows: discrete GPU with ≥ 4 GB VRAM from the supported list.
 - **Priority:** P2
 - **Owner:** bae-render
 - **Notes:** BAE decision: out of scope for M1; keep the comp setting and material data round-tripping. 3D model layers: see project-comp-layers.md, Layer types.
 
 ### AE-CMP-414 · CINEMA 4D composition renderer (CINEMA 4D 合成渲染器)
 
-- **What it does:** Legacy (AE 13.5–24.x) CPU renderer from Maxon that extrudes and bevels text/shape layers and bends footage layers, with a Quality slider.
-- **Exact semantics:** Options dialog: Quality slider (adjusts Ray Threshold, Ray Depth, Reflection Depth, Shadow Depth), Anti-Aliasing (default Geometry, 16×16 sub-pixels), Reflectance (default Layer Sampling). Geometry Options (Bevel Style, Bevel Depth, Hole Bevel Depth, Extrusion Depth, Curvature, Segments) become active. Deprecated in AE 24.x in favour of Advanced 3D.
+- **What it does:** CPU renderer from Maxon (AE CC 2015, 13.5 onward) that extrudes and bevels text/shape layers and bends footage layers, with a Quality slider.
+- **Exact semantics:** Options dialog: Quality slider (adjusts Ray Threshold, Ray Depth, Reflection Depth, Shadow Depth), Anti-Aliasing (default Geometry, 16×16 sub-pixels), Reflectance (default Layer Sampling). Quality slider range Draft – Typical – Extreme. Geometry Options (Bevel Style, Bevel Depth, Hole Bevel Depth, Extrusion Depth, Curvature, Segments) become active. Renderer Settings can point at a full retail Cinema 4D installation (Choose Installation / Defaults). Since AE 23.0 the Cinema 4D add-on must be installed via Creative Cloud. UNVERIFIED: Anti-Aliasing/Reflectance defaults quoted above.
 - **Priority:** P2
 - **Owner:** bae-render
 - **Notes:** BAE decision: not implemented; Geometry Options data is preserved and later honoured by BAE's extrusion path (shared with Advanced 3D).
@@ -222,7 +221,7 @@
 ### AE-CMP-415 · Ray-traced 3D renderer (removed) (光线追踪 3D 渲染器)
 
 - **What it does:** Historical NVIDIA OptiX-based renderer (AE CS6 11.0) supporting reflections, transparency/refraction, environment layers, bending and extrusion.
-- **Exact semantics:** Material options specific to it: Reflection Intensity/Sharpness/Rolloff, Transparency, Transparency Rolloff, Index of Refraction; comp options Ray-tracing Quality, Anti-aliasing Filter (Box/Tent/Cubic). Removed from current AE (renderer list no longer offers it; projects open with Classic 3D).
+- **Exact semantics:** Material options specific to it: Reflection Intensity/Sharpness/Rolloff, Transparency, Transparency Rolloff, Index of Refraction; comp options Ray-tracing Quality, Anti-aliasing Filter (Box/Tent/Cubic). Removed in AE 17.0 (AE 2020); projects that used it open with Classic 3D.
 - **Priority:** P2
 - **Owner:** bae-render
 - **Notes:** BAE decision: never implemented; on import map `ADBE Ernst` to Classic 3D and preserve the extra material properties as opaque data.
@@ -241,7 +240,8 @@
     |---|---|---|
     | One-Node Camera (单节点摄像机) | orientation from Orientation/Rotation only; POI property hidden | `autoOrient = AutoOrientType.NO_AUTO_ORIENT` |
     | Two-Node Camera (双节点摄像机) | additionally aims at Point of Interest (look-at), = Auto-Orient "Orient Towards Point of Interest" | `AutoOrientType.CAMERA_OR_POINT_OF_INTEREST` |
-    Default: Two-Node Camera. UNVERIFIED: the dialog may remember the last-used type.
+    Default: Two-Node Camera (factory). UNVERIFIED: whether the dialog remembers the last-used type.
+    Changing Type later is equivalent to Layer > Transform > Auto-Orient (Off ↔ Orient Towards Point of Interest); help states the two are the same thing.
   - Parenting: cameras can be parented / be parents like any layer (see project-comp-layers.md, Parenting).
   - Camera layer Video switch off ⇒ the camera is ignored for active-camera selection.
 - **Priority:** P0
@@ -256,20 +256,21 @@
   |---|---|---|---|---|---|
   | Type (类型) | enum | Two-Node Camera | One-Node / Two-Node | — | AE-CMP-416 |
   | Name (名称) | string | "Camera N" (N = 1 + count of existing cameras) | — | — | localized "摄像机 N" |
-  | Preset (预设) | enum | 50mm | 15mm, 20mm, 24mm, 28mm, 35mm, 50mm, 80mm, 135mm, 200mm, Custom | — | sets Zoom, AOV, Focal Length, Focus Distance, Aperture; any manual edit switches to Custom; user presets can be saved/deleted (disk icons) |
+  | Preset (预设) | enum | 50mm (help: "The default preset is 50mm") | 15mm, 20mm, 24mm, 28mm, 35mm, 50mm, 80mm, 135mm, 200mm, Custom | — | sets Zoom, AOV, Focal Length, Focus Distance, Aperture; any manual edit switches to Custom; user presets can be saved/deleted (disk icons) |
   | Zoom (缩放 / 变焦) | float | from preset (50mm: W·50/36) | > 0 UNVERIFIED: min 1 px | px (or selected Units) | AE-CMP-418 |
   | Angle of View (视角) | float | from preset (50mm horizontal: 39.60°) | (0, 180) | degrees | measured per Measure Film Size |
   | Enable Depth of Field (启用景深 / 景深) | bool | off | — | — | |
   | Focus Distance (焦点距离) | float | = Zoom | > 0 | px | |
-  | Lock to Zoom (锁定到缩放) | bool | on UNVERIFIED | — | — | keeps Focus Distance = Zoom while editing in the dialog only |
-  | Aperture (光圈) | float | preset-derived UNVERIFIED: 25.3 px for 50mm at W = 1920 | ≥ 0 | px | AE-CMP-419 |
-  | F-Stop (光圈大小) | float | = focal / aperture_mm UNVERIFIED: ≈105.4 for that default | > 0 | — | linked to Aperture |
+  | Lock to Zoom (锁定到缩放) | bool | on UNVERIFIED | — | — | makes Focus Distance = Zoom; the lock is dialog-only: editing Zoom or Focus Distance in the Timeline unlocks them (help) |
+  | Aperture (光圈) | float | preset-derived (each preset sets Aperture) UNVERIFIED: exact per-preset values; community recollection is "25.3" for 50mm but whether that number is px or mm is unconfirmed | ≥ 0 | px (or selected Units) | AE-CMP-419 |
+  | F-Stop (光圈大小) | float | derived: focal_length_mm / aperture_mm (AE-CMP-419) | > 0 | — | editing F-Stop changes Aperture and vice versa |
   | Blur Level (模糊层次) | float | 100 | 0–∞ UNVERIFIED: dialog allows > 100 | % | scales DOF blur |
   | Film Size (胶片大小) | float | 36 | > 0 | mm (or Units) | |
   | Focal Length (焦距) | float | 50 | > 0 | mm (or Units) | |
   | Units (单位) | enum | pixels | pixels, inches, millimeters | — | display units for Zoom, Focus Distance, Aperture, Film Size, Focal Length |
   | Measure Film Size (测量胶片大小) | enum | Horizontally | Horizontally, Vertically, Diagonally | — | AE-CMP-418 |
   | Preview (预览) | bool | on | — | — | live preview in viewer while dialog is open |
+  - Selecting a preset always resets Film Size to 36 mm (35 mm-film presets), even after a custom Film Size was entered.
   - OK on a new camera creates the layer; OK on an existing camera writes Zoom/Focus Distance/Aperture/Blur Level/Depth of Field into Camera Options at the current time (adds a keyframe if the property is keyframed). Type change toggles the layer's auto-orient.
   - Default Camera Settings and Custom View settings reuse this dialog (AE-CMP-403).
 - **Priority:** P0 (P1 for Units and Measure Film Size options)
@@ -297,7 +298,7 @@
   //                         (presets are defined on a 36 mm *horizontal* film, so in Diagonal mode
   //                          the 50mm preset still gives zoom = W*50/36 and shows AOV 44.9° at 1920x1080)
   ```
-  UNVERIFIED: the exact behaviour when Measure Film Size changes (whether Film Size or Zoom is held); the 1920×1080 diagonal value 44.9° quoted by community sources supports "Zoom held".
+  UNVERIFIED: the exact behaviour when Measure Film Size changes (whether Film Size or Zoom is held). Supporting evidence for "Zoom held": ProVideo Coalition (Chris Zwar, "Inside the After Effects camera") reports the default 50mm camera at 1920×1080 as Zoom 2666.7 px with a diagonal Angle of View of 44.9° (entering 44.885° reproduces 2666.7), i.e. the diagonal AOV of zoom = W·50/36.
   Preset table (Measure = Horizontally, film 36 mm; zoom shown for W = 1920, H = 1080):
   | Preset | Focal (mm) | Zoom (px) | AOV h (°) | AOV v (°) | AOV diag (°) |
   |---|---|---|---|---|---|
@@ -351,9 +352,9 @@
   | Iris Diffraction Fringe (光圈衍射条纹) | float | 0 | UNVERIFIED: 0–500 | — | `ADBE Iris Diffraction Fringe` |
   | Highlight Gain (高光增益) | float | 0 | 0–100 | — | `ADBE Iris Highlight Gain` |
   | Highlight Threshold (高光阈值) | float | 255 | 0–255 (8-bpc scale; 0–1 shown in 32 bpc UNVERIFIED) | level | `ADBE Iris Highlight Threshold` |
-  | Highlight Saturation (高光饱和度) | float | 0 | 0–100 | — | `ADBE Iris Hightlight Saturation` (sic, misspelled matchName) |
+  | Highlight Saturation (高光饱和度) | float | 0 | 0–100 | — | `ADBE Iris Hightlight Saturation` (sic, misspelled matchName; confirmed in docsforadobe Camera Layer Match Names) |
   - Group matchName `ADBE Camera Options Group`. Editing Zoom or Focus Distance in the Timeline breaks Lock to Zoom (it is not a persisted link).
-  - All Iris/Highlight Chinese names: （译名待核） except 光圈 (Aperture).
+  - All Iris/Highlight Chinese names（译名待核） except 光圈 (Aperture). Zoom: zh-CN help uses 缩放. Iris/Highlight defaults mirror the Camera Lens Blur effect defaults (Fast Rectangle, Gain 0, Threshold 255, Saturation 0) UNVERIFIED for the camera group.
 - **Priority:** P0 (Zoom, Depth of Field, Focus Distance, Aperture, Blur Level); P2 (Iris/Highlight)
 - **Owner:** bae-model (+ bae-render)
 - **Notes:** Expression access: `thisComp.activeCamera.zoom`, camera object attributes `pointOfInterest`, `zoom`, `depthOfField`, `focusDistance`, `aperture`, `blurLevel`, `irisShape` etc. — see transform-keyframes-expressions.md, Camera object. Lottie exports only Zoom (`pe`).
@@ -379,7 +380,7 @@
 
 ### AE-CMP-422 · Iris shape and highlight (bokeh) controls (光圈形状和高光（译名待核）)
 
-- **What it does:** Shapes the DOF blur kernel (bokeh) and boosts bright highlights inside the blur, mimicking real lens blur. Added in AE CS6 (11.0).
+- **What it does:** Shapes the DOF blur kernel (bokeh) and boosts bright highlights inside the blur, mimicking real lens blur. UNVERIFIED: added in AE CS6 (11.0).
 - **Exact semantics:**
   - Iris Shape enum (menu order, scripting value 1-based UNVERIFIED): Fast Rectangle (快速矩形) 1, Triangle (三角形) 2, Square (正方形) 3, Pentagon (五边形) 4, Hexagon (六边形) 5, Heptagon (七边形) 6, Octagon (八边形) 7, Nonagon (九边形) 8, Decagon (十边形) 9. Fast Rectangle uses a fast separable box approximation; others use a polygon kernel.
   - Iris Rotation rotates the polygon; Iris Roundness blends polygon → circle (100 % = circle); Iris Aspect Ratio stretches the kernel horizontally (>1) / vertically (<1) UNVERIFIED direction; Diffraction Fringe brightens the kernel rim.
@@ -439,9 +440,9 @@
 - **Owner:** bae-effects (+ bae-plugin)
 - **Notes:** Effect-specific behaviour: see effects.md (Perspective, Simulation). BAE: expose `EvaluatedComp.active_camera()` and `lights()` to effects and plug-ins.
 
-### AE-CMP-427 · Create Stereo 3D Rig (创建立体 3D 装置（译名待核）)
+### AE-CMP-427 · Create Stereo 3D Rig (创建立体 3D 设备)
 
-- **What it does:** Layer > Camera > Create Stereo 3D Rig builds a stereo rig: a master camera, left/right eye cameras in precomps, a 3D Glasses output comp and a control null with Stereo Scene Depth, Convergence etc.
+- **What it does:** Layer > Camera > Create Stereo 3D Rig (AE CS5.5+) builds a stereo rig: a master camera, left/right eye cameras in precomps, a 3D Glasses output comp and a control null with Stereo Scene Depth, Convergence etc.
 - **Exact semantics:** Generates comps/layers/expressions only (no new renderer feature). UNVERIFIED: exact controls (Stereo Scene Depth, Interaxial Separation, Convergence Of, Z Offset, 3D View, Enable Depth of Field, Swap Left-Right).
 - **Priority:** P2
 - **Owner:** bae-motion
@@ -453,7 +454,7 @@
 - **Exact semantics:**
   - Layer `ty: 13`; `pe` = perspective = Zoom (px), animatable; transform `ks.p` position, `ks.a` = Point of Interest (two-node; absent for one-node), `ks.or`, `ks.rx`, `ks.ry`, `ks.rz`. No DOF/iris data.
   - Players: lottie-web supports cameras only in the HTML renderer (CSS `perspective: pe px`, view matrix = inverse camera transform with y/z sign conventions), SVG/Canvas renderers ignore cameras; Skottie supports `ty 13` with the same projection.
-  - Export requires the comp to have a camera and 3D layers (`ddd: 1`).
+  - Bodymovin exports the camera only when 3D layers exist (`ddd: 1`) UNVERIFIED. lottie-web `HCameraElement` reads `pe`, `ks.p` (or split `ks.p.x/y/z`), optional `ks.a`, `ks.or`, `ks.rx`, `ks.ry`, `ks.rz`; Lottie docs: "small values of `pe` yield a stronger perspective".
 - **Priority:** P1
 - **Owner:** bae-media (+ bae-anim)
 - **Notes:** Lottie export settings in general: see ui-preview-render-io.md, Lottie export.
