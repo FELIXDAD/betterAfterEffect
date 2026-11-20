@@ -45,11 +45,15 @@
 
 ## 进度
 
-- [ ] 公共类型与 trait 合并进 dev
-- [ ] 分层组合与引用
-- [ ] 命令、事务、撤销
-- [ ] Prim schema 初版
-- [ ] 工程文件读写
-- [ ] spec 文档
+- [x] 公共类型与 trait（PR A）：`Time`/`FrameRate`/`TimeRange`、`PrimPath`、`Value`、`AttrSpec`/`Keyframe`/`Expression`、`PrimType`/`PrimSpec`/`PrimTree`/`Reference`、`SublayerId`/`AuthorId`、`Op`/`Edit`、`StageEvent`、`Command`/`DynCommand`/`CommandRegistry`。
+- [x] Sublayer 用 Loro 存储（movable tree + 可合并 map），内存镜像；快照与增量导入导出。
+- [x] 层叠强弱解析、值来源查询、自动补 `over`；命名空间操作作用于所有层。
+- [x] 事务、按作者撤销/重做、失败回滚；StageEvent 订阅（关键帧精确时间范围）。
+- [x] 基础命令 12 个（见 `docs/spec/data-model.md` 第 6 节）。
+- [x] 验收：1 万 Prim 打开 111 ms、修改到事件 5.3 µs（release，M4）；两个 Stage 并发修改同一 Sublayer 后合并一致（测试）。
+- [x] 分层引用（含跨工程、嵌套、防循环、改动传播到引用方）、`opinion.move` 下推、`sublayer.merge` 合并、`Stage::flatten`（PR B）
+- [ ] 工程文件读写、`.baez`、`export-json`、版本迁移、素材引用（PR C）
+- [ ] Prim schema 初版、效果参数模型、插件数据（PR D）
+- [x] spec 文档初稿：`docs/spec/data-model.md`（随 PR 逐步补全；`project-format.md` 在 PR C）
 
 ## 请求（其他工作流在这里留言）
