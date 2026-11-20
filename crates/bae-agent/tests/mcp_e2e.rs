@@ -1,5 +1,6 @@
 //! End-to-end: MCP clients talk to `BaeMcpServer` over an in-process byte pipe, both
-//! through rmcp's client and with hand-written JSON-RPC lines.
+//! through rmcp's client (the official SDK, to check interoperability) and with
+//! hand-written JSON-RPC lines.
 
 use std::sync::Arc;
 
@@ -26,15 +27,29 @@ impl ClientHandler for TestClient {
     }
 }
 
+/// Drive the server's JSON-RPC handler (the same one `bae mcp` runs on stdio) over
+/// an async byte stream.
+async fn serve(server: BaeMcpServer, io: tokio::io::DuplexStream) {
+    let (read, mut write) = tokio::io::split(io);
+    let mut lines = BufReader::new(read).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        if let Some(reply) = server.handle_line(&line)
+            && write
+                .write_all(format!("{reply}\n").as_bytes())
+                .await
+                .is_err()
+        {
+            break;
+        }
+    }
+}
+
 async fn connect(
     server: BaeMcpServer,
     client_name: &'static str,
 ) -> RunningService<RoleClient, TestClient> {
     let (server_io, client_io) = tokio::io::duplex(1 << 22);
-    tokio::spawn(async move {
-        let running = server.serve(server_io).await.expect("server starts");
-        let _ = running.waiting().await;
-    });
+    tokio::spawn(serve(server, server_io));
     TestClient(client_name)
         .serve(client_io)
         .await
@@ -406,11 +421,7 @@ async fn hand_written_json_rpc() {
     let workspace = Workspace::new(Project::new()).shared();
     let server = BaeMcpServer::new(workspace, McpOptions::default());
     let (server_io, client_io) = tokio::io::duplex(1 << 20);
-    tokio::spawn(async move {
-        if let Ok(running) = server.serve(server_io).await {
-            let _ = running.waiting().await;
-        }
-    });
+    tokio::spawn(serve(server, server_io));
     let (read, mut write) = tokio::io::split(client_io);
     let mut lines = BufReader::new(read).lines();
     let mut send = async |msg: Json| {

@@ -1,38 +1,39 @@
 //! Native menu bar (muda).
 //!
-//! Menu item ids are command ids (`file.open`, `app.quit` …). Today the shell
-//! handles the few it owns and reports the rest as not implemented; once the
-//! command registry (bae-model, workstream 02) lands, menus are built from
-//! registered commands and every click dispatches through it.
+//! Every menu item id is a command id (`bae_ui::action::ids`, `bae-model` command
+//! ids); an id with parameters is written `command:argument` and becomes the
+//! invocation `{"id": argument}` (`workspace.switch:motion`, `window.panel:project`).
+//! Clicks go through the same dispatch as shortcuts and panel requests.
 //!
-//! Edit items deliberately carry no native key equivalents: on macOS an NSMenu
-//! key equivalent would swallow Cmd+Z / Cmd+C before egui sees them. Shortcuts
-//! are handled by the UI shortcut system (workstream 11).
+//! Items deliberately carry no native key equivalents (except Quit on macOS): an
+//! NSMenu key equivalent would swallow Cmd+Z / Cmd+C before egui sees them, and the
+//! shortcuts switch with the workspace. `bae-ui`'s keymap handles every shortcut.
 
+use bae_ui::Invocation;
+use bae_ui::action::ids;
 use muda::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
 
 use crate::i18n::tr;
 
-/// Command ids of the shell's own menu items.
-pub mod ids {
-    /// Quit the application.
-    pub const QUIT: &str = "app.quit";
-    /// Show the About window.
-    pub const ABOUT: &str = "app.about";
-    /// Restore the default panel layout.
-    pub const RESET_WORKSPACE: &str = "window.reset_workspace";
-    /// Open the documentation.
-    pub const HELP: &str = "help.docs";
+/// Turns a menu item id back into an invocation.
+pub fn invocation(menu_id: &str) -> Invocation {
+    match menu_id.split_once(':') {
+        Some((id, arg)) => Invocation::with_params(id, serde_json::json!({ "id": arg })),
+        None => Invocation::new(menu_id),
+    }
 }
 
 /// The application menu bar.
 pub struct AppMenu {
     menu: Menu,
+    undo: MenuItem,
+    redo: MenuItem,
+    undo_state: (Option<String>, Option<String>),
 }
 
 impl AppMenu {
-    /// Builds the menu bar.
-    pub fn new() -> muda::Result<Self> {
+    /// Builds the menu bar; `workspaces` are `(id, English title)` in bar order.
+    pub fn new(workspaces: &[(String, String)]) -> muda::Result<Self> {
         let menu = Menu::new();
 
         #[cfg(target_os = "macos")]
@@ -40,6 +41,13 @@ impl AppMenu {
             let app = Submenu::new(bae_platform::APP_NAME, true);
             app.append_items(&[
                 &PredefinedMenuItem::about(Some(tr("About BAE")), Some(about_metadata())),
+                &PredefinedMenuItem::separator(),
+                &MenuItem::with_id(
+                    ids::KEYBOARD_SHORTCUTS,
+                    tr("Keyboard Shortcuts"),
+                    true,
+                    None,
+                ),
                 &PredefinedMenuItem::separator(),
                 &PredefinedMenuItem::services(None),
                 &PredefinedMenuItem::separator(),
@@ -62,10 +70,11 @@ impl AppMenu {
 
         let file = Submenu::new(tr("File"), true);
         file.append_items(&[
-            &MenuItem::with_id("file.new_project", tr("New Project"), false, None),
-            &MenuItem::with_id("file.open_project", tr("Open Project…"), false, None),
+            &MenuItem::with_id(ids::NEW_PROJECT, tr("New Project"), true, None),
+            &MenuItem::with_id(ids::OPEN_PROJECT, tr("Open Project…"), true, None),
             &PredefinedMenuItem::separator(),
-            &MenuItem::with_id("file.save", tr("Save"), false, None),
+            &MenuItem::with_id(ids::SAVE, tr("Save"), true, None),
+            &MenuItem::with_id(ids::SAVE_AS, tr("Save As..."), true, None),
         ])?;
         #[cfg(not(target_os = "macos"))]
         file.append_items(&[
@@ -75,25 +84,81 @@ impl AppMenu {
         menu.append(&file)?;
 
         let edit = Submenu::new(tr("Edit"), true);
+        let undo = MenuItem::with_id(ids::UNDO, tr("Undo"), false, None);
+        let redo = MenuItem::with_id(ids::REDO, tr("Redo"), false, None);
+        edit.append_items(&[&undo, &redo])?;
+        #[cfg(not(target_os = "macos"))]
         edit.append_items(&[
-            &MenuItem::with_id("edit.undo", tr("Undo"), false, None),
-            &MenuItem::with_id("edit.redo", tr("Redo"), false, None),
+            &PredefinedMenuItem::separator(),
+            &MenuItem::with_id(
+                ids::KEYBOARD_SHORTCUTS,
+                tr("Keyboard Shortcuts"),
+                true,
+                None,
+            ),
         ])?;
         menu.append(&edit)?;
 
         let window = Submenu::new(tr("Window"), true);
+        let workspace = Submenu::new(tr("Workspace"), true);
+        for (id, title) in workspaces {
+            workspace.append(&MenuItem::with_id(
+                format!("{}:{id}", ids::SWITCH_WORKSPACE),
+                tr(title),
+                true,
+                None,
+            ))?;
+        }
+        workspace.append_items(&[
+            &PredefinedMenuItem::separator(),
+            &MenuItem::with_id(
+                ids::SAVE_WORKSPACE,
+                tr("Save Changes to this Workspace"),
+                true,
+                None,
+            ),
+            &MenuItem::with_id(
+                ids::RESET_WORKSPACE,
+                tr("Reset to Saved Layout"),
+                true,
+                None,
+            ),
+            &MenuItem::with_id(
+                ids::NEW_WORKSPACE,
+                tr("Save as New Workspace..."),
+                true,
+                None,
+            ),
+            &MenuItem::with_id(ids::EDIT_WORKSPACES, tr("Edit Workspaces..."), true, None),
+        ])?;
+        window.append(&workspace)?;
+        window.append(&PredefinedMenuItem::separator())?;
         #[cfg(target_os = "macos")]
         window.append_items(&[
             &PredefinedMenuItem::minimize(Some(tr("Minimize"))),
             &PredefinedMenuItem::fullscreen(Some(tr("Full Screen"))),
             &PredefinedMenuItem::separator(),
         ])?;
-        window.append(&MenuItem::with_id(
-            ids::RESET_WORKSPACE,
-            tr("Reset Workspace"),
-            true,
-            None,
-        ))?;
+        for (panel, title) in [
+            ("project", "Project"),
+            ("composition", "Composition"),
+            ("timeline", "Timeline"),
+            ("effect_controls", "Effect Controls"),
+            ("effects", "Effects & Presets"),
+            ("preview", "Preview"),
+            ("properties", "Properties"),
+            ("info", "Info"),
+            ("history", "History"),
+            ("agent_activity", "Agent Activity"),
+            ("agent_proposals", "Proposals"),
+        ] {
+            window.append(&MenuItem::with_id(
+                format!("{}:{panel}", ids::OPEN_PANEL),
+                tr(title),
+                true,
+                None,
+            ))?;
+        }
         menu.append(&window)?;
 
         let help = Submenu::new(tr("Help"), true);
@@ -105,7 +170,28 @@ impl AppMenu {
         ])?;
         menu.append(&help)?;
 
-        Ok(Self { menu })
+        Ok(Self {
+            menu,
+            undo,
+            redo,
+            undo_state: (None, None),
+        })
+    }
+
+    /// Updates the Undo / Redo items (`Some(label)` = enabled, AE: "Undo <step>").
+    pub fn set_undo_state(&mut self, state: (Option<String>, Option<String>)) {
+        if state == self.undo_state {
+            return;
+        }
+        let text = |base: &str, label: &Option<String>| match label {
+            Some(label) if !label.is_empty() => format!("{} {label}", tr(base)),
+            _ => tr(base).to_owned(),
+        };
+        self.undo.set_text(text("Undo", &state.0));
+        self.undo.set_enabled(state.0.is_some());
+        self.redo.set_text(text("Redo", &state.1));
+        self.redo.set_enabled(state.1.is_some());
+        self.undo_state = state;
     }
 
     /// Attaches the menu bar: the global NSApp menu on macOS, the window's menu
@@ -152,4 +238,17 @@ fn about_metadata() -> AboutMetadata {
 #[allow(dead_code)]
 fn about_metadata() -> AboutMetadata {
     AboutMetadata::default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn menu_ids_map_to_invocations() {
+        assert_eq!(invocation("edit.undo"), Invocation::new("edit.undo"));
+        let inv = invocation("workspace.switch:review");
+        assert_eq!(inv.id, "workspace.switch");
+        assert_eq!(inv.id_param(), Some("review"));
+    }
 }

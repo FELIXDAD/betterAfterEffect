@@ -13,8 +13,6 @@ workspace = true
 
 [dependencies]
 bae-model.workspace = true
-rmcp = { workspace = true, features = ["server", "transport-io"] }
-tokio = { workspace = true, features = ["rt", "io-std", "macros", "sync"] }
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true
@@ -24,6 +22,7 @@ parking_lot.workspace = true
 png.workspace = true
 
 [dev-dependencies]
-rmcp = { workspace = true, features = ["client", "server", "transport-io"] }
+# The official SDK's client checks interoperability (tests only, not linked into bae).
+rmcp = { workspace = true, features = ["client", "transport-async-rw"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "io-util", "macros"] }
 tempfile.workspace = true

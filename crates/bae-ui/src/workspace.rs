@@ -19,6 +19,8 @@ pub struct WorkspacePreset {
     pub layout: Layout,
     /// Position in the workspace bar (ascending).
     pub order: i32,
+    /// One English sentence for the first-launch role picker (empty: not a role).
+    pub description: String,
 }
 
 impl WorkspacePreset {
@@ -31,7 +33,14 @@ impl WorkspacePreset {
                 floating: Vec::new(),
             },
             order: 0,
+            description: String::new(),
         }
+    }
+
+    /// Offer this workspace in the first-launch role picker.
+    pub fn description(mut self, text: impl Into<String>) -> Self {
+        self.description = text.into();
+        self
     }
 
     pub fn order(mut self, order: i32) -> Self {

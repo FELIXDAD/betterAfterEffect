@@ -307,6 +307,13 @@ pub struct Layout {
     pub floating: Vec<FloatingFrame>,
 }
 
+// Compared through JSON (the tree holds floats); used for change detection.
+impl PartialEq for Layout {
+    fn eq(&self, other: &Self) -> bool {
+        serde_json::to_value(self).ok() == serde_json::to_value(other).ok()
+    }
+}
+
 impl Layout {
     pub fn to_json(&self) -> String {
         serde_json::to_string_pretty(self).unwrap_or_default()
@@ -609,6 +616,16 @@ impl Dock {
                 f.tabs.push(panel);
                 self.layout.root = Node::Frame(f);
             }
+        }
+    }
+
+    /// Maximize `frame` (default: the focused frame) to fill the dock, or restore
+    /// it if it is already maximized (AE: `~`).
+    pub fn toggle_maximize(&mut self, frame: Option<FrameId>) {
+        if self.maximized.is_some() {
+            self.maximized = None;
+        } else {
+            self.maximized = frame.or(self.focused);
         }
     }
 

@@ -29,6 +29,10 @@ pub const LOG_FORMAT: &str = "bae.sync.log";
 pub const LOG_VERSION: u32 = 1;
 
 const UPDATES: &str = "updates";
+const PRESENCE: &str = "presence";
+const PRESENCE_EXT: &str = "presence";
+/// Presence files untouched this long are deleted by anyone (crashed clients).
+const PRESENCE_GC: Duration = Duration::from_secs(24 * 3600);
 const SUBLAYERS: &str = "sublayers";
 const LOG_EXT: &str = "log";
 const SNAPSHOT_EXT: &str = "loro";
@@ -139,6 +143,8 @@ pub struct DirTransport {
     wake: Arc<AtomicBool>,
     last_error: Option<String>,
     stats: DirStats,
+    /// `(len, mtime)` of other clients' presence files when last read.
+    presence_seen: BTreeMap<PathBuf, (u64, Option<SystemTime>)>,
     #[cfg(feature = "watch")]
     _watcher: Option<notify::RecommendedWatcher>,
 }
@@ -170,6 +176,8 @@ impl DirTransport {
         }
         let updates = root.join(UPDATES);
         fs::create_dir_all(&updates).map_err(SyncError::io(&updates))?;
+        let presence = root.join(PRESENCE);
+        fs::create_dir_all(&presence).map_err(SyncError::io(&presence))?;
         let lock_path = updates.join(format!("{client}.lock"));
         let lock = OpenOptions::new()
             .create(true)
@@ -197,6 +205,7 @@ impl DirTransport {
             wake: Arc::new(AtomicBool::new(false)),
             last_error: None,
             stats: DirStats::default(),
+            presence_seen: BTreeMap::new(),
             #[cfg(feature = "watch")]
             _watcher: None,
         };
@@ -251,7 +260,11 @@ impl DirTransport {
         });
         match watcher {
             Ok(mut w) => {
-                for dir in [self.root.join(UPDATES), self.root.join(SUBLAYERS)] {
+                for dir in [
+                    self.root.join(UPDATES),
+                    self.root.join(SUBLAYERS),
+                    self.root.join(PRESENCE),
+                ] {
                     if dir.is_dir()
                         && let Err(e) = w.watch(&dir, RecursiveMode::Recursive)
                     {
@@ -329,6 +342,7 @@ impl DirTransport {
             let r = self.read_source(&path, full);
             self.note(r);
         }
+        self.poll_presence();
         let history = self.root.join(crate::history::HISTORY_FILE);
         if history.is_file() {
             self.sources
@@ -363,6 +377,82 @@ impl DirTransport {
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect(),
         )
+    }
+
+    /// Read other clients' `presence/<client>.presence` heartbeat files that
+    /// changed. Files older than twice their TTL belong to clients that are gone.
+    fn poll_presence(&mut self) {
+        let dir = self.root.join(PRESENCE);
+        let Ok(entries) = fs::read_dir(&dir) else {
+            return;
+        };
+        let own = format!("{}.{PRESENCE_EXT}", self.client);
+        let now = SystemTime::now();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            if name == own || path.extension().and_then(|e| e.to_str()) != Some(PRESENCE_EXT) {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            let mtime = meta.modified().ok();
+            let stamp = (meta.len(), mtime);
+            if self.presence_seen.get(&path) == Some(&stamp) {
+                continue;
+            }
+            let age = mtime
+                .and_then(|m| now.duration_since(m).ok())
+                .unwrap_or_default();
+            if age > PRESENCE_GC {
+                let _ = fs::remove_file(&path);
+                continue;
+            }
+            let Ok(bytes) = fs::read(&path) else {
+                continue;
+            };
+            let (records, _) = parse_records(&bytes);
+            let Some(msg) = records.first().and_then(|p| Message::decode(p).ok()) else {
+                // Half-visible rewrite: try again on the next poll.
+                continue;
+            };
+            self.presence_seen.insert(path, stamp);
+            if let Message::Presence { ttl_ms, .. } = &msg {
+                if age > Duration::from_millis(u64::from(*ttl_ms)) * 2 {
+                    continue;
+                }
+                self.inbox.push_back(msg);
+            }
+        }
+    }
+
+    /// Publish our presence by rewriting our heartbeat file (temporary file +
+    /// rename). Leaving writes a "left" record so others react at once instead of
+    /// waiting for the TTL; untouched files are deleted after a day by anyone.
+    fn write_presence(&self, msg: &Message) -> Result<(), SyncError> {
+        let Message::Presence { client, .. } = msg else {
+            return Ok(());
+        };
+        if client != &self.client {
+            return Ok(());
+        }
+        let dir = self.root.join(PRESENCE);
+        let path = dir.join(format!("{}.{PRESENCE_EXT}", self.client));
+        fs::create_dir_all(&dir).map_err(SyncError::io(&dir))?;
+        let tmp = dir.join(format!("{}.tmp-{}", self.client, new_generation()));
+        let bytes = encode_record(&msg.encode());
+        let write = || -> io::Result<()> {
+            fs::write(&tmp, &bytes)?;
+            fs::rename(&tmp, &path)
+        };
+        write().map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            SyncError::io(&path)(e)
+        })
     }
 
     fn deliver(&mut self, msg: Message) {
@@ -633,6 +723,7 @@ impl Transport for DirTransport {
                 self.compact(&doc.clone(), &version.clone(), &msg)
             }
             Message::SnapshotRequest { .. } => Ok(()),
+            Message::Presence { .. } => self.write_presence(&msg),
         }
     }
 

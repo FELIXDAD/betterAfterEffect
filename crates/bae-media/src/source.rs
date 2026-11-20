@@ -156,7 +156,7 @@ pub(crate) fn check_index(info: &MediaInfo, index: i64) -> Result<(), MediaError
 }
 
 /// How [`MediaFormats::open`] treats numbered file names.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum SequenceMode {
     /// Open exactly the given file (AE: "sequence" checkbox off).
     #[default]
@@ -167,7 +167,7 @@ pub enum SequenceMode {
 }
 
 /// Options for opening a file.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct OpenOptions {
     /// Single file or image sequence.
     pub sequence: SequenceMode,

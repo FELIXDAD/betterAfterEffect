@@ -403,6 +403,27 @@ impl Keymap {
     }
 }
 
+/// Bindings a module adds to an existing keymap (`Registry<KeymapBindings>`, any
+/// unique id such as `"motion.timeline"`). The workbench merges every extension
+/// targeting the active keymap after the keymap's own bindings and before the
+/// user's overrides, so workspace crates add panel shortcuts (`when:
+/// Some("timeline")`) without replacing the shell's keymap.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct KeymapBindings {
+    /// Id of the keymap to extend (`"ae"`).
+    pub keymap: String,
+    pub bindings: Vec<Binding>,
+}
+
+impl KeymapBindings {
+    pub fn new(keymap: impl Into<String>, bindings: Vec<Binding>) -> Self {
+        KeymapBindings {
+            keymap: keymap.into(),
+            bindings,
+        }
+    }
+}
+
 /// A binding slot (chord + scope) removed by the user.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Unbind {
