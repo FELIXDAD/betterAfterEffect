@@ -1,17 +1,26 @@
-//! Text drawn on the GPU through Vello. Skips without an adapter (or without the
-//! needed system fonts); `BAE_REQUIRE_GPU=1` makes a missing adapter a failure.
+//! Text drawn on the GPU through Vello, via bae-render's testing entry (the same
+//! `LayerSource::render` path the renderer uses). Skips without an adapter, on
+//! software adapters (WARP: Vello's compute pipelines crash the process there),
+//! or without the needed system fonts; `BAE_REQUIRE_GPU=1` makes a missing
+//! adapter a failure.
 
 use std::sync::Arc;
 
-use bae_gpu::transfer::read_texture;
-use bae_gpu::{GpuContext, GpuContextDescriptor, GpuError};
-use bae_model::TextDocument;
-use bae_render::{IRect, ImageAlpha, LayerSource};
+use bae_gpu::{GpuContext, GpuContextDescriptor, GpuError, wgpu};
+use bae_model::{TextDocument, Time};
+use bae_render::{IRect, LayerSource, SourceRequest, testing};
 use bae_text::render::{TextProvider, TextSource};
 use bae_text::{FontMatch, FontSystem, TEXT_PROVIDER, layout_text};
 
 fn gpu() -> Option<Arc<GpuContext>> {
     match GpuContext::new_headless(GpuContextDescriptor::default().with_env()) {
+        Ok(ctx) if ctx.adapter_info().device_type == wgpu::DeviceType::Cpu => {
+            eprintln!(
+                "skipping Vello GPU test on software adapter {:?}",
+                ctx.adapter_info().name
+            );
+            None
+        }
         Ok(ctx) => Some(ctx),
         Err(error @ GpuError::NoAdapter { .. }) => {
             if std::env::var_os("BAE_REQUIRE_GPU").is_some_and(|v| v == "1") {
@@ -46,10 +55,26 @@ fn doc(text: &str) -> TextDocument {
     }
 }
 
-/// Fraction of pixels in the image that are (mostly) opaque.
-fn coverage(pixels: &bae_gpu::transfer::ImageData) -> f64 {
-    let opaque = pixels.data.chunks(4).filter(|p| p[3] > 128).count();
-    opaque as f64 / f64::from(pixels.width * pixels.height)
+/// Renders `roi` (layer pixels) at full resolution through the trait and
+/// returns the straight RGBA texels of `roi ∩ bounds`, row major, and the width.
+fn render(gpu: &Arc<GpuContext>, source: &TextSource, roi: IRect) -> (Vec<[f32; 4]>, u32) {
+    let request = SourceRequest {
+        roi,
+        scale: 1.0,
+        time: Time::ZERO,
+    };
+    let image = testing::render_source(gpu, source, &request).expect("render");
+    let pixels = testing::read_pixels(gpu, &image).expect("readback");
+    (pixels, image.texel_size()[0])
+}
+
+/// Fraction of texels that are (mostly) opaque.
+fn coverage(pixels: &[[f32; 4]]) -> f64 {
+    pixels.iter().filter(|p| p[3] > 0.5).count() as f64 / pixels.len() as f64
+}
+
+fn is(p: [f32; 4], rgba: [f32; 4]) -> bool {
+    p.iter().zip(rgba).all(|(a, b)| (a - b).abs() < 0.01)
 }
 
 #[test]
@@ -75,21 +100,19 @@ fn chinese_text_renders_above_the_baseline() {
         bounds.x0 >= -1 && bounds.x0 < 15 && bounds.x1 > 100,
         "{bounds:?}"
     );
-    let image = source.render_on(&gpu, bounds, 1.0).unwrap();
-    assert_eq!(image.alpha, ImageAlpha::Straight);
-    let px = read_texture(&gpu, &image.texture).unwrap();
+    let (px, width) = render(&gpu, &source, bounds);
+    assert_eq!(px.len() as u32, width * bounds.height());
     let c = coverage(&px);
     assert!(c > 0.15 && c < 0.8, "ink coverage {c}");
-    // Every opaque pixel is the fill colour.
+    // Straight alpha: every fully covered pixel carries the fill colour.
     assert!(
-        px.data
-            .chunks(4)
-            .filter(|p| p[3] == 255)
-            .all(|p| p[0] == 255 && p[1] == 0 && p[2] == 0)
+        px.iter()
+            .filter(|p| p[3] > 0.99)
+            .all(|p| is(*p, [1.0, 0.0, 0.0, 1.0]))
     );
-    // Below the descent there is nothing.
-    let below = px.row(px.height - 1);
-    assert!(below.chunks(4).all(|p| p[3] == 0));
+    // The last row (the anti-aliasing margin below the ink) is empty.
+    let below = &px[px.len() - width as usize..];
+    assert!(below.iter().all(|p| p[3] == 0.0));
 }
 
 #[test]
@@ -112,22 +135,16 @@ fn stroke_and_faux_bold_add_ink() {
     // Render all three over the same region so coverage is comparable.
     let region = TextSource::new(stroked.clone()).bounds();
     let ink = |layout: &Arc<bae_text::TextLayout>| {
-        let image = TextSource::new(layout.clone())
-            .render_on(&gpu, region, 1.0)
-            .unwrap();
-        let px = read_texture(&gpu, &image.texture).unwrap();
-        px.data.chunks(4).filter(|p| p[3] > 128).count()
+        let (px, _) = render(&gpu, &TextSource::new(layout.clone()), region);
+        px.iter().filter(|p| p[3] > 0.5).count()
     };
     let (p, s, b) = (ink(&plain), ink(&stroked), ink(&bold));
     assert!(s > p, "stroke adds ink: {s} vs {p}");
     assert!(b > p, "faux bold adds ink: {b} vs {p}");
     // The stroke (white) is under the fill (red) by default: some white shows.
-    let image = TextSource::new(stroked)
-        .render_on(&gpu, region, 1.0)
-        .unwrap();
-    let px = read_texture(&gpu, &image.texture).unwrap();
-    assert!(px.data.chunks(4).any(|p| p == [255, 255, 255, 255]));
-    assert!(px.data.chunks(4).any(|p| p == [255, 0, 0, 255]));
+    let (px, _) = render(&gpu, &TextSource::new(stroked), region);
+    assert!(px.iter().any(|p| is(*p, [1.0, 1.0, 1.0, 1.0])));
+    assert!(px.iter().any(|p| is(*p, [1.0, 0.0, 0.0, 1.0])));
 }
 
 #[test]
@@ -151,7 +168,6 @@ fn provider_lays_out_documents_and_caches_by_hash() {
         ..content
     };
     assert!(provider.source(&bad).is_err());
-    let _ = IRect::EMPTY;
 }
 
 #[test]
