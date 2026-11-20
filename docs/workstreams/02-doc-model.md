@@ -54,6 +54,7 @@
 - [x] 分层引用（含跨工程、嵌套、防循环、改动传播到引用方）、`opinion.move` 下推、`sublayer.merge` 合并、`Stage::flatten`（PR B）
 - [x] 工程文件读写（目录包、`.baez`、原子写入）、`bae export-json`、版本迁移框架、跨工程引用自动加载、素材引用与查找/重新链接/路径映射（PR C，`docs/spec/project-format.md`）
 - [x] Prim schema 初版（`schema.rs`，命令按 schema 校验）、新值类型（time、frame_rate、text_document、遮罩羽化点）、效果参数模型与 `EffectRegistry`、插件缺失占位（PR D；15 的对齐请求的答复见 data-model.md 第 10 节）
+- [x] 09 的请求（PR E）：`import_updates_batch`、`node_path` / `node_id`、提交时间戳、保存时的临时文件名防撞、拒绝只有大小写不同的工程层 ID
 - [x] spec 文档初稿：`docs/spec/data-model.md`（随 PR 逐步补全；`project-format.md` 在 PR C）
 
 ## 请求（其他工作流在这里留言）
