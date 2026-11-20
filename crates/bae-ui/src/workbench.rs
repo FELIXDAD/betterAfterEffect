@@ -636,7 +636,10 @@ impl Workbench {
                 true
             }
             ids::KEYBOARD_SHORTCUTS => {
-                self.editor.open = true;
+                if !self.editor.open {
+                    self.editor.open = true;
+                    self.editor.focus_search = true;
+                }
                 true
             }
             _ => false,

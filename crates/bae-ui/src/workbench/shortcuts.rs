@@ -23,6 +23,8 @@ pub struct CommandEntry {
 #[derive(Default)]
 pub(super) struct ShortcutEditor {
     pub open: bool,
+    /// Focus the search field on the next frame (just opened).
+    pub focus_search: bool,
     search: String,
     /// The row waiting for a key press.
     pub recording: Option<CommandEntry>,
@@ -213,7 +215,11 @@ impl Workbench {
                 }
             });
         });
-        crate::widgets::search_field(ui, &mut self.editor.search, ui.available_width());
+        let search =
+            crate::widgets::search_field(ui, &mut self.editor.search, ui.available_width());
+        if std::mem::take(&mut self.editor.focus_search) {
+            search.request_focus();
+        }
         if let Some((binding, other)) = self.editor.confirm.clone() {
             ui.add_space(4.0);
             ui.colored_label(
