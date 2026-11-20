@@ -103,10 +103,10 @@ linear = "使用线性光"
 
 ## 5. 检查
 
-在 BAE 仓库里运行检查工具（应用的 `bae plugin check` 子命令接入前，先用它）：
+用 `bae plugin check` 检查（在 BAE 仓库里也可以 `cargo run -p bae-plugin --example check -- <目录>`，两者完全一样）：
 
 ```sh
-cargo run -p bae-plugin --example check -- path/to/com.example.posterize
+bae plugin check path/to/com.example.posterize
 ```
 
 ```text
@@ -136,7 +136,25 @@ path/to/com.example.posterize/bae-plugin.toml:30:1: error: unknown field `slidr`
 | Windows | `%LOCALAPPDATA%\BAE\Plug-ins\` |
 | Linux（无界面渲染） | `$XDG_DATA_HOME/bae/plugins/` |
 
-设置 `BAE_HOME=<目录>` 时所有目录都在 `<目录>` 下。插件宿主（`bae_plugin::PluginHost`）扫描这些目录、为每个插件 ID 选出最高版本、注册效果；替换或删除插件后可以重新加载或卸载，不需要重启。应用启动时自动加载插件目录要等应用外壳接入插件宿主（后续版本）。详见 [打包、安装与版本](publishing.md)。
+设置 `BAE_HOME=<目录>` 时所有目录都在 `<目录>` 下。BAE 启动时扫描这些目录、为每个插件 ID 选出最高版本并注册效果；运行中也可以重新加载或卸载，不需要重启。
+
+开发时不用复制：把插件所在的目录加到环境变量 `BAE_PLUGIN_PATH`（多个目录用 `:` 分隔，Windows 用 `;`），BAE 会按"工程"作用域加载它们。用 `bae plugin list` 看找到了哪些插件、哪个版本生效、有什么问题：
+
+```sh
+BAE_PLUGIN_PATH=path/to/my-plugins bae plugin list
+```
+
+```text
+Plugin directories:
+  project  path/to/my-plugins
+  user     ~/Library/Application Support/BAE/Plug-ins
+  ...
+
+loaded    com.example.posterize 1.0.0 [project] path/to/my-plugins/com.example.posterize
+            effect com.example.posterize/posterize
+```
+
+详见 [打包、安装与版本](publishing.md)。
 
 ## 下一步
 

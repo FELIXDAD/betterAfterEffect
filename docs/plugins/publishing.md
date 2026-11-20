@@ -24,7 +24,7 @@ com.example.vignette/
 发布前用检查工具确认没有错误：
 
 ```sh
-cargo run -p bae-plugin --example check -- com.example.vignette
+bae plugin check com.example.vignette
 ```
 
 ## 插件目录（作用域）
@@ -36,7 +36,9 @@ cargo run -p bae-plugin --example check -- com.example.vignette
 | 用户 | `~/Library/Application Support/BAE/Plug-ins/` | `%LOCALAPPDATA%\BAE\Plug-ins\` | 安装时同意后信任 |
 | 工程 | `<工程>.bae/plugins/` | 同左 | 用户信任这个工程之前不加载脚本和原生代码 |
 
-目录里可以直接放插件目录（开发时方便），也可以用 `<插件 ID>/<版本>/` 的布局让多个版本并存。以 `.` 开头的目录会被跳过。设置 `BAE_HOME=<目录>` 时用户目录都在 `<目录>` 下。
+目录里可以直接放插件目录（开发时方便），也可以用 `<插件 ID>/<版本>/` 的布局让多个版本并存。以 `.` 开头的目录会被跳过。设置 `BAE_HOME=<目录>` 时用户目录都在 `<目录>` 下。环境变量 `BAE_PLUGIN_PATH`（多个目录用 `:` 分隔，Windows 用 `;`）里的目录也会被扫描，按工程作用域处理，开发插件时用。
+
+BAE 启动时扫描所有插件目录并加载生效的版本，问题写进日志，不会让启动失败。`bae plugin list [--json]` 列出每个目录、找到的插件、状态（`loaded` 已加载、`inactive` 有更高版本、`failed` 加载失败及原因）和效果。
 
 工程里的声明式插件不需要信任确认就能加载：它们不执行本地代码，最多占用 GPU，共享工程可以直接打开。
 
