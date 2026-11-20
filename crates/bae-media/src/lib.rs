@@ -52,6 +52,7 @@ mod cache;
 pub mod export;
 mod frame;
 mod gpu;
+mod library;
 #[cfg(windows)]
 pub mod media_foundation;
 mod meta;
@@ -68,6 +69,7 @@ use std::sync::Arc;
 pub use cache::{CacheStats, FrameCache, FrameKey, source_id_for};
 pub use frame::{AlphaOutput, CpuFrame, FrameRequest, GpuFrame, PixelFormat, WORKING_FORMAT};
 pub use gpu::{MediaGpu, SourceTexture};
+pub use library::{DEFAULT_OPEN_LIMIT, MediaLibrary};
 pub use meta::{
     AlphaMode, AudioInfo, Chromaticities, ColorInfo, ColorPrimaries, ColorRange,
     MatrixCoefficients, MediaInfo, MediaKind, PixelAspect, SampleType, SequenceInfo,
