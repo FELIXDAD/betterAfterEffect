@@ -1452,7 +1452,7 @@
   MGJSON: dataValue(path) where path indexes the dataOutline hierarchy, e.g. [0] first child, [1, 0] first child of the second group
         dynamic stream: value at the current time (sample interpolation UNVERIFIED: nearest previous sample)
   ```
-  - Adding a data footage item to a comp creates a layer whose only group is "Data" (数据), with one property per data stream, each carrying an auto-generated expression that reads the file (see project-comp-layers.md, layer types).
+  - Adding a data footage item to a comp creates a layer whose only group is "Data" (数据), with one property per data stream, each carrying an auto-generated expression that reads the file (see project-comp-layers.md, layer types). JSON, CSV and TSV hold static values only; only MGJSON holds dynamic (time-varying) streams.
   - Changing the file on disk and reloading updates all dependents.
 - **Priority:** P2
 - **Owner:** bae-anim (+ bae-media)
@@ -1531,9 +1531,10 @@
   | `layer.mask(index)` | Mask | 1-based top-down in the Timeline |
   | `mask.maskPath` | Path property | AE-ANI-444; linkable to other path properties, not numerically editable except via path methods |
   | `mask.maskOpacity` | Number | percent |
-  | `mask.maskFeather` | Array[2] | px (x, y) |
+  | `mask.maskFeather` | Array[2] | px (horizontal, vertical); the expression reference lists the type as Number, but the Mask Feather property is two-dimensional in AE (UNVERIFIED which the expression returns; BAE returns the property's value, Array[2]) |
   | `mask.maskExpansion` | Number | px |
   | `mask.invert` | Boolean | Inverted checkbox |
+  | `mask.maskPath` alias `mask.path` | Path property | used in the reference's own path examples |
 
   - Mask mode (Add/Subtract…) is not readable from expressions (UNVERIFIED).
 - **Priority:** P1
@@ -1751,7 +1752,7 @@
   - Layer Control references survive layer renames and reordering (stored by layer ID).
 - **Priority:** P0 (rigs and Essential Graphics templates depend on them)
 - **Owner:** bae-anim (+ bae-effects)
-- **Notes:** Lottie: expression controls export as effects `ty` 0 (slider), 1 (angle), 2 (color), 3 (point), 4 (checkbox), 7 (dropdown), 10 (layer) with lottie-web support for reading them (UNVERIFIED type numbers; see effects.md). Essential Graphics exposure is in ui-preview-render-io.md, Essential Graphics.
+- **Notes:** Lottie: an expression-control effect exports as a custom effect (`ty: 5`) whose effect-value entries `ef[].ef[].ty` are 0 Slider, 1 Angle, 2 Color, 3 Point, 4 Checkbox, 6 Ignored, 7 Drop Down, 10 Layer (source: https://lottiefiles.github.io/lottie-docs/effects/); lottie-web reads them via `effect("Name")("Param")`. See effects.md, Expression Controls. Essential Graphics exposure is in ui-preview-render-io.md, Essential Graphics.
 
 ### AE-ANI-477 · Dropdown menu strings: items, text, textAtTime() (下拉菜单文本)
 
@@ -1787,11 +1788,11 @@
 - **Owner:** bae-anim
 - **Notes:** BAE decision: QuickJS context with only ECMAScript built-ins, no `std`/`os` modules, `console.log` routed to the expression error/info panel (BAE extension, harmless); per-evaluation interrupt handler with a time budget (e.g. 50 ms default, configurable) that turns runaway loops into an expression error instead of a hang; memory limit per runtime. `Date`/`Math.random` usage marks the expression non-cacheable (AE-ANI-412).
 
-### AE-ANI-479 · Essential Properties access (基本属性访问（译名待核）)
+### AE-ANI-479 · Essential Properties access (基本属性访问)
 
-- **What it does:** Reads the Essential Properties (formerly Master Properties, AE 16.1+ / 2019) exposed by a precomp layer, so expressions in the parent comp can use per-instance overrides.
+- **What it does:** Reads the Essential Properties (introduced as Master Properties in AE 15.1, April 2018; later renamed, rename version UNVERIFIED) exposed by a precomp layer, so expressions in the parent comp can use per-instance overrides.
 - **Exact semantics:**
-  - Access through the precomp layer's Essential Properties group, e.g. `thisComp.layer("Precomp 1").essentialProperty("Title Color")` (UNVERIFIED method name; call syntax `layer("ADBE Layer Overrides")("Title Color")` also resolves, match name UNVERIFIED).
+  - Access through the precomp layer's Essential Properties group, e.g. `thisComp.layer("Precomp 1").essentialProperty("Title Color")` (UNVERIFIED method name; scripting exposes the group as `AVLayer.essentialProperty`). The group's match name is `ADBE Layer Overrides` (display name Essential Properties, per the scripting match-name list), so call syntax `layer("ADBE Layer Overrides")("Title Color")` resolves by AE-ANI-443.
   - Value = the override value on that layer instance if set, else the value of the source property inside the precomp (post-expression) at the mapped time (UNVERIFIED).
   - AE 15.1.2 fixed wrong evaluation when several master properties share a name.
 - **Priority:** P2
