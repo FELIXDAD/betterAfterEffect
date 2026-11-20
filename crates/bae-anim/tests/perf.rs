@@ -130,3 +130,50 @@ fn thousand_keyframed_layers_per_frame() {
         );
     }
 }
+
+/// Expressions are outside the 2 ms budget; this prints their cost for reference
+/// (100 layers, each with `wiggle` on Position and a read of the layer above on Rotation).
+#[test]
+fn expressions_per_frame() {
+    let mut stage = build(100);
+    stage
+        .transact(&AuthorId::new("user:test").unwrap(), "exprs", |tx| {
+            for i in 0..100 {
+                let lp = p(&format!("/comps/main/layers/l{i}"));
+                for (attr, src) in [
+                    ("transform:position", "wiggle(2, 30)".to_owned()),
+                    (
+                        "transform:rotation",
+                        if i == 0 {
+                            "time * 10".to_owned()
+                        } else {
+                            "thisComp.layer(index - 1).rotation + 1".to_owned()
+                        },
+                    ),
+                ] {
+                    tx.apply(Op::SetExpression {
+                        path: lp.clone(),
+                        attr: attr.into(),
+                        expression: Some(bae_model::Expression::new(src)),
+                    })?;
+                }
+            }
+            Ok::<_, bae_model::ModelError>(())
+        })
+        .unwrap();
+    let comp = p("/comps/main");
+    let mut ev = Evaluator::new();
+    ev.evaluate_comp(&stage, &comp, Time::ZERO).unwrap();
+    let frames = 30;
+    let t = Instant::now();
+    for f in 0..frames {
+        let ec = ev
+            .evaluate_comp(&stage, &comp, bae_model::FrameRate::FPS_30.frame_to_time(f))
+            .unwrap();
+        assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    }
+    println!(
+        "100 layers × 2 expressions: {:?} per frame",
+        t.elapsed() / frames as u32
+    );
+}

@@ -21,6 +21,9 @@ image = { workspace = true, features = ["webp"] }
 parking_lot.workspace = true
 png.workspace = true
 serde.workspace = true
+# Audio decoding: WAV / AIFF / PCM, MP4 / QuickTime with AAC, MP3, FLAC. No SIMD
+# features (they pull in rustfft); see the size note in the PR.
+symphonia = { workspace = true, features = ["aac", "aiff", "flac", "isomp4", "mp3", "pcm", "wav"] }
 thiserror.workspace = true
 tracing.workspace = true
 zune-jpeg.workspace = true

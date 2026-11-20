@@ -1,0 +1,104 @@
+ocio_profile_version: 2
+name: bae-handmade
+search_path: .
+roles:
+  scene_linear: lin
+  aces_interchange: lin
+  cie_xyz_d65_interchange: xyz
+  data: raw
+  default: lin
+file_rules:
+  - !<Rule> {name: Default, colorspace: lin}
+default_view_transform: identity
+view_transforms:
+  - !<ViewTransform>
+    name: identity
+    from_scene_reference: !<MatrixTransform> {}
+displays:
+  Display:
+    - !<View> {name: Raw, colorspace: raw}
+    - !<View> {name: Standard, view_transform: identity, display_colorspace: <USE_DISPLAY_NAME>}
+colorspaces:
+  - !<ColorSpace>
+    name: lin
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+  - !<ColorSpace>
+    name: range_clamp
+    from_scene_reference: !<RangeTransform> {min_in_value: 0.1, max_in_value: 0.9, min_out_value: 0, max_out_value: 1}
+  - !<ColorSpace>
+    name: range_noclamp
+    from_scene_reference: !<RangeTransform> {min_in_value: -0.5, max_in_value: 2, min_out_value: 0, max_out_value: 1, style: noClamp}
+  - !<ColorSpace>
+    name: range_min
+    from_scene_reference: !<RangeTransform> {min_in_value: 0.05, min_out_value: 0.05}
+  - !<ColorSpace>
+    name: cdl_asc
+    from_scene_reference: !<CDLTransform> {slope: [1.1, 0.95, 1.05], offset: [0.01, -0.02, 0.0], power: [1.2, 0.9, 1.0], sat: 0.85, style: asc}
+  - !<ColorSpace>
+    name: cdl_noclamp
+    from_scene_reference: !<CDLTransform> {slope: [1.1, 0.95, 1.05], offset: [0.01, -0.02, 0.0], power: [1.2, 0.9, 1.0], sat: 1.2, style: noClamp}
+  - !<ColorSpace>
+    name: exp_clamp
+    from_scene_reference: !<ExponentTransform> {value: [2.2, 2.4, 1.8, 1], direction: inverse}
+  - !<ColorSpace>
+    name: exp_mirror
+    from_scene_reference: !<ExponentTransform> {value: [2.2, 2.4, 1.8, 1], style: mirror, direction: inverse}
+  - !<ColorSpace>
+    name: exp_pass
+    from_scene_reference: !<ExponentTransform> {value: [2.2, 2.4, 1.8, 1], style: pass_thru, direction: inverse}
+  - !<ColorSpace>
+    name: moncurve
+    from_scene_reference: !<ExponentWithLinearTransform> {gamma: [2.4, 2.2, 3.0, 1], offset: [0.055, 0.099, 0.16, 0], direction: inverse}
+  - !<ColorSpace>
+    name: moncurve_mirror
+    from_scene_reference: !<ExponentWithLinearTransform> {gamma: 2.4, offset: 0.055, style: mirror, direction: inverse}
+  - !<ColorSpace>
+    name: log10
+    from_scene_reference: !<LogTransform> {base: 10}
+  - !<ColorSpace>
+    name: logaffine
+    from_scene_reference: !<LogAffineTransform> {base: 2, log_side_slope: [0.09, 0.1, 0.11], log_side_offset: 0.5, lin_side_slope: 1.2, lin_side_offset: 0.01}
+  - !<ColorSpace>
+    name: logcamera
+    from_scene_reference: !<LogCameraTransform> {base: 10, log_side_slope: 0.24719, log_side_offset: 0.385537, lin_side_slope: 5.555556, lin_side_offset: 0.0522723, lin_side_break: 0.010591}
+  - !<ColorSpace>
+    name: matrix_offset
+    from_scene_reference: !<MatrixTransform> {matrix: [1.2, -0.1, -0.1, 0, 0.05, 0.9, 0.05, 0, 0, 0.2, 0.8, 0, 0, 0, 0, 1], offset: [0.01, -0.02, 0.03, 0]}
+  - !<ColorSpace>
+    name: lut1d_cube
+    from_scene_reference: !<FileTransform> {src: curve1d.cube}
+  - !<ColorSpace>
+    name: lut3d_linear
+    from_scene_reference: !<FileTransform> {src: look3d.cube, interpolation: linear}
+  - !<ColorSpace>
+    name: lut3d_tetra
+    from_scene_reference: !<FileTransform> {src: look3d.cube, interpolation: tetrahedral}
+  - !<ColorSpace>
+    name: shaper3d
+    from_scene_reference: !<FileTransform> {src: shaper3d.cube, interpolation: linear}
+  - !<ColorSpace>
+    name: spi1d
+    from_scene_reference: !<FileTransform> {src: gamma.spi1d}
+  - !<ColorSpace>
+    name: spi1d_inverse
+    from_scene_reference: !<FileTransform> {src: gamma.spi1d, direction: inverse}
+  - !<ColorSpace>
+    name: spi3d
+    from_scene_reference: !<FileTransform> {src: look.spi3d, interpolation: linear}
+  - !<ColorSpace>
+    name: group
+    to_scene_reference: !<GroupTransform>
+      children:
+        - !<ColorSpaceTransform> {src: moncurve, dst: lin}
+        - !<MatrixTransform> {matrix: [0.9, 0.1, 0, 0, 0, 1, 0, 0, 0, 0.1, 0.9, 0, 0, 0, 0, 1]}
+  - !<ColorSpace>
+    name: builtin_acescct
+    to_scene_reference: !<BuiltinTransform> {style: ACEScct_to_ACES2065-1}
+display_colorspaces:
+  - !<ColorSpace>
+    name: xyz
+  - !<ColorSpace>
+    name: Display
+    from_display_reference: !<BuiltinTransform> {style: DISPLAY - CIE-XYZ-D65_to_sRGB}

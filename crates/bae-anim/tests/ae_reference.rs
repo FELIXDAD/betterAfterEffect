@@ -38,6 +38,10 @@ struct Case {
     other: Vec<Other>,
     times: Vec<i64>,
     pre: Vec<Vec<Option<f64>>>,
+    #[serde(default)]
+    post: Option<Vec<Vec<Option<f64>>>>,
+    #[serde(default)]
+    expression_error: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -122,7 +126,7 @@ fn to_layer_time(attr: &AttrSpec, layer: &LayerDef) -> AttrSpec {
     out
 }
 
-fn build(case: &Case) -> Stage {
+fn build(case: &Case, with_expression: bool) -> Stage {
     let mut stage = Stage::new();
     let author = AuthorId::new("user:test").unwrap();
     stage
@@ -184,9 +188,10 @@ fn build(case: &Case) -> Stage {
                 })?;
             }
             let (path, attr) = target(&case.property);
-            // Expressions are compared in the expression PR; here only keyframes.
             let mut spec = to_layer_time(&case.attr, l);
-            spec.expression = None;
+            if !with_expression {
+                spec.expression = None;
+            }
             tx.apply(Op::SetAttr {
                 path,
                 attr,
@@ -244,7 +249,11 @@ struct Outcome {
 }
 
 fn run(case: &Case) -> Outcome {
-    let stage = build(case);
+    run_against(case, false, &case.pre)
+}
+
+fn run_against(case: &Case, with_expression: bool, expected: &[Vec<Option<f64>>]) -> Outcome {
+    let stage = build(case, with_expression);
     let mut ev = Evaluator::new();
     let comp = p(COMP);
     let mut max_err = 0.0_f64;
@@ -252,7 +261,7 @@ fn run(case: &Case) -> Outcome {
     for (i, t) in case.times.iter().enumerate() {
         let ec = ev.evaluate_comp(&stage, &comp, Time(*t)).unwrap();
         let got = read(&ec.layers[0], &case.property);
-        let want = &case.pre[i];
+        let want = &expected[i];
         for (d, w) in want.iter().enumerate() {
             let Some(w) = w else { continue };
             let err = (got[d] - w).abs();
@@ -310,6 +319,52 @@ fn keyframes_match_after_effects() {
         "{} of {} cases exceed the tolerance:\n{}",
         failures.len(),
         fx.cases.len(),
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn expressions_match_after_effects() {
+    let fx = fixture();
+    let mut failures = Vec::new();
+    let mut n = 0;
+    for case in &fx.cases {
+        let Some(post) = &case.post else { continue };
+        n += 1;
+        let o = run_against(case, true, post);
+        println!("{:<28} max err {:.3e}  {}", o.id, o.max_err, o.worst);
+        // Expressions reading Position inherit the spatial gap.
+        let reads_position = case
+            .other
+            .iter()
+            .any(|o| o.property.iter().any(|p| p == "ADBE Position"));
+        let tol = if case.spatial || reads_position {
+            SPATIAL_TOLERANCE
+        } else {
+            TOLERANCE
+        };
+        if o.max_err >= tol {
+            failures.push(format!("{}: {:.3e} ({})", o.id, o.max_err, o.worst));
+        }
+        // AE disabled the expression with an error: BAE reports one too.
+        if case.expression_error.is_some() {
+            let stage = build(case, true);
+            let ec = Evaluator::new()
+                .evaluate_comp(&stage, &p(COMP), Time(case.times[1]))
+                .unwrap();
+            if ec.errors.is_empty() {
+                failures.push(format!(
+                    "{}: AE reported an expression error, BAE did not",
+                    o.id
+                ));
+            }
+        }
+    }
+    assert!(n > 0);
+    assert!(
+        failures.is_empty(),
+        "{} of {n} expression cases fail:\n{}",
+        failures.len(),
         failures.join("\n")
     );
 }

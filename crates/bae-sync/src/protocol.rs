@@ -100,6 +100,16 @@ pub enum Message {
         version: VersionVector,
         data: Vec<u8>,
     },
+    /// Ephemeral presence of `client` (who is online, what they look at); not part
+    /// of any document's history. `seq` grows with every update, receivers keep
+    /// the newest. The client counts as gone after `ttl_ms` without an update.
+    /// `state`: JSON of [`crate::PresenceState`]; `None` when the client left.
+    Presence {
+        client: ClientId,
+        seq: u64,
+        ttl_ms: u32,
+        state: Option<Vec<u8>>,
+    },
 }
 
 impl fmt::Debug for Message {
@@ -128,6 +138,14 @@ impl fmt::Debug for Message {
                 .field("doc", doc)
                 .field("bytes", &data.len())
                 .finish_non_exhaustive(),
+            Message::Presence {
+                client, seq, state, ..
+            } => f
+                .debug_struct("Presence")
+                .field("client", client)
+                .field("seq", seq)
+                .field("left", &state.is_none())
+                .finish_non_exhaustive(),
         }
     }
 }
@@ -136,6 +154,7 @@ const TAG_HELLO: u8 = 1;
 const TAG_UPDATES: u8 = 2;
 const TAG_SNAPSHOT_REQUEST: u8 = 3;
 const TAG_SNAPSHOT: u8 = 4;
+const TAG_PRESENCE: u8 = 5;
 
 impl Message {
     pub fn hello(client: ClientId, versions: Vec<(DocKey, VersionVector)>) -> Self {
@@ -149,7 +168,7 @@ impl Message {
     /// The document this message is about (`None` for `Hello`).
     pub fn doc(&self) -> Option<&DocKey> {
         match self {
-            Message::Hello { .. } => None,
+            Message::Hello { .. } | Message::Presence { .. } => None,
             Message::Updates { doc, .. }
             | Message::SnapshotRequest { doc }
             | Message::Snapshot { doc, .. } => Some(doc),
@@ -192,6 +211,24 @@ impl Message {
                 w.push(TAG_SNAPSHOT_REQUEST);
                 put_bytes(&mut w, doc.as_str().as_bytes());
             }
+            Message::Presence {
+                client,
+                seq,
+                ttl_ms,
+                state,
+            } => {
+                w.push(TAG_PRESENCE);
+                put_bytes(&mut w, client.as_str().as_bytes());
+                put_varint(&mut w, *seq);
+                put_varint(&mut w, u64::from(*ttl_ms));
+                match state {
+                    Some(s) => {
+                        w.push(1);
+                        put_bytes(&mut w, s);
+                    }
+                    None => w.push(0),
+                }
+            }
         }
         w
     }
@@ -232,6 +269,23 @@ impl Message {
             TAG_SNAPSHOT_REQUEST => Message::SnapshotRequest {
                 doc: DocKey::parse(r.str()?)?,
             },
+            TAG_PRESENCE => {
+                let client = ClientId::new(r.str()?)?;
+                let seq = r.varint()?;
+                let ttl_ms = u32::try_from(r.varint()?)
+                    .map_err(|_| SyncError::Decode("presence ttl out of range".into()))?;
+                let state = match r.u8()? {
+                    0 => None,
+                    1 => Some(r.bytes()?.to_vec()),
+                    _ => return Err(SyncError::Decode("bad presence flag".into())),
+                };
+                Message::Presence {
+                    client,
+                    seq,
+                    ttl_ms,
+                    state,
+                }
+            }
             other => return Err(SyncError::UnknownMessage(other)),
         })
     }
@@ -349,6 +403,18 @@ mod tests {
                 doc: DocKey::parse("root").unwrap(),
                 version: vv,
                 data: vec![0; 300],
+            },
+            Message::Presence {
+                client: ClientId::new("bob").unwrap(),
+                seq: 300,
+                ttl_ms: 20_000,
+                state: Some(br#"{"name":"Bob"}"#.to_vec()),
+            },
+            Message::Presence {
+                client: ClientId::new("bob").unwrap(),
+                seq: 301,
+                ttl_ms: 20_000,
+                state: None,
             },
         ];
         for m in msgs {

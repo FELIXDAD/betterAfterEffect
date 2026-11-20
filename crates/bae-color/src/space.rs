@@ -181,10 +181,10 @@ impl ColorSpace {
         else {
             return None;
         };
-        let suffix = if transfer.is_linear() {
-            "linear".to_string()
-        } else {
-            transfer.id().to_string()
+        let suffix = match transfer {
+            t if t.is_linear() => "linear".to_string(),
+            TransferFunction::Gamma(g) => format!("gamma{g}"),
+            t => t.id().to_string(),
         };
         Some(ColorSpace {
             id: Cow::Owned(format!("{}~{}", self.id, suffix)),
@@ -414,6 +414,15 @@ pub mod builtin {
         Chromaticities::REC2020,
         T::Linear,
     );
+    /// Rec.2020 primaries, pure gamma 2.4 (BT.1886; AE "Rec.2020 Gamma 2.4",
+    /// and how AE reads BT.2020-tagged video).
+    pub const REC2020_GAMMA24: ColorSpace = ColorSpace::rgb(
+        "rec2020-gamma24",
+        "Rec.2020 Gamma 2.4 (BT.1886)",
+        Encoding::Sdr,
+        Chromaticities::REC2020,
+        T::Gamma(2.4),
+    );
     /// Rec.2100 PQ (linear 1.0 = 100 cd/m²).
     pub const REC2100_PQ: ColorSpace = ColorSpace::rgb(
         "rec2100-pq",
@@ -551,7 +560,7 @@ pub mod builtin {
     }
 
     /// Every constant built-in space.
-    pub const ALL: [ColorSpace; 25] = [
+    pub const ALL: [ColorSpace; 26] = [
         SRGB,
         SRGB_LINEAR,
         REC709,
@@ -563,6 +572,7 @@ pub mod builtin {
         DCI_P3,
         REC2020,
         REC2020_LINEAR,
+        REC2020_GAMMA24,
         REC2100_PQ,
         REC2100_HLG,
         ACESCG,
@@ -599,6 +609,8 @@ pub mod builtin {
             let base = by_id(base)?;
             let tf = if curve == "linear" {
                 T::Linear
+            } else if let Some(g) = curve.strip_prefix("gamma") {
+                T::Gamma(g.parse().ok().filter(|g: &f64| g.is_finite() && *g > 0.0)?)
             } else {
                 T::ALL
                     .into_iter()

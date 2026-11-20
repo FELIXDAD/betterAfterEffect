@@ -63,6 +63,7 @@ bae-sync = { path = "crates/bae-sync" }
 bae-render = { path = "crates/bae-render" }
 bae-ui = { path = "crates/bae-ui" }
 bae-color = { path = "crates/bae-color" }
+bae-package = { path = "crates/bae-package" }
 
 # ---- GPU, rendering, text (one coherent Linebender/wgpu set) ----
 # Backends: Metal (macOS) + D3D12 (Windows). Vulkan/GLES are opt-in through the
@@ -145,6 +146,8 @@ windows-sys = { version = "0.61.2", default-features = false }
 directories = "6.0.0"
 # File watching for the shared-folder sync transport (bae-sync `watch` feature).
 notify = { version = "8.2.2", default-features = false, features = ["macos_fsevent"] }
+# WebSocket client for the sync hub (bae-sync `hub` feature). No TLS yet: LAN hub.
+tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
 libloading = "0.9.1"
 
 # ---- plugins, packaging, hashing ----

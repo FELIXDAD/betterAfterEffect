@@ -242,7 +242,10 @@ mod media {
             };
             let transfer = match info.transfer {
                 T::Unspecified => None,
-                T::Bt709 => Some(TransferFunction::Rec709),
+                // After Effects (measured, 26.2) reads the BT.709 / BT.2020
+                // transfer tags of video as BT.1886 gamma 2.4, display-referred,
+                // regardless of "Compensate for Scene-referred Profiles".
+                T::Bt709 => Some(TransferFunction::Gamma(2.4)),
                 T::Srgb => Some(TransferFunction::Srgb),
                 T::Linear => Some(TransferFunction::Linear),
                 T::Pq => Some(TransferFunction::Pq),

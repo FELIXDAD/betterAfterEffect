@@ -253,9 +253,12 @@ struct Placeholder;
 
 impl Panel for Placeholder {
     fn ui(&mut self, ui: &mut Ui, _cx: &mut PanelContext<'_>) {
-        ui.centered_and_justified(|ui| {
-            ui.weak(tr("Not implemented yet."));
-        });
+        // Short panels (Preview's 52pt strip) stay empty instead of clipping text.
+        if ui.available_height() >= 40.0 {
+            ui.centered_and_justified(|ui| {
+                ui.weak(tr("Not implemented yet."));
+            });
+        }
     }
 }
 

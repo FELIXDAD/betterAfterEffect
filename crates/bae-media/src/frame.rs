@@ -114,6 +114,41 @@ impl CpuFrame {
     }
 }
 
+impl CpuFrame {
+    /// Guesses whether the alpha of an image is straight or premultiplied from
+    /// its pixels (AE's "Guess" in Interpret Footage, for files that do not say,
+    /// like ProRes 4444): a color channel brighter than its alpha is impossible
+    /// in premultiplied images. Returns `None` when there is no partial
+    /// transparency to decide from.
+    pub fn guess_alpha(&self) -> Option<AlphaMode> {
+        const EPSILON: f32 = 1.5 / 255.0;
+        let mut partial = false;
+        // Sample at most ~64k pixels.
+        let step = ((self.width as u64 * self.height as u64) / 65_536).max(1) as u32;
+        let mut i = 0_u32;
+        for y in 0..self.height {
+            for x in 0..self.width {
+                i += 1;
+                if !i.is_multiple_of(step) {
+                    continue;
+                }
+                let [r, g, b, a] = self.pixel_f32(x, y);
+                if a <= EPSILON || a >= 1.0 - EPSILON {
+                    if a <= EPSILON && r.max(g).max(b) > EPSILON {
+                        return Some(AlphaMode::Straight);
+                    }
+                    continue;
+                }
+                partial = true;
+                if r.max(g).max(b) > a + EPSILON {
+                    return Some(AlphaMode::Straight);
+                }
+            }
+        }
+        partial.then_some(AlphaMode::Premultiplied)
+    }
+}
+
 /// A decoded frame on the GPU, in [`WORKING_FORMAT`].
 ///
 /// Cheap to clone (the texture is reference counted); the
@@ -199,5 +234,43 @@ impl FrameRequest {
     pub fn straight(mut self) -> Self {
         self.alpha_output = AlphaOutput::Straight;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rgba8(pixels: &[[u8; 4]]) -> CpuFrame {
+        CpuFrame {
+            width: pixels.len() as u32,
+            height: 1,
+            format: PixelFormat::Rgba8,
+            data: pixels.concat(),
+            alpha: AlphaMode::Straight,
+            color: ColorInfo::default(),
+            pixel_aspect: PixelAspect::SQUARE,
+        }
+    }
+
+    #[test]
+    fn alpha_guess() {
+        // Color never exceeds alpha: premultiplied.
+        assert_eq!(
+            rgba8(&[[100, 50, 0, 128], [255, 255, 255, 255], [0, 0, 0, 0]]).guess_alpha(),
+            Some(AlphaMode::Premultiplied)
+        );
+        // Color brighter than alpha: straight.
+        assert_eq!(
+            rgba8(&[[100, 50, 0, 128], [200, 10, 10, 128]]).guess_alpha(),
+            Some(AlphaMode::Straight)
+        );
+        // Color under zero alpha: straight.
+        assert_eq!(
+            rgba8(&[[9, 0, 0, 0]]).guess_alpha(),
+            Some(AlphaMode::Straight)
+        );
+        // Only fully opaque / transparent pixels: undecidable.
+        assert_eq!(rgba8(&[[255, 0, 0, 255], [0, 0, 0, 0]]).guess_alpha(), None);
     }
 }

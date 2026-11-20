@@ -43,6 +43,7 @@ use std::sync::Arc;
 use rustc_hash::FxHasher;
 
 use crate::lut::{Interpolation, Lut1d, Lut3d};
+use crate::ops::{FLT_MIN, NegativeStyle};
 use crate::transfer::{TransferFunction, k};
 use crate::transform::{ColorOp, ColorTransform};
 
@@ -183,6 +184,10 @@ impl GpuSnippet {
     }
 }
 
+fn v4(v: [f64; 3], w: f64) -> [f32; 4] {
+    [v[0] as f32, v[1] as f32, v[2] as f32, w as f32]
+}
+
 /// Formats an f64 as a WGSL float literal (always with `.` or exponent).
 fn lit(x: f64) -> String {
     let s = format!("{x:?}");
@@ -277,6 +282,157 @@ impl Gen<'_> {
                     "    c = {f}(t{t}, c, p.v[{i}].x, p.v[{i}].y, p.v[{j}].xyz, p.v[{k}].xyz);",
                     j = i + 1,
                     k = i + 2
+                );
+            }
+            ColorOp::Lut1dInverse(l) => {
+                let f = self.helper("lut1d_inv", lut1d_inv_fn);
+                let t = self.textures.len();
+                let tex = LutTexture::from_lut1d(l);
+                let dir = [l.direction(0), l.direction(1), l.direction(2)];
+                let r: Vec<(f64, f64)> = (0..3).map(|c| l.range(c)).collect();
+                let i = self.slots(&[
+                    [l.entries.len() as f32, tex.width as f32, 0.0, 0.0],
+                    [l.domain_min[0], l.domain_min[1], l.domain_min[2], 0.0],
+                    [l.domain_max[0], l.domain_max[1], l.domain_max[2], 0.0],
+                    v4(dir, 0.0),
+                    v4([r[0].0, r[1].0, r[2].0], 0.0),
+                    v4([r[0].1, r[1].1, r[2].1], 0.0),
+                ]);
+                self.textures.push(tex);
+                self.tex_params.push(format!("t{t}: texture_2d<f32>"));
+                self.tex_args.push(format!("t{t}"));
+                let args: Vec<String> = (1..6).map(|j| format!("p.v[{}].xyz", i + j)).collect();
+                let _ = writeln!(
+                    self.body,
+                    "    c = {f}(t{t}, c, p.v[{i}].x, p.v[{i}].y, {});",
+                    args.join(", ")
+                );
+            }
+            ColorOp::Power(p) => {
+                let e = p.exponent;
+                let i = self.slots(&[v4(e, 0.0)]);
+                let (name, expr) = match p.negative {
+                    NegativeStyle::Clamp => ("power_clamp", "pow(max(v, vec3<f32>(0.0)), e)"),
+                    NegativeStyle::Mirror => ("power_mirror", "sign(v) * pow(abs(v), e)"),
+                    NegativeStyle::PassThru | NegativeStyle::Linear => (
+                        "power_pass",
+                        "select(v, pow(max(v, vec3<f32>(0.0)), e), v >= vec3<f32>(0.0))",
+                    ),
+                };
+                let f = self.helper(name, |n| format!("fn {n}(v: vec3<f32>, e: vec3<f32>) -> vec3<f32> {{\n    return {expr};\n}}\n"));
+                let _ = writeln!(self.body, "    c = {f}(c, p.v[{i}].xyz);");
+            }
+            ColorOp::Moncurve(m) => {
+                let seg: Vec<(f64, f64)> = (0..3).map(|c| m.segment(c)).collect();
+                let i = self.slots(&[
+                    v4(m.gamma, 0.0),
+                    v4(m.offset, 0.0),
+                    v4([seg[0].0, seg[1].0, seg[2].0], 0.0),
+                    v4([seg[0].1, seg[1].1, seg[2].1], 0.0),
+                ]);
+                let mirror = m.negative == NegativeStyle::Mirror;
+                let name = format!(
+                    "moncurve_{}{}",
+                    if m.inverse { "inv" } else { "fwd" },
+                    if mirror { "_mirror" } else { "" }
+                );
+                let inverse = m.inverse;
+                let f = self.helper(&name, |n| {
+                    let power = if inverse {
+                        "(1.0 + o) * pow(max(x, vec3<f32>(0.0)), 1.0 / g) - o"
+                    } else {
+                        "pow((x + o) / (1.0 + o), g)"
+                    };
+                    let (pre, post) = if mirror { ("abs(v)", "sign(v) * r") } else { ("v", "r") };
+                    format!(
+                        "fn {n}(v: vec3<f32>, g: vec3<f32>, o: vec3<f32>, b: vec3<f32>, s: vec3<f32>) -> vec3<f32> {{\n    let x = {pre};\n    let r = select({power}, x * s, x < b);\n    return {post};\n}}\n"
+                    )
+                });
+                let _ = writeln!(
+                    self.body,
+                    "    c = {f}(c, p.v[{i}].xyz, p.v[{}].xyz, p.v[{}].xyz, p.v[{}].xyz);",
+                    i + 1,
+                    i + 2,
+                    i + 3
+                );
+            }
+            ColorOp::Log(l) => {
+                let ln_b = l.base.ln();
+                let k = l.log_slope.map(|s| s / ln_b);
+                let mut brk = [-1e38; 3];
+                let mut ts = [0.0; 3];
+                let mut to = [0.0; 3];
+                for c in 0..3 {
+                    if let Some((lin_brk, log_brk, slope, off)) = l.toe(c) {
+                        brk[c] = if l.inverse { log_brk } else { lin_brk };
+                        ts[c] = slope;
+                        to[c] = off;
+                    }
+                }
+                let i = self.slots(&[
+                    v4(k, 0.0),
+                    v4(l.log_offset, 0.0),
+                    v4(l.lin_slope, 0.0),
+                    v4(l.lin_offset, 0.0),
+                    v4(brk, 0.0),
+                    v4(ts, 0.0),
+                    v4(to, 0.0),
+                ]);
+                let inverse = l.inverse;
+                let f = self.helper(if inverse { "log_inv" } else { "log_fwd" }, |n| {
+                    let body = if inverse {
+                        "    let a = (exp((v - q_lo) / q_k) - q_io) / q_is;\n    return select(a, (v - q_to) / q_ts, v <= q_b);\n".to_string()
+                    } else {
+                        format!(
+                            "    let a = q_k * log(max(q_is * v + q_io, vec3<f32>({}))) + q_lo;\n    return select(a, q_ts * v + q_to, v <= q_b);\n",
+                            lit(FLT_MIN)
+                        )
+                    };
+                    format!(
+                        "fn {n}(v: vec3<f32>, q_k: vec3<f32>, q_lo: vec3<f32>, q_is: vec3<f32>, q_io: vec3<f32>, q_b: vec3<f32>, q_ts: vec3<f32>, q_to: vec3<f32>) -> vec3<f32> {{\n{body}}}\n"
+                    )
+                });
+                let args: Vec<String> = (0..7).map(|j| format!("p.v[{}].xyz", i + j)).collect();
+                let _ = writeln!(self.body, "    c = {f}(c, {});", args.join(", "));
+            }
+            ColorOp::Cdl(cdl) => {
+                let (power, sat) = if cdl.inverse {
+                    (cdl.power.map(|p| 1.0 / p), 1.0 / cdl.saturation)
+                } else {
+                    (cdl.power, cdl.saturation)
+                };
+                let i = self.slots(&[v4(cdl.slope, sat), v4(cdl.offset, 0.0), v4(power, 0.0)]);
+                let clamp = cdl.clamp;
+                let inverse = cdl.inverse;
+                let name = format!(
+                    "cdl_{}{}",
+                    if inverse { "inv" } else { "fwd" },
+                    if clamp { "" } else { "_noclamp" }
+                );
+                let f = self.helper(&name, |n| {
+                    let c01 = |e: &str| if clamp { format!("clamp({e}, vec3<f32>(0.0), vec3<f32>(1.0))") } else { e.to_string() };
+                    let luma = "vec3<f32>(0.2126, 0.7152, 0.0722)";
+                    let body = if inverse {
+                        format!(
+                            "    var x = {};\n    let l = dot(x, {luma});\n    x = {};\n    x = select(x, pow(max(x, vec3<f32>(0.0)), q_pw), x > vec3<f32>(0.0));\n    return {};\n",
+                            c01("v"),
+                            c01("l + q_sat * (x - l)"),
+                            c01("(x - q_of) / q_sl")
+                        )
+                    } else {
+                        format!(
+                            "    var x = {};\n    x = select(x, pow(max(x, vec3<f32>(0.0)), q_pw), x > vec3<f32>(0.0));\n    let l = dot(x, {luma});\n    return {};\n",
+                            c01("v * q_sl + q_of"),
+                            c01("l + q_sat * (x - l)")
+                        )
+                    };
+                    format!("fn {n}(v: vec3<f32>, q_sl: vec3<f32>, q_of: vec3<f32>, q_pw: vec3<f32>, q_sat: f32) -> vec3<f32> {{\n{body}}}\n")
+                });
+                let _ = writeln!(
+                    self.body,
+                    "    c = {f}(c, p.v[{i}].xyz, p.v[{}].xyz, p.v[{}].xyz, p.v[{i}].w);",
+                    i + 1,
+                    i + 2
                 );
             }
             ColorOp::Lut3d(l) => {
@@ -401,7 +557,7 @@ fn curve_fn(name: &str, tf: TransferFunction, decode: bool) -> String {
             "fn {name}(v: vec3<f32>, e: f32) -> vec3<f32> {{\n    return sign(v) * pow(abs(v), vec3<f32>(e));\n}}\n"
         ),
         (T::Pq, true) => mirrored(format!(
-            "    let e = pow(a, vec3<f32>({inv_m2}));\n    let r = pow(max(e - {c1}, vec3<f32>(0.0)) / ({c2} - {c3} * e), vec3<f32>({inv_m1})) * {scale};\n",
+            "    let e = pow(a, vec3<f32>({inv_m2}));\n    let r = pow(max(e - {c1}, vec3<f32>(0.0)) / max({c2} - {c3} * e, vec3<f32>(1e-6)), vec3<f32>({inv_m1})) * {scale};\n",
             inv_m2 = l(1.0 / k::PQ_M2),
             inv_m1 = l(1.0 / k::PQ_M1),
             c1 = l(k::PQ_C1),
@@ -431,10 +587,8 @@ fn curve_fn(name: &str, tf: TransferFunction, decode: bool) -> String {
             hb = l(k::HLG_B)
         )),
         (T::AcesCc, true) => plain(format!(
-            "    let p = exp2(v * 17.52 - 9.72);\n    let lo = (p - {h16}) * 2.0;\n    return select(select(vec3<f32>({max}), p, v < {hi}), lo, v < {lo_cut});\n",
+            "    let p = exp2(v * 17.52 - 9.72);\n    let lo = (p - {h16}) * 2.0;\n    return select(p, lo, v < {lo_cut});\n",
             h16 = l(2f64.powi(-16)),
-            max = l(k::ACES_HALF_MAX),
-            hi = v3((k::ACES_HALF_MAX.log2() + 9.72) / 17.52),
             lo_cut = v3((9.72 - 15.0) / 17.52)
         )),
         (T::AcesCc, false) => plain(format!(
@@ -574,6 +728,36 @@ fn {name}(t: texture_2d<f32>, c: vec3<f32>, n: f32, w: f32, dmin: vec3<f32>, dma
     let g = mix({name}_at(t, i.y, wi).y, {name}_at(t, i.y + 1, wi).y, f.y);
     let b = mix({name}_at(t, i.z, wi).z, {name}_at(t, i.z + 1, wi).z, f.z);
     return vec3<f32>(r, g, b);
+}}
+"
+    )
+}
+
+fn lut1d_inv_fn(name: &str) -> String {
+    format!(
+        "fn {name}_at(t: texture_2d<f32>, i: i32, w: i32) -> vec4<f32> {{
+    return textureLoad(t, vec2<i32>(i % w, i / w), 0);
+}}
+fn {name}_ch(t: texture_2d<f32>, y: f32, n: i32, w: i32, ch: i32, s: f32) -> f32 {{
+    var lo = 0;
+    var hi = n - 1;
+    loop {{
+        if (hi - lo <= 1) {{ break; }}
+        let mid = (lo + hi) / 2;
+        let v = {name}_at(t, mid, w)[ch];
+        if (s * v <= s * y) {{ lo = mid; }} else {{ hi = mid; }}
+    }}
+    let a = {name}_at(t, lo, w)[ch];
+    let b = {name}_at(t, hi, w)[ch];
+    let f = select(0.0, clamp((y - a) / (b - a), 0.0, 1.0), b != a);
+    return (f32(lo) + f) / f32(n - 1);
+}}
+fn {name}(t: texture_2d<f32>, c: vec3<f32>, n: f32, w: f32, dmin: vec3<f32>, dmax: vec3<f32>, s: vec3<f32>, rlo: vec3<f32>, rhi: vec3<f32>) -> vec3<f32> {{
+    let y = clamp(c, rlo, rhi);
+    let ni = i32(n);
+    let wi = i32(w);
+    let pos = vec3<f32>({name}_ch(t, y.x, ni, wi, 0, s.x), {name}_ch(t, y.y, ni, wi, 1, s.y), {name}_ch(t, y.z, ni, wi, 2, s.z));
+    return dmin + pos * (dmax - dmin);
 }}
 "
     )
