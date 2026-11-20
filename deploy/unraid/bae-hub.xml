@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<!-- Unraid Docker template for bae-hub. 说明见 deploy/nas/unraid.md。
+     Copy to /boot/config/plugins/dockerMan/templates-user/my-bae-hub.xml, then
+     Docker > Add Container > Template: bae-hub. -->
+<Container version="2">
+  <Name>bae-hub</Name>
+  <Repository>bae-hub:latest</Repository>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Overview>BAE 协作服务：团队实时同步工程、保存工程日志。数据目录里的 hub.toml 保存团队令牌（首次启动自动生成，也会显示在日志里）。</Overview>
+  <Category>Productivity: Tools:</Category>
+  <WebUI>http://[IP]:[PORT:7341]/v1/info</WebUI>
+  <ExtraParams>--restart unless-stopped</ExtraParams>
+  <Config Name="Port" Target="7341" Default="7341" Mode="tcp" Description="客户端连接的端口" Type="Port" Display="always" Required="true" Mask="false">7341</Config>
+  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/bae-hub" Mode="rw" Description="数据目录：工程、hub.toml（令牌）" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/bae-hub</Config>
+  <Config Name="Write token" Target="BAE_HUB_TOKEN" Default="" Mode="" Description="可选：可写令牌（至少 16 个字符）。不填就用 hub.toml 里自动生成的" Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Read-only token" Target="BAE_HUB_READ_TOKEN" Default="" Mode="" Description="可选：只读令牌" Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Log level" Target="BAE_HUB_LOG" Default="info" Mode="" Description="error / warn / info / debug" Type="Variable" Display="advanced" Required="false" Mask="false">info</Config>
+</Container>

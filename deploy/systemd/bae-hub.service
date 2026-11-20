@@ -1,0 +1,37 @@
+# bae-hub as a systemd service (Linux without Docker). 说明见 deploy/README.md。
+#
+#   sudo install -m 755 bae-hub /usr/local/bin/bae-hub
+#   sudo useradd --system --home /var/lib/bae-hub --shell /usr/sbin/nologin bae-hub
+#   sudo cp bae-hub.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now bae-hub
+#   sudo journalctl -u bae-hub        # first start prints the team token
+[Unit]
+Description=BAE collaboration hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=bae-hub
+Group=bae-hub
+# Creates /var/lib/bae-hub owned by the user above.
+StateDirectory=bae-hub
+Environment=BAE_HUB_DATA=/var/lib/bae-hub
+Environment=BAE_HUB_LISTEN=0.0.0.0:7341
+ExecStart=/usr/local/bin/bae-hub serve
+Restart=on-failure
+RestartSec=3
+# SIGTERM: close connections, write every project, exit.
+TimeoutStopSec=20
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
