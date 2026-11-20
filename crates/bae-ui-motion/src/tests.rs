@@ -57,7 +57,7 @@ impl Harness {
     }
 
     /// One frame of `panel`; returns its requests.
-    fn frame(&mut self, kind: &str, panel: &mut dyn Panel, events: Vec<Event>) -> PanelRequests {
+    fn frame(&self, kind: &str, panel: &mut dyn Panel, events: Vec<Event>) -> PanelRequests {
         let mut requests = PanelRequests::default();
         let id = PanelId::new(kind);
         let raw = RawInput {
@@ -77,7 +77,7 @@ impl Harness {
         requests
     }
 
-    fn action(&mut self, panel: &mut dyn Panel, inv: Invocation) -> PanelRequests {
+    fn action(&self, panel: &mut dyn Panel, inv: Invocation) -> PanelRequests {
         let mut requests = PanelRequests::default();
         let id = PanelId::new("timeline");
         let mut cx = PanelContext::new(

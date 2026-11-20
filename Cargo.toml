@@ -215,6 +215,10 @@ incremental = false
 opt-level = "s"
 [profile.release.package.bae-agent]
 opt-level = "s"
+[profile.release.package.bae-ui-motion]
+opt-level = "s"
+[profile.release.package.bae-motion]
+opt-level = "s"
 [profile.release.package.bae-platform]
 opt-level = "s"
 [profile.release.package.rmcp]
