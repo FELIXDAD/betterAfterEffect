@@ -362,7 +362,7 @@ impl<T: ?Sized + Send + Sync + 'static> Registry<T> {
     /// Applies several writes atomically: readers observe either none or all of
     /// them, and subscribers receive one [`RegistryEvent`]. Copies the map once,
     /// so prefer this over many single writes during startup.
-    pub fn batch<R>(&self, f: impl FnOnce(&mut RegistryTransaction<T>) -> R) -> R {
+    pub fn batch<R>(&self, f: impl FnOnce(&mut RegistryTransaction<'_, T>) -> R) -> R {
         let (result, event) = {
             let _guard = self.write_lock.lock();
             let current = self.state.load_full();
