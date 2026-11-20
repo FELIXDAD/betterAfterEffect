@@ -202,6 +202,7 @@
 
 - **What it does:** GPU physically-based composition renderer (AE 24.0, 2023-10) used for imported 3D models (GLTF, GLB, OBJ, FBX per current help), environment lights with HDRI image-based lighting, extruded text/shape layers, and Adobe Standard Material on 3D layers. It is the only renderer that can render 3D model layers.
 - **Exact semantics:**
+  - With 3D layers but no light layer, Advanced 3D lights the scene with a hidden default Environment light (also used for reflections); adding any light layer disables it.
   - Renders 3D groups like Classic 3D (same grouping rules), but layers are shaded with a PBR material (Adobe Standard Material) using Material Options extensions (AE-CMP-441, AE-CMP-442); lights: Parallel/Spot/Point/Ambient and Environment (AE-CMP-439).
   - Shadows: Environment light shadows first; current versions allow up to eight shadow-casting Spot and Parallel lights plus one Environment light (Point lights are not listed as shadow casters). UNVERIFIED: version that added Spot/Parallel shadows (25.x).
   - Advanced 3D Render Options dialog (3D Renderer menu > Rendering Options): Render Quality slider (interactive vs final quality trade-off); Shadows: Resolution (Half 2 MB, Full 16 MB, Double 128 MB), Smoothness (1–32; follows Render Quality unless set), Casting Box Size, Casting Box Center, Fit to Scene button. Resolution/Smoothness apply to Environment-light shadows only.
@@ -442,7 +443,7 @@
 
 ### AE-CMP-427 · Create Stereo 3D Rig (创建立体 3D 设备)
 
-- **What it does:** Layer > Camera > Create Stereo 3D Rig (AE CS5.5+) builds a stereo rig: a master camera, left/right eye cameras in precomps, a 3D Glasses output comp and a control null with Stereo Scene Depth, Convergence etc.
+- **What it does:** Layer > Camera > Create Stereo 3D Rig (UNVERIFIED: since AE CS5.5) builds a stereo rig: a master camera, left/right eye cameras in precomps, a 3D Glasses output comp and a control null with Stereo Scene Depth, Convergence etc.
 - **Exact semantics:** Generates comps/layers/expressions only (no new renderer feature). UNVERIFIED: exact controls (Stereo Scene Depth, Interaxial Separation, Convergence Of, Z Offset, 3D View, Enable Depth of Field, Swap Left-Right).
 - **Priority:** P2
 - **Owner:** bae-motion
@@ -472,21 +473,21 @@
   - A light is enabled when its Video switch is on and t is within its in/out range. All enabled lights act together (no "active light" selection).
 - **Priority:** P0
 - **Owner:** bae-render (+ bae-model)
-- **Notes:** matchName `ADBE Light Layer`; scripting `LayerCollection.addLight(name, centerPoint)`, `LightLayer.lightType` (`LightType.PARALLEL`, `SPOT`, `POINT`, `AMBIENT`, `ENVIRONMENT`), `LightLayer.lightSource` (AE 24.3+). Lottie has no light layer type in common players (bodymovin skips lights; lottie-web ignores them). BAE Lottie export: bake nothing, warn.
+- **Notes:** matchName `ADBE Light Layer`; scripting `LayerCollection.addLight(name, centerPoint)`, `LightLayer.lightType` (`LightType.PARALLEL`, `SPOT`, `POINT`, `AMBIENT`, `ENVIRONMENT`), `LightLayer.lightSource` (AE 24.3+; any 2D layer since 25.2). Lottie: the Lottie docs define no light layer and lottie-web/Skottie render no lights. BAE Lottie export: bake nothing, warn. zh-CN help terms: 光照 (light), 聚光 1 (default name example).
 
-### AE-CMP-430 · Light Settings dialog and Light Options (光照设置 / 灯光选项)
+### AE-CMP-430 · Light Settings dialog and Light Options (光照设置 / 光照选项)
 
 - **What it does:** Dialog and Timeline property group defining light type, colour, intensity, cone, falloff and shadow parameters.
 - **Exact semantics:** Fields in dialog order (Timeline group `ADBE Light Options Group` shows the same properties except Light Type):
   | Parameter (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
   | Name (名称) | string | "<Type> Light N" | — | — | |
-  | Light Type (光照类型) | enum | Spot UNVERIFIED (dialog remembers last used) | Parallel, Spot, Point, Ambient, Environment | — | AE-CMP-431; Environment AE 24.3+ (Advanced 3D only) |
+  | Light Type (光照类型) | enum | Spot UNVERIFIED (dialog remembers last used) | Parallel, Spot, Point, Ambient, Environment | — | AE-CMP-431; Environment: Advanced 3D only (scripting `LightType.ENVIRONMENT` since AE 24.3; UNVERIFIED: feature itself shipped with Advanced 3D in 24.0) |
   | Color (颜色) | color | white (1,1,1) | 0–1 per channel (overbright allowed in 32 bpc UNVERIFIED) | — | `ADBE Light Color` |
   | Intensity (强度) | float | 100 | unbounded; negative allowed | % | `ADBE Light Intensity`; negative = "nonlight", subtracts |
   | Cone Angle (锥形角度) | angle | 90 | 0–180 | ° (full cone angle) | Spot only; `ADBE Light Cone Angle` |
   | Cone Feather (锥形羽化) | float | 50 | 0–100 | % | Spot only; `ADBE Light Cone Feather 2` |
-  | Falloff (衰减) | enum | None | None (无), Smooth (平滑), Inverse Square Clamped (反向平方限制) | — | Parallel/Spot/Point; `ADBE Light Falloff Type`; AE CC 2014 (13.0) UNVERIFIED |
+  | Falloff (衰减) | enum | None | None (无), Smooth (平滑), Inverse Square Clamped (反向平方限制) | — | Parallel/Spot/Point; `ADBE Light Falloff Type`; added in AE CS5.5 (10.5) |
   | Radius (半径) | float | 500 | ≥ 0 | px | `ADBE Light Falloff Start` |
   | Falloff Distance (衰减距离) | float | 500 | ≥ 0 | px | `ADBE Light Falloff Distance`; Smooth only |
   | Casts Shadows (投影) | bool (not animatable) | off | — | — | not for Ambient |
@@ -509,9 +510,9 @@
                     perpendicular to L  UNVERIFIED
   Spot (聚光):      L = normalize(light.position - P); spot factor from cone (AE-CMP-432)
   Point (点):       L = normalize(light.position - P); omnidirectional
-  Ambient (环境):   no direction; adds color*intensity uniformly; never casts shadows
-  Environment (环境光, Advanced 3D only, AE 24.3+): image-based light from a 2D layer source
-                    (HDR/EXR in 24.3; any 2D layer since 25.2); P2
+  Ambient (周围光):  no direction; adds color*intensity uniformly; never casts shadows; no viewer icon
+  Environment (环境光, Advanced 3D only): image-based light from a 2D layer source
+                    (lightSource: HDR/EXR in 24.3; any 2D layer since 25.2); P2
   ```
   Chinese UI (zh-CN help light-type list): Parallel 平行光, Spot 聚光, Point 点光, Ambient 周围光, Environment 环境光; the Light Settings description text uses the short forms 平行/聚光/点/环境 (译名待核: which form the dialog menu shows).
 - **Priority:** P0 (Environment P2)
@@ -546,7 +547,8 @@
   R = Radius, F = Falloff Distance
   None:                     atten = 1
   Smooth:                   atten = 1                         if d <= R
-                                  = 1 - smoothstep(0, 1, (d - R) / F)   UNVERIFIED (help: "smooth linear")
+                                  = 1 - (d - R) / F           UNVERIFIED: help calls it a "smooth linear" falloff;
+                                                              linear ramp assumed (a smoothstep-shaped ramp is the alternative)
                                   = 0                         if d >= R + F
   Inverse Square Clamped:   atten = 1                         if d <= R
                                   = (R / d)^2                 otherwise   (F unused)  UNVERIFIED
@@ -555,7 +557,7 @@
   - Falloff does not affect Ambient lights.
 - **Priority:** P1
 - **Owner:** bae-render
-- **Notes:** Before falloff existed (≤ AE CC 12.x), lights never attenuated; old projects load with Falloff = None.
+- **Notes:** Falloff (Radius, Falloff Distance) was added in AE CS5.5 (10.5) (CS5.5 user manual, Light settings: "Radius … After Effects CS5.5 and later"); earlier projects load with Falloff = None. Help wording: Smooth = "smooth linear falloff starting at the Falloff Start radius and extending the length specified by Falloff Distance"; Inverse Square Clamped = "physically accurate falloff starting at the Falloff Start radius and decreasing proportionally to the inverse square of the distance". The Advanced 3D help recommends Inverse Square Clamped for physically plausible results with Adobe Standard Material.
 
 ### AE-CMP-434 · Light intensity, colour and negative light (光照强度、颜色和负光)
 
@@ -625,6 +627,7 @@
   - Continuously rasterized layers (text, shapes, collapsed comps) cast shadows from their source **before** effects (effects not seen in the shadow); precompose to include effects.
   - Shadows are not cast onto 2D layers or across groups; lights ignore groups only for illumination.
   - Draft 3D disables shadows.
+  - Advanced 3D differs (P2): shadows from up to eight Spot/Parallel lights plus one Environment light; Shadow Diffusion is available only for Spot lights there (help "Enable lights to cast shadows").
 - **Priority:** P1
 - **Owner:** bae-render
 - **Notes:** Implementation hint: since casters are planar quads, an exact analytic shadow (project caster quad onto receiver plane per light) is possible for hard shadows and avoids shadow-map gaps at intersections; BAE decision: use analytic projection where possible, shadow maps for many casters. Advanced 3D (AE 25.x) supports up to eight shadow-casting Spot/Parallel lights plus one Environment light — P2.
@@ -653,7 +656,7 @@
 - **Exact semantics:** Group `ADBE Material Options Group` (Timeline shortcut AA), shown only on 3D layers. Properties in Timeline order:
   | Parameter (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
-  | Casts Shadows (投影) | enum, animatable (hold) | Off | Off (关), On (开), Only (仅) | — | matchName `ADBE Casts Shadows` UNVERIFIED; toggle Off↔On: Opt+Shift+C / Alt+Shift+C |
+  | Casts Shadows (投影) | enum, animatable (hold) | Off | Off (关), On (开), Only (仅限) | — | matchName `ADBE Casts Shadows` UNVERIFIED; toggle Off↔On: Opt+Shift+C / Alt+Shift+C |
   | Light Transmission (透光率) | float | 0 | 0–100 | % | `ADBE Light Transmission` |
   | Accepts Shadows (接受阴影) | enum, animatable (hold) | On | Off, On, Only | — | `ADBE Accepts Shadows` UNVERIFIED |
   | Accepts Lights (接受光照) | enum, animatable (hold) | On | Off, On | — | `ADBE Accepts Lights` UNVERIFIED |
@@ -664,7 +667,7 @@
   - Scripting enum values: Casts Shadows 0 = Off, 1 = On, 2 = Only (property value) UNVERIFIED numbering; Accepts Shadows 0 = Off, 1 = On, 2 = Only UNVERIFIED.
 - **Priority:** P1 (Accepts Lights P0)
 - **Owner:** bae-model (+ bae-render)
-- **Notes:** In the Advanced 3D renderer the same switches appear for 3D model layers under "Compositing Options"; Accepts Shadows "Only" is disabled there (shadow catchers are a separate feature, P2).
+- **Notes:** In the Advanced 3D renderer the same switches appear for 3D model layers under "Compositing Options"; Accepts Shadows "Only" is disabled there (shadow catchers are a separate feature, P2). AE 25.1 (2024-12) added the Accepts Lights switch for Advanced 3D / 3D model layers (there it also removes shadows and highlights from lights); Classic 3D has had Accepts Lights all along. zh-CN help translates Material Options as 素材选项; the AE zh-CN UI string is believed to be 材质选项（译名待核）.
 
 ### AE-CMP-441 · Material Options: surface reflectance (材质选项：环境、漫射、镜面强度、镜面反光度、金属质感)
 
@@ -680,7 +683,7 @@
   - Defaults 100/50/50/5/100 are the long-standing AE factory values (documented in ProVideo Coalition's lighting series; the current Adobe help page lists no defaults).
   - The three lighting terms add, so Diffuse + Specular + Ambient contributions can exceed 100 % and blow out (clipped in 8/16 bpc).
   - Use in the lighting equation: AE-CMP-436. Out-of-range values are clamped by the UI; expressions can produce values outside 0–100, which AE clamps at render UNVERIFIED.
-  - To make a lit 3D layer match its 2D look under a single 100 % light: Ambient 100, Diffuse 100, Specular 0 (Adobe tip).
+  - Adobe tip (Advanced 3D materials help): to make a 3D layer match its 2D look as closely as possible, set Ambient and Diffuse to 100 and Specular Intensity, Specular Shininess and Metal to 0.
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-render)
 - **Notes:** Expression attributes `ambient`, `diffuse`, `specular`, `shininess`, `metal`, `lightTransmission`, `castsShadows`, `acceptsShadows`, `acceptsLights` on 3D layers (see transform-keyframes-expressions.md, Layer 3D attributes). In Advanced 3D these map to Adobe Standard Material: Ambient ≈ emissive-like (does not light others), Diffuse → Base Color weight, Specular Intensity → specular level, Specular Shininess → 1 − roughness (non-linear), Metal → metallic-like colour tint.
