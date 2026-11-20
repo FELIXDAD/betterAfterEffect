@@ -1,0 +1,513 @@
+#!/usr/bin/env bash
+# aictl — drive Adobe Illustrator (macOS) from scripts and agents without a human.
+#
+#   aictl status                 running? pid, owned by aictl, runner alive, modal dialog
+#   aictl start                  launch in background, wait until the script runner answers
+#   aictl eval '<jsx>' [opts]    run ExtendScript source in Illustrator; result JSON on stdout
+#   aictl run file.jsx [opts]    run an ExtendScript file in Illustrator; result JSON on stdout
+#   aictl stop                   close all documents without saving and quit (SIGKILL)
+#   aictl diagnose               main-thread stack, runner log, CEP log, recovery files
+#   aictl clean                  move stale crash-recovery files away (Illustrator not running)
+#   aictl install | uninstall    install / remove the runner extension (CEP)
+#
+# Options for eval/run: --timeout <s> (default 300), --force (also take over or recover an
+# Illustrator that aictl did not start; that may discard someone's unsaved work),
+# --lock-timeout <s> (default 1800: how long to wait while another caller uses Illustrator).
+#
+# How it works (see tools/ai/README.md):
+# - Scripts reach Illustrator through an invisible CEP extension (tools/ai/cep, installed
+#   into ~/Library/Application Support/Adobe/CEP/extensions/org.bae.aictl). AppleEvents
+#   (`do javascript`) would need a macOS Automation permission that only a human can grant.
+# - The extension starts on Illustrator's documentAfterActivate event, so `start` opens a
+#   tiny SVG along with the app (with the screen locked the app never activates).
+# - Every script runs with app.userInteractionLevel = DONTDISPLAYALERTS inside try/catch;
+#   results and errors go to a JSON file, never to alert().
+# - Hangs are detected by sampling Illustrator's main thread (no Accessibility permission
+#   needed): a blocking modal loop above the running script, or a main thread frozen
+#   outside the script. Recovery: save evidence, SIGKILL, move recovery files away.
+set -uo pipefail
+
+STATE="${BAE_AI_STATE:-/tmp/bae-ai-automation}"
+mkdir -p "$STATE"
+# Physical path: ExtendScript's Folder.create() fails through symlinks such as /tmp ->
+# /private/tmp, so every path handed to Illustrator must be resolved.
+STATE="$(cd "$STATE" && pwd -P)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+QUEUE="$STATE/queue"
+mkdir -p "$QUEUE"
+
+die() { echo "aictl: $*" >&2; exit 1; }
+log() { echo "aictl: $*" >&2; }
+nap() { perl -e "select(undef,undef,undef,$1)"; }
+json_str() { python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"; }
+
+find_app() {
+  if [[ -n "${AI_APP:-}" ]]; then echo "$AI_APP"; return; fi
+  local app
+  app=$(ls -d "/Applications/Adobe Illustrator "*/"Adobe Illustrator.app" 2>/dev/null | sort | tail -1)
+  [[ -n "$app" ]] || die "Illustrator not found in /Applications (set AI_APP)"
+  echo "$app"
+}
+APP="$(find_app)"
+VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")
+MAJOR="${VERSION%%.*}"
+EXE="$APP/Contents/MacOS/Adobe Illustrator"
+# CEP major version of this Illustrator (12 for Illustrator 30): PlayerDebugMode lives in
+# the com.adobe.CSXS.<major> defaults domain.
+CSXS_MAJOR=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+  "$APP/Contents/Frameworks/PlugPlugOwl.framework/Versions/A/Resources/Info.plist" 2>/dev/null | cut -d. -f1)
+CSXS_MAJOR="${CSXS_MAJOR:-12}"
+CSXS_DOMAIN="com.adobe.CSXS.$CSXS_MAJOR"
+EXT_ID="org.bae.aictl"
+EXT_DIR="$HOME/Library/Application Support/Adobe/CEP/extensions/$EXT_ID"
+CEP_LOG="$HOME/Library/Logs/CSXS/CEPHtmlEngine$CSXS_MAJOR-ILST-$VERSION-$EXT_ID.runner.log"
+SETTINGS_DIR="$HOME/Library/Preferences/Adobe Illustrator $MAJOR Settings"
+KICK="$STATE/bae-aictl-kick.svg"
+
+# Match the executable itself: helpers (CEPHtmlEngine, AIMonitor) live in the same bundle.
+ai_pid() { ps -axo pid=,comm= | awk -v exe="$EXE" '{pid=$1; $1=""; sub(/^ /, ""); if ($0 == exe) {print pid; exit}}'; }
+owned() { [[ -f "$STATE/aictl.pid" && "$(cat "$STATE/aictl.pid")" == "$1" ]]; }
+mtime() { stat -f %m "$1" 2>/dev/null || echo 0; }
+proc_start() { date -j -f "%a %b %d %T %Y" "$(ps -o lstart= -p "$1" | sed 's/  */ /g; s/^ //')" +%s 2>/dev/null || echo 0; }
+
+# The runner rewrites runner.json every second while Illustrator's CEP engine is alive.
+runner_alive() { [[ -f "$STATE/runner.json" ]] && (( $(date +%s) - $(mtime "$STATE/runner.json") <= 5 )); }
+# ready.json is written after the runner's first evalScript came back from this instance.
+runner_ready() { [[ -f "$STATE/ready.json" ]] && (( $(mtime "$STATE/ready.json") >= $(proc_start "$1") )); }
+
+# Main-thread section of one `sample`.
+main_thread() {
+  sample "$1" 1 -mayDie 2>/dev/null \
+    | awk '/com.apple.main-thread/ {m=1; next} m && /^    [0-9]+ Thread_/ {m=0} m'
+}
+main_stack() {
+  main_thread "$1" | grep -oE '[A-Za-z_][A-Za-z0-9_:~<>]*\(|-\[[A-Za-z0-9_]+ [A-Za-z0-9_:]+\]|\(in [^)]+\)' \
+    | grep -v -E '^(start|main|_|mach)' | awk '!seen[$0]++' | tail -30
+}
+
+# Blocking modal run loops (Cocoa alerts and dialogs, ScriptUI alert()). runModalSession
+# is not here: a session returns every iteration and only means a long operation is
+# pumping events (progress bars).
+MODAL_RE='runModalForWindow|_doModalLoop|NSAlert runModal|ModalLoop|RunModal[(]'
+SCRIPT_RE='[(]in AdobeExtendScript[)]|ScScript::|jsRunner'
+# "modal" when a blocking modal loop sits above (deeper than) every running script frame:
+# the script opened a dialog, or a dialog came up while nothing was running. A script
+# that is itself running inside an older modal loop is not waiting for a click.
+classify() {
+  awk -v mre="$MODAL_RE" -v sre="$SCRIPT_RE" '
+    { d = match($0, /[0-9]/) }
+    $0 ~ mre && d > md { md = d }
+    $0 ~ sre && d > sd { sd = d }
+    END {
+      if (md > 0 && md > sd) print "modal"
+      else if (sd > 0) print "script"
+      else print "idle"
+    }'
+}
+is_modal() { [[ -n "$1" ]] && [[ "$(main_thread "$1" | classify)" == modal ]]; }
+MODAL_CONFIRMATIONS=3
+# A pending script whose main thread sits on the same non-script stack this many checks
+# in a row (~3 s apart) is a hang that is not a dialog.
+FROZEN_CHECKS=10
+
+stuck() {
+  local n
+  for n in $(seq 1 "$MODAL_CONFIRMATIONS"); do
+    is_modal "$1" || return 1
+    (( n < MODAL_CONFIRMATIONS )) && nap 1.5
+  done
+  return 0
+}
+
+known_dialog() {
+  local stack="$1"
+  if grep -q 'ScCore::Dialogs::\|ScriptUI' <<<"$stack"; then
+    echo "script-alert: a script called alert()/confirm()/prompt() or showed a ScriptUI dialog"
+  elif grep -q -i 'recover' <<<"$stack"; then
+    echo "recovery: Illustrator offers to recover documents from a previous session"
+  elif grep -q 'NSAlert runModal' <<<"$stack"; then
+    echo "alert: an NSAlert is waiting for a click"
+  else
+    echo "unknown-modal"
+  fi
+}
+
+# Onscreen windows of a process: "id<TAB>width<TAB>height<TAB>name" (needs swift; optional).
+windows() {
+  command -v swift >/dev/null 2>&1 || return 0
+  swift - "$1" 2>/dev/null <<'SWIFT'
+import CoreGraphics
+let pid = Int32(CommandLine.arguments[1])!
+let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+for w in list where (w[kCGWindowOwnerPID as String] as? Int32) == pid && (w[kCGWindowLayer as String] as? Int) == 0 {
+  let b = w[kCGWindowBounds as String] as? [String: Any] ?? [:]
+  print("\(w[kCGWindowNumber as String] ?? 0)\t\(b["Width"] ?? 0)\t\(b["Height"] ?? 0)\t\(w[kCGWindowName as String] ?? "")")
+}
+SWIFT
+}
+
+# Illustrator keeps unsaved work of the last session in DataRecovery and offers it back
+# (a modal) on the next launch. aictl's sessions have nothing worth recovering; the files
+# are moved into the evidence folder, not deleted.
+clean_recovery() {
+  [[ -z "$(ai_pid)" ]] || die "clean: Illustrator is running"
+  local d moved=""
+  for d in "$SETTINGS_DIR"/*/DataRecovery; do
+    [[ -d "$d" ]] || continue
+    if [[ -n "$(ls -A "$d" 2>/dev/null)" ]]; then
+      moved="$STATE/recoveries/datarecovery-$(date +%Y%m%d-%H%M%S)"
+      mkdir -p "$moved" && mv "$d"/* "$moved"/ 2>/dev/null
+    fi
+  done
+  [[ -z "$moved" ]] || log "moved Illustrator data-recovery files to $moved"
+}
+
+install() {
+  mkdir -p "$EXT_DIR/CSXS"
+  cp "$HERE/cep/CSXS/manifest.xml" "$EXT_DIR/CSXS/manifest.xml"
+  cp "$HERE/cep/index.html" "$EXT_DIR/index.html"
+  sed "s#__STATE__#$STATE#g" "$HERE/cep/runner.js" > "$EXT_DIR/runner.js.tmp" && mv "$EXT_DIR/runner.js.tmp" "$EXT_DIR/runner.js"
+  # Unsigned extensions load only in debug mode. The key is shared by every CEP host of
+  # this CEP version (Illustrator, Premiere, After Effects…): set it, never delete it.
+  if [[ "$(defaults read "$CSXS_DOMAIN" PlayerDebugMode 2>/dev/null)" != 1 ]]; then
+    defaults write "$CSXS_DOMAIN" PlayerDebugMode 1
+    log "set $CSXS_DOMAIN PlayerDebugMode = 1 (unsigned CEP extensions may load)"
+  fi
+  [[ -f "$KICK" ]] || printf '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>\n' > "$KICK"
+}
+
+uninstall() {
+  rm -rf "$EXT_DIR"
+  log "removed $EXT_DIR (left $CSXS_DOMAIN PlayerDebugMode as is: other CEP tools may need it)"
+}
+
+# Keep the evidence before cleaning it away: stack, runner and CEP logs, dialog snapshots.
+save_evidence() {
+  local pid="$1" why="$2" dir f stamp w id
+  stamp="$(date +%Y%m%d-%H%M%S)-$pid"
+  dir="$STATE/recoveries"; mkdir -p "$dir"
+  f="$dir/$stamp.txt"
+  {
+    echo "reason: $why"
+    echo "time: $(date)"
+    echo "pid: $pid"
+    echo "--- windows (id, width, height, name)"
+    windows "$pid"
+    echo "--- runner.log (tail)"
+    tail -20 "$STATE/runner.log" 2>/dev/null
+    echo "--- CEP log (tail)"
+    tail -5 "$CEP_LOG" 2>/dev/null
+    echo "--- main thread (sample)"
+    sample "$pid" 1 -mayDie 2>/dev/null | sed -n '/com.apple.main-thread/,/^    [0-9]* Thread_/p'
+  } > "$f" 2>&1
+  # Pictures of Illustrator's own small windows (dialogs), not of the whole screen.
+  while IFS=$'\t' read -r id w _; do
+    [[ -n "$id" ]] || continue
+    (( ${w%.*} < 1000 )) && screencapture -x -o -l"$id" "$dir/$stamp-window-$id.png" 2>/dev/null
+  done < <(windows "$pid")
+  echo "$f"
+}
+
+kill_ai() {
+  local pid="$1"
+  # SIGKILL: Adobe apps treat SIGTERM like a crash and may show dialogs on the way out.
+  kill -9 "$pid" 2>/dev/null
+  for _ in $(seq 1 20); do kill -0 "$pid" 2>/dev/null || break; nap 0.3; done
+  rm -f "$STATE/aictl.pid" "$STATE/ready.json" "$STATE/runner.json"
+  rm -f "$QUEUE"/*.req "$QUEUE"/*.taken
+}
+
+recover() {
+  local pid="$1" force="$2" why="$3" evidence
+  if ! owned "$pid" && [[ "$force" != 1 ]]; then
+    die "Illustrator (pid $pid, not started by aictl) is stuck: $why. Re-run with --force to kill it."
+  fi
+  evidence=$(save_evidence "$pid" "$why")
+  log "recovering from: $why (evidence: $evidence)"
+  LAST_EVIDENCE="$evidence"
+  kill_ai "$pid"
+  clean_recovery
+}
+
+# 0 ready, 2 exited, 3 modal, 4 runner refused (CEP signature), 1 timeout.
+wait_ready() {
+  local pid="$1" t0="$2" limit="${3:-180}" i=0 hits=0 kicked=0
+  while (( i < limit * 2 )); do
+    nap 0.5; i=$((i + 1))
+    if [[ -f "$STATE/ready.json" ]] && (( $(mtime "$STATE/ready.json") >= t0 )); then return 0; fi
+    kill -0 "$pid" 2>/dev/null || return 2
+    if (( i % 6 == 0 )); then
+      if is_modal "$pid"; then hits=$((hits + 1)); else hits=0; fi
+      (( hits >= 2 )) && return 3
+      if [[ -f "$CEP_LOG" ]] && (( $(mtime "$CEP_LOG") >= t0 )) && grep -q 'Signature verification failed' "$CEP_LOG"; then
+        return 4
+      fi
+    fi
+    # The extension starts on documentAfterActivate; if Illustrator was still starting
+    # when the kick document arrived, open it once more.
+    if (( kicked == 0 && i >= 60 )) && ! runner_alive; then
+      kicked=1; open -g -a "$APP" "$KICK"
+    fi
+  done
+  return 1
+}
+
+# Submit a script file to the runner and wait for its result file (internal: no start).
+await_job() {
+  local id="$1" wrapper="$2" out="$3" timeout="$4" force="$5" pid="$6"
+  printf '{"script":%s}' "$(json_str "$wrapper")" > "$QUEUE/$id.req.tmp" && mv "$QUEUE/$id.req.tmp" "$QUEUE/$id.req"
+  local i=0 hits=0 frozen=0 prev_sig="" text kind sig why="" stale=0
+  while (( i < timeout * 2 )); do
+    nap 0.5; i=$((i + 1))
+    [[ -f "$out" ]] && return 0
+    if ! kill -0 "$pid" 2>/dev/null; then
+      JOB_ERROR="Illustrator exited while running the script (crash?)"
+      local crash; crash=$(ls -t "$HOME/Library/Logs/DiagnosticReports/"Adobe\ Illustrator*.ips 2>/dev/null | head -1)
+      [[ -n "$crash" ]] && (( $(mtime "$crash") >= $(date +%s) - i )) && JOB_ERROR="$JOB_ERROR; crash report: $crash"
+      rm -f "$STATE/aictl.pid" "$STATE/ready.json" "$STATE/runner.json" "$QUEUE/$id".*
+      clean_recovery
+      return 5
+    fi
+    if (( i % 6 == 0 )); then
+      text=$(main_thread "$pid")
+      kind=$(classify <<<"$text")
+      if [[ "$kind" == modal ]]; then hits=$((hits + 1)); else hits=0; fi
+      if [[ "$kind" == script ]]; then
+        frozen=0; prev_sig=""
+      else
+        sig=$(grep -oE '\(in [^)]+\) \+ [0-9]+' <<<"$text" | md5 -q)
+        if [[ -n "$prev_sig" && "$sig" == "$prev_sig" ]]; then frozen=$((frozen + 1)); else frozen=0; fi
+        prev_sig="$sig"
+      fi
+      if runner_alive; then stale=0; else stale=$((stale + 1)); fi
+    fi
+    if (( hits >= MODAL_CONFIRMATIONS )); then
+      why="modal dialog while running script: $(known_dialog "$(main_stack "$pid")")"
+    elif (( frozen >= FROZEN_CHECKS )); then
+      why="main thread frozen outside the script for ~$((FROZEN_CHECKS * 3))s: $(main_stack "$pid" | tail -4 | tr '\n' ' ')"
+    elif (( stale >= 5 )) && [[ ! -f "$QUEUE/$id.taken" ]]; then
+      why="the runner extension stopped (no heartbeat for ~15s) before taking the script"
+    fi
+    if [[ -n "$why" ]]; then
+      recover "$pid" "$force" "$why"
+      JOB_ERROR="$why"
+      return 3
+    fi
+  done
+  # Illustrator keeps executing an abandoned script, so the next caller would queue behind
+  # it and time out too. Restart before releasing the lock.
+  LAST_EVIDENCE=""
+  recover "$pid" 1 "timeout after ${timeout}s; the script was still running"
+  JOB_ERROR="timeout after ${timeout}s (Illustrator restarted so the next caller is not blocked)"
+  return 4
+}
+
+write_wrapper() {
+  local wrapper="$1" body="$2" out="$3"
+  cat > "$wrapper" <<EOF
+(function () {
+    var __bae_value, __bae_error = null, __bae_t0 = new Date().getTime(), __bae_uil = null;
+    try { __bae_uil = app.userInteractionLevel; app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (e0) {}
+    try { $body } catch (e) {
+        __bae_error = { message: String(e), line: e.line, file: String(e.fileName || "") };
+    }
+    try { if (__bae_uil !== null) { app.userInteractionLevel = __bae_uil; } } catch (e1) {}
+    function esc(s) {
+        return String(s).replace(/\\\\/g, "\\\\\\\\").replace(/"/g, '\\\\"').replace(/\\n/g, "\\\\n").replace(/\\r/g, "\\\\r").replace(/\\t/g, "\\\\t").replace(/[\\u0000-\\u001f]/g, " ");
+    }
+    var v = (__bae_value === undefined) ? "null" : '"' + esc(__bae_value) + '"';
+    var err = __bae_error ? '{"message":"' + esc(__bae_error.message) + '","line":' + (__bae_error.line || 0) + ',"file":"' + esc(__bae_error.file) + '"}' : "null";
+    var f = new File("$out.tmp");
+    f.encoding = "UTF-8";
+    f.open("w");
+    f.write('{"ok":' + (__bae_error ? "false" : "true") + ',"value":' + v + ',"error":' + err + ',"ms":' + (new Date().getTime() - __bae_t0) + '}');
+    f.close();
+    f.rename("$(basename "$out")");
+})();
+EOF
+}
+
+# Close the kick document(s) left over from start.
+close_kick() {
+  local pid="$1" id out wrapper
+  id="kick-$(date +%s)-$$"; out="$STATE/result-$id.json"; wrapper="$STATE/run-$id.jsx"
+  write_wrapper "$wrapper" 'for (var i = app.documents.length - 1; i >= 0; i--) { if (/^bae-aictl-kick/.test(app.documents[i].name)) { app.documents[i].close(SaveOptions.DONOTSAVECHANGES); } }' "$out"
+  JOB_ERROR=""
+  await_job "$id" "$wrapper" "$out" 60 1 "$pid" || { log "could not close the kick document: $JOB_ERROR"; return 1; }
+  rm -f "$out" "$wrapper" "$QUEUE/$id".*
+}
+
+start() {
+  local force="${1:-0}" pid attempt t0
+  install
+  pid=$(ai_pid)
+  if [[ -n "$pid" ]]; then
+    if runner_alive && runner_ready "$pid"; then
+      return 0
+    fi
+    if ! owned "$pid" && [[ "$force" != 1 ]]; then
+      die "Illustrator is running (pid $pid) but not started by aictl, and its runner is not up; quit it or use --force"
+    fi
+    if stuck "$pid"; then
+      recover "$pid" "$force" "$(known_dialog "$(main_stack "$pid")")"
+    else
+      # Running without the runner (e.g. the extension was installed later): kick it.
+      t0=$(date +%s)
+      open -g -a "$APP" "$KICK"
+      if wait_ready "$pid" "$t0" 40; then
+        echo "$pid" > "$STATE/aictl.pid"; close_kick "$pid"; return 0
+      fi
+      recover "$pid" "$force" "runner did not start in a running Illustrator"
+    fi
+  fi
+  for attempt in 1 2 3; do
+    clean_recovery
+    rm -f "$STATE/ready.json" "$STATE/runner.json" "$QUEUE"/*.req "$QUEUE"/*.taken
+    t0=$(date +%s)
+    open -g -a "$APP" "$KICK" || die "cannot launch $APP"
+    pid=""
+    for _ in $(seq 1 80); do pid=$(ai_pid); [[ -n "$pid" ]] && break; nap 0.25; done
+    [[ -n "$pid" ]] || die "Illustrator did not start"
+    echo "$pid" > "$STATE/aictl.pid"
+    wait_ready "$pid" "$t0" 240
+    case $? in
+      0) log "Illustrator $VERSION ready (pid $pid, $(( $(date +%s) - t0 ))s)"; close_kick "$pid"; return 0 ;;
+      2) log "Illustrator exited during startup (attempt $attempt)"; rm -f "$STATE/aictl.pid" ;;
+      3) recover "$pid" 1 "$(known_dialog "$(main_stack "$pid")") at startup (attempt $attempt)" ;;
+      4) recover "$pid" 1 "CEP refused the runner extension (signature check; is $CSXS_DOMAIN PlayerDebugMode = 1?)"
+         defaults write "$CSXS_DOMAIN" PlayerDebugMode 1 ;;
+      *) recover "$pid" 1 "runner not ready after 240s (attempt $attempt)" ;;
+    esac
+  done
+  die "Illustrator did not become ready after 3 attempts; run 'aictl diagnose'"
+}
+
+# Run ExtendScript source (file or string) with alerts suppressed; print the result JSON.
+run_script() {
+  local mode="$1" src="$2" timeout="$3" force="$4" id out wrapper body pid rc
+  start "$force"
+  pid=$(ai_pid)
+  id="$(date +%s)-$$-$RANDOM"
+  out="$STATE/result-$id.json"; wrapper="$STATE/run-$id.jsx"
+  if [[ "$mode" == file ]]; then
+    [[ -f "$src" ]] || die "no such script: $src"
+    body="__bae_value = \$.evalFile(new File($(json_str "$src")));"
+  else
+    printf '%s' "$src" > "$STATE/src-$id.jsx"
+    body="__bae_value = \$.evalFile(new File(\"$STATE/src-$id.jsx\"));"
+  fi
+  write_wrapper "$wrapper" "$body" "$out"
+  JOB_ERROR=""; LAST_EVIDENCE=""
+  await_job "$id" "$wrapper" "$out" "$timeout" "$force" "$pid"
+  rc=$?
+  if (( rc != 0 )); then
+    python3 -c 'import json,sys; print(json.dumps({"ok": False, "value": None, "error": {"message": sys.argv[1], "recovered": sys.argv[2] != "5", "evidence": sys.argv[3] or None}}))' \
+      "$JOB_ERROR" "$rc" "${LAST_EVIDENCE:-}"
+    return "$rc"
+  fi
+  cat "$out"; echo
+  rm -f "$wrapper" "$STATE/src-$id.jsx" "$QUEUE/$id".*
+  python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["ok"] else 1)' "$out"
+  rc=$?
+  rm -f "$out"
+  return "$rc"
+}
+
+stop() {
+  local force="${1:-0}" pid; pid=$(ai_pid)
+  [[ -n "$pid" ]] || { log "not running"; return 0; }
+  if ! owned "$pid" && [[ "$force" != 1 ]]; then
+    die "Illustrator (pid $pid) was not started by aictl; use --force to quit it without saving"
+  fi
+  if runner_alive && ! stuck "$pid"; then
+    local id out wrapper
+    id="stop-$(date +%s)-$$"; out="$STATE/result-$id.json"; wrapper="$STATE/run-$id.jsx"
+    write_wrapper "$wrapper" 'while (app.documents.length) { app.documents[0].close(SaveOptions.DONOTSAVECHANGES); }' "$out"
+    JOB_ERROR=""
+    await_job "$id" "$wrapper" "$out" 60 1 "$pid" >/dev/null 2>&1
+    rm -f "$out" "$wrapper" "$QUEUE/$id".*
+  fi
+  pid=$(ai_pid)
+  [[ -n "$pid" ]] && kill_ai "$pid"
+  clean_recovery
+  log "stopped"
+}
+
+status() {
+  local pid; pid=$(ai_pid)
+  python3 - "$pid" "$(owned "${pid:-x}" && echo 1 || echo 0)" "$( [[ -n "$pid" ]] && is_modal "$pid" && echo 1 || echo 0)" \
+    "$(runner_alive && echo 1 || echo 0)" "$( [[ -f "$STATE/ready.json" ]] && cat "$STATE/ready.json" || echo null)" \
+    "$APP" "$VERSION" "$( [[ -f "$EXT_DIR/runner.js" ]] && echo 1 || echo 0)" \
+    "$(defaults read "$CSXS_DOMAIN" PlayerDebugMode 2>/dev/null || echo 0)" <<'PY'
+import json, sys
+pid, owned, modal, alive, ready, app, ver, installed, debug = sys.argv[1:10]
+print(json.dumps({"running": bool(pid), "pid": int(pid) if pid else None, "owned_by_aictl": owned == "1",
+                  "modal_dialog": modal == "1", "runner_alive": alive == "1", "ready": json.loads(ready),
+                  "app": app, "version": ver, "runner_installed": installed == "1",
+                  "cep_debug_mode": debug == "1"}))
+PY
+}
+
+diagnose() {
+  local pid; pid=$(ai_pid)
+  echo "app: $APP ($VERSION)"
+  echo "pid: ${pid:-not running}$( [[ -n "$pid" ]] && owned "$pid" && echo ' (started by aictl)')"
+  if [[ -n "$pid" ]]; then
+    local stack; stack=$(main_stack "$pid")
+    echo "main thread: $(main_thread "$pid" | classify)$(is_modal "$pid" && echo " — $(known_dialog "$stack")")"
+    sed 's/^/  /' <<<"$stack"
+    echo "windows (id, width, height, name):"; windows "$pid" | sed 's/^/  /'
+  fi
+  echo "runner: $(runner_alive && echo alive || echo 'not running') — $EXT_DIR $( [[ -f "$EXT_DIR/runner.js" ]] && echo installed || echo MISSING)"
+  echo "runner.log (tail):"; tail -5 "$STATE/runner.log" 2>/dev/null | sed 's/^/  /'
+  echo "CEP log (tail):"; tail -3 "$CEP_LOG" 2>/dev/null | sed 's/^/  /'
+  echo "$CSXS_DOMAIN PlayerDebugMode: $(defaults read "$CSXS_DOMAIN" PlayerDebugMode 2>/dev/null || echo unset)"
+  echo "data recovery files: $(ls "$SETTINGS_DIR"/*/DataRecovery 2>/dev/null | grep -c . || true)"
+  echo "last evidence: $(ls -t "$STATE/recoveries/"*.txt 2>/dev/null | head -1)"
+}
+
+# One Illustrator serves every agent: commands that drive it take an exclusive lock and
+# wait their turn. mkdir is atomic; a lock whose holder died is reclaimed.
+LOCK="$STATE/lock.d"
+acquire_lock() {
+  local limit="$1" waited=0 holder
+  while ! mkdir "$LOCK" 2>/dev/null; do
+    holder=$(cat "$LOCK/pid" 2>/dev/null)
+    if [[ -n "$holder" ]] && ! kill -0 "$holder" 2>/dev/null; then
+      rm -rf "$LOCK"; continue
+    fi
+    if (( waited == 0 )); then log "waiting for Illustrator (in use by: $(cat "$LOCK/what" 2>/dev/null))"; fi
+    (( waited >= limit )) && die "Illustrator still busy after ${limit}s (lock: $LOCK)"
+    nap 1; waited=$((waited + 1))
+  done
+  echo $$ > "$LOCK/pid"
+  echo "$(date +%H:%M:%S) $cmd ${args[*]:0:1}" | cut -c1-120 > "$LOCK/what"
+  trap 'rm -rf "$LOCK"' EXIT
+}
+
+cmd="${1:-status}"; shift || true
+force=0; timeout=300; lock_timeout=1800; args=()
+while (( $# )); do
+  case "$1" in
+    --force) force=1 ;;
+    --timeout) timeout="$2"; shift ;;
+    --lock-timeout) lock_timeout="$2"; shift ;;
+    *) args+=("$1") ;;
+  esac
+  shift
+done
+case "$cmd" in
+  start|stop|eval|run|clean|install|uninstall) acquire_lock "$lock_timeout" ;;
+esac
+case "$cmd" in
+  status) status ;;
+  start) start "$force" ;;
+  stop) stop "$force" ;;
+  eval) [[ ${#args[@]} -ge 1 ]] || die "usage: aictl eval '<jsx>'"; run_script source "${args[0]}" "$timeout" "$force" ;;
+  run) [[ ${#args[@]} -ge 1 ]] || die "usage: aictl run file.jsx"; run_script file "$(cd "$(dirname "${args[0]}")" && pwd)/$(basename "${args[0]}")" "$timeout" "$force" ;;
+  diagnose) diagnose ;;
+  clean) clean_recovery ;;
+  install) install; log "installed $EXT_DIR" ;;
+  uninstall) uninstall ;;
+  *) sed -n '2,16p' "$0"; exit 2 ;;
+esac
