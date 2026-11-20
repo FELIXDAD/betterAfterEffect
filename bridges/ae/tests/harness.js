@@ -110,6 +110,11 @@ check(typeof BAE_EXPORT_NO_AUTORUN === "undefined" || !BAE_EXPORT_NO_AUTORUN, "n
     eq(B.relativePath("//nas/share/out", "//nas/other/a.mov"), undefined, "relative UNC other share");
     eq(B.toFlicks(1001 / 30000), 23543520, "29.97 frame in flicks");
     eq(B.toFlicks(1 / 24), 29400000, "24 fps frame in flicks");
+    eq(B.frameRate(30), {num: 30, den: 1}, "frameRate 30");
+    eq(B.frameRate(491029 / 16384), {num: 2997, den: 100}, "frameRate: AE 26's 29.97 (491029/16384)");
+    eq(B.frameRate(23.9760284423828), {num: 2997, den: 125}, "frameRate: AE 26's 23.976");
+    eq(B.frameRate(982057 / 16384), {num: 2997, den: 50}, "frameRate 59.94");
+    eq(B.frameRate(0), undefined, "frameRate of a still");
 
     var sample = {a: [1, -2.5, 0, 1e21], s: "q\"\\\n\r\t\u0001", n: null, b: false, o: {}, e: [], nested: [{x: [1, 2]}]};
     eq(B.stringify(sample, ""), J.stringify(sample), "compact stringify matches JSON.stringify");
@@ -204,14 +209,18 @@ function hasReport(list, code, path) {
 var MAIN = "/comps/Main_Comp";
 var BOX = MAIN + "/layers/Box";
 check(paths["/comps/Main_Comp_2"] === true, "duplicate comp names are made unique");
-eq(attr("/project", "name").value, {type: "string", value: "demo.aep"}, "project name");
-eq(attr(MAIN, "frame_rate").value, {type: "float", value: 30000 / 1001}, "comp frame rate");
-eq(attr(MAIN, "duration").value, {type: "int", value: 7063056000}, "comp duration in flicks");
+eq(attr("/project", "ae:fileName").value, {type: "string", value: "demo.aep"}, "project file name");
+eq(attr("/project", "bit_depth").value, {type: "enum", value: "8"}, "bit depth as bae-model enum");
+eq(attr("/project", "expression_engine").value, {type: "enum", value: "javascript"}, "expression engine token");
+eq(attr(MAIN, "frame_rate").value, {type: "frame_rate", value: {num: 2997, den: 100}},
+    "AE's 29.97 is the decimal rate (AE 26 counts frames at n / 29.97)");
+eq(attr(MAIN, "duration").value, {type: "time", value: 7063056000}, "comp duration in flicks");
+eq(attr(MAIN, "renderer").value, {type: "enum", value: "advanced_3d"}, "renderer token");
 eq(attr(MAIN, "bg_color").value, {type: "color", value: [0.1, 0.2, 0.3, 1]}, "comp bg color gets alpha");
-check(prims[MAIN].attrs.folder === undefined, "root-level comp has no folder attr");
-eq(attr("/assets/clip_mov", "folder").value, {type: "prim_ref", value: "/folders/Footage"}, "asset folder");
-eq(attr(MAIN + "/markers/marker_1", "time").value, {type: "int", value: 706305600}, "comp marker time");
-eq(attr(MAIN + "/markers/marker_2", "param:cue_type").value, {type: "string", value: "hit"}, "marker parameter");
+check(prims[MAIN].attrs["ae:parentFolder"] === undefined, "root-level comp has no folder attr");
+eq(attr("/assets/clip_mov", "ae:parentFolder").value, {type: "prim_ref", value: "/folders/Footage"}, "asset folder");
+eq(attr(MAIN + "/markers/marker_1", "time").value, {type: "time", value: 706305600}, "comp marker time");
+eq(attr(MAIN + "/markers/marker_2", "ae:param:cue_type").value, {type: "string", value: "hit"}, "marker parameter");
 eq(attr(BOX, "kind").value, {type: "enum", value: "shape"}, "shape layer kind");
 eq(attr(BOX, "parent").value, {type: "prim_ref", value: MAIN + "/layers/Controller"}, "parent ref");
 eq(attr(BOX, "blend_mode").value, {type: "enum", value: "silhouette_alpha"}, "AE typo SILHOUETE_ALPHA mapped");
@@ -243,7 +252,10 @@ eq(attr(BOX + "/markers/marker_1", "protected_region").value, {type: "bool", val
 var TITLE = "/comps/Pre_comp/layers/Title_\u6807\u9898";
 var st = attr(TITLE, "ae:ADBE_Text_Properties:ADBE_Text_Document").keyframes;
 eq(st["0"].value.type, "text_document", "text document type");
-eq(st["0"].value.value.justification, "center_justify", "text justification");
+eq(st["0"].value.value.justification, "center", "text justification (bae-model token)");
+eq(st["0"].value.value.font, "SourceHanSansSC-Bold", "text font");
+eq(st["706305600"].value.value.font, "", "required font field present even when AE gives none");
+check(st["0"].value.value.stroke_color === undefined, "no stroke_color when applyStroke is off");
 eq(st["0"].value.value.fill_color, [1, 1, 1, 1], "text fill color padded");
 check(st["0"].ease_in === undefined, "text keyframes have no eases");
 eq(attr(TITLE, "ae:ADBE_Text_Properties:ADBE_Text_Path_Options:ADBE_Text_Path").value,
@@ -271,16 +283,18 @@ check(paths[SOLID + "/masks/Mask_1"] && paths[SOLID + "/masks/Mask_1_2"], "dupli
 eq(attr(SOLID + "/masks/Mask_1", "mode").value, {type: "enum", value: "add"}, "mask mode");
 eq(attr(SOLID + "/masks/Mask_1_2", "mode").value, {type: "enum", value: "unknown_9999"}, "unknown enum token");
 check(hasReport(parsed.report.warnings, "unknown_enum", SOLID + "/masks/Mask_1_2"), "unknown enum warned");
-check(hasReport(parsed.report.unsupported, "mask_feather_points", SOLID + "/masks/Mask_1"), "feather points reported");
+check(!hasReport(parsed.report.unsupported, "mask_feather_points"), "feather points are exported, not reported");
+eq(attr(SOLID + "/masks/Mask_1", "ae:ADBE_Mask_Shape").keyframes["0"].value.value.feather,
+    [{segment: 0, t: 0.5, radius: 20, tension: 0, hold: false, inner: true, corner_angle: 0}], "mask feather point");
 eq(attr(SOLID + "/effects/Gaussian_Blur", "match_name").value, {type: "string", value: "ADBE Gaussian Blur 2"},
     "effect match name");
-eq(attr(SOLID + "/effects/Gaussian_Blur", "ae:ADBE_Gaussian_Blur_2--0001").value, {type: "float", value: 12.5},
-    "effect parameter");
-eq(attr(SOLID + "/effects/Set_Matte", "ae:ADBE_Set_Matte3--0001").value,
+eq(attr(SOLID + "/effects/Gaussian_Blur", "param:0001").value, {type: "float", value: 12.5},
+    "effect parameter as bae-model param:NNNN");
+eq(attr(SOLID + "/effects/Set_Matte", "param:0001").value,
     {type: "prim_ref", value: MAIN + "/layers/Controller"}, "layer parameter");
-eq(attr(SOLID + "/effects/My_Controls", "ae:Pseudo-2Fmy-5Fctrl--0002").value,
+eq(attr(SOLID + "/effects/My_Controls", "param:0002").value,
     {type: "prim_ref", value: SOLID + "/masks/Mask_1_2"}, "pseudo effect mask parameter");
-check(prims[SOLID + "/effects/My_Controls"].attrs["ae:Pseudo-2Fmy-5Fctrl--0003"] === undefined,
+check(prims[SOLID + "/effects/My_Controls"].attrs["param:0003"] === undefined,
     "layer parameter 'none' omitted");
 check(hasReport(parsed.report.unsupported, "custom_value", SOLID + "/effects/Curves"), "custom value reported");
 check(prims[SOLID].attrs["ae:ADBE_Time_Remapping"] === undefined, "time remap skipped when disabled");
@@ -288,9 +302,9 @@ check(prims[SOLID].attrs["ae:ADBE_Time_Remapping"] === undefined, "time remap sk
 var PRE = MAIN + "/layers/Pre_comp";
 eq(attr(PRE, "source").value, {type: "prim_ref", value: "/comps/Pre_comp"}, "precomp source");
 eq(attr(PRE, "stretch").value, {type: "float", value: 50}, "stretch");
-eq(attr(PRE, "start_time").value, {type: "int", value: 705600000}, "start time");
+eq(attr(PRE, "start_time").value, {type: "time", value: 705600000}, "start time");
 eq(attr(MAIN + "/layers/Controller", "kind").value, {type: "enum", value: "null"}, "null kind");
-eq(attr(MAIN + "/layers/Light_1", "light_type").value, {type: "enum", value: "spot"}, "light type");
+eq(attr(MAIN + "/layers/Light_1", "light:type").value, {type: "enum", value: "spot"}, "light type");
 eq(attr(MAIN + "/layers/clip_mov", "kind").value, {type: "enum", value: "footage"}, "footage kind");
 check(!!prims[MAIN + "/layers/clip_mov"].attrs["ae:ADBE_Audio_Group:ADBE_Audio_Levels"], "audio levels");
 check(paths[MAIN + "/layers/clip_mov_2"] === true, "duplicate layer names");
@@ -298,9 +312,13 @@ check(paths[MAIN + "/layers/layer"] === true, "emoji-only layer name falls back"
 check(paths[MAIN + "/layers/layer_-dash"] === true, "leading-dash layer name");
 eq(attr(MAIN + "/layers/layer_-dash", "kind").value, {type: "enum", value: "adjustment"}, "adjustment kind");
 
-eq(attr("/assets/frame_0001-0003_png", "asset_kind").value, {type: "enum", value: "sequence"}, "sequence asset");
-eq(attr("/assets/Red_Solid_1", "color").value, {type: "color", value: [1, 0, 0, 1]}, "solid color");
-eq(attr("/assets/missing_mov", "missing").value, {type: "bool", value: true}, "missing asset");
+eq(attr("/assets/frame_0001-0003_png", "kind").value, {type: "enum", value: "sequence"}, "sequence asset");
+eq(attr("/assets/frame_0001-0003_png", "sequence:first_frame").value, {type: "int", value: 1}, "first frame");
+eq(attr("/assets/clip_mov", "kind").value, {type: "enum", value: "footage"}, "file asset kind");
+eq(attr("/assets/clip_mov", "frame_rate").value, {type: "frame_rate", value: {num: 25, den: 1}}, "asset frame rate");
+eq(attr("/assets/Red_Solid_1", "solid_color").value, {type: "color", value: [1, 0, 0, 1]}, "solid color");
+check(prims["/assets/Red_Solid_1"].attrs.frame_rate === undefined, "no frame_rate for a 0 fps solid");
+eq(attr("/assets/missing_mov", "ae:footageMissing").value, {type: "bool", value: true}, "missing asset");
 var man = {};
 for (var m = 0; m < parsed.assets.length; m++) {
     man[parsed.assets[m].prim] = parsed.assets[m];

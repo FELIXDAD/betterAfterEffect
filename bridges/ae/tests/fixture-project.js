@@ -196,6 +196,12 @@ function buildFixtureProject() {
     // a pseudo effect, a curves-like CUSTOM_VALUE parameter) and time remapping disabled.
     var maskShape = new Shape([[0, 0], [100, 0], [100, 100]], [[0, 0], [0, 0], [0, 0]], [[0, 0], [0, 0], [0, 0]], true);
     maskShape.featherSegLocs = [0];
+    maskShape.featherRelSegLocs = [0.5];
+    maskShape.featherRadii = [20];
+    maskShape.featherInterps = [0];
+    maskShape.featherTensions = [0];
+    maskShape.featherTypes = [1];
+    maskShape.featherRelCornerAngles = [0];
     var maskShapeProp = new Prop("ADBE Mask Shape", "Mask Path", P.SHAPE, maskShape);
     maskShapeProp.addKey({t: 0, v: maskShape});
     maskShapeProp.addKey({t: 1, v: maskShape});

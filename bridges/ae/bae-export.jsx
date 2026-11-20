@@ -66,6 +66,25 @@
         return vt === PropertyValueType.TwoD_SPATIAL || vt === PropertyValueType.ThreeD_SPATIAL;
     };
 
+    /**
+     * The rational rate AE counts frames with, from the float it reports. AE 26 reports rates in
+     * steps of 1/16384 (29.97 comes back as 491029/16384 = 29.9700317) and counts NTSC frames at
+     * the decimal rate (n / 29.97, not n * 1001/30000: docs 4.2). The smallest denominator within
+     * 5e-5 gives exactly that: 30, 25, 2997/100 (29.97), 2997/125 (23.976), 2997/50 (59.94).
+     */
+    BAE.frameRate = function (fps) {
+        if (typeof fps !== "number" || !(fps > 0) || !isFinite(fps)) {
+            return undefined;
+        }
+        for (var den = 1; den <= 1001; den++) {
+            var num = Math.round(fps * den);
+            if (num > 0 && Math.abs(fps - num / den) < 5e-5) {
+                return {num: num, den: den};
+            }
+        }
+        return {num: Math.round(fps * 1000), den: 1000};
+    };
+
     BAE.toFlicks = function (seconds) {
         return Math.round(seconds * FLICKS_PER_SECOND);
     };
@@ -445,8 +464,10 @@
             "LINEAR_LIGHT", "LUMINESCENT_PREMUL", "LUMINOSITY", "MULTIPLY", "NORMAL", "OVERLAY", "PIN_LIGHT", "SATURATION",
             "SCREEN", "SILHOUETE_ALPHA=silhouette_alpha", "SILHOUETTE_ALPHA", "SILHOUETTE_LUMA", "SOFT_LIGHT",
             "STENCIL_ALPHA", "STENCIL_LUMA", "SUBTRACT", "VIVID_LIGHT"],
-        TrackMatteType: ["NO_TRACK_MATTE", "ALPHA", "ALPHA_INVERTED", "LUMA", "LUMA_INVERTED"],
-        AutoOrientType: ["NO_AUTO_ORIENT", "ALONG_PATH", "CAMERA_OR_POINT_OF_INTEREST", "CHARACTERS_TOWARD_CAMERA"],
+        // Tokens after "=" follow bae-model's schema where it has the setting (docs 6).
+        TrackMatteType: ["NO_TRACK_MATTE=none", "ALPHA", "ALPHA_INVERTED", "LUMA", "LUMA_INVERTED"],
+        AutoOrientType: ["NO_AUTO_ORIENT=off", "ALONG_PATH", "CAMERA_OR_POINT_OF_INTEREST=towards_point_of_interest",
+            "CHARACTERS_TOWARD_CAMERA"],
         FrameBlendingType: ["NO_FRAME_BLEND", "FRAME_MIX", "PIXEL_MOTION"],
         LayerQuality: ["BEST", "DRAFT", "WIREFRAME"],
         LayerSamplingQuality: ["BICUBIC", "BILINEAR"],
@@ -458,9 +479,10 @@
         FieldSeparationType: ["OFF", "UPPER_FIELD_FIRST", "LOWER_FIELD_FIRST"],
         PulldownPhase: ["OFF", "SSWWW", "SWWWS", "SWWWW_24P_ADVANCE", "WSSWW", "WSWWW_24P_ADVANCE", "WWSSW",
             "WWSWW_24P_ADVANCE", "WWWSS", "WWWSW_24P_ADVANCE", "WWWWS_24P_ADVANCE"],
-        ParagraphJustification: ["LEFT_JUSTIFY", "RIGHT_JUSTIFY", "CENTER_JUSTIFY", "FULL_JUSTIFY_LASTLINE_LEFT",
-            "FULL_JUSTIFY_LASTLINE_RIGHT", "FULL_JUSTIFY_LASTLINE_CENTER", "FULL_JUSTIFY_LASTLINE_FULL",
-            "MULTIPLE_JUSTIFICATIONS"],
+        ParagraphJustification: ["LEFT_JUSTIFY=left", "RIGHT_JUSTIFY=right", "CENTER_JUSTIFY=center",
+            "FULL_JUSTIFY_LASTLINE_LEFT=justify_last_left", "FULL_JUSTIFY_LASTLINE_RIGHT=justify_last_right",
+            "FULL_JUSTIFY_LASTLINE_CENTER=justify_last_center", "FULL_JUSTIFY_LASTLINE_FULL=justify_all",
+            "MULTIPLE_JUSTIFICATIONS=multiple"],
         KeyframeInterpolationType: ["LINEAR", "BEZIER", "HOLD"],
         TimeDisplayType: ["TIMECODE", "FRAMES"],
         FramesCountType: ["FC_START_0=start_0", "FC_START_1=start_1", "FC_TIMECODE_CONVERSION=timecode_conversion"],
@@ -594,11 +616,20 @@
         this.setAttr(prim, name, vInt(this.num(raw, path, name)));
     };
 
+    /** bae-model `time` value (flicks). */
     Exporter.prototype.setTime = function (prim, name, seconds, path) {
         if (seconds === undefined || seconds === null) {
             return;
         }
-        this.setAttr(prim, name, vInt(BAE.toFlicks(this.num(seconds, path, name))));
+        this.setAttr(prim, name, {type: "time", value: BAE.toFlicks(this.num(seconds, path, name))});
+    };
+
+    /** bae-model `frame_rate` value; nothing for 0 (stills) or an unreadable rate. */
+    Exporter.prototype.setFrameRate = function (prim, name, fps) {
+        var r = BAE.frameRate(fps);
+        if (r) {
+            this.setAttr(prim, name, {type: "frame_rate", value: r});
+        }
     };
 
     Exporter.prototype.setBool = function (prim, name, raw) {
@@ -748,7 +779,7 @@
             seen[key] = (seen[key] || 0) + 1;
             var seg = segments.concat([{matchName: p.matchName, occurrence: seen[key]}]);
             if (p.propertyType === PropertyType.PROPERTY) {
-                this.exportProperty(p, ctx, seg);
+                this.exportProperty(p, ctx, seg, segments.length === 0 ? effectParamKey(ctx, p.matchName) : undefined);
             } else if (p.propertyType === PropertyType.INDEXED_GROUP) {
                 this.walkIndexedGroup(p, ctx, seg);
             } else {
@@ -818,9 +849,27 @@
                 var op = p.matchName.substr(SHAPE_OPERATOR_PREFIX.length);
                 this.setAttr(child, "operator", vEnum(hasOwn(SHAPE_OPERATORS, op) ? SHAPE_OPERATORS[op] : p.matchName));
             }
-            this.walkGroup(p, new PrimCtx(child, childPath, ctx.layer), []);
+            var childCtx = new PrimCtx(child, childPath, ctx.layer);
+            if (primType === "Effect") {
+                childCtx.effectMatchName = p.matchName;
+            }
+            this.walkGroup(p, childCtx, []);
         }
     };
+
+    /**
+     * bae-model names effect parameters param:NNNN, NNNN being the number at the end of the AE
+     * parameter matchName ("ADBE Gaussian Blur 2-0001" -> param:0001). Other properties of the
+     * effect group (and anything that does not follow the pattern) keep their ae: name.
+     */
+    function effectParamKey(ctx, matchName) {
+        var fx = ctx.effectMatchName;
+        if (!fx || matchName.substr(0, fx.length + 1) !== fx + "-") {
+            return undefined;
+        }
+        var id = matchName.substr(fx.length + 1);
+        return /^[0-9]+$/.test(id) ? "param:" + id : undefined;
+    }
 
     function fallbackName(primType) {
         var map = {Mask: "mask", Effect: "effect", ShapeGroup: "group", Path: "path", Rect: "rect", Ellipse: "ellipse",
@@ -832,22 +881,22 @@
     Exporter.prototype.maskAttrs = function (mask, prim, path) {
         this.setEnum(prim, "mode", "MaskMode", tryGet(mask, "maskMode"), path);
         this.setBool(prim, "inverted", tryGet(mask, "inverted"));
-        this.setBool(prim, "roto_bezier", tryGet(mask, "rotoBezier"));
-        this.setEnum(prim, "motion_blur", "MaskMotionBlur", tryGet(mask, "maskMotionBlur"), path);
+        this.setBool(prim, "ae:rotoBezier", tryGet(mask, "rotoBezier"));
+        this.setEnum(prim, "ae:maskMotionBlur", "MaskMotionBlur", tryGet(mask, "maskMotionBlur"), path);
         this.setBool(prim, "locked", tryGet(mask, "locked"));
         var c = tryGet(mask, "color");
         if (c) {
             this.setAttr(prim, "color", this.color(c, path, "color"));
         }
-        this.setEnum(prim, "feather_falloff", "MaskFeatherFalloff", tryGet(mask, "maskFeatherFalloff"), path);
+        this.setEnum(prim, "ae:maskFeatherFalloff", "MaskFeatherFalloff", tryGet(mask, "maskFeatherFalloff"), path);
     };
 
-    Exporter.prototype.exportProperty = function (p, ctx, segments) {
+    Exporter.prototype.exportProperty = function (p, ctx, segments, keyOverride) {
         var vt = p.propertyValueType;
         if (vt === PropertyValueType.NO_VALUE && p.matchName !== "ADBE Vector Grad Colors") {
             return;
         }
-        var key = attrKey(segments);
+        var key = keyOverride || attrKey(segments);
         if (key.length > MAX_ATTR_NAME) {
             this.unsupportedItem("attr_name_too_long", ctx.path, null, p.matchName,
                 "encoded attribute name longer than " + MAX_ATTR_NAME + ": " + segmentPathText(segments));
@@ -1102,78 +1151,130 @@
     };
 
     Exporter.prototype.bezier = function (shape, info) {
-        var segs = tryGet(shape, "featherSegLocs");
-        if (segs && segs.length > 0 && !info.featherReported) {
-            info.featherReported = true;
-            this.unsupportedItem("mask_feather_points", info.path, info.key, null,
-                segs.length + " mask feather point(s) not exported");
-        }
-        return {type: "bezier", value: {
+        var v = {
             vertices: this.points(shape.vertices, info),
             in_tangents: this.points(shape.inTangents, info),
             out_tangents: this.points(shape.outTangents, info),
             closed: !!shape.closed
-        }};
+        };
+        var feather = this.featherPoints(shape, info);
+        if (feather.length) {
+            v.feather = feather;
+        }
+        return {type: "bezier", value: v};
     };
 
-    var TEXT_FIELDS = [
-        // [AE attribute, BAE key, kind]
-        ["font", "font", "string"],
+    /** AE mask feather points (parallel arrays on Shape) -> bae-model FeatherPoint list. */
+    Exporter.prototype.featherPoints = function (shape, info) {
+        var segs = tryGet(shape, "featherSegLocs");
+        var out = [];
+        if (!segs || !segs.length) {
+            return out;
+        }
+        var rel = tryGet(shape, "featherRelSegLocs") || [];
+        var radii = tryGet(shape, "featherRadii") || [];
+        var interps = tryGet(shape, "featherInterps") || [];
+        var tensions = tryGet(shape, "featherTensions") || [];
+        var types = tryGet(shape, "featherTypes") || [];
+        var angles = tryGet(shape, "featherRelCornerAngles") || [];
+        for (var i = 0; i < segs.length; i++) {
+            out.push({
+                segment: Math.round(segs[i]),
+                t: this.num(i < rel.length ? rel[i] : 0, info.path, info.key),
+                radius: this.num(i < radii.length ? radii[i] : 0, info.path, info.key),
+                tension: this.num(i < tensions.length ? tensions[i] : 0, info.path, info.key),
+                hold: interps[i] === 1,
+                inner: types[i] === 1,
+                corner_angle: this.num(i < angles.length ? angles[i] : 0, info.path, info.key)
+            });
+        }
+        return out;
+    };
+
+    /**
+     * AE TextDocument -> bae-model TextDocument (value.rs). Fields bae-model does not have yet
+     * (font_family, apply_fill, tsume, ...) ride along; serde ignores them, the AE import keeps them.
+     */
+    var TEXT_EXTRA = [
         ["fontFamily", "font_family", "string"],
         ["fontStyle", "font_style", "string"],
-        ["fontSize", "font_size", "number"],
         ["applyFill", "apply_fill", "bool"],
         ["applyStroke", "apply_stroke", "bool"],
-        ["fillColor", "fill_color", "color"],
-        ["strokeColor", "stroke_color", "color"],
-        ["strokeWidth", "stroke_width", "number"],
-        ["strokeOverFill", "stroke_over_fill", "bool"],
-        ["justification", "justification", "justification"],
-        ["tracking", "tracking", "number"],
-        ["leading", "leading", "number"],
         ["autoLeading", "auto_leading", "bool"],
-        ["baselineShift", "baseline_shift", "number"],
         ["horizontalScale", "horizontal_scale", "number"],
         ["verticalScale", "vertical_scale", "number"],
-        ["fauxBold", "faux_bold", "bool"],
-        ["fauxItalic", "faux_italic", "bool"],
-        ["allCaps", "all_caps", "bool"],
-        ["smallCaps", "small_caps", "bool"],
         ["superscript", "superscript", "bool"],
         ["subscript", "subscript", "bool"],
         ["tsume", "tsume", "number"],
-        ["boxText", "box_text", "bool"],
-        ["pointText", "point_text", "bool"],
-        ["boxTextSize", "box_size", "point"],
-        ["boxTextPos", "box_position", "point"]
+        ["pointText", "point_text", "bool"]
     ];
 
     Exporter.prototype.textDocument = function (td, info) {
-        var o = {text: String(td.text)};
-        for (var i = 0; i < TEXT_FIELDS.length; i++) {
-            var f = TEXT_FIELDS[i];
-            var v = tryGet(td, f[0]);
-            if (v === undefined || v === null) {
-                continue;
-            }
-            if (f[2] === "string") {
-                o[f[1]] = String(v);
-            } else if (f[2] === "number") {
-                o[f[1]] = this.num(v, info.path, info.key);
-            } else if (f[2] === "bool") {
-                o[f[1]] = !!v;
-            } else if (f[2] === "color") {
-                o[f[1]] = this.color(v, info.path, info.key).value;
-            } else if (f[2] === "point") {
-                o[f[1]] = [this.num(v[0], info.path, info.key), this.num(v[1], info.path, info.key)];
-            } else if (f[2] === "justification") {
-                o[f[1]] = this.enumToken("ParagraphJustification", v, info.path, info.key);
+        var self = this;
+        function n(v) {
+            return self.num(v, info.path, info.key);
+        }
+        function get(key) {
+            var v = tryGet(td, key);
+            return v === null ? undefined : v;
+        }
+        // text, font and font_size are required by bae-model.
+        var o = {text: String(td.text), font: String(get("font") || ""), font_size: n(get("fontSize") || 0)};
+        var fill = get("fillColor");
+        o.fill_color = fill ? this.color(fill, info.path, info.key).value : [1, 1, 1, 1];
+        // bae-model: a stroke exists iff stroke_color is set.
+        var stroke = get("strokeColor");
+        if (get("applyStroke") && stroke) {
+            o.stroke_color = this.color(stroke, info.path, info.key).value;
+        }
+        if (get("strokeWidth") !== undefined) {
+            o.stroke_width = n(get("strokeWidth"));
+        }
+        if (get("strokeOverFill") !== undefined) {
+            o.stroke_over_fill = !!get("strokeOverFill");
+        }
+        var just = get("justification");
+        if (just !== undefined) {
+            o.justification = this.enumToken("ParagraphJustification", just, info.path, info.key);
+        }
+        if (get("tracking") !== undefined) {
+            o.tracking = n(get("tracking"));
+        }
+        // bae-model: no leading means auto leading.
+        if (!get("autoLeading") && get("leading") !== undefined) {
+            o.leading = n(get("leading"));
+        }
+        var flags = [["baselineShift", "baseline_shift"]];
+        for (var f = 0; f < flags.length; f++) {
+            if (get(flags[f][0]) !== undefined) {
+                o[flags[f][1]] = n(get(flags[f][0]));
             }
         }
-        // Box-only fields are meaningless on point text; AE throws or returns junk there.
-        if (o.box_text === false) {
-            delete o.box_size;
-            delete o.box_position;
+        var bools = [["fauxBold", "faux_bold"], ["fauxItalic", "faux_italic"], ["allCaps", "all_caps"],
+            ["smallCaps", "small_caps"]];
+        for (var b = 0; b < bools.length; b++) {
+            if (get(bools[b][0]) !== undefined) {
+                o[bools[b][1]] = !!get(bools[b][0]);
+            }
+        }
+        // Box text only: on point text AE throws or returns junk for these.
+        if (get("boxText")) {
+            var size = get("boxTextSize");
+            var pos = get("boxTextPos");
+            if (size) {
+                o.box_size = [n(size[0]), n(size[1])];
+            }
+            if (pos) {
+                o.box_position = [n(pos[0]), n(pos[1])];
+            }
+        }
+        for (var i = 0; i < TEXT_EXTRA.length; i++) {
+            var e = TEXT_EXTRA[i];
+            var v = get(e[0]);
+            if (v === undefined) {
+                continue;
+            }
+            o[e[1]] = e[2] === "string" ? String(v) : (e[2] === "bool" ? !!v : n(v));
         }
         return {type: "text_document", value: o};
     };
@@ -1210,7 +1311,7 @@
                 }
             }
             if (tryGet(mv, "eventCuePoint")) {
-                this.setBool(m, "event_cue_point", true);
+                this.setBool(m, "ae:eventCuePoint", true);
             }
             var label = tryGet(mv, "label");
             if (label) {
@@ -1223,7 +1324,7 @@
             if (params) {
                 for (var k in params) {
                     if (hasOwn(params, k)) {
-                        this.setString(m, "param:" + BAE.encodeSegment(k), params[k]);
+                        this.setString(m, "ae:param:" + BAE.encodeSegment(k), params[k]);
                     }
                 }
             }
@@ -1239,10 +1340,10 @@
 
     Exporter.prototype.itemCommon = function (item, prim, path) {
         this.setString(prim, "name", item.name);
-        this.setInt(prim, "ae_id", item.id, path);
+        this.setInt(prim, "ae:id", item.id, path);
         var parent = tryGet(item, "parentFolder");
         if (parent && hasOwn(this.itemPaths, itemKey(parent))) {
-            this.setAttr(prim, "folder", vRef(this.itemPaths[itemKey(parent)]));
+            this.setAttr(prim, "ae:parentFolder", vRef(this.itemPaths[itemKey(parent)]));
         }
         var label = tryGet(item, "label");
         if (label) {
@@ -1250,7 +1351,7 @@
         }
         var comment = tryGet(item, "comment");
         if (comment) {
-            this.setString(prim, "comment", comment);
+            this.setString(prim, "ae:comment", comment);
         }
     };
 
@@ -1271,7 +1372,7 @@
         this.itemCommon(item, prim, path);
         var src = item.mainSource;
         var file = tryGet(item, "file");
-        var kind = "file";
+        var kind = "footage";
         if (isSolidSource(src)) {
             kind = "solid";
         } else if (!file && isPlaceholderSource(src)) {
@@ -1281,36 +1382,42 @@
         } else if (src && src.isStill === false && IMAGE_EXT.test(fileName(item))) {
             kind = "sequence";
         }
-        this.setAttr(prim, "asset_kind", vEnum(kind));
+        this.setAttr(prim, "kind", vEnum(kind));
         this.setInt(prim, "width", tryGet(item, "width"), path);
         this.setInt(prim, "height", tryGet(item, "height"), path);
         this.setNum(prim, "pixel_aspect", tryGet(item, "pixelAspect"), path);
         this.setTime(prim, "duration", tryGet(item, "duration"), path);
-        this.setNum(prim, "frame_rate", tryGet(item, "frameRate"), path);
+        this.setFrameRate(prim, "frame_rate", tryGet(item, "frameRate"));
         this.setBool(prim, "has_video", tryGet(item, "hasVideo"));
         this.setBool(prim, "has_audio", tryGet(item, "hasAudio"));
         if (item.footageMissing) {
-            this.setBool(prim, "missing", true);
+            this.setBool(prim, "ae:footageMissing", true);
             this.warn("missing_footage", path, null, "footage is missing: " + fileName(item));
         }
         if (src) {
             if (kind === "solid") {
-                this.setAttr(prim, "color", this.color(src.color, path, "color"));
+                this.setAttr(prim, "solid_color", this.color(src.color, path, "solid_color"));
             }
-            this.setBool(prim, "is_still", tryGet(src, "isStill"));
+            this.setBool(prim, "ae:isStill", tryGet(src, "isStill"));
             this.setEnum(prim, "alpha_mode", "AlphaMode", tryGet(src, "alphaMode"), path);
             var premul = tryGet(src, "premulColor");
             if (premul) {
-                this.setAttr(prim, "premul_color", this.color(premul, path, "premul_color"));
+                this.setAttr(prim, "premultiply_color", this.color(premul, path, "premultiply_color"));
             }
-            this.setBool(prim, "invert_alpha", tryGet(src, "invertAlpha"));
-            this.setEnum(prim, "field_separation", "FieldSeparationType", tryGet(src, "fieldSeparationType"), path);
-            this.setEnum(prim, "remove_pulldown", "PulldownPhase", tryGet(src, "removePulldown"), path);
+            this.setBool(prim, "ae:invertAlpha", tryGet(src, "invertAlpha"));
+            this.setEnum(prim, "ae:fieldSeparationType", "FieldSeparationType", tryGet(src, "fieldSeparationType"), path);
+            this.setEnum(prim, "ae:removePulldown", "PulldownPhase", tryGet(src, "removePulldown"), path);
             this.setInt(prim, "loop", tryGet(src, "loop"), path);
-            this.setNum(prim, "conform_frame_rate", tryGet(src, "conformFrameRate"), path);
-            this.setNum(prim, "native_frame_rate", tryGet(src, "nativeFrameRate"), path);
+            this.setNum(prim, "ae:conformFrameRate", tryGet(src, "conformFrameRate"), path);
+            this.setNum(prim, "ae:nativeFrameRate", tryGet(src, "nativeFrameRate"), path);
         }
-        if (kind === "file" || kind === "sequence") {
+        if (kind === "sequence") {
+            var first = /(\d+)\.[^.]+$/.exec(fileName(item));
+            if (first) {
+                this.setInt(prim, "sequence:first_frame", parseInt(first[1], 10), path);
+            }
+        }
+        if (kind === "footage" || kind === "sequence") {
             this.manifestEntry(item, prim, path, kind);
         }
     };
@@ -1439,7 +1546,7 @@
         this.setInt(prim, "width", comp.width, path);
         this.setInt(prim, "height", comp.height, path);
         this.setNum(prim, "pixel_aspect", comp.pixelAspect, path);
-        this.setNum(prim, "frame_rate", comp.frameRate, path);
+        this.setFrameRate(prim, "frame_rate", comp.frameRate);
         this.setTime(prim, "duration", comp.duration, path);
         this.setTime(prim, "display_start_time", tryGet(comp, "displayStartTime"), path);
         var bg = tryGet(comp, "bgColor");
@@ -1451,18 +1558,21 @@
         this.setNum(prim, "shutter_angle", tryGet(comp, "shutterAngle"), path);
         this.setNum(prim, "shutter_phase", tryGet(comp, "shutterPhase"), path);
         this.setInt(prim, "motion_blur_samples", tryGet(comp, "motionBlurSamplesPerFrame"), path);
-        this.setInt(prim, "motion_blur_adaptive_limit", tryGet(comp, "motionBlurAdaptiveSampleLimit"), path);
+        this.setInt(prim, "ae:motionBlurAdaptiveSampleLimit", tryGet(comp, "motionBlurAdaptiveSampleLimit"), path);
         this.setBool(prim, "motion_blur", tryGet(comp, "motionBlur"));
-        this.setBool(prim, "frame_blending", tryGet(comp, "frameBlending"));
-        this.setBool(prim, "draft_3d", tryGet(comp, "draft3d"));
-        this.setBool(prim, "hide_shy_layers", tryGet(comp, "hideShyLayers"));
-        this.setBool(prim, "preserve_nested_frame_rate", tryGet(comp, "preserveNestedFrameRate"));
-        this.setBool(prim, "preserve_nested_resolution", tryGet(comp, "preserveNestedResolution"));
-        this.setBool(prim, "drop_frame", tryGet(comp, "dropFrame"));
-        this.setString(prim, "renderer", tryGet(comp, "renderer"));
+        this.setBool(prim, "ae:frameBlending", tryGet(comp, "frameBlending"));
+        this.setBool(prim, "ae:draft3d", tryGet(comp, "draft3d"));
+        this.setBool(prim, "ae:hideShyLayers", tryGet(comp, "hideShyLayers"));
+        this.setBool(prim, "preserve_frame_rate", tryGet(comp, "preserveNestedFrameRate"));
+        this.setBool(prim, "preserve_resolution", tryGet(comp, "preserveNestedResolution"));
+        this.setBool(prim, "ae:dropFrame", tryGet(comp, "dropFrame"));
+        var renderer = tryGet(comp, "renderer");
+        if (renderer) {
+            this.setAttr(prim, "renderer", vEnum(hasOwn(RENDERERS, renderer) ? RENDERERS[renderer] : String(renderer)));
+        }
         var rf = tryGet(comp, "resolutionFactor");
         if (rf) {
-            this.setAttr(prim, "resolution_factor", {type: "vec2", value: [this.num(rf[0], path), this.num(rf[1], path)]});
+            this.setAttr(prim, "ae:resolutionFactor", {type: "vec2", value: [this.num(rf[0], path), this.num(rf[1], path)]});
         }
         this.markers(tryGet(comp, "markerProperty"), prim, path);
 
@@ -1478,6 +1588,9 @@
             this.layerPrim(layer, lprim, lp, compCtx);
         }
     };
+
+    /** AE renderer matchNames -> bae-model Comp.renderer tokens. */
+    var RENDERERS = {"ADBE Standard 3D": "classic_3d", "ADBE Ernst": "cinema_4d", "ADBE Advanced 3d": "advanced_3d"};
 
     /** Precompute layer paths so parents, track mattes and layer parameters can refer to any layer. */
     Exporter.prototype.compCtx = function (comp, compPath) {
@@ -1526,23 +1639,24 @@
         var kind = layerKind(layer);
         this.stats.layers++;
         this.setAttr(prim, "kind", vEnum(kind));
-        this.setString(prim, "match_name", layer.matchName);
+        this.setString(prim, "ae:matchName", layer.matchName);
         this.setString(prim, "name", layer.name);
         var comment = tryGet(layer, "comment");
         if (comment) {
-            this.setString(prim, "comment", comment);
+            this.setString(prim, "ae:comment", comment);
         }
         var label = tryGet(layer, "label");
         if (label) {
             this.setInt(prim, "label", label, path);
         }
-        this.setInt(prim, "ae_index", layer.index, path);
-        this.setInt(prim, "ae_id", tryGet(layer, "id"), path);
+        this.setInt(prim, "ae:index", layer.index, path);
+        this.setInt(prim, "ae:id", tryGet(layer, "id"), path);
 
         var src = tryGet(layer, "source");
         if (src && hasOwn(this.itemPaths, itemKey(src))) {
             var sp = this.itemPaths[itemKey(src)];
-            this.setAttr(prim, "source", src instanceof CompItem ? vRef(sp) : {type: "asset_ref", value: sp});
+            // bae-model: comps, footage and solids are all referenced through a prim_ref `source`.
+            this.setAttr(prim, "source", vRef(sp));
         }
         var parent = tryGet(layer, "parent");
         if (parent) {
@@ -1558,15 +1672,15 @@
         this.setBool(prim, "shy", layer.shy);
         this.setBool(prim, "locked", layer.locked);
         this.setBool(prim, "guide", tryGet(layer, "guideLayer"));
-        this.setBool(prim, "adjustment", tryGet(layer, "adjustmentLayer"));
-        this.setBool(prim, "environment", tryGet(layer, "environmentLayer"));
+        this.setBool(prim, "adjustment_layer", tryGet(layer, "adjustmentLayer"));
+        this.setBool(prim, "ae:environmentLayer", tryGet(layer, "environmentLayer"));
         this.setBool(prim, "three_d", tryGet(layer, "threeDLayer"));
         if (kind === "text") {
-            this.setBool(prim, "three_d_per_char", tryGet(layer, "threeDPerChar"));
+            this.setBool(prim, "ae:threeDPerChar", tryGet(layer, "threeDPerChar"));
         }
         this.setEnum(prim, "auto_orient", "AutoOrientType", tryGet(layer, "autoOrient"), path);
         this.setEnum(prim, "blend_mode", "BlendingMode", tryGet(layer, "blendingMode"), path);
-        this.setBool(prim, "preserve_transparency", tryGet(layer, "preserveTransparency"));
+        this.setBool(prim, "ae:preserveTransparency", tryGet(layer, "preserveTransparency"));
         var tmt = tryGet(layer, "trackMatteType");
         this.setEnum(prim, "track_matte", "TrackMatteType", tmt, path);
         if (tmt !== undefined && typeof TrackMatteType !== "undefined" && tmt !== TrackMatteType.NO_TRACK_MATTE) {
@@ -1576,16 +1690,16 @@
                 this.setAttr(prim, "track_matte_layer", vRef(compCtx.layerPaths[matteIndex]));
             }
         }
-        this.setBool(prim, "is_track_matte", tryGet(layer, "isTrackMatte"));
+        this.setBool(prim, "ae:isTrackMatte", tryGet(layer, "isTrackMatte"));
         this.setBool(prim, "motion_blur", tryGet(layer, "motionBlur"));
-        this.setBool(prim, "effects_active", tryGet(layer, "effectsActive"));
+        this.setBool(prim, "ae:effectsActive", tryGet(layer, "effectsActive"));
         this.setBool(prim, "collapse_transformation", tryGet(layer, "collapseTransformation"));
         this.setBool(prim, "time_remap_enabled", tryGet(layer, "timeRemapEnabled"));
-        this.setEnum(prim, "frame_blending_type", "FrameBlendingType", tryGet(layer, "frameBlendingType"), path);
+        this.setEnum(prim, "ae:frameBlendingType", "FrameBlendingType", tryGet(layer, "frameBlendingType"), path);
         this.setEnum(prim, "quality", "LayerQuality", tryGet(layer, "quality"), path);
-        this.setEnum(prim, "sampling_quality", "LayerSamplingQuality", tryGet(layer, "samplingQuality"), path);
+        this.setEnum(prim, "sampling", "LayerSamplingQuality", tryGet(layer, "samplingQuality"), path);
         if (kind === "light") {
-            this.setEnum(prim, "light_type", "LightType", tryGet(layer, "lightType"), path);
+            this.setEnum(prim, "light:type", "LightType", tryGet(layer, "lightType"), path);
         }
         var position = null;
         try {
@@ -1594,7 +1708,7 @@
             position = null;
         }
         if (position && tryGet(position, "dimensionsSeparated")) {
-            this.setBool(prim, "position_separated", true);
+            this.setBool(prim, "transform:separate_dimensions", true);
         }
 
         var layerCtx = {layer: layer, prim: prim, comp: compCtx, maskNames: [], maskPaths: []};
@@ -1629,22 +1743,28 @@
         var prim = newPrim("project", "Project");
         var path = "/project";
         if (project.file) {
-            this.setString(prim, "name", decodeName(project.file.name));
+            this.setString(prim, "ae:fileName", decodeName(project.file.name));
         }
-        this.setInt(prim, "bits_per_channel", tryGet(project, "bitsPerChannel"), path);
-        this.setBool(prim, "linear_blending", tryGet(project, "linearBlending"));
-        this.setBool(prim, "linearize_working_space", tryGet(project, "linearizeWorkingSpace"));
+        var bpc = tryGet(project, "bitsPerChannel");
+        if (bpc) {
+            this.setAttr(prim, "bit_depth", vEnum(String(bpc)));
+        }
+        this.setBool(prim, "blend_colors_using_gamma_1", tryGet(project, "linearBlending"));
+        this.setBool(prim, "linearize", tryGet(project, "linearizeWorkingSpace"));
         this.setString(prim, "working_space", tryGet(project, "workingSpace"));
-        this.setNum(prim, "working_gamma", tryGet(project, "workingGamma"), path);
-        this.setString(prim, "expression_engine", tryGet(project, "expressionEngine"));
-        this.setInt(prim, "display_start_frame", tryGet(project, "displayStartFrame"), path);
-        this.setEnum(prim, "frames_count_type", "FramesCountType", tryGet(project, "framesCountType"), path);
-        this.setEnum(prim, "time_display_type", "TimeDisplayType", tryGet(project, "timeDisplayType"), path);
-        this.setEnum(prim, "feet_frames_film_type", "FeetFramesFilmType", tryGet(project, "feetFramesFilmType"), path);
-        this.setEnum(prim, "footage_timecode_display_start_type", "FootageTimecodeDisplayStartType",
+        this.setNum(prim, "ae:workingGamma", tryGet(project, "workingGamma"), path);
+        var engine = tryGet(project, "expressionEngine");
+        if (engine) {
+            this.setAttr(prim, "expression_engine", vEnum(/^javascript/.test(engine) ? "javascript" : String(engine)));
+        }
+        this.setInt(prim, "ae:displayStartFrame", tryGet(project, "displayStartFrame"), path);
+        this.setEnum(prim, "ae:framesCountType", "FramesCountType", tryGet(project, "framesCountType"), path);
+        this.setEnum(prim, "time_display", "TimeDisplayType", tryGet(project, "timeDisplayType"), path);
+        this.setEnum(prim, "ae:feetFramesFilmType", "FeetFramesFilmType", tryGet(project, "feetFramesFilmType"), path);
+        this.setEnum(prim, "ae:footageTimecodeDisplayStartType", "FootageTimecodeDisplayStartType",
             tryGet(project, "footageTimecodeDisplayStartType"), path);
-        this.setBool(prim, "frames_use_feet_frames", tryGet(project, "framesUseFeetFrames"));
-        this.setEnum(prim, "gpu_accel_type", "GpuAccelType", tryGet(project, "gpuAccelType"), path);
+        this.setBool(prim, "ae:framesUseFeetFrames", tryGet(project, "framesUseFeetFrames"));
+        this.setEnum(prim, "ae:gpuAccelType", "GpuAccelType", tryGet(project, "gpuAccelType"), path);
         return prim;
     };
 
