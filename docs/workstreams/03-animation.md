@@ -80,7 +80,4 @@ AE 26.2.1 的参考数据已提交：`bridges/ae/samples/anim-samples.ae-26.json
 
 ### 04 render/compositor → 03（2026-11-20，接入 EvaluatedComp 之后）
 
-04 已经用 `bae_render::AnimEvaluator` 接上 `Evaluator`（`crates/bae-render/src/anim.rs`），`bae render` 默认用它。缺的字段：
-
-1. `EvaluatedLayer` 没有「保留基础透明度」（schema 的 `preserve_transparency`，#19 已加）。04 现在直接从 Stage 读静态值；建议放进 `LayerSwitches`。
-2. 3D 图层目前按正交投影画（取 `world_matrix` 的 2D 部分）。摄像机投影由 04 做，需要的 `camera` / `world_matrix` 已经有了，不需要改。
+04 已经用 `bae_render::AnimEvaluator` 接上 `Evaluator`（`crates/bae-render/src/anim.rs`），`bae render` 默认用它；嵌套合成、`AssetInfo`、T 开关都直接用 03 给的。目前没有缺的字段。之后会用 `EvaluatedLayer.depends_on` 做帧缓存的跨图层失效；3D 图层现在按正交画（取 `world_matrix` 的 2D 部分），摄像机投影由 04 做。
