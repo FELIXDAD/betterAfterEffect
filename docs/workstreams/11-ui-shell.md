@@ -41,13 +41,18 @@
 
 ## 进度
 
-- [ ] 外壳与停靠（进行中：停靠、标题栏、工作区切换栏已完成；原生菜单栏、快捷键未做）
+- [x] 外壳与停靠（bae-ui 已接进 `apps/bae`：自绘标题栏、工具栏、工作区栏、停靠树、状态栏；原生菜单项都是命令 id）
 - [x] 主题与图标（颜色与尺寸取自本机 AE 2026；图标用 Painter 自绘，不打包图片）
 - [x] 通用控件（第一批：热文本、秒表、关键帧导航、展开箭头、勾选框、下拉框、搜索框、开关格、时间码）
-- [ ] 快捷键系统
-- [ ] 工作区预设与保存
-- [ ] 历史面板与 Agent 面板
-- [ ] 输入法验证报告
+- [x] `Panel` trait 与面板 / 工作区 / 键位表注册（PR #23，`docs/spec/ui-shell.md`）
+- [x] 快捷键系统（按工作区切换键位表；AE 全局键位；面板作用域；自定义与冲突检查；快捷键编辑器）
+- [x] 工作区预设（动效、审阅、Agent）与保存、重置（AE 语义：当前布局自动记住，"保存"后"重置"回到保存的布局）
+- [x] 历史面板（命令名 + 作者，含协作者和 Agent；数据来自 Stage 事件）
+- [x] Agent 活动记录、提案面板（`bae_ui::agent::AgentFeed`；`apps/bae` 用 bae-agent 的 `AuditLog` 和 `proposal::proposals` 实现）
+- [x] 首次启动选择岗位、编辑工作区对话框（排序、显示/隐藏、另存为新工作区、删除自定义工作区）
+- [ ] 界面亮度设置（主题色现在是常量，需要把绘制统一经过一个亮度函数）
+- [x] 输入法验证报告（模拟测试通过，候选框改为跟随光标；真实拼音端到端待授权后确认，见下文）
+- [ ] 原生多窗口（浮动面板目前画在主窗口内）
 
 ### 进展记录
 
@@ -63,7 +68,45 @@
   - 示例：`cargo run -p bae-ui --example shell`（`--zh` 中文，`--reset` 恢复默认布局）。
   - 与 AE 截图逐像素对比：五个 frame 的位置误差 ≤1pt（有单元测试）；标题、标签文字、×、色块、锁、☰、下划线的位置误差 ≤1.5pt。AE 用 Adobe Clean 字体，我们用系统 SF，11.5pt 时文字宽度与 AE 相差约 1%。
   - 测试：拆分条拖动、标签拖到 frame 边缘重新停靠都用真实的 egui 指针事件在无窗口环境下模拟。
-- 待做：原生菜单栏（muda）、快捷键系统、`Panel` 注册与工作区预设、历史面板、Agent 面板、输入法验证、界面亮度设置。
+- 待做（当时）：原生菜单栏（muda）、快捷键系统、`Panel` 注册与工作区预设、历史面板、Agent 面板、输入法验证、界面亮度设置。
+
+- 2026-11-20（接手）：
+  - PR #23 `[interface]`：`Panel` / `PanelKind` / `PanelContext`（只读 Stage + `invoke(命令 id)`）、`WorkspacePreset`、`Keymap` / `Binding` / `Chord` / `KeymapOverrides`、`ActionInfo`，都注册到 bae-app 的 `Registry`；`UiModule` 给布局里没人注册的面板补占位。说明见 `docs/spec/ui-shell.md`。
+  - `bae_ui::Workbench`：标题栏 + 工具栏 + 工作区栏 + 停靠区 + 状态栏；面板实例按需创建，关闭或切走时保存视图状态；命令 id 解析顺序：焦点面板 → 外壳动作 → `bae-model` 命令。
+  - `apps/bae` 改用 Workbench（去掉 egui_dock 占位）：`Document`（Project + CommandRegistry，撤销/重做走 `Stage::undo/redo`）；菜单项 id = 命令 id；根视口命令走 `egui_winit::process_viewport_commands`；窗口用 `titlebar::viewport_builder` 创建；工作区状态存 `<state>/workspaces.json`。`--smoke-test` 和 `--headless --smoke-test` 都通过，headless 冒烟测试会轮流切换三个工作区；`BAE_SMOKE_SCREENSHOT=<path>` 可以把最后一帧存成 BMP。
+  - 快捷键：键位表随工作区切换；文本框有焦点时不触发打字键和文本编辑键；Cmd+C/X/V 在非文本状态下变成 `edit.copy/cut/paste`；快捷键编辑器（Cmd+Alt+'）可以录制、删除、全部重置，冲突时先确认再替换。
+  - `KeymapBindings`：模块往已有键位表追加快捷键（12 的时间轴键位），不替换整个键位表；插件卸载时一并撤销。
+  - 首次启动（没有 `workspaces.json`）弹出"欢迎使用 BAE"选岗位；编辑工作区对话框；窗口 > 工作区 菜单加"另存为新工作区…""编辑工作区…"。
+  - 历史面板：`bae_ui::history::HistoryLog`（应用资源）订阅 Stage 事件，显示命令名、作者（你 / 协作者 / Agent xxx）、撤销/重做；向 02 提了 `StageEvent.label` 和列出撤销栈的请求。
+
+### 中文输入法验证报告（2026-11-20）
+
+**结论：暂不提替换方案。** egui 0.36 / egui-winit 0.36 / winit 0.30.13 的输入法路径是完整的，组字、提交、退格、候选框定位在模拟测试里都对；BAE 修正了候选框锚点。**还缺真实拼音输入法上的端到端确认**：本机运行 Agent 的终端没有"辅助功能 / 发送事件"权限（`CGPreflightPostEventAccess()` 为 false），合成按键进不了应用，所以没能自动打出拼音。授权后用 `crates/bae-ui/tools/ime_driver.swift` 可以直接跑（用法见文件头）。
+
+**核对过的代码路径**
+
+- 文本框获得焦点时 egui 输出 `PlatformOutput::ime`，egui-winit 据此调用 `Window::set_ime_allowed(true)` 和 `set_ime_cursor_area`；失焦时关闭。winit 的 `Ime::Preedit/Commit` 转成 egui 的 `ImeEvent::Preedit/Commit`，`TextEdit` 显示带下划线的预编辑文字，提交后替换。
+- macOS：winit 的 `firstRectForCharacterRange` 返回 `set_ime_cursor_area` 给的矩形（视图坐标 → 屏幕坐标）。BAE 用 `fullsize_content_view` 隐藏系统标题栏，内容视图覆盖整个窗口，坐标系一致，候选框不会因为自绘标题栏偏移 19pt。
+- Windows：winit 在 IME 处理过的按键上仍会发 `KeyboardInput`（winit #4508），egui-winit 0.36 按 `VK_PROCESSKEY` 过滤掉了。
+- egui-winit 源码里记录了上游在 macOS 15 简体双拼、Windows 11 微软拼音、fcitx5 上实测的事件序列；模拟测试按 macOS 的序列（空格选词：`Preedit("")` → `Commit("你好")`；退格删光：`Preedit("")`）编写。
+
+**BAE 做的处理**
+
+1. **候选框跟随光标。** egui-winit 把整个文本框的矩形（`IMEOutput::rect`）交给系统，候选框会出现在文本框左下角，不跟光标走；AE 和系统原生文本框都在光标下方。`Workbench` 每帧把它换成光标矩形（`workbench::ime_follows_caret`）。12 号以后在合成查看器里直接编辑文字时，只要用 egui 的 `TextEdit` 或者自己设置 `PlatformOutput::ime`，都会经过这一步。
+2. **组字时不触发快捷键。** 文本框有焦点时，`U`、`J`、`K` 这类不带修饰键的快捷键、方向键/退格/回车，以及 Cmd+Z/A/C/V/X 都留给文本框（macOS 上组字时 winit 本来就不发按键事件；这里再保险一次）。
+3. 测试：`workbench::tests::ime_composition_in_text_fields`（打开快捷键编辑器 → 搜索框自动聚焦 → 组字 "ni'hao" 期间按 U 不触发快捷键 → 候选框矩形等于光标矩形且在文本框内 → 提交 "你好" → 退格删光预编辑不留字 → 光标后移）。
+
+**需要人工确认的清单**（授权后脚本覆盖前 3 条）
+
+1. 简体拼音：候选框出现在光标正下方（搜索框、以后的图层重命名和文字工具）。
+2. 空格 / 数字选词、回车上屏英文、Esc 取消、退格删到空。
+3. 组字时按 AE 快捷键字母不触发命令。
+4. Shift 切换中英文、全角标点。
+5. Retina 与外接 1x 屏、全屏、窗口在副屏时的候选框位置。
+6. Windows 11 微软拼音（`VK_PROCESSKEY` 过滤、候选框位置）。
+7. 多行文本（文字图层的源文本）：换行后候选框跟到新行。
+
+**如果真实测试不达标**：先在外壳层面修（egui-winit 是小 crate，必要时 fork 或给上游提 PR），其次对文字工具这类重度输入场景用原生文本控件（NSTextView / Win32 EDIT）叠在 egui 上只负责输入；目前没有证据需要替换整个界面框架。
 
 ## 请求（其他工作流在这里留言）
 

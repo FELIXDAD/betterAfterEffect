@@ -59,6 +59,7 @@
 - [x] 音频接口（`audio`）：`AudioSource`（按采样帧随机读取）、采样与 `Time` 精确换算、`MemoryAudio`、`Waveform`（min/max 峰值、降采样出缩放级别、按时间取可见区间）。
 - [x] 音频文件解码（`FileAudio`，symphonia）：WAV、AIFF、MP4 / QuickTime / M4A（AAC）、MP3、FLAC，按采样帧随机读取（顺读继续解码，跳转时精确 seek）；`audio::probe` 只读文件头列出音频流，影片的 `MediaInfo.audio` 由它填写。symphonia 的 MP4 读取不处理编码器延迟，AAC 会比画面晚约 44 ms（48 kHz 下 2112 个采样）；新增的小型 box 读取器从音频轨的编辑列表或 iTunes 无缝信息（`iTunSMPB`）里取延迟和有效长度并裁掉。测试用代码生成 WAV，macOS 上测试时用系统的 `afconvert` 生成 AAC / FLAC / AIFF；AAC 在 0.5 s 处放一个脉冲，解码后位置仍在 0.5 s。
 - [ ] cpal 播放、音画同步时钟；导出时混入音频
+- [x] `MediaLibrary`（给 04 / 14 / 缩略图 / Agent）：线程安全、全部 `&self`；每个文件（按打开选项区分）只打开一次，超出上限时关掉最久没用的；素材时间 → 帧号（超出两端时停在首帧 / 末帧，与 AE 时间重映射一致）；解码结果进共享 `FrameCache`；`content_hash` 给渲染缓存用（文件版本、打开选项、交付方式、帧号）；`invalidate(path)` 也能命中以该文件为一帧的序列，并换新的内容哈希。`MediaModule` 在 `finish` 里提供共享的 `Arc<MediaLibrary>` 资源。04 的素材 `LayerSource` 只需要薄薄包一层（`frame_at` → `GpuImage::from_texture`，零拷贝），示例写在 `library.rs` 的文档里。
 - [ ] 代理与 FFmpeg 插件（`FrameRequest::downscale` 与格式注册表已预留）
 - [x] 裁片接口（`trim`，给 21）：`TrimRequest` 按源时间区间（`TimeRange`）+ 余量 + 模式；`plan_trim` 换算成整帧，直拷时扩展到 GOP 边界（起点取之前最近的关键帧，终点延到下一关键帧之前）；`gop_start` / `next_gop_start`；`Trimmer`（注册到 `Registry<dyn Trimmer>`）；`SequenceTrimmer`（序列只复制用到的帧，保留文件名）。
 - [x] 影片关键帧表：`AvSource::sync_frames` 用 AVSampleCursor 读样本表（不读媒体数据），经编辑列表换算成帧号。

@@ -1,38 +1,18 @@
-//! Placeholder workspace: an egui_dock area with the AE motion-workspace panel
-//! names, and a status bar. Workstream 11 (`bae-ui`) replaces the dock and panels;
-//! the status bar contract (GPU name, frame time) stays.
+//! The window contents: `bae-ui`'s workbench (title bar, toolbar, workspace bar,
+//! dock with the registered panels) plus the shell's status strip, About window and
+//! the composition panel that shows the viewport texture until workstream 12
+//! registers the real one.
 
+use std::sync::Arc;
+
+use bae_app::{App, Resources};
 use bae_gpu::viewport::{ViewportTextureId, ViewportTextureRegistry};
-use egui_dock::{DockArea, DockState, NodeIndex, Style, TabViewer};
+use bae_ui::{
+    Invocation, Panel, PanelContext, PanelKind, Workbench, WorkbenchContext, WorkbenchState,
+};
 
+use crate::document::Document;
 use crate::i18n::tr;
-
-/// Placeholder panels (AE "Standard" workspace names).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Panel {
-    /// Project panel.
-    Project,
-    /// Composition viewer (shows the viewport texture).
-    Composition,
-    /// Timeline.
-    Timeline,
-    /// Effect Controls.
-    EffectControls,
-    /// Info.
-    Info,
-}
-
-impl Panel {
-    fn title(self) -> &'static str {
-        match self {
-            Self::Project => tr("Project"),
-            Self::Composition => tr("Composition"),
-            Self::Timeline => tr("Timeline"),
-            Self::EffectControls => tr("Effect Controls"),
-            Self::Info => tr("Info"),
-        }
-    }
-}
 
 /// What the status bar shows.
 #[derive(Debug, Clone, Default)]
@@ -49,31 +29,51 @@ pub struct StatusInfo {
     pub frames: u64,
 }
 
-/// The placeholder workspace state.
+/// The viewport texture the composition placeholder shows (an app resource).
+#[derive(Debug, Clone, Copy)]
+pub struct PlaceholderViewer(pub ViewportTextureId);
+
+/// Registers the shell's composition viewer unless a workspace crate registered a
+/// real one (it replaces `bae-ui`'s "not implemented" placeholder).
+pub fn register_panels(app: &mut bae_app::AppBuilder) {
+    let registry = app.registry::<PanelKind>();
+    let placeholder = registry
+        .snapshot()
+        .entry("composition")
+        .is_none_or(|e| e.owner() == &bae_app::Owner::module("bae-ui"));
+    if placeholder {
+        let kind = PanelKind::new("Composition", |_| Box::new(CompositionViewer));
+        let _ = registry.replace(app.current_owner(), "composition", Arc::new(kind));
+    }
+}
+
+/// The workbench plus shell-owned windows.
 pub struct Workspace {
-    dock: DockState<Panel>,
-    viewer: Option<ViewportTextureId>,
+    workbench: Workbench,
     show_about: bool,
 }
 
 impl Workspace {
-    /// The default layout: Project | Composition | Effect Controls+Info over Timeline.
-    pub fn new(viewer: Option<ViewportTextureId>) -> Self {
+    pub fn new(app: &mut App, state: WorkbenchState) -> Self {
         Self {
-            dock: default_layout(),
-            viewer,
+            workbench: Workbench::new(app, state),
             show_about: false,
         }
     }
 
-    /// Sets the viewport texture shown in the Composition panel.
-    pub fn set_viewer(&mut self, viewer: Option<ViewportTextureId>) {
-        self.viewer = viewer;
+    /// Ask for the user's role (first launch).
+    pub fn show_role_picker(&mut self) {
+        self.workbench.show_role_picker();
     }
 
-    /// Restores the default layout ("Reset Workspace").
-    pub fn reset_layout(&mut self) {
-        self.dock = default_layout();
+    /// Model commands listed in the shortcut editor.
+    pub fn set_extra_commands(&mut self, commands: Vec<(String, String)>) {
+        self.workbench.set_extra_commands(commands);
+    }
+
+    /// The state to persist between sessions.
+    pub fn state(&mut self) -> WorkbenchState {
+        self.workbench.state()
     }
 
     /// Opens the About window.
@@ -81,27 +81,23 @@ impl Workspace {
         self.show_about = true;
     }
 
-    /// Builds the UI for one frame.
+    /// Builds the UI for one frame; returns the invocations it produced.
     pub fn ui(
         &mut self,
         ui: &mut egui::Ui,
         status: &StatusInfo,
-        viewports: Option<&ViewportTextureRegistry>,
-    ) {
-        egui::Panel::bottom("bae.status")
-            .exact_size(22.0)
-            .show(ui, |ui| status_bar(ui, status));
-        egui::CentralPanel::no_frame().show(ui, |ui| {
-            let mut viewer = PanelViewer {
-                viewer: self.viewer,
-                viewports,
-            };
-            DockArea::new(&mut self.dock)
-                .style(Style::from_egui(ui.style().as_ref()))
-                .show_close_buttons(false)
-                .show_add_buttons(false)
-                .show_inside(ui, &mut viewer);
-        });
+        doc: &Document,
+        resources: &Resources,
+    ) -> Vec<Invocation> {
+        let title = doc.title();
+        let cx = WorkbenchContext {
+            stage: doc.stage(),
+            author: doc.author(),
+            resources,
+            title: &title,
+            dirty: doc.is_dirty(),
+        };
+        let out = self.workbench.ui(ui, &cx, |ui| status_bar(ui, status));
         if self.show_about {
             let mut open = true;
             egui::Window::new(tr("About BAE"))
@@ -116,79 +112,73 @@ impl Workspace {
                 });
             self.show_about = open;
         }
+        out
     }
-}
 
-fn default_layout() -> DockState<Panel> {
-    let mut dock = DockState::new(vec![Panel::Composition]);
-    let surface = dock.main_surface_mut();
-    let [center, _timeline] = surface.split_below(NodeIndex::root(), 0.62, vec![Panel::Timeline]);
-    let [center, _project] = surface.split_left(center, 0.22, vec![Panel::Project]);
-    let [_center, _effects] =
-        surface.split_right(center, 0.72, vec![Panel::EffectControls, Panel::Info]);
-    dock
+    /// Lets the focused panel and the workbench handle `inv`; returns it back if the
+    /// shell has to (undo/redo, application actions, model commands).
+    pub fn handle(
+        &mut self,
+        inv: Invocation,
+        doc: &Document,
+        resources: &Resources,
+    ) -> Option<Invocation> {
+        let title = String::new();
+        let cx = WorkbenchContext {
+            stage: doc.stage(),
+            author: doc.author(),
+            resources,
+            title: &title,
+            dirty: false,
+        };
+        (!self.workbench.handle(&inv, &cx)).then_some(inv)
+    }
+
+    /// Workspace ids and English titles in bar order (Window menu).
+    pub fn workspaces(&self) -> Vec<(String, String)> {
+        self.workbench
+            .workspaces()
+            .map(|(id, p)| (id.to_owned(), p.title.clone()))
+            .collect()
+    }
 }
 
 fn status_bar(ui: &mut egui::Ui, status: &StatusInfo) {
-    ui.horizontal_centered(|ui| {
-        ui.label(egui::RichText::new(&status.gpu).small());
-        ui.separator();
-        ui.label(
-            egui::RichText::new(format!("{} {:.2} ms", tr("frame"), status.frame_ms))
-                .small()
-                .monospace(),
-        );
-        ui.separator();
-        ui.label(
-            egui::RichText::new(format!(
-                "{}×{} @{:.2}x",
-                status.size_px[0], status.size_px[1], status.pixels_per_point
-            ))
-            .small()
-            .monospace(),
-        );
-    });
+    let small = |s: String| {
+        egui::RichText::new(s)
+            .size(10.5)
+            .color(bae_ui::theme::color::TEXT_DIM)
+    };
+    ui.label(small(status.gpu.clone()));
+    ui.separator();
+    ui.label(small(format!("{} {:.2} ms", tr("frame"), status.frame_ms)));
+    ui.separator();
+    ui.label(small(format!(
+        "{}×{} @{:.2}x",
+        status.size_px[0], status.size_px[1], status.pixels_per_point
+    )));
 }
 
-struct PanelViewer<'a> {
-    viewer: Option<ViewportTextureId>,
-    viewports: Option<&'a ViewportTextureRegistry>,
-}
+/// Shows the published viewport texture, fitted into the panel.
+struct CompositionViewer;
 
-impl TabViewer for PanelViewer<'_> {
-    type Tab = Panel;
-
-    fn id(&mut self, tab: &mut Panel) -> egui::Id {
-        egui::Id::new(("bae.panel", *tab))
+impl Panel for CompositionViewer {
+    fn tab(&self, _cx: &PanelContext<'_>) -> bae_ui::TabInfo {
+        bae_ui::TabInfo::new(tr("Composition"))
+            .label(bae_ui::theme::label_color(15))
+            .viewer()
     }
 
-    fn title(&mut self, tab: &mut Panel) -> egui::WidgetText {
-        tab.title().into()
-    }
-
-    fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Panel) {
-        match tab {
-            Panel::Composition => self.composition(ui),
-            _ => {
-                ui.centered_and_justified(|ui| {
-                    ui.weak(tr("Not implemented yet."));
-                });
-            }
-        }
-    }
-
-    fn is_closeable(&self, _tab: &Panel) -> bool {
-        false
-    }
-}
-
-impl PanelViewer<'_> {
-    fn composition(&self, ui: &mut egui::Ui) {
-        let image = self.viewer.zip(self.viewports).and_then(|(id, registry)| {
-            let handle = registry.display_handle(id)?;
-            let texture = registry.get(id)?;
-            Some((handle, texture.size))
-        });
+    fn ui(&mut self, ui: &mut egui::Ui, cx: &mut PanelContext<'_>) {
+        let image = cx
+            .resources
+            .get::<PlaceholderViewer>()
+            .zip(cx.resources.get::<Arc<ViewportTextureRegistry>>())
+            .and_then(|(viewer, registry)| {
+                let handle = registry.display_handle(viewer.0)?;
+                let texture = registry.get(viewer.0)?;
+                Some((handle, texture.size))
+            });
         match image {
             Some((handle, [w, h])) => {
                 // Fit the comp into the panel, keeping its aspect ratio.
