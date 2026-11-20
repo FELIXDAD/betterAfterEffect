@@ -1,0 +1,361 @@
+//! [`SyncSession`]: the transport-independent half of the protocol.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::time::{Duration, Instant};
+
+use bae_model::StageEvent;
+use bae_model::loro::VersionVector;
+
+use crate::client::ClientId;
+use crate::docs::{DocSet, Imported};
+use crate::error::SyncError;
+use crate::protocol::{DocKey, Message};
+use crate::transport::Transport;
+
+/// Settings of a [`SyncSession`].
+#[derive(Clone, Debug)]
+pub struct SessionConfig {
+    pub client: ClientId,
+    /// Re-announce our versions this often so the remote can resend anything that
+    /// got lost. `None`: only on connect and when a new document appears (enough
+    /// for the shared folder, which never loses data).
+    pub hello_interval: Option<Duration>,
+    /// At most this many received messages are handled per [`SyncSession::pump`],
+    /// so one pump never stalls the thread that owns the stage for long.
+    pub max_messages_per_pump: usize,
+    /// Send local changes at most this often. Zero sends on every pump; the shared
+    /// folder uses a few hundred milliseconds so a drag does not become dozens of
+    /// SMB appends per second.
+    pub min_send_interval: Duration,
+}
+
+impl SessionConfig {
+    pub fn new(client: ClientId) -> Self {
+        SessionConfig {
+            client,
+            hello_interval: Some(Duration::from_secs(5)),
+            max_messages_per_pump: 256,
+            min_send_interval: Duration::ZERO,
+        }
+    }
+}
+
+/// What one [`SyncSession::pump`] did.
+#[derive(Debug, Default)]
+pub struct PumpOutcome {
+    /// Events of remote imports into the stage, in order.
+    pub events: Vec<StageEvent>,
+    pub received: usize,
+    pub sent: usize,
+    /// Documents the remote has that the local set does not (e.g. a sublayer a
+    /// collaborator created). Once the document exists locally the session asks
+    /// the remote for its contents.
+    pub unknown_docs: Vec<DocKey>,
+    /// Messages that were skipped (corrupt payloads, unknown message types).
+    pub errors: Vec<SyncError>,
+}
+
+/// Running totals of a session.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SyncStats {
+    pub messages_sent: u64,
+    pub messages_received: u64,
+    pub bytes_sent: u64,
+    pub bytes_received: u64,
+    /// Payloads imported into a document.
+    pub imports: u64,
+    /// Payloads skipped because the document already had everything in them.
+    pub redundant: u64,
+}
+
+/// Keeps a [`DocSet`] in sync with one remote over a [`Transport`].
+///
+/// The session remembers, per document, which version the remote is known to
+/// have. Every [`pump`](Self::pump) imports what arrived and sends the ops the
+/// remote is missing. CRDT imports are idempotent and order-independent, so the
+/// only repair needed for lost messages is the periodic `Hello`, which resets that
+/// knowledge to what the remote really has.
+#[derive(Debug)]
+pub struct SyncSession {
+    config: SessionConfig,
+    /// What the remote has, per document. `None` until its first `Hello`: before
+    /// that we do not know what to send.
+    remote: Option<BTreeMap<DocKey, VersionVector>>,
+    remote_client: Option<ClientId>,
+    remote_protocol: Option<u32>,
+    last_hello: Option<Instant>,
+    last_send: Option<Instant>,
+    /// Documents announced in our last `Hello`.
+    announced: BTreeSet<DocKey>,
+    stats: SyncStats,
+}
+
+impl SyncSession {
+    pub fn new(config: SessionConfig) -> Self {
+        SyncSession {
+            config,
+            remote: None,
+            remote_client: None,
+            remote_protocol: None,
+            last_hello: None,
+            last_send: None,
+            announced: BTreeSet::new(),
+            stats: SyncStats::default(),
+        }
+    }
+
+    pub fn config(&self) -> &SessionConfig {
+        &self.config
+    }
+
+    pub fn client(&self) -> &ClientId {
+        &self.config.client
+    }
+
+    /// The remote's client ID, once it said hello.
+    pub fn remote_client(&self) -> Option<&ClientId> {
+        self.remote_client.as_ref()
+    }
+
+    /// Protocol version the remote announced.
+    pub fn remote_protocol(&self) -> Option<u32> {
+        self.remote_protocol
+    }
+
+    /// Whether the remote has said hello (we know what it has).
+    pub fn is_connected(&self) -> bool {
+        self.remote.is_some()
+    }
+
+    pub fn stats(&self) -> &SyncStats {
+        &self.stats
+    }
+
+    /// Forget what the remote has, e.g. after reconnecting to a hub. The next pump
+    /// says hello again and nothing is sent until the remote answers.
+    pub fn reset(&mut self) {
+        self.remote = None;
+        self.remote_client = None;
+        self.remote_protocol = None;
+        self.last_hello = None;
+        self.announced.clear();
+    }
+
+    /// Documents with local ops the remote is not known to have yet ("unsynced
+    /// changes"). Everything counts as unsynced before the remote said hello.
+    pub fn unsynced(&self, docs: &dyn DocSet) -> Vec<DocKey> {
+        docs.doc_keys()
+            .into_iter()
+            .filter(|key| {
+                let Some(local) = docs.version(key) else {
+                    return false;
+                };
+                if local.is_empty() {
+                    return false;
+                }
+                match &self.remote {
+                    None => true,
+                    Some(r) => !r.get(key).is_some_and(|k| k.includes_vv(&local)),
+                }
+            })
+            .collect()
+    }
+
+    /// Exchange messages without blocking: say hello when due, import what
+    /// arrived, send what the remote lacks. Call it after local edits and whenever
+    /// the transport signals incoming data (or on a timer).
+    ///
+    /// Errors are transport failures; the link must be re-established (then call
+    /// [`reset`](Self::reset)). Problems with single messages are in
+    /// [`PumpOutcome::errors`].
+    pub fn pump(
+        &mut self,
+        docs: &mut dyn DocSet,
+        transport: &mut dyn Transport,
+    ) -> Result<PumpOutcome, SyncError> {
+        self.pump_at(docs, transport, Instant::now())
+    }
+
+    /// [`pump`](Self::pump) with an explicit clock (simulations, tests).
+    pub fn pump_at(
+        &mut self,
+        docs: &mut dyn DocSet,
+        transport: &mut dyn Transport,
+        now: Instant,
+    ) -> Result<PumpOutcome, SyncError> {
+        let mut out = PumpOutcome::default();
+        self.maybe_hello(docs, transport, now, &mut out)?;
+        for _ in 0..self.config.max_messages_per_pump {
+            let Some(msg) = transport.recv()? else {
+                break;
+            };
+            out.received += 1;
+            self.stats.messages_received += 1;
+            self.handle(docs, transport, msg, &mut out)?;
+        }
+        // A document that appeared since the last hello (created locally, or the
+        // app added a sublayer the remote told us about): announce it so the
+        // remote sends its contents.
+        self.maybe_hello(docs, transport, now, &mut out)?;
+        let send_due = self
+            .last_send
+            .is_none_or(|t| now.saturating_duration_since(t) >= self.config.min_send_interval);
+        if send_due && self.flush(docs, transport, &mut out)? {
+            self.last_send = Some(now);
+        }
+        Ok(out)
+    }
+
+    fn maybe_hello(
+        &mut self,
+        docs: &dyn DocSet,
+        transport: &mut dyn Transport,
+        now: Instant,
+        out: &mut PumpOutcome,
+    ) -> Result<(), SyncError> {
+        let keys = docs.doc_keys();
+        let due = match (self.last_hello, self.config.hello_interval) {
+            (None, _) => true,
+            (Some(t), Some(every)) => now.saturating_duration_since(t) >= every,
+            (Some(_), None) => false,
+        };
+        let new_doc = keys.iter().any(|k| !self.announced.contains(k));
+        if !due && !new_doc {
+            return Ok(());
+        }
+        let versions: Vec<(DocKey, VersionVector)> = keys
+            .iter()
+            .filter_map(|k| Some((k.clone(), docs.version(k)?)))
+            .collect();
+        self.announced = keys.into_iter().collect();
+        self.last_hello = Some(now);
+        self.send(
+            transport,
+            Message::hello(self.config.client.clone(), versions),
+            out,
+        )
+    }
+
+    fn handle(
+        &mut self,
+        docs: &mut dyn DocSet,
+        transport: &mut dyn Transport,
+        msg: Message,
+        out: &mut PumpOutcome,
+    ) -> Result<(), SyncError> {
+        match msg {
+            Message::Hello {
+                protocol,
+                client,
+                versions,
+            } => {
+                self.remote_protocol = Some(protocol);
+                self.remote_client = Some(client);
+                for (key, _) in &versions {
+                    if docs.version(key).is_none() && !out.unknown_docs.contains(key) {
+                        out.unknown_docs.push(key.clone());
+                    }
+                }
+                // Replace, not merge: after a hub restart it may have less than we
+                // sent, and then we must send it again.
+                self.remote = Some(versions.into_iter().collect());
+            }
+            Message::Updates { doc, version, data } | Message::Snapshot { doc, version, data } => {
+                self.stats.bytes_received += data.len() as u64;
+                if let Some(remote) = &mut self.remote {
+                    remote.entry(doc.clone()).or_default().merge(&version);
+                }
+                if docs
+                    .version(&doc)
+                    .is_some_and(|have| have.includes_vv(&version))
+                {
+                    self.stats.redundant += 1;
+                    return Ok(());
+                }
+                match docs.import(&doc, &data) {
+                    Ok(Imported::Done(event)) => {
+                        self.stats.imports += 1;
+                        if let Some(ev) = event.filter(|e| !e.is_empty()) {
+                            out.events.push(ev);
+                        }
+                    }
+                    Ok(Imported::UnknownDoc) => {
+                        if !out.unknown_docs.contains(&doc) {
+                            out.unknown_docs.push(doc);
+                        }
+                    }
+                    Err(e) => out.errors.push(e),
+                }
+            }
+            Message::SnapshotRequest { doc } => {
+                let Some(version) = docs.version(&doc) else {
+                    return Ok(());
+                };
+                match docs.export_snapshot(&doc) {
+                    Ok(data) => {
+                        if let Some(remote) = &mut self.remote {
+                            remote.entry(doc.clone()).or_default().merge(&version);
+                        }
+                        self.send(transport, Message::Snapshot { doc, version, data }, out)?;
+                    }
+                    Err(e) => out.errors.push(e),
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Send every document's ops the remote is not known to have. Returns whether
+    /// anything was sent.
+    fn flush(
+        &mut self,
+        docs: &dyn DocSet,
+        transport: &mut dyn Transport,
+        out: &mut PumpOutcome,
+    ) -> Result<bool, SyncError> {
+        let Some(remote) = &mut self.remote else {
+            return Ok(false);
+        };
+        let mut batch = Vec::new();
+        for key in docs.doc_keys() {
+            let Some(local) = docs.version(&key) else {
+                continue;
+            };
+            let known = remote.entry(key.clone()).or_default();
+            if known.includes_vv(&local) {
+                continue;
+            }
+            match docs.export_updates(&key, known) {
+                Ok(data) => {
+                    known.merge(&local);
+                    batch.push(Message::Updates {
+                        doc: key,
+                        version: local,
+                        data,
+                    });
+                }
+                Err(e) => out.errors.push(e),
+            }
+        }
+        let sent = !batch.is_empty();
+        for msg in batch {
+            self.send(transport, msg, out)?;
+        }
+        Ok(sent)
+    }
+
+    fn send(
+        &mut self,
+        transport: &mut dyn Transport,
+        msg: Message,
+        out: &mut PumpOutcome,
+    ) -> Result<(), SyncError> {
+        if let Message::Updates { data, .. } | Message::Snapshot { data, .. } = &msg {
+            self.stats.bytes_sent += data.len() as u64;
+        }
+        transport.send(msg)?;
+        self.stats.messages_sent += 1;
+        out.sent += 1;
+        Ok(())
+    }
+}

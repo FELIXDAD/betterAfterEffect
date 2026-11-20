@@ -273,6 +273,9 @@ const LAYER: &[AttrDef] = &[
     prim_ref("track_matte_layer").doc("AE 2023+: the matte layer; none = the layer above."),
     boolean("three_d", false),
     boolean("adjustment_layer", false),
+    boolean("preserve_transparency", false)
+        .kinds(VISUAL)
+        .doc("AE 'Preserve Underlying Transparency' (T switch): draw only where layers below are opaque."),
     boolean("collapse_transformation", false).doc("Continuous rasterization for vectors."),
     boolean("motion_blur", false),
     choice("quality", "best", &["best", "draft", "wireframe"]),
