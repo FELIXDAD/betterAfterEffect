@@ -50,7 +50,8 @@
 - [x] macOS 视频解码：AVFoundation + VideoToolbox（H.264、HEVC、ProRes），IOSurface 支撑的 CVPixelBuffer → CVMetalTexture → wgpu 纹理（wgpu-hal，零拷贝），再转工作格式；8 位源用 BGRA，10 位以上和带 alpha 的 ProRes 4444 用 64RGBAHalf；帧精确 seek（向前小步顺读，其余重建 reader 并从目标帧内 1/8 帧处开始）；29.97 等非整数帧率逐帧验证。
 - [ ] Windows 视频解码：目前只有占位（`media_foundation`，能通过 `cargo clippy --target x86_64-pc-windows-msvc -p bae-media`），实现放下一个 PR。
 - [ ] TIFF、PSD（保留图层）、HEIC
-- [ ] 跳帧速度：4K 随机跳帧目前约 75 ms/帧（基准见 `tests/video.rs` 的 `decode_throughput_4k`；顺序解码 4K H.264 约 300 fps、ProRes 约 200 fps，测试素材是纯色条，比真实素材容易），主要花在重建 `AVAssetReader` 上，连全帧内编码的 ProRes 也一样。下一步改用 `supportsRandomAccess` + `resetForReadingTimeRanges`，或直接用 `VTDecompressionSession` + 样本表。
+- [x] 跳帧速度：拖动播放头（连续随机跳帧）不再每次重建 `AVAssetReader`：输出开了 `supportsRandomAccess`，跳帧读单帧时间范围，读完确认范围已读空后用 `resetForReadingTimeRanges` 换位置；往后顺读时切换成开放范围。4K 实测（机器负载较高时 A/B 交替各跑两轮）：拖动 ProRes 422 / 4444 约 8–9 ms/帧（原来 40–54 ms），H.264（GOP 30）约 27 ms/帧（原来约 46 ms，余下主要是从关键帧解码）；顺序解码速度不变。从播放状态跳出的第一次仍要重建（约 40–65 ms）。
+- [ ] 进一步：播放中跳帧也不重建（有界的播放窗口），以及长 GOP 素材的拖动缓存 / 预读
 - [ ] 预读（后台线程提前解码）、YUV 直出（420v/x420 双平面 + 着色器转换，进一步降低 4K 解码开销）、QuickTime 时码轨、关键帧表（`sync_frames`）
 - [x] 编码导出接口（`export`）：`EncodeSettings`（对应 AE 输出模块：编码、尺寸、帧率、RGB / RGB+Alpha 及直通/预乘、位深、色彩标签、起始编号与时码）、`Encoder` / `EncoderFormat`（注册到 `Registry<dyn EncoderFormat>`）、`MediaEncoders`、`convert_frame`（CPU 像素格式与 alpha 转换）、`FrameReadback`（GPU 帧异步回读，默认 2 帧在途）、`render`（逐帧生产 → 回读 → 编码，进度回调、取消时删除半成品）、`RenderQueue`（运行时队列：排队、取消、重排、重新排队、结果）。工程里保存哪些渲染任务属于文档模型，这里只负责执行。
 - [x] PNG 序列（8/16 位，RGB 或 RGBA，sRGB/gAMA/pHYs）、OpenEXR 序列（half/float，None/RLE/ZIPS/ZIP/PIZ，色度、像素比、逐帧时码）编码；文件名支持 `name_[####].png`、`name_####.png`、`name_0000.png`。
