@@ -63,6 +63,8 @@ enum UserEvent {
 
 /// A smoke test stops as failed if no frame completes for this long.
 const SMOKE_STALL_TIMEOUT: Duration = Duration::from_secs(20);
+/// Live-resize mode ends this long after the last `Resized` event.
+const LIVE_RESIZE_SETTLE: Duration = Duration::from_millis(250);
 /// How often device recovery is attempted before giving up.
 const MAX_DEVICE_RECOVERIES: u32 = 3;
 
@@ -126,6 +128,7 @@ pub fn run(app: App, global: &GlobalOptions) -> ExitCode {
         viewer: None,
         view: None,
         repaint_at: None,
+        last_resize: None,
         recoveries: 0,
         exit_code: ExitCode::SUCCESS,
     };
@@ -169,6 +172,8 @@ struct Shell {
     viewer: Option<ViewportTextureId>,
     view: Option<WindowView>,
     repaint_at: Option<Instant>,
+    /// Time of the last `Resized` event while live-resize mode is on.
+    last_resize: Option<Instant>,
     recoveries: u32,
     exit_code: ExitCode,
 }
@@ -615,6 +620,12 @@ impl ApplicationHandler<UserEvent> for Shell {
                 event_loop.exit();
             }
             WindowEvent::Resized(size) => {
+                // A minimize also arrives as a zero-size resize; that is not a
+                // live resize.
+                if size.width > 0 && size.height > 0 && self.smoke.is_none() {
+                    view.surface.set_live_resize(true);
+                    self.last_resize = Some(Instant::now());
+                }
                 view.surface.resize(size.width, size.height);
                 view.window.request_redraw();
             }
@@ -650,17 +661,32 @@ impl ApplicationHandler<UserEvent> for Shell {
             event_loop.set_control_flow(ControlFlow::Poll);
             return;
         }
-        match self.repaint_at {
-            Some(at) if at <= Instant::now() => {
+        // Sleep until the earliest pending deadline (egui repaint, end of live
+        // resize); with none pending, sleep until the next event.
+        let now = Instant::now();
+        let mut deadline: Option<Instant> = None;
+        if let Some(last) = self.last_resize {
+            let settle = last + LIVE_RESIZE_SETTLE;
+            if now >= settle {
+                self.last_resize = None;
+                if let Some(view) = &mut self.view {
+                    view.surface.set_live_resize(false);
+                }
+            } else {
+                deadline = Some(settle);
+            }
+        }
+        if let Some(at) = self.repaint_at {
+            if at <= now {
                 self.repaint_at = None;
                 if let Some(view) = &self.view {
                     view.window.request_redraw();
                 }
-                event_loop.set_control_flow(ControlFlow::Wait);
+            } else {
+                deadline = Some(deadline.map_or(at, |d| d.min(at)));
             }
-            Some(at) => event_loop.set_control_flow(ControlFlow::WaitUntil(at)),
-            None => event_loop.set_control_flow(ControlFlow::Wait),
         }
+        event_loop.set_control_flow(deadline.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {

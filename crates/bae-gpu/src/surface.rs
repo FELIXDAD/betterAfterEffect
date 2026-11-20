@@ -199,6 +199,8 @@ pub struct WindowSurface {
     color: SurfaceColorInfo,
     /// `false` while the window has zero area (minimized).
     configured: bool,
+    /// The window edge is being dragged (see [`WindowSurface::set_live_resize`]).
+    live_resize: bool,
 }
 
 impl std::fmt::Debug for WindowSurface {
@@ -270,6 +272,7 @@ impl WindowSurface {
             supported_present_modes: caps.present_modes,
             color,
             configured: false,
+            live_resize: false,
         };
         this.resize(width, height);
         tracing::debug!(
@@ -432,6 +435,36 @@ impl WindowSurface {
             }
         }
         Ok(None)
+    }
+
+    /// Tells the surface whether the user is live-resizing the window. On macOS
+    /// this makes the `CAMetalLayer` present inside the window server's
+    /// transaction while resizing, which removes the stretched / jittering frames
+    /// AppKit otherwise shows when a window edge is dragged (wgpu-hal honours the
+    /// flag at acquire time). Presenting is slightly slower in that mode, so the
+    /// shell turns it off again shortly after the last resize event. No-op on
+    /// other platforms.
+    pub fn set_live_resize(&mut self, resizing: bool) {
+        if self.live_resize == resizing {
+            return;
+        }
+        self.live_resize = resizing;
+        #[cfg(target_os = "macos")]
+        {
+            // SAFETY: only a CAMetalLayer property is toggled through the hal
+            // guard, which is dropped immediately; no wgpu-owned object is
+            // destroyed or retained.
+            if let Some(hal) = unsafe { self.surface.as_hal::<wgpu::hal::api::Metal>() } {
+                hal.render_layer()
+                    .lock()
+                    .setPresentsWithTransaction(resizing);
+            }
+        }
+    }
+
+    /// `true` while [`Self::set_live_resize`] is on.
+    pub fn is_live_resizing(&self) -> bool {
+        self.live_resize
     }
 
     /// Call after presenting a frame that was [`SurfaceFrame::is_suboptimal`].
