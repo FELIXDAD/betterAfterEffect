@@ -1,0 +1,43 @@
+# Manifest of the plain-C example effect (docs/spec/plugin-architecture.md §5.3).
+# The [[effect.param]] table is the optional listing copy of what define_params
+# declares in invert.c; the two MUST match (the native code is authoritative).
+schema_version = 1
+
+[plugin]
+id = "com.example.invert-c"
+version = "0.1.0"                          # = INVERT_PLUGIN_VERSION in invert.c
+api = "0.1"                                # = INVERT_ABI_REQUIRED in invert.c (§6.6 rule 2)
+name = "Invert (C example)"
+description = "Inverts the color channels of a layer. Minimal native CPU effect written in plain C."
+authors = ["BAE contributors"]
+license = "Apache-2.0"
+
+[native]
+isolation = "in-process"
+
+[native.libraries]                         # one library per platform key (§5.2)
+macos-aarch64 = "bin/macos-aarch64/libinvert.dylib"
+windows-x86_64 = "bin/windows-x86_64/invert.dll"
+linux-x86_64 = "bin/linux-x86_64/libinvert.so"
+
+[[effect]]
+id = "invert"                              # = INVERT_EFFECT_ID in invert.c
+name = "Invert"
+category = "Channel"
+class = "filter"
+implementation = "native"
+keywords = ["invert", "negative"]
+flags = ["pixel-independent"]
+threading = "concurrent"                   # informational; global_setup is authoritative
+devices = ["cpu"]
+
+[[effect.param]]
+id = 1
+key = "amount"
+type = "float"
+name = "Amount"
+default = 100.0
+range = [0.0, 100.0]
+slider = [0.0, 100.0]
+precision = 1
+display = "percent"

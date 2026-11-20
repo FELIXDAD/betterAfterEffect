@@ -43,12 +43,22 @@
 
 ## 进度
 
-- [ ] 清单、发现、安装
-- [ ] 注册与运行时加载卸载
-- [ ] 声明式 WGSL 插件
-- [ ] C ABI + Rust SDK
+- [x] 设计规格 `docs/spec/plugin-architecture.md`（v0.1，已对齐合并后的 `bae_render::Effect` 和 `bae_model::EffectDef`）
+- [x] C ABI 头文件 `sdk/c/bae_plugin.h` 雏形（ABI 0.1）+ 自检（`sdk/c/tests/check.sh`：结构体布局、常量、签名、C++17、迷你宿主跑通纯 C 示例）
+- [x] 清单格式与校验（`bae_plugin::manifest`，错误带行列号）；参数 → `bae_model::EffectDef`（`effect_def`）
+- [x] 声明式 WGSL 约定：前导代码、模块拼装、naga 校验并把错误定位回作者文件、uniform 布局（`bae_plugin::wgsl`）
+- [ ] 声明式 WGSL 效果的 GPU 执行（`DeclarativeEffect` 实现 `bae_render::Effect`）
+- [ ] 发现、加载、注册与运行时卸载（`PluginHost`）
+- [ ] 开发文档 `docs/plugins/`
+- [ ] 原生插件加载（libloading）+ Rust SDK
 - [ ] 脚本插件
-- [ ] 示例插件
-- [ ] 开发文档
+- [ ] 其余示例插件
+
+### 0.0.1 记录
+
+- 接口 PR：清单、效果注册路径（`EffectDef` + `bae_render::Effect`）、参数描述、WGSL 约定、C ABI 雏形。
+- 根 `Cargo.toml` 加了 `bae-plugin`、`bae-plugin-sdk` 两个路径依赖，以及 `naga = 30.0.2`（wgpu 已经链接的同一份，只开 `wgsl-in`）和 `semver = 1.0.28` 两个版本固定。
+- 自动化脚本的清单表从 `[[script]]` 改名为 `[[automation]]`（`[script]` 是运行时配置表，TOML 里两者不能同名）。
+- 给 02 的请求：R02-8（字符串/素材参数）、R02-9（相对坐标点参数默认值）；给 04 的请求：R04-11（`EffectParams` 补字段）、R04-12（在 crate 外构造 `EncodeContext`）。
 
 ## 请求（其他工作流在这里留言）

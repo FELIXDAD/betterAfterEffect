@@ -1,0 +1,11 @@
+# Simplified Chinese strings (docs/spec/plugin-architecture.md §5.3.9).
+[plugin]
+name = "反转（C 示例）"
+description = "反转图层的颜色通道。用纯 C 编写的最小原生 CPU 效果。"
+
+[effect.invert]
+name = "反转"
+keywords = ["反转", "负片"]
+
+[effect.invert.params]
+amount = "数量"

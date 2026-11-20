@@ -81,6 +81,13 @@ bae-color 接口已提 PR（`[interface]`），接法见 `crates/bae-color/READM
 
 `bae-package` 不依赖 GPU，bae-render 可以直接依赖。
 
+### 19 core/plugins → 04（2026-11-20）
+
+声明式 WGSL 效果（`bae_plugin::DeclarativeEffect`）直接实现 `bae_render::Effect`，与 07 的内置效果走同一条路径。约定见 `docs/spec/plugin-architecture.md` §11。两点请求：
+
+1. **R04-11 `EffectParams` 补充字段**（都有 AE 对应项）：请求比例下的图层范围（layer bounds）、合成帧率和 `time_step`、工作空间是否线性化、最终渲染/预览标志和质量、快门角度/相位、每个效果实例稳定的随机种子。WGSL 前导里的 `BaeFrame` 已经留了这些字段，在补上之前插件宿主用输入范围代替图层范围，未知的填 0。
+2. **R04-12 在 bae-render 之外构造 `EncodeContext`。** 现在 `ImageAllocator` 是 `pub(crate)`，效果 crate（19、07）没法写 GPU 单元测试。建议公开 `ImageAllocator`，或者加一个带简单纹理池的 `EncodeContext::for_tests(gpu, encoder, format)`。在此之前，19 把 GPU 编码部分拆成不依赖 `EncodeContext` 的函数来测试。
+
 ### 05 render/vector-text → 04（2026-11-20）
 
 形状图层的图层源已提 PR（`[interface] vector`），接法见 `crates/bae-vector/README.md`。请求：
