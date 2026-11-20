@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use bae_agent::{AuditLog, BaeMcpServer, InstructionsLang, McpOptions, Permission, Workspace};
 use bae_app::{AppBuilder, AppModule};
-use bae_model::Project;
+use bae_model::{DynCommand, Project};
 use bae_platform::AppDirs;
 use bae_platform::cli::{self, CliSubcommand};
 use clap::{Arg, ArgAction};
@@ -119,7 +119,17 @@ impl AppModule for McpCliModule {
             if let Some(name) = &options.agent_name {
                 bae_agent::AgentIdentity::new(name)?;
             }
-            let server = BaeMcpServer::new(Workspace::new(project).shared(), options)
+            // Domain commands that app modules published (bae-motion's comp.create,
+            // layer.create …), on top of the model, agent and packaging commands.
+            let module_commands: Vec<Arc<dyn DynCommand>> = ctx
+                .app
+                .registry::<dyn DynCommand>()
+                .snapshot()
+                .iter()
+                .map(|e| e.item().clone())
+                .collect();
+            let workspace = Workspace::with_commands(project, module_commands);
+            let server = BaeMcpServer::new(workspace.shared(), options)
                 .with_audit_log(Arc::new(audit));
             bae_agent::run_stdio(server)?;
             Ok(ExitCode::SUCCESS)
