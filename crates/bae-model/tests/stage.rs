@@ -406,6 +406,63 @@ fn failed_transaction_rolls_back_without_event_or_undo() {
 }
 
 #[test]
+fn guarded_transaction_never_writes_denied_sublayers() {
+    let reg = CommandRegistry::with_builtins();
+    let mut stage = base_stage(&reg);
+    stage.create_sublayer(sl("agent/x"), 0).unwrap();
+    stage.set_edit_target(&sl("agent/x")).unwrap();
+    let root_version = stage.sublayer(&SublayerId::root()).unwrap().version();
+    let only_agent = |id: &SublayerId| id.as_str().starts_with("agent/");
+    let delete = reg.get("prim.delete").unwrap().clone();
+
+    // A namespace edit would touch root: refused before anything is written.
+    let res = stage.transact_guarded(&author("agent:x"), "delete", &only_agent, |tx| {
+        delete.run_json(tx, json!({"path": "/comps/main/layers/title"}))
+    });
+    assert!(
+        matches!(res, Err(CommandError::Model(ModelError::WriteDenied(ref id))) if *id == SublayerId::root()),
+        "{res:?}"
+    );
+    assert_eq!(
+        stage.sublayer(&SublayerId::root()).unwrap().version(),
+        root_version
+    );
+    assert!(stage.has_prim(&p("/comps/main/layers/title")));
+
+    // Stack and edit-target changes are guarded too.
+    let res = stage.transact_guarded(&author("agent:x"), "t", &only_agent, |tx| {
+        tx.set_edit_target(&SublayerId::root())
+    });
+    assert!(matches!(res, Err(ModelError::WriteDenied(_))));
+    let res = stage.transact_guarded(&author("agent:x"), "t", &only_agent, |tx| {
+        tx.create_sublayer(sl("anim/y"), 0)
+    });
+    assert!(matches!(res, Err(ModelError::WriteDenied(_))));
+    assert_eq!(stage.layer_stack(), &[sl("agent/x"), SublayerId::root()]);
+
+    // Allowed writes go through, with the usual undo.
+    let set = reg.get("attr.set").unwrap().clone();
+    stage
+        .transact_guarded(&author("agent:x"), "set", &only_agent, |tx| {
+            assert!(tx.may_write(&sl("agent/x")) && !tx.may_write(&SublayerId::root()));
+            set.run_json(
+                tx,
+                json!({"path": "/comps/main/layers/title", "attr": "opacity", "value": {"type": "float", "value": 50.0}}),
+            )
+        })
+        .unwrap();
+    assert_eq!(
+        float(&stage, "/comps/main/layers/title", "opacity"),
+        Some(50.0)
+    );
+    assert!(stage.undo(&author("agent:x")).is_some());
+    assert_eq!(
+        float(&stage, "/comps/main/layers/title", "opacity"),
+        Some(100.0)
+    );
+}
+
+#[test]
 fn events_report_paths_and_keyframe_ranges() {
     let reg = CommandRegistry::with_builtins();
     let mut stage = base_stage(&reg);

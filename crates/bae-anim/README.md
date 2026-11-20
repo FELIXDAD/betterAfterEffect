@@ -19,10 +19,11 @@
 - 每个图层（`EvaluatedLayer`）：
   - `transform`：变换各分量（AE 单位：像素、度、百分比）；`local_matrix`（图层空间 → 父级空间）、`world_matrix`（图层空间 → 合成空间，`glam::DMat4`，f64）。
   - `opacity`：0–1（不继承父级）；`transform.opacity` 保留 AE 的百分比。
-  - `active`（在入点和出点之间）、`visible`（视频开关打开、active、没有被别的图层的独奏隐藏）、`switches`（独奏、参考图层、调整图层、3D、运动模糊、折叠变换……）。参考图层在这里算可见，最终输出时由渲染器跳过；轨道遮罩图层即使不可见也要用。
-  - `source`：`None` / `Asset { asset, time }` / `Comp { comp, time }`，`time` 是已经算上开始时间、伸缩、时间重映射的源时间；预合成如果勾了"保留帧速率"，已经吸附到内部合成的帧上。素材按自身帧率取哪一帧由 08 决定。
+  - `active`（在入点和出点之间）、`visible`（视频开关打开、active、没有被别的图层的独奏隐藏）、`switches`（独奏、参考图层、调整图层、3D、运动模糊、折叠变换、保留基础透明度……）。参考图层在这里算可见，最终输出时由渲染器跳过；轨道遮罩图层即使不可见也要用。
+  - `source`：`None` / `Asset { asset, time, info }` / `Comp { comp, time, nested }`，`time` 是已经算上开始时间、伸缩、时间重映射的源时间；预合成如果勾了"保留帧速率"，已经吸附到内部合成的帧上。`info` 是素材的种类、尺寸、帧率、时长、纯色颜色；`nested` 是按映射后的时间**递归求值好的嵌套合成**（合成缺失或循环嵌套时为 `None`）。素材按自身帧率取哪一帧由 08 决定，文件路径解析用 `bae_model::AssetResolver`。
+  - `motion_blur_times`：合成和图层的运动模糊都打开时，这一帧的采样时间点（合成时间，按快门角度/相位和每帧样本数），否则为空。04 在这些时间各求值一次再合成。
   - `blend_mode`、`track_matte`、`track_matte_layer`（没设时是上面一层）。
-  - `masks`（路径、模式、反转、羽化、不透明度 0–1、扩展）、`effects`（`param:NNNN` 全部求值，按 `"0001"` 这样的 ID 索引）、`contents`（形状内容的通用树，每个属性都已求值）。
+  - `masks`（路径、模式、反转、羽化、不透明度 0–1、扩展）、`effects`（`param:NNNN` 全部求值，按 `"0001"` 这样的 ID 索引）、`contents`（形状内容的通用树，每个属性都已求值）、`text`（文字图层这一刻的源文本）和 `text_animators`（文字动画器和选择器的通用树），形状和文字交给 05 解释。
   - 摄像机图层有 `camera`（缩放、景深参数、目标点、`world_matrix`；看向局部 +z，局部 +y 是屏幕向下），灯光图层有 `light`。
 - `camera`：当前活动摄像机（最上面一个开着且在入出点内的摄像机图层）；`None` 表示 AE 的默认摄像机，缩放为 `default_camera_zoom(width)`（50mm，`width * 50 / 36`）。
 - `errors`：单个属性的求值问题（表达式错误等），界面挂到对应属性上显示；不会让整个求值失败。

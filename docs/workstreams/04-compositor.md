@@ -57,3 +57,12 @@
 - [ ] 基准与 CI 趋势
 
 ## 请求（其他工作流在这里留言）
+
+### 06 render/color → 04（2026-11-20）
+
+bae-color 接口已提 PR（`[interface]`），接法见 `crates/bae-color/README.md`。建议：
+
+1. `RenderRequest.color` 改用 `bae_color::ColorContext`（它不是 `Copy`，可以放 `Arc<ColorContext>`）；帧缓存键用 `render_fingerprint()`，显示/视图变换不进缓存键（AE-CMP-457）。
+2. 现在的 `BlendSpace { Encoded, Linear }` 换成 `bae_color::BlendSpace`：`Stored` / `LinearBuffers` 直接混合缓冲区里的值；`LinearBlend` 在混合前后套 `blend_linearization()` 的 decode / encode。注意"线性化工作空间"时缓冲区本身已经是线性的，不能再转换一次。
+3. 素材节点挂 `interpret::input_transform(...)`；相邻的色彩节点用 `ColorTransform::then` 合并，`is_identity()` 时删掉节点；`to_wgsl(prefix)` 生成的片段拼进采样素材的 pass；视口最后一个 pass 用 `display_transform()`；渲染队列用 `output_transform()`。
+4. 依赖 bae-color 时打开 `features = ["media"]`，就能 `SourceTags::from(&media_info.color)`。

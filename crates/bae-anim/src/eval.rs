@@ -13,11 +13,11 @@ use glam::{DMat4, DVec3};
 use crate::curve::Curve;
 use crate::error::EvalError;
 use crate::evaluated::{
-    CameraState, EvaluatedComp, EvaluatedEffect, EvaluatedLayer, EvaluatedMask, EvaluatedPrim,
-    LayerSource, LayerSwitches, LightFalloff, LightState, LightType, TrackMatte,
+    AssetInfo, CameraState, EvaluatedComp, EvaluatedEffect, EvaluatedLayer, EvaluatedMask,
+    EvaluatedPrim, LayerSource, LayerSwitches, LightFalloff, LightState, LightType, TrackMatte,
 };
 use crate::schema::{
-    self, camera as cam, comp as c, effect as fx, layer as l, light as li, mask as mk,
+    self, asset, camera as cam, comp as c, effect as fx, layer as l, light as li, mask as mk,
     transform as tr,
 };
 use crate::time::{LayerTiming, MotionBlur, frame_rate_from_value, nested_comp_time};
@@ -188,7 +188,7 @@ struct CompiledTransform {
 #[derive(Debug)]
 enum CompiledSource {
     None,
-    Asset(PrimPath),
+    Asset(PrimPath, AssetInfo),
     Comp {
         path: PrimPath,
         rate: FrameRate,
@@ -265,6 +265,8 @@ struct CompiledLayer {
     masks: Vec<CompiledMask>,
     effects: Vec<CompiledEffect>,
     contents: Vec<CompiledPrim>,
+    text: Option<Prop>,
+    text_animators: Vec<CompiledPrim>,
     camera: Option<CompiledCamera>,
     light: Option<CompiledLight>,
 }
@@ -396,6 +398,7 @@ fn compile_layer(
         three_d: three_d || matches!(kind, LayerKind::Camera | LayerKind::Light),
         motion_blur: setting_bool(v, lt, l::MOTION_BLUR),
         collapse_transformation: setting_bool(v, lt, l::COLLAPSE_TRANSFORMATION),
+        preserve_transparency: setting_bool(v, lt, l::PRESERVE_TRANSPARENCY),
     };
 
     let source = match setting_ref(v, l::SOURCE) {
@@ -410,7 +413,22 @@ fn compile_layer(
                 preserve: setting_bool(&sv, &PrimType::COMP, c::PRESERVE_FRAME_RATE),
                 path: p,
             },
-            _ => CompiledSource::Asset(p),
+            Some(av) => {
+                let info = asset_info(&av);
+                CompiledSource::Asset(p, info)
+            }
+            None => CompiledSource::Asset(
+                p,
+                AssetInfo {
+                    kind: "missing".into(),
+                    width: 0,
+                    height: 0,
+                    pixel_aspect: 1.0,
+                    frame_rate: None,
+                    duration: None,
+                    solid_color: None,
+                },
+            ),
         },
         None => CompiledSource::None,
     };
@@ -554,6 +572,16 @@ fn compile_layer(
         .into_iter()
         .filter_map(|cp| compile_generic(stage, &cp, 0))
         .collect();
+    let text = (kind == LayerKind::Text)
+        .then(|| {
+            v.attr(l::TEXT_SOURCE)
+                .and_then(|s| Prop::from_spec(s, ty, l::TEXT_SOURCE))
+        })
+        .flatten();
+    let text_animators = child_prims(l::ANIMATORS)
+        .into_iter()
+        .filter_map(|cp| compile_generic(stage, &cp, 0))
+        .collect();
 
     Ok(CompiledLayer {
         name: v
@@ -579,10 +607,33 @@ fn compile_layer(
         masks,
         effects,
         contents,
+        text,
+        text_animators,
         camera,
         light,
         path: lpath,
     })
+}
+
+fn asset_info(av: &PrimView<'_>) -> AssetInfo {
+    let at = &PrimType::ASSET;
+    let kind = setting_str(av, at, asset::KIND).unwrap_or_else(|| "footage".into());
+    let dim = |attr: &str| setting_f64(av, at, attr).unwrap_or(0.0).max(0.0) as u32;
+    AssetInfo {
+        width: dim(asset::WIDTH),
+        height: dim(asset::HEIGHT),
+        pixel_aspect: setting_f64(av, at, asset::PIXEL_ASPECT).unwrap_or(1.0),
+        frame_rate: setting(av, at, asset::FRAME_RATE).and_then(|v| match v {
+            Value::FrameRate(r) => Some(r),
+            other => frame_rate_from_value(&other),
+        }),
+        duration: setting_time(av, at, asset::DURATION),
+        solid_color: (kind == "solid").then(|| match setting(av, at, asset::SOLID_COLOR) {
+            Some(Value::Color(c)) => c,
+            _ => [0.5, 0.5, 0.5, 1.0],
+        }),
+        kind,
+    }
 }
 
 /// Shape contents (and any other prim tree under a layer): every attribute compiled,
@@ -658,6 +709,15 @@ impl CompiledComp {
                     visible,
                     switches: layer.switches,
                     source: sample_source(layer, lt),
+                    motion_blur_times: if self.motion_blur.enabled && layer.switches.motion_blur {
+                        self.motion_blur.sample_times(
+                            time,
+                            self.frame_rate,
+                            self.motion_blur.samples,
+                        )
+                    } else {
+                        Vec::new()
+                    },
                     parent: layer.parent,
                     opacity: (tf.opacity / 100.0).clamp(0.0, 1.0),
                     local_matrix: DMat4::IDENTITY,
@@ -670,6 +730,15 @@ impl CompiledComp {
                     effects: layer.effects.iter().map(|e| sample_effect(e, lt)).collect(),
                     contents: layer
                         .contents
+                        .iter()
+                        .map(|p| sample_generic(p, lt))
+                        .collect(),
+                    text: layer.text.as_ref().and_then(|p| match p.sample(lt) {
+                        Value::TextDocument(doc) => Some(doc),
+                        _ => None,
+                    }),
+                    text_animators: layer
+                        .text_animators
                         .iter()
                         .map(|p| sample_generic(p, lt))
                         .collect(),
@@ -919,9 +988,10 @@ fn sample_source(layer: &CompiledLayer, lt: Time) -> LayerSource {
     };
     match &layer.source {
         CompiledSource::None => LayerSource::None,
-        CompiledSource::Asset(a) => LayerSource::Asset {
+        CompiledSource::Asset(a, info) => LayerSource::Asset {
             asset: a.clone(),
             time: source_time,
+            info: info.clone(),
         },
         CompiledSource::Comp {
             path,
@@ -930,6 +1000,7 @@ fn sample_source(layer: &CompiledLayer, lt: Time) -> LayerSource {
         } => LayerSource::Comp {
             comp: path.clone(),
             time: nested_comp_time(source_time, *rate, *preserve),
+            nested: None,
         },
     }
 }
@@ -989,6 +1060,10 @@ fn sample_generic(p: &CompiledPrim, lt: Time) -> EvaluatedPrim {
 /// every [`StageEvent`]; compiled comps that the event may affect are dropped and
 /// recompiled on next use. The free functions [`crate::evaluate_comp`] and
 /// [`crate::evaluate_attribute`] use a throwaway evaluator.
+/// Pre-comp nesting deeper than this is not evaluated (deeper nesting in practice
+/// means a reference loop through several comps).
+const MAX_NESTING: usize = 64;
+
 #[derive(Debug, Default)]
 pub struct Evaluator {
     comps: HashMap<PrimPath, Arc<CompiledComp>>,
@@ -1006,6 +1081,18 @@ impl Evaluator {
         comp: &PrimPath,
         time: Time,
     ) -> Result<EvaluatedComp, EvalError> {
+        self.evaluate_nested(stage, comp, time, &mut Vec::new())
+    }
+
+    /// Evaluate `comp` and, recursively, the pre-comps its layers show (each at its
+    /// mapped time). `stack` holds the comps being evaluated, to cut cycles.
+    fn evaluate_nested(
+        &mut self,
+        stage: &Stage,
+        comp: &PrimPath,
+        time: Time,
+        stack: &mut Vec<PrimPath>,
+    ) -> Result<EvaluatedComp, EvalError> {
         let compiled = match self.comps.get(comp) {
             Some(c) => c.clone(),
             None => {
@@ -1014,7 +1101,21 @@ impl Evaluator {
                 c
             }
         };
-        Ok(compiled.evaluate(time))
+        let mut out = compiled.evaluate(time);
+        stack.push(comp.clone());
+        for layer in &mut out.layers {
+            if let LayerSource::Comp { comp, time, nested } = &mut layer.source
+                && !stack.contains(comp)
+                && stack.len() < MAX_NESTING
+            {
+                *nested = self
+                    .evaluate_nested(stage, comp, *time, stack)
+                    .ok()
+                    .map(Box::new);
+            }
+        }
+        stack.pop();
+        Ok(out)
     }
 
     /// Evaluate one attribute of any prim at `time`.

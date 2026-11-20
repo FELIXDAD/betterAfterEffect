@@ -13,13 +13,18 @@ use bae_platform::GlobalOptions;
 use bae_platform::cli::EXIT_NOT_IMPLEMENTED;
 use bae_platform::crash;
 
-use crate::ui::{self, StatusInfo, UiOutput, UiRenderer, Workspace};
+use crate::document::Document;
+use crate::ui::{self, PlaceholderViewer, StatusInfo, UiOutput, UiRenderer, Workspace};
 
 /// Offscreen size of the headless smoke test.
 const SMOKE_SIZE: [u32; 2] = [1280, 720];
+/// When set, the headless smoke test writes its last frame to this path (BMP), for
+/// screenshots in PRs and CI artifacts.
+const SCREENSHOT_ENV: &str = "BAE_SMOKE_SCREENSHOT";
 
 /// Runs headless mode.
 pub fn run(app: &mut App, global: &GlobalOptions) -> ExitCode {
+    crate::i18n::init_from_env();
     let desc = app
         .resource::<GpuContextDescriptor>()
         .cloned()
@@ -49,7 +54,7 @@ pub fn run(app: &mut App, global: &GlobalOptions) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn smoke_test(app: &App, gpu: &Arc<GpuContext>, frames: u32) -> ExitCode {
+fn smoke_test(app: &mut App, gpu: &Arc<GpuContext>, frames: u32) -> ExitCode {
     match render_offscreen(app, gpu, frames) {
         Ok(report) => {
             println!("{report}");
@@ -63,7 +68,7 @@ fn smoke_test(app: &App, gpu: &Arc<GpuContext>, frames: u32) -> ExitCode {
     }
 }
 
-fn render_offscreen(app: &App, gpu: &Arc<GpuContext>, frames: u32) -> anyhow::Result<String> {
+fn render_offscreen(app: &mut App, gpu: &Arc<GpuContext>, frames: u32) -> anyhow::Result<String> {
     let [width, height] = SMOKE_SIZE;
     let format = wgpu::TextureFormat::Rgba8Unorm;
     let target = gpu.device().create_texture(&wgpu::TextureDescriptor {
@@ -85,9 +90,16 @@ fn render_offscreen(app: &App, gpu: &Arc<GpuContext>, frames: u32) -> anyhow::Re
     let viewer = registry
         .as_deref()
         .and_then(|registry| ui::publish_placeholder_comp(gpu, registry));
+    if let Some(viewer) = viewer {
+        app.insert_resource(PlaceholderViewer(viewer));
+    }
     let egui_ctx = egui::Context::default();
+    bae_ui::theme::apply(&egui_ctx);
     let mut renderer = UiRenderer::new(gpu, format);
-    let mut workspace = Workspace::new(viewer);
+    // Always the default layout: smoke tests never read or write user state.
+    let mut workspace = Workspace::new(app, bae_ui::WorkbenchState::default());
+    let workspaces = workspace.workspaces();
+    let document = Document::new(app.resource::<Arc<bae_ui::history::HistoryLog>>().cloned());
     let mut status = StatusInfo {
         gpu: gpu.summary(),
         size_px: SMOKE_SIZE,
@@ -107,9 +119,24 @@ fn render_offscreen(app: &App, gpu: &Arc<GpuContext>, frames: u32) -> anyhow::Re
             max_texture_side: Some(gpu.limits().max_texture_dimension_2d as usize),
             ..Default::default()
         };
+        let mut invocations = Vec::new();
+        let resources = app.resources();
         let output = egui_ctx.run_ui(input, |ui| {
-            workspace.ui(ui, &status, registry.as_deref());
+            invocations = workspace.ui(ui, &status, &document, resources);
         });
+        // Cycle through every workspace so each preset's panels get drawn.
+        if frame % 10 == 9 && !workspaces.is_empty() {
+            let next = &workspaces[(frame as usize / 10 + 1) % workspaces.len()].0;
+            invocations.push(bae_ui::Invocation::with_params(
+                bae_ui::action::ids::SWITCH_WORKSPACE,
+                serde_json::json!({ "id": next }),
+            ));
+        }
+        for inv in invocations {
+            if let Some(rest) = workspace.handle(inv, &document, resources) {
+                tracing::debug!("headless: unhandled `{}`", rest.id);
+            }
+        }
         if let Some(registry) = registry.as_deref() {
             renderer.sync_viewports(gpu, registry);
         }
@@ -139,6 +166,9 @@ fn render_offscreen(app: &App, gpu: &Arc<GpuContext>, frames: u32) -> anyhow::Re
     let elapsed = start.elapsed();
 
     let image = transfer::read_texture(gpu, &target)?;
+    if let Some(path) = std::env::var_os(SCREENSHOT_ENV) {
+        write_bmp(std::path::Path::new(&path), &image)?;
+    }
     let first = image.pixel(0, 0).to_vec();
     let varied = (0..height)
         .step_by(7)
@@ -157,4 +187,30 @@ fn render_offscreen(app: &App, gpu: &Arc<GpuContext>, frames: u32) -> anyhow::Re
         elapsed.as_secs_f64() * 1000.0 / f64::from(frames),
         gpu.summary()
     ))
+}
+
+/// Writes an RGBA8 image as an uncompressed 32-bit BMP (no image codec needed).
+fn write_bmp(path: &std::path::Path, image: &transfer::ImageData) -> anyhow::Result<()> {
+    let (w, h) = (image.width, image.height);
+    let size = 54 + w * h * 4;
+    let mut out = Vec::with_capacity(size as usize);
+    out.extend_from_slice(b"BM");
+    for v in [size, 0, 54, 40] {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out.extend_from_slice(&(w as i32).to_le_bytes());
+    out.extend_from_slice(&(-(h as i32)).to_le_bytes()); // top-down rows
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&32u16.to_le_bytes());
+    for v in [0u32, w * h * 4, 2835, 2835, 0, 0] {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    for y in 0..h {
+        for x in 0..w {
+            let p = image.pixel(x, y);
+            out.extend_from_slice(&[p[2], p[1], p[0], 255]);
+        }
+    }
+    std::fs::write(path, out)?;
+    Ok(())
 }

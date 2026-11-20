@@ -1,11 +1,11 @@
 //! The UI layer shared by the window and the headless smoke test: the egui
-//! renderer on the shared device and the placeholder workspace.
+//! renderer on the shared device and the `bae-ui` workbench.
 
 mod renderer;
 mod workspace;
 
 pub use renderer::{UiOutput, UiRenderer};
-pub use workspace::{StatusInfo, Workspace};
+pub use workspace::{PlaceholderViewer, StatusInfo, Workspace, register_panels};
 
 use bae_gpu::viewport::{ViewportTextureId, ViewportTextureRegistry};
 use bae_gpu::{GpuContext, transfer, wgpu};

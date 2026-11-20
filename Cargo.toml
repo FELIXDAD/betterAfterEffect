@@ -57,9 +57,12 @@ bae-platform = { path = "crates/bae-platform" }
 bae-gpu = { path = "crates/bae-gpu" }
 bae-model = { path = "crates/bae-model" }
 bae-anim = { path = "crates/bae-anim" }
+bae-agent = { path = "crates/bae-agent" }
 bae-media = { path = "crates/bae-media" }
 bae-sync = { path = "crates/bae-sync" }
 bae-render = { path = "crates/bae-render" }
+bae-ui = { path = "crates/bae-ui" }
+bae-color = { path = "crates/bae-color" }
 
 # ---- GPU, rendering, text (one coherent Linebender/wgpu set) ----
 # Backends: Metal (macOS) + D3D12 (Windows). Vulkan/GLES are opt-in through the
@@ -184,6 +187,81 @@ strip = true
 debug = false
 panic = "unwind"
 incremental = false
+
+# Cold-path dependencies are optimized for size (ARCHITECTURE §11): CLI, MCP/async
+# runtime, JSON and schemas, archives and hashing, menus/clipboard, URL/Unicode tables,
+# image codecs used at import time, and BAE's own UI/agent/platform glue. Per-frame paths (wgpu, naga, vello, egui painting,
+# loro, bae-render/bae-anim) keep opt-level 3. Measured in the PR that added this.
+[profile.release.package.bae-ui]
+opt-level = "s"
+[profile.release.package.bae-agent]
+opt-level = "s"
+[profile.release.package.bae-platform]
+opt-level = "s"
+[profile.release.package.rmcp]
+opt-level = "s"
+[profile.release.package.tokio]
+opt-level = "s"
+[profile.release.package.tokio-util]
+opt-level = "s"
+[profile.release.package.chrono]
+opt-level = "s"
+[profile.release.package.clap]
+opt-level = "s"
+[profile.release.package.clap_builder]
+opt-level = "s"
+[profile.release.package.clap_lex]
+opt-level = "s"
+[profile.release.package.schemars]
+opt-level = "s"
+[profile.release.package.serde_json]
+opt-level = "s"
+[profile.release.package.zip]
+opt-level = "s"
+[profile.release.package.flate2]
+opt-level = "s"
+[profile.release.package.zlib-rs]
+opt-level = "s"
+[profile.release.package.blake3]
+opt-level = "s"
+[profile.release.package.muda]
+opt-level = "s"
+[profile.release.package.arboard]
+opt-level = "s"
+[profile.release.package.webbrowser]
+opt-level = "s"
+[profile.release.package.url]
+opt-level = "s"
+[profile.release.package.idna]
+opt-level = "s"
+[profile.release.package.icu_collections]
+opt-level = "s"
+[profile.release.package.icu_normalizer]
+opt-level = "s"
+[profile.release.package.icu_properties]
+opt-level = "s"
+[profile.release.package.icu_provider]
+opt-level = "s"
+[profile.release.package.tracing-subscriber]
+opt-level = "s"
+[profile.release.package.directories]
+opt-level = "s"
+[profile.release.package.futures-util]
+opt-level = "s"
+[profile.release.package.futures-executor]
+opt-level = "s"
+[profile.release.package.sha2]
+opt-level = "s"
+[profile.release.package.unicode-normalization]
+opt-level = "s"
+[profile.release.package.uuid]
+opt-level = "s"
+[profile.release.package.anyhow]
+opt-level = "s"
+[profile.release.package.image]
+opt-level = "s"
+[profile.release.package.png]
+opt-level = "s"
 
 # Benchmarks: release code generation plus line tables for profilers.
 [profile.bench]

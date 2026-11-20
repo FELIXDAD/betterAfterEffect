@@ -10,8 +10,11 @@
 // double-click); `bae_platform::console` re-attaches to a parent terminal.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod agent_feed;
+mod document;
 mod headless;
 mod i18n;
+mod mcp_cli;
 mod model_cli;
 mod shell;
 mod startup;
@@ -27,6 +30,7 @@ fn main() -> ExitCode {
         .add_module(bae_platform::PlatformModule)
         .add_module(bae_gpu::GpuModule)
         .add_module(model_cli::ModelCliModule)
+        .add_module(mcp_cli::McpCliModule)
         .add_module(shell::ShellModule);
     // Feature modules from other workstreams are added here, e.g.
     // `.add_module(bae_render::RenderModule)`.
