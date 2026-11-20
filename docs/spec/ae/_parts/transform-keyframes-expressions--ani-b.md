@@ -11,12 +11,12 @@
   | Expressions Engine (表达式引擎) | enum | JavaScript | JavaScript, Legacy ExtendScript | — | scripting `app.project.expressionEngine`: `"javascript-1.0"` / `"extendscript"` |
 
   - Enum menu order: `JavaScript` (JavaScript), `Legacy ExtendScript` (旧版 ExtendScript).
-  - New projects default to JavaScript since AE 16.0 (2018). Projects saved by AE ≤ 15.x open with Legacy ExtendScript selected (UNVERIFIED: AE keeps the saved engine; an old project without the field defaults to Legacy).
+  - New projects default to JavaScript since AE 16.0 (CC 2019, Oct 2018), the version that added the setting. Projects saved in earlier AE versions (no engine field) open with Legacy ExtendScript selected (documented: "Projects saved in previous versions of After Effects default to Legacy ExtendScript"); a project saved by 16.0+ keeps its saved engine.
   - Switching the engine re-evaluates every expression in the project; no expression text is rewritten.
-  - The JavaScript engine is documented as up to 5x faster than Legacy at render time.
+  - The JavaScript engine is documented as up to 5x faster than Legacy at render time and as having higher floating-point precision. On Windows AE uses V8 for the JavaScript engine.
 - **Priority:** P0 (the engine choice defines the whole expression language)
 - **Owner:** bae-anim (+ bae-model)
-- **Notes:** Lottie/bodymovin stores expressions as raw strings on a property (`x` key) and evaluates them with the browser's JS engine, with no engine flag. BAE decision: BAE implements only the JavaScript-engine dialect on QuickJS (ES2020+, a superset of ES2018). The persisted engine field is still read and written so AE round-trips keep it; a project marked Legacy is evaluated with the JS engine plus the compatibility shims in AE-ANI-401 to AE-ANI-403, and the UI flags it (see ui-preview-render-io.md, Project Settings).
+- **Notes:** Source: https://helpx.adobe.com/after-effects/using/expression-language-reference.html (Expressions: JavaScript Engine); scripting attribute added in AE 16.0. Lottie/bodymovin stores expressions as raw strings on a property (`x` key) and evaluates them with the browser's JS engine, with no engine flag. BAE decision: BAE implements only the JavaScript-engine dialect on QuickJS (ES2020+, a superset of ES2018). The persisted engine field is still read and written so AE round-trips keep it; a project marked Legacy is evaluated with the JS engine plus the compatibility shims in AE-ANI-401 to AE-ANI-403, and the UI flags it (see ui-preview-render-io.md, Project Settings).
 
 ### AE-ANI-401 · JavaScript-engine syntax rules vs Legacy ExtendScript (JavaScript 与旧版 ExtendScript 的语法差异)
 
@@ -35,7 +35,7 @@
   | Property linked from a Source Text expression without `.value` | string "[object Property]" | the property's value |
   | snake_case aliases (`this_comp`, `value_at_time()`…) | allowed | not defined (ReferenceError) |
   | `.jsxbin` binary code via `eval()` | allowed | not supported |
-  | `$.` object | full | only `$.build`, `$.engineName`, `$.global` (and `$.version`, UNVERIFIED) |
+  | `$.` object | full | only `$.build`, `$.engineName` (JS engine only) and `$.global`; everything else (`$.version`, `$.os`, `$.fileName`, `$.evalFile()`, `$.getenv()`…) is listed as unsupported |
   | `reflect.properties`, `reflect.methods`, `toSource()` | allowed | not supported |
   | ES5–ES2018 syntax (`let`, `const`, arrow functions, template literals, default params, spread, `Array.prototype.includes`, `Object.entries`, `padStart`…) | syntax error | allowed |
 
@@ -69,7 +69,10 @@
     number + array                  -> copy of array with [0] = number + array[0]
     array + array                   -> elementwise; length = max(len); missing element of the shorter
                                        array: result element = the element that exists (i.e. treated as 0)
-  a - b: same rules as +, elementwise subtraction; array - number subtracts from [0] only
+  a - b: numeric strings are parseInt()-ed first; array - number subtracts from [0] only;
+         number - array -> copy of array with [0] = number - array[0];
+         array - array elementwise; where only one operand has element i, lottie-web copies that
+         element unchanged (so [1] - [1,5] = [0,5], not [0,-5]; UNVERIFIED whether AE negates)
   a * b: number*number; array*number or number*array -> every element multiplied
          array*array -> UNVERIFIED (lottie-web returns 0; AE errors or returns NaN)
   a / b: number/number; array/number -> every element divided; number/array -> number / each element
@@ -97,6 +100,7 @@
   - Disabling the switch (启用表达式开关 shows a slash) keeps the text; the property uses its pre-expression value. An empty expression string is the same as no expression.
   - Properties that cannot take expressions: non-animatable properties (`canSetExpression == false`), e.g. property groups, layer switches, blend mode (UNVERIFIED list; per-property flag from the property tree, see project-comp-layers.md, Property tree/value types).
   - Keyframes and an expression may coexist; keyframes still define the pre-expression value.
+  - Scripting set semantics (documented): assigning a valid string to `Property.expression` sets `expressionEnabled = true`; assigning a string that fails to evaluate raises a script error and sets `expressionEnabled = false`; assigning `""` sets `expressionEnabled = false` without error. `expressionEnabled` can only be set true when `canSetExpression` is true and the expression is valid.
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-anim)
 - **Notes:** Lottie: animatable property `{ a, k, x }` where `x` is the expression string; no enable flag (an exported disabled expression is simply not written, UNVERIFIED). UI (Alt-click stopwatch, expression field, pick whip, Graph Editor post-expression graph) is specified in ui-preview-render-io.md, Timeline. "Convert Expression to Keyframes" is in this file's keyframe-assistant items (ani-a). All edits go through a `SetExpression { prop, text, enabled }` Command in bae-model.
@@ -200,7 +204,8 @@
     returns fps (Number)
   ```
   - Statements before the call see the original `time`. The pre-expression `value` is re-sampled at t' (UNVERIFIED for AE; lottie-web re-reads `value` at the posterized time).
-  - Since AE 17.0 an expression using `posterizeTime()` "calculates only once for the entire comp" per distinct posterized time (cache, see AE-ANI-412).
+  - AE 17.0 (Jan 2020) release note: "Any expression using posterizeTime() now calculates only once for the entire comp, not on every frame"; read as once per distinct posterized time (the literal wording cannot hold for `posterizeTime(1); random()`), see AE-ANI-412.
+  - Documented idiom: `posterizeTime(1 / framesToTime(n))` holds each value for n comp frames.
 - **Priority:** P1
 - **Owner:** bae-anim
 - **Notes:** Lottie-web: `posterizeTime(framesPerSecond)` sets `time = Math.floor(time*fps)/fps` and recomputes `value`. Comp-relative: quantisation is relative to comp time 0, not the layer in-point (UNVERIFIED for AE).
@@ -258,7 +263,7 @@
   | `thisProperty` | Property | the property carrying the expression |
   | `value` | Number / Array / String / Path / TextDocument | pre-expression value (AE-ANI-406) |
 
-  - Name resolution for an unqualified identifier (AE: "the default object is the property on which the expression is written, followed by the layer"):
+  - Name resolution for an unqualified identifier (AE help: the default object is the property on which the expression is written, followed by the layer containing it; source: https://helpx.adobe.com/after-effects/using/expression-language.html):
   ```
   resolve(id):
     1. local JS variables / functions declared in the expression
@@ -298,8 +303,8 @@
 
   | Attribute | Type | Values | Since |
   |---|---|---|---|
-  | `colorDepth` | Number | 8, 16 or 32 (project bits per channel) | AE ≤ 6.5 |
-  | `thisProject.bitsPerChannel` | Number | 8, 16, 32 (same as scripting `app.project.bitsPerChannel`) | AE 15.1 (2018) |
+  | `colorDepth` | Number | 8, 16 or 32 (project bits per channel) | long-standing (first version UNVERIFIED) |
+  | `thisProject.bitsPerChannel` | Number | 8, 16, 32 (same as scripting `app.project.bitsPerChannel`) | AE 15.1 (Apr 2018) |
   | `thisProject.fullPath` | String | absolute platform path incl. file name; `""` if never saved | AE 15.1 |
   | `thisProject.linearBlending` | Boolean | state of "Blend Colors Using 1.0 Gamma" | AE 15.1 |
 
@@ -346,7 +351,7 @@
   |---|---|---|
   | `timeToTimecode(t, timecodeBase, isDuration)` | t (时间) = `time + thisComp.displayStartTime`; timecodeBase (时间码基准) = 30; isDuration = false | String |
   | `timeToNTSCTimecode(t, ntscDropFrame, isDuration)` | t = `time + thisComp.displayStartTime`; ntscDropFrame (NTSC 丢帧) = false; isDuration = false | String |
-  | `timeToFeetAndFrames(t, fps, framesPerFoot, isDuration)` | t = `time + thisComp.displayStartTime`; fps = `1.0 / thisComp.frameDuration`; framesPerFoot (每英尺帧数) = 16; isDuration = false | String |
+  | `timeToFeetAndFrames(t, fps, framesPerFoot, isDuration)` | t = `time + thisComp.displayStartTime`; fps = `1.0 / thisComp.frameDuration`; framesPerFoot (每英尺帧数) = 16 (35mm); isDuration = false | String |
   | `timeToCurrentFormat(t, fps, isDuration, ntscDropFrame)` | t = `time + thisComp.displayStartTime`; fps = `1.0 / thisComp.frameDuration`; isDuration = false; ntscDropFrame = `thisComp.ntscDropFrame` (argument added AE 10.5 CS5.5) | String |
 
   ```
