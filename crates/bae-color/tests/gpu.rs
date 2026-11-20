@@ -283,11 +283,46 @@ fn compare(name: &str, t: &ColorTransform, input: &[[f32; 4]], out: &[[f32; 4]],
     worst
 }
 
+/// Software and virtual adapters (CI: WARP on Windows, the paravirtual GPU
+/// on macOS runners) implement `pow` / `exp2` / `log2` with less precision
+/// than hardware; their tolerances are scaled by this factor.
+fn tolerance_scale(ctx: &GpuContext) -> f64 {
+    match ctx.adapter_info().device_type {
+        wgpu::DeviceType::Cpu | wgpu::DeviceType::VirtualGpu | wgpu::DeviceType::Other => 4.0,
+        _ => 1.0,
+    }
+}
+
+/// Relative tolerance for inputs outside a curve's legal code range
+/// (mirrored negatives, extrapolation above 1). PQ extrapolated above 1 reaches
+/// linear values in the thousands, where f32 `pow` loses a few more digits.
+const EXTRAPOLATION_TOL: f64 = 1e-3;
+
 fn check(ctx: &GpuContext, name: &str, t: &ColorTransform, lo: f64, hi: f64, tol: f64) {
+    if hi <= lo {
+        return;
+    }
+    let tol = tol * tolerance_scale(ctx);
     let input = samples(lo, hi, 509);
     let out = run(ctx, &t.to_wgsl("cc"), &input, false);
     let worst = compare(name, t, &input, &out, tol);
-    eprintln!("{name:<40} max rel err {worst:.2e}");
+    eprintln!("{name:<40} max rel err {worst:.2e} (tol {tol:.0e})");
+}
+
+/// Splits a curve's encoded test range into the legal code range and the
+/// extrapolated parts: `(range, tolerance, label)`. Log curves are legal over
+/// their whole test range (ACEScc / ACEScct go above 1).
+fn curve_ranges(tf: TransferFunction, tol: f64) -> Vec<((f64, f64), f64, &'static str)> {
+    let (lo, hi) = tf.encoded_test_range();
+    if tf.is_log() {
+        return vec![((lo, hi), tol, "")];
+    }
+    let ext = tol.max(EXTRAPOLATION_TOL);
+    vec![
+        ((lo.max(0.0), hi.min(1.0)), tol, ""),
+        ((lo, lo.max(0.0).min(0.0)), ext, " (negative)"),
+        ((lo.max(1.0), hi), ext, " (above 1)"),
+    ]
 }
 
 #[test]
@@ -295,27 +330,30 @@ fn snippets_match_cpu_reference() {
     let Some(ctx) = context() else { return };
     eprintln!("GPU: {}", ctx.summary());
 
-    // Every curve, both directions. PQ amplifies f32 rounding (the
-    // `E^(1/m2) - c1` step cancels digits), so it gets a looser bound.
+    // Every curve, both directions, legal range and extrapolation separately.
+    // PQ amplifies f32 rounding (the `E^(1/m2) - c1` step cancels digits), so
+    // it gets a looser bound in its legal range too.
+    eprintln!("tolerance scale {}", tolerance_scale(&ctx));
     for tf in TransferFunction::ALL {
         let tol = if tf == TransferFunction::Pq {
             1e-4
         } else {
             2e-5
         };
-        let (lo, hi) = tf.encoded_test_range();
         let dec = ColorTransform::from_ops([ColorOp::Decode(tf)]);
-        check(&ctx, &format!("decode {tf:?}"), &dec, lo, hi, tol);
-        let (llo, lhi) = (tf.decode(lo), tf.decode(hi));
         let enc = ColorTransform::from_ops([ColorOp::Encode(tf)]);
-        check(
-            &ctx,
-            &format!("encode {tf:?}"),
-            &enc,
-            llo.max(-1.0),
-            lhi.min(200.0),
-            tol,
-        );
+        for ((lo, hi), tol, label) in curve_ranges(tf, tol) {
+            check(&ctx, &format!("decode {tf:?}{label}"), &dec, lo, hi, tol);
+            let (llo, lhi) = (tf.decode(lo), tf.decode(hi));
+            check(
+                &ctx,
+                &format!("encode {tf:?}{label}"),
+                &enc,
+                llo.max(-1.0),
+                lhi.min(200.0),
+                tol,
+            );
+        }
     }
 
     // Space conversions (merged chains).
