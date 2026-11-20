@@ -67,6 +67,28 @@ fn require_prim(tx: &Transaction<'_>, path: &PrimPath) -> Result<(), CommandErro
     Ok(())
 }
 
+/// Validate an attribute edit against the prim schema (type, enum token, animatable).
+fn check_attr(
+    tx: &Transaction<'_>,
+    path: &PrimPath,
+    attr: &str,
+    value: Option<&Value>,
+    animated: bool,
+) -> Result<(), CommandError> {
+    let prim_type = tx.stage().prim(path).and_then(|p| p.prim_type().cloned());
+    if let Some(v) = value {
+        crate::schema::check_value(path, prim_type.as_ref(), attr, v)?;
+    }
+    if animated && !crate::schema::is_animatable(prim_type.as_ref(), attr) {
+        return Err(ModelError::NotAnimatable {
+            path: path.clone(),
+            attr: attr.to_owned(),
+        }
+        .into());
+    }
+    Ok(())
+}
+
 /// Namespace edits need a prim the local layer stack defines.
 fn require_local_prim(tx: &Transaction<'_>, path: &PrimPath) -> Result<(), CommandError> {
     require_prim(tx, path)?;
@@ -250,6 +272,7 @@ impl Command for SetAttr {
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
         require_prim(tx, &p.path)?;
+        check_attr(tx, &p.path, &p.attr, Some(&p.value), false)?;
         tx.ensure_spec(&p.path)?;
         tx.apply(Op::SetValue {
             path: p.path,
@@ -313,6 +336,7 @@ impl Command for SetKey {
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
         require_prim(tx, &p.path)?;
+        check_attr(tx, &p.path, &p.attr, Some(&p.keyframe.value), true)?;
         tx.ensure_spec(&p.path)?;
         tx.apply(Op::SetKeyframe {
             path: p.path,
@@ -378,6 +402,7 @@ impl Command for SetExpression {
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
         require_prim(tx, &p.path)?;
+        check_attr(tx, &p.path, &p.attr, None, p.source.is_some())?;
         tx.ensure_spec(&p.path)?;
         tx.apply(Op::SetExpression {
             path: p.path,
