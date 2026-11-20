@@ -2,7 +2,7 @@
 
 自检时对照本章。每一条都写了"错在哪里"和"正确做法"，最后一列是 [质量检查清单](06-quality.md) 里对应的编号。
 
-> 本章的工具名是 `bae mcp` 里的实际工具名；还没提供或还没接入的工具，以及替代做法，见 [tools.md](tools.md)。
+> 本章的工具名是 `bae mcp` 里的实际工具名；还没提供的工具，以及替代做法，见 [tools.md](tools.md)。
 
 ## 1. 流程与协作
 
@@ -20,7 +20,7 @@
 | E10 | 一改就渲染全片、全分辨率 | 占用团队共享的渲染预算 | 低分辨率、只渲染要检查的范围 | C5 |
 | E40 | 顺手给别人的图层改名，或删掉"多余"的图层 | 删除、移动、改名是命名空间操作，会改到所有工程层，包括别人的层 | 只对自己新建的节点做；别人的先问 | H1 |
 | E41 | 想撤回自己的覆盖，就把弱层的值再写一遍 | 覆盖仍然在；之后别人在弱层的修改照样被遮住 | 用 `attr_clear` 清除自己的意见 | C3 |
-| E42 | 把帧号直接填进命令的 `time`（例如 `"time": 22`） | 命令的时间是 flicks，22 flicks 远小于一帧，关键帧全挤在第 0 帧附近 | `time = 帧号 × 每帧 flicks`（30 fps 是 23,520,000）；渲染工具才用帧号 | T1 |
+| E42 | 想表示第 22 帧，却在命令的时间参数里写整数 `"time": 22` | 整数是 flicks，22 flicks 远小于一帧，关键帧全挤在第 0 帧附近 | 写 `"22f"`（或 `{"frame": 22}`、时码）；只有渲染工具的帧号写整数 | T1 |
 | E43 | 多步修改拆成一条条单独的工具调用 | 历史碎片化，用户没法按意图接受或拒绝；中途失败会留下半成品 | 一个意图放进一次 `command_batch`（全部成功或全部不生效） | C1 |
 | E44 | 渲染返回占位图（`placeholder: true`）却说"画面检查通过" | 占位图不代表真实画面 | 只做 `prim_get` 数值核对，并在汇报里写明画面没有经过渲染检查 | H6 |
 
@@ -77,18 +77,18 @@
 
 ### 反例 1：入场缓动设反了
 
-30 fps，主标题第 4 帧（94,080,000 flicks）到第 22 帧（517,440,000 flicks）升起：
+30 fps，主标题第 4 帧到第 22 帧升起：
 
 ```jsonc
 // Wrong: ease_in on the FIRST key has no incoming segment to shape; the move slams to a stop.
 {"command": "key_ease", "params": {"mode": "ease_in", "influence": 80, "keys": [
-  {"path": "/comps/SH010_title/layers/title_main", "attr": "transform:position", "time": 94080000}]}}
+  {"path": "/comps/SH010_title/layers/title_main", "attr": "transform:position", "time": "4f"}]}}
 
 // Right: ease_out on the first key (15%), ease_in on the LAST key (80%) = decelerating entrance.
 {"command": "key_ease", "params": {"mode": "ease_out", "influence": 15, "keys": [
-  {"path": "/comps/SH010_title/layers/title_main", "attr": "transform:position", "time": 94080000}]}}
+  {"path": "/comps/SH010_title/layers/title_main", "attr": "transform:position", "time": "4f"}]}}
 {"command": "key_ease", "params": {"mode": "ease_in", "influence": 80, "keys": [
-  {"path": "/comps/SH010_title/layers/title_main", "attr": "transform:position", "time": 517440000}]}}
+  {"path": "/comps/SH010_title/layers/title_main", "attr": "transform:position", "time": "22f"}]}}
 ```
 
 ### 反例 1b：写了缓动但插值还是线性

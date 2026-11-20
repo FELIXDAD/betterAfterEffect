@@ -40,13 +40,7 @@ SH010_title  1920×1080, 30 fps, 90 帧（0–89）
 
 ## 4. 步骤
 
-> 本节用 12 的 `comp_create`、`layer_create`、`key_ease`。如果它们还不在工具列表里（见 [tools.md](../tools.md) 第 4 节），按那里的替代做法用 `prim_create` / `attr_set` / `key_set` 完成同样的结构。
-
-30 fps 下每帧 23,520,000 flicks。本配方用到的时间：
-
-| 帧 | 4 | 10 | 12 | 16 | 18 | 22 | 28 | 32 | 90（时长） |
-|---|---|---|---|---|---|---|---|---|---|
-| flicks | 94,080,000 | 235,200,000 | 282,240,000 | 376,320,000 | 423,360,000 | 517,440,000 | 658,560,000 | 752,640,000 | 2,116,800,000 |
+时间参数直接写帧号字符串（`"4f"`），`bae mcp` 按合成帧速率换算（见 [tools.md](../tools.md) 第 7 节）。三个图层都从第 0 帧开始，所以关键帧的图层帧就是合成帧。
 
 ### 事务 1：建立合成和版式
 
@@ -54,7 +48,7 @@ SH010_title  1920×1080, 30 fps, 90 帧（0–89）
 {"tool": "stage_describe", "args": {"detail": "normal"}}
 {"tool": "command_batch", "args": {"label": "标题出场：建立合成和版式", "commands": [
   {"command": "comp_create", "params": {"name": "SH010_title", "width": 1920, "height": 1080, "fps": 30,
-    "duration": 2116800000, "bg_color": [0.06, 0.06, 0.07, 1]}},
+    "duration": "90f", "bg_color": [0.06, 0.06, 0.07, 1]}},
   {"command": "layer_create", "params": {"comp": "/comps/SH010_title", "kind": "text", "name": "title_main",
     "text": "主标题文字", "font_size": 96, "position": [960, 510]}},
   {"command": "layer_create", "params": {"comp": "/comps/SH010_title", "kind": "text", "name": "title_sub",
@@ -79,27 +73,27 @@ SH010_title  1920×1080, 30 fps, 90 帧（0–89）
 ```json
 {"tool": "command_batch", "args": {"label": "标题出场：入场动画与错帧", "commands": [
   {"command": "key_set", "params": {"path": "/comps/SH010_title/layers/title_main", "attr": "transform:position",
-    "time": 94080000, "keyframe": {"value": {"type": "vec3", "value": [960, 550, 0]}}}},
+    "time": "4f", "keyframe": {"value": {"type": "vec3", "value": [960, 550, 0]}}}},
   {"command": "key_set", "params": {"path": "/comps/SH010_title/layers/title_main", "attr": "transform:position",
-    "time": 517440000, "keyframe": {"value": {"type": "vec3", "value": [960, 510, 0]}}}},
+    "time": "22f", "keyframe": {"value": {"type": "vec3", "value": [960, 510, 0]}}}},
   {"command": "key_ease", "params": {"mode": "ease_out", "influence": 15, "keys": [
-    {"path": "/comps/SH010_title/layers/title_main", "attr": "transform:position", "time": 94080000}]}},
+    {"path": "/comps/SH010_title/layers/title_main", "attr": "transform:position", "time": "4f"}]}},
   {"command": "key_ease", "params": {"mode": "ease_in", "influence": 80, "keys": [
-    {"path": "/comps/SH010_title/layers/title_main", "attr": "transform:position", "time": 517440000}]}},
+    {"path": "/comps/SH010_title/layers/title_main", "attr": "transform:position", "time": "22f"}]}},
   {"command": "key_set", "params": {"path": "/comps/SH010_title/layers/title_main", "attr": "transform:opacity",
-    "time": 94080000, "keyframe": {"value": {"type": "float", "value": 0}}}},
+    "time": "4f", "keyframe": {"value": {"type": "float", "value": 0}}}},
   {"command": "key_set", "params": {"path": "/comps/SH010_title/layers/title_main", "attr": "transform:opacity",
-    "time": 282240000, "keyframe": {"value": {"type": "float", "value": 100}}}}
+    "time": "12f", "keyframe": {"value": {"type": "float", "value": 100}}}}
 ]}}
 ```
 
 同一个 `command_batch` 里接着放 `title_sub` 和 `line_accent`：
 
-| 图层 | 属性 | 起点（flicks → 值） | 终点（flicks → 值） | 缓动 |
+| 图层 | 属性 | 起点（时间 → 值） | 终点（时间 → 值） | 缓动 |
 |---|---|---|---|---|
-| `title_sub` | `transform:position` | 235,200,000 → [960, 620, 0] | 658,560,000 → [960, 590, 0] | 起点 `ease_out` 15，终点 `ease_in` 80 |
-| `title_sub` | `transform:opacity` | 235,200,000 → 0 | 423,360,000 → 100 | 线性（不调 `key_ease`） |
-| `line_accent` | `transform:scale` | 376,320,000 → [0, 100, 100] | 752,640,000 → [100, 100, 100] | 起点 `ease_out` 15，终点 `ease_in` 80 |
+| `title_sub` | `transform:position` | `"10f"` → [960, 620, 0] | `"28f"` → [960, 590, 0] | 起点 `ease_out` 15，终点 `ease_in` 80 |
+| `title_sub` | `transform:opacity` | `"10f"` → 0 | `"18f"` → 100 | 线性（不调 `key_ease`） |
+| `line_accent` | `transform:scale` | `"16f"` → [0, 100, 100] | `"32f"` → [100, 100, 100] | 起点 `ease_out` 15，终点 `ease_in` 80 |
 
 两个关键帧的位置动画是直线，不需要另外设空间插值。
 
@@ -121,7 +115,7 @@ SH010_title  1920×1080, 30 fps, 90 帧（0–89）
 - **遮罩升起（更有设计感）：** 加一个形状图层 `matte_title` 盖住主标题所在区域（静止不动），把 `title_main` 的轨道遮罩设为 `matte_title` 的 Alpha。位移改成字高的 60–100%（约 70 px），不透明度可以不动。文字会像从一条看不见的线后面升起。
 - **需要出场：** 合成延长到 120 帧（4 秒）或压缩停留段。出场在第 104–115 帧：所有元素同时（或按入场顺序间隔 2 帧）向上 20 px 并淡出，出场·强，12 帧；最后几帧是空画面。
 - **逐字入场：** 主标题用动画制作工具（位置 Y +40、不透明度 0），范围选择器偏移 0% → 100%，每字约 1.5 帧；字数超过 12 个时改为整体或逐行。
-- **24 / 25 fps：** 帧号按比例换算（24 fps：主标题 3–18 帧，副标题 8–22 帧，装饰线 13–26 帧，合成 72 帧），再乘以该帧速率的每帧 flicks（24 fps 是 29,400,000）。
+- **24 / 25 fps：** 帧号按比例换算（24 fps：主标题 3–18 帧，副标题 8–22 帧，装饰线 13–26 帧，合成 72 帧），时间仍然写成 `"3f"` 这样的帧号，服务器按 24 fps 换算。
 
 ## 7. 常见坑
 

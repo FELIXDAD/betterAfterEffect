@@ -4,9 +4,9 @@
 
 本页列出指南用到的全部 MCP 工具，以及它们现在的状态。来源：
 
-- 17 `agent/api`（#20、#29 已合并）：`crates/bae-agent`，服务器 `bae mcp`；
+- 17 `agent/api`（#20、#29、#55 已合并）：`crates/bae-agent`，服务器 `bae mcp`；
 - 02 `core/doc-model`：内置命令（`docs/spec/data-model.md` 第 6 节）；
-- 12 `ui/motion`（#41 已合并）：`crates/bae-motion` 的动效领域命令。
+- 12 `ui/motion`（#41 已合并）：`crates/bae-motion` 的动效领域命令；21 `io/packaging`：`bae-package` 的打包命令。#55 起它们都在 `bae mcp` 里。
 
 ## 0. 命名规则
 
@@ -15,7 +15,7 @@
 - `command_batch` 的 `command` 字段既可以写命令 ID（`attr.set`），也可以写工具名（`attr_set`）。
 - MCP instructions（`mcp-instructions/en.md`、`zh.md`）按命令 ID 写（点号），服务器在后面附一段说明换算规则；17 的测试按点号名字检查。
 
-状态列的含义：**可用** = `bae mcp` 里已经能调用；**已实现未接入** = 命令写好了，但 `bae mcp` 还没注册；**未提供** = 还没有，用"替代做法"。
+状态列的含义：**可用** = `bae mcp` 里已经能调用；**未提供** = 还没有，用"替代做法"。以 `bae mcp` 实际返回的工具列表为准。
 
 ## 1. 查询类（只读）
 
@@ -49,7 +49,7 @@
 | 改名 | `prim_rename` | 只用于自己创建的节点 | 可用 |
 | 设置静态值 | `attr_set`：`path`、`attr`、`value` | 能 | 可用 |
 | 清除编辑目标层对某个属性的意见，露出弱层的值 | `attr_clear`：`path`、`attr` | 能。撤回自己的覆盖就用它 | 可用 |
-| 增改关键帧 | `key_set`：`path`、`attr`、`time`（flicks）、`keyframe` | 能 | 可用 |
+| 增改关键帧 | `key_set`：`path`、`attr`、`time`、`keyframe` | 能 | 可用 |
 | 删除关键帧 | `key_remove` | 能 | 可用 |
 | 设置、停用或删除表达式 | `attr_set_expression` | 能 | 可用 |
 | 设置引用（预合成、引用设计资产） | `prim_set_references` | 能 | 可用 |
@@ -66,34 +66,27 @@
 
 ## 4. 修改类：动效领域命令（12，bae-motion）
 
-**状态：已实现未接入。** 12 已经实现并合并了这些命令，但 `bae mcp` 目前只注册了 02 的内置命令和 17 的提案命令，Agent 在工具列表里还看不到它们（已请 17 从模块注册表收集）。接入之前的替代做法见本节末尾。
+`bae mcp` 从应用的模块注册表收集这些命令（#55），12 以后新增的命令也会自动出现。时间参数的写法见第 7 节。
 
 | 意图 | 工具名 | 主要参数 | 状态 |
 |---|---|---|---|
-| 新建合成（同时建 `layers` 文件夹，默认放在 `/comps`） | `comp_create` | `name`、`width`、`height`、`fps`、`duration`（flicks，默认 10 秒）、`bg_color`（RGBA 0–1） | 已实现未接入 |
-| 设置工作区域 / 修剪合成到工作区域 | `comp_set_work_area` / `comp_trim_to_work_area` | `comp`、`start`、`end`（flicks） | 已实现未接入 |
-| 新建文件夹 | `folder_create` | `name`、`parent` | 已实现未接入 |
-| 新建图层 | `layer_create` | `comp`、`kind`（`shape` / `text` / `solid` / `null` / `camera` / `light` / `adjustment` / `pre_comp` / `footage` / `audio`）、`name`、`source`、`index`（0 = 最上）、`color`、`size`、`text`、`font_size`、`shape`（`rect` / `ellipse` / `star`）、`position`、`start`（flicks） | 已实现未接入 |
-| 调整图层顺序 / 复制 / 拆分 | `layer_reorder` / `layer_duplicate` / `layer_split` | `layers`、`index` / `time` | 已实现未接入 |
-| 设置入点、出点 | `layer_trim` | `layers`、`in_point`、`out_point`（合成时间，flicks） | 已实现未接入 |
-| 设置父级（默认保持屏幕位置不变） | `layer_set_parent` | `layers`、`parent`、`keep_transform`、`time` | 已实现未接入 |
-| 秒表开 / 关 | `attr_set_animated` | `path`、`attr`、`animated`、`time` | 已实现未接入 |
-| 在某个时间改值（有关键帧就加 / 改关键帧，没有就改静态值） | `attr_set_at` | `path`、`attr`、`time`、`value` | 已实现未接入 |
-| 缓动 / 缓入 / 缓出（F9 / Shift+F9 / Ctrl+Shift+F9） | `key_ease` | `keys`（`[{path, attr, time}]`）、`mode`（`easy_ease` / `ease_in` / `ease_out`）、`influence`（默认 33.33） | 已实现未接入 |
-| 关键帧插值、切换定格 | `key_set_interpolation` | `keys`、`interp_in`、`interp_out`（`linear` / `bezier` / `hold`） | 已实现未接入 |
-| 移动 / 删除 / 时间反向 / 粘贴关键帧 | `key_move` / `key_delete` / `key_reverse` / `key_paste` | `keys`、`delta`（flicks）…… | 已实现未接入 |
+| 新建合成（同时建 `layers` 文件夹，默认放在 `/comps`） | `comp_create` | `name`、`width`、`height`、`fps`、`duration`（默认 10 秒）、`bg_color`（RGBA 0–1） | 可用 |
+| 设置工作区域 / 修剪合成到工作区域 | `comp_set_work_area` / `comp_trim_to_work_area` | `comp`、`start`、`end` | 可用 |
+| 新建文件夹 | `folder_create` | `name`、`parent` | 可用 |
+| 新建图层 | `layer_create` | `comp`、`kind`（`shape` / `text` / `solid` / `null` / `camera` / `light` / `adjustment` / `pre_comp` / `footage` / `audio`）、`name`、`source`、`index`（0 = 最上）、`color`、`size`、`text`、`font_size`、`shape`（`rect` / `ellipse` / `star`）、`position`、`start`（合成时间） | 可用 |
+| 调整图层顺序 / 复制 / 拆分 | `layer_reorder` / `layer_duplicate` / `layer_split` | `layers`、`index` / `time` | 可用 |
+| 设置入点、出点 | `layer_trim` | `layers`、`in_point`、`out_point`（合成时间） | 可用 |
+| 设置父级（默认保持屏幕位置不变） | `layer_set_parent` | `layers`、`parent`、`keep_transform`、`time` | 可用 |
+| 秒表开 / 关 | `attr_set_animated` | `path`、`attr`、`animated`、`time` | 可用 |
+| 在某个时间改值（有关键帧就加 / 改关键帧，没有就改静态值） | `attr_set_at` | `path`、`attr`、`time`、`value` | 可用 |
+| 缓动 / 缓入 / 缓出（F9 / Shift+F9 / Ctrl+Shift+F9） | `key_ease` | `keys`（`[{path, attr, time}]`）、`mode`（`easy_ease` / `ease_in` / `ease_out`）、`influence`（默认 33.33） | 可用 |
+| 关键帧插值、切换定格 | `key_set_interpolation` | `keys`、`interp_in`、`interp_out`（`linear` / `bezier` / `hold`） | 可用 |
+| 移动 / 删除 / 时间反向 / 粘贴关键帧 | `key_move` / `key_delete` / `key_reverse` / `key_paste` | `keys`、`delta`…… | 可用 |
 | 预合成 | `layer_precompose` | — | **未提供**（12 下一阶段） |
 | 添加合成标记 / 图层标记 | `marker_add` | — | **未提供**（12 下一阶段） |
 | 给文本图层添加动画制作工具 | `text_add_animator` | — | **未提供**（12 下一阶段） |
 
 `key_ease` 只设影响、速度固定为 0，正好覆盖指南的缓动预设（见 [03 动画规范](03-animation.md) 2.4）。`key_delete` 和 02 的 `key_remove` 的区别：删光关键帧时 `key_delete` 会关掉秒表并保留当前值。
-
-**接入之前的替代做法：**
-
-- 新建合成：`prim_create`（`prim_type: "Comp"`）+ 在其下 `prim_create` 一个 `layers` 文件夹（`Folder`）+ `attr_set` 设 `name`、`width`、`height`、`frame_rate`、`duration` 等（属性名和类型用 `schema_get` 查 `Comp`）。
-- 新建图层：`prim_create`（`prim_type: "Layer"`，路径 `<合成>/layers/<名字>`）+ `attr_set` 设 `kind`、`name` 等（用 `schema_get` 查 `Layer`）。
-- 缓动：直接在 `key_set` 的 `keyframe` 里写 `interp_in` / `interp_out: "bezier"` 和 `ease_in` / `ease_out`（见第 7 节）。
-- 标记、预合成、动画制作工具：暂时不做，在汇报里说明。
 
 ## 5. 事务：`command_batch`
 
@@ -127,10 +120,19 @@
 
 ### 时间
 
-- **命令的时间参数是 flicks**（1 秒 = 705,600,000）：`key_set` 的 `time`、`comp_create` 的 `duration`、`layer_create` 的 `start`、`layer_trim` 的入点出点、`key_move` 的 `delta` 等。换算：`flicks = 帧号 × 每帧 flicks`，每帧 flicks 见 [01 概念与术语](01-concepts.md) 第 5 节（30 fps 是 23,520,000，25 fps 是 28,224,000，24 fps 是 29,400,000）。
-- **渲染工具的参数是帧号**（`render_frame` 的 `frame`、`render_contact_sheet` 的 `frames` / `start` / `end`）；`prim_get` 返回的 `key_frames` 也是帧号。
-- 图层属性的关键帧时间是**图层时间**；图层的 `start_time` 为 0 时（默认）图层时间就等于合成时间。没有特别需要时不要改 `start_time`。
-- 17 正在考虑在 MCP 层统一接受帧号；定下来后本节和所有配方会更新。
+命令里的每个时间参数（`key_set` 的 `time`、`comp_create` 的 `duration`、`layer_create` 的 `start`、`layer_trim` 的入出点、`key_move` 的 `delta`、`key_ease` 里 `keys[].time`，以及 `attr_set` 里 `{"type": "time", ...}` 的值）都接受下面几种写法，`bae mcp` 在执行前换算成 flicks（#55）：
+
+| 写法 | 例子 | 说明 |
+|---|---|---|
+| 帧号字符串 | `"12f"`（也可以 `"f12"`） | **指南推荐的写法**，好读、不容易和 flicks 混淆 |
+| 帧号对象 | `{"frame": 12}` | 和上一种等价 |
+| 时码 | `"0:00:00:12"`，也可以 `MM:SS:FF`、`SS:FF` | 帧位前用 `;` 表示丢帧时码（29.97 / 59.94） |
+| 整数 | `282240000` | **整数是 flicks**，不是帧号（1 秒 = 705,600,000） |
+
+- **按哪个帧速率换算：** 先看参数里的 `fps` / `frame_rate`；没给时用这两个参数的默认值（例如 `comp_create` 默认 30）；都没有时，用参数里第一个节点路径所在合成的帧速率。同一个 `command_batch` 里，前面的命令刚建好的合成，后面的命令就能按它的帧速率换算。找不到帧速率时会报错。
+- **时间基准是参数自己的：** 合成时间（入出点、工作区域、`layer_create` 的 `start`）是合成帧；图层属性的关键帧是**图层帧**，和 `prim_get` 返回的 `key_frames` 一致。图层从 0 开始、时间伸缩 100%（默认）时，图层帧就等于合成帧。没有特别需要时不要改图层的 `start_time`，否则关键帧帧号要减去图层的起点。
+- **渲染工具**（`render_frame` 的 `frame`、`render_contact_sheet` 的 `frames` / `start` / `end`）本来就是帧号，写整数。
+- 不要写 `"time": 12` 想表示第 12 帧：整数会被当成 12 flicks，关键帧会挤在第 0 帧附近。
 
 ### 值
 
@@ -163,7 +165,7 @@
 |---|---|
 | `name` | 显示名 |
 | `transform:position` / `transform:scale` / `transform:rotation` / `transform:opacity` / `transform:anchor_point` | 图层变换 |
-| `start_time` / `in_point` / `out_point` | 图层时间（合成时间，flicks） |
+| `start_time` / `in_point` / `out_point` | 图层在合成里的起点、入点、出点（合成时间） |
 | `parent` | 父级 |
 | `motion_blur` | 图层的运动模糊开关 |
 | `track_matte` / `track_matte_layer` | 轨道遮罩模式（`alpha` / `luma` / …）和遮罩图层 |
@@ -180,11 +182,10 @@
 | 意图 | 工具名 | 状态 |
 |---|---|---|
 | 导出给 AE（`.jsx` 重建脚本 + 素材 + 导出报告） | `interop_export_ae` | **未提供**（15，推测名） |
-| 扫描、打包、收集、解包素材，重新链接 | `package_scan` / `package_pack` / `package_collect` / `package_unpack` / `asset_relink` / `asset_set_files` | 已实现未接入（21，已请 17 注册） |
+| 扫描、打包、收集、解包素材，重新链接 | `package_scan` / `package_pack` / `package_collect` / `package_unpack` / `asset_relink` / `asset_set_files` | 可用（21）。`project` 参数省略即可，服务器自动填入当前工程 |
 
 ## 10. 还请 17 考虑
 
-- 从模块注册表收集 12、21 等领域命令，让 `comp_create`、`layer_create`、`key_ease`、`package_*` 出现在 `bae mcp` 里。
-- 时间参数在 MCP 层接受帧号（或时码），由服务器换算 flicks。
 - `attribute_evaluate`、`proposal_describe`、`comment_add`、`history_list`、`selection_get`。
 - 把本指南作为 MCP 资源暴露（如 `bae://agent-guide/03-animation`）。
+- 关键帧时间也能按"相对合成开始的帧号"写（需要 02 / 12 先在命令 Schema 里标明哪些参数是关键帧时间）；在那之前按图层帧写，见第 7 节。

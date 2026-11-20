@@ -7,7 +7,7 @@ description: Operating rules and recipes for the BAE motion design app (After Ef
 
 你通过 MCP 操作 BAE：一个 AE 式的动画软件，工程由多个"工程层"叠加，多人和 Agent 同时编辑。你是协作者，你的修改会由人审核。目标是做出**专业动效师认可的动画**，并且**不越权、可审核**。
 
-> 工具名 = 命令 ID 把 `.` 换成 `_`（`attr.set` → `attr_set`）。本 Skill 写的都是 `bae mcp` 里的工具名。有些工具还没有提供或还没接入（`attribute_evaluate`、`proposal_describe`、`comment_add`、`marker_add`；12 的 `comp_create` / `layer_create` / `key_ease` 等），以实际工具列表为准，替代做法见 `references/tools.md`。
+> 工具名 = 命令 ID 把 `.` 换成 `_`（`attr.set` → `attr_set`）。本 Skill 写的都是 `bae mcp` 里的工具名。动效命令（`comp_create`、`layer_create`、`key_ease`、`layer_set_parent`……）和打包命令都可用；还没有的是 `attribute_evaluate`、`proposal_describe`、`comment_add`、`marker_add`、`layer_precompose`、`text_add_animator`。以实际工具列表为准，替代做法见 `references/tools.md`。
 
 ## 1. 每个任务都这样走
 
@@ -29,8 +29,8 @@ description: Operating rules and recipes for the BAE motion design app (After Ef
 ## 3. 动画核心规则
 
 **时间**
-- 只用合成帧速率下的**整数帧**思考时间。**命令的时间参数是 flicks**（`key_set` 的 `time`、`comp_create` 的 `duration`、`layer_trim` 的入出点……）：`flicks = 帧号 × 每帧 flicks`，30 fps 每帧 23,520,000，25 fps 28,224,000，24 fps 29,400,000（1 秒 = 705,600,000）。**渲染工具和 `prim_get` 的 `key_frames` 用帧号。** 把帧号直接填进 `time` 是常见错误。
-- 图层属性的关键帧时间是图层时间；图层 `start_time` 为 0（默认）时等于合成时间。
+- 只用合成帧速率下的**整数帧**思考时间。命令里的时间参数（`key_set` 的 `time`、`comp_create` 的 `duration`、`layer_trim` 的入出点、`key_ease` 的 `keys[].time`……）写**帧号字符串 `"12f"`**（也可以 `{"frame": 12}` 或时码 `"0:00:00:12"`），服务器按合成帧速率换算。**整数是 flicks**：写 `"time": 12` 会把关键帧放在第 0 帧附近。渲染工具的帧号写整数。
+- 图层属性的关键帧是图层帧（和 `prim_get` 的 `key_frames` 一致）；图层从第 0 帧开始、不伸缩（默认）时就是合成帧，没有必要就不改图层的 `start_time`。
 - 30 fps 常用时长：微反馈 3–6 帧；小元素 6–12；中等元素移动 9–18；单行标题入场 18–30；标题组整体 30–60；快速转场 8–15；常规转场 15–24；镜头运动 60–150。24 fps 乘 0.8，25 fps 乘 5/6，60 fps 乘 2。
 - 出场时长 = 入场的 60–80%。
 - 文字停留 ≥ max(1.5 秒, 中文字数 ÷ 5 + 1 秒)；英文按单词数 ÷ 3 + 1 秒。停留期间文字静止。结尾画面停留 ≥ 1.5 秒。
@@ -49,7 +49,7 @@ description: Operating rules and recipes for the BAE motion design app (After Ef
 | 出场·强 | 0，80% | 影响 15% | (0.8, 0, 0.85, 1) |
 
 - 换算：起点影响 a%、终点影响 b%（两端速度 0）⇒ cubic-bezier(a/100, 0, 1 − b/100, 1)。
-- **怎么设：** `key_set` 先放线性关键帧，再用 `key_ease`：起点 `mode: "ease_out"`、终点 `mode: "ease_in"`，`influence` 按预设（入场·强 = 起点 15、终点 80）。`key_ease` 还没接入时，在 `key_set` 的 `keyframe` 里直接写 `interp_in` / `interp_out: "bezier"` 和 `ease_in` / `ease_out`——**插值默认是 `linear`，只写 ease 不写 bezier 等于没设**。
+- **怎么设：** `key_set` 先放线性关键帧，再用 `key_ease`：起点 `mode: "ease_out"`、终点 `mode: "ease_in"`，`influence` 按预设（入场·强 = 起点 15、终点 80）；两步放在同一个 `command_batch` 里。直接在 `key_set` 的 `keyframe` 里写缓动时，要同时写 `interp_in` / `interp_out: "bezier"`——**插值默认是 `linear`，只写 ease 不写 bezier 等于没设**。
 - 值带类型标签：`{"type": "vec3", "value": [960, 510, 0]}`；图层位置、缩放是 vec3（缩放 z 写 100），不透明度、旋转是 float。属性名不确定就 `schema_get`。
 - 同类元素同一个预设、同样的时长和位移。连续运动的中间关键帧不要速度 0。直线运动的**空间插值设为线性**（默认自动贝塞尔会鼓包、甩过头）。
 - 位置 + 不透明度一起动时，不透明度在前 40–60% 完成。文字升起 20–60 px（1080p）；大元素和文字从 80–95% 缩放，不从 0%。
@@ -105,7 +105,7 @@ H1 只写了自己的提案层 · H2 需求明确的内容全部做到 · H3 停
 | 批注格式、提案说明模板、回应审核 | `05-collaboration.md` |
 | 完整质量清单和评分标准 | `06-quality.md` |
 | 常见错误和反例 | `08-mistakes.md` |
-| 工具状态、替代做法、参数格式（flicks、值、关键帧） | `tools.md` |
+| 工具状态、替代做法、参数格式（时间写法、值、关键帧） | `tools.md` |
 | 标题出场 | `recipes/title-in.md` |
 | 下三分之一字幕 | `recipes/lower-third.md` |
 | Logo 演绎 | `recipes/logo-reveal.md` |
