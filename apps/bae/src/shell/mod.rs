@@ -52,6 +52,12 @@ impl AppModule for ShellModule {
     fn build(&self, app: &mut AppBuilder) {
         app.add_module(bae_gpu::GpuModule);
         app.add_module(bae_ui::UiModule);
+        // Agent panels: tool-call log and proposals (bae-agent, workstream 17).
+        let audit = Arc::new(bae_agent::AuditLog::new());
+        let feed: Arc<dyn bae_ui::agent::AgentFeed> =
+            Arc::new(crate::agent_feed::BaeAgentFeed::new(audit.clone()));
+        app.insert_resource(audit);
+        app.insert_resource(feed);
     }
 
     fn finish(&self, app: &mut AppBuilder) {

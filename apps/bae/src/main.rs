@@ -10,6 +10,7 @@
 // double-click); `bae_platform::console` re-attaches to a parent terminal.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod agent_feed;
 mod document;
 mod headless;
 mod i18n;

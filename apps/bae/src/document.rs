@@ -46,7 +46,12 @@ impl Document {
         }
         Document {
             project,
-            commands: CommandRegistry::with_builtins(),
+            commands: {
+                // Model commands plus the agent proposal commands (accept / reject).
+                let mut commands = CommandRegistry::with_builtins();
+                bae_agent::register_commands(&mut commands);
+                commands
+            },
             author: local_author(),
             dirty: false,
             history,
