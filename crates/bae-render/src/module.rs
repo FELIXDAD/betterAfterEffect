@@ -21,6 +21,7 @@ use bae_platform::cli::{self, CliSubcommand};
 use clap::{Arg, ArgAction, ArgMatches};
 
 use crate::anim::AnimEvaluator;
+use crate::assets::AssetFiles;
 use crate::eval::{CompEvaluator, MockEvaluator, sample};
 use crate::geom::IRect;
 use crate::renderer::{OutputAlpha, Renderer, RendererConfig};
@@ -311,14 +312,12 @@ fn run(
     }
     #[cfg(not(feature = "media"))]
     let _ = media;
+    // Footage on disk or inside the .baez the project was opened from.
+    let assets = AssetFiles::for_project(&project)?;
     let mut evaluator: Box<dyn CompEvaluator> = if m.get_flag("mock-eval") {
-        Box::new(MockEvaluator::new(
-            project.base_dir().map(Path::to_path_buf),
-        ))
+        Box::new(MockEvaluator::new(None).with_assets(assets))
     } else {
-        Box::new(AnimEvaluator::new(
-            project.base_dir().map(Path::to_path_buf),
-        ))
+        Box::new(AnimEvaluator::new(None).with_assets(assets))
     };
 
     let started = Instant::now();
@@ -405,6 +404,72 @@ fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A project opened from a `.baez` finds its embedded footage after the
+    /// original file is gone (extracted through bae-package's locator).
+    #[cfg(feature = "media")]
+    #[test]
+    fn renders_packaged_footage_from_baez() {
+        if GpuContext::new_headless(GpuContextDescriptor::default()).is_err() {
+            eprintln!("no GPU, skipping");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let png = dir.path().join("src/red.png");
+        crate::fixture::write_label_png(&png, 16, 8, 0.0).unwrap();
+        let mut b = crate::fixture::SceneBuilder::new();
+        let comp = b
+            .comp("main", 32, 16, FrameRate::FPS_30, Time::ONE_SECOND)
+            .unwrap();
+        let project_dir = dir.path().join("p/T.bae");
+        let asset = b.footage_asset("red", &png, None, Some([16, 8])).unwrap();
+        let layer = b.layer(&comp, "img", "footage", Some(&asset)).unwrap();
+        b.set(
+            &layer,
+            "transform:anchor_point",
+            Value::Vec3([8.0, 4.0, 0.0]),
+        )
+        .unwrap();
+        b.set(&layer, "transform:position", Value::Vec3([16.0, 8.0, 0.0]))
+            .unwrap();
+        let mut project = Project::from_stage(b.into_stage());
+        project.save_as(&project_dir).unwrap();
+        let baez = dir.path().join("handoff/T.baez");
+        std::fs::create_dir_all(baez.parent().unwrap()).unwrap();
+        bae_package::pack(
+            &bae_package::PackSource::project(&project),
+            &baez,
+            &bae_package::PackOptions::default(),
+            bae_package::WriteOptions::default(),
+        )
+        .unwrap();
+        // The original footage and project are gone; only the .baez remains.
+        std::fs::remove_dir_all(dir.path().join("src")).unwrap();
+        std::fs::remove_dir_all(dir.path().join("p")).unwrap();
+
+        let out = dir.path().join("out.png");
+        let m = args(clap::Command::new("render"))
+            .try_get_matches_from([
+                "render",
+                baez.to_str().unwrap(),
+                "--comp",
+                "main",
+                "-o",
+                out.to_str().unwrap(),
+                "--alpha",
+                "premultiplied",
+            ])
+            .unwrap();
+        assert_eq!(
+            run(&m, GpuContextDescriptor::default(), None).unwrap(),
+            ExitCode::SUCCESS
+        );
+        let (w, _, data) = crate::png_out::read_rgba8(&out).unwrap();
+        // Centre of the label is opaque; outside the layer is transparent.
+        let px = |x: u32, y: u32| &data[((y * w + x) * 4) as usize..((y * w + x) * 4 + 4) as usize];
+        assert_eq!(px(16, 8)[3], 255, "{:?}", px(16, 8));
+        assert_eq!(px(2, 2), &[0, 0, 0, 0]);
+    }
 
     #[test]
     fn renders_a_saved_project_to_png() {

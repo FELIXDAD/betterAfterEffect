@@ -25,11 +25,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bae_model::{
-    AssetFile, AssetResolver, AttrSpec, FrameRate, Interpolation, PrimPath, PrimType, PrimView,
-    Stage, StageEvent, Time, Value, schema,
+    AttrSpec, FrameRate, Interpolation, PrimPath, PrimType, PrimView, Stage, StageEvent, Time,
+    Value, schema,
 };
 use glam::{DAffine2, DVec2};
 
+use crate::assets::AssetFiles;
 use crate::blend::{BlendMode, MaskMode, TrackMatteMode};
 use crate::error::RenderError;
 use crate::graph::MAX_DEPTH;
@@ -64,7 +65,7 @@ pub trait CompEvaluator {
 /// Evaluates a [`Stage`] with static values and linear keyframes.
 #[derive(Debug)]
 pub struct MockEvaluator {
-    assets: AssetResolver,
+    assets: AssetFiles,
     purpose: RenderPurpose,
     warnings: Vec<String>,
 }
@@ -74,10 +75,17 @@ impl MockEvaluator {
     /// project's directory, [`bae_model::Project::base_dir`]).
     pub fn new(base_dir: Option<PathBuf>) -> Self {
         Self {
-            assets: AssetResolver::new(base_dir, Vec::new()),
+            assets: AssetFiles::new(base_dir),
             purpose: RenderPurpose::Final,
             warnings: Vec::new(),
         }
+    }
+
+    /// Uses `assets` to find footage files (e.g. [`AssetFiles::for_project`]).
+    #[must_use]
+    pub fn with_assets(mut self, assets: AssetFiles) -> Self {
+        self.assets = assets;
+        self
     }
 
     /// Preview or final (guide layers render only in a top-level preview).
@@ -91,7 +99,7 @@ impl MockEvaluator {
 /// One evaluation over a stage.
 struct MockPass<'a> {
     stage: &'a Stage,
-    assets: &'a AssetResolver,
+    assets: &'a AssetFiles,
     purpose: RenderPurpose,
     warnings: &'a mut Vec<String>,
 }
@@ -313,8 +321,13 @@ impl<'a> MockPass<'a> {
                 height: h,
             }),
             "footage" | "sequence" => {
-                let file = AssetFile::from_prim(&src)
-                    .and_then(|f| self.assets.resolve(&f).path().map(|p| p.to_path_buf()));
+                let file = match self.assets.file(&src) {
+                    Ok(file) => file,
+                    Err(message) => {
+                        self.warn(format!("{}: {message}", layer.path()));
+                        None
+                    }
+                };
                 Ok(LayerContent::Footage(FootageRef {
                     asset: source,
                     file,

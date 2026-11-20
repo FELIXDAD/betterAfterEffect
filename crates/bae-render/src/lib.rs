@@ -30,6 +30,7 @@
 //! covers `[x, x + 1) × [y, y + 1)`.
 
 pub mod anim;
+mod assets;
 pub mod blend;
 pub mod cache;
 pub mod effect;
@@ -50,6 +51,7 @@ pub mod request;
 pub mod source;
 
 pub use anim::AnimEvaluator;
+pub use assets::AssetFiles;
 pub use blend::{BlendMode, MaskMode, TrackMatteMode};
 pub use cache::{CacheStats, FrameCache, FrameKey};
 pub use effect::{Effect, EffectLibrary, EffectParams};

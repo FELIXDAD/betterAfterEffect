@@ -10,9 +10,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bae_anim::{EvaluatedComp, EvaluatedLayer, Evaluator, LayerSource};
-use bae_model::{AssetFile, AssetResolver, LayerKind, PrimPath, Stage, StageEvent, Time};
+use bae_model::{LayerKind, PrimPath, Stage, StageEvent, Time};
 use glam::{DAffine2, DMat4, DVec2};
 
+use crate::assets::AssetFiles;
 use crate::blend::{BlendMode, MaskMode, TrackMatteMode};
 use crate::error::RenderError;
 use crate::eval::CompEvaluator;
@@ -27,7 +28,7 @@ use crate::request::RenderPurpose;
 #[derive(Debug)]
 pub struct AnimEvaluator {
     inner: Evaluator,
-    assets: AssetResolver,
+    assets: AssetFiles,
     purpose: RenderPurpose,
     warnings: Vec<String>,
 }
@@ -38,10 +39,23 @@ impl AnimEvaluator {
     pub fn new(base_dir: Option<PathBuf>) -> Self {
         Self {
             inner: Evaluator::new(),
-            assets: AssetResolver::new(base_dir, Vec::new()),
+            assets: AssetFiles::new(base_dir),
             purpose: RenderPurpose::Final,
             warnings: Vec::new(),
         }
+    }
+
+    /// An evaluator for an open project: footage is found like `bae_package`
+    /// does, including assets embedded in the `.baez` it was opened from.
+    pub fn for_project(project: &bae_model::Project) -> Result<Self, RenderError> {
+        Ok(Self::new(None).with_assets(AssetFiles::for_project(project)?))
+    }
+
+    /// Uses `assets` to find footage files.
+    #[must_use]
+    pub fn with_assets(mut self, assets: AssetFiles) -> Self {
+        self.assets = assets;
+        self
     }
 
     /// Preview or final (guide layers render only in a top-level preview).
@@ -215,10 +229,14 @@ impl AnimEvaluator {
                 },
                 "footage" | "sequence" => LayerContent::Footage(FootageRef {
                     asset: asset.clone(),
-                    file: stage
-                        .prim(asset)
-                        .and_then(|view| AssetFile::from_prim(&view))
-                        .and_then(|f| self.assets.resolve(&f).path().map(|p| p.to_path_buf())),
+                    file: match stage.prim(asset).map(|view| self.assets.file(&view)) {
+                        Some(Ok(file)) => file,
+                        Some(Err(message)) => {
+                            self.warn(format!("{}: {message}", l.path));
+                            None
+                        }
+                        None => None,
+                    },
                     size: (info.width > 0 && info.height > 0).then_some([info.width, info.height]),
                     source_time: *time,
                 }),

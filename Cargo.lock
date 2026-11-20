@@ -433,6 +433,7 @@ dependencies = [
  "bae-gpu",
  "bae-media",
  "bae-model",
+ "bae-package",
  "bae-platform",
  "bytemuck",
  "clap",

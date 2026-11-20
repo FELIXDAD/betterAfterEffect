@@ -6,8 +6,8 @@ use std::sync::Arc;
 use bae_gpu::{GpuContext, GpuContextDescriptor};
 use bae_model::{PrimPath, Time};
 use bae_render::{
-    BitDepth, BlendMode, FootageRef, IRect, LayerContent, OutputAlpha, RenderComp, RenderLayer,
-    RenderRequest, Renderer, Resolution, TrackMatte, TrackMatteMode,
+    BitDepth, BlendMode, IRect, LayerContent, OutputAlpha, RenderComp, RenderLayer, RenderRequest,
+    Renderer, Resolution, TrackMatte, TrackMatteMode,
 };
 use glam::{DAffine2, DVec2};
 
@@ -453,7 +453,7 @@ fn footage_png_is_sampled_with_straight_alpha_premultiplied() {
     let mut comp = RenderComp::new(p("/comps/main"), 8, 4);
     let mut l = RenderLayer::new(
         p("/comps/main/layers/img"),
-        LayerContent::Footage(FootageRef {
+        LayerContent::Footage(bae_render::FootageRef {
             asset: p("/assets/img"),
             file: Some(path),
             size: None,

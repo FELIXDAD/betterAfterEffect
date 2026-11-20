@@ -24,6 +24,7 @@ bae-app.workspace = true
 bae-gpu.workspace = true
 bae-media = { workspace = true, optional = true }
 bae-model.workspace = true
+bae-package.workspace = true
 bae-platform.workspace = true
 bytemuck.workspace = true
 clap.workspace = true
