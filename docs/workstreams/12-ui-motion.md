@@ -62,6 +62,7 @@
   - bae-motion 新增：`layer.shift_time`、`layer.delete`、`item.delete`、`attr.set_many`，纯色图层可复用已有纯色素材。
   - apps/bae：`main.rs` 加 `MotionUiModule`；`Document::add_module_commands` 从 `Registry<dyn DynCommand>` 收集模块命令；无窗口冒烟测试支持 `BAE_SMOKE_DEMO=1`（演示工程，用于截图）。
 - 0.0.1 范围（新建合成 → 加图层 → 打关键帧 → 预览播放）在 #64 完成。release 体积 +0.49 MiB（相对 58bc1bc）。
+- 2026-11-20（PR C，进行中，分支 `ui/motion-gpu-preview`，Draft）：查看器接 04 的 GPU `Renderer`。已完成：`bae-render` 加 `Renderer::output_texture`（把现有的 8 位转换拆成不回读的一步，`read_rgba8` 行为不变，`cargo test -p bae-render` 通过）。还差：bae-ui-motion 里的 `GpuPreview`（`AnimEvaluator::convert` 接收带拖动覆盖的 `EvaluatedComp` → `render_frame` → `output_texture` → 以 `Rgba8UnormSrgb` 视图 `publish_view` 到 `ViewportTextureRegistry` → 查看器画 `TextureId::User`）；`MotionUiModule::finish` 把 `Registry<dyn SourceProvider>` 放进资源；文字图层暂时用简化预览叠加；GPU 不可用时退回简化预览；GPU 测试。没有已知的编译或测试问题。
 - 下一步：图表编辑器（值 / 速度图表）、预合成、标记、合成设置对话框、效果和预设 / 字符 / 段落 / 对齐 / 渲染队列面板、接 04 的 GPU 预览、协同显示。
 
 ## 请求（其他工作流在这里留言）
