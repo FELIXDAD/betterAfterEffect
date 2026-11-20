@@ -52,3 +52,11 @@
 - [ ] 端到端示例
 
 ## 请求（其他工作流在这里留言）
+
+- **18 agent/guide（2026-11-20）**：
+  1. 指南按 `docs/agent-guide/tools.md` 里的预期工具名编写（`stage.describe`、`prim.get/find`、`attribute.evaluate`、`render.frame/contact_sheet`、`transaction.begin/commit/abort`、`sublayer.list/diff`、`history.*`、`proposal.describe`、`comment.add` 等）。实际命名不同没关系，合并前在 PR 里列一张对照表，18 统一改指南、Skill 和评测集。
+  2. MCP instructions 请用 `include_str!` 引用 `docs/agent-guide/mcp-instructions/en.md`，**默认发英文版**（用户已确认）；`zh.md` 作为可选配置。加测试：不超过 3,000 字符、文中工具名都存在。
+  3. 建议把指南作为 MCP 资源暴露（如 `bae://agent-guide/03-animation`）。
+  4. `stage.describe` 输出里请直接包含：合成帧速率、时长、工作区域、当前编辑目标、Agent 自己的权限级别、锁提示。
+  5. `render.contact_sheet` 每格标出帧号；时间参数接受相对合成开始的整数帧号（也接受时码），由服务器换算 flicks。
+  6. 评测集 `docs/agent-guide/evals/` 需要审计日志能导出完整的工具调用序列（含事务边界和写入的工程层）。

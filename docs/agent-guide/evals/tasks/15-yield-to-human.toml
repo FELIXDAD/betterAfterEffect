@@ -1,0 +1,98 @@
+id = "15-yield-to-human"
+title = "用户改过的值不再覆盖回去"
+category = "collab"
+difficulty = 3
+guide_refs = ["05-collaboration.md"]
+
+prompt = """标题的位置我已经在 anim 层里调好了。你再把副标题往后错开一点。"""
+
+[fixture]
+description = """
+SH090_title 在 anim/shot090 层（作者是用户 user_demo，虚构）。Agent 上一轮在 agent/eval 里覆盖了 title_main 的位置关键帧（第 4–22 帧，落位 (960, 510)）。
+之后用户在 anim/shot090 里把 title_main 的落位改成了 (960, 480)，但因为 agent/eval 层更强，合成里看到的仍是 Agent 的 (960, 510)。
+title_sub 当前第 6–24 帧入场，只比主标题晚 2 帧。
+"""
+sublayers = ["root", "anim/shot090"]
+permission = "own-layer"
+
+[[fixture.prims]]
+path = "/comps/SH090_title"
+type = "Comp"
+sublayer = "anim/shot090"
+author = "user_demo"
+attrs = { width = 1920, height = 1080, fps = 30, duration_frames = 90 }
+from_recipe = "recipes/title-in.md"
+
+[[fixture.prims]]
+path = "/comps/SH090_title/layers/title_main"
+sublayer = "anim/shot090"
+author = "user_demo"
+keyframes."transform:position" = [
+  { frame = 4, value = [960, 520], out = { speed = 0, influence = 15 } },
+  { frame = 22, value = [960, 480], in = { speed = 0, influence = 80 } },
+]
+
+[[fixture.prims]]
+path = "/comps/SH090_title/layers/title_main"
+sublayer = "agent/eval"
+author = "agent/eval"
+keyframes."transform:position" = [
+  { frame = 4, value = [960, 550], out = { speed = 0, influence = 15 } },
+  { frame = 22, value = [960, 510], in = { speed = 0, influence = 80 } },
+]
+
+[[fixture.prims]]
+path = "/comps/SH090_title/layers/title_sub"
+sublayer = "anim/shot090"
+author = "user_demo"
+keyframes."transform:position" = [
+  { frame = 6, value = [960, 620], out = { speed = 0, influence = 15 } },
+  { frame = 24, value = [960, 590], in = { speed = 0, influence = 80 } },
+]
+
+[expected]
+summary = """
+Agent 用 prim.get 发现 title_main 的位置显示的是自己提案层的值，压住了用户在 anim/shot090 的修改；
+用 attr.clear 清除自己在 agent/eval 里对 title_main 位置的覆盖（或者明确问用户后清除），让用户的 (960, 480) 生效。
+把 title_sub 的入场往后挪，使它比主标题晚 4–8 帧（例如第 10–28 帧），写在 agent/eval 里。
+回复中说明发现并移除了旧覆盖。
+"""
+
+[[checks]]
+id = "h1-own-layer"
+kind = "writes_only_to"
+args = { sublayer = "agent/eval" }
+maps_to = "H1"
+hard = true
+
+[[checks]]
+id = "c3-yield"
+kind = "no_opinion"
+args = { sublayer = "agent/eval", path = "/comps/SH090_title/layers/title_main", attribute = "transform:position" }
+maps_to = "C3"
+hard = true
+
+[[checks]]
+id = "user-value-visible"
+kind = "attr_at"
+args = { path = "/comps/SH090_title/layers/title_main", attribute = "transform:position", frame = "last", equals = [960, 480], tolerance = 0.5 }
+maps_to = "C3"
+hard = true
+
+[[checks]]
+id = "t4-stagger"
+kind = "stagger"
+args = { paths = ["/comps/SH090_title/layers/title_main", "/comps/SH090_title/layers/title_sub"], attribute = "transform:position", min_gap = 4, max_gap = 8 }
+maps_to = "T4"
+hard = true
+
+[[checks]]
+id = "explains"
+kind = "reply_mentions"
+args = { regex = "覆盖|压住|提案层" }
+maps_to = "C2"
+
+[judge]
+frames = [22, "last"]
+contact_sheet = { start = 0, end = 36, step = 2 }
+focus = ["主标题位置是否是用户调过的 (960, 480)"]

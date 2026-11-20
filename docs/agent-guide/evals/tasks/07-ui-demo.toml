@@ -1,0 +1,107 @@
+id = "07-ui-demo"
+title = "登录到首页的产品演示"
+category = "ui"
+difficulty = 2
+guide_refs = ["recipes/ui-motion.md", "03-animation.md"]
+
+prompt = """做一个 6 秒的产品演示：手机画面里，光标点击"登录"按钮，然后首页从右侧推入。"""
+
+[fixture]
+description = """
+design/assets 里有两个虚构的界面画板：/assets/login_screen 和 /assets/home_screen，都是 1170×2532（手机竖屏 3 倍图），
+内容由纯色块和文字组成（脚本生成）。login_screen 里的"登录"按钮 login_button 位于 (585, 1900)，尺寸 900×140。
+主合成需要 Agent 新建；工程里没有设备外框。
+"""
+sublayers = ["root", "design/assets"]
+permission = "own-layer"
+
+[[fixture.prims]]
+path = "/assets/login_screen"
+type = "Artboard"
+sublayer = "design/assets"
+attrs = { size = [1170, 2532], background = "#F7F7FA" }
+
+[[fixture.prims]]
+path = "/assets/login_screen/login_button"
+type = "ShapeGroup"
+sublayer = "design/assets"
+attrs = { rect = [900, 140], position = [585, 1900], fill = "#3B6CFF", label = "登录" }
+
+[[fixture.prims]]
+path = "/assets/home_screen"
+type = "Artboard"
+sublayer = "design/assets"
+attrs = { size = [1170, 2532], background = "#FFFFFF", generated_cards = 4 }
+
+[[followup]]
+when = "问到尺寸或帧速率"
+answer = "1920×1080，30 fps。"
+
+[expected]
+summary = """
+新建 6 秒合成，手机屏幕内容放在按 1170×2532 建的预合成里，在主合成里缩小显示（有效缩放不超过 100%）。
+光标移动到"登录"按钮（缓动，不瞬移），停顿 4–6 帧，按下（按钮轻微缩小 + 点击扩散），然后首页从右向左推入（12–18 帧，入场·强），
+旧页面同时向左移动并变暗；之后停留至少 1 秒看结果。光标移动和界面变化不同时发生。
+"""
+
+[[checks]]
+id = "h1-own-layer"
+kind = "writes_only_to"
+args = { sublayer = "agent/eval" }
+maps_to = "H1"
+hard = true
+
+[[checks]]
+id = "h8-asset-untouched"
+kind = "no_opinions_on_source"
+args = { sublayer = "design/assets" }
+maps_to = "H8"
+hard = true
+
+[[checks]]
+id = "h2-duration"
+kind = "comp_settings"
+args = { find = { type = "Comp", not_name_regex = "^pc_" }, duration_seconds = 6 }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "v5-no-upscale"
+kind = "no_upscale"
+args = { under = "/comps/*" }
+maps_to = "V5"
+
+[[checks]]
+id = "pause-before-click"
+kind = "judge_question"
+args = { question = "光标到达按钮后、按下之前是否有 4 帧以上的停顿？" }
+maps_to = "T7"
+
+[[checks]]
+id = "push-direction"
+kind = "judge_question"
+args = { question = "首页是否从右向左推入，旧页面同时向左移出？" }
+maps_to = "H2"
+
+[[checks]]
+id = "one-thing-at-a-time"
+kind = "judge_question"
+args = { question = "光标移动和界面变化是否没有同时发生？" }
+maps_to = "V3"
+
+[[checks]]
+id = "m1-no-linear"
+kind = "no_linear_temporal"
+args = { under = "/comps/*", allow = ["transform:opacity"] }
+maps_to = "M1"
+
+[[checks]]
+id = "p5-markers"
+kind = "marker_exists"
+args = { comp = { type = "Comp", not_name_regex = "^pc_" }, name_regex = "^step_" }
+maps_to = "P5"
+
+[judge]
+frames = ["1s", "2.5s", "last"]
+contact_sheet = { start = 0, end = "4s", step = 3 }
+focus = ["屏幕文字是否清晰", "节奏是否让人看得懂操作"]

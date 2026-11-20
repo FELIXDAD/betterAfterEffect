@@ -1,0 +1,107 @@
+id = "05-data-chart"
+title = "三年用户数柱状图"
+category = "chart"
+difficulty = 2
+guide_refs = ["recipes/data-chart.md", "03-animation.md"]
+
+prompt = """把这组数据做成一个 6 秒的柱状图动画：2023 年 120 万用户，2024 年 185 万，2025 年 260 万。图表标题"用户增长"，数据来源写"内部统计"。"""
+
+[fixture]
+description = "空工程，只有 root 工程层。数据是虚构的。"
+sublayers = ["root"]
+permission = "own-layer"
+
+[[followup]]
+when = "问到尺寸或帧速率"
+answer = "1920×1080，30 fps。"
+
+[expected]
+summary = """
+新建 6 秒合成。三根柱子按年份从左到右，数值轴从 0 开始，高度比例 120 : 185 : 260（误差 2% 以内）。
+柱子从底部生长（锚点在底边），按年份依次错帧 3–6 帧，入场·强，不过冲。
+每根柱子上的数字与柱子同步滚动，停留段显示 120、185、260（可带"万"）。年份标签、标题"用户增长"、来源"内部统计"齐全。
+停留至少 3 秒。
+"""
+
+[[checks]]
+id = "h1-own-layer"
+kind = "writes_only_to"
+args = { sublayer = "agent/eval" }
+maps_to = "H1"
+hard = true
+
+[[checks]]
+id = "h2-duration"
+kind = "comp_settings"
+args = { find = { type = "Comp" }, duration_seconds = 6 }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "h2-title"
+kind = "text_layer_exists"
+args = { value = "用户增长" }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "h2-source"
+kind = "text_layer_exists"
+args = { regex = "内部统计" }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "h2-proportional"
+kind = "values_proportional"
+args = { paths = ["/comps/*/layers/bar_01", "/comps/*/layers/bar_02", "/comps/*/layers/bar_03"], attribute = "bounds:height", values = [120, 185, 260], frame = "last", tolerance = 0.02 }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "h2-final-values"
+kind = "judge_question"
+args = { question = "停留段三个数字是否分别是 120、185、260（可带单位），并且对应正确的柱子？" }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "m9-no-overshoot"
+kind = "attr_never_exceeds"
+args = { path = "/comps/*/layers/bar_03", attribute = "bounds:height", limit_from_frame = "last" }
+maps_to = "M9"
+
+[[checks]]
+id = "t5-stagger"
+kind = "stagger"
+args = { paths = ["/comps/*/layers/bar_01", "/comps/*/layers/bar_02", "/comps/*/layers/bar_03"], attribute = "*", min_gap = 2, max_gap = 8 }
+maps_to = "T5"
+
+[[checks]]
+id = "sync-numbers"
+kind = "judge_question"
+args = { question = "数字是否和柱子同时到达终值（相差不超过 2 帧）？" }
+maps_to = "M3"
+
+[[checks]]
+id = "axis-zero"
+kind = "judge_question"
+args = { question = "柱子是否从同一条零基线开始生长，没有截断坐标轴？" }
+maps_to = "H2"
+
+[[checks]]
+id = "t6-hold"
+kind = "attr_still"
+args = { path = "/comps/*/layers/bar_03", attribute = "bounds:height", from = "3s", to = "last" }
+maps_to = "T6"
+
+[[checks]]
+id = "p1-naming"
+kind = "naming"
+args = { under = "/comps/*", regex = "^[a-z0-9_]+$|^SH[0-9]{3}_[a-z0-9_]+$", forbid_defaults = true }
+maps_to = "P1"
+
+[judge]
+frames = ["1s", "2.5s", "last"]
+contact_sheet = { start = 0, end = "3s", step = 3 }
+focus = ["柱子高度比例看起来是否正确", "数字滚动最后几帧是否在跳动"]
