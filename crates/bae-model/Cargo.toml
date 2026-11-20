@@ -19,5 +19,8 @@ schemars.workspace = true
 thiserror.workspace = true
 rustc-hash.workspace = true
 indexmap.workspace = true
+zip.workspace = true
+blake3.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true

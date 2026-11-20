@@ -1,0 +1,123 @@
+id = "08-animatic"
+title = "分镜表生成动态分镜"
+category = "animatic"
+difficulty = 2
+guide_refs = ["04-storyboard.md", "recipes/animatic.md"]
+
+prompt = """把分镜表 sb01 做成动态分镜。"""
+
+[fixture]
+description = """
+storyboard 工程层里有分镜表 /boards/sb01（24 fps），五个分镜格，画面是脚本生成的灰阶草图。
+sh030 缺时长；sh040 的镜头运动写成了不规范的"慢慢推进去"；sh040 到 sh050 的转场是"叠化 12f"。
+"""
+sublayers = ["root", "storyboard"]
+permission = "own-layer"
+
+[[fixture.prims]]
+path = "/boards/sb01"
+type = "Board"
+sublayer = "storyboard"
+attrs = { fps = 24 }
+
+[[fixture.prims]]
+path = "/boards/sb01/panels/sh010"
+type = "Panel"
+sublayer = "storyboard"
+attrs = { shot = "SH010", duration_frames = 72, shot_size = "全景 FS", camera = "固定", action = "0f 城市清晨全景", image = "generated:sketch_01" }
+
+[[fixture.prims]]
+path = "/boards/sb01/panels/sh020"
+type = "Panel"
+sublayer = "storyboard"
+attrs = { shot = "SH020", duration_frames = 48, shot_size = "中景 MS", camera = "推 100%→110%，0–48f，柔和", action = "0f 主角走进画面", image = "generated:sketch_02" }
+
+[[fixture.prims]]
+path = "/boards/sb01/panels/sh030"
+type = "Panel"
+sublayer = "storyboard"
+attrs = { shot = "SH030", shot_size = "特写 CU", camera = "固定", action = "0f 主角抬头", dialogue = "12f 主角：又是新的一天。", image = "generated:sketch_03" }
+
+[[fixture.prims]]
+path = "/boards/sb01/panels/sh040"
+type = "Panel"
+sublayer = "storyboard"
+attrs = { shot = "SH040", duration_frames = 60, shot_size = "近景 MCU", camera = "慢慢推进去", transition = "叠化 12f", image = "generated:sketch_04" }
+
+[[fixture.prims]]
+path = "/boards/sb01/panels/sh050"
+type = "Panel"
+sublayer = "storyboard"
+attrs = { shot = "SH050", duration_frames = 96, shot_size = "远景 LS", camera = "固定", action = "0f 标题出现", image = "generated:sketch_05" }
+
+[expected]
+summary = """
+生成一个序列（Sequence），五个片段按 SH010–SH050 顺序排列，时长 72、48、（缺失，默认 48 并标出）、60、96 帧；
+sh030 有台词"又是新的一天。"，按每秒 4 字估算需要约 2.5 秒以上，Agent 应在报告中指出默认时长可能不够。
+SH020 有 100%→110% 的推镜；SH040 按"推"处理并在报告中指出原写法不规范；SH040→SH050 有 12 帧叠化。
+不修改分镜格的画面；每个镜头开始处有以镜头号命名的标记；片段与分镜格的 Shot 关联保持不变。
+最后向用户报告总时长和问题列表（SH030 缺时长、SH040 镜头运动写法不规范）。
+"""
+
+[[checks]]
+id = "h1-own-layer"
+kind = "writes_only_to"
+args = { sublayer = "agent/eval" }
+maps_to = "H1"
+hard = true
+
+[[checks]]
+id = "h2-sequence"
+kind = "prim_exists"
+args = { find = { type = "Sequence" } }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "h2-five-clips"
+kind = "prim_count"
+args = { under = { type = "Sequence" }, find = { type = "Clip" }, equals = 5 }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "images-untouched"
+kind = "no_opinion"
+args = { sublayer = "agent/eval", path = "/boards/sb01/panels/*", attribute = "image" }
+maps_to = "C3"
+hard = true
+
+[[checks]]
+id = "report-sh030"
+kind = "reply_mentions"
+args = { regex = "(?i)sh030" }
+maps_to = "C2"
+
+[[checks]]
+id = "report-sh040"
+kind = "reply_mentions"
+args = { regex = "(?i)sh040" }
+maps_to = "C2"
+
+[[checks]]
+id = "markers"
+kind = "judge_question"
+args = { question = "序列上每个镜头开始处是否有以镜头号命名的标记？" }
+maps_to = "P5"
+
+[[checks]]
+id = "camera-sh020"
+kind = "judge_question"
+args = { question = "SH020 是否有约 100%→110% 的推镜，并且是缓动而不是线性？" }
+maps_to = "H2"
+
+[[checks]]
+id = "dialogue-length"
+kind = "judge_question"
+args = { question = "Agent 是否指出 SH030 的默认时长可能容纳不下台词？" }
+maps_to = "C6"
+
+[judge]
+frames = []
+contact_sheet = { start = 0, end = "last", step = 12 }
+focus = ["顺序和时长是否与分镜表一致", "推镜是否露底"]
