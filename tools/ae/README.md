@@ -30,6 +30,7 @@ tools/ae/aectl stop                       # 不保存关闭工程并结束 AE
 | 弹 "A copy of your project was saved at …/After Effects Crash_N.aep" | 用 `SIGTERM` 结束、甚至正常 `app.quit()`，AE 都会走崩溃流程 | 结束 AE 一律用 `SIGKILL`；`stop` 先不保存关闭工程再结束进程 |
 | 脚本里调用了 `alert()` 等 | 原生模态框 | 主线程连续 3 次（约 9 秒）处在阻塞式模态循环里（`OS_Dialog::ModalLoop`、`runModalForWindow`、`_doModalLoop`），就判定卡住：保存现场 → 结束 → 清理 → 下次自动重启 |
 | 主线程停在同一个不在执行脚本的调用栈上不动（实际遇到过：挂载磁盘卷时卡在 `DiskArbitration → NetFS → NSXPC` 的同步等待里） | 不是对话框，但 AE 永远不会去执行脚本 | 有脚本在等结果时，连续约 30 秒（10 次采样）主线程调用栈完全一样、并且不在执行 ExtendScript，就判定卡死，按同样的流程恢复 |
+| 调用方的脚本超时后，下一个调用方也跟着超时 | osascript 放弃等待之后，AE 仍在执行那段脚本，后来的脚本只能排在它后面 | 超时就保存现场、结束 AE、清理，然后才放锁，下一个调用方会拿到一个干净的 AE。`--timeout` 要按脚本的实际耗时留足余量 |
 | 长脚本运行时主线程出现 `runModalSession` | AE 在跑长操作时一边处理一边刷新界面，并没有在等人点 | 不算卡住 |
 | 需要"允许脚本写入文件和访问网络" | 偏好 `Pref_SCRIPTING_FILE_NETWORK_SECURITY` | AE 关着的时候由 `aectl install` 打开（会先备份） |
 
