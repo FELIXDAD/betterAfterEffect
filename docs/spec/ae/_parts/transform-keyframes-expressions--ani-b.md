@@ -4,7 +4,7 @@
 
 - **What it does:** Selects which language runtime evaluates every expression in the project: the JavaScript engine (ECMAScript 2018) or the Legacy ExtendScript engine (ECMAScript 3).
 - **Exact semantics:**
-  - Project-level setting, File > Project Settings > Expressions tab (项目设置 > 表达式（译名待核）).
+  - Project-level setting, File > Project Settings > Expressions tab (项目设置 > 表达式 > 表达式引擎, per the zh-CN help).
 
   | Parameter (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
@@ -82,7 +82,7 @@
   - Comparison operators (`==`, `<`) on arrays are NOT overloaded: `[1,2] == [1,2]` is `false` (reference comparison).
 - **Priority:** P0 (pick-whip expressions like `value + [10,0]` depend on it)
 - **Owner:** bae-anim
-- **Notes:** UNVERIFIED: AE's exact rule for array + scalar (first element only) is taken from lottie-web, which replicates AE; Dan Ebberts' material agrees. Implementation hint: do the rewrite once at compile time with a small JS parser pass (e.g. SWC/oxc-style AST rewrite done in Rust before handing source to QuickJS, or a QuickJS-side transform) mapping binary `+ - * /` and unary `-` to `$bm_sum` etc.; fast-path both operands numeric inline so scalar expressions do not pay a call. Do not rewrite inside string/template literals or regexes. Keep the rewrite off for `.jsx` libraries and `eval()` to match AE.
+- **Notes:** Array + scalar affecting only element [0] (and array − scalar likewise) matches lottie-web and is confirmed by a secondary source (ProVideo Coalition, "Deeper into arrays": https://www.provideocoalition.com/dmoe3_deeper_into_arrays/); not stated in Adobe's reference. Note also that AE's `add()` requires exactly two arguments. Implementation hint: do the rewrite once at compile time with a small JS parser pass (e.g. SWC/oxc-style AST rewrite done in Rust before handing source to QuickJS, or a QuickJS-side transform) mapping binary `+ - * /` and unary `-` to `$bm_sum` etc.; fast-path both operands numeric inline so scalar expressions do not pay a call. Do not rewrite inside string/template literals or regexes. Keep the rewrite off for `.jsx` libraries and `eval()` to match AE.
 
 ### AE-ANI-404 · Expression on a property and the enable switch (属性表达式与启用表达式开关)
 
@@ -610,7 +610,7 @@
   - Note the naming: AE's `easeIn` eases at the *start* (tMin side) — the opposite of the keyframe "Easy Ease In" wording, which eases into the incoming keyframe.
 - **Priority:** P0
 - **Owner:** bae-anim
-- **Notes:** The bezier constants are lottie-web's (`BezierFactory.getBezierEasing`), chosen to match AE; AE's exact curve is undocumented — UNVERIFIED (it may be a cubic Hermite/smoothstep-like curve; values differ by < 1% between candidates). Verify by sampling AE at u = 0.1…0.9 before M1. lottie-web clamps u but, for tMax == tMin, divides by zero (NaN); BAE: `tMax == tMin` → return value1 if t <= tMin else value2 (same boundary rule as `linear`, whose documented contract is value1 for t <= tMin and value2 for t >= tMax). Implementation hint: precompute a 256-entry lookup + one Newton step like the keyframe evaluator (see ani-a temporal ease).
+- **Notes:** The bezier constants are lottie-web's (`BezierFactory.getBezierEasing`), chosen to match AE; AE's exact curve is undocumented — UNVERIFIED. Secondary evidence: an Adobe-community user reports that a cubic bezier with handles (0.33, 0, 0.66, 1) reproduces `ease()` exactly (https://community.adobe.com/t5/after-effects-discussions/custom-easing-for-keyframe-less-animation/td-p/14533158), consistent with lottie-web's (0.33, 0, 0.667, 1). Verify all three curves by sampling AE at u = 0.1…0.9 before M1. lottie-web clamps u but, for tMax == tMin, divides by zero (NaN); BAE: `tMax == tMin` → return value1 if t <= tMin else value2 (same boundary rule as `linear`, whose documented contract is value1 for t <= tMin and value2 for t >= tMax). Implementation hint: precompute a 256-entry lookup + one Newton step like the keyframe evaluator (see ani-a temporal ease).
 
 ## Color conversion methods
 
