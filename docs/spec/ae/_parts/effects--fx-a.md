@@ -33,13 +33,13 @@
   - Adding an effect inserts it at the bottom of the stack when nothing is selected; when an effect is selected in Effect Controls the new effect is inserted below it (UNVERIFIED: AE 2015+ behaviour; older versions always appended at the bottom).
 - **Priority:** P0 — the basis of every effect.
 - **Owner:** bae-render (+ bae-model, bae-effects)
-- **Notes:** Scripting: `layer.property("ADBE Effect Parade")` (= `layer.Effects`, `layer.effect`), `addProperty(matchName)` appends an effect; `PropertyBase.moveTo(newIndex)` reorders. Expressions: `effect("Name")` or `effect(index)` (see transform-keyframes-expressions.md, effect object). Lottie: layer `ef` array, each entry `{ty, nm, mn, ix, en, ef:[values]}`; lottie-web only renders a few effect types (Tint 20, Fill 21, Stroke 22, Tritone 23, Pro Levels 24, Drop Shadow 25, Set Matte 28, Gaussian Blur 29, ...) and treats others (including `ty: 5` custom/expression-control effects) as data only. Implementation hint: build each layer's effect chain as a linear sub-graph of the render graph; adjacent pixel-independent effects (PF_OutFlag_PIX_INDEPENDENT, e.g. Levels → Curves → Tint) can be fused into one WGSL pass.
+- **Notes:** Scripting: `layer.property("ADBE Effect Parade")` (= `layer.Effects`, `layer.effect`), `addProperty(matchName)` appends an effect; `PropertyBase.moveTo(newIndex)` reorders. Expressions: `effect("Name")` or `effect(index)` (see transform-keyframes-expressions.md, effect object). Lottie: layer `ef` array, each entry `{ty, nm, mn, ix, en, np, ef:[values]}`. The bodymovin exporter assigns effect `ty` by matchName: 20 Tint, 21 Fill, 22 Stroke, 23 Tritone, 24 Pro Levels (Levels is converted to it), 25 Drop Shadow, 26 Radial Wipe, 27 Displacement Map, 28 Set Matte (`ADBE Set Matte3`), 29 Gaussian Blur (`ADBE Gaussian Blur 2`), 30 Twirl, 31 Mesh Warp, 32 Ripple, 33 Spherize, 34 Puppet (`ADBE FreePin3`), 35 Transform (`ADBE Geometry2`); every other effect (including expression controls) is exported as `ty: 5` (custom effect) with `mn` = its matchName. Bodymovin skips disabled effects unless "include hidden data" is set. lottie-web renders only a subset of these types and treats `ty: 5` effects as data for expressions. Source: bodymovin-extension `bundle/jsx/utils/effectsHelper.jsx`. Implementation hint: build each layer's effect chain as a linear sub-graph of the render graph; adjacent pixel-independent effects (PF_OutFlag_PIX_INDEPENDENT, e.g. Levels → Curves → Tint) can be fused into one WGSL pass.
 
 ### AE-FX-002 · Apply, duplicate, copy/paste and delete effects (应用、复制、粘贴和删除效果)
 
 - **What it does:** Basic editing commands on effect instances: apply from Effects & Presets / Effect menu, duplicate, copy/paste between layers, delete, rename.
 - **Exact semantics:**
-  - Apply: drag from Effects & Presets onto a layer (Timeline, Composition viewer or Effect Controls), double-click in Effects & Presets with layers selected (applies to every selected layer), or choose from the Effect menu (category submenus). If no layer is selected, double-clicking an animation preset creates a new layer; double-clicking an effect does nothing (UNVERIFIED for effects; documented for presets).
+  - Apply: drag from Effects & Presets onto a layer (Timeline, Composition viewer or Effect Controls), double-click in Effects & Presets with layers selected (applies to every selected layer), or choose from the Effect menu (category submenus). If no layer is selected, double-clicking an animation preset creates a new layer and applies the preset to it; double-clicking an effect does nothing (both documented in Adobe help, Effects and animation presets overview).
   - Effect > [last applied effect] (Ctrl+Alt+Shift+E / Cmd+Opt+Shift+E) re-applies the most recently applied effect to the selected layers.
   - Duplicate (Ctrl/Cmd+D) on a selected effect creates a copy directly below it with all keyframes, expressions and Compositing Options; the copy gets a numbered name ("Blur 2").
   - Paste of an effect onto a layer: if the target layer already has exactly one instance of that effect (same matchName) and the clipboard holds one instance, the paste replaces the existing instance's values instead of adding a new one; once a layer has two or more instances of that effect, paste adds a new instance (Adobe help, Effects and animation presets overview). Pasted keyframes start at the current time (keyframe paste rules: see transform-keyframes-expressions.md, copy/paste keys).
@@ -54,10 +54,10 @@
 
 - **What it does:** Each effect instance has an on/off switch; each layer has an "fx" switch that disables all of its effects at once.
 - **Exact semantics:**
-  - Per-effect switch (Effect Controls / Timeline, left of the effect name; drawn as "fx" icon, an eyeball icon in the AE 2025+ modernised Effect Controls): when off, the effect is skipped entirely (its input passes through unchanged), its parameters still evaluate and its keyframes are kept. Scripting: `PropertyBase.enabled` on the effect group; Lottie `en: 0|1`.
+  - Per-effect switch (Effect Controls / Timeline, left of the effect name; drawn as "fx" icon, an eyeball icon in the latest AE's modernised Effect Controls per Adobe help, UNVERIFIED version): when off, the effect is skipped entirely (its input passes through unchanged), its parameters still evaluate and its keyframes are kept. Scripting: `PropertyBase.enabled` on the effect group; Lottie `en: 0|1` (bodymovin omits disabled effects by default, so exported files normally contain only `en: 1`).
   - Layer Effects switch (Switches column, "fx", 效果): when off, every effect of that layer is skipped for preview and render. Scripting: `AVLayer.effectsActive` (boolean). Not animatable.
   - Render Settings > Effects (Current Settings / All On / All Off) overrides the switches at render time (see ui-preview-render-io.md, Render Queue).
-  - Expression Controls effects are never rendered regardless of the switch, but their values still evaluate for expressions even when the effect switch is off (UNVERIFIED: AE returns the parameter value from a disabled effect; it does).
+  - Expression Controls effects never change pixels; expressions keep reading their values when the effect switch is off (UNVERIFIED: AE returns the parameter value of a disabled effect; widely relied on in rigs, not documented).
   - Neither switch is keyframeable; to fade an effect in time animate Effect Opacity (AE-FX-005) or effect parameters.
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-render, bae-ui-motion)
@@ -76,7 +76,7 @@
   | parameters | ordered list | One property per parameter, keyed by parameter ID (AE-FX-007), each with static value or keyframes and an optional expression. |
   | compositing options | group | AE-FX-005, AE-FX-006. |
   | sequence data | opaque bytes | Per-instance private state of the effect (flattened sequence data); built-in BAE effects normally keep none. |
-  | label / selection | UI only | Not persisted per effect except selection state. |
+  | label | label index (0 = none, 1..16) | Colour label of the effect instance, shown as a swatch in Effect Controls and optionally tinting the effect row (panel menu: Show Effect Label Swatch, Use Label Color for Effect Background). New in the latest AE release documented by Adobe help (UNVERIFIED version, AE 26.x); same label set as layer labels (project-comp-layers.md, labels). |
   - Effects have no in/out times of their own; an effect is active for the whole layer duration.
   - Scripting: `effect.isEffect === true`, `effect.propertyIndex`, `effect.canSetEnabled`. `app.effects` lists installed effects with `displayName`, `matchName`, `category`.
 - **Priority:** P0
@@ -85,7 +85,7 @@
 
 ### AE-FX-005 · Compositing Options: Effect Opacity (合成选项：效果不透明度)
 
-- **What it does:** Every effect (AE CS6 11.0 and later) has a Compositing Options group whose Effect Opacity blends the effect's output with its input, like a per-effect "Blend With Original".
+- **What it does:** Every effect (AE CC 2014 13.0 and later) has a Compositing Options group whose Effect Opacity blends the effect's output with its input, like a per-effect "Blend With Original".
 - **Exact semantics:**
   - Group `"ADBE Effect Built In Params"` (合成选项, Compositing Options), appended after the effect's own parameters. Child `"ADBE Effect Mask Opacity"` = Effect Opacity (效果不透明度): percent, default 100%, valid 0…100%, keyframeable, expression-capable.
   ```
@@ -107,12 +107,12 @@
   - Under Compositing Options, "+" adds a mask reference, "−" removes the last one. Each reference has:
     | Parameter (中文) | Type | Default | Range | Units | Notes |
     |---|---|---|---|---|---|
-    | Mask Reference N (蒙版引用 N) | popup | None (无) | None, then every mask on this layer by name (Mask 1, Mask 2, ...) | — | Dynamic list; renaming a mask updates the menu. |
+    | Mask Reference N (蒙版引用 N) | popup | the first mask of the layer when the reference is added with "+" | None (无), then every mask on this layer by name (Mask 1, Mask 2, ...) | — | Dynamic list ("dynamic stream" per Adobe help); renaming or adding a mask updates the menu. |
     | Inverted (反转) | checkbox | off | — | — | UNVERIFIED: per-reference invert checkbox next to the menu. |
   - Coverage: each referenced mask is rasterised with its own path, feather (incl. per-vertex feather), expansion, opacity and mode; references are combined in their order using the masks' modes (Add, Subtract, Intersect, Lighten, Darken, Difference; None contributes nothing), exactly as layer masks combine (compositing-3d-color.md, Masks). Result `m(x,y) ∈ [0,1]`, used in AE-FX-005: `out = lerp(in, fx, effectOpacity * m)`.
   - A mask that is referenced by any effect's Compositing Options does not cut the layer's alpha (UNVERIFIED: AE treats referenced masks as effect-only when their mode is None; with any other mode the mask also applies to the layer — users set the mask mode to None to use it purely as an effect mask). Adobe help: "An effect mask cannot be used to modify the alpha channel of a layer."
   - Mask Opacity scales the effect intensity inside that mask. Only masks on the same layer can be referenced; references to a deleted mask revert to None.
-  - Version: Compositing Options and Mask Reference added in AE CS6 (11.0, 2012).
+  - Version: Compositing Options (Effect Opacity and Mask Reference) added in AE CC 2014 (13.0, June 2014). Source: https://helpx.adobe.com/after-effects/using/mask-reference.html and CC 2014 release coverage.
 - **Priority:** P1
 - **Owner:** bae-render (+ bae-model, bae-vector)
 - **Notes:** UNVERIFIED match names: references group `"ADBE Effect Mask Parade"`, each reference `"ADBE Effect Mask"` with `"ADBE Effect Path Stream Ref"` (menu) and `"ADBE Effect Mask Invert"` (checkbox). Scripting cannot set the referenced mask directly in AE (known limitation). Implementation hint: reuse the mask coverage rasteriser of the layer-mask pass and feed it as a texture into the per-effect mix shader.
@@ -122,8 +122,8 @@
 - **What it does:** Defines how each effect parameter is identified in projects, scripts, expressions and plug-ins.
 - **Exact semantics:**
   - Index: parameters are numbered 1..n in UI order (`effect.property(1)` = first visible parameter). The SDK numbers them 0..n with param[0] = input layer; SDK index k ↔ property index k.
-  - Group start markers (topics) occupy an index; the matching group end does not appear as a property (UNVERIFIED: scripting sees the topic as a PropertyGroup; its children continue the effect-level numbering in match names).
-  - Parameter match name: `"<effect matchName>-NNNN"`, NNNN = 4-digit zero-padded disk ID, e.g. Slider Control's slider = `"ADBE Slider Control-0001"`, Levels (Individual Controls) Red Gamma = `"ADBE Pro Levels2-0013"` (UNVERIFIED index). For built-in effects the disk ID equals the 1-based index at the time the effect was designed; later-added parameters get new IDs appended even if they are displayed earlier (so disk ID ≠ display index for some effects, e.g. parameters added in newer versions). Expressions and scripts that address by match name survive localisation; by display name they do not.
+  - Parameter groups (topics) are flattened: scripting lists both the group start and the group end as ordinary properties of the effect (value type NO_VALUE; the AE 26 dump of Shadow/Highlight shows `-0006` and `-0015` both named "More Options"), so each consumes one property index and one disk ID, and the parameters inside continue the effect-level numbering. Bodymovin exports them as `ty: 6` no-value entries (e.g. Pro Levels `-0003` RGB start, `-0009` RGB end).
+  - Parameter match name: `"<effect matchName>-NNNN"`, NNNN = 4-digit zero-padded disk ID, e.g. Slider Control's slider = `"ADBE Slider Control-0001"`, Levels (Individual Controls) Red Gamma = `"ADBE Pro Levels2-0013"` (confirmed by bodymovin's hard-coded Pro Levels export table). For built-in effects the disk ID equals the 1-based index at the time the effect was designed; later-added parameters get new IDs appended even if they are displayed earlier (so disk ID ≠ display index for some effects, e.g. parameters added in newer versions). Property index and disk ID can also differ when a disk ID is hidden or shown out of order: Curves lists `-0002` (Channel) before `-0001` (Curves); Hue/Saturation starts at `-0002` (no visible `-0001`). Expressions and scripts that address by match name survive localisation; by display name they do not.
   - Disk ID (SDK `PF_ParamDef.uu.id`) is the stable key under which AE stores the parameter value in the project; a plug-in can reorder parameters in the UI while keeping disk IDs (SDK "Changing parameter orders").
   - Display name = localised UI string (e.g. "Gamma" / "灰度系数"); `PropertyBase.name` returns it.
 - **Priority:** P0 — required for AE project import, Lottie (`mn`) and expressions.
@@ -146,15 +146,15 @@
   - Graph editor and velocity work like any 1D property (transform-keyframes-expressions.md, Keyframes and interpolation).
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-anim, bae-ui-motion)
-- **Notes:** Lottie value `ty: 0` (Slider) and `ty: 1` (Angle), value in `v` (animatable property with `a`, `k`). Expression `effect("X")(n).value` returns a Number.
+- **Notes:** Lottie docs: value `ty: 0` (Slider) and `ty: 1` (Angle), value in `v` (animatable property with `a`, `k`). The bodymovin exporter, however, writes every one-dimensional interpolatable parameter, angles included, as `ty: 0`; importers must accept both. Expression `effect("X")(n).value` returns a Number.
 
 ### AE-FX-009 · Checkbox and popup parameters (复选框和弹出菜单参数)
 
 - **What it does:** Discrete parameters: on/off checkbox and enumerated popup menu.
 - **Exact semantics:**
-  - Checkbox (`PF_Param_CHECKBOX`): value 0/1 (expressions return `0`/`1`; scripting returns `true/false`... UNVERIFIED: scripting `value` returns 1/0 for effect checkboxes). `PF_ParamFlag_CANNOT_INTERP` is forced on: keyframes are always Hold. Expression results are thresholded: non-zero → on (UNVERIFIED rounding rule: AE treats value ≥ 0.5 as on? report: any non-zero is on).
+  - Checkbox (`PF_Param_CHECKBOX`): value 0/1. Both expressions and scripting see a one-dimensional Number (`PropertyValueType.OneD`, value 0 or 1), not a boolean. `PF_ParamFlag_CANNOT_INTERP` is forced on: keyframes are always Hold. UNVERIFIED: an expression result is treated as on when non-zero (vs. a ≥ 0.5 threshold).
   - Popup (`PF_Param_POPUP`): value = 1-based item index (A_long). Items are fixed at effect definition ("Entry1|Entry2|..."; "(-" draws a separator, which still consumes an index). Keyframes are Hold only. Expression results are rounded to the nearest integer and clamped to [1, n] (UNVERIFIED rounding).
-  - Lottie: checkbox `ty: 4`, popup/dropdown `ty: 7`; values stored as numbers (popup 1-based).
+  - Lottie docs: checkbox `ty: 4`, popup/dropdown `ty: 7`; values stored as numbers (popup 1-based). Bodymovin classifies any one-dimensional parameter that cannot interpolate linearly as `ty: 7`, so AE checkboxes are exported as `ty: 7` with value 0/1; importers must accept both.
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-anim)
 - **Notes:** Popup menu text is localised; projects store only the index, so BAE must keep AE's item order exactly as given in each effect item below. Dropdown Menu Control (AE-FX-035) is the only popup whose items the user edits.
@@ -179,22 +179,22 @@
   - `PF_Param_POINT_3D` (AE CS5.5 / 10.5+): (x, y, z) pixels; default similarly relative to layer size (z in pixels).
   - Coordinate space: layer space for normal layers; comp space for continuously-rasterised layers and collapsed precomps (shape and text layers always comp space) (Adobe help, Effect control points).
   - Origin offset: if an upstream effect expanded the buffer, AE adds the offset so the point still refers to the same layer pixel (SDK "Point Parameter Origin").
-  - Animation: both dimensions animate together; point parameters are spatial (motion path shown in the viewer with spatial bezier/auto-bezier handles) (UNVERIFIED: effect points use spatial interpolation like Position; they draw motion paths in the Layer panel). Separate Dimensions is not available on effect points.
+  - Animation: both dimensions animate together. UNVERIFIED: effect points are spatial properties like Position (spatial bezier/auto-bezier handles, motion path in the Layer panel). Separate Dimensions is not available on effect points.
   - Downsampling: pixel values are multiplied by the downsample factor before rendering (AE-FX-018).
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-anim, bae-ui-motion)
-- **Notes:** Lottie `ty: 3` (Point; 3D points are exported as 3-element point values UNVERIFIED). Expressions: `effect("X")("Point")` returns [x, y] in layer space; use `toComp()` to convert.
+- **Notes:** Lottie `ty: 3` (Point); bodymovin exports 3D points as `ty: 3` with a 3-element value (its type fallback branch). Expressions: `effect("X")("Point")` returns [x, y] in layer space; use `toComp()` to convert.
 
 ### AE-FX-012 · Layer parameter (图层参数)
 
 - **What it does:** A popup that selects another layer of the same comp as an input image (control layer / layer map), with a second menu choosing which stage of that layer to use.
 - **Exact semantics:**
   - `PF_Param_LAYER`: value = layer reference (stored by layer ID; menu shows "None" (无) then layers as "N. Name"). Choosing the layer itself is allowed for most effects (the effect then receives the layer's own source stage, not its own output).
-  - Second menu (AE CC 2015 13.5+ UNVERIFIED version): `Source` (源) / `Masks` (蒙版) / `Effects & Masks` (效果和蒙版). Source = layer's source footage/frame without masks, effects or transforms; Masks = source with its masks applied; Effects & Masks = after masks and effects. Default = Source. Transforms are never included (Adobe help: "The compound effect ignores effects, masks, and transformations of a control layer" — precompose to include transforms).
+  - Second menu (added in AE CC 2017.1 / 14.2, April 2017): `Source` (源) / `Masks` (蒙版) / `Effects & Masks` (效果和蒙版)（译名待核）. Source = the layer's source frame, masks and effects ignored; Masks = after its masks; Effects & Masks = after its masks and effects. Default = Source. Transforms are never included (precompose to include them). The Adobe help sentence "The compound effect ignores effects, masks, and transformations of a control layer" describes the default (Source) and pre-14.2 behaviour. Source: https://blog.adobe.com/en/publish/2017/05/02/after-effects-cc-april-2017-in-depth-new-features
   - Time: the referenced layer is sampled at the same comp time as the current frame, mapped through that layer's own time stretch/remap (UNVERIFIED: AE checks out the layer at the comp time, converted to the layer's own time).
   - Size: the control layer arrives at its own pixel size; effects with "Stretch Map To Fit"-type options scale it to the destination size, otherwise it is centred on the destination layer.
-  - The control layer's video switch does not matter (hidden layers are usable). Track-matte layers can be referenced. Not animatable (no keyframes; UNVERIFIED: layer params cannot be keyframed but can take an expression in AE 2019+? — Layer Control accepts expressions? no: layer params are not expression-capable except Layer Control? keep: not keyframeable, not expression-capable).
-  - Scripting cannot read or set the Source/Masks/Effects & Masks menu (known AE limitation); value via `property.value` = layer index (0 = None).
+  - The control layer's video switch does not matter (hidden layers are usable; Adobe help recommends turning it off). Track-matte layers can be referenced. Layer parameters take Hold keyframes only (no interpolation between layers). UNVERIFIED: whether layer parameters (including Layer Control) accept expressions; BAE should allow an expression returning a layer.
+  - Scripting value type `PropertyValueType.LAYER_INDEX`: `property.value` = layer index (0 = None). UNVERIFIED: scripting cannot read or set the Source / Masks / Effects & Masks menu.
 - **Priority:** P0 — needed by Set Matte, Displacement Map, Layer Control and many compound effects.
 - **Owner:** bae-render (+ bae-model)
 - **Notes:** Lottie `ty: 10` (Effect Value Layer), value = layer `ind`. Implementation hint: the render graph adds a dependency edge to the referenced layer's stage node (source / after masks / after effects), which must not create cycles; a cycle (A references B whose effects reference A) renders the referenced layer as empty. Cross-ref ARCHITECTURE §15 (layer checkout at other times).
@@ -207,13 +207,13 @@
   |---|---|---|---|
   | Group (topic) | `PF_Param_GROUP_START` / `_END` | Twirl-down group in Effect Controls and Timeline; can nest; may start collapsed (`PF_ParamFlag_START_COLLAPSED`). | n/a |
   | Button | `PF_Param_BUTTON` (CS5.5+) | Push button; triggers a callback; no value. | no |
-  | No value / label | Lottie `Effect No Value`; SDK param with `PF_PUI_ECW_SEPARATOR` / custom UI | Placeholder rows (e.g. histogram rows of Levels, labels). | no |
-  | Arbitrary data | `PF_Param_ARBITRARY_DATA` | Opaque blob with an ID and default; interpolation provided by the effect (e.g. Curves' curve data, Levels' histogram). Effect supplies copy/compare/interpolate/flatten callbacks. | if the effect implements interpolation (Curves: yes, UNVERIFIED) |
-  | Path | `PF_Param_PATH` | Reference to a mask on the same layer (index of mask; "None" = 0). The effect reads the mask's path at render time. | no (the referenced mask animates) |
+  | No value / label | Scripting `PropertyValueType.NO_VALUE`; SDK param with `PF_PUI_ECW_SEPARATOR` / custom UI | Placeholder rows (labels, group start/end markers). | no |
+  | Arbitrary data | `PF_Param_ARBITRARY_DATA` | Opaque blob with an ID and default (scripting `PropertyValueType.CUSTOM_VALUE`, value not readable); interpolation provided by the effect (e.g. Curves' curve data, Levels' histogram, Hue/Saturation's Channel Range). Effect supplies copy/compare/interpolate/flatten callbacks. | if the effect implements interpolation (UNVERIFIED for Curves) |
+  | Path | `PF_Param_PATH` | Reference to a mask on the same layer (scripting `PropertyValueType.MASK_INDEX`; index of mask, "None" = 0). The effect reads the mask's path at render time. | no (the referenced mask animates) |
   - Parameter flags BAE must model (SDK `PF_ParamFlag_*`, `PF_PUI_*`): CANNOT_TIME_VARY (no keyframes), CANNOT_INTERP (hold only), SUPERVISE (UI callbacks), START_COLLAPSED, COLLAPSE_TWIRLY, INVISIBLE, DISABLED, NO_ECW_UI (hidden in Effect Controls), STD_CONTROL_ONLY.
 - **Priority:** P0 for groups and no-value rows; P1 for path; P2 for button and arbitrary data (internal use by built-in effects such as Curves).
 - **Owner:** bae-model (+ bae-plugin, bae-ui-motion)
-- **Notes:** Lottie: Ignored value `ty: 6`, No Value has no `ty`; groups appear as `ty: 5` custom-effect children (UNVERIFIED). Cross-ref ARCHITECTURE §15 (BAE parameter types must be a superset of AE's).
+- **Notes:** Lottie docs: Ignored value `ty: 6`, Effect No Value has no `ty`. Bodymovin actually writes no-value parameters (labels, group start/end markers) as `ty: 6` with `v: 0`, arbitrary data as an empty object (`ty: 9` reserved), mask references as `ty: 11`, layer references as `ty: 10`. Cross-ref ARCHITECTURE §15 (BAE parameter types must be a superset of AE's).
 
 ### AE-FX-014 · Animating effect parameters (效果参数动画)
 
@@ -305,8 +305,8 @@
 
 - **What it does:** Resets all parameters of one effect instance to their defaults.
 - **Exact semantics:**
-  - Effect Controls: "Reset" link (AE ≤ 24) / Reset Effect icon (AE 25.x modernised Effect Controls) at the top of the effect. Removes all keyframes of the effect's parameters and sets static defaults; expressions are UNVERIFIED (AE keeps expressions? — Reset removes keyframes and sets values; expressions remain attached UNVERIFIED).
-  - Also resets Compositing Options (Effect Opacity 100%, mask references removed? UNVERIFIED).
+  - Effect Controls: "Reset" link at the top of the effect; in the latest AE (modernised Effect Controls, UNVERIFIED version) a Reset Effect icon. Removes all keyframes of the effect's parameters and sets static defaults. UNVERIFIED: expressions stay attached.
+  - UNVERIFIED: Compositing Options are reset too (Effect Opacity 100%, mask references removed).
   - Point defaults are recomputed from the current layer size (e.g. layer centre).
   - Right-click a single parameter > Reset resets only that parameter.
   - One undo step.
@@ -342,8 +342,8 @@
 - **Exact semantics:**
   - New versions get a new matchName (usually with a numeric suffix): e.g. `ADBE Easy Levels` → `ADBE Easy Levels2` (Levels), `ADBE Pro Levels` → `ADBE Pro Levels2`, `ADBE Brightness & Contrast` → `ADBE Brightness & Contrast 2`, `ADBE Color Balance` → `ADBE Color Balance 2`, `ADBE Exposure` → `ADBE Exposure2`, `ADBE Photo Filter` → `ADBE PhotoFilterPS`, `ADBE Set Matte2` → `ADBE Set Matte3`, `ADBE Gaussian Blur` → `ADBE Gaussian Blur 2` (Gaussian Blur (Legacy) stays in Obsolete), `ADBE Fast Blur` = Fast Blur (Legacy).
   - Obsolete category effects (still applicable from the Effect > Obsolete menu): Basic 3D, Basic Text, Color Key, Fast Blur (Legacy), Gaussian Blur (Legacy), Lightning, Luma Key, Path Text, Reduce Interlace Flicker, Spill Suppressor (docsforadobe table, "Obsolete").
-  - Hidden obsolete effects (load only from old projects): Alpha Levels, Apply Color LUT, Box Blur, Cineon Converter, old Color Balance / Exposure / Levels / Photo Filter / Set Matte / Brightness & Contrast, Three-Way Color Corrector, Threshold, Unsharp Mask, Photoshop layer-style effects (`ADBE PSL *`), etc. (docsforadobe "_Obsolete").
-  - An effect can also keep its matchName and change behaviour behind a parameter (e.g. Brightness & Contrast "Use Legacy", Hue/Saturation "Use legacy"? no; see each effect).
+  - Hidden obsolete effects (load only from old projects; docsforadobe "_Obsolete"): Alpha Levels, Apply Color LUT (v1; current `ADBE Apply Color LUT2`), Box Blur, Cineon Converter (v1; current `ADBE Cineon Converter2`), old Color Balance / Exposure / Levels / Photo Filter / Set Matte / Brightness & Contrast, Three-Way Color Corrector, Threshold, Unsharp Mask, Photoshop layer-style effects (`ADBE PSL *`), etc. (docsforadobe "_Obsolete").
+  - An effect can also keep its matchName and change behaviour behind a parameter (e.g. Brightness & Contrast "Use Legacy (supports HDR)"; see each effect).
 - **Priority:** P1 for the legacy versions of effects specified in this file (old projects and templates use them); P2 for the rest.
 - **Owner:** bae-effects (+ bae-model)
 - **Notes:** BAE decision: map old matchNames to the same BAE implementation with a `legacy` mode flag when the maths differs, otherwise alias them. Each effect item below names its legacy matchName where one exists.
@@ -376,7 +376,7 @@
   - Users normally rename the instance (Return/Enter on the selected effect); expressions referencing the old name are updated automatically by AE's rename propagation (see transform-keyframes-expressions.md, expression evaluation and name tracking).
   - Right-click > Edit Value... changes the slider range shown in Effect Controls for numeric controls (stored per instance); it does not change the valid range (AE-FX-008).
   - Expression controls are the usual target of Essential Graphics "Add Property" (see ui-preview-render-io.md, Essential Graphics).
-  - Lottie/bodymovin exports them as an effect with `ty: 5` (Custom Effect), `mn` = effect matchName, `nm` = instance name, `ef` = one effect value whose `ty` is 0 slider, 1 angle, 2 color, 3 point, 4 checkbox, 7 dropdown, 10 layer (3D Point is exported as ty 3 with a 3-element value, UNVERIFIED).
+  - Lottie/bodymovin exports them as an effect with `ty: 5` (Custom Effect), `mn` = effect matchName, `nm` = instance name, `ef` = one effect value. Lottie docs value types: 0 slider, 1 angle, 2 color, 3 point, 4 checkbox, 7 dropdown, 10 layer. What bodymovin actually writes (type chosen from the AE property value type): Slider → 0, Angle → 0, Color → 2, Point → 3, 3D Point → 3 (3-element value), Checkbox → 7, Dropdown Menu → 7, Layer → 10. Importers must accept both numbering schemes (bodymovin-extension `effectsHelper.jsx`).
 - **Priority:** P0 — expression rigs and templates depend on them.
 - **Owner:** bae-model (+ bae-anim, bae-ui-motion)
 - **Notes:** Implementation hint: the render graph should skip these nodes entirely (identity), so they cost nothing at render time. The animation preset "Animated Shape Control" in AE's bundled presets is a pseudo-effect (custom expression-control effect defined in an .ffx); pseudo-effects are a P2 topic (AE-FX-023).
@@ -387,19 +387,19 @@
 - **Exact semantics:** matchName `ADBE Slider Control`; 32 bpc; GPU —; expands bounds: no; Lottie effect `ty: 5`, value `ty: 0`.
   | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|---|---|
-  | 1 | Slider (滑块) | `ADBE Slider Control-0001` | float slider | 0 | slider 0…100; valid −1,000,000…1,000,000 (UNVERIFIED valid range) | none | 2 decimals displayed; Edit Value can widen the slider range up to the valid range. |
+  | 1 | Slider (滑块) | `ADBE Slider Control-0001` | float slider | 0 | slider 0…100; valid −1,000,000…1,000,000 (the 1,000,000 cap is confirmed by Adobe community reports; the symmetric −1,000,000 floor is UNVERIFIED) | none | 2 decimals displayed; Edit Value can widen the slider range up to the valid range. |
   ```
   render(in) = in
   value(t)   = evaluated property value (keyframes / expression), clamped to valid range
   ```
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-anim)
-- **Notes:** Expressions read a Number. AE scripting cannot read or set the slider range of an instance (community-reported; no API). BAE decision: store the per-instance slider range in the model so Essential Graphics and the UI can show it.
+- **Notes:** Expressions read a Number. AE scripting cannot read or set the slider range of an instance (community-reported; no API). Source for the 1,000,000 cap: https://community.adobe.com/t5/after-effects-discussions/slider-only-goes-up-to-1-000-000/m-p/13465738 BAE decision: store the per-instance slider range in the model so Essential Graphics and the UI can show it.
 
 ### AE-FX-029 · Angle Control (角度控制)
 
 - **What it does:** Exposes one angle in degrees with the rotation dial UI.
-- **Exact semantics:** matchName `ADBE Angle Control`; 32 bpc; GPU —; expands bounds: no; Lottie value `ty: 1`.
+- **Exact semantics:** matchName `ADBE Angle Control`; 32 bpc; GPU —; expands bounds: no; Lottie value `ty: 1` per Lottie docs (bodymovin writes `ty: 0`, AE-FX-027).
   | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|---|---|
   | 1 | Angle (角度) | `ADBE Angle Control-0001` | angle | 0 | unbounded revolutions (displayed `Nx+D°`) | degrees | Value is a plain Number in degrees in expressions (e.g. 450 = 1x+90°). |
@@ -410,7 +410,7 @@
 ### AE-FX-030 · Checkbox Control (复选框控制)
 
 - **What it does:** Exposes one on/off switch.
-- **Exact semantics:** matchName `ADBE Checkbox Control`; 32 bpc; GPU —; expands bounds: no; Lottie value `ty: 4`.
+- **Exact semantics:** matchName `ADBE Checkbox Control`; 32 bpc; GPU —; expands bounds: no; Lottie value `ty: 4` per Lottie docs (bodymovin writes `ty: 7`, AE-FX-027).
   | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|---|---|
   | 1 | Checkbox (复选框) | `ADBE Checkbox Control-0001` | checkbox | off (0) | 0 / 1 | — | Keyframes are Hold only. Expressions read Number 0 or 1 (truthy in `if`). |
@@ -449,7 +449,7 @@
   | 1 | 3D Point (3D 点)（译名待核） | `ADBE Point3D Control-0001` | 3D point | UNVERIFIED: [layer width/2, layer height/2, 0] | unbounded | pixels | Spatial 3D property; viewer control point drawn only in 2D projection of the layer (UNVERIFIED). |
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-anim, bae-ui-motion)
-- **Notes:** Introduced in AE CS5.5? UNVERIFIED version (3D Point parameter type `PF_Param_POINT_3D` was added to the SDK in CS5.5 / AE 10.5). Lottie export of this control is not in the Lottie docs effect-value list; BAE exports it as `ty: 3` with three components (BAE decision).
+- **Notes:** UNVERIFIED version of introduction (the SDK's `PF_Param_POINT_3D` dates from CS5.5 / AE 10.5). The Lottie docs have no 3D effect-value type; bodymovin exports this control as `ty: 3` with a 3-element value, and BAE does the same.
 
 ### AE-FX-034 · Layer Control (图层控制)
 
@@ -460,10 +460,10 @@
   | 1 | Layer (图层) | `ADBE Layer Control-0001` | layer | None (UNVERIFIED) | None or any layer of the same comp (including itself) | — | Not keyframable to arbitrary values: Hold keys only (layer params cannot interpolate). |
   - `effect("Layer Control")("Layer")` returns a Layer object, so `.transform.position`, `.effect(...)`, `.sourceRectAtTime()` etc. work on it (see transform-keyframes-expressions.md, Layer object). When the parameter is None the expression gets an error / null (UNVERIFIED exact behaviour).
   - The reference is stored by layer identity (survives reordering and renaming), not by index.
-  - Unlike pixel effects' layer parameters there is no "Source / Masks / Effects & Masks" choice (no pixels are read).
+  - No pixels are read, so the "Source / Masks / Effects & Masks" choice of AE-FX-012 has no effect here (UNVERIFIED whether AE shows that menu on Layer Control).
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-anim)
-- **Notes:** Layer Control was added in AE CS5.5? UNVERIFIED version. Deleting the referenced layer resets the parameter to None.
+- **Notes:** UNVERIFIED version of introduction (believed to be one of the original expression controls). Deleting the referenced layer resets the parameter to None. Scripting value = layer index, 0 = None (AE-FX-012).
 
 ### AE-FX-035 · Dropdown Menu Control (下拉菜单控件)
 
