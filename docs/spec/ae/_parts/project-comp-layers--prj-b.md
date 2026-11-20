@@ -266,16 +266,16 @@
   - The Render Settings dialog can override the shutter angle (and use comp's phase) for a render; see ui-preview-render-io.md [ui-c].
 - **Priority:** P0 motion blur with default shutter is basic AE output.
 - **Owner:** bae-model (+ bae-anim, bae-render)
-- **Notes:** Scripting: `shutterAngle`, `shutterPhase`, `motionBlurSamplesPerFrame`, `motionBlurAdaptiveSampleLimit`. Lottie root `mb: {sa, sp, spf, asl}` (rarely supported by players). Expression access: `thisComp.shutterAngle`, `thisComp.shutterPhase`. Changing these settings is not sticky for new comps UNVERIFIED (AE help says only the two Preserve options are excluded from stickiness, so these probably are sticky).
+- **Notes:** Scripting: `shutterAngle`, `shutterPhase`, `motionBlurSamplesPerFrame`, `motionBlurAdaptiveSampleLimit`. Lottie root `mb: {sa, sp, spf, asl}` (Shutter Angle, Shutter Phase, Samples per Frame, Adaptive Sample Limit; rarely supported by players). Expression access: `thisComp.shutterAngle`, `thisComp.shutterPhase`. These four settings are sticky for new comps like the rest of Composition Settings: AE help says new comps reuse the last-used settings except the two Preserve options (Source: https://helpx.adobe.com/after-effects/using/composition-basics.html).
 
 ### AE-PRJ-314 · 3D Renderer selection (3D 渲染器)
 
 - **What it does:** Chooses the engine that renders 3D layers in the comp, and its options.
-- **Exact semantics:** Renderer menu in AE order:
+- **Exact semantics:** Renderer menu (menu order UNVERIFIED):
   | Entry (中文) | `CompItem.renderer` string | Versions | BAE |
   |---|---|---|---|
-  | Classic 3D (经典 3D) | "ADBE Calder" | all; default | P0 |
-  | Advanced 3D (高级 3D) | "ADBE Advanced 3d" UNVERIFIED | AE 24.0 (2023) on, default for new comps UNVERIFIED: since AE 24.1 | P2 |
+  | Classic 3D (经典 3D) | "ADBE Advanced 3d" (historical name: Classic 3D was called "Advanced 3D" in AE CS3-CS5) | all; default for new comps (renderer choice is sticky with the last-used Composition Settings) UNVERIFIED | P0 |
+  | Advanced 3D (高级 3D) | "ADBE Calder" | AE 24.0 (October 2023) on | P2 |
   | CINEMA 4D (CINEMA 4D) | "ADBE Ernst" | AE 13.5/CC 2015 UNVERIFIED to present (deprecated, hidden by default in recent versions UNVERIFIED) | P2 |
   | Ray-traced 3D (光线追踪 3D) | "ADBE Picasso" | AE 11.0 (CS6) to AE 2019 UNVERIFIED; legacy projects only | not supported |
   - Renderer options (Options… button):
@@ -286,7 +286,7 @@
   - Unknown renderer strings in an imported project fall back to Classic 3D with a warning.
 - **Priority:** P0 for storing the field and Classic 3D; other renderers P2.
 - **Owner:** bae-model (+ bae-render)
-- **Notes:** Scripting: `CompItem.renderer`, `CompItem.renderers`. Lottie: no renderer field (players are effectively Classic 3D or 2D only). BAE decision: BAE's single GPU 3D renderer implements Classic 3D semantics first; Advanced 3D is a later addition behind the same enum.
+- **Notes:** Scripting: `CompItem.renderer`, `CompItem.renderers` (installed modules). The match-name strings are counter-intuitive: "ADBE Advanced 3d" is CLASSIC 3D and "ADBE Calder" is the new Advanced 3D; an AE 2024 beta briefly renamed them ("ADBE Classic 3d"/"ADBE Advanced 3d"/"ADBE Cinema 4d") and Adobe reverted the change. Importers should accept both spellings. Source: https://community.adobe.com/questions-534/match-names-for-renderers-changing-314356. Lottie: no renderer field (players are effectively Classic 3D or 2D only). BAE decision: BAE's single GPU 3D renderer implements Classic 3D semantics first; Advanced 3D is a later addition behind the same enum.
 
 ### AE-PRJ-315 · Composition switches: Motion Blur, Frame Blending, Hide Shy Layers, Draft 3D, active camera (合成开关)
 
@@ -302,7 +302,7 @@
   - Render Settings can override the comp motion-blur and frame-blending switches ("For Checked Layers" / "Off for All Layers") and they are respected per render (ui-preview-render-io.md [ui-c]).
 - **Priority:** P0 (motion blur, frame blending, shy, active camera); Draft 3D P1.
 - **Owner:** bae-model (+ bae-render, bae-ui-motion)
-- **Notes:** Scripting: `CompItem.motionBlur`, `frameBlending`, `hideShyLayers`, `draft3d`, `activeCamera` (read-only). Expressions: `thisComp.activeCamera`. Lottie: no comp switches; per-layer `mb` boolean exists in some exporters UNVERIFIED. Also in this group in AE 2026: the "Enable Live Update", "Graph Editor", "Brainstorm" and "Frame Render Time" toggles, which are UI (ui-preview-render-io.md [ui-a]).
+- **Notes:** Scripting: `CompItem.motionBlur`, `frameBlending`, `hideShyLayers`, `draft3d`, `activeCamera` (read-only). Expressions: `thisComp.activeCamera`. Lottie: no comp on/off switches (root `mb` object carries only `sa`, `sp`, `spf`, `asl`); the per-layer Motion Blur switch is layer `mb` (boolean) in the Lottie schema (Source: https://lottiefiles.github.io/lottie-docs/layers/). Also in this group in AE 2026: the "Enable Live Update", "Graph Editor", "Brainstorm" and "Frame Render Time" toggles, which are UI (ui-preview-render-io.md [ui-a]).
 
 ## Creating and resizing compositions
 
@@ -321,9 +321,9 @@
 
 ### AE-PRJ-317 · New Comp from Selection (基于所选项新建合成)
 
-- **What it does:** File > New Comp from Selection (Alt+\\ / Opt+\\ UNVERIFIED shortcut), or dragging footage onto the New Composition button or into an empty Timeline, creates a comp whose settings match a footage item and places the item(s) in it as layers.
+- **What it does:** File > New Comp from Selection (Alt+\\ on Windows / Cmd+\\ on macOS, per the AE shortcut reference), or dragging footage onto the New Composition button or into an empty Timeline, creates a comp whose settings match a footage item and places the item(s) in it as layers.
 - **Exact semantics:**
-  - **One item selected:** no dialog. comp.name = item name (without extension UNVERIFIED); width, height, pixelAspect = the item's; frameRate = the item's frame rate for movies/sequences/comps, and for stills the last-used comp frame rate UNVERIFIED; duration = item duration for movies, sequences and comps, and Preferences > Import > Still Footage length for stills (default 0:00:05:00 UNVERIFIED); one layer is added spanning the comp; the comp opens.
+  - **One item selected:** no dialog. comp.name = item name (without extension UNVERIFIED); width, height, pixelAspect = the item's; frameRate = the item's frame rate for movies/sequences/comps, and for stills the last-used comp frame rate UNVERIFIED; duration = item duration for movies, sequences and comps, and for stills the Preferences > Import > Still Footage duration when it is set to a fixed duration; with the factory setting "Length of Composition" the last-used comp duration is used UNVERIFIED; one layer is added spanning the comp; the comp opens.
   - **Several items selected:** the New Composition from Selection dialog (基于所选项新建合成) appears:
     | Parameter (中文) | Type | Default | Range | Notes |
     |---|---|---|---|---|
@@ -356,7 +356,7 @@
 - **Owner:** bae-model (+ bae-motion)
 - **Notes:** Lottie: layer `ip`/`op` may extend beyond root `op`; players clip. BAE decision: offer an optional "extend layers that ended at the comp end" checkbox (off by default for AE parity).
 
-### AE-PRJ-319 · Trim Comp to Work Area (将合成修剪至工作区域)
+### AE-PRJ-319 · Trim Comp to Work Area (将合成修剪到工作区域)
 
 - **What it does:** Composition > Trim Comp to Work Area (Ctrl+Shift+X / Cmd+Shift+X) shortens the comp so it contains only the work area.
 - **Exact semantics:**
@@ -374,7 +374,7 @@
   - Not available when the work area already equals the whole comp UNVERIFIED (menu enabled but no-op).
 - **Priority:** P1
 - **Owner:** bae-motion (+ bae-model)
-- **Notes:** zh-CN menu string 将合成修剪至工作区域 UNVERIFIED (shortcut page shows 将合成修剪到工作区域; use the menu string after checking AE 2026 UI)（译名待核）. Single undo step.
+- **Notes:** zh-CN 将合成修剪到工作区域 (from the zh-CN keyboard-shortcut reference; menu string not checked in the AE 2026 UI). Single undo step.
 
 ### AE-PRJ-320 · Crop Comp to Region of Interest (将合成裁剪到目标区域)
 
@@ -391,9 +391,9 @@
 - **Owner:** bae-motion (+ bae-model, bae-ui-motion)
 - **Notes:** ROI itself is a viewer state (compositing-3d-color.md [cmp-b] "preview resolution/ROI"). zh-CN 将合成裁剪到目标区域（译名待核）.
 
-### AE-PRJ-321 · Crop Comp to Selected Layer(s) Bounds (将合成裁剪到所选图层边界)
+### AE-PRJ-321 · Crop Comp to Selected Layer(s) Bounds (将合成裁切到所选图层边界)
 
-- **What it does:** Resizes the comp (shrinking or growing) to the union of the visible bounds of the selected 2D layers. Added in AE 26.3 (June 2026).
+- **What it does:** Resizes the comp (shrinking or growing) to the union of the visible bounds of the selected 2D layers. Added in a 2025-2026 AE release (UNVERIFIED: exact version; the composition-basics help page documents it).
 - **Exact semantics:**
   ```
   r = union over selected 2D layers of layerBoundsInComp(layer, comp.time)  // transformed, masked visible bounds UNVERIFIED (mask/effect inclusion)
@@ -405,7 +405,7 @@
   - Available from the Composition menu and from the layer context menu in the Timeline and Composition panels.
 - **Priority:** P2
 - **Owner:** bae-motion (+ bae-model, bae-render)
-- **Notes:** Layer bounds definition: compositing-3d-color.md [cmp-a] "layer bounds". zh-CN string（译名待核）.
+- **Notes:** Layer bounds definition: compositing-3d-color.md [cmp-a] "layer bounds". zh-CN 将合成裁切到所选图层边界 (Source: https://helpx.adobe.com/cn/after-effects/using/composition-basics.html).
 
 ### AE-PRJ-322 · Duplicate composition (复制合成)
 
@@ -476,7 +476,7 @@
   | Time (时间) | time | CTI when added | any comp time | s | comp markers: comp time; layer markers: stored relative to the layer (see AE-PRJ-327) |
   | Duration (持续时间) | time | 0 | ≥ 0 | s | 0 = point marker; >0 = span marker with out point |
   | Label (标签) | int | 0 (None) | 0..16 | — | AE 16.0 (2019); colours from Preferences > Labels (AE-PRJ-392) |
-  | Comment (注释) | string | comp: next number (AE-PRJ-326); layer: "" | — | — | shown next to the marker |
+  | Comment (注释) | string | "" (numbered comp markers created with Shift+0..9 get "0".."9", AE-PRJ-326) | — | — | shown next to the marker |
   | Chapter (章节) | string | "" | — | — | written as chapter points to formats that support them |
   | URL (URL) | string | "" | — | — | Web Links group (Web 链接) |
   | Frame Target (帧目标) | string | "" | — | — | HTML frame/window target for the URL |
@@ -497,14 +497,15 @@
 - **What it does:** Markers on the comp's time ruler, used for navigation, sync points, numbered cue positions and output chapters.
 - **Exact semantics:**
   - Add at CTI with no layer selected: Layer > Add Marker or numpad `*`; numpad Alt/Opt+`*` adds and opens the dialog; drag from the Comp Marker Bin (合成标记素材箱) button at the right end of the time ruler to any time. Pressing `*` during a preview adds markers without stopping playback.
-  - Default comment is a number: UNVERIFIED rule: the smallest positive integer not used as the comment of another comp marker. Deleting a numbered marker does not renumber others; editing the comment frees its number for reuse.
-  - Numbered markers: Shift+0..9 (main keyboard) creates a marker with comment "0".."9" at CTI; if a comp marker with that number exists, it is MOVED to the CTI instead. Pressing 0..9 (main keyboard) moves the CTI to that numbered marker.
+  - Layer > Add Marker, numpad `*` and the bin create a blank comp marker (comment "").
+  - Numbered markers: Shift+0..9 (main keyboard) creates a marker with comment "0".."9" at CTI; if a comp marker with that number already exists, AE does not create a new one but MOVES the existing one to the CTI. Pressing 0..9 (main keyboard) moves the CTI to that numbered marker. Deleting a numbered marker does not renumber the others; changing a marker's comment away from its number frees that number for reuse.
+  - Delete: drag the marker onto the Comp Marker Bin, or Ctrl/Cmd-click it.
   - Uniqueness: at most one comp marker can start at a given time; adding or moving a marker onto another marker's start time replaces (deletes) the other.
   - Any number of comp markers per comp; marker times outside [0, duration) are allowed but hidden UNVERIFIED.
   - Expressions read them via `thisComp.marker`.
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-ui-motion)
-- **Notes:** Comp markers correspond to Premiere Pro sequence markers. Exact keyboard bindings: ui-preview-render-io.md [ui-b].
+- **Notes:** Source: https://helpx.adobe.com/after-effects/using/layer-markers-composition-markers.html (blank vs numbered markers, one marker per start time, Shift+number moves an existing numbered marker). Comp markers correspond to Premiere Pro sequence markers. Exact keyboard bindings: ui-preview-render-io.md [ui-b].
 
 ### AE-PRJ-327 · Layer markers (图层标记)
 
@@ -515,7 +516,7 @@
   - Markers may lie outside the layer's in/out span (e.g. after trimming); they are kept.
   - Any number of markers per layer; several layer markers may share a time UNVERIFIED (the replace rule documented for comp markers is not documented for layer markers).
   - Split Layer / Duplicate copy all markers to the new layer (AE-PRJ-383, AE-PRJ-384); Precompose "Move all attributes" moves them into the new comp's layer (they stay layer markers there).
-  - Footage layers: if Preferences > Media & Disk Cache "Create Layer Markers from Footage XMP Metadata" is on (default on), markers are created from the source file's temporal XMP metadata when the layer is created.
+  - Footage layers: if the Preferences "Create Layer Markers From Footage XMP Metadata" option (Disk / Media & Disk Cache category depending on version) is on (default on), markers are created from the source file's temporal XMP metadata when the layer is created.
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-anim)
 - **Notes:** Matchname `ADBE Marker` at layer root (shown as "Marker" (标记) in the Timeline only when markers exist UNVERIFIED). Layer markers correspond to Premiere Pro clip markers; they are retained when rendering to QuickTime.
@@ -583,7 +584,7 @@
   | Precomp | AVLayer, source CompItem | comp | 0 precomp | the comp item's label (Composition: Sandstone) | AE-PRJ-341 |
   | Guide (switch on any layer) | `guideLayer` true | any | 11 guide (not exported) | unchanged | AE-PRJ-342 |
   | Photoshop / CINEMA 4D / 3D model / data | AVLayer / ThreeDModelLayer | file | — / — / — / 15 data | 3D Models / Other 3D: UNVERIFIED | AE-PRJ-343..346 |
-  - Common defaults for every new layer: index 1 (top) or directly above the topmost selected layer (AE-PRJ-388 new-layer insertion); `startTime = 0` and `inPoint = 0` when Preferences > General "Create Layers at Composition Start Time" (在合成开始时间创建图层) is on (default on), otherwise both = CTI; Video on, Audio on (if hasAudio), Solo/Lock/Shy off, Quality Best (Draft for new layers when Preferences > ... "Default Quality" UNVERIFIED), Sampling Bilinear, blend mode Normal, no track matte, no parent, 2D, Motion Blur and Frame Blending off, Effects active, comment empty, `isNameSet` false.
+  - Common defaults for every new layer: index 1 (top) or directly above the topmost selected layer (AE-PRJ-388 new-layer insertion); `startTime = 0` and `inPoint = 0` when Preferences > General "Create Layers at Composition Start Time" (在合成开始时间创建图层) is on (default on), otherwise both = CTI; Video on, Audio on (if hasAudio), Solo/Lock/Shy off, Quality Best, Sampling Bilinear, blend mode Normal, no track matte, no parent, 2D, Motion Blur and Frame Blending off, Effects active, comment empty, `isNameSet` false.
   - Synthetic layers (solid, text, shape, null, adjustment, camera, light) default to an out point at the comp end; footage layers to the source duration (stills: Preferences > Import > Still Footage, default "Length of Composition").
 - **Priority:** P0
 - **Owner:** bae-model
@@ -606,7 +607,7 @@
 
 - **What it does:** A layer whose source has audio but no video; it contributes only to the comp's audio mix.
 - **Exact semantics:**
-  - `hasVideo = false`; the Video switch column is empty; it never renders pixels and cannot be a track matte, parent target is allowed UNVERIFIED (parenting to an audio layer is disallowed because it has no Transform).
+  - `hasVideo = false`; the Video switch column is empty; it never renders pixels and cannot be a track matte. It has no Transform group, so it is useless as a parent; UNVERIFIED: whether AE lists it in the Parent menu at all (BAE: exclude it).
   - Property groups: Marker, Time Remap, Effects (audio effects only), Audio > Audio Levels (音频电平) (TwoD, dB, default [0, 0], range -192..+24 dB UNVERIFIED). No Transform, Masks or Layer Styles.
   - Timeline shows waveform under Audio > Waveform (UI).
 - **Priority:** P1
@@ -620,11 +621,11 @@
   | Parameter (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
   | Name (名称) | string | "<Colour name> Solid N" e.g. "Black Solid 1" (黑色 纯色 1) UNVERIFIED zh format | — | — | colour name derived from the colour |
-  | Width / Height (宽度 / 高度) | int | comp size | 1..30000 | px / in / mm / % of comp / picas UNVERIFIED | Lock Aspect Ratio checkbox |
+  | Width / Height (宽度 / 高度) | int | comp size | 1..30000 | px (entry also in the chosen Units) | Lock Aspect Ratio checkbox |
   | Units (单位) | enum | pixels | pixels, inches, millimeters, % of composition | — | dialog-only |
   | Pixel Aspect Ratio (像素长宽比) | enum | comp PAR | AE-PRJ-304 list | — | |
   | Make Comp Size (制作合成大小) | button | — | — | — | sets width/height/PAR to the comp's |
-  | Color (颜色) | RGB | last used (17 % grey 45/255 for a fresh install, AE CS6+) | 0..1 | — | |
+  | Color (颜色) | RGB | last used; UNVERIFIED: fresh-install value | 0..1 | — | |
   - Creates a solid item in the project's Solids (纯色) folder and a layer using it. Layer size = solid size; Anchor `(w/2, h/2)`; Position comp centre.
   - Layer > Solid Settings (Ctrl+Shift+Y) on a solid layer edits the source; "Affect all layers that use this solid" (影响使用此纯色的所有图层) checked → modify the item in place; unchecked → create a new solid item for this layer only.
   - Property groups: Marker, Masks, Effects, Transform, Layer Styles, Geometry/Material Options (3D). No Time Remap or Audio.
@@ -639,7 +640,7 @@
   - Create: Layer > New > Text (Ctrl+Alt+Shift+T) or click with the Type tool (point text) / drag (paragraph text). Via menu the insertion point is the centre of the Composition viewer.
   - Defaults: Anchor Point `(0, 0)` (the text baseline origin); Position = click point, or comp centre via the menu; layer name = the text typed (first line UNVERIFIED), updating live until the layer is renamed (`isNameSet` false).
   - Property groups: Text (ADBE Text Properties: Source Text, Path Options, More Options, Animators), Masks, Effects, Transform, Layer Styles, Geometry Options (Advanced 3D / CINEMA 4D), Material Options (3D).
-  - Continuously rasterized always (no Collapse switch shown; Continuously Rasterize is implicit). `width`/`height` are not meaningful; bounds come from `sourceRectAtTime`.
+  - Always rasterized from vectors at render resolution (continuous rasterization is implicit). UNVERIFIED: whether the Collapse/Continuously Rasterize switch is shown for text layers and what it changes (cmp-a "collapse/continuous rasterize"). `width`/`height` are not meaningful; bounds come from `sourceRectAtTime`.
 - **Priority:** P0
 - **Owner:** bae-text (+ bae-model)
 - **Notes:** Everything about text content and layout: text.md. Lottie `ty: 5`, data in `t` (`t.d` document keyframes, `t.p` path, `t.m` more options, `t.a` animators).
@@ -677,7 +678,7 @@
   - Create: Layer > New > Camera (Ctrl+Alt+Shift+C) → Camera Settings dialog (type One-Node / Two-Node, preset 50 mm default, zoom, DOF...; defined in compositing-3d-color.md [cmp-b]). Name "Camera N" (摄像机 N).
   - Transform group (no Anchor Point, Scale, Opacity): Point of Interest (目标点; Two-Node only; matchName `ADBE Anchor Point`, default comp centre `(w/2, h/2, 0)`), Position (default `(w/2, h/2, -zoom)` UNVERIFIED, see cmp-b), Orientation, X/Y/Z Rotation.
   - Property groups: Marker, Transform, Camera Options (ADBE Camera Options Group). No masks, effects, styles, audio, time remap.
-  - Always 3D; no Video eyeball? (camera has the Video switch; turning it off makes it inactive) — `activeCamera` rule AE-PRJ-315.
+  - Always 3D (no 3D switch). It has a Video switch; turning it off makes the camera inactive (`activeCamera` rule, AE-PRJ-315).
   - Auto-Orient options: Off, Orient Along Path, Orient Towards Point of Interest (AE-PRJ-408).
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-anim, bae-render)
@@ -687,7 +688,7 @@
 
 - **What it does:** A 3D-only layer that lights 3D layers (and casts shadows) in the comp.
 - **Exact semantics:**
-  - Create: Layer > New > Light (Ctrl+Alt+Shift+L) → Light Settings dialog. Light Type menu (AE order): Parallel (平行), Spot (聚光), Point (点), Ambient (环境), Environment (环境光; AE 24.3+, Advanced 3D only, AE-PRJ-347). Scripting `LightType.PARALLEL / SPOT / POINT / AMBIENT / ENVIRONMENT`.
+  - Create: Layer > New > Light (Ctrl+Alt+Shift+L) → Light Settings dialog. Light Type menu (AE order): Parallel (平行), Spot (聚光), Point (点), Ambient (环境), Environment (环境光（译名待核）; Advanced 3D only, AE-PRJ-347; `LightType.ENVIRONMENT` added to scripting in AE 24.3). Scripting `LightType.PARALLEL / SPOT / POINT / AMBIENT / ENVIRONMENT`.
   - Name "<Type> Light N" (e.g. "Spot Light 1") UNVERIFIED (older versions "Light N").
   - Transform: Point of Interest (Parallel, Spot), Position (all but Ambient), Orientation + X/Y/Z Rotation (all but Ambient; Point lights ignore rotation). Ambient lights have no Transform group UNVERIFIED.
   - Property groups: Marker, Transform, Light Options (ADBE Light Options Group): Intensity, Color, Cone Angle, Cone Feather, Falloff, Radius, Falloff Distance, Casts Shadows, Shadow Darkness, Shadow Diffusion (per type; cmp-b).
@@ -722,18 +723,18 @@
 - **Owner:** bae-model (+ bae-anim, bae-render)
 - **Notes:** Lottie `ty: 0`, `refId` → `assets[].layers`, `w`, `h`, `tm` (time remap in seconds). Nesting rules (cycles) in AE-PRJ-403.
 
-### AE-PRJ-342 · Guide layer (参考图层)
+### AE-PRJ-342 · Guide layer (引导层)
 
 - **What it does:** Any layer can be flagged as a guide layer: it is visible in its own comp's viewer but excluded from rendered output and from parent comps.
 - **Exact semantics:**
-  - Toggle: Layer > Guide Layer (参考图层), or the layer context menu. Flag `guideLayer` (bool, default false).
-  - A guide layer renders in the Composition viewer of its own comp. It is skipped when (a) rendering through the Render Queue (unless Render Settings > Guide Layers is set to "Current Settings" (当前设置) UNVERIFIED; default "All Off"), and (b) the comp is nested in another comp (never visible in the parent).
+  - Toggle: Layer > Guide Layer (引导层), or the layer context menu. Flag `guideLayer` (bool, default false).
+  - A guide layer renders in the Composition viewer of its own comp. It is skipped when (a) rendering through the Render Queue, unless Render Settings > Guide Layers is "Current Settings" (当前设置), which renders guide layers of the top-level comp only (default "All Off" (全部关闭)（译名待核）), and (b) the comp is nested in another comp (guide layers in nested comps are never rendered).
   - It still evaluates (expressions may reference it; it can still be a parent).
   - Used as a track matte: UNVERIFIED (matte still works in its own comp viewer, not in output).
   - Timeline shows a guide-layer icon next to the layer name.
 - **Priority:** P1
 - **Owner:** bae-model (+ bae-render)
-- **Notes:** Scripting `AVLayer.guideLayer`. Lottie: bodymovin skips guide layers (layerType 11). zh-CN 参考图层 UNVERIFIED（译名待核）.
+- **Notes:** Scripting `AVLayer.guideLayer`. Lottie: bodymovin skips guide layers (layerType 11). zh-CN: the zh-CN help (layers page) uses 引导层/引导图层; menu string in AE 2026 not checked. Source (Render Settings rule): https://helpx.adobe.com/after-effects/using/basics-rendering-exporting.html.
 
 ### AE-PRJ-343 · Photoshop file layers (Photoshop 图层)
 
@@ -755,7 +756,7 @@
 
 ### AE-PRJ-345 · 3D model layer (3D 模型图层)
 
-- **What it does:** A layer whose source is an imported 3D model (GLB, glTF, OBJ; FBX added later UNVERIFIED), rendered by the Advanced 3D renderer.
+- **What it does:** A layer whose source is an imported 3D model (GLB, glTF, OBJ, FBX; FBX with embedded animation was added after the initial release, UNVERIFIED: in which version), rendered by the Advanced 3D renderer.
 - **Exact semantics:**
   - Introduced AE 24.0 (October 2023); scripting `ThreeDModelLayer` (subclass of AVLayer) AE 24.4.
   - Always 3D. Property groups: Marker, Time Remap (for animated models), Transform (Anchor Point, Position, Scale, Orientation, X/Y/Z Rotation, Opacity), Options for the model (animation selection, mesh/material settings UNVERIFIED), Material Options.
@@ -779,12 +780,15 @@
 
 - **What it does:** A light type that uses an image (typically an HDRI equirectangular footage layer) to light 3D layers with image-based lighting, reflections and backgrounds in Advanced 3D comps.
 - **Exact semantics:**
-  - Light Type "Environment" (`LightType.ENVIRONMENT`, AE 24.3 scripting; feature introduced with Advanced 3D in AE 24.0 UNVERIFIED). Light Options: Intensity, Color, Source (a footage layer, `LightLayer.lightSource`), Background visibility/blur UNVERIFIED, Shadow settings.
+  - Light Type "Environment" (`LightType.ENVIRONMENT`, scripting AE 24.3; the feature shipped with Advanced 3D, UNVERIFIED: in AE 24.0). Light Options: Intensity, Color, Source (`LightLayer.lightSource`: until AE 25.1 only HDR/EXR layers; AE 25.2+ any 2D video, still or precomp layer in the same comp; a 3D layer is rejected with "Invalid light source specified"), Casts Shadows + Shadow Darkness.
+  - With no Source, AE uses a built-in default environment map. Choosing a layer as Source turns that layer's Video switch off (user may re-enable it).
+  - The default environment light casts no shadows; with Casts Shadows on, 3D layers inside the shadow volume cast voxel shadows (subject to their Casts/Accepts Shadows options).
+  - There is no background-visibility option on the light: Layer > Light > Create Environment Light Background Layer adds a solid at the bottom of the stack with CC Environment linked to the light's Source and a 5 px Fast Box Blur.
   - Transform: Orientation/rotations only (rotate the environment).
   - Legacy: `AVLayer.environmentLayer` flags a layer as the environment in Ray-traced 3D comps (deprecated renderer).
 - **Priority:** P2
 - **Owner:** bae-render (+ bae-model)
-- **Notes:** Rendering: compositing-3d-color.md [cmp-b] Advanced 3D.
+- **Notes:** Rendering: compositing-3d-color.md [cmp-b] Advanced 3D. Sources: Adobe help "Create realistic reflections and ambient lighting in a 3D scene" (environment lights), ae-scripting `LightLayer.lightSource`.
 
 ## Layer property tree
 
@@ -815,7 +819,7 @@
   | Motion Trackers (动态跟踪器) | `ADBE MTrackers` | AV layers | tracker data (ui-a Tracker) |
   | Masks (蒙版) | `ADBE Mask Parade` | AV, text, shape | indexed; each `ADBE Mask Atom` (cmp-a) |
   | Effects (效果) | `ADBE Effect Parade` | AV, text, shape, audio (audio effects) | indexed (effects.md) |
-  | Essential Properties (基本属性) | `ADBE Layer Overrides` | precomp layers whose comp has Essential Graphics controllers | AE 15.1/16.x UNVERIFIED (AE-PRJ-420) |
+  | Essential Properties (基本属性) | `ADBE Layer Overrides` | precomp layers whose comp has Essential Graphics controllers | contains overrides and Media Replacement `ADBE Layer Source Alternate`; version in AE-PRJ-420 |
   | Transform (变换) | `ADBE Transform Group` | all except audio (and ambient light) | see below |
   | Layer Styles (图层样式) | `ADBE Layer Styles` | AV, text, shape | shown only when a style is added (AE-PRJ-409) |
   | Geometry Options (几何选项) | `ADBE Extrsn Options Group` (text/shape: Bevel, Extrusion Depth…) or `ADBE Plane Options Group` (footage/solid: Curvature, Segments) | 3D layers in CINEMA 4D / Advanced 3D comps | hidden in Classic 3D |
@@ -825,7 +829,7 @@
   | Audio (音频) | `ADBE Audio Group` | layers with audio | Audio Levels `ADBE Audio Levels` (TwoD, dB) |
   | Data (数据) | UNVERIFIED | data layers | AE-PRJ-346 |
   - Transform group children (matchName → value type, default): Anchor Point `ADBE Anchor Point` (ThreeD_SPATIAL; camera/light: Point of Interest), Position `ADBE Position` (ThreeD_SPATIAL; X/Y/Z Position `ADBE Position_0/_1/_2` OneD when separated), Scale `ADBE Scale` (ThreeD, % [100,100,100]), Orientation `ADBE Orientation` (ThreeD, 3D only), X Rotation `ADBE Rotate X`, Y Rotation `ADBE Rotate Y` (3D only), Rotation / Z Rotation `ADBE Rotate Z` (OneD, degrees), Opacity `ADBE Opacity` (OneD %, 0..100, default 100). 2D layers report 2D values in the UI but store 3 components (z ignored). Semantics and matrix order: transform-keyframes-expressions.md [ani-a].
-  - Timeline display order (top to bottom): Text / Contents, Masks, Effects, Essential Properties, Transform, Layer Styles, Geometry Options, Material Options, Audio. Scripting index order differs (`Marker` = 1, `Time Remap` = 2 …) UNVERIFIED; BAE must address by matchName, not index.
+  - Timeline display order (top to bottom): Time Remap (when enabled), Text / Contents, Masks, Effects, Essential Properties, Transform, Layer Styles, Geometry Options, Material Options, Audio. Scripting order of AVLayer top-level groups per the docsforadobe AVLayer match-name page: `ADBE Marker`, `ADBE Time Remapping`, `ADBE MTrackers`, `ADBE Mask Parade`, `ADBE Effect Parade`, `ADBE Layer Overrides`, `ADBE Transform Group`, … (exact numeric indices UNVERIFIED); BAE must address by matchName, not index.
 - **Priority:** P0
 - **Owner:** bae-model
 - **Notes:** Sources: docsforadobe "Match Names > Layer" pages (AVLayer, 3D Layer, Camera, Light, Text, Shape, Layer Styles). Lottie: `ks` (transform: `a`, `p` (or split `p.x`/`p.y`), `s`, `r`/`rx`/`ry`/`rz`, `or`, `o`, `sk`, `sa`), `masksProperties`, `ef`, `sy`, `shapes`, `t`, `tm`, `au`.
@@ -845,7 +849,7 @@
   | COLOR | [r, g, b, a] f64 in 0..1 (may exceed 1 in 32 bpc) | temporal per channel | Fill Color, Light Color |
   | CUSTOM_VALUE | opaque blob | not interpolable (hold) or effect-defined | Levels Histogram, Curves, gradient ramp data |
   | MARKER | MarkerValue | none (hold) | `ADBE Marker` |
-  | LAYER_INDEX | int, 0 = none | hold | Layer popups in effects (e.g. Set Matte "Take Matte From Layer"); stores a layer reference, displayed as index |
+  | LAYER_INDEX | int, 0 = none | hold | Layer popups in effects (e.g. Set Matte "Take Matte From Layer"); stores a layer reference, displayed as index. AE 26.5 adds a render-stage popup next to layer parameters: `LayerInputStageType.SOURCE` = 0 (before masks and effects), `ALL_EFFECTS` = -1 (masks + all effects), `ONLY_MASKS` = -2 (masks, no effects); scripting `layerInputStage`, `inputLayerAndStage` = [layerIndex, stageIndex], `getInputStageCycleSafeLimit()` |
   | MASK_INDEX | int, 0 = none | hold | Mask popups in effects (Stroke "Path") |
   | SHAPE | Shape {vertices, inTangents, outTangents, closed, featherSegLocs…} | path interpolation (vertex-wise) | Mask Path, shape Path |
   | TEXT_DOCUMENT | TextDocument | hold only | Source Text |
@@ -868,11 +872,11 @@
   | canSetExpression | bool | an expression may be set (false e.g. for Marker in older versions, for MASK_INDEX UNVERIFIED) |
   | expression / expressionEnabled / expressionError | string / bool / string | ani-b |
   | unitsText | string | "pixels", "degrees", "percent", "seconds", "dB" … (display only) |
-  | hasMin / minValue, hasMax / maxValue | bool / number | hard limits enforced on set (values outside throw in scripting; UI clamps). E.g. Opacity 0..100; Blur effect Blurriness 0..1000 UNVERIFIED |
+  | hasMin / minValue, hasMax / maxValue | bool / number | hard limits enforced on set (values outside throw in scripting; UI clamps). E.g. Opacity 0..100; effect limits per parameter in effects.md |
   | numKeys | int | keyframe count |
   | alternateSource / canSetAlternateSource | item | Media Replacement for MOGRT (AE 18.0) |
-  | essentialPropertySource | ref | for Essential Properties overrides, the original property |
-  | propertyParameters | string[] | dropdown item labels for Dropdown Menu Control (AE 26.0 scripting) |
+  | essentialPropertySource | ref | for Essential Properties overrides, the original property (AE 22.0) |
+  | propertyParameters | string[] | item strings of any dropdown-menu property, incl. custom Dropdown Menu Control items (getter added AE 26.0; setter `setPropertyParameters()` AE 17.0.1) |
   - Slider ranges vs limits: many effect parameters have a UI slider range smaller than the valid range (e.g. slider 0..100 but typed values up to 1000); only hasMin/hasMax limits are enforced. The slider range is effect metadata (effects.md [fx-a]).
   - Values typed beyond limits are clamped; expression results beyond limits are clamped at evaluation UNVERIFIED (e.g. Opacity expression returning 150 renders as 100).
 - **Priority:** P0
@@ -924,7 +928,7 @@
 - **What it does:** `index` is the 1-based stacking position (1 = top); `id` is a persistent unique identifier that survives reordering.
 - **Exact semantics:**
   - `index ∈ 1..numLayers`, contiguous, recomputed after every insert/delete/reorder. Displayed in the Timeline "#" column. Expressions `thisLayer.index`, `thisComp.layer(i)`.
-  - `id`: integer unique within the project, never reused while the project is open, persisted in the AEP (AE 22.0 scripting `Layer.id`; `comp.layerByID(id)` UNVERIFIED API name).
+  - `id`: integer unique within the project and persistent across save/reload (scripting `Layer.id`, read-only, AE 22.0; lookup `app.project.layerByID(id)`). Not shown in the UI. When a project is imported into another project, all its layers get new IDs.
   - Parent links, track matte links, LAYER_INDEX effect parameters and expression pick-whip links (when written by AE as `thisComp.layer("name")`) refer to layers; AE stores parent/matte/LAYER_INDEX by internal ID so reordering keeps them, while expressions refer by name or index text.
 - **Priority:** P0
 - **Owner:** bae-model
