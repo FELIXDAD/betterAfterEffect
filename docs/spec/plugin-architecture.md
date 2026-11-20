@@ -1110,3 +1110,330 @@ per frame:
             else { cpu_node(entry.render_cpu, plan.format) }   // §10.6
   release(plan.frame_data)
 ```
+
+---
+
+## 11. Declarative WGSL effects
+
+### 11.1 Model
+
+A declarative effect is manifest data + WGSL. The host turns it into a
+`DeclarativeEffect` (crate `bae-plugin`) that implements `DynEffect`; 04 executes it with
+the **same generic shader node, uniform ring, bind-group cache, transient texture pool
+and pipeline cache** as the built-in WGSL effects of 07, which are themselves authored as
+declarative packages embedded in the binary (§19). There is no interpreter, no extra
+copy and no extra dispatch: the < 2 % budget (§22) holds by construction.
+
+### 11.2 Module assembly
+
+The host compiles one WGSL module per effect and working format:
+
+```
+<generated prelude>       §11.3: structs, bindings, helpers (never written by authors)
+<include files>           §11.10, in manifest order
+<author shader>           `shader = "..."`
+<generated kernel>        pixel style only (§11.4)
+```
+
+Rules for author code: it MUST NOT declare `@group`/`@binding` resources (all bindings
+come from the prelude, so the host can renumber them for fusion); identifiers starting
+with `bae_` / `Bae` are reserved; `enable f16;` is allowed only if the manifest lists
+`features = ["f16"]` and the device supports it (otherwise the effect is unavailable on
+that device with a diagnostic). Diagnostics map naga spans back to `file:line:column`
+of the include or shader file (the prelude is a separate virtual file).
+
+### 11.3 Generated prelude
+
+```wgsl
+// ---- types (render pixel space, half-open rects) ----
+struct BaeRect { min: vec2<i32>, max: vec2<i32> }
+
+struct BaeFrame {
+  output_rect: BaeRect,     // rect covered by the pass target (result rect for "output")
+  layer_bounds: BaeRect,
+  downsample: vec2<f32>,    // (1,1) full res, (0.5,0.5) half ...
+  time: f32,                // layer time in seconds (exact value: time_flicks)
+  time_step: f32,           // seconds per comp frame
+  frame_rate: f32,
+  pixel_aspect: f32,
+  shutter_angle: f32,       // degrees
+  shutter_phase: f32,
+  flags: u32,               // BAE_FRAME_* below
+  seed: u32,                // stable per effect instance (hash of instance uid): noise seeds
+  frame_index: i32,         // round(time * frame_rate), exact
+  pass_index: u32,
+}
+const BAE_FRAME_LINEAR: u32 = 1u;        // working space is linearized
+const BAE_FRAME_FINAL: u32 = 2u;         // render queue / bae render
+const BAE_FRAME_HIGH_QUALITY: u32 = 4u;
+
+struct BaeInputInfo { rect: BaeRect, flags: u32, _pad: u32 }   // flags: 1 = empty, 2 = solid
+
+// ---- one field per numeric param, in definition order (only for effects with such params) ----
+struct BaeParams {
+  amount: f32,              // float, angle (degrees)          → f32
+  center: vec2<f32>,        // point (render px)                → vec2<f32>
+  color: vec4<f32>,         // color (straight, working space)  → vec4<f32>
+  shape: u32,               // popup (choice id), checkbox 0/1  → u32
+  samples: i32,             // int                              → i32
+}
+
+@group(0) @binding(0) var<uniform> frame: BaeFrame;
+@group(0) @binding(1) var<uniform> params: BaeParams;
+@group(0) @binding(2) var bae_linear: sampler;       // clamp-to-edge
+@group(0) @binding(3) var bae_nearest: sampler;
+// textures, one binding each, declared only if the effect uses them:
+//   bae_tex_input   (self input)          bae_tex_to (transitions)
+//   bae_tex_<key>   (each LAYER param)    bae_tex_<name> (each [[effect.texture]], read side)
+//   bae_out         (storage texture of the current pass target, working or texture format)
+// and per readable texture an info uniform: bae_info_input, bae_info_<key>, ...
+```
+
+Field order and types follow the definition order; the uniform layout is WGSL's
+uniform address-space layout (vec3 align 16, vec4 align 16, struct size rounded to 16);
+the host packs the evaluated values with the same rules (layout computed once at load).
+Params without a WGSL representation (group, button, string, asset, arbitrary, path,
+layer) get no field; layer params get textures instead. Points are in **render pixels**
+(downsample applied); distances are not converted — use `bae_scale(x)`.
+
+Helpers (all pure WGSL, inlined by the compiler):
+
+| Helper | Meaning |
+|---|---|
+| `bae_load_<src>(p: vec2<i32>) -> vec4<f32>` | texel at render pixel `p`; transparent outside the source rect (AE semantics) |
+| `bae_sample_<src>(p: vec2<f32>) -> vec4<f32>` | bilinear sample at render-pixel position (centers at `.5`); transparent outside |
+| `bae_store(p: vec2<i32>, c: vec4<f32>)` | write the current pass target |
+| `bae_target_pixel(id: vec3<u32>) -> vec2<i32>` / `bae_in_target(p) -> bool` | invocation id → render pixel of the target, bounds test |
+| `bae_scale(x: f32) -> f32` | full-res distance → render px (`x * frame.downsample.x`) |
+| `bae_to_layer(p: vec2<f32>) -> vec2<f32>` / `bae_from_layer(...)` | render px ↔ full-res layer px |
+| `bae_layer_uv(p) -> vec2<f32>` | 0..1 across `layer_bounds` |
+| `bae_premultiply(c)` / `bae_unpremultiply(c)` | alpha conversions (unpremultiply of alpha 0 returns 0) |
+| `bae_to_linear(c)` / `bae_from_linear(c)` | working ↔ linear light: identity if `BAE_FRAME_LINEAR`, else the sRGB curve |
+| `bae_luma(c) -> f32` | Rec.709 luma of the working values |
+| `bae_hash(seed: u32, p: vec2<i32>) -> f32` | deterministic 0..1 noise |
+
+`<src>` is `input`, `to`, a layer-param key or a texture name.
+
+### 11.4 Styles
+
+**Pixel style** (`style = "pixel"`, requires `pixel-independent` semantics): the author
+writes one function
+
+```wgsl
+struct BaePixel { pos: vec2<i32>, layer_pos: vec2<f32>, uv: vec2<f32> }  // generated
+fn vignette(c: vec4<f32>, px: BaePixel) -> vec4<f32> { ... }            // author
+```
+
+It receives the premultiplied input color at the output pixel and returns the output
+color. It MAY read `frame` and `params` and call helper functions; it MUST NOT read any
+texture (checked on the naga IR). The host generates the kernel
+(`@workgroup_size(16, 16)`: load → function → store) and may fuse chains (§10.9).
+Implied flags: `PIXEL_INDEPENDENT`; ROI = identity.
+
+**Compute style** (`style = "compute"`): the author writes `@compute` entry points named by
+`[[effect.pass]]`; each pass declares what it reads and writes. The workgroup size comes
+from the entry point's `@workgroup_size` (≤ 256 invocations, validated); the host
+dispatches `ceil(target_size / workgroup_size)` groups. Pattern:
+
+```wgsl
+@compute @workgroup_size(8, 8)
+fn blur_horizontal(@builtin(global_invocation_id) id: vec3<u32>) {
+  let p = bae_target_pixel(id);
+  if (!bae_in_target(p)) { return; }
+  ...
+  bae_store(p, sum);
+}
+```
+
+### 11.5 Passes and intermediate textures
+
+- Passes run in manifest order, each as one dispatch with its own pipeline (derived from
+  the entry point) and bind group. The last pass writes `output`.
+- `[[effect.texture]]` intermediates come from the host's transient pool (aliased with
+  other nodes' temporaries when lifetimes do not overlap): size = `ceil(rect size ×
+  scale)`, `rect = "output"` or `"input"`, format `working` or explicit. Sampling helpers
+  account for the scale (`bae_sample_<name>` takes render-pixel coordinates of the full
+  rect). Each texture must be written before it is read.
+- Data-dependent pass structures (pyramids with a param-dependent depth, iterative
+  solvers, reductions feeding later passes) are out of scope for v1 declarative effects:
+  use native `bae.gpu.compute`. A future `repeat = "<expr>"` key is reserved.
+
+### 11.6 ROI from the manifest
+
+`[effect.roi]` replaces `pre_render`:
+
+- Input request = request rect inflated by the `read*` margins (evaluated, §11.7, in
+  full-resolution layer pixels, multiplied by the downsample and rounded up).
+- Result rect: `extent = "input"` → the input's result rect, grown by the mirrored margins
+  if `grows = true`; `"layer"` → layer bounds; `"infinite"` → the request rect. Then
+  intersected with the request (declarative effects never return extra pixels).
+- `max_result_rect` follows the same rule with the input's max rect.
+- Layer params are checked out with the same inflated rect at the same time; transitions
+  check out `to` likewise.
+- `identity_when` true → `IDENTITY` (node skipped).
+
+### 11.7 Expressions
+
+Used by `read*`, `identity_when` and (reserved) `repeat`. Grammar:
+
+```
+expr    := or
+or      := and ("||" and)*          and := cmp ("&&" cmp)*
+cmp     := sum (("=="|"!="|"<"|"<="|">"|">=") sum)?
+sum     := prod (("+"|"-") prod)*   prod := unary (("*"|"/") unary)*
+unary   := ("-"|"!") unary | atom
+atom    := number | "params." key | "frame.downsample_x" | "frame.downsample_y"
+         | func "(" expr ("," expr)* ")" | "(" expr ")"
+func    := min | max | abs | floor | ceil | sqrt | clamp
+```
+
+Values are f64; booleans are 0/1; `params.<key>` is allowed for float, int, angle,
+checkbox (0/1) and popup (choice id) params. Expressions are parsed at load into a tiny
+bytecode, evaluated in `pre_render` with the values at the frame time (no allocation),
+and validated by `bae plugin check`. Division by zero yields 0 and a debug diagnostic.
+
+### 11.8 Compilation, pipelines, diagnostics
+
+1. Load (L, or a worker): read files → generate prelude → naga parse + validate → check
+   rules (no author bindings, entry points exist with the right signatures, pixel
+   function reads no textures, workgroup ≤ 256, only manifest-declared features).
+2. Pipelines are created per (device, working format) asynchronously when a project using
+   the effect opens or the effect is applied (pre-warm), never synchronously on the first
+   frame; they go into the host pipeline cache (wgpu `PipelineCache` where supported).
+3. Errors produce diagnostics with file:line:column and keep the previous version running
+   in dev hot-reload (§7.5); at normal load they mark the plugin `Failed`.
+
+### 11.9 Performance contract
+
+The declarative node is the built-in node: identical kernel shape, the same uniform ring
+with dynamic offsets (no per-frame buffer creation), cached bind groups, pooled
+textures, no CPU work per frame beyond packing the params uniform (a memcpy of ≤ 256 bytes
+typical) and evaluating ROI bytecode. 07 authors its WGSL built-ins in this format, so
+any optimization 04 makes applies to plugins as well.
+
+### 11.10 Shared WGSL modules
+
+An effect may list `includes = ["shaders/common.wgsl", "plugin:bae.std-shaders/noise.wgsl"]`.
+Package-relative files and files exported by dependencies (`[exports] wgsl = [...]` in
+the dependency's manifest) are concatenated in order between prelude and shader. No
+preprocessor and no `#import`: duplicate definitions are compile errors, which keeps the
+model simple and diagnostics exact.
+
+### 11.11 Example
+
+`plugins/examples/vignette/` is the reference package (pixel style, popup + point +
+float + color params, `identity_when`); `plugins/examples/directional-blur/` shows
+compute style with two passes and an intermediate texture.
+
+---
+
+## 12. Native GPU interop
+
+### 12.1 Two levels
+
+| | `bae.gpu.compute` (recommended) | `bae.gpu.native` |
+|---|---|---|
+| What | the plugin supplies WGSL compute pipelines; the host encodes dispatches into its own command stream | raw Metal / D3D12 / Vulkan device, queue and texture handles |
+| Portability | all backends, also out-of-process later (record/replay, §15.3) | per backend; in-process only |
+| Synchronization cost | none (host-ordered) | one extra queue submit per node + fence handling |
+| Use for | most GPU effects | existing Metal/HLSL/CUDA-interop code, AE GPU effects (20) |
+
+### 12.2 Device sharing
+
+There is one `wgpu::Device` per process (`bae_gpu::GpuContext`, 01) shared by renderer, UI
+and plugins. Native handles are obtained through wgpu-hal (`Device::as_hal`,
+`Texture::as_hal`), exposed by `bae_gpu::native` (request R01-3). The plugin receives the
+host's device and **the host's queue**: Metal `id<MTLDevice>` / `id<MTLCommandQueue>`;
+D3D12 `ID3D12Device*` / `ID3D12CommandQueue*` (+ adapter LUID); Vulkan handles when the
+Vulkan backend is enabled.
+
+### 12.3 Scope protocol (`begin` / `end`)
+
+Within `render_gpu`:
+
+1. `begin(images, usages)`: the host closes and submits its pending command encoder for
+   this frame's dependency chain (so everything the inputs depend on is enqueued before
+   the plugin's work), transitions the requested textures to the requested usage
+   (D3D12 resource states / Vulkan layouts; Metal has none) and returns their native
+   handles plus a scope with optional fences.
+2. The plugin encodes its own command buffers and commits them to `scope.device.queue`.
+   If `wait_fence` ≠ 0 it MUST encode a GPU-side wait for `wait_value` before the first
+   access; if `signal_fence` ≠ 0 it MUST encode a GPU-side signal of `signal_value` after
+   the last access. It MUST NOT block the CPU waiting for the GPU.
+3. `end()`: the host assumes the textures are back in the state they were handed out in
+   (`BaeNativeGpuTexture.state`) and continues encoding; later host submissions are
+   ordered after the plugin's.
+
+Fence use per backend: D3D12 — same queue, ordering by `ExecuteCommandLists` order, fences
+normally 0. Metal — wgpu may create untracked resources, so the host passes an
+`MTLSharedEvent` pair (`encodeWaitForEvent` / `encodeSignalEvent`). Vulkan — timeline
+semaphores. The host decides; plugins only honour non-zero fences.
+
+### 12.4 Lifetimes and ownership
+
+- All handles are host-owned and valid until `render_gpu` returns; the host keeps the
+  textures alive on the GPU until the plugin's signalled work completes.
+- Device and queue may be retained (ObjC `retain` / COM `AddRef`) in `gpu_device_setup`
+  and MUST be released in `gpu_device_setdown`.
+- Plugin-created GPU objects (pipelines, buffers) are created in `gpu_device_setup` and
+  destroyed in `gpu_device_setdown`; per-frame temporaries must be released only after GPU
+  completion (completion handlers / fences), and **no completion handler may run after
+  `gpu_device_setdown` returns** (the host waits for its last fence before unmapping code,
+  §7.4 step 5).
+- Formats: the working format maps to `MTLPixelFormatRGBA16Float` /
+  `DXGI_FORMAT_R16G16B16A16_FLOAT` (RGBA32F analogously); textures may be larger than
+  their `rect` (pooled).
+
+### 12.5 Device loss, multiple GPUs, CUDA
+
+- Device lost: the host calls `gpu_device_setdown` for every plugin on that device (handles
+  are then invalid and must not be used), recreates the device and calls
+  `gpu_device_setup` lazily again.
+- One GPU device per process in v1; `device_index` is reserved for multi-GPU.
+- CUDA/OpenCL are not offered. CUDA interop for AE GPU effects on Windows would be a new
+  suite (`bae.gpu.cuda`, D3D12 ↔ CUDA external memory) if 20 needs it.
+
+---
+
+## 13. Threading model
+
+### 13.1 Host threads
+
+| Letter | Thread | Notes |
+|---|---|---|
+| UI | main/UI thread | plugins never run here, except script panels' render callbacks (§17.6) |
+| M | model thread | owns the Stage, executes commands; may coincide with UI in early milestones but plugin code never blocks UI frames for long (§8.5 budgets) |
+| L | plugin thread | one host thread for load/unload, `bae_plugin_entry`, `global_setup`/`setdown`, `define_params`, `shutdown` |
+| R | render workers | pool sized to cores; GPU encoding and CPU nodes |
+| G | GPU setup | a render worker that holds the effect's per-device setup lock |
+| S | script workers | QuickJS runtimes (§17.1) |
+| D | media workers | decoders/encoders (§18.4) |
+
+### 13.2 Callback threads and exclusivity
+
+| Callback | Thread | Concurrency guarantee |
+|---|---|---|
+| `bae_plugin_entry`, `shutdown` | L | nothing else of the plugin runs |
+| `global_setup`, `global_setdown`, `define_params` | L | nothing else of that effect runs |
+| `gpu_device_setup` / `setdown` | G | no `render_gpu` of that effect on that device concurrently |
+| `instance_*` (EDIT), `param_changed`, `update_params_ui`, `query_dynamic_flags`, `get_dependencies`, `message` | M | serialized (M is one thread) |
+| `instance_create`/`destroy` (RENDER), `pre_render`, `render_*`, `release_frame_data` | R | per `threading` (§10.5) |
+| shape operator `apply`, expression functions | any | fully concurrent (pure) |
+| importer/exporter/command callbacks | M (commands, importers) / worker (exporters) | one call at a time per contribution |
+| decoder/encoder handle calls | D | serialized per handle; different handles concurrent |
+
+### 13.3 Plugin obligations
+
+- Suites are called only from the thread of the callback that received the context
+  (`BaeRenderCtx`, `BaeParamEditor`, ...), and only until it returns. Exceptions:
+  `bae.core` (`log`, `alloc`, `free`, `has_permission`, `get_path`) is callable from any
+  thread at any time while the plugin is loaded.
+- Threads a plugin creates MUST NOT touch host-provided memory after the callback that
+  provided it returns; prefer `bae.render.parallel_for` (host pool, no oversubscription).
+- Floating-point environment: the host enters callbacks with default rounding, no FP
+  exceptions enabled; FTZ/DAZ unspecified. A plugin that changes MXCSR/FPCR restores it
+  before returning.
+- Re-entrancy: suite calls never re-enter the same plugin synchronously, except
+  `bae.command.invoke`, which may run another plugin's command; invoking a command of the
+  calling plugin recursively returns `BAE_ERR_BAD_STATE`.
+- Thread-local storage in plugins is allowed but should not hold host pointers.
