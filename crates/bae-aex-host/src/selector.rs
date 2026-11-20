@@ -1,0 +1,934 @@
+//! Command selectors and the call-order contract.
+//!
+//! Every interaction between host and AE effect is one call of the plug-in's
+//! entry point with a command selector (SDK guide, "Effect Basics › Command
+//! Selectors"). [`Selector`] lists every selector the public guide documents,
+//! under BAE-owned names; [`Selector::info`] records, per selector, what the
+//! host must provide and which BAE plug-in lifecycle hook (workstream 19) it
+//! corresponds to; [`ProtocolTracker`] enforces the ordering rules the host
+//! itself must respect (and catches host bugs in tests).
+
+use std::collections::HashMap;
+
+use crate::error::{HostError, Result};
+
+/// Every documented `PF_Cmd_*` selector (BAE naming).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Selector {
+    /// `PF_Cmd_ABOUT`: show about text (host displays `return_msg`).
+    About,
+    /// `PF_Cmd_GLOBAL_SETUP`: plug-in reports version and capability flags.
+    GlobalSetup,
+    /// `PF_Cmd_GLOBAL_SETDOWN`: free global data.
+    GlobalSetdown,
+    /// `PF_Cmd_PARAM_SETUP` (named PARAMS_SETUP in some places): declare params.
+    ParamsSetup,
+    /// `PF_Cmd_SEQUENCE_SETUP`: new instance applied; allocate sequence data.
+    SequenceSetup,
+    /// `PF_Cmd_SEQUENCE_RESETUP`: rebuild (unflatten) sequence data after
+    /// load, duplication, precompose or layer change.
+    SequenceResetup,
+    /// `PF_Cmd_SEQUENCE_FLATTEN`: produce flat, byte-ordered sequence data for
+    /// saving / duplication.
+    SequenceFlatten,
+    /// `PF_Cmd_SEQUENCE_SETDOWN`: free sequence data.
+    SequenceSetdown,
+    /// `PF_Cmd_GET_FLATTENED_SEQUENCE_DATA`: return a flat *copy* without
+    /// disturbing the live data (Multi-Frame Rendering marshalling).
+    GetFlattenedSequenceData,
+    /// `PF_Cmd_FRAME_SETUP`: legacy per-frame setup / output resize.
+    FrameSetup,
+    /// `PF_Cmd_RENDER`: legacy render (8/16 bpc only).
+    Render,
+    /// `PF_Cmd_FRAME_SETDOWN`: legacy per-frame teardown.
+    FrameSetdown,
+    /// `PF_Cmd_SMART_PRE_RENDER`: SmartFX ROI negotiation and input checkout.
+    SmartPreRender,
+    /// `PF_Cmd_SMART_RENDER`: SmartFX CPU render (8/16/32 bpc).
+    SmartRender,
+    /// `PF_Cmd_SMART_RENDER_GPU`: SmartFX GPU render.
+    SmartRenderGpu,
+    /// `PF_Cmd_AUDIO_SETUP`.
+    AudioSetup,
+    /// `PF_Cmd_AUDIO_RENDER`.
+    AudioRender,
+    /// `PF_Cmd_AUDIO_SETDOWN`.
+    AudioSetdown,
+    /// `PF_Cmd_EVENT`: custom UI event (extra = event record).
+    Event,
+    /// `PF_Cmd_USER_CHANGED_PARAM`: a supervised param changed by the user.
+    UserChangedParam,
+    /// `PF_Cmd_UPDATE_PARAMS_UI`: cosmetic param UI refresh.
+    UpdateParamsUi,
+    /// `PF_Cmd_DO_DIALOG`: options dialog.
+    DoDialog,
+    /// `PF_Cmd_ARBITRARY_CALLBACK`: arbitrary-data param handler.
+    ArbitraryCallback,
+    /// `PF_Cmd_GET_EXTERNAL_DEPENDENCIES`: report files/fonts the effect needs.
+    GetExternalDependencies,
+    /// `PF_Cmd_COMPLETELY_GENERAL`: private message from an AEGP.
+    CompletelyGeneral,
+    /// `PF_Cmd_QUERY_DYNAMIC_FLAGS`: re-evaluate dynamic capability flags.
+    QueryDynamicFlags,
+    /// `PF_Cmd_GPU_DEVICE_SETUP`: per-device GPU initialisation / opt-out.
+    GpuDeviceSetup,
+    /// `PF_Cmd_GPU_DEVICE_SETDOWN`: release per-device GPU data.
+    GpuDeviceSetdown,
+}
+
+/// Selector family as grouped in the SDK guide.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SelectorGroup {
+    /// Plug-in-wide, not tied to an effect instance.
+    Global,
+    /// Tied to one effect instance (AE "sequence").
+    Sequence,
+    /// Per rendered frame.
+    Frame,
+    /// Per audio render.
+    Audio,
+    /// UI / messaging.
+    Messaging,
+    /// Per GPU device.
+    Gpu,
+}
+
+/// Which thread the host may issue a selector on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ThreadAffinity {
+    /// Main thread, with no other selector of this plug-in in flight
+    /// (global setup/setdown under Multi-Frame Rendering).
+    MainExclusive,
+    /// Main (UI) thread; render selectors may run concurrently on other
+    /// threads if the plug-in opted into threaded rendering.
+    Main,
+    /// Any render thread; concurrent with other render calls only if the
+    /// plug-in declared thread safety, otherwise the host serialises.
+    Render,
+}
+
+/// Which parameter values the host must have filled in `params[]`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ParamsValidity {
+    /// `params` is not valid.
+    None,
+    /// Non-layer params valid; layer params are not checked out.
+    NonLayer,
+    /// All params including checked-out layer worlds (legacy render).
+    All,
+}
+
+/// Type of the `extra` argument for a selector.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ExtraKind {
+    /// Unused.
+    None,
+    /// SmartFX pre-render record ([`crate::smart`]).
+    PreRender,
+    /// SmartFX render record (CPU and GPU share it).
+    SmartRender,
+    /// UI event record ([`crate::ui`]).
+    Event,
+    /// Arbitrary-data function selector + arguments ([`crate::params`]).
+    ArbitraryCallback,
+    /// External dependencies request.
+    ExternalDependencies,
+    /// GPU device setup record ([`crate::gpu`]).
+    GpuDeviceSetup,
+    /// GPU device setdown record.
+    GpuDeviceSetdown,
+    /// Opaque pointer supplied by an AEGP.
+    AegpMessage,
+    /// Output slot for the flattened copy.
+    FlattenedSequenceData,
+}
+
+/// The workstream-19 effect callback a selector is translated to.
+///
+/// The compat host is a native BAE plug-in (`BAE_KIND_EFFECT`, vtable 1 of
+/// `sdk/c/bae_plugin.h`) whose callbacks issue AE selectors; this enum names
+/// those callbacks exactly as the C header does ([`LifecycleHook::c_symbol`]).
+/// The table in [`Selector::info`] is the code form of
+/// `docs/spec/plugin-architecture.md` §9.1 (19's request R20-1), and a unit
+/// test checks every symbol against the header so the two cannot drift.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LifecycleHook {
+    /// `global_setup` (L thread).
+    GlobalSetup,
+    /// `global_setdown`.
+    GlobalSetdown,
+    /// `define_params`.
+    DefineParams,
+    /// `gpu_device_setup` (per device, before the first `render_gpu` there).
+    GpuDeviceSetup,
+    /// `gpu_device_setdown`.
+    GpuDeviceSetdown,
+    /// `instance_create`: `EDIT` with an empty state for a new instance,
+    /// `EDIT` or `RENDER` with the state blob for load, paste, duplicate and
+    /// remote changes. Compat effects are always `STATEFUL`.
+    InstanceCreate,
+    /// `instance_serialize`: non-destructive by 19's contract. The compat host
+    /// prefers the plug-in's non-destructive flatten and otherwise flattens
+    /// and immediately re-creates its live state.
+    InstanceSerialize,
+    /// `instance_destroy`.
+    InstanceDestroy,
+    /// `param_changed` (supervised params and buttons).
+    ParamChanged,
+    /// `update_params_ui` (cosmetic only).
+    UpdateParamsUi,
+    /// `query_dynamic_flags`.
+    QueryDynamicFlags,
+    /// `pre_render`: SmartFX pre-render, or synthesised from the legacy
+    /// frame setup (output size and origin).
+    PreRender,
+    /// `render_cpu`: SmartFX render or legacy render.
+    RenderCpu,
+    /// `render_gpu`.
+    RenderGpu,
+    /// `release_frame_data`.
+    ReleaseFrameData,
+    /// `get_dependencies`.
+    GetDependencies,
+    /// `message`: about text (`bae.about`), options dialog
+    /// (`bae.options_dialog`) and private plug-in messages.
+    Message,
+    /// `BaeArbitraryVTable1` (`interpolate`, `compare`, `to_text`,
+    /// `from_text`); new/dispose/copy/flatten are host-managed byte copies.
+    ArbitraryValue,
+    /// Reserved for ABI 0.2: `ui_event` + the `bae.draw` suite
+    /// (`BAE_EFFECT_FLAG_CUSTOM_UI`).
+    UiEvent,
+    /// Reserved contribution kind `BAE_KIND_AUDIO_EFFECT`; audio effects are
+    /// placeholders until BAE has an audio graph.
+    AudioEffect,
+}
+
+/// Where a [`LifecycleHook`] lives in 19's C ABI today.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum HookAbi {
+    /// A function pointer of `BaeEffectVTable1`.
+    EffectVTable1,
+    /// The `BaeArbitraryVTable1` table attached to an ARBITRARY param.
+    ArbitraryVTable1,
+    /// Named in the header but reserved (not callable in ABI 0.1).
+    Reserved,
+}
+
+impl LifecycleHook {
+    /// Every hook, for exhaustive tests.
+    pub const ALL: [LifecycleHook; 20] = [
+        LifecycleHook::GlobalSetup,
+        LifecycleHook::GlobalSetdown,
+        LifecycleHook::DefineParams,
+        LifecycleHook::GpuDeviceSetup,
+        LifecycleHook::GpuDeviceSetdown,
+        LifecycleHook::InstanceCreate,
+        LifecycleHook::InstanceSerialize,
+        LifecycleHook::InstanceDestroy,
+        LifecycleHook::ParamChanged,
+        LifecycleHook::UpdateParamsUi,
+        LifecycleHook::QueryDynamicFlags,
+        LifecycleHook::PreRender,
+        LifecycleHook::RenderCpu,
+        LifecycleHook::RenderGpu,
+        LifecycleHook::ReleaseFrameData,
+        LifecycleHook::GetDependencies,
+        LifecycleHook::Message,
+        LifecycleHook::ArbitraryValue,
+        LifecycleHook::UiEvent,
+        LifecycleHook::AudioEffect,
+    ];
+
+    /// The identifier in `sdk/c/bae_plugin.h`: the vtable field name, or the
+    /// reserved name for hooks that are not callable yet.
+    pub fn c_symbol(self) -> &'static str {
+        match self {
+            LifecycleHook::GlobalSetup => "global_setup",
+            LifecycleHook::GlobalSetdown => "global_setdown",
+            LifecycleHook::DefineParams => "define_params",
+            LifecycleHook::GpuDeviceSetup => "gpu_device_setup",
+            LifecycleHook::GpuDeviceSetdown => "gpu_device_setdown",
+            LifecycleHook::InstanceCreate => "instance_create",
+            LifecycleHook::InstanceSerialize => "instance_serialize",
+            LifecycleHook::InstanceDestroy => "instance_destroy",
+            LifecycleHook::ParamChanged => "param_changed",
+            LifecycleHook::UpdateParamsUi => "update_params_ui",
+            LifecycleHook::QueryDynamicFlags => "query_dynamic_flags",
+            LifecycleHook::PreRender => "pre_render",
+            LifecycleHook::RenderCpu => "render_cpu",
+            LifecycleHook::RenderGpu => "render_gpu",
+            LifecycleHook::ReleaseFrameData => "release_frame_data",
+            LifecycleHook::GetDependencies => "get_dependencies",
+            LifecycleHook::Message => "message",
+            LifecycleHook::ArbitraryValue => "BaeArbitraryVTable1",
+            LifecycleHook::UiEvent => "ui_event",
+            LifecycleHook::AudioEffect => "BAE_KIND_AUDIO_EFFECT",
+        }
+    }
+
+    /// Where the hook lives in the current C ABI.
+    pub fn abi(self) -> HookAbi {
+        match self {
+            LifecycleHook::ArbitraryValue => HookAbi::ArbitraryVTable1,
+            LifecycleHook::UiEvent | LifecycleHook::AudioEffect => HookAbi::Reserved,
+            _ => HookAbi::EffectVTable1,
+        }
+    }
+}
+
+/// Static facts about a selector.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SelectorInfo {
+    /// Family.
+    pub group: SelectorGroup,
+    /// Thread the host issues it on.
+    pub affinity: ThreadAffinity,
+    /// Which params must be valid.
+    pub params: ParamsValidity,
+    /// Whether `output` (a world) is valid.
+    pub output: bool,
+    /// Type of `extra`.
+    pub extra: ExtraKind,
+    /// Corresponding BAE lifecycle hook.
+    pub hook: LifecycleHook,
+    /// True when the call needs a live effect instance (sequence data).
+    pub needs_instance: bool,
+}
+
+impl Selector {
+    /// All selectors, for exhaustive tests and tables.
+    pub const ALL: [Selector; 28] = [
+        Selector::About,
+        Selector::GlobalSetup,
+        Selector::GlobalSetdown,
+        Selector::ParamsSetup,
+        Selector::SequenceSetup,
+        Selector::SequenceResetup,
+        Selector::SequenceFlatten,
+        Selector::SequenceSetdown,
+        Selector::GetFlattenedSequenceData,
+        Selector::FrameSetup,
+        Selector::Render,
+        Selector::FrameSetdown,
+        Selector::SmartPreRender,
+        Selector::SmartRender,
+        Selector::SmartRenderGpu,
+        Selector::AudioSetup,
+        Selector::AudioRender,
+        Selector::AudioSetdown,
+        Selector::Event,
+        Selector::UserChangedParam,
+        Selector::UpdateParamsUi,
+        Selector::DoDialog,
+        Selector::ArbitraryCallback,
+        Selector::GetExternalDependencies,
+        Selector::CompletelyGeneral,
+        Selector::QueryDynamicFlags,
+        Selector::GpuDeviceSetup,
+        Selector::GpuDeviceSetdown,
+    ];
+
+    /// Static facts (see the per-selector table in the spec for citations).
+    pub fn info(self) -> SelectorInfo {
+        use ExtraKind as X;
+        use LifecycleHook as H;
+        use ParamsValidity as P;
+        use SelectorGroup as G;
+        use ThreadAffinity as T;
+        let (group, affinity, params, output, extra, hook, needs_instance) = match self {
+            Selector::About => (
+                G::Global,
+                T::Main,
+                P::None,
+                false,
+                X::None,
+                H::Message,
+                false,
+            ),
+            Selector::GlobalSetup => (
+                G::Global,
+                T::MainExclusive,
+                P::None,
+                false,
+                X::None,
+                H::GlobalSetup,
+                false,
+            ),
+            Selector::GlobalSetdown => (
+                G::Global,
+                T::MainExclusive,
+                P::None,
+                false,
+                X::None,
+                H::GlobalSetdown,
+                false,
+            ),
+            Selector::ParamsSetup => (
+                G::Global,
+                T::Main,
+                P::None,
+                false,
+                X::None,
+                H::DefineParams,
+                false,
+            ),
+            Selector::SequenceSetup => (
+                G::Sequence,
+                T::Render,
+                P::NonLayer,
+                false,
+                X::None,
+                H::InstanceCreate,
+                false,
+            ),
+            Selector::SequenceResetup => (
+                G::Sequence,
+                T::Render,
+                P::NonLayer,
+                false,
+                X::None,
+                H::InstanceCreate,
+                false,
+            ),
+            Selector::SequenceFlatten => (
+                G::Sequence,
+                T::Main,
+                P::NonLayer,
+                false,
+                X::None,
+                H::InstanceSerialize,
+                true,
+            ),
+            Selector::SequenceSetdown => (
+                G::Sequence,
+                T::Render,
+                P::None,
+                false,
+                X::None,
+                H::InstanceDestroy,
+                true,
+            ),
+            Selector::GetFlattenedSequenceData => (
+                G::Sequence,
+                T::Main,
+                P::None,
+                false,
+                X::FlattenedSequenceData,
+                H::InstanceSerialize,
+                true,
+            ),
+            Selector::FrameSetup => (
+                G::Frame,
+                T::Render,
+                P::NonLayer,
+                false,
+                X::None,
+                H::PreRender,
+                true,
+            ),
+            Selector::Render => (
+                G::Frame,
+                T::Render,
+                P::All,
+                true,
+                X::None,
+                H::RenderCpu,
+                true,
+            ),
+            Selector::FrameSetdown => (
+                G::Frame,
+                T::Render,
+                P::NonLayer,
+                false,
+                X::None,
+                H::ReleaseFrameData,
+                true,
+            ),
+            Selector::SmartPreRender => (
+                G::Frame,
+                T::Render,
+                P::None,
+                false,
+                X::PreRender,
+                H::PreRender,
+                true,
+            ),
+            Selector::SmartRender => (
+                G::Frame,
+                T::Render,
+                P::None,
+                false,
+                X::SmartRender,
+                H::RenderCpu,
+                true,
+            ),
+            Selector::SmartRenderGpu => (
+                G::Frame,
+                T::Render,
+                P::None,
+                false,
+                X::SmartRender,
+                H::RenderGpu,
+                true,
+            ),
+            Selector::AudioSetup => (
+                G::Audio,
+                T::Render,
+                P::NonLayer,
+                false,
+                X::None,
+                H::AudioEffect,
+                true,
+            ),
+            Selector::AudioRender => (
+                G::Audio,
+                T::Render,
+                P::NonLayer,
+                false,
+                X::None,
+                H::AudioEffect,
+                true,
+            ),
+            Selector::AudioSetdown => (
+                G::Audio,
+                T::Render,
+                P::None,
+                false,
+                X::None,
+                H::AudioEffect,
+                true,
+            ),
+            Selector::Event => (
+                G::Messaging,
+                T::Main,
+                P::NonLayer,
+                false,
+                X::Event,
+                H::UiEvent,
+                true,
+            ),
+            Selector::UserChangedParam => (
+                G::Messaging,
+                T::Main,
+                P::NonLayer,
+                false,
+                X::None,
+                H::ParamChanged,
+                true,
+            ),
+            Selector::UpdateParamsUi => (
+                G::Messaging,
+                T::Main,
+                P::NonLayer,
+                false,
+                X::None,
+                H::UpdateParamsUi,
+                true,
+            ),
+            Selector::DoDialog => (
+                G::Messaging,
+                T::Main,
+                P::NonLayer,
+                false,
+                X::None,
+                H::Message,
+                true,
+            ),
+            Selector::ArbitraryCallback => (
+                G::Messaging,
+                T::Render,
+                P::None,
+                false,
+                X::ArbitraryCallback,
+                H::ArbitraryValue,
+                false,
+            ),
+            Selector::GetExternalDependencies => (
+                G::Messaging,
+                T::Main,
+                P::NonLayer,
+                false,
+                X::ExternalDependencies,
+                H::GetDependencies,
+                true,
+            ),
+            Selector::CompletelyGeneral => (
+                G::Messaging,
+                T::Main,
+                P::None,
+                false,
+                X::AegpMessage,
+                H::Message,
+                true,
+            ),
+            Selector::QueryDynamicFlags => (
+                G::Messaging,
+                T::Main,
+                P::NonLayer,
+                false,
+                X::None,
+                H::QueryDynamicFlags,
+                true,
+            ),
+            Selector::GpuDeviceSetup => (
+                G::Gpu,
+                T::Main,
+                P::None,
+                false,
+                X::GpuDeviceSetup,
+                H::GpuDeviceSetup,
+                false,
+            ),
+            Selector::GpuDeviceSetdown => (
+                G::Gpu,
+                T::Main,
+                P::None,
+                false,
+                X::GpuDeviceSetdown,
+                H::GpuDeviceSetdown,
+                false,
+            ),
+        };
+        SelectorInfo {
+            group,
+            affinity,
+            params,
+            output,
+            extra,
+            hook,
+            needs_instance,
+        }
+    }
+}
+
+/// Lifecycle state of one plug-in module as tracked by the host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModuleState {
+    /// Loaded but `GlobalSetup` not yet sent.
+    Loaded,
+    /// `GlobalSetup` succeeded.
+    GlobalReady,
+    /// `ParamsSetup` succeeded; instances may be created.
+    ParamsDefined,
+    /// `GlobalSetdown` sent; only unload is allowed.
+    Shutdown,
+}
+
+/// State of one effect instance's sequence data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InstanceState {
+    /// Live (unflattened) data owned by the plug-in.
+    Live,
+    /// Flat data (after flatten); the host must resetup before any call that
+    /// needs live data. AE may dispose flat data without a setdown.
+    Flat,
+}
+
+/// Host-side identifier of an effect instance (one effect Prim in BAE).
+pub type InstanceId = u64;
+
+/// Tracks module and instance state and rejects selector sequences the
+/// protocol (or BAE host policy, where stricter) forbids. The real host runs
+/// it in debug builds; it is also the executable form of the call-order
+/// table in the spec.
+#[derive(Debug)]
+pub struct ProtocolTracker {
+    module: ModuleState,
+    instances: HashMap<InstanceId, InstanceState>,
+    gpu_devices: HashMap<u32, ()>,
+}
+
+impl Default for ProtocolTracker {
+    fn default() -> Self {
+        ProtocolTracker {
+            module: ModuleState::Loaded,
+            instances: HashMap::new(),
+            gpu_devices: HashMap::new(),
+        }
+    }
+}
+
+impl ProtocolTracker {
+    /// New tracker for a freshly loaded module.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Current module state.
+    pub fn module_state(&self) -> ModuleState {
+        self.module
+    }
+
+    /// State of an instance, if it exists.
+    pub fn instance_state(&self, id: InstanceId) -> Option<InstanceState> {
+        self.instances.get(&id).copied()
+    }
+
+    /// Validate (and record) that the host is about to send `sel`, for
+    /// instance `inst` where relevant and GPU device `device` for GPU device
+    /// selectors. Call only after the plug-in returned success for the
+    /// previous selector; a failed `GlobalSetup` leaves the module unusable.
+    pub fn send(
+        &mut self,
+        sel: Selector,
+        inst: Option<InstanceId>,
+        device: Option<u32>,
+    ) -> Result<()> {
+        let v = |rule: &'static str| Err(HostError::ProtocolViolation { rule });
+        match (self.module, sel) {
+            (ModuleState::Shutdown, _) => return v("no selector after GLOBAL_SETDOWN"),
+            (ModuleState::Loaded, Selector::GlobalSetup) => {
+                self.module = ModuleState::GlobalReady;
+                return Ok(());
+            }
+            (ModuleState::Loaded, _) => return v("GLOBAL_SETUP must be the first selector"),
+            (_, Selector::GlobalSetup) => return v("GLOBAL_SETUP sent twice"),
+            (ModuleState::GlobalReady, Selector::ParamsSetup) => {
+                self.module = ModuleState::ParamsDefined;
+                return Ok(());
+            }
+            (ModuleState::ParamsDefined, Selector::ParamsSetup) => {
+                return v("PARAMS_SETUP is sent once per module load");
+            }
+            (_, Selector::GlobalSetdown) => {
+                if !self.instances.is_empty() {
+                    return v("BAE policy: set down every instance before GLOBAL_SETDOWN");
+                }
+                if !self.gpu_devices.is_empty() {
+                    return v("BAE policy: set down every GPU device before GLOBAL_SETDOWN");
+                }
+                self.module = ModuleState::Shutdown;
+                return Ok(());
+            }
+            (_, Selector::About) => return Ok(()),
+            (_, Selector::GpuDeviceSetup) => {
+                let d = device.ok_or(HostError::ProtocolViolation {
+                    rule: "GPU selector without device index",
+                })?;
+                if self.gpu_devices.insert(d, ()).is_some() {
+                    return v("GPU_DEVICE_SETUP at most once per device");
+                }
+                return Ok(());
+            }
+            (_, Selector::GpuDeviceSetdown) => {
+                let d = device.ok_or(HostError::ProtocolViolation {
+                    rule: "GPU selector without device index",
+                })?;
+                if self.gpu_devices.remove(&d).is_none() {
+                    return v("GPU_DEVICE_SETDOWN without matching setup");
+                }
+                return Ok(());
+            }
+            (ModuleState::GlobalReady, s)
+                if s.info().group != SelectorGroup::Global && s != Selector::ArbitraryCallback =>
+            {
+                return v("PARAMS_SETUP must precede instance selectors");
+            }
+            _ => {}
+        }
+
+        let info = sel.info();
+        match sel {
+            Selector::SequenceSetup => {
+                let id = inst.ok_or(HostError::ProtocolViolation {
+                    rule: "SEQUENCE_SETUP needs an instance id",
+                })?;
+                if self.instances.contains_key(&id) {
+                    return v("SEQUENCE_SETUP on an existing instance");
+                }
+                self.instances.insert(id, InstanceState::Live);
+                Ok(())
+            }
+            Selector::SequenceResetup => {
+                // Valid after load (no live instance yet), after duplication
+                // (both old and new instance) and after flatten.
+                let id = inst.ok_or(HostError::ProtocolViolation {
+                    rule: "SEQUENCE_RESETUP needs an instance id",
+                })?;
+                self.instances.insert(id, InstanceState::Live);
+                Ok(())
+            }
+            Selector::SequenceFlatten => {
+                let id = inst.ok_or(HostError::ProtocolViolation {
+                    rule: "SEQUENCE_FLATTEN needs an instance id",
+                })?;
+                match self.instances.get_mut(&id) {
+                    Some(s @ InstanceState::Live) => {
+                        *s = InstanceState::Flat;
+                        Ok(())
+                    }
+                    Some(InstanceState::Flat) => v("SEQUENCE_FLATTEN on already-flat data"),
+                    None => v("SEQUENCE_FLATTEN on unknown instance"),
+                }
+            }
+            Selector::SequenceSetdown => {
+                let id = inst.ok_or(HostError::ProtocolViolation {
+                    rule: "SEQUENCE_SETDOWN needs an instance id",
+                })?;
+                if self.instances.remove(&id).is_none() {
+                    return v("SEQUENCE_SETDOWN on unknown instance");
+                }
+                Ok(())
+            }
+            _ if info.needs_instance => {
+                let id = inst.ok_or(HostError::ProtocolViolation {
+                    rule: "selector needs an instance id",
+                })?;
+                match self.instances.get(&id) {
+                    Some(InstanceState::Live) => Ok(()),
+                    Some(InstanceState::Flat) => {
+                        v("BAE policy: RESETUP a flattened instance before using it")
+                    }
+                    None => v("selector for unknown instance"),
+                }
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// The host disposed flat data of an instance without SETDOWN (allowed by
+    /// the protocol after a recent flatten).
+    pub fn dispose_flat(&mut self, id: InstanceId) -> Result<()> {
+        match self.instances.get(&id) {
+            Some(InstanceState::Flat) => {
+                self.instances.remove(&id);
+                Ok(())
+            }
+            _ => Err(HostError::ProtocolViolation {
+                rule: "only flat sequence data may be disposed without SETDOWN",
+            }),
+        }
+    }
+}
+
+impl Selector {
+    /// The reserved `message` selector the compat host answers this AE selector
+    /// with (`BAE_MESSAGE_*` in `sdk/c/bae_plugin.h`), if any. Private messages
+    /// (`CompletelyGeneral`) use plug-in-defined selector strings instead.
+    pub fn bae_message(self) -> Option<&'static str> {
+        match self {
+            Selector::About => Some("bae.about"),
+            Selector::DoDialog => Some("bae.options_dialog"),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_selector_has_info() {
+        for s in Selector::ALL {
+            let i = s.info();
+            if i.group == SelectorGroup::Frame {
+                assert!(i.needs_instance, "{s:?}");
+            }
+        }
+        assert_eq!(Selector::Render.info().params, ParamsValidity::All);
+        assert!(Selector::Render.info().output);
+        assert_eq!(
+            Selector::GlobalSetup.info().affinity,
+            ThreadAffinity::MainExclusive
+        );
+    }
+
+    /// 19's request R20-1: every hook the table uses must exist in the C ABI
+    /// header with the same name, and every vtable-1 callback of the header
+    /// must be reachable from some AE selector (or be BAE-only on purpose).
+    #[test]
+    fn hooks_match_the_c_abi_header() {
+        const HEADER: &str = include_str!("../../../sdk/c/bae_plugin.h");
+        let vtable = {
+            let start = HEADER
+                .find("typedef struct BaeEffectVTable1")
+                .expect("BaeEffectVTable1 in header");
+            let end = start + HEADER[start..].find("} BaeEffectVTable1;").unwrap();
+            &HEADER[start..end]
+        };
+        for hook in LifecycleHook::ALL {
+            let sym = hook.c_symbol();
+            match hook.abi() {
+                HookAbi::EffectVTable1 => assert!(
+                    vtable.contains(&format!("(*{sym})(")),
+                    "{hook:?}: `{sym}` is not a BaeEffectVTable1 callback"
+                ),
+                HookAbi::ArbitraryVTable1 | HookAbi::Reserved => {
+                    assert!(HEADER.contains(sym), "{hook:?}: `{sym}` not in header")
+                }
+            }
+        }
+        // Every vtable-1 callback is covered by at least one selector.
+        let used: std::collections::HashSet<_> =
+            Selector::ALL.iter().map(|s| s.info().hook).collect();
+        for hook in LifecycleHook::ALL {
+            assert!(used.contains(&hook), "{hook:?} has no AE selector");
+        }
+        let callbacks = vtable.matches("(*").count();
+        let mapped = LifecycleHook::ALL
+            .iter()
+            .filter(|h| h.abi() == HookAbi::EffectVTable1)
+            .count();
+        assert_eq!(
+            callbacks, mapped,
+            "BaeEffectVTable1 gained or lost a callback: update LifecycleHook"
+        );
+        for s in Selector::ALL {
+            if let Some(m) = s.bae_message() {
+                assert_eq!(s.info().hook, LifecycleHook::Message);
+                assert!(HEADER.contains(&format!("\"{m}\"")), "{m} not in header");
+            }
+        }
+    }
+
+    #[test]
+    fn documented_happy_path() {
+        let mut t = ProtocolTracker::new();
+        t.send(Selector::GlobalSetup, None, None).unwrap();
+        t.send(Selector::ParamsSetup, None, None).unwrap();
+        t.send(Selector::GpuDeviceSetup, None, Some(0)).unwrap();
+        t.send(Selector::SequenceSetup, Some(1), None).unwrap();
+        for _ in 0..3 {
+            t.send(Selector::SmartPreRender, Some(1), None).unwrap();
+        }
+        t.send(Selector::SmartRender, Some(1), None).unwrap();
+        t.send(Selector::UserChangedParam, Some(1), None).unwrap();
+        // Save: flatten, then the BAE host resetups before further use.
+        t.send(Selector::SequenceFlatten, Some(1), None).unwrap();
+        assert!(t.send(Selector::SmartRender, Some(1), None).is_err());
+        t.send(Selector::SequenceResetup, Some(1), None).unwrap();
+        t.send(Selector::SmartRender, Some(1), None).unwrap();
+        // Duplicate: flatten old, resetup old and new.
+        t.send(Selector::SequenceFlatten, Some(1), None).unwrap();
+        t.send(Selector::SequenceResetup, Some(1), None).unwrap();
+        t.send(Selector::SequenceResetup, Some(2), None).unwrap();
+        t.send(Selector::SequenceSetdown, Some(1), None).unwrap();
+        t.send(Selector::SequenceFlatten, Some(2), None).unwrap();
+        t.dispose_flat(2).unwrap();
+        assert!(t.send(Selector::GlobalSetdown, None, None).is_err());
+        t.send(Selector::GpuDeviceSetdown, None, Some(0)).unwrap();
+        t.send(Selector::GlobalSetdown, None, None).unwrap();
+        assert_eq!(t.module_state(), ModuleState::Shutdown);
+        assert!(t.send(Selector::About, None, None).is_err());
+    }
+
+    #[test]
+    fn ordering_violations() {
+        let mut t = ProtocolTracker::new();
+        assert!(t.send(Selector::ParamsSetup, None, None).is_err());
+        t.send(Selector::GlobalSetup, None, None).unwrap();
+        assert!(t.send(Selector::GlobalSetup, None, None).is_err());
+        assert!(t.send(Selector::SequenceSetup, Some(1), None).is_err());
+        t.send(Selector::ParamsSetup, None, None).unwrap();
+        assert!(t.send(Selector::Render, Some(9), None).is_err());
+        assert!(t.send(Selector::SequenceSetup, None, None).is_err());
+        t.send(Selector::SequenceSetup, Some(9), None).unwrap();
+        assert!(t.send(Selector::SequenceSetup, Some(9), None).is_err());
+        assert!(t.dispose_flat(9).is_err());
+        assert!(t.send(Selector::GpuDeviceSetdown, None, Some(3)).is_err());
+        t.send(Selector::GpuDeviceSetup, None, Some(3)).unwrap();
+        assert!(t.send(Selector::GpuDeviceSetup, None, Some(3)).is_err());
+    }
+}

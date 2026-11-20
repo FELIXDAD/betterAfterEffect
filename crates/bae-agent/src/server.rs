@@ -28,8 +28,8 @@ pub const GUIDE_INSTRUCTIONS_ZH: &str =
 
 /// Server-specific notes appended to the guide text: the actual tool naming and the
 /// guide tools this server does not offer yet.
-const SERVER_NOTE_EN: &str = "\n\nServer notes (bae mcp)\n- Tool names use _ instead of . (stage.describe -> stage_describe, attr.set -> attr_set).\n- Instead of transaction.begin / transaction.commit, send the steps of one change in a single command_batch call: one undo step, all or nothing.\n- Not available yet: attribute.evaluate (read keyframes with prim_get), proposal.describe and comment.add (summarize your proposal in your reply instead).\n- schema_get lists attribute names, value types and defaults; sublayer_diff shows your whole proposal.\n";
-const SERVER_NOTE_ZH: &str = "\n\n本服务器说明（bae mcp）\n- 工具名用 _ 代替 .（stage.describe -> stage_describe，attr.set -> attr_set）。\n- 不用 transaction.begin / transaction.commit：一个修改的所有步骤放进一次 command_batch 调用，是一个撤销单元，要么全部生效，要么全部不生效。\n- 暂未提供：attribute.evaluate（用 prim_get 读关键帧）、proposal.describe 和 comment.add（在回复里写提案说明）。\n- schema_get 列出属性名、值类型和默认值；sublayer_diff 显示你的完整提案。\n";
+const SERVER_NOTE_EN: &str = "\n\nServer notes (bae mcp)\n- Tool names use _ instead of . (stage.describe -> stage_describe, attr.set -> attr_set).\n- Instead of transaction.begin / transaction.commit, send the steps of one change in a single command_batch call: one undo step, all or nothing.\n- Not available yet: attribute.evaluate (read keyframes with prim_get), proposal.describe and comment.add (summarize your proposal in your reply instead).\n- schema_get lists attribute names, value types and defaults; sublayer_diff shows your whole proposal.\n- Times: wherever a command takes a time, you may pass a frame number {\"frame\": 12} or \"12f\", or timecode \"0:00:00:12\"; integers are flicks. Frames count at the comp's frame rate, in the parameter's own time base (layer time for keyframes on layers, the same frames prim_get reports).\n- Commands with a project parameter (package_*, asset_relink) get the open project filled in.\n";
+const SERVER_NOTE_ZH: &str = "\n\n本服务器说明（bae mcp）\n- 工具名用 _ 代替 .（stage.describe -> stage_describe，attr.set -> attr_set）。\n- 不用 transaction.begin / transaction.commit：一个修改的所有步骤放进一次 command_batch 调用，是一个撤销单元，要么全部生效，要么全部不生效。\n- 暂未提供：attribute.evaluate（用 prim_get 读关键帧）、proposal.describe 和 comment.add（在回复里写提案说明）。\n- schema_get 列出属性名、值类型和默认值；sublayer_diff 显示你的完整提案。\n- 时间参数可以直接写帧号 {\"frame\": 12} 或 \"12f\"，或者时码 \"0:00:00:12\"；整数仍是 flicks。帧号按合成帧速率计算，时间基准跟参数本身一致（图层上的关键帧用图层时间，和 prim_get 返回的帧号一致）。\n- 带 project 参数的命令（package_*、asset_relink）由服务器自动填入当前工程。\n";
 
 /// Language of the built-in instructions.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -291,7 +291,20 @@ impl BaeMcpServer {
             .lock()
             .as_ref()
             .map_or(self.options.permission, AgentSession::permission);
-        tools::catalog(&self.workspace.lock().registry, permission)
+        let ws = self.workspace.lock();
+        let mut entries = tools::catalog(&ws.registry, permission);
+        if ws.project.location().is_some() {
+            for t in &mut entries {
+                if t.kind == ToolKind::Command
+                    && tools::takes_project(&Json::Object((*t.input_schema).clone()))
+                {
+                    let mut schema = (*t.input_schema).clone();
+                    tools::note_project_default(&mut schema);
+                    t.input_schema = Arc::new(schema);
+                }
+            }
+        }
+        entries
     }
 
     /// The `instructions` text sent on `initialize`.
