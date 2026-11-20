@@ -4,10 +4,10 @@
 
 - **What it does:** Defines how a tool becomes active: clicking its button in the Tools panel (toolbar), tapping its single-key shortcut, holding the shortcut for a momentary (spring-loaded) switch, repeated presses to cycle through a tool group, and Alt/Opt-click on a group button.
 - **Exact semantics:**
-  - **Tool groups.** Tools that share a button form a group; the button shows the most recently used member and a small triangle; press-and-hold (or click the triangle) opens a flyout listing every member with its shortcut. Groups (AE order): Selection; Hand; Zoom; Orbit/Pan/Dolly camera navigation (AE 22.x+ 3D design space, see AE-UI-311); Rotation; Unified Camera + camera tools; Pan Behind; Shape (Rectangle, Rounded Rectangle, Ellipse, Polygon, Star); Pen (Pen, Add Vertex, Delete Vertex, Convert Vertex, Mask Feather); Type (Horizontal, Vertical); Brush; Clone Stamp; Eraser; Roto Brush (Roto Brush, Refine Edge); Puppet (Position, Starch, Bend, Advanced, Overlap pins).
-  - **Tap vs hold.** Pressing a single-letter tool shortcut and releasing it immediately makes that tool the active tool. Holding the key down activates it **momentarily**; on key release the previously active tool returns. Implementation rule: if key-up happens after any pointer drag/click occurred while the key was held, or after a hold threshold (UNVERIFIED: AE uses "used while held" rather than a fixed time), revert; otherwise latch.
-  - **Cycling.** Pressing a group shortcut while a member of that group is already active advances to the next member of the group in group order and wraps (Q: Rectangle → Rounded Rectangle → Ellipse → Polygon → Star → Rectangle). C cycles Unified Camera → Orbit → Track XY (Pan) → Track Z (Dolly) camera tools (names per AE-UI-310); G cycles Pen ↔ Mask Feather only (Add/Delete/Convert Vertex are reached through the flyout or modifiers), and a preference turns the G cycling off; Ctrl+T / Cmd+T cycles Horizontal ↔ Vertical Type; Ctrl+B / Cmd+B cycles Brush → Clone Stamp → Eraser; Ctrl+P / Cmd+P cycles the Puppet tools; Alt+W / Opt+W toggles Roto Brush ↔ Refine Edge. Alt-click (Win) / Opt-click (Mac) on a group button in the Tools panel also advances to the next member. No Shift+key cycling exists in AE (UNVERIFIED: no "Use Shift Key for Tool Switch" preference like Photoshop).
-  - **Context availability.** Some tools are disabled when they cannot act: camera tools need a 3D view (a comp containing a camera or 3D layer, UNVERIFIED exact rule), paint tools and Roto Brush operate only in the Layer panel, Puppet tools need a selected layer with pixels. Selecting a disabled tool's shortcut does nothing.
+  - **Tool groups.** Tools that share a button form a group; the button shows the most recently used member and a small triangle; press-and-hold (or click the triangle) opens a flyout listing every member with its shortcut. Groups (AE 26.x toolbar order, left to right, after the Home button (主页); UNVERIFIED exact position of the camera groups): Selection; Hand; Zoom; camera tools as three groups Orbit / Pan / Dolly (AE 17.5 (October 2020) and later; before that one group Unified Camera / Orbit Camera / Track XY Camera / Track Z Camera; see AE-UI-310); Rotation; Pan Behind; Shape (Rectangle, Rounded Rectangle, Ellipse, Polygon, Star); Pen (Pen, Add Vertex, Delete Vertex, Convert Vertex, Mask Feather); Type (Horizontal, Vertical); Brush; Clone Stamp; Eraser; Roto Brush (Roto Brush, Refine Edge); Puppet (Position, Starch, Bend, Advanced, Overlap pins); 3D primitive group (Cube … , AE 26.x, AE-UI-321).
+  - **Tap vs hold.** Pressing a single-letter tool shortcut and releasing it immediately makes that tool the active tool. Holding the key down activates it **momentarily**; on key release the previously active tool returns (Adobe help, "Activate tools" note). Implementation rule (BAE decision, AE's exact rule UNVERIFIED): revert on key-up if a pointer press happened while the key was held or the key was held longer than ~250 ms; otherwise latch.
+  - **Cycling.** Pressing a group shortcut while a member of that group is already active advances to the next member of the group in group order and wraps (Q: Rectangle → Rounded Rectangle → Ellipse → Polygon → Star → Rectangle). C activates and cycles the camera tools (help text: Unified Camera → Orbit Camera → Track XY Camera → Track Z Camera; in AE 17.5+ the Orbit → Pan → Dolly groups, each using the variant last chosen in its flyout; see AE-UI-310); G cycles Pen ↔ Mask Feather only (Add/Delete/Convert Vertex are reached through the flyout or modifiers), and a preference turns the G cycling off; Ctrl+T / Cmd+T cycles Horizontal ↔ Vertical Type; Ctrl+B / Cmd+B cycles Brush → Clone Stamp → Eraser; Ctrl+P / Cmd+P cycles the Puppet tools; Alt+W / Opt+W toggles Roto Brush ↔ Refine Edge. Alt-click (Win) / Opt-click (Mac) on a group button in the Tools panel also advances to the next member. No Shift+key cycling exists in AE (UNVERIFIED: no "Use Shift Key for Tool Switch" preference like Photoshop).
+  - **Context availability.** Some tools are disabled when they cannot act: camera tools need a 3D context (the help page says "only when the active composition contains a camera layer"; in AE 17.5+ a comp with any 3D layer also enables them because a default camera view exists, UNVERIFIED exact rule), paint tools and Roto Brush operate only in the Layer panel, Puppet tools need a selected layer with pixels. Selecting a disabled tool's shortcut does nothing.
   - **Tool options area.** The rest of the Tools panel row shows options of the active tool (for example Rotation: Set Orientation/Rotation; shape tools: Tool Creates Shape/Mask, Fill, Stroke, Bezier Path; Pen: RotoBezier; Type, Brush, Clone Stamp, Eraser: Auto-Open Panels (自动打开面板); Puppet: Mesh Expansion/Density, Record Options; 3D-capable tools: axis mode buttons (AE-UI-313); Selection: Snapping (AE-UI-357)).
   - **Tool state is per application, not per viewer**: the active tool applies to every Composition/Layer/Footage viewer. The current tool is saved with the workspace-independent application state, not in the project.
   - Text-editing and numeric-field focus suspend single-key tool shortcuts (typing V into a text layer types "v").
@@ -50,7 +50,7 @@
 - **What it does:** Dragging one of the eight layer handles of a selected layer changes its Scale.
 - **Exact semantics:**
   - Corner handle: scales X and Y freely (each axis follows the pointer independently). Side handle: scales only the axis perpendicular to that side.
-  - **Shift-drag** any handle: scale proportionally, constrained to the footage frame aspect ratio (the ratio of Scale X/Scale Y at drag start is kept; for a side handle Shift makes the other axis follow).
+  - **Shift-drag** any handle: scale proportionally; Adobe's wording is "Modify Scale, constrained to footage frame aspect ratio" (keyboard-shortcuts reference). For a side handle Shift makes the other axis follow. UNVERIFIED: when Scale X ≠ Scale Y at drag start, whether AE keeps that ratio or snaps back to the footage frame aspect (BAE: keep the start ratio).
   - Scale is applied about the layer's Anchor Point (Position is not changed), so the handle under the pointer follows the pointer only if the anchor is at the opposite edge; the scale factor is computed as `newScale = oldScale * (distance(anchorScreen, pointer) projected on the axis) / (distance(anchorScreen, handleStart) projected on the axis)`, sign included (dragging across the anchor flips to negative scale).
   - Ctrl/Cmd during a handle drag toggles snapping (AE-UI-357). Selection tool has no rotate-near-corner behaviour (use the Rotation tool, AE-UI-309).
   - Multiple selected layers: only the layer whose handle is dragged changes (UNVERIFIED: AE applies the same percentage change to all selected layers).
@@ -131,8 +131,8 @@
 - **What it does:** Changes viewer magnification around the clicked point.
 - **Exact semantics:**
   - Z activates Zoom In; holding Alt (Win) / Opt (Mac) switches to Zoom Out while held. Click = zoom in one step centered at the click point; Alt/Opt-click = zoom out one step. Drag (UNVERIFIED: AE zoom tool has no marquee zoom; a drag behaves like click).
-  - Steps follow the magnification menu list: 1.5%, 3.1%, 6.25%, 12.5%, 25%, 33.3%, 50%, 66.7%, 100%, 200%, 300%, 400%, 800%, 1600%, 3200%, 6400%. Minimum 1.5%, maximum 6400% (UNVERIFIED minimum/maximum).
-  - Keyboard equivalents (any tool): `.` (period, main keyboard) zoom in; `,` (comma) zoom out; `/` (main keyboard) 100%; Shift+/ fit; Alt+/ (Opt+/) zoom up to 100% to fit. Double-click Zoom tool button = 100%.
+  - Steps follow the fixed magnification levels of the viewer's magnification menu (list, Smooth Zoom and limits: ui-a AE-UI-024 Magnification; do not duplicate here). With Smooth Zoom (AE 25.x) the tool steps still go to the next fixed level (UNVERIFIED).
+  - Keyboard equivalents (any tool, from the shortcuts reference): `.` (period, main keyboard) zoom in; `,` (comma) zoom out; `/` (main keyboard) 100%; Shift+/ zoom to fit; Alt+/ (Win) / Opt+/ (Mac) zoom up to 100% to fit. Double-click Zoom tool button = 100%.
 - **Priority:** P0
 - **Owner:** bae-ui-motion
 - **Notes:** Magnification menu, Fit, "Fit up to 100%": see ui-a, Composition viewer. Keyboard zoom centres on the view center (UNVERIFIED; mouse-wheel zoom centres on the pointer).
@@ -156,16 +156,16 @@
 - **Exact semantics:**
   - | Tool (中文) | Since | Action | Unified-tool mouse button |
     |---|---|---|---|
-    | Unified Camera (统一摄像机工具) | CS6 | Combines the three below by mouse button | — |
-    | Orbit Around Cursor (绕光标旋转（译名待核）) | AE 16.1 (2019) UNVERIFIED | Orbit around the point under the cursor | left button |
-    | Orbit Around Scene (绕场景旋转（译名待核）) | AE 16.1 UNVERIFIED | Orbit around the scene center | — |
-    | Orbit Around Camera POI (绕摄像机目标点旋转（译名待核）); older name Orbit Camera Tool (轨道摄像机工具) | CS3 | Orbit around the point of interest | — |
-    | Pan Under Cursor (在光标下平移（译名待核）) | AE 16.1 UNVERIFIED | Translate so the point under the cursor follows the cursor | middle button |
-    | Pan Camera POI (平移摄像机目标点（译名待核）); older name Track XY Camera (跟踪 XY 摄像机工具) | CS3 | Translate camera and POI horizontally/vertically in view space | — |
-    | Dolly Towards Cursor (向光标方向推拉（译名待核）) | AE 16.1 UNVERIFIED | Move along the line to the cursor point | right button |
-    | Dolly to Cursor (推拉至光标（译名待核）) | AE 16.1 UNVERIFIED | Move toward the cursor point, POI follows | — |
-    | Dolly to Camera POI (推拉至摄像机目标点（译名待核）); older name Track Z Camera (跟踪 Z 摄像机工具) | CS3 | Move along the line to the POI; on orthographic views scales the view | — |
-  - C activates the camera group and repeated C cycles Unified → Orbit → Pan (Track XY) → Dolly (Track Z) (the variant last chosen in each sub-group's flyout is used).
+    | Unified Camera (统一摄像机工具（译名待核）) | before AE 17.5 | Combines Orbit / Track XY / Track Z by mouse button | left = Orbit, middle = Track XY, right = Track Z |
+    | Orbit Around Cursor (绕光标旋转（译名待核）) | AE 17.5 (October 2020) | Orbit around the point under the cursor | — |
+    | Orbit Around Scene (绕场景旋转（译名待核）) | AE 17.5 | Orbit around the scene center | — |
+    | Orbit Around Camera POI (绕摄像机目标点旋转（译名待核）); older name Orbit Camera Tool (轨道摄像机工具（译名待核）) | CS3 | Orbit around the point of interest | — |
+    | Pan Under Cursor (在光标下平移（译名待核）) | AE 17.5 | Translate so the point under the cursor follows the cursor | — |
+    | Pan Camera POI (平移摄像机目标点（译名待核）); older name Track XY Camera (跟踪 XY 摄像机工具（译名待核）) | CS3 | Translate camera and POI horizontally/vertically in view space | — |
+    | Dolly Towards Cursor (向光标方向推拉（译名待核）) | AE 17.5 | Move along the line to the cursor point | — |
+    | Dolly to Cursor (推拉至光标（译名待核）) | AE 17.5 | Move toward the cursor point, POI follows | — |
+    | Dolly to Camera POI (推拉至摄像机目标点（译名待核）); older name Track Z Camera (跟踪 Z 摄像机工具（译名待核）) | CS3 | Move along the line to the POI; on orthographic views scales the view | — |
+  - The cursor-based variants, the 1/2/3 navigation keys and Alt+mouse-button navigation arrived with the 3D Design Space in the October 2020 release (Adobe labels it version 17.5); community reports show C then cycling Orbit Around Cursor → Pan Under Cursor → Dolly Towards Cursor (the variant last chosen in each flyout is used). UNVERIFIED: whether the Unified Camera tool is still offered in AE 26.x (the scripting enum still has `Tool_CameraMaya`; the help page text still names the old four tools).
   - Shift-drag with Unified Camera = Orbit constrained to one axis. Drags may continue outside the panel once started.
   - The tool edits the camera that the active 3D view shows: the active camera layer's Position and Point of Interest (one-node cameras: Position and Orientation), creating keyframes if stopwatches are on; on working 3D views (Custom View 1-3, Front/Left/Top/Back/Right/Bottom) no layer property changes and View > Reset 3D View restores the view. Orbit is unavailable on fixed orthographic views.
   - Camera-tool shortcuts: F = move camera and POI to look at selected 3D layers; Ctrl+Shift+F / Cmd+Shift+F = look at all 3D layers; Ctrl+Alt+Shift+\ / Cmd+Opt+Shift+\ = look at selected layers (any tool).
@@ -175,7 +175,7 @@
 
 ### AE-UI-311 · 3D camera navigation tools and keys (3D 摄像机导航工具（译名待核）)
 
-- **What it does:** In the 3D Design Space (AE 22.x, 2022, UNVERIFIED version) the Tools panel shows Orbit, Pan and Dolly navigation buttons that work with any tool selected via number keys or modifiers.
+- **What it does:** In the 3D Design Space (October 2020 release, Adobe-labelled version 17.5) camera navigation is spring-loaded: number keys 1/2/3 or Alt/Opt + left/middle/right mouse button orbit, pan and dolly the active 3D view or camera with any tool selected.
 - **Exact semantics:**
   - | Control | Windows | macOS |
     |---|---|---|
@@ -184,11 +184,12 @@
     | Switch to Dolly camera control | 3 | 3 |
     | Return to previous 3D view | Esc | Esc |
     | Switch to 3D view 1 / 2 / 3 (defaults Front / Custom View 1 / Active Camera) | F10 / F11 / F12 | F10 / F11 / F12 |
-  - The navigation controls move the active 3D view or camera like the matching camera tool (AE-UI-310), using the default variant (UNVERIFIED: "around cursor").
-  - Number keys 1-3 conflict with Clone Stamp preset keys only while a paint tool is active in the Layer panel.
+  - Hold Alt (Win) / Opt (Mac) and drag with the left / middle / right mouse button = Orbit / Pan / Dolly (temporary, the current tool stays active).
+  - The navigation controls move the active 3D view or camera like the matching camera tool (AE-UI-310), using the variant currently chosen in that tool's flyout (UNVERIFIED).
+  - Number keys 1-3 conflict with paint-tool keys (1/2 = stroke-duration moves, 3-7 = Clone Stamp presets) only while a paint tool is active in the Layer panel.
 - **Priority:** P2
 - **Owner:** bae-ui-motion
-- **Notes:** UNVERIFIED: AE also offers temporary navigation by Alt+left/middle/right mouse drag in 3D views (Maya-style) — check before implementing. 3D views menu: see compositing-3d-color.md, Cameras / 3D views and ui-a, Composition viewer.
+- **Notes:** Source: Adobe feature summary for the October 2020 release, https://helpx.adobe.com/after-effects/desktop/using/whats-new/2021.html ("use the numbers (1, 2, 3) on your keyboard or hold down the option/alt key and use your mouse buttons (left, middle and right) to orbit, pan and dolly"). 3D views menu: see compositing-3d-color.md, Cameras / 3D views and ui-a, Composition viewer.
 
 ### AE-UI-312 · 3D transform gizmo (3D 变换小工具（译名待核）)
 
@@ -196,7 +197,7 @@
 - **Exact semantics:**
   - Gizmo modes: Universal (all three combined, V while the Selection tool is active), Position (4), Scale (5), Rotation (6); Win and Mac identical.
   - Drag an arrow: Position changes along that axis only (axis per Axis Mode, AE-UI-313). Drag a scale cube: Scale along that axis. Drag a rotation arc: X/Y/Z Rotation (or Orientation, per the Rotation tool Set option). Shift snaps rotation to 15° (UNVERIFIED for gizmo).
-  - Multiple selected 3D layers share one gizmo placed at the selection's average anchor (AE 22.x "Single 3D gizmo for multiple 3D layers", UNVERIFIED version).
+  - The gizmo arrived with the 3D Design Space (October 2020 release, labelled 17.5). Multiple selected 3D layers share one gizmo (Adobe help topic "Single 3D Gizmo for multiple 3D layers"; UNVERIFIED: placed at the selection's average anchor; version that added it).
   - Gizmo colours: X red, Y green, Z blue (AE convention).
 - **Priority:** P1
 - **Owner:** bae-ui-motion (+ bae-anim)
@@ -224,11 +225,11 @@
   - Drag on a selected layer's anchor point in the Composition viewer: Anchor Point changes by the drag delta mapped to layer space; Position changes by the matching amount mapped to parent space so that the layer's rendered pixels stay put (`ΔPosition = M_linear(layer) · ΔAnchor`, where M_linear is the layer's scale/rotation/orientation; see transform-keyframes-expressions.md, Transform matrix order).
   - **Alt-drag (Win) / Opt-drag (Mac)**: only Anchor Point changes; the layer content shifts.
   - In the **Layer panel** (View: Anchor Point Path), dragging the anchor moves only Anchor Point; with Pan Behind in the Layer panel the layer image moves relative to masks (masks are moved in relation to the layer).
-  - Dragging a layer (not its anchor) with Pan Behind in the Composition viewer pans the layer content behind its masks (Anchor Point and Position change together so that masks stay fixed in comp space, UNVERIFIED exact compensation).
+  - **Pan a layer behind its mask:** clicking inside a mask area with Pan Behind and dragging moves the layer content while the mask stays fixed in the comp. Adobe: "the mask is moved in relation to its layer, and … the layer is moved in relation to the composition", i.e. Position changes by the drag delta (parent space) and every Mask Path on the layer is offset by the opposite delta in layer space. UNVERIFIED: whether Anchor Point is used instead of Position for the layer move.
   - Ctrl/Cmd during drag: snapping toggle (AE-UI-357). Double-click button actions: see AE-UI-306. Shortcut Ctrl+Alt+Home / Cmd+Opt+Home: center anchor point in visible content.
 - **Priority:** P0
 - **Owner:** bae-ui-motion (+ bae-motion, bae-anim)
-- **Notes:** The compensating edit must be one Command (Anchor + Position) so undo is atomic. When Position/Anchor are animated, AE writes keyframes at the current time only for properties with stopwatch on; the compensation is computed at the current time.
+- **Notes:** Source: https://helpx.adobe.com/after-effects/using/animating-shape-paths-masks.html ("Pan a layer behind its mask") and the anchor-point section of the layer-properties help page (double-click / Alt-double-click / Ctrl-double-click of the tool button, AE-UI-306). The compensating edit must be one Command (Anchor + Position, or Position + Mask Paths) so undo is atomic. When Position/Anchor are animated, AE writes keyframes at the current time only for properties with stopwatch on; the compensation is computed at the current time.
 
 ### AE-UI-315 · Shape and mask tools (形状工具和蒙版工具)
 
@@ -290,22 +291,22 @@
 - **Exact semantics:**
   - Drag = add foreground stroke (green); Alt-drag (Win) / Opt-drag (Mac) = background stroke (red); Ctrl-drag / Cmd-drag = brush size. Strokes on a base frame propagate forward/backward over a span; J/K jump to span begin/end/base frame in the Layer panel.
   - Refine Edge strokes mark hair/fuzzy borders for edge refinement; Alt+X / Opt+X toggles Refine Edge X-ray. Alt+5 / Opt+5 alpha boundary, Alt+6 / Opt+6 alpha overlay in the Layer panel.
-  - Result is the Roto Brush & Refine Edge effect on the layer. AE 2020 (17.5) introduced Roto Brush 2 (machine-learning propagation), AE 23.0 "Roto Brush 3 / Next-gen" (UNVERIFIED version names).
+  - Result is the Roto Brush & Refine Edge effect on the layer. The October 2020 release (17.5) introduced Roto Brush 2 (Sensei machine-learning propagation); a later "next-generation" Roto Brush model followed (UNVERIFIED version, AE 24.x).
 - **Priority:** P2
 - **Owner:** bae-ui-motion (+ bae-effects)
-- **Notes:** BAE decision: ML segmentation is out of scope for M1; reserve the tool slot and effect matchName `ADBE Samurai` (UNVERIFIED matchName).
+- **Notes:** Effect matchName `ADBE Samurai` ("Roto Brush & Refine Edge", docsforadobe first-party matchnames). BAE decision: ML segmentation is out of scope for M1; reserve the tool slot and the matchName.
 
 ### AE-UI-320 · Puppet tools (人偶工具)
 
 - **What it does:** Ctrl+P / Cmd+P activates and cycles Puppet Position Pin (人偶位置控点工具), Puppet Starch Pin (人偶固化控点工具（译名待核）), Puppet Bend Pin (人偶弯曲控点工具（译名待核）), Puppet Advanced Pin (人偶高级控点工具（译名待核）) and Puppet Overlap Pin (人偶重叠控点工具（译名待核）); clicking a layer creates a triangle mesh and pins that deform it.
 - **Exact semantics:**
-  - First click inside the layer's alpha outline creates a Mesh (Puppet effect added) and a pin; later clicks add pins; dragging a pin moves its Position (keyframed if animation is recorded). Bend pins carry Rotation and Scale; Advanced pins carry Position, Rotation, Scale.
-  - Tool options: Mesh: **Show** (显示) checkbox, **Expansion (扩展)** default 3 px (UNVERIFIED), **Density (密度)** default 10 (UNVERIFIED); Record Options (motion sketch of pins with Ctrl/Cmd-drag: speed default 100%, smoothing default 3, UNVERIFIED).
-  - Ctrl-drag (Win) / Cmd-drag (Mac) a pin = record (sketch) its motion in real time from the current time. Bend/Advanced pins: rotation and scale handles around the pin.
-  - AE CC 2018 (15.0) added Advanced and Bend pins (UNVERIFIED version); Puppet engine "Legacy" vs "Advanced" choice in the effect.
+  - First click inside the layer's alpha outline creates a Mesh (Puppet effect added) and a pin; later clicks add pins; dragging a pin moves its Position (keyframed if animation is recorded).
+  - Tool options: Mesh: **Show** (显示（译名待核）) checkbox, **Expansion (扩展（译名待核）)** default 3 px (Adobe help: "The default value of three pixels for Expansion"), **Density (密度（译名待核）)** (Advanced engine; replaces the Legacy engine's **Triangles** target count; default UNVERIFIED, 10); **Record Options (记录选项（译名待核）)** dialog: **Speed** (ratio of recorded to playback speed; 100% = real time, >100% plays back slower; default UNVERIFIED 100%) and **Smoothing** (higher removes more keyframes; default UNVERIFIED 3).
+  - Ctrl-drag (Win) / Cmd-drag (Mac) a pin = record (sketch) its motion in real time from the current time. Bend/Advanced pins: an outer circle with a square handle; drag the circle = rotation (Shift = 15° steps), drag the square = scale (Shift = 5% steps). Bend pins compute their location from the surrounding pins (no Position control); Advanced pins control Position, Scale and Rotation. Pin colours: Position yellow, Starch red, Overlap blue. New Overlap pin In Front default 50.
+  - Advanced puppet engine is the default since AE 15.1; Puppet Engine (Legacy / Advanced) is chosen per effect in the Timeline. Bend and Advanced pins arrived in AE 2019 (16.0) (UNVERIFIED: third-party preview, not Adobe release notes).
 - **Priority:** P2
 - **Owner:** bae-ui-motion (+ bae-effects, bae-anim)
-- **Notes:** Puppet effect matchName `ADBE FreePin3` (UNVERIFIED). Mesh deformation math (as-rigid-as-possible) is not in sibling files; treat as P2 gap.
+- **Notes:** Puppet effect matchName `ADBE FreePin3` (docsforadobe first-party matchnames). Scripting tool enum: `Tool_Pin` (Position), `Tool_PinStarch`, `Tool_PinDepth` (Overlap); Bend/Advanced pins have no ToolType value. Mesh deformation math (as-rigid-as-possible) is not in sibling files; treat as P2 gap.
 
 ### AE-UI-321 · 3D primitive tools (3D 基本体工具（译名待核）)
 

@@ -25,7 +25,7 @@
     | Paragraph (段落) | Ctrl+7 | Cmd+7 |
     | Paint (绘画) | Ctrl+8 | Cmd+8 |
     | Brushes (画笔) | Ctrl+9 | Cmd+9 |
-    | Effect Controls (效果控件) for selected layer | F3 or Ctrl+Shift+T | F3 or Cmd+Shift+T (UNVERIFIED: Adobe table prints Cmd+Opt+T for macOS) |
+    | Effect Controls (效果控件) for selected layer | F3 or Ctrl+Shift+T | F3 or Cmd+Opt+T (as printed in Adobe's shortcut table; UNVERIFIED: some AE builds show Cmd+Shift+T in the Keyboard Shortcuts editor) |
     | Project Flowchart (流程图) | Ctrl+F11 | Cmd+F11 |
   - Panel-wide commands: Close active viewer or panel (closes its content first) Ctrl+W / Cmd+W; close the active panel or all viewers of the active viewer's type Ctrl+Shift+W / Cmd+Shift+W; `\` toggles focus between the Composition panel and Timeline panel of the current comp; Alt+Shift+, / . (Opt+Shift on macOS) cycles the active panel in the active frame; Ctrl+\ (Cmd+\) resizes the application or floating window to fit the screen (press again: contents fill the screen); Ctrl+Alt+\ (Cmd+Opt+\) also moves it to the main monitor.
   - Tab titles of content panels follow AE format: `Composition <name>` / `合成 <name>`, `Effect Controls <layer>` / `效果控件 <layer>`, `Timeline <comp>`, `Layer <layer>`, `Footage <item>`.
@@ -40,7 +40,7 @@
 - **Exact semantics:**
   - Drag handles: dragging a **panel's tab gripper** moves that one panel; dragging the **group gripper** (the group's tab-well background/upper-right area) moves the whole group.
   - Drop zones while dragging: **docking zones** along the four edges of a group, frame or the application window (drop = split, inserting the panel next to that group, all affected groups resize); **grouping zone** in the middle of a group and on its tab row (drop = add as a new tab to that group). The zone under the pointer is highlighted (edge strip for dock, whole-group overlay for group).
-  - Undock: panel menu **Undock Panel (浮动面板)** / **Undock Panel Group (浮动面板组)**; or Ctrl-drag (Win) / Cmd-drag (Mac) the panel or group; or drag it outside the application window → a new floating window containing that panel/group. Floating windows accept docking like the main window and can go to a second monitor.
+  - Undock: panel menu **Undock Panel (浮动面板)** / **Undock Panel Group (浮动面板组)** (Adobe help calls the latter "Undock Frame"); or Ctrl-drag (Win) / Cmd-drag (Mac) the panel or group; or drag it outside the application window → a new floating window containing that panel/group. Floating windows accept docking like the main window and can go to a second monitor.
   - Other panel-menu entries: Close Panel (关闭面板), Close Other Panels in Group (关闭组中的其他面板), Panel Group Settings (面板组设置) ▸ {Close Panel Group (关闭面板组), Maximize Panel Group (最大化面板组), Stacked Panel Group (堆叠的面板组), Solo Panels in Stack (堆栈中的单独面板), Small Tabs (小选项卡)}.
   - Resize: dragging the divider between two groups resizes every group sharing that divider (horizontal or vertical double-arrow cursor); dragging an intersection of three or more groups resizes in both axes (four-way cursor). Each panel has a minimum size; resizing stops when a neighbour reaches its minimum.
   - Layout changes are not undoable project edits; they belong to the current workspace (AE-UI-006).
@@ -57,7 +57,7 @@
   - Keyboard layouts where ` is a dead key: AE accepts the physical key; BAE should bind by physical key code.
 - **Priority:** P0 (heavily used, e.g. maximizing the Composition viewer or the Timeline)
 - **Owner:** bae-ui
-- **Notes:** Shift+` / Ctrl+` variants: UNVERIFIED (AE has "maximize the panel under the pointer without the frame chrome" in some versions). Keyboard-shortcut list: see ui-preview-render-io.md, essential keyboard shortcuts (ui-b).
+- **Notes:** Ctrl+` / Cmd+` is *not* a maximize variant: in AE it toggles expansion of the selected layers' properties in the Timeline (see ui-b). No other modifier variant of ` maximizes; the ` key is only bound to maximize/restore. Keyboard-shortcut list: see ui-preview-render-io.md, essential keyboard shortcuts (ui-b). Source: https://helpx.adobe.com/after-effects/using/workspaces-panels-viewers.html and keyboard-shortcuts-reference.html.
 
 ### AE-UI-004 · Stacked panel groups (堆叠的面板组)
 
@@ -77,7 +77,7 @@
 - **Exact semantics:**
   - Switchers: Window > Workspace > <name>; the **workspace bar** at the right side of the Tools panel (one button per workspace; the active one highlighted; those that do not fit go into a chevron » overflow menu, which also has Edit Workspaces...); Shift+F10 / Shift+F11 / Shift+F12 for workspaces assigned to those keys (Window > Assign Shortcut to "<name>" Workspace (将快捷键分配给"<name>"工作区（译名待核）) ▸ Shift+F10/F11/F12).
   - The divider between the tool buttons and the workspace bar is draggable to give the bar more or less width.
-  - Predefined workspaces (AE 2024–2026, menu order alphabetical in Window > Workspace) (UNVERIFIED: exact set varies by version):
+  - Predefined workspaces (AE 2024–2026; listed here alphabetically; UNVERIFIED: whether Window > Workspace lists them alphabetically or in workspace-bar order, and the exact set, which varies by version). Learn is opened by Help > Learn After Effects (学习 workspace = Learn, Project, Composition, Timeline panels):
     | Workspace (中文) | Purpose / main panels |
     |---|---|
     | All Panels (所有面板（译名待核）) | every panel open |
@@ -107,7 +107,8 @@
   - AE continuously tracks layout edits as the *modified* state of the active workspace; they persist across sessions without an explicit save.
   - Window > Workspace > **Save Changes to this Workspace (保存对此工作区所做的更改)**: makes the modified layout the saved layout.
   - Window > Workspace > **Reset to Saved Layout (重置为已保存的布局)**: discards modifications, restoring the saved layout (for predefined workspaces never saved over, the factory layout).
-  - Window > Workspace > **Save as New Workspace... (另存为新工作区（译名待核）)**: name prompt; duplicates names are rejected/overwrite after confirm (UNVERIFIED).
+  - Window > Workspace > **Save as New Workspace... (另存为新工作区（译名待核）)** (older help text: "New Workspace" / 新建工作区): name prompt, OK. UNVERIFIED: entering the name of an existing workspace asks to replace it.
+  - Window > Workspace > **Delete Workspace (删除工作区)**: choose a workspace, OK; the currently active workspace cannot be deleted.
   - **Edit Workspaces... (编辑工作区...)** dialog: list of workspaces in bar order, drag to reorder; move entries to/from an "Overflow Menu" section and a "Do Not Show" section; Delete button (the active workspace cannot be deleted); OK/Cancel.
   - Locked viewers are not stored in workspaces (they are project-context-bound); unlock viewers before saving a multi-viewer workspace.
 - **Priority:** P1
@@ -174,13 +175,16 @@
 
 - **What it does:** The mouse wheel scrolls lists and zooms viewers and the Timeline, acting on the panel under the pointer even if that panel is not active.
 - **Exact semantics:**
-  | Gesture | Composition / Layer / Footage viewer | Timeline / Layer / Footage time ruler or navigator | Lists (Project, Timeline layers, Render Queue, Flowchart, Effect Controls, Metadata, Effects & Presets) |
+  | Gesture | Composition / Layer / Footage viewer | Timeline / Layer / Footage panels, pointer over the time navigator or time ruler | Lists (Project, Timeline, Render Queue, Flowchart, Effect Controls, Metadata, Effects & Presets) |
   |---|---|---|---|
-  | Wheel | zoom in (forward) / out (backward) about the pointer or the panel centre (Preferences > Previews > Magnification Behaviour = Follow Cursor (default UNVERIFIED) / Centered) | — | vertical scroll |
-  | Alt/Opt + wheel | zoom in/out about the point under the pointer | zoom time in/out | Timeline layer area: zoom time (UNVERIFIED) |
-  | Shift + wheel | horizontal scroll | scroll in time (wheel backward = forward in time) | horizontal scroll |
-  - When tracking (Layer viewer with Tracker active), plain wheel zooms about the feature region.
-  - Trackpad pinch: zoom (UNVERIFIED: AE ≥ 22 on macOS).
+  | Wheel forward / backward | zoom in / out. AE 25.2+ (Smooth Zoom, default Behaviour): about the **cursor**; legacy behaviour (older versions, or Preferences > Previews > Magnification set back to legacy/centre): about the **centre of the view** (about the feature region when tracking) | vertical scroll | vertical scroll |
+  | Alt/Opt + wheel | zoom in / out with the *other* anchor: AE 25.2+ = about the **centre of the view**; legacy = about the **point under the pointer** (Alt/Opt dynamically swaps cursor vs centre) | zoom **time** in / out | — (UNVERIFIED: AE ≥ 2020 also zooms time with Alt+wheel over the Timeline layer-bar area) |
+  | Shift + wheel | horizontal scroll | scroll in time; wheel **backward = later in time** and vice versa | horizontal scroll |
+  - The wheel acts on the panel under the pointer even if that panel is not active (no click-to-focus needed).
+  - Wheel over a tab row of a multi-panel group cycles the active tab (AE-UI-001).
+  - Trackpad pinch: zoom (UNVERIFIED: supported on macOS in recent versions; treat as Alt+wheel).
+  - Source: https://helpx.adobe.com/after-effects/using/general-user-interface-items.html ("Scroll or zoom with the mouse wheel", legacy text) and https://helpx.adobe.com/after-effects/using/modifying-using-views.html ("By default, zooming in or out with the mouse scroll wheel focuses on the cursor location. To zoom ... from the center of the view, hold Alt/Option"; Smooth Zoom section).
+  - Preferences > Previews > Magnification (放大率（译名待核）): Type (Smooth / legacy fixed levels), Behaviour (zoom to cursor / centre), Trackpad Scrolling (scroll vs zoom) (UNVERIFIED: exact labels and value names). AE 25.3 on macOS made trackpad/Mouse scroll pan the view by default; the Trackpad Scrolling preference restores scroll-to-zoom.
 - **Priority:** P0
 - **Owner:** bae-ui-motion (+ bae-ui)
 - **Notes:** Zoom levels themselves: AE-UI-03x (Composition viewer magnification).
@@ -192,11 +196,11 @@
   - Hover → cursor becomes a pointing hand with left/right arrows. Drag left/right: value changes by `step × pixels`, default step 1 unit per pixel (property-specific: Opacity 1 %, Rotation 1°, Scale 1 %, Position 1 px; effect sliders use the slider's UI precision).
   - Modifiers while dragging: **Ctrl (Win) / Cmd (Mac)** = fine, ×0.1 step; **Shift** = coarse, ×10 step. Modifiers can be pressed/released mid-drag.
   - Click (no drag) → inline edit field with the value selected; Enter (main keyboard) or Tab commits (Tab moves to the next field), Esc cancels; clicking elsewhere commits.
-  - Typed arithmetic: AE accepts simple arithmetic in value fields, e.g. `+20`, `*2`, `/3`, `-10` relative to the current value, and full expressions like `100*1.5` (UNVERIFIED: supported since CS3 for operators + - * /; parentheses not supported).
+  - Typed arithmetic: value fields and other number entries accept simple arithmetic expressions, e.g. `2*3` → 6, `4/2` → 2, `2e2` → 200 (documented since AE CS3). A relative change is made by typing the operator after the current value in the field (`100` → `100*1.5`). UNVERIFIED: whether parentheses and a leading bare operator (`*2` replacing the selected text) are evaluated.
   - Values clamp to the property's valid range (e.g. Opacity 0–100); some properties allow out-of-UI-range typing beyond the slider range (effect sliders, see AE-UI-11x Effect Controls).
   - Each completed drag is one undo step; while dragging the comp updates live.
-  - Up/Down arrow keys in an edit field: UNVERIFIED (AE does not support arrow increments in hot-text fields).
-  - Proportional scrubbing: Alt+drag in Timeline on a selected multi-layer property group scales values proportionally (AE 25.x "Proportional Scrubbing in timeline") (UNVERIFIED: modifier).
+  - Up/Down arrow keys in an edit field: UNVERIFIED (believed: no arrow-key increments in AE hot-text fields).
+  - **Proportional Scrubbing (按比例拖动（译名待核）)** (AE Beta 26.2, 2026; P2): select the same property on several layers in the order wanted, then Ctrl+Alt-drag (Win) / Cmd+Opt-drag (Mac) its hot text: the first selected layer changes by 0 % of the scrub delta, the last by 100 %, layers in between by proportional shares, i.e. `delta_i = delta × i/(n−1)` for selection index i = 0..n−1 (UNVERIFIED: exactly linear by selection index). For Scale, all layers use the Constrain Proportions state of the last selected layer. Source: https://helpx.adobe.com/after-effects/using/proportional-scrubbing-in-timeline.html
 - **Priority:** P0
 - **Owner:** bae-ui (+ bae-ui-motion)
 - **Notes:** Units displayed per property (px, %, °, ×+° for rotation revolutions); Rotation shows `Nx+M.M°`. Property value types: see project-comp-layers.md, Property tree and value types. Implementation hint: an egui DragValue variant with AE modifier mapping and arithmetic parser.
@@ -280,7 +284,7 @@
   - Footer buttons, left to right (AE 2022+, UNVERIFIED exact order between New Composition and bit depth):
     | Button (中文) | Click | Modifier / drag behaviour |
     |---|---|---|
-    | Interpret Footage (解释素材) | opens Interpret Footage for the selected footage item (same as Ctrl+Alt+G / Cmd+Opt+G) | drag a footage item onto it = open Interpret Footage for that item; Alt/Option-drag one item onto it = open Interpret Footage on the dropped item (UNVERIFIED distinction; AE help lists both gestures) |
+    | Interpret Footage (解释素材) | opens Interpret Footage (Main) for the selected footage item (same as File > Interpret Footage > Main, Ctrl+Alt+G / Cmd+Opt+G) | drag a footage item onto it = Interpret Footage (Main) for that item; **Alt-click / Option-click** the button or **Alt/Option-drag** an item onto it = Interpret Footage for the item's **proxy** (File > Interpret Footage > Proxy). Source: https://helpx.adobe.com/after-effects/using/importing-interpreting-footage-items.html |
     | Create a new Folder (新建文件夹) | creates a folder in the selected folder (or root), enters rename mode | dragging items onto it creates a folder containing them (UNVERIFIED) |
     | Create a new Composition (新建合成) | opens Composition Settings (new comp) | drag footage item(s) onto it = New Comp From Selection (基于所选项新建合成): one item → comp matching the item's size/PAR/fps/duration; several → the New Composition from Selection dialog (project-comp-layers.md, Composition Settings / new comp from footage) |
     | Project bit depth (项目位深度) "8 bpc"/"16 bpc"/"32 bpc" | opens Project Settings at the colour settings | Alt-click (Win) / Option-click (Mac) cycles 8 → 16 → 32 → 8 bpc without a dialog (undoable project setting change) |
@@ -322,10 +326,9 @@
   |---|---|
   | Double-click composition | opens the comp in a Composition viewer and its Timeline panel (brings existing tabs to front if already open) |
   | Double-click footage item (video, still, sequence, solid) | opens it in a Footage panel (shows interpreted footage; AE-UI-0xx Footage viewer) |
-  | Alt+double-click (Win) / Option+double-click (Mac) footage | opens the source file in the OS-associated player application (BAE: open with OS default) |
+  | Alt+double-click (Win) / Option+double-click (Mac) footage | opens the source file in the player application the OS associates with that file type (BAE: open with OS default) |
   | Double-click folder | expands/collapses it (UNVERIFIED) |
-  | Double-click placeholder | opens Replace Footage file dialog (UNVERIFIED) |
-  | Double-click missing footage | opens Replace Footage file dialog to relink (UNVERIFIED) |
+  | Double-click placeholder or missing footage | does **not** open a Footage panel (scripting `FootageItem.openInViewer()` notes that missing and placeholder footage cannot be opened by double-clicking). UNVERIFIED: AE instead opens the Replace Footage File dialog so the user can relink. |
   | Double-click audio-only footage | opens it in a Footage panel with an audio waveform-less view and audio playback (UNVERIFIED) |
   | Numeric-keypad Enter | opens selected footage in Footage panels |
   - Ctrl+E (Win) / Cmd+E (Mac) = Edit Original (project-comp-layers.md, Edit Original).
@@ -337,7 +340,7 @@
 
 - **What it does:** Clicking a label swatch (Project panel or Timeline) opens a menu of the 16 label colours plus None and Select Label Group; choosing a colour relabels all selected items/layers.
 - **Exact semantics:**
-  - Menu content: the label names in label order 1–16 (names/colours from Preferences > Labels; defaults in project-comp-layers.md, Labels), each with its swatch; separator; **None (无)** (label 0); separator; **Select Label Group (选择标签组)** = select all items (Project panel) / layers (Timeline) that have the same label as the clicked one.
+  - Menu content: the label names in label order 1–16 (names/colours from Preferences > Labels; defaults in project-comp-layers.md, Labels), each with its swatch; separator; **None (无)** (label 0); separator; **Select Label Group (选择标签组)** = select all items (Project panel) / layers (Timeline) that have the same label as the clicked one. UNVERIFIED: the relative order of the colour list, None and Select Label Group (AE 2023+ may list Select Label Group first).
   - Clicking the swatch of an unselected row applies to that row only (UNVERIFIED: or to the selection if the row is part of it). Edit > Label ▸ applies to the selection with the same menu.
   - Changing a label is one undoable command per click (project-comp-layers.md, Labels).
   - Label column can be widened to show label names in place of swatches.
@@ -411,9 +414,9 @@
 - **What it does:** Controls the on-screen zoom of the Composition, Layer and Footage viewers without changing the comp's resolution.
 - **Exact semantics:**
   - Magnification ratio popup: Fit (适合), Fit up to 100% (适合 100%（译名待核）; macOS Retina shows "Fit up to 200%" because 200% = 1 device pixel per image pixel), then fixed levels 1.5%, 3.1%, 6.25%, 12.5%, 25%, 33.3%, 50%, 100%, 200%, 400%, 800%, 1600%, 3200%, 6400% (UNVERIFIED: exact smallest levels and labels, e.g. "6.2%"). Ctrl/Cmd while choosing applies to all views of the panel.
-  - Since AE 25.x (2025) **Smooth Zoom** (Preferences > Previews > Magnification: Type = Smooth or Fixed (UNVERIFIED labels)): the magnification readout is hot text accepting any decimal value; wheel zoom is continuous; max zoom is buffer-limited between 3200% and 6400%.
-  - Keyboard: `.` zoom in, `,` zoom out (to next fixed level, around view centre); `/` (main keyboard) 100%; Shift+/ Fit; Alt+Shift+/ (Opt+Shift+/) Fit up to 100%. Double-click Hand tool = Fit; double-click Zoom tool = 100% (Win) / 200% (Mac Retina).
-  - Mouse wheel zoom (with Preferences default): zooms around the cursor; Alt/Opt+wheel zooms around the view centre (help text is contradictory, UNVERIFIED which is default; see AE-UI-011). While scroll-zooming, Shift speeds up and Ctrl/Cmd slows down (Smooth Zoom).
+  - Since AE 25.2 (2025) **Smooth Zoom** (Preferences > Previews > Magnification > Type = Smooth; the alternative restores legacy fixed-level zooming (UNVERIFIED: exact label of the legacy value)): the magnification readout is hot text accepting any decimal value; wheel zoom is continuous; max zoom is limited by the image buffer, somewhere between 3200 % and 6400 %.
+  - Keyboard: `.` zoom in, `,` zoom out (to next fixed level, around view centre); `/` (main keyboard) 100%; Shift+/ Fit; **Alt+/ (Opt+/)** Fit up to 100%. Double-click the Hand tool = centre (and fit) the comp in the panel; double-click the Zoom tool = 100% (Win) / 200% (Mac Retina) (UNVERIFIED: Retina value).
+  - Mouse wheel zoom: AE 25.2+ default zooms around the cursor, Alt/Opt+wheel around the view centre (legacy versions: the reverse), see AE-UI-011. While scroll-zooming, Shift speeds up and Ctrl/Cmd slows down. Source: https://helpx.adobe.com/after-effects/using/modifying-using-views.html
   - Pan: Hand tool drag, Space-drag, H-drag, middle-mouse drag; Shift while panning = faster.
   - Magnification is per view, not saved in the project (UNVERIFIED: saved with workspace/viewer state).
   - With Auto resolution, magnification drives the effective resolution (compositing-3d-color.md, Auto resolution).
@@ -425,7 +428,7 @@
 
 - **What it does:** Viewer popups that choose the comp's preview resolution (Full, Half, Third, Quarter, Custom, Auto) and the interactive fast-preview mode.
 - **Exact semantics:**
-  - Resolution / Down Sample Factor popup (分辨率/向下采样系数): Full (完整), Half (二分之一), Third (三分之一), Quarter (四分之一), Custom… (自定义, dialog with horizontal/vertical factors), Auto (自动). The value is a comp setting shared by all views of the comp (stored in Composition Settings). Shortcuts: Ctrl+J (Cmd+J) Full, Ctrl+Shift+J (Cmd+Shift+J) Half, Ctrl+Alt+Shift+J (Cmd+Opt+Shift+J) Quarter, Ctrl+Alt+J (Cmd+Opt+J) Custom (UNVERIFIED: AE 2023 shortcut table); Alt+/ cycles? (UNVERIFIED, see ui-b shortcuts).
+  - Resolution / Down Sample Factor popup (分辨率/向下采样系数): Full (完整), Half (二分之一), Third (三分之一), Quarter (四分之一), Custom… (自定义, dialog with horizontal/vertical factors), Auto (自动). The value is a comp setting shared by all views of the comp (stored in Composition Settings). Shortcuts: Ctrl+J (Cmd+J) Full, Ctrl+Shift+J (Cmd+Shift+J) Half, Ctrl+Alt+J (Cmd+Opt+J) Custom (Adobe shortcut table); Ctrl+Alt+Shift+J (Cmd+Opt+Shift+J) Quarter (UNVERIFIED: present in AE's default keymap but not in the Adobe table). UNVERIFIED: menu order (Auto may be listed first). Auto adapts to the zoom of the view with the highest magnification when the panel has several views, and is ignored for comps with Preserve Resolution When Nested. The Layer viewer's resolution is tied to its comp's Composition viewer.
   - When Auto is active, the popup label shows "Auto" and the computed factor in parentheses, e.g. "(Quarter)".
   - Fast Previews popup (快速预览): Off (Final Quality) (关闭（最终品质）), Adaptive Resolution (自适应分辨率), Draft (草图), Fast Draft (快速草图), Wireframe (线框), separator, Fast Previews Preferences… and GPU Information… (GPU 信息（译名待核）). Shortcuts Ctrl+Alt+1…5 / Cmd+Opt+1…5. The icon changes to show that a non-Off mode is active. Since AE 18.0 Draft/Fast Draft are replaced by Draft 3D in the viewer (compositing-3d-color.md, Fast Previews modes).
   - Both are view-level settings for the comp (Fast Previews per view, UNVERIFIED).
@@ -475,7 +478,7 @@
 
 - **What it does:** Each view of a Composition panel can look through the active camera or a working 3D view; the panel can be split into 1, 2 or 4 views.
 - **Exact semantics:**
-  - 3D View popup (3D 视图): entries and semantics in compositing-3d-color.md, 3D views. View > Switch 3D View ▸ (切换 3D 视图), View > Switch to Last 3D View (切换到上一个 3D 视图; also Esc). F10/F11/F12 switch to the three assignable views (defaults Front, Custom View 1, Active Camera); Shift+F10/F11/F12 assigns the current view to that key (View > Assign Shortcut to ▸). View > Reset Default Camera / Reset 3D View (重置 3D 视图（译名待核）) and View > Look at Selected Layers (查看选定图层) Ctrl+Alt+Shift+\ / Cmd+Opt+Shift+\ , Look at All Layers (查看所有图层) (UNVERIFIED shortcuts).
+  - 3D View popup (3D 视图): entries and semantics in compositing-3d-color.md, 3D views. View > Switch 3D View ▸ (切换 3D 视图), View > Switch to Last 3D View (切换到上一个 3D 视图; also Esc). F10/F11/F12 switch to the three assignable views (defaults Front, Custom View 1, Active Camera); Shift+F10/F11/F12 assigns the current view to that key (View > Assign Shortcut to ▸). View > Reset Default Camera / Reset 3D View (重置 3D 视图（译名待核）) and View > Look at Selected Layers (查看选定图层) Ctrl+Alt+Shift+\ / Cmd+Opt+Shift+\ , Look at All Layers (查看所有图层): with a camera tool active, F = look at selected 3D layers and Ctrl+Shift+F (Cmd+Shift+F) = look at all 3D layers (Adobe shortcut table).
   - The popup is disabled/hidden for comps without 3D layers? (UNVERIFIED: it is enabled only when the comp contains a 3D layer.)
   - Select View Layout popup (选择视图布局): 1 View (1 个视图), 2 Views (Horizontal) (2 个视图 - 水平), 2 Views (Vertical)? (UNVERIFIED), 4 Views (4 个视图), 4 Views - Left, 4 Views - Right, 4 Views - Top, 4 Views - Bottom (UNVERIFIED exact list/order), then Share View Options (共享视图选项). Mouse wheel over the popup cycles layouts.
   - Multi-view: each view has its own 3D View, magnification, grid/guide toggles, channel, snapshot display, layer controls; the active view has a highlighted corner/frame; click (or middle-click to avoid changing layer selection) activates a view. Share View Options: grid/guides/etc. settings apply to all views; holding Ctrl/Cmd while changing a setting temporarily reverses sharing.
@@ -502,7 +505,7 @@
 - **What it does:** Viewer controls to inspect single channels, toggle display colour management, and temporarily change preview exposure in stops.
 - **Exact semantics:**
   - Show Channel and Color Management Settings popup (显示通道及色彩管理设置): RGB, Red (红色), Green (绿色), Blue (蓝色), Alpha (Alpha), RGB Straight (RGB 直接（译名待核）), separator, Colorize (着色) toggle, separator, Use Display Color Management (使用显示色彩管理) toggle (Shift+/ on numeric keypad), Simulate Output ▸ (模拟输出) (UNVERIFIED order). A coloured outline around the view indicates the shown channel (red/green/blue/white).
-  - Shortcuts: Alt+1/2/3/4 (Opt+1/2/3/4) toggle red/green/blue/alpha as grayscale; Alt+Shift+1/2/3 colourised channels; repeating returns to RGB.
+  - Shortcuts: Alt+1/2/3/4 (Opt+1/2/3/4) toggle red/green/blue/alpha as grayscale; Alt+Shift+1/2/3 colourised channels; Alt+Shift+4 (Opt+Shift+4) toggles RGB Straight; repeating returns to RGB. Alt/Option-click the Show Channel button toggles Alpha ↔ RGB. Layer panel only: Alt+5 Alpha Boundary, Alt+6 Alpha Overlay, Alt+X Refine Edge X-ray (AE-UI-044).
   - Reset Exposure (重置曝光度) button + Adjust Exposure (调整曝光度) hot-text control (f-stops, default 0.0, range UNVERIFIED ±40): drag/enter value; when ≠ 0 the reset button is highlighted (blue); clicking Reset sets 0, clicking again restores the last non-zero value. Per view, never affects output.
 - **Priority:** P1
 - **Owner:** bae-ui-motion (+ bae-render, bae-color)
