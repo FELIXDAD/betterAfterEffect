@@ -70,6 +70,7 @@ attrs = { width = 1920, height = 1080, fps = 30, duration_frames = 90 }
 markers = [{ frame = 0, name = "in" }]            # 可选：合成标记
 # keyframes."transform.position" = [{ frame = 0, value = [960, 540] }]   可选：关键帧
 # copy_of = "/comps/OTHER"         可选：复制另一个节点（含子节点），之后的条目可以覆盖其中的属性
+# from_recipe = "recipes/title-in.md"   可选：按配方的结构和时间表生成这个合成及其图层
 # lock = { by = "zhou", note = "..." }               可选：锁提示
 # author = "zhou"                  可选：这些意见的作者（默认 fixture）
 

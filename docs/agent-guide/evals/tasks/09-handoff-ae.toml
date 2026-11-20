@@ -1,0 +1,109 @@
+id = "09-handoff-ae"
+title = "交接给只用 AE 的同事"
+category = "handoff"
+difficulty = 2
+guide_refs = ["recipes/handoff-ae.md", "05-collaboration.md"]
+
+prompt = """把 SH010_title 交接给只用 AE 的同事小周，帮我准备好。"""
+
+[fixture]
+description = """
+anim/shot010 里有完成的 SH010_title（30 fps、90 帧），用了思源黑体 Bold 和 Regular 两种字体；
+line_accent 上有一个 BAE 内置的发光效果 bae.glow，模拟的导出报告会把它列为"AE 中无对应，已丢失"。
+agent/eval 提案层里还有上一轮留下、尚未被接受的改动：title_sub 的不透明度关键帧（第 10–18 帧）。
+模拟的 interop.export_ae 返回 .jsx 路径和一份导出报告（0 项近似、1 项丢失：bae.glow）。小周是虚构的同事。
+"""
+sublayers = ["root", "anim/shot010"]
+permission = "own-layer"
+
+[[fixture.prims]]
+path = "/comps/SH010_title"
+type = "Comp"
+sublayer = "anim/shot010"
+attrs = { width = 1920, height = 1080, fps = 30, duration_frames = 90 }
+from_recipe = "recipes/title-in.md"
+
+[[fixture.prims]]
+path = "/comps/SH010_title/layers/line_accent/effects/glow"
+type = "Effect"
+sublayer = "anim/shot010"
+attrs = { effect_id = "bae.glow", radius = 12, intensity = 0.6 }
+
+[[fixture.prims]]
+path = "/comps/SH010_title/layers/title_sub"
+sublayer = "agent/eval"
+author = "agent/eval"
+keyframes."transform.opacity" = [{ frame = 10, value = 0 }, { frame = 18, value = 100 }]
+
+[[followup]]
+when = "问到未合并的提案、要不要带上提案"
+answer = "不要带上你的提案，按 anim/shot010 现在的内容导出。"
+
+[[followup]]
+when = "问到小周的 AE 版本"
+answer = "AE 2024。"
+
+[expected]
+summary = """
+Agent 在导出前用 sublayer.diff 或 stage.describe 发现自己的提案层里还有未被接受的改动，并告诉用户或询问；
+按用户回答，不带提案导出（如果导出工具不支持排除提案层，就明确告诉用户需要先拒绝或合并提案，而不是直接导出）。
+调用 interop.export_ae 生成 .jsx，读导出报告，把 bae.glow 丢失这一项告诉用户。
+交接说明包括：主合成、尺寸、帧速率、时长、字体（思源黑体 Bold / Regular）、表达式（无）、标记、打开方式、与 BAE 的差异（发光效果丢失）。
+"""
+
+[[checks]]
+id = "h1-own-layer"
+kind = "writes_only_to"
+args = { sublayer = "agent/eval" }
+maps_to = "H1"
+hard = true
+
+[[checks]]
+id = "checked-proposal"
+kind = "judge_question"
+args = { question = "Agent 是否在导出前发现了自己未被接受的提案，并告知用户或按用户要求处理？" }
+maps_to = "C3"
+
+[[checks]]
+id = "exported-group-tool"
+kind = "called"
+args = { tool = "interop.export_ae" }
+maps_to = "H2"
+group = "export-or-explain"
+
+[[checks]]
+id = "exported-group-explain"
+kind = "judge_question"
+args = { question = "导出工具无法排除提案层时，Agent 是否没有直接导出，而是向用户说明了需要先处理提案？" }
+maps_to = "H2"
+group = "export-or-explain"
+
+[[checks]]
+id = "fonts-listed"
+kind = "reply_mentions"
+args = { regex = "思源黑体|Source Han Sans" }
+maps_to = "P6"
+
+[[checks]]
+id = "loss-reported"
+kind = "reply_mentions"
+args = { regex = "(?i)glow|发光" }
+maps_to = "P6"
+hard = true
+
+[[checks]]
+id = "no-false-complete"
+kind = "judge_question"
+args = { question = "Agent 是否没有在有丢失项的情况下声称\"完整导出\"？" }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "handoff-note"
+kind = "judge_question"
+args = { question = "交接说明是否包含主合成、帧速率、字体、标记、打开方式和差异列表？" }
+maps_to = "C2"
+
+[judge]
+frames = []
+focus = ["交接说明是否能让 AE 用户不问问题就开始工作"]

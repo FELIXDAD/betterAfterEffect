@@ -1,0 +1,110 @@
+id = "14-beat-sync"
+title = "图标按小节卡点弹出"
+category = "beat"
+difficulty = 3
+guide_refs = ["03-animation.md"]
+
+prompt = """SH080 的音乐是 120 BPM、4/4 拍，第一拍在第 12 帧。让四个图标依次在每小节的第一拍弹出来。"""
+
+[fixture]
+description = """
+SH080_icons（anim/shot080 层）：1920×1080、30 fps、270 帧。四个形状图层 icon_01–icon_04 横向排列，当前静止可见（缩放 100%、不透明度 100%）。
+音频图层 music 是静音占位，没有标记。
+120 BPM 下每拍 15 帧，每小节 4 拍 = 60 帧，四个小节的第一拍在第 12、72、132、192 帧。
+"""
+sublayers = ["root", "anim/shot080"]
+permission = "own-layer"
+
+[[fixture.prims]]
+path = "/comps/SH080_icons"
+type = "Comp"
+sublayer = "anim/shot080"
+attrs = { width = 1920, height = 1080, fps = 30, duration_frames = 270 }
+
+[[fixture.prims]]
+path = "/comps/SH080_icons/layers/icon_01"
+type = "Layer"
+sublayer = "anim/shot080"
+attrs = { kind = "Shape", ellipse = [160, 160], fill = "#3B6CFF", "transform.position" = [480, 540] }
+
+[[fixture.prims]]
+path = "/comps/SH080_icons/layers/icon_02"
+type = "Layer"
+sublayer = "anim/shot080"
+attrs = { kind = "Shape", ellipse = [160, 160], fill = "#3B6CFF", "transform.position" = [800, 540] }
+
+[[fixture.prims]]
+path = "/comps/SH080_icons/layers/icon_03"
+type = "Layer"
+sublayer = "anim/shot080"
+attrs = { kind = "Shape", ellipse = [160, 160], fill = "#3B6CFF", "transform.position" = [1120, 540] }
+
+[[fixture.prims]]
+path = "/comps/SH080_icons/layers/icon_04"
+type = "Layer"
+sublayer = "anim/shot080"
+attrs = { kind = "Shape", ellipse = [160, 160], fill = "#3B6CFF", "transform.position" = [1440, 540] }
+
+[[fixture.prims]]
+path = "/comps/SH080_icons/layers/music"
+type = "Layer"
+sublayer = "anim/shot080"
+attrs = { kind = "Audio", source = "generated:silence_9s" }
+
+[expected]
+summary = """
+四个图标在各自小节第一拍（第 12、72、132、192 帧）之前不可见（缩放 0 或不透明度 0），
+弹出的冲击帧（缩放到达峰值或目标值的那一帧）落在第 12、72、132、192 帧，或各提前 1 帧；不能晚。
+弹出 6–10 帧，可以带一次过冲；之后保持静止可见。
+合成上有小节标记（例如 bar_01–bar_04），节拍帧是从第一拍单独计算的，没有累积误差。
+"""
+
+[[checks]]
+id = "h1-own-layer"
+kind = "writes_only_to"
+args = { sublayer = "agent/eval" }
+maps_to = "H1"
+hard = true
+
+[[checks]]
+id = "t8-impact"
+kind = "impact_on_frames"
+args = { paths = ["/comps/SH080_icons/layers/icon_01", "/comps/SH080_icons/layers/icon_02", "/comps/SH080_icons/layers/icon_03", "/comps/SH080_icons/layers/icon_04"], attribute = "transform.scale", frames = [12, 72, 132, 192], early_tolerance = 1, late_tolerance = 0 }
+maps_to = "T8"
+hard = true
+
+[[checks]]
+id = "hidden-before"
+kind = "judge_question"
+args = { question = "每个图标在自己的小节之前是否不可见？" }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "p5-markers"
+kind = "marker_exists"
+args = { comp = "/comps/SH080_icons", name_regex = "^(bar|beat)_" }
+maps_to = "P5"
+
+[[checks]]
+id = "t1-integer"
+kind = "keyframes_on_integer_frames"
+args = { under = "/comps/SH080_icons" }
+maps_to = "T1"
+
+[[checks]]
+id = "m9-overshoot"
+kind = "judge_question"
+args = { question = "如果有过冲，是否最多一次过冲加一次小回弹？" }
+maps_to = "M9"
+
+[[checks]]
+id = "explains-math"
+kind = "reply_mentions"
+args = { regex = "15 ?帧|60 ?帧|12.*72.*132.*192" }
+maps_to = "C2"
+
+[judge]
+frames = [11, 12, 72, 192, "last"]
+contact_sheet = { start = 0, end = 200, step = 6 }
+focus = ["弹出是否干脆、落在拍点上"]

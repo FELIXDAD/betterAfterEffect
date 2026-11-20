@@ -1,0 +1,125 @@
+id = "13-revise-feedback"
+title = "按客户反馈修改上一轮的标题"
+category = "revision"
+difficulty = 2
+guide_refs = ["03-animation.md", "05-collaboration.md", "08-mistakes.md"]
+
+prompt = """客户看了 SH070 的标题，说太生硬了，而且看不出先后顺序。改一下。"""
+
+[fixture]
+description = """
+SH070_title 是 Agent 上一轮做的、还在 agent/eval 提案层里（30 fps、90 帧）。问题：
+title_main、title_sub、line_accent 全部在第 0–20 帧同时入场，全部线性关键帧，位置位移 150 px，不透明度和位置同时结束。
+"""
+sublayers = ["root"]
+permission = "own-layer"
+
+[[fixture.prims]]
+path = "/comps/SH070_title"
+type = "Comp"
+sublayer = "agent/eval"
+author = "agent/eval"
+attrs = { width = 1920, height = 1080, fps = 30, duration_frames = 90 }
+
+[[fixture.prims]]
+path = "/comps/SH070_title/layers/title_main"
+type = "Layer"
+sublayer = "agent/eval"
+author = "agent/eval"
+attrs = { kind = "Text", text = "轻量，但不简单", font_size = 96, "transform.position" = [960, 510] }
+keyframes."transform.position" = [{ frame = 0, value = [960, 660], interpolation = "linear" }, { frame = 20, value = [960, 510], interpolation = "linear" }]
+keyframes."transform.opacity" = [{ frame = 0, value = 0, interpolation = "linear" }, { frame = 20, value = 100, interpolation = "linear" }]
+
+[[fixture.prims]]
+path = "/comps/SH070_title/layers/title_sub"
+type = "Layer"
+sublayer = "agent/eval"
+author = "agent/eval"
+attrs = { kind = "Text", text = "安装包压到极限", font_size = 40, "transform.position" = [960, 590] }
+keyframes."transform.position" = [{ frame = 0, value = [960, 740], interpolation = "linear" }, { frame = 20, value = [960, 590], interpolation = "linear" }]
+keyframes."transform.opacity" = [{ frame = 0, value = 0, interpolation = "linear" }, { frame = 20, value = 100, interpolation = "linear" }]
+
+[[fixture.prims]]
+path = "/comps/SH070_title/layers/line_accent"
+type = "Layer"
+sublayer = "agent/eval"
+author = "agent/eval"
+attrs = { kind = "Shape", rect = [240, 4], fill = "#FFFFFF", "transform.position" = [960, 640] }
+keyframes."transform.scale" = [{ frame = 0, value = [0, 100], interpolation = "linear" }, { frame = 20, value = [100, 100], interpolation = "linear" }]
+
+[expected]
+summary = """
+文案和最终版式不变。位置改为入场·强缓动（终点缓入），位移减到 40–60 px；不透明度在位置运动的前半段完成；
+三个元素按 title_main → title_sub → line_accent 错开，间隔 4–8 帧；入场在 1.2 秒内完成，之后静止。
+事务名标明是按反馈修改（例如"第 2 轮"或"按反馈"）；提案说明写清楚改了什么、对应客户的哪条意见。
+"""
+
+[[checks]]
+id = "h1-own-layer"
+kind = "writes_only_to"
+args = { sublayer = "agent/eval" }
+maps_to = "H1"
+hard = true
+
+[[checks]]
+id = "h2-text-main"
+kind = "text_equals"
+args = { path = "/comps/SH070_title/layers/title_main", value = "轻量，但不简单" }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "h2-text-sub"
+kind = "text_equals"
+args = { path = "/comps/SH070_title/layers/title_sub", value = "安装包压到极限" }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "m1-no-linear"
+kind = "no_linear_temporal"
+args = { under = "/comps/SH070_title", allow = ["transform.opacity"] }
+maps_to = "M1"
+hard = true
+
+[[checks]]
+id = "m2-entrance"
+kind = "entrance_eased"
+args = { path = "/comps/SH070_title/layers/title_main", attribute = "transform.position" }
+maps_to = "M2"
+
+[[checks]]
+id = "t4-stagger"
+kind = "stagger"
+args = { paths = ["/comps/SH070_title/layers/title_main", "/comps/SH070_title/layers/title_sub", "/comps/SH070_title/layers/line_accent"], attribute = "*", min_gap = 3, max_gap = 10 }
+maps_to = "T4"
+hard = true
+
+[[checks]]
+id = "final-layout"
+kind = "attr_at"
+args = { path = "/comps/SH070_title/layers/title_main", attribute = "transform.position", frame = "last", equals = [960, 510], tolerance = 0.5 }
+maps_to = "H3"
+
+[[checks]]
+id = "m6-distance"
+kind = "judge_question"
+args = { question = "位置位移是否减小到 20–60 px 的范围？" }
+maps_to = "M6"
+
+[[checks]]
+id = "round-label"
+kind = "transaction_label_any"
+args = { regex = "第 ?2 ?轮|反馈" }
+maps_to = "C1"
+
+[[checks]]
+id = "c2-mapping"
+kind = "judge_question"
+args = { question = "提案说明是否把每处修改对应到客户的\"生硬\"和\"看不出先后\"两条意见？" }
+maps_to = "C2"
+
+[judge]
+frames = [24, "last"]
+contact_sheet = { start = 0, end = 40, step = 2 }
+focus = ["和上一轮相比是否明显更利落、更有层次"]

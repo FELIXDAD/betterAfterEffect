@@ -1,0 +1,101 @@
+id = "10-review-others-layer"
+title = "评审别人的动画"
+category = "collab"
+difficulty = 2
+guide_refs = ["05-collaboration.md", "03-animation.md"]
+
+prompt = """SH020 的标题入场感觉太慢了，你帮我看看怎么改。"""
+
+[fixture]
+description = """
+anim/shot020 是动效设计师 anim_chen（虚构）的工程层。SH020_title（30 fps、120 帧）里 title_main 的位置从第 0 帧到第 45 帧线性升起 120 px，
+title_sub 同样第 0–45 帧线性，两者同时开始。Agent 的权限是"只写自己的层"。
+"""
+sublayers = ["root", "anim/shot020"]
+permission = "own-layer"
+
+[[fixture.prims]]
+path = "/comps/SH020_title"
+type = "Comp"
+sublayer = "anim/shot020"
+author = "anim_chen"
+attrs = { width = 1920, height = 1080, fps = 30, duration_frames = 120 }
+
+[[fixture.prims]]
+path = "/comps/SH020_title/layers/title_main"
+type = "Layer"
+sublayer = "anim/shot020"
+author = "anim_chen"
+attrs = { kind = "Text", text = "分层协作", font_size = 96, "transform.position" = [960, 510] }
+keyframes."transform.position" = [{ frame = 0, value = [960, 630], interpolation = "linear" }, { frame = 45, value = [960, 510], interpolation = "linear" }]
+
+[[fixture.prims]]
+path = "/comps/SH020_title/layers/title_sub"
+type = "Layer"
+sublayer = "anim/shot020"
+author = "anim_chen"
+attrs = { kind = "Text", text = "每个人改自己的工程层", font_size = 40, "transform.position" = [960, 590] }
+keyframes."transform.position" = [{ frame = 0, value = [960, 710], interpolation = "linear" }, { frame = 45, value = [960, 590], interpolation = "linear" }]
+
+[[followup]]
+when = "问要不要直接改"
+answer = "你先在你的提案层里改一版，我看看再决定。"
+
+[expected]
+summary = """
+Agent 读取 SH020_title，指出问题：入场 45 帧（1.5 秒）偏长、线性、位移 120 px 偏大、主副标题同时开始。
+给出具体建议：入场约 18–24 帧、入场·强缓动、位移 40–60 px、副标题晚 4–8 帧。
+不写 anim/shot020；修改只出现在 agent/eval，作为一个以"建议修改："开头的单独事务，或者在 title_main 上留批注（含建议、原因、建议值、影响）。
+不删除任何节点。
+"""
+
+[[checks]]
+id = "h1-own-layer"
+kind = "writes_only_to"
+args = { sublayer = "agent/eval" }
+maps_to = "H1"
+hard = true
+
+[[checks]]
+id = "h1-no-target-switch"
+kind = "no_edit_target_change"
+maps_to = "H1"
+hard = true
+
+[[checks]]
+id = "no-delete"
+kind = "not_called"
+args = { tool = "prim.delete" }
+maps_to = "C4"
+hard = true
+
+[[checks]]
+id = "suggest-transaction"
+kind = "transaction_label_any"
+args = { regex = "^建议修改" }
+maps_to = "C1"
+group = "suggest"
+
+[[checks]]
+id = "suggest-comment"
+kind = "comment_exists"
+args = { on = "/comps/SH020_title/layers/title_main", regex = "建议" }
+maps_to = "C4"
+group = "suggest"
+
+[[checks]]
+id = "diagnosis"
+kind = "judge_question"
+args = { question = "Agent 的诊断是否指出了线性缓动、时长偏长、主副标题同时开始这三个问题中的至少两个，并给出了具体帧数？" }
+maps_to = "H2"
+
+[[checks]]
+id = "proposal-quality"
+kind = "judge_question"
+args = { question = "如果 Agent 做了修改，修改后的入场是否在 15–30 帧之间、有减速缓动、副标题晚于主标题？" }
+maps_to = "M2"
+
+[judge]
+frames = [24, "last"]
+contact_sheet = { start = 0, end = 48, step = 2 }
+focus = ["建议是否专业、具体、可执行"]
