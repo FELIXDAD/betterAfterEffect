@@ -29,6 +29,14 @@ SAMPLES = [
     [0.002, 0.004, 0.01],
 ]
 
+# The OCIO configs that After Effects 2026 ships (read in place, not copied).
+AE_OCIO = "/Applications/Adobe After Effects 2026/Adobe After Effects 2026.app/Contents/Resources/OpenColorIO-Configs"
+AE_CONFIGS = {
+    "ae:ACES 1.3 CG v1.0": "ACES 1.3 CG v1.0/cg-config-v1.0.0_aces-v1.3_ocio-v2.1.ocio",
+    "ae:ACES 1.3 Studio v1.0": "ACES 1.3 Studio v1.0/studio-config-v1.0.0_aces-v1.3_ocio-v2.1.ocio",
+    "ae:ACES 1.2": "ACES 1.2/config.ocio",
+}
+
 ACES_CONFIGS = [
     "studio-config-v5.0.0_aces-v2.1_ocio-v2.6",
     "cg-config-v2.2.0_aces-v1.3_ocio-v2.4",
@@ -202,7 +210,8 @@ def cpu(proc):
 
 
 def apply(proc, rgb):
-    return [float(v) for v in proc.applyRGB([float(x) for x in rgb])]
+    # OCIO computes in f32: 9 significant digits keep every bit.
+    return [float("%.9g" % v) for v in proc.applyRGB([float(x) for x in rgb])]
 
 
 def main():
@@ -218,23 +227,39 @@ def main():
         write(fname, cfg.serialize())
         configs[fname] = cfg
 
+    ae_samples = {}
+    for key, rel in AE_CONFIGS.items():
+        path = os.path.join(AE_OCIO, rel)
+        if os.path.exists(path):
+            configs[key] = OCIO.Config.CreateFromFile(path)
+            ae_samples[key] = SAMPLES[:4]
+    data["ae_configs"] = AE_CONFIGS
+
     for fname, cfg in configs.items():
+        samples = ae_samples.get(fname, SAMPLES)
         cases = []
         names = [cs.getName() for cs in cfg.getColorSpaces()]
-        aces = cfg.getRoleColorSpace("aces_interchange") or names[0]
+        aces = cfg.getRoleColorSpace("aces_interchange") or ("ACES - ACES2065-1" if "ACES - ACES2065-1" in names else names[0])
         targets = [aces]
         scene_lin = cfg.getRoleColorSpace("scene_linear")
-        if scene_lin and scene_lin not in targets:
+        if scene_lin and scene_lin not in targets and fname not in ae_samples:
             targets.append(scene_lin)
         for src in names:
-            for dst in targets + ([d for d in names if "sRGB - Display" in d][:1]):
+            extra = [] if fname in ae_samples else [d for d in names if "sRGB - Display" in d][:1]
+            for dst in targets + extra:
                 if src == dst:
                     continue
                 try:
                     proc = cpu(cfg.getProcessor(src, dst))
                 except Exception:  # noqa: BLE001
                     continue
-                cases.append({"kind": "cs", "src": src, "dst": dst, "in": SAMPLES, "out": [apply(proc, s) for s in SAMPLES]})
+                cases.append({"kind": "cs", "src": src, "dst": dst, "in": samples, "out": [apply(proc, s) for s in samples]})
+        if fname == "ae:ACES 1.2":
+            # The baked RRT + ODT output spaces (3D LUTs): AE's ACES 1.2 views.
+            for dst in names:
+                if dst.startswith("Output - "):
+                    proc = cpu(cfg.getProcessor(aces, dst))
+                    cases.append({"kind": "cs", "src": aces, "dst": dst, "in": samples, "out": [apply(proc, s) for s in samples]})
         if fname == "handmade.ocio":
             # Forward direction of every from_scene_reference.
             for dst in names:
@@ -242,7 +267,7 @@ def main():
                     continue
                 proc = cpu(cfg.getProcessor(aces, dst))
                 cases.append({"kind": "cs", "src": aces, "dst": dst, "in": SAMPLES, "out": [apply(proc, s) for s in SAMPLES]})
-        for display in cfg.getDisplays():
+        for display in ([] if fname in ae_samples else cfg.getDisplays()):
             for view in cfg.getViews(display):
                 src = scene_lin or aces
                 try:

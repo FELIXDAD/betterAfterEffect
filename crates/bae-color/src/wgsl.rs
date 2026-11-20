@@ -284,6 +284,30 @@ impl Gen<'_> {
                     k = i + 2
                 );
             }
+            ColorOp::Lut1dInverse(l) => {
+                let f = self.helper("lut1d_inv", lut1d_inv_fn);
+                let t = self.textures.len();
+                let tex = LutTexture::from_lut1d(l);
+                let dir = [l.direction(0), l.direction(1), l.direction(2)];
+                let r: Vec<(f64, f64)> = (0..3).map(|c| l.range(c)).collect();
+                let i = self.slots(&[
+                    [l.entries.len() as f32, tex.width as f32, 0.0, 0.0],
+                    [l.domain_min[0], l.domain_min[1], l.domain_min[2], 0.0],
+                    [l.domain_max[0], l.domain_max[1], l.domain_max[2], 0.0],
+                    v4(dir, 0.0),
+                    v4([r[0].0, r[1].0, r[2].0], 0.0),
+                    v4([r[0].1, r[1].1, r[2].1], 0.0),
+                ]);
+                self.textures.push(tex);
+                self.tex_params.push(format!("t{t}: texture_2d<f32>"));
+                self.tex_args.push(format!("t{t}"));
+                let args: Vec<String> = (1..6).map(|j| format!("p.v[{}].xyz", i + j)).collect();
+                let _ = writeln!(
+                    self.body,
+                    "    c = {f}(t{t}, c, p.v[{i}].x, p.v[{i}].y, {});",
+                    args.join(", ")
+                );
+            }
             ColorOp::Power(p) => {
                 let e = p.exponent;
                 let i = self.slots(&[v4(e, 0.0)]);
@@ -704,6 +728,36 @@ fn {name}(t: texture_2d<f32>, c: vec3<f32>, n: f32, w: f32, dmin: vec3<f32>, dma
     let g = mix({name}_at(t, i.y, wi).y, {name}_at(t, i.y + 1, wi).y, f.y);
     let b = mix({name}_at(t, i.z, wi).z, {name}_at(t, i.z + 1, wi).z, f.z);
     return vec3<f32>(r, g, b);
+}}
+"
+    )
+}
+
+fn lut1d_inv_fn(name: &str) -> String {
+    format!(
+        "fn {name}_at(t: texture_2d<f32>, i: i32, w: i32) -> vec4<f32> {{
+    return textureLoad(t, vec2<i32>(i % w, i / w), 0);
+}}
+fn {name}_ch(t: texture_2d<f32>, y: f32, n: i32, w: i32, ch: i32, s: f32) -> f32 {{
+    var lo = 0;
+    var hi = n - 1;
+    loop {{
+        if (hi - lo <= 1) {{ break; }}
+        let mid = (lo + hi) / 2;
+        let v = {name}_at(t, mid, w)[ch];
+        if (s * v <= s * y) {{ lo = mid; }} else {{ hi = mid; }}
+    }}
+    let a = {name}_at(t, lo, w)[ch];
+    let b = {name}_at(t, hi, w)[ch];
+    let f = select(0.0, clamp((y - a) / (b - a), 0.0, 1.0), b != a);
+    return (f32(lo) + f) / f32(n - 1);
+}}
+fn {name}(t: texture_2d<f32>, c: vec3<f32>, n: f32, w: f32, dmin: vec3<f32>, dmax: vec3<f32>, s: vec3<f32>, rlo: vec3<f32>, rhi: vec3<f32>) -> vec3<f32> {{
+    let y = clamp(c, rlo, rhi);
+    let ni = i32(n);
+    let wi = i32(w);
+    let pos = vec3<f32>({name}_ch(t, y.x, ni, wi, 0, s.x), {name}_ch(t, y.y, ni, wi, 1, s.y), {name}_ch(t, y.z, ni, wi, 2, s.z));
+    return dmin + pos * (dmax - dmin);
 }}
 "
     )

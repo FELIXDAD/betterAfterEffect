@@ -28,9 +28,13 @@ struct Report {
 }
 
 fn run(config: &str, tol: f64) -> Report {
+    run_at(config, &data_dir().join(config), tol)
+}
+
+fn run_at(config: &str, path: &std::path::Path, tol: f64) -> Report {
     let text = std::fs::read_to_string(data_dir().join("vectors.json")).unwrap();
     let data: Value = serde_json::from_str(&text).unwrap();
-    let cfg = Config::load(&data_dir().join(config)).unwrap_or_else(|e| panic!("{config}: {e}"));
+    let cfg = Config::load(path).unwrap_or_else(|e| panic!("{config}: {e}"));
     let mut report = Report {
         compared: 0,
         worst: Vec::new(),
@@ -135,4 +139,36 @@ fn aces_studio_config_matches_ocio() {
 fn aces_cg_config_v13_matches_ocio() {
     let r = run("cg-config-v2.2.0_aces-v1.3_ocio-v2.4.ocio", 1e-4);
     assert!(r.compared >= 40, "{}", r.compared);
+}
+
+/// The configs After Effects 2026 ships (its OCIO engine uses exactly these),
+/// read in place from the AE bundle; skipped when AE is not installed.
+fn ae_config(key: &str) -> Option<Report> {
+    let text = std::fs::read_to_string(data_dir().join("vectors.json")).unwrap();
+    let data: Value = serde_json::from_str(&text).unwrap();
+    let rel = data["ae_configs"][key].as_str()?;
+    let path = PathBuf::from(AE_OCIO).join(rel);
+    if !path.exists() || data["configs"][key].is_null() {
+        eprintln!("skipping {key}: After Effects 2026 not installed");
+        return None;
+    }
+    Some(run_at(key, &path, 1e-4))
+}
+
+const AE_OCIO: &str = "/Applications/Adobe After Effects 2026/Adobe After Effects 2026.app/Contents/Resources/OpenColorIO-Configs";
+
+#[test]
+fn after_effects_aces13_configs_match_ocio() {
+    for key in ["ae:ACES 1.3 CG v1.0", "ae:ACES 1.3 Studio v1.0"] {
+        if let Some(r) = ae_config(key) {
+            assert!(r.compared >= 10, "{key}: {}", r.compared);
+        }
+    }
+}
+
+#[test]
+fn after_effects_aces12_config_matches_ocio() {
+    if let Some(r) = ae_config("ae:ACES 1.2") {
+        assert!(r.compared >= 100, "{}", r.compared);
+    }
 }

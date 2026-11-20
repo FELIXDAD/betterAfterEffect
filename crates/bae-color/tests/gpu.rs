@@ -470,8 +470,18 @@ fn snippets_match_cpu_reference() {
     }
     l1.domain_min = [-0.25; 3];
     l1.domain_max = [1.5; 3];
-    let t = ColorTransform::from_ops([ColorOp::Lut1d(Arc::new(l1))]);
+    let l1 = Arc::new(l1);
+    let t = ColorTransform::from_ops([ColorOp::Lut1d(l1.clone())]);
     check(&ctx, "lut1d 5000", &t, -0.5, 2.0, 2e-6);
+    let t = ColorTransform::from_ops([ColorOp::Lut1dInverse(l1)]);
+    check(&ctx, "lut1d 5000 inverse", &t, -0.1, 1.6, 2e-5);
+    // A decreasing LUT.
+    let mut dec = Lut1d::identity(64);
+    for e in &mut dec.entries {
+        *e = [1.0 - e[0] * e[0], 1.0 - e[1], (1.0 - e[2]).powf(3.0)];
+    }
+    let t = ColorTransform::from_ops([ColorOp::Lut1dInverse(Arc::new(dec))]);
+    check(&ctx, "lut1d decreasing inverse", &t, -0.1, 1.1, 2e-5);
 
     // 3D LUTs, both interpolations, with a non-separable function.
     for interp in [Interpolation::Linear, Interpolation::Tetrahedral] {
