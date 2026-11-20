@@ -353,6 +353,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bae-sync"
+version = "0.1.0"
+dependencies = [
+ "bae-model",
+ "serde_json",
+ "thiserror 2.0.21",
+ "uuid",
+]
+
+[[package]]
 name = "bae-ui"
 version = "0.1.0"
 dependencies = [
@@ -4115,6 +4125,12 @@ name = "uuid"
 version = "1.29.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c14b15dffa2f4bd712103e857140aa04a4f2ff6e955c77d7eb8e53ee02a3b64"
+dependencies = [
+ "getrandom 0.4.3",
+ "js-sys",
+ "serde_core",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "valuable"
