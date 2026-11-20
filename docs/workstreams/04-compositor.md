@@ -51,6 +51,7 @@
 - 与 AE 26.2.1 对照（`crates/bae-render/tests/ae/`，24 个用例，AE 输出存为 golden 进 CI）：5 种混合模式、4 种轨道遮罩、保留基础透明度、亚像素/旋转/缩放/预合成放大最大差 ≤ 1；修正了相加（AE 是预乘直接相加）和放大时的边缘过渡（按源像素）。缩小的软边纹理还差最多 10。
 - B1（Apple M4）：完整分辨率预览 852 fps，半分辨率 1333 fps，单帧延迟 p50 2.2 ms，导出（求值+渲染+回读）259 fps。形状、文字还是代替品，没有模糊和发光。
 - 从 `.baez` 打开的工程：素材经 21 的 `bae_package::AssetLocator` 定位，包内条目解到缓存目录再交给 bae-media（序列帧整目录解出）；两个求值器和 `bae render` 都用 `bae_render::AssetFiles`。
+- 回应请求（#44）：05 的 1（保留 `LayerSource::bounds()`）、2（`AnimEvaluator` 把形状/文字图层转成 `bae.shape` / `bae.text` 的 `Custom` 内容，`bae render` 从应用的 `Registry<dyn SourceProvider>` 取 provider，`apps/bae` 注册了 05 的 `ShapeProvider`）、3（`SourceRequest.scale` 改为期望密度 = 预览分辨率 × 图层在屏幕上的放大倍数，矢量源按最终尺寸栅格化）、4（`bae_render::testing`）；19 的 R04-11（`EffectParams` 加图层范围、帧率、time_step、线性混合、渲染目的、快门角度/相位、每实例随机种子）、R04-12（`testing::with_encode_context` / `render_effect` / `upload` / `read_pixels`）。`GpuImage.rect` 恢复为 #16 文档里的像素坐标（`texel_size()` 由 `pixel_scale` 算出）。
 - 下一步：遮罩（05 的路径栅格化或自带）、效果框架执行与三个参考效果、调整图层、其余混合模式（继续用 AE 对照）、视口纹理输出（零拷贝给 12）、B1 与 AE 渲染速度对比、B3。
 
 - [x] 渲染图与纹理池

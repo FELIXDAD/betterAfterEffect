@@ -20,12 +20,15 @@ Stage ──► CompEvaluator（AnimEvaluator = 03 的 bae-anim；MockEvaluator 
 | 07 效果 / 19 插件 | `Effect`、`EffectLibrary`、`EffectParams` | 参数定义用 `bae_model::EffectDef`（与界面、Agent 共用）；`Effect` 负责边界变化（`output_bounds`）、输入区域（`input_roi`）和 GPU 编码（`render`）。 |
 | 08 媒体 | `LayerContent::Footage` | 素材帧通过 bae-media 解码成共享设备上的 RGBA16F 预乘纹理，直接采样，不复制。 |
 | 12 动效界面 | `FrameCache::cached_times`、`Renderer::invalidate` | 时间轴的「已缓存帧」绿条；把 `StageEvent` 交给渲染器做精确失效。 |
+| 05 / 07 / 19 测试 | `bae_render::testing` | 不开窗口、不建渲染器：`render_source`、`render_effect`、`with_encode_context`（自己的编码代码）、`upload`、`read_pixels`。 |
 | 17 Agent | `bae render`、`Renderer::read_rgba8` | 无窗口渲染 PNG（`--json` 输出每帧耗时和警告），Agent 用它「看」画面；进程内可以直接回读 8 位 RGBA。 |
 
 ## 约定
 
 - 工作缓冲：预乘 alpha，RGBA16F（可选 RGBA32F），存工作空间的编码值（默认与 AE 一样非线性混合）。
 - 坐标：合成空间 y 向下；像素 `(x, y)` 覆盖 `[x, x+1) × [y, y+1)`。
+- `GpuImage`：`rect` 是图像所在空间的像素坐标，纹素 (0,0) 从 `(rect.x0, rect.y0)` 开始，每个纹素 `pixel_scale` 个像素（半分辨率 2，矢量图层按 4 倍密度栅格化时 0.25），纹素数是 `texel_size()`。用 `GpuImage::new` / `from_texture` 构造。
+- 图层源按 `SourceRequest.scale`（期望密度 = 预览分辨率 × 图层在屏幕上的放大倍数）出图，矢量/文字据此连续栅格化；素材可以忽略它返回原始分辨率。
 - 图层顺序：`RenderComp::layers[0]` 是最上面的图层（AE 序号 1），与 `layers` 文件夹的子 Prim 顺序一致。
 - 混合模式、轨道遮罩、遮罩模式的 token 与 schema 一致（`multiply`、`luma_inverted` …）。
 - 缓存键：`(Prim, 时间, 参数哈希)`；`StageEvent` 按「最具体的依赖 + 该 Prim 自己的时间基准」精确失效（图层属性用图层时间）。
