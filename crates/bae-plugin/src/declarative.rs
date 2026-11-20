@@ -733,14 +733,12 @@ pub fn create_image(
             | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    Ok(GpuImage {
-        texture,
-        view,
-        rect,
-        alpha: bae_render::source::ImageAlpha::Premultiplied,
-        pixel_scale,
-    })
+    // Through the constructor, not a struct literal: GpuImage gains private
+    // fields (pool leases) in bae-render.
+    let mut image = GpuImage::from_texture(texture, bae_render::source::ImageAlpha::Premultiplied);
+    image.rect = rect;
+    image.pixel_scale = pixel_scale;
+    Ok(image)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
