@@ -38,4 +38,4 @@ tools/ae/aectl stop                       # 不保存关闭工程并结束 AE
 
 - 只支持 macOS。Windows 版以后再说（AfterFX.exe `-r` / COM）。
 - 恢复时会丢掉 AE 里没保存的内容。自动化脚本应该自己保存需要的结果。
-- 同一时间只跑一个 AE 实例，多个 Agent 要排队用（`aectl` 不加锁，调用方自己串行）。
+- 同一时间只有一个 AE 实例。`start` / `eval` / `run` / `stop` 会拿一把互斥锁（`/private/tmp/bae-ae-automation/lock.d`），多个 Agent 同时调用时会自动排队（默认最多等 30 分钟，`--lock-timeout` 可调），持锁的进程退出后锁自动释放。用完**不要** `stop`：后面的调用会复用正在运行的 AE，`stop` 只在 AE 出问题时用。
