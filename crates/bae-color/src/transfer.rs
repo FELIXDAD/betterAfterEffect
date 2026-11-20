@@ -40,7 +40,8 @@ pub enum TransferFunction {
     Pq,
     /// ARIB STD-B67 / BT.2100 hybrid log-gamma OETF.
     Hlg,
-    /// ACEScc (S-2014-003). Not exactly invertible (clamps), never cancelled.
+    /// ACEScc (S-2014-003). Not exactly invertible (encoding clamps at 0),
+    /// never cancelled.
     AcesCc,
     /// ACEScct (S-2016-001).
     AcesCct,
@@ -95,7 +96,6 @@ pub(crate) mod k {
     pub const ACESCCT_Y_BRK: f64 = 0.155_251_141_552_511;
     pub const ACESCCT_A: f64 = 10.540_237_741_654_5;
     pub const ACESCCT_B: f64 = 0.072_905_534_195_835_5;
-    pub const ACES_HALF_MAX: f64 = 65504.0;
 
     pub const SLOG3_CUT_LIN: f64 = 0.01125;
     pub const SLOG3_CUT_CV: f64 = 171.210_294_692_9;
@@ -244,7 +244,9 @@ impl TransferFunction {
             TransferFunction::Gamma(g) => mirror(v, |v| v.powf(g)),
             TransferFunction::Pq => mirror(v, |v| {
                 let e = v.powf(1.0 / PQ_M2);
-                ((e - PQ_C1).max(0.0) / (PQ_C2 - PQ_C3 * e)).powf(1.0 / PQ_M1) * PQ_SCALE
+                // The denominator reaches 0 at code value ≈ 1.99 (beyond 10000
+                // cd/m²); keep it positive so out-of-range input stays finite.
+                ((e - PQ_C1).max(0.0) / (PQ_C2 - PQ_C3 * e).max(1e-6)).powf(1.0 / PQ_M1) * PQ_SCALE
             }),
             TransferFunction::Hlg => mirror(v, |v| {
                 if v <= 0.5 {
@@ -254,12 +256,12 @@ impl TransferFunction {
                 }
             }),
             TransferFunction::AcesCc => {
+                // No HALF_MAX cap above 1.468 (the CTL clamps for half-float
+                // storage; OCIO and float buffers do not).
                 if v < (9.72 - 15.0) / 17.52 {
                     (2f64.powf(v * 17.52 - 9.72) - 2f64.powi(-16)) * 2.0
-                } else if v < (ACES_HALF_MAX.log2() + 9.72) / 17.52 {
-                    2f64.powf(v * 17.52 - 9.72)
                 } else {
-                    ACES_HALF_MAX
+                    2f64.powf(v * 17.52 - 9.72)
                 }
             }
             TransferFunction::AcesCct => {

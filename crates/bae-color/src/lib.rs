@@ -25,7 +25,10 @@
 pub mod context;
 pub mod interpret;
 pub mod lut;
+pub mod lutfile;
 pub mod math;
+pub mod ocio;
+pub mod ops;
 pub mod primaries;
 pub mod space;
 pub mod transfer;
@@ -39,6 +42,7 @@ pub use context::{
 pub use interpret::{Interpretation, LinearLight, SourceTags};
 pub use lut::{Interpolation, Lut1d, Lut3d};
 pub use math::{Affine, Mat3};
+pub use ops::{CdlOp, LogOp, MoncurveOp, NegativeStyle, PowerOp};
 pub use primaries::{Adaptation, Chromaticities};
 pub use space::{ColorSpace, ColorSpaceKind, Encoding, builtin, convert};
 pub use transfer::TransferFunction;
@@ -57,4 +61,18 @@ pub enum ColorError {
     /// An op has no inverse.
     #[error("not invertible: {0}")]
     NotInvertible(&'static str),
+    /// A config or LUT file could not be parsed.
+    #[error("{what}: {message}")]
+    Parse {
+        /// File or item name.
+        what: String,
+        /// Details.
+        message: String,
+    },
+    /// A feature of a config or file that bae-color does not implement.
+    #[error("unsupported: {0}")]
+    Unsupported(String),
+    /// A file could not be read.
+    #[error("I/O error: {0}")]
+    Io(String),
 }

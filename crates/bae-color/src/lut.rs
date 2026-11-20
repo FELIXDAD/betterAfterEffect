@@ -79,6 +79,64 @@ impl Lut1d {
         ]
     }
 
+    /// `+1.0` when channel `c` increases, `-1.0` when it decreases.
+    pub fn direction(&self, c: usize) -> f64 {
+        match (self.entries.first(), self.entries.last()) {
+            (Some(a), Some(b)) if b[c] < a[c] => -1.0,
+            _ => 1.0,
+        }
+    }
+
+    /// Output range of channel `c` (min, max).
+    pub fn range(&self, c: usize) -> (f64, f64) {
+        self.entries
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), e| {
+                (lo.min(e[c] as f64), hi.max(e[c] as f64))
+            })
+    }
+
+    /// Exact inverse of one (monotonic) channel: binary search for the segment
+    /// containing `y` (clamped to the output range), linear within it. The
+    /// WGSL `lut1d_inv` helper runs the same search.
+    pub fn eval_inverse_channel(&self, c: usize, y: f64) -> f64 {
+        let n = self.entries.len();
+        if n < 2 {
+            return y;
+        }
+        let s = self.direction(c);
+        let (rlo, rhi) = self.range(c);
+        let y = y.clamp(rlo, rhi);
+        let e = |i: usize| self.entries[i][c] as f64;
+        let (mut lo, mut hi) = (0usize, n - 1);
+        while hi - lo > 1 {
+            let mid = (lo + hi) / 2;
+            if s * e(mid) <= s * y {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let (a, b) = (e(lo), e(hi));
+        let f = if b != a {
+            ((y - a) / (b - a)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let pos = (lo as f64 + f) / (n - 1) as f64;
+        let (d0, d1) = (self.domain_min[c] as f64, self.domain_max[c] as f64);
+        d0 + pos * (d1 - d0)
+    }
+
+    /// Exact inverse of RGB.
+    pub fn eval_inverse(&self, rgb: [f64; 3]) -> [f64; 3] {
+        [
+            self.eval_inverse_channel(0, rgb[0]),
+            self.eval_inverse_channel(1, rgb[1]),
+            self.eval_inverse_channel(2, rgb[2]),
+        ]
+    }
+
     /// Numerical inverse: a new LUT sampling the inverse of each (monotonic)
     /// channel on the output range, with `len` entries. Flat or decreasing
     /// segments are handled by taking the first matching entry.

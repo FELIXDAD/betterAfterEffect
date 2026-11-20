@@ -398,6 +398,14 @@ impl ColorContext {
         self.display.transform_from(&src)
     }
 
+    /// The output module's default colour space (AE: "Working Color Space"):
+    /// the working space *without* linearization — AE converts linearized
+    /// buffers back to the working space's curve when writing files (measured
+    /// in AE 26.2). `None` when unmanaged.
+    pub fn default_output_space(&self) -> Option<ColorSpace> {
+        self.working.space.clone()
+    }
+
     /// Buffer values → an output file's colour space (render queue). Unmanaged
     /// projects write numbers unchanged.
     pub fn output_transform(&self, output: &ColorSpace) -> Result<ColorTransform, ColorError> {
@@ -498,6 +506,16 @@ mod tests {
         let ctx =
             ColorContext::new(WorkingSpace::managed(builtin::ACESCG)).with_view(ViewTransform::Raw);
         assert!(ctx.display_transform().unwrap().is_identity());
+    }
+
+    #[test]
+    fn linearized_output_returns_to_working_curve() {
+        let ctx = ColorContext::new(WorkingSpace::managed(builtin::SRGB).linearized(true));
+        let input = ctx.input_transform(&builtin::SRGB).unwrap();
+        let output = ctx
+            .output_transform(&ctx.default_output_space().unwrap())
+            .unwrap();
+        assert!(input.then(&output).is_identity());
     }
 
     #[test]
