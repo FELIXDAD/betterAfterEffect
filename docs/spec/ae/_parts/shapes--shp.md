@@ -19,7 +19,7 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
     | Group (组) | Group | Container with its own Contents, Blend Mode and Transform (AE-SHP-002). |
   - The root Contents behaves as an implicit group with identity transform and Normal blend mode, except that it has no Transform/Blend Mode properties; the layer Transform positions it.
   - Shape coordinates are in layer space; the layer has no intrinsic size: layer anchor point default is (0,0) and layer space origin (0,0) is the reference for all path coordinates. The layer's width/height reported to scripting/expressions equals the comp size (UNVERIFIED: AVLayer.width/height of a shape layer returns the composition width/height).
-  - Bit depth follows the project (8/16/32 bpc), but fill/stroke colours are clamped to [0,1] (see AE-SHP-016).
+  - Bit depth follows the project (8/16/32 bpc), but fill/stroke colours are clipped to [0,1] (Adobe-documented; see AE-SHP-016).
   - A shape layer cannot be opened in the Layer panel (same as text layers).
   - Every attribute and group has a visibility toggle (eyeball, scripting `PropertyBase.enabled`); a disabled attribute is skipped entirely in evaluation as if absent (Lottie `hd: true`).
   - Names: each attribute has a user-editable name (Lottie `nm`) and fixed matchName (Lottie `mn`); default names are "<Kind> <n>" numbered per kind within the layer (e.g. "Rectangle 1", "Fill 1", "Group 1"), UNVERIFIED: numbering counts existing siblings of the same kind in the target group.
@@ -39,7 +39,7 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
   | Material Options (材质选项) | group | — | — | — | Only used by 3D renderers; see AE-SHP-062. |
   - A group's paths, after the group's own path operators, are transformed by the group transform and then contributed to the parent group's path list (so paints/operators below the group in the parent also act on them) — see AE-SHP-003.
   - A group's paint output is rendered as a unit at the group's stacking position in the parent (like a nested comp); Group opacity is defined in AE-SHP-030.
-  - Group (Empty) (组(空)) from the Add menu creates a group with no contents and identity transform.
+  - Group (Empty) (组（空）) from the Add menu creates a group with no contents and identity transform.
 - **Priority:** P0
 - **Owner:** bae-vector (+ bae-model)
 - **Notes:** Lottie `ty: "gr"`, `np` = number of properties (informational), `cix` (property index) are exporter details; BAE must accept a group whose `tr` is missing (identity). The dashed bounding box shown for a selected group in the Composition panel is UI (bae-ui-motion). Expression access: `content("Group 1").transform.position`, see transform-keyframes-expressions.md, expression property objects.
@@ -126,7 +126,7 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
 
 - **What it does:** The Add menu (in the Tools panel when a shape layer is selected or a shape tool is active, and in the Timeline next to Contents) inserts a new shape attribute into the selected group(s).
 - **Exact semantics:**
-  - Menu items in order: Group (Empty) (组(空)); Rectangle (矩形); Ellipse (椭圆); Polystar (多边星形); Path (路径); Fill (填充); Stroke (描边); Gradient Fill (渐变填充); Gradient Stroke (渐变描边); Merge Paths (合并路径); Offset Paths (位移路径); Pucker & Bloat (收缩和膨胀); Repeater (中继器); Round Corners (圆角); Trim Paths (修剪路径); Twist (扭转); Wiggle Paths (摆动路径); Wiggle Transform (摆动变换); Zig Zag (Z 字形). UNVERIFIED: exact separator placement.
+  - Menu items in order: Group (Empty) (组（空）); Rectangle (矩形); Ellipse (椭圆); Polystar (多边星形); Path (路径); Fill (填充); Stroke (描边); Gradient Fill (渐变填充); Gradient Stroke (渐变描边); Merge Paths (合并路径); Offset Paths (位移路径); Pucker & Bloat (收缩和膨胀); Repeater (中继器); Round Corners (圆角); Trim Paths (修剪路径); Twist (扭转); Wiggle Paths (摆动路径); Wiggle Transform (摆动变换); Zig Zag (Z 字形). UNVERIFIED: exact separator placement.
   - Target: the selected group(s), or Contents if nothing inside is selected; one copy is inserted into each selected group.
   - Insertion position (Adobe-documented):
     - New paths: below existing paths and groups.
@@ -157,10 +157,10 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
   - Layer > New > Shape Layer (图层 > 新建 > 形状图层): empty Contents; layer Anchor Point (0,0); Position = comp centre (w/2, h/2); duration/in-point per comp defaults (project-comp-layers.md, layer timing); name "Shape Layer <n>" (形状图层 <n>).
   - Drawing a parametric shape with no layer selected: new shape layer, layer Anchor Point (0,0), layer Position = comp centre; inside, a new Group "<Kind> 1" containing the primitive (path Position (0,0), drawn size), Stroke 1, Fill 1 (per Tools panel settings), and the group Transform Position = drawn centre − comp centre (layer space). UNVERIFIED: exact split of the offset between group Position and primitive Position; best understanding as stated.
   - Drawing with the Pen tool: Bezier vertices stored in layer space (relative to layer origin = comp centre); group Transform identity. UNVERIFIED.
-  - Preference "Center Anchor Point in New Shape Layers" (新建形状图层中居中锚点（译名待核）, Preferences > Composition (or General in older versions)): when on, the new layer's Anchor Point is set to the centre of the drawn shape's bounds and Position to that same point in comp space, so the shape stays put. UNVERIFIED: version introduced (best understanding AE 2020 17.x) and default (best understanding: off).
+  - Preference "Center Anchor Point in New Shape Layers" (在新形状图层中居中放置锚点（译名待核）, Preferences > General): when on, a new shape layer created by drawing a parametric shape (Rectangle/Rounded Rectangle/Ellipse/Polygon/Star tool) gets its layer Anchor Point at the centre of the drawn shape's bounds (layer space) and Position at that same point in comp space, so the shape stays put. It does not apply to Pen-tool paths (Adobe community expert, 2018). The preference exists at least since AE CC 2018 (15.x). UNVERIFIED: default value (best understanding: on in current versions).
 - **Priority:** P0
 - **Owner:** bae-motion (+ bae-model, bae-ui-motion)
-- **Notes:** Layer > Transform > Center Anchor Point in Layer Content (Ctrl+Alt+Home) uses the shape content bounds (project-comp-layers.md, layer editing ops).
+- **Notes:** Layer > Transform > Center Anchor Point in Layer Content (Ctrl+Alt+Home / Cmd+Option+Home) uses the shape content bounds (project-comp-layers.md, layer editing ops). Source for the preference: https://community.adobe.com/t5/after-effects-discussions/center-anchor-point-in-new-shape-layers/td-p/10103192
 
 ### AE-SHP-009 · Shape layer bounds and sourceRectAtTime (形状图层边界)
 
@@ -234,7 +234,7 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
     ```
 - **Priority:** P0
 - **Owner:** bae-vector
-- **Notes:** Lottie `ty: "el"`. UNVERIFIED: AE's internal kappa (0.5519 per lottie-web vs 0.55228475 = 4(√2−1)/3, which some third-party exporters assume); best understanding: AE's Convert to Bezier Path of a 100 px circle shows tangent lengths ≈ 27.6, i.e. 0.5523 — if confirmed, AE's own value is 0.5523 and lottie-web deviates slightly. BAE decision: keep the constant in one place (`ELLIPSE_KAPPA`) so it can be switched after verification against AE.
+- **Notes:** Lottie `ty: "el"`. UNVERIFIED: AE's internal kappa (0.5519 per lottie-web vs 0.55228475 = 4(√2−1)/3, which some third-party exporters assume); to settle it, Convert to Bezier Path on a 100 px circle in AE and read the tangent length: 27.595 means 0.5519, 27.614 means 0.55228 (the two differ by only 0.02 px here, so a rounded display of 27.6 does not decide it). Verified: lottie-web `common.js` defines `roundCorner = 0.5519` and uses it for both ellipses and rounded-rectangle corners. BAE decision: keep the constant in one place (`ELLIPSE_KAPPA`) so it can be switched after verification against AE.
 
 ### AE-SHP-012 · Polystar path (多边星形路径)
 
@@ -337,8 +337,8 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
   | Color (颜色) | colour RGB | Tools panel fill colour (AE-SHP-057) | each channel 0–1 | — | `ADBE Vector Fill Color`, Lottie `c` (RGB 0–1; a 4th component may be present and is ignored) |
   | Opacity (不透明度) | scalar | 100 | 0–100 | % | `ADBE Vector Fill Opacity`, Lottie `o` |
   - Rendering: the fill's geometry (AE-SHP-003) is filled as one compound path in the fill's group coordinate space, then transformed by enclosing group transforms and the layer transform; coverage is anti-aliased (layer Quality Best) or aliased (Draft; UNVERIFIED for shape layers).
-  - Effective alpha = Opacity/100 × product of enclosing group opacities (AE-SHP-030) × colour alpha 1.
-  - Colour values are clamped to [0, 1] even in 32 bpc projects (Adobe: shape fill/stroke colours are not rendered as HDR) — values entered or produced by expressions outside [0,1] are clipped.
+  - Effective alpha = Opacity/100 × enclosing group opacities (exactly so for non-overlapping draws; overlap inside a faded group: AE-SHP-030).
+  - Colour values are clipped to [0, 1] even in 32 bpc projects (Adobe: "the colors of strokes and fills for shape layers are not rendered as high-dynamic range colors"; values under 0.0 or over 1.0 are clipped) — this applies to solid and gradient fills/strokes, including values produced by expressions.
   - Open paths are filled as if closed by a straight segment from last to first vertex.
 - **Priority:** P0
 - **Owner:** bae-vector (+ bae-color)
@@ -370,8 +370,8 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
   | Line Join (线段连接) | enum | Miter Join | AE-SHP-019 | — | Lottie `lj` |
   | Miter Limit (尖角限制) | scalar | 4 | ≥ 1 (UNVERIFIED max) | × width | Lottie `ml` (static) / `ml2` (animated) |
   | Dashes (虚线) | group | empty | AE-SHP-020 | — | Lottie `d[]` |
-  | Taper (锥度（译名待核；帮助页作“椎体化”）) | group | off | AE-SHP-021 | — | AE 17.x+ |
-  | Wave (波形) | group | off | AE-SHP-022 | — | AE 17.x+ |
+  | Taper (锥度（译名待核；帮助页作“椎体化”）) | group | no taper (lengths 0) | AE-SHP-021 | — | AE 17.1+ |
+  | Wave (波形) | group | no wave (Amount 0) | AE-SHP-022 | — | AE 17.1+ |
   - The stroke outline is computed in the stroke's own group space with the given width and then transformed by enclosing transforms (so group/layer scale scales the stroke width, non-uniform scale makes it anisotropic). A path's own group transform scales the path but not a stroke that sits outside that group.
   - Open paths get caps at both ends; closed paths get a join at the start vertex and no caps. Each sub-path of a compound path is stroked independently (no joins between sub-paths).
   - Stroke Width 0 → nothing drawn. Overlapping parts of one stroke do not double-cover (one coverage mask per stroke).
@@ -384,10 +384,10 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
 
 - **What it does:** Shape of stroke ends and corners.
 - **Exact semantics:**
-  - Line Cap enum (menu order; scripting value = Lottie `lc`): 1 Butt Cap (平头端点), 2 Round Cap (圆头端点), 3 Projecting Cap (矩形端点). Butt ends exactly at the path end; Round adds a semicircle of radius width/2; Projecting extends a square by width/2 beyond the end. Caps apply to open-path ends and to each dash end (AE-SHP-020). (Adobe's text says round/projecting extend "a number of pixels equal to the stroke width"; geometrically the extension is half the stroke width, as in every 2D stroker — UNVERIFIED wording discrepancy.)
+  - Line Cap enum (menu order; scripting value = Lottie `lc`): 1 Butt Cap (平头端点), 2 Round Cap (圆头端点), 3 Projecting Cap (矩形端点). Butt ends exactly at the path end; Round adds a semicircle of radius width/2; Projecting extends a square by width/2 beyond the end. Caps apply to open-path ends and to each dash end (AE-SHP-020). (Adobe's help text says round/projecting caps extend "a number of pixels equal to the stroke width"; that wording is loose — the cap extends by half the stroke width on the path's end, i.e. the cap is a semicircle / half-square of the stroke's own width, as in SVG/PostScript stroking and lottie-web's mapping of `lc` to SVG `stroke-linecap`.)
   - Line Join enum (`lj`): 1 Miter Join (斜接连接), 2 Round Join (圆角连接), 3 Bevel Join (斜面连接). Joins apply only at segment boundaries (vertices) where the incoming and outgoing directions differ, including the closing vertex of closed paths; curve interiors are offset smoothly with no join.
-  - Miter Limit (`ml`): a miter join whose miter length / stroke width exceeds the limit is drawn as a bevel. Miter length ratio = 1/sin(θ/2) for interior angle θ. Limit 1 → always bevel. Default 4.
-  - Translations of cap/join names are UNVERIFIED (from Illustrator/AE zh-CN conventions).
+  - Miter Limit (`ml`): a miter join whose miter length / stroke width exceeds the limit is drawn as a bevel (Adobe: "if the miter limit is 4, then when the length of the point reaches four times the stroke weight, a bevel join is used"; "a miter limit of 1 causes a bevel join"). Miter length ratio = 1/sin(θ/2) for interior angle θ. Default 4.
+  - zh-CN names are from the zh-CN help page (shape-attributes-paint-operations-path).
 - **Priority:** P0
 - **Owner:** bae-vector
 - **Notes:** Lottie `lc`: 1 butt, 2 round, 3 square; `lj`: 1 miter, 2 round, 3 bevel. Offset Paths has its own Line Join/Miter Limit (AE-SHP-032).
@@ -423,13 +423,13 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
 - **Exact semantics:**
   | Parameter (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
-  | Length Units (长度单位) | enum | Percent (UNVERIFIED) | Percent (百分比) / Pixels (像素) | — | `ADBE Vector Taper Length Units` |
+  | Length Units (长度单位) | enum | UNVERIFIED (best understanding: Percentage) | Percentage (百分比) / Pixels (像素) (help-page labels; UI may read "Percent") | — | `ADBE Vector Taper Length Units` |
   | Start Length (起始长度) | scalar | 0 | 0–100 % or ≥ 0 px | % of path length or px | `ADBE Vector Taper Start Length` |
-  | End Length (结束长度) | scalar | 0 | same | same | `ADBE Vector Taper End Length` |
+  | End Length (末端长度（译名待核）) | scalar | 0 | same | same | `ADBE Vector Taper End Length` |
   | Start Width (起始宽度) | scalar | 0 (UNVERIFIED) | 0–100 (UNVERIFIED) | % of Stroke Width | `ADBE Vector Taper Start Width` |
-  | End Width (结束宽度) | scalar | 0 (UNVERIFIED) | 0–100 (UNVERIFIED) | % of Stroke Width | `ADBE Vector Taper End Width` |
+  | End Width (末端宽度（译名待核）) | scalar | 0 (UNVERIFIED) | 0–100 (UNVERIFIED) | % of Stroke Width | `ADBE Vector Taper End Width` |
   | Start Ease (起始缓动) | scalar | 0 | UNVERIFIED (−100–100) | % | negative = pointy, 0 = linear, positive = rounder |
-  | End Ease (结束缓动) | scalar | 0 | same | % | |
+  | End Ease (末端缓动（译名待核）) | scalar | 0 | same | % | |
   - Width profile along arc length s of each open path (total length Ltot), UNVERIFIED reconstruction (Adobe documents only the qualitative behaviour):
     ```
     Ls = StartLength (Percent: StartLength/100*Ltot);  Le likewise
@@ -444,7 +444,7 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
   - Caps are applied at the tapered ends (a taper to 0 % with Round Cap ends in a point). Closed paths: taper starts/ends at vertex 0 (UNVERIFIED).
 - **Priority:** P1
 - **Owner:** bae-vector
-- **Notes:** Introduced in AE 17.1 (2020) per Adobe release history (UNVERIFIED version). Also present on Gradient Stroke (UNVERIFIED). Not representable in Lottie/bodymovin (taper is dropped on export); Illustrator variable-width strokes are not imported as taper. Implementation hint: build the outline by offsetting the path's arc-length-parameterised normal by ±width(s)/2 at adaptive samples, then fill; cache per (path hash, params).
+- **Notes:** Introduced in AE 17.1 (May 2020) as "tapered shape strokes" (public beta from April 2020: Adobe community "Feature Focus: Tapered Shape Strokes"). Also present on Gradient Stroke (UNVERIFIED). Adobe: tapered strokes cannot be imported from Illustrator. Source: https://helpx.adobe.com/after-effects/using/taper-shape-strokes.html Not representable in Lottie/bodymovin (taper is dropped on export); Illustrator variable-width strokes are not imported as taper. Implementation hint: build the outline by offsetting the path's arc-length-parameterised normal by ±width(s)/2 at adaptive samples, then fill; cache per (path hash, params).
 
 ### AE-SHP-022 · Stroke wave (波形)
 
@@ -464,7 +464,7 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
     Cycles makes an integer number of waves fit a closed path seamlessly; Phase animates the wave along the path (Adobe example: Phase 0→360 over 4 s gives one full travel per 4 s, implying degrees).
 - **Priority:** P2
 - **Owner:** bae-vector
-- **Notes:** Introduced with Taper (AE 17.1, UNVERIFIED). Not exported to Lottie. Combines multiplicatively with Taper (UNVERIFIED).
+- **Notes:** Introduced together with Taper in AE 17.1 (May 2020). Adobe: with Units = Cycles the Wavelength property is relabelled Cycles and a value of 1 gives a single wave; Cycles suits closed paths (seamless), Pixels suits open paths. Not exported to Lottie. Combines multiplicatively with Taper (UNVERIFIED).
 
 ### AE-SHP-023 · Gradient Fill (渐变填充)
 
@@ -593,12 +593,12 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
 
 - **What it does:** Scales the opacity of everything inside the group.
 - **Exact semantics:**
-  - Effective opacity of a paint = paint Opacity × Π (opacity of each enclosing group) / 100^k, then × layer opacity at layer composite time.
-  - UNVERIFIED (important for parity): whether AE applies group opacity per paint (overlapping fills inside a 50 % group show their overlap — lottie-web canvas/SVG behaviour) or to the group as an isolated unit (no visible overlap — Skottie behaviour). Best understanding: per paint (non-isolated), matching lottie-web, which was tuned against AE renders.
+  - For a single paint (no overlap with other content of the group), effective opacity = paint Opacity/100 × Π(enclosing group Opacity/100), then × layer opacity at layer composite time. Where draws inside a faded group overlap, the result depends on isolation (next bullet).
+  - UNVERIFIED (important for parity): whether AE applies group opacity per paint (overlapping fills inside a 50 % group show their overlap) or to the group as an isolated unit (the group is composited first, then faded; no visible overlap). Reference players disagree: lottie-web's canvas renderer multiplies group opacity into each paint (`coOp = o * groupTransform.opacity`), while lottie-web's SVG renderer sets `opacity` on the group's `<g>` (isolated) and Skottie also isolates. Best understanding: isolated, consistent with Adobe's statement that shape-layer rendering follows the rules of nested compositions and with AE-SHP-005.
   - Repeater Start/End Opacity multiply in the same way per copy (AE-SHP-034).
 - **Priority:** P0
 - **Owner:** bae-vector (+ bae-render)
-- **Notes:** BAE decision: implement per-paint multiplication (cheap, no offscreen layer); add an isolation path only if verification shows AE isolates.
+- **Notes:** BAE decision: render a group with opacity < 100 % as an isolated layer (Vello `push_layer` with alpha); when the group produces a single draw with Normal blending, multiply the opacity into that paint instead (identical result, no offscreen). Switch to per-paint multiplication only if an AE render shows overlap inside a faded group.
 
 ## Path operations
 
