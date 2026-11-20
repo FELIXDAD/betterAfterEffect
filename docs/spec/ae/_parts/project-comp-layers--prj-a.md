@@ -226,7 +226,7 @@ Conventions used below: "AE" means the current After Effects release (26.x/27.0,
   - Footage can be trimmed in the Footage viewer and inserted (Ripple Insert / Overlay Edit), see ui-preview-render-io.md, Footage viewer.
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-media)
-- **Notes:** Scripting `FootageItem.mainSource`, `replace()`, `replaceWithPlaceholder()`, `replaceWithSequence()`, `replaceWithSolid()`, `openInViewer()`. BAE decision: maps to the `Asset` Prim (ARCHITECTURE 4.2) with `source` (file reference per ARCHITECTURE 16 / solid colour / placeholder spec), `interpretation`, and `proxy` sub-records. Data files (JSON/CSV/TSV/MGJSON) are footage items without video (see transform-keyframes-expressions.md, data footage).
+- **Notes:** Scripting `FootageItem.mainSource`, `replace()`, `replaceWithPlaceholder()`, `replaceWithSequence()`, `replaceWithSolid()`, `openInViewer()`. BAE decision: maps to the `Asset` Prim (ARCHITECTURE 4.2) with `source` (file reference per ARCHITECTURE 16 / solid colour / placeholder spec), `interpretation`, and `proxy` sub-records. Data files (JSON/CSV/TSV/MGJSON) are footage items without video (see transform-keyframes-expressions.md, data footage). Lottie/bodymovin: project items have no Lottie object of their own; footage referenced by exported layers becomes an entry of the root `assets` array (`id` string, referenced by the layer's `refId`): image asset `{id, w, h, u, p, e}` (`e: 1` = embedded, `p` is then a base64 data URL and `u` is empty; `e: 0` = external file `u` + `p`; optional `t: "seq"` marks one frame of an image sequence), sound asset (same file fields), precomposition asset `{id, layers, fr?}` for comps, data source asset `t: 3`; solids produce no asset (solid layer `ty: 1` carries `sc`, `sw`, `sh`), folders, comments and labels are not exported. Source: https://lottiefiles.github.io/lottie-docs/assets/
 
 ### AE-PRJ-017 · Project panel column data (项目面板列数据（译名待核）)
 
@@ -706,7 +706,7 @@ Conventions used below: "AE" means the current After Effects release (26.x/27.0,
   | Parameter (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
   | Use frame rate from file (使用文件中的帧速率（译名待核）) | radio | selected for movies | — | — | shows the native rate, e.g. "(29.970 fps)" |
-  | Conform to frame rate (匹配帧速率（译名待核）) | radio + float | native rate | UNVERIFIED: 0.001..999 | fps | scripting `conformFrameRate` (0 = use native); documented UI max 999 fps (scripting docs still say 99) |
+  | Conform to frame rate (匹配帧速率) | radio + float | native rate | UNVERIFIED: 0.001..999 | fps | scripting `conformFrameRate` (0 = use native); documented UI max 999 fps (scripting docs still say 99) |
   | Assume this frame rate (假定此帧速率) | float | Sequence Footage preference (30) | as above | fps | shown instead of the radios for image sequences |
   - Time mapping (no frame blending; frame blending is a layer switch, see transform-keyframes-expressions.md):
     ```
@@ -716,7 +716,7 @@ Conventions used below: "AE" means the current After Effects release (26.x/27.0,
     frame_index(t) = clamp(floor(t * rate + eps), 0, N - 1)    for 0 <= t < D
     ```
     UNVERIFIED: AE's exact epsilon/rounding for t landing exactly on a frame boundary (BAE: compute in flicks with exact rational rates so no epsilon is needed).
-  - Conforming changes playback speed and item duration (15 -> 30 fps plays twice as fast, half as long). Audio of the same item is NOT conformed: it keeps its original speed and duration, so A/V sync changes. UNVERIFIED: the item duration is then the video duration and audio beyond it is cut.
+  - Conforming changes playback speed and item duration (15 -> 30 fps plays twice as fast, half as long). Audio of the same item is NOT conformed: it keeps its original speed and duration, so A/V sync changes (Adobe help). Keyframes on layers using the item stay at their comp times. UNVERIFIED: the item duration is then the video duration and audio beyond it is cut.
   - Layers already using the item keep their In point and keyframe times; their Out point is re-derived from the new duration if the layer was not trimmed. UNVERIFIED.
   - Variable-frame-rate sources are presented as constant-rate (AE-PRJ-063).
 - **Priority:** P0
@@ -929,7 +929,7 @@ Conventions used below: "AE" means the current After Effects release (26.x/27.0,
 - **Exact semantics:**
   - JSON (`.json`, AE 15.0), CSV and TSV/TXT (UNVERIFIED: AE 16.1/17.0), and mgJSON (`.mgjson`, motion-graphics JSON with timed streams, AE 15.0) import as footage items without video or audio (duration 0 for JSON/CSV; mgJSON has duration from its samples).
   - Added to a comp, a JSON/CSV item makes a layer with no image whose data is read by expressions (`footage("data.json").sourceData`, `.dataValue([row, col])` for CSV); an mgJSON item makes a Data layer whose Data properties are keyframed from the streams. Layer > Time > Align Video to Data uses mgJSON timing.
-  - From AE 15.1, a `.jsx` file containing a JSON-like object can be imported as data (for expressions `footage("x.jsx").sourceData`). UNVERIFIED.
+  - From AE 15.1, a `.jsx` file with the same content as a JSON file can be imported as data (for expressions `footage("x.jsx").sourceData`); Adobe's help recommends it as the workaround for JSON files whose expressions do not work, via Replace Footage (Source: https://helpx.adobe.com/after-effects/using/data-driven-animation.html).
   - Reload Footage re-reads the file; expressions re-evaluate.
 - **Priority:** P1
 - **Owner:** bae-media (+ bae-anim, bae-model)
@@ -974,7 +974,7 @@ Conventions used below: "AE" means the current After Effects release (26.x/27.0,
 ### AE-PRJ-068 · Automatic footage reloading (自动重新加载素材)
 
 - **What it does:** Reloads changed footage automatically when AE becomes the active application again.
-- **Exact semantics:** Preferences > Import > Automatic Footage Reloading > Auto Reload: All Footage Types (所有素材类型) / Non-sequence Footage (非序列素材, default) / Off (关闭). On application activation AE checks modification dates of the relevant sources and reloads changed ones (as Reload Footage). Image sequences are excluded by default because checking every frame is slow.
+- **Exact semantics:** Preferences > Import > Automatic Footage Reloading > Auto Reload: All Footage Types (所有素材类型) / Non-sequence Footage (非序列素材, default) / Off (关). On application activation AE checks modification dates of the relevant sources and reloads changed ones (as Reload Footage). Image sequences are excluded by default because checking every frame is slow.
 - **Priority:** P1
 - **Owner:** bae-media (+ apps/bae)
 - **Notes:** BAE decision: use OS file-watch notifications (FSEvents / ReadDirectoryChangesW / inotify) instead of polling on activation, with the same three-way preference.
@@ -1013,7 +1013,7 @@ Conventions used below: "AE" means the current After Effects release (26.x/27.0,
 - **What it does:** Reports, on project open and on demand, the footage, effects and fonts the project needs but the machine lacks.
 - **Exact semantics:**
   - On open AE shows a dialog per category: "N files are missing" with the last missing path; a list of missing effects (by display name); a list of missing fonts (suppressible: Preferences > "Do not warn me about missing fonts when opening projects"). UNVERIFIED exact texts.
-  - File > Dependencies > Find Missing Footage / Find Missing Effects / Find Missing Fonts (UNVERIFIED: added AE 17.x (2020)): filters the Project panel to missing footage, or the Timeline panel to layers that use missing effects/fonts.
+  - File > Dependencies > Find Missing Footage / Find Missing Effects / Find Missing Fonts (added in AE CC 12.0 (2013); the Project panel search term "missing" offers the same filters): filters the Project panel to missing footage, or the Timeline panel to layers that use missing effects/fonts.
   - Missing effects: the effect instance remains on the layer with all parameter values preserved and is shown as missing; it renders as a pass-through (no effect). Missing fonts: text layers keep the font name and render with a substitute font until the font is installed; Edit > Find and replace font / `Project.replaceFont()` can retarget. See text.md, fonts, and effects.md, effect framework.
   - Scripting `Project.usedFonts` lists fonts used by text layers.
 - **Priority:** P1
@@ -1104,7 +1104,7 @@ Conventions used below: "AE" means the current After Effects release (26.x/27.0,
     | Pixel Aspect Ratio (像素长宽比) | enum | comp PAR | AE-PRJ-053 list | — | — |
     | Frame Aspect Ratio | read-only | — | — | — | shown, e.g. "16:9 (1.78)" |
     | Make Comp Size (制作合成大小) | button | — | — | — | sets width, height and PAR to the comp's |
-    | Color (颜色) | RGB | last used; initially 17% grey 45/255 (AE CS6+) | 0..1 per channel (picker in 8-bit or float per project depth) | — | — |
+    | Color (颜色) | RGB | last used; initially 17% grey 45/255 (AE CS6+, per Adobe help) | 0..1 per channel (picker in 8-bit or float per project depth) | — | — |
     | Affect all layers that use this solid (影响使用此纯色的所有图层) | bool | off | — | — | Solid Settings only, AE-PRJ-080 |
   - The item is `isStill`, duration 0; it renders as a uniform colour with alpha 1 over its whole frame. Colour is stored in the project working space (no colour conversion; with colour management on it is interpreted as working-space values). UNVERIFIED.
   - New items go to the solids folder (AE-PRJ-021).
@@ -1224,7 +1224,7 @@ Conventions used below: "AE" means the current After Effects release (26.x/27.0,
 - **Exact semantics:** Project Settings > Color tab, stored values (render semantics: compositing-3d-color.md, colour management; bit depth):
   | Parameter (中文) | Type | Default | Values | Scripting / notes |
   |---|---|---|---|---|
-  | Color Engine (颜色引擎) | enum | Adobe color managed (Adobe 颜色管理（译名待核）) | Adobe color managed / OCIO color managed (OCIO 颜色管理（译名待核）) | OCIO engine introduced in AE 24.x (UNVERIFIED: 24.0, 2023); OCIO 2.5.1 with ACES 2.0 configs since AE 26.5 (Sep 2026) |
+  | Color Engine (颜色引擎) | enum | Adobe color managed (Adobe 颜色管理（译名待核）) | Adobe color managed / OCIO color managed (OCIO 颜色管理（译名待核）) | OCIO engine shipped in AE 23.2 (Feb 2023; beta from 23.1, Oct 2022); OCIO library 2.3.2 in AE 25.0; OCIO 2.5.1 with ACES 2.0 configs since AE 26.5 (Sep 2026) |
   | Bit Depth (位深度) | enum | 8 bits per channel | 8 / 16 / 32 (float) bits per channel (位/通道) | `bitsPerChannel`; Alt/Option-click the Project panel depth button cycles it |
   | Working Space (工作空间) | enum | None (无) | None or any RGB ICC profile (e.g. sRGB IEC61966-2.1, HDTV (Rec. 709), Rec.709 Gamma 2.4, Rec.2020, ProPhoto RGB...) | `workingSpace` ("" = None); `listColorProfiles()`; None = colour management off |
   | Working gamma (工作伽玛（译名待核）) | enum | 2.4 | 2.2 / 2.4 | `workingGamma`; used only when Working Space is None (affects some gamma-dependent operations); UNVERIFIED default |
@@ -1247,7 +1247,7 @@ Conventions used below: "AE" means the current After Effects release (26.x/27.0,
 - **Exact semantics:** Project Settings > Audio > Sample Rate (采样率): enum, default 48.000 kHz (UNVERIFIED). Values (UNVERIFIED list): 22.050, 32.000, 44.100, 48.000, 88.200, 96.000 kHz. All audio sources are resampled to this rate for preview and render mixing; Output Module audio settings may resample again for output (see ui-preview-render-io.md, Render Queue audio).
 - **Priority:** P1
 - **Owner:** bae-model (+ bae-media)
-- **Notes:** UNVERIFIED: AE version that moved the default from 44.1 to 48 kHz.
+- **Notes:** UNVERIFIED: AE version that moved the default from 44.1 to 48 kHz; the offered list may differ by platform (a 2021 Adobe community thread reports a macOS AE 18.2 offering nothing above 48 kHz while Windows showed 96 kHz). Scripting exposes no Project attribute for the audio sample rate (UNVERIFIED).
 
 ### AE-PRJ-089 · Expression engine setting (表达式引擎)
 
