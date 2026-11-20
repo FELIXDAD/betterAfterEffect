@@ -909,7 +909,7 @@
 
 - **What it does:** File > Watch Folder… (文件 > 监视文件夹) puts AE (or the render engine) into a mode that polls a folder for collected projects and renders them; several machines can share one image-sequence render using Skip Existing Files.
 - **Exact semantics:**
-  - Projects arrive via File > Collect Files with "Enable 'Watch Folder' Render" (启用"监视文件夹"渲染) and a maximum machine count; Collect Files writes a Render Control File (RCF, `*_RCF.txt`) that watch-folder instances use to claim work; projects are rendered in alphabetical order.
+  - Projects arrive via File > Collect Files with "Enable 'Watch Folder' Render" (启用"监视文件夹"渲染) and a maximum machine count; Collect Files writes a Render Control File (RCF, `*_RCF.txt`) that watch-folder instances use to claim work (UNVERIFIED: projects are picked up in alphabetical order). Source: https://helpx.adobe.com/after-effects/using/automated-rendering-network-rendering.html
   - Watch-folder mode start: Watch Folder command; or a project named `Watch This Folder.aep` (AE watches its folder when opened); or (Windows) `afterfx.exe -wf <folder>`; `-re` starts the render engine instead of the full app.
   - Multi-machine sequence render: Render Settings "Skip Existing Files" (AE-UI-621) + one output module; each machine renders the next frame whose file does not yet exist (in-progress frames are placeholders), so machines can be stopped/started at any time. A single movie file cannot be split across machines; chain a second item with Post-Render Action to build a movie from the sequence (AE-UI-627).
   - Segment preferences (Preferences > Export) limit files per folder / movie size (AE-UI-668).
@@ -1040,7 +1040,7 @@
 
 ### AE-UI-653 · 3D model import (3D 模型导入)
 
-- **What it does:** Since AE 24.0 (2023-10, UNVERIFIED month) AE imports 3D models as 3D model layers rendered by the Advanced 3D renderer.
+- **What it does:** Since AE 24.0 (October 2023) AE imports 3D models as 3D model layers rendered by the Advanced 3D renderer.
 - **Exact semantics:**
   - Formats: glTF binary (.glb), glTF (.gltf + external resources), OBJ (.obj + .mtl), FBX (.fbx, added later, AE 25.x, UNVERIFIED); embedded animations play on the model layer (AE 24.x+, UNVERIFIED version).
   - Imported as footage; placing it in a comp creates a 3D Model layer (requires the Advanced 3D renderer; see compositing-3d-color.md [cmp-b], Advanced 3D).
