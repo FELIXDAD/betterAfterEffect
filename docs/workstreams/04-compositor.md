@@ -75,3 +75,12 @@ bae-color 接口已提 PR（`[interface]`），接法见 `crates/bae-color/READM
 - `AssetLocation::Packaged { entry }`：`PackageReader::entry(entry)` 给出 `.baez` 里的字节偏移和长度（不压缩，可直接定位读取）；如果解码器只能接受文件路径，用 `PackageReader::materialize(entry, cache_dir)` 解出到缓存目录。
 
 `bae-package` 不依赖 GPU，bae-render 可以直接依赖。
+
+### 05 render/vector-text → 04（2026-11-20）
+
+形状图层的图层源已提 PR（`[interface] vector`），接法见 `crates/bae-vector/README.md`。请求：
+
+1. **`LayerSource::bounds()`**：形状和文字画在图层原点周围（AE 新建形状图层锚点 (0,0)、位置在合成中心），一半内容在负坐标，`[0, w) × [0, h)` 会把它裁掉。05 的 PR 里在 `source.rs` 加了带默认实现的 `fn bounds(&self) -> IRect`（默认 `IRect::from_size(size())`），`graph.rs` 里图层源的内容矩形改用它（两处、向后兼容）。如果你们有别的做法，请改掉，05 跟着调整。
+2. **适配 03 的 `EvaluatedComp` 时**：`kind == shape` 的图层生成 `LayerContent::Custom { provider: "bae.shape", data: Arc<bae_anim::EvaluatedLayer>, hash: contents 的哈希, size: None }`；`kind == text` 的图层同样，provider 是 `"bae.text"`，哈希覆盖 `text`、`text_animators`。provider 由 apps/bae 注册（`bae_vector::render::ShapeProvider`、`bae_text::render::TextProvider`）。MockEvaluator 里"shape/text layers are drawn by 05 (not yet)"的警告可以换成这条路径。
+3. **连续栅格化**：AE 的形状/文字图层总是按最终变换后的分辨率栅格化，放大不会糊。现在图层源只在图层空间按 `SourceRequest.scale` 栅格化。建议 `SourceRequest` 加上图层到输出的变换（或者至少是各轴缩放），矢量源据此直接按最终分辨率画（`ImageAlpha` / `GpuImage` 不变）。
+4. **测试入口**：`EncodeContext` 的 `allocator` 是 `pub(crate)`，别的 crate 无法通过 trait 调 `LayerSource::render` 做测试。希望提供一个无窗口的测试入口，例如 `bae_render::testing::render_source(gpu, &dyn LayerSource, &SourceRequest) -> GpuImage`。05 目前直接测自己的 `ShapeSource::render_on`。
