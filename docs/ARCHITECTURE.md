@@ -19,7 +19,7 @@
 | 音频 | symphonia 解码 + cpal 播放 | 纯 Rust | — |
 | 色彩 | 自研 bae-color：常用变换在 GPU 上实现，并能读取 OCIO 配置的常用子集 | OpenColorIO 体积大、构建成本高 | 链接 OCIO C++ 库 |
 | 协作服务 | Rust：tokio + axum + WebSocket；单文件二进制 + Docker 镜像 | 能直接跑在 NAS 上 | — |
-| Agent 接口 | MCP（stdio + Streamable HTTP），Rust SDK 用 rmcp | 主流 Agent（Claude、Codex 等）都支持 | 自定义协议 |
+| Agent 接口 | MCP（stdio + Streamable HTTP）。协议层（JSON-RPC）由 `bae-agent` 自己实现，rmcp 只在测试里作为客户端检查互通 | 主流 Agent（Claude、Codex 等）都支持。只用到 MCP 的工具部分，自己实现不到 300 行，比链接 rmcp 的服务层加 tokio 小约 1.4 MiB | 自定义协议；在应用里链接 rmcp（体积） |
 | 插件 | 声明式 WGSL 插件 + 稳定 C ABI 原生插件（libloading 加载）+ JavaScript 脚本插件（见第 14 节） | 性能最好的路径零开销；ABI 稳定，插件不随宿主重新编译 | 只用 Rust ABI（不稳定）、只用 WASM（GPU 效果做不了零拷贝） |
 
 **风险最大的决定是界面用 egui。** 如果到 M1 发现做不出 AE/Ai 级别的观感，或者中文输入法体验不达标，由 `ui/shell` 工作流提出替换方案。为了让替换的代价可控，界面 crate 只负责显示和交互，不保存业务状态，也不直接改数据（见第 2 节原则 1）。
