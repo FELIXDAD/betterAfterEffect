@@ -67,3 +67,7 @@
 2. **记录提交时间。** 在 `Sublayer::new` / `from_snapshot` 里调用 `doc.set_record_timestamp(true)`，这样历史里每次提交都有时间，"查看任意时刻的工程"和差异里的"什么时候改的"才有数据。
 3. **树节点 → 路径。** 按 Prim 列差异时，09 要把 Loro 的操作（`TreeID`）对应到 Prim 路径。希望加 `Sublayer::node_path(TreeID) -> Option<&PrimPath>`（镜像里已经有）。在此之前 09 按 data-model.md 第 4 节的规则（同名兄弟的 `<名字>_<peer>_<counter>`）自己遍历，并用测试对照镜像。
 4. **小问题：** `write_atomic` 的临时文件名只用了进程号，NAS 上两台机器同时保存同一个文件时可能撞名，建议加随机后缀；只有大小写不同的工程层 ID（`Anim` 和 `anim`）在 macOS/Windows 上会落到同一个文件，建议在层叠里拒绝这种重复。
+
+### 04 render/compositor → 02（2026-11-20）
+
+1. schema v1 的 `Layer` 缺少「保留基础透明度」（AE 的 T 开关，`AVLayer.preserveTransparency`，AE-CMP-032）。建议加 `boolean("preserve_transparency", false)`。04 的 `MockEvaluator` 已经按这个名字读取。
