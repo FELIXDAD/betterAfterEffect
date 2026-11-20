@@ -360,6 +360,109 @@ fn snippets_match_cpu_reference() {
     ]);
     check(&ctx, "matrix+offset, clamp", &t, -0.5, 1.5, 1e-6);
 
+    // OCIO parametric ops, both directions and every negative style.
+    use bae_color::{CdlOp, LogOp, MoncurveOp, NegativeStyle, PowerOp};
+    for neg in [
+        NegativeStyle::Clamp,
+        NegativeStyle::Mirror,
+        NegativeStyle::PassThru,
+    ] {
+        let t = ColorTransform::from_ops([ColorOp::Power(PowerOp {
+            exponent: [2.2, 1.8, 2.6],
+            negative: neg,
+        })]);
+        check(&ctx, &format!("power {neg:?}"), &t, -0.5, 1.5, 2e-5);
+    }
+    for neg in [NegativeStyle::Linear, NegativeStyle::Mirror] {
+        for inverse in [false, true] {
+            let t = ColorTransform::from_ops([ColorOp::Moncurve(MoncurveOp {
+                gamma: [2.4, 2.2, 3.0],
+                offset: [0.055, 0.099, 0.16],
+                negative: neg,
+                inverse,
+            })]);
+            check(
+                &ctx,
+                &format!("moncurve {neg:?} inv={inverse}"),
+                &t,
+                -0.3,
+                1.3,
+                2e-5,
+            );
+        }
+    }
+    let logc = LogOp {
+        base: 10.0,
+        log_slope: [0.24719; 3],
+        log_offset: [0.385537; 3],
+        lin_slope: [5.555556; 3],
+        lin_offset: [0.0522723; 3],
+        lin_break: Some([0.010591; 3]),
+        linear_slope: None,
+        inverse: false,
+    };
+    check(
+        &ctx,
+        "logcamera fwd",
+        &ColorTransform::from_ops([ColorOp::Log(logc)]),
+        -0.05,
+        50.0,
+        2e-5,
+    );
+    check(
+        &ctx,
+        "logcamera inv",
+        &ColorTransform::from_ops([ColorOp::Log(logc.inverse())]),
+        -0.1,
+        1.2,
+        2e-5,
+    );
+    let mut affine = LogOp::log(2.0);
+    affine.log_slope = [0.1, 0.2, 0.3];
+    affine.lin_offset = [0.01, 0.02, 0.03];
+    check(
+        &ctx,
+        "log2 affine fwd",
+        &ColorTransform::from_ops([ColorOp::Log(affine)]),
+        0.001,
+        20.0,
+        2e-5,
+    );
+    check(
+        &ctx,
+        "log2 affine inv",
+        &ColorTransform::from_ops([ColorOp::Log(affine.inverse())]),
+        -1.0,
+        1.0,
+        2e-5,
+    );
+    for clamp in [true, false] {
+        let cdl = CdlOp {
+            slope: [1.1, 0.9, 1.05],
+            offset: [0.02, -0.01, 0.0],
+            power: [1.2, 0.85, 1.0],
+            saturation: 0.8,
+            clamp,
+            inverse: false,
+        };
+        check(
+            &ctx,
+            &format!("cdl clamp={clamp}"),
+            &ColorTransform::from_ops([ColorOp::Cdl(cdl)]),
+            -0.2,
+            1.2,
+            2e-5,
+        );
+        check(
+            &ctx,
+            &format!("cdl inv clamp={clamp}"),
+            &ColorTransform::from_ops([ColorOp::Cdl(cdl.inverse())]),
+            -0.2,
+            1.2,
+            2e-5,
+        );
+    }
+
     // 1D LUT long enough to wrap rows, with a non-unit domain.
     let mut l1 = Lut1d::identity(5000);
     for e in &mut l1.entries {

@@ -43,6 +43,7 @@ use std::sync::Arc;
 use rustc_hash::FxHasher;
 
 use crate::lut::{Interpolation, Lut1d, Lut3d};
+use crate::ops::{FLT_MIN, NegativeStyle};
 use crate::transfer::{TransferFunction, k};
 use crate::transform::{ColorOp, ColorTransform};
 
@@ -183,6 +184,10 @@ impl GpuSnippet {
     }
 }
 
+fn v4(v: [f64; 3], w: f64) -> [f32; 4] {
+    [v[0] as f32, v[1] as f32, v[2] as f32, w as f32]
+}
+
 /// Formats an f64 as a WGSL float literal (always with `.` or exponent).
 fn lit(x: f64) -> String {
     let s = format!("{x:?}");
@@ -277,6 +282,132 @@ impl Gen<'_> {
                     "    c = {f}(t{t}, c, p.v[{i}].x, p.v[{i}].y, p.v[{j}].xyz, p.v[{k}].xyz);",
                     j = i + 1,
                     k = i + 2
+                );
+            }
+            ColorOp::Power(p) => {
+                let e = p.exponent;
+                let i = self.slots(&[v4(e, 0.0)]);
+                let (name, expr) = match p.negative {
+                    NegativeStyle::Clamp => ("power_clamp", "pow(max(v, vec3<f32>(0.0)), e)"),
+                    NegativeStyle::Mirror => ("power_mirror", "sign(v) * pow(abs(v), e)"),
+                    NegativeStyle::PassThru | NegativeStyle::Linear => (
+                        "power_pass",
+                        "select(v, pow(max(v, vec3<f32>(0.0)), e), v >= vec3<f32>(0.0))",
+                    ),
+                };
+                let f = self.helper(name, |n| format!("fn {n}(v: vec3<f32>, e: vec3<f32>) -> vec3<f32> {{\n    return {expr};\n}}\n"));
+                let _ = writeln!(self.body, "    c = {f}(c, p.v[{i}].xyz);");
+            }
+            ColorOp::Moncurve(m) => {
+                let seg: Vec<(f64, f64)> = (0..3).map(|c| m.segment(c)).collect();
+                let i = self.slots(&[
+                    v4(m.gamma, 0.0),
+                    v4(m.offset, 0.0),
+                    v4([seg[0].0, seg[1].0, seg[2].0], 0.0),
+                    v4([seg[0].1, seg[1].1, seg[2].1], 0.0),
+                ]);
+                let mirror = m.negative == NegativeStyle::Mirror;
+                let name = format!(
+                    "moncurve_{}{}",
+                    if m.inverse { "inv" } else { "fwd" },
+                    if mirror { "_mirror" } else { "" }
+                );
+                let inverse = m.inverse;
+                let f = self.helper(&name, |n| {
+                    let power = if inverse {
+                        "(1.0 + o) * pow(max(x, vec3<f32>(0.0)), 1.0 / g) - o"
+                    } else {
+                        "pow((x + o) / (1.0 + o), g)"
+                    };
+                    let (pre, post) = if mirror { ("abs(v)", "sign(v) * r") } else { ("v", "r") };
+                    format!(
+                        "fn {n}(v: vec3<f32>, g: vec3<f32>, o: vec3<f32>, b: vec3<f32>, s: vec3<f32>) -> vec3<f32> {{\n    let x = {pre};\n    let r = select({power}, x * s, x < b);\n    return {post};\n}}\n"
+                    )
+                });
+                let _ = writeln!(
+                    self.body,
+                    "    c = {f}(c, p.v[{i}].xyz, p.v[{}].xyz, p.v[{}].xyz, p.v[{}].xyz);",
+                    i + 1,
+                    i + 2,
+                    i + 3
+                );
+            }
+            ColorOp::Log(l) => {
+                let ln_b = l.base.ln();
+                let k = l.log_slope.map(|s| s / ln_b);
+                let mut brk = [-1e38; 3];
+                let mut ts = [0.0; 3];
+                let mut to = [0.0; 3];
+                for c in 0..3 {
+                    if let Some((lin_brk, log_brk, slope, off)) = l.toe(c) {
+                        brk[c] = if l.inverse { log_brk } else { lin_brk };
+                        ts[c] = slope;
+                        to[c] = off;
+                    }
+                }
+                let i = self.slots(&[
+                    v4(k, 0.0),
+                    v4(l.log_offset, 0.0),
+                    v4(l.lin_slope, 0.0),
+                    v4(l.lin_offset, 0.0),
+                    v4(brk, 0.0),
+                    v4(ts, 0.0),
+                    v4(to, 0.0),
+                ]);
+                let inverse = l.inverse;
+                let f = self.helper(if inverse { "log_inv" } else { "log_fwd" }, |n| {
+                    let body = if inverse {
+                        "    let a = (exp((v - q_lo) / q_k) - q_io) / q_is;\n    return select(a, (v - q_to) / q_ts, v <= q_b);\n".to_string()
+                    } else {
+                        format!(
+                            "    let a = q_k * log(max(q_is * v + q_io, vec3<f32>({}))) + q_lo;\n    return select(a, q_ts * v + q_to, v <= q_b);\n",
+                            lit(FLT_MIN)
+                        )
+                    };
+                    format!(
+                        "fn {n}(v: vec3<f32>, q_k: vec3<f32>, q_lo: vec3<f32>, q_is: vec3<f32>, q_io: vec3<f32>, q_b: vec3<f32>, q_ts: vec3<f32>, q_to: vec3<f32>) -> vec3<f32> {{\n{body}}}\n"
+                    )
+                });
+                let args: Vec<String> = (0..7).map(|j| format!("p.v[{}].xyz", i + j)).collect();
+                let _ = writeln!(self.body, "    c = {f}(c, {});", args.join(", "));
+            }
+            ColorOp::Cdl(cdl) => {
+                let (power, sat) = if cdl.inverse {
+                    (cdl.power.map(|p| 1.0 / p), 1.0 / cdl.saturation)
+                } else {
+                    (cdl.power, cdl.saturation)
+                };
+                let i = self.slots(&[v4(cdl.slope, sat), v4(cdl.offset, 0.0), v4(power, 0.0)]);
+                let clamp = cdl.clamp;
+                let inverse = cdl.inverse;
+                let name = format!(
+                    "cdl_{}{}",
+                    if inverse { "inv" } else { "fwd" },
+                    if clamp { "" } else { "_noclamp" }
+                );
+                let f = self.helper(&name, |n| {
+                    let c01 = |e: &str| if clamp { format!("clamp({e}, vec3<f32>(0.0), vec3<f32>(1.0))") } else { e.to_string() };
+                    let luma = "vec3<f32>(0.2126, 0.7152, 0.0722)";
+                    let body = if inverse {
+                        format!(
+                            "    var x = {};\n    let l = dot(x, {luma});\n    x = {};\n    x = select(x, pow(max(x, vec3<f32>(0.0)), q_pw), x > vec3<f32>(0.0));\n    return (x - q_of) / q_sl;\n",
+                            c01("v"),
+                            c01("l + q_sat * (x - l)")
+                        )
+                    } else {
+                        format!(
+                            "    var x = {};\n    x = select(x, pow(max(x, vec3<f32>(0.0)), q_pw), x > vec3<f32>(0.0));\n    let l = dot(x, {luma});\n    return {};\n",
+                            c01("v * q_sl + q_of"),
+                            c01("l + q_sat * (x - l)")
+                        )
+                    };
+                    format!("fn {n}(v: vec3<f32>, q_sl: vec3<f32>, q_of: vec3<f32>, q_pw: vec3<f32>, q_sat: f32) -> vec3<f32> {{\n{body}}}\n")
+                });
+                let _ = writeln!(
+                    self.body,
+                    "    c = {f}(c, p.v[{i}].xyz, p.v[{}].xyz, p.v[{}].xyz, p.v[{i}].w);",
+                    i + 1,
+                    i + 2
                 );
             }
             ColorOp::Lut3d(l) => {

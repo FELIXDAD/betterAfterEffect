@@ -21,14 +21,15 @@ use rustc_hash::FxHasher;
 use crate::ColorError;
 use crate::lut::{Lut1d, Lut3d};
 use crate::math::Affine;
+use crate::ops::{CdlOp, LogOp, MoncurveOp, PowerOp, hash3};
 use crate::transfer::TransferFunction;
 
 /// Matrix coefficients closer than this to the identity are treated as identity.
 /// Far below f32 resolution, far above f64 round-off of adaptation round trips.
 pub const IDENTITY_EPSILON: f64 = 1e-10;
 
-/// One step of a colour transform. `#[non_exhaustive]`: OCIO-specific ops
-/// (exponent, log affine, CDL …) are added with the OCIO subset.
+/// One step of a colour transform. `#[non_exhaustive]`: more ops (OCIO fixed
+/// functions, ACES output transforms) are added later.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum ColorOp {
@@ -49,6 +50,14 @@ pub enum ColorOp {
         /// Upper bound.
         max: f64,
     },
+    /// Per-channel power (OCIO ExponentTransform).
+    Power(PowerOp),
+    /// Power with a linear toe (OCIO ExponentWithLinearTransform).
+    Moncurve(MoncurveOp),
+    /// Log / LogAffine / LogCamera.
+    Log(LogOp),
+    /// ASC CDL.
+    Cdl(CdlOp),
 }
 
 impl ColorOp {
@@ -61,6 +70,10 @@ impl ColorOp {
             ColorOp::Lut1d(l) => l.eval(rgb),
             ColorOp::Lut3d(l) => l.eval(rgb),
             ColorOp::Clamp { min, max } => rgb.map(|v| v.max(*min).min(*max)),
+            ColorOp::Power(p) => p.apply(rgb),
+            ColorOp::Moncurve(m) => m.apply(rgb),
+            ColorOp::Log(l) => l.apply(rgb),
+            ColorOp::Cdl(c) => c.apply(rgb),
         }
     }
 
@@ -79,6 +92,10 @@ impl ColorOp {
                 min: *min,
                 max: *max,
             },
+            ColorOp::Power(p) => ColorOp::Power(p.inverse()),
+            ColorOp::Moncurve(m) => ColorOp::Moncurve(m.inverse()),
+            ColorOp::Log(l) => ColorOp::Log(l.inverse()),
+            ColorOp::Cdl(c) => ColorOp::Cdl(c.inverse()),
         })
     }
 
@@ -89,6 +106,10 @@ impl ColorOp {
         match self {
             ColorOp::Decode(tf) | ColorOp::Encode(tf) => std::mem::discriminant(tf).hash(h),
             ColorOp::Lut3d(l) => l.interpolation.hash(h),
+            ColorOp::Power(p) => p.negative.hash(h),
+            ColorOp::Moncurve(m) => (m.negative, m.inverse).hash(h),
+            ColorOp::Log(l) => (l.lin_break.is_some(), l.inverse).hash(h),
+            ColorOp::Cdl(c) => (c.clamp, c.inverse).hash(h),
             ColorOp::Matrix(_) | ColorOp::Lut1d(_) | ColorOp::Clamp { .. } => {}
         }
     }
@@ -110,6 +131,29 @@ impl ColorOp {
                 min.to_bits().hash(h);
                 max.to_bits().hash(h);
             }
+            ColorOp::Power(p) => hash3(&p.exponent, h),
+            ColorOp::Moncurve(m) => {
+                hash3(&m.gamma, h);
+                hash3(&m.offset, h);
+            }
+            ColorOp::Log(l) => {
+                l.base.to_bits().hash(h);
+                for v in [l.log_slope, l.log_offset, l.lin_slope, l.lin_offset] {
+                    hash3(&v, h);
+                }
+                if let Some(b) = l.lin_break {
+                    hash3(&b, h);
+                }
+                if let Some(s) = l.linear_slope {
+                    hash3(&s, h);
+                }
+            }
+            ColorOp::Cdl(c) => {
+                for v in [c.slope, c.offset, c.power] {
+                    hash3(&v, h);
+                }
+                c.saturation.to_bits().hash(h);
+            }
         }
     }
 
@@ -118,7 +162,12 @@ impl ColorOp {
             ColorOp::Matrix(a) => a.is_identity(IDENTITY_EPSILON),
             ColorOp::Decode(tf) | ColorOp::Encode(tf) => tf.is_linear(),
             ColorOp::Clamp { min, max } => *min == f64::NEG_INFINITY && *max == f64::INFINITY,
-            ColorOp::Lut1d(_) | ColorOp::Lut3d(_) => false,
+            ColorOp::Power(p) => p.is_identity(),
+            ColorOp::Lut1d(_)
+            | ColorOp::Lut3d(_)
+            | ColorOp::Moncurve(_)
+            | ColorOp::Log(_)
+            | ColorOp::Cdl(_) => false,
         }
     }
 }
@@ -133,6 +182,17 @@ fn merge(a: &ColorOp, b: &ColorOp) -> Option<Option<ColorOp>> {
         (Matrix(x), Matrix(y)) => keep(Matrix(x.then(y))),
         (Decode(f), Encode(g)) | (Encode(f), Decode(g)) if f == g && f.is_exactly_invertible() => {
             Some(None)
+        }
+        (Moncurve(x), Moncurve(y)) if *y == x.inverse() => Some(None),
+        (Log(x), Log(y)) if *y == x.inverse() && x.is_exactly_invertible() => Some(None),
+        (Power(x), Power(y))
+            if x.negative == y.negative && x.negative != crate::ops::NegativeStyle::Clamp =>
+        {
+            let e = [0, 1, 2].map(|c| x.exponent[c] * y.exponent[c]);
+            keep(Power(PowerOp {
+                exponent: e,
+                negative: x.negative,
+            }))
         }
         // x^p then x^(1/q) = x^(p/q); all curves are odd-mirrored, so this is exact.
         (Decode(Gamma(p)), Encode(Gamma(q))) => keep(Decode(Gamma(p / q))),
