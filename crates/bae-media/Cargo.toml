@@ -1,0 +1,35 @@
+[package]
+name = "bae-media"
+description = "BAE media I/O: probing and metadata, image / image-sequence / video decoding into GPU textures, frame cache"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+bae-app.workspace = true
+bae-gpu.workspace = true
+# Time (flicks) and FrameRate shared with the document model.
+bae-model.workspace = true
+bytemuck.workspace = true
+exr.workspace = true
+half.workspace = true
+# WebP only (image-webp); PNG / JPEG / EXR use png / zune-jpeg / exr directly.
+image = { workspace = true, features = ["webp"] }
+parking_lot.workspace = true
+png.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+zune-jpeg.workspace = true
+
+[dev-dependencies]
+# Test fixtures are generated in code: JPEG / WebP encoders (tests only).
+image = { workspace = true, features = ["jpeg", "webp"] }
+serde_json.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

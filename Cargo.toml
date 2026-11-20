@@ -55,6 +55,8 @@ needless_pass_by_ref_mut = "warn"
 bae-app = { path = "crates/bae-app" }
 bae-platform = { path = "crates/bae-platform" }
 bae-gpu = { path = "crates/bae-gpu" }
+bae-model = { path = "crates/bae-model" }
+bae-media = { path = "crates/bae-media" }
 
 # ---- GPU, rendering, text (one coherent Linebender/wgpu set) ----
 # Backends: Metal (macOS) + D3D12 (Windows). Vulkan/GLES are opt-in through the
