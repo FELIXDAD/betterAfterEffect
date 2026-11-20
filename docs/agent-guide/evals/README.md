@@ -2,7 +2,7 @@
 
 用来评测 Agent 通过 MCP 操作 BAE 的质量：能不能做出合格的动画，守不守协作规范。每个任务包括**任务描述**（原样发给 Agent）、**起始工程**、**期望结果**和**评分标准**。
 
-状态：第一版草案。任务内容可以直接用于人工评测；自动检查依赖 17 `agent/api` 的审计日志和工具，检查项里的工具名、属性名都是预期名（待确认），评测脚本在 17 合并后实现。
+状态：草案。任务内容可以直接用于人工评测。自动检查读 17 `bae mcp` 的审计日志（`agent-audit.jsonl`：每次工具调用的工具名、参数、结果、写入的工程层、改动数）和结束时的工程；检查项里的工具名是 `bae mcp` 的实际工具名（下划线形式，与审计日志一致）。评测脚本还没写；部分任务依赖还没提供的工具（12 的领域命令接入 `bae mcp`、`comment_add`、`interop_export_ae`、分镜命令），这些任务在工具可用前只能人工评测。
 
 **这个目录不会复制进 Skill**（见 `skills/README.md`）：被评测的 Agent 不能看到期望结果。
 
@@ -97,7 +97,7 @@ focus = ["评审时重点看的地方"]
 
 ## 4. 检查项词汇（草案）
 
-自动检查只用下面这些 `kind`。新增前先在这里登记。属性名（`transform:position` 等）同 [tools.md](../tools.md)，待确认。
+自动检查只用下面这些 `kind`。新增前先在这里登记。工具名、属性名（`transform:position` 等）同 [tools.md](../tools.md)。
 
 通用约定：
 
@@ -117,7 +117,7 @@ focus = ["评审时重点看的地方"]
 | `writes_only_to` | `sublayer` | 所有修改都写进了这个工程层 |
 | `no_edit_target_change` | — | 没有切换编辑目标 |
 | `no_writes_under` | `path` | 没有修改这个路径下的任何节点（在任何工程层） |
-| `transactions` | `min`、`max`、`label_regex`（可选） | 已提交的事务数在范围内；每个事务名匹配正则 |
+| `transactions` | `min`、`max`、`label_regex`（可选） | 成功的事务数在范围内；每个事务名匹配正则。一次 `command_batch` 算一个事务（事务名是它的 `label`）；单独调用一个修改类工具也算一个（事务名是命令标题） |
 | `transaction_label_any` | `regex` | 至少一个事务名匹配正则 |
 | `render_budget` | `max_calls`、`max_full_res` | 渲染调用总数和全分辨率次数不超过上限 |
 

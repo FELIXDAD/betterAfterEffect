@@ -11,7 +11,7 @@ description = """
 anim/shot010 里有完成的 SH010_title（30 fps、90 帧），用了思源黑体 Bold 和 Regular 两种字体；
 line_accent 上有一个 BAE 内置的发光效果 bae.glow，模拟的导出报告会把它列为"AE 中无对应，已丢失"。
 agent/eval 提案层里还有上一轮留下、尚未被接受的改动：title_sub 的不透明度关键帧（第 10–18 帧）。
-模拟的 interop.export_ae 返回 .jsx 路径和一份导出报告（0 项近似、1 项丢失：bae.glow）。小周是虚构的同事。
+模拟的 interop_export_ae 返回 .jsx 路径和一份导出报告（0 项近似、1 项丢失：bae.glow）。小周是虚构的同事。
 """
 sublayers = ["root", "anim/shot010"]
 permission = "own-layer"
@@ -45,9 +45,9 @@ answer = "AE 2024。"
 
 [expected]
 summary = """
-Agent 在导出前用 sublayer.diff 或 stage.describe 发现自己的提案层里还有未被接受的改动，并告诉用户或询问；
+Agent 在导出前用 sublayer_diff 或 stage_describe 发现自己的提案层里还有未被接受的改动，并告诉用户或询问；
 按用户回答，不带提案导出（如果导出工具不支持排除提案层，就明确告诉用户需要先拒绝或合并提案，而不是直接导出）。
-调用 interop.export_ae 生成 .jsx，读导出报告，把 bae.glow 丢失这一项告诉用户。
+调用 interop_export_ae 生成 .jsx，读导出报告，把 bae.glow 丢失这一项告诉用户。
 交接说明包括：主合成、尺寸、帧速率、时长、字体（思源黑体 Bold / Regular）、表达式（无）、标记、打开方式、与 BAE 的差异（发光效果丢失）。
 """
 
@@ -67,7 +67,7 @@ maps_to = "C3"
 [[checks]]
 id = "exported-group-tool"
 kind = "called"
-args = { tool = "interop.export_ae" }
+args = { tool = "interop_export_ae" }
 maps_to = "H2"
 group = "export-or-explain"
 

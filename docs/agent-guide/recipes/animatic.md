@@ -2,13 +2,13 @@
 
 把分镜表变成一条能播放的动态分镜（animatic）：每个分镜格按时长排在序列上，按"镜头运动"字段加简单的推拉摇移，按"转场"字段加转场，有声音就对上声音。导演用它审节奏，剪辑在它的基础上继续剪。
 
-分镜字段的写法见 [04 分镜规范](../04-storyboard.md)。分镜工作区现阶段只做框架（13），下面的命令都是待确认。
+分镜字段的写法见 [04 分镜规范](../04-storyboard.md)。分镜工作区现阶段只做框架（13），`board_*`、`panel_*` 命令还没有提供，名字是推测的（见 [tools.md](../tools.md) 第 8 节）。
 
 ## 1. 输入
 
 | 信息 | 没有时怎么办 |
 |---|---|
-| 分镜表（`Board`） | 用户指定，或 `prim.find` 找 `Board` 类型；有多个就问 |
+| 分镜表（`Board`） | 用户指定，或 `prim_find` 找 `Board` 类型；有多个就问 |
 | 每格时长 | 缺的格先用 48 帧（2 秒 @24）并在报告里列出 |
 | 旁白 / 配乐素材 | 有就放到音轨上；没有就不放 |
 | 帧速率 | 工程设置 |
@@ -16,8 +16,8 @@
 ## 2. 先读分镜表，列出问题
 
 ```json
-{"tool": "prim.find", "args": {"type": "Panel", "under": "/boards/sb01"}}
-{"tool": "prim.get", "args": {"path": "/boards/sb01/panels/sh010"}}
+{"tool": "prim_find", "args": {"prim_type": "Panel", "under": "/boards/sb01"}}
+{"tool": "prim_get", "args": {"path": "/boards/sb01/panels/sh010"}}
 ```
 
 逐格检查，并整理成一张表告诉用户（不要自己"修好"再不说）：
@@ -31,15 +31,15 @@
 
 ## 3. 生成序列
 
-有 `board.make_animatic` 时直接调用：
+有 `board_make_animatic` 时直接调用：
 
 ```json
-{"tool": "transaction.begin", "args": {"label": "动态分镜：由 sb01 生成序列"}}
-{"tool": "board.make_animatic", "args": {"board": "/boards/sb01", "name": "sb01_animatic"}}
-{"tool": "transaction.commit"}
+{"tool": "command_batch", "args": {"label": "动态分镜：由 sb01 生成序列", "commands": [
+  {"command": "board_make_animatic", "params": {"board": "/boards/sb01", "name": "sb01_animatic"}}
+]}}
 ```
 
-没有时手工组装：新建 `Sequence`，一条视频轨，每个分镜格一个 `Clip`，按镜头号顺序首尾相接，`Clip` 的时长等于分镜格时长，引用分镜格的画面。
+没有时手工组装（`prim_create` + `attr_set` + `prim_set_references`，放在一个 `command_batch` 里）：新建 `Sequence`，一条视频轨，每个分镜格一个 `Clip`，按镜头号顺序首尾相接，`Clip` 的时长等于分镜格时长，引用分镜格的画面。`Sequence` / `Track` / `Clip` 的属性名用 `schema_get` 查。
 
 ## 4. 镜头运动
 
@@ -70,7 +70,7 @@
 
 ## 7. 自检
 
-- 联系表：每个镜头取中间一帧，`columns` 等于每行镜头数，`scale: 0.25`。核对顺序和画面。
+- 联系表：每个镜头取中间一帧，`columns` 等于每行镜头数，`thumb_width: 240`。核对顺序和画面。
 - 序列总时长 = 各格时长之和（加上转场重叠的影响）。
 - 推拉摇移的格：渲染首尾帧，确认没有露底。
 

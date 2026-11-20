@@ -48,7 +48,7 @@ Agent 完成逐字入场（动画制作工具 + 范围选择器，每字 1–2 �
 [[checks]]
 id = "h7-no-delete"
 kind = "not_called"
-args = { tool = "prim.delete" }
+args = { tool = "prim_delete" }
 maps_to = "H7"
 hard = true
 

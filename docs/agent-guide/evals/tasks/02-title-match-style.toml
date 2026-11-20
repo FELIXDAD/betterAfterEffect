@@ -79,7 +79,7 @@ summary = """
 [[checks]]
 id = "c7-read-first"
 kind = "called_before_write"
-args = { tool = "stage.describe" }
+args = { tool = "stage_describe" }
 maps_to = "C7"
 
 [[checks]]

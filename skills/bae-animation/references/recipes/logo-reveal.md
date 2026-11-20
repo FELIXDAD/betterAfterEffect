@@ -8,8 +8,8 @@ Logo 从无到有地构建出来，在一个"成形点"完成，然后标语出�
 
 | 信息 | 没有时怎么办 |
 |---|---|
-| Logo 矢量资产 | **必须有**。在 `design/assets` 或素材里找（`prim.find`）；找不到就问，不要自己画 |
-| Logo 是否拆分成部件（图形、文字标、各组件） | 看资产结构（`prim.get`）；没拆分就只能用整体手法（描边描绘、蒙版揭示） |
+| Logo 矢量资产 | **必须有**。在 `design/assets` 或素材里找（`prim_find`）；找不到就问，不要自己画 |
+| Logo 是否拆分成部件（图形、文字标、各组件） | 看资产结构（`prim_get`）；没拆分就只能用整体手法（描边描绘、蒙版揭示） |
 | 标语文案 | 问用户；没有就不做标语 |
 | 品牌规范（留白、最小尺寸、禁用做法） | 问用户有没有；没有就按通用规则：不变形、不改色、四周留白至少为 Logo 高度的 25% |
 | 音乐的重拍时间 | 有就把成形点对到重拍（见 [03 动画规范](../03-animation.md) 第 8 节） |
@@ -43,18 +43,18 @@ SH090_logo  1920×1080, 30 fps, 150 帧（5 秒）
 
 ## 4. 步骤
 
-1. `prim.find` 找 Logo 资产，`prim.get` 看它的结构和来源工程层。
-2. 事务"Logo 演绎：建立合成和版式"：新建合成；`prim.set_references` 或 `layer.create(kind: "precomp")` 引用 Logo 资产为 `logo_final`；建 `tagline`。
-3. 自检：`render.frame` 第 120 帧，`scale: 0.5`。确认 Logo 尺寸、位置、留白、标语位置。这一帧就是最终画面，要先定下来。
+1. `prim_find` 找 Logo 资产，`prim_get` 看它的结构和来源工程层。
+2. 事务"Logo 演绎：建立合成和版式"：新建合成；`prim_set_references` 或 `layer_create(kind: "precomp")` 引用 Logo 资产为 `logo_final`；建 `tagline`。
+3. 自检：`render_frame` 第 120 帧，`scale: 0.5`。确认 Logo 尺寸、位置、留白、标语位置。这一帧就是最终画面，要先定下来。
 4. 事务"Logo 演绎：构建预合成"：建 `pc_logo_build`，放入 Logo 路径的描边版本（无填充，描边颜色用品牌色），加修剪路径。
 5. 事务"Logo 演绎：构建与成形动画"：按时间表设关键帧。
 6. 事务"Logo 演绎：标语与标记"：标语动画；标记 `build`（8）、`resolve`（46）、`hold`（76）。
-7. 自检：联系表 0–80 帧 `step: 3`；`render.frame` 第 46、149 帧，`scale: 1`。
+7. 自检：联系表 0–80 帧 `step: 3`；`render_frame` 第 46、149 帧，`scale: 1`。
 
 ## 5. 自检要点
 
-- 第 149 帧：`attribute.evaluate` 核对 `logo_final` 的缩放 = [100, 100]、旋转 = 0、不透明度 = 100、位置 = 版式位置；`pc_logo_build` 不透明度 = 0。
-- `sublayer.diff` 里没有对 `design/assets` 来源节点的任何覆盖（硬性项 H8）。
+- 最后一帧：`prim_get` 核对 `logo_final` 最后的关键帧（或静态值）是缩放 [100, 100, 100]、旋转 0、不透明度 100、位置 = 版式位置；`pc_logo_build` 最后的不透明度是 0。
+- `sublayer_diff` 里没有对 `design/assets` 来源节点的任何覆盖（硬性项 H8）。
 - 成形点之前的描边版本和成形后的填充版本完全重合，没有错位（渲染第 44 帧检查）。
 - 标语离 Logo 的距离符合留白要求。
 
