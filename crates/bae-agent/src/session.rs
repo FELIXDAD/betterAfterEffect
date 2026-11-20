@@ -28,6 +28,8 @@ pub enum AgentError {
     Model(#[from] ModelError),
     #[error(transparent)]
     Project(#[from] ProjectError),
+    #[error(transparent)]
+    Sync(#[from] bae_sync::SyncError),
     #[error("{0}")]
     Invalid(String),
 }

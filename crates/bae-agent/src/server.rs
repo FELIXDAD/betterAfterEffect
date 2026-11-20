@@ -28,8 +28,8 @@ pub const GUIDE_INSTRUCTIONS_ZH: &str =
 
 /// Server-specific notes appended to the guide text: the actual tool naming and the
 /// guide tools this server does not offer yet.
-const SERVER_NOTE_EN: &str = "\n\nServer notes (bae mcp)\n- Tool names use _ instead of . (stage.describe -> stage_describe, attr.set -> attr_set).\n- Instead of transaction.begin / transaction.commit, send the steps of one change in a single command_batch call: one undo step, all or nothing.\n- Not available yet: attribute.evaluate (read keyframes with prim_get), proposal.describe and comment.add (summarize your proposal in your reply instead).\n- schema_get lists attribute names, value types and defaults; sublayer_diff shows your whole proposal.\n- Times: wherever a command takes a time, you may pass a frame number {\"frame\": 12} or \"12f\", or timecode \"0:00:00:12\"; integers are flicks. Frames count at the comp's frame rate, in the parameter's own time base (layer time for keyframes on layers, the same frames prim_get reports).\n- Commands with a project parameter (package_*, asset_relink) get the open project filled in.\n";
-const SERVER_NOTE_ZH: &str = "\n\n本服务器说明（bae mcp）\n- 工具名用 _ 代替 .（stage.describe -> stage_describe，attr.set -> attr_set）。\n- 不用 transaction.begin / transaction.commit：一个修改的所有步骤放进一次 command_batch 调用，是一个撤销单元，要么全部生效，要么全部不生效。\n- 暂未提供：attribute.evaluate（用 prim_get 读关键帧）、proposal.describe 和 comment.add（在回复里写提案说明）。\n- schema_get 列出属性名、值类型和默认值；sublayer_diff 显示你的完整提案。\n- 时间参数可以直接写帧号 {\"frame\": 12} 或 \"12f\"，或者时码 \"0:00:00:12\"；整数仍是 flicks。帧号按合成帧速率计算，时间基准跟参数本身一致（图层上的关键帧用图层时间，和 prim_get 返回的帧号一致）。\n- 带 project 参数的命令（package_*、asset_relink）由服务器自动填入当前工程。\n";
+const SERVER_NOTE_EN: &str = "\n\nServer notes (bae mcp)\n- Tool names use _ instead of . (stage.describe -> stage_describe, attr.set -> attr_set).\n- Instead of transaction.begin / transaction.commit, send the steps of one change in a single command_batch call: one undo step, all or nothing.\n- Not available yet: attribute.evaluate (read keyframes with prim_get), proposal.describe and comment.add (summarize your proposal in your reply instead).\n- schema_get lists attribute names, value types and defaults; sublayer_diff shows your whole proposal.\n- Times: wherever a command takes a time, you may pass a frame number {\"frame\": 12} or \"12f\", or timecode \"0:00:00:12\"; integers are flicks. Frames count at the comp's frame rate, in the parameter's own time base (layer time for keyframes on layers, the same frames prim_get reports).\n- Commands with a project parameter (package_*, asset_relink) get the open project filled in.\n- Named versions: history_checkpoint saves one, history_list / history_diff compare, stage_describe and prim_get take a checkpoint to look at an old version, history_revert goes back (with own-layer permission, give sublayer agent/<you>).\n";
+const SERVER_NOTE_ZH: &str = "\n\n本服务器说明（bae mcp）\n- 工具名用 _ 代替 .（stage.describe -> stage_describe，attr.set -> attr_set）。\n- 不用 transaction.begin / transaction.commit：一个修改的所有步骤放进一次 command_batch 调用，是一个撤销单元，要么全部生效，要么全部不生效。\n- 暂未提供：attribute.evaluate（用 prim_get 读关键帧）、proposal.describe 和 comment.add（在回复里写提案说明）。\n- schema_get 列出属性名、值类型和默认值；sublayer_diff 显示你的完整提案。\n- 时间参数可以直接写帧号 {\"frame\": 12} 或 \"12f\"，或者时码 \"0:00:00:12\"；整数仍是 flicks。帧号按合成帧速率计算，时间基准跟参数本身一致（图层上的关键帧用图层时间，和 prim_get 返回的帧号一致）。\n- 带 project 参数的命令（package_*、asset_relink）由服务器自动填入当前工程。\n- 命名版本：history_checkpoint 保存一个版本，history_list / history_diff 列出和比较，stage_describe 和 prim_get 传 checkpoint 可以查看旧版本，history_revert 回到某个版本（只写自己层的权限下请指定 sublayer agent/<你>）。\n";
 
 /// Language of the built-in instructions.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -419,12 +419,120 @@ impl BaeMcpServer {
                     location: ws.project.location().map(|l| l.display().to_string()),
                     agent: session.as_ref().map(AgentContext::of),
                 };
-                Ok(Reply::Text(describe::describe_stage(&ws.project.stage, &p, &ctx)?).into())
+                let Some(id) = &p.checkpoint else {
+                    return Ok(
+                        Reply::Text(describe::describe_stage(&ws.project.stage, &p, &ctx)?).into(),
+                    );
+                };
+                let (cp, view) = checkpoint_view(&ws, id)?;
+                let mut text = format!(
+                    "Named version {:?} ({}), saved by {} — read-only view; edits always go to the current project.\n",
+                    cp.name, cp.id.0, cp.author
+                );
+                if !view.missing().is_empty() {
+                    text.push_str(&format!(
+                        "Sublayers missing from this project now (not shown): {:?}\n",
+                        view.missing()
+                    ));
+                }
+                text.push_str(&describe::describe_stage(view.stage(), &p, &ctx)?);
+                Ok(Reply::Text(text).into())
             }
             tools::PRIM_GET => {
                 let p: PrimGetParams = parse(tool, args)?;
                 let ws = self.workspace.lock();
-                Ok(Reply::Json(describe::prim_json(&ws.project.stage, &p)?).into())
+                match &p.checkpoint {
+                    None => Ok(Reply::Json(describe::prim_json(&ws.project.stage, &p)?).into()),
+                    Some(id) => {
+                        let (cp, view) = checkpoint_view(&ws, id)?;
+                        let mut j = describe::prim_json(view.stage(), &p)?;
+                        j["checkpoint"] = json!({ "id": cp.id.0, "name": cp.name });
+                        Ok(Reply::Json(j).into())
+                    }
+                }
+            }
+            tools::HISTORY_LIST => {
+                let ws = self.workspace.lock();
+                let list: Vec<Json> = ws
+                    .history
+                    .checkpoints()
+                    .iter()
+                    .map(checkpoint_json)
+                    .collect();
+                Ok(Reply::Json(json!({ "checkpoints": list })).into())
+            }
+            tools::HISTORY_DIFF => {
+                let p: tools::HistoryDiffParams = parse(tool, args)?;
+                let ws = self.workspace.lock();
+                let from = bae_sync::CheckpointId(p.from);
+                let to = p.to.map(bae_sync::CheckpointId);
+                let diffs = ws.history.diff(&ws.project.stage, &from, to.as_ref())?;
+                let limit = p.limit.unwrap_or(200).clamp(1, 5000);
+                let listed: Vec<Json> = diffs.iter().take(limit).map(prim_diff_json).collect();
+                Ok(Reply::Json(json!({
+                    "changes": listed,
+                    "total": diffs.len(),
+                    "truncated": diffs.len() > limit,
+                }))
+                .into())
+            }
+            tools::HISTORY_CHECKPOINT => {
+                let p: tools::CheckpointParams = parse(tool, args)?;
+                let session = self.session.lock();
+                let session = session.as_ref().expect("bound");
+                if !session.permission().can_write() {
+                    return Err(AgentError::Denied(format!(
+                        "agent {} is read-only; it cannot save named versions",
+                        session.identity().name()
+                    )));
+                }
+                let mut ws = self.workspace.lock();
+                let ws = &mut *ws;
+                let cp = ws.history.create_checkpoint(
+                    &ws.project.stage,
+                    session.identity().author(),
+                    &p.name,
+                    &p.note,
+                )?;
+                let saved = match ws.save_history() {
+                    Ok(true) => json!(true),
+                    Ok(false) => json!("in memory only (the project is not a saved .bae folder)"),
+                    Err(e) => json!(format!("save failed: {e}")),
+                };
+                Ok(
+                    Reply::Json(json!({ "checkpoint": checkpoint_json(&cp), "saved": saved }))
+                        .into(),
+                )
+            }
+            tools::HISTORY_REVERT => {
+                let p: tools::HistoryRevertParams = parse(tool, args)?;
+                let (name, version) = {
+                    let ws = self.workspace.lock();
+                    let cp = ws
+                        .history
+                        .checkpoint(&bae_sync::CheckpointId(p.checkpoint.clone()))
+                        .ok_or_else(|| {
+                            AgentError::Invalid(format!(
+                                "no named version {}; see history_list",
+                                p.checkpoint
+                            ))
+                        })?;
+                    (cp.name, cp.version.to_json())
+                };
+                let mut params = json!({ "version": version });
+                if let Some(s) = p.sublayer {
+                    params["sublayer"] = json!(s);
+                }
+                if let Some(prim) = p.prim {
+                    params["prim"] = json!(prim);
+                }
+                self.run_steps(
+                    Some(&format!("revert to {name}")),
+                    vec![Step {
+                        command: "version.revert".into(),
+                        params,
+                    }],
+                )
             }
             tools::PRIM_FIND => {
                 let p: FindParams = parse(tool, args)?;
@@ -703,6 +811,52 @@ impl BaeMcpServer {
         );
         Ok(Reply::Image { png, meta })
     }
+}
+
+fn checkpoint_view(
+    ws: &crate::Workspace,
+    id: &str,
+) -> Result<(bae_sync::Checkpoint, bae_sync::VersionView), AgentError> {
+    let id = bae_sync::CheckpointId(id.to_owned());
+    let cp = ws.history.checkpoint(&id).ok_or_else(|| {
+        AgentError::Invalid(format!("no named version {}; see history_list", id.0))
+    })?;
+    let view = ws.history.view(&ws.project.stage, &id)?;
+    Ok((cp, view))
+}
+
+fn checkpoint_json(cp: &bae_sync::Checkpoint) -> Json {
+    json!({
+        "id": cp.id.0,
+        "name": cp.name,
+        "note": cp.note,
+        "author": cp.author,
+        "created_ms": cp.created_ms,
+        "layer_stack": cp.layer_stack,
+        "version": cp.version.to_json(),
+    })
+}
+
+fn prim_diff_json(d: &bae_sync::PrimDiff) -> Json {
+    let (change, from) = match &d.change {
+        bae_sync::PrimChange::Added => ("added", None),
+        bae_sync::PrimChange::Removed => ("removed", None),
+        bae_sync::PrimChange::Modified => ("modified", None),
+        bae_sync::PrimChange::Moved { from } => ("moved", Some(from)),
+    };
+    let mut j = json!({
+        "sublayer": d.sublayer,
+        "path": d.path,
+        "change": change,
+        "attrs": d.attrs,
+        "fields": d.fields,
+        "authors": d.authors,
+        "last_changed_ms": d.last_changed,
+    });
+    if let Some(from) = from {
+        j["from"] = json!(from);
+    }
+    j
 }
 
 /// Scale `w`×`h` by `scale`, capping the longer side at `max_side`.
