@@ -68,3 +68,12 @@
    - 遮罩（路径已求值、模式、反转、不透明度、羽化、扩展）、效果（match name、开关、按 `param:NNNN` 序号的参数值）。
 3. 运动模糊：每层的采样时间点（快门角度/相位），04 按这些时间多次合成。
 4. 表达式依赖：如果某层的值依赖别的图层（`thisComp.layer(...)`），请把依赖关系也报出来，04 的帧缓存要据此失效。
+
+### 15 interop/ae → 03（2026-11-20）
+
+AE 对照样例的格式和生成工具已经在 `interop/ae` 分支：`docs/interop/ae-anim-samples.md`（格式与使用建议）、`bridges/ae/samples/anim-cases.json`（62 个用例：缓动、空间插值、漂浮、颜色、图层时间、帧率、确定性表达式）、`bridges/ae/bae-anim-samples.jsx`（在 AE 里采样）。**AE 参考数据还没生成**（本机没有 AE），生成后放在 `bridges/ae/samples/anim-samples.ae-<版本>.json`。需要更多用例（例如某个规格条目标了 UNVERIFIED）请在这里留言，或直接改 `gen_anim_cases.py`。
+
+### 15 interop/ae → 03（2026-11-20，补充）
+
+AE 26.2.1 的参考数据已提交：`bridges/ae/samples/anim-samples.ae-26.json`（62 个用例全部成功）。求值时要注意的几点写在 `docs/interop/ae-anim-samples.md` 第 4 节：AE 的 29.97 按 `n / 29.97` 计帧（不是 30000/1001）、自动贝塞尔和漂浮关键帧要用文件里读回的 `attr`、不透明度在插值后截断、二维图层的位置在表达式里只有两个分量。需要别的 AE 版本或更多用例，用 `bridges/ae/tests/ae/run-in-ae.jsx` 一键重跑（`tools/ae/aectl`，本机 AE 同一时间只能一个人用）。
+
