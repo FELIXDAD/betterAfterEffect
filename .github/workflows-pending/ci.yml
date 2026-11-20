@@ -1,0 +1,116 @@
+# BAE continuous integration (workstream 01, ARCHITECTURE §11).
+#
+# Every push to main/dev and every pull request runs, on macOS arm64 and Windows x64:
+# fmt (once), clippy, tests, the one-wgpu dependency check, the release size budget
+# (`cargo xtask size`), a headless smoke run and packaging (`cargo xtask dist`).
+# CI uses the default ./target directory (no CARGO_TARGET_DIR).
+
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            os: macos-14
+            target: aarch64-apple-darwin
+          - name: Windows x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (rust-toolchain.toml)
+        run: |
+          rustup --version
+          # rustup >= 1.28 installs the toolchain pinned in rust-toolchain.toml, with its
+          # components and targets; older rustup installs it on first use, which `rustup show` triggers.
+          rustup toolchain install || rustup show
+          rustup show active-toolchain
+          rustc -vV
+          cargo --version
+
+      - name: Check host target
+        # Builds are host-native (no --target) so clippy, test and release share one target dir.
+        run: |
+          host="$(rustc -vV | tr -d '\r' | sed -n 's/^host: //p')"
+          echo "host: $host"
+          test "$host" = "${{ matrix.target }}"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+          # Only main/dev populate the cache; pull requests restore from their base branch.
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
+
+      - name: Format
+        if: runner.os == 'macOS'
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        # GPU tests skip themselves when no adapter is available (Windows runners have WARP).
+        run: cargo test --workspace --locked
+
+      - name: One wgpu in the dependency graph
+        # Errors ("specification `wgpu` is ambiguous") when two wgpu versions are resolved:
+        # renderer, UI and plugins must share one wgpu::Device (docs/spec/dependencies.md).
+        run: cargo tree --locked -p bae-dep-probe -i wgpu --edges normal
+
+      - name: Release size budget
+        # Release build of bae + check against tools/size-budget/budget.toml; fails when over.
+        run: cargo xtask size --json size-report.json
+
+      - name: Headless smoke run
+        # Allowed to fail: hosted runners have no reliable GPU (paravirtualized Metal, WARP).
+        # The binary path comes from the size report, so it follows the real target dir.
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          bin="$(jq -r .binary size-report.json)"
+          if command -v cygpath >/dev/null 2>&1; then bin="$(cygpath -u "$bin")"; fi
+          "$bin" --headless --smoke-test 30
+
+      - name: Package
+        run: cargo xtask dist --no-build
+
+      - name: Upload package and size report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: bae-${{ matrix.target }}
+          path: |
+            target/dist/*.zip
+            size-report.json
+          # Earlier failures already fail the job; still upload whatever exists.
+          if-no-files-found: warn
+          retention-days: 14
