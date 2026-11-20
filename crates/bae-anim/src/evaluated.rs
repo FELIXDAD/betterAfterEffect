@@ -101,6 +101,9 @@ pub struct EvaluatedLayer {
     pub text_animators: Vec<EvaluatedPrim>,
     pub camera: Option<CameraState>,
     pub light: Option<LightState>,
+    /// Other layers this layer's expressions read at this time (`thisComp.layer(…)`,
+    /// `parent`, `comp(…)`), so caches can invalidate it when they change.
+    pub depends_on: Vec<PrimPath>,
 }
 
 /// Layer switches that matter for rendering.

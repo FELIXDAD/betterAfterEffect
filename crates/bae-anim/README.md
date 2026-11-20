@@ -48,6 +48,18 @@
 - 空间路径的速度手柄超过路径长度时，影响力按 `L / (speed × dt)` 截断（`spatial_speed_clamp` 用例验证）。
 - 已知差距：空间路径的弧长参数化与 AE 相差最多约 0.02 像素（AE 的数值方法未公开，直线路径也有这个偏差），对照测试暂时对空间用例用 0.05 像素的容差。颜色属性的缓动速度单位（AE-ANI-034）还没有 AE 数据。
 
+## 表达式
+
+属性的 `AttrSpec.expression`（启用且非空）在求值时运行，语义按 AE 的 JavaScript 表达式引擎：
+
+- **引擎**：每个线程一个 QuickJS 运行时（rquickjs），第一次遇到表达式时创建；编译结果按源码缓存。`Evaluator` 仍然是 `Send`，可以在任意线程求值。
+- **改写**（`src/expr/rewrite.rs`，自带一个小的 JavaScript 解析器）：`a + b`、`-`、`*`、`/`、`%` 和复合赋值改写成向量运算函数（`value + [10, 0]` 按分量相加，数组 + 数字只加到第一个分量，与 AE 相同）；结果是脚本最后执行的表达式语句的值；支持自动分号插入、`if (a) b else c` 这种写法；`value`、`position`、`wiggle`、`effect` 等 AE 名字只有用到时才声明成局部变量，用户自己声明的同名变量优先；没声明就赋值的变量不会泄漏到别的表达式。
+- **已实现**：`time`、`value`、`thisComp`、`thisLayer`、`thisProperty`、`index`、`comp(名)`、`layer(名或序号)`、变换属性（`transform.position` 等，2D 图层的位置/锚点/缩放在表达式里是二维的）、`effect(名或 matchName 或序号)(参数)`、`mask()`、`timeRemap`、`valueAtTime`、`velocity`/`velocityAtTime`、`speed`、`key()`/`numKeys`/`nearestKey()`、`loopIn`/`loopOut`（cycle、pingpong、offset、continue，以及 `…Duration`）、`wiggle`/`temporalWiggle`/`smooth`、`linear`/`ease`/`easeIn`/`easeOut`、`clamp`/`length`/`normalize`/`dot`/`cross`/`lookAt`、`random`/`seedRandom`/`gaussRandom`/`noise`、`timeToFrames`/`framesToTime`/`timeToTimecode`、`posterizeTime`、`toComp`/`fromComp`/`toWorld`/`fromWorld`（含 `…Vec`）、`sourceTime`、颜色转换。Property 对象在算术、下标（`transform.position[0]`）和库函数里自动当成它的值。源文本属性的表达式返回字符串时替换文字。
+- **与 AE 对照确认的细节**：`ease()` 是 3f²−2f³，`easeIn`/`easeOut` 是一端斜率为 1 的 Hermite 曲线；`valueAtTime` 把时间量化到 1/(帧率×1024) 秒（AE 26 在 24/25/30/60 fps 实测）；`velocityAtTime(t)` 是从量化时间向前一个网格步长的差分；`loopOut("continue")` 用最后关键帧前 1 ms 处的速度外推。21 个表达式对照用例里，不读位置的全部在 1e-6 以内。
+- **出错时**（语法错误、运行时异常、结果不是数字或数组、`value[2]` 这样的越界下标）用表达式之前的值，并把消息（带行号）放进 `EvaluatedComp.errors`。属性在自己的表达式里读自己（`value`、`valueAtTime`）得到表达式之前的值；互相引用的循环也一样截断，不会死循环。
+- **依赖**：`EvaluatedLayer.depends_on` 列出这一层的表达式在这一时刻读到的其他图层（同合成或其他合成），04 的帧缓存据此失效。
+- `wiggle`、`random` 的数值与 AE 不同（AE 的随机数实现未公开），但对同一属性、同一时间是确定的。
+
 ## 测试
 
 ```
@@ -60,5 +72,5 @@ cargo test --release -p bae-anim --test perf -- --nocapture  # 性能验收（10
 
 ## 还没做
 
-- 表达式（rquickjs，下一个 PR）。
+- 表达式：形状路径（`createPath`、`points()`）、文字的 `sourceText` 样式属性、`marker`、`footage()`、`sampleImage`。
 - 运动模糊的自适应采样数、折叠变换的嵌套求值、文字动画器。

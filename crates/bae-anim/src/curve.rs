@@ -154,6 +154,11 @@ impl Curve {
         (self.keys[0].time, self.keys[self.keys.len() - 1].time)
     }
 
+    /// Keyframe times and values, in time order.
+    pub fn keys(&self) -> impl Iterator<Item = (Time, &Value)> {
+        self.keys.iter().map(|k| (k.time, &k.value))
+    }
+
     /// Number of keyframes.
     pub fn len(&self) -> usize {
         self.keys.len()
