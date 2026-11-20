@@ -321,10 +321,9 @@ impl Renderer {
     }
 
     /// Converts a frame to an 8-bit RGBA texture on the GPU, without reading it
-    /// back: `Rgba8Unorm` holding the working-space values, usable as a render
-    /// target, copy source and sampled texture, and viewable as `Rgba8UnormSrgb`
-    /// (so a UI that samples it decodes the values the way a display shows them).
-    /// The work is submitted; the texture is ready for later GPU commands.
+    /// back (what [`Renderer::read_rgba8`] reads): `Rgba8Unorm`, usable as a copy
+    /// source and as a sampled texture, e.g. published to the viewport registry for
+    /// a viewer. The work is submitted; the texture is ready for later commands.
     pub fn output_texture(
         &mut self,
         frame: &RenderedFrame,
@@ -346,7 +345,7 @@ impl Renderer {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::COPY_SRC
                 | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[wgpu::TextureFormat::Rgba8UnormSrgb],
+            view_formats: &[],
         });
         let view = target.create_view(&wgpu::TextureViewDescriptor::default());
         let (mode, bg) = match alpha {

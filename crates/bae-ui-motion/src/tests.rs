@@ -407,3 +407,68 @@ fn demo_project_builds_and_renders() {
     h.frame("timeline", &mut tl, Vec::new());
     h.frame("composition", &mut viewer, Vec::new());
 }
+
+/// The viewer's GPU path: 04's renderer draws the comp, the 8-bit texture is
+/// published, and the viewer gets the egui handle the shell set.
+#[test]
+fn gpu_preview_publishes_the_rendered_comp() {
+    use bae_gpu::viewport::ViewportTextureRegistry;
+    use bae_gpu::{GpuContext, GpuContextDescriptor, wgpu};
+    let gpu = match GpuContext::new_headless(GpuContextDescriptor::default()) {
+        Ok(gpu) => gpu,
+        Err(e) => {
+            eprintln!("no GPU, skipping: {e}");
+            return;
+        }
+    };
+    eprintln!(
+        "adapter: {} ({:?})",
+        gpu.adapter_info().name,
+        gpu.adapter_info().device_type
+    );
+    let mut h = Harness::new();
+    let (comp, _solid, _shape) = h.comp_with_layers();
+    let registry = std::sync::Arc::new(ViewportTextureRegistry::new());
+    let mut preview = crate::gpu_preview::GpuPreview::with(gpu, registry.clone());
+    let evaluated = bae_anim::evaluate_comp(&h.stage, &comp, Time::ZERO).unwrap();
+    // No display handle until the shell registers the texture.
+    assert!(
+        preview
+            .frame(&h.resources, &h.stage, &evaluated, 1)
+            .is_none()
+    );
+    let published = registry.get(preview.viewport()).expect("published");
+    assert_eq!(published.size, [640, 360]);
+    assert_eq!(published.format, wgpu::TextureFormat::Rgba8Unorm);
+    registry.set_display_handle(preview.viewport(), Some(7));
+    let img = preview
+        .frame(&h.resources, &h.stage, &evaluated, 1)
+        .expect("image");
+    assert_eq!(img.handle, 7);
+    assert_eq!(
+        (img.rect.x1 - img.rect.x0, img.rect.y1 - img.rect.y0),
+        (640, 360)
+    );
+    // Half resolution publishes a half-size texture.
+    preview.frame(&h.resources, &h.stage, &evaluated, 2);
+    assert_eq!(registry.get(preview.viewport()).unwrap().size, [320, 180]);
+    // The pixels: the full-comp red solid shows where the star is not.
+    let mut anim = bae_render::AnimEvaluator::new(None);
+    let rc = anim.convert(&h.stage, &evaluated, 0).unwrap();
+    let frame = preview
+        .renderer()
+        .render_frame(&rc, &bae_render::RenderRequest::full())
+        .unwrap();
+    let pixels = preview
+        .renderer()
+        .read_rgba8(&frame, bae_render::OutputAlpha::Premultiplied)
+        .unwrap();
+    let px = pixels.pixel(10, 10);
+    assert!(
+        px[0] >= 250 && px[1] <= 3 && px[2] <= 3 && px[3] >= 250,
+        "{px:?}"
+    );
+    let id = preview.viewport();
+    drop(preview);
+    assert!(registry.get(id).is_none(), "removed on drop");
+}

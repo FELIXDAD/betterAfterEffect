@@ -15,12 +15,14 @@
 //! commands (`bae-motion` and `bae-model`), run by the shell after the frame.
 //! AE shortcuts are added to the shell's `ae` keymap ([`actions::bindings`]).
 //!
-//! The viewer draws a simplified vector preview ([`render`]) until the GPU
-//! compositor (04) publishes viewport textures.
+//! The viewer renders through 04's GPU compositor when the app has a GPU context
+//! (`gpu_preview`), and falls back to a simplified vector preview ([`render`])
+//! without one (tests, headless hosts).
 
 pub mod actions;
 mod common;
 pub mod demo;
+mod gpu_preview;
 mod i18n;
 mod panels;
 mod project;
@@ -33,6 +35,7 @@ mod viewer;
 use bae_app::{AppBuilder, AppModule};
 use bae_ui::{ActionInfo, KeymapBindings, PanelKind};
 
+pub use gpu_preview::PreviewSources;
 pub use panels::{EffectControlsPanel, PreviewPanel, PropertiesPanel};
 pub use project::ProjectPanel;
 pub use session::{Session, SharedSession};
@@ -102,6 +105,13 @@ impl AppModule for MotionUiModule {
             }
         });
         let _ = app.register::<KeymapBindings>("motion", actions::bindings());
+    }
+
+    fn finish(&self, app: &mut AppBuilder) {
+        // Layer sources other modules registered (05's shape layers …) for the
+        // viewer's GPU preview.
+        let sources = app.registry::<dyn bae_render::SourceProvider>();
+        app.insert_resource(PreviewSources(sources));
     }
 }
 
