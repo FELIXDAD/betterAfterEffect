@@ -16,6 +16,8 @@ workspace = true
 # ReadDirectoryChangesW, inotify). Without it the folder is only polled. Off by
 # default so the core stays free of platform APIs; the desktop app enables it.
 watch = ["dep:notify"]
+# WebSocket transport to the collaboration hub (services/bae-hub).
+hub = ["dep:tungstenite"]
 
 [dependencies]
 bae-model.workspace = true
@@ -26,6 +28,7 @@ serde.workspace = true
 serde_json.workspace = true
 rustc-hash.workspace = true
 notify = { workspace = true, optional = true }
+tungstenite = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
