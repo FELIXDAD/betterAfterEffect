@@ -125,6 +125,7 @@ fn blur_horizontal(@builtin(global_invocation_id) id: vec3<u32>) {
 
 - 每个 `[[effect.pass]]` 一次调度，工作组大小来自入口的 `@workgroup_size`（每组最多 256 个调用），宿主调度 `ceil(目标尺寸 / 工作组尺寸)` 个工作组。
 - 每个 pass 里，`bae_store` 写的是这个 pass 的目标（`output` 或某个中间纹理），`frame.target_rect` 是目标的矩形。
+- 目标纹理来自宿主的纹理池，**初始内容未定义**：每个 pass 必须给目标矩形里的每个像素都写一个值（透明也要写 `vec4<f32>(0.0)`），不能只写一部分。
 - 需要读周围像素时，在 `[effect.roi]` 里声明读取范围，宿主会请求足够大的输入；输出变大（例如模糊）时写 `grows = true`。
 - 依赖数据的 pass 结构（层数随参数变化的金字塔、迭代求解）不适合声明式，请用原生插件。
 
