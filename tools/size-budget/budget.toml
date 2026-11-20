@@ -10,18 +10,21 @@
 #   targets      按 target triple 覆盖上限：[<名称>.targets."<triple>"] max_mib = …
 #                没有覆盖的 target 用默认 max_mib。
 
-# 应用本体：release 构建的 bae 可执行文件（strip 后）。M0 预算。
+# 应用本体：release 构建的 bae 可执行文件（strip 后）。
+# M0 是 15 MiB。M1 起调为 30 MiB：数据模型（loro）、MCP（rmcp + tokio）、界面、音频、渲染、
+# 表达式引擎陆续链接进来，冷路径 crate 已经用 opt-level = "s"（根 Cargo.toml）。
+# 解压后的应用包 40 MiB 和压缩后安装包 20 MiB 这两条总约束不变（见下）。
 # 检查方：cargo xtask size
 [app]
 description = "bae executable (release, stripped)"
-max_mib = 15.0
+max_mib = 30.0
 enforced = true
 
 [app.targets."aarch64-apple-darwin"]
-max_mib = 15.0
+max_mib = 30.0
 
 [app.targets."x86_64-pc-windows-msvc"]
-max_mib = 15.0
+max_mib = 30.0
 
 # 解压后的应用包：macOS 的 BAE.app，Windows 的程序及依赖目录。
 # 检查方：cargo xtask dist（目前只报告）
