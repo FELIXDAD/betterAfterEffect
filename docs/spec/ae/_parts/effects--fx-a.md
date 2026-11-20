@@ -875,7 +875,7 @@ These effects are needed so AE projects open and render, but are rarely used in 
      Reduce Saturation: scale C down until the limit is met
      Key Out Unsafe:    alpha = 0 ; Key Out Safe: alpha = 0 for pixels within the limit
   ```
-- **Priority:** P2 — legacy broadcast QC; Video Limiter (AE-FX-068) replaces it.
+- **Priority:** P2 — legacy broadcast QC; Video Limiter (AE-FX-069) replaces it.
 - **Owner:** bae-effects
 - **Notes:** —
 
@@ -995,3 +995,620 @@ These effects are needed so AE projects open and render, but are rarely used in 
 - **Priority:** P2 — complex, but widely used in older templates; implement Get Phase From + preset palettes + Modify first.
 - **Owner:** bae-effects (+ bae-ui-motion)
 - **Notes:** Palette definitions of the presets are Adobe data; BAE must recreate them by measurement (UNVERIFIED colours). Parameter IDs other than those in the enum table are UNVERIFIED.
+
+### AE-FX-056 · Equalize (色调均化)
+
+- **What it does:** Redistributes pixel values so brightness (or each RGB channel) is spread more evenly over the full range, like Photoshop's Equalize; transparent pixels are excluded from the histogram.
+- **Exact semantics:** matchName `ADBE Equalize`; 8 bpc; GPU —; expands bounds: no.
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Equalize (色调均化) | `ADBE Equalize-0001` | popup | UNVERIFIED (2 = Brightness) | RGB / Brightness / Photoshop Style (AE 26 enum table) | — | |
+  | 2 | Amount to Equalize (色调均化量) | `ADBE Equalize-0002` | float slider | UNVERIFIED (50) | 0…100 | % | 100 = as even as possible. |
+  ```
+  hist over pixels with A > 0 (8-bit bins):
+    RGB:            one histogram per channel; map each channel through its own CDF
+    Brightness:     histogram of brightness (max(R,G,B), UNVERIFIED) ; scale RGB so brightness follows the CDF
+    Photoshop Style: histogram of luminance; same CDF applied to R,G,B (PS Equalize, UNVERIFIED exact variant)
+  eq(v) = CDF(v)                        // normalised 0..1
+  out   = lerp(v, eq(v), amount/100)
+  ```
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Whole-frame histogram → GPU reduction pass then a LUT pass. zh name from the zh-CN help heading "色调均化效果".
+
+### AE-FX-057 · Gamma/Pedestal/Gain (灰度系数/基值/增益)
+
+- **What it does:** Per-channel response curve: a black stretch for low values, then gamma, pedestal (output minimum) and gain (output maximum) separately for R, G and B.
+- **Exact semantics:** matchName `ADBE Gamma/Pedestal/Gain2`; 8 bpc; GPU —; expands bounds: no.
+  | # | Parameter (中文) | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|
+  | 1 | Black Stretch (黑色伸缩) | float slider | 1 (UNVERIFIED) | 1…4 (UNVERIFIED) | — | Remaps low values of all channels; larger brightens darks. |
+  | 2 | Red Gamma (红色灰度系数) | float slider | 1 | 0.1…10 (UNVERIFIED; slider 0.5…2) | — | |
+  | 3 | Red Pedestal (红色基值) | float slider | 0 | −1…1 (UNVERIFIED) | — | 0 = off. |
+  | 4 | Red Gain (红色增益) | float slider | 1 | 0…2 (UNVERIFIED) | — | 1 = completely on. |
+  | 5–7 | Green Gamma / Pedestal / Gain (绿色…) | float | 1 / 0 / 1 | as red | — | |
+  | 8–10 | Blue Gamma / Pedestal / Gain (蓝色…) | float | 1 / 0 / 1 | as red | — | |
+  ```
+  v  = blackStretch(c)       // UNVERIFIED: v = 1 - (1 - c)^? ; identity at 1.0
+  v  = pow(v, 1 / gamma_ch)   // UNVERIFIED: AE help calls gamma "an exponent"; direction measured to be confirmed
+  out = pedestal_ch + v * (gain_ch - pedestal_ch)
+  ```
+- **Priority:** P2 — legacy.
+- **Owner:** bae-effects
+- **Notes:** Parameter IDs assumed sequential (no groups) — UNVERIFIED. Build as a 3×1D LUT.
+
+### AE-FX-058 · Leave Color (保留颜色)
+
+- **What it does:** Desaturates everything except colours similar to Color To Leave.
+- **Exact semantics:** matchName `ADBE Leave Color`; 8 bpc; GPU —; expands bounds: no.
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Amount to Decolor (脱色量) | `ADBE Leave Color-0001` | float slider | 0 (UNVERIFIED) | 0…100 | % | 100 = non-matching areas fully grey. |
+  | 2 | Color To Leave (要保留的颜色) | `-0002` | color | UNVERIFIED (red) | — | — | |
+  | 3 | Tolerance (容差) | `-0003` | float slider | UNVERIFIED (15) | 0…100 | % | 0 = only exact match kept; 100 = no change. |
+  | 4 | Edge Softness (边缘柔和度) | `-0004` | float slider | UNVERIFIED (0) | 0…100 | % | |
+  | 5 | Match Colors (匹配颜色) | `-0005` | popup | 1 = Using RGB | Using RGB / Using Hue (AE 26 enum table) | — | Help text says "Using HSB"; the menu string is "Using Hue". |
+  ```
+  d = Using RGB ? |rgb - key| / sqrt(3) : hueDistance(rgb, key) / 0.5
+  w_keep = d <= tol ? 1 : (d <= tol + soft ? 1 - (d - tol)/soft : 0)    // UNVERIFIED ramp shape
+  grey = luma(rgb) (UNVERIFIED weights; 601 assumed)
+  out  = lerp(rgb, grey, (amount/100) * (1 - w_keep))
+  ```
+- **Priority:** P2 — Hue/Saturation and Lumetri HSL cover the common use.
+- **Owner:** bae-effects
+- **Notes:** —
+
+### AE-FX-059 · Lumetri Color: Basic Correction and Creative (Lumetri 颜色：基本校正和创意)
+
+- **What it does:** The commonly used part of Lumetri Color: input LUT, white balance, tone (exposure, contrast, highlights, shadows, whites, blacks), saturation, and Creative look LUT with adjustments.
+- **Exact semantics:** matchName `ADBE Lumetri`; 32 bpc; GPU since 13.8; expands bounds: no. Groups in UI order (parameter IDs are not sequential; the AE 26 enum table confirms `-0005` = Basic Correction Input LUT and `-0025` = Creative Look, both "None / [Custom] / Browse..." plus installed LUTs):
+  | Group | Parameter (中文) | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|
+  | Basic Correction (基本校正) | Input LUT (输入 LUT) | popup + file | None | None / [Custom] / Browse… / bundled LUTs | — | Applied first. |
+  | White Balance (白平衡) | WB Selector (白平衡选择器) | color (eyedropper) | — | — | — | Picks a neutral; sets Temperature/Tint. |
+  | | Temperature (色温) | float slider | 0 | −100…100 | — | |
+  | | Tint (色彩) | float slider | 0 | −100…100 | — | |
+  | Tone (色调) | Exposure (曝光) | float slider | 0 | −5…5 | stops (UNVERIFIED) | |
+  | | Contrast (对比度) | float slider | 0 | −100…100 | — | |
+  | | Highlights (高光) | float slider | 0 | −100…100 | — | |
+  | | Shadows (阴影) | float slider | 0 | −100…100 | — | |
+  | | Whites (白色) | float slider | 0 | −100…100 | — | |
+  | | Blacks (黑色) | float slider | 0 | −100…100 | — | |
+  | | Reset / Auto (重置 / 自动) | button | — | — | — | Auto analyses the frame. |
+  | | Saturation (饱和度) | float slider | 100 | 0…200 | — | |
+  | Creative (创意) | Look (Look) | popup + file | None | None / [Custom] / Browse… / bundled looks (SL …) | — | |
+  | | Intensity (强度) | float slider | 100 | 0…200 | % | |
+  | Adjustments (调整) | Faded Film (淡化胶片) | float slider | 0 | 0…100 | — | |
+  | | Sharpen (锐化) | float slider | 0 | −100…100 | — | Spatial; reads neighbours. |
+  | | Vibrance (自然饱和度) | float slider | 0 | −100…100 | — | |
+  | | Saturation (饱和度) | float slider | 100 | 0…200 | — | |
+  | | Shadow Tint / Highlight Tint (阴影色彩 / 高光色彩) | colour wheel (arbitrary data) | neutral | — | — | |
+  | | Tint Balance (色彩平衡) | float slider | 0 | −100…100 | — | |
+  - Ranges and zh strings follow Premiere Pro's Lumetri panel — UNVERIFIED for AE; zh names （译名待核）.
+  - Order of operations (UNVERIFIED, from Premiere documentation): Input LUT → White balance → Tone → Saturation → Creative Look × Intensity → Creative adjustments → Curves → Color Wheels → HSL Secondary → Vignette (AE-FX-060).
+  - Algorithms are proprietary. BAE reference: Temperature/Tint = von Kries scale in linear light; Exposure = ×2^stops in linear light; Contrast = S-curve pivot 0.5 (log-ish); Highlights/Shadows/Whites/Blacks = smooth tone-zone curves; Saturation = lerp to luma709 (UNVERIFIED all).
+- **Priority:** P1 — very common grading tool; exact parity requires measurement against AE renders.
+- **Owner:** bae-effects (+ bae-color, bae-ui-motion)
+- **Notes:** LUT files: .cube / .look / .3dl formats (bae-media parses; bae-color applies 3D LUT via a GPU texture). Bundled Adobe looks/LUTs cannot be redistributed; BAE decision: ship own looks and list missing Adobe ones as "missing LUT" (shows None with warning). Lumetri state also includes HDR options (HDR White, HDR Range) in newer versions (UNVERIFIED for AE).
+
+### AE-FX-060 · Lumetri Color: Curves, Color Wheels, HSL Secondary and Vignette (Lumetri 颜色：曲线、色轮、HSL 辅助和晕影)
+
+- **What it does:** The advanced Lumetri groups: RGB curves and Hue/Saturation curves, three-way colour wheels, HSL secondary keying with its own correction, and a vignette.
+- **Exact semantics:** same effect as AE-FX-059 (`ADBE Lumetri`).
+  - Curves (曲线): RGB Curves (master + R/G/B spline, arbitrary data); Hue Saturation Curves: Hue vs Sat, Hue vs Hue, Hue vs Luma, Luma vs Sat, Sat vs Sat (each a periodic or linear spline, arbitrary data). Default: identity.
+  - Color Wheels (色轮): Shadows / Midtones / Highlights wheels (offset colour) with lightness sliders (default 0, −100…100 UNVERIFIED).
+  - HSL Secondary (HSL 辅助): Key — Set color / Add color / Remove color eyedroppers, H, S, L range sliders (each min/max + feather), Color/Gray toggle (enum `-0075`: Color/Gray / Color/Black / White/Black per AE 26 enum table, i.e. the mask display mode); Refine — Denoise, Blur; Correction — colour wheel, Temperature, Tint, Contrast, Sharpen, Saturation.
+  - Vignette (晕影): Amount 0 (−5…5), Midpoint 50 (0…100), Roundness 0 (−100…100), Feather 50 (0…100) (UNVERIFIED ranges).
+  - Newer AE versions add input/output colour-space popups to Lumetri (enum `-0130`: None / ACEScct / Apple Log/Rec. 2020 / ARRI LogC3/Wide Gamut3 / … / Rec. 709 / sRGB) and technical LUT lists (`-0127`, `-0128`) — AE 26 enum table; semantics UNVERIFIED.
+  ```
+  curves:  c = rgbCurve_master(c); c.ch = rgbCurve_ch(c.ch)
+           h,s,l = hsl(c); s *= 2*HueVsSat(h); h += HueVsHue(h)-0.5; l *= ...; s *= 2*LumaVsSat(l); s *= 2*SatVsSat(s)
+  wheels:  lift/gamma/gain style: c += shadowOffset*wS(l) + midOffset*wM(l) + highOffset*wH(l)   // UNVERIFIED weights
+  hsl sec: w = rangeWeight(h)*rangeWeight(s)*rangeWeight(l) -> denoise/blur(w) -> apply correction weighted by w
+  vignette: d = ellipticalDistance(uv, roundness); f = smoothstep(midpoint, midpoint+feather, d); c *= 2^(amount*f) (UNVERIFIED)
+  ```
+- **Priority:** P2 — advanced grading; Curves (AE-FX-040) and Hue/Saturation (AE-FX-041) cover basic needs.
+- **Owner:** bae-effects (+ bae-ui-motion)
+- **Notes:** The curve and wheel editors need custom Effect Controls widgets (bae-ui-motion).
+
+### AE-FX-061 · OCIO transform effects (OCIO 变换效果)
+
+- **What it does:** Five OpenColorIO-based effects that convert a layer between colour spaces or apply OCIO looks, LUT/CDL files, or display/view transforms, using the project's OCIO configuration.
+- **Exact semantics:** All 32 bpc (UNVERIFIED), Color Correction category, available when the project uses OCIO colour management (AE 24.x+, UNVERIFIED version).
+  | Effect (中文) | matchName | Key parameters |
+  |---|---|---|
+  | OCIO Color Space Transform (OCIO 色彩空间转换) | `ADBE OCIO Color Space Transform` | Input Color Space, Output Color Space (lists from config) |
+  | OCIO File Transform (OCIO 文件转换) | `ADBE OCIO FILE Transform` | LUT/CDL file, Interpolation, Inverse (UNVERIFIED) |
+  | OCIO Display Transform (OCIO 显示变换) | `ADBE OCIO Display Transform` | Input Color Space, Display Device, View Transform, Inverse Transform, Information |
+  | OCIO Look Transform (OCIO 外观变换) | `ADBE OCIO Look Transform` | Look, Input/Output space, Inverse (UNVERIFIED) |
+  | OCIO CDL Transform (OCIO CDL 变换) | `ADBE OCIO CDL Transform` | Slope, Offset, Power (RGB), Saturation, Direction (UNVERIFIED) |
+  - CDL formula (ASC CDL v1.2): `out = clamp(in*slope + offset)^power`, then saturation about Rec.709 luma: `luma + sat*(out - luma)`.
+  - Dynamic lists are rebuilt from the config; if the project's config changes and a chosen name disappears, the Information section shows an error and the effect passes input through (UNVERIFIED).
+- **Priority:** P2 — follows BAE's OCIO-subset colour management.
+- **Owner:** bae-color (+ bae-effects)
+- **Notes:** zh names from the zh-CN help headings. Matchnames from an AE 26.0 effect enumeration (third-party audit dump). See compositing-3d-color.md, Color management for the OCIO subset BAE supports. BAE decision: no OpenColorIO runtime (AGENTS.md); implement the transforms BAE's built-in config defines natively, CDL and .cube files natively.
+
+### AE-FX-062 · PS Arbitrary Map (PS 任意映射)
+
+- **What it does:** Legacy: applies a Photoshop arbitrary-map (.amp / lookup) curve to the layer or individual channels, with a cyclic phase shift.
+- **Exact semantics:** matchName `ADBE PS Arbitrary Map`; 8 bpc in the match-name table (help says 8 and 16 bpc); GPU —; expands bounds: no.
+  | # | Parameter (中文) | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|
+  | — | Options… (选项) | button | — | — | — | Loads an .amp file into arbitrary data (256-entry tables for master/R/G/B/A). |
+  | 1 | Phase (相位) | float slider | 0 | UNVERIFIED | — | Shifts the map horizontally, cyclically. |
+  | 2 | Apply Phase Map To Alpha (将相位图应用到 Alpha) | checkbox | off | — | — | Uses the map's alpha table, else identity. |
+  ```
+  idx = fract(v + phase / 256 (UNVERIFIED unit)) * 255
+  out = table_ch[idx]   (default table: identity)
+  ```
+- **Priority:** P2 — compatibility only; AE says use Curves for new work.
+- **Owner:** bae-effects (+ bae-media)
+- **Notes:** —
+
+### AE-FX-063 · Selective Color (可选颜色)
+
+- **What it does:** Photoshop-style selective colour: adds or removes cyan, magenta, yellow and black within each of nine colour classes (Reds, Yellows, Greens, Cyans, Blues, Magentas, Whites, Neutrals, Blacks).
+- **Exact semantics:** matchName `ADBE SelectiveColor`; 16 bpc; GPU —; expands bounds: no.
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Method (方法) | `ADBE SelectiveColor-0001` | popup | UNVERIFIED (1 = Relative) | Relative / Absolute | — | |
+  | 2 | Colors (颜色) | `-0002` | popup | 1 = Reds | Reds / Yellows / Greens / Cyans / Blues / Magentas / Whites / Neutrals / Blacks | — | Selects which class the 4 sliders below edit (UI only). |
+  | 3–6 | Cyan / Magenta / Yellow / Black (青色 / 洋红色 / 黄色 / 黑色) | — | float slider | 0 | −100…100 | % | Mirror of the Details entry for the selected class. |
+  | — | Details (细节) group: Reds Cyan … Blacks Black | — | float slider ×36 | 0 | −100…100 | % | The stored/animated values (9 classes × CMYK). |
+  ```
+  mx,md,mn = max, mid, min of (R,G,B)
+  weights (Photoshop-compatible reimplementation, UNVERIFIED vs AE):
+    Reds/Greens/Blues:     w = mx - md   if that channel is the max
+    Cyans/Magentas/Yellows: w = md - mn  if the complementary channel is the min
+    Whites:   w = mn > 0.5 ? (mn - 0.5) * 2 : 0
+    Blacks:   w = mx < 0.5 ? (0.5 - mx) * 2 : 0
+    Neutrals: w = 1 - (|mx - 0.5| + |mn - 0.5|)
+  for each class k with w_k > 0, for channel ch in R,G,B (ink = C for R, M for G, Y for B):
+    a = clamp(ink_k + black_k + ink_k*black_k?, -1, 1)              // UNVERIFIED combination
+    Relative: delta = -a * (a < 0 ? (1 - c) : c) ... ; Absolute: delta = -a        // UNVERIFIED
+    c += w_k * delta
+  ```
+- **Priority:** P2 — mainly for Photoshop adjustment-layer fidelity.
+- **Owner:** bae-effects
+- **Notes:** AE help: the class weight is proportional to closeness to the class colour (50% magenta gets half the Magentas correction plus half the Whites correction). Relative cannot affect pure white. Imported PSD Selective Color adjustment layers map to this effect (see project-comp-layers.md, Import).
+
+### AE-FX-064 · Shadow/Highlight (阴影/高光)
+
+- **What it does:** Brightens shadows and darkens highlights based on the local neighbourhood (not a global curve), with optional automatic amounts and temporal smoothing.
+- **Exact semantics:** matchName `ADBE ShadowHighlight`; 16 bpc; GPU —; expands bounds: no. Defaults from the AE 26 dump.
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Auto Amounts (自动数量) | `ADBE ShadowHighlight-0001` | checkbox | on (1) | — | — | Ignores 2/3 and enables 4. |
+  | 2 | Shadow Amount (阴影数量) | `-0002` | float slider | 50 | 0…100 | % | |
+  | 3 | Highlight Amount (高光数量) | `-0003` | float slider | 0 | 0…100 | % | |
+  | 4 | Temporal Smoothing (seconds) (瞬时平滑（秒）) | `-0004` | float slider | 0 | 0…UNVERIFIED | s | Only with Auto Amounts. |
+  | 5 | Scene Detect (场景检测) | `-0005` | checkbox | off | — | — | |
+  | 6 | More Options (更多选项) | `-0006` | group start | — | — | — | Group end is `-0015`. |
+  | 7 | Shadow Tonal Width (阴影色调宽度) | `-0007` | float slider | 50 | 0…100 | % | |
+  | 8 | Shadow Radius (阴影半径) | `-0008` | float slider | 30 | 0…UNVERIFIED | px | Scaled by downsample factor (AE-FX-018). |
+  | 9 | Highlight Tonal Width (高光色调宽度) | `-0009` | float slider | 50 | 0…100 | % | |
+  | 10 | Highlight Radius (高光半径) | `-0010` | float slider | 30 | 0…UNVERIFIED | px | |
+  | 11 | Color Correction (颜色校正) | `-0011` | float slider | 20 | 0…100 (UNVERIFIED) | % | Saturation of adjusted areas. |
+  | 12 | Midtone Contrast (中间调对比度) | `-0012` | float slider | 0 | −100…100 | — | |
+  | 13 | Black Clip (黑色剪切) | `-0013` | float slider | 0.01 | 0…50 (UNVERIFIED) | % | AE 26 dump stores 0.01; help text says 0.1 % — UNVERIFIED which is displayed. |
+  | 14 | White Clip (白色剪切) | `-0014` | float slider | 0.01 | 0…50 (UNVERIFIED) | % | |
+  | 16 | Blend With Original (与原始图像混合) | `-0016` | float slider | 0 | 0…100 | % | |
+  ```
+  L    = luminance(in); Lb_s = gaussianBlur(L, shadowRadius); Lb_h = gaussianBlur(L, highlightRadius)
+  ws   = smoothstep(shadowTonalWidth_as_level, 0, Lb_s)      // 1 in deep shadow, 0 above tonal width (UNVERIFIED)
+  wh   = smoothstep(1 - highlightTonalWidth_as_level, 1, Lb_h)
+  if Auto Amounts: shadowAmt, highlightAmt = from frame histogram (temporally smoothed)   // UNVERIFIED
+  out  = in lifted by shadowAmt*ws, lowered by highlightAmt*wh (gamma-style, UNVERIFIED);
+         saturation scaled by colorCorrection in adjusted areas; midtone contrast S-curve;
+         final black/white clip stretch like Auto Levels (AE-FX-049)
+  out  = lerp(out, in, blend/100)
+  ```
+- **Priority:** P2 — algorithm is proprietary (Photoshop Shadows/Highlights); needs measurement.
+- **Owner:** bae-effects
+- **Notes:** zh parameter names （译名待核）. Two separable blurs of luminance → implement on GPU with the shared blur kernel of Gaussian Blur (effects.md, Blur & Sharpen).
+
+### AE-FX-065 · CC Color Neutralizer (CC 颜色中和器（译名待核）)
+
+- **What it does:** Removes colour casts by mapping chosen shadow, midtone and highlight "unbalance" colours to neutral (or to chosen balance colours), per region.
+- **Exact semantics:** matchName `CS Color Neutralizer`; 32 bpc; GPU —; expands bounds: no.
+  | Parameter (中文) | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|
+  | Shadows Unbalance (阴影不平衡（译名待核）) | color | black (UNVERIFIED) | — | — | Colour that should become Shadows Balance. |
+  | Shadows Balance | color | black (UNVERIFIED) | — | — | |
+  | Midtones Unbalance / Midtones Balance | color | mid grey (UNVERIFIED) | — | — | |
+  | Highlights Unbalance / Highlights Balance | color | white (UNVERIFIED) | — | — | |
+  | Pinning (固定（译名待核）) | float slider | UNVERIFIED | — | % | Keeps extreme black/white from moving. |
+  | Blend w. Original | float slider | 0 (UNVERIFIED) | 0…100 | % | |
+  - Parameter list UNVERIFIED (from Cycore documentation memory). Reference algorithm: per channel, a 3-point curve through (unbalance_s→balance_s), (unbalance_m→balance_m), (unbalance_h→balance_h), pinned at 0 and 1 by Pinning.
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Cycore (CC) effects ship with AE; display names are not translated in zh-CN AE. In AE 26 the match name is `CS Color Neutralizer` (prefix CS, not CC).
+
+### AE-FX-066 · CC Color Offset (CC 颜色偏移（译名待核）)
+
+- **What it does:** Rotates each of R, G and B through the value range by a phase angle, with Wrap, Solarize or Polarize overflow.
+- **Exact semantics:** matchName `CC Color Offset`; 16 bpc; GPU —; expands bounds: no.
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Red Phase (红色相位（译名待核）) | `CC Color Offset-0001` | angle | 0 | unbounded | degrees | |
+  | 2 | Green Phase | `-0002` | angle | 0 | unbounded | degrees | |
+  | 3 | Blue Phase | `-0003` | angle | 0 | unbounded | degrees | |
+  | 4 | Overflow (溢出（译名待核）) | `-0004` | popup | 1 = Wrap (UNVERIFIED default) | Wrap / Solarize / Polarize (AE 26 enum table) | — | |
+  ```
+  x = c + phase_ch / 360
+  Wrap:     out = fract(x)
+  Solarize: out = 1 - |2*fract(x/2) - 1|  -> triangle wave (UNVERIFIED)
+  Polarize: UNVERIFIED (reflects at 1 then clamps)
+  ```
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** —
+
+### AE-FX-067 · CC Kernel (CC 内核（译名待核）)
+
+- **What it does:** 3×3 convolution of each pixel with its neighbours (blur, sharpen, emboss looks) despite being filed under Color Correction.
+- **Exact semantics:** matchName `CS Kernel`; 32 bpc; GPU —; expands bounds: no (UNVERIFIED).
+  | Parameter (中文) | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|
+  | 9 kernel weights (row-major, top-left … bottom-right) | float slider ×9 | identity: centre 1, others 0 (UNVERIFIED) | UNVERIFIED | — | |
+  | Divisor / normalisation (UNVERIFIED) | float | UNVERIFIED | — | — | |
+  | Absolute Value (UNVERIFIED) | checkbox | off | — | — | |
+  | Blend w. Original | float slider | 0 | 0…100 | % | |
+  ```
+  out(x,y) = sum_{i,j in -1..1} k[i][j] * in(x+i, y+j) / divisor   (premultiplied, edges clamped; UNVERIFIED)
+  ```
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Parameter list UNVERIFIED. AE 26 has no other first-party 3×3 convolution effect (neither the docsforadobe table nor an AE 26.0 effect enumeration lists a "Convolution Kernel"), so CC Kernel is the only one.
+
+### AE-FX-068 · CC Toner (CC 调色（译名待核）)
+
+- **What it does:** Maps luminance to a 2-, 3- or 5-colour gradient (Duotone, Tritone, Pentone) or a solid tone, blended with the original.
+- **Exact semantics:** matchName `CC Toner`; 32 bpc; GPU —; expands bounds: no. Lottie: supported by Skottie (`CCTonerEffect`), parameter order below follows its index table.
+  | # | Parameter (中文) | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|
+  | 1 | Tones (色调（译名待核）) | popup | UNVERIFIED (2 = Tritone) | Duotone / Tritone / Pentone / (separator) / Solid (AE 26 enum table) | — | Values 1,2,3,5 (separator = 4). AE 26 enum table lists this popup under disk ID `-0005`, conflicting with Skottie's index 0 — ID mapping UNVERIFIED. |
+  | 2 | Highlights (高光) | color | white (UNVERIFIED) | — | — | |
+  | 3 | Brights (亮部（译名待核）) | color | UNVERIFIED | — | — | Pentone only. |
+  | 4 | Midtones (中间调) | color | UNVERIFIED | — | — | |
+  | 5 | Darktones (暗部（译名待核）) | color | UNVERIFIED | — | — | Pentone only. |
+  | 6 | Shadows (阴影) | color | black (UNVERIFIED) | — | — | |
+  | 7 | Blend w. Original (与原始图像混合) | float slider | 0 | 0…100 | % | |
+  ```
+  stops (5 evenly spaced at 0, .25, .5, .75, 1):
+    Duotone: S, lerp(S,H,.25), lerp(S,H,.5), lerp(S,H,.75), H
+    Tritone: S, lerp(S,M,.5), M, lerp(M,H,.5), H
+    Pentone: S, D, M, B, H
+    Solid:   M ×5
+  l   = luminance(in)                       // Skottie: GradientColorFilter luminance (Rec.709 weights, UNVERIFIED for AE)
+  out = lerp(in, gradient(l), (100 - blend)/100); alpha unchanged
+  ```
+- **Priority:** P2 — but Lottie-relevant (Skottie supports it).
+- **Owner:** bae-effects
+- **Notes:** Matches Skottie `CCTonerEffect.cpp`. Lottie effect `ty` is the generic custom effect (5) with matchName `CC Toner` (UNVERIFIED).
+
+### AE-FX-069 · Video Limiter (视频限幅器)
+
+- **What it does:** Clips luma and chroma of the signal to broadcast-legal ranges in the project working space (100 IRE = 1.0 in 32 bpc = 255 in 8 bpc); the modern, GPU-accelerated replacement for Broadcast Colors.
+- **Exact semantics:** matchName `ADBE DigitalVideoLimiter` (AE 26 effect enumeration; not in the docsforadobe table); bpc: 32 (UNVERIFIED); GPU: yes per AE help (version UNVERIFIED); expands bounds: no.
+  | Parameter (中文) | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|
+  | Clip Level / Signal Min / Signal Max (UNVERIFIED names) | popup / float | UNVERIFIED (e.g. 0–100 IRE) | e.g. −20…120 | IRE | Parameter set mirrors Premiere Pro's Video Limiter (UNVERIFIED for AE). |
+  | Clip Method (UNVERIFIED) | popup | UNVERIFIED | Luma / Chroma / Smart Limit (UNVERIFIED) | — | |
+  | Compression Before Clipping (UNVERIFIED) | popup | UNVERIFIED | — | % | Soft knee before the clip. |
+  | Show Safe Areas / Reduction Axis (UNVERIFIED) | checkbox | off | — | — | |
+  ```
+  Y,Cb,Cr = rgbToYCbCr709(c)  (working space)
+  Y  = softClip(Y, minIRE/100, maxIRE/100, knee)      // Luma or Smart Limit
+  Cr,Cb scaled so |chroma| stays within chroma limit  // Chroma or Smart Limit
+  out = yCbCrToRgb(...)
+  ```
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** zh name from the zh-CN help heading "视频限幅器效果" (the same page also calls the menu item 视频限制器). Parameter list needs a fetch of AE's Effect Controls; whole item is weakly sourced.
+
+## Channel
+
+Shared notes for this section: enum lists and parameter-ID positions of popups come from a generated table of popup options for AE 26.0x67 built-in effects (third-party ExtendScript enumeration, cached in the research folder) — referred to below as "the AE 26 enum table"; option N (1-based, separators `(-` included) is the stored value. Effects that take a second layer read it through the layer-parameter rules of AE-FX-012 and AE-FX-020: the other layer's pixels in its own layer space (source, or after masks / masks and effects per the layer-param menu), without its transform, at the same comp time, centred on or stretched to the effect layer. Unless stated, channel effects work on straight colour and do not expand bounds. zh effect names come from the zh-CN Channel effects help page.
+
+### AE-FX-070 · Invert (反转)
+
+- **What it does:** Inverts the colour information of the layer in RGB, HLS or YIQ space, all three components or a single one, or inverts alpha.
+- **Exact semantics:** matchName `ADBE Invert`; 32 bpc; GPU since 14.1; expands bounds: no.
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Channel (通道) | `ADBE Invert-0001` | popup | 1 = RGB | see enum below | — | |
+  | 2 | Blend With Original (与原始图像混合) | `ADBE Invert-0002` | float slider | 0 | slider 0…100; valid 0…100 | % | |
+  - Channel enum (AE 26 enum table, value = stored number): 1 RGB, 2 Red, 3 Green, 4 Blue, (5 separator), 6 HLS, 7 Hue, 8 Lightness, 9 Saturation, (10 separator), 11 YIQ, 12 Luminance, 13 In Phase Chrominance, 14 Quadrature Chrominance, (15 separator), 16 Alpha.
+  ```
+  RGB space:  R' = 1 - R (Red/Green/Blue: only that channel; RGB: all three)
+  HLS space:  (h,l,s) = rgbToHls(R,G,B), h in 0..1
+              Hue: h' = fract(h + 0.5)  (UNVERIFIED; Skottie uses h' = 0.5 - h)
+              Lightness: l' = 1 - l ; Saturation: s' = 1 - s ; HLS: all three ; back to RGB
+  YIQ space:  [Y,I,Q] = M_yiq * [R,G,B], M_yiq = [[0.299,0.587,0.114],[0.5959,-0.2746,-0.3213],[0.2115,-0.5227,0.3112]]
+              Luminance: Y' = 1 - Y ; In Phase: I' = -I ; Quadrature: Q' = -Q ; YIQ: all three ; back via inverse matrix
+  Alpha:      A' = 1 - A  (colour unchanged)
+  out = lerp(result, in, blend/100)
+  ```
+  - 32 bpc: `1 - x` is applied without clamping, so super-white (x > 1) becomes negative (UNVERIFIED; AE generally does not clamp in float).
+  - Inverting alpha of a layer whose transparent pixels have undefined colour reveals that colour (usually black in straight space).
+- **Priority:** P0 — one of the most used basic effects; trivial colour matrix.
+- **Owner:** bae-effects
+- **Notes:** Lottie: no dedicated effect `ty`; exported as a generic effect (`ty: 5`) with `mn: "ADBE Invert"`; Skottie implements it (`InvertEffect.cpp`, same enum values and YIQ matrices), lottie-web ignores it. Implementation hint: every mode except HLS is a 4×5 colour matrix; fuse with neighbouring matrix effects.
+
+### AE-FX-071 · Set Matte (设置遮罩)
+
+- **What it does:** Replaces (or multiplies) the layer's alpha with a channel taken from another layer, so any layer anywhere in the stack can act as a traveling matte for one or many layers.
+- **Exact semantics:** matchName `ADBE Set Matte3` (the CS6+ 32-bpc version); 32 bpc; GPU yes per help (version not in table); expands bounds: no. Defaults from the AE 26 dump.
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Take Matte From Layer (从图层获取遮罩) | `ADBE Set Matte3-0001` | layer | this layer (index of self, dump value 1 on a 1-layer comp) | — | — | With Source / Masks / Effects & Masks menu (AE-FX-012). |
+  | 2 | Use For Matte (用于遮罩) | `-0002` | popup | 4 = Alpha Channel | 1 Red Channel / 2 Green Channel / 3 Blue Channel / 4 Alpha Channel / 5 Luminance / 6 Hue / 7 Lightness / 8 Saturation / 9 Full / 10 Off | — | Lottie uses the same numbers. |
+  | 3 | Invert Matte (反转遮罩) | `-0003` | checkbox | off | — | — | |
+  | 4 | Stretch Matte to Fit (伸缩遮罩以适合) | `-0004` | checkbox | on | — | — | AE 26 scripting name of this property is "If Layer Sizes Differ" (UNVERIFIED whether the UI is still a checkbox). Off = matte layer centred. |
+  | 5 | Composite Matte with Original (将遮罩与原始图像合成) | `-0005` | checkbox | on | — | — | On: multiply with existing alpha; off: replace it. |
+  | 6 | Premultiply Matte Layer (预乘遮罩图层) | `-0006` | checkbox | on | — | — | |
+  ```
+  M = layerParam(1) rendered in its own layer space at the current time (no transform), positioned:
+      stretch ? scaled to the effect layer's width/height : centred (pixels outside M = transparent)
+  rgb_m = premultiplyMatteLayer ? M.rgb * M.a : M.rgb          // straight -> premultiplied (UNVERIFIED exact)
+  v = switch useForMatte: Red: rgb_m.r | Green | Blue | Alpha: M.a | Luminance: luma(rgb_m) (weights UNVERIFIED)
+      | Hue/Lightness/Saturation: from rgbToHls(rgb_m) | Full: 1 | Off: 0
+  if invert: v = 1 - v
+  A' = composite ? A * v : v ;  RGB unchanged
+  ```
+- **Priority:** P1 — legacy but very common in older templates and Lottie (`ty: 28`).
+- **Owner:** bae-effects (+ bae-render)
+- **Notes:** AE help says it exists for compatibility and suggests track mattes (see compositing-3d-color.md, Track mattes). Effects/masks of the matte layer are ignored unless the layer-param menu says otherwise, which is the classic gotcha. Lottie: effect `ty: 28` (Matte3); `ef[0]` Layer (layer index), `ef[1]` Channel, `ef[2]` Invert, `ef[3]` Stretch To Fit, `ef[4]` Show Mask (= Composite Matte with Original), `ef[5]` Premultiply Mask; lottie-web implements it only as an alpha mask (`SVGMatte3Effect`).
+
+### AE-FX-072 · Shift Channels (转换通道)
+
+- **What it does:** Rebuilds each output channel (alpha, red, green, blue) from a chosen source channel or derived value of the same pixel.
+- **Exact semantics:** matchName `ADBE Shift Channels`; 32 bpc; GPU yes per help (version not in table); expands bounds: no (but Take Alpha From = Full On makes transparent areas of the layer rect opaque).
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Take Alpha From (从获取 Alpha（译名待核）) | `ADBE Shift Channels-0001` | popup | 1 = Alpha | enum below | — | |
+  | 2 | Take Red From (从获取红色（译名待核）) | `-0002` | popup | 2 = Red | enum below | — | |
+  | 3 | Take Green From (从获取绿色（译名待核）) | `-0003` | popup | 3 = Green | enum below | — | |
+  | 4 | Take Blue From (从获取蓝色（译名待核）) | `-0004` | popup | 4 = Blue | enum below | — | |
+  - Enum (AE 26 enum table, all four popups): 1 Alpha, 2 Red, 3 Green, 4 Blue, 5 Luminance, 6 Hue, 7 Lightness, 8 Saturation, 9 Full On, 10 Full Off.
+  ```
+  src(k) = Alpha: A | Red: R | Green: G | Blue: B | Luminance: luma(R,G,B) (Rec.709 in Skottie; AE weights UNVERIFIED)
+         | Hue/Lightness/Saturation: rgbToHls(R,G,B) component | Full On: 1 | Full Off: 0
+  A' = src(takeAlpha); R' = src(takeRed); G' = src(takeGreen); B' = src(takeBlue)
+  ```
+- **Priority:** P1 — common for channel tricks and alpha fixes; Skottie supports it.
+- **Owner:** bae-effects
+- **Notes:** The help zh heading is 转换通道效果 and the shared label 通道获取源 ("Take Channel From"); the individual parameter strings are （译名待核）. Skottie leaves Hue/Lightness/Saturation as TODO (outputs 0). Lottie: generic effect with `mn: "ADBE Shift Channels"`; `ef` order Alpha, Red, Green, Blue.
+
+### AE-FX-073 · Set Channels (设置通道)
+
+- **What it does:** Builds R, G, B and A of the layer from a chosen channel of up to four (possibly different) source layers.
+- **Exact semantics:** matchName `ADBE Set Channels`; 16 bpc in the table (help says 8/16/32 bpc and GPU); expands bounds: no.
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Source Layer 1 (源图层 1) | `ADBE Set Channels-0001` | layer | None (= this layer) | — | — | |
+  | 2 | Set Red To Source 1's (将源 1 设置为红色（译名待核）) | `-0002` | popup | 1 = Red | 1 Red / 2 Green / 3 Blue / 4 Alpha / 5 Luminance / 6 Hue / 7 Lightness / 8 Saturation / 9 Full / 10 Off | — | |
+  | 3 | Source Layer 2 (源图层 2) | `-0003` | layer | None | — | — | |
+  | 4 | Set Green To Source 2's | `-0004` | popup | 2 = Green | same | — | |
+  | 5 | Source Layer 3 (源图层 3) | `-0005` | layer | None | — | — | |
+  | 6 | Set Blue To Source 3's | `-0006` | popup | 3 = Blue | same | — | |
+  | 7 | Source Layer 4 (源图层 4) | `-0007` | layer | None | — | — | |
+  | 8 | Set Alpha To Source 4's | `-0008` | popup | 4 = Alpha | same | — | |
+  | 9 | If Layer Sizes Differ: Stretch Layers to Fit (如果图层大小不同：伸缩图层以适合) | `-0009` | checkbox | on (UNVERIFIED) | — | — | Off = centred. |
+  ```
+  S_k = sourceLayer_k is None ? input : layerParam(k) (centred or stretched)
+  R' = chan(S_1, setRed); G' = chan(S_2, setGreen); B' = chan(S_3, setBlue); A' = chan(S_4, setAlpha)
+  chan(): as Shift Channels src() with Full = 1, Off = 0 (enum order differs: Red first)
+  ```
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Popup defaults (1,2,3,4) give an identity result; IDs are confirmed by the AE 26 enum table (popups at 0002/0004/0006/0008).
+
+### AE-FX-074 · Minimax (最小值/最大值)
+
+- **What it does:** Replaces each channel of a pixel with the minimum or maximum of that channel within a radius (morphological erode/dilate), used to shrink or grow mattes.
+- **Exact semantics:** matchName `ADBE Minimax`; 16 bpc in the table (help: 8/16/32 bpc, GPU-accelerated); expands bounds: no (UNVERIFIED — Maximum on alpha cannot grow past the layer rectangle).
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Operation (操作) | `ADBE Minimax-0001` | popup | 2 = Maximum (UNVERIFIED) | 1 Minimum / 2 Maximum / 3 Minimum Then Maximum / 4 Maximum Then Minimum | — | |
+  | 2 | Radius (半径) | `-0002` | float slider | 0 | slider 0…100 (UNVERIFIED); valid 0…UNVERIFIED | px | Scaled by downsample factor (AE-FX-018). |
+  | 3 | Channel (通道) | `-0003` | popup | 1 = Color | 1 Color / 2 Alpha and Color / 3 Red / 4 Green / 5 Blue / 6 Alpha | — | |
+  | 4 | Direction (方向) | `-0004` | popup | 1 = Horizontal & Vertical | 1 Horizontal & Vertical / 2 Just Horizontal / 3 Just Vertical | — | |
+  | 5 | Don't Shrink Edges (不要收缩边缘（译名待核）) | `-0005` | checkbox | off | — | — | UNVERIFIED version (CC 2015+). Treats outside-of-layer as not shrinking. |
+  ```
+  r = round(radius / downsample)          // integer pixel radius (UNVERIFIED rounding)
+  op = min or max
+  H&V:  out = op over the (2r+1)x(2r+1) square (separable: horizontal pass then vertical pass)   // square vs disc UNVERIFIED
+  Just Horizontal / Just Vertical: one 1D pass
+  "then" variants: second pass with the other op and the same r (opening / closing)
+  applied to the selected channels only (Color = R,G,B; Alpha and Color = R,G,B,A)
+  outside the layer: transparent black (so Minimum erodes from the layer edge unless Don't Shrink Edges)
+  ```
+  - Example from AE help: a white solid area on black, Minimum, radius 1 → shrinks by 1 px on each side.
+  - Layer Quality does not affect Minimax.
+- **Priority:** P1 — standard matte choke/spread tool.
+- **Owner:** bae-effects
+- **Notes:** Implementation hint: van Herk/Gil-Werman separable min/max is O(1) per pixel for any radius; operate on premultiplied or straight values consistently (AE: UNVERIFIED which).
+
+### AE-FX-075 · Remove Color Matting (移除颜色遮罩)
+
+- **What it does:** Removes colour fringes from semi-transparent pixels whose colour was premultiplied against a known background colour (formerly called "Unmultiply").
+- **Exact semantics:** matchName `ADBE Remove Color Matting`; 32 bpc; GPU —; expands bounds: no.
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Background Color (背景颜色) | `ADBE Remove Color Matting-0001` | color | black [0,0,0] (UNVERIFIED) | — | — | Colour the edges were matted against. |
+  | 2 | Clip HDR Results (剪切 HDR 结果（译名待核）) | `-0002` | checkbox | on | — | — | 32 bpc only matters; off allows values outside 0…1. |
+  ```
+  if A > 0:  C' = (C - (1 - A) * bg) / A          // C straight-stored but actually matted with bg
+             if clipHDR: C' = clamp01(C')
+  else:      C' = C                                // alpha 0: colour irrelevant
+  A' = A
+  ```
+- **Priority:** P1 — standard fix after keying or for footage matted on a colour.
+- **Owner:** bae-effects
+- **Notes:** Not the same as Knoll Unmult-style effects that create alpha from brightness (AE help). Interpret Footage "Premultiplied – Matted With Color" does the same at import (see project-comp-layers.md, Interpret Footage).
+
+### AE-FX-076 · Channel Combiner (通道合成器)
+
+- **What it does:** Extracts a value (channel, HLS/YUV component, min/max RGB) from the layer or a second layer and writes it into chosen channels, or converts the whole pixel between colour models.
+- **Exact semantics:** matchName `ADBE Channel Combiner`; 8 bpc in the table (help says 32 bpc and GPU-accelerated — conflict, UNVERIFIED); expands bounds: no.
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Use 2nd Layer (使用第二个图层) | `ADBE Channel Combiner-0001` | checkbox | off | — | — | |
+  | 2 | Source Layer (源图层) | `-0002` | layer | None | — | — | Only with Use 2nd Layer. |
+  | — | (IDs 0003–0004 hidden/unused, UNVERIFIED) | | | | | | |
+  | 5 | From (自) | `-0005` | popup | UNVERIFIED (7 = Red?) | 1 RGB to HLS / 2 HLS to RGB / 3 RGB to YUV / 4 YUV to RGB / 5 Straight to Premultiplied / (6) / 7 Red / 8 Green / 9 Blue / 10 Alpha / (11) / 12 Hue / 13 Lightness / 14 Luminance / 15 Saturation / 16 Saturation Multiplied / (17) / 18 Min RGB / 19 Max RGB | — | Options 1–5 are whole-pixel conversions; To is ignored. |
+  | 6 | To (至) | `-0006` | popup | UNVERIFIED | 1 Red / 2 Green / 3 Blue / 4 Alpha / (5) / 6 Hue / 7 Lightness / 8 Saturation / (9) / 10 Red only / 11 Green only / 12 Blue only / 13 Alpha only / (14) / 15 Hue only / 16 Lightness only / 17 Saturation only | — | |
+  | 7 | Invert (反转) | `-0007` | checkbox | off | — | — | |
+  | 8 | Solid Alpha (纯色 Alpha) | `-0008` | checkbox | off | — | — | A' = 1 everywhere. |
+  ```
+  S = use2nd ? layerParam(2) : input
+  From 1..5: out = convert(S)   e.g. RGB to HLS writes (h,l,s) into (R,G,B); Straight to Premultiplied: rgb *= a
+  else v = Red|Green|Blue|Alpha of S | Hue|Lightness|Saturation (HLS) | Luminance (UNVERIFIED weights)
+         | Saturation Multiplied = s * (1 - |2l - 1|) (UNVERIFIED: "s times distance to black or white") | Min RGB | Max RGB
+       if invert: v = 1 - v
+       To Red/Green/Blue/Alpha: replace that channel of the input, keep others
+       To Hue/Lightness/Saturation: replace that HLS component of the input
+       "X only": Red only -> (v,0,0); Alpha only -> rgb = 1, A = v; Hue only -> hls(v, 0.5, 1);
+                 Lightness only -> hls(any, v, 0); Saturation only -> hls(0, 0.5, v)
+  if solidAlpha: A' = 1
+  ```
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Help tip: From = channel, To = Lightness only shows any channel as greyscale. The meaning of Invert (input vs output) per help is "inverts the output channel values".
+
+### AE-FX-077 · Compound Arithmetic (复合运算)
+
+- **What it does:** Legacy: combines the layer with a second layer using an arithmetic or logical operator on 8-bit values, with clip/wrap/scale overflow.
+- **Exact semantics:** matchName `ADBE Compound Arithmetic`; 8 bpc; GPU —; expands bounds: no.
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Second Source Layer (第二个源图层) | `ADBE Compound Arithmetic-0001` | layer | None | — | — | |
+  | 2 | Operator (运算符) | `-0002` | popup | 1 = Copy (UNVERIFIED default) | 1 Copy / 2 Add / 3 Subtract / 4 Multiply / 5 Difference / 6 And / 7 Or / 8 Xor / 9 Lighter / 10 Darker / 11 Minimum / 12 Maximum / 13 Screen / 14 Overlay / 15 Hard Light | — | |
+  | 3 | Operate On Channels (在通道上运算) | `-0003` | popup | 1 = RGB | 1 RGB / 2 ARGB / 3 Alpha | — | |
+  | 4 | Overflow Behavior (溢出特性) | `-0004` | popup | 1 = Clip | 1 Clip / 2 Wrap / 3 Scale | — | |
+  | 5 | Stretch Second Source to Fit (伸缩第二个源以适合) | `-0005` | checkbox | on | — | — | Off: second layer at its own size, aligned top-left. |
+  | 6 | Blend With Original (与原始图像混合) | `-0006` | float slider | 0 | 0…100 | % | |
+  ```
+  a = this pixel, b = second-layer pixel, both as integers 0..255 per channel
+  r = Copy: b | Add: a+b | Subtract: a-b | Multiply: a*b/255 | Difference: |a-b| | And/Or/Xor: bitwise
+      | Lighter: max? Darker: min? (UNVERIFIED difference to Minimum/Maximum) | Screen: 255-(255-a)(255-b)/255
+      | Overlay / Hard Light: standard formulas (compositing-3d-color.md, Blend modes)
+  Clip: clamp 0..255 | Wrap: r mod 256 (258 -> 2, -3 -> 253) | Scale: remap [min r, max r] over the frame to 0..255
+  out = lerp(r, a, blend/100)
+  ```
+- **Priority:** P2 — compatibility only (help recommends blend modes).
+- **Owner:** bae-effects
+- **Notes:** Scale needs a whole-frame min/max reduction.
+
+### AE-FX-078 · Calculations (计算)
+
+- **What it does:** Blends a chosen channel of the layer with a chosen channel of a second layer using a blending mode and opacity.
+- **Exact semantics:** matchName `ADBE Calculations`; 16 bpc; GPU —; expands bounds: no.
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Input (输入) | `ADBE Calculations-0001` | group | — | — | — | |
+  | 2 | Input Channel (输入通道) | `-0002` | popup | 1 = RGBA | 1 RGBA / 2 Gray / 3 Red / 4 Green / 5 Blue / 6 Alpha | — | Gray = luminance into R,G,B. |
+  | 3 | Invert Input (反转输入) | `-0003` | checkbox | off | — | — | Applied before channel extraction. |
+  | 5 | Second Layer (第二个图层) group | `-0005` | group | — | — | — | 0004 = Input group end. |
+  | 6 | Second Layer (第二个图层) | `-0006` | layer | None | — | — | |
+  | 7 | Second Layer Channel (第二个图层通道) | `-0007` | popup | 1 = RGBA | same list as Input Channel | — | |
+  | 8 | Second Layer Opacity (第二个图层不透明度) | `-0008` | float slider | 100 | 0…100 | % | 0 = no influence. |
+  | 9 | Invert Second Layer (反转第二个图层) | `-0009` | checkbox | off | — | — | |
+  | 10 | Stretch Second Layer to Fit (伸缩第二个图层以适合) | `-0010` | checkbox | on (UNVERIFIED) | — | — | Off = centred. |
+  | 12 | Blending Mode (混合模式) | `-0012` | popup | 1 = Normal | Normal / Copy / (sep) / Darken / Multiply / Color Burn / Classic Color Burn / (sep) / Add / Lighten / Screen / Color Dodge / Classic Color Dodge / (sep) / Overlay / Soft Light / Hard Light / Linear Light / Vivid Light / Pin Light / (sep) / Difference / Classic Difference / Exclusion / (sep) / Hue / Saturation / Color / Luminosity / (sep) / Stencil Alpha / Stencil Luma / Silhouette Alpha / Silhouette Luma / (sep) / Alpha Add / Luminescent Add | — | Formulas: compositing-3d-color.md, Blend modes. |
+  | 13 | Preserve Transparency (保持透明度) | `-0013` | checkbox | off | — | — | Keeps the original alpha. |
+  ```
+  a = extract(invertInput ? 1 - in : in, inputChannel)      // Gray/Red/... broadcast into RGB (alpha kept? UNVERIFIED)
+  b = extract(invertSecond ? 1 - L2 : L2, secondChannel); b.alpha *= secondOpacity/100
+  out = blend(mode, src = b, dst = a)
+  if preserveTransparency: out.a = in.a
+  ```
+- **Priority:** P2
+- **Owner:** bae-effects (+ bae-render)
+- **Notes:** Group IDs inferred from the popup IDs 0002/0007/0012 in the AE 26 enum table. Implementation hint: reuse the compositor's blend-mode shader library.
+
+### AE-FX-079 · Arithmetic (算术)
+
+- **What it does:** Applies one simple arithmetic or bitwise operation between each of R, G, B and a per-channel constant.
+- **Exact semantics:** matchName `ADBE Arithmetic`; 8 bpc; GPU —; expands bounds: no.
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Operator (运算符) | `ADBE Arithmetic-0001` | popup | UNVERIFIED (4 = Add) | 1 And / 2 Or / 3 Xor / 4 Add / 5 Subtract / 6 Difference / 7 Min / 8 Max / 9 Block Above / 10 Block Below / 11 Slice / 12 Multiply / 13 Screen | — | |
+  | 2 | Red Value (红色值（译名待核）) | `-0002` | slider | 0 | 0…255 | 8-bit level | |
+  | 3 | Green Value (绿色值（译名待核）) | `-0003` | slider | 0 | 0…255 | | |
+  | 4 | Blue Value (蓝色值（译名待核）) | `-0004` | slider | 0 | 0…255 | | |
+  | 5 | Clip Result Values (剪切结果值) | `-0005` | checkbox | on | — | — | Off: results wrap (mod 256). |
+  ```
+  per channel, p = pixel 0..255, v = value:
+  And/Or/Xor: bitwise | Add: p+v | Subtract: p-v | Difference: |p-v| | Min: min | Max: max
+  Block Above: p > v ? 0 : p | Block Below: p < v ? 0 : p
+  Slice: this channel = p > v ? 255 : 0, the other colour channels set to 255 (per help)  (UNVERIFIED interplay)
+  Multiply: p*v/255 | Screen: 255 - (255-p)(255-v)/255
+  clip ? clamp(0,255) : wrap mod 256
+  ```
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Defined on 8-bit integers; in 16/32-bpc projects BAE converts as in AE-FX-015.
+
+### AE-FX-080 · Blend (混合)
+
+- **What it does:** Animatable blend of the layer with another layer using one of five modes (Crossfade, Color Only, Tint Only, Darken Only, Lighten Only).
+- **Exact semantics:** matchName `ADBE Blend`; 16 bpc; GPU —; expands bounds: no.
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Blend With Layer (与图层混合) | `ADBE Blend-0001` | layer | None (= this layer) | — | — | |
+  | 2 | Mode (模式) | `-0002` | popup | 1 = Crossfade | 1 Crossfade / 2 Color Only / 3 Tint Only / 4 Darken Only / 5 Lighten Only | — | |
+  | 3 | Blend With Original (与原始图像混合) | `-0003` | float slider | 0 | 0…100 | % | 100 = original only. |
+  | 4 | If Layer Sizes Differ (如果图层大小不同) | `-0004` | popup | 1 = Center | 1 Center / 2 Stretch to Fit | — | Layer Quality affects scaling only for Stretch. |
+  ```
+  b = layerParam(1) placed per (4)
+  Crossfade:    r = b (including alpha; a proper crossfade with transparency)
+  Color Only:   r = HLS(hue(b), sat(b), light(a))       // UNVERIFIED exact colour model
+  Tint Only:    as Color Only but only where sat(a) > 0 (UNVERIFIED weighting)
+  Darken Only:  r.rgb = min(a.rgb, b.rgb) ; Lighten Only: max
+  out = lerp(r, a, blendWithOriginal/100)
+  ```
+- **Priority:** P2
+- **Owner:** bae-effects
+- **Notes:** Help: unlike layer blending modes, these are animatable via Blend With Original; to hide the control layer turn off its Video switch.
+
+### AE-FX-081 · Solid Composite (纯色合成)
+
+- **What it does:** Composites the layer over a solid colour (behind it) with separate opacities and a blending mode, without creating a solid layer.
+- **Exact semantics:** matchName `ADBE Solid Composite`; 32 bpc; GPU —; expands bounds: no (fills only the layer rectangle).
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Source Opacity (源不透明度) | `ADBE Solid Composite-0001` | float slider | 100 | 0…100 | % | |
+  | 2 | Color (颜色) | `-0002` | color | white [1,1,1] (UNVERIFIED) | — | — | |
+  | 3 | Opacity (不透明度) | `-0003` | float slider | 100 | 0…100 | % | Solid opacity. |
+  | 4 | Blending Mode (混合模式) | `-0004` | popup | 1 = Normal | Normal / (sep) / Add / Multiply / Screen / Overlay / Soft Light / Hard Light / (sep) / Color Dodge / Color Burn / (sep) / Darken / Lighten / Difference / Exclusion / (sep) / Hue / Saturation / Color / Luminosity | — | |
+  ```
+  dst = solid(color, alpha = opacity/100) over the layer rect
+  src = input with alpha *= sourceOpacity/100
+  out = composite(src over dst with blendingMode)   // formulas: compositing-3d-color.md, Blend modes
+  ```
+- **Priority:** P2
+- **Owner:** bae-effects (+ bae-render)
+- **Notes:** —
+
+### AE-FX-082 · CC Composite (CC 合成（译名待核）)
+
+- **What it does:** Re-composites the layer's original (pre-effect) image with the current effect-stack result using a blend mode — typically applied after other effects to bring back the original on top or behind.
+- **Exact semantics:** matchName `CC Composite` per the docsforadobe table and the AE 26 enum table key (an AE 26.0 effect enumeration lists `CS Composite` — UNVERIFIED which one current AE writes; BAE must accept both); 16 bpc; GPU —; expands bounds: no.
+  | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|---|---|
+  | 1 | Opacity (不透明度) | `CC Composite-0001` | float slider | 100 | 0…100 | % | |
+  | 2 | Composite Original (合成原始项目（译名待核）) | `-0002` | popup | UNVERIFIED (2 = Behind?) | Copy / Behind / In front / (sep) / Darken / Multiply / Linear Burn / Color Burn / Classic Color Burn / (sep) / Add / Lighten / Screen / Linear Dodge / Color Dodge / Classic Color Dodge / (sep) / Overlay / Soft Light / Hard Light / Linear Light / Vivid Light / Pin Light / Hard Mix / (sep) / Difference / Classic Difference / Exclusion / (sep) / Hue / Saturation / Color / Luminosity / (sep) / Stencil Alpha / Stencil Luma / Silhouette Alpha / Silhouette Luma / (sep) / Add Alpha / Luminescent Premul | — | |
+  | 3 | RGB Only (仅 RGB（译名待核）) | `-0003` | checkbox | off | — | — | Keep the current alpha. |
+  ```
+  orig = layer pixels before the first effect (after masks; UNVERIFIED)
+  cur  = output of the effects above CC Composite
+  Copy: r = orig ; Behind: r = cur over orig ; In front: r = orig over cur ;
+  other modes: r = blend(mode, src = orig, dst = cur)
+  r = lerp(cur, r, opacity/100) ; if RGBOnly: r.a = cur.a
+  ```
+- **Priority:** P2
+- **Owner:** bae-effects (+ bae-render)
+- **Notes:** Needs access to the pre-effects input inside the stack (BAE effect graph must keep it alive, AE-FX-001).
