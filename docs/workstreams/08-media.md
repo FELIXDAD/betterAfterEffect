@@ -56,7 +56,8 @@
 - [x] 编码导出接口（`export`）：`EncodeSettings`（对应 AE 输出模块：编码、尺寸、帧率、RGB / RGB+Alpha 及直通/预乘、位深、色彩标签、起始编号与时码）、`Encoder` / `EncoderFormat`（注册到 `Registry<dyn EncoderFormat>`）、`MediaEncoders`、`convert_frame`（CPU 像素格式与 alpha 转换）、`FrameReadback`（GPU 帧异步回读，默认 2 帧在途）、`render`（逐帧生产 → 回读 → 编码，进度回调、取消时删除半成品）、`RenderQueue`（运行时队列：排队、取消、重排、重新排队、结果）。工程里保存哪些渲染任务属于文档模型，这里只负责执行。
 - [x] PNG 序列（8/16 位，RGB 或 RGBA，sRGB/gAMA/pHYs）、OpenEXR 序列（half/float，None/RLE/ZIPS/ZIP/PIZ，色度、像素比、逐帧时码）编码；文件名支持 `name_[####].png`、`name_####.png`、`name_0000.png`。
 - [x] macOS 编码（`apple::AvWriterFormat`）：AVAssetWriter 驱动 VideoToolbox，H.264 / HEVC 优先硬件编码，ProRes Proxy / LT / 422 / HQ / 4444 / 4444 XQ；8 位用 32BGRA，ProRes 和 10 位 HEVC 用 64RGBAHalf；ProRes 4444 直通 alpha，HEVC alpha 可选直通 / 预乘；按 H.273 写色彩标签（原色、传递函数、矩阵），像素比、码率、质量、关键帧间隔。解码端识别 HEVC alpha 及其直通 / 预乘。
-- [ ] 编码导出后续：GPU 端转换后直接写进 IOSurface（省掉 CPU 转换和拷贝）、时码轨、音频混入、Windows Media Foundation 编码
+- [x] 导出提速：`Encoder::input_format` 声明编码器要的像素格式和 alpha，渲染循环在回读前用 compute pass 转好（`MediaGpu::convert_for_export`；BGRA 用 RGBA8 纹理加通道交换，16 位用 rgba16uint），只回读最终字节，编码器直接借用不再逐像素转换；PNG / EXR 序列由最多 4 个线程并行压缩写盘（有界队列控制 4K 内存）。4K 实测（机器负载高，A/B 交替两轮）：H.264 25 → 47 fps，ProRes 422 HQ 23 → 62–69 fps，ProRes 4444 + alpha 21 → 50–66 fps，EXR half 7.3 → 12.6 fps。
+- [ ] 编码导出后续：渲染直接写进 IOSurface 支撑的 pixel buffer（省掉回读和拷贝）、时码轨、音频混入、Windows Media Foundation 编码
 - [x] 音频接口（`audio`）：`AudioSource`（按采样帧随机读取）、采样与 `Time` 精确换算、`MemoryAudio`、`Waveform`（min/max 峰值、降采样出缩放级别、按时间取可见区间）。
 - [x] 音频文件解码（`FileAudio`，symphonia）：WAV、AIFF、MP4 / QuickTime / M4A（AAC）、MP3、FLAC，按采样帧随机读取（顺读继续解码，跳转时精确 seek）；`audio::probe` 只读文件头列出音频流，影片的 `MediaInfo.audio` 由它填写。symphonia 的 MP4 读取不处理编码器延迟，AAC 会比画面晚约 44 ms（48 kHz 下 2112 个采样）；新增的小型 box 读取器从音频轨的编辑列表或 iTunes 无缝信息（`iTunSMPB`）里取延迟和有效长度并裁掉。测试用代码生成 WAV，macOS 上测试时用系统的 `afconvert` 生成 AAC / FLAC / AIFF；AAC 在 0.5 s 处放一个脉冲，解码后位置仍在 0.5 s。
 - [ ] cpal 播放、音画同步时钟；导出时混入音频
