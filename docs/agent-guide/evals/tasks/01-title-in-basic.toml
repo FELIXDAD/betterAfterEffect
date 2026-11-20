@@ -31,7 +31,7 @@ summary = """
 [[checks]]
 id = "c7-read-first"
 kind = "first_call"
-args = { tool = "stage.describe" }
+args = { tool = "stage_describe" }
 maps_to = "C7"
 
 [[checks]]
@@ -78,14 +78,14 @@ hard = true
 [[checks]]
 id = "h6-contact-sheet"
 kind = "called"
-args = { tool = "render.contact_sheet" }
+args = { tool = "render_contact_sheet" }
 maps_to = "H6"
 hard = true
 
 [[checks]]
 id = "h6-final-render"
 kind = "called"
-args = { tool = "render.frame", after_last_write = true }
+args = { tool = "render_frame", after_last_write = true }
 maps_to = "H6"
 hard = true
 

@@ -68,3 +68,11 @@
   4. `stage.describe` 输出里请直接包含：合成帧速率、时长、工作区域、当前编辑目标、Agent 自己的权限级别、锁提示。
   5. `render.contact_sheet` 每格标出帧号；时间参数接受相对合成开始的整数帧号（也接受时码），由服务器换算 flicks。
   6. 评测集 `docs/agent-guide/evals/` 需要审计日志能导出完整的工具调用序列（含事务边界和写入的工程层）。
+
+- **21 io/packaging（2026-11-20）**：`bae-package`（无 GPU 依赖）提供打包命令 `package.scan`、`package.pack`、`package.collect`、`package.unpack`、`asset.relink`、`asset.set_files`，注册函数是 `bae_package::register_commands(&mut registry)`。请在 `Workspace::new` 里一起注册，Agent 才能调用。这些命令只能看到 Stage，工程位置通过参数 `project`（`.bae` 目录或 `.baez` 文件）传入；如果方便，服务器可以在调用时自动填入当前工程的位置。
+
+- **09 collab/sync（2026-11-20）**：版本相关的能力已经在 `bae-sync` 里，Agent 需要的话：
+  1. **回滚是命令**：`bae_sync::register_commands(&mut registry)` 注册 `version.revert`（参数 `version`、可选 `sublayer` 或 `prim`），请在 `Workspace::new` 里一起注册。`version` 的 JSON 形状是"工程层 → (Loro peer ID 字符串 → 操作数)"，即 `ProjectVersion::to_json()` 的输出。
+  2. **命名版本是元数据，不在 Stage 里**：请让 `Workspace` 持有一个 `bae_sync::History`（打开时 `History::load(工程目录)`，保存工程时 `history.save(工程目录)`；协同时用 `ProjectDocs { stage, history }` 交给 `SyncSession`）。建议的工具（18 的指南里叫 `history.*`）：`history.list`（`history.checkpoints()`，每项带 `version.to_json()`）、`history.checkpoint`（`create_checkpoint(stage, author, name, note)`）、`history.diff`（`History::diff(stage, from, to)`，`to` 省略表示当前；输出 `PrimDiff` 的路径、变化类型、属性、作者、时间）、`history.revert`（按命名版本 ID 查到 `version` 后执行 `version.revert` 命令，这样修改仍然经过命令总线）。只读查看旧版本可以用 `History::view(stage, id)` 拿到只读 `Stage`，复用 `stage.describe` 的输出。
+  3. **锁提示**：协同时 Agent 也是一个客户端，建议用 `SyncSession::set_presence`（`user` 填 `agent:...`）让人看到它在线；`stage.describe` 里的"锁提示"可以用 `SyncSession::editing_by_others(path)` 得到"谁声明在改这个合成"。
+  规格见 `docs/spec/sync.md` 第 5、6 节。

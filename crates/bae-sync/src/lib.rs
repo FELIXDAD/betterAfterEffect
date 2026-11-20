@@ -13,6 +13,7 @@
 //! - Presence ([`PresenceState`]): who is online, selection, playhead, workspace and
 //!   advisory "I am editing this" locks, over the same transports
 //!   ([`SyncSession::set_presence`], [`SyncSession::presence`]).
+//! - `HubTransport` (feature `hub`): WebSocket connection to the collaboration hub.
 //! - [`Relay`]: the hub side (fan-out between clients), used by `services/bae-hub`.
 //! - [`History`]: named versions ([`Checkpoint`]), read-only views of any version
 //!   ([`history::view_at`]) and per-prim differences with authors
@@ -21,10 +22,13 @@
 //! This crate has no GPU, window or platform dependencies.
 
 mod client;
+mod commands;
 mod dir;
 mod docs;
 mod error;
 pub mod history;
+#[cfg(feature = "hub")]
+mod hub;
 mod presence;
 mod protocol;
 mod relay;
@@ -33,13 +37,16 @@ mod threaded;
 mod transport;
 
 pub use client::ClientId;
+pub use commands::{RevertOutput, RevertParams, register_commands};
 pub use dir::{DirConfig, DirStats, DirTransport, LOG_FORMAT, LOG_VERSION};
 pub use docs::{DocSet, Imported, MemDocs};
 pub use error::SyncError;
 pub use history::{
     Checkpoint, CheckpointId, History, PrimChange, PrimDiff, ProjectDocs, ProjectVersion,
-    VersionView,
+    RevertScope, VersionJson, VersionView,
 };
+#[cfg(feature = "hub")]
+pub use hub::HubTransport;
 pub use presence::{PeerPresence, Playhead, PresenceState};
 pub use protocol::{DocKey, Message, PROTOCOL_VERSION};
 pub use relay::{PeerHandle, Relay, RelayOutcome};

@@ -65,7 +65,7 @@ hard = true
 [[checks]]
 id = "no-delete"
 kind = "not_called"
-args = { tool = "prim.delete" }
+args = { tool = "prim_delete" }
 maps_to = "C4"
 hard = true
 

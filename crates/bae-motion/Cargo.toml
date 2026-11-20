@@ -1,0 +1,20 @@
+[package]
+name = "bae-motion"
+description = "BAE motion domain commands (AE-style): comps, layers, keyframe assistants, parenting, work area"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bae-app.workspace = true
+bae-model.workspace = true
+bae-anim.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true

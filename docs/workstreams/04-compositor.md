@@ -66,3 +66,28 @@ bae-color 接口已提 PR（`[interface]`），接法见 `crates/bae-color/READM
 2. 现在的 `BlendSpace { Encoded, Linear }` 换成 `bae_color::BlendSpace`：`Stored` / `LinearBuffers` 直接混合缓冲区里的值；`LinearBlend` 在混合前后套 `blend_linearization()` 的 decode / encode。注意"线性化工作空间"时缓冲区本身已经是线性的，不能再转换一次。
 3. 素材节点挂 `interpret::input_transform(...)`；相邻的色彩节点用 `ColorTransform::then` 合并，`is_identity()` 时删掉节点；`to_wgsl(prefix)` 生成的片段拼进采样素材的 pass；视口最后一个 pass 用 `display_transform()`；渲染队列用 `output_transform()`。
 4. 依赖 bae-color 时打开 `features = ["media"]`，就能 `SourceTags::from(&media_info.color)`。
+
+### 21 io/packaging → 04（2026-11-20）
+
+工程可以直接从 `.baez` 打开（素材在包里，不解包）。这时 `AssetResolver::new(base_dir)` 找不到包内素材。建议求值/渲染找素材时改用 `bae_package::AssetLocator`（`AssetLocator::for_project(&project)`，`locate(&asset_file)`）：
+
+- `AssetLocation::File { path, .. }`：和现在一样按路径打开；
+- `AssetLocation::Packaged { entry }`：`PackageReader::entry(entry)` 给出 `.baez` 里的字节偏移和长度（不压缩，可直接定位读取）；如果解码器只能接受文件路径，用 `PackageReader::materialize(entry, cache_dir)` 解出到缓存目录。
+
+`bae-package` 不依赖 GPU，bae-render 可以直接依赖。
+
+### 19 core/plugins → 04（2026-11-20）
+
+声明式 WGSL 效果（`bae_plugin::DeclarativeEffect`）直接实现 `bae_render::Effect`，与 07 的内置效果走同一条路径。约定见 `docs/spec/plugin-architecture.md` §11。两点请求：
+
+1. **R04-11 `EffectParams` 补充字段**（都有 AE 对应项）：请求比例下的图层范围（layer bounds）、合成帧率和 `time_step`、工作空间是否线性化、最终渲染/预览标志和质量、快门角度/相位、每个效果实例稳定的随机种子。WGSL 前导里的 `BaeFrame` 已经留了这些字段，在补上之前插件宿主用输入范围代替图层范围，未知的填 0。
+2. **R04-12 在 bae-render 之外构造 `EncodeContext`。** 现在 `ImageAllocator` 是 `pub(crate)`，效果 crate（19、07）没法写 GPU 单元测试。建议公开 `ImageAllocator`，或者加一个带简单纹理池的 `EncodeContext::for_tests(gpu, encoder, format)`。在此之前，19 把 GPU 编码部分拆成不依赖 `EncodeContext` 的函数来测试。
+
+### 05 render/vector-text → 04（2026-11-20）
+
+形状图层的图层源已提 PR（`[interface] vector`），接法见 `crates/bae-vector/README.md`。请求：
+
+1. **`LayerSource::bounds()`**：形状和文字画在图层原点周围（AE 新建形状图层锚点 (0,0)、位置在合成中心），一半内容在负坐标，`[0, w) × [0, h)` 会把它裁掉。05 的 PR 里在 `source.rs` 加了带默认实现的 `fn bounds(&self) -> IRect`（默认 `IRect::from_size(size())`），`graph.rs` 里图层源的内容矩形改用它（两处、向后兼容）。如果你们有别的做法，请改掉，05 跟着调整。
+2. **适配 03 的 `EvaluatedComp` 时**：`kind == shape` 的图层生成 `LayerContent::Custom { provider: "bae.shape", data: Arc<bae_anim::EvaluatedLayer>, hash: contents 的哈希, size: None }`；`kind == text` 的图层同样，provider 是 `"bae.text"`，哈希覆盖 `text`、`text_animators`。provider 由 apps/bae 注册（`bae_vector::render::ShapeProvider`、`bae_text::render::TextProvider`）。MockEvaluator 里"shape/text layers are drawn by 05 (not yet)"的警告可以换成这条路径。
+3. **连续栅格化**：AE 的形状/文字图层总是按最终变换后的分辨率栅格化，放大不会糊。现在图层源只在图层空间按 `SourceRequest.scale` 栅格化。建议 `SourceRequest` 加上图层到输出的变换（或者至少是各轴缩放），矢量源据此直接按最终分辨率画（`ImageAlpha` / `GpuImage` 不变）。
+4. **测试入口**：`EncodeContext` 的 `allocator` 是 `pub(crate)`，别的 crate 无法通过 trait 调 `LayerSource::render` 做测试。希望提供一个无窗口的测试入口，例如 `bae_render::testing::render_source(gpu, &dyn LayerSource, &SourceRequest) -> GpuImage`。05 目前直接测自己的 `ShapeSource::render_on`。

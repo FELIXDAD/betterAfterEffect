@@ -11,11 +11,13 @@
 | `TransferFunction` | 传递函数：`decode` = 编码值 → 线性光，`encode` 反之。见下表 |
 | `ColorSpace` | 色彩空间：原色 + 传递函数（`Rgb`），或显式变换（`Transform`，给 OCIO 和 XYZ 用），或数据（`Data`，不转换）。工程文件里只存 `id` |
 | `builtin` | 内置色彩空间库，`builtin::by_id("acescg")` 按 id 查找 |
-| `ColorTransform` | 变换 = 一串 `ColorOp`（矩阵、传递函数、1D/3D LUT、钳制）。拼接时相邻的步骤自动合并 |
+| `ColorTransform` | 变换 = 一串 `ColorOp`（矩阵、传递函数、1D/3D LUT 及 1D 精确反求、钳制、OCIO 的幂函数 / ExponentWithLinear / Log / CDL）。拼接时相邻的步骤自动合并 |
 | `GpuSnippet` | 由 `ColorTransform::to_wgsl(prefix)` 生成：WGSL 代码 + uniform 数据 + LUT 纹理，拼进渲染图的着色器 |
 | `WorkingSpace` | 工程色彩设置：工作空间（`None` = 不做色彩管理，AE 默认）、线性化工作空间、使用 1.0 灰度系数混合颜色 |
 | `ColorContext` | 一次渲染的色彩上下文：`working`、`view`、`display` |
 | `Interpretation` / `SourceTags` | 素材解释：文件里的色彩标签、手动覆盖、保留 RGB、解释为线性光 |
+| `ocio::Config` | 读取 `config.ocio`（v1、v2）：色彩空间、角色、别名、视图变换、显示/视图、文件规则、内置变换 |
+| `lutfile` | 读取 `.cube`（1D、3D、shaper + 3D）、`.spi1d`、`.spi3d` |
 
 ### 参考空间
 
@@ -33,6 +35,7 @@
 | `display-p3` / `p3-d65-linear` | Display P3 / 线性 P3-D65 | P3-D65 | sRGB / 线性 |
 | `dci-p3` | DCI-P3 | P3（DCI 白点） | 2.6 |
 | `rec2020` / `rec2020-linear` | Rec.2020 / 线性 Rec.2020 | Rec.2020 | BT.2020 / 线性 |
+| `rec2020-gamma24` | Rec.2020 Gamma 2.4（BT.1886） | Rec.2020 | 2.4 |
 | `rec2100-pq` / `rec2100-hlg` | Rec.2100 PQ / HLG | Rec.2020 | PQ / HLG |
 | `acescg` / `aces2065-1` | ACEScg / ACES2065-1 | AP1 / AP0 | 线性 |
 | `acescct` / `acescc` | ACEScct / ACEScc | AP1 | ACEScct / ACEScc |
@@ -45,7 +48,7 @@
 | `cie-xyz-d65` | CIE XYZ D65 | — | 线性 |
 | `raw` | 不转换（数据） | — | — |
 
-`<id>~linear`（例如 `srgb~linear`）表示同一原色的线性版本，用于"线性化工作空间"和"解释为线性光"。
+`<id>~linear`（例如 `srgb~linear`）表示同一原色的线性版本，用于"线性化工作空间"和"解释为线性光"；`<id>~gamma2.4` 等表示换成纯 gamma 曲线。
 
 传递函数的约定：编码值是归一化码值（`码值 / (2^n − 1)`）；显示曲线对负数做奇对称延伸，超过 1 的部分沿幂函数继续（32 bpc 超范围值不丢）；PQ 的线性 1.0 = 100 cd/m²（与 OCIO 相同）；HLG 是 BT.2100 OETF，不含 OOTF。
 
@@ -95,11 +98,28 @@ let out = ctx.output_transform(&builtin::REC709)?;
 - `*_apply_premul` 输入输出都是预乘 RGBA；纯矩阵变换不做反预乘。
 - 帧缓存键用 `ColorContext::render_fingerprint()`（只含工作空间，显示和视图变换不影响缓存的帧）。
 
+## OCIO 子集
+
+```rust
+let cfg = bae_color::ocio::Config::load(Path::new("config.ocio"))?;
+let t = cfg.processor("ACEScct", "ACEScg")?;                    // 色彩空间之间
+let v = cfg.display_view("ACEScg", "sRGB - Display", "Un-tone-mapped")?;  // 经过显示/视图
+let cs = cfg.color_space("ACEScct")?;                           // 变成 bae ColorSpace（id = "ocio:ACEScct"），可与内置空间混用
+let ws = WorkingSpace::from_project_attrs("ocio:ACEScg", false, false, cfg.resolver())?;
+```
+
+- 支持的变换：Group、Matrix、Exponent、ExponentWithLinear、Log、LogAffine、LogCamera、Range、CDL、File（.cube / .spi1d / .spi3d，1D 可反向）、ColorSpace、Builtin、Allocation（无操作）。
+- 内置变换：ACEScg / ACEScct / ACEScc ↔ ACES2065-1、相机（ARRI LogC3 / LogC4、Sony S-Log3 含 VENICE、Panasonic V-Log、Canon Log 3）、显示（sRGB、Display P3、BT.1886、Gamma 2.2 / 2.6、PQ）、工具矩阵。OCIO 内部用 LUT 近似的曲线（PQ、Canon Log 3）这里用解析式。
+- 暂不支持（返回 `ColorError::Unsupported`）：ACES 输出变换（ACES 1.x RRT+ODT、ACES 2.0）、Look、NamedTransform、上下文变量、FixedFunction / Grading、ADX、Apple Log、Canon Log 2、反向 3D LUT。ACES 1.2 配置的输出空间本身就是烘焙好的 3D LUT，可以用。
+- YAML 用自己写的子集解析器（`ocio::yaml`），没有新依赖。
+
 ## 精度（本机 Apple M4）
 
 - 曲线与 colour-science 0.4.7 对比：最大相对误差 2.6e-6（Rec.709 是 colour 常数取整的差别，其余 ≤ 3e-15）；空间转换 ≤ 2.6e-6。
 - 与 OCIO 2.6 内置 ACES studio 配置（AE 的 OCIO 引擎用的同类配置）对比：≤ 2.4e-5（Gamma 2.2/2.4，OCIO 在 f32 下计算），相机 Log 空间 ≤ 1.1e-5。
 - GPU（WGSL，f32）与 CPU 参考（f64）：PQ ≤ 9.7e-5，其他曲线 ≤ 1.6e-6，空间转换 ≤ 1.6e-5（含 PQ 的 4e-5），LUT ≤ 2.4e-7。
 - 往返（转到工作空间再转回）：所有内置空间两两之间 < 1e-9。
+- OCIO 子集与 OpenColorIO 2.6 库本身对比（`OPTIMIZATION_LOSSLESS`）：自制配置（覆盖每种变换和 LUT 格式）50 组 ≤ 1.3e-6；ACES studio 2.1 配置 175 组、ACES 1.3 CG 配置 78 组 ≤ 5.7e-6；AE 自带的 ACES 1.3 CG / Studio 和 ACES 1.2 配置 411 组（含 ACES 1.2 烘焙的输出变换）≤ 4.1e-6。
+- 与 After Effects 2026 渲染结果逐像素对比：13 个 Adobe 引擎用例全部吻合，详见 `tools/ae/README.md`。
 
 测试向量由 `tools/gen_vectors.py` 生成（需要 colour-science 和 opencolorio），GPU 测试在没有 GPU 的机器上自动跳过（`BAE_REQUIRE_GPU=1` 时改为失败）。

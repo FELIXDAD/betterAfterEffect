@@ -10,12 +10,15 @@ use bae_model::{
 };
 use glam::{DMat4, DVec3};
 
+use rquickjs::Ctx;
+
 use crate::curve::Curve;
 use crate::error::EvalError;
 use crate::evaluated::{
     AssetInfo, CameraState, EvaluatedComp, EvaluatedEffect, EvaluatedLayer, EvaluatedMask,
     EvaluatedPrim, LayerSource, LayerSwitches, LightFalloff, LightState, LightType, TrackMatte,
 };
+use crate::expr;
 use crate::schema::{
     self, asset, camera as cam, comp as c, effect as fx, layer as l, light as li, mask as mk,
     transform as tr,
@@ -25,9 +28,50 @@ use crate::transform::{AutoOrientRotation, Transform, drop_z, look_along, orient
 
 /// An animatable attribute, compiled.
 #[derive(Clone, Debug)]
-enum Prop {
+pub(crate) enum Prop {
     Static(Value),
     Curve(Box<Curve>),
+    /// An enabled expression on top of a static value or keyframes.
+    Expr(Box<ExprProp>),
+}
+
+/// An attribute with an expression: the pre-expression value and the source, plus the
+/// attribute's identity (memo key, error reports).
+#[derive(Clone, Debug)]
+pub(crate) struct ExprProp {
+    pub base: Prop,
+    pub source: Arc<str>,
+    pub prim: PrimPath,
+    pub attr: Arc<str>,
+    /// Range the result is clamped to (Opacity), as after interpolation.
+    pub clamp: Option<(f64, f64)>,
+}
+
+/// Where and when a property is sampled.
+#[derive(Clone, Copy)]
+pub(crate) struct Cx<'a, 'js> {
+    /// Comp id in the expression scope (0 when there is none).
+    pub comp: usize,
+    /// Layer index in the comp.
+    pub layer: usize,
+    /// Comp time.
+    pub ct: Time,
+    /// Layer time (the keyframes' time base).
+    pub lt: Time,
+    /// The JavaScript context when expressions run; `None` evaluates every
+    /// expression's pre-expression value.
+    pub js: Option<&'a Ctx<'js>>,
+}
+
+impl Cx<'_, '_> {
+    /// The same layer at another layer time.
+    pub(crate) fn at_layer_time(&self, lt: Time, timing: &LayerTiming) -> Self {
+        Cx {
+            lt,
+            ct: timing.comp_time(lt),
+            ..*self
+        }
+    }
 }
 
 impl Prop {
@@ -40,13 +84,39 @@ impl Prop {
         fallback: Value,
     ) -> Prop {
         match view.attr(attr) {
-            Some(spec) => Prop::from_spec(spec, prim_type, attr)
+            Some(spec) => Prop::from_spec(spec, prim_type, view.path(), attr)
                 .unwrap_or_else(|| Prop::Static(default_of(prim_type, attr).unwrap_or(fallback))),
             None => Prop::Static(default_of(prim_type, attr).unwrap_or(fallback)),
         }
     }
 
-    fn from_spec(spec: &AttrSpec, prim_type: Option<&PrimType>, attr: &str) -> Option<Prop> {
+    fn from_spec(
+        spec: &AttrSpec,
+        prim_type: Option<&PrimType>,
+        prim: &PrimPath,
+        attr: &str,
+    ) -> Option<Prop> {
+        let base = Self::from_spec_no_expr(spec, prim_type, attr)
+            .or_else(|| default_of(prim_type, attr).map(Prop::Static));
+        match &spec.expression {
+            Some(e) if e.enabled && !e.source.trim().is_empty() => {
+                Some(Prop::Expr(Box::new(ExprProp {
+                    base: base.unwrap_or(Prop::Static(Value::Float(0.0))),
+                    source: e.source.as_str().into(),
+                    prim: prim.clone(),
+                    attr: attr.into(),
+                    clamp: schema::clamp_range(prim_type, attr),
+                })))
+            }
+            _ => base,
+        }
+    }
+
+    fn from_spec_no_expr(
+        spec: &AttrSpec,
+        prim_type: Option<&PrimType>,
+        attr: &str,
+    ) -> Option<Prop> {
         if let Some(curve) = Curve::new(&spec.keyframes, schema::curve_kind(attr, spec)) {
             let curve = match schema::clamp_range(prim_type, attr) {
                 Some((lo, hi)) => curve.with_clamp(lo, hi),
@@ -57,25 +127,44 @@ impl Prop {
         spec.value.clone().map(Prop::Static)
     }
 
-    fn sample(&self, t: Time) -> Value {
+    /// Value at `cx` (expressions applied when `cx.js` is set).
+    pub(crate) fn sample(&self, cx: &Cx<'_, '_>) -> Value {
         match self {
             Prop::Static(v) => v.clone(),
-            Prop::Curve(c) => c.sample(t),
+            Prop::Curve(c) => c.sample(cx.lt),
+            Prop::Expr(e) => match cx.js {
+                Some(ctx) => crate::expr::evaluate(ctx, cx, e),
+                None => e.base.sample(cx),
+            },
         }
     }
 
-    fn f64(&self, t: Time) -> f64 {
+    /// Value before expressions.
+    pub(crate) fn sample_pre(&self, cx: &Cx<'_, '_>) -> Value {
         match self {
-            Prop::Static(v) => num(v),
-            Prop::Curve(c) => num(&c.sample(t)),
+            Prop::Expr(e) => e.base.sample(cx),
+            other => other.sample(cx),
         }
     }
 
-    fn vec3(&self, t: Time) -> DVec3 {
+    pub(crate) fn curve(&self) -> Option<&Curve> {
         match self {
-            Prop::Static(v) => vec3(v),
-            Prop::Curve(c) => vec3(&c.sample(t)),
+            Prop::Curve(c) => Some(c),
+            Prop::Expr(e) => e.base.curve(),
+            Prop::Static(_) => None,
         }
+    }
+
+    fn has_expression(&self) -> bool {
+        matches!(self, Prop::Expr(_))
+    }
+
+    fn f64(&self, cx: &Cx<'_, '_>) -> f64 {
+        num(&self.sample(cx))
+    }
+
+    fn vec3(&self, cx: &Cx<'_, '_>) -> DVec3 {
+        vec3(&self.sample(cx))
     }
 }
 
@@ -83,7 +172,7 @@ fn default_of(prim_type: Option<&PrimType>, attr: &str) -> Option<Value> {
     schema::default_value(prim_type?, attr)
 }
 
-fn num(v: &Value) -> f64 {
+pub(crate) fn num(v: &Value) -> f64 {
     match v {
         Value::Float(x) => *x,
         Value::Int(x) => *x as f64,
@@ -144,28 +233,32 @@ fn setting_ref(view: &PrimView<'_>, attr: &str) -> Option<PrimPath> {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
-struct CompiledComp {
-    path: PrimPath,
-    width: u32,
-    height: u32,
-    pixel_aspect: f64,
-    frame_rate: FrameRate,
-    duration: Time,
-    bg_color: [f64; 4],
-    motion_blur: MotionBlur,
-    layers: Vec<CompiledLayer>,
+pub(crate) struct CompiledComp {
+    pub(crate) path: PrimPath,
+    /// Display name (`name` attribute, falling back to the prim name).
+    pub(crate) name: String,
+    /// Some property of some layer has an enabled expression.
+    pub(crate) has_expressions: bool,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) pixel_aspect: f64,
+    pub(crate) frame_rate: FrameRate,
+    pub(crate) duration: Time,
+    pub(crate) bg_color: [f64; 4],
+    pub(crate) motion_blur: MotionBlur,
+    pub(crate) layers: Vec<CompiledLayer>,
     /// Prims whose changes invalidate this compiled comp (the comp and its sources).
-    deps: Vec<PrimPath>,
+    pub(crate) deps: Vec<PrimPath>,
 }
 
 #[derive(Debug)]
-enum Position {
+pub(crate) enum Position {
     Combined(Prop),
     Separate(Box<[Prop; 3]>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum AutoOrient {
+pub(crate) enum AutoOrient {
     Off,
     AlongPath,
     /// Cameras/lights: towards the point of interest; 3D AV layers: towards camera.
@@ -173,20 +266,20 @@ enum AutoOrient {
 }
 
 #[derive(Debug)]
-struct CompiledTransform {
-    anchor: Prop,
-    position: Position,
-    scale: Prop,
-    orientation: Prop,
-    rotation_x: Prop,
-    rotation_y: Prop,
-    rotation: Prop,
-    opacity: Prop,
-    point_of_interest: Prop,
+pub(crate) struct CompiledTransform {
+    pub(crate) anchor: Prop,
+    pub(crate) position: Position,
+    pub(crate) scale: Prop,
+    pub(crate) orientation: Prop,
+    pub(crate) rotation_x: Prop,
+    pub(crate) rotation_y: Prop,
+    pub(crate) rotation: Prop,
+    pub(crate) opacity: Prop,
+    pub(crate) point_of_interest: Prop,
 }
 
 #[derive(Debug)]
-enum CompiledSource {
+pub(crate) enum CompiledSource {
     None,
     Asset(PrimPath, AssetInfo),
     Comp {
@@ -197,78 +290,80 @@ enum CompiledSource {
 }
 
 #[derive(Debug)]
-struct CompiledMask {
-    path: PrimPath,
-    mode: String,
-    inverted: bool,
-    shape: Prop,
-    feather: Prop,
-    opacity: Prop,
-    expansion: Prop,
+pub(crate) struct CompiledMask {
+    pub(crate) path: PrimPath,
+    pub(crate) name: String,
+    pub(crate) mode: String,
+    pub(crate) inverted: bool,
+    pub(crate) shape: Prop,
+    pub(crate) feather: Prop,
+    pub(crate) opacity: Prop,
+    pub(crate) expansion: Prop,
 }
 
 #[derive(Debug)]
-struct CompiledEffect {
-    path: PrimPath,
-    match_name: String,
-    enabled: bool,
-    params: Vec<(String, Prop)>,
+pub(crate) struct CompiledEffect {
+    pub(crate) path: PrimPath,
+    pub(crate) name: String,
+    pub(crate) match_name: String,
+    pub(crate) enabled: bool,
+    pub(crate) params: Vec<(String, Prop)>,
 }
 
 #[derive(Debug)]
-struct CompiledPrim {
-    path: PrimPath,
-    prim_type: Option<PrimType>,
-    attrs: Vec<(String, Prop)>,
-    children: Vec<CompiledPrim>,
+pub(crate) struct CompiledPrim {
+    pub(crate) path: PrimPath,
+    pub(crate) prim_type: Option<PrimType>,
+    pub(crate) attrs: Vec<(String, Prop)>,
+    pub(crate) children: Vec<CompiledPrim>,
 }
 
 #[derive(Debug)]
-struct CompiledCamera {
-    zoom: Prop,
-    depth_of_field: bool,
-    focus_distance: Prop,
-    aperture: Prop,
-    blur_level: Prop,
+pub(crate) struct CompiledCamera {
+    pub(crate) zoom: Prop,
+    pub(crate) depth_of_field: bool,
+    pub(crate) focus_distance: Prop,
+    pub(crate) aperture: Prop,
+    pub(crate) blur_level: Prop,
 }
 
 #[derive(Debug)]
-struct CompiledLight {
-    light_type: LightType,
-    intensity: Prop,
-    color: Prop,
-    cone_angle: Prop,
-    cone_feather: Prop,
-    falloff: LightFalloff,
-    radius: Prop,
-    falloff_distance: Prop,
-    casts_shadows: bool,
-    shadow_darkness: Prop,
-    shadow_diffusion: Prop,
+pub(crate) struct CompiledLight {
+    pub(crate) light_type: LightType,
+    pub(crate) intensity: Prop,
+    pub(crate) color: Prop,
+    pub(crate) cone_angle: Prop,
+    pub(crate) cone_feather: Prop,
+    pub(crate) falloff: LightFalloff,
+    pub(crate) radius: Prop,
+    pub(crate) falloff_distance: Prop,
+    pub(crate) casts_shadows: bool,
+    pub(crate) shadow_darkness: Prop,
+    pub(crate) shadow_diffusion: Prop,
 }
 
 #[derive(Debug)]
-struct CompiledLayer {
-    path: PrimPath,
-    name: String,
-    kind: LayerKind,
-    timing: LayerTiming,
-    switches: LayerSwitches,
-    source: CompiledSource,
-    time_remap: Option<Prop>,
-    parent: Option<usize>,
-    blend_mode: String,
-    track_matte: TrackMatte,
-    track_matte_layer: Option<usize>,
-    auto_orient: AutoOrient,
-    transform: CompiledTransform,
-    masks: Vec<CompiledMask>,
-    effects: Vec<CompiledEffect>,
-    contents: Vec<CompiledPrim>,
-    text: Option<Prop>,
-    text_animators: Vec<CompiledPrim>,
-    camera: Option<CompiledCamera>,
-    light: Option<CompiledLight>,
+pub(crate) struct CompiledLayer {
+    pub(crate) path: PrimPath,
+    pub(crate) name: String,
+    pub(crate) kind: LayerKind,
+    pub(crate) timing: LayerTiming,
+    pub(crate) switches: LayerSwitches,
+    pub(crate) source: CompiledSource,
+    pub(crate) time_remap: Option<Prop>,
+    pub(crate) parent: Option<usize>,
+    pub(crate) blend_mode: String,
+    pub(crate) track_matte: TrackMatte,
+    pub(crate) track_matte_layer: Option<usize>,
+    pub(crate) auto_orient: AutoOrient,
+    pub(crate) transform: CompiledTransform,
+    pub(crate) masks: Vec<CompiledMask>,
+    pub(crate) effects: Vec<CompiledEffect>,
+    pub(crate) contents: Vec<CompiledPrim>,
+    pub(crate) text: Option<Prop>,
+    pub(crate) text_animators: Vec<CompiledPrim>,
+    pub(crate) camera: Option<CompiledCamera>,
+    pub(crate) light: Option<CompiledLight>,
 }
 
 fn layer_kind(token: &str) -> LayerKind {
@@ -364,7 +459,14 @@ fn compile_comp(stage: &Stage, path: &PrimPath) -> Result<CompiledComp, EvalErro
         layers.push(layer);
     }
 
+    let has_expressions = layers.iter().any(CompiledLayer::has_expressions);
     Ok(CompiledComp {
+        name: view
+            .value(schema::layer::NAME)
+            .and_then(Value::as_str)
+            .unwrap_or(view.name())
+            .to_owned(),
+        has_expressions,
         path: path.clone(),
         width: int(c::WIDTH, 1920.0).max(0.0) as u32,
         height: int(c::HEIGHT, 1080.0).max(0.0) as u32,
@@ -435,7 +537,7 @@ fn compile_layer(
     let time_remap = setting_bool(v, lt, l::TIME_REMAP_ENABLED)
         .then(|| {
             v.attr(l::TIME_REMAP)
-                .and_then(|s| Prop::from_spec(s, ty, l::TIME_REMAP))
+                .and_then(|s| Prop::from_spec(s, ty, v.path(), l::TIME_REMAP))
         })
         .flatten();
 
@@ -531,6 +633,11 @@ fn compile_layer(
             let mt = &PrimType::MASK;
             let mty = Some(mt);
             Some(CompiledMask {
+                name: mv
+                    .value(schema::effect::NAME)
+                    .and_then(Value::as_str)
+                    .unwrap_or(mv.name())
+                    .to_owned(),
                 mode: setting_str(&mv, mt, mk::MODE).unwrap_or_else(|| "add".into()),
                 inverted: setting_bool(&mv, mt, mk::INVERTED),
                 shape: Prop::read(&mv, mty, mk::PATH, Value::Bezier(BezierPath::default())),
@@ -555,10 +662,15 @@ fn compile_layer(
                 .filter_map(|name| {
                     let id = name.strip_prefix(fx::PARAM_PREFIX)?;
                     let spec = ev.attr(name)?;
-                    Some((id.to_owned(), Prop::from_spec(spec, Some(et), name)?))
+                    Some((id.to_owned(), Prop::from_spec(spec, Some(et), &ep, name)?))
                 })
                 .collect();
             Some(CompiledEffect {
+                name: ev
+                    .value(fx::NAME)
+                    .and_then(Value::as_str)
+                    .unwrap_or(ev.name())
+                    .to_owned(),
                 match_name: setting_str(&ev, et, fx::MATCH_NAME).unwrap_or_default(),
                 enabled: setting(&ev, et, fx::ENABLED)
                     .and_then(|v| v.as_bool())
@@ -575,7 +687,7 @@ fn compile_layer(
     let text = (kind == LayerKind::Text)
         .then(|| {
             v.attr(l::TEXT_SOURCE)
-                .and_then(|s| Prop::from_spec(s, ty, l::TEXT_SOURCE))
+                .and_then(|s| Prop::from_spec(s, ty, v.path(), l::TEXT_SOURCE))
         })
         .flatten();
     let text_animators = child_prims(l::ANIMATORS)
@@ -658,7 +770,7 @@ fn compile_generic(stage: &Stage, path: &PrimPath, depth: usize) -> Option<Compi
         .into_iter()
         .filter_map(|name| {
             let prop = match v.attr(name) {
-                Some(spec) => Prop::from_spec(spec, prim_type.as_ref(), name)?,
+                Some(spec) => Prop::from_spec(spec, prim_type.as_ref(), path, name)?,
                 None => Prop::Static(default_of(prim_type.as_ref(), name)?),
             };
             Some((name.to_owned(), prop))
@@ -682,23 +794,64 @@ fn compile_generic(stage: &Stage, path: &PrimPath, depth: usize) -> Option<Compi
 // ---------------------------------------------------------------------------
 
 impl CompiledComp {
-    fn evaluate(&self, time: Time) -> EvaluatedComp {
+    pub(crate) fn evaluate(
+        &self,
+        time: Time,
+        comp_id: usize,
+        js: Option<&Ctx<'_>>,
+    ) -> EvaluatedComp {
         let n = self.layers.len();
         let has_solo = self
             .layers
             .iter()
             .any(|l| l.switches.solo && l.switches.enabled);
 
+        // Expressions: memoise them first so long chains stay shallow (see warm_up).
+        if js.is_some() && self.has_expressions {
+            let props: Vec<(usize, &ExprProp)> = self
+                .layers
+                .iter()
+                .enumerate()
+                .flat_map(|(i, l)| l.expr_props().into_iter().map(move |e| (i, e)))
+                .collect();
+            let cx_of = |i: usize| Cx {
+                comp: comp_id,
+                layer: i,
+                ct: time,
+                lt: self.layers[i].timing.layer_time(time),
+                js,
+            };
+            expr::warm_up(
+                props.len(),
+                |k| {
+                    let (i, e) = props[k];
+                    expr::evaluate(js.expect("js"), &cx_of(i), e);
+                },
+                |k| {
+                    let (i, e) = props[k];
+                    expr::memoize_pre(&cx_of(i), e);
+                },
+            );
+        }
+
         // Pass 1: everything that does not depend on other layers.
         let mut out: Vec<EvaluatedLayer> = self
             .layers
             .iter()
-            .map(|layer| {
+            .enumerate()
+            .map(|(i, layer)| {
                 let lt = layer.timing.layer_time(time);
+                let cx = Cx {
+                    comp: comp_id,
+                    layer: i,
+                    ct: time,
+                    lt,
+                    js,
+                };
                 let active = layer.timing.is_active(time);
                 let visible =
                     layer.switches.enabled && active && (!has_solo || layer.switches.solo);
-                let tf = sample_transform(layer, lt);
+                let tf = sample_transform(layer, &cx);
                 EvaluatedLayer {
                     path: layer.path.clone(),
                     name: layer.name.clone(),
@@ -708,7 +861,7 @@ impl CompiledComp {
                     active,
                     visible,
                     switches: layer.switches,
-                    source: sample_source(layer, lt),
+                    source: sample_source(layer, &cx),
                     motion_blur_times: if self.motion_blur.enabled && layer.switches.motion_blur {
                         self.motion_blur.sample_times(
                             time,
@@ -726,24 +879,29 @@ impl CompiledComp {
                     blend_mode: layer.blend_mode.clone(),
                     track_matte: layer.track_matte,
                     track_matte_layer: layer.track_matte_layer,
-                    masks: layer.masks.iter().map(|m| sample_mask(m, lt)).collect(),
-                    effects: layer.effects.iter().map(|e| sample_effect(e, lt)).collect(),
+                    masks: layer.masks.iter().map(|m| sample_mask(m, &cx)).collect(),
+                    effects: layer
+                        .effects
+                        .iter()
+                        .map(|e| sample_effect(e, &cx))
+                        .collect(),
                     contents: layer
                         .contents
                         .iter()
-                        .map(|p| sample_generic(p, lt))
+                        .map(|p| sample_generic(p, &cx))
                         .collect(),
-                    text: layer.text.as_ref().and_then(|p| match p.sample(lt) {
+                    text: layer.text.as_ref().and_then(|p| match p.sample(&cx) {
                         Value::TextDocument(doc) => Some(doc),
                         _ => None,
                     }),
                     text_animators: layer
                         .text_animators
                         .iter()
-                        .map(|p| sample_generic(p, lt))
+                        .map(|p| sample_generic(p, &cx))
                         .collect(),
                     camera: None,
                     light: None,
+                    depends_on: Vec::new(),
                 }
             })
             .collect();
@@ -762,21 +920,27 @@ impl CompiledComp {
             .collect();
         let mut visiting = Vec::new();
         for i in order {
-            self.world_matrix(i, &mut out, &mut world, camera, &mut visiting);
+            self.world_matrix(i, &mut out, &mut world, camera, &mut visiting, comp_id, js);
         }
         // Camera / light state needs the final world matrices.
         for (i, layer) in self.layers.iter().enumerate() {
-            let lt = out[i].layer_time;
+            let cx = Cx {
+                comp: comp_id,
+                layer: i,
+                ct: time,
+                lt: out[i].layer_time,
+                js,
+            };
             let wm = out[i].world_matrix;
-            let poi = layer.transform.point_of_interest.vec3(lt);
+            let poi = layer.transform.point_of_interest.vec3(&cx);
             if let Some(cm) = &layer.camera {
                 out[i].camera = Some(CameraState {
                     two_node: layer.auto_orient == AutoOrient::Towards,
-                    zoom: cm.zoom.f64(lt),
+                    zoom: cm.zoom.f64(&cx),
                     depth_of_field: cm.depth_of_field,
-                    focus_distance: cm.focus_distance.f64(lt),
-                    aperture: cm.aperture.f64(lt),
-                    blur_level: cm.blur_level.f64(lt),
+                    focus_distance: cm.focus_distance.f64(&cx),
+                    aperture: cm.aperture.f64(&cx),
+                    blur_level: cm.blur_level.f64(&cx),
                     point_of_interest: poi,
                     world_matrix: wm,
                 });
@@ -784,19 +948,19 @@ impl CompiledComp {
             if let Some(lg) = &layer.light {
                 out[i].light = Some(LightState {
                     light_type: lg.light_type,
-                    intensity: lg.intensity.f64(lt),
-                    color: match lg.color.sample(lt) {
+                    intensity: lg.intensity.f64(&cx),
+                    color: match lg.color.sample(&cx) {
                         Value::Color(c) => c,
                         _ => [1.0; 4],
                     },
-                    cone_angle: lg.cone_angle.f64(lt),
-                    cone_feather: lg.cone_feather.f64(lt),
+                    cone_angle: lg.cone_angle.f64(&cx),
+                    cone_feather: lg.cone_feather.f64(&cx),
                     falloff: lg.falloff,
-                    radius: lg.radius.f64(lt),
-                    falloff_distance: lg.falloff_distance.f64(lt),
+                    radius: lg.radius.f64(&cx),
+                    falloff_distance: lg.falloff_distance.f64(&cx),
                     casts_shadows: lg.casts_shadows,
-                    shadow_darkness: lg.shadow_darkness.f64(lt),
-                    shadow_diffusion: lg.shadow_diffusion.f64(lt),
+                    shadow_darkness: lg.shadow_darkness.f64(&cx),
+                    shadow_diffusion: lg.shadow_diffusion.f64(&cx),
                     point_of_interest: poi,
                     world_matrix: wm,
                 });
@@ -820,6 +984,7 @@ impl CompiledComp {
     }
 
     /// World matrix of layer `i` (memoised in `world`; parent cycles are cut).
+    #[allow(clippy::too_many_arguments)]
     fn world_matrix(
         &self,
         i: usize,
@@ -827,6 +992,8 @@ impl CompiledComp {
         world: &mut [Option<DMat4>],
         camera: Option<usize>,
         visiting: &mut Vec<usize>,
+        comp_id: usize,
+        js: Option<&Ctx<'_>>,
     ) -> DMat4 {
         if let Some(m) = world[i] {
             return m;
@@ -835,18 +1002,24 @@ impl CompiledComp {
         let layer = &self.layers[i];
         let parent_world = match layer.parent {
             Some(p) if !visiting.contains(&p) => {
-                Some(self.world_matrix(p, out, world, camera, visiting))
+                Some(self.world_matrix(p, out, world, camera, visiting, comp_id, js))
             }
             _ => None,
         };
-        let lt = out[i].layer_time;
+        let cx = Cx {
+            comp: comp_id,
+            layer: i,
+            ct: out[i].timing.comp_time(out[i].layer_time),
+            lt: out[i].layer_time,
+            js,
+        };
         let three_d = out[i].switches.three_d;
         let mut tf = out[i].transform;
         tf.auto_orient = match (layer.auto_orient, layer.kind) {
             (AutoOrient::Off, _) => AutoOrientRotation::None,
-            (AutoOrient::AlongPath, kind) => along_path(layer, lt, three_d, kind),
+            (AutoOrient::AlongPath, kind) => along_path(layer, &cx, three_d, kind),
             (AutoOrient::Towards, LayerKind::Camera | LayerKind::Light) => {
-                look_along(layer.transform.point_of_interest.vec3(lt) - tf.position)
+                look_along(layer.transform.point_of_interest.vec3(&cx) - tf.position)
             }
             (AutoOrient::Towards, _) if three_d => {
                 // Orient towards the active camera (AE-ANI-021), in the parent's space.
@@ -884,15 +1057,15 @@ impl CompiledComp {
     }
 }
 
-fn sample_transform(layer: &CompiledLayer, lt: Time) -> Transform {
+fn sample_transform(layer: &CompiledLayer, cx: &Cx<'_, '_>) -> Transform {
     let t = &layer.transform;
     let three_d = layer.switches.three_d;
     let mut position = match &t.position {
-        Position::Combined(p) => p.vec3(lt),
-        Position::Separate(xyz) => DVec3::new(xyz[0].f64(lt), xyz[1].f64(lt), xyz[2].f64(lt)),
+        Position::Combined(p) => p.vec3(cx),
+        Position::Separate(xyz) => DVec3::new(xyz[0].f64(cx), xyz[1].f64(cx), xyz[2].f64(cx)),
     };
-    let mut anchor = t.anchor.vec3(lt);
-    let scale = match t.scale.sample(lt) {
+    let mut anchor = t.anchor.vec3(cx);
+    let scale = match t.scale.sample(cx) {
         Value::Vec2([x, y]) => DVec3::new(x, y, 100.0),
         other => vec3(&other),
     };
@@ -905,16 +1078,16 @@ fn sample_transform(layer: &CompiledLayer, lt: Time) -> Transform {
         position,
         scale,
         orientation: if three_d {
-            t.orientation.vec3(lt)
+            t.orientation.vec3(cx)
         } else {
             DVec3::ZERO
         },
         rotation: DVec3::new(
-            if three_d { t.rotation_x.f64(lt) } else { 0.0 },
-            if three_d { t.rotation_y.f64(lt) } else { 0.0 },
-            t.rotation.f64(lt),
+            if three_d { t.rotation_x.f64(cx) } else { 0.0 },
+            if three_d { t.rotation_y.f64(cx) } else { 0.0 },
+            t.rotation.f64(cx),
         ),
-        opacity: t.opacity.f64(lt),
+        opacity: t.opacity.f64(cx),
         auto_orient: AutoOrientRotation::None,
     }
 }
@@ -922,11 +1095,11 @@ fn sample_transform(layer: &CompiledLayer, lt: Time) -> Transform {
 /// Orient Along Path (AE-ANI-019/020): direction of travel of Position at `lt`.
 fn along_path(
     layer: &CompiledLayer,
-    lt: Time,
+    cx: &Cx<'_, '_>,
     three_d: bool,
     kind: LayerKind,
 ) -> AutoOrientRotation {
-    let d = position_direction(layer, lt);
+    let d = position_direction(layer, cx);
     let Some(d) = d else {
         return AutoOrientRotation::None;
     };
@@ -944,16 +1117,14 @@ fn along_path(
 
 /// Direction of motion of a layer's position: a central difference of ±1/1000 s
 /// (clamped into the keyframe range so the first/last segments keep their tangent).
-fn position_direction(layer: &CompiledLayer, lt: Time) -> Option<DVec3> {
+fn position_direction(layer: &CompiledLayer, cx: &Cx<'_, '_>) -> Option<DVec3> {
+    let lt = cx.lt;
     let range = match &layer.transform.position {
-        Position::Combined(Prop::Curve(c)) => c.time_range(),
+        Position::Combined(p) => p.curve()?.time_range(),
         Position::Separate(xyz) => {
             let ranges: Vec<(Time, Time)> = xyz
                 .iter()
-                .filter_map(|p| match p {
-                    Prop::Curve(c) => Some(c.time_range()),
-                    Prop::Static(_) => None,
-                })
+                .filter_map(|p| p.curve().map(Curve::time_range))
                 .collect();
             if ranges.is_empty() {
                 return None;
@@ -963,28 +1134,32 @@ fn position_direction(layer: &CompiledLayer, lt: Time) -> Option<DVec3> {
                 ranges.iter().map(|r| r.1).max().expect("non-empty"),
             )
         }
-        Position::Combined(Prop::Static(_)) => return None,
     };
     if range.0 >= range.1 {
         return None;
     }
     let h = Time(Time::FLICKS_PER_SECOND / 1000);
     let a = lt.clamp(range.0, range.1 - h);
-    let pos = |t: Time| match &layer.transform.position {
-        Position::Combined(p) => p.vec3(t),
-        Position::Separate(xyz) => DVec3::new(xyz[0].f64(t), xyz[1].f64(t), xyz[2].f64(t)),
+    let pos = |t: Time| {
+        let cx = cx.at_layer_time(t, &layer.timing);
+        match &layer.transform.position {
+            Position::Combined(p) => p.vec3(&cx),
+            Position::Separate(xyz) => {
+                DVec3::new(xyz[0].f64(&cx), xyz[1].f64(&cx), xyz[2].f64(&cx))
+            }
+        }
     };
     let d = pos(a + h) - pos(a);
     (d.length_squared() > 0.0).then_some(d)
 }
 
-fn sample_source(layer: &CompiledLayer, lt: Time) -> LayerSource {
+fn sample_source(layer: &CompiledLayer, cx: &Cx<'_, '_>) -> LayerSource {
     let source_time = match &layer.time_remap {
-        Some(p) => match p.sample(lt) {
+        Some(p) => match p.sample(cx) {
             Value::Time(t) => t,
             other => Time::from_seconds(num(&other)),
         },
-        None => lt,
+        None => cx.lt,
     };
     match &layer.source {
         CompiledSource::None => LayerSource::None,
@@ -1005,26 +1180,26 @@ fn sample_source(layer: &CompiledLayer, lt: Time) -> LayerSource {
     }
 }
 
-fn sample_mask(m: &CompiledMask, lt: Time) -> EvaluatedMask {
+fn sample_mask(m: &CompiledMask, cx: &Cx<'_, '_>) -> EvaluatedMask {
     EvaluatedMask {
         path: m.path.clone(),
         mode: m.mode.clone(),
         inverted: m.inverted,
-        shape: match m.shape.sample(lt) {
+        shape: match m.shape.sample(cx) {
             Value::Bezier(b) => b,
             _ => BezierPath::default(),
         },
-        feather: match m.feather.sample(lt) {
+        feather: match m.feather.sample(cx) {
             Value::Vec2(f) => f,
             Value::Float(f) => [f, f],
             _ => [0.0; 2],
         },
-        opacity: (m.opacity.f64(lt) / 100.0).clamp(0.0, 1.0),
-        expansion: m.expansion.f64(lt),
+        opacity: (m.opacity.f64(cx) / 100.0).clamp(0.0, 1.0),
+        expansion: m.expansion.f64(cx),
     }
 }
 
-fn sample_effect(e: &CompiledEffect, lt: Time) -> EvaluatedEffect {
+fn sample_effect(e: &CompiledEffect, cx: &Cx<'_, '_>) -> EvaluatedEffect {
     EvaluatedEffect {
         path: e.path.clone(),
         match_name: e.match_name.clone(),
@@ -1032,21 +1207,21 @@ fn sample_effect(e: &CompiledEffect, lt: Time) -> EvaluatedEffect {
         params: e
             .params
             .iter()
-            .map(|(id, p)| (id.clone(), p.sample(lt)))
+            .map(|(id, p)| (id.clone(), p.sample(cx)))
             .collect(),
     }
 }
 
-fn sample_generic(p: &CompiledPrim, lt: Time) -> EvaluatedPrim {
+fn sample_generic(p: &CompiledPrim, cx: &Cx<'_, '_>) -> EvaluatedPrim {
     EvaluatedPrim {
         path: p.path.clone(),
         prim_type: p.prim_type.clone(),
         attrs: p
             .attrs
             .iter()
-            .map(|(n, v)| (n.clone(), v.sample(lt)))
+            .map(|(n, v)| (n.clone(), v.sample(cx)))
             .collect::<BTreeMap<_, _>>(),
-        children: p.children.iter().map(|c| sample_generic(c, lt)).collect(),
+        children: p.children.iter().map(|c| sample_generic(c, cx)).collect(),
     }
 }
 
@@ -1067,6 +1242,9 @@ const MAX_NESTING: usize = 64;
 #[derive(Debug, Default)]
 pub struct Evaluator {
     comps: HashMap<PrimPath, Arc<CompiledComp>>,
+    /// Every comp of the stage (expressions can reach any comp); rebuilt after
+    /// structural changes.
+    comp_list: Option<Vec<PrimPath>>,
 }
 
 impl Evaluator {
@@ -1093,15 +1271,12 @@ impl Evaluator {
         time: Time,
         stack: &mut Vec<PrimPath>,
     ) -> Result<EvaluatedComp, EvalError> {
-        let compiled = match self.comps.get(comp) {
-            Some(c) => c.clone(),
-            None => {
-                let c = Arc::new(compile_comp(stage, comp)?);
-                self.comps.insert(comp.clone(), c.clone());
-                c
-            }
+        let compiled = self.compiled(stage, comp)?;
+        let mut out = if compiled.has_expressions {
+            self.evaluate_with_expressions(stage, &compiled, time)
+        } else {
+            compiled.evaluate(time, 0, None)
         };
-        let mut out = compiled.evaluate(time);
         stack.push(comp.clone());
         for layer in &mut out.layers {
             if let LayerSource::Comp { comp, time, nested } = &mut layer.source
@@ -1116,6 +1291,77 @@ impl Evaluator {
         }
         stack.pop();
         Ok(out)
+    }
+
+    fn compiled(&mut self, stage: &Stage, comp: &PrimPath) -> Result<Arc<CompiledComp>, EvalError> {
+        if let Some(c) = self.comps.get(comp) {
+            return Ok(c.clone());
+        }
+        let c = Arc::new(compile_comp(stage, comp)?);
+        self.comps.insert(comp.clone(), c.clone());
+        Ok(c)
+    }
+
+    /// Every comp of the stage, compiled (the scope expressions run in).
+    fn all_comps(&mut self, stage: &Stage) -> Vec<Arc<CompiledComp>> {
+        let list = self.comp_list.get_or_insert_with(|| {
+            stage
+                .traverse()
+                .into_iter()
+                .filter(|p| stage.prim(p).is_some_and(|v| v.is_a(&PrimType::COMP)))
+                .collect()
+        });
+        let list = list.clone();
+        list.iter()
+            .filter_map(|p| self.compiled(stage, p).ok())
+            .collect()
+    }
+
+    fn expression_scope(
+        &mut self,
+        stage: &Stage,
+        compiled: &Arc<CompiledComp>,
+    ) -> (expr::Scope, usize) {
+        let mut comps = self.all_comps(stage);
+        let id = match comps.iter().position(|c| Arc::ptr_eq(c, compiled)) {
+            Some(i) => i,
+            None => {
+                comps.push(compiled.clone());
+                comps.len() - 1
+            }
+        };
+        (expr::Scope::new(comps), id)
+    }
+
+    fn evaluate_with_expressions(
+        &mut self,
+        stage: &Stage,
+        compiled: &Arc<CompiledComp>,
+        time: Time,
+    ) -> EvaluatedComp {
+        let (scope, id) = self.expression_scope(stage, compiled);
+        let (mut out, result) = expr::with_scope(scope, || {
+            expr::with_js(|ctx| compiled.evaluate(time, id, Some(ctx)))
+        });
+        if let Some(r) = result {
+            out.errors.extend(
+                r.errors
+                    .into_iter()
+                    .filter(|(c, _)| *c == id)
+                    .map(|(_, e)| e),
+            );
+            for ((c1, l1), (c2, l2)) in r.deps {
+                if c1 != id {
+                    continue;
+                }
+                let path = r.comps[c2].layers[l2].path.clone();
+                let deps = &mut out.layers[l1].depends_on;
+                if !deps.contains(&path) {
+                    deps.push(path);
+                }
+            }
+        }
+        out
     }
 
     /// Evaluate one attribute of any prim at `time`.
@@ -1146,7 +1392,7 @@ impl Evaluator {
         };
         let prim_type = view.prim_type();
         let prop = match view.attr(attr) {
-            Some(spec) => Prop::from_spec(spec, prim_type, attr),
+            Some(spec) => Prop::from_spec(spec, prim_type, prim, attr),
             None => None,
         }
         .or_else(|| default_of(prim_type, attr).map(Prop::Static))
@@ -1154,18 +1400,83 @@ impl Evaluator {
             prim: prim.clone(),
             attr: attr.to_owned(),
         })?;
-        Ok(prop.sample(local))
+        if let (Prop::Expr(_), Some((layer, comp))) = (&prop, enclosing_layer(stage, prim)) {
+            return Ok(
+                self.evaluate_expression_attribute(stage, &comp, &layer, prim, attr, time, &prop)
+            );
+        }
+        let cx = Cx {
+            comp: 0,
+            layer: 0,
+            ct: time,
+            lt: local,
+            js: None,
+        };
+        Ok(prop.sample(&cx))
+    }
+
+    /// `evaluate_attribute` for an attribute with an expression: runs it in the scope of
+    /// its comp, like `evaluate_comp` would.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_expression_attribute(
+        &mut self,
+        stage: &Stage,
+        comp: &PrimPath,
+        layer: &PrimPath,
+        prim: &PrimPath,
+        attr: &str,
+        time: Time,
+        fallback: &Prop,
+    ) -> Value {
+        let Ok(compiled) = self.compiled(stage, comp) else {
+            return fallback.sample(&Cx {
+                comp: 0,
+                layer: 0,
+                ct: time,
+                lt: time,
+                js: None,
+            });
+        };
+        let index = compiled.layers.iter().position(|l| &l.path == layer);
+        let (scope, id) = self.expression_scope(stage, &compiled);
+        let (v, _) = expr::with_scope(scope, || {
+            expr::with_js(|ctx| {
+                let (li, lt) = match index {
+                    Some(i) => (i, compiled.layers[i].timing.layer_time(time)),
+                    None => (0, time),
+                };
+                let prop = index
+                    .and_then(|i| compiled.layers[i].find_prop(prim.as_str(), attr))
+                    .unwrap_or(fallback);
+                prop.sample(&Cx {
+                    comp: id,
+                    layer: li,
+                    ct: time,
+                    lt,
+                    js: Some(ctx),
+                })
+            })
+        });
+        v
     }
 
     /// Drop compiled comps that `event` may have changed.
     pub fn invalidate(&mut self, event: &StageEvent) {
         self.comps
             .retain(|_, c| !c.deps.iter().any(|d| event.touches(d)));
+        let structural = event.changes.iter().any(|c| match c {
+            bae_model::Change::AttrChanged { attr, .. } => attr == l::NAME,
+            _ => true,
+        });
+        if structural {
+            self.comp_list = None;
+        }
     }
 
     /// Drop every compiled comp.
     pub fn clear(&mut self) {
         self.comps.clear();
+        self.comp_list = None;
     }
 }
 
@@ -1181,4 +1492,262 @@ fn enclosing_layer(stage: &Stage, prim: &PrimPath) -> Option<(PrimPath, PrimPath
         cur = p.parent();
     }
     None
+}
+
+// ---------------------------------------------------------------------------
+// Property lookup and transforms for expressions
+// ---------------------------------------------------------------------------
+
+impl CompiledPrim {
+    fn find(&self, prim: &str, attr: &str) -> Option<&Prop> {
+        if self.path.as_str() == prim {
+            return self.attrs.iter().find(|(n, _)| n == attr).map(|(_, p)| p);
+        }
+        self.children.iter().find_map(|c| c.find(prim, attr))
+    }
+
+    fn has_expressions(&self) -> bool {
+        self.attrs.iter().any(|(_, p)| p.has_expression())
+            || self.children.iter().any(CompiledPrim::has_expressions)
+    }
+}
+
+impl CompiledLayer {
+    /// The compiled property `attr` of `prim` (this layer or a prim below it).
+    pub(crate) fn find_prop(&self, prim: &str, attr: &str) -> Option<&Prop> {
+        if self.path.as_str() == prim {
+            let t = &self.transform;
+            return match attr {
+                tr::ANCHOR_POINT => Some(&t.anchor),
+                tr::POSITION => match &t.position {
+                    Position::Combined(p) => Some(p),
+                    Position::Separate(_) => None,
+                },
+                tr::POSITION_X | tr::POSITION_Y | tr::POSITION_Z => match &t.position {
+                    Position::Separate(xyz) => Some(
+                        &xyz[match attr {
+                            tr::POSITION_X => 0,
+                            tr::POSITION_Y => 1,
+                            _ => 2,
+                        }],
+                    ),
+                    Position::Combined(_) => None,
+                },
+                tr::SCALE => Some(&t.scale),
+                tr::ORIENTATION => Some(&t.orientation),
+                tr::ROTATION_X => Some(&t.rotation_x),
+                tr::ROTATION_Y => Some(&t.rotation_y),
+                tr::ROTATION => Some(&t.rotation),
+                tr::OPACITY => Some(&t.opacity),
+                tr::POINT_OF_INTEREST => Some(&t.point_of_interest),
+                l::TIME_REMAP => self.time_remap.as_ref(),
+                l::TEXT_SOURCE => self.text.as_ref(),
+                cam::ZOOM => self.camera.as_ref().map(|c| &c.zoom),
+                cam::FOCUS_DISTANCE => self.camera.as_ref().map(|c| &c.focus_distance),
+                cam::APERTURE => self.camera.as_ref().map(|c| &c.aperture),
+                cam::BLUR_LEVEL => self.camera.as_ref().map(|c| &c.blur_level),
+                li::INTENSITY => self.light.as_ref().map(|c| &c.intensity),
+                li::COLOR => self.light.as_ref().map(|c| &c.color),
+                li::CONE_ANGLE => self.light.as_ref().map(|c| &c.cone_angle),
+                li::CONE_FEATHER => self.light.as_ref().map(|c| &c.cone_feather),
+                li::RADIUS => self.light.as_ref().map(|c| &c.radius),
+                li::FALLOFF_DISTANCE => self.light.as_ref().map(|c| &c.falloff_distance),
+                li::SHADOW_DARKNESS => self.light.as_ref().map(|c| &c.shadow_darkness),
+                li::SHADOW_DIFFUSION => self.light.as_ref().map(|c| &c.shadow_diffusion),
+                _ => None,
+            };
+        }
+        if let Some(m) = self.masks.iter().find(|m| m.path.as_str() == prim) {
+            return match attr {
+                mk::PATH => Some(&m.shape),
+                mk::FEATHER => Some(&m.feather),
+                mk::OPACITY => Some(&m.opacity),
+                mk::EXPANSION => Some(&m.expansion),
+                _ => None,
+            };
+        }
+        if let Some(e) = self.effects.iter().find(|e| e.path.as_str() == prim) {
+            let id = attr.strip_prefix(fx::PARAM_PREFIX)?;
+            return e.params.iter().find(|(i, _)| i == id).map(|(_, p)| p);
+        }
+        self.contents
+            .iter()
+            .chain(&self.text_animators)
+            .find_map(|c| c.find(prim, attr))
+    }
+
+    /// Every property of this layer (and the prims below it) that has an expression.
+    pub(crate) fn expr_props(&self) -> Vec<&ExprProp> {
+        let mut all: Vec<&Prop> = Vec::new();
+        let t = &self.transform;
+        match &t.position {
+            Position::Combined(p) => all.push(p),
+            Position::Separate(xyz) => all.extend(xyz.iter()),
+        }
+        all.extend([
+            &t.anchor,
+            &t.scale,
+            &t.orientation,
+            &t.rotation_x,
+            &t.rotation_y,
+            &t.rotation,
+            &t.opacity,
+            &t.point_of_interest,
+        ]);
+        all.extend(self.time_remap.iter());
+        all.extend(self.text.iter());
+        for m in &self.masks {
+            all.extend([&m.shape, &m.feather, &m.opacity, &m.expansion]);
+        }
+        for e in &self.effects {
+            all.extend(e.params.iter().map(|(_, p)| p));
+        }
+        fn walk<'a>(p: &'a CompiledPrim, out: &mut Vec<&'a Prop>) {
+            out.extend(p.attrs.iter().map(|(_, v)| v));
+            for c in &p.children {
+                walk(c, out);
+            }
+        }
+        for c in self.contents.iter().chain(&self.text_animators) {
+            walk(c, &mut all);
+        }
+        if let Some(c) = &self.camera {
+            all.extend([&c.zoom, &c.focus_distance, &c.aperture, &c.blur_level]);
+        }
+        if let Some(l) = &self.light {
+            all.extend([
+                &l.intensity,
+                &l.color,
+                &l.cone_angle,
+                &l.cone_feather,
+                &l.radius,
+                &l.falloff_distance,
+                &l.shadow_darkness,
+                &l.shadow_diffusion,
+            ]);
+        }
+        all.into_iter()
+            .filter_map(|p| match p {
+                Prop::Expr(e) => Some(&**e),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn has_expressions(&self) -> bool {
+        let t = &self.transform;
+        let position = match &t.position {
+            Position::Combined(p) => p.has_expression(),
+            Position::Separate(xyz) => xyz.iter().any(Prop::has_expression),
+        };
+        position
+            || [
+                &t.anchor,
+                &t.scale,
+                &t.orientation,
+                &t.rotation_x,
+                &t.rotation_y,
+                &t.rotation,
+                &t.opacity,
+                &t.point_of_interest,
+            ]
+            .iter()
+            .any(|p| p.has_expression())
+            || self.time_remap.as_ref().is_some_and(Prop::has_expression)
+            || self.text.as_ref().is_some_and(Prop::has_expression)
+            || self.masks.iter().any(|m| {
+                [&m.shape, &m.feather, &m.opacity, &m.expansion]
+                    .iter()
+                    .any(|p| p.has_expression())
+            })
+            || self
+                .effects
+                .iter()
+                .any(|e| e.params.iter().any(|(_, p)| p.has_expression()))
+            || self.contents.iter().any(CompiledPrim::has_expressions)
+            || self
+                .text_animators
+                .iter()
+                .any(CompiledPrim::has_expressions)
+            || self.camera.as_ref().is_some_and(|c| {
+                [&c.zoom, &c.focus_distance, &c.aperture, &c.blur_level]
+                    .iter()
+                    .any(|p| p.has_expression())
+            })
+    }
+
+    /// Source size (footage, solid or pre-comp), for `width` / `height` in expressions.
+    pub(crate) fn source_size(&self, comp: &CompiledComp) -> (u32, u32) {
+        match &self.source {
+            CompiledSource::Asset(_, info) => (info.width, info.height),
+            CompiledSource::Comp { .. } | CompiledSource::None => (comp.width, comp.height),
+        }
+    }
+
+    pub(crate) fn source_comp(&self) -> Option<&PrimPath> {
+        match &self.source {
+            CompiledSource::Comp { path, .. } => Some(path),
+            _ => None,
+        }
+    }
+}
+
+impl CompiledComp {
+    /// Layer `i`'s world matrix (layer space → comp space) at comp time `ct`, for
+    /// expression space transforms. Auto-orient towards the camera is not applied.
+    pub(crate) fn world_at(
+        &self,
+        i: usize,
+        ct: Time,
+        comp_id: usize,
+        js: Option<&Ctx<'_>>,
+    ) -> DMat4 {
+        let mut visiting = Vec::new();
+        self.world_at_inner(i, ct, comp_id, js, &mut visiting)
+    }
+
+    fn world_at_inner(
+        &self,
+        i: usize,
+        ct: Time,
+        comp_id: usize,
+        js: Option<&Ctx<'_>>,
+        visiting: &mut Vec<usize>,
+    ) -> DMat4 {
+        visiting.push(i);
+        let layer = &self.layers[i];
+        let cx = Cx {
+            comp: comp_id,
+            layer: i,
+            ct,
+            lt: layer.timing.layer_time(ct),
+            js,
+        };
+        let three_d = layer.switches.three_d;
+        let mut tf = sample_transform(layer, &cx);
+        tf.auto_orient = match (layer.auto_orient, layer.kind) {
+            (AutoOrient::AlongPath, kind) => along_path(layer, &cx, three_d, kind),
+            (AutoOrient::Towards, LayerKind::Camera | LayerKind::Light) => {
+                look_along(layer.transform.point_of_interest.vec3(&cx) - tf.position)
+            }
+            _ => AutoOrientRotation::None,
+        };
+        let local = match layer.kind {
+            LayerKind::Camera | LayerKind::Light => tf.camera_matrix(),
+            _ => tf.matrix(three_d),
+        };
+        let m = match layer.parent {
+            Some(p) if !visiting.contains(&p) => {
+                let pw = self.world_at_inner(p, ct, comp_id, js, visiting);
+                if three_d {
+                    pw * local
+                } else {
+                    drop_z(pw) * local
+                }
+            }
+            _ => local,
+        };
+        visiting.pop();
+        m
+    }
 }
