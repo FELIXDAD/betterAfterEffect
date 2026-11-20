@@ -419,6 +419,55 @@ fn evaluator_is_send() {
     assert_eq!(h.join().unwrap(), 6.0);
 }
 
+/// Run `f` on a thread with a 1 MiB stack (the Windows main-thread size).
+fn on_small_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    std::thread::Builder::new()
+        .stack_size(
+            std::env::var("BAE_TEST_STACK")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1 << 20),
+        )
+        .spawn(f)
+        .unwrap()
+        .join()
+        .unwrap()
+}
+
+#[test]
+fn long_dependency_chains_fit_a_small_stack() {
+    on_small_stack(long_dependency_chains_in_both_directions);
+}
+
+#[test]
+fn runaway_recursion_is_an_error_not_a_crash() {
+    on_small_stack(|| {
+        let s = stage(|b| {
+            let l = b.layer(MAIN, "a", "null");
+            b.expr(
+                &l,
+                "transform:rotation",
+                3.0,
+                "function f(n) { return f(n + 1) + 1; } f(0)",
+            )
+            .expr(
+                &l,
+                "transform:opacity",
+                50.0,
+                "var x = 0; while (true) { x++; if (x > 1e6) break; } x / 1e4",
+            );
+        });
+        let ec = eval(&s, 0.0);
+        assert_eq!(ec.layers[0].transform.rotation.z, 3.0);
+        assert!(
+            ec.errors.iter().any(|e| e.message.contains("stack")),
+            "{:?}",
+            ec.errors
+        );
+        assert_eq!(ec.layers[0].transform.opacity, 100.0);
+    });
+}
+
 #[test]
 fn long_dependency_chains_in_both_directions() {
     let n = 150;
@@ -454,4 +503,20 @@ fn long_dependency_chains_in_both_directions() {
     // Opacity is clamped to 0–100 after the expression, as in AE.
     assert_eq!(ec.layers[n - 50].transform.opacity, 50.0);
     assert_eq!(ec.layers[0].transform.opacity, 100.0);
+}
+
+#[test]
+fn to_comp_projects_3d_layers_through_the_default_camera() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "a", "null");
+        b.set(&l, "three_d", true)
+            .set(&l, "transform:position", [800.0, 400.0, 300.0])
+            .expr(&l, "transform:rotation", 0.0, "toComp([0, 0, 0])[0]")
+            .expr(&l, "transform:opacity", 0.0, "toWorld([0, 0, 0])[2] / 10");
+    });
+    let ec = eval(&s, 0.0);
+    let zoom = 1920.0 * 50.0 / 36.0;
+    let want = 960.0 + (800.0 - 960.0) * zoom / (300.0 + zoom);
+    assert!((ec.layers[0].transform.rotation.z - want).abs() < 1e-9);
+    assert_eq!(ec.layers[0].transform.opacity, 30.0);
 }
