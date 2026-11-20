@@ -109,6 +109,9 @@ MODAL_CONFIRMATIONS=3
 # A pending script whose main thread sits on the same non-script stack this many checks
 # in a row (~3 s apart) is a hang that is not a dialog.
 FROZEN_CHECKS=10
+# Innermost frames of a script blocked in the file system (privacy prompt pending).
+FILE_RE='__open|open[$]NOCANCEL|__stat|getattrlist|__access|opendir|__getdirentries'
+BLOCKED_CHECKS=5
 
 stuck() {
   local n
@@ -123,6 +126,8 @@ known_dialog() {
   local stack="$1"
   if grep -q 'ScCore::Dialogs::\|ScriptUI' <<<"$stack"; then
     echo "script-alert: a script called alert()/confirm()/prompt() or showed a ScriptUI dialog"
+  elif grep -q 'NSSavePanel\|NSOpenPanel' <<<"$stack"; then
+    echo "file-dialog: a script opened a file open/save dialog (pass paths as options instead)"
   elif grep -q -i 'recover' <<<"$stack"; then
     echo "recovery: Illustrator offers to recover documents from a previous session"
   elif grep -q 'NSAlert runModal' <<<"$stack"; then
@@ -231,12 +236,13 @@ recover() {
 
 # 0 ready, 2 exited, 3 modal, 4 runner refused (CEP signature), 1 timeout.
 wait_ready() {
-  local pid="$1" t0="$2" limit="${3:-180}" i=0 hits=0 kicked=0
-  while (( i < limit * 2 )); do
-    nap 0.5; i=$((i + 1))
+  local pid="$1" t0="$2" limit="${3:-180}" s0=$SECONDS next=$((SECONDS + 3)) hits=0 kicked=0
+  while (( SECONDS - s0 < limit )); do
+    nap 0.25
     if [[ -f "$STATE/ready.json" ]] && (( $(mtime "$STATE/ready.json") >= t0 )); then return 0; fi
     kill -0 "$pid" 2>/dev/null || return 2
-    if (( i % 6 == 0 )); then
+    if (( SECONDS >= next )); then
+      next=$((SECONDS + 3))
       if is_modal "$pid"; then hits=$((hits + 1)); else hits=0; fi
       (( hits >= 2 )) && return 3
       if [[ -f "$CEP_LOG" ]] && (( $(mtime "$CEP_LOG") >= t0 )) && grep -q 'Signature verification failed' "$CEP_LOG"; then
@@ -245,7 +251,7 @@ wait_ready() {
     fi
     # The extension starts on documentAfterActivate; if Illustrator was still starting
     # when the kick document arrived, open it once more.
-    if (( kicked == 0 && i >= 60 )) && ! runner_alive; then
+    if (( kicked == 0 && SECONDS - s0 >= 30 )) && ! runner_alive; then
       kicked=1; open -g -a "$APP" "$KICK"
     fi
   done
@@ -253,36 +259,48 @@ wait_ready() {
 }
 
 # Submit a script file to the runner and wait for its result file (internal: no start).
+# Timeouts are wall-clock: each check samples the main thread, which itself takes ~1 s.
 await_job() {
   local id="$1" wrapper="$2" out="$3" timeout="$4" force="$5" pid="$6"
   printf '{"script":%s}' "$(json_str "$wrapper")" > "$QUEUE/$id.req.tmp" && mv "$QUEUE/$id.req.tmp" "$QUEUE/$id.req"
-  local i=0 hits=0 frozen=0 prev_sig="" text kind sig why="" stale=0
-  while (( i < timeout * 2 )); do
-    nap 0.5; i=$((i + 1))
+  local t0=$SECONDS next=$((SECONDS + 3)) hits=0 frozen=0 blocked=0 prev_sig="" text kind sig why="" stale=0
+  while (( SECONDS - t0 < timeout )); do
+    nap 0.25
     [[ -f "$out" ]] && return 0
     if ! kill -0 "$pid" 2>/dev/null; then
       JOB_ERROR="Illustrator exited while running the script (crash?)"
       local crash; crash=$(ls -t "$HOME/Library/Logs/DiagnosticReports/"Adobe\ Illustrator*.ips 2>/dev/null | head -1)
-      [[ -n "$crash" ]] && (( $(mtime "$crash") >= $(date +%s) - i )) && JOB_ERROR="$JOB_ERROR; crash report: $crash"
+      [[ -n "$crash" ]] && (( $(mtime "$crash") >= $(date +%s) - (SECONDS - t0) )) && JOB_ERROR="$JOB_ERROR; crash report: $crash"
       rm -f "$STATE/aictl.pid" "$STATE/ready.json" "$STATE/runner.json" "$QUEUE/$id".*
       clean_recovery
       return 5
     fi
-    if (( i % 6 == 0 )); then
-      text=$(main_thread "$pid")
-      kind=$(classify <<<"$text")
-      if [[ "$kind" == modal ]]; then hits=$((hits + 1)); else hits=0; fi
-      if [[ "$kind" == script ]]; then
-        frozen=0; prev_sig=""
+    (( SECONDS >= next )) || continue
+    next=$((SECONDS + 3))
+    text=$(main_thread "$pid")
+    [[ -f "$out" ]] && return 0
+    kind=$(classify <<<"$text")
+    if [[ "$kind" == modal ]]; then hits=$((hits + 1)); else hits=0; fi
+    sig=$(grep -oE '\(in [^)]+\) \+ [0-9]+' <<<"$text" | md5 -q)
+    if [[ "$kind" == script ]]; then
+      frozen=0
+      # A script stuck in a file system call: macOS shows a privacy prompt ("would like to
+      # access files in your Documents folder") and blocks open() until someone answers.
+      if [[ "$sig" == "$prev_sig" ]] && grep -E "$FILE_RE" >/dev/null <<<"$(tail -3 <<<"$text")"; then
+        blocked=$((blocked + 1))
       else
-        sig=$(grep -oE '\(in [^)]+\) \+ [0-9]+' <<<"$text" | md5 -q)
-        if [[ -n "$prev_sig" && "$sig" == "$prev_sig" ]]; then frozen=$((frozen + 1)); else frozen=0; fi
-        prev_sig="$sig"
+        blocked=0
       fi
-      if runner_alive; then stale=0; else stale=$((stale + 1)); fi
+    else
+      blocked=0
+      if [[ -n "$prev_sig" && "$sig" == "$prev_sig" ]]; then frozen=$((frozen + 1)); else frozen=0; fi
     fi
+    prev_sig="$sig"
+    if runner_alive; then stale=0; else stale=$((stale + 1)); fi
     if (( hits >= MODAL_CONFIRMATIONS )); then
       why="modal dialog while running script: $(known_dialog "$(main_stack "$pid")")"
+    elif (( blocked >= BLOCKED_CHECKS )); then
+      why="the script has been blocked opening a file for ~$((BLOCKED_CHECKS * 3))s: macOS is probably asking whether Illustrator may access a protected folder (Documents, Desktop, Downloads, iCloud Drive, removable volumes). Keep scripts and files outside those folders (e.g. under /private/tmp), or grant access in System Settings > Privacy & Security > Files and Folders"
     elif (( frozen >= FROZEN_CHECKS )); then
       why="main thread frozen outside the script for ~$((FROZEN_CHECKS * 3))s: $(main_stack "$pid" | tail -4 | tr '\n' ' ')"
     elif (( stale >= 5 )) && [[ ! -f "$QUEUE/$id.taken" ]]; then
@@ -325,6 +343,16 @@ write_wrapper() {
     f.rename("$(basename "$out")");
 })();
 EOF
+}
+
+# Folders macOS guards with a per-app privacy prompt (Files and Folders). Illustrator has
+# no grant by default; touching them from a script blocks until someone answers.
+protected() {
+  local p; p="$(cd "$(dirname "$1")" 2>/dev/null && pwd -P)/"
+  case "$p" in
+    "$HOME/Documents/"*|"$HOME/Desktop/"*|"$HOME/Downloads/"*|"$HOME/Library/Mobile Documents/"*|/Volumes/*) return 0 ;;
+  esac
+  return 1
 }
 
 # Close the kick document(s) left over from start.
@@ -391,6 +419,12 @@ run_script() {
   out="$STATE/result-$id.json"; wrapper="$STATE/run-$id.jsx"
   if [[ "$mode" == file ]]; then
     [[ -f "$src" ]] || die "no such script: $src"
+    if protected "$src"; then
+      # Illustrator would trigger a macOS privacy prompt reading it; hand it a copy.
+      cp "$src" "$STATE/src-$id.jsx"
+      log "staged $src as $STATE/src-$id.jsx (macOS protects its folder; files it includes by relative path will not be found)"
+      src="$STATE/src-$id.jsx"
+    fi
     body="__bae_value = \$.evalFile(new File($(json_str "$src")));"
   else
     printf '%s' "$src" > "$STATE/src-$id.jsx"
