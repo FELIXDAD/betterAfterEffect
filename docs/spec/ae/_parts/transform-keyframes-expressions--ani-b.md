@@ -401,7 +401,8 @@
   add([10, 20], [1, 2, 3]) == [11, 22, 3]
   sub(a, b)[i] = (a[i] ?? 0) - (b[i] ?? 0)
   mul(v, k)[i] = v[i] * k ;  div(v, k)[i] = v[i] / k      // k == 0 -> ±Infinity / NaN per IEEE
-  numbers are accepted where arrays are expected ("vector math functions also work for regular numbers")
+  numbers where arrays are expected: the reference documents Array parameters only; accepting a Number
+  (treated as a 1-element vector) is UNVERIFIED for AE (lottie-web accepts numbers)
   ```
 - **Priority:** P0
 - **Owner:** bae-anim
@@ -436,7 +437,7 @@
   | Method | Parameters (中文) | Returns |
   |---|---|---|
   | `dot(vec1, vec2)` | vec1, vec2 (矢量): Array | Number = Σ vec1[i]·vec2[i] over max length, missing = 0 |
-  | `cross(vec1, vec2)` | vec1, vec2: Array of 2 or 3 | Array 3: `[y1z2−z1y2, z1x2−x1z2, x1y2−y1x2]`; 2D inputs are treated as z = 0 (UNVERIFIED whether the result for 2D inputs is length 2 or 3) |
+  | `cross(vec1, vec2)` | vec1, vec2: Array of 2 or 3 | Array (documented as "2- or 3-dimensional"): `[y1z2−z1y2, z1x2−x1z2, x1y2−y1x2]` with missing z = 0; UNVERIFIED: for two 2D inputs AE returns a 2-element array, presumably the first two components of that product (= [0, 0]), versus the full 3-element vector |
   | `length(vec)` | vec (矢量): Array or Number | Number = √(Σ vec[i]²); a Number argument returns `abs(vec)` |
   | `length(point1, point2)` | point1 (点 1), point2 (点 2): Array | Number = `length(sub(point1, point2))` (distance) |
   | `normalize(vec)` | vec: Array | Array = `div(vec, length(vec))`; zero vector → NaN elements (UNVERIFIED; lottie-web gives NaN) |
@@ -578,14 +579,15 @@
   | `linear(t, value1, value2)` | t: Number; value1, value2: Number or Array | same, with tMin = 0, tMax = 1 |
 
   ```
-  if tMax < tMin: swap(tMin, tMax)            // lottie-web; values NOT swapped (UNVERIFIED for AE)
+  if tMax < tMin: swap(tMin, tMax)            // lottie-web; values NOT swapped, so linear(100, 100, 0, 0, 10) = 10
+                                              // UNVERIFIED for AE (alternative: true reversed mapping returning 0)
   if t <= tMin: return value1
   if t >= tMax: return value2
   u = (t - tMin) / (tMax - tMin)              // tMin == tMax is caught by the two returns above
   return value1 + (value2 - value1) * u       // per component for arrays
   arrays of different length: result has the length of value1 (lottie-web); AE UNVERIFIED (likely longer, zero-padded)
   ```
-  - Overload detection: 3 arguments → second form; 5 arguments → first form (4 arguments: UNVERIFIED, treated as the 5-argument form with value2 undefined → error).
+  - Overload detection: 3 arguments → second form; 5 arguments → first form. 4 arguments: UNVERIFIED for AE; lottie-web treats any call with `value1` or `value2` undefined as the 3-argument form (`linear(t, a, b, c)` = `linear(t, a, b)`).
 - **Priority:** P0
 - **Owner:** bae-anim
 - **Notes:** Typical uses: `linear(time, 0, 6, 20, 80)` (ramp), `linear(value, 0, 100, 20, 80)` (range remap). The `t <= tMin` / `t >= tMax` order means values are returned exactly (bit-identical) outside the range.
@@ -608,7 +610,7 @@
   - Note the naming: AE's `easeIn` eases at the *start* (tMin side) — the opposite of the keyframe "Easy Ease In" wording, which eases into the incoming keyframe.
 - **Priority:** P0
 - **Owner:** bae-anim
-- **Notes:** The bezier constants are lottie-web's (`BezierFactory.getBezierEasing`), chosen to match AE; AE's exact curve is undocumented — UNVERIFIED (it may be a cubic Hermite/smoothstep-like curve; values differ by < 1% between candidates). Verify by sampling AE at u = 0.1…0.9 before M1. lottie-web clamps u but, for tMax == tMin, divides by zero (NaN); BAE: `tMax == tMin` → return value1 if t < tMin else value2. Implementation hint: precompute a 256-entry lookup + one Newton step like the keyframe evaluator (see ani-a temporal ease).
+- **Notes:** The bezier constants are lottie-web's (`BezierFactory.getBezierEasing`), chosen to match AE; AE's exact curve is undocumented — UNVERIFIED (it may be a cubic Hermite/smoothstep-like curve; values differ by < 1% between candidates). Verify by sampling AE at u = 0.1…0.9 before M1. lottie-web clamps u but, for tMax == tMin, divides by zero (NaN); BAE: `tMax == tMin` → return value1 if t <= tMin else value2 (same boundary rule as `linear`, whose documented contract is value1 for t <= tMin and value2 for t >= tMax). Implementation hint: precompute a 256-entry lookup + one Newton step like the keyframe evaluator (see ani-a temporal ease).
 
 ## Color conversion methods
 
