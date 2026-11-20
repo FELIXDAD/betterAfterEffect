@@ -52,10 +52,25 @@ pub mod layer {
     pub const QUALITY: &str = "quality";
     pub const TIME_REMAP_ENABLED: &str = "time_remap_enabled";
     pub const TIME_REMAP: &str = "time_remap";
+    pub const PRESERVE_TRANSPARENCY: &str = "preserve_transparency";
+    pub const TEXT_SOURCE: &str = "text:source";
+    pub const TEXT_PATH: &str = "text:path";
     /// Child folders.
     pub const MASKS: &str = "masks";
     pub const EFFECTS: &str = "effects";
     pub const CONTENTS: &str = "contents";
+    pub const ANIMATORS: &str = "animators";
+}
+
+/// `Asset` prim attributes.
+pub mod asset {
+    pub const KIND: &str = "kind";
+    pub const WIDTH: &str = "width";
+    pub const HEIGHT: &str = "height";
+    pub const PIXEL_ASPECT: &str = "pixel_aspect";
+    pub const FRAME_RATE: &str = "frame_rate";
+    pub const DURATION: &str = "duration";
+    pub const SOLID_COLOR: &str = "solid_color";
 }
 
 /// Layer transform group.
@@ -217,6 +232,9 @@ mod tests {
                 l::QUALITY,
                 l::TIME_REMAP_ENABLED,
                 l::TIME_REMAP,
+                l::PRESERVE_TRANSPARENCY,
+                l::TEXT_SOURCE,
+                l::TEXT_PATH,
                 tr::ANCHOR_POINT,
                 tr::POSITION,
                 tr::SEPARATE_DIMENSIONS,
@@ -258,6 +276,18 @@ mod tests {
                 mask::FEATHER,
                 mask::OPACITY,
                 mask::EXPANSION,
+            ],
+        );
+        check(
+            &PrimType::ASSET,
+            &[
+                asset::KIND,
+                asset::WIDTH,
+                asset::HEIGHT,
+                asset::PIXEL_ASPECT,
+                asset::FRAME_RATE,
+                asset::DURATION,
+                asset::SOLID_COLOR,
             ],
         );
         check(

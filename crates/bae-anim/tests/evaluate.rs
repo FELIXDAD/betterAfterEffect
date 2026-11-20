@@ -3,8 +3,8 @@
 use bae_anim::glam::DVec3;
 use bae_anim::{EvalError, Evaluator, LayerSource, TrackMatte, evaluate_attribute, evaluate_comp};
 use bae_model::{
-    AttrSpec, AuthorId, BezierPath, FrameRate, Keyframe, Op, PrimPath, PrimType, Stage, Time,
-    Transaction, Value,
+    AttrSpec, AuthorId, BezierPath, FrameRate, Keyframe, Op, PrimPath, PrimType, Stage,
+    TextDocument, Time, Transaction, Value,
 };
 
 fn p(s: &str) -> PrimPath {
@@ -191,7 +191,15 @@ fn layer_time_and_precomp_source_time() {
                 "frame_rate",
                 Value::FrameRate(FrameRate::new(12, 1)),
             )
-            .set("/comps/inner", "preserve_frame_rate", true);
+            .set("/comps/inner", "preserve_frame_rate", true)
+            .set("/comps/inner", "duration", Value::Time(secs(10.0)))
+            .folder("/comps/inner/layers");
+        let inner = b.layer("/comps/inner", "spin", "null");
+        b.keys(
+            &inner,
+            "transform:rotation",
+            vec![(0.0, Keyframe::linear(0.0)), (1.0, Keyframe::linear(100.0))],
+        );
         let l = b.layer("/comps/main", "pre", "pre_comp");
         b.set(&l, "source", Value::PrimRef(p("/comps/inner")))
             .set(&l, "start_time", Value::Time(secs(1.0)))
@@ -208,11 +216,16 @@ fn layer_time_and_precomp_source_time() {
     assert_eq!(l.layer_time, secs(0.5));
     assert!((l.transform.rotation.z - 5.0).abs() < 1e-12);
     // Inner comp time snapped to 12 fps (0.5 s is on a frame; 0.52 s is not).
-    let LayerSource::Comp { comp, time } = &l.source else {
+    let LayerSource::Comp { comp, time, nested } = &l.source else {
         panic!("{:?}", l.source)
     };
     assert_eq!(comp, &p("/comps/inner"));
     assert_eq!(*time, secs(0.5));
+    // The pre-comp is evaluated recursively at the mapped time.
+    let nested = nested.as_ref().expect("nested comp evaluated");
+    assert_eq!(nested.path, p("/comps/inner"));
+    assert_eq!(nested.time, secs(0.5));
+    assert!((nested.layers[0].transform.rotation.z - 50.0).abs() < 1e-9);
     let ec = evaluate_comp(&s, &p("/comps/main"), secs(2.04)).unwrap();
     let LayerSource::Comp { time, .. } = ec.layers[0].source else {
         panic!()
@@ -238,13 +251,117 @@ fn time_remap_drives_source_time() {
             );
     });
     let ec = evaluate_comp(&s, &p("/comps/main"), secs(0.5)).unwrap();
-    assert_eq!(
-        ec.layers[0].source,
-        LayerSource::Asset {
-            asset: p("/assets/clip"),
-            time: secs(3.0)
-        }
-    );
+    let LayerSource::Asset { asset, time, info } = &ec.layers[0].source else {
+        panic!("{:?}", ec.layers[0].source)
+    };
+    assert_eq!((asset, *time), (&p("/assets/clip"), secs(3.0)));
+    assert_eq!(info.kind, "footage");
+    assert_eq!(info.solid_color, None);
+}
+
+#[test]
+fn solid_source_info() {
+    let s = stage(|b| {
+        b.prim("/assets", PrimType::FOLDER)
+            .prim("/assets/red", PrimType::ASSET)
+            .set("/assets/red", "kind", Value::Enum("solid".into()))
+            .set("/assets/red", "width", Value::Int(640))
+            .set("/assets/red", "height", Value::Int(360))
+            .set(
+                "/assets/red",
+                "solid_color",
+                Value::Color([1.0, 0.0, 0.0, 1.0]),
+            );
+        let l = b.layer("/comps/main", "red", "solid");
+        b.set(&l, "source", Value::PrimRef(p("/assets/red"))).set(
+            &l,
+            "preserve_transparency",
+            true,
+        );
+    });
+    let ec = evaluate_comp(&s, &p("/comps/main"), Time::ZERO).unwrap();
+    let l = &ec.layers[0];
+    assert!(l.switches.preserve_transparency);
+    let LayerSource::Asset { info, .. } = &l.source else {
+        panic!()
+    };
+    assert_eq!((info.width, info.height), (640, 360));
+    assert_eq!(info.solid_color, Some([1.0, 0.0, 0.0, 1.0]));
+}
+
+#[test]
+fn precomp_cycles_are_cut() {
+    let s = stage(|b| {
+        let l = b.layer("/comps/main", "self", "pre_comp");
+        b.set(&l, "source", Value::PrimRef(p("/comps/main")));
+    });
+    let ec = evaluate_comp(&s, &p("/comps/main"), Time::ZERO).unwrap();
+    let LayerSource::Comp { nested, .. } = &ec.layers[0].source else {
+        panic!()
+    };
+    assert!(nested.is_none());
+}
+
+#[test]
+fn motion_blur_sample_times() {
+    let s = stage(|b| {
+        b.set("/comps/main", "motion_blur", true).set(
+            "/comps/main",
+            "motion_blur_samples",
+            Value::Int(4),
+        );
+        let a = b.layer("/comps/main", "blurred", "solid");
+        b.layer("/comps/main", "sharp", "solid");
+        b.set(&a, "motion_blur", true);
+    });
+    let t = FrameRate::FPS_30.frame_to_time(3);
+    let ec = evaluate_comp(&s, &p("/comps/main"), t).unwrap();
+    let times = &ec.layers[0].motion_blur_times;
+    assert_eq!(times.len(), 4);
+    // Default shutter 180° / -90°: centred on the frame, spanning half a frame.
+    let span = times[3] - times[0];
+    let frame = FrameRate::FPS_30.frame_duration();
+    assert!((span.0 - frame.0 * 3 / 8).abs() <= 1, "{span:?}");
+    assert!(times[0] < t && times[3] > t);
+    assert!(ec.layers[1].motion_blur_times.is_empty());
+}
+
+#[test]
+fn text_source_document() {
+    let s = stage(|b| {
+        let l = b.layer("/comps/main", "title", "text");
+        b.keys(
+            &l,
+            "text:source",
+            vec![
+                (
+                    0.0,
+                    Keyframe::linear(Value::TextDocument(Box::new(TextDocument::new(
+                        "Hello", "ArialMT", 72.0,
+                    )))),
+                ),
+                (
+                    1.0,
+                    Keyframe::linear(Value::TextDocument(Box::new(TextDocument::new(
+                        "World", "ArialMT", 72.0,
+                    )))),
+                ),
+            ],
+        );
+    });
+    let at = |t: f64| {
+        evaluate_comp(&s, &p("/comps/main"), secs(t))
+            .unwrap()
+            .layers[0]
+            .text
+            .as_ref()
+            .unwrap()
+            .text
+            .clone()
+    };
+    // Text documents only hold.
+    assert_eq!(at(0.5), "Hello");
+    assert_eq!(at(1.0), "World");
 }
 
 #[test]

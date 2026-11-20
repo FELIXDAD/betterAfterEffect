@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use bae_model::{BezierPath, FrameRate, LayerKind, PrimPath, PrimType, Time, Value};
+use bae_model::{BezierPath, FrameRate, LayerKind, PrimPath, PrimType, TextDocument, Time, Value};
 use glam::{DMat4, DVec3};
 use serde::Serialize;
 
@@ -74,6 +74,9 @@ pub struct EvaluatedLayer {
     pub switches: LayerSwitches,
     /// Where the layer's pixels come from, with the time to sample them at.
     pub source: LayerSource,
+    /// Comp times at which to sample this layer for motion blur (AE-ANI-103), in
+    /// shutter order. Empty when motion blur is off for the comp or the layer.
+    pub motion_blur_times: Vec<Time>,
     /// Index of the parent layer in [`EvaluatedComp::layers`].
     pub parent: Option<usize>,
     pub transform: Transform,
@@ -92,6 +95,10 @@ pub struct EvaluatedLayer {
     pub effects: Vec<EvaluatedEffect>,
     /// Shape layer contents (groups, paths, fills, operators …), in order.
     pub contents: Vec<EvaluatedPrim>,
+    /// Text layers: the source text at this time (`text:source`).
+    pub text: Option<Box<TextDocument>>,
+    /// Text layers: animators with their selectors (`animators` folder), evaluated.
+    pub text_animators: Vec<EvaluatedPrim>,
     pub camera: Option<CameraState>,
     pub light: Option<LightState>,
 }
@@ -108,6 +115,8 @@ pub struct LayerSwitches {
     pub three_d: bool,
     pub motion_blur: bool,
     pub collapse_transformation: bool,
+    /// AE "Preserve Underlying Transparency" (T switch).
+    pub preserve_transparency: bool,
 }
 
 /// Where a layer's pixels come from.
@@ -120,10 +129,35 @@ pub enum LayerSource {
     /// Footage or solid (`Asset` prim). `time` is the source time after start time,
     /// stretch and time remap (AE-ANI-090); choosing the frame for footage of a given
     /// frame rate is the media layer's job (AE-ANI-095).
-    Asset { asset: PrimPath, time: Time },
-    /// Pre-comp. `time` is the inner comp time to evaluate (AE-ANI-093/094: already
-    /// snapped when the inner comp preserves its frame rate).
-    Comp { comp: PrimPath, time: Time },
+    Asset {
+        asset: PrimPath,
+        time: Time,
+        info: AssetInfo,
+    },
+    /// Pre-comp. `time` is the inner comp time (AE-ANI-093/094: already snapped when
+    /// the inner comp preserves its frame rate). `nested` is the inner comp evaluated
+    /// at that time (recursively); `None` when the comp is missing or nesting is cyclic.
+    Comp {
+        comp: PrimPath,
+        time: Time,
+        nested: Option<Box<EvaluatedComp>>,
+    },
+}
+
+/// What a layer needs to know about its `Asset` source. Resolving the file on disk is
+/// `bae_model::AssetResolver`'s job.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct AssetInfo {
+    /// `footage` / `solid` / `placeholder` / `sequence`.
+    pub kind: String,
+    pub width: u32,
+    pub height: u32,
+    pub pixel_aspect: f64,
+    pub frame_rate: Option<FrameRate>,
+    /// `None` for stills and solids.
+    pub duration: Option<Time>,
+    /// Solids: the fill colour.
+    pub solid_color: Option<[f64; 4]>,
 }
 
 /// Track matte mode.
