@@ -16,6 +16,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+bae-agent.workspace = true
 bae-app.workspace = true
 bae-gpu.workspace = true
 bae-model.workspace = true

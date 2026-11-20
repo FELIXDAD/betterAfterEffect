@@ -54,19 +54,37 @@
 - [ ] 预读（后台线程提前解码）、YUV 直出（420v/x420 双平面 + 着色器转换，进一步降低 4K 解码开销）、QuickTime 时码轨、关键帧表（`sync_frames`）
 - [x] 编码导出接口（`export`）：`EncodeSettings`（对应 AE 输出模块：编码、尺寸、帧率、RGB / RGB+Alpha 及直通/预乘、位深、色彩标签、起始编号与时码）、`Encoder` / `EncoderFormat`（注册到 `Registry<dyn EncoderFormat>`）、`MediaEncoders`、`convert_frame`（CPU 像素格式与 alpha 转换）、`FrameReadback`（GPU 帧异步回读，默认 2 帧在途）、`render`（逐帧生产 → 回读 → 编码，进度回调、取消时删除半成品）、`RenderQueue`（运行时队列：排队、取消、重排、重新排队、结果）。工程里保存哪些渲染任务属于文档模型，这里只负责执行。
 - [x] PNG 序列（8/16 位，RGB 或 RGBA，sRGB/gAMA/pHYs）、OpenEXR 序列（half/float，None/RLE/ZIPS/ZIP/PIZ，色度、像素比、逐帧时码）编码；文件名支持 `name_[####].png`、`name_####.png`、`name_0000.png`。
-- [ ] macOS 硬件编码：H.264 / HEVC（VideoToolbox，经 AVAssetWriter）、ProRes 422/4444、带 alpha（下一个 PR）
+- [x] macOS 编码（`apple::AvWriterFormat`）：AVAssetWriter 驱动 VideoToolbox，H.264 / HEVC 优先硬件编码，ProRes Proxy / LT / 422 / HQ / 4444 / 4444 XQ；8 位用 32BGRA，ProRes 和 10 位 HEVC 用 64RGBAHalf；ProRes 4444 直通 alpha，HEVC alpha 可选直通 / 预乘；按 H.273 写色彩标签（原色、传递函数、矩阵），像素比、码率、质量、关键帧间隔。解码端识别 HEVC alpha 及其直通 / 预乘。
+- [ ] 编码导出后续：GPU 端转换后直接写进 IOSurface（省掉 CPU 转换和拷贝）、时码轨、音频混入、Windows Media Foundation 编码
 - [x] 音频接口（`audio`）：`AudioSource`（按采样帧随机读取）、采样与 `Time` 精确换算、`MemoryAudio`、`Waveform`（min/max 峰值、降采样出缩放级别、按时间取可见区间）。
-- [ ] 音频文件解码（symphonia）与 cpal 播放
+- [x] 音频文件解码（`FileAudio`，symphonia）：WAV、AIFF、MP4 / QuickTime / M4A（AAC）、MP3、FLAC，按采样帧随机读取（顺读继续解码，跳转时精确 seek）；`audio::probe` 只读文件头列出音频流，影片的 `MediaInfo.audio` 由它填写。symphonia 的 MP4 读取不处理编码器延迟，AAC 会比画面晚约 44 ms（48 kHz 下 2112 个采样）；新增的小型 box 读取器从音频轨的编辑列表或 iTunes 无缝信息（`iTunSMPB`）里取延迟和有效长度并裁掉。测试用代码生成 WAV，macOS 上测试时用系统的 `afconvert` 生成 AAC / FLAC / AIFF；AAC 在 0.5 s 处放一个脉冲，解码后位置仍在 0.5 s。
+- [ ] cpal 播放、音画同步时钟；导出时混入音频
 - [ ] 代理与 FFmpeg 插件（`FrameRequest::downscale` 与格式注册表已预留）
 - [x] 裁片接口（`trim`，给 21）：`TrimRequest` 按源时间区间（`TimeRange`）+ 余量 + 模式；`plan_trim` 换算成整帧，直拷时扩展到 GOP 边界（起点取之前最近的关键帧，终点延到下一关键帧之前）；`gop_start` / `next_gop_start`；`Trimmer`（注册到 `Registry<dyn Trimmer>`）；`SequenceTrimmer`（序列只复制用到的帧，保留文件名）。
-- [ ] 影片裁片：AVFoundation 直拷（读压缩样本 + 写入同格式）与重编码、影片关键帧表（`sync_frames`，用样本表，下一个 PR）
+- [x] 影片关键帧表：`AvSource::sync_frames` 用 AVSampleCursor 读样本表（不读媒体数据），经编辑列表换算成帧号。
+- [x] 影片裁片（`apple::AvTrimmer`）：直拷整 GOP 的压缩样本（视频和音频轨，AVAssetReader / AVAssetWriter 不带编码设置），或精确帧重编码成 ProRes（默认 422 HQ，有 alpha 时 4444，可在请求里指定编码）。
+- [x] `MediaInfo::asset_attributes()`：按 `bae_model::schema` 的 Asset 属性名输出（kind、width、height、frame_rate、duration、pixel_aspect、alpha_mode、has_video、has_audio、sequence:*），测试里逐项对照 schema 的类型和枚举值。
+
+### 与 AE 2026 渲染结果的对比（`tests/ae_reference.rs`，脚本 `tests/ae/render_refs.jsx`）
+
+测试合成：左半边不透明纯色 (0.75, 0.25, 0.5)，右半边 50% 不透明度纯色 (0.2, 0.6, 0.9)；AE 模板 "H.264 - Match Render Settings - 15 Mbps"、"High Quality"（ProRes 422）、"High Quality with Alpha"（ProRes 4444）。
+
+| | AE | bae-media |
+|---|---|---|
+| 1920×1080 标签（原色 / 传递 / 矩阵 / 范围） | 709 / 709 / 709 / 有限范围 | 相同 |
+| 320×180 标签 | SMPTE-C（601）/ 709 / 601 / 有限范围 | 已改成相同（高度 < 720 用 601） |
+| 纯色解码值（理论值 191.25, 63.75, 127.5） | H.264 190/64/127，ProRes 190.5/64.1/127.2 | 我们编码再解码：H.264 192/64/129，ProRes 191/64/128 |
+| ProRes 4444 alpha | 默认预乘（"Premultiplied (Matted)"），文件里不标记 | 按设置写直通或预乘；读取时文件不标记，默认按直通，`CpuFrame::guess_alpha()` 能判断出预乘（AE「猜测」的做法） |
+
+- 读 AE 的文件颜色正确（与理论值差 ≤ 1.3 个 8 位码值）；我们编码的标签与 AE 一致。
+- `MediaInfo` 现在报告文件里真实的 YCbCr 矩阵和范围；交付的帧仍是全范围 RGB。
 
 ### 说明与待定
 
 - `bae-media` 依赖 `bae-model`（只用 `Time` / `FrameRate`），按 02 的要求避免两套时间体系。
 - 媒体帧号一律从素材第一帧起算、从 0 开始；序列 `name_0101.png` 的第 0 帧是 0101。
 - 颜色只报告不转换：`GpuFrame` 的值保持素材自身的编码（不线性化），由 06 根据 `ColorInfo` 处理。未标记的素材报告为 `Unspecified`，默认规则由 06 决定。
-- 本机交叉检查 Windows：dev 上 `bae-model` 依赖 `blake3`，它的 build script 在 macOS 上为 msvc 目标编译 C/汇编会失败；`cargo clippy --target x86_64-pc-windows-msvc` 需要加 `CARGO_FEATURE_PURE=1`（只检查不链接，不影响结果）。真正的 Windows CI 不受影响。
+- VideoToolbox 把「最大关键帧间隔」当上限，实际可能更密（设 10 时给出每 9 帧一个）；裁片一律以样本表里的关键帧为准。
 - 待用户决定：序列缺帧时是报错（现在的做法，合成里显示占位）还是沿用前一帧。
 
 ## 请求（其他工作流在这里留言）

@@ -100,8 +100,8 @@ wgpu v30.0.2
 | cbindgen | `clap`（命令行） | 无 | 只作为库在 build 脚本里生成 `bae_plugin.h` |
 | zip | `aes-crypto`、`bzip2`、`deflate64`、`lzma`、`ppmd`、`time`、`zstd`、`xz` | `deflate-flate2-zlib-rs` | 只要 deflate（纯 Rust 的 zlib-rs 后端） |
 | futures | `async-await`、`executor` | `std` | 执行器用 tokio 或 pollster |
-| tokio | （默认本来就空） | 无 | 10、17 自己开 `rt`、`net` 等 |
-| rmcp | `base64`、`macros`、`server` | 无 | 17 自己开 |
+| tokio | （默认本来就空） | 无 | 10 自己开 `rt`、`net` 等；17 只在测试里用 |
+| rmcp | `base64`、`macros`、`server` | 无 | 只做 17 的 dev-dependency（`client` + `transport-async-rw`），不链接进应用 |
 | criterion | `rayon`、`plotters` | `cargo_bench_support` | 不生成图表 |
 
 ## 5. 全部 pin
@@ -193,6 +193,7 @@ wgpu v30.0.2
 | windows-sys | 0.61.2 | 无默认 | bae-platform（Windows 控制台） | 最新；muda 要求 `>=0.60, <=0.61` |
 | directories | 6.0.0 | 默认 | bae-platform | 最新 |
 | libloading | 0.9.1 | 默认 | 19、20 | 最新 |
+| notify | 8.2.2 | 关默认，只开 `macos_fsevent` | 09（`bae-sync` 的可选 feature `watch`，共享目录模式的文件监听） | 8.x 最新稳定版（9.0 还是 rc）；macOS 走 FSEvents（objc2-core-services，和已 pin 的 objc2 0.3 同一套），Windows 走 ReadDirectoryChangesW |
 
 ### 插件、打包、哈希
 
@@ -208,8 +209,8 @@ wgpu v30.0.2
 |---|---|---|---|---|
 | pollster | 0.4.0 | 默认 | bae、bae-gpu（等待适配器 / 设备请求） | **待定**：1.0.3 已发布，eframe 0.36.2 用 `^1.0`。依赖图里只有我们自己用 0.4，可以直接升到 1.0（见第 9 节） |
 | futures | 0.3.34 | `std` | 09、10、17 | 最新 |
-| tokio | 1.54.1 | 无默认 | 10、17 | 最新 |
-| rmcp | 3.11.0 | 无默认 | 17 | 最新 |
+| tokio | 1.54.1 | 无默认 | 10、17（测试） | 最新 |
+| rmcp | 3.11.0 | 无默认 | 17（测试：用官方 SDK 的客户端检查互通） | 最新 |
 
 ### 测试与基准
 

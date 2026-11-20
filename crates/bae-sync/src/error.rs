@@ -29,6 +29,24 @@ pub enum SyncError {
     },
     #[error("transport closed")]
     Closed,
+    #[error("client ID {0} is already in use by another session on this project")]
+    ClientIdInUse(crate::ClientId),
+    #[error("{0} is not a project directory")]
+    NotADirectory(PathBuf),
+    #[error("no named version {0}")]
+    UnknownCheckpoint(String),
+    /// The version includes ops of sublayer `.0` that have not arrived here yet.
+    #[error("that version of sublayer {0} is not available locally (not synced yet)")]
+    VersionNotAvailable(bae_model::SublayerId),
+}
+
+impl SyncError {
+    pub(crate) fn io(path: &std::path::Path) -> impl FnOnce(std::io::Error) -> SyncError + '_ {
+        move |source| SyncError::Io {
+            path: path.to_owned(),
+            source,
+        }
+    }
 }
 
 impl From<bae_model::loro::LoroError> for SyncError {

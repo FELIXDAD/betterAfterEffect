@@ -21,6 +21,9 @@ image = { workspace = true, features = ["webp"] }
 parking_lot.workspace = true
 png.workspace = true
 serde.workspace = true
+# Audio decoding: WAV / AIFF / PCM, MP4 / QuickTime with AAC, MP3, FLAC. No SIMD
+# features (they pull in rustfft); see the size note in the PR.
+symphonia = { workspace = true, features = ["aac", "aiff", "flac", "isomp4", "mp3", "pcm", "wav"] }
 thiserror.workspace = true
 tracing.workspace = true
 zune-jpeg.workspace = true
@@ -32,9 +35,10 @@ zune-jpeg.workspace = true
 objc2.workspace = true
 objc2-foundation = { workspace = true, features = ["NSArray", "NSDictionary", "NSError", "NSString", "NSURL", "NSValue"] }
 objc2-core-foundation = { workspace = true, features = ["CFBase", "CFDictionary", "CFNumber", "CFString"] }
-objc2-av-foundation = { workspace = true, features = ["AVAsset", "AVAssetReader", "AVAssetReaderOutput", "AVAssetTrack", "AVMediaFormat", "AVTime", "objc2-core-media"] }
+objc2-av-foundation = { workspace = true, features = ["AVAsset", "AVAssetReader", "AVAssetReaderOutput", "AVAssetTrack", "AVAssetTrackSegment", "AVAssetWriter", "AVAssetWriterInput", "AVMediaFormat", "AVSampleCursor", "AVTime", "AVVideoSettings", "objc2-core-media", "objc2-core-video"] }
 objc2-core-media = { workspace = true, features = ["CMBase", "CMFormatDescription", "CMSampleBuffer", "CMTime", "CMTimeRange", "objc2-core-video"] }
-objc2-core-video = { workspace = true, features = ["CVBase", "CVBuffer", "CVImageBuffer", "CVMetalTexture", "CVMetalTextureCache", "CVPixelBuffer", "CVPixelFormatDescription", "CVReturn", "objc2-metal"] }
+objc2-core-video = { workspace = true, features = ["CVBase", "CVBuffer", "CVImageBuffer", "CVMetalTexture", "CVMetalTextureCache", "CVPixelBuffer", "CVPixelBufferPool", "CVPixelFormatDescription", "CVReturn", "objc2-metal"] }
+objc2-video-toolbox = { workspace = true, features = ["VTCompressionProperties"] }
 objc2-metal = { workspace = true, features = ["MTLDevice", "MTLPixelFormat", "MTLResource", "MTLTexture", "MTLTypes"] }
 
 # Test fixtures: movies are written with AVAssetWriter (no binary files in git).

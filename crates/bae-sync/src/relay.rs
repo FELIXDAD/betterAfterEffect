@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 use crate::client::ClientId;
 use crate::docs::MemDocs;
 use crate::error::SyncError;
+use crate::presence::PresenceTable;
+use crate::protocol::Message;
 use crate::session::{SessionConfig, SyncSession};
 use crate::transport::Transport;
 
@@ -22,6 +24,8 @@ struct Peer {
     handle: PeerHandle,
     session: SyncSession,
     transport: Box<dyn Transport + Send>,
+    /// Current presence of the others has been sent to this peer.
+    greeted: bool,
 }
 
 /// What one [`Relay::pump`] did.
@@ -42,6 +46,7 @@ pub struct Relay {
     docs: MemDocs,
     peers: Vec<Peer>,
     next_handle: u64,
+    presence: PresenceTable,
 }
 
 impl std::fmt::Debug for Relay {
@@ -68,6 +73,7 @@ impl Relay {
             docs,
             peers: Vec::new(),
             next_handle: 0,
+            presence: PresenceTable::default(),
         }
     }
 
@@ -91,14 +97,33 @@ impl Relay {
             handle,
             session: SyncSession::new(config),
             transport,
+            greeted: false,
         });
         handle
     }
 
+    /// Drop a connection; the others are told its client left.
     pub fn disconnect(&mut self, handle: PeerHandle) -> bool {
-        let before = self.peers.len();
-        self.peers.retain(|p| p.handle != handle);
-        before != self.peers.len()
+        self.disconnect_at(handle, Instant::now())
+    }
+
+    fn disconnect_at(&mut self, handle: PeerHandle, now: Instant) -> bool {
+        let Some(i) = self.peers.iter().position(|p| p.handle == handle) else {
+            return false;
+        };
+        let peer = self.peers.remove(i);
+        if let Some(client) = peer.session.remote_client()
+            && !self
+                .peers
+                .iter()
+                .any(|p| p.session.remote_client() == Some(client))
+            && let Some(leave) = self.presence.leave(client, now)
+        {
+            for p in &mut self.peers {
+                let _ = p.transport.send(leave.clone());
+            }
+        }
+        true
     }
 
     /// Connected peers and the client IDs they announced.
@@ -117,9 +142,11 @@ impl Relay {
     /// so an update from one client reaches the others within the same call.
     pub fn pump_at(&mut self, now: Instant) -> RelayOutcome {
         let mut out = RelayOutcome::default();
+        self.presence.expire(now);
         for _ in 0..4 {
             let mut received = 0;
             let mut failed = Vec::new();
+            let mut presence: Vec<(PeerHandle, Message)> = Vec::new();
             for peer in &mut self.peers {
                 match peer
                     .session
@@ -130,12 +157,39 @@ impl Relay {
                         out.sent += o.sent;
                         out.errors
                             .extend(o.errors.into_iter().map(|e| (peer.handle, e)));
+                        presence.extend(o.presence_received.into_iter().map(|m| (peer.handle, m)));
                     }
                     Err(e) => failed.push((peer.handle, e)),
                 }
+                if !peer.greeted {
+                    peer.greeted = true;
+                    for (_, msg) in self.presence.raw() {
+                        if let Err(e) = peer.transport.send(msg.clone()) {
+                            failed.push((peer.handle, e));
+                            break;
+                        }
+                        out.sent += 1;
+                    }
+                }
             }
+            // Fan presence out: everyone but the sender gets every accepted update
+            // (heartbeats included, they keep the sender alive on the others).
+            for (from, msg) in presence {
+                if self.presence.apply(&msg, now).is_none() {
+                    continue;
+                }
+                for peer in self.peers.iter_mut().filter(|p| p.handle != from) {
+                    if let Err(e) = peer.transport.send(msg.clone()) {
+                        failed.push((peer.handle, e));
+                    } else {
+                        out.sent += 1;
+                    }
+                }
+            }
+            failed.sort_by_key(|(h, _)| *h);
+            failed.dedup_by_key(|(h, _)| *h);
             for (handle, e) in failed {
-                self.disconnect(handle);
+                self.disconnect_at(handle, now);
                 out.disconnected.push((handle, e));
             }
             out.received += received;

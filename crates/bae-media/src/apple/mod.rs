@@ -20,6 +20,12 @@
 //! at the frame (AVFoundation then decodes from the preceding keyframe and only
 //! outputs from the range start).
 
+mod encode;
+mod trim;
+
+pub use encode::{AvWriterEncoder, AvWriterFormat, default_movie_path};
+pub use trim::AvTrimmer;
+
 use std::path::Path;
 use std::ptr::NonNull;
 
@@ -33,8 +39,10 @@ use objc2_av_foundation::{
 use objc2_core_foundation::{CFBoolean, CFDictionary, CFNumber, CFRetained, CFString, CFType};
 use objc2_core_media::{
     CMFormatDescription, CMSampleBuffer, CMTime, CMTimeFlags, CMTimeRange,
-    CMVideoFormatDescriptionGetDimensions, kCMFormatDescriptionExtension_BitsPerComponent,
-    kCMFormatDescriptionExtension_ColorPrimaries, kCMFormatDescriptionExtension_Depth,
+    CMVideoFormatDescriptionGetDimensions, kCMFormatDescriptionAlphaChannelMode_PremultipliedAlpha,
+    kCMFormatDescriptionExtension_AlphaChannelMode, kCMFormatDescriptionExtension_BitsPerComponent,
+    kCMFormatDescriptionExtension_ColorPrimaries,
+    kCMFormatDescriptionExtension_ContainsAlphaChannel, kCMFormatDescriptionExtension_Depth,
     kCMFormatDescriptionExtension_FullRangeVideo, kCMFormatDescriptionExtension_PixelAspectRatio,
     kCMFormatDescriptionExtension_TransferFunction, kCMFormatDescriptionExtension_YCbCrMatrix,
     kCMFormatDescriptionKey_PixelAspectRatioHorizontalSpacing,
@@ -191,11 +199,27 @@ fn describe(desc: &CMFormatDescription, video: &mut VideoInfo) {
         )
     };
     let prores = video.codec.starts_with("prores");
-    let alpha = ext(depth_key).and_then(|v| number(&v)) == Some(32);
-    video.alpha = if alpha {
-        AlphaMode::Straight
-    } else {
-        AlphaMode::Opaque
+    // ProRes 4444 signals alpha with a depth of 32; HEVC with alpha with
+    // ContainsAlphaChannel and says whether it is premultiplied.
+    // SAFETY: extern statics provided by CoreMedia.
+    let (contains_key, mode_key, premultiplied) = unsafe {
+        (
+            kCMFormatDescriptionExtension_ContainsAlphaChannel,
+            kCMFormatDescriptionExtension_AlphaChannelMode,
+            kCMFormatDescriptionAlphaChannelMode_PremultipliedAlpha,
+        )
+    };
+    let contains_alpha = ext(contains_key)
+        .and_then(|v| v.downcast_ref::<CFBoolean>().map(CFBoolean::as_bool))
+        .unwrap_or(false);
+    let alpha = contains_alpha || ext(depth_key).and_then(|v| number(&v)) == Some(32);
+    let is_premultiplied = ext(mode_key)
+        .and_then(|v| v.downcast_ref::<CFString>().map(|s| s == premultiplied))
+        .unwrap_or(false);
+    video.alpha = match (alpha, is_premultiplied) {
+        (false, _) => AlphaMode::Opaque,
+        (true, false) => AlphaMode::Straight,
+        (true, true) => AlphaMode::Premultiplied,
     };
     let bits = ext(bits_key).and_then(|v| number(&v));
     video.bit_depth = match bits {
@@ -332,16 +356,12 @@ impl AvSource {
         } else {
             kCVPixelFormatType_32BGRA
         };
-        // Frames are delivered as RGB.
-        video.color.matrix = MatrixCoefficients::Identity;
-        video.color.range = ColorRange::Full;
-
         let info = MediaInfo {
             path: path.to_owned(),
             kind: MediaKind::Movie,
             format: "avfoundation".into(),
             video: Some(video),
-            audio: Vec::new(),
+            audio: crate::audio::probe(path),
             timecode: None,
             sequence: None,
         };
@@ -662,6 +682,17 @@ impl AvSource {
     }
 }
 
+/// The color of delivered frames: VideoToolbox applied the file's Y'CbCr
+/// matrix and range, so frames are full-range RGB (the info keeps the file's
+/// values).
+fn rgb_color(file: &ColorInfo) -> ColorInfo {
+    ColorInfo {
+        matrix: MatrixCoefficients::Identity,
+        range: ColorRange::Full,
+        ..file.clone()
+    }
+}
+
 fn rate_from(min_duration: CMTime, nominal: f32) -> Option<FrameRate> {
     let nominal = frame_rate_from_f64(f64::from(nominal));
     if min_duration.flags.contains(CMTimeFlags::Valid)
@@ -744,9 +775,57 @@ impl MediaSource for AvSource {
             format,
             data,
             alpha: video.alpha,
-            color: video.color.clone(),
+            color: rgb_color(&video.color),
             pixel_aspect: video.pixel_aspect,
         })
+    }
+
+    /// Keyframes from the sample table (no media data is read): every full
+    /// sync sample, mapped through the track's edit list to frame indices.
+    fn sync_frames(&mut self) -> Option<Vec<i64>> {
+        let count = self.info.video.as_ref().and_then(|v| v.frame_count)?;
+        // SAFETY: AVAssetTrack / AVSampleCursor queries.
+        unsafe {
+            if !self.track.canProvideSampleCursors() {
+                return None;
+            }
+            // Media time → track time of the first non-empty edit.
+            let offset = self
+                .track
+                .segments()
+                .iter()
+                .find(|segment| !segment.isEmpty())
+                .and_then(|segment| {
+                    let mapping = segment.timeMapping();
+                    Some(
+                        cmtime_to_flicks(mapping.target.start)?
+                            - cmtime_to_flicks(mapping.source.start)?,
+                    )
+                })
+                .unwrap_or(0);
+            let cursor = self.track.makeSampleCursorAtFirstSampleInDecodeOrder()?;
+            let mut sync = Vec::new();
+            // A sample table cannot hold more samples than this; stop runaway loops.
+            for _ in 0..count.saturating_mul(4).saturating_add(64) {
+                if cursor.currentSampleSyncInfo().sampleIsFullSync.as_bool() {
+                    let pts = cursor.presentationTimeStamp();
+                    if let Some(flicks) = cmtime_to_flicks(pts) {
+                        let index = self.rate.time_to_frame(Time::from_flicks(
+                            flicks + offset - self.start_flicks + self.frame_duration_flicks() / 2,
+                        ));
+                        if (0..count as i64).contains(&index) {
+                            sync.push(index);
+                        }
+                    }
+                }
+                if cursor.stepInDecodeOrderByCount(1) != 1 {
+                    break;
+                }
+            }
+            sync.sort_unstable();
+            sync.dedup();
+            Some(sync)
+        }
     }
 
     fn decode_gpu(
@@ -765,7 +844,7 @@ impl MediaSource for AvSource {
                 width: video.width.min(texture.width()),
                 height: video.height.min(texture.height()),
                 alpha: video.alpha,
-                color: video.color.clone(),
+                color: rgb_color(&video.color),
                 pixel_aspect: video.pixel_aspect,
             },
             request,

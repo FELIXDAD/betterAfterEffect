@@ -252,6 +252,12 @@ fn export_json_is_readable() {
     );
 }
 
+/// Compare paths as stored: `/`-separated, without Windows' `\\?\` verbatim prefix
+/// (`fs::canonicalize` adds it; resolved paths do not carry it).
+fn slash(path: &Path) -> String {
+    bae_model::asset::to_slash(path)
+}
+
 fn write(path: &Path, bytes: &[u8]) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, bytes).unwrap();
@@ -309,14 +315,20 @@ fn assets_resolve_relink_and_map() {
     let mut searching = resolver.clone();
     searching.search_dirs.push(root.clone());
     let found = searching.resolve(&a);
-    assert_eq!(found, Resolution::Searched(root.join("moved/a.mov")));
+    assert!(matches!(found, Resolution::Searched(_)), "{found:?}");
+    assert_eq!(
+        slash(found.path().unwrap()),
+        slash(&root.join("moved").join("a.mov"))
+    );
 
     // Relinking one asset gives a mapping that finds the other.
     let mapping = infer_mapping(&a.original, found.path().unwrap()).unwrap();
     let mapped = AssetResolver::new(None, vec![mapping]);
+    let resolved = mapped.resolve(&b);
+    assert!(matches!(resolved, Resolution::Mapped(_)), "{resolved:?}");
     assert_eq!(
-        mapped.resolve(&b),
-        Resolution::Mapped(root.join("moved/b.mov"))
+        slash(resolved.path().unwrap()),
+        slash(&root.join("moved").join("b.mov"))
     );
 
     // A same-named file with the wrong content is not accepted.

@@ -43,6 +43,11 @@
 
 ## 进度
 
+**2026-11-20**
+
+- PR 1 [interface]：`crates/bae-render` 公共接口。渲染输入 `RenderComp`/`RenderLayer`（纯数据，03 合并前用 `MockEvaluator` 按 schema v1 从 Stage 求值）、AE 全部 38 种混合模式 token、轨道遮罩/遮罩模式、`RenderRequest`（分辨率、ROI、位深、RGBA16F/32F、色彩上下文占位）、`LayerSource`/`SourceProvider`（05/08/插件的图层源接口）、`Effect`/`EffectLibrary`（参数定义复用 `bae_model::EffectDef`）、渲染图节点模型与 ROI 协商（合成、纯色、图层源、效果、轨道遮罩；剔除；缓存键）、`FrameCache`（内存预算 LRU + StageEvent 精确失效）、`fixture::SceneBuilder`（用命令搭测试/基准工程）。
+- 下一步：GPU 执行（纹理池、合成着色器、5 种混合模式、轨道遮罩）、`bae render` 输出 PNG、B1 基准与 `docs/perf.md`、与 AE 对照。
+
 - [ ] 渲染图与纹理池
 - [ ] 混合模式、遮罩、轨道遮罩
 - [ ] 3D 与运动模糊
@@ -52,3 +57,12 @@
 - [ ] 基准与 CI 趋势
 
 ## 请求（其他工作流在这里留言）
+
+### 06 render/color → 04（2026-11-20）
+
+bae-color 接口已提 PR（`[interface]`），接法见 `crates/bae-color/README.md`。建议：
+
+1. `RenderRequest.color` 改用 `bae_color::ColorContext`（它不是 `Copy`，可以放 `Arc<ColorContext>`）；帧缓存键用 `render_fingerprint()`，显示/视图变换不进缓存键（AE-CMP-457）。
+2. 现在的 `BlendSpace { Encoded, Linear }` 换成 `bae_color::BlendSpace`：`Stored` / `LinearBuffers` 直接混合缓冲区里的值；`LinearBlend` 在混合前后套 `blend_linearization()` 的 decode / encode。注意"线性化工作空间"时缓冲区本身已经是线性的，不能再转换一次。
+3. 素材节点挂 `interpret::input_transform(...)`；相邻的色彩节点用 `ColorTransform::then` 合并，`is_identity()` 时删掉节点；`to_wgsl(prefix)` 生成的片段拼进采样素材的 pass；视口最后一个 pass 用 `display_transform()`；渲染队列用 `output_transform()`。
+4. 依赖 bae-color 时打开 `features = ["media"]`，就能 `SourceTags::from(&media_info.color)`。

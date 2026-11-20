@@ -56,6 +56,7 @@ mod gpu;
 pub mod media_foundation;
 mod meta;
 mod module;
+mod mp4;
 pub mod sequence;
 mod source;
 pub mod still;
@@ -77,7 +78,7 @@ pub use sequence::{ImageSequence, ImageSequenceSource, detect_sequence};
 pub use source::{MediaError, MediaFormat, MediaFormats, MediaSource, OpenOptions, SequenceMode};
 pub use time::{FrameRate, Time, Timecode};
 
-pub use audio::{AudioBuffer, AudioSource, MemoryAudio, Waveform};
+pub use audio::{AudioBuffer, AudioSource, FileAudio, MemoryAudio, Waveform};
 pub use export::{
     CancelToken, EncodeOutput, EncodeSettings, Encoder, EncoderFormat, ExrCompression,
     FrameProducer, FrameReadback, MediaEncoders, ProResProfile, ProducedFrame, RenderJob,
@@ -99,12 +100,20 @@ pub fn builtin_formats() -> Vec<Arc<dyn MediaFormat>> {
 
 /// The encoders compiled into this crate for the current platform.
 pub fn builtin_encoders() -> Vec<Arc<dyn EncoderFormat>> {
-    vec![Arc::new(export::ImageSequenceFormat)]
+    #[allow(unused_mut)]
+    let mut encoders: Vec<Arc<dyn EncoderFormat>> = vec![Arc::new(export::ImageSequenceFormat)];
+    #[cfg(target_vendor = "apple")]
+    encoders.push(Arc::new(apple::AvWriterFormat));
+    encoders
 }
 
 /// The trimmers compiled into this crate for the current platform.
 pub fn builtin_trimmers() -> Vec<Arc<dyn Trimmer>> {
-    vec![Arc::new(trim::SequenceTrimmer::new(
+    #[allow(unused_mut)]
+    let mut trimmers: Vec<Arc<dyn Trimmer>> = vec![Arc::new(trim::SequenceTrimmer::new(
         time::DEFAULT_SEQUENCE_RATE,
-    ))]
+    ))];
+    #[cfg(target_vendor = "apple")]
+    trimmers.push(Arc::new(apple::AvTrimmer));
+    trimmers
 }

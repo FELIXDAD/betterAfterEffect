@@ -11,10 +11,21 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Native file-system notifications for the shared-folder transport (FSEvents,
+# ReadDirectoryChangesW, inotify). Without it the folder is only polled. Off by
+# default so the core stays free of platform APIs; the desktop app enables it.
+watch = ["dep:notify"]
+
 [dependencies]
 bae-model.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
+blake3.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rustc-hash.workspace = true
+notify = { workspace = true, optional = true }
 
 [dev-dependencies]
-serde_json.workspace = true
+tempfile.workspace = true

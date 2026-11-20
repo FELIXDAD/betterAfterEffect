@@ -9,8 +9,12 @@ use bae_model::loro::VersionVector;
 use crate::client::ClientId;
 use crate::docs::{DocSet, Imported};
 use crate::error::SyncError;
+use crate::presence::{PeerPresence, PresenceState, PresenceTable, initial_seq};
 use crate::protocol::{DocKey, Message};
 use crate::transport::Transport;
+
+/// Payloads received in one pump, per document: `(version, data)`.
+type Incoming = BTreeMap<DocKey, Vec<(VersionVector, Vec<u8>)>>;
 
 /// Settings of a [`SyncSession`].
 #[derive(Clone, Debug)]
@@ -27,6 +31,11 @@ pub struct SessionConfig {
     /// folder uses a few hundred milliseconds so a drag does not become dozens of
     /// SMB appends per second.
     pub min_send_interval: Duration,
+    /// Re-send our presence this often while nothing changes (heartbeat).
+    pub presence_heartbeat: Duration,
+    /// Others drop us after this long without a heartbeat (sent along with each
+    /// update, so receivers do not need to agree on it).
+    pub presence_ttl: Duration,
 }
 
 impl SessionConfig {
@@ -36,6 +45,8 @@ impl SessionConfig {
             hello_interval: Some(Duration::from_secs(5)),
             max_messages_per_pump: 256,
             min_send_interval: Duration::ZERO,
+            presence_heartbeat: Duration::from_secs(5),
+            presence_ttl: Duration::from_secs(20),
         }
     }
 }
@@ -53,6 +64,10 @@ pub struct PumpOutcome {
     pub unknown_docs: Vec<DocKey>,
     /// Messages that were skipped (corrupt payloads, unknown message types).
     pub errors: Vec<SyncError>,
+    /// Someone came online, went offline or changed their presence.
+    pub presence_changed: bool,
+    /// Presence messages received, for the relay to forward.
+    pub(crate) presence_received: Vec<Message>,
 }
 
 /// Running totals of a session.
@@ -88,6 +103,13 @@ pub struct SyncSession {
     /// Documents announced in our last `Hello`.
     announced: BTreeSet<DocKey>,
     stats: SyncStats,
+    presence: Option<PresenceState>,
+    presence_dirty: bool,
+    /// A "left" message is due.
+    presence_leave: bool,
+    presence_seq: u64,
+    last_presence: Option<Instant>,
+    peers: PresenceTable,
 }
 
 impl SyncSession {
@@ -101,11 +123,23 @@ impl SyncSession {
             last_send: None,
             announced: BTreeSet::new(),
             stats: SyncStats::default(),
+            presence: None,
+            presence_dirty: false,
+            presence_leave: false,
+            presence_seq: initial_seq(),
+            last_presence: None,
+            peers: PresenceTable::default(),
         }
     }
 
     pub fn config(&self) -> &SessionConfig {
         &self.config
+    }
+
+    /// Change settings (takes effect on the next pump; the client ID should not
+    /// change while connected).
+    pub fn config_mut(&mut self) -> &mut SessionConfig {
+        &mut self.config
     }
 
     pub fn client(&self) -> &ClientId {
@@ -133,6 +167,42 @@ impl SyncSession {
 
     /// Forget what the remote has, e.g. after reconnecting to a hub. The next pump
     /// says hello again and nothing is sent until the remote answers.
+    /// Publish our presence (sent on the next pump, then as a heartbeat).
+    pub fn set_presence(&mut self, state: PresenceState) {
+        if self.presence.as_ref() != Some(&state) {
+            self.presence = Some(state);
+            self.presence_dirty = true;
+            self.presence_leave = false;
+        }
+    }
+
+    /// Our current presence.
+    pub fn local_presence(&self) -> Option<&PresenceState> {
+        self.presence.as_ref()
+    }
+
+    /// Tell the others we left (sent on the next pump). Call before closing.
+    pub fn clear_presence(&mut self) {
+        if self.presence.take().is_some() {
+            self.presence_leave = true;
+        }
+    }
+
+    /// Everyone else who is online, by client ID.
+    pub fn presence(&self) -> Vec<PeerPresence> {
+        self.peers.peers()
+    }
+
+    /// Others who declared they are editing `path` (or an ancestor or descendant
+    /// of it): show a hint, do not block.
+    pub fn editing_by_others(&self, path: &bae_model::PrimPath) -> Vec<PeerPresence> {
+        self.peers
+            .peers()
+            .into_iter()
+            .filter(|p| p.is_editing(path))
+            .collect()
+    }
+
     pub fn reset(&mut self) {
         self.remote = None;
         self.remote_client = None;
@@ -185,14 +255,18 @@ impl SyncSession {
     ) -> Result<PumpOutcome, SyncError> {
         let mut out = PumpOutcome::default();
         self.maybe_hello(docs, transport, now, &mut out)?;
+        let mut incoming = Incoming::new();
         for _ in 0..self.config.max_messages_per_pump {
             let Some(msg) = transport.recv()? else {
                 break;
             };
             out.received += 1;
             self.stats.messages_received += 1;
-            self.handle(docs, transport, msg, &mut out)?;
+            self.handle(docs, transport, msg, &mut incoming, now, &mut out)?;
         }
+        self.import(docs, incoming, &mut out);
+        out.presence_changed |= self.peers.expire(now);
+        self.maybe_presence(transport, now, &mut out)?;
         // A document that appeared since the last hello (created locally, or the
         // app added a sublayer the remote told us about): announce it so the
         // remote sends its contents.
@@ -238,9 +312,11 @@ impl SyncSession {
 
     fn handle(
         &mut self,
-        docs: &mut dyn DocSet,
+        docs: &dyn DocSet,
         transport: &mut dyn Transport,
         msg: Message,
+        incoming: &mut Incoming,
+        now: Instant,
         out: &mut PumpOutcome,
     ) -> Result<(), SyncError> {
         match msg {
@@ -265,26 +341,13 @@ impl SyncSession {
                 if let Some(remote) = &mut self.remote {
                     remote.entry(doc.clone()).or_default().merge(&version);
                 }
-                if docs
-                    .version(&doc)
-                    .is_some_and(|have| have.includes_vv(&version))
-                {
-                    self.stats.redundant += 1;
-                    return Ok(());
-                }
-                match docs.import(&doc, &data) {
-                    Ok(Imported::Done(event)) => {
-                        self.stats.imports += 1;
-                        if let Some(ev) = event.filter(|e| !e.is_empty()) {
-                            out.events.push(ev);
-                        }
-                    }
-                    Ok(Imported::UnknownDoc) => {
-                        if !out.unknown_docs.contains(&doc) {
-                            out.unknown_docs.push(doc);
-                        }
-                    }
-                    Err(e) => out.errors.push(e),
+                // Imported after the receive loop, one batch per document.
+                incoming.entry(doc).or_default().push((version, data));
+            }
+            Message::Presence { ref client, .. } => {
+                if client != &self.config.client {
+                    out.presence_changed |= self.peers.apply(&msg, now).unwrap_or(false);
+                    out.presence_received.push(msg);
                 }
             }
             Message::SnapshotRequest { doc } => {
@@ -303,6 +366,74 @@ impl SyncSession {
             }
         }
         Ok(())
+    }
+
+    /// Send our presence when it changed or the heartbeat is due, or "left".
+    fn maybe_presence(
+        &mut self,
+        transport: &mut dyn Transport,
+        now: Instant,
+        out: &mut PumpOutcome,
+    ) -> Result<(), SyncError> {
+        let state = if self.presence_leave {
+            None
+        } else if let Some(p) = &self.presence {
+            let due = self.presence_dirty
+                || self.last_presence.is_none_or(|t| {
+                    now.saturating_duration_since(t) >= self.config.presence_heartbeat
+                });
+            if !due {
+                return Ok(());
+            }
+            Some(serde_json::to_vec(p).expect("presence serializes"))
+        } else {
+            return Ok(());
+        };
+        self.presence_seq += 1;
+        let msg = Message::Presence {
+            client: self.config.client.clone(),
+            seq: self.presence_seq,
+            ttl_ms: u32::try_from(self.config.presence_ttl.as_millis()).unwrap_or(u32::MAX),
+            state,
+        };
+        self.send(transport, msg, out)?;
+        self.presence_dirty = false;
+        self.presence_leave = false;
+        self.last_presence = Some(now);
+        Ok(())
+    }
+
+    /// Import what arrived, one batch per document (one mirror rebuild and one
+    /// event per sublayer instead of one per message).
+    fn import(&mut self, docs: &mut dyn DocSet, incoming: Incoming, out: &mut PumpOutcome) {
+        for (doc, items) in incoming {
+            // A set may create documents on import (the relay does), so a missing
+            // document is only "unknown" if the set says so.
+            let have = docs.version(&doc).unwrap_or_default();
+            let total = items.len();
+            let batch: Vec<(VersionVector, Vec<u8>)> = items
+                .into_iter()
+                .filter(|(version, _)| !have.includes_vv(version))
+                .collect();
+            self.stats.redundant += (total - batch.len()) as u64;
+            if batch.is_empty() {
+                continue;
+            }
+            match docs.import_batch(&doc, &batch) {
+                Ok(Imported::Done(event)) => {
+                    self.stats.imports += batch.len() as u64;
+                    if let Some(ev) = event.filter(|e| !e.is_empty()) {
+                        out.events.push(ev);
+                    }
+                }
+                Ok(Imported::UnknownDoc) => {
+                    if !out.unknown_docs.contains(&doc) {
+                        out.unknown_docs.push(doc);
+                    }
+                }
+                Err(e) => out.errors.push(e),
+            }
+        }
     }
 
     /// Send every document's ops the remote is not known to have. Returns whether

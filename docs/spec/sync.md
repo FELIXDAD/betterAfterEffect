@@ -1,7 +1,7 @@
 # 协同同步与版本（bae-sync）
 
 > 负责：09 `collab/sync`。代码：`crates/bae-sync`。架构依据：`docs/ARCHITECTURE.md` 第 4.6、7 节。
-> 状态：第 1–3 节（协议、会话、Hub 中继）在 PR A；第 4 节（共享目录）在 PR B；第 5 节（版本）在 PR C。在线状态、建议性锁、分支与合并在后续 PR。
+> 状态：第 1–3 节（协议、会话、Hub 中继）PR A 已合并；第 4 节（共享目录）PR B；第 5 节（命名版本、只读视图、按 Prim 差异）PR C 已合并；第 6 节（在线状态、建议性锁）PR D。Hub 的 WebSocket 客户端、回滚、分支与合并在后续 PR。
 
 ## 1. 概念
 
@@ -34,6 +34,7 @@
 | `Updates` | `doc`、`version`、`data` | 一段 Loro 增量；`version` 是发送方在导出这段增量时的版本。 |
 | `SnapshotRequest` | `doc` | 请对方发一份完整快照（共享目录模式用它压缩自己的日志）。 |
 | `Snapshot` | `doc`、`version`、`data` | 完整 Loro 快照（含历史）。导入方式与 `Updates` 相同。 |
+| `Presence` | `client`、`seq`、`ttl_ms`、`state` | 在线状态（第 6 节），不进任何文档的历史。`state` 是 `PresenceState` 的 JSON，`None` 表示离开。 |
 
 ### 2.3 二进制编码
 
@@ -44,6 +45,7 @@ Hello            0x01  protocol:varint  client:str  n:varint  n × (doc:str  vv:
 Updates          0x02  doc:str  vv:bytes  data:bytes
 SnapshotRequest  0x03  doc:str
 Snapshot         0x04  doc:str  vv:bytes  data:bytes
+Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state:bytes)
 ```
 
 - 当前协议版本 `PROTOCOL_VERSION = 1`。以后只以兼容的方式扩展：新字段追加在已有字段之后（旧版本解码时忽略多出来的字节），新消息用新的类型字节（旧版本收到未知类型时跳过，`SyncError::UnknownMessage`）。
@@ -70,7 +72,9 @@ Snapshot         0x04  doc:str  vv:bytes  data:bytes
 
 ### 2.6 线程
 
-`SyncSession::pump` 在持有 `Stage` 的线程上调用，不做阻塞 I/O。共享目录、网络的 I/O 由传输层放在后台线程里做，通过队列交给会话（PR B 的 `ThreadedTransport`）。
+`SyncSession::pump` 在持有 `Stage` 的线程上调用，不做阻塞 I/O。共享目录、网络的 I/O 由传输层放在后台线程里做，通过队列交给会话：`ThreadedTransport::spawn(内层传输, tick, on_receive)` 把任何会阻塞的传输搬到后台线程，收到消息后调用 `on_receive`（接到"请求重绘 / 尽快 pump"上）。
+
+同一轮 `pump` 里同一个文档收到的多条数据合并成一批导入（`DocSet::import_batch`），`Stage` 只重建一次镜像、只发一个事件。
 
 ## 3. Hub 中继（`Relay`）
 
@@ -90,7 +94,8 @@ MyFilm.bae/
   sublayers/<工程层>.loro            基础快照（Project::save 写，02 负责）
   updates/<文档>/<client-id>.log     每个客户端只追加写自己的日志
   updates/<client-id>.lock           会话期间持有的建议性文件锁（尽力而为）
-  history.loro                       工程历史（第 5 节）
+  presence/<client-id>.presence      在线状态心跳文件（第 6 节）
+  history.loro                       工程历史（第 5 节，History::save 写）
 ```
 
 `<文档>` 是工程层 ID（`/` 变成子目录，`anim/shot010` → `updates/anim/shot010/`），或 `@history`。
@@ -114,14 +119,14 @@ sum     := BLAKE3(payload) 的前 8 字节
 
 ### 4.3 写（只有日志的主人写）
 
-- 追加：整条记录一次 `write` 写入，然后 `sync_data`。写之前检查文件长度是否等于自己记的长度：更长且文件头没变，说明上次写了一半，先截掉；文件不见了或文件头变了，就重写整个文件。
-- 启动时主人也像读别人的日志一样读一遍自己的日志（里面可能有还没存进 `sublayers/*.loro` 的修改），并截掉末尾写了一半的记录。
+- 追加：整条记录一次 `write` 写入，然后关闭文件（不逐条 `fsync`：关闭时数据交给 SMB 服务器；崩溃留下的半条记录下次启动时截掉；修改本身还在会话的文档里）。压缩重写的新文件先 `fsync` 再改名。写之前检查文件长度是否等于自己记的长度：更长且文件头没变，说明上次写了一半，先截掉；文件不见了或文件头变了，就重写整个文件。
+- 启动时主人也像读别人的日志一样读一遍自己的日志（里面可能有还没存进 `sublayers/*.loro` 的修改），并截掉末尾写了一半的记录。文件头都读不出来的日志改名为 `<client-id>.corrupt-<随机>` 留着排查，下次写入时新建。
 - **压缩**：日志超过阈值（默认 `max(1 MiB, 上次压缩结果 × 4)`）时，传输层向会话发 `SnapshotRequest`，拿到快照后写一个新文件（新 `generation`，文件头 + 一条 `Snapshot`），再改名覆盖旧日志。每个客户端只压缩自己的日志，所以多个客户端同时压缩不会互相破坏；目录总大小约为"客户端数 × 快照大小"，不随编辑次数增长。快照覆盖了旧日志的全部内容，因为会话的文档包含自己写过的一切。
 
 ### 4.4 读
 
 - 每隔 `poll_interval`（默认 1 秒）轮询一次；开启 `watch` feature 时文件变化会提前唤醒轮询（SMB 的变更通知不可靠，轮询始终保留）。
-- 每个日志记住 `(generation, 已读到的位置, 长度, 修改时间)`。长度和修改时间都没变就不打开文件；`generation` 变了就从头读；否则从上次的位置往后读。
+- 每个日志记住 `(generation, 已读到的位置, 长度, 修改时间)`。长度和修改时间都没变就不打开文件；`generation` 变了就从头读；否则从上次的位置往后读。每 `full_check_every`（默认 30）次轮询无论如何都打开一次（时间戳粒度粗、SMB 属性缓存过期的情况）。
 - 记录不完整（长度超出文件末尾）或校验和不对时停在这里，下次轮询再试（写入方可能还没写完，或者 SMB 缓存还没刷新）。
 - `sublayers/<文档>.loro` 也是一个来源：长度或修改时间变了就重新读，作为 `Snapshot` 交给会话（会话按版本判断是否需要导入）。
 
@@ -129,24 +134,109 @@ sum     := BLAKE3(payload) 的前 8 字节
 
 共享目录被当作一个"远端"：
 
-- 第一次扫描完后，传输层发一个 `Hello`，版本 = 目录里所有记录和基础快照版本的并集。会话据此把目录里还没有的本地修改（比如离线时的修改）写进自己的日志。
-- 会话发来的 `Hello`：如果某个文档目录里的版本没有被会话的版本包含，就从头重新交付这个文档的所有日志（用于 2.5 的场景）。
+- 第一次扫描完后，传输层发一个 `Hello`（`client` 为 `shared-folder`），版本 = 目录里所有记录和基础快照版本的并集。会话据此把目录里还没有的本地修改（比如离线时的修改）写进自己的日志。
+- 会话发来的 `Hello`：如果某个文档目录里的版本没有被会话的版本包含，就从头重新交付这个文档的所有日志（用于 2.5 的场景），然后回一个自己的 `Hello`（会话 `reset()` 之后靠它恢复）。
+- 共享目录会话的推荐设置：`hello_interval = None`（目录不会丢数据），`min_send_interval` 几百毫秒。
 - 会话发来的 `Updates` → 追加到自己的日志；`Snapshot` → 压缩重写自己的日志。
 
-### 4.6 还没做
+### 4.6 验证（`crates/bae-sync/tests/shared_dir.rs`）
+
+- 3 个客户端在同一个目录上随机编辑后收敛；之后从旧的已保存工程加入的新客户端追上进度。
+- 重启后从自己的日志恢复没保存的修改；末尾半条记录被截掉，之后的追加别人能读。
+- 一小时连续编辑（3600 次修改，大多是拖动同一个属性）：自己的日志最大 33 KB（压缩阈值 32 KB），压缩 29 次，`updates/` 总共 26 KB。
+- 3 个客户端频繁同时压缩，不丢数据，新客户端读到的结果一致。
+- 同一个 ClientId 不能同时开两个会话（文件锁）。
+- **模拟 SMB 延迟**：每个客户端用自己的目录副本，后台线程把别人的日志延迟 1–3 秒复制过来，30% 的情况先给一个截断的前缀（模拟没传完的追加），覆盖写也不是原子的；客户端用 `ThreadedTransport`。默认测试把延迟缩小 10 倍（100–300 ms，停止编辑后 0.3 秒收敛）；`--ignored` 跑真实 1–3 秒（停止编辑后 3.0 秒收敛）。
+- `watch` feature：轮询间隔设成 1 小时，文件事件仍能在 0.4 秒内唤醒读取。
+
+### 4.7 还没做
 
 - **清理离开的客户端的日志。** 安全的条件是：这个日志的内容被另一个"自包含"（以快照开头）的日志完全包含，并且主人长时间不活跃；为了避免两个客户端互相删对方，只能删"严格更小"的那个（版本相同时按 ID 排序）。在线状态的心跳文件做好之后再实现。
 - 多台机器经 NAS 的实测。
 
 ## 5. 版本（PR C）
 
-- 工程历史是一个单独的 Loro 文档（`DocKey::History`），和工程层一样同步，保存为 `history.loro`。
-- **命名版本**（Checkpoint）：ID、名字、说明、作者、创建时间、当时的层叠顺序，以及每个工程层的版本向量。多人同时创建不会冲突。
-- **只读视图**：按命名版本里的版本向量，为每个工程层导出那一时刻的快照并组装成一个只读的 Stage。
-- **按 Prim 的差异**：比较两个版本的每个工程层，列出新增、删除、修改（哪些属性）的 Prim，以及改动者（来自 Loro 提交信息里的 `{author, label}`）。
+每个工程层的 Loro 文档都保留完整历史，所以"工程的一个版本"就是每个工程层一个版本向量（`ProjectVersion`，没列出的工程层在这个版本里是空的）。
 
-## 6. 给其他工作流
+### 5.1 历史文档
+
+- 命名版本存在一个单独的 Loro 文档里（`History`，同步时的 `DocKey` 是 `@history`），和工程层一样同步：会话用 `ProjectDocs { stage, history }` 作为 `DocSet` 就会同时同步两者。
+- 保存为 `.bae` 目录里的 `history.loro`（`History::save` / `History::load`，临时文件 + 改名）；应用在 `Project::save` 时一起保存。共享目录模式下它的日志在 `updates/@history/`，`history.loro` 也作为基础快照来源读取。
+- 结构：根 map `checkpoints`，键是命名版本 ID（UUID v7 十六进制，按时间排序），值是 map：
+
+  | 键 | 类型 | 说明 |
+  |---|---|---|
+  | `name` | string | 名字，例如"给客户的第 1 版" |
+  | `note` | string | 说明 |
+  | `author` | string | 创建者 `AuthorId` |
+  | `created` | i64 | Unix 毫秒 |
+  | `stack` | string | 当时的层叠顺序（强 → 弱），JSON 字符串数组 |
+  | `versions` | map | 工程层 ID → 版本向量（`VersionVector::encode()` 的二进制） |
+
+- 每次修改的 Loro 提交信息和 Stage 一样是 `{"author", "label"}`（`checkpoint.create` / `checkpoint.rename` / `checkpoint.delete`）。多人同时创建命名版本不会冲突（ID 不同）；同时改名后写者胜。删除命名版本不影响工程本身的历史。
+
+### 5.2 只读视图
+
+- `History::view(stage, id)` / `history::view_at(stage, version, stack)`：为每个工程层导出那个版本的快照（`ExportMode::SnapshotAt`），组装成一个新的 `Stage`，包在 `VersionView` 里，只给出 `&Stage`，所以不能修改。版本等于当前版本的工程层直接复用。
+- 层叠顺序用命名版本里记录的；后来从工程里删掉的工程层显示不了，列在 `VersionView::missing()`。
+- 协作者的命名版本已经同步过来、但它引用的操作还没到时，返回 `SyncError::VersionNotAvailable`。
+- 跨工程引用在视图里不挂载（显示为未解析）。
+
+### 5.3 按 Prim 的差异
+
+`History::diff(stage, from, to)`（`to` 为 `None` 表示当前）/ `history::diff(stage, from, to)` 返回 `Vec<PrimDiff>`，按当前层叠从强到弱、同一层内按路径排序：
+
+| 字段 | 说明 |
+|---|---|
+| `sublayer`、`path` | 哪一层的哪个 Prim（被删除的用旧路径） |
+| `change` | `Added` / `Removed` / `Modified` / `Moved { from }`（移动或改名） |
+| `attrs` | 意见（值、关键帧、表达式）不同的属性名 |
+| `fields` | 其他不同的字段：`type`、`specifier`、`references` |
+| `authors` | 两个版本之间改过这个 Prim 的作者 |
+| `last_changed` | 其中最晚一次提交的时间（Unix 秒） |
+
+- 两个版本里同一路径的 Prim 视为同一个；路径不同的靠 Loro 树节点 ID（`Sublayer::node_id` / `node_path`）认出移动和改名。
+- 作者：遍历两个版本之间的所有 Loro 操作（两个方向都算，所以也能倒着比较），把每个操作对应到它改的树节点（树操作的目标节点，或 map 所在节点），作者取提交信息里的 `author`。
+- 没有报告的：兄弟之间的顺序变化；撤销删除后恢复的 Prim 因为路径相同显示为修改。
+
+### 5.4 还没做
+
+- 回滚（以新提交的方式把某个 Prim 或整个工程层恢复到旧版本，不改写历史）。
+- 分支与合并。
+- 命名版本的命令（让 Agent 通过 CommandRegistry 调用）：现在的 `Command` 只能拿到 `Transaction`，碰不到 `History`，需要和 02/17 商量接口。
+
+## 6. 在线状态与建议性锁（PR D）
+
+### 6.1 内容
+
+`PresenceState`（JSON，新版本加的字段原样保留在 `extra` 里转发）：
+
+| 字段 | 说明 |
+|---|---|
+| `user` | `AuthorId` |
+| `name`、`color` | 显示名、颜色（sRGB 三个字节） |
+| `selection` | 选中的 Prim 路径 |
+| `playhead` | `{comp, time}`：哪个合成、播放头时间（flicks） |
+| `workspace` | 正在用的工作区，例如 `motion`、`storyboard`、`edit`、`review` |
+| `editing` | **建议性锁**：声明"我在改这些 Prim"（通常是合成）。只提示，不阻止任何人修改。 |
+
+### 6.2 规则
+
+- `SyncSession::set_presence(state)`：变化时下一次 `pump` 发出，之后每 `presence_heartbeat`（默认 5 秒）发一次心跳。`clear_presence()`：发"离开"。
+- 每条 `Presence` 带递增的 `seq`，接收方只保留每个客户端最新的一条，旧的、重放的、JSON 解析不了的都忽略。`seq` 从会话开始时的毫秒时间算起，所以重启后的客户端不会被旧记录压住。
+- **在线判断只用接收方自己的时钟**：超过发送方声明的 `ttl_ms`（默认 20 秒）没有收到新的 `seq` 就视为离线。不同机器的时钟不用对齐。
+- `SyncSession::presence()` 列出其他在线的人（不含自己）；`editing_by_others(path)` 列出声明正在改 `path`、它的祖先或后代的人（界面据此提示"Alice 正在改这个合成"）；`PumpOutcome::presence_changed` 表示有人上线、离线或状态变了。
+- **Hub**：`Relay` 把每条被接受的在线状态（包括只刷新存活的心跳）转发给其他所有连接；新连接一上来就收到当前所有人的状态；连接断开（`disconnect` 或传输出错）时替那个客户端向其他人发"离开"。
+- **共享目录**：每个客户端用临时文件 + 改名重写自己的 `presence/<client-id>.presence`（一条第 4.2 节格式的记录，内容是编码后的 `Presence` 消息），离开时写一条"离开"记录。读者随轮询读取变了的文件。文件修改时间早于两倍 TTL 的不予理会（崩溃的客户端留下的）；超过一天没动的文件任何人都可以删除。这一步要用文件修改时间对比本地时钟，所以 SMB 服务器和客户端的时钟差不要超过两倍 TTL（默认 40 秒）。
+
+### 6.3 验证（`crates/bae-sync/tests/presence.rs`）
+
+- 经 Hub：选中、播放头、工作区、建议性锁都能传到其他人；自己看不到自己；状态不变时不重复报告变化；新加入的人立即看到所有人；心跳维持在线远超 TTL，停止心跳后按 TTL 离线；主动离开立即生效；连接断开时其他人立即收到离开。
+- 重放的旧心跳不能改写或复活别人；坏 JSON 被忽略。
+- 经共享目录：心跳文件、TTL 离线、主动离开、一小时前的残留文件被忽略（把修改时间改成现在后又能看到，证明是按时间过滤的）。
+
+## 7. 给其他工作流
 
 - **02 doc-model**：需求记在 `docs/workstreams/02-doc-model.md` 的"请求"一节。
 - **10 hub-nas**：服务端用 `Relay` + 每个 WebSocket 连接一个 `Transport` 实现即可；消息编码见 2.3。
-- **11/12 界面**：`PumpOutcome::events` 已经通过 `Stage::subscribe` 广播，界面照常刷新；`SyncSession::unsynced` 可用于"有未同步的修改"提示；`unknown_docs` 用于提示"协作者新建了工程层"。
+- **11/12 界面**：`PumpOutcome::events` 已经通过 `Stage::subscribe` 广播，界面照常刷新；`SyncSession::unsynced` 可用于"有未同步的修改"提示；`unknown_docs` 用于提示"协作者新建了工程层"；`presence()` / `editing_by_others()` / `presence_changed` 用于在线头像、别人的选中框和播放头、"有人正在改这个合成"的提示。

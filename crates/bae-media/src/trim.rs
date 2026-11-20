@@ -54,6 +54,10 @@ pub struct TrimRequest {
     pub handles: Time,
     /// Passthrough or re-encode.
     pub mode: TrimMode,
+    /// Codec when re-encoding; `None` = an intermediate codec chosen by the
+    /// trimmer (ProRes 422 HQ, or 4444 for sources with alpha).
+    #[serde(default)]
+    pub reencode_codec: Option<crate::export::VideoCodec>,
 }
 
 /// Frames a trim will write.
@@ -307,6 +311,7 @@ mod tests {
             range: TimeRange::new(rate.frame_to_time(start), rate.frame_to_time(end)),
             handles: Time::from_flicks(0),
             mode,
+            reencode_codec: None,
         }
     }
 
@@ -389,6 +394,7 @@ mod tests {
                 range: TimeRange::new(rate.frame_to_time(1), rate.frame_to_time(5)),
                 handles: Time::from_flicks(0),
                 mode: TrimMode::PreferPassthrough,
+                reencode_codec: None,
             })
             .unwrap();
         let names: Vec<_> = result
