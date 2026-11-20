@@ -52,16 +52,21 @@
 - [ ] TIFF、PSD（保留图层）、HEIC
 - [ ] 跳帧速度：4K 随机跳帧目前约 75 ms/帧（基准见 `tests/video.rs` 的 `decode_throughput_4k`；顺序解码 4K H.264 约 300 fps、ProRes 约 200 fps，测试素材是纯色条，比真实素材容易），主要花在重建 `AVAssetReader` 上，连全帧内编码的 ProRes 也一样。下一步改用 `supportsRandomAccess` + `resetForReadingTimeRanges`，或直接用 `VTDecompressionSession` + 样本表。
 - [ ] 预读（后台线程提前解码）、YUV 直出（420v/x420 双平面 + 着色器转换，进一步降低 4K 解码开销）、QuickTime 时码轨、关键帧表（`sync_frames`）
-- [ ] 音频（接口已预留：`audio`）
-- [ ] 编码导出（接口已预留：`export`）
+- [x] 编码导出接口（`export`）：`EncodeSettings`（对应 AE 输出模块：编码、尺寸、帧率、RGB / RGB+Alpha 及直通/预乘、位深、色彩标签、起始编号与时码）、`Encoder` / `EncoderFormat`（注册到 `Registry<dyn EncoderFormat>`）、`MediaEncoders`、`convert_frame`（CPU 像素格式与 alpha 转换）、`FrameReadback`（GPU 帧异步回读，默认 2 帧在途）、`render`（逐帧生产 → 回读 → 编码，进度回调、取消时删除半成品）、`RenderQueue`（运行时队列：排队、取消、重排、重新排队、结果）。工程里保存哪些渲染任务属于文档模型，这里只负责执行。
+- [x] PNG 序列（8/16 位，RGB 或 RGBA，sRGB/gAMA/pHYs）、OpenEXR 序列（half/float，None/RLE/ZIPS/ZIP/PIZ，色度、像素比、逐帧时码）编码；文件名支持 `name_[####].png`、`name_####.png`、`name_0000.png`。
+- [ ] macOS 硬件编码：H.264 / HEVC（VideoToolbox，经 AVAssetWriter）、ProRes 422/4444、带 alpha（下一个 PR）
+- [x] 音频接口（`audio`）：`AudioSource`（按采样帧随机读取）、采样与 `Time` 精确换算、`MemoryAudio`、`Waveform`（min/max 峰值、降采样出缩放级别、按时间取可见区间）。
+- [ ] 音频文件解码（symphonia）与 cpal 播放
 - [ ] 代理与 FFmpeg 插件（`FrameRequest::downscale` 与格式注册表已预留）
-- [ ] 裁片（接口已预留：`trim`，给 21）
+- [x] 裁片接口（`trim`，给 21）：`TrimRequest` 按源时间区间（`TimeRange`）+ 余量 + 模式；`plan_trim` 换算成整帧，直拷时扩展到 GOP 边界（起点取之前最近的关键帧，终点延到下一关键帧之前）；`gop_start` / `next_gop_start`；`Trimmer`（注册到 `Registry<dyn Trimmer>`）；`SequenceTrimmer`（序列只复制用到的帧，保留文件名）。
+- [ ] 影片裁片：AVFoundation 直拷（读压缩样本 + 写入同格式）与重编码、影片关键帧表（`sync_frames`，用样本表，下一个 PR）
 
 ### 说明与待定
 
 - `bae-media` 依赖 `bae-model`（只用 `Time` / `FrameRate`），按 02 的要求避免两套时间体系。
 - 媒体帧号一律从素材第一帧起算、从 0 开始；序列 `name_0101.png` 的第 0 帧是 0101。
 - 颜色只报告不转换：`GpuFrame` 的值保持素材自身的编码（不线性化），由 06 根据 `ColorInfo` 处理。未标记的素材报告为 `Unspecified`，默认规则由 06 决定。
+- 本机交叉检查 Windows：dev 上 `bae-model` 依赖 `blake3`，它的 build script 在 macOS 上为 msvc 目标编译 C/汇编会失败；`cargo clippy --target x86_64-pc-windows-msvc` 需要加 `CARGO_FEATURE_PURE=1`（只检查不链接，不影响结果）。真正的 Windows CI 不受影响。
 - 待用户决定：序列缺帧时是报错（现在的做法，合成里显示占位）还是沿用前一帧。
 
 ## 请求（其他工作流在这里留言）

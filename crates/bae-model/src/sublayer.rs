@@ -87,6 +87,9 @@ impl Sublayer {
     /// An empty sublayer.
     pub fn new(id: SublayerId) -> Self {
         let doc = LoroDoc::new();
+        // Commit timestamps make "the project at any time" and "when was this changed"
+        // answerable from history (bae-sync). Runtime setting, so set on every load.
+        doc.set_record_timestamp(true);
         let tree = doc.get_tree(TREE);
         Sublayer {
             id,
@@ -196,6 +199,24 @@ impl Sublayer {
     }
 
     /// Import updates or a snapshot from a collaborator; returns what changed.
+    /// Path of the prim spec stored in Loro tree node `id` (maps CRDT history to prims).
+    pub fn node_path(&self, id: TreeID) -> Option<&PrimPath> {
+        self.nodes.get(&id).map(|n| &n.path)
+    }
+
+    /// Loro tree node of the spec at `path`.
+    pub fn node_id(&self, path: &PrimPath) -> Option<TreeID> {
+        self.by_path.get(path).copied()
+    }
+
+    /// Import several update blobs, rebuilding the mirror once.
+    pub(crate) fn import_batch(&mut self, blobs: &[Vec<u8>]) -> Result<Vec<Change>> {
+        self.doc.import_batch(blobs)?;
+        let old = std::mem::take(&mut self.nodes);
+        self.rebuild();
+        Ok(diff(&old, &self.nodes))
+    }
+
     pub(crate) fn import(&mut self, bytes: &[u8]) -> Result<Vec<Change>> {
         self.doc.import(bytes)?;
         let old = std::mem::take(&mut self.nodes);

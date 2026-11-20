@@ -39,8 +39,10 @@
 //! | Video (macOS) | H.264, HEVC, ProRes (QuickTime / MP4) | AVFoundation / VideoToolbox, IOSurface → Metal texture, zero copy ([`apple`]) |
 //! | Video (Windows) | H.264, HEVC | Media Foundation (placeholder; next PR) |
 //!
-//! Reserved interfaces for later PRs: [`export`] (encoders, render queue
-//! status), [`audio`], [`trim`] (clip trimming for packaging), proxies
+//! Export: [`export`] (encoders, async GPU readback, render loop, render
+//! queue); PNG / OpenEXR sequence encoders built in. Audio: [`audio`]
+//! (sample access, waveforms). Packaging: [`trim`] (time-range clips on GOP
+//! boundaries, keyframe lookup). Proxies are reserved
 //! ([`FrameRequest::downscale`]).
 
 #[cfg(target_vendor = "apple")]
@@ -75,6 +77,14 @@ pub use sequence::{ImageSequence, ImageSequenceSource, detect_sequence};
 pub use source::{MediaError, MediaFormat, MediaFormats, MediaSource, OpenOptions, SequenceMode};
 pub use time::{FrameRate, Time, Timecode};
 
+pub use audio::{AudioBuffer, AudioSource, MemoryAudio, Waveform};
+pub use export::{
+    CancelToken, EncodeOutput, EncodeSettings, Encoder, EncoderFormat, ExrCompression,
+    FrameProducer, FrameReadback, MediaEncoders, ProResProfile, ProducedFrame, RenderJob,
+    RenderJobId, RenderProgress, RenderQueue, RenderStatus, VideoCodec,
+};
+pub use trim::{TimeRange, TrimMode, TrimPlan, TrimRequest, TrimResult, Trimmer, plan_trim};
+
 /// The formats compiled into this crate for the current platform, in
 /// registration order.
 pub fn builtin_formats() -> Vec<Arc<dyn MediaFormat>> {
@@ -85,4 +95,16 @@ pub fn builtin_formats() -> Vec<Arc<dyn MediaFormat>> {
     #[cfg(windows)]
     formats.push(Arc::new(media_foundation::MediaFoundationFormat));
     formats
+}
+
+/// The encoders compiled into this crate for the current platform.
+pub fn builtin_encoders() -> Vec<Arc<dyn EncoderFormat>> {
+    vec![Arc::new(export::ImageSequenceFormat)]
+}
+
+/// The trimmers compiled into this crate for the current platform.
+pub fn builtin_trimmers() -> Vec<Arc<dyn Trimmer>> {
+    vec![Arc::new(trim::SequenceTrimmer::new(
+        time::DEFAULT_SEQUENCE_RATE,
+    ))]
 }

@@ -54,6 +54,7 @@
 - [x] 分层引用（含跨工程、嵌套、防循环、改动传播到引用方）、`opinion.move` 下推、`sublayer.merge` 合并、`Stage::flatten`（PR B）
 - [x] 工程文件读写（目录包、`.baez`、原子写入）、`bae export-json`、版本迁移框架、跨工程引用自动加载、素材引用与查找/重新链接/路径映射（PR C，`docs/spec/project-format.md`）
 - [x] Prim schema 初版（`schema.rs`，命令按 schema 校验）、新值类型（time、frame_rate、text_document、遮罩羽化点）、效果参数模型与 `EffectRegistry`、插件缺失占位（PR D；15 的对齐请求的答复见 data-model.md 第 10 节）
+- [x] 09 的请求（PR E）：`import_updates_batch`、`node_path` / `node_id`、提交时间戳、保存时的临时文件名防撞、拒绝只有大小写不同的工程层 ID
 - [x] spec 文档初稿：`docs/spec/data-model.md`（随 PR 逐步补全；`project-format.md` 在 PR C）
 
 ## 请求（其他工作流在这里留言）
@@ -81,3 +82,11 @@
 
 10. **AE 的 NTSC 帧率是十进制的 29.97，不是 30000/1001。** AE 26.2.1 报告 `frameRate` 为单精度 29.97（`29.9700317382812`），帧和关键帧落在 `n / 29.97` 秒（第 30 帧 = `706306306` flicks，`30000/1001` 时是 `706305600`）；23.976 同理。这些时间不是整数 flicks，`FrameRate{2997, 100}.is_exact()` 为 false。15 的导入器会把 AE 的 29.97 / 23.976 / 59.94 换成 `30000/1001` 一类，并按帧号吸附（交换格式 4.2）。建议在 `data-model.md` 写明这条约定，免得各工作流各自处理。
 
+### 来自 09 collab/sync（2026-11-20）
+
+共享目录协同的 `updates/<文档>/<client-id>.log` 格式已定，见 `docs/spec/sync.md` 第 4 节（09 只写 `updates/` 和 `history.loro`，不碰 `project.json` 和 `sublayers/`）。下面几条按优先级排列：
+
+1. **远端导入的性能。** `Stage::import_updates` 每次都重建整层镜像（1 万个 Prim 约 100 ms），Hub 模式下每秒会有很多条小增量，这会卡住持有 Stage 的线程。希望：(a) 导入时根据 Loro 的 diff 增量更新镜像；或者至少 (b) 提供 `Stage::import_updates_batch(sublayer, &[&[u8]])`，用 `LoroDoc::import_batch` 导入多条后只重建一次。09 会把同一层同一轮收到的增量合并成一次调用。
+2. **记录提交时间。** 在 `Sublayer::new` / `from_snapshot` 里调用 `doc.set_record_timestamp(true)`，这样历史里每次提交都有时间，"查看任意时刻的工程"和差异里的"什么时候改的"才有数据。
+3. **树节点 → 路径。** 按 Prim 列差异时，09 要把 Loro 的操作（`TreeID`）对应到 Prim 路径。希望加 `Sublayer::node_path(TreeID) -> Option<&PrimPath>`（镜像里已经有）。在此之前 09 按 data-model.md 第 4 节的规则（同名兄弟的 `<名字>_<peer>_<counter>`）自己遍历，并用测试对照镜像。
+4. **小问题：** `write_atomic` 的临时文件名只用了进程号，NAS 上两台机器同时保存同一个文件时可能撞名，建议加随机后缀；只有大小写不同的工程层 ID（`Anim` 和 `anim`）在 macOS/Windows 上会落到同一个文件，建议在层叠里拒绝这种重复。

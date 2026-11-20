@@ -60,6 +60,9 @@ pub enum MediaError {
     /// The operation is not supported by this source or platform (yet).
     #[error("not supported: {0}")]
     Unsupported(String),
+    /// The operation was cancelled (render queue).
+    #[error("cancelled")]
+    Canceled,
     /// The platform media framework (AVFoundation, VideoToolbox, Media
     /// Foundation) reported an error.
     #[error("{framework}: {message}")]
