@@ -1,0 +1,34 @@
+# 配方（recipes）
+
+配方是常见任务的标准做法：结构、时间表、调用步骤、自检要点。按配方做能稳定得到合格的结果；需求不同的地方按 [03 动画规范](../03-animation.md) 调整，并在提案说明里写出改了什么。
+
+> 配方里的工具名、属性名、参数格式都是预期名（待确认），见 [tools.md](../tools.md)。
+
+| 配方 | 典型时长 | 文件 |
+|---|---|---|
+| 标题出场 | 3 秒 | [title-in.md](title-in.md) |
+| 下三分之一字幕 | 5–7 秒 | [lower-third.md](lower-third.md) |
+| Logo 演绎 | 3–6 秒 | [logo-reveal.md](logo-reveal.md) |
+| 数据图表动画 | 4–8 秒 | [data-chart.md](data-chart.md) |
+| UI 动效 | 视交互步骤 | [ui-motion.md](ui-motion.md) |
+| 分镜生成动态分镜 | 视分镜表 | [animatic.md](animatic.md) |
+| 交接给 AE 用户 | — | [handoff-ae.md](handoff-ae.md) |
+
+## 配方的统一格式
+
+1. **输入**：开始前要确认的信息；哪些必须问用户。
+2. **结构**：合成和图层树。
+3. **时间表**：默认按 30 fps 写帧号。其他帧速率按"帧号 × 目标帧速率 ÷ 30"换算后取整（24 fps 乘 0.8，25 fps 乘 5/6，60 fps 乘 2）。
+4. **步骤**：按事务分组的调用顺序。
+5. **自检**：要渲染哪些帧、核对哪些数值。
+6. **变体**和**常见坑**。
+
+## 调用示例里的约定
+
+示例里的 JSON 只写关键参数，`"...": "..."` 表示省略。属性路径按 AE 的属性分组写成点号形式，例如 `transform.position`、`transform.opacity`、`transform.scale`（待确认）。关键帧参数统一写成：
+
+```json
+{"frame": 22, "value": [960, 510], "in": {"speed": 0, "influence": 80}, "out": {"speed": 0, "influence": 33.33}}
+```
+
+`in` 是进入这个关键帧的一侧，`out` 是离开的一侧。只写需要设置的一侧。
