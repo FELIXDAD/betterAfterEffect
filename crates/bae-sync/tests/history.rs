@@ -448,3 +448,62 @@ fn revert_can_be_limited_to_one_prim() {
     );
     assert!(stage.prim(&p("/comps/main/layers/logo")).is_some());
 }
+
+#[test]
+fn agents_revert_through_the_command_registry() {
+    use bae_model::{CommandError, CommandRegistry};
+    let (mut stage, history, alice, _) = two_versions();
+    let mut reg = CommandRegistry::with_builtins();
+    bae_sync::register_commands(&mut reg);
+    let info = reg.get("version.revert").unwrap().info();
+    assert!(info.params_schema.to_string().contains("version"));
+
+    let v1 = history.checkpoints()[0].clone();
+    let json = v1.version.to_json();
+    assert_eq!(ProjectVersion::from_json(&json).unwrap(), v1.version);
+
+    let out = reg
+        .execute(
+            &mut stage,
+            &alice,
+            "version.revert",
+            serde_json::json!({"version": json, "prim": "/comps/main/layers/bg"}),
+        )
+        .unwrap();
+    assert_eq!(out.output["edits"], 1);
+    assert_eq!(
+        stage
+            .prim(&p("/comps/main/layers/bg"))
+            .unwrap()
+            .value("opacity"),
+        Some(&Value::Float(50.0))
+    );
+    assert!(stage.prim(&p("/comps/main/layers/logo")).is_some());
+
+    reg.execute(
+        &mut stage,
+        &alice,
+        "version.revert",
+        serde_json::json!({"version": json}),
+    )
+    .unwrap();
+    assert_eq!(
+        specs(&stage),
+        specs(history.view(&stage, &v1.id).unwrap().stage())
+    );
+
+    let both = reg.execute(
+        &mut stage,
+        &alice,
+        "version.revert",
+        serde_json::json!({"version": json, "prim": "/comps", "sublayer": "root"}),
+    );
+    assert!(matches!(both, Err(CommandError::InvalidParams { .. })));
+    let bad_peer = reg.execute(
+        &mut stage,
+        &alice,
+        "version.revert",
+        serde_json::json!({"version": {"root": {"not-a-peer": 3}}}),
+    );
+    assert!(matches!(bad_peer, Err(CommandError::InvalidParams { .. })));
+}

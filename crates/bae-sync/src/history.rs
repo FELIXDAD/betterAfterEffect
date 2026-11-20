@@ -56,7 +56,41 @@ impl ProjectVersion {
     pub fn get(&self, id: &SublayerId) -> VersionVector {
         self.sublayers.get(id).cloned().unwrap_or_default()
     }
+
+    /// JSON form for tools and commands: sublayer → (Loro peer ID as a decimal
+    /// string → number of that peer's ops).
+    pub fn to_json(&self) -> VersionJson {
+        self.sublayers
+            .iter()
+            .map(|(id, vv)| {
+                let peers = vv
+                    .iter()
+                    .map(|(peer, counter)| (peer.to_string(), *counter))
+                    .collect();
+                (id.to_string(), peers)
+            })
+            .collect()
+    }
+
+    pub fn from_json(json: &VersionJson) -> Result<Self, SyncError> {
+        let mut sublayers = BTreeMap::new();
+        for (id, peers) in json {
+            let id = SublayerId::new(id).map_err(|_| SyncError::InvalidDocKey(id.clone()))?;
+            let mut vv = VersionVector::new();
+            for (peer, counter) in peers {
+                let peer: u64 = peer
+                    .parse()
+                    .map_err(|_| SyncError::Decode(format!("bad peer ID {peer:?}")))?;
+                vv.insert(peer, *counter);
+            }
+            sublayers.insert(id, vv);
+        }
+        Ok(ProjectVersion { sublayers })
+    }
 }
+
+/// JSON form of a [`ProjectVersion`]: sublayer → (peer ID → op count).
+pub type VersionJson = BTreeMap<String, BTreeMap<String, i32>>;
 
 /// Identifies a named version: a time-ordered UUID (v7) in hex.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -707,7 +741,23 @@ pub fn revert(
     to: &ProjectVersion,
     scope: &RevertScope,
 ) -> Result<StageEvent, SyncError> {
-    let mut edits: Vec<(SublayerId, bae_model::Op)> = Vec::new();
+    let edits = revert_edits(stage, to, scope)?;
+    let (_, event) = stage.transact(author, label, |tx| {
+        for (layer, op) in edits {
+            tx.apply_to(&layer, op)?;
+        }
+        Ok::<_, SyncError>(())
+    })?;
+    Ok(event)
+}
+
+/// The edits [`revert`] applies (also used by the `version.revert` command).
+pub(crate) fn revert_edits(
+    stage: &Stage,
+    to: &ProjectVersion,
+    scope: &RevertScope,
+) -> Result<Vec<(SublayerId, bae_model::Op)>, SyncError> {
+    let mut edits = Vec::new();
     for id in stage.layer_stack() {
         if matches!(scope, RevertScope::Sublayer(s) if s != id) {
             continue;
@@ -718,13 +768,7 @@ pub fn revert(
             edits.push((id.clone(), op));
         }
     }
-    let (_, event) = stage.transact(author, label, |tx| {
-        for (layer, op) in edits {
-            tx.apply_to(&layer, op)?;
-        }
-        Ok::<_, SyncError>(())
-    })?;
-    Ok(event)
+    Ok(edits)
 }
 
 /// Ops that turn `live` into `past` within `scope`.

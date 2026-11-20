@@ -216,10 +216,12 @@ sum     := BLAKE3(payload) 的前 8 字节
 - 不恢复的：两边都存在的兄弟 Prim 之间的顺序；已经从层叠里删掉的工程层。那个版本里还不存在的工程层会被清空（工程层本身保留，层叠变化不可撤销）。
 - 验证：整个工程回到 v1 后内容和 v1 的只读视图一致（包括子 Prim 顺序），v1 到当前的差异为空，回滚的修改都记在执行者名下，旧的版本向量仍被包含（历史没改写）；一次撤销恢复 v2 的内容，另一个作者的撤销栈不变；只回滚一个 Prim、只回滚一个工程层。
 
+- **命令**：`bae_sync::register_commands(&mut registry)` 注册 `version.revert`，参数 `version`（`ProjectVersion::to_json()` 的形状：工程层 → (Loro peer ID 十进制字符串 → 操作数)）、可选 `sublayer` 或 `prim`（两个都给是参数错误），输出 `{edits}`。Agent、脚本、菜单都走它；命名版本本身是元数据（`History`），由 17 的工具查到 `version` 后调用这个命令（见 17 任务书的请求）。
+
 ### 5.5 还没做
 
 - 分支与合并。
-- 命名版本和回滚的命令（让 Agent 通过 CommandRegistry 调用）：`Command` 只能拿到 `Transaction`，碰不到 `History`，需要和 02/17 商量接口。
+- 命名版本的创建、列表、差异的工具：`History` 不在 Stage 里，由 17 在 `Workspace` 里持有并暴露成工具（已在 17 任务书提了请求）。
 
 ## 6. 在线状态与建议性锁（PR D）
 
