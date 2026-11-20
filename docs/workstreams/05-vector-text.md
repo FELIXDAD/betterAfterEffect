@@ -41,12 +41,14 @@
 **2026-11-20**
 
 - PR A `[interface] vector`：`crates/bae-vector`。路径几何（AE 顶点形式 ↔ kurbo）、矩形/椭圆/多边星形（AE 顶点顺序）、填充/描边/渐变参数、形状树（从 03 的 `EvaluatedLayer.contents` 解析）、显示列表 `VectorScene`（AE 运算顺序、组变换、隔离组不透明度、合成顺序、边界、哈希）、修剪路径；`render` feature：Vello 编码、共享 `VelloRenderer`、`ShapeSource`/`ShapeProvider`（`bae.shape`）。GPU 测试逐像素检查。bae-render 加了 `LayerSource::bounds()` 默认方法（见 04 的请求一节）。
-- 下一步：PR B `[interface] text`（`crates/bae-text`：parley 排版、点文字/段落文字、中文字体回退、字体枚举、`TextSource`/`TextProvider`）。
+- PR A 已合并（#48）。
+- PR B `[interface] text`：`crates/bae-text`。系统字体枚举与 PostScript 名匹配（缺失字体用默认字体代替）、parley 排版：点文字和段落文字的 AE 定位（基线原点、左/中/右、两端对齐、行距、字符间距、基线偏移、全部大写、仿粗体/斜体、段落溢出）、拉丁字体里的中文回退到系统中文字体、中文换行避头尾；结果类型 `TextLayout`（字形、行、逐字符信息、边界）；`render` feature：Vello 字形绘制（逐字符填充/描边顺序）、`TextSource`/`TextProvider`（`bae.text`）。给 02 留了 `TextDocument` 补充请求。
+- 下一步：形状操作器（中继器、位移路径、圆角……）、路径布尔与命中测试 API（给 13/16）、文字动画器。
 
 - [x] Vello 图层源（形状）
 - [ ] 形状操作器第一批（修剪路径已完成；中继器、位移路径、圆角等待做）
 - [ ] 路径布尔与编辑几何
-- [ ] 文字排版
+- [x] 文字排版（点文字、段落文字、中文回退；逐字符样式等 02 补充 TextDocument）
 - [ ] 文字动画器
 
 ## 请求（其他工作流在这里留言）
