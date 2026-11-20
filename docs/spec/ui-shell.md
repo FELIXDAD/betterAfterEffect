@@ -57,3 +57,15 @@ app.register("timeline", PanelKind::new("Timeline", |spawn| Box::new(Timeline::n
 ## 5. 工作区
 
 `WorkspacePreset::new(title, keymap, root)` 给出默认布局。用户的修改由外壳保存：切换工作区时保留各自当前的布局；"重置为已保存的布局"回到用户上次"保存对此工作区所做的更改"时的布局，没保存过就回到预设。
+
+## 6. 外壳提供的应用资源
+
+| 资源 | 谁插入 | 用途 |
+|---|---|---|
+| `Arc<bae_ui::history::HistoryLog>` | `UiModule` | 历史面板的数据。持有 Stage 的一方用 `stage.subscribe(move \|e\| log.record(e))` 喂事件，执行命令前调用 `log.label_next(标题)` 记下命令名（等 02 给 `StageEvent` 加上 `label` 后就不需要了）。 |
+| `Arc<dyn bae_ui::agent::AgentFeed>` | 外壳（`apps/bae`，基于 bae-agent） | Agent 活动记录（工具调用）和提案列表。提案的接受 / 拒绝走 `proposal.accept` / `proposal.reject` 命令。 |
+| `Arc<bae_agent::AuditLog>` | 外壳 | 应用内的 MCP 服务（17，HTTP 传输）应该写进同一个日志，活动面板才能看到。 |
+
+## 7. 输入法
+
+`Workbench` 每帧把 `PlatformOutput::ime` 的锚点换成光标矩形（`workbench::ime_follows_caret`），拼音候选框出现在光标下方。自己画文字编辑的面板（例如合成查看器里的文字工具）设置 `PlatformOutput::ime` 时同样会被处理。文本框有焦点时，不带修饰键的快捷键和文本编辑键不会触发命令。验证报告见 `docs/workstreams/11-ui-shell.md`。
