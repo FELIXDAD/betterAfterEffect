@@ -115,3 +115,13 @@
 
 1. **R02-8 字符串和素材参数。** `ParamKind` 加 `String`（值 `Value::String`）和 `Asset`（值 `Value::AssetRef`）。清单里的 `string` / `asset` 参数类型先保留不开放，等这两个类型合并后再打开。
 2. **R02-9 相对坐标的点参数默认值。** AE 的 `PF_ADD_POINT` 默认值是图层尺寸的比例（例如 50%,50% = 图层中心），添加效果时才换算成像素。`EffectParamDef.default` 是静态值，表达不了。建议 `ParamKind::Point { default_relative: bool }`（或 `DefaultValue` 加一种"按图层尺寸换算"），由添加效果的命令写入 `比例 × 图层尺寸`。在这之前，插件宿主在 `EffectDef` 里不填这类默认值，渲染时由效果按图层范围自行换算。
+
+### 05 render/vector-text → 02（2026-11-20）
+
+bae-text 已按现有 `TextDocument` 排版（整段一种样式）。下一阶段（文字动画器、AE 互转保真）需要 `TextDocument` 补充，不急，按 AE-TXT-010 的结构即可：
+
+1. **`apply_fill: bool`**（默认 true）：AE 的"无填充颜色"。现在 `fill_color` 总是生效，无法表示只有描边的文字。
+2. **逐字符样式**：`runs: Vec<{ start, end, style }>`（字符下标，Unicode 标量），`style` 里放字体、字号、颜色、描边、字符间距、行距、基线偏移、仿粗体/斜体、大写选项；现有顶层字段作为默认样式。
+3. **段落属性**（按段落）：缩进（左/右/首行）、段前距、段后距；`justification` 也挪到段落里。
+4. **文本框选项**（AE 24.6+，AE-TXT-031）：内边距、垂直对齐、首行基线方式。
+5. 自动行距百分比（默认 120%，AE-TXT-020）。
