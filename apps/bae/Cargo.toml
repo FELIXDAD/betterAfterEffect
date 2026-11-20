@@ -1,0 +1,31 @@
+[package]
+name = "bae"
+description = "BAE desktop application (assembly only: every feature is an AppModule)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+default-run = "bae"
+
+[[bin]]
+name = "bae"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+bae-app.workspace = true
+bae-gpu.workspace = true
+bae-platform.workspace = true
+egui.workspace = true
+egui-wgpu.workspace = true
+egui-winit.workspace = true
+egui_dock.workspace = true
+muda.workspace = true
+serde.workspace = true
+tracing.workspace = true
+winit.workspace = true
+
+[lints]
+workspace = true

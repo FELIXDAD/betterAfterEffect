@@ -356,7 +356,7 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
     draw(&pen, icon);
 }
 
-fn draw(g: &Pen, icon: Icon) {
+fn draw(g: &Pen<'_>, icon: Icon) {
     let hole = color::PANEL;
     match icon {
         Icon::Menu => {

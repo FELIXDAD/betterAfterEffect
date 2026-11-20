@@ -1,3 +1,7 @@
+# Pinned toolchain for every BAE crate, CI and release builds.
+# Bump in a dedicated PR (see docs/spec/dependencies.md).
 [toolchain]
-channel = "stable"
+channel = "1.100"
 components = ["rustfmt", "clippy"]
+targets = ["aarch64-apple-darwin", "x86_64-pc-windows-msvc"]
+profile = "minimal"

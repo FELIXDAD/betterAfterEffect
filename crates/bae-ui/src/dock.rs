@@ -796,13 +796,7 @@ impl Dock {
     }
 
     /// Draws the tab row; returns the content rect below it.
-    fn tab_bar(
-        &mut self,
-        ui: &mut Ui,
-        rect: Rect,
-        frame: &Frame,
-        host: &mut impl PanelHost,
-    ) -> Rect {
+    fn tab_bar(&mut self, ui: &Ui, rect: Rect, frame: &Frame, host: &mut impl PanelHost) -> Rect {
         let bar = Rect::from_min_size(rect.min, vec2(rect.width(), metrics::TAB_BAR_H));
         let font = theme::body();
         let multi = frame.tabs.len() > 1;
@@ -958,7 +952,7 @@ impl Dock {
         Rect::from_min_max(pos2(rect.left(), bar.bottom()), rect.max)
     }
 
-    fn overflow_menu(&mut self, ui: &mut Ui, bar: Rect, frame: &Frame, host: &mut impl PanelHost) {
+    fn overflow_menu(&mut self, ui: &Ui, bar: Rect, frame: &Frame, host: &mut impl PanelHost) {
         let p = ui.painter();
         let sep_x = bar.right() - geom::OVERFLOW_W;
         p.vline(
@@ -1153,7 +1147,7 @@ impl Dock {
         }
     }
 
-    fn drag_and_drop(&mut self, ui: &mut Ui, frames: &[(FrameId, Rect)]) {
+    fn drag_and_drop(&mut self, ui: &Ui, frames: &[(FrameId, Rect)]) {
         let Some(drag) = self.drag.clone() else {
             return;
         };
@@ -1219,7 +1213,7 @@ impl Dock {
         }
     }
 
-    fn floating_windows(&mut self, ui: &mut Ui, host: &mut impl PanelHost) {
+    fn floating_windows(&mut self, ui: &Ui, host: &mut impl PanelHost) {
         let mut closed = Vec::new();
         let floating = self.layout.floating.clone();
         for fl in floating {

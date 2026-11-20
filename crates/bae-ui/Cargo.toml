@@ -3,12 +3,23 @@ name = "bae-ui"
 description = "BAE UI shell: theme tokens, docking frames, title bar, icons and AE-style widgets"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+publish.workspace = true
 
 [dependencies]
 egui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
+# The shell demo (`cargo run -p bae-ui --example shell`) runs on eframe. eframe is not a
+# workspace pin: the app drives bae-ui through egui-winit + egui-wgpu on the shared
+# bae-gpu device (docs/spec/dependencies.md §10). `wgpu_no_default_features` plus the
+# workspace wgpu keeps one wgpu with only the Metal/D3D12 backends.
 [dev-dependencies]
-eframe.workspace = true
+eframe = { version = "0.36.2", default-features = false, features = ["wgpu_no_default_features", "default_fonts"] }
+wgpu.workspace = true
+
+[lints]
+workspace = true
