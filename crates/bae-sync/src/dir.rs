@@ -95,7 +95,7 @@ struct OwnLog {
 enum SourceKind {
     /// Another client's log.
     Log,
-    /// `sublayers/<doc>.loro`, written by `Project::save`.
+    /// `sublayers/<doc>.loro` (written by `Project::save`) or `history.loro`.
     Base,
 }
 
@@ -327,6 +327,20 @@ impl DirTransport {
                 seen: None,
             });
             let r = self.read_source(&path, full);
+            self.note(r);
+        }
+        let history = self.root.join(crate::history::HISTORY_FILE);
+        if history.is_file() {
+            self.sources
+                .entry(history.clone())
+                .or_insert_with(|| Source {
+                    doc: DocKey::History,
+                    kind: SourceKind::Base,
+                    generation: None,
+                    offset: 0,
+                    seen: None,
+                });
+            let r = self.read_source(&history, full);
             self.note(r);
         }
         if !self.scanned {
