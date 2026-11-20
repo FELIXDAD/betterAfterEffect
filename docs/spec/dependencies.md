@@ -193,8 +193,9 @@ wgpu v30.0.2
 | windows-sys | 0.61.2 | 无默认 | bae-platform（Windows 控制台） | 最新；muda 要求 `>=0.60, <=0.61` |
 | directories | 6.0.0 | 默认 | bae-platform | 最新 |
 | libloading | 0.9.1 | 默认 | 19、20 | 最新 |
+| libc | 0.2.191 | 默认 | 10（bae-hub 在 Unix 上处理 SIGTERM / SIGINT，`docker stop` 和 systemd 用） | `Cargo.lock` 里已有的版本（parking_lot、getrandom 等都依赖它），直接依赖不增加体积 |
 | notify | 8.2.2 | 关默认，只开 `macos_fsevent` | 09（`bae-sync` 的可选 feature `watch`，共享目录模式的文件监听） | 8.x 最新稳定版（9.0 还是 rc）；macOS 走 FSEvents（objc2-core-services，和已 pin 的 objc2 0.3 同一套），Windows 走 ReadDirectoryChangesW |
-| tungstenite | 0.30.0 | 关默认，只开 `handshake`（不带 TLS） | 09（`bae-sync` 的可选 feature `hub`，连协作服务的 WebSocket 客户端） | 最新；同步 API，放在 `ThreadedTransport` 的后台线程里跑；axum 的 WebSocket 底层也是它。局域网 Hub 暂不需要 TLS |
+| tungstenite | 0.30.0 | 关默认，只开 `handshake`（不带 TLS） | 09（`bae-sync` 的可选 feature `hub`，连协作服务的 WebSocket 客户端）；10（bae-hub 经 `bae-sync` 的 `HubTransport::accept` 用它做服务端） | 最新；同步 API，放在 `ThreadedTransport` 的后台线程里跑；axum 的 WebSocket 底层也是它。局域网 Hub 暂不需要 TLS |
 
 ### 插件、打包、哈希
 
@@ -221,7 +222,7 @@ wgpu v30.0.2
 | insta | 1.49.0 | `json` | 02、15（快照测试） | 最新 |
 | tempfile | 3.27.0 | 默认 | bae-platform（测试） | 最新 |
 
-ARCHITECTURE 里提到但还没有 pin 的：`axum`（10）、`psd`（08）。用到时按第 1 节加。
+ARCHITECTURE 里提到但还没有 pin 的：`psd`（08）。bae-hub 不用 axum / tokio（协调人决定：直接用 `bae-sync` 的 `HubTransport`，和客户端同一个 WebSocket 库）。用到时按第 1 节加。
 
 ## 6. 兼容矩阵
 
