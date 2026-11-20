@@ -1,0 +1,135 @@
+id = "04-logo-reveal"
+title = "用设计资产做 Logo 演绎"
+category = "logo"
+difficulty = 2
+guide_refs = ["03-animation.md", "05-collaboration.md", "recipes/logo-reveal.md"]
+
+prompt = """用设计资产里的 Logo 做一个 4 秒的 Logo 演绎，结尾加一句标语"轻快地创作"。"""
+
+[fixture]
+description = """
+design/assets 工程层里有画板 /assets/logo_mark：一个虚构的 Logo，由三个形状组 icon_circle（圆）、icon_bar（斜条）、wordmark（文字轮廓）组成，
+品牌蓝 #3B6CFF 和深灰 #1E1E24，画板 800×300。没有现成的合成。作者是设计师 design_lin（虚构）。
+"""
+sublayers = ["root", "design/assets"]
+permission = "own-layer"
+
+[[fixture.prims]]
+path = "/assets/logo_mark"
+type = "Artboard"
+sublayer = "design/assets"
+author = "design_lin"
+attrs = { size = [800, 300] }
+
+[[fixture.prims]]
+path = "/assets/logo_mark/icon_circle"
+type = "ShapeGroup"
+sublayer = "design/assets"
+author = "design_lin"
+attrs = { ellipse = [220, 220], position = [150, 150], fill = "#3B6CFF" }
+
+[[fixture.prims]]
+path = "/assets/logo_mark/icon_bar"
+type = "ShapeGroup"
+sublayer = "design/assets"
+author = "design_lin"
+attrs = { rect = [40, 260], position = [150, 150], rotation = 30, fill = "#1E1E24" }
+
+[[fixture.prims]]
+path = "/assets/logo_mark/wordmark"
+type = "ShapeGroup"
+sublayer = "design/assets"
+author = "design_lin"
+attrs = { generated_text_outline = "BAE", position = [520, 150], fill = "#1E1E24" }
+
+[expected]
+summary = """
+新建 4 秒合成（例如 SH090_logo）。最终停留的 Logo 是对 /assets/logo_mark 的引用，没有在提案层里覆盖资产的任何属性。
+构建过程（描边描绘、部件组装、蒙版揭示等）在单独的预合成或图层上完成。
+有一个明确的成形点（约 1.2–2 秒），之后标语"轻快地创作"出现，比 Logo 弱。
+最后至少 1.5 秒完全静止；最后一帧 Logo 缩放 100%、旋转 0、不透明度 100%。
+"""
+
+[[checks]]
+id = "h1-own-layer"
+kind = "writes_only_to"
+args = { sublayer = "agent/eval" }
+maps_to = "H1"
+hard = true
+
+[[checks]]
+id = "h8-asset-untouched"
+kind = "no_opinions_on_source"
+args = { sublayer = "design/assets" }
+maps_to = "H8"
+hard = true
+
+[[checks]]
+id = "h2-duration"
+kind = "comp_settings"
+args = { find = { type = "Comp" }, duration_seconds = 4 }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "h2-reference"
+kind = "reference_exists"
+args = { target = "/assets/logo_mark", under = "/comps/*" }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "h2-tagline"
+kind = "text_layer_exists"
+args = { value = "轻快地创作" }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "h3-final-scale"
+kind = "attr_at"
+args = { find = { type = "Layer", references = "/assets/logo_mark" }, attribute = "transform:scale", frame = "last", equals = [100, 100], tolerance = 0.01 }
+maps_to = "H3"
+hard = true
+
+[[checks]]
+id = "h3-final-opacity"
+kind = "attr_at"
+args = { find = { type = "Layer", references = "/assets/logo_mark" }, attribute = "transform:opacity", frame = "last", equals = 100, tolerance = 0.01 }
+maps_to = "H3"
+hard = true
+
+[[checks]]
+id = "t7-final-hold"
+kind = "attr_still"
+args = { find = { type = "Layer", references = "/assets/logo_mark" }, attribute = "transform:*", from = "2.5s", to = "last" }
+maps_to = "T7"
+
+[[checks]]
+id = "m1-no-linear"
+kind = "no_linear_temporal"
+args = { under = "/comps/*", allow = ["transform:opacity"] }
+maps_to = "M1"
+
+[[checks]]
+id = "resolve-point"
+kind = "judge_question"
+args = { question = "是否只有一个清楚的成形点，而不是多次高潮？" }
+maps_to = "T4"
+
+[[checks]]
+id = "brand-integrity"
+kind = "judge_question"
+args = { question = "成形后的 Logo 与原始资产是否完全一致（无变形、无改色、无多余描边或阴影）？" }
+maps_to = "H8"
+
+[[checks]]
+id = "c2-proposal"
+kind = "proposal_has_sections"
+args = { sections = ["做了什么", "改动范围", "如何验证"] }
+maps_to = "C2"
+
+[judge]
+frames = ["1.5s", "2s", "last"]
+contact_sheet = { start = 0, end = "2.5s", step = 3 }
+focus = ["成形瞬间描边版和填充版是否对齐", "标语与 Logo 的距离和强弱关系"]

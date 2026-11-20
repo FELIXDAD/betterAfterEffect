@@ -15,6 +15,7 @@ mod attr;
 mod command;
 pub mod commands;
 pub mod compose;
+pub mod effect;
 mod error;
 mod event;
 mod ids;
@@ -22,6 +23,7 @@ mod op;
 mod path;
 mod prim;
 pub mod project;
+pub mod schema;
 mod stage;
 mod sublayer;
 mod time;
@@ -31,6 +33,9 @@ pub use asset::{AssetFile, AssetResolver, PathMapping, Resolution};
 pub use attr::{AttrSpec, Ease, Expression, Interpolation, Keyframe, KeyframeFlags};
 pub use command::{Command, CommandError, CommandInfo, CommandOutput, CommandRegistry, DynCommand};
 pub use compose::{Opinion, PrimView};
+pub use effect::{
+    EffectDef, EffectParamDef, EffectRegistry, EffectStatus, ParamFlags, ParamKind, PluginRef,
+};
 pub use error::{ModelError, Result, validate_attr_name};
 pub use event::{Change, EventOrigin, StageEvent};
 pub use ids::{AuthorId, InvalidId, SublayerId};
@@ -44,7 +49,7 @@ pub use project::{
 pub use stage::{Stage, SubscriptionId, Transaction};
 pub use sublayer::Sublayer;
 pub use time::{FrameRate, Time, TimeRange};
-pub use value::{BezierPath, Value, ValueType};
+pub use value::{BezierPath, FeatherPoint, TextDocument, Value, ValueType};
 
 /// Re-exported for `bae-sync` (version vectors, export modes).
 pub use loro;

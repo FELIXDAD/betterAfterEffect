@@ -65,7 +65,7 @@
 {"type": "bytes", "value": "AQID"}
 ```
 
-类型：`float`、`int`、`bool`、`string`、`vec2`、`vec3`、`color`、`bezier`（AE 的顶点 + 相对切线 + closed，可选每顶点羽化）、`enum`、`asset_ref`、`prim_ref`、`bytes`（base64，对应 AE"任意数据"参数和插件状态）、`float_list`。
+类型：`float`、`int`、`bool`、`string`、`vec2`、`vec3`、`color`、`bezier`（AE 的顶点 + 相对切线 + closed，可选遮罩羽化点 `feather: [{segment, t, radius, tension, hold, inner, corner_angle}]`，对应 AE 的可变宽度遮罩羽化）、`enum`、`asset_ref`、`prim_ref`、`bytes`（base64，对应 AE"任意数据"参数和插件状态）、`float_list`、`time`（整数 flicks，用于入点、出点、开始时间、时长）、`frame_rate`（`{"num": 30000, "den": 1001}`）、`text_document`（文字图层的源文本，每个关键帧是一整份文档：`text`、`font`（PostScript 名）、`font_size`、`fill_color`、`stroke_color`、`stroke_width`、`justification`、`tracking`、`leading`……逐字符样式以后再加）。
 
 关键帧（时间是 `AttrSpec.keyframes` 的键，单位 flicks）：
 
@@ -153,6 +153,28 @@ Op（JSON 里 `"op"` 字段区分）：`create_prim`、`delete_prim`、`restore_
 | 打开 1 万个 Prim（每个带一个属性和一个关键帧，快照 2.5 MB） | 111 ms（空闲时）；160–330 ms（机器满载，load 20） | < 500 ms |
 | 单次属性修改到事件发出（平均 200 次） | 5.3 µs | < 1 ms |
 
-## 10. 还没做（后续 PR）
+## 10. Prim schema 与约定（PR D）
 
-- **D：** Prim schema 初版（各类型的字段和默认值、显示名属性）、效果参数模型（AE 参数类型超集、稳定数字 ID、参数标志、状态数据槽）、插件数据与缺失插件占位。
+每种内置 Prim 类型的属性（名字、值类型、默认值、能否加关键帧、枚举选项）在 `crates/bae-model/src/schema.rs`，`bae_model::schema::to_json()` 可以导出全部（给 Agent、属性面板、文档用）。`attr.set`、`key.set`、`attr.set_expression` 会按 schema 检查：类型不对报 `TypeMismatch`（`float` 属性接受 `int`），枚举值必须在选项里，不能加关键帧的属性报 `NotAnimatable`。schema 里没有的属性（自定义属性、`ae:` 开头的、插件类型的属性）不检查，原样保存。
+
+约定（回复 15 的请求）：
+
+- **单位**与 AE 一致：缩放和不透明度用百分比，角度用度，位置用像素，时间用 flicks。AE 的值可以 1:1 搬过来。
+- **关键帧的时间基准**：图层上的属性（以及它下面的遮罩、效果、形状内容、标记）的关键帧用**图层时间**，移动图层时关键帧跟着走，和 AE 内部一致；`合成时间 = start_time + 图层时间 × stretch / 100`。合成上的属性用合成时间。03 求值时负责换算。
+- **图层顺序**：合成下 `layers` 文件夹里的第一个子 Prim 是最上面的图层（AE 序号 1）。
+- **图层来源**：预合成、素材、纯色都用图层的 `source` 属性（`prim_ref` 指向 Comp 或 Asset）。`references` 用于实例化其他工程（或本工程）里的 Prim 子树，例如链接的 Ai 画板、共享的角色资产。
+- **属性命名**：图层变换是 `transform:anchor_point`、`transform:position`（vec3；`transform:separate_dimensions` 打开时用 `transform:position_x/_y/_z`）、`transform:scale`（vec3，百分比）、`transform:orientation`、`transform:rotation_x`、`transform:rotation_y`、`transform:rotation`、`transform:opacity`、`transform:point_of_interest`（摄像机、灯光）。图层设置是 `name`、`kind`、`source`、`start_time`、`in_point`、`out_point`、`stretch`、`parent`、`blend_mode`、`track_matte`、`track_matte_layer`、`three_d`、`adjustment_layer`、`motion_blur`……。按图层种类区分的属性带前缀：`text:source`、`camera:*`、`light:*`、`audio:levels`、`material:*`。遮罩是单独的 `Mask` Prim，属性不加前缀：`path`、`mode`、`inverted`、`feather`、`opacity`、`expansion`。完整列表以 `schema.rs` 为准。
+- **AE 专有、BAE 不认识的属性**以 `ae:` 开头原样保存（编码规则见 15 的交换格式文档 4.8），导回 AE 时不丢。
+- 新增 Prim 类型：`Marker`（`time`、`duration`、`comment`、`chapter`、`url`……，图层标记用图层时间）、`TextAnimator`（`animator:*` 属性）、`TextSelector`（范围、摆动、表达式选择器）。
+
+## 11. 效果参数（PR D）
+
+- `Effect` Prim：`match_name`（效果身份，例如 `ADBE Gaussian Blur 2`）、`name`、`enabled`、`plugin:id`、`plugin:version`、`state`（bytes，不透明的实例状态，对应 AE 的 sequence data）。
+- 参数值是 `param:NNNN` 属性，`NNNN` 是稳定的数字 ID，**直接等于 AE 参数 matchName 末尾的序号**（`ADBE Gaussian Blur 2-0001` → `param:0001`），导入导出不需要查表。参数和其他属性一样可以加关键帧、表达式、覆盖、协同。
+- `EffectDef` / `EffectParamDef`（`crates/bae-model/src/effect.rs`）：参数种类是 AE 的超集，包括 `slider`（含整数滑块、有效范围、滑块范围、精度、显示单位）、`angle`、`checkbox`、`color`、`point`、`point3d`、`popup`（值是从 1 开始的序号，和 AE 一样）、`layer`、`group_start` / `group_end`、`arbitrary_data`、`path`（指向 Mask）、`button`。参数标志：`hidden`、`disabled`、`supervise`、`cannot_animate`、`cannot_time_vary`、`collapsed`、`custom_ui`。效果本身可以声明 `thread_safe`、`gpu`。
+- `EffectRegistry`：内置效果和插件效果都注册到这里（07 和 19 使用），插件卸载时用 `unregister_plugin` 整体撤销。`status(prim)` 返回 `Known` 或 `MissingPlugin`（插件没装：界面显示占位，**所有参数和 `state` 原样保留**，重新装上插件或导回 AE 时不丢）。`check_param` 按定义检查参数值。
+
+## 12. 还没做（后续 PR）
+
+- 逐字符文字样式；形状操作器和文字动画器的完整属性；schema 的版本迁移。
+- 引用列表跨层合并（目前取最强的一份）；`active` / 停用 Prim。

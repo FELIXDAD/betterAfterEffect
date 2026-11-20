@@ -41,6 +41,15 @@ pub enum ModelError {
     SublayerExists(SublayerId),
     #[error("sublayer {0} is not in the layer stack")]
     NotInStack(SublayerId),
+    #[error("{path}.{attr}: expected {expected}, got {got}")]
+    TypeMismatch {
+        path: PrimPath,
+        attr: String,
+        expected: String,
+        got: String,
+    },
+    #[error("{path}.{attr} cannot be animated")]
+    NotAnimatable { path: PrimPath, attr: String },
     #[error("invalid attribute name {0:?}")]
     InvalidAttrName(String),
     #[error("storage error: {0}")]
