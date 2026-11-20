@@ -454,7 +454,7 @@
     | # (py-aep id) | Format (中文) | Kind | Extension(s) | Video depths offered | BAE priority | BAE encoder path |
     |---|---|---|---|---|---|---|
     | 0 | AIFF | audio | .aif/.aiff | — | P2 | pure Rust (hound-style PCM writer) |
-    | 1 | AVI | movie (Win; macOS too in recent AE, UNVERIFIED) | .avi | 24/32/48/64 | P2 | pure Rust RIFF writer, uncompressed only |
+    | 1 | AVI | movie (Adobe lists "Video for Windows (AVI; Windows only)"; UNVERIFIED whether current macOS builds offer it) | .avi | 24/32/48/64 | P2 | pure Rust RIFF writer, uncompressed only |
     | 2 | DPX/Cineon Sequence (DPX/Cineon 序列) | sequence | .dpx/.cin | 48/64 (10-bit log/lin) | P1 | pure Rust writer |
     | 3 | H.264 | movie | .mp4 (or .3gp / elementary stream) | 24 only | P0 | VideoToolbox (macOS) / Media Foundation (Windows); FFmpeg plugin elsewhere |
     | 4 | IFF Sequence (IFF 序列) | sequence | .iff | 24/32/48/64 | P2 | — (not planned) |
@@ -556,6 +556,7 @@
   - Number = `start + i` for the i-th rendered frame (frames are numbered by output frame index, so with a Render Settings custom frame rate the numbers follow output frames, not comp frames).
   - Zero padding comes from the `[####…]` token in the file name (AE-UI-640); default sequence template is `[compName]_[#####].[fileExtension]` (5 digits).
   - Edge: negative comp frame numbers (comp starting at negative time) — UNVERIFIED: AE writes a leading minus sign.
+  - Limit: a still-image sequence holds at most 32,766 frames (Adobe help, "Rendering and exporting still images"); BAE decision: no such limit, but warn when exporting for AE round-trip.
 - **Priority:** P0
 - **Owner:** bae-media (+ bae-model)
 - **Notes:** Scripting keys `"Starting #"`, `"Use Comp Frame Number"`. aerender `-s`/`-e` override the range but not the numbering mode.
@@ -644,7 +645,7 @@
 
 - **What it does:** Per-format option dialogs for the image-sequence formats.
 - **Exact semantics:**
-  - **PNG Options** (PNG 选项): Bit depth 8 / 16 (follows Depth: 24/32 ⇒ 8, 48/64 ⇒ 16); Compression (压缩): None (default) / Interlaced (Adam7); **Include HDR10 Metadata** (包括 HDR10 元数据（译名待核）) — 16-bit only, with Color Primaries Rec.709 / P3 D65 / Rec.2020, Luminance Min / Max (nits), Content Light Levels Maximum / Average (nits) (AE 24.x, UNVERIFIED version). PNG with alpha is always written Straight. Compression level itself is not exposed (zlib default).
+  - **PNG Options** (PNG 选项): Bit depth 8 / 16 (follows Depth: 24/32 ⇒ 8, 48/64 ⇒ 16); Compression (压缩): older versions offer a dropdown None (default) / Interlaced (Adam7); current AE (UNVERIFIED version, AE 26.x) replaces it with a **Compression slider** between "Larger files, faster" and "Smaller files, slower" (lossless: only file size and encode time change; UNVERIFIED mapping to zlib levels 0…9); **Include HDR10 Metadata** (包括 HDR10 元数据（译名待核）) — 16-bit only, with Color Primaries Rec.709 / P3 D65 / Rec.2020, Luminance Min / Max (nits), Content Light Levels Maximum / Average (nits) (AE 24.x, UNVERIFIED version). PNG with alpha is always written Straight. Source: https://helpx.adobe.com/after-effects/using/rendering-exporting-still-images-still.html ("Set PNG compression level during export").
   - **TIFF Options** (TIFF 选项): LZW Compression (LZW 压缩) checkbox (default off, UNVERIFIED); IBM PC Byte Order (IBM PC 字节顺序) checkbox (little-endian; default on Windows-created modules, UNVERIFIED). 32 bpc writes IEEE float samples; ICC profile embedded when Embed Profile is on.
   - **JPEG Options** (JPEG 选项): Quality (品质) 0 … 10 integer (default 10, UNVERIFIED) with labels Low/Medium/High/Maximum; Format Type (格式类型): Baseline ("Standard") (基线（标准）), Baseline Optimized (基线（优化）), Progressive (连续); Scans (扫描) 3 / 4 / 5 (Progressive only). Quality q maps to libjpeg quality ≈ q × 10 (UNVERIFIED).
   - **Targa Options** (Targa 选项): Resolution 24 / 32 bits/pixel (this value, not OM Depth, decides the file); RLE Compressed (RLE 压缩) checkbox.
@@ -819,8 +820,8 @@
 
 - **What it does:** Composition > Save Frame As (合成 > 帧另存为) renders the frame at the current time: **File…** (文件) as a one-frame render-queue item, or **Photoshop Layers…** (Photoshop 图层) as a layered PSD written immediately.
 - **Exact semantics:**
-  - File…: adds a render item whose Time Span = the single frame at the CTI, using the Frame Default Render Settings (AE-UI-623, "Current Settings") and the Frame Default Output Module (AE-UI-639, "Photoshop"); the item is queued and the Render Queue opens; it does not render until Render is pressed. File name default `[compName] ([#####]).[fileExtension]` (e.g. `Comp 1 (00000).psd`; UNVERIFIED pattern). Shortcut: see ui-preview-render-io.md [ui-b] (Ctrl+Alt+S / Cmd+Opt+S, UNVERIFIED).
-  - Photoshop Layers…: saves right away (save dialog) a PSD at comp size and current project bit depth (8/16 bpc; 32 bpc projects write 32-bit, UNVERIFIED) where each top-level AE layer becomes a Photoshop layer rendered with its effects, masks and transforms at the current time; layer name, opacity, blend mode (where Photoshop has an equivalent) and visibility are preserved; precomps become flattened layers or layer groups (UNVERIFIED); 3D layers are rendered flat. A composite image is stored for preview.
+  - File…: adds a render item whose Time Span = the single frame at the CTI, using the Frame Default Render Settings (AE-UI-623, "Current Settings") and the Frame Default Output Module (AE-UI-639, "Photoshop"); the item is queued and the Render Queue opens; it does not render until Render is pressed. File name default `[compName] ([#####]).[fileExtension]` (e.g. `Comp 1 (00000).psd`; UNVERIFIED pattern). Shortcut Ctrl+Alt+S / Cmd+Opt+S ("Add current frame to render queue" in Adobe's shortcut table; see [ui-b]). Adobe: change the Frame Default render settings template to change what this command produces.
+  - Photoshop Layers…: saves right away (save dialog) a PSD at comp size; the PSD inherits the project's color bit depth. Each AE layer becomes a Photoshop layer rendered with its effects, masks and transforms at the current time; layer name, opacity, blend mode and visibility are preserved, and a blend mode Photoshop lacks is replaced by the most similar one. Nested comps up to **five levels deep** become layer groups. 3D layers are rendered flat. An embedded flattened composite is always written (it keeps AE's exact look even where layer blend modes were substituted). ICC profile: sRGB IEC61966-2.1 when the project working space is None, otherwise the working-space profile. Source: https://helpx.adobe.com/after-effects/using/rendering-exporting-still-images-still.html
   - Frame Default templates are settable in the Templates dialogs.
 - **Priority:** P1 (File as PNG/PSD), P2 (Photoshop Layers)
 - **Owner:** bae-media (+ bae-render, bae-ui-motion)
