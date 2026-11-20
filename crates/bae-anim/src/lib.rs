@@ -21,6 +21,7 @@
 
 mod bezier;
 mod curve;
+pub mod edit;
 mod error;
 mod eval;
 mod evaluated;

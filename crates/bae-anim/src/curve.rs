@@ -25,8 +25,10 @@ pub enum CurveKind {
     Spatial,
 }
 
-/// AE's influence range (percent → fraction).
-const MIN_INFLUENCE: f64 = 0.001;
+/// Lowest influence (fraction). AE's UI clamps entries to 0.1 %, but keys converted
+/// from Linear to Bezier by scripts store 0, and AE evaluates them with 0 (measured on
+/// roving key times in AE 26), so 0 is allowed.
+const MIN_INFLUENCE: f64 = 0.0;
 /// Influence AE uses for the Linear side of a mixed Linear/Bezier segment.
 const LINEAR_INFLUENCE: f64 = 1.0 / 6.0;
 
@@ -265,6 +267,43 @@ impl Curve {
             _ => a.value.clone(),
         };
         self.finish(v)
+    }
+
+    /// Key times with roving keys re-timed: each roving key at the time the span's
+    /// ease reaches its cumulative distance (AE-ANI-051). Non-spatial curves and
+    /// non-roving keys keep their times.
+    pub fn roving_times(&self) -> Vec<Time> {
+        let mut out: Vec<Time> = self.keys.iter().map(|k| k.time).collect();
+        if self.kind != CurveKind::Spatial {
+            return out;
+        }
+        for span in &self.spans {
+            if span.last - span.first < 2 {
+                continue;
+            }
+            let (a, b) = (&self.keys[span.first], &self.keys[span.last]);
+            let total = *span.cumulative.last().expect("span");
+            let dt = (b.time - a.time).as_seconds();
+            if total <= 0.0 || dt <= 0.0 {
+                continue;
+            }
+            let ho = spatial_handle(&a.ease_out, a.interp_out, total, dt);
+            let hi = spatial_handle(&b.ease_in, b.interp_in, total, dt);
+            for k in span.first + 1..span.last {
+                let target = span.cumulative[k - span.first];
+                let (mut lo, mut hi_t) = (0.0, dt);
+                for _ in 0..80 {
+                    let mid = 0.5 * (lo + hi_t);
+                    if ease_1d(dt, mid, 0.0, total, ho, hi) < target {
+                        lo = mid;
+                    } else {
+                        hi_t = mid;
+                    }
+                }
+                out[k] = a.time + Time::from_seconds(0.5 * (lo + hi_t));
+            }
+        }
+        out
     }
 
     fn sample_spatial(&self, seg: usize, t: Time) -> Value {

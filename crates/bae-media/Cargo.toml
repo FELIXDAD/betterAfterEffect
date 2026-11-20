@@ -17,7 +17,7 @@ bytemuck.workspace = true
 exr.workspace = true
 half.workspace = true
 # WebP only (image-webp); PNG / JPEG / EXR use png / zune-jpeg / exr directly.
-image = { workspace = true, features = ["tiff", "webp"] }
+image = { workspace = true, features = ["webp"] }
 parking_lot.workspace = true
 png.workspace = true
 serde.workspace = true
@@ -25,6 +25,7 @@ serde.workspace = true
 # features (they pull in rustfft); see the size note in the PR.
 symphonia = { workspace = true, features = ["aac", "aiff", "flac", "isomp4", "mp3", "pcm", "wav"] }
 thiserror.workspace = true
+tiff.workspace = true
 tracing.workspace = true
 zune-jpeg.workspace = true
 
@@ -47,7 +48,7 @@ objc2-av-foundation = { workspace = true, features = ["AVAssetWriter", "AVAssetW
 
 [dev-dependencies]
 # Test fixtures are generated in code: JPEG / WebP encoders (tests only).
-image = { workspace = true, features = ["jpeg", "webp"] }
+image = { workspace = true, features = ["jpeg", "tiff", "webp"] }
 serde_json.workspace = true
 tempfile.workspace = true
 
