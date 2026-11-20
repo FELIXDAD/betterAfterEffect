@@ -37,8 +37,8 @@ Conventions used in this file (apply to every item unless an item says otherwise
     | X/Y Rotation (3D) | 0 | 0 | 0 | degrees |
     | Opacity | 100 | 100 | 100 | % |
 
-  - Turning the 3D switch on adds a z component (0 for Anchor/Position, 100 for Scale), adds Orientation and X/Y Rotation, and renames Rotation to Z Rotation (value and keyframes kept). Turning it off **deletes** Orientation, X Rotation and Y Rotation (values, keyframes and expressions, not restorable by switching back), keeps Anchor/Position/Scale with their z hidden and ignored, and renames Z Rotation back to Rotation.
-  - Reset (重置) next to the group name resets every Transform property to the layer-kind default above; resetting an animated property deletes its keyframes? UNVERIFIED: AE's Reset on an animated property adds/sets a keyframe at the CTI with the default value instead of deleting keyframes (observed behaviour); BAE must match this.
+  - Turning the 3D switch on adds a z component (0 for Anchor/Position, 100 for Scale), adds Orientation and X/Y Rotation (plus the Geometry Options and Material Options groups, see compositing-3d-color.md), and renames Rotation to Z Rotation (value and keyframes kept). Turning it off **deletes** Orientation, X Rotation and Y Rotation (and Geometry/Material Options) including all values, keyframes and expressions, which are not restored by switching back; Anchor/Position/Scale keep their keyframes and expressions with their z hidden and ignored, and Z Rotation is renamed back to Rotation (AE help, 3D layers).
+  - Reset (重置) next to the group name resets every Transform property to the layer-kind default above. UNVERIFIED: on an animated property Reset does not delete keyframes; it sets/adds a keyframe at the CTI with the default value (observed behaviour); BAE must match this once measured.
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-anim)
 - **Notes:** Scripting: group matchName `ADBE Transform Group`; children `ADBE Anchor Point`, `ADBE Position` (`ADBE Position_0/_1/_2` when separated), `ADBE Scale`, `ADBE Orientation`, `ADBE Rotate X`, `ADBE Rotate Y`, `ADBE Rotate Z` (the 2D "Rotation" is also `ADBE Rotate Z`), `ADBE Opacity`. Expression accessors: `transform.anchorPoint`, `.position`, `.xPosition`, `.scale`, `.rotation`/`.zRotation`, `.orientation`, `.xRotation`, `.yRotation`, `.opacity`, `.pointOfInterest` (see the expression part of this file). Lottie: transform `ks` with `a`, `p` (or split `p.s:true` + `p.x/p.y/p.z`), `s`, `r` (2D) or `rx/ry/rz/or` (3D, layer `ddd:1`), `o`. Older AE (UNVERIFIED: before CS4) put the Null Object anchor at its top-left (0,0); current AE nulls are 100×100 with anchor (50,50). The "Center Anchor Point in New Shape Layers" preference (UNVERIFIED: added in AE 16.1, 2019) lives in Preferences > General (see ui-preview-render-io.md, Preferences).
@@ -122,7 +122,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 
   - Render: `layer_alpha *= opacity / 100` after masks and effects, before the blend mode (compositing-3d-color.md, Alpha model / render order).
   - Opacity is **not** part of the transform matrix and is **not** inherited through parenting.
-  - Display: integer percent when the value is whole, otherwise one decimal (UNVERIFIED: AE displays opacity with 0 decimals but keeps fractional values internally; typing 33.3 shows "33%" in some versions).
+  - Display: UNVERIFIED: the Timeline shows Opacity as a whole percent (e.g. typing 33.3 shows "33%") while the stored value keeps the fraction; BAE should store full precision and may display one decimal when the value is fractional.
   - Expression results outside 0–100 are clamped at render time.
 - **Priority:** P0
 - **Owner:** bae-anim (+ bae-render)
@@ -208,7 +208,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   |---|---|---|
   | Reset (重置) | — | resets all Transform properties to defaults (AE-ANI-001) |
   | Anchor Point… / Position… / Scale… / Orientation… / Rotation… / Opacity… (锚点… 等) | Position… Ctrl+Shift+P / Cmd+Shift+P; Rotation… Ctrl+Shift+R / Cmd+Shift+R; Opacity… Ctrl+Shift+O / Cmd+Shift+O; Anchor Point…, Scale…, Orientation…: none in the shortcut reference | opens the Edit Value dialog (AE-ANI-012) |
-  | Flip Horizontal (水平翻转) | — | `scale.x *= -1` (keyframes: all keys of Scale? UNVERIFIED: sets value at CTI / adds key if animated) |
+  | Flip Horizontal (水平翻转) | — | `scale.x *= -1` about the anchor point (AE help: "multiply the horizontal or vertical component of its Scale property value by -1"); UNVERIFIED on animated Scale: writes the flipped value at the CTI only (a user feature request reports that existing Scale keyframes are not flipped) |
   | Flip Vertical (垂直翻转) | — | `scale.y *= -1` |
   | Center Anchor Point in Layer Content (在图层内容中居中放置锚点) | Ctrl+Alt+Home / Cmd+Opt+Home | anchor = centre of the layer's content bounds (shape layer: bounds of all shapes; text: text bounds; masked layer: bounds of the masked visible area), Position compensated so the layer does not move |
   | Center In View (在视图中居中（译名待核）) | Ctrl+Home / Cmd+Home | changes Position so the anchor point of each selected layer is at the centre of the current view |
@@ -220,7 +220,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   - All commands are single undoable Commands and respect animated properties by writing the value at the CTI (adding a keyframe if the stopwatch is on).
 - **Priority:** P1 (Reset, Fit to Comp, Center Anchor are P0-adjacent but non-blocking)
 - **Owner:** bae-motion (+ bae-anim, bae-ui-motion)
-- **Notes:** Flip Horizontal/Vertical were added in AE 17.0 (2020) (UNVERIFIED version). Content-bounds computation shares code with `sourceRectAtTime()` (expression part of this file). Menu framework: ui-preview-render-io.md (Menus).
+- **Notes:** Flip Horizontal/Vertical are menu commands of current AE (documented in the AE 2024+ help); in CS3 flipping was done only by negative Scale (UNVERIFIED: exact version that added the menu commands). Source: https://helpx.adobe.com/after-effects/using/layer-properties.html Content-bounds computation shares code with `sourceRectAtTime()` (expression part of this file). Menu framework: ui-preview-render-io.md (Menus).
 
 ### AE-ANI-012 · Edit Value dialogs for transform properties (编辑值)
 
@@ -284,7 +284,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   - Cameras and lights use the same order without scale and anchor: `C_local = T(pos) * L * Or * Rot`.
 - **Priority:** P0
 - **Owner:** bae-anim
-- **Notes:** Order verified against lottie-web `TransformProperty.js` (`rotateZ(-rz).rotateY(ry).rotateX(rx).rotateZ(-or[2]).rotateY(or[1]).rotateX(or[0])` then `translate(p.x, p.y, -p.z)`, row-vector, lottie z toward viewer) and Skottie's `TransformAdapter3D` (`T(p)·Rx·Ry·Rz·S·T(-a)`). Skottie adds orientation and rotation per axis before building the matrix, which is only an approximation; BAE must use `Or * Rot`. UNVERIFIED for cameras: lottie-web's `HCameraElement` inverts in the order rotation-then-orientation, i.e. `C = T·L·Rot·Or`; for layers it is `Or·Rot`. BAE decision: use `Or * Rot` for cameras too unless an AE measurement shows otherwise (they only differ when both Orientation and Rotation are non-zero). Expression `toWorld()/toComp()` and `lookAt()` must use this same matrix (expression part of this file).
+- **Notes:** Order verified against lottie-web `TransformProperty.js` (`rotateZ(-rz).rotateY(ry).rotateX(rx).rotateZ(-or[2]).rotateY(or[1]).rotateX(or[0])` then `translate(p.x, p.y, -p.z)`, row-vector, lottie z toward viewer) and Skottie's `TransformAdapter3D` (`T(p)·Rx·Ry·Rz·S·T(-a)`). Skottie adds orientation and rotation per axis before building the matrix, which is only an approximation; BAE must use `Or * Rot`. UNVERIFIED for cameras: lottie-web's `HCameraElement` inverts in the order rotation-then-orientation, i.e. `C = T·L·Rot·Or`; for layers it is `Or·Rot`. BAE decision: use `Or * Rot` for cameras too unless an AE measurement shows otherwise (they only differ when both Orientation and Rotation are non-zero). A 2025 Adobe community answer claims AE applies X first about the fixed comp axes (`Rz·Ry·Rx`); this contradicts both lottie-web and Skottie (`Rx·Ry·Rz`, Z first, so Z Rotation always spins the layer in its own plane) and is not adopted. Expression `toWorld()/toComp()` and `lookAt()` must use this same matrix (expression part of this file).
 
 ### AE-ANI-015 · Parenting world matrix and inherited attributes (父级变换)
 
@@ -347,15 +347,15 @@ Conventions used in this file (apply to every item unless an item says otherwise
   |---|---|---|---|
   | Off (关) | all | `AutoOrientType.NO_AUTO_ORIENT` | `ao: 0` |
   | Orient Along Path (沿路径定向) | 2D/3D AV layers, cameras, lights | `AutoOrientType.ALONG_PATH` | `ao: 1` |
-  | Orient Towards Camera (定向到摄像机（译名待核）) | 3D AV layers only | `AutoOrientType.CAMERA_OR_POINT_OF_INTEREST` | — |
+  | Orient Towards Camera (定位于摄像机) | 3D AV layers only | `AutoOrientType.CAMERA_OR_POINT_OF_INTEREST` | — |
   | Orient Towards Point of Interest (定向到目标点) | cameras and lights only | `AutoOrientType.CAMERA_OR_POINT_OF_INTEREST` | — |
-  | Orient Each Character Independently (独立定向每个字符（译名待核）) | 3D text layers, sub-option of Orient Towards Camera | `AutoOrientType.CHARACTERS_TOWARD_CAMERA` | — |
+  | Orient Each Character Independently (独立定向每个字符) | 3D text layers, sub-option of Orient Towards Camera | `AutoOrientType.CHARACTERS_TOWARD_CAMERA` | — |
 
   - The automatic rotation `L` is applied **outside** the layer's own Orientation and X/Y/Z Rotation (AE-ANI-014): manual rotations act as an offset in the auto-oriented frame (e.g. a camera oriented along a path plus Y Rotation 90° looks out of the side window).
   - Defaults: AV layers Off; two-node cameras and spot/parallel lights Orient Towards Point of Interest; one-node cameras Off.
 - **Priority:** P0 (Off/Along Path/Towards POI), P1 (Towards Camera, per-character)
 - **Owner:** bae-anim (+ bae-model, bae-ui-motion)
-- **Notes:** Shortcut Ctrl+Alt+O / Cmd+Opt+O. Per-character orientation math belongs to text.md (Per-character 3D). The setting is stored per layer (`layer.autoOrient`); data item in project-comp-layers.md (Auto-orient data).
+- **Notes:** zh-CN terms from the AE help (cn) page "选择和排列图层": 关 / 沿路径定向 / 定位于摄像机 / 定向到目标点; the shortcut reference calls the dialog "自动方向". Orient Towards Camera is not available for 2D layers, cameras or lights; Orient Towards Point Of Interest only for cameras and lights (AE help). Shortcut Ctrl+Alt+O / Cmd+Opt+O. Per-character orientation math belongs to text.md (Per-character 3D). The setting is stored per layer (`layer.autoOrient`); data item in project-comp-layers.md (Auto-orient data).
 
 ### AE-ANI-019 · Orient Along Path for 2D layers (沿路径定向（二维）)
 
@@ -397,7 +397,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 - **Owner:** bae-anim
 - **Notes:** UNVERIFIED: the camera formula is the no-roll look-along construction that lottie-web uses for POI cameras (`rotateY(atan2(look.x, -look.z))`, `rotateX(-atan2(look.y, lenXZ))` in its z-toward-viewer space); the axis AE aligns for 3D AV layers and its roll convention must be measured in AE.
 
-### AE-ANI-021 · Orient Towards Camera (定向到摄像机（译名待核）)
+### AE-ANI-021 · Orient Towards Camera (定位于摄像机)
 
 - **What it does:** Keeps a 3D layer turned so it faces the active camera (billboarding).
 - **Exact semantics:**
@@ -456,7 +456,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   | time (时间) | rational / flicks | CTI | any; unique per property | `keyTime(i)`; see AE-ANI-024 |
   | value (值) | property value type | value at CTI | type-specific | `keyValue(i)` |
   | inInterpolationType / outInterpolationType (传入/传出插值) | enum Linear / Bezier / Hold | Linear / Linear (temporal) | — | `keyInInterpolationType(i)`; scripting `KeyframeInterpolationType.LINEAR` (6612), `.BEZIER` (6613), `.HOLD` (6614) |
-  | inTemporalEase / outTemporalEase (传入/传出缓动) | array of {speed, influence}: N entries for N-D non-spatial properties, 1 entry for spatial, shape, text and 1-D properties | speed = segment slope, influence 16.666667 % (Linear) | influence 0.1–100 %, speed unbounded | AE-ANI-033 |
+  | inTemporalEase / outTemporalEase (传入/传出缓动) | array of {speed, influence}: 2 entries for `TwoD`, 3 for `ThreeD`, 1 entry for every other value type (spatial, `COLOR`, shape, text, 1-D) per the scripting guide (`keyInTemporalEase` returns) | speed = segment slope, influence 16.666667 % (Linear) | influence 0.1–100 %, speed unbounded | AE-ANI-033 |
   | temporalContinuous (时间连续) | bool | false | — | AE-ANI-041 |
   | temporalAutoBezier (时间自动贝塞尔) | bool | false | — | AE-ANI-040 |
   | inSpatialTangent / outSpatialTangent (传入/传出空间切线) | vector, same dimension as value | from auto-bezier computation (AE-ANI-042) or (0,…) when Linear | unbounded | spatial properties only; relative to the key's value |
@@ -516,12 +516,13 @@ Conventions used in this file (apply to every item unless an item says otherwise
   | Class | Properties | Interpolation |
   |---|---|---|
   | Spatial (`isSpatial == true`, value type `TwoD_SPATIAL` / `ThreeD_SPATIAL`) | Position, Anchor Point, Point of Interest, effect Point Controls (2-D/3-D points, e.g. Lens Flare centre), Puppet pin positions, motion-tracker attach points | temporal ease is **one** 1-D curve driving arc length along a spatial Bezier path (AE-ANI-035); spatial interpolation + roving available |
-  | Non-spatial multi-dimensional (`TwoD`, `ThreeD`, `COLOR`) | Scale, colours, 2-D/3-D values of effects that are not points | one temporal ease **per dimension** (AE-ANI-034) |
+  | Non-spatial multi-dimensional (`TwoD`, `ThreeD`) | Scale, 2-D/3-D values of effects that are not points | one temporal ease **per dimension** (AE-ANI-034) |
+  | Colour (`COLOR`, 4 floats RGBA) | colour properties of effects, lights, shapes, text | **one** temporal ease shared by all four components (AE-ANI-034, AE-ANI-053) |
   | 1-D (`OneD`) | Rotation, Opacity, sliders, angles | one ease |
   | Other (`SHAPE`, `TEXT_DOCUMENT`, `MARKER`, `LAYER_INDEX`, `MASK_INDEX`, `CUSTOM_VALUE`, `NO_VALUE`) | mask/shape paths, Source Text, markers, layer/mask pickers, menus/checkboxes (`OneD` but discrete) | AE-ANI-053..058 |
 
   - Separated Position (X/Y/Z Position) are 1-D non-spatial properties (AE-ANI-052).
-  - Orientation is `ThreeD_SPATIAL` in scripting (UNVERIFIED) but has no motion path and interpolates by shortest arc (AE-ANI-057); its temporal ease is a single curve.
+  - Orientation is `ThreeD_SPATIAL` in scripting (evidence: bodymovin calls `keyOutSpatialTangent` only for spatial types and does export `to`/`ti` for `ks.or`, which lottie-web then discards) but has no motion path and interpolates by shortest arc (AE-ANI-057); its temporal ease is a single curve.
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-anim)
 - **Notes:** Scripting `Property.isSpatial`, `Property.propertyValueType`. Bodymovin export treats `TwoD_SPATIAL`, `ThreeD_SPATIAL`, `SHAPE` and `NO_VALUE` as single-ease and `OneD/TwoD/ThreeD/COLOR` as per-dimension, which confirms the split.
@@ -531,7 +532,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 - **What it does:** Decides which interpolation a keyframe gets when it is created.
 - **Exact semantics:**
   - First keyframe of a property (stopwatch on): temporal Linear in/out; spatial Auto Bezier (or Linear when the preference AE-ANI-044 is on).
-  - Additional keyframe added by editing the value at the CTI or by "Add keyframe": UNVERIFIED: AE copies the temporal and spatial interpolation types of the nearest preceding keyframe (or of the following one when added before the first key); a key created after a key whose out type is Hold gets in type Hold (AE help).
+  - Additional keyframe added by editing the value at the CTI or by "Add keyframe": UNVERIFIED: AE copies the temporal and spatial interpolation types of the nearest preceding keyframe (or of the following one when added before the first key). Documented: a key created after a key whose out type is Hold gets incoming Hold (AE help, Keyframe interpolation).
   - Keys created by assistants and expressions-to-keyframes use the types defined in those items.
   - Changing the spatial-interpolation preference affects neither existing keys nor new keys on properties that already have keys (AE help).
 - **Priority:** P0
@@ -607,7 +608,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   ```
 
   - Hold is temporal only; the motion path shows the keys but no dots between them.
-  - `in(k1)` is irrelevant for the segment's shape. Toggle Hold Keyframe (AE-ANI-050) sets both in and out to Hold on the selected keys (UNVERIFIED: AE sets in and out; the documented effect is on the outgoing side).
+  - `in(k1)` is irrelevant for the segment's shape. Toggle Hold Keyframe (AE-ANI-050) applies or removes Hold as the **outgoing** interpolation of the selected keys (AE help: "To apply or remove Hold interpolation as outgoing interpolation"); UNVERIFIED: whether it also changes the selected key's incoming type.
   - Sub-frame evaluation (motion blur, frame blending, time remap) sees the jump exactly at t1, not at a frame boundary: a motion-blur sample at t1 − ε shows v0.
 - **Priority:** P0
 - **Owner:** bae-anim
@@ -640,15 +641,15 @@ Conventions used in this file (apply to every item unless an item says otherwise
 
 ### AE-ANI-034 · Per-dimension temporal ease for multi-dimensional non-spatial properties (多维非空间属性的分维缓动)
 
-- **What it does:** Non-spatial 2-D/3-D/colour properties have an independent temporal curve for each dimension.
+- **What it does:** Non-spatial 2-D/3-D properties (`TwoD`, `ThreeD`, e.g. Scale) have an independent temporal curve for each dimension; colour properties have a single shared curve.
 - **Exact semantics:**
   - For each dimension d, apply AE-ANI-033 with `v0[d], v1[d]`, `speed[d]`, `influence[d]`. The `x` solve is per dimension (different influences give different u for the same t).
   - Interpolation types (Linear/Bezier/Hold) are shared by all dimensions of the key; eases differ.
-  - Colour properties: value components are 0–1 floats in scripting but ease speed is expressed in 8-bit units per second (0–255 scale): `speed_internal = speed_displayed / 255` (from bodymovin, which multiplies colour deltas by 255 when normalising). Interpolation space: AE-ANI-053.
+  - Colour properties (`COLOR`) are **not** per-dimension: the scripting guide states `keyInTemporalEase`/`keyOutTemporalEase` return 1 KeyframeEase for every value type other than `TwoD`/`ThreeD`, and Lottie colour keyframes carry single-element `o.x/o.y/i.x/i.y` arrays. One ease curve gives a scalar progress `p(t)` in [0,1] and every component is `c = c0 + (c1 − c0) * p(t)`. Components are 0–1 floats in scripting but ease speed is in 8-bit units per second (0–255 scale; bodymovin multiplies colour deltas by 255 when normalising). UNVERIFIED: which scalar "distance" AE uses to relate the colour speed to `p` (bodymovin normalises by component 0's `255*Δ` only, which is probably an exporter shortcut; best guess: Euclidean length of the 255-scaled RGBA difference, by analogy with spatial properties). Interpolation space: AE-ANI-053.
   - Easy Ease and the Keyframe Velocity dialog set all dimensions at once unless the dimensions are edited separately in the Graph Editor.
 - **Priority:** P0
 - **Owner:** bae-anim
-- **Notes:** Scripting: `setTemporalEaseAtKey(i, [e_x, e_y(, e_z)])` takes N KeyframeEase objects for `TwoD`/`ThreeD`/`COLOR`? UNVERIFIED for COLOR: docs say "for all other value types the array contains 1 object", while bodymovin reads `easeIn[k]` for each of the 4 colour components; BAE should accept both.
+- **Notes:** Scripting: `setTemporalEaseAtKey(i, inEase[, outEase])` takes arrays of 2 KeyframeEase objects for `TwoD`, 3 for `ThreeD`, 1 for all other types including `COLOR` (scripting guide, Property.keyInTemporalEase). Source: https://ae-scripting.docsforadobe.dev/property/property/
 
 ### AE-ANI-035 · Temporal ease of spatial properties (arc-length driven) (空间属性的时间缓动)
 
