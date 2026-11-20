@@ -201,3 +201,192 @@ impl SceneBuilder {
         Ok(layer)
     }
 }
+
+/// Deterministic pseudo-random numbers for fixtures (64-bit LCG).
+#[derive(Clone, Debug)]
+pub struct Lcg(u64);
+
+impl Lcg {
+    /// A generator from a seed.
+    pub fn new(seed: u64) -> Self {
+        Self(
+            seed.wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407),
+        )
+    }
+
+    /// Uniform in `[0, 1)`.
+    pub fn next_f64(&mut self) -> f64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (self.0 >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    /// Uniform in `[lo, hi)`.
+    pub fn range(&mut self, lo: f64, hi: f64) -> f64 {
+        lo + (hi - lo) * self.next_f64()
+    }
+}
+
+/// Writes a `w × h` RGBA test texture (a soft-edged rounded "label" with a
+/// gradient, straight alpha), standing in for a text layer until 05 lands.
+pub fn write_label_png(path: &Path, w: u32, h: u32, hue: f64) -> Result<(), RenderError> {
+    let mut data = Vec::with_capacity((w * h * 4) as usize);
+    let r = f64::from(h) * 0.3;
+    for y in 0..h {
+        for x in 0..w {
+            let (fx, fy) = (f64::from(x) + 0.5, f64::from(y) + 0.5);
+            // Signed distance to a rounded rectangle inset by 2 px.
+            let qx = (fx - f64::from(w) / 2.0).abs() - (f64::from(w) / 2.0 - 2.0 - r);
+            let qy = (fy - f64::from(h) / 2.0).abs() - (f64::from(h) / 2.0 - 2.0 - r);
+            let outside =
+                (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0) - r;
+            let alpha = (0.5 - outside).clamp(0.0, 1.0);
+            let t = fx / f64::from(w);
+            let c = |phase: f64| {
+                (0.5 + 0.5 * ((hue + t * 0.3 + phase) * std::f64::consts::TAU).cos()) * 255.0
+            };
+            data.extend_from_slice(&[
+                c(0.0) as u8,
+                c(1.0 / 3.0) as u8,
+                c(2.0 / 3.0) as u8,
+                (alpha * 255.0).round() as u8,
+            ]);
+        }
+    }
+    crate::png_out::write_rgba8(
+        path,
+        &bae_gpu::transfer::ImageData {
+            width: w,
+            height: h,
+            format: bae_gpu::wgpu::TextureFormat::Rgba8Unorm,
+            bytes_per_row: w * 4,
+            data,
+        },
+    )
+}
+
+/// Benchmark B1 "motion graphics" (ARCHITECTURE §11): 1080p30, 10 s, 50 shape
+/// layers + 10 text layers. Until 05 lands, shapes are animated solids and text
+/// layers are animated RGBA textures (written into `assets_dir`); blur and glow
+/// wait for 07. Layers move, rotate, scale and fade; a fifth use Add, Screen,
+/// Multiply or Overlay. Returns the builder and the comp.
+pub fn b1(assets_dir: &Path) -> Result<(SceneBuilder, PrimPath), RenderError> {
+    const SECONDS: i64 = 10;
+    let mut b = SceneBuilder::new();
+    let comp = b.comp(
+        "b1",
+        1920,
+        1080,
+        FrameRate::FPS_30,
+        Time::from_flicks(SECONDS * Time::FLICKS_PER_SECOND),
+    )?;
+    let mut rng = Lcg::new(0xB1);
+    let modes = ["add", "screen", "multiply", "overlay"];
+    let end = Time::from_flicks(SECONDS * Time::FLICKS_PER_SECOND);
+    let mid = Time::from_flicks(SECONDS * Time::FLICKS_PER_SECOND / 2);
+
+    std::fs::create_dir_all(assets_dir)?;
+    for i in 0..10 {
+        let file = assets_dir.join(format!("label_{i:02}.png"));
+        let (w, h) = (
+            rng.range(360.0, 720.0) as u32,
+            rng.range(80.0, 140.0) as u32,
+        );
+        write_label_png(&file, w, h, rng.next_f64())?;
+        let asset = b.footage_asset(&format!("label_{i:02}"), &file, None, Some([w, h]))?;
+        let layer = b.layer(&comp, &format!("text_{i:02}"), "footage", Some(&asset))?;
+        b.set(
+            &layer,
+            "transform:anchor_point",
+            Value::Vec3([f64::from(w) / 2.0, f64::from(h) / 2.0, 0.0]),
+        )?;
+        let y = 120.0 + 84.0 * f64::from(i);
+        b.key(
+            &layer,
+            "transform:position",
+            Time::ZERO,
+            Value::Vec3([-400.0, y, 0.0]),
+        )?;
+        b.key(
+            &layer,
+            "transform:position",
+            mid,
+            Value::Vec3([960.0, y, 0.0]),
+        )?;
+        b.key(
+            &layer,
+            "transform:position",
+            end,
+            Value::Vec3([2300.0, y, 0.0]),
+        )?;
+        b.key(&layer, "transform:opacity", Time::ZERO, Value::Float(0.0))?;
+        b.key(
+            &layer,
+            "transform:opacity",
+            Time::ONE_SECOND,
+            Value::Float(100.0),
+        )?;
+    }
+    for i in 0..50 {
+        let size = [rng.range(60.0, 420.0) as u32, rng.range(60.0, 420.0) as u32];
+        let color = [rng.next_f64(), rng.next_f64(), rng.next_f64(), 1.0];
+        let layer = b.solid_layer(&comp, &format!("shape_{i:02}"), color, size, [0.0, 0.0])?;
+        let p0 = [rng.range(0.0, 1920.0), rng.range(0.0, 1080.0), 0.0];
+        let p1 = [rng.range(0.0, 1920.0), rng.range(0.0, 1080.0), 0.0];
+        let p2 = [rng.range(0.0, 1920.0), rng.range(0.0, 1080.0), 0.0];
+        b.key(&layer, "transform:position", Time::ZERO, Value::Vec3(p0))?;
+        b.key(&layer, "transform:position", mid, Value::Vec3(p1))?;
+        b.key(&layer, "transform:position", end, Value::Vec3(p2))?;
+        b.key(&layer, "transform:rotation", Time::ZERO, Value::Float(0.0))?;
+        b.key(
+            &layer,
+            "transform:rotation",
+            end,
+            Value::Float(rng.range(-360.0, 360.0)),
+        )?;
+        let s = rng.range(50.0, 150.0);
+        b.key(
+            &layer,
+            "transform:scale",
+            Time::ZERO,
+            Value::Vec3([s, s, 100.0]),
+        )?;
+        b.key(
+            &layer,
+            "transform:scale",
+            end,
+            Value::Vec3([150.0 - s + 50.0, s, 100.0]),
+        )?;
+        b.key(
+            &layer,
+            "transform:opacity",
+            Time::ZERO,
+            Value::Float(rng.range(40.0, 100.0)),
+        )?;
+        b.key(
+            &layer,
+            "transform:opacity",
+            end,
+            Value::Float(rng.range(40.0, 100.0)),
+        )?;
+        if i % 5 == 4 {
+            b.set(
+                &layer,
+                "blend_mode",
+                Value::Enum(modes[(i / 5) % modes.len()].into()),
+            )?;
+        }
+    }
+    // A full-frame background at the bottom.
+    b.solid_layer(
+        &comp,
+        "background",
+        [0.08, 0.09, 0.12, 1.0],
+        [1920, 1080],
+        [0.0, 0.0],
+    )?;
+    Ok((b, comp))
+}

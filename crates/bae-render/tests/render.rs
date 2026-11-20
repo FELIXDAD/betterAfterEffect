@@ -81,6 +81,18 @@ fn reference(mode: BlendMode, src: [f32; 4], opacity: f32, dst: [f32; 4], clamp:
     };
     let ao = a_s + a_b * (1.0 - a_s);
     let mut out = [0.0; 4];
+    if mode == BlendMode::Add {
+        // AE's Add: premultiplied backdrop + source (measured against AE 26.2).
+        for c in 0..3 {
+            let mut cop = src[c] * a_s + dst[c] * a_b;
+            if clamp {
+                cop = cop.min(ao);
+            }
+            out[c] = cop / ao;
+        }
+        out[3] = ao;
+        return out;
+    }
     for c in 0..3 {
         let cop =
             (1.0 - a_b) * src[c] * a_s + (1.0 - a_s) * dst[c] * a_b + a_s * a_b * b(dst[c], src[c]);
@@ -147,7 +159,9 @@ fn rotated_layer_coverage_sums_to_its_area() {
     );
     let total: f64 = img
         .data
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|p| f64::from(p[3]) / 255.0)
         .sum();
     assert!((total - 1600.0).abs() < 8.0, "coverage {total}");
@@ -357,11 +371,18 @@ fn precomps_half_resolution_roi_and_cache() {
         * DAffine2::from_scale(DVec2::splat(2.0));
     comp.layers.push(pre);
     let img = render(&mut r, &comp, &RenderRequest::full(), OutputAlpha::Straight);
-    assert_eq!(img.px(40, 40), [0, 0, 255, 255]);
+    // Magnified 2×, the nested raster's edges ramp over one source texel (two
+    // pixels), like AE's bilinear resampling with a transparent border: the corner
+    // pixel is 0.75² covered (AE renders 143 here too, see tests/ae).
+    assert!(
+        close(img.px(40, 40), [0, 0, 255, 143], 1),
+        "{:?}",
+        img.px(40, 40)
+    );
+    assert_eq!(img.px(42, 42), [0, 0, 255, 255]);
     assert_eq!(img.px(77, 77), [0, 0, 255, 255]);
-    assert_eq!(img.px(39, 40), [0, 0, 0, 0]);
-    // The nested raster is magnified 2× with bilinear filtering: its inner edge
-    // (the solid ends at 20 of 40) softens over one source texel.
+    assert_eq!(img.px(37, 42), [0, 0, 0, 0]);
+    // Inside, the solid's edge (at 20 of 40) is softened by bilinear filtering.
     assert!(
         close(img.px(79, 79), [0, 0, 255, 143], 1),
         "{:?}",
@@ -375,8 +396,8 @@ fn precomps_half_resolution_roi_and_cache() {
     let frame = r.render_frame(&comp, &half).unwrap();
     assert_eq!(frame.image.rect, IRect::new(0, 0, 40, 40));
     let img = render(&mut r, &comp, &half, OutputAlpha::Straight);
-    assert_eq!(img.px(20, 20), [0, 0, 255, 255]);
-    assert_eq!(img.px(19, 20), [0, 0, 0, 0]);
+    assert_eq!(img.px(21, 21), [0, 0, 255, 255]);
+    assert_eq!(img.px(18, 21), [0, 0, 0, 0]);
 
     let roi = RenderRequest {
         roi: Some(IRect::new(30, 30, 50, 50)),
@@ -385,8 +406,8 @@ fn precomps_half_resolution_roi_and_cache() {
     let frame = r.render_frame(&comp, &roi).unwrap();
     assert_eq!(frame.image.rect, IRect::new(30, 30, 50, 50));
     let img = render(&mut r, &comp, &roi, OutputAlpha::Straight);
-    assert_eq!(img.px(9, 10), [0, 0, 0, 0]);
-    assert_eq!(img.px(10, 10), [0, 0, 255, 255]);
+    assert_eq!(img.px(7, 12), [0, 0, 0, 0]);
+    assert_eq!(img.px(13, 13), [0, 0, 255, 255]);
 
     // Second render of the same frame comes from the cache; a change misses it.
     let again = r.render_frame(&comp, &RenderRequest::full()).unwrap();

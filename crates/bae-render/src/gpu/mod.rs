@@ -59,7 +59,9 @@ impl DrawData {
         // edges x = const (|det| / |y axis|) and y = const (|det| / |x axis|).
         let kx = det.abs() / transform.matrix2.y_axis.length();
         let ky = det.abs() / transform.matrix2.x_axis.length();
-        let (mx, my) = (1.0 / kx, 1.0 / ky);
+        // Quad margin: the edge ramp reaches half a footprint (max of one target
+        // pixel and one input texel) beyond the edge; one full footprint is safe.
+        let (mx, my) = ((1.0 / kx).max(1.0), (1.0 / ky).max(1.0));
         Some(DrawData {
             fwd_x,
             fwd_y,
@@ -403,8 +405,9 @@ mod tests {
     fn geometry_margins_follow_scale() {
         let t = DAffine2::from_scale(DVec2::new(2.0, 0.5));
         let d = DrawData::geometry(&t, [0.0, 0.0, 10.0, 10.0], [100, 100]).unwrap();
-        // 1 target pixel = 0.5 input texels along x, 2 along y.
-        assert_eq!(d.quad, [-0.5, -2.0, 10.5, 12.0]);
+        // Margin = max(1 target pixel, 1 input texel): 1 texel along x (magnified),
+        // 2 texels (= 1 target pixel) along y.
+        assert_eq!(d.quad, [-1.0, -2.0, 11.0, 12.0]);
         assert_eq!(&d.src[2..], &[2.0, 0.5]);
         assert!(DrawData::geometry(&DAffine2::from_scale(DVec2::ZERO), [0.0; 4], [1, 1]).is_none());
     }

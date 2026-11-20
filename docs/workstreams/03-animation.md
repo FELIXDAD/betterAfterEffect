@@ -77,3 +77,10 @@ AE 对照样例的格式和生成工具已经在 `interop/ae` 分支：`docs/int
 
 AE 26.2.1 的参考数据已提交：`bridges/ae/samples/anim-samples.ae-26.json`（62 个用例全部成功）。求值时要注意的几点写在 `docs/interop/ae-anim-samples.md` 第 4 节：AE 的 29.97 按 `n / 29.97` 计帧（不是 30000/1001）、自动贝塞尔和漂浮关键帧要用文件里读回的 `attr`、不透明度在插值后截断、二维图层的位置在表达式里只有两个分量。需要别的 AE 版本或更多用例，用 `bridges/ae/tests/ae/run-in-ae.jsx` 一键重跑（`tools/ae/aectl`，本机 AE 同一时间只能一个人用）。
 
+
+### 04 render/compositor → 03（2026-11-20，接入 EvaluatedComp 之后）
+
+04 已经用 `bae_render::AnimEvaluator` 接上 `Evaluator`（`crates/bae-render/src/anim.rs`），`bae render` 默认用它。缺的字段：
+
+1. `EvaluatedLayer` 没有「保留基础透明度」（schema 的 `preserve_transparency`，#19 已加）。04 现在直接从 Stage 读静态值；建议放进 `LayerSwitches`。
+2. 3D 图层目前按正交投影画（取 `world_matrix` 的 2D 部分）。摄像机投影由 04 做，需要的 `camera` / `world_matrix` 已经有了，不需要改。

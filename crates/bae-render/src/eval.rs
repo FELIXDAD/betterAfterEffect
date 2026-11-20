@@ -26,7 +26,7 @@ use std::sync::Arc;
 
 use bae_model::{
     AssetFile, AssetResolver, AttrSpec, FrameRate, Interpolation, PrimPath, PrimType, PrimView,
-    Stage, Time, Value, schema,
+    Stage, StageEvent, Time, Value, schema,
 };
 use glam::{DAffine2, DVec2};
 
@@ -38,11 +38,22 @@ use crate::input::{
 };
 use crate::request::RenderPurpose;
 
-/// Produces evaluated comps. Implemented by the mock below and, later, by an
-/// adapter over `bae-anim`.
+/// Produces evaluated comps. Implemented by [`MockEvaluator`] and by
+/// [`crate::anim::AnimEvaluator`] (the adapter over 03's `bae-anim`).
+///
+/// The stage is passed per call so one evaluator (with its compiled caches) can
+/// live across edits; forward every [`StageEvent`] to [`CompEvaluator::invalidate`].
 pub trait CompEvaluator {
-    /// Evaluates `comp` at comp time `time`.
-    fn evaluate(&mut self, comp: &PrimPath, time: Time) -> Result<RenderComp, RenderError>;
+    /// Evaluates `comp` of `stage` at comp time `time`.
+    fn evaluate(
+        &mut self,
+        stage: &Stage,
+        comp: &PrimPath,
+        time: Time,
+    ) -> Result<RenderComp, RenderError>;
+
+    /// Drops whatever `event` makes stale. Default: nothing is cached.
+    fn invalidate(&mut self, _event: &StageEvent) {}
 
     /// Problems found while evaluating since the last call (unsupported features).
     fn take_warnings(&mut self) -> Vec<String> {
@@ -52,19 +63,17 @@ pub trait CompEvaluator {
 
 /// Evaluates a [`Stage`] with static values and linear keyframes.
 #[derive(Debug)]
-pub struct MockEvaluator<'a> {
-    stage: &'a Stage,
+pub struct MockEvaluator {
     assets: AssetResolver,
     purpose: RenderPurpose,
     warnings: Vec<String>,
 }
 
-impl<'a> MockEvaluator<'a> {
-    /// An evaluator over `stage`; footage paths resolve against `base_dir` (the
+impl MockEvaluator {
+    /// An evaluator whose footage paths resolve against `base_dir` (the
     /// project's directory, [`bae_model::Project::base_dir`]).
-    pub fn new(stage: &'a Stage, base_dir: Option<PathBuf>) -> Self {
+    pub fn new(base_dir: Option<PathBuf>) -> Self {
         Self {
-            stage,
             assets: AssetResolver::new(base_dir, Vec::new()),
             purpose: RenderPurpose::Final,
             warnings: Vec::new(),
@@ -77,7 +86,17 @@ impl<'a> MockEvaluator<'a> {
         self.purpose = purpose;
         self
     }
+}
 
+/// One evaluation over a stage.
+struct MockPass<'a> {
+    stage: &'a Stage,
+    assets: &'a AssetResolver,
+    purpose: RenderPurpose,
+    warnings: &'a mut Vec<String>,
+}
+
+impl<'a> MockPass<'a> {
     fn warn(&mut self, message: String) {
         if !self.warnings.contains(&message) {
             self.warnings.push(message);
@@ -358,9 +377,20 @@ impl<'a> MockEvaluator<'a> {
     }
 }
 
-impl CompEvaluator for MockEvaluator<'_> {
-    fn evaluate(&mut self, comp: &PrimPath, time: Time) -> Result<RenderComp, RenderError> {
-        self.comp(comp, time, 0)
+impl CompEvaluator for MockEvaluator {
+    fn evaluate(
+        &mut self,
+        stage: &Stage,
+        comp: &PrimPath,
+        time: Time,
+    ) -> Result<RenderComp, RenderError> {
+        MockPass {
+            stage,
+            assets: &self.assets,
+            purpose: self.purpose,
+            warnings: &mut self.warnings,
+        }
+        .comp(comp, time, 0)
     }
 
     fn take_warnings(&mut self) -> Vec<String> {

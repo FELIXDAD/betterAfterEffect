@@ -46,14 +46,18 @@
 **2026-11-20**
 
 - PR 1 [interface]：`crates/bae-render` 公共接口。渲染输入 `RenderComp`/`RenderLayer`（纯数据，03 合并前用 `MockEvaluator` 按 schema v1 从 Stage 求值）、AE 全部 38 种混合模式 token、轨道遮罩/遮罩模式、`RenderRequest`（分辨率、ROI、位深、RGBA16F/32F、色彩上下文占位）、`LayerSource`/`SourceProvider`（05/08/插件的图层源接口）、`Effect`/`EffectLibrary`（参数定义复用 `bae_model::EffectDef`）、渲染图节点模型与 ROI 协商（合成、纯色、图层源、效果、轨道遮罩；剔除；缓存键）、`FrameCache`（内存预算 LRU + StageEvent 精确失效）、`fixture::SceneBuilder`（用命令搭测试/基准工程）。
-- 下一步：GPU 执行（纹理池、合成着色器、5 种混合模式、轨道遮罩）、`bae render` 输出 PNG、B1 基准与 `docs/perf.md`、与 AE 对照。
+- PR 1 已合并（#16）。
+- PR 2：GPU 执行。纹理池（分桶复用，租约计数）、合成着色器（一个图层一次 draw，连续纯色合批；正常/相加(32 bpc)/滤色走固定管线混合，其余只拷贝图层覆盖区域的底图再混合）、轨道遮罩、保留基础透明度、8/16 bpc 截断、素材经 bae-media 零拷贝采样、03 的 `Evaluator` 适配器 `AnimEvaluator`、`bae render` 输出 PNG（`apps/bae` 加了一行 `add_module`）、B1 基准与 `cargo xtask bench`、`docs/perf.md`。
+- 与 AE 26.2.1 对照（`crates/bae-render/tests/ae/`，24 个用例，AE 输出存为 golden 进 CI）：5 种混合模式、4 种轨道遮罩、保留基础透明度、亚像素/旋转/缩放/预合成放大最大差 ≤ 1；修正了相加（AE 是预乘直接相加）和放大时的边缘过渡（按源像素）。缩小的软边纹理还差最多 10。
+- B1（Apple M4）：完整分辨率预览 852 fps，半分辨率 1333 fps，单帧延迟 p50 2.2 ms，导出（求值+渲染+回读）259 fps。形状、文字还是代替品，没有模糊和发光。
+- 下一步：遮罩（05 的路径栅格化或自带）、效果框架执行与三个参考效果、调整图层、其余混合模式（继续用 AE 对照）、视口纹理输出（零拷贝给 12）、B1 与 AE 渲染速度对比、B3。
 
-- [ ] 渲染图与纹理池
+- [x] 渲染图与纹理池
 - [ ] 混合模式、遮罩、轨道遮罩
 - [ ] 3D 与运动模糊
 - [ ] 效果框架与参考效果
 - [ ] 缓存与预览
-- [ ] bae render 命令行
+- [x] bae render 命令行（PNG）
 - [ ] 基准与 CI 趋势
 
 ## 请求（其他工作流在这里留言）

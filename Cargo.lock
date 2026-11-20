@@ -237,6 +237,7 @@ dependencies = [
  "bae-gpu",
  "bae-model",
  "bae-platform",
+ "bae-render",
  "bae-ui",
  "clap",
  "egui",
@@ -401,10 +402,15 @@ dependencies = [
 name = "bae-render"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "bae-anim",
+ "bae-app",
  "bae-gpu",
  "bae-media",
  "bae-model",
+ "bae-platform",
  "bytemuck",
+ "clap",
  "glam",
  "parking_lot",
  "png",

@@ -103,15 +103,36 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = in.pos.xy;
     let u = vec2<f32>(dot(d.inv_x.xyz, vec3<f32>(p, 1.0)), dot(d.inv_y.xyz, vec3<f32>(p, 1.0)));
 
-    // Box-filter coverage of this pixel by the content rectangle: overlap of the
-    // pixel footprint with the rectangle, edge distances in target pixels.
-    let dl = (u - d.rect.xy) * d.src.zw;
-    let dr = (d.rect.zw - u) * d.src.zw;
+    // Edge coverage, matching AE's resampling of a layer's raster: the edge ramps
+    // over max(1 target pixel, 1 source texel) – a box filter when the layer is
+    // drawn at or below its size, bilinear magnification with a transparent
+    // border when it is enlarged. Edge distances are measured perpendicular, in
+    // target pixels, then in units of that footprint.
+    let footprint = max(vec2<f32>(1.0), d.src.zw);
+    let dl = (u - d.rect.xy) * d.src.zw / footprint;
+    let dr = (d.rect.zw - u) * d.src.zw / footprint;
     let cov2 = clamp(min(dl, vec2<f32>(0.5)) + min(dr, vec2<f32>(0.5)), vec2<f32>(0.0), vec2<f32>(1.0));
 
     var src: vec4<f32>;
     if (flags & FLAG_TEXTURE) != 0u {
-        src = textureSampleLevel(t_src, s_linear, u * d.src.xy, 0.0);
+        // Minified layers average a grid of bilinear samples over the pixel's
+        // footprint in the source (a box prefilter, like AE's downsampling);
+        // others take one sample.
+        let du_dx = vec2<f32>(d.inv_x.x, d.inv_y.x);
+        let du_dy = vec2<f32>(d.inv_x.y, d.inv_y.y);
+        let n = u32(clamp(ceil(max(length(du_dx), length(du_dy))), 1.0, 4.0));
+        if n == 1u {
+            src = textureSampleLevel(t_src, s_linear, u * d.src.xy, 0.0);
+        } else {
+            var acc = vec4<f32>(0.0);
+            for (var j = 0u; j < n; j++) {
+                for (var i = 0u; i < n; i++) {
+                    let o = (vec2<f32>(f32(i), f32(j)) + 0.5) / f32(n) - 0.5;
+                    acc += textureSampleLevel(t_src, s_linear, (u + o.x * du_dx + o.y * du_dy) * d.src.xy, 0.0);
+                }
+            }
+            src = acc / f32(n * n);
+        }
         if (flags & FLAG_STRAIGHT) != 0u {
             src = vec4<f32>(src.rgb * src.a, src.a);
         }
@@ -156,7 +177,12 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
     var co: vec3<f32>;
     var ao: f32;
-    if (flags & FLAG_PRESERVE) != 0u {
+    if d.mode.x == 9u && (flags & FLAG_PRESERVE) == 0u {
+        // AE's Add is additive on premultiplied colour (measured against AE 26.2,
+        // AE-CMP-018): backdrop + source x alpha, alpha is the union.
+        ao = a_s + a_b * (1.0 - a_s);
+        co = src.rgb + b.rgb;
+    } else if (flags & FLAG_PRESERVE) != 0u {
         ao = a_b;
         co = a_s * a_b * bl + (1.0 - a_s) * b.rgb;
     } else {
