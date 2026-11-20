@@ -834,7 +834,7 @@
   - Solid layers: a mask on a solid is the standard way to draw a soft shape. Solids are raster layers, so the mask is rasterised at the solid's pixel size and its edge softens when the solid is scaled above 100 % (UNVERIFIED: AE may render solids resolution-independently).
   - Precomp layers: masks apply to the nested comp's rendered frame; with Collapse Transformations on, a closed mask forces the nested layers to be flattened first (Collapse Transformations section).
   - 3D layers: masks are in the layer's own plane and are projected with it.
-  - Camera, light and null layers cannot have masks; audio-only layers neither.
+  - Camera, light and audio-only layers cannot have masks (no pixels). Null objects: UNVERIFIED whether AE allows masks on them; they would have no visible effect (a null is never rendered).
 - **Priority:** P0
 - **Owner:** bae-render (+ bae-text, bae-vector)
 - **Notes:** Effects that read a mask path (Stroke, Fill, Path Text, Vegas...) are specified in effects.md; text "Path Options" in text.md.
@@ -889,11 +889,16 @@
 - **Exact semantics:**
   ```
   render_collapsed(P, acc, t):                  # P = precomp layer with Collapse on
-    if P has (a closed mask with mode != None) or (an enabled effect) or (a layer style)
-       or the nested comp contains an adjustment layer:
-        # forced rasterisation ("partial collapse")
+    if the nested comp contains an (active) adjustment layer:
+        # Adobe help: the adjustment layer "will force the flattening and cropping that
+        # collapsing transformations would usually prevent" -> behave as not collapsed
+        return composite(nested_frame(P, t) transformed by P (AE-CMP-054), acc, ...)
+    if P has (a closed mask with mode != None) or (an enabled effect) or (a layer style):
+        # forced rasterisation ("partial collapse"; Adobe help: nested layers "are first
+        # rendered on their own, then masks and effects are applied")
         img = render nested layers with transforms = outer(P) ∘ nested(layer), into a
-              comp-space buffer of the OUTER comp size (not cropped to the nested frame)
+              comp-space buffer of the OUTER comp size (UNVERIFIED: not cropped to the
+              nested frame; transforms still concatenated, so resolution is preserved)
         img = apply P's masks (mapped to comp space), effects, layer styles
         acc = composite(img, acc, P.blend_mode, P.preserve_transparency)
         # nested blend modes affect only nested layers; 3D layers cannot intersect
@@ -922,7 +927,7 @@
   - Off (default for vector footage): the vector file is rasterised once at its document size (100 %) into a bitmap, then follows the raster pipeline (AE-CMP-007); scaling above 100 % blurs/pixelates.
   - On: render order becomes masks → transformations → effects (AE-CMP-008); the vector is rasterised in comp space with the full layer transform at the current preview resolution.
   - Effects on a continuously rasterized layer receive a comp-space raster, so their results differ from the switch-off case (e.g. a Drop Shadow's distance is in comp pixels and does not scale with the layer).
-  - Best quality anti-aliases vector edges whether or not continuous rasterization is on (Adobe help); Draft does not (UNVERIFIED).
+  - Best quality anti-aliases vector edges whether or not continuous rasterization is on (Adobe help, Layers > Continuous rasterization); Draft renders without anti-aliasing (Adobe help, Layer image quality: Draft "displays and renders a layer without anti-aliasing and subpixel positioning").
   - Shape and text layers: switch shown but always on; scripting state UNVERIFIED for these layer types.
   - Cost: re-rasterisation each frame (slower but sharper).
 - **Priority:** P0 for shape/text (always on); P1 for AI/PDF/EPS footage switch.
@@ -994,10 +999,10 @@
 
 - **What it does:** A preference that makes the Quality, Effects (fx), Frame Blending and Motion Blur switches of a precomp layer propagate recursively into the layers of the nested comp.
 - **Exact semantics:**
-  - Preference location: Preferences > General in older versions, Preferences > Composition in current AE (Adobe help); default on (UNVERIFIED default).
+  - Preference location: Preferences > Composition in current AE (Adobe help, Precomposing and Preferences pages: "Quality, effects, frame blending, and motion blur switches affect nested compositions recursively"); older help pages place it under General / Appearance. Default on (UNVERIFIED: default not stated by Adobe; long-standing AE default is checked).
   - When on, for every layer N rendered inside a nested comp reached through precomp layer P (recursively):
     - Quality: `N.quality = min(N.quality, P.quality)` in order Wireframe < Draft < Best (UNVERIFIED: P = Draft forces nested layers to Draft; P = Best leaves them as set).
-    - Effects switch: P's fx switch off disables effects on nested layers (UNVERIFIED; Adobe preference text lists "effects").
+    - Effects switch: P's fx switch off disables effects on nested layers (the preference text lists "effects" among the propagated switches; exact rule UNVERIFIED: assumed `N.effects_on = N.effects_on && P.effects_on`).
     - Motion Blur: nested layers blur only if their own MB switch is on and P's MB switch is on; the nested comp's own "Enable Motion Blur" comp switch is replaced by the outer comp's (UNVERIFIED); shutter settings come from the outer (rendering) comp (UNVERIFIED).
     - Frame Blending: P's frame-blending switch state is required for nested footage layers' frame blending to apply (UNVERIFIED).
   - When off, nested layers use only their own switches and the nested comp's own comp switches.
@@ -1046,11 +1051,11 @@
   - Values (scripting `AVLayer.samplingQuality`, `LayerSamplingQuality.`): Bilinear (双线性, `BILINEAR`, default), Bicubic (双立方, `BICUBIC`). Only meaningful when quality = Best. Shortcuts Alt/Option+B (Best/Bilinear), Alt/Option+Shift+B (Best/Bicubic).
   - Bilinear: standard 2×2 tap interpolation on premultiplied (alpha-weighted) colour; for downscaling AE uses area sampling / mip-like prefiltering (UNVERIFIED: AE Best quality downscales with a box-area filter rather than plain bilinear, avoiding aliasing).
   - Bicubic: 4×4 tap cubic; kernel UNVERIFIED (Keys a = −0.5 assumed); can ring/overshoot at hard edges (Adobe help), helps more for upscaling; results clamped to [0, 1] at 8/16 bpc, and overshoot may produce < 0 or > 1 in 32 bpc (UNVERIFIED).
-  - Not used by: textures in the ray-traced/Advanced 3D renderers (always bilinear), transformations inside effects (bilinear unless the effect implements its own method).
+  - Not used by (Adobe help): textures in the Ray-traced 3D renderer (always bilinear); transformations inside effects (bilinear unless the effect implements its own method). UNVERIFIED for the Advanced 3D renderer.
   - Samples outside the layer are transparent (zero alpha), not edge-clamped.
 - **Priority:** P1
 - **Owner:** bae-render
-- **Notes:** Introduced in AE CC 2015 (13.5) — UNVERIFIED version. Implementation hint: bilinear = hardware sampler on premultiplied textures with mipmaps for strong minification (trilinear when scale < 0.5); bicubic = 4-tap optimised B-spline/Catmull-Rom shader using bilinear fetches.
+- **Notes:** UNVERIFIED version of introduction (a CC-era addition, around AE CC 2014.1-2015, 13.1-13.5). Source: https://helpx.adobe.com/after-effects/using/layers.html (Bilinear and bicubic sampling; shortcuts Alt/Option+B and Alt/Option+Shift+B; Quality switch cycles Best (bilinear) → Draft → Best (bicubic)). Implementation hint: bilinear = hardware sampler on premultiplied textures with mipmaps for strong minification (trilinear when scale < 0.5); bicubic = 4-tap optimised B-spline/Catmull-Rom shader using bilinear fetches.
 
 ### AE-CMP-061 · Subpixel positioning and precision (子像素定位)
 
