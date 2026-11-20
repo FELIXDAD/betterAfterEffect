@@ -38,6 +38,7 @@ Illustrator 的文件和剪贴板内容能变成 BAE 里可编辑的矢量，也
 
 ## 进度
 
+- [x] 公共接口（PR A）：`crates/bae-interop-ai` 的中间表示 `AiDocument`、命令批次 `CommandBatch`（一个撤销步骤，JSON 与 Agent 的 `command.batch` 一致）、规划器 `plan_import`（画板 → 合成，Ai 图层 → 形状图层，编组、复合路径、填充描边、渐变、点文字占位、顶层剪切组 → 蒙版）、`ai.import` 命令；对照表初稿 `docs/interop/ai-mapping.md`
 - [ ] PDF/.ai 解析
 - [ ] SVG 导入导出
 - [ ] 剪贴板粘贴

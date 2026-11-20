@@ -335,6 +335,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bae-interop-ai"
+version = "0.1.0"
+dependencies = [
+ "bae-anim",
+ "bae-model",
+ "bae-vector",
+ "kurbo",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "bae-media"
 version = "0.1.0"
 dependencies = [
