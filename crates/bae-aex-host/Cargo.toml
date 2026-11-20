@@ -1,0 +1,23 @@
+[package]
+name = "bae-aex-host"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+publish = false
+description = "Reserved After Effects effect plug-in (.aex / .plugin) compatibility host for BAE: translation-layer data structures only (P1 design phase; loads nothing)."
+# Workstream 20 (interop/aex-compat). Design: docs/spec/aex-compat.md.
+#
+# Dependency policy for this crate:
+# - No runtime dependencies at all in P1. Everything here is plain Rust data
+#   structures, pure conversion kernels and a WGSL source string.
+# - No Adobe SDK headers, no bindgen output, no FFI loading. Numeric ABI values
+#   (selector numbers, flag bits, suite name strings) are deliberately absent
+#   until the P3 legal review (docs/spec/aex-compat.md, "Legal and compliance").
+# - The GPU round-trip benchmark lives in ./bench/roundtrip as a separate
+#   package with its own empty [workspace], so wgpu never enters this crate's
+#   (or the main workspace's) dependency graph through it.
+
+[dependencies]
+
+[dev-dependencies]
