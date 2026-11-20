@@ -33,10 +33,16 @@ pub mod cache;
 pub mod effect;
 mod error;
 pub mod eval;
+mod exec;
 pub mod fixture;
+pub mod footage;
 pub mod geom;
+mod gpu;
 pub mod graph;
 pub mod input;
+pub mod png_out;
+pub mod pool;
+mod renderer;
 pub mod request;
 pub mod source;
 
@@ -51,6 +57,8 @@ pub use input::{
     CustomContent, Dependency, FootageRef, LayerContent, RenderComp, RenderEffect, RenderLayer,
     RenderMask, TrackMatte,
 };
+pub use pool::PoolStats;
+pub use renderer::{FrameStats, OutputAlpha, RenderedFrame, Renderer, RendererConfig};
 pub use request::{
     BitDepth, BlendSpace, ColorContext, RenderPurpose, RenderRequest, Resolution, WorkFormat,
 };

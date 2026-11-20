@@ -36,21 +36,23 @@ pub enum ImageAlpha {
 /// A texture on the shared device and the pixel rectangle it represents.
 ///
 /// Texel `(0, 0)` is pixel `(rect.x0, rect.y0)` of the image's own space (layer
-/// space for sources, comp space for composites). The texture may be larger
-/// than `rect` (pooled textures are bucketed); texels outside `rect` are
-/// transparent.
+/// space for sources, comp space for composites), counted in texels of
+/// `pixel_scale` space pixels each. The texture may be larger than `rect`
+/// (pooled textures are bucketed); only texels inside `rect.size()` are defined.
 #[derive(Clone, Debug)]
 pub struct GpuImage {
     /// The texture (needs `TEXTURE_BINDING`).
     pub texture: wgpu::Texture,
     /// A view of the texture.
     pub view: wgpu::TextureView,
-    /// Covered pixel rectangle.
+    /// Covered region, in texels of the image's space.
     pub rect: IRect,
     /// Alpha representation.
     pub alpha: ImageAlpha,
-    /// Pixels of the image's space per texel (1 at full resolution, 2 at half …).
+    /// Space pixels per texel (1 at full resolution, 2 at half …).
     pub pixel_scale: f64,
+    /// Pool lease: the pooled texture is reused once every clone is dropped.
+    lease: Option<Arc<()>>,
 }
 
 impl GpuImage {
@@ -58,18 +60,55 @@ impl GpuImage {
     pub fn from_texture(texture: wgpu::Texture, alpha: ImageAlpha) -> Self {
         let rect = IRect::from_size(texture.width(), texture.height());
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        Self::new(texture, view, rect, alpha, 1.0)
+    }
+
+    /// An image from its parts.
+    pub fn new(
+        texture: wgpu::Texture,
+        view: wgpu::TextureView,
+        rect: IRect,
+        alpha: ImageAlpha,
+        pixel_scale: f64,
+    ) -> Self {
         Self {
             texture,
             view,
             rect,
             alpha,
-            pixel_scale: 1.0,
+            pixel_scale,
+            lease: None,
         }
+    }
+
+    pub(crate) fn pooled(
+        texture: wgpu::Texture,
+        view: wgpu::TextureView,
+        rect: IRect,
+        alpha: ImageAlpha,
+        pixel_scale: f64,
+        lease: Arc<()>,
+    ) -> Self {
+        Self {
+            lease: Some(lease),
+            ..Self::new(texture, view, rect, alpha, pixel_scale)
+        }
+    }
+
+    /// True when the texture belongs to the renderer's pool.
+    pub fn is_pooled(&self) -> bool {
+        self.lease.is_some()
     }
 
     /// Texture size in texels.
     pub fn texture_size(&self) -> [u32; 2] {
         [self.texture.width(), self.texture.height()]
+    }
+
+    /// GPU bytes of the texture.
+    pub fn byte_size(&self) -> u64 {
+        let bpp = self.texture.format().block_copy_size(None).unwrap_or(8);
+        u64::from(self.texture.width()) * u64::from(self.texture.height()) * u64::from(bpp)
     }
 }
 
@@ -96,9 +135,10 @@ pub struct EncodeContext<'a> {
 }
 
 impl EncodeContext<'_> {
-    /// A transparent working-format image covering `rect` at `pixel_scale`,
-    /// usable as a render attachment and storage texture. Its texture comes
-    /// from the renderer's pool and returns there when the frame is done.
+    /// A working-format image covering `rect` at `pixel_scale`, usable as a
+    /// render attachment and storage texture. Its contents are undefined (clear
+    /// or overwrite all of `rect`). The texture comes from the renderer's pool
+    /// and returns there when every clone of the image is dropped.
     pub fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError> {
         self.allocator.allocate(rect, pixel_scale)
     }

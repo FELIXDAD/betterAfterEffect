@@ -196,6 +196,8 @@ pub struct LayerOp {
     pub matte: Option<MatteRef>,
     /// Destination region in composite texels (clipped to the composite rect).
     pub bounds: IRect,
+    /// The layer's content bounds in input-space pixels (anti-aliased edges).
+    pub content: Rect,
 }
 
 /// The pixels of a layer op.
@@ -478,6 +480,12 @@ impl Builder<'_> {
             bounds_chain.push(effect.output_bounds(&params, prev));
         }
         let layer_bounds = *bounds_chain.last().unwrap_or(&IRect::EMPTY);
+        let content_px = if effects.is_empty() {
+            content_rect
+        } else {
+            let r = layer_bounds.to_rect();
+            Rect::new(r.x0 * scale, r.y0 * scale, r.x1 * scale, r.y1 * scale)
+        };
         if layer_bounds.is_empty() {
             return Ok(None);
         }
@@ -627,6 +635,7 @@ impl Builder<'_> {
             preserve_transparency: layer.preserve_transparency,
             matte,
             bounds,
+            content: content_px,
         }))
     }
 
