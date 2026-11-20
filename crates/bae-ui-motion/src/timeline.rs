@@ -1778,7 +1778,15 @@ impl TimelinePanel {
                     self.drag = None;
                 }
             }
-            Some(Drag::Cti) if released => self.drag = None,
+            // Bar and work-area drags finish in their own widgets; if the row
+            // scrolled out of view, drop the drag instead of leaving it stuck.
+            Some(
+                Drag::Cti
+                | Drag::Move { .. }
+                | Drag::TrimIn { .. }
+                | Drag::TrimOut { .. }
+                | Drag::WorkArea { .. },
+            ) if released => self.drag = None,
             _ => {}
         }
     }

@@ -287,6 +287,11 @@ impl Panel for CompositionViewer {
                 return;
             }
         };
+        // A value drag that ended without a commit (e.g. cancelled) must not leave
+        // its preview behind.
+        if !ui.input(|i| i.pointer.any_down()) {
+            session.lock().scrub = None;
+        }
         let scrub = session.lock().scrub.clone();
         apply_overrides(&mut comp, scrub.as_ref(), self.drag.as_ref());
 

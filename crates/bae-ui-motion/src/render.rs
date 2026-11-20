@@ -478,7 +478,9 @@ pub(crate) fn paint_comp(
             LayerSource::Comp {
                 nested: Some(nested),
                 ..
-            } => paint_comp(nested, painter, to_screen, xf, alpha, view_scale, font, shapes),
+            } => paint_comp(
+                nested, painter, to_screen, xf, alpha, view_scale, font, shapes,
+            ),
             _ => {}
         }
         match layer.kind {
