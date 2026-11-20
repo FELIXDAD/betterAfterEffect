@@ -37,11 +37,17 @@ pub const APP_ID: &str = "io.github.felixdad.bae";
 /// Application version (workspace version).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// One-line version string for `--version`, logs and crash reports, e.g.
+/// One-line version string for logs and crash reports, e.g.
 /// `BAE 0.1.0 (aarch64-macos, release)`.
 pub fn version_line() -> String {
+    format!("{APP_NAME} {}", version_details())
+}
+
+/// Version with build details, e.g. `0.1.0 (aarch64-macos, release)`; clap
+/// prefixes it with the binary name for `bae --version`.
+pub fn version_details() -> String {
     format!(
-        "{APP_NAME} {VERSION} ({}-{}, {})",
+        "{VERSION} ({}-{}, {})",
         std::env::consts::ARCH,
         std::env::consts::OS,
         if cfg!(debug_assertions) {

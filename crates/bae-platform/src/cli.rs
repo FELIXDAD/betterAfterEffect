@@ -254,7 +254,7 @@ pub fn command<'a>(subcommands: impl IntoIterator<Item = &'a CliSubcommand>) -> 
     let mut cmd = Command::new(crate::BINARY_NAME)
         .about("BAE — GPU-first motion graphics and compositing")
         .version(crate::VERSION)
-        .long_version(crate::version_line())
+        .long_version(crate::version_details())
         .args_conflicts_with_subcommands(true)
         .arg(
             Arg::new("headless")
