@@ -69,6 +69,8 @@ pub fn run(mut app: App) -> ExitCode {
         tracing::warn!("the previous session crashed; report: {}", report.display());
     }
     app.insert_resource(dirs);
+    // Installed plugins (user, system, bundled, BAE_PLUGIN_PATH); problems are logged.
+    bae_plugin::load_installed(&app);
 
     match invocation {
         Invocation::Subcommand {

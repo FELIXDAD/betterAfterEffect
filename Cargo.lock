@@ -238,6 +238,7 @@ dependencies = [
  "bae-model",
  "bae-motion",
  "bae-platform",
+ "bae-plugin",
  "bae-ui",
  "clap",
  "egui",

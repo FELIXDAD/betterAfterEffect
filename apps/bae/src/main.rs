@@ -33,6 +33,8 @@ fn main() -> ExitCode {
         .add_module(mcp_cli::McpCliModule)
         // Motion commands (comp.create, layer.create, key.ease …) for menus and agents.
         .add_module(bae_motion::MotionModule)
+        // Plugin host: `bae plugin check|list`; plugin effects in the app registries.
+        .add_module(bae_plugin::PluginModule)
         .add_module(shell::ShellModule);
     // Feature modules from other workstreams are added here, e.g.
     // `.add_module(bae_render::RenderModule)`.
