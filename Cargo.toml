@@ -66,6 +66,7 @@ bae-color = { path = "crates/bae-color" }
 bae-plugin = { path = "crates/bae-plugin" }
 bae-plugin-sdk = { path = "crates/bae-plugin-sdk" }
 bae-package = { path = "crates/bae-package" }
+bae-motion = { path = "crates/bae-motion" }
 bae-vector = { path = "crates/bae-vector" }
 
 # ---- GPU, rendering, text (one coherent Linebender/wgpu set) ----
@@ -152,6 +153,9 @@ notify = { version = "8.2.2", default-features = false, features = ["macos_fseve
 # WebSocket client for the sync hub (bae-sync `hub` feature). No TLS yet: LAN hub.
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
 libloading = "0.9.1"
+# Signal handling (SIGTERM from `docker stop` / systemd) in bae-hub on Unix. Already
+# in the graph through std-adjacent crates; this pin only makes it a direct dep.
+libc = "0.2.191"
 
 # ---- plugins, packaging, hashing ----
 cbindgen = { version = "0.29.4", default-features = false }

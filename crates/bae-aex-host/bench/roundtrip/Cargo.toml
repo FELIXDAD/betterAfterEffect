@@ -1,0 +1,23 @@
+[package]
+name = "bae-aex-roundtrip-bench"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+publish = false
+description = "Measures the cost of hosting a CPU AE plug-in node in BAE's GPU render graph: GPU->CPU readback, format conversion, plug-in call, upload; in-process and out-of-process (shared memory)."
+
+# Standalone package: its own (empty) workspace so wgpu never enters the main
+# BAE workspace through bae-aex-host. Build and run with
+#   cargo run --release --manifest-path crates/bae-aex-host/bench/roundtrip/Cargo.toml
+[workspace]
+
+[dependencies]
+bae-aex-host = { path = "../.." }
+wgpu = { version = "=30.0.2", default-features = false, features = ["metal", "dx12", "wgsl", "std"] }
+pollster = "=1.0.3"
+memmap2 = "=0.9.12"
+
+[profile.release]
+opt-level = 3
+debug = false

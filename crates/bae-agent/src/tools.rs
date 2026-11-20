@@ -278,9 +278,36 @@ fn command_entry(info: &CommandInfo) -> ToolEntry {
         id: info.id.clone(),
         title: info.title.clone(),
         description,
-        input_schema: input_schema(&info.params_schema),
+        input_schema: {
+            let mut schema = (*input_schema(&info.params_schema)).clone();
+            crate::timeargs::rewrite_schema(&mut schema);
+            Arc::new(schema)
+        },
         read_only: false,
         kind: ToolKind::Command,
+    }
+}
+
+/// Does a command take an optional top-level `project` parameter (the open
+/// project's location, e.g. the `package.*` commands)? The server fills it in.
+pub fn takes_project(schema: &Json) -> bool {
+    schema.pointer("/properties/project").is_some()
+        && !schema
+            .get("required")
+            .and_then(Json::as_array)
+            .is_some_and(|r| r.iter().any(|x| x == "project"))
+}
+
+/// Tell the agent that `project` defaults to the open project.
+pub fn note_project_default(schema: &mut serde_json::Map<String, Json>) {
+    if let Some(Json::Object(p)) = schema
+        .get_mut("properties")
+        .and_then(|p| p.get_mut("project"))
+    {
+        p.insert(
+            "description".into(),
+            "Project location (.bae folder or .baez file). Omit it: the server fills in the open project.".into(),
+        );
     }
 }
 

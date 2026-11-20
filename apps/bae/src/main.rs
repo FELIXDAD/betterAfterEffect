@@ -31,6 +31,8 @@ fn main() -> ExitCode {
         .add_module(bae_gpu::GpuModule)
         .add_module(model_cli::ModelCliModule)
         .add_module(mcp_cli::McpCliModule)
+        // Motion commands (comp.create, layer.create, key.ease …) for menus and agents.
+        .add_module(bae_motion::MotionModule)
         .add_module(shell::ShellModule);
     // Feature modules from other workstreams are added here, e.g.
     // `.add_module(bae_render::RenderModule)`.

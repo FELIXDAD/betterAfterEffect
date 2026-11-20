@@ -42,11 +42,37 @@
 
 ## 进度
 
-- [ ] 同步服务端
+- [x] 同步服务端（PR 1，#47）：`services/bae-hub`。
+  - 直接建立在 09 的 `Relay` + `HubTransport::accept` 上，和客户端是同一个 WebSocket 库（tungstenite 0.30）。没有异步运行时，不用 tokio / axum（协调人的决定）。
+  - 每个工程一个 Relay 线程；在线状态和建议性锁由 Relay 转发；工程按需加载、空闲卸载。
+  - 工程日志用 `DirTransport` 存在数据目录里（09 的共享目录日志格式，自动压缩，重启后读回）。
+  - HTTP 接口：`/healthz`、`/v1/info`、`/v1/status`、`/v1/projects`。
+  - 接口说明见 `services/bae-hub/README.md`。
 - [ ] 素材存储
-- [ ] 权限与发现
+- [~] 权限与发现：
+  - 团队令牌已做（PR 1）：只读/可写，可以限定工程；只保存哈希，比较用常数时间；首次启动自动生成。
+  - mDNS 自动发现还没做。
 - [ ] Docker 与 NAS 部署文档
 - [ ] 历史快照
+
+### 2026-11-20
+
+- **PR 1 的测试**：8 个端到端测试，客户端是 `HubTransport::connect`：
+  - 收敛，以及重启后从磁盘恢复
+  - HTTP 接口与令牌
+  - 只读
+  - 匿名访问
+  - 在线状态经 Hub 转发
+  - 空闲卸载与重新加载
+  - 10 个客户端的延迟（本机回环 debug 构建，中位数约 5.5 ms）
+  - 数据目录锁
+- **改架构**：第一版用 tokio + axum 写的。09 PR E 合并后，按协调人的要求改成直接用 `HubTransport`。
+- **体积**：去掉 tokio / axum 之后，release 体积见 PR 描述（预算 15 MiB）。在 macOS 上用 `rust-lld` 就能直接交叉编译 musl 静态单文件，不需要 zig 或 Docker。
+- **给 09 的请求**：写在 09 任务书"请求"一节，共 4 条：
+  - 传输出错时会话丢掉本轮已收到的数据（会丢修改；Hub 这边已经绕开）
+  - WebSocket 单帧 16 MiB 的上限
+  - 写缓冲上限
+  - 按连接设置 `SessionConfig`
 
 ## 请求（其他工作流在这里留言）
 

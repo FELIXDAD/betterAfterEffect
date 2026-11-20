@@ -11,6 +11,8 @@
 //! | [`expr`] | ROI and `identity_when` expressions | §11.7 |
 //! | [`wgsl`] | declarative WGSL interface: prelude, assembly, naga validation, uniform layouts | §11 |
 //! | [`package`] | loading and checking a package from disk or memory | §5.1, §5.4 |
+//! | [`declarative`] | `DeclarativeEffect`: declarative effects on the GPU via `bae_render::Effect` | §11 |
+//! | [`host`] | `PluginHost`: discovery, version selection, registration, runtime unload | §6, §7 |
 //! | [`diag`] | diagnostics (`file:line:column: error: …`) | §16 |
 //!
 //! ## How an effect plugin reaches the renderer
@@ -28,15 +30,19 @@
 
 #![warn(missing_docs)]
 
+pub mod declarative;
 pub mod diag;
 pub mod effect_def;
 pub mod expr;
+pub mod host;
 pub mod id;
 pub mod manifest;
 pub mod package;
 pub mod wgsl;
 
 pub use bae_plugin_sdk::{ApiVersion, ContributionKind, Implementation};
+pub use declarative::DeclarativeEffect;
 pub use diag::{Diagnostic, Severity};
+pub use host::{LoadedPlugin, PluginDir, PluginHost, Scope};
 pub use manifest::{EffectDecl, ParamDecl, PluginManifest};
 pub use package::{DirSource, EffectPackage, MemorySource, Package, PackageSource};
