@@ -268,6 +268,8 @@ impl CdlOp {
             }
             Self::sat(v, self.saturation).map(c01)
         } else {
+            // ASC: clamp in, inverse saturation, clamp, inverse power, inverse
+            // slope / offset, clamp (as OCIO; noClamp skips every clamp).
             let v = Self::sat(rgb.map(c01), 1.0 / self.saturation).map(c01);
             let mut o = [0.0; 3];
             for c in 0..3 {
@@ -276,7 +278,7 @@ impl CdlOp {
                 } else {
                     v[c]
                 };
-                o[c] = (x - self.offset[c]) / self.slope[c];
+                o[c] = c01((x - self.offset[c]) / self.slope[c]);
             }
             o
         }

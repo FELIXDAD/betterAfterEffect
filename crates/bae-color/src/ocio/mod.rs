@@ -150,10 +150,18 @@ fn s(n: Option<&Node>) -> Option<String> {
 fn str_list(n: Option<&Node>) -> Vec<String> {
     match n {
         Some(n) => match n.as_seq() {
-            Some(items) => items.iter().filter_map(|i| i.as_str().map(str::to_string)).collect(),
+            Some(items) => items
+                .iter()
+                .filter_map(|i| i.as_str().map(str::to_string))
+                .collect(),
             None => n
                 .as_str()
-                .map(|v| v.split([',', ':']).map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect())
+                .map(|v| {
+                    v.split([',', ':'])
+                        .map(|p| p.trim().to_string())
+                        .filter(|p| !p.is_empty())
+                        .collect()
+                })
                 .unwrap_or_default(),
         },
         None => Vec::new(),
@@ -167,7 +175,8 @@ fn first<'a>(n: &'a Node, keys: &[&str]) -> Option<&'a Node> {
 impl Config {
     /// Reads a config file; LUT paths resolve against its directory and `search_path`.
     pub fn load(path: &Path) -> Result<Config, ColorError> {
-        let text = std::fs::read_to_string(path).map_err(|e| ColorError::Io(format!("{}: {e}", path.display())))?;
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| ColorError::Io(format!("{}: {e}", path.display())))?;
         let mut cfg = Self::parse(&text)?;
         cfg.dir = path.parent().map(Path::to_path_buf);
         Ok(cfg)
@@ -180,13 +189,24 @@ impl Config {
         if doc.as_map().is_none() {
             return Err(perr("config.ocio", "not a mapping"));
         }
-        let version = doc.get("ocio_profile_version").and_then(Node::as_f64).unwrap_or(1.0);
+        let version = doc
+            .get("ocio_profile_version")
+            .and_then(Node::as_f64)
+            .unwrap_or(1.0);
         let mut colorspaces = Vec::new();
-        for (key, reference) in [("colorspaces", Reference::Scene), ("display_colorspaces", Reference::Display)] {
+        for (key, reference) in [
+            ("colorspaces", Reference::Scene),
+            ("display_colorspaces", Reference::Display),
+        ] {
             for cs in doc.get(key).and_then(Node::as_seq).unwrap_or(&[]) {
-                let name = s(cs.get("name")).ok_or_else(|| perr("config.ocio", format!("{key}: colour space without a name")))?;
+                let name = s(cs.get("name")).ok_or_else(|| {
+                    perr("config.ocio", format!("{key}: colour space without a name"))
+                })?;
                 let (to_keys, from_keys): (&[&str], &[&str]) = match reference {
-                    Reference::Scene => (&["to_scene_reference", "to_reference"], &["from_scene_reference", "from_reference"]),
+                    Reference::Scene => (
+                        &["to_scene_reference", "to_reference"],
+                        &["from_scene_reference", "from_reference"],
+                    ),
                     Reference::Display => (&["to_display_reference"], &["from_display_reference"]),
                 };
                 colorspaces.push(OcioColorSpace {
@@ -227,9 +247,17 @@ impl Config {
             colorspace: s(v.get("colorspace")),
             view_transform: s(v.get("view_transform")),
             display_colorspace: s(v.get("display_colorspace")),
-            looks: s(v.get("looks")).or_else(|| s(v.get("look"))).filter(|l| !l.is_empty()),
+            looks: s(v.get("looks"))
+                .or_else(|| s(v.get("look")))
+                .filter(|l| !l.is_empty()),
         };
-        let shared: Vec<View> = doc.get("shared_views").and_then(Node::as_seq).unwrap_or(&[]).iter().map(parse_view).collect();
+        let shared: Vec<View> = doc
+            .get("shared_views")
+            .and_then(Node::as_seq)
+            .unwrap_or(&[])
+            .iter()
+            .map(parse_view)
+            .collect();
         let mut displays = Vec::new();
         for (name, views) in doc.get("displays").and_then(Node::as_map).unwrap_or(&[]) {
             let mut list = Vec::new();
@@ -288,13 +316,17 @@ impl Config {
     /// Finds a colour space by name, alias or role (case-insensitive, as OCIO).
     pub fn space(&self, name: &str) -> Result<&OcioColorSpace, ColorError> {
         let eq = |a: &str| a.eq_ignore_ascii_case(name);
-        if let Some(cs) = self.colorspaces.iter().find(|c| eq(&c.name) || c.aliases.iter().any(|a| eq(a))) {
+        if let Some(cs) = self
+            .colorspaces
+            .iter()
+            .find(|c| eq(&c.name) || c.aliases.iter().any(|a| eq(a)))
+        {
             return Ok(cs);
         }
-        if let Some((_, target)) = self.roles.iter().find(|(r, _)| eq(r)) {
-            if !target.eq_ignore_ascii_case(name) {
-                return self.space(target);
-            }
+        if let Some((_, target)) = self.roles.iter().find(|(r, _)| eq(r))
+            && !target.eq_ignore_ascii_case(name)
+        {
+            return self.space(target);
         }
         Err(ColorError::UnknownSpace(format!("ocio:{name}")))
     }
@@ -302,9 +334,14 @@ impl Config {
     fn default_scene_to_display(&self) -> Result<ColorTransform, ColorError> {
         let vt = match &self.default_view_transform {
             Some(name) => self.view_transforms.iter().find(|v| &v.name == name),
-            None => self.view_transforms.iter().find(|v| v.from_scene.is_some() || v.to_scene.is_some()),
+            None => self
+                .view_transforms
+                .iter()
+                .find(|v| v.from_scene.is_some() || v.to_scene.is_some()),
         }
-        .ok_or_else(|| ColorError::Unsupported("scene ↔ display conversion without a view transform".into()))?;
+        .ok_or_else(|| {
+            ColorError::Unsupported("scene ↔ display conversion without a view transform".into())
+        })?;
         self.vt_scene_to_display(vt)
     }
 
@@ -369,7 +406,9 @@ impl Config {
         let mut t = self.to_reference(s)?;
         match (s.reference, d.reference) {
             (Reference::Scene, Reference::Display) => t = t.then(&self.default_scene_to_display()?),
-            (Reference::Display, Reference::Scene) => t = t.then(&self.default_scene_to_display()?.inverse()?),
+            (Reference::Display, Reference::Scene) => {
+                t = t.then(&self.default_scene_to_display()?.inverse()?)
+            }
             _ => {}
         }
         Ok(t.then(&self.from_reference(d)?))
@@ -377,7 +416,12 @@ impl Config {
 
     /// The transform from `src` through a display / view (OCIO
     /// `DisplayViewTransform`).
-    pub fn display_view(&self, src: &str, display: &str, view: &str) -> Result<ColorTransform, ColorError> {
+    pub fn display_view(
+        &self,
+        src: &str,
+        display: &str,
+        view: &str,
+    ) -> Result<ColorTransform, ColorError> {
         let disp = self
             .displays
             .iter()
@@ -392,7 +436,11 @@ impl Config {
             return Err(ColorError::Unsupported(format!("looks in view `{view}`")));
         }
         if let Some(cs) = &v.colorspace {
-            let cs = if cs == "<USE_DISPLAY_NAME>" { display } else { cs.as_str() };
+            let cs = if cs == "<USE_DISPLAY_NAME>" {
+                display
+            } else {
+                cs.as_str()
+            };
             return self.processor(src, cs);
         }
         let vt_name = v.view_transform.as_deref().unwrap_or_default();
@@ -416,10 +464,14 @@ impl Config {
             if scene_vt {
                 t = t.then(&self.vt_scene_to_display(vt)?);
             } else {
-                t = t.then(&self.default_scene_to_display()?).then(&self.vt_scene_to_display(vt)?);
+                t = t
+                    .then(&self.default_scene_to_display()?)
+                    .then(&self.vt_scene_to_display(vt)?);
             }
         } else if scene_vt {
-            return Err(ColorError::Unsupported("display-referred source through a scene view transform".into()));
+            return Err(ColorError::Unsupported(
+                "display-referred source through a scene view transform".into(),
+            ));
         } else {
             t = t.then(&self.vt_scene_to_display(vt)?);
         }
@@ -441,8 +493,14 @@ impl Config {
             if r.regex || (r.pattern.is_none() && r.extension.is_none()) {
                 continue;
             }
-            let p_ok = r.pattern.as_deref().is_none_or(|p| glob(p, stem) || glob(p, file));
-            let e_ok = r.extension.as_deref().is_none_or(|e| glob(&e.to_ascii_lowercase(), &ext.to_ascii_lowercase()));
+            let p_ok = r
+                .pattern
+                .as_deref()
+                .is_none_or(|p| glob(p, stem) || glob(p, file));
+            let e_ok = r
+                .extension
+                .as_deref()
+                .is_none_or(|e| glob(&e.to_ascii_lowercase(), &ext.to_ascii_lowercase()));
             if p_ok && e_ok {
                 return Some(&r.colorspace);
             }
@@ -492,7 +550,12 @@ impl Config {
     }
 
     fn reference_to_aces(&self, reference: Reference) -> Result<ColorTransform, ColorError> {
-        let role = |r: &str| self.roles.iter().find(|(k, _)| k == r).map(|(_, v)| v.clone());
+        let role = |r: &str| {
+            self.roles
+                .iter()
+                .find(|(k, _)| k == r)
+                .map(|(_, v)| v.clone())
+        };
         match reference {
             Reference::Scene => match role("aces_interchange") {
                 Some(name) => self.from_reference(self.space(&name)?),
@@ -500,7 +563,9 @@ impl Config {
             },
             Reference::Display => {
                 let name = role("cie_xyz_d65_interchange").ok_or_else(|| {
-                    ColorError::Unsupported("display colour space without a cie_xyz_d65_interchange role".into())
+                    ColorError::Unsupported(
+                        "display colour space without a cie_xyz_d65_interchange role".into(),
+                    )
                 })?;
                 let xyz = self.from_reference(self.space(&name)?)?;
                 Ok(xyz.then(&bi::cie_xyz_d65().to_reference()))
@@ -520,7 +585,9 @@ impl Config {
 
     fn find_file(&self, src: &str) -> Result<PathBuf, ColorError> {
         if src.contains('$') {
-            return Err(ColorError::Unsupported(format!("context variables in `{src}`")));
+            return Err(ColorError::Unsupported(format!(
+                "context variables in `{src}`"
+            )));
         }
         let p = Path::new(src);
         if p.is_absolute() {
@@ -542,9 +609,18 @@ impl Config {
         Ok(t)
     }
 
-    fn build_into(&self, n: &Node, inverse: bool, out: &mut ColorTransform, depth: usize) -> Result<(), ColorError> {
+    fn build_into(
+        &self,
+        n: &Node,
+        inverse: bool,
+        out: &mut ColorTransform,
+        depth: usize,
+    ) -> Result<(), ColorError> {
         if depth > 32 {
-            return Err(perr("config.ocio", "transforms nested too deeply (ColorSpaceTransform cycle?)"));
+            return Err(perr(
+                "config.ocio",
+                "transforms nested too deeply (ColorSpaceTransform cycle?)",
+            ));
         }
         let tag = n.tag.as_deref().unwrap_or("");
         let inv = inverse ^ (n.get("direction").and_then(Node::as_str) == Some("inverse"));
@@ -558,7 +634,11 @@ impl Config {
                 },
             }
         };
-        let neg = |default: NegativeStyle| match n.get("style").or(n.get("negative_style")).and_then(Node::as_str) {
+        let neg = |default: NegativeStyle| match n
+            .get("style")
+            .or(n.get("negative_style"))
+            .and_then(Node::as_str)
+        {
             Some("mirror") => NegativeStyle::Mirror,
             Some("pass_thru") | Some("passThru") => NegativeStyle::PassThru,
             Some("linear") => NegativeStyle::Linear,
@@ -584,20 +664,39 @@ impl Config {
             }
             "MatrixTransform" => {
                 let m = n.get("matrix").and_then(Node::as_f64_seq);
-                let off = n.get("offset").and_then(Node::as_f64_seq).unwrap_or_else(|| vec![0.0; 4]);
+                let off = n
+                    .get("offset")
+                    .and_then(Node::as_f64_seq)
+                    .unwrap_or_else(|| vec![0.0; 4]);
                 let m: Mat3 = match m.as_deref() {
-                    Some(v) if v.len() == 16 => [[v[0], v[1], v[2]], [v[4], v[5], v[6]], [v[8], v[9], v[10]]],
-                    Some(v) if v.len() == 9 => [[v[0], v[1], v[2]], [v[3], v[4], v[5]], [v[6], v[7], v[8]]],
+                    Some(v) if v.len() == 16 => {
+                        [[v[0], v[1], v[2]], [v[4], v[5], v[6]], [v[8], v[9], v[10]]]
+                    }
+                    Some(v) if v.len() == 9 => {
+                        [[v[0], v[1], v[2]], [v[3], v[4], v[5]], [v[6], v[7], v[8]]]
+                    }
                     None => crate::math::IDENTITY,
                     _ => return Err(perr(tag, "matrix must have 16 values")),
                 };
                 if off.len() < 3 {
                     return Err(perr(tag, "offset must have 4 values"));
                 }
-                push(out, ColorOp::Matrix(Affine { m, offset: [off[0], off[1], off[2]] }))?;
+                push(
+                    out,
+                    ColorOp::Matrix(Affine {
+                        m,
+                        offset: [off[0], off[1], off[2]],
+                    }),
+                )?;
             }
             "ExponentTransform" => {
-                push(out, ColorOp::Power(PowerOp { exponent: f3("value", 1.0)?, negative: neg(NegativeStyle::Clamp) }))?;
+                push(
+                    out,
+                    ColorOp::Power(PowerOp {
+                        exponent: f3("value", 1.0)?,
+                        negative: neg(NegativeStyle::Clamp),
+                    }),
+                )?;
             }
             "ExponentWithLinearTransform" => {
                 push(
@@ -632,8 +731,12 @@ impl Config {
             }
             "RangeTransform" => {
                 let g = |k: &str| n.get(k).and_then(Node::as_f64);
-                let (mut a0, mut a1, mut b0, mut b1) =
-                    (g("min_in_value"), g("max_in_value"), g("min_out_value"), g("max_out_value"));
+                let (mut a0, mut a1, mut b0, mut b1) = (
+                    g("min_in_value"),
+                    g("max_in_value"),
+                    g("min_out_value"),
+                    g("max_out_value"),
+                );
                 if inv {
                     std::mem::swap(&mut a0, &mut b0);
                     std::mem::swap(&mut a1, &mut b1);
@@ -654,13 +757,22 @@ impl Config {
                 }));
                 if clamp {
                     out.push(ColorOp::Clamp {
-                        min: if a0.is_some() { b0.unwrap_or(f64::NEG_INFINITY) } else { f64::NEG_INFINITY },
-                        max: if a1.is_some() { b1.unwrap_or(f64::INFINITY) } else { f64::INFINITY },
+                        min: if a0.is_some() {
+                            b0.unwrap_or(f64::NEG_INFINITY)
+                        } else {
+                            f64::NEG_INFINITY
+                        },
+                        max: if a1.is_some() {
+                            b1.unwrap_or(f64::INFINITY)
+                        } else {
+                            f64::INFINITY
+                        },
                     });
                 }
             }
             "CDLTransform" => {
-                let style = n.get("style").and_then(Node::as_str).unwrap_or("asc");
+                // OCIO 2's default style is noClamp; only `asc` clamps.
+                let style = n.get("style").and_then(Node::as_str).unwrap_or("noClamp");
                 push(
                     out,
                     ColorOp::Cdl(CdlOp {
@@ -668,7 +780,7 @@ impl Config {
                         offset: f3("offset", 0.0)?,
                         power: f3("power", 1.0)?,
                         saturation: n.get("sat").and_then(Node::as_f64).unwrap_or(1.0),
-                        clamp: !style.to_ascii_lowercase().starts_with("noclamp"),
+                        clamp: style.eq_ignore_ascii_case("asc"),
                         inverse: false,
                     }),
                 )?;
@@ -681,7 +793,11 @@ impl Config {
                 };
                 let path = self.find_file(&src)?;
                 let key = (path.clone(), interp as u8);
-                let cached = self.lut_cache.lock().ok().and_then(|c| c.get(&key).cloned());
+                let cached = self
+                    .lut_cache
+                    .lock()
+                    .ok()
+                    .and_then(|c| c.get(&key).cloned());
                 let t = match cached {
                     Some(t) => t,
                     None => {
@@ -696,7 +812,10 @@ impl Config {
                 *out = out.then(&t);
             }
             "ColorSpaceTransform" => {
-                let (a, b) = (s(n.get("src")).unwrap_or_default(), s(n.get("dst")).unwrap_or_default());
+                let (a, b) = (
+                    s(n.get("src")).unwrap_or_default(),
+                    s(n.get("dst")).unwrap_or_default(),
+                );
                 let (a, b) = if inv { (b, a) } else { (a, b) };
                 *out = out.then(&self.processor(&a, &b)?);
             }
@@ -811,7 +930,11 @@ display_colorspaces:
         assert!((t.apply_f64([0.25; 3])[0] - 0.25f64.powf(1.0 / 2.2)).abs() < 1e-12);
         let t = c.display_view("lin", "Monitor", "Plain").unwrap();
         assert!((t.apply_f64([0.125; 3])[0] - 0.25f64.powf(1.0 / 2.2)).abs() < 1e-12);
-        assert!(c.display_view("lin", "Monitor", "Raw").unwrap().is_identity());
+        assert!(
+            c.display_view("lin", "Monitor", "Raw")
+                .unwrap()
+                .is_identity()
+        );
         assert_eq!(c.colorspace_for_path("/a/b/plate.0001.EXR"), Some("lin"));
         assert_eq!(c.colorspace_for_path("ref.png"), Some("srgb"));
         // As a bae-color space: lin reaches ACES with the ×2 matrix.

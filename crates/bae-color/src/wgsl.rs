@@ -390,9 +390,10 @@ impl Gen<'_> {
                     let luma = "vec3<f32>(0.2126, 0.7152, 0.0722)";
                     let body = if inverse {
                         format!(
-                            "    var x = {};\n    let l = dot(x, {luma});\n    x = {};\n    x = select(x, pow(max(x, vec3<f32>(0.0)), q_pw), x > vec3<f32>(0.0));\n    return (x - q_of) / q_sl;\n",
+                            "    var x = {};\n    let l = dot(x, {luma});\n    x = {};\n    x = select(x, pow(max(x, vec3<f32>(0.0)), q_pw), x > vec3<f32>(0.0));\n    return {};\n",
                             c01("v"),
-                            c01("l + q_sat * (x - l)")
+                            c01("l + q_sat * (x - l)"),
+                            c01("(x - q_of) / q_sl")
                         )
                     } else {
                         format!(
@@ -532,7 +533,7 @@ fn curve_fn(name: &str, tf: TransferFunction, decode: bool) -> String {
             "fn {name}(v: vec3<f32>, e: f32) -> vec3<f32> {{\n    return sign(v) * pow(abs(v), vec3<f32>(e));\n}}\n"
         ),
         (T::Pq, true) => mirrored(format!(
-            "    let e = pow(a, vec3<f32>({inv_m2}));\n    let r = pow(max(e - {c1}, vec3<f32>(0.0)) / ({c2} - {c3} * e), vec3<f32>({inv_m1})) * {scale};\n",
+            "    let e = pow(a, vec3<f32>({inv_m2}));\n    let r = pow(max(e - {c1}, vec3<f32>(0.0)) / max({c2} - {c3} * e, vec3<f32>(1e-6)), vec3<f32>({inv_m1})) * {scale};\n",
             inv_m2 = l(1.0 / k::PQ_M2),
             inv_m1 = l(1.0 / k::PQ_M1),
             c1 = l(k::PQ_C1),
@@ -562,10 +563,8 @@ fn curve_fn(name: &str, tf: TransferFunction, decode: bool) -> String {
             hb = l(k::HLG_B)
         )),
         (T::AcesCc, true) => plain(format!(
-            "    let p = exp2(v * 17.52 - 9.72);\n    let lo = (p - {h16}) * 2.0;\n    return select(select(vec3<f32>({max}), p, v < {hi}), lo, v < {lo_cut});\n",
+            "    let p = exp2(v * 17.52 - 9.72);\n    let lo = (p - {h16}) * 2.0;\n    return select(p, lo, v < {lo_cut});\n",
             h16 = l(2f64.powi(-16)),
-            max = l(k::ACES_HALF_MAX),
-            hi = v3((k::ACES_HALF_MAX.log2() + 9.72) / 17.52),
             lo_cut = v3((9.72 - 15.0) / 17.52)
         )),
         (T::AcesCc, false) => plain(format!(
