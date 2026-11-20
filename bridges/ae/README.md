@@ -10,7 +10,7 @@
 | `bae-anim-samples.jsx` | 在 AE 里搭建关键帧/表达式用例并记录 AE 的求值结果，给 03 做对照（格式：`docs/interop/ae-anim-samples.md`） |
 | `samples/gen_anim_cases.py`、`samples/anim-cases.json` | 对照用例的生成器和生成结果 |
 | `examples/mock-project.bae-interchange.json` | 模拟工程的导出结果（不是 AE 的真实输出），也是测试的金样 |
-| `tests/` | 不依赖 AE 的测试：模拟 DOM、ES3 检查、金样对比、Schema 校验 |
+| `tests/` | 不依赖 AE 的测试：模拟 DOM、ES3 检查、金样对比、Schema 校验；`tests/ae/run-in-ae.jsx` 是在真实 AE 里跑的一键实测 |
 
 ## 1. 准备
 
@@ -58,6 +58,18 @@ $.evalFile("D:/bae/bridges/ae/bae-export.jsx");
 ## 4. 手动测试（在 AE 里）
 
 每项写明 AE 版本（`app.version`）和系统。建议至少覆盖 CC 2018（15.x）、2020（17.x）、2023（23.x）和当前版本。
+
+### 一键实测（`tests/ae/run-in-ae.jsx`）
+
+T1 的场景、T4 的时间基准合成、T8 的对照用例可以一次跑完：脚本在当前工程里用脚本搭出这些合成（一个撤销步骤），用 `bae-export.jsx` 导出，再跑 62 个对照用例，最后删掉搭建的合成。全程不弹对话框（`app.beginSuppressDialogs`，异常都写进日志），适合用 `osascript` 无人值守运行：
+
+```sh
+osascript -e 'tell application "Adobe After Effects 2026" to DoScript "var BAE_AE_TEST_OPTIONS = {outDir: \"/tmp/bae-ae\"}; $.evalFile(\"/path/to/repo/bridges/ae/tests/ae/run-in-ae.jsx\");"'
+```
+
+输出目录里：`log.txt`（每一步 ok/FAIL，含 T4 里 `keyTime()` 的实际返回值）、`fixture.bae-interchange.json`（T1、T4 合成的导出结果）、`anim-samples.ae-<主版本号>.json`（T8）、`result.json`（汇总）。选项：`keep: true` 保留搭建的合成以便在 AE 里查看，`skipSamples: true` 跳过对照用例。AE 弹出任何模态框（首次启动、更新提示）时 `DoScript` 会一直挂起，先在 AE 里把它们关掉。
+
+一键脚本覆盖不到的仍需手动检查：T2（关键帧速度对话框）、T3（另一种界面语言）、T5（真实素材与收集）、T6（交互对话框）、T7（大工程）。
 
 ### T1 冒烟：导出一个覆盖面广的工程
 

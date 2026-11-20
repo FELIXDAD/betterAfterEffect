@@ -31,10 +31,18 @@ function eq(actual, expected, message) {
 load("mock-ae.js");
 load("fixture-project.js");
 
-// ---------------------------------------------------------------- ES3 syntax lint (source text)
+// ---------------------------------------------------------------- ES3 lint and syntax check (source text)
 
-(function () {
-    var src = readFile("../bae-export.jsx");
+function lintJsx(file) {
+    var src = readFile(file);
+    if (typeof checkSyntax === "function") {
+        // Parse only (jsc's checkSyntax; node-run.js provides one): run-in-ae.jsx needs real AE to run.
+        try {
+            checkSyntax(file);
+        } catch (e) {
+            check(false, file + ": syntax error: " + e);
+        }
+    }
     var lines = src.split("\n");
     var bad = [
         [/\b(let|const|class)\s/, "ES6 declaration"],
@@ -47,14 +55,19 @@ load("fixture-project.js");
         // Drop comments: whole-line //, /** ... */ and " * " continuation lines, trailing // comments.
         var line = lines[i].replace(/^\s*(\/\/|\/\*|\*).*$/, "").replace(/\s\/\/ .*$/, "");
         for (var b = 0; b < bad.length; b++) {
-            check(!bad[b][0].test(line), "bae-export.jsx:" + (i + 1) + ": " + bad[b][1] + ": " + lines[i]);
+            check(!bad[b][0].test(line), file + ":" + (i + 1) + ": " + bad[b][1] + ": " + lines[i]);
         }
     }
     var nonAscii = /[^\x00-\x7f]/;
     for (var k = 0; k < lines.length; k++) {
-        check(!nonAscii.test(lines[k]), "bae-export.jsx:" + (k + 1) + ": non-ASCII character (escape it as \\uXXXX)");
+        check(!nonAscii.test(lines[k]), file + ":" + (k + 1) + ": non-ASCII character (escape it as \\uXXXX)");
     }
-}());
+}
+
+var JSX_FILES = ["../bae-export.jsx", "../bae-anim-samples.jsx", "ae/run-in-ae.jsx"];
+for (var jf = 0; jf < JSX_FILES.length; jf++) {
+    lintJsx(JSX_FILES[jf]);
+}
 
 load("es3-guard.js");
 var BAE_EXPORT_NO_AUTORUN = true;
