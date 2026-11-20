@@ -2,15 +2,13 @@
 
 use rustc_hash::FxHashMap;
 
-use crate::attr::AttrSpec;
 use crate::error::{ModelError, Result};
 use crate::event::{Change, EventOrigin, StageEvent};
 use crate::ids::{AuthorId, SublayerId};
 use crate::op::{Edit, Op};
 use crate::path::PrimPath;
-use crate::prim::{PrimSpec, PrimType, Reference, Specifier};
+use crate::prim::Specifier;
 use crate::sublayer::Sublayer;
-use crate::value::Value;
 
 /// Maximum undo steps kept per author.
 const UNDO_LIMIT: usize = 1000;
@@ -34,9 +32,15 @@ struct UndoEntry {
 /// strongest sublayer with an opinion wins. A prim exists on the stage when at least
 /// one sublayer has a `def` spec for it and its parent exists.
 pub struct Stage {
-    sublayers: FxHashMap<SublayerId, Sublayer>,
+    pub(crate) sublayers: FxHashMap<SublayerId, Sublayer>,
     /// Strongest first.
-    stack: Vec<SublayerId>,
+    pub(crate) stack: Vec<SublayerId>,
+    /// Other projects that cross-project references resolve against, by the
+    /// `Reference::project` key.
+    pub(crate) externals: FxHashMap<String, Stage>,
+    /// Same-project references `(referencing prim, target prim)`, rebuilt lazily
+    /// after structural changes; used to report changes at referencing paths.
+    pub(crate) ref_index: Option<Vec<(PrimPath, PrimPath)>>,
     edit_target: SublayerId,
     undo: FxHashMap<AuthorId, Vec<UndoEntry>>,
     redo: FxHashMap<AuthorId, Vec<UndoEntry>>,
@@ -88,6 +92,8 @@ impl Stage {
             redo: FxHashMap::default(),
             subscribers: Vec::new(),
             next_subscription: 0,
+            externals: FxHashMap::default(),
+            ref_index: None,
         })
     }
 
@@ -172,77 +178,7 @@ impl Stage {
                 path: PrimPath::root(),
             }],
         };
-        self.emit(&event);
-        event
-    }
-
-    // ---- composed queries ----
-
-    /// Specs for `path`, strongest first.
-    pub fn specs<'a>(
-        &'a self,
-        path: &'a PrimPath,
-    ) -> impl Iterator<Item = (&'a SublayerId, &'a PrimSpec)> + 'a {
-        self.stack
-            .iter()
-            .filter_map(move |id| self.sublayers[id].spec(path).map(|s| (id, s)))
-    }
-
-    /// Whether `path` is a prim on the composed stage (the pseudo-root always is).
-    pub fn has_prim(&self, path: &PrimPath) -> bool {
-        if path.is_root() {
-            return true;
-        }
-        self.specs(path).any(|(_, s)| s.specifier == Specifier::Def)
-            && path.parent().is_some_and(|p| self.has_prim(&p))
-    }
-
-    pub fn prim<'a>(&'a self, path: &PrimPath) -> Option<PrimView<'a>> {
-        self.has_prim(path).then(|| PrimView {
-            stage: self,
-            path: path.clone(),
-        })
-    }
-
-    /// The prim or [`ModelError::NoSuchPrim`].
-    pub fn require_prim<'a>(&'a self, path: &PrimPath) -> Result<PrimView<'a>> {
-        self.prim(path)
-            .ok_or_else(|| ModelError::NoSuchPrim(path.clone()))
-    }
-
-    /// Composed child prims of `path`, in order. Children keep the order of the
-    /// weakest sublayer that has them; children added by stronger sublayers follow.
-    pub fn children(&self, path: &PrimPath) -> Vec<PrimPath> {
-        let mut out: Vec<PrimPath> = Vec::new();
-        for id in self.stack.iter().rev() {
-            for c in self.sublayers[id].children(path) {
-                if !out.contains(&c) {
-                    out.push(c);
-                }
-            }
-        }
-        out.retain(|c| self.specs(c).any(|(_, s)| s.specifier == Specifier::Def));
-        out
-    }
-
-    /// All prims, depth-first pre-order (excluding the pseudo-root).
-    pub fn traverse(&self) -> Vec<PrimPath> {
-        let mut out = Vec::new();
-        let mut stack = self.children(&PrimPath::root());
-        stack.reverse();
-        while let Some(p) = stack.pop() {
-            let mut kids = self.children(&p);
-            kids.reverse();
-            stack.extend(kids);
-            out.push(p);
-        }
-        out
-    }
-
-    /// Strongest opinion about an attribute and the sublayer it comes from.
-    pub fn attr_opinion(&self, path: &PrimPath, attr: &str) -> Option<(&SublayerId, &AttrSpec)> {
-        self.specs_static(path)
-            .find_map(|(id, s)| s.attrs.get(attr).map(|a| (id, a)))
+        self.publish(event)
     }
 
     // ---- events ----
@@ -262,10 +198,23 @@ impl Stage {
         before != self.subscribers.len()
     }
 
-    fn emit(&mut self, event: &StageEvent) {
-        for (_, f) in &mut self.subscribers {
-            f(event);
+    /// Add changes seen through references, notify subscribers, return the event.
+    pub(crate) fn publish(&mut self, mut event: StageEvent) -> StageEvent {
+        if event.is_empty() {
+            return event;
         }
+        if event
+            .changes
+            .iter()
+            .any(|c| !matches!(c, Change::AttrChanged { .. }))
+        {
+            self.ref_index = None;
+        }
+        self.expand_through_references(&mut event);
+        for (_, f) in &mut self.subscribers {
+            f(&event);
+        }
+        event
     }
 
     // ---- editing ----
@@ -363,16 +312,12 @@ impl Stage {
                 redo.remove(author);
             }
         }
-        let event = StageEvent {
+        self.publish(StageEvent {
             origin,
             author: Some(author.clone()),
             sublayers: touched,
             changes,
-        };
-        if !event.is_empty() {
-            self.emit(&event);
-        }
-        event
+        })
     }
 
     fn commit_layers(&self, touched: &[SublayerId], author: &AuthorId, label: &str) {
@@ -449,16 +394,12 @@ impl Stage {
             .get_mut(sublayer)
             .ok_or_else(|| ModelError::UnknownSublayer(sublayer.clone()))?;
         let changes = layer.import(bytes)?;
-        let event = StageEvent {
+        Ok(self.publish(StageEvent {
             origin: EventOrigin::Remote,
             author: None,
             sublayers: vec![sublayer.clone()],
             changes,
-        };
-        if !event.is_empty() {
-            self.emit(&event);
-        }
-        Ok(event)
+        }))
     }
 }
 
@@ -566,99 +507,5 @@ impl Transaction<'_> {
         self.stage.set_edit_target(id)?;
         self.target = id.clone();
         Ok(())
-    }
-}
-
-/// A composed prim.
-#[derive(Clone)]
-pub struct PrimView<'a> {
-    stage: &'a Stage,
-    path: PrimPath,
-}
-
-impl std::fmt::Debug for PrimView<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PrimView")
-            .field("path", &self.path)
-            .finish_non_exhaustive()
-    }
-}
-
-impl<'a> PrimView<'a> {
-    pub fn path(&self) -> &PrimPath {
-        &self.path
-    }
-
-    pub fn name(&self) -> &str {
-        self.path.name()
-    }
-
-    /// Strongest type opinion.
-    pub fn prim_type(&self) -> Option<&'a PrimType> {
-        self.stage
-            .specs_static(&self.path)
-            .find_map(|(_, s)| s.prim_type.as_ref())
-    }
-
-    pub fn is_a(&self, t: &PrimType) -> bool {
-        self.prim_type() == Some(t)
-    }
-
-    /// Strongest opinion about `attr`.
-    pub fn attr(&self, attr: &str) -> Option<&'a AttrSpec> {
-        self.stage
-            .specs_static(&self.path)
-            .find_map(|(_, s)| s.attrs.get(attr))
-    }
-
-    /// The sublayer whose opinion about `attr` wins ("这个值来自哪一层").
-    pub fn attr_source(&self, attr: &str) -> Option<&'a SublayerId> {
-        self.stage
-            .specs_static(&self.path)
-            .find_map(|(id, s)| s.attrs.contains_key(attr).then_some(id))
-    }
-
-    /// Static value of `attr` (ignores animation; `bae-anim` evaluates keyframes).
-    pub fn value(&self, attr: &str) -> Option<&'a Value> {
-        self.attr(attr)?.value.as_ref()
-    }
-
-    /// Names of all attributes with an opinion in any sublayer (strongest first).
-    pub fn attr_names(&self) -> Vec<&'a str> {
-        let mut out: Vec<&'a str> = Vec::new();
-        for (_, s) in self.stage.specs_static(&self.path) {
-            for name in s.attrs.keys() {
-                if !out.contains(&name.as_str()) {
-                    out.push(name);
-                }
-            }
-        }
-        out
-    }
-
-    /// Strongest non-empty references opinion.
-    pub fn references(&self) -> &'a [Reference] {
-        self.stage
-            .specs_static(&self.path)
-            .find_map(|(_, s)| (!s.references.is_empty()).then_some(s.references.as_slice()))
-            .unwrap_or(&[])
-    }
-
-    pub fn children(&self) -> Vec<PrimPath> {
-        self.stage.children(&self.path)
-    }
-
-    pub fn parent(&self) -> Option<PrimView<'a>> {
-        self.stage.prim(&self.path.parent()?)
-    }
-}
-
-impl Stage {
-    /// Like [`Stage::specs`] but borrowing only `self` (the path is cloned in).
-    fn specs_static(&self, path: &PrimPath) -> impl Iterator<Item = (&SublayerId, &PrimSpec)> + '_ {
-        let path = path.clone();
-        self.stack
-            .iter()
-            .filter_map(move |id| self.sublayers[id].spec(&path).map(|s| (id, s)))
     }
 }

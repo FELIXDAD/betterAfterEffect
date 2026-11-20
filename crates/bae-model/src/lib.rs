@@ -13,6 +13,7 @@
 mod attr;
 mod command;
 pub mod commands;
+pub mod compose;
 mod error;
 mod event;
 mod ids;
@@ -26,13 +27,14 @@ mod value;
 
 pub use attr::{AttrSpec, Ease, Expression, Interpolation, Keyframe, KeyframeFlags};
 pub use command::{Command, CommandError, CommandInfo, CommandOutput, CommandRegistry, DynCommand};
+pub use compose::{Opinion, PrimView};
 pub use error::{ModelError, Result, validate_attr_name};
 pub use event::{Change, EventOrigin, StageEvent};
 pub use ids::{AuthorId, InvalidId, SublayerId};
 pub use op::{Edit, Op};
 pub use path::{PathError, PrimPath, validate_name};
 pub use prim::{LayerKind, PrimSpec, PrimTree, PrimType, Reference, Specifier};
-pub use stage::{PrimView, Stage, SubscriptionId, Transaction};
+pub use stage::{Stage, SubscriptionId, Transaction};
 pub use sublayer::Sublayer;
 pub use time::{FrameRate, Time, TimeRange};
 pub use value::{BezierPath, Value, ValueType};

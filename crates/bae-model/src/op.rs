@@ -52,6 +52,11 @@ pub enum Op {
         path: PrimPath,
         prim_type: Option<PrimType>,
     },
+    /// Turn an `over` into a `def` or back.
+    SetSpecifier {
+        path: PrimPath,
+        specifier: Specifier,
+    },
     /// Set (or with `None`, remove) the static value of an attribute.
     SetValue {
         path: PrimPath,
@@ -95,6 +100,7 @@ impl Op {
             | Op::DeletePrim { path }
             | Op::RestorePrim { path, .. }
             | Op::SetPrimType { path, .. }
+            | Op::SetSpecifier { path, .. }
             | Op::SetValue { path, .. }
             | Op::SetKeyframe { path, .. }
             | Op::RemoveKeyframe { path, .. }
