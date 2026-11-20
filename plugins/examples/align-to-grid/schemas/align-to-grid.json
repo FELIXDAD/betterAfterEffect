@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Align Layers to Grid",
+  "type": "object",
+  "properties": {
+    "size": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "default": 10,
+      "description": "Grid size in comp pixels."
+    },
+    "layers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Layer prim paths. Defaults to the current selection."
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,16 @@
+[package]
+name = "bae-plugin-sdk"
+description = "BAE plugin SDK: the stable C ABI mirror, version negotiation and contribution kinds shared by plugins and the host."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# No dependencies on purpose: plugin authors build this crate, it must compile
+# fast and must never pull host-side crates (wgpu, bae-model, ...).
+[dependencies]
+
+[lints]
+workspace = true
