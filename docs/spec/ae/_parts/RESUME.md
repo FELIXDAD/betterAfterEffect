@@ -8,3 +8,10 @@
   Helpers: scratchpad/tools/fetch.sh (pins *.docsforadobe.dev, which the local DNS cannot resolve) and tools/commit.sh (index.lock retry).
 - To resume after an interruption: keep every existing part file; re-run only the parts whose verify commit is missing
   (writers continue from existing content), then assemble, critique, fix, README.
+
+## Phase 2 (session b7c80908, 14:10 CET 2026-11-20)
+- Run 1 (wf.js) wrote prj-a, ani-b, cmp-a, cmp-b, shp, txt fully and prj-b, ani-a, fx-a, ui-a partially, then hit the usage limit.
+- Phase-2 script: scratchpad/wf2.js, data-driven via args
+  `{write:[...], verify:[...], assemble:[...], gated:[...], critique, readme}`; verifiers checkpoint in
+  scratchpad/research/<key>/verify-progress.md and commit `spec(draft): verifying part <key> (through <ID>)`.
+  To resume: derive the remaining keys from git log and pass them as args.
