@@ -56,6 +56,7 @@ mod gpu;
 pub mod media_foundation;
 mod meta;
 mod module;
+mod mp4;
 pub mod sequence;
 mod source;
 pub mod still;
@@ -77,7 +78,7 @@ pub use sequence::{ImageSequence, ImageSequenceSource, detect_sequence};
 pub use source::{MediaError, MediaFormat, MediaFormats, MediaSource, OpenOptions, SequenceMode};
 pub use time::{FrameRate, Time, Timecode};
 
-pub use audio::{AudioBuffer, AudioSource, MemoryAudio, Waveform};
+pub use audio::{AudioBuffer, AudioSource, FileAudio, MemoryAudio, Waveform};
 pub use export::{
     CancelToken, EncodeOutput, EncodeSettings, Encoder, EncoderFormat, ExrCompression,
     FrameProducer, FrameReadback, MediaEncoders, ProResProfile, ProducedFrame, RenderJob,

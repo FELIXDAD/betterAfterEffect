@@ -361,7 +361,7 @@ impl AvSource {
             kind: MediaKind::Movie,
             format: "avfoundation".into(),
             video: Some(video),
-            audio: Vec::new(),
+            audio: crate::audio::probe(path),
             timecode: None,
             sequence: None,
         };
