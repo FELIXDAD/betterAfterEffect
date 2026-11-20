@@ -393,7 +393,7 @@
 
 ### AE-PRJ-321 · Crop Comp to Selected Layer(s) Bounds (将合成裁切到所选图层边界)
 
-- **What it does:** Resizes the comp (shrinking or growing) to the union of the visible bounds of the selected 2D layers. Added in a 2025-2026 AE release (UNVERIFIED: exact version; the composition-basics help page documents it).
+- **What it does:** Resizes the comp (shrinking or growing) to the union of the visible bounds of the selected 2D layers. Added in AE 26.3 (June 2026) per Adobe "What's new".
 - **Exact semantics:**
   ```
   r = union over selected 2D layers of layerBoundsInComp(layer, comp.time)  // transformed, masked visible bounds UNVERIFIED (mask/effect inclusion)
@@ -640,7 +640,7 @@
   - Create: Layer > New > Text (Ctrl+Alt+Shift+T) or click with the Type tool (point text) / drag (paragraph text). Via menu the insertion point is the centre of the Composition viewer.
   - Defaults: Anchor Point `(0, 0)` (the text baseline origin); Position = click point, or comp centre via the menu; layer name = the text typed (first line UNVERIFIED), updating live until the layer is renamed (`isNameSet` false).
   - Property groups: Text (ADBE Text Properties: Source Text, Path Options, More Options, Animators), Masks, Effects, Transform, Layer Styles, Geometry Options (Advanced 3D / CINEMA 4D), Material Options (3D).
-  - Always rasterized from vectors at render resolution. The Collapse switch is shown as Continuously Rasterize and changes the mask/effect vs transform order (AE-PRJ-362; cmp-a "collapse/continuous rasterize"). `width`/`height` are not meaningful; bounds come from `sourceRectAtTime`.
+  - Always rasterized from vectors at render resolution. The Collapse switch is shown as Continuously Rasterize (effect on render order UNVERIFIED, AE-PRJ-362; cmp-a "collapse/continuous rasterize"). `width`/`height` are not meaningful; bounds come from `sourceRectAtTime`.
 - **Priority:** P0
 - **Owner:** bae-text (+ bae-model)
 - **Notes:** Everything about text content and layout: text.md. Lottie `ty: 5`, data in `t` (`t.d` document keyframes, `t.p` path, `t.m` more options, `t.a` animators).
@@ -652,7 +652,7 @@
   - Create: Layer > New > Shape Layer (empty "Shape Layer N" (形状图层 N)), or draw with a shape/pen tool with no shape layer selected.
   - Defaults: Anchor Point `(0, 0)`; Position `(compW/2, compH/2)`; drawn shapes are placed so they appear where drawn (path coordinates relative to the layer origin). AE 2020 (17.0)+ "Shape Layer" names, label Blue UNVERIFIED.
   - Property groups: Contents (ADBE Root Vectors Group), Masks, Effects, Transform, Layer Styles, Geometry Options (Advanced 3D / CINEMA 4D), Material Options (3D).
-  - Always rasterized from vectors at render resolution. The Collapse switch is shown as Continuously Rasterize and changes the mask/effect vs transform order (AE-PRJ-362).
+  - Always rasterized from vectors at render resolution. The Collapse switch is shown as Continuously Rasterize (effect on render order UNVERIFIED, AE-PRJ-362).
 - **Priority:** P0
 - **Owner:** bae-vector (+ bae-model)
 - **Notes:** Content model: shapes.md. Lottie `ty: 4`, `shapes[]`.
@@ -1004,7 +1004,7 @@
 
 - **What it does:** One switch with two meanings: for precomp layers it collapses the nested comp's transforms into the parent's (no intermediate flattening); for vector-source layers (Illustrator/PDF/EPS/SVG footage) it re-rasterizes vectors at the transformed resolution every frame.
 - **Exact semantics:**
-  - `collapseTransformation: bool`, default false. Settable when `canSetCollapseTransformation`. Per the AE help (Layers page, switch list), the switch means Collapse Transformations for precomp layers and Continuously Rasterize for shape layers, text layers and vector-footage layers (Illustrator, PDF, EPS, SVG). Text and shape layers are always rasterized from their vectors at the transformed resolution; for them the switch changes the render order (with it on, masks/effects are applied after the layer transform, as for any continuously rasterized layer) rather than sharpness; details in cmp-a.
+  - `collapseTransformation: bool`, default false. Settable when `canSetCollapseTransformation`. Per the AE help (Layers page, switch list), the switch means Collapse Transformations for precomp layers and Continuously Rasterize for shape layers, text layers and vector-footage layers (Illustrator, PDF, EPS, SVG). The precompose help page states that text and shape layers are always continuously rasterized; UNVERIFIED: for them the switch then only changes the render order (with it on, masks/effects are applied after the layer transform, like other continuously rasterized layers) rather than sharpness; details in cmp-a.
   - Data only here. Rendering consequences (blend modes passing through, 3D layers interleaving with the parent comp, mask/effect order change, frame boundary removal, adjustment layers inside collapsed precomps) are specified in compositing-3d-color.md [cmp-a] "collapse/continuous rasterize".
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-render)
@@ -1460,7 +1460,7 @@
 ### AE-PRJ-392 · Label colours (标签颜色)
 
 - **What it does:** Sixteen named colour labels (plus None) that can be assigned to project items, layers, keyframes, markers and effects for organisation.
-- **Exact semantics:** Preferences > Labels > Label Colors; index stored is 0..16 (0 = None). Factory names and colours (AE CC 2015+ defaults; hex UNVERIFIED for every row):
+- **Exact semantics:** Preferences > Labels > Label Colors; index stored is 0..16 (0 = None). Factory names and colours (values as stored in AE preference files since CC 2014 and widely published; not documented by Adobe help, UNVERIFIED against an AE 2026 install):
   | Index | Name (中文)（译名待核） | Default sRGB |
   |---|---|---|
   | 0 | None (无) | — (no colour) |
@@ -1525,11 +1525,11 @@
 
 ### AE-PRJ-395 · Keyframe, marker and effect labels (关键帧、标记和效果的颜色标签)
 
-- **What it does:** Colour labels on individual keyframes (AE 22.6, 2022), on comp/layer markers (AE 16.0), and on effect instances in Effect Controls (AE 26.5, September 2026).
+- **What it does:** Colour labels on individual keyframes (AE 22.6, 2022), on comp/layer markers (AE 16.0), and on effect instances in Effect Controls (AE 26.5, September 2026, per Adobe "What's new").
 - **Exact semantics:**
   - Keyframe label: per-keyframe int 0..16, default 0; set via keyframe context menu > Label; shown as keyframe icon colour; Select Label Group works on keyframes UNVERIFIED. Scripting `Property.keyLabel(i)`, `setLabelAtKey(i, n)`.
   - Marker label: AE-PRJ-325 field.
-  - Effect label: per-effect int 0..16, default 0; shown in the Effect Controls panel header UNVERIFIED (scripting attribute name UNVERIFIED).
+  - Effect label: per-effect int 0..16, default 0 (grey swatch = no label); shown as a coloured square swatch next to the effect name in Effect Controls, clicking it opens the label picker; optionally tints the effect row background; scripting attribute name UNVERIFIED.
   - Labels never affect rendering. Copy/paste of keyframes carries their labels UNVERIFIED.
 - **Priority:** P2
 - **Owner:** bae-model (+ bae-ui-motion)
@@ -1621,7 +1621,7 @@
   | Parameter (中文) | Type | Default | Notes |
   |---|---|---|---|
   | New composition name (新合成名称) | string | single layer: "<layer name> Comp N" UNVERIFIED; several: "Pre-comp N" (预合成 N) | |
-  | Leave all attributes in "<comp>" (保留"<合成>"中的所有属性) | radio | selected when available UNVERIFIED | only when exactly one layer is selected and it is not a text or shape layer (also unavailable for camera, light, null? UNVERIFIED) |
+  | Leave all attributes in "<comp>" (保留"<合成>"中的所有属性) | radio | selected when available UNVERIFIED | not available when more than one layer, a text layer or a shape layer is selected (help); UNVERIFIED: camera, light, null, adjustment |
   | Move all attributes into the new composition (将所有属性移动到新合成) | radio | forced when Leave is unavailable | |
   | Adjust composition duration to the time span of the selected layers (将合成持续时间调整为所选图层的时间跨度) | bool | false UNVERIFIED | only with Move all; newer AE (UNVERIFIED version, ≈ AE 2020+) |
   | Open New Composition (打开新合成) | bool | false UNVERIFIED | opens the new comp in Timeline/viewer |
@@ -1739,7 +1739,7 @@
 - **Owner:** bae-motion (+ bae-anim)
 - **Notes:** Help confirms: first selected layer stays, order = selection order, negative Duration leaves gaps, "Cross Dissolve Front And Back Layers to use the transparency of the selected layers". The same options appear in New Comp from Selection (AE-PRJ-317). Opacity key exact values UNVERIFIED.
 
-### AE-PRJ-407 · Quick Offset (快速偏移)（译名待核）
+### AE-PRJ-407 · Quick Offset (快速偏移)
 
 - **What it does:** Ctrl+Alt-drag (Win) / Cmd+Opt-drag (Mac) on selected layers (or keyframes across layers) staggers them evenly in time by selection order.
 - **Exact semantics:**
@@ -1748,10 +1748,11 @@
   for i in 1..n: move L[i] by round(D * (i-1)/(n-1))   // L[1] fixed, L[n] moves D
   ```
   - Keyframes move with their layers. An overlay shows "Total Offset" and "Per Layer" in the Timeline's time display unit.
-  - With keyframes selected across several layers/properties, the same stagger applies to keyframe groups per layer UNVERIFIED.
+  - With keyframes selected across several layers, Ctrl+Alt / Cmd+Opt-drag staggers the keyframes across the layers in the same way (help); UNVERIFIED: the exact grouping when one layer has several selected keyframes (assumed: each layer's selected keys move as a group).
+  - The overlay unit follows the Timeline time display (timecode or frames).
 - **Priority:** P2
 - **Owner:** bae-motion (+ bae-ui-motion)
-- **Notes:** Recent feature (AE 25.x–26.x, exact version UNVERIFIED); help page "Selecting and arranging layers > Quickly offset your layers and keyframes". Rounding to whole frames UNVERIFIED.
+- **Notes:** Recent feature (exact version UNVERIFIED); help page "Selecting and arranging layers > Quickly offset your layers and keyframes" (zh-CN help: 快速偏移). Rounding to whole frames UNVERIFIED.
 
 ## Auto-Orient
 
