@@ -44,10 +44,10 @@ Conventions for every effect item in this part: "bpc" and "GPU" come from the do
   | 2 | Blur Dimensions (模糊方向) | `ADBE Gaussian Blur-0002` | popup | 1 = Horizontal and Vertical | Horizontal and Vertical / Horizontal / Vertical | — | — |
   | 3 | Repeat Edge Pixels (重复边缘像素) | `ADBE Gaussian Blur-0003` | checkbox | off (UNVERIFIED) | 0/1 | — | UNVERIFIED: present in the legacy version. |
 
-  - Algorithm: same structure as AE-FX-300 (separable Gaussian, premultiplied). UNVERIFIED: the legacy kernel is slightly narrower/wider than the new one for the same Blurriness; BAE uses the AE-FX-300 kernel and accepts the small difference until measured.
+  - Algorithm: **not** a true Gaussian. Adobe states that Gaussian Blur (Legacy) and Fast Blur (Legacy) both used the box blur algorithm internally with a hidden Iterations = 3 (i.e. the AE-FX-302 kernel, 3 iterations); the new Gaussian Blur (AE-FX-300) uses a different algorithm, which is why results differ slightly. UNVERIFIED: the Blurriness → box-radius mapping used internally (calibrate against reference renders).
 - **Priority:** P1 — old projects and many tutorials/presets reference it.
 - **Owner:** bae-effects
-- **Notes:** Scripting `addProperty("ADBE Gaussian Blur")` still applies it. BAE decision: implement as an alias of AE-FX-300 with its own matchName and default; record the reference renders needed to calibrate the kernel difference.
+- **Notes:** Scripting `addProperty("ADBE Gaussian Blur")` still applies it. BAE decision: implement on the AE-FX-302 box kernel with Iterations fixed at 3 and its own matchName/defaults; calibrate the Blurriness → radius mapping with reference renders. Source: https://blog.adobe.com/en/publish/2017/05/02/after-effects-cc-april-2017-in-depth-new-features
 
 ### AE-FX-302 · Fast Box Blur (快速方框模糊)
 
@@ -57,8 +57,8 @@ Conventions for every effect item in this part: "bpc" and "GPU" come from the do
 
   | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|---|---|
-  | 1 | Blur Radius (模糊半径) | `ADBE Box Blur2-0001` | float slider | 0.0 (UNVERIFIED) | slider 0…50; valid 0…32767 (UNVERIFIED) | pixels | Downsample-scaled. |
-  | 2 | Iterations (迭代) | `ADBE Box Blur2-0002` | integer slider | 3 (UNVERIFIED) | 1…50 (UNVERIFIED) | count | — |
+  | 1 | Blur Radius (模糊半径) | `ADBE Box Blur2-0001` | float slider | 0.0 (UNVERIFIED: AE 26.0 apply default not dumped) | slider 0…50; valid 0…32767 (UNVERIFIED) | pixels | Downsample-scaled. |
+  | 2 | Iterations (迭代) | `ADBE Box Blur2-0002` | integer slider | 3 (default since AE 14.2; Box Blur before it defaulted to 1) | 1…50 (UNVERIFIED) | count | — |
   | 3 | Blur Dimensions (模糊方向) | `ADBE Box Blur2-0003` | popup | 1 = Horizontal and Vertical | Horizontal and Vertical / Horizontal / Vertical | — | — |
   | 4 | Repeat Edge Pixels (重复边缘像素) | `ADBE Box Blur2-0004` | checkbox | off (UNVERIFIED) | 0/1 | — | — |
 
@@ -75,14 +75,14 @@ Conventions for every effect item in this part: "bpc" and "GPU" come from the do
   - Radius 0 = identity regardless of Iterations.
 - **Priority:** P0 — common fast blur; also the documented equivalent of Fast Blur (Legacy).
 - **Owner:** bae-effects
-- **Notes:** Naming history: AE originally had "Fast Blur" (`ADBE Fast Blur`) and "Box Blur" (`ADBE Box Blur`); the box blur was rebuilt as "Fast Box Blur" with matchName `ADBE Box Blur2`, while the old Fast Blur became "Fast Blur (Legacy)" (AE-FX-303). UNVERIFIED: the rename shipped in AE 2019 (16.0) or AE 2020 (17.0). Adobe help: "the match name of the Fast Box Blur effect is ADBE Box Blur2. The older match name ADBE Box Blur still works to apply the effect, but with the older effect name Box Blur". Implementation hint: running-sum box filter (O(1) per pixel per pass) in a compute shader, one workgroup per row/column.
+- **Notes:** Naming history: AE originally had "Fast Blur" (`ADBE Fast Blur`) and "Box Blur" (`ADBE Box Blur`). In AE CC 2017.1 (14.2, April 2017) Box Blur was renamed "Fast Box Blur" (matchName `ADBE Box Blur2`), made GPU accelerated, and its Iterations default changed from 1 to 3; Fast Blur became "Fast Blur (Legacy)" in the Obsolete category (AE-FX-303). Source: https://blog.adobe.com/en/publish/2017/05/02/after-effects-cc-april-2017-in-depth-new-features Adobe help: "the match name of the Fast Box Blur effect is ADBE Box Blur2. The older match name ADBE Box Blur still works to apply the effect, but with the older effect name Box Blur". Implementation hint: running-sum box filter (O(1) per pixel per pass) in a compute shader, one workgroup per row/column.
 
 ### AE-FX-303 · Fast Blur (Legacy) and Box Blur (legacy matchName) (快速模糊（旧版）和方框模糊)
 
 - **What it does:** Two legacy blur identities kept for old projects: Fast Blur (Legacy) and the pre-rename Box Blur.
 - **Exact semantics:**
-  - **Fast Blur (Legacy) (快速模糊（旧版）):** matchName `ADBE Fast Blur`; category Obsolete; 32 bpc; GPU —. Parameters: 1 Blurriness (模糊度) `ADBE Fast Blur-0001` float slider default 0.0, slider 0…50, valid 0…32767 (UNVERIFIED), pixels; 2 Blur Dimensions (模糊方向) `ADBE Fast Blur-0002` popup Horizontal and Vertical (1) / Horizontal / Vertical; 3 Repeat Edge Pixels (重复边缘像素) `ADBE Fast Blur-0003` checkbox default off. Algorithm: a 3-pass box approximation of a Gaussian (UNVERIFIED); Adobe states Fast Box Blur "can replicate the rendering result of Fast Blur (Legacy)", i.e. Fast Box Blur with Iterations = 3 and a radius derived from Blurriness. UNVERIFIED mapping: `box_radius ≈ blurriness / 2`.
-  - **Box Blur (方框模糊):** matchName `ADBE Box Blur`; listed under Obsolete. Same implementation and parameters as Fast Box Blur (AE-FX-302) (params `ADBE Box Blur-0001…0004`: Blur Radius, Iterations, Blur Dimensions, Repeat Edge Pixels), shown with the old display name "Box Blur". Adobe help: Iterations "around 3 gives a blur similar in quality to Fast Blur"; "the default value creates boxy results" (UNVERIFIED: Box Blur default Iterations = 1, Fast Box Blur default 3).
+  - **Fast Blur (Legacy) (快速模糊（旧版）):** matchName `ADBE Fast Blur`; category Obsolete; 32 bpc; GPU —. Parameters: 1 Blurriness (模糊度) `ADBE Fast Blur-0001` float slider default 0.0, slider 0…50, valid 0…32767 (UNVERIFIED), pixels; 2 Blur Dimensions (模糊方向) `ADBE Fast Blur-0002` popup Horizontal and Vertical (1) / Horizontal / Vertical; 3 Repeat Edge Pixels (重复边缘像素) `ADBE Fast Blur-0003` checkbox default off. Algorithm: the box blur algorithm with a hidden, fixed Iterations = 3 (Adobe, AE 14.2 notes); Adobe states Fast Box Blur at default settings (Iterations 3) "replicates the rendering result of Fast Blur (Legacy)". UNVERIFIED: whether Blurriness maps 1:1 to Blur Radius (Adobe's wording implies the same value; forum reports say Box Blur looks blurrier for the same number) — calibrate with reference renders.
+  - **Box Blur (方框模糊):** matchName `ADBE Box Blur`; listed under Obsolete. Same implementation and parameters as Fast Box Blur (AE-FX-302) (params `ADBE Box Blur-0001…0004`: Blur Radius, Iterations, Blur Dimensions, Repeat Edge Pixels), shown with the old display name "Box Blur". Since AE 14.2, `addProperty("ADBE Box Blur")` applies the Fast Box Blur implementation named "Box Blur" with the new Iterations default 3; before 14.2 Box Blur defaulted to Iterations 1 ("the default value creates boxy results" in the older help text).
   - Both expand output bounds unless Repeat Edge Pixels.
 - **Priority:** P1 — needed to open older projects and presets correctly.
 - **Owner:** bae-effects
@@ -190,13 +190,13 @@ Conventions for every effect item in this part: "bpc" and "GPU" come from the do
 
   | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|---|---|
-  | 1 | Blur Radius (模糊半径) | `ADBE Camera Lens Blur-0001` | float slider | 5.0 (UNVERIFIED) | 0…500 (UNVERIFIED) | pixels | — |
+  | 1 | Blur Radius (模糊半径) | `ADBE Camera Lens Blur-0001` | float slider | 5.0 (UNVERIFIED) | max 500 (Adobe help); slider range UNVERIFIED | pixels | — |
   | 2 | Iris Properties (光圈属性) | group | group | — | — | — | — |
   | 3 | Shape (形状) | `ADBE Camera Lens Blur-0003` | popup | Hexagon (4) (UNVERIFIED) | Triangle, Square, Pentagon, Hexagon, Heptagon, Octagon, Nonagon, Decagon | — | — |
   | 4 | Roundness (圆度) | UNVERIFIED `-0004` | float | 0 % | 0…100 | % | — |
   | 5 | Aspect Ratio (长宽比) | UNVERIFIED `-0005` | float | 1 | 0.01…100 (UNVERIFIED) | ratio | — |
   | 6 | Rotation (旋转) | UNVERIFIED `-0006` | angle | 0° | any | degrees | — |
-  | 7 | Diffraction Fringe (衍射条纹) | UNVERIFIED `-0007` | float | 0 | 0…100 | — | — |
+  | 7 | Diffraction Fringe (衍射条纹) | UNVERIFIED `-0007` | float | 0 (UNVERIFIED) | 0…500 (Adobe help: 100 = natural ring, 500 = all blur energy pushed into the ring) | — | — |
   | 8 | Blur Map (模糊图) | group | group | — | — | — | — |
   | 9 | Layer (图层) | UNVERIFIED `-0010` | layer | None | — | — | Depth/blur map. |
   | 10 | Channel (通道) | `ADBE Camera Lens Blur-0011` | popup | Luminance (1) | Luminance, Red, Green, Blue, Alpha | — | — |
@@ -205,15 +205,15 @@ Conventions for every effect item in this part: "bpc" and "GPU" come from the do
   | 13 | Invert Blur Map (反转模糊图) | UNVERIFIED | checkbox | off | — | — | — |
   | 14 | Highlight (高光) | group | group | — | — | — | — |
   | 15 | Gain (增益) | UNVERIFIED | float | 0 | 0…100 | — | — |
-  | 16 | Threshold (阈值) | UNVERIFIED | float | 255 | 0…255 | levels | — |
-  | 17 | Saturation (饱和度) | UNVERIFIED | float | 0 | 0…100 | — | — |
+  | 16 | Threshold (阈值) | UNVERIFIED | float | 1 (UNVERIFIED) | 0…1 (Adobe help: 0 boosts every pixel brighter than 0, 1 effectively disables highlights) | luminance | — |
+  | 17 | Saturation (饱和度) | UNVERIFIED | float | 0 (UNVERIFIED) | 0…100 | — | 0 pushes boosted highlights toward white (old Lens Blur look), 100 keeps as much colour as possible. |
   | 18 | Edge Behavior: Repeat Edge Pixels (边缘行为：重复边缘像素) | UNVERIFIED | checkbox | off | — | — | — |
   | 19 | Use "Linear" Working Space (使用"线性"工作空间) | UNVERIFIED | checkbox | off | — | — | Blurs in linear light. |
 
   - Algorithm: per pixel, radius = Blur Radius × |map(p) − focal| / 255 (or constant without a map); scatter/gather convolution with a polygon iris kernel (Shape, Roundness, Aspect Ratio, Rotation), highlights above Threshold boosted by Gain. UNVERIFIED in detail.
 - **Priority:** P2 — heavy, rarely needed for basic motion graphics.
 - **Owner:** bae-effects
-- **Notes:** Chinese labels in this table are best-effort（译名待核）. Adobe help notes a "forward and backward compatibility" change (Camera Lens Blur rewritten in AE CC 2014 (13.0), UNVERIFIED version). Cross-ref compositing-3d-color.md, Cameras (DOF) for the 3D camera depth-of-field, which is separate.
+- **Notes:** Chinese labels in this table are best-effort（译名待核）. Adobe help: Camera Lens Blur replaces the older Lens Blur effect, with a larger maximum radius (500) and faster rendering; the camera layer's Camera Options use the same property definitions (UNVERIFIED: introduced in AE CC 12.0, 2013). Cross-ref compositing-3d-color.md, Cameras (DOF) for the 3D camera depth-of-field, which is separate.
 
 ### AE-FX-309 · Bilateral Blur (双向模糊)
 
@@ -273,10 +273,11 @@ Conventions for every effect item in this part: "bpc" and "GPU" come from the do
 - **What it does:** Reduces motion blur caused by camera shake by borrowing detail from sharper neighbouring frames.
 - **Exact semantics:**
   - matchName `ADBE CameraShakeDeblur`; 32 bpc; GPU —; temporal (reads other frames of the layer).
-  - Parameters (UNVERIFIED order): Blurriness (模糊度), Detail Quality (细节品质) popup `-0002`: Standard (标准), High Quality (slower) (高品质（较慢）); Blur Duration, Stability Threshold, Detail Threshold, Use Linear, Analysis/Process (UNVERIFIED).
+  - Parameters (Adobe help order): 1 Blur Duration (模糊持续时间) `ADBE CameraShakeDeblur-0001` (UNVERIFIED matchName), frames around the blurry frame searched for sharp frames; 2 Deblur Method (去模糊方法) popup `ADBE CameraShakeDeblur-0002`: 1 Standard (标准), 2 High Quality (slower) (高品质（更慢）) — optical-flow mapping quality; 3 Strength (强度) % default 100, range 100…200; 4 Shake Sensitivity (抖动敏感度), threshold for treating a frame as blurry (default and range UNVERIFIED).
+  - Algorithm: detect blurry frames (Shake Sensitivity), warp sharper frames within Blur Duration onto them with optical flow, and blend in their detail scaled by Strength. Adobe recommends applying it after Warp Stabilizer (AE-FX-378).
 - **Priority:** P2
 - **Owner:** bae-effects (+ bae-render)
-- **Notes:** Introduced AE CC 2017 (14.0) (UNVERIFIED).
+- **Notes:** UNVERIFIED: introduced in AE CC 2017 (14.0). Source: https://helpx.adobe.com/after-effects/using/blur-sharpen-effects.html
 
 ### AE-FX-314 · CC Cross Blur (CC 交叉模糊)
 
@@ -341,16 +342,16 @@ Effect-category name: Stylize (风格化). Conventions as stated at the start of
 
   | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|---|---|
-  | 1 | Glow Based On (发光基于) | `ADBE Glo2-0001` | popup | 2 = Color Channels | 1 Alpha Channel (Alpha 通道), 2 Color Channels (颜色通道) | — | — |
+  | 1 | Glow Based On (发光依据) | `ADBE Glo2-0001` | popup | 2 = Color Channels | 1 Alpha Channel (Alpha 通道), 2 Color Channels (颜色通道) | — | — |
   | 2 | Glow Threshold (发光阈值) | `ADBE Glo2-0002` | float slider (percent display) | 60.0 % (internal 153 of 255) | 0…100 % | % brightness | Scripting/Lottie value is the 0…255 internal number. |
   | 3 | Glow Radius (发光半径) | `ADBE Glo2-0003` | float slider | 10.0 | slider 0…100; valid 0…1000 (UNVERIFIED) | pixels | Downsample-scaled. |
   | 4 | Glow Intensity (发光强度) | `ADBE Glo2-0004` | float slider | 1.0 | slider 0…4; valid 0…255 (UNVERIFIED) | multiplier | — |
-  | 5 | Composite Original (合成原始项目) | `ADBE Glo2-0005` | popup | 2 = Behind | 1 On Top (顶端), 2 Behind (后面), 3 None (无) | — | — |
+  | 5 | Composite Original (与原始图像合成) | `ADBE Glo2-0005` | popup | 2 = Behind | 1 On Top (顶部), 2 Behind (后方), 3 None (无) | — | — |
   | 6 | Glow Operation (发光操作) | `ADBE Glo2-0006` | popup | 3 = Add | 1 None, 2 Normal, 3 Add, 4 Multiply, 5 Dissolve, 6 Screen, 7 Overlay, 8 Soft Light, 9 Hard Light, 10 Darken, 11 Lighten, 12 Difference, 13 Hue, 14 Saturation, 15 Color, 16 Luminosity, 17 Color Dodge, 18 Color Burn, 19 Exclusion, 20 Stencil Alpha, 21 Stencil Luma, 22 Silhouette Alpha, 23 Silhouette Luma, 24 Luminescent Premultiply, 25 Alpha Add | — | Blend-mode formulas: see compositing-3d-color.md, Blend modes (Chinese names as there). |
   | 7 | Glow Colors (发光颜色) | `ADBE Glo2-0007` | popup | 1 = Original Colors | 1 Original Colors (原始颜色), 2 A & B Colors (A 和 B 颜色), 3 Arbitrary Map (任意映射) | — | Arbitrary Map is loaded from an .amp file via the effect's Options… link. |
-  | 8 | Color Looping (颜色循环) | `ADBE Glo2-0008` | popup | 3 = Triangle A>B>A | 1 Sawtooth A>B (锯齿 A>B), 2 Sawtooth B>A (锯齿 B>A), 3 Triangle A>B>A (三角形 A>B>A), 4 Triangle B>A>B (三角形 B>A>B) | — | Only with A & B Colors / Arbitrary Map. |
-  | 9 | Color Loops (颜色循环数)（译名待核） | `ADBE Glo2-0009` | float slider | 1.0 | slider 1…10; valid 1…127 (UNVERIFIED) | loops | — |
-  | 10 | Color Phase (色彩相位) | `ADBE Glo2-0010` | angle | 0° | any | degrees (1 rev = 1 loop) | — |
+  | 8 | Color Looping (颜色循环方式) | `ADBE Glo2-0008` | popup | 3 = Triangle A>B>A | 1 Sawtooth A>B (锯齿 A>B), 2 Sawtooth B>A (锯齿 B>A), 3 Triangle A>B>A (三角形 A>B>A), 4 Triangle B>A>B (三角形 B>A>B) | — | Only with A & B Colors / Arbitrary Map. |
+  | 9 | Color Loops (颜色循环数) | `ADBE Glo2-0009` | float slider | 1.0 | slider 1…10; valid 1…127 (UNVERIFIED) | loops | — |
+  | 10 | Color Phase (颜色相位) | `ADBE Glo2-0010` | angle | 0° | any | degrees (1 rev = 1 loop) | — |
   | 11 | A & B Midpoint (A 和 B 中点) | `ADBE Glo2-0011` | float slider (percent) | 50 % (internal 0.5) | 0…100 % | % | — |
   | 12 | Color A (颜色 A) | `ADBE Glo2-0012` | color | white [1,1,1] | — | — | — |
   | 13 | Color B (颜色 B) | `ADBE Glo2-0013` | color | black [0,0,0] | — | — | — |
@@ -422,7 +423,7 @@ Effect-category name: Stylize (风格化). Conventions as stated at the start of
   |---|---|---|---|---|---|---|---|
   | 1 | Horizontal Blocks (水平块) | `ADBE Mosaic-0001` | integer slider | 10 | slider 1…200; valid 1…4000 (UNVERIFIED) | blocks per row | — |
   | 2 | Vertical Blocks (垂直块) | `ADBE Mosaic-0002` | integer slider | 10 | same | blocks per column | — |
-  | 3 | Sharp Colors (锐化颜色) | `ADBE Mosaic-0003` | checkbox | off | 0/1 | — | On: colour of the block's centre pixel; off: block average. |
+  | 3 | Sharp Colors (锐利颜色) | `ADBE Mosaic-0003` | checkbox | off | 0/1 | — | On: colour of the block's centre pixel; off: block average. |
 
   ```
   bw = layer_w / H; bh = layer_h / V          // fractional block sizes allowed
@@ -442,12 +443,13 @@ Effect-category name: Stylize (风格化). Conventions as stated at the start of
 
   | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|---|---|
-  | 1 | Level (级别) | `ADBE Posterize-0001` | integer slider | 7 | 2…255 (Adobe help) | levels per channel | — |
+  | 1 | Level (级别) | `ADBE Posterize-0001` | integer slider | 7 (AE 26.0 dump) | 2…255 (Adobe help: "Values range from 2 to 255") | levels per channel | — |
 
   ```
   // per R,G,B on straight colour; alpha unchanged (UNVERIFIED)
   L = level
-  v' = floor(v * L) / (L - 1)  clamped to [0,1]     // UNVERIFIED exact rounding (Photoshop-style)
+  v' = min(floor(v * L), L - 1) / (L - 1)           // L equal-width input bins -> L evenly spaced outputs
+                                                     // UNVERIFIED exact bin edges; Adobe: "maps pixels to the closest matching level"
   32 bpc: values outside 0…1 are clamped before quantising (UNVERIFIED)
   ```
 - **Priority:** P1
@@ -481,13 +483,13 @@ Effect-category name: Stylize (风格化). Conventions as stated at the start of
 
   | # | Parameter (中文) | param matchName | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|---|---|
-  | 1 | Edge Type (边缘类型) | `ADBE Roughen Edges-0001` | popup | 1 = Roughen | 1 Roughen (粗糙化), 2 Roughen Color (粗糙化颜色), 3 Cut (剪切), 4 Spiky (尖刺), 5 Rusty (生锈), 6 Rusty Color (生锈颜色), 7 Photocopy (影印), 8 Photocopy Color (影印颜色)（译名待核） | — | — |
+  | 1 | Edge Type (边缘类型) | `ADBE Roughen Edges-0001` | popup | 1 = Roughen | 1 Roughen (粗糙化), 2 Roughen Color (粗糙化颜色), 3 Cut (剪切), 4 Spiky (尖刺), 5 Rusty (锈蚀), 6 Rusty Color (锈蚀颜色), 7 Photocopy (影印), 8 Photocopy Color (影印颜色)（译名待核） | — | — |
   | 2 | Edge Color (边缘颜色) | `ADBE Roughen Edges-0010` | color | [0.6, 0.2, 0] (rust brown) | — | — | Used by Roughen Color, Rusty Color (edge) and Photocopy Color (fill). |
   | 3 | Border (边框) | `ADBE Roughen Edges-0002` | float slider | 8.0 | slider 0…500 (UNVERIFIED) | pixels | Inward distance from the alpha edge. |
   | 4 | Edge Sharpness (边缘锐度) | `ADBE Roughen Edges-0003` | float slider | 1.0 | 0…10 (UNVERIFIED) | — | — |
   | 5 | Fractal Influence (分形影响) | `ADBE Roughen Edges-0004` | float slider | 1.0 | 0…1 | — | — |
   | 6 | Scale (缩放) | `ADBE Roughen Edges-0005` | float slider | 100 % | slider 10…400; valid 10…2000 (UNVERIFIED) | % | — |
-  | 7 | Stretch Width or Height (伸缩宽度或高度) | `ADBE Roughen Edges-0006` | float slider | 0.0 | −10…10 (UNVERIFIED) | — | Positive stretches the fractal horizontally (UNVERIFIED sign). |
+  | 7 | Stretch Width or Height (拉伸宽度或高度) | `ADBE Roughen Edges-0006` | float slider | 0.0 | −10…10 (UNVERIFIED) | — | Positive stretches the fractal horizontally (UNVERIFIED sign). |
   | 8 | Offset (Turbulence) (偏移（湍流）) | `ADBE Roughen Edges-0007` | point | [0, 0] | any | layer px | — |
   | 9 | Complexity (复杂度) | `ADBE Roughen Edges-0008` | integer slider | 2 | 1…10 | octaves | — |
   | 10 | Evolution (演化) | `ADBE Roughen Edges-0009` | angle | 0° | any | revolutions + degrees | — |
@@ -524,7 +526,7 @@ Effect-category name: Stylize (风格化). Conventions as stated at the start of
   | 5 | Output Height (输出高度) | `ADBE Tile-0005` | float slider | 100.0 | same | % of layer height | — |
   | 6 | Mirror Edges (镜像边缘) | `ADBE Tile-0006` | checkbox | off | — | — | Adjacent tiles are flipped. |
   | 7 | Phase (相位) | `ADBE Tile-0007` | angle | 0° | any | degrees (360° = 1 tile) | Offsets alternate columns vertically (or rows horizontally). |
-  | 8 | Horizontal Phase Shift (水平位移)（译名待核） | `ADBE Tile-0008` | checkbox | off | — | — | On: phase shifts rows horizontally. |
+  | 8 | Horizontal Phase Shift (水平相位偏移) | `ADBE Tile-0008` | checkbox | off | — | — | On: phase shifts rows horizontally. |
 
   ```
   tw = W * tile_w/100; th = H * tile_h/100
@@ -548,7 +550,7 @@ Effect-category name: Stylize (风格化). Conventions as stated at the start of
 - **What it does:** Paints the image with randomised brush strokes at a given angle.
 - **Exact semantics:**
   - matchName `ADBE Brush Strokes`; 8 bpc; GPU —; clips to layer bounds (Adobe help suggests Grow Bounds first).
-  - Parameters (AE order; UNVERIFIED defaults): Stroke Angle (描边角度) angle 135°; Brush Size (画笔大小) 2 px (1…5); Stroke Length (描边长度) 12 px; Stroke Density (描边浓度) 1.0; Stroke Randomness (描边随机性) 1.0; Paint Surface (绘画表面) popup `ADBE Brush Strokes-0006`: 1 Paint On Original Image (在原始图像上绘画), 2 Paint On Transparent (在透明背景上绘画), 3 Paint On White (在白色上绘画), 4 Paint On Black (在黑色上绘画), default 1; Blend With Original (与原始图像混合) 0 %.
+  - Parameters (AE order; UNVERIFIED defaults): Stroke Angle (描边角度) angle 135°; Brush Size (画笔大小) 2 px (1…5); Stroke Length (描边长度) 12 px; Stroke Density (描边浓度) 1.0; Stroke Randomness (描边随机性) 1.0; Paint Surface (绘画表面) popup `ADBE Brush Strokes-0006`: 1 Paint On Original Image (在原始图像上绘制), 2 Paint On Transparent (在透明上绘制), 3 Paint On White (在白色上绘制), 4 Paint On Black (在黑色上绘制), default 1; Blend With Original (与原始图像混合) 0 %.
 - **Priority:** P2
 - **Owner:** bae-effects
 - **Notes:** Chinese labels per zh-CN help (笔刷描边 heading in help; AE UI name 画笔描边（译名待核）).
@@ -558,7 +560,7 @@ Effect-category name: Stylize (风格化). Conventions as stated at the start of
 - **What it does:** Smooths the image (bilateral-type blur), posterises its shading and draws edge strokes for a cel-shaded look.
 - **Exact semantics:**
   - matchName `ADBE Cartoonify`; 32 bpc; GPU —.
-  - Parameters (AE order): Render (渲染) popup `ADBE Cartoonify-0001`: 1 Fill (填充), 2 Edges (边缘), 3 Fill & Edges (填充及边缘), default 3 (UNVERIFIED); Detail Radius (细节半径); Detail Threshold (细节阈值); Fill group: Shading Steps (阴影步骤), Shading Smoothness (阴影平滑度); Edge group: Threshold (阈值), Width (宽度), Softness (柔和度), Opacity (不透明度); Advanced group: Edge Enhancement (边缘增强), Edge Black Level (边缘黑色阶), Edge Contrast (边缘对比度), Performance. Defaults UNVERIFIED.
+  - Parameters (AE order): Render (渲染) popup `ADBE Cartoonify-0001`: 1 Fill (填充), 2 Edges (边缘), 3 Fill & Edges (填充和边缘), default 3 (UNVERIFIED); Detail Radius (细节半径); Detail Threshold (细节阈值); Fill group: Shading Steps (阴影级数), Shading Smoothness (阴影平滑度); Edge group: Threshold (阈值), Width (宽度), Softness (柔和度), Opacity (不透明度); Advanced group: Edge Enhancement (边缘增强), Edge Black Level (边缘黑色阶), Edge Contrast (边缘对比度), Performance. Defaults UNVERIFIED.
 - **Priority:** P2
 - **Owner:** bae-effects
 - **Notes:** Added AE CS6 (11.0).
@@ -639,7 +641,7 @@ Effect-category name: Stylize (风格化). Conventions as stated at the start of
 - **What it does:** Detects contour flow in each frame, smears pixels along it and optionally overlays posterised flat colour fills for a painted look.
 - **Exact semantics:**
   - matchName UNVERIFIED (effect is newer than the AE 26.0 match-name dump); 8/16/32 bpc (Adobe help); GPU UNVERIFIED.
-  - Main controls (Adobe help): edge source (Get Edges From Layer (从图层获取边缘), Edge Layer Behavior: Center Map / Stretch Map to Fit / Tile Map), Offset Flow Angles, Quantize Flow Angles (0/15/30/45/60/90° or custom), Edge Strength Adjustment, Freehand Flow Adjustment (brush tools), Stylization (风格化), Cleanliness (整洁度), Smear Iterations, Apply to Alpha, Draw Color Fills (None / On Top of Smeared Image / Only), Reduction Method (Posterize K-Means, Posterize Median, Match Closest Custom Color), Posterize Levels, Custom Color Set, Fill Rendering (Feather, Opacity), Limit Fills by Edge Strength (Min/Max Strength).
+  - Main controls (Adobe help): edge source (Get Edges From Layer (从图层获取边缘), Edge Layer Behavior: Center Map / Stretch Map to Fit / Tile Map), Offset Flow Angles, Quantize Flow Angles (0/15/30/45/60/90° or custom), Edge Strength Adjustment, Freehand Flow Adjustment (brush tools), Stylization (风格化), Cleanliness (整洁度), Smear Iterations, Apply to Alpha, Draw Color Fills (None / On Top of Smeared Image / Only), Reduction Method (Posterize K-Means, Posterize Median, Match Closest Custom Color), Posterize Levels, Custom Color Set, Fill Rendering (Feather, Opacity), Limit Fills by Edge Strength (Low Strength / High Strength).
 - **Priority:** P2
 - **Owner:** bae-effects
 - **Notes:** Added in a 2025/2026 AE release (UNVERIFIED version).
