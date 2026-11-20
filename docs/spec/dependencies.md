@@ -193,6 +193,7 @@ wgpu v30.0.2
 | windows-sys | 0.61.2 | 无默认 | bae-platform（Windows 控制台） | 最新；muda 要求 `>=0.60, <=0.61` |
 | directories | 6.0.0 | 默认 | bae-platform | 最新 |
 | libloading | 0.9.1 | 默认 | 19、20 | 最新 |
+| notify | 8.2.2 | 关默认，只开 `macos_fsevent` | 09（`bae-sync` 的可选 feature `watch`，共享目录模式的文件监听） | 8.x 最新稳定版（9.0 还是 rc）；macOS 走 FSEvents（objc2-core-services，和已 pin 的 objc2 0.3 同一套），Windows 走 ReadDirectoryChangesW |
 
 ### 插件、打包、哈希
 

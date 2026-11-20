@@ -41,6 +41,10 @@ pub enum ModelError {
     SublayerExists(SublayerId),
     #[error("sublayer {0} is not in the layer stack")]
     NotInStack(SublayerId),
+    /// A guarded transaction ([`crate::Stage::transact_guarded`]) tried to write a
+    /// sublayer its guard does not allow. Nothing was written to that sublayer.
+    #[error("writing sublayer {0} is not allowed")]
+    WriteDenied(SublayerId),
     #[error("{path}.{attr}: expected {expected}, got {got}")]
     TypeMismatch {
         path: PrimPath,
