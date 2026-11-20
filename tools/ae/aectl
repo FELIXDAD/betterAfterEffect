@@ -11,7 +11,8 @@
 #   aectl install                install the startup "ready" script and enable script file access
 #
 # Options for eval/run: --timeout <s> (default 300), --force (also recover an AE instance
-# that aectl did not start; that may discard someone's unsaved work).
+# that aectl did not start; that may discard someone's unsaved work), --lock-timeout <s>
+# (default 1800: how long to wait while another caller is using After Effects).
 #
 # How it works (see tools/ae/README.md):
 # - A startup script (Scripts/Startup/bae_automation_ready.jsx) writes $STATE/ready.json
@@ -340,16 +341,39 @@ diagnose() {
   echo "startup script: $([[ -f "$STARTUP_DIR/bae_automation_ready.jsx" ]] && echo installed || echo missing)"
 }
 
+# One AE serves every agent: commands that drive it take an exclusive lock and wait
+# their turn. mkdir is atomic; a lock whose holder died is reclaimed.
+LOCK="$STATE/lock.d"
+acquire_lock() {
+  local limit="$1" waited=0 holder
+  while ! mkdir "$LOCK" 2>/dev/null; do
+    holder=$(cat "$LOCK/pid" 2>/dev/null)
+    if [[ -n "$holder" ]] && ! kill -0 "$holder" 2>/dev/null; then
+      rm -rf "$LOCK"; continue
+    fi
+    if (( waited == 0 )); then log "waiting for After Effects (in use by: $(cat "$LOCK/what" 2>/dev/null))"; fi
+    (( waited >= limit )) && die "After Effects still busy after ${limit}s (lock: $LOCK)"
+    nap 1; waited=$((waited + 1))
+  done
+  echo $$ > "$LOCK/pid"
+  echo "$(date +%H:%M:%S) $cmd ${args[*]:0:1}" | cut -c1-120 > "$LOCK/what"
+  trap 'rm -rf "$LOCK"' EXIT
+}
+
 cmd="${1:-status}"; shift || true
-force=0; timeout=300; args=()
+force=0; timeout=300; lock_timeout=1800; args=()
 while (( $# )); do
   case "$1" in
     --force) force=1 ;;
     --timeout) timeout="$2"; shift ;;
+    --lock-timeout) lock_timeout="$2"; shift ;;
     *) args+=("$1") ;;
   esac
   shift
 done
+case "$cmd" in
+  start|stop|eval|run|clean|install) acquire_lock "$lock_timeout" ;;
+esac
 case "$cmd" in
   status) status ;;
   start) start "$force" ;;
