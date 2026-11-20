@@ -178,15 +178,22 @@ fn decode_throughput_4k() {
         ctx.wait_idle().unwrap();
         let fps = f64::from(frames - 1) / start.elapsed().as_secs_f64();
 
+        // The first seek leaves open-ended playback (new reader); the rest
+        // are scrubbing (the reader is repositioned).
         let seeks = [70_i64, 10, 55, 25, 85, 5, 40, 62];
-        let start = Instant::now();
+        let mut times = Vec::new();
         for index in seeks {
+            let start = Instant::now();
             source
                 .decode_gpu(&FrameRequest::new(index), &media)
                 .unwrap();
             ctx.wait_idle().unwrap();
+            times.push(start.elapsed().as_secs_f64() * 1000.0);
         }
-        let seek_ms = start.elapsed().as_secs_f64() * 1000.0 / seeks.len() as f64;
-        eprintln!("4K {name}: sequential {fps:.1} fps, random seek {seek_ms:.1} ms/frame");
+        let scrub = times[1..].iter().sum::<f64>() / (times.len() - 1) as f64;
+        eprintln!(
+            "4K {name}: sequential {fps:.1} fps, seek from playback {:.1} ms, scrubbing {scrub:.1} ms/frame",
+            times[0]
+        );
     }
 }
