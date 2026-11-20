@@ -19,6 +19,17 @@ SCHEMAS = {
 }
 
 
+def registry():
+    """All schemas by $id, so ae-anim-samples can $ref the interchange definitions."""
+    from referencing import Registry, Resource
+
+    resources = []
+    for path in set(SCHEMAS.values()):
+        contents = json.loads(path.read_text(encoding="utf-8"))
+        resources.append((contents["$id"], Resource.from_contents(contents)))
+    return Registry().with_resources(resources)
+
+
 def main(paths):
     try:
         import jsonschema
@@ -36,7 +47,8 @@ def main(paths):
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         cls = jsonschema.validators.validator_for(schema)
         cls.check_schema(schema)
-        errors = sorted(cls(schema).iter_errors(doc), key=lambda e: list(e.absolute_path))
+        validator = cls(schema, registry=registry())
+        errors = sorted(validator.iter_errors(doc), key=lambda e: list(e.absolute_path))
         for e in errors[:20]:
             loc = "/".join(str(x) for x in e.absolute_path)
             print(f"{p}: {loc}: {e.message[:300]}")

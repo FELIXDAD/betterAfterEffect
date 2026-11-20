@@ -102,6 +102,19 @@ check(typeof BAE_EXPORT_NO_AUTORUN === "undefined" || !BAE_EXPORT_NO_AUTORUN, "n
     eq(B.stringify(sample, ""), J.stringify(sample), "compact stringify matches JSON.stringify");
     eq(J.parse(B.stringify(sample, "  ")), J.parse(J.stringify(sample)), "indented stringify parses back");
     eq(B.stringify({x: -0, y: undefined}, ""), "{\"x\":0}", "stringify -0 and undefined");
+    eq(B.parseJSON(J.stringify(sample)), sample, "parseJSON round trip");
+    eq(B.parseJSON(" {\"a\" : [ 1 , 2.5e-3 , -0.5 ] , \"u\":\"\\u4f60\\n\\/\"} "), {a: [1, 0.0025, -0.5], u: "\u4f60\n/"},
+        "parseJSON whitespace and escapes");
+    var bad = ["{", "[1,]", "{\"a\":1,}", "01", "\"\\x\"", "nul", "[1] 2", "{a:1}", "\"a\nb\""];
+    for (var bi = 0; bi < bad.length; bi++) {
+        var threw = false;
+        try {
+            B.parseJSON(bad[bi]);
+        } catch (e) {
+            threw = /JSON parse error/.test(String(e));
+        }
+        check(threw, "parseJSON rejects " + bad[bi]);
+    }
     eq(B.stringify("\u2028\u2029", ""), "\"\\u2028\\u2029\"", "line separators escaped (ExtendScript eval safety)");
 }());
 
@@ -114,6 +127,7 @@ doc.exported_at = "2026-11-20T00:00:00Z";
 doc.report.stats.seconds = 0;
 var text = B.stringify(doc, "  ") + "\n";
 var parsed = J.parse(text);
+eq(B.parseJSON(text), parsed, "parseJSON reads the full export like JSON.parse");
 
 var PRIM_NAME = /^[0-9A-Za-z_\u0080-\uffff][0-9A-Za-z_\u0080-\uffff-]*$/;
 var ATTR_NAME = /^[0-9A-Za-z_\u0080-\uffff-]([0-9A-Za-z_\u0080-\uffff:-]*[0-9A-Za-z_\u0080-\uffff-])?$/;

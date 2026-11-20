@@ -124,6 +124,7 @@ function Prop(matchName, name, vt, value, extra) {
     this.propertyType = PropertyType.PROPERTY;
     this.propertyValueType = vt;
     this._value = value;
+    this.value = value;
     this._keys = [];
     this.numKeys = 0;
     this.expression = "";
@@ -507,6 +508,7 @@ function Project() {
     this.footageTimecodeDisplayStartType = FootageTimecodeDisplayStartType.FTCS_USE_SOURCE_MEDIA;
     this.framesUseFeetFrames = false;
     this.gpuAccelType = GpuAccelType.METAL;
+    this.items = new ItemCollection(this);
 }
 
 Project.prototype.item = function (i) {
@@ -519,3 +521,243 @@ Project.prototype.addItem = function (item, folder) {
     item.parentFolder = folder || this.rootFolder;
     return item;
 };
+
+// ---------------------------------------------------------------- write-side API (sample builder)
+
+function KeyframeEase(speed, influence) {
+    this.speed = speed;
+    this.influence = influence;
+}
+
+app.beginUndoGroup = function () {
+    app._undoDepth = (app._undoDepth || 0) + 1;
+};
+app.endUndoGroup = function () {
+    app._undoDepth--;
+};
+
+/** text files readable through File.open("r") */
+var MOCK_TEXT = {};
+
+File.prototype.read = function () {
+    if (!MOCK_TEXT.hasOwnProperty(this.fsName)) {
+        throw new Error("mock: no text for " + this.fsName);
+    }
+    return MOCK_TEXT[this.fsName];
+};
+
+var _mockOpen = File.prototype.open;
+File.prototype.open = function (mode) {
+    if (mode === "r") {
+        this._mode = "r";
+        return MOCK_TEXT.hasOwnProperty(this.fsName);
+    }
+    return _mockOpen.call(this, mode);
+};
+
+function easeCountOf(prop) {
+    if (prop.propertyValueType === PropertyValueType.TwoD) {
+        return 2;
+    }
+    if (prop.propertyValueType === PropertyValueType.ThreeD) {
+        return 3;
+    }
+    return 1;
+}
+
+Prop.prototype.setValue = function (v) {
+    this._value = v;
+    this.value = v;
+};
+
+Prop.prototype.setValueAtTime = function (t, v) {
+    for (var i = 0; i < this._keys.length; i++) {
+        if (Math.abs(this._keys[i].t - t) < 1e-9) {
+            this._keys[i].v = v;
+            return;
+        }
+    }
+    var key = {t: t, v: v};
+    var pos = this._keys.length;
+    for (var j = 0; j < this._keys.length; j++) {
+        if (this._keys[j].t > t) {
+            pos = j;
+            break;
+        }
+    }
+    this._keys.splice(pos, 0, key);
+    this.numKeys = this._keys.length;
+};
+
+Prop.prototype.removeKey = function (i) {
+    this._key(i);
+    this._keys.splice(i - 1, 1);
+    this.numKeys = this._keys.length;
+};
+
+Prop.prototype.nearestKeyIndex = function (t) {
+    var best = 1;
+    for (var i = 0; i < this._keys.length; i++) {
+        if (Math.abs(this._keys[i].t - t) < Math.abs(this._keys[best - 1].t - t)) {
+            best = i + 1;
+        }
+    }
+    return best;
+};
+
+Prop.prototype.setInterpolationTypeAtKey = function (i, inType, outType) {
+    var k = this._key(i);
+    k.inType = inType;
+    k.outType = outType === undefined ? inType : outType;
+};
+
+Prop.prototype.setTemporalEaseAtKey = function (i, inEase, outEase) {
+    var n = easeCountOf(this);
+    if (inEase.length !== n || (outEase && outEase.length !== n)) {
+        throw new Error("mock AE: " + this.matchName + " needs " + n + " KeyframeEase objects, got " + inEase.length);
+    }
+    for (var e = 0; e < inEase.length; e++) {
+        if (!(inEase[e] instanceof KeyframeEase)) {
+            throw new Error("mock AE: ease must be a KeyframeEase");
+        }
+    }
+    var k = this._key(i);
+    k.inEase = inEase;
+    k.outEase = outEase || inEase;
+};
+
+Prop.prototype.setSpatialTangentsAtKey = function (i, inTan, outTan) {
+    this._spatialOnly();
+    var n = this.value.length;
+    if (inTan.length !== n || outTan.length !== n) {
+        throw new Error("mock AE: tangents need " + n + " values");
+    }
+    var k = this._key(i);
+    k.inTan = inTan.length === 2 ? [inTan[0], inTan[1], 0] : inTan;
+    k.outTan = outTan.length === 2 ? [outTan[0], outTan[1], 0] : outTan;
+};
+
+Prop.prototype.setTemporalContinuousAtKey = function (i, on) {
+    this._key(i).tc = on;
+};
+Prop.prototype.setTemporalAutoBezierAtKey = function (i, on) {
+    this._key(i).tab = on;
+};
+Prop.prototype.setSpatialContinuousAtKey = function (i, on) {
+    this._spatialOnly();
+    this._key(i).sc = on;
+};
+Prop.prototype.setSpatialAutoBezierAtKey = function (i, on) {
+    this._spatialOnly();
+    this._key(i).sab = on;
+};
+Prop.prototype.setRovingAtKey = function (i, on) {
+    this._spatialOnly();
+    if (i === 1 || i === this._keys.length) {
+        throw new Error("mock AE: first and last keys cannot rove");
+    }
+    this._key(i).roving = on;
+};
+Prop.prototype.setLabelAtKey = function (i, label) {
+    this._key(i).label = label;
+};
+
+/** Mock evaluation: linear between keys (hold where out type is HOLD); expressions are not run. */
+Prop.prototype.valueAtTime = function (t, pre) {
+    if (this.propertyValueType === PropertyValueType.CUSTOM_VALUE ||
+        this.propertyValueType === PropertyValueType.NO_VALUE) {
+        throw new Error("Can not get value of " + this.matchName);
+    }
+    var keys = this._keys;
+    if (keys.length === 0) {
+        return this._value;
+    }
+    if (t <= keys[0].t) {
+        return keys[0].v;
+    }
+    for (var i = 0; i < keys.length - 1; i++) {
+        var a = keys[i];
+        var b = keys[i + 1];
+        if (t < b.t) {
+            if (a.outType === KeyframeInterpolationType.HOLD || typeof a.v !== typeof b.v) {
+                return a.v;
+            }
+            var u = (t - a.t) / (b.t - a.t);
+            if (typeof a.v === "number") {
+                return a.v + (b.v - a.v) * u;
+            }
+            var out = [];
+            for (var d = 0; d < a.v.length; d++) {
+                out.push(a.v[d] + (b.v[d] - a.v[d]) * u);
+            }
+            return out;
+        }
+    }
+    return keys[keys.length - 1].v;
+};
+
+var MOCK_EFFECTS = {
+    "ADBE Color Control": [PropertyValueType.COLOR, [1, 0, 0, 1]],
+    "ADBE Point Control": [PropertyValueType.TwoD_SPATIAL, [0, 0]],
+    "ADBE Slider Control": [PropertyValueType.OneD, 0]
+};
+
+Group.prototype.addProperty = function (matchName) {
+    var def = MOCK_EFFECTS[matchName];
+    if (this.matchName !== "ADBE Effect Parade" || !def) {
+        throw new Error("mock AE: cannot add " + matchName + " to " + this.matchName);
+    }
+    return this.add(named(matchName, matchName, [new Prop(matchName + "-0001", "Value", def[0], def[1])]));
+};
+
+function LayerCollection(comp) {
+    this._comp = comp;
+}
+
+LayerCollection.prototype._add = function (matchName, name, opts) {
+    var layer = new Layer(matchName, name, [
+        indexed("ADBE Mask Parade", "Masks", []),
+        indexed("ADBE Effect Parade", "Effects", []),
+        transformGroup()
+    ], opts);
+    // AE inserts new layers at the top; the builder only uses one layer per comp.
+    return this._comp.addLayer(layer);
+};
+LayerCollection.prototype.addNull = function () {
+    return this._add("ADBE AV Layer", "Null 1", {nullLayer: true});
+};
+LayerCollection.prototype.addSolid = function (color, name) {
+    return this._add("ADBE AV Layer", name, {});
+};
+LayerCollection.prototype.addShape = function () {
+    return this._add("ADBE Vector Layer", "Shape Layer 1", {});
+};
+
+function ItemCollection(project) {
+    this._project = project;
+}
+
+ItemCollection.prototype.addComp = function (name, width, height, pixelAspect, duration, frameRate) {
+    var p = this._project;
+    var comp = p.addItem(new CompItem(1000 + p.numItems, name, {width: width, height: height, pixelAspect: pixelAspect,
+        duration: duration, frameRate: frameRate, frameDuration: 1 / frameRate}));
+    comp.layers = new LayerCollection(comp);
+    return comp;
+};
+
+ItemCollection.prototype.addFolder = function (name) {
+    return this._project.addItem(new FolderItem(1000 + this._project.numItems, name));
+};
+
+Item.prototype.remove = function () {
+    var items = app.project._items;
+    for (var i = 0; i < items.length; i++) {
+        if (items[i] === this) {
+            items.splice(i, 1);
+            app.project.numItems = items.length;
+            return;
+        }
+    }
+};
+FolderItem.prototype.remove = Item.prototype.remove;
+CompItem.prototype.remove = Item.prototype.remove;

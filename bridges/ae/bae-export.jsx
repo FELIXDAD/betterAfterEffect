@@ -170,6 +170,168 @@
         return out.join("");
     };
 
+    /**
+     * JSON.parse replacement (ES3, no eval: interchange files may come from other people).
+     * Throws Error("JSON parse error at <offset>: ...").
+     */
+    BAE.parseJSON = function (text) {
+        var s = String(text);
+        var i = 0;
+        var NUMBER = /^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$/;
+        var ESC = {"\"": "\"", "\\": "\\", "/": "/", b: "\b", f: "\f", n: "\n", r: "\r", t: "\t"};
+
+        function fail(msg) {
+            throw new Error("JSON parse error at " + i + ": " + msg);
+        }
+
+        function ws() {
+            var c = s.charAt(i);
+            while (c === " " || c === "\t" || c === "\n" || c === "\r") {
+                i++;
+                c = s.charAt(i);
+            }
+        }
+
+        function expect(c) {
+            ws();
+            if (s.charAt(i) !== c) {
+                fail("expected '" + c + "'");
+            }
+            i++;
+        }
+
+        function str() {
+            if (s.charAt(i) !== "\"") {
+                fail("expected string");
+            }
+            i++;
+            var out = [];
+            var start = i;
+            while (i < s.length) {
+                var c = s.charAt(i);
+                if (c === "\"") {
+                    out.push(s.substring(start, i));
+                    i++;
+                    return out.join("");
+                }
+                if (c === "\\") {
+                    out.push(s.substring(start, i));
+                    var e = s.charAt(i + 1);
+                    if (e === "u") {
+                        var h = s.substr(i + 2, 4);
+                        if (!/^[0-9A-Fa-f]{4}$/.test(h)) {
+                            fail("bad \\u escape");
+                        }
+                        out.push(String.fromCharCode(parseInt(h, 16)));
+                        i += 6;
+                    } else if (hasOwn(ESC, e)) {
+                        out.push(ESC[e]);
+                        i += 2;
+                    } else {
+                        fail("bad escape");
+                    }
+                    start = i;
+                } else if (s.charCodeAt(i) < 32) {
+                    fail("control character in string");
+                } else {
+                    i++;
+                }
+            }
+            fail("unterminated string");
+        }
+
+        function num() {
+            var start = i;
+            while (i < s.length && "+-0123456789.eE".indexOf(s.charAt(i)) >= 0) {
+                i++;
+            }
+            var t = s.substring(start, i);
+            if (!NUMBER.test(t)) {
+                i = start;
+                fail("bad number");
+            }
+            return parseFloat(t);
+        }
+
+        function word(w, v) {
+            if (s.substr(i, w.length) !== w) {
+                fail("unexpected token");
+            }
+            i += w.length;
+            return v;
+        }
+
+        function value() {
+            ws();
+            var c = s.charAt(i);
+            if (c === "{") {
+                i++;
+                var obj = {};
+                ws();
+                if (s.charAt(i) === "}") {
+                    i++;
+                    return obj;
+                }
+                for (;;) {
+                    ws();
+                    var k = str();
+                    expect(":");
+                    obj[k] = value();
+                    ws();
+                    c = s.charAt(i++);
+                    if (c === "}") {
+                        return obj;
+                    }
+                    if (c !== ",") {
+                        i--;
+                        fail("expected ',' or '}'");
+                    }
+                }
+            }
+            if (c === "[") {
+                i++;
+                var arr = [];
+                ws();
+                if (s.charAt(i) === "]") {
+                    i++;
+                    return arr;
+                }
+                for (;;) {
+                    arr.push(value());
+                    ws();
+                    c = s.charAt(i++);
+                    if (c === "]") {
+                        return arr;
+                    }
+                    if (c !== ",") {
+                        i--;
+                        fail("expected ',' or ']'");
+                    }
+                }
+            }
+            if (c === "\"") {
+                return str();
+            }
+            if (c === "t") {
+                return word("true", true);
+            }
+            if (c === "f") {
+                return word("false", false);
+            }
+            if (c === "n") {
+                return word("null", null);
+            }
+            return num();
+        }
+
+        var result = value();
+        ws();
+        if (i < s.length) {
+            fail("trailing characters");
+        }
+        return result;
+    };
+
     // ------------------------------------------------------------------ names
 
     function isAsciiAlnum(code) {
