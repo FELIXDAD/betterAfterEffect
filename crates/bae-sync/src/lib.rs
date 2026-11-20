@@ -10,6 +10,9 @@
 //! - [`DirTransport`]: shared-folder mode (no server): append-only per-client logs
 //!   under `updates/` in the project directory. Wrap it in a [`ThreadedTransport`]
 //!   so NAS latency never blocks the stage thread.
+//! - Presence ([`PresenceState`]): who is online, selection, playhead, workspace and
+//!   advisory "I am editing this" locks, over the same transports
+//!   ([`SyncSession::set_presence`], [`SyncSession::presence`]).
 //! - [`Relay`]: the hub side (fan-out between clients), used by `services/bae-hub`.
 //! - [`History`]: named versions ([`Checkpoint`]), read-only views of any version
 //!   ([`history::view_at`]) and per-prim differences with authors
@@ -22,6 +25,7 @@ mod dir;
 mod docs;
 mod error;
 pub mod history;
+mod presence;
 mod protocol;
 mod relay;
 mod session;
@@ -36,6 +40,7 @@ pub use history::{
     Checkpoint, CheckpointId, History, PrimChange, PrimDiff, ProjectDocs, ProjectVersion,
     VersionView,
 };
+pub use presence::{PeerPresence, Playhead, PresenceState};
 pub use protocol::{DocKey, Message, PROTOCOL_VERSION};
 pub use relay::{PeerHandle, Relay, RelayOutcome};
 pub use session::{PumpOutcome, SessionConfig, SyncSession, SyncStats};
