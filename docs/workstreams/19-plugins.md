@@ -47,9 +47,13 @@
 - [x] C ABI 头文件 `sdk/c/bae_plugin.h` 雏形（ABI 0.1）+ 自检（`sdk/c/tests/check.sh`：结构体布局、常量、签名、C++17、迷你宿主跑通纯 C 示例）
 - [x] 清单格式与校验（`bae_plugin::manifest`，错误带行列号）；参数 → `bae_model::EffectDef`（`effect_def`）
 - [x] 声明式 WGSL 约定：前导代码、模块拼装、naga 校验并把错误定位回作者文件、uniform 布局（`bae_plugin::wgsl`）
-- [ ] 声明式 WGSL 效果的 GPU 执行（`DeclarativeEffect` 实现 `bae_render::Effect`）
-- [ ] 发现、加载、注册与运行时卸载（`PluginHost`）
-- [ ] 开发文档 `docs/plugins/`
+- [x] 声明式 WGSL 效果的 GPU 执行（`DeclarativeEffect` 实现 `bae_render::Effect`；GPU 测试对照 CPU 参考，含 RGBA16F/32F、半分辨率、ROI、identity）
+- [x] 发现、版本选择、注册与运行时卸载（`PluginHost`；加载→渲染→卸载 100 次无 GPU 资源泄漏）
+- [x] 内置效果的嵌入式声明式包（`DeclarativeEffect::load_builtin`，给 07）
+- [x] 开发文档 `docs/plugins/`（概览、快速开始、清单参考、WGSL 参考、C ABI 入门、打包安装与版本）
+- [x] 示例：posterize、vignette、box-blur（声明式），align-to-grid（脚本），invert（纯 C）
+- [ ] 应用接入：启动时扫描插件目录、`bae plugin check|list` 子命令（需要 01 在 `apps/bae` 里组装；现在用 `cargo run -p bae-plugin --example check`）
+- [ ] 渲染耗时对照基准（声明式 vs 同功能内置效果 < 2%，等 04 的执行器和 07 的内置效果）
 - [ ] 原生插件加载（libloading）+ Rust SDK
 - [ ] 脚本插件
 - [ ] 其余示例插件
@@ -60,5 +64,6 @@
 - 根 `Cargo.toml` 加了 `bae-plugin`、`bae-plugin-sdk` 两个路径依赖，以及 `naga = 30.0.2`（wgpu 已经链接的同一份，只开 `wgsl-in`）和 `semver = 1.0.28` 两个版本固定。
 - 自动化脚本的清单表从 `[[script]]` 改名为 `[[automation]]`（`[script]` 是运行时配置表，TOML 里两者不能同名）。
 - 给 02 的请求：R02-8（字符串/素材参数）、R02-9（相对坐标点参数默认值）；给 04 的请求：R04-11（`EffectParams` 补字段）、R04-12（在 crate 外构造 `EncodeContext`）。
+- 第二个 PR：`DeclarativeEffect`、`PluginHost`、`load_builtin`、检查工具、posterize 示例、`docs/plugins/`。`EffectParams` 没有图层范围、帧率等信息前（R04-11），`BaeFrame.layer_bounds` 用输入范围代替，其余未知字段为 0；`layer` 参数和转场的 `to` 源要等渲染图支持（R04-1），现在绑定为空纹理。
 
 ## 请求（其他工作流在这里留言）

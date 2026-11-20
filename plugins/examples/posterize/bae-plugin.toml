@@ -1,0 +1,38 @@
+# The quickstart example of docs/plugins/quickstart.md: the smallest useful
+# declarative effect (pixel style, an int and a checkbox parameter).
+schema_version = 1
+
+[plugin]
+id = "com.example.posterize"
+version = "1.0.0"
+api = "0.1"
+name = "Posterize (example)"
+description = "Reduces each color channel to a number of levels."
+authors = ["BAE example plugins"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "posterize"
+name = "Posterize (example)"
+category = "Stylize"
+implementation = "wgsl"
+keywords = ["posterize", "levels", "poster"]
+shader = "shaders/posterize.wgsl"
+identity_when = "params.levels >= 256"
+
+[[effect.param]]
+id = 1
+key = "levels"
+type = "int"
+name = "Levels"
+default = 6
+range = [2, 256]
+slider = [2, 32]
+
+[[effect.param]]
+id = 2
+key = "linear"
+type = "checkbox"
+name = "Use Linear Light"
+label = "On"
+default = false

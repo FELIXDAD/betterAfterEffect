@@ -1319,6 +1319,8 @@ fn blur_horizontal(@builtin(global_invocation_id) id: vec3<u32>) {
   `rect = "output"` or `"input"` at full render resolution (`scale` is reserved), format
   `working` or one of the portable storage formats. Each texture must be written before
   it is read.
+- Pass targets come from the transient pool with **undefined contents**: every pass MUST
+  write every pixel of its target rect (the generated pixel kernel does).
 - Data-dependent pass structures (pyramids with a param-dependent depth, iterative
   solvers, reductions feeding later passes) are out of scope for v1 declarative effects:
   use native `bae.gpu.compute`. A future `repeat = "<expr>"` key is reserved.
