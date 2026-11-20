@@ -44,11 +44,17 @@
 
 ## 进度
 
-- [ ] 工作区与工具链
-- [ ] bae-platform
-- [ ] bae-gpu
-- [ ] apps/bae 空窗口
-- [ ] CI 与体积检查
-- [ ] xtask
+- [x] 工作区与工具链：虚拟工作区（`apps/*`、`crates/*`、`services/*`、`xtask`、`tools/dep-probe`）、统一依赖版本（见 `docs/spec/dependencies.md`）、`rust-toolchain.toml`（1.100）、dev/release/bench 配置。
+- [x] bae-platform：目录（含用户级/系统级插件目录）、日志（stderr + 会话文件、轮转）、崩溃报告与紧急保存、单实例、版本化设置、可扩展的命令行子命令注册表。
+- [x] bae-gpu：共享 `GpuContext`、适配器选择与软件回退、可选特性、设备丢失回调与重建、窗口表面（呈现模式、帧延迟、HDR/广色域格式发现）、GPU 计时、异步回读与上传、Metal/D3D12 原生句柄、视口纹理注册表、`bae gpu-info`。
+- [x] apps/bae 空窗口：winit + egui-winit + egui-wgpu（共用设备）、egui_dock 占位工作区、状态栏、muda 原生菜单、事件驱动重绘、窗口位置记忆、`--headless`、`--smoke-test`。说明见 `docs/spec/app-shell.md`。
+- [x] CI 与体积检查：`.github/workflows/ci.yml`（macOS arm64 + Windows x64）。
+- [x] xtask：`size`（预算 `tools/size-budget/budget.toml`）、`dist`（macOS .app / Windows zip）、`bench`。
+
+后续（不阻塞合并）：
+
+- 浮动面板的原生多窗口（每个 egui 视口一个 winit 窗口和 surface，共用同一设备）；目前用 `set_embed_viewports(true)` 画在主窗口内。
+- 第二个实例把命令行参数转给已运行的实例。
+- 设备丢失恢复后通知其他子系统重建 GPU 资源（与 04 一起定事件）。
 
 ## 请求（其他工作流在这里留言）

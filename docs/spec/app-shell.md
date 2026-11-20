@@ -1,0 +1,105 @@
+# 应用外壳（apps/bae）
+
+本文说明桌面应用 `bae` 的启动流程、模块注册、窗口与事件循环、GPU 共享和视口纹理。负责工作流：01 `core/foundation`。
+
+## 1. 组成
+
+| 位置 | 内容 |
+|---|---|
+| `crates/bae-app` | `AppBuilder`、`AppModule`、资源类型表（`Resources`）、运行时注册表（`Registry<T>`）。不依赖界面、GPU 和平台，任何 crate 都可以实现 `AppModule`。 |
+| `crates/bae-platform` | 目录、日志、崩溃报告与紧急保存、单实例、设置文件、命令行（子命令注册表）。`PlatformModule` 注册保留子命令的占位。 |
+| `crates/bae-gpu` | 全进程唯一的 `GpuContext`、窗口表面、能力报告、计时、回读/上传、原生句柄、`ViewportTextureRegistry`。`GpuModule` 注册 `bae gpu-info`。 |
+| `apps/bae/src/main.rs` | **只做组装**：按顺序 `add_module(...)`，然后交给 `startup::run`。 |
+| `apps/bae/src/startup.rs` | 解析命令行 → 目录 → 日志 → 崩溃钩子 → 分派到界面 / 无界面 / 子命令。 |
+| `apps/bae/src/shell/` | winit 窗口、事件循环、原生菜单（muda）、窗口位置记忆、设备丢失恢复、`--smoke-test`。 |
+| `apps/bae/src/ui/` | egui-wgpu 渲染器（与渲染共用设备）、视口纹理桥接、占位工作区（egui_dock）和状态栏。 |
+| `apps/bae/src/headless.rs` | `bae --headless`：不创建窗口；`--smoke-test N` 在离屏纹理上渲染 N 帧界面。 |
+
+## 2. 模块与注册表
+
+```rust
+pub trait AppModule: Send + Sync + 'static {
+    fn name(&self) -> &str { /* 类型名 */ }
+    fn build(&self, app: &mut AppBuilder);      // 插入资源、注册条目、add_module 依赖
+    fn finish(&self, app: &mut AppBuilder) {}   // 所有模块 build 之后再运行，可读取别人的注册
+}
+```
+
+- 每个功能 crate 提供一个模块，在 `build` 里注册命令、面板、工作区、导入器、导出器、效果、CLI 子命令等。`apps/bae/src/main.rs` 只多加一行 `add_module`。依赖关系由模块自己 `app.add_module(Dep)` 声明，重复添加是空操作。
+- 注册表是 `Registry<T>`（`T` 可以是 `dyn Trait`）：读取无锁（`arc-swap` 快照），写入可以在**启动后任何时候**进行，也可以按 `Owner` 整体撤销。`App::unregister_owner(&Owner::plugin(id))` 一次清掉某个插件在所有注册表里的条目——19 号插件宿主在运行时加载 / 卸载第三方插件就走这条路。
+- 命名：内部的是**应用模块**（`AppModule`，`Owner::Module`），面向用户的是**插件**（`bae-plugin`，`Owner::Plugin`）。代码里不要混用。
+- 具体的条目类型由拥有它的工作流定义：命令（02 `bae-model`）、面板与工作区（11 `bae-ui`）、效果（04/07）、导入导出器（08/15/16）。外壳只提供机制。
+
+### CLI 子命令
+
+`bae-platform::cli` 维护 `Registry<CliSubcommand>`。保留名（`gpu-info`、`render`、`mcp`、`export-json`、`pack`）由 `PlatformModule` 注册成占位，运行时打印 “not implemented yet” 并以退出码 3 结束。工作流在自己的模块里用 `cli::implement(&registry, owner, CliSubcommand::new(...).with_args(...).with_run(...))` 接管，也可以注册全新的子命令。
+
+```text
+bae [PROJECT…]              打开界面（默认）
+bae --headless              不创建窗口
+bae --smoke-test <N>        渲染 N 帧后退出（0 = 成功），可与 --headless 组合
+bae --log <FILTER>          日志过滤，例如 "info,bae_gpu=debug"
+bae --version
+bae gpu-info [--json]       GPU、特性、限制、格式支持
+bae render | mcp | export-json | pack …   其他工作流实现
+```
+
+## 3. 启动流程
+
+1. Windows 上重新连接父进程控制台（release 是 GUI 子系统程序，双击不弹黑窗）。
+2. 用注册表里的子命令解析命令行。
+3. `AppDirs::resolve()`（`BAE_HOME` 可把所有目录放到一个根目录下）。
+4. 日志：stderr + 每次会话一个文件（子命令默认只输出 warn 以上，不写文件）。
+5. 崩溃钩子：写崩溃报告、运行紧急保存回调；上一次崩溃会在启动时提示。
+6. 分派：子命令 → `cli::dispatch`；`--headless` → `headless::run`；否则 → `shell::run`。
+
+## 4. 窗口与事件循环
+
+- 一个 winit 窗口；`GpuContext::new_with_surface` 选择能向这个窗口呈现的适配器（默认高性能优先），创建的 `Arc<GpuContext>` 作为资源放进 `App`，界面、渲染、插件共用它的 device / queue。
+- **事件驱动重绘**：`ControlFlow::Wait`。只有输入事件、egui 的重绘请求（通过 `set_request_repaint_callback` 投递到事件循环，支持延迟重绘）、窗口变化才会产生一帧。空闲时 CPU 占用接近 0。
+- 呈现：默认 `PresentModePreference::Vsync`（FifoRelaxed / Fifo），帧延迟 2；表面格式默认 8 位非 sRGB（egui 在 gamma 空间混合）。最小化时暂停呈现；`Outdated` 自动重配；`Lost` 从窗口重建表面。
+- DPI：由 egui-winit 跟随窗口缩放；表面按物理像素配置。
+- 窗口位置、大小、最大化、全屏保存在 `<state>/window.json`（版本化设置文件），只有仍在某个显示器上的位置才会恢复；`--smoke-test` 不写入。
+- 单实例：界面模式在 `<state>/bae-gui.lock` 上加锁，第二个实例提示后退出（以后改为把参数转给已运行的实例）。`--smoke-test` 和 `--headless` 不加锁。
+- 原生菜单栏：muda。菜单项 id 就是命令 id（`file.open_project`、`app.quit` …）；命令系统合并后由注册的命令生成菜单。编辑菜单不设置原生快捷键，避免在 macOS 上抢走 egui 的 Cmd+Z / Cmd+C，快捷键由 11 的快捷键系统处理。
+- egui 的根视口命令（自绘标题栏的拖动、最小化、最大化、关闭）通过 `egui_winit::process_viewport_commands` 执行；`ViewportCommand::Close` 会关闭应用（除非同一帧有 `CancelClose`）。
+- 额外视口（浮动面板）：暂时 `ctx.set_embed_viewports(true)`，egui 把它们画成主窗口内的浮动窗。原生多窗口（每个视口一个 winit 窗口 + 一个 surface，共用同一设备）是后续工作。
+
+### 设备丢失
+
+`GpuContext::on_device_lost` 把丢失事件投递到事件循环。外壳保留窗口和界面状态，丢弃旧设备上的所有资源，用 `GpuContext::recreate` 的同一描述重新创建上下文、表面和 egui 渲染器，并把新的 `Arc<GpuContext>` 放回 `App`。连续失败 3 次后运行紧急保存并退出。其他持有旧上下文的子系统（渲染缓存、插件）需要在恢复后重建自己的资源：计划由 04 定义“GPU 上下文已更换”的事件。
+
+## 5. 视口纹理（零拷贝显示渲染结果）
+
+`bae_gpu::viewport::ViewportTextureRegistry`（资源类型 `Arc<ViewportTextureRegistry>`，由 `GpuModule` 插入）把“视口 id → `wgpu::TextureView`”交给界面，像素始终留在 GPU 上：
+
+```text
+bae-render ──publish(id, texture)──► ViewportTextureRegistry ◄──每帧同步── apps/bae 外壳（egui-wgpu）
+                                            │ display_handle(id)
+                                            ▼
+                              界面面板：egui::Image(TextureId::User(handle))
+```
+
+| 角色 | 调用 |
+|---|---|
+| 渲染器 | `let id = registry.create("comp main")`；渲染到纹理后 `registry.publish(id, &texture, FilterMode::Linear)`；纹理对象改变（分辨率变化、重新分配）时再次 `publish`；不用时 `registry.remove(id)`。同一纹理里画新内容**不需要**重新发布。 |
+| 外壳 | 每帧 `UiRenderer::sync_viewports`：注册表的 `generation()` 没变就什么都不做；新发布的视图用 `egui_wgpu::Renderer::register_native_texture` 注册，重新发布的用 `update_egui_texture_from_wgpu_texture` 重新绑定，删除的释放；然后 `set_display_handle(id, egui 的 User id)`。 |
+| 界面面板 | `registry.display_handle(id)` 得到 `u64`，用 `egui::TextureId::User(handle)` 画图；`registry.get(id)` 给出尺寸和格式。 |
+
+对发布纹理的要求：2D、带 `TEXTURE_BINDING`、可过滤的颜色格式（`Rgba8Unorm`、`Rgba16Float` …）、预乘 alpha、已经是界面期望的显示编码（06 的显示变换在发布之前完成）。注册表本身不依赖 egui，渲染 crate 只依赖 `bae-gpu`。
+
+目前外壳发布一张占位测试图（`ui::publish_placeholder_comp`），让“注册表 → egui-wgpu → 面板”的路径在渲染器合并前就被 `--smoke-test` 覆盖。
+
+## 6. 冒烟测试
+
+| 命令 | 内容 |
+|---|---|
+| `bae --smoke-test 120` | 打开窗口，尽快渲染 120 帧（`NoVsync`）后以 0 退出。窗口不能呈现时（被遮挡、CI 桌面）改为离屏渲染，测试仍然覆盖完整界面路径；20 秒没有进展或出现 wgpu 校验错误则以 1 退出。 |
+| `bae --headless --smoke-test 30` | 不创建窗口，在 1280×720 离屏纹理上渲染 30 帧界面，回读检查画面不是单色、没有校验错误。CI 使用这一项。 |
+
+## 7. 给其他工作流
+
+- 11 `ui/shell`：把 `apps/bae/src/ui/workspace.rs` 的占位工作区换成 `bae-ui` 的停靠和面板；`i18n.rs` 的小表换成 `bae-ui::i18n`；面板 / 工作区注册类型定义在 `bae-ui`，通过 `AppModule` 注册。迁移步骤见 `docs/spec/dependencies.md` 第 10 节。
+- 04 `render/compositor`：通过 `Arc<GpuContext>` 资源拿设备，用视口纹理注册表显示结果；`bae render` 子命令用 `cli::implement` 接管。
+- 17 `agent/api`：`bae mcp` 子命令同上；截图用 `bae_gpu::transfer::read_texture`。
+- 19 `core/plugins`：`App::unregister_owner(&Owner::plugin(id))` 卸载插件；原生 GPU 句柄用 `GpuContext::native_device` / `native_texture`；插件目录用 `AppDirs::plugin_dirs()`。
