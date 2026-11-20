@@ -283,11 +283,46 @@ fn compare(name: &str, t: &ColorTransform, input: &[[f32; 4]], out: &[[f32; 4]],
     worst
 }
 
+/// Software and virtual adapters (CI: WARP on Windows, the paravirtual GPU
+/// on macOS runners) implement `pow` / `exp2` / `log2` with less precision
+/// than hardware; their tolerances are scaled by this factor.
+fn tolerance_scale(ctx: &GpuContext) -> f64 {
+    match ctx.adapter_info().device_type {
+        wgpu::DeviceType::Cpu | wgpu::DeviceType::VirtualGpu | wgpu::DeviceType::Other => 4.0,
+        _ => 1.0,
+    }
+}
+
+/// Relative tolerance for inputs outside a curve's legal code range
+/// (mirrored negatives, extrapolation above 1). PQ extrapolated above 1 reaches
+/// linear values in the thousands, where f32 `pow` loses a few more digits.
+const EXTRAPOLATION_TOL: f64 = 1e-3;
+
 fn check(ctx: &GpuContext, name: &str, t: &ColorTransform, lo: f64, hi: f64, tol: f64) {
+    if hi <= lo {
+        return;
+    }
+    let tol = tol * tolerance_scale(ctx);
     let input = samples(lo, hi, 509);
     let out = run(ctx, &t.to_wgsl("cc"), &input, false);
     let worst = compare(name, t, &input, &out, tol);
-    eprintln!("{name:<40} max rel err {worst:.2e}");
+    eprintln!("{name:<40} max rel err {worst:.2e} (tol {tol:.0e})");
+}
+
+/// Splits a curve's encoded test range into the legal code range and the
+/// extrapolated parts: `(range, tolerance, label)`. Log curves are legal over
+/// their whole test range (ACEScc / ACEScct go above 1).
+fn curve_ranges(tf: TransferFunction, tol: f64) -> Vec<((f64, f64), f64, &'static str)> {
+    let (lo, hi) = tf.encoded_test_range();
+    if tf.is_log() {
+        return vec![((lo, hi), tol, "")];
+    }
+    let ext = tol.max(EXTRAPOLATION_TOL);
+    vec![
+        ((lo.max(0.0), hi.min(1.0)), tol, ""),
+        ((lo, hi.min(0.0)), ext, " (negative)"),
+        ((lo.max(1.0), hi), ext, " (above 1)"),
+    ]
 }
 
 #[test]
@@ -295,27 +330,30 @@ fn snippets_match_cpu_reference() {
     let Some(ctx) = context() else { return };
     eprintln!("GPU: {}", ctx.summary());
 
-    // Every curve, both directions. PQ amplifies f32 rounding (the
-    // `E^(1/m2) - c1` step cancels digits), so it gets a looser bound.
+    // Every curve, both directions, legal range and extrapolation separately.
+    // PQ amplifies f32 rounding (the `E^(1/m2) - c1` step cancels digits), so
+    // it gets a looser bound in its legal range too.
+    eprintln!("tolerance scale {}", tolerance_scale(&ctx));
     for tf in TransferFunction::ALL {
         let tol = if tf == TransferFunction::Pq {
             1e-4
         } else {
             2e-5
         };
-        let (lo, hi) = tf.encoded_test_range();
         let dec = ColorTransform::from_ops([ColorOp::Decode(tf)]);
-        check(&ctx, &format!("decode {tf:?}"), &dec, lo, hi, tol);
-        let (llo, lhi) = (tf.decode(lo), tf.decode(hi));
         let enc = ColorTransform::from_ops([ColorOp::Encode(tf)]);
-        check(
-            &ctx,
-            &format!("encode {tf:?}"),
-            &enc,
-            llo.max(-1.0),
-            lhi.min(200.0),
-            tol,
-        );
+        for ((lo, hi), tol, label) in curve_ranges(tf, tol) {
+            check(&ctx, &format!("decode {tf:?}{label}"), &dec, lo, hi, tol);
+            let (llo, lhi) = (tf.decode(lo), tf.decode(hi));
+            check(
+                &ctx,
+                &format!("encode {tf:?}{label}"),
+                &enc,
+                llo.max(-1.0),
+                lhi.min(200.0),
+                tol,
+            );
+        }
     }
 
     // Space conversions (merged chains).
@@ -360,6 +398,109 @@ fn snippets_match_cpu_reference() {
     ]);
     check(&ctx, "matrix+offset, clamp", &t, -0.5, 1.5, 1e-6);
 
+    // OCIO parametric ops, both directions and every negative style.
+    use bae_color::{CdlOp, LogOp, MoncurveOp, NegativeStyle, PowerOp};
+    for neg in [
+        NegativeStyle::Clamp,
+        NegativeStyle::Mirror,
+        NegativeStyle::PassThru,
+    ] {
+        let t = ColorTransform::from_ops([ColorOp::Power(PowerOp {
+            exponent: [2.2, 1.8, 2.6],
+            negative: neg,
+        })]);
+        check(&ctx, &format!("power {neg:?}"), &t, -0.5, 1.5, 2e-5);
+    }
+    for neg in [NegativeStyle::Linear, NegativeStyle::Mirror] {
+        for inverse in [false, true] {
+            let t = ColorTransform::from_ops([ColorOp::Moncurve(MoncurveOp {
+                gamma: [2.4, 2.2, 3.0],
+                offset: [0.055, 0.099, 0.16],
+                negative: neg,
+                inverse,
+            })]);
+            check(
+                &ctx,
+                &format!("moncurve {neg:?} inv={inverse}"),
+                &t,
+                -0.3,
+                1.3,
+                2e-5,
+            );
+        }
+    }
+    let logc = LogOp {
+        base: 10.0,
+        log_slope: [0.24719; 3],
+        log_offset: [0.385537; 3],
+        lin_slope: [5.555556; 3],
+        lin_offset: [0.0522723; 3],
+        lin_break: Some([0.010591; 3]),
+        linear_slope: None,
+        inverse: false,
+    };
+    check(
+        &ctx,
+        "logcamera fwd",
+        &ColorTransform::from_ops([ColorOp::Log(logc)]),
+        -0.05,
+        50.0,
+        2e-5,
+    );
+    check(
+        &ctx,
+        "logcamera inv",
+        &ColorTransform::from_ops([ColorOp::Log(logc.inverse())]),
+        -0.1,
+        1.2,
+        2e-5,
+    );
+    let mut affine = LogOp::log(2.0);
+    affine.log_slope = [0.1, 0.2, 0.3];
+    affine.lin_offset = [0.01, 0.02, 0.03];
+    check(
+        &ctx,
+        "log2 affine fwd",
+        &ColorTransform::from_ops([ColorOp::Log(affine)]),
+        0.001,
+        20.0,
+        2e-5,
+    );
+    check(
+        &ctx,
+        "log2 affine inv",
+        &ColorTransform::from_ops([ColorOp::Log(affine.inverse())]),
+        -1.0,
+        1.0,
+        2e-5,
+    );
+    for clamp in [true, false] {
+        let cdl = CdlOp {
+            slope: [1.1, 0.9, 1.05],
+            offset: [0.02, -0.01, 0.0],
+            power: [1.2, 0.85, 1.0],
+            saturation: 0.8,
+            clamp,
+            inverse: false,
+        };
+        check(
+            &ctx,
+            &format!("cdl clamp={clamp}"),
+            &ColorTransform::from_ops([ColorOp::Cdl(cdl)]),
+            -0.2,
+            1.2,
+            2e-5,
+        );
+        check(
+            &ctx,
+            &format!("cdl inv clamp={clamp}"),
+            &ColorTransform::from_ops([ColorOp::Cdl(cdl.inverse())]),
+            -0.2,
+            1.2,
+            2e-5,
+        );
+    }
+
     // 1D LUT long enough to wrap rows, with a non-unit domain.
     let mut l1 = Lut1d::identity(5000);
     for e in &mut l1.entries {
@@ -367,8 +508,18 @@ fn snippets_match_cpu_reference() {
     }
     l1.domain_min = [-0.25; 3];
     l1.domain_max = [1.5; 3];
-    let t = ColorTransform::from_ops([ColorOp::Lut1d(Arc::new(l1))]);
+    let l1 = Arc::new(l1);
+    let t = ColorTransform::from_ops([ColorOp::Lut1d(l1.clone())]);
     check(&ctx, "lut1d 5000", &t, -0.5, 2.0, 2e-6);
+    let t = ColorTransform::from_ops([ColorOp::Lut1dInverse(l1)]);
+    check(&ctx, "lut1d 5000 inverse", &t, -0.1, 1.6, 2e-5);
+    // A decreasing LUT.
+    let mut dec = Lut1d::identity(64);
+    for e in &mut dec.entries {
+        *e = [1.0 - e[0] * e[0], 1.0 - e[1], (1.0 - e[2]).powf(3.0)];
+    }
+    let t = ColorTransform::from_ops([ColorOp::Lut1dInverse(Arc::new(dec))]);
+    check(&ctx, "lut1d decreasing inverse", &t, -0.1, 1.1, 2e-5);
 
     // 3D LUTs, both interpolations, with a non-separable function.
     for interp in [Interpolation::Linear, Interpolation::Tetrahedral] {

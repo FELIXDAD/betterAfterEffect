@@ -423,6 +423,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "bae-plugin"
+version = "0.1.0"
+dependencies = [
+ "bae-model",
+ "bae-plugin-sdk",
+ "naga",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "toml",
+]
+
+[[package]]
+name = "bae-plugin-sdk"
+version = "0.1.0"
+
+[[package]]
 name = "bae-render"
 version = "0.1.0"
 dependencies = [
@@ -463,6 +481,23 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "wgpu",
+]
+
+[[package]]
+name = "bae-vector"
+version = "0.1.0"
+dependencies = [
+ "bae-anim",
+ "bae-gpu",
+ "bae-model",
+ "bae-render",
+ "bae-vector",
+ "glam",
+ "kurbo",
+ "parking_lot",
+ "rustc-hash 2.1.3",
+ "serde_json",
+ "vello",
 ]
 
 [[package]]
