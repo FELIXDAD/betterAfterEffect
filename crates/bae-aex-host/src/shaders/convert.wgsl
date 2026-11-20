@@ -12,8 +12,16 @@
 //   argb16  : two u32 per pixel, u16 A,R | G,B   (white = 32768)
 //   argb32f : four u32 per pixel, f32 A,R,G,B
 //   bgra128 : four u32 per pixel, f32 B,G,R,A    (AE GPU worlds)
-// Conversions match bae_aex_host::pixel (the CPU reference) bit for bit for
-// the integer formats; NaN is replaced by 0 for float formats.
+// Encoding matches bae_aex_host::pixel (the CPU reference) bit for bit for
+// every format; NaN is replaced by 0 (FloatPolicy::ZeroNan). Decoding into
+// rgba16float may differ from the CPU reference by at most 1 half-float ulp
+// because the hardware float->half rounding mode of storage-texture writes is
+// implementation defined (Metal on Apple GPUs does not round to nearest-even
+// for every value); 8 bpc -> half -> 8 bpc still round-trips exactly because
+// 1 half ulp is far below half an 8-bit step.
+//
+// NaN is detected with a bit test, never with `x != x`: shader compilers
+// running in fast-math mode (Metal) are allowed to fold `x != x` to false.
 
 struct Params {
     // Top-left of the region inside the texture.
@@ -37,13 +45,19 @@ fn load_px(p: vec2<u32>) -> vec4<f32> {
     return textureLoad(src_tex, vec2<i32>(p) + params.origin, 0);
 }
 
+// True where the lane is a NaN (exponent all ones, non-zero mantissa).
+fn is_nan4(v: vec4<f32>) -> vec4<bool> {
+    return (bitcast<vec4<u32>>(v) & vec4<u32>(0x7fffffffu)) > vec4<u32>(0x7f800000u);
+}
+
 fn no_nan(v: vec4<f32>) -> vec4<f32> {
-    return select(v, vec4<f32>(0.0), v != v);
+    return select(v, vec4<f32>(0.0), is_nan4(v));
 }
 
 fn to16(x: f32) -> u32 {
     // NaN -> 0 like the CPU path (saturating cast of NaN is 0 there).
-    let c = select(clamp(x, 0.0, 1.0), 0.0, x != x);
+    let nan = (bitcast<u32>(x) & 0x7fffffffu) > 0x7f800000u;
+    let c = select(clamp(x, 0.0, 1.0), 0.0, nan);
     return u32(c * 32768.0 + 0.5);
 }
 
