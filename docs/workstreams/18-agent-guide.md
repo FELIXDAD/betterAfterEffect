@@ -46,6 +46,8 @@
 
 ## 进度
 
+第一版：Draft PR #7（`agent/guide` → `dev`，2026-11-20）。修改类命令已按 02 合并的命令 ID 对齐。
+
 - [x] 指南大纲：`docs/agent-guide/README.md` 及 01–08 章
 - [x] 动画规范：`03-animation.md`（时长表、缓动预设与 cubic-bezier 换算、节奏、文字、Logo、转场、镜头运动、卡点）
 - [x] 操作流程与协作礼仪：`02-workflow.md`、`05-collaboration.md`；分镜规范 `04-storyboard.md`；质量清单与 rubric `06-quality.md`；常见错误 `08-mistakes.md`
@@ -59,7 +61,7 @@
 
 ### 受阻 / 待决定
 
-- 工具名、参数格式、属性路径（`transform.position` 等）、节点路径格式都是预期值，等 17 和 02 定稿。
+- 查询、渲染、事务、提案、批注类工具名和参数格式是预期值，等 17 定稿；属性名（`transform:position` 等）和节点路径中间段的约定等 02 的 Prim schema（PR D）。
 - MCP instructions 默认用英文还是中文：目前建议英文（见 `mcp-instructions/README.md`），等用户决定。
 - 分镜格字段名（以及是否增加"转场""声音"两个字段）等 13 定稿。
 
