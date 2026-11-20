@@ -85,6 +85,7 @@ fn probe_ae_renders() {
         "ae_h264.mp4",
         "ae_hq.mov",
         "ae_hq_alpha.mov",
+        "ae_tiff_00.tif",
         "ae_hd_h264.mp4",
         "ae_hd_hq.mov",
         "ae_hd_hq_alpha.mov",
