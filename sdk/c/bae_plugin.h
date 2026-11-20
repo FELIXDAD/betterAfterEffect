@@ -625,6 +625,7 @@ typedef struct BaeRenderInfo {
     BaeRect layer_bounds;       /* the layer's own bounds in render pixel space */
     uint64_t render_id;         /* unique per frame request; for logs */
     BaeParamValues params;      /* values at `time` */
+    BaeFlicks layer_duration;   /* duration of the layer (AE in_data total_time) */
 } BaeRenderInfo;
 
 /* Input sources for checkout_input. */
@@ -1279,7 +1280,7 @@ BAE_STATIC_ASSERT(offsetof(BaeParamDef, u) == 48, "BaeParamDef.u");
 BAE_STATIC_ASSERT(sizeof(BaeParamValue) == 40, "BaeParamValue");
 BAE_STATIC_ASSERT(sizeof(BaeParamValues) == 16, "BaeParamValues");
 BAE_STATIC_ASSERT(sizeof(BaeEffectDescription) == 40, "BaeEffectDescription");
-BAE_STATIC_ASSERT(sizeof(BaeRenderInfo) == 112, "BaeRenderInfo");
+BAE_STATIC_ASSERT(sizeof(BaeRenderInfo) == 120, "BaeRenderInfo");
 BAE_STATIC_ASSERT(sizeof(BaeInputRequest) == 48, "BaeInputRequest");
 BAE_STATIC_ASSERT(sizeof(BaeInputInfo) == 64, "BaeInputInfo");
 BAE_STATIC_ASSERT(sizeof(BaePreRenderArgs) == 48, "BaePreRenderArgs");
