@@ -129,6 +129,9 @@ uuid = { version = "1.29.3", features = ["v4", "v7", "serde"] }
 image = { version = "0.25.10", default-features = false }
 exr = { version = "1.74.3", default-features = false }
 png = "0.18.1"
+# 08 reads TIFF directly (image's TIFF path drops AE's alpha, which is tagged
+# "unspecified"); same version image uses, no CCITT fax codec.
+tiff = { version = "0.11.3", default-features = false, features = ["deflate", "jpeg", "lzw"] }
 zune-jpeg = "0.5.15"
 symphonia = { version = "0.6.1", default-features = false }
 cpal = "0.18.2"

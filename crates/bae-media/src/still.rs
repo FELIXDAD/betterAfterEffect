@@ -1,5 +1,5 @@
-//! Still-image formats: PNG (`png`), JPEG (`zune-jpeg`), WebP and TIFF
-//! (`image`'s `image-webp` / `tiff`) and OpenEXR (`exr`), all pure Rust.
+//! Still-image formats: PNG (`png`), JPEG (`zune-jpeg`), WebP (`image`'s
+//! `image-webp`), TIFF (`tiff`) and OpenEXR (`exr`), all pure Rust.
 //!
 //! Opening reads only the header (size, bit depth, color tags, alpha,
 //! timecode); pixels are decoded on each [`MediaSource::decode_cpu`] call into
@@ -439,11 +439,157 @@ fn decode_webp(path: &Path) -> Result<Decoded, MediaError> {
 // ---- TIFF ------------------------------------------------------------------
 
 /// Baseline TIFF (8 / 16-bit integer and 32-bit float, gray / RGB, with or
-/// without alpha; uncompressed, LZW, Deflate, PackBits, JPEG). Alpha mode
-/// from the `ExtraSamples` tag (associated = premultiplied, AE's default for
-/// "TIFF Sequence with Alpha"); the first image of multi-page files.
+/// without alpha; uncompressed, LZW, Deflate, PackBits, JPEG); the first image
+/// of multi-page files.
+///
+/// Alpha: an extra sample after gray or RGB is alpha. `ExtraSamples` says how:
+/// associated (1) = premultiplied, unassociated (2) = straight. AE's "TIFF
+/// Sequence with Alpha" writes premultiplied pixels tagged *unspecified* (0)
+/// (checked against AE 2026 output), so an explicit 0 reads as premultiplied;
+/// a missing tag (writers that omit it) reads as straight.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TiffFormat;
+
+/// What the header of a TIFF says about its pixels.
+struct TiffLayout {
+    width: u32,
+    height: u32,
+    /// Samples per pixel (1 gray, 2 gray + alpha, 3 RGB, 4 RGBA).
+    samples: usize,
+    bits: u8,
+    float: bool,
+    alpha: AlphaMode,
+    /// The alpha sample is tagged "unspecified", which the `tiff` decoder
+    /// drops; decoding works on a copy tagged "associated".
+    unspecified_alpha: bool,
+    icc: Option<Vec<u8>>,
+}
+
+fn tiff_layout<R: std::io::Read + std::io::Seek>(
+    decoder: &mut tiff::decoder::Decoder<R>,
+    path: &Path,
+) -> Result<TiffLayout, MediaError> {
+    use tiff::tags::Tag;
+
+    let err = |e: tiff::TiffError| MediaError::decode(path, e);
+    let (width, height) = decoder.dimensions().map_err(err)?;
+    let photometric: u16 = decoder
+        .find_tag_unsigned(Tag::PhotometricInterpretation)
+        .map_err(err)?
+        .unwrap_or(2);
+    let samples: usize = decoder
+        .find_tag_unsigned(Tag::SamplesPerPixel)
+        .map_err(err)?
+        .unwrap_or(1);
+    let bits: u16 = decoder
+        .find_tag_unsigned_vec::<u16>(Tag::BitsPerSample)
+        .map_err(err)?
+        .and_then(|v| v.first().copied())
+        .unwrap_or(1);
+    let float = decoder
+        .find_tag_unsigned_vec::<u16>(Tag::SampleFormat)
+        .map_err(err)?
+        .is_some_and(|v| v.first() == Some(&3));
+    let color_samples = match photometric {
+        0 | 1 => 1, // WhiteIsZero, BlackIsZero
+        2 => 3,     // RGB
+        other => {
+            return Err(MediaError::Unsupported(format!(
+                "TIFF photometric interpretation {other} (CMYK, YCbCr, palette …)"
+            )));
+        }
+    };
+    if !(color_samples..=color_samples + 1).contains(&samples) {
+        return Err(MediaError::Unsupported(format!(
+            "TIFF with {samples} samples per pixel"
+        )));
+    }
+    let extra = decoder
+        .find_tag_unsigned_vec::<u16>(Tag::ExtraSamples)
+        .map_err(err)?
+        .and_then(|v| v.first().copied());
+    let alpha = if samples > color_samples {
+        match extra {
+            // Explicitly unspecified (AE) or associated.
+            Some(0 | 1) => AlphaMode::Premultiplied,
+            // Unassociated, or no tag at all (generic writers that omit it
+            // write straight RGBA).
+            _ => AlphaMode::Straight,
+        }
+    } else {
+        AlphaMode::Opaque
+    };
+    let icc = decoder.get_tag_u8_vec(Tag::IccProfile).ok();
+    Ok(TiffLayout {
+        width,
+        height,
+        samples,
+        bits: bits.min(32) as u8,
+        float,
+        alpha,
+        unspecified_alpha: samples > color_samples && extra == Some(0),
+        icc,
+    })
+}
+
+/// Rewrites a single, inline `ExtraSamples` value of 0 (unspecified) to 1
+/// (associated) in the first IFD of a classic TIFF held in memory. Returns
+/// whether it did.
+fn tag_unspecified_alpha_as_associated(bytes: &mut [u8]) -> bool {
+    let big_endian = match bytes.get(..2) {
+        Some(b"II") => false,
+        Some(b"MM") => true,
+        _ => return false,
+    };
+    let u16_at = |b: &[u8], at: usize| -> Option<u16> {
+        let v: [u8; 2] = b.get(at..at + 2)?.try_into().ok()?;
+        Some(if big_endian {
+            u16::from_be_bytes(v)
+        } else {
+            u16::from_le_bytes(v)
+        })
+    };
+    let u32_at = |b: &[u8], at: usize| -> Option<u32> {
+        let v: [u8; 4] = b.get(at..at + 4)?.try_into().ok()?;
+        Some(if big_endian {
+            u32::from_be_bytes(v)
+        } else {
+            u32::from_le_bytes(v)
+        })
+    };
+    let Some(ifd) = (u16_at(bytes, 2) == Some(42))
+        .then(|| u32_at(bytes, 4))
+        .flatten()
+        .map(|o| o as usize)
+    else {
+        return false;
+    };
+    let Some(count) = u16_at(bytes, ifd) else {
+        return false;
+    };
+    for i in 0..usize::from(count) {
+        let entry = ifd + 2 + i * 12;
+        // Tag 338, type SHORT (3), one value, inline value 0.
+        if u16_at(bytes, entry) == Some(338)
+            && u16_at(bytes, entry + 2) == Some(3)
+            && u32_at(bytes, entry + 4) == Some(1)
+            && u16_at(bytes, entry + 8) == Some(0)
+        {
+            let one = if big_endian {
+                1_u16.to_be_bytes()
+            } else {
+                1_u16.to_le_bytes()
+            };
+            bytes[entry + 8..entry + 10].copy_from_slice(&one);
+            return true;
+        }
+    }
+    false
+}
+
+fn tiff_decoder(path: &Path) -> Result<tiff::decoder::Decoder<BufReader<File>>, MediaError> {
+    tiff::decoder::Decoder::new(open_file(path)?).map_err(|e| MediaError::decode(path, e))
+}
 
 impl MediaFormat for TiffFormat {
     fn id(&self) -> &str {
@@ -463,31 +609,26 @@ impl MediaFormat for TiffFormat {
     }
 
     fn open(&self, path: &Path) -> Result<Box<dyn MediaSource>, MediaError> {
-        use image::ImageDecoder as _;
-
-        let mut decoder = image::codecs::tiff::TiffDecoder::new(open_file(path)?)
-            .map_err(|e| MediaError::decode(path, e))?;
-        let (width, height) = decoder.dimensions();
-        let color = decoder.color_type();
-        let (bits, sample_type) = match color.bytes_per_pixel() / color.channel_count() {
-            1 => (8, SampleType::UInt),
-            2 => (16, SampleType::UInt),
-            _ => (32, SampleType::Float),
-        };
-        let mut video = still_video(width, height, bits, sample_type, "tiff");
-        video.alpha = if color.has_alpha() {
-            match tiff_extra_samples(path) {
-                Some(1) => AlphaMode::Premultiplied,
-                _ => AlphaMode::Straight,
-            }
+        let mut decoder = tiff_decoder(path)?;
+        let layout = tiff_layout(&mut decoder, path)?;
+        let sample_type = if layout.float {
+            SampleType::Float
         } else {
-            AlphaMode::Opaque
+            SampleType::UInt
         };
+        let mut video = still_video(
+            layout.width,
+            layout.height,
+            layout.bits,
+            sample_type,
+            "tiff",
+        );
+        video.alpha = layout.alpha;
         video.color.matrix = MatrixCoefficients::Identity;
-        if sample_type == SampleType::Float {
+        if layout.float {
             video.color.transfer = TransferFunction::Linear;
         }
-        video.color.icc_profile = decoder.icc_profile().ok().flatten().map(Arc::from);
+        video.color.icc_profile = layout.icc.map(Arc::from);
         Ok(Box::new(StillSource::new(
             path,
             "tiff",
@@ -497,101 +638,76 @@ impl MediaFormat for TiffFormat {
     }
 }
 
-/// The first `ExtraSamples` value of the first image (0 unspecified, 1
-/// associated alpha, 2 unassociated alpha). Classic TIFF only.
-fn tiff_extra_samples(path: &Path) -> Option<u16> {
-    use std::io::{Read, Seek, SeekFrom};
-
-    let mut file = File::open(path).ok()?;
-    let mut header = [0_u8; 8];
-    file.read_exact(&mut header).ok()?;
-    let big_endian = match &header[..2] {
-        b"II" => false,
-        b"MM" => true,
-        _ => return None,
-    };
-    let u16_at = |b: &[u8]| {
-        let b = [b[0], b[1]];
-        if big_endian {
-            u16::from_be_bytes(b)
-        } else {
-            u16::from_le_bytes(b)
-        }
-    };
-    let u32_at = |b: &[u8]| {
-        let b = [b[0], b[1], b[2], b[3]];
-        if big_endian {
-            u32::from_be_bytes(b)
-        } else {
-            u32::from_le_bytes(b)
-        }
-    };
-    if u16_at(&header[2..4]) != 42 {
-        return None;
-    }
-    file.seek(SeekFrom::Start(u64::from(u32_at(&header[4..8]))))
-        .ok()?;
-    let mut count = [0_u8; 2];
-    file.read_exact(&mut count).ok()?;
-    let count = usize::from(u16_at(&count)).min(4096);
-    let mut entries = vec![0_u8; count * 12];
-    file.read_exact(&mut entries).ok()?;
-    entries.as_chunks::<12>().0.iter().find_map(|entry| {
-        // Tag 338 = ExtraSamples, type 3 = SHORT; the first value sits in the
-        // first two bytes of the value field.
-        (u16_at(&entry[0..2]) == 338 && u16_at(&entry[2..4]) == 3).then(|| u16_at(&entry[8..10]))
-    })
-}
-
 fn decode_tiff(path: &Path) -> Result<Decoded, MediaError> {
-    use image::ImageDecoder as _;
+    use tiff::decoder::DecodingResult;
 
-    let decoder = image::codecs::tiff::TiffDecoder::new(open_file(path)?)
-        .map_err(|e| MediaError::decode(path, e))?;
-    let (width, height) = decoder.dimensions();
-    let color = decoder.color_type();
-    let channels = usize::from(color.channel_count());
-    let sample_bytes = usize::from(color.bytes_per_pixel()) / channels;
-    let mut buf = vec![0; decoder.total_bytes() as usize];
-    decoder
-        .read_image(&mut buf)
-        .map_err(|e| MediaError::decode(path, e))?;
+    let mut decoder = tiff_decoder(path)?;
+    let layout = tiff_layout(&mut decoder, path)?;
+    let image = if layout.unspecified_alpha {
+        let mut bytes = std::fs::read(path).map_err(|e| MediaError::io(path, e))?;
+        if !tag_unspecified_alpha_as_associated(&mut bytes) {
+            return Err(MediaError::Unsupported(
+                "TIFF alpha tagged unspecified in an unusual layout".into(),
+            ));
+        }
+        tiff::decoder::Decoder::new(std::io::Cursor::new(bytes)).and_then(|mut d| d.read_image())
+    } else {
+        decoder.read_image()
+    }
+    .map_err(|e| MediaError::decode(path, e))?;
+    let (width, height, channels) = (layout.width, layout.height, layout.samples);
     let pixels = width as usize * height as usize;
-    let (format, data) = match sample_bytes {
-        1 => {
-            let data = if channels == 4 {
-                buf
-            } else {
-                let mut data = Vec::with_capacity(pixels * 4);
-                for px in buf.chunks_exact(channels) {
-                    data.extend_from_slice(&expand_to_rgba(channels, |i| px[i], u8::MAX));
-                }
-                data
-            };
+    let check = |len: usize| {
+        if len < pixels * channels {
+            Err(MediaError::decode(path, "TIFF image data is short"))
+        } else {
+            Ok(())
+        }
+    };
+    let (format, data) = match image {
+        DecodingResult::U8(buf) => {
+            check(buf.len())?;
+            let mut data = Vec::with_capacity(pixels * 4);
+            for px in buf.chunks_exact(channels).take(pixels) {
+                data.extend_from_slice(&expand_to_rgba(channels, |i| px[i], u8::MAX));
+            }
             (PixelFormat::Rgba8, data)
         }
-        2 => {
-            // `image` delivers native-endian samples.
+        DecodingResult::U16(buf) => {
+            check(buf.len())?;
             let mut data = Vec::with_capacity(pixels * 8);
-            for px in buf.chunks_exact(channels * 2) {
-                let s = |i: usize| u16::from_ne_bytes([px[2 * i], px[2 * i + 1]]);
-                for v in expand_to_rgba(channels, s, u16::MAX) {
+            for px in buf.chunks_exact(channels).take(pixels) {
+                for v in expand_to_rgba(channels, |i| px[i], u16::MAX) {
                     data.extend_from_slice(&v.to_ne_bytes());
                 }
             }
             (PixelFormat::Rgba16, data)
         }
-        _ => {
+        DecodingResult::F32(buf) => {
+            check(buf.len())?;
             let mut data = Vec::with_capacity(pixels * 16);
-            for px in buf.chunks_exact(channels * 4) {
-                let s = |i: usize| {
-                    f32::from_ne_bytes([px[4 * i], px[4 * i + 1], px[4 * i + 2], px[4 * i + 3]])
-                };
-                for v in expand_to_rgba(channels, s, 1.0) {
+            for px in buf.chunks_exact(channels).take(pixels) {
+                for v in expand_to_rgba(channels, |i| px[i], 1.0) {
                     data.extend_from_slice(&v.to_ne_bytes());
                 }
             }
             (PixelFormat::Rgba32Float, data)
+        }
+        DecodingResult::F16(buf) => {
+            check(buf.len())?;
+            let mut data = Vec::with_capacity(pixels * 8);
+            for px in buf.chunks_exact(channels).take(pixels) {
+                for v in expand_to_rgba(channels, |i| px[i], f16::ONE) {
+                    data.extend_from_slice(&v.to_ne_bytes());
+                }
+            }
+            (PixelFormat::Rgba16Float, data)
+        }
+        _ => {
+            return Err(MediaError::Unsupported(format!(
+                "{}-bit TIFF samples",
+                layout.bits
+            )));
         }
     };
     Ok((width, height, format, data))
