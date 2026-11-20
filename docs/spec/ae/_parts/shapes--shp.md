@@ -481,12 +481,13 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
   | Highlight Length (高光长度) | scalar | 0 | −100–100 (UNVERIFIED) | % | Radial only; Lottie `h` |
   | Highlight Angle (高光角度) | angle | 0 | any | degrees | Radial only; Lottie `a` |
   | Colors (颜色) | gradient | white→black (UNVERIFIED) | — | — | `ADBE Vector Grad Colors`, Lottie `g`; AE-SHP-025 |
+  | Scale / Rotation (缩放 / 旋转) | — | identity | — | — | AE 26.x+, AE-SHP-063 (UI position UNVERIFIED) |
   | Opacity (不透明度) | scalar | 100 | 0–100 | % | `ADBE Vector Fill Opacity` |
   - Geometry and stacking exactly as Fill (AE-SHP-016); colour per pixel from AE-SHP-027/028 evaluated in the fill's group space (gradient moves/scales with group transforms).
   - Shape tools: when a shape is drawn with gradient fill, Start/End are placed relative to the drawn shape (UNVERIFIED: start at shape centre, end at its right edge); with the Pen tool both points start at the layer centre (Adobe).
 - **Priority:** P0
 - **Owner:** bae-vector (+ bae-color)
-- **Notes:** Lottie `ty: "gf"`. Gradient colours are clamped to [0,1] like solid colours. The Colors property cannot be read or set by expressions or scripting in AE (no value type; UNVERIFIED for AE 2024+). Lottie also defines Type 3 Conic, which AE does not produce.
+- **Notes:** Lottie `ty: "gf"`. Since AE 26.x Gradient Fill and Gradient Stroke also carry Scale and Rotation properties (AE-SHP-063). Gradient colours are clipped to [0,1] like solid colours (Adobe). The Colors property cannot be read or set by expressions or scripting in AE (no value type; UNVERIFIED for AE 2024+). Lottie also defines Type 3 Conic, which AE does not produce.
 
 ### AE-SHP-024 · Gradient Stroke (渐变描边)
 
@@ -559,6 +560,20 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
 - **Priority:** P0 (plain radial) / P1 (highlight)
 - **Owner:** bae-vector
 - **Notes:** Lottie `h` is percent (lottie-web multiplies by 0.01), `a` in degrees. lottie-web canvas uses `createRadialGradient(F, 0, S, r)`, SVG uses `fx/fy`. UNVERIFIED: AE clamps highlight to ±100 % and how AE renders |h| → 100 % (lottie-web clamps to 0.99 to avoid the degenerate cone). Vello `Gradient::new_two_point_radial(F, 0, S, r)`.
+
+### AE-SHP-063 · Gradient Scale and Rotation (渐变缩放和旋转（译名待核）)
+
+- **What it does:** Animatable Scale and Rotation properties on Gradient Fill and Gradient Stroke that stretch, squash and rotate the gradient independently of Start/End Point (e.g. elliptical radial gradients), added for Illustrator/SVG gradient fidelity.
+- **Exact semantics:**
+  | Parameter (中文) | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|
+  | Scale (缩放) | UNVERIFIED (best understanding: 2D, linked) | UNVERIFIED (best understanding: (100, 100)) | UNVERIFIED | % | gradient-space scale; matchName UNVERIFIED |
+  | Rotation (旋转) | angle | UNVERIFIED (best understanding: 0) | any | degrees | gradient-space rotation; matchName UNVERIFIED |
+  - Adobe documents only that they exist on all shape-layer gradients (native, converted Illustrator and imported SVG), combine with the existing gradient properties and are animatable. UNVERIFIED reconstruction: the gradient coordinate `t` (AE-SHP-027/028) is evaluated at `G⁻¹ · p`, where `G = T(Start) · R(Rotation) · S(Scale/100) · T(−Start)` (pivot at Start Point), so non-uniform Scale turns a radial gradient elliptical; SVG `gradientTransform` maps onto these plus Start/End.
+  - Defaults are identity, so files from earlier versions render unchanged.
+- **Priority:** P2 — new in AE 26.x; needed mainly for SVG/Illustrator import fidelity
+- **Owner:** bae-vector (+ bae-model)
+- **Notes:** Introduced in AE 26.x (public beta 26.0x8, October 2025; listed under "Improved Illustrator layer conversion" in Adobe's What's New for the 2026 releases). Not in the Lottie format (bake into Start/End where the transform is a similarity; otherwise export is lossy). Sources: https://helpx.adobe.com/after-effects/using/creating-shapes-masks.html ("use the Scale and Rotation properties to animate the gradient"), https://community.adobe.com/t5/after-effects-beta-discussions/new-vector-workflow-enhancements-in-after-effects-beta/td-p/15559138. Pivot, defaults, ranges, dimensionality and matchNames must be checked in AE 26.x before implementation.
 
 ## Group transform
 
@@ -994,6 +1009,18 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
 - **Owner:** bae-motion (+ bae-anim)
 - **Notes:** Script (CC 2018 / 15.0+), not core AE. BAE can ship an equivalent command; it depends on expression path methods (transform-keyframes-expressions.md).
 
+### AE-SHP-064 · SVG import and paste as shape layers (将 SVG 导入或粘贴为形状图层（译名待核）)
+
+- **What it does:** SVG files can be imported (or SVG/Illustrator clipboard content pasted) directly as native, editable shape layers instead of rasterised footage.
+- **Exact semantics:**
+  - Import (AE 26.x): File > Import of an .svg offers import as a composition of native shape layers (editable vectors) or as rasterised footage (Adobe What's New: "Import SVG file as footage or as a composition"). As footage, it can later be converted with Create Shapes from Vector Layer (AE-SHP-048).
+  - Paste (AE 26.3, June 2026): Edit > Paste of SVG content copied from Illustrator or other apps creates native, editable shape layers.
+  - Preserved (Adobe): paths, fills, strokes, gradient fills/strokes (with gradient Scale/Rotation, AE-SHP-063) and transparency. Not supported (Adobe beta notes): SVG text (convert to outlines first), animated SVG, embedded raster images; an SVG imported as a composition gets a 1-frame duration and keeps no reference to the source file (Collect Files does not include it) (UNVERIFIED whether these beta limitations still hold in release builds).
+  - UNVERIFIED mapping details: one shape layer per top-level SVG element/group vs. one per file; how `transform` attributes map to group transforms; `fill-rule` → Fill Rule (AE-SHP-017); `stroke-dasharray` → Dashes (AE-SHP-020); `viewBox` scaling.
+- **Priority:** P1 — SVG is the main interchange path for BAE (Figma/Illustrator/Lottie workflows)
+- **Owner:** bae-media (+ bae-motion, bae-vector)
+- **Notes:** The import-format list and import dialog belong to ui-preview-render-io.md (import formats); this item defines the shape-layer result. BAE decision: implement SVG → shape-layer conversion as a bae-motion command over a bae-media SVG parser (usvg-style normalisation), shared by import, paste and AE-SHP-048. Sources: https://helpx.adobe.com/after-effects/using/whats-new.html, https://community.adobe.com/t5/after-effects-beta-discussions/new-vector-workflow-enhancements-in-after-effects-beta/td-p/15559138.
+
 ## Shape tools
 
 ### AE-SHP-051 · Shape tool target and Tool Creates Shape / Mask (工具创建形状 / 工具创建蒙版)
@@ -1100,7 +1127,14 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
 
 - **What it does:** Composition-panel interaction with shape contents: group selection mode vs. path editing, group transform box, gradient handles.
 - **Exact semantics:**
-  - Clicking a shape with the Selection tool selects the layer; clicking again (or double-clicking) enters the group and selects the group (dashed transform box with anchor), further double-clicks drill into nested groups / path editing (UNVERIFIED exact click sequence).
+  - Selection levels (Adobe): layer selection → group selection → free-transform → path editing.
+    - Clicking inside the layer bounds with the Selection tool selects the layer; clicking inside the layer bounds but outside all shape paths deselects all shapes while keeping the layer selected.
+    - Double-clicking a member of a group selects its group (dashed transform box with anchor); each further double-click descends one level of the group hierarchy.
+    - Ctrl/Cmd with the Selection tool = Direct Selection tool: clicking a shape selects that shape's own (innermost) group directly, however deeply nested.
+    - With a group selected, clicking another group in the same parent selects it; Shift-click adds a group to the selection (combinable with double-click and Direct Selection).
+    - Path editing: click a vertex/segment (Shift-click adds); Alt/Option-click selects the whole path; Ctrl/Cmd+A with part of a path selected selects all its points; marquee-drag selects vertices.
+    - Free-transform: double-click a path segment in path-editing mode or in group selection mode for a single shape, or select the Path property and press Ctrl/Cmd+T (AE-SHP-044).
+  - Vertex and handle display size: Preferences > Appearance > Path Point and Handle Size.
   - Dragging/handles of the group box edit the group's Transform (Position, Scale with Shift proportional, Rotation outside the box, Anchor by dragging the anchor icon); Alt/Option-drag duplicates the group while transforming.
   - With a group containing a gradient paint selected, Start Point, End Point and Highlight controls are draggable (pointer changes to the gradient pointer).
   - Arrow keys nudge the selected group (1 px, Shift 10 px) (UNVERIFIED).
@@ -1151,13 +1185,13 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
   | Topic | AE (this spec) | lottie-web | Skottie |
   |---|---|---|---|
   | Merge Paths | Boolean ops, suppresses paints above (AE-SHP-031) | not implemented | implemented |
-  | Group opacity | per paint (UNVERIFIED, AE-SHP-030) | per paint | isolated layer |
+  | Group opacity | isolated (UNVERIFIED, AE-SHP-030) | canvas: per paint; SVG: isolated (`<g opacity>`) | isolated layer |
   | Paint Composite "Above" | supported (AE-SHP-004) | not in format | not in format |
-  | Taper / Wave / Offset Copies | supported | not in format | not in format |
+  | Taper / Wave / Offset Copies / gradient Scale-Rotation (AE-SHP-063) | supported | not in format | not in format |
   | Wiggle Paths / Wiggle Transform | supported | not in format | not in format |
   | Twist | supported | ignored | ignored |
   | Polystar fractional Points | UNVERIFIED (AE-SHP-012) | floor | floor |
-  | Ellipse kappa | UNVERIFIED (AE-SHP-011) | 0.5519 | 0.5519 (UNVERIFIED) |
+  | Ellipse kappa | UNVERIFIED (AE-SHP-011) | 0.5519 | UNVERIFIED (Skia ovals are built from conics, i.e. exact circles, if Skottie uses `SkPath` ovals) |
   | Trim arc length | exact | 150 samples/segment | exact-ish |
   | Gradient midpoints | native | baked by exporter | baked |
   - BAE import of a Lottie file must reproduce lottie-web's look where the format is lossy (e.g. no Composite key → default order); BAE export bakes unsupported features (e.g. Wiggle Paths → path keyframes per frame, taper → filled outline path) when the user opts in.
@@ -1179,5 +1213,5 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
   - Only available when the comp renderer is not Classic 3D; ignored by the Classic 3D renderer.
 - **Priority:** P2
 - **Owner:** bae-render (+ bae-vector)
-- **Notes:** Renderer selection, materials and lighting: compositing-3d-color.md (Advanced 3D/C4D, P2). Introduced with the Cinema 4D renderer in AE CC 2013 (12.0) (UNVERIFIED); Advanced 3D renderer AE 24.x.
+- **Notes:** Renderer selection, materials and lighting: compositing-3d-color.md (Advanced 3D/C4D, P2). Introduced with the Cinema 4D renderer in AE CC 2013 (12.0) (UNVERIFIED); Advanced 3D renderer AE 24.0 (2023). AE 27.0 (November 2026) adds Substance 3D materials on 3D text and shape layers (Advanced 3D; compositing-3d-color.md).
 
