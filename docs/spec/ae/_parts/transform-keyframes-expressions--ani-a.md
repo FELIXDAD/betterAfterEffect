@@ -67,7 +67,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   | Parameter (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
   | Position (位置) | 2-D / 3-D float | (W/2, H/2[, 0]) | unbounded | parent-space px | spatial; motion path in comp viewer |
-  | X Position / Y Position / Z Position (X 位置 / Y 位置 / Z 位置) | 1-D float each | components of Position | unbounded | px | only exist while Separate Dimensions is on (AE-ANI-062) |
+  | X Position / Y Position / Z Position (X 位置 / Y 位置 / Z 位置) | 1-D float each | components of Position | unbounded | px | only exist while Separate Dimensions is on (AE-ANI-052) |
 
   - Position z: positive = farther from the viewer (smaller under a perspective camera).
   - For a 2D layer the stored value may still carry a z (kept from a former 3D state); it is ignored for rendering and hidden in the UI.
@@ -93,7 +93,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   - Edit Value dialog lets the user enter scale as % of source or as pixels (Width/Height), with "Include Pixel Aspect Ratio" (AE-ANI-012).
 - **Priority:** P0
 - **Owner:** bae-anim (+ bae-model, bae-ui-motion)
-- **Notes:** Lottie `ks.s` in percent. Exponential Scale assistant: AE-ANI-104. Keyboard: Alt/Option + numpad +/- = ±1 %, with Shift ±10 % (ui-preview-render-io.md). Raster softening on downscale depends on layer Quality (compositing-3d-color.md, Quality/sampling).
+- **Notes:** Lottie `ks.s` in percent. Exponential Scale assistant: AE-ANI-078. Keyboard: Alt/Option + numpad +/- = ±1 %, with Shift ±10 % (ui-preview-render-io.md). Raster softening on downscale depends on layer Quality (compositing-3d-color.md, Quality/sampling).
 
 ### AE-ANI-005 · Rotation (2D) (旋转)
 
@@ -138,7 +138,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   | Orientation (方向) | 3-D float (x°, y°, z°) | (0, 0, 0) | each component wraps to [0, 360) on entry | degrees | displayed `0.0°,0.0°,0.0°` |
 
   - Matrix contribution: `Rx(ox) * Ry(oy) * Rz(oz)` (so z is applied to the point first), applied **outside** (after) X/Y/Z Rotation; see AE-ANI-014.
-  - Interpolation between Orientation keyframes is **not** per-component: AE converts each keyframe to a rotation and interpolates along the shortest arc (spherical); see AE-ANI-077. Hence Orientation cannot express more than a half turn between two keys.
+  - Interpolation between Orientation keyframes is **not** per-component: AE converts each keyframe to a rotation and interpolates along the shortest arc (spherical); see AE-ANI-057. Hence Orientation cannot express more than a half turn between two keys.
   - Orientation keyframes have spatial-like interpolation only in time (no motion path); lottie-web discards the `to/ti` spatial tangents of `or` keyframes.
 - **Priority:** P0
 - **Owner:** bae-anim (+ bae-model)
@@ -194,7 +194,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   | Environment (环境光（译名待核）, Advanced 3D only) | Orientation/rotations only (UNVERIFIED), see compositing-3d-color.md |
 
   - Default Point of Interest = (W/2, H/2, 0). Default Position is offset up-right-toward-viewer from the comp centre (UNVERIFIED: (W/2 + W/36, H/2 − W/36, −Zoom/3), e.g. (1013.3, 486.7, −888.9) at 1920×1080).
-  - Auto-Orient default for spot/parallel lights: Orient Towards Point of Interest. Choosing Off makes the light ignore its POI (AE-ANI-021).
+  - Auto-Orient default for spot/parallel lights: Orient Towards Point of Interest. Choosing Off makes the light ignore its POI (AE-ANI-022).
 - **Priority:** P0
 - **Owner:** bae-anim (+ bae-model, bae-render)
 - **Notes:** Lighting/shadow rendering: compositing-3d-color.md (Lights). Lottie light layers are not supported by lottie-web (export ignores them).
@@ -207,15 +207,15 @@ Conventions used in this file (apply to every item unless an item says otherwise
   | Command (中文) | Shortcut (Win / Mac) | Effect |
   |---|---|---|
   | Reset (重置) | — | resets all Transform properties to defaults (AE-ANI-001) |
-  | Anchor Point… / Position… / Scale… / Orientation… / Rotation… / Opacity… (锚点… 等) | Scale… Ctrl+Shift+S? UNVERIFIED; others none | opens the Edit Value dialog (AE-ANI-012) |
+  | Anchor Point… / Position… / Scale… / Orientation… / Rotation… / Opacity… (锚点… 等) | Position… Ctrl+Shift+P / Cmd+Shift+P; Rotation… Ctrl+Shift+R / Cmd+Shift+R; Opacity… Ctrl+Shift+O / Cmd+Shift+O; Anchor Point…, Scale…, Orientation…: none in the shortcut reference | opens the Edit Value dialog (AE-ANI-012) |
   | Flip Horizontal (水平翻转) | — | `scale.x *= -1` (keyframes: all keys of Scale? UNVERIFIED: sets value at CTI / adds key if animated) |
   | Flip Vertical (垂直翻转) | — | `scale.y *= -1` |
   | Center Anchor Point in Layer Content (在图层内容中居中放置锚点) | Ctrl+Alt+Home / Cmd+Opt+Home | anchor = centre of the layer's content bounds (shape layer: bounds of all shapes; text: text bounds; masked layer: bounds of the masked visible area), Position compensated so the layer does not move |
-  | Center In View (在视图中居中（译名待核）) | Ctrl+Home / Cmd+Home | moves the layer so its anchor is at the centre of the current view (UNVERIFIED shortcut) |
+  | Center In View (在视图中居中（译名待核）) | Ctrl+Home / Cmd+Home | changes Position so the anchor point of each selected layer is at the centre of the current view |
   | Fit to Comp (适合复合) | Ctrl+Alt+F / Cmd+Opt+F | non-uniform scale so the layer bounds exactly fill the comp; anchor/position centred |
   | Fit to Comp Width (适合复合宽度) | Ctrl+Alt+Shift+H / Cmd+Opt+Shift+H | uniform scale so width = comp width, centred |
   | Fit to Comp Height (适合复合高度) | Ctrl+Alt+Shift+G / Cmd+Opt+Shift+G | uniform scale so height = comp height, centred |
-  | Auto-Orient… (自动定向…) | Ctrl+Alt+O / Cmd+Opt+O | Auto-Orientation dialog (AE-ANI-019) |
+  | Auto-Orient… (自动定向…) | Ctrl+Alt+O / Cmd+Opt+O | Auto-Orientation dialog (AE-ANI-018) |
 
   - All commands are single undoable Commands and respect animated properties by writing the value at the CTI (adding a keyframe if the stopwatch is on).
 - **Priority:** P1 (Reset, Fit to Comp, Center Anchor are P0-adjacent but non-blocking)
@@ -273,7 +273,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 
   Or  = Rx(or.x) * Ry(or.y) * Rz(or.z)          // Orientation: z applied first, then y, then x
   Rot = Rx(xRot) * Ry(yRot) * Rz(zRot)          // X/Y/Z Rotation: Z first, then Y, then X
-  L   = autoOrientRotation()                    // identity unless Auto-Orient (AE-ANI-019..021)
+  L   = autoOrientRotation()                    // identity unless Auto-Orient (AE-ANI-019..022)
 
   M_local_3D = T(px, py, pz) * L * Or * Rot * S(sx/100, sy/100, sz/100) * T(-ax, -ay, -az)
   ```
@@ -294,14 +294,14 @@ Conventions used in this file (apply to every item unless an item says otherwise
   ```
   world(layer, t) = (layer.parent ? world(layer.parent, t) : I) * M_local(layer, t)
   // the parent's matrix is evaluated at the same comp time t (each layer converts t to its own layer time,
-  // AE-ANI-110), using the parent's full Anchor, Position, Scale, Rotation/Orientation and auto-orient
+  // AE-ANI-087), using the parent's full Anchor, Position, Scale, Rotation/Orientation and auto-orient
   ```
 
   - The child's Position is in the parent's **layer space** (origin = parent's layer-space origin, i.e. top-left of the parent's source rectangle), not relative to the parent's anchor point.
   - Inherited: everything in the transform matrix (anchor, position, scale incl. negative, rotation, orientation, auto-orient). Not inherited: Opacity, effects, masks, blend mode, switches, time remap, time stretch, visibility. A parent whose Video switch is off or that is outside its in/out range still drives its children (its transform is evaluated for any time).
   - Non-uniform parent scale combined with child rotation produces skew in the child's world matrix (a general affine matrix; no decomposition is needed for rendering).
   - Cycles are forbidden (a layer cannot be parented to itself or a descendant); parent must be in the same comp.
-  - Parenting is applied before motion blur sampling: a child of a moving parent is motion-blurred by the parent's motion (AE-ANI-133).
+  - Parenting is applied before motion blur sampling: a child of a moving parent is motion-blurred by the parent's motion (AE-ANI-105).
 - **Priority:** P0
 - **Owner:** bae-anim (+ bae-model)
 - **Notes:** Parent column and pick-whip UI: ui-preview-render-io.md; parent data field and the Alt/Shift pick-whip variants: project-comp-layers.md, Parenting. Expression `parent`, `hasParent`, `toWorld`: expression part of this file. Lottie: layer `parent` = parent `ind`; lottie-web multiplies parent matrices in the same order.
@@ -462,7 +462,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   | inSpatialTangent / outSpatialTangent (传入/传出空间切线) | vector, same dimension as value | from auto-bezier computation (AE-ANI-042) or (0,…) when Linear | unbounded | spatial properties only; relative to the key's value |
   | spatialContinuous (空间连续) | bool | true for Auto Bezier keys | — | spatial only |
   | spatialAutoBezier (空间自动贝塞尔) | bool | true unless the "Default Spatial Interpolation to Linear" preference is on (AE-ANI-044) | — | spatial only |
-  | roving (漂浮) | bool | false | — | spatial only; first/last key never rove (AE-ANI-055) |
+  | roving (漂浮) | bool | false | — | spatial only; first/last key never rove (AE-ANI-051) |
   | label (标签) | int 0–16 | 0 (None) | 0 = none, 1–16 = label colours from Preferences > Labels | AE 22.6 (2022)+; `keyLabel(i)`, `setLabelAtKey(i, n)` |
   | selected (选中) | bool | — | — | `keySelected(i)`; UI state, persisted in the project |
 
@@ -477,14 +477,14 @@ Conventions used in this file (apply to every item unless an item says otherwise
 
 - **What it does:** Defines where in time keyframes can sit and how they relate to frames.
 - **Exact semantics:**
-  - Keyframe times are stored in **layer time** (time relative to the layer's own timeline, so moving the layer moves its keys), not comp time. See AE-ANI-110 for the mapping.
+  - Keyframe times are stored in **layer time** (time relative to the layer's own timeline, so moving the layer moves its keys), not comp time. See AE-ANI-087 for the mapping.
   - Times are exact rationals; keys created in the UI land exactly on frame boundaries of the comp frame rate (as seen through the layer's start time and stretch). Fractional (between-frame) times arise from scripting (`setValueAtTime`), time-stretching a layer, changing the comp frame rate, Alt-drag scaling of keys, and pasting between comps of different frame rates; AE keeps them and evaluates them exactly.
   - Dragging a keyframe in the Timeline snaps to whole frames (of the comp frame rate as displayed); a between-frame key that is nudged (Alt+→) moves by exactly one frame duration and stays between frames.
   - At most one keyframe per property per time. Moving a key onto another key's time replaces that key (UNVERIFIED: AE deletes the overwritten key on drop).
   - Keys may exist before the layer In point or after its Out point; they still affect interpolation.
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-anim)
-- **Notes:** BAE stores times as i64 flicks; frame rates like 29.97 (30000/1001) are not representable exactly in flicks for every frame (705,600,000 × 1001 / 30000 = 23,543,520 flicks per frame — exact; 23.976 likewise exact). Implementation hint: when comparing a key time with a frame time use an epsilon of 1 flick.
+- **Notes:** BAE stores times as i64 flicks; the NTSC rates are exact in flicks (29.97 = 30000/1001: 705,600,000 × 1001 / 30000 = 23,543,520 flicks per frame; 23.976 = 24000/1001: 29,429,400 flicks per frame), but arbitrary rationals from scripting or stretch factors may not be, so round to the nearest flick on entry. Implementation hint: when comparing a key time with a frame time use an epsilon of 1 flick.
 
 ### AE-ANI-025 · Stopwatch and auto-keyframing (秒表)
 
@@ -502,7 +502,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 
   - Turning the stopwatch off is undoable and is the only bulk "delete all keyframes" that keeps the current value.
   - Alt/Option-click the stopwatch adds/removes an expression instead (expression part of this file).
-  - Properties that cannot vary over time (`canVaryOverTime == false`, e.g. Puppet mesh settings, some effect buttons; layer name and switches are not properties) have no stopwatch. Effect menus and checkboxes do have one (they animate with Hold, AE-ANI-076).
+  - Properties that cannot vary over time (`canVaryOverTime == false`, e.g. Puppet mesh settings, some effect buttons; layer name and switches are not properties) have no stopwatch. Effect menus and checkboxes do have one (they animate with Hold, AE-ANI-056).
   - Editing a value while the CTI is outside the layer's in/out range still creates a keyframe at that time.
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-ui-motion)
@@ -518,10 +518,10 @@ Conventions used in this file (apply to every item unless an item says otherwise
   | Spatial (`isSpatial == true`, value type `TwoD_SPATIAL` / `ThreeD_SPATIAL`) | Position, Anchor Point, Point of Interest, effect Point Controls (2-D/3-D points, e.g. Lens Flare centre), Puppet pin positions, motion-tracker attach points | temporal ease is **one** 1-D curve driving arc length along a spatial Bezier path (AE-ANI-035); spatial interpolation + roving available |
   | Non-spatial multi-dimensional (`TwoD`, `ThreeD`, `COLOR`) | Scale, colours, 2-D/3-D values of effects that are not points | one temporal ease **per dimension** (AE-ANI-034) |
   | 1-D (`OneD`) | Rotation, Opacity, sliders, angles | one ease |
-  | Other (`SHAPE`, `TEXT_DOCUMENT`, `MARKER`, `LAYER_INDEX`, `MASK_INDEX`, `CUSTOM_VALUE`, `NO_VALUE`) | mask/shape paths, Source Text, markers, layer/mask pickers, menus/checkboxes (`OneD` but discrete) | AE-ANI-071..078 |
+  | Other (`SHAPE`, `TEXT_DOCUMENT`, `MARKER`, `LAYER_INDEX`, `MASK_INDEX`, `CUSTOM_VALUE`, `NO_VALUE`) | mask/shape paths, Source Text, markers, layer/mask pickers, menus/checkboxes (`OneD` but discrete) | AE-ANI-053..058 |
 
-  - Separated Position (X/Y/Z Position) are 1-D non-spatial properties (AE-ANI-062).
-  - Orientation is `ThreeD_SPATIAL` in scripting (UNVERIFIED) but has no motion path and interpolates by shortest arc (AE-ANI-077); its temporal ease is a single curve.
+  - Separated Position (X/Y/Z Position) are 1-D non-spatial properties (AE-ANI-052).
+  - Orientation is `ThreeD_SPATIAL` in scripting (UNVERIFIED) but has no motion path and interpolates by shortest arc (AE-ANI-057); its temporal ease is a single curve.
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-anim)
 - **Notes:** Scripting `Property.isSpatial`, `Property.propertyValueType`. Bodymovin export treats `TwoD_SPATIAL`, `ThreeD_SPATIAL`, `SHAPE` and `NO_VALUE` as single-ease and `OneD/TwoD/ThreeD/COLOR` as per-dimension, which confirms the split.
@@ -551,7 +551,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 - **What it does:** Keyframes are individually selectable; most keyframe commands act on the selection.
 - **Exact semantics:**
   - Selection is a set of (property, key) pairs across layers; persisted in the project (`keySelected`).
-  - Click selects one (clears others); Shift-click toggles; marquee-drag selects; clicking a property name selects all its keys; Ctrl/Cmd+Alt+A (Win: Ctrl+Alt+A) selects all visible keyframes (UNVERIFIED shortcut; AE: "Select all keyframes for a property: click the property name"; Edit > Select All with keys shown selects all keys? see ui-preview-render-io.md).
+  - Click selects one (clears others); Shift-click toggles; marquee-drag selects; clicking a property name selects all its keys; Ctrl+Alt+A / Cmd+Opt+A selects all visible keyframes and properties; Shift+F2 or Ctrl+Alt+Shift+A / Cmd+Opt+Shift+A deselects all keyframes, properties and groups (AE shortcut reference). Alt/Option-clicking two keys shows the duration between them in the Info panel.
   - Right-click > Select Equal Keyframes (选择相同关键帧) selects keys of that property with the same value; Select Previous Keyframes / Select Following Keyframes (选择前面的关键帧 / 选择跟随关键帧（译名待核）) select all keys of the property before/after the clicked key.
   - Selecting a layer's motion path keyframe in the comp viewer selects the same key in the Timeline.
 - **Priority:** P0 (basic selection), P1 (Equal/Previous/Following)
@@ -607,11 +607,11 @@ Conventions used in this file (apply to every item unless an item says otherwise
   ```
 
   - Hold is temporal only; the motion path shows the keys but no dots between them.
-  - `in(k1)` is irrelevant for the segment's shape. Toggle Hold Keyframe (AE-ANI-052) sets both in and out to Hold on the selected keys (UNVERIFIED: AE sets in and out; the documented effect is on the outgoing side).
+  - `in(k1)` is irrelevant for the segment's shape. Toggle Hold Keyframe (AE-ANI-050) sets both in and out to Hold on the selected keys (UNVERIFIED: AE sets in and out; the documented effect is on the outgoing side).
   - Sub-frame evaluation (motion blur, frame blending, time remap) sees the jump exactly at t1, not at a frame boundary: a motion-blur sample at t1 − ε shows v0.
 - **Priority:** P0
 - **Owner:** bae-anim
-- **Notes:** Lottie `h: 1` on the outgoing keyframe. Freeze Frame (AE-ANI-118) is built on a Hold Time Remap key.
+- **Notes:** Lottie `h: 1` on the outgoing keyframe. Freeze Frame (AE-ANI-092) is built on a Hold Time Remap key.
 
 ### AE-ANI-033 · Bezier temporal interpolation: speed/influence to cubic Bezier (贝塞尔曲线插值：速度与影响)
 
@@ -644,7 +644,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 - **Exact semantics:**
   - For each dimension d, apply AE-ANI-033 with `v0[d], v1[d]`, `speed[d]`, `influence[d]`. The `x` solve is per dimension (different influences give different u for the same t).
   - Interpolation types (Linear/Bezier/Hold) are shared by all dimensions of the key; eases differ.
-  - Colour properties: value components are 0–1 floats in scripting but ease speed is expressed in 8-bit units per second (0–255 scale): `speed_internal = speed_displayed / 255` (from bodymovin, which multiplies colour deltas by 255 when normalising). Interpolation space: AE-ANI-071.
+  - Colour properties: value components are 0–1 floats in scripting but ease speed is expressed in 8-bit units per second (0–255 scale): `speed_internal = speed_displayed / 255` (from bodymovin, which multiplies colour deltas by 255 when normalising). Interpolation space: AE-ANI-053.
   - Easy Ease and the Keyframe Velocity dialog set all dimensions at once unless the dimensions are edited separately in the Graph Editor.
 - **Priority:** P0
 - **Owner:** bae-anim
@@ -669,7 +669,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 
   - Spatial speeds are magnitudes (never negative). If `so*io*dt > L` (or `si*ii*dt > L`), the effective influence is reduced to `L/(so*dt)` (resp. `L/(si*dt)`) so the handle does not pass the path end (UNVERIFIED: AE behaviour inferred from bodymovin, which applies exactly this clamp `inf = min(100*L/(speed*dt), inf)`).
   - L == 0 (keys at the same point, zero tangents): value constant; speeds ignored.
-  - Separated dimensions are not spatial: each X/Y/Z Position is a 1-D property (AE-ANI-062).
+  - Separated dimensions are not spatial: each X/Y/Z Position is a 1-D property (AE-ANI-052).
 - **Priority:** P0
 - **Owner:** bae-anim
 - **Notes:** This is why a Position segment shows a single speed curve in the Graph Editor's speed graph, and why its value graph shows each dimension only for reference (not editable as separate curves). Lottie stores spatial keys with a single `o/i` pair (scalar `x`,`y`).
@@ -775,7 +775,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   - Recompute the eases of k when k−1, k, or k+1 change value or time.
 - **Priority:** P0
 - **Owner:** bae-anim (+ bae-model)
-- **Notes:** Ctrl/Cmd-click on a Linear key in the Timeline makes it Auto Bezier (AE-ANI-051). Scripting `setTemporalAutoBezierAtKey(i, bool)`, `keyTemporalAutoBezier(i)`.
+- **Notes:** Ctrl/Cmd-click on a Linear key in the Timeline makes it Auto Bezier (AE-ANI-049). Scripting `setTemporalAutoBezierAtKey(i, bool)`, `keyTemporalAutoBezier(i)`.
 
 ### AE-ANI-041 · Temporal Continuous Bezier and broken (independent) handles (时间连续贝塞尔曲线)
 
@@ -784,7 +784,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   - temporalContinuous = true ⇒ `inTemporalEase.speed == outTemporalEase.speed` per dimension (influences may differ). Editing either side's speed moves the other.
   - temporalContinuous = false (Bezier) ⇒ in and out speeds independent ("split handles"). Alt/Option-dragging a handle in the Graph Editor splits it (sets Bezier); Alt/Option-dragging a key draws new handles.
   - Applying Continuous Bezier to keys whose speeds differ sets both sides to the average? UNVERIFIED: AE uses the outgoing speed for both sides.
-  - The Keyframe Velocity dialog's "Continuous" checkbox (AE-ANI-049) toggles this flag.
+  - The Keyframe Velocity dialog's "Continuous" checkbox (AE-ANI-047) toggles this flag.
 - **Priority:** P0
 - **Owner:** bae-anim (+ bae-model)
 - **Notes:** Scripting `setTemporalContinuousAtKey`, `keyTemporalContinuous`.
@@ -816,7 +816,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 - **What it does:** User-controlled spatial tangents, either collinear (Continuous) or independent (Bezier, "corner").
 - **Exact semantics:**
   - Continuous Bezier: `inTan = -λ * outTan` with λ > 0 (collinear, opposite direction, independent lengths); dragging one handle rotates the other to stay collinear and keeps its length.
-  - Bezier: in and out tangents independent. In the comp viewer, the Convert Vertex tool (or Ctrl/Cmd+Alt/Opt-drag a handle with the Pen/Selection tool) breaks the handle (sets Bezier); clicking a key with Convert Vertex toggles Linear ⇄ Auto Bezier (AE-ANI-086).
+  - Bezier: in and out tangents independent. In the comp viewer, the Convert Vertex tool (or Ctrl/Cmd+Alt/Opt-drag a handle with the Pen/Selection tool) breaks the handle (sets Bezier); clicking a key with Convert Vertex toggles Linear ⇄ Auto Bezier (AE-ANI-065).
   - Converting Linear → Bezier/Continuous initialises the tangents with the Auto Bezier computation (AE help: initial handle positions use the same method as Auto Bezier).
 - **Priority:** P0
 - **Owner:** bae-anim (+ bae-model, bae-ui-motion)
@@ -829,7 +829,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 
   | Parameter (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
-  | Default Spatial Interpolation to Linear (默认空间插值为线性) | bool | off | — | — | current AE help: Edit > Preferences > Composition (Win) / After Effects > Settings > Composition (macOS); older versions had it under General (UNVERIFIED) |
+  | Default Spatial Interpolation to Linear (默认空间插值为线性) | bool | off | — | — | Edit > Preferences > Composition (Win) / After Effects > Settings > Composition (macOS) (current AE help) |
 
   - Applies only to the first keyframes of properties without keys; does not change existing keys or new keys on already-animated properties.
 - **Priority:** P1
@@ -842,7 +842,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 - **Exact semantics:**
   - The in-side of the first key and the out-side of the last key have no segment: their interpolation type and ease are stored but unused (the timeline icon shows that half dark grey).
   - Ease values on the unused side are retained and become effective if a key is later added beyond them.
-  - First/last keys can never rove (AE-ANI-055).
+  - First/last keys can never rove (AE-ANI-051).
   - Auto Bezier first/last: AE-ANI-040, AE-ANI-042.
   - Value outside the range: AE-ANI-030.
 - **Priority:** P0
@@ -875,7 +875,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 ### AE-ANI-047 · Keyframe Velocity dialog (关键帧速度)
 
 - **What it does:** Numeric entry of incoming and outgoing speed and influence for the selected keyframe(s).
-- **Exact semantics:** Animation > Keyframe Velocity… (动画 > 关键帧速度), Ctrl+Shift+K / Cmd+Shift+K, or right-click a keyframe > Keyframe Velocity. (Double-clicking a keyframe opens the value dialog instead, AE-ANI-092.)
+- **Exact semantics:** Animation > Keyframe Velocity… (动画 > 关键帧速度), Ctrl+Shift+K / Cmd+Shift+K, or right-click a keyframe > Keyframe Velocity. (Double-clicking a keyframe opens the value dialog instead, AE-ANI-073.)
 
   | Parameter (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
@@ -959,7 +959,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
 
     With A-out and B-in Linear this gives constant speed `Ltotal / (tB − tA)` along the whole span.
   - Roving key times are recomputed whenever any key in the span changes value, tangents or the times of A/B; they are stored (so the Timeline shows them) but marked roving.
-  - Dragging a roving key in time, or choosing Lock To Time, makes it non-roving at its current time. Pasting keys with "Rove Across Time" happens when pasting a spatial path into a property (AE-ANI-097).
+  - Dragging a roving key in time, or choosing Lock To Time, makes it non-roving at its current time. Pasting keys with "Rove Across Time" happens when pasting a spatial path into a property (AE-ANI-076).
 - **Priority:** P1
 - **Owner:** bae-anim (+ bae-model, bae-motion)
 - **Notes:** Scripting `setRovingAtKey(i, bool)`, `keyRoving(i)`. Roving keys appear as small dots in the Timeline (ui-preview-render-io.md). Lottie has no roving flag: bodymovin bakes the computed times. Verify the reconstruction by exporting a roving animation with bodymovin and reading the baked key times.
@@ -1026,7 +1026,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   - Mask Feather points (variable-width feather) interpolate per feather point with the same index rule.
 - **Priority:** P0
 - **Owner:** bae-anim (+ bae-vector)
-- **Notes:** Lottie path keyframes `{s:[{c, v, i, o}]}`; lottie-web lerps `v`, `i`, `o` with one eased percent. Copying a closed path into Position: AE-ANI-097. Shape layer path editing: shapes.md.
+- **Notes:** Lottie path keyframes `{s:[{c, v, i, o}]}`; lottie-web lerps `v`, `i`, `o` with one eased percent. Copying a closed path into Position: AE-ANI-076. Shape layer path editing: shapes.md.
 
 ### AE-ANI-055 · Source Text and Text Document keyframes (源文本关键帧)
 
@@ -1147,7 +1147,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   - Off: dragged times round to the nearest comp frame (`round((t - layerStart) * fps)`, see AE-ANI-024). Keys already between frames keep their offset when dragged in whole frames (UNVERIFIED).
 - **Priority:** P2
 - **Owner:** bae-ui-motion (+ bae-model)
-- **Notes:** Timeline (layer bar mode) snapping with Shift-drag: AE-ANI-094.
+- **Notes:** Timeline (layer bar mode) snapping with Shift-drag: AE-ANI-070.
 
 ### AE-ANI-063 · Graph Editor transform box (图表编辑器变换框)
 
@@ -1264,7 +1264,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   - Values and eases (speed/influence) are unchanged, so speeds in units/s now produce a different curve shape (AE keeps speed values; UNVERIFIED: AE does not rescale speeds when stretching).
 - **Priority:** P1
 - **Owner:** bae-motion (+ bae-ui-motion)
-- **Notes:** Layer time-stretch keeps key layer-times and thus also produces between-frame keys (AE-ANI-111).
+- **Notes:** Layer time-stretch keeps key layer-times and thus also produces between-frame keys (AE-ANI-087).
 
 ### AE-ANI-072 · Change values of multiple keyframes at once (同时更改多个关键帧的值)
 
@@ -1481,7 +1481,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   displayed timecode/frame number = n + displayStartTime * fps_comp   // display only
   ```
 
-  - All property evaluation for frame n happens at `t_frame(n)` unless motion blur or frame blending requests sub-frame times (AE-ANI-101..106).
+  - All property evaluation for frame n happens at `t_frame(n)` unless motion blur or frame blending requests sub-frame times (AE-ANI-099..108).
   - Comp Start Timecode / Start Frame (`displayStartTime`, min −10800 s since AE 17.1) only changes display; internal time 0 is the first frame.
   - Drop-frame timecode is display only (project-comp-layers.md / ui-preview-render-io.md, timecode).
 - **Priority:** P0
