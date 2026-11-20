@@ -461,6 +461,7 @@ dependencies = [
  "blake3",
  "notify",
  "rustc-hash 2.1.3",
+ "schemars",
  "serde",
  "serde_json",
  "tempfile",

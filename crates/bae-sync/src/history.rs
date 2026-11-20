@@ -56,7 +56,41 @@ impl ProjectVersion {
     pub fn get(&self, id: &SublayerId) -> VersionVector {
         self.sublayers.get(id).cloned().unwrap_or_default()
     }
+
+    /// JSON form for tools and commands: sublayer → (Loro peer ID as a decimal
+    /// string → number of that peer's ops).
+    pub fn to_json(&self) -> VersionJson {
+        self.sublayers
+            .iter()
+            .map(|(id, vv)| {
+                let peers = vv
+                    .iter()
+                    .map(|(peer, counter)| (peer.to_string(), *counter))
+                    .collect();
+                (id.to_string(), peers)
+            })
+            .collect()
+    }
+
+    pub fn from_json(json: &VersionJson) -> Result<Self, SyncError> {
+        let mut sublayers = BTreeMap::new();
+        for (id, peers) in json {
+            let id = SublayerId::new(id).map_err(|_| SyncError::InvalidDocKey(id.clone()))?;
+            let mut vv = VersionVector::new();
+            for (peer, counter) in peers {
+                let peer: u64 = peer
+                    .parse()
+                    .map_err(|_| SyncError::Decode(format!("bad peer ID {peer:?}")))?;
+                vv.insert(peer, *counter);
+            }
+            sublayers.insert(id, vv);
+        }
+        Ok(ProjectVersion { sublayers })
+    }
 }
+
+/// JSON form of a [`ProjectVersion`]: sublayer → (peer ID → op count).
+pub type VersionJson = BTreeMap<String, BTreeMap<String, i32>>;
 
 /// Identifies a named version: a time-ordered UUID (v7) in hex.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -275,6 +309,27 @@ impl History {
             .checkpoint(id)
             .ok_or_else(|| SyncError::UnknownCheckpoint(id.0.clone()))?;
         view_at(stage, &cp.version, Some(&cp.layer_stack))
+    }
+
+    /// Put the project (or part of it) back to a named version, as one new
+    /// undoable step (see [`revert`]).
+    pub fn revert_to(
+        &self,
+        stage: &mut Stage,
+        author: &AuthorId,
+        id: &CheckpointId,
+        scope: &RevertScope,
+    ) -> Result<StageEvent, SyncError> {
+        let cp = self
+            .checkpoint(id)
+            .ok_or_else(|| SyncError::UnknownCheckpoint(id.0.clone()))?;
+        revert(
+            stage,
+            author,
+            &format!("revert to {}", cp.name),
+            &cp.version,
+            scope,
+        )
     }
 
     /// Per-prim differences from one named version to another (`None`: to the
@@ -645,6 +700,166 @@ fn node_authors(doc: &LoroDoc, a: &VersionVector, b: &VersionVector) -> FxHashMa
         }
     }
     out
+}
+
+// ---- rollback ----
+
+/// What [`revert`] restores.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RevertScope {
+    /// Every sublayer of the current stack.
+    Project,
+    /// One sublayer.
+    Sublayer(SublayerId),
+    /// One prim and its descendants, in every sublayer.
+    Prim(PrimPath),
+}
+
+impl RevertScope {
+    fn covers(&self, layer: &SublayerId, path: &PrimPath) -> bool {
+        match self {
+            RevertScope::Project => true,
+            RevertScope::Sublayer(id) => id == layer,
+            RevertScope::Prim(root) => root.is_prefix_of(path),
+        }
+    }
+}
+
+/// Put (part of) the project back the way it was at `to`, as one new undoable
+/// step by `author`: history is never rewritten, collaborators receive the
+/// rollback like any other edit, and undo takes it back.
+///
+/// Prims that did not exist then are deleted, prims that existed are restored
+/// with their whole subtree, and differing types, specifiers, references and
+/// attribute opinions are set back. Not restored: sibling order of prims that
+/// exist in both versions, and sublayers no longer in the stack. A sublayer that
+/// did not exist at `to` is emptied.
+pub fn revert(
+    stage: &mut Stage,
+    author: &AuthorId,
+    label: &str,
+    to: &ProjectVersion,
+    scope: &RevertScope,
+) -> Result<StageEvent, SyncError> {
+    let edits = revert_edits(stage, to, scope)?;
+    let (_, event) = stage.transact(author, label, |tx| {
+        for (layer, op) in edits {
+            tx.apply_to(&layer, op)?;
+        }
+        Ok::<_, SyncError>(())
+    })?;
+    Ok(event)
+}
+
+/// The edits [`revert`] applies (also used by the `version.revert` command).
+pub(crate) fn revert_edits(
+    stage: &Stage,
+    to: &ProjectVersion,
+    scope: &RevertScope,
+) -> Result<Vec<(SublayerId, bae_model::Op)>, SyncError> {
+    let mut edits = Vec::new();
+    for id in stage.layer_stack() {
+        if matches!(scope, RevertScope::Sublayer(s) if s != id) {
+            continue;
+        }
+        let live = stage.sublayer(id).expect("in stack");
+        let past = layer_at(live, &to.get(id))?;
+        for op in revert_ops(id, live, past.get(), scope) {
+            edits.push((id.clone(), op));
+        }
+    }
+    Ok(edits)
+}
+
+/// Ops that turn `live` into `past` within `scope`.
+fn revert_ops(
+    id: &SublayerId,
+    live: &Sublayer,
+    past: &Sublayer,
+    scope: &RevertScope,
+) -> Vec<bae_model::Op> {
+    use bae_model::Op;
+    let in_scope = |p: &&PrimPath| scope.covers(id, p);
+    let mut ops = Vec::new();
+
+    // Delete what did not exist (top-most only: the subtree goes with it).
+    let mut gone: Vec<&PrimPath> = live
+        .paths()
+        .filter(in_scope)
+        .filter(|p| !past.has_spec(p))
+        .collect();
+    gone.sort();
+    let mut deleted: Vec<&PrimPath> = Vec::new();
+    for p in gone {
+        if !deleted.iter().any(|d| d.is_prefix_of(p)) {
+            ops.push(Op::DeletePrim { path: p.clone() });
+            deleted.push(p);
+        }
+    }
+
+    // Restore what existed (top-most only, with its whole subtree), parents
+    // before children, each at its old position.
+    let mut back: Vec<&PrimPath> = past
+        .paths()
+        .filter(in_scope)
+        .filter(|p| !live.has_spec(p))
+        .collect();
+    back.sort();
+    let mut restored: Vec<&PrimPath> = Vec::new();
+    for p in back {
+        if restored.iter().any(|r| r.is_prefix_of(p)) {
+            continue;
+        }
+        if let Some(tree) = past.subtree(p) {
+            ops.push(Op::RestorePrim {
+                path: p.clone(),
+                tree,
+                index: past.child_index(p),
+            });
+            restored.push(p);
+        }
+    }
+
+    // Set back what differs on prims present in both.
+    let mut both: Vec<&PrimPath> = live
+        .paths()
+        .filter(in_scope)
+        .filter(|p| past.has_spec(p))
+        .collect();
+    both.sort();
+    for p in both {
+        let (now, then) = (live.spec(p).expect("listed"), past.spec(p).expect("listed"));
+        if now.specifier != then.specifier {
+            ops.push(Op::SetSpecifier {
+                path: p.clone(),
+                specifier: then.specifier,
+            });
+        }
+        if now.prim_type != then.prim_type {
+            ops.push(Op::SetPrimType {
+                path: p.clone(),
+                prim_type: then.prim_type.clone(),
+            });
+        }
+        if now.references != then.references {
+            ops.push(Op::SetReferences {
+                path: p.clone(),
+                references: then.references.clone(),
+            });
+        }
+        let names: BTreeSet<&String> = now.attrs.keys().chain(then.attrs.keys()).collect();
+        for name in names {
+            let old = then.attrs.get(name);
+            if now.attrs.get(name) != old {
+                ops.push(Op::SetAttr {
+                    path: p.clone(),
+                    attr: name.clone(),
+                    spec: old.cloned(),
+                });
+            }
+        }
+    }
+    ops
 }
 
 // ---- syncing the history document ----

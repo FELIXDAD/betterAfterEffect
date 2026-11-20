@@ -22,6 +22,7 @@
 //! This crate has no GPU, window or platform dependencies.
 
 mod client;
+mod commands;
 mod dir;
 mod docs;
 mod error;
@@ -36,12 +37,13 @@ mod threaded;
 mod transport;
 
 pub use client::ClientId;
+pub use commands::{RevertOutput, RevertParams, register_commands};
 pub use dir::{DirConfig, DirStats, DirTransport, LOG_FORMAT, LOG_VERSION};
 pub use docs::{DocSet, Imported, MemDocs};
 pub use error::SyncError;
 pub use history::{
     Checkpoint, CheckpointId, History, PrimChange, PrimDiff, ProjectDocs, ProjectVersion,
-    VersionView,
+    RevertScope, VersionJson, VersionView,
 };
 #[cfg(feature = "hub")]
 pub use hub::HubTransport;
