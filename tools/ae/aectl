@@ -1,0 +1,363 @@
+#!/usr/bin/env bash
+# aectl — drive Adobe After Effects (macOS) from scripts and agents without a human.
+#
+#   aectl status                 running? pid, owned by aectl, modal dialog, ready
+#   aectl start                  clean crash flags, launch in background, wait until scripting works
+#   aectl eval '<jsx>' [opts]    run ExtendScript source in AE; result JSON on stdout
+#   aectl run file.jsx [opts]    run an ExtendScript file in AE; result JSON on stdout
+#   aectl stop                   close the project without saving and quit (force-kill if stuck)
+#   aectl diagnose               main-thread stack, last error-dialog text, crash flags
+#   aectl clean                  clear crash / force-quit flags (AE must not be running)
+#   aectl install                install the startup "ready" script and enable script file access
+#
+# Options for eval/run: --timeout <s> (default 300), --force (also recover an AE instance
+# that aectl did not start; that may discard someone's unsaved work).
+#
+# How it works (see tools/ae/README.md):
+# - A startup script (Scripts/Startup/bae_automation_ready.jsx) writes $STATE/ready.json
+#   once AE has loaded its scripting plugin; DoScript is only sent after that, otherwise AE
+#   shows "Unable to execute script file. Scripting Plugin is not installed." and hangs.
+# - Every script runs inside app.beginSuppressDialogs() with try/catch; results and errors
+#   go to a JSON file, never to alert().
+# - A hang is detected by sampling AE's main thread for dvaui::ui::OS_Dialog::ModalLoop (no
+#   Accessibility permission needed). Recovery: kill, clear the "crash in last session"
+#   flags (CrashOccurred / ForceQuitOccured in com.Adobe.After Effects.<ver>.plist) and the
+#   stale session records, relaunch.
+set -uo pipefail
+
+STATE="${BAE_AE_STATE:-/tmp/bae-ae-automation}"
+mkdir -p "$STATE"
+# Physical path: ExtendScript's Folder.create() fails through symlinks such as /tmp ->
+# /private/tmp, so every path handed to After Effects must be resolved.
+STATE="$(cd "$STATE" && pwd -P)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+die() { echo "aectl: $*" >&2; exit 1; }
+log() { echo "aectl: $*" >&2; }
+nap() { perl -e "select(undef,undef,undef,$1)"; }
+
+find_app() {
+  if [[ -n "${AE_APP:-}" ]]; then echo "$AE_APP"; return; fi
+  local app
+  # "Adobe After Effects 2026.app", not "Adobe After Effects Render Engine 2026.app".
+  app=$(ls -d "/Applications/Adobe After Effects "*/"Adobe After Effects "[0-9][0-9][0-9][0-9].app 2>/dev/null | sort | tail -1)
+  [[ -n "$app" ]] || die "After Effects not found in /Applications (set AE_APP)"
+  echo "$app"
+}
+APP="$(find_app)"
+BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")
+VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")
+MAJMIN=$(echo "$VERSION" | cut -d. -f1-2)
+PREFS_DIR="$HOME/Library/Preferences/Adobe/After Effects/$MAJMIN"
+PREFS_FILE="$PREFS_DIR/Adobe After Effects $MAJMIN Prefs.txt"
+STARTUP_DIR="$PREFS_DIR/Scripts/Startup"
+DEFAULTS_VER="com.Adobe.After Effects.$MAJMIN"
+DEFAULTS_APP="com.Adobe.After Effects"
+EXE="$APP/Contents/MacOS/After Effects"
+
+# Match the executable itself: helper processes (AdobeIPCBroker, crashpad) carry the AE
+# path in their arguments.
+ae_pid() { ps -axo pid=,comm= | awk -v exe="$EXE" '{pid=$1; $1=""; sub(/^ /, ""); if ($0 == exe) {print pid; exit}}'; }
+owned() { [[ -f "$STATE/aectl.pid" && "$(cat "$STATE/aectl.pid")" == "$1" ]]; }
+
+main_stack() {
+  sample "$1" 1 -mayDie 2>/dev/null | sed -n '/com.apple.main-thread/,/mach_msg2_trap/p' \
+    | grep -oE '[A-Za-z_][A-Za-z0-9_:~<>]*\(|-\[[A-Za-z0-9_]+ [A-Za-z0-9_:]+\]' \
+    | grep -v -E '^(start|main|_|mach)' | awk '!seen[$0]++' | tail -24
+}
+
+# Any modal run loop on the main thread: AE's own dialogs (dvaui OS_Dialog::ModalLoop) and
+# Cocoa ones (NSAlert from a script's alert(), sheets). Note: never `grep -q` after a
+# producer under pipefail — the producer gets SIGPIPE and the pipeline reports failure.
+# runModalSession is NOT here: AE pumps a modal *session* (returns every iteration) while a
+# long script or operation runs; only the blocking loops below mean "waiting for a click".
+MODAL_RE='OS_Dialog::ModalLoop|runModalForWindow|_doModalLoop|NSAlert runModal'
+# Main thread only. Busy operations open short-lived modal sessions (progress bars), so
+# callers treat a process as stuck only after several consecutive positive samples.
+is_modal() {
+  [[ -n "$1" ]] && sample "$1" 1 -mayDie 2>/dev/null \
+    | awk '/com.apple.main-thread/ {m=1; next} m && /^    [0-9]+ Thread_/ {m=0} m' \
+    | grep -E "$MODAL_RE" >/dev/null
+}
+MODAL_CONFIRMATIONS=3
+
+# Stuck = modal in several consecutive samples ~1.5 s apart.
+stuck() {
+  local n
+  for n in $(seq 1 "$MODAL_CONFIRMATIONS"); do
+    is_modal "$1" || return 1
+    (( n < MODAL_CONFIRMATIONS )) && nap 1.5
+  done
+  return 0
+}
+
+last_dialog_text() {
+  local db="$HOME/Library/Caches/Adobe/After Effects/${MAJMIN%.*}.0/SentryIO-db" run
+  run=$(ls -td "$db"/*.run 2>/dev/null | head -1)
+  # Error dialogs leave an "AEErrorDialog" breadcrumb whose "message" is the dialog text.
+  [[ -n "$run" ]] && strings "$run/__sentry-breadcrumb1" "$run/__sentry-breadcrumb2" 2>/dev/null \
+    | awk '/AEErrorDialog/ {d=1} d && prev=="message" {print substr($0, 2); d=0} {prev=$0}' | tail -1
+}
+
+known_dialog() {
+  # Name the dialog from the frame that opened it.
+  local stack="$1"
+  if grep -q -i 'crash' <<<"$stack"; then
+    echo "crash-alert: After Effects hit an internal error and saved a crash copy of the project"
+  elif grep -q 'ScCore::Dialogs::' <<<"$stack"; then
+    echo "script-alert: a script called alert()/confirm()/prompt()"
+  elif grep -q 'CEggApp::BirthPrefs' <<<"$stack"; then
+    echo "crash-detected: 'We detected a crash in your last session' (safe-mode prompt at startup)"
+  elif grep -q 'AEDoScriptFileCommand\|AEDoScriptCommand' <<<"$stack"; then
+    echo "script-error: $(last_dialog_text)"
+  elif grep -q 'U_ReportError\|Up_ReportErrorDialog' <<<"$stack"; then
+    echo "error-dialog: $(last_dialog_text)"
+  else
+    echo "unknown-modal"
+  fi
+}
+
+clean_flags() {
+  [[ -z "$(ae_pid)" ]] || die "clean: After Effects is running"
+  defaults delete "$DEFAULTS_VER" CrashOccurred >/dev/null 2>&1 || true
+  defaults delete "$DEFAULTS_VER" ForceQuitOccured >/dev/null 2>&1 || true
+  defaults delete "$DEFAULTS_APP" AppStates >/dev/null 2>&1 || true
+  local db="$HOME/Library/Caches/Adobe/After Effects/${MAJMIN%.*}.0/SentryIO-db"
+  rm -rf "$db"/*.run "$db"/*.run.lock 2>/dev/null || true
+}
+
+install() {
+  [[ -d "$PREFS_DIR" ]] || die "install: $PREFS_DIR missing; launch After Effects once first"
+  mkdir -p "$STARTUP_DIR"
+  sed "s#__STATE__#$STATE#g" "$HERE/bae_automation_ready.jsx" > "$STARTUP_DIR/bae_automation_ready.jsx"
+  if tr '\r' '\n' < "$PREFS_FILE" | grep '"Pref_SCRIPTING_FILE_NETWORK_SECURITY" = "1"' >/dev/null; then
+    return 0
+  fi
+  [[ -z "$(ae_pid)" ]] || die "install: quit After Effects first (prefs are rewritten on quit)"
+  cp "$PREFS_FILE" "$PREFS_FILE.bak-aectl" 2>/dev/null || true
+  perl -0777 -pi -e 's/"Pref_SCRIPTING_FILE_NETWORK_SECURITY" = "0"/"Pref_SCRIPTING_FILE_NETWORK_SECURITY" = "1"/' "$PREFS_FILE"
+  log "enabled 'Allow Scripts to Write Files and Access Network' (backup: $PREFS_FILE.bak-aectl)"
+}
+
+# SIGKILL only: After Effects treats SIGTERM (and even a normal app.quit() on some
+# installs) as a crash — it saves "~/Documents/After Effects Crash_N.aep", shows a modal
+# "A copy of your project was saved…" alert and flags the next launch for Safe Mode.
+kill_ae() {
+  local pid="$1"
+  kill -9 "$pid" 2>/dev/null
+  for _ in $(seq 1 10); do kill -0 "$pid" 2>/dev/null || break; nap 0.3; done
+  rm -f "$STATE/aectl.pid"
+}
+
+all_dialog_texts() {
+  local db="$HOME/Library/Caches/Adobe/After Effects/${MAJMIN%.*}.0/SentryIO-db" run
+  for run in "$db"/*.run; do
+    [[ -d "$run" ]] && strings "$run/__sentry-breadcrumb1" "$run/__sentry-breadcrumb2" 2>/dev/null \
+      | awk '/AEErrorDialog/ {d=1} d && prev=="message" {print substr($0, 2); d=0} {prev=$0}'
+  done
+}
+
+# Keep the evidence before cleaning it away: stack, dialog texts, flags.
+save_evidence() {
+  local pid="$1" why="$2" dir="$STATE/recoveries" f
+  mkdir -p "$dir"
+  f="$dir/$(date +%Y%m%d-%H%M%S)-$pid.txt"
+  {
+    echo "reason: $why"
+    echo "time: $(date)"
+    echo "pid: $pid"
+    echo "--- error dialogs (Sentry breadcrumbs, oldest first)"
+    all_dialog_texts
+    echo "--- crash flags"
+    defaults read "$DEFAULTS_VER" 2>/dev/null | grep -E 'CrashOccurred|ForceQuitOccured'
+    echo "--- main thread (sample)"
+    sample "$pid" 1 -mayDie 2>/dev/null | sed -n '/com.apple.main-thread/,/mach_msg2_trap/p'
+  } > "$f" 2>&1
+  echo "$f"
+}
+
+# Kill a stuck instance (only ours unless --force) and clear the flags it leaves behind.
+recover() {
+  local pid="$1" force="$2" why="$3" evidence
+  if ! owned "$pid" && [[ "$force" != 1 ]]; then
+    die "After Effects (pid $pid, not started by aectl) is stuck: $why. Re-run with --force to kill it."
+  fi
+  evidence=$(save_evidence "$pid" "$why")
+  log "recovering from: $why (evidence: $evidence)"
+  LAST_EVIDENCE="$evidence"
+  kill_ae "$pid"
+  clean_flags
+}
+
+wait_ready() {
+  local pid="$1" t0="$2" limit="${3:-180}" i=0 hits=0
+  while (( i < limit * 2 )); do
+    nap 0.5; i=$((i + 1))
+    if [[ -f "$STATE/ready.json" ]] && [[ "$(stat -f %m "$STATE/ready.json")" -ge "$t0" ]]; then return 0; fi
+    kill -0 "$pid" 2>/dev/null || return 2
+    if (( i % 6 == 0 )); then
+      if is_modal "$pid"; then hits=$((hits + 1)); else hits=0; fi
+      (( hits >= 2 )) && return 3
+    fi
+  done
+  return 1
+}
+
+start() {
+  local force="${1:-0}" pid attempt
+  pid=$(ae_pid)
+  if [[ -n "$pid" ]]; then
+    if stuck "$pid"; then
+      recover "$pid" "$force" "$(known_dialog "$(main_stack "$pid")")"
+    elif [[ -f "$STATE/ready.json" ]]; then
+      return 0
+    else
+      die "After Effects is running (pid $pid) but was not started by aectl; quit it or run 'aectl stop --force'"
+    fi
+  fi
+  install
+  for attempt in 1 2 3; do
+    clean_flags
+    rm -f "$STATE/ready.json"
+    local t0; t0=$(date +%s)
+    open -g -a "$APP" || die "cannot launch $APP"
+    for _ in $(seq 1 40); do pid=$(ae_pid); [[ -n "$pid" ]] && break; nap 0.25; done
+    [[ -n "$pid" ]] || die "After Effects did not start"
+    echo "$pid" > "$STATE/aectl.pid"
+    wait_ready "$pid" "$t0" 240
+    case $? in
+      0) log "After Effects $VERSION ready (pid $pid, $(( $(date +%s) - t0 ))s)"; return 0 ;;
+      2) log "After Effects exited during startup (attempt $attempt)"; clean_flags ;;
+      3) recover "$pid" 1 "$(known_dialog "$(main_stack "$pid")") (attempt $attempt)" ;;
+      *) recover "$pid" 1 "startup timeout (attempt $attempt)" ;;
+    esac
+  done
+  die "After Effects did not become ready after 3 attempts; run 'aectl diagnose'"
+}
+
+# Run ExtendScript source (file or string) with dialogs suppressed; print the result JSON.
+run_script() {
+  local mode="$1" src="$2" timeout="$3" force="$4"
+  start "$force"
+  local id; id="$(date +%s)-$$-$RANDOM"
+  local out="$STATE/result-$id.json" wrapper="$STATE/run-$id.jsx" body
+  if [[ "$mode" == file ]]; then
+    [[ -f "$src" ]] || die "no such script: $src"
+    body="__bae_value = \$.evalFile(new File($(printf '%s' "$src" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read()))')));"
+  else
+    printf '%s' "$src" > "$STATE/src-$id.jsx"
+    body="__bae_value = \$.evalFile(new File(\"$STATE/src-$id.jsx\"));"
+  fi
+  cat > "$wrapper" <<EOF
+(function () {
+    var __bae_value, __bae_error = null, __bae_t0 = new Date().getTime();
+    app.beginSuppressDialogs();
+    try { $body } catch (e) {
+        __bae_error = { message: String(e), line: e.line, file: String(e.fileName || "") };
+    }
+    try { app.endSuppressDialogs(false); } catch (e2) {}
+    function esc(s) {
+        return String(s).replace(/\\\\/g, "\\\\\\\\").replace(/"/g, '\\\\"').replace(/\\n/g, "\\\\n").replace(/\\r/g, "\\\\r").replace(/\\t/g, "\\\\t");
+    }
+    var v = (__bae_value === undefined) ? "null" : '"' + esc(__bae_value) + '"';
+    var err = __bae_error ? '{"message":"' + esc(__bae_error.message) + '","line":' + (__bae_error.line || 0) + ',"file":"' + esc(__bae_error.file) + '"}' : "null";
+    var f = new File("$out");
+    f.encoding = "UTF-8";
+    f.open("w");
+    f.write('{"ok":' + (__bae_error ? "false" : "true") + ',"value":' + v + ',"error":' + err + ',"ms":' + (new Date().getTime() - __bae_t0) + '}');
+    f.close();
+})();
+EOF
+  local pid; pid=$(ae_pid)
+  osascript -e "with timeout of $((timeout + 5)) seconds" \
+    -e "tell application id \"$BUNDLE_ID\" to DoScriptFile \"$wrapper\"" -e "end timeout" >/dev/null 2>&1 &
+  local osa=$! i=0 hits=0
+  while (( i < timeout * 2 )); do
+    nap 0.5; i=$((i + 1))
+    [[ -f "$out" ]] && break
+    if (( i % 6 == 0 )); then
+      if is_modal "$pid"; then hits=$((hits + 1)); else hits=0; fi
+    fi
+    if (( hits >= MODAL_CONFIRMATIONS )); then
+      local why; why=$(known_dialog "$(main_stack "$pid")")
+      kill "$osa" 2>/dev/null
+      recover "$pid" "$force" "modal dialog while running script: $why"
+      echo "{\"ok\":false,\"value\":null,\"error\":{\"message\":\"After Effects showed a modal dialog: $why\",\"recovered\":true,\"evidence\":\"${LAST_EVIDENCE:-}\"}}"
+      return 3
+    fi
+  done
+  kill "$osa" 2>/dev/null; wait "$osa" 2>/dev/null
+  if [[ ! -f "$out" ]]; then
+    echo "{\"ok\":false,\"value\":null,\"error\":{\"message\":\"timeout after ${timeout}s\"}}"
+    return 4
+  fi
+  cat "$out"; echo
+  rm -f "$wrapper" "$STATE/src-$id.jsx"
+  python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["ok"] else 1)' "$out"
+}
+
+stop() {
+  local force="${1:-0}" pid; pid=$(ae_pid)
+  [[ -n "$pid" ]] || { log "not running"; return 0; }
+  if ! owned "$pid" && [[ "$force" != 1 ]]; then
+    die "After Effects (pid $pid) was not started by aectl; use --force to quit it without saving"
+  fi
+  # Discard the project, then kill: app.quit() crashes on quit on some installs (see kill_ae).
+  if ! stuck "$pid"; then
+    osascript -e 'with timeout of 20 seconds' \
+      -e "tell application id \"$BUNDLE_ID\" to DoScript \"app.beginSuppressDialogs(); try { app.project.close(CloseOptions.DO_NOT_SAVE_CHANGES); } catch (e) {}\"" \
+      -e 'end timeout' >/dev/null 2>&1
+  fi
+  kill_ae "$pid"
+  rm -f "$STATE/aectl.pid" "$STATE/ready.json"
+  clean_flags
+  log "stopped"
+}
+
+status() {
+  local pid; pid=$(ae_pid)
+  python3 - "$pid" "$(owned "${pid:-x}" && echo 1 || echo 0)" "$( [[ -n "$pid" ]] && is_modal "$pid" && echo 1 || echo 0)" \
+    "$( [[ -f "$STATE/ready.json" ]] && cat "$STATE/ready.json" || echo null)" "$APP" "$VERSION" <<'PY'
+import json, sys
+pid, owned, modal, ready, app, ver = sys.argv[1:7]
+print(json.dumps({"running": bool(pid), "pid": int(pid) if pid else None, "owned_by_aectl": owned == "1",
+                  "modal_dialog": modal == "1", "ready": json.loads(ready), "app": app, "version": ver}))
+PY
+}
+
+diagnose() {
+  local pid; pid=$(ae_pid)
+  echo "app: $APP ($VERSION)"
+  echo "pid: ${pid:-not running}"
+  if [[ -n "$pid" ]]; then
+    local stack; stack=$(main_stack "$pid")
+    echo "modal: $(is_modal "$pid" && known_dialog "$stack" || echo no)"
+    echo "main thread:"; sed 's/^/  /' <<<"$stack"
+  fi
+  echo "last error dialog: $(last_dialog_text)"
+  echo "crash flags: $(defaults read "$DEFAULTS_VER" 2>/dev/null | grep -E 'CrashOccurred|ForceQuitOccured' | tr -d ' ;\n' || true)"
+  echo "script file access: $(tr '\r' '\n' < "$PREFS_FILE" | grep -o '"Pref_SCRIPTING_FILE_NETWORK_SECURITY" = "[01]"')"
+  echo "startup script: $([[ -f "$STARTUP_DIR/bae_automation_ready.jsx" ]] && echo installed || echo missing)"
+}
+
+cmd="${1:-status}"; shift || true
+force=0; timeout=300; args=()
+while (( $# )); do
+  case "$1" in
+    --force) force=1 ;;
+    --timeout) timeout="$2"; shift ;;
+    *) args+=("$1") ;;
+  esac
+  shift
+done
+case "$cmd" in
+  status) status ;;
+  start) start "$force" ;;
+  stop) stop "$force" ;;
+  eval) [[ ${#args[@]} -ge 1 ]] || die "usage: aectl eval '<jsx>'"; run_script source "${args[0]}" "$timeout" "$force" ;;
+  run) [[ ${#args[@]} -ge 1 ]] || die "usage: aectl run file.jsx"; run_script file "$(cd "$(dirname "${args[0]}")" && pwd)/$(basename "${args[0]}")" "$timeout" "$force" ;;
+  diagnose) diagnose ;;
+  clean) clean_flags ;;
+  install) install ;;
+  *) sed -n '2,15p' "$0"; exit 2 ;;
+esac
