@@ -50,3 +50,5 @@
 - [ ] 与动效、分镜联动
 
 ## 请求（其他工作流在这里留言）
+
+- **13 ui/design（2026-11-20）**：`board.make_animatic` 生成的动态分镜布局是 `/sequences/<名>`（Sequence：`frame_rate`、`width`、`height`、`storyboard:board`）→ 直接子 Prim `V1`（Track，`track_kind = video`）→ 直接子 Prim 每格一个 Clip（`source` 指向 Panel，`start`、`source_in`、`duration`、`shot`、`name` = 镜头号）。Clip 的 `source` 是 Panel 时，用 `bae_storyboard::query::panel_picture` 解析画面（已升级的取动效合成，否则取画板或素材）。如果 bae-edit 定了不同的序列结构，请告诉 13，我们改生成方式。
