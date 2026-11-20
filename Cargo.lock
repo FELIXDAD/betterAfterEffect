@@ -241,6 +241,7 @@ dependencies = [
  "bae-plugin",
  "bae-render",
  "bae-ui",
+ "bae-ui-motion",
  "bae-vector",
  "clap",
  "egui",
