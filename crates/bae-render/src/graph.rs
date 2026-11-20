@@ -259,12 +259,50 @@ pub struct EffectNode {
     pub effect: Arc<dyn Effect>,
     /// Evaluated parameters.
     pub instance: RenderEffect,
-    /// Layer time.
-    pub time: Time,
-    /// Resolution scale passed to the effect.
-    pub scale: f64,
+    /// Frame context for [`EffectParams`] (time, scale, bounds, rate, shutter …).
+    pub frame: EffectFrame,
     /// Input node.
     pub input: NodeId,
+}
+
+/// The frame context of an effect call, stored per effect node (everything in
+/// [`EffectParams`] except the instance).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EffectFrame {
+    /// Layer time.
+    pub time: Time,
+    /// Resolution scale.
+    pub scale: f64,
+    /// Layer content bounds (layer pixels, full resolution, before effects).
+    pub layer_bounds: IRect,
+    /// Comp frame rate.
+    pub frame_rate: bae_model::FrameRate,
+    /// One comp frame (time-stretched layers are not rescaled yet).
+    pub time_step: Time,
+    /// Linearized blending.
+    pub linear: bool,
+    /// Preview or final.
+    pub purpose: crate::request::RenderPurpose,
+    /// Shutter angle and phase (degrees).
+    pub shutter: [f64; 2],
+}
+
+impl EffectFrame {
+    /// The parameters of `instance` in this frame.
+    pub fn params<'a>(&self, instance: &'a RenderEffect) -> EffectParams<'a> {
+        EffectParams {
+            time: self.time,
+            scale: self.scale,
+            layer_bounds: self.layer_bounds,
+            frame_rate: self.frame_rate,
+            time_step: self.time_step,
+            linear: self.linear,
+            purpose: self.purpose,
+            shutter_angle: self.shutter[0],
+            shutter_phase: self.shutter[1],
+            ..EffectParams::new(instance)
+        }
+    }
 }
 
 impl std::fmt::Debug for EffectNode {
@@ -327,6 +365,8 @@ pub fn build(
     let mut builder = Builder {
         sources,
         effects,
+        linear: request.color.blend == crate::request::BlendSpace::Linear,
+        purpose: request.purpose,
         clamp: request.depth.clamps(),
         nodes: Vec::new(),
         dedup: FxHashMap::default(),
@@ -354,6 +394,8 @@ pub fn units(rect: &Rect, pixel_scale: f64) -> IRect {
 struct Builder<'a> {
     sources: &'a mut dyn SourceResolver,
     effects: &'a EffectLibrary,
+    linear: bool,
+    purpose: crate::request::RenderPurpose,
     clamp: bool,
     nodes: Vec<Node>,
     dedup: FxHashMap<u64, NodeId>,
@@ -466,13 +508,19 @@ impl Builder<'_> {
         };
         // Effects: bounds forward (in layer texel units).
         let effects = self.plan_effects(layer);
+        let frame = EffectFrame {
+            time: layer.time,
+            scale: 1.0 / scale,
+            layer_bounds: content_rect.round_out(),
+            frame_rate: comp.frame_rate,
+            time_step: comp.frame_rate.frame_duration(),
+            linear: self.linear,
+            purpose: self.purpose,
+            shutter: comp.shutter,
+        };
         let mut bounds_chain = vec![units(&content_rect, scale)];
         for (effect, instance) in &effects {
-            let params = EffectParams {
-                effect: instance,
-                time: layer.time,
-                scale: 1.0 / scale,
-            };
+            let params = frame.params(instance);
             let prev = *bounds_chain.last().unwrap_or(&IRect::EMPTY);
             bounds_chain.push(effect.output_bounds(&params, prev));
         }
@@ -523,11 +571,7 @@ impl Builder<'_> {
             .inflate(1)
             .intersect(&layer_bounds);
         for (i, (effect, instance)) in effects.iter().enumerate().rev() {
-            let params = EffectParams {
-                effect: instance,
-                time: layer.time,
-                scale: 1.0 / scale,
-            };
+            let params = frame.params(instance);
             roi = effect.input_roi(&params, roi).intersect(&bounds_chain[i]);
         }
 
@@ -561,21 +605,23 @@ impl Builder<'_> {
                 }))
             }
             Content::Source(source, time) => {
+                let roi_px = Rect::new(
+                    f64::from(roi.x0) * scale,
+                    f64::from(roi.y0) * scale,
+                    f64::from(roi.x1) * scale,
+                    f64::from(roi.y1) * scale,
+                )
+                .round_out();
+                let density = source_density(&layer.transform, scale, roi_px);
                 let mut h = FxHasher::default();
                 "source".hash(&mut h);
                 layer.path.hash(&mut h);
                 source.content_hash(time).hash(&mut h);
                 roi.hash(&mut h);
-                scale.to_bits().hash(&mut h);
+                density.to_bits().hash(&mut h);
                 let request = SourceRequest {
-                    roi: Rect::new(
-                        f64::from(roi.x0) * scale,
-                        f64::from(roi.y0) * scale,
-                        f64::from(roi.x1) * scale,
-                        f64::from(roi.y1) * scale,
-                    )
-                    .round_out(),
-                    scale: 1.0 / scale,
+                    roi: roi_px,
+                    scale: density,
                     time,
                 };
                 OpInput::Image(self.push(Node {
@@ -615,8 +661,7 @@ impl Builder<'_> {
                     layer: layer.path.clone(),
                     effect,
                     instance,
-                    time: layer.time,
-                    scale: 1.0 / scale,
+                    frame,
                     input: input_id,
                 }),
                 rect,
@@ -776,6 +821,21 @@ impl Builder<'_> {
         }
         out
     }
+}
+
+/// Texels per layer pixel a source should deliver: the layer's magnification on
+/// screen (resolution × scale through the transform and parents), so vector and
+/// text layers rasterize at their final size like AE's continuous rasterization.
+/// Clamped to [1/64, 16] and to the GPU texture limit for `roi`.
+pub fn source_density(transform: &DAffine2, resolution_scale: f64, roi: IRect) -> f64 {
+    let to_texels = scale_affine(1.0 / resolution_scale) * *transform;
+    let mut density = crate::geom::axis_scales(&to_texels).max_element();
+    if !density.is_finite() || density <= 0.0 {
+        density = 1.0 / resolution_scale;
+    }
+    density = density.clamp(1.0 / 64.0, 16.0);
+    let largest = f64::from(roi.width().max(roi.height()).max(1));
+    density.min(8192.0 / largest)
 }
 
 fn rect_bits(r: &Rect) -> [u64; 4] {
@@ -946,6 +1006,29 @@ mod tests {
         });
         let g = build_default(&comp, &RenderRequest::full());
         assert!(g.warnings.iter().any(|w| w.contains("cycle")));
+    }
+
+    #[test]
+    fn source_density_follows_magnification() {
+        let roi = IRect::new(0, 0, 100, 100);
+        let t = DAffine2::from_scale(DVec2::new(4.0, 2.0));
+        assert_eq!(source_density(&t, 1.0, roi), 4.0);
+        assert_eq!(source_density(&t, 2.0, roi), 2.0, "half resolution");
+        let r = DAffine2::from_angle(0.7) * DAffine2::from_scale(DVec2::splat(0.5));
+        assert!((source_density(&r, 1.0, roi) - 0.5).abs() < 1e-12);
+        assert_eq!(
+            source_density(&DAffine2::from_scale(DVec2::splat(100.0)), 1.0, roi),
+            16.0
+        );
+        assert_eq!(
+            source_density(
+                &DAffine2::from_scale(DVec2::splat(8.0)),
+                1.0,
+                IRect::new(0, 0, 4096, 10)
+            ),
+            2.0,
+            "texture limit"
+        );
     }
 
     #[test]

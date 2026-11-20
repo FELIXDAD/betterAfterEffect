@@ -394,7 +394,8 @@ fn precomps_half_resolution_roi_and_cache() {
         ..RenderRequest::full()
     };
     let frame = r.render_frame(&comp, &half).unwrap();
-    assert_eq!(frame.image.rect, IRect::new(0, 0, 40, 40));
+    assert_eq!(frame.image.rect, IRect::new(0, 0, 80, 80));
+    assert_eq!(frame.image.texel_size(), [40, 40]);
     let img = render(&mut r, &comp, &half, OutputAlpha::Straight);
     assert_eq!(img.px(21, 21), [0, 0, 255, 255]);
     assert_eq!(img.px(18, 21), [0, 0, 0, 0]);

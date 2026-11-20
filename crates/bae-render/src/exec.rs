@@ -13,7 +13,6 @@ use bae_gpu::{GpuContext, wgpu};
 use glam::{DAffine2, DVec2};
 
 use crate::blend::BlendMode;
-use crate::effect::EffectParams;
 use crate::error::RenderError;
 use crate::geom::IRect;
 use crate::gpu::{BlendKind, DrawData, Pipelines, flags};
@@ -120,10 +119,11 @@ pub(crate) fn execute(
     for (index, node) in graph.nodes.iter().enumerate() {
         let image = match &node.kind {
             NodeKind::Composite(c) => {
-                let target = pool.acquire(device, format, node.rect, node.pixel_scale)?;
+                let px = node_pixels(node);
+                let target = pool.acquire(device, format, px, node.pixel_scale)?;
                 let scratch_needed = c.ops.iter().any(|op| ctx.needs_backdrop(c, op));
                 let scratch = if scratch_needed {
-                    Some(pool.acquire(device, format, node.rect, node.pixel_scale)?)
+                    Some(pool.acquire(device, format, px, node.pixel_scale)?)
                 } else {
                     None
                 };
@@ -131,7 +131,7 @@ pub(crate) fn execute(
                 target
             }
             NodeKind::Fill(fill) => {
-                let target = pool.acquire(device, format, node.rect, node.pixel_scale)?;
+                let target = pool.acquire(device, format, node_pixels(node), node.pixel_scale)?;
                 ctx.fill(&mut encoder, node, fill.color, &fill.rect, &target)?;
                 target
             }
@@ -153,11 +153,7 @@ pub(crate) fn execute(
                 let input = outputs[fx.input.index()]
                     .clone()
                     .ok_or_else(|| RenderError::Other("effect input missing".into()))?;
-                let params = EffectParams {
-                    effect: &fx.instance,
-                    time: fx.time,
-                    scale: fx.scale,
-                };
+                let params = fx.frame.params(&fx.instance);
                 let mut alloc = PoolAllocator {
                     pool,
                     device,
@@ -479,6 +475,19 @@ impl ExecCtx<'_> {
     }
 }
 
+/// A composite or fill node's region in space pixels (its `rect` is in texels
+/// of `pixel_scale` pixels; composite scales are whole numbers).
+fn node_pixels(node: &Node) -> IRect {
+    let s = node.pixel_scale;
+    let px = |v: i32| (f64::from(v) * s).round() as i32;
+    IRect::new(
+        px(node.rect.x0),
+        px(node.rect.y0),
+        px(node.rect.x1),
+        px(node.rect.y1),
+    )
+}
+
 fn clear(encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
     encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("bae-render.clear"),
@@ -527,21 +536,19 @@ fn plan_op(
             let img = outputs[id.index()]
                 .as_ref()
                 .ok_or_else(|| RenderError::Other(format!("input of {} missing", op.layer)))?;
-            // Input texel t → input space px: (t + rect origin) · pixel_scale.
-            let from_texel = DAffine2::from_scale(DVec2::splat(img.pixel_scale))
-                * DAffine2::from_translation(DVec2::new(
-                    f64::from(img.rect.x0),
-                    f64::from(img.rect.y0),
-                ));
+            // Input texel t → input space px: rect origin + t · pixel_scale.
+            let origin = DVec2::new(f64::from(img.rect.x0), f64::from(img.rect.y0));
+            let s = img.pixel_scale;
+            let from_texel =
+                DAffine2::from_translation(origin) * DAffine2::from_scale(DVec2::splat(s));
             let t = to_target * from_texel;
             // Coverage edges: the layer's content bounds (in input texels).
             let c = &op.content;
-            let s = img.pixel_scale;
             let rect = [
-                c.x0 / s - f64::from(img.rect.x0),
-                c.y0 / s - f64::from(img.rect.y0),
-                c.x1 / s - f64::from(img.rect.x0),
-                c.y1 / s - f64::from(img.rect.y0),
+                (c.x0 - origin.x) / s,
+                (c.y0 - origin.y) / s,
+                (c.x1 - origin.x) / s,
+                (c.y1 - origin.y) / s,
             ];
             let Some(mut d) = DrawData::geometry(&t, rect, target_size) else {
                 return Ok(None);
@@ -563,11 +570,13 @@ fn plan_op(
         let matte = outputs[m.node.index()]
             .as_ref()
             .ok_or_else(|| RenderError::Other(format!("matte of {} missing", op.layer)))?;
+        // The matte composite shares the target's space and scale.
+        let [mw, mh] = matte.texel_size();
         data.matte = [
-            (matte.rect.x0 - node.rect.x0) as f32,
-            (matte.rect.y0 - node.rect.y0) as f32,
-            matte.rect.width() as f32,
-            matte.rect.height() as f32,
+            (f64::from(matte.rect.x0) / matte.pixel_scale - f64::from(node.rect.x0)) as f32,
+            (f64::from(matte.rect.y0) / matte.pixel_scale - f64::from(node.rect.y0)) as f32,
+            mw as f32,
+            mh as f32,
         ];
         data.mode[1] |= flags::MATTE;
         data.mode[2] = m.mode as u32;

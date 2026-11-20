@@ -9,9 +9,12 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use bae_anim::{EvaluatedComp, EvaluatedLayer, Evaluator, LayerSource};
+use std::hash::{Hash, Hasher};
+
+use bae_anim::{EvaluatedComp, EvaluatedLayer, EvaluatedPrim, Evaluator, LayerSource};
 use bae_model::{LayerKind, PrimPath, Stage, StageEvent, Time};
 use glam::{DAffine2, DMat4, DVec2};
+use rustc_hash::FxHasher;
 
 use crate::assets::AssetFiles;
 use crate::blend::{BlendMode, MaskMode, TrackMatteMode};
@@ -19,7 +22,8 @@ use crate::error::RenderError;
 use crate::eval::CompEvaluator;
 use crate::graph::MAX_DEPTH;
 use crate::input::{
-    FootageRef, LayerContent, RenderComp, RenderEffect, RenderLayer, RenderMask, TrackMatte,
+    CustomContent, FootageRef, LayerContent, RenderComp, RenderEffect, RenderLayer, RenderMask,
+    TrackMatte, hash_value,
 };
 use crate::request::RenderPurpose;
 
@@ -109,6 +113,7 @@ impl AnimEvaluator {
             pixel_aspect: ec.pixel_aspect,
             frame_rate: ec.frame_rate,
             background: ec.bg_color.map(|v| v as f32),
+            shutter: [ec.motion_blur.shutter_angle, ec.motion_blur.shutter_phase],
             layers: Vec::with_capacity(ec.layers.len()),
         };
         for layer in &ec.layers {
@@ -197,16 +202,18 @@ impl AnimEvaluator {
             return Ok(LayerContent::None);
         }
         match &l.source {
-            LayerSource::None => {
-                if matches!(l.kind, LayerKind::Shape | LayerKind::Text) {
-                    self.warn(format!(
-                        "{}: {} layers are drawn by 05 (not yet)",
-                        l.path,
-                        l.kind.as_str()
-                    ));
+            // Shape and text layers are drawn by 05's providers from the
+            // evaluated layer (contents, source text, animators).
+            LayerSource::None if l.kind == LayerKind::Shape => Ok(custom(SHAPE_PROVIDER, l, |h| {
+                hash_prims(&l.contents, h);
+            })),
+            LayerSource::None if l.kind == LayerKind::Text => Ok(custom(TEXT_PROVIDER, l, |h| {
+                if let Some(doc) = &l.text {
+                    serde_json::to_vec(doc).unwrap_or_default().hash(h);
                 }
-                Ok(LayerContent::None)
-            }
+                hash_prims(&l.text_animators, h);
+            })),
+            LayerSource::None => Ok(LayerContent::None),
             LayerSource::Comp { comp, nested, .. } => match nested {
                 // bae-anim evaluates nested comps itself (at the mapped time).
                 Some(nested) => {
@@ -262,6 +269,38 @@ impl CompEvaluator for AnimEvaluator {
 
     fn take_warnings(&mut self) -> Vec<String> {
         std::mem::take(&mut self.warnings)
+    }
+}
+
+/// Provider ID of shape layers (05's `bae_vector::SHAPE_PROVIDER`).
+pub const SHAPE_PROVIDER: &str = "bae.shape";
+/// Provider ID of text layers (05's text provider).
+pub const TEXT_PROVIDER: &str = "bae.text";
+
+fn custom(provider: &str, l: &EvaluatedLayer, hash: impl FnOnce(&mut FxHasher)) -> LayerContent {
+    let mut h = FxHasher::default();
+    provider.hash(&mut h);
+    hash(&mut h);
+    LayerContent::Custom(CustomContent {
+        provider: provider.to_owned(),
+        prim: l.path.clone(),
+        size: None,
+        hash: h.finish(),
+        data: Arc::new(l.clone()),
+    })
+}
+
+fn hash_prims(prims: &[EvaluatedPrim], h: &mut FxHasher) {
+    prims.len().hash(h);
+    for p in prims {
+        p.path.hash(h);
+        p.prim_type.hash(h);
+        p.attrs.len().hash(h);
+        for (name, value) in &p.attrs {
+            name.hash(h);
+            hash_value(value, h);
+        }
+        hash_prims(&p.children, h);
     }
 }
 

@@ -49,6 +49,7 @@ pub mod pool;
 mod renderer;
 pub mod request;
 pub mod source;
+pub mod testing;
 
 pub use anim::AnimEvaluator;
 pub use assets::AssetFiles;
@@ -58,6 +59,7 @@ pub use effect::{Effect, EffectLibrary, EffectParams};
 pub use error::RenderError;
 pub use eval::{CompEvaluator, MockEvaluator};
 pub use geom::{IRect, Rect};
+pub use graph::EffectFrame;
 pub use graph::{RenderGraph, SourceResolver};
 pub use input::{
     CustomContent, Dependency, FootageRef, LayerContent, RenderComp, RenderEffect, RenderLayer,

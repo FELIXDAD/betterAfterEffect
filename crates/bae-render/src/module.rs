@@ -26,8 +26,11 @@ use crate::eval::{CompEvaluator, MockEvaluator, sample};
 use crate::geom::IRect;
 use crate::renderer::{OutputAlpha, Renderer, RendererConfig};
 use crate::request::{BitDepth, RenderPurpose, RenderRequest, Resolution};
+use crate::source::SourceProvider;
 
-/// Registers `bae render`.
+/// Registers `bae render`. Layer source providers come from the app's
+/// `Registry<dyn SourceProvider>` (register with
+/// `app.register_arc::<dyn bae_render::SourceProvider>(id, provider)`).
 #[derive(Debug, Default)]
 pub struct RenderModule;
 
@@ -55,7 +58,16 @@ impl AppModule for RenderModule {
                     .cloned();
                 #[cfg(not(feature = "media"))]
                 let media: Option<MediaHandle> = None;
-                run(ctx.matches, desc, media)
+                // Layer source providers registered by other modules (05's shapes
+                // and text, plugin generators).
+                let providers: Vec<std::sync::Arc<dyn SourceProvider>> = ctx
+                    .app
+                    .registry::<dyn SourceProvider>()
+                    .snapshot()
+                    .iter()
+                    .map(|e| e.item().clone())
+                    .collect();
+                run(ctx.matches, desc, media, &providers)
             });
         if let Err(error) = cli::implement(&registry, app.current_owner(), render) {
             tracing::warn!("render not registered: {error}");
@@ -233,6 +245,7 @@ fn run(
     m: &ArgMatches,
     desc: GpuContextDescriptor,
     media: Option<MediaHandle>,
+    providers: &[std::sync::Arc<dyn SourceProvider>],
 ) -> anyhow::Result<ExitCode> {
     let project_path = m.get_one::<PathBuf>("project").expect("required");
     let comp = comp_path(m.get_one::<String>("comp").expect("required"))?;
@@ -312,6 +325,9 @@ fn run(
     }
     #[cfg(not(feature = "media"))]
     let _ = media;
+    for provider in providers {
+        renderer.providers_mut().register(provider.clone());
+    }
     // Footage on disk or inside the .baez the project was opened from.
     let assets = AssetFiles::for_project(&project)?;
     let mut evaluator: Box<dyn CompEvaluator> = if m.get_flag("mock-eval") {
@@ -461,7 +477,7 @@ mod tests {
             ])
             .unwrap();
         assert_eq!(
-            run(&m, GpuContextDescriptor::default(), None).unwrap(),
+            run(&m, GpuContextDescriptor::default(), None, &[]).unwrap(),
             ExitCode::SUCCESS
         );
         let (w, _, data) = crate::png_out::read_rgba8(&out).unwrap();
@@ -505,7 +521,7 @@ mod tests {
             ])
             .unwrap();
         assert_eq!(
-            run(&m, GpuContextDescriptor::default(), None).unwrap(),
+            run(&m, GpuContextDescriptor::default(), None, &[]).unwrap(),
             ExitCode::SUCCESS
         );
         for f in ["out_00.png", "out_01.png"] {

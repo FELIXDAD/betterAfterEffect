@@ -29,6 +29,7 @@ bae-platform.workspace = true
 bytemuck.workspace = true
 clap.workspace = true
 glam.workspace = true
+half.workspace = true
 parking_lot.workspace = true
 png.workspace = true
 rustc-hash.workspace = true

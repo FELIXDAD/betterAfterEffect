@@ -104,8 +104,8 @@ impl TexturePool {
         }
     }
 
-    /// An image covering `rect` (texels of its space) at `pixel_scale`. The
-    /// texture may be larger than `rect`; its contents are undefined.
+    /// An image covering `rect` (pixels of its space) at `pixel_scale` pixels
+    /// per texel. The texture may be larger than needed; contents are undefined.
     pub fn acquire(
         &mut self,
         device: &wgpu::Device,
@@ -114,7 +114,8 @@ impl TexturePool {
         pixel_scale: f64,
     ) -> Result<GpuImage, RenderError> {
         let limit = device.limits().max_texture_dimension_2d;
-        let (w, h) = (rect.width().max(1), rect.height().max(1));
+        let [w, h] = crate::source::texels_for(rect, pixel_scale);
+        let (w, h) = (w.max(1), h.max(1));
         if w > limit || h > limit {
             return Err(RenderError::TooLarge {
                 width: w,

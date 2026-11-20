@@ -33,6 +33,14 @@ fn main() -> ExitCode {
         .add_module(mcp_cli::McpCliModule)
         .add_module(bae_render::RenderModule)
         .add_module(shell::ShellModule);
+    // Layer sources drawn by other workstreams (05: shape layers), used by the
+    // renderer and `bae render`.
+    if let Err(error) = builder.register_arc::<dyn bae_render::SourceProvider>(
+        bae_vector::SHAPE_PROVIDER,
+        std::sync::Arc::new(bae_vector::render::ShapeProvider::new()),
+    ) {
+        tracing::warn!("shape layer source not registered: {error}");
+    }
     // Feature modules from other workstreams are added here.
     startup::run(builder.build())
 }

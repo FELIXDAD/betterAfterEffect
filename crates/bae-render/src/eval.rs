@@ -156,6 +156,10 @@ impl<'a> MockPass<'a> {
             pixel_aspect: float(&view, "pixel_aspect", time).unwrap_or(1.0),
             frame_rate,
             background: color(&view, "bg_color", time).unwrap_or([0.0, 0.0, 0.0, 1.0]),
+            shutter: [
+                float(&view, "shutter_angle", time).unwrap_or(180.0),
+                float(&view, "shutter_phase", time).unwrap_or(-90.0),
+            ],
             layers: Vec::new(),
         };
 

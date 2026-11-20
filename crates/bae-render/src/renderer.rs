@@ -60,7 +60,8 @@ pub struct FrameStats {
 /// the requested ROI), in comp texels at the request resolution.
 #[derive(Clone, Debug)]
 pub struct RenderedFrame {
-    /// The image. `image.rect` is in comp texels (`pixel_scale` comp pixels each).
+    /// The image. `image.rect` is in comp pixels; at reduced resolution each texel
+    /// covers `pixel_scale` pixels ([`GpuImage::texel_size`] texels).
     pub image: GpuImage,
     /// The comp.
     pub comp: PrimPath,
@@ -316,7 +317,7 @@ impl Renderer {
         alpha: OutputAlpha,
     ) -> Result<ImageData, RenderError> {
         let device = self.gpu.device();
-        let [w, h] = frame.image.rect.size();
+        let [w, h] = frame.image.texel_size();
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("bae-render.output"),
             size: wgpu::Extent3d {
