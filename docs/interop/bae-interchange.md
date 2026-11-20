@@ -461,12 +461,13 @@ AE 的标记是 `ADBE Marker` 属性上的「关键帧」，值是 `MarkerValue`
 
 ## 11. 与 02 Prim schema 的对齐状态
 
-对照的是 02 推送到 `core/doc-model`（PR #4，提交 `e9a6571`）的 `crates/bae-model/src/{value,attr,prim,time,path,error}.rs` 和 `docs/spec/data-model.md`。02 的 Prim schema（PR D）合并后再核对一次。
+对照的是 02 合并进 `dev` 的 `crates/bae-model`（PR #4、#5，`dev` 提交 `d3bb9bd`）和 `docs/spec/data-model.md`。核对方法：用 `bae-model` 的类型反序列化 `bridges/ae/examples/` 的示例，经 `Op::RestorePrim` 写入 Sublayer、`to_trees` 读回，重新序列化与原文件逐字段一致；`bridges/ae/samples/anim-cases.json` 里的 67 个 `AttrSpec` 同样往返一致。02 的 Prim schema（PR D）合并后再核对一次。
 
 已经对齐（直接用 02 的形状）：`Value` 的 `{"type","value"}` 标签和各变体；`AttrSpec{value, keyframes, expression}`；`keyframes` 以 flicks 为键；`Keyframe{value, interp_in, interp_out, ease_in, ease_out, spatial_in, spatial_out, flags, label}`；`Ease{speed, influence}`；`KeyframeFlags` 五个开关；`Expression{source, enabled}`；`PrimTree{name, specifier, prim_type, attrs, references, children}`；`LayerKind` 的 token；`Effect.match_name`、`ShapeOperator.operator`；Prim 名字规则（`validate_name`）；属性名规则（`validate_attr_name`，第 4.8 节）；显示名作为属性（`name`）。
 
 对不上、已经写进 02 任务书「请求」的：
 
+0. **`PrimTree` 读不了带关键帧的 JSON**（`#[serde(flatten)]` 与 `BTreeMap<Time, _>` 的字符串键不兼容）。在 02 修好之前，读取方逐个节点反序列化 `PrimSpec` 即可绕过。
 1. `Value` 没有文字文档类型。提案新增 `text_document`（4.7）。
 2. 没有 `Marker`、`TextAnimator`、`TextSelector` 这三个内置 Prim 类型。草案先用这三个名字（第 6.9、6.10 节）。
 3. 时间型属性（入点、出点、时长……）没有专门的 `Value` 类型，草案用 `int` flicks。是否新增 `time` 变体由 02 定。

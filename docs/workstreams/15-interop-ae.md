@@ -46,12 +46,23 @@ AE 工程能进来，也能回去。让团队里只用 AE 的人照常工作，�
 
 ## 进度
 
-- [ ] 导出脚本 v0
-- [ ] 交换格式草案
-- [ ] 给 03 的对照样例
-- [ ] BAE 侧导入器
-- [ ] 导回 AE 的 .jsx
+- [x] 导出脚本 v0（`bridges/ae/bae-export.jsx`）：合成、图层、变换关键帧（时间缓动、空间切线、连续/自动贝塞尔/漂浮、标签）、表达式、遮罩、形状内容、文字（源文本、动画器、选择器）、效果（matchName + 参数，含图层/遮罩参数）、标记、素材清单与收集、导出报告。**未在 AE 中验证**：只在模拟 DOM 上测过（`bridges/ae/tests/`，约 1.3 万项检查 + 金样），手动测试步骤见 `bridges/ae/README.md` 第 4 节。
+- [x] 交换格式草案 v0.1（`docs/interop/bae-interchange.md` + `bae-interchange.schema.json`）：容器直接用 02 的 `PrimTree`/`AttrSpec`/`Keyframe`/`Value` JSON；AE 属性名用可逆编码的 `ae:` 名字。用 dev 上的 `bae-model` 实测：示例文件经 `Op::RestorePrim` 写入 Sublayer、读回、重新序列化逐字段一致（`text_document` 除外，见请求）。
+- [x] 给 03 的对照样例：格式（`docs/interop/ae-anim-samples.md` + schema）、62 个用例（`bridges/ae/samples/anim-cases.json`，由 `gen_anim_cases.py` 生成）、AE 采样脚本 `bridges/ae/bae-anim-samples.jsx`。**AE 参考数据还没生成**，等有 AE 的人跑 README 的 T8。
+- [ ] BAE 侧导入器（`crates/bae-interop-ae`，02 已合并，可以开始）
+- [ ] 导回 AE 的 .jsx（`bae-anim-samples.jsx` 里的 `applyAttr` 是它的雏形）
 - [ ] Lottie
 - [ ] .aep 直接读取
+
+### 受阻
+
+- 本机没有 After Effects：两个脚本都没在 AE 里运行过；交换格式里「关键帧时间是合成时间」（`key_time_base = "comp"`）也是按脚本文档推断的，要用 README 的 T4 核实。
+- 02 的 `PrimTree` 目前不能从 JSON 反序列化带关键帧的树（见 02 任务书「请求」第 1 条）。Rust 导入器可以先绕过（逐个节点反序列化 `PrimSpec`），但最好由 02 修。
+
+### 待决定（先按默认做了）
+
+1. 交换文件里动画属性用 AE 词汇（`ae:` + matchName），由 Rust 导入器映射到 BAE 属性名；而不是让 AE 脚本直接写 BAE 属性名。理由：ExtendScript 没法在 CI 里测，映射逻辑放在 Rust 里只有一份、能写单元测试；BAE 暂不支持的属性也能原样保留、导回 AE 不丢。
+2. 金样 `bridges/ae/examples/mock-project.bae-interchange.json` 约 190 KB（缩进 JSON），作为测试基准提交进仓库。
+3. 谁、在哪些 AE 版本上做第一次真机测试（建议 CC 2018、2020、2023 和当前版本各一次）。
 
 ## 请求（其他工作流在这里留言）

@@ -57,3 +57,23 @@
 - [x] spec 文档初稿：`docs/spec/data-model.md`（随 PR 逐步补全；`project-format.md` 在 PR C）
 
 ## 请求（其他工作流在这里留言）
+
+### 15 interop/ae → 02（2026-11-20）
+
+交换格式草案：`docs/interop/bae-interchange.md`（分支 `interop/ae`）。已按 `docs/spec/data-model.md` 对齐，用 dev 上的 `bae-model` 实测通过（`RestorePrim` → `to_trees` → 重新序列化逐字段一致）。对不上或需要 02 定的地方：
+
+1. **Bug：带关键帧的 `PrimTree` 不能从 JSON 反序列化。** `PrimTree.spec` 用了 `#[serde(flatten)]`，serde 的 flatten 会先把内容缓冲，之后 `AttrSpec.keyframes`（`BTreeMap<Time, _>`）的字符串键 `"0"` 不再转成 `i64`，报 `invalid type: string "0", expected i64`。`AttrSpec`、`PrimSpec` 单独反序列化正常。复现：一个属性带一个关键帧的 `PrimTree`，`to_string` 后 `from_str::<PrimTree>` 失败。建议给 `keyframes` 加自定义的 `#[serde(with = ...)]`（键按字符串解析成 i64，也接受数字），或者 `PrimTree` 不用 flatten；加一个 `PrimTree` JSON 往返测试。影响 `RestorePrim`/粘贴/`export-json` 读回和 15 的导入器。
+2. **`Value` 缺文字文档类型。** AE 的「源文本」可以打关键帧，每个关键帧是一整个 TextDocument。提案新增 `text_document` 变体，字段见交换格式 4.7（`text`、`font`、`font_size`、`fill_color`、`justification`……，snake_case）。逐字符样式以后再加。
+3. **内置 Prim 类型**：提案新增 `Marker`（合成/图层标记，属性见交换格式 6.9）、`TextAnimator`、`TextSelector`。草案已经用这三个名字。
+4. **时间和帧率的值类型**：入点、出点、开始时间、时长等草案用 `int`（flicks），帧率用 `float`（AE 原值，导入时换成 `FrameRate`）。如果 02 想加 `time` / `frame_rate` 变体，告诉我改导出脚本。
+5. **`BezierPath.feather`** 是「每个顶点一个二维值」，AE 的遮罩羽化点是沿路径分布的点（所在段、段内位置、半径、张力、内/外）。建议改成 `Vec<FeatherPoint>{segment, t, radius, tension, inner, corner_angle}` 之类，或者 PR D 时一起定。v0 不导出羽化点，进报告。
+6. **关键帧时间基准**：AE 内部按图层时间存关键帧（移动图层时关键帧跟着走），脚本接口给的是合成时间。BAE 的 `AttrSpec.keyframes` 是相对图层还是相对合成？请在 data-model.md 里写明；03 也要用。
+7. **图层顺序**：草案约定 `layers` 下第一个子 Prim 是 AE 最上面的图层（AE 序号 1）。请确认 BAE 的约定。
+8. **预合成图层**：草案用 `source` 属性（`prim_ref` 指向 `/comps/...`）。还是用 `PrimSpec.references`？引用会把整个合成子树合成到图层下面，语义上更像「实例化」而不是「图层的素材来源」。
+9. **属性命名建议（PR D）**，单位与 AE 一致，值可以 1:1 搬：
+   - 变换：`transform:anchor_point`（vec3）、`transform:position`（vec3）、`transform:position_x` / `_y` / `_z`（单独尺寸时）、`transform:scale`（vec3，百分比）、`transform:orientation`（vec3，度）、`transform:rotation_x`、`transform:rotation_y`、`transform:rotation`（z，度）、`transform:opacity`（百分比）、`transform:point_of_interest`（摄像机、灯光）。
+   - 遮罩：`mask:path`、`mask:feather`、`mask:opacity`、`mask:expansion`，以及 `mode`、`inverted`。
+   - 图层、合成、素材的设置项：交换格式第 6 节的名字（`name`、`in_point`、`out_point`、`start_time`、`stretch`、`parent`、`blend_mode`、`track_matte`、`track_matte_layer`、`three_d`、`width`、`height`、`frame_rate`、`duration`、`bg_color`、`work_area_start`……）。
+   - 效果参数：AE 参数 matchName 本身就带稳定序号（`ADBE Gaussian Blur 2-0001`），如果 PR D 用数字参数 ID，建议直接对应这个序号，导入导出不用查表。
+   - BAE 不认识的 AE 属性，导入时原样保留为 `ae:` 开头的属性（编码规则见交换格式 4.8），导回 AE 不丢。
+

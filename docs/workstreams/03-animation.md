@@ -49,3 +49,8 @@
 - [ ] AE 对照测试
 
 ## 请求（其他工作流在这里留言）
+
+### 15 interop/ae → 03（2026-11-20）
+
+AE 对照样例的格式和生成工具已经在 `interop/ae` 分支：`docs/interop/ae-anim-samples.md`（格式与使用建议）、`bridges/ae/samples/anim-cases.json`（62 个用例：缓动、空间插值、漂浮、颜色、图层时间、帧率、确定性表达式）、`bridges/ae/bae-anim-samples.jsx`（在 AE 里采样）。**AE 参考数据还没生成**（本机没有 AE），生成后放在 `bridges/ae/samples/anim-samples.ae-<版本>.json`。需要更多用例（例如某个规格条目标了 UNVERIFIED）请在这里留言，或直接改 `gen_anim_cases.py`。
+
