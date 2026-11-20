@@ -33,6 +33,23 @@ impl PanelId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// The panel kind: the part before the first `:` (`"timeline:comp-1"` →
+    /// `"timeline"`). This is the `Registry<PanelKind>` id.
+    pub fn kind(&self) -> &str {
+        self.0.split_once(':').map_or(&self.0, |(kind, _)| kind)
+    }
+
+    /// The instance part after the first `:`, if any.
+    pub fn instance(&self) -> Option<&str> {
+        self.0.split_once(':').map(|(_, instance)| instance)
+    }
+}
+
+impl From<String> for PanelId {
+    fn from(s: String) -> Self {
+        PanelId(s)
+    }
 }
 
 impl From<&str> for PanelId {
@@ -297,6 +314,22 @@ impl Layout {
 
     pub fn from_json(s: &str) -> Result<Layout, serde_json::Error> {
         serde_json::from_str(s)
+    }
+
+    /// Every panel id in the layout, docked first, then floating.
+    pub fn panel_ids(&self) -> Vec<PanelId> {
+        fn walk(node: &Node, out: &mut Vec<PanelId>) {
+            match node {
+                Node::Frame(f) => out.extend(f.tabs.iter().cloned()),
+                Node::Split { children, .. } => children.iter().for_each(|c| walk(c, out)),
+            }
+        }
+        let mut out = Vec::new();
+        walk(&self.root, &mut out);
+        for f in &self.floating {
+            out.extend(f.frame.tabs.iter().cloned());
+        }
+        out
     }
 }
 
@@ -1610,6 +1643,19 @@ mod tests {
         assert!(back.contains(&"align".into()));
         let stack = back.frame_of(&"properties".into()).unwrap();
         assert!(back.frame(stack).unwrap().stacked);
+        let ids = back.layout.panel_ids();
+        assert_eq!(ids.last().unwrap().as_str(), "align");
+        assert!(ids.iter().any(|p| p.as_str() == "timeline"));
+    }
+
+    #[test]
+    fn panel_id_kind_and_instance() {
+        let id = PanelId::new("timeline:comp-1");
+        assert_eq!(id.kind(), "timeline");
+        assert_eq!(id.instance(), Some("comp-1"));
+        let id = PanelId::new("project");
+        assert_eq!(id.kind(), "project");
+        assert_eq!(id.instance(), None);
     }
 
     fn run(ctx: &egui::Context, dock: &mut Dock, events: Vec<Event>) {

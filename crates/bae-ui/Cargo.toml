@@ -1,6 +1,6 @@
 [package]
 name = "bae-ui"
-description = "BAE UI shell: theme tokens, docking frames, title bar, icons and AE-style widgets"
+description = "BAE UI shell: theme, docking, title bar, icons, widgets, panels, workspaces and shortcuts"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,9 +9,12 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+bae-app.workspace = true
+bae-model.workspace = true
 egui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
 
 # The shell demo (`cargo run -p bae-ui --example shell`) runs on eframe. eframe is not a
 # workspace pin: the app drives bae-ui through egui-winit + egui-wgpu on the shared

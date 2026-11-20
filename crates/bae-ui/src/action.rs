@@ -1,0 +1,129 @@
+//! Actions: everything a menu item, shortcut, toolbar button or panel can trigger
+//! is identified by a **command id** string.
+//!
+//! An id resolves, in this order (see [`crate::workbench`]):
+//!
+//! 1. the focused panel ([`crate::Panel::on_action`]) — view-only actions such as
+//!    timeline zoom, scoped to one panel kind;
+//! 2. shell actions ([`ids`]): undo/redo, workspaces, windows, application;
+//! 3. a `bae-model` command (`CommandRegistry::execute` on the open stage, one undo
+//!    step attributed to the local author).
+//!
+//! Only (3) changes project data. UI-level actions are described by an
+//! [`ActionInfo`] registered in `Registry<ActionInfo>` (id = command id) so the
+//! keyboard-shortcut editor and the menus can show a localized title; model
+//! commands are described by their `CommandInfo` and need no extra registration.
+
+use serde::{Deserialize, Serialize};
+
+/// Metadata of a UI-level action (registered in `bae_app::Registry<ActionInfo>`
+/// under its command id).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActionInfo {
+    /// English title; displayed through [`crate::i18n::tr`].
+    pub title: String,
+    /// Panel kind the action belongs to (`Some("timeline")`); `None` for global
+    /// actions. Panel actions are routed to the focused panel of that kind.
+    pub panel: Option<String>,
+}
+
+impl ActionInfo {
+    pub fn new(title: impl Into<String>) -> Self {
+        ActionInfo {
+            title: title.into(),
+            panel: None,
+        }
+    }
+
+    /// Scope the action to a panel kind.
+    pub fn for_panel(mut self, kind: impl Into<String>) -> Self {
+        self.panel = Some(kind.into());
+        self
+    }
+}
+
+/// A request to run a command id with JSON parameters (`Null` = no parameters;
+/// model commands receive `{}` instead).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Invocation {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub params: serde_json::Value,
+}
+
+impl Invocation {
+    pub fn new(id: impl Into<String>) -> Self {
+        Invocation {
+            id: id.into(),
+            params: serde_json::Value::Null,
+        }
+    }
+
+    pub fn with_params(id: impl Into<String>, params: serde_json::Value) -> Self {
+        Invocation {
+            id: id.into(),
+            params,
+        }
+    }
+
+    /// The `"id"` string parameter (`workspace.switch`, `window.panel`).
+    pub fn id_param(&self) -> Option<&str> {
+        self.params.get("id").and_then(|v| v.as_str())
+    }
+}
+
+/// Command ids handled by the shell itself.
+pub mod ids {
+    /// Undo the local author's last step (`Stage::undo`).
+    pub const UNDO: &str = "edit.undo";
+    /// Redo the local author's last undone step (`Stage::redo`).
+    pub const REDO: &str = "edit.redo";
+    /// Quit the application.
+    pub const QUIT: &str = "app.quit";
+    /// Show the About window.
+    pub const ABOUT: &str = "app.about";
+    /// Open the keyboard shortcut editor.
+    pub const KEYBOARD_SHORTCUTS: &str = "app.keyboard_shortcuts";
+    /// New / open / save project (handled by the shell's project owner).
+    pub const NEW_PROJECT: &str = "file.new_project";
+    pub const OPEN_PROJECT: &str = "file.open_project";
+    pub const SAVE: &str = "file.save";
+    pub const SAVE_AS: &str = "file.save_as";
+    /// Switch workspace; params `{"id": "<workspace id>"}`.
+    pub const SWITCH_WORKSPACE: &str = "workspace.switch";
+    /// Restore the active workspace's saved layout.
+    pub const RESET_WORKSPACE: &str = "workspace.reset";
+    /// Save the current layout as the active workspace's saved layout.
+    pub const SAVE_WORKSPACE: &str = "workspace.save";
+    /// Open (or focus) a panel; params `{"id": "<panel id>"}`.
+    pub const OPEN_PANEL: &str = "window.panel";
+    /// Close the focused panel.
+    pub const CLOSE_PANEL: &str = "window.close_panel";
+    /// Maximize / restore the focused panel group (AE: `~`).
+    pub const MAXIMIZE_FRAME: &str = "window.maximize_frame";
+    /// Switch the UI language; params `{"id": "en" | "zh"}`.
+    pub const SET_LANGUAGE: &str = "app.language";
+    /// Open the help documentation.
+    pub const HELP: &str = "help.docs";
+}
+
+/// Titles of the shell's own actions, registered by [`crate::UiModule`].
+pub(crate) const SHELL_ACTIONS: &[(&str, &str)] = &[
+    (ids::UNDO, "Undo"),
+    (ids::REDO, "Redo"),
+    (ids::QUIT, "Quit"),
+    (ids::ABOUT, "About BAE"),
+    (ids::KEYBOARD_SHORTCUTS, "Keyboard Shortcuts"),
+    (ids::NEW_PROJECT, "New Project"),
+    (ids::OPEN_PROJECT, "Open Project..."),
+    (ids::SAVE, "Save"),
+    (ids::SAVE_AS, "Save As..."),
+    (ids::SWITCH_WORKSPACE, "Switch Workspace"),
+    (ids::RESET_WORKSPACE, "Reset to Saved Layout"),
+    (ids::SAVE_WORKSPACE, "Save Changes to this Workspace"),
+    (ids::OPEN_PANEL, "Open Panel"),
+    (ids::CLOSE_PANEL, "Close Panel"),
+    (ids::MAXIMIZE_FRAME, "Maximize Panel Group"),
+    (ids::SET_LANGUAGE, "Language"),
+    (ids::HELP, "BAE Help"),
+];
