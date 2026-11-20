@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::audio::AudioBuffer;
 use crate::frame::{CpuFrame, GpuFrame, PixelFormat};
-use crate::gpu::MediaGpu;
+use crate::gpu::{ExportTexture, MediaGpu};
 use crate::meta::{
     AlphaMode, ColorInfo, ColorPrimaries, MatrixCoefficients, PixelAspect, TransferFunction,
 };
@@ -297,6 +297,14 @@ pub trait Encoder: Send {
     /// Frames written so far.
     fn frames_written(&self) -> u64;
 
+    /// The pixel layout and alpha the encoder works in. The render loop
+    /// converts GPU frames into it before readback
+    /// ([`MediaGpu::convert_for_export`]), so `push_frame` receives frames it
+    /// can use without per-pixel work. `None`: no preference.
+    fn input_format(&self) -> Option<(PixelFormat, AlphaMode)> {
+        None
+    }
+
     /// Flushes and closes the output.
     fn finish(self: Box<Self>) -> Result<EncodeOutput, MediaError>;
 
@@ -388,6 +396,16 @@ impl MediaEncoders {
 /// over black and sets alpha to 1 (AE's "RGB" output of a comp with
 /// transparency). Integer formats are rounded and clamped to `0..=1`.
 pub fn convert_frame(frame: &CpuFrame, format: PixelFormat, alpha: AlphaMode) -> CpuFrame {
+    convert_frame_cow(frame, format, alpha).into_owned()
+}
+
+/// Like [`convert_frame`], but borrows `frame` when it already has the layout
+/// and alpha (the normal case for frames converted on the GPU).
+pub fn convert_frame_cow(
+    frame: &CpuFrame,
+    format: PixelFormat,
+    alpha: AlphaMode,
+) -> std::borrow::Cow<'_, CpuFrame> {
     let from = frame.alpha;
     let same_alpha = from == alpha
         || matches!(
@@ -395,8 +413,13 @@ pub fn convert_frame(frame: &CpuFrame, format: PixelFormat, alpha: AlphaMode) ->
             (AlphaMode::Opaque | AlphaMode::Ignore, AlphaMode::Opaque)
         );
     if frame.format == format && same_alpha {
-        return frame.clone();
+        return std::borrow::Cow::Borrowed(frame);
     }
+    std::borrow::Cow::Owned(convert_pixels(frame, format, alpha))
+}
+
+fn convert_pixels(frame: &CpuFrame, format: PixelFormat, alpha: AlphaMode) -> CpuFrame {
+    let from = frame.alpha;
     let pixels = frame.width as usize * frame.height as usize;
     let mut data = Vec::with_capacity(pixels * format.bytes_per_pixel() as usize);
     for y in 0..frame.height {
@@ -549,11 +572,77 @@ impl SequencePattern {
     }
 }
 
-/// PNG / OpenEXR sequence encoder (one file per frame, written synchronously).
+/// PNG / OpenEXR sequence encoder (one file per frame).
+///
+/// Frames are compressed and written by a few worker threads (files are
+/// independent), so exporting is not limited by one core; the queue is
+/// bounded to keep memory in check at 4K. Errors surface on a later
+/// `push_frame` or on `finish`.
 pub struct ImageSequenceEncoder {
     settings: EncodeSettings,
     pattern: SequencePattern,
     files: Vec<PathBuf>,
+    writer: Arc<SequenceWriter>,
+    pool: Option<WriterPool>,
+}
+
+/// Writes one frame file (shared by the worker threads).
+struct SequenceWriter {
+    settings: EncodeSettings,
+}
+
+struct WriteJob {
+    path: PathBuf,
+    frame: CpuFrame,
+    index: u64,
+}
+
+struct WriterPool {
+    sender: Option<std::sync::mpsc::SyncSender<WriteJob>>,
+    workers: Vec<std::thread::JoinHandle<()>>,
+    error: Arc<parking_lot::Mutex<Option<MediaError>>>,
+}
+
+impl WriterPool {
+    fn new(writer: &Arc<SequenceWriter>) -> Self {
+        let threads = std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(1, 4));
+        let (sender, receiver) = std::sync::mpsc::sync_channel::<WriteJob>(threads);
+        let receiver = Arc::new(parking_lot::Mutex::new(receiver));
+        let error: Arc<parking_lot::Mutex<Option<MediaError>>> = Arc::default();
+        let workers = (0..threads)
+            .map(|_| {
+                let (writer, receiver, error) = (writer.clone(), receiver.clone(), error.clone());
+                std::thread::spawn(move || {
+                    loop {
+                        // Hold the lock only while taking a job.
+                        let Ok(job) = receiver.lock().recv() else {
+                            break;
+                        };
+                        if error.lock().is_some() {
+                            continue;
+                        }
+                        if let Err(e) = writer.write(&job.path, &job.frame, job.index) {
+                            error.lock().get_or_insert(e);
+                        }
+                    }
+                })
+            })
+            .collect();
+        WriterPool {
+            sender: Some(sender),
+            workers,
+            error,
+        }
+    }
+
+    /// Waits for every queued frame; returns the first error.
+    fn join(mut self) -> Result<(), MediaError> {
+        self.sender = None;
+        for worker in self.workers.drain(..) {
+            let _ = worker.join();
+        }
+        self.error.lock().take().map_or(Ok(()), Err)
+    }
 }
 
 impl ImageSequenceEncoder {
@@ -570,17 +659,32 @@ impl ImageSequenceEncoder {
         if !pattern.dir.as_os_str().is_empty() {
             std::fs::create_dir_all(&pattern.dir).map_err(|e| MediaError::io(&pattern.dir, e))?;
         }
+        let writer = Arc::new(SequenceWriter {
+            settings: settings.clone(),
+        });
         Ok(ImageSequenceEncoder {
             settings: settings.clone(),
             pattern,
             files: Vec::new(),
+            pool: Some(WriterPool::new(&writer)),
+            writer,
         })
+    }
+}
+
+impl SequenceWriter {
+    fn write(&self, path: &Path, frame: &CpuFrame, index: u64) -> Result<(), MediaError> {
+        match self.settings.codec {
+            VideoCodec::Png => self.write_png(path, frame),
+            VideoCodec::Exr(compression) => self.write_exr(path, frame, compression, index),
+            other => unreachable!("checked in ImageSequenceEncoder::new: {other:?}"),
+        }
     }
 
     fn write_png(&self, path: &Path, frame: &CpuFrame) -> Result<(), MediaError> {
         let s = &self.settings;
         let sixteen = s.bit_depth == 16;
-        let frame = convert_frame(
+        let frame = convert_frame_cow(
             frame,
             if sixteen {
                 PixelFormat::Rgba16
@@ -651,17 +755,49 @@ impl ImageSequenceEncoder {
         path: &Path,
         frame: &CpuFrame,
         compression: ExrCompression,
+        index: u64,
     ) -> Result<(), MediaError> {
         use exr::prelude::{
             Blocks, Encoding, Image, LineOrder, SpecificChannels, Vec2, WritableImage as _,
         };
         let s = &self.settings;
-        let frame = convert_frame(frame, PixelFormat::Rgba32Float, s.alpha);
+        let half = s.bit_depth == 16;
+        let frame = convert_frame_cow(
+            frame,
+            if half {
+                PixelFormat::Rgba16Float
+            } else {
+                PixelFormat::Rgba32Float
+            },
+            s.alpha,
+        );
         let width = s.width as usize;
-        let pixels: &[f32] = bytemuck::cast_slice(&frame.data);
-        let px = move |pos: Vec2<usize>| {
+        // `CpuFrame::data` is a byte vector: reinterpret when aligned, copy
+        // otherwise.
+        let halves: std::borrow::Cow<'_, [f16]> = if half {
+            match bytemuck::try_cast_slice(&frame.data) {
+                Ok(slice) => std::borrow::Cow::Borrowed(slice),
+                Err(_) => std::borrow::Cow::Owned(bytemuck::pod_collect_to_vec(&frame.data)),
+            }
+        } else {
+            std::borrow::Cow::Borrowed(&[])
+        };
+        let floats: std::borrow::Cow<'_, [f32]> = if half {
+            std::borrow::Cow::Borrowed(&[])
+        } else {
+            match bytemuck::try_cast_slice(&frame.data) {
+                Ok(slice) => std::borrow::Cow::Borrowed(slice),
+                Err(_) => std::borrow::Cow::Owned(bytemuck::pod_collect_to_vec(&frame.data)),
+            }
+        };
+        let (halves, floats) = (&*halves, &*floats);
+        let px16 = move |pos: Vec2<usize>| {
             let i = (pos.1 * width + pos.0) * 4;
-            [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+            [halves[i], halves[i + 1], halves[i + 2], halves[i + 3]]
+        };
+        let px32 = move |pos: Vec2<usize>| {
+            let i = (pos.1 * width + pos.0) * 4;
+            [floats[i], floats[i + 1], floats[i + 2], floats[i + 3]]
         };
         let encoding = Encoding {
             compression: match compression {
@@ -675,12 +811,11 @@ impl ImageSequenceEncoder {
             line_order: LineOrder::Increasing,
         };
         let size = (width, s.height as usize);
-        let half = s.bit_depth == 16;
         let mut attributes = exr::meta::header::ImageAttributes::with_size(size);
         attributes.pixel_aspect = s.pixel_aspect.as_f64() as f32;
         attributes.chromaticities = exr_chromaticities(s.color.primaries);
         if let Some(tc) = s.start_timecode {
-            let frame_number = tc.to_frame_number(s.frame_rate) + self.files.len() as u64;
+            let frame_number = tc.to_frame_number(s.frame_rate) + index;
             let tc = Timecode::from_frame_number(frame_number, s.frame_rate, tc.drop_frame);
             attributes.time_code = Some(exr::meta::attribute::TimeCode {
                 hours: tc.hours,
@@ -696,20 +831,20 @@ impl ImageSequenceEncoder {
         }
         let result = match (s.has_alpha(), half) {
             (true, true) => {
-                let channels = SpecificChannels::rgba(move |pos| px(pos).map(f16::from_f32).into());
+                let channels = SpecificChannels::rgba(move |pos| px16(pos).into());
                 let mut image = Image::from_encoded_channels(size, encoding, channels);
                 image.attributes = attributes;
                 image.write().non_parallel().to_file(path)
             }
             (true, false) => {
-                let channels = SpecificChannels::rgba(move |pos| px(pos).into());
+                let channels = SpecificChannels::rgba(move |pos| px32(pos).into());
                 let mut image = Image::from_encoded_channels(size, encoding, channels);
                 image.attributes = attributes;
                 image.write().non_parallel().to_file(path)
             }
             (false, true) => {
                 let channels = SpecificChannels::rgb(move |pos| {
-                    let [r, g, b, _] = px(pos).map(f16::from_f32);
+                    let [r, g, b, _] = px16(pos);
                     (r, g, b)
                 });
                 let mut image = Image::from_encoded_channels(size, encoding, channels);
@@ -718,7 +853,7 @@ impl ImageSequenceEncoder {
             }
             (false, false) => {
                 let channels = SpecificChannels::rgb(move |pos| {
-                    let [r, g, b, _] = px(pos);
+                    let [r, g, b, _] = px32(pos);
                     (r, g, b)
                 });
                 let mut image = Image::from_encoded_channels(size, encoding, channels);
@@ -757,12 +892,29 @@ impl Encoder for ImageSequenceEncoder {
 
     fn push_frame(&mut self, frame: &CpuFrame) -> Result<(), MediaError> {
         check_frame_size(&self.settings, frame)?;
-        let number = self.settings.start_number + self.files.len() as i64;
-        let path = self.pattern.path_for(number);
-        match self.settings.codec {
-            VideoCodec::Png => self.write_png(&path, frame)?,
-            VideoCodec::Exr(compression) => self.write_exr(&path, frame, compression)?,
-            other => unreachable!("checked in new: {other:?}"),
+        let index = self.files.len() as u64;
+        let path = self
+            .pattern
+            .path_for(self.settings.start_number + index as i64);
+        match &self.pool {
+            Some(pool) => {
+                if let Some(error) = pool.error.lock().take() {
+                    return Err(error);
+                }
+                // Convert here (cheap when the GPU already did) so workers get
+                // exactly what they write.
+                let (format, alpha) = self.input_format().expect("sequences have a format");
+                let frame = convert_frame_cow(frame, format, alpha).into_owned();
+                let sender = pool.sender.as_ref().expect("open until finish");
+                sender
+                    .send(WriteJob {
+                        path: path.clone(),
+                        frame,
+                        index,
+                    })
+                    .map_err(|_| MediaError::Unsupported("image writer stopped".into()))?;
+            }
+            None => self.writer.write(&path, frame, index)?,
         }
         self.files.push(path);
         Ok(())
@@ -772,14 +924,31 @@ impl Encoder for ImageSequenceEncoder {
         self.files.len() as u64
     }
 
-    fn finish(self: Box<Self>) -> Result<EncodeOutput, MediaError> {
+    fn input_format(&self) -> Option<(PixelFormat, AlphaMode)> {
+        let s = &self.settings;
+        let format = match (s.codec, s.bit_depth) {
+            (VideoCodec::Png, 16) => PixelFormat::Rgba16,
+            (VideoCodec::Png, _) => PixelFormat::Rgba8,
+            (VideoCodec::Exr(_), 16) => PixelFormat::Rgba16Float,
+            _ => PixelFormat::Rgba32Float,
+        };
+        Some((format, s.alpha))
+    }
+
+    fn finish(mut self: Box<Self>) -> Result<EncodeOutput, MediaError> {
+        if let Some(pool) = self.pool.take() {
+            pool.join()?;
+        }
         Ok(EncodeOutput {
             frames: self.files.len() as u64,
             files: self.files,
         })
     }
 
-    fn abort(self: Box<Self>) {
+    fn abort(mut self: Box<Self>) {
+        if let Some(pool) = self.pool.take() {
+            let _ = pool.join();
+        }
         for file in &self.files {
             let _ = std::fs::remove_file(file);
         }
@@ -812,7 +981,16 @@ impl EncoderFormat for ImageSequenceFormat {
 /// submission order.
 pub struct FrameReadback {
     depth: usize,
-    in_flight: VecDeque<(PendingReadback, GpuFrame)>,
+    in_flight: VecDeque<(PendingReadback, ReadbackMeta)>,
+}
+
+/// What a readback's bytes are.
+#[derive(Clone, Debug)]
+struct ReadbackMeta {
+    format: PixelFormat,
+    alpha: AlphaMode,
+    color: ColorInfo,
+    pixel_aspect: PixelAspect,
 }
 
 impl fmt::Debug for FrameReadback {
@@ -852,7 +1030,35 @@ impl FrameReadback {
     /// [`GpuFrame`] from [`MediaGpu`] has).
     pub fn submit(&mut self, gpu: &MediaGpu, frame: &GpuFrame) -> Result<(), MediaError> {
         let pending = TextureReadback::start(gpu.context(), &frame.texture)?;
-        self.in_flight.push_back((pending, frame.clone()));
+        self.in_flight.push_back((
+            pending,
+            ReadbackMeta {
+                format: PixelFormat::Rgba16Float,
+                alpha: frame.alpha,
+                color: frame.color.clone(),
+                pixel_aspect: frame.pixel_aspect,
+            },
+        ));
+        Ok(())
+    }
+
+    /// Starts copying a frame converted for an encoder
+    /// ([`MediaGpu::convert_for_export`]).
+    pub fn submit_export(
+        &mut self,
+        gpu: &MediaGpu,
+        frame: &ExportTexture,
+    ) -> Result<(), MediaError> {
+        let pending = TextureReadback::start(gpu.context(), &frame.texture)?;
+        self.in_flight.push_back((
+            pending,
+            ReadbackMeta {
+                format: frame.format,
+                alpha: frame.alpha,
+                color: frame.color.clone(),
+                pixel_aspect: frame.pixel_aspect,
+            },
+        ));
         Ok(())
     }
 
@@ -880,11 +1086,11 @@ impl FrameReadback {
     }
 }
 
-fn to_cpu(image: bae_gpu::transfer::ImageData, frame: &GpuFrame) -> CpuFrame {
+fn to_cpu(image: bae_gpu::transfer::ImageData, frame: &ReadbackMeta) -> CpuFrame {
     CpuFrame {
         width: image.width,
         height: image.height,
-        format: PixelFormat::Rgba16Float,
+        format: frame.format,
         data: image.data,
         alpha: frame.alpha,
         color: frame.color.clone(),
@@ -1036,7 +1242,15 @@ pub fn render(
                         encoder.push_frame(&done?)?;
                         report(encoder.as_ref());
                     }
-                    readback.submit(gpu, &gpu_frame)?;
+                    match encoder.input_format() {
+                        Some((format, alpha))
+                            if (format, alpha) != (PixelFormat::Rgba16Float, gpu_frame.alpha) =>
+                        {
+                            let converted = gpu.convert_for_export(&gpu_frame, format, alpha)?;
+                            readback.submit_export(gpu, &converted)?;
+                        }
+                        _ => readback.submit(gpu, &gpu_frame)?,
+                    }
                 }
             }
         }

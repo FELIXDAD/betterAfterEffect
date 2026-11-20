@@ -252,3 +252,77 @@ fn cancel_deletes_the_movie_and_bad_settings_fail_early() {
     .with_alpha(AlphaMode::Straight);
     assert!(encoders.create(&h264_alpha).is_err());
 }
+
+/// 4K export throughput from GPU frames (render loop → readback → convert →
+/// encode): `cargo test -p bae-media --release --test encode -- --ignored --nocapture`.
+#[test]
+#[ignore = "benchmark: encodes 4K movies"]
+fn export_throughput_4k() {
+    use std::time::Instant;
+
+    let Some(ctx) = common::gpu() else { return };
+    let media = bae_media::MediaGpu::new(ctx);
+    let dir = tempfile::tempdir().unwrap();
+    let (w, h) = (3840_u32, 2160_u32);
+    // One premultiplied half-float frame with partial alpha, uploaded once.
+    let mut data = Vec::with_capacity((w * h * 8) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let a = 0.25 + 0.75 * (x as f32 / w as f32);
+            for v in [0.8 * a, (y as f32 / h as f32) * a, 0.3 * a, a] {
+                data.extend_from_slice(&half::f16::from_f32(v).to_ne_bytes());
+            }
+        }
+    }
+    let cpu = CpuFrame {
+        width: w,
+        height: h,
+        format: PixelFormat::Rgba16Float,
+        data,
+        alpha: AlphaMode::Premultiplied,
+        color: ColorInfo::srgb(),
+        pixel_aspect: PixelAspect::SQUARE,
+    };
+    let frame = media.upload(&cpu, &FrameRequest::new(0)).unwrap();
+    let frames = 30;
+    for (name, codec, alpha) in [
+        ("H.264", VideoCodec::H264, AlphaMode::Opaque),
+        (
+            "ProRes 422 HQ",
+            VideoCodec::ProRes(ProResProfile::Hq),
+            AlphaMode::Opaque,
+        ),
+        (
+            "ProRes 4444 + alpha",
+            VideoCodec::ProRes(ProResProfile::P4444),
+            AlphaMode::Straight,
+        ),
+        (
+            "EXR half + alpha",
+            VideoCodec::Exr(bae_media::ExrCompression::Zip),
+            AlphaMode::Premultiplied,
+        ),
+    ] {
+        let path = match codec {
+            VideoCodec::Exr(_) => dir.path().join("exr/f_####.exr"),
+            _ => dir.path().join("bench.mov"),
+        };
+        let settings = EncodeSettings::new(path, codec, w, h, FrameRate::FPS_30).with_alpha(alpha);
+        let start = Instant::now();
+        render(
+            &RenderJob {
+                name: name.into(),
+                frames: 0..frames,
+                settings,
+            },
+            &mut |_| Ok(ProducedFrame::Gpu(frame.clone())),
+            Some(&media),
+            &MediaEncoders::builtin(),
+            &CancelToken::new(),
+            &mut |_| {},
+        )
+        .unwrap();
+        let fps = frames as f64 / start.elapsed().as_secs_f64();
+        eprintln!("4K export {name}: {fps:.1} fps");
+    }
+}

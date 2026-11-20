@@ -104,6 +104,86 @@ pub struct MediaGpu {
     uint_layout: wgpu::BindGroupLayout,
     float_pipeline: wgpu::ComputePipeline,
     uint_pipeline: wgpu::ComputePipeline,
+    /// Export conversion pipelines, created on first use per output format.
+    export_pipelines: parking_lot::Mutex<
+        std::collections::HashMap<PixelFormat, (wgpu::BindGroupLayout, wgpu::ComputePipeline)>,
+    >,
+}
+
+const EXPORT_SHADER: &str = r"
+struct Params {
+    // 0 keep, 1 premultiply, 2 unpremultiply, 3 force opaque,
+    // 4 premultiply then force opaque (straight → RGB over black)
+    op: u32,
+    _p0: u32,
+    _p1: u32,
+    _p2: u32,
+};
+
+@group(0) @binding(0) var src: texture_2d<f32>;
+@group(0) @binding(1) var dst: texture_storage_2d<FORMAT, write>;
+@group(0) @binding(2) var<uniform> params: Params;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+    let size = textureDimensions(dst);
+    if (id.x >= size.x || id.y >= size.y) { return; }
+    var c = textureLoad(src, id.xy, 0);
+    switch params.op {
+        case 1u: { c = vec4<f32>(c.rgb * c.a, c.a); }
+        case 2u: { if (c.a > 0.0) { c = vec4<f32>(c.rgb / c.a, c.a); } }
+        case 3u: { c.a = 1.0; }
+        case 4u: { c = vec4<f32>(c.rgb * c.a, 1.0); }
+        default: {}
+    }
+    textureStore(dst, id.xy, STORE);
+}
+";
+
+/// Storage format, store expression and texture format of an export target.
+fn export_target(format: PixelFormat) -> (&'static str, &'static str, wgpu::TextureFormat) {
+    match format {
+        PixelFormat::Rgba8 => ("rgba8unorm", "c", wgpu::TextureFormat::Rgba8Unorm),
+        // Swizzled into an RGBA8 texture: the bytes come out B G R A, no
+        // BGRA storage feature needed.
+        PixelFormat::Bgra8 => ("rgba8unorm", "c.bgra", wgpu::TextureFormat::Rgba8Unorm),
+        PixelFormat::Rgba16 => (
+            "rgba16uint",
+            "vec4<u32>(round(clamp(c, vec4<f32>(0.0), vec4<f32>(1.0)) * 65535.0))",
+            wgpu::TextureFormat::Rgba16Uint,
+        ),
+        PixelFormat::Rgba16Float => ("rgba16float", "c", wgpu::TextureFormat::Rgba16Float),
+        PixelFormat::Rgba32Float => ("rgba32float", "c", wgpu::TextureFormat::Rgba32Float),
+    }
+}
+
+/// The alpha operation turning `from` into `to` for export.
+fn export_alpha_op(from: AlphaMode, to: AlphaMode) -> u32 {
+    let from_opaque = matches!(from, AlphaMode::Opaque | AlphaMode::Ignore);
+    match to {
+        AlphaMode::Opaque | AlphaMode::Ignore if from == AlphaMode::Straight => 4,
+        AlphaMode::Opaque | AlphaMode::Ignore => 3,
+        _ if from_opaque => 3,
+        AlphaMode::Straight if from == AlphaMode::Premultiplied => 2,
+        AlphaMode::Premultiplied if from == AlphaMode::Straight => 1,
+        _ => 0,
+    }
+}
+
+/// A frame converted for an encoder on the GPU, ready to be read back
+/// ([`FrameReadback::submit_export`](crate::FrameReadback::submit_export)).
+#[derive(Clone, Debug)]
+pub struct ExportTexture {
+    /// The converted texture (`COPY_SRC`).
+    pub texture: wgpu::Texture,
+    /// Memory layout of the texture's bytes.
+    pub format: PixelFormat,
+    /// Alpha of the converted pixels.
+    pub alpha: AlphaMode,
+    /// Color tags (unchanged).
+    pub color: ColorInfo,
+    /// Pixel aspect (unchanged).
+    pub pixel_aspect: PixelAspect,
 }
 
 /// Description of a texture to convert with [`MediaGpu::convert_texture`].
@@ -201,7 +281,158 @@ impl MediaGpu {
             uint_layout,
             float_pipeline,
             uint_pipeline,
+            export_pipelines: parking_lot::Mutex::new(std::collections::HashMap::new()),
         }
+    }
+
+    fn export_pipeline(
+        &self,
+        format: PixelFormat,
+    ) -> (wgpu::BindGroupLayout, wgpu::ComputePipeline) {
+        let mut pipelines = self.export_pipelines.lock();
+        if let Some(entry) = pipelines.get(&format) {
+            return entry.clone();
+        }
+        let (storage, store, texture_format) = export_target(format);
+        let device = self.ctx.device();
+        let source = EXPORT_SHADER
+            .replace("FORMAT", storage)
+            .replace("STORE", store);
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("bae.media.export"),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
+        });
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("bae.media.export"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: texture_format,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("bae.media.export"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("bae.media.export"),
+            layout: Some(&pipeline_layout),
+            module: &module,
+            entry_point: Some("main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        });
+        pipelines.insert(format, (layout.clone(), pipeline.clone()));
+        (layout, pipeline)
+    }
+
+    /// Converts a frame on the GPU into the layout and alpha an encoder wants
+    /// ([`Encoder::input_format`](crate::Encoder::input_format)), so readback
+    /// moves only the final bytes and the CPU does no per-pixel work.
+    /// `AlphaMode::Opaque` keeps color premultiplied over black and sets alpha
+    /// to 1 (AE's "RGB" output).
+    pub fn convert_for_export(
+        &self,
+        frame: &GpuFrame,
+        format: PixelFormat,
+        alpha: AlphaMode,
+    ) -> Result<ExportTexture, MediaError> {
+        let (layout, pipeline) = self.export_pipeline(format);
+        let (_, _, texture_format) = export_target(format);
+        let device = self.ctx.device();
+        let size = wgpu::Extent3d {
+            width: frame.width(),
+            height: frame.height(),
+            depth_or_array_layers: 1,
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("bae.media.export"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: texture_format,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let params: [u32; 4] = [export_alpha_op(frame.alpha, alpha), 0, 0, 0];
+        let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("bae.media.export.params"),
+            contents: bytemuck::cast_slice(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let src = frame.view();
+        let dst = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bae.media.export"),
+            layout: &layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&src),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&dst),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: uniform.as_entire_binding(),
+                },
+            ],
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("bae.media.export"),
+        });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("bae.media.export"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups(size.width.div_ceil(8), size.height.div_ceil(8), 1);
+        }
+        self.ctx.queue().submit([encoder.finish()]);
+        Ok(ExportTexture {
+            texture,
+            format,
+            alpha: if alpha == AlphaMode::Ignore {
+                AlphaMode::Opaque
+            } else {
+                alpha
+            },
+            color: frame.color.clone(),
+            pixel_aspect: frame.pixel_aspect,
+        })
     }
 
     /// The shared GPU context.
@@ -427,5 +658,16 @@ mod tests {
             (AlphaOp::ForceOpaque, M::Opaque)
         );
         assert_eq!(alpha_plan(M::Opaque, O::Premultiplied).1, M::Opaque);
+    }
+
+    #[test]
+    fn export_alpha_ops() {
+        use AlphaMode as M;
+        assert_eq!(export_alpha_op(M::Premultiplied, M::Opaque), 3);
+        assert_eq!(export_alpha_op(M::Straight, M::Opaque), 4);
+        assert_eq!(export_alpha_op(M::Premultiplied, M::Straight), 2);
+        assert_eq!(export_alpha_op(M::Straight, M::Premultiplied), 1);
+        assert_eq!(export_alpha_op(M::Premultiplied, M::Premultiplied), 0);
+        assert_eq!(export_alpha_op(M::Opaque, M::Straight), 3);
     }
 }
