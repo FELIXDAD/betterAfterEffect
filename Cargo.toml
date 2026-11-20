@@ -57,9 +57,11 @@ bae-platform = { path = "crates/bae-platform" }
 bae-gpu = { path = "crates/bae-gpu" }
 bae-model = { path = "crates/bae-model" }
 bae-anim = { path = "crates/bae-anim" }
+bae-agent = { path = "crates/bae-agent" }
 bae-media = { path = "crates/bae-media" }
 bae-sync = { path = "crates/bae-sync" }
 bae-render = { path = "crates/bae-render" }
+bae-ui = { path = "crates/bae-ui" }
 bae-color = { path = "crates/bae-color" }
 
 # ---- GPU, rendering, text (one coherent Linebender/wgpu set) ----

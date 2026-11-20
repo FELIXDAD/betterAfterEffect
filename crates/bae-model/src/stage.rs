@@ -237,6 +237,37 @@ impl Stage {
     where
         E: From<ModelError>,
     {
+        self.transact_inner(author, label, None, f)
+    }
+
+    /// [`Stage::transact`] with a write guard: every op on, new sublayer named, or
+    /// edit-target switch to a sublayer for which `allow` returns false fails with
+    /// [`ModelError::WriteDenied`] *before* anything is written, so a refused
+    /// transaction leaves no trace in that sublayer's history. Used for agent
+    /// permissions (`bae-agent`) and locked sublayers.
+    pub fn transact_guarded<R, E>(
+        &mut self,
+        author: &AuthorId,
+        label: &str,
+        allow: &dyn Fn(&SublayerId) -> bool,
+        f: impl FnOnce(&mut Transaction<'_>) -> std::result::Result<R, E>,
+    ) -> std::result::Result<(R, StageEvent), E>
+    where
+        E: From<ModelError>,
+    {
+        self.transact_inner(author, label, Some(allow), f)
+    }
+
+    fn transact_inner<R, E>(
+        &mut self,
+        author: &AuthorId,
+        label: &str,
+        guard: Option<&dyn Fn(&SublayerId) -> bool>,
+        f: impl FnOnce(&mut Transaction<'_>) -> std::result::Result<R, E>,
+    ) -> std::result::Result<(R, StageEvent), E>
+    where
+        E: From<ModelError>,
+    {
         let target = self.edit_target.clone();
         let mut tx = Transaction {
             stage: self,
@@ -245,6 +276,7 @@ impl Stage {
             inverse: Vec::new(),
             changes: Vec::new(),
             touched: Vec::new(),
+            guard,
         };
         match f(&mut tx) {
             Ok(r) => {
@@ -437,6 +469,7 @@ pub struct Transaction<'s> {
     inverse: Vec<Edit>,
     changes: Vec<Change>,
     touched: Vec<SublayerId>,
+    guard: Option<&'s dyn Fn(&SublayerId) -> bool>,
 }
 
 impl Transaction<'_> {
@@ -467,8 +500,22 @@ impl Transaction<'_> {
         self.apply_to(&target, op)
     }
 
+    /// Whether the transaction's write guard (if any) allows writing `sublayer`.
+    pub fn may_write(&self, sublayer: &SublayerId) -> bool {
+        self.guard.is_none_or(|allow| allow(sublayer))
+    }
+
+    fn check_write(&self, sublayer: &SublayerId) -> Result<()> {
+        if self.may_write(sublayer) {
+            Ok(())
+        } else {
+            Err(ModelError::WriteDenied(sublayer.clone()))
+        }
+    }
+
     /// Apply an op to a specific sublayer.
     pub fn apply_to(&mut self, sublayer: &SublayerId, op: Op) -> Result<()> {
+        self.check_write(sublayer)?;
         let layer = self
             .stage
             .sublayers
@@ -525,11 +572,13 @@ impl Transaction<'_> {
     /// Add a sublayer to the stack. Not undoable (layer stack edits are not part of
     /// any sublayer); the stack change is emitted as a separate event.
     pub fn create_sublayer(&mut self, id: SublayerId, index: usize) -> Result<()> {
+        self.check_write(&id)?;
         self.stage.create_sublayer(id, index).map(|_| ())
     }
 
     /// Change the stage's edit target (session state, not undoable).
     pub fn set_edit_target(&mut self, id: &SublayerId) -> Result<()> {
+        self.check_write(id)?;
         self.stage.set_edit_target(id)?;
         self.target = id.clone();
         Ok(())
