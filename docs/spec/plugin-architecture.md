@@ -692,3 +692,421 @@ previous version running and shows the diagnostics; native changes trigger unloa
 load from a fresh copy of the library (copied to a temp path so the build can overwrite
 the original on Windows).
 
+
+---
+
+## 8. Effect lifecycle
+
+This section is the plugin-side contract of an effect. §9 maps it onto After Effects,
+§10 states what the render graph (04) does around it. Thread letters: **L** plugin/load
+thread, **M** model thread (owns the Stage, runs commands; may be the main thread),
+**R** render worker, **G** GPU setup (a render worker holding the effect's setup lock).
+Exact rules per thread: §13.
+
+### 8.1 Objects and lifetimes
+
+| Object | Created by | Destroyed by | Thread | Cardinality |
+|---|---|---|---|---|
+| global (`void* global`) | `global_setup`, on first use of the effect in the process | `global_setdown` during unload (§7.4) | L | 1 per effect contribution per process |
+| parameter schema | `define_params`, right after `global_setup` (result cached, §6.2) | — | L | 1 per effect per plugin version |
+| GPU data | `gpu_device_setup`, lazily before the first `render_gpu` on a device | `gpu_device_setdown` (unload, device lost, device removed) | G | 1 per effect per GPU device |
+| edit instance | lazily, when the model needs instance logic (§8.5, §8.6, §8.9) | effect Prim deleted, project closed, state replaced remotely, unload | M | ≤ 1 per effect Prim per open Stage |
+| render instance | when a render graph references the effect Prim and no render instance exists for its current state revision | when no graph and no in-flight frame references it | R | 1 per (effect Prim, state revision) in use |
+| frame data | `pre_render` (`out_result->frame_data`) | `release_frame_data`, always, also after abort/error/skip | R | per frame request |
+
+Effects without `BAE_EFFECT_FLAG_STATEFUL` have **no instances**: `instance_*` callbacks are
+never called and every `instance` argument is NULL. This is the default and costs nothing.
+
+### 8.2 Call sequence
+
+```
+load (L)            bae_plugin_entry
+first use (L)       global_setup → define_params → schema registered with 02 (§8.4)
+apply effect (M)    [STATEFUL] instance_create(EDIT, state = empty) → instance_serialize
+                    → the AddEffect command stores the state blob (one undo step)
+open project (M)    edit instances are created lazily: instance_create(EDIT, state = blob)
+build graph (M/R)   [DYNAMIC_FLAGS] query_dynamic_flags when non-animated values change
+                    [STATEFUL] instance_create(RENDER, state = blob) once per state revision
+per frame (R)       pre_render → render_gpu | render_cpu → release_frame_data
+first GPU use (G)   gpu_device_setup (per device, before the first render_gpu there)
+user edit (M)       [SUPERVISE] param_changed → optional bae.param.edit ops in the same command
+                    → if BAE_CHANGED_STATE: instance_serialize → new blob (same command)
+UI refresh (M)      [SEND_UPDATE_PARAMS_UI] update_params_ui (UI state only)
+copy/duplicate (M)  commands copy the blob; new instances are created from it
+remote change (M)   blob replaced by sync → edit instance destroyed + recreated, render instances rebuilt
+delete effect (M)   instance_destroy(edit); render instances dropped with their graphs
+unload (L/R/G)      §7.4: instance_destroy … gpu_device_setdown … global_setdown … shutdown
+```
+
+### 8.3 Instance state (AE sequence data)
+
+1. The **state blob** in the document is the single source of truth (02: opaque bytes on
+   the effect Prim, plus `state_plugin_version`). Instances are caches of it; saving a
+   project never calls the plugin.
+2. **Edit instances** are mutable and live only on M. **Render instances** are created
+   from the same blob, are immutable after `instance_create` returns and are shared by all
+   render threads (this is AE's Multi-Frame-Rendering model: flattened sequence data
+   marshalled to render threads). A plugin that wants a render-side cache keeps it inside
+   the render instance with its own synchronization; the cache MUST NOT change output.
+3. The state changes **only** on M: `param_changed` or `message` return/report
+   `BAE_CHANGED_STATE`; the host then calls `instance_serialize` on the edit instance and
+   writes the blob as an op of the *same* command (undoable, synced). New render instances
+   are created for the new revision; old ones die when unused.
+4. `instance_serialize` is non-destructive (AE `GET_FLATTENED_SEQUENCE_DATA` semantics):
+   the instance stays valid and unchanged.
+5. Format: plugin-defined, MUST be byte-order and platform independent and SHOULD carry its
+   own version tag. The host never interprets it. Soft limit 1 MiB (warning: blobs are
+   synced through the CRDT), hard limit 16 MiB.
+6. `instance_create` receives `state_plugin_version`, the plugin version that wrote the
+   blob; a plugin that cannot read it returns `BAE_ERR_PARSE` → the effect becomes a
+   placeholder with diagnostics (§20), data untouched.
+7. Determinism: same params + same state + same inputs ⇒ same pixels, unless the effect
+   declares `NON_DETERMINISTIC` (then nothing it produces is cached).
+
+#### 8.3.4 Migration across plugin majors
+
+When a document written by plugin major `N` is opened with major `M > N`, the host first
+applies manifest `[[effect.migration]]` tables whose `from` requirement matches the
+writer version (rename / drop / defaults on param keys), then, for native effects that
+handle it, sends `message("bae.migrate")` on M with input
+`{"from_version": "...", "params": [{"id", "key", "value"}...], "state_b64": "..."}` and
+expects the same shape back for the current version. The result is applied as one
+command ("Update effect to version …", undoable). If neither exists, major mismatches
+stay placeholders (§20.5).
+
+### 8.4 Parameters
+
+- `define_params` is called once per process (L) and MUST depend only on the plugin
+  version and locale-independent data (it is cached). Display names may be localized via
+  `l10n_key`; dynamic UI changes go through `update_params_ui`.
+- The host converts the definitions into an **effect schema** registered with 02's schema
+  registry under (full id, plugin version): stable numeric ids (AE disk ids), keys, types,
+  defaults, ranges, popup choice ids, group structure, flags.
+- The document stores values **by param id**. Keys are what WGSL (§11.3), scripts and
+  expressions use. Expressions (03) may address a param by key, by its default English
+  name or by 1-based definition index (AE `effect("Blur")(1)` semantics).
+- `BaeParamValues` has one entry per defined param **in definition order, including GROUP
+  and BUTTON entries** (their value is meaningless), so index `i` is always the `i`-th
+  definition and AE-style index access is O(1).
+- Value semantics: FLOAT/ANGLE are f64 (angles in degrees, unbounded); INT i32; COLOR is
+  straight RGBA f32 in the working color space (§6 of ARCHITECTURE, 06 decides storage);
+  POINT/POINT_3D are in **render pixel space** (downsample applied) during pre_render/
+  render, and in full-resolution layer pixels in M callbacks; POPUP is the stable choice
+  id, never an index; LAYER is a host handle (0 = none); STRING/ARBITRARY are borrowed.
+- Removed or unknown params: values of ids the current definition does not know are kept
+  by the document and never passed to the plugin (forward/backward compatibility, §6.5).
+
+### 8.5 Supervision: `param_changed` and `update_params_ui`
+
+- `param_changed` runs for params with `SUPERVISE` (and every BUTTON) when a **user-level
+  change** is applied through a command: UI, scripts, MCP. It runs *inside* that command:
+  values set through `bae.param.edit.set_value` become ops in the same transaction (one
+  undo step) and do not re-trigger supervision.
+- It is **not** called for: time changes (keyframe interpolation), undo/redo (ops are
+  replayed), and remote changes arriving through sync (the originating client already ran
+  it and its resulting ops are synced). This keeps collaboration deterministic.
+- Budget: < 1 ms typical; the host logs a warning above 16 ms (it blocks M).
+- `update_params_ui` (needs `SEND_UPDATE_PARAMS_UI`) is called when the Effect Controls UI
+  shows the effect and after value changes, at most once per UI frame. It may only call
+  `set_ui` (hide/disable/rename). That UI state is per client and session, not in the
+  document, not undoable.
+- Neither callback may render or check out inputs.
+
+### 8.6 Dynamic flags
+
+With `DYNAMIC_FLAGS`, `query_dynamic_flags` (M) is called when the render graph is built
+and whenever non-animated values change. It may change only bits in
+`BAE_EFFECT_DYNAMIC_FLAGS_MASK`. The answer MUST hold for all times; an effect whose flags
+depend on animated values returns the conservative union. The result is part of the
+graph's cache key.
+
+### 8.7 Render protocol
+
+1. **`pre_render`** (R) receives the request rect (render pixel space of the effect's
+   layer) and the planned device. The plugin MUST declare every input it will read with
+   `checkout_input` (source, time, rect, `checkout_id`) and every param value at another
+   time with `checkout_param`; it returns `result_rect` (what it will produce, may exceed
+   the request only with `RETURNS_EXTRA_PIXELS`), `max_result_rect` (largest output for
+   any request; used for layer bounds), flags (`SOLID`, `IDENTITY`, clear `GPU_POSSIBLE`
+   to force CPU) and optional frame data.
+2. `checkout_id` is plugin-chosen and unique within one `pre_render`; **id 0 is reserved for
+   the self input** (`source = SELF`). A NULL `pre_render` behaves as if it checked out the
+   self input as id 0 with `rect = request_rect` and returned the input's rects (identity
+   ROI).
+3. The host renders the declared inputs, then calls `render_gpu` if the planned device is
+   GPU and `GPU_POSSIBLE` is still set, otherwise `render_cpu`. Only checked-out ids can be
+   fetched (`get_input_*`); others return `BAE_ERR_NOT_FOUND`.
+4. **Output**: covers `result_rect ∩ request_rect` (or all of `result_rect` with
+   `RETURNS_EXTRA_PIXELS`). Its content is undefined on entry; the plugin MUST write every
+   pixel. Pixels outside `result_rect` are transparent by definition.
+5. `IDENTITY` (or a manifest `identity_when`) means output = self input: the host skips the
+   render call and aliases the input (zero cost).
+6. **Abort**: `is_aborted` is cheap (an atomic load); poll at least every few
+   milliseconds of work and return `BAE_ERR_ABORTED`.
+7. **GPU fallback**: `render_gpu` may return `BAE_STATUS_FALLBACK`; the host then releases
+   the frame data, re-runs `pre_render` with `device = CPU` and calls `render_cpu`. This
+   is a per-frame exception path; effects that know earlier clear `GPU_POSSIBLE`.
+8. `release_frame_data` is called exactly once for every non-NULL frame data.
+
+### 8.8 Generators and transitions
+
+- **Generator**: the self input exists (usually a solid) but need not be checked out. The
+  default extent is the layer bounds; an infinite generator returns
+  `BAE_COORD_MIN..BAE_COORD_MAX` and the host clips to the request.
+- **Transition**: inputs `SELF` ("from") and `TRANSITION_TO` ("to"), progress from the
+  FLOAT param flagged `TRANSITION_PROGRESS` (0..1). In the motion workspace a transition
+  is a normal layer effect (AE Linear Wipe style) and `TRANSITION_TO` checks out `EMPTY`;
+  in edit sequences (14) the host supplies both clips and drives the progress.
+
+### 8.9 Dependencies and messages
+
+- `get_dependencies` (with `EXTERNAL_DEPENDENCIES`, M): JSON array of
+  `{"kind": "file"|"font"|"asset", "path"|"name": ...}`; used by Collect Files and
+  `.baez` packaging (21) and by missing-file reports.
+- `message` (M, or any thread for selectors the plugin documents): generic extension point
+  (AE `COMPLETELY_GENERAL`), reachable from scripts as `effect.message(selector, bytes)`.
+  `bae.*` selectors are reserved: `bae.about`, `bae.options_dialog`, `bae.migrate`.
+
+### 8.10 The same lifecycle in every form
+
+| Step | Declarative WGSL | Native | Built-in Rust |
+|---|---|---|---|
+| global setup | host-internal (manifest → description) | `global_setup` | `Effect::describe` |
+| params | manifest `[[effect.param]]` | `define_params` | `Effect::define_params` |
+| instances | none (stateless) | `instance_*` if `STATEFUL` | `Effect::Instance` |
+| pre-render | from `[effect.roi]` + `identity_when` (§11.6) | `pre_render` | `Effect::pre_render` |
+| render | host-encoded passes (§11.5) | `render_cpu` / `render_gpu` | `Effect::render_cpu` / `render_gpu` |
+| supervision | none | `param_changed` / `update_params_ui` | same trait methods |
+
+---
+
+## 9. After Effects mapping
+
+Goal (ARCHITECTURE §15): the future `bae-aex-host` (20) translates an AE effect's
+`EffectMain` calls to and from this interface without a second effect system. Names below
+are from Adobe's public SDK guide and are used for cross-reference only; nothing from the
+SDK is copied. 20's `bae-aex-host::selector` encodes the same table (`LifecycleHook`).
+
+### 9.1 Command selectors
+
+| AE selector | BAE | Notes |
+|---|---|---|
+| `ABOUT` | manifest `description` + `message("bae.about")` | |
+| `GLOBAL_SETUP` | `global_setup` | PiPL / out-flags → `BaeEffectDescription` (§9.2) |
+| `GLOBAL_SETDOWN` | `global_setdown` | |
+| `PARAMS_SETUP` | `define_params` | |
+| `SEQUENCE_SETUP` | `instance_create(EDIT, empty)` | compat effects are always `STATEFUL` |
+| `SEQUENCE_RESETUP` | `instance_create(EDIT or RENDER, blob)` | load, paste, duplicate, remote change |
+| `SEQUENCE_FLATTEN` | `instance_serialize` | after `BAE_CHANGED_STATE` |
+| `GET_FLATTENED_SEQUENCE_DATA` | `instance_serialize` | non-destructive by contract (§8.3 item 4) |
+| `SEQUENCE_SETDOWN` | `instance_destroy` | |
+| `FRAME_SETUP` | `pre_render` | compat host synthesizes ROI from the legacy output size/origin |
+| `RENDER` | `render_cpu` | legacy 8/16 bpc path |
+| `FRAME_SETDOWN` | `release_frame_data` | |
+| `SMART_PRE_RENDER` | `pre_render` | layer checkouts → `checkout_input`; result/max rects; `GPU_RENDER_POSSIBLE` → `GPU_POSSIBLE` |
+| `SMART_RENDER` | `render_cpu` | input checkouts → `get_input_cpu`; output world → `args.output` |
+| `SMART_RENDER_GPU` | `render_gpu` | GPU worlds via `bae.gpu.native` + host conversion (20's BGRA128 buffers) |
+| `AUDIO_SETUP` / `AUDIO_RENDER` / `AUDIO_SETDOWN` | reserved kind `BAE_KIND_AUDIO_EFFECT` | not in ABI 0.x; such effects become placeholders |
+| `EVENT` | reserved `ui_event` + `bae.draw` (ABI 0.2, `BAE_EFFECT_FLAG_CUSTOM_UI`) | Drawbot → backend-neutral display list (20 `ui.rs`); never a native window |
+| `USER_CHANGED_PARAM` | `param_changed` | |
+| `UPDATE_PARAMS_UI` | `update_params_ui` | |
+| `DO_DIALOG` | `message("bae.options_dialog")` + `BAE_EFFECT_FLAG_OPTIONS_DIALOG` | |
+| `ARBITRARY_CALLBACK` | `BaeArbitraryVTable1` | new/dispose/copy/flatten are host-managed (values are bytes); interpolate/compare/print/scan map to `interpolate`/`compare`/`to_text`/`from_text` |
+| `GET_EXTERNAL_DEPENDENCIES` | `get_dependencies` | |
+| `COMPLETELY_GENERAL` | `message` | |
+| `QUERY_DYNAMIC_FLAGS` | `query_dynamic_flags` | |
+| `GPU_DEVICE_SETUP` | `gpu_device_setup` | returning no GPU data = opt out on that device |
+| `GPU_DEVICE_SETDOWN` | `gpu_device_setdown` | |
+
+### 9.2 Capability flags
+
+| AE out-flag (public name) | BAE |
+|---|---|
+| `PIX_INDEPENDENT` | `BAE_EFFECT_FLAG_PIXEL_INDEPENDENT` |
+| `I_EXPAND_BUFFER` / `I_SHRINK_BUFFER` | `EXPANDS_BUFFER` / `SHRINKS_BUFFER` |
+| `NON_PARAM_VARY` | `NON_PARAM_VARY` |
+| `WIDE_TIME_INPUT` | `WIDE_TIME_INPUT` |
+| `I_USE_SHUTTER_ANGLE` | `USES_SHUTTER` |
+| `I_USE_3D_CAMERA` / `I_USE_3D_LIGHTS` | `USES_CAMERA` / `USES_LIGHTS` (+ planned `bae.scene` suite, §14.2) |
+| `SEND_UPDATE_PARAMS_UI` | `SEND_UPDATE_PARAMS_UI` |
+| `I_DO_DIALOG` | `OPTIONS_DIALOG` |
+| `CUSTOM_UI` | `CUSTOM_UI` (reserved) |
+| `I_HAVE_EXTERNAL_DEPENDENCIES` | `EXTERNAL_DEPENDENCIES` |
+| `REVEALS_ZERO_ALPHA` | `REVEALS_ZERO_ALPHA` (host must not trim inputs to their alpha bounds) |
+| `DEEP_COLOR_AWARE` / `FLOAT_COLOR_AWARE` | `cpu_formats` include `ARGB_U16_15BIT_PREMUL` / `ARGB_F32_PREMUL` |
+| `SUPPORTS_SMART_RENDER` | compat host provides `pre_render`; otherwise the legacy path above |
+| `SUPPORTS_THREADED_RENDERING` | `threading = CONCURRENT` (else `SERIAL_GLOBAL`) |
+| `MUTABLE_RENDER_SEQUENCE_DATA_SLOWER` | compat host keeps per-thread render-instance copies |
+| `SUPPORTS_GPU_RENDER_F32` | `devices |= GPU`, `gpu_formats ∋ RGBA32F` |
+| `FORCE_RERENDER` (from user-changed-param) | `BAE_CHANGED_RERENDER` |
+
+### 9.3 `in_data` and render request fields
+
+| AE | BAE |
+|---|---|
+| `current_time`, `time_step`, `time_scale` | `BaeRenderInfo.time`, `time_step` in flicks (exact conversion, 20 `time.rs`) |
+| `total_time` | `layer_duration` |
+| `downsample_x/y` | `downsample_x/y` |
+| `pixel_aspect_ratio` | `pixel_aspect` |
+| `shutter_angle`, `shutter_phase` | same |
+| `width`, `height` (layer) | `layer_bounds` |
+| `extent_hint` / request rect | `request_rect` |
+| `output_origin_x/y` | `result_rect` origin |
+| `quality` | `quality` |
+| `field` | not supported: BAE renders progressive frames only |
+| `global_data` / `sequence_data` / `frame_data` | `global` / `instance` / `frame_data` |
+| `effect_ref`, `utils` | `BaeRenderCtx` / `BaeParamEditor` + suites; AE per-pixel utility suites are implemented *inside* the compat host |
+
+### 9.4 Parameter types
+
+| AE param type | BAE type |
+|---|---|
+| `LAYER` | `BAE_PARAM_LAYER` (checkout = layer after masks and effects, before transform, in that layer's space; `WITHOUT_EFFECTS` = source only) |
+| `SLIDER` (integer) | `INT` |
+| `FIX_SLIDER`, `FLOAT_SLIDER` | `FLOAT` (precision, display flags) |
+| `ANGLE` | `ANGLE` |
+| `CHECKBOX` | `CHECKBOX` |
+| `COLOR` | `COLOR` (float; 8-bit values converted) |
+| `POINT`, `POINT_3D` | `POINT`, `POINT_3D` |
+| `POPUP` | `POPUP` (AE 1-based index `i` ↔ choice id `i`) |
+| `GROUP_START` / `GROUP_END` | `GROUP` + `group_id` of children |
+| `ARBITRARY_DATA` | `ARBITRARY` |
+| `PATH` | `PATH` |
+| `BUTTON` | `BUTTON` |
+
+Param flags: `CANNOT_TIME_VARY` → `NOT_ANIMATABLE`; `SUPERVISE` → `SUPERVISE`;
+`START_COLLAPSED` → `START_COLLAPSED`; hidden/disabled UI flags → `HIDDEN`/`DISABLED`
+(via `set_ui` when dynamic). The AE param index ↔ BAE definition order mapping is the
+identity (groups occupy a slot in both).
+
+---
+
+## 10. Render-graph contract (for 04)
+
+This is what `bae-render` implements around an effect node. All of it is form-agnostic:
+the node holds an `Arc<dyn bae_plugin_sdk::DynEffect>` resolved once at graph build (§7.3).
+
+### 10.1 Request
+
+Every node evaluation carries a request (`BaeRenderInfo` / `bae_plugin_sdk::RenderInfo`):
+layer time and comp `time_step` (flicks), comp frame rate, downsample (x, y), layer pixel
+aspect, quality (draft/high), shutter angle/phase, working color space + linearized flag,
+final/preview/headless flags, layer bounds, layer duration, render id, and the param
+values at that time. All rects are in the effect layer's **render pixel space** =
+full-resolution layer pixels × downsample, origin at the layer's top-left, y down.
+
+### 10.2 ROI negotiation
+
+1. Graph evaluation is demand-driven from the comp output: each node receives a request
+   rect and answers with a result rect, recursively (AE SmartFX semantics).
+2. For an effect node the host calls `pre_render(request)`; each `checkout_input` becomes
+   a request to the upstream node (same layer: the previous effect or the layer source;
+   layer params: the referenced layer's post-mask, post-effect, pre-transform output;
+   other times: the same subgraph evaluated at that time). The upstream answer is returned
+   synchronously as `BaeInputInfo` — pre-render is planning only, nothing renders yet.
+3. Within one frame, several requests to the same (node, time) are merged (union of rects)
+   so every node renders at most once per frame and time.
+4. `max_result_rect` answers are cached per node and parameter revision; 04 uses them for
+   layer-bounds queries (motion-blur extents, collapse transformations, precomp bounds).
+5. Cycles through layer params (A's effect reads B whose effect reads A) are broken: the
+   back edge returns `EMPTY` and a diagnostic.
+
+### 10.3 Dependencies
+
+`pre_render` records the node's dependency set: inputs (node, time, rect), params at other
+times, layer params, and with `USES_CAMERA`/`USES_LIGHTS`/`USES_SHUTTER` the comp camera,
+lights and shutter. 04 keeps a reverse index from Prims/time ranges to nodes so a
+`StageEvent` invalidates exactly the affected cache entries. `WIDE_TIME_INPUT` is required
+to check out other times (else `BAE_ERR_INVALID_ARGUMENT`).
+
+### 10.4 Caching
+
+Cache key of an effect node output = (effect Prim, plugin id + version, time or
+time-independence, values of all params except `UI_ONLY`, state revision, dynamic flags,
+input keys, result rect, downsample, quality, color space + linear flag, shutter if
+`USES_SHUTTER`, camera/lights if `USES_*`). Time-independence: without `NON_PARAM_VARY`,
+a node whose params and inputs are constant over a time range reuses one result across
+that range. `NON_DETERMINISTIC` disables caching for the node and everything downstream.
+
+### 10.5 Scheduling and threading
+
+- Effect nodes run on render workers, never on UI or M.
+- `threading` is enforced per effect contribution: `CONCURRENT` (no restriction),
+  `SERIAL_INSTANCE` (one call at a time per render instance; host keeps a per-instance
+  lock or queue), `SERIAL_GLOBAL` (one render-side call at a time for the whole effect).
+  The lock is taken only around the plugin call, never around input rendering.
+- Abort: every frame request has an abort flag (atomic); the scheduler sets it when the
+  frame is no longer needed (scrubbing); `is_aborted` reads it.
+- Progress reporting is aggregated per frame for the UI and the render queue.
+
+### 10.6 Devices, formats and CPU nodes
+
+- **GPU path**: the node format is the working format (RGBA16F default, RGBA32F per
+  project). If the effect's `gpu_formats` lacks it, the host converts to the first
+  accepted format and back on the GPU (cost only on that node).
+- **CPU path** (`render_cpu`): the host picks the first entry of `cpu_formats` it supports
+  (every `BaePixelFormat` combination is supported) and:
+  1. converts the GPU input (format, channel order RGBA/BGRA/ARGB, component U8/U16/
+     U16-15-bit/F16/F32, premultiplied ↔ straight, working space unchanged) with a compute
+     kernel into a staging buffer with 64-byte-aligned rows;
+  2. reads it back asynchronously (`map_async`), double-buffered;
+  3. runs the plugin on a worker thread on the mapped/copied memory;
+  4. uploads the output and converts back to the working format on the GPU.
+  The graph executor splits GPU work at CPU nodes so GPU work of other branches and of the
+  next frames proceeds while the CPU node runs (pipelining during playback). The round
+  trip costs only the CPU node (budget §22).
+- Straight-alpha CPU formats are converted with the usual epsilon rule (alpha 0 → RGB
+  0, or preserved when `BAE_INPUT_FLAG_PRESERVE_RGB_OF_ZERO_ALPHA` is requested).
+- U16_15BIT is AE's 0..32768 range; U16 is 0..65535.
+
+### 10.7 Downsample, pixel aspect, time
+
+- Downsampled requests are in downsampled pixels; params of type POINT are delivered
+  already scaled. Effects scale distance-like params themselves (AE behaviour); WGSL gets
+  `frame.downsample` helpers (§11.3).
+- Pixel aspect: the effect works on the layer's pixel grid; the host applies PAR in the
+  layer transform. `pixel_aspect` is informational (e.g. for radial effects that want
+  round results on non-square pixels).
+- Time: `time` is **layer time** after time remapping/stretch (AE `current_time`
+  semantics); `time_step` is one comp frame (negative when the layer plays reversed).
+
+### 10.8 Identity, disabled effects, placeholders
+
+Disabled effects (fx switch off) and placeholders (§20) are removed from the graph at
+build time; `IDENTITY` nodes alias their input. None of these cost a pass.
+
+### 10.9 Fusion of pixel-style chains
+
+Consecutive declarative effects with `style = "pixel"` on the same layer (no other
+consumers of the intermediate results, same working format) are fused by 04 into one
+compute kernel: one input read, N inlined pixel functions, one write. Each fused effect
+keeps its own params uniform. Fusion happens at the naga IR level (per-effect global
+renaming, bindings renumbered); the fused module is cached by the ordered list of
+(effect id, version). Built-in pixel effects (07) are pixel-style too, so a built-in
+chain and a plugin chain fuse the same way. The fused chain caches only its final output.
+
+### 10.10 Errors in the graph
+
+A failing node (status < 0 other than `BAE_ERR_ABORTED`) passes its self input through
+unchanged and reports a diagnostic (badge on the effect in Effect Controls and the
+timeline, log entry with plugin id, callback, message). Previews continue. Final renders
+(render queue, `bae render`) fail with the diagnostic unless "continue on effect errors"
+is set. Repeated failures of the same node are rate-limited (one diagnostic per node and
+error code per second).
+
+### 10.11 Node interface summary
+
+```text
+graph build (once per graph):
+  entry   = effect_registry.get(full_id)          // Arc<dyn DynEffect>, a lease (§7.3)
+  desc    = entry.description()                   // flags, threading, devices, formats
+  flags   = desc.flags ⊕ entry.dynamic_flags(...) // if DYNAMIC_FLAGS
+  inst    = render_instance_cache.get_or_create(prim, state_revision)
+per frame:
+  plan    = entry.pre_render(inst, request, &services)     // checkouts recorded by services
+  inputs  = render(plan.checkouts)                          // recursive
+  out     = if plan.identity { alias(self) }
+            else if device == Gpu && plan.gpu_possible { entry.render_gpu(...) }
+            else { cpu_node(entry.render_cpu, plan.format) }   // §10.6
+  release(plan.frame_data)
+```
