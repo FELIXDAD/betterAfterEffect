@@ -48,7 +48,7 @@
 - [x] bae-platform：目录（含用户级/系统级插件目录）、日志（stderr + 会话文件、轮转）、崩溃报告与紧急保存、单实例、版本化设置、可扩展的命令行子命令注册表。
 - [x] bae-gpu：共享 `GpuContext`、适配器选择与软件回退、可选特性、设备丢失回调与重建、窗口表面（呈现模式、帧延迟、HDR/广色域格式发现）、GPU 计时、异步回读与上传、Metal/D3D12 原生句柄、视口纹理注册表、`bae gpu-info`。
 - [x] apps/bae 空窗口：winit + egui-winit + egui-wgpu（共用设备）、egui_dock 占位工作区、状态栏、muda 原生菜单、事件驱动重绘、窗口位置记忆、`--headless`、`--smoke-test`。说明见 `docs/spec/app-shell.md`。
-- [x] CI 与体积检查：`.github/workflows/ci.yml`（macOS arm64 + Windows x64）。
+- [x] CI 与体积检查：`.github/workflows-pending/ci.yml`（macOS arm64 + Windows x64）。开发 Agent 的 GitHub 令牌没有 `workflow` 权限，推不了 `.github/workflows/`；有权限的人 `git mv` 一下即可启用（见 `.github/workflows-pending/README.md`）。
 - [x] xtask：`size`（预算 `tools/size-budget/budget.toml`）、`dist`（macOS .app / Windows zip）、`bench`。
 
 后续（不阻塞合并）：

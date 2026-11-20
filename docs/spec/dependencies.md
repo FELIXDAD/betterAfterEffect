@@ -23,7 +23,7 @@
    - 真实调用的类型检查：在同一个 `&wgpu::Device` 上调用 `vello::Renderer::new` 和 `egui_wgpu::Renderer::new`；vello `render_to_texture` 的输出用 `egui_wgpu::Renderer::register_native_texture` 注册成 `egui::TextureId`（视口路径）；把 `egui::TexturesDelta` / `egui::ClippedPrimitive` 交给 egui-wgpu（证明 egui 与 egui-wgpu 用的是同一个 epaint）；把 parley 排好的字形连同 `run.font()` 直接画进 `vello::Scene`。
    - BAE 从不调用这些函数；唯一会运行的是一个单元测试，只调用其中不需要 GPU 的几个。
    - 看不到的：skrifa / read-fonts、harfrust、naga、wgpu-hal 的类型不出现在 vello / parley / egui 的公开接口里，它们的重复只能靠下面的 `cargo tree` 发现。
-2. **CI：`cargo tree`。** `.github/workflows/ci.yml` 的「One wgpu in the dependency graph」一步在 macOS 和 Windows 上各跑一次：
+2. **CI：`cargo tree`。** `.github/workflows-pending/ci.yml`（启用后移到 `.github/workflows/`，见该目录的 README）的「One wgpu in the dependency graph」一步在 macOS 和 Windows 上各跑一次：
 
    ```sh
    cargo tree --locked -p bae-dep-probe -i wgpu --edges normal
