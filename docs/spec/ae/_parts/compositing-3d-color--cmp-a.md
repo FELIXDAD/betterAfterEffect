@@ -1003,8 +1003,8 @@
   - When on, for every layer N rendered inside a nested comp reached through precomp layer P (recursively):
     - Quality: `N.quality = min(N.quality, P.quality)` in order Wireframe < Draft < Best (UNVERIFIED: P = Draft forces nested layers to Draft; P = Best leaves them as set).
     - Effects switch: P's fx switch off disables effects on nested layers (the preference text lists "effects" among the propagated switches; exact rule UNVERIFIED: assumed `N.effects_on = N.effects_on && P.effects_on`).
-    - Motion Blur: nested layers blur only if their own MB switch is on and P's MB switch is on; the nested comp's own "Enable Motion Blur" comp switch is replaced by the outer comp's (UNVERIFIED); shutter settings come from the outer (rendering) comp (UNVERIFIED).
-    - Frame Blending: P's frame-blending switch state is required for nested footage layers' frame blending to apply (UNVERIFIED).
+    - Motion Blur: nested comps obey the containing comp's Enable Motion Blur comp switch (Adobe help, Motion blur: "nested compositions obey the setting for the compositions in which they're contained"); nested layers blur only if their own MB switch is on and P's MB switch is on (UNVERIFIED for the layer-switch AND); shutter settings come from the outer (rendering) comp (UNVERIFIED).
+    - Frame Blending: frame blending cannot be applied to a precomp layer itself (Adobe help, Frame blending), so propagation concerns the comp-level Enable Frame Blending switch: nested footage layers frame-blend only if the containing (rendering) comp's switch is on (UNVERIFIED by analogy with motion blur).
   - When off, nested layers use only their own switches and the nested comp's own comp switches.
   - Draft 3D and comp-level switches: UNVERIFIED propagation.
 - **Priority:** P1
@@ -1114,9 +1114,9 @@
       img = render_layer_at(layer, t)
   ```
   - What is re-evaluated per sub-sample: the layer transform (incl. parent chain, camera for 3D), opacity, masks set to Same As Layer/On (AE-CMP-046), shape and text content of continuously rasterized layers (their path animation is blurred — shape layers always use Samples Per Frame), and nested comps when the precomp layer is collapsed or nested layers have MB (each nested layer blurs according to its own switch).
-  - Not re-evaluated: effects on raster layers (rendered once at frame time, then transformed per sample) unless the effect supports shutter-angle motion blur itself (SDK `PF_OutFlag_I_USE_SHUTTER_ANGLE`; e.g. Transform effect, CC Force Motion Blur family); motion inside footage (use frame blending or effects such as Pixel Motion Blur instead).
+  - Not re-evaluated: effects on raster layers (rendered once at frame time, then transformed per sample) unless the effect supports shutter-angle motion blur itself (SDK `PF_OutFlag_I_USE_SHUTTER_ANGLE`; e.g. Transform effect, CC Force Motion Blur family); motion inside footage (Adobe help: the MB switches cannot blur motion that already exists within a layer; use frame blending or effects such as Pixel Motion Blur instead).
   - Averaging is in premultiplied space so edges blur correctly; 8/16 bpc clamping applies after averaging (UNVERIFIED).
-  - 2D layers: number of samples adapts to the layer's motion between Samples Per Frame (min, default 16) and Adaptive Sample Limit (max, default 128); 3D layers and shape layers use Samples Per Frame (Adobe help). (Defaults per project-comp-layers.md, Composition Settings; UNVERIFIED defaults 16/128.)
+  - 2D layers: number of samples adapts to the layer's motion between Samples Per Frame (minimum; default 16) and Adaptive Sample Limit (maximum; default 128); 3D layers and shape layers always use Samples Per Frame (Adobe help, Composition Settings > Advanced). Defaults and ranges are specified in project-comp-layers.md, Composition Settings.
   - Track mattes: the matte layer is blurred according to its own MB switch; the matted layer's blurred image is then multiplied by the (separately blurred) matte value (UNVERIFIED: AE applies the matte per sample vs after averaging).
   - Adjustment layers: blur only their footprint (AE-CMP-050).
   - 3D layers: each sample renders the layer through the camera at the sample time; camera motion itself blurs every 3D layer with MB on.
@@ -1126,7 +1126,7 @@
 
 ### AE-CMP-065 · Frame blending rendering (帧混合)
 
-- **What it does:** For footage or precomp layers whose source frame rate does not match the comp time mapping (time stretch, time remap, conformed footage), creates intermediate frames by blending source frames instead of repeating them.
+- **What it does:** For footage layers (video or image sequences) whose source frames do not line up with the comp's frames (time stretch, time remap, conformed footage), creates intermediate frames by blending source frames instead of repeating them. Not applicable to precomp layers or single stills (Adobe help: "You can't apply frame blending to a precomposition layer"; apply it to the footage layers inside the nested comp instead).
 - **Exact semantics:**
   - Layer switch values (scripting `AVLayer.frameBlendingType`, `FrameBlendingType.`): Off (`NO_FRAME_BLEND`), Frame Mix (帧混合, `FRAME_MIX`), Pixel Motion (像素运动, `PIXEL_MOTION`). Only applied when the comp's Enable Frame Blending switch is on (previews) / Render Settings frame blending is on (output).
   ```
@@ -1143,9 +1143,11 @@
   ```
   - Integer `s` (no fractional phase) → the frame itself, no blending.
   - Frame blending applies before masks/effects (it produces the layer's source frame).
+  - Quality interaction: a frame-blended layer in Draft quality always uses Frame Mix, even if Pixel Motion is selected (Adobe help).
+  - Gate: the comp's Enable Frame Blending switch disables frame blending for all layers in that comp regardless of layer switches (Adobe help); Render Settings can enable it for output.
 - **Priority:** P1 (Frame Mix); Pixel Motion P2.
 - **Owner:** bae-render (+ bae-media, bae-anim)
-- **Notes:** Which source frames and weights are used is defined in transform-keyframes-expressions.md, frame blending; this item covers only the pixel combination. Cost: Frame Mix decodes two frames per output frame (cache-friendly); Pixel Motion needs a flow pass (GPU compute, e.g. pyramidal Lucas-Kanade/DIS) — BAE decision: Pixel Motion may ship later behind Frame Mix.
+- **Notes:** Source: https://helpx.adobe.com/after-effects/using/time-stretching-time-remapping.html (Frame blending). zh-CN: menu 图层 > 帧混合 > 帧混合 / 像素运动. Which source frames and weights are used is defined in transform-keyframes-expressions.md, frame blending; this item covers only the pixel combination. Cost: Frame Mix decodes two frames per output frame (cache-friendly); Pixel Motion needs a flow pass (GPU compute, e.g. pyramidal Lucas-Kanade/DIS) — BAE decision: Pixel Motion may ship later behind Frame Mix.
 
 ## Other compositing behaviour
 
