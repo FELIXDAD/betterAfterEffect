@@ -47,20 +47,21 @@
 
 ### 进展记录
 
-- 2026-11-20（PR A，`[interface]`）：新建 `crates/bae-motion`，不依赖界面和 GPU。18 个命令，全部是一个撤销单元、按 schema 校验，Agent 通过 MCP 直接可用：
+- 2026-11-20（PR A #41，`[interface]`，已合并）：新建 `crates/bae-motion`，不依赖界面和 GPU。18 个命令，全部是一个撤销单元、按 schema 校验，Agent 通过 MCP 直接可用：
   - 合成与项目：`comp.create`（尺寸、帧速率 fps 自动换成 NTSC 有理数、时长、背景色；同时建 `layers` 文件夹；默认放在 `/comps`，名字按 AE 编号 "Comp N"）、`comp.set_work_area`（B / N）、`comp.trim_to_work_area`、`folder.create`。
   - 图层：`layer.create`（形状 / 文本 / 纯色 / 空对象 / 摄像机 / 灯光 / 调整图层 / 预合成 / 素材；AE 默认值：放在最上面、锚点在中心、居中；纯色在 `/assets/solids` 建纯色素材；形状图层可带矩形 / 椭圆 / 星形和填充）、`layer.reorder`、`layer.duplicate`（Cmd+D，放在原图层上方，名字递增）、`layer.split`（Cmd+Shift+D）、`layer.trim`（Alt+[ / ]）、`layer.set_parent`（父级；默认保持屏幕位置不变，用 03 的求值结果换算位置、旋转、缩放，含关键帧；防止循环）。
   - 关键帧：`attr.set_animated`（秒表）、`attr.set_at`（在当前时间改值：有关键帧就加 / 改关键帧，没有就改静态值）、`key.ease`（F9 缓动、Shift+F9 缓入、Cmd+Shift+F9 缓出；速度 0、影响 33.33%，按维度生成）、`key.set_interpolation`、`key.move`（拖动，落到已有关键帧上时替换）、`key.delete`（删光时关掉秒表并保留值）、`key.reverse`（时间反向）、`key.paste`。
   - 关键帧时间与 `key.set` 一致，用存储的时间（图层属性是图层时间）；入点、出点、拆分、工作区用合成时间。`bae_motion::query` 提供合成设置、图层列表、图层时间换算、显示名等只读帮助函数，界面和命令共用。
   - 注册：`bae_motion::register_commands(&mut CommandRegistry)`；`MotionModule` 把命令发布到 `bae_app::Registry<dyn DynCommand>`（id = 命令 id），应用从这里收集各模块的命令（接入 apps/bae 在下一个 PR）。
   - 测试：7 个集成测试（经过 CommandRegistry 执行，覆盖撤销、父级换算前后世界坐标一致、缓动的维度、关键帧移动 / 反向 / 粘贴 / 删除、工作区）。
-- 2026-11-20（PR B）：新建 `crates/bae-ui-motion`，接进 apps/bae。
+- 2026-11-20（PR B #64）：新建 `crates/bae-ui-motion`，接进 apps/bae。
   - 面板（通过 11 的 Panel API 注册，替换外壳的占位）：项目、合成查看器、时间轴、属性、效果控件、预览。共享的会话状态 `SharedSession`（活动合成、每个合成的当前时间、选择、播放、拖动预览）是应用资源，只有视图状态；所有修改都是命令。
   - 时间轴：合成标签、当前时间、标尺、工作区域、时间指示器、A/V 与开关列、父级下拉框与关联器、拖动重排、图层条移动 / 修剪、属性树（文本、内容、蒙版、效果、变换）、秒表、关键帧导航器、数值编辑（松手才提交一步撤销，查看器实时预览）、关键帧图标 / 选择 / 框选 / 拖动 / 复制粘贴、表达式开关和输入框、右键菜单。
   - 查看器：简化的矢量预览（纯色、形状、文本、预合成），选择与拖动移动（多选一步撤销）、边界框和锚点、放大率、分辨率、透明网格、安全框、网格、从项目面板拖入素材。
   - 快捷键：通过 `Registry<KeymapBindings>` 加进 `ae` 键位表，完整列表见一致性清单第 4 节。
   - bae-motion 新增：`layer.shift_time`、`layer.delete`、`item.delete`、`attr.set_many`，纯色图层可复用已有纯色素材。
   - apps/bae：`main.rs` 加 `MotionUiModule`；`Document::add_module_commands` 从 `Registry<dyn DynCommand>` 收集模块命令；无窗口冒烟测试支持 `BAE_SMOKE_DEMO=1`（演示工程，用于截图）。
+- 0.0.1 范围（新建合成 → 加图层 → 打关键帧 → 预览播放）在 #64 完成。release 体积 +0.49 MiB（相对 58bc1bc）。
 - 下一步：图表编辑器（值 / 速度图表）、预合成、标记、合成设置对话框、效果和预设 / 字符 / 段落 / 对齐 / 渲染队列面板、接 04 的 GPU 预览、协同显示。
 
 ## 请求（其他工作流在这里留言）
