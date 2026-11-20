@@ -756,7 +756,7 @@ Effect-category name: Perspective (透视). Conventions as stated at the start o
   ```
   rad = radians(direction)
   off = (distance * sin(rad), -distance * cos(rad))      // layer space, y down; 135° → (+0.707d, +0.707d)
-  a_s = gaussian_blur(alpha(in), sigma = softness * k)    // k UNVERIFIED: Skottie 0.3, lottie-web 0.25
+  a_s = gaussian_blur(alpha(in), sigma = softness * k)    // UNVERIFIED k: Skottie 0.3 (kBlurSizeToSigma), lottie-web 0.25
   a_s = shift(a_s, off)                                   // subpixel (bilinear) at Best quality, integer at Draft
   shadow = premul(shadow_color, a_s * opacity/255)
   out = shadow_only ? shadow : in OVER shadow             // original composited on top
@@ -766,7 +766,7 @@ Effect-category name: Perspective (透视). Conventions as stated at the start o
   - Semi-transparent pixels cast proportionally lighter shadow; the colour of the layer does not tint the shadow.
 - **Priority:** P0 — ubiquitous on text and graphics.
 - **Owner:** bae-effects (+ bae-render)
-- **Notes:** Lottie: `ty: 25` Drop Shadow effect, values in order color, opacity (0…255), angle (direction), distance, blur (softness) — lottie-web uses offset angle `(direction − 90)°`, `flood-opacity = opacity/255`, `stdDeviation = softness/4`; Skottie uses `sigma = softness·0.3`. Shadow Only is not part of the Lottie schema (UNVERIFIED whether bodymovin exports it as a 6th value). Layer quality affects subpixel positioning and the smoothness of the soft edge (Adobe help). Implementation hint: blur only the alpha channel (one R16F/R32F texture), then one composite pass.
+- **Notes:** Lottie: `ty: 25` Drop Shadow effect, values in order color, opacity (0…255), angle (direction), distance, blur (softness) — lottie-web uses offset angle `(direction − 90)°`, `flood-opacity = opacity/255`, `stdDeviation = softness/4`; Skottie uses `sigma = softness·0.3` and offset `(d·cos(90°−dir), −d·sin(90°−dir))`. Shadow Only: the lottie-docs schema lists only the first five values, but Skottie binds a 6th value (index 5, `kShadowOnly_Index`), i.e. bodymovin exports it as `ef[5]`. Sources: https://raw.githubusercontent.com/google/skia/main/modules/skottie/src/effects/DropShadowEffect.cpp, https://raw.githubusercontent.com/airbnb/lottie-web/master/player/js/elements/svgElements/effects/SVGDropShadowEffect.js Layer quality affects subpixel positioning and the smoothness of the soft edge (Adobe help). Implementation hint: blur only the alpha channel (one R16F/R32F texture), then one composite pass.
 
 ### AE-FX-346 · Bevel Alpha (斜面 Alpha)
 
@@ -870,7 +870,7 @@ Effect-category name: Perspective (透视). Conventions as stated at the start o
 
 ## Distort effects
 
-Effect-category name: Distort (扭曲). Conventions as stated at the start of the Blur & Sharpen section. All Distort effects are **inverse-mapping warps**: for every output pixel `p` they compute a source position `s = f⁻¹(p)` in the layer's input buffer and sample it (Best quality: bilinear on premultiplied RGBA, or the effect's own supersampling where an Antialiasing control exists; Draft quality: nearest pixel). Samples outside the input buffer are transparent black unless the effect states a wrap/repeat rule. Popup values are the 1-based numbers AE stores; a menu separator "(-" occupies a number (so the stored value skips it). Positions are in layer pixels (y down) and are scaled by the downsample factor. Lottie: only Displacement Map (`ty: 27`), Twirl (`ty: 30`), Mesh Warp (`ty: 31`), Ripple ("Wavy", `ty: 32`), Spherize (`ty: 33`) and Puppet (`ty: 34`) have dedicated effect types; every other effect exports as a generic effect group (`ty: 5`) identified by `mn` (matchName). Skottie renders Bulge, Corner Pin, Displacement Map and Transform by matchName; lottie-web renders none of the Distort effects.
+Effect-category name: Distort (扭曲). Conventions as stated at the start of the Blur & Sharpen section. All Distort effects are **inverse-mapping warps**: for every output pixel `p` they compute a source position `s = f⁻¹(p)` in the layer's input buffer and sample it (Best quality: bilinear on premultiplied RGBA, or the effect's own supersampling where an Antialiasing control exists; Draft quality: nearest pixel). Samples outside the input buffer are transparent black unless the effect states a wrap/repeat rule. Popup values are the 1-based numbers AE stores; a menu separator "(-" occupies a number (so the stored value skips it). Positions are in layer pixels (y down) and are scaled by the downsample factor. Lottie: only Displacement Map (`ty: 27`), Twirl (`ty: 30`), Mesh Warp (`ty: 31`), Ripple ("Wavy", `ty: 32`), Spherize (`ty: 33`), Puppet (`ty: 34`) and Transform (`ty: 35`, lottie-web only) have dedicated effect types; every other effect exports as a generic effect group (`ty: 5`) identified by `mn` (matchName). Skottie renders Bulge, Corner Pin, Displacement Map and Transform by matchName; lottie-web renders only the Transform effect (`ADBE Geometry2`, its `TransformEffect.js`) among the Distort effects.
 
 ### AE-FX-355 · Turbulent Displace (湍流置换)
 
@@ -1085,19 +1085,22 @@ Effect-category name: Distort (扭曲). Conventions as stated at the start of th
   | 9 | Opacity (不透明度) | `-0008` | float slider | 100.0 | 0…100 | % | Multiplies the result. |
   | 10 | Use Composition's Shutter Angle (使用合成的快门角度)（译名待核） | `-0009` | checkbox | on | — | — | — |
   | 11 | Shutter Angle (快门角度) | `-0010` | float slider | 0.0 | 0…360 (UNVERIFIED; comp allows 0…720) | degrees | Used when 10 is off. |
-  | 12 | Sampling (采样) | `-0012` | popup | 1 Bilinear | 1 Bilinear (双线性), 2 Bicubic (双立方) | — | Added AE 16.1 (2019) (UNVERIFIED version). |
+  | 12 | Sampling (采样) | `-0012` | popup | 1 Bilinear | 1 Bilinear (双线性), 2 Bicubic (双三次) | — | Added AE 16.1 (2019) (UNVERIFIED version). |
 
   ```
   sx = scale_width/100 (or scale_height/100 if uniform);  sy = scale_height/100
   M = T(position) · R(rotation) · K(skew, skew_axis) · S(sx, sy) · T(-anchor)
   K(k, a) = R(a) · [[1, tan(-k)], [0, 1]] · R(-a)     // same skew model as shape-group transforms (UNVERIFIED sign; see shapes.md, group transforms)
+  // UNVERIFIED order of skew vs rotation: Skottie (TransformAdapter2D) applies skew before rotation as above;
+  // lottie-web's TransformEffect.js applies translate(-anchor) → scale → rotate(-r) → skewFromAxis(-skew, skewAxis+90°) → translate(position),
+  // i.e. skew AFTER rotation with the axis offset by 90°. Settle with a reference render (skew 30°, axis 0°, rotation 45°).
   out(p) = opacity/100 * sample(in, M⁻¹ p)            // Bilinear or Bicubic at Best; nearest at Draft
   ```
   - **Motion blur:** when the layer's Motion Blur switch and the comp's Enable Motion Blur are both on, the effect renders its own motion blur: it evaluates its parameters at N sub-frame times across the shutter interval (angle = comp shutter angle, or Shutter Angle when 10 is off; phase and sample count from Composition Settings › Advanced: UNVERIFIED whether phase is honoured) and averages the transformed images. This blur is independent of (and in addition to) layer-transform motion blur. With Shutter Angle 0 there is no effect-level blur.
   - Applied in layer space after masks and earlier effects, before the layer's own transform (render order: compositing-3d-color.md [cmp-a], Render order).
 - **Priority:** P0 — ubiquitous for secondary transforms, effect-stack transforms and stylised motion blur.
 - **Owner:** bae-effects (+ bae-anim)
-- **Notes:** Skottie: `TransformEffect.cpp` (in uniform mode uses Scale Height for both axes; ignores shutter/sampling). Lottie: no `ty`; generic `ty: 5` with `mn: "ADBE Geometry2"`, values in AE order. Expressions often read `effect("Transform")("Position")`. Implementation hint: a single textured-quad draw with the matrix; for effect motion blur, accumulate N draws into one target in the same pass. BAE decision: provide Bicubic via a 16-tap Catmull-Rom (B=0, C=0.5) kernel (AE's bicubic kernel UNVERIFIED).
+- **Notes:** Skottie: `TransformEffect.cpp` (in uniform mode uses Scale Height for both axes; ignores shutter/sampling). lottie-web also renders it (`player/js/effects/TransformEffect.js`, canvas `CVTransformEffect.js`, SVG `SVGTransformEffect.js`; uniform mode likewise uses Scale Height for both axes; opacity = value 8). Lottie: `ty: 35` Transform effect (lottie-web `registerEffect(35, SVGTransformEffect)`; not in the lottie-docs schema), `ef` values in AE order (anchor, position, uniform scale, scale height, scale width, skew, skew axis, rotation, opacity, …). Source: https://raw.githubusercontent.com/airbnb/lottie-web/master/player/js/effects/TransformEffect.js Expressions often read `effect("Transform")("Position")`. Implementation hint: a single textured-quad draw with the matrix; for effect motion blur, accumulate N draws into one target in the same pass. BAE decision: provide Bicubic via a 16-tap Catmull-Rom (B=0, C=0.5) kernel (AE's bicubic kernel UNVERIFIED).
 
 ### AE-FX-361 · Mirror (镜像)
 
@@ -1276,7 +1279,7 @@ Effect-category name: Distort (扭曲). Conventions as stated at the start of th
 ### AE-FX-370 · Magnify (放大)
 
 - **What it does:** Magnifies a circular or square region like a loupe, with feathered edge and blend mode.
-- **Exact semantics:** matchName `ADBE Magnify`; 8 bpc; GPU —. Params (AE order): Shape (形状) popup `-0010` (1 Circle, 2 Square); Center (居中对齐); Magnification (放大率) % (default 200 UNVERIFIED); Link (链接) popup `-0011` (1 None (无), 2 Size To Magnification (大小至放大率), 3 Size & Feather To Magnification (大小和羽化至放大率)); Size (大小) px; Feather (羽化) px; Opacity (不透明度) %; Scaling (缩放) popup `-0008` (1 Standard (标准), 2 Soft (柔和), 3 Scatter (散布)); Blending Mode (混合模式) popup `-0012` (None, Normal, Add, Multiply, Screen, Overlay, Soft Light, Hard Light, Color Dodge, Color Burn, Darken, Lighten, Difference, Exclusion, Hue, Saturation, Color, Luminosity; separators occupy values); Resize Layer (调整图层大小) checkbox.
+- **Exact semantics:** matchName `ADBE Magnify`; 8 bpc; GPU —. Params (AE order): Shape (形状) popup `-0010` (1 Circle, 2 Square); Center (中心)（译名待核）; Magnification (放大率) % (default 200 UNVERIFIED); Link (链接) popup `-0011` (1 None (无), 2 Size To Magnification (大小至放大率), 3 Size & Feather To Magnification (大小和羽化至放大率)); Size (大小) px; Feather (羽化) px; Opacity (不透明度) %; Scaling (缩放) popup `-0008` (1 Standard (标准), 2 Soft (柔和), 3 Scatter (散布)); Blending Mode (混合模式) popup `-0012` (None, Normal, Add, Multiply, Screen, Overlay, Soft Light, Hard Light, Color Dodge, Color Burn, Darken, Lighten, Difference, Exclusion, Hue, Saturation, Color, Luminosity; separators occupy values); Resize Layer (调整图层大小) checkbox.
   ```
   inside region: out(p) = blend(in(p), sample(in, center + (p - center) / (mag/100)), mode) * opacity, feathered at the edge
   ```
@@ -1295,7 +1298,7 @@ Effect-category name: Distort (扭曲). Conventions as stated at the start of th
 ### AE-FX-372 · Puppet effect (操控)（译名待核）
 
 - **What it does:** The effect created by the Puppet tools: a triangulated mesh over the layer outline deformed by Position/Advanced/Bend pins, with Overlap and Starch pins.
-- **Exact semantics:** matchName `ADBE FreePin3`; Puppet Engine popup `ADBE FreePin3 Puppet Engine` (1 Legacy, 2 Advanced; AE 16.1 (2019) added Advanced pins and Bend pins); Mesh Rotation Refinement; On Transparent; Auto-traced Shapes / Mesh groups with Triangles, Density, Expansion, and per-pin keyframed Position (and Scale/Rotation for Advanced/Bend pins). Deformation: as-rigid-as-possible mesh deformation (UNVERIFIED solver).
+- **Exact semantics:** matchName `ADBE FreePin3`; Puppet Engine popup `ADBE FreePin3 Puppet Engine` (1 Legacy, 2 Advanced; UNVERIFIED: AE CC 2019 (16.0) added the Advanced engine with Advanced pins and Bend pins); Mesh Rotation Refinement; On Transparent; Auto-traced Shapes / Mesh groups with Triangles, Density, Expansion, and per-pin keyframed Position (and Scale/Rotation for Advanced/Bend pins). Deformation: as-rigid-as-possible mesh deformation (UNVERIFIED solver).
 - **Priority:** P2 — popular character tool, but a large feature on its own.
 - **Owner:** bae-effects (+ bae-ui-motion, bae-motion)
 - **Notes:** Lottie: `ty: 34` (Puppet) — not rendered by players. Puppet tools UI: see ui-preview-render-io.md [ui-b], tools.
