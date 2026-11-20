@@ -48,7 +48,7 @@
 - [x] EvaluatedComp：接口 PR（`[interface]`），`Evaluator` 缓存 + `invalidate(&StageEvent)`；说明见 `crates/bae-anim/README.md`
 - [x] AE 对照测试：AE 26.2.1 的 59 个用例（夹具 `crates/bae-anim/tests/fixtures/ae-26.2-anim.json`，407 KB）。时间插值全部 < 1e-8；29.97/23.976 fps 和倒放用例约 3e-4（AE 自身的时间量化，见下）
 - [ ] 空间插值与 AE 差最多约 0.02 像素，空间用例暂用 0.05 像素容差。已查明一部分：AE 的 `valueAtTime` 把时间量化到 1/(帧率×1024) 秒；匀速参数化的直线量化后误差 < 1e-7。剩下的是 AE 弧长参数化的近似（误差是段间平滑弧线、幅度约 1/64 像素以内、路径越长分段越多），继续反推
-- [ ] 颜色属性的缓动速度单位：15 的采样脚本在颜色用例上失败（见 15 的请求），待补采
+- [x] 颜色属性的缓动速度单位：用 aectl 自己补采了 6 个颜色用例（含 3 个非零速度），确认是 RGBA 差值 ×255 的欧氏距离（AE-ANI-034），误差 < 1e-12。采样脚本 `crates/bae-anim/tests/fixtures/ae-color-samples.jsx`
 
 性能（Apple M4，release）：1000 个带关键帧的图层（位置空间贝塞尔、缩放、旋转、不透明度、父级）单帧约 0.4 ms；表达式 100 层 × 2 个（`wiggle` + 读上一层）单帧 1.07 ms。表达式递归最多 24 层，更长的依赖链用多轮预热解决（150 层正反两个方向的链有测试）。
 

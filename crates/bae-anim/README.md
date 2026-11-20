@@ -46,7 +46,8 @@
 - 定格：出点定格保持前一个值；**只有入点定格**（后一个关键帧的入点是定格）时，一离开前一个关键帧就跳到后一个关键帧的值。
 - 漂移关键帧：从前一个非漂移关键帧到后一个非漂移关键帧是一条缓动，按总弧长分配，不使用漂移关键帧自己的时间。
 - 空间路径的速度手柄超过路径长度时，影响力按 `L / (speed × dt)` 截断（`spatial_speed_clamp` 用例验证）。
-- 已知差距：空间路径的弧长参数化与 AE 相差最多约 0.02 像素（AE 的数值方法未公开，直线路径也有这个偏差），对照测试暂时对空间用例用 0.05 像素的容差。颜色属性的缓动速度单位（AE-ANI-034）还没有 AE 数据。
+- 颜色：所有分量共用一条缓动，速度的单位是"RGBA 差值 ×255 后的欧氏距离"每秒（AE-ANI-034，用一/二/三个通道变化的非零速度用例验证，误差 < 1e-12）。
+- 已知差距：空间路径的弧长参数化与 AE 相差最多约 0.02 像素（AE 的数值方法未公开，直线路径也有这个偏差），对照测试暂时对空间用例用 0.05 像素的容差。
 
 ## 表达式
 
@@ -68,7 +69,7 @@ cargo test -p bae-anim --test ae_reference -- --nocapture  # 打印每个对照�
 cargo test --release -p bae-anim --test perf -- --nocapture  # 性能验收（1000 个带关键帧的图层，单帧 < 2 ms）
 ```
 
-对照夹具由 `tests/fixtures/make_ae_fixture.py` 从 15 的 AE 采样结果生成（见 `docs/interop/ae-anim-samples.md`）。
+对照夹具由 `tests/fixtures/make_ae_fixture.py` 从 15 的 AE 采样结果生成（见 `docs/interop/ae-anim-samples.md`），颜色用例另由 `tests/fixtures/ae-color-samples.jsx`（用 `tools/ae/aectl run` 在 AE 里运行）采样后用 `--extra` 合并。
 
 ## 还没做
 
