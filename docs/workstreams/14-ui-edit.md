@@ -43,10 +43,24 @@
 
 ## 进度
 
-- [ ] bae-edit 命令
+- [ ] bae-edit 命令（进行中，2026-11-20，PR A 草稿，**尚未编译**）
 - [ ] 监视器
 - [ ] 序列时间轴与工具
 - [ ] 音频轨与波形
 - [ ] 与动效、分镜联动
+
+### 2026-11-20 状态（额度暂停时的 wip）
+
+已完成（代码已写，**还没跑过 `cargo check` / 测试**，因额度不足暂停）：
+
+- `crates/bae-edit`：`query`（序列/轨道/片段信息、某时刻的视频叠放顺序和可听音频、链接组、片段来源长度、双击片段跳到的动效合成）和 21 个命令：`sequence.create`、`sequence.add_marker`、`marks.set`、`track.add` / `track.remove` / `track.set_state`、`clip.insert` / `clip.overwrite`（三点编辑）、`clip.lift`、`clip.ripple_delete`、`clip.razor`、`clip.move`、`clip.trim` / `clip.ripple_trim` / `clip.roll` / `clip.slip` / `clip.slide`、`clip.link` / `clip.unlink`、`clip.nest`、`clip.set_transition`；`EditModule` 发布到 `bae_app::Registry<dyn DynCommand>`。
+
+还差（按顺序）：
+
+1. 根 `Cargo.toml` 加 `bae-edit` 工作区依赖；`cargo check -p bae-edit` 修编译错误；写 `tests/commands.rs`（每个命令至少一个用例）；fmt / clippy / test 通过后 `gh pr ready`。
+2. `apps/bae` 加一行 `.add_module(bae_edit::EditModule)`，让菜单和 `bae mcp` 拿到剪辑命令。
+3. PR B：`crates/bae-ui-edit` 骨架——源监视器、节目监视器、序列时间轴面板（只读显示轨道和片段，工具切换、J/K/L、I/O 调用命令），`edit` 工作区预设和 Premiere 键位表，中英文 i18n。
+
+已知问题：尚未编译，可能有小的编译错误。
 
 ## 请求（其他工作流在这里留言）
