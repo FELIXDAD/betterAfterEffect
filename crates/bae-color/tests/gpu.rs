@@ -320,7 +320,7 @@ fn curve_ranges(tf: TransferFunction, tol: f64) -> Vec<((f64, f64), f64, &'stati
     let ext = tol.max(EXTRAPOLATION_TOL);
     vec![
         ((lo.max(0.0), hi.min(1.0)), tol, ""),
-        ((lo, lo.max(0.0).min(0.0)), ext, " (negative)"),
+        ((lo, hi.min(0.0)), ext, " (negative)"),
         ((lo.max(1.0), hi), ext, " (above 1)"),
     ]
 }
