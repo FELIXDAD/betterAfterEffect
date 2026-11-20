@@ -200,6 +200,7 @@ impl Plan {
 
         let mut names = Names::default();
         let mut files: Vec<PlannedFile> = Vec::new();
+        let mut file_index: HashMap<String, usize> = HashMap::new();
         let mut items = Vec::with_capacity(inventory.assets.len());
         for entry in &inventory.assets {
             let mut item = PlanItem {
@@ -245,12 +246,10 @@ impl Plan {
                         source: src.clone(),
                         size: locator.size(src),
                     });
+                    file_index.insert(name.clone(), files.len() - 1);
                     files.len() - 1
                 } else {
-                    files
-                        .iter()
-                        .position(|f| &f.name == name)
-                        .expect("placed before")
+                    file_index[name]
                 };
                 item.files.push(index);
             }
@@ -521,14 +520,12 @@ impl Names {
     fn claim(&mut self, key: &str, candidate: impl Fn(u32) -> String) -> String {
         for n in 1.. {
             let name = candidate(n);
+            // Files and sequence folders all sit directly under `assets/`
+            // (`sanitize` removes `/`), so a folder can only clash with a file
+            // of exactly its name. Case-insensitive file systems: compare lowercase.
             let lower = name.to_lowercase();
-            // A folder name must not clash with a file name or vice versa.
-            let clash = self.taken.contains_key(&lower)
-                || self.taken.keys().any(|t| {
-                    t.starts_with(&format!("{lower}/")) || lower.starts_with(&format!("{t}/"))
-                });
-            if !clash {
-                self.taken.insert(lower, key.to_owned());
+            if let std::collections::hash_map::Entry::Vacant(slot) = self.taken.entry(lower) {
+                slot.insert(key.to_owned());
                 return name;
             }
         }

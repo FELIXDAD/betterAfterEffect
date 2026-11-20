@@ -737,3 +737,47 @@ fn stage_only_source_works_for_unsaved_projects() {
         Some(bae_model::asset::to_slash(&fx.root.join("work/footage/a.mov")).as_str())
     );
 }
+
+#[test]
+fn assets_sharing_files_are_packed_once() {
+    let (mut fx, originals) = Fixture::new();
+    // A second asset on the same movie, and one on another frame of the same sequence.
+    let a = fx.root.join("work/footage/a.mov");
+    let frame2 = fx.root.join("renders/seq/shot_0002.png");
+    fx.asset("/assets/a2", "footage", Some(&a));
+    fx.asset("/assets/seq2", "sequence", Some(&frame2));
+    let out = fx.root.join("shared.baez");
+    let report = pack(
+        &fx.source(),
+        &out,
+        &PackOptions::default(),
+        WriteOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(report.stats.packed, 6);
+    assert_eq!(report.stats.files, 6, "no file twice");
+    assert_eq!(
+        report
+            .asset(&p("/assets/a2"))
+            .unwrap()
+            .packaged_as
+            .as_deref(),
+        Some("assets/a.mov")
+    );
+    let seq2 = report.asset(&p("/assets/seq2")).unwrap();
+    assert_eq!(
+        seq2.packaged_as.as_deref(),
+        Some("assets/shot/shot_0002.png")
+    );
+    assert_eq!(seq2.files, 3);
+
+    fx.move_originals_away();
+    let opened = open_project(&out).unwrap();
+    let AssetLocation::Packaged { entry } = opened.locate(&p("/assets/seq2")) else {
+        panic!("seq2");
+    };
+    assert_eq!(
+        opened.assets.package().unwrap().read_entry(&entry).unwrap(),
+        originals.0[4].1
+    );
+}
