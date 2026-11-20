@@ -135,6 +135,17 @@ fn evaluated_shape_layer_renders_on_the_gpu() {
             }
             Err(error) => panic!("{error}"),
         };
+    // Vello's compute pipelines crash the process (STATUS_ACCESS_VIOLATION) on WARP,
+    // the software D3D12 adapter of GPU-less Windows CI runners. Skip software
+    // adapters like the no-GPU case; making the render path itself refuse CPU adapters
+    // is tracked in 05's task book.
+    if gpu.adapter_info().device_type == vello::wgpu::DeviceType::Cpu {
+        eprintln!(
+            "skipping Vello GPU test on software adapter {:?}",
+            gpu.adapter_info().name
+        );
+        return;
+    }
     let (p, comp, layer) = project();
     let evaluated = evaluate_comp(
         &p.stage,
