@@ -1437,3 +1437,321 @@ semaphores. The host decides; plugins only honour non-zero fences.
   `bae.command.invoke`, which may run another plugin's command; invoking a command of the
   calling plugin recursively returns `BAE_ERR_BAD_STATE`.
 - Thread-local storage in plugins is allowed but should not hold host pointers.
+
+---
+
+## 14. C ABI: suites, vtables, compatibility policy
+
+The header `sdk/c/bae_plugin.h` is normative for layouts; this section states the policy.
+Rules R1–R10 are at the top of the header.
+
+### 14.1 Handshake
+
+```
+host                                              plugin
+ │ dlopen / LoadLibraryExW                          │
+ │ bae_plugin_entry(&BaeHost, &exports) ──────────► │ check abi_version (rule 3, §6.6)
+ │                                                  │ get_suite("bae.core", 1) ...
+ │ ◄─────────────────────────── BAE_OK + exports    │ fill exports (ids, contributions, vtables)
+ │ validate exports vs manifest (§7.2)              │
+ │ per contribution on first use: global_setup ...  │
+```
+
+`BaeHost.abi_version` is the version the host presents to this plugin (§6.6 rule 1); the
+plugin's `abi_built` tells the host which struct sizes the plugin knows (informational:
+R3 makes sizes self-describing).
+
+### 14.2 Suites
+
+| Suite | Version | Valid in | Purpose |
+|---|---|---|---|
+| `bae.core` | 1 | always (any thread) | log, `set_error`, aligned alloc/free, `has_permission`, plugin paths |
+| `bae.param.define` | 1 | `define_params` | add parameter definitions |
+| `bae.param.edit` | 1 | `param_changed`, `update_params_ui`, `message` on M | set values (undoable ops), set UI state |
+| `bae.render` | 1 | `pre_render`, `render_*` | checkouts, inputs, abort, progress, temp images, `parallel_for` |
+| `bae.gpu.compute` | 1 | `gpu_device_setup`, `render_gpu` | host-encoded WGSL compute |
+| `bae.gpu.native` | 1 | `gpu_device_setup`, `render_gpu` | raw device/queue/texture handles (§12) |
+| `bae.path` | 1 | shape operator `apply` | output paths |
+| `bae.command` | 1 | commands, importers, exporters | invoke commands, read-only queries, progress |
+| `bae.scene` | planned 1 | `pre_render`, `render_*` | comp camera, lights, comp size/time (needed by `USES_CAMERA`/`USES_LIGHTS` effects and 20) |
+| `bae.draw` | planned 1 | `ui_event` (ABI 0.2) | custom UI display lists (20 `ui.rs`) |
+| `bae.l10n` | planned 1 | any | translated strings from the plugin's locale files |
+
+A suite table is acquired once (typically in `bae_plugin_entry` or `global_setup`) and
+cached; acquisition is not a hot-path operation. A suite version is **frozen** once
+released (R4): fixing a mistake means a new version, both stay available.
+
+### 14.3 VTables
+
+Each native contribution exports `(kind, id, vtable_version, vtable)`. VTables start with
+`struct_size`; callbacks are only ever appended; a NULL callback means "documented
+default" (e.g. NULL `pre_render` = identity ROI, NULL `can_execute` = always enabled).
+A new *incompatible* callback set is a new `vtable_version` (e.g. `BaeEffectVTable2`) and
+the host keeps calling version 1 plugins through version 1 semantics.
+
+### 14.4 Capability negotiation
+
+Three directions, all at runtime:
+1. Host → plugin: `BaeHost.capabilities` (`GPU_COMPUTE`, `GPU_NATIVE`, `OUT_OF_PROCESS`,
+   `HEADLESS`), `get_suite` returning NULL for unsupported suites, `BaeGpuDeviceArgs.features`.
+2. Plugin → host: `BaeEffectDescription` (flags, threading, devices, formats), vtable
+   `struct_size` and non-NULL callbacks, dynamic flags.
+3. Plugin → plugin: `BaePluginExports.get_suite` lets a plugin export versioned suites to
+   its dependents (§5.3.5), with the same freezing rule.
+
+### 14.5 Compatibility policy
+
+1. **ABI 0.x** (design and early implementation): no stability promise; 0.x hosts accept
+   only the minors they list (§6.6). ABI **1.0 is frozen at milestone M1**.
+2. **Within a major**, only additive changes are allowed: new suites and suite versions,
+   fields appended to extensible structs, callbacks appended to vtables, new flag bits and
+   enum values (consumers ignore unknown ones, R9), new contribution kinds. Never:
+   removing/reordering/retyping fields, changing semantics of an existing field or
+   callback, renumbering constants, changing a released suite version.
+3. **Old plugin on new host** (same major): guaranteed. CI keeps the example plugins built
+   with every released SDK minor as binary artifacts and runs them against the current
+   host (acceptance test, §22.4).
+4. **New plugin on old host**: the manifest `api` lets an old host reject it before any code
+   loads, with "update BAE". Plugins that use newer suites *optionally* (NULL check) keep
+   `api` low.
+5. **New major**: only when unavoidable; the host serves the previous major through a
+   compatibility shim for at least **two years** after the new major ships.
+6. `bae-plugin-sdk` (Rust) major version tracks the API major; Rust-only API changes in the
+   SDK never change the ABI.
+7. Generation: once the ABI is close to 1.0 the header is generated by cbindgen from
+   `bae_plugin_sdk::abi`; until then the header is authoritative and the Rust mirror is
+   checked by layout tests and a constant-drift test (both directions).
+
+### 14.6 Binary rules
+
+- Export only `bae_plugin_entry` (other exported C symbols are ignored; libraries are
+  opened `RTLD_LOCAL`). Never link against BAE itself; everything comes through suites.
+- Statically link language runtimes where possible (Rust does by default; C++: static
+  libc++ / `/MT`), so two plugins can use different runtime versions.
+- macOS: arm64 and x86_64 are separate platform keys (no universal binaries required);
+  minimum macOS 12; code-signed. A notarized BAE with hardened runtime needs the
+  `disable-library-validation` entitlement to load third-party in-process plugins, or the
+  out-of-process runner (packaging decision for 01/21, §23).
+- Windows: x64 DLL; loaded with `LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR` so the plugin's own
+  directory resolves its dependencies; never assume a shared CRT with the host.
+
+---
+
+## 15. Out-of-process mode
+
+### 15.1 When
+
+Opt-in per plugin: manifest `isolation = "out-of-process"` or `"prefer-out-of-process"`,
+the Plugin Manager toggle, or automatically after a crash attributed to the plugin
+(§16.4). AE plugins (20) use the same mechanism by default. In-process stays the default
+for BAE plugins (performance first, ARCHITECTURE §2 principle 6).
+
+### 15.2 Architecture
+
+- `bae-plugin-runner`: a small helper executable shipped with BAE. One runner process per
+  native library (all contributions and instances of that plugin share it, matching
+  per-module globals), started lazily, connected by a local socket/pipe.
+- Control channel: versioned, length-prefixed binary messages (one request in flight per
+  render worker; responses matched by id). Suite calls that need host state
+  (`checkout_input`, `checkout_param`, `bae.command`) become synchronous RPCs back to the
+  host; per-pixel helpers (`parallel_for`, `alloc_cpu_image`) run inside the runner.
+- Frames: CPU images live in shared-memory slots (POSIX shm / Mach VM on macOS, file
+  mappings on Windows) allocated by the host, page-aligned, rows 64-byte aligned, reused
+  across frames. The runner hands slot memory to the plugin directly.
+- Host side: `OutOfProcessEffect` implements `DynEffect` and forwards; the render graph
+  cannot tell the difference except for cost.
+
+### 15.3 Supported subset
+
+Effects on the CPU path, shape operators, importers, exporters, commands, decoders and
+encoders. Not supported out of process: `bae.gpu.native` (no shared device;
+`BAE_HOST_CAP_GPU_NATIVE` is cleared) and, in v1, `bae.gpu.compute` (planned: the runner
+records dispatches — pipeline ids, bindings, uniform bytes — and the host replays them,
+which the host-encoded design makes possible). Expression libraries always run in
+process (call granularity too fine).
+
+### 15.4 Cost
+
+Per frame: the in-process CPU-node round trip (§10.6) + one memcpy per direction between
+the readback/upload staging buffers and the shared slot + 2 IPC round trips (pre_render,
+render; ~20–50 µs each) + RPCs for checkouts (pre-sent where possible: the host includes
+param values and input infos in the request). Budget: ≤ 0.3 ms per frame plus the copies
+(§22).
+
+### 15.5 Crashes and hangs
+
+- Runner death (pipe EOF / process exit) fails in-flight calls with `BAE_ERR_INTERNAL`; the
+  nodes pass their input through with an error badge (§10.10); the runner restarts
+  lazily, globals are set up again and instances are recreated from the state blobs.
+- Three crashes within 60 s disable the plugin for the session (user can re-enable).
+- Watchdog: render calls time out after 10 s, other calls after 30 s (configurable); a hung
+  runner is killed and treated as a crash.
+- Out-of-process mode is crash isolation, not a security sandbox: the runner has the user's
+  privileges (§21).
+
+---
+
+## 16. Errors, crashes, diagnostics
+
+1. **Status + message.** Callbacks return `BaeStatus`; `bae.core.set_error` attaches a
+   per-thread message to the error being returned. The host wraps it into a diagnostic
+   with plugin id, version, contribution, callback name and (for effects) the effect Prim.
+2. **No unwinding across the boundary** (R8). The Rust SDK wraps every callback in
+   `catch_unwind` → `BAE_ERR_PANIC`; C++ plugins must catch all exceptions.
+3. **Render errors**: §10.10 (pass-through + badge; final renders fail unless configured).
+4. **Load errors**: the plugin goes to `Failed` with diagnostics in the Plugin Manager;
+   its effects are placeholders (§20). `bae plugin check` reports the same diagnostics.
+5. **In-process crashes** cannot be recovered. Every host→plugin call sets a per-thread
+   breadcrumb ("plugin X, contribution Y, callback Z"; two TLS stores, ~1 ns) that the
+   crash handler of `bae-platform` writes into the crash report (request R01-6). On the
+   next start BAE offers: disable the plugin, run it out of process, or keep it.
+6. **Hangs** in process: a watchdog reports "plugin X is not responding" with the
+   breadcrumb (it cannot kill the call) and offers out-of-process mode for next time.
+7. **Validation mode** (`--plugin-validate`, also used by CI for examples): checks result
+   rects against `max_result_rect`, fills outputs with a sentinel pattern to detect
+   unwritten pixels, checks for NaN/Inf, renders twice to check determinism, checks
+   instance serialize/restore round trips and that `param_changed` edits are undoable. It
+   is a developer tool (like the OpenFX validator) and costs nothing when off.
+8. **Logging**: `bae.core.log` goes to `tracing` with target `plugin::<id>`, rate-limited
+   per plugin.
+9. **GPU**: WGSL compile errors → diagnostics with file:line; wgpu validation errors during
+   a plugin's dispatch are attributed to the plugin; device loss → §12.5.
+
+---
+
+## 17. Script plugins
+
+### 17.1 Runtime
+
+- QuickJS through `rquickjs`, the same library as the expression engine (03), so the
+  binary contains one JS engine. Each script plugin gets its **own runtime** (isolation,
+  per-plugin memory limit `memory_limit_mb`, interrupt handler for time limits).
+- Runtimes execute on a small pool of script workers (S); one runtime runs on at most one
+  thread at a time. Scripts never block UI or rendering.
+- ES modules. The entry module exports the functions named by `entry` keys. Imports:
+  package-relative paths, `plugin:<id>/<path>` from dependencies' `[exports] js`, and the
+  built-in module `bae`.
+
+### 17.2 Object model
+
+AE scripting (ExtendScript) names, so AE scripts port with little change:
+
+```js
+import { app } from "bae";
+const comp = app.project.activeItem;                 // CompItem
+for (const layer of comp.selectedLayers) {           // Layer
+  const pos = layer.transform.position;              // Property
+  pos.setValue([Math.round(pos.value[0] / 10) * 10, pos.value[1]]);
+  layer.effect("Gaussian Blur")("Blurriness").setValueAtTime(1.0, 20);
+}
+```
+
+Objects: `app` (project, version, settings), `Project` (items, activeItem, selection,
+importFile), `CompItem`/`FootageItem`/`FolderItem`, `Layer` (name, index, inPoint, outPoint,
+startTime, enabled, solo, locked, parent, transform, effects, masks), `Property`/
+`PropertyGroup` (value, valueAtTime, setValue, setValueAtTime, keys, expression,
+addKey/removeKey). ExtendScript-only facilities are replaced: `File`/`Folder` → `bae.fs`
+(permissioned), `$.writeln` → `console.log`, ScriptUI → declarative panels (§17.6).
+
+### 17.3 Mutation, undo, commands
+
+- Every mutation is a command invocation; reads see the script's own uncommitted writes.
+- All mutations of one entry-point call form **one transaction = one undo step** with
+  author = (invoking user or agent, via plugin id); `app.beginUndoGroup(name)` /
+  `app.endUndoGroup()` split it, like AE.
+- Scripts can invoke any registered command: `bae.commands.invoke(id, args)`; scripts and
+  script commands are themselves registered commands, so menus, shortcuts and MCP see them.
+
+### 17.4 Permissions and limits
+
+| Permission | Script API it unlocks | Default |
+|---|---|---|
+| `project = "read"` | read the object model, `bae.commands.query` | granted |
+| `project = "write"` | mutations, `bae.commands.invoke` of mutating commands | consent |
+| `filesystem` scopes | `bae.fs` limited to the scopes (`plugin-data`, `plugin-cache` always) | consent per scope |
+| `network` origins | `bae.net.fetch` to listed https origins | consent |
+| `clipboard` | `bae.clipboard` | consent |
+| `process` | `bae.process.spawn` | consent, shown as dangerous |
+| `render` | `bae.render.frame(comp, time) → ImageData/PNG` within a render budget | consent |
+
+Checks happen in the host functions (capability style: user-picked files arrive as
+handles, not paths). Time limits: 10 s per command call by default (then the user is asked
+to continue or cancel), 50 ms per panel event handler; memory per manifest.
+
+### 17.5 Not in the frame path
+
+Scripts never render pixels. Expression libraries written in JS are executed by the
+expression engine (03) under expression rules (pure, deterministic, no project access, no
+IO) during animation evaluation, where 03 caches results.
+
+### 17.6 Panels
+
+A script panel returns a declarative widget tree (column, row, label, button, slider,
+number, text, checkbox, dropdown, list, image, separator) with callbacks; the host renders
+it with egui (11) and calls back on events; `panel.update(state)` re-renders (the host
+diffs). No HTML/DOM/WebView (ARCHITECTURE §1). Native panels are reserved
+(`BAE_KIND_PANEL`): egui types cannot cross a C ABI, so a native panel API would also be
+declarative; deferred until a concrete need.
+
+### 17.7 Agents
+
+Plugin commands and scripts appear as MCP tools automatically (name = registry id,
+description and JSON Schema from the manifest). Their permission level (read/write)
+determines which agent permission tier may call them (ARCHITECTURE §10).
+
+---
+
+## 18. Other contribution kinds
+
+### 18.1 Shape operators (05)
+
+`apply(params, time, input paths) → output paths` (cubic Béziers, AE vertex/tangent
+convention), pure and concurrent, evaluated in the shape group's operator order like AE's
+Zig Zag or Pucker & Bloat. `BAE_SHAPE_OP_FLAG_PER_PATH` lets the host split work per path.
+Params use the same definitions as effects.
+
+### 18.2 Importers
+
+`probe(path, header bytes) → confidence 0..100` (fast, any thread) and `run` on M inside a
+transaction: the importer creates content **only by invoking commands** (one undo step,
+progress, abortable). File > Import and drag-and-drop pick the highest-confidence importer
+among those claiming the extension/MIME; ties by registry priority (built-ins first).
+
+### 18.3 Exporters
+
+Read-only access (`bae.command.query`), may request rendered frames (permission `render`),
+write to the chosen path; run on a worker thread with progress and abort.
+
+### 18.4 Codecs (08)
+
+Decoders: `probe`, `open`, `get_info`, `decode_video` (into a host-allocated packed or
+planar image: NV12/P010/YUV formats are converted to the working format on the GPU by
+08), `decode_audio`, `close`. Encoders: `open` (declares the pixel format it wants),
+`encode_video`, `encode_audio`, `finish`, `close`. Handles are serialized per handle.
+Registry priority decides among codecs claiming an extension (system codecs of 08 are
+built-in contributions). The optional FFmpeg download (ARCHITECTURE §1) is a native codec
+plugin through this interface.
+
+### 18.5 Commands
+
+Registry id `plugin.<plugin-id>.<command-id>`; JSON Schema for arguments is required (it is
+also the MCP tool schema); `execute` runs on M in a transaction with the invoking author;
+`can_execute` (optional) drives menu enablement and is called at most once per UI frame.
+
+### 18.6 Panels, workspaces, keymaps
+
+Panels: §17.6. Workspaces: a TOML layout (egui_dock tree of panel ids, sizes) registered
+in the workspace registry (11). Keymaps: shortcut → command id per workspace; precedence
+user > plugin > built-in; conflicts are listed in the shortcut editor.
+
+### 18.7 Expression libraries (03)
+
+`namespace.function(args)` in expressions (`easing.outBack(t)`). Forms: a JS module (runs
+in 03's expression runtime) or native `BaeExprFunction`s (pure, numeric, scalar..vec4, no
+allocation, thread-safe). Namespaces are unique; documents using a library record it in
+the project plugin lock (§6.7).
+
+### 18.8 Text selectors
+
+Reserved (`[[text_selector]]`, `BAE_KIND_TEXT_SELECTOR`): parsed and listed, never loaded,
+until 05 defines the per-glyph evaluation contract.
