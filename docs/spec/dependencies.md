@@ -194,6 +194,7 @@ wgpu v30.0.2
 | directories | 6.0.0 | 默认 | bae-platform | 最新 |
 | libloading | 0.9.1 | 默认 | 19、20 | 最新 |
 | notify | 8.2.2 | 关默认，只开 `macos_fsevent` | 09（`bae-sync` 的可选 feature `watch`，共享目录模式的文件监听） | 8.x 最新稳定版（9.0 还是 rc）；macOS 走 FSEvents（objc2-core-services，和已 pin 的 objc2 0.3 同一套），Windows 走 ReadDirectoryChangesW |
+| tungstenite | 0.30.0 | 关默认，只开 `handshake`（不带 TLS） | 09（`bae-sync` 的可选 feature `hub`，连协作服务的 WebSocket 客户端） | 最新；同步 API，放在 `ThreadedTransport` 的后台线程里跑；axum 的 WebSocket 底层也是它。局域网 Hub 暂不需要 TLS |
 
 ### 插件、打包、哈希
 

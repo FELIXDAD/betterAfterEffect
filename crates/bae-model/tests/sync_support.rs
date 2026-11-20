@@ -118,3 +118,36 @@ fn sublayer_ids_differing_only_in_case_are_rejected() {
     .unwrap_err();
     assert!(matches!(err, ModelError::SublayerExists(_)), "{err}");
 }
+
+#[test]
+fn stage_can_be_shared_across_threads() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<Stage>();
+    assert_send_sync::<Sublayer>();
+
+    // Parallel read-only evaluation over one stage.
+    let reg = CommandRegistry::with_builtins();
+    let mut s = Stage::new();
+    run(
+        &reg,
+        &mut s,
+        "prim.create",
+        json!({"path": "/comps", "prim_type": "Folder"}),
+    );
+    for i in 0..8 {
+        run(
+            &reg,
+            &mut s,
+            "prim.create",
+            json!({"path": format!("/comps/c{i}"), "prim_type": "Comp"}),
+        );
+    }
+    let stage = &s;
+    let counts: Vec<usize> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..4)
+            .map(|_| scope.spawn(move || stage.traverse().len()))
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    assert!(counts.iter().all(|&n| n == 9), "{counts:?}");
+}

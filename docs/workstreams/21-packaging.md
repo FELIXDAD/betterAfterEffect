@@ -39,10 +39,18 @@
 
 ## 进度
 
-- [ ] 素材收集与引用解析
-- [ ] .baez 打包、直接打开、解包
-- [ ] 收集文件到文件夹
-- [ ] 视频裁片
-- [ ] 报告与命令
+- [x] 素材收集与引用解析（用到/没用到、嵌套合成递归、字体、跨工程引用；包内 → 相对 → 原始 → 路径映射 → 按名称+指纹搜索；批量重新链接）
+- [x] .baez 打包、直接打开（`open_project` + `PackageReader`，素材按字节范围在包内读取）、解包
+- [x] 收集文件到文件夹
+- [ ] 视频裁片（参数已在 `TrimOptions` 里预留；M2 做，接 08 的 `bae_media::trim`）
+- [x] 报告与命令（`package.scan/pack/collect/unpack`、`asset.relink`、`asset.set_files`）
+- [ ] 字体打包（现在只记录字体名，`FontPolicy::Embed` 已预留）
+
+2026-11-20：第一阶段（M1，不裁片）实现完毕，见 `crates/bae-package/README.md`。
+
+受阻 / 对其他工作流的请求：
+
+- 17：`bae_agent::Workspace::new` 注册 `bae_package::register_commands`，Agent 才能调用打包命令；命令的 `project` 参数可以由服务器自动填当前工程位置（已在 17 的任务书留言）。
+- 04 / 08：直接打开 `.baez` 时，素材位置请用 `bae_package::open_project` / `AssetLocator::locate`（已在 04 的任务书留言）。
 
 ## 请求（其他工作流在这里留言）

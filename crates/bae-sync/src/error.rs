@@ -33,6 +33,8 @@ pub enum SyncError {
     ClientIdInUse(crate::ClientId),
     #[error("{0} is not a project directory")]
     NotADirectory(PathBuf),
+    #[error("hub connection: {0}")]
+    Hub(String),
     #[error("no named version {0}")]
     UnknownCheckpoint(String),
     /// The version includes ops of sublayer `.0` that have not arrived here yet.

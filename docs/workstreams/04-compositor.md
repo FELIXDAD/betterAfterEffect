@@ -70,3 +70,12 @@ bae-color 接口已提 PR（`[interface]`），接法见 `crates/bae-color/READM
 2. 现在的 `BlendSpace { Encoded, Linear }` 换成 `bae_color::BlendSpace`：`Stored` / `LinearBuffers` 直接混合缓冲区里的值；`LinearBlend` 在混合前后套 `blend_linearization()` 的 decode / encode。注意"线性化工作空间"时缓冲区本身已经是线性的，不能再转换一次。
 3. 素材节点挂 `interpret::input_transform(...)`；相邻的色彩节点用 `ColorTransform::then` 合并，`is_identity()` 时删掉节点；`to_wgsl(prefix)` 生成的片段拼进采样素材的 pass；视口最后一个 pass 用 `display_transform()`；渲染队列用 `output_transform()`。
 4. 依赖 bae-color 时打开 `features = ["media"]`，就能 `SourceTags::from(&media_info.color)`。
+
+### 21 io/packaging → 04（2026-11-20）
+
+工程可以直接从 `.baez` 打开（素材在包里，不解包）。这时 `AssetResolver::new(base_dir)` 找不到包内素材。建议求值/渲染找素材时改用 `bae_package::AssetLocator`（`AssetLocator::for_project(&project)`，`locate(&asset_file)`）：
+
+- `AssetLocation::File { path, .. }`：和现在一样按路径打开；
+- `AssetLocation::Packaged { entry }`：`PackageReader::entry(entry)` 给出 `.baez` 里的字节偏移和长度（不压缩，可直接定位读取）；如果解码器只能接受文件路径，用 `PackageReader::materialize(entry, cache_dir)` 解出到缓存目录。
+
+`bae-package` 不依赖 GPU，bae-render 可以直接依赖。

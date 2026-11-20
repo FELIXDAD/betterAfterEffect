@@ -322,9 +322,18 @@ mod tests {
             app.enforced,
             "the app budget must be enforced (ARCHITECTURE §11)"
         );
-        assert!((app.max_mib_for("aarch64-apple-darwin") - 15.0).abs() < f64::EPSILON);
-        assert!((app.max_mib_for("x86_64-pc-windows-msvc") - 15.0).abs() < f64::EPSILON);
-        for name in ["app-bundle", "installer", "bae-hub"] {
+        // Invariant instead of a hard-coded number, so budget PRs only touch
+        // budget.toml: the executable fits inside the unpacked app bundle.
+        let bundle = budgets.get("app-bundle").unwrap();
+        for target in ["aarch64-apple-darwin", "x86_64-pc-windows-msvc"] {
+            let exe = app.max_mib_for(target);
+            assert!(exe > 0.0, "{target}: app budget must be positive");
+            assert!(
+                exe <= bundle.max_mib_for(target),
+                "{target}: executable budget {exe} exceeds the app bundle budget"
+            );
+        }
+        for name in ["installer", "bae-hub"] {
             budgets.get(name).unwrap();
         }
     }

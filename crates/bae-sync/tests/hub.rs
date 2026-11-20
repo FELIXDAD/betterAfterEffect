@@ -1,0 +1,260 @@
+//! Hub mode over real WebSocket connections on loopback: a test hub (the
+//! `Relay` behind `HubTransport::accept`) and clients using
+//! `ThreadedTransport(HubTransport::connect)`.
+#![cfg(feature = "hub")]
+
+mod common;
+
+use std::net::{SocketAddr, TcpListener};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
+
+use bae_model::{AuthorId, Op, Stage, SublayerId, Value};
+use bae_sync::{
+    ClientId, HubTransport, PresenceState, Relay, SessionConfig, SyncError, SyncSession,
+    ThreadedTransport,
+};
+use common::*;
+
+struct TestHub {
+    addr: SocketAddr,
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl TestHub {
+    fn start(token: Option<&'static str>) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = stop.clone();
+        let thread = std::thread::spawn(move || {
+            let mut relay = Relay::new(ClientId::new("hub").unwrap());
+            relay.set_hello_interval(Some(Duration::from_millis(500)));
+            while !flag.load(Ordering::Relaxed) {
+                if let Ok((stream, _)) = listener.accept()
+                    && let Ok(t) = HubTransport::accept(stream, token)
+                {
+                    relay.connect(Box::new(t));
+                }
+                relay.pump();
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        });
+        TestHub {
+            addr,
+            stop,
+            thread: Some(thread),
+        }
+    }
+
+    fn url(&self) -> String {
+        format!("ws://{}/projects/film", self.addr)
+    }
+}
+
+impl Drop for TestHub {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(t) = self.thread.take() {
+            t.join().unwrap();
+        }
+    }
+}
+
+struct Client {
+    stage: Stage,
+    session: SyncSession,
+    link: ThreadedTransport,
+    who: AuthorId,
+    rng: Rng,
+    n: u32,
+    tag: String,
+}
+
+fn connect(url: &str, token: Option<&str>) -> Result<ThreadedTransport, SyncError> {
+    let hub = HubTransport::connect(url, token, Duration::from_secs(5))?;
+    Ok(ThreadedTransport::spawn(
+        hub,
+        Duration::from_millis(2),
+        || {},
+    ))
+}
+
+impl Client {
+    fn new(i: usize, url: &str, base: &[(SublayerId, Vec<u8>)]) -> Self {
+        let id = format!("w{i}");
+        let mut config = SessionConfig::new(ClientId::new(&id).unwrap());
+        config.hello_interval = Some(Duration::from_millis(500));
+        Client {
+            stage: client_stage(base),
+            session: SyncSession::new(config),
+            link: connect(url, Some("team-secret")).unwrap(),
+            who: author(&format!("user:{id}")),
+            rng: Rng::new(900 + i as u64),
+            n: 0,
+            tag: id,
+        }
+    }
+
+    fn pump(&mut self) -> Result<bae_sync::PumpOutcome, SyncError> {
+        self.session.pump(&mut self.stage, &mut self.link)
+    }
+}
+
+fn wait_until(what: &str, timeout: Duration, mut f: impl FnMut() -> bool) {
+    let deadline = Instant::now() + timeout;
+    while !f() {
+        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+fn agreed(clients: &[Client]) -> bool {
+    let first = fingerprint(&clients[0].stage);
+    clients.iter().all(|c| fingerprint(&c.stage) == first)
+}
+
+#[test]
+fn clients_sync_and_see_each_other_through_a_websocket_hub() {
+    let hub = TestHub::start(Some("team-secret"));
+    let base = base_snapshots();
+    let mut clients: Vec<Client> = (0..3).map(|i| Client::new(i, &hub.url(), &base)).collect();
+    clients[0].session.set_presence(PresenceState {
+        name: "w0".into(),
+        ..PresenceState::default()
+    });
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(1) {
+        for c in &mut clients {
+            if c.rng.chance(40) {
+                random_edit(&mut c.stage, &c.who, &mut c.rng, &c.tag, &mut c.n);
+            }
+            c.pump().unwrap();
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    wait_until("convergence", Duration::from_secs(10), || {
+        for c in &mut clients {
+            c.pump().unwrap();
+        }
+        agreed(&clients)
+            && clients
+                .iter()
+                .all(|c| c.session.unsynced(&c.stage).is_empty())
+    });
+    assert!(
+        clients[0]
+            .stage
+            .sublayer(&SublayerId::root())
+            .unwrap()
+            .len()
+            > 5
+    );
+    wait_until("presence", Duration::from_secs(5), || {
+        clients[2].pump().unwrap();
+        clients[2].session.presence().len() == 1
+    });
+
+    // Round trip of one edit from one client to another over loopback.
+    let mut samples = Vec::new();
+    for k in 0..20 {
+        let sent = Instant::now();
+        let a = &mut clients[0];
+        a.stage.set_edit_target(&SublayerId::root()).unwrap();
+        a.stage
+            .transact(&a.who, "probe", |tx| {
+                tx.apply(Op::SetValue {
+                    path: p("/comps/main"),
+                    attr: "probe".into(),
+                    value: Some(Value::Int(k)),
+                })
+            })
+            .unwrap();
+        a.pump().unwrap();
+        wait_until("edit to arrive", Duration::from_secs(5), || {
+            clients[1].pump().unwrap();
+            clients[1]
+                .stage
+                .prim(&p("/comps/main"))
+                .and_then(|m| m.value("probe").cloned())
+                == Some(Value::Int(k))
+        });
+        samples.push(sent.elapsed());
+        clients[0].pump().unwrap();
+    }
+    samples.sort();
+    let median = samples[samples.len() / 2];
+    eprintln!(
+        "edit latency client → hub → client over loopback: median {median:?}, max {:?}",
+        samples.last().unwrap()
+    );
+    assert!(median < Duration::from_millis(100), "{median:?}");
+}
+
+#[test]
+fn wrong_or_missing_token_is_refused() {
+    let hub = TestHub::start(Some("team-secret"));
+    for token in [None, Some("guess")] {
+        match HubTransport::connect(&hub.url(), token, Duration::from_secs(5)) {
+            Err(SyncError::Hub(msg)) => assert!(msg.contains("401"), "{msg}"),
+            other => panic!("expected refusal, got {other:?}"),
+        }
+    }
+    assert!(matches!(
+        HubTransport::connect("wss://example.invalid/x", None, Duration::from_secs(1)),
+        Err(SyncError::Hub(_))
+    ));
+}
+
+#[test]
+fn clients_reconnect_after_the_hub_restarts() {
+    let base = base_snapshots();
+    let hub = TestHub::start(Some("team-secret"));
+    let mut clients: Vec<Client> = (0..2).map(|i| Client::new(i, &hub.url(), &base)).collect();
+    for c in &mut clients {
+        for _ in 0..20 {
+            random_edit(&mut c.stage, &c.who, &mut c.rng, &c.tag, &mut c.n);
+        }
+    }
+    wait_until("first convergence", Duration::from_secs(10), || {
+        for c in &mut clients {
+            c.pump().unwrap();
+        }
+        agreed(&clients)
+    });
+
+    // The hub goes away (and forgets everything). Clients notice, keep editing
+    // offline, then reconnect to the new hub and catch up.
+    drop(hub);
+    wait_until("disconnect noticed", Duration::from_secs(10), || {
+        clients
+            .iter_mut()
+            .all(|c| matches!(c.pump(), Err(SyncError::Closed)))
+    });
+    for c in &mut clients {
+        for _ in 0..10 {
+            random_edit(&mut c.stage, &c.who, &mut c.rng, &c.tag, &mut c.n);
+        }
+    }
+    let hub = TestHub::start(Some("team-secret"));
+    for c in &mut clients {
+        c.link = connect(&hub.url(), Some("team-secret")).unwrap();
+        c.session.reset();
+    }
+    wait_until("convergence after restart", Duration::from_secs(10), || {
+        for c in &mut clients {
+            c.pump().unwrap();
+        }
+        agreed(&clients)
+    });
+    // A newcomer gets everything from the new hub.
+    let mut late = Client::new(7, &hub.url(), &base);
+    wait_until("late joiner", Duration::from_secs(10), || {
+        late.pump().unwrap();
+        fingerprint(&late.stage) == fingerprint(&clients[0].stage)
+    });
+}
