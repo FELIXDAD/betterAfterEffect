@@ -1168,7 +1168,8 @@ copy and no extra dispatch: the < 2 % budget (§22) holds by construction.
 
 ### 11.2 Module assembly
 
-The host compiles one WGSL module per effect and working format:
+The host compiles one WGSL module per (effect, working format, pass) — pixel style has one
+implicit pass. The modules differ only in the prelude's pass target (§11.5):
 
 ```
 <generated prelude>       §11.3: structs, bindings, helpers (never written by authors)
@@ -1291,6 +1292,11 @@ fn blur_horizontal(@builtin(global_invocation_id) id: vec3<u32>) {
 
 - Passes run in manifest order, each as one dispatch with its own pipeline (derived from
   the entry point) and bind group. The last pass writes `output`.
+- Each pass's module declares every readable source as a sampled texture and **only that
+  pass's target** as `bae_out` (`texture_storage_2d<FORMAT, write>` with the target's
+  format), so `bae_store` always writes the current target. Pipeline layouts are derived
+  from each entry point's static resource use, so unused declarations cost nothing. A pass
+  MUST NOT read its own target.
 - `[[effect.texture]]` intermediates come from the host's transient pool (aliased with
   other nodes' temporaries when lifetimes do not overlap): size = `ceil(rect size ×
   scale)`, `rect = "output"` or `"input"`, format `working` or explicit. Sampling helpers
