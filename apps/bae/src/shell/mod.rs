@@ -318,6 +318,7 @@ impl Shell {
     }
 
     fn schedule_repaint(&mut self, delay: Duration) {
+        tracing::trace!(?delay, "egui repaint request");
         let Some(view) = &self.view else { return };
         if delay.is_zero() {
             view.window.request_redraw();
@@ -381,6 +382,7 @@ impl Shell {
             return;
         };
         let frame_start = Instant::now();
+        tracing::trace!(frame = view.status.frames, "redraw");
 
         egui_winit::update_viewport_info(
             &mut view.viewport_info,
@@ -610,7 +612,18 @@ impl ApplicationHandler<UserEvent> for Shell {
         let Some(view) = self.view.as_mut() else {
             return;
         };
+        if matches!(event, WindowEvent::RedrawRequested) {
+            // Not an input event: egui-winit answers it with `repaint: true`, and
+            // honouring that would redraw forever (no idle).
+            self.redraw(event_loop);
+            return;
+        }
         let response = view.egui_state.on_window_event(&view.window, &event);
+        tracing::trace!(
+            event = egui_winit::short_window_event_description(&event),
+            repaint = response.repaint,
+            "window event"
+        );
         if response.repaint {
             view.window.request_redraw();
         }
@@ -632,7 +645,6 @@ impl ApplicationHandler<UserEvent> for Shell {
             WindowEvent::ScaleFactorChanged { .. } | WindowEvent::Occluded(false) => {
                 view.window.request_redraw();
             }
-            WindowEvent::RedrawRequested => self.redraw(event_loop),
             _ => {}
         }
     }
