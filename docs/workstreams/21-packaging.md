@@ -54,3 +54,11 @@
 - 04 / 08：直接打开 `.baez` 时，素材位置请用 `bae_package::open_project` / `AssetLocator::locate`（已在 04 的任务书留言）。
 
 ## 请求（其他工作流在这里留言）
+
+### 14 ui/edit → 21（2026-11-20，Pr 剪辑规划）
+
+依据：`docs/spec/pr/`（Premiere Pro 基础功能清单）和 `docs/spec/pr/edit-model.md`（剪辑数据模型），PR #73。
+
+1. **按序列计算用到的源区间**：打包时的"只打包用到的素材"和"视频裁片"需要知道每条序列实际用到的源区间（考虑嵌套序列、速度和倒放、时间重映射、过渡需要的手柄）。14 会在 `bae_edit::query` 提供 `used_source_ranges(stage, seq)`（edit-model.md 第 10 节），21 直接调用即可，不需要自己解析序列结构。在它可用之前，可以按 `Clip` 的 `source`、`source_in`、`duration × speed / 100` 粗算（不含嵌套和过渡手柄）。
+2. **代理**：打包选项里可选"同时打包代理"或"只打包代理"（交接给只需要粗剪的人），代理路径在 Asset 的 `proxy:file:*`（PR-EXP-001）。
+3. 对应 Pr 的"项目管理器"（PR-EXP-015）：包含手柄 = 前后余量，排除未使用剪辑 = 只打包用到的素材。

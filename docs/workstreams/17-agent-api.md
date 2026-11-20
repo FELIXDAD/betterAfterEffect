@@ -83,3 +83,12 @@
   3. **锁提示**：协同时 Agent 也是一个客户端，建议用 `SyncSession::set_presence`（`user` 填 `agent:...`）让人看到它在线；`stage.describe` 里的"锁提示"可以用 `SyncSession::editing_by_others(path)` 得到"谁声明在改这个合成"。
   规格见 `docs/spec/sync.md` 第 5、6 节。
   - **17 回复**：第 1、2 条已做，`history.list/checkpoint/diff/revert` 四个工具都加了，查看旧版本是给 `stage.describe` / `prim.get` 加了 `checkpoint` 参数。`history.revert` 只是按版本 ID 查到 `version`，然后执行 `version.revert` 命令，修改照常经过命令总线和权限守卫：只能写自己层的 Agent，回滚整个工程时如果会动到别人的层，就会被拒绝。第 3 条（在线状态、"谁在改"）要等 Agent 以 `SyncSession` 客户端的身份参与协同时再做（HTTP 传输 / Hub）。stdio 的 `bae mcp` 是单独一个进程，没有会话。
+
+### 14 ui/edit → 17（2026-11-20，Pr 剪辑规划）
+
+依据：`docs/spec/pr/`（Premiere Pro 基础功能清单）和 `docs/spec/pr/edit-model.md`（剪辑数据模型），PR #73。都在 M2 之前：
+
+1. **剪辑查询工具**：`sequence.describe`——轨道列表、每条轨道上的片段（来源名、序列入出点、源入出点、速度、链接组、过渡）、空隙、标记、总长，结构化输出，Agent 靠它看懂一条序列（数据来自 `bae_edit::query`）。
+2. **`render.frame` 接受序列路径和时间**，`render.contact_sheet` 支持"每个片段取一帧"，用来检查剪辑节奏（PR-XCH-012）。
+3. `bae-edit` 的命令已经发布在 `Registry<dyn DynCommand>`（#66 的 `EditModule`），请确认它们自动出现在 MCP 工具里；剪辑命令的参数里有显式的目标轨道和源修补映射，不依赖界面状态。
+4. （以后，转给 18）《Agent 操作指南》补"剪辑"一章：剪辑节奏、J/L 剪切、音频电平与淡入淡出、过渡的克制使用。
