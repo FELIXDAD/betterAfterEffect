@@ -52,7 +52,7 @@
 - [x] 内置效果的嵌入式声明式包（`DeclarativeEffect::load_builtin`，给 07）
 - [x] 开发文档 `docs/plugins/`（概览、快速开始、清单参考、WGSL 参考、C ABI 入门、打包安装与版本）
 - [x] 示例：posterize、vignette、box-blur（声明式），align-to-grid（脚本），invert（纯 C）
-- [ ] 应用接入：启动时扫描插件目录、`bae plugin check|list` 子命令（需要 01 在 `apps/bae` 里组装；现在用 `cargo run -p bae-plugin --example check`）
+- [x] 应用接入：`PluginModule` + 启动时 `load_installed`（`AppDirs::plugin_dirs()` + `BAE_PLUGIN_PATH`），插件效果发布到 `bae_app::Registry<EffectDef>` / `Registry<dyn bae_render::Effect>`；`bae plugin check|list [--json]`
 - [ ] 渲染耗时对照基准（声明式 vs 同功能内置效果 < 2%，等 04 的执行器和 07 的内置效果）
 - [ ] 原生插件加载（libloading）+ Rust SDK
 - [ ] 脚本插件
@@ -64,6 +64,7 @@
 - 根 `Cargo.toml` 加了 `bae-plugin`、`bae-plugin-sdk` 两个路径依赖，以及 `naga = 30.0.2`（wgpu 已经链接的同一份，只开 `wgsl-in`）和 `semver = 1.0.28` 两个版本固定。
 - 自动化脚本的清单表从 `[[script]]` 改名为 `[[automation]]`（`[script]` 是运行时配置表，TOML 里两者不能同名）。
 - 给 02 的请求：R02-8（字符串/素材参数）、R02-9（相对坐标点参数默认值）；给 04 的请求：R04-11（`EffectParams` 补字段）、R04-12（在 crate 外构造 `EncodeContext`）。
+- 第三个 PR（应用接入，协调人决定由 19 做）：`apps/bae` 只改三行（依赖、`add_module`、启动时调用 `load_installed`）。`PluginHost` 改为通过 `EffectRegistrar` 注册（`EffectRegistries` 普通注册表 / `AppEffectRegistries` 应用注册表）。release 体积 15.98 → 16.72 MiB（含 bae-render 首次链接进应用）。给 04 的请求 R04-13：`bae render` 和渲染器从 `Registry<dyn Effect>` 取效果（和 `Registry<dyn SourceProvider>` 一样）。
 - 第二个 PR：`DeclarativeEffect`、`PluginHost`、`load_builtin`、检查工具、posterize 示例、`docs/plugins/`。`EffectParams` 没有图层范围、帧率等信息前（R04-11），`BaeFrame.layer_bounds` 用输入范围代替，其余未知字段为 0；`layer` 参数和转场的 `to` 源要等渲染图支持（R04-1），现在绑定为空纹理。
 
 ## 请求（其他工作流在这里留言）

@@ -238,6 +238,7 @@ dependencies = [
  "bae-model",
  "bae-motion",
  "bae-platform",
+ "bae-plugin",
  "bae-render",
  "bae-ui",
  "bae-vector",
@@ -471,10 +472,14 @@ dependencies = [
 name = "bae-plugin"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "bae-app",
  "bae-gpu",
  "bae-model",
+ "bae-platform",
  "bae-plugin-sdk",
  "bae-render",
+ "clap",
  "half",
  "naga",
  "parking_lot",
@@ -485,6 +490,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "toml",
+ "tracing",
 ]
 
 [[package]]

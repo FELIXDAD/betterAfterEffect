@@ -98,6 +98,10 @@ bae-color 接口已提 PR（`[interface]`），接法见 `crates/bae-color/READM
 3. **连续栅格化**：AE 的形状/文字图层总是按最终变换后的分辨率栅格化，放大不会糊。现在图层源只在图层空间按 `SourceRequest.scale` 栅格化。建议 `SourceRequest` 加上图层到输出的变换（或者至少是各轴缩放），矢量源据此直接按最终分辨率画（`ImageAlpha` / `GpuImage` 不变）。
 4. **测试入口**：`EncodeContext` 的 `allocator` 是 `pub(crate)`，别的 crate 无法通过 trait 调 `LayerSource::render` 做测试。希望提供一个无窗口的测试入口，例如 `bae_render::testing::render_source(gpu, &dyn LayerSource, &SourceRequest) -> GpuImage`。05 目前直接测自己的 `ShapeSource::render_on`。
 
+### 19 core/plugins → 04（2026-11-20，第二条）
+
+**R04-13 从应用注册表取效果。** 插件效果（以及以后 07 用 `DeclarativeEffect::load_builtin` 注册的内置声明式效果）发布在应用的运行时注册表 `bae_app::Registry<dyn bae_render::Effect>` 里（ID = match name），定义在 `Registry<bae_model::EffectDef>` 里，做法和你们的 `Registry<dyn SourceProvider>` 一样。希望 `bae render` 和交互预览构建 `Renderer` 时，把 `app.registry::<dyn Effect>().snapshot()` 里的效果放进 `renderer.effects_mut()`（或者渲染图直接查快照），这样插件效果在命令行渲染和预览里都能用；卸载插件后重建渲染图即可。
+
 ### 20 interop/aex-compat → 04（2026-11-20）
 
 AE 插件兼容层的预留请求，详见 `docs/spec/aex-compat.md` §4.5–§4.7、§5.2、§6。19 已提的 R04-1/2/3/4/5/7/9/11 我们附议（CPU 节点的 GPU 转换着色器和测量数据在 `crates/bae-aex-host`），只补增量：

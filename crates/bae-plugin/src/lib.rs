@@ -13,6 +13,7 @@
 //! | [`package`] | loading and checking a package from disk or memory | §5.1, §5.4 |
 //! | [`declarative`] | `DeclarativeEffect`: declarative effects on the GPU via `bae_render::Effect` | §11 |
 //! | [`host`] | `PluginHost`: discovery, version selection, registration, runtime unload | §6, §7 |
+//! | [`module`] | `PluginModule` (app module, `bae plugin check\|list`), `load_installed` | §6 |
 //! | [`diag`] | diagnostics (`file:line:column: error: …`) | §16 |
 //!
 //! ## How an effect plugin reaches the renderer
@@ -37,12 +38,17 @@ pub mod expr;
 pub mod host;
 pub mod id;
 pub mod manifest;
+pub mod module;
 pub mod package;
 pub mod wgsl;
 
 pub use bae_plugin_sdk::{ApiVersion, ContributionKind, Implementation};
 pub use declarative::DeclarativeEffect;
 pub use diag::{Diagnostic, Severity};
-pub use host::{LoadedPlugin, PluginDir, PluginHost, Scope};
+pub use host::{
+    AppEffectRegistries, EffectRegistrar, EffectRegistries, LoadedPlugin, PluginDir, PluginHost,
+    Scope,
+};
 pub use manifest::{EffectDecl, ParamDecl, PluginManifest};
+pub use module::{PluginModule, PluginRuntime, load_installed};
 pub use package::{DirSource, EffectPackage, MemorySource, Package, PackageSource};
