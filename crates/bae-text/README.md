@@ -36,6 +36,8 @@ TextDocument（bae-model，某一时刻的源文本）
 
 ## 已知问题
 
+- 没有显卡的 Windows（WARP）上文字和形状一样改用 `vello_cpu` 栅格化（字形轮廓来自 skrifa），见 `crates/bae-vector/README.md` 的"兼容性"一节。
+
 - debug 构建里，排含中文的段落时 ICU4X 会往 stderr 打一行 `No segmentation model for complex script: Chinese/Japanese`（parley 没开 `complex-scripts`，中文词边界退化为按字符；换行不受影响）。release 构建里这行日志被编译掉。开 `complex-scripts` 要多带约 2 MB 的词典数据，暂不开。
 - 和形状一样，文字在图层空间栅格化，放大图层会糊；连续栅格化需要 04 在 `SourceRequest` 里带上变换（已提请求）。
 

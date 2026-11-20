@@ -50,6 +50,28 @@ bae-anim EvaluatedLayer.contents ──► ShapeGroup（类型化的形状树）
 
 已知限制：图层源在图层空间按请求的分辨率栅格化，图层放大时会糊。AE 的形状图层总是按最终变换后的分辨率栅格化（连续栅格化），这需要 `SourceRequest` 带上图层到合成的变换，已在 04 的任务书里提请求。
 
+## 兼容性：没有显卡的 Windows（软件适配器）
+
+没有显卡的 Windows（虚拟机、远程桌面、GitHub 的 Windows runner）上，wgpu 拿到的是 WARP（微软的软件 D3D12 实现，`DeviceType::Cpu`）。在 WARP 上用 Vello 的 GPU 计算管线会让整个进程崩溃（`STATUS_ACCESS_VIOLATION`，0xc0000005），应用一画形状图层就退出。
+
+现在 `VelloRenderer` 按适配器选后端（`VectorBackend`）：
+
+- 硬件适配器：Vello GPU（默认，最快）。
+- 软件适配器：`vello_cpu` 在 CPU 上栅格化，结果（预乘 `Rgba8Unorm`）上传成纹理交给合成器；**根本不创建 Vello 的 GPU 管线**。文字走 skrifa 字形轮廓 + `vello_cpu` 填充/描边，仿粗体、仿斜体、逐字符描边顺序与 GPU 路径一致。启动时打一条 `warn` 日志说明在用 CPU 栅格化。
+- 环境变量 `BAE_VECTOR_RENDERER=cpu|gpu` 强制选择（`gpu` 用于在软件适配器上复现驱动问题）。
+
+`vello_cpu` 0.1.0 本来就随 egui 的 epaint 链接进应用，不新增 crate。两个后端在同一画面上的差异只在抗锯齿边缘：`tests/cpu.rs` 在硬件适配器上逐像素对比（平均差 < 1%），在 WARP 上只跑 CPU 路径。
+
+崩溃的根因还没有在 Windows 上确认（Vello 本身还是 WARP 的着色器 JIT）。诊断步骤：
+
+```bat
+set BAE_GPU_ADAPTER=software
+set BAE_GPU_VALIDATION=1
+cargo test -p bae-vector --test cpu -- --ignored --nocapture vello_gpu_stages
+```
+
+它强制在 WARP 上走 Vello GPU，并在"创建管线 / 渲染空场景 / 渲染测试场景 / 回读"每一步前打印 `[vello-diag]`，看最后一条就知道崩在管线创建（着色器编译）还是派发；D3D12 调试层的输出会给出更具体的原因。
+
 ## 测试
 
 ```sh
