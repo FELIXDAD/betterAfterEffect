@@ -4,6 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::path::PrimPath;
+use crate::time::{FrameRate, Time};
 
 /// A value stored in an attribute or keyframe.
 ///
@@ -37,6 +38,12 @@ pub enum Value {
     ),
     /// A list of numbers (dash pattern, gradient stops encoded flat, …).
     FloatList(Vec<f64>),
+    /// A point in time or a duration (in/out points, start time, marker duration).
+    Time(Time),
+    /// A frame rate (comps, footage interpretation).
+    FrameRate(FrameRate),
+    /// A text layer's source text: one whole document per keyframe, as in AE.
+    TextDocument(Box<TextDocument>),
 }
 
 /// The type of a [`Value`], used for schemas and validation.
@@ -56,6 +63,9 @@ pub enum ValueType {
     PrimRef,
     Bytes,
     FloatList,
+    Time,
+    FrameRate,
+    TextDocument,
 }
 
 impl Value {
@@ -74,6 +84,16 @@ impl Value {
             Value::PrimRef(_) => ValueType::PrimRef,
             Value::Bytes(_) => ValueType::Bytes,
             Value::FloatList(_) => ValueType::FloatList,
+            Value::Time(_) => ValueType::Time,
+            Value::FrameRate(_) => ValueType::FrameRate,
+            Value::TextDocument(_) => ValueType::TextDocument,
+        }
+    }
+
+    pub fn as_time(&self) -> Option<Time> {
+        match *self {
+            Value::Time(t) => Some(t),
+            _ => None,
         }
     }
 
@@ -164,9 +184,110 @@ pub struct BezierPath {
     pub in_tangents: Vec<[f64; 2]>,
     pub out_tangents: Vec<[f64; 2]>,
     pub closed: bool,
-    /// Per-vertex feather (mask feather points); empty when unused.
+    /// Mask feather points (AE variable-width mask feather); empty when unused.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub feather: Vec<[f64; 2]>,
+    pub feather: Vec<FeatherPoint>,
+}
+
+/// One variable mask feather point (AE `MaskFeatherPoint` fields).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FeatherPoint {
+    /// Path segment the point sits on (0-based).
+    pub segment: u32,
+    /// Position within the segment, 0..1.
+    pub t: f64,
+    /// Feather radius in pixels.
+    pub radius: f64,
+    /// Tension, 0..1.
+    #[serde(default)]
+    pub tension: f64,
+    /// Hold interpolation to the next point instead of smooth.
+    #[serde(default)]
+    pub hold: bool,
+    /// Inner feather (true) or outer (false).
+    #[serde(default)]
+    pub inner: bool,
+    /// Relative corner angle in degrees.
+    #[serde(default)]
+    pub corner_angle: f64,
+}
+
+/// A text document (AE `TextDocument`), the value of a text layer's source text.
+/// Character-level style runs come later; until then the whole text shares one style.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TextDocument {
+    pub text: String,
+    /// PostScript font name, e.g. `ArialMT`.
+    pub font: String,
+    pub font_size: f64,
+    #[serde(default = "white")]
+    pub fill_color: [f64; 4],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke_color: Option<[f64; 4]>,
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub stroke_width: f64,
+    #[serde(default)]
+    pub stroke_over_fill: bool,
+    /// `left`, `center`, `right`, `justify_last_left`, …
+    #[serde(default = "left")]
+    pub justification: String,
+    /// Tracking in 1/1000 em.
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub tracking: f64,
+    /// Leading in pixels; `None` = auto.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leading: Option<f64>,
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub baseline_shift: f64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub faux_bold: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub faux_italic: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub all_caps: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub small_caps: bool,
+    /// Paragraph (box) text size; `None` = point text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub box_size: Option<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub box_position: Option<[f64; 2]>,
+}
+
+fn white() -> [f64; 4] {
+    [1.0, 1.0, 1.0, 1.0]
+}
+
+fn left() -> String {
+    "left".to_owned()
+}
+
+fn is_zero_f64(v: &f64) -> bool {
+    *v == 0.0
+}
+
+impl TextDocument {
+    pub fn new(text: impl Into<String>, font: impl Into<String>, font_size: f64) -> Self {
+        TextDocument {
+            text: text.into(),
+            font: font.into(),
+            font_size,
+            fill_color: white(),
+            stroke_color: None,
+            stroke_width: 0.0,
+            stroke_over_fill: false,
+            justification: left(),
+            tracking: 0.0,
+            leading: None,
+            baseline_shift: 0.0,
+            faux_bold: false,
+            faux_italic: false,
+            all_caps: false,
+            small_caps: false,
+            box_size: None,
+            box_position: None,
+        }
+    }
 }
 
 impl BezierPath {
@@ -266,6 +387,19 @@ mod tests {
         // Int stays Int.
         let i: Value = serde_json::from_str(r#"{"type":"int","value":3}"#).unwrap();
         assert_eq!(i, Value::Int(3));
+        let t = Value::Time(Time(705_600_000));
+        assert_eq!(
+            serde_json::to_string(&t).unwrap(),
+            r#"{"type":"time","value":705600000}"#
+        );
+        let r = Value::FrameRate(FrameRate::FPS_29_97);
+        assert_eq!(
+            serde_json::to_string(&r).unwrap(),
+            r#"{"type":"frame_rate","value":{"num":30000,"den":1001}}"#
+        );
+        let doc = Value::TextDocument(Box::new(TextDocument::new("Hi", "ArialMT", 72.0)));
+        let json = serde_json::to_string(&doc).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&json).unwrap(), doc);
         let b = Value::Bytes(vec![1, 2, 3]);
         let json = serde_json::to_string(&b).unwrap();
         assert_eq!(json, r#"{"type":"bytes","value":"AQID"}"#);

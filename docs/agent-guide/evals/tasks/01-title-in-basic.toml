@@ -1,0 +1,159 @@
+id = "01-title-in-basic"
+title = "3 秒标题出场"
+category = "title"
+difficulty = 1
+guide_refs = ["02-workflow.md", "03-animation.md", "recipes/title-in.md"]
+
+prompt = """做一个 3 秒的标题出场动画并渲染预览。主标题：更快的动画；副标题：每一帧都在 GPU 上完成。"""
+
+[fixture]
+description = "空工程，只有 root 工程层，没有任何合成。这是 17 端到端示例的标准任务。"
+sublayers = ["root"]
+permission = "own-layer"
+
+[[followup]]
+when = "问到尺寸或帧速率"
+answer = "1920×1080，30 fps。"
+
+[[followup]]
+when = "问到字体或颜色"
+answer = "你定就行，深色背景、浅色字。"
+
+[expected]
+summary = """
+新建一个 3 秒、1920×1080 的合成（30 fps 时 90 帧），合成名符合命名规范（例如 SH010_title 或 title）。
+两个文本图层分别是主标题和副标题，文案完全一致，按作用命名。
+主标题先入场，副标题晚 4–8 帧；入场是减速（终点关键帧缓入），时长 0.5–1 秒；不透明度先于位置完成。
+入场在 1.2 秒内全部结束，之后文字静止停留到结尾；最后一帧完整、干净、在标题安全区内。
+修改分成 2–5 个事务；渲染过联系表和单帧；提案说明包含模板各段。
+"""
+
+[[checks]]
+id = "c7-read-first"
+kind = "first_call"
+args = { tool = "stage.describe" }
+maps_to = "C7"
+
+[[checks]]
+id = "h1-own-layer"
+kind = "writes_only_to"
+args = { sublayer = "agent/eval" }
+maps_to = "H1"
+hard = true
+
+[[checks]]
+id = "h1-no-target-switch"
+kind = "no_edit_target_change"
+maps_to = "H1"
+hard = true
+
+[[checks]]
+id = "h2-comp"
+kind = "comp_settings"
+args = { find = { type = "Comp" }, width = 1920, height = 1080, duration_seconds = 3 }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "h2-title-text"
+kind = "text_layer_exists"
+args = { value = "更快的动画" }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "h2-sub-text"
+kind = "text_layer_exists"
+args = { value = "每一帧都在 GPU 上完成" }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "h4-within-duration"
+kind = "keyframes_within_duration"
+args = { comp = { type = "Comp" } }
+maps_to = "H4"
+hard = true
+
+[[checks]]
+id = "h6-contact-sheet"
+kind = "called"
+args = { tool = "render.contact_sheet" }
+maps_to = "H6"
+hard = true
+
+[[checks]]
+id = "h6-final-render"
+kind = "called"
+args = { tool = "render.frame", after_last_write = true }
+maps_to = "H6"
+hard = true
+
+[[checks]]
+id = "t1-integer-frames"
+kind = "keyframes_on_integer_frames"
+args = { under = "/comps/*" }
+maps_to = "T1"
+
+[[checks]]
+id = "t4-stagger"
+kind = "stagger"
+args = { finds = [{ type = "Layer", text = "更快的动画" }, { type = "Layer", text = "每一帧都在 GPU 上完成" }], attribute = "*", min_gap = 3, max_gap = 10 }
+maps_to = "T4"
+
+[[checks]]
+id = "m1-no-linear"
+kind = "no_linear_temporal"
+args = { under = "/comps/*", allow = ["transform:opacity"] }
+maps_to = "M1"
+
+[[checks]]
+id = "m2-entrance-eased"
+kind = "entrance_eased"
+args = { find = { type = "Layer", text = "更快的动画" }, attribute = "transform:position" }
+maps_to = "M2"
+
+[[checks]]
+id = "v1-title-safe"
+kind = "within_title_safe"
+args = { comp = { type = "Comp" }, finds = [{ type = "Layer", kind = "Text" }], frames = ["last"] }
+maps_to = "V1"
+
+[[checks]]
+id = "v4-still-while-reading"
+kind = "attr_still"
+args = { find = { type = "Layer", text = "更快的动画" }, attribute = "transform:position", from = "1.5s", to = "last" }
+maps_to = "V4"
+
+[[checks]]
+id = "p1-naming"
+kind = "naming"
+args = { under = "/comps/*", regex = "^[a-z0-9_]+$|^SH[0-9]{3}_[a-z0-9_]+$", forbid_defaults = true }
+maps_to = "P1"
+
+[[checks]]
+id = "c1-transactions"
+kind = "transactions"
+args = { min = 2, max = 6 }
+maps_to = "C1"
+
+[[checks]]
+id = "c2-proposal"
+kind = "proposal_has_sections"
+args = { sections = ["做了什么", "为什么", "改动范围", "如何验证", "默认值", "需要你决定"] }
+maps_to = "C2"
+
+[[checks]]
+id = "c5-budget"
+kind = "render_budget"
+args = { max_calls = 15, max_full_res = 4 }
+maps_to = "C5"
+
+[judge]
+frames = [0, "0.5s", "1.2s", "last"]
+contact_sheet = { start = 0, end = "1.5s", step = 2 }
+focus = [
+  "入场是否利落：前几格变化大、后几格变化小",
+  "主副标题是否有清楚的先后",
+  "最后一帧版式是否居中、平衡、可读",
+]
