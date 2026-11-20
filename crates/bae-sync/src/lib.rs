@@ -7,22 +7,29 @@
 //!   with one remote over a [`Transport`]. Remote imports go through
 //!   `Stage::import_updates`, so they emit `origin = remote` events and never enter
 //!   an undo stack.
+//! - [`DirTransport`]: shared-folder mode (no server): append-only per-client logs
+//!   under `updates/` in the project directory. Wrap it in a [`ThreadedTransport`]
+//!   so NAS latency never blocks the stage thread.
 //! - [`Relay`]: the hub side (fan-out between clients), used by `services/bae-hub`.
 //!
 //! This crate has no GPU, window or platform dependencies.
 
 mod client;
+mod dir;
 mod docs;
 mod error;
 mod protocol;
 mod relay;
 mod session;
+mod threaded;
 mod transport;
 
 pub use client::ClientId;
+pub use dir::{DirConfig, DirStats, DirTransport, LOG_FORMAT, LOG_VERSION};
 pub use docs::{DocSet, Imported, MemDocs};
 pub use error::SyncError;
 pub use protocol::{DocKey, Message, PROTOCOL_VERSION};
 pub use relay::{PeerHandle, Relay, RelayOutcome};
 pub use session::{PumpOutcome, SessionConfig, SyncSession, SyncStats};
+pub use threaded::ThreadedTransport;
 pub use transport::{MemoryTransport, Transport};
