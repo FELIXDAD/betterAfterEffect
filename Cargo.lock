@@ -270,6 +270,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bae-color"
+version = "0.1.0"
+dependencies = [
+ "bae-gpu",
+ "bae-media",
+ "pollster 0.4.0",
+ "rustc-hash 2.1.3",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "bae-dep-probe"
 version = "0.1.0"
 dependencies = [

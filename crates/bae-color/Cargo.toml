@@ -1,0 +1,31 @@
+[package]
+name = "bae-color"
+description = "BAE color management: color spaces, transfer functions, merged color transforms, WGSL snippets for the render graph, working space and footage interpretation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+# `From<&bae_media::ColorInfo>` for footage interpretation. Off by default so the
+# core stays free of GPU and platform dependencies; bae-render turns it on.
+media = ["dep:bae-media"]
+
+[dependencies]
+bae-media = { workspace = true, optional = true }
+rustc-hash.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+# GPU tests compare the WGSL snippets with the CPU reference; they skip when the
+# machine has no adapter (same rule as bae-gpu's tests).
+bae-gpu.workspace = true
+pollster.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
