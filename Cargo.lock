@@ -263,6 +263,7 @@ version = "0.1.0"
 dependencies = [
  "bae-model",
  "bae-package",
+ "bae-sync",
  "parking_lot",
  "png",
  "rmcp",

@@ -99,6 +99,9 @@ pub enum Detail {
 
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 pub struct DescribeParams {
+    /// Describe a named version (ID from history_list) instead of the current project.
+    #[serde(default)]
+    pub checkpoint: Option<String>,
     /// Prim to summarize (default "/", the whole project), e.g. /comps/main.
     #[serde(default)]
     pub root: Option<PrimPath>,
@@ -398,6 +401,9 @@ pub fn describe_stage(
 pub struct PrimGetParams {
     /// Prim path, e.g. /comps/main/layers/title.
     pub path: PrimPath,
+    /// Read the prim at a named version (ID from history_list) instead of now.
+    #[serde(default)]
+    pub checkpoint: Option<String>,
     /// Also list schema attributes that are not authored, with their defaults.
     #[serde(default)]
     pub include_defaults: bool,
@@ -745,6 +751,7 @@ mod tests {
             &stage,
             &PrimGetParams {
                 path: PrimPath::new("/comps/main/layers/title").unwrap(),
+                checkpoint: None,
                 include_defaults: true,
             },
         )
