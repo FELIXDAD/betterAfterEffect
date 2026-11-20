@@ -381,6 +381,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bae-motion"
+version = "0.1.0"
+dependencies = [
+ "bae-anim",
+ "bae-app",
+ "bae-model",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bae-package"
 version = "0.1.0"
 dependencies = [
