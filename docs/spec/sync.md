@@ -1,7 +1,7 @@
 # 协同同步与版本（bae-sync）
 
 > 负责：09 `collab/sync`。代码：`crates/bae-sync`。架构依据：`docs/ARCHITECTURE.md` 第 4.6、7 节。
-> 状态：第 1–3 节（协议、会话、Hub 中继）PR A 已合并；第 4 节（共享目录）PR B；第 5 节（版本）PR C。在线状态、建议性锁、分支与合并在后续 PR。
+> 状态：第 1–3 节（协议、会话、Hub 中继）PR A 已合并；第 4 节（共享目录）PR B；第 5 节（命名版本、只读视图、按 Prim 差异）PR C。在线状态、建议性锁、分支与合并在后续 PR。
 
 ## 1. 概念
 
@@ -92,7 +92,7 @@ MyFilm.bae/
   sublayers/<工程层>.loro            基础快照（Project::save 写，02 负责）
   updates/<文档>/<client-id>.log     每个客户端只追加写自己的日志
   updates/<client-id>.lock           会话期间持有的建议性文件锁（尽力而为）
-  history.loro                       工程历史（第 5 节）
+  history.loro                       工程历史（第 5 节，History::save 写）
 ```
 
 `<文档>` 是工程层 ID（`/` 变成子目录，`anim/shot010` → `updates/anim/shot010/`），或 `@history`。
@@ -153,10 +153,54 @@ sum     := BLAKE3(payload) 的前 8 字节
 
 ## 5. 版本（PR C）
 
-- 工程历史是一个单独的 Loro 文档（`DocKey::History`），和工程层一样同步，保存为 `history.loro`。
-- **命名版本**（Checkpoint）：ID、名字、说明、作者、创建时间、当时的层叠顺序，以及每个工程层的版本向量。多人同时创建不会冲突。
-- **只读视图**：按命名版本里的版本向量，为每个工程层导出那一时刻的快照并组装成一个只读的 Stage。
-- **按 Prim 的差异**：比较两个版本的每个工程层，列出新增、删除、修改（哪些属性）的 Prim，以及改动者（来自 Loro 提交信息里的 `{author, label}`）。
+每个工程层的 Loro 文档都保留完整历史，所以"工程的一个版本"就是每个工程层一个版本向量（`ProjectVersion`，没列出的工程层在这个版本里是空的）。
+
+### 5.1 历史文档
+
+- 命名版本存在一个单独的 Loro 文档里（`History`，同步时的 `DocKey` 是 `@history`），和工程层一样同步：会话用 `ProjectDocs { stage, history }` 作为 `DocSet` 就会同时同步两者。
+- 保存为 `.bae` 目录里的 `history.loro`（`History::save` / `History::load`，临时文件 + 改名）；应用在 `Project::save` 时一起保存。共享目录模式下它的日志在 `updates/@history/`，`history.loro` 也作为基础快照来源读取。
+- 结构：根 map `checkpoints`，键是命名版本 ID（UUID v7 十六进制，按时间排序），值是 map：
+
+  | 键 | 类型 | 说明 |
+  |---|---|---|
+  | `name` | string | 名字，例如"给客户的第 1 版" |
+  | `note` | string | 说明 |
+  | `author` | string | 创建者 `AuthorId` |
+  | `created` | i64 | Unix 毫秒 |
+  | `stack` | string | 当时的层叠顺序（强 → 弱），JSON 字符串数组 |
+  | `versions` | map | 工程层 ID → 版本向量（`VersionVector::encode()` 的二进制） |
+
+- 每次修改的 Loro 提交信息和 Stage 一样是 `{"author", "label"}`（`checkpoint.create` / `checkpoint.rename` / `checkpoint.delete`）。多人同时创建命名版本不会冲突（ID 不同）；同时改名后写者胜。删除命名版本不影响工程本身的历史。
+
+### 5.2 只读视图
+
+- `History::view(stage, id)` / `history::view_at(stage, version, stack)`：为每个工程层导出那个版本的快照（`ExportMode::SnapshotAt`），组装成一个新的 `Stage`，包在 `VersionView` 里，只给出 `&Stage`，所以不能修改。版本等于当前版本的工程层直接复用。
+- 层叠顺序用命名版本里记录的；后来从工程里删掉的工程层显示不了，列在 `VersionView::missing()`。
+- 协作者的命名版本已经同步过来、但它引用的操作还没到时，返回 `SyncError::VersionNotAvailable`。
+- 跨工程引用在视图里不挂载（显示为未解析）。
+
+### 5.3 按 Prim 的差异
+
+`History::diff(stage, from, to)`（`to` 为 `None` 表示当前）/ `history::diff(stage, from, to)` 返回 `Vec<PrimDiff>`，按当前层叠从强到弱、同一层内按路径排序：
+
+| 字段 | 说明 |
+|---|---|
+| `sublayer`、`path` | 哪一层的哪个 Prim（被删除的用旧路径） |
+| `change` | `Added` / `Removed` / `Modified` / `Moved { from }`（移动或改名） |
+| `attrs` | 意见（值、关键帧、表达式）不同的属性名 |
+| `fields` | 其他不同的字段：`type`、`specifier`、`references` |
+| `authors` | 两个版本之间改过这个 Prim 的作者 |
+| `last_changed` | 其中最晚一次提交的时间（Unix 秒） |
+
+- 两个版本里同一路径的 Prim 视为同一个；路径不同的靠 Loro 树节点 ID（`Sublayer::node_id` / `node_path`）认出移动和改名。
+- 作者：遍历两个版本之间的所有 Loro 操作（两个方向都算，所以也能倒着比较），把每个操作对应到它改的树节点（树操作的目标节点，或 map 所在节点），作者取提交信息里的 `author`。
+- 没有报告的：兄弟之间的顺序变化；撤销删除后恢复的 Prim 因为路径相同显示为修改。
+
+### 5.4 还没做
+
+- 回滚（以新提交的方式把某个 Prim 或整个工程层恢复到旧版本，不改写历史）。
+- 分支与合并。
+- 命名版本的命令（让 Agent 通过 CommandRegistry 调用）：现在的 `Command` 只能拿到 `Transaction`，碰不到 `History`，需要和 02/17 商量接口。
 
 ## 6. 给其他工作流
 
