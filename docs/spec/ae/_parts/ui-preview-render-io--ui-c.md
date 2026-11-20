@@ -390,7 +390,7 @@
 
     | Default for (中文) | Used when | Default template |
     |---|---|---|
-    | Movie Default (影片默认值（译名待核）) | Add to Render Queue | Best Settings |
+    | Movie Default (电影默认值) | Add to Render Queue | Best Settings |
     | Frame Default (帧默认值（译名待核）) | Composition > Save Frame As > File | Current Settings |
     | Pre-Render Default (预渲染默认值（译名待核）) | Composition > Pre-render | Best Settings |
     | Movie Proxy Default (影片代理默认值（译名待核）) | File > Create Proxy > Movie | Draft Settings |
@@ -401,3 +401,439 @@
 - **Priority:** P1
 - **Owner:** bae-ui-motion (+ bae-model)
 - **Notes:** BAE decision: templates stored as JSON in the user config dir, exportable; ship AE's built-in names so imported AE projects/scripts referencing "Best Settings" resolve.
+
+## Output Module
+
+### AE-UI-624 · Output Module settings data model and dialog layout (输出模块设置)
+
+- **What it does:** An output module (输出模块) describes how the frames produced by a render item's Render Settings are post-processed (resize, crop, channel/depth/alpha conversion, color transform) and encoded to one file or file sequence. Every render item owns 1…n output modules (AE-UI-605); each has its own destination path.
+- **Exact semantics:**
+  - Dialog: **Output Module Settings** (输出模块设置), opened by clicking the underlined template name next to "Output Module:" (输出模块) in the Render Queue. Two tabs: **Main Options** (主要选项) and **Color Management** (色彩管理; the zh help calls it 颜色选项卡).
+  - Main Options layout, top to bottom: Format (格式) + Post-Render Action (渲染后动作) row; Include Project Link (包括项目链接), Include Source XMP Metadata (包括源 XMP 元数据); **Video Output** (视频输出) group: Format Options… (格式选项) button + summary text, Channels (通道), Depth (深度), Color (颜色), Starting # (开始 #), Use Comp Frame Number (使用合成帧编号); **Resize** (调整大小) group; **Crop** (裁剪) group; **Audio Output** (音频输出) group with its own Format Options…; status line showing the settings-mismatch warning (AE-UI-638).
+  - Persisted fields and the values a fresh AE 2026 module has (from `getSettings` dumps of AE-saved projects):
+
+    | Parameter (中文) | Type | Default | Range | Units | Notes |
+    |---|---|---|---|---|---|
+    | Format (格式) | enum | per default template (H.264 since AE 23.x, AE-UI-639) | AE-UI-625 | — | scripting key `"Format"` |
+    | Include Project Link (包括项目链接) | bool | on | — | — | AE-UI-626 |
+    | Include Source XMP Metadata (包括源 XMP 元数据) | bool | off | — | — | off in every factory template |
+    | Post-Render Action (渲染后动作) | enum | None | AE-UI-627 | — | |
+    | Video Output (视频输出) | bool | on | forced off for audio formats, forced on for sequences | — | |
+    | Channels (通道) | enum | RGB | RGB / RGB + Alpha / Alpha | — | AE-UI-628 |
+    | Depth (深度) | enum | Millions of Colors (24) | per format | bits/pixel | AE-UI-628 |
+    | Color (颜色) | enum | Premultiplied (Matted) | Straight / Premultiplied | — | AE-UI-628 |
+    | Starting # (开始 #) | int | 0 | 0 … UNVERIFIED max | frame | AE-UI-629 |
+    | Use Comp Frame Number (使用合成帧编号) | bool | on | — | — | AE-UI-629 |
+    | Resize (调整大小) | bool | off | — | — | AE-UI-634 |
+    | Resize to (调整大小到) | int×2 | comp size | 1 … 30000 (UNVERIFIED) | px | |
+    | Lock Aspect Ratio (锁定长宽比) | bool | on | — | — | |
+    | Resize Quality (调整大小后的品质) | enum | High | Low / High | — | |
+    | Crop (裁剪) | bool | off | — | — | AE-UI-635 |
+    | Use Region of Interest (使用目标区域) | bool | off | — | — | |
+    | Crop Top/Left/Bottom/Right (顶部/左侧/底部/右侧) | int | 0 | negative allowed | px | |
+    | Output Audio (音频输出) | enum | Auto | Auto / On / Off | — | AE-UI-636 |
+    | Audio Sample Rate (采样率) | enum | 48.000 kHz | per format | Hz | |
+    | Audio Bit Depth (采样深度) | enum | 16 Bit | 8 / 16 / 32 Bit | bits | |
+    | Audio Channels (声道) | enum | Stereo | Mono / Stereo | — | |
+    | Output To (输出到) | path + file-name template | `[compName].[fileExtension]` in the last-used folder | — | — | AE-UI-640 |
+    | Output profile / color space, Convert to Linear Light, Embed Profile, Preserve RGB | — | — | — | — | AE-UI-637 |
+    | Format options (格式选项) | per-format blob | per format | — | — | AE-UI-630…633 |
+
+  - Changing Format re-clamps dependent fields (Depth, Channels, Color, audio) to the nearest value the new format allows; the dialog never stores an illegal combination (see AE-UI-628 rule table).
+  - The module's settings are a full copy; editing a template later never changes existing modules (AE-UI-639).
+- **Priority:** P0
+- **Owner:** bae-model (+ bae-ui-motion, bae-media)
+- **Notes:** Scripting: `OutputModule` (`file`, `name`, `postRenderAction`, `includeSourceXMP`, `templates`, `applyTemplate()`, `saveAsTemplate()`, `getSetting(s)()`, `setSetting(s)()` since AE 13.0 (CC 2014)). Setting keys are the English labels (`"Channels"`, `"Depth"`, `"Starting #"`, `"Output File Info"` …); BAE should accept the same keys in its scripting layer for script portability. BAE decision: store format options as a typed per-encoder struct (serde) rather than an opaque blob.
+
+### AE-UI-625 · Output format list (输出格式)
+
+- **What it does:** The Format menu (格式) of the Output Module chooses the container / file type; each format implies a kind (movie, image sequence, audio only) that locks Video Output / Audio Output.
+- **Exact semantics:**
+  - Format menu in AE 2026 (alphabetical, as in the menu); scripting label = the menu string. Kind and the bae-media path:
+
+    | # (py-aep id) | Format (中文) | Kind | Extension(s) | Video depths offered | BAE priority | BAE encoder path |
+    |---|---|---|---|---|---|---|
+    | 0 | AIFF | audio | .aif/.aiff | — | P2 | pure Rust (hound-style PCM writer) |
+    | 1 | AVI | movie (Win; macOS too in recent AE, UNVERIFIED) | .avi | 24/32/48/64 | P2 | pure Rust RIFF writer, uncompressed only |
+    | 2 | DPX/Cineon Sequence (DPX/Cineon 序列) | sequence | .dpx/.cin | 48/64 (10-bit log/lin) | P1 | pure Rust writer |
+    | 3 | H.264 | movie | .mp4 (or .3gp / elementary stream) | 24 only | P0 | VideoToolbox (macOS) / Media Foundation (Windows); FFmpeg plugin elsewhere |
+    | 4 | IFF Sequence (IFF 序列) | sequence | .iff | 24/32/48/64 | P2 | — (not planned) |
+    | 5 | JPEG Sequence (JPEG 序列) | sequence | .jpg | 24 | P1 | `image`/`zune-jpeg` encoder (pure Rust) |
+    | 6 | MP3 | audio | .mp3 | — | P2 | system encoder or FFmpeg plugin |
+    | 7 | OpenEXR Sequence (OpenEXR 序列) | sequence | .exr | Floating Point / Floating Point+ | P1 | `exr` crate (pure Rust) |
+    | 8 | PNG Sequence (PNG 序列) | sequence | .png | 24/32/48/64 | P0 | `png` crate (pure Rust) |
+    | 9 | Photoshop Sequence (Photoshop 序列) | sequence | .psd | 24/32/48/64/96/128 | P1 | own flat-PSD writer (single composite + optional alpha) |
+    | 10 | QuickTime | movie | .mov | 24/32/48/64 (per codec) | P0 (ProRes on macOS) | AVFoundation/VideoToolbox (macOS); Media Foundation has no ProRes encoder → FFmpeg plugin on Windows/Linux |
+    | 11 | Radiance Sequence (Radiance 序列) | sequence | .hdr | Floating Point | P2 | `image` crate HDR writer |
+    | 12 | SGI Sequence (SGI 序列) | sequence | .sgi/.rgb/.bw | 24/32/48/64 | P2 | — (not planned) |
+    | 13 | TIFF Sequence (TIFF 序列) | sequence | .tif | 24/32/48/64/96/128 | P1 | `tiff` crate (pure Rust) |
+    | 14 | Targa Sequence (Targa 序列) | sequence | .tga | 24/32 | P2 | `image` crate TGA writer |
+    | 15 | WAV | audio | .wav | — | P1 | pure Rust PCM writer |
+
+  - Kind locks: audio formats force Video Output = off and Output Audio = On; image sequences force Video Output = on and Output Audio = Off (no audio in sequences); movies allow both.
+  - Not in the AE Format menu (removed): Animated GIF (removed AE CC 2015), FLV/F4V, Windows Media, MPEG-2/MPEG-4/DPX via AME-embedded exporters (removed AE CC 2014+/2015; UNVERIFIED exact versions), XFL. H.264 returned as a native exporter in AE 23.0 (2022-10) (UNVERIFIED: version — some sources say 23.0 beta then 23.1).
+- **Priority:** P0 (H.264, QuickTime/ProRes, PNG Sequence); P1 (EXR, TIFF, JPEG, DPX, PSD, WAV); P2 (rest)
+- **Owner:** bae-media (+ bae-model)
+- **Notes:** Format ids are py-aep/AEP internal ids (four-char codes `H264`, `MooV`, `png!`, `oEXR`, `8BPS`, `sDPX`, `JPEG`, `.AVI`, `Mp3 `, `IFF `, `AIFF` …), useful when importing AEP files. Adobe's "Supported output formats" page states that image formats are exported at 8 bpc unless otherwise noted. BAE decision (ARCHITECTURE §1): movie encoding uses system frameworks first, FFmpeg only as the optional downloaded plugin; still formats use pure-Rust crates. BAE additionally offers Lottie JSON (AE-UI-6xx, Export section), animated GIF/WebP and APNG as P2 extras that AE lacks natively.
+
+### AE-UI-626 · Include Project Link and Include Source XMP Metadata (包括项目链接、包括源 XMP 元数据)
+
+- **What it does:** Two metadata checkboxes: embed a link back to the source project so other Adobe apps can "Edit Original"; copy XMP metadata of the source footage into the output.
+- **Exact semantics:**
+  - Include Project Link (包括项目链接): default **on**; when the format supports XMP (MOV, MP4, PSD, TIFF, JPEG, PNG, EXR …; UNVERIFIED full list), writes XMP fields identifying the `.aep` path and comp so Premiere Pro / AME "Edit Original" (编辑原始) re-opens the comp.
+  - Include Source XMP Metadata (包括源 XMP 元数据): default **off** in every factory template; when on, XMP of the source footage items used by the comp is aggregated into the output's XMP packet.
+  - Formats without an XMP slot ignore both flags silently.
+- **Priority:** P2
+- **Owner:** bae-media (+ bae-model)
+- **Notes:** Scripting: `OutputModule.includeSourceXMP` (read/write); `"Include Project Link"` setting key. BAE decision: store both flags for AEP round-trip; implement "project link" as a BAE-specific XMP field (`bae:project`, `bae:comp`) only for MOV/MP4/PNG; source-XMP passthrough deferred.
+
+### AE-UI-627 · Post-Render Action (渲染后动作)
+
+- **What it does:** Tells AE what to do with the rendered file after the item finishes: nothing, import it, import it and replace a project item's usage, or set it as a proxy.
+- **Exact semantics:**
+  - Enum, menu order (scripting `PostRenderAction.*`):
+
+    | Value (中文) | Scripting | Effect after the item reaches Done |
+    |---|---|---|
+    | None (无) | `NONE` | nothing (default) |
+    | Import (导入) | `IMPORT` | import the output file/sequence as a footage item (into the project root, UNVERIFIED: or into the folder of the source comp) |
+    | Import & Replace Usage (导入和替换用法) | `IMPORT_AND_REPLACE_USAGE` | import, then replace every usage (layer source) of the target item with the new footage |
+    | Set Proxy (设置代理) | `SET_PROXY` | import and set as the proxy of the target item (proxy switched on) |
+
+  - For Import & Replace Usage and Set Proxy a pick whip (关联器) appears next to the menu; the target defaults to the render item's comp and can be dragged to any project item.
+  - Composition > Pre-render… (合成 > 预渲染) = add to queue with the Pre-Render Default templates (AE-UI-623, AE-UI-639) and Post-Render Action = Import & Replace Usage targeting the comp.
+  - File > Create Proxy > Movie/Still… (创建代理) adds an item using the Movie/Still Proxy defaults with Post-Render Action = Set Proxy.
+  - Changing the Output Module template can change the action (it is a template field).
+  - Chaining: item B may use the output of item A because A's action runs before B starts; if A fails, B renders with the original sources (UNVERIFIED).
+  - If the output is a sequence, the import uses the sequence frame rate from Preferences > Import (AE-UI-6xx) unless the comp frame rate is used (UNVERIFIED: AE uses the comp rate for post-render imports).
+- **Priority:** P1 (Import, Import & Replace Usage for pre-render), P2 (Set Proxy)
+- **Owner:** bae-model (+ bae-ui-motion, bae-media)
+- **Notes:** Scripting: `OutputModule.postRenderAction`, `OutputModule.postRenderTargetComp` (UNVERIFIED name; AE 2021+ exposes the target comp). Proxy data model: see project-comp-layers.md, Proxies. Implementation hint: implement as a bae-model Command emitted by the render runner after the encoder closes the file, so it is undoable.
+
+### AE-UI-628 · Video Output: Channels, Depth and Color (视频输出：通道、深度、颜色)
+
+- **What it does:** Chooses which channels are written, the bit depth per pixel and whether RGB is premultiplied (matted) by alpha or straight.
+- **Exact semantics:**
+  - Channels (通道), menu order: **RGB** (scripting/py-aep 0), **RGB + Alpha** (1), **Alpha** (2). Default RGB.
+    - Alpha writes the alpha channel as a grayscale image (in RGB, or a 1-channel image when the format supports gray, UNVERIFIED).
+  - Depth (深度) labels and bits per pixel:
+
+    | Label (中文) | Bits/pixel | Meaning |
+    |---|---|---|
+    | 256 Grays (256 级灰色) | 8 | 8-bit gray (Alpha channel only, some formats) |
+    | 256 Colors (256 色) | 8 | indexed (legacy) |
+    | Millions of Colors (数百万种颜色) | 24 | 8 bpc RGB |
+    | Millions of Colors+ (数百万种以上颜色) | 32 | 8 bpc RGBA |
+    | Trillions of Colors (数万亿种颜色) | 48 | 16 bpc RGB |
+    | Trillions of Colors+ (数万亿种以上颜色) | 64 | 16 bpc RGBA |
+    | Floating Point (浮点) | 96 | 32-bit float RGB |
+    | Floating Point+ (浮点 +) | 128 | 32-bit float RGBA |
+    | Floating Point Gray (浮点灰色（译名待核）) | — | float gray (alpha only) |
+
+  - Pairing rule (observed on every AE-saved module): Channels = RGB + Alpha ⇒ only "+" depths; Channels = RGB or Alpha ⇒ only base depths. Switching Channels re-maps Depth to its partner (24↔32, 48↔64, 96↔128).
+  - Allowed Depth per format (base/“+” pairs): H.264 and JPEG: 24 only, Channels RGB or Alpha (no RGB + Alpha); Targa: 24/32; DPX/Cineon: 48/64; OpenEXR: 96/128; Radiance: 96 only, no RGB + Alpha; PNG, IFF, SGI: 24/32/48/64; TIFF, Photoshop: 24…128; QuickTime: 24/32/48/64 (per codec: Animation and ProRes 4444/4444 XQ allow +; ProRes 422 family, DNxHR 422, H.264-in-MOV only base; 10-bit YUV codecs give 48); AVI: 24/32/48/64.
+  - Color (颜色): **Premultiplied (Matted)** (预乘（遮罩）, py-aep 1, default) or **Straight (Unmatted)** (直接（无遮罩）, 0). Only meaningful when alpha is written; PNG with RGB + Alpha forces Straight.
+    ```
+    // compositor frame is premultiplied in working space (see compositing-3d-color.md, Alpha model)
+    if color == Straight and a > 0: rgb_out = rgb_premul / a   // un-premultiply after color transform
+    if color == Straight and a == 0: rgb_out = 0
+    if channels == RGB: rgb_out = rgb_premul composited over black (i.e. premultiplied RGB, alpha discarded)
+    ```
+  - Output of RGB only from a comp with transparency = premultiplied over black (AE does not composite over the comp background colour; the background colour is only shown in the viewer). 
+  - Files written with a "+" depth carry a labeled alpha (premultiplied flag or straight flag in the file), so re-importing needs no alpha interpretation.
+  - Quantization from float working buffer: `round(clamp(v,0,1) * (2^n − 1))` for 8-bit; AE 16 bpc internal range is 0…32768 but 16-bit files are written 0…65535 (scaled; UNVERIFIED exact rounding). Float formats write unclamped values (overbrights preserved).
+- **Priority:** P0
+- **Owner:** bae-media (+ bae-render, bae-model)
+- **Notes:** Scripting enum names are the labels (`"RGB + Alpha"`, `"Millions of Colors+"`…). Depth set greater than the project bit depth is allowed (upconverts). See compositing-3d-color.md (Bit depth) for 16-bpc internal representation. Implementation hint: do un-premultiply + dither-free quantization in a single compute pass on the GPU before readback; read back in the output's bit depth to halve PCIe traffic for 8-bit outputs.
+
+### AE-UI-629 · Starting # and Use Comp Frame Number (开始 # 与使用合成帧编号)
+
+- **What it does:** Sets the number of the first file of an image sequence.
+- **Exact semantics:**
+  - Visible/enabled only for sequence formats.
+  - `Use Comp Frame Number` (default on): first file number = the comp frame number of the first rendered frame (e.g. work area starting at frame 48 ⇒ `_00048`), counting from the comp's Start Frame Number / start timecode (see project-comp-layers.md, Composition Settings).
+  - Off: first file number = `Starting #` (default 0). Help example: Starting # = 38 ⇒ first file `name_00038`.
+  - Number = `start + i` for the i-th rendered frame (frames are numbered by output frame index, so with a Render Settings custom frame rate the numbers follow output frames, not comp frames).
+  - Zero padding comes from the `[####…]` token in the file name (AE-UI-640); default sequence template is `[compName]_[#####].[fileExtension]` (5 digits).
+  - Edge: negative comp frame numbers (comp starting at negative time) — UNVERIFIED: AE writes a leading minus sign.
+- **Priority:** P0
+- **Owner:** bae-media (+ bae-model)
+- **Notes:** Scripting keys `"Starting #"`, `"Use Comp Frame Number"`. aerender `-s`/`-e` override the range but not the numbering mode.
+
+### AE-UI-630 · QuickTime format options (QuickTime 选项)
+
+- **What it does:** The QuickTime Options dialog (opened by Format Options… when Format = QuickTime) selects the video codec and its quality / key-frame / bitrate options, plus the audio codec of the MOV.
+- **Exact semantics:**
+  - Video Codec (视频编解码器) list offered by AE 2026 (py-aep enum names; four-char code):
+
+    | Codec | FourCC | Alpha (“+” depths) | 10/16-bit | BAE priority / path |
+    |---|---|---|---|---|
+    | Animation | `rle ` | yes | 8-bit only | P2 (pure-Rust RLE writer possible) |
+    | Apple ProRes 422 Proxy | `apco` | no | 10-bit | P1 |
+    | Apple ProRes 422 LT | `apcs` | no | 10-bit | P1 |
+    | Apple ProRes 422 | `apcn` | no | 10-bit | P0 (macOS) |
+    | Apple ProRes 422 HQ | `apch` | no | 10-bit | P0 (macOS) |
+    | Apple ProRes 4444 | `ap4h` | yes | 12-bit + 16-bit alpha | P0 (macOS) |
+    | Apple ProRes 4444 XQ | `ap4x` | yes | 12-bit | P1 |
+    | DNxHR/DNxHD | `AVdn` | DNxHR 444 / DNxHD 444 only (UNVERIFIED) | 8/10/12-bit per resolution | P2 (FFmpeg plugin) |
+    | DV25 / DV50 / DVCPRO HD variants | `dvc `, `dv5n`, `dvh5`… | no | 8-bit | P2 (not planned) |
+    | GoPro CineForm | `CFHD` | yes | 10/12-bit | P2 (FFmpeg plugin) |
+    | H.264 (in MOV) | `avc1` | no | 8-bit | P1 |
+    | None / Uncompressed RGB 8-bit | `raw ` | (32 with alpha, UNVERIFIED) | 8-bit | P2 |
+    | Uncompressed YUV 8-bit 4:2:2 | `2vuy` | no | 8-bit | P2 |
+    | Uncompressed YUV 10-bit 4:2:2 | `v210` | no | 10-bit (Depth 48) | P2 |
+
+  - Basic Video Settings: **Quality** (品质) slider 0…100 (default 100 for Animation, UNVERIFIED) — only for codecs with a quality knob; **Key Frame Every** (关键帧间隔) N frames (only temporal codecs); **Frame Reordering** (帧重新排序) checkbox (H.264); **Limit Data Rate / Bitrate** (限制比特率（译名待核）) kbps for H.264-in-MOV.
+  - DNxHR/DNxHD: Resolution menu (py-aep `DnxResolution`): DNxHR 444 12-bit, HQX 10-bit, HQ 8-bit, SQ 8-bit, LB 8-bit; DNxHD 1080p/1080i/720p in RGB 444 10-bit, HQX 10-bit, HQ 8-bit, SQ 8-bit, SQ thin raster, LB; plus Color Space (Rec.709 / RGB levels) UNVERIFIED.
+  - Audio settings (MOV): Audio Codec Uncompressed (PCM) default; AAC options when available (UNVERIFIED for MOV).
+  - The Output Module Depth/Channels menus are re-clamped when the codec changes (e.g. ProRes 422 ⇒ Channels RGB only). UNVERIFIED: for ProRes the Depth menu offers Millions and Trillions of Colors, and the encoder receives 16-bit samples (giving true 10/12-bit output) only when Depth = Trillions and the project is 16/32 bpc.
+  - Pixel aspect, field order and frame rate come from the comp / Render Settings; the MOV gets `fiel`, `pasp`, `colr` (nclc from the output color space) atoms.
+- **Priority:** P0 (QuickTime + ProRes 422 HQ / 4444 on macOS), P1 (ProRes elsewhere via plugin), P2 (other codecs)
+- **Owner:** bae-media
+- **Notes:** ProRes encoding on Windows is native in AE since CC 2019 (16.0) / 2020 (UNVERIFIED exact version); BAE decision: ProRes via VideoToolbox/AVFoundation on macOS; on Windows/Linux only through the optional FFmpeg plugin (`prores_ks`), and the Format Options dialog lists only codecs whose encoder is present, greying out the others with a "needs FFmpeg plugin" hint. Writing ProRes 4444 alpha: encoder receives straight or premultiplied per the OM Color setting; ProRes stores alpha unassociated in practice — set the OM default to Straight for 4444 like AE's "High Quality with Alpha" template does (UNVERIFIED).
+
+### AE-UI-631 · H.264 format options (H.264 选项)
+
+- **What it does:** Native H.264 exporter (AE 23.0, 2022-10; uses the Adobe Media Encoder backend in-process) writing MP4 with AAC audio; supports hardware and software encoding.
+- **Exact semantics:**
+  - Output Module restrictions: Channels RGB (or Alpha) only, Depth Millions of Colors only; frame size must be even (and ≤ codec level limits); mismatches trigger the settings-mismatch warning and automatic adjustment (AE-UI-638).
+  - H.264 Options dialog groups (UNVERIFIED: field labels follow AME's H.264 export settings):
+
+    | Parameter (中文) | Type | Default | Range | Units | Notes |
+    |---|---|---|---|---|---|
+    | Performance: Hardware / Software Encoding (性能：硬件编码 / 软件编码) | enum | Hardware if available | — | — | hardware = Intel QuickSync / NVENC / Apple VT |
+    | Profile (配置文件) | enum | Auto via template (High) | Baseline (-1) / Main (1) / High (3) / High 10 (4) | — | py-aep `MPEGProfile`; "Match Render Settings" templates choose by resolution |
+    | Level (级别) | enum | Auto by resolution | 3.0 … 6.2 (UNVERIFIED list) | — | |
+    | Bitrate Encoding (比特率编码) | enum | VBR, 1 pass | CBR / VBR, 1 pass / VBR, 2 pass (software only) | — | UNVERIFIED |
+    | Target Bitrate (目标比特率) | float | 15 (template) | 1 … 300 (UNVERIFIED) | Mbps | templates: 5, 15, 40 |
+    | Maximum Bitrate (最大比特率) | float | UNVERIFIED (≈ target × 1.x) | ≥ target | Mbps | VBR only |
+    | Key Frame Distance (关键帧距离) | int | auto (UNVERIFIED) | 1 … | frames | |
+    | Audio Format (音频格式) | enum | AAC | AAC / MPEG / PCM | — | py-aep `MPEGAudioFormat` |
+    | Audio Codec (音频编解码器) | enum | AAC | AAC / AAC+ Version 1 / AAC+ Version 2 | — | |
+    | Audio Sample Rate | enum | 48000 | AAC: 16000…48000; MPEG: 32000/44100/48000; PCM: 48000/96000 | Hz | |
+    | Audio Bitrate (音频比特率) | enum | 320 kbps (UNVERIFIED) | 16 … 320 (ladder depends on rate × channels) | kbps | |
+    | Multiplexer (多路复用器) | enum | MP4 | MP4 / 3GPP / None | — | None = elementary `.264` stream |
+    | Stream Compatibility (流兼容性) | enum | Standard | Standard / iPod / PSP | — | |
+
+  - Factory templates "H.264 - Match Render Settings - 5 Mbps / 15 Mbps / 40 Mbps" (note the AE template name pads " 5" with two spaces): profile/level auto from resolution, frame size and rate = render settings.
+  - Fresh-install default for both Movie Default and Save Current Preview Default is "H.264 - Match Render Settings - 15 Mbps" (Adobe help).
+- **Priority:** P0
+- **Owner:** bae-media (+ bae-ui-motion)
+- **Notes:** BAE decision: hardware encoder through VideoToolbox (`kVTProfileLevel_H264_*_AutoLevel`) on macOS and Media Foundation H.264 MFT on Windows, both shipped with the OS; software x264 only via the FFmpeg plugin; Linux without plugin offers no H.264 (show reason). Expose the same three templates. Write `colr`/VUI color primaries/transfer/matrix from the output color space (Rec.709 by default) and full/limited range = limited. H.265/HEVC is not in AE's Format menu (AME only); BAE may add HEVC as P2 since the same system APIs support it.
+
+### AE-UI-632 · OpenEXR format options (OpenEXR 选项)
+
+- **What it does:** Options for OpenEXR Sequence output: compression method, half vs full float, luminance/chroma encoding and DWA level.
+- **Exact semantics:**
+
+  | Parameter (中文) | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|
+  | Compression (压缩) | enum | ZIP (UNVERIFIED; PIZ in pre-2019 ProEXR-based versions) | None, RLE, ZIP, ZIP16, PIZ, PXR24, B44, B44A, DWAA, DWAB, HTJ2K 256, HTJ2K 32 | — | py-aep ids 0…11; HTJ2K added AE 25.x (UNVERIFIED) |
+  | 32-bit float (32 位浮点) | bool | off (16-bit half) | — | — | half = IEEE binary16 |
+  | Luminance/Chroma (亮度/色度) | bool | off | — | — | n/a for DWAA/DWAB |
+  | DWA Compression Level (DWA 压缩级别) | float | 45.0 | > 0 | — | only DWAA/DWAB |
+
+  - Channels written: R, G, B (+ A for RGB + Alpha); Alpha-only writes `A` (UNVERIFIED: or Y). Premultiplied output is the EXR convention; Straight is allowed but non-standard.
+  - Values are written unclamped, in the output color space (linear if Convert to Linear Light is on — default "On for 32 bpc", AE-UI-637).
+  - Data window = display window = output frame size (no overscan); pixel aspect ratio written to the header.
+- **Priority:** P1
+- **Owner:** bae-media
+- **Notes:** AE 2022+ uses its built-in OpenEXR (not the old fnord ProEXR); layered/multi-pass EXR output is not available natively (Extractor / ProEXR plugins only). BAE decision: `exr` crate supports None/RLE/ZIP/ZIP16/PIZ/PXR24/B44/B44A; DWAA/DWAB/HTJ2K write not supported → map to ZIP with a warning (P2 to add).
+
+### AE-UI-633 · Still-image sequence format options (PNG、TIFF、JPEG、Targa、DPX/Cineon、Photoshop 选项)
+
+- **What it does:** Per-format option dialogs for the image-sequence formats.
+- **Exact semantics:**
+  - **PNG Options** (PNG 选项): Bit depth 8 / 16 (follows Depth: 24/32 ⇒ 8, 48/64 ⇒ 16); Compression (压缩): None (default) / Interlaced (Adam7); **Include HDR10 Metadata** (包括 HDR10 元数据（译名待核）) — 16-bit only, with Color Primaries Rec.709 / P3 D65 / Rec.2020, Luminance Min / Max (nits), Content Light Levels Maximum / Average (nits) (AE 24.x, UNVERIFIED version). PNG with alpha is always written Straight. Compression level itself is not exposed (zlib default).
+  - **TIFF Options** (TIFF 选项): LZW Compression (LZW 压缩) checkbox (default off, UNVERIFIED); IBM PC Byte Order (IBM PC 字节顺序) checkbox (little-endian; default on Windows-created modules, UNVERIFIED). 32 bpc writes IEEE float samples; ICC profile embedded when Embed Profile is on.
+  - **JPEG Options** (JPEG 选项): Quality (品质) 0 … 10 integer (default 10, UNVERIFIED) with labels Low/Medium/High/Maximum; Format Type (格式类型): Baseline ("Standard") (基线（标准）), Baseline Optimized (基线（优化）), Progressive (连续); Scans (扫描) 3 / 4 / 5 (Progressive only). Quality q maps to libjpeg quality ≈ q × 10 (UNVERIFIED).
+  - **Targa Options** (Targa 选项): Resolution 24 / 32 bits/pixel (this value, not OM Depth, decides the file); RLE Compressed (RLE 压缩) checkbox.
+  - **DPX/Cineon Settings** (Cineon 设置): Presets (预设) Standard / Over Range / Full Range / Custom (UNVERIFIED list); 10-bit Black Point (10 位黑场) 0…1023 (Standard 95); 10-bit White Point (10 位白场) 0…1023 (Standard 685); Converted Black Point (转换黑场) (Standard 0); Converted White Point (转换白场) (Standard 1.0 / 32767 in 16 bpc units); Current Gamma (当前灰度系数) (Standard 1.7); Highlight Rolloff / Expansion (高光滚降) (Standard 20, UNVERIFIED); Logarithmic Conversion (对数转换) checkbox; File Format (文件格式): FIDO/Cineon 4.5 or DPX; DPX bit depth 8 / 10 / 12 / 16 (default 10). The log conversion formula is shared with the Cineon Converter effect (see effects.md [fx-a], Cineon Converter) and Interpret Footage Cineon settings (project-comp-layers.md, Interpret Footage).
+  - **Photoshop Sequence**: no options dialog; writes a flattened composite (plus alpha as a channel/transparency) at 8/16/32 bpc. Layered PSD output is only via Save Frame As > Photoshop Layers (AE-UI-641).
+  - **IFF, SGI, Radiance**: no options (SGI writes RLE, UNVERIFIED).
+- **Priority:** P0 (PNG), P1 (TIFF, JPEG, DPX, PSD), P2 (Targa, IFF, SGI, Radiance, HDR10 metadata)
+- **Owner:** bae-media
+- **Notes:** BAE decision: use `png` crate (`Compression::Default`, Adam7 for Interlaced, write `cHRP`/`cICP`/`mDCv`/`cLLi` chunks for HDR10), `tiff` crate (LZW, Deflate), `jpeg-encoder` or `image` JPEG encoder (pure Rust), own DPX writer. Implementation hint: encode sequence frames on a CPU thread pool in parallel with GPU rendering of later frames; sequences parallelise perfectly.
+
+### AE-UI-634 · Output Module Resize (调整大小)
+
+- **What it does:** Scales the rendered frame to another pixel size after rendering, before encoding.
+- **Exact semantics:**
+
+  | Parameter (中文) | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|
+  | Resize (调整大小) | bool | off | — | — | enables the group |
+  | Rendering at (渲染在) | read-only | Render Settings size (after Resolution) | — | px | |
+  | Resize to (调整大小到) | int W, H | rendering size | 1 … 30000 (UNVERIFIED) | px | preset menu: Custom, common video/film sizes (NTSC DV, PAL D1/DV, HDV/HDTV 1280×720, HDTV 1920×1080, DCI 2K/4K, UHD … UNVERIFIED list) |
+  | Resize % (调整大小 %) | float W%, H% | 100 | — | % | linked to Resize to |
+  | Lock Aspect Ratio to (锁定长宽比为) | bool | on | — | — | label shows the ratio, e.g. "16:9 (1.78)" |
+  | Resize Quality (调整大小后的品质) | enum | High | Low (0) / High (1) | — | Low for tests |
+
+  - Pipeline: `render (Render Settings size) → resize → crop (AE-UI-635) → channel/depth/colour conversion → encode`.
+  - Resizing never changes the pixel aspect ratio written to the file (PAR comes from the comp); to change PAR the comp must change.
+  - Interpolation: Low = bilinear, High = bicubic (UNVERIFIED; Adobe only says Low for tests, High for final).
+  - Resolution in Render Settings is applied first: Half resolution + Resize to full size renders at half then upsamples (useful for fast drafts).
+- **Priority:** P1
+- **Owner:** bae-media (+ bae-render)
+- **Notes:** Scripting keys `"Resize"`, `"Resize to"` ([w, h]), `"Lock Aspect Ratio"`, `"Resize Quality"`. Implementation hint: do the resize on the GPU (separable bicubic / Lanczos compute pass) before readback; with multiple output modules of different sizes, share one render and resample per module.
+
+### AE-UI-635 · Output Module Crop and Use Region of Interest (裁剪与使用目标区域)
+
+- **What it does:** Removes (or adds, with negative values) rows/columns at the frame edges, or outputs only the viewer's region of interest.
+- **Exact semantics:**
+
+  | Parameter (中文) | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|
+  | Crop (裁剪) | bool | off | — | — | |
+  | Use Region of Interest (使用目标区域) | bool | off | — | — | fills the four values from the comp's current ROI |
+  | Top (顶部) | int | 0 | negative = add pixels | px | |
+  | Left (左侧) | int | 0 | ditto | px | |
+  | Bottom (底部) | int | 0 | ditto | px | |
+  | Right (右侧) | int | 0 | ditto | px | |
+  | Final Size (最终大小) | read-only | — | — | px | `W − L − R` × `H − T − B` |
+
+  ```
+  final_w = resized_w - left - right ; final_h = resized_h - top - bottom
+  // negative values pad with transparent black (alpha 0, rgb 0)
+  require final_w >= 1 and final_h >= 1   // else the dialog refuses (UNVERIFIED message)
+  ```
+  - Applied after Resize (UNVERIFIED: AE dialog computes Final Size from the resized dimensions).
+  - Adding one row at the top and removing one at the bottom shifts the image by one line, which swaps field dominance (Adobe tip).
+  - ROI: the region of interest drawn in the Composition panel (see ui-preview-render-io.md [ui-a]/[ui-b] and compositing-3d-color.md, Region of interest); if the comp has no ROI the checkbox is disabled.
+- **Priority:** P1 (Crop), P2 (Use Region of Interest)
+- **Owner:** bae-media (+ bae-render)
+- **Notes:** Scripting keys `"Crop"`, `"Use Region of Interest"`, `"Crop Top"/"Crop Left"/"Crop Bottom"/"Crop Right"`. Implementation hint: when Resize is off, push the crop rectangle into the render as an ROI so cropped pixels are never rendered.
+
+### AE-UI-636 · Audio Output (音频输出)
+
+- **What it does:** Controls whether and how comp audio is mixed down and written into the output.
+- **Exact semantics:**
+  - Mode menu (scripting `"Output Audio"`): **Audio Output Auto** (自动音频输出, default, value 3) — write audio only if the comp contains at least one audible audio-capable layer in the rendered span; **Audio Output On** (打开音频输出, 2) — always write (silence if none); **Audio Output Off** (关闭音频输出, 1). Auto was added in AE 17.0 (2020) (UNVERIFIED version).
+  - Sample Rate (采样率): 8.000, 11.025, 16.000, 22.050, 24.000, 32.000, 44.100, 48.000, 88.200, 96.000 kHz (subset per format; default 48.000 kHz; MP3 template 44.100 kHz). AIFF/WAV/AVI uncompressed: {8, 11.025, 16, 22.05, 32, 44.1, 48, 88.2, 96} kHz; H.264 AAC: 16…48 kHz.
+  - Sample size (采样深度): 8 Bit, 16 Bit (default), 32 Bit (float, WAV only). 24 Bit is not offered.
+  - Channels (声道): Mono / Stereo (default Stereo).
+  - Format Options… (audio) per format: WAV codec Uncompressed (default) / IMA ADPCM / Microsoft ADPCM / CCITT A-Law / CCITT u-Law / GSM 6.10 (GSM forces Mono; ADPCM/GSM limit rates to {8, 11.025, 22.05, 44.1} kHz, A/u-Law add 16 kHz); MP3 bitrate 16 … 320 kbps (16, 18, 20, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320); H.264 see AE-UI-631; AVI interleave None / 1 frame / ½ s / 1 s / 2 s.
+  - Mixdown: sum of all audible layers' audio after Audio Levels / audio effects / layer time remapping and stretch, at the chosen rate; values outside ±1.0 are clipped for integer formats (no limiter). Mono = (L+R)/2 (UNVERIFIED). Audio span = same time span as the video.
+  - Image-sequence formats: audio controls disabled (AE-UI-625); to get audio, add a second output module with an audio-only format (e.g. "AIFF 48kHz" template).
+- **Priority:** P0 (Auto/On/Off, 48 kHz 16-bit stereo in MOV/MP4), P1 (WAV), P2 (other codecs)
+- **Owner:** bae-media (+ bae-anim)
+- **Notes:** Audio evaluation (levels, time remap of audio) is defined with layers in project-comp-layers.md and effects.md [fx-c] (Audio effects). Implementation hint: mix audio once per render item on a separate thread in f32, resample with a high-quality sinc resampler only when the comp audio rate differs.
+
+### AE-UI-637 · Output Module Color Management tab (输出模块色彩管理)
+
+- **What it does:** Chooses the color space the rendered frames are converted to before encoding, whether linear light is written, and whether a profile is embedded.
+- **Exact semantics:**
+
+  | Parameter (中文) | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|
+  | Output Profile (输出配置文件) / Output Color Space (输出色彩空间) | enum | Working Space (project working space) | ICC profiles (Adobe CM) or OCIO color spaces (OCIO/ACES mode) | — | |
+  | Convert to Linear Light (转换为线性光) | enum | On for 32 bpc (对 32 bpc 打开) | Off (0) / On (1) / On for 32 bpc (2) | — | On for 32 bpc applies only when the output depth is Floating Point(+) |
+  | Embed Profile (嵌入配置文件) | bool | on (UNVERIFIED) | — | — | only formats that carry ICC: PSD, TIFF, PNG, JPEG (+ MOV `colr` tag) |
+  | Preserve RGB (保留 RGB) | bool | off | — | — | no conversion: write working-space numbers unchanged |
+
+  - When project color management is off (Working Space = None) the tab shows only Preserve RGB-equivalent behaviour: values are written unconverted.
+  - Order: `working-space pixels → (output transform unless Preserve RGB) → (linearize if Convert to Linear Light active) → un-premultiply if Straight → quantize`.
+  - Movie formats get color tags (primaries/transfer/matrix) from the output space (Rec.709 for HDTV).
+- **Priority:** P1
+- **Owner:** bae-color (+ bae-media, bae-model)
+- **Notes:** Color-space math, working spaces, OCIO/ACES and the AE 24.x–25.x color-management modes are specified in compositing-3d-color.md, Color management (output). Scripting: `OutputModule` exposes no key for the profile; py-aep notes AE 2026 `getSettings` returns neither `"Convert to Linear Light"` nor `"Preserve RGB"`. zh help calls this tab 颜色 (颜色选项卡).
+
+### AE-UI-638 · Settings mismatch warning (设置不匹配警告)
+
+- **What it does:** When the chosen format constrains frame size, frame rate or other settings that the comp / Render Settings / Output Module violate, AE shows a yellow warning icon and "Settings mismatch" at the bottom of the Output Module dialog and auto-adjusts the output.
+- **Exact semantics:**
+  - Triggers (examples): H.264 needs even width/height and a level-legal frame size × rate; DV codecs need exact NTSC/PAL sizes and rates; DNxHD needs fixed raster sizes.
+  - Clicking the icon shows a message describing the automatic change (e.g. "frame width will be padded/scaled to 1920"); OK accepts; the user can instead change comp/RS/OM settings.
+  - The automatic change is applied at render time; the stored settings are not rewritten (UNVERIFIED).
+  - For H.264, the same check also runs when an item is queued and shows a modal warning dialog with the adjustment (Adobe "Troubleshoot settings mismatch warnings").
+- **Priority:** P1
+- **Owner:** bae-media (+ bae-ui-motion)
+- **Notes:** BAE decision: each encoder exposes `validate(config) -> Vec<Adjustment>`; the UI lists adjustments and the CLI prints them as warnings. Odd sizes for 4:2:0 codecs: pad by one pixel of edge replication (not scale) so the image stays pixel-exact; record the adjustment.
+
+### AE-UI-639 · Output Module templates and Templates dialog (输出模块模板)
+
+- **What it does:** Named, reusable output-module presets, plus per-purpose defaults used when items are created.
+- **Exact semantics:**
+  - Factory templates in AE 2026 (from `OutputModule.templates`, menu order is alphabetical):
+
+    | Template | Format / settings (UNVERIFIED where marked) |
+    |---|---|
+    | AIFF 48kHz | AIFF, audio only, 48 kHz 16-bit stereo |
+    | Alpha Only | QuickTime, Channels Alpha (UNVERIFIED codec Animation) |
+    | H.264 - Match Render Settings -  5 Mbps | H.264 MP4, target 5 Mbps, AAC |
+    | H.264 - Match Render Settings - 15 Mbps | H.264 MP4, target 15 Mbps, AAC (fresh-install default) |
+    | H.264 - Match Render Settings - 40 Mbps | H.264 MP4, target 40 Mbps, AAC |
+    | High Quality | QuickTime, Apple ProRes 422 HQ (UNVERIFIED; Animation before AE 2020) |
+    | High Quality with Alpha | QuickTime, RGB + Alpha, Millions of Colors+ (ProRes 4444, UNVERIFIED) |
+    | Lossless | AVI uncompressed on Windows (observed `Format` = AVI); QuickTime Animation on macOS (UNVERIFIED) |
+    | Lossless with Alpha | as Lossless with RGB + Alpha, Millions of Colors+ (UNVERIFIED) |
+    | Multi-Machine Sequence | Photoshop Sequence for watch-folder rendering (UNVERIFIED) |
+    | Photoshop | Photoshop Sequence, RGB, Millions of Colors |
+    | TIFF Sequence with Alpha | TIFF Sequence, RGB + Alpha, Millions of Colors+ |
+    | `_HIDDEN X-Factor 8/16/32 [Premul]` | internal templates hidden from the UI (used by Dynamic Link / AME); listed by scripting only |
+
+  - Applying a template from the "Output Module:" menu copies its settings into the module; Ctrl/Cmd+choose makes it the default for new movie items. Applying to several selected modules applies to all.
+  - Edit > Templates > Output Module… (编辑 > 模板 > 输出模块) dialog: **Defaults** (默认值) menus — Movie Default (电影默认值) = H.264 - Match Render Settings - 15 Mbps; Frame Default (帧默认值) = Photoshop (UNVERIFIED); Save Current Preview Default (保存当前预览默认值) = H.264 - Match Render Settings - 15 Mbps; Pre-Render Default (预渲染默认值) = Lossless (UNVERIFIED); Movie Proxy Default (影片代理默认值（译名待核）) = Lossless with Alpha (UNVERIFIED); Still Proxy Default (静止代理默认值（译名待核）) = TIFF Sequence with Alpha (UNVERIFIED). **Settings** area: Settings Name, New… / Edit… / Duplicate / Delete, Save All… / Load… (template file `.aom`, UNVERIFIED extension).
+  - Template edits never affect modules already in the queue. "Make Template…" in the module menu opens the dialog pre-filled with the current module.
+- **Priority:** P0 (templates + default), P1 (Templates dialog, Save/Load)
+- **Owner:** bae-model (+ bae-ui-motion)
+- **Notes:** Scripting `OutputModule.templates`, `applyTemplate()`, `saveAsTemplate()`; names include the double space in " 5 Mbps" — BAE must match exactly for scripts. Templates live in application preferences, not the project. BAE decision: ship templates using codecs available on the platform; a template whose encoder is missing stays listed but disabled with a reason; store as JSON alongside Render Settings templates (AE-UI-622).
+
+### AE-UI-640 · Output To: destination and file-name templates (输出到与文件命名模板)
+
+- **What it does:** Each output module has a destination path built from a folder plus a file-name template with bracketed tokens; templates can be saved, chosen per module and set as default.
+- **Exact semantics:**
+  - Clicking the underlined path next to "Output To:" (输出到) opens a save dialog; the triangle menu lists file-naming templates (文件命名模板) and **Custom…** (自定义). Ctrl/Cmd+choose makes a template the default.
+  - Factory file-name templates (UNVERIFIED exact list and order): "Comp Name" `[compName].[fileExtension]` (default), "Project Name" `[projectName].[fileExtension]`, "Comp and Project Name" `[projectName]_[compName].[fileExtension]`, "Comp and Output Module Name" `[compName]_[outputModuleName].[fileExtension]`, "Comp and Render Settings Name" `[compName]_[renderSettingsName].[fileExtension]`, "Comp and Frame Range" `[compName]_[startFrame]-[endFrame].[fileExtension]`, "Comp Folder and Name" `[compName]/[compName].[fileExtension]`, "Comp Folder and Frame Numbers" (sequence), "Project Folder and Comp Name" `[projectFolder]/…` (UNVERIFIED).
+  - For sequence formats AE inserts `_[#####]` before the extension: default `[compName]_[#####].[fileExtension]`.
+  - Tokens (Add Property menu, 添加属性; names case-insensitive — AE writes `[fileextension]` in lower case in saved projects):
+
+    | Token | Expands to |
+    |---|---|
+    | `[projectName]` | project file name without extension |
+    | `[compName]` | render item comp name |
+    | `[renderSettingsName]` | Render Settings template name (e.g. "Best Settings") |
+    | `[outputModuleName]` | Output Module template name |
+    | `[fileExtension]` | format extension without dot |
+    | `[width]`, `[height]` | output frame size after resize/crop |
+    | `[frameRate]` | output frame rate |
+    | `[aspectRatio]` | pixel aspect ratio (UNVERIFIED) |
+    | `[startFrame]`, `[endFrame]`, `[durationFrames]` | render span in frames |
+    | `[#]`…`[#########]` | frame number, zero-padded to the number of `#` (sequences) |
+    | `[startTimecode]`, `[endTimecode]`, `[durationTimecode]` | span as timecode (`;`/`:` replaced by `_`, UNVERIFIED) |
+    | `[channels]` | "RGB" / "RGBA" / "Alpha" (UNVERIFIED strings) |
+    | `[projectColorDepth]`, `[outputColorDepth]` | bit depth |
+    | `[compressor]` | codec name |
+    | `[fieldOrder]`, `[pulldownPhase]` | field render / pulldown settings |
+    | `[dateYear]`, `[dateMonth]`, `[dateDay]`, `[timeHour]`, `[timeMins]`, `[timeSecs]`, `[timeZone]` | render start date/time (UNVERIFIED names) |
+
+  - Text outside brackets is literal; `/` (or `\` on Windows) creates subfolders, which AE creates at render time if missing; absolute paths are allowed in a template.
+  - "Use Default File Name and Folder" (Preferences > Output, AE-UI-6xx): new items reuse the previous item's folder; when the resolved name already exists in the queue, AE appends `_1`, `_2`… (e.g. `composition_name_1`).
+  - Saving a project and opening it on another machine keeps the path; missing folders mark the item **Needs Output** (AE-UI-602) (UNVERIFIED: only if the volume is missing).
+  - Characters illegal on the target OS are replaced (UNVERIFIED with `_`); Adobe warns to avoid high-ASCII for cross-platform / watch-folder renders.
+- **Priority:** P0 (path + default template + `[#####]`), P1 (custom templates and tokens)
+- **Owner:** bae-model (+ bae-ui-motion, bae-media)
+- **Notes:** Scripting `OutputModule.file` (File object); `getSettings()["Output File Info"]` returns `Full Flat Path`, `Base Path`, `Subfolder Path`, `File Name`, `File Template`; `setSettings({"Output File Info": {"File Template": "[compName]/[compName].[fileExtension]"}})` sets a template. BAE decision: tokens identical to AE (case-insensitive), plus `[compName]` sanitised for the file system; store the template string, resolve at render time.
+
+### AE-UI-641 · Save Frame As (帧另存为)
+
+- **What it does:** Composition > Save Frame As (合成 > 帧另存为) renders the frame at the current time: **File…** (文件) as a one-frame render-queue item, or **Photoshop Layers…** (Photoshop 图层) as a layered PSD written immediately.
+- **Exact semantics:**
+  - File…: adds a render item whose Time Span = the single frame at the CTI, using the Frame Default Render Settings (AE-UI-623, "Current Settings") and the Frame Default Output Module (AE-UI-639, "Photoshop"); the item is queued and the Render Queue opens; it does not render until Render is pressed. File name default `[compName] ([#####]).[fileExtension]` (e.g. `Comp 1 (00000).psd`; UNVERIFIED pattern). Shortcut: see ui-preview-render-io.md [ui-b] (Ctrl+Alt+S / Cmd+Opt+S, UNVERIFIED).
+  - Photoshop Layers…: saves right away (save dialog) a PSD at comp size and current project bit depth (8/16 bpc; 32 bpc projects write 32-bit, UNVERIFIED) where each top-level AE layer becomes a Photoshop layer rendered with its effects, masks and transforms at the current time; layer name, opacity, blend mode (where Photoshop has an equivalent) and visibility are preserved; precomps become flattened layers or layer groups (UNVERIFIED); 3D layers are rendered flat. A composite image is stored for preview.
+  - Frame Default templates are settable in the Templates dialogs.
+- **Priority:** P1 (File as PNG/PSD), P2 (Photoshop Layers)
+- **Owner:** bae-media (+ bae-render, bae-ui-motion)
+- **Notes:** BAE decision: "Save Frame As > File" also offers PNG as default format (more common than PSD outside Adobe pipelines); Photoshop Layers requires a layered-PSD writer (bae-media) and per-layer renders (bae-render) — P2. Also used by scripts via `RenderQueue.items.add()` with a one-frame span.
+
+### AE-UI-642 · Save Current Preview (保存当前预览)
+
+- **What it does:** Composition > Preview > Save Current Preview… (合成 > 预览 > 保存当前预览) writes the frames currently cached for preview (the work area or preview range) to a movie, without re-rendering frames already cached.
+- **Exact semantics:**
+  - Uses the **Save Current Preview Default** output module template (fresh install: H.264 - Match Render Settings - 15 Mbps) and the cached preview frames at the preview's resolution/quality.
+  - Frames not yet cached are rendered first (with the preview settings, not Best Settings). Audio is included if the preview included audio (UNVERIFIED).
+  - File name uses the comp name (exception to "Use Default File Name and Folder").
+  - Shortcut Ctrl+Numpad 0 / Cmd+Numpad 0 (see [ui-b]).
+- **Priority:** P2
+- **Owner:** bae-ui-motion (+ bae-render, bae-media)
+- **Notes:** Preview cache semantics: ui-preview-render-io.md [ui-b], Preview & cache. Implementation hint: export straight from the GPU frame cache to the encoder.
