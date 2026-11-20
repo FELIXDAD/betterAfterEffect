@@ -49,6 +49,12 @@ prim_types! {
     /// the operator is the `operator` attribute.
     SHAPE_OPERATOR = "ShapeOperator";
     MASK = "Mask";
+    /// Comp or layer marker (`time` attribute; layer markers use layer time).
+    MARKER = "Marker";
+    /// Text animator group under a text layer.
+    TEXT_ANIMATOR = "TextAnimator";
+    /// Range / wiggly / expression selector under a text animator.
+    TEXT_SELECTOR = "TextSelector";
     /// Effect instance; `match_name` attribute names the effect.
     EFFECT = "Effect";
     ARTBOARD = "Artboard";
