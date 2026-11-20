@@ -718,7 +718,7 @@
     | Column header row (left) | headers of the visible columns (AE-UI-049) |
     | Layer outline (图层大纲（译名待核）) (left) | one row per layer in stacking order (layer 1 at top), each twirlable into property groups/properties |
     | Top of time graph (right) | time navigator (AE-UI-061), work area bar (AE-UI-062), time ruler with cache indicators (AE-UI-063/064), comp marker bin at the far right (AE-UI-065) |
-    | Time graph (时间图表) (right) | layer bar mode (图层条模式): layer duration bars (AE-UI-066), keyframes (AE-UI-070), markers; or Graph Editor mode (图表编辑器) (AE-UI-077+) |
+    | Time graph (时间图表) (right) | layer bar mode (图层条模式): layer duration bars (AE-UI-066), keyframes (AE-UI-071, AE-UI-072), markers (AE-UI-065); or Graph Editor mode (图表编辑器) (AE-UI-077+) |
     | Bottom-left | pane toggle buttons: Layer Switches (图层开关) pane, Transfer Controls (转换控制) pane, In/Out/Duration/Stretch (入点/出点/持续时间/伸缩) pane, Frame Render Time (帧渲染时间) pane (AE-UI-049, AE-UI-057) |
     | Bottom centre | Toggle Switches / Modes (切换开关/模式) button (AE-UI-049) |
     | Bottom of time graph | zoom-out button, time zoom slider, zoom-in button (AE-UI-061) |
@@ -738,7 +738,7 @@
   - Columns (in default left-to-right order; Columns ▸ menu on any column header right-click):
     | Column (中文) | Default | Content (UI item) |
     |---|---|---|
-    | A/V Features (A/V 功能) | shown | Video, Audio, Solo, Lock switches; keyframe navigator and stopwatch area for property rows (AE-UI-050, AE-UI-069) |
+    | A/V Features (A/V 功能) | shown | Video, Audio, Solo, Lock switches; keyframe navigator and stopwatch area for property rows (AE-UI-050, AE-UI-070) |
     | Label (标签) | shown | label swatch (AE-UI-020) |
     | # (layer number) | shown | layer index 1..N (AE-UI-051) |
     | Source Name / Layer Name (源名称 / 图层名称) | shown | twirl + name (AE-UI-051) |
@@ -746,7 +746,7 @@
     | Switches (开关) | shown | Shy, Collapse/Continuously Rasterize, Quality, Effect, Frame Blending, Motion Blur, Adjustment Layer, 3D Layer (AE-UI-052) |
     | Modes (模式) | shown (as alternative to Switches when toggled, see below) | Mode, T (Preserve Underlying Transparency), Track Matte (AE-UI-053) |
     | Parent & Link (父级和链接) | shown | AE-UI-054 |
-    | Keys (键（译名待核）) | hidden | keyframe navigator in its own column (AE-UI-069) |
+    | Keys (键（译名待核）) | hidden | keyframe navigator in its own column (AE-UI-070) |
     | In (入) / Out (出) / Duration (持续时间) / Stretch (伸缩) | hidden | AE-UI-055 |
     | Render Time (渲染时间（译名待核）) | hidden | AE-UI-057 |
   - Pane buttons (bottom-left): Layer Switches pane toggles the Switches column; Transfer Controls pane toggles Modes; In/Out/Duration/Stretch pane toggles those four; Frame Render Time pane toggles Render Time. F4 = **Toggle Switches / Modes**: when both are visible it hides one; repeatedly alternates Switches ↔ Modes (also the bottom button). Shift+F4 shows/hides Parent & Link.
@@ -759,7 +759,7 @@
 
 - **What it does:** Per-layer Video (eyeball), Audio (speaker), Solo and Lock switches with click, drag-across and modifier behaviours.
 - **Exact semantics:**
-  - Video (视频): click toggles layer video (cameras/lights: on/off; adjustment layers: effect application). Shown for layers with video. Property groups that can be disabled (shape groups, text animators, masks' none-mode aside) also show an eyeball in this column; effects use their own fx switch (AE-UI-068) (UNVERIFIED list).
+  - Video (视频): click toggles layer video (cameras/lights: on/off; adjustment layers: effect application). Shown for layers with video. Property groups that can be disabled (shape groups, text animators, masks' none-mode aside) also show an eyeball in this column; effects use their own fx switch (AE-UI-087) (UNVERIFIED list).
   - Audio (音频): shown only for layers with audio.
   - Solo (独奏): click toggles; **Alt-click (Win) / Option-click (Mac)** solos this layer exclusively (unsolos all others). Solo semantics: project-comp-layers.md, Solo switch.
   - Lock (锁定): click toggles; locked layers cannot be selected in the viewer or Timeline (clicking a locked layer row selects nothing / AE flashes the lock, UNVERIFIED); Ctrl+L / Cmd+L locks selected; Ctrl+Shift+L / Cmd+Shift+L unlocks all layers.
@@ -776,7 +776,7 @@
   - # column: 1-based stacking index. Typing a layer number on the numeric keypad selects that layer (e.g. 1 then 2 within a short interval = layer 12; UNVERIFIED delay).
   - Name header click toggles **Layer Name (图层名称)** ↔ **Source Name (源名称)** display for all rows. In Layer Name mode, a layer that has not been renamed shows its source name in square brackets, e.g. `[Comp 1]`; renamed layers show the name without brackets (UNVERIFIED: brackets exact).
   - Rename: select a layer and press Enter (Win) / Return (Mac), or context menu Rename; Enter commits; Esc cancels; empty name reverts to source name (layer name cleared). Renaming properties/groups (masks, effects, shape groups, text animators) is done the same way.
-  - Twirl triangle left of the name expands/collapses the layer (AE-UI-068). Layer type icon between label and name (UNVERIFIED: AE shows a type icon only for shape/text/camera/light/null? — AE shows the source type icon).
+  - Twirl triangle left of the name expands/collapses the layer (AE-UI-069). Layer type icon between label and name (UNVERIFIED: AE shows a type icon only for shape/text/camera/light/null? — AE shows the source type icon).
   - Name is drawn in italics when the source is missing? (UNVERIFIED).
 - **Priority:** P0
 - **Owner:** bae-ui-motion (+ bae-model)
@@ -840,7 +840,7 @@
 ### AE-UI-056 · Comment and Keys columns (注释和键列)
 
 - **What it does:** Comment shows a free-text note per layer; Keys shows each property's keyframe navigator in a dedicated column.
-- **Exact semantics:** Comment: click the cell to edit inline; searchable by the Timeline search field only when the column is shown. Keys: when visible, the keyframe navigator (AE-UI-069) moves from the A/V Features column into this column (UNVERIFIED).
+- **Exact semantics:** Comment: click the cell to edit inline; searchable by the Timeline search field only when the column is shown. Keys: when visible, the keyframe navigator (AE-UI-070) moves from the A/V Features column into this column (UNVERIFIED).
 - **Priority:** P2
 - **Owner:** bae-ui-motion (+ bae-model)
 - **Notes:** Data: project-comp-layers.md, Layer comment.
@@ -1167,7 +1167,7 @@
   - Twirl Audio (音频) > Audio Levels (音频电平) (dB, keyframable) and Waveform (波形). L reveals Audio Levels; LL reveals the Waveform.
   - The Waveform row draws the source audio amplitude envelope for each channel (stereo: two waveforms) over the layer's duration in the time graph; the row height is larger than a normal property row (UNVERIFIED); drawn post-Audio Levels? (UNVERIFIED: AE draws the source waveform, not affected by Audio Levels).
   - Waveform drawing respects time stretch and time remap (shows audio as it plays in comp time).
-  - Graph Editor: Show Audio Waveforms option (AE-UI-078) overlays the waveform of selected layers behind the graphs.
+  - Graph Editor: Show Audio Waveforms option (AE-UI-079) overlays the waveform of selected layers behind the graphs.
   - Waveform generation is asynchronous: rows show empty until analysis finishes (UNVERIFIED).
 - **Priority:** P1
 - **Owner:** bae-ui-motion (+ bae-media)
