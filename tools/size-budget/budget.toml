@@ -1,0 +1,51 @@
+# BAE 体积预算（docs/ARCHITECTURE.md 第 11 节）。
+#
+# 由 `cargo xtask size`（应用本体）和 `cargo xtask dist`（打包产物）读取，CI 每次都检查。
+# 提高预算需要单独的 PR 并写明理由。
+#
+# 每个表是一项被测产物，字段：
+#   description  测量的是什么（报告里显示）
+#   max_mib      默认上限，单位 MiB（1 MiB = 1024 × 1024 字节）。第 11 节写的 "MB" 一律按 MiB 计。
+#   enforced     true：超出预算时命令以非零退出码失败；false（默认）：只在报告里提示
+#   targets      按 target triple 覆盖上限：[<名称>.targets."<triple>"] max_mib = …
+#                没有覆盖的 target 用默认 max_mib。
+
+# 应用本体：release 构建的 bae 可执行文件（strip 后）。M0 预算。
+# 检查方：cargo xtask size
+[app]
+description = "bae executable (release, stripped)"
+max_mib = 15.0
+enforced = true
+
+[app.targets."aarch64-apple-darwin"]
+max_mib = 15.0
+
+[app.targets."x86_64-pc-windows-msvc"]
+max_mib = 15.0
+
+# 解压后的应用包：macOS 的 BAE.app，Windows 的程序及依赖目录。
+# 检查方：cargo xtask dist（目前只报告）
+[app-bundle]
+description = "unpacked application (BAE.app / Windows folder)"
+max_mib = 40.0
+enforced = false
+
+[app-bundle.targets."aarch64-apple-darwin"]
+max_mib = 40.0
+
+[app-bundle.targets."x86_64-pc-windows-msvc"]
+max_mib = 40.0
+
+# 压缩后的安装包。目前用 dist 产出的 zip 计量，以后换成 dmg / 安装器。
+# 检查方：cargo xtask dist（目前只报告）
+[installer]
+description = "compressed distributable (zip now, installer later)"
+max_mib = 20.0
+enforced = false
+
+# bae-hub 服务端二进制（services/bae-hub，工作流 10 落地后接入检查）。
+# 检查方：暂无
+[bae-hub]
+description = "bae-hub server executable (release, stripped)"
+max_mib = 15.0
+enforced = false
