@@ -838,20 +838,22 @@ These effects are needed so AE projects open and render, but are rarely used in 
 
 ### AE-FX-049 · Auto Color, Auto Contrast and Auto Levels (自动颜色、自动对比度和自动色阶)
 
-- **What it does:** Analyse each frame's histogram and stretch it so the darkest/lightest pixels map to black/white (Auto Contrast: luminance only; Auto Levels: per channel; Auto Color: per channel plus optional neutral-midtone snap), with temporal smoothing.
+- **What it does:** Analyse each frame's histogram and stretch it so the darkest/lightest pixels map to black/white (Auto Contrast: overall contrast; Auto Levels: each channel separately; Auto Color: contrast and colour from shadows/midtones/highlights, with optional neutral-midtone snap), with temporal smoothing.
 - **Exact semantics:** matchNames `ADBE AutoColor`, `ADBE AutoContrast`, `ADBE AutoLevels`; all 16 bpc; GPU —; expands bounds: no.
   | Parameter (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
-  | Temporal Smoothing (seconds) (时间滤波（秒）) | float slider | 0 | 0…UNVERIFIED (slider 0…10) | s | 0 = each frame analysed alone. |
+  | Temporal Smoothing (seconds) (瞬时平滑（秒）) | float slider | 0 | 0…UNVERIFIED (slider 0…10) | s | 0 = each frame analysed alone. |
   | Scene Detect (场景检测) | checkbox | off | — | — | Ignores frames past a scene cut when smoothing. |
-  | Black Clip (黑色剪切) | float slider | 0.10 | 0…10 (UNVERIFIED) | % | Fraction of darkest pixels ignored. |
-  | White Clip (白色剪切) | float slider | 0.10 | 0…10 (UNVERIFIED) | % | |
+  | Black Clip (修剪黑色) | float slider | 0.10 (per help) | 0…10 (UNVERIFIED) | % | Fraction of darkest pixels ignored; help recommends 0…1 %. |
+  | White Clip (修剪白色) | float slider | 0.10 (per help) | 0…10 (UNVERIFIED) | % | |
   | Snap Neutral Midtones (对齐中性中间调) | checkbox | off | — | — | Auto Color only. |
   | Blend With Original (与原始图像混合) | float slider | 0 | 0…100 | % | |
   ```
   for frames in [t - smooth/2, t + smooth/2] (cut at scene changes if Scene Detect): accumulate histograms
   lo = value at Black Clip percentile, hi = value at (100 - White Clip) percentile
-     (Auto Contrast: of luminance, applied equally to R,G,B; Auto Levels / Auto Color: per channel)
+     (Auto Contrast: one map from luminance, applied equally to R,G,B; Auto Levels: per channel
+      (may add/remove casts); Auto Color: help says channels are not adjusted individually, so it
+      does not add or remove casts except through Snap Neutral Midtones — exact algorithm UNVERIFIED)
   out = (in - lo) / (hi - lo)
   Auto Color + Snap Neutral Midtones: find near-neutral average colour, set per-channel gamma so it becomes grey
   out = lerp(out, in, blend/100)
@@ -1192,8 +1194,8 @@ These effects are needed so AE projects open and render, but are rarely used in 
   | 10 | Highlight Radius (高光半径) | `-0010` | float slider | 30 | 0…UNVERIFIED | px | |
   | 11 | Color Correction (颜色校正) | `-0011` | float slider | 20 | 0…100 (UNVERIFIED) | % | Saturation of adjusted areas. |
   | 12 | Midtone Contrast (中间调对比度) | `-0012` | float slider | 0 | −100…100 | — | |
-  | 13 | Black Clip (黑色剪切) | `-0013` | float slider | 0.01 | 0…50 (UNVERIFIED) | % | AE 26 dump stores 0.01; help text says 0.1 % — UNVERIFIED which is displayed. |
-  | 14 | White Clip (白色剪切) | `-0014` | float slider | 0.01 | 0…50 (UNVERIFIED) | % | |
+  | 13 | Black Clip (修剪黑色) | `-0013` | float slider | 0.01 | 0…50 (UNVERIFIED) | % | AE 26 dump stores 0.01; help text says 0.1 % — UNVERIFIED which is displayed. |
+  | 14 | White Clip (修剪白色) | `-0014` | float slider | 0.01 | 0…50 (UNVERIFIED) | % | |
   | 16 | Blend With Original (与原始图像混合) | `-0016` | float slider | 0 | 0…100 | % | |
   ```
   L    = luminance(in); Lb_s = gaussianBlur(L, shadowRadius); Lb_h = gaussianBlur(L, highlightRadius)
@@ -1295,10 +1297,9 @@ These effects are needed so AE projects open and render, but are rarely used in 
 - **Exact semantics:** matchName `ADBE DigitalVideoLimiter` (AE 26 effect enumeration; not in the docsforadobe table); bpc: 32 (UNVERIFIED); GPU: yes per AE help (version UNVERIFIED); expands bounds: no.
   | Parameter (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
-  | Clip Level / Signal Min / Signal Max (UNVERIFIED names) | popup / float | UNVERIFIED (e.g. 0–100 IRE) | e.g. −20…120 | IRE | Parameter set mirrors Premiere Pro's Video Limiter (UNVERIFIED for AE). |
-  | Clip Method (UNVERIFIED) | popup | UNVERIFIED | Luma / Chroma / Smart Limit (UNVERIFIED) | — | |
-  | Compression Before Clipping (UNVERIFIED) | popup | UNVERIFIED | — | % | Soft knee before the clip. |
-  | Show Safe Areas / Reduction Axis (UNVERIFIED) | checkbox | off | — | — | |
+  | Clip Level (剪切级别（译名待核）) `-0001` | float slider (the AE 26 enum table lists no popup at `-0001`) | UNVERIFIED | UNVERIFIED | IRE | Maximum legal level (UNVERIFIED name; Premiere Pro's Video Limiter uses this name). |
+  | Compression Before Clipping (剪切前压缩（译名待核）) `ADBE DigitalVideoLimiter-0002` | popup | UNVERIFIED (1 = None) | None / 3% / 5% / 10% / 20% (AE 26 enum table) | — | Soft knee that starts this far below the clip level. |
+  | Further controls (e.g. clip method / reduction axis) | — | — | — | — | UNVERIFIED whether AE has any; needs a parameter dump. |
   ```
   Y,Cb,Cr = rgbToYCbCr709(c)  (working space)
   Y  = softClip(Y, minIRE/100, maxIRE/100, knee)      // Luma or Smart Limit
