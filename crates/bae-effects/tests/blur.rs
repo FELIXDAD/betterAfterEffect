@@ -88,9 +88,8 @@ fn gauss_case(blurriness: f64, dims: i64, repeat: bool, scale: f64, tol: f32) {
     ];
     let inst = instance(&fx.info.match_name, params.clone());
     let p = EffectParams {
-        effect: &inst,
-        time: bae_model::Time::ZERO,
         scale,
+        ..EffectParams::new(&inst)
     };
     let bounds = fx.effect().output_bounds(&p, in_rect);
     let s = BLURRINESS_TO_SIGMA * blurriness * scale;
@@ -130,9 +129,9 @@ fn gauss_case(blurriness: f64, dims: i64, repeat: bool, scale: f64, tol: f32) {
 
 #[test]
 fn gaussian_direct() {
-    // σ < 8: exact separable kernel.
+    // σ < 6: exact separable kernel.
     gauss_case(5.0, 1, false, 1.0, 2e-5);
-    gauss_case(20.0, 1, true, 1.0, 2e-5);
+    gauss_case(19.0, 1, true, 1.0, 2e-5);
     gauss_case(12.0, 2, false, 1.0, 2e-5);
     gauss_case(12.0, 3, true, 1.0, 2e-5);
     gauss_case(0.7, 1, false, 1.0, 2e-5);
@@ -142,6 +141,8 @@ fn gaussian_direct() {
 fn gaussian_pyramid() {
     // σ ≥ 8: downsample / blur / upsample. Values up to 3.0 (HDR spots); the
     // bound is relative to that range (≈ 0.75/255 of a 0..1 edge).
+    gauss_case(20.0, 1, false, 1.0, 0.009);
+    gauss_case(25.0, 1, true, 1.0, 0.009);
     gauss_case(30.0, 1, false, 1.0, 0.009);
     gauss_case(60.0, 1, true, 1.0, 0.009);
     gauss_case(100.0, 2, false, 1.0, 0.009);
@@ -151,7 +152,7 @@ fn gaussian_pyramid() {
 #[test]
 fn gaussian_half_resolution() {
     // Blurriness is scaled by the downsample factor.
-    gauss_case(40.0, 1, false, 0.5, 2e-5);
+    gauss_case(38.0, 1, false, 0.5, 2e-5);
     gauss_case(100.0, 1, true, 0.5, 0.009);
 }
 
@@ -167,9 +168,8 @@ fn gaussian_roi_is_tile_independent() {
         let params = vec![(1, Value::Float(blurriness)), (3, Value::Bool(false))];
         let inst = instance(&fx.info.match_name, params.clone());
         let p = EffectParams {
-            effect: &inst,
-            time: bae_model::Time::ZERO,
             scale: 1.0,
+            ..EffectParams::new(&inst)
         };
         let effect = fx.effect();
         let bounds = effect.output_bounds(&p, in_rect);
@@ -259,9 +259,8 @@ fn fast_box_blur() {
         ];
         let inst = instance(&fx.info.match_name, params.clone());
         let p = EffectParams {
-            effect: &inst,
-            time: bae_model::Time::ZERO,
             scale: 1.0,
+            ..EffectParams::new(&inst)
         };
         let bounds = fx.effect().output_bounds(&p, in_rect);
         let r = match dims {

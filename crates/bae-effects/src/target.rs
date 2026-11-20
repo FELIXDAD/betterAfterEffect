@@ -119,6 +119,11 @@ impl Standalone {
         index
     }
 
+    /// The command encoder (to record extra work, e.g. timer resolves).
+    pub fn encoder_mut(&mut self) -> &mut wgpu::CommandEncoder {
+        &mut self.encoder
+    }
+
     /// Submits and waits until the GPU is idle.
     pub fn finish(&mut self) -> Result<(), RenderError> {
         self.submit();

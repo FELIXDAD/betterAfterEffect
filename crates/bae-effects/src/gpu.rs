@@ -247,7 +247,12 @@ impl Runtime {
             layout: Some(&pipeline_layout),
             module: &module,
             entry_point: Some(src.entry),
-            compilation_options: Default::default(),
+            // Every kernel writes its workgroup memory before reading it; the
+            // default zero fill costs a serial store loop per workgroup.
+            compilation_options: wgpu::PipelineCompilationOptions {
+                zero_initialize_workgroup_memory: false,
+                ..Default::default()
+            },
             cache: None,
         });
         if let Some(err) = pollster::block_on(scope.pop()) {

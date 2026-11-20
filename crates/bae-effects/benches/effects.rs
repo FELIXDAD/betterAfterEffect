@@ -15,7 +15,7 @@ use std::time::Instant;
 use bae_effects::Standalone;
 use bae_gpu::wgpu;
 use bae_gpu::{GpuContext, GpuContextDescriptor};
-use bae_model::{PrimPath, Time, Value};
+use bae_model::{PrimPath, Value};
 use bae_render::{EffectParams, GpuImage, IRect, ImageAlpha, RenderEffect};
 
 const ITER: u32 = 60;
@@ -77,6 +77,7 @@ fn main() {
         .iter()
         .find(|a| !a.starts_with("--") && Some(*a) != json_path.as_ref())
         .cloned();
+    let steps = args.iter().any(|a| a == "--steps");
 
     let gpu = match GpuContext::new_headless(GpuContextDescriptor::default().with_env()) {
         Ok(g) => g,
@@ -149,6 +150,9 @@ fn main() {
         }
         let (per_frame, latency) = measure(&gpu, case);
         println!("{:<44} {:>10.3} {:>10.3}", case.name, per_frame, latency);
+        if steps {
+            profile_steps(&gpu, case);
+        }
         results.push(format!(
             "{{\"case\": \"{}\", \"ms_per_frame\": {per_frame:.4}, \"latency_ms\": {latency:.4}}}",
             case.name
@@ -174,9 +178,8 @@ fn measure(gpu: &Arc<GpuContext>, case: &Case) -> (f64, f64) {
         params: case.params.clone(),
     };
     let params = EffectParams {
-        effect: &inst,
-        time: Time::ZERO,
         scale: 1.0,
+        ..EffectParams::new(&inst)
     };
     let image = input(gpu, case.size);
     let effect = fx.effect();
@@ -199,4 +202,38 @@ fn measure(gpu: &Arc<GpuContext>, case: &Case) -> (f64, f64) {
     target.finish().unwrap();
     let per_frame = t.elapsed().as_secs_f64() * 1e3 / f64::from(ITER);
     (per_frame, latency)
+}
+
+/// Prints the GPU time of every dispatch of one frame of `case`.
+fn profile_steps(gpu: &Arc<GpuContext>, case: &Case) {
+    let Some(timer) = bae_gpu::timer::GpuTimer::new(gpu, 64) else {
+        println!("    (no timestamp queries)");
+        return;
+    };
+    bae_effects::profile::install(timer);
+    let fx = bae_effects::get(case.match_name).unwrap();
+    let inst = RenderEffect {
+        path: PrimPath::new("/comps/bench/layers/a/effects/fx").unwrap(),
+        effect: case.match_name.to_owned(),
+        enabled: true,
+        params: case.params.clone(),
+    };
+    let params = EffectParams::new(&inst);
+    let image = input(gpu, case.size);
+    let roi = fx.effect().output_bounds(&params, image.rect);
+    let mut target = Standalone::new(gpu.clone(), wgpu::TextureFormat::Rgba16Float);
+    // Warm the GPU up (clocks) without the timer, then time one frame.
+    let timer = bae_effects::profile::take().unwrap();
+    for _ in 0..30 {
+        let _ = fx.render(&mut target, &params, &image, roi).unwrap();
+        target.submit();
+    }
+    bae_effects::profile::install(timer);
+    let _ = fx.render(&mut target, &params, &image, roi).unwrap();
+    let timer = bae_effects::profile::take().unwrap();
+    timer.resolve(target.encoder_mut());
+    target.finish().unwrap();
+    for sample in timer.read(gpu).unwrap() {
+        println!("    {:<36} {:>8.3} ms", sample.label, sample.millis());
+    }
 }

@@ -37,6 +37,7 @@ mod common;
 pub mod effects;
 mod gpu;
 mod params;
+pub mod profile;
 mod target;
 
 use std::sync::{Arc, OnceLock};

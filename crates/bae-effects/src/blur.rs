@@ -1,9 +1,9 @@
 //! The blur engine shared by the blur, glow, shadow and feather effects.
 //!
 //! **Gaussian** ([`plan_gaussian`], [`encode_gaussian`]): separable, with the
-//! kernel cut at 3σ like AE. Small σ (< 8 render px) runs two direct passes
-//! whose source line is cached in workgroup memory. Larger σ blurs a
-//! block-averaged copy at 1/2ⁿ resolution (σ at the level stays in 4..8
+//! kernel cut at 3σ like AE. Small σ (< 6 render px) runs two direct passes
+//! whose source lines are cached in workgroup memory. Larger σ blurs a
+//! block-averaged copy at 1/2ⁿ resolution (σ at the level stays in 3..6
 //! texels) and upsamples it bilinearly: the cost no longer depends on the
 //! radius (4K, Blurriness 100 ≈ one full-resolution read and write). The level
 //! σ is reduced by the variance the box downsample ((f²−1)/12) and the
@@ -29,14 +29,16 @@ use crate::gpu::{
 use crate::target::EffectTarget;
 
 const SOURCE: &str = include_str!("shaders/blur.wgsl");
-const PARAMS_SIZE: u32 = 96 + 7 * 16;
+const PARAMS_SIZE: u32 = 96 + 15 * 16;
 /// Direct (full-resolution) passes up to this σ, pyramid above.
-pub const DIRECT_MAX_SIGMA: f64 = 8.0;
+pub const DIRECT_MAX_SIGMA: f64 = 6.0;
 /// `conv_line` tile: outputs along the axis × lines across it.
-const TILE_ALONG: u32 = 32;
-const TILE_ACROSS: u32 = 8;
+const TILE_ALONG: u32 = 128;
+const TILE_ACROSS: u32 = 4;
 /// Most taps per side `conv_line` handles (box blurs above use `box_line`).
 const MAX_TAPS: i32 = 24;
+/// Index of offset 0 in the symmetric weight table (`WPAD` in blur.wgsl).
+const WPAD: usize = 28;
 
 /// Kernel radius (taps per side) for σ, as AE: ceil(3σ).
 pub fn radius(sigma: f64) -> i32 {
@@ -68,7 +70,7 @@ fn kernel(
         variant: crate::gpu::format_key(format),
     };
     let workgroup = match entry {
-        "conv_line" => [TILE_ALONG, TILE_ACROSS, 1],
+        "conv_line" => [32, TILE_ACROSS, 1],
         "box_line" => [64, 1, 1],
         _ => [8, 8, 1],
     };
@@ -212,7 +214,8 @@ pub fn level_factor(sigma: f64) -> i32 {
     if sigma < DIRECT_MAX_SIGMA {
         1
     } else {
-        let n = (sigma / 4.0).log2().floor().max(1.0) as u32;
+        // σ at the level stays in [3, 6).
+        let n = (sigma / 3.0).log2().floor().max(1.0) as u32;
         1 << n.min(12)
     }
 }
@@ -488,8 +491,10 @@ impl Plan {
                 .f32(76, s.sigma.max(1e-6))
                 .f32(80, s.frac)
                 .i32(84, s.seg);
-            for (i, x) in s.weights.iter().enumerate().take(28) {
-                w.f32(96 + 4 * i, *x);
+            // Symmetric, zero-padded layout (see `wsym` in blur.wgsl).
+            for (d, x) in s.weights.iter().enumerate().take(WPAD + 1) {
+                w.f32(96 + 4 * (WPAD + d), *x);
+                w.f32(96 + 4 * (WPAD - d), *x);
             }
             let offset = gpu::push_uniform(&rt, &w);
             let group = rt.bind_group(
@@ -515,6 +520,24 @@ impl Plan {
             prepared.push((k, group, offset, groups));
         }
         let encoder = target.encoder();
+        let mut profiler = crate::profile::PROFILER.lock();
+        if let Some(timer) = profiler.as_mut() {
+            // Profiling: one pass per step, each with timestamps.
+            for ((k, group, offset, groups), s) in prepared.iter().zip(&self.steps) {
+                let [w, h] = s.dst_rect.size();
+                let label = format!("{} r{} {}x{}", s.entry, s.radius, w, h);
+                let scope = timer.scope(label);
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("bae.effects.blur"),
+                    timestamp_writes: scope.map(|sc| timer.compute_pass_writes(sc)),
+                });
+                pass.set_pipeline(&k.pipeline);
+                pass.set_bind_group(0, group, &[*offset]);
+                pass.dispatch_workgroups(groups[0], groups[1], groups[2]);
+            }
+            return Ok(output);
+        }
+        drop(profiler);
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("bae.effects.blur"),
             timestamp_writes: None,
@@ -550,15 +573,15 @@ mod tests {
 
     #[test]
     fn levels() {
-        assert_eq!(level_factor(7.9), 1);
-        assert_eq!(level_factor(8.0), 2);
-        assert_eq!(level_factor(15.9), 2);
-        assert_eq!(level_factor(16.0), 4);
-        assert_eq!(level_factor(30.0), 4);
-        for s in [8.0, 12.0, 30.0, 100.0, 900.0] {
+        assert_eq!(level_factor(5.9), 1);
+        assert_eq!(level_factor(6.0), 2);
+        assert_eq!(level_factor(11.9), 2);
+        assert_eq!(level_factor(12.0), 4);
+        assert_eq!(level_factor(30.0), 8);
+        for s in [6.0, 8.0, 12.0, 30.0, 100.0, 900.0] {
             let f = level_factor(s);
             let ls = level_sigma(s, f);
-            assert!((3.0..8.0).contains(&ls), "sigma {s}: level sigma {ls}");
+            assert!((2.5..6.5).contains(&ls), "sigma {s}: level sigma {ls}");
         }
     }
 

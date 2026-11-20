@@ -12,7 +12,7 @@ use bae_effects::{Builtin, Standalone};
 use bae_gpu::transfer;
 use bae_gpu::wgpu;
 use bae_gpu::{GpuContext, GpuContextDescriptor, GpuError};
-use bae_model::{PrimPath, Time, Value};
+use bae_model::{PrimPath, Value};
 use bae_render::{EffectParams, GpuImage, IRect, ImageAlpha, RenderEffect};
 
 pub const F32: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
@@ -196,9 +196,8 @@ pub fn run(
 ) -> Pixels {
     let inst = instance(&fx.info.match_name, params);
     let p = EffectParams {
-        effect: &inst,
-        time: Time::ZERO,
         scale,
+        ..EffectParams::new(&inst)
     };
     let mut target = Standalone::new(gpu.clone(), format);
     let image = input.upload(gpu, format);

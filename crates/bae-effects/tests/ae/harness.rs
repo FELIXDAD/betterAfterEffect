@@ -8,7 +8,7 @@ use std::sync::Arc;
 use bae_effects::Standalone;
 use bae_gpu::GpuContext;
 use bae_gpu::wgpu;
-use bae_model::{PrimPath, Time, Value};
+use bae_model::{PrimPath, Value};
 use bae_render::{EffectParams, IRect, ImageAlpha, RenderEffect};
 
 pub const CASES: &str = include_str!("cases.json");
@@ -165,9 +165,8 @@ pub fn render(gpu: &Arc<GpuContext>, case: &Case) -> Vec<[u8; 4]> {
         params: case.params.clone(),
     };
     let p = EffectParams {
-        effect: &inst,
-        time: Time::ZERO,
         scale: 1.0,
+        ..EffectParams::new(&inst)
     };
     let mut target = Standalone::new(gpu.clone(), wgpu::TextureFormat::Rgba32Float);
     let out = fx.render(&mut target, &p, &image, rect).unwrap();
