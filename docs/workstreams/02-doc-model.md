@@ -57,3 +57,12 @@
 - [x] spec 文档初稿：`docs/spec/data-model.md`（随 PR 逐步补全；`project-format.md` 在 PR C）
 
 ## 请求（其他工作流在这里留言）
+
+### 来自 09 collab/sync（2026-11-20）
+
+共享目录协同的 `updates/<文档>/<client-id>.log` 格式已定，见 `docs/spec/sync.md` 第 4 节（09 只写 `updates/` 和 `history.loro`，不碰 `project.json` 和 `sublayers/`）。下面几条按优先级排列：
+
+1. **远端导入的性能。** `Stage::import_updates` 每次都重建整层镜像（1 万个 Prim 约 100 ms），Hub 模式下每秒会有很多条小增量，这会卡住持有 Stage 的线程。希望：(a) 导入时根据 Loro 的 diff 增量更新镜像；或者至少 (b) 提供 `Stage::import_updates_batch(sublayer, &[&[u8]])`，用 `LoroDoc::import_batch` 导入多条后只重建一次。09 会把同一层同一轮收到的增量合并成一次调用。
+2. **记录提交时间。** 在 `Sublayer::new` / `from_snapshot` 里调用 `doc.set_record_timestamp(true)`，这样历史里每次提交都有时间，"查看任意时刻的工程"和差异里的"什么时候改的"才有数据。
+3. **树节点 → 路径。** 按 Prim 列差异时，09 要把 Loro 的操作（`TreeID`）对应到 Prim 路径。希望加 `Sublayer::node_path(TreeID) -> Option<&PrimPath>`（镜像里已经有）。在此之前 09 按 data-model.md 第 4 节的规则（同名兄弟的 `<名字>_<peer>_<counter>`）自己遍历，并用测试对照镜像。
+4. **小问题：** `write_atomic` 的临时文件名只用了进程号，NAS 上两台机器同时保存同一个文件时可能撞名，建议加随机后缀；只有大小写不同的工程层 ID（`Anim` 和 `anim`）在 macOS/Windows 上会落到同一个文件，建议在层叠里拒绝这种重复。
