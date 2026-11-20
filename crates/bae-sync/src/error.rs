@@ -29,6 +29,19 @@ pub enum SyncError {
     },
     #[error("transport closed")]
     Closed,
+    #[error("client ID {0} is already in use by another session on this project")]
+    ClientIdInUse(crate::ClientId),
+    #[error("{0} is not a project directory")]
+    NotADirectory(PathBuf),
+}
+
+impl SyncError {
+    pub(crate) fn io(path: &std::path::Path) -> impl FnOnce(std::io::Error) -> SyncError + '_ {
+        move |source| SyncError::Io {
+            path: path.to_owned(),
+            source,
+        }
+    }
 }
 
 impl From<bae_model::loro::LoroError> for SyncError {

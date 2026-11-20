@@ -35,6 +35,35 @@ pub trait DocSet {
     fn export_snapshot(&self, doc: &DocKey) -> Result<Vec<u8>, SyncError>;
     /// Import updates or a snapshot of `doc`.
     fn import(&mut self, doc: &DocKey, data: &[u8]) -> Result<Imported, SyncError>;
+
+    /// Import several payloads of `doc` at once; each comes with its version (the
+    /// sender had every op up to it). The default imports them one by one,
+    /// skipping payloads the document already contains, and merges the events.
+    /// Implementations override it when one batch is cheaper (one mirror rebuild).
+    fn import_batch(
+        &mut self,
+        doc: &DocKey,
+        batch: &[(VersionVector, Vec<u8>)],
+    ) -> Result<Imported, SyncError> {
+        let mut merged: Option<StageEvent> = None;
+        for (version, data) in batch {
+            if self
+                .version(doc)
+                .is_some_and(|have| have.includes_vv(version))
+            {
+                continue;
+            }
+            match self.import(doc, data)? {
+                Imported::UnknownDoc => return Ok(Imported::UnknownDoc),
+                Imported::Done(Some(ev)) => match &mut merged {
+                    Some(m) => m.changes.extend(ev.changes),
+                    None => merged = Some(ev),
+                },
+                Imported::Done(None) => {}
+            }
+        }
+        Ok(Imported::Done(merged))
+    }
 }
 
 impl DocSet for Stage {
@@ -58,6 +87,21 @@ impl DocSet for Stage {
         match doc.as_sublayer() {
             Some(id) if self.sublayer(id).is_some() => {
                 Ok(Imported::Done(Some(self.import_updates(id, data)?)))
+            }
+            _ => Ok(Imported::UnknownDoc),
+        }
+    }
+
+    /// One Loro batch import, one mirror rebuild, one event.
+    fn import_batch(
+        &mut self,
+        doc: &DocKey,
+        batch: &[(VersionVector, Vec<u8>)],
+    ) -> Result<Imported, SyncError> {
+        match doc.as_sublayer() {
+            Some(id) if self.sublayer(id).is_some() => {
+                let blobs: Vec<Vec<u8>> = batch.iter().map(|(_, d)| d.clone()).collect();
+                Ok(Imported::Done(Some(self.import_updates_batch(id, &blobs)?)))
             }
             _ => Ok(Imported::UnknownDoc),
         }

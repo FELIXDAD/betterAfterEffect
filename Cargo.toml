@@ -140,6 +140,8 @@ objc2-video-toolbox = { version = "0.3.2", default-features = false, features = 
 windows = { version = "0.62.2", default-features = false }
 windows-sys = { version = "0.61.2", default-features = false }
 directories = "6.0.0"
+# File watching for the shared-folder sync transport (bae-sync `watch` feature).
+notify = { version = "8.2.2", default-features = false, features = ["macos_fsevent"] }
 libloading = "0.9.1"
 
 # ---- plugins, packaging, hashing ----
