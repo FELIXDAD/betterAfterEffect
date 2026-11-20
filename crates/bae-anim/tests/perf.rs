@@ -168,5 +168,8 @@ fn expressions_per_frame() {
             .unwrap();
         assert!(ec.errors.is_empty(), "{:?}", ec.errors);
     }
-    println!("100 layers × 2 expressions: {:?} per frame", t.elapsed() / frames as u32);
+    println!(
+        "100 layers × 2 expressions: {:?} per frame",
+        t.elapsed() / frames as u32
+    );
 }

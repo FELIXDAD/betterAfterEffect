@@ -43,6 +43,8 @@ pub(crate) struct ExprProp {
     pub source: Arc<str>,
     pub prim: PrimPath,
     pub attr: Arc<str>,
+    /// Range the result is clamped to (Opacity), as after interpolation.
+    pub clamp: Option<(f64, f64)>,
 }
 
 /// Where and when a property is sampled.
@@ -103,6 +105,7 @@ impl Prop {
                     source: e.source.as_str().into(),
                     prim: prim.clone(),
                     attr: attr.into(),
+                    clamp: schema::clamp_range(prim_type, attr),
                 })))
             }
             _ => base,
@@ -802,6 +805,34 @@ impl CompiledComp {
             .layers
             .iter()
             .any(|l| l.switches.solo && l.switches.enabled);
+
+        // Expressions: memoise them first so long chains stay shallow (see warm_up).
+        if js.is_some() && self.has_expressions {
+            let props: Vec<(usize, &ExprProp)> = self
+                .layers
+                .iter()
+                .enumerate()
+                .flat_map(|(i, l)| l.expr_props().into_iter().map(move |e| (i, e)))
+                .collect();
+            let cx_of = |i: usize| Cx {
+                comp: comp_id,
+                layer: i,
+                ct: time,
+                lt: self.layers[i].timing.layer_time(time),
+                js,
+            };
+            expr::warm_up(
+                props.len(),
+                |k| {
+                    let (i, e) = props[k];
+                    expr::evaluate(js.expect("js"), &cx_of(i), e);
+                },
+                |k| {
+                    let (i, e) = props[k];
+                    expr::memoize_pre(&cx_of(i), e);
+                },
+            );
+        }
 
         // Pass 1: everything that does not depend on other layers.
         let mut out: Vec<EvaluatedLayer> = self
@@ -1543,6 +1574,64 @@ impl CompiledLayer {
             .iter()
             .chain(&self.text_animators)
             .find_map(|c| c.find(prim, attr))
+    }
+
+    /// Every property of this layer (and the prims below it) that has an expression.
+    pub(crate) fn expr_props(&self) -> Vec<&ExprProp> {
+        let mut all: Vec<&Prop> = Vec::new();
+        let t = &self.transform;
+        match &t.position {
+            Position::Combined(p) => all.push(p),
+            Position::Separate(xyz) => all.extend(xyz.iter()),
+        }
+        all.extend([
+            &t.anchor,
+            &t.scale,
+            &t.orientation,
+            &t.rotation_x,
+            &t.rotation_y,
+            &t.rotation,
+            &t.opacity,
+            &t.point_of_interest,
+        ]);
+        all.extend(self.time_remap.iter());
+        all.extend(self.text.iter());
+        for m in &self.masks {
+            all.extend([&m.shape, &m.feather, &m.opacity, &m.expansion]);
+        }
+        for e in &self.effects {
+            all.extend(e.params.iter().map(|(_, p)| p));
+        }
+        fn walk<'a>(p: &'a CompiledPrim, out: &mut Vec<&'a Prop>) {
+            out.extend(p.attrs.iter().map(|(_, v)| v));
+            for c in &p.children {
+                walk(c, out);
+            }
+        }
+        for c in self.contents.iter().chain(&self.text_animators) {
+            walk(c, &mut all);
+        }
+        if let Some(c) = &self.camera {
+            all.extend([&c.zoom, &c.focus_distance, &c.aperture, &c.blur_level]);
+        }
+        if let Some(l) = &self.light {
+            all.extend([
+                &l.intensity,
+                &l.color,
+                &l.cone_angle,
+                &l.cone_feather,
+                &l.radius,
+                &l.falloff_distance,
+                &l.shadow_darkness,
+                &l.shadow_diffusion,
+            ]);
+        }
+        all.into_iter()
+            .filter_map(|p| match p {
+                Prop::Expr(e) => Some(&**e),
+                _ => None,
+            })
+            .collect()
     }
 
     fn has_expressions(&self) -> bool {

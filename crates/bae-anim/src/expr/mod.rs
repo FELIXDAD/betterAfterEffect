@@ -91,7 +91,15 @@ pub(crate) struct Scope {
     errors: Vec<(usize, AttrError)>,
     /// (comp id, layer) → layers it read through expressions.
     deps: BTreeSet<((usize, usize), (usize, usize))>,
+    /// Set when an evaluation hit [`MAX_DEPTH`]: everything above it on the stack is
+    /// incomplete (not memoised, errors not recorded) and is retried by the caller's
+    /// warm-up passes ([`warm_up`]).
+    deferred: bool,
 }
+
+/// Nested expression evaluations allowed on the native stack. Deeper dependency
+/// chains are resolved by repeated passes that memoise them from the far end.
+const MAX_DEPTH: usize = 24;
 
 impl Scope {
     pub(crate) fn new(comps: Vec<Arc<CompiledComp>>) -> Scope {
@@ -112,6 +120,7 @@ impl Scope {
             stack: Vec::new(),
             errors: Vec::new(),
             deps: BTreeSet::new(),
+            deferred: false,
         }
     }
 
@@ -197,6 +206,19 @@ pub(crate) fn evaluate(ctx: &Ctx<'_>, cx: &Cx<'_, '_>, e: &ExprProp) -> Value {
         None if SCOPE.with(|s| s.borrow().is_none()) => return pre,
         None => {}
     }
+    let too_deep = SCOPE.with(|s| {
+        let mut s = s.borrow_mut();
+        let s = s.as_mut().expect("scope");
+        if s.stack.len() >= MAX_DEPTH {
+            s.deferred = true;
+            true
+        } else {
+            false
+        }
+    });
+    if too_deep {
+        return pre;
+    }
     let func = match compile(ctx, &e.source) {
         Ok(f) => f,
         Err(msg) => {
@@ -215,7 +237,15 @@ pub(crate) fn evaluate(ctx: &Ctx<'_>, cx: &Cx<'_, '_>, e: &ExprProp) -> Value {
             s.stack.pop();
         }
     });
+    if is_deferred() {
+        // A dependency was too deep to finish here; a later warm-up pass retries.
+        return pre;
+    }
     let value = match result.and_then(|js| to_value(js, &pre)) {
+        Ok(Value::Float(v)) if e.clamp.is_some() => {
+            let (lo, hi) = e.clamp.expect("checked");
+            Value::Float(v.clamp(lo, hi))
+        }
         Ok(v) => v,
         Err(msg) => {
             record_error(cx, e, msg);
@@ -228,6 +258,57 @@ pub(crate) fn evaluate(ctx: &Ctx<'_>, cx: &Cx<'_, '_>, e: &ExprProp) -> Value {
         }
     });
     value
+}
+
+fn is_deferred() -> bool {
+    SCOPE.with(|s| s.borrow().as_ref().is_some_and(|s| s.deferred))
+}
+
+/// Memoise every expression of a comp before the real pass, so long dependency
+/// chains never recurse deeper than [`MAX_DEPTH`]: each pass completes the
+/// evaluations whose remaining chain fits, and the next pass builds on them.
+/// `eval_one(i)` evaluates property `i`; when a pass makes no progress (a cycle longer
+/// than the depth limit), `cut(i)` memoises property `i`'s pre-expression value,
+/// which is how cycles are cut anyway.
+pub(crate) fn warm_up(count: usize, mut eval_one: impl FnMut(usize), mut cut: impl FnMut(usize)) {
+    let mut pending: Vec<usize> = (0..count).collect();
+    for _ in 0..(4 * count + 8) {
+        let mut still = Vec::new();
+        for &i in &pending {
+            set_deferred(false);
+            eval_one(i);
+            if is_deferred() {
+                still.push(i);
+            }
+        }
+        if still.is_empty() {
+            break;
+        }
+        if still.len() == pending.len() {
+            cut(still.remove(0));
+        }
+        pending = still;
+    }
+    set_deferred(false);
+}
+
+fn set_deferred(v: bool) {
+    SCOPE.with(|s| {
+        if let Some(s) = s.borrow_mut().as_mut() {
+            s.deferred = v;
+        }
+    });
+}
+
+/// Memoise `e`'s pre-expression value at `cx` (cuts a dependency cycle there).
+pub(crate) fn memoize_pre(cx: &Cx<'_, '_>, e: &ExprProp) {
+    let key: Key = (cx.comp, cx.layer, e.prim.clone(), e.attr.clone(), cx.ct.0);
+    let pre = e.base.sample(cx);
+    SCOPE.with(|s| {
+        if let Some(s) = s.borrow_mut().as_mut() {
+            s.memo.insert(key, pre);
+        }
+    });
 }
 
 fn record_error(cx: &Cx<'_, '_>, e: &ExprProp, message: String) {

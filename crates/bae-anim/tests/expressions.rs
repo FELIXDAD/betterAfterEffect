@@ -418,3 +418,40 @@ fn evaluator_is_send() {
     let h = std::thread::spawn(move || eval(&s, 3.0).layers[0].transform.rotation.z);
     assert_eq!(h.join().unwrap(), 6.0);
 }
+
+#[test]
+fn long_dependency_chains_in_both_directions() {
+    let n = 150;
+    let s = stage(|b| {
+        for i in 0..n {
+            b.layer(MAIN, &format!("l{i}"), "null");
+        }
+        for i in 0..n {
+            let l = format!("{MAIN}/layers/l{i}");
+            // Rotation: each layer reads the one above (index - 1).
+            let rot = if i == 0 {
+                "1".to_owned()
+            } else {
+                "thisComp.layer(index - 1).rotation + 1".to_owned()
+            };
+            // Opacity: each layer reads the one below (index + 1).
+            let op = if i == n - 1 {
+                "1".to_owned()
+            } else {
+                "thisComp.layer(index + 1).opacity + 1".to_owned()
+            };
+            b.expr(&l, "transform:rotation", 0.0, &rot)
+                .expr(&l, "transform:opacity", 0.0, &op);
+        }
+    });
+    let ec = eval(&s, 0.0);
+    assert!(
+        ec.errors.is_empty(),
+        "{:?}",
+        &ec.errors[..ec.errors.len().min(3)]
+    );
+    assert_eq!(ec.layers[n - 1].transform.rotation.z, n as f64);
+    // Opacity is clamped to 0–100 after the expression, as in AE.
+    assert_eq!(ec.layers[n - 50].transform.opacity, 50.0);
+    assert_eq!(ec.layers[0].transform.opacity, 100.0);
+}
