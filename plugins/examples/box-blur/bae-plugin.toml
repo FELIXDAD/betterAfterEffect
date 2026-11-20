@@ -1,0 +1,59 @@
+# Declarative WGSL effect, compute style with two passes and an intermediate texture
+# (docs/spec/plugin-architecture.md §5.3.6, §11.4-§11.6).
+schema_version = 1
+
+[plugin]
+id = "com.example.box-blur"
+version = "1.0.0"
+api = "0.1"
+name = "Box Blur (separable)"
+description = "Separable box blur: a horizontal pass into an intermediate texture, then a vertical pass."
+authors = ["BAE example plugins"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "box-blur"
+name = "Box Blur (separable)"
+category = "Blur & Sharpen"
+implementation = "wgsl"
+keywords = ["blur", "box", "soften"]
+flags = ["expands-buffer"]
+shader = "shaders/box_blur.wgsl"
+style = "compute"
+identity_when = "params.radius < 0.5"
+
+# The output pixel p reads input pixels within `radius` (full-res layer px) on both axes,
+# and blurred content spreads outwards by the same amount.
+[effect.roi]
+extent = "input"
+read = "ceil(params.radius)"
+grows = true
+
+[[effect.param]]
+id = 1
+key = "radius"
+type = "float"
+name = "Blur Radius"
+default = 8.0
+range = [0.0, 256.0]
+slider = [0.0, 64.0]
+precision = 1
+display = "pixels"
+
+# Covers the whole (inflated) input rect: the vertical pass reads rows above and below
+# the output rect, so the horizontal pass must have produced them.
+[[effect.texture]]
+name = "tmp"
+format = "working"
+rect = "input"
+scale = 1.0
+
+[[effect.pass]]
+entry = "blur_horizontal"
+reads = ["input"]
+writes = "tmp"
+
+[[effect.pass]]
+entry = "blur_vertical"
+reads = ["tmp"]
+writes = "output"

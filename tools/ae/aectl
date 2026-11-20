@@ -312,7 +312,12 @@ EOF
   done
   kill "$osa" 2>/dev/null; wait "$osa" 2>/dev/null
   if [[ ! -f "$out" ]]; then
-    echo "{\"ok\":false,\"value\":null,\"error\":{\"message\":\"timeout after ${timeout}s\"}}"
+    # AE keeps executing the abandoned script after osascript gives up, so the next
+    # caller would queue behind it and time out too. Restart AE before releasing the
+    # lock; every caller builds its own scene, so nothing of value is lost.
+    LAST_EVIDENCE=""
+    recover "$pid" 1 "timeout after ${timeout}s; the script was still running"
+    echo "{\"ok\":false,\"value\":null,\"error\":{\"message\":\"timeout after ${timeout}s (After Effects restarted so the next caller is not blocked)\",\"evidence\":\"${LAST_EVIDENCE:-}\"}}"
     return 4
   fi
   cat "$out"; echo

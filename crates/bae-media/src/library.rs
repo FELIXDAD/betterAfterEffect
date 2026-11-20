@@ -42,6 +42,32 @@ use crate::time::Time;
 /// Default number of files kept open.
 pub const DEFAULT_OPEN_LIMIT: usize = 64;
 
+/// Where a footage file's bytes are: on disk, or embedded in a container
+/// such as a `.baez` package (ARCHITECTURE §16 stores media entries
+/// uncompressed, so an entry is a byte range of the container).
+///
+/// Packaging code maps its asset locations to this (for `bae-package`:
+/// `AssetLocation::File { path }` → [`MediaLocation::File`];
+/// `AssetLocation::Packaged { entry }` with the entry's `offset` / `size` →
+/// [`MediaLocation::Embedded`]) and calls [`MediaLibrary::resolve`].
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum MediaLocation {
+    /// A file on disk.
+    File(PathBuf),
+    /// A stored (uncompressed) entry of a container file.
+    Embedded {
+        /// The container (`.baez`).
+        container: PathBuf,
+        /// Byte offset of the entry's data.
+        offset: u64,
+        /// Length in bytes.
+        len: u64,
+        /// Entry name, `/`-separated (`assets/footage/a.mov`); its directories
+        /// are kept so the frames of an image sequence end up side by side.
+        name: String,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct SourceKey {
     path: PathBuf,
@@ -77,6 +103,9 @@ pub struct MediaLibrary {
     /// and content hashes of a re-opened file never match the old ones (a
     /// sequence frame can change without its first file changing).
     generation: std::sync::atomic::AtomicU64,
+    /// Where embedded entries are extracted ([`Self::resolve`]).
+    extract_dir: PathBuf,
+    extract_lock: Mutex<()>,
 }
 
 impl std::fmt::Debug for MediaLibrary {
@@ -100,7 +129,47 @@ impl MediaLibrary {
             open_limit: DEFAULT_OPEN_LIMIT,
             sources: Mutex::new(Sources::default()),
             generation: std::sync::atomic::AtomicU64::new(0),
+            extract_dir: std::env::temp_dir().join("bae-media-extract"),
+            extract_lock: Mutex::new(()),
         }
+    }
+
+    /// Extracts embedded media under `dir` (e.g. the project's `cache/`
+    /// directory) instead of the system temporary directory.
+    pub fn with_extract_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.extract_dir = dir.into();
+        self
+    }
+
+    /// A file path for `location`: the path itself for files; for embedded
+    /// entries a copy extracted on first use (system decoders such as
+    /// AVFoundation need a file) and reused while the container is unchanged.
+    /// For an image sequence, resolve every frame's entry, then open the
+    /// first frame's path as a sequence.
+    pub fn resolve(&self, location: &MediaLocation) -> Result<PathBuf, MediaError> {
+        let (container, offset, len, name) = match location {
+            MediaLocation::File(path) => return Ok(path.clone()),
+            MediaLocation::Embedded {
+                container,
+                offset,
+                len,
+                name,
+            } => (container, *offset, *len, name),
+        };
+        // One directory per container version, entry directories mirrored.
+        let dest = safe_join(
+            &self
+                .extract_dir
+                .join(format!("{:016x}", source_id_for(container))),
+            name,
+        )
+        .ok_or_else(|| MediaError::Unsupported(format!("embedded entry name {name:?}")))?;
+        let _guard = self.extract_lock.lock();
+        if std::fs::metadata(&dest).is_ok_and(|m| m.is_file() && m.len() == len) {
+            return Ok(dest);
+        }
+        extract_range(container, offset, len, &dest)?;
+        Ok(dest)
     }
 
     /// Changes how many files stay open (least recently used are closed).
@@ -272,6 +341,65 @@ impl MediaLibrary {
     }
 }
 
+/// `base` joined with the `/`-separated `name`, refusing anything that could
+/// leave `base` (`..`, absolute or drive-prefixed segments): package contents
+/// are untrusted.
+fn safe_join(base: &Path, name: &str) -> Option<PathBuf> {
+    let mut out = base.to_owned();
+    let mut any = false;
+    for segment in name.split(['/', '\\']) {
+        match segment {
+            "" | "." => {}
+            ".." => return None,
+            s if s.contains(':') => return None,
+            s => {
+                out.push(s);
+                any = true;
+            }
+        }
+    }
+    any.then_some(out)
+}
+
+/// Copies `len` bytes at `offset` of `container` to `dest` (atomically, via a
+/// temporary file in the same directory).
+fn extract_range(container: &Path, offset: u64, len: u64, dest: &Path) -> Result<(), MediaError> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let dir = dest.parent().expect("joined paths have a parent");
+    std::fs::create_dir_all(dir).map_err(|e| MediaError::io(dir, e))?;
+    let mut input = std::fs::File::open(container).map_err(|e| MediaError::io(container, e))?;
+    let total = input
+        .metadata()
+        .map_err(|e| MediaError::io(container, e))?
+        .len();
+    if offset.checked_add(len).is_none_or(|end| end > total) {
+        return Err(MediaError::decode(
+            container,
+            "embedded entry outside the container",
+        ));
+    }
+    input
+        .seek(SeekFrom::Start(offset))
+        .map_err(|e| MediaError::io(container, e))?;
+    let tmp = dir.join(format!(
+        ".{}.part-{}",
+        dest.file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default(),
+        std::process::id()
+    ));
+    let mut output = std::fs::File::create(&tmp).map_err(|e| MediaError::io(&tmp, e))?;
+    let copied =
+        std::io::copy(&mut input.take(len), &mut output).map_err(|e| MediaError::io(&tmp, e))?;
+    drop(output);
+    if copied != len {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(MediaError::decode(container, "embedded entry is truncated"));
+    }
+    std::fs::rename(&tmp, dest).map_err(|e| MediaError::io(dest, e))
+}
+
 /// Whether `path` is a frame of the sequence opened under `key`.
 fn same_sequence(key: &SourceKey, path: &Path) -> bool {
     use crate::sequence::parse_numbered_name;
@@ -301,6 +429,22 @@ fn clamp_index(info: &MediaInfo, index: i64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn safe_join_refuses_escapes() {
+        let base = Path::new("/cache/pkg");
+        assert_eq!(
+            safe_join(base, "assets/footage/a.mov"),
+            Some(PathBuf::from("/cache/pkg/assets/footage/a.mov"))
+        );
+        assert_eq!(
+            safe_join(base, "./assets//b.png"),
+            Some(PathBuf::from("/cache/pkg/assets/b.png"))
+        );
+        assert_eq!(safe_join(base, "assets/../../etc/passwd"), None);
+        assert_eq!(safe_join(base, "C:\\x.png"), None);
+        assert_eq!(safe_join(base, ""), None);
+    }
 
     #[test]
     fn source_keys_include_options() {

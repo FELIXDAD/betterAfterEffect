@@ -28,6 +28,8 @@ pub enum AgentError {
     Model(#[from] ModelError),
     #[error(transparent)]
     Project(#[from] ProjectError),
+    #[error(transparent)]
+    Sync(#[from] bae_sync::SyncError),
     #[error("{0}")]
     Invalid(String),
 }
@@ -179,6 +181,27 @@ impl AgentSession {
             .map(str::to_owned)
             .unwrap_or_else(|| commands[0].info().title.clone());
 
+        // Commands with an optional top-level `project` parameter get the open
+        // project's location (the package.* commands only see the stage).
+        let location = ws
+            .project
+            .location()
+            .map(|l| Json::String(l.to_string_lossy().into_owned()));
+        let params: Vec<Json> = steps
+            .iter()
+            .zip(&commands)
+            .map(|(step, cmd)| {
+                let mut params = step.params.clone();
+                if let (Some(loc), Json::Object(obj)) = (&location, &mut params)
+                    && !obj.contains_key("project")
+                    && crate::tools::takes_project(&cmd.info().params_schema)
+                {
+                    obj.insert("project".into(), loc.clone());
+                }
+                params
+            })
+            .collect();
+
         let target = self.ensure_target(ws)?;
         let stage = &mut ws.project.stage;
         let restore_target = stage.edit_target().clone();
@@ -198,9 +221,22 @@ impl AgentSession {
         };
         let result = stage.transact_guarded(self.identity.author(), &label, &allow, |tx| {
             let mut outputs = Vec::with_capacity(steps.len());
-            for (i, (step, cmd)) in steps.iter().zip(&commands).enumerate() {
+            for (i, (cmd, params)) in commands.iter().zip(params).enumerate() {
+                // Frame numbers / timecode -> flicks, against the stage as it is now
+                // (earlier commands of a batch may have created the comp).
+                let schema = &cmd.info().params_schema;
+                let params =
+                    crate::timeargs::convert(tx.stage(), schema, params).map_err(|message| {
+                        TxError {
+                            step: i,
+                            error: CommandError::InvalidParams {
+                                command: cmd.info().id.clone(),
+                                message,
+                            },
+                        }
+                    })?;
                 let out = cmd
-                    .run_json(tx, step.params.clone())
+                    .run_json(tx, params)
                     .map_err(|error| TxError { step: i, error })?;
                 outputs.push(out);
             }

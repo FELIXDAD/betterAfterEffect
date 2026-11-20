@@ -32,6 +32,10 @@ pub const RENDER_CONTACT_SHEET: &str = "render.contact_sheet";
 pub const COMMAND_BATCH: &str = "command.batch";
 pub const HISTORY_UNDO: &str = "history.undo";
 pub const HISTORY_REDO: &str = "history.redo";
+pub const HISTORY_LIST: &str = "history.list";
+pub const HISTORY_CHECKPOINT: &str = "history.checkpoint";
+pub const HISTORY_DIFF: &str = "history.diff";
+pub const HISTORY_REVERT: &str = "history.revert";
 
 /// MCP tool name for a canonical ID: `.` → `_`.
 pub fn tool_name(id: &str) -> String {
@@ -119,6 +123,39 @@ pub struct ContactSheetParams {
     /// Width of each thumbnail in pixels (default 320).
     #[serde(default)]
     pub thumb_width: Option<u32>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct CheckpointParams {
+    /// Short name of the version, e.g. "title_in v1".
+    pub name: String,
+    /// What this version contains and why it was saved.
+    #[serde(default)]
+    pub note: String,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct HistoryDiffParams {
+    /// Named version to compare from (ID from history_list).
+    pub from: String,
+    /// Named version to compare to; omitted compares to the current project.
+    #[serde(default)]
+    pub to: Option<String>,
+    /// Maximum number of changed prims listed (default 200).
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct HistoryRevertParams {
+    /// Named version to go back to (ID from history_list).
+    pub checkpoint: String,
+    /// Only put back this sublayer (e.g. your own agent/<you>).
+    #[serde(default)]
+    pub sublayer: Option<SublayerId>,
+    /// Only put back this prim and its descendants.
+    #[serde(default)]
+    pub prim: Option<PrimPath>,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -266,6 +303,34 @@ pub fn builtin_tools() -> Vec<ToolEntry> {
             false,
             schema_of::<NoParams>(),
         ),
+        builtin(
+            HISTORY_LIST,
+            "List Versions",
+            "Named versions of the project (oldest first): id, name, note, author, time, layer stack. Pass an id as checkpoint to stage_describe or prim_get to look at that version.",
+            true,
+            schema_of::<NoParams>(),
+        ),
+        builtin(
+            HISTORY_DIFF,
+            "Compare Versions",
+            "Which prims changed between a named version and another one (or now): per sublayer and prim, added / removed / modified / moved, the attributes and fields that differ, who changed them and when.",
+            true,
+            schema_of::<HistoryDiffParams>(),
+        ),
+        builtin(
+            HISTORY_CHECKPOINT,
+            "Save Version",
+            "Name the project's current state (a checkpoint everyone can see and go back to). Does not change the project.",
+            false,
+            schema_of::<CheckpointParams>(),
+        ),
+        builtin(
+            HISTORY_REVERT,
+            "Revert to Version",
+            "Put the project, one sublayer or one prim back to a named version, as one new undoable step (runs version.revert; your permission applies, so with own-layer permission give sublayer agent/<you>).",
+            false,
+            schema_of::<HistoryRevertParams>(),
+        ),
     ]
 }
 
@@ -278,9 +343,36 @@ fn command_entry(info: &CommandInfo) -> ToolEntry {
         id: info.id.clone(),
         title: info.title.clone(),
         description,
-        input_schema: input_schema(&info.params_schema),
+        input_schema: {
+            let mut schema = (*input_schema(&info.params_schema)).clone();
+            crate::timeargs::rewrite_schema(&mut schema);
+            Arc::new(schema)
+        },
         read_only: false,
         kind: ToolKind::Command,
+    }
+}
+
+/// Does a command take an optional top-level `project` parameter (the open
+/// project's location, e.g. the `package.*` commands)? The server fills it in.
+pub fn takes_project(schema: &Json) -> bool {
+    schema.pointer("/properties/project").is_some()
+        && !schema
+            .get("required")
+            .and_then(Json::as_array)
+            .is_some_and(|r| r.iter().any(|x| x == "project"))
+}
+
+/// Tell the agent that `project` defaults to the open project.
+pub fn note_project_default(schema: &mut serde_json::Map<String, Json>) {
+    if let Some(Json::Object(p)) = schema
+        .get_mut("properties")
+        .and_then(|p| p.get_mut("project"))
+    {
+        p.insert(
+            "description".into(),
+            "Project location (.bae folder or .baez file). Omit it: the server fills in the open project.".into(),
+        );
     }
 }
 

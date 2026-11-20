@@ -53,6 +53,10 @@
 - [x] 审计日志：每次工具调用一条（工具、参数、结果 ok / error / denied、写了哪些层、改动数、耗时），内存 + JSON Lines 文件（默认在日志目录的 `agent-audit.jsonl`）。
 - [x] MCP instructions：直接内置 18 的 `docs/agent-guide/mcp-instructions/en.md`（`--instructions zh` 用中文版），后面附一段本服务器说明（工具名写法、用 `command_batch` 代替事务、哪些工具还没有）。测试检查两份文件不超过 3000 字符、提到的工具名都存在或在"暂未提供"名单里。
 - [x] 端到端测试：rmcp 客户端和手写 JSON-RPC 两种方式（`crates/bae-agent/tests/mcp_e2e.rs`），并用真实的 `bae mcp` 二进制走过一遍 stdio。
+- [x] 领域命令接入：`Workspace::new` 注册 bae-package 的命令（`package.*`、`asset.relink` …），带可选顶层 `project` 参数的命令由服务器自动填入当前工程位置；`Workspace::with_commands` 接收模块命令，`bae mcp` 从 `bae_app::Registry<dyn DynCommand>` 收集（bae-motion 的 `MotionModule` 发布在这里）。
+- [x] 帧号和时码：所有 `Time` 参数还接受 `{"frame": 12}`、`"12f"`、时码 `"0:00:00:12"`（`;` 表示丢帧），在事务里按合成帧速率换算成 flicks（帧速率取 `frame_rate` / `fps` 参数或它的默认值，否则取参数里第一个 Prim 路径所在的合成）。时间基准跟参数本身一致：合成时间；图层上的关键帧用图层时间，和 `prim_get` 的 `key_frames` 一致。
+- [x] 命名版本（09）：`Workspace` 持有 `bae_sync::History`（`.bae` 目录里的 `history.loro`，创建版本时保存），注册 `version.revert`；工具 `history_list`、`history_diff`、`history_checkpoint`、`history_revert`（经 `version.revert` 命令，受权限守卫约束）；`stage_describe` / `prim_get` 传 `checkpoint` 查看旧版本（只读）。
+- [ ] 在线状态与锁提示（09 第 3 条）：等 HTTP / 协同模式里 Agent 作为 `SyncSession` 客户端时再接（stdio 模式没有会话）
 - [ ] `attribute.evaluate`（等 03 的求值）、`selection.get`（等桌面应用接入）、`proposal.describe`、`comment.add`、`history.list`
 - [ ] 速率限制和渲染预算
 - [ ] HTTP 传输（连接正在运行的桌面应用或 Hub，本地 token 认证）
@@ -67,6 +71,15 @@
   3. 建议把指南作为 MCP 资源暴露（如 `bae://agent-guide/03-animation`）。
   4. `stage.describe` 输出里请直接包含：合成帧速率、时长、工作区域、当前编辑目标、Agent 自己的权限级别、锁提示。
   5. `render.contact_sheet` 每格标出帧号；时间参数接受相对合成开始的整数帧号（也接受时码），由服务器换算 flicks。
+     - **17 回复**：已做（帧号、`"12f"`、时码含丢帧）。帧号用参数本身的时间基准：合成时间不变；图层上的关键帧是图层时间，图层从 0 开始、伸缩 100% 时和合成帧号相同。要按合成帧号写图层关键帧，命令参数需要标明"这是关键帧时间"，由 02 / 12 在 schema 里约定后再做。
   6. 评测集 `docs/agent-guide/evals/` 需要审计日志能导出完整的工具调用序列（含事务边界和写入的工程层）。
 
 - **21 io/packaging（2026-11-20）**：`bae-package`（无 GPU 依赖）提供打包命令 `package.scan`、`package.pack`、`package.collect`、`package.unpack`、`asset.relink`、`asset.set_files`，注册函数是 `bae_package::register_commands(&mut registry)`。请在 `Workspace::new` 里一起注册，Agent 才能调用。这些命令只能看到 Stage，工程位置通过参数 `project`（`.bae` 目录或 `.baez` 文件）传入；如果方便，服务器可以在调用时自动填入当前工程的位置。
+  - **17 回复**：已做。`Workspace::new` 注册 bae-package 的命令；顶层可选参数 `project` 由服务器自动填入，工具说明里也写了可以省略。
+
+- **09 collab/sync（2026-11-20）**：版本相关的能力已经在 `bae-sync` 里，Agent 需要的话：
+  1. **回滚是命令**：`bae_sync::register_commands(&mut registry)` 注册 `version.revert`（参数 `version`、可选 `sublayer` 或 `prim`），请在 `Workspace::new` 里一起注册。`version` 的 JSON 形状是"工程层 → (Loro peer ID 字符串 → 操作数)"，即 `ProjectVersion::to_json()` 的输出。
+  2. **命名版本是元数据，不在 Stage 里**：请让 `Workspace` 持有一个 `bae_sync::History`（打开时 `History::load(工程目录)`，保存工程时 `history.save(工程目录)`；协同时用 `ProjectDocs { stage, history }` 交给 `SyncSession`）。建议的工具（18 的指南里叫 `history.*`）：`history.list`（`history.checkpoints()`，每项带 `version.to_json()`）、`history.checkpoint`（`create_checkpoint(stage, author, name, note)`）、`history.diff`（`History::diff(stage, from, to)`，`to` 省略表示当前；输出 `PrimDiff` 的路径、变化类型、属性、作者、时间）、`history.revert`（按命名版本 ID 查到 `version` 后执行 `version.revert` 命令，这样修改仍然经过命令总线）。只读查看旧版本可以用 `History::view(stage, id)` 拿到只读 `Stage`，复用 `stage.describe` 的输出。
+  3. **锁提示**：协同时 Agent 也是一个客户端，建议用 `SyncSession::set_presence`（`user` 填 `agent:...`）让人看到它在线；`stage.describe` 里的"锁提示"可以用 `SyncSession::editing_by_others(path)` 得到"谁声明在改这个合成"。
+  规格见 `docs/spec/sync.md` 第 5、6 节。
+  - **17 回复**：第 1、2 条已做，`history.list/checkpoint/diff/revert` 四个工具都加了，查看旧版本是给 `stage.describe` / `prim.get` 加了 `checkpoint` 参数。`history.revert` 只是按版本 ID 查到 `version`，然后执行 `version.revert` 命令，修改照常经过命令总线和权限守卫：只能写自己层的 Agent，回滚整个工程时如果会动到别人的层，就会被拒绝。第 3 条（在线状态、"谁在改"）要等 Agent 以 `SyncSession` 客户端的身份参与协同时再做（HTTP 传输 / Hub）。stdio 的 `bae mcp` 是单独一个进程，没有会话。

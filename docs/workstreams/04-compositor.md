@@ -46,14 +46,20 @@
 **2026-11-20**
 
 - PR 1 [interface]：`crates/bae-render` 公共接口。渲染输入 `RenderComp`/`RenderLayer`（纯数据，03 合并前用 `MockEvaluator` 按 schema v1 从 Stage 求值）、AE 全部 38 种混合模式 token、轨道遮罩/遮罩模式、`RenderRequest`（分辨率、ROI、位深、RGBA16F/32F、色彩上下文占位）、`LayerSource`/`SourceProvider`（05/08/插件的图层源接口）、`Effect`/`EffectLibrary`（参数定义复用 `bae_model::EffectDef`）、渲染图节点模型与 ROI 协商（合成、纯色、图层源、效果、轨道遮罩；剔除；缓存键）、`FrameCache`（内存预算 LRU + StageEvent 精确失效）、`fixture::SceneBuilder`（用命令搭测试/基准工程）。
-- 下一步：GPU 执行（纹理池、合成着色器、5 种混合模式、轨道遮罩）、`bae render` 输出 PNG、B1 基准与 `docs/perf.md`、与 AE 对照。
+- PR 1 已合并（#16）。
+- PR 2（#44，分支 `render/compositor-gpu`）：GPU 执行。纹理池（分桶复用，租约计数）、合成着色器（一个图层一次 draw，连续纯色合批；正常/相加(32 bpc)/滤色走固定管线混合，其余只拷贝图层覆盖区域的底图再混合）、轨道遮罩、保留基础透明度、8/16 bpc 截断、素材经 bae-media 零拷贝采样、03 的 `Evaluator` 适配器 `AnimEvaluator`、`bae render` 输出 PNG（`apps/bae` 加了一行 `add_module`）、B1 基准与 `cargo xtask bench`、`docs/perf.md`。
+- 与 AE 26.2.1 对照（`crates/bae-render/tests/ae/`，24 个用例，AE 输出存为 golden 进 CI）：5 种混合模式、4 种轨道遮罩、保留基础透明度、亚像素/旋转/缩放/预合成放大最大差 ≤ 1；修正了相加（AE 是预乘直接相加）和放大时的边缘过渡（按源像素）。缩小的软边纹理还差最多 10。
+- B1（Apple M4）：完整分辨率预览 852 fps，半分辨率 1333 fps，单帧延迟 p50 2.2 ms，导出（求值+渲染+回读）259 fps。形状、文字还是代替品，没有模糊和发光。
+- 从 `.baez` 打开的工程：素材经 21 的 `bae_package::AssetLocator` 定位，包内条目解到缓存目录再交给 bae-media（序列帧整目录解出）；两个求值器和 `bae render` 都用 `bae_render::AssetFiles`。
+- 回应请求（#44）：05 的 1（保留 `LayerSource::bounds()`）、2（`AnimEvaluator` 把形状/文字图层转成 `bae.shape` / `bae.text` 的 `Custom` 内容，`bae render` 从应用的 `Registry<dyn SourceProvider>` 取 provider，`apps/bae` 注册了 05 的 `ShapeProvider`）、3（`SourceRequest.scale` 改为期望密度 = 预览分辨率 × 图层在屏幕上的放大倍数，矢量源按最终尺寸栅格化）、4（`bae_render::testing`）；19 的 R04-11（`EffectParams` 加图层范围、帧率、time_step、线性混合、渲染目的、快门角度/相位、每实例随机种子）、R04-12（`testing::with_encode_context` / `render_effect` / `upload` / `read_pixels`）。`GpuImage.rect` 恢复为 #16 文档里的像素坐标（`texel_size()` 由 `pixel_scale` 算出）。
+- 下一步：遮罩（05 的路径栅格化或自带）、效果框架执行与三个参考效果、调整图层、其余混合模式（继续用 AE 对照）、视口纹理输出（零拷贝给 12）、B1 与 AE 渲染速度对比、B3。
 
-- [ ] 渲染图与纹理池
+- [x] 渲染图与纹理池
 - [ ] 混合模式、遮罩、轨道遮罩
 - [ ] 3D 与运动模糊
 - [ ] 效果框架与参考效果
 - [ ] 缓存与预览
-- [ ] bae render 命令行
+- [x] bae render 命令行（PNG）
 - [ ] 基准与 CI 趋势
 
 ## 请求（其他工作流在这里留言）
@@ -75,3 +81,33 @@ bae-color 接口已提 PR（`[interface]`），接法见 `crates/bae-color/READM
 - `AssetLocation::Packaged { entry }`：`PackageReader::entry(entry)` 给出 `.baez` 里的字节偏移和长度（不压缩，可直接定位读取）；如果解码器只能接受文件路径，用 `PackageReader::materialize(entry, cache_dir)` 解出到缓存目录。
 
 `bae-package` 不依赖 GPU，bae-render 可以直接依赖。
+
+### 19 core/plugins → 04（2026-11-20）
+
+声明式 WGSL 效果（`bae_plugin::DeclarativeEffect`）直接实现 `bae_render::Effect`，与 07 的内置效果走同一条路径。约定见 `docs/spec/plugin-architecture.md` §11。两点请求：
+
+1. **R04-11 `EffectParams` 补充字段**（都有 AE 对应项）：请求比例下的图层范围（layer bounds）、合成帧率和 `time_step`、工作空间是否线性化、最终渲染/预览标志和质量、快门角度/相位、每个效果实例稳定的随机种子。WGSL 前导里的 `BaeFrame` 已经留了这些字段，在补上之前插件宿主用输入范围代替图层范围，未知的填 0。
+2. **R04-12 在 bae-render 之外构造 `EncodeContext`。** 现在 `ImageAllocator` 是 `pub(crate)`，效果 crate（19、07）没法写 GPU 单元测试。建议公开 `ImageAllocator`，或者加一个带简单纹理池的 `EncodeContext::for_tests(gpu, encoder, format)`。在此之前，19 把 GPU 编码部分拆成不依赖 `EncodeContext` 的函数来测试。
+
+### 05 render/vector-text → 04（2026-11-20）
+
+形状图层的图层源已提 PR（`[interface] vector`），接法见 `crates/bae-vector/README.md`。请求：
+
+1. **`LayerSource::bounds()`**：形状和文字画在图层原点周围（AE 新建形状图层锚点 (0,0)、位置在合成中心），一半内容在负坐标，`[0, w) × [0, h)` 会把它裁掉。05 的 PR 里在 `source.rs` 加了带默认实现的 `fn bounds(&self) -> IRect`（默认 `IRect::from_size(size())`），`graph.rs` 里图层源的内容矩形改用它（两处、向后兼容）。如果你们有别的做法，请改掉，05 跟着调整。
+2. **适配 03 的 `EvaluatedComp` 时**：`kind == shape` 的图层生成 `LayerContent::Custom { provider: "bae.shape", data: Arc<bae_anim::EvaluatedLayer>, hash: contents 的哈希, size: None }`；`kind == text` 的图层同样，provider 是 `"bae.text"`，哈希覆盖 `text`、`text_animators`。provider 由 apps/bae 注册（`bae_vector::render::ShapeProvider`、`bae_text::render::TextProvider`）。MockEvaluator 里"shape/text layers are drawn by 05 (not yet)"的警告可以换成这条路径。
+3. **连续栅格化**：AE 的形状/文字图层总是按最终变换后的分辨率栅格化，放大不会糊。现在图层源只在图层空间按 `SourceRequest.scale` 栅格化。建议 `SourceRequest` 加上图层到输出的变换（或者至少是各轴缩放），矢量源据此直接按最终分辨率画（`ImageAlpha` / `GpuImage` 不变）。
+4. **测试入口**：`EncodeContext` 的 `allocator` 是 `pub(crate)`，别的 crate 无法通过 trait 调 `LayerSource::render` 做测试。希望提供一个无窗口的测试入口，例如 `bae_render::testing::render_source(gpu, &dyn LayerSource, &SourceRequest) -> GpuImage`。05 目前直接测自己的 `ShapeSource::render_on`。
+
+### 19 core/plugins → 04（2026-11-20，第二条）
+
+**R04-13 从应用注册表取效果。** 插件效果（以及以后 07 用 `DeclarativeEffect::load_builtin` 注册的内置声明式效果）发布在应用的运行时注册表 `bae_app::Registry<dyn bae_render::Effect>` 里（ID = match name），定义在 `Registry<bae_model::EffectDef>` 里，做法和你们的 `Registry<dyn SourceProvider>` 一样。希望 `bae render` 和交互预览构建 `Renderer` 时，把 `app.registry::<dyn Effect>().snapshot()` 里的效果放进 `renderer.effects_mut()`（或者渲染图直接查快照），这样插件效果在命令行渲染和预览里都能用；卸载插件后重建渲染图即可。
+
+### 20 interop/aex-compat → 04（2026-11-20）
+
+AE 插件兼容层的预留请求，详见 `docs/spec/aex-compat.md` §4.5–§4.7、§5.2、§6。19 已提的 R04-1/2/3/4/5/7/9/11 我们附议（CPU 节点的 GPU 转换着色器和测量数据在 `crates/bae-aex-host`），只补增量：
+
+1. **R04-05 CPU 节点渲染时按需拉取输入，且不会死锁（现在）。** 预渲染声明的输入在渲染时才真正渲染，声明了却没取用的不渲染；插件节点在工作线程里阻塞等上游时，这个线程能就地执行上游子图（或线程池补一个线程），线程池被插件节点占满也不会死锁。上游可能又是同一个插件模块的另一个实例（重入）。
+2. **R04-01 预渲染只求边界（约定）。** 节点的 `pre_render` 可能被调用多次、也可能只为求边界而不跟随渲染，结果可以丢弃；每次计划最多执行一次渲染。
+3. **验收请求。** 带与不带 CPU 节点机制编译，B1–B3 的帧时间在测量噪声内相同（不用 AE 插件的工程零代价）。
+
+P3 再做（现在别堵死）：R04-06 节点自带暂存内存（进程外零拷贝）、R04-08 缓存键附加节点提供的字节、R04-10 "输入在一段时间内是否变化"查询、R04-13 插件内存计入缓存预算、R04-16 非像素缓存条目、R04-17 节点输出质量状态（失败 / 水印 / 降级）。

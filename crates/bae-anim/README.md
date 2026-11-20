@@ -37,6 +37,15 @@
 - **空间属性**：图层的锚点、位置、目标点，以及关键帧带空间切线的二维/三维属性（AE 的点控制等），按运动路径插值：一条时间缓动控制沿路径走过的距离。
 - **截断**：不透明度（图层、遮罩）在插值之后截断到 0–100，和 AE 一样允许贝塞尔缓动中间过冲。
 
+## 变换（与 AE 对照的结论）
+
+用 AE 26.2.1 的 `toWorld` / `toComp` 实测（13 组，`tests/ae_transforms.rs`，误差 ≤ 1e-9）：
+
+- 2D：`T(p)·Rz(r)·S(s)·T(−a)`；3D：`T(p)·L·Rx·Ry·Rz(方向)·Rx·Ry·Rz(旋转)·S(s)·T(−a)`（先 Z 再 Y 再 X，方向在旋转外面），负缩放、非等比缩放的父级（斜切）都对。
+- **3D 父级下的 2D 图层**：所有祖先（包括 3D 的）都按 2D 变换算，只用位置 xy、Z 旋转、缩放 xy、锚点 xy，方向、X/Y 旋转和 z 全部忽略（规格 AE-ANI-016 原来猜的是正交压平，不对）。2D 父级下的 3D 图层按 2D 父级矩阵嵌入 4×4。
+- **沿路径定向**：2D 图层转 Z 角度；3D 图层（和摄像机、灯光一样）让局部 +z 沿路径切线，无滚转（规格原来猜 +x）。切线取 AE 的方式：从量化后的时间向前走一个 1/1024 帧的差分。
+- **默认摄像机**（没有活动摄像机图层时）：眼睛在 (w/2, h/2, −zoom)，zoom = 宽 × 50/36，投影 `x' = w/2 + (X − w/2)·zoom/(Z + zoom)`，与 AE 的 `toComp` 完全一致。
+
 ## 关键帧插值（与 AE 对照的结论）
 
 用 AE 26.2.1 的实测数据（`tests/fixtures/ae-26.2-anim.json`）确认：
@@ -58,6 +67,8 @@
 - **已实现**：`time`、`value`、`thisComp`、`thisLayer`、`thisProperty`、`index`、`comp(名)`、`layer(名或序号)`、变换属性（`transform.position` 等，2D 图层的位置/锚点/缩放在表达式里是二维的）、`effect(名或 matchName 或序号)(参数)`、`mask()`、`timeRemap`、`valueAtTime`、`velocity`/`velocityAtTime`、`speed`、`key()`/`numKeys`/`nearestKey()`、`loopIn`/`loopOut`（cycle、pingpong、offset、continue，以及 `…Duration`）、`wiggle`/`temporalWiggle`/`smooth`、`linear`/`ease`/`easeIn`/`easeOut`、`clamp`/`length`/`normalize`/`dot`/`cross`/`lookAt`、`random`/`seedRandom`/`gaussRandom`/`noise`、`timeToFrames`/`framesToTime`/`timeToTimecode`、`posterizeTime`、`toComp`/`fromComp`/`toWorld`/`fromWorld`（含 `…Vec`）、`sourceTime`、颜色转换。Property 对象在算术、下标（`transform.position[0]`）和库函数里自动当成它的值。源文本属性的表达式返回字符串时替换文字。
 - **与 AE 对照确认的细节**：`ease()` 是 3f²−2f³，`easeIn`/`easeOut` 是一端斜率为 1 的 Hermite 曲线；`valueAtTime` 把时间量化到 1/(帧率×1024) 秒（AE 26 在 24/25/30/60 fps 实测）；`velocityAtTime(t)` 是从量化时间向前一个网格步长的差分；`loopOut("continue")` 用最后关键帧前 1 ms 处的速度外推。21 个表达式对照用例里，不读位置的全部在 1e-6 以内。
 - **出错时**（语法错误、运行时异常、结果不是数字或数组、`value[2]` 这样的越界下标）用表达式之前的值，并把消息（带行号）放进 `EvaluatedComp.errors`。属性在自己的表达式里读自己（`value`、`valueAtTime`）得到表达式之前的值；互相引用的循环也一样截断，不会死循环。
+- **栈用量有上界**：表达式嵌套求值最多 4 层，更长的依赖链在求值合成前分轮预热（正反方向交替，单向链两轮内完成），所以任意长的链都不会加深调用栈；每次从 Rust 进入 JavaScript 时重设 QuickJS 的栈顶，预算 384 KiB，用户写的无限递归是 RangeError（挂到属性上），不会让程序崩溃。测试在 1 MiB 栈的线程（Windows 主线程大小）里跑长链和无限递归。
+- `toComp` 对 3D 图层通过活动摄像机（或默认摄像机）投影，`toWorld` 是世界坐标；`fromComp` 目前按世界坐标求逆（不做反投影）。
 - **依赖**：`EvaluatedLayer.depends_on` 列出这一层的表达式在这一时刻读到的其他图层（同合成或其他合成），04 的帧缓存据此失效。
 - `wiggle`、`random` 的数值与 AE 不同（AE 的随机数实现未公开），但对同一属性、同一时间是确定的。
 

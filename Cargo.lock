@@ -236,8 +236,12 @@ dependencies = [
  "bae-app",
  "bae-gpu",
  "bae-model",
+ "bae-motion",
  "bae-platform",
+ "bae-plugin",
+ "bae-render",
  "bae-ui",
+ "bae-vector",
  "clap",
  "egui",
  "egui-wgpu",
@@ -250,10 +254,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bae-aex-host"
+version = "0.1.0"
+dependencies = [
+ "bae-model",
+]
+
+[[package]]
 name = "bae-agent"
 version = "0.1.0"
 dependencies = [
  "bae-model",
+ "bae-package",
+ "bae-sync",
  "parking_lot",
  "png",
  "rmcp",
@@ -332,6 +345,40 @@ dependencies = [
  "wgpu-hal",
  "wgpu-types",
  "windows",
+]
+
+[[package]]
+name = "bae-hub"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bae-model",
+ "bae-sync",
+ "blake3",
+ "clap",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "bae-interop-ai"
+version = "0.1.0"
+dependencies = [
+ "bae-anim",
+ "bae-model",
+ "bae-vector",
+ "kurbo",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -423,16 +470,57 @@ dependencies = [
 ]
 
 [[package]]
+name = "bae-plugin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bae-app",
+ "bae-gpu",
+ "bae-model",
+ "bae-platform",
+ "bae-plugin-sdk",
+ "bae-render",
+ "clap",
+ "half",
+ "naga",
+ "parking_lot",
+ "rustc-hash 2.1.3",
+ "semver",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml",
+ "tracing",
+]
+
+[[package]]
+name = "bae-plugin-sdk"
+version = "0.1.0"
+
+[[package]]
 name = "bae-render"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "bae-anim",
+ "bae-app",
  "bae-gpu",
+ "bae-media",
  "bae-model",
+ "bae-package",
+ "bae-platform",
+ "bytemuck",
+ "clap",
  "glam",
+ "half",
+ "parking_lot",
+ "png",
  "rustc-hash 2.1.3",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "tracing",
 ]
 
 [[package]]
@@ -443,6 +531,7 @@ dependencies = [
  "blake3",
  "notify",
  "rustc-hash 2.1.3",
+ "schemars",
  "serde",
  "serde_json",
  "tempfile",
@@ -463,6 +552,23 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "wgpu",
+]
+
+[[package]]
+name = "bae-vector"
+version = "0.1.0"
+dependencies = [
+ "bae-anim",
+ "bae-gpu",
+ "bae-model",
+ "bae-render",
+ "bae-vector",
+ "glam",
+ "kurbo",
+ "parking_lot",
+ "rustc-hash 2.1.3",
+ "serde_json",
+ "vello",
 ]
 
 [[package]]
@@ -677,6 +783,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac230478587d0269d8d6998b82ae69ea51509d55df66d9e92edd1f986904cd4a"
 dependencies = [
  "clap_builder",
+ "clap_derive",
 ]
 
 [[package]]
@@ -689,6 +796,18 @@ dependencies = [
  "anstyle",
  "clap_lex",
  "strsim",
+]
+
+[[package]]
+name = "clap_derive"
+version = "4.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "895c9d8d2ac2dd8b8a29f3724a14e72aaaa6debcf8c38c82f97305c6a172767a"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.10",
 ]
 
 [[package]]

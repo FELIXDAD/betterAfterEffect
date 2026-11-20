@@ -31,8 +31,20 @@ fn main() -> ExitCode {
         .add_module(bae_gpu::GpuModule)
         .add_module(model_cli::ModelCliModule)
         .add_module(mcp_cli::McpCliModule)
+        .add_module(bae_render::RenderModule)
+        // Motion commands (comp.create, layer.create, key.ease …) for menus and agents.
+        .add_module(bae_motion::MotionModule)
+        // Plugin host: `bae plugin check|list`; plugin effects in the app registries.
+        .add_module(bae_plugin::PluginModule)
         .add_module(shell::ShellModule);
-    // Feature modules from other workstreams are added here, e.g.
-    // `.add_module(bae_render::RenderModule)`.
+    // Layer sources drawn by other workstreams (05: shape layers), used by the
+    // renderer and `bae render`.
+    if let Err(error) = builder.register_arc::<dyn bae_render::SourceProvider>(
+        bae_vector::SHAPE_PROVIDER,
+        std::sync::Arc::new(bae_vector::render::ShapeProvider::new()),
+    ) {
+        tracing::warn!("shape layer source not registered: {error}");
+    }
+    // Feature modules from other workstreams are added here.
     startup::run(builder.build())
 }

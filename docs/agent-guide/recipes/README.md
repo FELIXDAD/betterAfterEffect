@@ -2,7 +2,7 @@
 
 配方是常见任务的标准做法：结构、时间表、调用步骤、自检要点。按配方做能稳定得到合格的结果；需求不同的地方按 [03 动画规范](../03-animation.md) 调整，并在提案说明里写出改了什么。
 
-> 配方里的工具名、属性名、参数格式都是预期名（待确认），见 [tools.md](../tools.md)。
+> 配方里的工具名、属性名、参数格式以 [tools.md](../tools.md) 为准；还没提供的工具见下面"调用示例里的约定"。
 
 | 配方 | 典型时长 | 文件 |
 |---|---|---|
@@ -25,10 +25,13 @@
 
 ## 调用示例里的约定
 
-示例里的 JSON 只写关键参数，`"...": "..."` 表示省略。属性名用 02 的命名空间写法，例如 `transform:position`、`transform:opacity`、`transform:scale`（具体名字由 02 的 Prim schema 定，待确认）。关键帧参数用简写（完整格式见 [tools.md](../tools.md) 第 9 节）：
+示例里的 JSON 只写关键参数，`"...": "..."` 表示省略。工具名、参数格式以 [tools.md](../tools.md) 为准：
 
-```json
-{"frame": 22, "value": [960, 510], "in": {"speed": 0, "influence": 80}, "out": {"speed": 0, "influence": 33.33}}
-```
+- 一个事务 = 一次 `command_batch`；
+- 时间参数写帧号字符串 `"12f"`（服务器按合成帧速率换算；**整数是 flicks**），渲染工具的帧号写整数；图层从第 0 帧开始时，关键帧的帧号就是合成帧号；
+- 值带类型标签：`{"type": "vec3", "value": [960, 510, 0]}`；图层的位置、缩放是 vec3；
+- 缓动：`key_set` 放线性关键帧，再用 `key_ease`（`ease_out` 用在起点、`ease_in` 用在终点，`influence` 按预设）。
 
-`in` 是进入这个关键帧的一侧，`out` 是离开的一侧。只写需要设置的一侧。
+配方的时间表为了好读写成帧号和 2D 坐标，调用时按上面的规则写。完整的调用示例见 [标题出场](title-in.md) 第 4 节。
+
+**还没有的工具**（见 tools.md）：`marker_add`、`layer_precompose`、`text_add_animator`、`attribute_evaluate`、`proposal_describe`、`comment_add`，以及 13、15 的分镜和导出命令。配方里用到它们的步骤先跳过或用替代做法，并在汇报里写明。

@@ -35,22 +35,26 @@ pub enum ImageAlpha {
 
 /// A texture on the shared device and the pixel rectangle it represents.
 ///
-/// Texel `(0, 0)` is pixel `(rect.x0, rect.y0)` of the image's own space (layer
-/// space for sources, comp space for composites). The texture may be larger
-/// than `rect` (pooled textures are bucketed); texels outside `rect` are
-/// transparent.
+/// `rect` is in pixels of the image's own space (layer space for sources, comp
+/// space for composites). Texel `(0, 0)` starts at pixel `(rect.x0, rect.y0)` and
+/// every texel is `pixel_scale` pixels wide (1 at full resolution, 2 at half, 0.25
+/// for a vector layer rasterized at 4× density), so the image has
+/// [`GpuImage::texel_size`] texels. The texture may be larger (pooled textures are
+/// bucketed); only those texels are defined.
 #[derive(Clone, Debug)]
 pub struct GpuImage {
     /// The texture (needs `TEXTURE_BINDING`).
     pub texture: wgpu::Texture,
     /// A view of the texture.
     pub view: wgpu::TextureView,
-    /// Covered pixel rectangle.
+    /// Covered region, in pixels of the image's space.
     pub rect: IRect,
     /// Alpha representation.
     pub alpha: ImageAlpha,
-    /// Pixels of the image's space per texel (1 at full resolution, 2 at half …).
+    /// Space pixels per texel (1 at full resolution, 2 at half …).
     pub pixel_scale: f64,
+    /// Pool lease: the pooled texture is reused once every clone is dropped.
+    lease: Option<Arc<()>>,
 }
 
 impl GpuImage {
@@ -58,19 +62,73 @@ impl GpuImage {
     pub fn from_texture(texture: wgpu::Texture, alpha: ImageAlpha) -> Self {
         let rect = IRect::from_size(texture.width(), texture.height());
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        Self::new(texture, view, rect, alpha, 1.0)
+    }
+
+    /// An image from its parts.
+    pub fn new(
+        texture: wgpu::Texture,
+        view: wgpu::TextureView,
+        rect: IRect,
+        alpha: ImageAlpha,
+        pixel_scale: f64,
+    ) -> Self {
         Self {
             texture,
             view,
             rect,
             alpha,
-            pixel_scale: 1.0,
+            pixel_scale,
+            lease: None,
         }
     }
 
-    /// Texture size in texels.
+    pub(crate) fn pooled(
+        texture: wgpu::Texture,
+        view: wgpu::TextureView,
+        rect: IRect,
+        alpha: ImageAlpha,
+        pixel_scale: f64,
+        lease: Arc<()>,
+    ) -> Self {
+        Self {
+            lease: Some(lease),
+            ..Self::new(texture, view, rect, alpha, pixel_scale)
+        }
+    }
+
+    /// True when the texture belongs to the renderer's pool.
+    pub fn is_pooled(&self) -> bool {
+        self.lease.is_some()
+    }
+
+    /// Texels that hold the image: `rect` divided by `pixel_scale`, rounded up.
+    pub fn texel_size(&self) -> [u32; 2] {
+        texels_for(self.rect, self.pixel_scale)
+    }
+
+    /// Texture size in texels (may exceed [`GpuImage::texel_size`]).
     pub fn texture_size(&self) -> [u32; 2] {
         [self.texture.width(), self.texture.height()]
     }
+
+    /// GPU bytes of the texture.
+    pub fn byte_size(&self) -> u64 {
+        let bpp = self.texture.format().block_copy_size(None).unwrap_or(8);
+        u64::from(self.texture.width()) * u64::from(self.texture.height()) * u64::from(bpp)
+    }
+}
+
+/// Texels needed to cover `rect` (pixels) at `pixel_scale` pixels per texel.
+pub fn texels_for(rect: IRect, pixel_scale: f64) -> [u32; 2] {
+    let s = if pixel_scale.is_finite() && pixel_scale > 0.0 {
+        pixel_scale
+    } else {
+        1.0
+    };
+    // A tiny epsilon keeps exact multiples (1080 / 2) from rounding up.
+    let n = |v: u32| ((f64::from(v) / s) - 1e-9).ceil().max(0.0) as u32;
+    [n(rect.width()), n(rect.height())]
 }
 
 /// What a source is asked to produce.
@@ -78,7 +136,11 @@ impl GpuImage {
 pub struct SourceRequest {
     /// Needed region in layer pixels (already clipped to the source bounds).
     pub roi: IRect,
-    /// Resolution scale (1.0 full, 0.5 half …). Sources may return more detail.
+    /// Wanted density in texels per layer pixel: the layer's on-screen
+    /// magnification (preview resolution × scale through transform and parents),
+    /// so vector/text sources can rasterize at their final size (AE's continuous
+    /// rasterization). Raster sources (footage) may ignore it and return their
+    /// native resolution; the compositor resamples whatever comes back.
     pub scale: f64,
     /// Time inside the source (footage time, layer time for generators).
     pub time: Time,
@@ -96,9 +158,11 @@ pub struct EncodeContext<'a> {
 }
 
 impl EncodeContext<'_> {
-    /// A transparent working-format image covering `rect` at `pixel_scale`,
-    /// usable as a render attachment and storage texture. Its texture comes
-    /// from the renderer's pool and returns there when the frame is done.
+    /// A working-format image covering `rect` (pixels of its space) at
+    /// `pixel_scale` pixels per texel, usable as a render attachment and storage
+    /// texture. Its contents are undefined (clear
+    /// or overwrite all of `rect`). The texture comes from the renderer's pool
+    /// and returns there when every clone of the image is dropped.
     pub fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError> {
         self.allocator.allocate(rect, pixel_scale)
     }
@@ -121,6 +185,15 @@ pub(crate) trait ImageAllocator {
 pub trait LayerSource: Send + Sync {
     /// Layer-space size in pixels: the source covers `[0, w) × [0, h)`.
     fn size(&self) -> [u32; 2];
+
+    /// Layer-space pixel bounds of the content. Defaults to `[0, w) × [0, h)`
+    /// from [`size`](Self::size). Vector sources (shape and text layers, 05) are
+    /// drawn around the layer origin and report bounds that may start at negative
+    /// coordinates; requests and returned images use the same layer pixels.
+    fn bounds(&self) -> IRect {
+        let [w, h] = self.size();
+        IRect::from_size(w, h)
+    }
 
     /// Hash of everything that affects the pixels at `time` (cache key part).
     fn content_hash(&self, time: Time) -> u64;

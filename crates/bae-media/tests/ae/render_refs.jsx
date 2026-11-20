@@ -15,14 +15,15 @@ right.property("Opacity").setValue(50);
 var jobs = [
   ["H.264 - Match Render Settings - 15 Mbps", "ae_h264"],
   ["High Quality", "ae_hq"],
-  ["High Quality with Alpha", "ae_hq_alpha"]
+  ["High Quality with Alpha", "ae_hq_alpha"],
+  ["TIFF Sequence with Alpha", "ae_tiff_[##]"]
 ];
 var log = [];
 for (var i = 0; i < jobs.length; i++) {
   var rq = app.project.renderQueue.items.add(comp);
   var om = rq.outputModule(1);
   om.applyTemplate(jobs[i][0]);
-  var ext = jobs[i][0].indexOf("H.264") === 0 ? ".mp4" : ".mov";
+  var ext = jobs[i][0].indexOf("H.264") === 0 ? ".mp4" : (jobs[i][0].indexOf("TIFF") === 0 ? ".tif" : ".mov");
   var f = new File(outDir.fsName + "/" + jobs[i][1] + ext);
   if (f.exists) f.remove();
   om.file = f;

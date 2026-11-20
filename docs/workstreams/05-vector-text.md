@@ -38,8 +38,13 @@
 
 ## 进度
 
-- [ ] Vello 图层源
-- [ ] 形状操作器第一批
+**2026-11-20**
+
+- PR A `[interface] vector`：`crates/bae-vector`。路径几何（AE 顶点形式 ↔ kurbo）、矩形/椭圆/多边星形（AE 顶点顺序）、填充/描边/渐变参数、形状树（从 03 的 `EvaluatedLayer.contents` 解析）、显示列表 `VectorScene`（AE 运算顺序、组变换、隔离组不透明度、合成顺序、边界、哈希）、修剪路径；`render` feature：Vello 编码、共享 `VelloRenderer`、`ShapeSource`/`ShapeProvider`（`bae.shape`）。GPU 测试逐像素检查。bae-render 加了 `LayerSource::bounds()` 默认方法（见 04 的请求一节）。
+- 下一步：PR B `[interface] text`（`crates/bae-text`：parley 排版、点文字/段落文字、中文字体回退、字体枚举、`TextSource`/`TextProvider`）。
+
+- [x] Vello 图层源（形状）
+- [ ] 形状操作器第一批（修剪路径已完成；中继器、位移路径、圆角等待做）
 - [ ] 路径布尔与编辑几何
 - [ ] 文字排版
 - [ ] 文字动画器

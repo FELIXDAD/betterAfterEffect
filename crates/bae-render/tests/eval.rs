@@ -2,7 +2,9 @@
 
 use bae_model::{FrameRate, PrimPath, Time, Value};
 use bae_render::fixture::SceneBuilder;
-use bae_render::{BlendMode, CompEvaluator, LayerContent, MockEvaluator, TrackMatteMode};
+use bae_render::{
+    AnimEvaluator, BlendMode, CompEvaluator, LayerContent, MockEvaluator, TrackMatteMode,
+};
 use glam::DVec2;
 
 const S: i64 = Time::FLICKS_PER_SECOND;
@@ -11,8 +13,30 @@ fn t(seconds: f64) -> Time {
     Time::from_seconds(seconds)
 }
 
+fn evaluators() -> Vec<(&'static str, Box<dyn CompEvaluator>)> {
+    vec![
+        ("mock", Box::new(MockEvaluator::new(None))),
+        ("bae-anim", Box::new(AnimEvaluator::new(None))),
+    ]
+}
+
 #[test]
 fn evaluates_solids_transforms_keyframes_and_layer_time() {
+    for (name, mut eval) in evaluators() {
+        eprintln!("evaluator: {name}");
+        solids_transforms_keyframes(eval.as_mut());
+    }
+}
+
+#[test]
+fn evaluates_precomps_parents_and_track_mattes() {
+    for (name, mut eval) in evaluators() {
+        eprintln!("evaluator: {name}");
+        precomps_parents_mattes(eval.as_mut());
+    }
+}
+
+fn solids_transforms_keyframes(eval: &mut dyn CompEvaluator) {
     let mut b = SceneBuilder::new();
     let comp = b
         .comp(
@@ -39,8 +63,7 @@ fn evaluates_solids_transforms_keyframes_and_layer_time() {
     b.set(&a, "transform:rotation", Value::Float(90.0)).unwrap();
 
     let stage = b.into_stage();
-    let mut eval = MockEvaluator::new(&stage, None);
-    let rc = eval.evaluate(&comp, t(1.0)).unwrap();
+    let rc = eval.evaluate(&stage, &comp, t(1.0)).unwrap();
     assert_eq!((rc.width, rc.height), (400, 300));
     assert_eq!(rc.background, [0.1, 0.2, 0.3, 1.0]);
     assert_eq!(rc.layers.len(), 1);
@@ -67,12 +90,11 @@ fn evaluates_solids_transforms_keyframes_and_layer_time() {
     );
 
     // Outside the comp duration the layer is inactive (out_point = duration).
-    let rc = eval.evaluate(&comp, t(4.0)).unwrap();
+    let rc = eval.evaluate(&stage, &comp, t(4.0)).unwrap();
     assert!(!rc.layers[0].active);
 }
 
-#[test]
-fn evaluates_precomps_parents_and_track_mattes() {
+fn precomps_parents_mattes(eval: &mut dyn CompEvaluator) {
     let mut b = SceneBuilder::new();
     let inner = b
         .comp(
@@ -127,8 +149,7 @@ fn evaluates_precomps_parents_and_track_mattes() {
         .unwrap();
 
     let stage = b.into_stage();
-    let mut eval = MockEvaluator::new(&stage, None);
-    let rc = eval.evaluate(&comp, t(2.0)).unwrap();
+    let rc = eval.evaluate(&stage, &comp, t(2.0)).unwrap();
     let names: Vec<_> = rc.layers.iter().map(|l| l.path.name().to_owned()).collect();
     assert_eq!(
         names,

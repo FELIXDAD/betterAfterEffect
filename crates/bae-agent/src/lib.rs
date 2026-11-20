@@ -28,6 +28,7 @@ pub mod protocol;
 pub mod render;
 mod server;
 mod session;
+pub mod timeargs;
 pub mod tools;
 mod workspace;
 

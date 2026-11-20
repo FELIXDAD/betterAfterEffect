@@ -16,6 +16,39 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 const FLICKS_PER_FRAME_30: i64 = 705_600_000 / 30;
 
+/// A module command (as `bae-motion` publishes them) with a time parameter.
+struct Nudge;
+
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+struct NudgeParams {
+    /// Layer to nudge.
+    path: PrimPath,
+    /// When.
+    at: bae_model::Time,
+}
+
+impl bae_model::Command for Nudge {
+    type Params = NudgeParams;
+    type Output = Json;
+    const ID: &'static str = "test.nudge";
+    const TITLE: &'static str = "Nudge";
+    const DESCRIPTION: &'static str = "Test command.";
+
+    fn run(
+        &self,
+        _tx: &mut bae_model::Transaction<'_>,
+        p: NudgeParams,
+    ) -> Result<Json, bae_model::CommandError> {
+        Ok(json!({ "path": p.path, "at": p.at.flicks() }))
+    }
+}
+
+fn module_commands() -> Vec<Arc<dyn bae_model::DynCommand>> {
+    let mut r = bae_model::CommandRegistry::new();
+    r.register(Nudge).unwrap();
+    vec![r.get("test.nudge").unwrap().clone()]
+}
+
 #[derive(Clone)]
 struct TestClient(&'static str);
 
@@ -155,15 +188,15 @@ fn title_batch() -> Json {
             {"command": "prim.create", "params": {"path": "/comps", "prim_type": "Folder"}},
             {"command": "prim_create", "params": {"path": "/comps/main", "prim_type": "Comp"}},
             {"command": "attr.set", "params": {"path": "/comps/main", "attr": "duration",
-                "value": {"type": "time", "value": 3 * 705_600_000i64}}},
+                "value": {"type": "time", "value": "90f"}}},
             {"command": "prim.create", "params": {"path": "/comps/main/layers", "prim_type": "Folder"}},
             {"command": "prim.create", "params": {"path": title, "prim_type": "Layer"}},
             {"command": "attr.set", "params": {"path": title, "attr": "kind",
                 "value": {"type": "enum", "value": "text"}}},
             {"command": "key.set", "params": {"path": title, "attr": "transform:opacity",
-                "time": 0, "keyframe": {"value": {"type": "float", "value": 0.0}}}},
+                "time": {"frame": 0}, "keyframe": {"value": {"type": "float", "value": 0.0}}}},
             {"command": "key.set", "params": {"path": title, "attr": "transform:opacity",
-                "time": 15 * FLICKS_PER_FRAME_30, "keyframe": {"value": {"type": "float", "value": 100.0}}}},
+                "time": "0:00:00:15", "keyframe": {"value": {"type": "float", "value": 100.0}}}},
         ]
     })
 }
@@ -174,7 +207,7 @@ async fn agent_builds_animates_renders_and_proposes() {
     let project_path = dir.path().join("demo.bae");
     let mut project = Project::new();
     project.save_as(&project_path).unwrap();
-    let workspace = Workspace::new(project).shared();
+    let workspace = Workspace::with_commands(project, module_commands()).shared();
     let audit = Arc::new(AuditLog::new());
     let server =
         BaeMcpServer::new(workspace.clone(), McpOptions::default()).with_audit_log(audit.clone());
@@ -347,6 +380,132 @@ async fn agent_builds_animates_renders_and_proposes() {
             .iter()
             .all(|e| e.author.as_str() == "agent:test-agent")
     );
+
+    // Named versions: save, compare, view, revert (only within the agent's rights).
+    let cp = ok_json(
+        &call(
+            &client,
+            "history_checkpoint",
+            json!({"name": "v1", "note": "title in"}),
+        )
+        .await,
+    );
+    assert_eq!(cp["saved"], true);
+    assert!(project_path.join("history.loro").is_file());
+    let cp_id = cp["checkpoint"]["id"].as_str().unwrap().to_owned();
+    ok_json(
+        &call(
+            &client,
+            "attr_set",
+            json!({"path": "/comps/main/layers/title", "attr": "name",
+                   "value": {"type": "string", "value": "Changed"}}),
+        )
+        .await,
+    );
+    {
+        // A collaborator edits root meanwhile.
+        let mut ws = workspace.lock();
+        let ws = &mut *ws;
+        let user = bae_model::AuthorId::new("user:felix").unwrap();
+        ws.registry
+            .execute(
+                &mut ws.project.stage,
+                &user,
+                "prim.create",
+                json!({"path": "/notes", "prim_type": "Folder"}),
+            )
+            .unwrap();
+    }
+    let diff = ok_json(&call(&client, "history_diff", json!({"from": cp_id})).await);
+    let changes = diff["changes"].as_array().unwrap();
+    assert!(
+        changes
+            .iter()
+            .any(|c| c["path"] == "/comps/main/layers/title"
+                && c["sublayer"] == "agent/test-agent"
+                && c["attrs"] == json!(["name"])),
+        "{diff}"
+    );
+    assert!(
+        changes
+            .iter()
+            .any(|c| c["path"] == "/notes" && c["change"] == "added"),
+        "{diff}"
+    );
+    let old = text_of(&call(&client, "stage_describe", json!({"checkpoint": cp_id})).await);
+    assert!(old.starts_with("Named version \"v1\""), "{old}");
+    assert!(!old.contains("notes (Folder)"), "{old}");
+    let denied = call(&client, "history_revert", json!({"checkpoint": cp_id})).await;
+    assert!(
+        text_of(&denied).contains("permission denied"),
+        "{}",
+        text_of(&denied)
+    );
+    ok_json(
+        &call(
+            &client,
+            "history_revert",
+            json!({"checkpoint": cp_id, "sublayer": "agent/test-agent"}),
+        )
+        .await,
+    );
+    let prim = ok_json(
+        &call(
+            &client,
+            "prim_get",
+            json!({"path": "/comps/main/layers/title"}),
+        )
+        .await,
+    );
+    assert!(prim["attributes"].get("name").is_none(), "{prim}");
+    assert!(
+        workspace
+            .lock()
+            .project
+            .stage
+            .has_prim(&PrimPath::new("/notes").unwrap())
+    );
+    let list = ok_json(&call(&client, "history_list", json!({})).await);
+    assert_eq!(list["checkpoints"][0]["name"], "v1");
+
+    // Module commands are tools too, and their times accept frames.
+    let tools = client.list_all_tools().await.unwrap();
+    assert!(tools.iter().any(|t| t.name == "test_nudge"));
+    let out = ok_json(
+        &call(
+            &client,
+            "test_nudge",
+            json!({"path": "/comps/main/layers/title", "at": "3f"}),
+        )
+        .await,
+    );
+    assert_eq!(out["output"]["at"], 3 * FLICKS_PER_FRAME_30);
+    let bad = call(
+        &client,
+        "test_nudge",
+        json!({"path": "/elsewhere", "at": "3f"}),
+    )
+    .await;
+    assert!(text_of(&bad).contains("frame rate"), "{}", text_of(&bad));
+
+    // Packaging commands get the open project's location filled in.
+    let scan_tool = tools.iter().find(|t| t.name == "package_scan").unwrap();
+    let schema = serde_json::to_value(&scan_tool.input_schema).unwrap();
+    assert!(
+        schema["properties"]["project"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("fills in the open project"),
+        "{schema}"
+    );
+    let scan = ok_json(&call(&client, "package_scan", json!({})).await);
+    let audit_scan = audit
+        .entries()
+        .into_iter()
+        .rev()
+        .find(|e| e.tool == "package.scan")
+        .unwrap();
+    assert!(audit_scan.outcome.is_ok(), "{scan}");
 
     client.cancel().await.unwrap();
 }

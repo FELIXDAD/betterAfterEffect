@@ -46,7 +46,7 @@
 
 ## 进度
 
-第一版：Draft PR #7（`agent/guide` → `dev`，2026-11-20）。修改类命令已按 02 合并的命令 ID 对齐。
+第一版：PR #7（已合并）。第二轮：PR #50（已合并），按 17 的 `bae mcp`（#20、#29）和 12 的 `bae-motion`（#41）核对工具名。第三轮：按 17 的 #55（模块命令和打包命令接入 `bae mcp`，时间参数接受帧号和时码）统一更新（2026-11-20）。
 
 - [x] 指南大纲：`docs/agent-guide/README.md` 及 01–08 章
 - [x] 动画规范：`03-animation.md`（时长表、缓动预设与 cubic-bezier 换算、节奏、文字、Logo、转场、镜头运动、卡点）
@@ -55,13 +55,17 @@
 - [x] Skill 打包：`skills/bae-animation/SKILL.md`；`references/` 由 `skills/sync-references.py` 从指南生成；改指南后手动运行 `--check`（暂不加进 CI）
 - [x] MCP instructions 精简版：`docs/agent-guide/mcp-instructions/`（英文 / 中文，各不超过 3,000 字符）
 - [x] 评测集：`docs/agent-guide/evals/`，15 个任务（TOML），检查项词汇草案和评审提示
-- [ ] 17 合并后按实际工具名核对全部"待确认"（`tools.md`、正文、Skill、MCP instructions、评测检查项）
+- [x] 按实际工具名核对（`tools.md`、正文、配方、Skill、MCP instructions、评测检查项）：工具名改用 `bae mcp` 的下划线形式；事务改为 `command_batch`；时间参数写明 flicks / 帧号；值和关键帧按 02 的 JSON；标题出场配方改成可以照抄的调用序列；`en.md` / `zh.md` 通过 17 的 `guide_instructions` 测试
+- [x] 时间参数按 #55 写成帧号字符串 `"12f"`（整数仍是 flicks）：`tools.md` 第 7 节、配方、Skill、instructions
+- [x] 12 的领域命令、21 的打包命令标为可用；instructions 提到 `key_ease`
+- [ ] `attribute_evaluate`、`proposal_describe`、`comment_add`、`marker_add` 等提供后，去掉正文里的替代做法
 - [ ] 评测脚本（依赖 17 的审计日志和工具；可以由 17 或 18 实现）
 - [ ] 动效设计师审阅动画规范（验收条件之一）
 
 ### 受阻 / 待决定
 
-- 查询、渲染、事务、提案、批注类工具名和参数格式是预期值，等 17 定稿；属性名（`transform:position` 等）和节点路径中间段的约定等 02 的 Prim schema（PR D）。
+- 关键帧时间按图层帧写（和 `prim_get` 一致）；要严格按"相对合成开始的帧号"写，需要 02 / 12 在命令 Schema 里标明哪些参数是关键帧时间（17 在 #55 里说明了）。
+- 17 的 instructions 测试目录不含模块命令，所以 `en.md` 里的 `key_ease` 用下划线写；建议 17 让测试也收集模块命令。
 - 分镜格字段名（以及是否增加"转场""声音"两个字段）等 13 定稿。
 
 ### 已决定
@@ -75,3 +79,5 @@
 - 13：已在 13 任务书"请求"一节留言（分镜格增加"转场""声音"字段）。
 
 ## 请求（其他工作流在这里留言）
+
+- **09 collab/sync（2026-11-20）**：版本相关的实际名称：回滚是命令 `version.revert`（参数 `version`，可选 `sublayer` / `prim`；以新的撤销单元执行，不改写历史，作者可以撤销）；命名版本、差异的工具名已建议 17 用 `history.list` / `history.checkpoint` / `history.diff` / `history.revert`（以 17 的最终实现为准）。协作锁只是提示（`PresenceState.editing`），指南里可以要求 Agent 改合成前先看锁提示、改完前不要回滚别人的修改。规格见 `docs/spec/sync.md` 第 5、6 节。

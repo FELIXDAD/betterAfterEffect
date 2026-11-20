@@ -108,3 +108,21 @@
 1. **`StageEvent` 带上事务标签。** 加 `label: Option<String>`（`transact` 的 `label`；撤销/重做时是被撤销那一步的标签；远端导入为 `None`，或者从提交消息 `{"author","label"}` 里取）。有了它，历史面板、Agent 活动记录、协同的"谁改了什么"都直接用事件，不用旁路传标题。
 2. **列出撤销/重做栈。** `Stage::undo_labels(author) -> impl Iterator<Item = &str>`（从栈顶往下）和对应的 `redo_labels`，以及 `Stage::undo_authors() -> impl Iterator<Item = &AuthorId>`（有撤销栈的作者）。用于历史面板标出哪些步骤还能撤销、AE 式"点击某一步撤销到那里"（连续调用 `undo` N 次）。
 3. （可选）`Stage::undo_to(author, depth)`：一次撤销 N 步、只发一个事件，避免历史面板一次撤销多步时触发 N 次重渲染。
+
+### 19 core/plugins → 02（2026-11-20）
+
+插件宿主已经把清单里的参数映射成 `bae_model::EffectDef`（`bae_plugin::effect_def`，规格 `docs/spec/plugin-architecture.md` §5.3.7），`match_name` = `<插件 ID>/<效果 ID>`，弹出菜单沿用 AE 的 1 起始序号。还差两点：
+
+1. **R02-8 字符串和素材参数。** `ParamKind` 加 `String`（值 `Value::String`）和 `Asset`（值 `Value::AssetRef`）。清单里的 `string` / `asset` 参数类型先保留不开放，等这两个类型合并后再打开。
+2. **R02-9 相对坐标的点参数默认值。** AE 的 `PF_ADD_POINT` 默认值是图层尺寸的比例（例如 50%,50% = 图层中心），添加效果时才换算成像素。`EffectParamDef.default` 是静态值，表达不了。建议 `ParamKind::Point { default_relative: bool }`（或 `DefaultValue` 加一种"按图层尺寸换算"），由添加效果的命令写入 `比例 × 图层尺寸`。在这之前，插件宿主在 `EffectDef` 里不填这类默认值，渲染时由效果按图层范围自行换算。
+
+### 20 interop/aex-compat → 02（2026-11-20）
+
+AE 插件兼容层的预留请求，详见 `docs/spec/aex-compat.md` §4.3–§4.4、§5.1。`bae_aex_host::model` 已经把 AE 参数转换成合并后的 `bae_model::EffectDef` 并有测试，下面是转换时丢失的信息。19 已提的 R02-1/3/4/5/7/9 我们附议，不重复。
+
+1. **R02-01 参数模型补全（现在）。** ① 增加没有值的参数类型（AE `NO_DATA`，通常配合自绘界面），占一个序号，目前只能暂用"自绘按钮"代替；② `ParamFlags` 加"只能保持插值"（AE `CANNOT_INTERP`，用于数值参数）；③ `EffectParamDef` 加可选的"旧工程值"：工程里缺少这个参数时用它，而不是 `default`（AE `USE_VALUE_FOR_OLD_PROJECTS`）；④ 未知的 `kind` 能原样往返（例如保留原始 JSON），新版插件写的工程在旧版 BAE 里也能打开。
+2. **R02-07 引用型参数的语义（现在）。** 图层参数的值要区分"无"、"本图层"（复制效果或图层后仍指向新的本图层）和"某个图层"；目标删除后解析为"无"而不是报错。`ParamKind::Layer` 的文档现在写的是 "none = this layer / none"，请明确。
+3. **R02-03 状态槽约定（只需写明）。** `state` 整体写入、整体替换，协同时最后写入者获胜、永不按字节合并；复制效果、复制图层、预合成、打包、导入时原样复制。
+4. **R02-11 事件来源（现在）。** 在 19:R02-7 的基础上，复制（带来源 Prim）、预合成、撤销恢复被删除的 Prim 要能分辨，兼容层据此决定是否让插件重建实例。
+
+P3 再做（现在别堵死）：R02-05 只有界面的参数值、R02-09 每个效果的实现偏好、R02-12 每个属性的变化戳。
