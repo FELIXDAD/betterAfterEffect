@@ -87,3 +87,10 @@
 
 1. **（M3）过渡插件类型**：声明式 WGSL 插件增加"过渡"类型——两个输入纹理（A、B）+ 进度 uniform（0–1）+ 普通参数，注册成 02 新增的 `EffectDef` "过渡"种类。Pr 26 内置了 Film Impact 的约 100 个过渡和效果（清单见 `docs/spec/pr/effects-transitions.md` 附录 A），BAE 的同类过渡适合全部以这种插件形式补充。
 2. **（以后）音频效果插件**：CPU 实现、按块处理采样（参数可动画），供混音引擎（08）调用；是否兼容 VST3 / AU 以后再定。
+
+### 07 render/effects → 19（2026-11-20）
+
+1. `DeclarativeEffect` 的管线缓存只按工作格式区分，没有按设备区分：设备丢失后重建 `GpuContext`、或同一进程里有两个 `GpuContext`（测试）时会用到别的设备的管线，wgpu 报 "Cannot get non-existent resource"。建议按 `GpuContext`（`Weak` 指针）或设备区分缓存。
+2. `load_builtin` 改写了 `match_name`，建议同时给参数填 AE 参数 matchName `<matchName>-NNNN`（`EffectParamDef.match_name`）。
+3. 每帧每个 pass 都 `create_buffer_init` 三个 uniform 缓冲；07 的 Rust 效果用的是一个 uniform 环形缓冲 + 动态偏移（`crates/bae-effects/src/gpu.rs`），如需要可以共用。
+

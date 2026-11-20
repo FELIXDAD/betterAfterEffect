@@ -40,10 +40,23 @@
 
 ## 进度
 
-- [ ] 第一批效果
-- [ ] matchName 对照表
-- [ ] golden image 测试
+- [ ] 第一批效果（进行中）
+  - [x] `crates/bae-effects`：注册接口 `register`/`builtins`/`get`/`catalog`/`prewarm`，`Standalone` 渲染目标（测试/基准用）
+  - [x] 颜色校正（声明式 WGSL 内嵌包，走 19 的 `DeclarativeEffect::load_builtin`）：色调、三色调、色阶、色阶（单独控件）、色相/饱和度、亮度和对比度、曝光度
+  - [x] 模糊（Rust 效果）：高斯模糊（含旧版）、快速方框模糊（含旧版 Box Blur）；大 σ 走降采样金字塔
+  - [ ] 曲线、填充、梯度渐变、四色渐变、线性/径向擦除、百叶窗、分形杂色、定向/径向模糊、发光、投影、简单阻塞工具、变换、动态拼贴、湍流置换、置换图、毛边
+- [ ] matchName 对照表 `docs/interop/ae-effects.md`
+- [ ] golden image 测试：AE 对照用例和脚本已写（`tests/ae/`），需要在装了 AE 的机器上跑
 - [ ] 第二批效果
+
+### 0.0.1 记录（2026-11-20）
+
+- 文档身份用 AE matchName（与 02 数据模型一致，AE 工程不用查表），参数 id = AE disk id；内置效果 `plugin = None`。
+- 测试：GPU 结果对照 CPU 参考实现（RGBA32F/16F、半分辨率、ROI 分块一致、Repeat Edge Pixels）全部通过。
+- 基准（M1 Pro，旧版一维线条核）：4K 高斯模糊度 100 = 2.8 ms/帧；颜色校正 4K ≈ 0.9 ms。已知问题：改成 32×8 二维分块的 `conv_line` 后性能大幅退化（4K 模糊度 100 = 40 ms，dev profile），待查（怀疑 uniform 数组动态下标在 Metal 上的代码生成）。
+- 已知：EffectParams 缺图层范围等字段（R04-11），用输入范围代替。
+
+## 请求（其他工作流在这里留言）
 
 ## 请求（其他工作流在这里留言）
 
