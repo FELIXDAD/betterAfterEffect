@@ -36,18 +36,22 @@
 //! | Kind | Formats | Implementation |
 //! |---|---|---|
 //! | Still / sequence | PNG, JPEG, WebP, OpenEXR | pure Rust (`png`, `zune-jpeg`, `image-webp`, `exr`) |
-//! | Video (macOS) | H.264, HEVC, ProRes | AVFoundation / VideoToolbox, IOSurface → Metal (next step) |
-//! | Video (Windows) | H.264, HEVC | Media Foundation (later) |
+//! | Video (macOS) | H.264, HEVC, ProRes (QuickTime / MP4) | AVFoundation / VideoToolbox, IOSurface → Metal texture, zero copy ([`apple`]) |
+//! | Video (Windows) | H.264, HEVC | Media Foundation (placeholder; next PR) |
 //!
 //! Reserved interfaces for later PRs: [`export`] (encoders, render queue
 //! status), [`audio`], [`trim`] (clip trimming for packaging), proxies
 //! ([`FrameRequest::downscale`]).
 
+#[cfg(target_vendor = "apple")]
+pub mod apple;
 pub mod audio;
 mod cache;
 pub mod export;
 mod frame;
 mod gpu;
+#[cfg(windows)]
+pub mod media_foundation;
 mod meta;
 mod module;
 pub mod sequence;
@@ -74,5 +78,11 @@ pub use time::{FrameRate, Time, Timecode};
 /// The formats compiled into this crate for the current platform, in
 /// registration order.
 pub fn builtin_formats() -> Vec<Arc<dyn MediaFormat>> {
-    still::formats()
+    #[allow(unused_mut)]
+    let mut formats = still::formats();
+    #[cfg(target_vendor = "apple")]
+    formats.push(Arc::new(apple::AvFoundationFormat));
+    #[cfg(windows)]
+    formats.push(Arc::new(media_foundation::MediaFoundationFormat));
+    formats
 }

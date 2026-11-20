@@ -70,3 +70,6 @@ pub fn assert_close(actual: [f32; 4], expected: [f32; 4], tolerance: f32) {
         );
     }
 }
+
+#[cfg(target_vendor = "apple")]
+pub mod movie;

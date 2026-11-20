@@ -303,6 +303,15 @@ impl MediaFormats {
     }
 }
 
+/// `true` for ISO base media / QuickTime files (a box type at offset 4).
+pub(crate) fn sniff_iso_bmff(header: &[u8]) -> bool {
+    header.len() >= 8
+        && matches!(
+            &header[4..8],
+            b"ftyp" | b"moov" | b"mdat" | b"wide" | b"free" | b"skip" | b"pnot"
+        )
+}
+
 fn read_header(path: &Path, buf: &mut [u8]) -> Result<usize, MediaError> {
     let mut file = std::fs::File::open(path).map_err(|e| MediaError::io(path, e))?;
     let mut len = 0;
