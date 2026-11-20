@@ -8,6 +8,12 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+default = ["media"]
+# Footage layers decoded by bae-media (PNG/JPEG/WebP/EXR, macOS video). Off in the
+# app until 08's media module is linked there (size budget, see docs/perf.md).
+media = ["dep:bae-media"]
+
 [lints]
 workspace = true
 
@@ -16,7 +22,7 @@ anyhow.workspace = true
 bae-anim.workspace = true
 bae-app.workspace = true
 bae-gpu.workspace = true
-bae-media.workspace = true
+bae-media = { workspace = true, optional = true }
 bae-model.workspace = true
 bae-platform.workspace = true
 bytemuck.workspace = true

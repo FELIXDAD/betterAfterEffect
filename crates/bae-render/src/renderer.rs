@@ -145,13 +145,12 @@ impl Renderer {
     /// A renderer with explicit settings.
     pub fn with_config(gpu: Arc<GpuContext>, config: RendererConfig) -> Self {
         let pipelines = Pipelines::new(gpu.device());
-        let media = Arc::new(bae_media::MediaGpu::new(gpu.clone()));
         Self {
             pipelines,
             pool: TexturePool::new(config.pool_idle_bytes),
             draws: DrawBuffer::default(),
             frames: FrameCache::new(config.frame_cache_bytes),
-            footage: FootageCache::new(media),
+            footage: FootageCache::new(gpu.clone()),
             providers: SourceProviders::new(),
             effects: EffectLibrary::new(),
             gpu,
