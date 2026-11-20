@@ -34,7 +34,9 @@ use serde::{Deserialize, Serialize};
 use crate::audio::AudioBuffer;
 use crate::frame::{CpuFrame, GpuFrame, PixelFormat};
 use crate::gpu::MediaGpu;
-use crate::meta::{AlphaMode, ColorInfo, ColorPrimaries, PixelAspect, TransferFunction};
+use crate::meta::{
+    AlphaMode, ColorInfo, ColorPrimaries, MatrixCoefficients, PixelAspect, TransferFunction,
+};
 use crate::sequence::parse_numbered_name;
 use crate::source::MediaError;
 use crate::time::{FrameRate, Timecode};
@@ -165,7 +167,9 @@ pub struct EncodeSettings {
 }
 
 impl EncodeSettings {
-    /// Settings with defaults: opaque, 8 bit (16 for EXR), sRGB / BT.709 tags.
+    /// Settings with defaults: opaque, 8 bit (16 for EXR); tags sRGB (PNG),
+    /// linear BT.709 (EXR), or AE's video tags (BT.709, or BT.601 below 720
+    /// lines).
     pub fn new(
         path: impl Into<PathBuf>,
         codec: VideoCodec,
@@ -176,8 +180,18 @@ impl EncodeSettings {
         let color = match codec {
             VideoCodec::Exr(_) => ColorInfo::linear_bt709(),
             VideoCodec::Png => ColorInfo::srgb(),
+            // Same tags as AE's H.264 / QuickTime output (checked against AE
+            // 2026 renders): BT.709 for HD and larger, SMPTE-C primaries with
+            // the BT.601 matrix below 720 lines; BT.709 transfer either way.
+            _ if height < 720 => ColorInfo {
+                primaries: ColorPrimaries::Bt601Ntsc,
+                transfer: TransferFunction::Bt709,
+                matrix: MatrixCoefficients::Bt601,
+                ..ColorInfo::srgb()
+            },
             _ => ColorInfo {
                 transfer: TransferFunction::Bt709,
+                matrix: MatrixCoefficients::Bt709,
                 ..ColorInfo::srgb()
             },
         };
@@ -1286,6 +1300,16 @@ mod tests {
         )
         .with_alpha(AlphaMode::Straight);
         assert!(prores.validate().is_ok());
+        let hd = EncodeSettings::new("a.mp4", VideoCodec::H264, 1920, 1080, FrameRate::FPS_24);
+        assert_eq!(
+            (hd.color.primaries, hd.color.matrix),
+            (ColorPrimaries::Bt709, MatrixCoefficients::Bt709)
+        );
+        let sd = EncodeSettings::new("a.mp4", VideoCodec::H264, 720, 480, FrameRate::FPS_29_97);
+        assert_eq!(
+            (sd.color.primaries, sd.color.matrix),
+            (ColorPrimaries::Bt601Ntsc, MatrixCoefficients::Bt601)
+        );
         let exr = EncodeSettings::new(
             "a.exr",
             VideoCodec::Exr(ExrCompression::Zip),

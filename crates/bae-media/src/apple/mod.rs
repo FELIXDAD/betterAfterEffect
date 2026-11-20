@@ -356,16 +356,12 @@ impl AvSource {
         } else {
             kCVPixelFormatType_32BGRA
         };
-        // Frames are delivered as RGB.
-        video.color.matrix = MatrixCoefficients::Identity;
-        video.color.range = ColorRange::Full;
-
         let info = MediaInfo {
             path: path.to_owned(),
             kind: MediaKind::Movie,
             format: "avfoundation".into(),
             video: Some(video),
-            audio: Vec::new(),
+            audio: crate::audio::probe(path),
             timecode: None,
             sequence: None,
         };
@@ -686,6 +682,17 @@ impl AvSource {
     }
 }
 
+/// The color of delivered frames: VideoToolbox applied the file's Y'CbCr
+/// matrix and range, so frames are full-range RGB (the info keeps the file's
+/// values).
+fn rgb_color(file: &ColorInfo) -> ColorInfo {
+    ColorInfo {
+        matrix: MatrixCoefficients::Identity,
+        range: ColorRange::Full,
+        ..file.clone()
+    }
+}
+
 fn rate_from(min_duration: CMTime, nominal: f32) -> Option<FrameRate> {
     let nominal = frame_rate_from_f64(f64::from(nominal));
     if min_duration.flags.contains(CMTimeFlags::Valid)
@@ -768,7 +775,7 @@ impl MediaSource for AvSource {
             format,
             data,
             alpha: video.alpha,
-            color: video.color.clone(),
+            color: rgb_color(&video.color),
             pixel_aspect: video.pixel_aspect,
         })
     }
@@ -837,7 +844,7 @@ impl MediaSource for AvSource {
                 width: video.width.min(texture.width()),
                 height: video.height.min(texture.height()),
                 alpha: video.alpha,
-                color: video.color.clone(),
+                color: rgb_color(&video.color),
                 pixel_aspect: video.pixel_aspect,
             },
             request,

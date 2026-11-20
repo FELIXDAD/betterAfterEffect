@@ -91,6 +91,9 @@ fn h264_mp4_with_tags() {
     );
     settings.keyframe_interval = Some(10);
     settings.bit_rate = Some(2_000_000);
+    // Explicit HD tags (the SD-size default would be BT.601).
+    settings.color.primaries = ColorPrimaries::Bt709;
+    settings.color.matrix = bae_media::MatrixCoefficients::Bt709;
     let mut source = encode(settings, 30, AlphaMode::Opaque);
     let video = source.info().video.clone().unwrap();
     assert_eq!(video.codec, "h264");
@@ -101,6 +104,24 @@ fn h264_mp4_with_tags() {
     assert_eq!(video.color.primaries, ColorPrimaries::Bt709);
     assert_eq!(video.color.transfer, TransferFunction::Bt709);
     check_frames(source.as_mut(), 30);
+}
+
+#[test]
+fn sd_defaults_match_ae_tags() {
+    // AE tags SD-sized H.264 as SMPTE-C primaries, BT.709 transfer, BT.601 matrix.
+    let dir = tempfile::tempdir().unwrap();
+    let settings = EncodeSettings::new(
+        dir.path().join("sd.mp4"),
+        VideoCodec::H264,
+        W,
+        H,
+        FrameRate::FPS_24,
+    );
+    let source = encode(settings, 2, AlphaMode::Opaque);
+    let color = source.info().video.clone().unwrap().color;
+    assert_eq!(color.primaries, ColorPrimaries::Bt601Ntsc);
+    assert_eq!(color.transfer, TransferFunction::Bt709);
+    assert_eq!(color.matrix, bae_media::MatrixCoefficients::Bt601);
 }
 
 #[test]
