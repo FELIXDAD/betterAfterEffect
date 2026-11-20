@@ -4,6 +4,7 @@
 
 | 目录 | 形态 | 演示内容 | 规范章节 |
 |---|---|---|---|
+| `posterize/` | 声明式 WGSL，像素式 | 最小的完整效果：整数、复选框参数；`identity_when`；快速开始文档 `docs/plugins/quickstart.md` 用的就是它 | §5.3、§11.4 |
 | `vignette/` | 声明式 WGSL，像素式（pixel style） | 浮点、点、弹出菜单、颜色参数；`identity_when`；线性光混合；可以与相邻像素式效果融合成一个内核 | §5.3.6、§11.3、§11.4、§10.9 |
 | `box-blur/` | 声明式 WGSL，计算式（compute style） | 两个 pass + 中间纹理；ROI（`read`、`grows`）；随降采样缩放半径 | §11.5、§11.6、§11.7 |
 | `align-to-grid/` | 脚本插件（JavaScript） | 命令（菜单、快捷键、MCP 工具）+ 自动化脚本（`[[automation]]`）；参数 JSON Schema；权限；一次调用 = 一个撤销步骤 | §5.3.8、§17 |

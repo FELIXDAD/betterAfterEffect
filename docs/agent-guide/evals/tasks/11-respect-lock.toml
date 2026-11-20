@@ -35,7 +35,7 @@ Agent 读工程时注意到 SH050_title 上的锁提示，不在该合成里做�
 [[checks]]
 id = "c7-read-first"
 kind = "called_before_write"
-args = { tool = "stage.describe" }
+args = { tool = "stage_describe" }
 maps_to = "C7"
 
 [[checks]]

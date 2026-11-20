@@ -1,0 +1,12 @@
+# Simplified Chinese strings (docs/spec/plugin-architecture.md §5.3.10).
+[plugin]
+name = "色调分离（示例）"
+description = "把每个颜色通道减少到指定的色阶数。"
+
+[effect.posterize]
+name = "色调分离（示例）"
+keywords = ["色调分离", "色阶"]
+
+[effect.posterize.params]
+levels = "色阶"
+linear = "使用线性光"
