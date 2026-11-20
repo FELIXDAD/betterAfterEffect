@@ -41,7 +41,7 @@ pub use docs::{DocSet, Imported, MemDocs};
 pub use error::SyncError;
 pub use history::{
     Checkpoint, CheckpointId, History, PrimChange, PrimDiff, ProjectDocs, ProjectVersion,
-    VersionView,
+    RevertScope, VersionView,
 };
 #[cfg(feature = "hub")]
 pub use hub::HubTransport;

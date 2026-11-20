@@ -349,3 +349,102 @@ fn checkpoints_travel_through_the_shared_folder() {
     let view = hc.view(&sc, &cp.id).unwrap();
     assert_eq!(view.stage().layer_stack().len(), 2);
 }
+
+/// Every spec of every sublayer, by path (order-independent).
+fn specs(stage: &Stage) -> Vec<(String, String, String)> {
+    let mut out = Vec::new();
+    for layer in stage.sublayers() {
+        for path in layer.paths() {
+            out.push((
+                layer.id().to_string(),
+                path.to_string(),
+                serde_json::to_string(layer.spec(path).unwrap()).unwrap(),
+            ));
+        }
+    }
+    out.sort();
+    out
+}
+
+#[test]
+fn revert_to_a_named_version_is_a_new_undoable_step() {
+    let (mut stage, history, alice, bob) = two_versions();
+    let cps = history.checkpoints();
+    let then = specs(history.view(&stage, &cps[0].id).unwrap().stage());
+    let before = specs(&stage);
+    let version_before = ProjectVersion::current(&stage);
+    let bob_undo = stage.undo_label(&bob).map(str::to_owned);
+
+    let ev = history
+        .revert_to(
+            &mut stage,
+            &alice,
+            &cps[0].id,
+            &bae_sync::RevertScope::Project,
+        )
+        .unwrap();
+    assert!(!ev.is_empty());
+    assert_eq!(specs(&stage), then, "content is back to v1");
+    assert_eq!(
+        fingerprint(&stage),
+        fingerprint(history.view(&stage, &cps[0].id).unwrap().stage()),
+        "child order too"
+    );
+    assert!(history.diff(&stage, &cps[0].id, None).unwrap().is_empty());
+    // History is not rewritten: the rollback is new ops on top, attributed to alice.
+    let now = ProjectVersion::current(&stage);
+    for (id, vv) in &version_before.sublayers {
+        assert!(now.get(id).includes_vv(vv));
+    }
+    let d = history.diff(&stage, &cps[1].id, None).unwrap();
+    assert!(d.iter().all(|x| x.authors == std::slice::from_ref(&alice)));
+    assert_eq!(stage.undo_label(&alice), Some("revert to v1"));
+
+    // One undo brings v2's content back; bob's undo stack was never touched.
+    stage.undo(&alice).unwrap();
+    assert_eq!(specs(&stage), before);
+    assert_eq!(stage.undo_label(&bob).map(str::to_owned), bob_undo);
+    assert!(bob_undo.is_some());
+}
+
+#[test]
+fn revert_can_be_limited_to_one_prim() {
+    let (mut stage, history, alice, _) = two_versions();
+    let v1 = history.checkpoints()[0].id.clone();
+    history
+        .revert_to(
+            &mut stage,
+            &alice,
+            &v1,
+            &bae_sync::RevertScope::Prim(p("/comps/main/layers/bg")),
+        )
+        .unwrap();
+    assert_eq!(
+        stage
+            .prim(&p("/comps/main/layers/bg"))
+            .unwrap()
+            .value("opacity"),
+        Some(&Value::Float(50.0))
+    );
+    // Everything else keeps v2's changes.
+    assert!(stage.prim(&p("/comps/main/layers/logo")).is_some());
+    assert!(stage.prim(&p("/comps/main/layers/headline")).is_some());
+
+    // A whole sublayer: only anim/a goes back.
+    history
+        .revert_to(
+            &mut stage,
+            &alice,
+            &v1,
+            &bae_sync::RevertScope::Sublayer(sl("anim/a")),
+        )
+        .unwrap();
+    assert!(
+        stage
+            .prim(&p("/comps/main"))
+            .unwrap()
+            .attr("zoom")
+            .is_none()
+    );
+    assert!(stage.prim(&p("/comps/main/layers/logo")).is_some());
+}
