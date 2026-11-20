@@ -24,7 +24,7 @@ use crate::schema::{
     transform as tr,
 };
 use crate::time::{LayerTiming, MotionBlur, frame_rate_from_value, nested_comp_time};
-use crate::transform::{AutoOrientRotation, Transform, drop_z, look_along, orient_x_along};
+use crate::transform::{AutoOrientRotation, Transform, look_along};
 
 /// An animatable attribute, compiled.
 #[derive(Clone, Debug)]
@@ -1017,7 +1017,7 @@ impl CompiledComp {
         let mut tf = out[i].transform;
         tf.auto_orient = match (layer.auto_orient, layer.kind) {
             (AutoOrient::Off, _) => AutoOrientRotation::None,
-            (AutoOrient::AlongPath, kind) => along_path(layer, &cx, three_d, kind),
+            (AutoOrient::AlongPath, _) => along_path(layer, &cx, three_d, self.tick()),
             (AutoOrient::Towards, LayerKind::Camera | LayerKind::Light) => {
                 look_along(layer.transform.point_of_interest.vec3(&cx) - tf.position)
             }
@@ -1044,8 +1044,25 @@ impl CompiledComp {
         };
         let m = match parent_world {
             Some(p) if three_d => p * local,
-            // 2D layers see their parent chain flattened (AE-ANI-016).
-            Some(p) => drop_z(p) * local,
+            // A 2D layer sees every ancestor as a 2D transform (position xy, Z rotation,
+            // scale xy, anchor xy), 3D ones included: orientation, X/Y rotation and z
+            // are ignored (measured in AE 26; AE-ANI-016 guessed an orthographic flatten).
+            Some(_) => {
+                let mut chain = Vec::new();
+                let mut j = layer.parent;
+                while let Some(k) = j {
+                    if k == i || chain.contains(&k) {
+                        break;
+                    }
+                    chain.push(k);
+                    j = self.layers[k].parent;
+                }
+                let mut m2 = DMat4::IDENTITY;
+                for &k in chain.iter().rev() {
+                    m2 *= out[k].transform.matrix(false);
+                }
+                m2 * local
+            }
             None => local,
         };
         out[i].transform = tf;
@@ -1097,9 +1114,9 @@ fn along_path(
     layer: &CompiledLayer,
     cx: &Cx<'_, '_>,
     three_d: bool,
-    kind: LayerKind,
+    tick: Time,
 ) -> AutoOrientRotation {
-    let d = position_direction(layer, cx);
+    let d = position_direction(layer, cx, tick);
     let Some(d) = d else {
         return AutoOrientRotation::None;
     };
@@ -1109,16 +1126,15 @@ fn along_path(
         }
         return AutoOrientRotation::Angle(d.y.atan2(d.x).to_degrees());
     }
-    match kind {
-        LayerKind::Camera | LayerKind::Light => look_along(d),
-        _ => orient_x_along(d),
-    }
+    // 3D layers, cameras and lights alike: local +z along the path, no roll
+    // (measured in AE 26 for AV layers).
+    look_along(d)
 }
 
-/// Direction of motion of a layer's position: a central difference of ±1/1000 s
-/// (clamped into the keyframe range so the first/last segments keep their tangent).
-fn position_direction(layer: &CompiledLayer, cx: &Cx<'_, '_>) -> Option<DVec3> {
-    let lt = cx.lt;
+/// Direction of motion of a layer's position, as AE computes it: a forward difference
+/// over one step of its 1/1024-frame time grid (`tick`, comp time) from the quantized
+/// time, kept inside the keyframe range so the first/last segments keep their tangent.
+fn position_direction(layer: &CompiledLayer, cx: &Cx<'_, '_>, tick: Time) -> Option<DVec3> {
     let range = match &layer.transform.position {
         Position::Combined(p) => p.curve()?.time_range(),
         Position::Separate(xyz) => {
@@ -1138,8 +1154,23 @@ fn position_direction(layer: &CompiledLayer, cx: &Cx<'_, '_>) -> Option<DVec3> {
     if range.0 >= range.1 {
         return None;
     }
-    let h = Time(Time::FLICKS_PER_SECOND / 1000);
-    let a = lt.clamp(range.0, range.1 - h);
+    let q = Time((cx.ct.0 as f64 / tick.0 as f64).round() as i64 * tick.0);
+    let (mut a, mut b) = (
+        layer.timing.layer_time(q),
+        layer.timing.layer_time(q + tick),
+    );
+    if a > b {
+        std::mem::swap(&mut a, &mut b);
+    }
+    let h = b - a;
+    if h.0 <= 0 || range.1 - range.0 < h {
+        return None;
+    }
+    if a < range.0 {
+        (a, b) = (range.0, range.0 + h);
+    } else if b > range.1 {
+        (a, b) = (range.1 - h, range.1);
+    }
     let pos = |t: Time| {
         let cx = cx.at_layer_time(t, &layer.timing);
         match &layer.transform.position {
@@ -1149,7 +1180,7 @@ fn position_direction(layer: &CompiledLayer, cx: &Cx<'_, '_>) -> Option<DVec3> {
             }
         }
     };
-    let d = pos(a + h) - pos(a);
+    let d = pos(b) - pos(a);
     (d.length_squared() > 0.0).then_some(d)
 }
 
@@ -1693,6 +1724,39 @@ impl CompiledLayer {
 }
 
 impl CompiledComp {
+    /// One step of AE's evaluation time grid: 1/1024 of a frame (measured in AE 26).
+    pub(crate) fn tick(&self) -> Time {
+        Time(((self.frame_rate.frame_duration().0 as f64) / 1024.0).round() as i64)
+    }
+
+    /// View matrix (comp space → camera space, camera looking along +z) and zoom of the
+    /// active camera at comp time `ct`: the topmost enabled camera layer that is active,
+    /// else AE's default camera at (w/2, h/2, −zoom), zoom = width·50/36.
+    pub(crate) fn camera_at(&self, ct: Time, comp_id: usize, js: Option<&Ctx<'_>>) -> (DMat4, f64) {
+        let cam = self.layers.iter().position(|l| {
+            l.kind == LayerKind::Camera && l.switches.enabled && l.timing.is_active(ct)
+        });
+        match cam {
+            Some(i) => {
+                let layer = &self.layers[i];
+                let cx = Cx {
+                    comp: comp_id,
+                    layer: i,
+                    ct,
+                    lt: layer.timing.layer_time(ct),
+                    js,
+                };
+                let zoom = layer.camera.as_ref().map_or(1777.8, |c| c.zoom.f64(&cx));
+                (self.world_at(i, ct, comp_id, js).inverse(), zoom)
+            }
+            None => {
+                let zoom = crate::default_camera_zoom(self.width);
+                let eye = DVec3::new(self.width as f64 / 2.0, self.height as f64 / 2.0, -zoom);
+                (DMat4::from_translation(-eye), zoom)
+            }
+        }
+    }
+
     /// Layer `i`'s world matrix (layer space → comp space) at comp time `ct`, for
     /// expression space transforms. Auto-orient towards the camera is not applied.
     pub(crate) fn world_at(
@@ -1703,15 +1767,18 @@ impl CompiledComp {
         js: Option<&Ctx<'_>>,
     ) -> DMat4 {
         let mut visiting = Vec::new();
-        self.world_at_inner(i, ct, comp_id, js, &mut visiting)
+        self.world_at_inner(i, ct, comp_id, js, false, &mut visiting)
     }
 
+    /// `flat`: evaluate this layer as a 2D transform (it is an ancestor of a 2D layer).
+    #[allow(clippy::too_many_arguments)]
     fn world_at_inner(
         &self,
         i: usize,
         ct: Time,
         comp_id: usize,
         js: Option<&Ctx<'_>>,
+        flat: bool,
         visiting: &mut Vec<usize>,
     ) -> DMat4 {
         visiting.push(i);
@@ -1726,7 +1793,7 @@ impl CompiledComp {
         let three_d = layer.switches.three_d;
         let mut tf = sample_transform(layer, &cx);
         tf.auto_orient = match (layer.auto_orient, layer.kind) {
-            (AutoOrient::AlongPath, kind) => along_path(layer, &cx, three_d, kind),
+            (AutoOrient::AlongPath, _) => along_path(layer, &cx, three_d, self.tick()),
             (AutoOrient::Towards, LayerKind::Camera | LayerKind::Light) => {
                 look_along(layer.transform.point_of_interest.vec3(&cx) - tf.position)
             }
@@ -1736,14 +1803,10 @@ impl CompiledComp {
             LayerKind::Camera | LayerKind::Light => tf.camera_matrix(),
             _ => tf.matrix(three_d),
         };
+        let local = if flat { tf.matrix(false) } else { local };
         let m = match layer.parent {
             Some(p) if !visiting.contains(&p) => {
-                let pw = self.world_at_inner(p, ct, comp_id, js, visiting);
-                if three_d {
-                    pw * local
-                } else {
-                    drop_z(pw) * local
-                }
+                self.world_at_inner(p, ct, comp_id, js, flat || !three_d, visiting) * local
             }
             _ => local,
         };

@@ -53,4 +53,4 @@ EffectDef         ──► bae_model::EffectRegistry   效果控件、效果和
 DeclarativeEffect ──► bae_render::EffectLibrary   渲染图（和 07 的内置效果同一个 trait）
 ```
 
-宿主代码在 `crates/bae-plugin`（`PluginHost` 负责发现、选版本、注册和卸载）。
+宿主代码在 `crates/bae-plugin`（`PluginHost` 负责发现、选版本、注册和卸载）。应用里由 `PluginModule` 接入：插件效果发布在应用的运行时注册表 `bae_app::Registry<EffectDef>` 和 `Registry<dyn bae_render::Effect>` 里（所有者是 `Owner::Plugin(<插件 ID>)`），和内置模块注册的效果在一起；命令行有 `bae plugin check` 和 `bae plugin list`。

@@ -23,7 +23,7 @@ MCP 服务器在初始化时可以给客户端一段 `instructions` 文本，大
 
 - 内容以完整指南为准，这里只是摘要。完整指南改了规则，这里同步改。
 - 工具名按**命令 ID（点号）**写，例如 `stage.describe`、`attr.clear`；服务器附加说明会告诉 Agent 实际工具名用下划线。
-- 17 有测试（`guide_instructions_fit_and_name_real_tools`）：两份都不超过 3,000 字符，必须提到 `stage.describe`，提到的每个点号名字都必须是 `bae mcp` 已提供的工具，或在 17 的"暂未提供"名单（`PENDING`）里。所以**还没接入 `bae mcp` 的命令（例如 12 的 `key.ease`）不能写进来**；改完运行 `cargo test -p bae-agent --lib guide_instructions`。
+- 17 有测试（`guide_instructions_fit_and_name_real_tools`）：两份都不超过 3,000 字符，必须提到 `stage.describe`，提到的每个点号名字都必须是 `bae mcp` 已提供的工具，或在 17 的"暂未提供"名单（`PENDING`）里。测试用的工具目录是 `Workspace::new`，只含 02 的内置命令、17 和 21 的命令，**不含应用模块发布的命令**（例如 12 的 `key.ease`）。所以模块命令写成实际工具名（`key_ease`，下划线不会被测试当成命令 ID 检查）。改完运行 `cargo test -p bae-agent --lib guide_instructions`。
 - 长度上限 3,000 字符。要加内容就删掉不那么关键的内容，不要加长。
 - 中英文两个版本的条目一一对应，改一个就改另一个。
 

@@ -25,11 +25,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bae_model::{
-    AssetFile, AssetResolver, AttrSpec, FrameRate, Interpolation, PrimPath, PrimType, PrimView,
-    Stage, Time, Value, schema,
+    AttrSpec, FrameRate, Interpolation, PrimPath, PrimType, PrimView, Stage, StageEvent, Time,
+    Value, schema,
 };
 use glam::{DAffine2, DVec2};
 
+use crate::assets::AssetFiles;
 use crate::blend::{BlendMode, MaskMode, TrackMatteMode};
 use crate::error::RenderError;
 use crate::graph::MAX_DEPTH;
@@ -38,11 +39,22 @@ use crate::input::{
 };
 use crate::request::RenderPurpose;
 
-/// Produces evaluated comps. Implemented by the mock below and, later, by an
-/// adapter over `bae-anim`.
+/// Produces evaluated comps. Implemented by [`MockEvaluator`] and by
+/// [`crate::anim::AnimEvaluator`] (the adapter over 03's `bae-anim`).
+///
+/// The stage is passed per call so one evaluator (with its compiled caches) can
+/// live across edits; forward every [`StageEvent`] to [`CompEvaluator::invalidate`].
 pub trait CompEvaluator {
-    /// Evaluates `comp` at comp time `time`.
-    fn evaluate(&mut self, comp: &PrimPath, time: Time) -> Result<RenderComp, RenderError>;
+    /// Evaluates `comp` of `stage` at comp time `time`.
+    fn evaluate(
+        &mut self,
+        stage: &Stage,
+        comp: &PrimPath,
+        time: Time,
+    ) -> Result<RenderComp, RenderError>;
+
+    /// Drops whatever `event` makes stale. Default: nothing is cached.
+    fn invalidate(&mut self, _event: &StageEvent) {}
 
     /// Problems found while evaluating since the last call (unsupported features).
     fn take_warnings(&mut self) -> Vec<String> {
@@ -52,23 +64,28 @@ pub trait CompEvaluator {
 
 /// Evaluates a [`Stage`] with static values and linear keyframes.
 #[derive(Debug)]
-pub struct MockEvaluator<'a> {
-    stage: &'a Stage,
-    assets: AssetResolver,
+pub struct MockEvaluator {
+    assets: AssetFiles,
     purpose: RenderPurpose,
     warnings: Vec<String>,
 }
 
-impl<'a> MockEvaluator<'a> {
-    /// An evaluator over `stage`; footage paths resolve against `base_dir` (the
+impl MockEvaluator {
+    /// An evaluator whose footage paths resolve against `base_dir` (the
     /// project's directory, [`bae_model::Project::base_dir`]).
-    pub fn new(stage: &'a Stage, base_dir: Option<PathBuf>) -> Self {
+    pub fn new(base_dir: Option<PathBuf>) -> Self {
         Self {
-            stage,
-            assets: AssetResolver::new(base_dir, Vec::new()),
+            assets: AssetFiles::new(base_dir),
             purpose: RenderPurpose::Final,
             warnings: Vec::new(),
         }
+    }
+
+    /// Uses `assets` to find footage files (e.g. [`AssetFiles::for_project`]).
+    #[must_use]
+    pub fn with_assets(mut self, assets: AssetFiles) -> Self {
+        self.assets = assets;
+        self
     }
 
     /// Preview or final (guide layers render only in a top-level preview).
@@ -77,7 +94,17 @@ impl<'a> MockEvaluator<'a> {
         self.purpose = purpose;
         self
     }
+}
 
+/// One evaluation over a stage.
+struct MockPass<'a> {
+    stage: &'a Stage,
+    assets: &'a AssetFiles,
+    purpose: RenderPurpose,
+    warnings: &'a mut Vec<String>,
+}
+
+impl<'a> MockPass<'a> {
     fn warn(&mut self, message: String) {
         if !self.warnings.contains(&message) {
             self.warnings.push(message);
@@ -129,6 +156,10 @@ impl<'a> MockEvaluator<'a> {
             pixel_aspect: float(&view, "pixel_aspect", time).unwrap_or(1.0),
             frame_rate,
             background: color(&view, "bg_color", time).unwrap_or([0.0, 0.0, 0.0, 1.0]),
+            shutter: [
+                float(&view, "shutter_angle", time).unwrap_or(180.0),
+                float(&view, "shutter_phase", time).unwrap_or(-90.0),
+            ],
             layers: Vec::new(),
         };
 
@@ -294,8 +325,13 @@ impl<'a> MockEvaluator<'a> {
                 height: h,
             }),
             "footage" | "sequence" => {
-                let file = AssetFile::from_prim(&src)
-                    .and_then(|f| self.assets.resolve(&f).path().map(|p| p.to_path_buf()));
+                let file = match self.assets.file(&src) {
+                    Ok(file) => file,
+                    Err(message) => {
+                        self.warn(format!("{}: {message}", layer.path()));
+                        None
+                    }
+                };
                 Ok(LayerContent::Footage(FootageRef {
                     asset: source,
                     file,
@@ -358,9 +394,20 @@ impl<'a> MockEvaluator<'a> {
     }
 }
 
-impl CompEvaluator for MockEvaluator<'_> {
-    fn evaluate(&mut self, comp: &PrimPath, time: Time) -> Result<RenderComp, RenderError> {
-        self.comp(comp, time, 0)
+impl CompEvaluator for MockEvaluator {
+    fn evaluate(
+        &mut self,
+        stage: &Stage,
+        comp: &PrimPath,
+        time: Time,
+    ) -> Result<RenderComp, RenderError> {
+        MockPass {
+            stage,
+            assets: &self.assets,
+            purpose: self.purpose,
+            warnings: &mut self.warnings,
+        }
+        .comp(comp, time, 0)
     }
 
     fn take_warnings(&mut self) -> Vec<String> {

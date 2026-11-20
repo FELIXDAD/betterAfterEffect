@@ -10,15 +10,17 @@
 use std::fmt;
 use std::sync::Arc;
 
-use bae_model::{EffectDef, PrimPath, Time, Value};
+use bae_model::{EffectDef, FrameRate, PrimPath, Time, Value};
 use rustc_hash::FxHashMap;
 
 use crate::error::RenderError;
 use crate::geom::IRect;
 use crate::input::RenderEffect;
+use crate::request::RenderPurpose;
 use crate::source::{EncodeContext, GpuImage};
 
-/// Evaluated parameters of one effect instance, with typed accessors.
+/// Evaluated parameters of one effect instance plus the frame context an
+/// effect needs (the equivalents of AE's `PF_InData`), with typed accessors.
 #[derive(Clone, Copy, Debug)]
 pub struct EffectParams<'a> {
     /// The instance (prim, effect ID, values).
@@ -26,8 +28,51 @@ pub struct EffectParams<'a> {
     /// Layer time of the frame.
     pub time: Time,
     /// Resolution scale (0.5 at half resolution): pixel-sized parameters such as a
-    /// blur radius must be multiplied by it.
+    /// blur radius must be multiplied by it (AE `downsample_x/y`).
     pub scale: f64,
+    /// The layer's content bounds in layer pixels at full resolution, before any
+    /// effect (AE "layer bounds", `PF_InData::width/height` + origin).
+    pub layer_bounds: IRect,
+    /// Comp frame rate.
+    pub frame_rate: FrameRate,
+    /// Duration of one comp frame (AE `time_step`; not yet rescaled for
+    /// time-stretched layers).
+    pub time_step: Time,
+    /// The working space is linearized for blending (effects that mix colours
+    /// should do so in linear light too).
+    pub linear: bool,
+    /// Preview or final render.
+    pub purpose: RenderPurpose,
+    /// Comp shutter angle in degrees (AE default 180).
+    pub shutter_angle: f64,
+    /// Comp shutter phase in degrees (AE default −90).
+    pub shutter_phase: f64,
+    /// Stable per effect instance (hash of the effect prim path): seeds random
+    /// generators so noise does not change between frames or renders.
+    pub seed: u64,
+}
+
+impl<'a> EffectParams<'a> {
+    /// Parameters of `effect` with default frame context: time 0, full
+    /// resolution, empty layer bounds, 30 fps, preview, 180° / −90° shutter.
+    pub fn new(effect: &'a RenderEffect) -> Self {
+        use std::hash::{Hash, Hasher};
+        let mut h = rustc_hash::FxHasher::default();
+        effect.path.hash(&mut h);
+        Self {
+            effect,
+            time: Time::ZERO,
+            scale: 1.0,
+            layer_bounds: IRect::EMPTY,
+            frame_rate: FrameRate::FPS_30,
+            time_step: FrameRate::FPS_30.frame_duration(),
+            linear: false,
+            purpose: RenderPurpose::Preview,
+            shutter_angle: 180.0,
+            shutter_phase: -90.0,
+            seed: h.finish(),
+        }
+    }
 }
 
 impl EffectParams<'_> {

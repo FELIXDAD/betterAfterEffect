@@ -4,11 +4,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use bae_gpu::{GpuContext, GpuContextDescriptor, GpuError, wgpu};
-use bae_model::{EffectDef, EffectRegistry, PrimPath, Time};
+use bae_model::{EffectDef, PrimPath, Time};
 use bae_plugin::declarative::create_image;
-use bae_plugin::host::{LoadError, PluginDir, PluginHost, Scope};
+use bae_plugin::host::{EffectRegistries, LoadError, PluginDir, PluginHost, Scope};
 use bae_plugin::{DeclarativeEffect, DirSource};
-use bae_render::{EffectLibrary, EffectParams, GpuImage, IRect, RenderEffect, RenderError};
+use bae_render::{EffectParams, GpuImage, IRect, RenderEffect, RenderError};
 
 fn manifest(version: &str) -> String {
     format!(
@@ -77,10 +77,9 @@ fn discovery_and_version_selection() {
     assert_eq!(active[0].manifest.plugin.version.to_string(), "1.2.0");
     assert_eq!(active[0].scope, Scope::Project);
 
-    let mut defs = EffectRegistry::new();
-    let mut lib = EffectLibrary::new();
+    let mut regs = EffectRegistries::default();
     let mut host = PluginHost::new();
-    let (loaded, problems) = host.load_dirs(&dirs, &mut defs, &mut lib);
+    let (loaded, problems) = host.load_dirs(&dirs, &mut regs);
     assert_eq!(loaded, ["com.example.tint"]);
     assert_eq!(problems.len(), 1);
     assert_eq!(host.get("com.example.tint").unwrap().scope, Scope::Project);
@@ -89,27 +88,27 @@ fn discovery_and_version_selection() {
 #[test]
 fn register_update_and_unload() {
     let tmp = tempfile::tempdir().unwrap();
-    let mut defs = EffectRegistry::new();
-    let mut lib = EffectLibrary::new();
+    let mut regs = EffectRegistries::default();
     let mut host = PluginHost::new();
     let v1 = write_package(&tmp.path().join("v1"), "1.0.0");
     let v2 = write_package(&tmp.path().join("v2"), "2.0.0");
 
     let p = host
-        .load_from(&DirSource::new(&v1), Scope::User, &mut defs, &mut lib)
+        .load_from(&DirSource::new(&v1), Scope::User, &mut regs)
         .unwrap();
     assert_eq!(p.effects.len(), 1);
-    let def = defs.get("com.example.tint/tint").unwrap();
+    let def = regs.definitions.get("com.example.tint/tint").unwrap();
     assert_eq!(def.plugin.as_ref().unwrap().version, "1.0.0");
     assert_eq!(def.category, "Color Correction");
-    assert!(lib.get("com.example.tint/tint").is_some());
+    assert!(regs.library.get("com.example.tint/tint").is_some());
 
     // Loading another version replaces the first (update without restart).
-    host.load_from(&DirSource::new(&v2), Scope::User, &mut defs, &mut lib)
+    host.load_from(&DirSource::new(&v2), Scope::User, &mut regs)
         .unwrap();
     assert_eq!(host.plugins().len(), 1);
     assert_eq!(
-        defs.get("com.example.tint/tint")
+        regs.definitions
+            .get("com.example.tint/tint")
             .unwrap()
             .plugin
             .as_ref()
@@ -117,32 +116,26 @@ fn register_update_and_unload() {
             .version,
         "2.0.0"
     );
-    assert_eq!(lib.len(), 1);
+    assert_eq!(regs.library.len(), 1);
 
     // A render graph holding the effect keeps it alive across the unload.
-    let held = lib.get("com.example.tint/tint").unwrap().clone();
-    let report = host
-        .unload("com.example.tint", &mut defs, &mut lib)
-        .unwrap();
+    let held = regs.library.get("com.example.tint/tint").unwrap().clone();
+    let report = host.unload("com.example.tint", &mut regs).unwrap();
     assert_eq!(report.definitions_removed, 1);
     assert_eq!(report.effects_removed, 1);
     assert_eq!(report.effects_in_use, 1);
-    assert!(defs.get("com.example.tint/tint").is_none());
-    assert!(lib.is_empty());
+    assert!(regs.definitions.get("com.example.tint/tint").is_none());
+    assert!(regs.library.is_empty());
     assert_eq!(Arc::strong_count(&held), 1);
     drop(held);
-    assert!(
-        host.unload("com.example.tint", &mut defs, &mut lib)
-            .is_none()
-    );
+    assert!(host.unload("com.example.tint", &mut regs).is_none());
 }
 
 #[test]
 fn built_in_effects_win_conflicts() {
     let tmp = tempfile::tempdir().unwrap();
-    let mut defs = EffectRegistry::new();
-    let mut lib = EffectLibrary::new();
-    defs.register(EffectDef {
+    let mut regs = EffectRegistries::default();
+    regs.definitions.register(EffectDef {
         match_name: "com.example.tint/tint".into(),
         name: "Built-in".into(),
         category: String::new(),
@@ -153,23 +146,21 @@ fn built_in_effects_win_conflicts() {
     });
     let pkg = write_package(&tmp.path().join("p"), "1.0.0");
     let err = PluginHost::new()
-        .load_from(&DirSource::new(&pkg), Scope::User, &mut defs, &mut lib)
+        .load_from(&DirSource::new(&pkg), Scope::User, &mut regs)
         .unwrap_err();
     assert!(matches!(err, LoadError::Conflict { .. }), "{err}");
-    assert_eq!(defs.get("com.example.tint/tint").unwrap().name, "Built-in");
+    assert_eq!(
+        regs.definitions.get("com.example.tint/tint").unwrap().name,
+        "Built-in"
+    );
 }
 
 #[test]
 fn official_examples_load_through_the_host() {
     let examples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../plugins/examples");
-    let mut defs = EffectRegistry::new();
-    let mut lib = EffectLibrary::new();
+    let mut regs = EffectRegistries::default();
     let mut host = PluginHost::new();
-    let (loaded, problems) = host.load_dirs(
-        &[PluginDir::new(examples, Scope::Bundled)],
-        &mut defs,
-        &mut lib,
-    );
+    let (loaded, problems) = host.load_dirs(&[PluginDir::new(examples, Scope::Bundled)], &mut regs);
     assert!(problems.is_empty(), "{problems:#?}");
     assert_eq!(
         loaded,
@@ -180,8 +171,12 @@ fn official_examples_load_through_the_host() {
             "com.example.vignette"
         ]
     );
-    assert_eq!(lib.len(), 3);
-    assert!(defs.get("com.example.vignette/vignette").is_some());
+    assert_eq!(regs.library.len(), 3);
+    assert!(
+        regs.definitions
+            .get("com.example.vignette/vignette")
+            .is_some()
+    );
     // The script plugin loads (validated) with a warning that it does not run yet.
     assert!(
         !host
@@ -229,8 +224,7 @@ fn runtime_load_unload_does_not_leak_gpu_resources() {
     let Some(gpu) = context() else { return };
     let tmp = tempfile::tempdir().unwrap();
     let pkg = write_package(&tmp.path().join("p"), "1.0.0");
-    let mut defs = EffectRegistry::new();
-    let mut lib = EffectLibrary::new();
+    let mut regs = EffectRegistries::default();
     let mut host = PluginHost::new();
     let input = create_image(
         &gpu,
@@ -246,14 +240,14 @@ fn runtime_load_unload_does_not_leak_gpu_resources() {
         params: Vec::new(),
     };
 
-    let mut cycle = |defs: &mut EffectRegistry, lib: &mut EffectLibrary| {
-        host.load_from(&DirSource::new(&pkg), Scope::User, defs, lib)
+    let mut cycle = |regs: &mut EffectRegistries| {
+        host.load_from(&DirSource::new(&pkg), Scope::User, regs)
             .unwrap();
         let effect = host.get("com.example.tint").unwrap().effects[0].clone();
         let params = EffectParams {
-            effect: &inst,
             time: Time::ZERO,
             scale: 1.0,
+            ..EffectParams::new(&inst)
         };
         let mut encoder = gpu
             .device()
@@ -276,20 +270,20 @@ fn runtime_load_unload_does_not_leak_gpu_resources() {
         gpu.queue().submit([encoder.finish()]);
         drop(out);
         drop(effect);
-        let report = host.unload("com.example.tint", defs, lib).unwrap();
+        let report = host.unload("com.example.tint", regs).unwrap();
         assert_eq!(report.effects_in_use, 0);
         gpu.wait_idle().unwrap();
     };
 
     // Warm up once (lazily created device-level objects), then measure.
-    cycle(&mut defs, &mut lib);
+    cycle(&mut regs);
     let Some(baseline) = live_objects(&gpu) else {
         eprintln!("wgpu resource report unavailable; skipping the leak check");
         return;
     };
     for _ in 0..100 {
-        cycle(&mut defs, &mut lib);
+        cycle(&mut regs);
     }
     assert_eq!(live_objects(&gpu).unwrap(), baseline);
-    assert!(defs.iter().next().is_none() && lib.is_empty());
+    assert!(regs.definitions.iter().next().is_none() && regs.library.is_empty());
 }

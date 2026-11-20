@@ -1,0 +1,30 @@
+# bae-hub on Docker Compose (Synology Container Manager "项目", QNAP Container
+# Station "应用程序", TrueNAS SCALE custom app, plain docker compose).
+# 说明见 deploy/README.md。
+#
+#   docker compose -f deploy/docker/compose.yaml up -d
+#
+# 第一次启动后，在日志里（或 <数据目录>/hub.toml 里）找到团队令牌。
+
+services:
+  bae-hub:
+    # 自己构建的镜像名。用 deploy/scripts/build-image.sh 构建，或者导入它生成的 .tar。
+    image: bae-hub:latest
+    container_name: bae-hub
+    restart: unless-stopped
+    ports:
+      - "7341:7341"
+    volumes:
+      # 冒号左边换成 NAS 上的目录，例如群晖 /volume1/docker/bae-hub、
+      # 威联通 /share/Container/bae-hub、Unraid /mnt/user/appdata/bae-hub。
+      - ./bae-hub-data:/data
+    environment:
+      BAE_HUB_LOG: info
+      # 也可以不写 hub.toml，直接在这里给令牌（至少 16 个字符；bae-hub gen-token 可以生成）：
+      # BAE_HUB_TOKEN: "…可写令牌…"
+      # BAE_HUB_READ_TOKEN: "…只读令牌…"
+    # 以 NAS 上某个用户的身份运行（数据目录要归这个用户所有）。不写时以 root 运行。
+    # 查看 uid/gid：在 NAS 的 SSH 里执行 `id 用户名`。
+    # user: "1026:100"
+    # 内存上限（可选）。空闲时只占几 MB。
+    # mem_limit: 256m

@@ -52,7 +52,11 @@
 - [~] 权限与发现：
   - 团队令牌已做（PR 1）：只读/可写，可以限定工程；只保存哈希，比较用常数时间；首次启动自动生成。
   - mDNS 自动发现还没做。
-- [ ] Docker 与 NAS 部署文档
+- [x] Docker 与 NAS 部署文档（PR 2）：
+  - `deploy/docker/Dockerfile`：多架构（amd64 / arm64）；构建阶段直接交叉编译，不需要 QEMU；最终镜像 `FROM scratch`，里面只有一个静态文件。
+  - 其他文件：`compose.yaml`；`scripts/build-linux.sh`（生成 musl 静态单文件压缩包）、`scripts/build-image.sh`（生成可导入的镜像 .tar，或推送到镜像仓库）；systemd 服务；Unraid 模板。
+  - 中文文档：`deploy/README.md`，以及群晖、威联通、Unraid、TrueNAS 的分步说明。
+  - 真机部署验收还没做：这台 Mac 上没有 Docker，也没有 NAS。
 - [ ] 历史快照
 
 ### 2026-11-20
@@ -68,6 +72,12 @@
   - 数据目录锁
 - **改架构**：第一版用 tokio + axum 写的。09 PR E 合并后，按协调人的要求改成直接用 `HubTransport`。
 - **体积**：去掉 tokio / axum 之后，release 体积见 PR 描述（预算 15 MiB）。在 macOS 上用 `rust-lld` 就能直接交叉编译 musl 静态单文件，不需要 zig 或 Docker。
+- **PR 1 已合并（#47）。**
+- **PR 2 的验证**（只能在本机做）：
+  - `build-linux.sh` 在 macOS 上生成了两个架构的压缩包：x86_64 版 2.4 MiB（程序 5.0 MiB），aarch64 版 2.2 MiB（程序 4.2 MiB）。
+  - 按容器的方式运行（只用环境变量配置）：健康检查、只读令牌、SIGTERM 退出都正常。
+  - compose 和各 NAS 文档里的 YAML 都能正常解析。
+  - 还没验证：Docker 镜像的实际构建，以及在真实 NAS 上部署（任务书验收第 3 条）。需要一台装了 Docker 的机器，或一台 NAS。
 - **给 09 的请求**：写在 09 任务书"请求"一节，共 4 条：
   - 传输出错时会话丢掉本轮已收到的数据（会丢修改；Hub 这边已经绕开）
   - WebSocket 单帧 16 MiB 的上限

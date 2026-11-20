@@ -46,7 +46,11 @@ impl Engine {
         let rt = Runtime::new().expect("QuickJS runtime");
         // Expressions are small; a runaway loop should not take the app down.
         rt.set_memory_limit(256 << 20);
-        rt.set_max_stack_size(1 << 20);
+        // Native stack QuickJS may use from the entry point ([`with_js`] resets it),
+        // shared by the nested expression evaluations (at most MAX_DEPTH) and user
+        // recursion. Small enough to leave room on 1 MiB thread stacks (Windows main
+        // thread), so deep recursion is a RangeError, never a crash.
+        rt.set_max_stack_size(JS_STACK);
         let ctx = Context::full(&rt).expect("QuickJS context");
         ctx.with(|ctx| {
             install_host(&ctx).expect("host functions");
@@ -65,13 +69,27 @@ impl Engine {
     }
 }
 
-/// Run `f` inside this thread's JavaScript context.
+/// QuickJS stack budget, see [`Engine::new`].
+const JS_STACK: usize = 384 << 10;
+
+/// Run `f` inside this thread's JavaScript context. Only called from Rust (never from
+/// a host function), so it is the outermost entry into JavaScript.
 pub(crate) fn with_js<R>(f: impl FnOnce(&Ctx<'_>) -> R) -> R {
     let ctx = ENGINE.with(|e| {
         let mut e = e.borrow_mut();
         e.get_or_insert_with(Engine::new).ctx.clone()
     });
-    ctx.with(|ctx| f(&ctx))
+    ctx.with(|ctx| {
+        // QuickJS measures its stack limit from the stack top recorded when the
+        // runtime was created; measure it from here instead, so the budget does not
+        // depend on where the runtime happened to be created.
+        // SAFETY: `ctx` is a live context of this thread's runtime, so the runtime
+        // pointer is valid; JS_UpdateStackTop only reads the current stack pointer.
+        unsafe {
+            rquickjs::qjs::JS_UpdateStackTop(rquickjs::qjs::JS_GetRuntime(ctx.as_raw().as_ptr()));
+        }
+        f(&ctx)
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -98,8 +116,9 @@ pub(crate) struct Scope {
 }
 
 /// Nested expression evaluations allowed on the native stack. Deeper dependency
-/// chains are resolved by repeated passes that memoise them from the far end.
-const MAX_DEPTH: usize = 24;
+/// chains are resolved by repeated passes that memoise them from the far end, so the
+/// stack use is bounded whatever the chain length.
+const MAX_DEPTH: usize = 4;
 
 impl Scope {
     pub(crate) fn new(comps: Vec<Arc<CompiledComp>>) -> Scope {
@@ -272,9 +291,16 @@ fn is_deferred() -> bool {
 /// which is how cycles are cut anyway.
 pub(crate) fn warm_up(count: usize, mut eval_one: impl FnMut(usize), mut cut: impl FnMut(usize)) {
     let mut pending: Vec<usize> = (0..count).collect();
-    for _ in 0..(4 * count + 8) {
+    for pass in 0..(4 * count + 8) {
         let mut still = Vec::new();
-        for &i in &pending {
+        // Alternate directions: a chain running either way through the layer order
+        // completes within two passes.
+        let order: Vec<usize> = if pass % 2 == 0 {
+            pending.clone()
+        } else {
+            pending.iter().rev().copied().collect()
+        };
+        for &i in &order {
             set_deferred(false);
             eval_one(i);
             if is_deferred() {
@@ -284,9 +310,10 @@ pub(crate) fn warm_up(count: usize, mut eval_one: impl FnMut(usize), mut cut: im
         if still.is_empty() {
             break;
         }
-        if still.len() == pending.len() {
+        if still.len() == pending.len() && pass % 2 == 1 {
             cut(still.remove(0));
         }
+        still.sort_unstable();
         pending = still;
     }
     set_deferred(false);
@@ -1003,16 +1030,30 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 let comp = comp_or_throw(&ctx, c)?;
                 let li = layer_or_throw(&ctx, &comp, l)?;
                 note_dependency(c as usize, li);
-                let m = comp.world_at(li, Time::from_seconds(t), c as usize, Some(&ctx));
+                let ct = Time::from_seconds(t);
+                let m = comp.world_at(li, ct, c as usize, Some(&ctx));
                 let v = glam::DVec3::new(
                     p.first().copied().unwrap_or(0.0),
                     p.get(1).copied().unwrap_or(0.0),
                     p.get(2).copied().unwrap_or(0.0),
                 );
                 let r = match kind {
-                    0 => m.transform_point3(v),
-                    1 => m.inverse().transform_point3(v),
-                    2 => m.transform_vector3(v),
+                    // toComp of a 3D layer is in the comp's view: through the active
+                    // camera (AE 26: matches the default camera's projection exactly).
+                    0 if comp.layers[li].switches.three_d => {
+                        let w = m.transform_point3(v);
+                        let (view, zoom) = comp.camera_at(ct, c as usize, Some(&ctx));
+                        let pc = view.transform_point3(w);
+                        let (cx, cy) = (comp.width as f64 / 2.0, comp.height as f64 / 2.0);
+                        if pc.z.abs() < 1e-12 {
+                            glam::DVec3::new(cx, cy, 0.0)
+                        } else {
+                            glam::DVec3::new(cx + pc.x * zoom / pc.z, cy + pc.y * zoom / pc.z, pc.z)
+                        }
+                    }
+                    0 | 4 => m.transform_point3(v),
+                    1 | 5 => m.inverse().transform_point3(v),
+                    2 | 6 => m.transform_vector3(v),
                     _ => m.inverse().transform_vector3(v),
                 };
                 Ok::<_, rquickjs::Error>(r.to_array().to_vec())

@@ -381,6 +381,93 @@ async fn agent_builds_animates_renders_and_proposes() {
             .all(|e| e.author.as_str() == "agent:test-agent")
     );
 
+    // Named versions: save, compare, view, revert (only within the agent's rights).
+    let cp = ok_json(
+        &call(
+            &client,
+            "history_checkpoint",
+            json!({"name": "v1", "note": "title in"}),
+        )
+        .await,
+    );
+    assert_eq!(cp["saved"], true);
+    assert!(project_path.join("history.loro").is_file());
+    let cp_id = cp["checkpoint"]["id"].as_str().unwrap().to_owned();
+    ok_json(
+        &call(
+            &client,
+            "attr_set",
+            json!({"path": "/comps/main/layers/title", "attr": "name",
+                   "value": {"type": "string", "value": "Changed"}}),
+        )
+        .await,
+    );
+    {
+        // A collaborator edits root meanwhile.
+        let mut ws = workspace.lock();
+        let ws = &mut *ws;
+        let user = bae_model::AuthorId::new("user:felix").unwrap();
+        ws.registry
+            .execute(
+                &mut ws.project.stage,
+                &user,
+                "prim.create",
+                json!({"path": "/notes", "prim_type": "Folder"}),
+            )
+            .unwrap();
+    }
+    let diff = ok_json(&call(&client, "history_diff", json!({"from": cp_id})).await);
+    let changes = diff["changes"].as_array().unwrap();
+    assert!(
+        changes
+            .iter()
+            .any(|c| c["path"] == "/comps/main/layers/title"
+                && c["sublayer"] == "agent/test-agent"
+                && c["attrs"] == json!(["name"])),
+        "{diff}"
+    );
+    assert!(
+        changes
+            .iter()
+            .any(|c| c["path"] == "/notes" && c["change"] == "added"),
+        "{diff}"
+    );
+    let old = text_of(&call(&client, "stage_describe", json!({"checkpoint": cp_id})).await);
+    assert!(old.starts_with("Named version \"v1\""), "{old}");
+    assert!(!old.contains("notes (Folder)"), "{old}");
+    let denied = call(&client, "history_revert", json!({"checkpoint": cp_id})).await;
+    assert!(
+        text_of(&denied).contains("permission denied"),
+        "{}",
+        text_of(&denied)
+    );
+    ok_json(
+        &call(
+            &client,
+            "history_revert",
+            json!({"checkpoint": cp_id, "sublayer": "agent/test-agent"}),
+        )
+        .await,
+    );
+    let prim = ok_json(
+        &call(
+            &client,
+            "prim_get",
+            json!({"path": "/comps/main/layers/title"}),
+        )
+        .await,
+    );
+    assert!(prim["attributes"].get("name").is_none(), "{prim}");
+    assert!(
+        workspace
+            .lock()
+            .project
+            .stage
+            .has_prim(&PrimPath::new("/notes").unwrap())
+    );
+    let list = ok_json(&call(&client, "history_list", json!({})).await);
+    assert_eq!(list["checkpoints"][0]["name"], "v1");
+
     // Module commands are tools too, and their times accept frames.
     let tools = client.list_all_tools().await.unwrap();
     assert!(tools.iter().any(|t| t.name == "test_nudge"));

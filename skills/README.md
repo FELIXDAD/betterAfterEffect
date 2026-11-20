@@ -44,4 +44,4 @@ Skill 目录是自包含的，复制整个 `skills/bae-animation/` 即可：
 
 ## 状态
 
-工具名已按 17 的 `bae mcp` 核对（2026-11-20）。还没提供或还没接入的工具见 `docs/agent-guide/tools.md`。
+工具名和参数格式已按 17 的 `bae mcp`（#55）核对。还没提供的工具见 `docs/agent-guide/tools.md`。
