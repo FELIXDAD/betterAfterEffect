@@ -35,23 +35,23 @@ AE 互转由 15 `interop/ae` 实现：导回 AE 的主路径是生成一个 `.js
 
 ### 2.3 整洁
 
-- 命名清楚（AE 用户会直接在时间轴上看到这些名字）；没有默认名、测试图层。自己新建的节点可以直接改名；别人的节点改名会改到别人的层（`prim.rename` 是命名空间操作），列出来问用户，或者留批注。
+- 命名清楚（AE 用户会直接在时间轴上看到这些名字）；没有默认名、测试图层。自己新建的节点可以直接改名；别人的节点改名会改到别人的层（`prim_rename` 是命名空间操作），列出来问用户，或者留批注。
 - 关键时间点有合成标记，注释写清楚（例如 `in`：入场开始；`beat_09`：第 9 拍）。
 - 用表达式的属性有批注说明；导出后批注会变成图层注释或标记注释（以 15 的实现为准）。
 
 ## 3. 导出
 
 ```json
-{"tool": "transaction.begin", "args": {"label": "交接：整理命名和标记"}}
-{"tool": "prim.rename", "args": {"...": "按 2.3 修正自己新建节点的命名"}}
-{"tool": "marker.add", "args": {"...": "补充段落标记"}}
-{"tool": "transaction.commit"}
+{"tool": "command_batch", "args": {"label": "交接：整理命名", "commands": [
+  {"command": "prim_rename", "params": {"...": "按 2.3 修正自己新建节点的命名"}}
+]}}
 
-{"tool": "interop.export_ae", "args": {"comps": ["/comps/SH010_title"], "format": "jsx", "collect_assets": true, "out": "handoff/SH010_title"}}
+{"tool": "interop_export_ae", "args": {"comps": ["/comps/SH010_title"], "format": "jsx", "collect_assets": true, "out": "handoff/SH010_title"}}
 ```
 
-- `interop.export_ae`（待确认，15）：生成 `.jsx` 重建脚本和素材文件夹，并返回一份导出报告（哪些属性近似、哪些丢失）。
-- 需要连同素材整体归档时，用工程打包（`package.create`，待确认，21）。
+- `interop_export_ae`（15，还没有提供，名字是推测的）：生成 `.jsx` 重建脚本和素材文件夹，并返回一份导出报告（哪些属性近似、哪些丢失）。没有这个工具时，告诉用户需要在桌面应用里导出，并把第 2 节的检查结果交给用户。
+- 需要连同素材整体归档时，用 21 的打包命令（`package_scan` 先检查缺失素材，再 `package_pack` 打成 `.baez`；这些命令已实现，接入 `bae mcp` 之前不可用，见 [tools.md](../tools.md) 第 9 节）。
+- 标记（`marker_add`）还没有提供；需要标记时在交接说明里写清楚关键时间点。
 - 同时渲染一个参考视频（无界面渲染 `bae render`，或者让用户导出），对方在 AE 里重建后可以逐帧对比。
 
 ## 4. 读导出报告
@@ -65,7 +65,7 @@ AE 互转由 15 `interop/ae` 实现：导回 AE 的主路径是生成一个 `.js
 
 ## 5. 交接说明
 
-和导出文件放在一起，同时用 `proposal.describe` 或直接回复给用户：
+和导出文件放在一起，同时用 `proposal_describe` 或直接回复给用户：
 
 ```markdown
 # 交接说明：SH010_title
