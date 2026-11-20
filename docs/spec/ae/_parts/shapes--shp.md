@@ -610,7 +610,7 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
   |---|---|---|---|---|---|
   | Mode (模式) | enum | Add (UNVERIFIED) | 1–5 | — | `ADBE Vector Merge Type`, Lottie `mm` |
   - Enum (menu order = scripting value = Lottie `mm`): 1 Merge (合并), 2 Add (相加), 3 Subtract (相减), 4 Intersect (相交), 5 Exclude Intersections (排除交集).
-    - Merge: concatenate all input sub-paths, unchanged, into one compound path (no geometry change; the fill rule of the paint below decides holes). Default mode for multi-contour glyphs from Create Shapes from Text.
+    - Merge: concatenate all input sub-paths, unchanged, into one compound path (no geometry change; the fill rule of the paint below decides holes). Adobe: this is the mode used for characters made of several paths (e.g. "e") by Create Shapes from Text.
     - Add: union of the areas of all inputs.
     - Subtract: area of the **topmost** input minus the union of all inputs below it.
     - Intersect: area common to all inputs (iterated pairwise in stacking order).
@@ -637,7 +637,7 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
   - For each input sub-path, the output is the curve offset by `d` along its normal: on closed paths positive `d` expands the area and negative contracts it (independent of path direction per Adobe; UNVERIFIED for counter-clockwise paths — lottie-web offsets along the direction-dependent normal). Open paths: the result is an outline around the path (forward offset then backward offset joined at the ends) — UNVERIFIED (lottie-web behaviour).
   - Corners between offset segments use Line Join; a miter longer than Miter Limit (× |Amount|) becomes a bevel; round joins are circular arcs (K = 0.5519 handles).
   - Self-intersections created by contraction are pruned (lottie-web `pruneIntersections`); UNVERIFIED how fully AE cleans loops on strongly concave shapes.
-  - Copies (AE 17.1, 2020, UNVERIFIED version): output contains `ceil(Copies)` concentric paths. UNVERIFIED formula, best understanding:
+  - Copies (default 1, Adobe-documented; added in AE 17.1, May 2020, as the "concentric shape repeater"): output contains `ceil(Copies)` concentric paths. UNVERIFIED formula, best understanding:
     ```
     for i in 0 .. ceil(Copies)-1:
         d_i = Amount * (i + 1 + CopyOffset)      // Copy Offset shifts all copies by whole/fractional steps
@@ -674,8 +674,8 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
   | Parameter (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
   | Copies (副本) | scalar | 3 | ≥ 0 (UNVERIFIED max) | count | `ADBE Vector Repeater Copies`, Lottie `c` |
-  | Offset (偏移) | scalar | 0 | any | copies | `ADBE Vector Repeater Offset`, Lottie `o` |
-  | Composite (合成) | enum | Below | 1 Below (之下), 2 Above (之上) | — | `ADBE Vector Repeater Order`, Lottie `m` |
+  | Offset (位移) | scalar | 0 | any | copies | `ADBE Vector Repeater Offset`, Lottie `o` |
+  | Composite (合成) | enum | Below | 1 Below (之下（译名待核）), 2 Above (之上（译名待核）) | — | `ADBE Vector Repeater Order`, Lottie `m` (Lottie docs: 1 = Below, 2 = Above) |
   | Transform: Repeater (变换: 中继器) › Anchor Point (锚点) | 2D point | (0,0) | any | px | Lottie `tr.a` |
   | › Position (位置) | 2D point | (100,0) | any | px | Lottie `tr.p` |
   | › Scale (缩放) | 2D % | (100,100) | any | % | Lottie `tr.s` |
@@ -699,7 +699,7 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
   - The Repeater always goes to the end of the group when added from the Add menu (AE-SHP-006). Operators below the Repeater (e.g. Wiggle Transform) see each copy separately (AE-SHP-039).
 - **Priority:** P0
 - **Owner:** bae-vector
-- **Notes:** Lottie `ty: "rp"`; lottie-web implements it by cloning the items above into hidden groups; Skottie treats it as a draw effect on paints above it. Match names of the Transform children are `ADBE Vector Repeater Transform` › `ADBE Vector Repeater Anchor`, `… Position`, `… Scale`, `… Rotation`, `… Opacity 1`, `… Opacity 2` (UNVERIFIED). Implementation hint: never materialise copies as model data; emit N draw instances with per-instance matrices (instanced drawing for large N).
+- **Notes:** Lottie `ty: "rp"`; lottie-web implements it by cloning the items above into hidden groups; Skottie treats it as a draw effect on paints above it. Match names of the Transform children are `ADBE Vector Repeater Transform` › `ADBE Vector Repeater Anchor`, `… Position`, `… Scale`, `… Rotation`, `… Opacity 1` (Start Opacity), `… Opacity 2` (End Opacity) (confirmed in third-party importer tables; not listed on docsforadobe). Implementation hint: never materialise copies as model data; emit N draw instances with per-instance matrices (instanced drawing for large N).
 
 ### AE-SHP-035 · Round Corners (圆角)
 
@@ -744,7 +744,7 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
     else: segments = (e <= 1) ? [(s,e)] : (s >= 1) ? [(s-1,e-1)] : [(s,1),(0,e-1)]
     ```
   - Simultaneously: each input **shape** (the output of one path attribute, which may contain several sub-paths) is trimmed with the same `segments`, measured on that shape's own total length (its sub-paths concatenated in order).
-  - Individually: all input shapes are concatenated into one sequence in Timeline order (topmost path first) and `segments` are applied to the total length; each shape receives the part of the range that falls in its own span.
+  - Individually: all input shapes are concatenated into one sequence in Timeline order (topmost path first) and `segments` are applied to the total length; each shape receives the part of the range that falls in its own span (lottie-web `m: 2`, which Lottie docs call "Sequential"; `m: 1` = "Parallel" = Simultaneously). Adobe's help describes Individually loosely as treating the paths "as a compound path".
   - Wrap-around (`e > 1`): the piece `[s,1]` and the piece `[0,e−1]` are joined into one continuous open path through vertex 0 when the (last) sub-path is closed; otherwise two separate open paths.
   - Any trim other than the full range produces open paths (a closed path loses its closing join; fills close it with a straight chord). Trim boundaries split Bezier segments exactly (de Casteljau at the parameter that matches the arc length).
   - Arc length is measured in the path's own coordinate space (before the enclosing group transforms of the Trim's group; UNVERIFIED for paths inside scaled nested groups, AE-SHP-003).
@@ -779,7 +779,7 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
   | Parameter (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
   | Size (大小) | scalar | 10 (UNVERIFIED) | ≥ 0 | px | max displacement; `ADBE Vector Roughen Size` |
-  | Detail (详细信息（译名待核）) | scalar | 10 (UNVERIFIED) | ≥ 0 | segments per… UNVERIFIED | subdivision density; `ADBE Vector Roughen Detail` |
+  | Detail (细节) | scalar | 10 (UNVERIFIED) | ≥ 0 | segments per… UNVERIFIED | subdivision density; `ADBE Vector Roughen Detail` |
   | Points (点) | enum | Smooth (UNVERIFIED) | Corner (边角), Smooth (平滑) | — | `ADBE Vector Roughen Points` |
   | Wiggles/Second (摇摆/秒) | scalar | 2 (UNVERIFIED) | ≥ 0 | Hz | `ADBE Vector Temporal Freq` |
   | Correlation (关联) | scalar | 50 | 0–100 | % | neighbour-vertex similarity; `ADBE Vector Correlation` |
@@ -922,8 +922,8 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
 - **Exact semantics:**
   - Toggle: Layer > Mask and Shape Path > RotoBezier, or the RotoBezier checkbox in the Tools panel when the Pen tool is active (applies to new paths).
   - Manual → RotoBezier changes the shape if handles had been adjusted (tangents recomputed); RotoBezier → manual keeps the shape.
-  - Tension: Alt/Option-drag a vertex with the Convert Vertex tool (or Pen + Alt) changes its tension; 0 % tension = corner (UNVERIFIED exact tension range and default 33 %?).
-  - Tangent formula UNVERIFIED (best understanding: Catmull-Rom-like, tangent ∝ (next − prev) scaled by tension and adjacent chord lengths).
+  - Tension (Adobe-documented): drag a vertex with the Convert Vertex tool (Alt/Option with the Pen tool active) to change the tension of the selected vertices; the Info panel shows the value. Clicking a vertex without dragging sets it to a corner point (100 % tension); clicking again sets it to a smooth point (33 % tension, the default for new RotoBezier vertices). Dragging up or right decreases tension (more curvature in the adjacent segments); dragging down or left increases it. Range 0–100 % (UNVERIFIED lower bound).
+  - Tangent formula UNVERIFIED (best understanding: Catmull-Rom-like, tangent ∝ (next − prev) scaled by (1 − tension) and adjacent chord lengths, so 100 % tension gives zero-length tangents).
 - **Priority:** P2
 - **Owner:** bae-vector (+ bae-ui-motion)
 - **Notes:** RotoBezier state is exposed in scripting for masks (`MaskPropertyGroup.rotoBezier`) but not for shape paths (UNVERIFIED). Lottie export bakes the computed tangents.
@@ -965,9 +965,9 @@ Conventions used in this file: coordinates are AE layer space (x right, y **down
   - Menu: Layer > Create > Create Shapes from Vector Layer (also in the layer context menu). Exactly one selected vector footage layer.
   - Result: a new shape layer named "<source name> Outlines" (UNVERIFIED name) placed directly above the source; the source layer's Video switch is turned off. Transform values of the source are carried over so the result aligns (UNVERIFIED: anchor/position mapping).
   - Structure: one group per Illustrator path/object, nested groups for Illustrator groups/layers (UNVERIFIED depth handling), each with Path(s), Fill and/or Stroke reproducing colour, opacity, stroke width, caps, joins, miter limit and dashes; compound paths become one group with several paths plus Merge Paths? (UNVERIFIED; best understanding: several Path attributes in one group with Even-Odd/Non-Zero fill per Illustrator fill rule).
-  - Gradients: since AE 25.x (2025, UNVERIFIED version) linear and radial gradient fills/strokes and transparency are retained; earlier versions (and unsupported types) produce 50 % grey shapes. Freeform gradients, Illustrator blend modes, effects/appearance stacks, live text, images and meshes are not converted.
+  - Gradients: since AE 26.x (public beta 26.0x8, October 2025; Adobe help updated January 2026; listed in What's New with the 2026 releases) gradient fills, gradient strokes and transparency are retained as Gradient Fill/Gradient Stroke attributes (with the new gradient Scale/Rotation, AE-SHP-063); earlier versions (and still-unsupported types) produce 50 % grey shapes. Freeform gradients and Illustrator blend modes are not retained (Adobe); effects/appearance stacks, live text, images and meshes are not converted (UNVERIFIED list).
   - Pixel Aspect Ratio overrides from Interpret Footage are ignored. Files with thousands of paths convert slowly without progress feedback.
-  - Works on one layer at a time; for an AI imported as Composition, each layer must be converted individually.
+  - Works on one layer at a time; for an AI imported as Composition, each layer must be converted individually (Adobe). SVG import/paste as shape layers: AE-SHP-064.
 - **Priority:** P1
 - **Owner:** bae-motion (+ bae-media, bae-vector)
 - **Notes:** Requires a PDF/AI vector parser (bae-media) producing BAE path/paint data; the command itself is bae-motion. Introduced in AE CS6 (11.0). BAE decision: also accept SVG layers as input (BAE-native SVG import), which is the main Lottie/Figma path.
