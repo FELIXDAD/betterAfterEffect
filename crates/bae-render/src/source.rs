@@ -122,6 +122,15 @@ pub trait LayerSource: Send + Sync {
     /// Layer-space size in pixels: the source covers `[0, w) × [0, h)`.
     fn size(&self) -> [u32; 2];
 
+    /// Layer-space pixel bounds of the content. Defaults to `[0, w) × [0, h)`
+    /// from [`size`](Self::size). Vector sources (shape and text layers, 05) are
+    /// drawn around the layer origin and report bounds that may start at negative
+    /// coordinates; requests and returned images use the same layer pixels.
+    fn bounds(&self) -> IRect {
+        let [w, h] = self.size();
+        IRect::from_size(w, h)
+    }
+
     /// Hash of everything that affects the pixels at `time` (cache key part).
     fn content_hash(&self, time: Time) -> u64;
 

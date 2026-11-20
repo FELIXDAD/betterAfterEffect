@@ -459,10 +459,7 @@ impl Builder<'_> {
         };
         let content_rect = match &content {
             Content::Solid { rect, .. } | Content::Fill { rect, .. } => *rect,
-            Content::Source(src, _) => {
-                let [w, h] = src.size();
-                Rect::from_size(f64::from(w), f64::from(h))
-            }
+            Content::Source(src, _) => src.bounds().to_rect(),
             Content::Comp(c) => c.rect(),
         };
         // Effects: bounds forward (in layer texel units).
