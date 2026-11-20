@@ -63,6 +63,12 @@ AE 工程能进来，也能回去。让团队里只用 AE 的人照常工作，�
 - 新发现，已告知 02/03：AE 的 29.97 / 23.976 按 `n / 29.97` 计帧（内部 2997/100），不是 30000/1001，时间不是整数 flicks（交换格式 4.2 写了导入时的吸附规则）。
 - 还没测：其他 AE 版本、Windows、README 的 T2/T3/T5/T6/T7 手动项。
 
+### 与 02 Prim schema v1 对齐（交换格式 v0.2，2026-11-20）
+
+- 设置项改用 02 schema 的名字、值类型和枚举 token（`time`、`frame_rate`、`text_document`、`bit_depth`、`track_matte: none`、`auto_orient: off`、素材 `kind: footage`、`solid_color`、`light:type`、`sampling`……），02 没有的 AE 专有设置写成 `ae:<脚本接口属性名>`；效果参数写成 `param:NNNN`；遮罩羽化点按 02 的 `FeatherPoint` 导出（不再进「不支持」）。
+- 属性树（变换、遮罩路径、文字源文本、形状参数）仍是 `ae:` + matchName，导入器查 02 schema 映射；关键帧仍是合成时间，导入器按 02 的约定换成图层时间。
+- 用 dev 上的 `bae-model` 实测：示例直接反序列化（不再替换 `text_document`），02 schema 认识的 453 个属性都通过 `schema::check_value`（只有夹具里故意构造的未知遮罩模式不通过），`RestorePrim` 往返一致。
+
 ### 待决定（先按默认做了）
 
 1. 交换文件里动画属性用 AE 词汇（`ae:` + matchName），由 Rust 导入器映射到 BAE 属性名；而不是让 AE 脚本直接写 BAE 属性名。理由：ExtendScript 没法在 CI 里测，映射逻辑放在 Rust 里只有一份、能写单元测试；BAE 暂不支持的属性也能原样保留、导回 AE 不丢。

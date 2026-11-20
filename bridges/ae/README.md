@@ -72,7 +72,8 @@ tools/ae/aectl eval 'var BAE_AE_TEST_OPTIONS = {outDir: "/private/tmp/bae-ae"}; 
 注意：
 
 - 输出目录用真实路径（`/private/tmp/...`，不要用 `/tmp/...`）：ExtendScript 的 `Folder.create()` 碰到符号链接会失败。脚本会把 `/tmp/` 开头的路径换成 `/private/tmp/`，建不了目录时只往控制台写一行就退出。
-- 本机同一时间只能有一个 AE，其他工作流（例如 03）也会用：实测要串行跑，跑之前看一眼 `tools/ae/aectl status`。
+- 本机同一时间只能有一个 AE，其他工作流（例如 03）也会用。`aectl` 的 `start` / `eval` / `run` / `stop` 会自动排队（`--lock-timeout` 控制最多等多久）；用完不要 `aectl stop`，后面的人会复用正在运行的 AE。
+- 如果脚本迟迟不开始执行、输出目录都没建出来，而 `aectl diagnose` 显示没有模态框，用 `sample <AE 的 pid> 1` 看主线程：2026-11-20 遇到过 AE 卡在磁盘卷回调里（`DiskArbitration … NetFSCopyURLForRemountingVolume`，等一个永远不来的 XPC 回复），这种情况 `aectl` 检测不到，只能结束 AE 重来（持锁时 `kill -9`，再放锁，下一个调用方会自动启动新的 AE）。
 - 在 AE 里跑的脚本不能用 `alert()` / `confirm()` / `prompt()`（会弹模态框把调用挂住，ExtendScript 里这几个函数也替换不了），结果一律写文件。
 
 输出目录里：`log.txt`（每一步 ok/FAIL，含 T4 里 `keyTime()` 的实际返回值）、`fixture.bae-interchange.json`（T1、T4 合成的导出结果）、`anim-samples.ae-<主版本号>.json`（T8）、`result.json`（汇总）。选项：`keep: true` 保留搭建的合成以便在 AE 里查看，`skipSamples: true` 跳过对照用例。AE 弹出任何模态框（首次启动、更新提示）时 `DoScript` 会一直挂起，先在 AE 里把它们关掉。
@@ -96,13 +97,13 @@ tools/ae/aectl eval 'var BAE_AE_TEST_OPTIONS = {outDir: "/private/tmp/bae-ae"}; 
 - 弹窗：`已导出 2 个合成…`（或英文 `Exported 2 comps…`），没有报错。
 - `python3 bridges/ae/tests/validate_schema.py <导出文件>` 输出 `OK`（需要 `pip install jsonschema`）。
 - 文件里能找到（路径是 Prim 路径）：
-  - `/comps/Main_Comp` 的 `frame_rate` ≈ 29.97002997、`duration` = 7063056000。
-  - `/comps/Main_Comp/layers/Box` 的 `parent` = `/comps/Main_Comp/layers/Controller`；`ae:ADBE_Transform_Group:ADBE_Position` 有 3 个关键帧，键是 `0`、`706305600`、`1412611200`；第 2 个 `flags` 含 `roving`；第 3 个 `interp_out` = `hold`。
+  - `/comps/Main_Comp` 的 `frame_rate` = `{"num": 2997, "den": 100}`（AE 按十进制 29.97 计帧），`duration` 是 `time` 值 7063063063。
+  - `/comps/Main_Comp/layers/Box` 的 `parent` = `/comps/Main_Comp/layers/Controller`；`ae:ADBE_Transform_Group:ADBE_Position` 有 3 个关键帧，第 1 个键是 `0`、第 3 个是 `1412612613`（AE 的 2.002 秒第 60 帧，按 n / 29.97 计），第 2 个是漂浮关键帧、时间由 AE 重算，`flags` 含 `roving`；第 3 个 `interp_out` = `hold`。
   - `ae:ADBE_Transform_Group:ADBE_Opacity` 有 `expression.source` = `wiggle(2, 20)`。
   - `/comps/Main_Comp/layers/Box/contents/…` 下有 `ShapeGroup`、`Rect`、`Fill`、`GradientFill`、`ShapeOperator`（`operator` = `trim` / `repeater`）。
   - `/comps/Pre_comp/layers/Title_标题` 的源文本关键帧值类型是 `text_document`，文字和字体正确；`animators/…` 下有 `TextAnimator` 和 `TextSelector`。
-  - 纯色图层的 `track_matte` = `alpha`，`track_matte_layer` 指向 Pre comp 图层；两个遮罩是 `Mask_1` 和 `Mask_1_2`；效果参数 `ae:ADBE_Gaussian_Blur_2--0001` = 12.5。
-  - `report.unsupported` 里有 `gradient_colors`、`custom_value`（曲线）、`mask_feather_points`。
+  - 纯色图层的 `track_matte` = `alpha`，`track_matte_layer` 指向 Pre comp 图层；两个遮罩是 `Mask_1` 和 `Mask_1_2`；高斯模糊的 `param:0001` = 12.5；第一个遮罩路径的 bezier 值里有 1 个 `feather` 羽化点。
+  - `report.unsupported` 里有 `gradient_colors`、`custom_value`（曲线）。
 - 把结果文件和 `examples/mock-project.bae-interchange.json` 对比结构（值会不同）：同样的路径、同样的属性名。**两者结构不一致的地方就是模拟和真实 AE 的差别，请记下来。**
 
 ### T2 关键帧数值
@@ -139,7 +140,7 @@ tools/ae/aectl eval 'var BAE_AE_TEST_OPTIONS = {outDir: "/private/tmp/bae-ae"}; 
 运行 `bae-anim-samples.jsx`（第 3 节）。预期：
 
 - 提示 `62 cases, 0 failed`；`validate_schema.py` 校验输出为 `OK`。
-- 抽查：`linear_two_keys` 在 `times` = 705600000（1 秒）处 `pre_expression` = `[180]`；`hold_out` 在 0.5 秒处是 `[0]`；`expr_time` 在 1 秒处 `post_expression` = `[100]`；`comp_29_97` 的 `attr` 关键帧键是 `0`、`706305600`、`1412611200`。
+- 抽查：`linear_two_keys` 在 `times` = 705600000（1 秒）处 `pre_expression` = `[180]`；`hold_out` 在 0.5 秒处是 `[0]`；`expr_time` 在 1 秒处 `post_expression` = `[100]`；`comp_29_97` 的 `attr` 关键帧键是 `0`、`706306306`、`1412612613`（AE 按 n / 29.97 计帧，见交换格式 4.2）。
 - 失败的用例看 `error` 字段（多半是某个属性在该版本里叫法不同），记到任务书。
 - 把输出改名为 `anim-samples.ae-<主版本号>.json` 放进 `bridges/ae/samples/` 提交。
 

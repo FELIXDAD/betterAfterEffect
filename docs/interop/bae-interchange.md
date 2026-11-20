@@ -1,8 +1,8 @@
-# BAE 交换格式（草案 v0.1）
+# BAE 交换格式（草案 v0.2）
 
 负责：15 `interop/ae`。机器可读的定义见同目录的 [`bae-interchange.schema.json`](bae-interchange.schema.json)（JSON Schema 2020-12）。
 
-状态：**草案**，供 02 `core/doc-model` 对齐 Prim schema。v0.1 的编码完全照 02 在 `crates/bae-model` 里正在定义的 serde 类型写（`Value`、`AttrSpec`、`Keyframe`、`PrimTree`，见第 11 节对齐状态）。凡是 02 的类型里还没有的东西，都在第 11 节列出，并已经写进 02 任务书的「请求」一节。
+状态：**草案 v0.2**，已对齐 02 的 Prim schema v1（`crates/bae-model/src/schema.rs`、`docs/spec/data-model.md` 第 10、11 节）。导出结果能直接用 `bae-model` 的 serde 类型读入，02 schema 认识的属性都通过 `schema::check_value`（见第 11 节）。导出脚本已在 AE 26.2.1 上实测（`bridges/ae/README.md`）。
 
 ## 1. 用途
 
@@ -19,7 +19,7 @@ BAE Stage ──bae-interop-ae──► 交换文件 ──bridges/ae/bae-import
 ## 2. 设计原则
 
 1. **容器就是 Prim JSON。** 文件里的 Prim 树直接用 02 的 `PrimTree` / `PrimSpec` / `AttrSpec` / `Keyframe` / `Value` 的 JSON 形式，`bae-interop-ae` 可以直接用 `bae-model` 的 serde 类型反序列化，然后用 `RestorePrim` 一类的 Op 落进 Stage。
-2. **结构用 BAE 的词，动画属性用 AE 的词。** Prim 类型用 BAE 的内置类型（`Comp`、`Layer`、`Mask`、`Effect`、`ShapeGroup`……）；合成和图层的设置项用 snake_case 的 BAE 风格名字（本文第 6 节就是给 02 的命名提案）；AE 属性树里的可动画属性一律用 `ae:` 前缀加 matchName 路径作为属性名，由 Rust 导入器映射成 BAE 的属性。
+2. **设置项用 BAE 的词，属性树用 AE 的词。** Prim 类型用 BAE 的内置类型（`Comp`、`Layer`、`Mask`、`Effect`、`Marker`、`TextAnimator`……）。合成、图层、素材、遮罩、标记的**设置项**（脚本接口上的属性，如入点、混合模式）凡是 02 schema 里有的，名字、值类型、枚举 token 都用 02 的；schema 里没有的 AE 专有设置写成 `ae:<脚本接口属性名>`（第 6 节）。**AE 属性树**里的属性（变换、遮罩路径、文字源文本、形状参数……）用 `ae:` 加 matchName 路径（4.8），由 Rust 导入器查表映射成 `transform:position` 一类的 BAE 属性。唯一的例外是效果参数：02 规定 `param:NNNN` 直接等于 AE 参数 matchName 末尾的序号，不用查表，所以导出时直接写成 `param:NNNN`。
 3. **无损优先。** 导出脚本读得到的东西都写进去，不在 AE 端丢弃。BAE 暂时不支持的 `ae:` 属性，导入时原样保留在 Prim 上，导回 AE 时不丢。
 4. **丢了什么要说出来。** 读不出来的东西（自定义值、渐变色标……）写进文件的 `report.unsupported`，导入报告直接用它。
 5. **语言无关。** 只用 matchName、枚举 token 和数字，不依赖 AE 界面语言。显示名（`name`）只用来显示。
@@ -34,9 +34,9 @@ BAE Stage ──bae-interop-ae──► 交换文件 ──bridges/ae/bae-import
 | 字段 | 类型 | 必有 | 说明 |
 |---|---|---|---|
 | `format` | `"bae-interchange"` | 是 | 固定值 |
-| `format_version` | string（semver） | 是 | 本文是 `0.1.0`。主版本不同的文件，读取方应拒绝 |
+| `format_version` | string（semver） | 是 | 本文是 `0.2.0`。0.x 阶段次版本号不同就可能不兼容（0.2 相对 0.1 改了设置项的名字和类型），读取方应拒绝不认识的版本 |
 | `profile` | `"ae"` | 是 | 属性词汇。目前只有 `ae`（AE matchName）；以后 Ai 互转可以有 `ai` |
-| `generator` | object | 是 | `{name, version}`，例如 `{"name": "bae-ae-export", "version": "0.1.0"}` |
+| `generator` | object | 是 | `{name, version}`，例如 `{"name": "bae-ae-export", "version": "0.2.0"}` |
 | `host` | object | 否 | 生成文件的软件：`{app, version, build, os, language}`；AE 端取 `app.version`、`app.buildName`、`$.os`、`app.isoLanguage` |
 | `exported_at` | string | 否 | ISO 8601 UTC |
 | `source` | object | 否 | `{project_path, project_name}`：原 .aep 的绝对路径（`/` 分隔）和文件名；未保存的工程两项都没有 |
@@ -54,19 +54,21 @@ BAE Stage ──bae-interop-ae──► 交换文件 ──bridges/ae/bae-import
 | type | JSON value | AE 来源 |
 |---|---|---|
 | `float` | number | `PropertyValueType.OneD`；数值型设置项 |
-| `int` | 整数 | 整数型设置项；所有时间（flicks，见 4.2） |
+| `int` | 整数 | 整数型设置项（宽高、标签、序号） |
 | `bool` | boolean | 开关型设置项 |
 | `string` | string | 名字、注释、路径 |
 | `vec2` | `[x, y]` | `TwoD`、`TwoD_SPATIAL` |
-| `vec3` | `[x, y, z]` | `ThreeD`、`ThreeD_SPATIAL`（AE 的图层位置永远是三维，二维图层 z = 0） |
+| `vec3` | `[x, y, z]` | `ThreeD`、`ThreeD_SPATIAL`（AE 脚本接口里图层位置永远是三维，二维图层 z = 0） |
 | `color` | `[r, g, b, a]` | `COLOR`（0–1 浮点，32 位工程可以超出 0–1）；AE 只给 RGB 的地方补 a = 1 |
-| `bezier` | `{vertices, in_tangents, out_tangents, closed}` | `SHAPE`（遮罩路径、形状路径），切线相对顶点，与 AE `Shape` 相同 |
+| `bezier` | `{vertices, in_tangents, out_tangents, closed, feather?}` | `SHAPE`（遮罩路径、形状路径），切线相对顶点；遮罩羽化点是 `feather: [{segment, t, radius, tension, hold, inner, corner_angle}]`（AE `Shape.featherSegLocs` 等平行数组） |
+| `time` | 整数 flicks | 入点、出点、开始时间、时长、工作区、标记时间（4.2） |
+| `frame_rate` | `{num, den}` | 合成、素材的帧率（4.2） |
 | `enum` | string | AE 枚举，转成 snake_case token，见 4.6 |
-| `asset_ref` | Prim 路径 | 图层的素材来源 |
-| `prim_ref` | Prim 路径 | 父级、轨道遮罩、效果的图层参数（`LAYER_INDEX`）、遮罩参数（`MASK_INDEX`）、预合成来源 |
-| `text_document` | object，见 4.7 | `TEXT_DOCUMENT`。**02 的 `Value` 还没有这一项，见第 11 节** |
+| `prim_ref` | Prim 路径 | 图层来源（素材、纯色、预合成）、父级、轨道遮罩、效果的图层参数（`LAYER_INDEX`）、遮罩参数（`MASK_INDEX`）、项目面板文件夹 |
+| `text_document` | object，见 4.7 | `TEXT_DOCUMENT` |
+| `float_list` | number[] | 未知值类型里长度不是 2、3 的数组（`unknown_value_type`） |
 
-不导出的：`NO_VALUE`（属性组、按钮）；`CUSTOM_VALUE`（曲线、色阶直方图等，脚本读不到），记入 `report.unsupported`；`MARKER` 单独转成 `Marker` Prim（第 6.9 节）。
+不导出的：`NO_VALUE`（属性组、按钮）；`CUSTOM_VALUE`（曲线、色阶直方图等，脚本读不到），记入 `report.unsupported`；`MARKER` 单独转成 `Marker` Prim（第 6.9 节）。脚本手册里没有的值类型（AE 26 的文字可变字体轴报 161）按值的形状导出，每种类型记一条 `unknown_value_type` 警告。
 
 NaN / ±Infinity 不是合法 JSON：导出脚本遇到时写 `0` 并记一条 `report.warnings`（`code: "non_finite"`）。
 
@@ -119,27 +121,28 @@ NaN / ±Infinity 不是合法 JSON：导出脚本遇到时写 `0` 并记一条 `
 
 AE 的枚举常量（`BlendingMode.MULTIPLY` 等）转成小写 snake_case token：`multiply`、`linear_dodge`、`no_track_matte`。导出脚本在运行时按常量名查表，不硬编码数值；查不到时写 `"unknown_<数值>"` 并记警告。
 
-### 4.7 文字文档（`text_document`，提案）
+### 4.7 文字文档（`text_document`）
 
-`TEXT_DOCUMENT` 值（「源文本」属性，可以有关键帧）编码为：
+`TEXT_DOCUMENT` 值（「源文本」属性，可以有关键帧）按 02 的 `TextDocument`（`crates/bae-model/src/value.rs`）编码：
 
 ```json
 {"type": "text_document", "value": {
-  "text": "Hello\rWorld",
-  "font": "SourceHanSansSC-Bold", "font_family": "Source Han Sans SC", "font_style": "Bold",
-  "font_size": 72, "fill_color": [1, 1, 1, 1], "stroke_color": [0, 0, 0, 1], "stroke_width": 2,
-  "apply_fill": true, "apply_stroke": false, "stroke_over_fill": false,
-  "justification": "left_justify", "tracking": 0, "leading": 86.4, "auto_leading": true,
-  "baseline_shift": 0, "horizontal_scale": 1, "vertical_scale": 1,
+  "text": "Hello\rWorld", "font": "SourceHanSansSC-Bold", "font_size": 72,
+  "fill_color": [1, 1, 1, 1], "stroke_color": [0, 0, 0, 1], "stroke_width": 2, "stroke_over_fill": false,
+  "justification": "center", "tracking": 25, "leading": 86.4, "baseline_shift": 0,
   "faux_bold": false, "faux_italic": false, "all_caps": false, "small_caps": false,
-  "superscript": false, "subscript": false, "tsume": 0,
-  "box_text": false, "box_size": [400, 200], "box_position": [0, 0]
+  "box_size": [400, 200], "box_position": [0, 0],
+  "font_family": "Source Han Sans SC", "font_style": "Bold", "apply_fill": true, "apply_stroke": true,
+  "auto_leading": false, "horizontal_scale": 1, "vertical_scale": 1, "superscript": false, "subscript": false,
+  "tsume": 0, "point_text": false
 }}
 ```
 
-- 字段名是 AE `TextDocument` 属性名的 snake_case；脚本读不到（旧版本没有、或者对点文字无意义）的字段省略。
-- 换行符保持 AE 的 `\r`。
-- v0 只导出 `TextDocument` 上的整体样式（即第一个字符的样式）。逐字符样式（AE 24.3+ 的 `CharacterRange`）还没导出，见第 10 节。
+- `text`、`font`（PostScript 名）、`font_size` 总是有（02 要求必填；AE 读不到字体时写空字符串）。
+- 02 的约定：有描边当且仅当有 `stroke_color`（AE `applyStroke` 为 false 时不写）；没有 `leading` 表示自动行距（AE `autoLeading`）；没有 `box_size` 表示点文字。
+- `justification`：`left`、`right`、`center`、`justify_last_left`、`justify_last_right`、`justify_last_center`、`justify_all`、`multiple`（AE `ParagraphJustification`）。
+- 后面一组（`font_family` 到 `point_text`）是 02 的结构里还没有的 AE 字段，照样写进去：`bae-model` 读的时候忽略它们，不报错；导回 AE 时需要它们（已请 02 补上或原样保留，见第 11 节）。
+- 换行符保持 AE 的 `\r`。v0 只导出整体样式（第一个字符的样式），逐字符样式（AE 24.3+ 的 `CharacterRange`）以后再加。
 
 ### 4.8 `ae:` 属性名
 
@@ -185,8 +188,8 @@ ae:<段>:<段>:…        段 = 从所属 Prim 往下的每一级 matchName，�
     …/layers/<layer>/effects/<effect>     Effect
     …/layers/<layer>/contents/<item>      ShapeGroup / Path / Rect / Ellipse / Star / Fill / Stroke / GradientFill / GradientStroke / ShapeOperator
         …/contents/<group>/contents/<item>   形状组可以嵌套
-    …/layers/<layer>/animators/<animator> TextAnimator（提案）
-        …/animators/<animator>/selectors/<selector>   TextSelector（提案）
+    …/layers/<layer>/animators/<animator> TextAnimator
+        …/animators/<animator>/selectors/<selector>   TextSelector
 ```
 
 - `folders`、`assets`、`comps`、`layers`、`markers`、`masks`、`effects`、`contents`、`animators`、`selectors` 是不带类型的容器 Prim（不写 `prim_type`），只用来分组，空的不写。
@@ -205,137 +208,109 @@ AE 的属性树由三种节点组成（`PropertyBase.propertyType`）：`PROPERT
 
 ## 6. 各类 Prim 的属性
 
-下表「类型」一列是 `Value.type`。时间都是 int flicks。所有项都是可选的：读不到就不写。
+下表是**设置项**（AE 脚本接口上的属性）。「名字」一列没有 `ae:` 的都是 02 schema 里的属性（名字、值类型、枚举 token 与 `bae_model::schema` 一致）；`ae:` 开头的是 02 没有的 AE 专有设置，名字是 AE 脚本接口里的属性名。读不到就不写。AE 属性树里的属性按 4.8 / 5.1 展开，不在这些表里。
 
 ### 6.1 `Project`（`/project`）
 
-| 属性 | 类型 | AE 来源 |
+| 名字 | 类型 | AE 来源 |
 |---|---|---|
-| `name` | string | 工程文件名（未保存时省略） |
-| `bits_per_channel` | int | `app.project.bitsPerChannel`（8 / 16 / 32） |
-| `linear_blending` | bool | `linearBlending` |
-| `linearize_working_space` | bool | `linearizeWorkingSpace`（AE 16.0+） |
-| `working_space` | string | `workingSpace`（ICC 描述名，AE 16.0+） |
-| `working_gamma` | float | `workingGamma`（AE 16.0+） |
-| `expression_engine` | string | `expressionEngine`（`"javascript-1.0"` / `"extendscript"`，AE 16.0+） |
-| `display_start_frame` | int | `displayStartFrame`（0 或 1） |
-| `frames_count_type` | enum | `framesCountType` |
-| `time_display_type` | enum | `timeDisplayType` |
-| `feet_frames_film_type` | enum | `feetFramesFilmType` |
-| `footage_timecode_display_start_type` | enum | `footageTimecodeDisplayStartType` |
-| `frames_use_feet_frames` | bool | `framesUseFeetFrames` |
-| `gpu_accel_type` | enum | `gpuAccelType`（AE 13.8+） |
+| `bit_depth` | enum `8` / `16` / `32` | `app.project.bitsPerChannel` |
+| `working_space` | string | `workingSpace`（AE 16.0+） |
+| `linearize` | bool | `linearizeWorkingSpace` |
+| `blend_colors_using_gamma_1` | bool | `linearBlending` |
+| `time_display` | enum `timecode` / `frames` | `timeDisplayType` |
+| `expression_engine` | enum `javascript` / `extendscript` | `expressionEngine`（`javascript-1.0` 记作 `javascript`） |
+| `ae:fileName` | string | 工程文件名（未保存时省略） |
+| `ae:workingGamma`、`ae:displayStartFrame`、`ae:framesCountType`、`ae:feetFramesFilmType`、`ae:footageTimecodeDisplayStartType`、`ae:framesUseFeetFrames`、`ae:gpuAccelType` | | 同名脚本属性 |
 
 ### 6.2 `Folder`
 
-`name`、`ae_id`（`Item.id`）、`folder`、`label`（int 0–16）、`comment`。
+`name`、`label`（int 0–16）；`ae:id`（`Item.id`）、`ae:parentFolder`（`prim_ref`，上级文件夹；在根目录时省略）、`ae:comment`。合成和素材也有这三个 `ae:` 属性。
 
 ### 6.3 `Asset`
 
-| 属性 | 类型 | AE 来源 |
+| 名字 | 类型 | AE 来源 |
 |---|---|---|
-| `name`、`ae_id`、`folder`、`label`、`comment` | | 同 Folder |
-| `asset_kind` | enum | `file` / `sequence` / `solid` / `placeholder` |
+| `name`、`label` | | |
+| `kind` | enum `footage` / `sequence` / `solid` / `placeholder` | 文件素材、图片序列（非静帧的图片文件）、`SolidSource`、`PlaceholderSource` |
 | `width`、`height` | int | |
 | `pixel_aspect` | float | |
-| `duration` | int | 静帧为 0 |
-| `frame_rate` | float | `frameRate` |
+| `frame_rate` | frame_rate | `frameRate`（静帧和纯色为 0，不写） |
+| `duration` | time | |
 | `has_video`、`has_audio` | bool | |
-| `missing` | bool | `footageMissing` |
-| `color` | color | 纯色素材的颜色（`SolidSource.color`） |
-| `is_still` | bool | `FileSource.isStill` |
-| `alpha_mode` | enum | `ignore` / `straight` / `premultiplied` |
-| `premul_color` | color | |
-| `invert_alpha` | bool | |
-| `field_separation` | enum | `off` / `upper_field_first` / `lower_field_first` |
-| `remove_pulldown` | enum | `PulldownPhase` |
+| `alpha_mode` | enum `straight` / `premultiplied` / `ignore` | `mainSource.alphaMode` |
+| `premultiply_color` | color | `premulColor` |
+| `solid_color` | color | 纯色素材的 `SolidSource.color` |
 | `loop` | int | |
-| `conform_frame_rate` | float | 0 = 不覆盖 |
-| `native_frame_rate` | float | |
-| `file:original` | string | 原始绝对路径，`/` 分隔，Windows 保留盘符；缺失素材用 AE 记录的缺失路径 |
-| `file:relative` | string | 相对交换文件所在目录（不在同一卷上时没有） |
-| `file:size` | int | 字节数（缺失时没有） |
-| `file:mtime` | int | 修改时间，Unix 毫秒（缺失时没有） |
-
-`file:*` 四项与 02 的素材引用一致（`docs/spec/project-format.md` 第 5 节），导入器可以直接用 `bae_model::AssetFile::from_prim` 读取，再把 `file:relative` 换算到新工程的基准目录。只有 `asset_kind` 为 `file` / `sequence` 的素材有这几项；图片序列记第一帧。`file:hash` v0 不写（ExtendScript 算哈希太慢）。素材清单（第 8 节）另外记录相对 .aep 的路径、序列帧和收集结果。
+| `sequence:first_frame` | int | 图片序列第一帧文件名里的帧号 |
+| `file:original`、`file:relative`、`file:size`、`file:mtime` | string / string / int / int | 文件引用，与 `docs/spec/project-format.md` 第 5 节一致，见第 8 节 |
+| `ae:footageMissing`、`ae:isStill`、`ae:invertAlpha`、`ae:fieldSeparationType`、`ae:removePulldown`、`ae:conformFrameRate`、`ae:nativeFrameRate` | | 同名脚本属性 |
 
 ### 6.4 `Comp`
 
-| 属性 | 类型 | AE 来源 |
+| 名字 | 类型 | AE 来源 |
 |---|---|---|
-| `name`、`ae_id`、`folder`、`label`、`comment` | | |
+| `name`、`label` | | |
 | `width`、`height` | int | |
 | `pixel_aspect` | float | |
-| `frame_rate` | float | |
-| `duration` | int | |
-| `display_start_time` | int | |
+| `frame_rate` | frame_rate | `frameRate`，换成 AE 实际计帧用的有理数（29.97 → `2997/100`，见 4.2） |
+| `duration`、`display_start_time`、`work_area_start`、`work_area_duration` | time | |
 | `bg_color` | color | `bgColor`（补 a = 1） |
-| `work_area_start`、`work_area_duration` | int | |
+| `motion_blur` | bool | |
 | `shutter_angle`、`shutter_phase` | float | |
-| `motion_blur_samples`、`motion_blur_adaptive_limit` | int | `motionBlurSamplesPerFrame`、`motionBlurAdaptiveSampleLimit` |
-| `motion_blur`、`frame_blending`、`draft_3d`、`hide_shy_layers` | bool | 合成开关 |
-| `preserve_nested_frame_rate`、`preserve_nested_resolution` | bool | |
-| `drop_frame` | bool | `dropFrame`（AE 2019+） |
-| `renderer` | string | `renderer`（如 `"ADBE Advanced 3d"`） |
-| `resolution_factor` | vec2 | `resolutionFactor` |
+| `motion_blur_samples` | int | `motionBlurSamplesPerFrame` |
+| `renderer` | enum `classic_3d` / `cinema_4d` / `advanced_3d` | `renderer`（`ADBE Standard 3D` / `ADBE Ernst` / `ADBE Advanced 3d`；不认识的写原文） |
+| `preserve_frame_rate`、`preserve_resolution` | bool | `preserveNestedFrameRate`、`preserveNestedResolution` |
+| `ae:motionBlurAdaptiveSampleLimit`、`ae:frameBlending`、`ae:draft3d`、`ae:hideShyLayers`、`ae:dropFrame`、`ae:resolutionFactor` | | 同名脚本属性 |
 
 ### 6.5 `Layer`
 
-| 属性 | 类型 | AE 来源 |
+| 名字 | 类型 | AE 来源 |
 |---|---|---|
-| `kind` | enum | 02 的 `LayerKind`：`shape` / `text` / `solid` / `footage` / `null` / `camera` / `light` / `adjustment` / `pre_comp` / `audio` |
-| `match_name` | string | `Layer.matchName`（`ADBE AV Layer`、`ADBE Text Layer`、`ADBE Vector Layer`、`ADBE Camera Layer`、`ADBE Light Layer`） |
-| `name`、`comment`、`label` | | `label` 是 int 0–16 |
-| `ae_index` | int | `Layer.index`，从 1 开始 |
-| `ae_id` | int | `Layer.id`（AE 22+ 才有） |
-| `source` | asset_ref / prim_ref | 素材图层指向 `/assets/...`；预合成图层指向 `/comps/...`（prim_ref） |
+| `kind` | enum | `shape` / `text` / `solid` / `footage` / `null` / `camera` / `light` / `adjustment` / `pre_comp` / `audio` |
+| `name`、`label` | | |
+| `source` | prim_ref | 素材、纯色指向 `/assets/...`，预合成指向 `/comps/...` |
 | `parent` | prim_ref | 父级图层 |
-| `in_point`、`out_point`、`start_time` | int | 合成时间 |
+| `start_time`、`in_point`、`out_point` | time | 合成时间 |
 | `stretch` | float | 百分比，100 = 不伸缩，负数 = 倒放 |
-| `enabled` | bool | 视频开关（眼睛） |
-| `audio_enabled`、`solo`、`shy`、`locked` | bool | |
-| `guide`、`adjustment`、`environment` | bool | `guideLayer`、`adjustmentLayer`、`environmentLayer` |
-| `three_d`、`three_d_per_char` | bool | `threeDLayer`、`threeDPerChar`（文字） |
-| `auto_orient` | enum | `no_auto_orient` / `along_path` / `camera_or_point_of_interest` / `characters_toward_camera` |
-| `blend_mode` | enum | `BlendingMode` |
-| `preserve_transparency` | bool | |
-| `track_matte` | enum | `no_track_matte` / `alpha` / `alpha_inverted` / `luma` / `luma_inverted` |
+| `enabled`、`audio_enabled`、`solo`、`shy`、`locked`、`guide` | bool | 视频开关、音频开关等；`guide` ← `guideLayer` |
+| `three_d`、`adjustment_layer`、`collapse_transformation`、`motion_blur`、`time_remap_enabled` | bool | `threeDLayer`、`adjustmentLayer` 等 |
+| `blend_mode` | enum | `BlendingMode`（AE 常量名的小写，`SILHOUETE_ALPHA` 记作 `silhouette_alpha`） |
+| `track_matte` | enum `none` / `alpha` / `alpha_inverted` / `luma` / `luma_inverted` | `trackMatteType` |
 | `track_matte_layer` | prim_ref | AE 23.0+ 用 `trackMatteLayer`；更早的版本是正上方一层（`index - 1`） |
-| `is_track_matte` | bool | |
-| `motion_blur`、`effects_active`、`collapse_transformation`、`time_remap_enabled` | bool | |
-| `frame_blending_type` | enum | `no_frame_blend` / `frame_mix` / `pixel_motion` |
-| `quality` | enum | `best` / `draft` / `wireframe` |
-| `sampling_quality` | enum | `bicubic` / `bilinear` |
-| `position_separated` | bool | 「位置」的 `dimensionsSeparated`（单独尺寸） |
-| `light_type` | enum | 灯光图层：`parallel` / `spot` / `point` / `ambient` |
+| `auto_orient` | enum `off` / `along_path` / `towards_point_of_interest` | `autoOrient`；文字的「独立字符朝向摄像机」02 没有，写 `characters_toward_camera` |
+| `quality` | enum `best` / `draft` / `wireframe` | |
+| `sampling` | enum `bilinear` / `bicubic` | `samplingQuality` |
+| `transform:separate_dimensions` | bool | 「位置」的 `dimensionsSeparated` |
+| `light:type` | enum `parallel` / `spot` / `point` / `ambient` | 灯光图层的 `lightType` |
+| `ae:matchName`、`ae:index`、`ae:id`、`ae:comment`、`ae:environmentLayer`、`ae:threeDPerChar`、`ae:preserveTransparency`、`ae:isTrackMatte`、`ae:effectsActive`、`ae:frameBlendingType` | | 同名脚本属性（`ae:id` 是 AE 22+ 的 `Layer.id`） |
 
-另外是展开的 `ae:` 属性：`ae:ADBE_Transform_Group:…`、`ae:ADBE_Time_Remapping`、`ae:ADBE_Audio_Group:…`、`ae:ADBE_Material_Options_Group:…`、`ae:ADBE_Camera_Options_Group:…`、`ae:ADBE_Light_Options_Group:…`、`ae:ADBE_Text_Properties:…` 等。
+属性树展开出来的 `ae:` 属性：`ae:ADBE_Transform_Group:…`、`ae:ADBE_Time_Remapping`、`ae:ADBE_Audio_Group:…`、`ae:ADBE_Material_Options_Group:…`、`ae:ADBE_Camera_Options_Group:…`、`ae:ADBE_Light_Options_Group:…`、`ae:ADBE_Text_Properties:…` 等，导入器映射到 `transform:*`、`time_remap`、`audio:levels`、`material:*`、`camera:*`、`light:*`、`text:source`、`text:path`。
 
 ### 6.6 `Mask`
 
-`match_name`（`ADBE Mask Atom`）、`name`、`mode`（`none` / `add` / `subtract` / `intersect` / `lighten` / `darken` / `difference`）、`inverted`、`roto_bezier`、`motion_blur`（`same_as_layer` / `on` / `off`）、`locked`、`color`、`feather_falloff`（`smooth` / `linear`），以及 `ae:ADBE_Mask_Shape`、`ae:ADBE_Mask_Feather`、`ae:ADBE_Mask_Opacity`、`ae:ADBE_Mask_Offset`。
+设置项 `mode`（`none` / `add` / `subtract` / `intersect` / `lighten` / `darken` / `difference`）、`inverted`、`locked`、`color`；`ae:rotoBezier`、`ae:maskMotionBlur`、`ae:maskFeatherFalloff`。属性树：`ae:ADBE_Mask_Shape`（bezier，含羽化点）、`ae:ADBE_Mask_Feather`、`ae:ADBE_Mask_Opacity`、`ae:ADBE_Mask_Offset`，导入器映射到 02 的 `path`、`feather`、`opacity`、`expansion`。
 
 ### 6.7 `Effect`
 
-`match_name`（效果的 matchName，02 已经用这个名字）、`name`、`enabled`，以及每个参数一个 `ae:<编码后的参数 matchName>`。参数分组（Topic）在 AE 里是命名组，按 4.8 展开。第三方效果同样导出，是否支持由导入器按 `docs/interop/ae-effects.md`（与 07 共用，以后建）判断。
+`match_name`（效果的 matchName）、`name`、`enabled`。参数：效果组下直接挂的、matchName 形如 `<效果 matchName>-NNNN` 的属性写成 `param:NNNN`（02 第 11 节，例如 `ADBE Gaussian Blur 2-0001` → `param:0001`，伪效果 `Pseudo/abc-0002` → `param:0002`）；其他属性（命名子组里的、不符合这个模式的）仍按 4.8 写 `ae:` 名字。第三方效果同样导出，是否支持由导入器按 `docs/interop/ae-effects.md`（与 07 共用，以后建）和 02 的 `EffectRegistry` 判断。
 
 ### 6.8 形状内容
 
-`contents` 下每一项：`match_name`、`name`、`enabled`，形状操作器另有 `operator`（02 已用这个名字）。参数是 `ae:` 属性（例如 `ae:ADBE_Vector_Rect_Size`、`ae:ADBE_Vector_Transform_Group:ADBE_Vector_Position`）。形状组（`ADBE Vector Group`）的子项在它自己的 `contents` 下。
+`contents` 下每一项：`match_name`、`name`、`enabled`，形状操作器另有 `operator`（token 与 02 schema 一致）。参数是 `ae:` 属性（例如 `ae:ADBE_Vector_Rect_Size`、`ae:ADBE_Vector_Transform_Group:ADBE_Vector_Position`），导入器映射到 02 的 `direction`、`fill_rule`、`merge:mode` 等。形状组（`ADBE Vector Group`）的子项在它自己的 `contents` 下。
 
-### 6.9 `Marker`（提案）
+### 6.9 `Marker`
 
-AE 的标记是 `ADBE Marker` 属性上的「关键帧」，值是 `MarkerValue`。每个标记导出成一个 Prim：
+AE 的标记是 `ADBE Marker` 属性上的「关键帧」，值是 `MarkerValue`。每个标记导出成一个 `Marker` Prim：
 
-| 属性 | 类型 | AE 来源 |
+| 名字 | 类型 | AE 来源 |
 |---|---|---|
-| `time` | int | 标记时间（与关键帧同一时间基准） |
-| `duration` | int | |
+| `time`、`duration` | time | 标记时间（与关键帧同一时间基准，4.2） |
 | `comment`、`chapter`、`url`、`frame_target`、`cue_point_name` | string | |
-| `event_cue_point` | bool | |
 | `label` | int | AE 16.0+ |
 | `protected_region` | bool | AE 16.0+ |
-| `param:<编码后的键>` | string | `getParameters()` 的每一项，键按 4.8 的规则编码 |
+| `ae:eventCuePoint` | bool | |
+| `ae:param:<编码后的键>` | string | `getParameters()` 的每一项，键按 4.8 编码 |
 
 ### 6.10 matchName → Prim 类型
 
@@ -353,8 +328,8 @@ AE 的标记是 `ADBE Marker` 属性上的「关键帧」，值是 `MarkerValue`
 | `ADBE Vector Graphic - G-Fill` | `GradientFill` | `contents` |
 | `ADBE Vector Graphic - G-Stroke` | `GradientStroke` | `contents` |
 | `ADBE Vector Filter - *` | `ShapeOperator`，`operator` 见下 | `contents` |
-| `ADBE Text Animator` | `TextAnimator`（提案） | `animators` |
-| `ADBE Text Selector`、`ADBE Text Wiggly Selector`、`ADBE Text Expressible Selector` | `TextSelector`（提案） | `selectors` |
+| `ADBE Text Animator` | `TextAnimator` | `animators` |
+| `ADBE Text Selector`、`ADBE Text Wiggly Selector`、`ADBE Text Expressible Selector` | `TextSelector` | `selectors` |
 | 其他索引组的子组 | `ae:Group` | 容器名 = 索引组 matchName 净化后的结果 |
 
 `operator` token：`Merge` → `merge`、`Offset` → `offset`、`PB` → `pucker_bloat`、`Repeater` → `repeater`、`RC` → `round_corners`、`Trim` → `trim`、`Twist` → `twist`、`Roughen` → `roughen`、`Wiggler` → `wiggle_paths`、`Zigzag` → `zig_zag`、`Wiggle Transform` → `wiggle_transform`；不认识的写 matchName 原文。
@@ -366,9 +341,9 @@ AE 的标记是 `ADBE Marker` 属性上的「关键帧」，值是 `MarkerValue`
 ```json
 {
   "format": "bae-interchange",
-  "format_version": "0.1.0",
+  "format_version": "0.2.0",
   "profile": "ae",
-  "generator": {"name": "bae-ae-export", "version": "0.1.0"},
+  "generator": {"name": "bae-ae-export", "version": "0.2.0"},
   "time": {"unit": "flicks", "flicks_per_second": 705600000, "key_time_base": "comp"},
   "prims": [
     {"name": "comps", "specifier": "def", "children": [
@@ -377,8 +352,8 @@ AE 的标记是 `ADBE Marker` 属性上的「关键帧」，值是 `MarkerValue`
          "name": {"value": {"type": "string", "value": "Main"}},
          "width": {"value": {"type": "int", "value": 1920}},
          "height": {"value": {"type": "int", "value": 1080}},
-         "frame_rate": {"value": {"type": "float", "value": 29.97002997002997}},
-         "duration": {"value": {"type": "int", "value": 7063056000}}
+         "frame_rate": {"value": {"type": "frame_rate", "value": {"num": 2997, "den": 100}}},
+         "duration": {"value": {"type": "time", "value": 7063063063}}
        },
        "children": [
         {"name": "layers", "specifier": "def", "children": [
@@ -392,7 +367,7 @@ AE 的标记是 `ADBE Marker` 属性上的「关键帧」，值是 `MarkerValue`
                      "ease_in": [{"speed": 0, "influence": 33.333333}],
                      "ease_out": [{"speed": 0, "influence": 33.333333}],
                      "spatial_in": [0, 0, 0], "spatial_out": [0, 0, 0]},
-               "706305600": {"value": {"type": "vec3", "value": [1720, 540, 0]},
+               "706306306": {"value": {"type": "vec3", "value": [1720, 540, 0]},
                      "interp_in": "bezier", "interp_out": "bezier",
                      "ease_in": [{"speed": 0, "influence": 33.333333}],
                      "ease_out": [{"speed": 0, "influence": 33.333333}],
@@ -446,7 +421,7 @@ AE 的标记是 `ADBE Marker` 属性上的「关键帧」，值是 `MarkerValue`
 |---|---|---|
 | `custom_value` | unsupported | `CUSTOM_VALUE` 类型的属性（曲线、色阶等），脚本读不到值 |
 | `gradient_colors` | unsupported | 形状渐变的色标（`ADBE Vector Grad Colors`），脚本读不到值 |
-| `mask_feather_points` | unsupported | 遮罩羽化点（`Shape.featherSegLocs` 等），v0 没导出 |
+| `mask_feather_points` | unsupported | 保留：v0.2 起羽化点按 02 的 `FeatherPoint` 导出，不再报这一项 |
 | `text_per_character_style` | unsupported | 保留，v0 不检测 |
 | `attr_name_too_long` | unsupported | 编码后的属性名超过 256 个字符，没有导出 |
 | `read_error` | warning | 读属性时抛异常，附异常信息 |
@@ -459,34 +434,34 @@ AE 的标记是 `ADBE Marker` 属性上的「关键帧」，值是 `MarkerValue`
 
 ## 10. v0 已知限制
 
-- 形状渐变色标、`CUSTOM_VALUE` 参数（曲线、色阶）、遮罩羽化点：读不到或没导出，只进报告。渐变色标以后通过解析 .aepx 或 bodymovin 的做法补上。
-- 文字只导出整体样式，不导出逐字符样式；段落样式只有 `justification`。
+- 形状渐变色标、`CUSTOM_VALUE` 参数（曲线、色阶）：脚本读不到，只进报告。渐变色标以后通过解析 .aepx 或 bodymovin 的做法补上。
+- 文字只导出整体样式，不导出逐字符样式；段落样式只有 `justification`。02 的 `TextDocument` 还没有的 AE 字段（4.7）在 BAE 里读入时会被丢掉，导回 AE 前需要 02 补上。
 - 只导出 `OneD` 的数值，不区分效果里的复选框、弹出菜单（都是 float）；由导入器按 matchName 判断。
 - 不导出：渲染队列、输出模块、代理设置、合成的「基本图形」面板模板、3D 模型图层（AE 24+）。
 - 「仅修改过的属性」选项（`onlyModified`）依赖 AE 的 `PropertyBase.isModified`，可能漏掉默认值不同于 BAE 的属性，默认关闭。
 
 ## 11. 与 02 Prim schema 的对齐状态
 
-对照的是 02 合并进 `dev` 的 `crates/bae-model`（PR #4、#5、#9，`dev` 提交 `c6d36d6`）、`docs/spec/data-model.md` 和 `docs/spec/project-format.md`。核对方法：用 `bae-model` 的类型直接反序列化 `bridges/ae/examples/` 的示例（`Vec<PrimTree>`），经 `Op::RestorePrim` 写入 Sublayer、`to_trees` 读回，重新序列化与原文件逐字段一致；素材 Prim 用 `AssetFile::from_prim` 读出的路径、大小、修改时间正确；`bridges/ae/samples/anim-cases.json` 里的 67 个 `AttrSpec` 同样往返一致。02 的 Prim schema（PR D）合并后再核对一次。
+对照的是 02 合并进 `dev` 的 `crates/bae-model`（Prim schema v1，PR #11，`dev` 提交 `5214377` 及之后）、`docs/spec/data-model.md` 第 3、10、11 节和 `docs/spec/project-format.md` 第 5 节。核对方法（临时 Rust 程序，没有提交）：
 
-已经对齐（直接用 02 的形状）：素材引用属性 `file:original` / `file:relative` / `file:size` / `file:mtime`；`Value` 的 `{"type","value"}` 标签和各变体；`AttrSpec{value, keyframes, expression}`；`keyframes` 以 flicks 为键；`Keyframe{value, interp_in, interp_out, ease_in, ease_out, spatial_in, spatial_out, flags, label}`；`Ease{speed, influence}`；`KeyframeFlags` 五个开关；`Expression{source, enabled}`；`PrimTree{name, specifier, prim_type, attrs, references, children}`；`LayerKind` 的 token；`Effect.match_name`、`ShapeOperator.operator`；Prim 名字规则（`validate_name`）；属性名规则（`validate_attr_name`，第 4.8 节）；显示名作为属性（`name`）。
+- 用 `bae-model` 的 serde 类型直接反序列化 `bridges/ae/examples/` 下的两个示例（`Vec<PrimTree>`，`text_document` 不做任何替换），经 `Op::RestorePrim` 写入 Sublayer、`to_trees` 读回，重新序列化逐字段一致。
+- 每个 02 schema 认识的属性都过一遍 `schema::check_value`（值类型、枚举 token）和 `schema::is_animatable`：模拟工程只有夹具里故意构造的未知遮罩模式 `unknown_9999` 不通过。
+- 素材 Prim 用 `AssetFile::from_prim` 读出的路径、大小、修改时间正确；`bridges/ae/samples/anim-cases.json` 里的 67 个 `AttrSpec` 往返一致。
 
-对不上、已经写进 02 任务书「请求」的：
+02 已经采纳（v0.2 按此导出）：`time`、`frame_rate`、`text_document` 值类型；`Marker`、`TextAnimator`、`TextSelector` Prim 类型；`FeatherPoint` 遮罩羽化点；图层顺序（第一个子 Prim 是最上面的图层）；图层来源用 `source`（`prim_ref`）；设置项的名字和枚举（第 6 节）；效果参数 `param:NNNN`；`PrimTree` 带关键帧的 JSON 反序列化 bug（PR #9 修复）。
 
-0. ~~`PrimTree` 读不了带关键帧的 JSON~~：02 已在 PR #9（`c6d36d6`）修复，`AttrSpec.keyframes` 现在接受字符串和整数键。
-1. `Value` 没有文字文档类型。提案新增 `text_document`（4.7）。
-2. 没有 `Marker`、`TextAnimator`、`TextSelector` 这三个内置 Prim 类型。草案先用这三个名字（第 6.9、6.10 节）。
-3. 时间型属性（入点、出点、时长……）没有专门的 `Value` 类型，草案用 `int` flicks。是否新增 `time` 变体由 02 定。
-4. 帧率没有有理数类型，草案用 `float`。
-5. `BezierPath.feather` 是「每个顶点一个二维值」，和 AE 的遮罩羽化点（所在段、段内位置、半径、张力、内外）对不上，v0 不导出羽化点。
-6. 关键帧时间基准：AE 内部按图层时间存储，脚本给的是合成时间（4.2）。需要 02/03 明确 BAE 的关键帧时间相对什么。
-7. 图层顺序：草案约定 `layers` 的第一个子 Prim 是 AE 最上面的图层。需要 02 确认 BAE 的约定。
-8. 预合成：草案用 `source` 属性（`prim_ref`）指向 `/comps/...`。是否改用 `PrimSpec.references`，由 02 定。
-9. 合成、图层设置项的属性名（第 6 节）是提案，02 定稿后以 02 为准，导出脚本只改这一处的表。
-10. **NTSC 帧率**：AE 内部按 2997/100、24000/1001 以外的十进制帧率计帧（4.2），`FrameRate::is_exact()` 对它们为 false。建议 02 在 data-model.md 里写明「AE 的 29.97 导入为 30000/1001」这条约定，03 在对照测试里按帧号比较。
-11. 变换等可动画属性的 BAE 属性名（`transform:position` 一类）由 02 在 PR D 定；交换文件里仍然用 `ae:` 名字，由导入器映射。给 02 的命名建议见 02 任务书「请求」。
+02 已经定、由导入器处理的：
+
+- **关键帧时间基准**：BAE 里图层（及其遮罩、效果、形状内容、标记）上的关键帧用图层时间，`合成时间 = start_time + 图层时间 × stretch / 100`。交换文件保持 AE 脚本接口给的合成时间（`key_time_base = "comp"`，4.2），导入器按 `图层时间 = (合成时间 − start_time) × 100 / stretch` 换算。
+- **属性树映射**：`ae:ADBE_Transform_Group:ADBE_Position` → `transform:position` 等，按 02 schema 查表；查不到的原样保留为 `ae:` 属性。
+
+还没对上、已写进 02 任务书「请求」的：
+
+1. **NTSC 帧率**（AE 26.2.1 实测）：AE 按十进制的 29.97（2997/100）计帧，不是 30000/1001（4.2）。导入器会换成 `30000/1001` 并按帧号吸附；建议 02 在 `data-model.md` 写明这条约定。
+2. **`TextDocument` 缺 AE 字段**：`font_family`、`font_style`、`apply_fill`、`horizontal_scale`、`vertical_scale`、`superscript`、`subscript`、`tsume` 等（4.7）。目前 serde 读入时丢掉，导回 AE 会丢。
+3. **形状内容的 `name` / `enabled`**：02 schema 里 `ShapeGroup`、`Fill` 等没有这两个属性，导出时照样写（schema 外的属性原样保存）。
 
 ## 12. 版本
 
-- `format_version` 遵循 semver：只加可选字段算次版本；改名、改语义、删字段算主版本。
+- `format_version` 遵循 semver。1.0 之前：只加可选字段时加补丁号；改名、改语义、删字段时加次版本号（0.1 → 0.2 就是这种）。1.0 之后按通常的 semver。
 - 读取方遇到不认识的属性、Prim 类型和 `report.code` 时应保留或忽略，不能报错。

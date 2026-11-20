@@ -1,6 +1,6 @@
 // bae-export.jsx - export an After Effects project to the BAE interchange format.
 //
-// Format: docs/interop/bae-interchange.md (format_version 0.1.0).
+// Format: docs/interop/bae-interchange.md (format_version 0.2.0).
 // Runs in After Effects CC 2018 (15.0) and later. ExtendScript is ES3: no JSON object,
 // no Array.prototype.indexOf/forEach/map, no String.prototype.trim, no Object.keys.
 //
@@ -13,8 +13,8 @@
 
 (function (global) {
     var BAE = {};
-    BAE.VERSION = "0.1.0";
-    BAE.FORMAT_VERSION = "0.1.0";
+    BAE.VERSION = "0.2.0";
+    BAE.FORMAT_VERSION = "0.2.0";
     var FLICKS_PER_SECOND = 705600000;
     var MAX_ATTR_NAME = 256;
 
