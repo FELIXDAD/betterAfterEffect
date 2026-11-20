@@ -117,7 +117,7 @@ Conventions used below: "AE" means the current After Effects release (26.x/27.0,
   - Closing, quitting, opening another project or New Project prompts Save / Don't Save / Cancel when dirty.
 - **Priority:** P0
 - **Owner:** bae-model (+ apps/bae)
-- **Notes:** Scripting `Project.dirty` (undocumented, AE 17.5 / CC 2020), `Project.revision`. UNVERIFIED: which non-undoable actions set dirty. Implementation hint: derive dirty from "op log length since last flush" per sublayer; revision = monotonic op counter (useful for cache keys).
+- **Notes:** Scripting `Project.dirty` (read-only, added in AE 17.5 (CC 2020); officially undocumented, listed by the docsforadobe guide), `Project.revision` ("every user action increases the revision number; a new project starts at revision 1", scripting guide). UNVERIFIED: which non-undoable actions set dirty. Implementation hint: derive dirty from "op log length since last flush" per sublayer; revision = monotonic op counter (useful for cache keys).
 
 ### AE-PRJ-010 · Auto-Save (自动保存)
 
