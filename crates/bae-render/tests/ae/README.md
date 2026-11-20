@@ -5,7 +5,7 @@
 | `cases.json` | 用例定义（两边共用）：合成尺寸、图层（纯色 / 素材 / 预合成）、位置、缩放、旋转、不透明度、混合模式、轨道遮罩、保留基础透明度；`tolerance` 是允许的每通道最大差（默认 1，即取整误差）。 |
 | `render_cases.jsx` | 在 AE 里搭出全部用例（8 bpc、不线性混合、无色彩管理、图层质量"最佳"），用 `saveFrameToPng` 输出第 0 帧（预乘 RGBA）。 |
 | `cases.rs` | 生成两边共用的素材（灰阶渐变、彩色渐变、带软边 alpha 的纹理），用 bae-model 命令搭同样的工程，逐像素比较。 |
-| `golden/` | AE 26.2.1 的输出，`tests/ae_golden.rs` 在 CI 里用它比较，不需要 AE。 |
+| `golden/` | AE 26.2.1 的输出，`tests/ae_golden.rs` 在 CI 里用它比较，不需要 AE。软件 / 虚拟适配器（CI 的 Windows runner 用 WARP）上每个用例的容差加 2（纹理滤波精度略低），真 GPU 上保持原容差；测试输出里打印适配器和实际容差。 |
 
 重新生成 golden（改了用例或换了 AE 版本时）：
 
