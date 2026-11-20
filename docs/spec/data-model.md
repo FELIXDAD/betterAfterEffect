@@ -142,6 +142,10 @@ Op（JSON 里 `"op"` 字段区分）：`create_prim`、`delete_prim`、`restore_
 - `Sublayer::doc()`：底层 Loro 文档（只读使用；直接写入会绕过镜像）。
 - `Sublayer::version()`、`export_snapshot()`、`export_updates(&since)`、`Sublayer::from_snapshot(id, bytes)`。
 - `Stage::import_updates(sublayer, bytes)`：导入远端增量，返回并广播 `origin = remote` 的事件。
+- `Stage::import_updates_batch(sublayer, &[blob])`：一次导入多条增量，只重建一次镜像、只发一个事件（Hub 模式下一秒内收到很多小增量时用这个）。
+- `Sublayer::node_path(TreeID)` / `node_id(path)`：Loro 树节点和 Prim 路径互查（按 Prim 列历史差异时用），节点 ID 在改名、移动后不变。
+- 每个工程层的 Loro 文档都开启了提交时间戳（`set_record_timestamp`），历史里每次提交都有时间。
+- 只有大小写不同的工程层 ID（`Anim` 和 `anim`）会被拒绝，因为在 macOS 和 Windows 上它们会落到同一个文件。
 - `bae_model::loro` 重新导出了 Loro crate，版本由 `bae-model` 决定。
 
 ## 9. 性能（验收）
