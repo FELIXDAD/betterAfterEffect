@@ -63,6 +63,7 @@ bae-sync = { path = "crates/bae-sync" }
 bae-render = { path = "crates/bae-render" }
 bae-ui = { path = "crates/bae-ui" }
 bae-color = { path = "crates/bae-color" }
+bae-package = { path = "crates/bae-package" }
 
 # ---- GPU, rendering, text (one coherent Linebender/wgpu set) ----
 # Backends: Metal (macOS) + D3D12 (Windows). Vulkan/GLES are opt-in through the
