@@ -1,0 +1,160 @@
+id = "02-title-match-style"
+title = "沿用已有样式做第三章标题"
+category = "title"
+difficulty = 2
+guide_refs = ["02-workflow.md", "recipes/title-in.md"]
+
+prompt = """照着 SH010 和 SH020 的样式，给第三章也做一个标题：主标题"第三章 协作"，副标题"多人同时编辑同一个工程"。"""
+
+[fixture]
+description = """
+anim/titles 工程层里已有两个章节标题合成 SH010_title、SH020_title，样式和动画完全一致：
+25 fps、1920×1080、75 帧；主标题思源黑体 Bold 88 px、颜色 #F2F2F2；副标题思源黑体 Regular 36 px、颜色 #A0A0A0；
+主标题第 3–20 帧升起（入场·强），副标题第 8–25 帧，装饰线第 13–27 帧展开。
+"""
+sublayers = ["root", "anim/titles"]
+permission = "own-layer"
+
+[[fixture.prims]]
+path = "/comps/SH010_title"
+type = "Comp"
+sublayer = "anim/titles"
+attrs = { width = 1920, height = 1080, fps = 25, duration_frames = 75, background = "#101012" }
+
+[[fixture.prims]]
+path = "/comps/SH010_title/layers/title_main"
+type = "Layer"
+sublayer = "anim/titles"
+attrs = { kind = "Text", text = "第一章 起步", font = "Source Han Sans SC Bold", font_size = 88, fill = "#F2F2F2", "transform.position" = [960, 515] }
+keyframes."transform.position" = [
+  { frame = 3, value = [960, 555], out = { speed = 0, influence = 15 } },
+  { frame = 20, value = [960, 515], in = { speed = 0, influence = 80 } },
+]
+keyframes."transform.opacity" = [{ frame = 3, value = 0 }, { frame = 10, value = 100 }]
+
+[[fixture.prims]]
+path = "/comps/SH010_title/layers/title_sub"
+type = "Layer"
+sublayer = "anim/titles"
+attrs = { kind = "Text", text = "从一个空工程开始", font = "Source Han Sans SC Regular", font_size = 36, fill = "#A0A0A0", "transform.position" = [960, 590] }
+keyframes."transform.position" = [
+  { frame = 8, value = [960, 620], out = { speed = 0, influence = 15 } },
+  { frame = 25, value = [960, 590], in = { speed = 0, influence = 80 } },
+]
+keyframes."transform.opacity" = [{ frame = 8, value = 0 }, { frame = 15, value = 100 }]
+
+[[fixture.prims]]
+path = "/comps/SH010_title/layers/line_accent"
+type = "Layer"
+sublayer = "anim/titles"
+attrs = { kind = "Shape", rect = [200, 4], fill = "#3B6CFF", "transform.position" = [960, 640] }
+keyframes."transform.scale" = [
+  { frame = 13, value = [0, 100], out = { speed = 0, influence = 15 } },
+  { frame = 27, value = [100, 100], in = { speed = 0, influence = 80 } },
+]
+
+[[fixture.prims]]
+path = "/comps/SH020_title"
+copy_of = "/comps/SH010_title"
+sublayer = "anim/titles"
+
+[[fixture.prims]]
+path = "/comps/SH020_title/layers/title_main"
+sublayer = "anim/titles"
+attrs = { text = "第二章 分层" }
+
+[[fixture.prims]]
+path = "/comps/SH020_title/layers/title_sub"
+sublayer = "anim/titles"
+attrs = { text = "每个人改自己的工程层" }
+
+[expected]
+summary = """
+新建 SH030_title（不是 SH03、title3 之类），25 fps、1920×1080、75 帧，与前两章一致。
+三个图层的名字、字体、字号、颜色、位置与 SH010 一致，文案替换为第三章的内容。
+关键帧帧号和缓动与 SH010 一致（允许 ±1 帧）。
+不修改 SH010_title、SH020_title。复制或新建都可以，但结果必须在 agent/eval 层。
+"""
+
+[[checks]]
+id = "c7-read-first"
+kind = "called_before_write"
+args = { tool = "stage.describe" }
+maps_to = "C7"
+
+[[checks]]
+id = "h1-own-layer"
+kind = "writes_only_to"
+args = { sublayer = "agent/eval" }
+maps_to = "H1"
+hard = true
+
+[[checks]]
+id = "h2-comp"
+kind = "comp_settings"
+args = { path = "/comps/SH030_title", width = 1920, height = 1080, fps = 25, duration_frames = 75 }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "h2-title-text"
+kind = "text_layer_exists"
+args = { under = "/comps/SH030_title", value = "第三章 协作" }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "h2-sub-text"
+kind = "text_layer_exists"
+args = { under = "/comps/SH030_title", value = "多人同时编辑同一个工程" }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "no-touch-sh010"
+kind = "no_writes_under"
+args = { path = "/comps/SH010_title" }
+maps_to = "C3"
+hard = true
+
+[[checks]]
+id = "no-touch-sh020"
+kind = "no_writes_under"
+args = { path = "/comps/SH020_title" }
+maps_to = "C3"
+hard = true
+
+[[checks]]
+id = "style-font"
+kind = "attr_at"
+args = { path = "/comps/SH030_title/layers/title_main", attribute = "text.font", frame = 0, equals = "Source Han Sans SC Bold" }
+maps_to = "H2"
+
+[[checks]]
+id = "style-color"
+kind = "attr_at"
+args = { path = "/comps/SH030_title/layers/title_sub", attribute = "text.fill", frame = 0, equals = "#A0A0A0" }
+maps_to = "H2"
+
+[[checks]]
+id = "timing-main"
+kind = "keyframe_frames_match"
+args = { path = "/comps/SH030_title/layers/title_main", reference = "/comps/SH010_title/layers/title_main", tolerance = 1 }
+maps_to = "M3"
+
+[[checks]]
+id = "timing-sub"
+kind = "keyframe_frames_match"
+args = { path = "/comps/SH030_title/layers/title_sub", reference = "/comps/SH010_title/layers/title_sub", tolerance = 1 }
+maps_to = "M3"
+
+[[checks]]
+id = "p1-naming"
+kind = "naming"
+args = { under = "/comps/SH030_title", regex = "^(title_main|title_sub|line_accent|bg_[a-z0-9_]+)$", forbid_defaults = true }
+maps_to = "P1"
+
+[judge]
+frames = [0, 20, 40, "last"]
+contact_sheet = { start = 0, end = 30, step = 2 }
+focus = ["与 SH010 的最后一帧并排对比，版式是否一致"]

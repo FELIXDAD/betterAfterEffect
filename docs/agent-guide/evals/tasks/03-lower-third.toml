@@ -1,0 +1,112 @@
+id = "03-lower-third"
+title = "采访镜头的下三分之一字幕"
+category = "lower-third"
+difficulty = 1
+guide_refs = ["03-animation.md", "recipes/lower-third.md"]
+
+prompt = """SH040 是一段采访，给它加下三分之一字幕：李明，动效设计师。在受访者开口的时候出现。"""
+
+[fixture]
+description = """
+SH040_interview：1920×1080、25 fps、250 帧（10 秒）。用一个灰色纯色图层 footage_interview 代替采访素材，
+受访者面部区域大致在画面中央偏右（x 900–1300，y 200–700）。
+合成标记 speaker_in 在第 50 帧（受访者开口）。人名是虚构的。
+"""
+sublayers = ["root", "edit"]
+permission = "own-layer"
+
+[[fixture.prims]]
+path = "/comps/SH040_interview"
+type = "Comp"
+sublayer = "edit"
+attrs = { width = 1920, height = 1080, fps = 25, duration_frames = 250 }
+markers = [{ frame = 50, name = "speaker_in", comment = "受访者开口" }]
+
+[[fixture.prims]]
+path = "/comps/SH040_interview/layers/footage_interview"
+type = "Layer"
+sublayer = "edit"
+attrs = { kind = "Solid", color = "#5A5A5A", size = [1920, 1080] }
+
+[expected]
+summary = """
+人名"李明"、职位"动效设计师"出现在画面左下（不挡住中央偏右的面部区域），在标题安全区内。
+入场开始于第 50–75 帧（开口后 0–1 秒），人名先于职位或同时、底条先于文字。
+停留 3–6 秒，期间文字静止；出场比入场快；全部在第 249 帧前结束。
+可以做成独立的 lower_third 合成再放进 SH040，也可以直接在 SH040 里做。
+"""
+
+[[checks]]
+id = "h1-own-layer"
+kind = "writes_only_to"
+args = { sublayer = "agent/eval" }
+maps_to = "H1"
+hard = true
+
+[[checks]]
+id = "h2-name"
+kind = "text_layer_exists"
+args = { value = "李明" }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "h2-title"
+kind = "text_layer_exists"
+args = { value = "动效设计师" }
+maps_to = "H2"
+hard = true
+
+[[checks]]
+id = "h4-within-duration"
+kind = "keyframes_within_duration"
+args = { comp = "/comps/SH040_interview" }
+maps_to = "H4"
+hard = true
+
+[[checks]]
+id = "timing-start"
+kind = "first_keyframe_between"
+args = { find = { type = "Layer", text = "李明" }, comp = "/comps/SH040_interview", attribute = "*", from = 50, to = 75 }
+maps_to = "H2"
+
+[[checks]]
+id = "v1-safe"
+kind = "within_title_safe"
+args = { comp = "/comps/SH040_interview", finds = [{ type = "Layer", text = "李明" }, { type = "Layer", text = "动效设计师" }], frames = ["5s"] }
+maps_to = "V1"
+
+[[checks]]
+id = "v4-still"
+kind = "attr_still"
+args = { find = { type = "Layer", text = "李明" }, comp = "/comps/SH040_interview", attribute = "transform.position", from = "4s", to = "5.5s" }
+maps_to = "V4"
+
+[[checks]]
+id = "m1-no-linear"
+kind = "no_linear_temporal"
+args = { under = "/comps/*", allow = ["transform.opacity"] }
+maps_to = "M1"
+
+[[checks]]
+id = "t3-exit"
+kind = "judge_question"
+args = { question = "出场时长是否不长于入场时长？" }
+maps_to = "T3"
+
+[[checks]]
+id = "v3-face"
+kind = "judge_question"
+args = { question = "字幕是否避开了画面中央偏右的面部区域？" }
+maps_to = "V3"
+
+[[checks]]
+id = "c2-proposal"
+kind = "proposal_has_sections"
+args = { sections = ["做了什么", "改动范围", "如何验证"] }
+maps_to = "C2"
+
+[judge]
+frames = [50, "3s", "5s", "last"]
+contact_sheet = { start = 46, end = 80, step = 2 }
+focus = ["底条宽度是否盖住文字", "字号在手机上是否可读"]
