@@ -28,6 +28,7 @@
 
 #![warn(missing_docs)]
 
+pub mod declarative;
 pub mod diag;
 pub mod effect_def;
 pub mod expr;
@@ -37,6 +38,7 @@ pub mod package;
 pub mod wgsl;
 
 pub use bae_plugin_sdk::{ApiVersion, ContributionKind, Implementation};
+pub use declarative::DeclarativeEffect;
 pub use diag::{Diagnostic, Severity};
 pub use manifest::{EffectDecl, ParamDecl, PluginManifest};
 pub use package::{DirSource, EffectPackage, MemorySource, Package, PackageSource};
