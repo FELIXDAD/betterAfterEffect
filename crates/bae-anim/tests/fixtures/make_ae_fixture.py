@@ -55,10 +55,19 @@ def main():
             results[r["id"]] = r
 
     out_cases = []
-    for cid, c in by_id.items():
+    ids = list(by_id) + [i for i in results if i not in by_id]
+    for cid in ids:
         r = results.get(cid)
         if r is None or r.get("error"):
             continue
+        # Cases sampled by other scripts (--extra) may have no definition in CASES:
+        # derive what the test needs from the result itself.
+        c = by_id.get(cid) or {
+            "group": cid.split("_")[0],
+            "comp": {"frame_rate": {"num": r["comp"]["frame_rate"], "den": 1}},
+            "layer": {"effects": [r["property"]["path"][1]]}
+            if r["property"]["path"][0] == "ADBE Effect Parade" else {},
+        }
         comp = merged(cases["defaults"], c, "comp")
         layer_in = merged(cases["defaults"], c, "layer")
         lr = r["layer"]

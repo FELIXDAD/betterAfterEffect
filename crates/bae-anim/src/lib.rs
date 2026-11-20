@@ -24,6 +24,7 @@ mod curve;
 mod error;
 mod eval;
 mod evaluated;
+mod expr;
 pub mod schema;
 pub mod time;
 mod transform;
