@@ -1,2 +1,0 @@
-# Standalone builds (--manifest-path) before the workspace root lands.
-Cargo.lock

@@ -74,8 +74,10 @@ pub enum ContributionKind {
     Codec,
     /// `[[command]]`: menus, shortcuts, MCP tools.
     Command,
-    /// `[[script]]`: an automation script, registered as a command.
-    Script,
+    /// `[[automation]]`: an automation script (AE File > Scripts), registered as
+    /// a command. (The `[script]` table configures the JS runtime, so the
+    /// contribution table has a different name.)
+    Automation,
     /// `[[panel]]`.
     Panel,
     /// `[[workspace]]` (data only).
@@ -96,7 +98,7 @@ impl ContributionKind {
         ContributionKind::Exporter,
         ContributionKind::Codec,
         ContributionKind::Command,
-        ContributionKind::Script,
+        ContributionKind::Automation,
         ContributionKind::Panel,
         ContributionKind::Workspace,
         ContributionKind::Keymap,
@@ -113,7 +115,7 @@ impl ContributionKind {
             ContributionKind::Exporter => "exporter",
             ContributionKind::Codec => "codec",
             ContributionKind::Command => "command",
-            ContributionKind::Script => "script",
+            ContributionKind::Automation => "automation",
             ContributionKind::Panel => "panel",
             ContributionKind::Workspace => "workspace",
             ContributionKind::Keymap => "keymap",
@@ -139,7 +141,7 @@ impl ContributionKind {
             | ContributionKind::Exporter
             | ContributionKind::Command
             | ContributionKind::ExpressionLibrary => &[I::Native, I::Script],
-            ContributionKind::Script | ContributionKind::Panel => &[I::Script],
+            ContributionKind::Automation | ContributionKind::Panel => &[I::Script],
             ContributionKind::Workspace | ContributionKind::Keymap => &[I::Data],
         }
     }
@@ -168,9 +170,9 @@ impl ContributionKind {
             ContributionKind::Command => &[NativeKind::Command],
             ContributionKind::Panel => &[NativeKind::Panel],
             ContributionKind::ExpressionLibrary => &[NativeKind::ExpressionLibrary],
-            ContributionKind::Script | ContributionKind::Workspace | ContributionKind::Keymap => {
-                &[]
-            }
+            ContributionKind::Automation
+            | ContributionKind::Workspace
+            | ContributionKind::Keymap => &[],
         }
     }
 }
@@ -328,6 +330,6 @@ mod tests {
         }
         assert_eq!(Implementation::from_manifest_name("rust"), None);
         assert!(ContributionKind::Effect.requires_implementation_key());
-        assert!(!ContributionKind::Script.requires_implementation_key());
+        assert!(!ContributionKind::Automation.requires_implementation_key());
     }
 }
