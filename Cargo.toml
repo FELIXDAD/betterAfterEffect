@@ -56,9 +56,11 @@ bae-app = { path = "crates/bae-app" }
 bae-platform = { path = "crates/bae-platform" }
 bae-gpu = { path = "crates/bae-gpu" }
 bae-model = { path = "crates/bae-model" }
+bae-anim = { path = "crates/bae-anim" }
 bae-agent = { path = "crates/bae-agent" }
 bae-media = { path = "crates/bae-media" }
 bae-sync = { path = "crates/bae-sync" }
+bae-render = { path = "crates/bae-render" }
 
 # ---- GPU, rendering, text (one coherent Linebender/wgpu set) ----
 # Backends: Metal (macOS) + D3D12 (Windows). Vulkan/GLES are opt-in through the
@@ -139,6 +141,8 @@ objc2-video-toolbox = { version = "0.3.2", default-features = false, features = 
 windows = { version = "0.62.2", default-features = false }
 windows-sys = { version = "0.61.2", default-features = false }
 directories = "6.0.0"
+# File watching for the shared-folder sync transport (bae-sync `watch` feature).
+notify = { version = "8.2.2", default-features = false, features = ["macos_fsevent"] }
 libloading = "0.9.1"
 
 # ---- plugins, packaging, hashing ----

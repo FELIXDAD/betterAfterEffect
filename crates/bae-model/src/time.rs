@@ -147,10 +147,32 @@ impl FrameRate {
     }
 
     /// Start time of `frame`.
+    /// Start time of `frame`. Exact for rates that divide 705,600,000 (all common
+    /// ones); otherwise rounded up to the next flick so [`FrameRate::time_to_frame`]
+    /// maps it back to the same frame.
     pub fn frame_to_time(self, frame: i64) -> Time {
-        let flicks =
-            frame as i128 * Time::FLICKS_PER_SECOND as i128 * self.den as i128 / self.num as i128;
-        Time(flicks as i64)
+        let n = frame as i128 * Time::FLICKS_PER_SECOND as i128 * self.den as i128;
+        let d = self.num as i128;
+        // Ceiling division that also works for negative frames.
+        let q = n.div_euclid(d) + i128::from(n.rem_euclid(d) != 0);
+        Time(q as i64)
+    }
+
+    /// The rational rate for a decimal frame rate as AE reports it: 29.97 → 30000/1001,
+    /// 23.976 → 24000/1001, 59.94 → 60000/1001 (also 47.952, 119.88), integers → n/1;
+    /// anything else becomes thousandths. Importers use this, then snap times to frames.
+    pub fn from_fps(fps: f64) -> FrameRate {
+        let rounded = fps.round();
+        if (fps - rounded).abs() < 1e-3 && rounded >= 1.0 {
+            return FrameRate::new(rounded as u32, 1);
+        }
+        // NTSC: n * 1000/1001 for n in 24, 30, 48, 60, 120.
+        for n in [24u32, 30, 48, 60, 120] {
+            if (fps - f64::from(n) * 1000.0 / 1001.0).abs() < 2e-3 {
+                return FrameRate::new(n * 1000, 1001);
+            }
+        }
+        FrameRate::new((fps * 1000.0).round().max(1.0) as u32, 1000)
     }
 
     /// The frame that contains `time` (floor).
@@ -244,6 +266,24 @@ mod tests {
                 assert_eq!(t, Time(rate.frame_duration().0 * frame));
             }
         }
+    }
+
+    #[test]
+    fn inexact_rates_round_trip_and_decimal_rates_map_to_ntsc() {
+        // AE's decimal 29.97 (2997/100) does not divide flicks.
+        let r = FrameRate::new(2997, 100);
+        assert!(!r.is_exact());
+        for frame in [-31_i64, -1, 0, 1, 30, 1_000_001] {
+            let t = r.frame_to_time(frame);
+            assert_eq!(r.time_to_frame(t), frame, "frame {frame}");
+            assert!(r.time_to_frame(t - Time(1)) < frame);
+        }
+        assert_eq!(FrameRate::from_fps(29.9700317382812), FrameRate::FPS_29_97);
+        assert_eq!(FrameRate::from_fps(23.976), FrameRate::FPS_23_976);
+        assert_eq!(FrameRate::from_fps(59.94), FrameRate::FPS_59_94);
+        assert_eq!(FrameRate::from_fps(119.88), FrameRate::new(120_000, 1001));
+        assert_eq!(FrameRate::from_fps(25.0), FrameRate::FPS_25);
+        assert_eq!(FrameRate::from_fps(12.5), FrameRate::new(12_500, 1000));
     }
 
     #[test]

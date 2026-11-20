@@ -81,6 +81,16 @@ is_modal() {
     | grep -E "$MODAL_RE" >/dev/null
 }
 MODAL_CONFIRMATIONS=3
+# A pending script whose main thread sits on the same non-script stack this many checks
+# in a row (~3 s apart) is a hang that is not a dialog, e.g. a synchronous NSXPC wait in
+# a DiskArbitration callback when a volume mounts.
+FROZEN_CHECKS=10
+
+# Main-thread section of one `sample`.
+main_thread() {
+  sample "$1" 1 -mayDie 2>/dev/null \
+    | awk '/com.apple.main-thread/ {m=1; next} m && /^    [0-9]+ Thread_/ {m=0} m'
+}
 
 # Stuck = modal in several consecutive samples ~1.5 s apart.
 stuck() {
@@ -272,15 +282,28 @@ EOF
   local pid; pid=$(ae_pid)
   osascript -e "with timeout of $((timeout + 5)) seconds" \
     -e "tell application id \"$BUNDLE_ID\" to DoScriptFile \"$wrapper\"" -e "end timeout" >/dev/null 2>&1 &
-  local osa=$! i=0 hits=0
+  local osa=$! i=0 hits=0 frozen=0 prev_sig="" text sig why=""
   while (( i < timeout * 2 )); do
     nap 0.5; i=$((i + 1))
     [[ -f "$out" ]] && break
     if (( i % 6 == 0 )); then
-      if is_modal "$pid"; then hits=$((hits + 1)); else hits=0; fi
+      text=$(main_thread "$pid")
+      if grep -E "$MODAL_RE" >/dev/null <<<"$text"; then hits=$((hits + 1)); else hits=0; fi
+      # Frozen: not running script code, and the stack does not change at all.
+      if grep -E 'ScScript|evalFile|jsRunner' >/dev/null <<<"$text"; then
+        frozen=0; prev_sig=""
+      else
+        sig=$(grep -oE '\(in [^)]+\) \+ [0-9]+' <<<"$text" | md5 -q)
+        if [[ -n "$prev_sig" && "$sig" == "$prev_sig" ]]; then frozen=$((frozen + 1)); else frozen=0; fi
+        prev_sig="$sig"
+      fi
     fi
-    if (( hits >= MODAL_CONFIRMATIONS )); then
-      local why; why=$(known_dialog "$(main_stack "$pid")")
+    if (( frozen >= FROZEN_CHECKS )); then
+      why="main thread frozen outside the script for ~$((FROZEN_CHECKS * 3))s: $(main_stack "$pid" | tail -4 | tr '\n' ' ')"
+    elif (( hits >= MODAL_CONFIRMATIONS )); then
+      why="$(known_dialog "$(main_stack "$pid")")"
+    fi
+    if [[ -n "$why" ]]; then
       kill "$osa" 2>/dev/null
       recover "$pid" "$force" "modal dialog while running script: $why"
       echo "{\"ok\":false,\"value\":null,\"error\":{\"message\":\"After Effects showed a modal dialog: $why\",\"recovered\":true,\"evidence\":\"${LAST_EVIDENCE:-}\"}}"
