@@ -250,6 +250,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "bae-aex-host"
+version = "0.1.0"
+dependencies = [
+ "bae-model",
+]
+
+[[package]]
 name = "bae-agent"
 version = "0.1.0"
 dependencies = [
