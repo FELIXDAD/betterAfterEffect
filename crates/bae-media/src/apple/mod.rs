@@ -20,6 +20,10 @@
 //! at the frame (AVFoundation then decodes from the preceding keyframe and only
 //! outputs from the range start).
 
+mod encode;
+
+pub use encode::{AvWriterEncoder, AvWriterFormat, default_movie_path};
+
 use std::path::Path;
 use std::ptr::NonNull;
 
@@ -33,8 +37,10 @@ use objc2_av_foundation::{
 use objc2_core_foundation::{CFBoolean, CFDictionary, CFNumber, CFRetained, CFString, CFType};
 use objc2_core_media::{
     CMFormatDescription, CMSampleBuffer, CMTime, CMTimeFlags, CMTimeRange,
-    CMVideoFormatDescriptionGetDimensions, kCMFormatDescriptionExtension_BitsPerComponent,
-    kCMFormatDescriptionExtension_ColorPrimaries, kCMFormatDescriptionExtension_Depth,
+    CMVideoFormatDescriptionGetDimensions, kCMFormatDescriptionAlphaChannelMode_PremultipliedAlpha,
+    kCMFormatDescriptionExtension_AlphaChannelMode, kCMFormatDescriptionExtension_BitsPerComponent,
+    kCMFormatDescriptionExtension_ColorPrimaries,
+    kCMFormatDescriptionExtension_ContainsAlphaChannel, kCMFormatDescriptionExtension_Depth,
     kCMFormatDescriptionExtension_FullRangeVideo, kCMFormatDescriptionExtension_PixelAspectRatio,
     kCMFormatDescriptionExtension_TransferFunction, kCMFormatDescriptionExtension_YCbCrMatrix,
     kCMFormatDescriptionKey_PixelAspectRatioHorizontalSpacing,
@@ -191,11 +197,27 @@ fn describe(desc: &CMFormatDescription, video: &mut VideoInfo) {
         )
     };
     let prores = video.codec.starts_with("prores");
-    let alpha = ext(depth_key).and_then(|v| number(&v)) == Some(32);
-    video.alpha = if alpha {
-        AlphaMode::Straight
-    } else {
-        AlphaMode::Opaque
+    // ProRes 4444 signals alpha with a depth of 32; HEVC with alpha with
+    // ContainsAlphaChannel and says whether it is premultiplied.
+    // SAFETY: extern statics provided by CoreMedia.
+    let (contains_key, mode_key, premultiplied) = unsafe {
+        (
+            kCMFormatDescriptionExtension_ContainsAlphaChannel,
+            kCMFormatDescriptionExtension_AlphaChannelMode,
+            kCMFormatDescriptionAlphaChannelMode_PremultipliedAlpha,
+        )
+    };
+    let contains_alpha = ext(contains_key)
+        .and_then(|v| v.downcast_ref::<CFBoolean>().map(CFBoolean::as_bool))
+        .unwrap_or(false);
+    let alpha = contains_alpha || ext(depth_key).and_then(|v| number(&v)) == Some(32);
+    let is_premultiplied = ext(mode_key)
+        .and_then(|v| v.downcast_ref::<CFString>().map(|s| s == premultiplied))
+        .unwrap_or(false);
+    video.alpha = match (alpha, is_premultiplied) {
+        (false, _) => AlphaMode::Opaque,
+        (true, false) => AlphaMode::Straight,
+        (true, true) => AlphaMode::Premultiplied,
     };
     let bits = ext(bits_key).and_then(|v| number(&v));
     video.bit_depth = match bits {
