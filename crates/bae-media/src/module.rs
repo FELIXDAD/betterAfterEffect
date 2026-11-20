@@ -6,7 +6,9 @@ use bae_app::{AppBuilder, AppModule};
 
 use crate::cache::FrameCache;
 use crate::export::EncoderFormat;
+use crate::library::MediaLibrary;
 use crate::source::MediaFormat;
+use crate::source::MediaFormats;
 use crate::trim::Trimmer;
 
 /// Default GPU memory budget of the shared [`FrameCache`]: 1 GiB (about 15 4K
@@ -23,7 +25,9 @@ pub const DEFAULT_CACHE_BUDGET: u64 = 1 << 30;
 ///   (`bae.media.encoder.<id>`) and [`Trimmer`] into `Registry<dyn Trimmer>`
 ///   (`bae.media.trim.<id>`),
 /// * resource `Arc<FrameCache>` with [`DEFAULT_CACHE_BUDGET`] unless another
-///   module inserted one first.
+///   module inserted one first,
+/// * resource `Arc<MediaLibrary>` (in `finish`, over every registered format
+///   and that cache) — the footage access the renderer and timeline share.
 ///
 /// [`MediaGpu`](crate::MediaGpu) needs the `GpuContext`, which is created later
 /// by the shell or the headless runner; the compositor creates it from there.
@@ -58,6 +62,21 @@ impl AppModule for MediaModule {
             app.insert_resource(Arc::new(FrameCache::new(DEFAULT_CACHE_BUDGET)));
         }
     }
+
+    /// After every module registered its formats: the shared
+    /// `Arc<MediaLibrary>` over them and the frame cache. (Formats a plugin
+    /// registers later need a new library; the plugin host rebuilds it.)
+    fn finish(&self, app: &mut AppBuilder) {
+        if app.resource::<Arc<MediaLibrary>>().is_some() {
+            return;
+        }
+        let formats = MediaFormats::from_registry(&app.registry::<dyn MediaFormat>());
+        let cache = app
+            .resource::<Arc<FrameCache>>()
+            .cloned()
+            .unwrap_or_else(|| Arc::new(FrameCache::new(DEFAULT_CACHE_BUDGET)));
+        app.insert_resource(Arc::new(MediaLibrary::new(formats, cache)));
+    }
 }
 
 #[cfg(test)]
@@ -77,6 +96,11 @@ mod tests {
         let formats = MediaFormats::from_registry(&registry);
         assert_eq!(formats.iter().count(), crate::builtin_formats().len());
         assert!(app.resource::<Arc<FrameCache>>().is_some());
+        let library = app.resource::<Arc<MediaLibrary>>().unwrap();
+        assert!(Arc::ptr_eq(
+            library.cache(),
+            app.resource::<Arc<FrameCache>>().unwrap()
+        ));
         let encoders = app.registry::<dyn EncoderFormat>();
         assert!(encoders.contains("bae.media.encoder.image-sequence"));
         assert!(
