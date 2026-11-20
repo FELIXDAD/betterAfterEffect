@@ -62,15 +62,21 @@ bae-anim EvaluatedLayer.contents ──► ShapeGroup（类型化的形状树）
 
 `vello_cpu` 0.1.0 本来就随 egui 的 epaint 链接进应用，不新增 crate。两个后端在同一画面上的差异只在抗锯齿边缘：`tests/cpu.rs` 在硬件适配器上逐像素对比（平均差 < 1%），在 WARP 上只跑 CPU 路径。
 
-崩溃的根因还没有在 Windows 上确认（Vello 本身还是 WARP 的着色器 JIT）。诊断步骤：
+Windows 实机（RTX 5090 D，2026-11-21，报告见 #78）确认了两件事：
+
+- **WARP 本身在 Vello 派发时崩溃。** `vello_gpu_stages` 在 WARP 上能创建管线（FXC 编译通过），但在第一次渲染（stage 2，派发）时访问违规（0xc0000005）。所以软件适配器上必须走 CPU 后端，和着色器编译器无关。强制 WARP 时 bae-vector、bae-text 的测试全部通过（Vello GPU 测试跳过，CPU 后端测试运行）。
+- **真显卡上的 0xc000001d 是 DXC 的问题，不是 Vello。** wgpu 默认的 DX12 编译器是 `Auto`，会用 `PATH` 上找到的 `dxcompiler.dll`（那台机器上排第一的是某个应用自带的 dxcompiler 1.8.2505 配旧版 dxil），在创建管线时崩溃。设 `WGPU_DX12_COMPILER=fxc` 后真显卡上 bae-vector、bae-text 全部通过，CPU 与 Vello 的逐像素对比（平均差 < 1%）也通过。修法是在 bae-gpu 里固定 DX12 编译器（01 负责），不在本 crate。
+
+复现诊断：
 
 ```bat
 set BAE_GPU_ADAPTER=software
 set BAE_GPU_VALIDATION=1
+set WGPU_DX12_COMPILER=fxc
 cargo test -p bae-vector --test cpu -- --ignored --nocapture vello_gpu_stages
 ```
 
-它强制在 WARP 上走 Vello GPU，并在"创建管线 / 渲染空场景 / 渲染测试场景 / 回读"每一步前打印 `[vello-diag]`，看最后一条就知道崩在管线创建（着色器编译）还是派发；D3D12 调试层的输出会给出更具体的原因。
+它强制在 WARP 上走 Vello GPU，在"创建管线 / 渲染空场景 / 渲染测试场景 / 回读"每一步前打印 `[vello-diag]`，最后一条说明崩在哪一步。
 
 ## 测试
 
