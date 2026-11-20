@@ -25,30 +25,30 @@ attrs = { width = 1920, height = 1080, fps = 25, duration_frames = 75, backgroun
 path = "/comps/SH010_title/layers/title_main"
 type = "Layer"
 sublayer = "anim/titles"
-attrs = { kind = "Text", text = "第一章 起步", font = "Source Han Sans SC Bold", font_size = 88, fill = "#F2F2F2", "transform.position" = [960, 515] }
-keyframes."transform.position" = [
+attrs = { kind = "Text", text = "第一章 起步", font = "Source Han Sans SC Bold", font_size = 88, fill = "#F2F2F2", "transform:position" = [960, 515] }
+keyframes."transform:position" = [
   { frame = 3, value = [960, 555], out = { speed = 0, influence = 15 } },
   { frame = 20, value = [960, 515], in = { speed = 0, influence = 80 } },
 ]
-keyframes."transform.opacity" = [{ frame = 3, value = 0 }, { frame = 10, value = 100 }]
+keyframes."transform:opacity" = [{ frame = 3, value = 0 }, { frame = 10, value = 100 }]
 
 [[fixture.prims]]
 path = "/comps/SH010_title/layers/title_sub"
 type = "Layer"
 sublayer = "anim/titles"
-attrs = { kind = "Text", text = "从一个空工程开始", font = "Source Han Sans SC Regular", font_size = 36, fill = "#A0A0A0", "transform.position" = [960, 590] }
-keyframes."transform.position" = [
+attrs = { kind = "Text", text = "从一个空工程开始", font = "Source Han Sans SC Regular", font_size = 36, fill = "#A0A0A0", "transform:position" = [960, 590] }
+keyframes."transform:position" = [
   { frame = 8, value = [960, 620], out = { speed = 0, influence = 15 } },
   { frame = 25, value = [960, 590], in = { speed = 0, influence = 80 } },
 ]
-keyframes."transform.opacity" = [{ frame = 8, value = 0 }, { frame = 15, value = 100 }]
+keyframes."transform:opacity" = [{ frame = 8, value = 0 }, { frame = 15, value = 100 }]
 
 [[fixture.prims]]
 path = "/comps/SH010_title/layers/line_accent"
 type = "Layer"
 sublayer = "anim/titles"
-attrs = { kind = "Shape", rect = [200, 4], fill = "#3B6CFF", "transform.position" = [960, 640] }
-keyframes."transform.scale" = [
+attrs = { kind = "Shape", rect = [200, 4], fill = "#3B6CFF", "transform:position" = [960, 640] }
+keyframes."transform:scale" = [
   { frame = 13, value = [0, 100], out = { speed = 0, influence = 15 } },
   { frame = 27, value = [100, 100], in = { speed = 0, influence = 80 } },
 ]
@@ -127,13 +127,13 @@ hard = true
 [[checks]]
 id = "style-font"
 kind = "attr_at"
-args = { path = "/comps/SH030_title/layers/title_main", attribute = "text.font", frame = 0, equals = "Source Han Sans SC Bold" }
+args = { path = "/comps/SH030_title/layers/title_main", attribute = "text:font", frame = 0, equals = "Source Han Sans SC Bold" }
 maps_to = "H2"
 
 [[checks]]
 id = "style-color"
 kind = "attr_at"
-args = { path = "/comps/SH030_title/layers/title_sub", attribute = "text.fill", frame = 0, equals = "#A0A0A0" }
+args = { path = "/comps/SH030_title/layers/title_sub", attribute = "text:fill", frame = 0, equals = "#A0A0A0" }
 maps_to = "H2"
 
 [[checks]]

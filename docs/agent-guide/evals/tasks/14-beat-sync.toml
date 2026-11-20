@@ -25,25 +25,25 @@ attrs = { width = 1920, height = 1080, fps = 30, duration_frames = 270 }
 path = "/comps/SH080_icons/layers/icon_01"
 type = "Layer"
 sublayer = "anim/shot080"
-attrs = { kind = "Shape", ellipse = [160, 160], fill = "#3B6CFF", "transform.position" = [480, 540] }
+attrs = { kind = "Shape", ellipse = [160, 160], fill = "#3B6CFF", "transform:position" = [480, 540] }
 
 [[fixture.prims]]
 path = "/comps/SH080_icons/layers/icon_02"
 type = "Layer"
 sublayer = "anim/shot080"
-attrs = { kind = "Shape", ellipse = [160, 160], fill = "#3B6CFF", "transform.position" = [800, 540] }
+attrs = { kind = "Shape", ellipse = [160, 160], fill = "#3B6CFF", "transform:position" = [800, 540] }
 
 [[fixture.prims]]
 path = "/comps/SH080_icons/layers/icon_03"
 type = "Layer"
 sublayer = "anim/shot080"
-attrs = { kind = "Shape", ellipse = [160, 160], fill = "#3B6CFF", "transform.position" = [1120, 540] }
+attrs = { kind = "Shape", ellipse = [160, 160], fill = "#3B6CFF", "transform:position" = [1120, 540] }
 
 [[fixture.prims]]
 path = "/comps/SH080_icons/layers/icon_04"
 type = "Layer"
 sublayer = "anim/shot080"
-attrs = { kind = "Shape", ellipse = [160, 160], fill = "#3B6CFF", "transform.position" = [1440, 540] }
+attrs = { kind = "Shape", ellipse = [160, 160], fill = "#3B6CFF", "transform:position" = [1440, 540] }
 
 [[fixture.prims]]
 path = "/comps/SH080_icons/layers/music"
@@ -69,7 +69,7 @@ hard = true
 [[checks]]
 id = "t8-impact"
 kind = "impact_on_frames"
-args = { paths = ["/comps/SH080_icons/layers/icon_01", "/comps/SH080_icons/layers/icon_02", "/comps/SH080_icons/layers/icon_03", "/comps/SH080_icons/layers/icon_04"], attribute = "transform.scale", frames = [12, 72, 132, 192], early_tolerance = 1, late_tolerance = 0 }
+args = { paths = ["/comps/SH080_icons/layers/icon_01", "/comps/SH080_icons/layers/icon_02", "/comps/SH080_icons/layers/icon_03", "/comps/SH080_icons/layers/icon_04"], attribute = "transform:scale", frames = [12, 72, 132, 192], early_tolerance = 1, late_tolerance = 0 }
 maps_to = "T8"
 hard = true
 

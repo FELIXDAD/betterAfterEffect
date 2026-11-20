@@ -26,26 +26,26 @@ path = "/comps/SH070_title/layers/title_main"
 type = "Layer"
 sublayer = "agent/eval"
 author = "agent/eval"
-attrs = { kind = "Text", text = "轻量，但不简单", font_size = 96, "transform.position" = [960, 510] }
-keyframes."transform.position" = [{ frame = 0, value = [960, 660], interpolation = "linear" }, { frame = 20, value = [960, 510], interpolation = "linear" }]
-keyframes."transform.opacity" = [{ frame = 0, value = 0, interpolation = "linear" }, { frame = 20, value = 100, interpolation = "linear" }]
+attrs = { kind = "Text", text = "轻量，但不简单", font_size = 96, "transform:position" = [960, 510] }
+keyframes."transform:position" = [{ frame = 0, value = [960, 660], interpolation = "linear" }, { frame = 20, value = [960, 510], interpolation = "linear" }]
+keyframes."transform:opacity" = [{ frame = 0, value = 0, interpolation = "linear" }, { frame = 20, value = 100, interpolation = "linear" }]
 
 [[fixture.prims]]
 path = "/comps/SH070_title/layers/title_sub"
 type = "Layer"
 sublayer = "agent/eval"
 author = "agent/eval"
-attrs = { kind = "Text", text = "安装包压到极限", font_size = 40, "transform.position" = [960, 590] }
-keyframes."transform.position" = [{ frame = 0, value = [960, 740], interpolation = "linear" }, { frame = 20, value = [960, 590], interpolation = "linear" }]
-keyframes."transform.opacity" = [{ frame = 0, value = 0, interpolation = "linear" }, { frame = 20, value = 100, interpolation = "linear" }]
+attrs = { kind = "Text", text = "安装包压到极限", font_size = 40, "transform:position" = [960, 590] }
+keyframes."transform:position" = [{ frame = 0, value = [960, 740], interpolation = "linear" }, { frame = 20, value = [960, 590], interpolation = "linear" }]
+keyframes."transform:opacity" = [{ frame = 0, value = 0, interpolation = "linear" }, { frame = 20, value = 100, interpolation = "linear" }]
 
 [[fixture.prims]]
 path = "/comps/SH070_title/layers/line_accent"
 type = "Layer"
 sublayer = "agent/eval"
 author = "agent/eval"
-attrs = { kind = "Shape", rect = [240, 4], fill = "#FFFFFF", "transform.position" = [960, 640] }
-keyframes."transform.scale" = [{ frame = 0, value = [0, 100], interpolation = "linear" }, { frame = 20, value = [100, 100], interpolation = "linear" }]
+attrs = { kind = "Shape", rect = [240, 4], fill = "#FFFFFF", "transform:position" = [960, 640] }
+keyframes."transform:scale" = [{ frame = 0, value = [0, 100], interpolation = "linear" }, { frame = 20, value = [100, 100], interpolation = "linear" }]
 
 [expected]
 summary = """
@@ -78,14 +78,14 @@ hard = true
 [[checks]]
 id = "m1-no-linear"
 kind = "no_linear_temporal"
-args = { under = "/comps/SH070_title", allow = ["transform.opacity"] }
+args = { under = "/comps/SH070_title", allow = ["transform:opacity"] }
 maps_to = "M1"
 hard = true
 
 [[checks]]
 id = "m2-entrance"
 kind = "entrance_eased"
-args = { path = "/comps/SH070_title/layers/title_main", attribute = "transform.position" }
+args = { path = "/comps/SH070_title/layers/title_main", attribute = "transform:position" }
 maps_to = "M2"
 
 [[checks]]
@@ -98,7 +98,7 @@ hard = true
 [[checks]]
 id = "final-layout"
 kind = "attr_at"
-args = { path = "/comps/SH070_title/layers/title_main", attribute = "transform.position", frame = "last", equals = [960, 510], tolerance = 0.5 }
+args = { path = "/comps/SH070_title/layers/title_main", attribute = "transform:position", frame = "last", equals = [960, 510], tolerance = 0.5 }
 maps_to = "H3"
 
 [[checks]]

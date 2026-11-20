@@ -6,7 +6,8 @@
 
 - 架构文档第 10 节：`stage.describe`、`prim.get`、`prim.find`、`selection.get`、`render.frame`、`render.contact_sheet`；
 - 17 任务书：`attribute.evaluate`、`history.*`、`sublayer.*`；
-- 02 任务书的"基础命令"（创建/删除/移动/重命名节点、设置属性、增删改关键帧、设置引用、新建工程层、切换编辑目标）——这些会由 `CommandRegistry` 自动生成为 MCP 工具，名字取决于命令 ID，下面只是按意图推测。
+- 02 `core/doc-model` 已经合并的内置命令（`docs/spec/data-model.md` 第 6 节）：`prim.create`、`attr.set`、`key.set` 等。17 会把 `CommandRegistry` 里的命令自动生成为 MCP 工具，第 3 节按**命令 ID** 写；MCP 工具名是否与命令 ID 完全相同，由 17 决定（见第 10 节）。
+- 其余（动效领域命令、事务、提案、批注等）是按意图推测的。
 
 **凡是本页标"待确认"的名字，指南正文里都按这里的写法使用。** 17 合并后，18 会按实际导出逐行核对，改正文和 Skill，并把本页的"状态"列改成"已确认"。
 
@@ -27,21 +28,30 @@
 | `render.frame` | 渲染单帧，返回 PNG | `comp`、`frame`、`scale`（`1`、`0.5`、`0.25`） | 架构文档已列出；参数待确认 |
 | `render.contact_sheet` | 多帧缩略图拼成一张图，检查节奏 | `comp`、`frames`（列表）或 `start` / `end` / `step`、`columns`、`scale` | 架构文档已列出；参数待确认 |
 
-## 3. 修改类：通用命令（由 CommandRegistry 生成）
+## 3. 修改类：内置命令（02 已定义，由 CommandRegistry 生成）
 
-| 意图 | 预期工具名 | 状态 |
-|---|---|---|
-| 创建节点（合成、图层、形状内容、标记等） | `prim.create` | 待确认 |
-| 删除节点 | `prim.delete` | 待确认 |
-| 移动节点到新的父节点 | `prim.move` | 待确认 |
-| 调整同级顺序（例如图层上下顺序） | `prim.reorder` | 待确认 |
-| 重命名 | `prim.rename` | 待确认 |
-| 设置属性的静态值 | `attribute.set` | 待确认 |
-| 设置或修改关键帧（值、插值、缓动） | `keyframe.set` | 待确认 |
-| 删除关键帧 | `keyframe.remove` | 待确认 |
-| 对已有关键帧应用缓动 / 缓入 / 缓出（关键帧辅助） | `keyframe.ease` | 待确认 |
-| 设置或清除表达式 | `expression.set` | 待确认 |
-| 设置引用（预合成、引用设计资产） | `reference.set` | 待确认 |
+| 意图 | 命令 ID | Agent 能不能用 | 状态 |
+|---|---|---|---|
+| 创建节点（合成、图层、形状内容等） | `prim.create` | 能 | 02 已定义 |
+| 删除节点及子树 | `prim.delete` | 只用于自己创建的节点（见下） | 02 已定义 |
+| 移动 / 重排 / 改名 | `prim.move` | 只用于自己创建的节点 | 02 已定义 |
+| 改名 | `prim.rename` | 只用于自己创建的节点 | 02 已定义 |
+| 设置属性静态值（写进编辑目标层） | `attr.set` | 能 | 02 已定义 |
+| 清除编辑目标层对某个属性的意见，露出弱层的值 | `attr.clear` | 能。撤回自己的覆盖就用它 | 02 已定义 |
+| 增改关键帧 / 删除关键帧 | `key.set` / `key.remove` | 能 | 02 已定义 |
+| 设置、停用或删除表达式 | `attr.set_expression` | 能 | 02 已定义 |
+| 设置引用（预合成、引用设计资产） | `prim.set_references` | 能 | 02 已定义 |
+| 新建工程层 | `sublayer.create` | 不用 | 02 已定义 |
+| 切换编辑目标 | `sublayer.set_edit_target` | **不用**（会话开始时就是自己的提案层） | 02 已定义 |
+| 把覆盖从一层移到另一层（下推） | `opinion.move` | 不用，这是人审核时的操作 | 02 已定义 |
+| 把一层整体合并进另一层（接受提案） | `sublayer.merge` | 不用，这是人审核时的操作 | 02 已定义 |
+| 对已有关键帧应用缓动 / 缓入 / 缓出（关键帧辅助） | `key.ease` | 能 | 推测，待确认（12） |
+
+**删除、移动、改名是命名空间操作。** 按 02 的规则，`prim.delete`、`prim.move`、`prim.rename` 作用于层叠里**所有**在该路径上有意见的工程层——对别人定义的节点做这三个操作，就是在改别人的层。Agent 只对自己在提案层里新建（`def`）的节点使用它们；需要从画面里去掉别人的节点、或改别人节点的名字时，先问用户。
+
+**在强层里改弱层定义的节点**时，命令会自动在编辑目标层补一个 `over`（只覆盖、不定义），再写属性。这就是 Agent 在提案层里"覆盖"别人的值的机制，不需要额外操作。
+
+**节点名和显示名不同。** 节点名是路径的一段（标识符：字母含中文、数字、`_`、`-`）；界面上的图层名是一个属性，可以重复、带空格（具体属性名在 02 的 Prim schema 里定，待确认）。指南的命名规范同时适用于两者：新建时两者用同一个 snake_case 名字。
 
 ## 4. 修改类：动效领域命令（bae-motion，由 12 定义）
 
@@ -58,6 +68,8 @@
 | 给文本图层添加动画制作工具 | `text.add_animator` | 待确认 |
 
 ## 5. 事务
+
+02 的事务是 `Stage::transact(author, label, …)`：一次调用里的所有修改是一个撤销单元，提交信息 `{"author", "label"}` 进历史和审计。跨多个 MCP 工具调用的事务需要 17 另外提供，下面的名字是推测。
 
 | 意图 | 预期工具名 | 状态 |
 |---|---|---|
@@ -101,10 +113,14 @@
 - **时间参数优先用帧号**：相对于合成开始、从 0 开始的整数帧，例如 `{"frame": 12}`。同时接受时码字符串（`"0:00:00:12"`）。内部再换算成 flicks（见 [01 概念与术语](01-concepts.md) 的换算表）。
 - **节点用完整路径**，例如 `/comps/main/layers/title`；不要依赖"当前选中"。
 - **颜色**用 0–1 的浮点 RGBA，并注明色彩空间（默认合成工作空间）。
-- **缓动参数**沿用 AE 的速度 / 影响（speed / influence）模型：`{"in": {"speed": 0, "influence": 75}, "out": {"speed": 0, "influence": 33.33}}`，影响用百分比。
+- **属性名**用 02 的命名空间写法：`transform:position`、`transform:opacity`、`transform:scale`（具体属性名由 02 的 Prim schema 定，待确认）。
+- **值**：02 的 `Value` JSON 带类型标签（`{"type": "vec2", "value": [960, 540]}`）。指南示例为了易读写成不带标签的值；建议 17 按参数 Schema 接受不带标签的写法。
+- **关键帧**：02 的关键帧 JSON 是 `interp_in` / `interp_out`（`linear | bezier | hold`）、`ease_in` / `ease_out`（**每个维度一组** `speed` + `influence`，影响用百分比）、`spatial_in` / `spatial_out`、`flags`。指南示例用简写 `{"frame": 22, "value": [960, 510], "in": {"speed": 0, "influence": 80}}`：`in` / `out` 是一组缓动，表示所有维度相同；`"interpolation": "linear"` 表示两侧都是线性；`"spatial": "linear"` 表示空间插值线性。建议 17 支持这种简写，或者在工具说明里写清楚完整格式。
 - 修改类工具返回受影响的节点路径和新建节点的路径，方便后续调用。
 
 ## 10. 请 17 一并考虑
+
+- **工具名里的点号。** 部分客户端或模型接口对工具名有字符限制（例如只允许字母、数字、`_`、`-`），带点号的名字可能被改写成 `stage_describe` 之类。请 17 确认各客户端里的实际名字，并在 MCP instructions 里使用 Agent 实际看到的写法。
 
 - 把本指南作为 MCP 资源（resources）暴露，例如 `bae://agent-guide/03-animation`，让没有安装 Skill 的 Agent 也能按需读取。
 - `stage.describe` 的输出里直接带上：合成帧率、时长、工作区域，当前编辑目标，自己的权限级别，锁提示。这几项是指南要求 Agent 每次先看的内容。

@@ -33,7 +33,7 @@ attrs = { effect_id = "bae.glow", radius = 12, intensity = 0.6 }
 path = "/comps/SH010_title/layers/title_sub"
 sublayer = "agent/eval"
 author = "agent/eval"
-keyframes."transform.opacity" = [{ frame = 10, value = 0 }, { frame = 18, value = 100 }]
+keyframes."transform:opacity" = [{ frame = 10, value = 0 }, { frame = 18, value = 100 }]
 
 [[followup]]
 when = "问到未合并的提案、要不要带上提案"

@@ -42,7 +42,7 @@ SH090_logo  1920×1080, 30 fps, 150 帧（5 秒）
 ## 4. 步骤
 
 1. `prim.find` 找 Logo 资产，`prim.get` 看它的结构和来源工程层。
-2. 事务"Logo 演绎：建立合成和版式"：新建合成；`reference.set` 或 `layer.create(kind: "precomp")` 引用 Logo 资产为 `logo_final`；建 `tagline`。
+2. 事务"Logo 演绎：建立合成和版式"：新建合成；`prim.set_references` 或 `layer.create(kind: "precomp")` 引用 Logo 资产为 `logo_final`；建 `tagline`。
 3. 自检：`render.frame` 第 120 帧，`scale: 0.5`。确认 Logo 尺寸、位置、留白、标语位置。这一帧就是最终画面，要先定下来。
 4. 事务"Logo 演绎：构建预合成"：建 `pc_logo_build`，放入 Logo 路径的描边版本（无填充，描边颜色用品牌色），加修剪路径。
 5. 事务"Logo 演绎：构建与成形动画"：按时间表设关键帧。

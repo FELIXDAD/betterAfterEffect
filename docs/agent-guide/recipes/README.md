@@ -25,7 +25,7 @@
 
 ## 调用示例里的约定
 
-示例里的 JSON 只写关键参数，`"...": "..."` 表示省略。属性路径按 AE 的属性分组写成点号形式，例如 `transform.position`、`transform.opacity`、`transform.scale`（待确认）。关键帧参数统一写成：
+示例里的 JSON 只写关键参数，`"...": "..."` 表示省略。属性名用 02 的命名空间写法，例如 `transform:position`、`transform:opacity`、`transform:scale`（具体名字由 02 的 Prim schema 定，待确认）。关键帧参数用简写（完整格式见 [tools.md](../tools.md) 第 9 节）：
 
 ```json
 {"frame": 22, "value": [960, 510], "in": {"speed": 0, "influence": 80}, "out": {"speed": 0, "influence": 33.33}}

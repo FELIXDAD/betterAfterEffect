@@ -54,7 +54,7 @@ hard = true
 [[checks]]
 id = "h2-proportional"
 kind = "values_proportional"
-args = { paths = ["/comps/*/layers/bar_01", "/comps/*/layers/bar_02", "/comps/*/layers/bar_03"], attribute = "bounds.height", values = [120, 185, 260], frame = "last", tolerance = 0.02 }
+args = { paths = ["/comps/*/layers/bar_01", "/comps/*/layers/bar_02", "/comps/*/layers/bar_03"], attribute = "bounds:height", values = [120, 185, 260], frame = "last", tolerance = 0.02 }
 maps_to = "H2"
 hard = true
 
@@ -68,7 +68,7 @@ hard = true
 [[checks]]
 id = "m9-no-overshoot"
 kind = "attr_never_exceeds"
-args = { path = "/comps/*/layers/bar_03", attribute = "bounds.height", limit_from_frame = "last" }
+args = { path = "/comps/*/layers/bar_03", attribute = "bounds:height", limit_from_frame = "last" }
 maps_to = "M9"
 
 [[checks]]
@@ -92,7 +92,7 @@ maps_to = "H2"
 [[checks]]
 id = "t6-hold"
 kind = "attr_still"
-args = { path = "/comps/*/layers/bar_03", attribute = "bounds.height", from = "3s", to = "last" }
+args = { path = "/comps/*/layers/bar_03", attribute = "bounds:height", from = "3s", to = "last" }
 maps_to = "T6"
 
 [[checks]]

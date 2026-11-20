@@ -26,16 +26,16 @@ path = "/comps/SH020_title/layers/title_main"
 type = "Layer"
 sublayer = "anim/shot020"
 author = "anim_chen"
-attrs = { kind = "Text", text = "分层协作", font_size = 96, "transform.position" = [960, 510] }
-keyframes."transform.position" = [{ frame = 0, value = [960, 630], interpolation = "linear" }, { frame = 45, value = [960, 510], interpolation = "linear" }]
+attrs = { kind = "Text", text = "分层协作", font_size = 96, "transform:position" = [960, 510] }
+keyframes."transform:position" = [{ frame = 0, value = [960, 630], interpolation = "linear" }, { frame = 45, value = [960, 510], interpolation = "linear" }]
 
 [[fixture.prims]]
 path = "/comps/SH020_title/layers/title_sub"
 type = "Layer"
 sublayer = "anim/shot020"
 author = "anim_chen"
-attrs = { kind = "Text", text = "每个人改自己的工程层", font_size = 40, "transform.position" = [960, 590] }
-keyframes."transform.position" = [{ frame = 0, value = [960, 710], interpolation = "linear" }, { frame = 45, value = [960, 590], interpolation = "linear" }]
+attrs = { kind = "Text", text = "每个人改自己的工程层", font_size = 40, "transform:position" = [960, 590] }
+keyframes."transform:position" = [{ frame = 0, value = [960, 710], interpolation = "linear" }, { frame = 45, value = [960, 590], interpolation = "linear" }]
 
 [[followup]]
 when = "问要不要直接改"

@@ -104,13 +104,13 @@ maps_to = "T4"
 [[checks]]
 id = "m1-no-linear"
 kind = "no_linear_temporal"
-args = { under = "/comps/*", allow = ["transform.opacity"] }
+args = { under = "/comps/*", allow = ["transform:opacity"] }
 maps_to = "M1"
 
 [[checks]]
 id = "m2-entrance-eased"
 kind = "entrance_eased"
-args = { find = { type = "Layer", text = "更快的动画" }, attribute = "transform.position" }
+args = { find = { type = "Layer", text = "更快的动画" }, attribute = "transform:position" }
 maps_to = "M2"
 
 [[checks]]
@@ -122,7 +122,7 @@ maps_to = "V1"
 [[checks]]
 id = "v4-still-while-reading"
 kind = "attr_still"
-args = { find = { type = "Layer", text = "更快的动画" }, attribute = "transform.position", from = "1.5s", to = "last" }
+args = { find = { type = "Layer", text = "更快的动画" }, attribute = "transform:position", from = "1.5s", to = "last" }
 maps_to = "V4"
 
 [[checks]]

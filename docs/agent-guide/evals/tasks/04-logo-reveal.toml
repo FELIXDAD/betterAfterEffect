@@ -88,27 +88,27 @@ hard = true
 [[checks]]
 id = "h3-final-scale"
 kind = "attr_at"
-args = { find = { type = "Layer", references = "/assets/logo_mark" }, attribute = "transform.scale", frame = "last", equals = [100, 100], tolerance = 0.01 }
+args = { find = { type = "Layer", references = "/assets/logo_mark" }, attribute = "transform:scale", frame = "last", equals = [100, 100], tolerance = 0.01 }
 maps_to = "H3"
 hard = true
 
 [[checks]]
 id = "h3-final-opacity"
 kind = "attr_at"
-args = { find = { type = "Layer", references = "/assets/logo_mark" }, attribute = "transform.opacity", frame = "last", equals = 100, tolerance = 0.01 }
+args = { find = { type = "Layer", references = "/assets/logo_mark" }, attribute = "transform:opacity", frame = "last", equals = 100, tolerance = 0.01 }
 maps_to = "H3"
 hard = true
 
 [[checks]]
 id = "t7-final-hold"
 kind = "attr_still"
-args = { find = { type = "Layer", references = "/assets/logo_mark" }, attribute = "transform.*", from = "2.5s", to = "last" }
+args = { find = { type = "Layer", references = "/assets/logo_mark" }, attribute = "transform:*", from = "2.5s", to = "last" }
 maps_to = "T7"
 
 [[checks]]
 id = "m1-no-linear"
 kind = "no_linear_temporal"
-args = { under = "/comps/*", allow = ["transform.opacity"] }
+args = { under = "/comps/*", allow = ["transform:opacity"] }
 maps_to = "M1"
 
 [[checks]]

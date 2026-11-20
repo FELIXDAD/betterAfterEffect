@@ -68,7 +68,7 @@ type = "Comp"
 sublayer = "root"                  # 这个节点的意见写在哪个工程层
 attrs = { width = 1920, height = 1080, fps = 30, duration_frames = 90 }
 markers = [{ frame = 0, name = "in" }]            # 可选：合成标记
-# keyframes."transform.position" = [{ frame = 0, value = [960, 540] }]   可选：关键帧
+# keyframes."transform:position" = [{ frame = 0, value = [960, 540] }]   可选：关键帧
 # copy_of = "/comps/OTHER"         可选：复制另一个节点（含子节点），之后的条目可以覆盖其中的属性
 # from_recipe = "recipes/title-in.md"   可选：按配方的结构和时间表生成这个合成及其图层
 # lock = { by = "zhou", note = "..." }               可选：锁提示
@@ -97,13 +97,13 @@ focus = ["评审时重点看的地方"]
 
 ## 4. 检查项词汇（草案）
 
-自动检查只用下面这些 `kind`。新增前先在这里登记。属性名（`transform.position` 等）同 [tools.md](../tools.md)，待确认。
+自动检查只用下面这些 `kind`。新增前先在这里登记。属性名（`transform:position` 等）同 [tools.md](../tools.md)，待确认。
 
 通用约定：
 
 - **节点选择**：节点参数（`path`、`comp`、`under`、`reference` 等）写成路径字符串，支持通配符 `*`。Agent 自己起名的节点无法预知路径时，`path` 可以换成 `find`，其他节点参数可以直接写成 find 表：`{ type = "Layer", kind = "Text", text = "更快的动画", name_regex = "...", not_name_regex = "^pc_", references = "/assets/logo" }`，各键可任意组合，必须匹配到唯一节点。正则使用 Rust `regex` 语法（不支持前后断言）。节点列表 `paths` 对应 `finds`，按列表顺序。
 - **帧**：整数帧号；或者 `"2.5s"`（按该合成的帧速率换算并四舍五入）；或者 `"last"`（合成最后一帧）。帧号按节点所在合成的时间计算；检查项另给了 `comp` 参数时，按那个合成的时间计算（节点在预合成里时，换算预合成图层的入点和时间伸缩）。
-- **属性**：属性名支持通配符（`transform.*`）。另有两个派生属性 `bounds.width`、`bounds.height`：图层在该帧画面上的边界尺寸（已含缩放、路径尺寸、父级），用于"不管 Agent 用缩放还是改路径做动画"都能检查的场合。
+- **属性**：属性名支持通配符（`transform:*`）。另有两个派生属性 `bounds:width`、`bounds:height`：图层在该帧画面上的边界尺寸（已含缩放、路径尺寸、父级），用于"不管 Agent 用缩放还是改路径做动画"都能检查的场合。
 - **分组**：多个检查项写同一个 `group`，只要其中一项通过，整组算通过（用于"留批注或单独事务，二选一"这类情况）。
 
 ### 过程类（读审计日志）

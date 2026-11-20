@@ -92,7 +92,7 @@ maps_to = "V3"
 [[checks]]
 id = "m1-no-linear"
 kind = "no_linear_temporal"
-args = { under = "/comps/*", allow = ["transform.opacity"] }
+args = { under = "/comps/*", allow = ["transform:opacity"] }
 maps_to = "M1"
 
 [[checks]]

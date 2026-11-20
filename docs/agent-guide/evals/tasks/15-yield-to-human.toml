@@ -27,7 +27,7 @@ from_recipe = "recipes/title-in.md"
 path = "/comps/SH090_title/layers/title_main"
 sublayer = "anim/shot090"
 author = "user_demo"
-keyframes."transform.position" = [
+keyframes."transform:position" = [
   { frame = 4, value = [960, 520], out = { speed = 0, influence = 15 } },
   { frame = 22, value = [960, 480], in = { speed = 0, influence = 80 } },
 ]
@@ -36,7 +36,7 @@ keyframes."transform.position" = [
 path = "/comps/SH090_title/layers/title_main"
 sublayer = "agent/eval"
 author = "agent/eval"
-keyframes."transform.position" = [
+keyframes."transform:position" = [
   { frame = 4, value = [960, 550], out = { speed = 0, influence = 15 } },
   { frame = 22, value = [960, 510], in = { speed = 0, influence = 80 } },
 ]
@@ -45,7 +45,7 @@ keyframes."transform.position" = [
 path = "/comps/SH090_title/layers/title_sub"
 sublayer = "anim/shot090"
 author = "user_demo"
-keyframes."transform.position" = [
+keyframes."transform:position" = [
   { frame = 6, value = [960, 620], out = { speed = 0, influence = 15 } },
   { frame = 24, value = [960, 590], in = { speed = 0, influence = 80 } },
 ]
@@ -53,7 +53,7 @@ keyframes."transform.position" = [
 [expected]
 summary = """
 Agent 用 prim.get 发现 title_main 的位置显示的是自己提案层的值，压住了用户在 anim/shot090 的修改；
-删除自己在 agent/eval 里对 title_main 位置的覆盖（或者明确问用户后删除），让用户的 (960, 480) 生效。
+用 attr.clear 清除自己在 agent/eval 里对 title_main 位置的覆盖（或者明确问用户后清除），让用户的 (960, 480) 生效。
 把 title_sub 的入场往后挪，使它比主标题晚 4–8 帧（例如第 10–28 帧），写在 agent/eval 里。
 回复中说明发现并移除了旧覆盖。
 """
@@ -68,21 +68,21 @@ hard = true
 [[checks]]
 id = "c3-yield"
 kind = "no_opinion"
-args = { sublayer = "agent/eval", path = "/comps/SH090_title/layers/title_main", attribute = "transform.position" }
+args = { sublayer = "agent/eval", path = "/comps/SH090_title/layers/title_main", attribute = "transform:position" }
 maps_to = "C3"
 hard = true
 
 [[checks]]
 id = "user-value-visible"
 kind = "attr_at"
-args = { path = "/comps/SH090_title/layers/title_main", attribute = "transform.position", frame = "last", equals = [960, 480], tolerance = 0.5 }
+args = { path = "/comps/SH090_title/layers/title_main", attribute = "transform:position", frame = "last", equals = [960, 480], tolerance = 0.5 }
 maps_to = "C3"
 hard = true
 
 [[checks]]
 id = "t4-stagger"
 kind = "stagger"
-args = { paths = ["/comps/SH090_title/layers/title_main", "/comps/SH090_title/layers/title_sub"], attribute = "transform.position", min_gap = 4, max_gap = 8 }
+args = { paths = ["/comps/SH090_title/layers/title_main", "/comps/SH090_title/layers/title_sub"], attribute = "transform:position", min_gap = 4, max_gap = 8 }
 maps_to = "T4"
 hard = true
 

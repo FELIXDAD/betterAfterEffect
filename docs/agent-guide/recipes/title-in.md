@@ -56,17 +56,17 @@ SH010_title  1920×1080, 30 fps, 90 帧（0–89）
 
 ```json
 {"tool": "transaction.begin", "args": {"label": "标题出场：入场动画与错帧"}}
-{"tool": "keyframe.set", "args": {"path": "/comps/SH010_title/layers/title_main", "attribute": "transform.position", "spatial": "linear", "keyframes": [
+{"tool": "key.set", "args": {"path": "/comps/SH010_title/layers/title_main", "attribute": "transform:position", "spatial": "linear", "keyframes": [
   {"frame": 4, "value": [960, 550], "out": {"speed": 0, "influence": 15}},
   {"frame": 22, "value": [960, 510], "in": {"speed": 0, "influence": 80}}]}}
-{"tool": "keyframe.set", "args": {"path": "/comps/SH010_title/layers/title_main", "attribute": "transform.opacity", "interpolation": "linear", "keyframes": [
+{"tool": "key.set", "args": {"path": "/comps/SH010_title/layers/title_main", "attribute": "transform:opacity", "interpolation": "linear", "keyframes": [
   {"frame": 4, "value": 0}, {"frame": 12, "value": 100}]}}
-{"tool": "keyframe.set", "args": {"path": "/comps/SH010_title/layers/title_sub", "attribute": "transform.position", "spatial": "linear", "keyframes": [
+{"tool": "key.set", "args": {"path": "/comps/SH010_title/layers/title_sub", "attribute": "transform:position", "spatial": "linear", "keyframes": [
   {"frame": 10, "value": [960, 620], "out": {"speed": 0, "influence": 15}},
   {"frame": 28, "value": [960, 590], "in": {"speed": 0, "influence": 80}}]}}
-{"tool": "keyframe.set", "args": {"path": "/comps/SH010_title/layers/title_sub", "attribute": "transform.opacity", "interpolation": "linear", "keyframes": [
+{"tool": "key.set", "args": {"path": "/comps/SH010_title/layers/title_sub", "attribute": "transform:opacity", "interpolation": "linear", "keyframes": [
   {"frame": 10, "value": 0}, {"frame": 18, "value": 100}]}}
-{"tool": "keyframe.set", "args": {"path": "/comps/SH010_title/layers/line_accent", "attribute": "transform.scale", "keyframes": [
+{"tool": "key.set", "args": {"path": "/comps/SH010_title/layers/line_accent", "attribute": "transform:scale", "keyframes": [
   {"frame": 16, "value": [0, 100], "out": {"speed": 0, "influence": 15}},
   {"frame": 32, "value": [100, 100], "in": {"speed": 0, "influence": 80}}]}}
 {"tool": "transaction.commit"}
@@ -89,7 +89,7 @@ SH010_title  1920×1080, 30 fps, 90 帧（0–89）
 2. `attribute.evaluate`：
 
 ```json
-{"tool": "attribute.evaluate", "args": {"path": "/comps/SH010_title/layers/title_main", "attribute": "transform.opacity", "frames": [3, 4, 12, 89]}}
+{"tool": "attribute.evaluate", "args": {"path": "/comps/SH010_title/layers/title_main", "attribute": "transform:opacity", "frames": [3, 4, 12, 89]}}
 ```
 
 期望：第 3 帧 0（不可见）、第 4 帧 0、第 12 帧 100、第 89 帧 100；位置在第 22 帧以后保持 (960, 510)。

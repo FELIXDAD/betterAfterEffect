@@ -24,8 +24,8 @@ attrs = { width = 1920, height = 1080, fps = 30, duration_frames = 90 }
 path = "/comps/SH060_title/layers/title_main"
 type = "Layer"
 sublayer = "anim/shot060"
-attrs = { kind = "Text", text = "协作，从这里开始", font_size = 96, "transform.position" = [960, 540] }
-keyframes."transform.opacity" = [{ frame = 4, value = 0 }, { frame = 16, value = 100 }]
+attrs = { kind = "Text", text = "协作，从这里开始", font_size = 96, "transform:position" = [960, 540] }
+keyframes."transform:opacity" = [{ frame = 4, value = 0 }, { frame = 16, value = 100 }]
 
 [[fixture.prims]]
 path = "/comps/SH060_title/layers/note"
