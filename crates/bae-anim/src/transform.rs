@@ -33,10 +33,9 @@ pub enum AutoOrientRotation {
     None,
     /// 2D Orient Along Path: degrees added to Z rotation.
     Angle(f64),
-    /// 3D: `Ry(yaw) * Rx(pitch)` (cameras, lights, towards camera) in degrees.
+    /// 3D: `Ry(yaw) * Rx(pitch)` in degrees, turning local +z towards a direction
+    /// without roll (along path, towards the point of interest or the camera).
     YawPitch { yaw: f64, pitch: f64 },
-    /// 3D AV layer along a path: `Rz(alpha) * Ry(beta)` in degrees.
-    AlphaBeta { alpha: f64, beta: f64 },
 }
 
 impl Default for Transform {
@@ -60,10 +59,6 @@ impl AutoOrientRotation {
             AutoOrientRotation::YawPitch { yaw, pitch } => {
                 DMat4::from_rotation_y(yaw.to_radians())
                     * DMat4::from_rotation_x(pitch.to_radians())
-            }
-            AutoOrientRotation::AlphaBeta { alpha, beta } => {
-                DMat4::from_rotation_z(alpha.to_radians())
-                    * DMat4::from_rotation_y(beta.to_radians())
             }
         }
     }
@@ -112,17 +107,6 @@ fn xyz_rotation(r: DVec3) -> DMat4 {
         * DMat4::from_rotation_z(r.z.to_radians())
 }
 
-/// AE-ANI-016: a 2D layer under a 3D parent chain sees the parent's matrix flattened
-/// orthographically (z row and column dropped).
-pub(crate) fn drop_z(m: DMat4) -> DMat4 {
-    let mut out = m;
-    out.x_axis.z = 0.0;
-    out.y_axis.z = 0.0;
-    out.z_axis = glam::DVec4::new(0.0, 0.0, 1.0, 0.0);
-    out.w_axis.z = 0.0;
-    out
-}
-
 /// Yaw/pitch that turn local +z towards `d` without roll (AE-ANI-020/022).
 pub(crate) fn look_along(d: DVec3) -> AutoOrientRotation {
     if d.length_squared() < 1e-24 {
@@ -134,19 +118,6 @@ pub(crate) fn look_along(d: DVec3) -> AutoOrientRotation {
     AutoOrientRotation::YawPitch {
         yaw: yaw.to_degrees(),
         pitch: pitch.to_degrees(),
-    }
-}
-
-/// Rotation that points a 3D AV layer's +x along `d` (AE-ANI-020, UNVERIFIED roll).
-pub(crate) fn orient_x_along(d: DVec3) -> AutoOrientRotation {
-    if d.length_squared() < 1e-24 {
-        return AutoOrientRotation::None;
-    }
-    let alpha = d.y.atan2(d.x);
-    let beta = (-d.z).atan2(d.x.hypot(d.y));
-    AutoOrientRotation::AlphaBeta {
-        alpha: alpha.to_degrees(),
-        beta: beta.to_degrees(),
     }
 }
 

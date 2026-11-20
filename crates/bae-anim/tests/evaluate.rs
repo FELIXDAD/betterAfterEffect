@@ -137,10 +137,10 @@ fn two_d_child_of_3d_parent_is_flattened() {
     });
     let ec = evaluate_comp(&s, &p("/comps/main"), Time::ZERO).unwrap();
     let m = ec.layers[1].world_matrix;
-    // AE-ANI-016: x squeezed by cos 60°, parent z dropped.
+    // AE 26: a 2D layer sees its 3D parent as 2D (X/Y rotation and z ignored).
     close(
         m.transform_point3(DVec3::new(100.0, 0.0, 0.0)),
-        DVec3::new(50.0, 0.0, 0.0),
+        DVec3::new(100.0, 0.0, 0.0),
     );
 }
 

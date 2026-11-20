@@ -12,7 +12,8 @@
 //   __h.effect(c, l, nameOrIndex) -> string|null     effect prim path
 //   __h.param(c, l, effectPath, nameOrIndex) -> string|null   param attr name
 //   __h.mask(c, l, nameOrIndex) -> string|null       mask prim path
-//   __h.xform(c, l, t, kind, point) -> number[]      toComp/fromComp/toWorld/... (kind 0..7)
+//   __h.xform(c, l, t, kind, point) -> number[]      0 toComp 1 fromComp 2 toCompVec 3 fromCompVec
+//                                                    4 toWorld 5 fromWorld 6 toWorldVec 7 fromWorldVec
 //   __h.seed(c, l, prim, attr) -> number             stable per-property random seed
 // `__now` is the expression's current comp time (seconds); posterizeTime changes it.
 
@@ -521,12 +522,12 @@ Layer.prototype = {
   },
   toComp: function (p, t) { return this.__xf(0, p, t); },
   fromComp: function (p, t) { return this.__xf(1, p, t); },
-  toWorld: function (p, t) { return this.__xf(0, p, t); },
-  fromWorld: function (p, t) { return this.__xf(1, p, t); },
+  toWorld: function (p, t) { return this.__xf(4, p, t); },
+  fromWorld: function (p, t) { return this.__xf(5, p, t); },
   toCompVec: function (p, t) { return this.__xf(2, p, t); },
   fromCompVec: function (p, t) { return this.__xf(3, p, t); },
-  toWorldVec: function (p, t) { return this.__xf(2, p, t); },
-  fromWorldVec: function (p, t) { return this.__xf(3, p, t); },
+  toWorldVec: function (p, t) { return this.__xf(6, p, t); },
+  fromWorldVec: function (p, t) { return this.__xf(7, p, t); },
 };
 
 function Comp(c) { this.__c = c; this.__i = null; }
