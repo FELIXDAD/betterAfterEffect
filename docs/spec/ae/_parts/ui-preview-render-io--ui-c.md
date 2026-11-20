@@ -17,7 +17,7 @@
     | Render Settings (渲染设置) | RenderSettings record (AE-UI-614..AE-UI-620) + template name | default RS template ("Best Settings") | — | — | Template name shown as underlined text; edits mark it "Custom" (UNVERIFIED: the label becomes "Custom: Best Settings"). |
     | Log (日志) | enum LogType | Errors Only | Errors Only / Plus Settings / Plus Per Frame Info | — | AE-UI-609. |
     | Output Modules (输出模块) | ordered list ≥ 1 of OutputModule | 1 module from default OM template | 1..n | — | AE-UI-605. |
-    | Notify (通知) | bool | value of Preferences > Notifications "auto enable" (AE-UI-6xx Notifications) | — | — | `queueItemNotify` (AE 22.0). |
+    | Notify (通知) | bool | value of Preferences > Notifications "auto enable" (AE-UI-668, Export preferences) | — | — | `queueItemNotify` (AE 22.0). |
     | Skip Frames | int | 0 | 0..99 | frames | Scripting only (`skipFrames`): renders every (n+1)-th frame ("render on twos" = 1). No UI. |
     | Time Span Start / Duration | f64 | from Render Settings Time Span | — | seconds | Scripting `timeSpanStart`, `timeSpanDuration`; writing sets Time Span to Custom. |
     | Started (开始时间) | datetime? | null | — | — | Set when rendering of the item begins (`startTime`). |
@@ -203,7 +203,7 @@
 - **Exact semantics:**
   - A chime plays when all items in the queue finished; a different sound plays when a render failed.
   - Per-item Notify checkbox (Notify column) and footer "Notify when queue completes" send a Creative Cloud (desktop/mobile/watch) push notification (AE 22.0 / 2022).
-  - Preferences > Notifications "Automatically enable notifications when you add a composition to the Render Queue" makes Notify checked by default for new items (AE-UI-6xx Preferences Notifications). The bell icon at the bottom-left of the panel opens that preference.
+  - Preferences > Notifications "Automatically enable notifications when you add a composition to the Render Queue" makes Notify checked by default for new items (AE-UI-668, Export preferences; formerly Preferences > Notifications). The bell icon at the bottom-left of the panel opens that preference.
 - **Priority:** P2 (sounds P1)
 - **Owner:** apps/bae (+ bae-ui-motion)
 - **Notes:** BAE decision: replace Creative Cloud push with an OS notification (macOS UserNotifications / Windows toast) plus an optional webhook URL; sounds via cpal. No account service dependency.
@@ -474,7 +474,7 @@
   - Not in the AE Format menu (removed): Animated GIF (removed AE CC 2015), FLV/F4V, Windows Media, MPEG-2/MPEG-4/DPX via AME-embedded exporters (removed AE CC 2014+/2015; UNVERIFIED exact versions), XFL. H.264 returned as a native exporter in AE 23.0 (2022-10) (UNVERIFIED: version — some sources say 23.0 beta then 23.1).
 - **Priority:** P0 (H.264, QuickTime/ProRes, PNG Sequence); P1 (EXR, TIFF, JPEG, DPX, PSD, WAV); P2 (rest)
 - **Owner:** bae-media (+ bae-model)
-- **Notes:** Format ids are py-aep/AEP internal ids (four-char codes `H264`, `MooV`, `png!`, `oEXR`, `8BPS`, `sDPX`, `JPEG`, `.AVI`, `Mp3 `, `IFF `, `AIFF` …), useful when importing AEP files. Adobe's "Supported output formats" page states that image formats are exported at 8 bpc unless otherwise noted. BAE decision (ARCHITECTURE §1): movie encoding uses system frameworks first, FFmpeg only as the optional downloaded plugin; still formats use pure-Rust crates. BAE additionally offers Lottie JSON (AE-UI-6xx, Export section), animated GIF/WebP and APNG as P2 extras that AE lacks natively.
+- **Notes:** Format ids are py-aep/AEP internal ids (four-char codes `H264`, `MooV`, `png!`, `oEXR`, `8BPS`, `sDPX`, `JPEG`, `.AVI`, `Mp3 `, `IFF `, `AIFF` …), useful when importing AEP files. Adobe's "Supported output formats" page states that image formats are exported at 8 bpc unless otherwise noted. BAE decision (ARCHITECTURE §1): movie encoding uses system frameworks first, FFmpeg only as the optional downloaded plugin; still formats use pure-Rust crates. BAE additionally offers Lottie JSON (AE-UI-656), animated GIF/WebP and APNG as P2 extras that AE lacks natively.
 
 ### AE-UI-626 · Include Project Link and Include Source XMP Metadata (包括项目链接、包括源 XMP 元数据)
 
@@ -505,7 +505,7 @@
   - File > Create Proxy > Movie/Still… (创建代理) adds an item using the Movie/Still Proxy defaults with Post-Render Action = Set Proxy.
   - Changing the Output Module template can change the action (it is a template field).
   - Chaining: item B may use the output of item A because A's action runs before B starts; if A fails, B renders with the original sources (UNVERIFIED).
-  - If the output is a sequence, the import uses the sequence frame rate from Preferences > Import (AE-UI-6xx) unless the comp frame rate is used (UNVERIFIED: AE uses the comp rate for post-render imports).
+  - If the output is a sequence, the import uses the sequence frame rate from Preferences > Import (AE-UI-667) unless the comp frame rate is used (UNVERIFIED: AE uses the comp rate for post-render imports).
 - **Priority:** P1 (Import, Import & Replace Usage for pre-render), P2 (Set Proxy)
 - **Owner:** bae-model (+ bae-ui-motion, bae-media)
 - **Notes:** Scripting: `OutputModule.postRenderAction`, `OutputModule.postRenderTargetComp` (UNVERIFIED name; AE 2021+ exposes the target comp). Proxy data model: see project-comp-layers.md, Proxies. Implementation hint: implement as a bae-model Command emitted by the render runner after the encoder closes the file, so it is undoable.
@@ -808,7 +808,7 @@
     | `[dateYear]`, `[dateMonth]`, `[dateDay]`, `[timeHour]`, `[timeMins]`, `[timeSecs]`, `[timeZone]` | render start date/time (UNVERIFIED names) |
 
   - Text outside brackets is literal; `/` (or `\` on Windows) creates subfolders, which AE creates at render time if missing; absolute paths are allowed in a template.
-  - "Use Default File Name and Folder" (Preferences > Output, AE-UI-6xx): new items reuse the previous item's folder; when the resolved name already exists in the queue, AE appends `_1`, `_2`… (e.g. `composition_name_1`).
+  - "Use Default File Name and Folder" (Preferences > Export, formerly Output, AE-UI-668): new items reuse the previous item's folder; when the resolved name already exists in the queue, AE appends `_1`, `_2`… (e.g. `composition_name_1`).
   - Saving a project and opening it on another machine keeps the path; missing folders mark the item **Needs Output** (AE-UI-602) (UNVERIFIED: only if the volume is missing).
   - Characters illegal on the target OS are replaced (UNVERIFIED with `_`); Adobe warns to avoid high-ASCII for cross-platform / watch-folder renders.
 - **Priority:** P0 (path + default template + `[#####]`), P1 (custom templates and tokens)
@@ -899,7 +899,7 @@
   - Output is identical with MFR on or off (frames are independent); expression state is per frame (no cross-frame globals; expressions that relied on persistent state across frames break — see transform-keyframes-expressions.md [ani-b], evaluation semantics).
   - Render Queue shows per-item concurrency/CPU in the info popup (AE-UI-607).
   - Replaced the old "Render Multiple Frames Simultaneously" multiprocessing (separate background processes, removed AE CC 2015 (13.5)).
-  - Speculative Preview (cache frames when idle) builds on MFR; its settings are in Preferences > Previews (AE-UI-6xx).
+  - Speculative Preview (cache frames when idle) builds on MFR; its settings are in Preferences > Previews (AE-UI-662).
 - **Priority:** P0 (BAE must render frames concurrently to be "a faster AE"; the preference itself P1)
 - **Owner:** bae-render (+ bae-anim, apps/bae)
 - **Notes:** aerender `-mfr ON|OFF max_cpu_percent`. Implementation hint: BAE's frame graph evaluates `EvaluatedComp` for N frames in parallel on CPU (bae-anim is pure, Send + Sync), and pipelines GPU submissions (one command encoder per frame, ring of readback buffers); encoders consume frames in order through a reorder buffer. Keep the "reserved CPU %" preference to size the CPU pool. BAE decision: GPU work is shared, so concurrency is chosen to keep the GPU queue full, not by CPU core count.
@@ -911,7 +911,7 @@
   - Projects arrive via File > Collect Files with "Enable 'Watch Folder' Render" (启用"监视文件夹"渲染) and a maximum machine count; Collect Files writes a Render Control File (RCF, `*_RCF.txt`) that watch-folder instances use to claim work; projects are rendered in alphabetical order.
   - Watch-folder mode start: Watch Folder command; or a project named `Watch This Folder.aep` (AE watches its folder when opened); or (Windows) `afterfx.exe -wf <folder>`; `-re` starts the render engine instead of the full app.
   - Multi-machine sequence render: Render Settings "Skip Existing Files" (AE-UI-621) + one output module; each machine renders the next frame whose file does not yet exist (in-progress frames are placeholders), so machines can be stopped/started at any time. A single movie file cannot be split across machines; chain a second item with Post-Render Action to build a movie from the sequence (AE-UI-627).
-  - Segment preferences (Preferences > Output) limit files per folder / movie size (AE-UI-6xx).
+  - Segment preferences (Preferences > Export) limit files per folder / movie size (AE-UI-668).
 - **Priority:** P2
 - **Owner:** apps/bae (+ bae-package, bae-media)
 - **Notes:** BAE decision: no watch-folder daemon in M1; `bae render` + Skip Existing Files semantics (atomic placeholder creation with `O_EXCL`, then rename on completion) give the same farm capability; Collect Files is owned by bae-package (project-comp-layers.md, Collect Files).
@@ -922,7 +922,7 @@
 
 - **What it does:** The raster still formats AE imports as footage (single frame or numbered sequence), with bit depth and the BAE decode path.
 - **Exact semantics:**
-  - Any still format can be imported as an image sequence (see project-comp-layers.md [prj-a], Import; sequence frame rate from Preferences > Import, AE-UI-6xx).
+  - Any still format can be imported as an image sequence (see project-comp-layers.md [prj-a], Import; sequence frame rate from Preferences > Import, AE-UI-667).
 
     | Format (中文) | Extensions | AE bit depth on import | AE alpha default | BAE priority | BAE decode path |
     |---|---|---|---|---|---|
@@ -1058,3 +1058,420 @@
 - **Priority:** P2
 - **Owner:** bae-media (+ bae-anim)
 - **Notes:** Expression API for data footage: transform-keyframes-expressions.md [ani-b], data footage. Implementation hint: parse with `serde_json`/`csv` once on import; expose an immutable value tree to QuickJS.
+
+## Export
+
+### AE-UI-655 · File > Export menu (文件 > 导出)
+
+- **What it does:** The Export submenu collects the ways to send a comp out of AE besides the Render Queue panel itself.
+- **Exact semantics:**
+  - Items in AE 2026 (UNVERIFIED order): **Add to Adobe Media Encoder Queue…** (添加到 Adobe Media Encoder 队列, Ctrl+Alt+M / Cmd+Opt+M), **Add to Render Queue** (添加到渲染队列, Ctrl+M / Cmd+M; also Ctrl+Shift+/ / Cmd+Shift+/ , UNVERIFIED), **Adobe Premiere Pro Project…** (Adobe Premiere Pro 项目), **Export as Motion Graphics Template…** (导出为动态图形模板, `.mogrt` from the Essential Graphics panel), **Cinema 4D Exporter…** (CINEMA 4D Exporter, `.c4d` of 3D layers/cameras), plus entries added by third-party scripts/plug-ins (e.g. Bodymovin is a separate extension panel, not in this menu).
+  - Add to Render Queue / Add to AME use the selected comps (Project panel or active comp); with several selected each becomes an item.
+  - Removed: Export > QuickTime / Windows Media / FLV / SWF / XFL (removed in AE CC 2014–2015; UNVERIFIED versions).
+- **Priority:** P0 (Add to Render Queue), P2 (others)
+- **Owner:** apps/bae (+ bae-ui-motion)
+- **Notes:** Shortcuts are listed in ui-preview-render-io.md [ui-b]. Essential Graphics / mogrt: ui-preview-render-io.md [ui-a]. BAE decision: Export menu = Add to Render Queue, Export Lottie JSON… (AE-UI-656), Export Frame (= Save Frame As), Export Package (.baez, bae-package); no AME/Premiere/C4D exporters.
+
+### AE-UI-656 · Lottie (bodymovin JSON) export (Lottie 导出)
+
+- **What it does:** Writes a comp as Lottie JSON (the format produced by the third-party Bodymovin extension for AE, played by lottie-web / Skottie / rlottie / dotLottie). In AE it is an extension; in BAE it is a native exporter.
+- **Exact semantics:**
+  - Root: `v` (version string, BAE writes "5.12.0" or the targeted schema), `fr` (frame rate), `ip`/`op` (work area or comp span in frames), `w`/`h`, `nm`, `ddd` (any 3D layer), `assets` (precomps `layers`, images `p`/`u`/`e`), `fonts`/`chars` (text), `markers` (comp markers: `tm`, `cm`, `dr`), `layers`.
+  - Feature map (AE → Lottie; ✓ = exported, ~ = partial, ✗ = not representable):
+
+    | AE feature | Lottie | Status |
+    |---|---|---|
+    | Precomp layer | `ty: 0`, `refId`, `tm` (time remap), `w`/`h` | ✓ |
+    | Solid layer | `ty: 1`, `sc`, `sw`, `sh` | ✓ |
+    | Image (still footage) | `ty: 2`, asset `p` (embedded base64 or external) | ✓ |
+    | Null | `ty: 3` | ✓ |
+    | Shape layer | `ty: 4`, `shapes` (gr, rc, el, sr, sh, fl, st, gf, gs, tr, tm, rp, rd, mm, op, pb, tw, zz) | ✓ (merge paths/offset/zig-zag/twist ~ in players) |
+    | Text layer | `ty: 5`, `t.d` (document keys), `t.a` (animators with range/wiggly/expression selectors), `t.p` (path), `t.m` | ✓/~ (glyphs as shapes or font reference) |
+    | Audio | `ty: 6` | ~ (players mostly ignore) |
+    | Video / image sequence | `ty: 9` / `ty: 8` | ✗ in most players → BAE warns, offers pre-render to image sequence |
+    | Adjustment layer | `ty: 12` (reserved in the schema; UNVERIFIED) — not rendered by lottie-web/Skottie | ✗ (warn; BAE offers to precompose the layers below and apply the effects to the precomp) |
+    | Camera | `ty: 13` (`pe` perspective, `tr` with `p`/`a`/`or`/`rx`/`ry`/`rz`) | ~ (lottie-web html renderer only) |
+    | Light | `ty: 14` (UNVERIFIED) | ✗ |
+    | Transform | `ks` (`a`, `p` or split `p.x/p.y`, `s`, `r`/`rx`/`ry`/`rz`/`or`, `o`, `sk`, `sa`) | ✓ |
+    | Parenting | `parent` (layer `ind`) | ✓ |
+    | Auto-orient | `ao: 1` | ✓ |
+    | Time stretch / in–out | `sr`, `st`, `ip`, `op` | ✓ |
+    | Time remap | `tm` on precomp | ✓ |
+    | Blend modes | `bm` 0 Normal, 1 Multiply, 2 Screen, 3 Overlay, 4 Darken, 5 Lighten, 6 Color Dodge, 7 Color Burn, 8 Hard Light, 9 Soft Light, 10 Difference, 11 Exclusion, 12 Hue, 13 Saturation, 14 Color, 15 Luminosity, 16 Add, 17 Hard Mix | ✓ (others ✗ → Normal + warning) |
+    | Masks | `hasMask`, `masksProperties` (`mode` n/a/s/i/l/d/f, `pt`, `o`, `x` expansion, `inv`); feather ✗ in most players | ✓/~ |
+    | Track mattes | `tt` 1 Alpha, 2 Alpha Inverted, 3 Luma, 4 Luma Inverted; `td` on the matte layer; AE 23+ any-layer mattes → `tp` (matte parent index) | ✓ |
+    | Keyframes | `a: 1`, `k: [{t, s, e?, i:{x,y}, o:{x,y}, h, to, ti}]` — AE speed/influence converted to cubic-bezier `i`/`o` per dimension | ✓ |
+    | Expressions | `x` string on the property | ~ (lottie-web only) — BAE default: bake to keyframes |
+    | Effects | `ef` (`ty: 5` expression-control groups: Slider 0, Angle 1, Color 2, Point 3, Checkbox 4, Layer 10, Dropdown 7; Fill 21, Stroke 22, Tint 20, Tritone 23, Pro Levels 24, Drop Shadow 25, Gaussian Blur 29, Displacement Map 27, Mesh Warp 28, Puppet 34) | ~ (UNVERIFIED id list; players support only a subset) |
+    | Layer styles | `sy` (drop shadow, inner shadow, stroke…) | ~ |
+    | Motion blur, frame blending, 3D lights/shadows, collapse transformations, continuous rasterization of AI, quality switches | — | ✗ |
+
+  - Units: Lottie times are frames at `fr` (not seconds); Position/Anchor in px; Rotation in degrees; Opacity 0–100; Scale percent; colors as 0–1 floats `[r,g,b,a]`.
+  - Export options (Bodymovin settings mirrored): Glyphs (text as shapes) vs font reference; Hidden layers include/skip; Guided layers skip; Extra comps; Images: embed (base64) / external folder / skip; Compress JSON; Demo HTML; Skottie/Lottie-web target; `.lottie` (dotLottie zip) output.
+  - Unsupported features never fail the export: each produces a warning entry (layer path + reason) listed in the export report.
+- **Priority:** P1 (BAE native; AE has it only via the Bodymovin extension)
+- **Owner:** bae-media (+ bae-model, bae-anim, bae-vector, bae-text)
+- **Notes:** Lottie keys per sibling item Notes (transform-keyframes-expressions.md, shapes.md, text.md, compositing-3d-color.md). Lottie import (ARCHITECTURE: import and export) uses the same mapping in reverse and should round-trip everything marked ✓. BAE decision: the exporter evaluates the doc through bae-anim and writes keyframes, with an option to sample ("bake") any property whose evaluation cannot be expressed exactly (expressions, AE-only interpolation, wiggle) at every frame. Implementation hint: test against lottie-web and Skottie golden renders.
+
+### AE-UI-657 · Additional export formats: animated GIF, WebP, APNG (BAE 额外导出格式)
+
+- **What it does:** AE cannot write animated GIF (removed in AE CC 2015; Adobe recommends rendering a movie and converting in Photoshop / Media Encoder). BAE adds direct output modules for web-animation formats.
+- **Exact semantics:**
+  - BAE output formats (extend AE-UI-625): **Animated GIF** (palette per frame or global; dithering None/Floyd–Steinberg; loop count 0 = infinite; transparency threshold 50 % alpha), **Animated WebP** (lossless/lossy quality 0–100, alpha), **APNG** (8/16-bit, alpha). Frame delays derived from the output frame rate, rounded to 1/100 s for GIF (GIF timing quantum) with error diffusion so total duration is preserved.
+  - AE-compatibility: these formats do not exist in AE; AEP/scripting `"Format"` values never refer to them.
+- **Priority:** P2
+- **Owner:** bae-media
+- **Notes:** BAE decision: pure-Rust encoders (`gif` + palette quantiser, `image-webp` lossless; lossy WebP requires libwebp → only via plugin). Listed here so AE-parity reviewers do not mistake them for AE features.
+
+## Preferences
+
+### AE-UI-658 · Preferences dialog, storage and reset (首选项对话框)
+
+- **What it does:** Application-wide settings, opened with Edit > Preferences > [pane] (Windows) / After Effects > Settings > [pane] (macOS); shortcut Ctrl+Alt+; / Cmd+Opt+; opens the first pane.
+- **Exact semantics:**
+  - Panes in AE 2026 (list order; zh names from the zh-CN help): Startup & Repair (启动和修复), Project (项目), Composition (合成), Previews (预览), Appearance (外观), Grids & Guides (网格和参考线), Labels (标签), Type (类型), Import (导入), Export (导出), Audio (音频), Disk (磁盘), Memory & CPU (内存和 CPU), Video (视频), 3D (3D), Scripting & Expressions (脚本和表达式). Pre-2026 names: General (常规), Display (显示), Output (输出), Media & Disk Cache (媒体和磁盘缓存), Video Preview (视频预览), Auto-Save (自动保存), Memory & Performance (内存和性能), Audio Hardware (音频硬件), Audio Output Mapping (音频输出映射), Notifications (通知) — AE 2026 regrouped the same options (AE 26.0, UNVERIFIED version of the regrouping).
+  - Storage: per user and per major version, `~/Library/Preferences/Adobe/After Effects/<version>/` (macOS) or `%APPDATA%\Adobe\After Effects\<version>\` (Windows); includes keyboard shortcuts and workspaces. Written when AE quits normally.
+  - Startup & Repair pane: Enable Home Screen (启用主屏幕（译名待核）, default on; forced on for trials); Show System Compatibility Issues (default on); Start in Safe Mode (third-party plug-ins and extensions disabled); Empty All Caches (disk, media and database cache); Reveal Preferences in Finder/Explorer; Reset All Preferences To Defaults (also resets workspaces; restart); Migrate Previous Version Preferences; File Bug Report.
+  - Reset at launch: hold Ctrl+Alt+Shift / Cmd+Opt+Shift while starting AE. Restore default keyboard shortcuts: Alt/Option + OK in the confirmation (per Adobe page).
+  - Preferences never change project data; options marked "project setting" (bit depth, color, time display, expression engine) live in File > Project Settings (project-comp-layers.md [prj-a], Project settings).
+- **Priority:** P0 (dialog, storage, reset), P2 (repair tools)
+- **Owner:** bae-ui (+ apps/bae, bae-ui-motion)
+- **Notes:** BAE decision: one TOML/JSON settings file per user (`<config dir>/bae/<major>/settings.json`) with a schema; unknown keys preserved; settings are hot-reloaded; `bae --reset-settings` CLI flag replaces the key chord. Each preference below names the semantic item it affects; implementers of that item read the setting through a typed accessor (no ad-hoc keys).
+
+### AE-UI-659 · Project preferences: new-project template, solids folder (“项目”首选项)
+
+- **What it does:** Defaults for newly created projects and project-open behaviour.
+- **Exact semantics:**
+
+  | Parameter (中文) | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|
+  | Maintain Current Workspace When Opening Projects (打开项目时保持当前工作区) | bool | off (UNVERIFIED) | — | — | else the workspace saved with the project is restored |
+  | Dynamic Link with After Effects Uses Project File Name with Highest Number | bool | off (UNVERIFIED) | — | — | Adobe-only |
+  | New Project Loads Template (新建项目加载模板) | bool | off | — | — | File > New Project opens a copy of the chosen `.aep`/`.aepx`/`.aet` (untitled) |
+  | Choose Project Template (选择项目模板) | path | — | — | — | |
+  | New Project Solids Folder (新建项目纯色文件夹) | string | "Solids" (纯色) | — | — | folder that receives new solids (project-comp-layers.md [prj-a], Solids) |
+
+  - Levels of Undo (撤消级别): 32, range 1 … 99 (UNVERIFIED: AE 2026 no longer lists it on the help page; in AE ≤ 25 it was in General). Affects project-comp-layers.md [prj-a], Undo.
+- **Priority:** P1
+- **Owner:** bae-model (+ bae-ui-motion)
+- **Notes:** BAE decision: undo depth unlimited by default (bounded by memory, configurable), since bae-model undo is command-based and cheap; keep a "Levels of Undo" setting for parity.
+
+### AE-UI-660 · Auto-Save (自动保存)
+
+- **What it does:** Periodically writes copies of the open project and keeps a bounded number of versions.
+- **Exact semantics:**
+
+  | Parameter (中文) | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|
+  | Automatically Save Projects / Save every (保存间隔) | bool + int | on, 20 | 1 … 999 (UNVERIFIED) | minutes | timer counts editing time; no save while rendering (UNVERIFIED) |
+  | Save when starting render queue (启动渲染队列时保存) | bool | off (UNVERIFIED) | — | — | auto-save when Render is pressed |
+  | Ask to recover an auto-saved project if AE closes unexpectedly (beta) | bool | on (UNVERIFIED) | — | — | AE 26.x beta |
+  | Maximum Project Versions (最大项目版本数) | int | 5 | 1 … 99 (UNVERIFIED) | files | oldest deleted |
+  | Auto-Save Location (自动保存位置) | enum | Next to Project (项目旁边) | Next to Project / Custom Location (自定义位置) | — | folder "Adobe After Effects Auto-Save" |
+
+  - File names: `<project name> auto-save <n>.aep` with n cycling 1…max (UNVERIFIED pattern). Untitled projects are not auto-saved until first saved (UNVERIFIED).
+  - Auto-save never overwrites the user's project file.
+- **Priority:** P0
+- **Owner:** bae-model (+ apps/bae, bae-package)
+- **Notes:** Sibling: project-comp-layers.md [prj-a] (saving). BAE decision: continuous crash-safe journal of Loro CRDT updates (cheap incremental writes every few seconds) plus periodic full snapshots honouring "Maximum Project Versions"; recovery prompt on next launch is on by default.
+
+### AE-UI-661 · Composition preferences (“合成”首选项)
+
+- **What it does:** Defaults for new layers, keyframes and editing behaviour; several change semantics of other features.
+- **Exact semantics:**
+
+  | Parameter (中文) | Type | Default | Affects (sibling item) |
+  |---|---|---|---|
+  | Center Anchor Point in New Shape Layers (在新建形状图层中居中放置锚点) | bool | on (UNVERIFIED) | shapes.md, shape tools (anchor at shape centre vs comp centre) |
+  | Create Layers at Composition Start Time (在合成开始时创建图层) | bool | on | project-comp-layers.md [prj-b], layer timing: on ⇒ new layers start at comp start; off ⇒ at the CTI |
+  | Create Split Layers Above Original Layer (在原始图层上方创建拆分图层) | bool | on | project-comp-layers.md [prj-b], Split Layer |
+  | Default Spatial Interpolation to Linear (将空间插值默认为线性) | bool | off | transform-keyframes-expressions.md [ani-a], interpolation (new spatial keys Linear instead of Auto Bezier) |
+  | Default Position Properties to Separated Dimensions (将默认位置属性设为分离尺寸) | bool | off | [ani-a], separate dimensions (new layers get separated Position) |
+  | Pen Tool Shortcut Toggles Between Pen and Mask Feather Tools (钢笔工具快捷键在钢笔和蒙版羽化工具之间切换) | bool | off (UNVERIFIED) | [ui-b], tools (G cycling) |
+  | Preserve Constant Vertex and Feather Point Count when Editing Masks (编辑蒙版时保持常量顶点和羽化点数量) | bool | on | compositing-3d-color.md [cmp-a] masks / shapes.md paths: adding a vertex at one keyframe adds it at all keyframes |
+  | Show Bounding Boxes for Layers Within Pre-Comps (显示预合成内图层的定界框) | bool | off (UNVERIFIED) | [ui-b], viewer |
+  | Switches Affect Nested Comps (开关影响嵌套合成) | bool | on | [cmp-a], nested comps: comp-level Quality, Effects, Frame Blending, Motion Blur switches on a precomp layer propagate recursively |
+  | Synchronize Time of All Related Items (同步所有相关项目的时间) | bool | on | [ui-a], viewers/timeline CTI sync across nested comps |
+  | Use System Shortcut Keys (使用系统快捷键) (macOS) | bool | off | [ui-b], shortcuts (Cmd+H/Cmd+M) |
+  | On Footage Layer Opens (素材图层打开时) | enum | Layer panel (UNVERIFIED) | double-click on a footage layer: Layer panel / Footage (source) |
+  | On Comp Layer Opens (合成图层打开时) | enum | Nested comp (UNVERIFIED) | double-click on a precomp layer: Layer panel / nested comp (Alt+double-click = the other) |
+  | Open Layer Panel when Double-clicking with Paint, Roto Brush, and Refine Edge Tools | bool | on | |
+  | Synthetic layers duration (合成图层) | enum | Length of Composition (合成长度) | solids, text, shape, null, adjustment, camera, light duration: comp length or Use Custom Duration (使用自定义持续时间) value |
+
+- **Priority:** P0 (Create Layers at Comp Start Time, Default Spatial Interpolation to Linear, Preserve Constant Vertex Count, Switches Affect Nested Comps, synthetic layer duration), P1 (rest)
+- **Owner:** bae-model (+ bae-motion, bae-anim, bae-ui-motion)
+- **Notes:** Older AE names: these were in General (常规) — e.g. "Create New Layers at Composition Start Time", "Preserve Constant Vertex Count When Editing Masks". BAE decision: commands in bae-motion read these settings at command-creation time and store the resolved values in the command, so replay/undo is deterministic regardless of later preference changes.
+
+### AE-UI-662 · Previews preferences (“预览”首选项)
+
+- **What it does:** Interactive-preview degradation, viewer quality, idle caching and zoom behaviour.
+- **Exact semantics:**
+
+  | Parameter (中文) | Type | Default | Range | Notes |
+  |---|---|---|---|---|
+  | Adaptive Resolution Priority (自适应分辨率优先级) | slider | UNVERIFIED (old "Adaptive Resolution Limit" default 1/8) | — | minimum resolution while dragging/scrubbing; see compositing-3d-color.md [cmp-b], fast previews |
+  | 3D Renderer Reduces (3D 渲染器减少) | enum | Resolution & Quality (分辨率和品质) (UNVERIFIED) | Resolution & Quality / Only Render Quality (仅渲染品质) | |
+  | Zoom Quality (缩放品质) | enum | More Accurate Except Cached Preview | Faster (更快) / More Accurate Except Cached Preview (更精确（缓存预览除外）) / More Accurate (更精确) | viewer resampling when zoom ≠ 100 % |
+  | Color Management Quality (色彩管理品质) | enum | More Accurate Except Cached Preview | same three | display transform precision |
+  | Automatically Enable Frame Blending and Motion Blur Rendering (自动启用帧混合和运动模糊渲染) | bool | on (UNVERIFIED) | — | turning a layer switch on also enables the comp-level switch |
+  | Mute Audio When Preview Is Not Real-time (非实时预览时静音) | bool | off | — | |
+  | Cache Frames When Idle (空闲时缓存帧) | bool | on | — | Speculative Preview (AE 22.0) |
+  | Idle Delay Before Caching Starts (缓存开始前的空闲延迟) | int | 8 | s | |
+  | Cache Frames (缓存帧) | enum | Around Current Time (UNVERIFIED) | From Current Time (从当前时间) / Around Current Time (当前时间前后) / From Start of Range (从范围开头) | |
+  | Cache Range (缓存范围) | enum | Work Area Extended by Current Time (UNVERIFIED) | Work Area (工作区域) / Work Area Extended by Current Time (工作区域按当前时间延伸) / Entire Duration (整个持续时间) | |
+  | Magnification Type (放大率类型) | enum | Smooth (UNVERIFIED) | Legacy (旧版, fixed steps 33/50/100/200 %…) / Smooth (平滑) | |
+  | Magnification Behavior (行为) | enum | Follow Cursor (UNVERIFIED) | Centered (居中) / Follow Cursor (关注光标) | |
+  | Trackpad Scrolling (触控板滚动) | enum | Pans (UNVERIFIED) | Zooms (缩放) / Pans (平移) | only with Smooth |
+
+- **Priority:** P1 (P0 for idle caching in BAE since it is a speed feature)
+- **Owner:** bae-render (+ bae-ui-motion)
+- **Notes:** Preview/cache behaviour itself: ui-preview-render-io.md [ui-b] (preview & cache) and compositing-3d-color.md [cmp-b]. The old Previews pane also had "Show Internal Wireframes", "Alternate RAM Preview", "GPU Information" — gone in AE 2026.
+
+### AE-UI-663 · Appearance preferences (“外观”首选项)
+
+- **What it does:** UI look, handle sizes, label-colour usage and motion-path display.
+- **Exact semantics:**
+
+  | Parameter (中文) | Type | Default | Range | Notes |
+  |---|---|---|---|---|
+  | Path Point and Handle Size (路径点和手柄大小) | int | 7 (UNVERIFIED) | 5 … 15 (UNVERIFIED) px | masks, shapes, motion paths |
+  | Hardware Accelerate Composition, Layer, And Footage Panels (硬件加速合成、图层和素材面板) | bool | on | — | |
+  | Use System Color Picker (使用系统颜色选择器) | bool | off | — | |
+  | Show Rendering Progress in Info Panel (在“信息”面板中显示渲染进度) | bool | off (UNVERIFIED) | — | |
+  | Disable Thumbnails in Project Panel (在项目面板中禁用缩略图) | bool | off | — | |
+  | Show Both Timecode and Frames in Timeline Panel (在“时间轴”面板中同时显示时间码和帧数) | bool | on (UNVERIFIED) | — | |
+  | Show Tool Tips (显示工具提示) | bool | on | — | |
+  | Show Coach Marks (显示引导提示标记) | bool | on | — | |
+  | Color Theme (颜色主题) | enum | Darkest (UNVERIFIED) | Darkest (最暗) / Dark (暗色) / Light (明亮) | |
+  | Accessible color contrast (无障碍颜色对比) | bool | off | — | |
+  | Use Label Color for Layer Handles and Paths (对图层手柄和路径使用标签颜色) | bool | on | — | |
+  | Use Label Color for Related Tabs (对相关选项卡使用标签颜色) | bool | on | — | |
+  | Cycle Mask Colors (uses label colors) (循环蒙版颜色（使用标签颜色）) | bool | on | — | new masks get successive label colours |
+  | Use Contrasting Color for Mask Path (为蒙版路径使用对比色) | bool | on (UNVERIFIED) | — | |
+  | Use Gradients (使用渐变) | bool | on | — | |
+  | Motion Path (运动路径) | enum | Show Keyframes for Duration 0:00:15:00 (UNVERIFIED) | No Motion Path (无运动路径) / All Keyframes (所有关键帧) / No More Than N keyframes (不超过, default N = 5) / Show Keyframes for Duration (显示关键帧持续时间) | how much of a layer's motion path the viewer draws around the CTI |
+
+- **Priority:** P1 (handle size, label colours, motion path), P2 (theme options)
+- **Owner:** bae-ui (+ bae-ui-motion)
+- **Notes:** Pre-2026 these were split between General, Display and Appearance (Brightness slider, Affect Label Colors, Highlight Color). Motion path drawing: ui-preview-render-io.md [ui-b]. BAE decision: ship dark/light themes via bae-ui theme tokens; handle size in logical px scaled by DPI.
+
+### AE-UI-664 · Grids & Guides preferences (“网格和参考线”首选项)
+
+- **What it does:** Appearance and spacing of the grid, proportional grid, guides, safe margins and transparency checkerboard.
+- **Exact semantics:**
+
+  | Parameter (中文) | Type | Default | Range | Units |
+  |---|---|---|---|---|
+  | Grid Color (网格颜色) | color | UNVERIFIED (light green) | — | — |
+  | Grid Style (网格样式) | enum | Lines (UNVERIFIED) | Lines / Dashed Lines / Dots | — |
+  | Gridline every (网格间隔) | float | 100 (UNVERIFIED) | > 0 | px |
+  | Subdivisions (分区) | int | 4 (UNVERIFIED) | ≥ 1 | — |
+  | Proportional Grid Horizontal / Vertical (对称网格 水平 / 垂直) | int | 4 / 4 (UNVERIFIED) | ≥ 1 | divisions |
+  | Guides Color / Style (参考线 颜色 / 样式) | color / enum | cyan (UNVERIFIED) / Lines | Lines / Dashed Lines | — |
+  | Action Safe (动作安全) | % | 10 | 0 … 50 | % inset per side |
+  | Title Safe (标题安全) | % | 20 | 0 … 50 | % |
+  | Center-Cut Action Safe (中心剪切动作安全) | % | 32.5 | 0 … 50 | % (4:3 inside 16:9) |
+  | Center-Cut Title Safe (中心剪切标题安全) | % | 40 | 0 … 50 | % |
+  | Transparency Grid Size (网格大小) | enum | Medium (UNVERIFIED) | Small / Medium / Large | — |
+  | Transparency Grid Colors (网格颜色) | enum + 2 colors | Light (light gray / white) | Light / Medium / Dark / Custom (颜色 1, 颜色 2) | — |
+
+  ```
+  // safe-margin rectangles (centered), for frame W×H and inset percent p:
+  inset_x = W * p / 200 ; inset_y = H * p / 200   // p is the total of both sides (UNVERIFIED: AE inset = p/2 per side)
+  ```
+- **Priority:** P1
+- **Owner:** bae-ui-motion (+ bae-ui)
+- **Notes:** Grid/guide/safe-margin display and snapping behaviour: ui-preview-render-io.md [ui-b] (viewer interaction). The per-side interpretation of the percentage must be checked against AE (title safe 20 % of 1920 ⇒ 192 px per side if p/2).
+
+### AE-UI-665 · Labels preferences (“标签”首选项)
+
+- **What it does:** Names and colours of the 16 labels and which label each new item/layer type receives.
+- **Exact semantics:**
+  - Label Defaults (标签默认值) per type: Composition (合成), Video (视频), Audio (音频), Still (静止图像), Folder (文件夹), Solid (纯色), Camera (摄像机), Light (灯光), Adjustment (调整), Null Object (空对象), Shape (形状), Text (文本), 3D Models (3D 模型), Other 3D (其他 3D).
+  - Factory defaults (UNVERIFIED, AE ≥ 2018 scheme): Composition = Sandstone, Video = Aqua, Audio = Sea Foam, Still = Lavender, Folder = Yellow, Solid = Red, Camera = Pink, Light = Pink (UNVERIFIED), Adjustment = Peach (UNVERIFIED), Null Object = Red, Shape = Blue, Text = Red, 3D Models / Other 3D = UNVERIFIED.
+  - Label Colors (标签颜色): 16 labels, each with Label Name (标签名称) and colour; factory names in order: Red, Yellow, Aqua, Pink, Lavender, Peach, Sea Foam, Blue, Green, Purple, Orange, Brown, Fuchsia, Cyan, Sandstone, Dark Green (index 1…16; 0 = None). Colour values: see project-comp-layers.md [prj-b], Labels.
+  - Changing a label's colour or name updates every item using that label index (labels are stored by index).
+- **Priority:** P1
+- **Owner:** bae-model (+ bae-ui-motion)
+- **Notes:** Label data model, scripting `label` index and keyframe labels (AE 22.x+): project-comp-layers.md [prj-b], Labels. BAE decision: label table stored in app settings and copied into the project on save so projects render identical label colours on other machines (AE does not do this).
+
+### AE-UI-666 · Type preferences (“类型”首选项)
+
+- **What it does:** Font-menu presentation, missing-font warning and (older versions) the text engine.
+- **Exact semantics:**
+
+  | Parameter (中文) | Type | Default | Range | Notes |
+  |---|---|---|---|---|
+  | Preview Size (预览大小) | enum | Medium (UNVERIFIED) | Small / Medium / Large / Extra Large (UNVERIFIED) | font preview in Character panel menu |
+  | Number of Recent Fonts to Display (要显示的近期字体数量) | int | 10 (UNVERIFIED) | 0 … 30 (UNVERIFIED) | |
+  | Do not warn me about missing fonts when opening projects (打开项目时不提示缺失字体警告) | bool | off | — | Resolve Fonts dialog |
+  | Text Engine (文本引擎) (AE 22.x–25.x) | enum | Latin and East Asian (UNVERIFIED) | Latin and East Asian / South Asian and Middle Eastern | selects the line composer; affects text.md (layout, RTL/complex scripts) |
+  | Show Font Names in English (以英文显示字体名称) | bool | off (UNVERIFIED) | — | CJK font names |
+
+- **Priority:** P1
+- **Owner:** bae-text (+ bae-ui-motion)
+- **Notes:** Text layout semantics: text.md (fonts, CJK/vertical). BAE decision: one shaping engine (parley/swash with full complex-script support) — no engine switch; keep the "font names in English" toggle since BAE targets Chinese users.
+
+### AE-UI-667 · Import preferences (“导入”首选项)
+
+- **What it does:** Defaults applied when footage is imported; several directly change Interpret Footage values.
+- **Exact semantics:**
+
+  | Parameter (中文) | Type | Default | Range | Affects |
+  |---|---|---|---|---|
+  | Indeterminate Media NTSC (非确定性媒体 NTSC) | enum | Use Dropframe (使用丢帧时间码) (UNVERIFIED) | Use Dropframe / Use Non-Dropframe (使用非丢帧时间码) | timecode of 29.97/59.94 sequences without timecode |
+  | Interpret Unlabeled Alpha As (将未标记的 Alpha 通道解释为) | enum | Ask User (询问用户) (UNVERIFIED) | Ask User / Guess (猜测) / Ignore Alpha (忽略 Alpha 通道) / Straight (Unmatted) (直接（无蒙版）) / Premultiplied (Matted with Black) (预乘（以黑色蒙版）) / Premultiplied (Matted with White) (预乘（以白色蒙版）) | project-comp-layers.md [prj-a], Interpret Footage alpha |
+  | Drag Import Multiple Items As (拖拽导入多个项目为) | enum | Footage (素材) (UNVERIFIED) | Footage / Composition (合成) / Composition – Retain Layer Sizes (合成 – 保留图层尺寸) | layered files dragged from the OS |
+  | Footage Interpretation on Replacement | enum | Reset (重置) (UNVERIFIED) | Reset / Remember (记住) | Replace Footage keeps or resets interpretation |
+  | Still Footage (静止素材) | enum + time | Use Composition Length (使用合成时长) | or Use Custom Duration (使用自定义持续时间), default 0:00:10:00 when chosen (UNVERIFIED) | still layer duration when added to a comp |
+  | Sequence Footage Frames Per Second (每秒帧数) | float | 30 | 0.001 … 999 (UNVERIFIED) | frame rate assigned to imported image sequences |
+  | Report Missing Frames (报告缺失帧) | bool | on | — | gaps in sequences → warning; missing frames render as color bars/placeholder |
+  | Verify Individual Files (验证个体文件) | bool | off | — | slower, checks every file |
+  | Enable hardware accelerated decoding (启用硬件加速解码) | bool | on | — | H.264/HEVC decode on GPU |
+  | Automatic Footage Reloading (自动重新加载素材) | enum | Non-Sequence Footage (非序列素材) | All Footage Types (所有素材类型) / Non-Sequence Footage / Off (关) | footage changed on disk is reloaded when AE regains focus |
+
+- **Priority:** P0 (unlabeled alpha, still duration, sequence fps, auto reload), P1 (rest)
+- **Owner:** bae-media (+ bae-model)
+- **Notes:** Interpret Footage semantics: project-comp-layers.md [prj-a]. BAE decision: default Interpret Unlabeled Alpha = Guess without a modal prompt (non-blocking import), with the guess shown in the Project panel; file watching via OS notifications (FSEvents/ReadDirectoryChangesW) instead of reload-on-focus.
+
+### AE-UI-668 · Export (Output) preferences (“导出”首选项)
+
+- **What it does:** Render-output defaults: automatic file names, completion sound, ProRes hardware encoding, segmenting, notifications, storage overflow.
+- **Exact semantics:**
+
+  | Parameter (中文) | Type | Default | Range | Units | Affects |
+  |---|---|---|---|---|---|
+  | Use Default File Name and Folder (使用默认文件名和文件夹) | bool | on (UNVERIFIED) | — | — | AE-UI-640 |
+  | Preview output during render queue output (渲染队列输出期间预览输出) | bool | off | — | — | sends frames to Mercury Transmit |
+  | Play Sound When Render Finishes (渲染完成时播放声音) | bool | on | — | — | AE-UI-610 |
+  | Enable ProRes hardware accelerated encoding, if available (启用 ProRes 硬件加速编码（如果可用）) | bool | on (UNVERIFIED) | — | — | AE-UI-630; restart required |
+  | Segment Sequences At (按指定数量分割序列) | bool + int | off, 700 (UNVERIFIED) | ≥ 1 | files per folder | new subfolder after N files; ignored with Skip Existing Files |
+  | Segment Video-only Movie Files At (分割纯视频影片文件于) | bool + int | off, 1024 (UNVERIFIED) | ≥ 1 | MB | ignored when the module writes audio; not allowed to a volume root |
+  | Automatically enable notifications when you add a composition to the Render Queue (将合成添加到渲染队列时自动启用通知) | bool | on (UNVERIFIED) | — | — | AE-UI-610 |
+  | Overflow Volumes / Minimum Diskspace Before Overflowing (溢出卷 / 溢出前的最小磁盘空间) (≤ AE 25) | list + int | none, 20 (UNVERIFIED) | — | MB | Render Settings "Use storage overflow" (AE-UI-621) |
+  | Audio Block Duration (音频块时长) (Audio pane in 2026) | time | 1 s (UNVERIFIED) | — | s | audio rendering chunk length |
+
+  - Segmenting movies: when a segment reaches the size, the file is closed and the next one gets `_n` appended (UNVERIFIED suffix).
+- **Priority:** P1 (default name, sound), P2 (segmenting, overflow, ProRes HW toggle)
+- **Owner:** bae-media (+ bae-model)
+- **Notes:** BAE decision: segmenting/overflow not implemented in M1 (modern file systems); keep the settings readable from AE imports only.
+
+### AE-UI-669 · Audio preferences (“音频”首选项)
+
+- **What it does:** Audio device selection for preview playback and the mapping of the stereo mix to device channels.
+- **Exact semantics:**
+
+  | Parameter (中文) | Type | Default | Notes |
+  |---|---|---|---|
+  | Device Class (设备类型) | enum | system default (Core Audio on macOS; MME/WASAPI on Windows, UNVERIFIED) | Built-in / third-party / ASIO (Windows) / Core Audio (macOS) |
+  | Default Input (默认输入设备) | device | system default | |
+  | Default Output (默认输出设备) | device | system default | |
+  | I/O Buffer Size (I/O 缓冲器大小) | int | device-dependent (UNVERIFIED 512) | samples |
+  | Sample Rate (采样率) | enum | device rate (44.1 / 48 / 96 kHz …) | hardware rate; comp audio is resampled to it |
+  | Output Channel Mapping Left / Right (左声道 / 右声道) | channel | device channels 1 / 2 | |
+  | Audio Block Duration (音频块时长) | time | UNVERIFIED | render chunk length (also listed in AE-UI-668) |
+
+- **Priority:** P1
+- **Owner:** bae-media (+ bae-ui-motion)
+- **Notes:** Preview audio behaviour: ui-preview-render-io.md [ui-b] (preview). BAE decision: `cpal` (pure Rust over Core Audio / WASAPI / ALSA); ASIO only as an optional build feature.
+
+### AE-UI-670 · Disk preferences: disk cache, media cache, XMP (“磁盘”首选项)
+
+- **What it does:** Location and size of the persistent disk cache, the conformed media cache and XMP behaviour on import.
+- **Exact semantics:**
+
+  | Parameter (中文) | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|
+  | Enable Disk Cache (启用磁盘缓存) | bool | on | — | — | blue cache bar in the timeline |
+  | Maximum Disk Cache Size (磁盘缓存最大容量) | int | 10 % of the volume, ≤ 100 | ≥ 1 | GB | AE requires 10 GB free beyond this and warns otherwise |
+  | Choose Folder (选择文件夹) | path | user cache folder | — | — | not a volume root |
+  | Empty Disk Cache (清空磁盘缓存) | button | — | — | — | also Edit > Purge > All Memory & Disk Cache |
+  | Enable Preview from Disk Cache (启用从磁盘缓存预览) | bool | on (UNVERIFIED) | — | — | play frames from disk when RAM is full |
+  | Enable Compressed Frames (Lossless) (启用压缩帧（无损）) | bool | on (UNVERIFIED) | — | — | lossless compression of disk-cache frames |
+  | Conformed Media Cache Database / Cache (数据库 / 缓存) | path | `…/Common/Media Cache Files` (UNVERIFIED) | — | — | shared with Premiere/AME (audio conform, indexes) |
+  | Clean Database & Cache (清理数据库与缓存) | button | — | — | — | removes entries whose sources are gone |
+  | Write XMP IDs to Files on Import (导入时向文件写入 XMP ID) | bool | off (UNVERIFIED) | — | — | modifies source files |
+  | Create Layer Markers from Footage XMP Metadata (基于素材 XMP 元数据创建图层标记) | bool | on | — | — | project-comp-layers.md [prj-b], layer markers |
+
+  - The disk cache stores a frame only if reading it back is faster than re-rendering; cache entries are keyed by the render state so they survive restarts (persistent disk cache) and undo (global RAM cache).
+- **Priority:** P1 (disk cache), P2 (media cache, XMP)
+- **Owner:** bae-render (+ bae-media)
+- **Notes:** Cache semantics: ui-preview-render-io.md [ui-b] (preview & cache) and compositing-3d-color.md [cmp-a] (caching). BAE decision: disk cache stores GPU-friendly compressed frames (e.g. lossless zstd of f16/u8 planes) keyed by a 128-bit hash of the evaluated layer subtree; never writes into source files (no XMP ID writing).
+
+### AE-UI-671 · Memory & CPU preferences (“内存和 CPU”首选项)
+
+- **What it does:** How much RAM AE may use and the Multi-Frame Rendering controls.
+- **Exact semantics:**
+
+  | Parameter (中文) | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|
+  | RAM reserved for other applications (为其他应用程序保留的 RAM) | float | machine-dependent (UNVERIFIED: ≈ 25 % of installed RAM, min 3–6 GB) | ≥ OS minimum | GB | pool shared with Premiere Pro, Photoshop, Audition, AME via the memory balancer |
+  | RAM available for (可用于以下用途的 RAM) | read-only | installed − reserved | — | GB | |
+  | Show Memory Usage Details (展开内存使用详细信息) | button | — | — | — | Memory Details dialog |
+  | GPU Information (GPU 信息) | button | — | — | — | |
+  | Enable Multi-Frame Rendering (启用多帧渲染) | bool | on | — | — | AE-UI-645; also applies to AE comps rendered from AME/Premiere |
+  | % CPU reserved for other applications (为其他应用程序保留的 CPU 百分比) | int | 10 | 0 … 70 | % | |
+
+  - Edit > Purge (清理) commands: All Memory & Disk Cache, All Memory, All Disk Cache (UNVERIFIED wording), All 3D Cache, Undo, Image Cache Memory, Snapshot; Alt/Option + All Memory also re-synchronises the project database.
+- **Priority:** P1
+- **Owner:** bae-render (+ apps/bae)
+- **Notes:** BAE decision: a single "Memory budget" (RAM cache size) and "Reserved CPU %" setting; no cross-app memory balancer. GPU memory budget is a separate BAE setting (VRAM cache size).
+
+### AE-UI-672 · Video preferences: HDR preview and Mercury Transmit (“视频”首选项)
+
+- **What it does:** HDR display preview and video output to external monitors / I/O cards.
+- **Exact semantics:**
+
+  | Parameter (中文) | Type | Default | Notes |
+  |---|---|---|---|
+  | Enable Extended Display Range / High Dynamic Range preview (when available) (启用扩展显示范围/高动态范围预览（如可用）) | bool | off (UNVERIFIED) | EDR on macOS / HDR on Windows; see compositing-3d-color.md [cmp-b], display color |
+  | Enable Mercury Transmit (启用 Mercury Transmit) | bool | off | numpad `/` toggles video preview; macOS without numpad: Ctrl+Shift+/ |
+  | Disable video output when in the background (在后台时禁用视频输出) | bool | on (UNVERIFIED) | |
+  | Video devices list (Adobe Monitor 1/2, AJA, Blackmagic …) + Setup | list | none | per-device options; "Video Monitor Uses Composition Color Space" (UNVERIFIED) |
+
+- **Priority:** P2 (HDR preview P1 in BAE)
+- **Owner:** bae-ui-motion (+ bae-color, bae-render)
+- **Notes:** BAE decision: fullscreen second-display preview (wgpu window on another monitor) replaces Mercury Transmit in M1; SDI cards via plugin later.
+
+### AE-UI-673 · 3D preferences (3D 首选项)
+
+- **What it does:** 3D camera navigation keys/mouse behaviour and the 3D model cache.
+- **Exact semantics:**
+
+  | Parameter (中文) | Type | Default | Options |
+  |---|---|---|---|
+  | 1,2,3 and 4,5,6 key behavior (1、2、3 和 4、5、6 键行为) | enum | Camera Navigation and Transform Gizmos (UNVERIFIED) | Camera Navigation and Transform Gizmos (摄像机导航与变换 Gizmo) / Go To Markers (跳转至标记点); when navigation is active, marker keys move to Shift+number |
+  | Option/Alt-drag behavior in 3D Compositions (在 3D 合成中按 Option 键拖动的行为) | enum | Activate Camera Navigation (UNVERIFIED) | Activate Camera Navigation (激活摄像机导航) / Duplicate Layers (复制图层) |
+  | Camera manipulation point (摄像机操作点) | enum | Indicator (UNVERIFIED) | None / Indicator / Directional indicator |
+  | Mouse scroll wheel behavior (鼠标滚轮行为) | enum | Magnify composition (UNVERIFIED) | Magnify composition / Dolly camera / Reverse dolly camera |
+  | Drag direction (拖动方向) | enum | Normal (正常) | Normal / Reverse (反向) |
+  | Empty 3D Cache (清空 3D 缓存) | button | — | clears imported 3D model caches |
+
+- **Priority:** P2
+- **Owner:** bae-ui-motion (+ bae-render)
+- **Notes:** 3D camera tools and gizmos: ui-preview-render-io.md [ui-b] (tools); cameras: compositing-3d-color.md [cmp-b].
+
+### AE-UI-674 · Scripting & Expressions preferences (脚本和表达式首选项)
+
+- **What it does:** Script security, expression pick-whip format, error banner and expression-editor settings.
+- **Exact semantics:**
+
+  | Parameter (中文) | Type | Default | Range | Affects |
+  |---|---|---|---|---|
+  | Allow Scripts to Write Files and Access Network (允许脚本写入文件和访问网络) | bool | off | — | scripting File/Socket objects |
+  | Enable JavaScript Debugger (启用 JavaScript 调试器) | bool | off | — | ExtendScript debugger on error |
+  | Warn User When Executing Files (执行文件时警告用户) | bool | on | — | File > Scripts > Run Script File |
+  | Show Scripting Progress Dialog (显示脚本执行进度对话框) | bool | on (UNVERIFIED) | — | |
+  | Expression Pick Whip Writes Compact English (以简明英语编写表达式拾取) | bool | on | — | transform-keyframes-expressions.md [ani-b]: on ⇒ `thisComp.layer("A").transform.position`; off ⇒ match names `thisComp.layer("A")("ADBE Transform Group")("ADBE Position")` (UNVERIFIED exact form) |
+  | Show Warning Banner When Project Contains Expression Errors (当项目包含表达式错误时显示警告横幅) | bool | on | — | [ani-b], errors |
+  | Font Size (字体大小) | int | 12 (UNVERIFIED) | 8 … 24 | pt |
+  | Syntax Highlighting / Show Line Numbers / Show Indent Guides / Highlight Matching Braces / Auto Insert Braces / Auto Indent Braces / Folding / Inline Errors / Auto Complete (语法高亮 / 显示行号 / 显示缩进标尺 / 高亮显示匹配的大括号 / 自动插入大括号 / 自动缩进大括号 / 折叠 / 内联错误 / 自动完成) | bool each | on (UNVERIFIED) | — | expression editor (AE 16.0+) |
+  | Word Wrap (自动换行) | enum | Off (UNVERIFIED) | Off / Word / Character | |
+  | Use Tabs (使用制表符) | bool | off (UNVERIFIED) | — | |
+  | Tab Width (制表符宽度) | int | 4 (UNVERIFIED) | 2 … 8 | spaces |
+  | Backspace Unindents (退格键取消缩进) | bool | on (UNVERIFIED) | — | |
+  | Theme (主题) + Color Customization (颜色自定义) | enum + colors | default dark theme | predefined / Custom | editor colours (text, background, line numbers, keywords, identifiers, comments, numbers, strings, operators, indent guides, good/bad brace, selection) |
+
+- **Priority:** P0 (pick-whip format, error banner), P1 (editor options), P2 (script security flags until BAE scripting exists)
+- **Owner:** bae-ui-motion (+ bae-anim, bae-plugin)
+- **Notes:** The expression engine choice (JavaScript vs Legacy ExtendScript) is a project setting, not a preference (project-comp-layers.md [prj-a], Project settings; [ani-b]). BAE decision: BAE scripting runs sandboxed; "write files / network" maps to an explicit capability grant per script.
