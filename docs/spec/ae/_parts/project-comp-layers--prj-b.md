@@ -662,7 +662,7 @@
 - **What it does:** An invisible layer used as a parent, controller or expression host; it has transforms but never renders.
 - **Exact semantics:**
   - Create: Layer > New > Null Object (Ctrl+Alt+Shift+Y). Name "Null N" (空 N); AE creates a 100×100 px null source in the Solids folder UNVERIFIED (shown as "Null N" item).
-  - Defaults: size 100×100; Anchor Point `(0, 0)` (the top-left corner of the 100×100 box, a long-standing AE quirk users complain about; community-reported, UNVERIFIED by Adobe docs); Position `(compW/2, compH/2)` so the box's top-left corner sits at the comp centre UNVERIFIED (some versions offset Position by (-50, -50) so the box is centred); label Red UNVERIFIED.
+  - Defaults: size 100×100; Anchor Point `(0, 0)` (the top-left corner of the 100×100 box; not in Adobe docs, but confirmed by Adobe Community answers and the open feature request "Default null object's anchor point must be 50,50", https://community.adobe.com/t5/after-effects-ideas/default-null-object-s-anchor-point-must-be-50-50/idi-p/13401323); Position `(compW/2, compH/2)` (community answers), so the box's top-left corner sits at the comp centre; label Red UNVERIFIED.
   - Rendering: never rendered in the output or as a track matte (contributes no pixels; a null used as a matte acts as fully transparent UNVERIFIED); the Composition viewer draws its bounds as a 100×100 outline with handles.
   - Opacity exists but affects nothing (not inherited by children, AE-PRJ-396 parenting). Effects can be applied (typically Expression Controls); masks UNVERIFIED.
   - Can be 3D (no Material Options UNVERIFIED). Video switch: toggling off still lets children follow it (transform evaluation does not depend on Video, AE-PRJ-396).
@@ -1998,18 +1998,20 @@
 - **Exact semantics:**
   - Source side: a comp's Essential Graphics panel controllers (properties dragged into the panel, with optional renamed labels, grouped) define the list; supported types include Slider/Angle/Checkbox/Color/Point/Dropdown values, Source Text, Media Replacement (alternate source) UNVERIFIED.
   - Layer side: `ADBE Layer Overrides` group on each precomp layer, one property per controller, initially showing the source value (not overridden).
-  - Editing or keyframing an Essential Property on a layer creates an override for that instance only; other instances keep the source value. Overridden properties are shown in a different state; "Revert" (还原)（译名待核） clears the override; "Push to source" / "Push All Values to Source" pushes the instance value back into the source comp UNVERIFIED wording.
+  - Linked vs unlinked: initially every Essential Property is "linked" to its source property. Changing its value, keyframes or expression on a precomp layer "unlinks" it: that instance alone renders with the override; other instances keep the source. Unlinked properties show their name in bold and enable the Pull / Push buttons (per property and on the Essential Properties group; also in the Properties panel).
+  - Pull: discards the override (value, keyframes and expression) and relinks to the source. Push: writes the override (value, keyframes and expression) into the source property, relinks, and thereby updates every instance whose property is still linked. Group-level Pull/Push acts on the selected Essential Properties, or on all of them when none is selected.
+  - The source comp is the "Primary" comp set in the Essential Graphics panel.
   - Expressions can read them via `layer.essentialProperty("Name")` (AE 2020+ expression) UNVERIFIED API name (ani-b).
   - Changing the source comp's controller list adds/removes Essential Properties on all its layers (removed overrides are lost).
   - Rendering: the nested comp is rendered once per distinct set of overrides (instances with different overrides render separately).
   - Introduced as Master Properties in AE 16.1 (CC 2019 April release) UNVERIFIED version; renamed Essential Properties in AE 2020 (17.0) UNVERIFIED.
 - **Priority:** P2
 - **Owner:** bae-model (+ bae-anim, bae-render)
-- **Notes:** Scripting `Property.essentialPropertySource`, `AVLayer.addToMotionGraphicsTemplate()`, `CompItem.motionGraphicsTemplateName`. Essential Graphics panel UI: ui-preview-render-io.md [ui-a]. BAE: maps naturally onto USD-style per-instance opinions (ARCHITECTURE.md 4.1 Reference + override).
+- **Notes:** Source: Adobe help page "Essential Properties" (linked/unlinked, Pull/Push). Scripting `Property.essentialPropertySource` (AE 22.0), `AVLayer.addToMotionGraphicsTemplate()`, `CompItem.motionGraphicsTemplateName`. Essential Graphics panel UI: ui-preview-render-io.md [ui-a]. BAE: maps naturally onto USD-style per-instance opinions (ARCHITECTURE.md 4.1 Reference + override).
 
 ## Other composition and layer commands
 
-### AE-PRJ-421 · Composition poster time (设置标识时间)
+### AE-PRJ-421 · Composition poster time (设置标识时间)（译名待核）
 
 - **What it does:** Chooses which frame of a composition is used as its thumbnail (poster frame, 标识帧) in the Project panel.
 - **Exact semantics:**
