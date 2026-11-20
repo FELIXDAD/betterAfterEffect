@@ -1,5 +1,6 @@
 # Script plugin: one command (menu + shortcut + MCP tool) and one automation script
 # (docs/spec/plugin-architecture.md §5.3.8, §17). Scripts never run per frame.
+# `[script]` configures the JS runtime; `[[automation]]` declares File > Scripts entries.
 schema_version = 1
 
 [plugin]
@@ -28,7 +29,7 @@ menu = "Layer/Transform"
 shortcut = { motion = "Ctrl+Alt+G" }
 description = "Snap the position of the selected layers (or the given layers) to a grid of `size` pixels."
 
-[[script]]
+[[automation]]
 id = "report-off-grid"
 name = "Report Off-Grid Layers"
 entry = "reportOffGrid"
