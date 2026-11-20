@@ -197,6 +197,14 @@ impl Renderer {
         self.frames.invalidate(event)
     }
 
+    /// Shares the app's media library (`bae_media::MediaModule` resource) so
+    /// footage frames are decoded and cached once for every consumer.
+    #[cfg(feature = "media")]
+    pub fn set_media_library(&mut self, library: Arc<bae_media::MediaLibrary>) {
+        self.footage.set_library(library);
+        self.frames.clear();
+    }
+
     /// Closes every open footage file so the next frame reopens them (after
     /// files changed on disk or assets were relinked).
     pub fn reload_footage(&mut self) {

@@ -47,7 +47,14 @@ impl AppModule for RenderModule {
                     .resource::<GpuContextDescriptor>()
                     .cloned()
                     .unwrap_or_default();
-                run(ctx.matches, desc)
+                #[cfg(feature = "media")]
+                let media = ctx
+                    .app
+                    .resource::<std::sync::Arc<bae_media::MediaLibrary>>()
+                    .cloned();
+                #[cfg(not(feature = "media"))]
+                let media: Option<MediaHandle> = None;
+                run(ctx.matches, desc, media)
             });
         if let Err(error) = cli::implement(&registry, app.current_owner(), render) {
             tracing::warn!("render not registered: {error}");
@@ -215,7 +222,17 @@ pub fn frame_file(pattern: &Path, frame: i64) -> PathBuf {
     pattern.with_file_name(format!("{stem}_{frame:04}.{ext}"))
 }
 
-fn run(m: &ArgMatches, desc: GpuContextDescriptor) -> anyhow::Result<ExitCode> {
+/// The app's shared media library, when footage decoding is compiled in.
+#[cfg(feature = "media")]
+type MediaHandle = std::sync::Arc<bae_media::MediaLibrary>;
+#[cfg(not(feature = "media"))]
+type MediaHandle = ();
+
+fn run(
+    m: &ArgMatches,
+    desc: GpuContextDescriptor,
+    media: Option<MediaHandle>,
+) -> anyhow::Result<ExitCode> {
     let project_path = m.get_one::<PathBuf>("project").expect("required");
     let comp = comp_path(m.get_one::<String>("comp").expect("required"))?;
     let json = m.get_flag("json");
@@ -288,6 +305,12 @@ fn run(m: &ArgMatches, desc: GpuContextDescriptor) -> anyhow::Result<ExitCode> {
             ..RendererConfig::default()
         },
     );
+    #[cfg(feature = "media")]
+    if let Some(library) = media {
+        renderer.set_media_library(library);
+    }
+    #[cfg(not(feature = "media"))]
+    let _ = media;
     let mut evaluator: Box<dyn CompEvaluator> = if m.get_flag("mock-eval") {
         Box::new(MockEvaluator::new(
             project.base_dir().map(Path::to_path_buf),
@@ -417,7 +440,7 @@ mod tests {
             ])
             .unwrap();
         assert_eq!(
-            run(&m, GpuContextDescriptor::default()).unwrap(),
+            run(&m, GpuContextDescriptor::default(), None).unwrap(),
             ExitCode::SUCCESS
         );
         for f in ["out_00.png", "out_01.png"] {

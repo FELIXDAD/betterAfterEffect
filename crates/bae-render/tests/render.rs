@@ -421,6 +421,7 @@ fn precomps_half_resolution_roi_and_cache() {
     assert_eq!(r.cached_frames(&p("/comps/main")), vec![Time::ZERO]);
 }
 
+#[cfg(feature = "media")]
 #[test]
 fn footage_png_is_sampled_with_straight_alpha_premultiplied() {
     let Some(gpu) = gpu() else { return };

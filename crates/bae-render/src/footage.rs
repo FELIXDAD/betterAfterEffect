@@ -41,29 +41,31 @@ mod imp {
 
 #[cfg(feature = "media")]
 mod imp {
-
-    use std::hash::{Hash, Hasher};
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use bae_media::{AlphaMode, FrameRequest, MediaFormats, MediaGpu, MediaSource, OpenOptions};
-    use bae_model::Time;
-    use parking_lot::Mutex;
-    use rustc_hash::{FxHashMap, FxHasher};
-
     use bae_gpu::GpuContext;
+    use bae_media::{
+        AlphaMode, FrameCache, FrameRequest, MediaFormats, MediaGpu, MediaLibrary, OpenOptions,
+    };
+    use bae_model::Time;
+    use rustc_hash::FxHashMap;
 
     use crate::error::RenderError;
     use crate::source::{EncodeContext, GpuImage, ImageAlpha, LayerSource, SourceRequest};
 
-    /// A footage file as a layer source.
+    /// Frame cache of a library the renderer creates for itself.
+    const OWN_CACHE_BYTES: u64 = 1 << 30;
+
+    /// A footage file as a layer source: a thin wrapper over 08's
+    /// [`MediaLibrary`] (shared open files and frame cache, stable content hashes).
     pub struct FootageSource {
-        path: PathBuf,
-        media: Mutex<Box<dyn MediaSource>>,
+        library: Arc<MediaLibrary>,
         gpu: Arc<MediaGpu>,
+        path: PathBuf,
+        open: OpenOptions,
+        request: FrameRequest,
         size: [u32; 2],
-        identity: u64,
-        last: Mutex<Option<(i64, GpuImage)>>,
     }
 
     impl std::fmt::Debug for FootageSource {
@@ -76,44 +78,31 @@ mod imp {
     }
 
     impl FootageSource {
-        /// Opens `path` with the built-in formats.
+        /// Opens `path` through `library`.
         pub fn open(
-            path: &Path,
-            formats: &MediaFormats,
+            library: Arc<MediaLibrary>,
             gpu: Arc<MediaGpu>,
+            path: &Path,
         ) -> Result<Self, RenderError> {
-            let err = |e: bae_media::MediaError| RenderError::Footage {
-                path: path.to_path_buf(),
-                message: e.to_string(),
-            };
-            let media = formats.open(path, &OpenOptions::default()).map_err(err)?;
-            let video = media
-                .info()
-                .video
-                .as_ref()
-                .ok_or_else(|| RenderError::Footage {
+            let open = OpenOptions::default();
+            let info = library
+                .info(path, &open)
+                .map_err(|e| RenderError::Footage {
                     path: path.to_path_buf(),
-                    message: "no video stream".into(),
+                    message: e.to_string(),
                 })?;
-            let size = [video.width, video.height];
-            let mut h = FxHasher::default();
-            path.hash(&mut h);
-            if let Ok(meta) = std::fs::metadata(path) {
-                meta.len().hash(&mut h);
-                meta.modified().ok().hash(&mut h);
-            }
-            Ok(Self {
+            let video = info.video.as_ref().ok_or_else(|| RenderError::Footage {
                 path: path.to_path_buf(),
-                media: Mutex::new(media),
+                message: "no video stream".into(),
+            })?;
+            Ok(Self {
+                size: [video.width, video.height],
+                library,
                 gpu,
-                size,
-                identity: h.finish(),
-                last: Mutex::new(None),
+                path: path.to_path_buf(),
+                open,
+                request: FrameRequest::new(0),
             })
-        }
-
-        fn frame_index(&self, time: Time) -> i64 {
-            self.media.lock().frame_at(time)
         }
     }
 
@@ -123,10 +112,9 @@ mod imp {
         }
 
         fn content_hash(&self, time: Time) -> u64 {
-            let mut h = FxHasher::default();
-            self.identity.hash(&mut h);
-            self.frame_index(time).hash(&mut h);
-            h.finish()
+            self.library
+                .content_hash(&self.path, &self.open, &self.request, time)
+                .unwrap_or(0)
         }
 
         fn render(
@@ -134,16 +122,15 @@ mod imp {
             _ctx: &mut EncodeContext<'_>,
             request: &SourceRequest,
         ) -> Result<GpuImage, RenderError> {
-            let index = self.frame_index(request.time);
-            if let Some((i, image)) = self.last.lock().as_ref()
-                && *i == index
-            {
-                return Ok(image.clone());
-            }
             let frame = self
-                .media
-                .lock()
-                .decode_gpu(&FrameRequest::new(index), &self.gpu)
+                .library
+                .frame_at(
+                    &self.path,
+                    &self.open,
+                    &self.request,
+                    request.time,
+                    &self.gpu,
+                )
                 .map_err(|e| RenderError::Footage {
                     path: self.path.clone(),
                     message: e.to_string(),
@@ -153,43 +140,54 @@ mod imp {
                 AlphaMode::Ignore => ImageAlpha::Opaque,
                 AlphaMode::Premultiplied | AlphaMode::Opaque => ImageAlpha::Premultiplied,
             };
-            let image = GpuImage::from_texture(frame.texture, alpha);
-            *self.last.lock() = Some((index, image.clone()));
-            Ok(image)
+            Ok(GpuImage::from_texture(frame.texture, alpha))
         }
     }
 
-    /// Open footage files, by path.
+    /// Footage sources by path, over one [`MediaLibrary`].
     pub(crate) struct FootageCache {
-        formats: MediaFormats,
+        library: Arc<MediaLibrary>,
         gpu: Arc<MediaGpu>,
         sources: FxHashMap<PathBuf, Result<Arc<FootageSource>, String>>,
     }
 
     impl FootageCache {
         pub fn new(gpu: Arc<GpuContext>) -> Self {
+            let library = MediaLibrary::new(
+                MediaFormats::builtin(),
+                Arc::new(FrameCache::new(OWN_CACHE_BYTES)),
+            );
             Self {
-                formats: MediaFormats::builtin(),
+                library: Arc::new(library),
                 gpu: Arc::new(MediaGpu::new(gpu)),
                 sources: FxHashMap::default(),
             }
         }
 
-        /// The source for `path` (opened once; failures are remembered and reported
-        /// as warnings by the caller).
+        /// Uses a shared library (the app's `MediaModule` resource).
+        pub fn set_library(&mut self, library: Arc<MediaLibrary>) {
+            self.library = library;
+            self.sources.clear();
+        }
+
+        /// The source for `path` (opened once; failures are remembered and
+        /// reported as warnings by the caller).
         pub fn get(&mut self, path: &Path) -> Result<Arc<dyn LayerSource>, String> {
             if let Some(entry) = self.sources.get(path) {
                 return entry.clone().map(|s| s as Arc<dyn LayerSource>);
             }
-            let entry = FootageSource::open(path, &self.formats, self.gpu.clone())
+            let entry = FootageSource::open(self.library.clone(), self.gpu.clone(), path)
                 .map(Arc::new)
                 .map_err(|e| e.to_string());
             self.sources.insert(path.to_path_buf(), entry.clone());
             entry.map(|s| s as Arc<dyn LayerSource>)
         }
 
-        /// Forgets every open file (after relinking assets).
+        /// Forgets open files (they changed on disk or were relinked).
         pub fn clear(&mut self) {
+            for path in self.sources.keys() {
+                self.library.invalidate(path);
+            }
             self.sources.clear();
         }
     }

@@ -41,3 +41,16 @@ tempfile.workspace = true
 [[bench]]
 name = "b1"
 harness = false
+required-features = ["media"]
+
+[[test]]
+name = "ae_golden"
+required-features = ["media"]
+
+[[example]]
+name = "ae_compare"
+required-features = ["media"]
+
+[[example]]
+name = "b1_project"
+required-features = ["media"]
