@@ -33,6 +33,7 @@ vello = { workspace = true, optional = true }
 # GPU tests always run with the `render` feature (`cargo test -p bae-text`).
 bae-text = { path = ".", features = ["render"] }
 bae-gpu.workspace = true
+png.workspace = true
 
 [lints]
 workspace = true

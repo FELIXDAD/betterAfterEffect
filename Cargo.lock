@@ -483,6 +483,7 @@ dependencies = [
  "kurbo",
  "parking_lot",
  "parley",
+ "png",
  "rustc-hash 2.1.3",
  "skrifa 0.49.0",
  "vello",

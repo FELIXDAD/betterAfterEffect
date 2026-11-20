@@ -39,6 +39,14 @@ TextDocument（bae-model，某一时刻的源文本）
 - debug 构建里，排含中文的段落时 ICU4X 会往 stderr 打一行 `No segmentation model for complex script: Chinese/Japanese`（parley 没开 `complex-scripts`，中文词边界退化为按字符；换行不受影响）。release 构建里这行日志被编译掉。开 `complex-scripts` 要多带约 2 MB 的词典数据，暂不开。
 - 和形状一样，文字在图层空间栅格化，放大图层会糊；连续栅格化需要 04 在 `SourceRequest` 里带上变换（已提请求）。
 
+## 样张
+
+```sh
+cargo run -p bae-text --example sample_frame -- sample_frame.png
+```
+
+在 GPU 上把形状（渐变圆角矩形、径向渐变星形、虚线六边形、修剪到 75% 的椭圆）、居中的中英混排标题和一段中文段落文本画进同一张 960×540 的图，用来目测和给 PR 截图。
+
 ## 测试
 
 ```sh
