@@ -20,11 +20,11 @@
   | shutterAngle / shutterPhase / motionBlurSamplesPerFrame / motionBlurAdaptiveSampleLimit | int | 180 / -90 / 16 / 128 | see AE-PRJ-313 | deg / samples | AE-PRJ-313 |
   | renderer (渲染器) | enum | Classic 3D | see AE-PRJ-314 | — | AE-PRJ-314 |
   | motionBlur, frameBlending, hideShyLayers, draft3d | bool | see AE-PRJ-315 | — | — | AE-PRJ-315 |
-  | workAreaStart / workAreaDuration (工作区域) | time | 0 / duration | inside [0, duration] | s | AE-PRJ-330 |
+  | workAreaStart / workAreaDuration (工作区域) | time | 0 / duration | inside [0, duration] | s | AE-PRJ-323 |
   | time (current time indicator, 当前时间指示器) | time | 0 | [0, duration) | s | persisted per comp |
-  | markers (合成标记) | Marker[] | [] | — | — | AE-PRJ-333 |
-  | layers (图层) | Layer[] | [] | index 1 = top | — | AE-PRJ-340 onward |
-  | comment (注释), label (标签), id | from item base | label Sandstone UNVERIFIED (index 15, see AE-PRJ-436) | — | — | item base fields are owned by prj-a |
+  | markers (合成标记) | Marker[] | [] | — | — | AE-PRJ-326 |
+  | layers (图层) | Layer[] | [] | index 1 = top | — | AE-PRJ-331 onward |
+  | comment (注释), label (标签), id | from item base | label Sandstone UNVERIFIED (index 15, see AE-PRJ-393) | — | — | item base fields are owned by prj-a |
 - Derived, read-only values: `frameDuration = 1 / frameRate`; `frameAspect = width * pixelAspect / height`; `numLayers`; `activeCamera` (AE-PRJ-315); `hasVideo` = true; `hasAudio` = any layer has audio; `usedIn` = comps that contain a precomp layer of this comp.
 - Every field listed here is undoable and is a separate CRDT attribute (not a single blob) so that two users can change, for example, the duration and the background colour at the same time.
 - **Priority:** P0 the core document object.
@@ -37,7 +37,7 @@
 - **Exact semantics:**
   - New comps are named `Comp N` (zh-CN `合成 N`), where N is the smallest positive integer such that the name is not already used by another comp in the project UNVERIFIED: AE uses "one more than the highest existing Comp N".
   - Names need not be unique; AE allows duplicate comp names (expressions that use `comp("name")` then resolve to the first match in project item order).
-  - Comps created from footage take the footage item name (file name without extension for New Comp from Selection, AE-PRJ-317); Precompose uses "Pre-comp N" (预合成 N), AE-PRJ-470.
+  - Comps created from footage take the footage item name (file name without extension for New Comp from Selection, AE-PRJ-317); Precompose uses "Pre-comp N" (预合成 N), AE-PRJ-401.
   - Renaming a comp updates the source name of every precomp layer that uses it; precomp layers with a custom layer name keep their layer name (AE-PRJ-388).
   - Renaming does NOT rewrite expressions that reference the comp by name (`comp("Old")`); these then fail. UNVERIFIED: AE 13.x+ updates expression references on layer renames inside the same comp, not on comp renames.
 - **Priority:** P0
@@ -178,11 +178,11 @@
   | Duration (持续时间) | time | 0:00:30:00 UNVERIFIED (fresh prefs; sticky afterwards) | 1 frame .. 3:00:00:00 (10800 s) | timecode/frames | entered in the current display style, relative to Start Timecode ("is 0:00:30:00 Base 30" read-out) |
   - Valid frames are `0 .. ceil(duration * fps) - 1`; the comp's last frame starts at `duration - frameDuration`.
   - Changing duration never moves layers. Shortening it does not trim layer in/out points: layer bars and keyframes past the end are kept and simply not visible/renderable; lengthening reveals them again (AE-PRJ-319).
-  - If the work area ended at the old duration, it follows the new end; otherwise it is clipped to `[0, duration]` (AE-PRJ-330).
+  - If the work area ended at the old duration, it follows the new end; otherwise it is clipped to `[0, duration]` (AE-PRJ-323).
   - Footage longer than 3 h can be used but times after 3 h display incorrectly (AE help).
 - **Priority:** P0
 - **Owner:** bae-model
-- **Notes:** Scripting: `AVItem.duration` (read/write for comps, [0.0..10800.0]). Lottie root `op` - `ip` in frames (bodymovin exports the work area; see AE-PRJ-330). BAE decision: no hard 3 h limit is required internally (flicks in i64 cover ~418 years), but keep 3 h in the dialog for AE parity and project round-trip.
+- **Notes:** Scripting: `AVItem.duration` (read/write for comps, [0.0..10800.0]). Lottie root `op` - `ip` in frames (bodymovin exports the work area; see AE-PRJ-323). BAE decision: no hard 3 h limit is required internally (flicks in i64 cover ~418 years), but keep 3 h in the dialog for AE parity and project round-trip.
 
 ### AE-PRJ-309 · Background Color (背景颜色)
 
@@ -213,7 +213,7 @@
                                  // also X/Y Position when dimensions are separated
   ```
   - Parented layers are not moved (they follow their parent). Layer content and anchor points are not changed.
-  - Applies only when the size changes through this dialog (and through Crop Comp to Region of Interest, which uses its own offset, AE-PRJ-321).
+  - Applies only when the size changes through this dialog (and through Crop Comp to Region of Interest, which uses its own offset, AE-PRJ-320).
   - UNVERIFIED: layers whose Position is driven by an expression are not changed (the expression result is unaffected); BAE should warn.
 - **Priority:** P1
 - **Owner:** bae-motion (+ bae-model)
@@ -282,7 +282,7 @@
     - Classic 3D: Shadow Map Resolution (阴影图分辨率) UNVERIFIED values: Comp size-based default, 256, 512, 1024, 2048, 4096, 8000; specified in compositing-3d-color.md [cmp-b].
     - Advanced 3D: quality, anti-aliasing, ray-traced shadows / reflections, environment light behaviour (cmp-b).
     - CINEMA 4D: Quality slider (Draft … Typical … Extreme) controlling ray threshold/ray depth/reflection depth/shadow depth/anti-aliasing; Choose Cinema 4D Installation.
-  - Classic 3D does not render extrusions/bevel (Geometry Options are hidden); switching renderer keeps extrusion data but does not render it (AE-PRJ-367).
+  - Classic 3D does not render extrusions/bevel (Geometry Options are hidden); switching renderer keeps extrusion data but does not render it (see compositing-3d-color.md [cmp-b], Advanced 3D / CINEMA 4D renderer).
   - Unknown renderer strings in an imported project fall back to Classic 3D with a warning.
 - **Priority:** P0 for storing the field and Classic 3D; other renderers P2.
 - **Owner:** bae-model (+ bae-render)
@@ -296,7 +296,7 @@
   |---|---|---|---|
   | Enables Motion Blur for all layers with the Motion Blur switch set (为设置了"运动模糊"开关的所有图层启用运动模糊) | `motionBlur` | true UNVERIFIED (on in new comps since AE CS6) | layer blur happens iff comp.motionBlur && layer.motionBlur && shutterAngle > 0 |
   | Enables Frame Blending for all layers with the Frame Blend switch set (为设置了"帧混合"开关的所有图层启用帧混合) | `frameBlending` | true UNVERIFIED | layer frame blending happens iff comp.frameBlending && layer.frameBlendingType != None |
-  | Hide all layers for which the Shy switch is set (隐藏为其设置了"消隐"开关的所有图层) | `hideShyLayers` | false | hides shy layers in the Timeline only; never affects rendering (AE-PRJ-409) |
+  | Hide all layers for which the Shy switch is set (隐藏为其设置了"消隐"开关的所有图层) | `hideShyLayers` | false | hides shy layers in the Timeline only; never affects rendering (AE-PRJ-361) |
   | Draft 3D (草图 3D) | `draft3d` | false | viewer-only: disables lights, shadows, camera depth of field (and in AE 2022+ adds an extended 3D ground plane/viewer) for interactive speed; never affects Render Queue output |
   | Active camera (活动摄像机) | `activeCamera` (derived) | — | the top-most (lowest index) camera layer that has Video on and whose time span contains the current time; null → default comp camera (cmp-b) |
   - Render Settings can override the comp motion-blur and frame-blending switches ("For Checked Layers" / "Off for All Layers") and they are respected per render (ui-preview-render-io.md [ui-c]).
@@ -331,7 +331,7 @@
     | Use Dimensions From (使用尺寸来自) | item menu | first selected item | selected items | Single only; supplies width, height, PAR (and frame rate UNVERIFIED) |
     | Still Duration (静止持续时间) | time | Preferences > Import still length UNVERIFIED | ≥ 1 frame | Single: layer length for stills; Multiple: comp duration for each still |
     | Add to Render Queue (添加到渲染队列) | bool | false | — | adds every created comp to the Render Queue |
-    | Sequence Layers (序列图层) | bool | false | — | Single only; arranges layers end-to-end (AE-PRJ-480 math) |
+    | Sequence Layers (序列图层) | bool | false | — | Single only; arranges layers end-to-end (AE-PRJ-406 math) |
     | Overlap (重叠) | bool | false | — | Single + Sequence only |
     | Duration (持续时间) | time | 0:00:01:00 UNVERIFIED | ≥ 0 | overlap length |
     | Transition (过渡) | enum | Dissolve Front Layer UNVERIFIED | Off / Dissolve Front Layer / Cross Dissolve Front and Back Layers | see Sequence Layers |
@@ -450,7 +450,7 @@
   for each layer L in targets with span [L.in, L.out) overlapping [a, b):
       if L.in >= a and L.out <= b: delete L                         // fully inside
       elif L.in < a and L.out > b:                                   // spans the work area
-          R = split L at b (AE-PRJ-4xx Split rules: duplicate above, named like Split Layer)
+          R = split L at b (AE-PRJ-383 Split rules: duplicate above, named like Split Layer)
           L.out = a; R.in = b
       elif L.in < a: L.out = a                                       // overlaps the start
       else: L.in = b                                                 // overlaps the end
@@ -475,7 +475,7 @@
   |---|---|---|---|---|---|
   | Time (时间) | time | CTI when added | any comp time | s | comp markers: comp time; layer markers: stored relative to the layer (see AE-PRJ-327) |
   | Duration (持续时间) | time | 0 | ≥ 0 | s | 0 = point marker; >0 = span marker with out point |
-  | Label (标签) | int | 0 (None) | 0..16 | — | AE 16.0 (2019); colours from Preferences > Labels (AE-PRJ-436) |
+  | Label (标签) | int | 0 (None) | 0..16 | — | AE 16.0 (2019); colours from Preferences > Labels (AE-PRJ-392) |
   | Comment (注释) | string | comp: next number (AE-PRJ-326); layer: "" | — | — | shown next to the marker |
   | Chapter (章节) | string | "" | — | — | written as chapter points to formats that support them |
   | URL (URL) | string | "" | — | — | Web Links group (Web 链接) |
@@ -484,7 +484,8 @@
   | Event / Navigation (事件 / 导航)（译名待核） | enum | Event | Event, Navigation | — | scripting `eventCuePoint` true = Event |
   | Parameter Name / Parameter Value (参数名称 / 参数值)（译名待核） | ordered list of string pairs | [] | — | — | Add/Remove buttons; scripting `getParameters()`/`setParameters(obj)` |
   | Protected Region (受保护区域)（译名待核） | bool | false | — | — | comp markers only; AE 16.0; AE-PRJ-330 |
-  - Markers are values of a special property `ADBE Marker` (type MARKER) on each layer, and `CompItem.markerProperty` for comps (AE-PRJ-36x property types). Keyframe-like: each marker is a key with a time; they cannot have interpolation.
+  | Marker type (标记类型)（译名待核）: Comment (注释) / Segmentation (分段) | enum | Comment | Comment, Segmentation | — | layer marker dialog radio choice; AE 22.3 (April 2022, with Scene Edit Detection, AE-PRJ-422); each type has its own default label colour in Preferences > Labels UNVERIFIED (which indices); scripting name UNVERIFIED |
+  - Markers are values of a special property `ADBE Marker` (type MARKER) on each layer, and `CompItem.markerProperty` for comps (AE-PRJ-350 property types). Keyframe-like: each marker is a key with a time; they cannot have interpolation.
   - A marker with link or cue-point data shows a small dot in its icon (UI).
   - Markers do not affect rendering, except Protected Region (time behaviour of nested comps) and output metadata (chapters/URLs/cue points/XMP are written by the output module, ui-preview-render-io.md [ui-c]).
 - **Priority:** P0 for time/duration/comment/label; P2 for chapter, URL, frame target, cue points.
@@ -513,7 +514,7 @@
   - Time base: markers are stored in layer time (relative to the layer's startTime) so moving the layer in time moves its markers. Displayed/scripted time is comp time: `markerCompTime = layer.startTime + markerLayerTime * stretch/100` UNVERIFIED (time stretch scales marker positions like keyframes; Time-Reverse mirrors them UNVERIFIED).
   - Markers may lie outside the layer's in/out span (e.g. after trimming); they are kept.
   - Any number of markers per layer; several layer markers may share a time UNVERIFIED (the replace rule documented for comp markers is not documented for layer markers).
-  - Split Layer / Duplicate copy all markers to the new layer (AE-PRJ-4xx); Precompose "Move all attributes" moves them into the new comp's layer (they stay layer markers there).
+  - Split Layer / Duplicate copy all markers to the new layer (AE-PRJ-383, AE-PRJ-384); Precompose "Move all attributes" moves them into the new comp's layer (they stay layer markers there).
   - Footage layers: if Preferences > Media & Disk Cache "Create Layer Markers from Footage XMP Metadata" is on (default on), markers are created from the source file's temporal XMP metadata when the layer is created.
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-anim)
@@ -582,7 +583,7 @@
   | Precomp | AVLayer, source CompItem | comp | 0 precomp | the comp item's label (Composition: Sandstone) | AE-PRJ-341 |
   | Guide (switch on any layer) | `guideLayer` true | any | 11 guide (not exported) | unchanged | AE-PRJ-342 |
   | Photoshop / CINEMA 4D / 3D model / data | AVLayer / ThreeDModelLayer | file | — / — / — / 15 data | 3D Models / Other 3D: UNVERIFIED | AE-PRJ-343..346 |
-  - Common defaults for every new layer: index 1 (top) or directly above the topmost selected layer (AE-PRJ-4xx new-layer insertion); `startTime = 0` and `inPoint = 0` when Preferences > General "Create Layers at Composition Start Time" (在合成开始时间创建图层) is on (default on), otherwise both = CTI; Video on, Audio on (if hasAudio), Solo/Lock/Shy off, Quality Best (Draft for new layers when Preferences > ... "Default Quality" UNVERIFIED), Sampling Bilinear, blend mode Normal, no track matte, no parent, 2D, Motion Blur and Frame Blending off, Effects active, comment empty, `isNameSet` false.
+  - Common defaults for every new layer: index 1 (top) or directly above the topmost selected layer (AE-PRJ-388 new-layer insertion); `startTime = 0` and `inPoint = 0` when Preferences > General "Create Layers at Composition Start Time" (在合成开始时间创建图层) is on (default on), otherwise both = CTI; Video on, Audio on (if hasAudio), Solo/Lock/Shy off, Quality Best (Draft for new layers when Preferences > ... "Default Quality" UNVERIFIED), Sampling Bilinear, blend mode Normal, no track matte, no parent, 2D, Motion Blur and Frame Blending off, Effects active, comment empty, `isNameSet` false.
   - Synthetic layers (solid, text, shape, null, adjustment, camera, light) default to an out point at the comp end; footage layers to the source duration (stills: Preferences > Import > Still Footage, default "Length of Composition").
 - **Priority:** P0
 - **Owner:** bae-model
@@ -594,9 +595,9 @@
 - **Exact semantics:**
   - Size: `width × height` of the source (after Interpret Footage PAR; layer pixels are source pixels). Default Anchor Point `(w/2, h/2)`; Position `(compW/2, compH/2)` (or the drop point when dragged into the Composition panel; Shift snaps to centre/edges); Scale 100 %; Rotation 0; Opacity 100 %.
   - Name: source name (layer name empty → shows source name; AE-PRJ-388).
-  - Duration: movie/sequence = source duration (layer may be trimmed but not extended past the source unless time-remapped; AE-PRJ-4xx timing); still = Still Footage preference (default length of comp), and stills can be extended indefinitely.
+  - Duration: movie/sequence = source duration (layer may be trimmed but not extended past the source unless time-remapped; AE-PRJ-379 timing); still = Still Footage preference (default length of comp), and stills can be extended indefinitely.
   - Property groups: Marker, Time Remap (movies, sequences; not stills UNVERIFIED), Motion Trackers, Masks, Effects, Essential Properties (no), Transform, Layer Styles, Geometry/Material Options (when 3D), Audio (when the source has audio).
-  - Movie frames are sampled per AE-PRJ-4xx layer-time formula; the source frame index is `floor(sourceTime * sourceFps + ε)`.
+  - Movie frames are sampled per AE-PRJ-373 layer-time formula; the source frame index is `floor(sourceTime * sourceFps + ε)`.
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-media, bae-render)
 - **Notes:** Lottie: still images are `ty: 2` with `refId` to an image asset (`assets[].p`, `u`, `w`, `h`); movies/sequences are not part of the Lottie spec. Decoding and interpretation: project-comp-layers.md [prj-a] and bae-media.
@@ -660,10 +661,10 @@
 - **What it does:** An invisible layer used as a parent, controller or expression host; it has transforms but never renders.
 - **Exact semantics:**
   - Create: Layer > New > Null Object (Ctrl+Alt+Shift+Y). Name "Null N" (空 N); AE creates a 100×100 px null source in the Solids folder UNVERIFIED (shown as "Null N" item).
-  - Defaults: size 100×100; Anchor Point `(50, 50)`; Position `(compW/2, compH/2)`; label Red UNVERIFIED.
+  - Defaults: size 100×100; Anchor Point `(0, 0)` (the top-left corner of the 100×100 box, a long-standing AE quirk users complain about; community-reported, UNVERIFIED by Adobe docs); Position `(compW/2, compH/2)` so the box's top-left corner sits at the comp centre UNVERIFIED (some versions offset Position by (-50, -50) so the box is centred); label Red UNVERIFIED.
   - Rendering: never rendered in the output or as a track matte (contributes no pixels; a null used as a matte acts as fully transparent UNVERIFIED); the Composition viewer draws its bounds as a 100×100 outline with handles.
-  - Opacity exists but affects nothing (not inherited by children, AE-PRJ-4xx parenting). Effects can be applied (typically Expression Controls); masks UNVERIFIED.
-  - Can be 3D (no Material Options UNVERIFIED). Video switch: toggling off still lets children follow it (transform evaluation does not depend on Video, AE-PRJ-4xx).
+  - Opacity exists but affects nothing (not inherited by children, AE-PRJ-396 parenting). Effects can be applied (typically Expression Controls); masks UNVERIFIED.
+  - Can be 3D (no Material Options UNVERIFIED). Video switch: toggling off still lets children follow it (transform evaluation does not depend on Video, AE-PRJ-396).
   - Converting: any AV layer can be made null via scripting `nullLayer` is read-only; UI has no switch.
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-render)
@@ -677,7 +678,7 @@
   - Transform group (no Anchor Point, Scale, Opacity): Point of Interest (目标点; Two-Node only; matchName `ADBE Anchor Point`, default comp centre `(w/2, h/2, 0)`), Position (default `(w/2, h/2, -zoom)` UNVERIFIED, see cmp-b), Orientation, X/Y/Z Rotation.
   - Property groups: Marker, Transform, Camera Options (ADBE Camera Options Group). No masks, effects, styles, audio, time remap.
   - Always 3D; no Video eyeball? (camera has the Video switch; turning it off makes it inactive) — `activeCamera` rule AE-PRJ-315.
-  - Auto-Orient options: Off, Orient Along Path, Orient Towards Point of Interest (AE-PRJ-4xx).
+  - Auto-Orient options: Off, Orient Along Path, Orient Towards Point of Interest (AE-PRJ-408).
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-anim, bae-render)
 - **Notes:** Scripting: `CameraLayer`, `layers.addCamera(name, centerPoint)`. Lottie `ty: 13` with `pe` (perspective) and `ks` (`a` as point of interest). Default label Pink UNVERIFIED.
@@ -701,7 +702,7 @@
 - **What it does:** A layer whose effects (and masks, opacity) apply to the composite of all layers below it instead of to its own pixels.
 - **Exact semantics:**
   - Create: Layer > New > Adjustment Layer (Ctrl+Alt+Y / Cmd+Opt+Y): a comp-sized white solid named "Adjustment Layer N" (调整图层 N) in the Solids folder, with the Adjustment Layer switch on, label Purple UNVERIFIED, Anchor `(w/2, h/2)`, Position comp centre.
-  - The Adjustment Layer switch (AE-PRJ-4xx) can be set on any AV layer (solid, footage, precomp, shape, text) to turn it into an adjustment layer; its own colour pixels are then ignored and only its alpha (masks, opacity, source alpha) acts as the effect's coverage.
+  - The Adjustment Layer switch (AE-PRJ-368) can be set on any AV layer (solid, footage, precomp, shape, text) to turn it into an adjustment layer; its own colour pixels are then ignored and only its alpha (masks, opacity, source alpha) acts as the effect's coverage.
   - Property groups: same as solid.
   - Rendering semantics: compositing-3d-color.md [cmp-a] "adjustment layers".
 - **Priority:** P0
@@ -712,14 +713,14 @@
 
 - **What it does:** A layer whose source is another comp, rendering that comp's output (nesting).
 - **Exact semantics:**
-  - Created by dragging a comp item into a comp, Precompose (AE-PRJ-4xx), or New Comp from Selection.
+  - Created by dragging a comp item into a comp, Precompose (AE-PRJ-401), or New Comp from Selection.
   - Size = nested comp `width × height`; Anchor `(w/2, h/2)`; Position comp centre; duration = nested comp duration (can be trimmed; extending past the nested comp's end shows nothing unless time-remapped).
   - Time mapping: `nestedTime = (compTime - layer.startTime) * 100/stretch` (plus time remap if enabled), sampled per the nested comp's frame-rate rules (AE-PRJ-311).
-  - Property groups: Marker (copies of source comp markers, AE-PRJ-329), Time Remap, Masks, Effects, Essential Properties (AE-PRJ-4xx, when the source comp has them), Transform, Layer Styles, Geometry/Material Options (3D), Audio (if the nested comp has audio).
-  - Collapse Transformations switch available (AE-PRJ-4xx).
+  - Property groups: Marker (copies of source comp markers, AE-PRJ-329), Time Remap, Masks, Effects, Essential Properties (AE-PRJ-420, when the source comp has them), Transform, Layer Styles, Geometry/Material Options (3D), Audio (if the nested comp has audio).
+  - Collapse Transformations switch available (AE-PRJ-362).
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-anim, bae-render)
-- **Notes:** Lottie `ty: 0`, `refId` → `assets[].layers`, `w`, `h`, `tm` (time remap in seconds). Nesting rules (cycles) in AE-PRJ-4xx.
+- **Notes:** Lottie `ty: 0`, `refId` → `assets[].layers`, `w`, `h`, `tm` (time remap in seconds). Nesting rules (cycles) in AE-PRJ-403.
 
 ### AE-PRJ-342 · Guide layer (参考图层)
 
@@ -742,7 +743,7 @@
   - Layer > New > Adobe Photoshop File creates a comp-sized blank PSD, imports it and adds it as the top layer; the source item re-reads the file when it changes on disk.
 - **Priority:** P2
 - **Owner:** bae-media (+ bae-model)
-- **Notes:** BAE decision: PSD import is a P2 importer; layer-style conversion relies on AE-PRJ-4xx Layer Styles.
+- **Notes:** BAE decision: PSD import is a P2 importer; layer-style conversion relies on AE-PRJ-409 Layer Styles.
 
 ### AE-PRJ-344 · CINEMA 4D file layers (CINEMA 4D 图层)
 
@@ -810,13 +811,13 @@
   | Marker (标记) | `ADBE Marker` | all | MARKER property (AE-PRJ-327); hidden until markers exist |
   | Text (文本) | `ADBE Text Properties` | text | Source Text `ADBE Text Document`, Path Options `ADBE Text Path Options`, More Options `ADBE Text More Options`, Animators `ADBE Text Animators` (text.md) |
   | Contents (内容) | `ADBE Root Vectors Group` | shape | indexed group (shapes.md) |
-  | Time Remap (时间重映射) | `ADBE Time Remapping` | AV layers with time-varying source (movie, sequence, precomp, audio, 3D model) | OneD seconds; only when enabled (AE-PRJ-4xx) |
+  | Time Remap (时间重映射) | `ADBE Time Remapping` | AV layers with time-varying source (movie, sequence, precomp, audio, 3D model) | OneD seconds; only when enabled (AE-PRJ-376) |
   | Motion Trackers (动态跟踪器) | `ADBE MTrackers` | AV layers | tracker data (ui-a Tracker) |
   | Masks (蒙版) | `ADBE Mask Parade` | AV, text, shape | indexed; each `ADBE Mask Atom` (cmp-a) |
   | Effects (效果) | `ADBE Effect Parade` | AV, text, shape, audio (audio effects) | indexed (effects.md) |
-  | Essential Properties (基本属性) | `ADBE Layer Overrides` | precomp layers whose comp has Essential Graphics controllers | AE 15.1/16.x UNVERIFIED (AE-PRJ-4xx) |
+  | Essential Properties (基本属性) | `ADBE Layer Overrides` | precomp layers whose comp has Essential Graphics controllers | AE 15.1/16.x UNVERIFIED (AE-PRJ-420) |
   | Transform (变换) | `ADBE Transform Group` | all except audio (and ambient light) | see below |
-  | Layer Styles (图层样式) | `ADBE Layer Styles` | AV, text, shape | shown only when a style is added (AE-PRJ-4xx) |
+  | Layer Styles (图层样式) | `ADBE Layer Styles` | AV, text, shape | shown only when a style is added (AE-PRJ-409) |
   | Geometry Options (几何选项) | `ADBE Extrsn Options Group` (text/shape: Bevel, Extrusion Depth…) or `ADBE Plane Options Group` (footage/solid: Curvature, Segments) | 3D layers in CINEMA 4D / Advanced 3D comps | hidden in Classic 3D |
   | Material Options (材质选项) | `ADBE Material Options Group` | 3D AV/text/shape layers | cmp-b |
   | Camera Options (摄像机选项) | `ADBE Camera Options Group` | camera | Zoom `ADBE Camera Zoom`, Depth of Field, Focus Distance, Aperture, Blur Level, Iris Shape… |
@@ -902,7 +903,7 @@
   - Displayed name in Layer Name view: `name` if set, else `[sourceName]` in square brackets. Brackets mean "name taken from source"; renaming removes them; clearing the name (rename to empty) restores the source name UNVERIFIED.
   - Source Name view shows the source item name regardless (for sourceless layers the layer name).
   - Rename: select layer, Enter/Return, type, Enter. Also for property groups that allow it (masks, effects, shape groups, animators).
-  - Changing the source item name updates every layer without its own name. Replace Source (AE-PRJ-4xx) keeps a set name.
+  - Changing the source item name updates every layer without its own name. Replace Source (AE-PRJ-404) keeps a set name.
   - `isNameFromSource` (AVLayer) = !isNameSet && source != null.
   - Names need not be unique within a comp; `thisComp.layer("name")` resolves to the topmost (lowest index) match.
   - Renaming a layer updates expressions in the project that reference it by name (`thisComp.layer("Old")` → `"New"`) UNVERIFIED version: AE 17.x+ does this for references within the same project; earlier versions broke them.
@@ -1122,7 +1123,7 @@
   - Read-only derived: `hasTrackMatte`, `isTrackMatte`.
   - Constraints: the matte layer cannot be the layer itself; cycles (A mattes B mattes A) are prevented UNVERIFIED; matte must be in the same comp.
   - Legacy projects (pre-23.0): matte = layer at index-1; on open, AE converts to the explicit link.
-  - Duplicate/Precompose rules: AE-PRJ-4xx. Render formulas: compositing-3d-color.md [cmp-a] "track mattes".
+  - Duplicate/Precompose rules: AE-PRJ-384, AE-PRJ-402. Render formulas: compositing-3d-color.md [cmp-a] "track mattes".
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-render)
 - **Notes:** Scripting `AVLayer.setTrackMatte(layer, type)`, `removeTrackMatte()`, legacy `trackMatteType`. Lottie: `tt` on the matted layer (1 alpha, 2 alpha inverted, 3 luma, 4 luma inverted), `td: 1` on the matte layer, `tp` = `ind` of the matte layer (newer exporters; default = layer above).
@@ -1135,7 +1136,7 @@
 - **Exact semantics:**
   | Field (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
-  | startTime (开始时间) | time | 0 or CTI (AE-PRJ-331) | -10800..10800 | s (comp time) | comp time at which layer time 0 (source frame 0) occurs |
+  | startTime (开始时间) | time | 0 or CTI (AE-PRJ-388) | -10800..10800 | s (comp time) | comp time at which layer time 0 (source frame 0) occurs |
   | inPoint (入点) | time | = startTime for new layers | -10800..10800 | s (comp time) | first visible instant (inclusive) |
   | outPoint (出点) | time | in + duration | -10800..10800 | s (comp time) | end of visibility (exclusive) |
   | stretch (伸缩) | f64 | 100 | -9900..9900, never in (-1, 1): 0 < x < 1 → 1, -1 < x < 0 → -1; 0 invalid UNVERIFIED | % | negative = reversed playback |
@@ -1150,7 +1151,7 @@
   ```
   - Keyframes, layer markers and the time-remap curve are stored in layer time, so they move with startTime and scale with stretch. Expressions expose comp time (`key.time`, `time`) and layer time via `sourceTime()`/`thisLayer.sourceTime(t)` (ani-b).
   - Footage sampling: source frame = `floor(sourceTime * sourceFps + ε)` within `[0, sourceDuration)` (ε handles float error; BAE uses exact rationals).
-  - The In/Out/Duration/Stretch Timeline columns edit these fields: typing In moves the whole layer (keeps duration) UNVERIFIED; Alt/Opt-click on In/Out moves that point to CTI (AE-PRJ-4xx); Ctrl/Cmd-click In/Out stretches the layer so that point reaches the CTI; clicking Duration or Stretch opens Time Stretch (AE-PRJ-374).
+  - The In/Out/Duration/Stretch Timeline columns edit these fields: typing In moves the whole layer (keeps duration) UNVERIFIED; Alt/Opt-click on In/Out moves that point to CTI (AE-PRJ-380); Ctrl/Cmd-click In/Out stretches the layer so that point reaches the CTI; clicking Duration or Stretch opens Time Stretch (AE-PRJ-374).
   - Alt+Home / Opt+Home moves the in points of selected layers to comp start; Alt+End to comp end (out point at comp end).
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-anim)
@@ -1368,7 +1369,7 @@
 - **What it does:** Removes selected layers (Delete / Backspace, Edit > Clear).
 - **Exact semantics:**
   - Removes the layers and everything they own. Sources remain in the project.
-  - Children of a deleted layer: parent becomes None; their world transform at the CTI is preserved by rewriting local values (same as unparenting, AE-PRJ-398) UNVERIFIED (AE may instead let children jump).
+  - Children of a deleted layer: parent becomes None; their world transform at the CTI is preserved by rewriting local values (same as unparenting, AE-PRJ-397) UNVERIFIED (AE may instead let children jump).
   - Layers using a deleted layer as track matte lose the matte (`trackMatteType` → none).
   - Effect LAYER_INDEX parameters pointing to it become None.
   - Expressions referencing it by name fail and show an expression error (they are not rewritten).
@@ -1978,7 +1979,7 @@
   | Red / Green / Blue (红色 / 绿色 / 蓝色) | `ADBE R/G/B Channel Blend` | bool (OneD 0/1) | On | — | Off: that channel of the result is taken from the underlying composite (channel excluded from blending); animatable |
   | Blend Interior Styles as Group (将内部样式混合成组) | `ADBE Blend Interior` | bool | Off | — | On: interior styles are blended with the layer first and the group uses the layer's blending mode |
   | Use Blend Ranges from Source (使用源的混合范围) | `ADBE Blend Ranges` | bool | Off | — | applies the "Blend If" ranges stored in the source PSD |
-  - Knockout (挖空, None/Shallow/Deep in Photoshop) is not exposed in AE UNVERIFIED.
+  - Knockout (挖空, None/Shallow/Deep in Photoshop) is not exposed in AE: the docsforadobe Blending Options matchName list has exactly Global Light Angle, Global Light Altitude, Advanced Blending > Fill Opacity, Red, Green, Blue, Blend Interior Styles as Group, Use Blend Ranges from Source.
   - The Blending Options group exists only after a style has been added (adding then deleting a style leaves it).
 - **Priority:** P2
 - **Owner:** bae-render (+ bae-model)
@@ -2001,3 +2002,38 @@
 - **Owner:** bae-model (+ bae-anim, bae-render)
 - **Notes:** Scripting `Property.essentialPropertySource`, `AVLayer.addToMotionGraphicsTemplate()`, `CompItem.motionGraphicsTemplateName`. Essential Graphics panel UI: ui-preview-render-io.md [ui-a]. BAE: maps naturally onto USD-style per-instance opinions (ARCHITECTURE.md 4.1 Reference + override).
 
+## Other composition and layer commands
+
+### AE-PRJ-421 · Composition poster time (设置标识时间)
+
+- **What it does:** Chooses which frame of a composition is used as its thumbnail (poster frame, 标识帧) in the Project panel.
+- **Exact semantics:**
+  | Parameter (中文) | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|
+  | Poster time (标识时间) | time | 0 (first frame of the comp) | [0, duration) | s (comp time, relative to comp start) | set by Composition > Set Poster Time (合成 > 设置标识时间) to the CTI |
+  - Command: Composition > Set Poster Time stores the current CTI of the active comp as the poster time (undoable).
+  - The Project panel thumbnail renders the comp at the poster time; transparent pixels are drawn black unless Project panel menu > Thumbnail Transparency Grid (缩略图透明度网格) is on; Preferences > Appearance > Disable Thumbnails in Project Panel (在项目面板中禁用缩略图) turns thumbnails off.
+  - Never affects rendering or output. If the comp is shortened so that poster time ≥ duration, the thumbnail falls back to the last valid frame UNVERIFIED.
+  - Footage items: the thumbnail of a movie is its first frame unless a poster frame was set UNVERIFIED (AE has no Set Poster Time for footage in the Composition menu).
+- **Priority:** P2 — cosmetic, but persisted per comp and round-tripped in .aep.
+- **Owner:** bae-model (+ bae-ui-motion)
+- **Notes:** Not exposed in the ExtendScript `CompItem` object UNVERIFIED (no `posterTime` attribute documented). The Essential Graphics panel has its own "Set Poster Time" button for Motion Graphics templates (ui-preview-render-io.md [ui-a], Essential Graphics). Implementation hint: cache the thumbnail as a small texture keyed by (comp version, poster time) and re-render lazily when the comp changes.
+
+### AE-PRJ-422 · Scene Edit Detection (场景编辑检测)
+
+- **What it does:** Analyses selected video footage layers for cut points (scene changes) and either marks them with layer markers or splits the layer at each cut, optionally precomposing every resulting segment.
+- **Exact semantics:**
+  - Invocation: select one or more footage layers, Layer > Scene Edit Detection (图层 > 场景编辑检测) or the layer context menu. Only layers whose source is video footage qualify; precomp layers, other layer types and layers with Time Remapping enabled are rejected.
+  - Dialog options:
+    | Parameter (中文) | Type | Default | Range | Units | Notes |
+    |---|---|---|---|---|---|
+    | Create Layer Markers (创建图层标记) | radio | UNVERIFIED (believed selected) | — | — | adds numbered markers of type Segmentation (分段) at each detected cut |
+    | Split Layer at Scene Edit (在场景编辑位置拆分图层) | radio | — | — | — | splits the layer at each cut with Split Layer semantics (AE-PRJ-383); one layer per scene |
+    | Create Pre-comps (创建预合成) | bool | Off UNVERIFIED | — | — | only with Split Layer; each resulting layer is precomposed with "Move all attributes" semantics (AE-PRJ-401) UNVERIFIED which option |
+  - Pre-comps created by the split option are placed in the Project panel in a folder named after the footage layer, nested inside a folder "Scene Edit Detection" (场景编辑检测).
+  - Marker comments are sequential numbers (1, 2, 3 …) UNVERIFIED (exact comment text); marker type = Segmentation, whose default label colour comes from Preferences > Labels (AE-PRJ-392).
+  - Detection: a machine-learning (Adobe Sensei) shot-boundary detector; analysis runs over the layer's source frames between its in and out points UNVERIFIED (whether trimmed portions are analysed); cut times are frame-quantised to the source frame where the new shot begins. Fades and cuts to black are often not detected (user reports).
+  - The whole operation is one undo step.
+- **Priority:** P2 — convenience; the detector algorithm is BAE's own choice.
+- **Owner:** bae-media (+ bae-motion, bae-model)
+- **Notes:** AE 22.3 (April 2022); beta from build 22.0x88 (2021); ported from Premiere Pro. Marker type (Comment / Segmentation) introduced with it: see AE-PRJ-325. BAE decision: implement detection with a cheap CPU/GPU histogram + luma-difference shot-boundary detector (no ML runtime, to respect the size budget); expose a sensitivity threshold as an advanced option. Implementation hint: decode at low resolution (e.g. 64x36 thumbnails) on bae-media's decode path; the split/marker edits go through bae-motion Commands.
