@@ -1,0 +1,6 @@
+# Portable, repository-wide cargo configuration.
+# Never set `build.target-dir` here: developers and CI choose their own.
+
+[alias]
+# `cargo xtask <task>`: size budget, packaging, benchmarks (see xtask/src/main.rs).
+xtask = "run --quiet --package xtask --"
