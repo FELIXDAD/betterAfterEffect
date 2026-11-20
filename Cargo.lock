@@ -556,6 +556,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bae-ui-motion"
+version = "0.1.0"
+dependencies = [
+ "bae-anim",
+ "bae-app",
+ "bae-model",
+ "bae-motion",
+ "bae-ui",
+ "egui",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bae-vector"
 version = "0.1.0"
 dependencies = [
