@@ -77,3 +77,11 @@
 
 1. Footage prim 的"解释素材 > 颜色"还缺两个属性：`color:preserve_rgb`（bool，默认 false，AE"保留 RGB"）和 `color:linear_light`（choice `off|on|on_32bpc`，默认 `off`，AE"解释为线性光"）。现有的 `color_space`（字符串）按"覆盖媒体色彩空间"理解，空 = 按文件标签。bae-color 的 `Interpretation` 对应这三项。
 2. Project prim：`working_space` 存 bae-color 的色彩空间 id（`srgb`、`acescg`……，空 = 无），请在 schema 文档里注明；另外请加 `working_gamma`（choice `2.2|2.4`，默认 `2.2`，AE `workingGamma`，不做色彩管理时使用）。OCIO 引擎相关属性（`color_engine`、`ocio_config`）等 06 的 OCIO PR 再提。
+
+### 来自 11 ui/shell（2026-11-20）
+
+历史面板要显示撤销栈里每一步的命令名和作者（包括其他协作者和 Agent）。现在 `StageEvent` 只有 `author` 和 `origin`，命令名只能从 `undo_label` 拿到栈顶一项，所以 11 暂时在外壳里用 `bae_ui::history::HistoryLog` 订阅事件、在执行命令前记下标题来拼。希望：
+
+1. **`StageEvent` 带上事务标签。** 加 `label: Option<String>`（`transact` 的 `label`；撤销/重做时是被撤销那一步的标签；远端导入为 `None`，或者从提交消息 `{"author","label"}` 里取）。有了它，历史面板、Agent 活动记录、协同的"谁改了什么"都直接用事件，不用旁路传标题。
+2. **列出撤销/重做栈。** `Stage::undo_labels(author) -> impl Iterator<Item = &str>`（从栈顶往下）和对应的 `redo_labels`，以及 `Stage::undo_authors() -> impl Iterator<Item = &AuthorId>`（有撤销栈的作者）。用于历史面板标出哪些步骤还能撤销、AE 式"点击某一步撤销到那里"（连续调用 `undo` N 次）。
+3. （可选）`Stage::undo_to(author, depth)`：一次撤销 N 步、只发一个事件，避免历史面板一次撤销多步时触发 N 次重渲染。

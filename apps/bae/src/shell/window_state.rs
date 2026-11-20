@@ -8,6 +8,18 @@ use winit::window::{Window, WindowAttributes};
 
 /// File name in the state directory.
 pub const FILE_NAME: &str = "window.json";
+/// Workspace layouts, panel view state and shortcut customizations.
+pub const WORKBENCH_FILE_NAME: &str = "workspaces.json";
+
+/// `bae-ui`'s workbench state as a versioned settings file.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct WorkbenchSettings(pub bae_ui::WorkbenchState);
+
+impl VersionedSettings for WorkbenchSettings {
+    const KIND: &'static str = "bae-workspaces";
+    const VERSION: u32 = 1;
+}
 
 /// Main window geometry.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

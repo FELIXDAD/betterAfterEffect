@@ -11,6 +11,7 @@
 | `Registry<PanelKind>` | 面板类型，如 `"timeline"` | 标题（英文，界面经 `tr()` 翻译）、是否可以开多个、工厂函数 |
 | `Registry<WorkspacePreset>` | 工作区，如 `"motion"` | 标题、默认布局（`dock::Layout`）、使用的键位表 id、在工作区栏里的顺序 |
 | `Registry<Keymap>` | 键位表，如 `"ae"`、`"ai"` | 快捷键列表（`Binding`） |
+| `Registry<KeymapBindings>` | 任意唯一 id，如 `"motion.timeline"` | 模块往某个键位表追加的快捷键（12 的时间轴 `U`、`J`/`K` 等），不必替换整个键位表 |
 | `Registry<ActionInfo>` | 命令 id，如 `"edit.undo"` | 界面层动作的标题；`bae-model` 的命令不用在这里注册 |
 
 `bae_ui::UiModule` 由外壳加载：注册外壳自己的动作；所有模块 build 完之后，给工作区布局里用到、但没有模块注册的面板补一个占位面板（显示"尚未实现"）。所以 12 号先注册 `"timeline"` 也好、晚一点注册也好，布局都不会出错；注册了同名 id 就替换掉占位。
@@ -51,9 +52,22 @@ app.register("timeline", PanelKind::new("Timeline", |spawn| Box::new(Timeline::n
 - `Chord` 写法和 AE 文档一致：`"Cmd+Shift+Z"`、`"Alt+["`、`"U"`。`Cmd` 是平台命令键（macOS 的 ⌘、Windows 的 Ctrl），`Ctrl` 是 macOS 的 Control 键。匹配时同时看逻辑键和物理键，所以 `Shift+[` 能匹配，非拉丁键盘布局下快捷键也有效。
 - `Binding { chord, action, params, when }`：`when` 是面板类型，表示只在这类面板获得焦点时生效；同一个键，面板内的绑定优先于全局绑定。
 - 每个工作区指定一个键位表，切换工作区就切换快捷键。
+- 最终键位表 = 键位表本身 + 所有指向它的 `KeymapBindings` + 用户自定义。模块卸载（插件）时它的 `KeymapBindings` 随之撤销。
 - 自定义：`KeymapOverrides { add, remove }` 保存在用户设置里，`Keymap::with_overrides` 合成最终键位表。`Keymap::conflicts()` 列出同一作用域里重复的键，`Keymap::conflict_for(chord, when)` 在用户确认前检查冲突。
 - 不带修饰键的快捷键（`U`、`P`、`J`、`K` …）在文本框获得键盘焦点时不触发（`Chord::is_typing_key`）。
 
 ## 5. 工作区
 
 `WorkspacePreset::new(title, keymap, root)` 给出默认布局。用户的修改由外壳保存：切换工作区时保留各自当前的布局；"重置为已保存的布局"回到用户上次"保存对此工作区所做的更改"时的布局，没保存过就回到预设。
+
+## 6. 外壳提供的应用资源
+
+| 资源 | 谁插入 | 用途 |
+|---|---|---|
+| `Arc<bae_ui::history::HistoryLog>` | `UiModule` | 历史面板的数据。持有 Stage 的一方用 `stage.subscribe(move \|e\| log.record(e))` 喂事件，执行命令前调用 `log.label_next(标题)` 记下命令名（等 02 给 `StageEvent` 加上 `label` 后就不需要了）。 |
+| `Arc<dyn bae_ui::agent::AgentFeed>` | 外壳（`apps/bae`，基于 bae-agent） | Agent 活动记录（工具调用）和提案列表。提案的接受 / 拒绝走 `proposal.accept` / `proposal.reject` 命令。 |
+| `Arc<bae_agent::AuditLog>` | 外壳 | 应用内的 MCP 服务（17，HTTP 传输）应该写进同一个日志，活动面板才能看到。 |
+
+## 7. 输入法
+
+`Workbench` 每帧把 `PlatformOutput::ime` 的锚点换成光标矩形（`workbench::ime_follows_caret`），拼音候选框出现在光标下方。自己画文字编辑的面板（例如合成查看器里的文字工具）设置 `PlatformOutput::ime` 时同样会被处理。文本框有焦点时，不带修饰键的快捷键和文本编辑键不会触发命令。验证报告见 `docs/workstreams/11-ui-shell.md`。
