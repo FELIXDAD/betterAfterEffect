@@ -584,12 +584,15 @@ version = "0.1.0"
 dependencies = [
  "bae-anim",
  "bae-app",
+ "bae-gpu",
  "bae-model",
  "bae-motion",
+ "bae-render",
  "bae-ui",
  "egui",
  "serde",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
