@@ -186,7 +186,7 @@ Conventions used in this file:
 - **Exact semantics:**
   - Scripting range APIs (`characterRange(start, end)`, `paragraphCharacterIndexesAt`) index the string by UTF-16 code units (JavaScript string indices). UNVERIFIED.
   - Text animators operate on "characters" = displayed text elements: UNVERIFIED but required for correct emoji/CJK behaviour: AE (Universal Text Engine, AE 22.x+) groups a base character with combining marks and surrogate pairs into one animated element; lottie-web reproduces this by merging combining marks (U+0300..U+036F etc.), variation selectors, ZWJ sequences, emoji modifiers, regional-indicator flag pairs into the preceding element.
-  - Line-break characters (CR, ETX) count as characters for "Characters" based selectors (they are present in the per-character arrays but have no glyph); see AE-TXT-071 for each Based On mode.
+  - Line-break characters (CR, ETX) are present in the per-character arrays but have no glyph. Whether they count as units for "Characters" based selectors is UNVERIFIED in AE; lottie-web does not count them (newline letters have an empty value and do not increment the unit index), and BAE follows that (AE-TXT-071).
 - **Priority:** P0
 - **Owner:** bae-text
 - **Notes:** BAE decision: animate per grapheme cluster (Unicode extended grapheme clusters, UAX #29) and expose UTF-16 offsets only at the scripting boundary. Complex-script (Arabic, Devanagari) per-character animation follows the shaped cluster, see AE-TXT-092.
@@ -892,7 +892,8 @@ Conventions used in this file:
   - Animators are processed in timeline order (top first) per property kind; for transforms the order of matrix composition is fixed by kind (AE-TXT-054), so reordering animators changes only interpolative results (colour/opacity) and Character Value.
   - Base values: transforms identity, opacity 100%, colours from the character's TextDocument fill/stroke, stroke width from the TextDocument.
   - Layout-affecting properties (Tracking, Line Spacing, Line Anchor, Character Offset/Value, Variable Font Axes) modify the glyph placement after the TextDocument layout; they never re-break paragraph lines (UNVERIFIED for Character Offset/Value: AE re-measures replaced glyph advances but keeps line breaks).
-  - Opacity quirk: lottie-web computes `o = o + (P*m - o)*m`; BAE follows the interpolative rule above (UNVERIFIED which matches AE for 0 < m < 1 and P ≠ 0).
+  - Opacity quirk: lottie-web computes `o = o + (P*m - o)*m`; Skottie uses the plain lerp `o = lerp(o, P, max(m,0))`. BAE follows the interpolative (Skottie) rule above (UNVERIFIED which matches AE for 0 < m < 1 and P ≠ 0).
+  - Interpolative properties (opacity, fill/stroke colour and opacity) use `max(m, 0)` (Skottie); additive and multiplicative properties use the signed m.
 - **Priority:** P0
 - **Owner:** bae-text (+ bae-anim)
 - **Notes:** Implementation hint: evaluate selectors into an `[N_chars × N_animators] × vec3` buffer, then per property kind a single pass; this vectorizes well (SIMD or a compute shader for very long texts).
@@ -1013,7 +1014,7 @@ Conventions used in this file:
   | Opacity (不透明度) | 1D | 100 | 0 – 100 | % |
 
   - Interpolative: `o_i = o_i + (P - o_i) * m` per animator, starting at 100%; applies to the whole character (fill and stroke together). Result multiplies the character's coverage when compositing into the layer.
-  - Negative selection values (wiggly) push opacity beyond the base: result clamped to [0, 100] (UNVERIFIED).
+  - Negative selection values (wiggly, Subtract): Skottie clamps the selection amount to ≥ 0 for opacity and all colour properties (`clamped_amount = max(amount, 0)`), so negative selection leaves them at the base value; UNVERIFIED in AE. BAE follows Skottie; the result is additionally clamped to [0, 100].
 - **Priority:** P0 — the most common text reveal.
 - **Owner:** bae-text (+ bae-render)
 - **Notes:** matchName `ADBE Text Opacity`. Lottie `t.a[].a.o`. Typewriter reveal = Opacity 0 + Range Selector End/Start keyed, Square shape, Smoothness 0%.
@@ -1157,7 +1158,7 @@ offset(line 0) = 0;  offset(line k) = offset(line k-1) + lineSpacing(line k)    
 - **Owner:** bae-render (+ bae-text)
 - **Notes:** matchName `ADBE Text Blur`. Lottie `t.a[].a.bl` (not rendered by lottie-web). Implementation hint: group characters with identical blur into one offscreen pass; separable Gaussian in WGSL shared with effects.md (Gaussian Blur).
 
-### AE-TXT-068 · Variable font axis animator properties (可变字体轴, 译名待核)
+### AE-TXT-068 · Variable font axis animator properties (变量字体轴)
 
 - **What it does:** Animates OpenType variable-font axes (weight, width, slant, custom axes) per character through the animator/selector system.
 - **Exact semantics:**
@@ -1166,7 +1167,7 @@ offset(line 0) = 0;  offset(line k) = offset(line k-1) + lineSpacing(line k)    
   - Application: interpolative per character `axis_i = base_i + (P - base_i) * m` (UNVERIFIED; help: "Amount 50% → half the axis value applied"), then glyphs are re-shaped with the new variation coordinates; spacing compensation per More Options > Variable Font Spacing (AE-TXT-051).
   - Static per-character axis values can also be set in the Properties panel Variable Font pop-up (stored in the TextDocument run, see AE-TXT-084).
   - Scripting: `animatorProps.addVariableFontAxis("wght")`; `fontObject.designAxesData` lists axes `{name, tag, minValue, maxValue, defaultValue}`.
-  - Version: UNVERIFIED AE 26.0 (2026) for axis animators.
+  - Version: public beta AE 26.0x40 (Nov 2025); shipped in AE 26.x (UNVERIFIED exact release). Up to 8 axes can be animated per layer (Adobe beta announcement).
 - **Priority:** P2
 - **Owner:** bae-text
 - **Notes:** Implementation hint: skrifa supports variation coordinates; cache outlines keyed by quantized axis values (e.g. 1/16 unit) so animated weight does not re-outline every frame.
@@ -1240,7 +1241,7 @@ offset(line 0) = 0;  offset(line k) = offset(line k-1) + lineSpacing(line k)    
 - **What it does:** Defines what units a selector indexes and which unit each character belongs to.
 - **Exact semantics:**
   ```
-  Characters:                    every character (incl. spaces); line-break characters excluded (lottie-web)
+  Characters:                    every character (incl. spaces); line-break characters excluded (lottie-web; UNVERIFIED in AE, see AE-TXT-012)
   Characters Excluding Spaces:   every non-space character; spaces and line breaks are not counted; UNVERIFIED which unit value they take (lottie-web: they keep the running index without incrementing)
   Words:                         unit = word; a word = maximal run of non-space characters; the space(s) after a word belong to that word's unit (lottie-web increments after the space)
   Lines:                         unit = composed line (wrapped lines count separately)
