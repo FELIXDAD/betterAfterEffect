@@ -66,6 +66,25 @@
 | Reset to Saved Layout | 重置为已保存的布局 |
 | Save Changes to this Workspace | 保存对此工作区所做的更改 |
 | Edit Workspaces... | 编辑工作区... |
+| Motion（BAE 工作区） | 动效 |
+| Agent（BAE 工作区） | Agent |
+
+## 四之二、菜单与外壳（AE 2026 简体中文词典 MenuID 0002 / 0003）
+
+| 英文 | 中文 |
+|---|---|
+| Undo | 撤消（AE 用"消"） |
+| Redo | 重做 |
+| History | 历史记录 |
+| Keyboard Shortcuts | 键盘快捷键 |
+| New Project | 新建项目 |
+| Open Project... | 打开项目... |
+| Save | 保存 |
+| Save As... | 另存为... |
+| Quit | 退出 |
+| Untitled Project | 未命名项目 |
+| Agent Activity（BAE） | Agent 活动 |
+| Proposals（BAE） | 提案 |
 
 ## 五、工具栏
 

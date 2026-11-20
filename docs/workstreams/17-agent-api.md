@@ -43,7 +43,7 @@
 
 ## 进度
 
-- [x] MCP 服务器（stdio，rmcp 3.11，`bae mcp`）：一个连接 = 一个 Agent 会话；Agent 名默认取 MCP 客户端名（Claude Code → `claude-code`），`--name` 可指定。
+- [x] MCP 服务器（stdio，`bae mcp`）：协议层自己实现（同步 JSON-RPC，`bae_agent::protocol`），应用不链接 rmcp / tokio（release 比用 rmcp 时小 1.37 MiB，见 #29 / #30），rmcp 的客户端只在测试里检查互通；一个连接 = 一个 Agent 会话；Agent 名默认取 MCP 客户端名（Claude Code → `claude-code`），`--name` 可指定。
 - [x] 从 CommandRegistry 生成工具：工具名 = 命令 ID 把 `.` 换成 `_`（Claude / OpenAI 的工具名只允许 `[a-zA-Z0-9_-]`）；描述、参数 Schema 都来自命令定义；新命令无需改 17 的代码。
 - [x] 查询工具：`stage_describe`（文字摘要，`root` / `detail` / `max_chars`）、`prim_get`（每个属性的来源层和被覆盖的层、关键帧帧号、所在合成的尺寸和帧速率）、`prim_find`、`sublayer_list`、`sublayer_diff`、`schema_get`。
 - [x] 视觉工具：`render_frame`、`render_contact_sheet`（帧号标在每格左上角）。渲染走 `FrameRenderer` trait，现在是占位图（结果里标 `placeholder: true`），04 合并后由 app 注入真正的渲染器。
@@ -68,3 +68,5 @@
   4. `stage.describe` 输出里请直接包含：合成帧速率、时长、工作区域、当前编辑目标、Agent 自己的权限级别、锁提示。
   5. `render.contact_sheet` 每格标出帧号；时间参数接受相对合成开始的整数帧号（也接受时码），由服务器换算 flicks。
   6. 评测集 `docs/agent-guide/evals/` 需要审计日志能导出完整的工具调用序列（含事务边界和写入的工程层）。
+
+- **21 io/packaging（2026-11-20）**：`bae-package`（无 GPU 依赖）提供打包命令 `package.scan`、`package.pack`、`package.collect`、`package.unpack`、`asset.relink`、`asset.set_files`，注册函数是 `bae_package::register_commands(&mut registry)`。请在 `Workspace::new` 里一起注册，Agent 才能调用。这些命令只能看到 Stage，工程位置通过参数 `project`（`.bae` 目录或 `.baez` 文件）传入；如果方便，服务器可以在调用时自动填入当前工程的位置。

@@ -1,17 +1,11 @@
-//! The MCP server (rmcp): one connection = one agent session.
+//! The MCP server: one connection = one agent session. The JSON-RPC layer is in
+//! [`crate::protocol`].
 
 use std::sync::Arc;
 use std::time::Instant;
 
 use bae_model::{Change, PrimPath, StageEvent, SublayerId, Time};
 use parking_lot::Mutex;
-use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
-    InitializeRequestParams, InitializeResult, ListToolsResult, PaginatedRequestParams,
-    ServerCapabilities, ServerConfig, Tool, ToolAnnotations,
-};
-use rmcp::service::RequestContext;
-use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde::de::DeserializeOwned;
 use serde_json::{Value as Json, json};
 
@@ -112,6 +106,84 @@ impl std::fmt::Debug for BaeMcpServer {
             .field("options", &self.options)
             .field("session", &self.session.lock())
             .finish_non_exhaustive()
+    }
+}
+
+/// One content block of a tool result.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Content {
+    Text(String),
+    /// Base64-encoded image data.
+    Image {
+        data: String,
+        mime_type: String,
+    },
+}
+
+/// The result of a tool call (MCP `CallToolResult`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolResult {
+    pub content: Vec<Content>,
+    /// Machine-readable result (also serialized into the text content).
+    pub structured: Option<Json>,
+    /// The call failed; the text says why (the agent reads it).
+    pub is_error: bool,
+}
+
+impl ToolResult {
+    pub fn text(text: impl Into<String>) -> Self {
+        ToolResult {
+            content: vec![Content::Text(text.into())],
+            structured: None,
+            is_error: false,
+        }
+    }
+
+    pub fn json(value: Json) -> Self {
+        ToolResult {
+            content: vec![Content::Text(value.to_string())],
+            structured: Some(value),
+            is_error: false,
+        }
+    }
+
+    pub fn error(message: impl Into<String>) -> Self {
+        ToolResult {
+            is_error: true,
+            ..ToolResult::text(message)
+        }
+    }
+
+    /// All text content, joined by newlines.
+    pub fn joined_text(&self) -> String {
+        let parts: Vec<&str> = self
+            .content
+            .iter()
+            .filter_map(|c| match c {
+                Content::Text(t) => Some(t.as_str()),
+                Content::Image { .. } => None,
+            })
+            .collect();
+        parts.join("\n")
+    }
+
+    /// MCP JSON shape: `{content, structuredContent?, isError}`.
+    pub fn to_json(&self) -> Json {
+        let content: Vec<Json> = self
+            .content
+            .iter()
+            .map(|c| match c {
+                Content::Text(t) => json!({ "type": "text", "text": t }),
+                Content::Image { data, mime_type } => {
+                    json!({ "type": "image", "data": data, "mimeType": mime_type })
+                }
+            })
+            .collect();
+        let mut out = json!({ "content": content, "isError": self.is_error });
+        if let Some(s) = &self.structured {
+            out["structuredContent"] = s.clone();
+        }
+        out
     }
 }
 
@@ -222,24 +294,16 @@ impl BaeMcpServer {
         tools::catalog(&self.workspace.lock().registry, permission)
     }
 
-    /// The tools as MCP definitions.
-    pub fn tools(&self) -> Vec<Tool> {
-        self.tool_entries()
-            .into_iter()
-            .map(|t| {
-                let mut annotations = ToolAnnotations::new().read_only(t.read_only);
-                if !t.read_only {
-                    annotations = annotations.open_world(false);
-                }
-                Tool::new(t.name, t.description, t.input_schema)
-                    .with_title(t.title)
-                    .with_annotations(annotations)
-            })
-            .collect()
+    /// The `instructions` text sent on `initialize`.
+    pub fn instructions(&self) -> String {
+        self.options
+            .instructions
+            .clone()
+            .unwrap_or_else(|| instructions(self.options.lang))
     }
 
     /// Handle one tool call (transport independent). Every call is audited.
-    pub fn call(&self, name: &str, args: Json) -> CallToolResult {
+    pub fn call(&self, name: &str, args: Json) -> ToolResult {
         let started = Instant::now();
         let unix_ms = unix_ms_now();
         if self.session.lock().is_none() {
@@ -307,14 +371,21 @@ impl BaeMcpServer {
 
         match result {
             Ok(Done { reply, .. }) => match reply {
-                Reply::Text(text) => CallToolResult::success(vec![ContentBlock::text(text)]),
-                Reply::Json(j) => CallToolResult::structured(j),
-                Reply::Image { png, meta } => CallToolResult::success(vec![
-                    ContentBlock::image(render::base64(&png), "image/png"),
-                    ContentBlock::text(meta.to_string()),
-                ]),
+                Reply::Text(text) => ToolResult::text(text),
+                Reply::Json(j) => ToolResult::json(j),
+                Reply::Image { png, meta } => ToolResult {
+                    content: vec![
+                        Content::Image {
+                            data: render::base64(&png),
+                            mime_type: "image/png".into(),
+                        },
+                        Content::Text(meta.to_string()),
+                    ],
+                    structured: None,
+                    is_error: false,
+                },
             },
-            Err(e) => CallToolResult::error(vec![ContentBlock::text(e.to_string())]),
+            Err(e) => ToolResult::error(e.to_string()),
         }
     }
 
@@ -634,79 +705,20 @@ fn fit(w: u32, h: u32, scale: f64, max_side: u32) -> (u32, u32) {
     )
 }
 
-impl ServerHandler for BaeMcpServer {
-    fn get_info(&self) -> ServerConfig {
-        let mut implementation = Implementation::new("bae", env!("CARGO_PKG_VERSION"));
-        implementation.title = Some("BAE".into());
-        implementation.description =
-            Some("BAE motion graphics: read, edit (as a proposal) and render projects".into());
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(implementation)
-            .with_instructions(
-                self.options
-                    .instructions
-                    .clone()
-                    .unwrap_or_else(|| instructions(self.options.lang)),
-            )
-    }
-
-    async fn initialize(
-        &self,
-        request: InitializeRequestParams,
-        context: RequestContext<RoleServer>,
-    ) -> Result<InitializeResult, McpError> {
-        context.peer.set_peer_info(request.clone());
-        self.bind_agent(Some(&request.client_info.name))
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
-        self.negotiate_initialize(&request)
-    }
-
-    async fn list_tools(
-        &self,
-        _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<ListToolsResult, McpError> {
-        Ok(ListToolsResult::with_all_items(self.tools()))
-    }
-
-    async fn call_tool(
-        &self,
-        request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResponse, McpError> {
-        let args = request.arguments.map(Json::Object).unwrap_or(Json::Null);
-        Ok(self.call(&request.name, args).into())
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum ServeError {
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
-    #[error("MCP session failed to start: {0}")]
-    Init(String),
-    #[error("MCP session ended abnormally: {0}")]
-    Join(String),
 }
 
-/// Serve `server` over stdin/stdout until the client disconnects (`bae mcp`).
-/// Blocks; builds its own single-threaded Tokio runtime.
+/// Serve `server` over stdin/stdout until the client closes stdin (`bae mcp`).
+/// Blocks the calling thread; requests are handled one at a time.
 pub fn run_stdio(server: BaeMcpServer) -> Result<(), ServeError> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    rt.block_on(async move {
-        let running = server
-            .serve(rmcp::transport::stdio())
-            .await
-            .map_err(|e| ServeError::Init(e.to_string()))?;
-        let reason = running
-            .waiting()
-            .await
-            .map_err(|e| ServeError::Join(e.to_string()))?;
-        tracing::info!("MCP session ended: {reason:?}");
-        Ok(())
-    })
+    let stdin = std::io::stdin();
+    let stdout = std::io::stdout();
+    crate::protocol::serve_io(&server, stdin.lock(), stdout.lock())?;
+    tracing::info!("MCP session ended (stdin closed)");
+    Ok(())
 }
 
 #[cfg(test)]

@@ -67,6 +67,15 @@ bae-color 接口已提 PR（`[interface]`），接法见 `crates/bae-color/READM
 3. 素材节点挂 `interpret::input_transform(...)`；相邻的色彩节点用 `ColorTransform::then` 合并，`is_identity()` 时删掉节点；`to_wgsl(prefix)` 生成的片段拼进采样素材的 pass；视口最后一个 pass 用 `display_transform()`；渲染队列用 `output_transform()`。
 4. 依赖 bae-color 时打开 `features = ["media"]`，就能 `SourceTags::from(&media_info.color)`。
 
+### 21 io/packaging → 04（2026-11-20）
+
+工程可以直接从 `.baez` 打开（素材在包里，不解包）。这时 `AssetResolver::new(base_dir)` 找不到包内素材。建议求值/渲染找素材时改用 `bae_package::AssetLocator`（`AssetLocator::for_project(&project)`，`locate(&asset_file)`）：
+
+- `AssetLocation::File { path, .. }`：和现在一样按路径打开；
+- `AssetLocation::Packaged { entry }`：`PackageReader::entry(entry)` 给出 `.baez` 里的字节偏移和长度（不压缩，可直接定位读取）；如果解码器只能接受文件路径，用 `PackageReader::materialize(entry, cache_dir)` 解出到缓存目录。
+
+`bae-package` 不依赖 GPU，bae-render 可以直接依赖。
+
 ### 19 core/plugins → 04（2026-11-20）
 
 声明式 WGSL 效果（`bae_plugin::DeclarativeEffect`）直接实现 `bae_render::Effect`，与 07 的内置效果走同一条路径。约定见 `docs/spec/plugin-architecture.md` §11。两点请求：

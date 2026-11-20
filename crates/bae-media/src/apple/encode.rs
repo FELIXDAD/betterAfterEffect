@@ -6,7 +6,8 @@
 //! into IOSurface-backed pixel buffers from the writer's pool: `32BGRA` for
 //! 8-bit H.264 / HEVC, `64RGBAHalf` for ProRes and 10-bit HEVC so precision and
 //! alpha survive. Color tags come from the settings' H.273 code points; alpha is
-//! straight for ProRes 4444 and as requested for HEVC with alpha.
+//! written straight or premultiplied as requested (HEVC tags the mode, ProRes
+//! has no flag for it, so readers must be told or guess).
 
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
@@ -44,7 +45,8 @@ use objc2_video_toolbox::{
 };
 
 use crate::export::{
-    EncodeOutput, EncodeSettings, Encoder, EncoderFormat, ProResProfile, VideoCodec, convert_frame,
+    EncodeOutput, EncodeSettings, Encoder, EncoderFormat, ProResProfile, VideoCodec,
+    convert_frame_cow,
 };
 use crate::frame::{CpuFrame, PixelFormat};
 use crate::meta::{AlphaMode, ColorPrimaries, MatrixCoefficients};
@@ -157,11 +159,11 @@ impl AvWriterEncoder {
             } else {
                 (PixelFormat::Bgra8, kCVPixelFormatType_32BGRA)
             };
-        let frame_alpha = match (settings.alpha, settings.codec) {
-            (AlphaMode::Opaque | AlphaMode::Ignore, _) => AlphaMode::Opaque,
-            // ProRes 4444 alpha is unassociated.
-            (_, VideoCodec::ProRes(_)) => AlphaMode::Straight,
-            (alpha, _) => alpha,
+        // ProRes carries no alpha-mode flag: write what was asked (AE's
+        // default for "High Quality with Alpha" is premultiplied); HEVC tags it.
+        let frame_alpha = match settings.alpha {
+            AlphaMode::Opaque | AlphaMode::Ignore => AlphaMode::Opaque,
+            alpha => alpha,
         };
 
         // SAFETY: plain AVFoundation calls with valid arguments; the statics
@@ -423,7 +425,7 @@ impl Encoder for AvWriterEncoder {
                 frame.width, frame.height, self.settings.width, self.settings.height
             )));
         }
-        let converted = convert_frame(frame, self.pixel_format, self.frame_alpha);
+        let converted = convert_frame_cow(frame, self.pixel_format, self.frame_alpha);
         let buffer = self.pixel_buffer(&converted)?;
         self.wait_ready()?;
         let rate = self.settings.frame_rate;
@@ -442,6 +444,10 @@ impl Encoder for AvWriterEncoder {
 
     fn frames_written(&self) -> u64 {
         self.frames
+    }
+
+    fn input_format(&self) -> Option<(PixelFormat, AlphaMode)> {
+        Some((self.pixel_format, self.frame_alpha))
     }
 
     fn finish(self: Box<Self>) -> Result<EncodeOutput, MediaError> {

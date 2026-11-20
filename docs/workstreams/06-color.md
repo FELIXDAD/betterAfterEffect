@@ -48,12 +48,19 @@
   - `WorkingSpace` / `ColorContext`：AE 的非线性混合、线性化工作空间、使用 1.0 灰度系数混合颜色；显示目标（直接写、硬件 sRGB、EDR/scRGB 扩展线性、HDR10）；渲染队列输出变换。
   - 素材解释：文件标签自动识别（`media` feature 接 bae-media 的 `ColorInfo`）、覆盖、保留 RGB、解释为线性光，优先级与 AE 一致。
   - 验证：colour-science 向量 ≤ 2.6e-6；OCIO 2.6 内置 ACES studio 配置 ≤ 2.4e-5；GPU 与 CPU ≤ 9.7e-5（PQ）/ 1.6e-6（其他曲线）；内置空间两两往返 < 1e-9。
-- 下一步：OCIO 子集（config.ocio 解析、LogCamera / Exponent / ExponentWithLinear 等 op、.cube / .spi1d / .spi3d、ACES 内置变换）；用 AE 渲染对照；视图变换（ACES 输出变换）；AE "补偿场景引用的配置文件"（先在 AE 里实测）。
+- PR 1 已合并（#28）。
+- PR 2：OCIO 子集与 AE 对照。
+  - `ocio::Config`：config.ocio（v1、v2）的色彩空间、显示色彩空间、角色、别名、视图变换、显示/视图（含共享视图）、文件规则；变换 Group / Matrix / Exponent / ExponentWithLinear / Log / LogAffine / LogCamera / Range / CDL / File / ColorSpace / Builtin；YAML 用自写的子集解析器（无新依赖）。
+  - 新 op（CPU + WGSL）：逐通道幂函数、ExponentWithLinear、Log/LogAffine/LogCamera、CDL、1D LUT 精确反求（二分查找）。
+  - LUT 文件：.cube（1D / 3D / shaper+3D）、.spi1d、.spi3d。
+  - 与 OpenColorIO 2.6 对比：自制配置、ACES studio 2.1、ACES 1.3 CG、AE 自带的三个配置，共 700 多组转换，最大误差 5.7e-6。
+  - 与 AE 26.2 逐像素对比（`crates/bae-color/tools/ae/`）：13 个 Adobe 引擎用例全部吻合（≤ 1.4e-4，16 位 PNG 精度；一处 3.6e-3 是 AE 自己的 ICC 定点串扰）。实测得出并已实现：BT.709 / BT.2020 标签的视频按 Gamma 2.4 解释；线性化工作空间时输出模块转回工作空间曲线；PQ 线性 1.0 = 100 nit（= AE 的 W100）。
+- 下一步：ACES 输出变换（1.x RRT+ODT 与 2.0），作为视图变换；界面颜色工具函数；OCIO 的 Look / NamedTransform。
 
 - [x] 色彩空间库与测试向量
 - [x] GPU 变换生成
-- [x] 工作空间与素材解释（Adobe 引擎部分；OCIO 引擎随 OCIO 子集）
+- [x] 工作空间与素材解释（Adobe 引擎与 OCIO 引擎）
 - [ ] 显示器与 HDR（bae-color 侧的 `DisplayTarget` 已有；系统显示器信息等 01 的接口，见 01 任务书的请求）
-- [ ] OCIO 子集与 LUT
+- [x] OCIO 子集与 LUT（ACES 输出变换除外）
 
 ## 请求（其他工作流在这里留言）
