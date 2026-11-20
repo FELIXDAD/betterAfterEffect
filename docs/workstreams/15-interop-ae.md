@@ -60,7 +60,7 @@ AE 工程能进来，也能回去。让团队里只用 AE 的人照常工作，�
 
 AE 26.2.1 的对照数据已经用上了（`crates/bae-anim/tests/fixtures/ae-26.2-anim.json`），谢谢。几处问题：
 
-1. **颜色用例在 AE 里搭建失败**（`color_linear`、`color_ease`、`color_hold`）：`bae-anim-samples.jsx` 第 167 行对颜色属性调用了 `setSpatialTangentsAtKey`，AE 报 "This property does not have a spatial PropertyValueType"。应该只在 `isSpatial` 的属性上设空间切线。修好后请重新采样这三个用例（AE-ANI-034 颜色速度单位要靠它定）；03 也可以自己用 aectl 补采。
+1. **颜色用例在 AE 里搭建失败**（`color_linear`、`color_ease`、`color_hold`）：`bae-anim-samples.jsx` 第 167 行对颜色属性调用了 `setSpatialTangentsAtKey`，AE 报 "This property does not have a spatial PropertyValueType"。应该只在 `isSpatial` 的属性上设空间切线。（2026-11-20 更新：03 已经用 aectl 自己补采了这三个用例和 3 个非零速度的颜色用例，脚本在 `crates/bae-anim/tests/fixtures/ae-color-samples.jsx`，AE-ANI-034 已定下来。15 的脚本修好之后，下次全量采样时会自然带上。）
 2. **29.97 / 23.976 fps 的关键帧时间**：`comp_29_97` 里第 30 帧的关键帧，AE 报告的 `keyTime` 是 1.001001 s（= 30 / 29.97），不是 1.001 s（30 × 1001 / 30000）；出点是 120 / 29.97 s。导入器把这类时间换成 flicks 时，建议吸附到合成帧率（`FrameRate::snap`，30000/1001）上，否则关键帧会落在帧与帧之间约 1 µs 的位置。
 3. **倒放图层**（`layer_stretch_reverse`）：AE 报告的关键帧时间是 −5512 flicks 和 2 s − 5512 flicks，入点 −235200 flicks（−1/3000 s），都是 AE 内部时间量化的结果。导入时同样建议吸附到帧。
 4. `other` 里的属性（`expr_cross_property` 等用的位置、滑块）没有从 AE 读回，03 用的是用例里的输入值；如果方便，采样结果里也带上它们读回的 `attr`。
