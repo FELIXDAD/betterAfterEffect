@@ -161,7 +161,7 @@
 - **Exact semantics:**
   - Toggle: Draft 3D button (Composition panel toolbar in current AE; historically at the top of the Timeline panel); applies to all views of the comp. Scripting `CompItem.draft3d` (Boolean, read/write).
   - Classic semantics (documented in the Previews help, still valid as the minimum contract): disables all lights (3D layers render unlit, as if no light existed), all shadows, and camera depth-of-field blur.
-  - Since AE 18.0 (2021-03, "3D Design Space") Draft 3D additionally switches the viewer to the GPU real-time draft engine (today the Advanced 3D engine, "only intended for draft quality") and enables the 3D Ground Plane and Extended Viewer buttons (AE-CMP-411). This real-time draft preview replaced the old OpenGL "Fast Draft" Fast Previews mode (AE-CMP-467). Help note: with Draft 3D on, some effects may not render on precomps.
+  - Since AE 18.0 (2021-03, "3D Design Space") Draft 3D additionally switches the viewer to the GPU real-time draft engine (today the Advanced 3D engine, "only intended for draft quality") and enables the 3D Ground Plane and Extended Viewer buttons (AE-CMP-411). This real-time draft preview replaced the old OpenGL "Fast Draft" Fast Previews mode (AE-CMP-467). Help note: with Draft 3D on, some effects may not render on precomps. UNVERIFIED: whether the real-time draft engine still omits lights/shadows/DOF or now previews them approximately.
   - Render Queue / headless output always renders at full quality regardless of Draft 3D.
 - **Priority:** P1
 - **Owner:** bae-render (+ bae-ui-motion, bae-model)
@@ -1015,7 +1015,7 @@
 - **Exact semantics:**
   | Parameter (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
-  | Resolution (分辨率) | enum | Full (Auto in the viewer menu for new comps UNVERIFIED) | Auto (自动, previews only), Full (完整), Half (二分之一), Third (三分之一), Quarter (四分之一), Custom (自定义) | — | Composition Settings and viewer menu; scripting `CompItem.resolutionFactor` = [x, y] |
+  | Resolution (分辨率) | enum | Full (Auto in the viewer menu for new comps UNVERIFIED) | Auto (自动, previews only), Full (完全), Half (二分之一), Third (三分之一), Quarter (四分之一), Custom (自定义) | — | Composition Settings and viewer menu; scripting `CompItem.resolutionFactor` = [x, y] |
   | Custom horizontal / vertical (自定义) | int, int | 1, 1 | 1–99 UNVERIFIED max | "render every N pixels" | x and y independent |
   ```
   (fx, fy) = (1,1) Full | (2,2) Half | (3,3) Third | (4,4) Quarter | (N,M) Custom
@@ -1051,7 +1051,7 @@
 - **Owner:** bae-render (+ bae-ui-motion)
 - **Notes:** BAE decision: allow non-integer factors internally for HiDPI viewers (render at exactly displayed size) as an optional "faster than AE" mode, defaulting to AE's integer behaviour.
 
-### AE-CMP-466 · Region of Interest (感兴趣区域)
+### AE-CMP-466 · Region of Interest (目标区域)
 
 - **What it does:** Restricts preview rendering to a user-drawn rectangle of the comp/layer/footage; optionally crops the comp or output to it.
 - **Exact semantics:**
@@ -1071,15 +1071,16 @@
 - **Exact semantics:** Fast Previews menu (Composition panel), shortcuts Cmd/Ctrl+Opt/Alt+1…5:
   | Mode (中文) | Behaviour |
   |---|---|
-  | Off (Final Quality) (关闭（最终品质）) | always full quality at the comp's Resolution |
+  | Off (Final Quality) (关（最终品质）) | always full quality at the comp's Resolution |
   | Adaptive Resolution (自适应分辨率) | during interaction, renders at a lower factor (down to the Adaptive Resolution Limit preference: 1/2, 1/4, 1/8, 1/16; default 1/8 UNVERIFIED) to keep interactive speed; full quality when interaction stops |
-  | Draft (草稿) | Ray-traced 3D only (removed in AE 24.0 UNVERIFIED) |
-  | Fast Draft (快速绘图) | (≤ AE 23.x) 3D layout mode: 1/4 downsample, effects & mattes on, no lights/shadows/DOF; replaced by Draft 3D (AE-CMP-409) |
+  | Draft (草图) | Ray-traced 3D comps only: ray-tracing quality reduced to 1 ray. Still documented in the current help, but meaningless since Ray-traced 3D was removed (AE 17.0) UNVERIFIED: whether the menu item still exists |
+  | Fast Draft (快速绘图) | OpenGL/GPU layout preview: scene downsampled to 1/4 resolution for texture upload, effects and track mattes on; in Ray-traced comps it rendered bevels/extrusion/curvature. Still documented in the help, but CG Channel reports the AE 18.0 real-time Draft 3D preview (AE-CMP-409) replaced it UNVERIFIED: whether the menu item remains |
   | Wireframe (线框) | draws layer bounding boxes (and 3D layer outlines through the camera) instead of pixels |
   - If an interaction frame takes too long in Off/Adaptive modes, AE temporarily shows wireframes until the mouse stops.
   - The renderer button's lightning bolt turns orange in Draft/Fast Draft/Wireframe, and in Adaptive Resolution while downsampled; the mode name appears at the viewer's top-right.
   - Live Update (实时更新) off ⇒ wireframes during interaction; Alt/Opt while dragging toggles it temporarily; Caps Lock suspends viewer refresh (red bar). These are UI behaviours: see ui-preview-render-io.md, Preview & cache behaviour.
-  - Adaptive Resolution preferences (AE 25.x): Adaptive Resolution Priority slider (minimum resolution) and 3D Renderer Reduction (Resolution and Quality / Render Quality Only) UNVERIFIED version; see ui-preview-render-io.md, Preferences.
+  - Adaptive Resolution limit: Preferences > Previews (help). Newer AE replaces it with an "Adaptive Resolution Priority" slider (minimum resolution; lower values allow more aggressive down-sampling) plus a 3D renderer reduction choice UNVERIFIED: version and exact option names; see ui-preview-render-io.md, Preferences. Adaptive Resolution also applies to 3D (Advanced 3D) rendering in current AE (help).
+  - Ray-traced legacy: Adaptive Resolution at 1/2 halved ray-tracing quality, at 1/4 capped it at 4, at 1/8 or 1/16 capped it at 2 (historical, P2).
   - Never affects Render Queue output.
 - **Priority:** P1 (Off, Adaptive Resolution, Wireframe); P2 (others)
 - **Owner:** bae-render (+ bae-ui-motion)
@@ -1107,11 +1108,11 @@
   | Red (红色) / Green (绿色) / Blue (蓝色) | grey = straight channel value? UNVERIFIED: AE shows the premultiplied channel `c.r` as grey, over black |
   | Alpha (Alpha) | grey = `a` (black transparent, white opaque) |
   | RGB Straight (RGB 直通) | `c.rgb / a` for a > 0, opaque; undefined (whatever is stored, typically black) where a = 0 |
-  | Alpha Boundary / Alpha Overlay | Layer panel only (Roto Brush) — outline / tinted overlay of the alpha |
-  | Colorize (彩色化) | toggle: single-channel views shown in that channel's colour instead of grey |
+  | Alpha Boundary (Alpha 边界) / Alpha Overlay (Alpha 叠加) | Layer panel only (Roto Brush) — outline / tinted overlay of the alpha |
+  | Colorize (彩色化（译名待核）) | toggle: single-channel views shown in that channel's colour instead of grey |
   - Then the colour-management items: Use Display Color Management, Simulate Output (AE-CMP-457/458).
   - Alt/Opt-click the button toggles between Alpha and RGB. Shortcuts Alt/Opt+1..4 (R, G, B, Alpha; Shift adds Colorize) UNVERIFIED.
-  - Channel views are applied after exposure and before display colour management? UNVERIFIED order; best-known: channel extraction on working values, then display transform. Straight-colour views force "Faster" viewer quality.
+  - Channel views are applied after exposure and before display colour management? UNVERIFIED order; best-known: channel extraction on working values, then display transform. Straight-colour views (RGB Straight, Alpha Overlay, Alpha Boundary) ignore the Viewer Quality preference and render as if it were "Faster" (help).
   - 32 bpc: channel values > 1 are clipped at display unless HDR.
 - **Priority:** P1
 - **Owner:** bae-render (+ bae-ui-motion)
@@ -1130,7 +1131,7 @@
   lin *= 2 ^ exposure
   out  = from_linear(lin)            // then channel view, display CM
   ```
-  - Each viewer has its own value; not saved to output; persisted with the project per viewer UNVERIFIED.
+  - Each viewer has its own value (help); never affects output; persisted with the project per viewer UNVERIFIED. Help usage: drag far left/right ("gamma slamming") to check composite matching and find black/white points. zh-CN help section title: 调整预览曝光度.
   - Useful at 8/16 bpc too (shows clipping), but only 32 bpc preserves above-white detail.
 - **Priority:** P1
 - **Owner:** bae-render (+ bae-color, bae-ui-motion)
@@ -1143,3 +1144,18 @@
 - **Priority:** P2
 - **Owner:** bae-render (+ bae-ui-motion)
 - **Notes:** PAR in compositing math: see compositing-3d-color.md, Quality and sampling; comp PAR setting: project-comp-layers.md, Composition Settings.
+
+### AE-CMP-472 · Viewer Quality preferences: Zoom Quality and Color Management Quality (查看器质量：缩放品质与色彩管理品质)
+
+- **What it does:** Preferences > Previews choose the speed/accuracy of the two display-only operations a viewer applies on top of rendered frames: zoom/PAR scaling and display colour conversion.
+- **Exact semantics:**
+  | Parameter (中文) | Type | Default | Range | Units | Notes |
+  |---|---|---|---|---|---|
+  | Zoom Quality (缩放品质) | enum | UNVERIFIED: More Accurate Except Cached Preview | Faster (更快), More Accurate Except Cached Preview (除缓存预览之外更准确), More Accurate (更准确) | — | quality of viewer magnification and of Pixel Aspect Ratio Correction scaling (AE-CMP-471) |
+  | Color Management Quality (色彩管理品质) | enum | UNVERIFIED: More Accurate Except Cached Preview | same three values | — | precision of the working → display (and simulation) conversion (AE-CMP-457, AE-CMP-458) |
+  - "Except Cached Preview": the accurate path is used for still frames/interaction, the faster path during cached (RAM) preview playback.
+  - Straight-colour channel views (RGB Straight, Alpha Overlay, Alpha Boundary; AE-CMP-469) ignore both preferences and behave as Faster.
+  - Never affects rendered frames, caches or output.
+- **Priority:** P2
+- **Owner:** bae-render (+ bae-color, bae-ui-motion)
+- **Notes:** Source: https://helpx.adobe.com/after-effects/using/previewing.html (Viewer Quality preferences). BAE decision: BAE's display transform runs in a GPU shader at full precision always, so "Faster" and "More Accurate" may be identical in BAE; keep the stored preference for UI parity. Preferences dialog layout: see ui-preview-render-io.md, Preferences.
