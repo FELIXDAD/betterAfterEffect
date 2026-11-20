@@ -829,9 +829,9 @@ Conventions used in this file:
   - Menu values in order: Per Character Palette (每字符调板, 译名待核) / All Fills Over All Strokes (全部填充在全部描边之上) / All Strokes Over All Fills (全部描边在全部填充之上). Default Per Character Palette. Keyframeable as hold (UNVERIFIED).
   - Render order semantics: AE-TXT-017.
   - Unavailable (greyed out, ignored) with per-character 3D.
-- **Priority:** P0 — needed to render stroked text correctly.
+- **Priority:** P1 — the default Per Character Palette (AE-TXT-017, P0) covers basic stroked text; the layer-wide overrides are common but not basic.
 - **Owner:** bae-text (+ bae-render)
-- **Notes:** matchName UNVERIFIED: `ADBE Text Render Order` (not listed in the docsforadobe text matchName table). Not in Lottie (lottie-web uses the document `of` flag only).
+- **Notes:** matchName `ADBE Text Render Order` (confirmed by the scripting guide, TextDocument.strokeOverFill: `text("ADBE Text More Options")("ADBE Text Render Order")`). Not in Lottie (lottie-web uses the document `of` flag only).
 
 ### AE-TXT-050 · Inter-Character Blending (字符间混合)
 
@@ -863,7 +863,7 @@ Conventions used in this file:
 
 - **What it does:** An animator is a named group holding selectors and animator properties; properties affect characters in proportion to the combined selector value.
 - **Exact semantics:**
-  - Structure (`ADBE Text Animators` > `ADBE Text Animator` "Animator N" (动画制作器 N)): `Selectors` (`ADBE Text Selectors`) containing 0..n selectors (Range, Wiggly, Expression), then `Properties` (`ADBE Text Animator Properties`) containing 1..n animator properties. The timeline shows selectors first, then properties, inside the animator.
+  - Structure (`ADBE Text Animators` > `ADBE Text Animator` "Animator N" (动画制作工具 N in the Timeline, 译名待核; the zh-CN help text calls animators 动画制作器)): `Selectors` (`ADBE Text Selectors`) containing 0..n selectors (Range, Wiggly, Expression), then `Properties` (`ADBE Text Animator Properties`) containing 1..n animator properties. The timeline shows selectors first, then properties, inside the animator.
   - Animate menu (Timeline `Animate:` button next to Text, Animation > Animate Text (动画 > 动画文本), or viewer context menu > Animate Text), items in order: Enable Per-character 3D (启用逐字 3D 化); Anchor Point, Position, Scale, Skew, Rotation, Opacity, All Transform Properties (全部变换属性); Line Anchor (行锚点), Line Spacing (行距); Character Value (字符值), Character Offset (字符位移); Fill Color > RGB / Hue / Saturation / Brightness / Opacity; Stroke Color > RGB / Hue / Saturation / Brightness / Opacity; Stroke Width (描边宽度); Tracking (字符间距); Blur (模糊); Variable Font Axes > [axis] (AE 26.0, UNVERIFIED version). UNVERIFIED exact grouping separators.
   - Choosing an item with a text layer selected creates a new animator "Animator N" with one Range Selector 1 (defaults of AE-TXT-070) and that property; with an animator selected, Animation > Animate Text adds the property to it instead. With characters selected in the viewer, the new Range Selector's Start/End are set to the selected character range (UNVERIFIED: in Index units? AE sets Start/End percentages matching the selection).
   - Each animator row has an `Add:` menu: Property > (same list) and Selector > Range / Wiggly / Expression (also Animation > Add Text Selector, and viewer context menu > Add Text Selector).
@@ -1025,8 +1025,10 @@ Conventions used in this file:
 - **Exact semantics:**
   - Animate > Enable Per-character 3D sets the layer's 3D switch on and `threeDPerChar = true` (switch column shows the per-character 3D icon instead of the 3D cube). It adds no animator, but every animator's Anchor Point, Position and Scale gain a z component and X/Y Rotation become available.
   - Turning per-character 3D off (choose the menu item again: layer stays 3D; or toggle the 3D switch: layer becomes 2D) discards all z values and X/Y rotations permanently (re-enabling does not restore them).
-  - Rendering: each character is a separate planar layer in the comp's 3D space: participates in Classic 3D depth sorting and intersections per character, receives lights and casts/accepts shadows with the layer's Material Options (see compositing-3d-color.md, Classic 3D renderer). Fill & Stroke (layer-wide order) and Inter-Character Blending are disabled.
+  - Any per-character 3D property added to a 2D text layer (pasting a Y Rotation, applying a 3D Text preset) also turns the layer 3D and enables per-character 3D (help). The single Rotation property is renamed Z Rotation (Z 轴旋转).
+  - Rendering: each character behaves like an individual 3D layer inside the text layer, and the text layer behaves like a precomposition with collapsed transformations: characters intersect with other 3D layers by the standard rules for collapsed 3D precomps (help), receive lights and cast/accept shadows with the layer's Material Options (see compositing-3d-color.md, Classic 3D renderer and Collapse transformations). Fill & Stroke (layer-wide order) and Inter-Character Blending are unavailable.
   - Camera depth of field and motion blur apply per character.
+  - Auto-orient: per-character 3D text layers get the extra Auto-Orientation option Orient Each Character Independently (独立定向每个字符): each character rotates around its own anchor point to face the active camera. Choosing it on a text layer enables per-character 3D if it is not enabled. Orientation math (towards the camera) as for Orient Towards Camera in transform-keyframes-expressions.md (Auto-orient), applied per character after the animator transforms (UNVERIFIED order).
 - **Priority:** P1
 - **Owner:** bae-render (+ bae-text, bae-model)
 - **Notes:** Scripting `TextLayer.threeDPerChar` (bool, read/write). Help warns per-character 3D can decrease performance. Lottie: bodymovin exports per-character 3D only in the HTML renderer (UNVERIFIED). Implementation hint: emit one 3D quad/plane per character into the same 3D sort as layers; batch characters with identical depth order.
@@ -1390,7 +1392,7 @@ offset(line 0) = 0;  offset(line k) = offset(line k-1) + lineSpacing(line k)    
 - **Owner:** bae-motion (+ bae-text)
 - **Notes:** Mask modes and data: compositing-3d-color.md (Masks). Commonly used to drive Stroke / Scribble effects from text.
 
-### AE-TXT-079 · Convert to Editable Text (转换为可编辑文字)
+### AE-TXT-079 · Convert to Editable Text (转换为可编辑文本)
 
 - **What it does:** Converts an imported Photoshop text layer into a native editable AE text layer.
 - **Exact semantics:**
@@ -1554,7 +1556,7 @@ offset(line 0) = 0;  offset(line k) = offset(line k-1) + lineSpacing(line k)    
 
 - **What it does:** Correctly shapes and orders Arabic, Hebrew, Indic (Devanagari etc.), Thai and other complex scripts, mixed with Latin and digits.
 - **Exact semantics:**
-  - Universal Text Engine (default `composerEngine = UNIVERSAL_TYPE_ENGINE`; formerly the "South Asian and Middle Eastern" engine selected in Preferences > Type; UNVERIFIED version that made it the only engine for new layers: AE 24.0): full OpenType shaping (GSUB/GPOS: joining forms, mark positioning, reordering, conjuncts) for all scripts in one layer, no preference switch needed.
+  - Universal Text Engine (default `composerEngine = UNIVERSAL_TYPE_ENGINE`; formerly the "South Asian and Middle Eastern" engine selected in Preferences > Type; it became the default for new text layers in AE 22.1.1 per the scripting guide (`TextDocument.composerEngine`)): full OpenType shaping (GSUB/GPOS: joining forms, mark positioning, reordering, conjuncts) for all scripts in one layer, no preference switch needed.
   - Bidi: Unicode Bidirectional Algorithm with the paragraph direction (AE-TXT-033) as base level; numbers and Latin inside RTL keep LTR order.
   - Per-character animation: units are the logical characters (clusters), animated "based on their direction": index 0 is the first logical character (rightmost in RTL), so a Range Selector sweep reveals RTL text from the right.
   - Digit substitution via `digitSet` (AE-TXT-027).
@@ -1624,7 +1626,7 @@ offset(line 0) = 0;  offset(line k) = offset(line k-1) + lineSpacing(line k)    
   | More Options | `ADBE Text More Options` | yes |
   | Anchor Point Grouping | `ADBE Text Anchor Point Option` | UNVERIFIED |
   | Grouping Alignment | `ADBE Text Anchor Point Align` | yes |
-  | Fill & Stroke | `ADBE Text Render Order` | yes (scripting PropertyGroup docs) |
+  | Fill & Stroke | `ADBE Text Render Order` | yes (scripting guide, TextDocument.strokeOverFill) |
   | Inter-Character Blending | `ADBE Text Character Blend Mode` | UNVERIFIED |
   | Variable Font Spacing | `ADBE Text Variable Font Spacing` | yes |
   | Animators / Animator | `ADBE Text Animators` / `ADBE Text Animator` | yes |
