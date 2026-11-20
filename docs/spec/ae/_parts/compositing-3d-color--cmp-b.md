@@ -741,7 +741,7 @@
   - Each effect declares supported depths (8, 16, 32); see effects.md, Effect framework, and the bpc column of the matchName table.
   - In a 16-bpc project an 8-bpc-only effect receives its input quantised to 8 bpc; output is converted back to 16 bpc (precision loss, banding).
   - In a 32-bpc project an effect without 32-bpc support receives input converted to 16 bpc if it supports 16, else 8 bpc: values clamped to [0,1] (over-range and negative values lost) and quantised; output converted back to float.
-  - UI warning: the Effect Controls panel shows a yellow warning triangle next to the effect name when the effect's max depth is below the project depth (tooltip states the supported depth); the Effects & Presets panel can filter "Show 32-bpc Only / 16-bpc / 8-bpc" effects.
+  - UI warning: the Effect Controls panel shows a yellow warning triangle next to the effect name when the effect's max depth is below the project depth (tooltip states the supported depth); the Effects & Presets panel can be set to list only the effects that support the current project depth (help); UNVERIFIED: exact menu strings of those filters.
   - Effects later in the chain after a clamping effect cannot recover over-range data.
 - **Priority:** P1
 - **Owner:** bae-effects (+ bae-color, bae-ui-motion)
@@ -773,13 +773,13 @@
 - **Exact semantics:** Project Settings > Color > Color Management:
   | Parameter (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
-  | Color Engine (颜色引擎) | enum | Adobe color managed | Adobe color managed, OCIO color managed | — | OCIO engine AE 24.x UNVERIFIED (24.0, 2023-10 or 24.1); ACES 2.0 configs AE 26.5 |
-  | Working Color Space (工作色彩空间) | enum/profile | None (unmanaged) UNVERIFIED for new 2024+ projects | AE-CMP-449 / AE-CMP-459 | — | `Project.workingSpace` ("" = None) |
-  - Adobe engine: colour management is ON iff Working Color Space ≠ None. With None, footage RGB numbers enter compositing unchanged (except Interpret-as-Linear and media colour-space handling, AE-CMP-450) and output is unchanged.
+  | Color Engine (颜色引擎) | enum | Adobe color managed | Adobe color managed, OCIO color managed | — | OCIO engine shipped in AE 23.2 (2023-02; beta from 23.1); OCIO library 2.5.1 with ACES 2.0 configs in AE 26.5 |
+  | Working Color Space (工作色彩空间) | enum/profile | None (unmanaged) UNVERIFIED: factory default for new projects | AE-CMP-449 / AE-CMP-459 | — | `Project.workingSpace` ("" = None) |
+  - Adobe engine: colour management is ON iff Working Color Space ≠ None. With None, footage RGB numbers enter compositing unchanged (except Interpret As Linear Light, AE-CMP-455, and Working Gamma handling of colour-managed video formats, AE-CMP-450) and output is unchanged.
   - Selecting OCIO always manages colour (working space chosen from the config).
 - **Priority:** P0 (Adobe ICC with None/sRGB/Rec.709), P2 (OCIO)
 - **Owner:** bae-color (+ bae-model)
-- **Notes:** Older AE (≤ 23.x) had no engine menu; Working Space alone controlled CM. Project settings storage: see project-comp-layers.md, Project settings.
+- **Notes:** Before the OCIO engine (≤ AE 23.1) there was no engine menu; Working Space alone controlled CM (choosing a Color Engine "turns color management on", help). Sources: https://helpx.adobe.com/after-effects/using/color-management.html; CG Channel "Adobe releases After Effects 23.2" (2023-02-08). Project settings storage: see project-comp-layers.md, Project settings.
 
 ### AE-CMP-449 · Working color space (Adobe engine) (工作色彩空间)
 
@@ -802,18 +802,18 @@
 ### AE-CMP-450 · Working gamma when unmanaged (工作伽玛（译名待核）)
 
 - **What it does:** With Working Color Space = None, chooses whether colour-managed video formats are interpreted for a display gamma of 2.2 or 2.4.
-- **Exact semantics:** `Project.workingGamma` ∈ {2.2, 2.4}; ignored when a working space is set. UNVERIFIED semantics: media with embedded colour info (QuickTime/H.264/HEVC/ProRes tagged Rec.709) is converted from its tagged space to a pure gamma 2.2 or 2.4 display space with Rec.709 primaries; 2.4 keeps Rec.709 video numbers unchanged, 2.2 brightens shadows slightly. Default UNVERIFIED (2.4 for new projects since AE 22.x).
+- **Exact semantics:** `Project.workingGamma` ∈ {2.2, 2.4} (any other value is a scripting error); ignored when a working space is set (scripting guide). UNVERIFIED semantics: media with embedded colour info (QuickTime/H.264/HEVC/ProRes tagged Rec.709) is converted from its tagged space to a pure gamma 2.2 or 2.4 display space with Rec.709 primaries; 2.4 keeps Rec.709 video numbers unchanged, 2.2 brightens shadows slightly. Default UNVERIFIED (2.4 for new projects since AE 22.x).
 - **Priority:** P2
 - **Owner:** bae-color
 - **Notes:** Related legacy option "Match Legacy After Effects QuickTime Gamma Adjustments" (AE-CMP-462).
 
-### AE-CMP-451 · Linearize Working Space (线性化工作空间)
+### AE-CMP-451 · Linearize Working Space (线性化工作色彩空间)
 
 - **What it does:** Composites in linear light: the working space keeps its primaries and white point but uses a gamma-1.0 tone curve, so all operations (blending, resampling, blur, motion blur, antialiasing, lighting) act on linear values.
 - **Exact semantics:**
-  - Available only when colour management is on. `Project.linearizeWorkingSpace` (scripting since AE 16.0).
+  - Available only when colour management is on. `Project.linearizeWorkingSpace` (scripting since AE 16.0). Help recommends combining it with 16 or 32 bpc.
   - Footage converted to the linearised working space: `v_lin = TRC_working^-1(v)` (AE-CMP-461 formulas) after profile conversion.
-  - Colour property values (picker colours, solid colours) are interpreted as already linear-space values (numbers unchanged ⇒ appearance changes when toggling).
+  - Colour property values (picker colours, solid colours) are interpreted as already linear-space values (numbers unchanged ⇒ appearance changes when toggling). UNVERIFIED: AE may instead convert picker colours so they keep their appearance; verify against AE.
   - Display/output convert from linear working space through the monitor / output profile.
   - Recommended 16 or 32 bpc; in 8 bpc linear storage bands dark tones (AE allows it).
   - Mutually exclusive in effect with Blend Colors Using 1.0 Gamma (that option becomes irrelevant/disabled when linearized UNVERIFIED).
@@ -885,11 +885,10 @@
   |---|---|---|---|---|---|
   | Output Color Space / Output Profile (输出色彩空间) | profile | Working Color Space | any profile / OCIO space | — | requires CM on |
   | Preserve RGB (保留 RGB) | bool | off | — | — | no conversion; numbers written as-is |
-  | Convert To Linear Light (转换为线性光) | enum | On for 32 bpc | Off, On, On for 32 bpc | — | output encoded with gamma 1.0 of the output profile |
-  | Embed Profile / Embed color space (嵌入配置文件) | bool | on for formats that support it UNVERIFIED | — | — | PSD, PNG, TIFF, JPEG (ICC); CICP for PNG/MOV HDR |
+  | Convert To Linear Light (转换为线性光) | enum | On for 32 bpc (help: default because linear output is seldom a good idea at 8/16 bpc) | Off, On, On for 32 bpc | — | output encoded with gamma 1.0 of the output profile |
+  | Embed Profile / Embed color space (嵌入色彩空间) | bool | on for formats that support it UNVERIFIED | — | — | PSD, PNG, TIFF, JPEG (ICC); CICP for PNG/MOV HDR |
   - Rendering intent chosen automatically: relative colorimetric with black-point compensation; absolute colorimetric for film-negative output profiles.
   - Multiple output modules on one render item may each use a different profile.
-  - Export paths outside the Render Queue that bypass output modules (legacy SWF) convert to sRGB.
   - HDR10 metadata for PNG (Mastering Display Color Volume primaries/luminance, content light level) when output space is PQ (AE 25.x UNVERIFIED).
 - **Priority:** P0 (profile conversion), P1 (linear light, embed), P2 (HDR10 metadata)
 - **Owner:** bae-color (+ bae-media)
@@ -899,7 +898,7 @@
 
 - **What it does:** Converts viewer pixels from the working space to the monitor's profile so colours look correct; per viewer, preview only.
 - **Exact semantics:**
-  - Toggle per viewer (Composition, Layer, Footage): View > Use Display Color Management or Show Channel and Color Management Settings button > Use Display Color Management; shortcut Shift + numpad / (Win), Ctrl+Opt+/ UNVERIFIED (Mac). Default On when CM is enabled. A yellow plus sign on the button indicates it is on.
+  - Toggle per viewer (Composition, Layer, Footage): View > Use Display Color Management or Show Channel and Color Management Settings button > Use Display Color Management; shortcut Shift + / on the numeric keypad (Win), Control+Option+/ (Mac) (help). Default On when CM is enabled. A yellow plus sign on the button indicates it is on.
   - On: `working → monitor profile` (OS display profile; HDR displays get extended range, AE-CMP-460). Off: working RGB numbers sent directly to the display (RGB numbers preserved; appearance not).
   - Never changes rendered data or cached frames' working-space content (BAE: apply in the final viewer shader).
   - Turning it off also disables output simulation (whose setting is remembered).
@@ -931,7 +930,7 @@
 - **Exact semantics:**
   | Parameter (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
-  | OCIO Configuration (OCIO 配置) | enum/file | bundled ACES config (ACES 1.x "ACE 2" in 24.x; ACES 2.0 CG v4.0 / Studio v4.0 added in 26.5 with OCIO 2.5.1) | bundled configs, Custom (load .ocio) | — | |
+  | OCIO Configuration (OCIO 配置) | enum/file | bundled ACES config (ACES 1.x configs since 23.2 — trade press reports ACES 1.2 and 1.3 presets; the current help names the default "ACE 2" UNVERIFIED meaning; ACES 2.0 CG v4.0 / Studio v4.0 added in 26.5 with OCIO 2.5.1) | bundled configs, Custom (load .ocio) | — | |
   | Working Color Space (工作色彩空间) | OCIO colour space | config default (ACEScg UNVERIFIED) | spaces of the config | — | linear scene-referred |
   | Display Color Space (显示色彩空间) | display/view | config default (sRGB – ACES SDR view UNVERIFIED) | displays × views of the config | — | also switchable from a menu at the bottom of the Composition panel (OCIO mode only) |
   - Media colour space defaults from the config's file rules; override per footage in Interpret Footage (AE-CMP-454); output colour space per output module (AE-CMP-456); "Show all" lists all spaces and display/view transforms.
