@@ -228,7 +228,7 @@
   - The same mode list (subsets) is reused by paint strokes, layer styles, some effects (e.g. Blend, Set Matte "composite" options) and shape-layer Blend Mode; those are specified with their features.
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-render, bae-ui-motion)
-- **Notes:** zh-CN names are from the zh-CN help category lists (Darker Color appears as 深色 in the category list and 较深的颜色 in a heading; Lighter Color 浅色 / 较浅的颜色; Luminosity 明度 / 发光度; Hard Mix 实色混合) — UNVERIFIED which form the AE 2026 zh-CN menu uses（译名待核）. Lottie: `bm` 0-17 per the Lottie spec; lottie-web implements only 0-15 (CSS `mix-blend-mode` names), so Add (16) and Hard Mix (17) are dropped there; Lottie has no Dissolve, Classic*, Linear Burn/Dodge/Light, Vivid/Pin Light, Darker/Lighter Color, Subtract, Divide, Stencil/Silhouette, Alpha Add, Luminescent Premul — BAE Lottie export must flatten or warn (see ui-preview-render-io.md, Lottie export). Keyboard: Shift+- / Shift+= cycle modes of selected layers (ui-preview-render-io.md, shortcuts).
+- **Notes:** zh-CN names are from the zh-CN help category lists (Darker Color appears as 深色 in the category list and 较深的颜色 in a heading; Lighter Color 浅色 / 较浅的颜色; Luminosity 明度 / 发光度; Hard Mix 实色混合) — UNVERIFIED which form the AE 2026 zh-CN menu uses（译名待核）. Lottie: `bm` 0-17 per the Lottie spec; lottie-web implements only 0-15 (CSS `mix-blend-mode` names, `player/js/utils/blendModes.js`), so Add (16) and Hard Mix (17) are dropped there; Skottie implements all 18 (`modules/skottie/src/BlendModes.cpp`: 16 → `SkBlendMode::kPlus`, 17 → a runtime Hard Mix blender); Lottie has no Dissolve, Classic*, Linear Burn/Dodge/Light, Vivid/Pin Light, Darker/Lighter Color, Subtract, Divide, Stencil/Silhouette, Alpha Add, Luminescent Premul — BAE Lottie export must flatten or warn (see ui-preview-render-io.md, Lottie export). Keyboard: Shift+- / Shift+= cycle modes of selected layers (ui-preview-render-io.md, shortcuts).
 
 ### AE-CMP-012 · Generic blend compositing equation (混合模式合成公式（译名待核）)
 
@@ -252,7 +252,7 @@
   - Edge cases: `ao == 0` → output transparent black; `ab == 0` → result equals the source (no blend visible); `as' == 0` → backdrop unchanged.
 - **Priority:** P0
 - **Owner:** bae-render (+ bae-color)
-- **Notes:** UNVERIFIED: that AE's implementation matches the PDF/W3C alpha equation exactly for every mode (especially the Classic modes, which predate it, and Add / Luminescent Premul). Behaviour visible in AE consistent with it: a non-Normal layer over transparency looks like Normal. Implementation hint: one WGSL "blend" fragment shader with a `mode` switch reading premultiplied inputs, unmultiplying with `max(a, 1e-6)` guard, applying `B`, recombining with the equation above; for Normal use fixed-function hardware blending (`One, OneMinusSrcAlpha`) and batch consecutive Normal layers. Adobe help lists eight modes (Screen, Multiply, Add, Overlay, Hard Light, Classic Difference, Lighten, Darken) as GPU-accelerated at 32 bpc when the layer has motion blur — irrelevant to results, but indicates AE's own GPU path.
+- **Notes:** Source: https://helpx.adobe.com/after-effects/using/blending-modes-layer-styles.html ("identical to blending modes in Adobe Photoshop"; "see section 7.2.4 of version 1.7 of the PDF reference"). UNVERIFIED: that AE's implementation matches the PDF/W3C alpha equation exactly for every mode (especially the Classic modes, which predate it, and Add / Luminescent Premul). Behaviour visible in AE consistent with it: a non-Normal layer over transparency looks like Normal. Implementation hint: one WGSL "blend" fragment shader with a `mode` switch reading premultiplied inputs, unmultiplying with `max(a, 1e-6)` guard, applying `B`, recombining with the equation above; for Normal use fixed-function hardware blending (`One, OneMinusSrcAlpha`) and batch consecutive Normal layers. Adobe help lists eight modes (Screen, Multiply, Add, Overlay, Hard Light, Classic Difference, Lighten, Darken) as GPU-accelerated at 32 bpc when the layer has motion blur — irrelevant to results, but indicates AE's own GPU path.
 
 ### AE-CMP-013 · Normal blend mode (正常)
 
@@ -274,12 +274,12 @@
 - **Exact semantics:**
   ```
   r = rand01(seed, pixel_x, pixel_y [, frame_time for Dancing Dissolve])   # uniform in [0,1)
-  if r < as':   ao = 1 (UNVERIFIED: or max(ab, 1)); Co = Cs     # pixel fully from source
+  if r < as':   ao = 1; Co = Cs                                  # pixel fully opaque source
   else:         ao = ab;  Co = Cb                                # pixel untouched
   ```
   - `as'` includes opacity, masks/feather, effects and track matte, so a soft mask edge becomes a speckled edge.
   - Dissolve: noise pattern is constant over time for a given layer (changes only if the layer moves, because the pattern is in comp pixel space — UNVERIFIED whether it is in comp space or layer space). Dancing Dissolve: pattern changes on each rendered frame.
-  - Dissolve and Dancing Dissolve do not work on 3D layers (Adobe help); on a 3D layer they behave like Normal (UNVERIFIED).
+  - Dissolve and Dancing Dissolve do not work on 3D layers (Adobe help: "Dissolve and Dancing Dissolve do not work on 3D layers"); UNVERIFIED: on a 3D layer they then behave like Normal.
   - Seeding: UNVERIFIED (AE's hash is not documented); BAE needs a deterministic hash of (layer id, x, y[, frame]) so renders are reproducible.
 - **Priority:** P2 — rarely used.
 - **Owner:** bae-render
@@ -607,7 +607,7 @@
   - Constraints: a layer cannot be its own matte; cycles (A mattes B, B mattes A) are refused (UNVERIFIED exact UI behaviour). Camera, light and audio-only layers cannot be mattes (no pixels). UNVERIFIED: whether adjustment layers can be picked as mattes (if allowed, only their source alpha would count).
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-render, bae-ui-motion, bae-motion)
-- **Notes:** Scripting (23.0+): `AVLayer.setTrackMatte(layer, TrackMatteType)`, `AVLayer.removeTrackMatte()` (keeps the type), `AVLayer.trackMatteLayer` (read-only), `hasTrackMatte`, `isTrackMatte`; `trackMatteType` is the legacy read/write API. Lottie: matted layer has `tt` (1-4), matte layer has `td: 1`, and `tp` (matte parent layer index) — when `tp` is absent the matte is the previous layer in the array (the layer above), which is how bodymovin exported pre-23 projects. Parenting the matte to the matted layer makes a matte that moves with it (Adobe help tip).
+- **Notes:** Scripting (23.0+): `AVLayer.setTrackMatte(layer, TrackMatteType)`, `AVLayer.removeTrackMatte()` (keeps the type), `AVLayer.trackMatteLayer` (read-only), `hasTrackMatte`, `isTrackMatte`; `trackMatteType` is the legacy read/write API. Lottie: matted layer has `tt` (1-4), matte layer has `td: 1`, and `tp` (matte parent layer index) — when `tp` is absent the matte is the previous layer in the array (the layer above), which is how bodymovin exported pre-23 projects. Parenting the matte to the matted layer makes a matte that moves with it (Adobe help tip). Source: https://helpx.adobe.com/after-effects/using/track-mattes-and-traveling-mattes.html ("Any layer in your composition, no matter where it sits in the layer stack, can be used as a Track Matte source"; multiple layers may reference one matte; the matte's visibility is switched off by default when chosen and can be turned back on).
 
 ### AE-CMP-034 · Track matte compositing math (轨道遮罩合成计算（译名待核）)
 
@@ -660,7 +660,7 @@
   | Parameter (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
   | Mask Path (蒙版路径) | Bezier path (shape) | set when drawn | — | layer pixels | closed or open; animatable; matchName `ADBE Mask Shape` |
-  | Mask Feather (蒙版羽化) | 2D [x, y] | [0, 0] | 0 … 32,000 (UNVERIFIED max for typed values) | pixels | constrain-proportions link; matchName `ADBE Mask Feather` |
+  | Mask Feather (蒙版羽化) | 2D [x, y] | [0, 0] | 0 … 32,000 by scrubbing (Adobe help); UNVERIFIED max for typed values | pixels | constrain-proportions link; matchName `ADBE Mask Feather` |
   | Mask Opacity (蒙版不透明度) | scalar | 100 | 0 … 100 | % | matchName `ADBE Mask Opacity` |
   | Mask Expansion (蒙版扩展) | scalar | 0 | −32,000 … 32,000 (scrub range) | pixels | matchName `ADBE Mask Offset` |
 
@@ -670,7 +670,7 @@
   - Empty mask list, or all masks None/open → layer alpha unchanged.
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-render, bae-vector)
-- **Notes:** Scripting: `layer.mask` (`ADBE Mask Parade`) → `MaskPropertyGroup` (`ADBE Mask Atom`) with `maskMode`, `inverted`, `rotoBezier`, `maskMotionBlur`, `maskFeatherFalloff`, `locked`, `color`. Expression access: `mask("Mask 1").maskPath / maskFeather / maskOpacity / maskExpansion / invert` (see transform-keyframes-expressions.md, Expressions mask object). Lottie: layer `hasMask`, `masksProperties[]` with `mode` (see AE-CMP-038), `inv` (bool), `pt` (animated Bezier), `o` (opacity %), `x` (expansion px), `nm`; mask feather is not exported by bodymovin in older versions, Skottie reads an `f` 2D feather if present (UNVERIFIED in the official Lottie schema). Bezier path model and editing: shapes.md, Bezier model; drawing tools: ui-preview-render-io.md, tools.
+- **Notes:** Scripting: `layer.mask` (`ADBE Mask Parade`) → `MaskPropertyGroup` (`ADBE Mask Atom`) with `maskMode`, `inverted`, `rotoBezier`, `maskMotionBlur`, `maskFeatherFalloff`, `locked`, `color`. Expression access: `mask("Mask 1").maskPath / maskFeather / maskOpacity / maskExpansion / invert` (see transform-keyframes-expressions.md, Expressions mask object). Lottie: layer `hasMask`, `masksProperties[]` with `mode` (see AE-CMP-038), `inv` (bool), `pt` (animated Bezier), `o` (opacity %), `x` (expansion px), `nm`; the official Lottie schema (lottie-docs, Mask) lists only `mode`, `o`, `pt`, `x`, `inv` (+ `nm`); feather is a de-facto extension: Skottie reads a 2D `f` (`modules/skottie/src/Layer.cpp`), lottie-web ignores it. Bezier path model and editing: shapes.md, Bezier model; drawing tools: ui-preview-render-io.md, tools.
 
 ### AE-CMP-037 · Mask display attributes: colour, lock, name (蒙版颜色、锁定和名称（译名待核）)
 
@@ -709,10 +709,11 @@
   - With a single Subtract mask the layer is visible everywhere except inside the mask (because the start value is 1); a single Intersect mask behaves like Add.
   - Mask modes operate only between masks of the same layer; they never touch other layers.
   - The first mask "interacts with the alpha channel of the layer" (Adobe help): `M` multiplies the source alpha, it does not replace it, so a mask cannot make transparent source pixels opaque.
+  - Drawing/editing shortcuts that set the mode of the closed mask being drawn or modified (Adobe help, Mask modes): N None, A Add, S Subtract, I Intersect, L Lighten, D Darken, F Difference.
   - Coverage outside the layer's bounds does not exist (masks are evaluated inside the layer frame only).
 - **Priority:** P0
 - **Owner:** bae-render (+ bae-model, bae-vector)
-- **Notes:** Adobe help's Intersect text says non-overlapping areas become "complete opacity"; actual AE behaviour (and lottie-web/Skottie) is complete transparency outside the intersection — the help text is wrong. Reference implementations: Skottie maps Add→SrcOver, Intersect→SrcIn, Subtract→DstOut (first Subtract = inverted geometry), Difference→Xor and does not support Lighten/Darken; lottie-web starts from a full white rect when the first mask is Subtract or Intersect. Golden tests needed for the partial-coverage formulas (overlap of two 50 % opacity masks in each mode). Implementation hint: rasterise each mask's coverage into an R16F texture at layer resolution (or ROI), accumulate in one compute pass over all masks, multiply into alpha in the same pass.
+- **Notes:** Scripting enum order as documented: `MaskMode.NONE, ADD, SUBTRACT, INTERSECT, LIGHTEN, DARKEN, DIFFERENCE`. Source: https://helpx.adobe.com/after-effects/using/alpha-channels-masks-mattes.html (Mask modes). Adobe help's Intersect text says non-overlapping areas become "complete opacity"; actual AE behaviour (and lottie-web/Skottie) is complete transparency outside the intersection — the help text is wrong. Reference implementations: Skottie maps Add→SrcOver, Intersect→SrcIn, Subtract→DstOut (first Subtract = inverted geometry), Difference→Xor and does not support Lighten/Darken; lottie-web starts from a full white rect when the first mask is Subtract or Intersect. Golden tests needed for the partial-coverage formulas (overlap of two 50 % opacity masks in each mode). Implementation hint: rasterise each mask's coverage into an R16F texture at layer resolution (or ROI), accumulate in one compute pass over all masks, multiply into alpha in the same pass.
 
 ### AE-CMP-039 · Mask Inverted (反转)
 
@@ -744,7 +745,7 @@
 - **What it does:** Softens the mask edge with a Gaussian-like falloff, separately in x and y, straddling the path half inside and half outside.
 - **Exact semantics:**
   - Value `[fx, fy]` in layer pixels; both ≥ 0. Feather width `f` is centred on the (expanded) edge: e.g. f = 25 → ~12.5 px inside and ~12.5 px outside (Adobe help).
-  - Profile: opacity varies "according to a Gaussian distribution", so the influence extends slightly beyond the nominal width (Adobe help). Best implementation: blur the hard (anti-aliased) coverage with a separable Gaussian, `sigma_x = k * fx`, `sigma_y = k * fy`. UNVERIFIED `k`: Skottie's empirical match is `k = 0.38`; a pure "99 % within f/2" Gaussian would be `k ≈ 0.19`.
+  - Profile: opacity varies "according to a Gaussian distribution", so the influence extends slightly beyond the nominal width (Adobe help). Best implementation: blur the hard (anti-aliased) coverage with a separable Gaussian, `sigma_x = k * fx`, `sigma_y = k * fy`. UNVERIFIED `k` for AE: Skottie uses `k = 0.38` (`kFeatherToSigma` in `modules/skottie/src/Layer.cpp`, its empirical match to AE); a pure "99 % within f/2" Gaussian would be `k ≈ 0.19`. BAE default: `k = 0.38` until golden-tested.
   - Feathering is computed only within the layer's dimensions: coverage outside the layer frame is not available, so a feather that reaches the layer edge is cut abruptly (Adobe help). The blur uses transparent (decal) borders, not edge clamping.
   - Feather is in layer space, so it scales with the layer's Scale when the layer is transformed afterwards (raster pipeline); downsampled previews scale it by the resolution factor (AE-CMP-062 Resolution downsampling).
   - 0 feather → hard anti-aliased edge (Best quality) or aliased (Draft, UNVERIFIED).
@@ -752,24 +753,24 @@
 - **Owner:** bae-render
 - **Notes:** Shortcut F reveals Mask Feather. Lottie: not in the official mask schema; Skottie reads `f`. Implementation hint: separable two-pass Gaussian on the R16F coverage texture with kernel radius `3*sigma`; for large feathers downsample (mip) first — the result is smooth, so a 1/4-resolution blur and bilinear upsample is visually identical. Feather Falloff and variable-width feathers modify this profile (AE-CMP-042, AE-CMP-043).
 
-### AE-CMP-042 · Mask Feather Falloff (蒙版羽化衰减（译名待核）)
+### AE-CMP-042 · Mask Feather Falloff (羽化衰减)
 
 - **What it does:** Chooses the shape of the feather ramp: Smooth (default) or Linear.
 - **Exact semantics:**
-  - Values (Layer > Mask > Feather Falloff; scripting `MaskFeatherFalloff`): Smooth (平滑, `FFO_SMOOTH`, default), Linear (线性, `FFO_LINEAR`).
+  - Values in menu order (Layer > Mask > Feather Falloff / 图层 > 蒙版 > 羽化衰减; scripting `MaskPropertyGroup.maskFeatherFalloff`, `MaskFeatherFalloff.`): Smooth (平滑, `FFO_SMOOTH`, default), Linear (线性, `FFO_LINEAR`).
   - Smooth: Gaussian / smoothstep-like ramp (AE-CMP-041). Linear: alpha changes linearly with distance across the feather band from the inner to the outer feather boundary. UNVERIFIED exact Smooth curve when variable-width feather points exist (likely smoothstep over the band rather than a true Gaussian blur).
   - Per-mask attribute, not animatable.
 - **Priority:** P2
 - **Owner:** bae-render (+ bae-model)
 - **Notes:** Introduced with variable-width mask feather in AE CS6 (11.0). Implementation hint: when Falloff = Linear or feather points exist, compute coverage from a signed-distance field of the path (distance to inner/outer boundary) instead of blurring.
 
-### AE-CMP-043 · Variable-width mask feather points (可变宽度蒙版羽化（译名待核）)
+### AE-CMP-043 · Variable-width mask feather points (可变宽度蒙版羽化)
 
 - **What it does:** Feather points placed along a closed mask path with the Mask Feather tool define a feather band whose width varies along the path, inside or outside.
 - **Exact semantics:**
   - Each feather point: position along the path (segment index + parameter), radius (signed: outward positive, inward negative — UNVERIFIED sign), tension (curvature of the boundary through the point, 0-100 %, UNVERIFIED range), corner angle, and Hold flag (constant radius up to the next feather point).
   - Feather points define the outer and inner feather boundaries; if no feather point is inside the mask, the inner boundary is the mask path itself (Adobe help). The feather ramps from the inner to the outer boundary (shape per Feather Falloff).
-  - Feather points are stored with the Mask Path keyframes; counts are kept constant across keyframes when the General preference "Preserve Constant Vertex and Feather Count when Editing Masks" is on.
+  - Feather points are stored with the Mask Path keyframes; counts are kept constant across keyframes when the preference "Preserve Constant Vertex and Feather Point Count when Editing Masks" is on (Preferences > Composition in current AE; General in older versions).
   - Combined with the global Mask Feather value: UNVERIFIED (assume the global Gaussian feather is applied on top).
 - **Priority:** P2
 - **Owner:** bae-render (+ bae-model, bae-ui-motion)
@@ -779,7 +780,7 @@
 
 - **What it does:** Grows (positive) or shrinks (negative) the area a mask influences, as an offset of its coverage in pixels, without changing the mask path.
 - **Exact semantics:**
-  - `e` in layer pixels; `e > 0` expands outward, `e < 0` contracts; scrub range −32,000 … 32,000 (earlier versions ±1,000 by scrubbing).
+  - `e` in layer pixels; `e > 0` expands outward, `e < 0` contracts; scrub range −32,000 … 32,000 (Adobe help; earlier versions scrubbed only to ±1,000, larger values had to be typed).
   - Applied before feather: the feather is centred on the expanded edge.
   - Offset geometry: UNVERIFIED — expansion behaves like a morphological dilation/erosion of the filled path (rounded outer corners on expansion, sharp inner corners), not a miter offset of the path.
   - Inverted masks: expansion is applied to the path's interior first, then inverted (UNVERIFIED).
@@ -804,14 +805,14 @@
 
 - **What it does:** Controls whether a mask's own path animation is motion-blurred.
 - **Exact semantics:**
-  - Values (scripting `MaskMotionBlur`): Same As Layer (与图层相同（译名待核）, `SAME_AS_LAYER`, default), On (`ON`), Off (`OFF`).
+  - Values (scripting `MaskMotionBlur`): Same As Layer (与图层相同, `SAME_AS_LAYER`, default), On (打开（译名待核）, `ON`), Off (关闭（译名待核）, `OFF`).
   - Same As Layer: the mask is evaluated at each motion-blur sub-sample time when the layer's Motion Blur switch and the comp's Motion Blur enable are on.
-  - On: mask path is sampled at the sub-sample times whenever the comp's motion blur enable is on, even if the layer switch is off (UNVERIFIED).
+  - On: mask path is sampled at the sub-sample times even if the layer's Motion Blur switch is off (Adobe help: "regardless of the setting of the Enable Motion Blur switch for the layer"); the comp-level Enable Motion Blur / Render Settings motion blur still gate it (UNVERIFIED for the comp-level gate).
   - Off: mask evaluated at the frame time only, while the layer's transform is still blurred.
   - Sub-sample times and weighting come from the comp's Shutter Angle / Phase / Samples Per Frame (see transform-keyframes-expressions.md, motion-blur sampling; AE-CMP-064 Motion blur rendering).
 - **Priority:** P1
 - **Owner:** bae-render (+ bae-anim)
-- **Notes:** Layer > Mask > Motion Blur menu. Implementation hint: for raster layers the masked source is rendered per sub-sample only when the mask path actually changes within the shutter interval; otherwise reuse one masked source for all sub-samples.
+- **Notes:** Layer > Mask > Motion Blur menu; scripting `MaskPropertyGroup.maskMotionBlur`. Source: https://helpx.adobe.com/after-effects/using/assorted-animation-tools.html (Motion blur). Implementation hint: for raster layers the masked source is rendered per sub-sample only when the mask path actually changes within the shutter interval; otherwise reuse one masked source for all sub-samples.
 
 ### AE-CMP-047 · RotoBezier masks (RotoBezier 蒙版（译名待核）)
 
