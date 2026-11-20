@@ -640,7 +640,7 @@
   - Create: Layer > New > Text (Ctrl+Alt+Shift+T) or click with the Type tool (point text) / drag (paragraph text). Via menu the insertion point is the centre of the Composition viewer.
   - Defaults: Anchor Point `(0, 0)` (the text baseline origin); Position = click point, or comp centre via the menu; layer name = the text typed (first line UNVERIFIED), updating live until the layer is renamed (`isNameSet` false).
   - Property groups: Text (ADBE Text Properties: Source Text, Path Options, More Options, Animators), Masks, Effects, Transform, Layer Styles, Geometry Options (Advanced 3D / CINEMA 4D), Material Options (3D).
-  - Always rasterized from vectors at render resolution (continuous rasterization is implicit). UNVERIFIED: whether the Collapse/Continuously Rasterize switch is shown for text layers and what it changes (cmp-a "collapse/continuous rasterize"). `width`/`height` are not meaningful; bounds come from `sourceRectAtTime`.
+  - Always rasterized from vectors at render resolution. The Collapse switch is shown as Continuously Rasterize and changes the mask/effect vs transform order (AE-PRJ-362; cmp-a "collapse/continuous rasterize"). `width`/`height` are not meaningful; bounds come from `sourceRectAtTime`.
 - **Priority:** P0
 - **Owner:** bae-text (+ bae-model)
 - **Notes:** Everything about text content and layout: text.md. Lottie `ty: 5`, data in `t` (`t.d` document keyframes, `t.p` path, `t.m` more options, `t.a` animators).
@@ -652,7 +652,7 @@
   - Create: Layer > New > Shape Layer (empty "Shape Layer N" (形状图层 N)), or draw with a shape/pen tool with no shape layer selected.
   - Defaults: Anchor Point `(0, 0)`; Position `(compW/2, compH/2)`; drawn shapes are placed so they appear where drawn (path coordinates relative to the layer origin). AE 2020 (17.0)+ "Shape Layer" names, label Blue UNVERIFIED.
   - Property groups: Contents (ADBE Root Vectors Group), Masks, Effects, Transform, Layer Styles, Geometry Options (Advanced 3D / CINEMA 4D), Material Options (3D).
-  - Always continuously rasterized; Collapse/Continuous Rasterize switch toggles nothing visible UNVERIFIED (shown but forced).
+  - Always rasterized from vectors at render resolution. The Collapse switch is shown as Continuously Rasterize and changes the mask/effect vs transform order (AE-PRJ-362).
 - **Priority:** P0
 - **Owner:** bae-vector (+ bae-model)
 - **Notes:** Content model: shapes.md. Lottie `ty: 4`, `shapes[]`.
@@ -947,7 +947,7 @@
 - **What it does:** The eyeball toggles whether the layer's visual contributes to previews and renders.
 - **Exact semantics:**
   - `enabled: bool`, default true. For adjustment layers: whether their effects apply. For cameras: whether the camera can be the active camera. For lights: whether the light lights the scene.
-  - A disabled layer still evaluates its transforms and expressions (children follow it; expressions can sample it). It can still be used as a track matte (AE 23.0+ automatically turns the matte layer's Video off and the matte still works; classic behaviour: a matte layer with Video off still works as a matte) UNVERIFIED for pre-23 nuance.
+  - A disabled layer still evaluates its transforms and expressions (children follow it; expressions can sample it). It can still be used as a track matte: assigning a track matte turns the matte layer's Video off and the matte still works (in all versions; AE 23.0+ lets the user turn the matte's Video back on to also show it).
   - `active(t) = enabled && soloRule(layer) && inPoint <= t < outPoint` (scripting `Layer.active`, `activeAtTime(t)`).
   - Layer > Switches > Show All Video; Hide Other Video (disables all but selected).
 - **Priority:** P0
@@ -987,7 +987,7 @@
 ### AE-PRJ-360 · Lock switch (锁定)
 
 - **What it does:** Prevents a layer from being selected or edited.
-- **Exact semantics:** `locked: bool`, default false. A locked layer cannot be selected in the Composition panel or Timeline; attempts make it flash; its properties cannot be changed by UI (scripts also cannot change most attributes of a locked layer; Scale Composition.jsx fails on locked layers). Commands that act on "all layers" (Lift/Extract, Select All) skip locked layers. Layer > Switches > Unlock All Layers (Ctrl+Shift+L) UNVERIFIED shortcut. Rendering unaffected.
+- **Exact semantics:** `locked: bool`, default false. A locked layer cannot be selected in the Composition panel or Timeline; attempts make it flash; its properties cannot be changed by UI (scripts also cannot change most attributes of a locked layer; Scale Composition.jsx fails on locked layers). Commands that act on "all layers" (Lift/Extract, Select All) skip locked layers. Layer > Switches > Lock (Ctrl+L / Cmd+L) locks the selection; Unlock All Layers is Ctrl+Shift+L / Cmd+Shift+L (AE shortcut reference). Rendering unaffected.
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-ui-motion)
 - **Notes:** Scripting `Layer.locked`. BAE decision: Agent/collaborator commands must also respect Lock (Command validation rejects edits to locked layers unless the command unlocks first).
@@ -1004,7 +1004,7 @@
 
 - **What it does:** One switch with two meanings: for precomp layers it collapses the nested comp's transforms into the parent's (no intermediate flattening); for vector-source layers (Illustrator/PDF/EPS/SVG footage) it re-rasterizes vectors at the transformed resolution every frame.
 - **Exact semantics:**
-  - `collapseTransformation: bool`, default false. Settable only when `canSetCollapseTransformation` (precomp layers and vector footage layers); for text and shape layers the behaviour is always continuous rasterization and the switch is not shown/changeable UNVERIFIED.
+  - `collapseTransformation: bool`, default false. Settable when `canSetCollapseTransformation`. Per the AE help (Layers page, switch list), the switch means Collapse Transformations for precomp layers and Continuously Rasterize for shape layers, text layers and vector-footage layers (Illustrator, PDF, EPS, SVG). Text and shape layers are always rasterized from their vectors at the transformed resolution; for them the switch changes the render order (with it on, masks/effects are applied after the layer transform, as for any continuously rasterized layer) rather than sharpness; details in cmp-a.
   - Data only here. Rendering consequences (blend modes passing through, 3D layers interleaving with the parent comp, mask/effect order change, frame boundary removal, adjustment layers inside collapsed precomps) are specified in compositing-3d-color.md [cmp-a] "collapse/continuous rasterize".
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-render)
@@ -1019,12 +1019,12 @@
   | Best (最佳) | `LayerQuality.BEST` | subpixel positioning, anti-aliasing, full effect precision; sampling per AE-PRJ-364 |
   | Draft (草图) | `LayerQuality.DRAFT` | no anti-aliasing, no subpixel positioning (positions rounded to pixels), some effects approximate |
   | Wireframe (线框) | `LayerQuality.WIREFRAME` | layer drawn as its bounding box outline only |
-  - Default Best. Clicking the Quality switch cycles Best (Bilinear) → Draft → Best (Bicubic) → Best (Bilinear) UNVERIFIED cycle order; Layer > Quality offers all four including Wireframe. Ctrl+U = Best, Ctrl+Shift+U = Draft, Ctrl+Alt+Shift+U = Wireframe UNVERIFIED shortcuts.
+  - Default Best. Clicking the Quality switch toggles among Best (bilinear) → Draft → Best (bicubic) → back to Best (bilinear) (order as listed in the help); Layer > Quality (图层 > 质量) offers all of these plus Wireframe. Ctrl+U / Ctrl+Shift+U / Ctrl+Alt+Shift+U (Cmd on macOS) set Best / Draft / Wireframe for the selection (AE shortcut reference lists the three shortcuts in that order).
   - Render Settings "Quality" (Current Settings / Best / Draft / Wireframe) can override it for a render.
   - Duplicated or split layers keep the Quality setting.
 - **Priority:** P0 (Best/Draft); Wireframe P2.
 - **Owner:** bae-model (+ bae-render)
-- **Notes:** Scripting `AVLayer.quality`. Rendering details: compositing-3d-color.md [cmp-a] "quality/sampling/subpixel". zh-CN help shows 品质 for the switch; menu entries 最佳/草图/线框 UNVERIFIED（译名待核）.
+- **Notes:** Scripting `AVLayer.quality`. Rendering details: compositing-3d-color.md [cmp-a] "quality/sampling/subpixel". zh-CN help: switch 品质, menu 图层 > 质量, values 最佳 / 草图 / 线框, sampling 双线性 / 双立方 (Source: https://helpx.adobe.com/cn/after-effects/using/layers.html).
 
 ### AE-PRJ-364 · Sampling: Bilinear / Bicubic (采样：双线性 / 双立方)
 
@@ -1070,7 +1070,7 @@
 ### AE-PRJ-368 · Adjustment Layer switch (调整图层)
 
 - **What it does:** Turns any visual AV layer into an adjustment layer (AE-PRJ-340) or back.
-- **Exact semantics:** `adjustmentLayer: bool`, default false (true for layers made by New > Adjustment Layer). Allowed on footage, solid, precomp, text and shape layers UNVERIFIED for text/shape; not on camera, light, audio-only or null. Toggling does not change effects, masks or transforms. Render semantics: cmp-a.
+- **Exact semantics:** `adjustmentLayer: bool`, default false (true for layers made by New > Adjustment Layer). Allowed on footage, solid, precomp, text and shape layers (shape/text adjustment layers are a common AE technique: the shape/text alpha becomes the effect coverage); not on camera, light, audio-only layers. UNVERIFIED: whether a null object can be switched to an adjustment layer. Toggling does not change effects, masks or transforms. Render semantics: cmp-a.
 - **Priority:** P0
 - **Owner:** bae-model (+ bae-render)
 - **Notes:** Scripting `AVLayer.adjustmentLayer`.
@@ -1143,7 +1143,7 @@
   | startTime (开始时间) | time | 0 or CTI (AE-PRJ-388) | -10800..10800 | s (comp time) | comp time at which layer time 0 (source frame 0) occurs |
   | inPoint (入点) | time | = startTime for new layers | -10800..10800 | s (comp time) | first visible instant (inclusive) |
   | outPoint (出点) | time | in + duration | -10800..10800 | s (comp time) | end of visibility (exclusive) |
-  | stretch (伸缩) | f64 | 100 | -9900..9900, never in (-1, 1): 0 < x < 1 → 1, -1 < x < 0 → -1; 0 invalid UNVERIFIED | % | negative = reversed playback |
+  | stretch (伸缩) | f64 | 100 | -9900..9900; values in (0, 1) are set to 1 and values in (-1, 0) to -1 (scripting doc); exactly 0 UNVERIFIED (treat as invalid) | % | negative = reversed playback |
   | duration (持续时间) | derived | | | s | `outPoint - inPoint` (Timeline Duration column) |
   ```
   k = stretch / 100
@@ -1167,9 +1167,9 @@
 - **Exact semantics:**
   | Parameter (中文) | Type | Default | Range | Units | Notes |
   |---|---|---|---|---|---|
-  | Stretch Factor (拉伸因数)（译名待核: help uses 拉伸系数） | f64 | current stretch | -9900..9900 (|x| ≥ 1) | % | |
+  | Stretch Factor (拉伸系数) | f64 | current stretch | -9900..9900 (|x| ≥ 1) | % | |
   | New Duration (新持续时间) | time | current duration × new/old | > 0 | timecode | linked to Stretch Factor: `newDur = oldDur * newStretch/oldStretch` |
-  | Hold in Place (原位定格)（译名待核） | enum | Layer In-point | Layer In-point (图层入点), Current Frame (当前帧), Layer Out-point (图层出点) | — | |
+  | Hold in Place (原位定格) | enum | Layer In-point | Layer In-point (图层入点), Current Frame (当前帧), Layer Out-point (图层出点) | — | |
   ```
   r = newStretch / oldStretch
   pivot = (hold == In) ? inPoint : (hold == Current) ? CTI : outPoint
@@ -1179,11 +1179,11 @@
   ```
   - Negative factor reverses the layer (like AE-PRJ-375 but with the hold point semantics).
   - The layer's frame sampling follows the new mapping; inter-frame results need frame blending (AE-PRJ-366).
-  - Not available for camera/light? (UNVERIFIED: AE allows time stretch on all layer types, including text and shape; it scales their keyframes.)
+  - Applies to every layer type, including sourceless text and shape layers, where it only rescales keyframe and marker timing (UNVERIFIED: camera and light layers).
   - With time remap enabled, Time Stretch scales the Time Remap keyframe timing too.
 - **Priority:** P0
 - **Owner:** bae-motion (+ bae-anim, bae-model)
-- **Notes:** Help: dialog fields "Stretch Factor", "New Duration", "Hold in Place". Ctrl/Cmd-click on In/Out column: stretch to CTI. Precision: AE rounds New Duration to whole frames when typed in timecode UNVERIFIED.
+- **Notes:** Help: dialog fields "Stretch Factor", "New Duration", "Hold in Place" (zh-CN help: 拉伸系数, 新持续时间, 原位定格). Ctrl/Cmd-click on In/Out column: stretch to CTI. Precision: AE rounds New Duration to whole frames when typed in timecode UNVERIFIED.
 
 ### AE-PRJ-375 · Time-Reverse Layer (时间反向图层)
 
@@ -1349,7 +1349,7 @@
   - Track mattes (AE 23.0+ explicit links): a copy of a matted layer points to the same matte layer; if the matte layer is duplicated in the same operation, the copy points to the matte copy. Legacy implicit mattes: duplicating preserves "the relative ordering of the layer and its track matte" (copies of the pair are placed together).
   - Parent links: copy keeps the same parent; if the parent was duplicated in the same operation, copies link to the parent copy UNVERIFIED.
   - Expressions are copied verbatim: references by name resolve to the original targets (e.g. `thisComp.layer("Null 1")`); `thisLayer` refers to the copy.
-  - Alt/Opt-drag of a layer in the Composition panel also duplicates (preference "Duplicate Layers" vs "Activate Camera Navigation" for Alt-drag, AE 2025+).
+  - Alt/Opt-drag of a layer in the Composition panel also duplicates (UNVERIFIED: a preference choosing between duplicating layers and camera navigation for Alt-drag in recent versions).
 - **Priority:** P0
 - **Owner:** bae-motion (+ bae-model)
 - **Notes:** Scripting `Layer.duplicate()`. Exact name-increment algorithm UNVERIFIED (AE scans existing names).
@@ -1360,7 +1360,7 @@
 - **Exact semantics:**
   - Copy (Ctrl+C) with layers selected and no property/keyframe selected copies whole layers; if a mask, effect or keyframe is selected only that component is copied (Shift+F2 deselects components first).
   - Paste (Ctrl+V): pasted layers keep their original startTime/in/out (comp times). Placement: directly above the topmost selected layer in the target comp; with no selection, at the top of the stack. Pasted order: top-to-bottom in the order the layers were selected before copying (first selected ends up on top).
-  - Paste with Ctrl+Alt+V / Cmd+Opt+V: same, but shifted so that the earliest in point equals the CTI (relative offsets kept) UNVERIFIED (help: "place the In points of the copies at the current time").
+  - Paste with Ctrl+Alt+V / Cmd+Opt+V ("Paste layers at current time" in the shortcut reference): same, but the pasted layers are moved in time so their in points are at the CTI; UNVERIFIED: whether several pasted layers keep their relative offsets (earliest in point at CTI) or all start at the CTI.
   - Cut (Ctrl+X) = copy + delete.
   - Cross-comp paste: sources are referenced (no new items); parent links to layers not pasted are dropped unless the target comp has the same layer? UNVERIFIED (AE keeps parent only when pasting into the same comp); track matte links to non-pasted layers are dropped (AE 23+) UNVERIFIED; expressions are copied verbatim and may break.
   - Cross-project / to text editors: AE puts a proprietary clipboard format; pasting a layer into a text editor yields nothing useful (transform keyframes paste as tab-separated "Adobe After Effects Keyframe Data", ani-a).
@@ -1411,9 +1411,9 @@
 - **Exact semantics:**
   | Command | Shortcut | Effect |
   |---|---|---|
-  | Fit to Comp (适合复合) | Ctrl+Alt+F | Scale (non-uniform allowed) so the layer's source rect fills the comp frame exactly; Position = comp centre; Anchor unchanged at source centre UNVERIFIED (AE sets anchor to centre?) |
-  | Fit to Comp Width | Ctrl+Alt+Shift+H | uniform scale so layer width = comp width |
-  | Fit to Comp Height | Ctrl+Alt+Shift+G | uniform scale so layer height = comp height |
+  | Fit to Comp (适合复合) | Ctrl+Alt+F / Cmd+Opt+F | Scale (non-uniform allowed) so the layer's source rect fills the comp frame exactly; Position = comp centre; Anchor unchanged at source centre UNVERIFIED (AE sets anchor to centre?) |
+  | Fit to Comp Width | Ctrl+Alt+Shift+H / Cmd+Opt+Shift+H (preserves each layer's aspect ratio) | uniform scale so layer width = comp width |
+  | Fit to Comp Height | Ctrl+Alt+Shift+G / Cmd+Opt+Shift+G (preserves aspect ratio) | uniform scale so layer height = comp height |
   | Center Anchor Point in Layer Content (在图层内容中居中放置锚点) | Ctrl+Alt+Home | Anchor = centre of `sourceRectAtTime(CTI)` (visible content, AE 17.0+), Position adjusted so the layer does not move |
   | Center In View (在视图中居中) | Ctrl+Home | Position so that the anchor point lands at the centre of the current Composition view |
   - Each applies to all selected layers; when Scale/Position are keyframed, a keyframe is set at CTI.
