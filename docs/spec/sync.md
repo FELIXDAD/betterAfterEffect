@@ -1,7 +1,7 @@
 # 协同同步与版本（bae-sync）
 
 > 负责：09 `collab/sync`。代码：`crates/bae-sync`。架构依据：`docs/ARCHITECTURE.md` 第 4.6、7 节。
-> 状态：第 1–3 节（协议、会话、Hub 中继）PR A 已合并；第 4 节（共享目录）PR B；第 5 节（命名版本、只读视图、按 Prim 差异）PR C。在线状态、建议性锁、分支与合并在后续 PR。
+> 状态：第 1–3 节（协议、会话、Hub 中继）PR A 已合并；第 4 节（共享目录）PR B；第 5 节（命名版本、只读视图、按 Prim 差异）PR C 已合并；第 6 节（在线状态、建议性锁）PR D。Hub 的 WebSocket 客户端、回滚、分支与合并在后续 PR。
 
 ## 1. 概念
 
@@ -34,6 +34,7 @@
 | `Updates` | `doc`、`version`、`data` | 一段 Loro 增量；`version` 是发送方在导出这段增量时的版本。 |
 | `SnapshotRequest` | `doc` | 请对方发一份完整快照（共享目录模式用它压缩自己的日志）。 |
 | `Snapshot` | `doc`、`version`、`data` | 完整 Loro 快照（含历史）。导入方式与 `Updates` 相同。 |
+| `Presence` | `client`、`seq`、`ttl_ms`、`state` | 在线状态（第 6 节），不进任何文档的历史。`state` 是 `PresenceState` 的 JSON，`None` 表示离开。 |
 
 ### 2.3 二进制编码
 
@@ -44,6 +45,7 @@ Hello            0x01  protocol:varint  client:str  n:varint  n × (doc:str  vv:
 Updates          0x02  doc:str  vv:bytes  data:bytes
 SnapshotRequest  0x03  doc:str
 Snapshot         0x04  doc:str  vv:bytes  data:bytes
+Presence         0x05  client:str  seq:varint  ttl_ms:varint  (0x00 | 0x01 state:bytes)
 ```
 
 - 当前协议版本 `PROTOCOL_VERSION = 1`。以后只以兼容的方式扩展：新字段追加在已有字段之后（旧版本解码时忽略多出来的字节），新消息用新的类型字节（旧版本收到未知类型时跳过，`SyncError::UnknownMessage`）。
@@ -92,6 +94,7 @@ MyFilm.bae/
   sublayers/<工程层>.loro            基础快照（Project::save 写，02 负责）
   updates/<文档>/<client-id>.log     每个客户端只追加写自己的日志
   updates/<client-id>.lock           会话期间持有的建议性文件锁（尽力而为）
+  presence/<client-id>.presence      在线状态心跳文件（第 6 节）
   history.loro                       工程历史（第 5 节，History::save 写）
 ```
 
@@ -202,8 +205,38 @@ sum     := BLAKE3(payload) 的前 8 字节
 - 分支与合并。
 - 命名版本的命令（让 Agent 通过 CommandRegistry 调用）：现在的 `Command` 只能拿到 `Transaction`，碰不到 `History`，需要和 02/17 商量接口。
 
-## 6. 给其他工作流
+## 6. 在线状态与建议性锁（PR D）
+
+### 6.1 内容
+
+`PresenceState`（JSON，新版本加的字段原样保留在 `extra` 里转发）：
+
+| 字段 | 说明 |
+|---|---|
+| `user` | `AuthorId` |
+| `name`、`color` | 显示名、颜色（sRGB 三个字节） |
+| `selection` | 选中的 Prim 路径 |
+| `playhead` | `{comp, time}`：哪个合成、播放头时间（flicks） |
+| `workspace` | 正在用的工作区，例如 `motion`、`storyboard`、`edit`、`review` |
+| `editing` | **建议性锁**：声明"我在改这些 Prim"（通常是合成）。只提示，不阻止任何人修改。 |
+
+### 6.2 规则
+
+- `SyncSession::set_presence(state)`：变化时下一次 `pump` 发出，之后每 `presence_heartbeat`（默认 5 秒）发一次心跳。`clear_presence()`：发"离开"。
+- 每条 `Presence` 带递增的 `seq`，接收方只保留每个客户端最新的一条，旧的、重放的、JSON 解析不了的都忽略。`seq` 从会话开始时的毫秒时间算起，所以重启后的客户端不会被旧记录压住。
+- **在线判断只用接收方自己的时钟**：超过发送方声明的 `ttl_ms`（默认 20 秒）没有收到新的 `seq` 就视为离线。不同机器的时钟不用对齐。
+- `SyncSession::presence()` 列出其他在线的人（不含自己）；`editing_by_others(path)` 列出声明正在改 `path`、它的祖先或后代的人（界面据此提示"Alice 正在改这个合成"）；`PumpOutcome::presence_changed` 表示有人上线、离线或状态变了。
+- **Hub**：`Relay` 把每条被接受的在线状态（包括只刷新存活的心跳）转发给其他所有连接；新连接一上来就收到当前所有人的状态；连接断开（`disconnect` 或传输出错）时替那个客户端向其他人发"离开"。
+- **共享目录**：每个客户端用临时文件 + 改名重写自己的 `presence/<client-id>.presence`（一条第 4.2 节格式的记录，内容是编码后的 `Presence` 消息），离开时写一条"离开"记录。读者随轮询读取变了的文件。文件修改时间早于两倍 TTL 的不予理会（崩溃的客户端留下的）；超过一天没动的文件任何人都可以删除。这一步要用文件修改时间对比本地时钟，所以 SMB 服务器和客户端的时钟差不要超过两倍 TTL（默认 40 秒）。
+
+### 6.3 验证（`crates/bae-sync/tests/presence.rs`）
+
+- 经 Hub：选中、播放头、工作区、建议性锁都能传到其他人；自己看不到自己；状态不变时不重复报告变化；新加入的人立即看到所有人；心跳维持在线远超 TTL，停止心跳后按 TTL 离线；主动离开立即生效；连接断开时其他人立即收到离开。
+- 重放的旧心跳不能改写或复活别人；坏 JSON 被忽略。
+- 经共享目录：心跳文件、TTL 离线、主动离开、一小时前的残留文件被忽略（把修改时间改成现在后又能看到，证明是按时间过滤的）。
+
+## 7. 给其他工作流
 
 - **02 doc-model**：需求记在 `docs/workstreams/02-doc-model.md` 的"请求"一节。
 - **10 hub-nas**：服务端用 `Relay` + 每个 WebSocket 连接一个 `Transport` 实现即可；消息编码见 2.3。
-- **11/12 界面**：`PumpOutcome::events` 已经通过 `Stage::subscribe` 广播，界面照常刷新；`SyncSession::unsynced` 可用于"有未同步的修改"提示；`unknown_docs` 用于提示"协作者新建了工程层"。
+- **11/12 界面**：`PumpOutcome::events` 已经通过 `Stage::subscribe` 广播，界面照常刷新；`SyncSession::unsynced` 可用于"有未同步的修改"提示；`unknown_docs` 用于提示"协作者新建了工程层"；`presence()` / `editing_by_others()` / `presence_changed` 用于在线头像、别人的选中框和播放头、"有人正在改这个合成"的提示。
