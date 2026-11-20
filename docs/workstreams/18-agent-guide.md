@@ -46,11 +46,26 @@
 
 ## 进度
 
-- [ ] 指南大纲
-- [ ] 动画规范
-- [ ] 操作流程与协作礼仪
-- [ ] 配方
-- [ ] Skill 打包
-- [ ] 评测集
+- [x] 指南大纲：`docs/agent-guide/README.md` 及 01–08 章
+- [x] 动画规范：`03-animation.md`（时长表、缓动预设与 cubic-bezier 换算、节奏、文字、Logo、转场、镜头运动、卡点）
+- [x] 操作流程与协作礼仪：`02-workflow.md`、`05-collaboration.md`；分镜规范 `04-storyboard.md`；质量清单与 rubric `06-quality.md`；常见错误 `08-mistakes.md`
+- [x] 配方：`recipes/` 下 7 个（标题出场、下三分之一字幕、Logo 演绎、数据图表、UI 动效、动态分镜、交接给 AE）
+- [x] Skill 打包：`skills/bae-animation/SKILL.md`；`references/` 由 `skills/sync-references.py` 从指南生成（`--check` 可放进 CI）
+- [x] MCP instructions 精简版：`docs/agent-guide/mcp-instructions/`（英文 / 中文，各不超过 3,000 字符）
+- [x] 评测集：`docs/agent-guide/evals/`，15 个任务（TOML），检查项词汇草案和评审提示
+- [ ] 17 合并后按实际工具名核对全部"待确认"（`tools.md`、正文、Skill、MCP instructions、评测检查项）
+- [ ] 评测脚本（依赖 17 的审计日志和工具；可以由 17 或 18 实现）
+- [ ] 动效设计师审阅动画规范（验收条件之一）
+
+### 受阻 / 待决定
+
+- 工具名、参数格式、属性路径（`transform.position` 等）、节点路径格式都是预期值，等 17 和 02 定稿。
+- MCP instructions 默认用英文还是中文：目前建议英文（见 `mcp-instructions/README.md`），等用户决定。
+- 分镜格字段名（以及是否增加"转场""声音"两个字段）等 13 定稿。
+
+### 对其他工作流的请求
+
+- 17：已在 17 任务书"请求"一节留言（工具名对齐、instructions 集成、指南作为 MCP 资源、`stage.describe` 输出内容、联系表标帧号、时间参数接受帧号）。
+- 13：已在 13 任务书"请求"一节留言（分镜格增加"转场""声音"字段）。
 
 ## 请求（其他工作流在这里留言）
