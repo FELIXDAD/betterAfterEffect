@@ -8,15 +8,15 @@
 - 规则：只测试，不改代码；测量时持 `gui.lock`
 - 截图：[`final-acceptance-shots/`](./final-acceptance-shots/)、[`kf2-shots/`](./kf2-shots/)；本机补充 `E:\bae-test\acc\final624-shots\`；机器 JSON：[`final-acceptance-timings.json`](./final-acceptance-timings.json)
 
-## 总表（5819881 更新 C）
+## 总表（补齐 B′ / 5819881 更新 C）
 
 | 项 | 结果 | 一句话 |
 |---|---|---|
 | **A 速度对比** | **通过** | 沿用 a775f2c 同机结论：BAE PNG **2.008 s** / TIFF **2.006 s** vs AE **22.017** / **18.515**（~11× / ~9×；清缓存后 PNG ~14×） |
-| **B 保存 / 打开** | **部分** | 「保存丢关键帧」已撤回（IME）。@624a136：`kfA.bae`/`kfB.bae`/`kfA.baez` 可另存；`bae.exe kfA.bae` 标题正确；`BAE_LANG=zh` 菜单与「是/否/取消」「关闭前是否保存…」为中文；Esc 取消后主窗 `IsWindowEnabled`；**秒表/◆ 自动化仍未稳定打出 2 个可读回关键帧**（export-json 无 `keyframes`）——阻塞完整往返 |
+| **B 保存 / 打开** | **通过** | Windows 界面上另存为对话框落盘、Ctrl+S、未保存标记、命令行打开、中文提示、Esc 取消后主窗口可用已验证；两个关键帧（值不同/相同）在 .bae 和 .baez 上的保存读回由 bae mcp + export-json + 界面 J/K 验证（见 [bp-cp 报告](./2026-11-21-final-acceptance-bp-cp.md)）；脏关闭消息框的"否/是"两个按钮在 Windows 界面上没有单独测。 |
 | **C 渲染队列** | **通过** | 见 [`2026-11-21-final-acceptance-c-keyboard.md`](./2026-11-21-final-acceptance-c-keyboard.md)（@`293561a`）与 [`2026-11-21-final-acceptance-c-fixes.md`](./2026-11-21-final-acceptance-c-fixes.md)（@`5819881`，含 #103）：PNG / 不压缩 TIFF / OpenEXR 实渲与 #102 按键路由全通；**#103 三项修复复测 3/3 通过**——含空格（`E:\bae-test\rq final\png\`）与无空格（`E:\bae-test\rq_nospace\`）路径「在资源管理器中显示」均打开目标目录并选中 `Comp1_0000.png`；项目面板持停靠焦点时 `Tab` 到 `Stop` 按 `Enter` 不再触发改名；长范围（10,001 帧）中途停止后状态显示 `Stopped (9078/10001 frames)` 且磁盘实留 **9,078** 个完整 PNG（`N` 与磁盘一致） |
 
-**结论（给发布）：A、C 全绿（C 在 `5819881` 上完成 #103 三项修复复测，全项闭环通过）；B 关键帧 GUI 自动化仍待补齐。**
+**结论（给发布）：A、B、C 全绿（B 的两个关键帧 `.bae`/`.baez` 往返已在 `0c63a4b` 上由 `bae mcp` + `export-json` + 界面 J/K 补齐，见 [`2026-11-21-final-acceptance-bp-cp.md`](./2026-11-21-final-acceptance-bp-cp.md)；C 在 `5819881` 上完成 #103 三项修复复测，全项闭环通过）。**
 
 ---
 
