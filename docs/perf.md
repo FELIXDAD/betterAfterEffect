@@ -161,7 +161,7 @@ GPU                 … 第 N−1 帧 … 第 N 帧 …
 
 导出流水线（2026-11-21，macOS arm64 strip 后，`cargo build --release -p bae`）：dev 6aae5b8 22,870,912 字节 → 23,568,144 字节，**+697,232 字节（+0.665 MiB）**。没有新依赖：以前 `bae render` 不调用 bae-media 的编码器，LTO 把它们整个删掉了；现在链接进来的是 EXR 写出（exr 的各种压缩器 +92 KiB，miniz_oxide +16 KiB）、PNG / TIFF / EXR 写出与并行写出（bae_media +104 KiB，含 macOS 影片编码器）、TIFF 编码（+17 KiB）、导出流水线（bae_render +33 KiB）和标准库的线程 / 通道实例化（cargo bloat 估算，.text 合计约 +387 KiB）。Windows 没有影片编码器那部分。`png` 从 opt-level "s" 改回 3：strip 后的二进制大小不变（同字节数）。
 
-蒙版（render/masks，2026-11-21，macOS arm64 strip 后，`cargo xtask size`）：dev b7c37e2 24,238,352 字节 → 24,287,968 字节，**+49,616 字节（+48.5 KiB）**。没有新 crate（kurbo 已经随 bae-vector / vello 链接进应用）。
+蒙版（render/masks，2026-11-21，macOS arm64 strip 后，`cargo xtask size`）：蒙版本身 +49,616 字节；同时去掉两处浪费 −33,072 字节——`bae render --mock-eval`（03 之前的模拟求值器，唯一把 `MockEvaluator` 链接进应用的地方，约 29 KB 代码）和 `RenderError` 的派生 `Debug`（改成打印消息）。合计 dev b7c37e2 24,238,352 → 24,254,896 字节，**+16,544 字节（+16.2 KiB）**。没有新 crate（kurbo 已经随 bae-vector / vello 链接进应用）。另：bae-render 里还实例化了约 50 KB naga / wgpu 错误类型的 `Debug`（`<&T as Debug>` 的跨 crate 泛型副本，bae-gpu 里还有一份 55 KB），在 bae-render 内部去不掉，留给根 `Cargo.toml` 的编译选项（例如 share-generics）去看。
 
 `cargo bloat`：bae-render 自身约 134 KiB，其余主要是第一次进入应用的 bae-media 解码器（exr、image-webp、zune-jpeg 等）和 bae-anim。素材解码是 bae-render 的 `media` 特性（默认开）；根 `Cargo.toml` 的条目关掉默认特性，`apps/bae` 显式打开，需要更小的二进制（例如只渲染形状的服务端）时可以不开。
 
