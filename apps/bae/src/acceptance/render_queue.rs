@@ -549,3 +549,178 @@ fn full_disk_fails_cleanly() {
         std::panic::resume_unwind(panic);
     }
 }
+
+// ---- Retest of #110 (dev 763eaad): edge cases ----
+
+/// Queue the active comp once more and set the new item's output.
+fn queue_one(h: &mut Ui, format: ExportFormat, output: &Path, start: i64, end: i64) -> usize {
+    key(h, Modifiers::COMMAND, Key::M);
+    let i = items(h).len() - 1;
+    let queue = h.state().render_queue();
+    let mut q = queue.lock();
+    let id = q.items()[i].id;
+    let item = q.item_mut(id).unwrap();
+    item.format = format;
+    item.output = output.to_string_lossy().into_owned();
+    item.start = start;
+    item.end = end;
+    i
+}
+
+/// Render and collect every `Rendering { total }` the panel showed.
+fn render_watching_totals(h: &mut Ui, i: usize) -> std::collections::BTreeSet<usize> {
+    render(h);
+    let mut totals = std::collections::BTreeSet::new();
+    let started = Instant::now();
+    loop {
+        frame(h);
+        if let ItemStatus::Rendering { total, .. } = items(h)[i].status {
+            totals.insert(total);
+        }
+        if !h.state().render_queue().lock().is_running() {
+            frame(h);
+            return totals;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(60),
+            "{:?}",
+            items(h)[i].status
+        );
+    }
+}
+
+#[test]
+fn whitespace_output_is_refused_with_a_visible_message() {
+    let Some(mut h) = gpu_gui() else { return };
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let i = queue_one(&mut h, ExportFormat::Png, Path::new("   "), 0, 2);
+    render_watching_totals(&mut h, i);
+    let ItemStatus::Failed(message) = items(&h)[i].status.clone() else {
+        panic!("{:?}", items(&h)[i].status);
+    };
+    assert_eq!(message, "Choose where to render: Output To is empty.");
+    assert!(
+        find_text(&h, &message).is_some(),
+        "message not shown in the panel"
+    );
+}
+
+#[test]
+fn ranges_are_limited_to_the_comp() {
+    let Some(mut h) = gpu_gui() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let i = queue_one(
+        &mut h,
+        ExportFormat::Png,
+        &tmp.path().join("neg_[####].png"),
+        -5,
+        2,
+    );
+    render_watching_totals(&mut h, i);
+    assert!(
+        matches!(items(&h)[i].status, ItemStatus::Done { files: 3, .. }),
+        "{:?}",
+        items(&h)[i].status
+    );
+    assert_eq!(
+        files_in(tmp.path(), "png").first().map(String::as_str),
+        Some("neg_0000.png")
+    );
+    let i = queue_one(
+        &mut h,
+        ExportFormat::Png,
+        &tmp.path().join("out_[####].png"),
+        400,
+        410,
+    );
+    render_watching_totals(&mut h, i);
+    assert_eq!(
+        items(&h)[i].status,
+        ItemStatus::Failed("The frames are outside the composition (0–299).".into())
+    );
+}
+
+#[test]
+#[ignore = "issue #110"]
+fn progress_of_a_limited_range_counts_the_frames_it_renders() {
+    // 290–400 on a 300-frame comp renders 10 frames; the progress must say
+    // “x / 10”, not “x / 111” (or the fields must show the limited range).
+    let Some(mut h) = gpu_gui() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    long_comp(&mut h); // 1 800 frames, slow enough to see the progress
+    let i = queue_one(
+        &mut h,
+        ExportFormat::Png,
+        &tmp.path().join("end_[####].png"),
+        1780,
+        1900,
+    );
+    let totals = render_watching_totals(&mut h, i);
+    assert!(
+        matches!(items(&h)[i].status, ItemStatus::Done { files: 20, .. }),
+        "{:?}",
+        items(&h)[i].status
+    );
+    let item = items(&h)[i].clone();
+    assert!(
+        totals.iter().all(|t| *t == 20) || (item.start, item.end) == (1780, 1799),
+        "progress totals {totals:?} for 20 rendered frames; fields still {}–{}",
+        item.start,
+        item.end
+    );
+}
+
+#[test]
+#[ignore = "issue #110"]
+fn a_folder_as_output_renders_into_the_folder() {
+    // “…/输出/” (or an existing folder) names a folder: the frames belong in it,
+    // not next to it as “输出_0000.png”.
+    let Some(mut h) = gpu_gui() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    let existing = tmp.path().join("已有 目录");
+    fs::create_dir(&existing).unwrap();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let slash = PathBuf::from(format!("{}/输出/", tmp.path().display()));
+    for out in [slash, existing.clone()] {
+        let i = queue_one(&mut h, ExportFormat::Png, &out, 0, 2);
+        render_watching_totals(&mut h, i);
+        let inside = files_in(&tmp.path().join(out.file_name().unwrap()), "png");
+        let beside = files_in(tmp.path(), "png");
+        assert!(
+            inside.len() == 3 && beside.is_empty(),
+            "{}: inside {inside:?}, beside {beside:?}",
+            out.display()
+        );
+    }
+}
+
+#[test]
+#[ignore = "issue #110"]
+fn the_file_extension_matches_the_format() {
+    // A typed “.png” name with TIFF chosen writes TIFF data into .png files.
+    let Some(mut h) = gpu_gui() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let i = queue_one(
+        &mut h,
+        ExportFormat::Tiff,
+        &tmp.path().join("错配_[####].png"),
+        0,
+        1,
+    );
+    render_watching_totals(&mut h, i);
+    for name in fs::read_dir(tmp.path()).unwrap().map(|e| e.unwrap().path()) {
+        let bytes = fs::read(&name).unwrap();
+        let is_tiff = bytes.starts_with(b"II*\0") || bytes.starts_with(b"MM\0*");
+        let ext = name
+            .extension()
+            .map(|e| e.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        assert!(
+            !is_tiff || ext == "tif" || ext == "tiff",
+            "{} holds TIFF data",
+            name.display()
+        );
+    }
+}

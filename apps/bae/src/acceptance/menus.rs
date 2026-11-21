@@ -343,7 +343,6 @@ fn focus_panel(h: &mut Ui, anchor: &str, offset: egui::Vec2) {
 fn shortcuts_run_once_whichever_panel_has_focus() {
     let mut h = gui();
     key(&mut h, Modifiers::COMMAND, Key::N);
-    key(&mut h, Modifiers::COMMAND, Key::M); // opens the Render Queue panel too
     let targets: [(&str, egui::Vec2); 5] = [
         ("Name", egui::vec2(0.0, 420.0)), // Project panel, below the rows
         ("Layer Name", egui::vec2(700.0, 120.0)), // Timeline graph
@@ -352,10 +351,14 @@ fn shortcuts_run_once_whichever_panel_has_focus() {
         ("Render", egui::vec2(200.0, 0.0)), // Render Queue
     ];
     for (anchor, offset) in targets {
-        if find_text(&h, anchor).is_none() {
-            println!("panel anchor {anchor:?} not visible; skipped");
-            continue;
+        if anchor == "Render" {
+            // Cmd+M opens the Render Queue (a tab over the Project panel).
+            key(&mut h, Modifiers::COMMAND, Key::M);
         }
+        assert!(
+            find_text(&h, anchor).is_some(),
+            "panel anchor {anchor:?} not visible"
+        );
         focus_panel(&mut h, anchor, offset);
         let layers = h.state().layers().len();
         let dispatched = h.state().dispatched.len();
@@ -443,3 +446,180 @@ fn text_fields_keep_delete_undo_and_select_all() {
 }
 
 use egui_kittest::kittest::Queryable as _;
+
+// ---- Retest of #109 / #112 / #117 / #118 (dev 763eaad) ----
+
+fn render_queue_open(h: &Ui) -> bool {
+    h.query_by_label("Render").is_some()
+}
+
+#[test]
+fn window_render_queue_item_opens_and_closes_the_panel() {
+    let mut h = gui();
+    let item = h.state().menu_item("motion.window.render_queue");
+    assert!(item.enabled, "Window ▸ Render Queue disabled");
+    assert_eq!(item.path, ["Window"]);
+    assert_eq!(item.chord.as_deref(), Some("Cmd+Alt+0"));
+    assert!(!render_queue_open(&h), "Render Queue open at start");
+    // Menu click opens it (no comp needed), a second click closes it (AE's
+    // checked Window items), Cmd+Alt+0 opens it again.
+    assert!(h.state_mut().menu("motion.window.render_queue"));
+    settle(&mut h);
+    assert!(
+        render_queue_open(&h),
+        "Window ▸ Render Queue did not open the panel"
+    );
+    assert!(h.state_mut().menu("motion.window.render_queue"));
+    settle(&mut h);
+    assert!(!render_queue_open(&h), "second click did not close it");
+    key(&mut h, Modifiers::COMMAND | Modifiers::ALT, Key::Num0);
+    assert!(render_queue_open(&h), "Cmd+Alt+0 did not open it");
+    // Closing it with items queued keeps the items (runtime queue).
+    key(&mut h, Modifiers::COMMAND, Key::N);
+    key(&mut h, Modifiers::COMMAND, Key::M);
+    assert!(h.state_mut().menu("motion.window.render_queue"));
+    settle(&mut h);
+    assert!(h.state_mut().menu("motion.window.render_queue"));
+    settle(&mut h);
+    assert!(render_queue_open(&h));
+    assert_eq!(h.state().render_queue().lock().items().len(), 1);
+}
+
+#[test]
+fn window_panel_items_toggle_and_reopen_panels() {
+    let mut h = gui();
+    key(&mut h, Modifiers::COMMAND, Key::N);
+    // Project: Cmd+0 / Window ▸ Project toggle the Project panel.
+    let shown = |h: &Ui| find_text(h, "Name").is_some() && find_text(h, "Type").is_some();
+    assert!(shown(&h));
+    assert!(h.state_mut().menu("shell.window.project"));
+    settle(&mut h);
+    assert!(
+        !shown(&h),
+        "Window ▸ Project did not close the Project panel"
+    );
+    key(&mut h, Modifiers::COMMAND, Key::Num0);
+    assert!(shown(&h), "Cmd+0 did not reopen the Project panel");
+    // Every Window item runs without failing.
+    for item in h
+        .state()
+        .menu_items()
+        .into_iter()
+        .filter(|i| i.path == ["Window"])
+    {
+        assert!(h.state_mut().menu(&item.id), "{} disabled", item.id);
+        settle(&mut h);
+        assert!(h.state_mut().menu(&item.id));
+        settle(&mut h);
+    }
+    let failed: Vec<_> = h
+        .state()
+        .outcomes
+        .iter()
+        .filter(|(_, o)| o.starts_with("failed") || o == "unknown")
+        .collect();
+    assert!(failed.is_empty(), "{failed:?}");
+}
+
+#[test]
+fn undo_redo_and_shell_items_show_their_keymap_chords() {
+    // AppMenu::sync shows what the keymap binds to each shell item (#117).
+    let h = gui();
+    let chord = |id: &str| {
+        h.state()
+            .workspace
+            .keymap()
+            .chord_for_invocation(&Invocation::new(id))
+            .filter(|c| !c.is_typing_key())
+            .map(|c| c.to_string())
+    };
+    assert_eq!(chord(ids::UNDO).as_deref(), Some("Cmd+Z"));
+    assert_eq!(chord(ids::REDO).as_deref(), Some("Cmd+Shift+Z"));
+    assert!(
+        chord(ids::KEYBOARD_SHORTCUTS).is_some(),
+        "Keyboard Shortcuts has no chord"
+    );
+    println!(
+        "Keyboard Shortcuts: {:?}, Quit: {:?}",
+        chord(ids::KEYBOARD_SHORTCUTS),
+        chord(ids::QUIT)
+    );
+    // While a text field is focused the shell hands Undo / Redo back to it
+    // (`Shell::user_event` checks `text_edit_focused`).
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let search = h
+        .root()
+        .query_all_by_role(egui::accesskit::Role::TextInput)
+        .next()
+        .unwrap()
+        .rect();
+    click_at(&mut h, search.center());
+    assert!(h.ctx.text_edit_focused());
+}
+
+#[test]
+fn welcome_dialog_blocks_panel_keys_and_reports_modal() {
+    let mut g = Gui::new();
+    g.workspace.show_role_picker();
+    let mut h = gui_with(g);
+    settle(&mut h);
+    // `Workspace::modal_open` is what the shell checks for native menu commands.
+    assert!(h.state().workspace.modal_open());
+    for (m, k) in [
+        (Modifiers::COMMAND, Key::N),
+        (Modifiers::COMMAND, Key::Y),
+        (Modifiers::NONE, Key::Space),
+        (Modifiers::NONE, Key::Enter),
+        (Modifiers::NONE, Key::Delete),
+        (Modifiers::COMMAND, Key::S),
+        (Modifiers::COMMAND, Key::M),
+    ] {
+        key(&mut h, m, k);
+    }
+    assert!(
+        h.state().active_comp().is_none(),
+        "a shortcut reached the project"
+    );
+    assert!(!h.state().doc.is_dirty());
+    assert!(
+        h.state().dialogs.suggested.is_empty(),
+        "Cmd+S opened Save As behind the modal"
+    );
+    assert!(find_text(&h, "Welcome to BAE").is_some());
+    key(&mut h, Modifiers::NONE, Key::Escape);
+    assert!(!h.state().workspace.modal_open());
+    key(&mut h, Modifiers::COMMAND, Key::N);
+    assert!(
+        h.state().active_comp().is_some(),
+        "shortcuts dead after the dialog closed"
+    );
+}
+
+#[test]
+fn chinese_window_items_and_render_messages() {
+    if !in_child(
+        "acceptance::menus::chinese_window_items_and_render_messages",
+        &[("BAE_LANG", "zh")],
+    ) {
+        return;
+    }
+    crate::i18n::init_from_env();
+    let h = gui();
+    let zh = |id: &str| bae_ui::tr(&h.state().menu_item(id).title).to_owned();
+    assert_eq!(zh("motion.window.render_queue"), "渲染队列");
+    assert_eq!(zh("motion.layer.arrange.front"), "置于顶层");
+    for en in [
+        "Choose where to render: Output To is empty.",
+        "The frames are outside the composition (0–{last}).",
+        "Undo",
+        "Redo",
+        "Keyboard Shortcuts",
+    ] {
+        assert!(!bae_ui::tr(en).is_ascii(), "{en:?} not translated");
+    }
+    println!(
+        "empty output (zh): {}",
+        bae_ui::tr("Choose where to render: Output To is empty.")
+    );
+}
