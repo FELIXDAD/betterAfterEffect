@@ -105,6 +105,10 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ),
     ("The composition no longer exists.", "合成已不存在。"),
     (
+        "The file will be saved as .{ext} to match the format.",
+        "文件会按格式保存为 .{ext}。",
+    ),
+    (
         "Add a composition with Composition ▸ Add to Render Queue.",
         "用“合成 ▸ 添加到渲染队列”添加合成。",
     ),

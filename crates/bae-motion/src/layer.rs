@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::query::{self, SOLIDS_FOLDER};
 use crate::util::{
-    child, composed_tree, create, ensure_folder, fail, retarget_refs, set, write_attr,
+    child, composed_tree, create, ensure_folder, ensure_unlocked, fail, retarget_refs, set,
+    write_attr,
 };
 
 /// Output of commands that create one layer.
@@ -408,6 +409,7 @@ impl Command for ReorderLayers {
     const DESCRIPTION: &'static str = "Move layers up or down in their comp's layer stack (AE: drag in the timeline, Bring Forward / Send Backward).";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        ensure_unlocked(tx.stage(), &p.layers)?;
         let comp = same_comp(tx.stage(), &p.layers)?;
         let current = query::comp_layers(tx.stage(), &comp);
         let moved: Vec<PrimPath> = current
@@ -518,6 +520,7 @@ impl Command for SplitLayers {
     const DESCRIPTION: &'static str = "Split layers at a comp time: the original ends there and a duplicate above it starts there.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<LayersOutput, CommandError> {
+        ensure_unlocked(tx.stage(), &p.layers)?;
         same_comp(tx.stage(), &p.layers)?;
         let mut paths = Vec::new();
         for l in &p.layers {
@@ -565,6 +568,7 @@ impl Command for TrimLayers {
     const DESCRIPTION: &'static str = "Set the in and/or out point of layers (AE: Alt+[ and Alt+]). The in point must stay before the out point.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        ensure_unlocked(tx.stage(), &p.layers)?;
         same_comp(tx.stage(), &p.layers)?;
         for l in &p.layers {
             let t = query::layer_timing(tx.stage(), l);
@@ -647,6 +651,7 @@ impl Command for SetParent {
     const DESCRIPTION: &'static str = "Parent layers to another layer of the same comp, or remove the parent (AE pick whip). By default the layers keep their on-screen transform.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        ensure_unlocked(tx.stage(), &p.layers)?;
         let comp = same_comp(tx.stage(), &p.layers)?;
         if let Some(parent) = &p.parent {
             if query::owning_comp(tx.stage(), parent).as_ref() != Some(&comp)
@@ -789,6 +794,7 @@ impl Command for ShiftLayers {
     const DESCRIPTION: &'static str = "Move layers earlier or later in their comp (dragging the layer bar; AE [ and ] move the in or out point to the current time). Keyframes move with the layer.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        ensure_unlocked(tx.stage(), &p.layers)?;
         same_comp(tx.stage(), &p.layers)?;
         if p.delta == Time::ZERO {
             return Ok(());
@@ -892,6 +898,7 @@ impl Command for DeleteLayers {
     const DESCRIPTION: &'static str = "Delete layers (with their keyframes, masks, effects and contents). Layers parented to them are unparented and stay where they are.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        ensure_unlocked(tx.stage(), &p.layers)?;
         same_comp(tx.stage(), &p.layers)?;
         delete_prims(tx, &p.layers, p.time)
     }
