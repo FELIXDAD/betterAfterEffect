@@ -511,6 +511,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bae-agent",
+ "bae-anim",
  "bae-app",
  "bae-gpu",
  "bae-model",
