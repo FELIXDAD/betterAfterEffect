@@ -197,6 +197,20 @@ impl Command for CreateLayer {
         let mut position = [pos[0], pos[1], 0.0];
 
         match kind {
+            LayerKind::Solid | LayerKind::Adjustment if p.source.is_some() => {
+                // An existing solid item (dragged from the project panel).
+                let (size, _) = source_info.expect("checked above");
+                set(
+                    tx,
+                    &path,
+                    "source",
+                    Value::PrimRef(p.source.clone().expect("some")),
+                )?;
+                anchor = [size[0] / 2.0, size[1] / 2.0];
+                if kind == LayerKind::Adjustment {
+                    set(tx, &path, "adjustment_layer", Value::Bool(true))?;
+                }
+            }
             LayerKind::Solid | LayerKind::Adjustment => {
                 let [sw, sh] = p.size.unwrap_or([info.width, info.height]);
                 if sw == 0 || sh == 0 {
@@ -753,4 +767,155 @@ fn compensate(
     write_attr(tx, layer, "transform:rotation", rotation)?;
     write_attr(tx, layer, "transform:scale", scale)?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+
+pub struct ShiftLayers;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ShiftLayersParams {
+    /// Layers of one comp.
+    pub layers: Vec<PrimPath>,
+    /// Offset in flicks added to the start time, in point and out point (may be negative).
+    pub delta: Time,
+}
+
+impl Command for ShiftLayers {
+    type Params = ShiftLayersParams;
+    type Output = ();
+    const ID: &'static str = "layer.shift_time";
+    const TITLE: &'static str = "Move Layer in Time";
+    const DESCRIPTION: &'static str = "Move layers earlier or later in their comp (dragging the layer bar; AE [ and ] move the in or out point to the current time). Keyframes move with the layer.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        same_comp(tx.stage(), &p.layers)?;
+        if p.delta == Time::ZERO {
+            return Ok(());
+        }
+        for l in &p.layers {
+            let t = query::layer_timing(tx.stage(), l);
+            let has_out = tx
+                .stage()
+                .prim(l)
+                .is_some_and(|v| v.value("out_point").is_some());
+            set(tx, l, "start_time", Value::Time(t.start_time + p.delta))?;
+            set(tx, l, "in_point", Value::Time(t.in_point + p.delta))?;
+            if has_out {
+                set(tx, l, "out_point", Value::Time(t.out_point + p.delta))?;
+            }
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+
+/// Delete prims from every sublayer that has them. Layers parented to a deleted
+/// layer are unparented first, keeping their on-screen transform (at `time`).
+fn delete_prims(
+    tx: &mut Transaction<'_>,
+    paths: &[PrimPath],
+    time: Time,
+) -> Result<(), CommandError> {
+    // Children of deleted layers, per comp.
+    let mut orphans: Vec<PrimPath> = Vec::new();
+    for p in paths {
+        if !query::is_layer(tx.stage(), p) {
+            continue;
+        }
+        if let Some(comp) = query::owning_comp(tx.stage(), p) {
+            for l in query::comp_layers(tx.stage(), &comp) {
+                if !paths.contains(&l)
+                    && parent_of(tx.stage(), &l).as_ref() == Some(p)
+                    && !orphans.contains(&l)
+                {
+                    orphans.push(l);
+                }
+            }
+        }
+    }
+    for l in orphans {
+        SetParent.run(
+            tx,
+            SetParentParams {
+                layers: vec![l],
+                parent: None,
+                keep_transform: true,
+                time,
+            },
+        )?;
+    }
+    // Deepest first, so deleting a folder and its contents together works.
+    let mut sorted: Vec<PrimPath> = paths.to_vec();
+    sorted.sort_by_key(|p| std::cmp::Reverse(p.depth()));
+    for p in sorted {
+        if !tx.stage().has_prim(&p) {
+            continue;
+        }
+        if p.is_root() {
+            return Err(ModelError::RootNotEditable.into());
+        }
+        if !tx.stage().has_local_def(&p) {
+            return Err(ModelError::ProvidedByReference(p).into());
+        }
+        let layers: Vec<_> = tx
+            .stage()
+            .layer_stack()
+            .iter()
+            .filter(|id| tx.stage().sublayer(id).is_some_and(|s| s.has_spec(&p)))
+            .cloned()
+            .collect();
+        for id in layers {
+            tx.apply_to(&id, Op::DeletePrim { path: p.clone() })?;
+        }
+    }
+    Ok(())
+}
+
+pub struct DeleteLayers;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct DeleteLayersParams {
+    /// Layers of one comp.
+    pub layers: Vec<PrimPath>,
+    /// Comp time (flicks) at which children of deleted layers keep their place (default 0).
+    #[serde(default)]
+    pub time: Time,
+}
+
+impl Command for DeleteLayers {
+    type Params = DeleteLayersParams;
+    type Output = ();
+    const ID: &'static str = "layer.delete";
+    const TITLE: &'static str = "Delete Layers";
+    const DESCRIPTION: &'static str = "Delete layers (with their keyframes, masks, effects and contents). Layers parented to them are unparented and stay where they are.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        same_comp(tx.stage(), &p.layers)?;
+        delete_prims(tx, &p.layers, p.time)
+    }
+}
+
+pub struct DeleteItems;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct DeleteItemsParams {
+    /// Project items (comps, folders, footage, solids) or layers.
+    pub paths: Vec<PrimPath>,
+}
+
+impl Command for DeleteItems {
+    type Params = DeleteItemsParams;
+    type Output = ();
+    const ID: &'static str = "item.delete";
+    const TITLE: &'static str = "Delete";
+    const DESCRIPTION: &'static str = "Delete project items (comps, folders with their contents, footage, solids) or layers in one step.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        for path in &p.paths {
+            tx.stage().require_prim(path)?;
+        }
+        delete_prims(tx, &p.paths, Time::ZERO)
+    }
 }
