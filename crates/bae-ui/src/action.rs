@@ -217,3 +217,53 @@ pub(crate) const SHELL_ACTIONS: &[(&str, &str)] = &[
     (ids::SET_LANGUAGE, "Language"),
     (ids::HELP, "BAE Help"),
 ];
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn the_most_specific_matching_variant_names_the_command() {
+        let variants = [
+            CommandVariant::new(
+                "layer.create",
+                json!({ "kind": "shape" }),
+                "New Shape Layer",
+            ),
+            CommandVariant::new(
+                "layer.create",
+                json!({ "kind": "shape", "shape": "rect" }),
+                "New Rectangle",
+            ),
+            CommandVariant::new("layer.create", json!({ "kind": "solid" }), "New Solid"),
+            CommandVariant::new("motion.step", json!({ "frames": -10 }), "Back 10 Frames"),
+        ];
+        let title = |id: &str, params: serde_json::Value| variant_title(&variants, id, &params);
+        // Other parameters do not matter; the variant's keys must all match.
+        assert_eq!(
+            title(
+                "layer.create",
+                json!({ "kind": "solid", "name": "BG", "index": 0 })
+            ),
+            Some("New Solid")
+        );
+        assert_eq!(
+            title("layer.create", json!({ "kind": "shape", "shape": "rect" })),
+            Some("New Rectangle")
+        );
+        assert_eq!(
+            title("layer.create", json!({ "kind": "shape", "shape": "star" })),
+            Some("New Shape Layer")
+        );
+        assert_eq!(title("layer.create", json!({ "kind": "camera" })), None);
+        assert_eq!(title("layer.create", serde_json::Value::Null), None);
+        assert_eq!(
+            title("motion.step", json!({ "frames": -10 })),
+            Some("Back 10 Frames")
+        );
+        assert_eq!(title("motion.step", json!({ "frames": 10 })), None);
+        assert_eq!(title("comp.create", json!({ "kind": "solid" })), None);
+    }
+}
