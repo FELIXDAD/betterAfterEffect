@@ -60,6 +60,7 @@ impl AppModule for MotionUiModule {
     fn build(&self, app: &mut AppBuilder) {
         app.add_module(bae_motion::MotionModule);
         bae_ui::i18n::register(i18n::ZH);
+        bae_ui::i18n::register(catalog::MENU_ZH);
         if app.resource::<SharedSession>().is_none() {
             app.insert_resource(SharedSession::default());
         }
@@ -130,7 +131,7 @@ impl AppModule for MotionUiModule {
         let menu = app.registry::<MenuItemSpec>();
         menu.batch(|tx| {
             for (id, item) in menus::items() {
-                if !tx.contains(id) {
+                if !tx.contains(&id) {
                     let _ = tx.register(owner.clone(), id, item);
                 }
             }

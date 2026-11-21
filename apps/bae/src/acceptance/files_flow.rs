@@ -29,7 +29,7 @@ fn animated_project(h: &mut Ui) {
         h,
         &[
             "motion.layer.new.solid",
-            "motion.layer.new.rectangle",
+            "shape:rect",
             "motion.layer.new.text",
         ],
     );

@@ -704,3 +704,323 @@ fn catalog_doc_is_up_to_date() {
         "docs/ui/ae-commands.md is stale: run BAE_UPDATE_DOCS=1 cargo test -p bae-ui-motion catalog"
     );
 }
+
+const MAC_MENUS_JSON: &str = include_str!("../../../../docs/reference/ae/mac/menus.json");
+
+/// Drop separators that no longer separate anything: leading, trailing and
+/// doubled ones within each level (lines are `Top > … > Label`).
+fn fold_separators(lines: Vec<String>) -> Vec<String> {
+    let parent = |l: &str| {
+        l.rsplit_once(" > ")
+            .map(|(p, _)| p.to_owned())
+            .unwrap_or_default()
+    };
+    let is_sep = |l: &str| l.ends_with(" > ---");
+    // Last kept entry of each level: separator or not.
+    let mut last: BTreeMap<String, bool> = BTreeMap::new();
+    let mut out: Vec<String> = Vec::new();
+    for l in lines {
+        let p = parent(&l);
+        if is_sep(&l) {
+            match last.get(&p) {
+                Some(false) => {}
+                _ => continue,
+            }
+        }
+        last.insert(p, is_sep(&l));
+        out.push(l);
+    }
+    // Trailing separators of each level.
+    let mut keep = vec![true; out.len()];
+    for i in 0..out.len() {
+        if !is_sep(&out[i]) {
+            continue;
+        }
+        let p = parent(&out[i]);
+        let next_own = out[i + 1..]
+            .iter()
+            .find(|l| parent(l) == p || !l.starts_with(&format!("{p} > ")));
+        if next_own.is_none_or(|l| parent(l) != p) {
+            keep[i] = false;
+        }
+    }
+    out.into_iter()
+        .zip(keep)
+        .filter_map(|(l, k)| k.then_some(l))
+        .collect()
+}
+
+/// The catalog's menu bar as macOS shows it, in English: the application menu
+/// first, no Windows-only entries, sorted runs in English order, no run-time
+/// list placeholders.
+fn catalog_mac_lines() -> Vec<String> {
+    fn walk(prefix: &str, nodes: &[Node], out: &mut Vec<String>) {
+        let mut level: Vec<String> = Vec::new();
+        let mut run: Option<usize> = None;
+        let sort_run = |level: &mut Vec<String>, run: &mut Option<usize>| {
+            if let Some(start) = run.take() {
+                level[start..].sort();
+            }
+        };
+        for n in nodes {
+            match n {
+                Node::Item(it) if it.platform == Platform::All && it.status != Status::Dynamic => {
+                    if it.sorted {
+                        run.get_or_insert(level.len());
+                    } else {
+                        sort_run(&mut level, &mut run);
+                    }
+                    level.push(format!("{prefix} > {}", mac_title(it.title)));
+                }
+                Node::Separator => {
+                    sort_run(&mut level, &mut run);
+                    level.push(format!("{prefix} > ---"));
+                }
+                Node::Submenu(sub) if sub.platform == Platform::All => {
+                    sort_run(&mut level, &mut run);
+                    level.push(format!("{prefix} > {} ▸", sub.title));
+                    walk(
+                        &format!("{prefix} > {}", sub.title),
+                        sub.children,
+                        &mut level,
+                    );
+                }
+                Node::Effects => {
+                    sort_run(&mut level, &mut run);
+                    for c in EFFECT_CATEGORIES {
+                        level.push(format!("{prefix} > {c} ▸"));
+                    }
+                }
+                _ => {}
+            }
+        }
+        sort_run(&mut level, &mut run);
+        out.extend(level);
+    }
+    let mut out = Vec::new();
+    for (top, nodes) in [("BAE", MAC_APP_MENU)]
+        .into_iter()
+        .chain(MENUS.iter().copied())
+    {
+        out.push(format!("{top} ▸"));
+        walk(top, nodes, &mut out);
+    }
+    fold_separators(out)
+}
+
+/// Submenus whose entries AE fills at run time (recent files, installed
+/// scripts and extensions, effects, Services): only the submenu is compared.
+const MAC_RUNTIME_SUBMENUS: &[&str] = &[
+    "BAE > Services",
+    "File > Open Recent",
+    "File > Import Recent Footage",
+    "File > Scripts > Recent Script Files",
+    "Animation > Recent Animation Presets",
+    "Window > Extensions",
+    "Edit > History",
+    "Edit > Team Project",
+    "Layer > Layer Styles",
+    "Animation > Animate Text > Variable Font Axes",
+];
+
+/// Entries of AE 26.2.1 on macOS that are not menu commands of AE 26.0
+/// (`docs/reference/ae/mac/menus.md` 5.3 and 5.5): AppKit's injected items,
+/// AE 26.2's Quick Apply, Team Project and account items.
+const MAC_NOT_IN_CATALOG: &[&str] = &[
+    "Edit > AutoFill",
+    "Edit > Start Dictation…",
+    "View > Enter Full Screen",
+    "Edit > Quick Apply...",
+    "File > New > New Team Project...",
+    "File > Open Team Project...",
+    "Help > Adobe Crash Reporter...",
+    "Help > Manage My Account...",
+    "Help > Sign Out...",
+    "Help > Updates...",
+];
+
+/// AE's macOS menu bar (`docs/reference/ae/mac/menus.json`, AE 26.2.1, English)
+/// as `Top > … > Label` lines, with "After Effects" read as "BAE" and the
+/// run-time entries left out.
+fn ae_mac_lines() -> Vec<String> {
+    fn label(v: &Value) -> String {
+        v["label"]
+            .as_str()
+            .unwrap_or_default()
+            .replace("After Effects", "BAE")
+            .replace("Settings…", "Settings")
+    }
+    fn walk(prefix: &str, items: &[Value], out: &mut Vec<String>) {
+        for v in items {
+            let line = format!("{prefix} > {}", label(v));
+            if MAC_NOT_IN_CATALOG.iter().any(|x| line.starts_with(x)) {
+                continue;
+            }
+            match v["type"].as_str() {
+                Some("separator") => out.push(format!("{prefix} > ---")),
+                Some("submenu") => {
+                    let path = format!("{prefix} > {}", label(v));
+                    out.push(format!("{path} ▸"));
+                    let runtime = MAC_RUNTIME_SUBMENUS.contains(&path.as_str())
+                        || EFFECT_CATEGORIES
+                            .iter()
+                            .any(|c| path == format!("Effect > {c}"));
+                    if !runtime {
+                        walk(
+                            &path,
+                            v["items"].as_array().map(Vec::as_slice).unwrap_or(&[]),
+                            out,
+                        );
+                    }
+                }
+                _ => out.push(line),
+            }
+        }
+    }
+    let json: Value = serde_json::from_str(MAC_MENUS_JSON).unwrap();
+    let mut out = Vec::new();
+    for top in json["menus"].as_array().unwrap() {
+        let title = label(top);
+        out.push(format!("{title} ▸"));
+        walk(&title, top["items"].as_array().unwrap(), &mut out);
+    }
+    fold_separators(out.into_iter().filter_map(|l| mac_normalize(&l)).collect())
+}
+
+/// What differs between AE's live macOS menu and its menu commands, read the
+/// way the catalog lists them (`None` = not a fixed menu command):
+/// - installed scripts (`File ▸ Scripts ▸ *.jsx`);
+/// - titles AE fills in when the menu opens: "Can't Undo" / "Can't Redo" (BAE's
+///   shell does the same), the 16 label colours ("Unused" until opened),
+///   `^1...` (Layer ▸ Transform ▸ Anchor Point...), and the active workspace's
+///   name in Window ▸ Workspace ▸ Reset … and Assign Shortcut to … Workspace;
+/// - viewer items name what the viewer shows ("Composition: (none)");
+/// - Services is the system's submenu (BAE uses the native one).
+fn mac_normalize(line: &str) -> Option<String> {
+    if line.ends_with(".jsx") {
+        return None;
+    }
+    let line = line
+        .replace("Can’t Undo", "Undo")
+        .replace("Can’t Redo", "Redo")
+        .replace("Transform > ^1...", "Transform > Anchor Point...")
+        .replace("BAE > Services ▸", "BAE > Services");
+    // “Name” inserted by AE: drop the quoted parts.
+    let mut line = line;
+    while let (Some(a), Some(b)) = (line.find('“'), line.find('”')) {
+        if b < a {
+            break;
+        }
+        line = format!("{}{}", &line[..a], &line[b + '”'.len_utf8()..]);
+    }
+    let line = line
+        .replace("Reset  to Saved Layout", "Reset to Saved Layout")
+        .replace("Assign Shortcut to  Workspace", "Assign Shortcut to Workspace")
+        .replace(" (Replace )", "")
+        // Viewer items name the viewer's item: "Composition: Comp 1".
+        .replace(": (none)", "");
+    Some(line)
+}
+
+/// Lines both sides list differently by design: the label colours (AE fills
+/// them when the menu opens) and Track in Boris FX Mocha (AE 26.2 moved it next
+/// to the other tracking commands; the catalog follows AE 26.0, `menus.json`).
+fn mac_compare_skip(line: &str) -> bool {
+    const COLORS: &[&str] = &[
+        "Unused",
+        "Red",
+        "Yellow",
+        "Aqua",
+        "Pink",
+        "Lavender",
+        "Peach",
+        "Sea Foam",
+        "Blue",
+        "Green",
+        "Purple",
+        "Orange",
+        "Brown",
+        "Fuchsia",
+        "Cyan",
+        "Sandstone",
+        "Dark Green",
+    ];
+    line == "Animation > Track in Boris FX Mocha"
+        || line
+            .strip_prefix("Edit > Label > ")
+            .is_some_and(|c| COLORS.contains(&c))
+}
+
+/// The catalog matches AE's macOS menu bar too: the application menu (About,
+/// Settings ▸ the 16 pages, Services, Hide, Quit), no Exit / Preferences /
+/// About in File, Edit and Help, Finder instead of Explorer.
+#[test]
+fn mac_menu_bar_matches_ae_mac() {
+    let ours: Vec<String> = catalog_mac_lines()
+        .into_iter()
+        .filter(|l| !mac_compare_skip(l))
+        .collect();
+    let ae: Vec<String> = ae_mac_lines()
+        .into_iter()
+        .filter(|l| !mac_compare_skip(l))
+        .collect();
+    if let Some(dir) = std::env::var_os("BAE_DUMP_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::write(dir.join("ours.txt"), ours.join("\n")).unwrap();
+        std::fs::write(dir.join("ae.txt"), ae.join("\n")).unwrap();
+    }
+    let first = ours.iter().zip(&ae).position(|(a, b)| a != b);
+    assert!(
+        ours == ae,
+        "first difference at line {first:?}: ours {:?} vs AE {:?}",
+        first.and_then(|i| ours.get(i)),
+        first.and_then(|i| ae.get(i))
+    );
+}
+
+/// AE sorts some entries by their localized name (Export, Keyframe Assistant,
+/// workspaces, the Window panel list). The catalog lists them in the order of
+/// AE's Chinese menu (`menus.json`), so the Chinese titles must sort the same
+/// way by code point: a wrong translation of one of them shows up here.
+#[test]
+fn sorted_entries_follow_ae_chinese_order() {
+    let zh: BTreeMap<&str, &str> = MENU_ZH
+        .iter()
+        .copied()
+        .chain(crate::i18n::ZH.iter().copied())
+        .collect();
+    let zh_of = |t: &str| {
+        zh.get(t)
+            .copied()
+            .or_else(|| bae_ui::i18n::translation(t))
+            .unwrap_or_else(|| panic!("no Chinese for {t}"))
+    };
+    fn runs(nodes: &'static [Node], out: &mut Vec<Vec<&'static str>>) {
+        let mut run: Vec<&'static str> = Vec::new();
+        for n in nodes {
+            match n {
+                Node::Item(it) if it.sorted => run.push(it.title),
+                Node::Submenu(s) => {
+                    out.push(std::mem::take(&mut run));
+                    runs(s.children, out);
+                }
+                _ => out.push(std::mem::take(&mut run)),
+            }
+        }
+        out.push(run);
+    }
+    let mut all = Vec::new();
+    for (_, nodes) in MENUS {
+        runs(nodes, &mut all);
+    }
+    let mut errors = Vec::new();
+    for run in all.iter().filter(|r| r.len() > 1) {
+        for pair in run.windows(2) {
+            let (a, b) = (zh_of(pair[0]), zh_of(pair[1]));
+            if a >= b {
+                errors.push(format!("{} ({a}) before {} ({b})", pair[0], pair[1]));
+            }
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}

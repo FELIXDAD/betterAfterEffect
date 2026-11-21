@@ -78,12 +78,12 @@ impl AppModule for ShellModule {
 
     fn finish(&self, app: &mut AppBuilder) {
         ui::register_panels(app);
-        // File menu items: registered like any module's menu items, so the native
-        // menu shows the shortcut the active keymap binds to each.
+        // BAE's own menu entries (History and Agent panels, Agent workspace),
+        // registered next to the AE menus the motion workspace contributes.
         let owner = app.current_owner();
         let menu = app.registry::<bae_ui::MenuItemSpec>();
         menu.batch(|tx| {
-            for (id, item) in menu::file_items().into_iter().chain(menu::window_items()) {
+            for (id, item) in menu::extra_items() {
                 if !tx.contains(id) {
                     let _ = tx.register(owner.clone(), id, item);
                 }
@@ -92,10 +92,10 @@ impl AppModule for ShellModule {
     }
 }
 
-/// English titles of the File menu items and their menu path (i18n test).
+/// English titles of the shell's menu items and their menu path (i18n test).
 #[cfg(test)]
 pub fn file_menu_titles() -> Vec<String> {
-    menu::file_items()
+    menu::extra_items()
         .into_iter()
         .flat_map(|(_, spec)| {
             spec.path
@@ -719,12 +719,14 @@ impl Shell {
         });
         self.ui_passes += 1;
         if let Some(menu) = &mut self.menu {
-            let cx = bae_ui::menu::MenuContext {
-                stage: document.stage(),
+            let open = workspace.open_panels();
+            let cx = bae_ui::menu::MenuContext::new(
+                document.stage(),
                 resources,
-                workspace: workspace.active_workspace(),
-            };
-            menu.sync(workspace.keymap(), &cx);
+                workspace.active_workspace(),
+            )
+            .with_open_panels(&open);
+            menu.sync(workspace.keymap(), &cx, view.egui_ctx.text_edit_focused());
         }
         view.egui_state.handle_platform_output_with_event_loop(
             &view.window,
@@ -958,7 +960,8 @@ impl ApplicationHandler<UserEvent> for Shell {
                 view.window.set_visible(true);
                 if self.menu.is_none() {
                     let contributed = self.workspace.contributed_menus(&self.app);
-                    match menu::AppMenu::new(&self.workspace.workspaces(), &contributed) {
+                    let actions = self.workspace.handled_actions(&self.app);
+                    match menu::AppMenu::new(&contributed, actions) {
                         Ok(menu) => {
                             menu.attach(&view.window);
                             self.menu = Some(menu);
@@ -1032,26 +1035,34 @@ impl ApplicationHandler<UserEvent> for Shell {
                 if self.workspace.modal_open() && inv.id != ids::QUIT {
                     return;
                 }
-                // Undo / Redo (their native key equivalents too) while a text
-                // field is focused undo the typing, as in any Mac / Windows app.
-                if (inv.id == ids::UNDO || inv.id == ids::REDO)
+                // Undo / Redo, Cut / Copy / Paste and Select All (their native
+                // key equivalents too) while a text field is focused edit the
+                // text, as in any Mac / Windows app.
+                if menu::TEXT_EDIT_ACTIONS.contains(&inv.id.as_str())
                     && let Some(view) = self.view.as_mut()
                     && view.egui_ctx.text_edit_focused()
                 {
-                    let modifiers = egui::Modifiers {
-                        shift: inv.id == ids::REDO,
-                        ..egui::Modifiers::COMMAND
+                    let key = |key: egui::Key, shift: bool| egui::Event::Key {
+                        key,
+                        physical_key: Some(key),
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers {
+                            shift,
+                            ..egui::Modifiers::COMMAND
+                        },
                     };
-                    view.egui_state
-                        .egui_input_mut()
-                        .events
-                        .push(egui::Event::Key {
-                            key: egui::Key::Z,
-                            physical_key: Some(egui::Key::Z),
-                            pressed: true,
-                            repeat: false,
-                            modifiers,
-                        });
+                    let event = match inv.id.as_str() {
+                        ids::UNDO => key(egui::Key::Z, false),
+                        ids::REDO => key(egui::Key::Z, true),
+                        "edit.cut" => egui::Event::Cut,
+                        "edit.copy" => egui::Event::Copy,
+                        "edit.paste" => {
+                            egui::Event::Paste(view.egui_state.clipboard_text().unwrap_or_default())
+                        }
+                        _ => key(egui::Key::A, false),
+                    };
+                    view.egui_state.egui_input_mut().events.push(event);
                     view.window.request_redraw();
                     return;
                 }

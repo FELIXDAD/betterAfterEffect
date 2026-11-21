@@ -18,9 +18,12 @@
 
 mod keys;
 mod menu;
+mod zh;
 
 pub use keys::{KEYS, MAC_KEYS};
 pub use menu::{EFFECT_CATEGORIES, MAC_APP_MENU, MENUS};
+pub(crate) use zh::MENU_ZH;
+pub use zh::SAME_IN_CHINESE;
 
 /// Who implements the command behind an entry (the AE-parity agents, see
 /// `docs/ui/ae-commands.md`).
@@ -209,6 +212,24 @@ pub fn context_scope(context: &str) -> Option<&'static str> {
         "CSwitchboardModal" => "dialog",
         _ => return None,
     })
+}
+
+/// The English title AE shows on macOS for a catalog title (`menus.json` is the
+/// Windows menu bar): Finder instead of Explorer.
+pub fn mac_title(title: &str) -> &str {
+    match title {
+        "Reveal in Explorer" => "Reveal in Finder",
+        other => other,
+    }
+}
+
+/// The English title shown on the platform BAE runs on.
+pub fn shown_title(title: &str) -> &str {
+    if cfg!(target_os = "macos") {
+        mac_title(title)
+    } else {
+        title
+    }
 }
 
 /// Visit every item of a menu tree, depth first, with its English path.

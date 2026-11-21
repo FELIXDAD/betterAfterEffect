@@ -125,6 +125,9 @@ pub struct PanelKind {
     pub multi_instance: bool,
     /// Listed in the Window menu (false for panels opened only by other panels).
     pub in_window_menu: bool,
+    /// A "Not implemented yet." stand-in ([`PanelKind::placeholder`]): the menus
+    /// show its Window item greyed.
+    pub is_placeholder: bool,
     factory: Box<PanelFactory>,
 }
 
@@ -137,6 +140,7 @@ impl PanelKind {
             title: title.into(),
             multi_instance: false,
             in_window_menu: true,
+            is_placeholder: false,
             factory: Box::new(factory),
         }
     }
@@ -154,7 +158,10 @@ impl PanelKind {
     /// A placeholder kind showing "Not implemented yet." (used for workspace panels
     /// whose owning workstream has not registered them yet).
     pub fn placeholder(title: impl Into<String>) -> Self {
-        PanelKind::new(title, |_| Box::new(Placeholder))
+        PanelKind {
+            is_placeholder: true,
+            ..PanelKind::new(title, |_| Box::new(Placeholder))
+        }
     }
 
     pub fn create(&self, spawn: &PanelSpawn<'_>) -> Box<dyn Panel> {
