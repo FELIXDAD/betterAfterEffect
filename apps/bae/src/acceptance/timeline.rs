@@ -1,0 +1,406 @@
+//! Timeline: select, rename (Enter / double-click, type, Enter / click away /
+//! Esc), Chinese through an IME composition, spaces, emoji, long names;
+//! stopwatch and Option+Shift+P keyframes, J/K; Space with the focus in a text
+//! field, on a button and on nothing; undo / redo of all of it.
+
+use bae_model::Time;
+use egui::{Key, Modifiers, Pos2, pos2};
+use egui_kittest::kittest::Queryable as _;
+
+use super::*;
+
+const POSITION: &str = "transform:position";
+
+/// The timeline's "Layer Name" column header.
+fn header(h: &Ui) -> Rect {
+    find_texts(h, |t| t == "Layer Name")
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| panic!("no timeline header in {:?}", painted_texts(h)))
+}
+
+/// Where the timeline paints `name` (a layer row or a property row), below the
+/// column header and in the outline (left of the graph).
+fn timeline_text(h: &Ui, name: &str) -> Option<Rect> {
+    let head = header(h);
+    find_texts(h, |t| t == name)
+        .into_iter()
+        .find(|r| r.top() > head.bottom() && r.left() < head.left() + 400.0)
+}
+
+fn layer_row(h: &Ui, name: &str) -> Pos2 {
+    timeline_text(h, name)
+        .unwrap_or_else(|| panic!("no timeline row {name:?} in {:?}", painted_texts(h)))
+        .center()
+}
+
+/// Comp with one solid, the solid selected; returns the harness.
+fn comp_with_solid() -> Ui {
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    assert_eq!(h.state().layer_names(), ["Solid 1"]);
+    h
+}
+
+/// The rename field, if one is open (the only single-line text input in the
+/// timeline outline).
+fn rename_field_value(h: &Ui) -> Option<String> {
+    let head = header(h);
+    h.root()
+        .query_all_by_role(egui::accesskit::Role::TextInput)
+        .find(|n| {
+            let r = n.rect();
+            r.top() > head.bottom() && r.left() < head.left() + 400.0
+        })
+        .and_then(|n| n.value())
+}
+
+fn start_rename_by_double_click(h: &mut Ui, name: &str) {
+    let at = layer_row(h, name);
+    double_click_at(h, at);
+    assert_eq!(
+        rename_field_value(h).as_deref(),
+        Some(name),
+        "double-click did not open the rename field"
+    );
+}
+
+/// Select-all then type, so the test does not depend on the initial selection.
+fn replace_text(h: &mut Ui, text: &str) {
+    press(h, Modifiers::COMMAND, Key::A);
+    send(h, Event::Text(text.to_owned()));
+    settle(h);
+}
+
+fn undo(h: &mut Ui) {
+    key(h, Modifiers::COMMAND, Key::Z);
+}
+
+fn redo(h: &mut Ui) {
+    key(h, Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+}
+
+#[test]
+fn rename_commits_on_enter_and_click_away_and_esc_cancels() {
+    let mut h = comp_with_solid();
+    let layer = h.state().layers()[0].clone();
+
+    // Double-click, type, Enter.
+    start_rename_by_double_click(&mut h, "Solid 1");
+    replace_text(&mut h, "Hero");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(h.state().name(&layer), "Hero");
+    assert!(
+        rename_field_value(&h).is_none(),
+        "field still open after Enter"
+    );
+
+    // Double-click, type, click elsewhere (an empty part of the timeline graph).
+    start_rename_by_double_click(&mut h, "Hero");
+    replace_text(&mut h, "Hero 2");
+    let head = header(&h);
+    click_at(&mut h, pos2(head.left() + 900.0, head.bottom() + 80.0));
+    assert_eq!(
+        h.state().name(&layer),
+        "Hero 2",
+        "click away did not commit"
+    );
+
+    // Double-click, type, Esc: unchanged.
+    start_rename_by_double_click(&mut h, "Hero 2");
+    replace_text(&mut h, "Discarded");
+    key(&mut h, Modifiers::NONE, Key::Escape);
+    assert_eq!(h.state().name(&layer), "Hero 2", "Esc did not cancel");
+    assert!(rename_field_value(&h).is_none());
+
+    // Each committed rename is one undo step.
+    undo(&mut h);
+    assert_eq!(h.state().name(&layer), "Hero");
+    undo(&mut h);
+    assert_eq!(h.state().name(&layer), "Solid 1");
+    redo(&mut h);
+    redo(&mut h);
+    assert_eq!(h.state().name(&layer), "Hero 2");
+}
+
+#[test]
+#[ignore = "issue #106"]
+fn rename_field_starts_with_the_whole_name_selected() {
+    // AE selects the whole name when the field opens: typing replaces it.
+    let mut h = comp_with_solid();
+    let layer = h.state().layers()[0].clone();
+    start_rename_by_double_click(&mut h, "Solid 1");
+    type_text(&mut h, "Hero");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(h.state().name(&layer), "Hero");
+}
+
+#[test]
+#[ignore = "issue #106"]
+fn enter_on_a_selected_timeline_layer_starts_rename() {
+    // AE: select a layer in the timeline, press Enter (Return) to rename it.
+    let mut h = comp_with_solid();
+    let at = layer_row(&h, "Solid 1");
+    click_at(&mut h, at);
+    assert_eq!(h.state().selected_layers(), h.state().layers());
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(
+        rename_field_value(&h).as_deref(),
+        Some("Solid 1"),
+        "Enter on the selected layer did not open the rename field"
+    );
+}
+
+#[test]
+fn rename_with_ime_spaces_emoji_and_long_names() {
+    let mut h = comp_with_solid();
+    let layer = h.state().layers()[0].clone();
+
+    // Chinese through a Pinyin composition: marked text, then the commit.
+    start_rename_by_double_click(&mut h, "Solid 1");
+    press(&mut h, Modifiers::COMMAND, Key::A);
+    settle(&mut h);
+    ime_compose(&mut h, &["b", "bei", "bei j", "bei jing"], "背景");
+    // The field shows the committed text, not the marked text.
+    assert_eq!(rename_field_value(&h).as_deref(), Some("背景"));
+    // A second composition appended after the first.
+    ime_compose(&mut h, &["c", "ce", "ceng"], "层");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(h.state().name(&layer), "背景层");
+
+    // Spaces inside, leading and trailing.
+    for name in ["  spaced  name  ", "Comp 背景 ✨ 🎬👩‍👩‍👧", "a"] {
+        let current = h.state().name(&layer);
+        start_rename_by_double_click(&mut h, &current);
+        replace_text(&mut h, name);
+        key(&mut h, Modifiers::NONE, Key::Enter);
+        assert_eq!(h.state().name(&layer), name, "rename to {name:?}");
+    }
+
+    // A whitespace-only name is refused (the layer keeps its name).
+    start_rename_by_double_click(&mut h, "a");
+    replace_text(&mut h, "   ");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(h.state().name(&layer), "a");
+
+    // A very long name (2 000 characters, mixed scripts).
+    let long: String = "长名字 Long name ".repeat(125);
+    start_rename_by_double_click(&mut h, "a");
+    replace_text(&mut h, &long);
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(h.state().name(&layer), long);
+    // The row still paints (clipped) and the app keeps running.
+    settle(&mut h);
+    assert!(
+        !find_texts(&h, |t| t.starts_with("长名字")).is_empty(),
+        "long name not painted"
+    );
+
+    // All five renames undo back to the original name.
+    for _ in 0..5 {
+        undo(&mut h);
+    }
+    assert_eq!(h.state().name(&layer), "Solid 1");
+}
+
+#[test]
+fn space_in_a_text_field_types_and_does_not_play() {
+    let mut h = comp_with_solid();
+    start_rename_by_double_click(&mut h, "Solid 1");
+    replace_text(&mut h, "A");
+    press(&mut h, Modifiers::NONE, Key::Space);
+    send(&mut h, Event::Text(" ".into()));
+    send(&mut h, Event::Text("B".into()));
+    settle(&mut h);
+    assert!(
+        !h.state().is_playing(),
+        "Space in the rename field started playback"
+    );
+    assert_eq!(rename_field_value(&h).as_deref(), Some("A B"));
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(h.state().layer_names(), ["A B"]);
+}
+
+#[test]
+fn space_with_nothing_focused_plays_and_stops() {
+    let mut h = comp_with_solid();
+    assert!(!h.ctx.egui_wants_keyboard_input());
+    press(&mut h, Modifiers::NONE, Key::Space);
+    frame(&mut h);
+    assert!(h.state().is_playing(), "Space did not start playback");
+    // Playback advances the time while frames run.
+    for _ in 0..6 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        frame(&mut h);
+    }
+    assert!(h.state().now() > Time::ZERO, "time did not advance");
+    press(&mut h, Modifiers::NONE, Key::Space);
+    frame(&mut h);
+    assert!(
+        !h.state().is_playing(),
+        "second Space did not stop playback"
+    );
+    // One play action per press (not handled twice).
+    let plays = h
+        .state()
+        .dispatched
+        .iter()
+        .filter(|i| i.id == "motion.play")
+        .count();
+    assert_eq!(plays, 2);
+}
+
+#[test]
+fn space_on_a_focused_button_presses_it_and_does_not_play() {
+    let mut h = comp_with_solid();
+    // The Render Queue's "Remove" button gets keyboard focus (Tab), then Space.
+    key(&mut h, Modifiers::COMMAND, Key::M);
+    assert_eq!(h.state().render_queue().lock().items().len(), 1);
+    h.get_by_label("Remove").focus();
+    settle(&mut h);
+    press(&mut h, Modifiers::NONE, Key::Space);
+    settle(&mut h);
+    assert!(
+        !h.state().is_playing(),
+        "Space on a focused button started playback"
+    );
+    assert!(
+        h.state().render_queue().lock().items().is_empty(),
+        "Space did not press the focused button"
+    );
+}
+
+/// Reveal Position (P) and click its stopwatch; returns the layer.
+fn position_stopwatch(h: &mut Ui) -> PrimPath {
+    let layer = h.state().layers()[0].clone();
+    key(h, Modifiers::NONE, Key::P);
+    let label = timeline_text(h, "Position")
+        .unwrap_or_else(|| panic!("P did not reveal Position: {:?}", painted_texts(h)));
+    // The stopwatch is drawn just left of the property name.
+    click_at(h, pos2(label.left() - 12.0, label.center().y));
+    layer
+}
+
+fn key_times(h: &Ui, layer: &PrimPath) -> Vec<Time> {
+    bae_motion::query::attr_spec(h.state().stage(), layer, POSITION)
+        .map(|a| a.keyframes.keys().copied().collect())
+        .unwrap_or_default()
+}
+
+fn frames(h: &mut Ui, n: usize) {
+    for _ in 0..n {
+        press(h, Modifiers::NONE, Key::PageDown);
+    }
+    settle(h);
+}
+
+#[test]
+fn stopwatch_option_shift_p_and_j_k() {
+    let mut h = comp_with_solid();
+    let layer = position_stopwatch(&mut h);
+    assert_eq!(
+        key_times(&h, &layer),
+        [Time::ZERO],
+        "stopwatch made no keyframe at 0"
+    );
+
+    // 15 frames on, Option+Shift+P adds a keyframe at the current time.
+    frames(&mut h, 15);
+    let t15 = h.state().now();
+    assert!(t15 > Time::ZERO);
+    key(&mut h, Modifiers::ALT | Modifiers::SHIFT, Key::P);
+    assert_eq!(key_times(&h, &layer), [Time::ZERO, t15]);
+    // And at 45 frames.
+    frames(&mut h, 30);
+    let t45 = h.state().now();
+    key(&mut h, Modifiers::ALT | Modifiers::SHIFT, Key::P);
+    assert_eq!(key_times(&h, &layer), [Time::ZERO, t15, t45]);
+    // Option+Shift+P on an existing keyframe removes it (AE toggles).
+    key(&mut h, Modifiers::ALT | Modifiers::SHIFT, Key::P);
+    assert_eq!(key_times(&h, &layer), [Time::ZERO, t15]);
+    key(&mut h, Modifiers::ALT | Modifiers::SHIFT, Key::P);
+
+    // J / K jump between the keyframes of the selected layer.
+    key(&mut h, Modifiers::NONE, Key::Home);
+    assert_eq!(h.state().now(), Time::ZERO);
+    key(&mut h, Modifiers::NONE, Key::K);
+    assert_eq!(h.state().now(), t15);
+    key(&mut h, Modifiers::NONE, Key::K);
+    assert_eq!(h.state().now(), t45);
+    key(&mut h, Modifiers::NONE, Key::J);
+    assert_eq!(h.state().now(), t15);
+    key(&mut h, Modifiers::NONE, Key::J);
+    assert_eq!(h.state().now(), Time::ZERO);
+    // J at the first keyframe stays.
+    key(&mut h, Modifiers::NONE, Key::J);
+    assert_eq!(h.state().now(), Time::ZERO);
+
+    // Undo the keyframe edits one by one, then redo them.
+    let full = key_times(&h, &layer);
+    undo(&mut h); // re-add at 45
+    undo(&mut h); // remove at 45
+    assert_eq!(key_times(&h, &layer), [Time::ZERO, t15, t45]);
+    undo(&mut h); // add at 45
+    undo(&mut h); // add at 15
+    undo(&mut h); // stopwatch
+    assert!(key_times(&h, &layer).is_empty(), "undo left keyframes");
+    for _ in 0..5 {
+        redo(&mut h);
+    }
+    assert_eq!(key_times(&h, &layer), full);
+}
+
+#[test]
+fn stopwatch_off_removes_all_keyframes_and_undo_restores_them() {
+    let mut h = comp_with_solid();
+    let layer = position_stopwatch(&mut h);
+    frames(&mut h, 10);
+    key(&mut h, Modifiers::ALT | Modifiers::SHIFT, Key::P);
+    assert_eq!(key_times(&h, &layer).len(), 2);
+    // Clicking the stopwatch again turns animation off (AE: keyframes deleted).
+    let label = timeline_text(&h, "Position").unwrap();
+    click_at(&mut h, pos2(label.left() - 12.0, label.center().y));
+    assert!(key_times(&h, &layer).is_empty());
+    undo(&mut h);
+    assert_eq!(key_times(&h, &layer).len(), 2);
+}
+
+#[test]
+#[ignore = "issue #107"]
+fn selection_by_click_and_shift_click() {
+    let mut h = gui();
+    comp_with(
+        &mut h,
+        &[
+            "motion.layer.new.solid",
+            "motion.layer.new.null",
+            "motion.layer.new.text",
+        ],
+    );
+    let names = h.state().layer_names();
+    assert_eq!(names.len(), 3, "{names:?}");
+    let first = layer_row(&h, &names[0]);
+    click_at(&mut h, first);
+    assert_eq!(h.state().selected_layers(), [h.state().layers()[0].clone()]);
+    let third = layer_row(&h, &names[2]);
+    click_at_mods(&mut h, third, Modifiers::SHIFT);
+    assert_eq!(h.state().selected_layers().len(), 3, "Shift+click range");
+    // Cmd+Shift+A deselects all.
+    key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::A);
+    assert!(h.state().selected_layers().is_empty());
+    // Cmd+A selects all.
+    key(&mut h, Modifiers::COMMAND, Key::A);
+    assert_eq!(h.state().selected_layers().len(), 3);
+}
+
+#[test]
+fn project_panel_enter_renames_the_selected_item() {
+    let mut h = comp_with_solid();
+    let comp = h.state().active_comp().unwrap();
+    let row = find_text(&h, "Comp 1").expect("comp row in the Project panel");
+    click_at(&mut h, row.center());
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    replace_text(&mut h, "片头 Intro");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(h.state().name(&comp), "片头 Intro");
+}
