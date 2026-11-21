@@ -379,47 +379,43 @@ fn ui_code_uses_the_menu_button_with_a_system_glyph() {
 fn invisible_characters_draw_nothing() {
     use egui::epaint::text::{Fonts, LayoutJob, TextOptions};
     let mut fonts = Fonts::new(TextOptions::default(), bae_ui::theme::ui_font_definitions());
-    let invisible = [
+    // (glyphs that draw something, total advance) of `text` on one line.
+    let mut measure = |text: String| {
+        let job = LayoutJob::simple_singleline(
+            text,
+            egui::FontId::proportional(13.0),
+            egui::Color32::WHITE,
+        );
+        let galley = fonts.with_pixels_per_point(2.0).layout_job(job);
+        let glyphs = galley.rows.iter().flat_map(|r| r.row.glyphs.iter());
+        glyphs.fold((0usize, 0.0f32), |(n, w), g| {
+            (
+                n + usize::from(!g.uv_rect.is_nothing()),
+                w + g.advance_width,
+            )
+        })
+    };
+    let letters = measure("AB".into());
+    let alone = measure("x".into());
+    for c in [
         '\u{FE0F}',
         '\u{FE0E}',
         '\u{200D}',
         '\u{00AD}',
         '\u{E0020}',
         '\u{2060}',
-    ];
-    // A selector on its own (start of a name, after a space) found no font and drew the
-    // box with the system fonts; after a letter it joins the letter's cluster.
-    let mut text = String::from("\u{FE0F}A");
-    for c in invisible {
-        text.push(c);
-        text.push('B');
+    ] {
+        let code = u32::from(c);
+        // Between letters (joins a cluster) and on its own at the start: a selector
+        // there found no font and drew the box with the system fonts.
+        assert_eq!(
+            measure(format!("A{c}B")),
+            letters,
+            "U+{code:04X} between letters"
+        );
+        assert_eq!(measure(format!("{c}x")), alone, "U+{code:04X} at the start");
     }
-    let missing = '\u{10FFFD}'; // private use, in no font: draws the box
-    text.push(missing);
-    let job = LayoutJob::simple_singleline(
-        text.clone(),
-        egui::FontId::proportional(13.0),
-        egui::Color32::WHITE,
-    );
-    let galley = fonts.with_pixels_per_point(2.0).layout_job(job);
-    let glyphs: Vec<_> = galley
-        .rows
-        .iter()
-        .flat_map(|r| r.row.glyphs.iter())
-        .collect();
-    // One glyph per char (epaint's invariant; clustered chars get zero-width
-    // continuation glyphs), so glyphs line up with the text.
-    assert_eq!(glyphs.len(), text.chars().count());
-    for (c, g) in text.chars().zip(&glyphs) {
-        if invisible.contains(&c) {
-            let code = u32::from(c);
-            assert_eq!(g.advance_width, 0.0, "U+{code:04X} takes space");
-            assert!(g.uv_rect.is_nothing(), "U+{code:04X} draws something");
-        }
-    }
-    let boxed = glyphs.last().unwrap();
-    assert!(
-        boxed.advance_width > 0.0 && !boxed.uv_rect.is_nothing(),
-        "the missing glyph box"
-    );
+    // A character no font has still shows the missing-glyph box.
+    let (drawn, width) = measure("\u{10FFFD}".into());
+    assert!(drawn >= 1 && width > 0.0, "the missing glyph box");
 }
