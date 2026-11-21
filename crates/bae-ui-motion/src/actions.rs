@@ -104,78 +104,78 @@ const TRANSFORM_PROPERTIES: [(&str, &str, &str); 5] = [
     ("A", "transform:anchor_point", "Anchor Point"),
 ];
 
+/// Variants with fixed parameters: (command, parameters as JSON, English name). A
+/// table rather than `json!` calls keeps the code small (parsed once at startup).
+const VARIANTS: &[(&str, &str, &str)] = &[
+    (ids::STEP, r#"{"frames":-1}"#, "Previous Frame"),
+    (ids::STEP, r#"{"frames":1}"#, "Next Frame"),
+    (ids::STEP, r#"{"frames":-10}"#, "Back 10 Frames"),
+    (ids::STEP, r#"{"frames":10}"#, "Forward 10 Frames"),
+    (ids::EASE, r#"{"mode":"easy_ease"}"#, "Easy Ease"),
+    (ids::EASE, r#"{"mode":"ease_in"}"#, "Easy Ease In"),
+    (ids::EASE, r#"{"mode":"ease_out"}"#, "Easy Ease Out"),
+    ("key.ease", r#"{"mode":"easy_ease"}"#, "Easy Ease"),
+    ("key.ease", r#"{"mode":"ease_in"}"#, "Easy Ease In"),
+    ("key.ease", r#"{"mode":"ease_out"}"#, "Easy Ease Out"),
+    (ids::ORDER, r#"{"to":"forward"}"#, "Bring Layer Forward"),
+    (ids::ORDER, r#"{"to":"backward"}"#, "Send Layer Backward"),
+    (ids::ORDER, r#"{"to":"front"}"#, "Bring Layer to Front"),
+    (ids::ORDER, r#"{"to":"back"}"#, "Send Layer to Back"),
+    (
+        ids::REVEAL,
+        r#"{"what":"animated","add":false}"#,
+        "Reveal Animated Properties",
+    ),
+];
+
+/// Layer kinds by name, for both the UI action and the model command it runs.
+const LAYER_VARIANTS: &[(&str, &str)] = &[
+    (r#"{"kind":"solid"}"#, "New Solid"),
+    (r#"{"kind":"adjustment"}"#, "New Adjustment Layer"),
+    (r#"{"kind":"null"}"#, "New Null Object"),
+    (r#"{"kind":"text"}"#, "New Text Layer"),
+    (r#"{"kind":"camera"}"#, "New Camera"),
+    (r#"{"kind":"light"}"#, "New Light"),
+    (r#"{"kind":"shape"}"#, "New Shape Layer"),
+    (r#"{"kind":"shape","shape":"rect"}"#, "New Rectangle"),
+    (r#"{"kind":"shape","shape":"ellipse"}"#, "New Ellipse"),
+];
+
 /// Names of the variants of motion actions and of the model commands they run, so
 /// the Keyboard Shortcuts window, Edit > Undo and History say which one (#140):
 /// "Back 10 Frames", not four "Next Frame" rows; "Undo New Solid", not "Undo New
 /// Layer". `(registry id, variant)`.
 pub fn variants() -> Vec<(String, CommandVariant)> {
     let mut v = Vec::new();
-    let mut add = |command: &str, params: serde_json::Value, title: &str| {
+    let mut add = |command: &str, params: serde_json::Value, title: String| {
         let id = format!("{command}/{params}");
         v.push((id, CommandVariant::new(command, params, title)));
     };
-    for (frames, title) in [
-        (-1, "Previous Frame"),
-        (1, "Next Frame"),
-        (-10, "Back 10 Frames"),
-        (10, "Forward 10 Frames"),
-    ] {
-        add(ids::STEP, json!({ "frames": frames }), title);
+    let parse = |json: &str| serde_json::from_str(json).expect("variant parameters are JSON");
+    for (command, params, title) in VARIANTS {
+        add(command, parse(params), (*title).to_owned());
     }
-    for (mode, title) in [
-        ("easy_ease", "Easy Ease"),
-        ("ease_in", "Easy Ease In"),
-        ("ease_out", "Easy Ease Out"),
-    ] {
-        add(ids::EASE, json!({ "mode": mode }), title);
-        add("key.ease", json!({ "mode": mode }), title);
+    for (params, title) in LAYER_VARIANTS {
+        add(ids::NEW_LAYER, parse(params), (*title).to_owned());
+        add("layer.create", parse(params), (*title).to_owned());
     }
-    for (to, title) in [
-        ("forward", "Bring Layer Forward"),
-        ("backward", "Send Layer Backward"),
-        ("front", "Bring Layer to Front"),
-        ("back", "Send Layer to Back"),
-    ] {
-        add(ids::ORDER, json!({ "to": to }), title);
-    }
-    let layers = [
-        (json!({ "kind": "solid" }), "New Solid"),
-        (json!({ "kind": "adjustment" }), "New Adjustment Layer"),
-        (json!({ "kind": "null" }), "New Null Object"),
-        (json!({ "kind": "text" }), "New Text Layer"),
-        (json!({ "kind": "camera" }), "New Camera"),
-        (json!({ "kind": "light" }), "New Light"),
-        (json!({ "kind": "shape" }), "New Shape Layer"),
-        (json!({ "kind": "shape", "shape": "rect" }), "New Rectangle"),
-        (
-            json!({ "kind": "shape", "shape": "ellipse" }),
-            "New Ellipse",
-        ),
-    ];
-    for (params, title) in layers {
-        add(ids::NEW_LAYER, params.clone(), title);
-        add("layer.create", params, title);
-    }
-    add(
-        ids::REVEAL,
-        json!({ "what": "animated", "add": false }),
-        "Reveal Animated Properties",
-    );
     for (_, attr, name) in TRANSFORM_PROPERTIES {
-        add(
-            ids::REVEAL,
-            json!({ "what": attr, "add": false }),
-            &format!("Show {name}"),
-        );
-        add(
-            ids::REVEAL,
-            json!({ "what": attr, "add": true }),
-            &format!("Add {name} to Shown Properties"),
-        );
+        for add_to_shown in [false, true] {
+            let title = if add_to_shown {
+                format!("Add {name} to Shown Properties")
+            } else {
+                format!("Show {name}")
+            };
+            add(
+                ids::REVEAL,
+                json!({ "what": attr, "add": add_to_shown }),
+                title,
+            );
+        }
         add(
             ids::TOGGLE_KEY,
             json!({ "attr": attr }),
-            &format!("{name}: Add or Remove Keyframe"),
+            format!("{name}: Add or Remove Keyframe"),
         );
     }
     v
