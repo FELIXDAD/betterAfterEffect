@@ -1,0 +1,8 @@
+cargo :    Compiling bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+所在位置 行:10 字符: 1
++ cargo build --release -p bae *> docs/test-reports/win5090/size-build. ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ba...t\dev\apps\bae):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    Finished `release` profile [optimized] target(s) in 3m 26s
