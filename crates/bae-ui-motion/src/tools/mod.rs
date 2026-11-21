@@ -317,6 +317,10 @@ pub mod ids {
     pub const CAMERA_DOLLY: &str = "motion.tool.camera_dolly";
     pub const CAMERA_DOLLY_CYCLE: &str = "motion.tool.camera_dolly_cycle";
     pub const PARAMETRIC_MESH: &str = "motion.tool.parametric_mesh";
+    /// Arrow keys: nudge the selected layers (or mask vertices) by `{dx, dy}`
+    /// screen pixels at the viewer's magnification (AE `NudgeUp` …, id from the
+    /// command catalog).
+    pub const NUDGE: &str = "motion.layer.nudge_position";
 }
 
 /// `(action id, English title, default chord, what it does)`; chords from AE 26's
@@ -483,16 +487,53 @@ const SHORTCUTS: &[(&str, &str, &str, Shortcut)] = &[
     ),
 ];
 
-/// `(id, English title)` of the tool actions, for the shortcut editor.
-pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
-    SHORTCUTS.iter().map(|(id, title, ..)| (*id, *title))
+/// Arrow-key nudges: `(chord, dx, dy, English title)` (AE `CCompCompCmd`
+/// `NudgeUp` … `NudgeRightMore`: 1 pixel at the current magnification, Shift 10).
+const NUDGES: &[(&str, i32, i32, &str)] = &[
+    ("ArrowUp", 0, -1, "Nudge Up"),
+    ("ArrowDown", 0, 1, "Nudge Down"),
+    ("ArrowLeft", -1, 0, "Nudge Left"),
+    ("ArrowRight", 1, 0, "Nudge Right"),
+    ("Shift+ArrowUp", 0, -10, "Nudge Up 10 Pixels"),
+    ("Shift+ArrowDown", 0, 10, "Nudge Down 10 Pixels"),
+    ("Shift+ArrowLeft", -10, 0, "Nudge Left 10 Pixels"),
+    ("Shift+ArrowRight", 10, 0, "Nudge Right 10 Pixels"),
+];
+
+fn nudge_params(dx: i32, dy: i32) -> serde_json::Value {
+    serde_json::json!({ "dx": dx, "dy": dy })
 }
 
-/// The tool shortcuts, added to the `ae` keymap.
+/// `(id, English title)` of the tool actions, for the shortcut editor.
+pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
+    SHORTCUTS
+        .iter()
+        .map(|(id, title, ..)| (*id, *title))
+        .chain([(ids::NUDGE, "Nudge Layer Position")])
+}
+
+/// The variants of the nudge action (one row per arrow in the shortcut editor).
+pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
+    NUDGES
+        .iter()
+        .map(|(_, dx, dy, title)| {
+            let params = nudge_params(*dx, *dy);
+            (
+                format!("{}/{params}", ids::NUDGE),
+                bae_ui::CommandVariant::new(ids::NUDGE, params, (*title).to_owned()),
+            )
+        })
+        .collect()
+}
+
+/// The tool shortcuts and arrow-key nudges, added to the `ae` keymap.
 pub fn bindings() -> Vec<Binding> {
     SHORTCUTS
         .iter()
         .map(|(id, _, chord, _)| Binding::new(chord, id))
+        .chain(NUDGES.iter().map(|(chord, dx, dy, _)| {
+            Binding::new(chord, ids::NUDGE).params(nudge_params(*dx, *dy))
+        }))
         .collect()
 }
 
@@ -654,6 +695,10 @@ pub struct ToolState {
     /// A shape tool button was double-clicked: the viewer adds a layer- or
     /// comp-sized shape or mask with this tool.
     pub fill_request: Option<FillRequest>,
+    /// Cmd/Ctrl double-click on the Pan Behind tool: center the anchor points.
+    pub center_anchor_request: bool,
+    /// Magnification of the Composition viewer (1 = 100%), for the arrow keys.
+    pub magnification: f32,
 }
 
 impl Default for ToolState {
@@ -665,6 +710,8 @@ impl Default for ToolState {
             options: ToolOptions::default(),
             view_request: None,
             fill_request: None,
+            center_anchor_request: false,
+            magnification: 1.0,
         }
     }
 }
@@ -844,7 +891,7 @@ pub struct ToolActions;
 
 impl ActionHandler for ToolActions {
     fn actions(&self) -> Vec<String> {
-        SHORTCUTS.iter().map(|(id, ..)| (*id).to_owned()).collect()
+        actions().map(|(id, _)| id.to_owned()).collect()
     }
 
     fn workspace(&self) -> Option<&str> {
@@ -852,6 +899,13 @@ impl ActionHandler for ToolActions {
     }
 
     fn handle(&self, inv: &Invocation, cx: &mut PanelContext<'_>) -> bool {
+        if inv.id == ids::NUDGE {
+            // Another panel has focus (the viewer handles it itself).
+            let p = |k: &str| inv.params.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let mag = f64::from(shared(cx.resources).lock().magnification);
+            let session = crate::common::session(cx.resources);
+            return crate::viewer::nudge_layers(cx, &session, p("dx"), p("dy"), mag);
+        }
         shared(cx.resources).lock().shortcut(&inv.id)
     }
 }
@@ -941,6 +995,16 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Opacity", "不透明度"),
     ("Normal", "正常"),
     ("Mixed", "混合"),
+    // Arrow-key nudges.
+    ("Nudge Layer Position", "微移图层位置"),
+    ("Nudge Up", "向上微移"),
+    ("Nudge Down", "向下微移"),
+    ("Nudge Left", "向左微移"),
+    ("Nudge Right", "向右微移"),
+    ("Nudge Up 10 Pixels", "向上微移 10 像素"),
+    ("Nudge Down 10 Pixels", "向下微移 10 像素"),
+    ("Nudge Left 10 Pixels", "向左微移 10 像素"),
+    ("Nudge Right 10 Pixels", "向右微移 10 像素"),
 ];
 
 #[cfg(test)]

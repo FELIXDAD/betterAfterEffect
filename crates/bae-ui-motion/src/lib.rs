@@ -140,7 +140,7 @@ impl AppModule for MotionUiModule {
         let _ = app.register_arc::<dyn ActionHandler>("bae-ui-motion.tools", tool_actions);
         let variants = app.registry::<bae_ui::CommandVariant>();
         variants.batch(|tx| {
-            for (id, variant) in actions::variants() {
+            for (id, variant) in actions::variants().into_iter().chain(tools::variants()) {
                 let _ = tx.register(owner.clone(), id, variant);
             }
         });

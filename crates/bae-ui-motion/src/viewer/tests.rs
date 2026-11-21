@@ -835,3 +835,275 @@ fn command_makes_the_pen_the_selection_tool() {
         "the tool stays the Pen"
     );
 }
+
+// --- Selection, Rotation and Pan Behind tools --------------------------------
+
+impl H {
+    /// A solid of `size` centered at comp `(x, y)` (anchor at its center).
+    fn solid(&mut self, size: [f64; 2], at: [f64; 2]) -> PrimPath {
+        let size = [size[0] as u32, size[1] as u32];
+        path(
+            &self.run(
+                "layer.create",
+                json!({"comp": self.comp, "kind": "solid", "size": size, "position": at}),
+            )["path"],
+        )
+    }
+
+    fn action_with(&mut self, id: &str, params: serde_json::Value) -> PanelRequests {
+        let mut requests = PanelRequests::default();
+        let pid = PanelId::new("composition");
+        let mut cx = PanelContext::new(
+            &pid,
+            "Composition",
+            &self.stage,
+            &self.author,
+            &self.resources,
+            &mut requests,
+        );
+        cx.focused = true;
+        assert!(
+            self.viewer
+                .on_action(&Invocation::with_params(id, params), &mut cx),
+            "{id}"
+        );
+        requests
+    }
+
+    fn v3(&self, p: &PrimPath, attr: &str) -> [f64; 3] {
+        match self.value(p, attr) {
+            Some(Value::Vec3(v)) => v,
+            other => panic!("{attr}: {other:?}"),
+        }
+    }
+
+    /// Drag from comp `a` to comp `b` in steps and release; returns the
+    /// release frame's requests.
+    fn drag(&mut self, a: (f64, f64), b: (f64, f64), m: Modifiers) -> PanelRequests {
+        self.drag_to(a, b, m);
+        self.release(b, m)
+    }
+}
+
+fn close3(a: [f64; 3], b: [f64; 3]) -> bool {
+    (0..3).all(|i| (a[i] - b[i]).abs() < 0.01)
+}
+
+#[test]
+fn moving_layers_snaps_to_other_layers_and_the_comp() {
+    let mut h = H::new();
+    let b = h.solid([100.0, 100.0], [100.0, 100.0]);
+    let a = h.solid([200.0, 100.0], [320.0, 180.0]);
+    h.tools().lock().set(Tool::Selection);
+    // Snapping off: the layer follows the pointer.
+    let r = h.drag((300.0, 170.0), (233.0, 170.0), Modifiers::NONE);
+    one(&r, "attr.set_many");
+    h.apply(&r);
+    assert!(close3(h.v3(&a, "transform:position"), [253.0, 180.0, 0.0]));
+    assert_eq!(h.session().lock().selected_layers, std::slice::from_ref(&a));
+    h.stage.undo(&h.author).unwrap();
+    // On: its left edge (220 − 67 = 153) snaps to the other solid's right edge.
+    h.tools().lock().options.snapping = true;
+    let r = h.drag((300.0, 170.0), (233.0, 170.0), Modifiers::NONE);
+    h.apply(&r);
+    assert!(close3(h.v3(&a, "transform:position"), [250.0, 180.0, 0.0]));
+    h.stage.undo(&h.author).unwrap();
+    // Cmd/Ctrl inverts the switch while held.
+    let r = h.drag((300.0, 170.0), (233.0, 170.0), Modifiers::COMMAND);
+    h.apply(&r);
+    assert!(close3(h.v3(&a, "transform:position"), [253.0, 180.0, 0.0]));
+    let _ = b;
+}
+
+#[test]
+fn bounding_box_handles_scale_around_the_anchor() {
+    let mut h = H::new();
+    let a = h.solid([200.0, 100.0], [320.0, 180.0]);
+    h.select(&[&a]);
+    h.tools().lock().set(Tool::Selection);
+    // Bottom-right corner (420, 230) out by (100, 50): twice the size.
+    let r = h.drag((420.0, 230.0), (520.0, 280.0), Modifiers::NONE);
+    one(&r, "attr.set_many");
+    h.apply(&r);
+    assert!(close3(h.v3(&a, "transform:scale"), [200.0, 200.0, 100.0]));
+    assert!(
+        close3(h.v3(&a, "transform:position"), [320.0, 180.0, 0.0]),
+        "not moved"
+    );
+    h.stage.undo(&h.author).unwrap();
+    // Shift keeps the proportions.
+    let r = h.drag((420.0, 230.0), (520.0, 240.0), Modifiers::SHIFT);
+    h.apply(&r);
+    let s = h.v3(&a, "transform:scale");
+    assert!(
+        (s[0] - 184.0).abs() < 0.01 && (s[0] - s[1]).abs() < 1e-9,
+        "{s:?}"
+    );
+    h.stage.undo(&h.author).unwrap();
+    // The right edge handle scales X only.
+    let r = h.drag((420.0, 180.0), (470.0, 180.0), Modifiers::NONE);
+    h.apply(&r);
+    assert!(close3(h.v3(&a, "transform:scale"), [150.0, 100.0, 100.0]));
+    // One undo step.
+    h.stage.undo(&h.author).unwrap();
+    assert!(close3(h.v3(&a, "transform:scale"), [100.0, 100.0, 100.0]));
+}
+
+#[test]
+fn marquee_selects_the_layers_it_touches() {
+    let mut h = H::new();
+    let b = h.solid([100.0, 100.0], [100.0, 100.0]);
+    let a = h.solid([200.0, 100.0], [320.0, 180.0]);
+    h.tools().lock().set(Tool::Selection);
+    h.drag_to((10.0, 10.0), (160.0, 160.0), Modifiers::NONE);
+    assert_eq!(h.session().lock().selected_layers, std::slice::from_ref(&b));
+    h.move_to(h.screen(240.0, 140.0), Modifiers::NONE, Vec::new());
+    assert_eq!(h.session().lock().selected_layers, [a.clone(), b.clone()]);
+    let r = h.release((240.0, 140.0), Modifiers::NONE);
+    assert!(r.invocations.is_empty());
+    assert_eq!(h.session().lock().selected_layers.len(), 2);
+    // Shift adds to the selection; a plain marquee in empty space replaces it.
+    h.select(&[&a]);
+    h.drag((10.0, 10.0), (60.0, 60.0), Modifiers::SHIFT);
+    assert_eq!(h.session().lock().selected_layers, [a.clone(), b.clone()]);
+    h.drag((600.0, 10.0), (630.0, 20.0), Modifiers::NONE);
+    assert!(h.session().lock().selected_layers.is_empty());
+}
+
+#[test]
+fn rotation_tool_rotates_around_the_anchor_shift_in_45_degree_steps() {
+    let mut h = H::new();
+    let a = h.solid([200.0, 100.0], [320.0, 180.0]);
+    h.tools().lock().set(Tool::Rotation);
+    // A quarter turn clockwise around the anchor (320, 180).
+    let r = h.drag((400.0, 180.0), (320.0, 260.0), Modifiers::NONE);
+    one(&r, "attr.set_many");
+    h.apply(&r);
+    assert_eq!(h.session().lock().selected_layers, std::slice::from_ref(&a));
+    assert!((float(h.value(&a, "transform:rotation")) - 90.0).abs() < 0.01);
+    h.stage.undo(&h.author).unwrap();
+    let r = h.drag((400.0, 180.0), (330.0, 260.0), Modifiers::SHIFT);
+    h.apply(&r);
+    assert!((float(h.value(&a, "transform:rotation")) - 90.0).abs() < 1e-9);
+    h.stage.undo(&h.author).unwrap();
+    let r = h.drag((400.0, 180.0), (390.0, 230.0), Modifiers::SHIFT);
+    h.apply(&r);
+    assert!((float(h.value(&a, "transform:rotation")) - 45.0).abs() < 1e-9);
+}
+
+#[test]
+fn pan_behind_moves_the_anchor_or_pans_the_content() {
+    let mut h = H::new();
+    let a = h.solid([200.0, 100.0], [320.0, 180.0]);
+    h.select(&[&a]);
+    h.tools().lock().set(Tool::PanBehind);
+    // Dragging the anchor point: it moves, the layer stays where it is.
+    let r = h.drag((320.0, 180.0), (370.0, 200.0), Modifiers::NONE);
+    one(&r, "attr.set_many");
+    h.apply(&r);
+    assert!(close3(
+        h.v3(&a, "transform:anchor_point"),
+        [150.0, 70.0, 0.0]
+    ));
+    assert!(close3(h.v3(&a, "transform:position"), [370.0, 200.0, 0.0]));
+    h.stage.undo(&h.author).unwrap();
+    // Dragging elsewhere on the layer: the content pans behind the anchor.
+    let r = h.drag((250.0, 150.0), (300.0, 170.0), Modifiers::NONE);
+    h.apply(&r);
+    assert!(close3(
+        h.v3(&a, "transform:anchor_point"),
+        [50.0, 30.0, 0.0]
+    ));
+    assert!(close3(h.v3(&a, "transform:position"), [320.0, 180.0, 0.0]));
+    // Cmd/Ctrl double-click on the tool button: anchor back to the center.
+    h.tools().lock().center_anchor_request = true;
+    let r = h.frame(Vec::new(), Modifiers::NONE);
+    h.apply(&r);
+    assert!(close3(
+        h.v3(&a, "transform:anchor_point"),
+        [100.0, 50.0, 0.0]
+    ));
+    // The content moved by (50, 20): its center is at (370, 200) in the comp.
+    assert!(close3(h.v3(&a, "transform:position"), [370.0, 200.0, 0.0]));
+}
+
+#[test]
+fn arrow_keys_nudge_by_screen_pixels() {
+    let mut h = H::new();
+    let a = h.solid([200.0, 100.0], [320.0, 180.0]);
+    h.select(&[&a]);
+    let r = h.action_with(crate::tools::ids::NUDGE, json!({"dx": 1, "dy": 0}));
+    h.apply(&r);
+    assert!(close3(h.v3(&a, "transform:position"), [321.0, 180.0, 0.0]));
+    let r = h.action_with(crate::tools::ids::NUDGE, json!({"dx": 0, "dy": -10}));
+    h.apply(&r);
+    assert!(close3(h.v3(&a, "transform:position"), [321.0, 170.0, 0.0]));
+    // At 200 % one screen pixel is half a comp pixel.
+    h.viewer.zoom = Some(2.0);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let r = h.action_with(crate::tools::ids::NUDGE, json!({"dx": -1, "dy": 0}));
+    h.apply(&r);
+    assert!(close3(h.v3(&a, "transform:position"), [320.5, 170.0, 0.0]));
+    // From another panel the tool handler does the same at the viewer's
+    // magnification.
+    let mut requests = PanelRequests::default();
+    let pid = PanelId::new("timeline");
+    {
+        let mut cx = PanelContext::new(
+            &pid,
+            "Timeline",
+            &h.stage,
+            &h.author,
+            &h.resources,
+            &mut requests,
+        );
+        use bae_ui::ActionHandler as _;
+        let inv = Invocation::with_params(crate::tools::ids::NUDGE, json!({"dx": 0, "dy": 1}));
+        assert!(crate::tools::ToolActions.handle(&inv, &mut cx));
+    }
+    h.apply(&requests);
+    assert!(close3(h.v3(&a, "transform:position"), [320.5, 170.5, 0.0]));
+}
+
+#[test]
+fn selection_tool_edits_mask_vertices() {
+    let mut h = H::new();
+    let a = h.solid([200.0, 100.0], [320.0, 180.0]);
+    h.run(
+        "mask.create",
+        json!({"layer": a, "kind": "rect", "position": [100.0, 50.0], "size": [100.0, 50.0]}),
+    );
+    let mask = h.children(&a.child("masks").unwrap())[0].clone();
+    h.select(&[&a]);
+    h.tools().lock().set(Tool::Selection);
+    // Vertex 0 (top right, layer (150, 25)) is at comp (370, 155).
+    let r = h.click(370.0, 155.0, Modifiers::NONE);
+    assert!(r.invocations.is_empty());
+    assert_eq!(h.viewer.select.vertices.indices, [0]);
+    assert_eq!(
+        h.session().lock().selected_layers,
+        std::slice::from_ref(&a),
+        "layer stays selected"
+    );
+    let r = h.drag((370.0, 155.0), (390.0, 165.0), Modifiers::NONE);
+    one(&r, "path.set_vertices");
+    h.apply(&r);
+    let b = h.bezier(&mask);
+    assert!(near(b.vertices[0], [170.0, 35.0]), "{:?}", b.vertices);
+    assert!(
+        close3(h.v3(&a, "transform:position"), [320.0, 180.0, 0.0]),
+        "layer not moved"
+    );
+    // Arrow keys move the selected vertex, Delete removes it.
+    let r = h.action_with(crate::tools::ids::NUDGE, json!({"dx": 0, "dy": 1}));
+    h.apply(&r);
+    assert!(near(h.bezier(&mask).vertices[0], [170.0, 36.0]));
+    let r = h.action_with(crate::actions::ids::DELETE, json!({}));
+    one(&r, "path.set_vertices");
+    h.apply(&r);
+    assert_eq!(h.bezier(&mask).vertices.len(), 3);
+    assert!(h.viewer.select.vertices.is_empty());
+    // Clicking empty space deselects the layer (and its vertices).
+    h.click(600.0, 20.0, Modifiers::NONE);
+    assert!(h.session().lock().selected_layers.is_empty());
+}

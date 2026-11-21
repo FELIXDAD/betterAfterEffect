@@ -271,6 +271,11 @@ impl AeToolbar {
             Tool::Rotation => reset_selected(cx, "transform:rotation"),
             Tool::Hand => self.tools.lock().view_request = Some(ViewRequest::Center),
             Tool::Zoom => self.tools.lock().view_request = Some(ViewRequest::Actual),
+            // Cmd/Ctrl double-click: center the anchor points in the layers'
+            // content (AE tutorials T05@05:31).
+            Tool::PanBehind if modifiers.command => {
+                self.tools.lock().center_anchor_request = true;
+            }
             t if t.is_shape() => {
                 self.tools.lock().fill_request = Some(FillRequest {
                     tool: t,
@@ -412,10 +417,12 @@ fn axis_modes(ui: &mut Ui, o: &mut ToolOptions) {
     }
 }
 
-/// Snapping (AE-UI-357) is not implemented yet: shown disabled.
+/// Snapping (AE-UI-357): layers snap while dragged in the viewer (Cmd/Ctrl
+/// inverts it while held). The two options next to it (extend layer edges,
+/// snap to features of collapsed and text layers) are not available yet.
 fn snapping(ui: &mut Ui, o: &mut ToolOptions) {
+    widgets::checkbox(ui, &mut o.snapping, tr("Snapping"));
     ui.add_enabled_ui(false, |ui| {
-        widgets::checkbox(ui, &mut o.snapping, tr("Snapping"));
         icons::button(ui, Icon::SnapEdges, 20.0, false);
         icons::button(ui, Icon::SnapFeatures, 20.0, false);
     });

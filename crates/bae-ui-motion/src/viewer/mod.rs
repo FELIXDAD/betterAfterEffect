@@ -5,7 +5,7 @@
 
 use bae_anim::glam::{DMat4, DVec2, DVec3};
 use bae_anim::{EvaluatedComp, Transform};
-use bae_model::{LayerKind, PrimPath, Stage, Time, Value};
+use bae_model::{LayerKind, PrimPath, Time, Value};
 use bae_motion::query::{self, CompInfo};
 use bae_ui::Accessible as _;
 use bae_ui::icons::{self, Icon};
@@ -24,19 +24,17 @@ use crate::tools::{Tool, ViewRequest};
 
 mod bar;
 mod overlay;
+mod path_edit;
 mod pen_tool;
+mod select_tool;
 mod shape_tool;
 #[cfg(test)]
 mod tests;
+mod transform;
+
+pub(crate) use transform::nudge_layers;
 
 const MAGNIFICATIONS: [f32; 9] = [0.125, 0.25, 0.333, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0];
-
-struct MoveDrag {
-    /// `(layer, position at drag start, parent-space linear inverse)`.
-    layers: Vec<(PrimPath, DVec3, DMat4)>,
-    start: DVec2,
-    delta: DVec2,
-}
 
 #[derive(Default)]
 pub struct CompositionViewer {
@@ -48,7 +46,6 @@ pub struct CompositionViewer {
     grid: bool,
     checker: bool,
     locked: bool,
-    drag: Option<MoveDrag>,
     title: String,
     /// Zoom step requested by a shortcut, applied in `ui` (needs the panel rect).
     pending_zoom: Option<bool>,
@@ -66,6 +63,11 @@ pub struct CompositionViewer {
     shape: Option<shape_tool::ShapeDrag>,
     /// Pen tools: the open path being drawn, a Convert Vertex drag.
     pen: pen_tool::PenState,
+    /// Selection, Rotation and Pan Behind tools: transform drags, marquee,
+    /// selected mask vertices.
+    select: select_tool::SelectState,
+    /// Magnification of the last frame (arrow keys nudge by screen pixels).
+    mag: f32,
     /// Comp → screen mapping of the last frame.
     last_view: Option<View>,
 }
@@ -127,6 +129,50 @@ impl CompositionViewer {
         }
     }
 
+    fn nudge_vertices(
+        &mut self,
+        cx: &mut PanelContext<'_>,
+        session: &SharedSession,
+        info: &CompInfo,
+        d: DVec2,
+    ) -> bool {
+        let Some(comp) = self.evaluate(cx, session, info) else {
+            return false;
+        };
+        let selected = session.lock().selected_layers.clone();
+        let paths = overlay::editable_paths(cx.stage, &comp, &selected, false);
+        path_edit::nudge(cx, session, info, &paths, &self.select.vertices, d)
+    }
+
+    fn delete_vertices(
+        &mut self,
+        cx: &mut PanelContext<'_>,
+        session: &SharedSession,
+        info: &CompInfo,
+    ) {
+        let Some(comp) = self.evaluate(cx, session, info) else {
+            return;
+        };
+        let selected = session.lock().selected_layers.clone();
+        let paths = overlay::editable_paths(cx.stage, &comp, &selected, false);
+        if path_edit::delete(cx, &paths, &self.select.vertices) {
+            self.select.vertices.clear();
+        }
+    }
+
+    fn evaluate(
+        &mut self,
+        cx: &PanelContext<'_>,
+        session: &SharedSession,
+        info: &CompInfo,
+    ) -> Option<EvaluatedComp> {
+        let time = session.lock().time(&info.path);
+        self.eval
+            .get(cx.resources)
+            .evaluate_comp(cx.stage, &info.path, time)
+            .ok()
+    }
+
     /// Zoom tool click: the next magnification step, keeping `at` in place.
     fn step_zoom_at(&mut self, up: bool, at: Pos2, area: Rect, info: &CompInfo, ppp: f32) {
         let (_, mag) = self.view(area, info, ppp);
@@ -147,7 +193,11 @@ impl CompositionViewer {
 
 /// Apply live edits (timeline scrubs, viewer drags) to an evaluated comp and
 /// recompute world matrices.
-fn apply_overrides(comp: &mut EvaluatedComp, scrub: Option<&Scrub>, drag: Option<&MoveDrag>) {
+fn apply_overrides(
+    comp: &mut EvaluatedComp,
+    scrub: Option<&Scrub>,
+    drag: Option<&transform::TransformDrag>,
+) {
     let mut changed = false;
     for layer in &mut comp.layers {
         let three_d = layer.switches.three_d;
@@ -172,12 +222,13 @@ fn apply_overrides(comp: &mut EvaluatedComp, scrub: Option<&Scrub>, drag: Option
                 _ => touched = false,
             }
         }
-        if let Some(d) = drag
-            && let Some((_, start, inv)) = d.layers.iter().find(|(p, ..)| *p == layer.path)
-        {
+        if let Some(e) = drag.and_then(|d| d.edits.iter().find(|e| e.path == layer.path)) {
             touched = true;
-            let local = inv.transform_vector3(DVec3::new(d.delta.x, d.delta.y, 0.0));
-            t.position = *start + local;
+            t.position = e.now.position;
+            t.anchor_point = e.now.anchor_point;
+            t.scale = e.now.scale;
+            t.rotation = e.now.rotation;
+            t.orientation = e.now.orientation;
         }
         if touched {
             layer.transform = t;
@@ -210,21 +261,6 @@ fn apply_overrides(comp: &mut EvaluatedComp, scrub: Option<&Scrub>, drag: Option
             world(comp, i, &mut done, 0);
         }
     }
-}
-
-/// Topmost layer under `pos` (screen), if any.
-/// The topmost layer under `pos`; locked layers cannot be picked (AE: clicks go
-/// through them).
-fn hit_test(stage: &Stage, comp: &EvaluatedComp, view: &View, pos: Pos2) -> Option<PrimPath> {
-    let outer = Affine::new(DMat4::IDENTITY);
-    comp.layers
-        .iter()
-        .filter(|l| l.visible && !l.switches.guide || l.kind == LayerKind::Null)
-        .filter(|l| !query::is_locked(stage, &l.path))
-        .find(|l| {
-            render::bounds_quad(l, view, &outer).is_some_and(|q| render::quad_contains(&q, pos))
-        })
-        .map(|l| l.path.clone())
 }
 
 fn checkerboard(p: &egui::Painter, r: Rect) {
@@ -265,11 +301,29 @@ impl Panel for CompositionViewer {
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
         // While a shape is being drawn the keys belong to the drag: Space moves
         // the shape (not playback), arrows and Page Up / Down change it.
-        if self.shape.is_some() || self.pen.busy() {
+        if self.shape.is_some() || self.pen.busy() || self.select.busy() {
             return true;
         }
         let session = common::session(cx.resources);
         match action.id.as_str() {
+            crate::tools::ids::NUDGE => {
+                let p = |k: &str| action.params.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let mag = f64::from(if self.mag > 0.0 { self.mag } else { 1.0 });
+                if !self.select.vertices.is_empty()
+                    && let Some(info) = common::active_comp(cx.stage, &session)
+                {
+                    let d = DVec2::new(p("dx") / mag, p("dy") / mag);
+                    return self.nudge_vertices(cx, &session, &info, d);
+                }
+                nudge_layers(cx, &session, p("dx"), p("dy"), mag);
+                true
+            }
+            crate::actions::ids::DELETE if !self.select.vertices.is_empty() => {
+                if let Some(info) = common::active_comp(cx.stage, &session) {
+                    self.delete_vertices(cx, &session, &info);
+                }
+                true
+            }
             "viewer.zoom_in" | "viewer.zoom_out" => {
                 self.pending_zoom = Some(action.id == "viewer.zoom_in");
                 true
@@ -338,6 +392,10 @@ impl Panel for CompositionViewer {
         }
         let (view, mag) = self.view(area, &info, ppp);
         self.last_view = Some(view);
+        if self.mag != mag {
+            self.mag = mag;
+            crate::tools::shared(cx.resources).lock().magnification = mag;
+        }
 
         // Evaluate.
         let eval = self.eval.get(cx.resources);
@@ -360,12 +418,17 @@ impl Panel for CompositionViewer {
             session.lock().scrub = None;
         }
         let scrub = session.lock().scrub.clone();
-        apply_overrides(&mut comp, scrub.as_ref(), self.drag.as_ref());
+        apply_overrides(&mut comp, scrub.as_ref(), self.select.drag.as_ref());
         // Double-clicking a shape tool button: a layer- or comp-sized shape.
         let tools = crate::tools::shared(cx.resources);
         let fill = tools.lock().fill_request.take();
         if let Some(request) = fill {
             shape_tool::fill_target(cx, &session, &info, &comp, request, &tools);
+        }
+        // Cmd/Ctrl double-click on the Pan Behind tool button.
+        let center = std::mem::take(&mut tools.lock().center_anchor_request);
+        if center {
+            select_tool::center_anchors(cx, &session, &info, &comp);
         }
 
         // Paint.
@@ -537,6 +600,7 @@ impl Panel for CompositionViewer {
             && resp.hovered()
             && self.shape.is_none()
             && !self.pen.busy()
+            && !self.select.busy()
         {
             let s = session.lock();
             self.space_hold = Some((s.is_playing(), s.time(&info.path)));
@@ -603,6 +667,18 @@ impl Panel for CompositionViewer {
             effective,
             &painter,
         );
+        let select_cursor = select_tool::frame(
+            &mut self.select,
+            ui,
+            &resp,
+            cx,
+            &session,
+            &info,
+            &comp,
+            &view,
+            effective,
+            &painter,
+        );
         if resp.hovered()
             && let Some(pos) = resp.hover_pos()
         {
@@ -611,7 +687,10 @@ impl Panel for CompositionViewer {
                 dragging: self.panning,
             };
             let shown = pen.as_ref().map_or(effective, |p| p.tool);
-            cursor::show(ui, &painter, pos, cursor::for_tool(shown, hover));
+            match select_cursor {
+                Some(icon) => ui.ctx().set_cursor_icon(icon),
+                None => cursor::show(ui, &painter, pos, cursor::for_tool(shown, hover)),
+            }
             if pen.as_ref().is_some_and(|p| p.close) {
                 cursor::close_mark(&painter, pos);
             }
@@ -630,104 +709,6 @@ impl Panel for CompositionViewer {
                 }
             }
         }
-        // Clicking a layer selects it with the Selection, Rotation and Pan Behind
-        // tools; only the Selection tool moves layers.
-        let selects = matches!(
-            effective,
-            Tool::Selection | Tool::Rotation | Tool::PanBehind
-        );
-        let moves = effective == Tool::Selection;
-        if selects
-            && resp.clicked_by(egui::PointerButton::Primary)
-            && let Some(pos) = pointer
-        {
-            let hit = hit_test(cx.stage, &comp, &view, pos);
-            let shift = ui.input(|i| i.modifiers.shift);
-            let mut s = session.lock();
-            match hit {
-                Some(h) if shift => {
-                    if let Some(i) = s.selected_layers.iter().position(|p| *p == h) {
-                        s.selected_layers.remove(i);
-                    } else {
-                        s.selected_layers.push(h);
-                    }
-                }
-                Some(h) => {
-                    s.selected_layers = vec![h];
-                    s.selected_keys.clear();
-                }
-                None => {
-                    s.selected_layers.clear();
-                    s.selected_keys.clear();
-                }
-            }
-        }
-        if moves
-            && resp.drag_started_by(egui::PointerButton::Primary)
-            && let Some(pos) = resp.interact_pointer_pos()
-        {
-            let hit = hit_test(cx.stage, &comp, &view, pos);
-            let mut s = session.lock();
-            if let Some(h) = &hit
-                && !s.selected_layers.contains(h)
-            {
-                s.selected_layers = vec![h.clone()];
-            }
-            if hit.is_some() {
-                s.stop();
-                let layers = s
-                    .selected_layers
-                    .iter()
-                    .filter_map(|p| {
-                        let l = comp.layer(p)?;
-                        let parent_world = l
-                            .parent
-                            .map_or(DMat4::IDENTITY, |i| comp.layers[i].world_matrix);
-                        Some((p.clone(), l.transform.position, parent_world.inverse()))
-                    })
-                    .collect();
-                self.drag = Some(MoveDrag {
-                    layers,
-                    start: view.to_comp(pos),
-                    delta: DVec2::ZERO,
-                });
-            }
-        }
-        if let Some(d) = &mut self.drag {
-            if let Some(pos) = resp.interact_pointer_pos() {
-                let mut delta = view.to_comp(pos) - d.start;
-                if ui.input(|i| i.modifiers.shift) {
-                    if delta.x.abs() > delta.y.abs() {
-                        delta.y = 0.0;
-                    } else {
-                        delta.x = 0.0;
-                    }
-                }
-                d.delta = delta;
-            }
-            if resp.drag_stopped() {
-                let d = self.drag.take().expect("some");
-                if d.delta.length_squared() > 0.0 {
-                    let edits: Vec<serde_json::Value> = d
-                        .layers
-                        .iter()
-                        .map(|(p, start, inv)| {
-                            let local =
-                                inv.transform_vector3(DVec3::new(d.delta.x, d.delta.y, 0.0));
-                            let v = *start + local;
-                            json!({
-                                "path": p,
-                                "attr": "transform:position",
-                                "time": query::to_key_time(cx.stage, p, time),
-                                "value": {"type": "vec3", "value": [v.x, v.y, v.z]},
-                            })
-                        })
-                        .collect();
-                    cx.invoke_with("attr.set_many", json!({"edits": edits}));
-                }
-            }
-        }
-
         // Items dropped from the project panel become layers.
         if let Some(item) = resp.dnd_release_payload::<ItemDrag>() {
             add_item_as_layer(cx, &session, &item.0, pointer.map(|p| view.to_comp(p)));
