@@ -23,6 +23,7 @@ use crate::tools::cursor::{self, Hover};
 use crate::tools::{Tool, ViewRequest};
 
 mod bar;
+mod free_transform;
 mod overlay;
 mod path_edit;
 mod pen_tool;

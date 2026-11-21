@@ -321,6 +321,8 @@ pub mod ids {
     /// screen pixels at the viewer's magnification (AE `NudgeUp` …, id from the
     /// command catalog).
     pub const NUDGE: &str = "motion.layer.nudge_position";
+    /// Layer > Mask and Shape Path > Free Transform Points (catalog id).
+    pub const FREE_TRANSFORM: &str = "motion.layer.free_transform_points";
 }
 
 /// `(action id, English title, default chord, what it does)`; chords from AE 26's
@@ -509,7 +511,10 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
     SHORTCUTS
         .iter()
         .map(|(id, title, ..)| (*id, *title))
-        .chain([(ids::NUDGE, "Nudge Layer Position")])
+        .chain([
+            (ids::NUDGE, "Nudge Layer Position"),
+            (ids::FREE_TRANSFORM, "Free Transform Points"),
+        ])
 }
 
 /// The variants of the nudge action (one row per arrow in the shortcut editor).
@@ -697,6 +702,9 @@ pub struct ToolState {
     pub fill_request: Option<FillRequest>,
     /// Cmd/Ctrl double-click on the Pan Behind tool: center the anchor points.
     pub center_anchor_request: bool,
+    /// Free Transform Points was chosen: the viewer puts a box on the selected
+    /// mask path (its selected vertices, or all).
+    pub free_transform_request: bool,
     /// Magnification of the Composition viewer (1 = 100%), for the arrow keys.
     pub magnification: f32,
 }
@@ -711,6 +719,7 @@ impl Default for ToolState {
             view_request: None,
             fill_request: None,
             center_anchor_request: false,
+            free_transform_request: false,
             magnification: 1.0,
         }
     }
@@ -906,6 +915,13 @@ impl ActionHandler for ToolActions {
             let session = crate::common::session(cx.resources);
             return crate::viewer::nudge_layers(cx, &session, p("dx"), p("dy"), mag);
         }
+        if inv.id == ids::FREE_TRANSFORM {
+            let tools = shared(cx.resources);
+            let mut t = tools.lock();
+            t.set(Tool::Selection);
+            t.free_transform_request = true;
+            return true;
+        }
         shared(cx.resources).lock().shortcut(&inv.id)
     }
 }
@@ -997,6 +1013,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Mixed", "混合"),
     // Arrow-key nudges.
     ("Nudge Layer Position", "微移图层位置"),
+    ("Free Transform Points", "自由变换点"),
     ("Nudge Up", "向上微移"),
     ("Nudge Down", "向下微移"),
     ("Nudge Left", "向左微移"),

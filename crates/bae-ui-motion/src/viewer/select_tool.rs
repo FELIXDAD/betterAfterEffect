@@ -22,6 +22,7 @@ use bae_ui::theme;
 use egui::{CursorIcon, Painter, PointerButton, Pos2, Rect, Response, Ui};
 use serde_json::json;
 
+use super::free_transform::FreeTransform;
 use super::overlay::{self, EditablePath};
 use super::path_edit::{self, PathDrag, VertexSelection};
 use super::transform::{self, Kind, TransformDrag};
@@ -32,6 +33,8 @@ use crate::tools::Tool;
 /// What a press landed on.
 #[derive(Clone, Debug, PartialEq)]
 enum Press {
+    /// On the free-transform box.
+    Free,
     Path(path_edit::Hit),
     Handle(PrimPath, transform::Handle),
     Anchor(PrimPath),
@@ -53,12 +56,17 @@ pub(crate) struct SelectState {
     press: Option<(Press, Pos2)>,
     marquee: Option<Marquee>,
     path_drag: Option<PathDrag>,
+    /// Free Transform Points box.
+    pub(crate) free: Option<FreeTransform>,
 }
 
 impl SelectState {
     /// A drag is in progress.
     pub(crate) fn busy(&self) -> bool {
-        self.drag.is_some() || self.marquee.is_some() || self.path_drag.is_some()
+        self.drag.is_some()
+            || self.marquee.is_some()
+            || self.path_drag.is_some()
+            || self.free.as_ref().is_some_and(|f| f.dragging())
     }
 }
 
@@ -172,6 +180,52 @@ pub(super) fn frame(
     let hover = resp.hover_pos();
     let pointer = resp.interact_pointer_pos().or(hover);
 
+    // Free Transform Points: follow the model; Enter / Esc end it; the menu
+    // command or a double-click on a mask path starts it.
+    if let Some(f) = state.free.as_mut() {
+        match paths.iter().find(|p| p.prim == f.prim) {
+            Some(p) => f.sync(p),
+            None => state.free = None,
+        }
+    }
+    let request = std::mem::take(&mut tools.lock().free_transform_request);
+    if request && tool == Tool::Selection {
+        let prim = state
+            .vertices
+            .prim
+            .clone()
+            .or_else(|| paths.first().map(|p| p.prim.clone()));
+        if let Some(p) = prim.and_then(|prim| paths.iter().find(|p| p.prim == prim)) {
+            let sel = if state.vertices.prim.as_ref() == Some(&p.prim) {
+                state.vertices.indices.clone()
+            } else {
+                Vec::new()
+            };
+            state.free = FreeTransform::new(p, &sel);
+        }
+    }
+    if state.free.as_ref().is_some_and(|f| !f.dragging())
+        && ui.input(|i| i.key_pressed(egui::Key::Escape) || i.key_pressed(egui::Key::Enter))
+    {
+        state.free = None;
+    }
+    if tool == Tool::Selection
+        && resp.double_clicked()
+        && let Some(pos) = hover
+        && let Some(hit) = overlay::hit(&paths, view, pos)
+    {
+        let pi = match hit {
+            overlay::PathHit::Vertex { path, .. } | overlay::PathHit::Segment { path, .. } => path,
+        };
+        let sel = if state.vertices.prim.as_ref() == Some(&paths[pi].prim) {
+            state.vertices.indices.clone()
+        } else {
+            Vec::new()
+        };
+        state.free = FreeTransform::new(&paths[pi], &sel);
+        state.path_drag = None;
+    }
+
     // What is under the pointer.
     let target = |pos: Pos2, state: &SelectState| -> Press {
         if tool == Tool::Selection
@@ -204,7 +258,19 @@ pub(super) fn frame(
         && resp.hovered()
         && let Some(pos) = hover
     {
-        let t = target(pos, state);
+        let on_box = match state.free.as_mut() {
+            Some(f) => f.press(view, pos),
+            None => false,
+        };
+        if !on_box && state.free.is_some() {
+            // A click away from the box ends free transform.
+            state.free = None;
+        }
+        let t = if on_box {
+            Press::Free
+        } else {
+            target(pos, state)
+        };
         match &t {
             Press::Path(path_edit::Hit::Vertex { path, index }) => {
                 path_edit::press_vertex(&mut state.vertices, &paths[*path].prim, *index, shift);
@@ -248,6 +314,7 @@ pub(super) fn frame(
         let at = view.to_comp(origin);
         session.lock().stop();
         match press {
+            Press::Free => {}
             Press::Path(h) => {
                 let pi = match h {
                     path_edit::Hit::Handle { path, .. } | path_edit::Hit::Vertex { path, .. } => {
@@ -337,6 +404,12 @@ pub(super) fn frame(
     {
         d.update(view.to_comp(pos), shift);
     }
+    if let Some(f) = state.free.as_mut()
+        && f.dragging()
+        && let Some(pos) = pointer
+    {
+        f.update(view, pos, shift);
+    }
     if let Some(m) = &state.marquee
         && let Some(pos) = pointer
     {
@@ -378,12 +451,21 @@ pub(super) fn frame(
         {
             d.commit(cx, session, info);
         }
+        if let Some(f) = state.free.as_mut() {
+            f.release(cx, session, info);
+        }
         state.marquee = None;
         state.press = None;
     }
 
     // Paint: mask vertices, snap guides, the hover outline.
     let mut shown = paths.clone();
+    if let Some(f) = &state.free {
+        if let Some(p) = shown.iter_mut().find(|p| p.prim == f.prim) {
+            p.path = f.preview().clone();
+        }
+        f.paint(painter, view);
+    }
     if let Some(d) = &state.path_drag {
         let preview = d.preview();
         if let Some(p) = shown.iter_mut().find(|p| &p.prim == d.prim()) {
@@ -402,6 +484,12 @@ pub(super) fn frame(
         d.paint_guides(painter, view, info);
     }
     let mut cursor = None;
+    if let Some(f) = &state.free
+        && let Some(pos) = hover
+        && let Some(c) = f.cursor(view, pos)
+    {
+        return Some(c);
+    }
     if !state.busy()
         && let Some(pos) = hover
     {
