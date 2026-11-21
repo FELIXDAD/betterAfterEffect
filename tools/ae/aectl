@@ -10,6 +10,8 @@
 #   aectl clean                  clear crash / force-quit flags (AE must not be running)
 #   aectl install                install the startup "ready" script and enable script file access
 #
+# Exit codes of eval/run: 0 ok, 1 script error, 3 dialog recovered, 4 timeout,
+# 5 osascript failed before the script ran.
 # Options for eval/run: --timeout <s> (default 300), --force (also recover an AE instance
 # that aectl did not start; that may discard someone's unsaved work), --lock-timeout <s>
 # (default 1800: how long to wait while another caller is using After Effects).
@@ -280,12 +282,35 @@ run_script() {
 })();
 EOF
   local pid; pid=$(ae_pid)
-  osascript -e "with timeout of $((timeout + 5)) seconds" \
-    -e "tell application id \"$BUNDLE_ID\" to DoScriptFile \"$wrapper\"" -e "end timeout" >/dev/null 2>&1 &
-  local osa=$! i=0 hits=0 frozen=0 prev_sig="" text sig why=""
-  while (( i < timeout * 2 )); do
+  # BAE_AE_OSASCRIPT overrides the osascript binary (tests/osascript_exit.sh fakes a failure).
+  local osa_log="$STATE/osascript-$id.log"
+  "${BAE_AE_OSASCRIPT:-osascript}" -e "with timeout of $((timeout + 5)) seconds" \
+    -e "tell application id \"$BUNDLE_ID\" to DoScriptFile \"$wrapper\"" -e "end timeout" >"$osa_log" 2>&1 &
+  # Wall-clock deadline: the stack samples below take time, so counting naps would let
+  # osascript's own (timeout + 5) s limit expire first.
+  local osa=$! i=0 hits=0 frozen=0 prev_sig="" text sig why="" deadline=$((SECONDS + timeout))
+  local timeout_why="timeout after ${timeout}s; the script was still running"
+  while (( SECONDS < deadline )); do
     nap 0.5; i=$((i + 1))
     [[ -f "$out" ]] && break
+    # osascript only returns after DoScriptFile has run the wrapper, which writes $out
+    # first. If it is gone and $out is still missing, the Apple event failed (not
+    # delivered, AE refused it, osascript error): report it now instead of waiting
+    # for --timeout while After Effects sits idle.
+    if ! kill -0 "$osa" 2>/dev/null; then
+      wait "$osa"; local osa_rc=$?
+      for _ in 1 2 3 4; do [[ -f "$out" ]] && break; nap 0.5; done
+      [[ -f "$out" ]] && break
+      # -1712: AE did not answer the Apple event in time. It is either still running the
+      # script or not processing events at all; handle it like our own timeout (restart).
+      if grep -q -- '(-1712)' "$osa_log"; then
+        timeout_why="After Effects did not answer the Apple event (-1712)"; break
+      fi
+      local osa_err; osa_err=$(tr '\n' ' ' < "$osa_log" | sed 's/"/\\"/g' | cut -c1-300)
+      rm -f "$wrapper" "$STATE/src-$id.jsx" "$osa_log"
+      echo "{\"ok\":false,\"value\":null,\"error\":{\"message\":\"osascript exited (status $osa_rc) without running the script: ${osa_err:-no output}\"}}"
+      return 5
+    fi
     if (( i % 6 == 0 )); then
       text=$(main_thread "$pid")
       if grep -E "$MODAL_RE" >/dev/null <<<"$text"; then hits=$((hits + 1)); else hits=0; fi
@@ -310,14 +335,14 @@ EOF
       return 3
     fi
   done
-  kill "$osa" 2>/dev/null; wait "$osa" 2>/dev/null
+  kill "$osa" 2>/dev/null; wait "$osa" 2>/dev/null; rm -f "$osa_log"
   if [[ ! -f "$out" ]]; then
     # AE keeps executing the abandoned script after osascript gives up, so the next
     # caller would queue behind it and time out too. Restart AE before releasing the
     # lock; every caller builds its own scene, so nothing of value is lost.
     LAST_EVIDENCE=""
-    recover "$pid" 1 "timeout after ${timeout}s; the script was still running"
-    echo "{\"ok\":false,\"value\":null,\"error\":{\"message\":\"timeout after ${timeout}s (After Effects restarted so the next caller is not blocked)\",\"evidence\":\"${LAST_EVIDENCE:-}\"}}"
+    recover "$pid" 1 "$timeout_why"
+    echo "{\"ok\":false,\"value\":null,\"error\":{\"message\":\"$timeout_why (After Effects restarted so the next caller is not blocked)\",\"evidence\":\"${LAST_EVIDENCE:-}\"}}"
     return 4
   fi
   cat "$out"; echo

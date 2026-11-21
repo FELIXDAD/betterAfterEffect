@@ -11,7 +11,7 @@ tools/ae/aectl stop                       # 不保存关闭工程并结束 AE
 ```
 
 输出：`{"ok": true|false, "value": "<脚本最后一个表达式的字符串>", "error": {"message", "line", "file"}, "ms": …}`。
-退出码：0 成功；1 脚本抛异常；3 出现模态框并已自动恢复（`error.evidence` 是现场文件）；4 超时。
+退出码：0 成功；1 脚本抛异常；3 出现模态框并已自动恢复（`error.evidence` 是现场文件）；4 超时（按墙钟计；AE 会被重启。osascript 报 `AppleEvent timed out (-1712)` 也按超时处理，因为这时 AE 要么还在跑脚本、要么根本不处理 Apple 事件）；5 osascript 在脚本运行之前就失败了（Apple 事件没送到或被拒绝，`error.message` 带 osascript 的原始报错，立刻返回，不等超时）。测试时可以用环境变量 `BAE_AE_OSASCRIPT` 换掉 osascript。
 选项：`--timeout <秒>`（默认 300）；`--force`：允许处理不是 aectl 启动的 AE（可能丢掉别人没保存的工作，慎用）。
 
 ## 写给 AE 的脚本要遵守
@@ -35,6 +35,17 @@ tools/ae/aectl stop                       # 不保存关闭工程并结束 AE
 | 需要"允许脚本写入文件和访问网络" | 偏好 `Pref_SCRIPTING_FILE_NETWORK_SECURITY` | AE 关着的时候由 `aectl install` 打开（会先备份） |
 
 检测卡死不需要辅助功能权限：用 `sample <pid>` 读主线程调用栈。对话框原文取自 AE 的 Sentry breadcrumb（`AEErrorDialog`）。每次恢复前，现场都会存到 `/private/tmp/bae-ae-automation/recoveries/`。
+
+## 已知问题
+
+- **这台 Mac 上 aerender 用不了**（2026-11-20，AE 26.2.1）：独立启动的 `aerender` → `aerendercore` 卡在 Adobe 授权库的初始化里（主线程停在 `aelicensing::DoSetup → licensingglue::LicenseSetup → … → adobe::ngl::internal::DataStorageFs::GetInstance → std::mutex::lock`），CPU 占用为 0，一直不出帧。这是本机授权环境的问题。**不要去改任何授权相关的文件或设置。** 绕开的办法：在已经运行的 AE 里用渲染队列渲染（`app.project.renderQueue.render()`，通过 `aectl run`），示例见 `docs/test-reports/m4/scripts/ae_time.jsx`。用 `sample <aerendercore 的 pid>` 可以确认是不是这种情况，确认后用 `kill -9` 结束 aerender 和 aerendercore。
+- **计时前要清 AE 的缓存**：AE 会复用内存和磁盘缓存里已经渲好的帧，同一个合成第二次渲染会明显变快。测速时每次先 `app.purge(PurgeTarget.ALL_CACHES)`。
+- **ExtendScript 里不要把 Error 对象直接和字符串拼接**：`"x" + e` 在 AE 里会再抛一个"Object of type Error found where a Number, Array, or Property is needed"，用 `e.message`。
+- **AE 的输出模块格式在脚本里是只读的**，本机也没有 PNG 输出模板（只有 `TIFF Sequence with Alpha` 等），要 PNG 只能用 `comp.saveFrameToPng`，而且它返回时文件还没写完，要用新的 `File` 对象轮询 `exists` 和 `length`。
+
+## 测试
+
+- `tools/ae/tests/osascript_exit.sh`：osascript 提前失败时 aectl 要立刻报错（退出码 5），不能等到超时；osascript 报 -1712 时按超时处理并重启 AE（退出码 4）。需要本机装有 AE，会重启一次 AE，大约 15 秒。
 
 ## 限制
 
