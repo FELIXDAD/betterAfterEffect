@@ -1,0 +1,2 @@
+﻿sniffed=mediafoundation
+open=Err: not supported: video decoding on Windows (Media Foundation) is not implemented yet: C:\Users\king\AppData\Local\Temp\bae-mf-probe.mp4

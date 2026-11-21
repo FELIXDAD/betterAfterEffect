@@ -1,0 +1,155 @@
+cargo :    Compiling indexmap v2.14.2
+所在位置 行:7 字符: 1
++ cargo test -p bae-media *> docs/test-reports/win5090/media-tests.txt
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling indexmap v2.14.2:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   Compiling tiff v0.11.3
+   Compiling naga-types v30.0.2
+   Compiling bae-app v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-app)
+   Compiling zip v9.8.0
+   Compiling bae-platform v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-platform)
+   Compiling wgpu-types v30.0.2
+   Compiling naga v30.0.2
+   Compiling image v0.25.10
+   Compiling bae-model v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-model)
+   Compiling wgpu-naga-bridge v30.0.2
+   Compiling wgpu-hal v30.0.2
+   Compiling wgpu-core-deps-windows-linux-android v30.0.2
+   Compiling wgpu-core v30.0.2
+   Compiling wgpu v30.0.2
+   Compiling bae-gpu v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-gpu)
+   Compiling bae-media v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-media)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 24.90s
+     Running unittests src\lib.rs (target\debug\build\bae-media/3ed3c45118171123\out\bae_media-3ed3c45118171123.exe)
+
+running 36 tests
+test cache::tests::keys_separate_variants ... ok
+test audio::tests::sample_time_is_exact ... ok
+test export::tests::progress_math ... ok
+test frame::tests::alpha_guess ... ok
+test gpu::tests::export_alpha_ops ... ok
+test audio::tests::memory_source_reads_ranges ... ok
+test export::tests::conversions ... ok
+test library::tests::source_keys_include_options ... ok
+test export::tests::queue_bookkeeping ... ok
+test export::tests::sequence_patterns ... ok
+test meta::tests::chromaticities_are_recognized ... ok
+test library::tests::safe_join_refuses_escapes ... ok
+test audio::tests::waveform_peaks_and_levels ... ok
+test meta::tests::asset_attributes_match_the_schema ... ok
+test gpu::tests::alpha_plans ... ok
+test meta::tests::pixel_aspect ... ok
+test meta::tests::info_serializes ... ok
+test export::tests::settings_validation ... ok
+test meta::tests::cicp_round_trip ... ok
+test module::tests::registers_builtin_formats_and_cache ... ok
+test cache::tests::source_ids_track_content ... ok
+test sequence::tests::parse_names ... ok
+test sequence::tests::paths_and_pattern ... ok
+test time::tests::media_frame_index_round_trip ... ok
+test time::tests::snap_measured_rates ... ok
+test time::tests::timecode_drop_frame ... ok
+test time::tests::timecode_non_drop ... ok
+test trim::tests::gop_lookup ... ok
+test trim::tests::passthrough_widens_to_gops ... ok
+test trim::tests::reencode_is_exact_and_handles_clamp ... ok
+test sequence::tests::scan_groups_files ... ok
+test sequence::tests::detect_on_disk ... ok
+test mp4::tests::edit_list_priming ... ok
+test mp4::tests::itunes_gapless_info ... ok
+test trim::tests::sequence_trim_copies_used_frames ... ok
+test mp4::tests::no_signal_or_garbage ... ok
+
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\ae_reference.rs (target\debug\build\bae-media/156c8241de0abab9\out\ae_reference-156c8241de0abab9.exe
+)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\audio.rs (target\debug\build\bae-media/cb313194c02353ae\out\audio-cb313194c02353ae.exe)
+
+running 2 tests
+test waveform_from_file_matches_memory ... ok
+test wav_decodes_exactly_with_random_access ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\encode.rs (target\debug\build\bae-media/e2a8524153f02190\out\encode-e2a8524153f02190.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\export.rs (target\debug\build\bae-media/a387290b7c20484b\out\export-a387290b7c20484b.exe)
+
+running 6 tests
+test cancel_removes_partial_output ... ok
+test queue_renders_jobs_in_order ... ok
+test png_sixteen_bit_rgb_is_premultiplied_over_black ... ok
+test png_sequence_round_trip_straight_alpha ... ok
+test exr_sequence_keeps_hdr_tags_and_timecode ... ok
+test gpu_frames_are_read_back_in_order ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+
+     Running tests\gpu.rs (target\debug\build\bae-media/ed2877fca6ed6a8a\out\gpu-ed2877fca6ed6a8a.exe)
+
+running 4 tests
+test sixteen_bit_png_keeps_precision ... ok
+test frame_cache_serves_repeats ... ok
+test exr_uploads_without_clamping ... ok
+test straight_png_becomes_premultiplied_half_float ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.64s
+
+     Running tests\images.rs (target\debug\build\bae-media/6f5da53f7ab12c8f\out\images-6f5da53f7ab12c8f.exe)
+
+running 8 tests
+test png_rgba8_straight_alpha ... ok
+test jpeg_decodes_to_rgba ... ok
+test exr_half_premultiplied_linear ... ok
+test webp_lossless_with_alpha ... ok
+test image_sequence_with_gap ... ok
+test png_gray16_palette_and_tags ... ok
+test format_is_sniffed_not_guessed_from_extension ... ok
+test tiff_depths_and_alpha_modes ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests\library.rs (target\debug\build\bae-media/5213e4cf25fb30f7\out\library-5213e4cf25fb30f7.exe)
+
+running 5 tests
+test open_limit_closes_least_recently_used ... ok
+test time_mapping_hashes_and_end_hold ... ok
+test gpu_frames_cache_and_invalidate ... ok
+test concurrent_requests_from_threads ... ok
+test embedded_entries_resolve_to_extracted_files ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.12s
+
+     Running tests\trim_movie.rs (target\debug\build\bae-media/32e68a028460b17f\out\trim_movie-32e68a028460b17f.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\video.rs (target\debug\build\bae-media/458992c10b6502f9\out\video-458992c10b6502f9.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests bae_media
+
+running 2 tests
+test crates\bae-media\src\library.rs - library (line 13) ... ignored
+test crates\bae-media\src\lib.rs - (line 23) - compile ... ok
+
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+all doctests ran in 0.88s; merged doctests compilation took 0.81s
