@@ -96,7 +96,7 @@ impl AppModule for RenderModule {
             let open_error = ctx.app.resource::<cli::ProjectOpenError>().cloned();
             run(
                 ctx.matches,
-                desc,
+                move || GpuContext::new_headless(desc),
                 media,
                 encoders,
                 &providers,
@@ -295,9 +295,11 @@ type MediaHandle = std::sync::Arc<bae_media::MediaLibrary>;
 #[cfg(not(feature = "media"))]
 type MediaHandle = ();
 
+/// `gpu` creates the context once the options are checked (tests pass the
+/// process-wide test context instead, #154).
 fn run(
     m: &ArgMatches,
-    desc: GpuContextDescriptor,
+    gpu: impl FnOnce() -> Result<std::sync::Arc<GpuContext>, bae_gpu::GpuError>,
     media: Option<MediaHandle>,
     encoders: Option<Encoders>,
     providers: &[std::sync::Arc<dyn SourceProvider>],
@@ -386,7 +388,7 @@ fn run(
     // Reject bad output options before any GPU work.
     settings.validate(rate, &request)?;
 
-    let gpu = GpuContext::new_headless(desc)?;
+    let gpu = gpu()?;
     let mut renderer = Renderer::with_config(
         gpu.clone(),
         RendererConfig {
@@ -596,7 +598,7 @@ mod tests {
             ])
             .unwrap();
         assert_eq!(
-            run(&m, test_gpu(), None, None, &[], None).unwrap(),
+            run(&m, test_gpu, None, None, &[], None).unwrap(),
             ExitCode::SUCCESS
         );
         let (w, _, data) = crate::png_out::read_rgba8(&out).unwrap();
@@ -638,7 +640,7 @@ mod tests {
             ])
             .unwrap();
         assert_eq!(
-            run(&m, test_gpu(), None, None, &[], None).unwrap(),
+            run(&m, test_gpu, None, None, &[], None).unwrap(),
             ExitCode::SUCCESS
         );
         for f in ["out_00.png", "out_01.png"] {
@@ -739,13 +741,13 @@ mod tests {
         let m = args(clap::Command::new("render"))
             .try_get_matches_from(std::iter::once("render").chain(argv.iter().copied()))
             .unwrap();
-        run(&m, test_gpu(), None, None, &[], None)
+        run(&m, test_gpu, None, None, &[], None)
     }
 
-    /// The descriptor `bae render` runs get in tests: honours `BAE_GPU_VALIDATION`
-    /// like the shared test context (#154).
-    fn test_gpu() -> GpuContextDescriptor {
-        GpuContextDescriptor::default().with_env()
+    /// The context `bae render` runs get in tests: the process-wide test context,
+    /// not a device of their own (#154).
+    fn test_gpu() -> Result<std::sync::Arc<GpuContext>, bae_gpu::GpuError> {
+        Ok(bae_gpu::testing::shared_context().expect("callers check has_gpu() first"))
     }
 
     fn has_gpu() -> bool {
