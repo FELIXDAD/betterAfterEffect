@@ -175,7 +175,6 @@ pub fn read_pixels(gpu: &Arc<GpuContext>, image: &GpuImage) -> Result<Vec<[f32; 
 
 #[cfg(test)]
 mod tests {
-    use bae_gpu::GpuContextDescriptor;
     use bae_model::Time;
 
     use super::*;
@@ -229,8 +228,7 @@ mod tests {
 
     #[test]
     fn renders_sources_and_round_trips_pixels() {
-        let Ok(gpu) = GpuContext::new_headless(GpuContextDescriptor::default()) else {
-            eprintln!("no GPU, skipping");
+        let Some(gpu) = bae_gpu::testing::shared_context() else {
             return;
         };
         let request = SourceRequest {

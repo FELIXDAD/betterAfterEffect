@@ -19,6 +19,7 @@
 //! the other tests of this binary.
 
 mod files_flow;
+mod i18n_scan;
 mod layers;
 mod layout;
 mod menus;
@@ -280,6 +281,12 @@ impl Gui {
                 invocation: spec.invocation(),
             })
             .collect()
+    }
+
+    /// What the status bar shows about the GPU (the window sets it from the
+    /// device it created).
+    pub fn set_gpu_status(&mut self, text: String) {
+        self.status.gpu = text;
     }
 
     /// Queues an invocation as if a panel produced it this frame.
@@ -612,11 +619,10 @@ pub(crate) fn painted_texts(h: &Ui) -> Vec<String> {
     out
 }
 
-/// The process-wide GPU for tests (`None` without an adapter).
+/// The process-wide GPU for tests (`None` without an adapter), shared with every
+/// other GPU test in this binary (#154).
 pub(crate) fn gpu() -> Option<Arc<bae_gpu::GpuContext>> {
-    static GPU: std::sync::OnceLock<Option<Arc<bae_gpu::GpuContext>>> = std::sync::OnceLock::new();
-    GPU.get_or_init(|| bae_gpu::GpuContext::new_headless(Default::default()).ok())
-        .clone()
+    bae_gpu::testing::shared_context()
 }
 
 /// New comp (Cmd+N) with one layer from `Layer > New > <registry id>`; returns

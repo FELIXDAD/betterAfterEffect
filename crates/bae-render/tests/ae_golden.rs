@@ -10,7 +10,7 @@
 
 use std::path::Path;
 
-use bae_gpu::{GpuContext, GpuContextDescriptor, wgpu};
+use bae_gpu::{GpuContext, wgpu};
 use bae_model::{PrimPath, Time};
 use bae_render::png_out::read_rgba8;
 use bae_render::{AnimEvaluator, CompEvaluator, OutputAlpha, RenderRequest, Renderer};
@@ -33,12 +33,8 @@ fn adapter_slack(gpu: &GpuContext) -> u8 {
 
 #[test]
 fn matches_after_effects() {
-    let gpu = match GpuContext::new_headless(GpuContextDescriptor::default()) {
-        Ok(gpu) => gpu,
-        Err(e) => {
-            eprintln!("no GPU, skipping: {e}");
-            return;
-        }
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
     };
     let assets = tempfile::tempdir().unwrap();
     cases::prepare(assets.path());

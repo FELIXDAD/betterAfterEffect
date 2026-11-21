@@ -1170,7 +1170,7 @@ impl Dock {
             if others.clicked() {
                 actions.push(Action::CloseOthers(fid, index));
             }
-            ui.menu_button(tr("Panel Group Settings"), |ui| {
+            crate::widgets::menu_button(ui, tr("Panel Group Settings"), |ui| {
                 ui.set_min_width(170.0);
                 if ui.button(tr("Close Panel Group")).clicked() {
                     actions.push(Action::CloseFrame(fid));

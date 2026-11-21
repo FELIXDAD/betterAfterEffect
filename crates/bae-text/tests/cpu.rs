@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use bae_gpu::{GpuContext, GpuContextDescriptor, GpuError, wgpu};
+use bae_gpu::{GpuContext, wgpu};
 use bae_model::TextDocument;
 use bae_render::{LayerSource, testing};
 use bae_text::render::TextSource;
@@ -12,17 +12,7 @@ use bae_text::{FontSystem, layout_text};
 use bae_vector::render::{VectorBackend, VelloRenderer};
 
 fn gpu() -> Option<Arc<GpuContext>> {
-    match GpuContext::new_headless(GpuContextDescriptor::default().with_env()) {
-        Ok(ctx) => Some(ctx),
-        Err(error @ GpuError::NoAdapter { .. }) => {
-            if std::env::var_os("BAE_REQUIRE_GPU").is_some_and(|v| v == "1") {
-                panic!("BAE_REQUIRE_GPU=1 but {error}");
-            }
-            eprintln!("skipping: {error}");
-            None
-        }
-        Err(error) => panic!("GPU context creation failed: {error}"),
-    }
+    bae_gpu::testing::shared_context()
 }
 
 fn source() -> Option<TextSource> {
