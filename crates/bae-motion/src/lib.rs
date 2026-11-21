@@ -29,6 +29,8 @@
 //! | `key.delete` | deleting keyframes |
 //! | `key.reverse` | Keyframe Assistant > Time-Reverse Keyframes |
 //! | `key.paste` | pasting keyframes |
+//! | `shape.add` | drawing with a shape tool or the Pen tool in (or into a new) shape layer |
+//! | `mask.create` | drawing with a shape tool or the Pen tool on a layer that gets a mask |
 //!
 //! **Times** are flicks (705,600,000 per second). Layer in/out points, split and work
 //! area times are comp times. Keyframe times are the stored keyframe times — layer
@@ -43,6 +45,7 @@ pub mod comp;
 pub mod keys;
 pub mod layer;
 pub mod query;
+pub mod shape;
 mod util;
 
 use std::sync::Arc;
@@ -59,6 +62,7 @@ pub use layer::{
     CreateLayer, DeleteItems, DeleteLayers, DuplicateLayers, LayerOutput, LayersOutput,
     ReorderLayers, SetParent, ShapePreset, ShiftLayers, SplitLayers, TrimLayers,
 };
+pub use shape::{AddShape, CreateMask, Geometry, ShapeKind};
 
 /// Register every motion command.
 pub fn register_commands(r: &mut CommandRegistry) {
@@ -85,6 +89,8 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(DeleteKeys),
         r.register(ReverseKeys),
         r.register(PasteKeys),
+        r.register(AddShape),
+        r.register(CreateMask),
     ];
     for res in results {
         res.expect("motion command IDs are unique");

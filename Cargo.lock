@@ -744,6 +744,7 @@ dependencies = [
  "bae-anim",
  "bae-app",
  "bae-model",
+ "bae-vector",
  "schemars",
  "serde",
  "serde_json",
