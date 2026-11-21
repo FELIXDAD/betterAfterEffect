@@ -438,3 +438,96 @@ fn cli_errors_are_printed_once_without_a_log_line() {
         );
     }
 }
+
+impl Mcp {
+    /// A tool call; returns (is_error, text).
+    fn try_call(&mut self, tool: &str, args: Json) -> (bool, String) {
+        let reply = self.request("tools/call", json!({"name": tool, "arguments": args}));
+        let is_error = reply["result"]["isError"] == true;
+        let text = reply["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        (is_error, text)
+    }
+}
+
+#[test]
+#[ignore = "issue #124"]
+fn mcp_agents_cannot_edit_locked_layers() {
+    // AE scripts cannot change a locked layer either (docs/spec/ae
+    // project-comp-layers.md, Lock); only the Lock switch itself.
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tricky(tmp.path()).join("锁定 智能体.bae");
+    let mut mcp = Mcp::start(&project);
+    let comp = mcp.call(
+        "comp_create",
+        json!({"name": "锁定 合成", "fps": 30, "duration": 2 * SEC}),
+    );
+    let comp = comp["output"]["path"].as_str().unwrap().to_owned();
+    let layer = mcp.call(
+        "layer_create",
+        json!({"comp": comp, "kind": "solid", "name": "锁定 层"}),
+    );
+    let layer = layer["output"]["path"].as_str().unwrap().to_owned();
+    let other = mcp.call(
+        "layer_create",
+        json!({"comp": comp, "kind": "null", "name": "其他"}),
+    );
+    let other = other["output"]["path"].as_str().unwrap().to_owned();
+    let (err, text) = mcp.try_call(
+        "attr_set",
+        json!({"path": layer, "attr": "locked", "value": {"type": "bool", "value": true}}),
+    );
+    assert!(!err, "locking: {text}");
+    let pos = json!({"type": "vec3", "value": [10.0, 20.0, 0.0]});
+    let attempts = [
+        (
+            "attr_set_at",
+            json!({"path": layer, "attr": "transform:position", "time": 0, "value": pos}),
+        ),
+        (
+            "attr_set position",
+            json!({"path": layer, "attr": "transform:position", "value": pos}),
+        ),
+        (
+            "attr_set name",
+            json!({"path": layer, "attr": "name", "value": {"type": "string", "value": "改了"}}),
+        ),
+        (
+            "attr_set_animated",
+            json!({"path": layer, "attr": "transform:opacity", "animated": true, "time": 0}),
+        ),
+        (
+            "layer_set_parent",
+            json!({"layers": [layer], "parent": other}),
+        ),
+        ("layer_delete", json!({"layers": [layer]})),
+        ("prim_delete", json!({"path": layer})),
+    ];
+    let mut allowed = Vec::new();
+    for (label, args) in attempts {
+        let tool = label.split(' ').next().unwrap();
+        let (err, text) = mcp.try_call(tool, args);
+        println!(
+            "{label}: error={err} {}",
+            text.chars().take(160).collect::<String>()
+        );
+        if !err {
+            allowed.push(label);
+        }
+    }
+    // Unlocking still works.
+    let (err, text) = mcp.try_call(
+        "attr_set",
+        json!({"path": layer, "attr": "locked", "value": {"type": "bool", "value": false}}),
+    );
+    println!(
+        "unlock: error={err} {}",
+        text.chars().take(120).collect::<String>()
+    );
+    assert!(
+        allowed.is_empty(),
+        "an agent edited a locked layer with: {allowed:?}"
+    );
+}

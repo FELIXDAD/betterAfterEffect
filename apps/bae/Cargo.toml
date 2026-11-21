@@ -48,6 +48,8 @@ rfd.workspace = true
 tempfile.workspace = true
 # Acceptance tests drive the real workbench through accesskit (labels, not coordinates).
 egui_kittest.workspace = true
+# Acceptance: world transforms of layers (locked child keeps its place, #124).
+bae-anim.workspace = true
 
 [lints]
 workspace = true
