@@ -6,7 +6,12 @@ const path = require("path");
 const vm = require("vm");
 
 process.chdir(__dirname);
-global.print = (s) => console.log(String(s));
+// es3-guard.js deletes post-ES3 builtins such as Function.prototype.bind, which node's
+// own stream code still calls (node 22 creates process.stdout lazily, on first use).
+// Create the stdio streams now and print with plain synchronous writes.
+void process.stdout;
+void process.stderr;
+global.print = (s) => fs.writeSync(1, String(s) + "\n");
 global.readFile = (p) => fs.readFileSync(p, "utf8");
 global.writeFile = (p, s) => fs.writeFileSync(p, s);
 global.load = (p) => vm.runInThisContext(fs.readFileSync(p, "utf8"), { filename: path.resolve(p) });
