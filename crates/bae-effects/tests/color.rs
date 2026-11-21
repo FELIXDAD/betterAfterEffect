@@ -38,7 +38,8 @@ fn check(match_name: &str, params: Vec<(u32, Value)>, reference: impl Fn([f64; 4
     let fx = builtin(match_name);
     let input = test_image(RECT);
     let want = straight(&input, &reference);
-    for (format, tol) in [(F32, TOL32), (F16, TOL16)] {
+    let soft = tolerance_scale(&gpu);
+    for (format, tol) in [(F32, TOL32 * soft), (F16, TOL16 * soft)] {
         let got = run(&gpu, format, fx, params.clone(), &input, RECT, 1.0);
         // Tolerance relative to the magnitude (HDR values in half precision).
         let (d, (x, y), k) = max_diff(&got, &want, RECT);

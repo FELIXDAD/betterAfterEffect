@@ -25,9 +25,29 @@ pub fn context() -> Option<Arc<GpuContext>> {
     CONTEXT.get_or_init(create_context).clone()
 }
 
+/// Software and virtual adapters (CI: WARP on Windows, the paravirtual GPU
+/// on macOS runners) implement `pow` / `exp2` / `sin` and float rounding with
+/// less precision than hardware; tolerances are scaled by this factor there.
+pub fn tolerance_scale(gpu: &GpuContext) -> f32 {
+    match gpu.adapter_info().device_type {
+        wgpu::DeviceType::Cpu | wgpu::DeviceType::VirtualGpu | wgpu::DeviceType::Other => 4.0,
+        _ => 1.0,
+    }
+}
+
 fn create_context() -> Option<Arc<GpuContext>> {
     match GpuContext::new_headless(GpuContextDescriptor::default().with_env()) {
-        Ok(ctx) => Some(ctx),
+        Ok(ctx) => {
+            if tolerance_scale(&ctx) > 1.0 {
+                eprintln!(
+                    "GPU tests on software/virtual adapter {:?} ({:?}): tolerances x{}",
+                    ctx.adapter_info().name,
+                    ctx.adapter_info().device_type,
+                    tolerance_scale(&ctx)
+                );
+            }
+            Some(ctx)
+        }
         Err(error @ GpuError::NoAdapter { .. }) => {
             if std::env::var_os("BAE_REQUIRE_GPU").is_some_and(|v| v == "1") {
                 panic!("BAE_REQUIRE_GPU=1 but {error}");
@@ -166,10 +186,25 @@ pub fn max_diff(got: &Pixels, want: &Pixels, rect: IRect) -> (f32, (i32, i32), u
 }
 
 pub fn assert_close(got: &Pixels, want: &Pixels, rect: IRect, tol: f32, what: &str) {
+    let tol = context().map_or(1.0, |g| tolerance_scale(&g)) * tol;
     let (d, (x, y), k) = max_diff(got, want, rect);
-    assert!(
-        d <= tol && !d.is_nan(),
-        "{what}: max diff {d} > {tol} at ({x}, {y}) channel {k}: got {:?}, want {:?}",
+    if d <= tol && !d.is_nan() {
+        return;
+    }
+    // Extent of the mismatch, for diagnosis.
+    let (mut n, mut bbox) = (0, IRect::EMPTY);
+    for yy in rect.y0..rect.y1 {
+        for xx in rect.x0..rect.x1 {
+            let (g, w) = (got.get(xx, yy), want.get(xx, yy));
+            if (0..4).any(|c| (g[c] - w[c]).abs() > tol || g[c].is_nan()) {
+                n += 1;
+                let r = IRect::new(xx, yy, xx + 1, yy + 1);
+                bbox = if bbox.is_empty() { r } else { bbox.union(&r) };
+            }
+        }
+    }
+    panic!(
+        "{what}: max diff {d} > {tol} at ({x}, {y}) channel {k}: got {:?}, want {:?}; {n} pixels differ within {bbox:?} (rect {rect:?})",
         got.get(x, y),
         want.get(x, y)
     );

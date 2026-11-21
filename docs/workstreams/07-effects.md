@@ -40,24 +40,24 @@
 
 ## 进度
 
-- [ ] 第一批效果（进行中）
-  - [x] `crates/bae-effects`：注册接口 `register`/`builtins`/`get`/`catalog`/`prewarm`，`Standalone` 渲染目标（测试/基准用）
+- [ ] 第一批效果（0.0.1 先合并第一阶段，#70）
+  - [x] `crates/bae-effects`：注册接口 `register` / `builtins` / `get` / `catalog` / `prewarm`，`Standalone` 渲染目标（测试、基准用）
   - [x] 颜色校正（声明式 WGSL 内嵌包，走 19 的 `DeclarativeEffect::load_builtin`）：色调、三色调、色阶、色阶（单独控件）、色相/饱和度、亮度和对比度、曝光度
-  - [x] 模糊（Rust 效果）：高斯模糊（含旧版）、快速方框模糊（含旧版 Box Blur）；大 σ 走降采样金字塔
-  - [ ] 曲线、填充、梯度渐变、四色渐变、线性/径向擦除、百叶窗、分形杂色、定向/径向模糊、发光、投影、简单阻塞工具、变换、动态拼贴、湍流置换、置换图、毛边
-- [ ] matchName 对照表 `docs/interop/ae-effects.md`
-- [ ] golden image 测试：AE 对照用例和脚本已写（`tests/ae/`），需要在装了 AE 的机器上跑
+  - [x] 模糊（Rust 效果）：高斯模糊（含旧版）、快速方框模糊（含旧版 Box Blur）
+  - [ ] 曲线、填充、梯度渐变、四色渐变、线性/径向擦除、百叶窗、分形杂色、定向/径向模糊、发光、投影、简单阻塞工具、变换、动态拼贴、湍流置换、置换图、毛边（下一阶段）
+- [x] matchName 对照表 `docs/interop/ae-effects.md`（已实现的 11 个 + 计划中的第一批）
+- [ ] golden image 测试：AE 对照用例、JSX、对比工具已写（`crates/bae-effects/tests/ae/`），需要在装了 AE 的机器上跑出 golden
+- [ ] 应用接入：`bae_effects::register` 还没在 `apps/bae` / 渲染器里调用（要和 04/01 一起接，接入时再看体积）
 - [ ] 第二批效果
 
-### 0.0.1 记录（2026-11-21，暂停）
+### 0.0.1 记录（2026-11-21）
 
 - 文档身份用 AE matchName（与 02 数据模型一致，AE 工程不用查表），参数 id = AE disk id；内置效果 `plugin = None`。
-- 已 rebase 到 dev（`EffectParams` 已有 R04-11 的字段，测试和基准改用 `EffectParams::new`）。
-- **性能回退已查明并修复**：原因是 wgpu 默认把 workgroup 内存清零（生成的 Metal 代码里每个工作组串行清零），不是权重下标。`gpu.rs` 里关掉 `zero_initialize_workgroup_memory`（所有核都先写后读）。另外：卷积核每个线程算 4 个输出、权重放 workgroup 内存；降采样展开 4 个独立读取；金字塔阈值从 σ ≥ 8 改为 σ ≥ 6（层上 σ 在 3–6）。
-- 基准（M1 Pro，dev profile、关闭 GPU 校验，GPU 时间为主）：4K 高斯 模糊度 100 = 1.16 ms/帧（原 2.81）、模糊度 25 = 2.48（原 10.5）、模糊度 10 = 4.3、模糊度 300 = 1.36；颜色校正 4K ≈ 0.9–1.1。金字塔误差 ≤ 0.0051（含 3.0 的 HDR 输入，约 0.4/255）。
-- **已知问题（下一步先修）**：`tests/blur.rs::fast_box_blur` 偶发失败（6 次里 3 次）：`box r=4 n=1` 在 (9, -3) 得到 0、应为 0.9。关掉 workgroup 清零后新卷积核可能有未写先读或边界问题，需要先查清再推进；快速方框模糊大半径（4K r20×3 = 23 ms、r100×3 = 29 ms）还慢。
-- 还没跑 `cargo clippy --workspace`、`cargo xtask size`；没请求 Windows 实机测试。
-- 下一步：修上面的偶发失败 → 方框模糊优化 → 第一批剩下的 17 个效果 → `docs/interop/ae-effects.md`、README → clippy/size → Windows 实机基准（RTX 5090 D：`cargo bench -p bae-effects --bench effects -- 4K`、`cargo test -p bae-effects`）。
+- 性能回退的原因：wgpu 默认清零 workgroup 内存，生成的 Metal 代码在每个工作组里串行清零，卷积核慢了约 100 倍。07 的核都先写后读，已关掉清零。另外每线程算 4 个输出、降采样展开读取、金字塔阈值 σ ≥ 6。
+- 偶发失败的原因：uniform 环形缓冲新建时未初始化，wgpu 的延迟清零和其他线程写入的槽位冲突，整张输出变 0。改为创建时映射（整块视为已初始化）后稳定通过。
+- 基准（M1 Pro，GPU 时间为主）：4K 高斯 模糊度 100 = 1.16 ms/帧、模糊度 25 = 2.48、模糊度 10 = 4.3；颜色校正 4K ≈ 0.9–1.1 ms。
+- 已知：快速方框模糊大半径偏慢（4K r20×3 ≈ 23 ms）；19 的 `DeclarativeEffect` 管线缓存不区分设备（测试里每个测试二进制共用一个 `GpuContext` 绕过）。
+- 体积：`bae-effects` 还没有链进应用，release 体积不变；根 `Cargo.toml` 只加了一行路径依赖。
 
 ## 请求（其他工作流在这里留言）
 

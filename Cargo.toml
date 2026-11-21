@@ -69,6 +69,7 @@ bae-package = { path = "crates/bae-package" }
 bae-motion = { path = "crates/bae-motion" }
 bae-vector = { path = "crates/bae-vector" }
 bae-ui-motion = { path = "crates/bae-ui-motion" }
+bae-effects = { path = "crates/bae-effects" }
 bae-text = { path = "crates/bae-text" }
 
 # ---- GPU, rendering, text (one coherent Linebender/wgpu set) ----

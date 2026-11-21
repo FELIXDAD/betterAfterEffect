@@ -251,71 +251,70 @@ fn load() -> Result<Vec<Builtin>, Vec<Diagnostic>> {
             });
         }
     }
-    let rust: Vec<(
-        Arc<dyn TargetEffect>,
-        Vec<(u32, String)>,
-        &str,
-        &str,
-        &[&str],
-    )> = {
+    {
         use effects::*;
-        let entry = |fx: GaussianBlur, id, zh, kw| {
+        let blur = |fx: GaussianBlur| {
             let names = fx.names_zh.clone();
-            (Arc::new(fx) as Arc<dyn TargetEffect>, names, id, zh, kw)
+            (Arc::new(fx) as Arc<dyn TargetEffect>, names)
         };
-        let boxed = |fx: BoxBlur, id, zh, kw| {
+        let boxed = |fx: BoxBlur| {
             let names = fx.names_zh.clone();
-            (Arc::new(fx) as Arc<dyn TargetEffect>, names, id, zh, kw)
+            (Arc::new(fx) as Arc<dyn TargetEffect>, names)
         };
-        vec![
-            entry(
-                GaussianBlur::new(),
-                "gaussian-blur",
-                "高斯模糊",
-                &["blur", "gaussian", "soften", "模糊", "高斯", "柔化"][..],
-            ),
-            entry(
-                GaussianBlur::legacy(),
-                "gaussian-blur-legacy",
-                "高斯模糊（旧版）",
-                &["blur", "gaussian", "legacy", "模糊", "高斯", "旧版"][..],
-            ),
-            boxed(
-                BoxBlur::new(),
-                "fast-box-blur",
-                "快速方框模糊",
-                &["blur", "box", "fast", "模糊", "方框", "快速"][..],
-            ),
-            boxed(
-                BoxBlur::legacy(),
-                "box-blur",
-                "方框模糊",
-                &["blur", "box", "legacy", "模糊", "方框"][..],
-            ),
-        ]
-    };
-    for (fx, names_zh, id, name_zh, keywords) in rust {
-        let def = fx.def();
-        out.push(Builtin {
-            info: EffectInfo {
-                match_name: def.match_name.clone(),
-                full_id: format!("{PLUGIN_ID}/{id}"),
-                name: def.name.clone(),
-                name_zh: name_zh.to_owned(),
-                category: def.category.clone(),
-                keywords: keywords.iter().map(|s| (*s).to_owned()).collect(),
-                form: Form::Rust,
-                obsolete: def.category == "Obsolete",
-                param_names_zh: names_zh,
-            },
-            implementation: Implementation::Rust(fx),
-        });
+        out.push(rust_builtin(
+            blur(GaussianBlur::new()),
+            "gaussian-blur",
+            "高斯模糊",
+            &["blur", "gaussian", "soften", "模糊", "高斯", "柔化"],
+        ));
+        out.push(rust_builtin(
+            blur(GaussianBlur::legacy()),
+            "gaussian-blur-legacy",
+            "高斯模糊（旧版）",
+            &["blur", "gaussian", "legacy", "模糊", "高斯", "旧版"],
+        ));
+        out.push(rust_builtin(
+            boxed(BoxBlur::new()),
+            "fast-box-blur",
+            "快速方框模糊",
+            &["blur", "box", "fast", "模糊", "方框", "快速"],
+        ));
+        out.push(rust_builtin(
+            boxed(BoxBlur::legacy()),
+            "box-blur",
+            "方框模糊",
+            &["blur", "box", "legacy", "模糊", "方框"],
+        ));
     }
     out.sort_by(|a, b| {
         (a.info.category.as_str(), a.info.name.as_str())
             .cmp(&(b.info.category.as_str(), b.info.name.as_str()))
     });
     Ok(out)
+}
+
+/// Catalog entry of a Rust effect (implementation and Chinese param names).
+fn rust_builtin(
+    (fx, names_zh): (Arc<dyn TargetEffect>, Vec<(u32, String)>),
+    id: &str,
+    name_zh: &str,
+    keywords: &[&str],
+) -> Builtin {
+    let def = fx.def();
+    Builtin {
+        info: EffectInfo {
+            match_name: def.match_name.clone(),
+            full_id: format!("{PLUGIN_ID}/{id}"),
+            name: def.name.clone(),
+            name_zh: name_zh.to_owned(),
+            category: def.category.clone(),
+            keywords: keywords.iter().map(|s| (*s).to_owned()).collect(),
+            form: Form::Rust,
+            obsolete: def.category == "Obsolete",
+            param_names_zh: names_zh,
+        },
+        implementation: Implementation::Rust(fx),
+    }
 }
 
 fn declarative_info(fx: &DeclarativeEffect, zh: &toml::Table) -> EffectInfo {

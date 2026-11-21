@@ -111,7 +111,8 @@ fn gauss_case(blurriness: f64, dims: i64, repeat: bool, scale: f64, tol: f32) {
     };
     assert_eq!(bounds, expected_bounds);
     let want = gauss_reference(&input, sigma, repeat, bounds);
-    for (format, tol) in [(F32, tol), (F16, tol.max(4e-3))] {
+    let soft = tolerance_scale(&gpu);
+    for (format, tol) in [(F32, tol * soft), (F16, tol.max(4e-3) * soft)] {
         let got = run(&gpu, format, fx, params.clone(), &input, bounds, scale);
         assert_eq!(got.rect, bounds);
         let (d, (x, y), k) = max_diff(&got, &want, bounds);
@@ -199,8 +200,7 @@ fn box_reference(input: &Pixels, r: [f64; 2], iterations: u32, repeat: bool, out
         )
     };
     for _ in 0..iterations {
-        for axis in 0..2 {
-            let ra = r[axis];
+        for (axis, &ra) in r.iter().enumerate() {
             if ra <= 0.0 {
                 continue;
             }

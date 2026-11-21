@@ -148,8 +148,12 @@ impl Runtime {
             label: Some("bae.effects.uniform_ring"),
             size: RING_SIZE,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
+            // Created mapped (zeroed) so wgpu considers the whole ring
+            // initialized: otherwise its lazy zero fill of "uninitialized"
+            // bound ranges can race with slots written by other threads.
+            mapped_at_creation: true,
         });
+        buffer.unmap();
         let align = u64::from(device.limits().min_uniform_buffer_offset_alignment).max(16);
         let placeholder = device
             .create_texture(&wgpu::TextureDescriptor {
