@@ -367,14 +367,14 @@ pub(crate) fn render_job(
     evaluator: &mut AnimEvaluator,
     stage: &Stage,
     job: &Job,
-    progress: &mut dyn FnMut(usize),
+    progress: &mut dyn FnMut(usize, usize),
 ) -> Result<ItemStatus, RenderError> {
     let started = Instant::now();
-    let output = output_path(&job.output, job.format)?;
-    // AE limits the range to the comp.
-    let last = bae_motion::query::comp_info(stage, &job.comp)
-        .map(|c| c.frame_count() - 1)
+    let info = bae_motion::query::comp_info(stage, &job.comp)
         .ok_or_else(|| RenderError::Other(tr("The composition no longer exists.").to_owned()))?;
+    let output = output_path(&job.output, job.format, &info.name)?;
+    // AE limits the range to the comp.
+    let last = info.frame_count() - 1;
     let (start, end) = (job.start.max(0), job.end.min(last));
     if start > end {
         return Err(RenderError::Other(
@@ -385,6 +385,9 @@ pub(crate) fn render_job(
     let times: Vec<(Option<i64>, Time)> = (start..=end)
         .map(|f| (Some(f), job.rate.frame_to_time(f)))
         .collect();
+    // The progress counts the frames actually rendered (the limited range).
+    let total = times.len();
+    progress(0, total);
     // One frame of a sequence pattern still gets a numbered file.
     let path = if times.len() == 1 && job.format.is_image() {
         frame_file(&output, start)
@@ -410,7 +413,7 @@ pub(crate) fn render_job(
             encoders: None,
         },
         Some(&job.cancel),
-        &mut |frame| progress(frame.index + 1),
+        &mut |frame| progress(frame.index + 1, total),
     )?;
     let first = report.frames.first().map(|f| f.file.clone());
     Ok(if report.stopped {
@@ -428,26 +431,46 @@ pub(crate) fn render_job(
     })
 }
 
-/// The output file to write: refuses an empty one (it would land in the
-/// process's working directory, `/` for an app started from Finder) and adds
-/// the format's extension when the name has none (AE).
-fn output_path(output: &Path, format: ExportFormat) -> Result<PathBuf, RenderError> {
-    if output.as_os_str().to_string_lossy().trim().is_empty() || output.file_name().is_none() {
+/// The output file to write (AE rules):
+/// - an empty one is refused (it would land in the process's working
+///   directory, `/` for an app started from Finder);
+/// - a folder (ending in a separator, or an existing directory) gets
+///   `<comp>_[####].<ext>` inside it;
+/// - the format decides the extension: a missing one is added, another image
+///   or movie extension is replaced (the panel says so,
+///   [`extension_follows_format`]).
+fn output_path(output: &Path, format: ExportFormat, comp: &str) -> Result<PathBuf, RenderError> {
+    let text = output.as_os_str().to_string_lossy();
+    if text.trim().is_empty() {
         return Err(RenderError::Other(
             tr("Choose where to render: Output To is empty.").to_owned(),
         ));
     }
-    let has_extension = output
+    if text.ends_with(['/', '\\']) || output.is_dir() || output.file_name().is_none() {
+        let name = sanitize(comp);
+        return Ok(output.join(format!("{name}_[####].{}", format.extension())));
+    }
+    let known = output
         .extension()
-        .is_some_and(|e| ExportFormat::parse(&e.to_string_lossy().to_ascii_lowercase()).is_some());
-    Ok(if has_extension {
-        output.to_owned()
-    } else {
-        let mut name = output.file_name().unwrap_or_default().to_os_string();
-        name.push(".");
-        name.push(format.extension());
-        output.with_file_name(name)
+        .and_then(|e| ExportFormat::parse(&e.to_string_lossy().to_ascii_lowercase()));
+    Ok(match known {
+        Some(f) if f == format => output.to_owned(),
+        Some(_) => output.with_extension(format.extension()),
+        None => {
+            let mut name = output.file_name().unwrap_or_default().to_os_string();
+            name.push(".");
+            name.push(format.extension());
+            output.with_file_name(name)
+        }
     })
+}
+
+/// The extension the output will get when the typed one does not match the
+/// format (`None` when it matches or there is none yet).
+fn extension_follows_format(output: &str, format: ExportFormat) -> Option<&'static str> {
+    let ext = Path::new(output.trim()).extension()?;
+    let typed = ExportFormat::parse(&ext.to_string_lossy().to_ascii_lowercase())?;
+    (typed != format).then(|| format.extension())
 }
 
 /// Starts rendering the queued items on a background thread, one after
@@ -517,16 +540,9 @@ pub(crate) fn run_worker(
         let status = match &stage {
             Err(error) => ItemStatus::Failed(error.clone()),
             Ok(stage) => {
-                let total = job.end - job.start + 1;
-                let mut progress = |done: usize| {
+                let mut progress = |done: usize, total: usize| {
                     let mut q = queue.lock();
-                    q.set_status(
-                        job.id,
-                        ItemStatus::Rendering {
-                            done,
-                            total: total.max(0) as usize,
-                        },
-                    );
+                    q.set_status(job.id, ItemStatus::Rendering { done, total });
                 };
                 match render_job(&mut renderer, &mut evaluator, stage, &job, &mut progress) {
                     Ok(status) => status,
@@ -635,8 +651,10 @@ impl Panel for RenderQueuePanel {
         let mut requeue = None;
         egui::ScrollArea::vertical().show(ui, |ui| {
             for item in &mut q.items {
+                let last =
+                    bae_motion::query::comp_info(cx.stage, &item.comp).map(|c| c.frame_count() - 1);
                 ui.push_id(item.id, |ui| {
-                    item_ui(ui, item, &mut remove, &mut cancel, &mut requeue);
+                    item_ui(ui, item, last, &mut remove, &mut cancel, &mut requeue);
                 });
                 ui.separator();
             }
@@ -660,6 +678,7 @@ impl Panel for RenderQueuePanel {
 fn item_ui(
     ui: &mut egui::Ui,
     item: &mut QueueItem,
+    last: Option<i64>,
     remove: &mut Option<u64>,
     cancel: &mut Option<u64>,
     requeue: &mut Option<u64>,
@@ -747,13 +766,34 @@ fn item_ui(
             }
             ui.end_row();
             ui.label(tr("Output To"));
-            ui.add(egui::TextEdit::singleline(&mut item.output).desired_width(f32::INFINITY));
+            ui.vertical(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut item.output).desired_width(f32::INFINITY));
+                // AE: the format decides the extension.
+                if let Some(ext) = extension_follows_format(&item.output, item.format) {
+                    ui.weak(
+                        tr("The file will be saved as .{ext} to match the format.")
+                            .replace("{ext}", ext),
+                    );
+                }
+            });
             ui.end_row();
             ui.label(tr("Frames"));
+            // Typed and dragged values stay inside the comp (AE); a range set
+            // otherwise (or a comp shortened later) is limited, or refused when
+            // entirely outside, at render time.
+            let last = last.unwrap_or(i64::MAX).max(0);
             ui.horizontal(|ui| {
-                ui.add(egui::DragValue::new(&mut item.start).range(i64::MIN..=item.end));
+                ui.add(
+                    egui::DragValue::new(&mut item.start)
+                        .range(0..=item.end.clamp(0, last))
+                        .clamp_existing_to_range(false),
+                );
                 ui.label("–");
-                ui.add(egui::DragValue::new(&mut item.end).range(item.start..=i64::MAX));
+                ui.add(
+                    egui::DragValue::new(&mut item.end)
+                        .range(item.start.clamp(0, last)..=last)
+                        .clamp_existing_to_range(false),
+                );
             });
             ui.end_row();
         });
@@ -859,9 +899,9 @@ mod tests {
     /// extension gets it; one with an image or movie extension is kept.
     #[test]
     fn output_path_rules() {
-        assert!(output_path(Path::new(""), ExportFormat::Png).is_err());
-        assert!(output_path(Path::new("  "), ExportFormat::Png).is_err());
-        let p = |s: &str, f| output_path(Path::new(s), f).unwrap();
+        assert!(output_path(Path::new(""), ExportFormat::Png, "C").is_err());
+        assert!(output_path(Path::new("  "), ExportFormat::Png, "C").is_err());
+        let p = |s: &str, f| output_path(Path::new(s), f, "Comp 1").unwrap();
         assert_eq!(
             p("/r/noext_[####]", ExportFormat::Png),
             Path::new("/r/noext_[####].png")
@@ -874,10 +914,34 @@ mod tests {
             p("/r/a_####.exr", ExportFormat::Exr),
             Path::new("/r/a_####.exr")
         );
+        // The format decides the extension (AE).
         assert_eq!(
             p("/r/a_####.png", ExportFormat::Tiff),
-            Path::new("/r/a_####.png")
+            Path::new("/r/a_####.tif")
         );
+        assert_eq!(
+            p("/r/a_####.tiff", ExportFormat::Tiff),
+            Path::new("/r/a_####.tiff")
+        );
+        // A folder: the comp's name inside it.
+        assert_eq!(
+            p("/r/out/", ExportFormat::Png),
+            Path::new("/r/out/Comp 1_[####].png")
+        );
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            p(dir.path().to_str().unwrap(), ExportFormat::Exr),
+            dir.path().join("Comp 1_[####].exr")
+        );
+        assert_eq!(
+            extension_follows_format("/r/a.png", ExportFormat::Tiff),
+            Some("tif")
+        );
+        assert_eq!(
+            extension_follows_format("/r/a.tif", ExportFormat::Tiff),
+            None
+        );
+        assert_eq!(extension_follows_format("/r/a", ExportFormat::Tiff), None);
     }
 
     #[test]
@@ -911,11 +975,17 @@ mod tests {
         let mut renderer = Renderer::new(gpu);
         let mut evaluator = AnimEvaluator::new(None);
         let cancel = job.cancel.clone();
-        let status = render_job(&mut renderer, &mut evaluator, &stage, &job, &mut |done| {
-            if done == 5 {
-                cancel.store(true, Ordering::Relaxed);
-            }
-        })
+        let status = render_job(
+            &mut renderer,
+            &mut evaluator,
+            &stage,
+            &job,
+            &mut |done, _| {
+                if done == 5 {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            },
+        )
         .unwrap();
         let ItemStatus::Stopped { done, total, first } = status else {
             panic!("{status:?}");

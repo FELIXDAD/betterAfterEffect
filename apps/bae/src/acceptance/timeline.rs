@@ -411,3 +411,210 @@ fn project_panel_enter_renames_the_selected_item() {
     key(&mut h, Modifiers::NONE, Key::Enter);
     assert_eq!(h.state().name(&comp), "片头 Intro");
 }
+
+// ---- Retest of #106 / #107 (dev 763eaad): edge cases from a user's side ----
+
+/// Click a layer row, then Enter: the rename field opens with the whole name
+/// selected; a Pinyin composition replaces it.
+#[test]
+fn enter_rename_then_ime_replaces_the_selected_name() {
+    let mut h = comp_with_solid();
+    let layer = h.state().layers()[0].clone();
+    let at = layer_row(&h, "Solid 1");
+    click_at(&mut h, at);
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(rename_field_value(&h).as_deref(), Some("Solid 1"));
+    ime_compose(&mut h, &["bei", "bei jing"], "背景");
+    assert_eq!(
+        rename_field_value(&h).as_deref(),
+        Some("背景"),
+        "IME did not replace the selection"
+    );
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(h.state().name(&layer), "背景");
+    assert!(rename_field_value(&h).is_none());
+    // The Enter that committed did not open the field again.
+    settle(&mut h);
+    assert!(
+        rename_field_value(&h).is_none(),
+        "Enter re-opened the rename field"
+    );
+    // Enter again renames again (selection kept), Esc cancels.
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(rename_field_value(&h).as_deref(), Some("背景"));
+    type_text(&mut h, "x");
+    key(&mut h, Modifiers::NONE, Key::Escape);
+    assert_eq!(h.state().name(&layer), "背景");
+}
+
+#[test]
+fn enter_renames_the_topmost_selected_layer() {
+    let mut h = gui();
+    comp_with(
+        &mut h,
+        &[
+            "motion.layer.new.solid",
+            "motion.layer.new.null",
+            "motion.layer.new.solid",
+        ],
+    );
+    let layers = h.state().layers();
+    // Select the bottom and the top layer (Cmd+click), in that order.
+    let bottom = layer_row(&h, &h.state().name(&layers[2]));
+    let top = layer_row(&h, &h.state().name(&layers[0]));
+    click_at(&mut h, bottom);
+    click_at_mods(&mut h, top, Modifiers::COMMAND);
+    assert_eq!(h.state().selected_layers().len(), 2);
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    let top_name = h.state().name(&layers[0]);
+    assert_eq!(
+        rename_field_value(&h),
+        Some(top_name),
+        "Enter did not rename the topmost selected layer"
+    );
+    replace_text(&mut h, "顶层");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(h.state().name(&layers[0]), "顶层");
+    assert_ne!(h.state().name(&layers[2]), "顶层");
+}
+
+#[test]
+fn enter_on_a_focused_button_does_not_start_a_rename() {
+    let mut h = comp_with_solid();
+    key(&mut h, Modifiers::COMMAND, Key::M);
+    assert_eq!(h.state().render_queue().lock().items().len(), 1);
+    h.state().session().lock().selected_layers = h.state().layers();
+    h.get_by_label("Remove").focus();
+    settle(&mut h);
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(
+        h.state().render_queue().lock().items().is_empty(),
+        "Enter did not press the button"
+    );
+    assert!(
+        rename_field_value(&h).is_none(),
+        "Enter on a button also started a rename"
+    );
+}
+
+#[test]
+fn double_click_rename_also_selects_the_name_for_ime() {
+    let mut h = comp_with_solid();
+    let layer = h.state().layers()[0].clone();
+    start_rename_by_double_click(&mut h, "Solid 1");
+    ime_compose(&mut h, &["wen", "wen zi"], "文字");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(h.state().name(&layer), "文字");
+}
+
+/// Five layers; returns their timeline row positions top to bottom.
+fn five_layers(h: &mut Ui) -> Vec<Pos2> {
+    comp_with(
+        h,
+        &[
+            "motion.layer.new.solid",
+            "motion.layer.new.null",
+            "motion.layer.new.solid",
+            "motion.layer.new.null",
+            "motion.layer.new.solid",
+        ],
+    );
+    let names = h.state().layer_names();
+    names.iter().map(|n| layer_row(h, n)).collect()
+}
+
+#[test]
+fn shift_click_range_grows_shrinks_and_goes_upward() {
+    let mut h = gui();
+    let rows = five_layers(&mut h);
+    let layers = h.state().layers();
+    let sel = |h: &Ui| {
+        let mut s: Vec<usize> = h
+            .state()
+            .selected_layers()
+            .iter()
+            .map(|l| layers.iter().position(|x| x == l).unwrap())
+            .collect();
+        s.sort();
+        s
+    };
+    click_at(&mut h, rows[1]);
+    click_at_mods(&mut h, rows[3], Modifiers::SHIFT);
+    assert_eq!(sel(&h), [1, 2, 3], "range down");
+    // A second Shift+click re-ranges from the same anchor (shrinks).
+    click_at_mods(&mut h, rows[2], Modifiers::SHIFT);
+    assert_eq!(sel(&h), [1, 2], "range shrinks from the anchor");
+    // Upward from the anchor.
+    click_at_mods(&mut h, rows[0], Modifiers::SHIFT);
+    assert_eq!(sel(&h), [0, 1], "range up");
+    // A plain click moves the anchor.
+    click_at(&mut h, rows[4]);
+    click_at_mods(&mut h, rows[2], Modifiers::SHIFT);
+    assert_eq!(sel(&h), [2, 3, 4], "new anchor");
+    // Shift+click with nothing selected selects just that layer.
+    key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::A);
+    click_at_mods(&mut h, rows[3], Modifiers::SHIFT);
+    assert_eq!(sel(&h), [3], "Shift+click with no anchor");
+}
+
+/// Locks `layer` as the timeline's lock switch does (`attr.set locked`).
+fn lock(h: &mut Ui, layer: &PrimPath) {
+    h.state_mut().invoke(Invocation::with_params(
+        "attr.set",
+        serde_json::json!({"path": layer, "attr": "locked", "value": {"type": "bool", "value": true}}),
+    ));
+    settle(h);
+}
+
+#[test]
+fn locked_layers_are_skipped_by_clicks_ranges_select_all_and_delete() {
+    // docs/spec/ae/project-comp-layers.md: a locked layer cannot be selected by
+    // Timeline clicks, Select All skips locked layers, locked layers cannot be
+    // deleted.
+    let mut h = gui();
+    let rows = five_layers(&mut h);
+    let layers = h.state().layers();
+    lock(&mut h, &layers[2]);
+    let locked = layers[2].clone();
+    let mut wrong = Vec::new();
+    click_at(&mut h, rows[2]);
+    if h.state().selected_layers().contains(&locked) {
+        wrong.push("a click selects the locked layer");
+    }
+    click_at(&mut h, rows[1]);
+    click_at_mods(&mut h, rows[3], Modifiers::SHIFT);
+    if h.state().selected_layers().contains(&locked) {
+        wrong.push("a Shift+click range includes the locked layer");
+    }
+    key(&mut h, Modifiers::COMMAND, Key::A);
+    if h.state().selected_layers().contains(&locked) {
+        wrong.push("Select All (Cmd+A) includes the locked layer");
+    }
+    // Rename through Enter.
+    h.state().session().lock().selected_layers = vec![locked.clone()];
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    if rename_field_value(&h).is_some() {
+        wrong.push("Enter opens a rename field on the locked layer");
+        key(&mut h, Modifiers::NONE, Key::Escape);
+    }
+    // Delete with the timeline focused.
+    let head = header(&h);
+    click_at(&mut h, pos2(head.left() + 800.0, head.bottom() + 150.0));
+    h.state().session().lock().selected_layers = vec![locked.clone()];
+    key(&mut h, Modifiers::NONE, Key::Delete);
+    if h.state().stage().prim(&locked).is_none() {
+        wrong.push("Delete removes the locked layer");
+        key(&mut h, Modifiers::COMMAND, Key::Z);
+    }
+    // Arrange / duplicate act on it.
+    h.state().session().lock().selected_layers = vec![locked.clone()];
+    key(
+        &mut h,
+        Modifiers::COMMAND | Modifiers::SHIFT,
+        Key::CloseBracket,
+    );
+    if h.state().layers()[0] == locked {
+        wrong.push("Bring to Front moves the locked layer");
+    }
+    assert!(wrong.is_empty(), "locked layer: {wrong:?}");
+}

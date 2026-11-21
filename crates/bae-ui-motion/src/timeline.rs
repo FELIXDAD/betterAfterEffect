@@ -586,7 +586,10 @@ impl Panel for TimelinePanel {
             && bae_ui::panel_key_pressed(ui, egui::Key::Enter)
         {
             let selected = session.lock().selected_layers.clone();
-            if let Some(layer) = comp_layers.iter().find(|l| selected.contains(l)) {
+            if let Some(layer) = comp_layers
+                .iter()
+                .find(|l| selected.contains(l) && !query::is_locked(stage, l))
+            {
                 self.rename = Some((layer.clone(), query::display_name_of(stage, layer)));
             }
         }
@@ -1126,10 +1129,11 @@ impl TimelinePanel {
                     if resp.clicked() {
                         select_layer(session, stage, layer, ui.input(|i| i.modifiers));
                     }
-                    if resp.double_clicked() {
+                    let locked = query::is_locked(stage, layer);
+                    if resp.double_clicked() && !locked {
                         self.rename = Some((layer.clone(), name.clone()));
                     }
-                    if resp.drag_started() {
+                    if resp.drag_started() && !locked {
                         if !layer_selected {
                             select_layer(session, stage, layer, egui::Modifiers::NONE);
                         }
@@ -1381,7 +1385,9 @@ impl TimelinePanel {
         if resp.clicked() {
             select_layer(session, stage, layer, ui.input(|i| i.modifiers));
         }
+        // A locked layer's bar does not move or trim (AE).
         if resp.drag_started()
+            && !query::is_locked(stage, layer)
             && let Some(p) = resp.interact_pointer_pos()
         {
             if !selected {
@@ -1590,12 +1596,14 @@ impl TimelinePanel {
             paint_key(&p, c, k, selected);
             let hit = Rect::from_center_size(c, vec2(11.0, 13.0));
             key_rects.push((hit, kr.clone()));
+            // Keyframes of a locked layer cannot be selected or moved (AE).
+            let sense = if query::locked_layer_of(stage, path).is_some() {
+                Sense::hover()
+            } else {
+                Sense::click_and_drag()
+            };
             let resp = ui
-                .interact(
-                    hit,
-                    ui.id().with(("key", path.as_str(), attr, t.0)),
-                    Sense::click_and_drag(),
-                )
+                .interact(hit, ui.id().with(("key", path.as_str(), attr, t.0)), sense)
                 .labeled_toggle(egui::WidgetType::Button, tr("Keyframe"), selected);
             if resp.clicked() {
                 let mods = ui.input(|i| i.modifiers);
@@ -1938,6 +1946,10 @@ fn row_key(row: &Row) -> String {
 /// it; Shift+click selects the contiguous range from the anchor (the layer
 /// clicked last without Shift) to it, in timeline order.
 fn select_layer(session: &SharedSession, stage: &Stage, layer: &PrimPath, mods: egui::Modifiers) {
+    // AE: a locked layer cannot be selected (unlock it first).
+    if query::is_locked(stage, layer) {
+        return;
+    }
     let mut s = session.lock();
     if mods.shift {
         let order = query::owning_comp(stage, layer)
@@ -1959,7 +1971,12 @@ fn select_layer(session: &SharedSession, stage: &Stage, layer: &PrimPath, mods: 
         let (lo, hi) = (a.min(b), a.max(b));
         // The anchor stays first so the next Shift+click extends from it.
         let mut range = vec![anchor.clone()];
-        range.extend(order[lo..=hi].iter().filter(|l| **l != anchor).cloned());
+        range.extend(
+            order[lo..=hi]
+                .iter()
+                .filter(|l| **l != anchor && !query::is_locked(stage, l))
+                .cloned(),
+        );
         s.selected_layers = range;
     } else if mods.command {
         if let Some(i) = s.selected_layers.iter().position(|p| p == layer) {

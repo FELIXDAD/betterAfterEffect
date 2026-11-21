@@ -179,6 +179,22 @@ pub fn owning_layer(stage: &Stage, path: &PrimPath) -> Option<PrimPath> {
     ancestor_of_type(stage, path, &PrimType::LAYER)
 }
 
+/// The layer's Lock switch is on (AE: it cannot be selected or edited until
+/// unlocked).
+pub fn is_locked(stage: &Stage, layer: &PrimPath) -> bool {
+    stage
+        .prim(layer)
+        .and_then(|v| static_value(&v, "locked"))
+        .and_then(|v| v.as_bool())
+        == Some(true)
+}
+
+/// The locked layer `path` belongs to (itself, or the layer of a property,
+/// shape or effect below it), if any.
+pub fn locked_layer_of(stage: &Stage, path: &PrimPath) -> Option<PrimPath> {
+    owning_layer(stage, path).filter(|l| is_locked(stage, l))
+}
+
 /// A layer's placement in comp time. An unset out point is the comp's end.
 pub fn layer_timing(stage: &Stage, layer: &PrimPath) -> LayerTiming {
     let Some(view) = stage.prim(layer) else {
