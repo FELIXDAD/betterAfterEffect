@@ -23,7 +23,10 @@ use bae_ui::{Keymap, PanelContext, Toolbar, tr, widgets};
 use egui::{Align2, Color32, Id, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::json;
 
-use super::{AxisMode, Group, Paint, PaintKind, SharedTools, Tool, ToolOptions, ViewRequest, ids};
+use super::{
+    AxisMode, FillRequest, Group, Paint, PaintKind, SharedTools, Tool, ToolOptions, ViewRequest,
+    ids,
+};
 use crate::common;
 
 /// Press-and-hold time that opens a group's flyout.
@@ -212,7 +215,8 @@ impl AeToolbar {
             }
         }
         if resp.double_clicked() {
-            self.double_click(cx, shown);
+            let modifiers = ui.input(|i| i.modifiers);
+            self.double_click(cx, shown, modifiers);
         }
         if several && egui::Popup::is_id_open(ui.ctx(), flyout_id) {
             let mut picked = None;
@@ -261,13 +265,18 @@ impl AeToolbar {
     }
 
     /// Double-click on a tool button (AE-UI-306).
-    fn double_click(&self, cx: &mut PanelContext<'_>, tool: Tool) {
+    fn double_click(&self, cx: &mut PanelContext<'_>, tool: Tool, modifiers: egui::Modifiers) {
         match tool {
             Tool::Selection => reset_selected(cx, "transform:scale"),
             Tool::Rotation => reset_selected(cx, "transform:rotation"),
             Tool::Hand => self.tools.lock().view_request = Some(ViewRequest::Center),
             Tool::Zoom => self.tools.lock().view_request = Some(ViewRequest::Actual),
-            t if t.is_shape() => self.tools.lock().fill_request = Some(t),
+            t if t.is_shape() => {
+                self.tools.lock().fill_request = Some(FillRequest {
+                    tool: t,
+                    shift: modifiers.shift,
+                });
+            }
             _ => {}
         }
     }

@@ -12,18 +12,19 @@
 
 use bae_anim::EvaluatedComp;
 use bae_anim::glam::{DMat4, DVec2, DVec3};
-use bae_model::{LayerKind, PrimPath, Stage, Value};
+use bae_model::{PrimPath, Stage, Value};
 use bae_motion::query::{self, CompInfo};
-use bae_motion::shape::{Geometry, ShapeKind, takes_masks};
+use bae_motion::shape::{Geometry, ShapeKind, mask_color, takes_masks};
+use bae_ui::theme;
 use bae_ui::{PanelContext, tr};
-use egui::{Color32, Painter, Shape, Stroke};
+use egui::{Color32, Event, Key, Painter, PointerButton, Response, Shape, Stroke, Ui};
 use serde_json::json;
 
 use super::overlay;
 use crate::common;
 use crate::render::View;
 use crate::session::{Pending, SharedSession};
-use crate::tools::{PaintKind, Tool, ToolOptions};
+use crate::tools::{FillRequest, PaintKind, SharedTools, Tool, ToolOptions};
 
 /// Where a drawn shape goes (AE-SHP-051).
 #[derive(Clone, Debug, PartialEq)]
@@ -77,12 +78,28 @@ pub(crate) enum DragKey {
     PageDown,
 }
 
+impl DragKey {
+    fn of(key: Key) -> Option<DragKey> {
+        Some(match key {
+            Key::ArrowUp => DragKey::Up,
+            Key::ArrowDown => DragKey::Down,
+            Key::ArrowLeft => DragKey::Left,
+            Key::ArrowRight => DragKey::Right,
+            Key::PageUp => DragKey::PageUp,
+            Key::PageDown => DragKey::PageDown,
+            _ => return None,
+        })
+    }
+}
+
 /// Roundness step of the Up / Down arrows (pixels; AE's step 待核).
 const ROUNDNESS_STEP: f64 = 1.0;
 /// Polystar roundness step of the arrows and Page Up / Down (percent; 待核).
 const STAR_ROUNDNESS_STEP: f64 = 5.0;
 /// Default inner / outer radius ratio of a new star (AE-SHP-053, 待核).
 const STAR_RATIO: f64 = 0.5;
+/// Scrolled points per Up / Down step while drawing (one wheel notch).
+const WHEEL_STEP: f32 = 20.0;
 
 /// A shape being dragged out.
 pub(crate) struct ShapeDrag {
@@ -106,6 +123,8 @@ pub(crate) struct ShapeDrag {
     fixed_inner: Option<f64>,
     /// Outline color of the preview.
     color: Color32,
+    /// Mouse wheel scrolling not yet turned into steps.
+    wheel: f32,
 }
 
 /// Target layer space → comp space.
@@ -150,6 +169,7 @@ impl ShapeDrag {
             inner_ratio: STAR_RATIO,
             fixed_inner: None,
             color,
+            wheel: 0.0,
         }
     }
 
@@ -252,19 +272,7 @@ impl ShapeDrag {
 
     /// The shape in target space; `None` while it has no size.
     pub(crate) fn geometry(&self) -> Option<Geometry> {
-        let mut g = Geometry {
-            kind: ShapeKind::Rect,
-            position: [0.0, 0.0],
-            size: None,
-            roundness: 0.0,
-            points: None,
-            outer_radius: None,
-            inner_radius: None,
-            rotation: 0.0,
-            outer_roundness: 0.0,
-            inner_roundness: 0.0,
-            path: None,
-        };
+        let mut g = empty_geometry();
         if self.polystar() {
             let (outer, rotation) = self.radii();
             if outer < 0.5 {
@@ -394,7 +402,10 @@ pub(crate) fn run(
             obj.insert("comp".into(), json!(info.path));
             obj.insert("name".into(), json!(name));
             obj.insert("index".into(), json!(index));
-            obj.insert("center_anchor".into(), json!(prefs::CENTER_ANCHOR_IN_NEW_SHAPES));
+            obj.insert(
+                "center_anchor".into(),
+                json!(prefs::CENTER_ANCHOR_IN_NEW_SHAPES),
+            );
             add_paint_and_names(obj, &g, bezier, options);
             cx.invoke_with("shape.add", params);
             let mut s = session.lock();
@@ -448,22 +459,34 @@ fn source_size(stage: &Stage, layer: &PrimPath) -> Option<[f64; 2]> {
 
 /// Double-clicking a shape tool button (AE-SHP-054): a shape or mask the size of
 /// the target — the comp frame for a new or selected shape layer, the layer's
-/// pixels for a mask. Shift: a square / circle (AE tutorials).
+/// pixels for a mask. Shift: the largest square / circle that fits (AE
+/// tutorials T05@04:05). Also resets the tool's remembered roundness / points.
 pub(crate) fn fill_target(
     cx: &mut PanelContext<'_>,
     session: &SharedSession,
     info: &CompInfo,
     comp: &EvaluatedComp,
-    tool: Tool,
-    shift: bool,
-    options: &ToolOptions,
+    request: FillRequest,
+    tools: &SharedTools,
 ) {
+    let FillRequest { tool, shift } = request;
+    let options = {
+        let mut t = tools.lock();
+        let defaults = ToolOptions::default();
+        match tool {
+            Tool::RoundedRectangle => t.options.roundness = defaults.roundness,
+            Tool::Polygon | Tool::Star => t.options.points = defaults.points,
+            _ => {}
+        }
+        t.options.clone()
+    };
     let selected = session.lock().selected_layers.clone();
     let target = Target::of(cx.stage, &info.path, &selected, options.creates_mask);
     let to_comp = target_matrix(info, comp, &target);
     let (w, h) = (f64::from(info.width), f64::from(info.height));
     // The frame in target space: a mask uses the layer's pixels when it has them.
-    let (center, mut size) = match (&target, target.layer().and_then(|l| source_size(cx.stage, l))) {
+    let source = target.layer().and_then(|l| source_size(cx.stage, l));
+    let (center, mut size) = match (&target, source) {
         (Target::Mask(_), Some([lw, lh])) => (DVec2::new(lw / 2.0, lh / 2.0), [lw, lh]),
         _ => {
             let inv = to_comp.inverse();
@@ -479,57 +502,180 @@ pub(crate) fn fill_target(
         let m = size[0].min(size[1]);
         size = [m, m];
     }
-    let mut drag = ShapeDrag::new(
-        tool,
-        target.clone(),
-        to_comp,
-        DVec2::ZERO,
-        options,
-        false,
-        Color32::WHITE,
-    );
-    drag.shift = false;
-    let g = match tool {
-        Tool::Polygon | Tool::Star => Geometry {
-            kind: if tool == Tool::Star {
+    let radius = size[0].min(size[1]) / 2.0;
+    let mut g = empty_geometry();
+    g.position = [center.x, center.y];
+    match tool {
+        Tool::Polygon | Tool::Star => {
+            g.kind = if tool == Tool::Star {
                 ShapeKind::Star
             } else {
                 ShapeKind::Polygon
-            },
-            position: [center.x, center.y],
-            size: None,
-            roundness: 0.0,
-            points: Some(drag.points),
-            outer_radius: Some(size[0].min(size[1]) / 2.0),
-            inner_radius: Some(size[0].min(size[1]) / 2.0 * STAR_RATIO),
-            rotation: 0.0,
-            outer_roundness: 0.0,
-            inner_roundness: 0.0,
-            path: None,
-        },
-        _ => Geometry {
-            kind: if tool == Tool::Ellipse {
+            };
+            g.points = Some(options.points.max(3.0));
+            g.outer_radius = Some(radius);
+            g.inner_radius = Some(radius * STAR_RATIO);
+        }
+        _ => {
+            g.kind = if tool == Tool::Ellipse {
                 ShapeKind::Ellipse
             } else {
                 ShapeKind::Rect
-            },
-            position: [center.x, center.y],
-            size: Some(size),
-            roundness: drag.roundness.min(size[0].min(size[1]) / 2.0),
-            points: None,
-            outer_radius: None,
-            inner_radius: None,
-            rotation: 0.0,
-            outer_roundness: 0.0,
-            inner_roundness: 0.0,
-            path: None,
-        },
-    };
-    run(cx, session, info, &target, g, options.bezier_path, options);
+            };
+            g.size = Some(size);
+            if tool == Tool::RoundedRectangle {
+                g.roundness = options.roundness.max(0.0).min(radius);
+            }
+        }
+    }
+    run(cx, session, info, &target, g, options.bezier_path, &options);
 }
 
-/// The kinds of layer a shape tool can draw a mask on (for the cursor and tests).
-#[allow(dead_code)]
-pub(crate) fn can_mask(kind: LayerKind) -> bool {
-    takes_masks(kind.as_str())
+fn empty_geometry() -> Geometry {
+    Geometry {
+        kind: ShapeKind::Rect,
+        position: [0.0, 0.0],
+        size: None,
+        roundness: 0.0,
+        points: None,
+        outer_radius: None,
+        inner_radius: None,
+        rotation: 0.0,
+        outer_roundness: 0.0,
+        inner_roundness: 0.0,
+        path: None,
+    }
+}
+
+/// Outline color of the shape being drawn: the next mask color on a mask target,
+/// the shape layer's label color otherwise (AE draws the rubber band in it).
+fn preview_color(stage: &Stage, target: &Target) -> Color32 {
+    match target {
+        Target::Mask(layer) => {
+            let count = layer
+                .child("masks")
+                .map(|m| stage.children(&m).len())
+                .unwrap_or(0);
+            let [r, g, b, _] = mask_color(count, true);
+            let u = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            Color32::from_rgb(u(r), u(g), u(b))
+        }
+        Target::Shape(layer) => {
+            let label = stage
+                .prim(layer)
+                .and_then(|v| query::static_value(&v, "label"))
+                .and_then(|v| v.as_f64())
+                .map_or(SHAPE_LABEL, |v| v as usize);
+            theme::label_color(label)
+        }
+        Target::NewLayer => theme::label_color(SHAPE_LABEL),
+    }
+}
+
+/// Default label of new shape layers (AE: Blue).
+const SHAPE_LABEL: usize = 8;
+
+/// Shape-tool input for one viewer frame: start a drag with a shape tool, follow
+/// the pointer, modifiers and keys, commit on release, cancel with Esc.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn frame(
+    slot: &mut Option<ShapeDrag>,
+    ui: &Ui,
+    resp: &Response,
+    cx: &mut PanelContext<'_>,
+    session: &SharedSession,
+    info: &CompInfo,
+    comp: &EvaluatedComp,
+    view: &View,
+    tool: Tool,
+) {
+    let tools = crate::tools::shared(cx.resources);
+    if slot.is_none() && tool.is_shape() && resp.drag_started_by(PointerButton::Primary) {
+        let origin = ui
+            .input(|i| i.pointer.press_origin())
+            .or(resp.interact_pointer_pos());
+        if let Some(pos) = origin {
+            let options = tools.lock().options.clone();
+            let selected = session.lock().selected_layers.clone();
+            let target = Target::of(cx.stage, &info.path, &selected, options.creates_mask);
+            let to_comp = target_matrix(info, comp, &target);
+            let alt = ui.input(|i| i.modifiers.alt);
+            let color = preview_color(cx.stage, &target);
+            session.lock().stop();
+            *slot = Some(ShapeDrag::new(
+                tool,
+                target,
+                to_comp,
+                view.to_comp(pos),
+                &options,
+                alt,
+                color,
+            ));
+        }
+    }
+    let Some(drag) = slot.as_mut() else {
+        return;
+    };
+    let (shift, command, space, middle, escape, keys, wheel, down) = ui.input(|i| {
+        let keys: Vec<DragKey> = i
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Key {
+                    key, pressed: true, ..
+                } => DragKey::of(*key),
+                _ => None,
+            })
+            .collect();
+        (
+            i.modifiers.shift,
+            i.modifiers.command,
+            i.key_down(Key::Space),
+            i.pointer.middle_down(),
+            i.key_pressed(Key::Escape),
+            keys,
+            i.events
+                .iter()
+                .map(|e| match e {
+                    Event::MouseWheel { unit, delta, .. } => match unit {
+                        egui::MouseWheelUnit::Point => delta.y,
+                        egui::MouseWheelUnit::Line => delta.y * WHEEL_STEP,
+                        egui::MouseWheelUnit::Page => delta.y * WHEEL_STEP * 10.0,
+                    },
+                    _ => 0.0,
+                })
+                .sum::<f32>(),
+            i.pointer.primary_down(),
+        )
+    });
+    if escape {
+        *slot = None;
+        return;
+    }
+    for k in keys {
+        drag.key(k);
+    }
+    // The mouse wheel works like Up / Down (AE-SHP-052/053): one step per
+    // wheel notch, trackpad scrolling accumulated.
+    drag.wheel += wheel;
+    while drag.wheel.abs() >= WHEEL_STEP {
+        let up = drag.wheel > 0.0;
+        drag.key(if up { DragKey::Up } else { DragKey::Down });
+        drag.wheel -= WHEEL_STEP.copysign(drag.wheel);
+    }
+    if let Some(pos) = resp.interact_pointer_pos().or(resp.hover_pos()) {
+        drag.update(view.to_comp(pos), shift, command, space || middle);
+    }
+    if resp.drag_stopped() || !down {
+        let d = slot.take().expect("checked above");
+        let options = tools.lock().options.clone();
+        d.commit(cx, session, info, &options);
+        // Each tool remembers its last roundness / points (AE-SHP-052/053).
+        let mut t = tools.lock();
+        match d.tool {
+            Tool::RoundedRectangle => t.options.roundness = d.roundness,
+            Tool::Polygon | Tool::Star => t.options.points = d.points,
+            _ => {}
+        }
+    }
 }

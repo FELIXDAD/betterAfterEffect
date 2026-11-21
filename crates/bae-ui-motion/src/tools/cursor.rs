@@ -76,3 +76,21 @@ pub(crate) fn show(ui: &Ui, painter: &Painter, pos: Pos2, cursor: Cursor) {
         }
     }
 }
+
+/// The small star AE adds to the shape tools' crosshair when the drag will make
+/// a shape (new shape layer or new group) rather than a mask.
+pub(crate) fn shape_star(painter: &Painter, pos: Pos2) {
+    let c = pos + vec2(10.0, 10.0);
+    let spokes: Vec<[Pos2; 2]> = (0..3)
+        .map(|i| {
+            let a = std::f32::consts::PI * (i as f32 / 3.0 + 0.5);
+            let d = vec2(a.cos(), a.sin()) * 3.5;
+            [c - d, c + d]
+        })
+        .collect();
+    for (width, color) in [(2.5, Color32::BLACK), (1.0, Color32::WHITE)] {
+        for s in &spokes {
+            painter.line_segment(*s, egui::Stroke::new(width, color));
+        }
+    }
+}

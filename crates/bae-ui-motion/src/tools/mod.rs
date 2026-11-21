@@ -633,6 +633,14 @@ pub enum ViewRequest {
     Actual,
 }
 
+/// A double-click on a shape tool button (AE-SHP-054), applied by the viewer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FillRequest {
+    pub tool: Tool,
+    /// Shift was held: the largest square / circle that fits.
+    pub shift: bool,
+}
+
 /// The tool state (an app resource through [`SharedTools`]).
 #[derive(Debug)]
 pub struct ToolState {
@@ -645,7 +653,7 @@ pub struct ToolState {
     pub view_request: Option<ViewRequest>,
     /// A shape tool button was double-clicked: the viewer adds a layer- or
     /// comp-sized shape or mask with this tool.
-    pub fill_request: Option<Tool>,
+    pub fill_request: Option<FillRequest>,
 }
 
 impl Default for ToolState {
@@ -933,6 +941,13 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Opacity", "不透明度"),
     ("Normal", "正常"),
     ("Mixed", "混合"),
+    // Default names of what the shape and Pen tools create ("矩形 1", "蒙版 1").
+    ("Rectangle Path", "矩形路径"),
+    ("Ellipse Path", "椭圆路径"),
+    ("Polystar", "多边星形"),
+    ("Polystar Path", "多边星形路径"),
+    ("Shape", "形状"),
+    ("Mask", "蒙版"),
 ];
 
 #[cfg(test)]

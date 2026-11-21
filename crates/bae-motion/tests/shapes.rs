@@ -99,7 +99,10 @@ fn rectangle_into_a_new_shape_layer() {
     let layer = p(out["layer"].as_str().unwrap());
     let group = p(out["group"].as_str().unwrap());
     assert_eq!(query::display_name_of(&fx.stage, &layer), "Shape Layer 1");
-    assert_eq!(query::layer_kind(&fx.stage, &layer).as_deref(), Some("shape"));
+    assert_eq!(
+        query::layer_kind(&fx.stage, &layer).as_deref(),
+        Some("shape")
+    );
     assert_eq!(fx.names(&layer.child("contents").unwrap()), ["Rectangle 1"]);
     assert_eq!(
         fx.names(&fx.contents(&group)),
@@ -129,7 +132,10 @@ fn rectangle_into_a_new_shape_layer() {
     let c = fx.to_comp(&comp, &layer, 100.0, -100.0);
     assert!((c - DVec3::new(1060.0, 440.0, 0.0)).length() < 1e-9, "{c}");
     let f = fx.contents(&group).child("Fill_1").unwrap();
-    assert_eq!(fx.value(&f, "color"), Some(Value::Color([1.0, 0.0, 0.0, 1.0])));
+    assert_eq!(
+        fx.value(&f, "color"),
+        Some(Value::Color([1.0, 0.0, 0.0, 1.0]))
+    );
     let s = fx.contents(&group).child("Stroke_1").unwrap();
     assert_eq!(fx.value(&s, "width"), Some(Value::Float(2.0)));
     // One undo step removes the layer and everything in it.
@@ -293,23 +299,28 @@ fn pen_paths_keep_layer_coordinates() {
 fn shape_add_refuses_other_layers_and_locked_layers() {
     let mut fx = Fx::new();
     let comp = fx.comp();
-    let solid = p(fx.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"]
-        .as_str()
-        .unwrap());
+    let solid = p(
+        fx.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"]
+            .as_str()
+            .unwrap(),
+    );
     let err = fx
         .try_run("shape.add", json!({"layer": solid, "kind": "rect"}))
         .unwrap_err();
     assert!(err.contains("not a shape layer"), "{err}");
-    let shape = p(fx.run("layer.create", json!({"comp": comp, "kind": "shape"}))["path"]
-        .as_str()
-        .unwrap());
+    let shape = p(
+        fx.run("layer.create", json!({"comp": comp, "kind": "shape"}))["path"]
+            .as_str()
+            .unwrap(),
+    );
     fx.run(
         "attr.set",
         json!({"path": shape, "attr": "locked", "value": {"type": "bool", "value": true}}),
     );
-    assert!(fx
-        .try_run("shape.add", json!({"layer": shape, "kind": "rect"}))
-        .is_err());
+    assert!(
+        fx.try_run("shape.add", json!({"layer": shape, "kind": "rect"}))
+            .is_err()
+    );
     assert!(fx.try_run("shape.add", json!({"kind": "rect"})).is_err());
 }
 
@@ -317,9 +328,11 @@ fn shape_add_refuses_other_layers_and_locked_layers() {
 fn masks_are_named_colored_and_in_layer_space() {
     let mut fx = Fx::new();
     let comp = fx.comp();
-    let solid = p(fx.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"]
-        .as_str()
-        .unwrap());
+    let solid = p(
+        fx.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"]
+            .as_str()
+            .unwrap(),
+    );
     let m1 = p(fx.run(
         "mask.create",
         json!({"layer": solid, "kind": "rect", "position": [500.0, 300.0], "size": [200.0, 100.0]}),
@@ -334,7 +347,12 @@ fn masks_are_named_colored_and_in_layer_space() {
     // Rectangle in layer space, AE's vertex order (top right first, clockwise).
     assert_eq!(
         b.vertices,
-        [[600.0, 250.0], [600.0, 350.0], [400.0, 350.0], [400.0, 250.0]]
+        [
+            [600.0, 250.0],
+            [600.0, 350.0],
+            [400.0, 350.0],
+            [400.0, 250.0]
+        ]
     );
     assert!(b.closed);
     let m2 = p(fx.run(
@@ -374,18 +392,25 @@ fn masks_only_on_layers_that_take_them() {
     let mut fx = Fx::new();
     let comp = fx.comp();
     for kind in ["null", "camera", "light"] {
-        let l = p(fx.run("layer.create", json!({"comp": comp, "kind": kind}))["path"]
-            .as_str()
-            .unwrap());
+        let l = p(
+            fx.run("layer.create", json!({"comp": comp, "kind": kind}))["path"]
+                .as_str()
+                .unwrap(),
+        );
         assert!(
-            fx.try_run("mask.create", json!({"layer": l, "kind": "rect", "size": [10.0, 10.0]}))
-                .is_err(),
+            fx.try_run(
+                "mask.create",
+                json!({"layer": l, "kind": "rect", "size": [10.0, 10.0]})
+            )
+            .is_err(),
             "{kind}"
         );
     }
-    let shape = p(fx.run("layer.create", json!({"comp": comp, "kind": "shape"}))["path"]
-        .as_str()
-        .unwrap());
+    let shape = p(
+        fx.run("layer.create", json!({"comp": comp, "kind": "shape"}))["path"]
+            .as_str()
+            .unwrap(),
+    );
     fx.run(
         "mask.create",
         json!({"layer": shape, "kind": "rect", "size": [10.0, 10.0]}),

@@ -503,10 +503,7 @@ impl Command for CreateMask {
             // AE: "Mask N", N = the mask's index when it is created.
             None => format!("Mask {}", count + 1),
         };
-        let mask = child(
-            &masks,
-            &query::unique_child_name(tx.stage(), &masks, &name),
-        )?;
+        let mask = child(&masks, &query::unique_child_name(tx.stage(), &masks, &name))?;
         create(tx, &mask, PrimType::MASK, None)?;
         set(tx, &mask, "name", Value::String(name))?;
         set(tx, &mask, "path", Value::Bezier(path))?;

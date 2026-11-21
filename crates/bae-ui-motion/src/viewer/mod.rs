@@ -10,7 +10,6 @@ use bae_motion::query::{self, CompInfo};
 use bae_ui::Accessible as _;
 use bae_ui::icons::{self, Icon};
 use bae_ui::theme::{self, color};
-use bae_ui::widgets;
 use bae_ui::{Invocation, Panel, PanelContext, TabInfo, tr};
 use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use serde_json::json;
@@ -26,6 +25,8 @@ use crate::tools::{Tool, ViewRequest};
 mod bar;
 mod overlay;
 mod shape_tool;
+#[cfg(test)]
+mod tests;
 
 const MAGNIFICATIONS: [f32; 9] = [0.125, 0.25, 0.333, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0];
 
@@ -60,6 +61,10 @@ pub struct CompositionViewer {
     space_hold: Option<(bool, Time)>,
     /// A Hand-tool (or Space) drag is panning the view.
     panning: bool,
+    /// A shape being drawn with a shape tool.
+    shape: Option<shape_tool::ShapeDrag>,
+    /// Comp → screen mapping of the last frame.
+    last_view: Option<View>,
 }
 
 impl CompositionViewer {
@@ -255,6 +260,11 @@ impl Panel for CompositionViewer {
     }
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
+        // While a shape is being drawn the keys belong to the drag: Space moves
+        // the shape (not playback), arrows and Page Up / Down change it.
+        if self.shape.is_some() {
+            return true;
+        }
         let session = common::session(cx.resources);
         match action.id.as_str() {
             "viewer.zoom_in" | "viewer.zoom_out" => {
@@ -310,7 +320,7 @@ impl Panel for CompositionViewer {
             None => {}
         }
         // Zoom: pinch / Cmd+scroll around the pointer; plain scroll pans.
-        if resp.hovered() {
+        if resp.hovered() && self.shape.is_none() {
             let (zoom, scroll) = ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta));
             if zoom != 1.0 {
                 self.zoom_by(zoom, resp.hover_pos(), area, &info, ppp);
@@ -324,6 +334,7 @@ impl Panel for CompositionViewer {
             self.pan += resp.drag_delta();
         }
         let (view, mag) = self.view(area, &info, ppp);
+        self.last_view = Some(view);
 
         // Evaluate.
         let eval = self.eval.get(cx.resources);
@@ -347,6 +358,12 @@ impl Panel for CompositionViewer {
         }
         let scrub = session.lock().scrub.clone();
         apply_overrides(&mut comp, scrub.as_ref(), self.drag.as_ref());
+        // Double-clicking a shape tool button: a layer- or comp-sized shape.
+        let tools = crate::tools::shared(cx.resources);
+        let fill = tools.lock().fill_request.take();
+        if let Some(request) = fill {
+            shape_tool::fill_target(cx, &session, &info, &comp, request, &tools);
+        }
 
         // Paint.
         let painter = ui.painter_at(area);
@@ -504,15 +521,16 @@ impl Panel for CompositionViewer {
             );
         }
 
+        overlay::masks(&painter, cx.stage, &comp, &view, &selected);
+
         // Interaction by tool. Space held over the viewer is the Hand tool until
-        // released (AE-UI-307).
+        // released (AE-UI-307), except while drawing a shape (Space moves it).
         let pointer = resp.interact_pointer_pos().or(resp.hover_pos());
-        let tools = crate::tools::shared(cx.resources);
         let tool = tools.lock().current();
         let space = ui.input(|i| i.key_down(egui::Key::Space)) && !ui.ctx().text_edit_focused();
         if !space {
             self.space_hold = None;
-        } else if self.space_hold.is_none() && resp.hovered() {
+        } else if self.space_hold.is_none() && resp.hovered() && self.shape.is_none() {
             let s = session.lock();
             self.space_hold = Some((s.is_playing(), s.time(&info.path)));
         }
@@ -544,6 +562,20 @@ impl Panel for CompositionViewer {
             let out = ui.input(|i| i.modifiers.alt);
             self.step_zoom_at(!out, pos, area, &info, ppp);
         }
+        shape_tool::frame(
+            &mut self.shape,
+            ui,
+            &resp,
+            cx,
+            &session,
+            &info,
+            &comp,
+            &view,
+            effective,
+        );
+        if let Some(d) = &self.shape {
+            d.paint(&painter, &view);
+        }
         if resp.hovered()
             && let Some(pos) = resp.hover_pos()
         {
@@ -552,6 +584,20 @@ impl Panel for CompositionViewer {
                 dragging: self.panning,
             };
             cursor::show(ui, &painter, pos, cursor::for_tool(effective, hover));
+            // A small star by the crosshair: the drag makes a shape, not a mask.
+            if effective.is_shape() {
+                let makes_shape = match &self.shape {
+                    Some(d) => d.target.makes_shape(),
+                    None => {
+                        let selected = session.lock().selected_layers.clone();
+                        let mask = tools.lock().options.creates_mask;
+                        shape_tool::Target::of(cx.stage, &info.path, &selected, mask).makes_shape()
+                    }
+                };
+                if makes_shape {
+                    cursor::shape_star(&painter, pos);
+                }
+            }
         }
         // Clicking a layer selects it with the Selection, Rotation and Pan Behind
         // tools; only the Selection tool moves layers.
