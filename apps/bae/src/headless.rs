@@ -99,7 +99,18 @@ fn render_offscreen(app: &mut App, gpu: &Arc<GpuContext>, frames: u32) -> anyhow
     // Always the default layout: smoke tests never read or write user state.
     let mut workspace = Workspace::new(app, bae_ui::WorkbenchState::default());
     let workspaces = workspace.workspaces();
-    let document = Document::new(app.resource::<Arc<bae_ui::history::HistoryLog>>().cloned());
+    let mut document = Document::new(app.resource::<Arc<bae_ui::history::HistoryLog>>().cloned());
+    document.add_module_commands(app);
+    // `BAE_SMOKE_DEMO=1`: a demo project open in the Motion workspace (screenshots).
+    let demo = std::env::var_os("BAE_SMOKE_DEMO").is_some();
+    if demo {
+        for inv in bae_ui_motion::demo::steps() {
+            if let crate::document::Outcome::Failed(e) = document.run(&inv) {
+                anyhow::bail!("demo step `{}` failed: {e}", inv.id);
+            }
+        }
+        bae_ui_motion::demo::open(app.resources(), document.stage());
+    }
     let mut status = StatusInfo {
         gpu: gpu.summary(),
         size_px: SMOKE_SIZE,
@@ -125,7 +136,7 @@ fn render_offscreen(app: &mut App, gpu: &Arc<GpuContext>, frames: u32) -> anyhow
             invocations = workspace.ui(ui, &status, &document, resources);
         });
         // Cycle through every workspace so each preset's panels get drawn.
-        if frame % 10 == 9 && !workspaces.is_empty() {
+        if !demo && frame % 10 == 9 && !workspaces.is_empty() {
             let next = &workspaces[(frame as usize / 10 + 1) % workspaces.len()].0;
             invocations.push(bae_ui::Invocation::with_params(
                 bae_ui::action::ids::SWITCH_WORKSPACE,

@@ -1,0 +1,783 @@
+arrayvec v0.7.8
+└── naga v30.0.2
+    [build-dependencies]
+    └── vello_shaders v0.12.0
+        └── vello v0.12.0
+            ├── bae-text v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-text)
+            │   └── bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+            └── bae-vector v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-vector)
+                ├── bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+                └── bae-text v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-text) (*)
+
+arrayvec v0.7.8
+├── blake3 v1.8.7
+│   ├── bae-model v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-model)
+│   │   ├── bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+│   │   ├── bae-agent v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-agent)
+│   │   │   └── bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+│   │   ├── bae-anim v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-anim)
+│   │   │   ├── bae-motion v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-motion)
+│   │   │   │   ├── bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+│   │   │   │   └── bae-ui-motion v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-ui-motion)
+│   │   │   │       └── bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+│   │   │   ├── bae-render v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-render)
+│   │   │   │   ├── bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+│   │   │   │   ├── bae-plugin v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-plugin)
+│   │   │   │   │   └── bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+│   │   │   │   ├── bae-text v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-text) (*)
+│   │   │   │   └── bae-vector v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-vector) (*)
+│   │   │   ├── bae-text v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-text) (*)
+│   │   │   ├── bae-ui-motion v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-ui-motion) (*)
+│   │   │   └── bae-vector v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-vector) (*)
+│   │   ├── bae-media v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-media)
+│   │   │   └── bae-render v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-render) (*)
+│   │   ├── bae-motion v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-motion) (*)
+│   │   ├── bae-package v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-package)
+│   │   │   ├── bae-agent v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-agent) (*)
+│   │   │   └── bae-render v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-render) (*)
+│   │   ├── bae-plugin v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-plugin) (*)
+│   │   ├── bae-render v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-render) (*)
+│   │   ├── bae-sync v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-sync)
+│   │   │   └── bae-agent v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-agent) (*)
+│   │   ├── bae-text v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-text) (*)
+│   │   ├── bae-ui v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-ui)
+│   │   │   ├── bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+│   │   │   └── bae-ui-motion v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-ui-motion) (*)
+│   │   ├── bae-ui-motion v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-ui-motion) (*)
+│   │   └── bae-vector v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-vector) (*)
+│   └── bae-sync v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-sync) (*)
+├── kurbo v0.13.1
+│   ├── bae-text v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-text) (*)
+│   ├── bae-vector v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-vector) (*)
+│   └── peniko v0.6.1
+│       ├── vello v0.12.0 (*)
+│       ├── vello_common v0.1.0
+│       │   └── vello_cpu v0.1.0
+│       │       ├── bae-text v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-text) (*)
+│       │       ├── bae-vector v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-vector) (*)
+│       │       └── epaint v0.36.2
+│       │           ├── egui v0.36.2
+│       │           │   ├── bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+│       │           │   ├── bae-ui v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-ui) (*)
+│       │           │   ├── bae-ui-motion v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-ui-motion) (*)
+│       │           │   └── egui-winit v0.36.2
+│       │           │       └── bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+│       │           └── egui-wgpu v0.36.2
+│       │               └── bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+│       └── vello_encoding v0.12.0
+│           ├── vello v0.12.0 (*)
+│           └── vello_shaders v0.12.0 (*)
+├── loro-delta v1.18.0
+│   ├── loro v1.18.0
+│   │   └── bae-model v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-model) (*)
+│   └── loro-internal v1.18.0
+│       └── loro v1.18.0 (*)
+├── naga v30.0.2
+│   ├── bae-plugin v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-plugin) (*)
+│   ├── wgpu-core v30.0.2
+│   │   └── wgpu v30.0.2
+│   │       ├── bae-gpu v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-gpu)
+│   │       │   ├── bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+│   │       │   ├── bae-media v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-media) (*)
+│   │       │   ├── bae-plugin v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-plugin) (*)
+│   │       │   ├── bae-render v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-render) (*)
+│   │       │   ├── bae-text v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-text) (*)
+│   │       │   └── bae-vector v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-vector) (*)
+│   │       ├── egui-wgpu v0.36.2 (*)
+│   │       └── vello v0.12.0 (*)
+│   ├── wgpu-hal v30.0.2
+│   │   ├── bae-gpu v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-gpu) (*)
+│   │   ├── wgpu v30.0.2 (*)
+│   │   ├── wgpu-core v30.0.2 (*)
+│   │   └── wgpu-core-deps-windows-linux-android v30.0.2
+│   │       └── wgpu-core v30.0.2 (*)
+│   └── wgpu-naga-bridge v30.0.2
+│       ├── wgpu-core v30.0.2 (*)
+│       └── wgpu-hal v30.0.2 (*)
+├── polycool v0.4.0
+│   └── kurbo v0.13.1 (*)
+├── wgpu v30.0.2 (*)
+├── wgpu-core v30.0.2 (*)
+└── wgpu-hal v30.0.2 (*)
+
+bitflags v2.13.2
+└── naga v30.0.2 (*)
+
+bitflags v2.13.2
+├── egui v0.36.2 (*)
+├── harfrust v0.12.0
+│   └── epaint v0.36.2 (*)
+├── harfrust v0.15.0
+│   └── parley_engine v0.13.0
+│       └── parley v0.13.0
+│           └── bae-text v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-text) (*)
+├── keyboard-types v0.8.3
+│   └── muda v0.21.2
+│       └── bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+├── naga v30.0.2 (*)
+├── png v0.18.1
+│   ├── bae-agent v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-agent) (*)
+│   ├── bae-media v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-media) (*)
+│   ├── bae-render v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-render) (*)
+│   ├── image v0.25.10
+│   │   ├── arboard v3.7.0
+│   │   │   └── egui-winit v0.36.2 (*)
+│   │   └── bae-media v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-media) (*)
+│   └── vello v0.12.0 (*)
+├── symphonia-core v0.6.1
+│   ├── symphonia v0.6.1
+│   │   └── bae-media v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-media) (*)
+│   ├── symphonia-bundle-flac v0.6.1
+│   │   └── symphonia v0.6.1 (*)
+│   ├── symphonia-bundle-mp3 v0.6.1
+│   │   └── symphonia v0.6.1 (*)
+│   ├── symphonia-codec-aac v0.6.1
+│   │   └── symphonia v0.6.1 (*)
+│   ├── symphonia-codec-pcm v0.6.1
+│   │   └── symphonia v0.6.1 (*)
+│   ├── symphonia-common v0.6.1
+│   │   ├── symphonia-bundle-flac v0.6.1 (*)
+│   │   ├── symphonia-codec-aac v0.6.1 (*)
+│   │   └── symphonia-format-isomp4 v0.6.1
+│   │       └── symphonia v0.6.1 (*)
+│   ├── symphonia-format-isomp4 v0.6.1 (*)
+│   ├── symphonia-format-riff v0.6.1
+│   │   └── symphonia v0.6.1 (*)
+│   └── symphonia-metadata v0.6.1
+│       ├── symphonia v0.6.1 (*)
+│       ├── symphonia-bundle-flac v0.6.1 (*)
+│       ├── symphonia-common v0.6.1 (*)
+│       ├── symphonia-format-isomp4 v0.6.1 (*)
+│       └── symphonia-format-riff v0.6.1 (*)
+├── wgpu v30.0.2 (*)
+├── wgpu-core v30.0.2 (*)
+├── wgpu-hal v30.0.2 (*)
+├── wgpu-types v30.0.2
+│   ├── bae-gpu v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-gpu) (*)
+│   ├── wgpu v30.0.2 (*)
+│   ├── wgpu-core v30.0.2 (*)
+│   ├── wgpu-hal v30.0.2 (*)
+│   └── wgpu-naga-bridge v30.0.2 (*)
+└── winit v0.30.13
+    ├── bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+    └── egui-winit v0.36.2 (*)
+
+constant_time_eq v0.4.2
+└── blake3 v1.8.7 (*)
+
+constant_time_eq v0.6.1
+└── zip v9.8.0
+    ├── bae-model v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-model) (*)
+    └── bae-package v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-package) (*)
+
+enum-as-inner v0.5.1 (proc-macro)
+└── loro-delta v1.18.0 (*)
+
+enum-as-inner v0.6.1 (proc-macro)
+├── loro v1.18.0 (*)
+├── loro-common v1.18.0
+│   ├── loro v1.18.0 (*)
+│   ├── loro-internal v1.18.0 (*)
+│   └── loro-kv-store v1.18.0
+│       ├── loro v1.18.0 (*)
+│       └── loro-internal v1.18.0 (*)
+└── loro-internal v1.18.0 (*)
+
+getrandom v0.2.17
+├── loro-internal v1.18.0 (*)
+└── rand_core v0.6.4
+    ├── rand v0.8.8
+    │   ├── loro-internal v1.18.0 (*)
+    │   └── loro_fractional_index v1.18.0
+    │       └── loro-internal v1.18.0 (*)
+    └── rand_chacha v0.3.1
+        └── rand v0.8.8 (*)
+
+getrandom v0.3.4
+└── ahash v0.8.12
+    ├── egui v0.36.2 (*)
+    ├── egui-wgpu v0.36.2 (*)
+    ├── epaint v0.36.2 (*)
+    └── quick_cache v0.6.24
+        └── loro-kv-store v1.18.0 (*)
+
+getrandom v0.4.3
+├── uuid v1.29.3
+│   ├── accesskit v0.24.1
+│   │   └── egui v0.36.2 (*)
+│   └── bae-sync v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-sync) (*)
+└── zip v9.8.0 (*)
+
+half v2.7.1
+├── bae-media v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-media) (*)
+├── bae-render v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-render) (*)
+├── exr v1.74.3
+│   └── bae-media v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-media) (*)
+├── naga v30.0.2 (*)
+└── tiff v0.11.3
+    └── bae-media v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-media) (*)
+
+half v2.7.1
+└── naga v30.0.2 (*)
+
+harfrust v0.12.0 (*)
+
+harfrust v0.15.0 (*)
+
+hash32 v0.2.1
+└── heapless v0.7.17
+    └── postcard v1.1.3
+        ├── loro-internal v1.18.0 (*)
+        └── serde_columnar v0.3.14
+            ├── loro-common v1.18.0 (*)
+            └── loro-internal v1.18.0 (*)
+
+hash32 v0.3.1
+├── heapless v0.8.0
+│   └── loro-delta v1.18.0 (*)
+└── heapless v0.9.4
+    └── generic-btree v0.10.8
+        ├── loro v1.18.0 (*)
+        ├── loro-delta v1.18.0 (*)
+        └── loro-internal v1.18.0 (*)
+
+hashbrown v0.16.1
+├── gpu-allocator v0.28.0
+│   └── wgpu-hal v30.0.2 (*)
+└── quick_cache v0.6.24 (*)
+
+hashbrown v0.17.1
+├── fontique v0.13.0
+│   ├── bae-text v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-text) (*)
+│   ├── parley v0.13.0 (*)
+│   └── parley_engine v0.13.0 (*)
+├── indexmap v2.14.2
+│   ├── bae-app v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-app)
+│   │   ├── bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+│   │   ├── bae-gpu v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-gpu) (*)
+│   │   ├── bae-media v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-media) (*)
+│   │   ├── bae-motion v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-motion) (*)
+│   │   ├── bae-platform v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-platform)
+│   │   │   ├── bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+│   │   │   ├── bae-gpu v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-gpu) (*)
+│   │   │   ├── bae-plugin v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-plugin) (*)
+│   │   │   └── bae-render v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-render) (*)
+│   │   ├── bae-plugin v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-plugin) (*)
+│   │   ├── bae-render v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-render) (*)
+│   │   ├── bae-ui v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-ui) (*)
+│   │   └── bae-ui-motion v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-ui-motion) (*)
+│   ├── bae-model v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-model) (*)
+│   ├── naga v30.0.2 (*)
+│   ├── naga-types v30.0.2
+│   │   ├── naga v30.0.2 (*)
+│   │   ├── wgpu-core v30.0.2 (*)
+│   │   ├── wgpu-hal v30.0.2 (*)
+│   │   └── wgpu-types v30.0.2 (*)
+│   ├── wgpu-core v30.0.2 (*)
+│   └── zip v9.8.0 (*)
+├── naga v30.0.2 (*)
+├── naga-types v30.0.2 (*)
+├── parley v0.13.0 (*)
+├── parley_engine v0.13.0 (*)
+├── rquickjs-core v0.14.0
+│   └── rquickjs v0.14.0
+│       └── bae-anim v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-anim) (*)
+├── vello_cpu v0.1.0 (*)
+├── wgpu v30.0.2 (*)
+├── wgpu-core v30.0.2 (*)
+└── wgpu-hal v30.0.2 (*)
+
+hashbrown v0.17.1
+├── indexmap v2.14.2
+│   ├── naga v30.0.2 (*)
+│   └── naga-types v30.0.2
+│       └── naga v30.0.2 (*)
+├── naga v30.0.2 (*)
+└── naga-types v30.0.2 (*)
+
+heapless v0.7.17 (*)
+
+heapless v0.8.0 (*)
+
+heapless v0.9.4 (*)
+
+heck v0.4.1
+└── enum-as-inner v0.5.1 (proc-macro) (*)
+
+heck v0.5.0
+└── enum-as-inner v0.6.1 (proc-macro) (*)
+
+indexmap v2.14.2 (*)
+
+indexmap v2.14.2 (*)
+
+itertools v0.11.0
+├── generic-btree v0.10.8 (*)
+└── serde_columnar v0.3.14 (*)
+
+itertools v0.12.1
+└── loro-internal v1.18.0 (*)
+
+itertools v0.15.0
+└── egui v0.36.2 (*)
+
+log v0.4.35
+└── naga v30.0.2 (*)
+[build-dependencies]
+└── vello_shaders v0.12.0 (*)
+
+log v0.4.35
+├── arboard v3.7.0 (*)
+├── egui v0.36.2 (*)
+├── egui-wgpu v0.36.2 (*)
+├── egui-winit v0.36.2 (*)
+├── epaint v0.36.2 (*)
+├── gpu-allocator v0.28.0 (*)
+├── naga v30.0.2 (*)
+├── symphonia-bundle-flac v0.6.1 (*)
+├── symphonia-bundle-mp3 v0.6.1 (*)
+├── symphonia-codec-aac v0.6.1 (*)
+├── symphonia-codec-pcm v0.6.1 (*)
+├── symphonia-common v0.6.1 (*)
+├── symphonia-core v0.6.1 (*)
+├── symphonia-format-isomp4 v0.6.1 (*)
+├── symphonia-format-riff v0.6.1 (*)
+├── symphonia-metadata v0.6.1 (*)
+├── tracing-log v0.2.0
+│   └── tracing-subscriber v0.3.23
+│       └── bae-platform v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-platform) (*)
+├── vello v0.12.0 (*)
+├── vello_common v0.1.0 (*)
+├── webbrowser v1.2.7
+│   └── egui-winit v0.36.2 (*)
+├── wgpu v30.0.2 (*)
+├── wgpu-core v30.0.2 (*)
+├── wgpu-hal v30.0.2 (*)
+└── wgpu-types v30.0.2 (*)
+
+miniz_oxide v0.8.9
+├── exr v1.74.3 (*)
+└── png v0.18.1 (*)
+
+miniz_oxide v0.9.1
+└── flate2 v1.1.11
+    ├── png v0.18.1 (*)
+    ├── tiff v0.11.3 (*)
+    └── zip v9.8.0 (*)
+
+naga v30.0.2 (*)
+
+naga v30.0.2 (*)
+
+naga-types v30.0.2 (*)
+
+naga-types v30.0.2 (*)
+
+num-traits v0.2.19
+├── euclid v0.22.14
+│   └── guillotiere v0.7.0
+│       ├── vello_common v0.1.0 (*)
+│       └── vello_encoding v0.12.0 (*)
+├── half v2.7.1 (*)
+├── image v0.25.10 (*)
+├── loro-internal v1.18.0 (*)
+├── moxcms v0.8.1
+│   └── image v0.25.10 (*)
+├── naga v30.0.2 (*)
+├── num v0.4.3
+│   ├── loro-internal v1.18.0 (*)
+│   └── loro-rle v1.6.0
+│       ├── loro-common v1.18.0 (*)
+│       └── loro-internal v1.18.0 (*)
+├── num-bigint v0.4.8
+│   ├── num v0.4.3 (*)
+│   └── num-rational v0.4.2
+│       └── num v0.4.3 (*)
+├── num-complex v0.4.6
+│   ├── num v0.4.3 (*)
+│   └── symphonia-core v0.6.1 (*)
+├── num-integer v0.1.47
+│   ├── num v0.4.3 (*)
+│   ├── num-bigint v0.4.8 (*)
+│   ├── num-iter v0.1.46
+│   │   └── num v0.4.3 (*)
+│   └── num-rational v0.4.2 (*)
+├── num-iter v0.1.46 (*)
+├── num-rational v0.4.2 (*)
+└── ordered-float v5.5.1
+    └── wgpu-hal v30.0.2 (*)
+
+num-traits v0.2.19
+├── half v2.7.1 (*)
+└── naga v30.0.2 (*)
+
+rand_core v0.6.4 (*)
+
+rand_core v0.9.5
+├── imbl v7.0.2
+│   └── loro-internal v1.18.0 (*)
+└── rand_xoshiro v0.7.0
+    └── imbl v7.0.2 (*)
+
+read-fonts v0.41.0
+├── harfrust v0.12.0 (*)
+└── skrifa v0.44.0
+    └── epaint v0.36.2 (*)
+
+read-fonts v0.46.0
+├── fontique v0.13.0 (*)
+├── harfrust v0.15.0 (*)
+└── skrifa v0.49.0
+    ├── bae-text v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-text) (*)
+    ├── parley_engine v0.13.0 (*)
+    ├── vello v0.12.0 (*)
+    └── vello_encoding v0.12.0 (*)
+
+rustc-hash v1.1.0
+├── naga v30.0.2 (*)
+├── naga v30.0.2 (*)
+├── naga-types v30.0.2 (*)
+├── naga-types v30.0.2 (*)
+└── wgpu-core v30.0.2 (*)
+
+rustc-hash v2.1.3
+├── bae-model v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-model) (*)
+├── bae-plugin v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-plugin) (*)
+├── bae-render v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-render) (*)
+├── bae-sync v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-sync) (*)
+├── bae-text v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-text) (*)
+├── bae-vector v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-vector) (*)
+├── generic-btree v0.10.8 (*)
+├── loro v1.18.0 (*)
+├── loro-common v1.18.0 (*)
+├── loro-internal v1.18.0 (*)
+├── loro-kv-store v1.18.0 (*)
+└── type-map v0.5.1
+    └── egui-wgpu v0.36.2 (*)
+
+skrifa v0.44.0 (*)
+
+skrifa v0.49.0 (*)
+
+syn v1.0.109
+└── enum-as-inner v0.5.1 (proc-macro) (*)
+
+syn v2.0.119
+├── darling_core v0.20.11
+│   ├── darling v0.20.11
+│   │   └── serde_columnar_derive v0.3.7 (proc-macro)
+│   │       └── serde_columnar v0.3.14 (*)
+│   └── darling_macro v0.20.11 (proc-macro)
+│       └── darling v0.20.11 (*)
+├── darling_macro v0.20.11 (proc-macro) (*)
+├── enum-as-inner v0.6.1 (proc-macro) (*)
+├── enum_dispatch v0.3.13 (proc-macro)
+│   └── loro-internal v1.18.0 (*)
+├── multiversion-macros v0.8.1 (proc-macro)
+│   └── multiversion v0.8.1
+│       └── exr v1.74.3 (*)
+├── serde_columnar_derive v0.3.7 (proc-macro) (*)
+├── thiserror-impl v1.0.69 (proc-macro)
+│   └── thiserror v1.0.69
+│       ├── loro-common v1.18.0 (*)
+│       ├── loro-internal v1.18.0 (*)
+│       └── serde_columnar v0.3.14 (*)
+├── tracing-attributes v0.1.31 (proc-macro)
+│   └── tracing v0.1.44
+│       ├── bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+│       ├── bae-agent v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-agent) (*)
+│       ├── bae-gpu v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-gpu) (*)
+│       ├── bae-media v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-media) (*)
+│       ├── bae-platform v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-platform) (*)
+│       ├── bae-plugin v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-plugin) (*)
+│       ├── bae-render v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-render) (*)
+│       ├── bae-vector v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-vector) (*)
+│       ├── loro v1.18.0 (*)
+│       ├── loro-internal v1.18.0 (*)
+│       ├── loro-kv-store v1.18.0 (*)
+│       └── winit v0.30.13 (*)
+├── windows-implement v0.60.2 (proc-macro)
+│   └── windows-core v0.62.2
+│       ├── fontique v0.13.0 (*)
+│       ├── wgpu-hal v30.0.2 (*)
+│       ├── windows v0.62.2
+│       │   ├── bae-gpu v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-gpu) (*)
+│       │   ├── fontique v0.13.0 (*)
+│       │   ├── gpu-allocator v0.28.0 (*)
+│       │   └── wgpu-hal v30.0.2 (*)
+│       ├── windows-collections v0.3.2
+│       │   └── windows v0.62.2 (*)
+│       ├── windows-future v0.3.2
+│       │   └── windows v0.62.2 (*)
+│       └── windows-numerics v0.3.1
+│           └── windows v0.62.2 (*)
+├── windows-interface v0.59.3 (proc-macro)
+│   └── windows-core v0.62.2 (*)
+├── zerocopy-derive v0.8.63 (proc-macro)
+│   └── zerocopy v0.8.63
+│       ├── ahash v0.8.12 (*)
+│       ├── half v2.7.1 (*)
+│       ├── half v2.7.1 (*)
+│       └── ppv-lite86 v0.2.21
+│           └── rand_chacha v0.3.1 (*)
+└── zeroize_derive v1.5.0 (proc-macro)
+    └── zeroize v1.9.2
+        └── zip v9.8.0 (*)
+
+syn v3.0.10
+├── bytemuck_derive v1.12.1 (proc-macro)
+│   └── bytemuck v1.25.2
+│       ├── bae-media v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-media) (*)
+│       ├── bae-render v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-render) (*)
+│       ├── color v0.3.3
+│       │   └── peniko v0.6.1 (*)
+│       ├── ecolor v0.36.2
+│       │   └── epaint v0.36.2 (*)
+│       ├── egui-wgpu v0.36.2 (*)
+│       ├── egui-winit v0.36.2 (*)
+│       ├── emath v0.36.2
+│       │   ├── ecolor v0.36.2 (*)
+│       │   ├── egui v0.36.2 (*)
+│       │   └── epaint v0.36.2 (*)
+│       ├── epaint v0.36.2 (*)
+│       ├── font-types v0.12.7
+│       │   ├── epaint v0.36.2 (*)
+│       │   ├── read-fonts v0.41.0 (*)
+│       │   └── read-fonts v0.46.0 (*)
+│       ├── half v2.7.1 (*)
+│       ├── harfrust v0.12.0 (*)
+│       ├── harfrust v0.15.0 (*)
+│       ├── image v0.25.10 (*)
+│       ├── peniko v0.6.1 (*)
+│       ├── read-fonts v0.41.0 (*)
+│       ├── read-fonts v0.46.0 (*)
+│       ├── safe_arch v0.7.4
+│       │   └── wide v0.7.33
+│       │       └── imbl v7.0.2 (*)
+│       ├── skrifa v0.44.0 (*)
+│       ├── skrifa v0.49.0 (*)
+│       ├── symphonia-core v0.6.1 (*)
+│       ├── vello v0.12.0 (*)
+│       ├── vello_common v0.1.0 (*)
+│       ├── vello_cpu v0.1.0 (*)
+│       ├── vello_encoding v0.12.0 (*)
+│       ├── vello_shaders v0.12.0 (*)
+│       ├── wgpu v30.0.2 (*)
+│       ├── wgpu-core v30.0.2 (*)
+│       ├── wgpu-hal v30.0.2 (*)
+│       ├── wgpu-types v30.0.2 (*)
+│       └── wide v0.7.33 (*)
+├── derive_arbitrary v1.5.0 (proc-macro)
+│   └── arbitrary v1.5.0
+│       └── loro-common v1.18.0 (*)
+├── displaydoc v0.2.7 (proc-macro)
+│   ├── icu_collections v2.3.0
+│   │   ├── icu_normalizer v2.3.0
+│   │   │   ├── idna_adapter v1.2.2
+│   │   │   │   └── idna v1.1.0
+│   │   │   │       └── url v2.5.8
+│   │   │   │           └── webbrowser v1.2.7 (*)
+│   │   │   └── parley_engine v0.13.0 (*)
+│   │   ├── icu_properties v2.3.0
+│   │   │   ├── idna_adapter v1.2.2 (*)
+│   │   │   ├── parley_data v0.13.0
+│   │   │   │   └── parley_engine v0.13.0 (*)
+│   │   │   └── parley_engine v0.13.0 (*)
+│   │   ├── icu_segmenter v2.3.0
+│   │   │   └── parley_engine v0.13.0 (*)
+│   │   └── parley_data v0.13.0 (*)
+│   ├── icu_locale_core v2.4.0
+│   │   ├── icu_locale_fallback v2.3.0
+│   │   │   └── icu_segmenter v2.3.0 (*)
+│   │   ├── icu_properties v2.3.0 (*)
+│   │   ├── icu_provider v2.4.0
+│   │   │   ├── icu_locale_fallback v2.3.0 (*)
+│   │   │   ├── icu_normalizer v2.3.0 (*)
+│   │   │   ├── icu_properties v2.3.0 (*)
+│   │   │   ├── icu_segmenter v2.3.0 (*)
+│   │   │   └── parley_engine v0.13.0 (*)
+│   │   └── parley_engine v0.13.0 (*)
+│   ├── icu_properties v2.3.0 (*)
+│   ├── icu_provider v2.4.0 (*)
+│   ├── tinystr v0.8.5
+│   │   ├── icu_locale_core v2.4.0 (*)
+│   │   └── icu_locale_fallback v2.3.0 (*)
+│   └── zerotrie v0.2.5
+│       ├── icu_properties v2.3.0 (*)
+│       └── icu_provider v2.4.0 (*)
+├── ref-cast-impl v1.0.27 (proc-macro)
+│   └── ref-cast v1.0.27
+│       └── schemars v1.2.3
+│           ├── bae-agent v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-agent) (*)
+│           ├── bae-model v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-model) (*)
+│           ├── bae-motion v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-motion) (*)
+│           ├── bae-package v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-package) (*)
+│           └── bae-sync v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-sync) (*)
+├── schemars_derive v1.2.3 (proc-macro)
+│   └── schemars v1.2.3 (*)
+├── serde_derive v1.0.229 (proc-macro)
+│   └── serde v1.0.229
+│       ├── bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+│       ├── bae-agent v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-agent) (*)
+│       ├── bae-anim v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-anim) (*)
+│       ├── bae-gpu v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-gpu) (*)
+│       ├── bae-media v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-media) (*)
+│       ├── bae-model v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-model) (*)
+│       ├── bae-motion v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-motion) (*)
+│       ├── bae-package v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-package) (*)
+│       ├── bae-platform v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-platform) (*)
+│       ├── bae-plugin v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-plugin) (*)
+│       ├── bae-sync v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-sync) (*)
+│       ├── bae-ui v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-ui) (*)
+│       ├── bae-ui-motion v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-ui-motion) (*)
+│       ├── heapless v0.7.17 (*)
+│       ├── loro-common v1.18.0 (*)
+│       ├── loro-internal v1.18.0 (*)
+│       ├── loro_fractional_index v1.18.0 (*)
+│       ├── naga-types v30.0.2 (*)
+│       ├── postcard v1.1.3 (*)
+│       ├── schemars v1.2.3 (*)
+│       ├── serde_columnar v0.3.14 (*)
+│       ├── smallvec v1.16.6
+│       │   ├── egui v0.36.2 (*)
+│       │   ├── epaint v0.36.2 (*)
+│       │   ├── exr v1.74.3 (*)
+│       │   ├── fontique v0.13.0 (*)
+│       │   ├── harfrust v0.12.0 (*)
+│       │   ├── harfrust v0.15.0 (*)
+│       │   ├── icu_normalizer v2.3.0 (*)
+│       │   ├── icu_segmenter v2.3.0 (*)
+│       │   ├── idna v1.1.0 (*)
+│       │   ├── kurbo v0.13.1 (*)
+│       │   ├── loro-common v1.18.0 (*)
+│       │   ├── loro-internal v1.18.0 (*)
+│       │   ├── loro-rle v1.6.0 (*)
+│       │   ├── parking_lot_core v0.9.12
+│       │   │   └── parking_lot v0.12.5
+│       │   │       ├── bae-agent v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-agent) (*)
+│       │   │       ├── bae-app v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-app) (*)
+│       │   │       ├── bae-gpu v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-gpu) (*)
+│       │   │       ├── bae-media v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-media) (*)
+│       │   │       ├── bae-plugin v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-plugin) (*)
+│       │   │       ├── bae-render v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-render) (*)
+│       │   │       ├── bae-text v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-text) (*)
+│       │   │       ├── bae-vector v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-vector) (*)
+│       │   │       ├── epaint v0.36.2 (*)
+│       │   │       ├── futures-intrusive v0.5.0
+│       │   │       │   └── vello v0.12.0 (*)
+│       │   │       ├── loro-internal v1.18.0 (*)
+│       │   │       ├── quick_cache v0.6.24 (*)
+│       │   │       ├── wgpu v30.0.2 (*)
+│       │   │       ├── wgpu-core v30.0.2 (*)
+│       │   │       └── wgpu-hal v30.0.2 (*)
+│       │   ├── parley v0.13.0 (*)
+│       │   ├── peniko v0.6.1 (*)
+│       │   ├── read-fonts v0.46.0 (*)
+│       │   ├── skrifa v0.49.0 (*)
+│       │   ├── symphonia-core v0.6.1 (*)
+│       │   ├── symphonia-metadata v0.6.1 (*)
+│       │   ├── tracing-subscriber v0.3.23 (*)
+│       │   ├── vello_common v0.1.0 (*)
+│       │   ├── vello_encoding v0.12.0 (*)
+│       │   ├── wgpu v30.0.2 (*)
+│       │   └── wgpu-core v30.0.2 (*)
+│       └── wgpu-types v30.0.2 (*)
+├── serde_derive_internals v0.30.0
+│   └── schemars_derive v1.2.3 (proc-macro) (*)
+├── synstructure v0.14.0
+│   ├── yoke-derive v0.8.4 (proc-macro)
+│   │   └── yoke v0.8.4
+│   │       ├── harfrust v0.15.0 (*)
+│   │       ├── icu_collections v2.3.0 (*)
+│   │       ├── icu_provider v2.4.0 (*)
+│   │       ├── read-fonts v0.46.0 (*)
+│   │       ├── skrifa v0.49.0 (*)
+│   │       ├── zerotrie v0.2.5 (*)
+│   │       └── zerovec v0.11.9
+│   │           ├── icu_collections v2.3.0 (*)
+│   │           ├── icu_locale_core v2.4.0 (*)
+│   │           ├── icu_locale_fallback v2.3.0 (*)
+│   │           ├── icu_normalizer v2.3.0 (*)
+│   │           ├── icu_properties v2.3.0 (*)
+│   │           ├── icu_provider v2.4.0 (*)
+│   │           ├── icu_segmenter v2.3.0 (*)
+│   │           ├── potential_utf v0.1.6
+│   │           │   ├── icu_collections v2.3.0 (*)
+│   │           │   ├── icu_locale_fallback v2.3.0 (*)
+│   │           │   └── icu_segmenter v2.3.0 (*)
+│   │           └── tinystr v0.8.5 (*)
+│   └── zerofrom-derive v0.1.8 (proc-macro)
+│       └── zerofrom v0.1.8
+│           ├── icu_collections v2.3.0 (*)
+│           ├── icu_provider v2.4.0 (*)
+│           ├── yoke v0.8.4 (*)
+│           ├── zerotrie v0.2.5 (*)
+│           └── zerovec v0.11.9 (*)
+├── thiserror-impl v2.0.21 (proc-macro)
+│   ├── thiserror v2.0.21
+│   │   ├── naga v30.0.2 (*)
+│   │   └── naga-types v30.0.2 (*)
+│   │   [build-dependencies]
+│   │   └── vello_shaders v0.12.0 (*)
+│   └── thiserror v2.0.21
+│       ├── bae-agent v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-agent) (*)
+│       ├── bae-anim v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-anim) (*)
+│       ├── bae-app v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-app) (*)
+│       ├── bae-gpu v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-gpu) (*)
+│       ├── bae-media v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-media) (*)
+│       ├── bae-model v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-model) (*)
+│       ├── bae-package v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-package) (*)
+│       ├── bae-platform v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-platform) (*)
+│       ├── bae-plugin v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-plugin) (*)
+│       ├── bae-render v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-render) (*)
+│       ├── bae-sync v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-sync) (*)
+│       ├── bae-ui v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-ui) (*)
+│       ├── cobs v0.3.0
+│       │   └── postcard v1.1.3 (*)
+│       ├── egui-wgpu v0.36.2 (*)
+│       ├── gpu-allocator v0.28.0 (*)
+│       ├── muda v0.21.2 (*)
+│       ├── naga v30.0.2 (*)
+│       ├── naga-types v30.0.2 (*)
+│       ├── vello v0.12.0 (*)
+│       ├── vello_common v0.1.0 (*)
+│       ├── wgpu-core v30.0.2 (*)
+│       └── wgpu-hal v30.0.2 (*)
+├── yoke-derive v0.8.4 (proc-macro) (*)
+├── zerofrom-derive v0.1.8 (proc-macro) (*)
+└── zerovec-derive v0.11.7 (proc-macro)
+    └── zerovec v0.11.9 (*)
+
+thiserror v1.0.69 (*)
+
+thiserror v2.0.21 (*)
+
+thiserror v2.0.21 (*)
+
+thiserror-impl v1.0.69 (proc-macro) (*)
+
+thiserror-impl v2.0.21 (proc-macro) (*)
+
+windows-sys v0.52.0
+└── winit v0.30.13 (*)
+
+windows-sys v0.61.2
+├── anstyle-query v1.1.5
+│   └── anstream v1.0.0
+│       └── clap_builder v4.6.7
+│           └── clap v4.6.8
+│               ├── bae v0.1.0 (E:\05_Orca\betterAfterEffect\dev\apps\bae)
+│               ├── bae-platform v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-platform) (*)
+│               ├── bae-plugin v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-plugin) (*)
+│               └── bae-render v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-render) (*)
+├── anstyle-wincon v3.0.11
+│   └── anstream v1.0.0 (*)
+├── arboard v3.7.0 (*)
+├── bae-platform v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-platform) (*)
+├── dirs-sys v0.5.0
+│   └── directories v6.0.0
+│       └── bae-platform v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-platform) (*)
+├── muda v0.21.2 (*)
+├── nu-ansi-term v0.50.3
+│   └── tracing-subscriber v0.3.23 (*)
+└── zip v9.8.0 (*)

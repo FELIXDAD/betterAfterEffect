@@ -1,0 +1,9 @@
+cargo :     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.32s
+所在位置 行:6 字符: 1
++ cargo run -p bae-effects --example ae_compare -- prepare 2>&1 | Tee-O ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Finished `d...get(s) in 0.32s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+     Running `target\debug\examples\ae_compare.exe prepare`
+wrote /private/tmp/bae-07-ae/inputs and cases.json

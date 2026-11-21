@@ -146,7 +146,8 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         .as_ref()
         .is_some_and(|l| l.status == bae_platform::settings::LoadStatus::Missing);
     let workbench_state = loaded.map(|l| l.value.0).unwrap_or_default();
-    let document = Document::new(app.resource::<Arc<HistoryLog>>().cloned());
+    let mut document = Document::new(app.resource::<Arc<HistoryLog>>().cloned());
+    document.add_module_commands(&app);
     let mut workspace = Workspace::new(&mut app, workbench_state);
     workspace.set_extra_commands(document.command_titles());
     if first_run {
@@ -490,6 +491,14 @@ impl Shell {
         let output = view.egui_ctx.run_ui(input, |ui| {
             invocations = workspace.ui(ui, status, document, resources);
         });
+        if let Some(menu) = &mut self.menu {
+            let cx = bae_ui::menu::MenuContext {
+                stage: document.stage(),
+                resources,
+                workspace: workspace.active_workspace(),
+            };
+            menu.sync(workspace.keymap(), &cx);
+        }
         view.egui_state.handle_platform_output_with_event_loop(
             &view.window,
             event_loop,
@@ -683,7 +692,8 @@ impl ApplicationHandler<UserEvent> for Shell {
         match self.create_view(window) {
             Ok(view) => {
                 if self.menu.is_none() {
-                    match menu::AppMenu::new(&self.workspace.workspaces()) {
+                    let contributed = self.workspace.contributed_menus(&self.app);
+                    match menu::AppMenu::new(&self.workspace.workspaces(), &contributed) {
                         Ok(menu) => {
                             menu.attach(&view.window);
                             self.menu = Some(menu);
@@ -743,7 +753,13 @@ impl ApplicationHandler<UserEvent> for Shell {
         match event {
             UserEvent::Repaint { delay } => self.schedule_repaint(delay),
             UserEvent::Menu(event) => {
-                self.dispatch(event_loop, menu::invocation(event.id.as_ref()));
+                let id = event.id.as_ref();
+                let inv = self
+                    .menu
+                    .as_ref()
+                    .and_then(|m| m.contributed_invocation(id))
+                    .unwrap_or_else(|| menu::invocation(id));
+                self.dispatch(event_loop, inv);
             }
             UserEvent::DeviceLost => self.recover_device(event_loop),
         }

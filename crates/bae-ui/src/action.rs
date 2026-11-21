@@ -72,6 +72,30 @@ impl Invocation {
     }
 }
 
+/// Handles actions for a module whichever panel has focus (registered in
+/// `bae_app::Registry<dyn ActionHandler>`, id = module name).
+///
+/// The workbench tries, in order: the focused panel's [`crate::Panel::on_action`],
+/// then these handlers, then the shell's own actions ([`ids`]), then the shell
+/// runs model commands. Among handlers, the ones whose [`ActionHandler::workspace`]
+/// is the active workspace go first, then registration order; two handlers
+/// claiming the same action id are a conflict the workbench logs (and reports in
+/// `Workbench::handler_conflicts`).
+pub trait ActionHandler: Send + Sync + 'static {
+    /// Action ids this handler claims (e.g. `motion.play`).
+    fn actions(&self) -> Vec<String>;
+
+    /// Workspace of the module (it wins conflicts while that workspace is active).
+    fn workspace(&self) -> Option<&str> {
+        None
+    }
+
+    /// Handle `inv` (one of [`ActionHandler::actions`]); `cx` is the focused
+    /// panel's context, or a workbench-level one when no panel has focus. Return
+    /// `true` when handled.
+    fn handle(&self, inv: &Invocation, cx: &mut crate::panel::PanelContext<'_>) -> bool;
+}
+
 /// Command ids handled by the shell itself.
 pub mod ids {
     /// Undo the local author's last step (`Stage::undo`).

@@ -1,0 +1,21 @@
+cargo :     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s
+所在位置 行:7 字符: 1
++ cargo test -p bae-media --test images -- --nocapture *> docs/test-rep ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Finished `t...get(s) in 0.31s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+     Running tests\images.rs (target\debug\build\bae-media/6f5da53f7ab12c8f\out\images-6f5da53f7ab12c8f.exe)
+
+running 8 tests
+test exr_half_premultiplied_linear ... ok
+test jpeg_decodes_to_rgba ... ok
+test format_is_sniffed_not_guessed_from_extension ... ok
+test png_gray16_palette_and_tags ... ok
+test webp_lossless_with_alpha ... ok
+test png_rgba8_straight_alpha ... ok
+test image_sequence_with_gap ... ok
+test tiff_depths_and_alpha_modes ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

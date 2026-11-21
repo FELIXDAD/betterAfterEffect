@@ -1,0 +1,8 @@
+[effect.brightness-contrast]
+name = "亮度和对比度"
+keywords = ["亮度", "对比度", "提亮", "压暗"]
+
+[effect.brightness-contrast.params]
+brightness = "亮度"
+contrast = "对比度"
+use_legacy = "使用旧版（支持 HDR）"
