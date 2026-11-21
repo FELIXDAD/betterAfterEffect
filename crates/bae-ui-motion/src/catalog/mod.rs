@@ -16,14 +16,65 @@
 //! `viewer`, `project`, `panel`. Variants of one action differ by parameters
 //! (`motion.layer.blending_mode {"mode": "multiply"}`).
 
+mod blob;
 mod keys;
+// The menu tables are compiled into tests only; the app reads them from the
+// compressed `catalog.bin` (see `blob`).
+#[cfg(test)]
 mod menu;
+#[cfg(test)]
 mod zh;
 
 pub use keys::{KEYS, MAC_KEYS};
+#[cfg(test)]
 pub use menu::{EFFECT_CATEGORIES, MAC_APP_MENU, MENUS};
+#[cfg(test)]
 pub(crate) use zh::MENU_ZH;
-pub use zh::SAME_IN_CHINESE;
+
+/// The top-level menus in AE's order: `(English title, entries)`.
+pub fn menus() -> &'static [(&'static str, &'static [Node])] {
+    blob::tables().menus
+}
+
+/// The macOS application menu (About, Settings ▸ the Preferences pages,
+/// Services, Hide, Hide Others, Show All, Quit).
+pub fn mac_app_menu() -> &'static [Node] {
+    blob::tables().mac_app_menu
+}
+
+/// AE's effect categories (English, as in AE), in English alphabetical order;
+/// the menu sorts them by their localized title like AE.
+pub fn effect_categories() -> &'static [&'static str] {
+    blob::tables().effect_categories
+}
+
+/// Chinese titles of the menu entries (`bae_ui::i18n` pairs).
+pub fn menu_zh() -> &'static [(&'static str, &'static str)] {
+    blob::tables().zh
+}
+
+/// Menu titles that read the same in Chinese (AE keeps them in English).
+pub const SAME_IN_CHINESE: &[&str] = &[
+    "Adobe Dynamic Link",
+    "Maxon Cinema 4D Exporter...",
+    "3D...",
+    "Shift+F10",
+    "Shift+F11",
+    "Shift+F12",
+    "A",
+    "B",
+    "C",
+    "RGB",
+    "ProEXR...",
+    "RotoBezier",
+    "VR",
+    "HDTV (Rec. 709)",
+    "SDTV NTSC",
+    "SDTV PAL",
+    "Kodak 5218 to Kodak 2383",
+    "Boris FX Mocha",
+    "Cinema 4D",
+];
 
 /// Who implements the command behind an entry (the AE-parity agents, see
 /// `docs/ui/ae-commands.md`).
@@ -123,7 +174,7 @@ pub enum Node {
     Item(Item),
     Separator,
     Submenu(Submenu),
-    /// The effect categories (`EFFECT_CATEGORIES`), each listing its effects;
+    /// The effect categories ([`effect_categories`]), each listing its effects;
     /// filled from the effect registry at run time.
     Effects,
 }
@@ -255,7 +306,7 @@ pub fn walk(
 /// application menu (path `BAE`) included.
 pub fn menu_items() -> Vec<(Vec<&'static str>, &'static Item)> {
     let mut out = Vec::new();
-    let tops = MENUS.iter().copied().chain([("BAE", MAC_APP_MENU)]);
+    let tops = menus().iter().copied().chain([("BAE", mac_app_menu())]);
     for (top, nodes) in tops {
         let mut path = vec![top];
         walk(nodes, &mut path, &mut |p, it| out.push((p.to_vec(), it)));

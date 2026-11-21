@@ -60,7 +60,7 @@ impl AppModule for MotionUiModule {
     fn build(&self, app: &mut AppBuilder) {
         app.add_module(bae_motion::MotionModule);
         bae_ui::i18n::register(i18n::ZH);
-        bae_ui::i18n::register(catalog::MENU_ZH);
+        bae_ui::i18n::register(catalog::menu_zh());
         if app.resource::<SharedSession>().is_none() {
             app.insert_resource(SharedSession::default());
         }

@@ -505,26 +505,3 @@ pub(crate) const MENU_ZH: &[(&str, &str)] = &[
     ("Boris FX Mocha", "Boris FX Mocha"),
     ("Cinema 4D", "Cinema 4D"),
 ];
-
-/// Menu titles that read the same in Chinese (AE keeps them in English).
-pub const SAME_IN_CHINESE: &[&str] = &[
-    "Adobe Dynamic Link",
-    "Maxon Cinema 4D Exporter...",
-    "3D...",
-    "Shift+F10",
-    "Shift+F11",
-    "Shift+F12",
-    "A",
-    "B",
-    "C",
-    "RGB",
-    "ProEXR...",
-    "RotoBezier",
-    "VR",
-    "HDTV (Rec. 709)",
-    "SDTV NTSC",
-    "SDTV PAL",
-    "Kodak 5218 to Kodak 2383",
-    "Boris FX Mocha",
-    "Cinema 4D",
-];

@@ -297,7 +297,7 @@ impl Builder {
                 Node::Effects => {
                     // One submenu per category, sorted by its localized name like
                     // AE; the effects are listed once `motion.effect.apply` exists.
-                    for category in catalog::EFFECT_CATEGORIES {
+                    for category in catalog::effect_categories() {
                         path.push(category);
                         let mut at = levels.to_vec();
                         at.push(pos.sorted());
@@ -372,8 +372,8 @@ pub fn items() -> Vec<(String, MenuItemSpec)> {
         out: Vec::new(),
         ids: HashSet::new(),
     };
-    let app = cfg!(target_os = "macos").then_some((APP_MENU, catalog::MAC_APP_MENU));
-    for (top, nodes) in app.into_iter().chain(catalog::MENUS.iter().copied()) {
+    let app = cfg!(target_os = "macos").then_some((APP_MENU, catalog::mac_app_menu()));
+    for (top, nodes) in app.into_iter().chain(catalog::menus().iter().copied()) {
         let mut path = vec![top];
         b.level(&mut path, &[], nodes);
     }
