@@ -941,13 +941,6 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Opacity", "不透明度"),
     ("Normal", "正常"),
     ("Mixed", "混合"),
-    // Default names of what the shape and Pen tools create ("矩形 1", "蒙版 1").
-    ("Rectangle Path", "矩形路径"),
-    ("Ellipse Path", "椭圆路径"),
-    ("Polystar", "多边星形"),
-    ("Polystar Path", "多边星形路径"),
-    ("Shape", "形状"),
-    ("Mask", "蒙版"),
 ];
 
 #[cfg(test)]

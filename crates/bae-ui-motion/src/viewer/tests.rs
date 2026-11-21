@@ -340,7 +340,7 @@ fn shape_tools_on_other_layers_or_with_tool_creates_mask_make_masks() {
     let r = h.draw(Tool::Rectangle, (100.0, 50.0), (300.0, 150.0));
     let params = one(&r, "mask.create");
     assert_eq!(params["layer"], json!(solid));
-    assert_eq!(params["name"], "Mask 1");
+    assert!(params.get("name").is_none(), "the command names it");
     h.apply(&r);
     let masks = h.children(&solid.child("masks").unwrap());
     assert_eq!(masks.len(), 1);
