@@ -1138,7 +1138,6 @@ fn every_cli_error_is_printed_once_and_names_the_file() {
 }
 
 #[test]
-#[ignore = "issue #111"]
 fn mcp_says_a_missing_project_does_not_exist() {
     // `bae mcp <missing>` (without --create) still says "is not a BAE project
     // (expected a .bae directory or a .baez file)" for a path that does not

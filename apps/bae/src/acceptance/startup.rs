@@ -473,7 +473,6 @@ fn rename(h: &mut Ui, layer: &PrimPath, name: &str) {
 }
 
 #[test]
-#[ignore = "issue #128"]
 fn layers_with_the_same_name_still_have_distinct_control_names() {
     // AE allows two layers with one name; the layer number tells them apart.
     let mut h = gui();
@@ -542,7 +541,6 @@ fn control_names_follow_a_rename() {
 }
 
 #[test]
-#[ignore = "issue #128"]
 fn inputs_have_names_not_only_values() {
     // A field that only exposes its value ("PNG", a path, "0") is read without
     // saying what it is: the Render Queue's Format / Output To / Frames and the
