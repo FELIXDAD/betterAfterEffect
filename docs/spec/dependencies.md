@@ -22,7 +22,7 @@
    - 类型相等断言：我们的 `wgpu::{Instance, Device, Queue, TextureView, TextureFormat, CommandEncoder}` 与 `vello::wgpu::…`、`egui_wgpu::wgpu::…` 是同一类型；`peniko::{Color, Brush, Fill, ImageData}`、`kurbo::{Affine, BezPath, Rect}` 与 `vello::peniko` / `vello::kurbo` / `peniko::kurbo` 里的是同一类型；`fontique::Collection` 与 `parley::fontique::Collection`、`parley::FontData` 与 `peniko::FontData` / `vello::peniko::FontData`、`fontique::Blob<u8>` 与 `peniko::Blob<u8>` 是同一类型。
    - 真实调用的类型检查：在同一个 `&wgpu::Device` 上调用 `vello::Renderer::new` 和 `egui_wgpu::Renderer::new`；vello `render_to_texture` 的输出用 `egui_wgpu::Renderer::register_native_texture` 注册成 `egui::TextureId`（视口路径）；把 `egui::TexturesDelta` / `egui::ClippedPrimitive` 交给 egui-wgpu（证明 egui 与 egui-wgpu 用的是同一个 epaint）；把 parley 排好的字形连同 `run.font()` 直接画进 `vello::Scene`。
    - BAE 从不调用这些函数；唯一会运行的是一个单元测试，只调用其中不需要 GPU 的几个。
-   - 看不到的：skrifa / read-fonts、harfrust、naga、wgpu-hal 的类型不出现在 vello / parley / egui 的公开接口里，它们的重复只能靠下面的 `cargo tree` 发现。
+   - 看不到的：skrifa / read-fonts、harfrust、naga、wgpu-hal 的类型不出现在 vello / parley / egui 的公开接口里，它们的重复只能靠下面的 `cargo tree` 发现。其中字体这一组（skrifa / read-fonts / harfrust）由 CI 的「One font stack in the app」一步检查：`cargo tree -p bae -d` 里出现第二个版本就失败。
 2. **CI：`cargo tree`。** `.github/workflows-pending/ci.yml`（启用后移到 `.github/workflows/`，见该目录的 README）的「One wgpu in the dependency graph」一步在 macOS 和 Windows 上各跑一次：
 
    ```sh
@@ -117,17 +117,17 @@ wgpu v30.0.2
 | wgpu-types | 30.0.2 | `std` | bae-gpu（加 `serde`，用于 `gpu-info --json`）；19、04（只要类型的地方） | 必须与 wgpu 同版本 |
 | vello | 0.12.0 | `wgpu` | dep-probe；04、05 | 最新。要求 wgpu `^30.0.0`、peniko `^0.6.1`、skrifa `^0.49.0` |
 | peniko | 0.6.1 | 默认 | dep-probe；04、05、16 | 最新；= vello 0.12.0 的要求。带入 kurbo `^0.13.1`、color `^0.3.3` |
-| vello_cpu | 0.1.0 | 关默认，只开 `std`、`u8_pipeline` | 05（bae-vector / bae-text 的 `render`：软件适配器上的矢量和文字栅格化） | = egui 0.36.2 的 epaint 已链接的版本（不新增 crate）。WARP 等软件适配器上 Vello 的计算管线会让进程崩溃，05 在那里改用它 |
+| vello_cpu | 0.1.0 | 关默认，只开 `std`、`u8_pipeline` | 05（bae-vector / bae-text 的 `render`：软件适配器上的矢量和文字栅格化） | = egui 0.36.2 的 epaint 已链接的版本（不新增 crate；`vendor/epaint` 没改这一项）。WARP 等软件适配器上 Vello 的计算管线会让进程崩溃，05 在那里改用它 |
 | kurbo | 0.13.1 | 默认 | dep-probe；03、05、13、16 | 最新；= peniko 0.6.1 的要求 |
 | parley | 0.13.0 | `std`、`system` | dep-probe；05 | 最新。经 parley_engine 要求 skrifa `^0.49.0`、harfrust `^0.15.0` |
 | fontique | 0.13.0 | `std`、`system` | dep-probe；05 | = parley 0.13.0 的要求。要求 read-fonts `^0.46.0` |
-| skrifa | 0.49.0 | 默认 | dep-probe；05、16 | 0.50.0 已发布，但 vello 0.12.0 和 parley_engine 0.13.0 都要求 `^0.49.0`（0.50 用 read-fonts 0.47，会多出一份） |
+| skrifa | 0.49.0 | 默认 | dep-probe；05、16 | 0.50.0 已发布，但 vello 0.12.0 和 parley_engine 0.13.0 都要求 `^0.49.0`（0.50 用 read-fonts 0.47，会多出一份）。egui 的 epaint 通过 `vendor/epaint` 补丁也用这一份（见第 7 节） |
 
 ### 界面与窗口
 
 | crate | 版本 | features | 使用方 | 版本原因 |
 |---|---|---|---|---|
-| egui | 0.36.2 | 默认（`default_fonts`） | bae、dep-probe；11、12、13、14、19 | 0.37.0 已发布，但 egui_dock 0.21.1（最新）要求 `^0.36` |
+| egui | 0.36.2 | 默认（`default_fonts`） | bae、dep-probe；11、12、13、14、19 | 0.37.0 已发布，egui_dock 0.22.0（2026-11-20）也已支持 `^0.37`，但 epaint 0.37.0 仍用 skrifa 0.44 / harfrust 0.12，升级不能去掉字体重复。epaint 用根 `Cargo.toml` 的 `[patch.crates-io]` 换成 `vendor/epaint`（0.36.2 + 上游 egui#8874 的字体依赖升级，见 `vendor/epaint/BAE-PATCH.md`）；egui 组升到包含 #8874 的版本时删掉补丁 |
 | egui-wgpu | 0.36.2 | 无默认 | bae、dep-probe | 跟 egui。要求 wgpu `^30.0`、winit `^0.30.13`（可选） |
 | egui-winit | 0.36.2 | `clipboard`、`links` | bae | 跟 egui。要求 winit `^0.30.13`、raw-window-handle `^0.6.2` |
 | egui_dock | 0.21.1 | 默认 | bae；12、13、14 | 最新，要求 egui `^0.36`。`bae-ui`（11）用自己的停靠实现，不用它 |
@@ -236,10 +236,10 @@ ARCHITECTURE 里提到但还没有 pin 的：`psd`（08）。bae-hub 不用 axum
 | vello | 0.12.0 | wgpu `^30.0.0`、peniko `^0.6.1`、skrifa `^0.49.0`、vello_encoding / vello_shaders `^0.12.0` | — |
 | peniko | 0.6.1 | kurbo `^0.13.1`、color `^0.3.3`、linebender_resource_handle `^0.1.1` | vello、vello_encoding `^0.6.1`；vello_common 0.1.0（epaint 0.36.2 → vello_cpu 0.1.0）`^0.6.1` |
 | kurbo | 0.13.1 | — | peniko 0.6.1 `^0.13.1` |
-| skrifa | 0.49.0 | read-fonts `^0.46.0` | vello、vello_encoding、parley_engine 0.13.0 `^0.49.0`；epaint 0.36.2 / 0.37.0 要 `^0.44.0`（另一份，见第 7 节） |
+| skrifa | 0.49.0 | read-fonts `^0.46.0` | vello、vello_encoding、parley_engine 0.13.0 `^0.49.0`；`vendor/epaint` `^0.49.0`（crates.io 上的 epaint 0.36.2 / 0.37.0 要 `^0.44.0`，见第 7 节） |
 | parley | 0.13.0 | fontique `^0.13.0`、parley_engine `^0.13.0`（→ skrifa `^0.49.0`、harfrust `^0.15.0`）、linebender_resource_handle `^0.1.1` | — |
 | fontique | 0.13.0 | read-fonts `^0.46.0`、linebender_resource_handle `^0.1.1`、objc2 `^0.6.5`（Apple）、windows `^0.62.2`（Windows） | parley、parley_engine `^0.13.0` |
-| egui | 0.36.2 | epaint / emath `^0.36.2`（epaint → skrifa `^0.44.0`、harfrust `^0.12.0`、vello_cpu `^0.1.0`） | egui-winit `^0.36.2`、egui_kittest `^0.36.2`、eframe 0.36.2 `^0.36.2`、egui_dock 0.21.1 `^0.36` |
+| egui | 0.36.2 | epaint / emath `^0.36.2`（epaint 用 `vendor/epaint`：skrifa `^0.49.0`、harfrust `^0.15.0`、vello_cpu `^0.1.0`；原版是 skrifa `^0.44.0`、harfrust `^0.12.0`） | egui-winit `^0.36.2`、egui_kittest `^0.36.2`、eframe 0.36.2 `^0.36.2`、egui_dock 0.21.1 `^0.36` |
 | egui-wgpu | 0.36.2 | wgpu `^30.0`、epaint `^0.36.2`、winit `^0.30.13`（可选） | eframe 0.36.2 `^0.36.2` |
 | egui-winit | 0.36.2 | egui `^0.36.2`、winit `^0.30.13`、raw-window-handle `^0.6.2` | eframe 0.36.2 `^0.36.2` |
 | egui_dock | 0.21.1 | egui `^0.36` | —（它是 egui 停在 0.36 的原因） |
@@ -248,32 +248,31 @@ ARCHITECTURE 里提到但还没有 pin 的：`psd`（08）。bae-hub 不用 axum
 
 目前卡住升级的边：
 
-- egui 0.37.0 ← egui_dock 0.21.1 只支持 `^0.36`。
+- egui 0.37.0 ← egui_dock 0.21.1 只支持 `^0.36`（egui_dock 0.22.0 已解开这条边；但 0.37 的 epaint 仍是旧字体栈，升级要等包含 egui#8874 的版本才能去掉 `vendor/epaint`）。
 - skrifa 0.50.0 ← vello 0.12.0、parley 0.13.0 要求 `^0.49.0`。
 - winit 0.31 ← 仍是 beta，egui-winit 0.36 / 0.37 都要求 `^0.30.13`。
 - parking_lot 0.13 ← wgpu-core / wgpu-hal 30 要求 `^0.12.3`。
 
 ## 7. 当前的重复依赖
 
-核对：`cargo tree -p <pkg> -d --edges normal --locked --depth 0`，以及加 `--target x86_64-pc-windows-msvc`。`syn` 2 / 3 两份只出现在过程宏（编译期），不进二进制，下面不再列。
+核对：`cargo tree -p <pkg> -d --edges normal --locked --depth 0`，以及加 `--target x86_64-pc-windows-msvc`（2026-11-20，体积清理 PR 之后）。`syn`、`heck`、`thiserror-impl`、`enum-as-inner` 的多份只出现在过程宏（编译期），不进二进制，下面不再列。
 
-`bae-dep-probe`（相当于将来 app 同时带 vello、parley、egui 时的样子）：
+**字体栈已经只有一份。** egui 0.36.2 原版的 epaint 用 skrifa 0.44 + harfrust 0.12（+ read-fonts 0.41），vello 0.12 / parley 0.13 用 skrifa 0.49 + harfrust 0.15（+ read-fonts 0.46），两套同时进 `bae` 时约多 0.9 MiB。现在 epaint 由 `vendor/epaint` 补丁成后一套（为什么不升 egui、不降 vello/parley，见 `vendor/epaint/BAE-PATCH.md`），CI 的「One font stack in the app」一步防止回退。
 
-| 重复 | 来源 | 影响与处理 |
-|---|---|---|
-| skrifa 0.44.0 / 0.49.0，read-fonts 0.41.0 / 0.46.0，harfrust 0.12.0 / 0.15.0 | egui 的 epaint 0.36.2 自己做文字整形，用 skrifa 0.44 + harfrust 0.12；vello / parley 用 skrifa 0.49 + harfrust 0.15 | 等 05（bae-text）进入 app 后会多一套字体解析代码。egui 0.37.0 的 epaint 仍要求 skrifa `^0.44.0`，升 egui 解决不了。先接受，05 合并时用 `cargo xtask size` 量出实际增量 |
-| miniz_oxide 0.8.9 / 0.9.1 | png 0.18.1 直接依赖 0.8；flate2 用 0.9 | 很小；等 png 升级 |
-| rustc-hash 1.1.0 / 2.1.3 | naga、naga-types、wgpu-core 用 1.1 | 很小；随 wgpu 升级 |
-| hashbrown 0.16.1 / 0.17.1（仅 Windows） | wgpu-hal 的 D3D12 内存分配器 gpu-allocator 0.28 用 0.16 | 很小；随 wgpu 升级 |
-
-`bae` 应用（现在还没有 vello / parley，所以没有上面的字体重复）：
+`bae` 应用：
 
 | 重复 | 来源 | 影响与处理 |
 |---|---|---|
 | objc2 0.5.3 / 0.6.5、objc2-foundation 0.2 / 0.3、objc2-app-kit 0.2 / 0.3、block2 0.5 / 0.6（macOS） | winit 0.30 用 objc2 0.5；wgpu-hal、muda、fontique 用 0.6 | 等 winit 0.31 正式版和对应的 egui-winit |
 | bitflags 1.3.2 / 2.x（macOS） | winit 0.30 → core-graphics 0.23 | 同上 |
-| windows-sys 0.52.0 / 0.61.2（Windows） | winit 0.30 用 0.52；muda 和我们用 0.61 | 同上 |
-| miniz_oxide 0.8 / 0.9、rustc-hash 1.1 / 2.1、hashbrown 0.16 / 0.17（仅 Windows） | muda → png 0.18.1；naga / wgpu-core；gpu-allocator | 同上表 |
+| windows-sys 0.52.0 / 0.61.2（Windows） | winit 0.30.13 用 0.52；muda、egui-winit 和我们用 0.61 | 同上。只是 FFI 声明，LTO 后不占体积 |
+| thiserror 1 / 2、itertools 0.11 / 0.12 / 0.15、heapless 0.7 / 0.8 / 0.9（+ hash32 0.2 / 0.3）、getrandom 0.2 / 0.3 / 0.4、rand_core 0.6 / 0.9 | loro 1.18（loro-internal、generic-btree、serde_columnar、postcard、imbl）；egui 用 itertools 0.15；ahash 用 getrandom 0.3，uuid / zip 用 0.4 | loro、uuid、zip 都已是最新版。多为泛型代码，实际重复很少 |
+| hashbrown 0.16.1 / 0.17.1 | loro-kv-store → quick_cache 0.6；Windows 上还有 wgpu-hal 的 gpu-allocator 0.28 | 很小；随 loro / wgpu 升级 |
+| miniz_oxide 0.8.9 / 0.9.1 | png 0.18.1、exr 1.74 直接用 0.8；png 打开了 flate2 的默认后端（0.9） | flate2 实际走 zlib-rs，0.9 的代码被 LTO 去掉；等 png / exr 升级 |
+| rustc-hash 1.1.0 / 2.1.3 | naga、naga-types、wgpu-core 用 1.1 | 很小；随 wgpu 升级 |
+| constant_time_eq 0.4 / 0.6 | blake3 1.8.7 用 0.4，zip 9.8 用 0.6 | 很小 |
+
+`bae-dep-probe`：只剩 miniz_oxide、rustc-hash 和（Windows）hashbrown，来源同上。
 
 ## 8. 不放进工作区的东西
 
