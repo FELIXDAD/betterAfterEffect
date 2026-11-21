@@ -876,6 +876,7 @@ dependencies = [
  "bae-model",
  "eframe",
  "egui",
+ "fontique",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

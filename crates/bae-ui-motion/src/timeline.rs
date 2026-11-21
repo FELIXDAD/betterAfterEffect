@@ -684,7 +684,7 @@ fn comp_tabs(ui: &Ui, rect: Rect, stage: &Stage, session: &SharedSession) {
 }
 
 fn new_layer_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, session: &SharedSession) {
-    ui.menu_button(tr("New"), |ui| {
+    bae_ui::widgets::menu_button(ui, tr("New"), |ui| {
         let items: [(&str, LayerKind, Option<&str>); 9] = [
             ("Text", LayerKind::Text, None),
             ("Solid", LayerKind::Solid, None),
@@ -714,7 +714,7 @@ fn new_layer_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, session: &SharedSessio
 }
 
 fn keyframe_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, session: &SharedSession) {
-    ui.menu_button(tr("Keyframe Assistant"), |ui| {
+    bae_ui::widgets::menu_button(ui, tr("Keyframe Assistant"), |ui| {
         for (title, id, params) in [
             ("Easy Ease", ids::EASE, json!({"mode": "easy_ease"})),
             ("Easy Ease In", ids::EASE, json!({"mode": "ease_in"})),

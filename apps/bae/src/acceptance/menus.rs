@@ -624,16 +624,12 @@ fn chinese_window_items_and_render_messages() {
     );
 }
 
-/// Painted characters egui's built-in fonts cannot draw (macOS shortcut modifiers
-/// excepted: drawn with SF, see `ui_text`).
+/// Painted characters the UI's system fonts cannot draw.
 fn missing_glyphs(h: &Ui) -> Vec<String> {
     painted_texts(h)
         .into_iter()
         .filter_map(|t| {
-            let missing: Vec<char> = crate::ui_text::missing_from_builtin_fonts(t.chars())
-                .into_iter()
-                .filter(|c| !crate::ui_text::MACOS_MODIFIERS.contains(c))
-                .collect();
+            let missing = crate::ui_text::missing_from_ui_fonts(t.chars());
             (!missing.is_empty()).then(|| format!("{missing:?} in {t:?}"))
         })
         .collect()
@@ -647,9 +643,8 @@ fn open_empty_render_queue() -> Ui {
     h
 }
 
-/// #135: the empty Render Queue's hint named the menu path with `▸`, which egui's
-/// built-in fonts do not have (a box on Windows). Nothing painted may need a glyph
-/// they lack.
+/// #135: the empty Render Queue's hint named the menu path with `▸`, which the UI's
+/// fonts did not have on Windows (a box). Nothing painted may need a glyph they lack.
 #[test]
 fn render_queue_hint_has_no_missing_glyphs() {
     let h = open_empty_render_queue();

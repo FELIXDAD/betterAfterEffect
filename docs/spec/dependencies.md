@@ -87,7 +87,7 @@ wgpu v30.0.2
 | egui-wgpu | `wgpu/default`、`wgpu/webgl`、`fragile-send-sync-non-atomic-wasm`、`macos-window-resize-jitter-fix` | 无；不开 `winit` | 默认值会打开 wgpu 全部后端。BAE 自己管理表面（`bae-gpu`），不用 `egui_wgpu::winit::Painter`；注意 `macos-window-resize-jitter-fix` 只作用于这个 Painter（macOS 缩放窗口时 `presentsWithTransaction` + 3 个 drawable），`bae-gpu` 需要自己实现同样的处理 |
 | egui-winit | `wayland`、`x11`、`winit/default` | `clipboard`、`links`；`apps/bae` 另开 `accesskit` | 只做 macOS / Windows。`accesskit`（读屏、UI 自动化）在 `apps/bae` 打开（#116，2026-11-21）：VoiceOver / 讲述人和 Windows 上的自动化验收读控件标签 |
 | winit | `x11`、`wayland`、`wayland-dlopen`、`wayland-csd-adwaita` | `rwh_06` | 同上，只保留 raw-window-handle 0.6 接口 |
-| egui | 不关 | 默认 `default_fonts` | 内嵌约 1.4 MB 字体（Ubuntu-Light、Hack、两个 emoji 字体）。界面用系统字体（SF / 苹方），以后体积紧张时可以考虑关掉，只留图标字体 |
+| egui | `default_fonts` | 无 | 不内嵌 egui 的 1.4 MB 字体（Ubuntu-Light、Hack、两个 emoji 字体）。界面全部用系统字体：系统界面字体、简体中文字体、符号字体，由 bae-ui `theme::system_ui_fonts` 经 fontique 查找（见 bae-ui 的 `ui_text` 覆盖测试）。测试里 egui_kittest 会打开它，不影响发布产物 |
 | egui_kittest | （无默认） | 无 | 界面测试只用无窗口模式；需要截图对比的 crate 自己开 `wgpu` / `snapshot` |
 | muda | `gtk3` | 无 | Linux 菜单后端，不需要 |
 | rfd | `xdg-portal`、`wayland` | 无 | Linux 对话框后端，不需要；应用只在 macOS / Windows 上依赖它 |
@@ -128,7 +128,7 @@ wgpu v30.0.2
 
 | crate | 版本 | features | 使用方 | 版本原因 |
 |---|---|---|---|---|
-| egui | 0.36.2 | 默认（`default_fonts`） | bae、dep-probe；11、12、13、14、19 | 0.37.0 已发布，egui_dock 0.22.0（2026-11-20）也已支持 `^0.37`，但 epaint 0.37.0 仍用 skrifa 0.44 / harfrust 0.12，升级不能去掉字体重复。epaint 用根 `Cargo.toml` 的 `[patch.crates-io]` 换成 `vendor/epaint`（0.36.2 + 上游 egui#8874 的字体依赖升级，见 `vendor/epaint/BAE-PATCH.md`）；egui 组升到包含 #8874 的版本时删掉补丁 |
+| egui | 0.36.2 | 关默认（不要 `default_fonts`） | bae、dep-probe；11、12、13、14、19 | 0.37.0 已发布，egui_dock 0.22.0（2026-11-20）也已支持 `^0.37`，但 epaint 0.37.0 仍用 skrifa 0.44 / harfrust 0.12，升级不能去掉字体重复。epaint 用根 `Cargo.toml` 的 `[patch.crates-io]` 换成 `vendor/epaint`（0.36.2 + 上游 egui#8874 的字体依赖升级，见 `vendor/epaint/BAE-PATCH.md`）；egui 组升到包含 #8874 的版本时删掉补丁 |
 | egui-wgpu | 0.36.2 | 无默认 | bae、dep-probe | 跟 egui。要求 wgpu `^30.0`、winit `^0.30.13`（可选） |
 | egui-winit | 0.36.2 | `clipboard`、`links` | bae | 跟 egui。要求 winit `^0.30.13`、raw-window-handle `^0.6.2` |
 | egui_dock | 0.21.1 | 默认 | bae；12、13、14 | 最新，要求 egui `^0.36`。`bae-ui`（11）用自己的停靠实现，不用它 |

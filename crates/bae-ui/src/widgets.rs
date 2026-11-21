@@ -365,6 +365,27 @@ pub fn disclosure(ui: &mut Ui, open: &mut bool) -> Response {
     resp
 }
 
+/// Arrow on submenu buttons: `›`, which the system UI fonts have. egui's own `⏵` is only
+/// in egui's bundled fonts, which BAE does not ship.
+pub const SUBMENU_ARROW: &str = "›";
+
+/// [`Ui::menu_button`] with BAE's submenu arrow ([`SUBMENU_ARROW`]): a submenu button
+/// inside a menu, a menu button elsewhere. Use it instead of `ui.menu_button`.
+pub fn menu_button<'a, R>(
+    ui: &mut Ui,
+    title: impl egui::IntoAtoms<'a>,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    use egui::containers::menu;
+    let (response, inner) = if menu::is_in_menu(ui) {
+        menu::SubMenuButton::from_button(egui::Button::new(title).right_text(SUBMENU_ARROW))
+            .ui(ui, add_contents)
+    } else {
+        menu::MenuButton::new(title).ui(ui, add_contents)
+    };
+    egui::InnerResponse::new(inner.map(|i| i.inner), response)
+}
+
 /// A check mark drawn in `rect` (the same shape as [`checkbox`]'s). Used instead of
 /// `✓`, which egui's built-in fonts do not have (#135).
 pub fn paint_check(p: &egui::Painter, rect: Rect, color: Color32) {
