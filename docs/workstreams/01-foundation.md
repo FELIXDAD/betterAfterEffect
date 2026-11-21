@@ -52,7 +52,7 @@
 - [x] xtask：`size`（预算 `tools/size-budget/budget.toml`）、`dist`（macOS .app / Windows zip）、`bench`。
 
 - [x] 0.0.1 前体积清理（PR #89，2026-11-21）：egui 的 epaint 用 `vendor/epaint` 补丁到 vello/parley 的字体栈（skrifa 0.49 / harfrust 0.15），去掉一整套重复字体代码；插件清单和音频标签解析的冷路径 crate 改 `opt-level = "s"`；CI 增加「One font stack in the app」检查。`bae`：macOS 22.60 → 21.65 MiB，Windows 29.09 → 27.98 MiB。B1 和 egui 排版性能不变或更快。
-  - 留给协调人决定：`panic = "abort"` 能再减 Windows 7.1 MiB、macOS 3.2 MiB，但崩溃恢复（`bae-platform` 的 `run_emergency_saves` 用 `catch_unwind`）和 MCP 服务的 tokio 任务隔离依赖 unwind；egui 内置字体（`default_fonts`，1.41 MiB）是 emoji/符号的兜底字体，换成系统字体要 11 决定。windows-sys 0.52 / objc2 0.5 来自 winit 0.30，要等 winit 0.31 正式版。
+  - `panic = "abort"` 能再减 Windows 7.1 MiB、macOS 3.2 MiB，但崩溃恢复（`bae-platform` 的 `run_emergency_saves` 用 `catch_unwind`）和 MCP 服务的 tokio 任务隔离依赖 unwind。协调人决定 0.0.1 不做，0.0.1 之后先设计替代方案再评估（记在 `docs/spec/dependencies.md` 第 9 节）。egui 内置字体（`default_fonts`，1.41 MiB）是 emoji/符号的兜底字体，换成系统字体要 11 决定。windows-sys 0.52 / objc2 0.5 来自 winit 0.30，要等 winit 0.31 正式版。
 
 后续（不阻塞合并）：
 

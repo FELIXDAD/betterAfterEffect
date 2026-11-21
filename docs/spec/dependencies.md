@@ -293,6 +293,7 @@ ARCHITECTURE 里提到但还没有 pin 的：`psd`（08）。bae-hub 不用 axum
 - **macOS 缩放抖动**：egui-wgpu 的 `macos-window-resize-jitter-fix` 只在 `egui_wgpu::winit::Painter` 里生效，BAE 不用这个 Painter。`bae-gpu` 的表面管理需要自己在拖动缩放期间打开 `CAMetalLayer.presentsWithTransaction` 并把帧延迟提到 2（参考 egui-wgpu 0.36.2 `src/winit.rs`）。
 - **读屏（accesskit）**：eframe 示例开了 `accesskit`，`apps/bae` 的 egui-winit 没开。是否开启由 11 决定，开启前跑一次 `cargo xtask size`。
 - **浮动面板的原生多窗口**：见第 10 节。
+- **以后可选：`panic = "abort"`**（0.0.1 之后再评估，协调人 2026-11-21 决定 0.0.1 不做）。可省 Windows 7.1 MiB、macOS 3.2 MiB（PR #89 实测：Windows 27.98 → 20.86 MiB，macOS 21.65 → 18.44 MiB；Windows 省得多，是因为 MSVC 的 unwind 要给每个析构清理生成单独的 funclet）。前提是下面两处依赖 unwind 的地方有了替代方案：`bae-platform` 崩溃处理里用 `catch_unwind` 兜住保存回调（`run_emergency_saves`），以及 Agent / MCP（tokio 任务）、插件的 panic 隔离，防止一个工具调用拖垮整个应用。例如在 panic hook 里自动保存，并给插件和 Agent 设计新的隔离策略。不能只为了体积改。
 
 ## 10. ui/shell（PR #1）迁移说明
 
