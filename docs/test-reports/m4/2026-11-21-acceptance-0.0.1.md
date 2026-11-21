@@ -264,3 +264,15 @@ release 体积：24,072,784 B（+287,248 B，来自 accesskit 适配器），mac
 本机另一个工作区的开发构建也注册了同一个 bundle id，现在是默认应用，所以打开时用 `open -a` 指定了 CI 的应用；测完已经注销测试用的这份应用。
 
 新开 **#131**（小问题）：`bae pack` 在 `--help` 里列出，但没有实现；`package_pack` 打包时丢掉 `project.json` 的 `view` 字段。
+
+### dev `2c94655`（#130）：#124 收尾
+
+#130 去掉 ignore 的 3 个测试通过（MCP 的通用 `attr_set` / `prim_delete`、删除锁定子图层的父级、锁定后取消选中）。又补了 6 个用例：
+
+- **MCP 的每个入口**：`attr_set`、`attr_set_many`、`attr_clear`、`attr_set_expression`、`attr_set_at`、`prim_rename`、`prim_move`、`prim_create`（在锁定图层下建子 prim）、`prim_delete`、`layer_delete`、`layer_shift_time`、`layer_trim`、`layer_set_parent` 都被拒绝，消息里写明图层名（`layer "锁定 层" is locked; unlock it first`）。读取、移动别的图层越过它、复制它、改别的图层都可以。
+- **批量命令**：`command_batch` 里只要有一步碰到锁定图层，整批都不生效；“解锁、改值、再锁定”放在一批里可以执行，撤销和重做都是一步。
+- **跨工程层**：用户在 root 层锁定的图层，写自己层的 agent 不能改、不能删，但可以关掉锁定（和 AE 脚本一样）。
+- **history_revert** 回到锁定之前的版本时，会把整个版本连同“未锁定”一起恢复，不会出现“仍然锁定但值被改了”的情况。agent 自己的 `history_undo` 和用户的撤销按历史回放，不受锁定限制（按设计）。
+- **界面**：被拒绝的修改在状态栏有提示，中英文都有（“图层“Solid 1”已锁定，请先解锁。”），下一次修改后清除；被拒绝的修改不产生撤销步骤，工程也不变脏。删除锁定子图层的父级后，撤销会把父级和父子关系都恢复，重做会再删掉。
+
+**#124 已关闭。** Windows 在 `c20770a` 上复测的界面部分也通过了。
