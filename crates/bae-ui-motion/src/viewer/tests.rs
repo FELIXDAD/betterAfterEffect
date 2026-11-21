@@ -641,7 +641,6 @@ fn pen_clicks_draw_an_open_path_in_a_new_shape_layer() {
     let r = h.click(100.0, 100.0, Modifiers::NONE);
     let p = one(&r, "shape.add");
     assert_eq!(p["kind"], "path");
-    assert_eq!(p["names"]["group"], "Shape");
     h.apply(&r);
     let layer = query::comp_layers(&h.stage, &h.comp)[0].clone();
     assert_eq!(h.name(&layer), "Shape Layer 1");

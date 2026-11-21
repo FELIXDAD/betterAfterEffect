@@ -419,7 +419,7 @@ fn sync_open_path(
 #[allow(clippy::too_many_arguments)]
 fn start_vertex(
     state: &mut PenState,
-    cx: &mut PanelContext<'_>,
+    cx: &PanelContext<'_>,
     session: &SharedSession,
     info: &CompInfo,
     comp: &EvaluatedComp,
