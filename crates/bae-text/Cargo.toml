@@ -1,0 +1,39 @@
+[package]
+name = "bae-text"
+description = "BAE text: AE text layers laid out with parley (point and paragraph text, CJK fallback), system fonts, Vello rendering"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+# GPU drawing: Vello glyph encoding and the text layer source for bae-render.
+# Layout, fonts and bounds work without it.
+render = ["bae-vector/render", "dep:vello", "dep:vello_cpu", "dep:bae-render", "dep:bae-gpu", "dep:parking_lot"]
+
+[dependencies]
+bae-model.workspace = true
+bae-anim.workspace = true
+bae-vector.workspace = true
+fontique.workspace = true
+kurbo.workspace = true
+parley.workspace = true
+rustc-hash.workspace = true
+skrifa.workspace = true
+
+bae-gpu = { workspace = true, optional = true }
+bae-render = { workspace = true, optional = true }
+parking_lot = { workspace = true, optional = true }
+vello = { workspace = true, optional = true }
+vello_cpu = { workspace = true, optional = true }
+
+[dev-dependencies]
+# GPU tests always run with the `render` feature (`cargo test -p bae-text`).
+bae-text = { path = ".", features = ["render"] }
+bae-gpu.workspace = true
+
+[lints]
+workspace = true
