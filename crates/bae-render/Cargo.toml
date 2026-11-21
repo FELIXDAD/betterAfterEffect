@@ -46,6 +46,10 @@ name = "b1"
 harness = false
 required-features = ["media"]
 
+[[bench]]
+name = "masks"
+harness = false
+
 [[test]]
 name = "ae_golden"
 required-features = ["media"]

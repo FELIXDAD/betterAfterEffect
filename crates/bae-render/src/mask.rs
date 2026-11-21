@@ -49,8 +49,9 @@ pub const FEATHER_TO_SIGMA: f64 = 0.38;
 /// (Skottie and lottie-web use it); to be confirmed against AE.
 pub const MASK_EVEN_ODD: bool = false;
 
-/// Largest raster side in texels (the coverage buffers are scaled down beyond it).
-const MAX_TEXELS: f64 = 8192.0;
+/// Largest raster side in texels (the coverage buffers are scaled down beyond
+/// it); leaves room for the atlas gutters within an 8192-texel page.
+const MAX_TEXELS: f64 = 8000.0;
 
 /// A path edge in raster texels.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -90,8 +91,9 @@ pub struct MaskRaster {
     pub xmax: f32,
     /// Raster region in layer pixels.
     pub rect: IRect,
-    /// Layer pixels per raster texel.
-    pub pixel_scale: f64,
+    /// Layer pixels per raster texel along x and y (reduced separately for
+    /// large feathers).
+    pub pixel_scale: [f64; 2],
     /// Gaussian sigma in raster texels (x, y); 0 = no feather on that axis.
     pub sigma: [f32; 2],
     /// The layer frame in raster texels: coverage outside it is 0 (decal border).
@@ -101,7 +103,7 @@ pub struct MaskRaster {
 impl MaskRaster {
     /// Raster size in texels.
     pub fn texels(&self) -> [u32; 2] {
-        crate::source::texels_for(self.rect, self.pixel_scale)
+        texels_xy(self.rect, self.pixel_scale)
     }
 }
 
@@ -359,17 +361,15 @@ pub fn to_bez_path(path: &BezierPath) -> BezPath {
 /// Plans one mask's raster for an output `region` (layer px) at `pixel_scale`.
 fn plan_raster(m: &RenderMask, region: IRect, pixel_scale: f64, frame: Option<Rect>) -> MaskRaster {
     let sigma = sigma_px(m);
-    let st = sigma.map(|s| s / pixel_scale);
-    // Reduce so that the smaller sigma keeps ≥ 3 texels and the larger ≤ 32.
-    let lo = st[0].min(st[1]);
-    let hi = st[0].max(st[1]);
-    let mut reduce = (lo / 3.0).floor().max((hi / 32.0).ceil()).max(1.0);
+    // Reduce each axis so its sigma keeps 3–6 texels: the blur costs at most
+    // 37 taps per pass whatever the feather, on a buffer a fraction of the size.
+    let mut reduce = sigma.map(|s| (s / pixel_scale / 3.0).floor().max(1.0));
     // Coverage needed: the output region plus the blur's reach, clipped to the
     // layer frame (decal) and to where this mask can be non-zero.
     let support = geometry_support(m);
-    let rect_for = |reduce: f64| {
-        let mx = (3.0 * sigma[0] + 2.0 * pixel_scale * reduce).ceil() as i32;
-        let my = (3.0 * sigma[1] + 2.0 * pixel_scale * reduce).ceil() as i32;
+    let rect_for = |reduce: [f64; 2]| {
+        let mx = (3.0 * sigma[0] + 2.0 * pixel_scale * reduce[0]).ceil() as i32;
+        let my = (3.0 * sigma[1] + 2.0 * pixel_scale * reduce[1]).ceil() as i32;
         let mut rect = IRect::new(
             region.x0 - mx,
             region.y0 - my,
@@ -385,9 +385,14 @@ fn plan_raster(m: &RenderMask, region: IRect, pixel_scale: f64, frame: Option<Re
         rect
     };
     let mut rect = rect_for(reduce);
-    let largest = f64::from(rect.width().max(rect.height()).max(1));
-    if largest / (pixel_scale * reduce) > MAX_TEXELS {
-        reduce = (largest / (MAX_TEXELS * pixel_scale)).ceil();
+    let side = [
+        f64::from(rect.width().max(1)),
+        f64::from(rect.height().max(1)),
+    ];
+    if (0..2).any(|i| side[i] / (pixel_scale * reduce[i]) > MAX_TEXELS) {
+        for i in 0..2 {
+            reduce[i] = reduce[i].max((side[i] / (MAX_TEXELS * pixel_scale)).ceil());
+        }
         rect = rect_for(reduce);
     }
     let empty = rect.is_empty();
@@ -395,17 +400,17 @@ fn plan_raster(m: &RenderMask, region: IRect, pixel_scale: f64, frame: Option<Re
         // Nothing to rasterise: a 1-texel buffer of zero coverage.
         rect = IRect::new(region.x0, region.y0, region.x0 + 1, region.y0 + 1);
     }
-    let ps = pixel_scale * reduce;
-    let [tw, th] = crate::source::texels_for(rect, ps);
+    let ps = [pixel_scale * reduce[0], pixel_scale * reduce[1]];
+    let [tw, th] = texels_xy(rect, ps);
     let (ox, oy) = (f64::from(rect.x0), f64::from(rect.y0));
-    let to_texel = |p: Point| [((p.x - ox) / ps) as f32, ((p.y - oy) / ps) as f32];
+    let to_texel = |p: Point| [((p.x - ox) / ps[0]) as f32, ((p.y - oy) / ps[1]) as f32];
 
     let mut edges = Vec::new();
     let mut xmax = f32::NEG_INFINITY;
     if !empty {
         let path = to_bez_path(&m.shape);
         // Flatten to within 1/20 texel of the raster.
-        let tolerance = (0.05 * ps).max(1e-4);
+        let tolerance = (0.05 * ps[0].min(ps[1])).max(1e-4);
         let mut push = |el_path: &BezPath, stroke: bool| {
             let mut start = Point::ZERO;
             let mut last = Point::ZERO;
@@ -470,10 +475,10 @@ fn plan_raster(m: &RenderMask, region: IRect, pixel_scale: f64, frame: Option<Re
     };
     let clip = frame.map(|f| {
         [
-            ((f.x0 - ox) / ps) as f32,
-            ((f.y0 - oy) / ps) as f32,
-            ((f.x1 - ox) / ps) as f32,
-            ((f.y1 - oy) / ps) as f32,
+            ((f.x0 - ox) / ps[0]) as f32,
+            ((f.y0 - oy) / ps[1]) as f32,
+            ((f.x1 - ox) / ps[0]) as f32,
+            ((f.y1 - oy) / ps[1]) as f32,
         ]
     });
     MaskRaster {
@@ -484,9 +489,18 @@ fn plan_raster(m: &RenderMask, region: IRect, pixel_scale: f64, frame: Option<Re
         xmax: xmax.clamp(-1.0, tw as f32),
         rect,
         pixel_scale: ps,
-        sigma: [(sigma[0] / ps) as f32, (sigma[1] / ps) as f32],
+        sigma: [(sigma[0] / ps[0]) as f32, (sigma[1] / ps[1]) as f32],
         clip,
     }
+}
+
+/// Texels covering `rect` (pixels) at `pixel_scale` pixels per texel per axis.
+pub fn texels_xy(rect: IRect, pixel_scale: [f64; 2]) -> [u32; 2] {
+    let n = |v: u32, s: f64| ((f64::from(v) / s.max(1e-9)) - 1e-9).ceil().max(0.0) as u32;
+    [
+        n(rect.width(), pixel_scale[0]),
+        n(rect.height(), pixel_scale[1]),
+    ]
 }
 
 /// Normalised Gaussian kernel radius (taps each side) for `sigma` texels.
@@ -618,7 +632,7 @@ mod tests {
             Some(Rect::from_size(100.0, 100.0)),
         );
         let r = &node.rasters[0];
-        assert_eq!(r.pixel_scale, 1.0);
+        assert_eq!(r.pixel_scale, [1.0, 1.0]);
         assert_eq!(r.rect.x0, 9, "clipped to the mask's support");
         // Two vertical edges (the horizontal ones add nothing).
         assert_eq!(r.edges.len(), 2);
@@ -634,8 +648,20 @@ mod tests {
             None,
         );
         let r = &node.rasters[0];
-        assert!(r.pixel_scale >= 12.0, "{}", r.pixel_scale);
+        assert_eq!(r.pixel_scale, [12.0, 12.0]);
         assert!(r.sigma[0] >= 3.0 && r.sigma[0] < 6.0, "{:?}", r.sigma);
+
+        // Different feathers reduce each axis on its own.
+        let mut wide = mask(MaskMode::Add, rect_path(10.0, 10.0, 90.0, 90.0));
+        wide.feather = [100.0, 4.0];
+        let masks = [wide];
+        let node = MaskStack::new(&masks).unwrap().plan(
+            &PrimPath::new("/c/l").unwrap(),
+            IRect::new(0, 0, 100, 100),
+            1.0,
+            None,
+        );
+        assert_eq!(node.rasters[0].pixel_scale, [12.0, 1.0]);
     }
 
     #[test]

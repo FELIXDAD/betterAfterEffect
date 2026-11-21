@@ -32,6 +32,8 @@ struct Draw {
     mask_uv: vec4<f32>,
     // Mask value a + b * sample (x, y).
     mask_val: vec4<f32>,
+    // The mask's region in its atlas page (uv min, max).
+    mask_clip: vec4<f32>,
 }
 
 const FLAG_TEXTURE: u32 = 1u;
@@ -167,7 +169,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Layer masks (AE-CMP-038): the combined mask, or one mask's coverage with
     // its value transform, in layer space.
     if (flags & FLAG_MASK) != 0u {
-        let mv = textureSampleLevel(t_mask, s_linear, u * d.mask_uv.xy + d.mask_uv.zw, 0.0).x;
+        let muv = clamp(u * d.mask_uv.xy + d.mask_uv.zw, d.mask_clip.xy, d.mask_clip.zw);
+        let mv = textureSampleLevel(t_mask, s_linear, muv, 0.0).x;
         k = k * clamp(d.mask_val.x + d.mask_val.y * mv, 0.0, 1.0);
     }
     src = src * k;

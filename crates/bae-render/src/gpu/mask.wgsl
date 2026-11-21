@@ -10,6 +10,9 @@
 // vs_full/fs_pass: resolve (fill rule, expansion, layer-frame clip), separable
 // Gaussian feather, and the combine pass (bilinear upsample, inversion and
 // opacity, mode via fixed-function blending).
+//
+// Every mask of a frame shares atlas pages: each raster is a region with a zero
+// gutter, draws are scissored to it, and reads stay inside it (src_rect).
 
 struct Edge {
     p0: vec2<f32>,
@@ -21,7 +24,7 @@ struct Edge {
 }
 
 struct Pass {
-    // Target texel -> source texel: s = t * map.xy + map.zw.
+    // Target texel (in its page) -> source texel (in its region): s = t * map.xy + map.zw.
     map: vec4<f32>,
     // Source texture size (w, h, 1/w, 1/h).
     src: vec4<f32>,
@@ -34,6 +37,8 @@ struct Pass {
     // Source kind (0 winding, 1 coverage texels, 2 coverage bilinear), fill rule
     // (0 nonzero, 1 even-odd), expansion (0 none, 1 grow, 2 shrink), clip on.
     mode: vec4<u32>,
+    // The source region in its atlas page: origin (x, y), size (w, h) in texels.
+    src_rect: vec4<f32>,
 }
 
 @group(0) @binding(0) var<storage, read> edges: array<Edge>;
@@ -129,11 +134,12 @@ fn clip_cov(c: vec4<f32>, cell: vec2<f32>) -> f32 {
     return x * y;
 }
 
+// Coverage of texel `cell` of the source region (0 outside it).
 fn load_cov(pd: Pass, cell: vec2<i32>) -> f32 {
-    if any(cell < vec2<i32>(0)) || any(cell >= vec2<i32>(pd.src.xy)) {
+    if any(cell < vec2<i32>(0)) || any(cell >= vec2<i32>(pd.src_rect.zw)) {
         return 0.0;
     }
-    let t = textureLoad(t_in, cell, 0);
+    let t = textureLoad(t_in, cell + vec2<i32>(pd.src_rect.xy), 0);
     if pd.mode.x != 0u {
         return t.x;
     }
@@ -155,7 +161,9 @@ fn fs_pass(in: FullOut) -> @location(0) vec4<f32> {
     let s = in.pos.xy * pd.map.xy + pd.map.zw;
     var c: f32;
     if pd.mode.x == 2u {
-        c = textureSampleLevel(t_in, s_linear, s * pd.src.zw, 0.0).x;
+        // Half a texel into the region's zero gutter, no further.
+        let sl = clamp(s, vec2<f32>(-0.5), pd.src_rect.zw + 0.5);
+        c = textureSampleLevel(t_in, s_linear, (sl + pd.src_rect.xy) * pd.src.zw, 0.0).x;
     } else {
         let base = vec2<i32>(floor(s));
         let r = i32(pd.blur.w);

@@ -113,8 +113,23 @@ impl TexturePool {
         rect: IRect,
         pixel_scale: f64,
     ) -> Result<GpuImage, RenderError> {
+        let texels = crate::source::texels_for(rect, pixel_scale);
+        self.acquire_texels(device, format, rect, pixel_scale, texels)
+    }
+
+    /// Like [`Self::acquire`] with an explicit texel count (buffers whose x and y
+    /// scales differ, such as reduced mask rasters; `pixel_scale` is then only
+    /// informative).
+    pub fn acquire_texels(
+        &mut self,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        rect: IRect,
+        pixel_scale: f64,
+        texels: [u32; 2],
+    ) -> Result<GpuImage, RenderError> {
         let limit = device.limits().max_texture_dimension_2d;
-        let [w, h] = crate::source::texels_for(rect, pixel_scale);
+        let [w, h] = texels;
         let (w, h) = (w.max(1), h.max(1));
         if w > limit || h > limit {
             return Err(RenderError::TooLarge {

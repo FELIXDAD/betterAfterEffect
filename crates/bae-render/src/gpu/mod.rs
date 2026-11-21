@@ -45,6 +45,8 @@ pub(crate) struct DrawData {
     pub mask_uv: [f32; 4],
     /// Mask value `a + b · sample` (x, y).
     pub mask_val: [f32; 4],
+    /// The mask's region in its atlas page (uv min x, y, max x, y).
+    pub mask_clip: [f32; 4],
 }
 
 impl DrawData {
@@ -480,6 +482,7 @@ pub(crate) struct MaskPassData {
     pub clip: [f32; 4],
     pub value: [f32; 4],
     pub mode: [u32; 4],
+    pub src_rect: [f32; 4],
 }
 
 /// Pipelines of `mask.wgsl`.
@@ -663,10 +666,10 @@ mod tests {
 
     #[test]
     fn draw_record_matches_wgsl_layout() {
-        // 13 vec4s: the WGSL struct stride.
-        assert_eq!(std::mem::size_of::<DrawData>(), 208);
+        // 14 vec4s: the WGSL struct stride.
+        assert_eq!(std::mem::size_of::<DrawData>(), 224);
         assert_eq!(std::mem::size_of::<EdgeData>(), 32);
-        assert_eq!(std::mem::size_of::<MaskPassData>(), 96);
+        assert_eq!(std::mem::size_of::<MaskPassData>(), 112);
     }
 
     #[test]

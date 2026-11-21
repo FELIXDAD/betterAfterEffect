@@ -11,7 +11,6 @@
 //! coverage accumulation, resolve + horizontal feather, vertical feather, and –
 //! with several masks – one accumulator pass merging them with blend states.
 
-use std::ops::Not;
 use std::sync::Arc;
 
 use bae_gpu::{GpuContext, wgpu};
@@ -20,12 +19,10 @@ use glam::{DAffine2, DVec2};
 use crate::blend::BlendMode;
 use crate::error::RenderError;
 use crate::geom::IRect;
-use crate::gpu::{
-    BlendKind, DrawData, EdgeData, MASK_ACCUM_FORMAT, MASK_FORMAT, MaskBlend, MaskPassData,
-    Pipelines, flags,
-};
-use crate::graph::{CompositeNode, LayerOp, MaskNode, Node, NodeKind, OpInput, RenderGraph};
-use crate::mask::{Expansion, MASK_EVEN_ODD, kernel_norm, kernel_radius};
+use crate::gpu::{BlendKind, DrawData, Pipelines, flags};
+use crate::graph::{CompositeNode, LayerOp, Node, NodeKind, OpInput, RenderGraph};
+
+mod masks;
 use crate::pool::TexturePool;
 use crate::source::{EncodeContext, GpuImage, ImageAllocator, ImageAlpha};
 
@@ -136,40 +133,6 @@ pub(crate) fn execute(
         .sum();
     draw_buffer.ensure(device, &pipelines.draws_layout, total_draws as u64);
     let (buffer, draws_group, _) = draw_buffer.buffer.as_ref().expect("ensured");
-    let (mut total_edges, mut total_passes) = (0u64, 0u64);
-    for node in &graph.nodes {
-        if let NodeKind::Mask(m) = &node.kind {
-            total_edges += m.rasters.iter().map(|r| r.edges.len() as u64).sum::<u64>();
-            total_passes += 3 * m.rasters.len() as u64;
-        }
-    }
-    let masks = if total_passes > 0 {
-        let edges = mask_buffers
-            .edges
-            .ensure(
-                device,
-                "bae-render.mask-edges",
-                total_edges * std::mem::size_of::<EdgeData>() as u64,
-            )
-            .clone();
-        let passes = mask_buffers
-            .passes
-            .ensure(
-                device,
-                "bae-render.mask-passes",
-                total_passes * std::mem::size_of::<MaskPassData>() as u64,
-            )
-            .clone();
-        Some(MaskCursor {
-            edges,
-            passes,
-            next_edge: 0,
-            next_pass: 0,
-        })
-    } else {
-        None
-    };
-
     let blendable = format != wgpu::TextureFormat::Rgba32Float
         || gpu.features().contains(wgpu::Features::FLOAT32_BLENDABLE);
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -187,8 +150,10 @@ pub(crate) fn execute(
         blendable,
         draw_calls: 0,
         passes: 0,
-        masks,
+        mask_outs: Vec::new(),
     };
+    // Every mask of the frame at once, in shared atlases (they have no inputs).
+    ctx.mask_outs = masks::encode(&mut ctx, &mut encoder, pool, mask_buffers, graph)?;
 
     for (index, node) in graph.nodes.iter().enumerate() {
         let image = match &node.kind {
@@ -241,7 +206,10 @@ pub(crate) fn execute(
                 };
                 fx.effect.render(&mut ectx, &params, &input, node.rect)?
             }
-            NodeKind::Mask(m) => ctx.mask(&mut encoder, pool, m)?,
+            NodeKind::Mask(_) => ctx.mask_outs[index]
+                .as_ref()
+                .map(|m| m.image.clone())
+                .ok_or_else(|| RenderError::Other("mask not encoded".into()))?,
         };
         outputs[index] = Some(image);
         // Free inputs whose last consumer this was.
@@ -276,15 +244,8 @@ struct ExecCtx<'a> {
     blendable: bool,
     draw_calls: usize,
     passes: usize,
-    masks: Option<MaskCursor>,
-}
-
-/// Where the next mask edges and pass records go in this frame's buffers.
-struct MaskCursor {
-    edges: wgpu::Buffer,
-    passes: wgpu::Buffer,
-    next_edge: u32,
-    next_pass: u32,
+    /// Where each mask node's output lives (by node index).
+    mask_outs: Vec<Option<masks::MaskOut>>,
 }
 
 /// A planned draw of one op.
@@ -342,7 +303,7 @@ impl ExecCtx<'_> {
                 kind = BlendKind::Normal;
                 backdrop = false;
             }
-            let Some(mut data) = plan_op(node, op, outputs, tsize)? else {
+            let Some(mut data) = plan_op(node, op, outputs, &self.mask_outs, tsize)? else {
                 continue;
             };
             let mut fl = data.mode[1];
@@ -566,261 +527,6 @@ impl ExecCtx<'_> {
     }
 }
 
-impl ExecCtx<'_> {
-    /// Encodes a mask node; returns the combined mask, or the single mask's
-    /// coverage (see [`MaskNode::is_single`]).
-    fn mask(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        pool: &mut TexturePool,
-        node: &MaskNode,
-    ) -> Result<GpuImage, RenderError> {
-        let gpu = self.gpu.clone();
-        let device = gpu.device();
-        let mut cursor = self
-            .masks
-            .take()
-            .ok_or_else(|| RenderError::Other("mask buffers missing".into()))?;
-        let rule = u32::from(MASK_EVEN_ODD);
-        let mut finals: Vec<GpuImage> = Vec::with_capacity(node.rasters.len());
-        for raster in &node.rasters {
-            // 1. Exact-area coverage accumulation of the path (R) and the
-            // expansion outline (G).
-            let accum = pool.acquire(device, MASK_ACCUM_FORMAT, raster.rect, raster.pixel_scale)?;
-            let [aw, ah] = accum.texture_size();
-            let edges: Vec<EdgeData> = raster
-                .edges
-                .iter()
-                .map(|e| EdgeData {
-                    p0: e.p0,
-                    p1: e.p1,
-                    xmax: raster.xmax,
-                    chan: u32::from(e.stroke),
-                    size: [aw as f32, ah as f32],
-                })
-                .collect();
-            self.mask_edges(encoder, &mut cursor, &accum.view, &edges);
-
-            // 2. Resolve (fill rule, expansion, layer frame) + horizontal feather.
-            let src = |img: &GpuImage| {
-                let [w, h] = img.texture_size();
-                [w as f32, h as f32, 1.0 / w as f32, 1.0 / h as f32]
-            };
-            let [sx, sy] = raster.sigma;
-            let expansion = match raster.expansion {
-                Expansion::None => 0,
-                Expansion::Grow => 1,
-                Expansion::Shrink => 2,
-            };
-            let resolved = pool.acquire(device, MASK_FORMAT, raster.rect, raster.pixel_scale)?;
-            let record = MaskPassData {
-                map: [1.0, 1.0, 0.0, 0.0],
-                src: src(&accum),
-                blur: [1.0, 0.0, sx, kernel_radius(sx) as f32],
-                clip: raster.clip.unwrap_or_default(),
-                value: [0.0, 1.0, kernel_norm(sx), 0.0],
-                mode: [0, rule, expansion, u32::from(raster.clip.is_some())],
-            };
-            self.mask_passes(
-                encoder,
-                &mut cursor,
-                &resolved.view,
-                0.0,
-                &[(record, MaskBlend::Replace, &accum.view)],
-            );
-            drop(accum);
-
-            // 3. Vertical feather.
-            let out = if kernel_radius(sy) > 0 {
-                let blurred = pool.acquire(device, MASK_FORMAT, raster.rect, raster.pixel_scale)?;
-                let record = MaskPassData {
-                    map: [1.0, 1.0, 0.0, 0.0],
-                    src: src(&resolved),
-                    blur: [0.0, 1.0, sy, kernel_radius(sy) as f32],
-                    value: [0.0, 1.0, kernel_norm(sy), 0.0],
-                    mode: [1, 0, 0, 0],
-                    ..MaskPassData::default()
-                };
-                self.mask_passes(
-                    encoder,
-                    &mut cursor,
-                    &blurred.view,
-                    0.0,
-                    &[(record, MaskBlend::Replace, &resolved.view)],
-                );
-                blurred
-            } else {
-                resolved
-            };
-            finals.push(out);
-        }
-
-        let result = if node.is_single() {
-            finals.pop()
-        } else {
-            // 4. Merge top to bottom into the accumulator (blend state per mode),
-            // upsampling reduced rasters bilinearly.
-            let acc = pool.acquire(device, MASK_FORMAT, node.rect, node.pixel_scale)?;
-            let jobs: Vec<(MaskPassData, MaskBlend, &wgpu::TextureView)> = node
-                .rasters
-                .iter()
-                .zip(&finals)
-                .map(|(raster, img)| {
-                    let [w, h] = img.texture_size();
-                    let s = img.pixel_scale;
-                    (
-                        MaskPassData {
-                            map: [
-                                (acc.pixel_scale / s) as f32,
-                                (acc.pixel_scale / s) as f32,
-                                (f64::from(acc.rect.x0 - img.rect.x0) / s) as f32,
-                                (f64::from(acc.rect.y0 - img.rect.y0) / s) as f32,
-                            ],
-                            src: [w as f32, h as f32, 1.0 / w as f32, 1.0 / h as f32],
-                            value: [raster.value[0], raster.value[1], 1.0, 0.0],
-                            mode: [2, 0, 0, 0],
-                            ..MaskPassData::default()
-                        },
-                        MaskBlend::Mode(raster.mode),
-                        &img.view,
-                    )
-                })
-                .collect();
-            self.mask_passes(encoder, &mut cursor, &acc.view, f64::from(node.init), &jobs);
-            Some(acc)
-        };
-        self.masks = Some(cursor);
-        result.ok_or_else(|| RenderError::Other("mask without rasters".into()))
-    }
-
-    /// Clears `target` and accumulates `edges` into it.
-    fn mask_edges(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        cursor: &mut MaskCursor,
-        target: &wgpu::TextureView,
-        edges: &[EdgeData],
-    ) {
-        let device = self.gpu.device();
-        let first = cursor.next_edge;
-        if !edges.is_empty() {
-            self.gpu.queue().write_buffer(
-                &cursor.edges,
-                u64::from(first) * std::mem::size_of::<EdgeData>() as u64,
-                bytemuck::cast_slice(edges),
-            );
-            cursor.next_edge += edges.len() as u32;
-        }
-        let dummy = self.pipelines.dummy.clone();
-        let group = edges
-            .is_empty()
-            .not()
-            .then(|| self.mask_group(cursor, &dummy));
-        let pipelines = self.pipelines.masks(device);
-        let mut pass = begin_mask_pass(encoder, target, 0.0);
-        self.passes += 1;
-        if let Some(group) = group {
-            pass.set_pipeline(&pipelines.edges);
-            pass.set_bind_group(0, &group, &[]);
-            pass.draw(0..6, first..first + edges.len() as u32);
-            self.draw_calls += 1;
-        }
-    }
-
-    /// One render pass on `target` (cleared to `clear`) drawing a full-screen
-    /// mask pass per job.
-    fn mask_passes(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        cursor: &mut MaskCursor,
-        target: &wgpu::TextureView,
-        clear: f64,
-        jobs: &[(MaskPassData, MaskBlend, &wgpu::TextureView)],
-    ) {
-        let device = self.gpu.device();
-        let first = cursor.next_pass;
-        let records: Vec<MaskPassData> = jobs.iter().map(|j| j.0).collect();
-        self.gpu.queue().write_buffer(
-            &cursor.passes,
-            u64::from(first) * std::mem::size_of::<MaskPassData>() as u64,
-            bytemuck::cast_slice(&records),
-        );
-        cursor.next_pass += jobs.len() as u32;
-        let groups: Vec<wgpu::BindGroup> = jobs
-            .iter()
-            .map(|(_, _, view)| self.mask_group(cursor, view))
-            .collect();
-        let pipelines: Vec<wgpu::RenderPipeline> = jobs
-            .iter()
-            .map(|(_, blend, _)| self.pipelines.masks(device).pass(device, *blend).clone())
-            .collect();
-        let mut pass = begin_mask_pass(encoder, target, clear);
-        self.passes += 1;
-        for (i, (pipeline, group)) in pipelines.iter().zip(&groups).enumerate() {
-            let index = first + i as u32;
-            pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, group, &[]);
-            pass.draw(0..3, index..index + 1);
-            self.draw_calls += 1;
-        }
-    }
-
-    fn mask_group(&mut self, cursor: &MaskCursor, view: &wgpu::TextureView) -> wgpu::BindGroup {
-        let device = self.gpu.device();
-        let pipelines = self.pipelines.masks(device);
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("bae-render.mask"),
-            layout: &pipelines.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: cursor.edges.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: cursor.passes.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::Sampler(&pipelines.sampler),
-                },
-            ],
-        })
-    }
-}
-
-fn begin_mask_pass<'e>(
-    encoder: &'e mut wgpu::CommandEncoder,
-    target: &wgpu::TextureView,
-    clear: f64,
-) -> wgpu::RenderPass<'e> {
-    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label: Some("bae-render.mask"),
-        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-            view: target,
-            depth_slice: None,
-            resolve_target: None,
-            ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(wgpu::Color {
-                    r: clear,
-                    g: 0.0,
-                    b: 0.0,
-                    a: 1.0,
-                }),
-                store: wgpu::StoreOp::Store,
-            },
-        })],
-        depth_stencil_attachment: None,
-        timestamp_writes: None,
-        occlusion_query_set: None,
-        multiview_mask: None,
-    })
-}
-
 /// A composite or fill node's region in space pixels (its `rect` is in texels
 /// of `pixel_scale` pixels; composite scales are whole numbers).
 fn node_pixels(node: &Node) -> IRect {
@@ -858,6 +564,7 @@ fn plan_op(
     node: &Node,
     op: &LayerOp,
     outputs: &[Option<GpuImage>],
+    mask_outs: &[Option<masks::MaskOut>],
     target_size: [u32; 2],
 ) -> Result<Option<DrawData>, RenderError> {
     // Composite texel → … : target texel = comp px / scale − rect origin.
@@ -928,32 +635,38 @@ fn plan_op(
         data.mode[2] = m.mode as u32;
     }
     if let Some(m) = op.mask {
-        let mask = outputs[m.node.index()]
-            .as_ref()
+        let mask = mask_outs
+            .get(m.node.index())
+            .and_then(Option::as_ref)
             .ok_or_else(|| RenderError::Other(format!("mask of {} missing", op.layer)))?;
         // Input texel u → layer pixels: solids are drawn in layer pixels, images
-        // map their texels; then layer pixels → mask uv.
+        // map their texels; then layer pixels → the mask's atlas uv.
         let (in_scale, in_origin) = match &op.input {
-            OpInput::Solid { .. } => (1.0, DVec2::ZERO),
+            OpInput::Solid { .. } => (1.0, [0.0, 0.0]),
             OpInput::Image(id) => {
                 let img = outputs[id.index()]
                     .as_ref()
                     .ok_or_else(|| RenderError::Other(format!("input of {} missing", op.layer)))?;
                 (
                     img.pixel_scale,
-                    DVec2::new(f64::from(img.rect.x0), f64::from(img.rect.y0)),
+                    [f64::from(img.rect.x0), f64::from(img.rect.y0)],
                 )
             }
         };
-        let [mw, mh] = mask.texture_size();
-        let s = mask.pixel_scale;
-        let (sw, sh) = (s * f64::from(mw), s * f64::from(mh));
-        data.mask_uv = [
-            (in_scale / sw) as f32,
-            (in_scale / sh) as f32,
-            ((in_origin.x - f64::from(mask.rect.x0)) / sw) as f32,
-            ((in_origin.y - f64::from(mask.rect.y0)) / sh) as f32,
-        ];
+        let [pw, ph] = mask.image.texture_size();
+        let page = [f64::from(pw), f64::from(ph)];
+        let mut uv = [0.0f32; 4];
+        let mut clip = [0.0f32; 4];
+        for i in 0..2 {
+            uv[i] = (in_scale / (mask.scale[i] * page[i])) as f32;
+            uv[i + 2] = (((in_origin[i] - mask.px_origin[i]) / mask.scale[i] + mask.origin[i])
+                / page[i]) as f32;
+            // Half a texel into the zero gutter around the region, no further.
+            clip[i] = ((mask.origin[i] - 0.5) / page[i]) as f32;
+            clip[i + 2] = ((mask.origin[i] + mask.texels[i] + 0.5) / page[i]) as f32;
+        }
+        data.mask_uv = uv;
+        data.mask_clip = clip;
         data.mask_val = [m.value[0], m.value[1], 0.0, 0.0];
         data.mode[1] |= flags::MASK;
     }

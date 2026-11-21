@@ -640,3 +640,48 @@ fn masked_solid_with_effect_reads_the_masked_pixels() {
     assert_alpha(&img, 20, 40, 0.25, 1, "half-covered edge");
     assert_alpha(&img, 5, 5, 0.0, 0, "outside");
 }
+
+#[test]
+fn many_masked_layers_share_atlases_without_crosstalk() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    let req = RenderRequest::default();
+    // Twelve layers side by side, each with its own masks (feathered, inverted,
+    // expanded, several per layer) – all packed into the same atlas pages.
+    let layers: Vec<RenderLayer> = (0..12)
+        .map(|i| {
+            let x = f64::from(i % 4) * 60.0;
+            let y = f64::from(i / 4) * 60.0;
+            let mut l = solid(&format!("l{i}"), [60, 60], [x, y]);
+            let mut a = mask(MaskMode::Add, ellipse_path(5.0, 8.0, 55.0, 52.0));
+            a.feather = [f64::from(i) as f32 * 3.0, f64::from(11 - i) as f32];
+            a.inverted = i % 4 == 1;
+            a.expansion = if i % 3 == 2 { -4.0 } else { 0.0 };
+            l.masks.push(a);
+            if i % 2 == 0 {
+                let mut b = mask(MODES[i as usize % 6], rect_path(20.0, 20.0, 40.0, 40.0));
+                b.opacity = 0.7;
+                l.masks.push(b);
+            }
+            l
+        })
+        .collect();
+    let mut all = RenderComp::new(p("/comps/main"), 240, 180);
+    all.layers = layers.clone();
+    let together = render(&mut r, &all, &req);
+    for (i, layer) in layers.into_iter().enumerate() {
+        let mut alone = RenderComp::new(p("/comps/main"), 240, 180);
+        alone.layers.push(layer);
+        let img = render(&mut r, &alone, &req);
+        let (x0, y0) = ((i % 4) as u32 * 60, (i / 4) as u32 * 60);
+        for y in y0..y0 + 60 {
+            for x in x0..x0 + 60 {
+                let (a, b) = (img.alpha(x, y), together.alpha(x, y));
+                assert!(
+                    a.abs_diff(b) <= 1,
+                    "layer {i} at ({x}, {y}): alone {a}, together {b}"
+                );
+            }
+        }
+    }
+}
