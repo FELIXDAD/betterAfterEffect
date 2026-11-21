@@ -5,12 +5,13 @@
 //! invocation `{"id": argument}` (`workspace.switch:motion`, `window.panel:project`).
 //! Clicks go through the same dispatch as shortcuts and panel requests.
 //!
-//! The shell's own items deliberately carry no native key equivalents (except Quit
-//! on macOS): an NSMenu key equivalent would swallow Cmd+Z / Cmd+C before egui sees
-//! them, and the shortcuts switch with the workspace. `bae-ui`'s keymap handles
-//! every shortcut. Items in `Registry<MenuItemSpec>` — the File items
-//! ([`file_items`]) and the menus modules contribute — show the chord the active
-//! keymap binds to their invocation ([`AppMenu::sync`]).
+//! Every item shows the chord the active keymap binds to its invocation
+//! ([`AppMenu::sync`]): items in `Registry<MenuItemSpec>` — the shell's File and
+//! Window items ([`file_items`], [`window_items`]) and the menus modules
+//! contribute — and the shell's fixed items (Undo, Redo, Keyboard Shortcuts,
+//! Exit). The native key equivalent then handles the key; Undo / Redo while a
+//! text field has focus are handed back to the field (`Shell::user_event`), so
+//! Cmd/Ctrl+Z still undoes typing.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -64,6 +65,57 @@ pub fn file_items() -> Vec<(&'static str, MenuItemSpec)> {
     ]
 }
 
+/// The shell's Window ▸ panel items (other modules add theirs, e.g. Render
+/// Queue): the same invocation as the keymap's panel bindings (`toggle`, AE's
+/// checked Window items), so the menu shows Cmd+0, F3 ….
+pub fn window_items() -> Vec<(&'static str, MenuItemSpec)> {
+    [
+        ("shell.window.project", "project", "Project", 10),
+        ("shell.window.composition", "composition", "Composition", 20),
+        ("shell.window.timeline", "timeline", "Timeline", 30),
+        (
+            "shell.window.effect_controls",
+            "effect_controls",
+            "Effect Controls",
+            40,
+        ),
+        ("shell.window.effects", "effects", "Effects & Presets", 50),
+        ("shell.window.preview", "preview", "Preview", 60),
+        ("shell.window.properties", "properties", "Properties", 70),
+        ("shell.window.info", "info", "Info", 80),
+        ("shell.window.history", "history", "History", 90),
+        (
+            "shell.window.agent_activity",
+            "agent_activity",
+            "Agent Activity",
+            100,
+        ),
+        (
+            "shell.window.agent_proposals",
+            "agent_proposals",
+            "Proposals",
+            110,
+        ),
+    ]
+    .into_iter()
+    .map(|(id, panel, title, order)| {
+        (
+            id,
+            MenuItemSpec::new(&["Window"], title, ids::OPEN_PANEL)
+                .params(serde_json::json!({ "id": panel, "toggle": true }))
+                .order(order),
+        )
+    })
+    .collect()
+}
+
+/// A shell item outside the registry whose shortcut follows the keymap.
+struct ShellItem {
+    item: MenuItem,
+    invocation: Invocation,
+    chord: Option<Chord>,
+}
+
 /// A contributed item and the state last pushed to the native menu.
 struct Contributed {
     item: MenuItem,
@@ -80,6 +132,8 @@ pub struct AppMenu {
     undo_state: (Option<String>, Option<String>),
     /// Contributed items by registry id.
     contributed: HashMap<String, Contributed>,
+    /// Undo, Redo, Keyboard Shortcuts, Exit.
+    shell: Vec<ShellItem>,
 }
 
 impl AppMenu {
@@ -89,6 +143,14 @@ impl AppMenu {
     pub fn new(workspaces: &[(String, String)], contributed: &MenuTree) -> muda::Result<Self> {
         let menu = Menu::new();
         let mut items: HashMap<String, Contributed> = HashMap::new();
+        let mut shell: Vec<ShellItem> = Vec::new();
+        let mut keyed = |item: &MenuItem, id: &str| {
+            shell.push(ShellItem {
+                item: item.clone(),
+                invocation: Invocation::new(id),
+                chord: None,
+            });
+        };
         let extra = |title: &str| {
             contributed
                 .menus
@@ -100,15 +162,17 @@ impl AppMenu {
         #[cfg(target_os = "macos")]
         {
             let app = Submenu::new(bae_platform::APP_NAME, true);
+            let shortcuts = MenuItem::with_id(
+                ids::KEYBOARD_SHORTCUTS,
+                tr("Keyboard Shortcuts"),
+                true,
+                None,
+            );
+            keyed(&shortcuts, ids::KEYBOARD_SHORTCUTS);
             app.append_items(&[
                 &PredefinedMenuItem::about(Some(tr("About BAE")), Some(about_metadata())),
                 &PredefinedMenuItem::separator(),
-                &MenuItem::with_id(
-                    ids::KEYBOARD_SHORTCUTS,
-                    tr("Keyboard Shortcuts"),
-                    true,
-                    None,
-                ),
+                &shortcuts,
                 &PredefinedMenuItem::separator(),
                 &PredefinedMenuItem::services(None),
                 &PredefinedMenuItem::separator(),
@@ -139,24 +203,29 @@ impl AppMenu {
             if !file_entries.is_empty() {
                 file.append(&PredefinedMenuItem::separator())?;
             }
-            file.append(&MenuItem::with_id(ids::QUIT, tr("Exit"), true, None))?;
+            let exit = MenuItem::with_id(ids::QUIT, tr("Exit"), true, None);
+            keyed(&exit, ids::QUIT);
+            file.append(&exit)?;
         }
         menu.append(&file)?;
 
         let edit = Submenu::new(tr("Edit"), true);
         let undo = MenuItem::with_id(ids::UNDO, tr("Undo"), false, None);
         let redo = MenuItem::with_id(ids::REDO, tr("Redo"), false, None);
+        keyed(&undo, ids::UNDO);
+        keyed(&redo, ids::REDO);
         edit.append_items(&[&undo, &redo])?;
         #[cfg(not(target_os = "macos"))]
-        edit.append_items(&[
-            &PredefinedMenuItem::separator(),
-            &MenuItem::with_id(
+        {
+            let shortcuts = MenuItem::with_id(
                 ids::KEYBOARD_SHORTCUTS,
                 tr("Keyboard Shortcuts"),
                 true,
                 None,
-            ),
-        ])?;
+            );
+            keyed(&shortcuts, ids::KEYBOARD_SHORTCUTS);
+            edit.append_items(&[&PredefinedMenuItem::separator(), &shortcuts])?;
+        }
         if let Some(entries) = extra("Edit") {
             edit.append(&PredefinedMenuItem::separator())?;
             append_entries(&edit, entries, &mut items)?;
@@ -213,28 +282,8 @@ impl AppMenu {
             &PredefinedMenuItem::fullscreen(Some(tr("Full Screen"))),
             &PredefinedMenuItem::separator(),
         ])?;
-        for (panel, title) in [
-            ("project", "Project"),
-            ("composition", "Composition"),
-            ("timeline", "Timeline"),
-            ("effect_controls", "Effect Controls"),
-            ("effects", "Effects & Presets"),
-            ("preview", "Preview"),
-            ("properties", "Properties"),
-            ("info", "Info"),
-            ("history", "History"),
-            ("agent_activity", "Agent Activity"),
-            ("agent_proposals", "Proposals"),
-        ] {
-            window.append(&MenuItem::with_id(
-                format!("{}:{panel}", ids::OPEN_PANEL),
-                tr(title),
-                true,
-                None,
-            ))?;
-        }
+        // Panels: the registered Window items ([`window_items`] and modules').
         if let Some(entries) = extra("Window") {
-            window.append(&PredefinedMenuItem::separator())?;
             append_entries(&window, entries, &mut items)?;
         }
         menu.append(&window)?;
@@ -258,6 +307,7 @@ impl AppMenu {
             redo,
             undo_state: (None, None),
             contributed: items,
+            shell,
         })
     }
 
@@ -285,6 +335,13 @@ impl AppMenu {
             if chord != c.chord {
                 let _ = c.item.set_accelerator(chord.as_ref().and_then(accelerator));
                 c.chord = chord;
+            }
+        }
+        for s in &mut self.shell {
+            let chord = shell_chord(keymap, &s.invocation);
+            if chord != s.chord {
+                let _ = s.item.set_accelerator(chord.as_ref().and_then(accelerator));
+                s.chord = chord;
             }
         }
     }
@@ -365,6 +422,15 @@ fn append_entries(
         }
     }
     Ok(())
+}
+
+/// The chord a shell item shows: what the keymap binds to its command (plain
+/// typing keys never: the menu would take them from text fields).
+fn shell_chord(keymap: &Keymap, invocation: &Invocation) -> Option<Chord> {
+    keymap
+        .chord_for_invocation(invocation)
+        .filter(|ch| !ch.is_typing_key())
+        .cloned()
 }
 
 /// The native accelerator for a chord (`None` for keys the menu cannot show).
@@ -493,6 +559,29 @@ mod tests {
         let inv = invocation("workspace.switch:review");
         assert_eq!(inv.id, "workspace.switch");
         assert_eq!(inv.id_param(), Some("review"));
+    }
+
+    /// Issue #117: the shell's own items show the keymap's shortcut like the
+    /// contributed ones (Undo Cmd+Z, Redo Cmd+Shift+Z, Keyboard Shortcuts,
+    /// Quit / Exit), and the Window panel items carry the panel bindings.
+    #[test]
+    fn shell_items_show_keymap_shortcuts() {
+        let keymap = bae_ui::presets::ae_keymap();
+        let chord = |id: &str| shell_chord(&keymap, &Invocation::new(id)).map(|c| c.to_string());
+        let parse = |s: &str| Some(Chord::parse(s).unwrap().to_string());
+        assert_eq!(chord(ids::UNDO), parse("Cmd+Z"));
+        assert_eq!(chord(ids::REDO), parse("Cmd+Shift+Z"));
+        assert_eq!(chord(ids::KEYBOARD_SHORTCUTS), parse("Cmd+Alt+Quote"));
+        assert_eq!(chord(ids::QUIT), parse("Cmd+Q"));
+        let window: HashMap<_, _> = window_items().into_iter().collect();
+        let shown = |id: &str| {
+            keymap
+                .chord_for_invocation(&window[id].invocation())
+                .map(|c| c.to_string())
+        };
+        assert_eq!(shown("shell.window.project"), parse("Cmd+0"));
+        assert_eq!(shown("shell.window.effect_controls"), parse("F3"));
+        assert_eq!(shown("shell.window.timeline"), None);
     }
 
     #[test]

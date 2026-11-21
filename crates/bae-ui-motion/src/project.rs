@@ -438,7 +438,7 @@ impl Panel for ProjectPanel {
             cx.open_panel("composition");
         }
         if menu_new_folder {
-            let mut params = json!({"name": common::numbered(stage, target_folder.as_ref().unwrap_or(&PrimPath::root()), "Untitled")});
+            let mut params = json!({"name": common::numbered(stage, &session, target_folder.as_ref().unwrap_or(&PrimPath::root()), "Untitled")});
             if let Some(f) = &target_folder {
                 params["parent"] = json!(f);
             }

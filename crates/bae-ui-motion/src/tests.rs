@@ -165,6 +165,42 @@ fn module_registers_panels_shortcuts_and_commands() {
     assert!(app.resource::<SharedSession>().is_some());
 }
 
+/// Issue #114: two New Composition (or New Solid) in one frame, before either
+/// command ran, get Comp 1 / Comp 2 and Solid 1 / Solid 2, and both are created.
+#[test]
+fn default_names_stay_unique_within_a_frame() {
+    let mut h = Harness::new();
+    let mut viewer = CompositionViewer::new(None);
+    // Two actions in one frame (nothing applied in between), then applied.
+    fn twice(h: &mut Harness, viewer: &mut CompositionViewer, inv: Invocation) -> Vec<String> {
+        let a = h.action(viewer, inv.clone());
+        let b = h.action(viewer, inv);
+        let out = [&a, &b]
+            .iter()
+            .map(|r| r.invocations[0].params["name"].as_str().unwrap().to_owned())
+            .collect();
+        h.apply(a);
+        h.apply(b);
+        out
+    }
+    let comps = twice(
+        &mut h,
+        &mut viewer,
+        Invocation::new(crate::actions::ids::NEW_COMP),
+    );
+    assert_eq!(comps, ["Comp 1", "Comp 2"]);
+    h.frame("composition", &mut viewer, Vec::new());
+    assert_eq!(query::comps(&h.stage).len(), 2);
+    let solid =
+        || Invocation::with_params(crate::actions::ids::NEW_LAYER, json!({"kind": "solid"}));
+    let solids = twice(&mut h, &mut viewer, solid());
+    assert_eq!(solids, ["Solid 1", "Solid 2"]);
+    h.frame("composition", &mut viewer, Vec::new());
+    // Reservations end once the items exist: the next one continues the count.
+    let next = h.action(&mut viewer, solid());
+    assert_eq!(next.invocations[0].params["name"], "Solid 3");
+}
+
 #[test]
 fn new_comp_and_layers_are_selected_once_created() {
     let mut h = Harness::new();
@@ -486,7 +522,10 @@ fn menus_and_global_handler() {
     let tree = build_menus(&app.registry::<MenuItemSpec>().snapshot(), "motion");
     assert!(tree.conflicts.is_empty(), "{:?}", tree.conflicts);
     let tops: Vec<&str> = tree.menus.iter().map(|(t, _)| t.as_str()).collect();
-    assert_eq!(tops, ["Edit", "Composition", "Layer", "Animation"]);
+    assert_eq!(
+        tops,
+        ["Edit", "Composition", "Layer", "Animation", "Window"]
+    );
     let layer = &tree.menus[2].1;
     let MenuEntry::Submenu { title, entries } = &layer[0] else {
         panic!("Layer ▸ New");
@@ -637,17 +676,13 @@ fn timeline_and_project_rename_commit_on_enter_and_click_away() {
     let mut h = Harness::new();
     let (comp, solid, _shape) = h.comp_with_layers();
     let mut tl = TimelinePanel::default();
-    // Enter commits (typed text included).
+    // Enter commits; the field opens with the whole name selected (AE), so
+    // typing replaces it.
     tl.start_rename(solid.clone(), "Bg");
     h.frame("timeline", &mut tl, Vec::new());
     h.frame("timeline", &mut tl, vec![Event::Text("X".into())]);
     let r = h.frame("timeline", &mut tl, vec![key(egui::Key::Enter)]);
-    assert_eq!(
-        renamed_to(&r).as_deref(),
-        Some("BgX"),
-        "{:?}",
-        r.invocations
-    );
+    assert_eq!(renamed_to(&r).as_deref(), Some("X"), "{:?}", r.invocations);
     assert!(
         h.frame("timeline", &mut tl, Vec::new())
             .invocations
