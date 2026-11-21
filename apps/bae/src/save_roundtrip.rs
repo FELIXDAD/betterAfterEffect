@@ -678,4 +678,73 @@ mod ui_flow {
         }
         let _ = (LAYER, POSITION);
     }
+
+    /// The 5090 final acceptance: keys go to the focused widget before the
+    /// motion shortcuts. Space plays with nothing focused; in the Render Queue's
+    /// output field it types a space (paths with spaces) and does not play.
+    #[test]
+    fn space_types_in_text_fields_and_plays_otherwise() {
+        let mut ui = Ui::new();
+        ui.run(
+            "comp.create",
+            json!({"name": "Main", "fps": 30, "duration": 5 * SEC}),
+        );
+        let session = ui
+            .app
+            .resource::<bae_ui_motion::SharedSession>()
+            .unwrap()
+            .clone();
+        session
+            .lock()
+            .open_comp(&bae_model::PrimPath::new(COMP).unwrap());
+        ui.frame(vec![]);
+        ui.frame(vec![]);
+        assert!(!ui.ctx.text_edit_focused());
+        ui.press(Key::Space, Modifiers::NONE);
+        assert!(session.lock().is_playing(), "Space plays");
+        ui.press(Key::Space, Modifiers::NONE);
+        assert!(!session.lock().is_playing());
+
+        // Composition > Add to Render Queue, then Tab to its output field.
+        ui.press(Key::M, Modifiers::COMMAND);
+        let queue = ui
+            .app
+            .resource::<bae_ui_motion::SharedRenderQueue>()
+            .unwrap()
+            .clone();
+        assert_eq!(queue.lock().items().len(), 1);
+        let before = queue.lock().items()[0].output.clone();
+        let mut typed = false;
+        for _ in 0..300 {
+            ui.press(Key::Tab, Modifiers::NONE);
+            if !ui.ctx.text_edit_focused() {
+                continue;
+            }
+            ui.frame(vec![
+                Event::Key {
+                    key: Key::Space,
+                    physical_key: Some(Key::Space),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: Modifiers::NONE,
+                },
+                Event::Text(" ".into()),
+                Event::Text("v2".into()),
+            ]);
+            assert!(
+                !session.lock().is_playing(),
+                "Space in a text field must not play"
+            );
+            if queue.lock().items()[0].output != before {
+                typed = true;
+                break;
+            }
+        }
+        assert!(typed, "Tab reaches the Render Queue output field");
+        assert!(
+            queue.lock().items()[0].output.contains(" v2"),
+            "{}",
+            queue.lock().items()[0].output
+        );
+    }
 }
