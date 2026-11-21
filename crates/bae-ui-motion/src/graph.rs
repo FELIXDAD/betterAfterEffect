@@ -162,6 +162,8 @@ pub(crate) struct GraphEditor {
     focus: Option<(PrimPath, String)>,
     /// Expression being typed in the expression editor.
     expr_buf: Option<(PrimPath, String, String)>,
+    /// The keyframe right-clicked for the context menu.
+    menu_key: Option<KeyRef>,
     /// Sampled graphs by (property, speed graph): reused while the keyframes and
     /// the view stay the same, so idle frames and drags resample only what changed.
     cache: HashMap<RangeKey, CacheEntry>,
@@ -1755,16 +1757,23 @@ impl GraphEditor {
         }
         if resp.secondary_clicked()
             && let Some(pos) = resp.interact_pointer_pos()
-            && let Hit::Key(k) = self.hit(&frame, pos, egui::Modifiers::NONE)
         {
-            let mut s = session.lock();
-            if !s.selected_keys.contains(&k.key) {
-                s.selected_keys = vec![k.key.clone()];
-                self.sel_dims = [(k.key.clone(), k.dim)].into_iter().collect();
+            self.menu_key = None;
+            if let Hit::Key(k) = self.hit(&frame, pos, egui::Modifiers::NONE) {
+                let mut s = session.lock();
+                if !s.selected_keys.contains(&k.key) {
+                    s.selected_keys = vec![k.key.clone()];
+                    self.sel_dims = [(k.key.clone(), k.dim)].into_iter().collect();
+                }
+                self.menu_key = Some(k.key.clone());
             }
         }
-        resp.context_menu(|ui| {
-            crate::timeline::keyframe_menu(ui, cx, session);
+        // Right-click on a keyframe: the keyframe menu; elsewhere the Keyframe
+        // Assistant and Toggle Hold items for the selection.
+        let menu_key = self.menu_key.clone();
+        resp.context_menu(|ui| match &menu_key {
+            Some(k) => crate::timeline::key_menu(ui, cx, session, k),
+            None => crate::timeline::keyframe_menu(ui, cx, session),
         });
 
         // Drag start.
@@ -2693,11 +2702,11 @@ impl GraphEditor {
             None,
             Glyph::EditKeys,
         );
+        let first = session.lock().selected_keys.first().cloned();
         egui::Popup::menu(&resp).show(|ui| {
-            crate::timeline::keyframe_menu(ui, cx, session);
-            if ui.button(tr("Delete")).clicked() {
-                actions::handle(&Invocation::new(ids::DELETE), cx, session);
-                ui.close();
+            // AE: the keyframe context menu for the selected keyframes.
+            if let Some(k) = &first {
+                crate::timeline::key_menu(ui, cx, session, k);
             }
         });
         // Interpolation.

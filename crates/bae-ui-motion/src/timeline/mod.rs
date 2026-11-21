@@ -9,6 +9,7 @@
 //! `layer.reorder`, parenting → `layer.set_parent`. Drags preview locally and run
 //! one command when released.
 
+mod dialogs;
 mod drags;
 mod header;
 mod keys;
@@ -36,10 +37,12 @@ use crate::project::ItemDrag;
 use crate::props::{self, Node};
 use crate::session::{Session, SharedSession};
 
+pub(crate) use dialogs::{InterpolationDialog, KeyDialog, VelocityDialog};
 use header::comp_tabs;
-use keys::paint_key;
-pub(crate) use menus::keyframe_menu;
 use menus::new_layer_menu;
+#[cfg(test)]
+pub(crate) use menus::{Related, rove_state, select_related};
+pub(crate) use menus::{key_menu, keyframe_menu};
 
 const ROW_H: f32 = 19.0;
 const TABS_H: f32 = 22.0;
@@ -112,14 +115,42 @@ struct Row {
 #[derive(Clone, Debug)]
 enum Drag {
     Cti,
-    Keys { origin: f32, keys: Vec<KeyRef> },
-    Move { origin: f32, layers: Vec<PrimPath> },
-    TrimIn { origin: f32, layer: PrimPath },
-    TrimOut { origin: f32, layer: PrimPath },
-    WorkArea { origin: f32, start: bool, end: bool },
-    Marquee { origin: Pos2, additive: bool },
-    PickWhip { layers: Vec<PrimPath>, origin: Pos2 },
-    Reorder { layers: Vec<PrimPath> },
+    /// Selected keyframes; `grabbed` is the one under the pointer; `scale`: Alt was
+    /// held at the start (scale the timing instead of moving).
+    Keys {
+        origin: f32,
+        keys: Vec<KeyRef>,
+        grabbed: KeyRef,
+        scale: bool,
+    },
+    Move {
+        origin: f32,
+        layers: Vec<PrimPath>,
+    },
+    TrimIn {
+        origin: f32,
+        layer: PrimPath,
+    },
+    TrimOut {
+        origin: f32,
+        layer: PrimPath,
+    },
+    WorkArea {
+        origin: f32,
+        start: bool,
+        end: bool,
+    },
+    Marquee {
+        origin: Pos2,
+        additive: bool,
+    },
+    PickWhip {
+        layers: Vec<PrimPath>,
+        origin: Pos2,
+    },
+    Reorder {
+        layers: Vec<PrimPath>,
+    },
 }
 
 #[derive(Default)]
@@ -142,9 +173,14 @@ pub struct TimelinePanel {
     graph: GraphEditor,
     /// This frame shows the Graph Editor.
     graph_mode: bool,
+    /// Where a keyframe drag puts the keyframes this frame.
+    key_plan: Option<keys::KeyPlan>,
     /// Last frame's time axis, for tests.
     #[cfg(test)]
     pub(crate) last_axis: Option<TimeAxis>,
+    /// Where the last frame drew the layer-bar keyframes, for tests.
+    #[cfg(test)]
+    pub(crate) last_keys: Vec<(KeyRef, Pos2)>,
 }
 
 /// Comp time ↔ x in the graph.
@@ -416,6 +452,7 @@ impl Panel for TimelinePanel {
         #[cfg(test)]
         {
             self.last_axis = Some(axis);
+            self.last_keys.clear();
         }
 
         let head = Rect::from_min_max(
@@ -443,6 +480,9 @@ impl Panel for TimelinePanel {
             let s = session.lock();
             self.rows(stage, &info.path, &s)
         };
+        let (pointer_x, shift) =
+            ui.input(|i| (i.pointer.interact_pos().map(|p| p.x), i.modifiers.shift));
+        self.key_plan = self.plan_key_drag(stage, &info, &axis, &rows, now, pointer_x, shift);
         let comp_layers = query::comp_layers(stage, &info.path);
         self.layer_numbers = comp_layers
             .iter()
@@ -516,7 +556,6 @@ impl Panel for TimelinePanel {
             cx,
             &session,
             &info,
-            &axis,
             graph_body,
             &key_rects,
             &layer_rows,
@@ -544,9 +583,14 @@ impl Panel for TimelinePanel {
 
         self.footer(ui, foot, &info, &axis, now, graph_left);
 
+        // Keyframe dialogs (modal; Enter and Esc are theirs).
+        let dialog_open = session.lock().key_dialog.is_some();
+        dialogs::show(ui.ctx(), cx, &session);
+
         // AE: Enter (Return) renames the selected layer (the topmost one when
         // several are selected); not the Enter that just committed a rename.
         if cx.focused
+            && !dialog_open
             && !renaming_before
             && self.rename.is_none()
             && bae_ui::panel_key_pressed(ui, egui::Key::Enter)

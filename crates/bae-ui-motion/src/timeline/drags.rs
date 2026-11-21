@@ -10,7 +10,6 @@ impl TimelinePanel {
         cx: &mut PanelContext<'_>,
         session: &SharedSession,
         info: &CompInfo,
-        axis: &TimeAxis,
         graph_body: Rect,
         key_rects: &[(Rect, KeyRef)],
         layer_rows: &[(Rect, PrimPath)],
@@ -18,24 +17,20 @@ impl TimelinePanel {
     ) {
         let pointer = ui.input(|i| i.pointer.interact_pos());
         let released = ui.input(|i| i.pointer.any_released());
-        let frame = info.frame_duration();
         match self.drag.clone() {
-            Some(Drag::Keys { origin, keys }) => {
+            Some(Drag::Keys { .. }) => {
+                let plan = self.key_plan.clone();
+                if let Some(x) = plan.as_ref().and_then(|p| p.snap_x) {
+                    ui.painter().with_clip_rect(graph_body).vline(
+                        x,
+                        graph_body.y_range(),
+                        Stroke::new(1.0, keys::SNAP),
+                    );
+                }
                 if released {
                     self.drag = None;
-                    let x = pointer.map_or(origin, |p| p.x);
-                    let d = Time((f64::from(x - origin) * axis.per_point()) as i64);
-                    let d = Time((d.0 as f64 / frame.0 as f64).round() as i64 * frame.0);
-                    if d != Time::ZERO {
-                        // Keyframe time offset (stretch-aware) from the first key.
-                        let first = &keys[0];
-                        let ct = query::to_comp_time(cx.stage, &first.path, first.time);
-                        let kd = query::to_key_time(cx.stage, &first.path, ct + d) - first.time;
-                        cx.invoke_with("key.move", json!({"keys": keys, "delta": kd}));
-                        session.lock().selected_keys = keys
-                            .iter()
-                            .map(|k| KeyRef::new(k.path.clone(), k.attr.clone(), k.time + kd))
-                            .collect();
+                    if let Some(plan) = plan {
+                        self.commit_key_drag(cx, session, &plan);
                     }
                 }
             }

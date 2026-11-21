@@ -623,86 +623,10 @@ impl TimelinePanel {
             common::apply_edit(cx, session, path, attr, now, edit);
         }
         // Keyframes (layer bar mode; the Graph Editor draws its own).
-        if self.graph_mode {
-            return;
-        }
-        let graph = Rect::from_min_max(pos2(axis.left, rect.top()), rect.max);
-        let p = ui.painter().with_clip_rect(graph);
-        let selected_keys = session.lock().selected_keys.clone();
-        let pointer_x = ui.input(|i| i.pointer.interact_pos()).map(|p| p.x);
-        let frame = info.frame_duration();
-        for (t, k) in &spec.keyframes {
-            let kr = KeyRef::new(path.clone(), attr, *t);
-            let selected = selected_keys.contains(&kr);
-            let mut ct = query::to_comp_time(stage, path, *t);
-            if let (Some(Drag::Keys { origin, keys }), Some(x)) = (&self.drag, pointer_x)
-                && keys.contains(&kr)
-            {
-                let d = Time((f64::from(x - origin) * axis.per_point()) as i64);
-                ct += Time((d.0 as f64 / frame.0 as f64).round() as i64 * frame.0);
-            }
-            let c = pos2(axis.x(ct), cy);
-            if !graph.expand(6.0).contains(c) {
-                continue;
-            }
-            paint_key(&p, c, k, selected);
-            let hit = Rect::from_center_size(c, vec2(11.0, 13.0));
-            key_rects.push((hit, kr.clone()));
-            // Keyframes of a locked layer cannot be selected or moved (AE).
-            let sense = if query::locked_layer_of(stage, path).is_some() {
-                Sense::hover()
-            } else {
-                Sense::click_and_drag()
-            };
-            let resp = ui
-                .interact(hit, ui.id().with(("key", path.as_str(), attr, t.0)), sense)
-                .labeled_toggle(
-                    egui::WidgetType::Button,
-                    &bae_ui::a11y::context(&[
-                        &prop_name,
-                        tr("Keyframe"),
-                        &common::timecode(info, query::to_comp_time(stage, path, *t)),
-                    ]),
-                    selected,
-                );
-            if resp.clicked() {
-                let mods = ui.input(|i| i.modifiers);
-                let mut s = session.lock();
-                if mods.shift || mods.command {
-                    if let Some(i) = s.selected_keys.iter().position(|x| *x == kr) {
-                        s.selected_keys.remove(i);
-                    } else {
-                        s.selected_keys.push(kr.clone());
-                    }
-                } else {
-                    s.selected_keys = vec![kr.clone()];
-                }
-            }
-            if resp.double_clicked() {
-                session.lock().set_time(info, ct);
-            }
-            if resp.drag_started()
-                && let Some(pos) = resp.interact_pointer_pos()
-            {
-                let mut s = session.lock();
-                if !s.selected_keys.contains(&kr) {
-                    s.selected_keys = vec![kr.clone()];
-                }
-                self.drag = Some(Drag::Keys {
-                    origin: pos.x,
-                    keys: s.selected_keys.clone(),
-                });
-            }
-            resp.context_menu(|ui| {
-                if !session.lock().selected_keys.contains(&kr) {
-                    session.lock().selected_keys = vec![kr.clone()];
-                }
-                keyframe_menu(ui, cx, session);
-                if ui.button(tr("Delete")).clicked() {
-                    actions::handle(&Invocation::new(ids::DELETE), cx, session);
-                    ui.close();
-                }
-            });
+        if !self.graph_mode {
+            self.key_track(
+                ui, cx, session, info, axis, rect, path, attr, &spec, &prop_name, key_rects,
+            );
         }
     }
 

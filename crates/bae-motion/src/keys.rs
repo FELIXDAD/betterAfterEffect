@@ -591,6 +591,14 @@ pub struct KeyEdit {
     pub spatial_in: Option<[f64; 3]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spatial_out: Option<[f64; 3]>,
+    /// Spatial continuous: the motion path's incoming and outgoing tangents stay
+    /// joined (Continuous Bezier).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spatial_continuous: Option<bool>,
+    /// Spatial auto-Bezier: AE computes the tangents from the neighbouring keyframes
+    /// (implies continuous).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spatial_auto_bezier: Option<bool>,
     /// Rove across time (spatial properties; not the first or last keyframe).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub roving: Option<bool>,
@@ -611,6 +619,8 @@ impl KeyEdit {
             auto_bezier: None,
             spatial_in: None,
             spatial_out: None,
+            spatial_continuous: None,
+            spatial_auto_bezier: None,
             roving: None,
         }
     }
@@ -673,6 +683,17 @@ impl KeyEdit {
             k.spatial_out = Some(t);
             k.flags.spatial_auto_bezier = false;
         }
+        if let Some(c) = self.spatial_continuous {
+            k.flags.spatial_continuous = c;
+        }
+        match self.spatial_auto_bezier {
+            Some(true) => {
+                k.flags.spatial_auto_bezier = true;
+                k.flags.spatial_continuous = true;
+            }
+            Some(false) => k.flags.spatial_auto_bezier = false,
+            None => {}
+        }
         if let Some(r) = self.roving {
             k.flags.roving = r;
         }
@@ -689,7 +710,7 @@ impl Command for EditKeys {
     type Output = KeysOutput;
     const ID: &'static str = "key.edit";
     const TITLE: &'static str = "Edit Keyframes";
-    const DESCRIPTION: &'static str = "Change keyframes' times, values, temporal interpolation, ease (speed and influence per dimension), continuity, auto-Bezier, spatial tangents or roving in one undo step (Graph Editor drags, keyframe dialogs). Keyframes moved onto other keyframes replace them. Returns the keyframes' new references, in input order.";
+    const DESCRIPTION: &'static str = "Change keyframes' times, values, temporal interpolation, ease (speed and influence per dimension), continuity, auto-Bezier, spatial tangents, spatial continuity / auto-Bezier or roving in one undo step (Graph Editor drags, keyframe dialogs). Keyframes moved onto other keyframes replace them. Returns the keyframes' new references, in input order.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<KeysOutput, CommandError> {
         ensure_unlocked(tx.stage(), p.edits.iter().map(|e| &e.key.path))?;
