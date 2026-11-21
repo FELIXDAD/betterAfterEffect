@@ -302,6 +302,23 @@ fn layout_shaped_run(
         }
         ctx.prev_cluster = Some(cluster);
 
+        // BAE: a cluster made only of default-ignorable characters (e.g. a lone
+        // U+FE0F) draws nothing, even when the run's font maps it to a visible
+        // glyph that the shaper keeps (see BAE-PATCH.md). One zero-width glyph
+        // for the first character; continuation glyphs cover the rest.
+        if super::font::invisible_char(chr)
+            && cluster_is_invisible(run_text, cluster, glyph_buffer.glyph_infos())
+        {
+            if is_new_cluster {
+                let physical_x = paragraph.cursor_x_px.round() as i32;
+                paragraph
+                    .glyphs
+                    .push(ctx.glyph(chr, physical_x, 0.0, face_metrics, UvRect::default()));
+                cluster_glyph_count += 1;
+            }
+            continue;
+        }
+
         let glyph = if glyph_id == skrifa::GlyphId::NOTDEF {
             // The shaper couldn't map this character. Drop combining marks
             // (Unicode category M) and duplicate NOTDEF glyphs within the same
@@ -391,6 +408,21 @@ fn layout_shaped_run(
             face_metrics,
         );
     }
+}
+
+/// BAE: whether every character of the cluster starting at byte `cluster` of
+/// `run_text` is invisible. Only called for clusters that start with an
+/// invisible character, which are rare.
+fn cluster_is_invisible(run_text: &str, cluster: u32, infos: &[harfrust::GlyphInfo]) -> bool {
+    let end = infos
+        .iter()
+        .map(|info| info.cluster)
+        .filter(|&c| c > cluster)
+        .min()
+        .map_or(run_text.len(), |c| c as usize);
+    run_text
+        .get(cluster as usize..end)
+        .is_some_and(|text| text.chars().all(super::font::invisible_char))
 }
 
 /// Emit zero-width continuation glyphs when a cluster has more characters than

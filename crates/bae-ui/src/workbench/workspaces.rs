@@ -220,13 +220,13 @@ impl Workbench {
                     ui.label(label);
                     ui.horizontal(|ui| {
                         if ui
-                            .add_enabled(i > 0, egui::Button::new("⏶").small())
+                            .add_enabled(i > 0, egui::Button::new("↑").small())
                             .clicked()
                         {
                             self.move_workspace(id, -1);
                         }
                         if ui
-                            .add_enabled(i + 1 < count, egui::Button::new("⏷").small())
+                            .add_enabled(i + 1 < count, egui::Button::new("↓").small())
                             .clicked()
                         {
                             self.move_workspace(id, 1);
