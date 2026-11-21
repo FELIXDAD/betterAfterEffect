@@ -850,3 +850,109 @@ fn deleting_the_parent_of_a_locked_layer_is_not_silent() {
         "dangling parent on the locked child"
     );
 }
+
+// ---- Retest of #124 (dev 2c94655): refusals in the app ----
+
+/// A panel asks to edit a locked layer (as a value scrub or keyframe click
+/// would): refused, explained in the status bar, no undo step, not dirty; the
+/// next change clears the notice.
+#[test]
+fn a_refused_edit_is_explained_in_the_status_bar() {
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid", "motion.layer.new.null"]);
+    let solid = h.state().layers()[1].clone();
+    lock(&mut h, &solid);
+    let undo_before = h.state().doc.undo_state();
+    let export_before = bae_model::export_flattened_json(h.state().stage());
+    h.state_mut().invoke(Invocation::with_params(
+        "attr.set_at",
+        serde_json::json!({"path": solid, "attr": "transform:position", "time": 0,
+                           "value": {"type": "vec3", "value": [1.0, 2.0, 0.0]}}),
+    ));
+    settle(&mut h);
+    let notice = "Layer “Solid 1” is locked. Unlock it first.";
+    assert!(
+        find_text(&h, notice).is_some(),
+        "no status bar notice: {:?}",
+        painted_texts(&h)
+    );
+    assert_eq!(
+        h.state().doc.undo_state(),
+        undo_before,
+        "a refused edit became an undo step"
+    );
+    assert_eq!(
+        bae_model::export_flattened_json(h.state().stage()),
+        export_before
+    );
+    // A successful change clears it.
+    key(&mut h, Modifiers::COMMAND, Key::Y);
+    assert!(
+        find_text(&h, notice).is_none(),
+        "the notice stayed after a change"
+    );
+}
+
+#[test]
+fn the_lock_notice_is_chinese_in_the_chinese_ui() {
+    if !in_child(
+        "acceptance::layers::the_lock_notice_is_chinese_in_the_chinese_ui",
+        &[("BAE_LANG", "zh")],
+    ) {
+        return;
+    }
+    crate::i18n::init_from_env();
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let solid = h.state().layers()[0].clone();
+    lock(&mut h, &solid);
+    h.state_mut().invoke(Invocation::with_params(
+        "layer.delete",
+        serde_json::json!({"layers": [solid]}),
+    ));
+    settle(&mut h);
+    let name = h.state().name(&solid);
+    let notice = format!("图层“{name}”已锁定，请先解锁。");
+    assert!(
+        find_text(&h, &notice).is_some(),
+        "no Chinese notice {notice:?}: {:?}",
+        painted_texts(&h)
+    );
+    assert!(h.state().stage().prim(&solid).is_some());
+}
+
+#[test]
+fn undoing_a_parent_delete_reparents_the_locked_child() {
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.null", "motion.layer.new.solid"]);
+    let [child, parent]: [PrimPath; 2] = h.state().layers().try_into().unwrap();
+    assert_eq!(set_parent(&mut h, &child, Some(&parent)), "changed");
+    lock(&mut h, &child);
+    let parent_before = parent_of(&h, &child);
+    assert!(parent_before.is_some());
+    let head = find_text(&h, "Layer Name").unwrap();
+    click_at(
+        &mut h,
+        egui::pos2(head.left() + 800.0, head.bottom() + 150.0),
+    );
+    h.state().session().lock().selected_layers = vec![parent.clone()];
+    key(&mut h, Modifiers::NONE, Key::Delete);
+    assert!(h.state().stage().prim(&parent).is_none());
+    assert_eq!(parent_of(&h, &child), None);
+    // One undo brings the parent back and the locked child parented again.
+    key(&mut h, Modifiers::COMMAND, Key::Z);
+    assert!(
+        h.state().stage().prim(&parent).is_some(),
+        "undo did not restore the parent"
+    );
+    assert_eq!(
+        parent_of(&h, &child),
+        parent_before,
+        "undo did not re-parent the locked child"
+    );
+    assert!(is_locked(&h, &child));
+    // Redo deletes it again.
+    key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+    assert!(h.state().stage().prim(&parent).is_none());
+    assert_eq!(parent_of(&h, &child), None);
+}

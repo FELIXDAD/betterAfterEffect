@@ -202,11 +202,19 @@ impl Gui {
             }
             ids::HELP => {}
             _ => {
+                // As `Shell::dispatch`: a failure is explained in the status bar
+                // until the next change.
                 let outcome = match self.doc.run(&inv) {
-                    Outcome::Changed => "changed".to_owned(),
+                    Outcome::Changed => {
+                        self.status.notice.clear();
+                        "changed".to_owned()
+                    }
                     Outcome::Unchanged => "unchanged".to_owned(),
                     Outcome::Unknown => "unknown".to_owned(),
-                    Outcome::Failed(error) => format!("failed: {error}"),
+                    Outcome::Failed(error) => {
+                        self.status.notice = crate::ui::failure_notice(&error);
+                        format!("failed: {error}")
+                    }
                 };
                 self.outcomes.push((inv.id.clone(), outcome));
             }
