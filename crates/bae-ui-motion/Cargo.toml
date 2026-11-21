@@ -17,6 +17,10 @@ bae-model.workspace = true
 bae-anim.workspace = true
 bae-motion.workspace = true
 bae-ui.workspace = true
+bae-gpu.workspace = true
+# The app enables `media`; the viewer itself does not need it.
+bae-render = { workspace = true, default-features = false }
 egui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tracing.workspace = true

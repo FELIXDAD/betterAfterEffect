@@ -15,6 +15,7 @@ use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use serde_json::json;
 
 use crate::common::{self, EvalCache};
+use crate::gpu_preview::GpuPreview;
 use crate::project::ItemDrag;
 use crate::render::{self, Affine, View};
 use crate::session::{Scrub, SharedSession};
@@ -42,6 +43,10 @@ pub struct CompositionViewer {
     title: String,
     /// Zoom step requested by a shortcut, applied in `ui` (needs the panel rect).
     pending_zoom: Option<bool>,
+    gpu: Option<GpuPreview>,
+    gpu_tried: bool,
+    /// The last frame came from the GPU compositor.
+    on_gpu: bool,
 }
 
 impl CompositionViewer {
@@ -314,10 +319,52 @@ impl Panel for CompositionViewer {
             );
         }
         let clip = painter.with_clip_rect(comp_rect.intersect(area));
+        // GPU preview through 04's compositor when the app has a GPU.
+        if self
+            .gpu
+            .as_ref()
+            .is_some_and(|g| !g.is_current(cx.resources))
+        {
+            self.gpu = None;
+            self.gpu_tried = false;
+        }
+        if self.gpu.is_none() && !self.gpu_tried {
+            self.gpu_tried = true;
+            self.gpu = GpuPreview::new(cx.resources);
+        }
+        let resolution = session.lock().resolution;
+        let image = self
+            .gpu
+            .as_mut()
+            .and_then(|g| g.frame(cx.resources, cx.stage, &comp, resolution));
+        self.on_gpu = image.is_some();
+        let mut vector = std::borrow::Cow::Borrowed(&comp);
+        if let Some(img) = image {
+            let r = img.rect;
+            let rect = Rect::from_min_max(
+                view.to_screen(DVec2::new(f64::from(r.x0), f64::from(r.y0))),
+                view.to_screen(DVec2::new(f64::from(r.x1), f64::from(r.y1))),
+            );
+            clip.image(
+                egui::TextureId::User(img.handle),
+                rect,
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
+            // Until 05's text source is registered, text layers are drawn here.
+            let has_text = self.gpu.as_ref().is_some_and(|g| g.has_text);
+            let mut text_only = comp.clone();
+            for l in &mut text_only.layers {
+                if has_text || l.kind != LayerKind::Text {
+                    l.visible = false;
+                }
+            }
+            vector = std::borrow::Cow::Owned(text_only);
+        }
         let mut shapes = Vec::new();
         let to_screen = |p: DVec2| view.to_screen(p);
         render::paint_comp(
-            &comp,
+            &vector,
             &clip,
             &to_screen,
             Affine::new(DMat4::IDENTITY),
@@ -645,9 +692,11 @@ fn bottom_bar(
             .font(theme::body())
             .color(color::ACCENT),
     );
-    ui.label(
-        egui::RichText::new(tr("Preview (simplified)"))
-            .font(theme::small())
-            .color(color::TEXT_DIM),
-    );
+    if !v.on_gpu {
+        ui.label(
+            egui::RichText::new(tr("Preview (simplified)"))
+                .font(theme::small())
+                .color(color::TEXT_DIM),
+        );
+    }
 }

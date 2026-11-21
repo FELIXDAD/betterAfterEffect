@@ -62,6 +62,7 @@
   - bae-motion 新增：`layer.shift_time`、`layer.delete`、`item.delete`、`attr.set_many`，纯色图层可复用已有纯色素材。
   - apps/bae：`main.rs` 加 `MotionUiModule`；`Document::add_module_commands` 从 `Registry<dyn DynCommand>` 收集模块命令；无窗口冒烟测试支持 `BAE_SMOKE_DEMO=1`（演示工程，用于截图）。
 - 0.0.1 范围（新建合成 → 加图层 → 打关键帧 → 预览播放）在 #64 完成。release 体积 +0.49 MiB（相对 58bc1bc）。
+- 2026-11-21（PR C #67）：查看器通过 04 的 GPU 合成器显示（`GpuPreview`：`AnimEvaluator::convert` 接收带拖动覆盖的 `EvaluatedComp` → `render_frame` → `Renderer::output_texture` → 视口注册表 → `TextureId::User`）；图层源来自 `Registry<dyn SourceProvider>`（05 的形状源）；文字源未注册前叠加简化预览画文字；没有 GPU 时退回简化预览。bae-render 加 `Renderer::output_texture`（`read_rgba8` 的转换拆出，不回读）。体积 +32 KiB。
 - 下一步：图表编辑器（值 / 速度图表）、预合成、标记、合成设置对话框、效果和预设 / 字符 / 段落 / 对齐 / 渲染队列面板、接 04 的 GPU 预览、协同显示。
 
 ## 请求（其他工作流在这里留言）
