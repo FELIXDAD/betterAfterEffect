@@ -1,6 +1,6 @@
 # Illustrator 桥接格式（`bae-ai-bridge` 0.1）
 
-负责：16 `interop/ai`。写入方：在 Illustrator 里运行的 [`bae-ai-export.jsx`](bae-ai-export.jsx)。读取方：`crates/bae-interop-ai` 的 `read_bridge` / `read_document`。真机样例见 `crates/bae-interop-ai/tests/data/illustrator/*.bae-ai.json`（Illustrator 30.4 导出）。
+负责：16 `interop/ai`。写入方：在 Illustrator 里运行的 [`bae-ai-export.jsx`](bae-ai-export.jsx)。读取方：`crates/bae-interop-ai` 的 `read_bridge` / `read_document`。真机样例见 `crates/bae-interop-ai/tests/data/illustrator/*.bae-ai.json`（Illustrator 30.4 导出）。Ai 各项功能在 BAE 里的支持程度（桥接导入和 .ai / PDF 读取各自能拿到什么）见 16 的映射文档 [`docs/interop/ai-mapping.md`](../../docs/interop/ai-mapping.md)。
 
 ## 1. 原则
 
