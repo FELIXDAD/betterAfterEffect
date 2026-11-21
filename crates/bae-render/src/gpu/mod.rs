@@ -14,6 +14,84 @@ pub(crate) const MASK_ACCUM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R
 /// Mask coverage and combined mask images.
 pub(crate) const MASK_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R16Float;
 
+/// A WGSL file without comments, indentation and blank lines, as a `&'static str`
+/// built at compile time: the shaders keep their comments in the source but do
+/// not ship them inside the executable (about 6.8 KB).
+macro_rules! wgsl {
+    ($file:literal) => {{
+        const SRC: &[u8] = include_bytes!($file);
+        const LEN: usize = crate::gpu::minified_len(SRC);
+        const OUT: [u8; LEN] = crate::gpu::minify::<LEN>(SRC);
+        const TEXT: &str = match std::str::from_utf8(&OUT) {
+            Ok(text) => text,
+            Err(_) => panic!("WGSL source is not UTF-8"),
+        };
+        TEXT
+    }};
+}
+
+/// Line `start..` of `src`: its content without `//` comment and surrounding
+/// whitespace (`a..b`) and where the next line starts. WGSL has no string
+/// literals, so `//` always starts a comment.
+const fn wgsl_line(src: &[u8], start: usize) -> (usize, usize, usize) {
+    let mut end = start;
+    while end < src.len() && src[end] != b'\n' {
+        end += 1;
+    }
+    let next = if end < src.len() { end + 1 } else { end };
+    let mut cut = start;
+    while cut < end && !(src[cut] == b'/' && cut + 1 < end && src[cut + 1] == b'/') {
+        cut += 1;
+    }
+    let mut a = start;
+    while a < cut && is_blank(src[a]) {
+        a += 1;
+    }
+    let mut b = cut;
+    while b > a && is_blank(src[b - 1]) {
+        b -= 1;
+    }
+    (a, b, next)
+}
+
+const fn is_blank(c: u8) -> bool {
+    c == b' ' || c == b'\t' || c == b'\r'
+}
+
+/// Length of [`minify`]'s output.
+pub(crate) const fn minified_len(src: &[u8]) -> usize {
+    let (mut i, mut n) = (0, 0);
+    while i < src.len() {
+        let (a, b, next) = wgsl_line(src, i);
+        if b > a {
+            n += b - a + 1;
+        }
+        i = next;
+    }
+    n
+}
+
+/// `src` without comments, indentation and blank lines (one line per line).
+pub(crate) const fn minify<const N: usize>(src: &[u8]) -> [u8; N] {
+    let mut out = [0u8; N];
+    let (mut i, mut o) = (0, 0);
+    while i < src.len() {
+        let (a, b, next) = wgsl_line(src, i);
+        if b > a {
+            let mut k = a;
+            while k < b {
+                out[o] = src[k];
+                o += 1;
+                k += 1;
+            }
+            out[o] = b'\n';
+            o += 1;
+        }
+        i = next;
+    }
+    out
+}
+
 /// Shader flags (must match `composite.wgsl`).
 pub(crate) mod flags {
     pub const TEXTURE: u32 = 1;
@@ -172,7 +250,7 @@ impl Pipelines {
     pub fn new(device: &wgpu::Device) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bae-render.composite"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("composite.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(wgsl!("composite.wgsl").into()),
         });
         let draws_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("bae-render.draws"),
@@ -270,7 +348,7 @@ impl Pipelines {
 
         let output_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bae-render.output"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("output.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(wgsl!("output.wgsl").into()),
         });
         let output_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("bae-render.output"),
@@ -499,7 +577,7 @@ impl MaskPipelines {
     fn new(device: &wgpu::Device) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bae-render.mask"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("mask.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(wgsl!("mask.wgsl").into()),
         });
         let storage = |binding| wgpu::BindGroupLayoutEntry {
             binding,
@@ -670,6 +748,16 @@ mod tests {
         assert_eq!(std::mem::size_of::<DrawData>(), 224);
         assert_eq!(std::mem::size_of::<EdgeData>(), 32);
         assert_eq!(std::mem::size_of::<MaskPassData>(), 112);
+    }
+
+    #[test]
+    fn shaders_ship_without_comments() {
+        const SRC: &[u8] = b"// header\n  let a = 1; // note\n\n\tfn f() {}\n";
+        const LEN: usize = minified_len(SRC);
+        assert_eq!(&minify::<LEN>(SRC), b"let a = 1;\nfn f() {}\n");
+        let composite: &str = wgsl!("composite.wgsl");
+        assert!(!composite.contains("//") && composite.contains("fn fs_main"));
+        assert!(composite.len() < include_str!("composite.wgsl").len() * 3 / 4);
     }
 
     #[test]
