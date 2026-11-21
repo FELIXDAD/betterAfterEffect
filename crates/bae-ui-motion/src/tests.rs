@@ -601,8 +601,8 @@ fn menus_and_global_handler() {
         [
             "Text",
             "Solid...",
-            "Light",
-            "Camera",
+            "Light...",
+            "Camera...",
             "Null Object",
             "Shape Layer",
             "Adjustment Layer",
@@ -1333,4 +1333,118 @@ fn layer_settings_target_follows_focus_and_selection() {
     // Several layers: none (AE edits one layer's settings).
     h.session().lock().selected_layers = vec![solid.clone(), shape];
     assert_eq!(target(&h, false), None);
+}
+
+#[test]
+fn camera_and_light_settings_dialogs() {
+    use crate::dialogs::Dialog;
+    let mut h = Harness::new();
+    let mut viewer = CompositionViewer::new(None);
+    let r = h.new_comp_requests(&mut viewer);
+    h.apply(r);
+    h.frame("composition", &mut viewer, Vec::new());
+    let comp = h.session().lock().active_comp.clone().expect("opened");
+    let new =
+        |kind: &str| Invocation::with_params(crate::actions::ids::NEW_LAYER, json!({"kind": kind}));
+    // New Camera: AE's 50mm two-node camera; OK creates it in one step.
+    assert!(h.action(&mut viewer, new("camera")).invocations.is_empty());
+    {
+        let d = h.dialogs();
+        let mut d = d.lock();
+        let Some(Dialog::CameraSettings(c)) = d.open.as_mut() else {
+            panic!("Camera Settings is not open");
+        };
+        assert!(c.is_new());
+        assert_eq!(c.values.name, "Camera 1");
+        assert_eq!(c.values.camera_type, "two_node");
+        assert!((c.values.zoom - 1920.0 * 50.0 / 36.0).abs() < 1e-3);
+        c.values.camera_type = "one_node".into();
+        c.values.depth_of_field = true;
+    }
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "layer.create");
+    h.apply(r);
+    h.frame("composition", &mut viewer, Vec::new());
+    let cam = query::comp_layers(&h.stage, &comp)[0].clone();
+    let value =
+        |h: &Harness, l: &PrimPath, a: &str| query::static_value(&h.stage.prim(l).unwrap(), a);
+    assert_eq!(
+        value(&h, &cam, "camera:type"),
+        Some(Value::Enum("one_node".into()))
+    );
+    assert_eq!(
+        value(&h, &cam, "camera:depth_of_field"),
+        Some(Value::Bool(true))
+    );
+    // New Light: Spot Light 1; switching the type renames it until typed.
+    assert!(h.action(&mut viewer, new("light")).invocations.is_empty());
+    {
+        let d = h.dialogs();
+        let mut d = d.lock();
+        let Some(Dialog::LightSettings(l)) = d.open.as_mut() else {
+            panic!("Light Settings is not open");
+        };
+        assert_eq!(l.values.name, "Spot Light 1");
+        assert_eq!(l.values.intensity, 100.0);
+        l.values.light_type = "point".into();
+        l.values.name = "Key".into();
+        l.values.intensity = 80.0;
+    }
+    let r = h.answer_dialog(egui::Key::Enter);
+    h.apply(r);
+    h.frame("composition", &mut viewer, Vec::new());
+    let light = query::comp_layers(&h.stage, &comp)[0].clone();
+    assert_eq!(query::display_name_of(&h.stage, &light), "Key");
+    assert_eq!(
+        value(&h, &light, "light:type"),
+        Some(Value::Enum("point".into()))
+    );
+    assert_eq!(
+        value(&h, &light, "light:intensity"),
+        Some(Value::Float(80.0))
+    );
+    // Layer Settings on the light: Light Settings; one light.set_settings.
+    h.session().lock().selected_layers = vec![light.clone()];
+    let settings = || Invocation::new(crate::actions::ids::LAYER_SETTINGS);
+    h.action(&mut viewer, settings());
+    {
+        let d = h.dialogs();
+        let mut d = d.lock();
+        let Some(Dialog::LightSettings(l)) = d.open.as_mut() else {
+            panic!("Light Settings is not open");
+        };
+        assert!(!l.is_new());
+        assert_eq!(l.values.intensity, 80.0);
+        l.values.intensity = 120.0;
+    }
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "light.set_settings");
+    assert_eq!(r.invocations[0].params["intensity"], 120.0);
+    assert!(
+        r.invocations[0].params.get("light_type").is_none(),
+        "only changes"
+    );
+    h.apply(r);
+    assert_eq!(
+        value(&h, &light, "light:intensity"),
+        Some(Value::Float(120.0))
+    );
+    // Layer Settings on the camera: Camera Settings.
+    h.session().lock().selected_layers = vec![cam.clone()];
+    h.action(&mut viewer, settings());
+    {
+        let d = h.dialogs();
+        let mut d = d.lock();
+        let Some(Dialog::CameraSettings(c)) = d.open.as_mut() else {
+            panic!("Camera Settings is not open");
+        };
+        assert!(!c.is_new());
+        c.values.zoom = 1000.0;
+    }
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations[0].id, "camera.set_settings");
+    h.apply(r);
+    assert_eq!(value(&h, &cam, "camera:zoom"), Some(Value::Float(1000.0)));
 }

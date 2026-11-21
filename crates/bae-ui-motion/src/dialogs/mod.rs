@@ -5,8 +5,10 @@
 //! settings) live in the [`SharedDialogs`] app resource. A dialog only collects
 //! values; OK runs one `bae-motion` command (one undo step), Cancel runs none.
 
+mod camera_settings;
 mod comp_settings;
 pub(crate) mod fields;
+mod light_settings;
 pub mod memory;
 mod solid_settings;
 
@@ -14,9 +16,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use bae_app::Resources;
 use bae_model::PrimPath;
+use bae_motion::query;
 use bae_ui::PanelContext;
 
+pub use camera_settings::{CameraSettings, CameraSettingsMemory, CameraValues, FilmUnits};
 pub use comp_settings::{CompSettings, CompSettingsMemory};
+pub use light_settings::{LightSettings, LightSettingsMemory, LightValues};
 pub use solid_settings::{SolidSettings, SolidSettingsMemory, Units};
 
 use crate::session::SharedSession;
@@ -29,6 +34,10 @@ pub enum Dialog {
     CompSettings(Box<CompSettings>),
     /// Layer > New > Solid (Cmd/Ctrl+Y) and Solid Settings (Cmd/Ctrl+Shift+Y).
     SolidSettings(Box<SolidSettings>),
+    /// Layer > New > Camera and Camera Settings.
+    CameraSettings(Box<CameraSettings>),
+    /// Layer > New > Light and Light Settings.
+    LightSettings(Box<LightSettings>),
 }
 
 /// Open dialog and remembered values.
@@ -45,6 +54,10 @@ pub struct Dialogs {
     pub loaded: bool,
     /// Color and options of the last new solid.
     pub solid: SolidSettingsMemory,
+    /// Lens and options of the last new camera.
+    pub camera: CameraSettingsMemory,
+    /// Settings of the last new light.
+    pub light: LightSettingsMemory,
 }
 
 /// The dialogs as an app resource (inserted by [`crate::MotionUiModule`]).
@@ -137,15 +150,51 @@ pub(crate) fn new_solid(cx: &PanelContext<'_>, session: &SharedSession) {
     }
 }
 
-/// Open Solid Settings for a layer that uses a solid, or a solid item.
-pub(crate) fn solid_settings(cx: &PanelContext<'_>, session: &SharedSession, target: &PrimPath) {
+/// Open the settings dialog of a layer or a solid item: Solid Settings
+/// (solid and adjustment layers, solid items), Camera Settings or Light
+/// Settings.
+pub(crate) fn layer_settings(cx: &PanelContext<'_>, session: &SharedSession, target: &PrimPath) {
     let dialogs = shared(cx.resources);
     let mut d = dialogs.lock();
     if d.open.is_some() {
         return;
     }
-    if let Some(s) = SolidSettings::edit(cx.stage, session, &d.solid, target) {
-        d.open = Some(Dialog::SolidSettings(Box::new(s)));
+    let stage = cx.stage;
+    let open = match query::layer_kind(stage, target).as_deref() {
+        Some("camera") => CameraSettings::edit(stage, session, target)
+            .map(|s| Dialog::CameraSettings(Box::new(s))),
+        Some("light") => {
+            LightSettings::edit(stage, session, target).map(|s| Dialog::LightSettings(Box::new(s)))
+        }
+        _ => SolidSettings::edit(stage, session, &d.solid, target)
+            .map(|s| Dialog::SolidSettings(Box::new(s))),
+    };
+    if open.is_some() {
+        d.open = open;
+    }
+}
+
+/// Open Camera Settings for a new camera in the active comp.
+pub(crate) fn new_camera(cx: &PanelContext<'_>, session: &SharedSession) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_some() {
+        return;
+    }
+    if let Some(s) = CameraSettings::new_camera(cx.stage, session, &d.camera) {
+        d.open = Some(Dialog::CameraSettings(Box::new(s)));
+    }
+}
+
+/// Open Light Settings for a new light in the active comp.
+pub(crate) fn new_light(cx: &PanelContext<'_>, session: &SharedSession) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_some() {
+        return;
+    }
+    if let Some(s) = LightSettings::new_light(cx.stage, session, &d.light) {
+        d.open = Some(Dialog::LightSettings(Box::new(s)));
     }
 }
 
@@ -158,7 +207,13 @@ pub(crate) fn solid_settings_default_color() -> [f64; 4] {
 /// English strings of the dialogs (i18n completeness test).
 #[cfg(test)]
 pub(crate) fn strings() -> Vec<&'static str> {
-    [comp_settings::STRINGS, solid_settings::STRINGS].concat()
+    [
+        comp_settings::STRINGS,
+        solid_settings::STRINGS,
+        camera_settings::STRINGS,
+        light_settings::STRINGS,
+    ]
+    .concat()
 }
 
 /// Draws the open motion dialog (registered in `Registry<dyn DialogHost>`).
@@ -180,6 +235,8 @@ impl bae_ui::DialogHost for MotionDialogs {
         let keep = match &mut open {
             Dialog::CompSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::SolidSettings(d) => d.ui(ctx, cx, &session, &dialogs),
+            Dialog::CameraSettings(d) => d.ui(ctx, cx, &session, &dialogs),
+            Dialog::LightSettings(d) => d.ui(ctx, cx, &session, &dialogs),
         };
         let mut lock = dialogs.lock();
         if keep && lock.open.is_none() {

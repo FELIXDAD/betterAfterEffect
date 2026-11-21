@@ -1,15 +1,30 @@
-//! Motion dialogs driven like a user: Composition Settings for New Composition
-//! (Cmd/Ctrl+N) and for the open comp (Cmd/Ctrl+K). Controls are found by
-//! their accesskit labels; values are typed.
+//! Motion dialogs driven like a user: Composition Settings (Cmd/Ctrl+N,
+//! Cmd/Ctrl+K), Solid Settings (Cmd/Ctrl+Y), Camera and Light Settings, and
+//! Layer Settings (Cmd/Ctrl+Shift+Y). Controls are found by their accesskit
+//! labels; values are typed.
 
 use egui_kittest::kittest::Queryable as _;
 
 use super::*;
 
+/// The control labeled `label`; when panels behind the dialog use the same
+/// label (the timeline's Zoom), the one nearest the window center, where
+/// dialogs open.
+fn dialog_control(h: &Ui, label: &str) -> egui::Rect {
+    let center = egui::pos2(SIZE[0] / 2.0, SIZE[1] / 2.0);
+    h.query_all_by_label(label)
+        .map(|n| n.rect())
+        .min_by(|a, b| {
+            let (da, db) = (a.center().distance(center), b.center().distance(center));
+            da.total_cmp(&db)
+        })
+        .unwrap_or_else(|| panic!("no control labeled {label:?}"))
+}
+
 /// Click a hot number / field by its label, select its text and type `text`;
 /// Tab commits it (the dialog stays open).
 fn type_into(h: &mut Ui, label: &str, text: &str) {
-    let rect = h.get_by_label(label).rect();
+    let rect = dialog_control(h, label);
     click_at(h, rect.center());
     key(h, Modifiers::COMMAND, Key::A);
     type_text(h, text);
@@ -324,4 +339,104 @@ fn solid_settings_in_chinese() {
     key(&mut h, Modifiers::NONE, Key::Enter);
     let layer = h.state().layers()[0].clone();
     assert_eq!(h.state().name(&layer), "深灰色 纯色 1");
+}
+
+fn attr(h: &Ui, layer: &bae_model::PrimPath, name: &str) -> Option<bae_model::Value> {
+    bae_motion::query::static_value(&h.state().stage().prim(layer).unwrap(), name)
+}
+
+#[test]
+fn new_camera_and_light_ask_for_their_settings() {
+    let mut h = gui();
+    new_comp(&mut h);
+    let cmd = Modifiers::COMMAND | Modifiers::ALT | Modifiers::SHIFT;
+    // Camera: Cmd+Alt+Shift+C opens Camera Settings; OK creates it.
+    key(&mut h, cmd, Key::C);
+    assert!(dialog_open(&h), "no Camera Settings");
+    assert!(find_text(&h, "Camera Settings").is_some());
+    assert!(h.state().layers().is_empty(), "created before OK");
+    type_into(&mut h, "Zoom", "1000");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(!dialog_open(&h));
+    let cam = h.state().layers()[0].clone();
+    assert_eq!(h.state().name(&cam), "Camera 1");
+    assert_eq!(
+        attr(&h, &cam, "camera:zoom"),
+        Some(bae_model::Value::Float(1000.0))
+    );
+    let (undo, _) = h.state().doc.undo_state();
+    assert_eq!(undo.as_deref(), Some("New Camera"));
+    // Light: Cmd+Alt+Shift+L opens Light Settings.
+    key(&mut h, cmd, Key::L);
+    assert!(find_text(&h, "Light Settings").is_some());
+    type_into(&mut h, "Intensity", "50");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    let light = h.state().layers()[0].clone();
+    assert_eq!(h.state().name(&light), "Spot Light 1");
+    assert_eq!(
+        attr(&h, &light, "light:intensity"),
+        Some(bae_model::Value::Float(50.0))
+    );
+    // Layer Settings (Cmd+Shift+Y) on the new light: one undo step.
+    key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::Y);
+    assert!(find_text(&h, "Light Settings").is_some());
+    type_into(&mut h, "Intensity", "75");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(
+        attr(&h, &light, "light:intensity"),
+        Some(bae_model::Value::Float(75.0))
+    );
+    let (undo, _) = h.state().doc.undo_state();
+    assert_eq!(undo.as_deref(), Some("Light Settings"));
+    key(&mut h, Modifiers::COMMAND, Key::Z);
+    assert_eq!(
+        attr(&h, &light, "light:intensity"),
+        Some(bae_model::Value::Float(50.0))
+    );
+    // Esc creates nothing.
+    key(&mut h, cmd, Key::C);
+    key(&mut h, Modifiers::NONE, Key::Escape);
+    assert_eq!(h.state().layers().len(), 2);
+}
+
+#[test]
+fn camera_and_light_settings_in_chinese() {
+    if !in_child(
+        "acceptance::dialogs::camera_and_light_settings_in_chinese",
+        &[("BAE_LANG", "zh")],
+    ) {
+        return;
+    }
+    crate::i18n::init_from_env();
+    let mut h = gui();
+    new_comp(&mut h);
+    let cmd = Modifiers::COMMAND | Modifiers::ALT | Modifiers::SHIFT;
+    key(&mut h, cmd, Key::C);
+    for text in [
+        "摄像机设置",
+        "类型:",
+        "预设:",
+        "缩放:",
+        "视角:",
+        "启用景深",
+        "胶片大小:",
+        "焦长:",
+    ] {
+        assert!(find_text(&h, text).is_some(), "{text} missing");
+    }
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(h.state().name(&h.state().layers()[0]), "摄像机 1");
+    key(&mut h, cmd, Key::L);
+    for text in [
+        "灯光设置",
+        "灯光类型:",
+        "强度:",
+        "锥形角度:",
+        "衰减:",
+        "投影",
+    ] {
+        assert!(find_text(&h, text).is_some(), "{text} missing");
+    }
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(h.state().name(&h.state().layers()[0]), "聚光灯 1");
 }

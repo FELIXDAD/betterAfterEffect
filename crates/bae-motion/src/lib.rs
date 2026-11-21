@@ -14,6 +14,8 @@
 //! | `comp.trim_to_work_area` | Composition > Trim Comp to Work Area |
 //! | `folder.create` | Project panel > New Folder |
 //! | `layer.create` | Layer > New > Shape / Text / Solid / Null / Camera / Light / Adjustment; drag an item into a comp |
+//! | `camera.set_settings` | Layer > Camera Settings (Layer Settings, Cmd/Ctrl+Shift+Y, on a camera) |
+//! | `light.set_settings` | Layer > Light Settings (Layer Settings on a light) |
 //! | `solid.set_settings` | Layer > Solid Settings (Cmd/Ctrl+Shift+Y); Solid Settings of a solid item |
 //! | `layer.reorder` | drag layers; Bring Forward / Send Backward (Cmd/Ctrl+] / [) |
 //! | `layer.duplicate` | Edit > Duplicate (Cmd/Ctrl+D) |
@@ -43,6 +45,7 @@
 //! [`MotionModule`] to the app: it publishes them in `bae_app::Registry<dyn DynCommand>`
 //! (id = command id), from which the application builds its command registry.
 
+pub mod camera;
 pub mod comp;
 pub mod dimensions;
 pub mod keys;
@@ -57,6 +60,7 @@ use std::sync::Arc;
 use bae_app::{AppBuilder, AppModule};
 use bae_model::{CommandRegistry, DynCommand};
 
+pub use camera::{CameraSettings, LightSettings, SetCameraSettings, SetLightSettings};
 pub use comp::{
     CompOutput, CreateComp, CreateFolder, ResizeAnchor, SetCompSettings, SetWorkArea,
     TrimCompToWorkArea,
@@ -83,6 +87,8 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(CreateFolder),
         r.register(CreateLayer),
         r.register(SetSolidSettings),
+        r.register(SetCameraSettings),
+        r.register(SetLightSettings),
         r.register(ReorderLayers),
         r.register(DuplicateLayers),
         r.register(SplitLayers),

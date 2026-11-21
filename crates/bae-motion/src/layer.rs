@@ -107,6 +107,12 @@ pub struct CreateLayerParams {
     /// Comp time (flicks) where the layer starts: its start time and in point (default 0).
     #[serde(default)]
     pub start: Option<Time>,
+    /// Camera layers: Camera Settings (type, zoom, depth of field …).
+    #[serde(default)]
+    pub camera: Option<crate::camera::CameraSettings>,
+    /// Light layers: Light Settings (type, color, intensity …).
+    #[serde(default)]
+    pub light: Option<crate::camera::LightSettings>,
 }
 
 fn source_size_and_duration(stage: &Stage, source: &PrimPath) -> Option<([f64; 2], Option<Time>)> {
@@ -287,6 +293,20 @@ impl Command for CreateLayer {
                 position = [pos[0], pos[1], -zoom];
                 if kind == LayerKind::Camera {
                     set(tx, &path, "camera:zoom", Value::Float(zoom))?;
+                    set(tx, &path, "camera:focus_distance", Value::Float(zoom))?;
+                    if let Some(c) = &p.camera {
+                        for (attr, value) in c.attrs()? {
+                            set(tx, &path, attr, value)?;
+                        }
+                        // The camera stands `zoom` in front of the comp (AE).
+                        if let Some(z) = c.zoom {
+                            position = [pos[0], pos[1], -z];
+                        }
+                    }
+                } else if let Some(l) = &p.light {
+                    for (attr, value) in l.attrs()? {
+                        set(tx, &path, attr, value)?;
+                    }
                 }
                 set(
                     tx,

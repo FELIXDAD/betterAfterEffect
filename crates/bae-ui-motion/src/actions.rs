@@ -50,9 +50,9 @@ pub mod ids {
     /// Params `{"kind": "<layer kind>", "shape": "rect" | …}`. A solid opens
     /// Solid Settings first.
     pub const NEW_LAYER: &str = "motion.new_layer";
-    /// Layer > Layer Settings (Cmd/Ctrl+Shift+Y): Solid Settings of the
-    /// selected solid / adjustment layer, or of the solid item selected in the
-    /// focused Project panel.
+    /// Layer > Layer Settings (Cmd/Ctrl+Shift+Y): Solid, Camera or Light
+    /// Settings of the selected layer, or Solid Settings of the solid item
+    /// selected in the focused Project panel.
     pub const LAYER_SETTINGS: &str = "motion.layer.layer_settings";
     /// Params `{"to": "forward" | "backward" | "front" | "back"}`.
     pub const ORDER: &str = "motion.order";
@@ -296,8 +296,8 @@ pub(crate) fn settings_target(cx: &PanelContext<'_>, session: &SharedSession) ->
 }
 
 /// What Layer Settings edits: the solid item selected in the Project panel
-/// when that panel has focus, otherwise the one selected layer when it uses a
-/// solid (solid and adjustment layers).
+/// when that panel has focus, otherwise the one selected layer when it has
+/// settings (solid and adjustment layers, cameras, lights).
 pub(crate) fn layer_settings_target(
     stage: &bae_model::Stage,
     session: &SharedSession,
@@ -311,7 +311,15 @@ pub(crate) fn layer_settings_target(
         return Some(item.clone());
     }
     match s.selected_layers.as_slice() {
-        [layer] if bae_motion::solid::layer_solid(stage, layer).is_some() => Some(layer.clone()),
+        [layer]
+            if bae_motion::solid::layer_solid(stage, layer).is_some()
+                || matches!(
+                    query::layer_kind(stage, layer).as_deref(),
+                    Some("camera" | "light")
+                ) =>
+        {
+            Some(layer.clone())
+        }
         _ => None,
     }
 }
@@ -421,9 +429,15 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             if kind == LayerKind::Text {
                 extra["text"] = json!(bae_ui::tr("Text"));
             }
-            if kind == LayerKind::Solid {
-                // AE: Solid Settings first; OK creates the solid.
-                crate::dialogs::new_solid(cx, session);
+            // AE: Solid, Camera and Light Settings first; OK creates the layer.
+            let dialog = match kind {
+                LayerKind::Solid => Some(crate::dialogs::new_solid as fn(&_, &_)),
+                LayerKind::Camera => Some(crate::dialogs::new_camera as fn(&_, &_)),
+                LayerKind::Light => Some(crate::dialogs::new_light as fn(&_, &_)),
+                _ => None,
+            };
+            if let Some(open) = dialog {
+                open(cx, session);
                 return true;
             }
             common::new_layer(cx, session, kind, extra);
@@ -432,7 +446,7 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         ids::LAYER_SETTINGS => {
             let project = cx.panel.kind() == "project";
             if let Some(target) = layer_settings_target(cx.stage, session, project) {
-                crate::dialogs::solid_settings(cx, session, &target);
+                crate::dialogs::layer_settings(cx, session, &target);
             }
             return true;
         }

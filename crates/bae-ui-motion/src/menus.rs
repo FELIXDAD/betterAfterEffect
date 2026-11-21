@@ -99,8 +99,11 @@ pub fn items() -> Vec<(&'static str, MenuItemSpec)> {
         // Layer ▸ New (AE order), then the shape presets.
         ("motion.layer.new.text", new_layer("Text", "text", 1)),
         ("motion.layer.new.solid", new_layer("Solid...", "solid", 2)),
-        ("motion.layer.new.light", new_layer("Light", "light", 3)),
-        ("motion.layer.new.camera", new_layer("Camera", "camera", 4)),
+        ("motion.layer.new.light", new_layer("Light...", "light", 3)),
+        (
+            "motion.layer.new.camera",
+            new_layer("Camera...", "camera", 4),
+        ),
         ("motion.layer.new.null", new_layer("Null Object", "null", 5)),
         (
             "motion.layer.new.shape",

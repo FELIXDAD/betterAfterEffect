@@ -1197,3 +1197,137 @@ fn solid_settings_validation() {
         .is_err()
     );
 }
+
+#[test]
+fn new_cameras_and_lights_take_their_settings() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let cam = fx.layer(
+        &comp,
+        "camera",
+        json!({"name": "Camera 1", "camera": {"camera_type": "one_node", "zoom": 1280.0,
+               "depth_of_field": true, "focus_distance": 1000.0, "aperture": 50.0}}),
+    );
+    assert_eq!(
+        fx.value(&cam, "camera:type"),
+        Some(Value::Enum("one_node".into()))
+    );
+    assert_eq!(fx.value(&cam, "camera:zoom"), Some(Value::Float(1280.0)));
+    assert_eq!(
+        fx.value(&cam, "camera:depth_of_field"),
+        Some(Value::Bool(true))
+    );
+    assert_eq!(
+        fx.value(&cam, "camera:focus_distance"),
+        Some(Value::Float(1000.0))
+    );
+    // The camera stands `zoom` in front of the comp.
+    assert_eq!(
+        fx.value(&cam, "transform:position"),
+        Some(Value::Vec3([960.0, 540.0, -1280.0]))
+    );
+    // Without settings: AE's 50mm camera, focus distance = zoom.
+    let default_cam = fx.layer(&comp, "camera", json!({}));
+    let zoom = 1920.0 * 50.0 / 36.0;
+    assert_eq!(
+        fx.value(&default_cam, "camera:zoom"),
+        Some(Value::Float(zoom))
+    );
+    assert_eq!(
+        fx.value(&default_cam, "camera:focus_distance"),
+        Some(Value::Float(zoom))
+    );
+    let light = fx.layer(
+        &comp,
+        "light",
+        json!({"name": "Point Light 1", "light": {"light_type": "point", "intensity": 150.0,
+               "color": [1.0, 0.5, 0.0, 1.0], "casts_shadows": true}}),
+    );
+    assert_eq!(
+        fx.value(&light, "light:type"),
+        Some(Value::Enum("point".into()))
+    );
+    assert_eq!(
+        fx.value(&light, "light:intensity"),
+        Some(Value::Float(150.0))
+    );
+    assert_eq!(
+        fx.value(&light, "light:casts_shadows"),
+        Some(Value::Bool(true))
+    );
+    assert!(
+        fx.try_run(
+            "layer.create",
+            json!({"comp": comp, "kind": "light", "light": {"light_type": "laser"}})
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn camera_and_light_settings_edit_at_the_current_time_in_one_step() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let cam = fx.layer(&comp, "camera", json!({}));
+    let light = fx.layer(&comp, "light", json!({}));
+    // Zoom is keyframed: the edit adds a keyframe at the time; static values change.
+    fx.run(
+        "attr.set_animated",
+        json!({"path": cam, "attr": "camera:zoom", "animated": true, "time": 0}),
+    );
+    fx.run(
+        "camera.set_settings",
+        json!({"layer": cam, "name": "Main Cam", "camera_type": "one_node", "zoom": 800.0,
+               "blur_level": 50.0, "time": SEC}),
+    );
+    assert_eq!(fx.keys(&cam, "camera:zoom"), vec![0, SEC]);
+    assert_eq!(
+        fx.value(&cam, "camera:blur_level"),
+        Some(Value::Float(50.0))
+    );
+    assert_eq!(query::display_name_of(&fx.stage, &cam), "Main Cam");
+    // One-node: no longer aims at the point of interest.
+    assert_eq!(
+        fx.value(&cam, "auto_orient"),
+        Some(Value::Enum("off".into()))
+    );
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(fx.keys(&cam, "camera:zoom"), vec![0]);
+    assert_eq!(query::display_name_of(&fx.stage, &cam), "Camera 1");
+    fx.run(
+        "light.set_settings",
+        json!({"layer": light, "light_type": "parallel", "cone_angle": 45.0, "falloff": "smooth"}),
+    );
+    assert_eq!(
+        fx.value(&light, "light:type"),
+        Some(Value::Enum("parallel".into()))
+    );
+    assert_eq!(
+        fx.value(&light, "light:falloff"),
+        Some(Value::Enum("smooth".into()))
+    );
+    // Wrong kinds and out-of-range values are refused.
+    assert!(
+        fx.try_run("camera.set_settings", json!({"layer": light}))
+            .is_err()
+    );
+    assert!(
+        fx.try_run("light.set_settings", json!({"layer": cam}))
+            .is_err()
+    );
+    assert!(
+        fx.try_run(
+            "light.set_settings",
+            json!({"layer": light, "cone_angle": 270.0})
+        )
+        .is_err()
+    );
+    assert!(
+        fx.try_run("camera.set_settings", json!({"layer": cam, "zoom": 0.0}))
+            .is_err()
+    );
+    assert!(
+        fx.try_run("camera.set_settings", json!({"layer": cam, "name": " "}))
+            .is_err()
+    );
+}
