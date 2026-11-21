@@ -232,7 +232,7 @@ incremental = false
 # Cold-path dependencies are optimized for size (ARCHITECTURE §11): CLI, MCP/async
 # runtime, JSON and schemas, archives and hashing, menus/clipboard, URL/Unicode tables,
 # image codecs used at import time, and BAE's own UI/agent/platform glue. Per-frame paths (wgpu, naga, vello, egui painting,
-# loro, bae-render/bae-anim) keep opt-level 3. Measured in the PR that added this.
+# loro, bae-render/bae-anim, the png export encoder) keep opt-level 3. Measured in the PR that added this.
 [profile.release.package.bae-ui]
 opt-level = "s"
 [profile.release.package.bae-agent]
@@ -305,8 +305,9 @@ opt-level = "s"
 opt-level = "s"
 [profile.release.package.image]
 opt-level = "s"
-[profile.release.package.png]
-opt-level = "s"
+# `png` stays at opt-level 3: it is the per-frame PNG encoder of `bae render` / the render
+# queue (adaptive filtering is ~3.5× slower at "s": 13.8 vs 4.3 ms per 1080p frame) and
+# decodes PNG-sequence footage per frame. No measurable size change (docs/perf.md).
 # Plugin manifests (bae-plugin, read once per plugin load): TOML parser and semver.
 [profile.release.package.toml]
 opt-level = "s"
