@@ -41,12 +41,19 @@
 **2026-11-20**
 
 - PR A `[interface] vector`：`crates/bae-vector`。路径几何（AE 顶点形式 ↔ kurbo）、矩形/椭圆/多边星形（AE 顶点顺序）、填充/描边/渐变参数、形状树（从 03 的 `EvaluatedLayer.contents` 解析）、显示列表 `VectorScene`（AE 运算顺序、组变换、隔离组不透明度、合成顺序、边界、哈希）、修剪路径；`render` feature：Vello 编码、共享 `VelloRenderer`、`ShapeSource`/`ShapeProvider`（`bae.shape`）。GPU 测试逐像素检查。bae-render 加了 `LayerSource::bounds()` 默认方法（见 04 的请求一节）。
-- 下一步：PR B `[interface] text`（`crates/bae-text`：parley 排版、点文字/段落文字、中文字体回退、字体枚举、`TextSource`/`TextProvider`）。
+- PR A 已合并（#48）。
+- PR B `[interface] text`：`crates/bae-text`。系统字体枚举与 PostScript 名匹配（缺失字体用默认字体代替）、parley 排版：点文字和段落文字的 AE 定位（基线原点、左/中/右、两端对齐、行距、字符间距、基线偏移、全部大写、仿粗体/斜体、段落溢出）、拉丁字体里的中文回退到系统中文字体、中文换行避头尾；结果类型 `TextLayout`（字形、行、逐字符信息、边界）；`render` feature：Vello 字形绘制（逐字符填充/描边顺序）、`TextSource`/`TextProvider`（`bae.text`）。给 02 留了 `TextDocument` 补充请求。
+- #49 rebase 到含 #44/#74 的 dev：GPU 测试改走 04 的 `bae_render::testing`（`render_source` / `read_pixels`），bae-text 的 Vello 测试在软件适配器上跳过。
+
+**2026-11-21**
+
+- PR D：**没有显卡的 Windows 不再崩溃**。`VelloRenderer` 按适配器选后端：软件适配器（WARP）上不创建 Vello GPU 管线，改用 `vello_cpu`（epaint 已链接的同一版本，不新增 crate）栅格化后上传纹理；文字用 skrifa 字形轮廓走同一路径。`BAE_VECTOR_RENDERER=cpu|gpu` 可强制。CPU 与 Vello 在硬件适配器上逐像素对比（平均差 < 1%），CPU 测试在 WARP 上也跑。对比时发现并修好了 Vello 路径仿斜体方向反了（Vello 的字形变换在字体空间 y 向上）。应用里注册了 `TextProvider`（文字图层能在应用里画出来）。崩溃根因（Vello 还是 WARP 的着色器 JIT）待 Windows 实机用 `vello_gpu_stages` 诊断测试确认。
+- 下一步：#54（基准与样张）rebase、Ready；之后形状操作器（中继器、位移路径、圆角……）、路径布尔与命中测试 API（给 13/16）、文字动画器。
 
 - [x] Vello 图层源（形状）
 - [ ] 形状操作器第一批（修剪路径已完成；中继器、位移路径、圆角等待做）
 - [ ] 路径布尔与编辑几何
-- [ ] 文字排版
+- [x] 文字排版（点文字、段落文字、中文回退；逐字符样式等 02 补充 TextDocument）
 - [ ] 文字动画器
 
 ## 请求（其他工作流在这里留言）

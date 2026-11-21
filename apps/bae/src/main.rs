@@ -37,13 +37,19 @@ fn main() -> ExitCode {
         // Plugin host: `bae plugin check|list`; plugin effects in the app registries.
         .add_module(bae_plugin::PluginModule)
         .add_module(shell::ShellModule);
-    // Layer sources drawn by other workstreams (05: shape layers), used by the
+    // Layer sources drawn by other workstreams (05: shape and text layers), used by the
     // renderer and `bae render`.
     if let Err(error) = builder.register_arc::<dyn bae_render::SourceProvider>(
         bae_vector::SHAPE_PROVIDER,
         std::sync::Arc::new(bae_vector::render::ShapeProvider::new()),
     ) {
         tracing::warn!("shape layer source not registered: {error}");
+    }
+    if let Err(error) = builder.register_arc::<dyn bae_render::SourceProvider>(
+        bae_text::TEXT_PROVIDER,
+        std::sync::Arc::new(bae_text::render::TextProvider::new()),
+    ) {
+        tracing::warn!("text layer source not registered: {error}");
     }
     // Feature modules from other workstreams are added here.
     startup::run(builder.build())

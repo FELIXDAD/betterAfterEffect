@@ -3,9 +3,9 @@
 
 use std::sync::Arc;
 
-use bae_gpu::transfer::{ImageData, read_texture};
 use bae_gpu::{GpuContext, GpuContextDescriptor, GpuError};
-use bae_render::{IRect, ImageAlpha, LayerSource};
+use bae_model::Time;
+use bae_render::{IRect, LayerSource, SourceRequest, testing};
 use bae_vector::render::{ShapeSource, VelloRenderer};
 use bae_vector::{
     BlendMode, Brush, Composite, Direction, EllipseShape, FillRule, Gradient, GradientKind,
@@ -62,19 +62,48 @@ fn fill(color: [f32; 4]) -> ShapeItem {
     })
 }
 
-/// Renders `root` over `roi` and returns the pixels with the image rect.
-fn render(gpu: &Arc<GpuContext>, root: &ShapeGroup, roi: IRect, scale: f64) -> (ImageData, IRect) {
+/// Texels of a source rendered through `LayerSource::render` (bae-render's
+/// testing entry): straight RGBA8 values of `roi ∩ bounds`, row major.
+struct Image {
+    texels: Vec<[f32; 4]>,
+    /// Covered layer pixels.
+    rect: IRect,
+    /// Texels per row and rows.
+    size: [u32; 2],
+}
+
+impl Image {
+    fn texel(&self, x: u32, y: u32) -> [u8; 4] {
+        let p = self.texels[(y * self.size[0] + x) as usize];
+        p.map(|v| (v * 255.0).round() as u8)
+    }
+}
+
+fn render_source(gpu: &Arc<GpuContext>, source: &ShapeSource, roi: IRect, scale: f64) -> Image {
+    let request = SourceRequest {
+        roi,
+        scale,
+        time: Time::ZERO,
+    };
+    let image = testing::render_source(gpu, source, &request).expect("render");
+    Image {
+        texels: testing::read_pixels(gpu, &image).expect("readback"),
+        rect: roi.intersect(&source.bounds()),
+        size: image.texel_size(),
+    }
+}
+
+/// Renders `root` over `roi` and returns the pixels with the covered rect.
+fn render(gpu: &Arc<GpuContext>, root: &ShapeGroup, roi: IRect, scale: f64) -> (Image, IRect) {
     let source = ShapeSource::new(Arc::new(VectorScene::from_group(root)));
-    let image = source.render_on(gpu, roi, scale).expect("render");
-    assert_eq!(image.alpha, ImageAlpha::Straight);
-    let pixels = read_texture(gpu, &image.texture).expect("readback");
-    (pixels, image.rect)
+    let image = render_source(gpu, &source, roi, scale);
+    let rect = image.rect;
+    (image, rect)
 }
 
 /// RGBA8 of layer pixel (x, y) in an image covering `rect` at scale 1.
-fn at(img: &ImageData, rect: IRect, x: i32, y: i32) -> [u8; 4] {
-    let p = img.pixel((x - rect.x0) as u32, (y - rect.y0) as u32);
-    [p[0], p[1], p[2], p[3]]
+fn at(img: &Image, rect: IRect, x: i32, y: i32) -> [u8; 4] {
+    img.texel((x - rect.x0) as u32, (y - rect.y0) as u32)
 }
 
 #[test]
@@ -88,7 +117,7 @@ fn filled_rectangle_around_the_layer_origin() {
     assert_eq!(source.bounds(), IRect::new(-21, -11, 21, 11));
     assert_eq!(source.size(), [21, 11]);
     let (img, r) = render(&gpu, &root, source.bounds(), 1.0);
-    assert_eq!([img.width, img.height], [42, 22]);
+    assert_eq!(img.size, [42, 22]);
     assert_eq!(at(&img, r, 0, 0), [255, 0, 0, 255]);
     assert_eq!(at(&img, r, -20, -10), [255, 0, 0, 255]);
     assert_eq!(at(&img, r, 19, 9), [255, 0, 0, 255]);
@@ -103,17 +132,13 @@ fn half_resolution_and_partial_roi() {
         .with(rect(40.0, 40.0, 0.0, 0.0))
         .with(fill(BLUE));
     let source = ShapeSource::new(Arc::new(VectorScene::from_group(&root)));
-    let image = source
-        .render_on(&gpu, IRect::new(0, 0, 40, 40), 0.5)
-        .expect("render");
-    // Clipped to the content bounds, half resolution.
-    assert_eq!(image.rect, IRect::new(0, 0, 21, 21));
-    assert_eq!(image.pixel_scale, 2.0);
-    let img = read_texture(&gpu, &image.texture).unwrap();
-    assert_eq!([img.width, img.height], [11, 11]);
-    assert_eq!(img.pixel(0, 0), [0, 0, 255, 255]);
-    assert_eq!(img.pixel(9, 9), [0, 0, 255, 255]);
-    assert_eq!(img.pixel(10, 10)[3], 0);
+    let img = render_source(&gpu, &source, IRect::new(0, 0, 40, 40), 0.5);
+    // Clipped to the content bounds, half resolution: 21 px → 11 texels.
+    assert_eq!(img.rect, IRect::new(0, 0, 21, 21));
+    assert_eq!(img.size, [11, 11]);
+    assert_eq!(img.texel(0, 0), [0, 0, 255, 255]);
+    assert_eq!(img.texel(9, 9), [0, 0, 255, 255]);
+    assert_eq!(img.texel(10, 10)[3], 0);
 }
 
 #[test]
