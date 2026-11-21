@@ -1,8 +1,10 @@
 #!/bin/sh
 # Regenerate the Illustrator test data of workstream 16 in real Illustrator (macOS):
 # build the fixture documents (make-fixtures.jsx), save them as .ai and export each one
-# with bae-ai-export.jsx. Output: crates/bae-interop-ai/tests/data/illustrator/.
-#   bridges/ai/tests/regen.sh [fixture-name]
+# with bae-ai-export.jsx.
+#   bridges/ai/tests/regen.sh [--out <dir>] [fixture-name]
+# Output: crates/bae-interop-ai/tests/data/illustrator/, or <dir> (the live test in
+# crates/bae-interop-ai/tests/illustrator.rs uses a scratch folder).
 #
 # Illustrator only ever sees a staging folder under /private/tmp: the repository usually
 # lives in ~/Documents (or ~/Desktop), which macOS guards with a privacy prompt that
@@ -10,6 +12,11 @@
 set -eu
 root=$(cd "$(dirname "$0")/../../.." && pwd -P)
 out="$root/crates/bae-interop-ai/tests/data/illustrator"
+if [ "${1:-}" = "--out" ]; then
+    [ $# -ge 2 ] || { echo "usage: regen.sh [--out <dir>] [fixture-name]" >&2; exit 2; }
+    out="$2"
+    shift 2
+fi
 aictl="$root/tools/ai/aictl"
 stage=$(mktemp -d /private/tmp/bae-ai-regen.XXXXXX)
 trap 'rm -rf "$stage"' EXIT

@@ -164,7 +164,7 @@
             "stops": [
               {
                 "offset": 0,
-                "midpoint": 0.5,
+                "midpoint": 0.3,
                 "color": [0.9305, 0.1116, 0.1421, 0.5],
                 "source": {
                   "model": "cmyk",
@@ -173,7 +173,7 @@
               },
               {
                 "offset": 1,
-                "midpoint": 0.3,
+                "midpoint": 0.5,
                 "color": [0.1821, 0.1904, 0.5734, 1],
                 "source": {
                   "model": "cmyk",

@@ -1,4 +1,4 @@
-// export-open.jsx — export every open document saved in BAE_EXPORT_DIR with
+// export-open.jsx - export every open document saved in BAE_EXPORT_DIR with
 // bae-ai-export.jsx (stable output) next to its .ai file, then close it without saving.
 // Used by regen.sh. Globals: BAE_EXPORT_DIR, BAE_AI_EXPORT_SCRIPT (path of bae-ai-export.jsx).
 (function () {

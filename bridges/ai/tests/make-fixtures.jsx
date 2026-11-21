@@ -1,4 +1,4 @@
-// make-fixtures.jsx — build the Illustrator test documents of workstream 16 and save
+// make-fixtures.jsx - build the Illustrator test documents of workstream 16 and save
 // them as .ai (PDF compatible, compressed). Run in Illustrator; normally through
 // bridges/ai/tests/regen.sh, which also exports each document with bae-ai-export.jsx.
 //
@@ -109,7 +109,7 @@
     // ------------------------------------------------------------------ basic
     // Artboard 1 "Poster" 400x300
     //   layer "Text"     point text "Hello" (36 pt MyriadPro, dark grey), baseline (20, 280)
-    //   layer "图层 1"    group "Logo" (opacity 90 %):
+    //   layer "\u56FE\u5C42 1" ("Layer 1") group "Logo" (opacity 90 %):
     //                      compound path "Frame": rect (20,20,160,120) with a (60,50,80,60)
     //                        hole, red fill (even-odd), blue 4 pt stroke, round caps,
     //                        bevel joins, dashes 6/3
@@ -119,7 +119,7 @@
     //   layer "Masked"   clip group: rect (0,150,200,150) clips a green circle (10,135) d 180
     //   layer "Hidden"   hidden and locked, white 10x10 square
     // Artboard 2 "Badge" 200x100, 50 pt right of artboard 1
-    //   layer "图层 1"    yellow ellipse (20,10,160,80), 2 pt black stroke
+    //   layer "\u56FE\u5C42 1" ("Layer 1") yellow ellipse (20,10,160,80), 2 pt black stroke
     build("basic", function () {
         var doc = app.documents.add(DocumentColorSpace.RGB, 400, 300);
         var ab1 = doc.artboards[0];
@@ -131,7 +131,7 @@
         var hidden = doc.layers[0];
         hidden.name = "Hidden";
         var masked = doc.layers.add(); masked.name = "Masked";
-        var shapes = doc.layers.add(); shapes.name = "图层 1";
+        var shapes = doc.layers.add(); shapes.name = "\u56FE\u5C42 1";
         var textLayer = doc.layers.add(); textLayer.name = "Text";
 
         var sq = rect(hidden.pathItems, ab1, 0, 0, 10, 10);
@@ -252,7 +252,7 @@
     //   "Gray"      rect (120,20,80,60), 30 % grey fill
     //   "Spot"      rect (220,20,80,60), spot "BAE Orange" at 40 % tint
     //   "LinRot"    rect (20,110,160,80), linear gradient turned 30 degrees, an opacity stop
-    //               (50 %) and a midpoint at 30 %
+    //               (50 %) and the midpoint between the two stops moved to 30 %
     //   "Ellipse"   rect (220,110,160,80), radial gradient squashed to 100 x 40 % (elliptical)
     //   "GradStroke" circle (20,220) d 120, no fill, 12 pt linear gradient stroke
     //   "Screen"    rect (180,220,100,100) 70 % opacity, screen blend
@@ -287,7 +287,7 @@
         var lr = rect(items, ab, 20, 110, 160, 80);
         lr.name = "LinRot"; noStroke(lr);
         lr.fillColor = gradient(doc, GradientType.LINEAR,
-            [[0, cmyk(0, 100, 100, 0), null, 50], [100, cmyk(100, 100, 0, 0), 30]]);
+            [[0, cmyk(0, 100, 100, 0), 30, 50], [100, cmyk(100, 100, 0, 0)]]);
         turnGradient(lr, 30, 100, 100);
 
         var sp = doc.spots.add();
@@ -384,7 +384,7 @@
     //   "Mixed"    point text "Big small\rcentred line" (MyriadPro 30/14 pt, second
     //              paragraph centred, "small" red), baseline (20, 50)
     //   "Rotated"  point text "Turn" 24 pt rotated 30 degrees counter-clockwise, (200, 120)
-    //   "Chinese"  point text "你好，世界" SourceHanSansSC 24 pt, 1 pt blue stroke, (20, 200)
+    //   "Chinese"  point text "\u4F60\u597D\uFF0C\u4E16\u754C" ("Hello, world") SourceHanSansSC 24 pt, 1 pt blue stroke, (20, 200)
     //   "Area"     area text in rect (220,180,160,90), 12 pt
     //   "OnPath"   text on an open curve
     build("text", function () {
@@ -408,7 +408,7 @@
         area.textRange.characterAttributes.size = 12;
         area.name = "Area";
 
-        var zh = pointText(L, ab, 20, 200, "你好，世界", "SourceHanSansSC-Regular", 24, rgb(20, 20, 20));
+        var zh = pointText(L, ab, 20, 200, "\u4F60\u597D\uFF0C\u4E16\u754C", "SourceHanSansSC-Regular", 24, rgb(20, 20, 20));
         zh.name = "Chinese";
         zh.textRange.characterAttributes.strokeColor = rgb(0, 0, 255);
         zh.textRange.characterAttributes.strokeWeight = 1;
