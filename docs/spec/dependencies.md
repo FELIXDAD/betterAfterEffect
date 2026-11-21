@@ -87,7 +87,7 @@ wgpu v30.0.2
 | egui-wgpu | `wgpu/default`、`wgpu/webgl`、`fragile-send-sync-non-atomic-wasm`、`macos-window-resize-jitter-fix` | 无；不开 `winit` | 默认值会打开 wgpu 全部后端。BAE 自己管理表面（`bae-gpu`），不用 `egui_wgpu::winit::Painter`；注意 `macos-window-resize-jitter-fix` 只作用于这个 Painter（macOS 缩放窗口时 `presentsWithTransaction` + 3 个 drawable），`bae-gpu` 需要自己实现同样的处理 |
 | egui-winit | `wayland`、`x11`、`winit/default` | `clipboard`、`links`；`apps/bae` 另开 `accesskit` | 只做 macOS / Windows。`accesskit`（读屏、UI 自动化）在 `apps/bae` 打开（#116，2026-11-21）：VoiceOver / 讲述人和 Windows 上的自动化验收读控件标签 |
 | winit | `x11`、`wayland`、`wayland-dlopen`、`wayland-csd-adwaita` | `rwh_06` | 同上，只保留 raw-window-handle 0.6 接口 |
-| egui | `default_fonts` | 无 | 不内嵌 egui 的 1.4 MB 字体（Ubuntu-Light、Hack、两个 emoji 字体）。界面全部用系统字体：系统界面字体、简体中文字体、符号字体，由 bae-ui `theme::system_ui_fonts` 经 fontique 查找（见 bae-ui 的 `ui_text` 覆盖测试）。测试里 egui_kittest 会打开它，不影响发布产物 |
+| egui | `default_fonts` | 无 | 不内嵌 egui 的 1.4 MB 字体（Ubuntu-Light、Hack、两个 emoji 字体）。界面全部用系统字体：系统界面字体、简体中文字体、符号字体，由 bae-ui `theme::system_ui_fonts` 经 fontique 查找（见 bae-ui 的 `ui_text` 覆盖测试）。测试也不打开它（bae-ui 示例用的 eframe 同样不带 `default_fonts`），所以单独测一个 crate 和整个工作区一起测看到的字体相同，都和发布产物一样；测试里的 egui 上下文用 `bae_ui::testing::ctx_with_fonts()` 装好系统字体 |
 | egui_kittest | （无默认） | 无 | 界面测试只用无窗口模式；需要截图对比的 crate 自己开 `wgpu` / `snapshot` |
 | muda | `gtk3` | 无 | Linux 菜单后端，不需要 |
 | rfd | `xdg-portal`、`wayland` | 无 | Linux 对话框后端，不需要；应用只在 macOS / Windows 上依赖它 |
@@ -344,7 +344,7 @@ ARCHITECTURE 里提到但还没有 pin 的：`psd`（08）。bae-hub 不用 axum
 
      ```toml
      [dev-dependencies]
-     eframe = { version = "0.36.2", default-features = false, features = ["wgpu_no_default_features", "default_fonts"] }
+     eframe = { version = "0.36.2", default-features = false, features = ["wgpu_no_default_features"] }
      wgpu.workspace = true   # 让示例用工作区的 wgpu 后端（metal + dx12）
      ```
 

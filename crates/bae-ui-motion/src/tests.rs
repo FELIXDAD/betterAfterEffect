@@ -30,7 +30,7 @@ impl Harness {
             reg,
             author: AuthorId::new("user:test").unwrap(),
             resources,
-            ctx: egui::Context::default(),
+            ctx: bae_ui::testing::ctx_with_fonts(),
         }
     }
 

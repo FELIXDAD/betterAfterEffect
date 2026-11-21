@@ -182,8 +182,15 @@ impl Gui {
 
     fn frame(&mut self, ui: &mut egui::Ui) {
         if !self.themed {
+            // kittest creates its own context and runs this first pass at once, so the
+            // fonts `theme::apply` installs (egui's bundled fonts are off) only take
+            // effect from the next pass. Draw nothing and discard the pass: egui reruns
+            // it with the fonts, as the app's first frame has them (`create_view`
+            // themes the context before it). kittest's first frame has no input.
             bae_ui::theme::apply(ui.ctx());
             self.themed = true;
+            ui.ctx().request_discard("bae: UI fonts installed");
+            return;
         }
         let invocations = self
             .workspace

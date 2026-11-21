@@ -27,6 +27,7 @@ pub mod keymap;
 pub mod menu;
 pub mod panel;
 pub mod presets;
+pub mod testing;
 pub mod theme;
 pub mod titlebar;
 pub mod widgets;
