@@ -19,7 +19,7 @@
 mod keys;
 mod menu;
 
-pub use keys::KEYS;
+pub use keys::{KEYS, MAC_KEYS};
 pub use menu::{EFFECT_CATEGORIES, MAC_APP_MENU, MENUS};
 
 /// Who implements the command behind an entry (the AE-parity agents, see
@@ -162,8 +162,26 @@ pub const BOUND_ELSEWHERE: u8 = 2;
 /// AE binds the same chord in the same context to another command first; BAE
 /// keeps the first one.
 pub const SHADOWED: u8 = 4;
+/// Only in AE's macOS shortcut file (26.2.1; the Windows table is 26.0).
+pub const MAC_ONLY: u8 = 8;
 
 impl Key {
+    /// AE's default chords for this command on Windows (`mac = false`) or macOS,
+    /// in BAE notation (see [`chords`]).
+    pub fn chords(&self, mac: bool) -> Vec<String> {
+        if mac
+            && let Some((_, _, keys)) = MAC_KEYS
+                .iter()
+                .find(|(ctx, cmd, _)| *ctx == self.context && *cmd == self.command)
+        {
+            return mac_chords(keys);
+        }
+        if self.flags & MAC_ONLY != 0 && !mac {
+            return Vec::new();
+        }
+        chords(self.keys, mac)
+    }
+
     /// The BAE panel kind the AE context corresponds to (`None` = everywhere).
     pub fn scope(&self) -> Option<&'static str> {
         context_scope(self.context)
@@ -256,23 +274,49 @@ pub fn chords(keys: &str, mac: bool) -> Vec<String> {
                     _ => return None,
                 }
             }
-            let mut s = String::new();
-            if ctrl {
-                s.push_str("Ctrl+");
-            }
-            if cmd {
-                s.push_str("Cmd+");
-            }
-            if alt {
-                s.push_str("Alt+");
-            }
-            if shift {
-                s.push_str("Shift+");
-            }
-            s.push_str(ae_key_name(key));
-            Some(s)
+            Some(chord_string(ctrl, cmd, alt, shift, key))
         })
         .collect()
+}
+
+/// AE's macOS notation (`Cmd+Option+macControl+H`) in BAE chord strings.
+pub fn mac_chords(keys: &str) -> Vec<String> {
+    keys.split('|')
+        .filter(|k| !k.is_empty())
+        .filter_map(|k| {
+            let parts: Vec<&str> = k.split('+').collect();
+            let (key, mods) = parts.split_last()?;
+            let (mut ctrl, mut cmd, mut alt, mut shift) = (false, false, false, false);
+            for m in mods {
+                match *m {
+                    "Cmd" => cmd = true,
+                    "Option" => alt = true,
+                    "Shift" => shift = true,
+                    "macControl" => ctrl = true,
+                    _ => return None,
+                }
+            }
+            Some(chord_string(ctrl, cmd, alt, shift, key))
+        })
+        .collect()
+}
+
+fn chord_string(ctrl: bool, cmd: bool, alt: bool, shift: bool, key: &str) -> String {
+    let mut s = String::new();
+    if ctrl {
+        s.push_str("Ctrl+");
+    }
+    if cmd {
+        s.push_str("Cmd+");
+    }
+    if alt {
+        s.push_str("Alt+");
+    }
+    if shift {
+        s.push_str("Shift+");
+    }
+    s.push_str(ae_key_name(key));
+    s
 }
 
 /// BAE key name (`egui::Key::name`) for an AE key name, or the AE name for keys

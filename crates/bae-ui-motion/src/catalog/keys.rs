@@ -3,14 +3,15 @@
 //! that is also a menu item runs the same action as the item, so the menu shows
 //! its shortcut.
 //!
-//! Keys are in AE's notation (`Ctrl` = Ctrl on Windows / ⌘ on macOS, `Alt` =
-//! Alt / Option, `macControl` = the macOS Control key); [`super::chords`] turns
-//! them into BAE chords. The test in `catalog::tests` checks every row against
-//! `shortcuts.json`.
+//! Keys are in AE's Windows notation (`Ctrl`, `Alt`, `macControl` = the macOS
+//! Control key); on macOS AE has the same chords with Ctrl → ⌘ and Alt → Option
+//! except the commands in [`MAC_KEYS`] (`docs/reference/ae/mac/shortcuts.json`).
+//! [`Key::chords`] turns them into BAE chords for either platform. The tests in
+//! `catalog::tests` check every row against both files.
 
 use super::Owner::{self, *};
 use super::Status::{self, *};
-use super::{BOUND_ELSEWHERE, Key, NATIVE, SHADOWED};
+use super::{BOUND_ELSEWHERE, Key, MAC_ONLY, NATIVE, SHADOWED};
 
 #[allow(clippy::too_many_arguments)]
 const fn k(
@@ -708,6 +709,54 @@ pub const KEYS: &[Key] = &[
     k("Tracker", "MTNudgeUpMore", "Shift+UpArrow", "motion.tool.tracker_nudge_up_more", "", E, Later, 0),
     k("Tracker", "MTSetEnd", "Alt+]", "motion.tool.tracker_set_end", "", E, Later, 0),
     k("Tracker", "MTSetStart", "Alt+[", "motion.tool.tracker_set_start", "", E, Later, 0),
+    // Only in the macOS file (AE 26.2.1; the Windows table is 26.0): MAC_KEYS has
+    // their shortcuts.
+    k("CCompCompCmd", "CompTimeZoomWorkArea", "", "motion.timeline.zoom_to_work_area", "", C, Todo, MAC_ONLY),
+    k("CItem", "CopyFrameToClipboard", "", "motion.viewer.copy_frame_to_clipboard", "", B, Later, MAC_ONLY),
+    k("CSwitchboard", "Clear", "", "motion.delete", "", B, Done, MAC_ONLY),
+    k("CSwitchboard", "PasteReversedKeyframes", "", "motion.edit.paste_reversed_keyframes", "", C, Todo, MAC_ONLY),
+    k("TLOutlinePano", "CompTimeZoomWorkArea", "", "motion.timeline.zoom_to_work_area", "", C, Todo, MAC_ONLY),
     // Shown in AE 26's Edit ▸ Purge menu but not in its shortcut file.
     k("Menu", "PurgeAllCaches", "Alt+Z", "motion.edit.purge", r#"{"what":"all_caches"}"#, B, Later, 0),
+];
+
+/// AE 26.2.1 macOS defaults that are not the Windows chord with Ctrl → Cmd and
+/// Alt → Option (`docs/reference/ae/mac/shortcuts.json`, `windowsDiff`), in AE's
+/// macOS notation (`Cmd`, `Option`, `macControl` = the Control key, `Shift`): the
+/// eight `Option+<key>` add-keyframe shortcuts, chords that use Control instead
+/// of ⌘ next to system shortcuts, the system menu items, and the commands only
+/// the macOS file has (`MAC_ONLY` rows of [`KEYS`]).
+#[rustfmt::skip]
+pub const MAC_KEYS: &[(&str, &str, &str)] = &[
+    ("CCompCompCmd", "CompTimeZoomWorkArea", "Option+;"),
+    ("CCompCompCmd", "CompToggleMaskFeathersNewKF", "Option+F"),
+    ("CCompCompCmd", "CompToggleMaskShapesNewKF", "Option+M"),
+    ("CCompCompCmd", "CompTwirlAnchorPointNewKF", "Option+A"),
+    ("CCompCompCmd", "CompTwirlAudioNewKF", "Option+L"),
+    ("CCompCompCmd", "CompTwirlOpacityNewKF", "Option+T"),
+    ("CCompCompCmd", "CompTwirlPositionNewKF", "Option+P"),
+    ("CCompCompCmd", "CompTwirlRotationNewKF", "Option+R"),
+    ("CCompCompCmd", "CompTwirlScaleNewKF", "Option+S"),
+    ("CCompCompCmd", "NudgeOpacityDown", "macControl+Option+PadMinus"),
+    ("CCompCompCmd", "NudgeOpacityDownMore", "macControl+Option+Shift+PadMinus"),
+    ("CCompCompCmd", "NudgeOpacityUp", "macControl+Option+PadPlus"),
+    ("CCompCompCmd", "NudgeOpacityUpMore", "macControl+Option+Shift+PadPlus"),
+    ("CCompCompCmd", "TwirlExplode", "macControl+`"),
+    ("CCompCompCmd", "TwirlPreserveSoloExplode", "macControl+Shift+`"),
+    ("CItem", "CopyFrameToClipboard", "Cmd+Option+Shift+F5"),
+    ("CPanoProjLayerPano", "NudgeOpacityDown", "macControl+Option+PadMinus"),
+    ("CPanoProjLayerPano", "NudgeOpacityDownMore", "macControl+Option+Shift+PadMinus"),
+    ("CPanoProjLayerPano", "NudgeOpacityUp", "macControl+Option+PadPlus"),
+    ("CPanoProjLayerPano", "NudgeOpacityUpMore", "macControl+Option+Shift+PadPlus"),
+    ("CSwitchboard", "Clear", "PadClear"),
+    ("CSwitchboard", "PasteReversedKeyframes", "Cmd+Shift+V"),
+    ("CSwitchboard", "ScanForChangedFootage", "Cmd+macControl+Option+Shift+Q"),
+    ("MacSysShortcutsAlt", "MacSysMenuHideMe", "Cmd+macControl+H"),
+    ("MacSysShortcutsAlt", "MacSysMenuHideOthers", "Cmd+Option+macControl+H"),
+    ("MacSysShortcutsAlt", "MacSysMenuMinimize", "Cmd+macControl+M"),
+    ("MacSysShortcutsStd", "MacSysMenuHideMe", "Cmd+H"),
+    ("MacSysShortcutsStd", "MacSysMenuHideOthers", "Cmd+Option+H"),
+    ("MacSysShortcutsStd", "MacSysMenuMinimize", "Cmd+M"),
+    ("TLOutlinePano", "CompTimeZoomWorkArea", "Option+;"),
+    ("TextLayerUI", "TextResetTracking", "macControl+Shift+Cmd+Q"),
 ];

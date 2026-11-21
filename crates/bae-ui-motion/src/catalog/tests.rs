@@ -10,6 +10,7 @@ use super::*;
 
 const MENUS_JSON: &str = include_str!("../../../../docs/reference/ae/menus.json");
 const SHORTCUTS_JSON: &str = include_str!("../../../../docs/reference/ae/shortcuts.json");
+const MAC_SHORTCUTS_JSON: &str = include_str!("../../../../docs/reference/ae/mac/shortcuts.json");
 const DOC_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/ui/ae-commands.md");
 
 /// Submenus AE fills when they open (`menus.json` has them empty): BAE may list
@@ -174,7 +175,7 @@ fn every_ae_shortcut_command_is_mapped() {
     }
     let ours: Vec<(String, String, String)> = KEYS
         .iter()
-        .filter(|k| k.context != "Menu")
+        .filter(|k| k.context != "Menu" && k.flags & MAC_ONLY == 0)
         .map(|k| {
             (
                 k.context.to_owned(),
@@ -189,6 +190,49 @@ fn every_ae_shortcut_command_is_mapped() {
     }
     for k in KEYS {
         params(k.params);
+    }
+}
+
+/// On macOS every command has AE's macOS defaults (AE 26.2.1's own file): the
+/// Windows chord with Ctrl → ⌘ and Alt → Option, or the `MAC_KEYS` exception.
+#[test]
+fn mac_chords_follow_the_mac_file() {
+    let json: Value = serde_json::from_str(MAC_SHORTCUTS_JSON).unwrap();
+    let mut errors = Vec::new();
+    let mut count = 0;
+    for (ctx, cmds) in json["contexts"].as_object().unwrap() {
+        for c in cmds.as_array().unwrap() {
+            let command = c["command"].as_str().unwrap();
+            let keys: Vec<&str> = c["shortcuts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|k| k.as_str().unwrap())
+                .collect();
+            let mut want: Vec<String> = mac_chords(&keys.join("|"));
+            let Some(row) = KEYS
+                .iter()
+                .find(|k| k.context == ctx && k.command == command)
+            else {
+                errors.push(format!("{ctx}/{command} missing"));
+                continue;
+            };
+            let mut got = row.chords(true);
+            want.sort();
+            got.sort();
+            if want != got {
+                errors.push(format!("{ctx}/{command}: mac {want:?}, catalog {got:?}"));
+            }
+            count += 1;
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+    assert_eq!(count, json["commandCount"].as_u64().unwrap() as usize);
+    for (ctx, cmd, _) in MAC_KEYS {
+        assert!(
+            KEYS.iter().any(|k| k.context == *ctx && k.command == *cmd),
+            "{ctx}/{cmd}"
+        );
     }
 }
 
@@ -353,7 +397,7 @@ fn shown_chords(keys: &[&Key], mac: bool) -> String {
         if k.flags & NATIVE != 0 {
             continue;
         }
-        for c in chords(k.keys, mac) {
+        for c in k.chords(mac) {
             let d = display_chord(&c, mac)
                 .replace('`', "\\`")
                 .replace('\\', "\\\\");
@@ -463,8 +507,8 @@ fn render_doc() -> String {
     let _ = writeln!(s);
     let _ = writeln!(
         s,
-        "快捷键列：Windows 是 AE 默认值；macOS 按 Ctrl→Cmd、Alt→Opt 换算，`Control` 是 macOS 的 Control 键（AE 文件里的 `macControl`，只在 macOS 有）。\
-         macOS 列等 R2（`ref/ae-mac`）的 Mac 快捷键表核对。`PadX` 是小键盘键。"
+        "快捷键列：Windows 是 AE 26.0 的默认值（`docs/reference/ae/shortcuts.json`）；macOS 是 AE 26.2.1 的默认值（`docs/reference/ae/mac/shortcuts.json`）：\
+         一般是 Ctrl→Cmd、Alt→Opt，例外按 Mac 文件（`catalog::MAC_KEYS`）。`Control` 是 macOS 的 Control 键（AE 文件里的 `macControl`）。`PadX` 是小键盘键。"
     );
     let _ = writeln!(s);
 
@@ -488,7 +532,10 @@ fn render_doc() -> String {
         )
     })
     .collect();
-    let keys: Vec<&Key> = KEYS.iter().filter(|k| k.context != "Menu").collect();
+    let keys: Vec<&Key> = KEYS
+        .iter()
+        .filter(|k| k.context != "Menu" && k.flags & MAC_ONLY == 0)
+        .collect();
     let commands: HashSet<&str> = keys.iter().map(|k| k.command).collect();
     let bound = keys
         .iter()
@@ -616,6 +663,9 @@ fn render_doc() -> String {
             }
             if k.flags & SHADOWED != 0 {
                 note.push_str("（同一快捷键 AE 先给了别的命令）");
+            }
+            if k.flags & MAC_ONLY != 0 {
+                note.push_str("（只在 macOS 26.2 的快捷键文件里）");
             }
             let _ = writeln!(
                 s,
