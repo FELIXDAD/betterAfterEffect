@@ -34,6 +34,14 @@ impl TimelinePanel {
                     }
                 }
             }
+            Some(Drag::Marker { .. }) => {
+                if released {
+                    self.drag = None;
+                    if let Some((m, d)) = self.marker_plan.clone() {
+                        self.commit_marker_drag(cx, &m, d);
+                    }
+                }
+            }
             Some(Drag::Marquee { origin, additive }) => {
                 if let Some(p) = pointer {
                     let r = Rect::from_two_pos(origin, p).intersect(graph_body);
@@ -135,7 +143,8 @@ impl TimelinePanel {
                 | Drag::Move { .. }
                 | Drag::TrimIn { .. }
                 | Drag::TrimOut { .. }
-                | Drag::WorkArea { .. },
+                | Drag::WorkArea { .. }
+                | Drag::MarkerFromBin,
             ) if released => self.drag = None,
             _ => {}
         }

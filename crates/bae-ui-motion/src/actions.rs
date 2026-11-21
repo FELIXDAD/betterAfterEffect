@@ -59,6 +59,13 @@ pub mod ids {
     /// Edit > Select Keyframe Label Group ▸ (params `{"scope": "selected_layers" |
     /// "all_layers" | "visible_selected_layers" | "visible_all_layers"}`).
     pub const SELECT_KEY_LABEL_GROUP: &str = "motion.edit.select_keyframe_label_group";
+    /// Layer > Markers > Add Marker (AE numpad *, Mac Control+8): a layer marker at
+    /// the current time on each selected layer, or a comp marker when none is.
+    pub const ADD_MARKER: &str = "motion.layer.add_marker";
+    /// Add a marker through the Marker dialog (AE Alt+numpad *, Mac Option+Control+8).
+    pub const ADD_MARKER_DIALOG: &str = "motion.timeline.add_marker_with_dialog";
+    /// Layer > Markers > Delete All Markers (of the selected layers).
+    pub const DELETE_ALL_MARKERS: &str = "motion.layer.delete_all_markers";
     /// Shell clipboard actions (Cmd+C / Cmd+V outside text fields).
     pub const COPY: &str = "edit.copy";
     pub const PASTE: &str = "edit.paste";
@@ -99,6 +106,9 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::KEY_INTERPOLATION, "Keyframe Interpolation"),
     (ids::KEY_VELOCITY, "Keyframe Velocity"),
     (ids::SELECT_KEY_LABEL_GROUP, "Select Keyframe Label Group"),
+    (ids::ADD_MARKER, "Add Marker"),
+    (ids::ADD_MARKER_DIALOG, "Add Marker with Dialog"),
+    (ids::DELETE_ALL_MARKERS, "Delete All Markers"),
     // Panel-scoped (`bindings`): handled by the timeline and the viewer. Registered
     // so the Keyboard Shortcuts window shows a name, not the id (#136).
     ("timeline.zoom_in", "Zoom In Time"),
@@ -258,6 +268,12 @@ pub fn bindings() -> KeymapBindings {
         v.push(reveal(k, attr, false));
         v.push(reveal(&format!("Shift+{k}"), attr, true));
         v.push(key(&format!("Alt+Shift+{k}"), attr));
+    }
+    // Markers: AE uses numpad * (Alt+* opens the dialog); Mac keyboards without a
+    // numpad use Control+8. egui has no numpad keys, so Windows has no binding yet.
+    if cfg!(target_os = "macos") {
+        v.push(b("Ctrl+8", ids::ADD_MARKER));
+        v.push(b("Ctrl+Alt+8", ids::ADD_MARKER_DIALOG));
     }
     v.push(b("Equals", "timeline.zoom_in").when("timeline"));
     v.push(b("Minus", "timeline.zoom_out").when("timeline"));
@@ -537,6 +553,29 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         ids::KEY_VELOCITY if !keys.is_empty() => {
             s.key_dialog = crate::timeline::VelocityDialog::new(stage, keys)
                 .map(crate::timeline::KeyDialog::Velocity);
+        }
+        ids::ADD_MARKER => {
+            if layers.is_empty() {
+                cx.invoke_with("marker.add", json!({"owner": info.path, "time": now}));
+            } else {
+                cx.invoke_with("marker.add", json!({"owners": layers, "comp_time": now}));
+            }
+        }
+        ids::ADD_MARKER_DIALOG => {
+            let owner = layers.first().cloned().unwrap_or_else(|| info.path.clone());
+            s.key_dialog = Some(crate::timeline::KeyDialog::Marker(Box::new(
+                crate::timeline::MarkerDialog::new_marker(&info, owner, now),
+            )));
+        }
+        ids::DELETE_ALL_MARKERS if !layers.is_empty() => {
+            let all: Vec<PrimPath> = layers
+                .iter()
+                .flat_map(|l| bae_motion::markers::markers_of(stage, l))
+                .map(|(p, _)| p)
+                .collect();
+            if !all.is_empty() {
+                cx.invoke_with("marker.delete", json!({ "markers": all }));
+            }
         }
         ids::REVERSE_KEYS if keys.len() > 1 => {
             cx.invoke_with("key.reverse", json!({"keys": keys}));

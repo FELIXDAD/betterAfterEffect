@@ -13,8 +13,10 @@ use crate::util::{child, create, ensure_folder, ensure_unlocked, fail, set};
 /// Output of `marker.add`.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct MarkerOutput {
-    /// The new marker.
+    /// The new marker (the first one when several owners got one).
     pub path: PrimPath,
+    /// Every new marker, in owner order.
+    pub paths: Vec<PrimPath>,
 }
 
 /// The comp or layer a marker belongs to.
@@ -98,10 +100,19 @@ pub struct AddMarker;
 #[derive(Deserialize, JsonSchema)]
 pub struct AddMarkerParams {
     /// The comp (comp marker) or layer (layer marker).
-    pub owner: PrimPath,
-    /// Marker time in flicks: comp time for comp markers, layer time for layer
-    /// markers.
-    pub time: Time,
+    #[serde(default)]
+    pub owner: Option<PrimPath>,
+    /// More owners: one marker each, in the same undo step (Add Marker with several
+    /// layers selected).
+    #[serde(default)]
+    pub owners: Vec<PrimPath>,
+    /// Marker time in flicks in the owner's time base: comp time for comp markers,
+    /// layer time for layer markers.
+    #[serde(default)]
+    pub time: Option<Time>,
+    /// Or a comp time, converted to each owner's time base.
+    #[serde(default)]
+    pub comp_time: Option<Time>,
     #[serde(flatten)]
     pub fields: MarkerFields,
 }
@@ -111,19 +122,37 @@ impl Command for AddMarker {
     type Output = MarkerOutput;
     const ID: &'static str = "marker.add";
     const TITLE: &'static str = "Add Marker";
-    const DESCRIPTION: &'static str = "Add a comp marker (owner = comp, comp time) or a layer marker (owner = layer, layer time), optionally with a duration, comment, chapter, URL, cue point and label.";
+    const DESCRIPTION: &'static str = "Add a comp marker (owner = comp) or layer markers (owner / owners = layers) at `time` (the owner's time base) or `comp_time`, optionally with a duration, comment, chapter, URL, cue point and label.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<MarkerOutput, CommandError> {
-        check_owner(tx, &p.owner)?;
-        ensure_unlocked(tx.stage(), [&p.owner])?;
-        let folder = child(&p.owner, MARKERS)?;
-        ensure_folder(tx, &folder)?;
-        let name = query::unique_child_name(tx.stage(), &folder, "Marker");
-        let path = child(&folder, &name)?;
-        create(tx, &path, PrimType::MARKER, None)?;
-        set(tx, &path, "time", Value::Time(p.time))?;
-        p.fields.write(tx, &path)?;
-        Ok(MarkerOutput { path })
+        let owners: Vec<PrimPath> = p.owner.into_iter().chain(p.owners).collect();
+        if owners.is_empty() {
+            return Err(fail("marker.add needs an owner"));
+        }
+        for o in &owners {
+            check_owner(tx, o)?;
+        }
+        ensure_unlocked(tx.stage(), owners.iter())?;
+        let mut paths = Vec::new();
+        for owner in &owners {
+            let time = match (p.time, p.comp_time) {
+                (Some(t), _) => t,
+                (None, Some(ct)) => query::to_key_time(tx.stage(), owner, ct),
+                (None, None) => return Err(fail("marker.add needs time or comp_time")),
+            };
+            let folder = child(owner, MARKERS)?;
+            ensure_folder(tx, &folder)?;
+            let name = query::unique_child_name(tx.stage(), &folder, "Marker");
+            let path = child(&folder, &name)?;
+            create(tx, &path, PrimType::MARKER, None)?;
+            set(tx, &path, "time", Value::Time(time))?;
+            p.fields.write(tx, &path)?;
+            paths.push(path);
+        }
+        Ok(MarkerOutput {
+            path: paths[0].clone(),
+            paths,
+        })
     }
 }
 
