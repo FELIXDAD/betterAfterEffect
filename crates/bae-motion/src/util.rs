@@ -13,6 +13,24 @@ pub(crate) fn fail(msg: impl Into<String>) -> CommandError {
     CommandError::Failed(msg.into())
 }
 
+/// Commands do not edit locked layers (AE: a locked layer, its properties and
+/// keyframes cannot be changed until it is unlocked; its Lock switch — a plain
+/// `attr.set` — still can).
+pub(crate) fn ensure_unlocked<'a>(
+    stage: &Stage,
+    paths: impl IntoIterator<Item = &'a PrimPath>,
+) -> Result<(), CommandError> {
+    for path in paths {
+        if let Some(layer) = crate::query::locked_layer_of(stage, path) {
+            return Err(fail(format!(
+                "{} is locked; unlock it first",
+                crate::query::display_name_of(stage, &layer)
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn child(parent: &PrimPath, name: &str) -> Result<PrimPath, CommandError> {
     parent
         .child(name)

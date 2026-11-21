@@ -17,7 +17,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::query;
-use crate::util::{check_animatable, fail, write_attr};
+use crate::util::{check_animatable, ensure_unlocked, fail, write_attr};
 
 /// One keyframe, identified by its attribute and keyframe time.
 #[derive(
@@ -123,6 +123,7 @@ impl Command for SetAnimated {
     const DESCRIPTION: &'static str = "Turn an attribute's stopwatch on (first keyframe at the given time with the current value) or off (delete all keyframes, keep the value at that time).";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        ensure_unlocked(tx.stage(), [&p.path])?;
         tx.stage().require_prim(&p.path)?;
         check_animatable(tx.stage(), &p.path, &p.attr)?;
         let mut spec = query::attr_spec(tx.stage(), &p.path, &p.attr)
@@ -165,6 +166,7 @@ impl Command for SetAt {
     const DESCRIPTION: &'static str = "Change an attribute the way editing it in the timeline does: animated attributes get a keyframe at the time (an existing one keeps its interpolation), others get a new static value.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        ensure_unlocked(tx.stage(), [&p.path])?;
         tx.stage().require_prim(&p.path)?;
         check_value(tx, &p.path, &p.attr, &p.value)?;
         let mut spec = query::attr_spec(tx.stage(), &p.path, &p.attr)
@@ -266,6 +268,7 @@ impl Command for EaseKeys {
     const DESCRIPTION: &'static str = "Keyframe assistant: Easy Ease (both sides), Easy Ease In or Easy Ease Out — Bezier interpolation with speed 0 and 33.33% influence on the chosen side.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        ensure_unlocked(tx.stage(), p.keys.iter().map(|k| &k.path))?;
         let influence = p
             .influence
             .unwrap_or(Ease::DEFAULT_INFLUENCE)
@@ -323,6 +326,7 @@ impl Command for SetInterpolation {
     const DESCRIPTION: &'static str = "Set the temporal interpolation of keyframes (AE Keyframe Interpolation dialog; Toggle Hold Keyframe sets the outgoing side to hold).";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        ensure_unlocked(tx.stage(), p.keys.iter().map(|k| &k.path))?;
         for ((path, attr), times) in group(&p.keys) {
             let mut spec = animated_spec(tx, &path, &attr, &times)?;
             let probe = spec.clone();
@@ -368,6 +372,7 @@ impl Command for MoveKeys {
     const DESCRIPTION: &'static str = "Move keyframes in time by an offset (dragging keyframes in the timeline). Keyframes they land on are replaced.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<KeysOutput, CommandError> {
+        ensure_unlocked(tx.stage(), p.keys.iter().map(|k| &k.path))?;
         let mut out = KeysOutput::default();
         if p.delta == Time::ZERO {
             out.keys = p.keys;
@@ -407,6 +412,7 @@ impl Command for DeleteKeys {
     const DESCRIPTION: &'static str = "Delete keyframes. Deleting every keyframe of an attribute turns its stopwatch off and keeps the value of the last deleted keyframe.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        ensure_unlocked(tx.stage(), p.keys.iter().map(|k| &k.path))?;
         for ((path, attr), times) in group(&p.keys) {
             let mut spec = animated_spec(tx, &path, &attr, &times)?;
             let mut last = None;
@@ -445,6 +451,7 @@ impl Command for ReverseKeys {
     const DESCRIPTION: &'static str = "Keyframe assistant: reverse the order of keyframes in time within the span they cover, per attribute.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<KeysOutput, CommandError> {
+        ensure_unlocked(tx.stage(), p.keys.iter().map(|k| &k.path))?;
         let mut out = KeysOutput::default();
         for ((path, attr), times) in group(&p.keys) {
             let mut spec = animated_spec(tx, &path, &attr, &times)?;
@@ -498,6 +505,7 @@ impl Command for PasteKeys {
         "Paste copied keyframes onto an attribute starting at a time (turns the stopwatch on).";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<KeysOutput, CommandError> {
+        ensure_unlocked(tx.stage(), [&p.path])?;
         tx.stage().require_prim(&p.path)?;
         check_animatable(tx.stage(), &p.path, &p.attr)?;
         let mut spec = query::attr_spec(tx.stage(), &p.path, &p.attr)

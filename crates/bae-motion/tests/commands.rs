@@ -538,3 +538,51 @@ fn delete_and_batch_edits() {
     assert!(!fx.stage.has_prim(&comp));
     assert!(fx.stage.has_prim(&item));
 }
+
+/// Issue #124 (AE): a locked layer, its properties and keyframes cannot be
+/// changed by commands until it is unlocked; the Lock switch itself still can.
+#[test]
+fn locked_layers_refuse_edits_until_unlocked() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let a = fx.layer(&comp, "solid", json!({}));
+    let b = fx.layer(&comp, "solid", json!({}));
+    fx.run(
+        "attr.set_animated",
+        json!({"path": b, "attr": "transform:opacity", "animated": true, "time": 0}),
+    );
+    let lock = |fx: &mut Fx, on: bool| {
+        fx.run(
+            "attr.set",
+            json!({"path": b, "attr": "locked", "value": {"type": "bool", "value": on}}),
+        );
+    };
+    lock(&mut fx, true);
+    assert!(query::is_locked(&fx.stage, &b));
+    let key = json!([{"path": b, "attr": "transform:opacity", "time": 0}]);
+    for (id, params) in [
+        ("layer.delete", json!({"layers": [b]})),
+        ("layer.reorder", json!({"layers": [b], "index": 0})),
+        ("layer.split", json!({"layers": [b], "time": SEC})),
+        ("layer.trim", json!({"layers": [b], "in_point": SEC})),
+        ("layer.shift_time", json!({"layers": [b], "delta": SEC})),
+        ("layer.set_parent", json!({"layers": [b], "parent": a})),
+        (
+            "attr.set_at",
+            json!({"path": b, "attr": "transform:rotation", "time": 0, "value": {"type": "float", "value": 45.0}}),
+        ),
+        ("key.delete", json!({"keys": key})),
+        ("key.move", json!({"keys": key, "delta": SEC})),
+    ] {
+        let error = fx.try_run(id, params).expect_err(id);
+        assert!(error.contains("locked"), "{id}: {error}");
+    }
+    // Other layers are unaffected, even when the locked one moves in the stack.
+    fx.run("layer.reorder", json!({"layers": [a], "index": 1}));
+    // Duplicating reads the locked layer without changing it.
+    fx.run("layer.duplicate", json!({"layers": [b]}));
+    // Unlocked: editable again.
+    lock(&mut fx, false);
+    fx.run("layer.delete", json!({"layers": [b]}));
+    assert!(fx.stage.prim(&b).is_none());
+}

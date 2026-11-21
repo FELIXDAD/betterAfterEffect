@@ -5,7 +5,7 @@
 
 use bae_anim::glam::{DMat4, DVec2, DVec3};
 use bae_anim::{EvaluatedComp, Transform};
-use bae_model::{LayerKind, PrimPath, Time, Value};
+use bae_model::{LayerKind, PrimPath, Stage, Time, Value};
 use bae_motion::query::{self, CompInfo};
 use bae_ui::Accessible as _;
 use bae_ui::icons::{self, Icon};
@@ -176,11 +176,14 @@ fn apply_overrides(comp: &mut EvaluatedComp, scrub: Option<&Scrub>, drag: Option
 }
 
 /// Topmost layer under `pos` (screen), if any.
-fn hit_test(comp: &EvaluatedComp, view: &View, pos: Pos2) -> Option<PrimPath> {
+/// The topmost layer under `pos`; locked layers cannot be picked (AE: clicks go
+/// through them).
+fn hit_test(stage: &Stage, comp: &EvaluatedComp, view: &View, pos: Pos2) -> Option<PrimPath> {
     let outer = Affine::new(DMat4::IDENTITY);
     comp.layers
         .iter()
         .filter(|l| l.visible && !l.switches.guide || l.kind == LayerKind::Null)
+        .filter(|l| !query::is_locked(stage, &l.path))
         .find(|l| {
             render::bounds_quad(l, view, &outer).is_some_and(|q| render::quad_contains(&q, pos))
         })
@@ -464,7 +467,7 @@ impl Panel for CompositionViewer {
         if resp.clicked_by(egui::PointerButton::Primary)
             && let Some(pos) = pointer
         {
-            let hit = hit_test(&comp, &view, pos);
+            let hit = hit_test(cx.stage, &comp, &view, pos);
             let shift = ui.input(|i| i.modifiers.shift);
             let mut s = session.lock();
             match hit {
@@ -488,7 +491,7 @@ impl Panel for CompositionViewer {
         if resp.drag_started_by(egui::PointerButton::Primary)
             && let Some(pos) = resp.interact_pointer_pos()
         {
-            let hit = hit_test(&comp, &view, pos);
+            let hit = hit_test(cx.stage, &comp, &view, pos);
             let mut s = session.lock();
             if let Some(h) = &hit
                 && !s.selected_layers.contains(h)
