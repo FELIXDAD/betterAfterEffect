@@ -1681,10 +1681,11 @@ impl TimelinePanel {
         } else {
             color::TEXT
         };
-        // Graph Editor Set switch (animated properties).
+        // Graph Editor Set switch (animated properties), left of the stopwatch so the
+        // stopwatch stays next to the name as in AE.
         let id_pair = (path.clone(), attr.to_owned());
         if animated {
-            let gs = Rect::from_center_size(pos2(x + 26.0, cy), vec2(14.0, 14.0));
+            let gs = Rect::from_center_size(pos2(x - 8.0, cy), vec2(14.0, 14.0));
             let on = session.lock().graph_set.contains(&id_pair);
             let resp = ui
                 .interact(gs, id.with("graph_set"), Sense::click())
@@ -1715,7 +1716,7 @@ impl TimelinePanel {
             }
         }
         ui.painter().text(
-            pos2(x + 36.0, cy),
+            pos2(x + 18.0, cy),
             Align2::LEFT_CENTER,
             label,
             theme::body(),
@@ -1724,8 +1725,8 @@ impl TimelinePanel {
         // Clicking the name selects the property and its keyframes (AE); Shift or
         // Cmd/Ctrl adds it.
         let name_rect = Rect::from_min_max(
-            pos2(x + 34.0, rect.top()),
-            pos2((l + cols.switches - 2.0).max(x + 40.0), rect.bottom()),
+            pos2(x + 16.0, rect.top()),
+            pos2((l + cols.switches - 2.0).max(x + 22.0), rect.bottom()),
         );
         let selected_prop = session.lock().selected_props.contains(&id_pair);
         let nresp = ui

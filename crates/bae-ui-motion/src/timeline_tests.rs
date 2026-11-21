@@ -807,7 +807,7 @@ fn graph_editor_set_and_show_properties() {
         .insert(h.layer.clone(), crate::session::Reveal::Animated);
     h.frame(&mut tl, Vec::new(), Modifiers::NONE);
     let row_y = 22.0 + 34.0 + 20.0 + 19.0 + 9.5;
-    h.click(&mut tl, pos2(124.0 + 14.0 + 26.0, row_y), Modifiers::NONE);
+    h.click(&mut tl, pos2(124.0 + 14.0 - 8.0, row_y), Modifiers::NONE);
     assert_eq!(
         h.session().lock().graph_set,
         vec![(h.layer.clone(), ROT.to_owned())]
