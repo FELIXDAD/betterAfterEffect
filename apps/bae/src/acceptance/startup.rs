@@ -564,3 +564,101 @@ fn inputs_have_names_not_only_values() {
         .collect();
     assert!(unnamed.is_empty(), "inputs without a name: {unnamed:#?}");
 }
+
+/// (pane, role, name) triples of interactive widgets that occur more than once.
+fn repeated_names(h: &Ui) -> Vec<String> {
+    use egui::accesskit::{Action, Role};
+    let mut seen: std::collections::HashMap<(String, String, String), usize> =
+        std::collections::HashMap::new();
+    for n in h.root().children_recursive() {
+        let a = n.accesskit_node();
+        let data = a.data();
+        let interactive =
+            data.supports_action(Action::Click) || data.supports_action(Action::Focus);
+        if !interactive || a.bounding_box().is_none() || a.is_hidden() {
+            continue;
+        }
+        let Some(label) = a.label().filter(|l| !l.is_empty()) else {
+            continue;
+        };
+        let mut group = "window".to_owned();
+        let mut up = a.parent();
+        while let Some(p) = up {
+            if p.role() == Role::Pane {
+                group = p.label().unwrap_or_default();
+                break;
+            }
+            up = p.parent();
+        }
+        *seen
+            .entry((group, format!("{:?}", a.role()), label))
+            .or_default() += 1;
+    }
+    seen.into_iter()
+        .filter(|(_, n)| *n > 1)
+        .map(|((g, r, l), n)| format!("×{n} in {g}: {r} “{l}”"))
+        .collect()
+}
+
+/// Issue #128: AE allows two layers with one name; the layer number tells
+/// their controls apart ("Layer 2 “背景” · Lock").
+#[test]
+fn same_named_layers_are_told_apart_by_number() {
+    let mut h = gui();
+    comp_with(
+        &mut h,
+        &["motion.layer.new.solid", "motion.layer.new.solid"],
+    );
+    for l in h.state().layers() {
+        h.state_mut().invoke(Invocation::with_params(
+            "attr.set",
+            serde_json::json!({"path": l, "attr": "name", "value": {"type": "string", "value": "背景"}}),
+        ));
+        settle(&mut h);
+    }
+    key(&mut h, Modifiers::COMMAND, Key::A);
+    key(&mut h, Modifiers::NONE, Key::P);
+    settle(&mut h);
+    let all = labels(&h);
+    for n in [1, 2] {
+        let lock = format!("Layer {n} “背景” · Lock");
+        assert!(all.contains(&lock), "no {lock:?} in {all:?}");
+    }
+    let dupes = repeated_names(&h);
+    assert!(dupes.is_empty(), "{dupes:#?}");
+}
+
+/// Issue #128: inputs have a name apart from their value — the Render Queue's
+/// Format / Output To / Frames, the Properties panel's text and number fields.
+#[test]
+fn inputs_are_named_apart_from_their_values() {
+    use egui::accesskit::Role;
+    let h = busy_window();
+    let unnamed: Vec<String> = h
+        .root()
+        .children_recursive()
+        .filter_map(|n| {
+            let a = n.accesskit_node();
+            let input = matches!(
+                a.role(),
+                Role::ComboBox | Role::TextInput | Role::MultilineTextInput | Role::SpinButton
+            );
+            (input && a.bounding_box().is_some() && a.label().is_none_or(|l| l.is_empty()))
+                .then(|| format!("{:?} value={:?}", a.role(), a.value()))
+        })
+        .collect();
+    assert!(unnamed.is_empty(), "inputs without a name: {unnamed:#?}");
+    let all = labels(&h);
+    for name in [
+        "Format",
+        "Output To",
+        "Frames · Start",
+        "Frames · End",
+        "Source Text",
+    ] {
+        assert!(
+            all.iter().any(|l| l == name),
+            "no input named {name:?}: {all:?}"
+        );
+    }
+}
