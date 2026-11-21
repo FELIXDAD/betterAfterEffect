@@ -986,10 +986,6 @@ fn offscreen_target(view: &mut WindowView, size: [u32; 2]) -> wgpu::TextureView 
         .unwrap_or_else(|| unreachable!("offscreen target was just created"))
 }
 
-/// The command for projects Finder asked to open: one project at a time, like AE and
-/// like `bae <project>`, so only the first is opened. Goes through the normal
-/// `file.open_project` (unsaved-changes question, error dialog).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 /// Shows `path` in Finder / Explorer (Reveal Preferences).
 fn reveal(path: &std::path::Path) {
     let result = if cfg!(target_os = "macos") {
@@ -1011,6 +1007,10 @@ fn reveal(path: &std::path::Path) {
     }
 }
 
+/// The command for projects Finder asked to open: one project at a time, like AE and
+/// like `bae <project>`, so only the first is opened. Goes through the normal
+/// `file.open_project` (unsaved-changes question, error dialog).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn open_files_invocation(paths: &[std::path::PathBuf]) -> Option<Invocation> {
     let (first, rest) = paths.split_first()?;
     if !rest.is_empty() {
