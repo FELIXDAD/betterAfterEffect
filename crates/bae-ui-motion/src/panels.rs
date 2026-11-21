@@ -153,7 +153,10 @@ impl Panel for PropertiesPanel {
                 if let Some(Value::TextDocument(doc)) = doc {
                     let key = ui.id().with(("text_src", layer.as_str()));
                     let mut text = ui.data(|d| d.get_temp::<String>(key)).unwrap_or_else(|| doc.text.clone());
-                    let r = ui.add(egui::TextEdit::multiline(&mut text).desired_rows(2).desired_width(f32::INFINITY));
+                    let value = text.clone();
+                    let r = ui
+                        .add(egui::TextEdit::multiline(&mut text).desired_rows(2).desired_width(f32::INFINITY))
+                        .labeled_value(egui::WidgetType::TextEdit, tr("Source Text"), &value);
                     if r.changed() {
                         ui.data_mut(|d| d.insert_temp(key, text.clone()));
                     }
@@ -169,7 +172,7 @@ impl Panel for PropertiesPanel {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(tr("Font Size")).color(color::TEXT));
                         let mut size = d2.font_size;
-                        let r = ui.add(widgets::HotNumber::new(&mut size).decimals(0).suffix(" px").range(1.0..=2000.0).label(tr("Size")));
+                        let r = ui.add(widgets::HotNumber::new(&mut size).decimals(0).suffix(" px").range(1.0..=2000.0).label(tr("Font Size")));
                         if r.drag_stopped() || (r.changed() && !r.dragged()) {
                             d2.font_size = size;
                             commit = true;

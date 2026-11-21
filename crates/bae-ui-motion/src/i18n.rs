@@ -72,6 +72,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Time Graph", "时间图表"),
     ("Project Items", "项目条目"),
     ("Duration Bar", "持续时间条"),
+    ("Start", "开始"),
+    ("Render Item {n} “{comp}”", "渲染项 {n}“{comp}”"),
+    ("End", "结束"),
     // Panels and tabs
     ("Composition", "合成"),
     ("Timeline", "时间轴"),

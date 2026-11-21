@@ -37,7 +37,7 @@ pub use identity::{AgentIdentity, InvalidAgentName, Permission};
 pub use render::{FrameRenderer, FrameRequest, PlaceholderRenderer, RenderError, RgbaImage};
 pub use server::{
     BaeMcpServer, Content, GUIDE_INSTRUCTIONS_EN, GUIDE_INSTRUCTIONS_ZH, InstructionsLang,
-    McpOptions, ServeError, ToolResult, instructions, run_stdio,
+    McpOptions, SaveErrorText, ServeError, ToolResult, instructions, run_stdio,
 };
 pub use session::{AgentError, AgentSession, ExecOutcome, Step};
 pub use workspace::{SharedWorkspace, Workspace};

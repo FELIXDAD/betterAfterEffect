@@ -559,12 +559,14 @@ pub(crate) fn rename_field(
     id: Id,
 ) -> Option<Option<String>> {
     let started = ui.data(|d| d.get_temp::<bool>(id)).is_none();
-    let r = ui.put(
-        rect,
-        egui::TextEdit::singleline(buf)
-            .id(id.with("field"))
-            .text_color(color::TEXT_STRONG),
-    );
+    let r = ui
+        .put(
+            rect,
+            egui::TextEdit::singleline(buf)
+                .id(id.with("field"))
+                .text_color(color::TEXT_STRONG),
+        )
+        .labeled(egui::WidgetType::TextEdit, tr("Name"));
     if started {
         r.request_focus();
         // AE selects the whole name: typing replaces it.

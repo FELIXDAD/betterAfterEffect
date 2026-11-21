@@ -19,7 +19,7 @@
 
 use std::ffi::OsString;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -160,6 +160,44 @@ pub fn reserved_subcommands() -> Vec<CliSubcommand> {
         CliSubcommand::new("pack", "Pack a project and its assets into a .baez file")
             .with_args(passthrough_args),
     ]
+}
+
+/// How the application explains a project that does not open (which file, what
+/// is wrong, in the UI language). The app installs it as a resource; subcommands
+/// from other crates (`bae render`) use it through [`project_open_error`] so every
+/// entry point says the same as `bae export-json`.
+#[derive(Clone)]
+pub struct ProjectOpenError(pub DescribeOpenError);
+
+/// Turns a project path and the error that kept it from opening into a message.
+pub type DescribeOpenError = Arc<dyn Fn(&Path, &anyhow::Error) -> String + Send + Sync>;
+
+impl fmt::Debug for ProjectOpenError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ProjectOpenError")
+    }
+}
+
+/// The error for a project at `path` that did not open: the app's wording when
+/// it installed [`ProjectOpenError`], otherwise "cannot open the project <path>:
+/// <cause>".
+pub fn project_open_error(
+    describe: Option<&ProjectOpenError>,
+    path: &Path,
+    error: anyhow::Error,
+) -> anyhow::Error {
+    match describe {
+        Some(d) => anyhow::anyhow!((d.0)(path, &error)),
+        None => {
+            let shown = path.display().to_string();
+            let message = format!("{error:#}");
+            if message.contains(&shown) {
+                anyhow::anyhow!("cannot open the project: {message}")
+            } else {
+                anyhow::anyhow!("cannot open the project {shown}: {message}")
+            }
+        }
+    }
 }
 
 /// Errors from [`implement`].

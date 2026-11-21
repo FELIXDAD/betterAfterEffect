@@ -180,7 +180,8 @@ fn describe_pack_error(out: &Path, error: PackageError) -> String {
         }
         _ => return crate::file_error::describe_save(out, &anyhow::Error::new(error)),
     };
-    format!("{sentence}\n{} {error}", tr("Details:"))
+    tracing::debug!("cannot pack {}: {error}", out.display());
+    sentence
 }
 
 #[cfg(test)]

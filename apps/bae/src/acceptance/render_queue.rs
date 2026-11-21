@@ -143,10 +143,12 @@ fn png_tiff_exr_with_ranges_into_tricky_paths() {
         );
         // Done shows "Done · N · x s" and "Show in Finder".
         assert!(
-            h.query_by_label("Show in Finder").is_some(),
+            queue_control(&h, 1, "Show in Finder").is_some(),
             "{ext}: no Show in Finder"
         );
-        h.get_by_label("Render Again").click();
+        queue_control(&h, 1, "Render Again")
+            .expect("Render Again")
+            .click();
         settle(&mut h);
     }
 }
@@ -200,7 +202,7 @@ fn stop_keeps_the_rendered_frames_and_reports_n_of_m() {
         h.get_by_label("Render").accesskit_node().is_disabled(),
         "Render enabled while rendering"
     );
-    h.get_by_label("Stop").click();
+    queue_control(&h, 1, "Stop").expect("Stop").click();
     settle(&mut h);
     wait_done(&mut h, Duration::from_secs(60));
     let status = items(&h)[0].status.clone();
@@ -450,7 +452,9 @@ fn show_in_finder_passes_the_path_to_open() {
     configure(&h, 0, ExportFormat::Png, &out.join("帧 _[####].png"), 0, 2);
     render(&mut h);
     wait_done(&mut h, Duration::from_secs(30));
-    h.get_by_label("Show in Finder").click();
+    queue_control(&h, 1, "Show in Finder")
+        .expect("Show in Finder")
+        .click();
     settle(&mut h);
     // `reveal` spawns `open` without waiting for it: wait for the fake's
     // record, which appears in one rename (see `in_child_with_fake_open`).

@@ -91,7 +91,17 @@ impl AppModule for RenderModule {
                 .iter()
                 .map(|e| e.item().clone())
                 .collect();
-            run(ctx.matches, desc, media, encoders, &providers)
+            // The app's wording for projects that do not open (same as
+            // `bae export-json`).
+            let open_error = ctx.app.resource::<cli::ProjectOpenError>().cloned();
+            run(
+                ctx.matches,
+                desc,
+                media,
+                encoders,
+                &providers,
+                open_error.as_ref(),
+            )
         });
         if let Err(error) = cli::implement(&registry, app.current_owner(), render) {
             tracing::warn!("render not registered: {error}");
@@ -291,21 +301,14 @@ fn run(
     media: Option<MediaHandle>,
     encoders: Option<Encoders>,
     providers: &[std::sync::Arc<dyn SourceProvider>],
+    open_error: Option<&cli::ProjectOpenError>,
 ) -> anyhow::Result<ExitCode> {
     let entered = Instant::now();
     let project_path = m.get_one::<PathBuf>("project").expect("required");
     let comp = comp_path(m.get_one::<String>("comp").expect("required"))?;
     let json = m.get_flag("json");
-    // Name the file unless the error already does (`bae render: error: …`).
-    let project = Project::open(project_path).map_err(|error| {
-        let shown = project_path.display().to_string();
-        let message = error.to_string();
-        if message.contains(&shown) {
-            anyhow::anyhow!("cannot open the project: {message}")
-        } else {
-            anyhow::anyhow!("cannot open the project {shown}: {message}")
-        }
-    })?;
+    let project = Project::open(project_path)
+        .map_err(|error| cli::project_open_error(open_error, project_path, error.into()))?;
     let stage = &project.stage;
     let (rate, duration) = comp_timing(stage, &comp)?;
 
@@ -594,7 +597,7 @@ mod tests {
             ])
             .unwrap();
         assert_eq!(
-            run(&m, GpuContextDescriptor::default(), None, None, &[]).unwrap(),
+            run(&m, GpuContextDescriptor::default(), None, None, &[], None).unwrap(),
             ExitCode::SUCCESS
         );
         let (w, _, data) = crate::png_out::read_rgba8(&out).unwrap();
@@ -638,7 +641,7 @@ mod tests {
             ])
             .unwrap();
         assert_eq!(
-            run(&m, GpuContextDescriptor::default(), None, None, &[]).unwrap(),
+            run(&m, GpuContextDescriptor::default(), None, None, &[], None).unwrap(),
             ExitCode::SUCCESS
         );
         for f in ["out_00.png", "out_01.png"] {
@@ -739,7 +742,7 @@ mod tests {
         let m = args(clap::Command::new("render"))
             .try_get_matches_from(std::iter::once("render").chain(argv.iter().copied()))
             .unwrap();
-        run(&m, GpuContextDescriptor::default(), None, None, &[])
+        run(&m, GpuContextDescriptor::default(), None, None, &[], None)
     }
 
     fn has_gpu() -> bool {
