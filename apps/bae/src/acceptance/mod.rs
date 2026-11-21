@@ -20,6 +20,7 @@
 
 mod files_flow;
 mod layers;
+mod layout;
 mod menus;
 mod render_queue;
 mod startup;
@@ -345,8 +346,13 @@ pub(crate) fn gui() -> Ui {
 }
 
 pub(crate) fn gui_with(gui: Gui) -> Ui {
+    gui_sized(gui, egui::vec2(SIZE[0], SIZE[1]))
+}
+
+/// A harness with a window client area of `size` logical points.
+pub(crate) fn gui_sized(gui: Gui, size: egui::Vec2) -> Ui {
     let mut h = Harness::builder()
-        .with_size(egui::vec2(SIZE[0], SIZE[1]))
+        .with_size(size)
         .with_max_steps(64)
         // A 60 Hz display: double-clicks and playback see real frame times.
         .with_step_dt(1.0 / 60.0)
