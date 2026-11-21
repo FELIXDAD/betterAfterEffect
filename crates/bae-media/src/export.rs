@@ -16,7 +16,9 @@
 //!   Which jobs a *project* contains is project data and belongs to the document
 //!   model (changed through commands); this queue only executes them.
 //!
-//! Built-in encoders here: PNG and OpenEXR sequences ([`ImageSequenceEncoder`]).
+//! Built-in encoders here: PNG, TIFF and OpenEXR sequences
+//! ([`ImageSequenceEncoder`], written in parallel; [`write_image_file`] for
+//! one image).
 //! Movie encoders (VideoToolbox / AVFoundation, Media Foundation) live in the
 //! platform modules.
 
@@ -83,6 +85,38 @@ pub enum ExrCompression {
     Piz,
 }
 
+/// TIFF compression.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TiffCompression {
+    /// No compression (AE's default; fastest to write and read).
+    #[default]
+    None,
+    /// LZW.
+    Lzw,
+    /// Deflate (zlib, fast level).
+    Deflate,
+}
+
+/// PNG compression effort. Every level is lossless; higher levels trade
+/// encoding time for smaller files.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PngCompression {
+    /// Stored, unfiltered (largest files).
+    None,
+    /// `fdeflate` with the Up filter: about 3× faster than [`Self::Fast`],
+    /// files about 20 % larger.
+    Fastest,
+    /// `fdeflate` with adaptive filtering (default: fast, good ratio).
+    #[default]
+    Fast,
+    /// zlib level 6 with adaptive filtering.
+    Balanced,
+    /// zlib level 9 with adaptive filtering.
+    High,
+    /// zlib level 1–9 with adaptive filtering (0 = [`Self::None`]).
+    Level(u8),
+}
+
 /// What an export is encoded with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum VideoCodec {
@@ -92,23 +126,26 @@ pub enum VideoCodec {
     Hevc,
     /// Apple ProRes.
     ProRes(ProResProfile),
-    /// PNG image sequence (8 or 16 bit).
+    /// PNG image sequence (8 or 16 bit; effort in
+    /// [`EncodeSettings::png_compression`]).
     Png,
     /// OpenEXR image sequence (half or float).
     Exr(ExrCompression),
+    /// TIFF image sequence (8 or 16 bit).
+    Tiff(TiffCompression),
 }
 
 impl VideoCodec {
     /// `true` for image-sequence codecs (one file per frame).
     pub fn is_image_sequence(self) -> bool {
-        matches!(self, Self::Png | Self::Exr(_))
+        matches!(self, Self::Png | Self::Exr(_) | Self::Tiff(_))
     }
 
     /// Whether the codec can carry alpha.
     pub fn supports_alpha(self) -> bool {
         match self {
             Self::H264 => false,
-            Self::Hevc | Self::Png | Self::Exr(_) => true,
+            Self::Hevc | Self::Png | Self::Exr(_) | Self::Tiff(_) => true,
             Self::ProRes(profile) => profile.supports_alpha(),
         }
     }
@@ -164,6 +201,14 @@ pub struct EncodeSettings {
     pub start_timecode: Option<Timecode>,
     /// Audio (reserved).
     pub audio: Option<AudioEncodeSettings>,
+    /// PNG compression effort (PNG only).
+    #[serde(default)]
+    pub png_compression: PngCompression,
+    /// Worker threads compressing and writing image-sequence files; `None` =
+    /// one per logical core (capped so queued frames stay within
+    /// [`SEQUENCE_QUEUE_BYTES`]). Not written to the output.
+    #[serde(default)]
+    pub threads: Option<usize>,
 }
 
 impl EncodeSettings {
@@ -179,7 +224,7 @@ impl EncodeSettings {
     ) -> Self {
         let color = match codec {
             VideoCodec::Exr(_) => ColorInfo::linear_bt709(),
-            VideoCodec::Png => ColorInfo::srgb(),
+            VideoCodec::Png | VideoCodec::Tiff(_) => ColorInfo::srgb(),
             // Same tags as AE's H.264 / QuickTime output (checked against AE
             // 2026 renders): BT.709 for HD and larger, SMPTE-C primaries with
             // the BT.601 matrix below 720 lines; BT.709 transfer either way.
@@ -215,6 +260,8 @@ impl EncodeSettings {
             start_number: 0,
             start_timecode: None,
             audio: None,
+            png_compression: PngCompression::default(),
+            threads: None,
         }
     }
 
@@ -245,7 +292,7 @@ impl EncodeSettings {
             return bad(format!("{:?} cannot carry alpha", self.codec));
         }
         let depth_ok = match self.codec {
-            VideoCodec::Png => matches!(self.bit_depth, 8 | 16),
+            VideoCodec::Png | VideoCodec::Tiff(_) => matches!(self.bit_depth, 8 | 16),
             VideoCodec::Exr(_) => matches!(self.bit_depth, 16 | 32),
             VideoCodec::Hevc => matches!(self.bit_depth, 8 | 10),
             VideoCodec::H264 | VideoCodec::ProRes(_) => true,
@@ -275,6 +322,31 @@ pub struct EncodeOutput {
     pub files: Vec<PathBuf>,
     /// Frames written.
     pub frames: u64,
+    /// Where the encoder spent its time (zero where it does not measure).
+    #[serde(default)]
+    pub stats: EncodeStats,
+}
+
+/// Time an encoder spent, summed over its worker threads (so it can exceed
+/// the wall time when files are written in parallel).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EncodeStats {
+    /// Pixel conversion and compression into memory.
+    pub encode: Duration,
+    /// Creating and writing files.
+    pub write: Duration,
+    /// Bytes written.
+    pub bytes: u64,
+    /// Worker threads used (1 for single-threaded encoders).
+    pub threads: usize,
+}
+
+impl EncodeStats {
+    fn add(&mut self, other: &EncodeStats) {
+        self.encode += other.encode;
+        self.write += other.write;
+        self.bytes += other.bytes;
+    }
 }
 
 // ---- encoder traits -------------------------------------------------------
@@ -287,6 +359,12 @@ pub trait Encoder: Send {
     /// Appends the next frame. The frame must have the output size; any
     /// [`PixelFormat`] and alpha mode is accepted and converted.
     fn push_frame(&mut self, frame: &CpuFrame) -> Result<(), MediaError>;
+
+    /// Like [`Self::push_frame`], but hands the frame over, so encoders that
+    /// queue frames (image sequences) do not copy them.
+    fn push_frame_owned(&mut self, frame: CpuFrame) -> Result<(), MediaError> {
+        self.push_frame(&frame)
+    }
 
     /// Appends audio (reserved).
     fn push_audio(&mut self, audio: &AudioBuffer) -> Result<(), MediaError> {
@@ -572,11 +650,19 @@ impl SequencePattern {
     }
 }
 
-/// PNG / OpenEXR sequence encoder (one file per frame).
+/// Upper bound on the bytes of frames held by the image-sequence writer
+/// threads (each holds at most two: one queued, one being written). The worker
+/// count is capped to stay within it, so memory does not grow with the frame
+/// count, and 4K / float frames on many-core machines stay bounded.
+pub const SEQUENCE_QUEUE_BYTES: u64 = 512 << 20;
+
+/// PNG / TIFF / OpenEXR sequence encoder (one file per frame).
 ///
-/// Frames are compressed and written by a few worker threads (files are
-/// independent), so exporting is not limited by one core; the queue is
-/// bounded to keep memory in check at 4K. Errors surface on a later
+/// Frames are converted, compressed and written by worker threads (files are
+/// independent): one per logical core by default ([`EncodeSettings::threads`]),
+/// capped by [`SEQUENCE_QUEUE_BYTES`]. The queue holds one frame per worker, so
+/// a producer faster than the disk blocks instead of buffering. Each file is
+/// compressed into memory and written with one call. Errors surface on a later
 /// `push_frame` or on `finish`.
 pub struct ImageSequenceEncoder {
     settings: EncodeSettings,
@@ -584,6 +670,7 @@ pub struct ImageSequenceEncoder {
     files: Vec<PathBuf>,
     writer: Arc<SequenceWriter>,
     pool: Option<WriterPool>,
+    stats: EncodeStats,
 }
 
 /// Writes one frame file (shared by the worker threads).
@@ -601,47 +688,90 @@ struct WriterPool {
     sender: Option<std::sync::mpsc::SyncSender<WriteJob>>,
     workers: Vec<std::thread::JoinHandle<()>>,
     error: Arc<parking_lot::Mutex<Option<MediaError>>>,
+    stats: Arc<parking_lot::Mutex<EncodeStats>>,
+    threads: usize,
+}
+
+/// Writer threads for frames of `frame_bytes`: `requested`, or one per logical
+/// core, capped so the frames they hold stay within [`SEQUENCE_QUEUE_BYTES`].
+fn sequence_threads(requested: Option<usize>, frame_bytes: u64) -> usize {
+    let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let budget = SEQUENCE_QUEUE_BYTES / (2 * frame_bytes.max(1));
+    requested
+        .unwrap_or(cores)
+        .clamp(1, usize::try_from(budget).unwrap_or(usize::MAX).max(1))
+}
+
+/// The pixel layout and alpha an image encoder ([`ImageSequenceEncoder`],
+/// [`write_image_file`]) takes without converting: read back in this layout.
+pub fn sequence_input_format(s: &EncodeSettings) -> (PixelFormat, AlphaMode) {
+    let format = match (s.codec, s.bit_depth) {
+        (VideoCodec::Png | VideoCodec::Tiff(_), 16) => PixelFormat::Rgba16,
+        (VideoCodec::Png | VideoCodec::Tiff(_), _) => PixelFormat::Rgba8,
+        (VideoCodec::Exr(_), 16) => PixelFormat::Rgba16Float,
+        _ => PixelFormat::Rgba32Float,
+    };
+    (format, s.alpha)
 }
 
 impl WriterPool {
-    fn new(writer: &Arc<SequenceWriter>) -> Self {
-        let threads = std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(1, 4));
+    fn new(writer: &Arc<SequenceWriter>, threads: usize) -> Self {
         let (sender, receiver) = std::sync::mpsc::sync_channel::<WriteJob>(threads);
         let receiver = Arc::new(parking_lot::Mutex::new(receiver));
         let error: Arc<parking_lot::Mutex<Option<MediaError>>> = Arc::default();
+        let stats: Arc<parking_lot::Mutex<EncodeStats>> = Arc::default();
         let workers = (0..threads)
-            .map(|_| {
-                let (writer, receiver, error) = (writer.clone(), receiver.clone(), error.clone());
-                std::thread::spawn(move || {
-                    loop {
-                        // Hold the lock only while taking a job.
-                        let Ok(job) = receiver.lock().recv() else {
-                            break;
-                        };
-                        if error.lock().is_some() {
-                            continue;
+            .map(|i| {
+                let (writer, receiver, error, stats) = (
+                    writer.clone(),
+                    receiver.clone(),
+                    error.clone(),
+                    stats.clone(),
+                );
+                std::thread::Builder::new()
+                    .name(format!("bae-media.write.{i}"))
+                    .spawn(move || {
+                        loop {
+                            // Hold the lock only while taking a job.
+                            let Ok(job) = receiver.lock().recv() else {
+                                break;
+                            };
+                            if error.lock().is_some() {
+                                continue;
+                            }
+                            match writer.write(&job.path, &job.frame, job.index) {
+                                Ok(s) => stats.lock().add(&s),
+                                Err(e) => {
+                                    error.lock().get_or_insert(e);
+                                }
+                            }
                         }
-                        if let Err(e) = writer.write(&job.path, &job.frame, job.index) {
-                            error.lock().get_or_insert(e);
-                        }
-                    }
-                })
+                    })
+                    .expect("spawn image writer thread")
             })
             .collect();
         WriterPool {
             sender: Some(sender),
             workers,
             error,
+            stats,
+            threads,
         }
     }
 
-    /// Waits for every queued frame; returns the first error.
-    fn join(mut self) -> Result<(), MediaError> {
+    /// Waits for every queued frame; returns the first error, or what the
+    /// workers spent.
+    fn join(mut self) -> Result<EncodeStats, MediaError> {
         self.sender = None;
         for worker in self.workers.drain(..) {
             let _ = worker.join();
         }
-        self.error.lock().take().map_or(Ok(()), Err)
+        if let Some(error) = self.error.lock().take() {
+            return Err(error);
+        }
+        let mut stats = *self.stats.lock();
+        stats.threads = self.threads;
+        Ok(stats)
     }
 }
 
@@ -662,26 +792,84 @@ impl ImageSequenceEncoder {
         let writer = Arc::new(SequenceWriter {
             settings: settings.clone(),
         });
+        let (format, _) = sequence_input_format(settings);
+        let frame_bytes = u64::from(settings.width)
+            * u64::from(settings.height)
+            * u64::from(format.bytes_per_pixel());
+        let threads = sequence_threads(settings.threads, frame_bytes);
         Ok(ImageSequenceEncoder {
             settings: settings.clone(),
             pattern,
             files: Vec::new(),
-            pool: Some(WriterPool::new(&writer)),
+            pool: Some(WriterPool::new(&writer, threads)),
             writer,
+            stats: EncodeStats::default(),
         })
+    }
+
+    /// Worker threads writing files.
+    pub fn threads(&self) -> usize {
+        self.pool.as_ref().map_or(1, |pool| pool.threads)
     }
 }
 
+/// Writes one image file (PNG, TIFF or OpenEXR, per `settings.codec`) at
+/// exactly `path`, on the calling thread: single frames (`bae render
+/// --frame`), screenshots. `settings.path` is ignored.
+pub fn write_image_file(
+    settings: &EncodeSettings,
+    path: &Path,
+    frame: &CpuFrame,
+) -> Result<EncodeStats, MediaError> {
+    settings.validate()?;
+    if !settings.codec.is_image_sequence() {
+        return Err(MediaError::Unsupported(format!(
+            "{:?} is not an image codec",
+            settings.codec
+        )));
+    }
+    check_frame_size(settings, frame)?;
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir).map_err(|e| MediaError::io(dir, e))?;
+    }
+    let mut stats = SequenceWriter {
+        settings: settings.clone(),
+    }
+    .write(path, frame, 0)?;
+    stats.threads = 1;
+    Ok(stats)
+}
+
+/// RGBA samples without the alpha sample.
+fn drop_alpha<T: Copy>(samples: &[T]) -> Vec<T> {
+    let mut out = Vec::with_capacity(samples.len() / 4 * 3);
+    for px in samples.as_chunks::<4>().0 {
+        out.extend_from_slice(&px[..3]);
+    }
+    out
+}
+
 impl SequenceWriter {
-    fn write(&self, path: &Path, frame: &CpuFrame, index: u64) -> Result<(), MediaError> {
-        match self.settings.codec {
-            VideoCodec::Png => self.write_png(path, frame),
-            VideoCodec::Exr(compression) => self.write_exr(path, frame, compression, index),
+    /// Encodes `frame` into memory, then writes the file in one call.
+    fn write(&self, path: &Path, frame: &CpuFrame, index: u64) -> Result<EncodeStats, MediaError> {
+        let started = Instant::now();
+        let bytes = match self.settings.codec {
+            VideoCodec::Png => self.encode_png(path, frame)?,
+            VideoCodec::Exr(compression) => self.encode_exr(path, frame, compression, index)?,
+            VideoCodec::Tiff(compression) => self.encode_tiff(path, frame, compression)?,
             other => unreachable!("checked in ImageSequenceEncoder::new: {other:?}"),
-        }
+        };
+        let encoded = Instant::now();
+        std::fs::write(path, &bytes).map_err(|e| MediaError::io(path, e))?;
+        Ok(EncodeStats {
+            encode: encoded - started,
+            write: encoded.elapsed(),
+            bytes: bytes.len() as u64,
+            threads: 0,
+        })
     }
 
-    fn write_png(&self, path: &Path, frame: &CpuFrame) -> Result<(), MediaError> {
+    fn encode_png(&self, path: &Path, frame: &CpuFrame) -> Result<Vec<u8>, MediaError> {
         let s = &self.settings;
         let sixteen = s.bit_depth == 16;
         let frame = convert_frame_cow(
@@ -693,25 +881,33 @@ impl SequenceWriter {
             },
             s.alpha,
         );
-        let channels = if s.has_alpha() { 4 } else { 3 };
-        let bytes_per_sample = if sixteen { 2 } else { 1 };
-        let mut data = Vec::with_capacity(
-            frame.width as usize * frame.height as usize * channels * bytes_per_sample,
-        );
-        for px in frame.data.chunks_exact(4 * bytes_per_sample) {
-            for c in 0..channels {
-                let sample = &px[c * bytes_per_sample..(c + 1) * bytes_per_sample];
-                if sixteen {
-                    // PNG stores big-endian samples.
-                    let v = u16::from_ne_bytes([sample[0], sample[1]]);
-                    data.extend_from_slice(&v.to_be_bytes());
-                } else {
-                    data.push(sample[0]);
+        // 8-bit RGBA (the usual case) is written straight from the frame.
+        let data: std::borrow::Cow<'_, [u8]> = match (sixteen, s.has_alpha()) {
+            (false, true) => std::borrow::Cow::Borrowed(&frame.data),
+            (false, false) => std::borrow::Cow::Owned(drop_alpha(&frame.data)),
+            (true, alpha) => {
+                let channels = if alpha { 4 } else { 3 };
+                let mut data =
+                    Vec::with_capacity(frame.width as usize * frame.height as usize * channels * 2);
+                for px in frame.data.as_chunks::<8>().0 {
+                    for sample in px.as_chunks::<2>().0.iter().take(channels) {
+                        // PNG stores big-endian samples.
+                        data.extend_from_slice(&u16::from_ne_bytes(*sample).to_be_bytes());
+                    }
                 }
+                std::borrow::Cow::Owned(data)
             }
-        }
-        let file = std::fs::File::create(path).map_err(|e| MediaError::io(path, e))?;
-        let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), s.width, s.height);
+        };
+        let stored = matches!(
+            s.png_compression,
+            PngCompression::None | PngCompression::Level(0)
+        );
+        let mut out = Vec::with_capacity(if stored {
+            data.len() + 4096
+        } else {
+            data.len() / 4
+        });
+        let mut encoder = png::Encoder::new(&mut out, s.width, s.height);
         encoder.set_color(if s.has_alpha() {
             png::ColorType::Rgba
         } else {
@@ -722,7 +918,19 @@ impl SequenceWriter {
         } else {
             png::BitDepth::Eight
         });
-        encoder.set_compression(png::Compression::Fast);
+        match s.png_compression {
+            PngCompression::None | PngCompression::Level(0) => {
+                encoder.set_compression(png::Compression::NoCompression);
+            }
+            PngCompression::Fastest => encoder.set_compression(png::Compression::Fastest),
+            PngCompression::Fast => encoder.set_compression(png::Compression::Fast),
+            PngCompression::Balanced => encoder.set_compression(png::Compression::Balanced),
+            PngCompression::High => encoder.set_compression(png::Compression::High),
+            PngCompression::Level(level) => {
+                encoder.set_deflate_compression(png::DeflateCompression::Level(level.min(9)));
+                encoder.set_filter(png::Filter::Adaptive);
+            }
+        }
         match s.color.transfer {
             TransferFunction::Srgb if matches!(s.color.primaries, ColorPrimaries::Bt709) => {
                 encoder.set_source_srgb(png::SrgbRenderingIntent::Perceptual);
@@ -747,16 +955,85 @@ impl SequenceWriter {
         writer
             .write_image_data(&data)
             .map_err(|e| MediaError::decode(path, e))?;
-        writer.finish().map_err(|e| MediaError::decode(path, e))
+        writer.finish().map_err(|e| MediaError::decode(path, e))?;
+        Ok(out)
     }
 
-    fn write_exr(
+    fn encode_tiff(
+        &self,
+        path: &Path,
+        frame: &CpuFrame,
+        compression: TiffCompression,
+    ) -> Result<Vec<u8>, MediaError> {
+        use tiff::encoder::{Compression, TiffEncoder, colortype, compression::DeflateLevel};
+        use tiff::tags::Tag;
+        let s = &self.settings;
+        let sixteen = s.bit_depth == 16;
+        let frame = convert_frame_cow(
+            frame,
+            if sixteen {
+                PixelFormat::Rgba16
+            } else {
+                PixelFormat::Rgba8
+            },
+            s.alpha,
+        );
+        let err = |e: tiff::TiffError| MediaError::decode(path, e);
+        let (w, h) = (s.width, s.height);
+        let mut out = std::io::Cursor::new(Vec::with_capacity(frame.data.len() + 4096));
+        let mut tiff =
+            TiffEncoder::new(&mut out)
+                .map_err(err)?
+                .with_compression(match compression {
+                    TiffCompression::None => Compression::Uncompressed,
+                    TiffCompression::Lzw => Compression::Lzw,
+                    TiffCompression::Deflate => Compression::Deflate(DeflateLevel::Fast),
+                });
+        // ExtraSamples: 1 = associated alpha (premultiplied), 2 = unassociated
+        // (straight), as AE writes and our decoder reads them.
+        let extra: u16 = if s.alpha == AlphaMode::Premultiplied {
+            1
+        } else {
+            2
+        };
+        if sixteen {
+            // Native-endian samples; the encoder writes the matching byte order.
+            let samples: std::borrow::Cow<'_, [u16]> = match bytemuck::try_cast_slice(&frame.data) {
+                Ok(slice) => std::borrow::Cow::Borrowed(slice),
+                Err(_) => std::borrow::Cow::Owned(bytemuck::pod_collect_to_vec(&frame.data)),
+            };
+            if s.has_alpha() {
+                let mut image = tiff.new_image::<colortype::RGBA16>(w, h).map_err(err)?;
+                image
+                    .encoder()
+                    .write_tag(Tag::ExtraSamples, extra)
+                    .map_err(err)?;
+                image.write_data(&samples).map_err(err)?;
+            } else {
+                tiff.write_image::<colortype::RGB16>(w, h, &drop_alpha(&samples))
+                    .map_err(err)?;
+            }
+        } else if s.has_alpha() {
+            let mut image = tiff.new_image::<colortype::RGBA8>(w, h).map_err(err)?;
+            image
+                .encoder()
+                .write_tag(Tag::ExtraSamples, extra)
+                .map_err(err)?;
+            image.write_data(&frame.data).map_err(err)?;
+        } else {
+            tiff.write_image::<colortype::RGB8>(w, h, &drop_alpha(&frame.data))
+                .map_err(err)?;
+        }
+        Ok(out.into_inner())
+    }
+
+    fn encode_exr(
         &self,
         path: &Path,
         frame: &CpuFrame,
         compression: ExrCompression,
         index: u64,
-    ) -> Result<(), MediaError> {
+    ) -> Result<Vec<u8>, MediaError> {
         use exr::prelude::{
             Blocks, Encoding, Image, LineOrder, SpecificChannels, Vec2, WritableImage as _,
         };
@@ -829,18 +1106,19 @@ impl SequenceWriter {
                 binary_groups: [0; 8],
             });
         }
+        let mut out = std::io::Cursor::new(Vec::with_capacity(frame.data.len() / 2));
         let result = match (s.has_alpha(), half) {
             (true, true) => {
                 let channels = SpecificChannels::rgba(move |pos| px16(pos).into());
                 let mut image = Image::from_encoded_channels(size, encoding, channels);
                 image.attributes = attributes;
-                image.write().non_parallel().to_file(path)
+                image.write().non_parallel().to_buffered(&mut out)
             }
             (true, false) => {
                 let channels = SpecificChannels::rgba(move |pos| px32(pos).into());
                 let mut image = Image::from_encoded_channels(size, encoding, channels);
                 image.attributes = attributes;
-                image.write().non_parallel().to_file(path)
+                image.write().non_parallel().to_buffered(&mut out)
             }
             (false, true) => {
                 let channels = SpecificChannels::rgb(move |pos| {
@@ -849,7 +1127,7 @@ impl SequenceWriter {
                 });
                 let mut image = Image::from_encoded_channels(size, encoding, channels);
                 image.attributes = attributes;
-                image.write().non_parallel().to_file(path)
+                image.write().non_parallel().to_buffered(&mut out)
             }
             (false, false) => {
                 let channels = SpecificChannels::rgb(move |pos| {
@@ -858,10 +1136,11 @@ impl SequenceWriter {
                 });
                 let mut image = Image::from_encoded_channels(size, encoding, channels);
                 image.attributes = attributes;
-                image.write().non_parallel().to_file(path)
+                image.write().non_parallel().to_buffered(&mut out)
             }
         };
-        result.map_err(|e| MediaError::decode(path, e))
+        result.map_err(|e| MediaError::decode(path, e))?;
+        Ok(out.into_inner())
     }
 }
 
@@ -892,6 +1171,14 @@ impl Encoder for ImageSequenceEncoder {
 
     fn push_frame(&mut self, frame: &CpuFrame) -> Result<(), MediaError> {
         check_frame_size(&self.settings, frame)?;
+        // Convert here (a plain copy when the GPU already did) so workers get
+        // exactly what they write.
+        let (format, alpha) = sequence_input_format(&self.settings);
+        self.push_frame_owned(convert_frame_cow(frame, format, alpha).into_owned())
+    }
+
+    fn push_frame_owned(&mut self, frame: CpuFrame) -> Result<(), MediaError> {
+        check_frame_size(&self.settings, &frame)?;
         let index = self.files.len() as u64;
         let path = self
             .pattern
@@ -901,10 +1188,6 @@ impl Encoder for ImageSequenceEncoder {
                 if let Some(error) = pool.error.lock().take() {
                     return Err(error);
                 }
-                // Convert here (cheap when the GPU already did) so workers get
-                // exactly what they write.
-                let (format, alpha) = self.input_format().expect("sequences have a format");
-                let frame = convert_frame_cow(frame, format, alpha).into_owned();
                 let sender = pool.sender.as_ref().expect("open until finish");
                 sender
                     .send(WriteJob {
@@ -914,7 +1197,10 @@ impl Encoder for ImageSequenceEncoder {
                     })
                     .map_err(|_| MediaError::Unsupported("image writer stopped".into()))?;
             }
-            None => self.writer.write(&path, frame, index)?,
+            None => {
+                let stats = self.writer.write(&path, &frame, index)?;
+                self.stats.add(&stats);
+            }
         }
         self.files.push(path);
         Ok(())
@@ -925,23 +1211,21 @@ impl Encoder for ImageSequenceEncoder {
     }
 
     fn input_format(&self) -> Option<(PixelFormat, AlphaMode)> {
-        let s = &self.settings;
-        let format = match (s.codec, s.bit_depth) {
-            (VideoCodec::Png, 16) => PixelFormat::Rgba16,
-            (VideoCodec::Png, _) => PixelFormat::Rgba8,
-            (VideoCodec::Exr(_), 16) => PixelFormat::Rgba16Float,
-            _ => PixelFormat::Rgba32Float,
-        };
-        Some((format, s.alpha))
+        Some(sequence_input_format(&self.settings))
     }
 
     fn finish(mut self: Box<Self>) -> Result<EncodeOutput, MediaError> {
+        let mut stats = self.stats;
+        stats.threads = 1;
         if let Some(pool) = self.pool.take() {
-            pool.join()?;
+            let pooled = pool.join()?;
+            stats.add(&pooled);
+            stats.threads = pooled.threads;
         }
         Ok(EncodeOutput {
             frames: self.files.len() as u64,
             files: self.files,
+            stats,
         })
     }
 
@@ -955,7 +1239,7 @@ impl Encoder for ImageSequenceEncoder {
     }
 }
 
-/// [`EncoderFormat`] for PNG and OpenEXR sequences.
+/// [`EncoderFormat`] for PNG, TIFF and OpenEXR sequences.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ImageSequenceFormat;
 
@@ -1226,10 +1510,10 @@ pub fn render(
                 ProducedFrame::Cpu(cpu) => {
                     // Keep order: drain GPU frames submitted before this one.
                     while let Some(done) = gpu.and_then(|gpu| readback.wait_next(gpu)) {
-                        encoder.push_frame(&done?)?;
+                        encoder.push_frame_owned(done?)?;
                         report(encoder.as_ref());
                     }
-                    encoder.push_frame(&cpu)?;
+                    encoder.push_frame_owned(cpu)?;
                     report(encoder.as_ref());
                 }
                 ProducedFrame::Gpu(gpu_frame) => {
@@ -1239,7 +1523,7 @@ pub fn render(
                     if readback.is_full()
                         && let Some(done) = readback.wait_next(gpu)
                     {
-                        encoder.push_frame(&done?)?;
+                        encoder.push_frame_owned(done?)?;
                         report(encoder.as_ref());
                     }
                     match encoder.input_format() {
@@ -1259,7 +1543,7 @@ pub fn render(
                 if cancel.is_cancelled() {
                     return Err(MediaError::Canceled);
                 }
-                encoder.push_frame(&done?)?;
+                encoder.push_frame_owned(done?)?;
                 report(encoder.as_ref());
             }
         }

@@ -61,4 +61,7 @@ pub enum RenderError {
     /// Something else (effect or source specific).
     #[error("{0}")]
     Other(String),
+    /// An export was cancelled.
+    #[error("export canceled")]
+    Canceled,
 }
