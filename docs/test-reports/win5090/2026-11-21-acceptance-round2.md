@@ -19,8 +19,8 @@
 |---|---|---|---|---|
 | **A** | 启动和欢迎框 | **通过** | — | 冷启动 0.94 s 弹出欢迎框；Esc、关闭按钮（×）、点框外均可关闭；Motion / Review / Agent 三个入口按钮均正确切换工作区；正常关闭后热启动 0.82 s 不再弹出欢迎框 |
 | **B** | 新建合成、图层 ▸ 新建、菜单与快捷键 | **失败** | [#117](https://github.com/FELIXDAD/betterAfterEffect/issues/117), [#118](https://github.com/FELIXDAD/betterAfterEffect/issues/118) | 新建合成与 `Layer ▸ New` 全部 9 项图层创建及 `export-json` 均通过；无合成/有合成/有图层菜单置灰逻辑正确；`Edit ▸ Undo/Redo` 等 Shell 自有菜单项缺失快捷键显示（#117）；`Window` 菜单缺少 `Render Queue` 入口（#118）；`Ctrl+Shift+S` 在本机被系统全局热键占用（1409），归类为环境/自动化受限 |
-| **C** | 时间轴改名（IME / 空格 / Emoji / 超长名） | 进行中 | — | — |
-| **D** | 关键帧、播放、焦点与撤销重做 | 待测 | — | — |
+| **C** | 时间轴改名（IME / 空格 / Emoji / 超长名） | **通过** | — | 双击图层名触发行内改名；真实微软拼音 IME 组字选词（`ni'hao` → `你好`）、含空格名（物理空格键不触发播放）、Emoji（`🎬 场记测试`）、323 字符超长名全部正常显示且经保存—重开后与 `export-json` 逐字一致 |
+| **D** | 关键帧、播放、焦点与撤销重做 | 进行中 | — | — |
 | **E** | 保存和打开（边界与异常） | 待测 | — | — |
 | **F** | 渲染队列（格式 / 停止 / 错误 / 满盘 / 多合成） | 待测 | — | — |
 | **G** | 语言（`BAE_LANG=zh` / `en`） | 待测 | — | — |
@@ -67,3 +67,24 @@
 | Window 菜单面板完整性 | **失败（#118）** | `Window` 菜单缺少 **`Render Queue`（渲染队列）** 入口（与 `render_queue.rs` 注释及 `Ctrl+Alt+0` 不一致），已提 [#118](https://github.com/FELIXDAD/betterAfterEffect/issues/118) |
 
 ![图 2：通过 Layer ▸ New 创建全部 9 种图层后的主界面](./acceptance-round2-shots/02-b-all-layers.jpg)
+
+---
+
+## C. 时间轴改名
+
+**结论：通过**
+
+在 `Comp 1` 中创建 4 个纯色图层（`Solid 1`–`Solid 4`），通过双击时间轴 `Layer Name` 列触发行内改名（注：选中图层按 `Enter` 不触发改名，仅双击触发，`crates/bae-ui-motion/src/timeline.rs:1067`），逐一完成 4 类输入后保存为 `E:\bae-test\acc2\c_rename.bae`，关闭进程并以命令行重新打开该工程、双击项目面板中的 `Comp 1` 核验界面显示，同时以 `bae.exe export-json` 逐字比对落盘值。
+
+| 检查项 | 操作与验证方式 | 结果 | 实测现象与证据 |
+|---|---|---|---|
+| 真实中文输入法组字 | 双击第 1 行图层名，确认微软拼音处于中文输入态（`IMC_GETOPENSTATUS=1`，`IMC_SETCONVERSIONMODE=1`），发送真实物理按键 `n i h a o`，截图确认预编辑 `ni'hao` 与微软拼音候选框 `1 你好 2 你号 ...` 正确跟随光标弹出（见图 3），按 `1` 选词再按 `Enter` 提交 | **通过** | 预编辑、候选框定位、选词上屏与回车提交均顺畅，图层名成功改为 `你好` |
+| 含空格图层名 | 双击第 2 行图层名，使用物理 `Space` 键与文本输入 `My Layer With Spaces 01` 后按 `Enter` | **通过** | 空格正常输入为字符，时间码保持 `0:00:00:00` 未误触发播放 |
+| Emoji 图层名 | 双击第 3 行图层名，输入 `🎬 场记测试` 后按 `Enter` | **通过** | 场记板 Emoji 正常渲染（无乱码/方框），中文同显正常 |
+| 超长图层名（>300 字符） | 双击第 4 行图层名，输入 323 字符名称（`LongName_` + 31×`A123456789` + `_END`）后按 `Enter` | **通过** | 无崩溃、无卡顿，时间轴 `Layer Name` 列按列宽自动截断为 `LongName_A123456789...`，不挤占右侧开关与 Parent 列 |
+| 保存—关闭—重开持久化 | `Ctrl+S` 保存至 `c_rename.bae`，关闭并重开工程，核对界面（见图 4）与 `bae.exe export-json` | **通过** | 4 个图层名在界面与 `export-json` 中均 100% 逐字一致：`/comps/Comp_1/layers/Solid_4`=`"你好"`（len=2）、`Solid_3`=`"My Layer With Spaces 01"`（len=23）、`Solid_2`=`"🎬 场记测试"`（len=6）、`Solid_1` 完整保留 323 字符 |
+
+![图 3：时间轴行内改名时真实微软拼音 IME 组字与候选框跟随](./acceptance-round2-shots/03-c-ime-compose.jpg)
+
+![图 4：保存并重新打开工程后，4 个特殊图层名（中文 / 空格 / Emoji / 323 字符）全部保持](./acceptance-round2-shots/04-c-timeline-rename.jpg)
+
