@@ -799,3 +799,325 @@ fn chinese_ui_names_every_command_and_panel() {
         assert_eq!(row.shown, format!("打开面板: {zh}"));
     }
 }
+
+// ---- Retest of #135 / #136 / #140 (dev d95480a) ----
+use serde_json::json;
+
+/// Many screens in one session: comp with layers and revealed properties, the
+/// Render Queue in every state, the Keyboard Shortcuts and About windows, the
+/// welcome dialog, the lock notice, the review and agent workspaces (History).
+fn walk_screens(h: &mut Ui, mut each: impl FnMut(&str, &Ui)) {
+    each("empty project", h);
+    comp_with(
+        h,
+        &[
+            "motion.layer.new.solid",
+            "motion.layer.new.text",
+            "motion.layer.new.null",
+        ],
+    );
+    key(h, Modifiers::COMMAND, Key::A);
+    key(h, Modifiers::NONE, Key::P);
+    key(h, Modifiers::SHIFT, Key::S);
+    each("comp with revealed properties", h);
+    key(h, Modifiers::COMMAND, Key::M);
+    let id = h.state().render_queue().lock().items()[0].id;
+    let tmp = std::env::temp_dir().join("glyphs_[####].png");
+    for status in [
+        bae_ui_motion::render_queue::ItemStatus::Rendering { done: 3, total: 30 },
+        bae_ui_motion::render_queue::ItemStatus::Done {
+            files: 30,
+            first: tmp.clone(),
+            seconds: 1.2,
+        },
+        bae_ui_motion::render_queue::ItemStatus::Stopped {
+            done: 3,
+            total: 30,
+            first: Some(tmp.clone()),
+        },
+        bae_ui_motion::render_queue::ItemStatus::Failed("No space left on device".into()),
+    ] {
+        h.state().render_queue().lock().item_mut(id).unwrap().status = status;
+        settle(h);
+        each("render queue item", h);
+    }
+    // A refused edit: the status bar notice.
+    let layer = h.state().layers()[0].clone();
+    h.state_mut().invoke(Invocation::with_params(
+        "attr.set",
+        json!({"path": layer, "attr": "locked", "value": {"type": "bool", "value": true}}),
+    ));
+    settle(h);
+    h.state_mut().invoke(Invocation::with_params(
+        "layer.delete",
+        json!({"layers": [layer]}),
+    ));
+    settle(h);
+    each("lock notice", h);
+    h.state_mut()
+        .invoke(Invocation::new(ids::KEYBOARD_SHORTCUTS));
+    settle(h);
+    each("keyboard shortcuts", h);
+    key(h, Modifiers::NONE, Key::Escape);
+    h.state_mut().invoke(Invocation::new(ids::ABOUT));
+    settle(h);
+    each("about", h);
+    for ws in ["review", "agent"] {
+        h.state_mut().invoke(Invocation::with_params(
+            ids::SWITCH_WORKSPACE,
+            json!({ "id": ws }),
+        ));
+        settle(h);
+        each(ws, h);
+    }
+    h.state_mut().workspace.show_role_picker();
+    settle(h);
+    each("welcome dialog", h);
+}
+
+fn glyph_problems() -> Vec<String> {
+    let mut h = gui();
+    let mut out = Vec::new();
+    walk_screens(&mut h, |screen, h| {
+        for m in missing_glyphs(h) {
+            out.push(format!("{screen}: {m}"));
+        }
+    });
+    out.sort();
+    out.dedup();
+    out
+}
+
+#[test]
+fn no_missing_glyphs_on_any_screen() {
+    let problems = glyph_problems();
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+#[test]
+fn no_missing_glyphs_on_any_screen_in_chinese() {
+    if !in_child(
+        "acceptance::menus::no_missing_glyphs_on_any_screen_in_chinese",
+        &[("BAE_LANG", "zh")],
+    ) {
+        return;
+    }
+    crate::i18n::init_from_env();
+    let problems = glyph_problems();
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// Names users type (layers, comps) in scripts egui's built-in fonts and the
+/// system CJK font may not cover: what is drawn as a box.
+#[test]
+fn user_names_in_other_scripts_and_emoji() {
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let layer = h.state().layers()[0].clone();
+    let mut report = Vec::new();
+    for name in [
+        "片头 中文",
+        "日本語 かな カナ",
+        "한국어",
+        "Ελληνικά Кириллица",
+        "ñ é ü ß ø",
+        "✨ 🎬 ❤️",
+        "العربية",
+    ] {
+        h.state_mut().invoke(Invocation::with_params(
+            "attr.set",
+            json!({"path": layer, "attr": "name", "value": {"type": "string", "value": name}}),
+        ));
+        settle(&mut h);
+        let missing = crate::ui_text::missing_from_builtin_fonts(name.chars());
+        report.push(format!("{name}: {missing:?}"));
+    }
+    println!("{}", report.join("\n"));
+}
+
+/// The undo label after each kind of edit, translated as the Edit menu shows it
+/// (`tr("Undo") + tr(label)`), and the History panel's entries.
+fn undo_labels(h: &mut Ui) -> Vec<String> {
+    let mut labels = Vec::new();
+    let mut step = |h: &mut Ui, what: &str| {
+        let label = h.state().doc.undo_state().0.unwrap_or_default();
+        labels.push(format!("{what} → {label}"));
+    };
+    key(h, Modifiers::COMMAND, Key::N);
+    step(h, "new comp");
+    key(h, Modifiers::COMMAND, Key::Y);
+    step(h, "new solid");
+    key(
+        h,
+        Modifiers::COMMAND | Modifiers::ALT | Modifiers::SHIFT,
+        Key::Y,
+    );
+    step(h, "new null");
+    key(
+        h,
+        Modifiers::COMMAND | Modifiers::ALT | Modifiers::SHIFT,
+        Key::T,
+    );
+    step(h, "new text");
+    assert!(h.state_mut().menu("motion.layer.new.rectangle"));
+    settle(h);
+    step(h, "new rectangle");
+    key(h, Modifiers::ALT | Modifiers::SHIFT, Key::P);
+    step(h, "keyframe");
+    key(h, Modifiers::COMMAND, Key::CloseBracket);
+    step(h, "bring forward");
+    key(h, Modifiers::COMMAND, Key::D);
+    step(h, "duplicate");
+    for _ in 0..10 {
+        press(h, Modifiers::NONE, Key::PageDown);
+    }
+    key(h, Modifiers::COMMAND | Modifiers::SHIFT, Key::D);
+    step(h, "split");
+    key(h, Modifiers::NONE, Key::B);
+    step(h, "work area");
+    let layers = h.state().layers();
+    h.state_mut().invoke(Invocation::with_params(
+        "layer.set_parent",
+        json!({"layers": [layers[0]], "parent": layers[1]}),
+    ));
+    settle(h);
+    step(h, "set parent");
+    h.state_mut().invoke(Invocation::with_params(
+        "attr.set",
+        json!({"path": layers[1], "attr": "name", "value": {"type": "string", "value": "改名"}}),
+    ));
+    settle(h);
+    step(h, "rename");
+    labels
+}
+
+#[test]
+fn undo_and_history_names_are_chinese() {
+    if !in_child(
+        "acceptance::menus::undo_and_history_names_are_chinese",
+        &[("BAE_LANG", "zh")],
+    ) {
+        return;
+    }
+    crate::i18n::init_from_env();
+    let mut h = gui();
+    let labels = undo_labels(&mut h);
+    let mut untranslated = Vec::new();
+    for l in &labels {
+        let label = l.split(" → ").nth(1).unwrap_or_default();
+        let shown = format!("{} {}", bae_ui::tr("Undo"), bae_ui::tr(label));
+        if label.is_empty()
+            || !shown
+                .chars()
+                .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c))
+            || bae_ui::tr(label) == label
+        {
+            untranslated.push(format!("{l} (shown “{shown}”)"));
+        }
+    }
+    println!("undo labels: {labels:#?}");
+    // The History panel (review workspace) shows the same entries in Chinese.
+    h.state_mut().invoke(Invocation::with_params(
+        ids::SWITCH_WORKSPACE,
+        json!({ "id": "review" }),
+    ));
+    settle(&mut h);
+    let english: Vec<String> = painted_texts(&h)
+        .into_iter()
+        .filter(|t| {
+            labels.iter().any(|l| {
+                let label = l.split(" → ").nth(1).unwrap_or_default();
+                !label.is_empty() && t.contains(label)
+            })
+        })
+        .collect();
+    assert!(
+        untranslated.is_empty(),
+        "undo labels without Chinese: {untranslated:#?}"
+    );
+    assert!(
+        english.is_empty(),
+        "History shows English labels: {english:?}"
+    );
+}
+
+#[test]
+fn undo_labels_name_the_variant_in_english() {
+    let mut h = gui();
+    let labels = undo_labels(&mut h);
+    let get = |what: &str| {
+        labels
+            .iter()
+            .find(|l| l.starts_with(what))
+            .cloned()
+            .unwrap_or_default()
+    };
+    assert!(get("new solid").ends_with("New Solid"), "{labels:#?}");
+    assert!(get("new null").ends_with("New Null Object"), "{labels:#?}");
+    for l in &labels {
+        assert!(!l.ends_with("→ "), "no undo label: {l}");
+        assert!(
+            !l.contains('.') || l.contains("Comp"),
+            "raw command id in {l}"
+        );
+    }
+}
+
+/// #140: the rows of a command's variants say which variant they are.
+#[test]
+fn shortcut_variant_rows_say_what_they_do() {
+    let h = gui();
+    let rows = h.state().workspace.shortcut_rows();
+    let find = |id: &str, params: serde_json::Value| {
+        rows.iter()
+            .find(|r| {
+                r.id == id
+                    && params
+                        .as_object()
+                        .unwrap()
+                        .iter()
+                        .all(|(k, v)| r.params.get(k) == Some(v))
+            })
+            .unwrap_or_else(|| panic!("no row {id} {params}"))
+            .shown
+            .clone()
+    };
+    let checks: Vec<(String, &str)> = vec![
+        (find("motion.step", json!({"frames": -1})), "Previous"),
+        (find("motion.step", json!({"frames": 1})), "Next"),
+        (find("motion.step", json!({"frames": 10})), "10"),
+        (find("motion.step", json!({"frames": -10})), "10"),
+        (find("motion.order", json!({"to": "backward"})), "Backward"),
+        (find("motion.order", json!({"to": "back"})), "Back"),
+        (
+            find("motion.toggle_key", json!({"attr": "transform:scale"})),
+            "Scale",
+        ),
+        (
+            find("motion.toggle_key", json!({"attr": "transform:opacity"})),
+            "Opacity",
+        ),
+        (
+            find("motion.new_layer", json!({"kind": "camera"})),
+            "Camera",
+        ),
+    ];
+    let wrong: Vec<String> = checks
+        .iter()
+        .filter(|(shown, want)| !shown.contains(want))
+        .map(|(shown, want)| format!("“{shown}” lacks {want:?}"))
+        .collect();
+    let raw: Vec<&String> = rows
+        .iter()
+        .map(|r| &r.shown)
+        .filter(|s| {
+            s.contains('.')
+                && s.chars()
+                    .all(|c| c.is_ascii_lowercase() || c == '.' || c == '_')
+        })
+        .collect();
+    assert!(
+        wrong.is_empty() && raw.is_empty(),
+        "{wrong:#?}\nraw ids: {raw:?}"
+    );
+}
