@@ -17,6 +17,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Set Parent", "设置父级"),
     ("Move Layer in Time", "在时间上移动图层"),
     ("Trim Layer", "修剪图层"),
+    ("Add Shape", "添加形状"),
+    ("New Mask", "新建蒙版"),
     // Variants of motion actions and commands (`actions::variants`, #140): the
     // Keyboard Shortcuts window, Edit > Undo and History name each one.
     ("Back 10 Frames", "后退 10 帧"),
