@@ -9,7 +9,7 @@
 
 use bae_prefs::schema::{self, Item, Kind, PAGES, Pref};
 use bae_prefs::{Preferences, parse_color};
-use egui::{Align, Color32, Key, Layout, RichText, Ui, vec2};
+use egui::{Color32, Key, RichText, Ui, vec2};
 use serde_json::Value;
 
 use crate::i18n::tr;
@@ -22,6 +22,7 @@ pub const ACTION: &str = "app.settings";
 /// Dialog size in points (AE's Preferences window at 100%).
 pub const SIZE: egui::Vec2 = vec2(760.0, 540.0);
 const LIST_W: f32 = 170.0;
+const BUTTONS_W: f32 = 80.0;
 
 /// Window title: "Settings" on macOS (AE 2026), "Preferences" elsewhere.
 pub fn title() -> &'static str {
@@ -364,9 +365,11 @@ impl SettingsDialog {
         outcome
     }
 
+    /// Page list | current page | buttons in a column on the right (OK, Cancel,
+    /// then Previous, Next), as AE's Preferences window.
     fn contents(&mut self, ui: &mut Ui) -> Outcome {
         let mut outcome = Outcome::None;
-        let body_h = SIZE.y - 40.0;
+        let body_h = SIZE.y - 16.0;
         ui.horizontal_top(|ui| {
             // Page list.
             egui::Frame::new()
@@ -382,6 +385,7 @@ impl SettingsDialog {
             // Current page.
             ui.vertical(|ui| {
                 ui.set_height(body_h);
+                ui.set_width(SIZE.x - LIST_W - BUTTONS_W - 40.0);
                 ui.label(
                     RichText::new(tr(PAGES[self.page].title))
                         .strong()
@@ -393,40 +397,24 @@ impl SettingsDialog {
                     .auto_shrink([false, false])
                     .show(ui, |ui| self.items(ui, PAGES[self.page].items));
             });
-        });
-        ui.separator();
-        ui.horizontal(|ui| {
-            let last = PAGES.len() - 1;
-            if ui
-                .add_enabled(self.page > 0, egui::Button::new(tr("Previous")))
-                .clicked()
-            {
-                self.page -= 1;
-            }
-            if ui
-                .add_enabled(self.page < last, egui::Button::new(tr("Next")))
-                .clicked()
-            {
-                self.page += 1;
-            }
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                // Right to left: on macOS the default button is rightmost
-                // (Cancel, OK); on Windows OK comes first (OK, Cancel).
-                let mac = cfg!(target_os = "macos");
-                let (first, second) = if mac {
-                    ("OK", "Cancel")
-                } else {
-                    ("Cancel", "OK")
-                };
-                for label in [first, second] {
-                    let button = egui::Button::new(tr(label)).min_size(vec2(72.0, 20.0));
-                    if ui.add(button).clicked() {
-                        outcome = if label == "OK" {
-                            Outcome::Ok(self.draft.clone())
-                        } else {
-                            Outcome::Cancel
-                        };
-                    }
+            // Buttons.
+            ui.vertical(|ui| {
+                ui.set_width(BUTTONS_W);
+                let button =
+                    |text: &str| egui::Button::new(tr(text)).min_size(vec2(BUTTONS_W, 20.0));
+                if ui.add(button("OK")).clicked() {
+                    outcome = Outcome::Ok(self.draft.clone());
+                }
+                if ui.add(button("Cancel")).clicked() {
+                    outcome = Outcome::Cancel;
+                }
+                ui.add_space(16.0);
+                let last = PAGES.len() - 1;
+                if ui.add_enabled(self.page > 0, button("Previous")).clicked() {
+                    self.page -= 1;
+                }
+                if ui.add_enabled(self.page < last, button("Next")).clicked() {
+                    self.page += 1;
                 }
             });
         });
