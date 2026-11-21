@@ -25,6 +25,7 @@ use bae_model::{AuthorId, Stage};
 use egui::{Context, Event, Key, Rect, Ui, pos2, vec2};
 use serde::{Deserialize, Serialize};
 
+use crate::a11y::Accessible as _;
 use crate::action::{ActionHandler, ActionInfo, Invocation, ids};
 use crate::dock::{Dock, Layout, PanelHost, PanelId, TabInfo};
 use crate::i18n::tr;
@@ -85,25 +86,25 @@ pub struct WorkbenchContext<'a> {
 
 /// The tools shown in the toolbar of AE-keymap workspaces (selection is view state
 /// until the motion workspace, workstream 12, registers real tools).
-const AE_TOOLS: [Icon; 18] = [
-    Icon::Home,
-    Icon::Selection,
-    Icon::Hand,
-    Icon::Zoom,
-    Icon::Orbit,
-    Icon::PanCamera,
-    Icon::Dolly,
-    Icon::Rotate,
-    Icon::PanBehind,
-    Icon::Rectangle,
-    Icon::Extrude,
-    Icon::Pen,
-    Icon::Type,
-    Icon::Brush,
-    Icon::CloneStamp,
-    Icon::Eraser,
-    Icon::RotoBrush,
-    Icon::Puppet,
+const AE_TOOLS: [(Icon, &str); 18] = [
+    (Icon::Home, "Home"),
+    (Icon::Selection, "Selection Tool"),
+    (Icon::Hand, "Hand Tool"),
+    (Icon::Zoom, "Zoom Tool"),
+    (Icon::Orbit, "Orbit Around Cursor Tool"),
+    (Icon::PanCamera, "Pan Under Cursor Tool"),
+    (Icon::Dolly, "Dolly Towards Cursor Tool"),
+    (Icon::Rotate, "Rotation Tool"),
+    (Icon::PanBehind, "Pan Behind (Anchor Point) Tool"),
+    (Icon::Rectangle, "Rectangle Tool"),
+    (Icon::Extrude, "Cube Tool"),
+    (Icon::Pen, "Pen Tool"),
+    (Icon::Type, "Horizontal Type Tool"),
+    (Icon::Brush, "Brush Tool"),
+    (Icon::CloneStamp, "Clone Stamp Tool"),
+    (Icon::Eraser, "Eraser Tool"),
+    (Icon::RotoBrush, "Roto Brush Tool"),
+    (Icon::Puppet, "Puppet Position Pin Tool"),
 ];
 
 pub struct Workbench {
@@ -576,8 +577,15 @@ impl Workbench {
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
         tools.set_clip_rect(area);
-        for (i, icon) in AE_TOOLS.into_iter().enumerate() {
-            if icons::button(&mut tools, icon, 24.0, i == self.tool).clicked() && i > 0 {
+        for (i, (icon, name)) in AE_TOOLS.into_iter().enumerate() {
+            let selected = i == self.tool;
+            // One tool is active at a time: radio buttons.
+            let resp = icons::button(&mut tools, icon, 24.0, selected).labeled_toggle(
+                egui::WidgetType::RadioButton,
+                tr(name),
+                selected,
+            );
+            if resp.clicked() && i > 0 {
                 self.tool = i;
             }
         }

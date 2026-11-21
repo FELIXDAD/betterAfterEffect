@@ -14,6 +14,7 @@ use std::collections::HashSet;
 use bae_model::{Interpolation, Keyframe, LayerKind, PrimPath, Stage, Time};
 use bae_motion::KeyRef;
 use bae_motion::query::{self, CompInfo};
+use bae_ui::Accessible as _;
 use bae_ui::icons::{self, Icon};
 use bae_ui::theme::{self, color};
 use bae_ui::widgets::{self, KeyNav};
@@ -368,8 +369,30 @@ impl TimelinePanel {
     }
 }
 
+/// AE's name of a layer switch, for screen readers.
+fn switch_name(icon: Icon) -> &'static str {
+    match icon {
+        Icon::Eye => "Video",
+        Icon::Speaker => "Audio",
+        Icon::Solo => "Solo",
+        Icon::Lock => "Lock",
+        Icon::Shy => "Shy",
+        Icon::Collapse => "Collapse Transformations",
+        Icon::Quality => "Quality and Sampling",
+        Icon::FrameBlend => "Frame Blending",
+        Icon::MotionBlur => "Motion Blur",
+        Icon::Adjustment => "Adjustment Layer",
+        Icon::Cube => "3D Layer",
+        _ => "Switch",
+    }
+}
+
 fn switch(ui: &Ui, rect: Rect, on: bool, icon: Icon, id: Id) -> bool {
-    let resp = ui.interact(rect, id, Sense::click());
+    let resp = ui.interact(rect, id, Sense::click()).labeled_toggle(
+        egui::WidgetType::Checkbox,
+        tr(switch_name(icon)),
+        on,
+    );
     widgets::paint_switch(
         ui.painter(),
         rect.shrink2(vec2(1.0, 2.0)),
@@ -480,11 +503,13 @@ impl Panel for TimelinePanel {
         let comp_layers = query::comp_layers(stage, &info.path);
 
         // Background of the graph body: marquee selection and deselect.
-        let bg = ui.interact(
-            graph_body,
-            ui.id().with("graph_bg"),
-            Sense::click_and_drag(),
-        );
+        let bg = ui
+            .interact(
+                graph_body,
+                ui.id().with("graph_bg"),
+                Sense::click_and_drag(),
+            )
+            .labeled(egui::WidgetType::Panel, tr("Timeline"));
         if bg.drag_started_by(egui::PointerButton::Primary)
             && let Some(p) = bg.interact_pointer_pos()
         {
@@ -583,8 +608,10 @@ fn comp_tabs(ui: &Ui, rect: Rect, stage: &Stage, session: &SharedSession) {
             .layout_no_wrap(name.clone(), theme::body(), color::TEXT);
         let w = galley.size().x + 34.0;
         let tab = Rect::from_min_size(pos2(x, rect.top() + 2.0), vec2(w, rect.height() - 2.0));
-        let resp = ui.interact(tab, ui.id().with(("comp_tab", c.as_str())), Sense::click());
         let is_active = active.as_ref() == Some(c);
+        let resp = ui
+            .interact(tab, ui.id().with(("comp_tab", c.as_str())), Sense::click())
+            .labeled_toggle(egui::WidgetType::SelectableLabel, &name, is_active);
         let p = ui.painter();
         icons::paint(
             p,
@@ -611,7 +638,9 @@ fn comp_tabs(ui: &Ui, rect: Rect, stage: &Stage, session: &SharedSession) {
             );
         }
         let xr = Rect::from_center_size(pos2(tab.right() - 8.0, tab.center().y), vec2(10.0, 10.0));
-        let xresp = ui.interact(xr, ui.id().with(("comp_tab_x", c.as_str())), Sense::click());
+        let xresp = ui
+            .interact(xr, ui.id().with(("comp_tab_x", c.as_str())), Sense::click())
+            .labeled(egui::WidgetType::Button, tr("Close"));
         if resp.hovered() || is_active {
             icons::paint(ui.painter(), xr, Icon::Close, color::TAB_CLOSE);
         }
@@ -716,7 +745,13 @@ impl TimelinePanel {
             theme::small(),
             color::TEXT_DIM,
         );
-        let tresp = ui.interact(tc, ui.id().with("cti_scrub"), Sense::drag());
+        let tresp = ui
+            .interact(tc, ui.id().with("cti_scrub"), Sense::drag())
+            .labeled_value(
+                egui::WidgetType::DragValue,
+                tr("Current Time"),
+                &common::timecode(info, now),
+            );
         if tresp.hovered() {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
         }
@@ -888,16 +923,20 @@ impl TimelinePanel {
 
         // Interaction: work area handles, then the ruler (CTI).
         let handle_w = 6.0;
-        let wa_resp = ui.interact(
-            wa.expand2(vec2(handle_w, 2.0)),
-            ui.id().with("work_area"),
-            Sense::click_and_drag(),
-        );
-        let ruler_resp = ui.interact(
-            Rect::from_min_max(pos2(ruler.left(), wa.bottom() + 1.0), ruler.max),
-            ui.id().with("ruler"),
-            Sense::click_and_drag(),
-        );
+        let wa_resp = ui
+            .interact(
+                wa.expand2(vec2(handle_w, 2.0)),
+                ui.id().with("work_area"),
+                Sense::click_and_drag(),
+            )
+            .labeled(egui::WidgetType::Slider, tr("Work Area"));
+        let ruler_resp = ui
+            .interact(
+                Rect::from_min_max(pos2(ruler.left(), wa.bottom() + 1.0), ruler.max),
+                ui.id().with("ruler"),
+                Sense::click_and_drag(),
+            )
+            .labeled(egui::WidgetType::Slider, tr("Time Ruler"));
         if wa_resp.hovered() {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
         }
@@ -1043,7 +1082,14 @@ impl TimelinePanel {
                     },
                     color::ICON,
                 );
-                if ui.interact(tw, rid("twirl"), Sense::click()).clicked()
+                if ui
+                    .interact(tw, rid("twirl"), Sense::click())
+                    .labeled_toggle(
+                        egui::WidgetType::CollapsingHeader,
+                        tr(if open { "Collapse" } else { "Expand" }),
+                        open,
+                    )
+                    .clicked()
                     && session.lock().reveal.remove(layer).is_none()
                 {
                     self.toggle(layer.as_str());
@@ -1074,7 +1120,9 @@ impl TimelinePanel {
                         color::TEXT_STRONG,
                         name_rect.width(),
                     );
-                    let resp = ui.interact(name_rect, rid("name"), Sense::click_and_drag());
+                    let resp = ui
+                        .interact(name_rect, rid("name"), Sense::click_and_drag())
+                        .labeled_toggle(egui::WidgetType::SelectableLabel, &name, layer_selected);
                     if resp.clicked() {
                         select_layer(session, stage, layer, ui.input(|i| i.modifiers));
                     }
@@ -1153,7 +1201,9 @@ impl TimelinePanel {
                 let whip =
                     Rect::from_center_size(pos2(l + cols.parent + 8.0, cy), vec2(14.0, 14.0));
                 icons::paint(ui.painter(), whip, Icon::Pickwhip, color::ICON);
-                let wresp = ui.interact(whip, rid("whip"), Sense::drag());
+                let wresp = ui
+                    .interact(whip, rid("whip"), Sense::drag())
+                    .labeled(egui::WidgetType::Button, tr("Parent Pick Whip"));
                 if wresp.drag_started() {
                     let layers = if layer_selected {
                         session.lock().selected_layers.clone()
@@ -1222,11 +1272,16 @@ impl TimelinePanel {
                     },
                     color::ICON,
                 );
-                let resp = ui.interact(
-                    Rect::from_min_max(pos2(x, rect.top()), pos2(l + cols.switches, rect.bottom())),
-                    rid("group"),
-                    Sense::click(),
-                );
+                let resp = ui
+                    .interact(
+                        Rect::from_min_max(
+                            pos2(x, rect.top()),
+                            pos2(l + cols.switches, rect.bottom()),
+                        ),
+                        rid("group"),
+                        Sense::click(),
+                    )
+                    .labeled_toggle(egui::WidgetType::CollapsingHeader, tr(label), *open);
                 if resp.clicked() {
                     self.toggle(id);
                 }
@@ -1300,11 +1355,17 @@ impl TimelinePanel {
         let c = theme::layer_bar_color(label_of(stage, layer), selected);
         ui.painter().with_clip_rect(graph).rect_filled(bar, 1.0, c);
         let edge = 5.0;
-        let resp = ui.interact(
-            bar,
-            ui.id().with(("bar", layer.as_str())),
-            Sense::click_and_drag(),
-        );
+        let resp = ui
+            .interact(
+                bar,
+                ui.id().with(("bar", layer.as_str())),
+                Sense::click_and_drag(),
+            )
+            .labeled_toggle(
+                egui::WidgetType::Other,
+                &query::display_name_of(stage, layer),
+                selected,
+            );
         let hover_edge = resp.hover_pos().map(|p| {
             if (p.x - bar.left()).abs() <= edge {
                 1
@@ -1529,11 +1590,13 @@ impl TimelinePanel {
             paint_key(&p, c, k, selected);
             let hit = Rect::from_center_size(c, vec2(11.0, 13.0));
             key_rects.push((hit, kr.clone()));
-            let resp = ui.interact(
-                hit,
-                ui.id().with(("key", path.as_str(), attr, t.0)),
-                Sense::click_and_drag(),
-            );
+            let resp = ui
+                .interact(
+                    hit,
+                    ui.id().with(("key", path.as_str(), attr, t.0)),
+                    Sense::click_and_drag(),
+                )
+                .labeled_toggle(egui::WidgetType::Button, tr("Keyframe"), selected);
             if resp.clicked() {
                 let mods = ui.input(|i| i.modifiers);
                 let mut s = session.lock();
@@ -1597,11 +1660,13 @@ impl TimelinePanel {
         let cy = rect.center().y;
         // "=" enable switch.
         let eq = Rect::from_center_size(pos2(x + 6.0, cy), vec2(14.0, 14.0));
-        let resp = ui.interact(
-            eq,
-            ui.id().with(("expr_on", path.as_str(), attr)),
-            Sense::click(),
-        );
+        let resp = ui
+            .interact(
+                eq,
+                ui.id().with(("expr_on", path.as_str(), attr)),
+                Sense::click(),
+            )
+            .labeled(egui::WidgetType::Checkbox, tr("Enable Expression"));
         ui.painter().text(
             eq.center(),
             Align2::CENTER_CENTER,
@@ -1836,6 +1901,11 @@ impl TimelinePanel {
         child.spacing_mut().slider_width = (r.width() - 40.0).max(40.0);
         if child
             .add(egui::Slider::new(&mut z, 0.0..=1.0).show_value(false))
+            .labeled_value(
+                egui::WidgetType::Slider,
+                tr("Zoom"),
+                &format!("{:.0}%", z * 100.0),
+            )
             .changed()
         {
             self.zoom = z;

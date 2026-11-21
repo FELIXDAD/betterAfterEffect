@@ -149,9 +149,12 @@ fn save_as_bae_and_baez_round_trip_exactly() {
     assert!(baez.is_file());
     assert_eq!(export_file(&baez), before, ".baez round trip differs");
 
-    // Reopened projects show no comp (the session belongs to the old project);
-    // open it from the Project panel (double-click), as in AE.
-    assert!(h.state().active_comp().is_none());
+    // The comp that was open when it was saved comes back (issue #113); a
+    // double-click in the Project panel still opens it, as in AE.
+    assert!(
+        h.state().active_comp().is_some(),
+        "the comp that was open is shown again"
+    );
     let comp = find_text(&h, "Comp 1").expect("comp in the Project panel");
     double_click_at(&mut h, comp.center());
     assert!(
@@ -515,6 +518,14 @@ fn broken_files_are_reported_without_touching_the_open_project() {
             message.contains(&*file),
             "{label}: message does not name the file: {message}"
         );
+        // Issue #111: say what is wrong, not only that it failed.
+        let why = match *label {
+            "missing path" => "does not exist",
+            "empty .bae folder" => "has no project.json",
+            l if l.ends_with(".baez") => "is damaged or is not a .baez project package",
+            _ => "(project.json) in",
+        };
+        assert!(message.contains(why), "{label}: {message}");
         assert!(
             g.dialogs.asked.is_empty(),
             "{label}: asked before reading the file"
@@ -532,7 +543,6 @@ fn broken_files_are_reported_without_touching_the_open_project() {
 }
 
 #[test]
-#[ignore = "issue #113"]
 fn reopening_shows_the_comp_that_was_open() {
     // AE reopens the compositions whose Timeline panels were open when the
     // project was saved; BAE opens the project with an empty Timeline and

@@ -46,6 +46,42 @@ const ZH: &[(&str, &str)] = &[
     ),
     ("Don't Save", "不保存"),
     ("Could not open the project.", "无法打开项目。"),
+    // Why a project did not open (open_error)
+    ("“{file}” does not exist.", "“{file}”不存在。"),
+    (
+        "“{file}” is a folder but not a BAE project: it has no project.json.",
+        "“{file}”是一个文件夹，但不是 BAE 项目：里面没有 project.json。",
+    ),
+    (
+        "“{file}” is not a BAE project. Open a .bae project folder or a .baez file.",
+        "“{file}”不是 BAE 项目。请打开 .bae 项目文件夹或 .baez 文件。",
+    ),
+    (
+        "“{file}” is damaged or is not a .baez project package.",
+        "“{file}”已损坏，或者不是 .baez 项目包。",
+    ),
+    (
+        "The project description (project.json) in “{file}” is damaged.",
+        "“{file}”里的项目描述（project.json）已损坏。",
+    ),
+    (
+        "“{file}” was saved by a newer version of BAE (format {found}; this version reads up to {supported}). Update BAE to open it.",
+        "“{file}”是用更新版本的 BAE 保存的（格式 {found}，当前版本最高支持 {supported}）。请更新 BAE 后再打开。",
+    ),
+    (
+        "“{file}” is incomplete: the data of sublayer “{id}” is missing.",
+        "“{file}”不完整：工程层“{id}”的数据缺失。",
+    ),
+    (
+        "The sublayer data in “{file}” is damaged.",
+        "“{file}”里的工程层数据已损坏。",
+    ),
+    (
+        "“{file}” cannot be read: {reason}",
+        "无法读取“{file}”：{reason}",
+    ),
+    ("“{file}” could not be opened.", "无法打开“{file}”。"),
+    ("Details:", "详细信息："),
     ("Could not save the project.", "无法保存项目。"),
     (
         "GPU-first motion graphics and compositing.",
@@ -53,10 +89,16 @@ const ZH: &[(&str, &str)] = &[
     ),
 ];
 
+/// Adds the shell strings to the translation table (without changing the
+/// language).
+pub fn register_tables() {
+    i18n::register(ZH);
+}
+
 /// Registers the shell strings and picks the language from `BAE_LANG`, then
 /// `LC_ALL` / `LC_MESSAGES` / `LANG`.
 pub fn init_from_env() {
-    i18n::register(ZH);
+    register_tables();
     let locale = std::env::var(LANG_ENV)
         .ok()
         .or_else(|| std::env::var("LC_ALL").ok())

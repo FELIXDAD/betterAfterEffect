@@ -3,6 +3,13 @@
 //! `docs/glossary.md`.
 
 pub(crate) const ZH: &[(&str, &str)] = &[
+    // Accessibility labels (timeline switches, keyframes, pick whip, ruler)
+    ("Parent Pick Whip", "父级关联器"),
+    ("Keyframe", "关键帧"),
+    ("Enable Expression", "启用表达式"),
+    ("Frame Blending", "帧混合"),
+    ("Switch", "开关"),
+    ("Time Ruler", "时间标尺"),
     // Panels and tabs
     ("Composition", "合成"),
     ("Timeline", "时间轴"),

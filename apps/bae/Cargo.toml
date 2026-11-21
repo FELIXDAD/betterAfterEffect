@@ -31,7 +31,8 @@ bae-ui-motion.workspace = true
 bae-text = { workspace = true, features = ["render"] }
 egui.workspace = true
 egui-wgpu.workspace = true
-egui-winit.workspace = true
+# accesskit: VoiceOver / Narrator / UI Automation see the labelled widgets (issue #116).
+egui-winit = { workspace = true, features = ["accesskit"] }
 muda.workspace = true
 serde.workspace = true
 serde_json.workspace = true

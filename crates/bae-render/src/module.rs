@@ -296,7 +296,16 @@ fn run(
     let project_path = m.get_one::<PathBuf>("project").expect("required");
     let comp = comp_path(m.get_one::<String>("comp").expect("required"))?;
     let json = m.get_flag("json");
-    let project = Project::open(project_path)?;
+    // Name the file unless the error already does (`bae render: error: …`).
+    let project = Project::open(project_path).map_err(|error| {
+        let shown = project_path.display().to_string();
+        let message = error.to_string();
+        if message.contains(&shown) {
+            anyhow::anyhow!("cannot open the project: {message}")
+        } else {
+            anyhow::anyhow!("cannot open the project {shown}: {message}")
+        }
+    })?;
     let stage = &project.stage;
     let (rate, duration) = comp_timing(stage, &comp)?;
 
