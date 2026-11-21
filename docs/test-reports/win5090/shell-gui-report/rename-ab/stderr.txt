@@ -1,0 +1,8 @@
+2026-11-21T01:27:03.725533Z  INFO bae::startup: BAE 0.1.0 (x86_64-windows, release)
+2026-11-21T01:27:04.129233Z  INFO bae_gpu::context: GPU device created adapter=NVIDIA GeForce RTX 5090 D v2 backend=Dx12 device_type=DiscreteGpu driver=32.0.16.1692
+2026-11-21T01:27:04.137738Z  INFO bae::shell: window surface: Bgra8Unorm, Fifo
+2026-11-21T01:32:14.503794Z ERROR egui_winit::clipboard: arboard paste error: The clipboard contents were not available in the requested format or the clipboard is empty.
+2026-11-21T01:32:20.146791Z ERROR egui_winit::clipboard: arboard paste error: The clipboard contents were not available in the requested format or the clipboard is empty.
+2026-11-21T01:33:17.274997Z ERROR egui_winit::clipboard: arboard paste error: The clipboard contents were not available in the requested format or the clipboard is empty.
+2026-11-21T01:33:23.261317Z ERROR egui_winit::clipboard: arboard paste error: The clipboard contents were not available in the requested format or the clipboard is empty.
+2026-11-21T01:37:42.663680Z ERROR egui_winit::clipboard: arboard paste error: The clipboard contents were not available in the requested format or the clipboard is empty.
