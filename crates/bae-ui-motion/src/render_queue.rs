@@ -1055,6 +1055,45 @@ mod tests {
         assert_eq!(on_disk, done, "every rendered frame is kept");
     }
 
+    /// The app's render queue renders on the app's `Arc<GpuContext>` resource and
+    /// never creates a device of its own (one device per process, #154).
+    #[test]
+    fn start_renders_on_the_apps_gpu_context() {
+        let Some(gpu) = gpu() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let (stage, comp) = project();
+        let info = bae_motion::query::comp_info(&stage, &comp).unwrap();
+        let queue = SharedRenderQueue::default();
+        let id = {
+            let mut q = queue.lock();
+            let id = q.add(&info, dir.path());
+            q.item_mut(id).unwrap().output = dir.path().join("f_####.png").to_string_lossy().into();
+            id
+        };
+        let mut resources = Resources::new();
+        resources.insert(gpu);
+        let extra_before = GpuContext::extra_devices_created();
+        start(&queue, &stage, &resources).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        while queue.lock().is_running() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "render queue timed out"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let q = queue.lock();
+        let item = q.items().iter().find(|i| i.id == id).unwrap();
+        assert!(
+            matches!(item.status, ItemStatus::Done { .. }),
+            "{:?}",
+            item.status
+        );
+        assert_eq!(GpuContext::extra_devices_created(), extra_before);
+    }
+
     #[test]
     fn start_needs_a_gpu() {
         let queue = SharedRenderQueue::default();

@@ -1,8 +1,8 @@
 //! [`GpuContext`]: the one wgpu instance / adapter / device / queue per process.
 
 use std::fmt;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Weak};
 
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -301,8 +301,25 @@ impl fmt::Debug for GpuContext {
     }
 }
 
-/// Contexts (devices) alive in this process; see [`GpuContext::live_count`].
-static LIVE_CONTEXTS: AtomicUsize = AtomicUsize::new(0);
+/// Contexts alive in this process, by their device-lost state (only the context
+/// holds the `Arc`); see [`GpuContext::live_count`] and [`GpuContext::devices_in_use`].
+static LIVE_CONTEXTS: Mutex<Vec<Weak<LostState>>> = Mutex::new(Vec::new());
+
+/// Devices created while another one was in use; see
+/// [`GpuContext::extra_devices_created`].
+static EXTRA_DEVICES: AtomicUsize = AtomicUsize::new(0);
+
+/// (alive, in use = alive and not lost) contexts, dropping entries of dead ones.
+fn live_contexts() -> (usize, usize) {
+    let mut live = LIVE_CONTEXTS.lock();
+    live.retain(|state| state.strong_count() > 0);
+    let in_use = live
+        .iter()
+        .filter_map(Weak::upgrade)
+        .filter(|state| !state.lost.load(Ordering::Acquire))
+        .count();
+    (live.len(), in_use)
+}
 
 /// Held while a device is created and warmed up (#154). On adapters that only take
 /// DXIL (WARP), D3D12 converts FXC's DXBC with Windows' `dxilconv.dll`, whose LLVM
@@ -333,12 +350,6 @@ fn warm_up_shader_conversion(device: &wgpu::Device) {
     });
     if let Some(error) = pollster::block_on(scope.pop()) {
         tracing::warn!("shader warm-up failed: {error}");
-    }
-}
-
-impl Drop for GpuContext {
-    fn drop(&mut self) {
-        LIVE_CONTEXTS.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -393,15 +404,28 @@ impl GpuContext {
         ))
     }
 
-    /// How many contexts (GPU devices) are alive in this process. The app needs one;
-    /// a second one while another lives is logged as a warning (see
-    /// [`crate::testing::shared_context`] for tests).
+    /// How many contexts (GPU devices) are alive in this process, lost ones included.
     pub fn live_count() -> usize {
-        LIVE_CONTEXTS.load(Ordering::Relaxed)
+        live_contexts().0
     }
 
-    /// `replacing`: [`Self::recreate`] after a device loss, where the lost context
-    /// may still be alive while its replacement is created.
+    /// How many contexts are alive and not lost. The app uses one device per
+    /// process: everything in it shares one `Arc<GpuContext>` (tests share
+    /// [`crate::testing::shared_context`]).
+    pub fn devices_in_use() -> usize {
+        live_contexts().1
+    }
+
+    /// How many devices this process created while another device was in use
+    /// (each is logged as an error). Creating or destroying a device while another
+    /// one converts shaders crashed D3D12 on WARP (#154), so the app must keep
+    /// this at zero; replacing a lost device does not count.
+    pub fn extra_devices_created() -> usize {
+        EXTRA_DEVICES.load(Ordering::Relaxed)
+    }
+
+    /// `replacing`: [`Self::recreate`], which replaces a lost device and is not
+    /// reported even if another device is still in use.
     async fn from_instance(
         instance: wgpu::Instance,
         desc: GpuContextDescriptor,
@@ -505,17 +529,16 @@ impl GpuContext {
             driver = %info.driver,
             "GPU device created"
         );
-        let others = LIVE_CONTEXTS.fetch_add(1, Ordering::Relaxed);
-        if others > 0 && !replacing {
-            // The app shares one context; tests share `testing::shared_context()`.
-            // Several devices per process is what crashed Windows CI (#154, see
-            // `DEVICE_CREATION`) and costs memory.
-            tracing::warn!(
-                others,
-                "another GPU device is created while {others} already exist in this process; \
-                 share one Arc<GpuContext> instead"
+        let in_use = live_contexts().1;
+        if in_use > 0 && !replacing {
+            EXTRA_DEVICES.fetch_add(1, Ordering::Relaxed);
+            tracing::error!(
+                in_use,
+                "a second GPU device was created while {in_use} other(s) are in use in this \
+                 process; share one Arc<GpuContext> (on WARP this can crash D3D12, #154)"
             );
         }
+        LIVE_CONTEXTS.lock().push(Arc::downgrade(&lost));
         Ok(Arc::new(Self {
             instance,
             adapter,
