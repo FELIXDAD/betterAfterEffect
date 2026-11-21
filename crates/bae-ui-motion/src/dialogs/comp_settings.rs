@@ -17,7 +17,8 @@ use bae_ui::{PanelContext, tr};
 use egui::{Id, Sense, Ui, vec2};
 use serde_json::json;
 
-use super::{SharedDialogs, fields};
+use super::SharedDialogs;
+use super::fields::{self, PIXEL_ASPECTS};
 use crate::session::{Pending, SharedSession};
 
 /// A composition preset: English name, width, height, pixel aspect, fps.
@@ -54,18 +55,6 @@ const PRESETS: &[Option<Preset>] = &[
     Some(("Cineon Full", 3656, 2664, 1.0, 24.0)),
     Some(("Film (2K)", 2048, 1556, 1.0, 24.0)),
     Some(("Film (4K)", 4096, 3112, 1.0, 24.0)),
-];
-
-/// AE's pixel aspect ratios (English name, value).
-const PIXEL_ASPECTS: &[(&str, f64)] = &[
-    ("Square Pixels", 1.0),
-    ("D1/DV NTSC (0.91)", 10.0 / 11.0),
-    ("D1/DV NTSC Widescreen (1.21)", 40.0 / 33.0),
-    ("D1/DV PAL (1.09)", 59.0 / 54.0),
-    ("D1/DV PAL Widescreen (1.46)", 118.0 / 81.0),
-    ("Anamorphic 2:1 (2)", 2.0),
-    ("HDV 1080/DVCPRO HD 720 (1.33)", 4.0 / 3.0),
-    ("DVCPRO HD 1080 (1.5)", 1.5),
 ];
 
 /// The frame rate menu.

@@ -6,6 +6,20 @@ use bae_ui::theme::{self, color};
 use bae_ui::widgets::HotNumber;
 use egui::{CursorIcon, Id, Key, Response, Sense, TextEdit, Ui, vec2};
 
+/// AE's pixel aspect ratios (English name, value), the same menu in
+/// Composition Settings, Solid Settings and Interpret Footage. The values are
+/// the exact ratios AE reports since CS4 (docs/spec/ae, AE-PRJ-053).
+pub(crate) const PIXEL_ASPECTS: &[(&str, f64)] = &[
+    ("Square Pixels", 1.0),
+    ("D1/DV NTSC (0.91)", 10.0 / 11.0),
+    ("D1/DV NTSC Widescreen (1.21)", 40.0 / 33.0),
+    ("D1/DV PAL (1.09)", 128.0 / 117.0),
+    ("D1/DV PAL Widescreen (1.46)", 512.0 / 351.0),
+    ("Anamorphic 2:1 (2)", 2.0),
+    ("HDV 1080/DVCPRO HD 720 (1.33)", 4.0 / 3.0),
+    ("DVCPRO HD 1080 (1.5)", 1.5),
+];
+
 /// Frames per second used for timecode digits (30 for 29.97).
 pub(crate) fn timecode_base(fps: f64) -> i64 {
     (fps.round() as i64).max(1)
