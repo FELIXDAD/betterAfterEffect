@@ -86,7 +86,7 @@ fn movie_codec(settings: &EncodeSettings) -> bool {
         VideoCodec::H264 | VideoCodec::Hevc => true,
         // ProRes lives in QuickTime files only.
         VideoCodec::ProRes(_) => !mp4,
-        VideoCodec::Png | VideoCodec::Exr(_) => false,
+        VideoCodec::Png | VideoCodec::Exr(_) | VideoCodec::Tiff(_) => false,
     }
 }
 
@@ -307,7 +307,7 @@ fn video_settings(settings: &EncodeSettings) -> Retained<NSDictionary<NSString, 
             VideoCodec::Hevc if settings.has_alpha() => AVVideoCodecTypeHEVCWithAlpha,
             VideoCodec::Hevc => AVVideoCodecTypeHEVC,
             VideoCodec::ProRes(profile) => prores_codec(profile),
-            VideoCodec::Png | VideoCodec::Exr(_) => None,
+            VideoCodec::Png | VideoCodec::Exr(_) | VideoCodec::Tiff(_) => None,
         }
         .expect("AVFoundation codec type");
         let width = NSNumber::new_u32(settings.width);
@@ -463,6 +463,10 @@ impl Encoder for AvWriterEncoder {
         Ok(EncodeOutput {
             files: vec![self.settings.path.clone()],
             frames: self.frames,
+            stats: crate::export::EncodeStats {
+                threads: 1,
+                ..Default::default()
+            },
         })
     }
 

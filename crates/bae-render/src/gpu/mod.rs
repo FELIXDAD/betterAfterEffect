@@ -145,7 +145,12 @@ pub(crate) struct Pipelines {
     pub dummy: wgpu::TextureView,
     pub empty_textures: wgpu::BindGroup,
     pub output_layout: wgpu::BindGroupLayout,
+    /// The output conversion into `Rgba8Unorm`.
     pub output: wgpu::RenderPipeline,
+    output_module: wgpu::ShaderModule,
+    output_pipeline_layout: wgpu::PipelineLayout,
+    /// Output conversions into other formats (export), created on first use.
+    outputs: FxHashMap<wgpu::TextureFormat, wgpu::RenderPipeline>,
 }
 
 impl Pipelines {
@@ -278,31 +283,12 @@ impl Pipelines {
                 bind_group_layouts: &[Some(&output_layout)],
                 immediate_size: 0,
             });
-        let output = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("bae-render.output"),
-            layout: Some(&output_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &output_module,
-                entry_point: Some("vs_full"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &output_module,
-                entry_point: Some("fs_out"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let output = output_pipeline(
+            device,
+            &output_module,
+            &output_pipeline_layout,
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
 
         Self {
             module,
@@ -315,7 +301,25 @@ impl Pipelines {
             empty_textures,
             output_layout,
             output,
+            output_module,
+            output_pipeline_layout,
+            outputs: FxHashMap::default(),
         }
+    }
+
+    /// The output conversion pipeline rendering into `format`.
+    pub fn output_for(
+        &mut self,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+    ) -> &wgpu::RenderPipeline {
+        if format == wgpu::TextureFormat::Rgba8Unorm {
+            return &self.output;
+        }
+        let (module, layout) = (&self.output_module, &self.output_pipeline_layout);
+        self.outputs
+            .entry(format)
+            .or_insert_with(|| output_pipeline(device, module, layout, format))
     }
 
     /// The composite pipeline for a target format and blend kind (compiled on
@@ -387,6 +391,40 @@ impl Pipelines {
             ],
         })
     }
+}
+
+/// A full-screen pass converting a working buffer into `format` (`output.wgsl`).
+fn output_pipeline(
+    device: &wgpu::Device,
+    module: &wgpu::ShaderModule,
+    layout: &wgpu::PipelineLayout,
+    format: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("bae-render.output"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module,
+            entry_point: Some("vs_full"),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module,
+            entry_point: Some("fs_out"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
 }
 
 #[cfg(test)]

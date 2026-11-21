@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use bae_gpu::{GpuContext, GpuContextDescriptor};
 use bae_render::fixture;
 use bae_render::{
-    AnimEvaluator, CompEvaluator, OutputAlpha, RenderComp, RenderRequest, Renderer, RendererConfig,
-    Resolution,
+    AnimEvaluator, CompEvaluator, ExportReadback, OutputAlpha, READBACK_DEPTH, ReadbackFormat,
+    RenderComp, RenderRequest, Renderer, RendererConfig, Resolution,
 };
 
 fn percentile(sorted: &[f64], p: f64) -> f64 {
@@ -120,6 +120,37 @@ fn main() {
     }
     let export_fps = frames as f64 / t.elapsed().as_secs_f64();
 
+    // The same through the export pipeline's asynchronous readback
+    // (`bae render`): READBACK_DEPTH staging buffers in flight, the GPU renders
+    // the next frame while earlier ones are mapped and copied out (no encoding).
+    let mut readback = ExportReadback::new(gpu.clone(), READBACK_DEPTH);
+    let t = Instant::now();
+    for f in 0..frames {
+        let c = eval
+            .evaluate(&stage, &comp, rate.frame_to_time(f as i64))
+            .expect("evaluate");
+        let frame = renderer.render_frame(&c, &full).expect("render");
+        if readback.is_full() {
+            readback.wait_next().expect("in flight").expect("readback");
+        }
+        readback
+            .submit(
+                &mut renderer,
+                &frame,
+                OutputAlpha::Straight,
+                ReadbackFormat::Rgba8,
+                f as u64,
+            )
+            .expect("readback");
+        while let Some(done) = readback.try_next() {
+            done.expect("readback");
+        }
+    }
+    while let Some(done) = readback.wait_next() {
+        done.expect("readback");
+    }
+    let export_async_fps = frames as f64 / t.elapsed().as_secs_f64();
+
     eval_times.sort_by(f64::total_cmp);
     let eval_mean = eval_times.iter().sum::<f64>() / eval_times.len().max(1) as f64;
     let report = serde_json::json!({
@@ -141,6 +172,7 @@ fn main() {
         "latency_ms_p50": percentile(&latency, 0.5),
         "latency_ms_p95": percentile(&latency, 0.95),
         "export_fps_full": export_fps,
+        "export_fps_async": export_async_fps,
     });
 
     println!("B1 motion graphics — {}", gpu.summary());
@@ -169,6 +201,7 @@ fn main() {
         percentile(&latency, 0.95)
     );
     println!("  export (eval+render+readback) {export_fps:6.1} fps");
+    println!("  export, async readback        {export_async_fps:6.1} fps");
 
     let out_dir = std::env::var_os("BAE_BENCH_OUT")
         .map(PathBuf::from)

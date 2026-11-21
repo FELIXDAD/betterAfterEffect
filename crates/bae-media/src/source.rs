@@ -27,6 +27,14 @@ pub enum MediaError {
         /// The underlying error.
         source: std::io::Error,
     },
+    /// Writing an output file (or creating its directory) failed.
+    #[error("cannot write {path}: {source}")]
+    Write {
+        /// The file or directory.
+        path: PathBuf,
+        /// The underlying error.
+        source: std::io::Error,
+    },
     /// No registered format recognizes the file.
     #[error("unsupported media format: {0}")]
     UnsupportedFormat(String),
@@ -86,6 +94,14 @@ impl MediaError {
     /// A [`MediaError::Io`] for `path`.
     pub fn io(path: &Path, source: std::io::Error) -> Self {
         MediaError::Io {
+            path: path.to_owned(),
+            source,
+        }
+    }
+
+    /// A [`MediaError::Write`] for `path`.
+    pub fn write(path: &Path, source: std::io::Error) -> Self {
+        MediaError::Write {
             path: path.to_owned(),
             source,
         }

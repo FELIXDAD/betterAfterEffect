@@ -1,11 +1,13 @@
-// Working buffer (premultiplied float) -> 8-bit output (PNG export, agent
-// screenshots, thumbnails). Values are the working space's encoded values, so no
-// transfer function is applied here (colour conversion is workstream 06).
+// Working buffer (premultiplied float) -> output image: 8-bit (PNG / TIFF
+// export, agent screenshots, thumbnails) or float (EXR export). Values are the
+// working space's encoded values, so no transfer function is applied here
+// (colour conversion is workstream 06).
 
 struct Params {
     // Background (straight RGB) for mode 2.
     bg: vec4<f32>,
     // x: 0 premultiplied, 1 straight alpha, 2 over the background (opaque).
+    // y: 1 = float target: keep colour outside [0, alpha] (32-bpc super-whites).
     mode: vec4<u32>,
 }
 
@@ -23,7 +25,9 @@ fn vs_full(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
 fn fs_out(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     var c = textureLoad(t_in, vec2<i32>(floor(pos.xy)), 0);
     c.a = clamp(c.a, 0.0, 1.0);
-    c = vec4<f32>(clamp(c.rgb, vec3<f32>(0.0), vec3<f32>(c.a)), c.a);
+    if params.mode.y == 0u {
+        c = vec4<f32>(clamp(c.rgb, vec3<f32>(0.0), vec3<f32>(c.a)), c.a);
+    }
     switch params.mode.x {
         case 1u: {
             if c.a > 0.0 {
