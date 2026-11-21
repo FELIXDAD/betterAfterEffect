@@ -60,7 +60,8 @@
 - 改了 08 的目录（`crates/bae-media` 导出部分）和根 `Cargo.toml` 的一行（`png` 回到 opt-level 3），原因写在 PR 里。
 - 应用内的导出入口（单独 PR）：「合成 ▸ 添加到渲染队列」（Cmd/Ctrl+M）和渲染队列面板，代码在 `crates/bae-ui-motion/src/render_queue.rs`（12 已停，菜单、快捷键、面板都在它的注册表里）。按「渲染」时给工程拍快照，后台线程用自己的 `Renderer` 跑 `export_frames`，界面不卡；进度条、停止（保留已渲出的帧，显示「已停止（N/M 帧）」）、失败原因、在访达 / 资源管理器中显示。队列是应用运行时状态，不进工程文件。
 
-- 下一步：遮罩（05 的路径栅格化或自带）、效果框架执行与三个参考效果、调整图层、其余混合模式（继续用 AE 对照）、视口纹理输出（零拷贝给 12）、B1 与 AE 渲染速度对比、B3。
+- 蒙版（分支 `render/masks`，[interface]，由 F 代做）：`RenderLayer.masks` 开始渲染。路径用 kurbo 展平（与 05 同一个库，不新增依赖；bae-vector 依赖 bae-render，反过来依赖会成环），GPU 上按精确面积累加绕数（非零环绕），扩展是圆角描边轮廓的并 / 差，X/Y 分开的高斯羽化（σ = 0.38 × 羽化，大羽化按轴降采样），7 种模式按 AE-CMP-038 的公式用固定管线混合合成，反转、蒙版不透明度；蒙版在图层空间、效果之前（有效果时先合成一张带蒙版的图层图像，没有效果时图层绘制直接采样蒙版）；一帧所有蒙版共用图集（每页 3 个 pass）；蒙版的支撑范围缩小图层边界。新公共接口：`graph::NodeKind::Mask`、`LayerOp.mask`、`bae_render::mask`、`fixture::{SceneBuilder::mask, rect_path, ellipse_path}`、`TexturePool::acquire_texels`。14 个 GPU 像素测试（`tests/masks.rs`），8 个 AE 对照用例等装了 AE 的机器出 golden（`tests/ae/README.md`）。基准：1080p 50 个图层、60 个每帧都变的羽化蒙版 247 fps（M1 Pro，`docs/perf.md`）。还没有：可变宽度羽化（P1）、羽化衰减"线性"、蒙版运动模糊。
+- 下一步：效果框架执行与三个参考效果、调整图层、其余混合模式（继续用 AE 对照）、视口纹理输出（零拷贝给 12）、B1 与 AE 渲染速度对比、B3。
 
 - [x] 渲染图与纹理池
 - [ ] 混合模式、遮罩、轨道遮罩

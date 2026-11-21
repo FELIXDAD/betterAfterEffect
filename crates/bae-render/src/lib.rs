@@ -44,6 +44,7 @@ pub mod geom;
 mod gpu;
 pub mod graph;
 pub mod input;
+pub mod mask;
 mod module;
 pub mod png_out;
 pub mod pool;
