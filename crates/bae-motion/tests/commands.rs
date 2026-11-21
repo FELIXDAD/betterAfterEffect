@@ -885,3 +885,88 @@ fn separate_and_recombine_position() {
         Some(Value::Bool(true))
     );
 }
+
+#[test]
+fn markers_add_edit_move_delete() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let solid = fx.layer(&comp, "solid", json!({}));
+    // A comp marker and a layer marker with a comment and a duration.
+    let m1 = p(
+        fx.run("marker.add", json!({"owner": comp, "time": SEC}))["path"]
+            .as_str()
+            .unwrap(),
+    );
+    let m2 = p(fx.run(
+        "marker.add",
+        json!({"owner": solid, "time": 2 * SEC, "comment": "hit", "duration": SEC}),
+    )["path"]
+        .as_str()
+        .unwrap());
+    assert_ne!(m1, m2);
+    assert_eq!(
+        bae_motion::markers::markers_of(&fx.stage, &comp),
+        vec![(m1.clone(), Time(SEC))]
+    );
+    assert_eq!(fx.value(&m2, "comment"), Some(Value::String("hit".into())));
+    assert_eq!(fx.value(&m2, "duration"), Some(Value::Time(Time(SEC))));
+    // A second comp marker gets its own name; markers_of sorts by time.
+    let m3 = p(
+        fx.run("marker.add", json!({"owner": comp, "time": 0}))["path"]
+            .as_str()
+            .unwrap(),
+    );
+    let comp_markers: Vec<PrimPath> = bae_motion::markers::markers_of(&fx.stage, &comp)
+        .into_iter()
+        .map(|(p, _)| p)
+        .collect();
+    assert_eq!(comp_markers, vec![m3.clone(), m1.clone()]);
+    // Edit (the Marker dialog), move (drag), delete; each one undo step.
+    fx.run(
+        "marker.edit",
+        json!({"path": m1, "comment": "intro", "label": 3, "time": 3 * SEC}),
+    );
+    assert_eq!(
+        fx.value(&m1, "comment"),
+        Some(Value::String("intro".into()))
+    );
+    assert_eq!(fx.value(&m1, "label"), Some(Value::Int(3)));
+    fx.run("marker.move", json!({"markers": [m1, m3], "delta": SEC}));
+    assert_eq!(
+        bae_motion::markers::marker_time(&fx.stage, &m1),
+        Time(4 * SEC)
+    );
+    assert_eq!(bae_motion::markers::marker_time(&fx.stage, &m3), Time(SEC));
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(
+        bae_motion::markers::marker_time(&fx.stage, &m1),
+        Time(3 * SEC)
+    );
+    fx.run("marker.delete", json!({"markers": [m2]}));
+    assert!(fx.stage.prim(&m2).is_none());
+    fx.stage.undo(&fx.author).unwrap();
+    assert!(fx.stage.prim(&m2).is_some());
+    // Not a marker; not a comp or layer.
+    assert!(
+        fx.try_run("marker.delete", json!({"markers": [solid]}))
+            .is_err()
+    );
+    assert!(
+        fx.try_run("marker.add", json!({"owner": m1, "time": 0}))
+            .is_err()
+    );
+    // A locked layer's markers cannot be added or changed (AE).
+    fx.run(
+        "attr.set",
+        json!({"path": solid, "attr": "locked", "value": {"type": "bool", "value": true}}),
+    );
+    assert!(
+        fx.try_run("marker.add", json!({"owner": solid, "time": 0}))
+            .unwrap_err()
+            .contains("locked")
+    );
+    assert!(
+        fx.try_run("marker.move", json!({"markers": [m2], "delta": SEC}))
+            .is_err()
+    );
+}

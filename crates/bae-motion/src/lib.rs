@@ -45,6 +45,7 @@ pub mod comp;
 pub mod dimensions;
 pub mod keys;
 pub mod layer;
+pub mod markers;
 pub mod names;
 pub mod query;
 mod util;
@@ -65,6 +66,7 @@ pub use layer::{
     CreateLayer, DeleteItems, DeleteLayers, DuplicateLayers, LayerOutput, LayersOutput,
     ReorderLayers, SetParent, ShapePreset, ShiftLayers, SplitLayers, TrimLayers,
 };
+pub use markers::{AddMarker, DeleteMarkers, EditMarker, MarkerFields, MarkerOutput, MoveMarkers};
 
 /// Register every motion command.
 pub fn register_commands(r: &mut CommandRegistry) {
@@ -93,6 +95,10 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(PasteKeys),
         r.register(EditKeys),
         r.register(SeparateDimensions),
+        r.register(AddMarker),
+        r.register(EditMarker),
+        r.register(MoveMarkers),
+        r.register(DeleteMarkers),
     ];
     for res in results {
         res.expect("motion command IDs are unique");

@@ -827,7 +827,7 @@ impl Command for ShiftLayers {
 
 /// Delete prims from every sublayer that has them. Layers parented to a deleted
 /// layer are unparented first, keeping their on-screen transform (at `time`).
-fn delete_prims(
+pub(crate) fn delete_prims(
     tx: &mut Transaction<'_>,
     paths: &[PrimPath],
     time: Time,
