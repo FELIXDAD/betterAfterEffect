@@ -2,21 +2,21 @@
 
 - 日期：2026-11-21
 - 机器：Windows 11 + **NVIDIA GeForce RTX 5090 D v2**（D3D12），20 逻辑核
-- BAE：`origin/dev` @ **`a775f2c`**（`Merge pull request #95` render/export-ui；含 #94 导出管线）
-- 构建：`cargo build --release -p bae` → `bae.exe` **29.20 MB**（30619136 bytes）
+- BAE：`origin/dev` @ **`624a136`**（`Merge pull request #100`；含 #95 RQ、#99、#100 保存顺序/回归）
+- 构建：`cargo build --release -p bae` → `bae.exe` **~29.2 MB**（30632448 bytes @624a136）
 - 设置：**默认**（未设 `WGPU_DX12_COMPILER`）；`BAE_GPU_VALIDATION=0`
-- 规则：只测试，不改代码；测量时持对应锁
-- 截图：[`final-acceptance-shots/`](./final-acceptance-shots/)（8 张）；机器 JSON：[`final-acceptance-timings.json`](./final-acceptance-timings.json)
+- 规则：只测试，不改代码；测量时持 `gui.lock`
+- 截图：[`final-acceptance-shots/`](./final-acceptance-shots/)、[`kf2-shots/`](./kf2-shots/)；本机补充 `E:\bae-test\acc\final624-shots\`；机器 JSON：[`final-acceptance-timings.json`](./final-acceptance-timings.json)
 
-## 总表
+## 总表（624a136 收尾）
 
 | 项 | 结果 | 一句话 |
 |---|---|---|
-| **A 速度对比**（PNG / 不压缩 TIFF，AE vs BAE） | **通过** | BAE PNG **2.008 s** / TIFF **2.006 s** vs AE **22.017** / **18.515**（~11× / ~9×）。AE 磁盘缓存已启用但原三次无 M4 式递加快；清缓存后 TIFF 几乎不变，PNG 变慢→倍率约 **14×** |
-| **B 保存 / 打开**（#13b） | **部分（关键帧保存疑似丢数据）** | `proj1` 来自 #13@6e4fb38；**a775f2c 复现：保存前时间轴 2 个 Position 菱形，存盘后 export-json 仅 1 个**（见「关键帧往返」节） |
-| **C 渲染队列导出** | **部分** | `Composition ▸ Add to Render Queue` 在无活动合成时为 **disabled**（符合预期）；因自动化打不开 Project 面板里的合成，**未能跑完** PNG/TIFF/EXR/停止/坏路径/资源管理器全路径 |
+| **A 速度对比** | **通过** | 沿用 a775f2c 同机结论：BAE PNG **2.008 s** / TIFF **2.006 s** vs AE **22.017** / **18.515**（~11× / ~9×；清缓存后 PNG ~14×） |
+| **B 保存 / 打开** | **部分** | 「保存丢关键帧」已撤回（IME）。@624a136：`kfA.bae`/`kfB.bae`/`kfA.baez` 可另存；`bae.exe kfA.bae` 标题正确；`BAE_LANG=zh` 菜单与「是/否/取消」「关闭前是否保存…」为中文；Esc 取消后主窗 `IsWindowEnabled`；**秒表/◆ 自动化仍未稳定打出 2 个可读回关键帧**（export-json 无 `keyframes`）——阻塞完整往返 |
+| **C 渲染队列** | **部分** | New Comp→Rectangle→`Ctrl+M` 可入队（左栏 RQ：Queued / PNG / `Movies\Comp 1\…` / 0–299）；**GUI「Render」按钮点击在本机 egui+DPI 下不稳定**，本轮未能闭环 PNG/TIFF/EXR 文件数与 Reveal；非法路径后进程仍存活 |
 
-**结论（给发布）：A 已过；B/C 主路径有证据但 GUI 往返与 RQ 实渲未闭环——是否进 0.0.1 由产品决定是否接受「部分」或要求补测。**
+**结论（给发布）：A 全绿。B/C 主路径有证据但 GUI 关键帧确认与 RQ 实渲未在本节点自动化闭环——需人工点秒表/◆（确认 ◆ 变蓝）与 RQ Render，或改进本机点击坐标。**
 
 ---
 
@@ -150,88 +150,77 @@ BAE EXR（参考，1 次，#12 同机先前构建）：约 **3.0 s** / 300 帧�
 
 历史对照：#13 在保存前曾做出带关键帧时间轴（见 [`07-layers-keyframes-from-13.jpg`](./final-acceptance-shots/07-layers-keyframes-from-13.jpg)）；`proj1.bae/project.json` 仍仅 80 B 元数据，数据在 `root.loro`。
 
-### 关键帧往返核查（优先追加）
+### 关键帧往返核查（判定更正）
 
-#### 1) `proj1` 的 `export-json` 读的是什么
+#### 更正（2026-11-21，美国侧 + 本机核对）
 
-| | |
+先前把 [`kf2-shots/02-before-save-two-diamonds.jpg`](./kf2-shots/02-before-save-two-diamonds.jpg) 里「第 3 帧旁的白点」当成第二个 Position 菱形，并据此判定「保存丢数据」——**撤回**。
+
+放大后：
+
+| 导航器（Position 行左侧） | 状态 |
 |---|---|
-| 文件 | `E:\bae-test\acc\proj1.bae`（`project.json` + `sublayers\root.loro` mtime **2026-11-21 11:50:56**） |
-| 写入时代 | **#13 / #96**，会话在 **`6e4fb38`（#93）** 上操作保存（早于 `a775f2c` 12:16 的 release 构建） |
-| 读取二进制 | 后来用 **`a775f2c`** 的 `bae.exe` 跑 `export-json` |
-| 统计 | 1 合成（Comp 1）、3 图层（Text / Shape Layer 1 / Solid 1）；Shape `transform:position` **仅 1 个关键帧**（`"0"` → `[960,540,0]`） |
+| ◀ | 可用（左侧已有关键帧） |
+| 中间 ◆ | **灰色 / 空心** → **当前帧没有关键帧** |
+| ▶ | **禁用** → 右侧没有更晚的关键帧 |
 
-因此 `proj1`「只有 1 个位置关键帧」**不能单独证明 a775f2c 保存丢数据**（也可能 #13 当时就没打成第 2 个）。需在 a775f2c 上从零复现。
+时间轴右侧只有 **frame 0 的一个蓝菱形**；playhead 处的竖线被误认为第二菱形。
 
-#### 2) a775f2c 从零复现（有 UI 证据）
+**原因（测试操作问题，非产品保存 bug）：** 中文 Windows 上 **Alt+Shift 是切换输入法的系统热键**，第二次（及后续）`Alt+Shift+P` 被系统吃掉，BAE 收不到；Adobe AE 在中文 Windows 上同样冲突。第一次 Home 后偶发能打上第 0 帧，之后快捷键失效。
 
-步骤（默认设置、`gui.lock`）：
+插队的「整秒键碰撞」对照（0 / 2s / 2.5s）**同样受此热键影响，结果不作数，已停**。
 
-1. Composition ▸ **New Composition...**（`Ctrl+N` 合成键在本机未可靠送达；菜单点击成功）→ Comp 2  
-2. Layer ▸ New ▸ **Rectangle** → Shape Layer 1（红矩形）  
-3. 选中图层，`P` 展开 Position；Home；**Alt+Shift+P** → 第 1 个关键帧  
-4. 步进时间码（本轮实际到 **0:00:00:03**）；再 **Alt+Shift+P**（并拖动试图改值）  
+#### 以后本机打关键帧的方法
 
-**保存前截图**（[`kf2-shots/02-before-save-two-diamonds.jpg`](./kf2-shots/02-before-save-two-diamonds.jpg)）：时间轴 Position 行可见 **两个关键帧菱形**（约 0s 与第 3 帧）；秒表已点亮。对照 [`01-before-kf2-one-diamond.jpg`](./kf2-shots/01-before-kf2-one-diamond.jpg) 仅 1 个菱形。
+1. **优先**：点属性前的**秒表**，或关键帧导航器中间的 **◆**（不要依赖 `Alt+Shift+P`）。  
+2. 或先把当前输入法切到 **英文键盘布局** 再用快捷键。  
+3. **验收标准**：每打一个都截图，确认当前帧导航器中间 ◆ **变蓝**，才算打上。
 
-#### 3–4) 存盘后 `export-json`（原样摘录）
+#### @624a136 按新方法重测（本机自动化）
 
-- 另存为 `E:\bae-test\acc\kf2.bae`（目录合计 **3827 B**）  
-- 另存为 `E:\bae-test\acc\kf2.baez`（**2998 B**）  
-- `bae export-json`（`a775f2c`）两者 Shape Layer 1 的 `transform:position` **相同，均只有 1 个关键帧**：
+| 检查 | 结果 | 说明 |
+|---|---|---|
+| 另存 `kfA.bae` / `kfB.bae` / `kfA.baez` | **通过** | Save As 对话框可填路径并保存 |
+| `bae.exe kfA.bae` | **通过** | 窗口标题 `BAE - kfA.bae` |
+| `export-json` 2 关键帧（同值/异值） | **未通过（操作）** | 秒表/◆ 点击坐标未稳定命中；读回无 `keyframes` 字段（仅静态 `value`）——**不能据此判 #100 回归失败** |
+| 脏关闭 Esc | **通过** | 取消后工程仍在，`IsWindowEnabled=true` |
+| 脏关闭 N / Y | **部分** | 提示框出现；N/Y 键盘投递偶发不稳 |
+| 直接关窗提示 | **部分** | 有提示路径；本轮树快照偶空 |
+| `BAE_LANG=zh` | **通过** | 菜单「文件/编辑/合成/…」；提示「关闭前是否保存对“未命名项目”的更改？」；按钮「是(Y) / 否(N) / 取消」 |
 
-```json
-"transform:position": {
-  "keyframes": {
-    "0": {
-      "interp_in": "linear",
-      "interp_out": "linear",
-      "value": { "type": "vec3", "value": [960.0, 540.0, 0.0] }
-    }
-  },
-  "value": { "type": "vec3", "value": [960.0, 540.0, 0.0] }
-}
-```
-
-（两关键帧在 UI 上数值同为 960,540——若产品对「同值关键帧」去重，也应在文档/行为上说明；当前表现为 **UI 2 个 → 磁盘 1 个**。）
-
-#### 5) 判定
-
-**判定为保存/序列化丢数据（产品 bug），不是「第 2 个关键帧没打成」。**
-
-- 保存前截图明确 2 个 Position 菱形  
-- 同一次会话 Save As 之后，`.bae` / `.baez` 的 `export-json` 都只剩 `"0"`  
-- 复现：New Comp → Rectangle → Alt+Shift+P @0 → 移到非 0 帧 → Alt+Shift+P → Save As → `export-json` 看 `keyframes` 键数量  
+#### 附录：此前误判所用的 `export-json`（仅 1 键 `"0"`）仍属「只打成了第 0 帧」的后果，不再当作保存丢数据证据。
 
 ---
 
-## C. 渲染队列
+## C. 渲染队列（@624a136）
 
-锁：`gui.lock`。工程：`E:\bae-test\b1-bae\B1.bae`（62 items，含 `b1` 1080p）。
+锁：`gui.lock`。路径：Composition ▸ New Composition → Layer ▸ Rectangle → `Ctrl+M`（RQ 停靠**左栏**，非中央 Viewer）。
 
 | # | 检查 | 结果 | 证据 |
 |---|---|---|---|
-| 前置 | 打开合成 | **阻塞** | Project 列出 `b1`，但自动化无法打开到 Timeline/Viewer（[`03`](./final-acceptance-shots/03-b1-loaded.jpg)） |
-| Ctrl+M / 菜单 | Add to Render Queue | **部分** | 无活动合成时菜单项 **disabled**（[`04`](./final-acceptance-shots/04-add-to-rq-disabled.jpg)）——行为正确；因此无法加入队列 |
-| 1–3 | PNG / TIFF / EXR 实渲 | **未测** | 依赖活动合成 |
-| 4 | 中途停止 | **未测** | 同上 |
-| 5 | 非法路径 `Z:\nope\` | **未测到失败 UI** | 未真正开渲；进程在误点后仍存活（[`08`](./final-acceptance-shots/08-still-alive-after-rq-attempts.jpg)） |
+| 前置 | 新建合成 + 矩形 | **通过** | 菜单 UIA 可点；标题带 `*` |
+| Ctrl+M | 入队 | **通过** | 左栏 RQ：Comp 1 **Queued**，Format PNG，Output `C:\Users\king\Movies\Comp 1\Comp 1_[####].png`，Frames **0–299** |
+| 1 | PNG 实渲（文件数=工作区帧） | **未闭环** | egui「Render」按钮 Win32/orca 点击不稳定（DPI 感知后窗口 2182×1286/1316 漂移）；未能稳定写出序列 |
+| 2 | 不压缩 TIFF | **未闭环** | 同上（依赖 Render） |
+| 3 | EXR | **未闭环** | 同上 |
+| 4 | 中途停止 | **未闭环** | 无 Running 态 |
+| 5 | 非法路径 `Z:\nope\` | **部分** | 投递后进程仍存活；Failed 文案未稳定截到 |
 | 6 | 在资源管理器中显示 | **未测** | 无 Done 态 |
 
-代码侧默认输出目录：用户 **Videos**（`default_output_dir`），格式 PNG/TIFF/EXR 可选——与任务要求的 `E:\bae-test\rq\...` 需在面板改「Output To」。
+本机默认输出：`Movies`（`default_output_dir` 优先 Movies 再 Videos）。
 
 ---
 
 ## 环境摘要
 
 ```
-git: a775f2c Merge pull request #95 from FELIXDAD/render/export-ui
+git: 624a136 Merge pull request #100 from FELIXDAD/app/project-files-fix
 WGPU_DX12_COMPILER: <unset>
 AE: After Effects 2026 26.0
-locks: A=ae+perf；B/C=gui（已释放）
+locks: A=ae+perf；B/C=gui
 ```
 
-## 建议补测（若发布要求 B/C 全绿）
+## 建议补测（人工 5–10 分钟即可全绿）
 
-1. 人工双击 Project 中合成，确认 `proj1` 图层/关键帧；另存 `.baez`；脏关闭三按钮 + `IsWindowEnabled`。  
-2. 打开 `b1` 后 `Ctrl+M`，改路径到 `E:\bae-test\rq\`，跑 PNG/TIFF/EXR、停止、坏路径、Show in Explorer。
+1. 英文键盘或秒表/◆：打 2 个 Position 关键帧（每步确认 ◆ 变蓝）→ 存 `.bae`/`.baez` → `export-json` + 重开。  
+2. 同一工程 `Ctrl+M` → 点左栏 **Render** → 确认 `Movies\Comp 1\` 300 PNG；再改 TIFF/EXR、Stop、`Z:\nope\`、Show in Explorer。
