@@ -424,3 +424,141 @@ fn unique_names_per_panel() {
     }
     assert!(dupes.is_empty(), "{} duplicate names", dupes.len());
 }
+
+// ---- Retest of #128 (dev 277f11a): edge cases ----
+
+/// Interactive widgets whose (pane, role, name) is not unique.
+fn duplicate_names(h: &Ui) -> Vec<String> {
+    use egui::accesskit::{Action, Role};
+    let mut seen: std::collections::HashMap<(String, String, String), usize> =
+        std::collections::HashMap::new();
+    for n in h.root().children_recursive() {
+        let a = n.accesskit_node();
+        let data = a.data();
+        let interactive =
+            data.supports_action(Action::Click) || data.supports_action(Action::Focus);
+        if !interactive || a.bounding_box().is_none() || a.is_hidden() {
+            continue;
+        }
+        let Some(label) = a.label().filter(|l| !l.is_empty()) else {
+            continue;
+        };
+        let mut group = "window".to_owned();
+        let mut up = a.parent();
+        while let Some(p) = up {
+            if p.role() == Role::Pane {
+                group = p.label().unwrap_or_default();
+                break;
+            }
+            up = p.parent();
+        }
+        *seen
+            .entry((group, format!("{:?}", a.role()), label))
+            .or_default() += 1;
+    }
+    seen.into_iter()
+        .filter(|(_, n)| *n > 1)
+        .map(|((g, r, l), n)| format!("×{n} in {g}: {r} “{l}”"))
+        .collect()
+}
+
+fn rename(h: &mut Ui, layer: &PrimPath, name: &str) {
+    h.state_mut().invoke(Invocation::with_params(
+        "attr.set",
+        serde_json::json!({"path": layer, "attr": "name", "value": {"type": "string", "value": name}}),
+    ));
+    settle(h);
+}
+
+#[test]
+#[ignore = "issue #128"]
+fn layers_with_the_same_name_still_have_distinct_control_names() {
+    // AE allows two layers with one name; the layer number tells them apart.
+    let mut h = gui();
+    comp_with(
+        &mut h,
+        &["motion.layer.new.solid", "motion.layer.new.solid"],
+    );
+    for l in h.state().layers() {
+        rename(&mut h, &l, "背景");
+    }
+    key(&mut h, Modifiers::COMMAND, Key::A);
+    key(&mut h, Modifiers::NONE, Key::P);
+    settle(&mut h);
+    let sample: Vec<String> = labels(&h)
+        .into_iter()
+        .filter(|l| l.contains("背景") && l.contains("Lock"))
+        .collect();
+    println!("lock switches: {sample:?}");
+    let dupes = duplicate_names(&h);
+    assert!(
+        dupes.is_empty(),
+        "same-named layers give duplicate control names: {dupes:#?}"
+    );
+}
+
+#[test]
+fn control_names_follow_a_rename() {
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let l = h.state().layers()[0].clone();
+    key(&mut h, Modifiers::NONE, Key::P);
+    rename(&mut h, &l, "新的 名字");
+    let all = labels(&h);
+    assert!(
+        all.iter().any(|x| x.contains("新的 名字")),
+        "no label with the new name: {all:?}"
+    );
+    // The layer's controls follow the rename; the solid's source item in the
+    // Project panel keeps its own name (as in AE).
+    let stale: Vec<String> = h
+        .root()
+        .children_recursive()
+        .filter(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.contains("Solid 1"))
+        })
+        .map(|n| {
+            let mut pane = String::from("window");
+            let mut up = n.accesskit_node().parent();
+            while let Some(p) = up {
+                if p.role() == egui::accesskit::Role::Pane {
+                    pane = p.label().unwrap_or_default();
+                    break;
+                }
+                up = p.parent();
+            }
+            format!("{pane}: {}", n.accesskit_node().label().unwrap_or_default())
+        })
+        .filter(|s| !s.starts_with("Project"))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "labels still carry the old name: {stale:?}"
+    );
+}
+
+#[test]
+#[ignore = "issue #128"]
+fn inputs_have_names_not_only_values() {
+    // A field that only exposes its value ("PNG", a path, "0") is read without
+    // saying what it is: the Render Queue's Format / Output To / Frames and the
+    // Properties panel's text field (found on Windows too, #128).
+    use egui::accesskit::Role;
+    let h = busy_window();
+    let unnamed: Vec<String> = h
+        .root()
+        .children_recursive()
+        .filter_map(|n| {
+            let a = n.accesskit_node();
+            let input = matches!(
+                a.role(),
+                Role::ComboBox | Role::TextInput | Role::MultilineTextInput | Role::SpinButton
+            );
+            (input && a.bounding_box().is_some() && a.label().is_none_or(|l| l.is_empty()))
+                .then(|| format!("{:?} value={:?}", a.role(), a.value()))
+        })
+        .collect();
+    assert!(unnamed.is_empty(), "inputs without a name: {unnamed:#?}");
+}
