@@ -472,3 +472,130 @@ fn gpu_preview_publishes_the_rendered_comp() {
     drop(preview);
     assert!(registry.get(id).is_none(), "removed on drop");
 }
+
+/// Menus: AE structure, enabled only when they can act, same invocation as the
+/// shortcut; the global handler runs them with no motion panel focused.
+#[test]
+fn menus_and_global_handler() {
+    use bae_ui::menu::{MenuContext, MenuEntry, build_menus};
+    use bae_ui::{ActionHandler, MenuItemSpec};
+    let mut b = AppBuilder::new();
+    b.add_module(bae_ui::UiModule)
+        .add_module(crate::MotionUiModule);
+    let mut app = b.build();
+    let tree = build_menus(&app.registry::<MenuItemSpec>().snapshot(), "motion");
+    assert!(tree.conflicts.is_empty(), "{:?}", tree.conflicts);
+    let tops: Vec<&str> = tree.menus.iter().map(|(t, _)| t.as_str()).collect();
+    assert_eq!(tops, ["Edit", "Composition", "Layer", "Animation"]);
+    let layer = &tree.menus[2].1;
+    let MenuEntry::Submenu { title, entries } = &layer[0] else {
+        panic!("Layer ▸ New");
+    };
+    assert_eq!(title, "New");
+    let names: Vec<String> = entries
+        .iter()
+        .map(|e| match e {
+            MenuEntry::Item { spec, .. } => spec.title.clone(),
+            MenuEntry::Separator => "---".into(),
+            MenuEntry::Submenu { title, .. } => title.clone(),
+        })
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "Text",
+            "Solid",
+            "Light",
+            "Camera",
+            "Null Object",
+            "Shape Layer",
+            "Adjustment Layer",
+            "---",
+            "Rectangle",
+            "Ellipse"
+        ]
+    );
+    // Menu items show the shortcut bound to the same invocation.
+    let mut keymap = bae_ui::presets::ae_keymap();
+    keymap.bindings.extend(crate::actions::bindings().bindings);
+    let shortcut = |id: &str| {
+        let (_, spec) = tree.items().into_iter().find(|(i, _)| *i == id).unwrap();
+        keymap
+            .chord_for_invocation(&spec.invocation())
+            .map(|c| c.to_string())
+    };
+    assert_eq!(shortcut("motion.composition.new").as_deref(), Some("Cmd+N"));
+    assert_eq!(shortcut("motion.layer.new.solid").as_deref(), Some("Cmd+Y"));
+    assert_eq!(
+        shortcut("motion.layer.new.null").as_deref(),
+        Some("Cmd+Alt+Shift+Y")
+    );
+    assert_eq!(shortcut("motion.animation.ease").as_deref(), Some("F9"));
+    assert_eq!(shortcut("motion.layer.new.rectangle"), None);
+
+    // Enabled state follows the session.
+    let mut h = Harness::new();
+    let solid_item = tree
+        .items()
+        .into_iter()
+        .find(|(i, _)| *i == "motion.layer.new.solid")
+        .unwrap()
+        .1
+        .clone();
+    let new_comp = tree
+        .items()
+        .into_iter()
+        .find(|(i, _)| *i == "motion.composition.new")
+        .unwrap()
+        .1
+        .clone();
+    {
+        let cx = MenuContext {
+            stage: &h.stage,
+            resources: &h.resources,
+            workspace: "motion",
+        };
+        assert!(!solid_item.is_enabled(&cx), "no comp yet");
+        assert!(new_comp.is_enabled(&cx));
+    }
+    // The handler runs a menu item with a non-motion panel focused.
+    let handler = crate::menus::MotionActions;
+    assert!(handler.actions().iter().any(|a| a == "motion.new_layer"));
+    let run = |h: &mut Harness, inv: Invocation| {
+        let mut requests = PanelRequests::default();
+        let id = PanelId::new("history");
+        let mut cx = PanelContext::new(
+            &id,
+            "History",
+            &h.stage,
+            &h.author,
+            &h.resources,
+            &mut requests,
+        );
+        assert!(handler.handle(&inv, &mut cx));
+        h.apply(requests);
+        h.frame("history", &mut NoopPanel, Vec::new());
+    };
+    run(&mut h, new_comp.invocation());
+    let comp = h.session().lock().active_comp.clone().expect("comp opened");
+    {
+        let cx = MenuContext {
+            stage: &h.stage,
+            resources: &h.resources,
+            workspace: "motion",
+        };
+        assert!(solid_item.is_enabled(&cx));
+    }
+    run(&mut h, solid_item.invocation());
+    assert_eq!(query::comp_layers(&h.stage, &comp).len(), 1);
+    let _ = &mut app;
+}
+
+struct NoopPanel;
+
+impl Panel for NoopPanel {
+    fn ui(&mut self, _ui: &mut egui::Ui, cx: &mut PanelContext<'_>) {
+        // Like every motion panel: resolve pending selections once per frame.
+        crate::common::session(cx.resources).lock().sync(cx.stage);
+    }
+}

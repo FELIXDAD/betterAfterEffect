@@ -24,6 +24,7 @@ mod common;
 pub mod demo;
 mod gpu_preview;
 mod i18n;
+pub mod menus;
 mod panels;
 mod project;
 mod props;
@@ -33,7 +34,7 @@ mod timeline;
 mod viewer;
 
 use bae_app::{AppBuilder, AppModule};
-use bae_ui::{ActionInfo, KeymapBindings, PanelKind};
+use bae_ui::{ActionHandler, ActionInfo, KeymapBindings, MenuItemSpec, PanelKind};
 
 pub use gpu_preview::PreviewSources;
 pub use panels::{EffectControlsPanel, PreviewPanel, PropertiesPanel};
@@ -105,6 +106,18 @@ impl AppModule for MotionUiModule {
             }
         });
         let _ = app.register::<KeymapBindings>("motion", actions::bindings());
+        // Menus and the global handler: AE shortcuts and menu items work whichever
+        // panel has focus.
+        let handler: std::sync::Arc<dyn ActionHandler> = std::sync::Arc::new(menus::MotionActions);
+        let _ = app.register_arc::<dyn ActionHandler>("bae-ui-motion", handler);
+        let menu = app.registry::<MenuItemSpec>();
+        menu.batch(|tx| {
+            for (id, item) in menus::items() {
+                if !tx.contains(id) {
+                    let _ = tx.register(owner.clone(), id, item);
+                }
+            }
+        });
     }
 
     fn finish(&self, app: &mut AppBuilder) {

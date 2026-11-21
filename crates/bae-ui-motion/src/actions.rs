@@ -156,7 +156,7 @@ pub fn bindings() -> KeymapBindings {
     v.push(b("Period", "viewer.zoom_in").when("composition"));
     v.push(b("Comma", "viewer.zoom_out").when("composition"));
     v.push(b("Shift+Slash", "viewer.fit").when("composition"));
-    KeymapBindings::new(bae_ui::presets::AE_KEYMAP, v)
+    KeymapBindings::new(bae_ui::presets::AE_KEYMAP, v).for_workspace(crate::menus::WORKSPACE)
 }
 
 /// Selected layers, or the layers of the selected keyframes.
