@@ -25,6 +25,8 @@
 # - Hangs are detected by sampling Illustrator's main thread (no Accessibility permission
 #   needed): a blocking modal loop above the running script, or a main thread frozen
 #   outside the script. Recovery: save evidence, SIGKILL, move recovery files away.
+#   Dialogs that neither the script nor document recovery opened are left on screen for a
+#   person (exit 3, "recovered": false); aictl never clicks or restarts around them.
 set -uo pipefail
 
 STATE="${BAE_AI_STATE:-/tmp/bae-ai-automation}"
@@ -90,21 +92,25 @@ main_stack() {
 # pumping events (progress bars).
 MODAL_RE='runModalForWindow|_doModalLoop|NSAlert runModal|ModalLoop|RunModal[(]'
 SCRIPT_RE='[(]in AdobeExtendScript[)]|ScScript::|jsRunner'
-# "modal" when a blocking modal loop sits above (deeper than) every running script frame:
-# the script opened a dialog, or a dialog came up while nothing was running. A script
-# that is itself running inside an older modal loop is not waiting for a click.
+# Where the main thread is:
+#   script-modal  a blocking modal loop above (deeper than) the running script: the script
+#                 opened the dialog (alert(), a file dialog, a "save changes?" prompt)
+#   modal         a blocking modal loop and no script running: something else opened it
+#   script        a script is running (possibly inside an older modal loop)
+#   idle          neither
 classify() {
   awk -v mre="$MODAL_RE" -v sre="$SCRIPT_RE" '
     { d = match($0, /[0-9]/) }
     $0 ~ mre && d > md { md = d }
     $0 ~ sre && d > sd { sd = d }
     END {
-      if (md > 0 && md > sd) print "modal"
+      if (md > 0 && sd > 0 && md > sd) print "script-modal"
+      else if (md > 0 && sd == 0) print "modal"
       else if (sd > 0) print "script"
       else print "idle"
     }'
 }
-is_modal() { [[ -n "$1" ]] && [[ "$(main_thread "$1" | classify)" == modal ]]; }
+is_modal() { [[ -n "$1" ]] && [[ "$(main_thread "$1" | classify)" == *modal ]]; }
 MODAL_CONFIRMATIONS=3
 # A pending script whose main thread sits on the same non-script stack this many checks
 # in a row (~3 s apart) is a hang that is not a dialog.
@@ -122,15 +128,27 @@ stuck() {
   return 0
 }
 
+# aictl only ends Illustrator for dialogs it understands: ones the running script opened,
+# and Illustrator's own document-recovery prompt. Any other dialog is left on screen for a
+# person, with the evidence saved; aictl does not click, dismiss or restart around it.
+recoverable() {
+  [[ "$1" == script-modal ]] || grep -q '^recovery:' <<<"$2"
+}
+
+# $1: main-thread text (main_thread). The dialog is named after the code that opened it:
+# the frames from the outermost down to the first blocking modal loop. (main_stack's
+# innermost frames are the modal loop's own event handling; a deep script engine stack
+# pushes the opener out of them.)
 known_dialog() {
-  local stack="$1"
-  if grep -q 'ScCore::Dialogs::\|ScriptUI' <<<"$stack"; then
+  local opener
+  opener=$(awk -v mre="$MODAL_RE" '{ print } $0 ~ mre { exit }' <<<"$1")
+  if grep -q 'ScCore::Dialogs::\|ScriptUI' <<<"$opener"; then
     echo "script-alert: a script called alert()/confirm()/prompt() or showed a ScriptUI dialog"
-  elif grep -q 'NSSavePanel\|NSOpenPanel' <<<"$stack"; then
+  elif grep -q 'NSSavePanel\|NSOpenPanel' <<<"$opener"; then
     echo "file-dialog: a script opened a file open/save dialog (pass paths as options instead)"
-  elif grep -q -i 'recover' <<<"$stack"; then
+  elif grep -q -i 'recover' <<<"$opener"; then
     echo "recovery: Illustrator offers to recover documents from a previous session"
-  elif grep -q 'NSAlert runModal' <<<"$stack"; then
+  elif grep -q 'NSAlert runModal' <<<"$opener"; then
     echo "alert: an NSAlert is waiting for a click"
   else
     echo "unknown-modal"
@@ -234,6 +252,14 @@ recover() {
   clean_recovery
 }
 
+# A dialog aictl does not handle: keep the evidence, leave Illustrator as it is.
+leave_alone() {
+  local pid="$1" why="$2" evidence
+  evidence=$(save_evidence "$pid" "$why (left on screen)")
+  LAST_EVIDENCE="$evidence"
+  log "$why; aictl leaves it for a person (evidence: $evidence; 'aictl stop --force' discards it)"
+}
+
 # 0 ready, 2 exited, 3 modal, 4 runner refused (CEP signature), 1 timeout.
 wait_ready() {
   local pid="$1" t0="$2" limit="${3:-180}" s0=$SECONDS next=$((SECONDS + 3)) hits=0 kicked=0
@@ -273,6 +299,7 @@ await_job() {
       [[ -n "$crash" ]] && (( $(mtime "$crash") >= $(date +%s) - (SECONDS - t0) )) && JOB_ERROR="$JOB_ERROR; crash report: $crash"
       rm -f "$STATE/aictl.pid" "$STATE/ready.json" "$STATE/runner.json" "$QUEUE/$id".*
       clean_recovery
+      JOB_RECOVERED=0
       return 5
     fi
     (( SECONDS >= next )) || continue
@@ -280,7 +307,7 @@ await_job() {
     text=$(main_thread "$pid")
     [[ -f "$out" ]] && return 0
     kind=$(classify <<<"$text")
-    if [[ "$kind" == modal ]]; then hits=$((hits + 1)); else hits=0; fi
+    if [[ "$kind" == *modal ]]; then hits=$((hits + 1)); else hits=0; fi
     sig=$(grep -oE '\(in [^)]+\) \+ [0-9]+' <<<"$text" | md5 -q)
     if [[ "$kind" == script ]]; then
       frozen=0
@@ -298,7 +325,17 @@ await_job() {
     prev_sig="$sig"
     if runner_alive; then stale=0; else stale=$((stale + 1)); fi
     if (( hits >= MODAL_CONFIRMATIONS )); then
-      why="modal dialog while running script: $(known_dialog "$(main_stack "$pid")")"
+      local dialog; dialog=$(known_dialog "$text")
+      if ! recoverable "$kind" "$dialog"; then
+        # Withdraw the job if the runner has not taken it, so it does not run unattended
+        # once someone closes the dialog.
+        rm -f "$QUEUE/$id.req"
+        leave_alone "$pid" "a dialog the script did not open blocks Illustrator ($dialog)"
+        JOB_ERROR="a dialog the script did not open blocks Illustrator ($dialog); aictl leaves it for a person"
+        JOB_RECOVERED=0
+        return 3
+      fi
+      why="modal dialog while running script: $dialog"
     elif (( blocked >= BLOCKED_CHECKS )); then
       why="the script has been blocked opening a file for ~$((BLOCKED_CHECKS * 3))s: macOS is probably asking whether Illustrator may access a protected folder (Documents, Desktop, Downloads, iCloud Drive, removable volumes). Keep scripts and files outside those folders (e.g. under /private/tmp), or grant access in System Settings > Privacy & Security > Files and Folders"
     elif (( frozen >= FROZEN_CHECKS )); then
@@ -309,6 +346,7 @@ await_job() {
     if [[ -n "$why" ]]; then
       recover "$pid" "$force" "$why"
       JOB_ERROR="$why"
+      JOB_RECOVERED=1
       return 3
     fi
   done
@@ -317,6 +355,7 @@ await_job() {
   LAST_EVIDENCE=""
   recover "$pid" 1 "timeout after ${timeout}s; the script was still running"
   JOB_ERROR="timeout after ${timeout}s (Illustrator restarted so the next caller is not blocked)"
+  JOB_RECOVERED=1
   return 4
 }
 
@@ -377,7 +416,12 @@ start() {
       die "Illustrator is running (pid $pid) but not started by aictl, and its runner is not up; quit it or use --force"
     fi
     if stuck "$pid"; then
-      recover "$pid" "$force" "$(known_dialog "$(main_stack "$pid")")"
+      local text dialog kind; text=$(main_thread "$pid"); dialog=$(known_dialog "$text"); kind=$(classify <<<"$text")
+      if ! recoverable "$kind" "$dialog"; then
+        leave_alone "$pid" "Illustrator shows a dialog ($dialog)"
+        die "Illustrator shows a dialog that aictl does not handle ($dialog); evidence: $LAST_EVIDENCE"
+      fi
+      recover "$pid" "$force" "$dialog"
     else
       # Running without the runner (e.g. the extension was installed later): kick it.
       t0=$(date +%s)
@@ -401,7 +445,12 @@ start() {
     case $? in
       0) log "Illustrator $VERSION ready (pid $pid, $(( $(date +%s) - t0 ))s)"; close_kick "$pid"; return 0 ;;
       2) log "Illustrator exited during startup (attempt $attempt)"; rm -f "$STATE/aictl.pid" ;;
-      3) recover "$pid" 1 "$(known_dialog "$(main_stack "$pid")") at startup (attempt $attempt)" ;;
+      3) local dialog; dialog=$(known_dialog "$(main_thread "$pid")")
+         if ! recoverable modal "$dialog"; then
+           leave_alone "$pid" "Illustrator shows a dialog at startup ($dialog)"
+           die "Illustrator shows a dialog at startup that aictl does not handle ($dialog); evidence: $LAST_EVIDENCE"
+         fi
+         recover "$pid" 1 "$dialog at startup (attempt $attempt)" ;;
       4) recover "$pid" 1 "CEP refused the runner extension (signature check; is $CSXS_DOMAIN PlayerDebugMode = 1?)"
          defaults write "$CSXS_DOMAIN" PlayerDebugMode 1 ;;
       *) recover "$pid" 1 "runner not ready after 240s (attempt $attempt)" ;;
@@ -431,12 +480,12 @@ run_script() {
     body="__bae_value = \$.evalFile(new File(\"$STATE/src-$id.jsx\"));"
   fi
   write_wrapper "$wrapper" "$body" "$out"
-  JOB_ERROR=""; LAST_EVIDENCE=""
+  JOB_ERROR=""; LAST_EVIDENCE=""; JOB_RECOVERED=0
   await_job "$id" "$wrapper" "$out" "$timeout" "$force" "$pid"
   rc=$?
   if (( rc != 0 )); then
-    python3 -c 'import json,sys; print(json.dumps({"ok": False, "value": None, "error": {"message": sys.argv[1], "recovered": sys.argv[2] != "5", "evidence": sys.argv[3] or None}}))' \
-      "$JOB_ERROR" "$rc" "${LAST_EVIDENCE:-}"
+    python3 -c 'import json,sys; print(json.dumps({"ok": False, "value": None, "error": {"message": sys.argv[1], "recovered": sys.argv[2] == "1", "evidence": sys.argv[3] or None}}))' \
+      "$JOB_ERROR" "$JOB_RECOVERED" "${LAST_EVIDENCE:-}"
     return "$rc"
   fi
   cat "$out"; echo
@@ -487,8 +536,8 @@ diagnose() {
   echo "app: $APP ($VERSION)"
   echo "pid: ${pid:-not running}$( [[ -n "$pid" ]] && owned "$pid" && echo ' (started by aictl)')"
   if [[ -n "$pid" ]]; then
-    local stack; stack=$(main_stack "$pid")
-    echo "main thread: $(main_thread "$pid" | classify)$(is_modal "$pid" && echo " — $(known_dialog "$stack")")"
+    local stack text; stack=$(main_stack "$pid"); text=$(main_thread "$pid")
+    echo "main thread: $(classify <<<"$text")$(is_modal "$pid" && echo " — $(known_dialog "$text")")"
     sed 's/^/  /' <<<"$stack"
     echo "windows (id, width, height, name):"; windows "$pid" | sed 's/^/  /'
   fi
