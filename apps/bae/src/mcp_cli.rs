@@ -132,7 +132,11 @@ impl AppModule for McpCliModule {
                 .collect();
             let workspace = Workspace::with_commands(project, module_commands);
             let server = BaeMcpServer::new(workspace.shared(), options)
-                .with_audit_log(Arc::new(audit));
+                .with_audit_log(Arc::new(audit))
+                // Autosave failures in the app's words (issue #111).
+                .with_save_error_text(Arc::new(|path, error| {
+                    crate::file_error::describe_save_error(path, error)
+                }));
             bae_agent::run_stdio(server)?;
             Ok(ExitCode::SUCCESS)
         });

@@ -650,10 +650,10 @@ fn inputs_are_named_apart_from_their_values() {
     assert!(unnamed.is_empty(), "inputs without a name: {unnamed:#?}");
     let all = labels(&h);
     for name in [
-        "Format",
-        "Output To",
-        "Frames · Start",
-        "Frames · End",
+        "Render Item 1 “Comp 1” · Format",
+        "Render Item 1 “Comp 1” · Output To",
+        "Render Item 1 “Comp 1” · Frames · Start",
+        "Render Item 1 “Comp 1” · Frames · End",
         "Source Text",
     ] {
         assert!(
@@ -661,4 +661,24 @@ fn inputs_are_named_apart_from_their_values() {
             "no input named {name:?}: {all:?}"
         );
     }
+}
+
+/// Issue #128 (Windows): two Render Queue items — here the same comp twice —
+/// show the same controls; each is named after its item.
+#[test]
+fn render_queue_items_are_told_apart() {
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND, Key::M);
+    settle(&mut h);
+    let all = labels(&h);
+    for n in [1, 2] {
+        for what in ["Remove", "Output To", "Format"] {
+            let name = format!("Render Item {n} “Comp 1” · {what}");
+            assert!(all.contains(&name), "no {name:?}: {all:?}");
+        }
+    }
+    let dupes = repeated_names(&h);
+    assert!(dupes.is_empty(), "{dupes:#?}");
 }

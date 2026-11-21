@@ -547,6 +547,22 @@ pub(crate) fn pause(h: &mut Ui) {
     }
 }
 
+/// The control `what` ("Stop", "Remove", "Show in Finder" …) of Render Queue item
+/// `number` (1-based): its accessible name is "Render Item N “Comp” · what".
+pub(crate) fn queue_control<'a>(
+    h: &'a Ui,
+    number: usize,
+    what: &str,
+) -> Option<egui_kittest::Node<'a>> {
+    use egui_kittest::kittest::Queryable as _;
+    let prefix = format!("Render Item {number} “");
+    let suffix = format!("” · {what}");
+    h.query_by(move |n| {
+        n.label()
+            .is_some_and(|l| l.starts_with(&prefix) && l.ends_with(&suffix))
+    })
+}
+
 /// Where the text `text` was painted in the last frame (first match, inside its
 /// clip rect). Finds rows the panels paint themselves (timeline layer names).
 pub(crate) fn find_text(h: &Ui, text: &str) -> Option<Rect> {

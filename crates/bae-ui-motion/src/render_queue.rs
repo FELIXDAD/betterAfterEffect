@@ -651,11 +651,19 @@ impl Panel for RenderQueuePanel {
         let mut cancel = None;
         let mut requeue = None;
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for item in &mut q.items {
+            for (i, item) in q.items.iter_mut().enumerate() {
                 let last =
                     bae_motion::query::comp_info(cx.stage, &item.comp).map(|c| c.frame_count() - 1);
                 ui.push_id(item.id, |ui| {
-                    item_ui(ui, item, last, &mut remove, &mut cancel, &mut requeue);
+                    item_ui(
+                        ui,
+                        i + 1,
+                        item,
+                        last,
+                        &mut remove,
+                        &mut cancel,
+                        &mut requeue,
+                    );
                 });
                 ui.separator();
             }
@@ -676,8 +684,10 @@ impl Panel for RenderQueuePanel {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn item_ui(
     ui: &mut egui::Ui,
+    number: usize,
     item: &mut QueueItem,
     last: Option<i64>,
     remove: &mut Option<u64>,
@@ -688,6 +698,12 @@ fn item_ui(
         item.status,
         ItemStatus::Queued | ItemStatus::Failed(_) | ItemStatus::Stopped { .. }
     );
+    // Screen-reader names carry the item ("Render Item 1 “Comp 1” · Output To"):
+    // two items show the same controls, possibly for the same comp (#128).
+    let item_ctx = tr("Render Item {n} “{comp}”")
+        .replace("{n}", &number.to_string())
+        .replace("{comp}", &item.comp_name);
+    let name = |what: &str| bae_ui::a11y::context(&[&item_ctx, tr(what)]);
     // Name, status and actions wrap in a narrow panel instead of running
     // off its edge.
     ui.horizontal_wrapped(|ui| {
@@ -707,7 +723,11 @@ fn item_ui(
                         .desired_width(ui.available_width().clamp(60.0, 160.0))
                         .text(format!("{done} / {total}")),
                 );
-                if ui.button(tr("Stop")).clicked() {
+                if ui
+                    .button(tr("Stop"))
+                    .labeled(egui::WidgetType::Button, &name("Stop"))
+                    .clicked()
+                {
                     *cancel = Some(item.id);
                 }
             }
@@ -717,7 +737,11 @@ fn item_ui(
                 seconds,
             } => {
                 ui.label(format!("{} · {files} · {seconds:.1} s", tr("Done")));
-                if ui.button(tr(reveal_label())).clicked() {
+                if ui
+                    .button(tr(reveal_label()))
+                    .labeled(egui::WidgetType::Button, &name(reveal_label()))
+                    .clicked()
+                {
                     reveal(first);
                 }
             }
@@ -732,7 +756,10 @@ fn item_ui(
                         .replace("{total}", &total.to_string()),
                 );
                 if let Some(first) = first
-                    && ui.button(tr(reveal_label())).clicked()
+                    && ui
+                        .button(tr(reveal_label()))
+                        .labeled(egui::WidgetType::Button, &name(reveal_label()))
+                        .clicked()
                 {
                     reveal(first);
                 }
@@ -741,11 +768,18 @@ fn item_ui(
         if !matches!(
             item.status,
             ItemStatus::Rendering { .. } | ItemStatus::Queued
-        ) && ui.button(tr("Render Again")).clicked()
+        ) && ui
+            .button(tr("Render Again"))
+            .labeled(egui::WidgetType::Button, &name("Render Again"))
+            .clicked()
         {
             *requeue = Some(item.id);
         }
-        if !matches!(item.status, ItemStatus::Rendering { .. }) && ui.button(tr("Remove")).clicked()
+        if !matches!(item.status, ItemStatus::Rendering { .. })
+            && ui
+                .button(tr("Remove"))
+                .labeled(egui::WidgetType::Button, &name("Remove"))
+                .clicked()
         {
             *remove = Some(item.id);
         }
@@ -755,9 +789,9 @@ fn item_ui(
     }
     ui.add_enabled_ui(editable, |ui| {
         egui::Grid::new("output").num_columns(2).show(ui, |ui| {
-            // Fields are named by the label in front of them (screen readers read
-            // "Format: PNG", issue #128).
-            let label = ui.label(tr("Format"));
+            // Fields are named after the label in front of them and the item
+            // (screen readers read "… · Format: PNG", issue #128).
+            ui.label(tr("Format"));
             let mut format = item.format;
             egui::ComboBox::from_id_salt("format")
                 .selected_text(format_label(format))
@@ -767,15 +801,20 @@ fn item_ui(
                     }
                 })
                 .response
-                .labelled_by(label.id);
+                .labeled_value(
+                    egui::WidgetType::ComboBox,
+                    &name("Format"),
+                    format_label(item.format),
+                );
             if format != item.format {
                 item.set_format(format);
             }
             ui.end_row();
-            let label = ui.label(tr("Output To"));
+            ui.label(tr("Output To"));
             ui.vertical(|ui| {
+                let output = item.output.clone();
                 ui.add(egui::TextEdit::singleline(&mut item.output).desired_width(f32::INFINITY))
-                    .labelled_by(label.id);
+                    .labeled_value(egui::WidgetType::TextEdit, &name("Output To"), &output);
                 // AE: the format decides the extension.
                 if let Some(ext) = extension_follows_format(&item.output, item.format) {
                     ui.weak(
@@ -799,7 +838,7 @@ fn item_ui(
                 )
                 .labeled_value(
                     egui::WidgetType::DragValue,
-                    &bae_ui::a11y::context(&[tr("Frames"), tr("Start")]),
+                    &bae_ui::a11y::context(&[&item_ctx, tr("Frames"), tr("Start")]),
                     &start,
                 );
                 ui.label("–");
@@ -811,7 +850,7 @@ fn item_ui(
                 )
                 .labeled_value(
                     egui::WidgetType::DragValue,
-                    &bae_ui::a11y::context(&[tr("Frames"), tr("End")]),
+                    &bae_ui::a11y::context(&[&item_ctx, tr("Frames"), tr("End")]),
                     &end,
                 );
             });

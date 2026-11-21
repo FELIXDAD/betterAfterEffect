@@ -103,12 +103,15 @@ const ZH: &[(&str, &str)] = &[
         "文件夹“{folder}”不存在。",
     ),
     (
+        "You don't have permission to change “{file}”.",
+        "没有权限修改“{file}”。",
+    ),
+    (
         "There is not enough space to save “{file}”.",
         "空间不足，无法保存“{file}”。",
     ),
     ("“{file}” could not be saved.", "无法保存“{file}”。"),
     ("“{file}” could not be opened.", "无法打开“{file}”。"),
-    ("Details:", "详细信息："),
     // bae pack
     ("packed", "已打包"),
     ("asset file(s)", "个素材文件"),

@@ -1012,9 +1012,15 @@ fn broken_files_are_explained_in_chinese_too() {
             "{label}: no file name: {m}"
         );
         assert!(m.contains(why), "{label}: no reason {why:?}: {m}");
-        // A missing file needs no technical detail; the others add one.
-        if *label != "missing" {
-            assert!(m.contains("详细信息："), "{label}: {m}");
+        // Issue #111: the system's English cause stays in the log.
+        for raw in [
+            "详细信息",
+            "Details",
+            "EOCD",
+            "os error",
+            "invalid project.json",
+        ] {
+            assert!(!m.contains(raw), "{label}: raw cause {raw:?} shown: {m}");
         }
     }
     let _ = fs::set_permissions(

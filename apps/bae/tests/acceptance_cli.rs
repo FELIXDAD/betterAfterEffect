@@ -1191,28 +1191,72 @@ fn every_entry_point_explains_open_failures_the_same_way() {
         // window when the project does not open.
         ("--smoke-test", vec!["--smoke-test".into(), "1".into()]),
     ];
-    for (path, why) in [
-        (&missing, "does not exist"),
-        (&garbage, "is damaged or is not a .baez project package"),
+    // English and Chinese UI; the system's / model's own text never shows.
+    for (lang, missing_why, damaged_why) in [
+        (
+            "en",
+            "does not exist",
+            "is damaged or is not a .baez project package",
+        ),
+        ("zh", "不存在", "已损坏，或者不是 .baez 项目包"),
     ] {
-        let file = path.file_name().unwrap().to_string_lossy().into_owned();
-        for (name, args) in &entries {
-            let out = Command::new(BAE)
-                .args(args)
-                .arg(path)
-                .stdin(Stdio::null())
-                .output()
-                .unwrap();
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            assert_eq!(out.status.code(), Some(1), "{name} {file}: {stderr}");
-            assert!(
-                stderr.contains(&file) && stderr.contains(why),
-                "{name} {file}: expected “{why}”: {stderr}"
-            );
-            assert!(
-                !stderr.contains("is not a BAE project"),
-                "{name} {file}: the model's wording leaked: {stderr}"
-            );
+        for (path, why) in [(&missing, missing_why), (&garbage, damaged_why)] {
+            let file = path.file_name().unwrap().to_string_lossy().into_owned();
+            for (name, args) in &entries {
+                let out = Command::new(BAE)
+                    .args(args)
+                    .arg(path)
+                    .env("BAE_LANG", lang)
+                    .stdin(Stdio::null())
+                    .output()
+                    .unwrap();
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let case = format!("{lang} {name} {file}");
+                assert_eq!(out.status.code(), Some(1), "{case}: {stderr}");
+                assert!(
+                    stderr.contains(&file) && stderr.contains(why),
+                    "{case}: expected “{why}”: {stderr}"
+                );
+                for raw in ["is not a BAE project", "EOCD", "zip:", "os error"] {
+                    assert!(!stderr.contains(raw), "{case}: raw {raw:?}: {stderr}");
+                }
+            }
         }
     }
+}
+
+/// Issue #111 (Windows): an autosave that fails (read-only project) says so in
+/// BAE's words, naming the project — not the system's "os error".
+#[cfg(unix)]
+#[test]
+fn mcp_autosave_failures_are_explained() {
+    use std::os::unix::fs::PermissionsExt;
+    fn set_mode(dir: &Path, dir_mode: u32, file_mode: u32) {
+        for e in std::fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                set_mode(&p, dir_mode, file_mode);
+            } else {
+                std::fs::set_permissions(&p, std::fs::Permissions::from_mode(file_mode)).unwrap();
+            }
+        }
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(dir_mode)).unwrap();
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tricky(tmp.path()).join("只读 自动保存.bae");
+    let mut mcp = Mcp::start(&project);
+    let first = mcp.call("comp_create", json!({"name": "A", "fps": 30}));
+    assert_eq!(first["saved"], true, "{first}");
+    set_mode(&project, 0o555, 0o444);
+    let reply = mcp.call("comp_create", json!({"name": "B", "fps": 30}));
+    set_mode(&project, 0o755, 0o644);
+    if std::env::var("USER").is_ok_and(|u| u == "root") {
+        return;
+    }
+    let saved = reply["saved"].as_str().unwrap_or_default().to_owned();
+    assert!(
+        saved.contains("You don't have permission") && saved.contains("只读 自动保存.bae"),
+        "{reply}"
+    );
+    assert!(!saved.contains("os error"), "{reply}");
 }

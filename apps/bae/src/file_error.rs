@@ -1,8 +1,8 @@
 //! Messages for projects that cannot be opened or saved: which file, and what
 //! is wrong in words a user understands ("does not exist", "no permission",
 //! "is damaged", "was saved by a newer version"), in the UI language — never the
-//! system's English text. The technical cause follows on its own line for
-//! support.
+//! system's English text. The technical cause goes to the log only, at debug
+//! level (`--log debug` / `BAE_LOG=debug`).
 //!
 //! Opening: File ▸ Open, `bae <project>`, `bae --headless <project>`,
 //! `bae export-json` ([`describe_open`]). Saving: Save / Save As
@@ -147,11 +147,8 @@ pub fn sentence(path: &Path, problem: &Problem) -> String {
 /// missing file, where it would only say the same less clearly).
 pub fn describe_open(path: &Path, error: &anyhow::Error) -> String {
     let problem = classify(path, error);
-    let sentence = sentence(path, &problem);
-    if problem == Problem::Missing {
-        return sentence;
-    }
-    format!("{sentence}\n{} {error:#}", tr("Details:"))
+    tracing::debug!("cannot open {}: {error:#}", path.display());
+    sentence(path, &problem)
 }
 
 /// Why a save failed.
@@ -169,7 +166,14 @@ pub enum SaveProblem {
 
 /// Classify why saving to `path` failed.
 pub fn classify_save(error: &anyhow::Error) -> SaveProblem {
-    let io = error.chain().find_map(|cause| {
+    classify_save_chain(error.chain())
+}
+
+/// [`classify_save`] for an error and its `source()` chain.
+fn classify_save_chain<'a>(
+    causes: impl Iterator<Item = &'a (dyn std::error::Error + 'static)>,
+) -> SaveProblem {
+    let io = causes.into_iter().find_map(|cause| {
         cause
             .downcast_ref::<std::io::Error>()
             .or_else(|| match cause.downcast_ref::<ProjectError>() {
@@ -192,14 +196,30 @@ pub fn classify_save(error: &anyhow::Error) -> SaveProblem {
     }
 }
 
-/// The message for a failed save to `path`: the sentence, then the cause.
+/// The message for a failed save to `path` (the cause goes to the log).
 pub fn describe_save(path: &Path, error: &anyhow::Error) -> String {
+    tracing::debug!("cannot save {}: {error:#}", path.display());
+    save_sentence(path, classify_save(error))
+}
+
+/// [`describe_save`] for any error type (the MCP server's autosave).
+pub fn describe_save_error(path: &Path, error: &(dyn std::error::Error + 'static)) -> String {
+    tracing::debug!("cannot save {}: {error}", path.display());
+    let chain = std::iter::successors(Some(error), |e| e.source());
+    save_sentence(path, classify_save_chain(chain))
+}
+
+fn save_sentence(path: &Path, problem: SaveProblem) -> String {
     let file = path.display().to_string();
     let folder = path
         .parent()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| file.clone());
-    let sentence = match classify_save(error) {
+    match problem {
+        // An existing project that became read-only, or a folder that is.
+        SaveProblem::NoPermission if path.exists() => {
+            tr("You don't have permission to change “{file}”.").replace("{file}", &file)
+        }
         SaveProblem::NoPermission => {
             tr("You don't have permission to save in “{folder}”.").replace("{folder}", &folder)
         }
@@ -210,8 +230,7 @@ pub fn describe_save(path: &Path, error: &anyhow::Error) -> String {
             tr("There is not enough space to save “{file}”.").replace("{file}", &file)
         }
         SaveProblem::Other => tr("“{file}” could not be saved.").replace("{file}", &file),
-    };
-    format!("{sentence}\n{} {error:#}", tr("Details:"))
+    }
 }
 
 #[cfg(test)]
@@ -290,20 +309,24 @@ mod tests {
     }
 
     #[test]
-    fn messages_name_the_file_and_keep_the_cause() {
+    fn messages_name_the_file_without_the_raw_cause() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("坏的 文件.baez");
         fs::write(&path, b"PK\x03\x04 not really a zip").unwrap();
         let error = Document::load(&path).err().unwrap();
         let message = describe_open(&path, &error);
-        let (first, cause) = message.split_once('\n').unwrap();
-        assert!(first.contains(&path.display().to_string()), "{message}");
-        assert!(first.contains("damaged"), "{message}");
-        assert!(cause.starts_with("Details:"), "{message}");
+        assert!(!message.contains('\n'), "one sentence: {message}");
+        assert!(message.contains(&path.display().to_string()), "{message}");
+        assert!(message.contains("damaged"), "{message}");
+        for raw in ["EOCD", "zip:", "Details", "is not a BAE project"] {
+            assert!(!message.contains(raw), "raw cause {raw:?} shown: {message}");
+        }
+        // Any error type (the MCP autosave): our wording, no "os error".
+        let io = std::io::Error::from(ErrorKind::PermissionDenied);
+        let m = describe_save_error(Path::new("/x/a.bae"), &io);
+        assert_eq!(m, "You don't have permission to save in “/x”.");
     }
 
-    /// Unreadable projects get our own sentence, not the system's text.
-    #[cfg(unix)]
     #[test]
     fn unreadable_projects_say_permission() {
         use std::os::unix::fs::PermissionsExt;
@@ -384,11 +407,11 @@ mod tests {
             "You don't have permission to open “{file}”.",
             "“{file}” cannot be read.",
             "You don't have permission to save in “{folder}”.",
+            "You don't have permission to change “{file}”.",
             "The folder “{folder}” does not exist.",
             "There is not enough space to save “{file}”.",
             "“{file}” could not be saved.",
             "“{file}” could not be opened.",
-            "Details:",
         ];
         let missing: Vec<_> = keys
             .iter()
