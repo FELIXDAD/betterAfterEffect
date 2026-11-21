@@ -361,6 +361,9 @@ pub struct TabInfo {
     pub locked: Option<bool>,
     /// Viewers (Composition, Layer, Footage, Timeline) always show the close button.
     pub viewer: bool,
+    /// The smallest content area (below the tabs) that shows the panel
+    /// completely; the dock gives the panel at least this much when it fits.
+    pub min_size: Vec2,
 }
 
 impl TabInfo {
@@ -383,6 +386,11 @@ impl TabInfo {
 
     pub fn locked(mut self, locked: bool) -> Self {
         self.locked = Some(locked);
+        self
+    }
+
+    pub fn min_size(mut self, size: Vec2) -> Self {
+        self.min_size = size;
         self
     }
 }
@@ -741,14 +749,14 @@ impl Dock {
             frames.push((m, rect));
         } else {
             self.maximized = None;
+            let mins = frame_mins(&self.layout.root, host);
             let mut splitters = Vec::new();
-            layout_node(
-                &self.layout.root,
-                rect,
-                &mut Vec::new(),
-                &mut frames,
-                &mut splitters,
-            );
+            let mut out = LayoutOut {
+                mins: &mins,
+                frames: &mut frames,
+                splitters: &mut splitters,
+            };
+            layout_node(&self.layout.root, rect, &mut Vec::new(), &mut out);
             let names: Vec<String> = splitters
                 .iter()
                 .map(|s| {
@@ -762,13 +770,12 @@ impl Dock {
             if self.drag_splitters(ui, &splitters, &names) {
                 frames.clear();
                 splitters.clear();
-                layout_node(
-                    &self.layout.root,
-                    rect,
-                    &mut Vec::new(),
-                    &mut frames,
-                    &mut splitters,
-                );
+                let mut out = LayoutOut {
+                    mins: &mins,
+                    frames: &mut frames,
+                    splitters: &mut splitters,
+                };
+                layout_node(&self.layout.root, rect, &mut Vec::new(), &mut out);
             }
         }
 
@@ -882,29 +889,65 @@ impl Dock {
         let baseline = bar.top() + geom::BASELINE;
         let mut tab_rects = Vec::new();
 
+        let infos: Vec<TabInfo> = frame.tabs.iter().map(|p| host.tab(p)).collect();
+        let titles: Vec<f32> = infos
+            .iter()
+            .map(|info| {
+                ui.painter()
+                    .layout_no_wrap(tr(&info.title).to_owned(), font.clone(), color::TEXT)
+                    .size()
+                    .x
+            })
+            .collect();
+        let extras: Vec<f32> = infos
+            .iter()
+            .enumerate()
+            .map(|(i, info)| {
+                let active = i == frame.active;
+                let mut w = 0.0;
+                if !active || info.viewer {
+                    w += geom::CLOSE_W + geom::CLOSE_GAP;
+                }
+                if info.label.is_some() {
+                    w += geom::SWATCH + geom::SWATCH_GAP;
+                }
+                if info.locked.is_some() {
+                    w += geom::LOCK_W + geom::LOCK_GAP;
+                }
+                if active {
+                    w += geom::MENU_GAP + geom::MENU_W;
+                }
+                w
+            })
+            .collect();
+        let fit = fit_tabs(&titles, &extras, frame.active, tabs_right - x);
+
         for (i, panel) in frame.tabs.iter().enumerate() {
-            let info = host.tab(panel);
+            let Some(title_w) = fit.titles[i] else {
+                continue;
+            };
+            let info = infos[i].clone();
             let active = i == frame.active;
             let close_slot = !active || info.viewer;
-            let galley =
+            let galley = if title_w + 0.5 < titles[i] {
+                // Shortened with an ellipsis; the full title is in the » menu.
+                let mut job = egui::text::LayoutJob::simple_singleline(
+                    tr(&info.title).to_owned(),
+                    font.clone(),
+                    color::TEXT,
+                );
+                job.wrap = egui::text::TextWrapping {
+                    max_width: title_w,
+                    max_rows: 1,
+                    break_anywhere: true,
+                    overflow_character: Some('…'),
+                };
+                ui.painter().layout_job(job)
+            } else {
                 ui.painter()
-                    .layout_no_wrap(tr(&info.title).to_owned(), font.clone(), color::TEXT);
-            let mut w = galley.size().x;
-            if close_slot {
-                w += geom::CLOSE_W + geom::CLOSE_GAP;
-            }
-            if info.label.is_some() {
-                w += geom::SWATCH + geom::SWATCH_GAP;
-            }
-            if info.locked.is_some() {
-                w += geom::LOCK_W + geom::LOCK_GAP;
-            }
-            if active {
-                w += geom::MENU_GAP + geom::MENU_W;
-            }
-            if x + w > tabs_right && i > 0 {
-                break;
-            }
+                    .layout_no_wrap(tr(&info.title).to_owned(), font.clone(), color::TEXT)
+            };
+            let w = galley.size().x + extras[i];
             let tab_rect = Rect::from_min_max(
                 pos2(x - geom::TAB_PAD / 2.0, bar.top()),
                 pos2((x + w + geom::TAB_PAD / 2.0).min(tabs_right), bar.bottom()),
@@ -1032,7 +1075,7 @@ impl Dock {
                     painter.rect_filled(ul, 0.5, color::TAB_ACTIVE);
                 }
             }
-            x += w + geom::TAB_SPACING;
+            x += w + fit.spacing;
         }
 
         if multi {
@@ -1480,6 +1523,112 @@ fn check_item(ui: &mut Ui, checked: bool, text: &str) -> Response {
     ui.button(format!("{mark}{text}"))
 }
 
+/// How a frame's tabs share the tab bar.
+#[derive(Debug, PartialEq)]
+struct TabFit {
+    /// Gap between tabs.
+    spacing: f32,
+    /// Width of each tab's title; `None` for tabs only in the » menu.
+    titles: Vec<Option<f32>>,
+}
+
+/// Fits tabs into `avail` points: AE's spacing when there is room, then
+/// tighter spacing, then shortened inactive titles. Tabs move to the » menu
+/// only when even that is not enough, from the end, never the active one.
+fn fit_tabs(titles: &[f32], extras: &[f32], active: usize, avail: f32) -> TabFit {
+    const MIN_SPACING: f32 = 10.0;
+    const MIN_TITLE: f32 = 28.0;
+    let n = titles.len();
+    let gaps = n.saturating_sub(1) as f32;
+    let fixed: f32 = extras.iter().sum();
+    let text: f32 = titles.iter().sum();
+    let mut spacing = geom::TAB_SPACING;
+    if text + fixed + spacing * gaps > avail && gaps > 0.0 {
+        spacing = ((avail - text - fixed) / gaps).clamp(MIN_SPACING, geom::TAB_SPACING);
+    }
+    let mut out: Vec<Option<f32>> = titles.iter().copied().map(Some).collect();
+    let width = |out: &[Option<f32>]| {
+        let shown: Vec<usize> = (0..n).filter(|&i| out[i].is_some()).collect();
+        shown
+            .iter()
+            .map(|&i| out[i].unwrap_or(0.0) + extras[i])
+            .sum::<f32>()
+            + spacing * shown.len().saturating_sub(1) as f32
+    };
+    let excess = width(&out) - avail;
+    if excess > 0.0 {
+        let room: f32 = (0..n)
+            .filter(|&i| i != active)
+            .map(|i| (titles[i] - MIN_TITLE).max(0.0))
+            .sum();
+        let k = if room > 0.0 {
+            (excess / room).min(1.0)
+        } else {
+            0.0
+        };
+        for i in (0..n).filter(|&i| i != active) {
+            let shrink = (titles[i] - MIN_TITLE).max(0.0) * k;
+            out[i] = Some(titles[i] - shrink);
+        }
+    }
+    // Last resort: hide inactive tabs from the end.
+    for i in (0..n).rev() {
+        if width(&out) <= avail + 0.5 {
+            break;
+        }
+        if i != active {
+            out[i] = None;
+        }
+    }
+    TabFit {
+        spacing,
+        titles: out,
+    }
+}
+
+/// A panel's content area and whether its contents fit last frame.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PanelArea {
+    pub panel: PanelId,
+    /// The content area below the tabs.
+    pub rect: Rect,
+    /// The size the contents asked for (larger than `rect` when they did not
+    /// fit; the panel then scrolls).
+    pub content: Vec2,
+}
+
+impl PanelArea {
+    pub fn overflows(&self) -> bool {
+        self.content.x > self.rect.width() + 0.5 || self.content.y > self.rect.height() + 0.5
+    }
+}
+
+/// The panels drawn in the last frame, with their content areas: which
+/// panel a widget belongs to, and whether a layout fits (tests, diagnostics).
+pub fn panel_areas(ctx: &egui::Context) -> Vec<PanelArea> {
+    ctx.data(|d| d.get_temp::<(u64, Vec<PanelArea>)>(panel_areas_id()))
+        .map(|(_, areas)| areas)
+        .unwrap_or_default()
+}
+
+fn panel_areas_id() -> Id {
+    Id::new("bae-dock-panel-areas")
+}
+
+fn record_panel_area(ctx: &egui::Context, area: PanelArea) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| {
+        let entry = d.get_temp_mut_or_default::<(u64, Vec<PanelArea>)>(panel_areas_id());
+        if entry.0 != pass {
+            *entry = (pass, Vec::new());
+        }
+        entry.1.retain(|a| a.panel != area.panel);
+        entry.1.push(area);
+    });
+}
+
+/// Draws a panel into `rect`. Contents that do not fit are never cut off:
+/// from the next frame on they scroll, until they fit again.
 fn panel_contents(ui: &mut Ui, rect: Rect, panel: &PanelId, host: &mut impl PanelHost) {
     if rect.width() <= 0.0 || rect.height() <= 0.0 {
         return;
@@ -1492,14 +1641,43 @@ fn panel_contents(ui: &mut Ui, rect: Rect, panel: &PanelId, host: &mut impl Pane
     );
     child.set_clip_rect(rect.intersect(ui.clip_rect()));
     // The panel is a named region for screen readers; widgets inside it are
-    // told apart within it (issue #128).
+    // told apart within it (issue #128). Tests find a widget's panel through
+    // its author id.
     let title = tr(&host.tab(panel).title).to_owned();
     let pane = child.unique_id();
     child.ctx().accesskit_node_builder(pane, |node| {
         node.set_role(egui::accesskit::Role::Pane);
         node.set_label(title);
+        node.set_author_id(format!("panel:{}", panel.as_str()));
     });
-    host.ui(&mut child, panel);
+    let scroll_id = child.id().with("overflow-scroll");
+    let scrolling = child
+        .ctx()
+        .data(|d| d.get_temp::<bool>(scroll_id))
+        .unwrap_or(false);
+    let content = if scrolling {
+        let out = egui::ScrollArea::both()
+            .id_salt(scroll_id)
+            .auto_shrink([false, false])
+            .show(&mut child, |ui| host.ui(ui, panel));
+        out.content_size
+    } else {
+        host.ui(&mut child, panel);
+        child.min_rect().max - rect.min
+    };
+    let area = PanelArea {
+        panel: panel.clone(),
+        rect,
+        content,
+    };
+    let overflows = area.overflows();
+    if overflows != scrolling {
+        child
+            .ctx()
+            .data_mut(|d| d.insert_temp(scroll_id, overflows));
+        child.ctx().request_repaint();
+    }
+    record_panel_area(ui.ctx(), area);
 }
 
 fn drop_zone(r: Rect, pos: Pos2) -> DropZone {
@@ -1532,15 +1710,105 @@ fn zone_rect(r: Rect, zone: DropZone) -> Rect {
     }
 }
 
-fn layout_node(
-    node: &Node,
-    rect: Rect,
-    path: &mut Vec<usize>,
-    frames: &mut Vec<(FrameId, Rect)>,
-    splitters: &mut Vec<Splitter>,
-) {
+/// Minimum sizes of the frames (tabs bar plus the largest content minimum of
+/// their panels). Stacked frames have none.
+fn frame_mins(root: &Node, host: &mut impl PanelHost) -> Vec<(FrameId, Vec2)> {
+    fn walk(node: &Node, host: &mut impl PanelHost, out: &mut Vec<(FrameId, Vec2)>) {
+        match node {
+            Node::Frame(f) if !f.stacked => {
+                let content = f
+                    .tabs
+                    .iter()
+                    .map(|p| host.tab(p).min_size)
+                    .fold(Vec2::ZERO, Vec2::max);
+                if content != Vec2::ZERO {
+                    out.push((f.id, content + vec2(0.0, metrics::TAB_BAR_H)));
+                }
+            }
+            Node::Frame(_) => {}
+            Node::Split { children, .. } => {
+                for c in children {
+                    walk(c, host, out);
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, host, &mut out);
+    out
+}
+
+/// Minimum size of a node: frames from `mins`, splits add up along their axis.
+fn node_min(node: &Node, mins: &[(FrameId, Vec2)]) -> Vec2 {
     match node {
-        Node::Frame(f) => frames.push((f.id, rect)),
+        Node::Frame(f) => mins
+            .iter()
+            .find(|(id, _)| *id == f.id)
+            .map_or(Vec2::ZERO, |(_, m)| *m),
+        Node::Split { axis, children, .. } => {
+            let gaps = metrics::PANEL_GAP * children.len().saturating_sub(1) as f32;
+            let sum = children
+                .iter()
+                .map(|c| node_min(c, mins))
+                .fold(Vec2::ZERO, |acc, m| match axis {
+                    Axis::Row => vec2(acc.x + m.x, acc.y.max(m.y)),
+                    Axis::Column => vec2(acc.x.max(m.x), acc.y + m.y),
+                });
+            match axis {
+                Axis::Row => sum + vec2(gaps, 0.0),
+                Axis::Column => sum + vec2(0.0, gaps),
+            }
+        }
+    }
+}
+
+/// Splits `avail` by `weights`, raising children to their minimum and taking
+/// the difference from the others. When the minimums do not all fit, plain
+/// proportions (the panels then scroll).
+fn distribute(weights: &[f32], mins: &[f32], avail: f32) -> Vec<f32> {
+    let n = weights.len();
+    let proportional = |fixed: &[bool], rest: f32| -> Vec<f32> {
+        let w: f32 = (0..n)
+            .filter(|&i| !fixed[i])
+            .map(|i| weights[i])
+            .sum::<f32>()
+            .max(1e-6);
+        (0..n)
+            .map(|i| {
+                if fixed[i] {
+                    mins[i]
+                } else {
+                    weights[i] / w * rest
+                }
+            })
+            .collect()
+    };
+    let mut fixed = vec![false; n];
+    if mins.iter().sum::<f32>() >= avail {
+        return proportional(&fixed, avail);
+    }
+    loop {
+        let rest = avail - (0..n).filter(|&i| fixed[i]).map(|i| mins[i]).sum::<f32>();
+        let out = proportional(&fixed, rest);
+        let short: Vec<usize> = (0..n).filter(|&i| !fixed[i] && out[i] < mins[i]).collect();
+        if short.is_empty() {
+            return out;
+        }
+        for i in short {
+            fixed[i] = true;
+        }
+    }
+}
+
+struct LayoutOut<'a> {
+    mins: &'a [(FrameId, Vec2)],
+    frames: &'a mut Vec<(FrameId, Rect)>,
+    splitters: &'a mut Vec<Splitter>,
+}
+
+fn layout_node(node: &Node, rect: Rect, path: &mut Vec<usize>, out: &mut LayoutOut<'_>) {
+    match node {
+        Node::Frame(f) => out.frames.push((f.id, rect)),
         Node::Split {
             axis,
             children,
@@ -1556,10 +1824,23 @@ fn layout_node(
                 Axis::Column => rect.height(),
             };
             let avail = (span - gap * (n - 1) as f32).max(0.0);
-            let total: f32 = sizes.iter().take(n).sum::<f32>().max(1e-6);
+            let weights: Vec<f32> = (0..n)
+                .map(|i| sizes.get(i).copied().unwrap_or(1.0))
+                .collect();
+            let mins: Vec<f32> = children
+                .iter()
+                .map(|c| {
+                    let m = node_min(c, out.mins);
+                    match axis {
+                        Axis::Row => m.x,
+                        Axis::Column => m.y,
+                    }
+                })
+                .collect();
             // Round to whole points so frame edges stay on the pixel grid.
-            let mut lengths: Vec<f32> = (0..n)
-                .map(|i| (sizes.get(i).copied().unwrap_or(1.0) / total * avail).round())
+            let mut lengths: Vec<f32> = distribute(&weights, &mins, avail)
+                .into_iter()
+                .map(f32::round)
                 .collect();
             let used: f32 = lengths.iter().sum();
             if let Some(last) = lengths.last_mut() {
@@ -1580,7 +1861,7 @@ fn layout_node(
                     }
                 };
                 path.push(i);
-                layout_node(child, r, path, frames, splitters);
+                layout_node(child, r, path, out);
                 path.pop();
                 pos += len;
                 if i + 1 < n {
@@ -1592,7 +1873,7 @@ fn layout_node(
                             Rect::from_min_size(pos2(rect.left(), pos), vec2(rect.width(), gap))
                         }
                     };
-                    splitters.push(Splitter {
+                    out.splitters.push(Splitter {
                         path: path.clone(),
                         index: i,
                         axis: *axis,
@@ -1610,7 +1891,12 @@ fn layout_node(
 /// Lay out a node without drawing (for tests and for hosts that need frame rects).
 pub fn frame_rects(root: &Node, rect: Rect) -> Vec<(FrameId, Rect)> {
     let mut frames = Vec::new();
-    layout_node(root, rect, &mut Vec::new(), &mut frames, &mut Vec::new());
+    let mut out = LayoutOut {
+        mins: &[],
+        frames: &mut frames,
+        splitters: &mut Vec::new(),
+    };
+    layout_node(root, rect, &mut Vec::new(), &mut out);
     frames
 }
 
@@ -1667,6 +1953,78 @@ mod tests {
         fn ui(&mut self, ui: &mut Ui, panel: &PanelId) {
             ui.label(panel.as_str());
         }
+    }
+
+    #[test]
+    fn splits_give_panels_their_minimum_size() {
+        // Proportions alone: preview gets 52 of 935.
+        assert_eq!(
+            distribute(&[52.0, 883.0], &[0.0, 0.0], 800.0)[0].round(),
+            44.0
+        );
+        // With a minimum of 84 it gets 84, the stack the rest.
+        let l = distribute(&[52.0, 883.0], &[84.0, 0.0], 800.0);
+        assert_eq!(l, vec![84.0, 716.0]);
+        // Several minimums; one already satisfied by its proportion.
+        let l = distribute(&[1.0, 1.0, 8.0], &[300.0, 10.0, 0.0], 1000.0);
+        assert_eq!(l[0], 300.0);
+        assert!((l[1] - 700.0 / 9.0).abs() < 1e-3 && (l.iter().sum::<f32>() - 1000.0).abs() < 1e-3);
+        // Minimums that cannot all fit: plain proportions (the panels scroll).
+        assert_eq!(
+            distribute(&[1.0, 1.0], &[600.0, 600.0], 1000.0),
+            vec![500.0, 500.0]
+        );
+        // Through the layout: the right column's preview frame.
+        let root = ae_default();
+        let preview = match &root {
+            Node::Split { children, .. } => match &children[1] {
+                Node::Split { children, .. } => match &children[0] {
+                    Node::Frame(f) => f.id,
+                    _ => unreachable!(),
+                },
+                _ => unreachable!(),
+            },
+            _ => unreachable!(),
+        };
+        let mins = [(preview, vec2(200.0, 84.0))];
+        let mut frames = Vec::new();
+        let mut out = LayoutOut {
+            mins: &mins,
+            frames: &mut frames,
+            splitters: &mut Vec::new(),
+        };
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 800.0));
+        layout_node(&root, screen, &mut Vec::new(), &mut out);
+        let r = frames.iter().find(|(id, _)| *id == preview).unwrap().1;
+        assert!(r.height() >= 84.0 && r.width() >= 200.0, "{r:?}");
+    }
+
+    #[test]
+    fn tabs_tighten_then_shorten_and_keep_the_active_one() {
+        let titles = [45.0, 90.0, 82.0];
+        let extras = [13.5, 13.5, 20.5];
+        // Room for everything: AE spacing, full titles.
+        let fit = fit_tabs(&titles, &extras, 2, 400.0);
+        assert_eq!(fit.spacing, geom::TAB_SPACING);
+        assert_eq!(fit.titles, vec![Some(45.0), Some(90.0), Some(82.0)]);
+        // A little short: tighter spacing first.
+        let fit = fit_tabs(&titles, &extras, 2, 290.0);
+        assert!(fit.spacing < geom::TAB_SPACING && fit.spacing >= 10.0);
+        assert_eq!(fit.titles, vec![Some(45.0), Some(90.0), Some(82.0)]);
+        // Shorter still: inactive titles shrink, the active one does not.
+        let fit = fit_tabs(&titles, &extras, 2, 223.0);
+        assert_eq!(fit.spacing, 10.0);
+        assert_eq!(fit.titles[2], Some(82.0));
+        let used: f32 = (0..3)
+            .map(|i| fit.titles[i].unwrap() + extras[i])
+            .sum::<f32>()
+            + 20.0;
+        assert!(used <= 223.5, "{fit:?}");
+        assert!(fit.titles[1].unwrap() < 90.0);
+        // Far too small: inactive tabs go to the » menu, the active one stays.
+        let fit = fit_tabs(&titles, &extras, 0, 80.0);
+        assert!(fit.titles[0].is_some());
+        assert!(fit.titles[2].is_none());
     }
 
     #[test]

@@ -687,7 +687,9 @@ fn item_ui(
         item.status,
         ItemStatus::Queued | ItemStatus::Failed(_) | ItemStatus::Stopped { .. }
     );
-    ui.horizontal(|ui| {
+    // Name, status and actions wrap in a narrow panel instead of running
+    // off its edge.
+    ui.horizontal_wrapped(|ui| {
         ui.strong(&item.comp_name);
         match &item.status {
             ItemStatus::Queued => {
@@ -701,7 +703,7 @@ fn item_ui(
                 };
                 ui.add(
                     egui::ProgressBar::new(fraction)
-                        .desired_width(160.0)
+                        .desired_width(ui.available_width().clamp(60.0, 160.0))
                         .text(format!("{done} / {total}")),
                 );
                 if ui.button(tr("Stop")).clicked() {

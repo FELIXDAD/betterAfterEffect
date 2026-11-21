@@ -236,7 +236,7 @@ impl Panel for ProjectPanel {
 
         let rows = self.rows(stage);
         let footer_h = 28.0;
-        let list_h = (ui.available_height() - footer_h).max(20.0);
+        let list_h = (ui.available_height() - footer_h - ui.spacing().item_spacing.y).max(20.0);
         let mut open_comp: Option<PrimPath> = None;
         // The Enter that commits a rename must not start a new one.
         let mut rename_finished = false;
