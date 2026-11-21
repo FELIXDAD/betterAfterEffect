@@ -19,6 +19,7 @@
 //! the other tests of this binary.
 
 mod files_flow;
+mod i18n_retest;
 mod i18n_scan;
 mod layers;
 mod layout;

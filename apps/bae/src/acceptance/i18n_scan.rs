@@ -10,7 +10,7 @@ use egui_kittest::kittest::{AccessKitNode, NodeT as _, Queryable as _};
 use super::*;
 
 /// Proper nouns and key legends that stay in Latin letters in a Chinese UI.
-const ALLOWED: &[&str] = &[
+pub(super) const ALLOWED: &[&str] = &[
     // Product, formats, color models, codecs.
     "BAE",
     "PNG",
@@ -22,6 +22,9 @@ const ALLOWED: &[&str] = &[
     "HEVC",
     "ProRes",
     "HQ",
+    // Frame rate unit: AE zh_CN keeps it ("社交媒体纵向 HD • 1080x1920 • 30 fps",
+    // docs/reference/ae/preferences.json); the timeline shows "(30.00 fps)".
+    "fps",
     // AE (keyboard layout name, "Roto 笔刷工具") and BAE's Agent workspace
     // (docs/glossary.md).
     "After",
