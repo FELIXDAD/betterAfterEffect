@@ -377,12 +377,80 @@ fn ui_code_uses_the_menu_button_with_a_system_glyph() {
 /// vendor/epaint/BAE-PATCH.md).
 #[test]
 fn invisible_characters_draw_nothing() {
+    let mut measure = text_measure(bae_ui::theme::ui_font_definitions());
+    let letters = measure("AB");
+    let alone = measure("x");
+    for c in INVISIBLE_SAMPLE {
+        let code = u32::from(c);
+        // Between letters (joins a cluster) and on its own at the start: a selector
+        // there found no font and drew the box with the system fonts.
+        assert_eq!(
+            measure(&format!("A{c}B")),
+            letters,
+            "U+{code:04X} between letters"
+        );
+        assert_eq!(
+            measure(&format!("{c}x")),
+            alone,
+            "U+{code:04X} at the start"
+        );
+    }
+    // A character no font has still shows the missing-glyph box.
+    let (drawn, width) = measure("\u{10FFFD}");
+    assert!(drawn >= 1 && width > 0.0, "the missing glyph box");
+}
+
+/// Windows CI drew a lone U+FE0F because a font there maps it to a visible glyph
+/// that the shaper keeps. macOS's LastResort font maps every code point to a
+/// visible glyph, so it reproduces that on any Mac.
+#[cfg(target_os = "macos")]
+#[test]
+fn invisible_characters_draw_nothing_when_a_font_maps_them() {
+    let Ok(data) = std::fs::read("/System/Library/Fonts/LastResort.otf") else {
+        panic!("macOS ships /System/Library/Fonts/LastResort.otf");
+    };
+    let mut definitions = bae_ui::theme::ui_font_definitions();
+    definitions.font_data.insert(
+        "last-resort".into(),
+        std::sync::Arc::new(egui::FontData::from_owned(data)),
+    );
+    for family in definitions.families.values_mut() {
+        family.insert(0, "last-resort".into());
+    }
+    let mut measure = text_measure(definitions);
+    let alone = measure("x");
+    for c in INVISIBLE_SAMPLE {
+        let code = u32::from(c);
+        assert_eq!(
+            measure(&format!("{c}x")),
+            alone,
+            "U+{code:04X} at the start"
+        );
+    }
+    assert_eq!(
+        measure("\u{200D}\u{FE0F}x"),
+        alone,
+        "ZWJ and U+FE0F at the start"
+    );
+}
+
+/// Default-ignorable characters that must not draw.
+const INVISIBLE_SAMPLE: [char; 6] = [
+    '\u{FE0F}',
+    '\u{FE0E}',
+    '\u{200D}',
+    '\u{00AD}',
+    '\u{E0020}',
+    '\u{2060}',
+];
+
+/// (glyphs that draw something, total advance) of a text on one line.
+fn text_measure(definitions: egui::FontDefinitions) -> impl FnMut(&str) -> (usize, f32) {
     use egui::epaint::text::{Fonts, LayoutJob, TextOptions};
-    let mut fonts = Fonts::new(TextOptions::default(), bae_ui::theme::ui_font_definitions());
-    // (glyphs that draw something, total advance) of `text` on one line.
-    let mut measure = |text: String| {
+    let mut fonts = Fonts::new(TextOptions::default(), definitions);
+    move |text| {
         let job = LayoutJob::simple_singleline(
-            text,
+            text.to_owned(),
             egui::FontId::proportional(13.0),
             egui::Color32::WHITE,
         );
@@ -394,28 +462,5 @@ fn invisible_characters_draw_nothing() {
                 w + g.advance_width,
             )
         })
-    };
-    let letters = measure("AB".into());
-    let alone = measure("x".into());
-    for c in [
-        '\u{FE0F}',
-        '\u{FE0E}',
-        '\u{200D}',
-        '\u{00AD}',
-        '\u{E0020}',
-        '\u{2060}',
-    ] {
-        let code = u32::from(c);
-        // Between letters (joins a cluster) and on its own at the start: a selector
-        // there found no font and drew the box with the system fonts.
-        assert_eq!(
-            measure(format!("A{c}B")),
-            letters,
-            "U+{code:04X} between letters"
-        );
-        assert_eq!(measure(format!("{c}x")), alone, "U+{code:04X} at the start");
     }
-    // A character no font has still shows the missing-glyph box.
-    let (drawn, width) = measure("\u{10FFFD}".into());
-    assert!(drawn >= 1 && width > 0.0, "the missing glyph box");
 }

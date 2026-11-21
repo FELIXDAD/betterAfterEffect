@@ -814,7 +814,7 @@ pub struct StyledMetrics {
 ///
 /// See also [`FontFace::ignore_character`].
 #[inline]
-fn invisible_char(c: char) -> bool {
+pub(crate) fn invisible_char(c: char) -> bool {
     if c == '\r' {
         // A character most vile and pernicious. Don't display it.
         return true;
