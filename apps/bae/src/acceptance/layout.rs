@@ -460,8 +460,10 @@ fn keyboard_shortcuts_window_in_chinese_in_a_small_retina_window() {
     );
     // Long Chinese command names stay on one line.
     let mut checked = 0;
+    // (Since #140 the keyframe toggle is listed per property; Opacity's row sorts
+    // near the top in Chinese.)
     for en in [
-        "Add or Remove Keyframe at Current Time",
+        "Opacity: Add or Remove Keyframe",
         "Accept Proposal",
         "Go to Previous Keyframe",
     ] {
