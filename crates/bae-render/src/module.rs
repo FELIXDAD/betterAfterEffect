@@ -751,24 +751,31 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         let project = animated_project(dir.path());
-        let cases: [(&str, ExportAlpha, &[&str]); 4] = [
+        let mut cases: Vec<(&str, ExportAlpha, &[&str])> = vec![
             ("straight", ExportAlpha::Straight, &[]),
-            (
-                "premultiplied",
-                ExportAlpha::Premultiplied,
-                &["--threads", "3"],
-            ),
-            (
-                "background",
-                ExportAlpha::Background,
-                &["--compression", "fastest"],
-            ),
-            (
-                "straight",
-                ExportAlpha::Straight,
-                &["--threads", "1", "--compression", "high"],
-            ),
+            ("premultiplied", ExportAlpha::Premultiplied, &[]),
+            ("background", ExportAlpha::Background, &[]),
         ];
+        // Encoder threads and compression levels (bae-media).
+        if cfg!(feature = "media") {
+            cases.extend([
+                (
+                    "premultiplied",
+                    ExportAlpha::Premultiplied,
+                    &["--threads", "3"][..],
+                ),
+                (
+                    "background",
+                    ExportAlpha::Background,
+                    &["--compression", "fastest"][..],
+                ),
+                (
+                    "straight",
+                    ExportAlpha::Straight,
+                    &["--threads", "1", "--compression", "high"][..],
+                ),
+            ]);
+        }
         for (case, (alpha_arg, alpha, extra)) in cases.iter().enumerate() {
             let out = dir.path().join(format!("case{case}/f_####.png"));
             let mut argv = vec![
@@ -906,6 +913,7 @@ mod tests {
             .is_err()
         );
         // Bad options are rejected before rendering.
+        #[cfg(feature = "media")]
         assert!(
             render_cli(&[
                 project.to_str().unwrap(),
@@ -1017,7 +1025,13 @@ mod tests {
             purpose: RenderPurpose::Final,
             ..RenderRequest::default()
         };
-        let settings = ExportSettings::new(ExportFormat::Tiff, dir.path().join("q/f_####.tif"));
+        // TIFF (uncompressed, so the byte count is known) where bae-media is in.
+        let (format, ext) = if cfg!(feature = "media") {
+            (ExportFormat::Tiff, "tif")
+        } else {
+            (ExportFormat::Png, "png")
+        };
+        let settings = ExportSettings::new(format, dir.path().join(format!("q/f_####.{ext}")));
         let job = ExportJob {
             stage: &project.stage,
             comp: &comp,
@@ -1034,8 +1048,13 @@ mod tests {
         .unwrap();
         assert_eq!(seen, (0..20).collect::<Vec<_>>());
         assert_eq!((report.stats.frames, report.stats.files), (20, 20));
-        assert!(report.stats.bytes >= 20 * 37 * 23 * 4);
-        assert_eq!(report.frames[7].file, dir.path().join("q/f_0007.tif"));
+        if format == ExportFormat::Tiff {
+            assert!(report.stats.bytes >= 20 * 37 * 23 * 4);
+        }
+        assert_eq!(
+            report.frames[7].file,
+            dir.path().join(format!("q/f_0007.{ext}"))
+        );
 
         let cancel = std::sync::atomic::AtomicBool::new(false);
         let settings = ExportSettings::new(ExportFormat::Png, dir.path().join("c/f_####.png"));

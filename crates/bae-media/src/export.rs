@@ -787,7 +787,8 @@ impl ImageSequenceEncoder {
         }
         let pattern = SequencePattern::parse(&settings.path);
         if !pattern.dir.as_os_str().is_empty() {
-            std::fs::create_dir_all(&pattern.dir).map_err(|e| MediaError::io(&pattern.dir, e))?;
+            std::fs::create_dir_all(&pattern.dir)
+                .map_err(|e| MediaError::write(&pattern.dir, e))?;
         }
         let writer = Arc::new(SequenceWriter {
             settings: settings.clone(),
@@ -830,7 +831,7 @@ pub fn write_image_file(
     }
     check_frame_size(settings, frame)?;
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-        std::fs::create_dir_all(dir).map_err(|e| MediaError::io(dir, e))?;
+        std::fs::create_dir_all(dir).map_err(|e| MediaError::write(dir, e))?;
     }
     let mut stats = SequenceWriter {
         settings: settings.clone(),
@@ -860,7 +861,7 @@ impl SequenceWriter {
             other => unreachable!("checked in ImageSequenceEncoder::new: {other:?}"),
         };
         let encoded = Instant::now();
-        std::fs::write(path, &bytes).map_err(|e| MediaError::io(path, e))?;
+        std::fs::write(path, &bytes).map_err(|e| MediaError::write(path, e))?;
         Ok(EncodeStats {
             encode: encoded - started,
             write: encoded.elapsed(),

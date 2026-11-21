@@ -8,7 +8,7 @@ GPU 合成与渲染图（工作流 04）。接口说明以代码里的文档注�
 Stage ──► CompEvaluator（AnimEvaluator = 03 的 bae-anim；MockEvaluator 只留给测试）──► RenderComp
       ──► graph::build（节点、ROI 协商、剔除、缓存键）──► RenderGraph
       ──► Renderer（共享 GpuContext，RGBA16F 预乘缓冲）──► 纹理
-      ──► 视口（零拷贝）/ PNG / 编码器（08）
+      ──► 视口（零拷贝）/ 导出（异步回读 ──► 08 的编码器）
 ```
 
 ## 给其他工作流
@@ -39,7 +39,7 @@ Stage ──► CompEvaluator（AnimEvaluator = 03 的 bae-anim；MockEvaluator 
 - 混合模式：正常、相加、相乘、滤色、叠加（与 AE 26.2.1 逐像素对照，见 `tests/ae/README.md`）；其余回退为正常并警告。8/16 bpc 截断与 32 bpc 浮点两种语义。
 - 轨道遮罩（Alpha / 亮度 × 正常 / 反转）、保留基础透明度。
 - 纹理池、帧缓存（预算 + StageEvent 精确失效）、半分辨率等降采样、ROI。
-- `bae render <工程> --comp <路径> [--frame N | --frames A-B|all] [-o out_####.png] [--resolution half] [--depth 8|16|32] [--alpha straight|premultiplied|background] [--roi X,Y,W,H] [--json]`。
+- `bae render <工程> --comp <路径> [--frame N | --frames A-B|all] [-o out_####.png] [--format png|tiff|exr|h264|hevc|prores|prores4444] [--compression 档位] [--bits 8|16|32] [--threads N] [--resolution half] [--depth 8|16|32] [--alpha straight|premultiplied|background] [--roi X,Y,W,H] [--json]`。导出是流水线（异步回读 + 每核一个编码线程），`--json` 给出各阶段耗时；进程内用 `bae_render::export_frames`（渲染队列也用它）。
 - 基准 B1：`cargo xtask bench -p bae-render`，方法和结果见 `docs/perf.md`。
 
 还没做：遮罩、效果执行（接口已定）、调整图层、3D/摄像机、运动模糊、其余 33 种混合模式、视口纹理输出、线性混合。

@@ -107,6 +107,87 @@ struct Staging {
     size: u64,
 }
 
+/// A read-back frame still in its mapped staging buffer. [`Self::into_frame`]
+/// copies the pixels out, on any thread (the export loop hands this to the
+/// encoder thread, keeping the copy off the render thread); the buffer then
+/// goes back to its [`ExportReadback`] for reuse.
+pub struct MappedFrame {
+    staging: Option<Staging>,
+    recycle: std::sync::mpsc::Sender<Staging>,
+    padded_bytes_per_row: u32,
+    /// Width in pixels.
+    pub width: u32,
+    /// Height in pixels.
+    pub height: u32,
+    /// Layout of the pixels.
+    pub format: ReadbackFormat,
+    /// How alpha was written.
+    pub alpha: OutputAlpha,
+    /// The tag given to [`ExportReadback::submit`].
+    pub tag: u64,
+    /// Time the caller waited for the GPU and the mapping.
+    pub wait: Duration,
+}
+
+impl std::fmt::Debug for MappedFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MappedFrame")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("format", &self.format)
+            .field("tag", &self.tag)
+            .finish_non_exhaustive()
+    }
+}
+
+impl MappedFrame {
+    /// Copies the pixels out (rows tightly packed) and returns the staging
+    /// buffer for reuse.
+    pub fn into_frame(mut self) -> Result<ReadFrame, RenderError> {
+        let staging = self.staging.take().expect("present until consumed");
+        let started = Instant::now();
+        let unpadded = (self.width * self.format.bytes_per_pixel()) as usize;
+        let padded = self.padded_bytes_per_row as usize;
+        let rows = self.height as usize;
+        let data = staging
+            .buffer
+            .get_mapped_range(..)
+            .map_err(|e| GpuError::Map(e.to_string()))
+            .map(|view| {
+                let mut data = Vec::with_capacity(unpadded * rows);
+                if padded == unpadded {
+                    data.extend_from_slice(&view[..unpadded * rows]);
+                } else {
+                    for row in view.chunks(padded).take(rows) {
+                        data.extend_from_slice(&row[..unpadded]);
+                    }
+                }
+                data
+            });
+        staging.buffer.unmap();
+        let _ = self.recycle.send(staging);
+        Ok(ReadFrame {
+            width: self.width,
+            height: self.height,
+            format: self.format,
+            alpha: self.alpha,
+            data: data?,
+            tag: self.tag,
+            wait: self.wait,
+            copy: started.elapsed(),
+        })
+    }
+}
+
+impl Drop for MappedFrame {
+    fn drop(&mut self) {
+        if let Some(staging) = self.staging.take() {
+            staging.buffer.unmap();
+            let _ = self.recycle.send(staging);
+        }
+    }
+}
+
 struct InFlight {
     staging: Staging,
     submission: wgpu::SubmissionIndex,
@@ -132,6 +213,9 @@ pub struct ExportReadback {
     gpu: Arc<GpuContext>,
     depth: usize,
     free: Vec<Staging>,
+    /// Buffers coming back from [`MappedFrame`]s (possibly other threads).
+    recycle: std::sync::mpsc::Sender<Staging>,
+    recycled: std::sync::mpsc::Receiver<Staging>,
     in_flight: VecDeque<InFlight>,
     target: Option<Target>,
     uniform: wgpu::Buffer,
@@ -157,10 +241,13 @@ impl ExportReadback {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let (recycle, recycled) = std::sync::mpsc::channel();
         Self {
             gpu,
             depth: depth.max(1),
             free: Vec::new(),
+            recycle,
+            recycled,
             in_flight: VecDeque::new(),
             target: None,
             uniform,
@@ -178,8 +265,9 @@ impl ExportReadback {
         self.in_flight.is_empty()
     }
 
-    /// `true` when every staging buffer is busy: collect a frame before the
-    /// next [`Self::submit`].
+    /// `true` when `depth` frames are in flight on the GPU: collect one before
+    /// the next [`Self::submit`]. (Frames collected as [`MappedFrame`]s hold
+    /// their buffer until copied out; more buffers are made meanwhile.)
     pub fn is_full(&self) -> bool {
         self.in_flight.len() >= self.depth
     }
@@ -235,6 +323,7 @@ impl ExportReadback {
 
         let padded = padded_bytes_per_row(w * format.bytes_per_pixel());
         let size = u64::from(padded) * u64::from(h);
+        self.free.extend(self.recycled.try_iter());
         let staging = match self.free.iter().position(|s| s.size == size) {
             Some(i) => self.free.swap_remove(i),
             None => Staging {
@@ -304,8 +393,19 @@ impl ExportReadback {
     }
 
     /// The oldest frame if its copy has finished (polls the device without
-    /// blocking).
+    /// blocking), copied out.
     pub fn try_next(&mut self) -> Option<Result<ReadFrame, RenderError>> {
+        Some(self.try_next_mapped()?.and_then(MappedFrame::into_frame))
+    }
+
+    /// The oldest frame, waiting for its submission only (later frames keep
+    /// the GPU busy meanwhile), copied out.
+    pub fn wait_next(&mut self) -> Option<Result<ReadFrame, RenderError>> {
+        Some(self.wait_next_mapped()?.and_then(MappedFrame::into_frame))
+    }
+
+    /// Like [`Self::try_next`], but leaves the pixels in the staging buffer.
+    pub fn try_next_mapped(&mut self) -> Option<Result<MappedFrame, RenderError>> {
         let front = self.in_flight.front()?;
         if front.mapped.lock().is_none() {
             let _ = self.gpu.device().poll(wgpu::PollType::Poll);
@@ -314,12 +414,11 @@ impl ExportReadback {
             }
         }
         let item = self.in_flight.pop_front()?;
-        Some(self.collect(item, Duration::ZERO))
+        Some(self.mapped(item, Duration::ZERO))
     }
 
-    /// The oldest frame, waiting for its submission only (later frames keep
-    /// the GPU busy meanwhile).
-    pub fn wait_next(&mut self) -> Option<Result<ReadFrame, RenderError>> {
+    /// Like [`Self::wait_next`], but leaves the pixels in the staging buffer.
+    pub fn wait_next_mapped(&mut self) -> Option<Result<MappedFrame, RenderError>> {
         let item = self.in_flight.pop_front()?;
         let started = Instant::now();
         while item.mapped.lock().is_none() {
@@ -333,55 +432,45 @@ impl ExportReadback {
                 return Some(Err(GpuError::from(error).into()));
             }
         }
-        Some(self.collect(item, started.elapsed()))
+        Some(self.mapped(item, started.elapsed()))
     }
 
-    fn collect(&mut self, item: InFlight, wait: Duration) -> Result<ReadFrame, RenderError> {
+    fn mapped(&self, item: InFlight, wait: Duration) -> Result<MappedFrame, RenderError> {
         let status = item.mapped.lock().take().expect("collected after mapping");
+        // A failed mapping leaves the buffer unmapped; it is dropped.
         status.map_err(GpuError::Map)?;
-        let started = Instant::now();
-        let unpadded = (item.width * item.format.bytes_per_pixel()) as usize;
-        let padded = item.padded_bytes_per_row as usize;
-        let rows = item.height as usize;
-        let mut data = Vec::with_capacity(unpadded * rows);
-        {
-            let view = item
-                .staging
-                .buffer
-                .get_mapped_range(..)
-                .map_err(|e| GpuError::Map(e.to_string()))?;
-            if padded == unpadded {
-                data.extend_from_slice(&view[..unpadded * rows]);
-            } else {
-                for row in view.chunks(padded).take(rows) {
-                    data.extend_from_slice(&row[..unpadded]);
-                }
-            }
-        }
-        item.staging.buffer.unmap();
-        self.free.push(item.staging);
-        Ok(ReadFrame {
+        Ok(MappedFrame {
+            staging: Some(item.staging),
+            recycle: self.recycle.clone(),
+            padded_bytes_per_row: item.padded_bytes_per_row,
             width: item.width,
             height: item.height,
             format: item.format,
             alpha: item.alpha,
-            data,
             tag: item.tag,
             wait,
-            copy: started.elapsed(),
         })
     }
 }
 
 /// An encoder (bae-media) on its own thread behind a short bounded queue, so
-/// the render loop never runs encoder code: a movie encoder works on frame N
+/// the render loop never runs encoder code: frames arrive still in their
+/// staging buffers and are copied out here, a movie encoder works on frame N
 /// while the GPU renders N+1, and image sequences dispatch to their writer
 /// threads from here.
 #[cfg(feature = "media")]
 pub(crate) struct EncoderThread {
-    sender: Option<std::sync::mpsc::SyncSender<bae_media::CpuFrame>>,
-    handle: Option<std::thread::JoinHandle<Result<bae_media::EncodeOutput, bae_media::MediaError>>>,
+    sender: Option<std::sync::mpsc::SyncSender<MappedFrame>>,
+    handle: Option<std::thread::JoinHandle<Result<EncoderOutput, RenderError>>>,
     abort: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// What the encoder thread did.
+#[cfg(feature = "media")]
+pub(crate) struct EncoderOutput {
+    pub output: bae_media::EncodeOutput,
+    /// Copying frames out of staging buffers.
+    pub copy: Duration,
 }
 
 #[cfg(feature = "media")]
@@ -391,26 +480,37 @@ impl EncoderThread {
 
     pub(crate) fn spawn(mut encoder: Box<dyn bae_media::Encoder>) -> Self {
         use std::sync::atomic::Ordering;
-        let (sender, receiver) = std::sync::mpsc::sync_channel::<bae_media::CpuFrame>(Self::QUEUE);
+        let (sender, receiver) = std::sync::mpsc::sync_channel::<MappedFrame>(Self::QUEUE);
         let abort = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stop = abort.clone();
         let handle = std::thread::Builder::new()
             .name("bae-render.encode".into())
             .spawn(move || {
-                for frame in receiver.iter() {
+                let mut copy = Duration::ZERO;
+                for mapped in receiver.iter() {
                     if stop.load(Ordering::Relaxed) {
                         break;
                     }
+                    let frame = match mapped.into_frame() {
+                        Ok(frame) => frame,
+                        Err(error) => {
+                            encoder.abort();
+                            return Err(error);
+                        }
+                    };
+                    copy += frame.copy;
+                    let frame = cpu_frame(frame, encoder.settings());
                     if let Err(error) = encoder.push_frame_owned(frame) {
                         encoder.abort();
-                        return Err(error);
+                        return Err(media_error(error));
                     }
                 }
                 if stop.load(Ordering::Relaxed) {
                     encoder.abort();
-                    return Err(bae_media::MediaError::Canceled);
+                    return Err(RenderError::Canceled);
                 }
-                encoder.finish()
+                let output = encoder.finish().map_err(media_error)?;
+                Ok(EncoderOutput { output, copy })
             })
             .expect("spawn encoder thread");
         Self {
@@ -422,7 +522,7 @@ impl EncoderThread {
 
     /// Queues a frame (blocks while the encoder is behind). After an encoder
     /// error, returns that error.
-    pub(crate) fn push(&mut self, frame: bae_media::CpuFrame) -> Result<(), RenderError> {
+    pub(crate) fn push(&mut self, frame: MappedFrame) -> Result<(), RenderError> {
         let sender = self.sender.as_ref().expect("open until finish");
         if sender.send(frame).is_ok() {
             return Ok(());
@@ -436,7 +536,7 @@ impl EncoderThread {
     }
 
     /// Waits for every queued frame to be written.
-    pub(crate) fn finish(mut self) -> Result<bae_media::EncodeOutput, RenderError> {
+    pub(crate) fn finish(mut self) -> Result<EncoderOutput, RenderError> {
         self.sender = None;
         self.join()
     }
@@ -448,15 +548,14 @@ impl EncoderThread {
         let _ = self.join();
     }
 
-    fn join(&mut self) -> Result<bae_media::EncodeOutput, RenderError> {
+    fn join(&mut self) -> Result<EncoderOutput, RenderError> {
         let handle = self
             .handle
             .take()
             .ok_or_else(|| RenderError::Other("encoder already finished".into()))?;
-        match handle.join() {
-            Ok(result) => result.map_err(|e| RenderError::Other(e.to_string())),
-            Err(_) => Err(RenderError::Other("encoder thread panicked".into())),
-        }
+        handle
+            .join()
+            .unwrap_or_else(|_| Err(RenderError::Other("encoder thread panicked".into())))
     }
 }
 
@@ -840,6 +939,8 @@ enum Sink {
         alpha: ExportAlpha,
         encode: Duration,
         bytes: u64,
+        /// Written so far (removed on abort).
+        files: Vec<PathBuf>,
     },
 }
 
@@ -851,6 +952,8 @@ struct SinkReport {
     write: Duration,
     bytes: u64,
     threads: usize,
+    /// Copying frames out of staging buffers on the encoder thread.
+    copy: Duration,
 }
 
 impl Sink {
@@ -941,6 +1044,7 @@ impl Sink {
                 alpha: settings.alpha,
                 encode: Duration::ZERO,
                 bytes: 0,
+                files: Vec::new(),
             })
         }
     }
@@ -988,31 +1092,43 @@ impl Sink {
     }
 
     /// Hands a frame over to `file`. Returns the time spent waiting for the
-    /// encoder.
-    fn push(&mut self, frame: ReadFrame, file: &Path) -> Result<Duration, RenderError> {
+    /// encoder and copying out on this thread.
+    fn push(
+        &mut self,
+        frame: MappedFrame,
+        file: &Path,
+    ) -> Result<(Duration, Duration), RenderError> {
         match self {
             #[cfg(feature = "media")]
-            Sink::Encoder {
-                thread, settings, ..
-            } => {
+            Sink::Encoder { thread, .. } => {
+                let _ = file;
                 let started = Instant::now();
-                thread.push(cpu_frame(frame, settings))?;
-                Ok(started.elapsed())
+                thread.push(frame)?;
+                Ok((started.elapsed(), Duration::ZERO))
             }
             #[cfg(feature = "media")]
             Sink::Image {
                 settings, stats, ..
             } => {
+                let frame = frame.into_frame()?;
+                let copy = frame.copy;
                 *stats = bae_media::export::write_image_file(
                     settings,
                     file,
                     &cpu_frame(frame, settings),
                 )
                 .map_err(media_error)?;
-                Ok(Duration::ZERO)
+                Ok((Duration::ZERO, copy))
             }
             #[cfg(not(feature = "media"))]
-            Sink::Png { encode, bytes, .. } => {
+            Sink::Png {
+                encode,
+                bytes,
+                files,
+                ..
+            } => {
+                let frame = frame.into_frame()?;
+                let copy = frame.copy;
                 let started = Instant::now();
                 let image = bae_gpu::transfer::ImageData {
                     width: frame.width,
@@ -1021,26 +1137,41 @@ impl Sink {
                     bytes_per_row: frame.width * 4,
                     data: frame.data,
                 };
-                crate::png_out::write_rgba8(file, &image)?;
+                files.push(file.to_owned());
+                crate::png_out::write_rgba8(file, &image)
+                    .map_err(|e| RenderError::Other(format!("{}: {e}", file.display())))?;
                 *encode += started.elapsed();
                 *bytes += std::fs::metadata(file).map_or(0, |m| m.len());
-                Ok(Duration::ZERO)
+                Ok((Duration::ZERO, copy))
             }
         }
     }
 
     /// Waits for everything to be written.
     fn finish(self, frames: usize) -> Result<SinkReport, RenderError> {
+        #[cfg(not(feature = "media"))]
+        let _ = frames;
         match self {
             #[cfg(feature = "media")]
             Sink::Encoder { thread, .. } => {
-                let output = thread.finish()?;
+                let EncoderOutput { output, copy } = thread.finish()?;
+                // Movie encoders do not count bytes: take the file sizes.
+                let bytes = match output.stats.bytes {
+                    0 => output
+                        .files
+                        .iter()
+                        .filter_map(|f| std::fs::metadata(f).ok())
+                        .map(|m| m.len())
+                        .sum(),
+                    bytes => bytes,
+                };
                 Ok(SinkReport {
                     files: output.files.len(),
                     encode: output.stats.encode,
                     write: output.stats.write,
-                    bytes: output.stats.bytes,
+                    bytes,
                     threads: output.stats.threads,
+                    copy,
                 })
             }
             #[cfg(feature = "media")]
@@ -1050,14 +1181,21 @@ impl Sink {
                 write: stats.write,
                 bytes: stats.bytes,
                 threads: 1,
+                copy: Duration::ZERO,
             }),
             #[cfg(not(feature = "media"))]
-            Sink::Png { encode, bytes, .. } => Ok(SinkReport {
-                files: frames,
+            Sink::Png {
+                encode,
+                bytes,
+                files,
+                ..
+            } => Ok(SinkReport {
+                files: files.len(),
                 encode,
                 write: Duration::ZERO,
                 bytes,
                 threads: 1,
+                copy: Duration::ZERO,
             }),
         }
     }
@@ -1072,7 +1210,11 @@ impl Sink {
                 let _ = std::fs::remove_file(path);
             }
             #[cfg(not(feature = "media"))]
-            Sink::Png { .. } => {}
+            Sink::Png { files, .. } => {
+                for file in files {
+                    let _ = std::fs::remove_file(file);
+                }
+            }
         }
     }
 }
@@ -1161,7 +1303,8 @@ pub struct ExportStats {
     pub render: Duration,
     /// Waiting for the GPU (render, output conversion, copy) and the mapping.
     pub readback_wait: Duration,
-    /// Copying frames out of the staging buffers.
+    /// Copying frames out of the staging buffers (on the encoder thread for
+    /// sequences and movies, so not on the render thread's critical path).
     pub readback_copy: Duration,
     /// Waiting for the encoder (its queue was full).
     pub encoder_stall: Duration,
@@ -1214,17 +1357,18 @@ struct Run<'f> {
 
 impl Run<'_> {
     /// Hands a read-back frame to the sink.
-    fn collect(&mut self, done: ReadFrame) -> Result<(), RenderError> {
+    fn collect(&mut self, done: MappedFrame) -> Result<(), RenderError> {
         let pending = self
             .pending
             .pop_front()
             .ok_or_else(|| RenderError::Other("readback returned an unexpected frame".into()))?;
         self.stats.readback_wait += done.wait;
-        self.stats.readback_copy += done.copy;
         let sink = self.sink.as_mut().expect("created with the first frame");
         let file = sink.file(pending.frame);
         let (width, height) = (done.width, done.height);
-        self.stats.encoder_stall += sink.push(done, &file)?;
+        let (stall, copy) = sink.push(done, &file)?;
+        self.stats.encoder_stall += stall;
+        self.stats.readback_copy += copy;
         let frame = ExportedFrame {
             index: pending.index,
             frame: pending.frame,
@@ -1244,7 +1388,7 @@ impl Run<'_> {
 
     /// Collects the oldest frame, waiting for it. `false` when none is left.
     fn wait_one(&mut self) -> Result<bool, RenderError> {
-        match self.readback.wait_next() {
+        match self.readback.wait_next_mapped() {
             Some(done) => {
                 self.collect(done?)?;
                 Ok(true)
@@ -1255,7 +1399,7 @@ impl Run<'_> {
 
     /// Collects the frames that are ready, without waiting.
     fn collect_ready(&mut self) -> Result<(), RenderError> {
-        while let Some(done) = self.readback.try_next() {
+        while let Some(done) = self.readback.try_next_mapped() {
             self.collect(done?)?;
         }
         Ok(())
@@ -1356,6 +1500,7 @@ pub fn export_frames(
     let mut stats = run.stats;
     stats.drain = drain.elapsed();
     stats.frames = run.frames.len();
+    stats.readback_copy += written.copy;
     stats.encode = written.encode;
     stats.write = written.write;
     stats.files = written.files;
