@@ -764,7 +764,7 @@ impl Dock {
     }
 
     fn handle_keys(&mut self, ui: &Ui, frames: &[(FrameId, Rect)]) {
-        if ui.ctx().text_edit_focused() {
+        if ui.ctx().text_edit_focused() || crate::panel::modal_open(ui.ctx()) {
             return;
         }
         // AE: the ` (tilde) key maximizes the panel group under the pointer.

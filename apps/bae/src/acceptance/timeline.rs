@@ -124,7 +124,6 @@ fn rename_commits_on_enter_and_click_away_and_esc_cancels() {
 }
 
 #[test]
-#[ignore = "issue #106"]
 fn rename_field_starts_with_the_whole_name_selected() {
     // AE selects the whole name when the field opens: typing replaces it.
     let mut h = comp_with_solid();
@@ -136,7 +135,6 @@ fn rename_field_starts_with_the_whole_name_selected() {
 }
 
 #[test]
-#[ignore = "issue #106"]
 fn enter_on_a_selected_timeline_layer_starts_rename() {
     // AE: select a layer in the timeline, press Enter (Return) to rename it.
     let mut h = comp_with_solid();
@@ -366,7 +364,6 @@ fn stopwatch_off_removes_all_keyframes_and_undo_restores_them() {
 }
 
 #[test]
-#[ignore = "issue #107"]
 fn selection_by_click_and_shift_click() {
     let mut h = gui();
     comp_with(
@@ -385,6 +382,16 @@ fn selection_by_click_and_shift_click() {
     let third = layer_row(&h, &names[2]);
     click_at_mods(&mut h, third, Modifiers::SHIFT);
     assert_eq!(h.state().selected_layers().len(), 3, "Shift+click range");
+    // Cmd+click removes one layer from the selection, and adds it back.
+    let second = layer_row(&h, &names[1]);
+    click_at_mods(&mut h, second, Modifiers::COMMAND);
+    assert_eq!(
+        h.state().selected_layers().len(),
+        2,
+        "Cmd+click toggles off"
+    );
+    click_at_mods(&mut h, second, Modifiers::COMMAND);
+    assert_eq!(h.state().selected_layers().len(), 3, "Cmd+click toggles on");
     // Cmd+Shift+A deselects all.
     key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::A);
     assert!(h.state().selected_layers().is_empty());

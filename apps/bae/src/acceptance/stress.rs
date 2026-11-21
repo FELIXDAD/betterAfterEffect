@@ -125,7 +125,6 @@ fn frame_time_with_many_layers() {
 }
 
 #[test]
-#[ignore = "issue #114"]
 fn key_presses_piled_up_in_one_frame() {
     // A slow frame (heavy comp, debug build) collects several key events; each
     // still runs once, against the project as the previous one left it.

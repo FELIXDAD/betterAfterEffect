@@ -328,7 +328,6 @@ fn duplicate_and_split_need_a_selection() {
 }
 
 #[test]
-#[ignore = "issue #108"]
 fn duplicate_and_split_select_the_new_layer() {
     // AE: Edit > Duplicate and Split Layer select the new layer, so the next
     // edit (or the next split further on) applies to it.
