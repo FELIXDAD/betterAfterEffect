@@ -742,3 +742,68 @@ fn add_to_render_queue_action() {
                 && b.action == crate::actions::ids::ADD_TO_RENDER_QUEUE)
     );
 }
+
+/// The Render Queue's Render button works from the keyboard: Tab focuses it,
+/// then Space or Enter starts the render (the workbench leaves those keys to a
+/// focused widget; see bae-ui's `focused_widgets_get_their_keys_before_shortcuts`).
+#[test]
+fn render_button_activates_with_space_and_enter() {
+    let Ok(gpu) = bae_gpu::GpuContext::new_headless(bae_gpu::GpuContextDescriptor::default())
+    else {
+        eprintln!("no GPU, skipping");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    for (n, activate) in [egui::Key::Space, egui::Key::Enter].into_iter().enumerate() {
+        let mut h = Harness::new();
+        h.resources.insert(gpu.clone());
+        let queue = crate::render_queue::SharedRenderQueue::default();
+        h.resources.insert(queue.clone());
+        let (comp, _, _) = h.comp_with_layers();
+        let info = query::comp_info(&h.stage, &comp).unwrap();
+        {
+            let mut q = queue.lock();
+            let id = q.add(&info, dir.path());
+            let item = q.item_mut(id).unwrap();
+            item.output = dir
+                .path()
+                .join(format!("k{n}/f_####.png"))
+                .to_string_lossy()
+                .into_owned();
+            (item.start, item.end) = (0, 1);
+        }
+        let mut panel = crate::RenderQueuePanel::default();
+        let key = |key: egui::Key| Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        };
+        h.frame("render_queue", &mut panel, Vec::new());
+        h.frame("render_queue", &mut panel, vec![key(egui::Key::Tab)]);
+        h.frame("render_queue", &mut panel, Vec::new());
+        assert!(
+            h.ctx.memory(|m| m.focused().is_some()),
+            "Tab focuses Render"
+        );
+        h.frame("render_queue", &mut panel, vec![key(activate)]);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            let status = queue.lock().items()[0].status.clone();
+            match status {
+                crate::render_queue::ItemStatus::Done { files, .. } => {
+                    assert_eq!(files, 2, "{activate:?}");
+                    break;
+                }
+                crate::render_queue::ItemStatus::Failed(e) => panic!("{activate:?}: {e}"),
+                crate::render_queue::ItemStatus::Queued if !queue.lock().is_running() => {
+                    panic!("{activate:?} did not press Render")
+                }
+                _ => {}
+            }
+            assert!(std::time::Instant::now() < deadline, "render timed out");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+}

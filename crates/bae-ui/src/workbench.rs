@@ -608,9 +608,11 @@ impl Workbench {
     }
 
     /// Turn key presses (and copy/cut/paste) into invocations through the keymap,
-    /// consuming the events they trigger.
+    /// consuming the events they trigger. Keys the focused widget uses stay with
+    /// it ([`KeyFocus`]); with nothing focused every bound key is a shortcut.
     fn collect_shortcuts(&mut self, ctx: &Context) {
-        let typing = ctx.egui_wants_keyboard_input();
+        let focus = KeyFocus::of(ctx);
+        let typing = focus == KeyFocus::Text;
         let focused = self.dock.focused_panel().map(|p| p.kind().to_owned());
         let keymap = &self.keymap;
         let mut hits = Vec::new();
@@ -628,7 +630,7 @@ impl Workbench {
                     else {
                         return true;
                     };
-                    if typing && reserved_while_typing(&binding.chord) {
+                    if focus.reserves(&binding.chord) {
                         return true;
                     }
                     hits.push(binding.invocation());
@@ -822,6 +824,54 @@ pub fn ime_follows_caret(ctx: &Context) {
 
 /// Chords a focused text field needs: plain typing, editing and navigation keys,
 /// and the standard text-editing commands.
+/// What has keyboard focus, for routing keys: the focused widget gets the keys
+/// it uses, everything else stays a shortcut (AE: Space plays unless a text
+/// field or a focused button wants it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum KeyFocus {
+    /// Nothing: every bound key is a shortcut.
+    None,
+    /// A text field: typing, caret movement, Enter and text commands.
+    Text,
+    /// A button, checkbox, combo box, slider …: activation and navigation.
+    Widget,
+}
+
+impl KeyFocus {
+    fn of(ctx: &Context) -> Self {
+        if ctx.text_edit_focused() {
+            KeyFocus::Text
+        } else if ctx.memory(|m| m.focused().is_some()) {
+            KeyFocus::Widget
+        } else {
+            KeyFocus::None
+        }
+    }
+
+    /// The focused widget gets this chord instead of the keymap.
+    fn reserves(self, chord: &Chord) -> bool {
+        match self {
+            KeyFocus::None => false,
+            KeyFocus::Text => reserved_while_typing(chord),
+            KeyFocus::Widget => reserved_by_focused_widget(chord),
+        }
+    }
+}
+
+/// Keys egui widgets use while focused: Space / Enter press buttons and toggle
+/// checkboxes, Tab / Shift+Tab move focus, arrows change sliders and drag
+/// values, Esc leaves.
+fn reserved_by_focused_widget(chord: &Chord) -> bool {
+    use Key::*;
+    !chord.command
+        && !chord.alt
+        && !chord.mac_ctrl
+        && matches!(
+            chord.key,
+            Space | Enter | Tab | Escape | ArrowLeft | ArrowRight | ArrowUp | ArrowDown
+        )
+}
+
 fn reserved_while_typing(chord: &Chord) -> bool {
     use Key::*;
     if chord.is_typing_key() {
@@ -1075,6 +1125,107 @@ mod tests {
             repeat: false,
             modifiers,
         }
+    }
+
+    /// A panel with a button (keyboard-focused on request) and a text field.
+    struct Focusable {
+        clicks: Arc<std::sync::atomic::AtomicUsize>,
+        text: Arc<std::sync::Mutex<String>>,
+        focus: Arc<std::sync::Mutex<Option<&'static str>>>,
+    }
+    impl Panel for Focusable {
+        fn ui(&mut self, ui: &mut Ui, _cx: &mut PanelContext<'_>) {
+            let button = ui.button("Render");
+            if button.clicked() {
+                self.clicks
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            let mut text = self.text.lock().unwrap();
+            let field = ui.text_edit_singleline(&mut *text);
+            match self.focus.lock().unwrap().take() {
+                Some("button") => button.request_focus(),
+                Some("field") => field.request_focus(),
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn focused_widgets_get_their_keys_before_shortcuts() {
+        let clicks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let text = Arc::new(std::sync::Mutex::new(String::from("a")));
+        let focus = Arc::new(std::sync::Mutex::new(None));
+        let (kinds, presets, keymaps, actions) = registries();
+        let (c, t, f) = (clicks.clone(), text.clone(), focus.clone());
+        kinds
+            .replace(
+                Owner::module("test"),
+                "a",
+                Arc::new(PanelKind::new("A", move |_| {
+                    Box::new(Focusable {
+                        clicks: c.clone(),
+                        text: t.clone(),
+                        focus: f.clone(),
+                    })
+                })),
+            )
+            .unwrap();
+        keymaps
+            .replace(
+                Owner::module("test"),
+                "km",
+                Arc::new(Keymap::new(
+                    "KM",
+                    vec![
+                        Binding::new("Space", "motion.play"),
+                        Binding::new("Enter", "layer.rename"),
+                        Binding::new("U", "layer.reveal_keyframes"),
+                    ],
+                )),
+            )
+            .unwrap();
+        let mut wb =
+            Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
+        let ctx = Context::default();
+        let none = Modifiers::NONE;
+        frame_in(&ctx, &mut wb, vec![]);
+        // Nothing focused: Space plays.
+        assert_eq!(
+            frame_in(&ctx, &mut wb, vec![key(Key::Space, none)]),
+            vec![Invocation::new("motion.play")]
+        );
+
+        // A focused button: Space and Enter press it, nothing else runs.
+        *focus.lock().unwrap() = Some("button");
+        frame_in(&ctx, &mut wb, vec![]);
+        frame_in(&ctx, &mut wb, vec![]);
+        assert!(frame_in(&ctx, &mut wb, vec![key(Key::Space, none)]).is_empty());
+        assert!(frame_in(&ctx, &mut wb, vec![key(Key::Enter, none)]).is_empty());
+        assert_eq!(clicks.load(std::sync::atomic::Ordering::Relaxed), 2);
+        // Keys a button does not use are still shortcuts.
+        assert_eq!(
+            frame_in(&ctx, &mut wb, vec![key(Key::U, none)]),
+            vec![Invocation::new("layer.reveal_keyframes")]
+        );
+
+        // A focused text field: Space types a space.
+        *focus.lock().unwrap() = Some("field");
+        frame_in(&ctx, &mut wb, vec![]);
+        frame_in(&ctx, &mut wb, vec![]);
+        let typed = frame_in(
+            &ctx,
+            &mut wb,
+            vec![key(Key::Space, none), Event::Text(" ".into())],
+        );
+        assert!(typed.is_empty(), "{typed:?}");
+        // …and U types a U.
+        let typed = frame_in(
+            &ctx,
+            &mut wb,
+            vec![key(Key::U, none), Event::Text("U".into())],
+        );
+        assert!(typed.is_empty(), "{typed:?}");
+        assert_eq!(text.lock().unwrap().as_str(), "a U");
     }
 
     #[test]
