@@ -122,17 +122,19 @@ impl Command for CreateComp {
 fn next_comp_name(tx: &Transaction<'_>) -> String {
     // AE numbers comps project-wide.
     let stage = tx.stage();
+    let base = crate::names::localized("Comp");
     let max = query::comps(stage)
         .iter()
         .filter_map(|c| {
             query::display_name_of(stage, c)
-                .strip_prefix("Comp ")?
+                .strip_prefix(base)?
+                .trim_start()
                 .parse::<u32>()
                 .ok()
         })
         .max()
         .unwrap_or(0);
-    format!("Comp {}", max + 1)
+    format!("{base} {}", max + 1)
 }
 
 // ---------------------------------------------------------------------------
@@ -270,10 +272,9 @@ impl Command for CreateFolder {
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<PathOutput, CommandError> {
         let parent = p.parent.unwrap_or_else(PrimPath::root);
         tx.stage().require_prim(&parent)?;
-        let name = p
-            .name
-            .filter(|n| !n.trim().is_empty())
-            .unwrap_or_else(|| query::next_numbered_name(tx.stage(), &parent, "Untitled"));
+        let name = p.name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| {
+            query::next_numbered_name(tx.stage(), &parent, crate::names::localized("Untitled"))
+        });
         let path = child(
             &parent,
             &query::unique_child_name(tx.stage(), &parent, &name),

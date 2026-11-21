@@ -69,7 +69,18 @@ pub(crate) fn ensure_folder(tx: &mut Transaction<'_>, path: &PrimPath) -> Result
     if let Some(parent) = path.parent() {
         ensure_folder(tx, &parent)?;
     }
-    create(tx, path, PrimType::FOLDER, None)
+    create(tx, path, PrimType::FOLDER, None)?;
+    // The default folders are named in the UI language they are created in.
+    let default_folder = [
+        crate::query::COMPS_FOLDER,
+        crate::query::ASSETS_FOLDER,
+        crate::query::SOLIDS_FOLDER,
+    ]
+    .contains(&path.as_str());
+    if let Some(name) = crate::names::folder_name(path.name()).filter(|_| default_folder) {
+        set(tx, path, "name", Value::String(name.into()))?;
+    }
+    Ok(())
 }
 
 /// Set a static value after checking it against the prim schema.
