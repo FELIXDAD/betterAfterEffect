@@ -902,8 +902,8 @@ fn no_missing_glyphs_on_any_screen_in_chinese() {
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
-/// Names users type (layers, comps) in scripts egui's built-in fonts and the
-/// system CJK font may not cover: what is drawn as a box.
+/// Names users type (layers, comps) in scripts the UI's system fonts may not cover:
+/// what is drawn as a box.
 #[test]
 fn user_names_in_other_scripts_and_emoji() {
     let mut h = gui();
@@ -924,7 +924,7 @@ fn user_names_in_other_scripts_and_emoji() {
             json!({"path": layer, "attr": "name", "value": {"type": "string", "value": name}}),
         ));
         settle(&mut h);
-        let missing = crate::ui_text::missing_from_builtin_fonts(name.chars());
+        let missing = crate::ui_text::missing_from_ui_fonts(name.chars());
         report.push(format!("{name}: {missing:?}"));
     }
     println!("{}", report.join("\n"));
