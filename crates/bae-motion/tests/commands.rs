@@ -586,3 +586,65 @@ fn locked_layers_refuse_edits_until_unlocked() {
     fx.run("layer.delete", json!({"layers": [b]}));
     assert!(fx.stage.prim(&b).is_none());
 }
+
+#[test]
+fn locked_layers_follow_comp_level_changes() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let child = fx.layer(&comp, "null", json!({"position": [300.0, 200.0]}));
+    let parent = fx.layer(&comp, "null", json!({"position": [1000.0, 500.0]}));
+    fx.run("attr.set", json!({"path": parent, "attr": "transform:rotation", "value": {"type": "float", "value": 90.0}}));
+    fx.run(
+        "layer.set_parent",
+        json!({"layers": [child], "parent": parent}),
+    );
+    fx.run(
+        "attr.set",
+        json!({"path": child, "attr": "locked", "value": {"type": "bool", "value": true}}),
+    );
+    // The locked child itself: a typed error that names it.
+    let error = fx
+        .reg
+        .execute(
+            &mut fx.stage,
+            &fx.author,
+            "layer.set_parent",
+            json!({"layers": [child], "parent": null}),
+        )
+        .unwrap_err();
+    assert!(
+        matches!(
+            &error,
+            bae_model::CommandError::Model(bae_model::ModelError::LayerLocked { layer, .. })
+                if *layer == child
+        ),
+        "{error:?}"
+    );
+    // AE-PRJ-386: deleting the parent unparents the locked child in place.
+    let before = fx.world_pos(&comp, &child);
+    fx.run("layer.delete", json!({"layers": [parent]}));
+    assert!(fx.stage.prim(&parent).is_none());
+    assert_eq!(fx.value(&child, "parent"), None);
+    let after = fx.world_pos(&comp, &child);
+    assert!((before - after).length() < 1e-6, "{before} vs {after}");
+    assert!(query::is_locked(&fx.stage, &child));
+    // Still locked for direct edits afterwards.
+    assert!(
+        fx.try_run(
+            "attr.set",
+            json!({"path": child, "attr": "transform:opacity", "value": {"type": "float", "value": 5.0}}),
+        )
+        .unwrap_err()
+        .contains("locked")
+    );
+    // AE-PRJ-319: Trim Comp to Work Area moves every layer, locked ones too.
+    fx.run(
+        "comp.set_work_area",
+        json!({"comp": comp, "start": 2 * SEC, "end": 6 * SEC}),
+    );
+    fx.run("comp.trim_to_work_area", json!({"comp": comp}));
+    assert_eq!(
+        query::layer_timing(&fx.stage, &child).start_time,
+        Time(-2 * SEC)
+    );
+}

@@ -238,7 +238,9 @@ impl Session {
         {
             self.active_comp = self.open_comps.last().cloned();
         }
-        self.selected_layers.retain(|l| stage.has_prim(l));
+        // AE: a locked layer cannot be selected, so locking one deselects it.
+        self.selected_layers
+            .retain(|l| stage.has_prim(l) && !query::is_locked(stage, l));
         self.selected_items.retain(|l| stage.has_prim(l));
         self.selected_keys.retain(|k| {
             query::attr_spec(stage, &k.path, &k.attr)

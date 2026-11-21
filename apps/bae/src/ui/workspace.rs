@@ -27,6 +27,19 @@ pub struct StatusInfo {
     pub pixels_per_point: f32,
     /// Frames rendered so far.
     pub frames: u64,
+    /// Why the last command failed, in the UI language (cleared by the next
+    /// change).
+    pub notice: String,
+}
+
+/// The status bar text for a failed command.
+pub fn failure_notice(error: &bae_model::CommandError) -> String {
+    match error {
+        bae_model::CommandError::Model(bae_model::ModelError::LayerLocked { name, .. }) => {
+            tr("Layer “{name}” is locked. Unlock it first.").replace("{name}", name)
+        }
+        other => tr("The last action failed: {reason}").replace("{reason}", &other.to_string()),
+    }
 }
 
 /// The viewport texture the composition placeholder shows (an app resource).
@@ -176,6 +189,14 @@ fn status_bar(ui: &mut egui::Ui, status: &StatusInfo) {
             .size(10.5)
             .color(bae_ui::theme::color::TEXT_DIM)
     };
+    if !status.notice.is_empty() {
+        ui.label(
+            egui::RichText::new(&status.notice)
+                .size(10.5)
+                .color(bae_ui::theme::color::TEXT_STRONG),
+        );
+        ui.separator();
+    }
     if !status.gpu.is_empty() {
         ui.label(small(status.gpu.clone()));
         ui.separator();
