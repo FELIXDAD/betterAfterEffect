@@ -1,0 +1,92 @@
+# Hue/Saturation (ADBE HUE SATURATION): AE-FX-041. Disk id 1 is not exposed by
+# AE; id 3 (Channel Range, arbitrary data) is not declared (its project value
+# is preserved). Channel Control 2..7 restricts the Master values to one of
+# the six default hue ranges (AE stores per-range values in the Channel Range
+# blob, which is not decoded yet).
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "hue-saturation"
+name = "Hue/Saturation"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE HUE SATURATION"]
+keywords = ["hue", "saturation", "lightness", "colorize", "desaturate"]
+flags = ["pixel-independent"]
+shader = "shaders/hue_saturation.wgsl"
+identity_when = "params.colorize == 0 && params.master_hue == 0 && params.master_saturation == 0 && params.master_lightness == 0"
+
+[[effect.param]]
+id = 2
+key = "channel_control"
+type = "popup"
+name = "Channel Control"
+default = 1
+choices = ["Master", "Reds", "Yellows", "Greens", "Cyans", "Blues", "Magentas"]
+
+[[effect.param]]
+id = 4
+key = "master_hue"
+type = "angle"
+name = "Master Hue"
+default = 0.0
+
+[[effect.param]]
+id = 5
+key = "master_saturation"
+type = "float"
+name = "Master Saturation"
+default = 0.0
+range = [-100.0, 100.0]
+precision = 0
+
+[[effect.param]]
+id = 6
+key = "master_lightness"
+type = "float"
+name = "Master Lightness"
+default = 0.0
+range = [-100.0, 100.0]
+precision = 0
+
+[[effect.param]]
+id = 7
+key = "colorize"
+type = "checkbox"
+name = "Colorize"
+label = "Colorize"
+default = false
+
+[[effect.param]]
+id = 8
+key = "colorize_hue"
+type = "angle"
+name = "Colorize Hue"
+default = 0.0
+
+[[effect.param]]
+id = 9
+key = "colorize_saturation"
+type = "float"
+name = "Colorize Saturation"
+default = 25.0
+range = [0.0, 100.0]
+precision = 0
+
+[[effect.param]]
+id = 10
+key = "colorize_lightness"
+type = "float"
+name = "Colorize Lightness"
+default = 0.0
+range = [-100.0, 100.0]
+precision = 0

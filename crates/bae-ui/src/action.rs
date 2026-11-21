@@ -72,6 +72,30 @@ impl Invocation {
     }
 }
 
+/// Handles actions for a module whichever panel has focus (registered in
+/// `bae_app::Registry<dyn ActionHandler>`, id = module name).
+///
+/// The workbench tries, in order: the focused panel's [`crate::Panel::on_action`],
+/// then these handlers, then the shell's own actions ([`ids`]), then the shell
+/// runs model commands. Among handlers, the ones whose [`ActionHandler::workspace`]
+/// is the active workspace go first, then registration order; two handlers
+/// claiming the same action id are a conflict the workbench logs (and reports in
+/// `Workbench::handler_conflicts`).
+pub trait ActionHandler: Send + Sync + 'static {
+    /// Action ids this handler claims (e.g. `motion.play`).
+    fn actions(&self) -> Vec<String>;
+
+    /// Workspace of the module (it wins conflicts while that workspace is active).
+    fn workspace(&self) -> Option<&str> {
+        None
+    }
+
+    /// Handle `inv` (one of [`ActionHandler::actions`]); `cx` is the focused
+    /// panel's context, or a workbench-level one when no panel has focus. Return
+    /// `true` when handled.
+    fn handle(&self, inv: &Invocation, cx: &mut crate::panel::PanelContext<'_>) -> bool;
+}
+
 /// Command ids handled by the shell itself.
 pub mod ids {
     /// Undo the local author's last step (`Stage::undo`).
@@ -84,9 +108,12 @@ pub mod ids {
     pub const ABOUT: &str = "app.about";
     /// Open the keyboard shortcut editor.
     pub const KEYBOARD_SHORTCUTS: &str = "app.keyboard_shortcuts";
-    /// New / open / save project (handled by the shell's project owner).
+    /// New / open / close / save project (handled by the shell's project owner).
+    /// `file.open_project` takes an optional `{"path": "<.bae or .baez>"}` (no
+    /// dialog); without it the shell shows the native open dialog.
     pub const NEW_PROJECT: &str = "file.new_project";
     pub const OPEN_PROJECT: &str = "file.open_project";
+    pub const CLOSE_PROJECT: &str = "file.close_project";
     pub const SAVE: &str = "file.save";
     pub const SAVE_AS: &str = "file.save_as";
     /// Switch workspace; params `{"id": "<workspace id>"}`.
@@ -121,6 +148,7 @@ pub(crate) const SHELL_ACTIONS: &[(&str, &str)] = &[
     (ids::KEYBOARD_SHORTCUTS, "Keyboard Shortcuts"),
     (ids::NEW_PROJECT, "New Project"),
     (ids::OPEN_PROJECT, "Open Project..."),
+    (ids::CLOSE_PROJECT, "Close Project"),
     (ids::SAVE, "Save"),
     (ids::SAVE_AS, "Save As..."),
     (ids::SWITCH_WORKSPACE, "Switch Workspace"),

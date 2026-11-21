@@ -1,0 +1,48 @@
+# Brightness & Contrast (ADBE Brightness & Contrast 2): AE-FX-042.
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "brightness-contrast"
+name = "Brightness & Contrast"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE Brightness & Contrast 2"]
+keywords = ["brightness", "contrast", "exposure", "lighten", "darken"]
+flags = ["pixel-independent"]
+shader = "shaders/brightness_contrast.wgsl"
+identity_when = "params.brightness == 0 && params.contrast == 0"
+
+[[effect.param]]
+id = 1
+key = "brightness"
+type = "float"
+name = "Brightness"
+default = 0.0
+range = [-150.0, 150.0]
+precision = 1
+
+[[effect.param]]
+id = 2
+key = "contrast"
+type = "float"
+name = "Contrast"
+default = 0.0
+range = [-100.0, 100.0]
+precision = 1
+
+[[effect.param]]
+id = 3
+key = "use_legacy"
+type = "checkbox"
+name = "Use Legacy (supports HDR)"
+label = "Use Legacy"
+default = false

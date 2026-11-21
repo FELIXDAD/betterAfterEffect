@@ -87,6 +87,24 @@ pub enum OutputAlpha {
     Over([f32; 3]),
 }
 
+/// Size of the output pass's uniform block.
+pub(crate) const OUTPUT_PARAMS_SIZE: u64 = 32;
+
+/// The output pass's uniform block (`output.wgsl` `Params`). `float`: the
+/// target is a float format, so colour outside `[0, alpha]` is kept.
+pub(crate) fn output_params(alpha: OutputAlpha, float: bool) -> [u8; OUTPUT_PARAMS_SIZE as usize] {
+    let (mode, bg) = match alpha {
+        OutputAlpha::Premultiplied => (0u32, [0.0f32; 3]),
+        OutputAlpha::Straight => (1, [0.0; 3]),
+        OutputAlpha::Over(bg) => (2, bg),
+    };
+    let mut params = [0u8; OUTPUT_PARAMS_SIZE as usize];
+    params[..12].copy_from_slice(bytemuck::cast_slice(&bg));
+    params[16..20].copy_from_slice(&mode.to_ne_bytes());
+    params[20..24].copy_from_slice(&u32::from(float).to_ne_bytes());
+    params
+}
+
 /// The GPU compositor.
 pub struct Renderer {
     gpu: Arc<GpuContext>,
@@ -316,6 +334,19 @@ impl Renderer {
         frame: &RenderedFrame,
         alpha: OutputAlpha,
     ) -> Result<ImageData, RenderError> {
+        let target = self.output_texture(frame, alpha)?;
+        Ok(bae_gpu::transfer::read_texture(&self.gpu, &target)?)
+    }
+
+    /// Converts a frame to an 8-bit RGBA texture on the GPU, without reading it
+    /// back (what [`Renderer::read_rgba8`] reads): `Rgba8Unorm`, usable as a copy
+    /// source and as a sampled texture, e.g. published to the viewport registry for
+    /// a viewer. The work is submitted; the texture is ready for later commands.
+    pub fn output_texture(
+        &mut self,
+        frame: &RenderedFrame,
+        alpha: OutputAlpha,
+    ) -> Result<wgpu::Texture, RenderError> {
         let device = self.gpu.device();
         let [w, h] = frame.image.texel_size();
         let target = device.create_texture(&wgpu::TextureDescriptor {
@@ -329,25 +360,47 @@ impl Renderer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
         let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-        let (mode, bg) = match alpha {
-            OutputAlpha::Premultiplied => (0u32, [0.0; 3]),
-            OutputAlpha::Straight => (1, [0.0; 3]),
-            OutputAlpha::Over(bg) => (2, bg),
-        };
-        let mut params = [0u8; 32];
-        params[..12].copy_from_slice(bytemuck::cast_slice(&bg));
-        params[16..20].copy_from_slice(&mode.to_ne_bytes());
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("bae-render.output"),
-            size: 32,
+            size: OUTPUT_PARAMS_SIZE,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        self.gpu.queue().write_buffer(&uniform, 0, &params);
+        self.gpu
+            .queue()
+            .write_buffer(&uniform, 0, &output_params(alpha, false));
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("bae-render.output"),
+        });
+        self.record_output(
+            &mut encoder,
+            frame,
+            &view,
+            wgpu::TextureFormat::Rgba8Unorm,
+            &uniform,
+        );
+        self.gpu.queue().submit([encoder.finish()]);
+        Ok(target)
+    }
+
+    /// Records the output conversion of `frame` into `target` (a `format`
+    /// render target at least the frame's texel size) with the parameters in
+    /// `uniform` ([`output_params`]). Export uses this with reused targets.
+    pub(crate) fn record_output(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        frame: &RenderedFrame,
+        target: &wgpu::TextureView,
+        format: wgpu::TextureFormat,
+        uniform: &wgpu::Buffer,
+    ) {
+        let device = self.gpu.device();
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bae-render.output"),
             layout: &self.pipelines.output_layout,
@@ -362,32 +415,27 @@ impl Renderer {
                 },
             ],
         });
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let [w, h] = frame.image.texel_size();
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("bae-render.output"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
         });
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("bae-render.output"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            pass.set_pipeline(&self.pipelines.output);
-            pass.set_bind_group(0, &group, &[]);
-            pass.draw(0..3, 0..1);
-        }
-        self.gpu.queue().submit([encoder.finish()]);
-        Ok(bae_gpu::transfer::read_texture(&self.gpu, &target)?)
+        pass.set_pipeline(self.pipelines.output_for(device, format));
+        pass.set_bind_group(0, &group, &[]);
+        pass.set_scissor_rect(0, 0, w.max(1), h.max(1));
+        pass.draw(0..3, 0..1);
     }
 
     /// Writes a frame as an 8-bit RGBA PNG (straight alpha unless `alpha` says

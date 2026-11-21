@@ -12,10 +12,13 @@
 
 mod agent_feed;
 mod document;
+mod files;
 mod headless;
 mod i18n;
 mod mcp_cli;
 mod model_cli;
+#[cfg(test)]
+mod save_roundtrip;
 mod shell;
 mod startup;
 mod ui;

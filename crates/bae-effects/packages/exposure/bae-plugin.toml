@@ -1,0 +1,198 @@
+# Exposure (ADBE Exposure2): AE-FX-043.
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "exposure"
+name = "Exposure"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE Exposure2"]
+keywords = ["exposure", "stops", "offset", "gamma", "hdr"]
+flags = ["pixel-independent"]
+shader = "shaders/exposure.wgsl"
+identity_when = "params.channels == 1 && params.master_exposure == 0 && params.master_offset == 0 && params.master_gamma == 1"
+
+[[effect.param]]
+id = 1
+key = "channels"
+type = "popup"
+name = "Channels"
+default = 1
+choices = ["Master", "Individual Channels"]
+
+[[effect.param]]
+id = 2
+key = "master"
+type = "group"
+name = "Master"
+end_id = 6
+
+[[effect.param]]
+id = 3
+key = "master_exposure"
+type = "float"
+name = "Exposure"
+default = 0.0
+range = [-20.0, 20.0]
+slider = [-5.0, 5.0]
+precision = 2
+group = "master"
+
+[[effect.param]]
+id = 4
+key = "master_offset"
+type = "float"
+name = "Offset"
+default = 0.0
+range = [-2.0, 2.0]
+slider = [-0.5, 0.5]
+precision = 4
+group = "master"
+
+[[effect.param]]
+id = 5
+key = "master_gamma"
+type = "float"
+name = "Gamma Correction"
+default = 1.0
+range = [0.0001, 9.99]
+slider = [0.1, 5.0]
+precision = 2
+group = "master"
+
+[[effect.param]]
+id = 7
+key = "red"
+type = "group"
+name = "Red"
+end_id = 11
+
+[[effect.param]]
+id = 8
+key = "red_exposure"
+type = "float"
+name = "Red Exposure"
+default = 0.0
+range = [-20.0, 20.0]
+slider = [-5.0, 5.0]
+precision = 2
+group = "red"
+
+[[effect.param]]
+id = 9
+key = "red_offset"
+type = "float"
+name = "Red Offset"
+default = 0.0
+range = [-2.0, 2.0]
+slider = [-0.5, 0.5]
+precision = 4
+group = "red"
+
+[[effect.param]]
+id = 10
+key = "red_gamma"
+type = "float"
+name = "Red Gamma Correction"
+default = 1.0
+range = [0.0001, 9.99]
+slider = [0.1, 5.0]
+precision = 2
+group = "red"
+
+[[effect.param]]
+id = 12
+key = "green"
+type = "group"
+name = "Green"
+end_id = 16
+
+[[effect.param]]
+id = 13
+key = "green_exposure"
+type = "float"
+name = "Green Exposure"
+default = 0.0
+range = [-20.0, 20.0]
+slider = [-5.0, 5.0]
+precision = 2
+group = "green"
+
+[[effect.param]]
+id = 14
+key = "green_offset"
+type = "float"
+name = "Green Offset"
+default = 0.0
+range = [-2.0, 2.0]
+slider = [-0.5, 0.5]
+precision = 4
+group = "green"
+
+[[effect.param]]
+id = 15
+key = "green_gamma"
+type = "float"
+name = "Green Gamma Correction"
+default = 1.0
+range = [0.0001, 9.99]
+slider = [0.1, 5.0]
+precision = 2
+group = "green"
+
+[[effect.param]]
+id = 17
+key = "blue"
+type = "group"
+name = "Blue"
+end_id = 21
+
+[[effect.param]]
+id = 18
+key = "blue_exposure"
+type = "float"
+name = "Blue Exposure"
+default = 0.0
+range = [-20.0, 20.0]
+slider = [-5.0, 5.0]
+precision = 2
+group = "blue"
+
+[[effect.param]]
+id = 19
+key = "blue_offset"
+type = "float"
+name = "Blue Offset"
+default = 0.0
+range = [-2.0, 2.0]
+slider = [-0.5, 0.5]
+precision = 4
+group = "blue"
+
+[[effect.param]]
+id = 20
+key = "blue_gamma"
+type = "float"
+name = "Blue Gamma Correction"
+default = 1.0
+range = [0.0001, 9.99]
+slider = [0.1, 5.0]
+precision = 2
+group = "blue"
+
+[[effect.param]]
+id = 22
+key = "bypass_linear"
+type = "checkbox"
+name = "Bypass Linear Light Conversion"
+label = "Bypass"
+default = false

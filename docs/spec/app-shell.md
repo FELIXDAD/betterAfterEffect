@@ -61,9 +61,30 @@ bae render | mcp | export-json | pack …   其他工作流实现
 - DPI：由 egui-winit 跟随窗口缩放；表面按物理像素配置。
 - 窗口位置、大小、最大化、全屏保存在 `<state>/window.json`（版本化设置文件），只有仍在某个显示器上的位置才会恢复；`--smoke-test` 不写入。
 - 单实例：界面模式在 `<state>/bae-gui.lock` 上加锁，第二个实例提示后退出（以后改为把参数转给已运行的实例）。`--smoke-test` 和 `--headless` 不加锁。
-- 原生菜单栏：muda。菜单项 id 就是命令 id（`file.open_project`、`app.quit` …）；命令系统合并后由注册的命令生成菜单。编辑菜单不设置原生快捷键，避免在 macOS 上抢走 egui 的 Cmd+Z / Cmd+C，快捷键由 11 的快捷键系统处理。
+- 原生菜单栏：muda。菜单项 id 就是命令 id（`file.open_project`、`app.quit` …）。"文件"菜单的项和各模块的菜单一样注册在 `Registry<MenuItemSpec>`（`shell::menu::file_items`），菜单上显示当前键位表绑定的快捷键；编辑菜单不设置原生快捷键，避免在 macOS 上抢走 egui 的 Cmd+Z / Cmd+C，快捷键由 11 的快捷键系统处理。
 - egui 的根视口命令（自绘标题栏的拖动、最小化、最大化、关闭）通过 `egui_winit::process_viewport_commands` 执行；`ViewportCommand::Close` 会关闭应用（除非同一帧有 `CancelClose`）。
 - 额外视口（浮动面板）：暂时 `ctx.set_embed_viewports(true)`，egui 把它们画成主窗口内的浮动窗。原生多窗口（每个视口一个 winit 窗口 + 一个 surface，共用同一设备）是后续工作。
+
+### 工程文件
+
+`apps/bae/src/document.rs`（文档层）和 `apps/bae/src/files.rs`（文件命令流程）：
+
+| 命令 | 快捷键（同 AE） | 行为 |
+|---|---|---|
+| `file.new_project` 新建项目 | Cmd/Ctrl+Alt+N | 有未保存的修改时先问；换成未命名的空工程 |
+| `file.open_project` 打开项目… | Cmd/Ctrl+O | 原生打开对话框；先读文件（坏文件直接报错，不动当前工程），再问未保存的修改，再切换。参数 `{"path": …}` 跳过对话框 |
+| `file.close_project` 关闭项目 | 无（AE 没有默认快捷键） | 先问；留下一个未命名的空工程（同 AE） |
+| `file.save` 保存 | Cmd/Ctrl+S | 写回原位置；未命名工程走"另存为" |
+| `file.save_as` 另存为… | Cmd/Ctrl+Shift+S | 原生保存对话框，格式可选 `.bae`（目录）或 `.baez`（单文件） |
+
+- 打开：`.bae` 目录、`.baez` 文件，或 `.bae` 目录里的 `project.json`，都经过 `bae_package::open_project`，`.baez` 里的素材原地读取（`AssetLocator`）。macOS 的打开面板可以直接选 `.bae` 目录；Windows 的对话框只能选文件或只能选目录，所以选 `.baez` 或 `project.json`。
+- 保存只是序列化（`Project::save_as` / `write_baez`），不改工程数据。从 `.baez` 打开的工程，保存时包里的素材原样保留（同名 `assets/…`）；另存为 `.bae` 目录时这些素材解到目录的 `assets/` 下，相对路径仍然有效。
+- 未保存的修改不另外记标志：比较每个工程层的 Loro 版本向量和层叠顺序与上次打开 / 保存时是否相同（命令、撤销、重做、远程导入都会推进版本）。保存后撤销算作新的修改。窗口标题在有修改时加 ` *`（AE 的写法），macOS 同时设置窗口的"已编辑"状态。
+- 关闭工程、新建、打开、退出（菜单、Cmd/Ctrl+Q、关闭窗口）前，有修改时弹原生提示：保存 / 不保存 / 取消。macOS 是 NSAlert（保存是默认按钮）；Windows 是 MessageBox 的 是 / 否 / 取消（自定义按钮文字需要 comctl32 v6 清单，可执行文件目前没有）。"保存"失败或取消保存对话框时不关闭。
+- 顺序（`files::CommitGate`）：文件命令和退出总在它们之前的编辑之后执行。同一帧里快捷键先于面板的提交被读到（输入数值、回车、Cmd/Ctrl+S 连按时是 `[file.save, attr.set_at]`），外壳把这一批的其他命令先跑；macOS 菜单和快捷键也排在上一帧的编辑后面。正在输入数值时按保存 / 退出，外壳先结束输入（字段失去焦点时提交，同 AE 的点别处），下一帧提交后再执行；窗口 300 ms 内不重绘（例如最小化）就不再等。
+- 对话框都在 `files::FileDialogs` trait 后面：外壳用 `shell::dialogs::Native`（rfd），冒烟测试用 `files::NoDialogs`（从不阻塞），测试注入路径和回答。
+- 命令行：`bae <工程>` 启动时打开；打不开时窗口出来后弹错误提示，`--smoke-test` 时直接以 1 退出。`bae --headless <工程>` 打开并打印一行摘要；`bae --headless --smoke-test N <工程>` 带着这个工程渲染界面。
+- 打开另一个工程时清空历史记录面板，并重置动效工作区的会话状态（当前合成、选择、播放）。
 
 ### 设备丢失
 
@@ -96,6 +117,7 @@ bae-render ──publish(id, texture)──► ViewportTextureRegistry ◄──
 |---|---|
 | `bae --smoke-test 120` | 打开窗口，尽快渲染 120 帧（`NoVsync`）后以 0 退出。窗口不能呈现时（被遮挡、CI 桌面）改为离屏渲染，测试仍然覆盖完整界面路径；20 秒没有进展或出现 wgpu 校验错误则以 1 退出。 |
 | `bae --headless --smoke-test 30` | 不创建窗口，在 1280×720 离屏纹理上渲染 30 帧界面，回读检查画面不是单色、没有校验错误。CI 使用这一项。 |
+| `bae [--headless] --smoke-test 3 <工程>` | 同上，但先打开这个工程；打不开以 1 退出。 |
 
 ## 7. 给其他工作流
 

@@ -171,6 +171,18 @@ fn columns(width: f32) -> [f32; 5] {
     ]
 }
 
+#[cfg(test)]
+impl ProjectPanel {
+    /// An item is being renamed.
+    pub(crate) fn is_renaming(&self) -> bool {
+        self.rename.is_some()
+    }
+
+    pub(crate) fn start_rename(&mut self, item: PrimPath, text: &str) {
+        self.rename = Some((item, text.to_owned()));
+    }
+}
+
 impl Panel for ProjectPanel {
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let session = common::session(cx.resources);
@@ -225,6 +237,8 @@ impl Panel for ProjectPanel {
         let footer_h = 28.0;
         let list_h = (ui.available_height() - footer_h).max(20.0);
         let mut open_comp: Option<PrimPath> = None;
+        // The Enter that commits a rename must not start a new one.
+        let mut rename_finished = false;
         let mut menu_new_comp = false;
         let mut menu_new_folder = false;
         let mut delete: Vec<PrimPath> = Vec::new();
@@ -283,15 +297,11 @@ impl Panel for ProjectPanel {
                         let field = Rect::from_min_max(pos2(x, rect.top() + 1.0), pos2(rect.left() + cols[2] - 4.0, rect.bottom() - 1.0));
                         let mut done = None;
                         if let Some((_, buf)) = &mut self.rename {
-                            let r = ui.put(field, egui::TextEdit::singleline(buf).text_color(color::TEXT_STRONG));
-                            r.request_focus();
-                            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                                done = Some(None);
-                            } else if r.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                done = Some(Some(buf.clone()));
-                            }
+                            let id = ui.id().with(("rename", row.path.as_str()));
+                            done = common::rename_field(ui, field, buf, id);
                         }
                         if let Some(result) = done {
+                            rename_finished = true;
                             if let Some(new) = result.filter(|n| !n.trim().is_empty() && *n != name) {
                                 cx.invoke_with(
                                     "attr.set",
@@ -443,10 +453,12 @@ impl Panel for ProjectPanel {
             cx.open_panel("timeline");
             cx.open_panel("composition");
         }
-        // Enter renames the selected item (AE).
+        // Enter renames the selected item (AE) — unless a focused widget, e.g. a
+        // button in another panel, took the Enter.
         if cx.focused
+            && !rename_finished
             && self.rename.is_none()
-            && ui.input(|i| i.key_pressed(egui::Key::Enter))
+            && bae_ui::panel_key_pressed(ui, egui::Key::Enter)
             && let Some(p) = &selected_first
         {
             self.rename = Some((p.clone(), query::display_name_of(stage, p)));

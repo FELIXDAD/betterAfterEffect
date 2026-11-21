@@ -5,7 +5,7 @@
 //! Stage ──► CompEvaluator (bae-anim; MockEvaluator until 03 lands) ──► RenderComp
 //!       ──► graph::build (nodes, ROI negotiation, culling, cache keys) ──► RenderGraph
 //!       ──► Renderer (shared GpuContext, RGBA16F premultiplied buffers) ──► texture
-//!       ──► viewport (zero copy) / PNG / encoder (08)
+//!       ──► viewport (zero copy) / export (async readback ──► 08's encoders)
 //! ```
 //!
 //! Public interface for other workstreams:
@@ -37,6 +37,7 @@ pub mod effect;
 mod error;
 pub mod eval;
 mod exec;
+pub mod export;
 pub mod fixture;
 pub mod footage;
 pub mod geom;
@@ -58,6 +59,11 @@ pub use cache::{CacheStats, FrameCache, FrameKey};
 pub use effect::{Effect, EffectLibrary, EffectParams};
 pub use error::RenderError;
 pub use eval::{CompEvaluator, MockEvaluator};
+pub use export::{
+    ExportAlpha, ExportFormat, ExportJob, ExportReadback, ExportReport, ExportSettings,
+    ExportStats, ExportedFrame, READBACK_DEPTH, ReadFrame, ReadbackFormat, export_frames,
+    frame_file,
+};
 pub use geom::{IRect, Rect};
 pub use graph::EffectFrame;
 pub use graph::{RenderGraph, SourceResolver};
@@ -65,7 +71,7 @@ pub use input::{
     CustomContent, Dependency, FootageRef, LayerContent, RenderComp, RenderEffect, RenderLayer,
     RenderMask, TrackMatte,
 };
-pub use module::{RenderModule, frame_file};
+pub use module::RenderModule;
 pub use pool::PoolStats;
 pub use renderer::{FrameStats, OutputAlpha, RenderedFrame, Renderer, RendererConfig};
 pub use request::{

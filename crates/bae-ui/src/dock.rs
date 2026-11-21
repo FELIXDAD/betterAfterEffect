@@ -764,7 +764,7 @@ impl Dock {
     }
 
     fn handle_keys(&mut self, ui: &Ui, frames: &[(FrameId, Rect)]) {
-        if ui.ctx().egui_wants_keyboard_input() {
+        if ui.ctx().text_edit_focused() {
             return;
         }
         // AE: the ` (tilde) key maximizes the panel group under the pointer.

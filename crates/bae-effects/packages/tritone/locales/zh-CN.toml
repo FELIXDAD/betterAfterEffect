@@ -1,0 +1,9 @@
+[effect.tritone]
+name = "三色调"
+keywords = ["三色调", "色调", "阴影", "中间调", "高光"]
+
+[effect.tritone.params]
+highlights = "高光"
+midtones = "中间调"
+shadows = "阴影"
+blend = "与原始图像混合"

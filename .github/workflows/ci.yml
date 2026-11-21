@@ -86,6 +86,17 @@ jobs:
         # renderer, UI and plugins must share one wgpu::Device (docs/spec/dependencies.md).
         run: cargo tree --locked -p bae-dep-probe -i wgpu --edges normal
 
+      - name: One font stack in the app
+        # egui (vendored epaint, vendor/epaint/BAE-PATCH.md), vello and parley must share one
+        # skrifa / read-fonts / harfrust; a second set adds ~0.9 MiB to bae.
+        run: |
+          dupes="$(cargo tree --locked -p bae -d -e normal --depth 0 | grep -E '^(skrifa|read-fonts|harfrust) ' || true)"
+          if [ -n "$dupes" ]; then
+            echo "bae links more than one version of:"
+            echo "$dupes"
+            exit 1
+          fi
+
       - name: Release size budget
         # Release build of bae + check against tools/size-budget/budget.toml; fails when over.
         run: cargo xtask size --json size-report.json

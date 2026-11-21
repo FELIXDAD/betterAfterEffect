@@ -52,6 +52,14 @@
 - B1（Apple M4）：完整分辨率预览 852 fps，半分辨率 1333 fps，单帧延迟 p50 2.2 ms，导出（求值+渲染+回读）259 fps。形状、文字还是代替品，没有模糊和发光。
 - 从 `.baez` 打开的工程：素材经 21 的 `bae_package::AssetLocator` 定位，包内条目解到缓存目录再交给 bae-media（序列帧整目录解出）；两个求值器和 `bae render` 都用 `bae_render::AssetFiles`。
 - 回应请求（#44）：05 的 1（保留 `LayerSource::bounds()`）、2（`AnimEvaluator` 把形状/文字图层转成 `bae.shape` / `bae.text` 的 `Custom` 内容，`bae render` 从应用的 `Registry<dyn SourceProvider>` 取 provider，`apps/bae` 注册了 05 的 `ShapeProvider`）、3（`SourceRequest.scale` 改为期望密度 = 预览分辨率 × 图层在屏幕上的放大倍数，矢量源按最终尺寸栅格化）、4（`bae_render::testing`）；19 的 R04-11（`EffectParams` 加图层范围、帧率、time_step、线性混合、渲染目的、快门角度/相位、每实例随机种子）、R04-12（`testing::with_encode_context` / `render_effect` / `upload` / `read_pixels`）。`GpuImage.rect` 恢复为 #16 文档里的像素坐标（`texel_size()` 由 `pixel_scale` 算出）。
+**2026-11-21**
+
+- 导出流水线（分支 `render/export-pipeline`，[interface]）：`bae render` 不再逐帧串行。新的公共模块 `bae_render::export`：`ExportReadback`（输出转换写进复用的目标纹理，3 个轮换暂存缓冲异步映射，只等最老那帧的那次提交；`MappedFrame` 可以在别的线程拷出，缓冲还回来复用）、`export_frames`（求值 → 渲染 → 异步回读 → 编码线程 → bae-media 并行序列写出；逐帧回调、取消标志；2026-11-21 起停止和出错都保留已写出的帧）、`ExportSettings` / `ExportFormat` / `ExportAlpha` / `ExportStats` / `ExportReport`，给 `bae render` 和接下来的渲染队列共用。`frame_file` 移到 `export`，命名规则与 bae-media 的序列写出一致（文件名里第一段 `#`，AE 的 `[####]` 去掉方括号）。`RenderError::Canceled`。输出转换着色器支持 BGRA8 / RGBA16F / RGBA32F 目标，浮点目标不截断超白。
+- `bae render` 新参数：`--format png|tiff|exr|h264|hevc|prores|prores4444`（默认按扩展名）、`--compression`、`--bits`、`--threads`；`--json` 增加 `stages`（求值、渲染、等 GPU、拷出、等编码器、编码、写盘）、`throughput`、`output`。`render_ms` 不再包含回读。
+- B1 300 帧（Apple M4）：PNG 5.03 s → 0.47 s（10.7×），每帧 16.65 → 1.42 ms；TIFF 不压缩 1.26 s（受磁盘限制）；EXR ZIP 2.19 s。M4 上现在是 GPU 受限。基准新增 `export_fps_async`（672 fps，同步回读 359 fps）。详见 `docs/perf.md`。
+- 改了 08 的目录（`crates/bae-media` 导出部分）和根 `Cargo.toml` 的一行（`png` 回到 opt-level 3），原因写在 PR 里。
+- 应用内的导出入口（单独 PR）：「合成 ▸ 添加到渲染队列」（Cmd/Ctrl+M）和渲染队列面板，代码在 `crates/bae-ui-motion/src/render_queue.rs`（12 已停，菜单、快捷键、面板都在它的注册表里）。按「渲染」时给工程拍快照，后台线程用自己的 `Renderer` 跑 `export_frames`，界面不卡；进度条、停止（保留已渲出的帧，显示「已停止（N/M 帧）」）、失败原因、在访达 / 资源管理器中显示。队列是应用运行时状态，不进工程文件。
+
 - 下一步：遮罩（05 的路径栅格化或自带）、效果框架执行与三个参考效果、调整图层、其余混合模式（继续用 AE 对照）、视口纹理输出（零拷贝给 12）、B1 与 AE 渲染速度对比、B3。
 
 - [x] 渲染图与纹理池
@@ -60,6 +68,7 @@
 - [ ] 效果框架与参考效果
 - [ ] 缓存与预览
 - [x] bae render 命令行（PNG）
+- [x] 导出流水线：异步回读 + 并行编码，PNG / TIFF / EXR / macOS 影片（见下）
 - [ ] 基准与 CI 趋势
 
 ## 请求（其他工作流在这里留言）

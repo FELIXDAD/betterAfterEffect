@@ -1,0 +1,79 @@
+{
+  "commit": "a775f2c",
+  "bae_png_all": [
+    2.3019912,
+    2.007549,
+    2.004229
+  ],
+  "bae_tif_all": [
+    2.0065247,
+    2.0064644,
+    2.0046752
+  ],
+  "bae_png_one": [
+    1.0069047,
+    1.0067906,
+    1.0067874
+  ],
+  "ae_png_all": [
+    22.395,
+    22.017,
+    21.898
+  ],
+  "ae_png_one": [
+    1.735,
+    0.988,
+    0.984
+  ],
+  "ae_tif_all": [
+    18.515,
+    18.87,
+    18.491
+  ],
+  "ae_tif_one": [
+    9.012,
+    8.821,
+    8.991
+  ],
+  "med": {
+    "bae_png_all": 2.007549,
+    "bae_tif_all": 2.0064644,
+    "bae_png_one": 1.0067906,
+    "ae_png_all": 22.017,
+    "ae_png_one": 0.988,
+    "ae_tif_all": 18.515,
+    "ae_tif_one": 8.991
+  },
+  "stages_png": {
+    "drain_ms": 9.9382,
+    "encode_ms": 1510.2903,
+    "encoder_stall_ms": 90.7493,
+    "eval_ms": 131.5179,
+    "readback_copy_ms": 495.5442,
+    "readback_wait_ms": 0.3545,
+    "render_ms": 271.4197,
+    "setup_ms": 387.0984,
+    "write_ms": 129.3648
+  },
+  "total_ms_png": 560.8702,
+  "throughput_png": {
+    "fps": 534.8831155586445,
+    "mb_per_s": 140.71382469598134
+  },
+  "stages_tif": {
+    "drain_ms": 13.6623,
+    "encode_ms": 783.3791,
+    "encoder_stall_ms": 211.26919999999998,
+    "eval_ms": 149.3097,
+    "readback_copy_ms": 680.4622999999999,
+    "readback_wait_ms": 0.5798,
+    "render_ms": 314.00660000000005,
+    "setup_ms": 394.39790000000005,
+    "write_ms": 1433.8056
+  },
+  "total_ms_tif": 758.7767,
+  "throughput_tif": {
+    "fps": 395.37323694836704,
+    "mb_per_s": 3279.501597769146
+  }
+}

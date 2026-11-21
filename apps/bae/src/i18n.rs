@@ -19,7 +19,6 @@ const ZH: &[(&str, &str)] = &[
     ("Exit", "退出"),
     ("File", "文件"),
     ("Help", "帮助"),
-    ("Open Project…", "打开项目…"),
     ("Quit BAE", "退出 BAE"),
     ("Window", "窗口"),
     ("Workspace", "工作区"),
@@ -27,6 +26,27 @@ const ZH: &[(&str, &str)] = &[
     ("Full Screen", "全屏"),
     ("frame", "帧"),
     ("English", "English"),
+    // File commands and their dialogs
+    ("Open Project", "打开项目"),
+    ("Save As", "另存为"),
+    ("BAE Project", "BAE 项目"),
+    ("BAE Package", "BAE 打包项目"),
+    (
+        "BAE Project (.baez, project.json)",
+        "BAE 项目（.baez、project.json）",
+    ),
+    ("Format:", "格式："),
+    (
+        "Save changes to “{}” before closing?",
+        "关闭前是否保存对“{}”的更改？",
+    ),
+    (
+        "If you don't save, your changes will be lost.",
+        "如果不保存，你的更改将会丢失。",
+    ),
+    ("Don't Save", "不保存"),
+    ("Could not open the project.", "无法打开项目。"),
+    ("Could not save the project.", "无法保存项目。"),
     (
         "GPU-first motion graphics and compositing.",
         "以 GPU 为基础的动态图形与合成应用。",
@@ -49,6 +69,38 @@ pub fn init_from_env() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_menu_and_dialog_strings_have_chinese() {
+        i18n::register(ZH);
+        let mut strings: Vec<String> = crate::shell::file_menu_titles();
+        strings.extend(
+            [
+                "File",
+                "Exit",
+                "Open Project",
+                "Save As",
+                "BAE Project",
+                "BAE Package",
+                "BAE Project (.baez, project.json)",
+                "Format:",
+                "Save changes to “{}” before closing?",
+                "If you don't save, your changes will be lost.",
+                "Save",
+                "Don't Save",
+                "Cancel",
+                "Could not open the project.",
+                "Could not save the project.",
+                "Untitled Project",
+            ]
+            .map(String::from),
+        );
+        let missing: Vec<_> = strings
+            .iter()
+            .filter(|s| !i18n::has_translation(s))
+            .collect();
+        assert!(missing.is_empty(), "no Chinese for {missing:?}");
+    }
 
     #[test]
     fn table_has_unique_keys() {

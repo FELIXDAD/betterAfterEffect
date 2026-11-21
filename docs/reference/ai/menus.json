@@ -1,0 +1,6526 @@
+{
+  "source": {
+    "application": "Adobe Illustrator 2026",
+    "version": "30.1.0",
+    "build_number": "136R",
+    "locale": "zh_CN",
+    "platform": "Microsoft Windows 11 专业版 (10.0.26200, Build 26200, 64 位)",
+    "extracted_date": "2026-11-21"
+  },
+  "extraction_method": "win32_orca_hotkey_alt_MN_GETHMENU",
+  "stats": {
+    "submenus": 122,
+    "items": 801,
+    "with_id": 558,
+    "static_items": 631,
+    "static_with_id": 558,
+    "dynamic_items": 170,
+    "with_shortcut": 134,
+    "separators": 125,
+    "top_level": 9
+  },
+  "menus": [
+    {
+      "type": "submenu",
+      "label": "文件",
+      "children": [
+        {
+          "type": "item",
+          "id": "new",
+          "label": "新建...",
+          "mnemonic": "N",
+          "shortcut": "Ctrl+N",
+          "commandId": 1852143392
+        },
+        {
+          "type": "item",
+          "id": "newFromTemplate",
+          "label": "从模板新建...",
+          "mnemonic": "T",
+          "shortcut": "Shift+Ctrl+N",
+          "commandId": 20
+        },
+        {
+          "type": "item",
+          "id": "open",
+          "label": "打开...",
+          "mnemonic": "O",
+          "shortcut": "Ctrl+O",
+          "commandId": 1869636974
+        },
+        {
+          "type": "submenu",
+          "label": "最近打开的文件",
+          "mnemonic": "F",
+          "omitted_dynamic": "local_recent_files",
+          "children": []
+        },
+        {
+          "type": "item",
+          "id": "Adobe Bridge Browse",
+          "label": "在 Bridge 中浏览...",
+          "shortcut": "Alt+Ctrl+O",
+          "commandId": -2147482987
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "close",
+          "label": "关闭",
+          "mnemonic": "C",
+          "shortcut": "Ctrl+W",
+          "commandId": 1634296684
+        },
+        {
+          "type": "item",
+          "id": "closeAll",
+          "label": "关闭全部",
+          "shortcut": "Alt+Ctrl+W",
+          "commandId": 117
+        },
+        {
+          "type": "item",
+          "id": "save",
+          "label": "存储",
+          "mnemonic": "S",
+          "shortcut": "Ctrl+S",
+          "commandId": 1935767141
+        },
+        {
+          "type": "item",
+          "id": "saveas",
+          "label": "存储为...",
+          "mnemonic": "A",
+          "shortcut": "Shift+Ctrl+S",
+          "commandId": 1937138035
+        },
+        {
+          "type": "item",
+          "id": "saveacopy",
+          "label": "存储副本...",
+          "mnemonic": "Y",
+          "shortcut": "Alt+Ctrl+S",
+          "commandId": 95
+        },
+        {
+          "type": "item",
+          "id": "Adobe AI Save Selected Slices",
+          "label": "存储选中的切片...",
+          "commandId": -2147482980
+        },
+        {
+          "type": "item",
+          "id": "Adobe Version History File Menu Item",
+          "label": "版本历史记录",
+          "commandId": -2147482905
+        },
+        {
+          "type": "item",
+          "id": "saveasTemplate",
+          "label": "存储为模板...",
+          "commandId": 48
+        },
+        {
+          "type": "item",
+          "id": "revert",
+          "label": "恢复",
+          "mnemonic": "V",
+          "commandId": 1920365172
+        },
+        {
+          "type": "item",
+          "id": "Search Adobe Stock",
+          "label": "搜索 Adobe Stock...",
+          "commandId": -2147483639
+        },
+        {
+          "type": "item",
+          "id": "AI Place",
+          "label": "置入...",
+          "mnemonic": "L",
+          "shortcut": "Shift+Ctrl+P",
+          "commandId": -2147483638
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "Invite People",
+          "label": "邀请编辑...",
+          "commandId": -2147482917
+        },
+        {
+          "type": "item",
+          "id": "Share For Review",
+          "label": "共享以供审阅...",
+          "commandId": -2147482916
+        },
+        {
+          "type": "submenu",
+          "label": "导出",
+          "mnemonic": "E",
+          "children": [
+            {
+              "type": "item",
+              "id": "exportForScreens",
+              "label": "导出为多种屏幕所用格式...",
+              "shortcut": "Alt+Ctrl+E",
+              "commandId": 354
+            },
+            {
+              "type": "item",
+              "id": "export",
+              "label": "导出为...",
+              "commandId": 355
+            },
+            {
+              "type": "item",
+              "id": "Adobe AI Save For Web",
+              "label": "存储为 Web 所用格式（旧版）...",
+              "shortcut": "Alt+Shift+Ctrl+S",
+              "commandId": 356
+            }
+          ]
+        },
+        {
+          "type": "item",
+          "id": "exportSelection",
+          "label": "导出所选项目...",
+          "commandId": 351
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "Package Menu Item",
+          "label": "打包...",
+          "mnemonic": "G",
+          "shortcut": "Alt+Shift+Ctrl+P",
+          "commandId": -2147482988
+        },
+        {
+          "type": "submenu",
+          "label": "脚本",
+          "mnemonic": "R",
+          "children": [
+            {
+              "type": "item",
+              "id": null,
+              "label": "图像描摹",
+              "commandId": -2147482904
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "将文档存储为 PDF",
+              "commandId": -2147482903
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "将文档存储为 SVG",
+              "commandId": -2147482902
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "ai_browse_for_script",
+              "label": "其它脚本...",
+              "shortcut": "Ctrl+F12",
+              "commandId": -2147482974
+            }
+          ]
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "document",
+          "label": "文档设置...",
+          "mnemonic": "D",
+          "shortcut": "Alt+Ctrl+P",
+          "commandId": 84
+        },
+        {
+          "type": "submenu",
+          "label": "文档颜色模式",
+          "mnemonic": "M",
+          "children": [
+            {
+              "type": "item",
+              "id": "doc-color-cmyk",
+              "label": "CMYK 颜色",
+              "mnemonic": "C",
+              "commandId": 223
+            },
+            {
+              "type": "item",
+              "id": "doc-color-rgb",
+              "label": "RGB 颜色",
+              "mnemonic": "R",
+              "commandId": 224
+            }
+          ]
+        },
+        {
+          "type": "item",
+          "id": "File Info",
+          "label": "文件信息...",
+          "mnemonic": "I",
+          "shortcut": "Alt+Shift+Ctrl+I",
+          "commandId": -2147482986
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "Print",
+          "label": "打印...",
+          "mnemonic": "P",
+          "shortcut": "Ctrl+P",
+          "commandId": -2147482920
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "quit",
+          "label": "退出",
+          "mnemonic": "X",
+          "shortcut": "Ctrl+Q",
+          "commandId": 1903520116
+        }
+      ]
+    },
+    {
+      "type": "submenu",
+      "label": "编辑",
+      "children": [
+        {
+          "type": "item",
+          "id": "undo",
+          "label": "还原",
+          "mnemonic": "U",
+          "shortcut": "Ctrl+Z",
+          "commandId": 1970168943
+        },
+        {
+          "type": "item",
+          "id": "redo",
+          "label": "重做",
+          "mnemonic": "R",
+          "shortcut": "Shift+Ctrl+Z",
+          "commandId": 1919247471
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "cut",
+          "label": "剪切",
+          "mnemonic": "T",
+          "shortcut": "Ctrl+X",
+          "commandId": 1668641824
+        },
+        {
+          "type": "item",
+          "id": "copy",
+          "label": "复制",
+          "mnemonic": "C",
+          "shortcut": "Ctrl+C",
+          "commandId": 1668247673
+        },
+        {
+          "type": "item",
+          "id": "paste",
+          "label": "粘贴",
+          "mnemonic": "P",
+          "shortcut": "Ctrl+V",
+          "commandId": 1885434740
+        },
+        {
+          "type": "item",
+          "id": "pasteFront",
+          "label": "贴在前面",
+          "mnemonic": "F",
+          "shortcut": "Ctrl+F",
+          "commandId": 18
+        },
+        {
+          "type": "item",
+          "id": "pasteBack",
+          "label": "贴在后面",
+          "mnemonic": "B",
+          "shortcut": "Ctrl+B",
+          "commandId": 19
+        },
+        {
+          "type": "item",
+          "id": "pasteInPlace",
+          "label": "就地粘贴",
+          "mnemonic": "S",
+          "shortcut": "Shift+Ctrl+V",
+          "commandId": 315
+        },
+        {
+          "type": "item",
+          "id": "pasteInAllArtboard",
+          "label": "在所有画板上粘贴",
+          "mnemonic": "S",
+          "shortcut": "Alt+Shift+Ctrl+V",
+          "commandId": 316
+        },
+        {
+          "type": "item",
+          "id": "pasteWithoutFormatting",
+          "label": "粘贴时不包含格式",
+          "mnemonic": "F",
+          "shortcut": "Alt+Ctrl+V",
+          "commandId": 437
+        },
+        {
+          "type": "item",
+          "id": "clear",
+          "label": "清除",
+          "mnemonic": "L",
+          "commandId": 1668048225
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "Find and Replace",
+          "label": "查找和替换...",
+          "mnemonic": "E",
+          "commandId": -2147483028
+        },
+        {
+          "type": "item",
+          "id": "Find Next",
+          "label": "查找下一个",
+          "mnemonic": "X",
+          "commandId": -2147483027
+        },
+        {
+          "type": "submenu",
+          "label": "拼写检查",
+          "children": [
+            {
+              "type": "item",
+              "id": "Auto Spell Check",
+              "label": "自动拼写检查",
+              "mnemonic": "U",
+              "commandId": -2147483031
+            },
+            {
+              "type": "item",
+              "id": "Check Spelling",
+              "label": "拼写检查...",
+              "mnemonic": "H",
+              "shortcut": "Ctrl+I",
+              "commandId": -2147483030
+            }
+          ]
+        },
+        {
+          "type": "item",
+          "id": "Edit Custom Dictionary...",
+          "label": "编辑自定词典...",
+          "mnemonic": "D",
+          "commandId": -2147483034
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "编辑颜色",
+          "children": [
+            {
+              "type": "item",
+              "id": "Recolor Art Dialog",
+              "label": "重新着色图稿...",
+              "commandId": -2147483234
+            },
+            {
+              "type": "submenu",
+              "label": "使用预设值重新着色",
+              "children": [
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "颜色库...",
+                  "commandId": -2147483229
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "单色",
+                  "commandId": -2147483228
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "双色",
+                  "commandId": -2147483227
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "三色",
+                  "commandId": -2147483226
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "颜色协调",
+                  "commandId": -2147483225
+                }
+              ]
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Generative Recolor Art Dialog",
+              "label": "生成式重新着色",
+              "commandId": -2147483231
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Colors3",
+              "label": "前后混合",
+              "mnemonic": "F",
+              "commandId": -2147483609
+            },
+            {
+              "type": "item",
+              "id": "Colors6",
+              "label": "反相颜色",
+              "mnemonic": "I",
+              "commandId": -2147483606
+            },
+            {
+              "type": "item",
+              "id": "Overprint2",
+              "label": "叠印黑色...",
+              "mnemonic": "O",
+              "commandId": -2147483020
+            },
+            {
+              "type": "item",
+              "id": "Colors5",
+              "label": "垂直混合",
+              "mnemonic": "V",
+              "commandId": -2147483607
+            },
+            {
+              "type": "item",
+              "id": "Colors4",
+              "label": "水平混合",
+              "mnemonic": "H",
+              "commandId": -2147483608
+            },
+            {
+              "type": "item",
+              "id": "Adjust3",
+              "label": "调整色彩平衡...",
+              "mnemonic": "A",
+              "commandId": -2147483014
+            },
+            {
+              "type": "item",
+              "id": "Saturate3",
+              "label": "调整饱和度...",
+              "mnemonic": "S",
+              "commandId": -2147483021
+            },
+            {
+              "type": "item",
+              "id": "Colors8",
+              "label": "转换为 CMYK",
+              "mnemonic": "C",
+              "commandId": -2147483604
+            },
+            {
+              "type": "item",
+              "id": "Colors9",
+              "label": "转换为 RGB",
+              "mnemonic": "R",
+              "commandId": -2147483603
+            },
+            {
+              "type": "item",
+              "id": "Colors7",
+              "label": "转换为灰度",
+              "mnemonic": "G",
+              "commandId": -2147483605
+            }
+          ]
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "EditOriginal Menu Item",
+          "label": "编辑原稿",
+          "mnemonic": "O",
+          "commandId": -2147483001
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "Transparency Presets",
+          "label": "透明度拼合器预设...",
+          "mnemonic": "J",
+          "commandId": -2147482932
+        },
+        {
+          "type": "item",
+          "id": "Print Presets",
+          "label": "打印预设...",
+          "mnemonic": "Q",
+          "commandId": -2147482921
+        },
+        {
+          "type": "item",
+          "id": "PDF Presets",
+          "label": "Adobe PDF 预设...",
+          "mnemonic": "M",
+          "commandId": -2147483203
+        },
+        {
+          "type": "item",
+          "id": "PerspectiveGridPresets",
+          "label": "透视网格预设...",
+          "mnemonic": "G",
+          "commandId": -2147482948
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "color",
+          "label": "颜色设置...",
+          "mnemonic": "G",
+          "shortcut": "Shift+Ctrl+K",
+          "commandId": 139
+        },
+        {
+          "type": "item",
+          "id": "assignprofile",
+          "label": "指定配置文件...",
+          "mnemonic": "A",
+          "commandId": 203
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "KBSC Menu Item",
+          "label": "键盘快捷键...",
+          "mnemonic": "K",
+          "shortcut": "Alt+Shift+Ctrl+K",
+          "commandId": -2147483544
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "我的设置",
+          "children": [
+            {
+              "type": "item",
+              "id": null,
+              "label": "导出设置...",
+              "commandId": 339
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "导入设置...",
+              "commandId": 340
+            }
+          ]
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "首选项",
+          "mnemonic": "N",
+          "children": [
+            {
+              "type": "item",
+              "id": "preference",
+              "label": "常规...",
+              "mnemonic": "G",
+              "shortcut": "Ctrl+K",
+              "commandId": 1886545254
+            },
+            {
+              "type": "item",
+              "id": "selectPref",
+              "label": "选择和锚点显示...",
+              "mnemonic": "A",
+              "commandId": 289
+            },
+            {
+              "type": "item",
+              "id": "keyboardPref",
+              "label": "文字...",
+              "mnemonic": "T",
+              "commandId": 98
+            },
+            {
+              "type": "item",
+              "id": "unitundoPref",
+              "label": "单位...",
+              "mnemonic": "U",
+              "commandId": 99
+            },
+            {
+              "type": "item",
+              "id": "guidegridPref",
+              "label": "参考线和网格...",
+              "mnemonic": "R",
+              "commandId": 161
+            },
+            {
+              "type": "item",
+              "id": "snapPref",
+              "label": "智能参考线...",
+              "mnemonic": "S",
+              "commandId": 55
+            },
+            {
+              "type": "item",
+              "id": "slicePref",
+              "label": "切片...",
+              "mnemonic": "S",
+              "commandId": 294
+            },
+            {
+              "type": "item",
+              "id": "hyphenPref",
+              "label": "连字...",
+              "commandId": 140
+            },
+            {
+              "type": "item",
+              "id": "pluginPref",
+              "label": "增效工具和暂存盘...",
+              "mnemonic": "P",
+              "commandId": 141
+            },
+            {
+              "type": "item",
+              "id": "UIPref",
+              "label": "用户界面...",
+              "mnemonic": "I",
+              "commandId": 293
+            },
+            {
+              "type": "item",
+              "id": "GPUPerformancePref",
+              "label": "性能...",
+              "mnemonic": "P",
+              "commandId": -2147483009
+            },
+            {
+              "type": "item",
+              "id": "FilePref",
+              "label": "文件处理...",
+              "mnemonic": "F",
+              "commandId": -2147483008
+            },
+            {
+              "type": "item",
+              "id": "ClipboardPref",
+              "label": "剪贴板处理...",
+              "mnemonic": "C",
+              "commandId": -2147483007
+            },
+            {
+              "type": "item",
+              "id": "BlackPref",
+              "label": "黑色外观...",
+              "mnemonic": "B",
+              "commandId": -2147483006
+            },
+            {
+              "type": "item",
+              "id": "DevicesPref",
+              "label": "设备...",
+              "mnemonic": "D",
+              "commandId": -2147483005
+            },
+            {
+              "type": "item",
+              "id": "TouchPref",
+              "label": "触摸工作区...",
+              "mnemonic": "W",
+              "commandId": -2147482918
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "submenu",
+      "label": "对象",
+      "children": [
+        {
+          "type": "submenu",
+          "label": "变换",
+          "mnemonic": "T",
+          "children": [
+            {
+              "type": "item",
+              "id": "transformagain",
+              "label": "再次变换",
+              "mnemonic": "T",
+              "shortcut": "Ctrl+D",
+              "commandId": 22
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "transformmove",
+              "label": "移动...",
+              "mnemonic": "M",
+              "shortcut": "Shift+Ctrl+M",
+              "commandId": 54
+            },
+            {
+              "type": "item",
+              "id": "transformrotate",
+              "label": "旋转...",
+              "mnemonic": "R",
+              "commandId": 162
+            },
+            {
+              "type": "item",
+              "id": "transformreflect",
+              "label": "镜像...",
+              "mnemonic": "E",
+              "commandId": 164
+            },
+            {
+              "type": "item",
+              "id": "transformscale",
+              "label": "缩放...",
+              "mnemonic": "S",
+              "commandId": 163
+            },
+            {
+              "type": "item",
+              "id": "transformshear",
+              "label": "倾斜...",
+              "mnemonic": "H",
+              "commandId": 165
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Transform3",
+              "label": "分别变换...",
+              "mnemonic": "N",
+              "shortcut": "Alt+Shift+Ctrl+D",
+              "commandId": -2147483011
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "AI Reset Bounding Box",
+              "label": "重置定界框",
+              "mnemonic": "B",
+              "commandId": -2147483359
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "排列",
+          "mnemonic": "A",
+          "children": [
+            {
+              "type": "item",
+              "id": "sendToFront",
+              "label": "置于顶层",
+              "mnemonic": "F",
+              "shortcut": "Shift+Ctrl+]",
+              "commandId": 42
+            },
+            {
+              "type": "item",
+              "id": "sendForward",
+              "label": "前移一层",
+              "mnemonic": "O",
+              "shortcut": "Ctrl+]",
+              "commandId": 100
+            },
+            {
+              "type": "item",
+              "id": "sendBackward",
+              "label": "后移一层",
+              "mnemonic": "B",
+              "shortcut": "Ctrl+[",
+              "commandId": 101
+            },
+            {
+              "type": "item",
+              "id": "sendToBack",
+              "label": "置于底层",
+              "mnemonic": "A",
+              "shortcut": "Shift+Ctrl+[",
+              "commandId": 43
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Selection Hat 2",
+              "label": "发送至当前图层",
+              "mnemonic": "L",
+              "commandId": -2147483062
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "对齐",
+          "mnemonic": "A",
+          "children": [
+            {
+              "type": "item",
+              "id": "Horizontal Align Left",
+              "label": "水平左对齐",
+              "mnemonic": "L",
+              "commandId": -2147483177
+            },
+            {
+              "type": "item",
+              "id": "Horizontal Align Center",
+              "label": "水平居中对齐",
+              "mnemonic": "C",
+              "commandId": -2147483176
+            },
+            {
+              "type": "item",
+              "id": "Horizontal Align Right",
+              "label": "水平右对齐",
+              "mnemonic": "R",
+              "commandId": -2147483175
+            },
+            {
+              "type": "item",
+              "id": "Vertical Align Top",
+              "label": "垂直顶对齐",
+              "mnemonic": "T",
+              "commandId": -2147483174
+            },
+            {
+              "type": "item",
+              "id": "Vertical Align Center",
+              "label": "垂直居中对齐",
+              "mnemonic": "A",
+              "commandId": -2147483173
+            },
+            {
+              "type": "item",
+              "id": "Vertical Align Bottom",
+              "label": "垂直底对齐",
+              "mnemonic": "B",
+              "commandId": -2147483172
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "分布",
+          "mnemonic": "U",
+          "children": [
+            {
+              "type": "item",
+              "id": "Vertical Distribute Top",
+              "label": "垂直顶分布",
+              "mnemonic": "T",
+              "commandId": -2147483170
+            },
+            {
+              "type": "item",
+              "id": "Vertical Distribute Center",
+              "label": "垂直居中分布",
+              "mnemonic": "D",
+              "commandId": -2147483169
+            },
+            {
+              "type": "item",
+              "id": "Vertical Distribute Bottom",
+              "label": "垂直底分布",
+              "mnemonic": "B",
+              "commandId": -2147483168
+            },
+            {
+              "type": "item",
+              "id": "Horizontal Distribute Left",
+              "label": "水平左分布",
+              "mnemonic": "L",
+              "commandId": -2147483167
+            },
+            {
+              "type": "item",
+              "id": "Horizontal Distribute Center",
+              "label": "水平居中分布",
+              "mnemonic": "C",
+              "commandId": -2147483166
+            },
+            {
+              "type": "item",
+              "id": "Horizontal Distribute Right",
+              "label": "水平右分布",
+              "mnemonic": "R",
+              "commandId": -2147483165
+            }
+          ]
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "group",
+          "label": "编组",
+          "mnemonic": "G",
+          "shortcut": "Ctrl+G",
+          "commandId": 23
+        },
+        {
+          "type": "item",
+          "id": "ungroup",
+          "label": "取消编组",
+          "mnemonic": "U",
+          "shortcut": "Shift+Ctrl+G",
+          "commandId": 24
+        },
+        {
+          "type": "item",
+          "id": "ungroupAll",
+          "label": "取消全部编组",
+          "shortcut": "Alt+Shift+G",
+          "commandId": 471
+        },
+        {
+          "type": "submenu",
+          "label": "锁定",
+          "mnemonic": "L",
+          "children": [
+            {
+              "type": "item",
+              "id": "lock",
+              "label": "所选对象",
+              "shortcut": "Ctrl+2",
+              "commandId": 28
+            },
+            {
+              "type": "item",
+              "id": "Selection Hat 5",
+              "label": "上方所有图稿",
+              "mnemonic": "A",
+              "commandId": -2147483060
+            },
+            {
+              "type": "item",
+              "id": "Selection Hat 7",
+              "label": "其它图层",
+              "mnemonic": "O",
+              "commandId": -2147483059
+            }
+          ]
+        },
+        {
+          "type": "item",
+          "id": "unlockAll",
+          "label": "全部解锁",
+          "mnemonic": "K",
+          "shortcut": "Alt+Ctrl+2",
+          "commandId": 29
+        },
+        {
+          "type": "submenu",
+          "label": "隐藏",
+          "mnemonic": "H",
+          "children": [
+            {
+              "type": "item",
+              "id": "hide",
+              "label": "所选对象",
+              "shortcut": "Ctrl+3",
+              "commandId": 50
+            },
+            {
+              "type": "item",
+              "id": "Selection Hat 4",
+              "label": "上方所有图稿",
+              "mnemonic": "A",
+              "commandId": -2147483058
+            },
+            {
+              "type": "item",
+              "id": "Selection Hat 6",
+              "label": "其它图层",
+              "mnemonic": "O",
+              "commandId": -2147483057
+            }
+          ]
+        },
+        {
+          "type": "item",
+          "id": "showAll",
+          "label": "显示全部",
+          "shortcut": "Alt+Ctrl+3",
+          "commandId": 51
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "Expand3",
+          "label": "扩展...",
+          "mnemonic": "X",
+          "commandId": -2147483368
+        },
+        {
+          "type": "item",
+          "id": "expandStyle",
+          "label": "扩展外观",
+          "mnemonic": "E",
+          "commandId": 148
+        },
+        {
+          "type": "item",
+          "id": "Crop Image",
+          "label": "裁剪图像",
+          "mnemonic": "C",
+          "commandId": -2147482979
+        },
+        {
+          "type": "item",
+          "id": "Rasterize 8 menu item",
+          "label": "栅格化...",
+          "mnemonic": "Z",
+          "commandId": -2147482981
+        },
+        {
+          "type": "item",
+          "id": "make mesh",
+          "label": "创建渐变网格...",
+          "mnemonic": "D",
+          "commandId": -2147483010
+        },
+        {
+          "type": "item",
+          "id": "AI Object Mosaic Plug-in4",
+          "label": "创建对象马赛克...",
+          "mnemonic": "J",
+          "commandId": -2147483019
+        },
+        {
+          "type": "item",
+          "id": "TrimMark v25",
+          "label": "创建裁切标记",
+          "mnemonic": "C",
+          "commandId": -2147483611
+        },
+        {
+          "type": "item",
+          "id": "Flatten Transparency",
+          "label": "拼合透明度...",
+          "mnemonic": "F",
+          "commandId": -2147482931
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "Make Pixel Perfect",
+          "label": "设为像素级优化",
+          "mnemonic": "M",
+          "commandId": -2147483209
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "生成式",
+          "children": [
+            {
+              "type": "item",
+              "id": "GenAIConsolidatedGenerateVectors",
+              "label": "生成矢量...",
+              "commandId": -2147483195
+            },
+            {
+              "type": "item",
+              "id": "GenAIConsolidatedShapeFill",
+              "label": "生成式形状填充…",
+              "commandId": -2147483194
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "submenu",
+              "label": "生成式扩展",
+              "children": [
+                {
+                  "type": "item",
+                  "id": "Gen Expand Object Make",
+                  "label": "建立",
+                  "commandId": -2147483191
+                },
+                {
+                  "type": "item",
+                  "id": "Gen Expand Object Combine",
+                  "label": "合并",
+                  "commandId": -2147483190
+                }
+              ]
+            },
+            {
+              "type": "item",
+              "id": "GenAIConsolidatedBleed",
+              "label": "打印出血",
+              "commandId": -2147483189
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "GenAIConsolidatedRecolor",
+              "label": "生成式重新着色",
+              "commandId": -2147483187
+            },
+            {
+              "type": "item",
+              "id": "GenAIConsolidatedPatterns",
+              "label": "生成图案",
+              "commandId": -2147483186
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "GenAIConsolidatedVariations",
+              "label": "生成历史记录",
+              "commandId": -2147483184
+            }
+          ]
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "切片",
+          "mnemonic": "S",
+          "children": [
+            {
+              "type": "item",
+              "id": "AISlice Make Slice",
+              "label": "建立",
+              "mnemonic": "M",
+              "commandId": -2147483442
+            },
+            {
+              "type": "item",
+              "id": "AISlice Release Slice",
+              "label": "释放",
+              "mnemonic": "R",
+              "commandId": -2147483441
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "AISlice Create from Guides",
+              "label": "从参考线创建",
+              "mnemonic": "G",
+              "commandId": -2147483439
+            },
+            {
+              "type": "item",
+              "id": "AISlice Create from Selection",
+              "label": "从所选对象创建",
+              "mnemonic": "S",
+              "commandId": -2147483438
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "AISlice Duplicate",
+              "label": "复制切片",
+              "mnemonic": "D",
+              "commandId": -2147483436
+            },
+            {
+              "type": "item",
+              "id": "AISlice Combine",
+              "label": "组合切片",
+              "mnemonic": "B",
+              "commandId": -2147483435
+            },
+            {
+              "type": "item",
+              "id": "AISlice Divide",
+              "label": "划分切片...",
+              "mnemonic": "V",
+              "commandId": -2147483434
+            },
+            {
+              "type": "item",
+              "id": "AISlice Delete All Slices",
+              "label": "全部删除",
+              "mnemonic": "A",
+              "commandId": -2147483433
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "AISlice Slice Options",
+              "label": "切片选项...",
+              "mnemonic": "O",
+              "commandId": -2147483431
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "AISlice Clip to Artboard",
+              "label": "剪切到画板",
+              "mnemonic": "C",
+              "commandId": -2147483429
+            }
+          ]
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "路径",
+          "mnemonic": "P",
+          "children": [
+            {
+              "type": "item",
+              "id": "join",
+              "label": "连接",
+              "mnemonic": "J",
+              "shortcut": "Ctrl+J",
+              "commandId": 25
+            },
+            {
+              "type": "item",
+              "id": "average",
+              "label": "平均...",
+              "mnemonic": "V",
+              "shortcut": "Alt+Ctrl+J",
+              "commandId": 26
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "OffsetPath v22",
+              "label": "轮廓化描边",
+              "mnemonic": "U",
+              "commandId": -2147482956
+            },
+            {
+              "type": "item",
+              "id": "OffsetPath v23",
+              "label": "偏移路径...",
+              "mnemonic": "O",
+              "commandId": -2147482955
+            },
+            {
+              "type": "item",
+              "id": "Reverse Path Direction",
+              "label": "反转路径方向",
+              "mnemonic": "E",
+              "commandId": -2147483399
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "simplify menu item",
+              "label": "简化...",
+              "mnemonic": "M",
+              "commandId": -2147483363
+            },
+            {
+              "type": "item",
+              "id": "smooth menu item",
+              "label": "平滑...",
+              "commandId": -2147483353
+            },
+            {
+              "type": "item",
+              "id": "Add Anchor Points2",
+              "label": "添加锚点",
+              "mnemonic": "A",
+              "commandId": -2147483012
+            },
+            {
+              "type": "item",
+              "id": "Remove Anchor Points menu",
+              "label": "移去锚点",
+              "mnemonic": "R",
+              "commandId": -2147483637
+            },
+            {
+              "type": "item",
+              "id": "Knife Tool2",
+              "label": "分割下方对象",
+              "mnemonic": "D",
+              "commandId": -2147482985
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Rows and Columns....",
+              "label": "分割为网格...",
+              "mnemonic": "S",
+              "commandId": -2147483036
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "cleanup menu item",
+              "label": "清理...",
+              "mnemonic": "C",
+              "commandId": -2147483015
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "形状",
+          "mnemonic": "P",
+          "children": [
+            {
+              "type": "item",
+              "id": "Convert to Shape",
+              "label": "转换为形状",
+              "mnemonic": "C",
+              "commandId": -2147483199
+            },
+            {
+              "type": "item",
+              "id": "Expand Shape",
+              "label": "扩展形状",
+              "mnemonic": "E",
+              "commandId": -2147483198
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "图案",
+          "mnemonic": "E",
+          "children": [
+            {
+              "type": "item",
+              "id": "Adobe Make Pattern",
+              "label": "建立",
+              "mnemonic": "M",
+              "commandId": -2147483347
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Adobe Edit Pattern",
+              "label": "编辑图案",
+              "mnemonic": "P",
+              "shortcut": "Shift+Ctrl+F8",
+              "commandId": -2147483345
+            },
+            {
+              "type": "item",
+              "id": "Adobe Pattern Tile Color",
+              "label": "拼贴边缘颜色...",
+              "mnemonic": "T",
+              "commandId": -2147483344
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "GenAIConsolidatedPatterns",
+              "label": "生成图案",
+              "commandId": -2147483342
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "缠绕",
+          "children": [
+            {
+              "type": "item",
+              "id": "Partial Rearrange Make",
+              "label": "建立",
+              "mnemonic": "M",
+              "commandId": -2147483182
+            },
+            {
+              "type": "item",
+              "id": "Partial Rearrange Release",
+              "label": "释放",
+              "mnemonic": "R",
+              "commandId": -2147483181
+            },
+            {
+              "type": "item",
+              "id": "Partial Rearrange Edit",
+              "label": "编辑",
+              "mnemonic": "E",
+              "commandId": -2147483180
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "重复",
+          "children": [
+            {
+              "type": "item",
+              "id": "Make Radial Repeat",
+              "label": "径向",
+              "commandId": -2147482927
+            },
+            {
+              "type": "item",
+              "id": "Make Grid Repeat",
+              "label": "网格",
+              "commandId": -2147482926
+            },
+            {
+              "type": "item",
+              "id": "Make Symmetry Repeat",
+              "label": "镜像",
+              "commandId": -2147482925
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Release Repeat Art",
+              "label": "释放",
+              "commandId": -2147482923
+            },
+            {
+              "type": "item",
+              "id": "Repeat Art Options",
+              "label": "选项...",
+              "commandId": -2147482922
+            },
+            {
+              "type": "separator"
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "路径上的对象",
+          "children": [
+            {
+              "type": "item",
+              "id": "Attach Objects on Path",
+              "label": "附加...",
+              "commandId": -2147483163
+            },
+            {
+              "type": "item",
+              "id": "Options Objects on Path",
+              "label": "选项...",
+              "commandId": -2147483162
+            },
+            {
+              "type": "item",
+              "id": "Expand Objects on Path",
+              "label": "展开",
+              "commandId": -2147483161
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "混合",
+          "mnemonic": "B",
+          "children": [
+            {
+              "type": "item",
+              "id": "Path Blend Make",
+              "label": "建立",
+              "mnemonic": "M",
+              "shortcut": "Alt+Ctrl+B",
+              "commandId": -2147483387
+            },
+            {
+              "type": "item",
+              "id": "Path Blend Release",
+              "label": "释放",
+              "mnemonic": "R",
+              "shortcut": "Alt+Shift+Ctrl+B",
+              "commandId": -2147483386
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Path Blend Options",
+              "label": "混合选项...",
+              "mnemonic": "O",
+              "commandId": -2147483384
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Path Blend Expand",
+              "label": "扩展",
+              "mnemonic": "E",
+              "commandId": -2147483382
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Path Blend Replace Spine",
+              "label": "替换混合轴",
+              "mnemonic": "S",
+              "commandId": -2147483380
+            },
+            {
+              "type": "item",
+              "id": "Path Blend Reverse Spine",
+              "label": "反向混合轴",
+              "mnemonic": "V",
+              "commandId": -2147483379
+            },
+            {
+              "type": "item",
+              "id": "Path Blend Reverse Stack",
+              "label": "反向堆叠",
+              "mnemonic": "F",
+              "commandId": -2147483378
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "封套扭曲",
+          "mnemonic": "V",
+          "children": [
+            {
+              "type": "item",
+              "id": "Make Warp",
+              "label": "用变形建立...",
+              "mnemonic": "W",
+              "shortcut": "Alt+Shift+Ctrl+W",
+              "commandId": -2147482969
+            },
+            {
+              "type": "item",
+              "id": "Create Envelope Grid",
+              "label": "用网格建立...",
+              "mnemonic": "M",
+              "shortcut": "Alt+Ctrl+M",
+              "commandId": -2147482968
+            },
+            {
+              "type": "item",
+              "id": "Make Envelope",
+              "label": "用顶层对象建立",
+              "mnemonic": "T",
+              "shortcut": "Alt+Ctrl+C",
+              "commandId": -2147482967
+            },
+            {
+              "type": "item",
+              "id": "Release Envelope",
+              "label": "释放",
+              "mnemonic": "R",
+              "commandId": -2147482966
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Envelope Options",
+              "label": "封套选项...",
+              "mnemonic": "O",
+              "commandId": -2147482964
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Expand Envelope",
+              "label": "扩展",
+              "mnemonic": "X",
+              "commandId": -2147482962
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Edit Envelope Contents",
+              "label": "编辑内容",
+              "mnemonic": "E",
+              "commandId": -2147482960
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "透视",
+          "mnemonic": "P",
+          "children": [
+            {
+              "type": "item",
+              "id": "Attach to Active Plane",
+              "label": "附加到现用平面",
+              "mnemonic": "A",
+              "commandId": -2147482952
+            },
+            {
+              "type": "item",
+              "id": "Release with Perspective",
+              "label": "通过透视释放",
+              "mnemonic": "R",
+              "commandId": -2147482951
+            },
+            {
+              "type": "item",
+              "id": "Show Object Grid Plane",
+              "label": "移动平面以匹配对象",
+              "mnemonic": "M",
+              "commandId": -2147482950
+            },
+            {
+              "type": "item",
+              "id": "Edit Original Object",
+              "label": "编辑文本",
+              "mnemonic": "E",
+              "commandId": -2147482949
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "实时上色",
+          "mnemonic": "N",
+          "children": [
+            {
+              "type": "item",
+              "id": "Make Planet X",
+              "label": "建立",
+              "mnemonic": "A",
+              "shortcut": "Alt+Ctrl+X",
+              "commandId": -2147483411
+            },
+            {
+              "type": "item",
+              "id": "Marge Planet X",
+              "label": "合并",
+              "mnemonic": "M",
+              "commandId": -2147483410
+            },
+            {
+              "type": "item",
+              "id": "Release Planet X",
+              "label": "释放",
+              "mnemonic": "R",
+              "commandId": -2147483409
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Planet X Options",
+              "label": "间隙选项...",
+              "mnemonic": "G",
+              "commandId": -2147483407
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Expand Planet X",
+              "label": "扩展",
+              "mnemonic": "E",
+              "commandId": -2147483405
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "模型",
+          "children": [
+            {
+              "type": "item",
+              "id": "Make Vector Edge",
+              "label": "预览模型",
+              "mnemonic": "P",
+              "commandId": -2147483356
+            },
+            {
+              "type": "item",
+              "id": "Release Vector Edge",
+              "label": "释放",
+              "mnemonic": "R",
+              "commandId": -2147483355
+            },
+            {
+              "type": "item",
+              "id": "Edit Vector Edge",
+              "label": "编辑",
+              "mnemonic": "E",
+              "commandId": -2147483354
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "图像描摹",
+          "children": [
+            {
+              "type": "item",
+              "id": "Make Image Tracing",
+              "label": "建立",
+              "mnemonic": "M",
+              "commandId": -2147483220
+            },
+            {
+              "type": "item",
+              "id": "Make and Expand Image Tracing",
+              "label": "建立并扩展",
+              "mnemonic": "K",
+              "commandId": -2147483219
+            },
+            {
+              "type": "item",
+              "id": "Release Image Tracing",
+              "label": "释放",
+              "mnemonic": "R",
+              "commandId": -2147483218
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Expand Image Tracing",
+              "label": "扩展",
+              "mnemonic": "E",
+              "commandId": -2147483216
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "文本绕排",
+          "mnemonic": "W",
+          "children": [
+            {
+              "type": "item",
+              "id": "Make Text Wrap",
+              "label": "建立",
+              "commandId": -2147483025
+            },
+            {
+              "type": "item",
+              "id": "Release Text Wrap",
+              "label": "释放",
+              "commandId": -2147483024
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Text Wrap Options...",
+              "label": "文本绕排选项...",
+              "commandId": -2147483022
+            }
+          ]
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "剪切蒙版",
+          "mnemonic": "M",
+          "children": [
+            {
+              "type": "item",
+              "id": "makeMask",
+              "label": "建立",
+              "mnemonic": "M",
+              "shortcut": "Ctrl+7",
+              "commandId": 120
+            },
+            {
+              "type": "item",
+              "id": "releaseMask",
+              "label": "释放",
+              "mnemonic": "R",
+              "shortcut": "Alt+Ctrl+7",
+              "commandId": 121
+            },
+            {
+              "type": "item",
+              "id": "editMask",
+              "label": "编辑内容",
+              "mnemonic": "E",
+              "commandId": 292
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "复合路径",
+          "mnemonic": "O",
+          "children": [
+            {
+              "type": "item",
+              "id": "compoundPath",
+              "label": "建立",
+              "mnemonic": "M",
+              "shortcut": "Ctrl+8",
+              "commandId": 56
+            },
+            {
+              "type": "item",
+              "id": "noCompoundPath",
+              "label": "释放",
+              "mnemonic": "R",
+              "shortcut": "Alt+Shift+Ctrl+8",
+              "commandId": 57
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "画板",
+          "mnemonic": "A",
+          "children": [
+            {
+              "type": "item",
+              "id": "setCropMarks",
+              "label": "转换为画板",
+              "mnemonic": "C",
+              "commandId": 127
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "ReArrange Artboards",
+              "label": "重新排列画板",
+              "mnemonic": "E",
+              "commandId": -2147482996
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Fit Artboard to artwork bounds",
+              "label": "适合图稿边界",
+              "mnemonic": "B",
+              "commandId": -2147482994
+            },
+            {
+              "type": "item",
+              "id": "Switch Orientation",
+              "label": "切换方向",
+              "commandId": -2147482993
+            },
+            {
+              "type": "item",
+              "id": "Fit Artboard to selected Art",
+              "label": "适合选中的图稿",
+              "mnemonic": "S",
+              "commandId": -2147482992
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "图表",
+          "mnemonic": "R",
+          "children": [
+            {
+              "type": "item",
+              "id": "setGraphStyle",
+              "label": "类型...",
+              "mnemonic": "T",
+              "commandId": 74
+            },
+            {
+              "type": "item",
+              "id": "editGraphData",
+              "label": "数据...",
+              "mnemonic": "D",
+              "commandId": 75
+            },
+            {
+              "type": "item",
+              "id": "graphDesigns",
+              "label": "设计...",
+              "mnemonic": "E",
+              "commandId": 77
+            },
+            {
+              "type": "item",
+              "id": "setBarDesign",
+              "label": "柱形图...",
+              "mnemonic": "C",
+              "commandId": 76
+            },
+            {
+              "type": "item",
+              "id": "setIconDesign",
+              "label": "标记...",
+              "mnemonic": "M",
+              "commandId": 78
+            }
+          ]
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "收集以导出",
+          "children": [
+            {
+              "type": "item",
+              "id": null,
+              "label": "作为单个资源",
+              "mnemonic": "S",
+              "commandId": 393
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "作为多个资源",
+              "mnemonic": "M",
+              "commandId": 394
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "submenu",
+      "label": "文字",
+      "children": [
+        {
+          "type": "item",
+          "id": "Browse Typekit Fonts Menu IllustratorUI",
+          "label": "Adobe Fonts 提供更多字体与功能...",
+          "mnemonic": "D",
+          "commandId": -2147483214
+        },
+        {
+          "type": "submenu",
+          "label": "字体",
+          "mnemonic": "F",
+          "omitted_dynamic": "installed_fonts",
+          "children": []
+        },
+        {
+          "type": "submenu",
+          "label": "最近使用的字体",
+          "mnemonic": "R",
+          "omitted_dynamic": "local_recent_fonts",
+          "children": []
+        },
+        {
+          "type": "submenu",
+          "label": "大小",
+          "mnemonic": "Z",
+          "children": [
+            {
+              "type": "item",
+              "id": null,
+              "label": "其它...",
+              "mnemonic": "O",
+              "commandId": 1936292367
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "6 pt",
+              "commandId": 1936292352
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "7 pt",
+              "commandId": 1936292353
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "8 pt",
+              "commandId": 1936292354
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "9 pt",
+              "commandId": 1936292355
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "10 pt",
+              "commandId": 1936292356
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "11 pt",
+              "commandId": 1936292357
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "12 pt",
+              "commandId": 1936292358
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "14 pt",
+              "commandId": 1936292359
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "18 pt",
+              "commandId": 1936292360
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "21 pt",
+              "commandId": 1936292361
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "24 pt",
+              "commandId": 1936292362
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "36 pt",
+              "commandId": 1936292363
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "48 pt",
+              "commandId": 1936292364
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "60 pt",
+              "commandId": 1936292365
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "72 pt",
+              "commandId": 1936292366
+            }
+          ]
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "alternate glyph palette plugin",
+          "label": "字形",
+          "mnemonic": "G",
+          "commandId": -2147482990
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "point-area",
+          "label": "类型转换",
+          "mnemonic": "V",
+          "commandId": 331
+        },
+        {
+          "type": "item",
+          "id": "area-type-options",
+          "label": "区域文字选项...",
+          "mnemonic": "A",
+          "commandId": 34
+        },
+        {
+          "type": "submenu",
+          "label": "路径文字",
+          "mnemonic": "P",
+          "children": [
+            {
+              "type": "item",
+              "id": "Rainbow",
+              "label": "彩虹效果",
+              "commandId": 83
+            },
+            {
+              "type": "item",
+              "id": "Skew",
+              "label": "倾斜效果",
+              "commandId": 116
+            },
+            {
+              "type": "item",
+              "id": "3D ribbon",
+              "label": "3D 带状效果",
+              "commandId": 38
+            },
+            {
+              "type": "item",
+              "id": "Stair Step",
+              "label": "阶梯效果",
+              "commandId": 40
+            },
+            {
+              "type": "item",
+              "id": "Gravity",
+              "label": "重力效果",
+              "commandId": 119
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "typeOnPathOptions",
+              "label": "路径文字选项...",
+              "commandId": 123
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "updateLegacyTOP",
+              "label": "更新旧版路径文字",
+              "commandId": 310
+            }
+          ]
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "复合字体...",
+          "mnemonic": "I",
+          "commandId": -2147483634
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "避头尾法则设置...",
+          "mnemonic": "K",
+          "commandId": -2147482999
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "标点挤压设置...",
+          "mnemonic": "J",
+          "commandId": -2147483627
+        },
+        {
+          "type": "submenu",
+          "label": "串接文本",
+          "mnemonic": "T",
+          "children": [
+            {
+              "type": "item",
+              "id": "threadTextCreate",
+              "label": "创建",
+              "mnemonic": "C",
+              "commandId": 133
+            },
+            {
+              "type": "item",
+              "id": "releaseThreadedTextSelection",
+              "label": "释放所选文字",
+              "mnemonic": "R",
+              "commandId": 157
+            },
+            {
+              "type": "item",
+              "id": "removeThreading",
+              "label": "移去串接文字",
+              "mnemonic": "M",
+              "commandId": 158
+            }
+          ]
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "fitHeadline",
+          "label": "适合标题",
+          "mnemonic": "H",
+          "commandId": 87
+        },
+        {
+          "type": "item",
+          "id": "Adobe IllustratorUI Resolve Missing Font",
+          "label": "解决缺失字体...",
+          "commandId": -2147483213
+        },
+        {
+          "type": "item",
+          "id": "Adobe Illustrator Find Font Menu Item",
+          "label": "查找/替换字体...",
+          "mnemonic": "N",
+          "commandId": -2147483035
+        },
+        {
+          "type": "submenu",
+          "label": "更改大小写",
+          "mnemonic": "C",
+          "children": [
+            {
+              "type": "item",
+              "id": "UpperCase Change Case Item",
+              "label": "大写",
+              "mnemonic": "U",
+              "commandId": -2147483043
+            },
+            {
+              "type": "item",
+              "id": "LowerCase Change Case Item",
+              "label": "小写",
+              "mnemonic": "L",
+              "commandId": -2147483042
+            },
+            {
+              "type": "item",
+              "id": "Title Case Change Case Item",
+              "label": "词首大写",
+              "mnemonic": "T",
+              "commandId": -2147483041
+            },
+            {
+              "type": "item",
+              "id": "Sentence case Change Case Item",
+              "label": "句首大写",
+              "mnemonic": "S",
+              "commandId": -2147483040
+            }
+          ]
+        },
+        {
+          "type": "item",
+          "id": "Adobe Illustrator Smart Punctuation Menu Item",
+          "label": "智能标点...",
+          "mnemonic": "U",
+          "commandId": -2147483038
+        },
+        {
+          "type": "item",
+          "id": "outline",
+          "label": "创建轮廓",
+          "mnemonic": "O",
+          "shortcut": "Shift+Ctrl+O",
+          "commandId": 62
+        },
+        {
+          "type": "item",
+          "id": "Adobe Optical Alignment Item",
+          "label": "视觉边距对齐方式",
+          "mnemonic": "M",
+          "commandId": -2147483039
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "Retype",
+          "commandId": 456
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "项目符号和编号",
+          "children": [
+            {
+              "type": "item",
+              "id": null,
+              "label": "应用项目符号",
+              "commandId": 440
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "应用编号",
+              "commandId": 441
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "convert list style to text",
+              "label": "转换为文本",
+              "commandId": 448
+            }
+          ]
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "插入特殊字符",
+          "mnemonic": "I",
+          "children": [
+            {
+              "type": "submenu",
+              "label": "符号",
+              "mnemonic": "S",
+              "children": [
+                {
+                  "type": "item",
+                  "id": "~bullet",
+                  "label": "项目符号",
+                  "mnemonic": "B",
+                  "shortcut": "Alt+8",
+                  "commandId": 368
+                },
+                {
+                  "type": "item",
+                  "id": "~copyright",
+                  "label": "版权符号",
+                  "mnemonic": "C",
+                  "shortcut": "Alt+G",
+                  "commandId": 369
+                },
+                {
+                  "type": "item",
+                  "id": "~ellipsis",
+                  "label": "省略号",
+                  "mnemonic": "E",
+                  "shortcut": "Alt+;",
+                  "commandId": 370
+                },
+                {
+                  "type": "item",
+                  "id": "~paragraphSymbol",
+                  "label": "段落符号",
+                  "mnemonic": "P",
+                  "shortcut": "Alt+7",
+                  "commandId": 371
+                },
+                {
+                  "type": "item",
+                  "id": "~registeredTrademark",
+                  "label": "注册商标符号",
+                  "mnemonic": "R",
+                  "shortcut": "Alt+R",
+                  "commandId": 372
+                },
+                {
+                  "type": "item",
+                  "id": "~sectionSymbol",
+                  "label": "分节符",
+                  "mnemonic": "S",
+                  "shortcut": "Alt+6",
+                  "commandId": 373
+                },
+                {
+                  "type": "item",
+                  "id": "~trademarkSymbol",
+                  "label": "商标符号",
+                  "mnemonic": "T",
+                  "shortcut": "Alt+2",
+                  "commandId": 374
+                }
+              ]
+            },
+            {
+              "type": "submenu",
+              "label": "连字符和破折号",
+              "mnemonic": "H",
+              "children": [
+                {
+                  "type": "item",
+                  "id": "~emDash",
+                  "label": "全角破折号",
+                  "mnemonic": "M",
+                  "shortcut": "Alt+Shift+-",
+                  "commandId": 379
+                },
+                {
+                  "type": "item",
+                  "id": "~enDash",
+                  "label": "半角破折号",
+                  "mnemonic": "N",
+                  "shortcut": "Alt+-",
+                  "commandId": 380
+                },
+                {
+                  "type": "separator"
+                },
+                {
+                  "type": "item",
+                  "id": "~discretionaryHyphen",
+                  "label": "自由连字符",
+                  "mnemonic": "D",
+                  "shortcut": "Shift+Ctrl+-",
+                  "commandId": 381
+                }
+              ]
+            },
+            {
+              "type": "submenu",
+              "label": "引号",
+              "mnemonic": "Q",
+              "children": [
+                {
+                  "type": "item",
+                  "id": "~doubleLeftQuote",
+                  "label": "左双引号",
+                  "mnemonic": "D",
+                  "shortcut": "Alt+[",
+                  "commandId": 375
+                },
+                {
+                  "type": "item",
+                  "id": "~doubleRightQuote",
+                  "label": "右双引号",
+                  "mnemonic": "R",
+                  "shortcut": "Alt+Shift+[",
+                  "commandId": 376
+                },
+                {
+                  "type": "item",
+                  "id": "~singleLeftQuote",
+                  "label": "左单引号",
+                  "mnemonic": "S",
+                  "shortcut": "Alt+]",
+                  "commandId": 377
+                },
+                {
+                  "type": "item",
+                  "id": "~singleRightQuote",
+                  "label": "右单引号",
+                  "mnemonic": "Q",
+                  "shortcut": "Alt+Shift+]",
+                  "commandId": 378
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "插入空白字符",
+          "mnemonic": "W",
+          "children": [
+            {
+              "type": "item",
+              "id": "~emSpace",
+              "label": "全角空格",
+              "mnemonic": "M",
+              "shortcut": "Shift+Ctrl+M",
+              "commandId": 382
+            },
+            {
+              "type": "item",
+              "id": "~enSpace",
+              "label": "半角空格",
+              "mnemonic": "N",
+              "shortcut": "Shift+Ctrl+N",
+              "commandId": 383
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "不间断空格",
+              "commandId": 472
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "~hairSpace",
+              "label": "微间隔",
+              "mnemonic": "H",
+              "commandId": 384
+            },
+            {
+              "type": "item",
+              "id": "~thinSpace",
+              "label": "窄间隔",
+              "mnemonic": "T",
+              "shortcut": "Alt+Shift+Ctrl+M",
+              "commandId": 385
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "插入分隔符",
+          "mnemonic": "B",
+          "children": [
+            {
+              "type": "item",
+              "id": "~forcedLineBreak",
+              "label": "强制换行符",
+              "mnemonic": "L",
+              "commandId": 386
+            }
+          ]
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "用占位符文本填充",
+          "commandId": 391
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "showHiddenChar",
+          "label": "显示隐藏字符",
+          "mnemonic": "S",
+          "shortcut": "Alt+Ctrl+I",
+          "commandId": 115
+        },
+        {
+          "type": "submenu",
+          "label": "文字方向",
+          "mnemonic": "Y",
+          "children": [
+            {
+              "type": "item",
+              "id": "type-horizontal",
+              "label": "水平",
+              "mnemonic": "H",
+              "commandId": 229
+            },
+            {
+              "type": "item",
+              "id": "type-vertical",
+              "label": "垂直",
+              "mnemonic": "V",
+              "commandId": 230
+            }
+          ]
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "旧版文本",
+          "mnemonic": "L",
+          "children": [
+            {
+              "type": "item",
+              "id": "convertlegacyText",
+              "label": "更新所有旧版文本",
+              "commandId": 278
+            },
+            {
+              "type": "item",
+              "id": "convertlegacyText1",
+              "label": "更新所选的旧版文本",
+              "commandId": 279
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "convertlegacyText2",
+              "label": "隐藏副本",
+              "mnemonic": "C",
+              "commandId": 280
+            },
+            {
+              "type": "item",
+              "id": "convertlegacyText3",
+              "label": "删除副本",
+              "commandId": 281
+            },
+            {
+              "type": "item",
+              "id": "convertlegacyText4",
+              "label": "选择副本",
+              "commandId": 282
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "submenu",
+      "label": "选择",
+      "children": [
+        {
+          "type": "item",
+          "id": "selectall",
+          "label": "全部",
+          "mnemonic": "A",
+          "shortcut": "Ctrl+A",
+          "commandId": 1935764588
+        },
+        {
+          "type": "item",
+          "id": "selectallinartboard",
+          "label": "现用画板上的全部对象",
+          "mnemonic": "L",
+          "shortcut": "Alt+Ctrl+A",
+          "commandId": 1934727834
+        },
+        {
+          "type": "item",
+          "id": "deselectall",
+          "label": "取消选择",
+          "mnemonic": "D",
+          "shortcut": "Shift+Ctrl+A",
+          "commandId": 142
+        },
+        {
+          "type": "item",
+          "id": "Find Reselect menu item",
+          "label": "重新选择",
+          "mnemonic": "R",
+          "shortcut": "Ctrl+6",
+          "commandId": -2147483479
+        },
+        {
+          "type": "item",
+          "id": "Inverse menu item",
+          "label": "反向",
+          "mnemonic": "I",
+          "commandId": -2147483017
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "Selection Hat 8",
+          "label": "上方的下一个对象",
+          "mnemonic": "V",
+          "shortcut": "Alt+Ctrl+]",
+          "commandId": -2147483052
+        },
+        {
+          "type": "item",
+          "id": "Selection Hat 9",
+          "label": "下方的下一个对象",
+          "mnemonic": "B",
+          "shortcut": "Alt+Ctrl+[",
+          "commandId": -2147483051
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "相同",
+          "mnemonic": "M",
+          "children": [
+            {
+              "type": "item",
+              "id": null,
+              "label": "形状和文本",
+              "mnemonic": "S",
+              "commandId": -2147483477
+            },
+            {
+              "type": "item",
+              "id": "Find Appearance menu item",
+              "label": "外观",
+              "mnemonic": "A",
+              "commandId": -2147483464
+            },
+            {
+              "type": "item",
+              "id": "Find Appearance Attributes menu item",
+              "label": "外观属性",
+              "mnemonic": "B",
+              "commandId": -2147483463
+            },
+            {
+              "type": "item",
+              "id": "Find Blending Mode menu item",
+              "label": "混合模式",
+              "mnemonic": "B",
+              "commandId": -2147483469
+            },
+            {
+              "type": "item",
+              "id": "Find Fill & Stroke menu item",
+              "label": "填色和描边",
+              "mnemonic": "R",
+              "commandId": -2147483472
+            },
+            {
+              "type": "item",
+              "id": "Find Fill Color menu item",
+              "label": "填充颜色",
+              "mnemonic": "F",
+              "commandId": -2147483474
+            },
+            {
+              "type": "item",
+              "id": "Find Opacity menu item",
+              "label": "不透明度",
+              "mnemonic": "O",
+              "commandId": -2147483468
+            },
+            {
+              "type": "item",
+              "id": "Find Stroke Color menu item",
+              "label": "描边颜色",
+              "mnemonic": "S",
+              "commandId": -2147483471
+            },
+            {
+              "type": "item",
+              "id": "Find Stroke Weight menu item",
+              "label": "描边粗细",
+              "mnemonic": "W",
+              "commandId": -2147483470
+            },
+            {
+              "type": "item",
+              "id": "Find Style menu item",
+              "label": "图形样式",
+              "mnemonic": "T",
+              "commandId": -2147483473
+            },
+            {
+              "type": "item",
+              "id": "Find Live Shape menu item",
+              "label": "形状",
+              "mnemonic": "P",
+              "commandId": -2147483467
+            },
+            {
+              "type": "item",
+              "id": "Find Symbol Instance menu item",
+              "label": "符号实例",
+              "mnemonic": "I",
+              "commandId": -2147483466
+            },
+            {
+              "type": "item",
+              "id": "Find Link Block Series menu item",
+              "label": "链接块系列",
+              "mnemonic": "L",
+              "commandId": -2147483465
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "文本",
+              "mnemonic": "T",
+              "commandId": -2147483476
+            },
+            {
+              "type": "item",
+              "id": "Find Text Font Family menu item",
+              "label": "字体系列",
+              "mnemonic": "N",
+              "commandId": -2147483458
+            },
+            {
+              "type": "item",
+              "id": "Find Text Font Family Style menu item",
+              "label": "字体系列和样式",
+              "mnemonic": "T",
+              "commandId": -2147483457
+            },
+            {
+              "type": "item",
+              "id": "Find Text Font Family Style Size menu item",
+              "label": "字体系列、样式和大小",
+              "mnemonic": "M",
+              "commandId": -2147483456
+            },
+            {
+              "type": "item",
+              "id": "Find Text Font Size menu item",
+              "label": "字体大小",
+              "mnemonic": "Z",
+              "commandId": -2147483459
+            },
+            {
+              "type": "item",
+              "id": "Find Text Fill Color menu item",
+              "label": "文本填充颜色",
+              "mnemonic": "E",
+              "commandId": -2147483462
+            },
+            {
+              "type": "item",
+              "id": "Find Text Stroke Color menu item",
+              "label": "文本描边颜色",
+              "mnemonic": "X",
+              "commandId": -2147483461
+            },
+            {
+              "type": "item",
+              "id": "Find Text Fill Stroke Color menu item",
+              "label": "文本填充和描边颜色",
+              "mnemonic": "K",
+              "commandId": -2147483460
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "对象",
+          "mnemonic": "O",
+          "children": [
+            {
+              "type": "item",
+              "id": "Selection Hat 3",
+              "label": "同一图层上的所有对象",
+              "mnemonic": "A",
+              "commandId": -2147483056
+            },
+            {
+              "type": "item",
+              "id": "Selection Hat 1",
+              "label": "方向手柄",
+              "mnemonic": "D",
+              "commandId": -2147483055
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Bristle Brush Strokes menu item",
+              "label": "毛刷画笔描边",
+              "commandId": -2147483362
+            },
+            {
+              "type": "item",
+              "id": "Brush Strokes menu item",
+              "label": "画笔描边",
+              "mnemonic": "B",
+              "commandId": -2147483539
+            },
+            {
+              "type": "item",
+              "id": "Clipping Masks menu item",
+              "label": "剪切蒙版",
+              "mnemonic": "C",
+              "commandId": -2147483018
+            },
+            {
+              "type": "item",
+              "id": "Stray Points menu item",
+              "label": "游离点",
+              "mnemonic": "S",
+              "commandId": -2147483455
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Text Objects menu item",
+              "label": "所有文本对象",
+              "mnemonic": "A",
+              "commandId": -2147483453
+            },
+            {
+              "type": "item",
+              "id": "Point Text Objects menu item",
+              "label": "点状文字对象",
+              "mnemonic": "P",
+              "commandId": -2147483452
+            },
+            {
+              "type": "item",
+              "id": "Area Text Objects menu item",
+              "label": "区域文字对象",
+              "mnemonic": "A",
+              "commandId": -2147483451
+            }
+          ]
+        },
+        {
+          "type": "item",
+          "id": "SmartEdit Menu Item",
+          "label": "启动全局编辑",
+          "commandId": -2147483029
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "Selection Hat 10",
+          "label": "存储所选对象...",
+          "mnemonic": "S",
+          "commandId": -2147483048
+        },
+        {
+          "type": "item",
+          "id": "Selection Hat 11",
+          "label": "编辑所选对象...",
+          "mnemonic": "E",
+          "commandId": -2147483047
+        },
+        {
+          "type": "item",
+          "id": "Selection Hat 14",
+          "label": "更新选区",
+          "mnemonic": "U",
+          "commandId": -2147483046
+        }
+      ]
+    },
+    {
+      "type": "submenu",
+      "label": "效果",
+      "children": [
+        {
+          "type": "item",
+          "id": "Adobe Apply Last Effect",
+          "label": "应用上一个效果",
+          "shortcut": "Shift+Ctrl+E",
+          "commandId": -2147483641
+        },
+        {
+          "type": "item",
+          "id": "Adobe Last Effect",
+          "label": "上一个效果",
+          "shortcut": "Alt+Shift+Ctrl+E",
+          "commandId": -2147483640
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "Live Rasterize Effect Setting",
+          "label": "文档栅格效果设置...",
+          "mnemonic": "E",
+          "commandId": -2147482982
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "Illustrator 效果",
+          "commandId": -2147483614
+        },
+        {
+          "type": "submenu",
+          "label": "3D 和材质",
+          "mnemonic": "3",
+          "children": [
+            {
+              "type": "item",
+              "id": "Live Adobe Geometry3D Extrude",
+              "label": "凸出和斜角...",
+              "commandId": -2147483373
+            },
+            {
+              "type": "item",
+              "id": "Live Adobe Geometry3D Revolve",
+              "label": "绕转...",
+              "commandId": -2147483372
+            },
+            {
+              "type": "item",
+              "id": "Live Adobe Geometry3D Inflate",
+              "label": "膨胀...",
+              "commandId": -2147483371
+            },
+            {
+              "type": "item",
+              "id": "Live Adobe Geometry3D Rotate",
+              "label": "旋转...",
+              "commandId": -2147483370
+            },
+            {
+              "type": "item",
+              "id": "Live Adobe Geometry3D Materials",
+              "label": "材质...",
+              "commandId": -2147483369
+            },
+            {
+              "type": "submenu",
+              "label": "3D（经典）",
+              "children": [
+                {
+                  "type": "item",
+                  "id": "Live 3DExtrude",
+                  "label": "凸出和斜角（经典）...",
+                  "mnemonic": "E",
+                  "commandId": -2147483366
+                },
+                {
+                  "type": "item",
+                  "id": "Live 3DRevolve",
+                  "label": "绕转（经典）...",
+                  "mnemonic": "R",
+                  "commandId": -2147483365
+                },
+                {
+                  "type": "item",
+                  "id": "Live 3DRotate",
+                  "label": "旋转（经典）...",
+                  "mnemonic": "O",
+                  "commandId": -2147483364
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "SVG 滤镜",
+          "mnemonic": "G",
+          "children": [
+            {
+              "type": "item",
+              "id": "Live SVG Filters",
+              "label": "应用 SVG 滤镜...",
+              "mnemonic": "A",
+              "commandId": -2147483065
+            },
+            {
+              "type": "item",
+              "id": "SVG Filter Import",
+              "label": "导入 SVG 滤镜...",
+              "mnemonic": "I",
+              "commandId": -2147482958
+            },
+            {
+              "type": "separator"
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "变形",
+          "mnemonic": "W",
+          "children": [
+            {
+              "type": "item",
+              "id": "Live Deform Arc",
+              "label": "弧形...",
+              "mnemonic": "A",
+              "commandId": -2147483081
+            },
+            {
+              "type": "item",
+              "id": "Live Deform Arc Lower",
+              "label": "下弧形...",
+              "mnemonic": "L",
+              "commandId": -2147483080
+            },
+            {
+              "type": "item",
+              "id": "Live Deform Arc Upper",
+              "label": "上弧形...",
+              "mnemonic": "U",
+              "commandId": -2147483079
+            },
+            {
+              "type": "item",
+              "id": "Live Deform Arch",
+              "label": "拱形...",
+              "mnemonic": "H",
+              "commandId": -2147483078
+            },
+            {
+              "type": "item",
+              "id": "Live Deform Bulge",
+              "label": "凸出...",
+              "mnemonic": "B",
+              "commandId": -2147483077
+            },
+            {
+              "type": "item",
+              "id": "Live Deform Shell Lower",
+              "label": "凹壳...",
+              "mnemonic": "O",
+              "commandId": -2147483076
+            },
+            {
+              "type": "item",
+              "id": "Live Deform Shell Upper",
+              "label": "凸壳...",
+              "mnemonic": "P",
+              "commandId": -2147483075
+            },
+            {
+              "type": "item",
+              "id": "Live Deform Flag",
+              "label": "旗形...",
+              "mnemonic": "G",
+              "commandId": -2147483074
+            },
+            {
+              "type": "item",
+              "id": "Live Deform Wave",
+              "label": "波形...",
+              "mnemonic": "W",
+              "commandId": -2147483073
+            },
+            {
+              "type": "item",
+              "id": "Live Deform Fish",
+              "label": "鱼形...",
+              "mnemonic": "F",
+              "commandId": -2147483072
+            },
+            {
+              "type": "item",
+              "id": "Live Deform Rise",
+              "label": "上升...",
+              "mnemonic": "R",
+              "commandId": -2147483071
+            },
+            {
+              "type": "item",
+              "id": "Live Deform Fisheye",
+              "label": "鱼眼...",
+              "mnemonic": "Y",
+              "commandId": -2147483070
+            },
+            {
+              "type": "item",
+              "id": "Live Deform Inflate",
+              "label": "膨胀...",
+              "mnemonic": "I",
+              "commandId": -2147483069
+            },
+            {
+              "type": "item",
+              "id": "Live Deform Squeeze",
+              "label": "挤压...",
+              "mnemonic": "S",
+              "commandId": -2147483068
+            },
+            {
+              "type": "item",
+              "id": "Live Deform Twist",
+              "label": "扭转...",
+              "mnemonic": "T",
+              "commandId": -2147483067
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "扭曲和变换",
+          "mnemonic": "D",
+          "children": [
+            {
+              "type": "item",
+              "id": "Live Transform",
+              "label": "变换...",
+              "mnemonic": "T",
+              "commandId": -2147483088
+            },
+            {
+              "type": "item",
+              "id": "Live Scribble and Tweak",
+              "label": "扭拧...",
+              "mnemonic": "K",
+              "commandId": -2147483097
+            },
+            {
+              "type": "item",
+              "id": "Live Twist",
+              "label": "扭转...",
+              "mnemonic": "W",
+              "commandId": -2147483087
+            },
+            {
+              "type": "item",
+              "id": "Live Pucker & Bloat",
+              "label": "收缩和膨胀...",
+              "mnemonic": "P",
+              "commandId": -2147483093
+            },
+            {
+              "type": "item",
+              "id": "Live Zig Zag",
+              "label": "波纹效果...",
+              "mnemonic": "Z",
+              "commandId": -2147483102
+            },
+            {
+              "type": "item",
+              "id": "Live Roughen",
+              "label": "粗糙化...",
+              "mnemonic": "R",
+              "commandId": -2147483094
+            },
+            {
+              "type": "item",
+              "id": "Live Free Distort",
+              "label": "自由扭曲...",
+              "mnemonic": "F",
+              "commandId": -2147483089
+            }
+          ]
+        },
+        {
+          "type": "item",
+          "id": "Live Rasterize",
+          "label": "栅格化...",
+          "mnemonic": "R",
+          "commandId": -2147483085
+        },
+        {
+          "type": "item",
+          "id": "Live Trim Marks",
+          "label": "裁剪标记",
+          "mnemonic": "O",
+          "commandId": -2147483612
+        },
+        {
+          "type": "submenu",
+          "label": "路径",
+          "mnemonic": "P",
+          "children": [
+            {
+              "type": "item",
+              "id": "Live Offset Path",
+              "label": "偏移路径...",
+              "mnemonic": "P",
+              "commandId": -2147483063
+            },
+            {
+              "type": "item",
+              "id": "Live Outline Object",
+              "label": "轮廓化对象",
+              "mnemonic": "O",
+              "commandId": -2147483159
+            },
+            {
+              "type": "item",
+              "id": "Live Outline Stroke",
+              "label": "轮廓化描边",
+              "mnemonic": "S",
+              "commandId": -2147483064
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "路径查找器",
+          "mnemonic": "F",
+          "children": [
+            {
+              "type": "item",
+              "id": "Live Pathfinder Add",
+              "label": "相加",
+              "mnemonic": "A",
+              "commandId": -2147483427
+            },
+            {
+              "type": "item",
+              "id": "Live Pathfinder Intersect",
+              "label": "交集",
+              "mnemonic": "I",
+              "commandId": -2147483426
+            },
+            {
+              "type": "item",
+              "id": "Live Pathfinder Exclude",
+              "label": "差集",
+              "mnemonic": "E",
+              "commandId": -2147483425
+            },
+            {
+              "type": "item",
+              "id": "Live Pathfinder Subtract",
+              "label": "相减",
+              "mnemonic": "U",
+              "commandId": -2147483424
+            },
+            {
+              "type": "item",
+              "id": "Live Pathfinder Minus Back",
+              "label": "减去后方对象",
+              "mnemonic": "B",
+              "commandId": -2147483423
+            },
+            {
+              "type": "item",
+              "id": "Live Pathfinder Divide",
+              "label": "分割",
+              "mnemonic": "D",
+              "commandId": -2147483422
+            },
+            {
+              "type": "item",
+              "id": "Live Pathfinder Trim",
+              "label": "修边",
+              "mnemonic": "T",
+              "commandId": -2147483421
+            },
+            {
+              "type": "item",
+              "id": "Live Pathfinder Merge",
+              "label": "合并",
+              "mnemonic": "M",
+              "commandId": -2147483420
+            },
+            {
+              "type": "item",
+              "id": "Live Pathfinder Crop",
+              "label": "裁剪",
+              "mnemonic": "C",
+              "commandId": -2147483419
+            },
+            {
+              "type": "item",
+              "id": "Live Pathfinder Outline",
+              "label": "轮廓",
+              "mnemonic": "O",
+              "commandId": -2147483418
+            },
+            {
+              "type": "item",
+              "id": "Live Pathfinder Hard Mix",
+              "label": "实色混合",
+              "mnemonic": "H",
+              "commandId": -2147483417
+            },
+            {
+              "type": "item",
+              "id": "Live Pathfinder Soft Mix",
+              "label": "透明混合...",
+              "mnemonic": "S",
+              "commandId": -2147483416
+            },
+            {
+              "type": "item",
+              "id": "Live Pathfinder Trap",
+              "label": "陷印...",
+              "mnemonic": "P",
+              "commandId": -2147483415
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "转换为形状",
+          "mnemonic": "V",
+          "children": [
+            {
+              "type": "item",
+              "id": "Live Rectangle",
+              "label": "矩形...",
+              "mnemonic": "R",
+              "commandId": -2147483100
+            },
+            {
+              "type": "item",
+              "id": "Live Rounded Rectangle",
+              "label": "圆角矩形...",
+              "mnemonic": "D",
+              "commandId": -2147483099
+            },
+            {
+              "type": "item",
+              "id": "Live Ellipse",
+              "label": "椭圆...",
+              "mnemonic": "E",
+              "commandId": -2147483098
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "风格化",
+          "mnemonic": "S",
+          "children": [
+            {
+              "type": "item",
+              "id": "Live Inner Glow",
+              "label": "内发光...",
+              "mnemonic": "I",
+              "commandId": -2147483090
+            },
+            {
+              "type": "item",
+              "id": "Live Adobe Round Corners",
+              "label": "圆角...",
+              "mnemonic": "R",
+              "commandId": -2147483095
+            },
+            {
+              "type": "item",
+              "id": "Live Outer Glow",
+              "label": "外发光...",
+              "mnemonic": "O",
+              "commandId": -2147483091
+            },
+            {
+              "type": "item",
+              "id": "Live Adobe Drop Shadow",
+              "label": "投影...",
+              "mnemonic": "D",
+              "commandId": -2147483092
+            },
+            {
+              "type": "item",
+              "id": "Live Scribble Fill",
+              "label": "涂抹...",
+              "mnemonic": "B",
+              "commandId": -2147483086
+            },
+            {
+              "type": "item",
+              "id": "Live Feather",
+              "label": "羽化...",
+              "mnemonic": "F",
+              "commandId": -2147483083
+            }
+          ]
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "Photoshop 效果",
+          "commandId": -2147483626
+        },
+        {
+          "type": "item",
+          "id": "Live PSAdapter_plugin_GEfc",
+          "label": "效果画廊...",
+          "commandId": -2147483104
+        },
+        {
+          "type": "submenu",
+          "label": "像素化",
+          "children": [
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_ClrH",
+              "label": "彩色半调...",
+              "commandId": -2147483615
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Crst",
+              "label": "晶格化...",
+              "commandId": -2147483616
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Pntl",
+              "label": "点状化...",
+              "commandId": -2147483620
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Mztn",
+              "label": "铜版雕刻...",
+              "commandId": -2147483619
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "扭曲",
+          "children": [
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_DfsG",
+              "label": "扩散亮光...",
+              "commandId": -2147483117
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_OcnR",
+              "label": "海洋波纹...",
+              "commandId": -2147483131
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Gls ",
+              "label": "玻璃...",
+              "commandId": -2147483121
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "模糊",
+          "children": [
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_RdlB",
+              "label": "径向模糊...",
+              "commandId": -2147483622
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_SmrB",
+              "label": "特殊模糊...",
+              "commandId": -2147483623
+            },
+            {
+              "type": "item",
+              "id": "Live Adobe PSL Gaussian Blur",
+              "label": "高斯模糊...",
+              "commandId": -2147483084
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "画笔描边",
+          "children": [
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Spt ",
+              "label": "喷溅...",
+              "commandId": -2147483143
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_SprS",
+              "label": "喷色描边...",
+              "commandId": -2147483145
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_InkO",
+              "label": "墨水轮廓...",
+              "commandId": -2147483127
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_AccE",
+              "label": "强化的边缘...",
+              "commandId": -2147483105
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_AngS",
+              "label": "成角的线条...",
+              "commandId": -2147483106
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_DrkS",
+              "label": "深色线条...",
+              "commandId": -2147483116
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Smie",
+              "label": "烟灰墨...",
+              "commandId": -2147483148
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Crsh",
+              "label": "阴影线...",
+              "commandId": -2147483114
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "素描",
+          "children": [
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_NtPr",
+              "label": "便条纸...",
+              "commandId": -2147483130
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_HlfS",
+              "label": "半调图案...",
+              "commandId": -2147483126
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Stmp",
+              "label": "图章...",
+              "commandId": -2147483147
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_BsRl",
+              "label": "基底凸现...",
+              "commandId": -2147483107
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Phtc",
+              "label": "影印...",
+              "commandId": -2147483136
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_TrnE",
+              "label": "撕边...",
+              "commandId": -2147483152
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_WtrP",
+              "label": "水彩画纸...",
+              "commandId": -2147483156
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Chrc",
+              "label": "炭笔...",
+              "commandId": -2147483109
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_CntC",
+              "label": "炭精笔...",
+              "commandId": -2147483112
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Plst",
+              "label": "石膏效果...",
+              "commandId": -2147483137
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_ChlC",
+              "label": "粉笔和炭笔...",
+              "commandId": -2147483108
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_GraP",
+              "label": "绘图笔...",
+              "commandId": -2147483125
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Rtcl",
+              "label": "网状...",
+              "commandId": -2147483140
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Chrm",
+              "label": "铬黄...",
+              "commandId": -2147483110
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "纹理",
+          "children": [
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Ptch",
+              "label": "拼缀图...",
+              "commandId": -2147483135
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_StnG",
+              "label": "染色玻璃...",
+              "commandId": -2147483146
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Txtz",
+              "label": "纹理化...",
+              "commandId": -2147483150
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Grn ",
+              "label": "颗粒...",
+              "commandId": -2147483124
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_MscT",
+              "label": "马赛克拼贴...",
+              "commandId": -2147483128
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Crql",
+              "label": "龟裂缝...",
+              "commandId": -2147483113
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "艺术效果",
+          "children": [
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_PlsW",
+              "label": "塑料包装...",
+              "commandId": -2147483138
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Frsc",
+              "label": "壁画...",
+              "commandId": -2147483120
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_DryB",
+              "label": "干画笔...",
+              "commandId": -2147483118
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Undr",
+              "label": "底纹效果...",
+              "commandId": -2147483153
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_ClrP",
+              "label": "彩色铅笔...",
+              "commandId": -2147483111
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Ct  ",
+              "label": "木刻...",
+              "commandId": -2147483115
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Wtrc",
+              "label": "水彩...",
+              "commandId": -2147483154
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_PstE",
+              "label": "海报边缘...",
+              "commandId": -2147483139
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Spng",
+              "label": "海绵...",
+              "commandId": -2147483144
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_SmdS",
+              "label": "涂抹棒...",
+              "commandId": -2147483142
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_RghP",
+              "label": "粗糙蜡笔...",
+              "commandId": -2147483141
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_PntD",
+              "label": "绘画涂抹...",
+              "commandId": -2147483133
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_FlmG",
+              "label": "胶片颗粒...",
+              "commandId": -2147483119
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_PltK",
+              "label": "调色刀...",
+              "commandId": -2147483134
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_NGlw",
+              "label": "霓虹灯光...",
+              "commandId": -2147483129
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "视频",
+          "children": [
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_NTSC",
+              "label": "NTSC 颜色",
+              "commandId": -2147483158
+            },
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_Dntr",
+              "label": "逐行...",
+              "commandId": -2147483617
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "风格化",
+          "children": [
+            {
+              "type": "item",
+              "id": "Live PSAdapter_plugin_GlwE",
+              "label": "照亮边缘...",
+              "commandId": -2147483122
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "submenu",
+      "label": "视图",
+      "children": [
+        {
+          "type": "item",
+          "id": "OpenGLCompositorPreview",
+          "label": "使用 GPU 查看",
+          "mnemonic": "V",
+          "shortcut": "Ctrl+E",
+          "commandId": 347
+        },
+        {
+          "type": "item",
+          "id": "preview",
+          "label": "预览",
+          "mnemonic": "P",
+          "shortcut": "Ctrl+Y",
+          "commandId": 30
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "ink",
+          "label": "叠印预览",
+          "mnemonic": "V",
+          "shortcut": "Alt+Shift+Ctrl+Y",
+          "commandId": 143
+        },
+        {
+          "type": "item",
+          "id": "raster",
+          "label": "像素预览",
+          "mnemonic": "X",
+          "shortcut": "Alt+Ctrl+Y",
+          "commandId": 33
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "裁切视图",
+          "mnemonic": "M",
+          "commandId": 396
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "显示文稿模式",
+          "mnemonic": "S",
+          "commandId": 397
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "屏幕模式",
+          "children": [
+            {
+              "type": "item",
+              "id": null,
+              "label": "正常屏幕模式",
+              "commandId": 404
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "带有菜单栏的全屏模式",
+              "commandId": 405
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "全屏模式",
+              "commandId": 406
+            }
+          ]
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "校样设置",
+          "mnemonic": "F",
+          "children": [
+            {
+              "type": "item",
+              "id": "proof-document",
+              "label": "文档 CMYK(D):",
+              "commandId": 225
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "proof-mac-rgb",
+              "label": "旧版 Macintosh RGB（灰度系数 1.8）",
+              "mnemonic": "L",
+              "commandId": 226
+            },
+            {
+              "type": "item",
+              "id": "proof-win-rgb",
+              "label": "Internet 标准 RGB (sRGB)",
+              "mnemonic": "I",
+              "commandId": 227
+            },
+            {
+              "type": "item",
+              "id": "proof-monitor-rgb",
+              "label": "显示器 RGB",
+              "mnemonic": "R",
+              "commandId": 228
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "proof-colorblindp",
+              "label": "色盲 - 红色色盲类型",
+              "commandId": 296
+            },
+            {
+              "type": "item",
+              "id": "proof-colorblindd",
+              "label": "色盲 - 绿色色盲类型",
+              "commandId": 297
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "proof-custom",
+              "label": "自定...",
+              "mnemonic": "C",
+              "commandId": 284
+            }
+          ]
+        },
+        {
+          "type": "item",
+          "id": "proofColors",
+          "label": "校样颜色",
+          "mnemonic": "C",
+          "commandId": 202
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "zoomin",
+          "label": "放大",
+          "mnemonic": "Z",
+          "shortcut": "Ctrl++",
+          "commandId": 135
+        },
+        {
+          "type": "item",
+          "id": "zoomout",
+          "label": "缩小",
+          "mnemonic": "M",
+          "shortcut": "Ctrl+-",
+          "commandId": 136
+        },
+        {
+          "type": "item",
+          "id": "fitin",
+          "label": "画板适合窗口大小",
+          "mnemonic": "W",
+          "shortcut": "Ctrl+0",
+          "commandId": 35
+        },
+        {
+          "type": "item",
+          "id": "fitall",
+          "label": "全部适合窗口大小",
+          "mnemonic": "L",
+          "shortcut": "Alt+Ctrl+0",
+          "commandId": 311
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "旋转视图",
+          "children": [
+            {
+              "type": "item",
+              "id": null,
+              "label": "180",
+              "commandId": 417
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "150",
+              "commandId": 418
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "135",
+              "commandId": 419
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "120",
+              "commandId": 420
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "90",
+              "commandId": 421
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "60",
+              "commandId": 422
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "45",
+              "commandId": 423
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "30",
+              "commandId": 424
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "15",
+              "commandId": 425
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "0",
+              "commandId": 426
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "-15",
+              "commandId": 427
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "-30",
+              "commandId": 428
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "-45",
+              "commandId": 429
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "-60",
+              "commandId": 430
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "-90",
+              "commandId": 431
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "-120",
+              "commandId": 432
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "-135",
+              "commandId": 433
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "-150",
+              "commandId": 434
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "-180",
+              "commandId": 435
+            }
+          ]
+        },
+        {
+          "type": "item",
+          "id": "resetRotationView",
+          "label": "重置旋转视图",
+          "shortcut": "Shift+Ctrl+1",
+          "commandId": 436
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "针对所选对象旋转视图",
+          "commandId": 415
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "AISlice Feedback Menu",
+          "label": "显示切片",
+          "mnemonic": "S",
+          "commandId": -2147483446
+        },
+        {
+          "type": "item",
+          "id": "AISlice Lock Menu",
+          "label": "锁定切片",
+          "mnemonic": "K",
+          "commandId": -2147483445
+        },
+        {
+          "type": "item",
+          "id": "AI Bounding Box Toggle",
+          "label": "隐藏定界框",
+          "mnemonic": "J",
+          "shortcut": "Shift+Ctrl+B",
+          "commandId": -2147483358
+        },
+        {
+          "type": "item",
+          "id": "TransparencyGrid Menu Item",
+          "label": "显示透明度网格",
+          "mnemonic": "Y",
+          "shortcut": "Shift+Ctrl+D",
+          "commandId": -2147483389
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "actualsize",
+          "label": "实际大小",
+          "mnemonic": "E",
+          "shortcut": "Ctrl+1",
+          "commandId": 63
+        },
+        {
+          "type": "item",
+          "id": "Show Gaps Planet X",
+          "label": "显示实时上色间隙",
+          "commandId": -2147483414
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "Gradient Feedback",
+          "label": "隐藏渐变批注者",
+          "shortcut": "Alt+Ctrl+G",
+          "commandId": -2147483400
+        },
+        {
+          "type": "item",
+          "id": "Live Corner Annotator",
+          "label": "隐藏边角构件",
+          "mnemonic": "W",
+          "commandId": -2147482919
+        },
+        {
+          "type": "item",
+          "id": "edge",
+          "label": "显示边缘",
+          "mnemonic": "D",
+          "shortcut": "Ctrl+H",
+          "commandId": 147
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "透视网格",
+          "mnemonic": "P",
+          "children": [
+            {
+              "type": "item",
+              "id": "Show Perspective Grid",
+              "label": "显示网格",
+              "mnemonic": "G",
+              "shortcut": "Shift+Ctrl+I",
+              "commandId": -2147482945
+            },
+            {
+              "type": "item",
+              "id": "Show Ruler",
+              "label": "显示标尺",
+              "mnemonic": "R",
+              "commandId": -2147482944
+            },
+            {
+              "type": "item",
+              "id": "Snap to Grid",
+              "label": "对齐网格",
+              "mnemonic": "N",
+              "commandId": -2147482943
+            },
+            {
+              "type": "item",
+              "id": "Lock Perspective Grid",
+              "label": "锁定网格",
+              "mnemonic": "K",
+              "commandId": -2147482942
+            },
+            {
+              "type": "item",
+              "id": "Lock Station Point",
+              "label": "锁定站点",
+              "mnemonic": "S",
+              "commandId": -2147482941
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Define Perspective Grid",
+              "label": "定义网格...",
+              "mnemonic": "D",
+              "commandId": -2147482939
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "submenu",
+              "label": "一点透视",
+              "mnemonic": "O",
+              "children": [
+                {
+                  "type": "item",
+                  "id": "XOnePointX[1P-Normal View]",
+                  "label": "[一点-正常视图]",
+                  "commandId": -2147482901
+                }
+              ]
+            },
+            {
+              "type": "submenu",
+              "label": "两点透视",
+              "mnemonic": "T",
+              "children": [
+                {
+                  "type": "item",
+                  "id": "XTwoPointX[2P-Normal View]",
+                  "label": "[两点-正常视图]",
+                  "commandId": -2147482900
+                }
+              ]
+            },
+            {
+              "type": "submenu",
+              "label": "三点透视",
+              "mnemonic": "H",
+              "children": [
+                {
+                  "type": "item",
+                  "id": "XThreePointX[3P-Normal View]",
+                  "label": "[三点-正常视图]",
+                  "commandId": -2147482899
+                }
+              ]
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Save Perspective Grid as Preset",
+              "label": "将网格存储为预设...",
+              "mnemonic": "P",
+              "commandId": -2147482933
+            }
+          ]
+        },
+        {
+          "type": "item",
+          "id": "artboard",
+          "label": "显示画板",
+          "mnemonic": "B",
+          "shortcut": "Shift+Ctrl+H",
+          "commandId": 86
+        },
+        {
+          "type": "item",
+          "id": "pagetiling",
+          "label": "显示打印拼贴",
+          "mnemonic": "T",
+          "commandId": 85
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "showtemplate",
+          "label": "显示模板",
+          "mnemonic": "L",
+          "shortcut": "Shift+Ctrl+W",
+          "commandId": 114
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "标尺",
+          "mnemonic": "R",
+          "children": [
+            {
+              "type": "item",
+              "id": "ruler",
+              "label": "显示标尺",
+              "mnemonic": "S",
+              "shortcut": "Ctrl+R",
+              "commandId": 37
+            },
+            {
+              "type": "item",
+              "id": "rulerCoordinateSystem",
+              "label": "更改为全局标尺",
+              "mnemonic": "C",
+              "shortcut": "Alt+Ctrl+R",
+              "commandId": 1383427079
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "videoruler",
+              "label": "显示视频标尺",
+              "mnemonic": "V",
+              "commandId": 299
+            }
+          ]
+        },
+        {
+          "type": "item",
+          "id": "textthreads",
+          "label": "显示文本串接",
+          "mnemonic": "H",
+          "shortcut": "Shift+Ctrl+Y",
+          "commandId": 150
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "参考线",
+          "mnemonic": "U",
+          "children": [
+            {
+              "type": "item",
+              "id": "showguide",
+              "label": "显示参考线",
+              "mnemonic": "U",
+              "shortcut": "Ctrl+;",
+              "commandId": 154
+            },
+            {
+              "type": "item",
+              "id": "lockguide",
+              "label": "锁定参考线",
+              "mnemonic": "K",
+              "shortcut": "Alt+Ctrl+;",
+              "commandId": 155
+            },
+            {
+              "type": "item",
+              "id": "makeguide",
+              "label": "建立参考线",
+              "mnemonic": "M",
+              "shortcut": "Ctrl+5",
+              "commandId": 52
+            },
+            {
+              "type": "item",
+              "id": "releaseguide",
+              "label": "释放参考线",
+              "mnemonic": "L",
+              "shortcut": "Alt+Ctrl+5",
+              "commandId": 53
+            },
+            {
+              "type": "item",
+              "id": "clearguide",
+              "label": "清除参考线",
+              "mnemonic": "C",
+              "commandId": 113
+            }
+          ]
+        },
+        {
+          "type": "item",
+          "id": "showgrid",
+          "label": "显示网格",
+          "mnemonic": "G",
+          "shortcut": "Ctrl+\"",
+          "commandId": 159
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "snapgrid",
+          "label": "对齐网格",
+          "shortcut": "Shift+Ctrl+\"",
+          "commandId": 160
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "对齐像素",
+          "mnemonic": "S",
+          "commandId": 353
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "snappoint",
+          "label": "对齐点",
+          "mnemonic": "N",
+          "shortcut": "Alt+Ctrl+\"",
+          "commandId": 146
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "Snapomatic on-off menu item",
+          "label": "智能参考线",
+          "shortcut": "Ctrl+U",
+          "commandId": -2147483546
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "对齐字形",
+          "commandId": 411
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "newview",
+          "label": "新建视图...",
+          "mnemonic": "I",
+          "commandId": 144
+        },
+        {
+          "type": "item",
+          "id": "editview",
+          "label": "编辑视图...",
+          "commandId": 145
+        }
+      ]
+    },
+    {
+      "type": "submenu",
+      "label": "窗口",
+      "children": [
+        {
+          "type": "item",
+          "id": "newwindow",
+          "label": "新建窗口",
+          "mnemonic": "W",
+          "commandId": 36
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "排列",
+          "mnemonic": "A",
+          "children": [
+            {
+              "type": "item",
+              "id": "cascade",
+              "label": "层叠",
+              "mnemonic": "C",
+              "commandId": 166
+            },
+            {
+              "type": "item",
+              "id": "tile",
+              "label": "平铺",
+              "mnemonic": "T",
+              "commandId": 168
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "floatInWindow",
+              "label": "在窗口中浮动",
+              "mnemonic": "W",
+              "commandId": 301
+            },
+            {
+              "type": "item",
+              "id": "floatAllInWindows",
+              "label": "全部在窗口中浮动",
+              "mnemonic": "A",
+              "commandId": 302
+            },
+            {
+              "type": "item",
+              "id": "consolidateAllWindows",
+              "label": "合并所有窗口",
+              "mnemonic": "O",
+              "commandId": 303
+            }
+          ]
+        },
+        {
+          "type": "item",
+          "id": "Browse Add-Ons Menu",
+          "label": "查找有关 Exchange 的扩展功能...",
+          "commandId": -2147483565
+        },
+        {
+          "type": "submenu",
+          "label": "工作区",
+          "children": [
+            {
+              "type": "item",
+              "id": null,
+              "label": "Web",
+              "commandId": -2147483557
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "上色",
+              "commandId": -2147483556
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "传统基本功能",
+              "commandId": -2147483555
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "基本功能",
+              "commandId": -2147483554
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "快速入门",
+              "commandId": -2147483553
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "打印和校样",
+              "commandId": -2147483552
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "排版规则",
+              "commandId": -2147483551
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "描摹",
+              "commandId": -2147483550
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "版面",
+              "commandId": -2147483549
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "自动",
+              "commandId": -2147483548
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "触摸",
+              "commandId": -2147483562
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Adobe Reset Workspace",
+              "label": "重置",
+              "commandId": -2147483560
+            },
+            {
+              "type": "item",
+              "id": "Adobe New Workspace",
+              "label": "新建工作区...",
+              "commandId": -2147483559
+            },
+            {
+              "type": "item",
+              "id": "Adobe Manage Workspace",
+              "label": "管理工作区...",
+              "commandId": -2147483558
+            }
+          ]
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "扩展功能",
+          "omitted_dynamic": "local_installed_extensions",
+          "children": []
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "上下文任务栏",
+          "mnemonic": "C",
+          "commandId": -2147483223
+        },
+        {
+          "type": "submenu",
+          "label": "工具栏",
+          "children": [
+            {
+              "type": "item",
+              "id": "Adobe Basic Toolbar Menu",
+              "label": "基本",
+              "commandId": -2147483397
+            },
+            {
+              "type": "item",
+              "id": "Adobe Quick Toolbar Menu",
+              "label": "快速入门",
+              "commandId": -2147483395
+            },
+            {
+              "type": "item",
+              "id": "Adobe Advanced Toolbar Menu",
+              "label": "高级",
+              "commandId": -2147483396
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "New Tools Panel",
+              "label": "新建工具栏...",
+              "mnemonic": "N",
+              "commandId": -2147483393
+            },
+            {
+              "type": "item",
+              "id": "Manage Tools Panel",
+              "label": "管理工具栏...",
+              "commandId": -2147483392
+            }
+          ]
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "帮助栏",
+          "mnemonic": "H",
+          "commandId": -2147483547
+        },
+        {
+          "type": "item",
+          "id": "drover control palette plugin",
+          "label": "控制",
+          "mnemonic": "C",
+          "commandId": -2147483224
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "隐藏生成式菜单",
+          "commandId": -2147483391
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "Adobe 3D Panel",
+          "label": "3D 和材质",
+          "commandId": -2147482929
+        },
+        {
+          "type": "item",
+          "id": "CSS Menu Item",
+          "label": "CSS 属性（已弃用）",
+          "commandId": -2147482978
+        },
+        {
+          "type": "item",
+          "id": "ReTypeWindowMenu",
+          "label": "Retype",
+          "commandId": -2147482973
+        },
+        {
+          "type": "item",
+          "id": "Adobe SVG Interactivity Palette",
+          "label": "SVG 交互",
+          "mnemonic": "Y",
+          "commandId": -2147482954
+        },
+        {
+          "type": "item",
+          "id": "internal palettes posing as plug-in menus-info",
+          "label": "信息",
+          "shortcut": "Ctrl+F8",
+          "commandId": -2147483633
+        },
+        {
+          "type": "item",
+          "id": "Adobe Separation Preview Panel",
+          "label": "分色预览",
+          "commandId": -2147483004
+        },
+        {
+          "type": "item",
+          "id": "Adobe Action Palette",
+          "label": "动作",
+          "mnemonic": "N",
+          "commandId": -2147483450
+        },
+        {
+          "type": "item",
+          "id": "Adobe History Panel Menu Item",
+          "label": "历史记录",
+          "commandId": -2147483543
+        },
+        {
+          "type": "item",
+          "id": "AdobeTransformObjects1",
+          "label": "变换",
+          "shortcut": "Shift+F8",
+          "commandId": -2147483201
+        },
+        {
+          "type": "item",
+          "id": "Adobe Variables Palette Menu Item",
+          "label": "变量",
+          "mnemonic": "R",
+          "commandId": -2147482959
+        },
+        {
+          "type": "item",
+          "id": "Adobe Vectorize Panel",
+          "label": "图像描摹",
+          "commandId": -2147483222
+        },
+        {
+          "type": "item",
+          "id": "AdobeLayerPalette1",
+          "label": "图层",
+          "mnemonic": "L",
+          "shortcut": "F7",
+          "commandId": -2147483377
+        },
+        {
+          "type": "item",
+          "id": "Adobe Style Palette",
+          "label": "图形样式",
+          "mnemonic": "S",
+          "shortcut": "Shift+F5",
+          "commandId": -2147483500
+        },
+        {
+          "type": "item",
+          "id": "Adobe Pattern Panel Toggle",
+          "label": "图案选项",
+          "commandId": -2147483349
+        },
+        {
+          "type": "item",
+          "id": "Style Palette",
+          "label": "外观",
+          "mnemonic": "E",
+          "shortcut": "Shift+F6",
+          "commandId": -2147483499
+        },
+        {
+          "type": "item",
+          "id": "AdobeAlignObjects2",
+          "label": "对齐",
+          "shortcut": "Shift+F7",
+          "commandId": -2147483179
+        },
+        {
+          "type": "item",
+          "id": "AdobeNavigator",
+          "label": "导航器",
+          "commandId": -2147482972
+        },
+        {
+          "type": "item",
+          "id": "Adobe Property Palette",
+          "label": "属性",
+          "commandId": -2147483545
+        },
+        {
+          "type": "item",
+          "id": "Adobe CSXS Extension com.adobe.DesignLibraries.angularLibraries",
+          "label": "库",
+          "commandId": -2147483567
+        },
+        {
+          "type": "item",
+          "id": "Adobe Flattening Preview",
+          "label": "拼合器预览",
+          "commandId": -2147482971
+        },
+        {
+          "type": "item",
+          "id": "Adobe Stroke Palette",
+          "label": "描边",
+          "mnemonic": "K",
+          "shortcut": "Ctrl+F10",
+          "commandId": -2147483401
+        },
+        {
+          "type": "submenu",
+          "label": "文字",
+          "children": [
+            {
+              "type": "item",
+              "id": "internal palettes posing as plug-in menus-opentype",
+              "label": "OpenType",
+              "mnemonic": "O",
+              "shortcut": "Alt+Shift+Ctrl+T",
+              "commandId": -2147483628
+            },
+            {
+              "type": "item",
+              "id": "ReflowWindowMenu",
+              "label": "Reflow 查看器",
+              "mnemonic": "R",
+              "commandId": -2147483208
+            },
+            {
+              "type": "item",
+              "id": "internal palettes posing as plug-in menus-tab",
+              "label": "制表符",
+              "mnemonic": "T",
+              "shortcut": "Shift+Ctrl+T",
+              "commandId": -2147483629
+            },
+            {
+              "type": "item",
+              "id": "alternate glyph palette plugin 2",
+              "label": "字形",
+              "mnemonic": "G",
+              "commandId": -2147482989
+            },
+            {
+              "type": "item",
+              "id": "internal palettes posing as plug-in menus-character",
+              "label": "字符",
+              "mnemonic": "C",
+              "shortcut": "Ctrl+T",
+              "commandId": -2147483631
+            },
+            {
+              "type": "item",
+              "id": "Character Styles",
+              "label": "字符样式",
+              "commandId": -2147483541
+            },
+            {
+              "type": "item",
+              "id": "internal palettes posing as plug-in menus-paragraph",
+              "label": "段落",
+              "mnemonic": "P",
+              "shortcut": "Alt+Ctrl+T",
+              "commandId": -2147483630
+            },
+            {
+              "type": "item",
+              "id": "Adobe Paragraph Styles Palette",
+              "label": "段落样式",
+              "commandId": -2147483542
+            }
+          ]
+        },
+        {
+          "type": "item",
+          "id": "DocInfo1",
+          "label": "文档信息",
+          "mnemonic": "M",
+          "commandId": -2147483501
+        },
+        {
+          "type": "item",
+          "id": "Adobe Vector Edge Panel",
+          "label": "模型",
+          "commandId": -2147482930
+        },
+        {
+          "type": "item",
+          "id": "Adobe Commenting Palette",
+          "label": "注释",
+          "commandId": -2147482907
+        },
+        {
+          "type": "item",
+          "id": "Adobe Gradient Palette",
+          "label": "渐变",
+          "shortcut": "Ctrl+F9",
+          "commandId": -2147483402
+        },
+        {
+          "type": "item",
+          "id": "Adobe Version History File Menu Item",
+          "label": "版本历史记录",
+          "commandId": -2147482906
+        },
+        {
+          "type": "item",
+          "id": "internal palettes posing as plug-in menus-attributes",
+          "label": "特性",
+          "shortcut": "Ctrl+F11",
+          "commandId": -2147483215
+        },
+        {
+          "type": "item",
+          "id": "Adobe Artboard Palette",
+          "label": "画板",
+          "commandId": -2147482998
+        },
+        {
+          "type": "item",
+          "id": "Adobe BrushManager Menu Item",
+          "label": "画笔",
+          "mnemonic": "B",
+          "shortcut": "F5",
+          "commandId": -2147483540
+        },
+        {
+          "type": "item",
+          "id": "Adobe Symbol Palette",
+          "label": "符号",
+          "shortcut": "Shift+Ctrl+F11",
+          "commandId": -2147483602
+        },
+        {
+          "type": "item",
+          "id": "Adobe Swatches Menu Item",
+          "label": "色板",
+          "mnemonic": "H",
+          "commandId": -2147483352
+        },
+        {
+          "type": "item",
+          "id": "Adobe SmartExport Panel Menu Item",
+          "label": "资源导出",
+          "commandId": -2147483204
+        },
+        {
+          "type": "item",
+          "id": "AdobePathfinderPalette1",
+          "label": "路径查找器",
+          "mnemonic": "P",
+          "shortcut": "Shift+Ctrl+F9",
+          "commandId": -2147482984
+        },
+        {
+          "type": "item",
+          "id": "Adobe Transparency Palette Menu Item",
+          "label": "透明度",
+          "shortcut": "Shift+Ctrl+F10",
+          "commandId": -2147483390
+        },
+        {
+          "type": "item",
+          "id": "Adobe LinkPalette Menu Item",
+          "label": "链接",
+          "mnemonic": "I",
+          "commandId": -2147483003
+        },
+        {
+          "type": "item",
+          "id": "Adobe Color Palette",
+          "label": "颜色",
+          "shortcut": "F6",
+          "commandId": -2147483404
+        },
+        {
+          "type": "item",
+          "id": "Adobe Harmony Palette",
+          "label": "颜色参考",
+          "shortcut": "Shift+F3",
+          "commandId": -2147483235
+        },
+        {
+          "type": "item",
+          "id": "AI Magic Wand",
+          "label": "魔棒",
+          "commandId": -2147483045
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "submenu",
+          "label": "图形样式库",
+          "children": [
+            {
+              "type": "item",
+              "id": null,
+              "label": "3D 效果",
+              "commandId": -2147483494
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "Vonster 图案样式",
+              "commandId": -2147483493
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "图像效果",
+              "commandId": -2147483492
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "按钮和翻转效果",
+              "commandId": -2147483491
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "文字效果",
+              "commandId": -2147483490
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "斑点画笔的附属品",
+              "commandId": -2147483489
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "涂抹效果",
+              "commandId": -2147483488
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "照亮样式",
+              "commandId": -2147483487
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "纹理",
+              "commandId": -2147483486
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "艺术效果",
+              "commandId": -2147483485
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "附属品",
+              "commandId": -2147483484
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "霓虹效果",
+              "commandId": -2147483483
+            },
+            {
+              "type": "submenu",
+              "label": "用户定义",
+              "omitted_dynamic": "user_defined_library",
+              "children": []
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Adobe Art Style Plugin Other libraries menu item",
+              "label": "其它库...",
+              "mnemonic": "O",
+              "commandId": -2147483480
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "画笔库",
+          "children": [
+            {
+              "type": "submenu",
+              "label": "Wacom 6D 画笔",
+              "children": [
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "6d 艺术钢笔画笔",
+                  "commandId": -2147483536
+                }
+              ]
+            },
+            {
+              "type": "submenu",
+              "label": "图像画笔",
+              "children": [
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "图像画笔库",
+                  "commandId": -2147483534
+                }
+              ]
+            },
+            {
+              "type": "submenu",
+              "label": "毛刷画笔",
+              "children": [
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "毛刷画笔库",
+                  "commandId": -2147483532
+                }
+              ]
+            },
+            {
+              "type": "submenu",
+              "label": "矢量包",
+              "children": [
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "手绘画笔矢量包",
+                  "commandId": -2147483530
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "颓废画笔矢量包",
+                  "commandId": -2147483529
+                }
+              ]
+            },
+            {
+              "type": "submenu",
+              "label": "箭头",
+              "children": [
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "图案箭头",
+                  "commandId": -2147483527
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "箭头_标准",
+                  "commandId": -2147483526
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "箭头_特殊",
+                  "commandId": -2147483525
+                }
+              ]
+            },
+            {
+              "type": "submenu",
+              "label": "艺术效果",
+              "children": [
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "艺术效果_书法",
+                  "commandId": -2147483523
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "艺术效果_卷轴笔",
+                  "commandId": -2147483522
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "艺术效果_水彩",
+                  "commandId": -2147483521
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "艺术效果_油墨",
+                  "commandId": -2147483520
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "艺术效果_画笔",
+                  "commandId": -2147483519
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "艺术效果_粉笔炭笔铅笔",
+                  "commandId": -2147483518
+                }
+              ]
+            },
+            {
+              "type": "submenu",
+              "label": "装饰",
+              "children": [
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "典雅的卷曲和花形画笔组",
+                  "commandId": -2147483516
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "装饰_散布",
+                  "commandId": -2147483515
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "装饰_文本分隔线",
+                  "commandId": -2147483514
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "装饰_横幅和封条",
+                  "commandId": -2147483513
+                }
+              ]
+            },
+            {
+              "type": "submenu",
+              "label": "边框",
+              "children": [
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "边框_几何图形",
+                  "commandId": -2147483511
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "边框_原始",
+                  "commandId": -2147483510
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "边框_新奇",
+                  "commandId": -2147483509
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "边框_框架",
+                  "commandId": -2147483508
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "边框_线条",
+                  "commandId": -2147483507
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "边框_虚线",
+                  "commandId": -2147483506
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "边框_装饰",
+                  "commandId": -2147483505
+                }
+              ]
+            },
+            {
+              "type": "submenu",
+              "label": "用户定义",
+              "omitted_dynamic": "user_defined_library",
+              "children": []
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "AdobeBrushMgrUI Other libraries menu item",
+              "label": "其它库...",
+              "mnemonic": "O",
+              "commandId": -2147483502
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "符号库",
+          "children": [
+            {
+              "type": "item",
+              "id": null,
+              "label": "3D 符号",
+              "commandId": -2147483599
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "Web 按钮和条形",
+              "commandId": -2147483598
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "传家宝",
+              "commandId": -2147483597
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "原始",
+              "commandId": -2147483596
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "图表",
+              "commandId": -2147483595
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "地图",
+              "commandId": -2147483594
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "复古",
+              "commandId": -2147483593
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "寿司",
+              "commandId": -2147483592
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "庆祝",
+              "commandId": -2147483591
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "徽标元素",
+              "commandId": -2147483590
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "提基",
+              "commandId": -2147483589
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "时尚",
+              "commandId": -2147483588
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "毛发和毛皮",
+              "commandId": -2147483587
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "污点矢量包",
+              "commandId": -2147483586
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "点状图案矢量包",
+              "commandId": -2147483585
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "照亮丝带",
+              "commandId": -2147483584
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "照亮流程图",
+              "commandId": -2147483583
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "照亮组织结构图",
+              "commandId": -2147483582
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "疯狂科学",
+              "commandId": -2147483581
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "移动",
+              "commandId": -2147483580
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "箭头",
+              "commandId": -2147483579
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "绚丽矢量包",
+              "commandId": -2147483578
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "网页图标",
+              "commandId": -2147483577
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "自然",
+              "commandId": -2147483576
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "至尊矢量包",
+              "commandId": -2147483575
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "艺术纹理",
+              "commandId": -2147483574
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "花朵",
+              "commandId": -2147483573
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "通讯",
+              "commandId": -2147483572
+            },
+            {
+              "type": "submenu",
+              "label": "用户定义",
+              "omitted_dynamic": "user_defined_library",
+              "children": []
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "Adobe Symbol Palette Plugin Other libraries menu item",
+              "label": "其它库...",
+              "mnemonic": "O",
+              "commandId": -2147483569
+            }
+          ]
+        },
+        {
+          "type": "submenu",
+          "label": "色板库",
+          "children": [
+            {
+              "type": "item",
+              "id": null,
+              "label": "VisiBone2",
+              "commandId": -2147483341
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "Web",
+              "commandId": -2147483340
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "中性",
+              "commandId": -2147483339
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "儿童物品",
+              "commandId": -2147483338
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "公司",
+              "commandId": -2147483337
+            },
+            {
+              "type": "submenu",
+              "label": "图案",
+              "children": [
+                {
+                  "type": "submenu",
+                  "label": "基本图形",
+                  "children": [
+                    {
+                      "type": "item",
+                      "id": null,
+                      "label": "基本图形_点",
+                      "commandId": -2147483334
+                    },
+                    {
+                      "type": "item",
+                      "id": null,
+                      "label": "基本图形_纹理",
+                      "commandId": -2147483333
+                    },
+                    {
+                      "type": "item",
+                      "id": null,
+                      "label": "基本图形_线条",
+                      "commandId": -2147483332
+                    }
+                  ]
+                },
+                {
+                  "type": "submenu",
+                  "label": "自然",
+                  "children": [
+                    {
+                      "type": "item",
+                      "id": null,
+                      "label": "自然_动物皮",
+                      "commandId": -2147483330
+                    },
+                    {
+                      "type": "item",
+                      "id": null,
+                      "label": "自然_叶子",
+                      "commandId": -2147483329
+                    }
+                  ]
+                },
+                {
+                  "type": "submenu",
+                  "label": "装饰",
+                  "children": [
+                    {
+                      "type": "item",
+                      "id": null,
+                      "label": "Vonster 图案",
+                      "commandId": -2147483327
+                    },
+                    {
+                      "type": "item",
+                      "id": null,
+                      "label": "装饰旧版",
+                      "commandId": -2147483326
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "大地色调",
+              "commandId": -2147483325
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "庆祝",
+              "commandId": -2147483324
+            },
+            {
+              "type": "submenu",
+              "label": "渐变",
+              "children": [
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "中性色",
+                  "commandId": -2147483322
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "叶子",
+                  "commandId": -2147483321
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "大地色调",
+                  "commandId": -2147483320
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "天空",
+                  "commandId": -2147483319
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "季节",
+                  "commandId": -2147483318
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "明亮",
+                  "commandId": -2147483317
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "晕影",
+                  "commandId": -2147483316
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "木质",
+                  "commandId": -2147483315
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "水",
+                  "commandId": -2147483314
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "水果和蔬菜",
+                  "commandId": -2147483313
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "淡色和暗色",
+                  "commandId": -2147483312
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "渐隐",
+                  "commandId": -2147483311
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "玉石和珠宝",
+                  "commandId": -2147483310
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "石头和砖块",
+                  "commandId": -2147483309
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "简单径向",
+                  "commandId": -2147483308
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "肤色",
+                  "commandId": -2147483307
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "色彩调和",
+                  "commandId": -2147483306
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "色谱",
+                  "commandId": -2147483305
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "蜡笔",
+                  "commandId": -2147483304
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "金属",
+                  "commandId": -2147483303
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "颜色组合",
+                  "commandId": -2147483302
+                }
+              ]
+            },
+            {
+              "type": "submenu",
+              "label": "科学",
+              "children": [
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "三色组合",
+                  "commandId": -2147483300
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "互补色",
+                  "commandId": -2147483299
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "分裂互补色",
+                  "commandId": -2147483298
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "四色组合",
+                  "commandId": -2147483297
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "近似色",
+                  "commandId": -2147483296
+                }
+              ]
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "系统 (Macintosh)",
+              "commandId": -2147483295
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "系统 (Windows)",
+              "commandId": -2147483294
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "纺织品",
+              "commandId": -2147483293
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "肤色",
+              "commandId": -2147483292
+            },
+            {
+              "type": "submenu",
+              "label": "自然",
+              "children": [
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "叶子",
+                  "commandId": -2147483290
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "季节",
+                  "commandId": -2147483289
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "海滩",
+                  "commandId": -2147483288
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "石头和砖块",
+                  "commandId": -2147483287
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "花朵",
+                  "commandId": -2147483286
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "风景",
+                  "commandId": -2147483285
+                }
+              ]
+            },
+            {
+              "type": "submenu",
+              "label": "色标簿",
+              "children": [
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "ANPA Color",
+                  "commandId": -2147483283
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "DIC Color Guide",
+                  "commandId": -2147483282
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "FOCOLTONE",
+                  "commandId": -2147483281
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "HKS E",
+                  "commandId": -2147483279
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "HKS E Process",
+                  "commandId": -2147483280
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "HKS K",
+                  "commandId": -2147483277
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "HKS K Process",
+                  "commandId": -2147483278
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "HKS N",
+                  "commandId": -2147483275
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "HKS N Process",
+                  "commandId": -2147483276
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "HKS Z",
+                  "commandId": -2147483273
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "HKS Z Process",
+                  "commandId": -2147483274
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "TOYO 94 COLOR FINDER",
+                  "commandId": -2147483272
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "TOYO Color Finder",
+                  "commandId": -2147483271
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "TRUMATCH",
+                  "commandId": -2147483270
+                }
+              ]
+            },
+            {
+              "type": "submenu",
+              "label": "艺术史",
+              "children": [
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "中世纪风格",
+                  "commandId": -2147483268
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "俄国海报艺术风格",
+                  "commandId": -2147483267
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "印象派风格",
+                  "commandId": -2147483266
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "史前风格",
+                  "commandId": -2147483265
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "巴洛克风格",
+                  "commandId": -2147483264
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "文艺复兴风格",
+                  "commandId": -2147483263
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "流行艺术风格",
+                  "commandId": -2147483262
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "远古风格",
+                  "commandId": -2147483261
+                }
+              ]
+            },
+            {
+              "type": "item",
+              "id": null,
+              "label": "金属",
+              "commandId": -2147483260
+            },
+            {
+              "type": "submenu",
+              "label": "颜色属性",
+              "children": [
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "不饱和色",
+                  "commandId": -2147483258
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "亮色",
+                  "commandId": -2147483257
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "冷色",
+                  "commandId": -2147483256
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "暖色",
+                  "commandId": -2147483255
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "暗色",
+                  "commandId": -2147483254
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "柔和色",
+                  "commandId": -2147483253
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "浅色",
+                  "commandId": -2147483252
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "饱和色",
+                  "commandId": -2147483251
+                }
+              ]
+            },
+            {
+              "type": "submenu",
+              "label": "食品",
+              "children": [
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "冰淇淋",
+                  "commandId": -2147483249
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "水果",
+                  "commandId": -2147483248
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "甜品",
+                  "commandId": -2147483247
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "蔬菜",
+                  "commandId": -2147483246
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "饮料",
+                  "commandId": -2147483245
+                }
+              ]
+            },
+            {
+              "type": "submenu",
+              "label": "默认色板",
+              "children": [
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "Web",
+                  "commandId": -2147483243
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "基本 RGB",
+                  "commandId": -2147483242
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "打印",
+                  "commandId": -2147483241
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "视频和胶片",
+                  "commandId": -2147483240
+                },
+                {
+                  "type": "item",
+                  "id": null,
+                  "label": "设备",
+                  "commandId": -2147483239
+                }
+              ]
+            },
+            {
+              "type": "submenu",
+              "label": "用户定义",
+              "omitted_dynamic": "user_defined_library",
+              "children": []
+            },
+            {
+              "type": "separator"
+            },
+            {
+              "type": "item",
+              "id": "AdobeSwatch_ Other libraries menu item",
+              "label": "其它库...",
+              "mnemonic": "O",
+              "commandId": -2147483236
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "submenu",
+      "label": "帮助",
+      "children": [
+        {
+          "type": "item",
+          "id": "helpcontent",
+          "label": "Illustrator 帮助...",
+          "mnemonic": "H",
+          "shortcut": "F1",
+          "commandId": 1634233456
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "教程...",
+          "commandId": 204
+        },
+        {
+          "type": "item",
+          "id": "whatsNewContent",
+          "label": "新增功能...",
+          "commandId": 438
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": "supportCommunity",
+          "label": "支持社区",
+          "commandId": -2147483212
+        },
+        {
+          "type": "item",
+          "id": "wishform",
+          "label": "提交错误/功能请求...",
+          "commandId": -2147483211
+        },
+        {
+          "type": "item",
+          "id": "systemInfo",
+          "label": "系统信息...",
+          "mnemonic": "S",
+          "commandId": 232
+        },
+        {
+          "type": "item",
+          "id": "about",
+          "label": "关于 Illustrator...",
+          "mnemonic": "A",
+          "commandId": 1633841013
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "生成式 AI 用户指南",
+          "commandId": -2147483207
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "关于生成式积分",
+          "commandId": -2147483206
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "系统兼容性报告...",
+          "mnemonic": "R",
+          "commandId": 414
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "管理我的帐户...",
+          "commandId": -2147483644
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "登录...",
+          "commandId": -2147483643
+        },
+        {
+          "type": "item",
+          "id": "Updates...",
+          "label": "更新...",
+          "commandId": -2147483642
+        }
+      ]
+    }
+  ]
+}

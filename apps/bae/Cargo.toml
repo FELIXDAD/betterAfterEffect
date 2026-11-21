@@ -21,6 +21,7 @@ bae-app.workspace = true
 bae-gpu.workspace = true
 bae-model.workspace = true
 bae-motion.workspace = true
+bae-package.workspace = true
 bae-platform.workspace = true
 bae-plugin.workspace = true
 bae-ui.workspace = true
@@ -36,6 +37,14 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 winit.workspace = true
+
+# Native file dialogs (File > Open / Save As, unsaved-changes prompt). Other
+# platforms get no dialogs (`shell::dialogs::Headless`).
+[target.'cfg(any(target_os = "macos", windows))'.dependencies]
+rfd.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

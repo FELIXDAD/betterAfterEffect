@@ -62,7 +62,13 @@
   - bae-motion 新增：`layer.shift_time`、`layer.delete`、`item.delete`、`attr.set_many`，纯色图层可复用已有纯色素材。
   - apps/bae：`main.rs` 加 `MotionUiModule`；`Document::add_module_commands` 从 `Registry<dyn DynCommand>` 收集模块命令；无窗口冒烟测试支持 `BAE_SMOKE_DEMO=1`（演示工程，用于截图）。
 - 0.0.1 范围（新建合成 → 加图层 → 打关键帧 → 预览播放）在 #64 完成。release 体积 +0.49 MiB（相对 58bc1bc）。
+- 2026-11-21（PR C #67）：查看器通过 04 的 GPU 合成器显示（`GpuPreview`：`AnimEvaluator::convert` 接收带拖动覆盖的 `EvaluatedComp` → `render_frame` → `Renderer::output_texture` → 视口注册表 → `TextureId::User`）；图层源来自 `Registry<dyn SourceProvider>`（05 的形状源）；文字源未注册前叠加简化预览画文字；没有 GPU 时退回简化预览。bae-render 加 `Renderer::output_texture`（`read_rgba8` 的转换拆出，不回读）。体积 +32 KiB。
+- 2026-11-21（PR D #83，`[interface]`）：按协调人决定（菜单方案 A）在 bae-ui 加模块菜单注册（`Registry<MenuItemSpec>`、`build_menus`）和全局动作处理器（`ActionHandler`，焦点面板 → 模块处理器 → 外壳动作；当前工作区模块优先，冲突打日志），apps/bae 生成贡献的菜单并显示快捷键；12 注册 AE 的合成、图层 ▸ 新建 / 排列、动画 ▸ 关键帧辅助、编辑菜单项。
 - 下一步：图表编辑器（值 / 速度图表）、预合成、标记、合成设置对话框、效果和预设 / 字符 / 段落 / 对齐 / 渲染队列面板、接 04 的 GPU 预览、协同显示。
+
+**2026-11-21（04 代做）**
+
+- 渲染队列：`render_queue` 面板替换外壳的占位面板；「合成 ▸ 添加到渲染队列」（`motion.add_to_render_queue`，Cmd/Ctrl+M，和 AE 一致）把当前合成按工作区域加入队列（默认 PNG 序列，输出到「影片 / 视频」文件夹下以合成命名的子文件夹）。面板里可改格式（PNG / TIFF / OpenEXR）、输出路径和帧范围，「渲染」在后台线程按顺序渲染（04 的 `bae_render::export_frames`），显示进度，可停止、重新渲染、移除，完成后可在访达 / 资源管理器中显示。中英文都有。队列是 `SharedRenderQueue` 应用资源，不是工程数据（AE 会存进工程，以后再定）。
 
 ## 请求（其他工作流在这里留言）
 

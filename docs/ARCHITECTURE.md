@@ -265,7 +265,7 @@ Stage ──► bae-anim 在时间 t 求值 ──► EvaluatedComp（这一帧�
 ## 12. 平台
 
 - macOS 12 及以上，Apple Silicon 优先，兼容 Intel。按架构分别打包，不做 universal 包（体积会翻倍）。
-- Windows 10 21H2 及以上 / Windows 11，x64，D3D12。
+- Windows 10 21H2 及以上 / Windows 11，x64，D3D12。D3D12 的着色器编译器固定用 FXC（Windows 自带的 `d3dcompiler_47.dll`，`bae_gpu::dx12_compiler`），不用 wgpu 默认的 `Auto`：`Auto` 会加载 `PATH` 上第一个 `dxcompiler.dll`，别的软件装的旧版 DXC 会在编译时让进程崩溃（0xc000001d）。`WGPU_DX12_COMPILER` 仍可覆盖，用于测试。随应用发布 DXC 会增加安装包体积，以后按着色器性能需要再评估。
 - 将来的 iOS/Android：`bae-model`、`bae-anim`、`bae-sync`、`bae-render`、`bae-color` 不能依赖桌面专属 API。平台相关代码只能放在 `bae-platform`、`bae-gpu` 和 `bae-media` 的平台模块里。
 
 ## 13. 目录结构

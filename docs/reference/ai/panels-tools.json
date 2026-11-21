@@ -1,0 +1,1979 @@
+{
+  "source": {
+    "application": "Adobe Illustrator 2026",
+    "version": "30.1.0",
+    "build_number": "136R",
+    "locale": "zh_CN",
+    "platform": "Microsoft Windows 11 专业版 (10.0.26200, Build 26200, 64 位)",
+    "extracted_date": "2026-11-21"
+  },
+  "stats": {
+    "default_toolbar_slots": 30,
+    "default_toolbar_tools": 91,
+    "default_toolbar_tools_with_id": 91,
+    "basic_toolbar_tools": 37,
+    "getting_started_tools": 34,
+    "extra_kys_tool_actions": 44,
+    "extra_kys_tool_actions_with_id": 44,
+    "window_menu_items": 44,
+    "window_menu_items_with_id": 41,
+    "window_type_subpanels": 8,
+    "window_type_subpanels_with_id": 8,
+    "window_menu_submenus": 9
+  },
+  "toolbars": {
+    "default": [
+      {
+        "id": "Adobe Select Tool",
+        "slot": "0",
+        "shortcut": "V",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Direct Select Tool",
+        "slot": "1",
+        "shortcut": "A",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Direct Object Select Tool",
+        "slot": "1.1",
+        "shortcut": null,
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Magic Wand Tool",
+        "slot": "2",
+        "shortcut": "Y",
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Direct Lasso Tool",
+        "slot": "3",
+        "shortcut": "Q",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Pen Tool",
+        "slot": "4",
+        "shortcut": "P",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Add Anchor Point Tool",
+        "slot": "4.1",
+        "shortcut": "+",
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Delete Anchor Point Tool",
+        "slot": "4.2",
+        "shortcut": "-",
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Anchor Point Tool",
+        "slot": "4.3",
+        "shortcut": "Shift+C",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Quick Pen Tool",
+        "slot": "4.4",
+        "shortcut": "Shift+Q",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Curvature Tool",
+        "slot": "5",
+        "shortcut": "Shift+~",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Type Tool",
+        "slot": "6",
+        "shortcut": "T",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Area Type Tool",
+        "slot": "6.1",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Path Type Tool",
+        "slot": "6.2",
+        "shortcut": null,
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Vertical Type Tool",
+        "slot": "6.3",
+        "shortcut": null,
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Vertical Area Type Tool",
+        "slot": "6.4",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Vertical Path Type Tool",
+        "slot": "6.5",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Touch Type Tool",
+        "slot": "6.6",
+        "shortcut": "Shift+T",
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Line Tool",
+        "slot": "7",
+        "shortcut": "\\",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Arc Tool",
+        "slot": "7.1",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Shape Construction Spiral Tool",
+        "slot": "7.2",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Rectangular Grid Tool",
+        "slot": "7.3",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Polar Grid Tool",
+        "slot": "7.4",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Rectangle Shape Tool",
+        "slot": "8",
+        "shortcut": "M",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Rounded Rectangle Tool",
+        "slot": "8.1",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Ellipse Shape Tool",
+        "slot": "8.2",
+        "shortcut": "L",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Shape Construction Regular Polygon Tool",
+        "slot": "8.3",
+        "shortcut": null,
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Shape Construction Star Tool",
+        "slot": "8.4",
+        "shortcut": null,
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Flare Tool",
+        "slot": "8.5",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Brush Tool",
+        "slot": "9",
+        "shortcut": "B",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Blob Brush Tool",
+        "slot": "9.1",
+        "shortcut": "Shift+B",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Shaper Tool",
+        "slot": "10",
+        "shortcut": "Shift+N",
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Freehand Tool",
+        "slot": "10.1",
+        "shortcut": "N",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Freehand Smooth Tool",
+        "slot": "10.2",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Freehand Erase Tool",
+        "slot": "10.3",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Corner Join Tool",
+        "slot": "10.4",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Eraser Tool",
+        "slot": "11",
+        "shortcut": "Shift+E",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Scissors Tool",
+        "slot": "11.1",
+        "shortcut": "C",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Knife Tool",
+        "slot": "11.2",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Rotate Tool",
+        "slot": "12",
+        "shortcut": "R",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Reflect Tool",
+        "slot": "12.1",
+        "shortcut": "O",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Scale Tool",
+        "slot": "13",
+        "shortcut": "S",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Shear Tool",
+        "slot": "13.1",
+        "shortcut": null,
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Reshape Tool",
+        "slot": "13.2",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Width Tool",
+        "slot": "14",
+        "shortcut": "Shift+W",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Warp Tool",
+        "slot": "14.1",
+        "shortcut": "Shift+R",
+        "in_basic": false
+      },
+      {
+        "id": "Adobe New Twirl Tool",
+        "slot": "14.2",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Pucker Tool",
+        "slot": "14.3",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Bloat Tool",
+        "slot": "14.4",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Scallop Tool",
+        "slot": "14.5",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Cyrstallize Tool",
+        "slot": "14.6",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Wrinkle Tool",
+        "slot": "14.7",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Free Transform Tool",
+        "slot": "15",
+        "shortcut": "E",
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Puppet Warp Tool",
+        "slot": "15.1",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Shape Builder Tool",
+        "slot": "16",
+        "shortcut": "Shift+M",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Planar Paintbucket Tool",
+        "slot": "16.1",
+        "shortcut": "K",
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Planar Face Select Tool",
+        "slot": "16.2",
+        "shortcut": "Shift+L",
+        "in_basic": false
+      },
+      {
+        "id": "Perspective Grid Tool",
+        "slot": "17",
+        "shortcut": "Shift+P",
+        "in_basic": false
+      },
+      {
+        "id": "Perspective Selection Tool",
+        "slot": "17.1",
+        "shortcut": "Shift+V",
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Mesh Editing Tool",
+        "slot": "18",
+        "shortcut": "U",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Gradient Vector Tool",
+        "slot": "19",
+        "shortcut": "G",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Dimension Tool",
+        "slot": "20",
+        "shortcut": null,
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Eyedropper Tool",
+        "slot": "21",
+        "shortcut": "I",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Color Picker Tool",
+        "slot": "21.1",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Measure Tool",
+        "slot": "21.2",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Blend Tool",
+        "slot": "22",
+        "shortcut": "W",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Symbol Sprayer Tool",
+        "slot": "23",
+        "shortcut": "Shift+S",
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Symbol Shifter Tool",
+        "slot": "23.1",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Symbol Scruncher Tool",
+        "slot": "23.2",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Symbol Sizer Tool",
+        "slot": "23.3",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Symbol Spinner Tool",
+        "slot": "23.4",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Symbol Stainer Tool",
+        "slot": "23.5",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Symbol Screener Tool",
+        "slot": "23.6",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Symbol Styler Tool",
+        "slot": "23.7",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Column Graph Tool",
+        "slot": "24",
+        "shortcut": "J",
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Stacked Column Graph Tool",
+        "slot": "24.1",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Bar Graph Tool",
+        "slot": "24.2",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Stacked Bar Graph Tool",
+        "slot": "24.3",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Line Graph Tool",
+        "slot": "24.4",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Area Graph Tool",
+        "slot": "24.5",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Scatter Graph Tool",
+        "slot": "24.6",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Pie Graph Tool",
+        "slot": "24.7",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Radar Graph Tool",
+        "slot": "24.8",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Crop Tool",
+        "slot": "25",
+        "shortcut": "Shift+O",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Slice Tool",
+        "slot": "26",
+        "shortcut": "Shift+K",
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Slice Select Tool",
+        "slot": "26.1",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Scroll Tool",
+        "slot": "27",
+        "shortcut": "H",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Rotate Canvas Tool",
+        "slot": "27.1",
+        "shortcut": "Shift+H",
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Page Tool",
+        "slot": "27.2",
+        "shortcut": null,
+        "in_basic": false
+      },
+      {
+        "id": "Adobe Constraints Tool",
+        "slot": "28",
+        "shortcut": null,
+        "in_basic": true
+      },
+      {
+        "id": "Adobe Zoom Tool",
+        "slot": "29",
+        "shortcut": "Z",
+        "in_basic": true
+      }
+    ],
+    "basic": [
+      "Adobe Anchor Point Tool",
+      "Adobe Blend Tool",
+      "Adobe Blob Brush Tool",
+      "Adobe Brush Tool",
+      "Adobe Constraints Tool",
+      "Adobe Crop Tool",
+      "Adobe Curvature Tool",
+      "Adobe Dimension Tool",
+      "Adobe Direct Lasso Tool",
+      "Adobe Direct Object Select Tool",
+      "Adobe Direct Select Tool",
+      "Adobe Ellipse Shape Tool",
+      "Adobe Eraser Tool",
+      "Adobe Eyedropper Tool",
+      "Adobe Freehand Tool",
+      "Adobe Gradient Vector Tool",
+      "Adobe Line Tool",
+      "Adobe Mesh Editing Tool",
+      "Adobe Path Type Tool",
+      "Adobe Pen Tool",
+      "Adobe Quick Pen Tool",
+      "Adobe Rectangle Shape Tool",
+      "Adobe Reflect Tool",
+      "Adobe Rotate Canvas Tool",
+      "Adobe Rotate Tool",
+      "Adobe Scale Tool",
+      "Adobe Scissors Tool",
+      "Adobe Scroll Tool",
+      "Adobe Select Tool",
+      "Adobe Shape Builder Tool",
+      "Adobe Shape Construction Regular Polygon Tool",
+      "Adobe Shape Construction Star Tool",
+      "Adobe Shear Tool",
+      "Adobe Type Tool",
+      "Adobe Vertical Type Tool",
+      "Adobe Width Tool",
+      "Adobe Zoom Tool"
+    ],
+    "getting_started": {
+      "SELECT": [
+        {
+          "id": "Adobe Select Tool",
+          "shortcut": "V"
+        },
+        {
+          "id": "Adobe Direct Select Tool",
+          "shortcut": "A"
+        },
+        {
+          "id": "Adobe Direct Object Select Tool",
+          "shortcut": null
+        },
+        {
+          "id": "Adobe Direct Lasso Tool",
+          "shortcut": "Q"
+        }
+      ],
+      "SHAPES": [
+        {
+          "id": "Adobe Rectangle Shape Tool",
+          "shortcut": "M"
+        },
+        {
+          "id": "Adobe Shape Construction Star Tool",
+          "shortcut": null
+        },
+        {
+          "id": "Adobe Line Tool",
+          "shortcut": "\\"
+        },
+        {
+          "id": "Adobe Ellipse Shape Tool",
+          "shortcut": "L"
+        },
+        {
+          "id": "Adobe Shape Construction Regular Polygon Tool",
+          "shortcut": null
+        },
+        {
+          "id": "Adobe Shaper Tool",
+          "shortcut": "Shift+N"
+        }
+      ],
+      "DRAW": [
+        {
+          "id": "Adobe Freehand Tool",
+          "shortcut": "N"
+        },
+        {
+          "id": "Adobe Eraser Tool",
+          "shortcut": "Shift+E"
+        },
+        {
+          "id": "Adobe Scissors Tool",
+          "shortcut": "C"
+        },
+        {
+          "id": "Adobe Brush Tool",
+          "shortcut": "B"
+        },
+        {
+          "id": "Adobe Blob Brush Tool",
+          "shortcut": "Shift+B"
+        },
+        {
+          "id": "Adobe Curvature Tool",
+          "shortcut": "Shift+~"
+        },
+        {
+          "id": "Adobe Pen Tool",
+          "shortcut": "P"
+        },
+        {
+          "id": "Adobe Anchor Point Tool",
+          "shortcut": "Shift+C"
+        }
+      ],
+      "MODIFY": [
+        {
+          "id": "Adobe Shape Builder Tool",
+          "shortcut": "Shift+M"
+        },
+        {
+          "id": "Adobe Rotate Tool",
+          "shortcut": "R"
+        },
+        {
+          "id": "Adobe Scale Tool",
+          "shortcut": "S"
+        },
+        {
+          "id": "Adobe Reflect Tool",
+          "shortcut": "O"
+        },
+        {
+          "id": "Adobe Shear Tool",
+          "shortcut": null
+        },
+        {
+          "id": "Adobe Blend Tool",
+          "shortcut": "W"
+        }
+      ],
+      "TYPE": [
+        {
+          "id": "Adobe Area Type Tool",
+          "shortcut": null
+        },
+        {
+          "id": "Adobe Type Tool",
+          "shortcut": "T"
+        },
+        {
+          "id": "Adobe Path Type Tool",
+          "shortcut": null
+        },
+        {
+          "id": "Adobe Vertical Type Tool",
+          "shortcut": null
+        }
+      ],
+      "NAVIGATION": [
+        {
+          "id": "Adobe Zoom Tool",
+          "shortcut": "Z"
+        },
+        {
+          "id": "Adobe Scroll Tool",
+          "shortcut": "H"
+        },
+        {
+          "id": "Adobe Rotate Canvas Tool",
+          "shortcut": "Shift+H"
+        }
+      ],
+      "COLOR": [
+        {
+          "id": "Adobe Gradient Vector Tool",
+          "shortcut": "G"
+        },
+        {
+          "id": "Adobe Mesh Editing Tool",
+          "shortcut": "U"
+        },
+        {
+          "id": "Adobe Eyedropper Tool",
+          "shortcut": "I"
+        }
+      ]
+    }
+  },
+  "extra_tool_actions": [
+    {
+      "id": "Adobe Blend Mode Color",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Color Burn",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Color Dodge",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Darken",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Difference",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Exclusion",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Hard Light",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Hue",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Lighten",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Luminosity",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Multiply",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Next Mode",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Normal",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Overlay",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Prev Mode",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Saturation",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Screen",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Soft Light",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Default Fill Stroke",
+      "shortcut": "D",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Opacity 0",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 10",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 100",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 20",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 30",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 40",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 50",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 60",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 70",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 80",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 90",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Paint Color",
+      "shortcut": "<",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Paint Gradient",
+      "shortcut": ">",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Paint None",
+      "shortcut": "/",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Presentation Mode",
+      "shortcut": "Shift+F",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Swap Fill Stroke",
+      "shortcut": "Shift+X",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Symbolism Dec Intensity",
+      "shortcut": "Shift+{",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Symbolism Inc Intensity",
+      "shortcut": "Shift+}",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Toggle Closing Palettes",
+      "shortcut": "Shift+Tab",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Toggle Drawing Mode",
+      "shortcut": "Shift+D",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Toggle Fill Stroke",
+      "shortcut": "X",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Toggle Palettes",
+      "shortcut": "Tab",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Toggle Screen Mode",
+      "shortcut": "F",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Tool Dec Diameter",
+      "shortcut": "[",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Tool Inc Diameter",
+      "shortcut": "]",
+      "assigned": true
+    }
+  ],
+  "window_panels": [
+    {
+      "type": "panel_or_command",
+      "id": "newwindow",
+      "label": "新建窗口",
+      "shortcut": null
+    },
+    {
+      "type": "submenu",
+      "id": null,
+      "label": "排列",
+      "shortcut": null,
+      "children": [
+        {
+          "type": "item",
+          "id": "cascade",
+          "label": "层叠",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": "tile",
+          "label": "平铺",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": "floatInWindow",
+          "label": "在窗口中浮动",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": "floatAllInWindows",
+          "label": "全部在窗口中浮动",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": "consolidateAllWindows",
+          "label": "合并所有窗口",
+          "shortcut": null
+        }
+      ]
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Browse Add-Ons Menu",
+      "label": "查找有关 Exchange 的扩展功能...",
+      "shortcut": null
+    },
+    {
+      "type": "submenu",
+      "id": null,
+      "label": "工作区",
+      "shortcut": null,
+      "children": [
+        {
+          "type": "item",
+          "id": null,
+          "label": "Web",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "上色",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "传统基本功能",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "基本功能",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "快速入门",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "打印和校样",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "排版规则",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "描摹",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "版面",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "自动",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "触摸",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": "Adobe Reset Workspace",
+          "label": "重置",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": "Adobe New Workspace",
+          "label": "新建工作区...",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": "Adobe Manage Workspace",
+          "label": "管理工作区...",
+          "shortcut": null
+        }
+      ]
+    },
+    {
+      "type": "submenu",
+      "id": null,
+      "label": "扩展功能",
+      "shortcut": null,
+      "omitted_dynamic": "local_installed_extensions",
+      "children": []
+    },
+    {
+      "type": "panel_or_command",
+      "id": null,
+      "label": "上下文任务栏",
+      "shortcut": null
+    },
+    {
+      "type": "submenu",
+      "id": null,
+      "label": "工具栏",
+      "shortcut": null,
+      "children": [
+        {
+          "type": "item",
+          "id": "Adobe Basic Toolbar Menu",
+          "label": "基本",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": "Adobe Quick Toolbar Menu",
+          "label": "快速入门",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": "Adobe Advanced Toolbar Menu",
+          "label": "高级",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": "New Tools Panel",
+          "label": "新建工具栏...",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": "Manage Tools Panel",
+          "label": "管理工具栏...",
+          "shortcut": null
+        }
+      ]
+    },
+    {
+      "type": "panel_or_command",
+      "id": null,
+      "label": "帮助栏",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "drover control palette plugin",
+      "label": "控制",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": null,
+      "label": "隐藏生成式菜单",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe 3D Panel",
+      "label": "3D 和材质",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "CSS Menu Item",
+      "label": "CSS 属性（已弃用）",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "ReTypeWindowMenu",
+      "label": "Retype",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe SVG Interactivity Palette",
+      "label": "SVG 交互",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "internal palettes posing as plug-in menus-info",
+      "label": "信息",
+      "shortcut": "Ctrl+F8"
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe Separation Preview Panel",
+      "label": "分色预览",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe Action Palette",
+      "label": "动作",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe History Panel Menu Item",
+      "label": "历史记录",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "AdobeTransformObjects1",
+      "label": "变换",
+      "shortcut": "Shift+F8"
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe Variables Palette Menu Item",
+      "label": "变量",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe Vectorize Panel",
+      "label": "图像描摹",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "AdobeLayerPalette1",
+      "label": "图层",
+      "shortcut": "F7"
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe Style Palette",
+      "label": "图形样式",
+      "shortcut": "Shift+F5"
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe Pattern Panel Toggle",
+      "label": "图案选项",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Style Palette",
+      "label": "外观",
+      "shortcut": "Shift+F6"
+    },
+    {
+      "type": "panel_or_command",
+      "id": "AdobeAlignObjects2",
+      "label": "对齐",
+      "shortcut": "Shift+F7"
+    },
+    {
+      "type": "panel_or_command",
+      "id": "AdobeNavigator",
+      "label": "导航器",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe Property Palette",
+      "label": "属性",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe CSXS Extension com.adobe.DesignLibraries.angularLibraries",
+      "label": "库",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe Flattening Preview",
+      "label": "拼合器预览",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe Stroke Palette",
+      "label": "描边",
+      "shortcut": "Ctrl+F10"
+    },
+    {
+      "type": "submenu",
+      "id": null,
+      "label": "文字",
+      "shortcut": null,
+      "children": [
+        {
+          "type": "item",
+          "id": "internal palettes posing as plug-in menus-opentype",
+          "label": "OpenType",
+          "shortcut": "Alt+Shift+Ctrl+T"
+        },
+        {
+          "type": "item",
+          "id": "ReflowWindowMenu",
+          "label": "Reflow 查看器",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": "internal palettes posing as plug-in menus-tab",
+          "label": "制表符",
+          "shortcut": "Shift+Ctrl+T"
+        },
+        {
+          "type": "item",
+          "id": "alternate glyph palette plugin 2",
+          "label": "字形",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": "internal palettes posing as plug-in menus-character",
+          "label": "字符",
+          "shortcut": "Ctrl+T"
+        },
+        {
+          "type": "item",
+          "id": "Character Styles",
+          "label": "字符样式",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": "internal palettes posing as plug-in menus-paragraph",
+          "label": "段落",
+          "shortcut": "Alt+Ctrl+T"
+        },
+        {
+          "type": "item",
+          "id": "Adobe Paragraph Styles Palette",
+          "label": "段落样式",
+          "shortcut": null
+        }
+      ]
+    },
+    {
+      "type": "panel_or_command",
+      "id": "DocInfo1",
+      "label": "文档信息",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe Vector Edge Panel",
+      "label": "模型",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe Commenting Palette",
+      "label": "注释",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe Gradient Palette",
+      "label": "渐变",
+      "shortcut": "Ctrl+F9"
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe Version History File Menu Item",
+      "label": "版本历史记录",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "internal palettes posing as plug-in menus-attributes",
+      "label": "特性",
+      "shortcut": "Ctrl+F11"
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe Artboard Palette",
+      "label": "画板",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe BrushManager Menu Item",
+      "label": "画笔",
+      "shortcut": "F5"
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe Symbol Palette",
+      "label": "符号",
+      "shortcut": "Shift+Ctrl+F11"
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe Swatches Menu Item",
+      "label": "色板",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe SmartExport Panel Menu Item",
+      "label": "资源导出",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "AdobePathfinderPalette1",
+      "label": "路径查找器",
+      "shortcut": "Shift+Ctrl+F9"
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe Transparency Palette Menu Item",
+      "label": "透明度",
+      "shortcut": "Shift+Ctrl+F10"
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe LinkPalette Menu Item",
+      "label": "链接",
+      "shortcut": null
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe Color Palette",
+      "label": "颜色",
+      "shortcut": "F6"
+    },
+    {
+      "type": "panel_or_command",
+      "id": "Adobe Harmony Palette",
+      "label": "颜色参考",
+      "shortcut": "Shift+F3"
+    },
+    {
+      "type": "panel_or_command",
+      "id": "AI Magic Wand",
+      "label": "魔棒",
+      "shortcut": null
+    },
+    {
+      "type": "submenu",
+      "id": null,
+      "label": "图形样式库",
+      "shortcut": null,
+      "children": [
+        {
+          "type": "item",
+          "id": null,
+          "label": "3D 效果",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "Vonster 图案样式",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "图像效果",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "按钮和翻转效果",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "文字效果",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "斑点画笔的附属品",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "涂抹效果",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "照亮样式",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "纹理",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "艺术效果",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "附属品",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "霓虹效果",
+          "shortcut": null
+        },
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "用户定义",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": "Adobe Art Style Plugin Other libraries menu item",
+          "label": "其它库...",
+          "shortcut": null
+        }
+      ]
+    },
+    {
+      "type": "submenu",
+      "id": null,
+      "label": "画笔库",
+      "shortcut": null,
+      "children": [
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "Wacom 6D 画笔",
+          "shortcut": null
+        },
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "图像画笔",
+          "shortcut": null
+        },
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "毛刷画笔",
+          "shortcut": null
+        },
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "矢量包",
+          "shortcut": null
+        },
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "箭头",
+          "shortcut": null
+        },
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "艺术效果",
+          "shortcut": null
+        },
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "装饰",
+          "shortcut": null
+        },
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "边框",
+          "shortcut": null
+        },
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "用户定义",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": "AdobeBrushMgrUI Other libraries menu item",
+          "label": "其它库...",
+          "shortcut": null
+        }
+      ]
+    },
+    {
+      "type": "submenu",
+      "id": null,
+      "label": "符号库",
+      "shortcut": null,
+      "children": [
+        {
+          "type": "item",
+          "id": null,
+          "label": "3D 符号",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "Web 按钮和条形",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "传家宝",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "原始",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "图表",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "地图",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "复古",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "寿司",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "庆祝",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "徽标元素",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "提基",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "时尚",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "毛发和毛皮",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "污点矢量包",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "点状图案矢量包",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "照亮丝带",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "照亮流程图",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "照亮组织结构图",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "疯狂科学",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "移动",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "箭头",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "绚丽矢量包",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "网页图标",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "自然",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "至尊矢量包",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "艺术纹理",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "花朵",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "通讯",
+          "shortcut": null
+        },
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "用户定义",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": "Adobe Symbol Palette Plugin Other libraries menu item",
+          "label": "其它库...",
+          "shortcut": null
+        }
+      ]
+    },
+    {
+      "type": "submenu",
+      "id": null,
+      "label": "色板库",
+      "shortcut": null,
+      "children": [
+        {
+          "type": "item",
+          "id": null,
+          "label": "VisiBone2",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "Web",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "中性",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "儿童物品",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "公司",
+          "shortcut": null
+        },
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "图案",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "大地色调",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "庆祝",
+          "shortcut": null
+        },
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "渐变",
+          "shortcut": null
+        },
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "科学",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "系统 (Macintosh)",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "系统 (Windows)",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "纺织品",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "肤色",
+          "shortcut": null
+        },
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "自然",
+          "shortcut": null
+        },
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "色标簿",
+          "shortcut": null
+        },
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "艺术史",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": null,
+          "label": "金属",
+          "shortcut": null
+        },
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "颜色属性",
+          "shortcut": null
+        },
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "食品",
+          "shortcut": null
+        },
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "默认色板",
+          "shortcut": null
+        },
+        {
+          "type": "submenu",
+          "id": null,
+          "label": "用户定义",
+          "shortcut": null
+        },
+        {
+          "type": "item",
+          "id": "AdobeSwatch_ Other libraries menu item",
+          "label": "其它库...",
+          "shortcut": null
+        }
+      ]
+    }
+  ]
+}

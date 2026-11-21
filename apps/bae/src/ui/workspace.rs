@@ -134,6 +134,27 @@ impl Workspace {
         (!self.workbench.handle(&inv, &cx)).then_some(inv)
     }
 
+    /// The menus modules contributed (`Registry<MenuItemSpec>`), for the active
+    /// workspace.
+    pub fn contributed_menus(&self, app: &App) -> bae_ui::MenuTree {
+        match app.get_registry::<bae_ui::MenuItemSpec>() {
+            Some(registry) => {
+                bae_ui::menu::build_menus(&registry.snapshot(), self.workbench.active_workspace())
+            }
+            None => bae_ui::MenuTree::default(),
+        }
+    }
+
+    /// The effective keymap of the active workspace (menu shortcuts).
+    pub fn keymap(&self) -> &bae_ui::Keymap {
+        self.workbench.keymap()
+    }
+
+    /// Id of the active workspace.
+    pub fn active_workspace(&self) -> &str {
+        self.workbench.active_workspace()
+    }
+
     /// Workspace ids and English titles in bar order (Window menu).
     pub fn workspaces(&self) -> Vec<(String, String)> {
         self.workbench

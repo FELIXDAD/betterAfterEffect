@@ -19,6 +19,9 @@ resolver = "3"
 # a Cargo.toml).
 members = ["apps/*", "crates/*", "services/*", "xtask", "tools/dep-probe"]
 default-members = ["apps/bae"]
+# Vendored third-party crates are `[patch.crates-io]` targets, not BAE crates: they keep
+# their upstream lints and formatting (see the `[patch.crates-io]` section below).
+exclude = ["vendor/epaint"]
 
 [workspace.package]
 version = "0.1.0"
@@ -69,6 +72,7 @@ bae-package = { path = "crates/bae-package" }
 bae-motion = { path = "crates/bae-motion" }
 bae-vector = { path = "crates/bae-vector" }
 bae-ui-motion = { path = "crates/bae-ui-motion" }
+bae-effects = { path = "crates/bae-effects" }
 bae-text = { path = "crates/bae-text" }
 
 # ---- GPU, rendering, text (one coherent Linebender/wgpu set) ----
@@ -99,6 +103,10 @@ egui_kittest = { version = "0.36.2", default-features = false }
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06"] }
 raw-window-handle = "0.6.2"
 muda = { version = "0.21.2", default-features = false }
+# Native open / save / message dialogs (NSOpenPanel / NSSavePanel / NSAlert,
+# IFileDialog / MessageBoxW). No default features: the Linux GTK / portal backends
+# are not built; the app depends on it only on macOS and Windows.
+rfd = { version = "0.18.0", default-features = false }
 
 # ---- document model, collaboration, scripting ----
 loro = "1.18.0"
@@ -189,6 +197,18 @@ insta = { version = "1.49.0", features = ["json"] }
 tempfile = "3.27.0"
 
 # ---------------------------------------------------------------------------
+# Patches
+# ---------------------------------------------------------------------------
+
+[patch.crates-io]
+# epaint 0.36.2 with egui's upstream font-stack update (emilk/egui#8874) backported:
+# harfrust 0.12 -> 0.15 and skrifa 0.44 -> 0.49, the versions vello 0.12 and parley 0.13
+# use. Without it the binary links two skrifa / read-fonts / harfrust sets (~0.9 MiB).
+# Delete when the egui group moves to a release that has #8874 (egui 0.38).
+# Details: vendor/epaint/BAE-PATCH.md, docs/spec/dependencies.md.
+epaint = { path = "vendor/epaint" }
+
+# ---------------------------------------------------------------------------
 # Profiles (ARCHITECTURE §11)
 # ---------------------------------------------------------------------------
 
@@ -216,7 +236,7 @@ incremental = false
 # Cold-path dependencies are optimized for size (ARCHITECTURE §11): CLI, MCP/async
 # runtime, JSON and schemas, archives and hashing, menus/clipboard, URL/Unicode tables,
 # image codecs used at import time, and BAE's own UI/agent/platform glue. Per-frame paths (wgpu, naga, vello, egui painting,
-# loro, bae-render/bae-anim) keep opt-level 3. Measured in the PR that added this.
+# loro, bae-render/bae-anim, the png export encoder) keep opt-level 3. Measured in the PR that added this.
 [profile.release.package.bae-ui]
 opt-level = "s"
 [profile.release.package.bae-agent]
@@ -289,7 +309,26 @@ opt-level = "s"
 opt-level = "s"
 [profile.release.package.image]
 opt-level = "s"
-[profile.release.package.png]
+# `png` stays at opt-level 3: it is the per-frame PNG encoder of `bae render` / the render
+# queue (adaptive filtering is ~3.5× slower at "s": 13.8 vs 4.3 ms per 1080p frame) and
+# decodes PNG-sequence footage per frame. No measurable size change (docs/perf.md).
+# Plugin manifests (bae-plugin, read once per plugin load): TOML parser and semver.
+[profile.release.package.toml]
+opt-level = "s"
+[profile.release.package.toml_parser]
+opt-level = "s"
+[profile.release.package.toml_writer]
+opt-level = "s"
+[profile.release.package.toml_datetime]
+opt-level = "s"
+[profile.release.package.serde_spanned]
+opt-level = "s"
+[profile.release.package.winnow]
+opt-level = "s"
+[profile.release.package.semver]
+opt-level = "s"
+# Audio tag parsing when a file is opened (symphonia-metadata); not the decode loop.
+[profile.release.package.regex-lite]
 opt-level = "s"
 
 # Benchmarks: release code generation plus line tables for profilers.

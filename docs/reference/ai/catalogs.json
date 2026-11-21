@@ -1,0 +1,3358 @@
+{
+  "source": {
+    "application": "Adobe Illustrator 2026",
+    "version": "30.1.0",
+    "build_number": "136R",
+    "locale": "zh_CN",
+    "platform": "Microsoft Windows 11 专业版 (10.0.26200, Build 26200, 64 位)",
+    "extracted_date": "2026-11-21"
+  },
+  "available_font_count": 652,
+  "document_profiles": [
+    "Web",
+    "品牌",
+    "图稿和插图",
+    "打印",
+    "社交",
+    "移动设备",
+    "胶片和视频"
+  ],
+  "preset_libraries": {
+    "swatches": [
+      "VisiBone2",
+      "Web",
+      "中性",
+      "儿童物品",
+      "公司",
+      "图案/基本图形/基本图形_点",
+      "图案/基本图形/基本图形_纹理",
+      "图案/基本图形/基本图形_线条",
+      "图案/自然/自然_动物皮",
+      "图案/自然/自然_叶子",
+      "图案/装饰/Vonster 图案",
+      "图案/装饰/装饰旧版",
+      "大地色调",
+      "庆祝",
+      "渐变/中性色",
+      "渐变/叶子",
+      "渐变/大地色调",
+      "渐变/天空",
+      "渐变/季节",
+      "渐变/明亮",
+      "渐变/晕影",
+      "渐变/木质",
+      "渐变/水",
+      "渐变/水果和蔬菜",
+      "渐变/淡色和暗色",
+      "渐变/渐隐",
+      "渐变/玉石和珠宝",
+      "渐变/石头和砖块",
+      "渐变/简单径向",
+      "渐变/肤色",
+      "渐变/色彩调和",
+      "渐变/色谱",
+      "渐变/蜡笔",
+      "渐变/金属",
+      "渐变/颜色组合",
+      "科学/三色组合",
+      "科学/互补色",
+      "科学/分裂互补色",
+      "科学/四色组合",
+      "科学/近似色",
+      "系统 (Macintosh)",
+      "系统 (Windows)",
+      "纺织品",
+      "肤色",
+      "自然/叶子",
+      "自然/季节",
+      "自然/海滩",
+      "自然/石头和砖块",
+      "自然/花朵",
+      "自然/风景",
+      "色标簿/ANPA Color",
+      "色标簿/DIC Color Guide",
+      "色标簿/FOCOLTONE",
+      "色标簿/HKS E Process",
+      "色标簿/HKS E",
+      "色标簿/HKS K Process",
+      "色标簿/HKS K",
+      "色标簿/HKS N Process",
+      "色标簿/HKS N",
+      "色标簿/HKS Z Process",
+      "色标簿/HKS Z",
+      "色标簿/TOYO 94 COLOR FINDER",
+      "色标簿/TOYO Color Finder",
+      "色标簿/TRUMATCH",
+      "色标簿/旧版/DIC Color Guide",
+      "色标簿/旧版/HKS E",
+      "色标簿/旧版/HKS K",
+      "色标簿/旧版/HKS N",
+      "色标簿/旧版/HKS Z",
+      "色标簿/旧版/TOYO Color Finder",
+      "艺术史/中世纪风格",
+      "艺术史/俄国海报艺术风格",
+      "艺术史/印象派风格",
+      "艺术史/史前风格",
+      "艺术史/巴洛克风格",
+      "艺术史/文艺复兴风格",
+      "艺术史/流行艺术风格",
+      "艺术史/远古风格",
+      "金属",
+      "颜色属性/不饱和色",
+      "颜色属性/亮色",
+      "颜色属性/冷色",
+      "颜色属性/暖色",
+      "颜色属性/暗色",
+      "颜色属性/柔和色",
+      "颜色属性/浅色",
+      "颜色属性/饱和色",
+      "食品/冰淇淋",
+      "食品/水果",
+      "食品/甜品",
+      "食品/蔬菜",
+      "食品/饮料",
+      "默认色板/Web",
+      "默认色板/基本 RGB",
+      "默认色板/打印",
+      "默认色板/视频和胶片",
+      "默认色板/设备"
+    ],
+    "brushes": [
+      "Wacom 6D 画笔/6d 艺术钢笔画笔",
+      "图像画笔/图像画笔库",
+      "毛刷画笔/毛刷画笔库",
+      "矢量包/手绘画笔矢量包",
+      "矢量包/颓废画笔矢量包",
+      "箭头/图案箭头",
+      "箭头/箭头_标准",
+      "箭头/箭头_特殊",
+      "艺术效果/艺术效果_书法",
+      "艺术效果/艺术效果_卷轴笔",
+      "艺术效果/艺术效果_水彩",
+      "艺术效果/艺术效果_油墨",
+      "艺术效果/艺术效果_画笔",
+      "艺术效果/艺术效果_粉笔炭笔铅笔",
+      "装饰/典雅的卷曲和花形画笔组",
+      "装饰/装饰_散布",
+      "装饰/装饰_文本分隔线",
+      "装饰/装饰_横幅和封条",
+      "边框/边框_几何图形",
+      "边框/边框_原始",
+      "边框/边框_新奇",
+      "边框/边框_框架",
+      "边框/边框_线条",
+      "边框/边框_虚线",
+      "边框/边框_装饰"
+    ],
+    "graphic_styles": [
+      "3D 效果",
+      "Vonster 图案样式",
+      "图像效果",
+      "按钮和翻转效果",
+      "文字效果",
+      "斑点画笔的附属品",
+      "涂抹效果",
+      "照亮样式",
+      "纹理",
+      "艺术效果",
+      "附属品",
+      "霓虹效果"
+    ],
+    "symbols": [
+      "3D 符号",
+      "Web 按钮和条形",
+      "传家宝",
+      "原始",
+      "图表",
+      "地图",
+      "复古",
+      "寿司",
+      "庆祝",
+      "徽标元素",
+      "提基",
+      "时尚",
+      "毛发和毛皮",
+      "污点矢量包",
+      "点状图案矢量包",
+      "照亮丝带",
+      "照亮流程图",
+      "照亮组织结构图",
+      "疯狂科学",
+      "移动",
+      "箭头",
+      "绚丽矢量包",
+      "网页图标",
+      "自然",
+      "至尊矢量包",
+      "艺术纹理",
+      "花朵",
+      "通讯"
+    ],
+    "workspaces": [
+      "Web",
+      "上色",
+      "传统基本功能",
+      "传统基本功能@2x",
+      "基本功能",
+      "开始",
+      "快速入门",
+      "打印和校样",
+      "排版规则",
+      "描摹",
+      "版面",
+      "自动"
+    ],
+    "scripts": [
+      "图像描摹",
+      "将文档存储为 PDF",
+      "将文档存储为 SVG"
+    ],
+    "actions": [
+      "默认_动作"
+    ],
+    "save_for_web": [
+      "优化/GIF 128 仿色",
+      "优化/GIF 128 无仿色",
+      "优化/GIF 32 仿色",
+      "优化/GIF 32 无仿色",
+      "优化/GIF 64 仿色",
+      "优化/GIF 64 无仿色",
+      "优化/GIF Web 调板",
+      "优化/JPEG 中",
+      "优化/JPEG 低",
+      "优化/JPEG 高",
+      "优化/PNG-24",
+      "优化/PNG-8 128 仿色",
+      "颜色表/Mac OS",
+      "颜色表/Windows",
+      "颜色表/灰度",
+      "颜色表/黑白"
+    ]
+  },
+  "app_presets": {
+    "startupPresetsList": [
+      "Web",
+      "品牌",
+      "图稿和插图",
+      "打印",
+      "社交",
+      "移动设备",
+      "胶片和视频"
+    ],
+    "pdfPresetsList": [
+      "[Illustrator 默认值]",
+      "[高质量打印]",
+      "[MAGAZINE Ad 2006 (Japan)]",
+      "[PDF/X-1a:2001 (Japan)]",
+      "[PDF/X-3:2002 (Japan)]",
+      "[PDF/X-4:2008 (Japan)]",
+      "[印刷质量]",
+      "[最小文件大小 (PDF 1.6)]",
+      "[最小文件大小]"
+    ],
+    "flattenerPresetsList": [
+      "[高分辨率]",
+      "[中分辨率]",
+      "[低分辨率]",
+      "[用于复杂图稿]"
+    ],
+    "tracingPresetsList": [
+      "[高色]",
+      "[低色]",
+      "[灰度]",
+      "[黑白]",
+      "[轮廓]",
+      "[自动颜色]",
+      "[默认]",
+      "高保真度照片",
+      "低保真度照片",
+      "3 色",
+      "6 色",
+      "16 色",
+      "灰阶",
+      "黑白徽标",
+      "素描图稿",
+      "剪影",
+      "线稿图",
+      "技术绘图"
+    ]
+  },
+  "enums": {
+    "AlternateGlyphsForm": [
+      "DEFAULTFORM",
+      "TRADITIONAL",
+      "EXPERT",
+      "JIS78FORM",
+      "JIS83FORM",
+      "HALFWIDTH",
+      "THIRDWIDTH",
+      "QUARTERWIDTH",
+      "FULLWIDTH",
+      "PROPORTIONALWIDTH",
+      "JIS90FORM",
+      "JIS04FORM"
+    ],
+    "AntiAliasingMethod": [
+      "None",
+      "ARTOPTIMIZED",
+      "TYPEOPTIMIZED"
+    ],
+    "AutoCADColors": [
+      "Max8Colors",
+      "Max16Colors",
+      "Max256Colors",
+      "TrueColors"
+    ],
+    "AutoCADCompatibility": [
+      "AutoCADRelease13",
+      "AutoCADRelease14",
+      "AutoCADRelease15",
+      "AutoCADRelease18",
+      "AutoCADRelease21",
+      "AutoCADRelease24"
+    ],
+    "AutoCADExportFileFormat": [
+      "DXF",
+      "DWG"
+    ],
+    "AutoCADExportOption": [
+      "PreserveAppearance",
+      "MaximumEditability"
+    ],
+    "AutoCADGlobalScaleOption": [
+      "OriginalSize",
+      "FitArtboard",
+      "ScaleByValue"
+    ],
+    "AutoCADRasterFormat": [
+      "PNG",
+      "JPEG"
+    ],
+    "AutoCADUnit": [
+      "Points",
+      "Picas",
+      "Inches",
+      "Millimeters",
+      "Centimeters",
+      "Pixels"
+    ],
+    "AutoKernType": [
+      "NOAUTOKERN",
+      "AUTO",
+      "OPTICAL",
+      "METRICSROMANONLY"
+    ],
+    "AutoLeadingType": [
+      "BOTTOMTOBOTTOM",
+      "TOPTOTOP"
+    ],
+    "BaselineDirectionType": [
+      "Standard",
+      "VerticalRotated",
+      "TateChuYoko"
+    ],
+    "BlendModes": [
+      "NORMAL",
+      "MULTIPLY",
+      "SCREEN",
+      "OVERLAY",
+      "SOFTLIGHT",
+      "HARDLIGHT",
+      "COLORDODGE",
+      "COLORBURN",
+      "DARKEN",
+      "LIGHTEN",
+      "DIFFERENCE",
+      "EXCLUSION",
+      "HUE",
+      "SATURATIONBLEND",
+      "COLORBLEND",
+      "LUMINOSITY"
+    ],
+    "BlendsExpandPolicy": [
+      "AUTOMATICALLYCONVERTBLENDS",
+      "RASTERIZEBLENDS"
+    ],
+    "BurasagariTypeEnum": [
+      "None",
+      "Standard",
+      "Forced"
+    ],
+    "CaseChangeType": [
+      "UPPERCASE",
+      "LOWERCASE",
+      "TITLECASE",
+      "SENTENCECASE"
+    ],
+    "ColorConversion": [
+      "None",
+      "COLORCONVERSIONTODEST",
+      "COLORCONVERSIONREPURPOSE"
+    ],
+    "ColorConvertPurpose": [
+      "defaultpurpose",
+      "previewpurpose",
+      "exportpurpose",
+      "dummypurpose"
+    ],
+    "ColorDestination": [
+      "None",
+      "COLORDESTINATIONDOCCMYK",
+      "COLORDESTINATIONWORKINGCMYK",
+      "COLORDESTINATIONDOCRGB",
+      "COLORDESTINATIONWORKINGRGB",
+      "COLORDESTINATIONPROFILE"
+    ],
+    "ColorDitherMethod": [
+      "NOREDUCTION",
+      "DIFFUSION",
+      "PATTERNDITHER",
+      "NOISE"
+    ],
+    "ColorModel": [
+      "REGISTRATION",
+      "PROCESS",
+      "SPOT"
+    ],
+    "ColorProfile": [
+      "None",
+      "INCLUDEALLPROFILE",
+      "LEAVEPROFILEUNCHANGED",
+      "INCLUDERGBPROFILE",
+      "INCLUDEDESTPROFILE"
+    ],
+    "ColorReductionMethod": [
+      "SELECTIVE",
+      "ADAPTIVE",
+      "PERCEPTUAL",
+      "WEB"
+    ],
+    "ColorType": [
+      "None",
+      "CMYK",
+      "GRAY",
+      "RGB",
+      "SPOT",
+      "PATTERN",
+      "GRADIENT"
+    ],
+    "Compatibility": [
+      "ILLUSTRATOR3",
+      "JAPANESEVERSION3",
+      "ILLUSTRATOR8",
+      "ILLUSTRATOR9",
+      "ILLUSTRATOR10",
+      "ILLUSTRATOR11",
+      "ILLUSTRATOR12",
+      "ILLUSTRATOR13",
+      "ILLUSTRATOR14",
+      "ILLUSTRATOR15",
+      "ILLUSTRATOR16",
+      "ILLUSTRATOR17",
+      "ILLUSTRATOR24"
+    ],
+    "ComposerEngineType": [
+      "latinCJKComposer",
+      "optycaComposer",
+      "adornment"
+    ],
+    "CompressionQuality": [
+      "None",
+      "JPEGMINIMUM",
+      "JPEGLOW",
+      "JPEGMEDIUM",
+      "JPEGHIGH",
+      "JPEGMAXIMUM",
+      "ZIP4BIT",
+      "ZIP8BIT",
+      "AUTOMATICJPEGMINIMUM",
+      "AUTOMATICJPEGLOW",
+      "AUTOMATICJPEGMEDIUM",
+      "AUTOMATICJPEGHIGH",
+      "AUTOMATICJPEGMAXIMUM",
+      "AUTOMATICJPEG2000MINIMUM",
+      "AUTOMATICJPEG2000LOW",
+      "AUTOMATICJPEG2000MEDIUM",
+      "AUTOMATICJPEG2000HIGH",
+      "AUTOMATICJPEG2000MAXIMUM",
+      "AUTOMATICJPEG2000LOSSLESS",
+      "JPEG2000MINIMUM",
+      "JPEG2000LOW",
+      "JPEG2000MEDIUM",
+      "JPEG2000HIGH",
+      "JPEG2000MAXIMUM",
+      "JPEG2000LOSSLESS"
+    ],
+    "CoordinateSystem": [
+      "DOCUMENTCOORDINATESYSTEM",
+      "ARTBOARDCOORDINATESYSTEM"
+    ],
+    "CropOptions": [
+      "Standard",
+      "Japanese"
+    ],
+    "DiacVPosType": [
+      "DEFAULT_POSITION",
+      "LOOSE_POSITION",
+      "MEDIUM_POSITION",
+      "TIGHT_POSITION",
+      "OPENTYPE_POSITION"
+    ],
+    "DigitSetType": [
+      "DEFAULT_DIGITS",
+      "ARABIC_DIGITS",
+      "HINDI_DIGITS",
+      "FARSI_DIGITS"
+    ],
+    "DirOverrideType": [
+      "DEFAULT_DIRECTION",
+      "LEFT_TO_RIGHT_DIRECTION",
+      "RIGHT_TO_LEFT_DIRECTION"
+    ],
+    "DocumentArtboardLayout": [
+      "GridByRow",
+      "GridByCol",
+      "Row",
+      "Column",
+      "RLGridByRow",
+      "RLGridByCol",
+      "RLRow"
+    ],
+    "DocumentColorSpace": [
+      "RGB",
+      "CMYK"
+    ],
+    "DocumentLayoutStyle": [
+      "CASCADE",
+      "HORIZONTALTILE",
+      "VERTICALTILE",
+      "FLOATALL",
+      "CONSOLIDATEALL"
+    ],
+    "DocumentPresetType": [
+      "Print",
+      "Web",
+      "Mobile",
+      "Video",
+      "BasicCMYK",
+      "BasicRGB"
+    ],
+    "DocumentPreviewMode": [
+      "DefaultPreview",
+      "PixelPreview",
+      "OverprintPreview"
+    ],
+    "DocumentRasterResolution": [
+      "ScreenResolution",
+      "MediumResolution",
+      "HighResolution"
+    ],
+    "DocumentTransparencyGrid": [
+      "TransparencyGridNone",
+      "TransparencyGridLight",
+      "TransparencyGridMedium",
+      "TransparencyGridDark",
+      "TransparencyGridRed",
+      "TransparencyGridOrange",
+      "TransparencyGridGreen",
+      "TransparencyGridBlue",
+      "TransparencyGridPurple"
+    ],
+    "DocumentType": [
+      "ILLUSTRATOR",
+      "EPS",
+      "PDF",
+      "FXG"
+    ],
+    "DownsampleMethod": [
+      "NODOWNSAMPLE",
+      "AVERAGEDOWNSAMPLE",
+      "SUBSAMPLE",
+      "BICUBICDOWNSAMPLE"
+    ],
+    "EPSPostScriptLevelEnum": [
+      "LEVEL2",
+      "LEVEL3"
+    ],
+    "EPSPreview": [
+      "None",
+      "BWMACINTOSH",
+      "COLORMACINTOSH",
+      "BWTIFF",
+      "COLORTIFF",
+      "TRANSPARENTCOLORTIFF"
+    ],
+    "ExportFileType": [
+      "ET_AI",
+      "ET_EPS",
+      "ET_AIT",
+      "ET_PDF",
+      "ET_SVGZ",
+      "ET_SVG",
+      "ET_JPEG",
+      "ET_PHOTOSHOP",
+      "ET_PNG8",
+      "ET_PNG24",
+      "ET_GIF",
+      "ET_AUTOCAD",
+      "ET_TIFF",
+      "ET_WOSVG",
+      "ET_WEBP",
+      "ET_AVIF"
+    ],
+    "ExportForScreensScaleType": [
+      "SCALEBYFACTOR",
+      "SCALEBYWIDTH",
+      "SCALEBYHEIGHT",
+      "SCALEBYRESOLUTION"
+    ],
+    "ExportForScreensType": [
+      "SE_JPEG100",
+      "SE_JPEG80",
+      "SE_JPEG50",
+      "SE_JPEG20",
+      "SE_SVG",
+      "SE_PNG8",
+      "SE_PNG24",
+      "SE_PDF",
+      "SE_WEBP",
+      "SE_AVIF"
+    ],
+    "ExportType": [
+      "JPEG",
+      "PHOTOSHOP",
+      "SVG",
+      "PNG8",
+      "PNG24",
+      "GIF",
+      "AUTOCAD",
+      "TIFF",
+      "WOSVG",
+      "WEBP",
+      "AVIF"
+    ],
+    "FXGVersion": [
+      "VERSION1PT0",
+      "VERSION2PT0"
+    ],
+    "FigureStyleType": [
+      "DEFAULTFIGURESTYLE",
+      "TABULAR",
+      "PROPORTIONALOLDSTYLE",
+      "PROPORTIONAL",
+      "TABULAROLDSTYLE"
+    ],
+    "FiltersPreservePolicy": [
+      "EXPANDFILTERS",
+      "RASTERIZEFILTERS",
+      "KEEPFILTERSEDITABLE"
+    ],
+    "FirstBaselineType": [
+      "BASELINEASCENT",
+      "BASELINECAPHEIGHT",
+      "BASELINELEADING",
+      "BASELINEXHEIGHT",
+      "BASELINEEMBOXHEIGHT",
+      "BASELINEFIXED",
+      "BASELINELEGACY"
+    ],
+    "FontBaselineOption": [
+      "NORMALBASELINE",
+      "SUPERSCRIPT",
+      "SUBSCRIPT"
+    ],
+    "FontCapsOption": [
+      "NORMALCAPS",
+      "SMALLCAPS",
+      "ALLCAPS",
+      "ALLSMALLCAPS"
+    ],
+    "FontOpenTypePositionOption": [
+      "OPENTYPEDEFAULT",
+      "OPENTYPESUPERSCRIPT",
+      "OPENTYPESUBSCRIPT",
+      "NUMERATOR",
+      "DENOMINATOR"
+    ],
+    "FontSubstitutionPolicy": [
+      "SUBSTITUTEOBLIQUE",
+      "SUBSTITUTETINT",
+      "SUBSTITUTEDEVICE"
+    ],
+    "GradientType": [
+      "LINEAR",
+      "RADIAL"
+    ],
+    "GradientsPreservePolicy": [
+      "KEEPGRADIENTSEDITABLE",
+      "AUTOMATICALLYCONVERTGRADIENTS"
+    ],
+    "GridRepeatUpdate": [
+      "HORIZONTALSPACING",
+      "VERTICALSPACING",
+      "GRIDALL"
+    ],
+    "ImageColorSpace": [
+      "GrayScale",
+      "RGB",
+      "CMYK",
+      "LAB",
+      "Separation",
+      "DeviceN",
+      "Indexed"
+    ],
+    "InkPrintStatus": [
+      "DISABLEINK",
+      "ENABLEINK",
+      "CONVERTINK"
+    ],
+    "InkType": [
+      "CYANINK",
+      "MAGENTAINK",
+      "YELLOWINK",
+      "BLACKINK",
+      "CUSTOMINK"
+    ],
+    "JPEGCompressionMethodType": [
+      "BASELINESTANDARD",
+      "BASELINEOPTIMIZED",
+      "PROGRESSIVE"
+    ],
+    "JavaScriptExecutionMode": [
+      "never",
+      "OnRuntimeError",
+      "BeforeRunning"
+    ],
+    "Justification": [
+      "LEFT",
+      "RIGHT",
+      "CENTER",
+      "FULLJUSTIFYLASTLINELEFT",
+      "FULLJUSTIFYLASTLINERIGHT",
+      "FULLJUSTIFYLASTLINECENTER",
+      "FULLJUSTIFY"
+    ],
+    "KashidaWidthType": [
+      "kashidaNone",
+      "kashidaSmall",
+      "kashidaMedium",
+      "kashidaLong",
+      "kashidaStylistic"
+    ],
+    "KashidasType": [
+      "DEFAULT_KASHIDAS",
+      "KASHIDAS_ON",
+      "KASHIDAS_OFF"
+    ],
+    "KinsokuOrderEnum": [
+      "PUSHIN",
+      "PUSHOUTFIRST",
+      "PUSHOUTONLY"
+    ],
+    "KnockoutState": [
+      "Unknown",
+      "DISABLED",
+      "ENABLED",
+      "INHERITED"
+    ],
+    "LanguageType": [
+      "ENGLISH",
+      "FINNISH",
+      "STANDARDFRENCH",
+      "CANADIANFRENCH",
+      "STANDARDGERMAN",
+      "OLDGERMAN",
+      "SWISSGERMAN",
+      "ITALIAN",
+      "BOKMALNORWEGIAN",
+      "NYNORSKNORWEGIAN",
+      "STANDARDPORTUGUESE",
+      "BRAZILLIANPORTUGUESE",
+      "SPANISH",
+      "SWEDISH",
+      "UKENGLISH",
+      "DUTCH",
+      "DANISH",
+      "CATALAN",
+      "RUSSIAN",
+      "UKRANIAN",
+      "BULGARIAN",
+      "SERBIAN",
+      "CZECH",
+      "POLISH",
+      "RUMANIAN",
+      "GREEK",
+      "TURKISH",
+      "ICELANDIC",
+      "HUNGARIAN",
+      "CHINESE",
+      "JAPANESE",
+      "ARABIC",
+      "FARSI",
+      "GERMAN2006REFORM",
+      "DUTCH2005REFORM",
+      "SWISSGERMAN2006REFORM",
+      "HINDI",
+      "MARATHI",
+      "BENGALIINDIA",
+      "PUNJABI",
+      "GUJARATI",
+      "ORIYA",
+      "TAMIL",
+      "TELUGU",
+      "KANNADA",
+      "MALAYALAM"
+    ],
+    "LibraryType": [
+      "ILLUSTRATORARTWORK",
+      "SWATCHES",
+      "BRUSHES",
+      "GRAPHICSTYLES",
+      "SYMBOLS"
+    ],
+    "MonochromeCompression": [
+      "None",
+      "CCIT3",
+      "CCIT4",
+      "MONOZIP",
+      "RUNLENGTH"
+    ],
+    "OutputFlattening": [
+      "PRESERVEPATHS",
+      "PRESERVEAPPEARANCE"
+    ],
+    "PDFBoxType": [
+      "PDFARTBOX",
+      "PDFCROPBOX",
+      "PDFTRIMBOX",
+      "PDFBLEEDBOX",
+      "PDFMEDIABOX",
+      "PDFBOUNDINGBOX"
+    ],
+    "PDFChangesAllowedEnum": [
+      "CHANGE128NONE",
+      "CHANGE128EDITPAGE",
+      "CHANGE128FILLFORM",
+      "CHANGE128COMMENTING",
+      "CHANGE128ANYCHANGES",
+      "CHANGE40NONE",
+      "CHANGE40COMMENTING",
+      "CHANGE40PAGELAYOUT",
+      "CHANGE40ANYCHANGES"
+    ],
+    "PDFCompatibility": [
+      "ACROBAT4",
+      "ACROBAT5",
+      "ACROBAT6",
+      "ACROBAT7",
+      "ACROBAT8"
+    ],
+    "PDFOverprint": [
+      "PRESERVEPDFOVERPRINT",
+      "DISCARDPDFOVERPRINT"
+    ],
+    "PDFPrintAllowedEnum": [
+      "PRINT128NONE",
+      "PRINT128LOWRESOLUTION",
+      "PRINT128HIGHRESOLUTION",
+      "PRINT40NONE",
+      "PRINT40HIGHRESOLUTION"
+    ],
+    "PDFTrimMarkWeight": [
+      "TRIMMARKWEIGHT0125",
+      "TRIMMARKWEIGHT025",
+      "TRIMMARKWEIGHT05"
+    ],
+    "PDFXStandard": [
+      "PDFXNONE",
+      "PDFX1A2001",
+      "PDFX1A2003",
+      "PDFX32001",
+      "PDFX32002",
+      "PDFX32003",
+      "PDFX42007"
+    ],
+    "PageMarksTypes": [
+      "Roman",
+      "Japanese"
+    ],
+    "ParagraphDirectionType": [
+      "LEFT_TO_RIGHT_DIRECTION",
+      "RIGHT_TO_LEFT_DIRECTION"
+    ],
+    "PathPointSelection": [
+      "NOSELECTION",
+      "ANCHORPOINT",
+      "LEFTDIRECTION",
+      "RIGHTDIRECTION",
+      "LEFTRIGHTPOINT"
+    ],
+    "PerspectiveGridPlaneType": [
+      "NOPLANE",
+      "LEFTPLANE",
+      "RIGHTPLANE",
+      "FLOORPLANE"
+    ],
+    "PhotoshopCompatibility": [
+      "PHOTOSHOP8",
+      "PHOTOSHOP6"
+    ],
+    "PointType": [
+      "SMOOTH",
+      "CORNER"
+    ],
+    "PolarityValues": [
+      "POSITIVE",
+      "NEGATIVE"
+    ],
+    "PostScriptImageCompressionType": [
+      "IMAGECOMPRESSIONNONE",
+      "RLE",
+      "JPEG"
+    ],
+    "PrintArtworkDesignation": [
+      "VISIBLEPRINTABLELAYERS",
+      "VISIBLELAYERS",
+      "ALLLAYERS"
+    ],
+    "PrintColorIntent": [
+      "PERCEPTUALINTENT",
+      "SATURATIONINTENT",
+      "RELATIVECOLORIMETRIC",
+      "ABSOLUTECOLORIMETRIC"
+    ],
+    "PrintColorProfile": [
+      "OLDSTYLEPROFILE",
+      "SOURCEPROFILE",
+      "PRINTERPROFILE",
+      "CUSTOMPROFILE"
+    ],
+    "PrintColorSeparationMode": [
+      "COMPOSITE",
+      "HOSTBASEDSEPARATION",
+      "INRIPSEPARATION"
+    ],
+    "PrintFontDownloadMode": [
+      "DOWNLOADNONE",
+      "DOWNLOADSUBSET",
+      "DOWNLOADCOMPLETE"
+    ],
+    "PrintOrientation": [
+      "PORTRAIT",
+      "LANDSCAPE",
+      "REVERSEPORTRAIT",
+      "REVERSELANDSCAPE",
+      "AUTOROTATE"
+    ],
+    "PrintPosition": [
+      "TRANSLATETOPLEFT",
+      "TRANSLATETOP",
+      "TRANSLATETOPRIGHT",
+      "TRANSLATELEFT",
+      "TRANSLATECENTER",
+      "TRANSLATERIGHT",
+      "TRANSLATEBOTTOMLEFT",
+      "TRANSLATEBOTTOM",
+      "TRANSLATEBOTTOMRIGHT"
+    ],
+    "PrintTiling": [
+      "TILESINGLEFULLPAGE",
+      "TILEFULLPAGES",
+      "TILEIMAGEABLEAREAS"
+    ],
+    "PrinterColorMode": [
+      "COLORPRINTER",
+      "GRAYSCALEPRINTER",
+      "BLACKANDWHITEPRINTER"
+    ],
+    "PrinterPostScriptLevelEnum": [
+      "PSLEVEL1",
+      "PSLEVEL2",
+      "PSLEVEL3"
+    ],
+    "PrinterTypeEnum": [
+      "Unknown",
+      "POSTSCRIPTPRINTER",
+      "NONPOSTSCRIPTPRINTER"
+    ],
+    "PrintingBounds": [
+      "ARTBOARDBOUNDS",
+      "ARTWORKBOUNDS",
+      "CROPBOUNDS"
+    ],
+    "RadialRepeatUpdate": [
+      "RADIUSOFART",
+      "NUMBEROFINSTANCES",
+      "REVERSEOVERLAP",
+      "RADIALALL"
+    ],
+    "RasterImageLocation": [
+      "EMBED",
+      "LINK",
+      "PRESERVE"
+    ],
+    "RasterLinkState": [
+      "NODATA",
+      "DATAFROMFILE",
+      "DATAMODIFIED"
+    ],
+    "RasterizationColorModel": [
+      "DEFAULTCOLORMODEL",
+      "GRAYSCALE",
+      "BITMAP"
+    ],
+    "RepeatGridShiftFlipType": [
+      "NOSF",
+      "HORIZONTALSF",
+      "VERTICALSF",
+      "HORIZONTALANDVERTICALSF"
+    ],
+    "RulerUnits": [
+      "Unknown",
+      "Inches",
+      "Centimeters",
+      "Points",
+      "Picas",
+      "Millimeters",
+      "Qs",
+      "Pixels",
+      "FeetInches",
+      "Meters",
+      "Yards",
+      "Feet"
+    ],
+    "SVGCSSPropertyLocation": [
+      "ENTITIES",
+      "STYLEATTRIBUTES",
+      "STYLEELEMENTS",
+      "PRESENTATIONATTRIBUTES"
+    ],
+    "SVGDTDVersion": [
+      "SVG1_0",
+      "SVG1_1",
+      "SVGTINY1_1",
+      "SVGTINY1_1PLUS",
+      "SVGBASIC1_1",
+      "SVGTINY1_2"
+    ],
+    "SVGDocumentEncoding": [
+      "ASCII",
+      "UTF8",
+      "UTF16"
+    ],
+    "SVGFontSubsetting": [
+      "None",
+      "GLYPHSUSED",
+      "COMMONENGLISH",
+      "GLYPHSUSEDPLUSENGLISH",
+      "COMMONROMAN",
+      "GLYPHSUSEDPLUSROMAN",
+      "ALLGLYPHS"
+    ],
+    "SVGFontType": [
+      "SVGFONT",
+      "OUTLINEFONT"
+    ],
+    "SVGIdType": [
+      "SVGIDMINIMAL",
+      "SVGIDREGULAR",
+      "SVGIDUNIQUE"
+    ],
+    "SaveOptions": [
+      "SAVECHANGES",
+      "DONOTSAVECHANGES",
+      "PROMPTTOSAVECHANGES"
+    ],
+    "ScreenMode": [
+      "MULTIWINDOW",
+      "DESKTOP",
+      "FULLSCREEN"
+    ],
+    "SpotColorKind": [
+      "SPOTCMYK",
+      "SPOTRGB",
+      "SPOTLAB"
+    ],
+    "StrokeCap": [
+      "BUTTENDCAP",
+      "ROUNDENDCAP",
+      "PROJECTINGENDCAP"
+    ],
+    "StrokeJoin": [
+      "MITERENDJOIN",
+      "ROUNDENDJOIN",
+      "BEVELENDJOIN"
+    ],
+    "StyleRunAlignmentType": [
+      "bottom",
+      "icfBottom",
+      "ROMANBASELINE",
+      "center",
+      "icfTop",
+      "top"
+    ],
+    "SymbolRegistrationPoint": [
+      "SYMBOLTOPLEFTPOINT",
+      "SYMBOLTOPMIDDLEPOINT",
+      "SYMBOLTOPRIGHTPOINT",
+      "SYMBOLMIDDLELEFTPOINT",
+      "SYMBOLCENTERPOINT",
+      "SYMBOLMIDDLERIGHTPOINT",
+      "SYMBOLBOTTOMLEFTPOINT",
+      "SYMBOLBOTTOMMIDDLEPOINT",
+      "SYMBOLBOTTOMRIGHTPOINT"
+    ],
+    "SymmetryRepeatUpdate": [
+      "AXISROTATION",
+      "SYMMETRYALL"
+    ],
+    "TIFFByteOrder": [
+      "IBMPC",
+      "MACINTOSH"
+    ],
+    "TabStopAlignment": [
+      "Left",
+      "Center",
+      "Right",
+      "Decimal"
+    ],
+    "TextAntialias": [
+      "NONE",
+      "SHARP",
+      "CRISP",
+      "STRONG"
+    ],
+    "TextOrientation": [
+      "HORIZONTAL",
+      "VERTICAL"
+    ],
+    "TextPreservePolicy": [
+      "OUTLINETEXT",
+      "RASTERIZETEXT",
+      "KEEPTEXTEDITABLE",
+      "AUTOMATICALLYCONVERTTEXT"
+    ],
+    "TextType": [
+      "POINTTEXT",
+      "AREATEXT",
+      "PATHTEXT"
+    ],
+    "TracingColorType": [
+      "TRACINGLIMITEDCOLOR",
+      "TRACINGFULLCOLOR"
+    ],
+    "TracingMethodType": [
+      "TRACINGMETHODABUTTING",
+      "TRACINGMETHODOVERLAPPING"
+    ],
+    "TracingModeType": [
+      "TRACINGMODECOLOR",
+      "TRACINGMODEGRAY",
+      "TRACINGMODEBLACKANDWHITE"
+    ],
+    "Transformation": [
+      "DOCUMENTORIGIN",
+      "TOPLEFT",
+      "LEFT",
+      "BOTTOMLEFT",
+      "TOP",
+      "CENTER",
+      "BOTTOM",
+      "TOPRIGHT",
+      "RIGHT",
+      "BOTTOMRIGHT"
+    ],
+    "TrappingType": [
+      "NORMALTRAPPING",
+      "TRANSPARENT",
+      "OPAQUE",
+      "IGNOREOPAQUE"
+    ],
+    "UserInteractionLevel": [
+      "DONTDISPLAYALERTS",
+      "DISPLAYALERTS"
+    ],
+    "VariableKind": [
+      "Unknown",
+      "VISIBILITY",
+      "TEXTUAL",
+      "IMAGE",
+      "GRAPH"
+    ],
+    "ViewType": [
+      "TRACINGVIEWVECTORTRACINGRESULT",
+      "TRACINGVIEWVECTOROUTLINESWITHTRACING",
+      "TRACINGVIEWVECTOROUTLINES",
+      "TRACINGVIEWVECTORWITHTRANSPARENTIMAGE",
+      "TRACINGVIEWIMAGE"
+    ],
+    "WariChuJustificationType": [
+      "Left",
+      "Right",
+      "Center",
+      "WARICHUFULLJUSTIFYLASTLINELEFT",
+      "WARICHUFULLJUSTIFYLASTLINERIGHT",
+      "WARICHUFULLJUSTIFYLASTLINECENTER",
+      "WARICHUFULLJUSTIFY",
+      "WARICHUAUTOJUSTIFY"
+    ],
+    "ZOrderMethod": [
+      "BRINGTOFRONT",
+      "BRINGFORWARD",
+      "SENDBACKWARD",
+      "SENDTOBACK"
+    ]
+  },
+  "save_options": {
+    "IllustratorSaveOptions": {
+      "className": "IllustratorSaveOptions",
+      "typename": "IllustratorSaveOptions",
+      "properties": [
+        {
+          "name": "artboardRange",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "defaultValue": ""
+        },
+        {
+          "name": "compatibility",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "Compatibility.ILLUSTRATOR24",
+          "defaultValue": "<Compatibility.ILLUSTRATOR24>"
+        },
+        {
+          "name": "compressed",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "embedICCProfile",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "embedLinkedFiles",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "embedUsedGlyphs",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "flattenOutput",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "OutputFlattening.PRESERVEAPPEARANCE",
+          "defaultValue": "<OutputFlattening.PRESERVEAPPEARANCE>"
+        },
+        {
+          "name": "fontSubsetThreshold",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 100
+        },
+        {
+          "name": "pdfCompatible",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "saveMultipleArtboards",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        }
+      ]
+    },
+    "PDFSaveOptions": {
+      "className": "PDFSaveOptions",
+      "typename": "PDFSaveOptions",
+      "properties": [
+        {
+          "name": "acrobatLayers",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "artboardRange",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "defaultValue": ""
+        },
+        {
+          "name": "bleedLink",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "bleedOffsetRect",
+          "access": "readwrite",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "defaultValue": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "colorBars",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "colorCompression",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "CompressionQuality.None",
+          "defaultValue": "<CompressionQuality.None>"
+        },
+        {
+          "name": "colorConversionID",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "ColorConversion.None",
+          "defaultValue": "<ColorConversion.None>"
+        },
+        {
+          "name": "colorDestinationID",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "ColorDestination.None",
+          "defaultValue": "<ColorDestination.None>"
+        },
+        {
+          "name": "colorDownsampling",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 150
+        },
+        {
+          "name": "colorDownsamplingImageThreshold",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 225
+        },
+        {
+          "name": "colorDownsamplingMethod",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "DownsampleMethod.NODOWNSAMPLE",
+          "defaultValue": "<DownsampleMethod.NODOWNSAMPLE>"
+        },
+        {
+          "name": "colorProfileID",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "ColorProfile.None",
+          "defaultValue": "<ColorProfile.None>"
+        },
+        {
+          "name": "colorTileSize",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 256
+        },
+        {
+          "name": "compatibility",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "PDFCompatibility.ACROBAT5",
+          "defaultValue": "<PDFCompatibility.ACROBAT5>"
+        },
+        {
+          "name": "compressArt",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "documentPassword",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "defaultValue": ""
+        },
+        {
+          "name": "enableAccess",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "enableCopy",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "enableCopyAccess",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "enablePlainText",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "flattenerOptions",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "defaultValue": null
+        },
+        {
+          "name": "flattenerPreset",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "defaultValue": ""
+        },
+        {
+          "name": "fontSubsetThreshold",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 100
+        },
+        {
+          "name": "generateThumbnails",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "grayscaleCompression",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "CompressionQuality.None",
+          "defaultValue": "<CompressionQuality.None>"
+        },
+        {
+          "name": "grayscaleDownsampling",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 150
+        },
+        {
+          "name": "grayscaleDownsamplingImageThreshold",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 225
+        },
+        {
+          "name": "grayscaleDownsamplingMethod",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "DownsampleMethod.NODOWNSAMPLE",
+          "defaultValue": "<DownsampleMethod.NODOWNSAMPLE>"
+        },
+        {
+          "name": "grayscaleTileSize",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 256
+        },
+        {
+          "name": "monochromeCompression",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "MonochromeCompression.None",
+          "defaultValue": "<MonochromeCompression.None>"
+        },
+        {
+          "name": "monochromeDownsampling",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 300
+        },
+        {
+          "name": "monochromeDownsamplingImageThreshold",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 450
+        },
+        {
+          "name": "monochromeDownsamplingMethod",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "DownsampleMethod.NODOWNSAMPLE",
+          "defaultValue": "<DownsampleMethod.NODOWNSAMPLE>"
+        },
+        {
+          "name": "offset",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 0
+        },
+        {
+          "name": "optimization",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "outputCondition",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "defaultValue": ""
+        },
+        {
+          "name": "outputConditionID",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "defaultValue": ""
+        },
+        {
+          "name": "outputIntentProfile",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "defaultValue": ""
+        },
+        {
+          "name": "pDFAllowPrinting",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "PDFPrintAllowedEnum.PRINT128HIGHRESOLUTION",
+          "defaultValue": "<PDFPrintAllowedEnum.PRINT128HIGHRESOLUTION>"
+        },
+        {
+          "name": "pDFChangesAllowed",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "PDFChangesAllowedEnum.CHANGE128ANYCHANGES",
+          "defaultValue": "<PDFChangesAllowedEnum.CHANGE128ANYCHANGES>"
+        },
+        {
+          "name": "pDFPreset",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "defaultValue": ""
+        },
+        {
+          "name": "pDFXStandard",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "PDFXStandard.PDFXNONE",
+          "defaultValue": "<PDFXStandard.PDFXNONE>"
+        },
+        {
+          "name": "pDFXStandardDescription",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "defaultValue": ""
+        },
+        {
+          "name": "pageInformation",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "pageMarksType",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "PageMarksTypes.Roman",
+          "defaultValue": "<PageMarksTypes.Roman>"
+        },
+        {
+          "name": "permissionPassword",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "defaultValue": ""
+        },
+        {
+          "name": "preserveEditability",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "printerResolution",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 800
+        },
+        {
+          "name": "registrationMarks",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "registryName",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "defaultValue": ""
+        },
+        {
+          "name": "requireDocumentPassword",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "requirePermissionPassword",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "trapped",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "trimMarkWeight",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "PDFTrimMarkWeight.TRIMMARKWEIGHT0125",
+          "defaultValue": "<PDFTrimMarkWeight.TRIMMARKWEIGHT0125>"
+        },
+        {
+          "name": "trimMarks",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "viewAfterSaving",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        }
+      ]
+    },
+    "EPSSaveOptions": {
+      "className": "EPSSaveOptions",
+      "typename": "EPSSaveOptions",
+      "properties": [
+        {
+          "name": "artboardRange",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "defaultValue": ""
+        },
+        {
+          "name": "cmykPostScript",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "compatibility",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "Compatibility.ILLUSTRATOR24",
+          "defaultValue": "<Compatibility.ILLUSTRATOR24>"
+        },
+        {
+          "name": "compatibleGradientPrinting",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "embedAllFonts",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "embedLinkedFiles",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "flattenOutput",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "OutputFlattening.PRESERVEAPPEARANCE",
+          "defaultValue": "<OutputFlattening.PRESERVEAPPEARANCE>"
+        },
+        {
+          "name": "includeDocumentThumbnails",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "overprint",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "PDFOverprint.PRESERVEPDFOVERPRINT",
+          "defaultValue": "<PDFOverprint.PRESERVEPDFOVERPRINT>"
+        },
+        {
+          "name": "postScript",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "EPSPostScriptLevelEnum.LEVEL2",
+          "defaultValue": "<EPSPostScriptLevelEnum.LEVEL2>"
+        },
+        {
+          "name": "preview",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "EPSPreview.TRANSPARENTCOLORTIFF",
+          "defaultValue": "<EPSPreview.TRANSPARENTCOLORTIFF>"
+        },
+        {
+          "name": "saveMultipleArtboards",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        }
+      ]
+    },
+    "FXGSaveOptions": {
+      "className": "FXGSaveOptions",
+      "typename": "FXGSaveOptions",
+      "properties": [
+        {
+          "name": "artboardRange",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "defaultValue": ""
+        },
+        {
+          "name": "blendsPolicy",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "BlendsExpandPolicy.AUTOMATICALLYCONVERTBLENDS",
+          "defaultValue": "<BlendsExpandPolicy.AUTOMATICALLYCONVERTBLENDS>"
+        },
+        {
+          "name": "downsampleLinkedImages",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "filtersPolicy",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "FiltersPreservePolicy.KEEPFILTERSEDITABLE",
+          "defaultValue": "<FiltersPreservePolicy.KEEPFILTERSEDITABLE>"
+        },
+        {
+          "name": "gradientsPolicy",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "GradientsPreservePolicy.AUTOMATICALLYCONVERTGRADIENTS",
+          "defaultValue": "<GradientsPreservePolicy.AUTOMATICALLYCONVERTGRADIENTS>"
+        },
+        {
+          "name": "includeMetadata",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "includeUnusedSymbols",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "preserveEditingCapabilities",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "saveMultipleArtboards",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "textPolicy",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "TextPreservePolicy.AUTOMATICALLYCONVERTTEXT",
+          "defaultValue": "<TextPreservePolicy.AUTOMATICALLYCONVERTTEXT>"
+        },
+        {
+          "name": "version",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "FXGVersion.VERSION2PT0",
+          "defaultValue": "<FXGVersion.VERSION2PT0>"
+        }
+      ]
+    }
+  },
+  "export_options": {
+    "ExportOptionsPNG24": {
+      "className": "ExportOptionsPNG24",
+      "typename": "ExportOptionsPNG24",
+      "properties": [
+        {
+          "name": "antiAliasing",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "artBoardClipping",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "dimensions",
+          "access": "readwrite",
+          "declaredType": "Dimensions",
+          "runtimeType": "Dimensions",
+          "defaultValue": "<Dimensions>"
+        },
+        {
+          "name": "horizontalScale",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 100
+        },
+        {
+          "name": "matte",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "matteColor",
+          "access": "readwrite",
+          "declaredType": "RGBColor",
+          "runtimeType": "RGBColor",
+          "defaultValue": "<RGBColor>"
+        },
+        {
+          "name": "saveAsHTML",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "transparency",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "verticalScale",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 100
+        }
+      ]
+    },
+    "ExportOptionsPNG8": {
+      "className": "ExportOptionsPNG8",
+      "typename": "ExportOptionsPNG8",
+      "properties": [
+        {
+          "name": "antiAliasing",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "artBoardClipping",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "colorCount",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 128
+        },
+        {
+          "name": "colorDither",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "ColorDitherMethod.DIFFUSION",
+          "defaultValue": "<ColorDitherMethod.DIFFUSION>"
+        },
+        {
+          "name": "colorReduction",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "ColorReductionMethod.SELECTIVE",
+          "defaultValue": "<ColorReductionMethod.SELECTIVE>"
+        },
+        {
+          "name": "ditherPercent",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 88
+        },
+        {
+          "name": "horizontalScale",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 100
+        },
+        {
+          "name": "interlaced",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "matte",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "matteColor",
+          "access": "readwrite",
+          "declaredType": "RGBColor",
+          "runtimeType": "RGBColor",
+          "defaultValue": "<RGBColor>"
+        },
+        {
+          "name": "saveAsHTML",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "transparency",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "verticalScale",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 100
+        },
+        {
+          "name": "webSnap",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 0
+        }
+      ]
+    },
+    "ExportOptionsJPEG": {
+      "className": "ExportOptionsJPEG",
+      "typename": "ExportOptionsJPEG",
+      "properties": [
+        {
+          "name": "antiAliasing",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "artBoardClipping",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "blurAmount",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 0
+        },
+        {
+          "name": "horizontalScale",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 100
+        },
+        {
+          "name": "matte",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "matteColor",
+          "access": "readwrite",
+          "declaredType": "RGBColor",
+          "runtimeType": "RGBColor",
+          "defaultValue": "<RGBColor>"
+        },
+        {
+          "name": "optimization",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "qualitySetting",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 30
+        },
+        {
+          "name": "saveAsHTML",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "verticalScale",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 100
+        }
+      ]
+    },
+    "ExportOptionsGIF": {
+      "className": "ExportOptionsGIF",
+      "typename": "ExportOptionsGIF",
+      "properties": [
+        {
+          "name": "antiAliasing",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "artBoardClipping",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "colorCount",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 128
+        },
+        {
+          "name": "colorDither",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "ColorDitherMethod.DIFFUSION",
+          "defaultValue": "<ColorDitherMethod.DIFFUSION>"
+        },
+        {
+          "name": "colorReduction",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "ColorReductionMethod.SELECTIVE",
+          "defaultValue": "<ColorReductionMethod.SELECTIVE>"
+        },
+        {
+          "name": "ditherPercent",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 88
+        },
+        {
+          "name": "horizontalScale",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 100
+        },
+        {
+          "name": "infoLossPercent",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 0
+        },
+        {
+          "name": "interlaced",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "matte",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "matteColor",
+          "access": "readwrite",
+          "declaredType": "RGBColor",
+          "runtimeType": "RGBColor",
+          "defaultValue": "<RGBColor>"
+        },
+        {
+          "name": "saveAsHTML",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "transparency",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "verticalScale",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 100
+        },
+        {
+          "name": "webSnap",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 0
+        }
+      ]
+    },
+    "ExportOptionsSVG": {
+      "className": "ExportOptionsSVG",
+      "typename": "ExportOptionsSVG",
+      "properties": [
+        {
+          "name": "DTD",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "SVGDTDVersion.SVG1_1",
+          "defaultValue": "<SVGDTDVersion.SVG1_1>"
+        },
+        {
+          "name": "artboardRange",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "defaultValue": ""
+        },
+        {
+          "name": "compressed",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "coordinatePrecision",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 3
+        },
+        {
+          "name": "cssProperties",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "SVGCSSPropertyLocation.STYLEATTRIBUTES",
+          "defaultValue": "<SVGCSSPropertyLocation.STYLEATTRIBUTES>"
+        },
+        {
+          "name": "documentEncoding",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "SVGDocumentEncoding.ASCII",
+          "defaultValue": "<SVGDocumentEncoding.ASCII>"
+        },
+        {
+          "name": "embedRasterImages",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "fontSubsetting",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "SVGFontSubsetting.ALLGLYPHS",
+          "defaultValue": "<SVGFontSubsetting.ALLGLYPHS>"
+        },
+        {
+          "name": "fontType",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "SVGFontType.SVGFONT",
+          "defaultValue": "<SVGFontType.SVGFONT>"
+        },
+        {
+          "name": "includeFileInfo",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "includeUnusedStyles",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "includeVariablesAndDatasets",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "optimizeForSVGViewer",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "preserveEditability",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "sVGAutoKerning",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "sVGTextOnPath",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "saveMultipleArtboards",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "slices",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        }
+      ]
+    },
+    "ExportOptionsWebOptimizedSVG": {
+      "className": "ExportOptionsWebOptimizedSVG",
+      "typename": "ExportOptionsWebOptimizedSVG",
+      "properties": [
+        {
+          "name": "artboardRange",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "defaultValue": ""
+        },
+        {
+          "name": "coordinatePrecision",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 3
+        },
+        {
+          "name": "cssProperties",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "SVGCSSPropertyLocation.STYLEATTRIBUTES",
+          "defaultValue": "<SVGCSSPropertyLocation.STYLEATTRIBUTES>"
+        },
+        {
+          "name": "fontType",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "SVGFontType.SVGFONT",
+          "defaultValue": "<SVGFontType.SVGFONT>"
+        },
+        {
+          "name": "rasterImageLocation",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "RasterImageLocation.PRESERVE",
+          "defaultValue": "<RasterImageLocation.PRESERVE>"
+        },
+        {
+          "name": "saveMultipleArtboards",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "svgId",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "SVGIdType.SVGIDREGULAR",
+          "defaultValue": "<SVGIdType.SVGIDREGULAR>"
+        },
+        {
+          "name": "svgMinify",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "svgResponsive",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        }
+      ]
+    },
+    "ExportOptionsTIFF": {
+      "className": "ExportOptionsTIFF",
+      "typename": "ExportOptionsTIFF",
+      "properties": [
+        {
+          "name": "antiAliasing",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "AntiAliasingMethod.ARTOPTIMIZED",
+          "defaultValue": "<AntiAliasingMethod.ARTOPTIMIZED>"
+        },
+        {
+          "name": "artboardRange",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "defaultValue": ""
+        },
+        {
+          "name": "byteOrder",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "TIFFByteOrder.IBMPC",
+          "defaultValue": "<TIFFByteOrder.IBMPC>"
+        },
+        {
+          "name": "embedICCProfile",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "imageColorSpace",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "ImageColorSpace.RGB",
+          "defaultValue": "<ImageColorSpace.RGB>"
+        },
+        {
+          "name": "lZWCompression",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "resolution",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 150
+        },
+        {
+          "name": "saveMultipleArtboards",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        }
+      ]
+    },
+    "ExportOptionsPhotoshop": {
+      "className": "ExportOptionsPhotoshop",
+      "typename": "ExportOptionsPhotoshop",
+      "properties": [
+        {
+          "name": "antiAliasing",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "artboardRange",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "defaultValue": ""
+        },
+        {
+          "name": "editableText",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "embedICCProfile",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "imageColorSpace",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "ImageColorSpace.RGB",
+          "defaultValue": "<ImageColorSpace.RGB>"
+        },
+        {
+          "name": "maximumEditability",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "resolution",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 150
+        },
+        {
+          "name": "saveMultipleArtboards",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "warnings",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "writeLayers",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        }
+      ]
+    },
+    "ExportOptionsAutoCAD": {
+      "className": "ExportOptionsAutoCAD",
+      "typename": "ExportOptionsAutoCAD",
+      "properties": [
+        {
+          "name": "alterPathsForAppearance",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "colors",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "AutoCADColors.TrueColors",
+          "defaultValue": "<AutoCADColors.TrueColors>"
+        },
+        {
+          "name": "convertTextToOutlines",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "exportFileFormat",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "AutoCADExportFileFormat.DWG",
+          "defaultValue": "<AutoCADExportFileFormat.DWG>"
+        },
+        {
+          "name": "exportOption",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "AutoCADExportOption.MaximumEditability",
+          "defaultValue": "<AutoCADExportOption.MaximumEditability>"
+        },
+        {
+          "name": "exportSelectedArtOnly",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "rasterFormat",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "AutoCADRasterFormat.PNG",
+          "defaultValue": "<AutoCADRasterFormat.PNG>"
+        },
+        {
+          "name": "scaleLineweights",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "unit",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "AutoCADUnit.Millimeters",
+          "defaultValue": "<AutoCADUnit.Millimeters>"
+        },
+        {
+          "name": "unitScaleRatio",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 1
+        },
+        {
+          "name": "version",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "AutoCADCompatibility.AutoCADRelease24",
+          "defaultValue": "<AutoCADCompatibility.AutoCADRelease24>"
+        }
+      ]
+    },
+    "ExportOptionsWebP": {
+      "className": "ExportOptionsWebP",
+      "typename": "ExportOptionsWebP",
+      "properties": [
+        {
+          "name": "antiAliasing",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "AntiAliasingMethod.TYPEOPTIMIZED",
+          "defaultValue": "<AntiAliasingMethod.TYPEOPTIMIZED>"
+        },
+        {
+          "name": "embedICCProfile",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "imageQuality",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 100
+        },
+        {
+          "name": "includeMetadata",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "isTransparent",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "losslessCompression",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "matteColor",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "defaultValue": null
+        },
+        {
+          "name": "pPI",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 72
+        }
+      ]
+    },
+    "ExportOptionsAVIF": {
+      "className": "ExportOptionsAVIF",
+      "typename": "ExportOptionsAVIF",
+      "properties": [
+        {
+          "name": "antiAliasing",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "AntiAliasingMethod.TYPEOPTIMIZED",
+          "defaultValue": "<AntiAliasingMethod.TYPEOPTIMIZED>"
+        },
+        {
+          "name": "embedICCProfile",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "imageQuality",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 63
+        },
+        {
+          "name": "includeMetadata",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "isTransparent",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "losslessCompression",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "matteColor",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "defaultValue": null
+        },
+        {
+          "name": "pPI",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 72
+        }
+      ]
+    },
+    "ExportForScreensOptionsPNG24": {
+      "className": "ExportForScreensOptionsPNG24",
+      "typename": "ExportForScreensOptionsPNG24",
+      "properties": [
+        {
+          "name": "antiAliasing",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "AntiAliasingMethod.ARTOPTIMIZED",
+          "defaultValue": "<AntiAliasingMethod.ARTOPTIMIZED>"
+        },
+        {
+          "name": "backgroundBlack",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "interlaced",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "scaleType",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "ExportForScreensScaleType.SCALEBYFACTOR",
+          "defaultValue": "<ExportForScreensScaleType.SCALEBYFACTOR>"
+        },
+        {
+          "name": "scaleTypeValue",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 1
+        },
+        {
+          "name": "transparency",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        }
+      ]
+    },
+    "ExportForScreensOptionsPNG8": {
+      "className": "ExportForScreensOptionsPNG8",
+      "typename": "ExportForScreensOptionsPNG8",
+      "properties": [
+        {
+          "name": "antiAliasing",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "AntiAliasingMethod.ARTOPTIMIZED",
+          "defaultValue": "<AntiAliasingMethod.ARTOPTIMIZED>"
+        },
+        {
+          "name": "colorCount",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 128
+        },
+        {
+          "name": "interlaced",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "matte",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "matteColor",
+          "access": "readwrite",
+          "declaredType": "RGBColor",
+          "runtimeType": "RGBColor",
+          "defaultValue": "<RGBColor>"
+        },
+        {
+          "name": "scaleType",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "ExportForScreensScaleType.SCALEBYFACTOR",
+          "defaultValue": "<ExportForScreensScaleType.SCALEBYFACTOR>"
+        },
+        {
+          "name": "scaleTypeValue",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 1
+        },
+        {
+          "name": "transparency",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        }
+      ]
+    },
+    "ExportForScreensOptionsJPEG": {
+      "className": "ExportForScreensOptionsJPEG",
+      "typename": "ExportForScreensOptionsJPEG",
+      "properties": [
+        {
+          "name": "antiAliasing",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "AntiAliasingMethod.ARTOPTIMIZED",
+          "defaultValue": "<AntiAliasingMethod.ARTOPTIMIZED>"
+        },
+        {
+          "name": "compressionMethod",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "JPEGCompressionMethodType.BASELINESTANDARD",
+          "defaultValue": "<JPEGCompressionMethodType.BASELINESTANDARD>"
+        },
+        {
+          "name": "embedICCProfile",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "progressiveScan",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 3
+        },
+        {
+          "name": "scaleType",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "ExportForScreensScaleType.SCALEBYFACTOR",
+          "defaultValue": "<ExportForScreensScaleType.SCALEBYFACTOR>"
+        },
+        {
+          "name": "scaleTypeValue",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 1
+        }
+      ]
+    },
+    "ExportForScreensOptionsWebOptimizedSVG": {
+      "className": "ExportForScreensOptionsWebOptimizedSVG",
+      "typename": "ExportForScreensOptionsWebOptimizedSVG",
+      "properties": [
+        {
+          "name": "coordinatePrecision",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 3
+        },
+        {
+          "name": "cssProperties",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "SVGCSSPropertyLocation.STYLEATTRIBUTES",
+          "defaultValue": "<SVGCSSPropertyLocation.STYLEATTRIBUTES>"
+        },
+        {
+          "name": "fontType",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "SVGFontType.SVGFONT",
+          "defaultValue": "<SVGFontType.SVGFONT>"
+        },
+        {
+          "name": "rasterImageLocation",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "RasterImageLocation.PRESERVE",
+          "defaultValue": "<RasterImageLocation.PRESERVE>"
+        },
+        {
+          "name": "svgId",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "SVGIdType.SVGIDREGULAR",
+          "defaultValue": "<SVGIdType.SVGIDREGULAR>"
+        },
+        {
+          "name": "svgMinify",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "svgResponsive",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        }
+      ]
+    },
+    "ExportForScreensOptionsWebP": {
+      "className": "ExportForScreensOptionsWebP",
+      "typename": "ExportForScreensOptionsWebP",
+      "properties": [
+        {
+          "name": "antiAliasing",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "AntiAliasingMethod.TYPEOPTIMIZED",
+          "defaultValue": "<AntiAliasingMethod.TYPEOPTIMIZED>"
+        },
+        {
+          "name": "embedICCProfile",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "imageQuality",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 100
+        },
+        {
+          "name": "includeMetadata",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "isTransparent",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "losslessCompression",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "matteColor",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "defaultValue": null
+        },
+        {
+          "name": "pPI",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 72
+        },
+        {
+          "name": "scaleType",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "ExportForScreensScaleType.SCALEBYFACTOR",
+          "defaultValue": "<ExportForScreensScaleType.SCALEBYFACTOR>"
+        },
+        {
+          "name": "scaleTypeValue",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 1
+        }
+      ]
+    },
+    "ExportForScreensOptionsAVIF": {
+      "className": "ExportForScreensOptionsAVIF",
+      "typename": "ExportForScreensOptionsAVIF",
+      "properties": [
+        {
+          "name": "antiAliasing",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "AntiAliasingMethod.TYPEOPTIMIZED",
+          "defaultValue": "<AntiAliasingMethod.TYPEOPTIMIZED>"
+        },
+        {
+          "name": "embedICCProfile",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "imageQuality",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 63
+        },
+        {
+          "name": "includeMetadata",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "isTransparent",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "losslessCompression",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "matteColor",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "defaultValue": null
+        },
+        {
+          "name": "pPI",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 72
+        },
+        {
+          "name": "scaleType",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "ExportForScreensScaleType.SCALEBYFACTOR",
+          "defaultValue": "<ExportForScreensScaleType.SCALEBYFACTOR>"
+        },
+        {
+          "name": "scaleTypeValue",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 1
+        }
+      ]
+    },
+    "ExportForScreensPDFOptions": {
+      "className": "ExportForScreensPDFOptions",
+      "typename": "ExportForScreensPDFOptions",
+      "properties": [
+        {
+          "name": "pdfPreset",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "defaultValue": ""
+        }
+      ]
+    },
+    "ExportForScreensItemToExport": {
+      "className": "ExportForScreensItemToExport",
+      "typename": "ExportForScreensItemToExport",
+      "properties": [
+        {
+          "name": "artboards",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "defaultValue": "all"
+        },
+        {
+          "name": "assets",
+          "access": "readwrite",
+          "declaredType": "array",
+          "runtimeType": "Array(0)",
+          "defaultValue": []
+        },
+        {
+          "name": "document",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        }
+      ]
+    },
+    "RasterizeOptions": {
+      "className": "RasterizeOptions",
+      "typename": "RasterizeOptions",
+      "properties": [
+        {
+          "name": "antiAliasingMethod",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "AntiAliasingMethod.ARTOPTIMIZED",
+          "defaultValue": "<AntiAliasingMethod.ARTOPTIMIZED>"
+        },
+        {
+          "name": "backgroundBlack",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "clippingMask",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "colorModel",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "RasterizationColorModel.DEFAULTCOLORMODEL",
+          "defaultValue": "<RasterizationColorModel.DEFAULTCOLORMODEL>"
+        },
+        {
+          "name": "convertSpotColors",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "convertTextToOutlines",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "includeLayers",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "padding",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 0
+        },
+        {
+          "name": "resolution",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 300
+        },
+        {
+          "name": "transparency",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": false
+        }
+      ]
+    },
+    "DocumentPreset": {
+      "className": "DocumentPreset",
+      "typename": "DocumentPreset",
+      "properties": [
+        {
+          "name": "artboardLayout",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "DocumentArtboardLayout.GridByRow",
+          "defaultValue": "<DocumentArtboardLayout.GridByRow>"
+        },
+        {
+          "name": "artboardRowsOrCols",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 1
+        },
+        {
+          "name": "artboardSpacing",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 20
+        },
+        {
+          "name": "colorMode",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "DocumentColorSpace.CMYK",
+          "defaultValue": "<DocumentColorSpace.CMYK>"
+        },
+        {
+          "name": "documentBleedLink",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "documentBleedOffset",
+          "access": "readwrite",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "defaultValue": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "height",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 792
+        },
+        {
+          "name": "numArtboards",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 1
+        },
+        {
+          "name": "previewMode",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "DocumentPreviewMode.DefaultPreview",
+          "defaultValue": "<DocumentPreviewMode.DefaultPreview>"
+        },
+        {
+          "name": "rasterResolution",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "DocumentRasterResolution.ScreenResolution",
+          "defaultValue": "<DocumentRasterResolution.ScreenResolution>"
+        },
+        {
+          "name": "title",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "defaultValue": "Untitled"
+        },
+        {
+          "name": "transparencyGrid",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "DocumentTransparencyGrid.TransparencyGridNone",
+          "defaultValue": "<DocumentTransparencyGrid.TransparencyGridNone>"
+        },
+        {
+          "name": "units",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "RulerUnits.Points",
+          "defaultValue": "<RulerUnits.Points>"
+        },
+        {
+          "name": "width",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "defaultValue": 612
+        }
+      ]
+    }
+  }
+}
