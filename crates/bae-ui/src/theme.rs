@@ -95,8 +95,48 @@ pub const LABELS: [(&str, Color32); 17] = [
     ("Dark Green", rgb(0x2c, 0x43, 0x2c)),
 ];
 
+const fn default_label_colors() -> [Color32; 17] {
+    let mut out = [Color32::BLACK; 17];
+    let mut i = 0;
+    while i < 17 {
+        out[i] = LABELS[i].1;
+        i += 1;
+    }
+    out
+}
+
+/// Label colors in use (Preferences > Labels; [`set_label_colors`]).
+static LABEL_COLORS: std::sync::RwLock<[Color32; 17]> =
+    std::sync::RwLock::new(default_label_colors());
+/// Label names the user changed (Preferences > Labels); `None`: the default.
+static LABEL_NAMES: std::sync::RwLock<[Option<String>; 17]> =
+    std::sync::RwLock::new([const { None }; 17]);
+
+/// Uses `colors` for labels 0..=16 from now on (index 0, None, stays fixed).
+pub fn set_label_colors(colors: [Color32; 17]) {
+    let mut table = LABEL_COLORS.write().unwrap_or_else(|e| e.into_inner());
+    *table = colors;
+    table[0] = LABELS[0].1;
+}
+
+/// Uses `names` for labels (`None` or the English default: the translated default).
+pub fn set_label_names(names: [Option<String>; 17]) {
+    *LABEL_NAMES.write().unwrap_or_else(|e| e.into_inner()) = names;
+}
+
+/// Color of label `index` (Preferences > Labels).
 pub fn label_color(index: usize) -> Color32 {
-    LABELS.get(index).map_or(LABELS[0].1, |l| l.1)
+    let table = LABEL_COLORS.read().unwrap_or_else(|e| e.into_inner());
+    table.get(index).copied().unwrap_or(table[0])
+}
+
+/// Name of label `index` as shown (the user's name or the translated default).
+pub fn label_name(index: usize) -> String {
+    let names = LABEL_NAMES.read().unwrap_or_else(|e| e.into_inner());
+    match names.get(index).and_then(Option::as_ref) {
+        Some(name) => name.clone(),
+        None => crate::i18n::tr(LABELS.get(index).map_or(LABELS[0].0, |l| l.0)).to_owned(),
+    }
 }
 
 /// Layer bar color in the timeline: the label color pulled toward the timeline background.
@@ -115,6 +155,130 @@ pub fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
 pub fn brighten(c: Color32, amount: i16) -> Color32 {
     let f = |x: u8| (x as i16 + amount).clamp(0, 255) as u8;
     Color32::from_rgba_unmultiplied(f(c.r()), f(c.g()), f(c.b()), c.a())
+}
+
+/// Preferences > Appearance: every color the UI draws goes through [`adjust`]
+/// (the shell applies it to the tessellated frame, [`apply_appearance`]), so the
+/// theme tokens stay constants.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Appearance {
+    /// Brightness slider, 0 (AE 2026 default, darkest) ..= 1 (lightest).
+    pub brightness: f32,
+    /// Also lighten label colors.
+    pub affect_labels: bool,
+    /// Interactive Controls slider, 0 ..= 1 (0.5 default).
+    pub interactive: f32,
+    /// Focus Indicator slider, 0 ..= 1 (0.5 default).
+    pub focus: f32,
+}
+
+impl Default for Appearance {
+    fn default() -> Self {
+        Appearance {
+            brightness: 0.0,
+            affect_labels: false,
+            interactive: 0.5,
+            focus: 0.5,
+        }
+    }
+}
+
+static APPEARANCE: std::sync::RwLock<Appearance> = std::sync::RwLock::new(Appearance {
+    brightness: 0.0,
+    affect_labels: false,
+    interactive: 0.5,
+    focus: 0.5,
+});
+
+/// Uses `a` from the next frame on.
+pub fn set_appearance(a: Appearance) {
+    *APPEARANCE.write().unwrap_or_else(|e| e.into_inner()) = a;
+}
+
+/// The appearance in use.
+pub fn appearance() -> Appearance {
+    *APPEARANCE.read().unwrap_or_else(|e| e.into_inner())
+}
+
+/// `c` (premultiplied) as drawn with appearance `a`.
+pub fn adjust(c: Color32, a: &Appearance, labels: &[Color32; 17]) -> Color32 {
+    let alpha = c.a();
+    if alpha == 0 {
+        return c;
+    }
+    let un = |v: u8| (f32::from(v) * 255.0 / f32::from(alpha)).min(255.0);
+    let (r, g, b) = (un(c.r()), un(c.g()), un(c.b()));
+    let lighten = |v: f32, amount: f32| v + (255.0 - v) * amount;
+    let darken = |v: f32, amount: f32| v * (1.0 - amount);
+    // Interactive controls and focus: lighter above 0.5, darker below.
+    let tone = |v: f32, t: f32| {
+        let k = (t - 0.5) * 0.8;
+        if k >= 0.0 {
+            lighten(v, k)
+        } else {
+            darken(v, -k)
+        }
+    };
+    let premul_eq = |token: Color32| {
+        let t = token.gamma_multiply(f32::from(alpha) / 255.0);
+        t.r().abs_diff(c.r()) <= 1 && t.g().abs_diff(c.g()) <= 1 && t.b().abs_diff(c.b()) <= 1
+    };
+    // FOCUS is one step away from ACCENT: match it exactly, first.
+    let mapped: Option<[f32; 3]> = if c == color::FOCUS.gamma_multiply(f32::from(alpha) / 255.0) {
+        (a.focus != 0.5).then(|| [tone(r, a.focus), tone(g, a.focus), tone(b, a.focus)])
+    } else if [
+        color::ACCENT,
+        color::ACCENT_HOVER,
+        color::ACCENT_DIM,
+        color::TOOL_SELECTED,
+    ]
+    .into_iter()
+    .any(premul_eq)
+    {
+        (a.interactive != 0.5).then(|| {
+            [
+                tone(r, a.interactive),
+                tone(g, a.interactive),
+                tone(b, a.interactive),
+            ]
+        })
+    } else {
+        let max = r.max(g).max(b);
+        let min = r.min(g).min(b);
+        let gray = max - min <= 6.0;
+        let label = a.affect_labels && labels[1..].iter().copied().any(premul_eq);
+        (a.brightness > 0.0 && (gray || label)).then(|| {
+            let k = a.brightness * 0.27;
+            [lighten(r, k), lighten(g, k), lighten(b, k)]
+        })
+    };
+    match mapped {
+        Some([r, g, b]) => {
+            let q = |v: f32| (v * f32::from(alpha) / 255.0).round().clamp(0.0, 255.0) as u8;
+            Color32::from_rgba_premultiplied(q(r), q(g), q(b), alpha)
+        }
+        None => c,
+    }
+}
+
+/// Applies the current [`Appearance`] to a tessellated frame. Only meshes drawn
+/// with egui's own texture (shapes and text) change; images and the viewer are
+/// left alone. Does nothing at the defaults.
+pub fn apply_appearance(prims: &mut [egui::ClippedPrimitive]) {
+    let a = appearance();
+    if a == Appearance::default() {
+        return;
+    }
+    let labels = *LABEL_COLORS.read().unwrap_or_else(|e| e.into_inner());
+    for prim in prims {
+        if let egui::epaint::Primitive::Mesh(mesh) = &mut prim.primitive
+            && mesh.texture_id == egui::TextureId::default()
+        {
+            for v in &mut mesh.vertices {
+                v.color = adjust(v.color, &a, &labels);
+            }
+        }
+    }
 }
 
 pub mod metrics {
