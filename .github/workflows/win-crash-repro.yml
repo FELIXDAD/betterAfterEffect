@@ -104,17 +104,17 @@ jobs:
                 id: "dispatch-\($j)", set: $set, threads: $threads, wrap: $wrap,
                 pageheap: $pageheap, fresh: $fresh, env: $env, debuglayer: $dl, n: $n }]}')"
           else
-            # The plan for pushes to ci/win-crash-repro. CI crashed (0xc0000005) in
-            # bae-render --test render (8 tests, each with its own WARP device) and in
-            # bae-text --test cpu (2 tests, 2 devices), never under procdump so far.
+            # The plan for pushes to ci/win-crash-repro. Run 44951964323 crashed 3 times in
+            # 2000 runs of bae-render --test render (dxilconv.dll, converting FXC's DXBC to
+            # DXIL for WARP during concurrent device creation). Controls: the same loop
+            # without the D3D12 debug layer, and with DXC (DXIL directly, no dxilconv).
             matrix='{"include":[
-              {"id":"render-wer-a","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"","n":"700"},
-              {"id":"render-wer-b","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"","n":"700"},
-              {"id":"render-wer-cold","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"true","env":"","n":"600"},
-              {"id":"render-t8-wer","set":"bae-render:render","threads":"8","wrap":"wer","pageheap":"false","fresh":"false","env":"","n":"700"},
-              {"id":"render-pageheap","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"true","fresh":"false","env":"","n":"150"},
-              {"id":"text-wer-cold","set":"bae-text:cpu","threads":"default","wrap":"wer","pageheap":"false","fresh":"true","env":"","n":"700"},
-              {"id":"gpu-all-wer","set":"gpu-all","threads":"default","wrap":"wer","pageheap":"false","fresh":"true","env":"","n":"40"}
+              {"id":"render-nodebuglayer-1","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"","debuglayer":"off","n":"700"},
+              {"id":"render-nodebuglayer-2","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"","debuglayer":"off","n":"700"},
+              {"id":"render-nodebuglayer-3","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"","debuglayer":"off","n":"700"},
+              {"id":"render-dxc-1","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"WGPU_DX12_COMPILER=dxc","debuglayer":"on","n":"700"},
+              {"id":"render-dxc-2","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"WGPU_DX12_COMPILER=dxc","debuglayer":"on","n":"700"},
+              {"id":"render-dxc-3","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"WGPU_DX12_COMPILER=dxc","debuglayer":"on","n":"700"}
             ]}'
             matrix="$(echo "$matrix" | jq -c .)"
           fi
