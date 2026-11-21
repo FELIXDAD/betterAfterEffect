@@ -1,6 +1,8 @@
 //! Native dialogs for the file commands (rfd): NSOpenPanel / NSSavePanel / NSAlert
 //! sheets on macOS, IFileOpenDialog / IFileSaveDialog / MessageBoxW on Windows,
-//! owned by the main window. Other platforms fall back to [`NoDialogs`].
+//! owned by the main window. Other platforms fall back to [`NoDialogs`]. Save As
+//! on Windows is our own IFileSaveDialog ([`super::win_save`]), which treats a
+//! `.bae` folder as the project it is instead of walking into it.
 //!
 //! A `.bae` project is a folder. macOS panels can pick a file or a folder, so the
 //! open panel accepts `.bae` folders and `.baez` files directly; Windows dialogs
@@ -64,17 +66,31 @@ impl FileDialogs for Native {
     }
 
     fn pick_save_path(&mut self, name: &str, dir: Option<&Path>) -> Option<PathBuf> {
-        let mut dialog = self
-            .files()
-            .set_title(tr("Save As"))
-            .set_file_name(name)
-            .set_format_label(tr("Format:"))
-            .add_filter(tr("BAE Project"), &["bae"])
-            .add_filter(tr("BAE Package"), &["baez"]);
-        if let Some(dir) = dir {
-            dialog = dialog.set_directory(dir);
+        #[cfg(target_os = "macos")]
+        {
+            let mut dialog = self
+                .files()
+                .set_title(tr("Save As"))
+                .set_file_name(name)
+                .set_format_label(tr("Format:"))
+                .add_filter(tr("BAE Project"), &["bae"])
+                .add_filter(tr("BAE Package"), &["baez"]);
+            if let Some(dir) = dir {
+                dialog = dialog.set_directory(dir);
+            }
+            dialog.save_file()
         }
-        dialog.save_file()
+        // Our own IFileSaveDialog: rfd's walks into `.bae` folders (issue #126).
+        #[cfg(windows)]
+        {
+            super::win_save::pick(&super::win_save::SaveRequest {
+                title: tr("Save As"),
+                name,
+                dir,
+                types: &[(tr("BAE Project"), "bae"), (tr("BAE Package"), "baez")],
+                parent: self.parent.as_deref().and_then(hwnd),
+            })
+        }
     }
 
     fn ask_unsaved(&mut self, name: &str) -> UnsavedChoice {
@@ -168,6 +184,18 @@ impl FileDialogs for Native {
             .set_description(detail)
             .set_buttons(rfd::MessageButtons::Ok)
             .show();
+    }
+}
+
+/// The window's Win32 handle, to own the save dialog.
+#[cfg(windows)]
+fn hwnd(window: &Window) -> Option<windows::Win32::Foundation::HWND> {
+    use winit::raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+    match window.window_handle().ok()?.as_raw() {
+        RawWindowHandle::Win32(handle) => Some(windows::Win32::Foundation::HWND(
+            handle.hwnd.get() as *mut std::ffi::c_void
+        )),
+        _ => None,
     }
 }
 
