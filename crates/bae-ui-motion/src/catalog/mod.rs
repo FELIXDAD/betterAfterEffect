@@ -338,10 +338,10 @@ pub fn display_chord(chord: &str, mac: bool) -> String {
             ("Minus", _) => "-",
             ("OpenBracket", _) => "[",
             ("CloseBracket", _) => "]",
-            ("ArrowLeft", _) => "←",
-            ("ArrowRight", _) => "→",
-            ("ArrowUp", _) => "↑",
-            ("ArrowDown", _) => "↓",
+            ("ArrowLeft", _) => "Left",
+            ("ArrowRight", _) => "Right",
+            ("ArrowUp", _) => "Up",
+            ("ArrowDown", _) => "Down",
             (other, _) => other,
         })
         .collect::<Vec<_>>()
