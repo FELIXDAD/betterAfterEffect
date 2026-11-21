@@ -466,3 +466,75 @@ fn module_publishes_commands() {
         assert!(c.info().params_schema.is_object(), "{}", c.info().id);
     }
 }
+
+#[test]
+fn delete_and_batch_edits() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let child = fx.layer(&comp, "null", json!({"position": [300.0, 200.0]}));
+    let parent = fx.layer(&comp, "null", json!({"position": [1000.0, 500.0]}));
+    fx.run("attr.set", json!({"path": parent, "attr": "transform:rotation", "value": {"type": "float", "value": 45.0}}));
+    fx.run(
+        "layer.set_parent",
+        json!({"layers": [child], "parent": parent}),
+    );
+    let before = fx.world_pos(&comp, &child);
+    // Deleting the parent unparents the child in place, in one undo step.
+    fx.run("layer.delete", json!({"layers": [parent]}));
+    assert!(!fx.stage.has_prim(&parent));
+    assert_eq!(fx.value(&child, "parent"), None);
+    assert!((fx.world_pos(&comp, &child) - before).length() < 1e-6);
+    fx.stage.undo(&fx.author).unwrap();
+    assert!(fx.stage.has_prim(&parent));
+    assert_eq!(
+        fx.value(&child, "parent"),
+        Some(Value::PrimRef(parent.clone()))
+    );
+
+    // Several values in one step.
+    fx.run("attr.set_many", json!({"edits": [
+        {"path": child, "attr": "transform:opacity", "time": 0, "value": {"type": "float", "value": 10.0}},
+        {"path": parent, "attr": "transform:opacity", "time": 0, "value": {"type": "float", "value": 20.0}}
+    ]}));
+    assert_eq!(
+        fx.value(&child, "transform:opacity"),
+        Some(Value::Float(10.0))
+    );
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(
+        fx.value(&parent, "transform:opacity"),
+        Some(Value::Float(100.0))
+    );
+    assert_eq!(
+        fx.value(&child, "transform:opacity"),
+        Some(Value::Float(100.0))
+    );
+
+    // A solid layer from an existing solid item reuses it.
+    let solid = fx.layer(&comp, "solid", json!({"size": [200, 100]}));
+    let item = fx
+        .value(&solid, "source")
+        .unwrap()
+        .as_prim_ref()
+        .unwrap()
+        .clone();
+    let again = fx.layer(&comp, "solid", json!({"source": item}));
+    assert_eq!(
+        fx.value(&again, "source"),
+        Some(Value::PrimRef(item.clone()))
+    );
+    assert_eq!(
+        fx.value(&again, "transform:anchor_point"),
+        Some(Value::Vec3([100.0, 50.0, 0.0]))
+    );
+
+    // Project items: a comp and a folder with contents, together.
+    let out = fx.run("folder.create", json!({"name": "Old"}));
+    let folder = p(out["path"].as_str().unwrap());
+    let inner = fx.run("comp.create", json!({"parent": folder}));
+    let inner = p(inner["path"].as_str().unwrap());
+    fx.run("item.delete", json!({"paths": [folder, inner, comp]}));
+    assert!(!fx.stage.has_prim(&folder));
+    assert!(!fx.stage.has_prim(&comp));
+    assert!(fx.stage.has_prim(&item));
+}

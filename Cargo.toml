@@ -68,6 +68,7 @@ bae-plugin-sdk = { path = "crates/bae-plugin-sdk" }
 bae-package = { path = "crates/bae-package" }
 bae-motion = { path = "crates/bae-motion" }
 bae-vector = { path = "crates/bae-vector" }
+bae-ui-motion = { path = "crates/bae-ui-motion" }
 bae-text = { path = "crates/bae-text" }
 
 # ---- GPU, rendering, text (one coherent Linebender/wgpu set) ----
@@ -217,6 +218,10 @@ incremental = false
 [profile.release.package.bae-ui]
 opt-level = "s"
 [profile.release.package.bae-agent]
+opt-level = "s"
+[profile.release.package.bae-ui-motion]
+opt-level = "s"
+[profile.release.package.bae-motion]
 opt-level = "s"
 [profile.release.package.bae-platform]
 opt-level = "s"
