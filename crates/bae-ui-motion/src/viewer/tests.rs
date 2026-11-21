@@ -1333,3 +1333,44 @@ fn free_transform_points_moves_and_scales_a_mask() {
     h.frame(Vec::new(), Modifiers::NONE);
     assert!(h.viewer.select.free.is_some());
 }
+
+/// Frame cost of the tool code on benchmark scene B1 (61 layers): idle, hover
+/// (hit testing and the hover outline) and a move drag (live preview). Run with
+/// `cargo test -p bae-ui-motion b1_tool_frames -- --ignored --nocapture`.
+#[test]
+#[ignore = "timing report, not a check"]
+fn b1_tool_frames() {
+    let dir = tempfile::tempdir().unwrap();
+    let (b, comp) = bae_render::fixture::b1(dir.path()).unwrap();
+    let mut h = H::new();
+    h.stage = b.into_stage();
+    h.comp = comp.clone();
+    h.session().lock().open_comp(&comp);
+    h.tools().lock().set(Tool::Selection);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let layers = query::comp_layers(&h.stage, &comp);
+    println!("B1: {} layers", layers.len());
+    let time = |h: &mut H, f: &mut dyn FnMut(&mut H, usize)| {
+        let t0 = std::time::Instant::now();
+        for i in 0..60 {
+            f(h, i);
+        }
+        t0.elapsed().as_secs_f64() * 1000.0 / 60.0
+    };
+    let idle = time(&mut h, &mut |h, _| {
+        h.frame(Vec::new(), Modifiers::NONE);
+    });
+    let hover = time(&mut h, &mut |h, i| {
+        let p = h.screen(200.0 + 20.0 * i as f64, 540.0);
+        h.move_to(p, Modifiers::NONE, Vec::new());
+    });
+    h.select(&[&layers[0]]);
+    let a = h.screen(960.0, 540.0);
+    h.move_to(a, Modifiers::NONE, Vec::new());
+    h.pointer_button(a, true, Modifiers::NONE);
+    let drag = time(&mut h, &mut |h, i| {
+        let p = a + vec2(3.0 * i as f32, 1.0 * i as f32);
+        h.move_to(p, Modifiers::NONE, Vec::new());
+    });
+    println!("ms/frame (debug build): idle {idle:.2}, hover {hover:.2}, drag {drag:.2}");
+}
