@@ -109,6 +109,9 @@ pub struct RenderQueue {
     items: Vec<QueueItem>,
     next_id: u64,
     running: bool,
+    /// Items of the running render (queued when Render was pressed; later ones
+    /// wait for the next Render, the snapshot does not have their edits).
+    batch: Vec<u64>,
     repaint: Option<egui::Context>,
 }
 
@@ -165,12 +168,14 @@ impl RenderQueue {
         self.items.len() != before
     }
 
-    /// Stops a rendering item (or drops a queued one back to canceled).
+    /// Stops a rendering item; a queued one is canceled and leaves the
+    /// running render (queued again, it waits for the next Render).
     pub fn cancel(&mut self, id: u64) {
-        if let Some(item) = self.item_mut(id) {
+        if let Some(item) = self.items.iter_mut().find(|i| i.id == id) {
             item.cancel.store(true, Ordering::Relaxed);
             if item.status == ItemStatus::Queued {
                 item.status = ItemStatus::Canceled;
+                self.batch.retain(|b| *b != id);
             }
         }
     }
@@ -193,12 +198,30 @@ impl RenderQueue {
             .count()
     }
 
-    /// Takes the next queued item for rendering.
+    /// Starts a render of the items queued now. `false` when already
+    /// rendering or nothing is queued.
+    fn begin(&mut self) -> bool {
+        if self.running || self.queued() == 0 {
+            return false;
+        }
+        self.running = true;
+        self.batch = self
+            .items
+            .iter()
+            .filter(|i| i.status == ItemStatus::Queued)
+            .map(|i| i.id)
+            .collect();
+        true
+    }
+
+    /// Takes the next item of the running render.
     fn take_next(&mut self) -> Option<Job> {
+        let batch = &mut self.batch;
         let item = self
             .items
             .iter_mut()
-            .find(|i| i.status == ItemStatus::Queued)?;
+            .find(|i| i.status == ItemStatus::Queued && batch.contains(&i.id))?;
+        batch.retain(|id| *id != item.id);
         item.status = ItemStatus::Rendering {
             done: 0,
             total: item.frame_count(),
@@ -392,12 +415,8 @@ pub fn start(
         .get::<PreviewSources>()
         .map(|s| provider_list(&s.0))
         .unwrap_or_default();
-    {
-        let mut q = queue.lock();
-        if q.running || q.queued() == 0 {
-            return Ok(());
-        }
-        q.running = true;
+    if !queue.lock().begin() {
+        return Ok(());
     }
     let snapshot = match StageSnapshot::take(stage) {
         Ok(snapshot) => snapshot,
@@ -470,6 +489,7 @@ pub(crate) fn run_worker(
     }
     let mut q = queue.lock();
     q.running = false;
+    q.batch.clear();
     if let Some(ctx) = &q.repaint {
         ctx.request_repaint();
     }
@@ -726,6 +746,9 @@ mod tests {
         assert_eq!(q.queued(), 2);
 
         // Taking a job marks it rendering; it cannot be removed meanwhile.
+        assert!(q.begin());
+        assert!(!q.begin(), "already rendering");
+        let late = q.add(&comp_info("/comps/late", "Late"), dir);
         let job = q.take_next().unwrap();
         assert_eq!((job.id, job.start, job.end), (a, 3, 8));
         assert!(matches!(
@@ -745,6 +768,10 @@ mod tests {
         q.requeue(b);
         assert_eq!(q.items()[1].status, ItemStatus::Queued);
         assert!(!q.items()[1].cancel.load(Ordering::Relaxed));
+        // Queued after Render was pressed: waits for the next render.
+        assert!(q.take_next().is_none());
+        assert_eq!(q.items()[2].status, ItemStatus::Queued);
+        assert!(q.remove(late));
         assert!(q.remove(b));
         assert_eq!(q.items().len(), 1);
         assert_eq!(sanitize("  ../a#b  "), "_a_b");
@@ -834,7 +861,7 @@ mod tests {
                 .join("blocker/f_####.png")
                 .to_string_lossy()
                 .into();
-            q.running = true;
+            assert!(q.begin());
             (png, tiff, stopped, bad)
         };
         // Stopped before its turn: canceled, nothing written.
