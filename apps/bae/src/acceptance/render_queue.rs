@@ -662,15 +662,9 @@ fn progress_of_a_limited_range_counts_the_frames_it_renders() {
         items(&h)[i].status
     );
     let item = items(&h)[i].clone();
-    // Only the progress once frames are rendering: between taking the item and
-    // limiting its range, the worker briefly shows “0 / 121” (issue #157). A UI
-    // frame sees that state only if it lands in that gap, so checking it here
-    // made this test pass or fail by timing.
-    let totals: std::collections::BTreeSet<usize> = seen
-        .iter()
-        .filter(|(done, _)| *done > 0)
-        .map(|(_, total)| *total)
-        .collect();
+    // Every state counts, the first “0 / x” included: the worker limits the
+    // range when it takes the item (issue #157).
+    let totals: std::collections::BTreeSet<usize> = seen.iter().map(|(_, total)| *total).collect();
     println!("progress seen: {seen:?}");
     assert!(
         totals.iter().all(|t| *t == 20) || (item.start, item.end) == (1780, 1799),
