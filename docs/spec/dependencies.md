@@ -117,6 +117,7 @@ wgpu v30.0.2
 | wgpu-types | 30.0.2 | `std` | bae-gpu（加 `serde`，用于 `gpu-info --json`）；19、04（只要类型的地方） | 必须与 wgpu 同版本 |
 | vello | 0.12.0 | `wgpu` | dep-probe；04、05 | 最新。要求 wgpu `^30.0.0`、peniko `^0.6.1`、skrifa `^0.49.0` |
 | peniko | 0.6.1 | 默认 | dep-probe；04、05、16 | 最新；= vello 0.12.0 的要求。带入 kurbo `^0.13.1`、color `^0.3.3` |
+| vello_cpu | 0.1.0 | 关默认，只开 `std`、`u8_pipeline` | 05（bae-vector / bae-text 的 `render`：软件适配器上的矢量和文字栅格化） | = egui 0.36.2 的 epaint 已链接的版本（不新增 crate）。WARP 等软件适配器上 Vello 的计算管线会让进程崩溃，05 在那里改用它 |
 | kurbo | 0.13.1 | 默认 | dep-probe；03、05、13、16 | 最新；= peniko 0.6.1 的要求 |
 | parley | 0.13.0 | `std`、`system` | dep-probe；05 | 最新。经 parley_engine 要求 skrifa `^0.49.0`、harfrust `^0.15.0` |
 | fontique | 0.13.0 | `std`、`system` | dep-probe；05 | = parley 0.13.0 的要求。要求 read-fonts `^0.46.0` |
