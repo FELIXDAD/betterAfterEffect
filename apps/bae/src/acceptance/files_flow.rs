@@ -344,15 +344,19 @@ fn finder_open_goes_through_the_open_flow() {
     let opened_export = export_file(&folder);
     assert!(open_files_invocation(&[]).is_none());
 
-    for (target, choice) in [
+    for (i, (target, choice)) in [
         (&folder, UnsavedChoice::Cancel),
         (&folder, UnsavedChoice::DontSave),
         (&packed, UnsavedChoice::DontSave),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let case = format!("{} / {choice:?}", target.display());
         let mut h = gui();
         comp_with(&mut h, &["motion.layer.new.solid"]);
-        let mine = dir.join(format!("当前 {choice:?}.bae"));
+        // A new name per case: saving over an existing project asks first (#126).
+        let mine = dir.join(format!("当前 {choice:?} {i}.bae"));
         save_as(&mut h, mine.clone());
         key(&mut h, Modifiers::COMMAND, Key::Y); // an unsaved edit
         let edited = export(&h);
@@ -514,10 +518,13 @@ fn save_as_over_existing_projects_replaces_them() {
     let mut h = gui();
     comp_with(&mut h, &["motion.layer.new.solid"]);
     let mine = export(&h);
-    // The OS save panel asks "Replace?"; answering Replace returns the path.
+    // A .bae is a folder on Windows (and in a bare binary on macOS): BAE asks
+    // "Replace?" itself (issue #126). For the .baez file the OS save panel asks.
+    h.state_mut().dialogs.replace.push_back(true);
     save_as(&mut h, bae.clone());
     save_as(&mut h, baez.clone());
     no_surprises(&h);
+    assert_eq!(h.state().dialogs.asked_replace, ["已有 工程.bae"]);
     assert_eq!(export_file(&bae), mine, ".bae not replaced");
     assert_eq!(export_file(&baez), mine, ".baez not replaced");
     // No stray staging folders or temporary files next to them.
@@ -531,6 +538,122 @@ fn save_as_over_existing_projects_replaces_them() {
             .all(|n| n == "已有 工程.bae" || n == "已有 工程.baez"),
         "leftovers: {names:?}"
     );
+}
+
+/// Issue #126: Windows save dialogs walk into an existing `.bae` folder; a path
+/// inside a project (or the project folder itself) means replacing that
+/// project, after asking — never a project nested inside another.
+#[test]
+fn save_as_into_an_existing_project_folder_replaces_it_after_asking() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tricky_dir(tmp.path());
+    let existing = dir.join("e_ow2.bae");
+    {
+        let mut h = gui();
+        comp_with(&mut h, &["motion.layer.new.null"]);
+        save_as(&mut h, existing.clone());
+        no_surprises(&h);
+    }
+    let old = export_file(&existing);
+    let mut h = gui();
+    comp_with(
+        &mut h,
+        &["motion.layer.new.solid", "motion.layer.new.solid"],
+    );
+    let mine = export(&h);
+
+    // The dialog walked into the folder and the user clicked Save again:
+    // e_ow2.bae/e_ow2.bae. Cancel at BAE's question: nothing changes.
+    let nested = existing.join("e_ow2.bae");
+    h.state_mut().dialogs.replace.push_back(false);
+    save_as(&mut h, nested.clone());
+    assert_eq!(h.state().dialogs.asked_replace, ["e_ow2.bae"]);
+    assert_eq!(export_file(&existing), old, "cancel changed the project");
+    assert!(!nested.exists(), "a project was nested inside another");
+    assert!(h.state().doc.is_dirty() && h.state().doc.location().is_none());
+
+    // The same, answering Replace: the outer project is replaced.
+    h.state_mut().dialogs.replace.push_back(true);
+    save_as(&mut h, nested.clone());
+    no_surprises(&h);
+    assert_eq!(export_file(&existing), mine, "not replaced");
+    assert!(!nested.exists(), "a project was nested inside another");
+    assert_eq!(h.state().doc.location(), Some(existing.as_path()));
+    assert!(!h.state().doc.is_dirty());
+    // Any other name inside it means the same project.
+    key(&mut h, Modifiers::COMMAND, Key::Y);
+    let edited = export(&h);
+    save_as(&mut h, existing.join("sublayers").join("别的 名字.bae"));
+    no_surprises(&h);
+    assert_eq!(
+        h.state().dialogs.asked_replace.len(),
+        2,
+        "saving into the open project's own folder asks nothing"
+    );
+    assert_eq!(export_file(&existing), edited);
+    assert!(!existing.join("sublayers").join("别的 名字.bae").exists());
+
+    // A folder with a project's name that is not a project is refused.
+    let foreign = dir.join("别人的.bae");
+    fs::create_dir(&foreign).unwrap();
+    fs::write(foreign.join("notes.txt"), "keep me").unwrap();
+    save_as(&mut h, foreign.clone());
+    let errors = std::mem::take(&mut h.state_mut().dialogs.errors);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(errors[0].contains("别人的.bae"), "{}", errors[0]);
+    assert_eq!(
+        fs::read_to_string(foreign.join("notes.txt")).unwrap(),
+        "keep me"
+    );
+    assert!(!foreign.join("project.json").exists());
+
+    // No staging or backup folders are left next to the project.
+    let names: Vec<String> = fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        names.iter().all(|n| !n.starts_with('.')),
+        "leftovers: {names:?}"
+    );
+}
+
+/// Issue #126: replacing goes through a temporary folder; when it fails the
+/// existing project is left exactly as it was.
+#[cfg(unix)]
+#[test]
+fn a_failed_replace_leaves_the_existing_project() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("只读 上级");
+    fs::create_dir(&dir).unwrap();
+    let existing = dir.join("原来的.bae");
+    {
+        let mut h = gui();
+        comp_with(&mut h, &["motion.layer.new.null"]);
+        save_as(&mut h, existing.clone());
+        no_surprises(&h);
+    }
+    let old = export_file(&existing);
+    // The parent folder becomes read-only: no temporary folder can be made.
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    h.state_mut().dialogs.replace.push_back(true);
+    save_as(&mut h, existing.clone());
+    let errors = std::mem::take(&mut h.state_mut().dialogs.errors);
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+    if std::env::var("USER").is_ok_and(|u| u == "root") {
+        return;
+    }
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        errors[0].contains("Could not save the project."),
+        "{}",
+        errors[0]
+    );
+    assert_eq!(export_file(&existing), old, "the existing project changed");
+    assert!(h.state().doc.is_dirty() && h.state().doc.location().is_none());
 }
 
 #[test]
@@ -899,4 +1022,135 @@ fn broken_files_are_explained_in_chinese_too() {
         fs::Permissions::from_mode(0o644),
     );
     println!("ZH ERRORS\n{}", report.join("\n"));
+}
+
+// ---- Retest of #131 / #111 (dev 277f11a) ----
+
+#[test]
+fn a_packed_project_reopens_with_its_comps() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tricky_dir(tmp.path());
+    let bae = dir.join("打包 前.bae");
+    let mut h = gui();
+    let (first, second, t1, t2) = two_comps_saved(&mut h, &bae);
+    // Pack it with `bae pack`'s own function, then open the package.
+    let baez = dir.join("打包 后.baez");
+    crate::pack_cli::pack(
+        &bae,
+        &baez,
+        &bae_package::PackOptions::default(),
+        bae_package::WriteOptions::default(),
+    )
+    .unwrap();
+    reopen(&mut h, &baez);
+    let s = h.state().session();
+    let s = s.lock();
+    assert_eq!(s.open_comps, [first.clone(), second.clone()]);
+    assert_eq!(s.active_comp.as_ref(), Some(&second));
+    assert_eq!((s.time(&first), s.time(&second)), (t1, t2));
+}
+
+#[test]
+fn save_errors_are_explained_in_chinese_too() {
+    if !in_child(
+        "acceptance::files_flow::save_errors_are_explained_in_chinese_too",
+        &[("BAE_LANG", "zh")],
+    ) {
+        return;
+    }
+    crate::i18n::init_from_env();
+    let tmp = tempfile::tempdir().unwrap();
+    let locked = tmp.path().join("只读 目录");
+    fs::create_dir(&locked).unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let mut report = Vec::new();
+    for (label, path, want) in [
+        (
+            "read-only folder",
+            locked.join("工程.bae"),
+            "没有权限保存到",
+        ),
+        (
+            "missing folder",
+            tmp.path().join("不存在 的 目录").join("工程.baez"),
+            "不存在",
+        ),
+    ] {
+        save_as(&mut h, path.clone());
+        let errors = std::mem::take(&mut h.state_mut().dialogs.errors);
+        assert_eq!(errors.len(), 1, "{label}: {errors:?}");
+        let m = &errors[0];
+        report.push(format!("{label}: {}", m.replace('\n', " ⏎ ")));
+        assert!(m.starts_with("无法保存项目。"), "{label}: {m}");
+        assert!(m.contains(want), "{label}: no {want:?}: {m}");
+        // The sentence for the user is ours; the system's text may follow
+        // only on the technical “详细信息：” line.
+        let sentence: String = m
+            .lines()
+            .take_while(|l| !l.starts_with("详细信息"))
+            .collect();
+        assert!(
+            !sentence.contains("Permission denied"),
+            "{label}: system English: {m}"
+        );
+        assert!(h.state().doc.is_dirty());
+    }
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    println!("ZH SAVE ERRORS\n{}", report.join("\n"));
+}
+
+#[test]
+#[ignore = "manual (macOS): creates and ejects a 4 MB RAM disk"]
+fn saving_to_a_full_disk_says_so() {
+    let dev = std::process::Command::new("hdiutil")
+        .args(["attach", "-nomount", "ram://8192"])
+        .output()
+        .unwrap();
+    let dev = String::from_utf8_lossy(&dev.stdout).trim().to_owned();
+    assert!(dev.starts_with("/dev/disk"), "{dev}");
+    let ok = std::process::Command::new("diskutil")
+        .args(["erasevolume", "HFS+", "BAESAVEFULL", &dev])
+        .output()
+        .unwrap();
+    assert!(ok.status.success());
+    let volume = PathBuf::from("/Volumes/BAESAVEFULL");
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // Fill the volume to the last byte (big blocks, then smaller ones).
+        for (i, bs) in ["64k", "4k", "512", "1"].iter().enumerate() {
+            let _ = std::process::Command::new("dd")
+                .args([
+                    "if=/dev/zero",
+                    &format!("of={}/fill{i}", volume.display()),
+                    &format!("bs={bs}"),
+                ])
+                .output();
+        }
+        let mut h = gui();
+        comp_with(&mut h, &["motion.layer.new.solid", "motion.layer.new.text"]);
+        let edited = bae_model::export_flattened_json(h.state().stage());
+        save_as(&mut h, volume.join("满 盘.baez"));
+        let errors = h.state().dialogs.errors.clone();
+        println!("FULL DISK SAVE: {errors:?}");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].contains("There is not enough space to save"),
+            "{}",
+            errors[0]
+        );
+        assert!(h.state().doc.is_dirty() && h.state().doc.location().is_none());
+        assert_eq!(bae_model::export_flattened_json(h.state().stage()), edited);
+        // Nothing half-written is left as the project file.
+        assert!(
+            !volume.join("满 盘.baez").exists(),
+            "a partial package was left behind"
+        );
+    }));
+    let _ = std::process::Command::new("hdiutil")
+        .args(["detach", &dev])
+        .output();
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
 }

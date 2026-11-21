@@ -81,6 +81,10 @@ pub(crate) struct Script {
     /// Suggested names of the save dialogs.
     pub suggested: Vec<String>,
     pub errors: Vec<String>,
+    /// Answers to "replace the existing project?" (Save As onto one).
+    pub replace: VecDeque<bool>,
+    /// Project names that question was asked about.
+    pub asked_replace: Vec<String>,
     /// Dialogs that were shown with nothing scripted (a test bug or a surprise).
     pub unexpected: Vec<String>,
 }
@@ -106,6 +110,14 @@ impl FileDialogs for Script {
         self.answers.pop_front().unwrap_or_else(|| {
             self.unexpected.push(format!("unsaved question ({name})"));
             UnsavedChoice::Cancel
+        })
+    }
+
+    fn confirm_replace(&mut self, name: &str) -> bool {
+        self.asked_replace.push(name.to_owned());
+        self.replace.pop_front().unwrap_or_else(|| {
+            self.unexpected.push(format!("replace question ({name})"));
+            false
         })
     }
 

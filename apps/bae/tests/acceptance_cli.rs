@@ -908,3 +908,251 @@ fn a_lock_from_another_sublayer_binds_the_agent() {
     );
     assert!(!err, "after unlocking: {text}");
 }
+
+// ---- Retest of #131 / #111 (dev 277f11a): bae pack, CLI errors ----
+
+/// A `.bae` with two comps, a saved view (second comp active at 1 s) and a
+/// field this version does not know.
+fn project_with_view(path: &Path) {
+    make_project(path);
+    let manifest = path.join("project.json");
+    let mut j: Json = serde_json::from_slice(&std::fs::read(&manifest).unwrap()).unwrap();
+    let comp = bae_motion::query::comps(&Project::open(path).unwrap().stage)[0].to_string();
+    j["view"] = json!({"comps": [{"path": comp, "time": SEC}], "active": comp});
+    j["x_future_field"] = json!({"keep": "me"});
+    std::fs::write(&manifest, serde_json::to_vec_pretty(&j).unwrap()).unwrap();
+}
+
+/// The top-level fields of a `.baez`'s project.json that are not project data.
+fn baez_manifest(path: &Path) -> Json {
+    let project = Project::open(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    Json::Object(project.manifest.extra.clone())
+}
+
+#[test]
+fn bae_pack_keeps_the_view_and_unknown_fields_and_guards_overwrites() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tricky(tmp.path());
+    let project = dir.join("打包 测试.bae");
+    project_with_view(&project);
+    let want_view =
+        serde_json::from_slice::<Json>(&std::fs::read(project.join("project.json")).unwrap())
+            .unwrap()["view"]
+            .clone();
+    // Default output: next to the project, same name.
+    let out = bae().arg("pack").arg(&project).output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let packed = dir.join("打包 测试.baez");
+    assert!(packed.is_file(), "no {}", packed.display());
+    let m = baez_manifest(&packed);
+    assert_eq!(m["view"], want_view, "view lost by bae pack: {m}");
+    assert_eq!(
+        m["x_future_field"],
+        json!({"keep": "me"}),
+        "unknown field lost: {m}"
+    );
+    // Same stage.
+    let a = bae_model::export_flattened_json(&Project::open(&project).unwrap().stage);
+    let b = bae_model::export_flattened_json(&Project::open(&packed).unwrap().stage);
+    assert_eq!(a, b);
+    // Again without --overwrite: refused, file untouched; with it: replaced.
+    let before = std::fs::metadata(&packed).unwrap().modified().unwrap();
+    let out = bae().arg("pack").arg(&project).output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success() && stderr.contains("--overwrite"),
+        "{stderr}"
+    );
+    assert_eq!(
+        std::fs::metadata(&packed).unwrap().modified().unwrap(),
+        before
+    );
+    let out = bae()
+        .arg("pack")
+        .arg(&project)
+        .arg("--overwrite")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // -o into another folder with spaces; re-packing a .baez keeps the view too.
+    let other = dir.join("另一个 目录");
+    std::fs::create_dir(&other).unwrap();
+    let repacked = other.join("再 打包.baez");
+    let out = bae()
+        .arg("pack")
+        .arg(&packed)
+        .arg("-o")
+        .arg(&repacked)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        baez_manifest(&repacked)["view"],
+        want_view,
+        "view lost when re-packing a .baez"
+    );
+    // Packing a .baez onto itself is refused.
+    let out = bae()
+        .arg("pack")
+        .arg(&packed)
+        .arg("-o")
+        .arg(&packed)
+        .arg("--overwrite")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    println!("pack onto itself: {stderr}");
+    assert!(!out.status.success(), "packing onto itself went through");
+    assert!(Project::open(&packed).is_ok(), "the package was damaged");
+}
+
+#[test]
+fn bae_pack_messages_are_chinese_in_the_chinese_ui() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tricky(tmp.path());
+    let project = dir.join("中文 提示.bae");
+    project_with_view(&project);
+    let run = || {
+        bae()
+            .env("BAE_LANG", "zh")
+            .arg("pack")
+            .arg(&project)
+            .output()
+            .unwrap()
+    };
+    let first = run();
+    let stdout = String::from_utf8_lossy(&first.stdout);
+    println!("zh pack: {stdout}");
+    assert!(first.status.success());
+    assert!(stdout.contains("已打包"), "{stdout}");
+    let again = run();
+    let stderr = String::from_utf8_lossy(&again.stderr);
+    println!("zh pack again: {stderr}");
+    assert!(
+        stderr.contains("已存在；要替换请加 --overwrite"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn mcp_package_pack_keeps_the_view() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tricky(tmp.path());
+    let project = dir.join("智能体 打包.bae");
+    project_with_view(&project);
+    let want =
+        serde_json::from_slice::<Json>(&std::fs::read(project.join("project.json")).unwrap())
+            .unwrap()["view"]
+            .clone();
+    let out = dir.join("智能体 打包.baez");
+    {
+        let mut mcp = Mcp::start(&project);
+        mcp.call("package_pack", json!({"output": out}));
+    }
+    assert_eq!(
+        baez_manifest(&out)["view"],
+        want,
+        "package_pack lost the view"
+    );
+}
+
+#[test]
+fn every_cli_error_is_printed_once_and_names_the_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tricky(tmp.path());
+    let broken = dir.join("坏的 包.baez");
+    std::fs::write(&broken, b"PK\x03\x04 nope").unwrap();
+    let missing = dir.join("没有 的.bae");
+    let runs: Vec<(&str, Vec<std::ffi::OsString>)> = vec![
+        (
+            "export-json broken",
+            vec!["export-json".into(), broken.clone().into()],
+        ),
+        (
+            "export-json missing",
+            vec!["export-json".into(), missing.clone().into()],
+        ),
+        (
+            "render broken",
+            vec![
+                "render".into(),
+                "--comp".into(),
+                "x".into(),
+                "-o".into(),
+                tmp.path().join("o_####.png").into(),
+                broken.clone().into(),
+            ],
+        ),
+        ("pack broken", vec!["pack".into(), broken.clone().into()]),
+        ("pack missing", vec!["pack".into(), missing.clone().into()]),
+        (
+            "headless broken",
+            vec!["--headless".into(), broken.clone().into()],
+        ),
+        (
+            "mcp missing (no --create)",
+            vec!["mcp".into(), missing.clone().into()],
+        ),
+    ];
+    let mut problems = Vec::new();
+    for (label, args) in runs {
+        let out = Command::new(BAE)
+            .args(&args)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let file = if label.contains("missing") {
+            "没有 的.bae"
+        } else {
+            "坏的 包.baez"
+        };
+        let mentions = stderr.matches(file).count();
+        println!("{label}: exit {:?}\n{stderr}", out.status.code());
+        if out.status.success() {
+            problems.push(format!("{label}: exit 0"));
+        }
+        if stderr.contains(" ERROR ") || stderr.contains("panicked") {
+            problems.push(format!("{label}: log line or panic in the output"));
+        }
+        if mentions == 0 {
+            problems.push(format!("{label}: does not name the file"));
+        }
+        if stderr.lines().filter(|l| l.contains(file)).count() > 2 {
+            problems.push(format!("{label}: the error is repeated"));
+        }
+    }
+    assert!(problems.is_empty(), "{problems:#?}");
+}
+
+#[test]
+#[ignore = "issue #111"]
+fn mcp_says_a_missing_project_does_not_exist() {
+    // `bae mcp <missing>` (without --create) still says "is not a BAE project
+    // (expected a .bae directory or a .baez file)" for a path that does not
+    // exist; the other entry points say "… does not exist." (#111).
+    let tmp = tempfile::tempdir().unwrap();
+    let missing = tricky(tmp.path()).join("没有 的.bae");
+    let out = Command::new(BAE)
+        .arg("mcp")
+        .arg(&missing)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr.contains("does not exist"), "{stderr}");
+    assert!(!stderr.contains("is not a BAE project"), "{stderr}");
+}
