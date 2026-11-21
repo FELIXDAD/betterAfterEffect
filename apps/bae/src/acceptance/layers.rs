@@ -360,3 +360,154 @@ fn duplicate_and_split_select_the_new_layer() {
     assert!(failed.is_empty(), "second split: {failed:?}");
     assert_eq!(h.state().layers().len(), 4, "{:?}", h.state().layer_names());
 }
+
+// ---- Retest of #108 / #109 / #114 (dev 763eaad): edge cases ----
+
+#[test]
+fn split_four_times_in_a_row_cuts_the_newest_part_each_time() {
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let mut cuts = Vec::new();
+    for _ in 0..4 {
+        for _ in 0..30 {
+            press(&mut h, Modifiers::NONE, Key::PageDown);
+        }
+        settle(&mut h);
+        cuts.push(h.state().now());
+        key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::D);
+        let selected = h.state().selected_layers();
+        assert_eq!(
+            selected.len(),
+            1,
+            "after split {}: {selected:?}",
+            cuts.len()
+        );
+        let t = query::layer_timing(h.state().stage(), &selected[0]);
+        assert_eq!(
+            t.in_point,
+            *cuts.last().unwrap(),
+            "the selected part does not start at the cut"
+        );
+    }
+    let failed: Vec<_> = h
+        .state()
+        .outcomes
+        .iter()
+        .filter(|(_, o)| o.starts_with("failed"))
+        .collect();
+    assert!(failed.is_empty(), "{failed:?}");
+    // Five contiguous segments: 0–1 s, 1–2 s, 2–3 s, 3–4 s, 4 s–end.
+    let mut spans: Vec<(bae_model::Time, bae_model::Time)> = h
+        .state()
+        .layers()
+        .iter()
+        .map(|l| {
+            let t = query::layer_timing(h.state().stage(), l);
+            (t.in_point, t.out_point)
+        })
+        .collect();
+    spans.sort();
+    assert_eq!(spans.len(), 5, "{spans:?}");
+    for w in spans.windows(2) {
+        assert_eq!(w[0].1, w[1].0, "gap or overlap between segments: {spans:?}");
+    }
+    assert_eq!(spans[0].0, bae_model::Time::ZERO);
+    // Four undos give back one layer, four redos the five segments.
+    for _ in 0..4 {
+        undo(&mut h);
+    }
+    assert_eq!(h.state().layers().len(), 1);
+    for _ in 0..4 {
+        redo(&mut h);
+    }
+    assert_eq!(h.state().layers().len(), 5);
+}
+
+#[test]
+fn duplicate_several_layers_selects_all_copies_and_survives_undo() {
+    let mut h = gui();
+    comp_with(
+        &mut h,
+        &[
+            "motion.layer.new.solid",
+            "motion.layer.new.null",
+            "motion.layer.new.text",
+        ],
+    );
+    let originals = h.state().layers();
+    h.state().session().lock().selected_layers = vec![originals[0].clone(), originals[2].clone()];
+    key(&mut h, Modifiers::COMMAND, Key::D);
+    let after = h.state().layers();
+    assert_eq!(after.len(), 5);
+    let copies: Vec<PrimPath> = after
+        .iter()
+        .filter(|l| !originals.contains(l))
+        .cloned()
+        .collect();
+    let mut selected = h.state().selected_layers();
+    selected.sort();
+    let mut want = copies.clone();
+    want.sort();
+    assert_eq!(selected, want, "the two copies are not the selection");
+    // Cmd+D again duplicates the copies.
+    key(&mut h, Modifiers::COMMAND, Key::D);
+    assert_eq!(h.state().layers().len(), 7);
+    // Undo twice: the selection no longer points at removed layers, and
+    // Cmd+D then does nothing wrong.
+    undo(&mut h);
+    undo(&mut h);
+    assert_eq!(h.state().layers(), originals);
+    settle(&mut h);
+    let stale: Vec<_> = h
+        .state()
+        .selected_layers()
+        .into_iter()
+        .filter(|l| h.state().stage().prim(l).is_none())
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "selection keeps removed layers: {stale:?}"
+    );
+    key(&mut h, Modifiers::COMMAND, Key::D);
+    let failed: Vec<_> = h
+        .state()
+        .outcomes
+        .iter()
+        .filter(|(_, o)| o.starts_with("failed"))
+        .collect();
+    assert!(failed.is_empty(), "{failed:?}");
+}
+
+#[test]
+fn cmd_shift_x_trims_the_comp_to_the_work_area() {
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let comp = h.state().active_comp().unwrap();
+    let duration = |h: &Ui| query::comp_info(h.state().stage(), &comp).unwrap().duration;
+    let before = duration(&h);
+    // Work area 1 s – 3 s (B at 30 frames, N at 89 frames: N is inclusive).
+    for _ in 0..30 {
+        press(&mut h, Modifiers::NONE, Key::PageDown);
+    }
+    key(&mut h, Modifiers::NONE, Key::B);
+    for _ in 0..59 {
+        press(&mut h, Modifiers::NONE, Key::PageDown);
+    }
+    key(&mut h, Modifiers::NONE, Key::N);
+    assert_eq!(
+        h.state()
+            .menu_item("motion.composition.trim")
+            .chord
+            .as_deref(),
+        Some("Cmd+Shift+X")
+    );
+    key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::X);
+    let sec = bae_model::Time(bae_model::Time::FLICKS_PER_SECOND);
+    assert_eq!(
+        duration(&h),
+        bae_model::Time(sec.0 * 2),
+        "comp not trimmed to the 2 s work area"
+    );
+    undo(&mut h);
+    assert_eq!(duration(&h), before);
+}

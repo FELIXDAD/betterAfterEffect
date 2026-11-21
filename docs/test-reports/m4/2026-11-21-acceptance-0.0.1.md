@@ -189,3 +189,34 @@ B1 导出（release，`bae render B1.bae --comp b1 --depth 8 --resolution full -
 - 新增依赖：`egui_kittest`（工作区里已经声明，0.36.2，default-features = false），只作为 `apps/bae` 的 dev-dependency，release 体积不变
 - 唯一改到的非测试文件：`apps/bae/src/main.rs` 加了一行 `#[cfg(all(test, target_os = "macos"))] mod acceptance;`，测试模块只能这样接进 bin crate
 - 没有 GPU 时，渲染队列的测试自动跳过
+
+## 复测记录
+
+### dev `8c0221d`（#120）：#105
+
+CI 产物按用户下载的方式检查：`ditto` 解压，再加上 `com.apple.quarantine`。
+
+- `codesign --verify --deep --strict`：valid on disk / satisfies its Designated Requirement
+- `spctl`：只有普通的 `rejected`（ad-hoc 签名、没有公证，Gatekeeper 走“仍要打开”的流程，不是“已损坏”）
+- `syspolicy_check`：只剩 ad-hoc 警告和缺公证票据
+- 应用能正常运行
+
+**#105 已关闭。**
+
+### dev `763eaad`（#121）：#106 #107 #108 #109 #110 #112 #114 #117 #118
+
+#121 去掉 ignore 的验收测试全部通过。另外从用户角度加了 19 个边界用例（其中 4 个因为还没修好标了 ignore），随复测 PR 提交：
+
+| issue | 结果 | 补测的边界情况 |
+|---|---|---|
+| #106 | 通过，已关闭 | Enter 打开后全选原名，拼音组字直接替换；提交用的 Enter 不会再打开改名框；选中多个图层时改最上面的；焦点在按钮上时 Enter 不开始改名；双击打开时同样全选 |
+| #107 | 通过，已关闭 | 范围向下、向上、从同一锚点缩小、换锚点、没有锚点时；Cmd+单击加选 / 减选 |
+| #108 | 通过，已关闭 | 连续拆分 4 次，每次选中新段，5 段首尾相接，撤销 / 重做；同时复制多个图层，副本都被选中；撤销后选择里不留已删除的图层 |
+| #109 | 通过，已关闭 | Cmd+Shift+X 实际把合成修剪成 2 秒的工作区域，撤销恢复；“修剪”一项按 glossary 保留“将合成修剪至工作区域”（AE 别处也用“工作区域”），测试期望值已按 glossary 更新 |
+| #110 | **部分通过，保持打开** | 空路径 / 只有空格、缺扩展名、范围超出合成都修好了。还有三处：进度的总帧数用的是没限制的范围（显示 x / 121，实际渲 20 帧）；把文件夹当输出时文件写在文件夹旁边；`.png` 名字配 TIFF 格式时写出的是 TIFF 数据 |
+| #112 | 通过，已关闭 | 模态框打开时，Cmd+N / Cmd+Y / 空格 / Enter / Delete / Cmd+S / Cmd+M 都不影响工程；`Workspace::modal_open()` 为真；Esc 关闭后恢复 |
+| #114 | 通过，已关闭 | 已有改名为 “Solid 7” 的图层时，同一帧的纯色 + 调整图层得到 Solid 8–10、Adjustment Layer 1–2；同一帧两次 Cmd+N 得到 Comp 2、Comp 3 |
+| #117 | 通过（数据层），已关闭 | 撤消 Cmd+Z、重做 Cmd+Shift+Z、键盘快捷键 Cmd+Alt+'、Window 面板项的快捷键都和 AE 一致。原生菜单的实际显示在本机没法目测，Windows 侧请确认 |
+| #118 | 通过，已关闭 | 窗口 ▸ 渲染队列（Cmd+Alt+0）可以打开 / 关闭；面板关掉再打开后，队列里的项目还在；Window ▸ 项目能把被挡住的项目面板带到前面 |
+
+新发现：**#124**。锁定开关不起作用：锁定的图层照样能被点选、范围选择、全选、改名、删除、排列。这是在测“范围选择跨越锁定图层”时发现的，#121 之前就存在。另外，“隐藏消隐图层”0.0.1 还没实现。
