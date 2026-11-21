@@ -1023,3 +1023,250 @@ fn broken_files_are_explained_in_chinese_too() {
     );
     println!("ZH ERRORS\n{}", report.join("\n"));
 }
+
+// ---- Retest of #126 (dev 5d82c2a): Save As onto an existing project ----
+
+/// A saved project with one null layer; returns its export.
+fn existing_project(path: &Path) -> Json {
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.null"]);
+    save_as(&mut h, path.to_owned());
+    no_surprises(&h);
+    export_file(path)
+}
+
+fn entries(dir: &Path) -> Vec<String> {
+    let mut v: Vec<String> = fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    v.sort();
+    v
+}
+
+#[test]
+fn a_replace_that_fails_during_the_swap_leaves_the_existing_project() {
+    // The existing project folder cannot be moved or removed (macOS immutable
+    // flag): the temporary copy is written, the swap fails.
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tricky_dir(tmp.path());
+    let existing = dir.join("锁住 的.bae");
+    let old = existing_project(&existing);
+    let before = entries(&dir);
+    let chflags = |flag: &str| {
+        let ok = std::process::Command::new("chflags")
+            .args([flag])
+            .arg(&existing)
+            .status()
+            .unwrap();
+        assert!(ok.success(), "chflags {flag}");
+    };
+    chflags("uchg");
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut h = gui();
+        comp_with(&mut h, &["motion.layer.new.solid"]);
+        let mine = export(&h);
+        h.state_mut().dialogs.replace.push_back(true);
+        save_as(&mut h, existing.clone());
+        let errors = h.state().dialogs.errors.clone();
+        println!("SWAP FAILURE: {errors:?}");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("锁住 的.bae"), "{}", errors[0]);
+        assert!(h.state().doc.is_dirty() && h.state().doc.location().is_none());
+        assert_eq!(export(&h), mine, "the open project changed");
+    }));
+    chflags("nouchg");
+    if let Err(p) = result {
+        std::panic::resume_unwind(p);
+    }
+    assert_eq!(export_file(&existing), old, "the existing project changed");
+    assert_eq!(entries(&dir), before, "temporary folders were left behind");
+}
+
+#[test]
+fn save_as_onto_the_open_projects_own_folder_saves_in_place() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tricky_dir(tmp.path()).join("自己.bae");
+    existing_project(&path);
+    let mut h = gui();
+    h.state_mut().dialogs.open.push_back(Some(path.clone()));
+    key(&mut h, Modifiers::COMMAND, Key::O);
+    key(&mut h, Modifiers::COMMAND, Key::Y);
+    let edited = export(&h);
+    save_as(&mut h, path.clone());
+    no_surprises(&h);
+    assert!(
+        h.state().dialogs.asked_replace.is_empty(),
+        "asked to replace the project itself"
+    );
+    assert_eq!(export_file(&path), edited);
+    assert_eq!(h.state().doc.location(), Some(path.as_path()));
+    assert!(!h.state().doc.is_dirty());
+    assert!(!path.join("自己.bae").exists());
+}
+
+#[test]
+fn a_baez_name_or_other_case_inside_an_existing_project_never_nests() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tricky_dir(tmp.path());
+    let existing = dir.join("Case 工程.bae");
+    existing_project(&existing);
+    for (label, picked) in [
+        ("a .baez name inside", existing.join("新的 包.baez")),
+        (
+            "a deeper path inside",
+            existing.join("sublayers").join("x.bae"),
+        ),
+        (
+            "the same name in other letter case",
+            dir.join("case 工程.BAE"),
+        ),
+    ] {
+        let mut h = gui();
+        comp_with(&mut h, &["motion.layer.new.solid"]);
+        let mine = export(&h);
+        h.state_mut().dialogs.replace.push_back(true);
+        save_as(&mut h, picked.clone());
+        no_surprises(&h);
+        assert_eq!(
+            h.state().dialogs.asked_replace.len(),
+            1,
+            "{label}: not asked"
+        );
+        assert_eq!(export_file(&existing), mine, "{label}: not replaced");
+        assert!(
+            !picked.exists() || picked.parent() == existing.parent(),
+            "{label}: nested {picked:?}"
+        );
+        let nested: Vec<_> = walk_names(&existing)
+            .into_iter()
+            .filter(|n| n.ends_with(".bae") || n.ends_with(".baez"))
+            .collect();
+        assert!(
+            nested.is_empty(),
+            "{label}: project nested inside: {nested:?}"
+        );
+        // One project folder only (case-insensitive file system).
+        let projects: Vec<String> = entries(&dir)
+            .into_iter()
+            .filter(|n| n.to_lowercase().ends_with(".bae"))
+            .collect();
+        assert_eq!(projects.len(), 1, "{label}: {projects:?}");
+    }
+}
+
+fn walk_names(dir: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Ok(rd) = fs::read_dir(dir) {
+        for e in rd.flatten() {
+            out.push(e.file_name().to_string_lossy().into_owned());
+            if e.path().is_dir() {
+                out.extend(walk_names(&e.path()));
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn declining_the_replace_while_quitting_keeps_the_app_open() {
+    let tmp = tempfile::tempdir().unwrap();
+    let existing = tricky_dir(tmp.path()).join("退出 时.bae");
+    let old = existing_project(&existing);
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let mine = export(&h);
+    // Quit → Save → Save As picks the existing project → Don't replace.
+    h.state_mut().dialogs.answers.push_back(UnsavedChoice::Save);
+    h.state_mut().dialogs.save.push_back(Some(existing.clone()));
+    h.state_mut().dialogs.replace.push_back(false);
+    h.state_mut().invoke(Invocation::new(ids::QUIT));
+    settle(&mut h);
+    no_surprises(&h);
+    assert!(!h.state().quit, "quit although the save was cancelled");
+    assert_eq!(export(&h), mine);
+    assert!(h.state().doc.is_dirty());
+    assert_eq!(export_file(&existing), old);
+}
+
+/// Dialogs like BAE.app's on macOS: the save panel itself asked "Replace?".
+struct NativeLike {
+    path: PathBuf,
+    asked: Vec<String>,
+    errors: Vec<String>,
+}
+
+impl FileDialogs for NativeLike {
+    fn pick_project(&mut self) -> Option<PathBuf> {
+        None
+    }
+    fn pick_save_path(&mut self, _: &str, _: Option<&Path>) -> Option<PathBuf> {
+        Some(self.path.clone())
+    }
+    fn ask_unsaved(&mut self, _: &str) -> UnsavedChoice {
+        UnsavedChoice::Cancel
+    }
+    fn confirm_replace(&mut self, name: &str) -> bool {
+        self.asked.push(name.to_owned());
+        false
+    }
+    fn save_dialog_confirms_replace(&self) -> bool {
+        true
+    }
+    fn error(&mut self, message: &str) {
+        self.errors.push(message.to_owned());
+    }
+}
+
+#[test]
+fn the_mac_save_panels_replace_question_is_not_asked_twice_but_nested_paths_still_are() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tricky_dir(tmp.path());
+    let existing = dir.join("面板 问过.bae");
+    existing_project(&existing);
+    let mut doc = Document::new(None);
+    doc.run(&Invocation::with_params(
+        "prim.create",
+        json!({"path": "/Mine", "prim_type": "Comp"}),
+    ));
+    // Picked the project itself: the panel already asked; BAE replaces.
+    let mut d = NativeLike {
+        path: existing.clone(),
+        asked: vec![],
+        errors: vec![],
+    };
+    assert_eq!(files::save_as(&mut doc, &mut d), files::FileOutcome::Saved);
+    assert!(d.asked.is_empty(), "asked again after the panel");
+    // A path inside it (the panel did not know it is a project): BAE asks;
+    // declined, nothing changes.
+    let mut doc = Document::new(None);
+    doc.run(&Invocation::with_params(
+        "prim.create",
+        json!({"path": "/Other", "prim_type": "Comp"}),
+    ));
+    let before = export_file(&existing);
+    let mut d = NativeLike {
+        path: existing.join("inner.bae"),
+        asked: vec![],
+        errors: vec![],
+    };
+    assert_eq!(
+        files::save_as(&mut doc, &mut d),
+        files::FileOutcome::Cancelled
+    );
+    assert_eq!(d.asked, ["面板 问过.bae"]);
+    assert_eq!(export_file(&existing), before);
+}
+
+#[test]
+fn replace_texts_are_translated() {
+    for en in [
+        "“{}” already exists. Do you want to replace it?",
+        "The existing project is replaced. This cannot be undone.",
+        "Replace",
+        "“{file}” is a folder but not a BAE project. Choose another name.",
+    ] {
+        crate::i18n::register_tables();
+        assert!(bae_ui::i18n::has_translation(en), "no Chinese for {en:?}");
+    }
+}
