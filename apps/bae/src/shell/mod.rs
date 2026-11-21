@@ -22,7 +22,8 @@ mod menu;
 mod open_documents;
 mod window_state;
 
-#[cfg(test)]
+// Only the macOS acceptance suite calls it (Windows test builds would warn).
+#[cfg(all(test, target_os = "macos"))]
 pub(crate) use menu::undo_redo_text;
 
 use std::process::ExitCode;
