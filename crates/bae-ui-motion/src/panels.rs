@@ -3,6 +3,7 @@
 
 use bae_model::{PrimPath, Stage, Time, Value};
 use bae_motion::query;
+use bae_ui::Accessible as _;
 use bae_ui::icons::{self, Icon};
 use bae_ui::theme::{self, color};
 use bae_ui::widgets;
@@ -168,7 +169,7 @@ impl Panel for PropertiesPanel {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(tr("Font Size")).color(color::TEXT));
                         let mut size = d2.font_size;
-                        let r = ui.add(widgets::HotNumber::new(&mut size).decimals(0).suffix(" px").range(1.0..=2000.0));
+                        let r = ui.add(widgets::HotNumber::new(&mut size).decimals(0).suffix(" px").range(1.0..=2000.0).label(tr("Size")));
                         if r.drag_stopped() || (r.changed() && !r.dragged()) {
                             d2.font_size = size;
                             commit = true;
@@ -346,6 +347,7 @@ impl Panel for PreviewPanel {
             ];
             for (icon, tip, inv) in buttons {
                 if icons::button(ui, icon, 24.0, false)
+                    .labeled(egui::WidgetType::Button, tr(tip))
                     .on_hover_text(tr(tip))
                     .clicked()
                 {

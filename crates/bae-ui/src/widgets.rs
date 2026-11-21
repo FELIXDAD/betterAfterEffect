@@ -12,6 +12,8 @@ use egui::{
     TextFormat, Ui, Vec2, Widget, pos2, vec2,
 };
 
+use crate::a11y::Accessible as _;
+use crate::i18n::tr;
 use crate::icons::{self, Icon};
 use crate::theme::{self, color};
 
@@ -25,6 +27,8 @@ pub struct HotNumber<'a> {
     range: RangeInclusive<f64>,
     width: Option<f32>,
     font: FontId,
+    /// Accessibility name (the property, e.g. "Position X").
+    label: &'a str,
 }
 
 impl<'a> HotNumber<'a> {
@@ -37,7 +41,14 @@ impl<'a> HotNumber<'a> {
             range: f64::NEG_INFINITY..=f64::INFINITY,
             width: None,
             font: theme::body(),
+            label: "",
         }
+    }
+
+    /// What the number is, for screen readers (the property name, translated).
+    pub fn label(mut self, label: &'a str) -> Self {
+        self.label = label;
+        self
     }
 
     /// Value change per point dragged (before modifiers).
@@ -142,6 +153,8 @@ impl Widget for HotNumber<'_> {
             .max(galley.size().x + 3.0)
             .max(8.0);
         let (rect, mut resp) = ui.allocate_exact_size(vec2(width, height), Sense::click_and_drag());
+        let spoken = format!("{text}{}", self.suffix);
+        resp = resp.labeled_value(egui::WidgetType::DragValue, self.label, &spoken);
         let resp_hover = resp.hovered() || resp.dragged();
         if resp_hover {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
@@ -239,6 +252,7 @@ pub fn stopwatch(ui: &mut Ui, on: &mut bool) -> Response {
         *on = !*on;
         resp.mark_changed();
     }
+    let resp = resp.labeled_toggle(egui::WidgetType::Checkbox, tr("Time-Vary Stopwatch"), *on);
     let c = if *on {
         color::ACCENT
     } else if resp.hovered() {
@@ -269,6 +283,12 @@ pub fn keyframe_nav(ui: &mut Ui, has_prev: bool, on_key: bool, has_next: bool) -
         ui.spacing_mut().item_spacing.x = 0.0;
         for (icon, nav, enabled) in parts {
             let (rect, resp) = ui.allocate_exact_size(vec2(13.0, 16.0), Sense::click());
+            let name = match nav {
+                KeyNav::Prev => "Go to Previous Keyframe",
+                KeyNav::Toggle => "Add or Remove Keyframe at Current Time",
+                KeyNav::Next => "Go to Next Keyframe",
+            };
+            let resp = resp.labeled(egui::WidgetType::Button, tr(name));
             if enabled && resp.clicked() {
                 out = Some(nav);
             }
@@ -297,6 +317,11 @@ pub fn disclosure(ui: &mut Ui, open: &mut bool) -> Response {
         *open = !*open;
         resp.mark_changed();
     }
+    let resp = resp.labeled_toggle(
+        egui::WidgetType::CollapsingHeader,
+        tr(if *open { "Collapse" } else { "Expand" }),
+        *open,
+    );
     let icon = if *open {
         Icon::ChevronDown
     } else {
@@ -333,6 +358,7 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, label: &str) -> Response {
         *checked = !*checked;
         resp.mark_changed();
     }
+    let resp = resp.labeled_toggle(egui::WidgetType::Checkbox, label, *checked);
     if ui.is_rect_visible(rect) {
         let p = ui.painter();
         let b = Rect::from_min_size(
@@ -378,6 +404,8 @@ pub fn dropdown(
     width: f32,
 ) -> Response {
     let (rect, mut resp) = ui.allocate_exact_size(vec2(width, 17.0), Sense::click());
+    let current = items.get(*selected).copied().unwrap_or("");
+    resp = resp.labeled_value(egui::WidgetType::ComboBox, current, current);
     let id = ui.id().with(id_salt);
     if ui.is_rect_visible(rect) {
         let p = ui.painter();
@@ -440,14 +468,16 @@ pub fn search_field(ui: &mut Ui, text: &mut String, width: f32) -> Response {
     icons::paint(p, chev, Icon::ChevronDown, color::ICON);
     let inner = Rect::from_min_max(pos2(rect.left() + 27.0, rect.top()), rect.max);
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
-    child.add(
+    let resp = child.add(
         TextEdit::singleline(text)
             .frame(egui::Frame::NONE)
             .desired_width(inner.width() - 6.0)
             .vertical_align(egui::Align::Center)
             .min_size(vec2(0.0, height))
             .text_color(color::TEXT_STRONG),
-    )
+    );
+    let value = text.clone();
+    resp.labeled_value(egui::WidgetType::TextEdit, tr("Search"), &value)
 }
 
 /// Blue text button, like "Reset" in the Properties panel.
@@ -456,6 +486,7 @@ pub fn link(ui: &mut Ui, text: &str) -> Response {
         .painter()
         .layout_no_wrap(text.to_owned(), theme::body(), color::ACCENT);
     let (rect, resp) = ui.allocate_exact_size(galley.size(), Sense::click());
+    let resp = resp.labeled(egui::WidgetType::Link, text);
     let c = if resp.hovered() {
         color::ACCENT_HOVER
     } else {
@@ -469,6 +500,8 @@ pub fn link(ui: &mut Ui, text: &str) -> Response {
 /// Color swatch button (e.g. the Fill color in the toolbar).
 pub fn color_swatch(ui: &mut Ui, fill: Color32, size: Vec2) -> Response {
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    let hex = format!("#{:02x}{:02x}{:02x}", fill.r(), fill.g(), fill.b());
+    let resp = resp.labeled_value(egui::WidgetType::ColorButton, tr("Color"), &hex);
     let p = ui.painter();
     p.rect_filled(rect, 1.0, fill);
     if resp.hovered() {
@@ -549,8 +582,11 @@ pub fn workspace_bar(
             continue;
         }
         let item = Rect::from_min_max(pos2(x - 6.0, rect.top()), pos2(x + w + 6.0, rect.bottom()));
-        let resp = ui.interact(item, ui.id().with(("bae-workspace", i)), Sense::click());
         let is_active = i == active;
+        let resp = ui
+            .interact(item, ui.id().with(("bae-workspace", i)), Sense::click())
+            // One workspace is active at a time: radio buttons.
+            .labeled_toggle(egui::WidgetType::RadioButton, text, is_active);
         let tc = if is_active || resp.hovered() {
             color::TAB_ACTIVE
         } else {
@@ -599,7 +635,9 @@ pub fn workspace_bar(
         pos2(rect.right() - 27.0, rect.top() + BASELINE - 4.5),
         Vec2::splat(14.0),
     );
-    let resp = ui.interact(r, ui.id().with("bae-workspace-more"), Sense::click());
+    let resp = ui
+        .interact(r, ui.id().with("bae-workspace-more"), Sense::click())
+        .labeled(egui::WidgetType::Button, tr("Workspace Menu"));
     let c = if resp.hovered() {
         color::TEXT_STRONG
     } else {

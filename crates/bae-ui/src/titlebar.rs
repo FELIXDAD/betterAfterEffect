@@ -11,6 +11,7 @@ use egui::{
     ViewportBuilder, ViewportCommand, pos2, vec2,
 };
 
+use crate::a11y::Accessible as _;
 use crate::theme::{self, color, metrics};
 
 /// Measured from AE 2026 (points).
@@ -64,7 +65,9 @@ pub fn show(ui: &mut Ui, title: &str, dirty: bool) -> Response {
     if h <= 0.0 {
         return ui.allocate_rect(rect, Sense::hover());
     }
-    let bar = ui.allocate_rect(rect, Sense::click_and_drag());
+    let bar = ui
+        .allocate_rect(rect, Sense::click_and_drag())
+        .labeled(egui::WidgetType::Other, title);
     let p = ui.painter();
     p.rect_filled(rect, 0.0, color::TITLE_BAR);
     p.hline(
@@ -115,7 +118,14 @@ pub fn show(ui: &mut Ui, title: &str, dirty: bool) -> Response {
             rect.top() + geom::LIGHT_Y,
         );
         let hit = Rect::from_center_size(c, Vec2::splat(geom::LIGHT_RADIUS * 2.0 + 3.0));
-        let resp = ui.interact(hit, Id::new(("bae-titlebar-light", i)), Sense::click());
+        let name = match light {
+            Light::Close => "Close",
+            Light::Minimize => "Minimize",
+            Light::Zoom => "Zoom",
+        };
+        let resp = ui
+            .interact(hit, Id::new(("bae-titlebar-light", i)), Sense::click())
+            .labeled(egui::WidgetType::Button, crate::i18n::tr(name));
         if resp.clicked() {
             clicked = Some(light);
         }

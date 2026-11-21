@@ -176,8 +176,10 @@ fn status_bar(ui: &mut egui::Ui, status: &StatusInfo) {
             .size(10.5)
             .color(bae_ui::theme::color::TEXT_DIM)
     };
-    ui.label(small(status.gpu.clone()));
-    ui.separator();
+    if !status.gpu.is_empty() {
+        ui.label(small(status.gpu.clone()));
+        ui.separator();
+    }
     ui.label(small(format!("{} {:.2} ms", tr("frame"), status.frame_ms)));
     ui.separator();
     ui.label(small(format!(
