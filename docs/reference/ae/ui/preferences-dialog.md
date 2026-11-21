@@ -213,3 +213,146 @@
 | `magnification_type` | `dropdown` | 类型: | Type: | 平滑 (`Smooth`) | 旧版 (Legacy) / 平滑 (Smooth) | `[Magnification] Magnification Using Legacy` |
 | `magnification_behavior` | `dropdown` | 行为: | Behavior: | 跟随光标 (`Follow Cursor`) | 居中 (Centered) / 跟随光标 (Follow Cursor) | `[Magnification] Magnification Behavior (0` |
 | `magnification_trackpad_scroll` | `dropdown` | 触控板滚动: | Trackpad Scroll: | 平移 (`Pan`) | 缩放 (Zoom) / 平移 (Pan) | `[Magnification] Magnification Scrolling (0` |
+
+### 4.5 第 5 页：外观 (Appearance) — `appearance`
+
+#### 外观选项 / Appearance Options
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `path_point_and_handle_size` | `number_input` | 路径点和手柄大小: | Path Point and Handle Size: | `5` 像素 | 范围 `4..15` 像素 | `[General Section] Path Point and Handle Radius (pixels)` |
+| `hardware_accelerate_panels` | `checkbox` | 硬件加速合成、图层和素材面板 | Hardware Accelerate Composition, Layer, and Footage Panels | 勾选 | — | `[Hardware Accelerated Viewer 2] Enabled` |
+| `use_system_color_picker` | `checkbox` | 使用系统拾色器 | Use System Color Picker | 不勾选 | — | — |
+| `show_rendering_progress_in_info_flowchart` | `checkbox` | 在信息面板和流程图中显示渲染进度 | Show Rendering Progress in Info Panel and Flowchart | 不勾选 | — | `[Main Pref Section v2] Pref_SHOW_INFO_FLOATER_PROGRESS` |
+| `disable_thumbnails_in_project_panel` | `checkbox` | 在项目面板中禁用缩览图 | Disable Thumbnails in Project Panel | 不勾选 | — | `[Main Pref Section v2] Pref_RENDER_THUMBNAILS` |
+| `show_both_timecode_and_frames_in_timeline` | `checkbox` | 在时间轴面板中同时显示时间码和帧 | Show Both Timecode and Frames in Timeline Panel | 勾选 | — | `[Prefs.Display] Show Alternate Time Display` |
+| `show_tool_tips` | `checkbox` | 显示工具提示 | Show Tool Tips | 勾选 | — | — |
+| `show_coachmarks` | `checkbox` | 显示引导标记 | Show Coachmarks | 不勾选 | — | `[Coachmarks Settings] Enabled` |
+| `reset_coachmarks` | `button` | 重置引导提示标记 | Reset Coachmarks | — | — | — |
+
+#### 主题 / Theme
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `color_theme` | `theme_picker` | 颜色主题 | Color Theme | 最暗 (`Darkest`) | 最暗 (Darkest) / 深色 (Dark) / 灯光 (Light)；3 个缩略图卡片单选（AE 26 取代旧版亮度连续滑块；zh_CN 将 Light 译作“灯光”） | `[Main Pref Section v2] User Interface Brightness (4) [0.0..1.0]` |
+| `accessibility_color_contrast` | `checkbox` | 无障碍色彩对比度 | Accessibility Color Contrast | 勾选 | — | — |
+
+#### 颜色 / Colors
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `use_label_color_for_handles_and_paths` | `checkbox` | 对图层手柄和路径使用标签颜色 | Use Label Color for Layer Handles and Paths | 勾选 | — | — |
+| `use_label_color_for_related_tabs` | `checkbox` | 对相关选项卡使用标签颜色 | Use Label Color for Related Tabs | 勾选 | — | — |
+| `cycle_mask_colors` | `checkbox` | 循环蒙版颜色（使用标签颜色） | Cycle Mask Colors (Use Label Colors) | 勾选 | — | `[Mask Colors] Cycle Mask Label Colors` |
+| `use_contrasting_color_for_mask_path` | `checkbox` | 为蒙版路径使用对比度颜色 | Use Contrasting Color for Mask Path | 勾选 | 启用条件：`cycle_mask_colors == True` | `[Mask Colors] Use Contrasting Color For Mask Path Enabled` |
+| `use_gradients` | `checkbox` | 使用渐变色 | Use Gradients | 勾选 | — | — |
+
+#### 运动路径 / Motion Path
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `motion_path_mode` | `radio_group` | 运动路径显示方式 | Motion Path Display Mode | 指定时长 (`No More Than (Time)`) | 没有运动路径 (No Motion Path) / 所有关键帧 (All Keyframes) / 不超过 (No More Than (Keyframes)) / 指定时长 (No More Than (Time)) | — |
+| `motion_path_max_keyframes` | `number_input` | 最大关键帧数 | Max Keyframes | `5` 个关键帧 | 范围 `1..999` 个关键帧 | — |
+| `motion_path_time_window` | `timecode_input` | 运动路径时长 | Motion Path Duration | `0:00:15:00` | — | — |
+
+### 4.6 第 6 页：网格和参考线 (Grids & Guides) — `grids_guides`
+
+#### 网格 / Grid
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `grid_color` | `color_swatch` | 颜色: | Color: | `#008000` | — | `[Main Pref Section v2] Pref_GRID_COLOR` |
+| `grid_style` | `dropdown` | 样式: | Style: | 线条 (`Lines`) | 线条 (Lines) / 虚线 (Dashed Lines) / 点 (Dots) | `[Main Pref Section v2] Pref_GRID_STYLE` |
+| `gridline_every` | `number_input` | 网格线间隔: | Gridline Every: | `80` 像素 | 范围 `1..9999` 像素 | `[Main Pref Section v2] Pref_GRID_PIX_PER_DIV` |
+| `grid_subdivisions` | `number_input` | 次分隔线: | Subdivisions: | `4` | 范围 `1..99` | `[Main Pref Section v2] Pref_GRID_SUB_PER_DIV` |
+
+#### 对称网格 / Proportional Grid
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `proportional_grid_horizontal` | `number_input` | 水平: | Horizontal: | `8` | 范围 `1..99` | `[Main Pref Section v2] Pref_ANIMGRID_CELLS_HORIZ` |
+| `proportional_grid_vertical` | `number_input` | 垂直: | Vertical: | `6` | 范围 `1..99` | `[Main Pref Section v2] Pref_ANIMGRID_CELLS_VERT v2` |
+
+#### 参考线 / Guides
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `guides_color` | `color_swatch` | 颜色: | Color: | `#20E0FF` | — | `[Main Pref Section v2] Pref_GUIDE_COLOR` |
+| `guides_style` | `dropdown` | 样式: | Style: | 线条 (`Lines`) | 线条 (Lines) / 虚线 (Dashed Lines) | `[Main Pref Section v2] Pref_GUIDE_STYLE` |
+
+#### 安全边距 / Safe Margins
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `action_safe` | `number_input` | 动作安全: | Action-safe: | `10` % | 范围 `0..100` % | `[Grids And Guides v2] Action Safe Margin % (0-100)` |
+| `title_safe` | `number_input` | 字幕安全: | Title-safe: | `20` % | 范围 `0..100` % | `[Grids And Guides v2] Title Safe Margin % (0-100)` |
+| `center_cut_action_safe` | `number_input` | 中心剪切动作安全: | Center-Cut Action-safe: | `32.5` % | 范围 `0..100` % | `[Grids And Guides v2] 4:3 Action Safe Margin % (0-100)` |
+| `center_cut_title_safe` | `number_input` | 中心剪切字幕安全: | Center-Cut Title-safe: | `40` % | 范围 `0..100` % | `[Grids And Guides v2] 4:3 Title Safe Margin % (0-100)` |
+
+#### 透明度设置 / Transparency Settings
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `transparency_grid_size` | `dropdown` | 网格大小: | Grid Size: | 中 (`Medium`) | 小 (Small) / 中 (Medium) / 大 (Large) | `[General Section] Transparency Grid Size` |
+| `transparency_grid_colors_preset` | `dropdown` | 网格颜色： | Grid Colors: | 自定义... (`Custom...`) | 自定义... (Custom...) / 灯光 (Light) / 中 (Medium) / 深色 (Dark) / 红色 (Red) / 橙色 (Orange) / 绿色 (Green) / 蓝色 (Blue) / 紫色 (Purple) | `[Main Pref Section v2] Pref_TRANSPARENCY_GRID_COLOR_POPUP_INDEX` |
+| `transparency_grid_color_1` | `color_swatch` | 棋盘格色 1 | Grid Color 1 | `#CCCCCC` | — | `[Main Pref Section v2] Pref_TRANSPARENCY_GRID_COLOR1` |
+| `transparency_grid_color_2` | `color_swatch` | 棋盘格色 2 | Grid Color 2 | `#FFFFFF` | — | `[Main Pref Section v2] Pref_TRANSPARENCY_GRID_COLOR2 v2` |
+
+### 4.7 第 7 页：标签 (Labels) — `labels`
+
+#### 标签默认值 / Label Defaults（全部 16 个下拉框共用 17 项标签色板（无 + 16 色）；左列 7 项 + 右列 7 项 + 底部嵌套“标记”子分组 2 项）
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `label_default_comp` | `dropdown` | 合成: | Composition: | 砂岩 (`Sandstone`, `15`) | 引用 `labelPalette17`（无 + 16 色） | `[Label Preference Indices Section 5] Comp Label Index 2` |
+| `label_default_video` | `dropdown` | 视频: | Video: | 浅绿色 (`Aqua`, `3`) | 引用 `labelPalette17`（无 + 16 色） | `[Label Preference Indices Section 5] Video Label Index 2` |
+| `label_default_audio` | `dropdown` | 音频: | Audio: | 海泡沫 (`Sea Foam`, `7`) | 引用 `labelPalette17`（无 + 16 色） | `[Label Preference Indices Section 5] Audio Label Index 2` |
+| `label_default_still` | `dropdown` | 静止图像: | Still: | 淡紫色 (`Lavender`, `5`) | 引用 `labelPalette17`（无 + 16 色） | `[Label Preference Indices Section 5] Still Label Index 2` |
+| `label_default_folder` | `dropdown` | 文件夹: | Folder: | 黄色 (`Yellow`, `2`) | 引用 `labelPalette17`（无 + 16 色） | `[Label Preference Indices Section 5] Folder Label Index 2` |
+| `label_default_null` | `dropdown` | 空对象: | Null: | 红色 (`Red`, `1`) | 引用 `labelPalette17`（无 + 16 色） | `[Label Preference Indices Section 5] Null Label Index` |
+| `label_default_3d_model` | `dropdown` | 3D 模型: | 3D Model: | 青色 (`Cyan`, `14`) | 引用 `labelPalette17`（无 + 16 色） | `[Label Preference Indices Section 5] 3D Model Label Index` |
+| `label_default_solid` | `dropdown` | 纯色: | Solid: | 红色 (`Red`, `1`) | 引用 `labelPalette17`（无 + 16 色） | `[Label Preference Indices Section 5] Solid Label Index 2` |
+| `label_default_camera` | `dropdown` | 摄像机: | Camera: | 粉色 (`Pink`, `4`) | 引用 `labelPalette17`（无 + 16 色） | `[Label Preference Indices Section 5] Camera Label Index 2` |
+| `label_default_light` | `dropdown` | 灯光: | Light: | 桃红色 (`Peach`, `6`) | 引用 `labelPalette17`（无 + 16 色） | `[Label Preference Indices Section 5] Light Label Index 2` |
+| `label_default_shape` | `dropdown` | 形状: | Shape: | 蓝色 (`Blue`, `8`) | 引用 `labelPalette17`（无 + 16 色） | `[Label Preference Indices Section 5] Shape Label Index 2` |
+| `label_default_adjustment` | `dropdown` | 调整: | Adjustment: | 淡紫色 (`Lavender`, `5`) | 引用 `labelPalette17`（无 + 16 色） | `[Label Preference Indices Section 5] Adjustment Label Index 2` |
+| `label_default_text` | `dropdown` | 文本: | Text: | 红色 (`Red`, `1`) | 引用 `labelPalette17`（无 + 16 色） | `[Label Preference Indices Section 5] Text Label Index` |
+| `label_default_other_3d` | `dropdown` | 其他 3D: | Other 3D: | 绿色 (`Green`, `9`) | 引用 `labelPalette17`（无 + 16 色） | `[Label Preference Indices Section 5] Materials Label Index` |
+| `label_default_marker_comment` | `dropdown` | 注释: | Comment: | 无 (`None`, `0`) | 引用 `labelPalette17`（无 + 16 色） | `[Label Preference Indices Section 5] Comment Label Index` |
+| `label_default_marker_segmentation` | `dropdown` | 片段: | Segmentation: | 淡紫色 (`Lavender`, `5`) | 引用 `labelPalette17`（无 + 16 色） | `[Label Preference Indices Section 5] Segmentation Label Index` |
+
+#### 标签颜色 / Label Colors（左列 #1-#8、右列 #9-#16；每项由 [名称输入框 + 色块按钮 + 吸管按钮] 组成）
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `label_color_1` | `label_color_entry` | 红色 | Red | `#B53838` | — | `[Label Preference Color Section 5] Label Color ID 2 # 1` |
+| `label_color_2` | `label_color_entry` | 黄色 | Yellow | `#E4D84C` | — | `[Label Preference Color Section 5] Label Color ID 2 # 2` |
+| `label_color_3` | `label_color_entry` | 浅绿色 | Aqua | `#A9CBC7` | — | `[Label Preference Color Section 5] Label Color ID 2 # 3` |
+| `label_color_4` | `label_color_entry` | 粉色 | Pink | `#E5BCC9` | — | `[Label Preference Color Section 5] Label Color ID 2 # 4` |
+| `label_color_5` | `label_color_entry` | 淡紫色 | Lavender | `#A9A9CA` | — | `[Label Preference Color Section 5] Label Color ID 2 # 5` |
+| `label_color_6` | `label_color_entry` | 桃红色 | Peach | `#E7C19E` | — | `[Label Preference Color Section 5] Label Color ID 2 # 6` |
+| `label_color_7` | `label_color_entry` | 海泡沫 | Sea Foam | `#B3C7B3` | — | `[Label Preference Color Section 5] Label Color ID 2 # 7` |
+| `label_color_8` | `label_color_entry` | 蓝色 | Blue | `#677DE0` | — | `[Label Preference Color Section 5] Label Color ID 2 # 8` |
+| `label_color_9` | `label_color_entry` | 绿色 | Green | `#4AA44C` | — | `[Label Preference Color Section 5] Label Color ID 2 # 9` |
+| `label_color_10` | `label_color_entry` | 紫色 | Purple | `#8E2C9A` | — | `[Label Preference Color Section 5] Label Color ID 2 # 10` |
+| `label_color_11` | `label_color_entry` | 橙色 | Orange | `#E8920D` | — | `[Label Preference Color Section 5] Label Color ID 2 # 11` |
+| `label_color_12` | `label_color_entry` | 棕色 | Brown | `#7F452A` | — | `[Label Preference Color Section 5] Label Color ID 2 # 12` |
+| `label_color_13` | `label_color_entry` | 紫红色 | Fuchsia | `#F46DD6` | — | `[Label Preference Color Section 5] Label Color ID 2 # 13` |
+| `label_color_14` | `label_color_entry` | 青色 | Cyan | `#3DA2A5` | — | `[Label Preference Color Section 5] Label Color ID 2 # 14` |
+| `label_color_15` | `label_color_entry` | 砂岩 | Sandstone | `#A89677` | — | `[Label Preference Color Section 5] Label Color ID 2 # 15` |
+| `label_color_16` | `label_color_entry` | 深绿色 | Dark Green | `#1E401E` | — | `[Label Preference Color Section 5] Label Color ID 2 # 16` |
+
+### 4.8 第 8 页：类型 (Type) — `type`
+
+#### 字体菜单 / Font Menu
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `font_preview_size` | `dropdown` | 预览大小 | Preview Size | 小 (`Small`) | 小 (Small) / 中 (Medium) / 大 (Large) / 特大 (Extra Large) | `[General Section] Font Panel Preview Size` |
+| `recent_fonts_count` | `dropdown` | 要显示的近期字体数量 | Number of Recent Fonts to Display | 14 (`14`) | 共 16 项：0 (0)、1 (1)、2 (2)、3 (3)、4 (4)、5 (5) 等（完整列表见 JSON） | `[General Section] Font Panel MRU Size` |
+
+#### “解析字体”对话框 / Resolve Fonts Dialog
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `do_not_warn_missing_fonts` | `checkbox` | 打开项目时，不要提醒我缺失字体。 | Do not warn me about missing fonts when opening a project. | 不勾选 | — | `[General Section] Hide Missing Font Dialog` |
