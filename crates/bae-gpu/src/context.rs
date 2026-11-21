@@ -592,7 +592,28 @@ fn create_instance(desc: &GpuContextDescriptor) -> wgpu::Instance {
     instance_desc.backends = desc.backends;
     instance_desc.flags = flags;
     instance_desc.backend_options = wgpu::BackendOptions::from_env_or_default();
+    instance_desc.backend_options.dx12.shader_compiler =
+        dx12_compiler(std::env::var(DX12_COMPILER_ENV).ok().as_deref());
     wgpu::Instance::new(instance_desc)
+}
+
+/// wgpu's environment variable choosing the DX12 shader compiler (`fxc`, `dxc`,
+/// `staticdxc`, `auto`); honoured for testing and diagnosis.
+pub const DX12_COMPILER_ENV: &str = "WGPU_DX12_COMPILER";
+
+/// The DX12 shader compiler for `env` (the value of [`DX12_COMPILER_ENV`]):
+/// FXC (`d3dcompiler_47.dll`, part of Windows) unless the variable names a
+/// valid compiler.
+///
+/// wgpu's own default (`Auto`) loads whatever `dxcompiler.dll` comes first on
+/// `PATH`. Other applications put old copies there, and those crash the process
+/// inside DXC (0xc000001d) while compiling naga's HLSL, so which compiler runs
+/// would depend on what else is installed. Shipping a known DXC would add
+/// several MiB to the installer; revisit when shader performance needs it
+/// (ARCHITECTURE §12).
+pub fn dx12_compiler(env: Option<&str>) -> wgpu::Dx12Compiler {
+    env.and_then(|v| v.trim().parse().ok())
+        .unwrap_or(wgpu::Dx12Compiler::Fxc)
 }
 
 fn no_adapter(desc: &GpuContextDescriptor, adapters: &[wgpu::AdapterInfo]) -> GpuError {
@@ -707,6 +728,24 @@ mod tests {
         assert!(adapter_rank(&integrated, &named) < adapter_rank(&discrete, &named));
         let software = AdapterSelection::Software;
         assert!(adapter_rank(&cpu, &software) < adapter_rank(&discrete, &software));
+    }
+
+    #[test]
+    fn dx12_shader_compiler_defaults_to_fxc() {
+        assert!(matches!(dx12_compiler(None), wgpu::Dx12Compiler::Fxc));
+        assert!(matches!(
+            dx12_compiler(Some("bogus")),
+            wgpu::Dx12Compiler::Fxc
+        ));
+        // The environment variable still overrides it.
+        assert!(matches!(
+            dx12_compiler(Some("DXC")),
+            wgpu::Dx12Compiler::DynamicDxc { .. }
+        ));
+        assert!(matches!(
+            dx12_compiler(Some("auto")),
+            wgpu::Dx12Compiler::Auto
+        ));
     }
 
     #[test]

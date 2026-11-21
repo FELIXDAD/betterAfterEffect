@@ -32,9 +32,10 @@ pub mod viewport;
 
 pub use caps::{GpuCapabilities, GpuReport, optional_features};
 pub use context::{
-    ADAPTER_ENV, AdapterSelection, BACKEND_ENV, DeviceLostInfo, DeviceLostSubscription, GpuContext,
-    GpuContextDescriptor, GpuError, LimitsPreference, POWER_ENV, VALIDATION_ENV, backend_name,
-    device_type_name, parse_backends, primary_backends,
+    ADAPTER_ENV, AdapterSelection, BACKEND_ENV, DX12_COMPILER_ENV, DeviceLostInfo,
+    DeviceLostSubscription, GpuContext, GpuContextDescriptor, GpuError, LimitsPreference,
+    POWER_ENV, VALIDATION_ENV, backend_name, device_type_name, dx12_compiler, parse_backends,
+    primary_backends,
 };
 pub use module::GpuModule;
 pub use native::{NativeApi, NativeDevice, NativeTexture};
