@@ -538,6 +538,8 @@ dependencies = [
  "skrifa 0.49.0",
  "tempfile",
  "tracing",
+ "windows",
+ "windows-core 0.62.2",
  "winit",
 ]
 
