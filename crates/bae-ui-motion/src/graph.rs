@@ -134,6 +134,8 @@ enum GDrag {
         dim: usize,
         side: Side,
         split: bool,
+        /// The other selected keys: their handles on the same side follow.
+        keys: Vec<KeyRef>,
     },
     Scale {
         origin: Pos2,
@@ -834,25 +836,17 @@ fn handle_points(
     out
 }
 
-/// The ease a handle drag gives (AE-ANI-060 / AE-ANI-061): pointer at keyframe time
-/// `tp` and graph value `vp`. Returns the new ease of the dragged side and, for
-/// continuous keys (unless split), the opposite side's.
-pub(crate) fn drag_handle(
+/// The ease that dragging the `side` handle of key `key` (dimension `dim`) to the
+/// pointer at key time `tp` and graph value `vp` gives.
+pub(crate) fn handle_ease(
     p: &Prop,
     key: Time,
     dim: usize,
     side: Side,
-    split: bool,
     tp: Time,
     vp: f64,
-) -> Option<KeyEdit> {
-    let keys: Vec<(Time, &Keyframe)> = p.spec.keyframes.iter().map(|(t, k)| (*t, k)).collect();
-    let i = keys.iter().position(|(t, _)| *t == key)?;
-    let (t, k) = keys[i];
-    let neighbour = match side {
-        Side::Out => keys.get(i + 1)?.0,
-        Side::In => keys.get(i.checked_sub(1)?)?.0,
-    };
+) -> Option<Ease> {
+    let (t, k, neighbour) = handle_segment(p, key, side)?;
     let dt = (neighbour - t).as_seconds().abs().max(1e-9);
     // Distance of the pointer from the key towards the neighbour, in key seconds.
     let toward = (tp - t).as_seconds() * (neighbour - t).as_seconds().signum();
@@ -868,11 +862,61 @@ pub(crate) fn drag_handle(
             Side::In => (v - vp) / toward,
         }
     };
+    Some(Ease { speed, influence })
+}
+
+/// The key at `key` and the neighbouring key time on `side`.
+fn handle_segment(p: &Prop, key: Time, side: Side) -> Option<(Time, &Keyframe, Time)> {
+    let mut before = p.spec.keyframes.range(..key);
+    let mut after = p.spec.keyframes.range(key..);
+    let (t, k) = after.next()?;
+    if *t != key {
+        return None;
+    }
+    let neighbour = match side {
+        Side::Out => *after.next()?.0,
+        Side::In => *before.next_back()?.0,
+    };
+    Some((*t, k, neighbour))
+}
+
+/// Average speed of the segment on `side` of key `key` in dimension `dim` (graph
+/// units per key second, signed the way handle speeds are): the speed a straight
+/// line would have. Spatial properties use the straight distance.
+fn segment_speed(p: &Prop, key: Time, dim: usize, side: Side) -> Option<f64> {
+    let (t, k, neighbour) = handle_segment(p, key, side)?;
+    let dt = (neighbour - t).as_seconds().abs().max(1e-9);
+    let a = comps(&k.value)?;
+    let b = comps(&p.spec.keyframes.get(&neighbour)?.value)?;
+    let delta = |i: usize| b.get(i).copied().unwrap_or(0.0) - a.get(i).copied().unwrap_or(0.0);
+    if p.spatial {
+        let n = p.dims.min(a.len());
+        return Some((0..n).map(|i| delta(i).powi(2)).sum::<f64>().sqrt() / dt);
+    }
+    let d = delta(dim);
+    Some(match side {
+        Side::Out => d / dt,
+        Side::In => -d / dt,
+    })
+}
+
+/// The edit that sets the `side` handle of key `key` to `eases` (dimension, ease).
+/// A continuous key turns its other handle to the same speed unless `split`;
+/// Auto Bezier keys become continuous Bezier.
+pub(crate) fn set_handle(
+    p: &Prop,
+    key: Time,
+    side: Side,
+    split: bool,
+    eases: &[(usize, Ease)],
+) -> Option<KeyEdit> {
+    let (t, k, _) = handle_segment(p, key, side)?;
     let n = p.ease_dims();
-    let d = dim.min(n - 1);
     let full = |side: Side| -> Vec<Ease> { (0..n).map(|j| ease_of(k, side, j)).collect() };
     let mut this = full(side);
-    this[d] = Ease { speed, influence };
+    for (dim, e) in eases {
+        this[(*dim).min(n - 1)] = *e;
+    }
     let continuous = k.flags.temporal_continuous && !split;
     let mut edit = KeyEdit::new(KeyRef::new(p.path.clone(), p.attr.clone(), t));
     let opposite = match side {
@@ -886,7 +930,9 @@ pub(crate) fn drag_handle(
     let mut other = None;
     if continuous && other_interp == Interpolation::Bezier {
         let mut o = full(opposite);
-        o[d].speed = speed;
+        for (dim, e) in eases {
+            o[(*dim).min(n - 1)].speed = e.speed;
+        }
         other = Some(o);
     }
     match side {
@@ -904,6 +950,22 @@ pub(crate) fn drag_handle(
     edit.auto_bezier = Some(false);
     edit.continuous = Some(continuous);
     Some(edit)
+}
+
+/// Dragging the `side` handle of key `key` (dimension `dim`) to the pointer at key
+/// time `tp` and graph value `vp` (AE-ANI-060 / AE-ANI-061).
+#[cfg(test)]
+pub(crate) fn drag_handle(
+    p: &Prop,
+    key: Time,
+    dim: usize,
+    side: Side,
+    split: bool,
+    tp: Time,
+    vp: f64,
+) -> Option<KeyEdit> {
+    let e = handle_ease(p, key, dim, side, tp, vp)?;
+    set_handle(p, key, side, split, &[(dim, e)])
 }
 
 /// Rounded to the comp's frame grid.
@@ -1210,13 +1272,33 @@ impl GraphEditor {
                 dim,
                 side,
                 split,
+                keys,
             }) => {
                 if let Some(pi) = find(key) {
                     let p = &props[pi];
+                    let va = &vaxes[pi];
                     let tp = p.key_time(axis.t(pointer.x));
-                    let vp = vaxes[pi].v(pointer.y);
-                    if let Some(e) = drag_handle(p, key.time, *dim, *side, *split, tp, vp) {
-                        edits.push(e);
+                    let mut vp = va.v(pointer.y);
+                    if !p.speed && mods.shift {
+                        // Shift keeps the handle level (speed 0).
+                        if let Some(v) = p
+                            .spec
+                            .keyframes
+                            .get(&key.time)
+                            .and_then(|k| comps(&k.value))
+                            .and_then(|c| c.get(*dim).copied())
+                        {
+                            vp = v;
+                        }
+                    } else if p.speed && snapping && (pointer.y - va.y(0.0)).abs() <= SNAP_PX {
+                        // Snap to the 0 speed line.
+                        vp = 0.0;
+                        hline = Some(va.y(0.0));
+                    }
+                    if let Some(ease) = handle_ease(p, key.time, *dim, *side, tp, vp) {
+                        edits.extend(
+                            self.follow_handle(props, key, *dim, *side, *split, ease, keys),
+                        );
                     }
                 }
             }
@@ -1309,6 +1391,71 @@ impl GraphEditor {
             _ => {}
         }
         (edits, vline, hline)
+    }
+
+    /// Edits for a handle drag that gives `ease` to the `side` handle of `key` in
+    /// `dim`: the same handle of every other selected key (and the key's other
+    /// selected dimensions) takes the same influence and the same speed relative
+    /// to its segment's average speed, so all the curves keep one shape.
+    #[allow(clippy::too_many_arguments)]
+    fn follow_handle(
+        &self,
+        props: &[Prop],
+        key: &KeyRef,
+        dim: usize,
+        side: Side,
+        split: bool,
+        ease: Ease,
+        selected: &[KeyRef],
+    ) -> Vec<KeyEdit> {
+        let find = |k: &KeyRef| props.iter().find(|p| p.path == k.path && p.attr == k.attr);
+        let Some(p0) = find(key) else {
+            return Vec::new();
+        };
+        let ratio = segment_speed(p0, key.time, dim, side)
+            .filter(|a| a.abs() > 1e-9)
+            .map(|a| ease.speed / a);
+        let mut edits = Vec::new();
+        let mut keys: Vec<&KeyRef> = vec![key];
+        keys.extend(selected.iter().filter(|k| *k != key));
+        for k in keys {
+            let Some(p) = find(k) else {
+                continue;
+            };
+            if !p.has_handles() {
+                continue;
+            }
+            let Some((_, kf, _)) = handle_segment(p, k.time, side) else {
+                continue;
+            };
+            let interp = match side {
+                Side::In => kf.interp_in,
+                Side::Out => kf.interp_out,
+            };
+            let mut eases = Vec::new();
+            for d in 0..p.ease_dims() {
+                if k == key && d == dim {
+                    eases.push((d, ease));
+                } else if interp == Interpolation::Bezier && self.picked(k, d) {
+                    let mut e = ease_of(kf, side, d);
+                    e.influence = ease.influence;
+                    if let Some(r) = ratio
+                        && let Some(a) = segment_speed(p, k.time, d, side)
+                        && a.abs() > 1e-9
+                    {
+                        e.speed = if p.spatial { (r * a).max(0.0) } else { r * a };
+                    }
+                    eases.push((d, e));
+                }
+            }
+            if eases.is_empty() {
+                continue;
+            }
+            if let Some(e) = set_handle(p, k.time, side, split, &eases) {
+                edits.push(e);
+            }
+        }
+        edits
     }
 
     fn hit(&self, f: &Frame, pos: Pos2, mods: egui::Modifiers) -> Hit {
@@ -1645,6 +1792,7 @@ impl GraphEditor {
                         dim: h.dim,
                         side: h.side,
                         split: mods.alt,
+                        keys: shown_selected.clone(),
                     })
                 }
                 Hit::BoxHandle(handle) => frame.selection_box.map(|bounds| GDrag::Scale {

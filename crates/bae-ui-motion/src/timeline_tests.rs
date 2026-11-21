@@ -418,6 +418,105 @@ fn alt_drag_splits_a_continuous_handle() {
 }
 
 #[test]
+fn shift_keeps_a_value_graph_handle_level() {
+    let mut h = H::new();
+    h.keys(ROT, &[(0.0, float(0.0)), (1.0, float(90.0))]);
+    let (k0, k1) = (h.key(ROT, 0.0), h.key(ROT, 1.0));
+    h.run("key.ease", json!({"keys": [k0, k1]}));
+    h.session().lock().selected_keys = vec![k0.clone()];
+    let mut tl = h.graph();
+    let va = vaxis(&mut tl, ROT);
+    let to = pos2(x_of(&tl, 0.5), va.y(60.0));
+    // Plain: the handle follows the pointer (60° over 0.5 s = 120 °/s).
+    let from = handle_pos(&mut tl, &k0, true);
+    let r = h.drag(&mut tl, from, to, Modifiers::NONE);
+    h.apply(&r);
+    let e = h.spec(ROT).keyframes[&Time::ZERO].ease_out[0];
+    assert!((e.speed - 120.0).abs() < 2.0, "{e:?}");
+    h.undo();
+    // Shift: level (speed 0), only the influence follows.
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let from = handle_pos(&mut tl, &k0, true);
+    let r = h.drag(&mut tl, from, to, Modifiers::SHIFT);
+    h.apply(&r);
+    let e = h.spec(ROT).keyframes[&Time::ZERO].ease_out[0];
+    assert_eq!(e.speed, 0.0, "{e:?}");
+    assert!((e.influence - 50.0).abs() < 0.5, "{e:?}");
+    h.undo();
+    assert!((h.spec(ROT).keyframes[&Time::ZERO].ease_out[0].influence - 33.33).abs() < 0.1);
+}
+
+#[test]
+fn speed_graph_handle_snaps_to_zero_speed() {
+    let mut h = H::new();
+    h.keys(POS, &[(0.0, vec3(0.0, 0.0)), (1.0, vec3(600.0, 0.0))]);
+    let (k0, k1) = (h.key(POS, 0.0), h.key(POS, 1.0));
+    h.run("key.ease", json!({"keys": [k0, k1]}));
+    h.session().lock().selected_keys = vec![k0.clone()];
+    let mut tl = h.graph();
+    // A non-zero speed first.
+    let va = vaxis(&mut tl, POS);
+    let from = handle_pos(&mut tl, &k0, true);
+    let to = pos2(x_of(&tl, 0.5), va.y(400.0));
+    let r = h.drag(&mut tl, from, to, Modifiers::NONE);
+    h.apply(&r);
+    // Snap on: 5 pt above the 0 line lands on 0.
+    tl.graph_editor().settings.snap = true;
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let va = vaxis(&mut tl, POS);
+    let from = handle_pos(&mut tl, &k0, true);
+    let to = pos2(x_of(&tl, 0.5), va.y(0.0) - 5.0);
+    let r = h.drag(&mut tl, from, to, Modifiers::NONE);
+    h.apply(&r);
+    assert_eq!(h.spec(POS).keyframes[&Time::ZERO].ease_out[0].speed, 0.0);
+    h.undo();
+    // Cmd/Ctrl turns snapping off for the drag.
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let from = handle_pos(&mut tl, &k0, true);
+    let r = h.drag(&mut tl, from, to, cmd());
+    h.apply(&r);
+    assert!(h.spec(POS).keyframes[&Time::ZERO].ease_out[0].speed > 0.0);
+}
+
+#[test]
+fn dragging_one_handle_moves_the_handles_of_all_selected_keys() {
+    let mut h = H::new();
+    const OPACITY: &str = "transform:opacity";
+    h.keys(ROT, &[(0.0, float(0.0)), (1.0, float(90.0))]);
+    h.keys(OPACITY, &[(0.0, float(100.0)), (2.0, float(0.0))]);
+    let rot = [h.key(ROT, 0.0), h.key(ROT, 1.0)];
+    let op = [h.key(OPACITY, 0.0), h.key(OPACITY, 2.0)];
+    h.run("key.ease", json!({"keys": [rot[0], rot[1], op[0], op[1]]}));
+    h.session().lock().selected_keys = vec![rot[0].clone(), op[0].clone()];
+    let mut tl = h.graph();
+    let va = vaxis(&mut tl, ROT);
+    let from = handle_pos(&mut tl, &rot[0], true);
+    // Rotation's out handle to (0.5 s, 45°): influence 50 %, speed 90 °/s, which is
+    // the segment's average speed. Opacity follows: 50 %, its own average speed.
+    let to = pos2(x_of(&tl, 0.5), va.y(45.0));
+    let r = h.drag(&mut tl, from, to, Modifiers::NONE);
+    assert_eq!(r.invocations.len(), 1, "one command, one undo step");
+    h.apply(&r);
+    let e = h.spec(ROT).keyframes[&Time::ZERO].ease_out[0];
+    assert!((e.influence - 50.0).abs() < 0.5, "{e:?}");
+    assert!((e.speed - 90.0).abs() < 1.5, "{e:?}");
+    let e = h.spec(OPACITY).keyframes[&Time::ZERO].ease_out[0];
+    assert!((e.influence - 50.0).abs() < 0.5, "{e:?}");
+    assert!((e.speed + 50.0).abs() < 1.0, "{e:?}");
+    // The unselected keys keep their eases.
+    let e = h.spec(OPACITY).keyframes[&Time(2 * SEC)].ease_in[0];
+    assert!((e.influence - 33.33).abs() < 0.1, "{e:?}");
+    h.undo();
+    for attr in [ROT, OPACITY] {
+        let e = h.spec(attr).keyframes[&Time::ZERO].ease_out[0];
+        assert!(
+            (e.influence - 33.33).abs() < 0.1 && e.speed == 0.0,
+            "{attr}: {e:?}"
+        );
+    }
+}
+
+#[test]
 fn speed_graph_handle_drag_on_position() {
     let mut h = H::new();
     h.keys(POS, &[(0.0, vec3(0.0, 0.0)), (1.0, vec3(600.0, 0.0))]);
