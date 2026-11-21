@@ -836,6 +836,7 @@ dependencies = [
  "clap",
  "glam",
  "half",
+ "kurbo",
  "parking_lot",
  "png",
  "rustc-hash 2.1.3",
