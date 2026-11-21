@@ -1238,8 +1238,9 @@ fn type_tool_edits_an_existing_text_layer() {
         )["path"],
     );
     h.tools().lock().set(Tool::TypeHorizontal);
-    // A click on the text (its first line sits above the baseline).
-    h.click(130.0, 180.0, Modifiers::NONE);
+    // A click at the start of the text (its first line sits above the
+    // baseline): the caret goes there (AE).
+    h.click(101.0, 180.0, Modifiers::NONE);
     assert_eq!(
         h.viewer.type_tool.edited_layer(),
         Some(&layer),
@@ -1254,12 +1255,17 @@ fn type_tool_edits_an_existing_text_layer() {
     let p = one(&r, "text.set_text");
     assert_eq!(p["layer"], json!(layer));
     let text = p["text"].as_str().unwrap().to_owned();
-    assert!(text == "Hello!" || text == "!Hello", "{text}");
+    assert_eq!(text, "!Hello");
     h.apply(&r);
     assert_eq!(h.doc(&layer).text, text);
     assert_eq!(h.doc(&layer).font_size, 72.0, "style kept");
     h.stage.undo(&h.author).unwrap();
     assert_eq!(h.doc(&layer).text, "Hello");
+    // Past the end of the text: the caret goes to the end.
+    h.click(295.0, 180.0, Modifiers::NONE);
+    h.type_text(vec![Event::Text("?".into())]);
+    let r = h.escape();
+    assert_eq!(one(&r, "text.set_text")["text"], "Hello?");
     // Layer > New > Text (E) asks the viewer to edit a layer.
     h.tools().lock().set(Tool::Selection);
     h.tools().lock().edit_text_request = Some(layer.clone());

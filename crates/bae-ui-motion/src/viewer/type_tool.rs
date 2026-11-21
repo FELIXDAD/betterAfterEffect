@@ -39,6 +39,8 @@ pub(crate) struct Editing {
     color: Color32,
     /// Focus was requested / the field had it (losing it commits).
     focused_once: bool,
+    /// Where an existing text was clicked: the caret goes there (screen).
+    caret_at: Option<Pos2>,
 }
 
 /// Type tool state of the viewer.
@@ -68,7 +70,12 @@ fn color32(c: [f64; 4]) -> Color32 {
 }
 
 /// Start editing an existing text layer.
-fn edit_layer(comp: &EvaluatedComp, info: &CompInfo, layer: &PrimPath) -> Option<Editing> {
+fn edit_layer(
+    comp: &EvaluatedComp,
+    info: &CompInfo,
+    layer: &PrimPath,
+    caret_at: Option<Pos2>,
+) -> Option<Editing> {
     let l = comp.layer(layer)?;
     let doc = l.text.as_ref()?;
     let text_box = doc
@@ -84,6 +91,7 @@ fn edit_layer(comp: &EvaluatedComp, info: &CompInfo, layer: &PrimPath) -> Option
         font_size: doc.font_size,
         color: color32(doc.fill_color),
         focused_once: false,
+        caret_at,
     })
 }
 
@@ -98,6 +106,7 @@ fn new_text(info: &CompInfo, origin: DVec2, text_box: Option<[f64; 2]>) -> Editi
         font_size: DEFAULT_SIZE,
         color: Color32::WHITE,
         focused_once: false,
+        caret_at: None,
     }
 }
 
@@ -230,7 +239,7 @@ pub(super) fn frame(
         if let Some(e) = state.editing.take() {
             e.commit(cx, session);
         }
-        if let Some(e) = edit_layer(comp, info, &layer) {
+        if let Some(e) = edit_layer(comp, info, &layer, None) {
             tools.lock().set(Tool::TypeHorizontal);
             session.lock().selected_layers = vec![layer];
             state.editing = Some(e);
@@ -293,7 +302,7 @@ pub(super) fn frame(
             state.editing = match hit {
                 Some(layer) => {
                     session.lock().selected_layers = vec![layer.clone()];
-                    edit_layer(comp, info, &layer)
+                    edit_layer(comp, info, &layer, Some(origin))
                 }
                 None => Some(match pointer.filter(|_| dragged) {
                     Some(p) => {
@@ -333,10 +342,29 @@ pub(super) fn frame(
         .desired_width(rect.width())
         .desired_rows(1)
         .margin(egui::Margin::ZERO);
-    let out = ui.put(rect, edit);
+    let shown = ui
+        .scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| edit.show(ui))
+        .inner;
+    let out = shown.response.response.clone();
     if !e.focused_once {
         out.request_focus();
         e.focused_once = true;
+    }
+    // AE puts the insertion point where the text was clicked (otherwise at
+    // the end).
+    let caret = match e.caret_at.take() {
+        Some(p) => shown.galley.cursor_from_pos(p - shown.galley_pos),
+        None if shown.cursor_range.is_none() => egui::text::CCursor::new(e.buffer.chars().count()),
+        None => shown
+            .cursor_range
+            .map_or(egui::text::CCursor::default(), |r| r.primary),
+    };
+    if shown.cursor_range.is_none_or(|r| r.primary != caret) && !out.dragged() {
+        let mut state = shown.state;
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::one(caret)));
+        state.store(ui.ctx(), text_id());
     }
     let escape = ui.input(|i| i.key_pressed(Key::Escape));
     if escape || (out.lost_focus() && !out.has_focus()) {
