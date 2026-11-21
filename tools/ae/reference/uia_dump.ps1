@@ -148,19 +148,19 @@ public static class AeWin32Helper {
                     int menuCount = hMenu != IntPtr.Zero ? GetMenuItemCount(hMenu) : 0;
                     IntPtr owner = GetWindow(hWnd, GW_OWNER);
                     res.Add(new Dictionary<string, object> {
-                        ["hwnd"] = hWnd.ToInt64(),
-                        ["title"] = ReadTitle(hWnd),
-                        ["className"] = ReadClass(hWnd),
-                        ["visible"] = IsWindowVisible(hWnd),
-                        ["enabled"] = IsWindowEnabled(hWnd),
-                        ["ownerHwnd"] = owner.ToInt64(),
-                        ["menuCount"] = menuCount,
-                        ["rect"] = new Dictionary<string, object> {
-                            ["x"] = r.Left,
-                            ["y"] = r.Top,
-                            ["w"] = r.Right - r.Left,
-                            ["h"] = r.Bottom - r.Top
-                        }
+                        { "hwnd", hWnd.ToInt64() },
+                        { "title", ReadTitle(hWnd) },
+                        { "className", ReadClass(hWnd) },
+                        { "visible", IsWindowVisible(hWnd) },
+                        { "enabled", IsWindowEnabled(hWnd) },
+                        { "ownerHwnd", owner.ToInt64() },
+                        { "menuCount", menuCount },
+                        { "rect", new Dictionary<string, object> {
+                            { "x", r.Left },
+                            { "y", r.Top },
+                            { "w", r.Right - r.Left },
+                            { "h", r.Bottom - r.Top }
+                        }}
                     });
                 }
                 return true;
@@ -179,18 +179,18 @@ public static class AeWin32Helper {
                 GetWindowRect(c, out r);
                 string cls = ReadClass(c);
                 var item = new Dictionary<string, object> {
-                    ["hwnd"] = c.ToInt64(),
-                    ["ctrlId"] = GetDlgCtrlID(c),
-                    ["className"] = cls,
-                    ["text"] = ReadTitle(c),
-                    ["visible"] = IsWindowVisible(c),
-                    ["enabled"] = IsWindowEnabled(c),
-                    ["rect"] = new Dictionary<string, object> {
-                        ["x"] = r.Left - parentRect.Left,
-                        ["y"] = r.Top - parentRect.Top,
-                        ["w"] = r.Right - r.Left,
-                        ["h"] = r.Bottom - r.Top
-                    }
+                    { "hwnd", c.ToInt64() },
+                    { "ctrlId", GetDlgCtrlID(c) },
+                    { "className", cls },
+                    { "text", ReadTitle(c) },
+                    { "visible", IsWindowVisible(c) },
+                    { "enabled", IsWindowEnabled(c) },
+                    { "rect", new Dictionary<string, object> {
+                        { "x", r.Left - parentRect.Left },
+                        { "y", r.Top - parentRect.Top },
+                        { "w", r.Right - r.Left },
+                        { "h", r.Bottom - r.Top }
+                    }}
                 };
                 if (cls.IndexOf("ComboBox", StringComparison.OrdinalIgnoreCase) >= 0) {
                     var cbItems = ReadWin32ComboBoxItems(c);
