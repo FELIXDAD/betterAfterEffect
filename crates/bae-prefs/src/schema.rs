@@ -595,15 +595,15 @@ pub static PAGES: &[Page] = &[
             Item::Group(
                 "Proportional Grid",
                 &[Item::Row(&[
-                    Item::P(int("grids.prop_horizontal", "Horizontal:", 8, 1, 100).ae("Main Pref Section v2/Pref_ANIMGRID_CELLS_HORIZ").live()),
-                    Item::P(int("grids.prop_vertical", "Vertical:", 6, 1, 100).ae("Main Pref Section v2/Pref_ANIMGRID_CELLS_VERT v2").live()),
+                    Item::P(int("grids.prop_horizontal", "Horizontal:", 8, 1, 100).ae("Main Pref Section v2/Pref_ANIMGRID_CELLS_HORIZ")),
+                    Item::P(int("grids.prop_vertical", "Vertical:", 6, 1, 100).ae("Main Pref Section v2/Pref_ANIMGRID_CELLS_VERT v2")),
                 ])],
             ),
             Item::Group(
                 "Guides",
                 &[Item::Row(&[
-                    Item::P(color("grids.guide_color", "Color:", "#00a2ff").ae("Main Pref Section v2/Pref_GUIDE_COLOR").live()),
-                    Item::P(choice("grids.guide_style", "Style:", GUIDE_STYLES, "Lines").ae("Main Pref Section v2/Pref_GUIDE_STYLE").live()),
+                    Item::P(color("grids.guide_color", "Color:", "#00a2ff").ae("Main Pref Section v2/Pref_GUIDE_COLOR")),
+                    Item::P(choice("grids.guide_style", "Style:", GUIDE_STYLES, "Lines").ae("Main Pref Section v2/Pref_GUIDE_STYLE")),
                 ])],
             ),
             Item::Group(
@@ -628,18 +628,18 @@ pub static PAGES: &[Page] = &[
             Item::Group(
                 "Label Defaults",
                 &[
-                    Item::P(label("labels.default_comp", "Composition:", 15).ae("Label Preference Indices Section 5/Comp Label Index 2").live()),
-                    Item::P(label("labels.default_video", "Video:", 3).ae("Label Preference Indices Section 5/Video Label Index 2").live()),
-                    Item::P(label("labels.default_audio", "Audio:", 7).ae("Label Preference Indices Section 5/Audio Label Index 2").live()),
-                    Item::P(label("labels.default_still", "Still:", 5).ae("Label Preference Indices Section 5/Still Label Index 2").live()),
-                    Item::P(label("labels.default_folder", "Folder:", 2).ae("Label Preference Indices Section 5/Folder Label Index 2").live()),
-                    Item::P(label("labels.default_null", "Null:", 1).ae("Label Preference Indices Section 5/Null Label Index").live()),
-                    Item::P(label("labels.default_shape", "Shape:", 8).ae("Label Preference Indices Section 5/Shape Label Index 2").live()),
-                    Item::P(label("labels.default_solid", "Solid:", 1).ae("Label Preference Indices Section 5/Solid Label Index 2").live()),
-                    Item::P(label("labels.default_camera", "Camera:", 4).ae("Label Preference Indices Section 5/Camera Label Index 2").live()),
-                    Item::P(label("labels.default_light", "Light:", 6).ae("Label Preference Indices Section 5/Light Label Index 2").live()),
-                    Item::P(label("labels.default_adjustment", "Adjustment:", 5).ae("Label Preference Indices Section 5/Adjustment Label Index 2").live()),
-                    Item::P(label("labels.default_text", "Text:", 1).ae("Label Preference Indices Section 5/Text Label Index").live()),
+                    Item::P(label("labels.default_comp", "Composition:", 15).ae("Label Preference Indices Section 5/Comp Label Index 2")),
+                    Item::P(label("labels.default_video", "Video:", 3).ae("Label Preference Indices Section 5/Video Label Index 2")),
+                    Item::P(label("labels.default_audio", "Audio:", 7).ae("Label Preference Indices Section 5/Audio Label Index 2")),
+                    Item::P(label("labels.default_still", "Still:", 5).ae("Label Preference Indices Section 5/Still Label Index 2")),
+                    Item::P(label("labels.default_folder", "Folder:", 2).ae("Label Preference Indices Section 5/Folder Label Index 2")),
+                    Item::P(label("labels.default_null", "Null:", 1).ae("Label Preference Indices Section 5/Null Label Index")),
+                    Item::P(label("labels.default_shape", "Shape:", 8).ae("Label Preference Indices Section 5/Shape Label Index 2")),
+                    Item::P(label("labels.default_solid", "Solid:", 1).ae("Label Preference Indices Section 5/Solid Label Index 2")),
+                    Item::P(label("labels.default_camera", "Camera:", 4).ae("Label Preference Indices Section 5/Camera Label Index 2")),
+                    Item::P(label("labels.default_light", "Light:", 6).ae("Label Preference Indices Section 5/Light Label Index 2")),
+                    Item::P(label("labels.default_adjustment", "Adjustment:", 5).ae("Label Preference Indices Section 5/Adjustment Label Index 2")),
+                    Item::P(label("labels.default_text", "Text:", 1).ae("Label Preference Indices Section 5/Text Label Index")),
                     Item::P(label("labels.default_3d_model", "3D Model:", 14).ae("Label Preference Indices Section 5/3D Model Label Index")),
                 ],
             ),
@@ -712,7 +712,7 @@ pub static PAGES: &[Page] = &[
         id: "appearance",
         title: "Appearance",
         items: &[
-            Item::P(b("appearance.label_handles", "Use Label Color for Layer Handles and Paths", true).live()),
+            Item::P(b("appearance.label_handles", "Use Label Color for Layer Handles and Paths", true)),
             Item::P(b("appearance.label_tabs", "Use Label Color for Related Tabs", true)),
             Item::P(b("appearance.cycle_mask_colors", "Cycle Mask Colors (uses Label Colors)", true)
                 .ae("Mask Colors/Cycle Mask Label Colors")),
