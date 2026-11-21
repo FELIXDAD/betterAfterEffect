@@ -680,3 +680,159 @@ fn render_queue_items_are_told_apart() {
     let dupes = repeated_names(&h);
     assert!(dupes.is_empty(), "{dupes:#?}");
 }
+
+// ---- Retest of #128 (dev dbdbb7c): numbered names ----
+
+/// Numbers in "Layer N “…” · Lock" names, top to bottom.
+fn lock_switch_numbers(h: &Ui, layer_word: &str, lock_word: &str) -> Vec<u32> {
+    let mut out: Vec<(f32, u32)> = h
+        .root()
+        .children_recursive()
+        .filter_map(|n| {
+            let l = n.accesskit_node().label()?;
+            if !l.starts_with(layer_word) || !l.ends_with(&format!(" · {lock_word}")) {
+                return None;
+            }
+            let num: u32 = l[layer_word.len()..]
+                .trim_start()
+                .split(|c: char| !c.is_ascii_digit())
+                .next()?
+                .parse()
+                .ok()?;
+            Some((n.rect().top(), num))
+        })
+        .collect();
+    out.sort_by(|a, b| a.0.total_cmp(&b.0));
+    out.into_iter().map(|(_, n)| n).collect()
+}
+
+#[test]
+fn layer_numbers_in_names_follow_reorder_and_delete() {
+    let mut h = gui();
+    comp_with(
+        &mut h,
+        &[
+            "motion.layer.new.solid",
+            "motion.layer.new.solid",
+            "motion.layer.new.solid",
+        ],
+    );
+    for l in h.state().layers() {
+        rename(&mut h, &l, "同名");
+    }
+    assert_eq!(lock_switch_numbers(&h, "Layer ", "Lock"), [1, 2, 3]);
+    assert!(duplicate_names(&h).is_empty(), "{:#?}", duplicate_names(&h));
+    // Move the bottom layer to the top: names are numbered by position again.
+    let bottom = h.state().layers()[2].clone();
+    h.state().session().lock().selected_layers = vec![bottom.clone()];
+    key(
+        &mut h,
+        Modifiers::COMMAND | Modifiers::SHIFT,
+        Key::CloseBracket,
+    );
+    assert_eq!(h.state().layers()[0], bottom);
+    assert_eq!(lock_switch_numbers(&h, "Layer ", "Lock"), [1, 2, 3]);
+    assert!(
+        duplicate_names(&h).is_empty(),
+        "after reorder: {:#?}",
+        duplicate_names(&h)
+    );
+    // Delete the middle one: 1, 2, still unique.
+    let middle = h.state().layers()[1].clone();
+    let head = find_text(&h, "Layer Name").unwrap();
+    click_at(
+        &mut h,
+        egui::pos2(head.left() + 800.0, head.bottom() + 150.0),
+    );
+    h.state().session().lock().selected_layers = vec![middle];
+    key(&mut h, Modifiers::NONE, Key::Delete);
+    assert_eq!(lock_switch_numbers(&h, "Layer ", "Lock"), [1, 2]);
+    assert!(
+        duplicate_names(&h).is_empty(),
+        "after delete: {:#?}",
+        duplicate_names(&h)
+    );
+}
+
+#[test]
+fn numbered_names_in_chinese() {
+    if !in_child(
+        "acceptance::startup::numbered_names_in_chinese",
+        &[("BAE_LANG", "zh")],
+    ) {
+        return;
+    }
+    crate::i18n::init_from_env();
+    let mut h = gui();
+    comp_with(
+        &mut h,
+        &["motion.layer.new.solid", "motion.layer.new.solid"],
+    );
+    for l in h.state().layers() {
+        rename(&mut h, &l, "同名");
+    }
+    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND, Key::M);
+    let all = labels(&h);
+    let english: Vec<&String> = all
+        .iter()
+        .filter(|l| l.starts_with("Layer ") || l.starts_with("Render Item"))
+        .collect();
+    assert!(
+        english.is_empty(),
+        "English prefixes in the Chinese UI: {english:?}"
+    );
+    let lock = bae_ui::tr("Lock");
+    let numbered: Vec<&String> = all
+        .iter()
+        .filter(|l| l.contains("同名") && l.ends_with(&format!(" · {lock}")))
+        .collect();
+    println!("zh lock switches: {numbered:?}");
+    assert_eq!(numbered.len(), 2);
+    assert_ne!(numbered[0], numbered[1]);
+    assert!(duplicate_names(&h).is_empty(), "{:#?}", duplicate_names(&h));
+    // The Render Queue's fields have names, not only values (Windows #128).
+    use egui::accesskit::Role;
+    let unnamed: Vec<String> = h
+        .root()
+        .children_recursive()
+        .filter_map(|n| {
+            let a = n.accesskit_node();
+            let input = matches!(
+                a.role(),
+                Role::ComboBox | Role::TextInput | Role::SpinButton
+            );
+            (input && a.bounding_box().is_some() && a.label().is_none_or(|l| l.is_empty()))
+                .then(|| format!("{:?} value={:?}", a.role(), a.value()))
+        })
+        .collect();
+    assert!(
+        unnamed.is_empty(),
+        "unnamed inputs in the Chinese UI: {unnamed:#?}"
+    );
+}
+
+#[test]
+fn render_queue_items_of_one_comp_stay_distinct_after_removing_one() {
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    for _ in 0..3 {
+        key(&mut h, Modifiers::COMMAND, Key::M);
+    }
+    assert!(duplicate_names(&h).is_empty(), "{:#?}", duplicate_names(&h));
+    for n in 1..=3 {
+        assert!(
+            queue_control(&h, n, "Remove").is_some(),
+            "no Render Item {n} · Remove"
+        );
+    }
+    queue_control(&h, 1, "Remove").unwrap().click();
+    settle(&mut h);
+    assert_eq!(h.state().render_queue().lock().items().len(), 2);
+    assert!(queue_control(&h, 1, "Remove").is_some() && queue_control(&h, 2, "Remove").is_some());
+    assert!(
+        queue_control(&h, 3, "Remove").is_none(),
+        "numbers not renumbered after removing item 1"
+    );
+    assert!(duplicate_names(&h).is_empty(), "{:#?}", duplicate_names(&h));
+}
