@@ -1,0 +1,22 @@
+[effect.hue-saturation]
+name = "色相/饱和度"
+keywords = ["色相", "饱和度", "亮度", "着色", "去色"]
+
+[effect.hue-saturation.params]
+channel_control = "通道控制"
+master_hue = "主色相"
+master_saturation = "主饱和度"
+master_lightness = "主亮度"
+colorize = "彩色化"
+colorize_hue = "着色色相"
+colorize_saturation = "着色饱和度"
+colorize_lightness = "着色亮度"
+
+[effect.hue-saturation.choices.channel_control]
+1 = "主"
+2 = "红色"
+3 = "黄色"
+4 = "绿色"
+5 = "青色"
+6 = "蓝色"
+7 = "洋红"

@@ -1,0 +1,30 @@
+[effect.levels]
+name = "色阶"
+keywords = ["色阶", "灰度系数", "输入", "输出", "黑场", "白场"]
+
+[effect.levels.params]
+channel = "通道"
+input_black = "输入黑色"
+input_white = "输入白色"
+gamma = "灰度系数"
+output_black = "输出黑色"
+output_white = "输出白色"
+clip_black = "剪切以输出黑色"
+clip_white = "剪切以输出白色"
+
+[effect.levels.choices.channel]
+1 = "RGB"
+2 = "红色"
+3 = "绿色"
+4 = "蓝色"
+5 = "Alpha"
+
+[effect.levels.choices.clip_black]
+1 = "开"
+2 = "关"
+3 = "对 32 bpc 颜色关闭"
+
+[effect.levels.choices.clip_white]
+1 = "开"
+2 = "关"
+3 = "对 32 bpc 颜色关闭"
