@@ -192,7 +192,8 @@ wgpu v30.0.2
 |---|---|---|---|---|
 | objc2 | 0.6.5 | 默认 | 01、08 | 最新；wgpu-hal、fontique、muda 用 0.6 |
 | objc2-foundation、objc2-core-foundation、objc2-app-kit、objc2-metal、objc2-quartz-core、objc2-av-foundation、objc2-core-video、objc2-core-media、objc2-video-toolbox | 0.3.2 | `std` | 01（bae-platform、bae-gpu）、08（AVFoundation / VideoToolbox） | 最新；与 objc2 0.6 配套 |
-| windows | 0.62.2 | 无默认 | bae-gpu（Windows，D3D12 句柄）；08（Media Foundation） | 最新；wgpu-hal 要求 `^0.62`，fontique 要求 `^0.62.2` |
+| windows | 0.62.2 | 无默认 | bae-gpu（Windows，D3D12 句柄）；08（Media Foundation）；bae（Windows 另存为对话框，`Win32_UI_Shell_Common`） | 最新；wgpu-hal 要求 `^0.62`，fontique 要求 `^0.62.2` |
+| windows-core | 0.62.2 | 无默认（bae 开 `std`，树里已经开着） | bae（Windows：`#[implement]` 实现 IFileDialogEvents，宏展开里写的是 `windows_core`） | windows 0.62.2 本来就依赖它，不新增 crate |
 | windows-sys | 0.61.2 | 无默认 | bae-platform（Windows 控制台） | 最新；muda 要求 `>=0.60, <=0.61` |
 | directories | 6.0.0 | 默认 | bae-platform | 最新 |
 | libloading | 0.9.1 | 默认 | 19、20 | 最新 |

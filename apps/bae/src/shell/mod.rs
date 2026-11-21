@@ -20,6 +20,10 @@ mod dialogs;
 mod menu;
 #[cfg(target_os = "macos")]
 mod open_documents;
+#[cfg(any(windows, test))]
+mod save_guard;
+#[cfg(windows)]
+mod win_save;
 mod window_state;
 
 // Only the macOS acceptance suite calls it (Windows test builds would warn).
