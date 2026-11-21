@@ -52,6 +52,7 @@ pub(crate) fn build_app() -> App {
         .add_module(bae_gpu::GpuModule)
         .add_module(crate::model_cli::ModelCliModule)
         .add_module(crate::mcp_cli::McpCliModule)
+        .add_module(crate::pack_cli::PackCliModule)
         .add_module(bae_render::RenderModule)
         .add_module(bae_motion::MotionModule)
         .add_module(bae_plugin::PluginModule)

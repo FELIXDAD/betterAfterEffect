@@ -536,12 +536,14 @@ fn row_of(h: &Ui, name: &str) -> egui::Rect {
         .unwrap_or_else(|| panic!("no row {name:?}"))
 }
 
-/// Clicks the Lock switch (accesskit name "Lock") on `name`'s timeline row.
+/// Clicks the Lock switch on `name`'s timeline row (accesskit name
+/// "Layer “name” · Lock", issue #128).
 fn click_lock_switch(h: &mut Ui, name: &str) {
     let row = row_of(h, name);
+    let label = format!("Layer “{name}” · Lock");
     let switch = h
         .root()
-        .query_all_by_label("Lock")
+        .query_all_by_label(&label)
         .map(|n| n.rect())
         .find(|r| (r.center().y - row.center().y).abs() < 6.0)
         .unwrap_or_else(|| panic!("no Lock switch on {name}'s row"));

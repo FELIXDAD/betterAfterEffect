@@ -781,3 +781,48 @@ fn assets_sharing_files_are_packed_once() {
         originals.0[4].1
     );
 }
+
+/// Issue #131: packing keeps the manifest's other fields — the desktop app's
+/// saved view (open comps), path mappings — even through the commands, which
+/// only see the stage.
+#[test]
+fn packing_keeps_the_manifest_fields() {
+    let (mut fx, _) = Fixture::new();
+    let view =
+        json!({"comps": [{"path": "/comps/main", "time": 705600000}], "active": "/comps/main"});
+    fx.project
+        .manifest
+        .extra
+        .insert("view".into(), view.clone());
+    fx.project.manifest.path_mappings = vec![bae_model::PathMapping {
+        from: "Z:/".into(),
+        to: "/Volumes/NAS/".into(),
+    }];
+    let location = fx.project.location().unwrap().to_owned();
+    fx.project.save().unwrap();
+    let manifest_of = |path: &std::path::Path| bae_package::read_manifest(path).unwrap();
+    assert_eq!(manifest_of(&location).extra.get("view"), Some(&view));
+
+    // The command (MCP's package_pack) with the project's location.
+    let out = fx.root.join("视图 保留.baez");
+    fx.run("package.pack", json!({"output": out, "project": location}));
+    let packed = manifest_of(&out);
+    assert_eq!(
+        packed.extra.get("view"),
+        Some(&view),
+        "view lost by package.pack"
+    );
+    assert_eq!(packed.path_mappings.len(), 1);
+    assert!(packed.extra.contains_key("package"), "package note");
+    // The library call with the opened project, and a package packed again.
+    let opened = Project::open(&out).unwrap();
+    let again = fx.root.join("again.baez");
+    bae_package::pack(
+        &bae_package::PackSource::project(&opened),
+        &again,
+        &bae_package::PackOptions::default(),
+        bae_package::WriteOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(manifest_of(&again).extra.get("view"), Some(&view));
+}

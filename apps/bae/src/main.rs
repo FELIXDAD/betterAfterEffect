@@ -21,6 +21,7 @@ mod headless;
 mod i18n;
 mod mcp_cli;
 mod model_cli;
+mod pack_cli;
 #[cfg(test)]
 mod save_roundtrip;
 mod shell;
@@ -39,6 +40,8 @@ fn main() -> ExitCode {
         .add_module(bae_gpu::GpuModule)
         .add_module(model_cli::ModelCliModule)
         .add_module(mcp_cli::McpCliModule)
+        // `bae pack`: one self-contained .baez (bae-package).
+        .add_module(pack_cli::PackCliModule)
         .add_module(bae_render::RenderModule)
         // Motion commands (comp.create, layer.create, key.ease …) for menus and agents.
         .add_module(bae_motion::MotionModule)

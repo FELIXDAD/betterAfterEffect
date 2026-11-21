@@ -96,6 +96,22 @@ const ZH: &[(&str, &str)] = &[
     ("“{file}” could not be saved.", "无法保存“{file}”。"),
     ("“{file}” could not be opened.", "无法打开“{file}”。"),
     ("Details:", "详细信息："),
+    // bae pack
+    ("packed", "已打包"),
+    ("asset file(s)", "个素材文件"),
+    ("warning", "警告"),
+    (
+        "“{file}” already exists; use --overwrite to replace it.",
+        "“{file}”已存在；要替换请加 --overwrite。",
+    ),
+    (
+        "“{file}” would overwrite the project or one of its assets.",
+        "“{file}”会覆盖项目本身或它的素材。",
+    ),
+    (
+        "{n} asset file(s) are missing; nothing was written.",
+        "缺少 {n} 个素材文件，没有写出任何文件。",
+    ),
     ("Could not save the project.", "无法保存项目。"),
     // Status bar: why the last command failed
     (
