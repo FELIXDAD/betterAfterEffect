@@ -12,6 +12,8 @@ publish.workspace = true
 bae-app.workspace = true
 bae-model.workspace = true
 egui.workspace = true
+# Inflates the embedded icon data (icons/vector.rs); already linked through bae-model's zip.
+flate2.workspace = true
 # System UI fonts (theme::system_ui_fonts): the font database bae-text / parley use,
 # already linked, so the app bundles no fonts.
 fontique.workspace = true

@@ -64,7 +64,7 @@
   - `bae-ui::dock`：与 AE 工作区同构的 Splitter/Frame 树。拆分条拖动（4pt 黑缝即拖动区）；标签（激活态 1pt 下划线、☰ 面板菜单、×、标签色块、锁）；焦点框 1pt #5794ec；堆叠面板组（折叠标题 24pt，可拖动展开面板的高度）；拖动标签到其他 frame 的中间或四边重新停靠，拖出窗口变成浮动窗口（egui 多视口）；`~` 键最大化面板组；布局可存成 JSON 再恢复（`Layout::to_json` / `from_json`）。
   - `bae-ui::titlebar`：保留系统窗口（圆角、阴影、边缘缩放），隐藏系统标题和红绿灯，自己画 19pt 标题栏和 9pt 红绿灯；关闭、最小化、全屏、拖动窗口、双击缩放都走 `ViewportCommand`。
   - `bae-ui::widgets`：上面列出的控件和工作区切换栏（默认 ☰ / 审阅 / …，☰ 菜单含重置、保存、编辑工作区）。
-  - `bae-ui::icons`：约 90 个图标，16×16 网格矢量绘制。
+  - `bae-ui::icons`：约 90 个图标。有 SVG 的图标由 `tools/icons/build_icons.py` 转成压缩的填充路径数据（`assets/icons/icons.bin`），运行时按实际像素光栅化进图集、按主题色着色；其余仍是 16×16 网格的 Painter 绘制（见 `assets/icons/README.md`）。
   - `bae-ui::i18n` 与 `docs/glossary.md`：中文术语都和本机 AE 2026 简体中文界面词典核对过。
   - 示例：`cargo run -p bae-ui --example shell`（`--zh` 中文，`--reset` 恢复默认布局）。
   - 与 AE 截图逐像素对比：五个 frame 的位置误差 ≤1pt（有单元测试）；标题、标签文字、×、色块、锁、☰、下划线的位置误差 ≤1.5pt。AE 用 Adobe Clean 字体，我们用系统 SF，11.5pt 时文字宽度与 AE 相差约 1%。

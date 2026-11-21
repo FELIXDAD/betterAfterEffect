@@ -879,6 +879,7 @@ dependencies = [
  "bae-model",
  "eframe",
  "egui",
+ "flate2",
  "fontique",
  "serde",
  "serde_json",
