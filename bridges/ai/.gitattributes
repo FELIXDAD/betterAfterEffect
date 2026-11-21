@@ -1,0 +1,6 @@
+# Same bytes on every platform: the shell scripts run under sh (CRLF breaks them), and the
+# scripts and harness are checked as they are (the .jsx files must stay ASCII).
+*.sh text eol=lf
+*.jsx text eol=lf
+*.js text eol=lf
+*.md text eol=lf
