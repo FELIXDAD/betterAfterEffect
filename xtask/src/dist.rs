@@ -1,7 +1,10 @@
 //! `cargo xtask dist`: release build and packaging into `<target-dir>/dist/`.
 //!
 //! - macOS: `BAE.app` (ad-hoc signed, not notarized) and `BAE-<version>-<arch>-macos.zip` of it.
-//! - Windows: `BAE-<version>-<arch>-windows/` and a zip of its contents.
+//!   The bundle has the app icon (`assets/icons/app/bae.icns`) and declares the `.bae`
+//!   (project folder, shown as one document) and `.baez` (packed project) document types.
+//! - Windows: `BAE-<version>-<arch>-windows/` and a zip of its contents. `bae.exe` must carry
+//!   the app icon (linked in by `apps/bae/build.rs`); packaging fails when it does not.
 //!
 //! Sizes are compared with the `app-bundle` and `installer` budgets; they fail the task only
 //! once those budgets are marked `enforced` in `tools/size-budget/budget.toml`.
@@ -16,6 +19,7 @@ use anyhow::{Context as _, Result, bail};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, DateTime, System, ZipWriter};
 
+use crate::icon;
 use crate::size::Budgets;
 use crate::util::{self, APP_BIN, APP_PACKAGE, BuildArgs, Target, Verdict, Workspace};
 
@@ -30,6 +34,11 @@ Builds `bae` in release mode and packages it into <target-dir>/dist/:
 const BUNDLE_ID: &str = "io.github.felixdad.bae";
 const BUNDLE_NAME: &str = "BAE";
 const MIN_MACOS: &str = "12.0";
+/// `Contents/Resources/<ICON_NAME>.icns` (`CFBundleIconFile`).
+const ICON_NAME: &str = "bae";
+/// Uniform type identifiers the bundle exports for its documents.
+const PROJECT_UTI: &str = "io.github.felixdad.bae.project";
+const PACKAGE_UTI: &str = "io.github.felixdad.bae.package";
 
 pub fn run(args: Vec<String>) -> Result<()> {
     let mut build = BuildArgs::default();
@@ -64,6 +73,9 @@ pub fn run(args: Vec<String>) -> Result<()> {
         ws.build_release_app(&target)?;
     }
     let binary = ws.existing_release_binary(&target)?;
+    if target.is_windows() {
+        check_exe_icon(&binary)?;
+    }
     let dist = ws.target_directory.join("dist");
     fs::create_dir_all(&dist).with_context(|| format!("failed to create {}", dist.display()))?;
     let stamp = zip_timestamp();
@@ -162,6 +174,10 @@ fn package_macos(
     write_file(&contents.join("Info.plist"), info_plist(version).as_bytes())?;
     copy_file(binary, &macos.join(APP_BIN))?;
     copy_file(
+        &icon::icon_file(&ws.workspace_root, "bae.icns"),
+        &resources.join(format!("{ICON_NAME}.icns")),
+    )?;
+    copy_file(
         &ws.workspace_root.join("LICENSE"),
         &resources.join("LICENSE"),
     )?;
@@ -196,6 +212,20 @@ fn package_windows(
     let zip = dist.join(format!("{name}.zip"));
     zip_dir(&stage, "", &zip, stamp)?;
     Ok((stage, zip))
+}
+
+/// `bae.exe` must carry the app icon (`RT_GROUP_ICON`, from `assets/icons/app/bae.res`
+/// through `apps/bae/build.rs`); otherwise Explorer and the taskbar show a blank one.
+fn check_exe_icon(exe: &Path) -> Result<()> {
+    let bytes = fs::read(exe).with_context(|| format!("failed to read {}", exe.display()))?;
+    if !icon::pe_has_group_icon(&bytes).with_context(|| format!("reading {}", exe.display()))? {
+        bail!(
+            "{} has no icon resource; apps/bae/build.rs should link {}/bae.res",
+            exe.display(),
+            icon::ICON_DIR
+        );
+    }
+    Ok(())
 }
 
 /// Ad-hoc signs the assembled bundle and verifies it.
@@ -258,14 +288,56 @@ fn copy_file(from: &Path, to: &Path) -> Result<()> {
 // Info.plist
 // ---------------------------------------------------------------------------
 
-enum PlistValue<'a> {
+enum Plist<'a> {
     String(&'a str),
     Bool(bool),
+    Array(Vec<Plist<'a>>),
+    Dict(Vec<(&'a str, Plist<'a>)>),
+}
+
+fn strings<'a>(items: &[&'a str]) -> Plist<'a> {
+    Plist::Array(items.iter().map(|s| Plist::String(s)).collect())
+}
+
+/// One `CFBundleDocumentTypes` entry: BAE is the owner and editor of `uti`. The document
+/// icon is composed by macOS from the app icon (`CFBundleTypeIconSystemGenerated`).
+fn document_type<'a>(name: &'a str, uti: &'a str, package: bool) -> Plist<'a> {
+    use Plist::{Bool, Dict, String as Str};
+    let mut entries = vec![
+        ("CFBundleTypeName", Str(name)),
+        ("CFBundleTypeRole", Str("Editor")),
+        ("LSHandlerRank", Str("Owner")),
+        ("LSItemContentTypes", strings(&[uti])),
+        ("CFBundleTypeIconSystemGenerated", Bool(true)),
+    ];
+    if package {
+        entries.push(("LSTypeIsPackage", Bool(true)));
+    }
+    Dict(entries)
+}
+
+/// One `UTExportedTypeDeclarations` entry for a file name extension.
+fn exported_type<'a>(
+    uti: &'a str,
+    description: &'a str,
+    conforms_to: &[&'a str],
+    extension: &'a str,
+) -> Plist<'a> {
+    use Plist::{Dict, String as Str};
+    Dict(vec![
+        ("UTTypeIdentifier", Str(uti)),
+        ("UTTypeDescription", Str(description)),
+        ("UTTypeConformsTo", strings(conforms_to)),
+        (
+            "UTTypeTagSpecification",
+            Dict(vec![("public.filename-extension", strings(&[extension]))]),
+        ),
+    ])
 }
 
 /// The bundle's `Info.plist` (XML property list).
 pub fn info_plist(version: &str) -> String {
-    use PlistValue::{Bool, String as Str};
+    use Plist::{Array, Bool, String as Str};
     let bundle_version = bundle_version(version);
     let entries = [
         ("CFBundleName", Str(BUNDLE_NAME)),
@@ -276,6 +348,7 @@ pub fn info_plist(version: &str) -> String {
         ("CFBundleShortVersionString", Str(bundle_version)),
         ("CFBundleVersion", Str(bundle_version)),
         ("CFBundleInfoDictionaryVersion", Str("6.0")),
+        ("CFBundleIconFile", Str(ICON_NAME)),
         ("LSMinimumSystemVersion", Str(MIN_MACOS)),
         ("NSHighResolutionCapable", Bool(true)),
         ("NSSupportsAutomaticGraphicsSwitching", Bool(true)),
@@ -284,23 +357,67 @@ pub fn info_plist(version: &str) -> String {
             Str("public.app-category.video"),
         ),
         ("NSHumanReadableCopyright", Str("Apache-2.0")),
+        // A `.bae` project is a folder: as a package Finder shows it as one document
+        // that opens in BAE on double-click. `.baez` is a single (zip) file.
+        (
+            "CFBundleDocumentTypes",
+            Array(vec![
+                document_type("BAE Project", PROJECT_UTI, true),
+                document_type("BAE Project Package", PACKAGE_UTI, false),
+            ]),
+        ),
+        (
+            "UTExportedTypeDeclarations",
+            Array(vec![
+                exported_type(
+                    PROJECT_UTI,
+                    "BAE Project",
+                    &["com.apple.package", "public.composite-content"],
+                    "bae",
+                ),
+                exported_type(
+                    PACKAGE_UTI,
+                    "BAE Project Package",
+                    &["public.data", "public.composite-content"],
+                    "baez",
+                ),
+            ]),
+        ),
     ];
     let mut xml = String::from(concat!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
         "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" ",
         "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n",
-        "<plist version=\"1.0\">\n<dict>\n",
+        "<plist version=\"1.0\">\n",
     ));
-    for (key, value) in entries {
-        xml.push_str(&format!("\t<key>{}</key>\n", xml_escape(key)));
-        match value {
-            Str(s) => xml.push_str(&format!("\t<string>{}</string>\n", xml_escape(s))),
-            Bool(true) => xml.push_str("\t<true/>\n"),
-            Bool(false) => xml.push_str("\t<false/>\n"),
+    write_plist(&mut xml, &Plist::Dict(entries.into()), 0);
+    xml.push_str("</plist>\n");
+    xml
+}
+
+/// Appends `value` as plist XML, one element per line, indented with tabs.
+fn write_plist(xml: &mut String, value: &Plist<'_>, depth: usize) {
+    let pad = "\t".repeat(depth);
+    match value {
+        Plist::String(s) => xml.push_str(&format!("{pad}<string>{}</string>\n", xml_escape(s))),
+        Plist::Bool(true) => xml.push_str(&format!("{pad}<true/>\n")),
+        Plist::Bool(false) => xml.push_str(&format!("{pad}<false/>\n")),
+        Plist::Array(items) => {
+            xml.push_str(&format!("{pad}<array>\n"));
+            for item in items {
+                write_plist(xml, item, depth + 1);
+            }
+            xml.push_str(&format!("{pad}</array>\n"));
+        }
+        Plist::Dict(entries) => {
+            xml.push_str(&format!("{pad}<dict>\n"));
+            for (key, item) in entries {
+                xml.push_str(&format!("{pad}\t<key>{}</key>\n", xml_escape(key)));
+                write_plist(xml, item, depth + 1);
+            }
+            xml.push_str(&format!("{pad}</dict>\n"));
         }
     }
-    xml.push_str("</dict>\n</plist>\n");
-    xml
 }
 
 /// macOS wants up to three dot-separated integers: drop SemVer pre-release/build suffixes.
@@ -480,6 +597,7 @@ mod tests {
             ("CFBundleShortVersionString", "<string>0.1.0</string>"),
             ("CFBundleVersion", "<string>0.1.0</string>"),
             ("CFBundleInfoDictionaryVersion", "<string>6.0</string>"),
+            ("CFBundleIconFile", "<string>bae</string>"),
             ("LSMinimumSystemVersion", "<string>12.0</string>"),
             ("NSHighResolutionCapable", "<true/>"),
             ("NSSupportsAutomaticGraphicsSwitching", "<true/>"),
@@ -492,11 +610,64 @@ mod tests {
             let pair = format!("\t<key>{key}</key>\n\t{value}\n");
             assert!(xml.contains(&pair), "missing {pair:?} in\n{xml}");
         }
-        assert_eq!(xml.matches("<key>").count(), 13);
+        // Every element on its own line and every container closed.
+        for (open, close) in [("<dict>", "</dict>"), ("<array>", "</array>")] {
+            assert_eq!(xml.matches(open).count(), xml.matches(close).count());
+        }
+        for uti in [PROJECT_UTI, PACKAGE_UTI] {
+            // Declared as a document type and exported as a type.
+            assert_eq!(xml.matches(&format!("<string>{uti}</string>")).count(), 2);
+        }
+        assert!(xml.contains("<key>LSTypeIsPackage</key>"));
+        assert!(xml.contains("\t\t\t\t<string>com.apple.package</string>\n"));
+    }
+
+    /// macOS parses the plist and finds the document types where Launch Services
+    /// looks for them (#115).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn plutil_reads_the_document_types() {
+        let path = scratch_dir("plist").join("Info.plist");
+        fs::write(&path, info_plist("0.1.0")).unwrap();
+        let plutil = |args: &[&str]| {
+            let out = Command::new("plutil")
+                .args(args)
+                .arg(&path)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "plutil {args:?}: {out:?}");
+            String::from_utf8(out.stdout).unwrap().trim().to_owned()
+        };
+        plutil(&["-lint"]);
+        let get = |key: &str| plutil(&["-extract", key, "raw", "-o", "-"]);
+        assert_eq!(get("CFBundleIconFile"), "bae");
         assert_eq!(
-            xml.matches("<key>").count(),
-            xml.matches("<string>").count() + xml.matches("<true/>").count()
+            get("CFBundleDocumentTypes.0.LSItemContentTypes.0"),
+            PROJECT_UTI
         );
+        assert_eq!(get("CFBundleDocumentTypes.0.LSTypeIsPackage"), "true");
+        assert_eq!(get("CFBundleDocumentTypes.0.CFBundleTypeRole"), "Editor");
+        assert_eq!(
+            get("CFBundleDocumentTypes.1.LSItemContentTypes.0"),
+            PACKAGE_UTI
+        );
+        assert_eq!(
+            get(
+                "UTExportedTypeDeclarations.0.UTTypeTagSpecification.public\\.filename-extension.0"
+            ),
+            "bae"
+        );
+        assert_eq!(
+            get("UTExportedTypeDeclarations.0.UTTypeConformsTo.0"),
+            "com.apple.package"
+        );
+        assert_eq!(
+            get(
+                "UTExportedTypeDeclarations.1.UTTypeTagSpecification.public\\.filename-extension.0"
+            ),
+            "baez"
+        );
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 
     #[test]
@@ -614,6 +785,7 @@ mod tests {
                 file("BAE.app/Contents/MacOS/bae", 0o755),
                 dir("BAE.app/Contents/Resources/"),
                 file("BAE.app/Contents/Resources/LICENSE", 0o644),
+                file("BAE.app/Contents/Resources/bae.icns", 0o644),
             ]
         );
     }

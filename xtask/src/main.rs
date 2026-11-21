@@ -4,11 +4,13 @@
 //!   (`tools/size-budget/budget.toml`, ARCHITECTURE §11).
 //! - `dist`:  release build and packaging (`BAE.app` + zip on macOS, zip on Windows).
 //! - `bench`: workspace benchmarks (entry point for workstream 04).
+//! - `icons`: render the application icon into `assets/icons/app/`.
 //!
 //! Kept deliberately small: no CLI framework, arguments are parsed by hand.
 
 mod bench;
 mod dist;
+mod icon;
 mod size;
 mod util;
 
@@ -31,6 +33,7 @@ Tasks:
             --no-build          package the existing release binary, do not build
   bench   Run the workspace benchmarks (criterion)
             cargo xtask bench [<cargo bench options>] [-- <criterion args>]
+  icons   Render the application icon into assets/icons/app/ (icns, ico, res, svg)
   help    Show this message
 
 Sizes are reported in MiB (1 MiB = 1024 * 1024 bytes). When GITHUB_STEP_SUMMARY is set,
@@ -49,6 +52,7 @@ fn main() -> ExitCode {
         Some("size") => size::run(rest),
         Some("dist") => dist::run(rest),
         Some("bench") => bench::run(rest),
+        Some("icons") => icon::run(rest),
         Some(other) => Err(anyhow::anyhow!(
             "unknown task `{other}` (run `cargo xtask help`)"
         )),
