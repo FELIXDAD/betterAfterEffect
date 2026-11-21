@@ -909,3 +909,51 @@ fn enter_on_a_focused_button_does_not_rename_in_the_project_panel() {
     assert_eq!(frame(&h, &mut project, false, vec![enter()]), 0);
     assert!(project.is_renaming());
 }
+
+/// Issue #124: a locked layer cannot be picked in the composition viewer (AE:
+/// clicks go through it) nor dragged.
+#[test]
+fn viewer_does_not_pick_locked_layers() {
+    let mut h = Harness::new();
+    let (_comp, solid, _shape) = h.comp_with_layers();
+    h.run(
+        "attr.set",
+        json!({"path": solid, "attr": "locked", "value": {"type": "bool", "value": true}}),
+    );
+    h.session().lock().selected_layers.clear();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    // The solid covers the comp; away from the star nothing else is there.
+    let at = pos2(640.0, 380.0) + vec2(-120.0, -60.0);
+    let mut evs = Vec::new();
+    pointer(&mut evs, at, None);
+    h.frame("composition", &mut viewer, evs);
+    let mut evs = Vec::new();
+    pointer(&mut evs, at, Some(true));
+    h.frame("composition", &mut viewer, evs);
+    let mut evs = Vec::new();
+    pointer(&mut evs, at, Some(false));
+    let r = h.frame("composition", &mut viewer, evs);
+    assert!(
+        !h.session().lock().selected_layers.contains(&solid),
+        "clicking selected the locked layer"
+    );
+    // Dragging over it moves nothing.
+    let mut evs = Vec::new();
+    pointer(&mut evs, at, Some(true));
+    h.frame("composition", &mut viewer, evs);
+    for i in 1..=4 {
+        let mut evs = Vec::new();
+        pointer(&mut evs, at + vec2(10.0 * i as f32, 0.0), None);
+        h.frame("composition", &mut viewer, evs);
+    }
+    let mut evs = Vec::new();
+    pointer(&mut evs, at + vec2(50.0, 0.0), Some(false));
+    let drag = h.frame("composition", &mut viewer, evs);
+    assert!(
+        r.invocations.is_empty() && drag.invocations.is_empty(),
+        "{:?} {:?}",
+        r.invocations,
+        drag.invocations
+    );
+}
