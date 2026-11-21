@@ -9,6 +9,7 @@
 | B1 动效图形 | 1080p30，10 秒，50 个形状图层 + 10 个文字图层 + 模糊和发光 | `fixture::b1`：50 个动画纯色（代替形状：位置 3 个关键帧、旋转、缩放、不透明度；每 5 个里有 1 个用相加/滤色/相乘/叠加）+ 10 个动画 RGBA 纹理（代替文字，带软边 alpha）+ 全屏背景。模糊和发光等 07。 |
 | B2 素材合成 | 4K ProRes 素材 + 调色 + 遮罩 | 未做（遮罩、06 调色） |
 | B3 压力测试 | 500 个图层，多层预合成嵌套 | 未做 |
+| 蒙版 | 1080p 下 50 个带羽化蒙版的图层实时（0.0.1 蒙版验收项） | `benches/masks.rs`：50 个整屏纯色（不透明度 70%），每层一个羽化（20–120 px）的椭圆蒙版，**路径每帧都在动**（每帧所有蒙版都重新栅格化、重新羽化，最坏情况）；每 5 层多一个相减的矩形蒙版（走累加器），每 7 层反转（整层都要画），每 3 层有扩展且 X/Y 羽化不同。共 60 个蒙版。 |
 
 形状（05）、文字（05）、效果（07）就绪后，B1 换成真实的形状和文字图层，指标名不变，历史结果里注明换代。
 
@@ -95,6 +96,28 @@ GPU                 … 第 N−1 帧 … 第 N 帧 …
 
 **与 AE 的速度对比**（Windows RTX 5090 D，`docs/test-reports/win5090/2026-11-21-speed-b1.md`，导出流水线之前的 dev）：AE 输出 PNG 22.645 s，BAE（逐帧串行 PNG）13.010 s，约 1.74 倍；固定开销 AE 约 7.88 s、BAE 约 0.96 s；扣掉后每帧 AE 约 49 ms、BAE 约 40 ms，其中 BAE 的求值、渲染、回读只占约 3 ms，其余是单线程 PNG 编码和写盘。流水线之后的数字等 5090 重测。画面一致性对比见 `crates/bae-render/tests/ae/README.md`。
 
+### 蒙版（Apple M1 Pro，macOS，Metal，2026-11-21）
+
+`cargo bench -p bae-render --bench masks`（120 帧，帧缓存关闭，每帧都真正渲染；JSON 写到 `target/bench/masks.json`）。
+
+| 指标 | 结果 | 目标 |
+|---|---:|---:|
+| 完整分辨率预览（60 个蒙版每帧重算） | **247 fps** | ≥ 30 fps |
+| 半分辨率预览 | 430 fps | |
+| 同样的 50 个图层不加蒙版 | 174 fps | |
+| 单帧延迟 p50 / p95 | 4.9 / 5.3 ms | < 33 ms |
+| 建图（含路径展平、扩展描边）p50 / p95 | 0.27 / 0.28 ms | |
+| 编码 GPU 命令 p50 | 0.26 ms | |
+| 每帧 | 51 个节点 → 250 个 draw call、**5 个 render pass** | |
+
+说明：
+
+- 加了蒙版反而比不加快：蒙版的支撑范围（路径包围盒 + 扩展 + 3σ）会缩小图层的绘制范围，小蒙版在大图层上只画蒙版那一块。
+- 做法（`crates/bae-render/src/mask.rs`）：路径在 CPU 上展平（kurbo，误差 1/20 像素），GPU 上按"每条边给它右边的像素加上精确面积"累加出绕数（抗锯齿是精确覆盖率，不是多重采样）；扩展用圆角连接的描边轮廓（扩大取并集、收缩减去），羽化是按轴分开的高斯模糊，大羽化按轴降采样，使每个方向的 σ 保持 3–6 个纹素（每遍最多 37 次采样，耗时和羽化大小无关）；7 种模式用固定管线混合合成。
+- 一帧里所有蒙版共用图集（`exec/masks.rs`）：每页 3 个 pass（覆盖、解析 + 横向羽化、纵向羽化），多蒙版图层再加 1 个累加 pass。只有一个蒙版的图层直接在图层绘制时采样蒙版，不多一遍全屏。
+- 优化过程（同一台机器、同一基准）：每个蒙版各 3 个 pass 时 50 fps（191 个 render pass/帧，编码 4.8 ms）→ 按轴降采样 78 fps → 图集 247 fps（5 个 pass/帧，编码 0.26 ms）。Apple GPU 上每个 render pass 都有固定开销，小 pass 多了是主要成本。
+- 静态蒙版现在也每帧重算（渲染器只有整帧缓存，没有中间结果缓存）；按上面的数字这不是瓶颈，以后加中间缓存时蒙版节点已经标了 `cacheable`。
+
 ### 导出端到端（`bae render`，B1 300 帧，Apple M4 10 核，macOS，2026-11-21）
 
 3 次取中位，墙钟含进程启动。之前 = dev 6aae5b8（逐帧串行：同步回读、单线程 PNG）；之后 = 本 PR（流水线 + 并行编码 + `png` 回到 opt-level 3）。
@@ -138,6 +161,8 @@ GPU                 … 第 N−1 帧 … 第 N 帧 …
 
 导出流水线（2026-11-21，macOS arm64 strip 后，`cargo build --release -p bae`）：dev 6aae5b8 22,870,912 字节 → 23,568,144 字节，**+697,232 字节（+0.665 MiB）**。没有新依赖：以前 `bae render` 不调用 bae-media 的编码器，LTO 把它们整个删掉了；现在链接进来的是 EXR 写出（exr 的各种压缩器 +92 KiB，miniz_oxide +16 KiB）、PNG / TIFF / EXR 写出与并行写出（bae_media +104 KiB，含 macOS 影片编码器）、TIFF 编码（+17 KiB）、导出流水线（bae_render +33 KiB）和标准库的线程 / 通道实例化（cargo bloat 估算，.text 合计约 +387 KiB）。Windows 没有影片编码器那部分。`png` 从 opt-level "s" 改回 3：strip 后的二进制大小不变（同字节数）。
 
+蒙版（render/masks，2026-11-21，macOS arm64 strip 后，`cargo xtask size`）：蒙版本身 +49,616 字节；同时去掉两处浪费 −33,072 字节——`bae render --mock-eval`（03 之前的模拟求值器，唯一把 `MockEvaluator` 链接进应用的地方，约 29 KB 代码）和 `RenderError` 的派生 `Debug`（改成打印消息）。合计 dev b7c37e2 24,238,352 → 24,254,896 字节，**+16,544 字节（+16.2 KiB）**。之后 WGSL 着色器在编译期去掉注释、缩进和空行再嵌入（`gpu::minify`，常量求值，不加构建脚本），又省约 6.8 KB。没有新 crate（kurbo 已经随 bae-vector / vello 链接进应用）。另：bae-render 里还实例化了约 50 KB naga / wgpu 错误类型的 `Debug`（`<&T as Debug>` 的跨 crate 泛型副本，bae-gpu 里还有一份 55 KB），在 bae-render 内部去不掉，留给根 `Cargo.toml` 的编译选项（例如 share-generics）去看。
+
 `cargo bloat`：bae-render 自身约 134 KiB，其余主要是第一次进入应用的 bae-media 解码器（exr、image-webp、zune-jpeg 等）和 bae-anim。素材解码是 bae-render 的 `media` 特性（默认开）；根 `Cargo.toml` 的条目关掉默认特性，`apps/bae` 显式打开，需要更小的二进制（例如只渲染形状的服务端）时可以不开。
 
 ## 5. 历史
@@ -146,3 +171,4 @@ GPU                 … 第 N−1 帧 … 第 N 帧 …
 |---|---|---|---:|---:|---:|---:|---:|---|
 | 2026-11-20 | PR 2 | Apple M4 | 852 fps | 1076 fps | 1.44 / 1.67 ms | 334 fps | 0.098 ms | 第一版：纯色 + 纹理代替形状和文字；`benches/results/2026-11-20-apple-m4.json` |
 | 2026-11-21 | 导出流水线 | Apple M4 | 1004 fps | 1083 fps | 1.34 / 1.49 ms | 359 fps（异步回读 672 fps） | 0.033 ms | `bae render` B1 PNG 300 帧 5.03 s → 0.47 s；`benches/results/2026-11-21-apple-m4.json` |
+| 2026-11-21 | render/masks | Apple M1 Pro | 247 fps | 430 fps | 4.9 / 5.3 ms | — | — | 蒙版基准（不是 B1）：50 个图层、60 个每帧都变的羽化蒙版；不加蒙版 174 fps |
