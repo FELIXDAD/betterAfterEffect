@@ -59,6 +59,8 @@
 
 - [x] 关键帧保存核查（分支 `app/project-files-fix`，2026-11-21，#97 的疑点）：保存 / 序列化没有丢数据——#97 存盘前截图里第 3 帧的关键帧导航器是灰的、右箭头不可用，内存里本来就只有 1 个关键帧，第二次 Alt+Shift+P 没生效。加了往返回归测试（`apps/bae/src/save_roundtrip.rs`：.bae / .baez、另存为、Cmd/Ctrl+S、同值和不同值、相隔 3 帧、export-json、演示工程全量对比、无窗口驱动真实动效界面按键），并修了一个会丢最后一次输入的顺序问题（`files::CommitGate`，见 `docs/spec/app-shell.md`「工程文件」）。
 
+- [x] macOS 包 ad-hoc 签名（#105，2026-11-21）：`cargo xtask dist` 组装好 `BAE.app` 后先签 `Contents/MacOS` 里的可执行文件、再签整个 bundle（`codesign --force --sign -`，不用 `--deep`，不开 hardened runtime，以免插件库加载被库校验拦下），然后 `codesign --verify --deep --strict`。CI 在打包后把 zip 按用户下载的方式解开（`ditto` + 隔离属性）再校验，签名错误直接失败。Developer ID 签名和公证要苹果开发者账号，放到 0.0.1 之后。
+
 后续（不阻塞合并）：
 
 - 浮动面板的原生多窗口（每个 egui 视口一个 winit 窗口和 surface，共用同一设备）；目前用 `set_embed_viewports(true)` 画在主窗口内。

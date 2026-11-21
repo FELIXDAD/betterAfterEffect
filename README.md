@@ -34,12 +34,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 
 cargo xtask size                         # release 构建 + 体积报告，并对照 tools/size-budget/budget.toml 检查
-cargo xtask dist                         # 打包：macOS 生成未签名的 BAE.app 和 zip，Windows 生成 zip
+cargo xtask dist                         # 打包：macOS 生成 ad-hoc 签名的 BAE.app 和 zip，Windows 生成 zip
 cargo xtask bench                        # 性能基准入口（criterion）
 ```
 
 - `cargo xtask size`：M0 阶段应用本体（strip 后的 release 可执行文件）的预算是 15 MB（按 MiB 计，见 [技术架构](docs/ARCHITECTURE.md) 第 11 节和 `tools/size-budget/budget.toml`），超出就失败。装了 cargo-bloat（`cargo install cargo-bloat`）时会附带按 crate 的体积分解。新增依赖的 PR 要写明这个命令给出的体积变化。
-- `cargo xtask dist` 的产物在 `<target 目录>/dist/`。安装器和签名以后再做。
+- `cargo xtask dist` 的产物在 `<target 目录>/dist/`。macOS 包组装好后用 ad-hoc 签名（`codesign --sign -`，必须在 macOS 上打包），并用 `codesign --verify --deep --strict` 校验；它没有经过公证，第一次打开要右键选“打开”，或者到“系统设置 ▸ 隐私与安全性”里点“仍要打开”。Windows 的 exe 没有签名。安装器、Developer ID 签名和公证以后再做。
 - 运行 `cargo xtask help` 查看全部参数。
 
 ### 环境变量
