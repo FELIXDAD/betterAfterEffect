@@ -55,7 +55,9 @@ impl AppModule for ModelCliModule {
             .with_run(|ctx| {
                 let m = ctx.matches;
                 let path = m.get_one::<PathBuf>("project").expect("required");
-                let project = Project::open(path)?;
+                let project = Project::open(path).map_err(|error| {
+                    anyhow::anyhow!(crate::open_error::describe(path, &error.into()))
+                })?;
                 let json = match (m.get_one::<String>("sublayer"), m.get_one::<String>("prim")) {
                     (Some(id), _) => {
                         bae_model::export_sublayer_json(&project.stage, &SublayerId::new(id)?)?

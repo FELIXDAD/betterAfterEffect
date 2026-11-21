@@ -39,7 +39,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::window::{Window, WindowId};
 
 use crate::document::{Document, Outcome};
-use crate::files::{self, CommitGate, FileDialogs, FileOutcome, NoDialogs};
+use crate::files::{self, CommitGate, FileDialogs, NoDialogs};
 use crate::ui::{self, PlaceholderViewer, StatusInfo, UiOutput, UiRenderer, Workspace};
 use bae_ui::Invocation;
 use bae_ui::action::ids;
@@ -190,15 +190,23 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
             tracing::warn!("only the first project is opened: {}", path.display());
         }
         match document.open(path) {
-            Ok(()) => tracing::info!("opened {}", path.display()),
+            Ok(()) => {
+                tracing::info!("opened {}", path.display());
+                crate::view_state::restore(&mut app, &document);
+            }
             Err(error) if global.smoke_test.is_some() => {
-                eprintln!("{}: {error:#}", bae_platform::BINARY_NAME);
+                eprintln!(
+                    "{}: {}",
+                    bae_platform::BINARY_NAME,
+                    crate::open_error::describe(path, &error)
+                );
                 return ExitCode::FAILURE;
             }
             Err(error) => {
                 startup_error = Some(format!(
-                    "{}\n\n{error:#}",
-                    crate::i18n::tr("Could not open the project.")
+                    "{}\n\n{}",
+                    crate::i18n::tr("Could not open the project."),
+                    crate::open_error::describe(path, &error)
                 ));
             }
         }
@@ -479,12 +487,14 @@ impl Shell {
             }
             ids::ABOUT => self.workspace.show_about(),
             id if files::is_file_command(id) => {
+                // Saves record the open comps; another project restores its own.
                 let mut dialogs = self.dialogs();
-                if files::run(&mut self.document, &mut *dialogs, &inv)
-                    == Some(FileOutcome::Replaced)
-                {
-                    self.project_replaced();
-                }
+                crate::view_state::run_file_command(
+                    &mut self.app,
+                    &mut self.document,
+                    &mut *dialogs,
+                    &inv,
+                );
             }
             ids::HELP => tracing::info!("`{}` is not implemented yet", inv.id),
             _ => match self.document.run(&inv) {
@@ -554,21 +564,13 @@ impl Shell {
     fn quit(&mut self, event_loop: &ActiveEventLoop) {
         if self.smoke.is_none() {
             let mut dialogs = self.dialogs();
-            if !files::confirm_discard(&mut self.document, &mut *dialogs) {
+            if !crate::view_state::confirm_quit(&self.app, &mut self.document, &mut *dialogs) {
                 self.request_redraw();
                 return;
             }
         }
         self.save_window_state();
         event_loop.exit();
-    }
-
-    /// Another project is open: drop the motion workspace's view state (active
-    /// comp, selection, playback) that belonged to the old one. The history log
-    /// was cleared by the document.
-    fn project_replaced(&mut self) {
-        self.app
-            .insert_resource(bae_ui_motion::SharedSession::default());
     }
 
     /// Keeps the native window title in step with the project name and the

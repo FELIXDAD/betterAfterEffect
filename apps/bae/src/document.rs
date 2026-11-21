@@ -130,6 +130,25 @@ impl Document {
         self.project.location()
     }
 
+    /// A top-level field of `project.json` that is not project data (e.g. the
+    /// saved view, `view_state`).
+    pub fn manifest_field(&self, key: &str) -> Option<&serde_json::Value> {
+        self.project.manifest.extra.get(key)
+    }
+
+    /// Set (`None`: remove) such a field; it is written with the next save and
+    /// does not count as an unsaved change.
+    pub fn set_manifest_field(&mut self, key: &str, value: Option<serde_json::Value>) {
+        match value {
+            Some(v) => {
+                self.project.manifest.extra.insert(key.to_owned(), v);
+            }
+            None => {
+                self.project.manifest.extra.remove(key);
+            }
+        }
+    }
+
     /// Whether the project changed since it was opened or last saved.
     pub fn is_dirty(&self) -> bool {
         SavePoint::of(&self.project.stage) != self.saved
@@ -348,7 +367,7 @@ pub fn project_path(path: &Path) -> PathBuf {
 
 /// Whether `path` names a single-file package (the model's rule: exactly the
 /// `.baez` extension; `files` lower-cases chosen extensions first).
-fn is_baez(path: &Path) -> bool {
+pub(crate) fn is_baez(path: &Path) -> bool {
     path.extension().is_some_and(|e| e == BAEZ)
 }
 
