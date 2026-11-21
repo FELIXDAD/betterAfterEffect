@@ -99,6 +99,168 @@ pub fn apply(prefs: &Preferences) {
     });
 }
 
+/// Preferences > Grids & Guides, as the Composition viewer draws them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GridGuides {
+    pub grid_color: Color32,
+    /// `Lines`, `Dashed Lines` or `Dots`.
+    pub grid_style: &'static str,
+    /// Gridline spacing in composition pixels.
+    pub spacing: f32,
+    pub subdivisions: u32,
+    pub guide_color: Color32,
+    pub guide_style: &'static str,
+    /// Action-safe and title-safe margins (fractions of the frame).
+    pub action_safe: f32,
+    pub title_safe: f32,
+    /// Center-cut action-safe and title-safe margins (fractions of the width).
+    pub cc_action_safe: f32,
+    pub cc_title_safe: f32,
+    /// Proportional grid cells.
+    pub proportional: [u32; 2],
+}
+
+impl GridGuides {
+    pub fn from_prefs(p: &Preferences) -> Self {
+        use bae_prefs::keys;
+        let c = |k| {
+            let [r, g, b] = p.color(k);
+            Color32::from_rgb(r, g, b)
+        };
+        let pct = |k| (p.float(k) / 100.0) as f32;
+        // No allocation per frame: the style is one of the schema's options.
+        let style = |k| match p.str(k) {
+            "Dashed Lines" => "Dashed Lines",
+            "Dots" => "Dots",
+            _ => "Lines",
+        };
+        GridGuides {
+            grid_color: c(keys::GRID_COLOR),
+            grid_style: style(keys::GRID_STYLE),
+            spacing: p.float(keys::GRID_SPACING) as f32,
+            subdivisions: p.int(keys::GRID_SUBDIVISIONS).max(1) as u32,
+            guide_color: c(keys::GUIDE_COLOR),
+            guide_style: style(keys::GUIDE_STYLE),
+            action_safe: pct(keys::ACTION_SAFE),
+            title_safe: pct(keys::TITLE_SAFE),
+            cc_action_safe: pct(keys::CC_ACTION_SAFE),
+            cc_title_safe: pct(keys::CC_TITLE_SAFE),
+            proportional: [
+                p.int(keys::PROP_GRID_H).max(1) as u32,
+                p.int(keys::PROP_GRID_V).max(1) as u32,
+            ],
+        }
+    }
+
+    /// The current values from the app's `Arc<PrefsStore>` (defaults without one).
+    pub fn current(resources: &bae_app::Resources) -> Self {
+        match resources.get::<std::sync::Arc<bae_prefs::PrefsStore>>() {
+            Some(store) => Self::from_prefs(&store.current()),
+            None => Self::from_prefs(&Preferences::default()),
+        }
+    }
+
+    /// Draws the grid over `comp` (screen rect of the frame) at `scale` screen
+    /// points per composition pixel: gridlines every `spacing` pixels, fainter
+    /// subdivisions in between, in the grid style.
+    pub fn paint_grid(&self, painter: &egui::Painter, comp: egui::Rect, scale: f32) {
+        let major = self.spacing * scale;
+        let minor = major / self.subdivisions as f32;
+        if minor < 3.0 {
+            return;
+        }
+        let strong = egui::Stroke::new(1.0, self.grid_color);
+        let faint = egui::Stroke::new(1.0, self.grid_color.gamma_multiply(0.45));
+        let mut i = 0u32;
+        let mut x = comp.left();
+        while x <= comp.right() + 0.5 {
+            let s = if i.is_multiple_of(self.subdivisions) {
+                strong
+            } else {
+                faint
+            };
+            self.line(
+                painter,
+                [egui::pos2(x, comp.top()), egui::pos2(x, comp.bottom())],
+                s,
+            );
+            x += minor;
+            i += 1;
+        }
+        let mut i = 0u32;
+        let mut y = comp.top();
+        while y <= comp.bottom() + 0.5 {
+            let s = if i.is_multiple_of(self.subdivisions) {
+                strong
+            } else {
+                faint
+            };
+            self.line(
+                painter,
+                [egui::pos2(comp.left(), y), egui::pos2(comp.right(), y)],
+                s,
+            );
+            y += minor;
+            i += 1;
+        }
+    }
+
+    fn line(&self, painter: &egui::Painter, [a, b]: [egui::Pos2; 2], stroke: egui::Stroke) {
+        match self.grid_style {
+            "Dashed Lines" => {
+                painter.extend(egui::Shape::dashed_line(&[a, b], stroke, 4.0, 3.0));
+            }
+            "Dots" => {
+                painter.extend(egui::Shape::dotted_line(&[a, b], stroke.color, 4.0, 0.75));
+            }
+            _ => {
+                painter.line_segment([a, b], stroke);
+            }
+        }
+    }
+
+    /// The action-safe and title-safe rectangles of `comp`, and the center-cut
+    /// x positions (left/right pairs, action then title).
+    pub fn safe_rects(&self, comp: egui::Rect) -> ([egui::Rect; 2], [[f32; 2]; 2]) {
+        let shrink = |f: f32| egui::Rect::from_center_size(comp.center(), comp.size() * (1.0 - f));
+        let cc = |f: f32| {
+            let half = comp.width() * (1.0 - f) / 2.0;
+            [comp.center().x - half, comp.center().x + half]
+        };
+        (
+            [shrink(self.action_safe), shrink(self.title_safe)],
+            [cc(self.cc_action_safe), cc(self.cc_title_safe)],
+        )
+    }
+
+    /// Draws the safe margins (Title/Action Safe) in `stroke`.
+    pub fn paint_safe(&self, painter: &egui::Painter, comp: egui::Rect, stroke: egui::Stroke) {
+        let ([action, title], cc) = self.safe_rects(comp);
+        for r in [action, title] {
+            painter.rect_stroke(r, 0.0, stroke, egui::StrokeKind::Middle);
+        }
+        // Center-cut: short vertical marks inside the title-safe band.
+        for (xs, band) in cc.iter().zip([action, title]) {
+            for x in xs {
+                painter.line_segment(
+                    [
+                        egui::pos2(*x, band.top()),
+                        egui::pos2(*x, band.top() + 12.0),
+                    ],
+                    stroke,
+                );
+                painter.line_segment(
+                    [
+                        egui::pos2(*x, band.bottom() - 12.0),
+                        egui::pos2(*x, band.bottom()),
+                    ],
+                    stroke,
+                );
+            }
+        }
+    }
+}
+
 /// What the dialog produced this frame.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Outcome {

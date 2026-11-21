@@ -192,3 +192,22 @@ fn appearance_brightness_lightens_grays_only() {
         Color32::TRANSPARENT
     );
 }
+
+#[test]
+fn grid_and_safe_margins_follow_preferences() {
+    let mut prefs = Preferences::default();
+    let g = GridGuides::from_prefs(&prefs);
+    assert_eq!(g.spacing, 80.0);
+    assert_eq!(g.subdivisions, 4);
+    let comp = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(1920.0, 1080.0));
+    let ([action, title], [cc_action, _]) = g.safe_rects(comp);
+    assert_eq!(action.width(), 1920.0 * 0.9);
+    assert_eq!(title.height(), 1080.0 * 0.8);
+    // Center-cut action-safe: the 4:3 action-safe width (1440 x 0.9 = 1296).
+    assert!((cc_action[1] - cc_action[0] - 1296.0).abs() < 0.5);
+    prefs.set(bae_prefs::keys::ACTION_SAFE, 20.0);
+    prefs.set(bae_prefs::keys::GRID_COLOR, "#ff0000");
+    let g = GridGuides::from_prefs(&prefs);
+    assert_eq!(g.safe_rects(comp).0[0].width(), 1920.0 * 0.8);
+    assert_eq!(g.grid_color, Color32::from_rgb(255, 0, 0));
+}
