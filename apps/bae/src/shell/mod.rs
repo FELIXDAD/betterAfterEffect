@@ -460,7 +460,7 @@ impl Shell {
         }
 
         let status = StatusInfo {
-            gpu: gpu.summary(),
+            gpu: ui::gpu_summary(&gpu),
             size_px: [size.width, size.height],
             pixels_per_point: window.scale_factor() as f32,
             ..StatusInfo::default()

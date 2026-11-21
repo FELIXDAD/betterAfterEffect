@@ -81,7 +81,43 @@ pub const LABELS: &[&str] = &[
     "Search",
     "Layer “{name}”",
     "Layer {n} “{name}”",
+    "Close Window",
 ];
+
+/// Labels egui gives its own widgets, in English only, and ours for them.
+const EGUI_LABELS: &[(&str, &str)] = &[("Close window", "Close Window")];
+
+/// Replaces egui's built-in English accessibility labels (the window close
+/// button's "Close window") with ours, translated, in every frame's
+/// accessibility tree. Installed by [`install`].
+struct EguiLabels;
+
+impl egui::Plugin for EguiLabels {
+    fn debug_name(&self) -> &'static str {
+        "bae-egui-labels"
+    }
+
+    fn output_hook(&mut self, _ctx: &egui::Context, output: &mut egui::FullOutput) {
+        let Some(update) = output.platform_output.accesskit_update.as_mut() else {
+            return;
+        };
+        for (_, node) in &mut update.nodes {
+            let Some(label) = node.label() else {
+                continue;
+            };
+            if let Some((_, ours)) = EGUI_LABELS.iter().find(|(egui, _)| *egui == label) {
+                node.set_label(crate::i18n::tr(ours));
+            }
+        }
+    }
+}
+
+/// Installs the accessibility fixes on `ctx` (once; later calls do nothing).
+pub fn install(ctx: &egui::Context) {
+    if ctx.plugin_opt::<EguiLabels>().is_none() {
+        ctx.add_plugin(EguiLabels);
+    }
+}
 
 impl Accessible for Response {
     fn labeled(self, kind: WidgetType, label: &str) -> Self {
@@ -109,6 +145,36 @@ impl Accessible for Response {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn egui_labels_are_replaced_by_ours() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        super::install(&ctx);
+        super::install(&ctx);
+        let mut open = true;
+        let mut out = None;
+        for _ in 0..2 {
+            let mut o = ctx.run_ui(Default::default(), |ui| {
+                egui::Window::new("W")
+                    .open(&mut open)
+                    .show(ui.ctx(), |ui| ui.label("x"));
+            });
+            o.textures_delta.clear();
+            out = Some(o);
+        }
+        let labels: Vec<String> = out
+            .unwrap()
+            .platform_output
+            .accesskit_update
+            .expect("accesskit on")
+            .nodes
+            .iter()
+            .filter_map(|(_, n)| n.label().map(str::to_owned))
+            .collect();
+        assert!(labels.iter().any(|l| l == "Close Window"), "{labels:?}");
+        assert!(!labels.iter().any(|l| l == "Close window"), "{labels:?}");
+    }
+
     #[test]
     fn every_label_has_chinese() {
         let missing: Vec<_> = super::LABELS
