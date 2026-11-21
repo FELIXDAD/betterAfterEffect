@@ -1,0 +1,53 @@
+# Tritone (ADBE Tritone): docs/spec/ae/_parts/effects--fx-a.md AE-FX-037.
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "tritone"
+name = "Tritone"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE Tritone"]
+keywords = ["tritone", "tint", "shadows", "midtones", "highlights"]
+flags = ["pixel-independent"]
+shader = "shaders/tritone.wgsl"
+identity_when = "params.blend >= 100"
+
+[[effect.param]]
+id = 1
+key = "highlights"
+type = "color"
+name = "Highlights"
+default = [1.0, 1.0, 1.0, 1.0]
+
+[[effect.param]]
+id = 2
+key = "midtones"
+type = "color"
+name = "Midtones"
+default = [0.49803922, 0.39215686, 0.27450980, 1.0]
+
+[[effect.param]]
+id = 3
+key = "shadows"
+type = "color"
+name = "Shadows"
+default = [0.0, 0.0, 0.0, 1.0]
+
+[[effect.param]]
+id = 4
+key = "blend"
+type = "float"
+name = "Blend With Original"
+default = 0.0
+range = [0.0, 100.0]
+precision = 1
+display = "percent"
