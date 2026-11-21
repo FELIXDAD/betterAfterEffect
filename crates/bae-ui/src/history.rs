@@ -112,6 +112,15 @@ impl HistoryLog {
     pub fn last_seq(&self) -> u64 {
         self.lock().seq
     }
+
+    /// Forget every entry (another project was opened). The sequence number still
+    /// advances, so readers that compare [`HistoryLog::last_seq`] see a change.
+    pub fn clear(&self) {
+        let mut inner = self.lock();
+        inner.entries.clear();
+        inner.next_label = None;
+        inner.seq += 1;
+    }
 }
 
 /// A label for events without a command title (remote imports, layer stack).
@@ -287,5 +296,13 @@ mod tests {
         assert_eq!(entries[2].origin, EventOrigin::Undo);
         assert_eq!(author_label(Some(&agent), &me).0, "Agent claude-01");
         assert_eq!(author_label(Some(&me), &me).0, "You");
+        // Opening another project clears the log; the sequence still advances.
+        let seq = log.last_seq();
+        log.label_next("dangling");
+        log.clear();
+        assert!(log.is_empty());
+        assert!(log.last_seq() > seq);
+        stage.undo(&agent);
+        assert_ne!(log.entries()[0].label, "dangling");
     }
 }

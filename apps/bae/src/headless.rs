@@ -1,6 +1,9 @@
 //! `bae --headless`: no window. Creates the shared GPU context, then runs the
 //! requested batch work. `--smoke-test N` renders N frames of the UI offscreen
 //! through the same egui renderer and viewport bridge the window uses.
+//! `bae --headless <project>` opens the project (`.bae` folder or `.baez` file)
+//! and prints a one-line summary; with `--smoke-test N` the UI is rendered with
+//! that project open. A project that cannot be opened exits with status 1.
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -10,7 +13,6 @@ use bae_app::App;
 use bae_gpu::viewport::ViewportTextureRegistry;
 use bae_gpu::{GpuContext, GpuContextDescriptor, transfer, wgpu};
 use bae_platform::GlobalOptions;
-use bae_platform::cli::EXIT_NOT_IMPLEMENTED;
 use bae_platform::crash;
 
 use crate::document::Document;
@@ -40,22 +42,43 @@ pub fn run(app: &mut App, global: &GlobalOptions) -> ExitCode {
     crash::set_context("gpu", gpu.summary());
     app.insert_resource(gpu.clone());
 
-    if let Some(frames) = global.smoke_test {
-        return smoke_test(app, &gpu, frames);
+    let project = global.open.first().map(std::path::PathBuf::as_path);
+    if global.open.len() > 1 {
+        tracing::warn!("only the first project is opened");
     }
-    if !global.open.is_empty() {
-        eprintln!(
-            "{} --headless: opening projects is not implemented yet",
-            bae_platform::BINARY_NAME
-        );
-        return ExitCode::from(EXIT_NOT_IMPLEMENTED);
+    if let Some(frames) = global.smoke_test {
+        return smoke_test(app, &gpu, frames, project);
+    }
+    if let Some(path) = project {
+        let mut document = Document::new(None);
+        return match document.open(path) {
+            Ok(()) => {
+                let stage = document.stage();
+                println!(
+                    "opened {}: {} sublayer(s), {} prim(s)",
+                    path.display(),
+                    stage.layer_stack().len(),
+                    stage.sublayers().map(|l| l.len()).sum::<usize>()
+                );
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("{}: {error:#}", bae_platform::BINARY_NAME);
+                ExitCode::FAILURE
+            }
+        };
     }
     tracing::info!("headless mode ready on {}; nothing to do", gpu.summary());
     ExitCode::SUCCESS
 }
 
-fn smoke_test(app: &mut App, gpu: &Arc<GpuContext>, frames: u32) -> ExitCode {
-    match render_offscreen(app, gpu, frames) {
+fn smoke_test(
+    app: &mut App,
+    gpu: &Arc<GpuContext>,
+    frames: u32,
+    project: Option<&std::path::Path>,
+) -> ExitCode {
+    match render_offscreen(app, gpu, frames, project) {
         Ok(report) => {
             println!("{report}");
             ExitCode::SUCCESS
@@ -68,7 +91,12 @@ fn smoke_test(app: &mut App, gpu: &Arc<GpuContext>, frames: u32) -> ExitCode {
     }
 }
 
-fn render_offscreen(app: &mut App, gpu: &Arc<GpuContext>, frames: u32) -> anyhow::Result<String> {
+fn render_offscreen(
+    app: &mut App,
+    gpu: &Arc<GpuContext>,
+    frames: u32,
+    project: Option<&std::path::Path>,
+) -> anyhow::Result<String> {
     let [width, height] = SMOKE_SIZE;
     let format = wgpu::TextureFormat::Rgba8Unorm;
     let target = gpu.device().create_texture(&wgpu::TextureDescriptor {
@@ -101,6 +129,9 @@ fn render_offscreen(app: &mut App, gpu: &Arc<GpuContext>, frames: u32) -> anyhow
     let workspaces = workspace.workspaces();
     let mut document = Document::new(app.resource::<Arc<bae_ui::history::HistoryLog>>().cloned());
     document.add_module_commands(app);
+    if let Some(path) = project {
+        document.open(path)?;
+    }
     // `BAE_SMOKE_DEMO=1`: a demo project open in the Motion workspace (screenshots).
     let demo = std::env::var_os("BAE_SMOKE_DEMO").is_some();
     if demo {

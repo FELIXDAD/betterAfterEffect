@@ -5,9 +5,12 @@
 //! invocation `{"id": argument}` (`workspace.switch:motion`, `window.panel:project`).
 //! Clicks go through the same dispatch as shortcuts and panel requests.
 //!
-//! Items deliberately carry no native key equivalents (except Quit on macOS): an
-//! NSMenu key equivalent would swallow Cmd+Z / Cmd+C before egui sees them, and the
-//! shortcuts switch with the workspace. `bae-ui`'s keymap handles every shortcut.
+//! The shell's own items deliberately carry no native key equivalents (except Quit
+//! on macOS): an NSMenu key equivalent would swallow Cmd+Z / Cmd+C before egui sees
+//! them, and the shortcuts switch with the workspace. `bae-ui`'s keymap handles
+//! every shortcut. Items in `Registry<MenuItemSpec>` — the File items
+//! ([`file_items`]) and the menus modules contribute — show the chord the active
+//! keymap binds to their invocation ([`AppMenu::sync`]).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,6 +33,36 @@ pub fn invocation(menu_id: &str) -> Invocation {
 
 /// Prefix of the ids of items modules contribute (`Registry<MenuItemSpec>`).
 const CONTRIBUTED: &str = "bae.menu:";
+
+/// The shell's File menu items (AE order: New Project, Open Project… — Close
+/// Project, Save, Save As…). Groups 0 and 10; other modules' File items (Import,
+/// Export …) use other groups and are sorted in between or after.
+pub fn file_items() -> Vec<(&'static str, MenuItemSpec)> {
+    let item = |title: &str, action: &str, group: i32, order: i32| {
+        MenuItemSpec::new(&["File"], title, action)
+            .group(group)
+            .order(order)
+    };
+    vec![
+        (
+            "shell.file.new_project",
+            item("New Project", ids::NEW_PROJECT, 0, 0),
+        ),
+        (
+            "shell.file.open_project",
+            item("Open Project...", ids::OPEN_PROJECT, 0, 1),
+        ),
+        (
+            "shell.file.close_project",
+            item("Close Project", ids::CLOSE_PROJECT, 10, 0),
+        ),
+        ("shell.file.save", item("Save", ids::SAVE, 10, 1)),
+        (
+            "shell.file.save_as",
+            item("Save As...", ids::SAVE_AS, 10, 2),
+        ),
+    ]
+}
 
 /// A contributed item and the state last pushed to the native menu.
 struct Contributed {
@@ -96,22 +129,17 @@ impl AppMenu {
             menu.append(&app)?;
         }
 
+        // File: the registered items (the shell's own come from `file_items`),
+        // then Exit on Windows.
         let file = Submenu::new(tr("File"), true);
-        file.append_items(&[
-            &MenuItem::with_id(ids::NEW_PROJECT, tr("New Project"), true, None),
-            &MenuItem::with_id(ids::OPEN_PROJECT, tr("Open Project…"), true, None),
-            &PredefinedMenuItem::separator(),
-            &MenuItem::with_id(ids::SAVE, tr("Save"), true, None),
-            &MenuItem::with_id(ids::SAVE_AS, tr("Save As..."), true, None),
-        ])?;
+        let file_entries = extra("File").map(Vec::as_slice).unwrap_or_default();
+        append_entries(&file, file_entries, &mut items)?;
         #[cfg(not(target_os = "macos"))]
-        file.append_items(&[
-            &PredefinedMenuItem::separator(),
-            &MenuItem::with_id(ids::QUIT, tr("Exit"), true, None),
-        ])?;
-        if let Some(entries) = extra("File") {
-            file.append(&PredefinedMenuItem::separator())?;
-            append_entries(&file, entries, &mut items)?;
+        {
+            if !file_entries.is_empty() {
+                file.append(&PredefinedMenuItem::separator())?;
+            }
+            file.append(&MenuItem::with_id(ids::QUIT, tr("Exit"), true, None))?;
         }
         menu.append(&file)?;
 
@@ -491,6 +519,67 @@ mod tests {
             a("Cmd+CloseBracket"),
             Some(Accelerator::new(cmd, Code::BracketRight))
         );
+    }
+
+    #[test]
+    fn file_items_follow_ae_order_and_shortcuts() {
+        let registry = bae_app::Registry::<MenuItemSpec>::new();
+        for (id, item) in file_items() {
+            registry.register(bae_app::Owner::Core, id, item).unwrap();
+        }
+        let tree = bae_ui::menu::build_menus(&registry.snapshot(), "motion");
+        assert_eq!(tree.menus.len(), 1);
+        let (title, entries) = &tree.menus[0];
+        assert_eq!(title, "File");
+        let shown: Vec<String> = entries
+            .iter()
+            .map(|e| match e {
+                MenuEntry::Item { spec, .. } => spec.title.clone(),
+                MenuEntry::Separator => "---".into(),
+                MenuEntry::Submenu { title, .. } => title.clone(),
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                "New Project",
+                "Open Project...",
+                "---",
+                "Close Project",
+                "Save",
+                "Save As..."
+            ]
+        );
+        // The AE keymap's chords are what the native menu shows (and on macOS
+        // handles) for these items.
+        let keymap = bae_ui::presets::ae_keymap();
+        let chords: Vec<Option<String>> = tree
+            .items()
+            .iter()
+            .map(|(_, spec)| {
+                keymap
+                    .chord_for_invocation(&spec.invocation())
+                    .map(|c| c.to_string())
+            })
+            .collect();
+        let expect = |s: &str| Some(s.to_owned());
+        assert_eq!(
+            chords,
+            [
+                expect("Cmd+Alt+N"),
+                expect("Cmd+O"),
+                None, // AE has no default shortcut for Close Project
+                expect("Cmd+S"),
+                expect("Cmd+Shift+S"),
+            ]
+        );
+        for (_, spec) in tree.items() {
+            assert!(
+                crate::files::is_file_command(&spec.action),
+                "{}",
+                spec.action
+            );
+        }
     }
 
     #[test]

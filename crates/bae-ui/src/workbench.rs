@@ -1348,6 +1348,47 @@ mod tests {
     }
 
     #[test]
+    fn role_picker_closes_on_escape_and_outside_click() {
+        let (kinds, presets, keymaps, actions) = registries();
+        let mut wb =
+            Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
+        let ctx = Context::default();
+        let pointer = |pos: egui::Pos2, pressed: bool| {
+            vec![
+                Event::PointerMoved(pos),
+                Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                },
+            ]
+        };
+        wb.show_role_picker();
+        for _ in 0..3 {
+            frame_in(&ctx, &mut wb, vec![]);
+        }
+        assert!(wb.role_picker_open());
+        // A click inside the dialog keeps it open.
+        let inside = egui::pos2(700.0, 450.0);
+        frame_in(&ctx, &mut wb, pointer(inside, true));
+        frame_in(&ctx, &mut wb, pointer(inside, false));
+        assert!(wb.role_picker_open());
+        frame_in(&ctx, &mut wb, vec![key(Key::Escape, Modifiers::NONE)]);
+        assert!(!wb.role_picker_open());
+        assert_eq!(wb.active_workspace(), "one", "closing keeps the workspace");
+
+        wb.show_role_picker();
+        for _ in 0..3 {
+            frame_in(&ctx, &mut wb, vec![]);
+        }
+        let outside = egui::pos2(20.0, 880.0);
+        frame_in(&ctx, &mut wb, pointer(outside, true));
+        frame_in(&ctx, &mut wb, pointer(outside, false));
+        assert!(!wb.role_picker_open());
+    }
+
+    #[test]
     fn modules_extend_keymaps() {
         let (kinds, presets, keymaps, actions) = registries();
         let extensions = Arc::new(Registry::<KeymapBindings>::new());
