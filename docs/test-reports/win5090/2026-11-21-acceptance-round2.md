@@ -19,9 +19,9 @@
 |---|---|---|---|---|
 | **A** | 启动和欢迎框 | **通过** | — | 冷启动 0.94 s 弹出欢迎框；Esc、关闭按钮（×）、点框外均可关闭；Motion / Review / Agent 三个入口按钮均正确切换工作区；正常关闭后热启动 0.82 s 不再弹出欢迎框 |
 | **B** | 新建合成、图层 ▸ 新建、菜单与快捷键 | **失败** | [#117](https://github.com/FELIXDAD/betterAfterEffect/issues/117), [#118](https://github.com/FELIXDAD/betterAfterEffect/issues/118) | 新建合成与 `Layer ▸ New` 全部 9 项图层创建及 `export-json` 均通过；无合成/有合成/有图层菜单置灰逻辑正确；`Edit ▸ Undo/Redo` 等 Shell 自有菜单项缺失快捷键显示（#117）；`Window` 菜单缺少 `Render Queue` 入口（#118）；`Ctrl+Shift+S` 在本机被系统全局热键占用（1409），归类为环境/自动化受限 |
-| **C** | 时间轴改名（IME / 空格 / Emoji / 超长名） | **通过** | — | 双击图层名触发行内改名；真实微软拼音 IME 组字选词（`ni'hao` → `你好`）、含空格名（物理空格键不触发播放）、Emoji（`🎬 场记测试`）、323 字符超长名全部正常显示且经保存—重开后与 `export-json` 逐字一致 |
-| **D** | 关键帧、播放、焦点与撤销重做 | 进行中 | — | — |
-| **E** | 保存和打开（边界与异常） | 待测 | — | — |
+| **C** | 时间轴改名（IME / 空格 / Emoji / 超长名） | **通过**（复现 [#106](https://github.com/FELIXDAD/betterAfterEffect/issues/106)、[#113](https://github.com/FELIXDAD/betterAfterEffect/issues/113)） | [#106](https://github.com/FELIXDAD/betterAfterEffect/issues/106), [#113](https://github.com/FELIXDAD/betterAfterEffect/issues/113) | 双击图层名触发行内改名；真实微软拼音 IME 组字选词（`ni'hao` → `你好`）、含空格名（物理空格键不触发播放）、Emoji（`🎬 场记测试`）、323 字符超长名全部正常显示且经保存—重开后与 `export-json` 逐字一致；另在 Windows 上复现并补充评论了已有 issue #106（Enter 不能改名/不全选原名）与 #113（重开工程不自动打开合成） |
+| **D** | 关键帧、播放、焦点与撤销重做 | **通过** | — | 秒表与导航器 ◆ 打 3 个关键帧（0s/1s/2s）均确认 ◆ 变蓝并落盘；J/K 精准跳转；空格播放/停止在时间轴、查看器、项目、历史 4 个面板均生效，在项目搜索框与时间轴改名框中输入空格且不触发播放；连续 4 步图层与 3 步关键帧撤销/重做经 `export-json` 核验一致；选中关键帧后 `Animation` 菜单 5 项全部启用 |
+| **E** | 保存和打开（边界与异常） | 进行中 | — | — |
 | **F** | 渲染队列（格式 / 停止 / 错误 / 满盘 / 多合成） | 待测 | — | — |
 | **G** | 语言（`BAE_LANG=zh` / `en`） | 待测 | — | — |
 | **H** | 150% DPI 清晰度与布局 | 待测 | — | — |
@@ -87,4 +87,27 @@
 ![图 3：时间轴行内改名时真实微软拼音 IME 组字与候选框跟随](./acceptance-round2-shots/03-c-ime-compose.jpg)
 
 ![图 4：保存并重新打开工程后，4 个特殊图层名（中文 / 空格 / Emoji / 323 字符）全部保持](./acceptance-round2-shots/04-c-timeline-rename.jpg)
+
+> 附注（已有 issue 跨平台复现）：测试中同时复现了 [#106](https://github.com/FELIXDAD/betterAfterEffect/issues/106)（时间轴选中图层按 `Enter` 不能开始改名；双击进入改名框后未全选原名）和 [#113](https://github.com/FELIXDAD/betterAfterEffect/issues/113)（重开工程后未自动打开合成），均已在原 issue 下补充 Windows 实机复现评论，未重复开 issue。
+
+---
+
+## D. 关键帧、播放、焦点与撤销重做
+
+**结论：通过**
+
+在 `Comp 1` 中创建 `Solid 1` 并按 `P` 展开 `Position`，全程点击秒表与关键帧导航器 `◆` 打帧（避开中文输入法可能吞掉的 `Alt+Shift+*`），逐帧以像素检测确认导航器 `◆` 蓝像素数（无帧 0 px → 有帧 85 px），并结合时间码截图与 `bae.exe export-json` 核验。
+
+| 检查项 | 操作与验证方式 | 结果 | 实测现象与证据 |
+|---|---|---|---|
+| 秒表打关键帧（0s） | 点击 `Position` 秒表 `(228, 1162)` | **通过** | 秒表与左侧导航器 `◆` `(48, 1163)` 均变蓝（蓝像素 85 px），时间轴轨道 `0s` 出现菱形关键帧 |
+| 导航器 ◆ 打关键帧（1s / 2s） | `Shift+PageDown` ×3 跳至 `0:00:01:00`（`◆` 变灰，蓝像素 0）→ 点 `◆`（变蓝 85 px）；再跳至 `0:00:02:00`（`◆` 变灰，0）→ 点 `◆`（变蓝 85 px）（见图 5） | **通过** | 3 个关键帧（`0` / `705600000` / `1411200000` ticks）均精确写入 `transform:position.keyframes` |
+| 选中关键帧后 `Animation` 菜单状态（补测 B） | 单击轨道 `2s` 关键帧菱形选中后 `GetMenuItemInfoW` 枚举 | **通过** | `Animation ▸ Keyframe Assistant` 4 项（`Easy Ease`、`Easy Ease In`、`Easy Ease Out`、`Time-Reverse Keyframes`）与 `Toggle Hold Keyframe` 全部由灰变为启用 |
+| `J` / `K` 在关键帧之间跳转 | 从 `0:00:02:00` 依次按 `J`、`J`、`K`、`K` | **通过** | 时间码精准依次跳转：`0:00:01:00` → `0:00:00:00` → `0:00:01:00` → `0:00:02:00`，每次跳转后 `◆` 均为蓝色（85 px） |
+| 空格播放 / 停止 — 4 面板焦点 | 依次点击聚焦 **时间轴**、**合成查看器**、**项目面板**、**历史面板**（通过 `Window ▸ History` 打开），`Home` 归零后 `Space` 播放 ~0.6 s 再 `Space` 停止，停后等待 0.4 s 复核时间码静止 | **通过** | 4 个面板焦点下均正常起播并立即停止：Timeline `0:00:00:00 → 0:00:01:07` 静止；Composition / Project / History 均 `0:00:00:00 → 0:00:01:05` 静止（停后 0.4 s 像素差为 0） |
+| 空格 — 文本框焦点不播放 | 1) 点击项目面板搜索框，输入 `foo` + 物理 `Space` + 等 0.55 s + `bar`；2) 时间轴改名框（C 项）输入含空格名 | **通过** | 搜索框清晰显示 `foo bar`，时间码始终保持 `0:00:00:00`（像素差 0），不触发播放 |
+| 连续撤销与重做（图层 + 关键帧） | 1) 连续 4 次图层操作（`Ctrl+Y` / `Ctrl+Y` / `Ctrl+D` / `Ctrl+Y`，4→8 层）→ `Ctrl+Z` ×4 → `Ctrl+Shift+Z` ×4；2) 3 个关键帧 → `Ctrl+Z` ×3 → `Ctrl+Shift+Z` ×3；每步保存后用 `export-json` 核对 | **通过** | 图层：`8 层 → 4 层 → 8 层` 完全一致；关键帧：`3 帧（0/1s/2s）→ 0 帧（纯静态值）→ 3 帧（0/1s/2s）` 完全一致 |
+
+![图 5：秒表与导航器 ◆ 打出 0s / 1s / 2s 三个 Position 关键帧，导航器 ◆ 与秒表均呈蓝色](./acceptance-round2-shots/05-d-keyframes-blue.jpg)
+
 
