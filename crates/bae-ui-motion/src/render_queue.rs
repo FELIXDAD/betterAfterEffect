@@ -873,7 +873,6 @@ fn format_label(format: ExportFormat) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use bae_gpu::GpuContextDescriptor;
     use bae_model::{Project, TimeRange, Value};
 
     use super::*;
@@ -1096,11 +1095,7 @@ mod tests {
     }
 
     fn gpu() -> Option<Arc<GpuContext>> {
-        let gpu = GpuContext::new_headless(GpuContextDescriptor::default()).ok();
-        if gpu.is_none() {
-            eprintln!("no GPU, skipping");
-        }
-        gpu
+        bae_gpu::testing::shared_context()
     }
 
     /// The worker renders every queued item in order (PNG and TIFF), with

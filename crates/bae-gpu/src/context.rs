@@ -2,7 +2,7 @@
 
 use std::fmt;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -301,6 +301,15 @@ impl fmt::Debug for GpuContext {
     }
 }
 
+/// Contexts (devices) alive in this process; see [`GpuContext::live_count`].
+static LIVE_CONTEXTS: AtomicUsize = AtomicUsize::new(0);
+
+impl Drop for GpuContext {
+    fn drop(&mut self) {
+        LIVE_CONTEXTS.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 impl GpuContext {
     /// Creates a context without a window (render, export, tests, `--headless`).
     /// Blocks on wgpu's async adapter/device requests.
@@ -311,7 +320,7 @@ impl GpuContext {
     /// Async variant of [`Self::new_headless`].
     pub async fn new_headless_async(desc: GpuContextDescriptor) -> Result<Arc<Self>, GpuError> {
         let instance = create_instance(&desc);
-        Self::from_instance(instance, desc, None).await
+        Self::from_instance(instance, desc, None, false).await
     }
 
     /// Creates a context whose adapter can present to `target` (normally an
@@ -323,7 +332,7 @@ impl GpuContext {
     ) -> Result<(Arc<Self>, wgpu::Surface<'static>), GpuError> {
         let instance = create_instance(&desc);
         let surface = instance.create_surface(target)?;
-        let ctx = pollster::block_on(Self::from_instance(instance, desc, Some(&surface)))?;
+        let ctx = pollster::block_on(Self::from_instance(instance, desc, Some(&surface), false))?;
         Ok((ctx, surface))
     }
 
@@ -348,13 +357,24 @@ impl GpuContext {
             self.instance.clone(),
             self.descriptor.clone(),
             None,
+            true,
         ))
     }
 
+    /// How many contexts (GPU devices) are alive in this process. The app needs one;
+    /// a second one while another lives is logged as a warning (see
+    /// [`crate::testing::shared_context`] for tests).
+    pub fn live_count() -> usize {
+        LIVE_CONTEXTS.load(Ordering::Relaxed)
+    }
+
+    /// `replacing`: [`Self::recreate`] after a device loss, where the lost context
+    /// may still be alive while its replacement is created.
     async fn from_instance(
         instance: wgpu::Instance,
         desc: GpuContextDescriptor,
         surface: Option<&wgpu::Surface<'_>>,
+        replacing: bool,
     ) -> Result<Arc<Self>, GpuError> {
         let all = instance.enumerate_adapters(desc.backends).await;
         let adapters: Vec<wgpu::AdapterInfo> = all.iter().map(wgpu::Adapter::get_info).collect();
@@ -443,6 +463,17 @@ impl GpuContext {
             driver = %info.driver,
             "GPU device created"
         );
+        let others = LIVE_CONTEXTS.fetch_add(1, Ordering::Relaxed);
+        if others > 0 && !replacing {
+            // The app shares one context. Several devices at once in one process
+            // crashed Windows CI under the D3D12 debug layer (#154); tests share
+            // `testing::shared_context()` instead.
+            tracing::warn!(
+                others,
+                "another GPU device is created while {others} already exist in this process; \
+                 share one Arc<GpuContext> instead"
+            );
+        }
         Ok(Arc::new(Self {
             instance,
             adapter,
@@ -594,7 +625,27 @@ fn create_instance(desc: &GpuContextDescriptor) -> wgpu::Instance {
     instance_desc.backend_options = wgpu::BackendOptions::from_env_or_default();
     instance_desc.backend_options.dx12.shader_compiler =
         dx12_compiler(std::env::var(DX12_COMPILER_ENV).ok().as_deref());
-    wgpu::Instance::new(instance_desc)
+    if !flags
+        .intersects(wgpu::InstanceFlags::VALIDATION | wgpu::InstanceFlags::GPU_BASED_VALIDATION)
+    {
+        return wgpu::Instance::new(instance_desc);
+    }
+    // With validation, every D3D12 instance calls `ID3D12Debug::EnableDebugLayer`,
+    // which the runtime does not allow once a device exists (it may remove existing
+    // devices). So a process creates each validating instance once and reuses it
+    // for later contexts (#154). Release builds don't validate by default.
+    static VALIDATING: Mutex<Vec<(String, wgpu::Instance)>> = Mutex::new(Vec::new());
+    let key = format!(
+        "{:?} {:?} {:?}",
+        desc.backends, flags, instance_desc.backend_options.dx12.shader_compiler
+    );
+    let mut instances = VALIDATING.lock();
+    if let Some((_, instance)) = instances.iter().find(|(k, _)| *k == key) {
+        return instance.clone();
+    }
+    let instance = wgpu::Instance::new(instance_desc);
+    instances.push((key, instance.clone()));
+    instance
 }
 
 /// wgpu's environment variable choosing the DX12 shader compiler (`fxc`, `dxc`,

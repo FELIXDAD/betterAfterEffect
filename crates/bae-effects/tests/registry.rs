@@ -105,10 +105,7 @@ fn ae_parameter_ids_and_defaults() {
 
 #[test]
 fn prewarm_compiles_every_pipeline() {
-    let Ok(gpu) =
-        bae_gpu::GpuContext::new_headless(bae_gpu::GpuContextDescriptor::default().with_env())
-    else {
-        eprintln!("skipping GPU test: no adapter");
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
         return;
     };
     for format in [

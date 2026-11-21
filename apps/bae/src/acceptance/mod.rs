@@ -619,11 +619,10 @@ pub(crate) fn painted_texts(h: &Ui) -> Vec<String> {
     out
 }
 
-/// The process-wide GPU for tests (`None` without an adapter).
+/// The process-wide GPU for tests (`None` without an adapter), shared with every
+/// other GPU test in this binary (#154).
 pub(crate) fn gpu() -> Option<Arc<bae_gpu::GpuContext>> {
-    static GPU: std::sync::OnceLock<Option<Arc<bae_gpu::GpuContext>>> = std::sync::OnceLock::new();
-    GPU.get_or_init(|| bae_gpu::GpuContext::new_headless(Default::default()).ok())
-        .clone()
+    bae_gpu::testing::shared_context()
 }
 
 /// New comp (Cmd+N) with one layer from `Layer > New > <registry id>`; returns
