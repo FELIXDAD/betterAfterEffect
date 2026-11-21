@@ -18,6 +18,8 @@
 
 mod dialogs;
 mod menu;
+#[cfg(target_os = "macos")]
+mod open_documents;
 mod window_state;
 
 use std::process::ExitCode;
@@ -109,6 +111,10 @@ enum UserEvent {
     /// A screen reader or UI automation client asked for the accessibility
     /// tree or for an action (accesskit).
     AccessKit(egui_winit::accesskit_winit::Event),
+    /// Finder asked to open projects (double-click, Dock drop, `open`): macOS only,
+    /// see `open_documents`.
+    #[cfg(target_os = "macos")]
+    OpenFiles(Vec<std::path::PathBuf>),
 }
 
 impl From<egui_winit::accesskit_winit::Event> for UserEvent {
@@ -166,6 +172,18 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         muda::MenuEvent::set_event_handler(Some(move |event| {
             let _ = proxy.send_event(UserEvent::Menu(event));
         }));
+    }
+    // After the event loop exists (it registers winit's app delegate class), before
+    // `run_app` (so a project double-clicked to launch BAE is not missed).
+    #[cfg(target_os = "macos")]
+    {
+        let proxy = std::sync::Mutex::new(proxy.clone());
+        open_documents::install(move |paths| {
+            let proxy = proxy
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let _ = proxy.send_event(UserEvent::OpenFiles(paths));
+        });
     }
 
     let window_file = dirs
@@ -347,6 +365,8 @@ impl Shell {
             .window_state
             .apply(attributes, event_loop)
             .with_visible(false);
+        #[cfg(windows)]
+        let attributes = with_exe_icon(attributes);
         let window = event_loop
             .create_window(attributes)
             .context("cannot create the main window")?;
@@ -866,6 +886,39 @@ fn offscreen_target(view: &mut WindowView, size: [u32; 2]) -> wgpu::TextureView 
         .unwrap_or_else(|| unreachable!("offscreen target was just created"))
 }
 
+/// The command for projects Finder asked to open: one project at a time, like AE and
+/// like `bae <project>`, so only the first is opened. Goes through the normal
+/// `file.open_project` (unsaved-changes question, error dialog).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn open_files_invocation(paths: &[std::path::PathBuf]) -> Option<Invocation> {
+    let (first, rest) = paths.split_first()?;
+    if !rest.is_empty() {
+        tracing::warn!("only the first project is opened: {}", first.display());
+    }
+    Some(Invocation::with_params(
+        ids::OPEN_PROJECT,
+        serde_json::json!({ "path": first.to_string_lossy() }),
+    ))
+}
+
+/// Window and taskbar icon from the icon group linked into `bae.exe`
+/// (`apps/bae/build.rs`, `assets/icons/app/bae.res`).
+#[cfg(windows)]
+fn with_exe_icon(attributes: winit::window::WindowAttributes) -> winit::window::WindowAttributes {
+    use winit::platform::windows::{IconExtWindows as _, WindowAttributesExtWindows as _};
+    /// `GROUP_ICON_ID` in `xtask/src/icon.rs`.
+    const APP_ICON_RESOURCE: u16 = 1;
+    match winit::window::Icon::from_resource(APP_ICON_RESOURCE, None) {
+        Ok(icon) => attributes
+            .with_window_icon(Some(icon.clone()))
+            .with_taskbar_icon(Some(icon)),
+        Err(error) => {
+            tracing::warn!("app icon resource not found: {error}");
+            attributes
+        }
+    }
+}
+
 impl ApplicationHandler<UserEvent> for Shell {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.view.is_some() {
@@ -986,6 +1039,14 @@ impl ApplicationHandler<UserEvent> for Shell {
                 self.pending.push(inv);
             }
             UserEvent::DeviceLost => self.recover_device(event_loop),
+            #[cfg(target_os = "macos")]
+            UserEvent::OpenFiles(paths) => {
+                // A file command like File > Open: `dispatch` runs it through
+                // `view_state::run_file_command`, so the project's comps are restored.
+                if let Some(inv) = open_files_invocation(&paths) {
+                    self.pending.push(inv);
+                }
+            }
             UserEvent::AccessKit(event) => {
                 use egui_winit::accesskit_winit::WindowEvent as A;
                 let Some(view) = self.view.as_mut() else {
