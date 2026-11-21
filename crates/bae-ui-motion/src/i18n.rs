@@ -54,10 +54,11 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Deselect All", "全部取消选择"),
     ("Copy", "复制"),
     ("Paste", "粘贴"),
-    ("Bring Layer Forward", "将图层前移一层"),
-    ("Send Layer Backward", "将图层后移一层"),
-    ("Bring Layer to Front", "将图层置于顶层"),
-    ("Send Layer to Back", "将图层置于底层"),
+    // Layer > Arrange: AE 26 and the usual Chinese UI wording (docs/glossary.md).
+    ("Bring Layer Forward", "前移一层"),
+    ("Send Layer Backward", "后移一层"),
+    ("Bring Layer to Front", "置于顶层"),
+    ("Send Layer to Back", "置于底层"),
     ("Trim Layer In Point", "将入点修剪到当前时间"),
     ("Trim Layer Out Point", "将出点修剪到当前时间"),
     ("Move In Point to Current Time", "将入点移到当前时间"),
@@ -66,6 +67,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Set Work Area End", "将工作区域结尾设置为当前时间"),
     ("Trim Comp to Work Area", "将合成修剪至工作区域"),
     // Render Queue (AE 简体中文界面用词)
+    ("Window", "窗口"),
+    ("Render Queue", "渲染队列"),
     ("Add to Render Queue", "添加到渲染队列"),
     ("Render", "渲染"),
     ("Rendering", "正在渲染"),
@@ -85,6 +88,15 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Show in Explorer", "在资源管理器中显示"),
     ("Show in Folder", "在文件夹中显示"),
     ("Rendering needs a GPU.", "渲染需要 GPU。"),
+    (
+        "Choose where to render: Output To is empty.",
+        "请选择渲染输出位置：“输出到”为空。",
+    ),
+    (
+        "The frames are outside the composition (0–{last}).",
+        "帧范围超出了合成（0–{last}）。",
+    ),
+    ("The composition no longer exists.", "合成已不存在。"),
     (
         "Add a composition with Composition ▸ Add to Render Queue.",
         "用“合成 ▸ 添加到渲染队列”添加合成。",

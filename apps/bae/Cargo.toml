@@ -45,6 +45,8 @@ rfd.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# Acceptance tests drive the real workbench through accesskit (labels, not coordinates).
+egui_kittest.workspace = true
 
 [lints]
 workspace = true
