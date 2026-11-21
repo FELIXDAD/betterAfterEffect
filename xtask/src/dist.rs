@@ -1,6 +1,6 @@
 //! `cargo xtask dist`: release build and packaging into `<target-dir>/dist/`.
 //!
-//! - macOS: `BAE.app` (unsigned) and `BAE-<version>-<arch>-macos.zip` of it.
+//! - macOS: `BAE.app` (ad-hoc signed, not notarized) and `BAE-<version>-<arch>-macos.zip` of it.
 //! - Windows: `BAE-<version>-<arch>-windows/` and a zip of its contents.
 //!
 //! Sizes are compared with the `app-bundle` and `installer` budgets; they fail the task only
@@ -9,6 +9,7 @@
 use std::fs::{self, File};
 use std::io::{self, BufWriter, Write as _};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, Result, bail};
@@ -22,7 +23,7 @@ const USAGE: &str = "\
 Usage: cargo xtask dist [--target <triple>] [--no-build]
 
 Builds `bae` in release mode and packages it into <target-dir>/dist/:
-  macOS    BAE.app (not signed) and BAE-<version>-<arch>-macos.zip
+  macOS    BAE.app (ad-hoc signed, not notarized) and BAE-<version>-<arch>-macos.zip
   Windows  BAE-<version>-<arch>-windows.zip (bae.exe, LICENSE, README.md)
 ";
 
@@ -53,6 +54,10 @@ pub fn run(args: Vec<String>) -> Result<()> {
             target.triple
         );
     }
+    if target.is_macos() && !cfg!(target_os = "macos") {
+        // Without the ad-hoc signature the bundle is reported as "damaged" once downloaded.
+        bail!("packaging BAE.app needs `codesign`, so it has to run on macOS");
+    }
     let version = ws.package(APP_PACKAGE)?.version.clone();
 
     if !build.no_build {
@@ -64,7 +69,15 @@ pub fn run(args: Vec<String>) -> Result<()> {
     let stamp = zip_timestamp();
 
     let (unpacked, archive) = if target.is_macos() {
-        package_macos(&ws, &binary, &version, &target, &dist, stamp)?
+        package_macos(
+            &ws,
+            &binary,
+            &version,
+            &target,
+            &dist,
+            stamp,
+            Signing::AdHoc,
+        )?
     } else {
         package_windows(&ws, &binary, &version, &target, &dist, stamp)?
     };
@@ -96,7 +109,8 @@ pub fn run(args: Vec<String>) -> Result<()> {
     );
     if target.is_macos() {
         println!(
-            "  note: BAE.app is not code-signed or notarized; on first launch use right-click > Open."
+            "  note: BAE.app is ad-hoc signed and not notarized; open it the first time with \
+             right-click > Open, or System Settings > Privacy & Security > Open Anyway."
         );
     }
     let markdown = util::size_table(&format!("BAE package: {}", target.triple), &rows);
@@ -117,7 +131,17 @@ fn file_name(path: &Path) -> String {
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
 }
 
-/// Builds `dist/BAE.app` and zips it. Returns (bundle dir, zip path).
+/// How `package_macos` signs the bundle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Signing {
+    /// Ad-hoc signature (`codesign --sign -`), then `codesign --verify --deep --strict`.
+    AdHoc,
+    /// Leave the bundle as assembled. Only for layout tests whose "binary" is not Mach-O.
+    #[cfg(test)]
+    None,
+}
+
+/// Builds `dist/BAE.app`, signs it and zips it. Returns (bundle dir, zip path).
 fn package_macos(
     ws: &Workspace,
     binary: &Path,
@@ -125,6 +149,7 @@ fn package_macos(
     target: &Target,
     dist: &Path,
     stamp: DateTime,
+    signing: Signing,
 ) -> Result<(PathBuf, PathBuf)> {
     let app = dist.join(format!("{BUNDLE_NAME}.app"));
     recreate_dir(&app)?;
@@ -140,6 +165,9 @@ fn package_macos(
         &ws.workspace_root.join("LICENSE"),
         &resources.join("LICENSE"),
     )?;
+    if signing == Signing::AdHoc {
+        sign_bundle_ad_hoc(&app)?;
+    }
 
     let zip = dist.join(format!(
         "{BUNDLE_NAME}-{version}-{}-macos.zip",
@@ -168,6 +196,45 @@ fn package_windows(
     let zip = dist.join(format!("{name}.zip"));
     zip_dir(&stage, "", &zip, stamp)?;
     Ok((stage, zip))
+}
+
+/// Ad-hoc signs the assembled bundle and verifies it.
+///
+/// On Apple Silicon the linker already gives the executable an ad-hoc signature, but that
+/// signature does not seal `Info.plist` or `Resources/`. Inside a bundle it is therefore
+/// invalid ("code has no resources but signature indicates they must be present"), and
+/// Gatekeeper reports a downloaded copy as damaged with no way to open it (#105).
+///
+/// Signs inside out without `--deep`: every executable in `Contents/MacOS` first, then the
+/// bundle itself (which re-signs the main executable with the bundle identifier and writes
+/// `Contents/_CodeSignature/CodeResources`). No hardened runtime: it would turn on library
+/// validation, and BAE loads unsigned plugin libraries. A Developer ID signature and
+/// notarization replace this once there is an Apple developer account.
+fn sign_bundle_ad_hoc(app: &Path) -> Result<()> {
+    let macos = app.join("Contents").join("MacOS");
+    let mut executables = fs::read_dir(&macos)
+        .with_context(|| format!("failed to read {}", macos.display()))?
+        .map(|entry| entry.map(|e| e.path()))
+        .collect::<io::Result<Vec<_>>>()?;
+    executables.sort();
+    for code in executables.iter().map(PathBuf::as_path).chain([app]) {
+        util::run(
+            Command::new("codesign")
+                .args(["--force", "--sign", "-"])
+                .arg(code),
+        )?;
+    }
+    verify_bundle_signature(app)
+}
+
+/// `codesign --verify --deep --strict`: the check Gatekeeper's "damaged" verdict comes from.
+fn verify_bundle_signature(app: &Path) -> Result<()> {
+    util::run(
+        Command::new("codesign")
+            .args(["--verify", "--deep", "--strict", "--verbose=2"])
+            .arg(app),
+    )
+    .context("BAE.app does not have a valid code signature")
 }
 
 fn recreate_dir(dir: &Path) -> Result<()> {
@@ -523,6 +590,7 @@ mod tests {
             &target,
             &tmp,
             stamp,
+            Signing::None,
         )
         .unwrap();
         assert_eq!(file_name(&app), "BAE.app");
@@ -548,6 +616,49 @@ mod tests {
                 file("BAE.app/Contents/Resources/LICENSE", 0o644),
             ]
         );
+    }
+
+    /// The signed bundle verifies, and still verifies after a round trip through our zip
+    /// writer and `ditto` (what Archive Utility does with a downloaded zip), #105.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_package_is_signed_and_survives_the_zip() {
+        let tmp = scratch_dir("mac-sign");
+        // Any Mach-O will do; a copy of a tiny system tool keeps the test fast.
+        let binary = tmp.join("bae-input");
+        fs::copy("/usr/bin/true", &binary).unwrap();
+        let target = Target {
+            triple: "aarch64-apple-darwin".into(),
+            explicit: false,
+        };
+        let (app, zip) = package_macos(
+            &test_workspace(&tmp),
+            &binary,
+            "0.1.0",
+            &target,
+            &tmp,
+            dos_datetime(1_700_000_000),
+            Signing::AdHoc,
+        )
+        .unwrap();
+        verify_bundle_signature(&app).unwrap();
+        let names: Vec<String> = zip_entries(&zip).into_iter().map(|e| e.0).collect();
+        assert!(
+            names.contains(&"BAE.app/Contents/_CodeSignature/CodeResources".to_owned()),
+            "{names:?}"
+        );
+
+        let unpacked = tmp.join("unpacked");
+        let status = Command::new("ditto")
+            .args(["-x", "-k"])
+            .arg(&zip)
+            .arg(&unpacked)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let result = verify_bundle_signature(&unpacked.join("BAE.app"));
+        fs::remove_dir_all(&tmp).unwrap();
+        result.unwrap();
     }
 
     #[test]

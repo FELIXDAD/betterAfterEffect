@@ -114,6 +114,30 @@ jobs:
       - name: Package
         run: cargo xtask dist --no-build
 
+      - name: macOS bundle signature
+        # Checks the zip as a user gets it: unpacked like Archive Utility does, with the
+        # quarantine flag a browser download sets. A broken signature makes Gatekeeper call
+        # the app "damaged" with no way to open it (#105). BAE.app is ad-hoc signed and not
+        # notarized, so spctl rejecting it is expected; any other spctl verdict is a
+        # signature error and fails the job.
+        if: runner.os == 'macOS'
+        run: |
+          check="$RUNNER_TEMP/bundle-check"
+          rm -rf "$check" && mkdir -p "$check"
+          zips=(target/dist/BAE-*-macos.zip)
+          ditto -x -k "${zips[0]}" "$check"
+          app="$check/BAE.app"
+          xattr -w com.apple.quarantine "0081;$(printf %x "$(date +%s)");CI;" "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign --display --verbose=2 "$app"
+          verdict="$(spctl --assess --type exec -vv "$app" 2>&1 || true)"
+          echo "spctl: $verdict"
+          syspolicy_check distribution "$app" || true
+          if ! grep -Eq ': (rejected|accepted)$' <<<"$verdict"; then
+            echo "::error::BAE.app has a code signature error: $verdict"
+            exit 1
+          fi
+
       - name: Upload package and size report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
