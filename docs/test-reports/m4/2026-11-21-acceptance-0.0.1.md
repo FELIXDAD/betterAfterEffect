@@ -245,3 +245,22 @@ release 体积：24,072,784 B（+287,248 B，来自 accesskit 适配器），mac
 | #124 | **部分通过，保持打开** | 通过：用真正的锁定开关锁定和解锁、撤销和重做；锁定图层不能指定父级，但可以当父级，父级移动时锁定的子级跟着动；锁定图层的关键帧可以复制、不能粘贴进去；复制、拆分、排列、F9 都不作用于锁定图层；查看器点击穿过锁定图层。**还剩**：① MCP 的通用 `attr_set`（位置、名字）和 `prim_delete` 还能改、能删锁定图层；② 删除锁定子级的父级时什么都不发生、也没有提示；③ 锁定一个选中的图层后它仍是选中状态 |
 
 为了算锁定子级的世界变换，`apps/bae` 的 dev-dependencies 加了 `bae-anim`（工作区内部 crate，已经在依赖树里，release 体积不变）。
+
+### dev `7e44f42`（#122）：#115
+
+用的是 CI 产物（run 44912303305），`ditto` 解压到带空格和中文的目录：
+
+| 项 | 结果 |
+|---|---|
+| 图标 | `bae.icns`，16–1024 px 共 8 个尺寸，图案是自己设计的（`acceptance-0.0.1-shots/app-icon-256.png`）；加上隔离属性后签名仍然有效 |
+| 文档类型 / UTI | .bae 是 `io.github.felixdad.bae.project`（被当作包），.baez 是 `io.github.felixdad.bae.package`；`lsregister -f` 之后 Launch Services 认得这两种类型，都由 BAE 打开 |
+| 应用没启动时 `open` .bae | 应用启动，通过 file.open_project 打开（日志 `bae::files: opened`），标题 “BAE - 访达 打开.bae” |
+| 应用在运行时 `open` .baez | 同一个进程切换过去，没有第二个实例；同时打开两个文件时只开第一个 |
+| `open` 损坏的 .baez | 弹出写清原因的提示，当前工程不变，没有崩溃 |
+| 恢复上次的合成 | 两个合成标签都在，当前是“第二 合成”，时间 1 秒（`acceptance-0.0.1-shots/view-restored-zh-7e44f42.png`） |
+
+**#115 已关闭。** Windows 的双击打开要安装器写文件关联，按说明不在 0.0.1 范围内。
+
+本机另一个工作区的开发构建也注册了同一个 bundle id，现在是默认应用，所以打开时用 `open -a` 指定了 CI 的应用；测完已经注销测试用的这份应用。
+
+新开 **#131**（小问题）：`bae pack` 在 `--help` 里列出，但没有实现；`package_pack` 打包时丢掉 `project.json` 的 `view` 字段。
