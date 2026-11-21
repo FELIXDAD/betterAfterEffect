@@ -498,7 +498,11 @@ impl Workbench {
         status: impl FnOnce(&mut Ui),
     ) -> Vec<Invocation> {
         self.refresh_registries();
-        if !self.record_shortcut(ui.ctx()) {
+        // A modal dialog (the welcome / role picker) owns the keyboard: no
+        // shortcuts and no panel keys reach the project behind it.
+        let modal = self.role_picker_open();
+        crate::panel::set_modal_open(ui.ctx(), modal);
+        if !modal && !self.record_shortcut(ui.ctx()) {
             self.collect_shortcuts(ui.ctx());
         }
 
@@ -1504,6 +1508,28 @@ mod tests {
         frame(&mut wb, vec![]);
         wb.show_role_picker();
         frame(&mut wb, vec![]);
+    }
+
+    /// Issue #112: while the modal welcome / role picker is open, shortcuts
+    /// and panel keys do not reach the project behind it.
+    #[test]
+    fn no_shortcuts_behind_a_modal() {
+        let (kinds, presets, keymaps, actions) = registries();
+        let mut wb =
+            Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
+        let ctx = Context::default();
+        wb.show_role_picker();
+        frame_in(&ctx, &mut wb, vec![]);
+        assert!(frame_in(&ctx, &mut wb, vec![key(Key::U, Modifiers::NONE)]).is_empty());
+        assert!(crate::panel::modal_open(&ctx));
+        frame_in(&ctx, &mut wb, vec![key(Key::Escape, Modifiers::NONE)]);
+        assert!(!wb.role_picker_open());
+        frame_in(&ctx, &mut wb, vec![]);
+        assert!(!crate::panel::modal_open(&ctx));
+        assert_eq!(
+            frame_in(&ctx, &mut wb, vec![key(Key::U, Modifiers::NONE)]),
+            vec![Invocation::new("layer.reveal_keyframes")]
+        );
     }
 
     #[test]

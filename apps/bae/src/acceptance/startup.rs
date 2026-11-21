@@ -104,7 +104,6 @@ fn welcome_dialog_role_choice_switches_workspace() {
 }
 
 #[test]
-#[ignore = "issue #112"]
 fn shortcuts_behind_the_welcome_dialog() {
     // The dialog is modal: AE-style shortcuts should not change the project
     // behind it while it is open.

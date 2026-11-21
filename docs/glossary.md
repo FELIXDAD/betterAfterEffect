@@ -85,6 +85,12 @@
 | Untitled Project | 未命名项目 |
 | Agent Activity（BAE） | Agent 活动 |
 | Proposals（BAE） | 提案 |
+| Work Area | 工作区域（AE 26 的“将合成裁剪到工作区”这一项缩写成“工作区”；BAE 统一用“工作区域”，不和 Workspace“工作区”混用） |
+| Trim | 修剪（如“将入点修剪到当前时间”“将合成修剪至工作区域”；“裁剪”是 Crop） |
+| Bring Layer to Front / Bring Layer Forward | 置于顶层 / 前移一层（AE 26 图层 ▸ 排列，也是通用叫法） |
+| Send Layer Backward / Send Layer to Back | 后移一层 / 置于底层 |
+| Add to Render Queue | 添加到渲染队列 |
+| Render Queue | 渲染队列 |
 
 ## 五、工具栏
 

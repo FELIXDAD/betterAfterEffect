@@ -446,6 +446,7 @@ impl Panel for TimelinePanel {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
         let stage = cx.stage;
+        let renaming_before = self.rename.is_some();
         let full = ui.available_rect_before_wrap();
         ui.painter().rect_filled(full, 0.0, color::PANEL);
 
@@ -576,6 +577,19 @@ impl Panel for TimelinePanel {
         p.vline(x, graph_body.y_range(), Stroke::new(1.0, color::ACCENT));
 
         self.footer(ui, foot, &info, &axis, now, graph_left);
+
+        // AE: Enter (Return) renames the selected layer (the topmost one when
+        // several are selected); not the Enter that just committed a rename.
+        if cx.focused
+            && !renaming_before
+            && self.rename.is_none()
+            && bae_ui::panel_key_pressed(ui, egui::Key::Enter)
+        {
+            let selected = session.lock().selected_layers.clone();
+            if let Some(layer) = comp_layers.iter().find(|l| selected.contains(l)) {
+                self.rename = Some((layer.clone(), query::display_name_of(stage, layer)));
+            }
+        }
     }
 }
 
@@ -1110,14 +1124,14 @@ impl TimelinePanel {
                         .interact(name_rect, rid("name"), Sense::click_and_drag())
                         .labeled_toggle(egui::WidgetType::SelectableLabel, &name, layer_selected);
                     if resp.clicked() {
-                        select_layer(session, layer, ui.input(|i| i.modifiers));
+                        select_layer(session, stage, layer, ui.input(|i| i.modifiers));
                     }
                     if resp.double_clicked() {
                         self.rename = Some((layer.clone(), name.clone()));
                     }
                     if resp.drag_started() {
                         if !layer_selected {
-                            select_layer(session, layer, egui::Modifiers::NONE);
+                            select_layer(session, stage, layer, egui::Modifiers::NONE);
                         }
                         self.drag = Some(Drag::Reorder {
                             layers: session.lock().selected_layers.clone(),
@@ -1125,7 +1139,7 @@ impl TimelinePanel {
                     }
                     resp.context_menu(|ui| {
                         if !session.lock().selected_layers.contains(layer) {
-                            select_layer(session, layer, egui::Modifiers::NONE);
+                            select_layer(session, stage, layer, egui::Modifiers::NONE);
                         }
                         new_layer_menu(ui, cx, session);
                         ui.separator();
@@ -1365,13 +1379,13 @@ impl TimelinePanel {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
         }
         if resp.clicked() {
-            select_layer(session, layer, ui.input(|i| i.modifiers));
+            select_layer(session, stage, layer, ui.input(|i| i.modifiers));
         }
         if resp.drag_started()
             && let Some(p) = resp.interact_pointer_pos()
         {
             if !selected {
-                select_layer(session, layer, egui::Modifiers::NONE);
+                select_layer(session, stage, layer, egui::Modifiers::NONE);
             }
             self.drag = Some(match hover_edge {
                 Some(1) => Drag::TrimIn {
@@ -1920,9 +1934,34 @@ fn row_key(row: &Row) -> String {
     }
 }
 
-fn select_layer(session: &SharedSession, layer: &PrimPath, mods: egui::Modifiers) {
+/// Click selection (AE): a click selects the layer; Cmd+click adds or removes
+/// it; Shift+click selects the contiguous range from the anchor (the layer
+/// clicked last without Shift) to it, in timeline order.
+fn select_layer(session: &SharedSession, stage: &Stage, layer: &PrimPath, mods: egui::Modifiers) {
     let mut s = session.lock();
-    if mods.command || mods.shift {
+    if mods.shift {
+        let order = query::owning_comp(stage, layer)
+            .map(|c| query::comp_layers(stage, &c))
+            .unwrap_or_default();
+        let anchor = s
+            .selected_layers
+            .first()
+            .filter(|a| order.contains(a))
+            .cloned()
+            .unwrap_or_else(|| layer.clone());
+        let (Some(a), Some(b)) = (
+            order.iter().position(|l| *l == anchor),
+            order.iter().position(|l| l == layer),
+        ) else {
+            s.selected_layers = vec![layer.clone()];
+            return;
+        };
+        let (lo, hi) = (a.min(b), a.max(b));
+        // The anchor stays first so the next Shift+click extends from it.
+        let mut range = vec![anchor.clone()];
+        range.extend(order[lo..=hi].iter().filter(|l| **l != anchor).cloned());
+        s.selected_layers = range;
+    } else if mods.command {
         if let Some(i) = s.selected_layers.iter().position(|p| p == layer) {
             s.selected_layers.remove(i);
         } else {

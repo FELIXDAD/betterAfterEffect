@@ -73,7 +73,7 @@ impl AppModule for ShellModule {
         let owner = app.current_owner();
         let menu = app.registry::<bae_ui::MenuItemSpec>();
         menu.batch(|tx| {
-            for (id, item) in menu::file_items() {
+            for (id, item) in menu::file_items().into_iter().chain(menu::window_items()) {
                 if !tx.contains(id) {
                     let _ = tx.register(owner.clone(), id, item);
                 }
@@ -953,6 +953,34 @@ impl ApplicationHandler<UserEvent> for Shell {
                     .as_ref()
                     .and_then(|m| m.contributed_invocation(id))
                     .unwrap_or_else(|| menu::invocation(id));
+                // A modal dialog is open: menu commands (and their key
+                // equivalents) do not reach the project behind it; Quit still works.
+                if self.workspace.modal_open() && inv.id != ids::QUIT {
+                    return;
+                }
+                // Undo / Redo (their native key equivalents too) while a text
+                // field is focused undo the typing, as in any Mac / Windows app.
+                if (inv.id == ids::UNDO || inv.id == ids::REDO)
+                    && let Some(view) = self.view.as_mut()
+                    && view.egui_ctx.text_edit_focused()
+                {
+                    let modifiers = egui::Modifiers {
+                        shift: inv.id == ids::REDO,
+                        ..egui::Modifiers::COMMAND
+                    };
+                    view.egui_state
+                        .egui_input_mut()
+                        .events
+                        .push(egui::Event::Key {
+                            key: egui::Key::Z,
+                            physical_key: Some(egui::Key::Z),
+                            pressed: true,
+                            repeat: false,
+                            modifiers,
+                        });
+                    view.window.request_redraw();
+                    return;
+                }
                 // Queued behind the edits the last frame produced (about_to_wait
                 // runs them in order), not ahead of them.
                 self.pending.push(inv);

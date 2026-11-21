@@ -17,10 +17,13 @@ const AE_ITEMS: &[(&str, Option<&str>, &str)] = &[
     ("shell.file.save", Some("Cmd+S"), "保存"),
     ("shell.file.save_as", Some("Cmd+Shift+S"), "另存为"),
     ("motion.composition.new", Some("Cmd+N"), "新建合成"),
+    // AE 26 shortens this item to “将合成裁剪到工作区”. BAE keeps the glossary
+    // terms (issue #109): Work Area = 工作区域 (工作区 is Workspace), Trim = 修剪
+    // (as in 将入点修剪到当前时间; 裁剪 is Crop).
     (
         "motion.composition.trim",
         Some("Cmd+Shift+X"),
-        "将合成裁剪到工作区",
+        "将合成修剪至工作区域",
     ),
     (
         "motion.composition.render_queue",
@@ -61,10 +64,27 @@ const AE_ITEMS: &[(&str, Option<&str>, &str)] = &[
     ("motion.animation.hold", Some("Cmd+Alt+H"), "切换定格关键帧"),
     ("motion.edit.duplicate", Some("Cmd+D"), "重复"),
     ("motion.edit.split", Some("Cmd+Shift+D"), "拆分图层"),
+    // Window (issues #117, #118). AE's Effect Controls item has a dynamic label
+    // (“效果控件: 图层名”); AE binds F3 to it, as BAE does.
+    ("shell.window.project", Some("Cmd+0"), "项目"),
+    ("shell.window.composition", None, "合成"),
+    ("shell.window.timeline", None, "时间轴"),
+    ("shell.window.effect_controls", Some("F3"), "效果控件"),
+    ("shell.window.effects", Some("Cmd+5"), "效果和预设"),
+    ("shell.window.preview", Some("Cmd+3"), "预览"),
+    ("shell.window.properties", None, "属性"),
+    ("shell.window.info", Some("Cmd+2"), "信息"),
+    ("motion.window.render_queue", Some("Cmd+Alt+0"), "渲染队列"),
 ];
 
 /// BAE-only items (no AE counterpart): Layer ▸ New ▸ Rectangle / Ellipse.
-const BAE_ONLY: &[&str] = &["motion.layer.new.rectangle", "motion.layer.new.ellipse"];
+const BAE_ONLY: &[&str] = &[
+    "motion.layer.new.rectangle",
+    "motion.layer.new.ellipse",
+    "shell.window.history",
+    "shell.window.agent_activity",
+    "shell.window.agent_proposals",
+];
 
 #[test]
 fn every_menu_item_is_compared_with_ae() {
@@ -92,7 +112,6 @@ fn every_menu_item_is_compared_with_ae() {
 }
 
 #[test]
-#[ignore = "issue #109"]
 fn shortcuts_shown_in_menus_match_ae() {
     let h = gui();
     let mut mismatches = Vec::new();
@@ -115,11 +134,21 @@ fn shortcuts_shown_in_menus_match_ae() {
 #[test]
 fn menu_enabled_state_follows_the_selection() {
     let mut h = gui();
+    // Window items open panels: always enabled (checked below), not part of
+    // what the selection changes.
+    let window = |i: &MenuItemView| i.path.first().is_some_and(|p| p == "Window");
+    assert!(
+        h.state()
+            .menu_items()
+            .iter()
+            .filter(|i| window(i))
+            .all(|i| i.enabled)
+    );
     let enabled = |h: &Ui| -> Vec<String> {
         h.state()
             .menu_items()
             .into_iter()
-            .filter(|i| i.enabled)
+            .filter(|i| i.enabled && !window(i))
             .map(|i| i.id)
             .collect()
     };
@@ -231,7 +260,6 @@ fn ae_label(label: &str) -> String {
 }
 
 #[test]
-#[ignore = "issue #109"]
 fn chinese_menus_use_ae_terms() {
     if !in_child(
         "acceptance::menus::chinese_menus_use_ae_terms",

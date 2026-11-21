@@ -378,9 +378,30 @@ pub(crate) fn current_value(
         .or_else(|| query::static_value(&stage.prim(path)?, attr))
 }
 
-/// Localized AE-style default name for a new item: `"<base> N"`.
-pub(crate) fn numbered(stage: &Stage, parent: &PrimPath, base: &str) -> String {
-    query::next_numbered_name(stage, parent, tr(base))
+/// Localized AE-style default name for a new item: `"<base> N"`, one more than
+/// the highest N among the existing siblings and the items commands are about
+/// to create (several Cmd+Y in one frame get Solid 1, Solid 2 …).
+pub(crate) fn numbered(
+    stage: &Stage,
+    session: &SharedSession,
+    parent: &PrimPath,
+    base: &str,
+) -> String {
+    let base = tr(base);
+    let existing = query::next_numbered_name(stage, parent, base);
+    let next_existing = number_after(&existing, base).unwrap_or(1);
+    let reserved = session
+        .lock()
+        .reserved_names(parent)
+        .filter_map(|n| number_after(&n, base))
+        .max()
+        .map_or(0, |n| n + 1);
+    format!("{base} {}", next_existing.max(reserved))
+}
+
+/// `N` of `"<base> N"`.
+fn number_after(name: &str, base: &str) -> Option<u32> {
+    name.strip_prefix(base)?.trim().parse().ok()
 }
 
 /// Create a comp with a localized default name and open it once it exists.
@@ -402,10 +423,17 @@ pub(crate) fn new_comp(
         })
         .max()
         .unwrap_or(0);
-    let name = format!("{base} {}", max + 1);
     let parent = folder
         .cloned()
         .unwrap_or_else(|| PrimPath::new(query::COMPS_FOLDER).expect("valid"));
+    // Comps about to be created this frame count too (Cmd+N twice).
+    let reserved = session
+        .lock()
+        .reserved_names(&parent)
+        .filter_map(|n| number_after(&n, base))
+        .max()
+        .unwrap_or(0);
+    let name = format!("{base} {}", max.max(reserved) + 1);
     let Ok(path) = parent.child(&query::unique_child_name(stage, &parent, &name)) else {
         return;
     };
@@ -414,7 +442,9 @@ pub(crate) fn new_comp(
         params["parent"] = json!(f);
     }
     cx.invoke_with("comp.create", params);
-    session.lock().expect(Pending::Comp(path));
+    let mut s = session.lock();
+    s.expect(Pending::Comp(path.clone()));
+    s.reserve_name(path, name);
 }
 
 /// Create a layer in the active comp (above the selected layer, like AE) and select
@@ -453,7 +483,7 @@ pub(crate) fn new_layer(
     };
     let name = match (kind, extra.get("text").and_then(|t| t.as_str())) {
         (LayerKind::Text, Some(t)) => t.to_owned(),
-        _ => numbered(stage, &folder, base),
+        _ => numbered(stage, session, &folder, base),
     };
     let Ok(path) = folder.child(&query::unique_child_name(stage, &folder, &name)) else {
         return;
@@ -463,7 +493,9 @@ pub(crate) fn new_layer(
         p.extend(m);
     }
     cx.invoke_with("layer.create", params);
-    session.lock().expect(Pending::Layer(path));
+    let mut s = session.lock();
+    s.expect(Pending::Layer(path.clone()));
+    s.reserve_name(path, name);
 }
 
 /// The comp info of the session's active comp.
@@ -502,6 +534,17 @@ pub(crate) fn rename_field(
     );
     if started {
         r.request_focus();
+        // AE selects the whole name: typing replaces it.
+        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), r.id) {
+            let end = egui::text::CCursor::new(buf.chars().count());
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    end,
+                )));
+            state.store(ui.ctx(), r.id);
+        }
         ui.data_mut(|d| d.insert_temp(id, true));
         return None;
     }

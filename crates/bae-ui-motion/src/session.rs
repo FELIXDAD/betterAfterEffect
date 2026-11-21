@@ -56,6 +56,14 @@ pub enum Pending {
     Comp(PrimPath),
     /// Select the layer (and open its comp).
     Layer(PrimPath),
+    /// Select the layers a command adds to the comp (duplicate, split): those
+    /// not in `before`.
+    NewLayers {
+        /// The comp.
+        comp: PrimPath,
+        /// Its layers before the command.
+        before: Vec<PrimPath>,
+    },
 }
 
 #[derive(Debug, Default)]
@@ -78,6 +86,9 @@ pub struct Session {
     pub scrub: Option<Scrub>,
     pub clipboard: Option<KeyClipboard>,
     pending: Vec<(Pending, u32)>,
+    /// Names of items commands are about to create (path, name), so default
+    /// names given in the same frame stay unique.
+    reserved: Vec<(PrimPath, String)>,
     /// When U was last pressed (UU detection).
     pub(crate) last_u: Option<Instant>,
 }
@@ -156,13 +167,40 @@ impl Session {
         self.pending.push((what, 0));
     }
 
+    /// Keep `name` taken until the command creating `path` has run.
+    pub fn reserve_name(&mut self, path: PrimPath, name: String) {
+        self.reserved.push((path, name));
+    }
+
+    /// Names reserved for items about to be created under `parent`.
+    pub fn reserved_names<'a>(&'a self, parent: &'a PrimPath) -> impl Iterator<Item = String> + 'a {
+        self.reserved
+            .iter()
+            .filter(move |(p, _)| p.parent().as_ref() == Some(parent))
+            .map(|(_, n)| n.clone())
+    }
+
     /// Drop references to prims that no longer exist and resolve pending items.
     /// Called once per frame by the panels (cheap).
     pub fn sync(&mut self, stage: &Stage) {
         let pending = std::mem::take(&mut self.pending);
         for (what, age) in pending {
+            if let Pending::NewLayers { comp, before } = &what {
+                let added: Vec<PrimPath> = query::comp_layers(stage, comp)
+                    .into_iter()
+                    .filter(|l| !before.contains(l))
+                    .collect();
+                if !added.is_empty() {
+                    self.selected_layers = added;
+                    self.selected_keys.clear();
+                } else if age < PENDING_FRAMES {
+                    self.pending.push((what, age + 1));
+                }
+                continue;
+            }
             let path = match &what {
                 Pending::Comp(p) | Pending::Layer(p) => p,
+                Pending::NewLayers { .. } => unreachable!("handled above"),
             };
             if stage.has_prim(path) {
                 match what {
@@ -174,11 +212,23 @@ impl Session {
                         self.selected_layers = vec![l];
                         self.selected_keys.clear();
                     }
+                    Pending::NewLayers { .. } => {}
                 }
             } else if age < PENDING_FRAMES {
                 self.pending.push((what, age + 1));
             }
         }
+        // A reservation ends when its item exists or its command gave up.
+        let waiting: Vec<PrimPath> = self
+            .pending
+            .iter()
+            .filter_map(|(w, _)| match w {
+                Pending::Comp(p) | Pending::Layer(p) => Some(p.clone()),
+                Pending::NewLayers { .. } => None,
+            })
+            .collect();
+        self.reserved
+            .retain(|(p, _)| !stage.has_prim(p) && waiting.contains(p));
         self.open_comps
             .retain(|c| query::comp_info(stage, c).is_some());
         if self

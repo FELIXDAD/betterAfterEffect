@@ -42,7 +42,9 @@ pub use i18n::{Lang, tr};
 pub use icons::Icon;
 pub use keymap::{Binding, Chord, Conflict, Keymap, KeymapBindings, KeymapOverrides};
 pub use menu::{MenuContext, MenuEntry, MenuItemSpec, MenuTree};
-pub use panel::{Panel, PanelContext, PanelKind, PanelRequests, PanelSpawn, panel_key_pressed};
+pub use panel::{
+    Panel, PanelContext, PanelKind, PanelRequests, PanelSpawn, modal_open, panel_key_pressed,
+};
 pub use workbench::{Workbench, WorkbenchContext, WorkbenchState};
 pub use workspace::WorkspacePreset;
 

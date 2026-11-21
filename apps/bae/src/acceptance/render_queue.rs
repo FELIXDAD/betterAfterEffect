@@ -267,7 +267,6 @@ fn invalid_output_paths_fail_with_a_message() {
 }
 
 #[test]
-#[ignore = "issue #110"]
 fn output_without_extension_gets_one() {
     // AE adds the format's extension to the output name.
     let Some(mut h) = gpu_gui() else { return };
@@ -296,7 +295,6 @@ fn output_without_extension_gets_one() {
 }
 
 #[test]
-#[ignore = "issue #110"]
 fn empty_output_path_is_refused() {
     // An empty "Output To" must not render into the process's working directory
     // (`/` for an app started from Finder, wherever the terminal was otherwise).
@@ -324,7 +322,6 @@ fn empty_output_path_is_refused() {
 }
 
 #[test]
-#[ignore = "issue #110"]
 fn frame_range_outside_the_comp() {
     let Some(mut h) = gpu_gui() else { return };
     let tmp = tempfile::tempdir().unwrap();
