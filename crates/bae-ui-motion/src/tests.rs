@@ -599,3 +599,17 @@ impl Panel for NoopPanel {
         crate::common::session(cx.resources).lock().sync(cx.stage);
     }
 }
+
+#[test]
+fn every_menu_title_has_chinese() {
+    let zh = crate::i18n::ZH;
+    let mut missing = Vec::new();
+    for (id, spec) in crate::menus::items() {
+        for t in spec.path.iter().chain(std::iter::once(&spec.title)) {
+            if !zh.iter().any(|(en, _)| en == t) {
+                missing.push(format!("{id}: {t}"));
+            }
+        }
+    }
+    assert!(missing.is_empty(), "missing Chinese for {missing:?}");
+}
