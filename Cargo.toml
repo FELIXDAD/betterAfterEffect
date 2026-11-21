@@ -307,6 +307,24 @@ opt-level = "s"
 opt-level = "s"
 [profile.release.package.png]
 opt-level = "s"
+# Plugin manifests (bae-plugin, read once per plugin load): TOML parser and semver.
+[profile.release.package.toml]
+opt-level = "s"
+[profile.release.package.toml_parser]
+opt-level = "s"
+[profile.release.package.toml_writer]
+opt-level = "s"
+[profile.release.package.toml_datetime]
+opt-level = "s"
+[profile.release.package.serde_spanned]
+opt-level = "s"
+[profile.release.package.winnow]
+opt-level = "s"
+[profile.release.package.semver]
+opt-level = "s"
+# Audio tag parsing when a file is opened (symphonia-metadata); not the decode loop.
+[profile.release.package.regex-lite]
+opt-level = "s"
 
 # Benchmarks: release code generation plus line tables for profilers.
 [profile.bench]
