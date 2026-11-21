@@ -4,11 +4,10 @@
 use std::sync::Arc;
 
 use bae_anim::evaluate_comp;
-use bae_gpu::transfer::read_texture;
 use bae_gpu::{GpuContext, GpuContextDescriptor, GpuError};
 use bae_model::{AuthorId, CommandRegistry, FrameRate, Keyframe, PrimPath, Stage, Time, Value};
-use bae_render::IRect;
 use bae_render::fixture::SceneBuilder;
+use bae_render::{IRect, LayerSource, SourceRequest, testing};
 use bae_vector::render::ShapeSource;
 use bae_vector::{DrawItem, shape_layer_scene};
 use serde_json::json;
@@ -156,11 +155,17 @@ fn evaluated_shape_layer_renders_on_the_gpu() {
     let scene = shape_layer_scene(evaluated.layer(&layer).unwrap(), &mut Vec::new());
     let source = ShapeSource::new(Arc::new(scene));
     let roi = IRect::new(-70, -70, 70, 70);
-    let image = source.render_on(&gpu, roi, 1.0).unwrap();
-    let px = read_texture(&gpu, &image.texture).unwrap();
+    let request = SourceRequest {
+        roi,
+        scale: 1.0,
+        time: Time::ZERO,
+    };
+    let image = testing::render_source(&gpu, &source, &request).unwrap();
+    let px = testing::read_pixels(&gpu, &image).unwrap();
+    let rect = roi.intersect(&source.bounds());
+    let width = image.texel_size()[0] as i32;
     let at = |x: i32, y: i32| {
-        let v = px.pixel((x - image.rect.x0) as u32, (y - image.rect.y0) as u32);
-        [v[0], v[1], v[2], v[3]]
+        px[((y - rect.y0) * width + (x - rect.x0)) as usize].map(|v| (v * 255.0).round() as u8)
     };
     // The fill is above the Trim Paths too, so it fills the trimmed half
     // (closed by a straight chord along x = 0).
