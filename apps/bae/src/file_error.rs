@@ -327,6 +327,8 @@ mod tests {
         assert_eq!(m, "You don't have permission to save in “/x”.");
     }
 
+    /// Unreadable projects get our own sentence, not the system's text.
+    #[cfg(unix)]
     #[test]
     fn unreadable_projects_say_permission() {
         use std::os::unix::fs::PermissionsExt;
