@@ -4,10 +4,17 @@
 
 本目录存放从 Windows 本机真实安装的 Adobe After Effects 26.0（构建号 `26.0x67`，简体中文界面）通过脚本与只读系统接口提取的**事实与结构参考数据**，用于 BAE 在数据模型、图层属性、内置效果、渲染输出、菜单/面板、工具与快捷键方面做对照查漏。
 
-## 合规与边界说明
+## 使用原则与合规边界
 
-- **仅含事实和结构数据**：名称、层级、`matchName`、属性类型、默认值、最小/最大值、单位、下拉选项（`Property.propertyParameters`）、是否可关键帧/表达式、默认快捷键、菜单树与 Win32 命令 ID。
-- **不含版权原文与二进制素材**：不包含任何 Adobe 说明文字/工具提示原文、截图、图标、预设原文件或工程文件；配置与快捷键已转换为本仓库自定的紧凑 JSON 与 Markdown 表格格式。
+> **重要说明**：本目录中的显示标签来自 After Effects 26.0x67 的 `zh_CN` 界面，仅用于对照查漏；对照时请以 `matchName`、菜单 `commandId`、快捷键命令标识等英文内部标识为稳定键；BAE 自己的界面文字（中英文）必须按 [`docs/glossary.md`](../../glossary.md) 独立撰写，**不能**从这份数据直接复制。
+
+- **仅含事实和结构数据**：名称、层级、`matchName`、属性类型、默认值、最小/最大值、单位、下拉选项（`Property.propertyParameters`）、是否可关键帧/表达式、默认快捷键、菜单树与 Win32 `commandId`。
+- **不含版权原文与报错原文**：不包含任何 Adobe 说明文字、帮助文本、工具提示或报错原文；不可应用/跳过的条目统一使用本仓库短标记（如 `{"unavailable": "modal_file_dialog_on_apply"}`、`{"unavailable": "requires_c4d_footage"}`、`{"unavailable": "cannot_add"}`）。不含截图、图标、预设原文件或工程文件。
+- **稳定英文键覆盖率**：
+  - 效果与效果参数：100% 带 `matchName`（749 条目录、439 个展开效果、5,637 个叶子参数）。
+  - 图层与属性树：100% 带 `matchName`（9 类图层、1,758 个变体叶子属性）。
+  - 菜单命令（`menus.json`）：863 / 863 个真实菜单命令均带 Win32 `commandId`（覆盖率 **100%**；含 4 个 MRU/扩展脱敏占位项共 867 项，占位项显式标为 `"commandId": null`，总体 863 / 867 = **99.5%**）。
+  - 快捷键与工具（`shortcuts.json`）：100% 以 AE 英文命令标识符为键（32 个上下文、669 条命令、27 项工具）。
 - **已脱敏与分离第三方**：移除了本机路径、用户名、GUID、设备信息、最近打开/导入记录（MRU）、第三方 CEP 扩展与第三方 ScriptUI 脚本；本机安装的非 Adobe 第三方插件仅在 `effects/third-party.json` 与 `effects.md` 中单独标注目录，未展开参数。
 
 ## 文件清单
@@ -59,6 +66,11 @@ powershell -ExecutionPolicy Bypass -File tools/ae/reference/run_ae_extraction.ps
 # 3. 转换为 docs/reference/ae/ 下的结构化参考文件
 python tools/ae/reference/build_reference_docs.py
 ```
+
+### Windows 上无人值守调用 AE 的关键点
+
+- **防止 `-r` 启动卡在安全模式模态框**：若上次 AE 被强杀，Windows 注册表会留下 `HKCU:\Software\Adobe\After Effects\26.0`（`ForceQuitOccured` / `AbortOccured` / `CrashOccurred`）以及 `HKCU:\Software\Adobe\After Effects\AppStates\*` 会话子键，导致下次启动弹出 `#32770` 安全模式框并阻塞 `-r`。启动前（以及异常强杀后）必须同时清理这两处注册表项（见 `run_ae_extraction.ps1` 中的 `Clear-AeCrashFlags`）。
+- **脚本内弹框抑制与安全退出**：脚本入口调用 `app.beginSuppressDialogs()`，结束时在 `finally` 调用 `app.endSuppressDialogs(false)`；用完后通过 `quit_ae.jsx` 先执行 `app.project.close(CloseOptions.DO_NOT_SAVE_CHANGES)` 再 `app.quit()` 正常退出，并及时释放 `ae.lock`。
 
 ## 如何用于 BAE 对照查漏
 

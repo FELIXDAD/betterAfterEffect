@@ -209,7 +209,7 @@ def sanitize_menu_nodes(nodes: list[dict[str, Any]], parent_label: str = "") -> 
             cleaned.append({
                 "type": "submenu",
                 "label": label,
-                "items": [{"type": "item", "label": "<redacted:MRU list>"}],
+                "items": [{"type": "item", "label": "<redacted:MRU list>", "commandId": None}],
             })
             continue
 
@@ -218,7 +218,7 @@ def sanitize_menu_nodes(nodes: list[dict[str, Any]], parent_label: str = "") -> 
             cleaned.append({
                 "type": "submenu",
                 "label": label,
-                "items": [{"type": "item", "label": "<omitted:host third-party CEP extensions>"}],
+                "items": [{"type": "item", "label": "<omitted:host third-party CEP extensions>", "commandId": None}],
             })
             continue
 
@@ -242,8 +242,8 @@ def sanitize_menu_nodes(nodes: list[dict[str, Any]], parent_label: str = "") -> 
         }
         if n.get("shortcut"):
             new_node["shortcut"] = n["shortcut"]
-        if n.get("commandId") is not None:
-            new_node["commandId"] = n["commandId"]
+        if t == "item":
+            new_node["commandId"] = n.get("commandId", None)
         if t == "submenu":
             new_node["items"] = sanitize_menu_nodes(n.get("items", []), parent_label=label)
         cleaned.append(new_node)

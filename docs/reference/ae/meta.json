@@ -76,6 +76,7 @@
     "menuSubmenus": 94,
     "menuItems": 867,
     "preferenceSections": 128,
-    "preferenceKeys": 975
+    "preferenceKeys": 975,
+    "menuItemsWithCommandId": 863
   }
 }

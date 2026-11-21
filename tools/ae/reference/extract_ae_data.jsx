@@ -319,7 +319,7 @@
                         children.push(dumpProperty(child, depth + 1, isEffectTree));
                     }
                 } catch (e) {
-                    children.push({ error: "" + e });
+                    children.push({ unavailable: "property_read_error" });
                 }
             }
             node.properties = children;
@@ -353,7 +353,7 @@
                     info.properties.push(dumpProperty(p, 1, false));
                 }
             } catch (e) {
-                info.properties.push({ error: "" + e });
+                info.properties.push({ unavailable: "property_read_error" });
             }
         }
         return info;
@@ -381,14 +381,14 @@
     function safeAdd(group, matchName, addedLog, failedLog) {
         try {
             if (group.canAddProperty && !group.canAddProperty(matchName)) {
-                failedLog.push({ matchName: matchName, error: "canAddProperty returned false" });
+                failedLog.push({ matchName: matchName, unavailable: "cannot_add" });
                 return null;
             }
             var p = group.addProperty(matchName);
             addedLog.push(matchName);
             return p;
         } catch (e) {
-            failedLog.push({ matchName: matchName, error: "" + e });
+            failedLog.push({ matchName: matchName, unavailable: "add_failed" });
             return null;
         }
     }
@@ -760,7 +760,7 @@
                     displayName: ef.displayName,
                     matchName: ef.matchName,
                     category: ef.category,
-                    reason: "skipped via BAE_AE_SKIP_EFFECTS"
+                    unavailable: "skipped_modal_or_unsupported"
                 };
                 effectsSkipped.push(skSkip);
                 appendLine("effects_skipped_partial.jsonl", toJson(skSkip));
@@ -781,7 +781,7 @@
                         displayName: ef.displayName,
                         matchName: ef.matchName,
                         category: ef.category,
-                        reason: "canAddProperty returned false on solid layer"
+                        unavailable: "cannot_apply"
                     };
                     effectsSkipped.push(skNoAdd);
                     appendLine("effects_skipped_partial.jsonl", toJson(skNoAdd));
@@ -806,7 +806,7 @@
                     displayName: ef.displayName,
                     matchName: ef.matchName,
                     category: ef.category,
-                    reason: "" + e
+                    unavailable: "apply_error"
                 };
                 effectsSkipped.push(skErr);
                 appendLine("effects_skipped_partial.jsonl", toJson(skErr));
