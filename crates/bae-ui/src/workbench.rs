@@ -115,6 +115,8 @@ pub struct Workbench {
     keymaps: Arc<Registry<Keymap>>,
     keymap_extensions: Arc<Registry<KeymapBindings>>,
     actions: Arc<Registry<ActionInfo>>,
+    /// Names of command variants (`motion.step` by frames, `layer.create` by kind).
+    variants: Arc<Registry<crate::action::CommandVariant>>,
     /// Module action handlers, tried after the focused panel.
     handlers: Arc<Registry<dyn ActionHandler>>,
     handlers_gen: u64,
@@ -148,6 +150,16 @@ impl Workbench {
         )
         .with_keymap_extensions(app.registry::<KeymapBindings>())
         .with_action_handlers(app.registry::<dyn ActionHandler>())
+        .with_command_variants(app.registry::<crate::action::CommandVariant>())
+    }
+
+    /// Names of command variants (`Registry<CommandVariant>`) for the shortcut editor.
+    pub fn with_command_variants(
+        mut self,
+        variants: Arc<Registry<crate::action::CommandVariant>>,
+    ) -> Self {
+        self.variants = variants;
+        self
     }
 
     /// Module action handlers (`Registry<dyn ActionHandler>`), tried after the
@@ -205,6 +217,7 @@ impl Workbench {
             keymaps,
             keymap_extensions: Arc::new(Registry::new()),
             actions,
+            variants: Arc::new(Registry::new()),
             handlers: Arc::new(Registry::new()),
             handlers_gen: u64::MAX,
             handler_conflicts: Vec::new(),

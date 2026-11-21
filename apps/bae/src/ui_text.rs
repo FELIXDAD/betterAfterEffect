@@ -13,7 +13,9 @@ use std::sync::Arc;
 
 use bae_app::App;
 use bae_ui::i18n;
-use bae_ui::{ActionInfo, Keymap, MenuItemSpec, PanelKind, WorkbenchState, WorkspacePreset};
+use bae_ui::{
+    ActionInfo, CommandVariant, Keymap, MenuItemSpec, PanelKind, WorkbenchState, WorkspacePreset,
+};
 use egui::epaint::text::{FontDefinitions, FontFamily};
 use skrifa::MetadataProvider as _;
 
@@ -65,6 +67,12 @@ fn names(a: &Assembled) -> BTreeMap<String, String> {
     if let Some(r) = a.app.get_registry::<Keymap>() {
         for e in r.snapshot().iter() {
             out.insert(format!("keymap {}", e.id()), e.item().title.clone());
+        }
+    }
+    // Variant names: shortcut rows, and undo / History labels of model commands.
+    if let Some(r) = a.app.get_registry::<CommandVariant>() {
+        for e in r.snapshot().iter() {
+            out.insert(format!("variant {}", e.id()), e.item().title.clone());
         }
     }
     if let Some(r) = a.app.get_registry::<MenuItemSpec>() {
@@ -132,6 +140,52 @@ fn every_command_panel_and_action_has_a_chinese_name() {
         "Chinese name equals the English:\n{}",
         untranslated.join("\n")
     );
+}
+
+/// A shortcut row's name in English or (from the tables, without switching the
+/// global language) Chinese, as the Keyboard Shortcuts window shows it.
+fn row_name(row: &crate::ui::ShortcutRow, zh: bool) -> String {
+    let t = |s: &str| {
+        if zh {
+            i18n::translation(s).unwrap_or(s).to_owned()
+        } else {
+            s.to_owned()
+        }
+    };
+    match &row.arg {
+        Some(arg) => format!("{}: {}", t(&row.title), t(arg)),
+        None => t(&row.title),
+    }
+}
+
+/// #140: every row of the Keyboard Shortcuts window (every bindable command and
+/// variant) has its own name, in English and in Chinese: no four "Next Frame" rows
+/// for PageUp / PageDown / Shift+PageUp / Shift+PageDown.
+#[test]
+fn every_shortcut_row_has_a_unique_name() {
+    let a = assemble();
+    let rows = a.workspace.shortcut_rows();
+    assert!(rows.len() > 50, "only {} rows", rows.len());
+    for zh in [false, true] {
+        let mut by_name: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for row in &rows {
+            by_name
+                .entry(row_name(row, zh))
+                .or_default()
+                .push(format!("{} {}", row.id, row.params));
+        }
+        let duplicates: Vec<String> = by_name
+            .into_iter()
+            .filter(|(_, rows)| rows.len() > 1)
+            .map(|(name, rows)| format!("{name:?}: {}", rows.join(", ")))
+            .collect();
+        let lang = if zh { "Chinese" } else { "English" };
+        assert!(
+            duplicates.is_empty(),
+            "{lang} shortcut rows share a name (register a CommandVariant):\n{}",
+            duplicates.join("\n")
+        );
+    }
 }
 
 /// CJK text is drawn with the system CJK font (PingFang, Microsoft YaHei), which BAE

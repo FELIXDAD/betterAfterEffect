@@ -27,6 +27,61 @@ pub struct ActionInfo {
     pub panel: Option<String>,
 }
 
+/// The name of one variant of a command (a UI action or a model command): the
+/// parameters that tell it apart and its English title, e.g. `motion.step` with
+/// `{"frames": -10}` is "Back 10 Frames", `layer.create` with `{"kind": "solid"}` is
+/// "New Solid". Registered in `bae_app::Registry<CommandVariant>`. The Keyboard
+/// Shortcuts window lists variants by these names, and the shell labels Edit > Undo /
+/// Redo and History with them (#140).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommandVariant {
+    pub command: String,
+    /// The variant matches when every key here has the same value in the
+    /// invocation's parameters (other keys are ignored).
+    pub params: serde_json::Value,
+    /// English title, displayed through [`crate::i18n::tr`].
+    pub title: String,
+}
+
+impl CommandVariant {
+    pub fn new(
+        command: impl Into<String>,
+        params: serde_json::Value,
+        title: impl Into<String>,
+    ) -> Self {
+        CommandVariant {
+            command: command.into(),
+            params,
+            title: title.into(),
+        }
+    }
+
+    /// Number of parameters matched, or `None` when the variant does not apply.
+    fn matches(&self, command: &str, params: &serde_json::Value) -> Option<usize> {
+        if self.command != command {
+            return None;
+        }
+        let wanted = self.params.as_object()?;
+        wanted
+            .iter()
+            .all(|(k, v)| params.get(k) == Some(v))
+            .then_some(wanted.len())
+    }
+}
+
+/// Title of the most specific variant of `command` matching `params`.
+pub fn variant_title<'a>(
+    variants: impl IntoIterator<Item = &'a CommandVariant>,
+    command: &str,
+    params: &serde_json::Value,
+) -> Option<&'a str> {
+    variants
+        .into_iter()
+        .filter_map(|v| v.matches(command, params).map(|n| (n, v)))
+        .max_by_key(|(n, _)| *n)
+        .map(|(_, v)| v.title.as_str())
+}
+
 impl ActionInfo {
     pub fn new(title: impl Into<String>) -> Self {
         ActionInfo {

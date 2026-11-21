@@ -696,9 +696,10 @@ fn english_words(zh: &str) -> Option<String> {
         .then(|| zh.to_owned())
 }
 
-/// #136: with `BAE_LANG=zh`, Edit > Undo, the History panel and the Keyboard
+/// #136 / #140: with `BAE_LANG=zh`, Edit > Undo, the History panel and the Keyboard
 /// Shortcuts window showed English command names ("撤消 New Layer") and raw panel
-/// ids ("打开面板: character").
+/// ids ("打开面板: character"); variants of one command (PageUp / PageDown /
+/// Shift+PageUp, Cmd+[ / Cmd+], Alt+Shift+P / S …) shared one name.
 #[test]
 fn chinese_ui_names_every_command_and_panel() {
     if !in_child(
@@ -714,7 +715,7 @@ fn chinese_ui_names_every_command_and_panel() {
     let (undo, redo) = h.state().doc.undo_state();
     assert_eq!(
         crate::shell::undo_redo_text("Undo", undo.as_deref()),
-        "撤消 新建图层"
+        "撤消 新建纯色"
     );
     assert_eq!(
         crate::shell::undo_redo_text("Redo", redo.as_deref()),
@@ -732,7 +733,7 @@ fn chinese_ui_names_every_command_and_panel() {
         .iter()
         .map(|e| bae_ui::tr(&e.label).to_owned())
         .collect();
-    assert!(history.iter().any(|l| l == "新建图层"), "{history:?}");
+    assert!(history.iter().any(|l| l == "新建纯色"), "{history:?}");
     let english: Vec<String> = history.iter().filter_map(|l| english_words(l)).collect();
     assert!(english.is_empty(), "History shows English: {english:?}");
 
@@ -745,6 +746,47 @@ fn chinese_ui_names_every_command_and_panel() {
         english.is_empty(),
         "Keyboard Shortcuts shows English: {english:#?}"
     );
+    let shown = |id: &str, params: serde_json::Value| {
+        rows.iter()
+            .find(|r| r.id == id && r.params == params)
+            .map(|r| r.shown.clone())
+            .unwrap_or_else(|| panic!("no shortcut row {id} {params}"))
+    };
+    for (frames, zh) in [
+        (-1, "上一帧"),
+        (1, "下一帧"),
+        (-10, "后退 10 帧"),
+        (10, "前进 10 帧"),
+    ] {
+        assert_eq!(
+            shown("motion.step", serde_json::json!({ "frames": frames })),
+            zh
+        );
+    }
+    for (to, zh) in [
+        ("forward", "前移一层"),
+        ("backward", "后移一层"),
+        ("front", "置于顶层"),
+        ("back", "置于底层"),
+    ] {
+        assert_eq!(shown("motion.order", serde_json::json!({ "to": to })), zh);
+    }
+    assert_eq!(
+        shown(
+            "motion.toggle_key",
+            serde_json::json!({ "attr": "transform:position" })
+        ),
+        "位置：添加或移除关键帧"
+    );
+    assert_eq!(
+        shown("motion.new_layer", serde_json::json!({ "kind": "solid" })),
+        "新建纯色"
+    );
+    let mut names: Vec<&str> = rows.iter().map(|r| r.shown.as_str()).collect();
+    names.sort_unstable();
+    let total = names.len();
+    names.dedup();
+    assert_eq!(names.len(), total, "shortcut rows share a name");
     for (id, zh) in [
         ("character", "字符"),
         ("paragraph", "段落"),

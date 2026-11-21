@@ -116,6 +116,12 @@ impl AppModule for MotionUiModule {
             }
         });
         let _ = app.register::<KeymapBindings>("motion", actions::bindings());
+        let variants = app.registry::<bae_ui::CommandVariant>();
+        variants.batch(|tx| {
+            for (id, variant) in actions::variants() {
+                let _ = tx.register(owner.clone(), id, variant);
+            }
+        });
         // Menus and the global handler: AE shortcuts and menu items work whichever
         // panel has focus.
         let handler: std::sync::Arc<dyn ActionHandler> = std::sync::Arc::new(menus::MotionActions);

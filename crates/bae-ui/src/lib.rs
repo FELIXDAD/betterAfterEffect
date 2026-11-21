@@ -36,7 +36,7 @@ pub mod workspace;
 use bae_app::{AppBuilder, AppModule};
 
 pub use a11y::Accessible;
-pub use action::{ActionHandler, ActionInfo, Invocation};
+pub use action::{ActionHandler, ActionInfo, CommandVariant, Invocation};
 pub use dock::{Dock, DropZone, Frame, FrameId, Layout, Node, PanelHost, PanelId, TabInfo};
 pub use i18n::{Lang, tr};
 pub use icons::Icon;

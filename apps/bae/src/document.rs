@@ -43,6 +43,9 @@ pub struct Document {
     /// Sublayer versions when the project was last opened or saved.
     saved: SavePoint,
     history: Option<Arc<HistoryLog>>,
+    /// Names of command variants ("New Solid" for `layer.create` with a solid), which
+    /// label undo steps and History entries (#140).
+    variants: Option<Arc<bae_app::Registry<bae_ui::CommandVariant>>>,
 }
 
 /// What [`Document::run`] did with an invocation.
@@ -91,6 +94,7 @@ impl Document {
             },
             author: local_author(),
             history,
+            variants: None,
         };
         doc.watch_history();
         doc
@@ -99,6 +103,7 @@ impl Document {
     /// Add the commands app modules published in `Registry<dyn DynCommand>` (domain
     /// command crates such as `bae-motion`). Built-in ids are kept.
     pub fn add_module_commands(&mut self, app: &bae_app::App) {
+        self.variants = app.get_registry::<bae_ui::CommandVariant>();
         let Some(registry) = app.get_registry::<dyn bae_model::DynCommand>() else {
             return;
         };
@@ -205,17 +210,29 @@ impl Document {
                 stage.redo(&self.author).is_some()
             }
             id => {
-                let Some(cmd) = self.commands.get(id) else {
+                let Some(cmd) = self.commands.get(id).cloned() else {
                     return Outcome::Unknown;
                 };
-                label(Some(&cmd.info().title));
                 let params = if inv.params.is_null() {
                     serde_json::json!({})
                 } else {
                     inv.params.clone()
                 };
-                match self.commands.execute(stage, &self.author, id, params) {
-                    Ok(out) => !out.event.is_empty(),
+                // The variant's name ("New Solid") when one matches, else the title.
+                // It becomes the undo label (Edit > Undo) and the History entry.
+                let variants = self.variants.as_ref().map(|r| r.snapshot());
+                let text = variants
+                    .as_ref()
+                    .and_then(|v| {
+                        bae_ui::action::variant_title(v.iter().map(|e| &**e.item()), id, &params)
+                    })
+                    .unwrap_or(&cmd.info().title)
+                    .to_owned();
+                label(Some(&text));
+                // `CommandRegistry::execute` with our label (same transaction, same
+                // lock and write checks inside `Stage::transact`).
+                match stage.transact(&self.author, &text, |tx| cmd.run_json(tx, params)) {
+                    Ok((_, event)) => !event.is_empty(),
                     Err(error) => return Outcome::Failed(error),
                 }
             }
