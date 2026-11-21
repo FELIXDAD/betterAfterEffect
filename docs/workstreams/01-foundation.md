@@ -57,6 +57,8 @@
 - [x] 工程文件（分支 `app/project-files`，2026-11-21，0.0.1 硬阻塞）：文件菜单接到模型——新建项目（Cmd/Ctrl+Alt+N）、打开项目（Cmd/Ctrl+O，`.bae` 目录 / `.baez` 文件，经 `bae_package::open_project`）、关闭项目、保存（Cmd/Ctrl+S）、另存为（Cmd/Ctrl+Shift+S）；原生对话框用 rfd（只在 macOS / Windows 依赖，关掉 Linux 后端），放在 `files::FileDialogs` trait 后面；未保存修改由工程层版本向量推出，标题加 ` *`，关闭 / 新建 / 打开 / 退出前问 保存 / 不保存 / 取消；`bae <工程>` 和 `bae --headless [--smoke-test N] <工程>` 启动时打开工程。说明见 `docs/spec/app-shell.md`「工程文件」。
   - 已知限制：macOS 从程序坞退出、系统注销关机时 winit 0.30 不给拦截的机会，不会提示未保存的修改；第二个实例 `bae <工程>` 仍然只提示已在运行（转给已运行实例是后续工作）；Windows 的打开对话框选不了目录，`.bae` 工程要选里面的 `project.json`。
 
+- [x] 关键帧保存核查（分支 `app/project-files-fix`，2026-11-21，#97 的疑点）：保存 / 序列化没有丢数据——#97 存盘前截图里第 3 帧的关键帧导航器是灰的、右箭头不可用，内存里本来就只有 1 个关键帧，第二次 Alt+Shift+P 没生效。加了往返回归测试（`apps/bae/src/save_roundtrip.rs`：.bae / .baez、另存为、Cmd/Ctrl+S、同值和不同值、相隔 3 帧、export-json、演示工程全量对比、无窗口驱动真实动效界面按键），并修了一个会丢最后一次输入的顺序问题（`files::CommitGate`，见 `docs/spec/app-shell.md`「工程文件」）。
+
 后续（不阻塞合并）：
 
 - 浮动面板的原生多窗口（每个 egui 视口一个 winit 窗口和 surface，共用同一设备）；目前用 `set_embed_viewports(true)` 画在主窗口内。

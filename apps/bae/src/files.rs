@@ -86,6 +86,83 @@ pub fn is_file_command(id: &str) -> bool {
     )
 }
 
+/// Commands that must see every edit made before them: the file commands (a
+/// save must contain the value just typed) and Quit (the unsaved-changes question
+/// must know about it).
+pub fn waits_for_edits(id: &str) -> bool {
+    is_file_command(id) || id == ids::QUIT
+}
+
+/// Holds file commands and Quit back until the edits before them are in the
+/// project.
+///
+/// Two orderings would otherwise lose the last edit (the timeline shows it, the
+/// saved file does not):
+///
+/// * In one UI frame, shortcuts are read before the panels draw, so typing a
+///   value, Enter and Cmd/Ctrl+S in quick succession yields `[file.save,
+///   attr.set_at]`. The gate runs the batch's other commands first. (macOS menu
+///   clicks and key equivalents are queued behind the last frame's edits too.)
+/// * Cmd/Ctrl+S while a value field is still being edited: the field commits
+///   only when it loses focus (Enter or a click elsewhere, AE's rule). The shell
+///   then ends the edit ([`Admitted::stop_editing`]), draws one more frame — in
+///   which the field commits — and only then runs the held commands.
+#[derive(Debug, Default)]
+pub struct CommitGate {
+    held: Vec<Invocation>,
+    /// UI pass counter value when the shell was asked to end the edit; the held
+    /// commands run after a later pass.
+    after_pass: Option<u64>,
+}
+
+/// What [`CommitGate::admit`] lets through.
+#[derive(Debug, Default, PartialEq)]
+pub struct Admitted {
+    /// Run these now, in order.
+    pub run: Vec<Invocation>,
+    /// End the text edit in progress and draw another frame.
+    pub stop_editing: bool,
+}
+
+impl CommitGate {
+    /// Take a batch of invocations collected since the last call. `editing`: a
+    /// widget has keyboard focus (a value is being typed); `pass`: how many UI
+    /// frames have run so far.
+    pub fn admit(&mut self, batch: Vec<Invocation>, editing: bool, pass: u64) -> Admitted {
+        let (held, mut run): (Vec<_>, Vec<_>) =
+            batch.into_iter().partition(|inv| waits_for_edits(&inv.id));
+        self.held.extend(held);
+        let mut stop_editing = false;
+        if !self.held.is_empty() {
+            match self.after_pass {
+                // The frame that commits the edit has not run yet.
+                Some(asked) if pass <= asked => {}
+                None if editing => {
+                    self.after_pass = Some(pass);
+                    stop_editing = true;
+                }
+                _ => {
+                    self.after_pass = None;
+                    run.append(&mut self.held);
+                }
+            }
+        }
+        Admitted { run, stop_editing }
+    }
+
+    /// Commands are held for a frame.
+    pub fn is_waiting(&self) -> bool {
+        !self.held.is_empty()
+    }
+
+    /// Let the held commands go without waiting for the frame (the window did
+    /// not redraw in time, e.g. while minimized).
+    pub fn release(&mut self) -> Vec<Invocation> {
+        self.after_pass = None;
+        std::mem::take(&mut self.held)
+    }
+}
+
 /// Run a file command (see [`is_file_command`]); `None` for other ids.
 /// `file.open_project` opens `{"path": …}` without a dialog when given.
 pub fn run(

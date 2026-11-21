@@ -39,7 +39,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::window::{Window, WindowId};
 
 use crate::document::{Document, Outcome};
-use crate::files::{self, FileDialogs, FileOutcome, NoDialogs};
+use crate::files::{self, CommitGate, FileDialogs, FileOutcome, NoDialogs};
 use crate::ui::{self, PlaceholderViewer, StatusInfo, UiOutput, UiRenderer, Workspace};
 use bae_ui::Invocation;
 use bae_ui::action::ids;
@@ -112,6 +112,9 @@ enum UserEvent {
 const SMOKE_STALL_TIMEOUT: Duration = Duration::from_secs(20);
 /// Live-resize mode ends this long after the last `Resized` event.
 const LIVE_RESIZE_SETTLE: Duration = Duration::from_millis(250);
+/// How long file commands wait for the frame that commits a value being typed
+/// before they run anyway (a window that does not redraw, e.g. minimized).
+const COMMIT_WAIT: Duration = Duration::from_millis(300);
 /// How often device recovery is attempted before giving up.
 const MAX_DEVICE_RECOVERIES: u32 = 3;
 
@@ -224,6 +227,9 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         repaint_at: None,
         last_resize: None,
         recoveries: 0,
+        gate: CommitGate::default(),
+        gate_deadline: None,
+        ui_passes: 0,
         exit_code: ExitCode::SUCCESS,
     };
     if let Err(error) = event_loop.run_app(&mut shell) {
@@ -277,6 +283,12 @@ struct Shell {
     /// Time of the last `Resized` event while live-resize mode is on.
     last_resize: Option<Instant>,
     recoveries: u32,
+    /// Holds file commands and Quit until the edits before them are committed.
+    gate: CommitGate,
+    /// When held commands run even without the committing frame.
+    gate_deadline: Option<Instant>,
+    /// UI frames run so far (egui passes, presented or not).
+    ui_passes: u64,
     exit_code: ExitCode,
 }
 
@@ -493,6 +505,38 @@ impl Shell {
         }
     }
 
+    /// Runs the invocations collected since the last call: edits first, file
+    /// commands and Quit after them — and, while a value is being typed, only
+    /// after the frame in which ending the edit commits it ([`CommitGate`]).
+    fn run_pending(&mut self, event_loop: &ActiveEventLoop) {
+        let batch = std::mem::take(&mut self.pending);
+        let editing = self
+            .view
+            .as_ref()
+            .is_some_and(|v| v.egui_ctx.egui_wants_keyboard_input());
+        let mut admitted = self.gate.admit(batch, editing, self.ui_passes);
+        if admitted.stop_editing {
+            if let Some(view) = &self.view {
+                // Fields commit when they lose focus (Enter or a click elsewhere).
+                view.egui_ctx.memory_mut(|m| m.stop_text_input());
+            }
+            self.gate_deadline = Instant::now().checked_add(COMMIT_WAIT);
+        }
+        if self.gate.is_waiting() {
+            if self.gate_deadline.is_none_or(|at| Instant::now() >= at) {
+                admitted.run.extend(self.gate.release());
+            } else {
+                self.request_redraw();
+            }
+        }
+        if !self.gate.is_waiting() {
+            self.gate_deadline = None;
+        }
+        for inv in admitted.run {
+            self.dispatch(event_loop, inv);
+        }
+    }
+
     /// The dialogs file commands use: native ones owned by the window, none in
     /// smoke tests (they must never block).
     fn dialogs(&self) -> Box<dyn FileDialogs> {
@@ -605,6 +649,7 @@ impl Shell {
         let output = view.egui_ctx.run_ui(input, |ui| {
             invocations = workspace.ui(ui, status, document, resources);
         });
+        self.ui_passes += 1;
         if let Some(menu) = &mut self.menu {
             let cx = bae_ui::menu::MenuContext {
                 stage: document.stage(),
@@ -876,16 +921,16 @@ impl ApplicationHandler<UserEvent> for Shell {
                     .as_ref()
                     .and_then(|m| m.contributed_invocation(id))
                     .unwrap_or_else(|| menu::invocation(id));
-                self.dispatch(event_loop, inv);
+                // Queued behind the edits the last frame produced (about_to_wait
+                // runs them in order), not ahead of them.
+                self.pending.push(inv);
             }
             UserEvent::DeviceLost => self.recover_device(event_loop),
         }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        for inv in std::mem::take(&mut self.pending) {
-            self.dispatch(event_loop, inv);
-        }
+        self.run_pending(event_loop);
         // Every project change goes through the dispatch above.
         self.sync_window_title();
         if let Some(smoke) = &self.smoke {
@@ -917,6 +962,9 @@ impl ApplicationHandler<UserEvent> for Shell {
             } else {
                 deadline = Some(settle);
             }
+        }
+        if let Some(at) = self.gate_deadline {
+            deadline = Some(deadline.map_or(at, |d| d.min(at)));
         }
         if let Some(at) = self.repaint_at {
             if at <= now {
