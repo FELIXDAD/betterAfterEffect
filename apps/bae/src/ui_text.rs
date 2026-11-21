@@ -212,11 +212,10 @@ fn ui_source_literals() -> Vec<(String, String)> {
                 while let Some(start) = rest.find('"') {
                     let after = &rest[start + 1..];
                     let Some(end) = after.find('"') else { break };
+                    // `/` on every platform: the keymap allowance below matches on it.
                     let rel = path.strip_prefix(&root).unwrap_or(&path);
-                    out.push((
-                        format!("{}:{}", rel.display(), n + 1),
-                        after[..end].to_owned(),
-                    ));
+                    let rel = rel.to_string_lossy().replace('\\', "/");
+                    out.push((format!("{rel}:{}", n + 1), after[..end].to_owned()));
                     rest = &after[end + 1..];
                 }
             }
