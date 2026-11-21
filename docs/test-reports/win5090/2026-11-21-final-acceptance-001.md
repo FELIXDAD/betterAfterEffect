@@ -8,15 +8,15 @@
 - 规则：只测试，不改代码；测量时持 `gui.lock`
 - 截图：[`final-acceptance-shots/`](./final-acceptance-shots/)、[`kf2-shots/`](./kf2-shots/)；本机补充 `E:\bae-test\acc\final624-shots\`；机器 JSON：[`final-acceptance-timings.json`](./final-acceptance-timings.json)
 
-## 总表（293561a 更新 C）
+## 总表（5819881 更新 C）
 
 | 项 | 结果 | 一句话 |
 |---|---|---|
 | **A 速度对比** | **通过** | 沿用 a775f2c 同机结论：BAE PNG **2.008 s** / TIFF **2.006 s** vs AE **22.017** / **18.515**（~11× / ~9×；清缓存后 PNG ~14×） |
 | **B 保存 / 打开** | **部分** | 「保存丢关键帧」已撤回（IME）。@624a136：`kfA.bae`/`kfB.bae`/`kfA.baez` 可另存；`bae.exe kfA.bae` 标题正确；`BAE_LANG=zh` 菜单与「是/否/取消」「关闭前是否保存…」为中文；Esc 取消后主窗 `IsWindowEnabled`；**秒表/◆ 自动化仍未稳定打出 2 个可读回关键帧**（export-json 无 `keyframes`）——阻塞完整往返 |
-| **C 渲染队列** | **部分（6/7 通过，1 个 Windows 空格路径缺陷）** | 见 [`2026-11-21-final-acceptance-c-keyboard.md`](./2026-11-21-final-acceptance-c-keyboard.md)（@`293561a`）：#102 按键路由生效，PNG（**0.9 s** / 90 帧、首尾矩形位移正确）/ 不压缩 TIFF（`Tab+Space`，**0.8 s** / 90 帧 / 8,294,698 B）/ OpenEXR（**0.9 s** / 90 帧）全部实渲通过，含空格路径与图层改名 `"my layer"` 空格不误播且离焦可播，中途 `Tab+Enter` 停止生效并清理临时帧；**唯步骤 6「Show in Explorer」遇含空格路径会退回打开「文档」（无空格路径正常），系 `render_queue.rs:506` 单参数 `/select,<path>` 加引号导致** |
+| **C 渲染队列** | **通过** | 见 [`2026-11-21-final-acceptance-c-keyboard.md`](./2026-11-21-final-acceptance-c-keyboard.md)（@`293561a`）与 [`2026-11-21-final-acceptance-c-fixes.md`](./2026-11-21-final-acceptance-c-fixes.md)（@`5819881`，含 #103）：PNG / 不压缩 TIFF / OpenEXR 实渲与 #102 按键路由全通；**#103 三项修复复测 3/3 通过**——含空格（`E:\bae-test\rq final\png\`）与无空格（`E:\bae-test\rq_nospace\`）路径「在资源管理器中显示」均打开目标目录并选中 `Comp1_0000.png`；项目面板持停靠焦点时 `Tab` 到 `Stop` 按 `Enter` 不再触发改名；长范围（10,001 帧）中途停止后状态显示 `Stopped (9078/10001 frames)` 且磁盘实留 **9,078** 个完整 PNG（`N` 与磁盘一致） |
 
-**结论（给发布）：A 全绿；C 核心实渲与 #102 按键路由在 `293561a` 上 6/7 闭环通过，唯 Windows「在资源管理器中显示」需修复含空格路径的 `/select,` 参数传递（`render_queue.rs:506`）；B 关键帧 GUI 自动化仍待补齐。**
+**结论（给发布）：A、C 全绿（C 在 `5819881` 上完成 #103 三项修复复测，全项闭环通过）；B 关键帧 GUI 自动化仍待补齐。**
 
 ---
 
