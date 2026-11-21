@@ -12,7 +12,7 @@ publish.workspace = true
 default = []
 # GPU drawing: Vello glyph encoding and the text layer source for bae-render.
 # Layout, fonts and bounds work without it.
-render = ["bae-vector/render", "dep:vello", "dep:bae-render", "dep:bae-gpu", "dep:parking_lot"]
+render = ["bae-vector/render", "dep:vello", "dep:vello_cpu", "dep:bae-render", "dep:bae-gpu", "dep:parking_lot"]
 
 [dependencies]
 bae-model.workspace = true
@@ -28,6 +28,7 @@ bae-gpu = { workspace = true, optional = true }
 bae-render = { workspace = true, optional = true }
 parking_lot = { workspace = true, optional = true }
 vello = { workspace = true, optional = true }
+vello_cpu = { workspace = true, optional = true }
 
 [dev-dependencies]
 # GPU tests always run with the `render` feature (`cargo test -p bae-text`).

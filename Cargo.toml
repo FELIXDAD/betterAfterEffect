@@ -79,6 +79,9 @@ wgpu = { version = "30.0.2", default-features = false, features = ["std", "parki
 wgpu-hal = { version = "30.0.2", default-features = false }
 wgpu-types = { version = "30.0.2", default-features = false, features = ["std"] }
 vello = { version = "0.12.0", default-features = false, features = ["wgpu"] }
+# Software fallback for vector/text rasterization on CPU adapters (WARP), 05.
+# Same version egui's epaint already links; only the u8 pipeline.
+vello_cpu = { version = "0.1.0", default-features = false, features = ["std", "u8_pipeline"] }
 peniko = "0.6.1"
 kurbo = "0.13.1"
 parley = { version = "0.13.0", default-features = false, features = ["std", "system"] }
