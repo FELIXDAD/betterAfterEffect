@@ -721,3 +721,154 @@ fn the_file_extension_matches_the_format() {
         );
     }
 }
+
+// ---- Retest of #110 (dev c20770a): edge cases ----
+
+#[test]
+fn chinese_folders_get_the_comp_name_inside() {
+    let Some(mut h) = gpu_gui() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    // A comp name with characters a file name cannot hold.
+    let comp = h.state().active_comp().unwrap();
+    h.state_mut().invoke(Invocation::with_params(
+        "attr.set",
+        json!({"path": comp, "attr": "name", "value": {"type": "string", "value": "片头/镜头:01"}}),
+    ));
+    settle(&mut h);
+    let existing = tmp.path().join("已有 输出 文件夹");
+    fs::create_dir(&existing).unwrap();
+    let cases = [
+        ("existing folder", existing.clone(), existing.clone()),
+        (
+            "new folder with a slash",
+            PathBuf::from(format!("{}/新的 文件夹/", tmp.path().display())),
+            tmp.path().join("新的 文件夹"),
+        ),
+    ];
+    for (label, out, dir) in cases {
+        let i = queue_one(&mut h, ExportFormat::Png, &out, 0, 2);
+        render_watching_totals(&mut h, i);
+        let status = items(&h)[i].status.clone();
+        let files = files_in(&dir, "png");
+        println!("{label}: {status:?} {files:?}");
+        assert!(
+            matches!(status, ItemStatus::Done { files: 3, .. }),
+            "{label}: {status:?}"
+        );
+        assert_eq!(files.len(), 3, "{label}: {files:?}");
+        assert!(
+            files[0].starts_with("片头_镜头_01_"),
+            "{label}: name {:?}",
+            files[0]
+        );
+    }
+}
+
+#[test]
+fn switching_formats_back_and_forth_keeps_the_name_and_fixes_the_extension() {
+    let Some(mut h) = gpu_gui() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let i = queue_one(
+        &mut h,
+        ExportFormat::Png,
+        &tmp.path().join("镜头 01_[####].png"),
+        0,
+        1,
+    );
+    let queue = h.state().render_queue();
+    let output_after = |f: ExportFormat| {
+        let mut q = queue.lock();
+        let id = q.items()[i].id;
+        let item = q.item_mut(id).unwrap();
+        item.set_format(f);
+        item.output.clone()
+    };
+    for (f, ext) in [
+        (ExportFormat::Tiff, "tif"),
+        (ExportFormat::Exr, "exr"),
+        (ExportFormat::Png, "png"),
+        (ExportFormat::Exr, "exr"),
+    ] {
+        let out = output_after(f);
+        assert!(
+            out.ends_with(&format!("镜头 01_[####].{ext}")),
+            "{f:?}: {out}"
+        );
+    }
+    render_watching_totals(&mut h, i);
+    let files = files_in(tmp.path(), "exr");
+    assert_eq!(files, ["镜头 01_0000.exr", "镜头 01_0001.exr"]);
+    let magic = fs::read(tmp.path().join(&files[0])).unwrap();
+    assert!(
+        magic.starts_with(&[0x76, 0x2f, 0x31, 0x01]),
+        "not an EXR file"
+    );
+    // A typed extension that does not match: the panel says what will happen,
+    // and the file gets the format's extension.
+    let j = queue_one(
+        &mut h,
+        ExportFormat::Tiff,
+        &tmp.path().join("手写_[####].png"),
+        0,
+        0,
+    );
+    settle(&mut h);
+    assert!(
+        find_text(&h, "The file will be saved as .tif to match the format.").is_some(),
+        "no hint for the mismatched extension"
+    );
+    render_watching_totals(&mut h, j);
+    assert_eq!(files_in(tmp.path(), "tif"), ["手写_0000.tif"]);
+    assert!(files_in(tmp.path(), "png").is_empty());
+}
+
+#[test]
+fn typed_frame_numbers_stay_inside_the_comp() {
+    let Some(mut h) = gpu_gui() else { return };
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    key(&mut h, Modifiers::COMMAND, Key::M);
+    // The start and end fields: the Render Queue's two spin buttons (the first
+    // two in the tree; the Properties panel has more further on).
+    let fields = |h: &Ui| -> Vec<(Rect, String)> {
+        h.root()
+            .query_all_by_role(egui::accesskit::Role::SpinButton)
+            .map(|n| (n.rect(), n.value().unwrap_or_default()))
+            .take(2)
+            .collect()
+    };
+    let f = fields(&h);
+    assert_eq!(
+        f.iter().map(|(_, v)| v.as_str()).collect::<Vec<_>>(),
+        ["0", "299"],
+        "{f:?}"
+    );
+    let type_into = |h: &mut Ui, at: Pos2, text: &str| {
+        pause(h);
+        click_at(h, at);
+        press(h, Modifiers::COMMAND, Key::A);
+        send(h, Event::Text(text.to_owned()));
+        key(h, Modifiers::NONE, Key::Enter);
+    };
+    type_into(&mut h, f[0].0.center(), "-25");
+    type_into(&mut h, f[1].0.center(), "99999");
+    let item = items(&h)[0].clone();
+    assert_eq!(
+        (item.start, item.end),
+        (0, 299),
+        "typed values not limited to the comp"
+    );
+    // Start after end: the end follows (or the start is limited to it).
+    type_into(&mut h, f[0].0.center(), "250");
+    let end_field = fields(&h)[1].0.center();
+    type_into(&mut h, end_field, "100");
+    let item = items(&h)[0].clone();
+    assert!(
+        item.start <= item.end,
+        "start {} after end {}",
+        item.start,
+        item.end
+    );
+    println!("start/end after 250 then 100: {}–{}", item.start, item.end);
+}

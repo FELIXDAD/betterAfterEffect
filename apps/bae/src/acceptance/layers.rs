@@ -5,6 +5,7 @@ use bae_motion::query;
 use egui::{Key, Modifiers};
 
 use super::*;
+use egui_kittest::kittest::Queryable as _;
 
 fn kind(h: &Ui, layer: &PrimPath) -> String {
     query::layer_kind(h.state().stage(), layer).unwrap_or_default()
@@ -510,4 +511,344 @@ fn cmd_shift_x_trims_the_comp_to_the_work_area() {
     );
     undo(&mut h);
     assert_eq!(duration(&h), before);
+}
+
+// ---- Retest of #124 (dev c20770a): locked layers, edge cases ----
+
+fn lock(h: &mut Ui, layer: &PrimPath) {
+    h.state_mut().invoke(Invocation::with_params(
+        "attr.set",
+        serde_json::json!({"path": layer, "attr": "locked", "value": {"type": "bool", "value": true}}),
+    ));
+    settle(h);
+}
+
+fn is_locked(h: &Ui, l: &PrimPath) -> bool {
+    bae_motion::query::is_locked(h.state().stage(), l)
+}
+
+/// The timeline row of layer `name`: its painted name.
+fn row_of(h: &Ui, name: &str) -> egui::Rect {
+    let head = find_text(h, "Layer Name").expect("timeline");
+    find_texts(h, |t| t == name)
+        .into_iter()
+        .find(|r| r.top() > head.bottom() && r.left() < head.left() + 400.0)
+        .unwrap_or_else(|| panic!("no row {name:?}"))
+}
+
+/// Clicks the Lock switch (accesskit name "Lock") on `name`'s timeline row.
+fn click_lock_switch(h: &mut Ui, name: &str) {
+    let row = row_of(h, name);
+    let switch = h
+        .root()
+        .query_all_by_label("Lock")
+        .map(|n| n.rect())
+        .find(|r| (r.center().y - row.center().y).abs() < 6.0)
+        .unwrap_or_else(|| panic!("no Lock switch on {name}'s row"));
+    click_at(h, switch.center());
+}
+
+fn position_keys(h: &Ui, l: &PrimPath) -> usize {
+    bae_motion::query::attr_spec(h.state().stage(), l, "transform:position")
+        .map_or(0, |a| a.keyframes.len())
+}
+
+#[test]
+fn lock_switch_with_undo_and_redo() {
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let l = h.state().layers()[0].clone();
+    // A keyframe before locking.
+    key(&mut h, Modifiers::ALT | Modifiers::SHIFT, Key::P);
+    assert_eq!(position_keys(&h, &l), 1);
+    click_lock_switch(&mut h, "Solid 1");
+    assert!(is_locked(&h, &l), "the Lock switch did not lock");
+    // Locked: Option+Shift+P does nothing, even with the layer forced into the selection.
+    h.state().session().lock().selected_layers = vec![l.clone()];
+    for _ in 0..5 {
+        press(&mut h, Modifiers::NONE, Key::PageDown);
+    }
+    key(&mut h, Modifiers::ALT | Modifiers::SHIFT, Key::P);
+    assert_eq!(
+        position_keys(&h, &l),
+        1,
+        "a keyframe was added to a locked layer"
+    );
+    // Undo unlocks (the lock was the last step); the layer is editable again.
+    key(&mut h, Modifiers::COMMAND, Key::Z);
+    assert!(!is_locked(&h, &l), "undo did not unlock");
+    h.state().session().lock().selected_layers = vec![l.clone()];
+    key(&mut h, Modifiers::ALT | Modifiers::SHIFT, Key::P);
+    assert_eq!(position_keys(&h, &l), 2, "unlocked layer not editable");
+    // Undo that keyframe and the first one: undo goes through the history even
+    // across a lock; redo the lock again.
+    key(&mut h, Modifiers::COMMAND, Key::Z);
+    assert_eq!(position_keys(&h, &l), 1);
+    click_lock_switch(&mut h, "Solid 1");
+    assert!(is_locked(&h, &l));
+    key(&mut h, Modifiers::COMMAND, Key::Z); // unlock
+    key(&mut h, Modifiers::COMMAND, Key::Z); // first keyframe
+    assert_eq!(position_keys(&h, &l), 0);
+    key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+    key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+    assert!(
+        is_locked(&h, &l) && position_keys(&h, &l) == 1,
+        "redo did not restore key + lock"
+    );
+    // The switch unlocks it again.
+    click_lock_switch(&mut h, "Solid 1");
+    assert!(!is_locked(&h, &l), "the Lock switch did not unlock");
+}
+
+fn set_parent(h: &mut Ui, layer: &PrimPath, parent: Option<&PrimPath>) -> String {
+    let n = h.state().outcomes.len();
+    h.state_mut().invoke(Invocation::with_params(
+        "layer.set_parent",
+        serde_json::json!({"layers": [layer], "parent": parent}),
+    ));
+    settle(h);
+    h.state().outcomes[n..]
+        .iter()
+        .map(|(_, o)| o.clone())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn parent_of(h: &Ui, l: &PrimPath) -> Option<String> {
+    h.state()
+        .stage()
+        .prim(l)
+        .and_then(|v| bae_motion::query::static_value(&v, "parent"))
+        .map(|v| format!("{v:?}"))
+}
+
+#[test]
+fn locked_layers_and_parenting() {
+    let mut h = gui();
+    comp_with(
+        &mut h,
+        &[
+            "motion.layer.new.solid",
+            "motion.layer.new.null",
+            "motion.layer.new.solid",
+        ],
+    );
+    let [a, p, c]: [PrimPath; 3] = h.state().layers().try_into().unwrap();
+    // c is locked: it cannot be given a parent (pick whip on it edits it) …
+    lock(&mut h, &c);
+    let out = set_parent(&mut h, &c, Some(&p));
+    assert!(
+        out.starts_with("failed") && out.contains("locked"),
+        "parenting a locked layer: {out}"
+    );
+    // … but another layer may use it as its parent (that edits the other layer).
+    let out = set_parent(&mut h, &a, Some(&c));
+    assert_eq!(out, "changed", "parenting to a locked layer: {out}");
+    // Unlocked parent of a locked child: moving the parent is allowed.
+    key(&mut h, Modifiers::COMMAND, Key::Z); // a's parent
+    h.state_mut().invoke(Invocation::with_params(
+        "attr.set",
+        serde_json::json!({"path": c, "attr": "locked", "value": {"type": "bool", "value": false}}),
+    ));
+    settle(&mut h);
+    assert_eq!(set_parent(&mut h, &c, Some(&p)), "changed");
+    lock(&mut h, &c);
+    let world = |h: &Ui| {
+        let comp = h.state().active_comp().unwrap();
+        bae_anim::evaluate_comp(h.state().stage(), &comp, bae_model::Time::ZERO)
+            .unwrap()
+            .layer(&c)
+            .map(|l| l.world_matrix)
+            .unwrap()
+    };
+    // Moving the unlocked parent moves the locked child with it (AE).
+    let before = world(&h);
+    h.state_mut().invoke(Invocation::with_params(
+        "attr.set_at",
+        serde_json::json!({"path": p, "attr": "transform:position", "time": 0,
+                           "value": {"type": "vec3", "value": [100.0, 100.0, 0.0]}}),
+    ));
+    settle(&mut h);
+    assert_eq!(
+        h.state().outcomes.last().map(|(_, o)| o.as_str()),
+        Some("changed")
+    );
+    assert!(
+        !before.abs_diff_eq(world(&h), 1e-6),
+        "the locked child did not follow its parent"
+    );
+    assert!(is_locked(&h, &c));
+}
+
+#[test]
+fn locked_layers_copy_paste_and_duplicate() {
+    let mut h = gui();
+    comp_with(
+        &mut h,
+        &["motion.layer.new.solid", "motion.layer.new.solid"],
+    );
+    let [top, bottom]: [PrimPath; 2] = h.state().layers().try_into().unwrap();
+    // Keyframes on the bottom layer, then lock it.
+    h.state().session().lock().selected_layers = vec![bottom.clone()];
+    key(&mut h, Modifiers::ALT | Modifiers::SHIFT, Key::P);
+    for _ in 0..10 {
+        press(&mut h, Modifiers::NONE, Key::PageDown);
+    }
+    key(&mut h, Modifiers::ALT | Modifiers::SHIFT, Key::P);
+    lock(&mut h, &bottom);
+    let keys: Vec<bae_motion::KeyRef> =
+        bae_motion::query::attr_spec(h.state().stage(), &bottom, "transform:position")
+            .unwrap()
+            .keyframes
+            .keys()
+            .map(|t| bae_motion::KeyRef::new(bottom.clone(), "transform:position", *t))
+            .collect();
+    // Copy from the locked layer (reading is fine), paste on the unlocked one.
+    // Keyframe copy / paste is a Timeline action: focus it (a click on the
+    // empty graph also clears the selection, so select afterwards).
+    let head = find_text(&h, "Layer Name").unwrap();
+    click_at(
+        &mut h,
+        egui::pos2(head.left() + 800.0, head.bottom() + 150.0),
+    );
+    // egui-winit turns Cmd+C / Cmd+V into Copy / Paste events.
+    h.state().session().lock().selected_keys = keys.clone();
+    send(&mut h, Event::Copy);
+    settle(&mut h);
+    key(&mut h, Modifiers::NONE, Key::Home);
+    {
+        let s = h.state().session();
+        let mut s = s.lock();
+        s.selected_keys.clear();
+        s.selected_layers = vec![top.clone()];
+    }
+    send(&mut h, Event::Paste(String::new()));
+    settle(&mut h);
+    assert_eq!(
+        position_keys(&h, &top),
+        2,
+        "paste from a locked layer's keys"
+    );
+    // Paste into the locked layer: nothing changes.
+    h.state().session().lock().selected_layers = vec![bottom.clone()];
+    for _ in 0..30 {
+        press(&mut h, Modifiers::NONE, Key::PageDown);
+    }
+    send(&mut h, Event::Paste(String::new()));
+    settle(&mut h);
+    assert_eq!(position_keys(&h, &bottom), 2, "pasted into a locked layer");
+    // Duplicate / split / arrange with only the locked layer selected: nothing.
+    let n = h.state().layers().len();
+    for (m, k) in [
+        (Modifiers::COMMAND, Key::D),
+        (Modifiers::COMMAND | Modifiers::SHIFT, Key::D),
+        (Modifiers::COMMAND | Modifiers::SHIFT, Key::CloseBracket),
+    ] {
+        h.state().session().lock().selected_layers = vec![bottom.clone()];
+        key(&mut h, m, k);
+    }
+    assert_eq!(
+        h.state().layers().len(),
+        n,
+        "duplicate / split acted on the locked layer"
+    );
+    assert_eq!(
+        h.state().layers()[1],
+        bottom,
+        "arrange moved the locked layer"
+    );
+    // Easy Ease on the locked layer's keys: refused by the command layer.
+    h.state().session().lock().selected_keys = keys;
+    key(&mut h, Modifiers::NONE, Key::F9);
+    let eased = h
+        .state()
+        .outcomes
+        .iter()
+        .rev()
+        .find(|(id, _)| id == "key.ease")
+        .map(|(_, o)| o.clone());
+    assert!(
+        eased.as_deref().is_none_or(|o| o.starts_with("failed")),
+        "eased a locked layer's keys: {eased:?}"
+    );
+}
+
+#[test]
+fn viewer_clicks_go_through_a_locked_layer() {
+    let mut h = gui();
+    comp_with(
+        &mut h,
+        &["motion.layer.new.solid", "motion.layer.new.solid"],
+    );
+    let [top, bottom]: [PrimPath; 2] = h.state().layers().try_into().unwrap();
+    let canvas = h
+        .root()
+        .query_all_by_label("Composition")
+        .map(|n| n.rect())
+        .max_by(|a, b| a.area().total_cmp(&b.area()))
+        .expect("composition viewer");
+    key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::A);
+    click_at(&mut h, canvas.center());
+    assert_eq!(
+        h.state().selected_layers(),
+        std::slice::from_ref(&top),
+        "unlocked: the top layer is picked"
+    );
+    lock(&mut h, &top);
+    key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::A);
+    pause(&mut h);
+    click_at(&mut h, canvas.center());
+    assert_eq!(
+        h.state().selected_layers(),
+        [bottom],
+        "the click did not go through the locked layer"
+    );
+}
+
+#[test]
+#[ignore = "issue #124"]
+fn locking_a_selected_layer_deselects_it() {
+    // AE: a locked layer cannot be selected, so locking a selected one
+    // deselects it (BAE keeps it selected and highlighted; actions skip it).
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let l = h.state().layers()[0].clone();
+    assert_eq!(h.state().selected_layers(), std::slice::from_ref(&l));
+    click_lock_switch(&mut h, "Solid 1");
+    assert!(is_locked(&h, &l));
+    assert!(
+        !h.state().selected_layers().contains(&l),
+        "the locked layer stays selected"
+    );
+}
+
+#[test]
+#[ignore = "issue #124"]
+fn deleting_the_parent_of_a_locked_layer_is_not_silent() {
+    // Deleting an unlocked parent whose child is locked fails with “… is
+    // locked; unlock it first” in the log only: Delete looks like it does
+    // nothing. AE deletes the parent and the child keeps its place; at least
+    // the user must be told.
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.null", "motion.layer.new.solid"]);
+    let [child, parent]: [PrimPath; 2] = h.state().layers().try_into().unwrap();
+    assert_eq!(set_parent(&mut h, &child, Some(&parent)), "changed");
+    lock(&mut h, &child);
+    let head = find_text(&h, "Layer Name").unwrap();
+    click_at(
+        &mut h,
+        egui::pos2(head.left() + 800.0, head.bottom() + 150.0),
+    );
+    h.state().session().lock().selected_layers = vec![parent.clone()];
+    key(&mut h, Modifiers::NONE, Key::Delete);
+    assert!(
+        h.state().stage().prim(&parent).is_none(),
+        "{:?}",
+        h.state().outcomes.last()
+    );
+    assert_eq!(
+        parent_of(&h, &child),
+        None,
+        "dangling parent on the locked child"
+    );
 }
