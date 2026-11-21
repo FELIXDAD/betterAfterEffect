@@ -614,6 +614,7 @@ dependencies = [
  "egui",
  "serde",
  "serde_json",
+ "tempfile",
  "tracing",
 ]
 

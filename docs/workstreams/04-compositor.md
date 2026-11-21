@@ -58,7 +58,7 @@
 - `bae render` 新参数：`--format png|tiff|exr|h264|hevc|prores|prores4444`（默认按扩展名）、`--compression`、`--bits`、`--threads`；`--json` 增加 `stages`（求值、渲染、等 GPU、拷出、等编码器、编码、写盘）、`throughput`、`output`。`render_ms` 不再包含回读。
 - B1 300 帧（Apple M4）：PNG 5.03 s → 0.47 s（10.7×），每帧 16.65 → 1.42 ms；TIFF 不压缩 1.26 s（受磁盘限制）；EXR ZIP 2.19 s。M4 上现在是 GPU 受限。基准新增 `export_fps_async`（672 fps，同步回读 359 fps）。详见 `docs/perf.md`。
 - 改了 08 的目录（`crates/bae-media` 导出部分）和根 `Cargo.toml` 的一行（`png` 回到 opt-level 3），原因写在 PR 里。
-- 下一步：应用内的导出入口（渲染队列面板、「合成 ▸ 添加到渲染队列」），单独 PR。
+- 应用内的导出入口（单独 PR）：「合成 ▸ 添加到渲染队列」（Cmd/Ctrl+M）和渲染队列面板，代码在 `crates/bae-ui-motion/src/render_queue.rs`（12 已停，菜单、快捷键、面板都在它的注册表里）。按「渲染」时给工程拍快照，后台线程用自己的 `Renderer` 跑 `export_frames`，界面不卡；进度条、停止（删掉部分输出）、失败原因、在访达 / 资源管理器中显示。队列是应用运行时状态，不进工程文件。
 
 - 下一步：遮罩（05 的路径栅格化或自带）、效果框架执行与三个参考效果、调整图层、其余混合模式（继续用 AE 对照）、视口纹理输出（零拷贝给 12）、B1 与 AE 渲染速度对比、B3。
 
