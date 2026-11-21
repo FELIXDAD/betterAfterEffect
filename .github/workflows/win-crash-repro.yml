@@ -42,8 +42,13 @@ on:
         description: Delete the D3D shader cache (%LOCALAPPDATA%\D3DSCache) before every run
         default: false
         type: boolean
+      debug_layer:
+        description: "D3D12 debug layer (d3d12SDKLayers.dll, installed on the runners): on, or off (the DLL is renamed)"
+        default: "on"
+        type: choice
+        options: ["on", "off"]
       env:
-        description: "Extra environment for the tests, 'NAME=value;NAME=value'"
+        description: "Extra environment for the tests, 'NAME=value;NAME=value'; WGPU_DX12_COMPILER=dxc uses the Windows SDK's DXC"
         default: ""
         type: string
       iterations:
@@ -87,16 +92,17 @@ jobs:
           IN_PAGEHEAP: ${{ inputs.pageheap }}
           IN_FRESH: ${{ inputs.fresh_cache }}
           IN_ENV: ${{ inputs.env }}
+          IN_DEBUG_LAYER: ${{ inputs.debug_layer }}
           IN_N: ${{ inputs.iterations }}
           IN_JOBS: ${{ inputs.jobs }}
         run: |
           if [ "$EVENT" = workflow_dispatch ]; then
             matrix="$(jq -cn --arg set "$IN_SET" --arg threads "$IN_THREADS" --arg wrap "$IN_WRAP" \
-              --arg pageheap "$IN_PAGEHEAP" --arg fresh "$IN_FRESH" --arg env "$IN_ENV" \
+              --arg pageheap "$IN_PAGEHEAP" --arg fresh "$IN_FRESH" --arg env "$IN_ENV" --arg dl "$IN_DEBUG_LAYER" \
               --arg n "$IN_N" --argjson jobs "${IN_JOBS:-1}" '
               {include: [range(1; $jobs + 1) as $j | {
                 id: "dispatch-\($j)", set: $set, threads: $threads, wrap: $wrap,
-                pageheap: $pageheap, fresh: $fresh, env: $env, n: $n }]}')"
+                pageheap: $pageheap, fresh: $fresh, env: $env, debuglayer: $dl, n: $n }]}')"
           else
             # The plan for pushes to ci/win-crash-repro. CI crashed (0xc0000005) in
             # bae-render --test render (8 tests, each with its own WARP device) and in
@@ -130,6 +136,7 @@ jobs:
       PAGEHEAP: ${{ matrix.pageheap }}
       FRESH_CACHE: ${{ matrix.fresh }}
       EXTRA_ENV: ${{ matrix.env }}
+      DEBUG_LAYER: ${{ matrix.debuglayer || 'on' }}
       ITERATIONS: ${{ matrix.n }}
     steps:
       - uses: actions/checkout@v4
@@ -159,6 +166,9 @@ jobs:
           $dxcOnPath = (& where.exe dxcompiler.dll 2>$null) -join "; "
           $global:LASTEXITCODE = 0
           if (-not $dxcOnPath) { $dxcOnPath = "none" }
+          $sdkDxc = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter dxcompiler.dll -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName | Select-Object -Last 1
+          if ($sdkDxc) { "SDK_DXC_DIR=$($sdkDxc.DirectoryName)" >> $env:GITHUB_ENV }
           $sys = "$env:WINDIR\System32"
           $lines = @(
             "Job: ${{ matrix.id }}",
@@ -172,9 +182,9 @@ jobs:
             "dxgi.dll: $(Version "$sys\dxgi.dll")",
             "dxgidebug.dll: $(Version "$sys\dxgidebug.dll")",
             "d3dcompiler_47.dll (FXC): $(Version "$sys\d3dcompiler_47.dll")",
-            "dxcompiler.dll in System32: $(Version "$sys\dxcompiler.dll"); on PATH: $dxcOnPath",
+            "dxcompiler.dll in System32: $(Version "$sys\dxcompiler.dll"); on PATH: $dxcOnPath; Windows SDK: $(if ($sdkDxc) { "$($sdkDxc.FullName) $(Version $sdkDxc.FullName)" } else { 'none' })",
             "DWrite.dll: $(Version "$sys\DWrite.dll")",
-            "Set: $env:SET; threads: $env:THREADS; wrap: $env:WRAP; page heap: $env:PAGEHEAP; fresh shader cache: $env:FRESH_CACHE; env: '$env:EXTRA_ENV'; iterations: $env:ITERATIONS"
+            "Set: $env:SET; threads: $env:THREADS; wrap: $env:WRAP; page heap: $env:PAGEHEAP; fresh shader cache: $env:FRESH_CACHE; D3D12 debug layer: $env:DEBUG_LAYER; env: '$env:EXTRA_ENV'; iterations: $env:ITERATIONS"
           )
           $lines | Tee-Object -FilePath "$out\machine.txt"
           "## ${{ matrix.id }}" >> $env:GITHUB_STEP_SUMMARY
@@ -268,6 +278,20 @@ jobs:
               Write-Output "full page heap: $exe"
             }
           }
+          if ($env:DEBUG_LAYER -eq 'off') {
+            # Debug builds ask for the D3D12 debug layer (GpuContextDescriptor::validation);
+            # without the DLL wgpu logs a warning and runs without it, like most user machines.
+            foreach ($dir in "$env:WINDIR\System32", "$env:WINDIR\SysWOW64") {
+              $dll = "$dir\d3d12SDKLayers.dll"
+              if (Test-Path $dll) {
+                & takeown.exe /f $dll | Out-Null
+                & icacls.exe $dll /grant "*S-1-5-32-544:F" | Out-Null
+                Rename-Item $dll "d3d12SDKLayers.dll.off"
+                Write-Output "renamed $dll"
+              }
+            }
+            if (Test-Path "$env:WINDIR\System32\d3d12SDKLayers.dll") { throw "d3d12SDKLayers.dll is still there" }
+          }
           # GitHub fails a pwsh step whose last native command exited non-zero (the crasher).
           $global:LASTEXITCODE = 0
 
@@ -289,6 +313,12 @@ jobs:
             $name, $value = $pair -split '=', 2
             Set-Item "env:$($name.Trim())" $value
             Write-Output "env: $($name.Trim())=$value"
+          }
+          if ($env:WGPU_DX12_COMPILER -match 'dxc' -and $env:WGPU_DX12_COMPILER -notmatch 'static') {
+            if (-not $env:SDK_DXC_DIR) { throw "WGPU_DX12_COMPILER=dxc but the Windows SDK has no dxcompiler.dll" }
+            # wgpu loads dxcompiler.dll by name; the SDK directory also has dxil.dll.
+            $env:PATH = "$env:SDK_DXC_DIR;$env:PATH"
+            Write-Output "DXC from $env:SDK_DXC_DIR"
           }
           $packages = (cargo metadata --format-version 1 --no-deps --locked | ConvertFrom-Json).packages
           $tests = Get-Content "$env:RUNNER_TEMP\tests.txt" | ForEach-Object {
