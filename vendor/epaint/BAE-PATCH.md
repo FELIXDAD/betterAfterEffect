@@ -21,7 +21,9 @@ egui 0.36.2 的 epaint 用 skrifa 0.44 + harfrust 0.12（+ read-fonts 0.41），
 - `Cargo.toml`：harfrust `0.12.0` → `0.15.0`，skrifa `0.44.0` → `0.49.0`；去掉 bench 目标和 dev-dependencies（没拷 `benches/`），`publish = false`。
 - `src/text/font.rs`、`src/text/fonts.rs`、`src/text/text_layout.rs`：harfrust 0.15 的 API（`ShaperData` → `harfrust::Font`，`UnicodeBuffer`/`GlyphBuffer` → `Buffer`，`harfrust::shape`），逐行对应上游 `1a591f8e` 里同名函数的改动。
 
-`git log -p -- vendor/epaint` 能看到：第一个提交是原样拷贝，第二个提交是回移的差异。
+- `src/text/font.rs` 的 `invisible_char`（另一处 BAE 自己的改动，2026-11-21）：把 Unicode 其余的 Default_Ignorable_Code_Point 字符（变体选择符 U+FE00–FE0F、软连字符、组合字形连接符、韩文填充符、标签字符等）也当作不可见的零宽字符。界面改用系统字体后，系统字体都没有这些字符，单独出现的 U+FE0F（比如名字开头）会画成缺字方块；原来 egui 的 Noto Emoji 字体映射了它，所以以前看不出来。见 `apps/bae/src/ui_text.rs` 的 `invisible_characters_draw_nothing`。升级 egui 时先看上游是否已经处理（egui#336），没有的话把这一处带过去。
+
+`git log -p -- vendor/epaint` 能看到：第一个提交是原样拷贝，第二个提交是回移的差异，之后是上面这处改动。
 
 ## 验证
 
@@ -32,4 +34,4 @@ egui 0.36.2 的 epaint 用 skrifa 0.44 + harfrust 0.12（+ read-fonts 0.41），
 
 ## 什么时候删
 
-egui 组升级到包含 #8874 的版本（预计 egui 0.38，且 egui_dock 跟上）时，删掉 `vendor/epaint` 和根 `Cargo.toml` 里的 `[patch.crates-io]`/`exclude` 两处。在那之前不要在这里做别的修改；需要改 epaint 行为的，先提到上游。
+egui 组升级到包含 #8874 的版本（预计 egui 0.38，且 egui_dock 跟上）时，删掉 `vendor/epaint` 和根 `Cargo.toml` 里的 `[patch.crates-io]`/`exclude` 两处。在那之前不要在这里做别的修改（上面 `invisible_char` 那一处除外）；需要改 epaint 行为的，先提到上游。

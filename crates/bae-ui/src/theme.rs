@@ -170,7 +170,8 @@ pub struct SystemFont {
 /// 2. `ui-cjk`: the Simplified Chinese UI font (PingFang SC, Microsoft YaHei);
 /// 3. `ui-ja`: the Japanese font (Hiragino Sans, Yu Gothic / Meiryo) for kana and
 ///    punctuation the Chinese font lacks on some systems (`・`);
-/// 4. `ui-symbols`: the platform symbol font (Apple Symbols, Segoe UI Symbol) for
+/// 4. `ui-ko`: the Korean font (Apple SD Gothic Neo, Malgun Gothic) for Hangul;
+/// 5. `ui-symbols`: the platform symbol font (Apple Symbols, Segoe UI Symbol) for
 ///    arrows, marks and the missing-glyph box `◻`.
 ///
 /// Found through fontique, the font database bae-text and parley use, once per process.
@@ -253,6 +254,19 @@ fn find_system_ui_fonts_uncached() -> Vec<SystemFont> {
             )
             .filter(|id| Some(*id) != cjk)
         });
+    let ko_locale = Language::parse("ko").ok();
+    let korean: Vec<FamilyId> = collection
+        .fallback_families(FallbackKey::new(
+            Script::from_bytes(*b"Hang"),
+            ko_locale.as_ref(),
+        ))
+        .collect();
+    let korean = korean
+        .iter()
+        .copied()
+        .find(|id| Some(*id) != cjk && Some(*id) != japanese)
+        .or_else(|| named(&mut collection, &["Apple SD Gothic Neo", "Malgun Gothic"]))
+        .filter(|id| Some(*id) != cjk && Some(*id) != japanese);
     let symbols = named(&mut collection, &["Apple Symbols", "Segoe UI Symbol"]);
 
     let mut out = Vec::new();
@@ -260,6 +274,7 @@ fn find_system_ui_fonts_uncached() -> Vec<SystemFont> {
         ("ui-text", ui),
         ("ui-cjk", cjk),
         ("ui-ja", japanese),
+        ("ui-ko", korean),
         ("ui-symbols", symbols),
     ] {
         let Some(family) = id.and_then(|id| collection.family(id)) else {
@@ -285,9 +300,14 @@ fn find_system_ui_fonts_uncached() -> Vec<SystemFont> {
     out
 }
 
-/// Installs [`system_ui_fonts`] as egui's proportional and monospace families (the
-/// UI's monospace text also uses the system UI font, as AE does).
+/// Installs [`ui_font_definitions`] in `ctx`.
 pub fn install_fonts(ctx: &Context) {
+    ctx.set_fonts(ui_font_definitions());
+}
+
+/// [`system_ui_fonts`] as egui's proportional and monospace families (the UI's
+/// monospace text also uses the system UI font, as AE does).
+pub fn ui_font_definitions() -> FontDefinitions {
     let mut defs = FontDefinitions::empty();
     let mut names = Vec::new();
     for font in system_ui_fonts() {
@@ -299,7 +319,7 @@ pub fn install_fonts(ctx: &Context) {
     for family in [FontFamily::Proportional, FontFamily::Monospace] {
         defs.families.insert(family, names.clone());
     }
-    ctx.set_fonts(defs);
+    defs
 }
 
 /// Apply the AE dark look to egui's built-in widgets.

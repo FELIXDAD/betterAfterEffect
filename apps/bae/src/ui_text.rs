@@ -315,6 +315,8 @@ fn ui_text_glyphs_are_in_the_ui_fonts() {
     texts.extend(ui_source_literals());
     texts.push(("egui's own glyphs".into(), EGUI_GLYPHS.into()));
     texts.push(("Japanese".into(), japanese_sample()));
+    // Korean: every Hangul syllable (the Korean system font has them all).
+    texts.push(("Korean".into(), ('\u{AC00}'..='\u{D7A3}').collect()));
 
     let fonts = bae_ui::theme::system_ui_fonts();
     let names: Vec<String> = fonts
@@ -367,5 +369,57 @@ fn ui_code_uses_the_menu_button_with_a_system_glyph() {
         calls.is_empty(),
         "use bae_ui::widgets::menu_button:\n{}",
         calls.join("\n")
+    );
+}
+
+/// Default-ignorable characters (variation selectors, joiners, soft hyphen, tags) are
+/// drawn as nothing, not as the missing-glyph box (vendored epaint's `invisible_char`,
+/// vendor/epaint/BAE-PATCH.md).
+#[test]
+fn invisible_characters_draw_nothing() {
+    use egui::epaint::text::{Fonts, LayoutJob, TextOptions};
+    let mut fonts = Fonts::new(TextOptions::default(), bae_ui::theme::ui_font_definitions());
+    let invisible = [
+        '\u{FE0F}',
+        '\u{FE0E}',
+        '\u{200D}',
+        '\u{00AD}',
+        '\u{E0020}',
+        '\u{2060}',
+    ];
+    // A selector on its own (start of a name, after a space) found no font and drew the
+    // box with the system fonts; after a letter it joins the letter's cluster.
+    let mut text = String::from("\u{FE0F}A");
+    for c in invisible {
+        text.push(c);
+        text.push('B');
+    }
+    let missing = '\u{10FFFD}'; // private use, in no font: draws the box
+    text.push(missing);
+    let job = LayoutJob::simple_singleline(
+        text.clone(),
+        egui::FontId::proportional(13.0),
+        egui::Color32::WHITE,
+    );
+    let galley = fonts.with_pixels_per_point(2.0).layout_job(job);
+    let glyphs: Vec<_> = galley
+        .rows
+        .iter()
+        .flat_map(|r| r.row.glyphs.iter())
+        .collect();
+    // One glyph per char (epaint's invariant; clustered chars get zero-width
+    // continuation glyphs), so glyphs line up with the text.
+    assert_eq!(glyphs.len(), text.chars().count());
+    for (c, g) in text.chars().zip(&glyphs) {
+        if invisible.contains(&c) {
+            let code = u32::from(c);
+            assert_eq!(g.advance_width, 0.0, "U+{code:04X} takes space");
+            assert!(g.uv_rect.is_nothing(), "U+{code:04X} draws something");
+        }
+    }
+    let boxed = glyphs.last().unwrap();
+    assert!(
+        boxed.advance_width > 0.0 && !boxed.uv_rect.is_nothing(),
+        "the missing glyph box"
     );
 }
