@@ -135,7 +135,6 @@ fn broken_projects_exit_1_with_a_message() {
 }
 
 #[test]
-#[ignore = "issue #111"]
 fn export_json_names_a_broken_file() {
     let tmp = tempfile::tempdir().unwrap();
     let garbage = tricky(tmp.path()).join("坏的 文件.baez");

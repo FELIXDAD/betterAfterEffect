@@ -85,7 +85,7 @@ wgpu v30.0.2
 | vello | `wgpu_default`（= `wgpu/default`，会打开 wgpu 的全部后端） | `wgpu` | 防止 vello 把 Vulkan / GLES / WebGPU 带回来 |
 | parley、fontique | 无实际差别（默认就是 `system`） | `std`、`system` | 写明，避免上游改默认值时悄悄变化 |
 | egui-wgpu | `wgpu/default`、`wgpu/webgl`、`fragile-send-sync-non-atomic-wasm`、`macos-window-resize-jitter-fix` | 无；不开 `winit` | 默认值会打开 wgpu 全部后端。BAE 自己管理表面（`bae-gpu`），不用 `egui_wgpu::winit::Painter`；注意 `macos-window-resize-jitter-fix` 只作用于这个 Painter（macOS 缩放窗口时 `presentsWithTransaction` + 3 个 drawable），`bae-gpu` 需要自己实现同样的处理 |
-| egui-winit | `wayland`、`x11`、`winit/default` | `clipboard`、`links` | 只做 macOS / Windows；`accesskit`（读屏）默认就不开，是否开启由 11 决定 |
+| egui-winit | `wayland`、`x11`、`winit/default` | `clipboard`、`links`；`apps/bae` 另开 `accesskit` | 只做 macOS / Windows。`accesskit`（读屏、UI 自动化）在 `apps/bae` 打开（#116，2026-11-21）：VoiceOver / 讲述人和 Windows 上的自动化验收读控件标签 |
 | winit | `x11`、`wayland`、`wayland-dlopen`、`wayland-csd-adwaita` | `rwh_06` | 同上，只保留 raw-window-handle 0.6 接口 |
 | egui | 不关 | 默认 `default_fonts` | 内嵌约 1.4 MB 字体（Ubuntu-Light、Hack、两个 emoji 字体）。界面用系统字体（SF / 苹方），以后体积紧张时可以考虑关掉，只留图标字体 |
 | egui_kittest | （无默认） | 无 | 界面测试只用无窗口模式；需要截图对比的 crate 自己开 `wgpu` / `snapshot` |
@@ -293,7 +293,7 @@ ARCHITECTURE 里提到但还没有 pin 的：`psd`（08）。bae-hub 不用 axum
 
 - **pollster**：建议升到 1.0.3（MSRV 1.69，接口仍是 `block_on`），与 eframe 0.36.2 一致，也避免 `bae-ui` 示例里出现两份。由 01 决定。
 - **macOS 缩放抖动**：egui-wgpu 的 `macos-window-resize-jitter-fix` 只在 `egui_wgpu::winit::Painter` 里生效，BAE 不用这个 Painter。`bae-gpu` 的表面管理需要自己在拖动缩放期间打开 `CAMetalLayer.presentsWithTransaction` 并把帧延迟提到 2（参考 egui-wgpu 0.36.2 `src/winit.rs`）。
-- **读屏（accesskit）**：eframe 示例开了 `accesskit`，`apps/bae` 的 egui-winit 没开。是否开启由 11 决定，开启前跑一次 `cargo xtask size`。
+- **读屏（accesskit）**：已开启（#116）。窗口先隐藏创建，accesskit 适配器建好后再显示（适配器必须在窗口第一次显示前创建）；设备丢失重建时把适配器移到新的 egui 状态。体积见 PR。
 - **浮动面板的原生多窗口**：见第 10 节。
 - **以后可选：`panic = "abort"`**（0.0.1 之后再评估，协调人 2026-11-21 决定 0.0.1 不做）。可省 Windows 7.1 MiB、macOS 3.2 MiB（PR #89 实测：Windows 27.98 → 20.86 MiB，macOS 21.65 → 18.44 MiB；Windows 省得多，是因为 MSVC 的 unwind 要给每个析构清理生成单独的 funclet）。前提是下面两处依赖 unwind 的地方有了替代方案：`bae-platform` 崩溃处理里用 `catch_unwind` 兜住保存回调（`run_emergency_saves`），以及 Agent / MCP（tokio 任务）、插件的 panic 隔离，防止一个工具调用拖垮整个应用。例如在 panic hook 里自动保存，并给插件和 Agent 设计新的隔离策略。不能只为了体积改。
 

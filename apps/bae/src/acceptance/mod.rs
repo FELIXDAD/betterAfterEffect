@@ -38,7 +38,7 @@ use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect};
 use egui_kittest::Harness;
 
 use crate::document::{Document, Outcome};
-use crate::files::{self, CommitGate, FileDialogs, FileOutcome, UnsavedChoice};
+use crate::files::{self, CommitGate, FileDialogs, UnsavedChoice};
 use crate::ui::{StatusInfo, Workspace};
 
 /// Window size of the simulated GUI (logical points).
@@ -186,18 +186,19 @@ impl Gui {
         };
         match inv.id.as_str() {
             ids::QUIT => {
-                if files::confirm_discard(&mut self.doc, &mut self.dialogs) {
+                if crate::view_state::confirm_quit(&self.app, &mut self.doc, &mut self.dialogs) {
                     self.quit = true;
                 }
             }
             ids::ABOUT => self.workspace.show_about(),
             id if files::is_file_command(id) => {
-                if files::run(&mut self.doc, &mut self.dialogs, &inv) == Some(FileOutcome::Replaced)
-                {
-                    // `Shell::project_replaced`.
-                    self.app
-                        .insert_resource(bae_ui_motion::SharedSession::default());
-                }
+                // As `Shell::dispatch`.
+                crate::view_state::run_file_command(
+                    &mut self.app,
+                    &mut self.doc,
+                    &mut self.dialogs,
+                    &inv,
+                );
             }
             ids::HELP => {}
             _ => {
