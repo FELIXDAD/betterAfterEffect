@@ -1,0 +1,6196 @@
+{
+  "source": {
+    "application": "Adobe Illustrator 2026",
+    "version": "30.1.0",
+    "build_number": "136R",
+    "locale": "zh_CN",
+    "platform": "Microsoft Windows 11 专业版 (10.0.26200, Build 26200, 64 位)",
+    "extracted_date": "2026-11-21"
+  },
+  "stats": {
+    "object_types": 34,
+    "total_properties": 779,
+    "total_methods": 231
+  },
+  "objects": {
+    "Document": {
+      "label": "Document",
+      "typename": "Document",
+      "properties": [
+        {
+          "name": "XMPString",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "<?xpacket begin=\"﻿\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n<x:xmpme..."
+        },
+        {
+          "name": "activeDataSet",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "The dataset was not found"
+        },
+        {
+          "name": "activeLayer",
+          "access": "readwrite",
+          "declaredType": "Layer",
+          "runtimeType": "Layer",
+          "sample": "<Layer>"
+        },
+        {
+          "name": "activeView",
+          "access": "readonly",
+          "declaredType": "View",
+          "runtimeType": "View",
+          "sample": "<View>"
+        },
+        {
+          "name": "artboards",
+          "access": "readonly",
+          "declaredType": "Artboards",
+          "runtimeType": "Artboards",
+          "sample": "<Artboards>"
+        },
+        {
+          "name": "assets",
+          "access": "readonly",
+          "declaredType": "Assets",
+          "runtimeType": "Assets",
+          "sample": "<Assets>"
+        },
+        {
+          "name": "brushes",
+          "access": "readonly",
+          "declaredType": "Brushes",
+          "runtimeType": "Brushes",
+          "sample": "<Brushes>"
+        },
+        {
+          "name": "characterStyles",
+          "access": "readonly",
+          "declaredType": "CharacterStyles",
+          "runtimeType": "CharacterStyles",
+          "sample": "<CharacterStyles>"
+        },
+        {
+          "name": "cloudPath",
+          "access": "readonly",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "an Illustrator error occurred: 2072 ('')"
+        },
+        {
+          "name": "colorProfileName",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "sRGB IEC61966-2.1"
+        },
+        {
+          "name": "compoundPathItems",
+          "access": "readonly",
+          "declaredType": "CompoundPathItems",
+          "runtimeType": "CompoundPathItems",
+          "sample": "<CompoundPathItems>"
+        },
+        {
+          "name": "cropBox",
+          "access": "readwrite",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            850,
+            600,
+            1250,
+            200
+          ]
+        },
+        {
+          "name": "cropStyle",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "CropOptions.Standard",
+          "sample": "<CropOptions.Standard>"
+        },
+        {
+          "name": "dataSets",
+          "access": "readonly",
+          "declaredType": "DataSets",
+          "runtimeType": "DataSets",
+          "sample": "<DataSets>"
+        },
+        {
+          "name": "defaultFillColor",
+          "access": "readwrite",
+          "declaredType": "RGBColor",
+          "runtimeType": "RGBColor",
+          "sample": "<RGBColor>"
+        },
+        {
+          "name": "defaultFillOverprint",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "defaultFilled",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "defaultStrokeCap",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "StrokeCap.BUTTENDCAP",
+          "sample": "<StrokeCap.BUTTENDCAP>"
+        },
+        {
+          "name": "defaultStrokeColor",
+          "access": "readwrite",
+          "declaredType": "RGBColor",
+          "runtimeType": "RGBColor",
+          "sample": "<RGBColor>"
+        },
+        {
+          "name": "defaultStrokeDashOffset",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "defaultStrokeDashes",
+          "access": "readwrite",
+          "declaredType": "array",
+          "runtimeType": "Array(0)",
+          "sample": []
+        },
+        {
+          "name": "defaultStrokeJoin",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "StrokeJoin.MITERENDJOIN",
+          "sample": "<StrokeJoin.MITERENDJOIN>"
+        },
+        {
+          "name": "defaultStrokeMiterLimit",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 10
+        },
+        {
+          "name": "defaultStrokeOverprint",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "defaultStrokeWidth",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 1
+        },
+        {
+          "name": "defaultStroked",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "documentColorSpace",
+          "access": "readonly",
+          "declaredType": "Object",
+          "runtimeType": "DocumentColorSpace.RGB",
+          "sample": "<DocumentColorSpace.RGB>"
+        },
+        {
+          "name": "embeddedItems",
+          "access": "readonly",
+          "declaredType": "EmbeddedItems",
+          "runtimeType": "EmbeddedItems",
+          "sample": "<EmbeddedItems>"
+        },
+        {
+          "name": "fullName",
+          "access": "readonly",
+          "declaredType": "filespec",
+          "runtimeType": null,
+          "sample": "<redacted:undefined>"
+        },
+        {
+          "name": "geometricBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            50,
+            550,
+            660,
+            73.904
+          ]
+        },
+        {
+          "name": "gradients",
+          "access": "readonly",
+          "declaredType": "Gradients",
+          "runtimeType": "Gradients",
+          "sample": "<Gradients>"
+        },
+        {
+          "name": "graphItems",
+          "access": "readonly",
+          "declaredType": "GraphItems",
+          "runtimeType": "GraphItems",
+          "sample": "<GraphItems>"
+        },
+        {
+          "name": "graphicStyles",
+          "access": "readonly",
+          "declaredType": "GraphicStyles",
+          "runtimeType": "GraphicStyles",
+          "sample": "<GraphicStyles>"
+        },
+        {
+          "name": "gridRepeatItems",
+          "access": "readonly",
+          "declaredType": "GridRepeatItems",
+          "runtimeType": "GridRepeatItems",
+          "sample": "<GridRepeatItems>"
+        },
+        {
+          "name": "groupItems",
+          "access": "readonly",
+          "declaredType": "GroupItems",
+          "runtimeType": "GroupItems",
+          "sample": "<GroupItems>"
+        },
+        {
+          "name": "height",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 400
+        },
+        {
+          "name": "inkList",
+          "access": "readonly",
+          "declaredType": "array",
+          "runtimeType": "Array(4)",
+          "sample": [
+            "Ink",
+            "Ink",
+            "Ink",
+            "Ink"
+          ]
+        },
+        {
+          "name": "isCloudDocument",
+          "access": "readonly",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "kinsokuSet",
+          "access": "readonly",
+          "declaredType": "array",
+          "runtimeType": "Array(2)",
+          "sample": [
+            "Hard",
+            "Soft"
+          ]
+        },
+        {
+          "name": "layers",
+          "access": "readonly",
+          "declaredType": "Layers",
+          "runtimeType": "Layers",
+          "sample": "<Layers>"
+        },
+        {
+          "name": "legacyTextItems",
+          "access": "readonly",
+          "declaredType": "LegacyTextItems",
+          "runtimeType": "LegacyTextItems",
+          "sample": "<LegacyTextItems>"
+        },
+        {
+          "name": "listStyles",
+          "access": "readonly",
+          "declaredType": "ListStyles",
+          "runtimeType": "ListStyles",
+          "sample": "<ListStyles>"
+        },
+        {
+          "name": "meshItems",
+          "access": "readonly",
+          "declaredType": "MeshItems",
+          "runtimeType": "MeshItems",
+          "sample": "<MeshItems>"
+        },
+        {
+          "name": "mojikumiSet",
+          "access": "readonly",
+          "declaredType": "array",
+          "runtimeType": "Array(5)",
+          "sample": [
+            "GyomatsuYakumonoZenkakuOrHankaku",
+            "YakumonoHankaku",
+            "GyomatsuYakumonoHankaku",
+            "GyomatsuYakumonoZenkaku",
+            "YakumonoZenkaku"
+          ]
+        },
+        {
+          "name": "name",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "未标题-1"
+        },
+        {
+          "name": "nonNativeItems",
+          "access": "readonly",
+          "declaredType": "NonNativeItems",
+          "runtimeType": "NonNativeItems",
+          "sample": "<NonNativeItems>"
+        },
+        {
+          "name": "outputResolution",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 800
+        },
+        {
+          "name": "pageItems",
+          "access": "readonly",
+          "declaredType": "PageItems",
+          "runtimeType": "PageItems",
+          "sample": "<PageItems>"
+        },
+        {
+          "name": "pageOrigin",
+          "access": "readwrite",
+          "declaredType": "point",
+          "runtimeType": "Array(2)",
+          "sample": [
+            0,
+            0
+          ]
+        },
+        {
+          "name": "paragraphStyles",
+          "access": "readonly",
+          "declaredType": "ParagraphStyles",
+          "runtimeType": "ParagraphStyles",
+          "sample": "<ParagraphStyles>"
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Application",
+          "runtimeType": "Application",
+          "sample": "<Application>"
+        },
+        {
+          "name": "path",
+          "access": "readonly",
+          "declaredType": "filespec",
+          "runtimeType": null,
+          "sample": "<redacted:undefined>"
+        },
+        {
+          "name": "pathItems",
+          "access": "readonly",
+          "declaredType": "PathItems",
+          "runtimeType": "PathItems",
+          "sample": "<PathItems>"
+        },
+        {
+          "name": "patterns",
+          "access": "readonly",
+          "declaredType": "Patterns",
+          "runtimeType": "Patterns",
+          "sample": "<Patterns>"
+        },
+        {
+          "name": "placedItems",
+          "access": "readonly",
+          "declaredType": "PlacedItems",
+          "runtimeType": "PlacedItems",
+          "sample": "<PlacedItems>"
+        },
+        {
+          "name": "pluginItems",
+          "access": "readonly",
+          "declaredType": "PluginItems",
+          "runtimeType": "PluginItems",
+          "sample": "<PluginItems>"
+        },
+        {
+          "name": "printTiles",
+          "access": "readonly",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "radialRepeatItems",
+          "access": "readonly",
+          "declaredType": "RadialRepeatItems",
+          "runtimeType": "RadialRepeatItems",
+          "sample": "<RadialRepeatItems>"
+        },
+        {
+          "name": "rasterEffectSettings",
+          "access": "readwrite",
+          "declaredType": "RasterEffectOptions",
+          "runtimeType": "RasterEffectOptions",
+          "sample": "<RasterEffectOptions>"
+        },
+        {
+          "name": "rasterItems",
+          "access": "readonly",
+          "declaredType": "RasterItems",
+          "runtimeType": "RasterItems",
+          "sample": "<RasterItems>"
+        },
+        {
+          "name": "rulerOrigin",
+          "access": "readwrite",
+          "declaredType": "point",
+          "runtimeType": "Array(2)",
+          "sample": [
+            -850,
+            -200
+          ]
+        },
+        {
+          "name": "rulerUnits",
+          "access": "readonly",
+          "declaredType": "Object",
+          "runtimeType": "RulerUnits.Points",
+          "sample": "<RulerUnits.Points>"
+        },
+        {
+          "name": "saved",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "scaleFactor",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 1
+        },
+        {
+          "name": "selection",
+          "access": "readwrite",
+          "declaredType": "array",
+          "runtimeType": "Array(0)",
+          "sample": []
+        },
+        {
+          "name": "showPlacedImages",
+          "access": "readonly",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "splitLongPaths",
+          "access": "readonly",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "spots",
+          "access": "readonly",
+          "declaredType": "Spots",
+          "runtimeType": "Spots",
+          "sample": "<Spots>"
+        },
+        {
+          "name": "stationery",
+          "access": "readonly",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "stories",
+          "access": "readonly",
+          "declaredType": "Stories",
+          "runtimeType": "Stories",
+          "sample": "<Stories>"
+        },
+        {
+          "name": "swatchGroups",
+          "access": "readonly",
+          "declaredType": "SwatchGroups",
+          "runtimeType": "SwatchGroups",
+          "sample": "<SwatchGroups>"
+        },
+        {
+          "name": "swatches",
+          "access": "readonly",
+          "declaredType": "Swatches",
+          "runtimeType": "Swatches",
+          "sample": "<Swatches>"
+        },
+        {
+          "name": "symbolItems",
+          "access": "readonly",
+          "declaredType": "SymbolItems",
+          "runtimeType": "SymbolItems",
+          "sample": "<SymbolItems>"
+        },
+        {
+          "name": "symbols",
+          "access": "readonly",
+          "declaredType": "Symbols",
+          "runtimeType": "Symbols",
+          "sample": "<Symbols>"
+        },
+        {
+          "name": "symmetryRepeatItems",
+          "access": "readonly",
+          "declaredType": "SymmetryRepeatItems",
+          "runtimeType": "SymmetryRepeatItems",
+          "sample": "<SymmetryRepeatItems>"
+        },
+        {
+          "name": "tags",
+          "access": "readonly",
+          "declaredType": "Tags",
+          "runtimeType": "Tags",
+          "sample": "<Tags>"
+        },
+        {
+          "name": "textFrames",
+          "access": "readonly",
+          "declaredType": "TextFrames",
+          "runtimeType": "TextFrames",
+          "sample": "<TextFrames>"
+        },
+        {
+          "name": "tileFullPages",
+          "access": "readonly",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "Document"
+        },
+        {
+          "name": "useDefaultScreen",
+          "access": "readonly",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "variables",
+          "access": "readonly",
+          "declaredType": "Variables",
+          "runtimeType": "Variables",
+          "sample": "<Variables>"
+        },
+        {
+          "name": "variablesLocked",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "views",
+          "access": "readonly",
+          "declaredType": "Views",
+          "runtimeType": "Views",
+          "sample": "<Views>"
+        },
+        {
+          "name": "visibleBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            48.5,
+            550.5,
+            660,
+            73.904
+          ]
+        },
+        {
+          "name": "width",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 400
+        }
+      ],
+      "methods": [
+        "activate",
+        "close",
+        "convertCoordinate",
+        "convertToLargeCanvas",
+        "exitIsolationMode",
+        "exitSymbolIsolationMode",
+        "exportAsFormat",
+        "exportFile",
+        "exportForScreens",
+        "exportPDFPreset",
+        "exportPerspectiveGridPreset",
+        "exportPrintPreset",
+        "exportSelectionAsAi",
+        "exportSelectionAsPNG",
+        "exportVariables",
+        "fitArtboardToSelectedArt",
+        "generateMockup",
+        "getAllBrushes",
+        "getDeHighlightedObjectsCount",
+        "getDocumentInfoAsText",
+        "getHighlightedObjectsCount",
+        "getPageItemFromUuid",
+        "getPerspectiveActivePlane",
+        "getPreviewMode",
+        "getScreenMode",
+        "getSelSymbolSetProps",
+        "getSelectedBrushes",
+        "getSymbol9SliceGrid",
+        "getViewMode",
+        "hidePerspectiveGrid",
+        "imageCapture",
+        "importCharacterStyles",
+        "importFile",
+        "importPDFPreset",
+        "importParagraphStyles",
+        "importPerspectiveGridPreset",
+        "importPrintPreset",
+        "importVariables",
+        "isGridVisible",
+        "isGuideVisible",
+        "isOutlineMode",
+        "isPixelGridVisible",
+        "isRulerVisible",
+        "isSmartEditMode",
+        "isSnapToGridEnabled",
+        "isSymbolGuidesEnabled",
+        "isSymbolIsolationModeActive",
+        "isTransparencyGridVisible",
+        "isTrimViewEnabled",
+        "isViewClippedToArtboards",
+        "isolateSelectedArt",
+        "numSelectedSymbol",
+        "openSymbolInIsolationMode",
+        "print",
+        "processGesture",
+        "rasterize",
+        "rearrangeArtboards",
+        "requestPlaceCloudPSD",
+        "save",
+        "saveAs",
+        "saveToCloud",
+        "selectGraphicStyle",
+        "selectObjectsOnActiveArtboard",
+        "selectPerspectivePreset",
+        "selectSymbol",
+        "setPerspectiveActivePlane",
+        "setSymbol9SliceGrid",
+        "showPerspectiveGrid",
+        "windowCapture",
+        "writeAsLibrary"
+      ]
+    },
+    "Artboard": {
+      "label": "Artboard",
+      "typename": "Artboard",
+      "properties": [
+        {
+          "name": "artboardRect",
+          "access": "readwrite",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            0,
+            600,
+            800,
+            0
+          ]
+        },
+        {
+          "name": "name",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "Main Artboard"
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Document",
+          "runtimeType": "Document",
+          "sample": "<Document>"
+        },
+        {
+          "name": "rulerOrigin",
+          "access": "readwrite",
+          "declaredType": "point",
+          "runtimeType": "Array(2)",
+          "sample": [
+            0,
+            0
+          ]
+        },
+        {
+          "name": "rulerPAR",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 1
+        },
+        {
+          "name": "showCenter",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "showCrossHairs",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "showSafeAreas",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "Artboard"
+        }
+      ],
+      "methods": [
+        "canChangeRulerCoordinateSystem",
+        "isVideoRulerVisible",
+        "remove"
+      ]
+    },
+    "Layer": {
+      "label": "Layer",
+      "typename": "Layer",
+      "properties": [
+        {
+          "name": "absoluteZOrderPosition",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 19
+        },
+        {
+          "name": "artworkKnockout",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "KnockoutState.INHERITED",
+          "sample": "<KnockoutState.INHERITED>"
+        },
+        {
+          "name": "blendingMode",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "BlendModes.NORMAL",
+          "sample": "<BlendModes.NORMAL>"
+        },
+        {
+          "name": "color",
+          "access": "readwrite",
+          "declaredType": "RGBColor",
+          "runtimeType": "RGBColor",
+          "sample": "<RGBColor>"
+        },
+        {
+          "name": "compoundPathItems",
+          "access": "readonly",
+          "declaredType": "CompoundPathItems",
+          "runtimeType": "CompoundPathItems",
+          "sample": "<CompoundPathItems>"
+        },
+        {
+          "name": "dimPlacedImages",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "graphItems",
+          "access": "readonly",
+          "declaredType": "GraphItems",
+          "runtimeType": "GraphItems",
+          "sample": "<GraphItems>"
+        },
+        {
+          "name": "gridRepeatItems",
+          "access": "readonly",
+          "declaredType": "GridRepeatItems",
+          "runtimeType": "GridRepeatItems",
+          "sample": "<GridRepeatItems>"
+        },
+        {
+          "name": "groupItems",
+          "access": "readonly",
+          "declaredType": "GroupItems",
+          "runtimeType": "GroupItems",
+          "sample": "<GroupItems>"
+        },
+        {
+          "name": "hasSelectedArtwork",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "isIsolated",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "layers",
+          "access": "readonly",
+          "declaredType": "Layers",
+          "runtimeType": "Layers",
+          "sample": "<Layers>"
+        },
+        {
+          "name": "legacyTextItems",
+          "access": "readonly",
+          "declaredType": "LegacyTextItems",
+          "runtimeType": "LegacyTextItems",
+          "sample": "<LegacyTextItems>"
+        },
+        {
+          "name": "locked",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "meshItems",
+          "access": "readonly",
+          "declaredType": "MeshItems",
+          "runtimeType": "MeshItems",
+          "sample": "<MeshItems>"
+        },
+        {
+          "name": "name",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "Vector Layer"
+        },
+        {
+          "name": "nonNativeItems",
+          "access": "readonly",
+          "declaredType": "NonNativeItems",
+          "runtimeType": "NonNativeItems",
+          "sample": "<NonNativeItems>"
+        },
+        {
+          "name": "opacity",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 100
+        },
+        {
+          "name": "pageItems",
+          "access": "readonly",
+          "declaredType": "PageItems",
+          "runtimeType": "PageItems",
+          "sample": "<PageItems>"
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Document",
+          "runtimeType": "Document",
+          "sample": "<Document>"
+        },
+        {
+          "name": "pathItems",
+          "access": "readonly",
+          "declaredType": "PathItems",
+          "runtimeType": "PathItems",
+          "sample": "<PathItems>"
+        },
+        {
+          "name": "placedItems",
+          "access": "readonly",
+          "declaredType": "PlacedItems",
+          "runtimeType": "PlacedItems",
+          "sample": "<PlacedItems>"
+        },
+        {
+          "name": "pluginItems",
+          "access": "readonly",
+          "declaredType": "PluginItems",
+          "runtimeType": "PluginItems",
+          "sample": "<PluginItems>"
+        },
+        {
+          "name": "preview",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "printable",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "radialRepeatItems",
+          "access": "readonly",
+          "declaredType": "RadialRepeatItems",
+          "runtimeType": "RadialRepeatItems",
+          "sample": "<RadialRepeatItems>"
+        },
+        {
+          "name": "rasterItems",
+          "access": "readonly",
+          "declaredType": "RasterItems",
+          "runtimeType": "RasterItems",
+          "sample": "<RasterItems>"
+        },
+        {
+          "name": "sliced",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "symbolItems",
+          "access": "readonly",
+          "declaredType": "SymbolItems",
+          "runtimeType": "SymbolItems",
+          "sample": "<SymbolItems>"
+        },
+        {
+          "name": "symmetryRepeatItems",
+          "access": "readonly",
+          "declaredType": "SymmetryRepeatItems",
+          "runtimeType": "SymmetryRepeatItems",
+          "sample": "<SymmetryRepeatItems>"
+        },
+        {
+          "name": "textFrames",
+          "access": "readonly",
+          "declaredType": "TextFrames",
+          "runtimeType": "TextFrames",
+          "sample": "<TextFrames>"
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "Layer"
+        },
+        {
+          "name": "visible",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "zOrderPosition",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 1
+        }
+      ],
+      "methods": [
+        "move",
+        "remove",
+        "zOrder"
+      ]
+    },
+    "PathItem": {
+      "label": "PathItem",
+      "typename": "PathItem",
+      "properties": [
+        {
+          "name": "absoluteZOrderPosition",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 2
+        },
+        {
+          "name": "area",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 24000
+        },
+        {
+          "name": "artworkKnockout",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "KnockoutState.DISABLED",
+          "sample": "<KnockoutState.DISABLED>"
+        },
+        {
+          "name": "blendingMode",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "BlendModes.MULTIPLY",
+          "sample": "<BlendModes.MULTIPLY>"
+        },
+        {
+          "name": "clipping",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "closed",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "controlBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            48.5,
+            501.5,
+            251.5,
+            378.5
+          ]
+        },
+        {
+          "name": "editable",
+          "access": "readonly",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "evenodd",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "fillColor",
+          "access": "readwrite",
+          "declaredType": "RGBColor",
+          "runtimeType": "RGBColor",
+          "sample": "<RGBColor>"
+        },
+        {
+          "name": "fillOverprint",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "filled",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "geometricBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            50,
+            500,
+            250,
+            380
+          ]
+        },
+        {
+          "name": "guides",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "height",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 120
+        },
+        {
+          "name": "hidden",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "isIsolated",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "layer",
+          "access": "readonly",
+          "declaredType": "Layer",
+          "runtimeType": "Layer",
+          "sample": "<Layer>"
+        },
+        {
+          "name": "left",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 48.5
+        },
+        {
+          "name": "length",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 640
+        },
+        {
+          "name": "locked",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "name",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "SampleRect"
+        },
+        {
+          "name": "note",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": ""
+        },
+        {
+          "name": "opacity",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 85
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Layer",
+          "runtimeType": "Layer",
+          "sample": "<Layer>"
+        },
+        {
+          "name": "pathPoints",
+          "access": "readonly",
+          "declaredType": "PathPoints",
+          "runtimeType": "PathPoints",
+          "sample": "<PathPoints>"
+        },
+        {
+          "name": "pixelAligned",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "polarity",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "PolarityValues.POSITIVE",
+          "sample": "<PolarityValues.POSITIVE>"
+        },
+        {
+          "name": "position",
+          "access": "readwrite",
+          "declaredType": "point",
+          "runtimeType": "Array(2)",
+          "sample": [
+            50,
+            500
+          ]
+        },
+        {
+          "name": "resolution",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 800
+        },
+        {
+          "name": "selected",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "selectedPathPoints",
+          "access": "readonly",
+          "declaredType": "array",
+          "runtimeType": "Array(0)",
+          "sample": []
+        },
+        {
+          "name": "sliced",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "strokeCap",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "StrokeCap.ROUNDENDCAP",
+          "sample": "<StrokeCap.ROUNDENDCAP>"
+        },
+        {
+          "name": "strokeColor",
+          "access": "readwrite",
+          "declaredType": "RGBColor",
+          "runtimeType": "RGBColor",
+          "sample": "<RGBColor>"
+        },
+        {
+          "name": "strokeDashOffset",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 2
+        },
+        {
+          "name": "strokeDashes",
+          "access": "readwrite",
+          "declaredType": "array",
+          "runtimeType": "Array(2)",
+          "sample": [
+            8,
+            4
+          ]
+        },
+        {
+          "name": "strokeJoin",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "StrokeJoin.ROUNDENDJOIN",
+          "sample": "<StrokeJoin.ROUNDENDJOIN>"
+        },
+        {
+          "name": "strokeMiterLimit",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 4
+        },
+        {
+          "name": "strokeOverprint",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "strokeWidth",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 3
+        },
+        {
+          "name": "stroked",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "tags",
+          "access": "readonly",
+          "declaredType": "Tags",
+          "runtimeType": "Tags",
+          "sample": "<Tags>"
+        },
+        {
+          "name": "top",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 501.5
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "PathItem"
+        },
+        {
+          "name": "uRL",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": ""
+        },
+        {
+          "name": "uuid",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "513"
+        },
+        {
+          "name": "visibilityVariable",
+          "access": "readwrite",
+          "declaredType": "null",
+          "runtimeType": "null",
+          "sample": null
+        },
+        {
+          "name": "visibleBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            48.5,
+            501.5,
+            251.5,
+            378.5
+          ]
+        },
+        {
+          "name": "width",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 200
+        },
+        {
+          "name": "wrapInside",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "Requested property is only available for wrapped items."
+        },
+        {
+          "name": "wrapOffset",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "Requested property is only available for wrapped items."
+        },
+        {
+          "name": "wrapped",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "zOrderPosition",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 4
+        }
+      ],
+      "methods": [
+        "applyEffect",
+        "bringInPerspective",
+        "canParallelExecutionRun",
+        "convertAnchorToCorner",
+        "convertAnchorToSmooth",
+        "duplicate",
+        "isAnchorPointCorner",
+        "move",
+        "remove",
+        "resize",
+        "rotate",
+        "sendScriptMessage",
+        "setEntirePath",
+        "setSmootheningPercentageValue",
+        "transform",
+        "translate",
+        "zOrder"
+      ]
+    },
+    "PathPoint": {
+      "label": "PathPoint",
+      "typename": "PathPoint",
+      "properties": [
+        {
+          "name": "anchor",
+          "access": "readwrite",
+          "declaredType": "point",
+          "runtimeType": "Array(2)",
+          "sample": [
+            100,
+            300
+          ]
+        },
+        {
+          "name": "leftDirection",
+          "access": "readwrite",
+          "declaredType": "point",
+          "runtimeType": "Array(2)",
+          "sample": [
+            100,
+            300
+          ]
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "PathItem",
+          "runtimeType": "PathItem",
+          "sample": "<PathItem>"
+        },
+        {
+          "name": "pointType",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "PointType.SMOOTH",
+          "sample": "<PointType.SMOOTH>"
+        },
+        {
+          "name": "rightDirection",
+          "access": "readwrite",
+          "declaredType": "point",
+          "runtimeType": "Array(2)",
+          "sample": [
+            140,
+            340
+          ]
+        },
+        {
+          "name": "selected",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "PathPointSelection.NOSELECTION",
+          "sample": "<PathPointSelection.NOSELECTION>"
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "PathPoint"
+        }
+      ],
+      "methods": [
+        "remove"
+      ]
+    },
+    "CompoundPathItem": {
+      "label": "CompoundPathItem",
+      "typename": "CompoundPathItem",
+      "properties": [
+        {
+          "name": "absoluteZOrderPosition",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 6
+        },
+        {
+          "name": "artworkKnockout",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "KnockoutState.DISABLED",
+          "sample": "<KnockoutState.DISABLED>"
+        },
+        {
+          "name": "blendingMode",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "BlendModes.NORMAL",
+          "sample": "<BlendModes.NORMAL>"
+        },
+        {
+          "name": "controlBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            299.5,
+            450.5,
+            440.5,
+            309.5
+          ]
+        },
+        {
+          "name": "editable",
+          "access": "readonly",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "geometricBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            300,
+            450,
+            440,
+            310
+          ]
+        },
+        {
+          "name": "height",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 140
+        },
+        {
+          "name": "hidden",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "isIsolated",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "layer",
+          "access": "readonly",
+          "declaredType": "Layer",
+          "runtimeType": "Layer",
+          "sample": "<Layer>"
+        },
+        {
+          "name": "left",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 299.5
+        },
+        {
+          "name": "locked",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "name",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "SampleCompound"
+        },
+        {
+          "name": "note",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": ""
+        },
+        {
+          "name": "opacity",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 100
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Layer",
+          "runtimeType": "Layer",
+          "sample": "<Layer>"
+        },
+        {
+          "name": "pathItems",
+          "access": "readonly",
+          "declaredType": "PathItems",
+          "runtimeType": "PathItems",
+          "sample": "<PathItems>"
+        },
+        {
+          "name": "pixelAligned",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "position",
+          "access": "readwrite",
+          "declaredType": "point",
+          "runtimeType": "Array(2)",
+          "sample": [
+            300,
+            450
+          ]
+        },
+        {
+          "name": "selected",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "sliced",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "tags",
+          "access": "readonly",
+          "declaredType": "Tags",
+          "runtimeType": "Tags",
+          "sample": "<Tags>"
+        },
+        {
+          "name": "top",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 450.5
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "CompoundPathItem"
+        },
+        {
+          "name": "uRL",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": ""
+        },
+        {
+          "name": "uuid",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "515"
+        },
+        {
+          "name": "visibilityVariable",
+          "access": "readwrite",
+          "declaredType": "null",
+          "runtimeType": "null",
+          "sample": null
+        },
+        {
+          "name": "visibleBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            299.5,
+            450.5,
+            440.5,
+            309.5
+          ]
+        },
+        {
+          "name": "width",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 140
+        },
+        {
+          "name": "wrapInside",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "Requested property is only available for wrapped items."
+        },
+        {
+          "name": "wrapOffset",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "Requested property is only available for wrapped items."
+        },
+        {
+          "name": "wrapped",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "zOrderPosition",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 12
+        }
+      ],
+      "methods": [
+        "applyEffect",
+        "bringInPerspective",
+        "canParallelExecutionRun",
+        "duplicate",
+        "move",
+        "remove",
+        "resize",
+        "rotate",
+        "sendScriptMessage",
+        "transform",
+        "translate",
+        "zOrder"
+      ]
+    },
+    "GroupItem": {
+      "label": "GroupItem",
+      "typename": "GroupItem",
+      "properties": [
+        {
+          "name": "absoluteZOrderPosition",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 8
+        },
+        {
+          "name": "artworkKnockout",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "KnockoutState.INHERITED",
+          "sample": "<KnockoutState.INHERITED>"
+        },
+        {
+          "name": "blendingMode",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "BlendModes.SCREEN",
+          "sample": "<BlendModes.SCREEN>"
+        },
+        {
+          "name": "clipped",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "compoundPathItems",
+          "access": "readonly",
+          "declaredType": "CompoundPathItems",
+          "runtimeType": "CompoundPathItems",
+          "sample": "<CompoundPathItems>"
+        },
+        {
+          "name": "controlBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            299.5,
+            300.5,
+            380.5,
+            219.5
+          ]
+        },
+        {
+          "name": "editable",
+          "access": "readonly",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "geometricBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            300,
+            300,
+            380,
+            220
+          ]
+        },
+        {
+          "name": "graphItems",
+          "access": "readonly",
+          "declaredType": "GraphItems",
+          "runtimeType": "GraphItems",
+          "sample": "<GraphItems>"
+        },
+        {
+          "name": "gridRepeatItems",
+          "access": "readonly",
+          "declaredType": "GridRepeatItems",
+          "runtimeType": "GridRepeatItems",
+          "sample": "<GridRepeatItems>"
+        },
+        {
+          "name": "groupItems",
+          "access": "readonly",
+          "declaredType": "GroupItems",
+          "runtimeType": "GroupItems",
+          "sample": "<GroupItems>"
+        },
+        {
+          "name": "height",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 80
+        },
+        {
+          "name": "hidden",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "isIsolated",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "layer",
+          "access": "readonly",
+          "declaredType": "Layer",
+          "runtimeType": "Layer",
+          "sample": "<Layer>"
+        },
+        {
+          "name": "left",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 299.5
+        },
+        {
+          "name": "legacyTextItems",
+          "access": "readonly",
+          "declaredType": "LegacyTextItems",
+          "runtimeType": "LegacyTextItems",
+          "sample": "<LegacyTextItems>"
+        },
+        {
+          "name": "locked",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "meshItems",
+          "access": "readonly",
+          "declaredType": "MeshItems",
+          "runtimeType": "MeshItems",
+          "sample": "<MeshItems>"
+        },
+        {
+          "name": "name",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "SampleGroup"
+        },
+        {
+          "name": "nonNativeItems",
+          "access": "readonly",
+          "declaredType": "NonNativeItems",
+          "runtimeType": "NonNativeItems",
+          "sample": "<NonNativeItems>"
+        },
+        {
+          "name": "note",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": ""
+        },
+        {
+          "name": "opacity",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 90
+        },
+        {
+          "name": "pageItems",
+          "access": "readonly",
+          "declaredType": "PageItems",
+          "runtimeType": "PageItems",
+          "sample": "<PageItems>"
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Layer",
+          "runtimeType": "Layer",
+          "sample": "<Layer>"
+        },
+        {
+          "name": "pathItems",
+          "access": "readonly",
+          "declaredType": "PathItems",
+          "runtimeType": "PathItems",
+          "sample": "<PathItems>"
+        },
+        {
+          "name": "pixelAligned",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "placedItems",
+          "access": "readonly",
+          "declaredType": "PlacedItems",
+          "runtimeType": "PlacedItems",
+          "sample": "<PlacedItems>"
+        },
+        {
+          "name": "pluginItems",
+          "access": "readonly",
+          "declaredType": "PluginItems",
+          "runtimeType": "PluginItems",
+          "sample": "<PluginItems>"
+        },
+        {
+          "name": "position",
+          "access": "readwrite",
+          "declaredType": "point",
+          "runtimeType": "Array(2)",
+          "sample": [
+            300,
+            300
+          ]
+        },
+        {
+          "name": "radialRepeatItems",
+          "access": "readonly",
+          "declaredType": "RadialRepeatItems",
+          "runtimeType": "RadialRepeatItems",
+          "sample": "<RadialRepeatItems>"
+        },
+        {
+          "name": "rasterItems",
+          "access": "readonly",
+          "declaredType": "RasterItems",
+          "runtimeType": "RasterItems",
+          "sample": "<RasterItems>"
+        },
+        {
+          "name": "selected",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "sliced",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "symbolItems",
+          "access": "readonly",
+          "declaredType": "SymbolItems",
+          "runtimeType": "SymbolItems",
+          "sample": "<SymbolItems>"
+        },
+        {
+          "name": "symmetryRepeatItems",
+          "access": "readonly",
+          "declaredType": "SymmetryRepeatItems",
+          "runtimeType": "SymmetryRepeatItems",
+          "sample": "<SymmetryRepeatItems>"
+        },
+        {
+          "name": "tags",
+          "access": "readonly",
+          "declaredType": "Tags",
+          "runtimeType": "Tags",
+          "sample": "<Tags>"
+        },
+        {
+          "name": "textFrames",
+          "access": "readonly",
+          "declaredType": "TextFrames",
+          "runtimeType": "TextFrames",
+          "sample": "<TextFrames>"
+        },
+        {
+          "name": "top",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 300.5
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "GroupItem"
+        },
+        {
+          "name": "uRL",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": ""
+        },
+        {
+          "name": "uuid",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "518"
+        },
+        {
+          "name": "visibilityVariable",
+          "access": "readwrite",
+          "declaredType": "null",
+          "runtimeType": "null",
+          "sample": null
+        },
+        {
+          "name": "visibleBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            299.5,
+            300.5,
+            380.5,
+            219.5
+          ]
+        },
+        {
+          "name": "width",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 80
+        },
+        {
+          "name": "wrapInside",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "Requested property is only available for wrapped items."
+        },
+        {
+          "name": "wrapOffset",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "Requested property is only available for wrapped items."
+        },
+        {
+          "name": "wrapped",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "zOrderPosition",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 11
+        }
+      ],
+      "methods": [
+        "applyEffect",
+        "bringInPerspective",
+        "canParallelExecutionRun",
+        "duplicate",
+        "isDimensionArt",
+        "move",
+        "remove",
+        "resize",
+        "rotate",
+        "sendScriptMessage",
+        "transform",
+        "translate",
+        "zOrder"
+      ]
+    },
+    "GroupItem_ClippingMask": {
+      "label": "GroupItem (clipping mask)",
+      "typename": "GroupItem",
+      "properties": [
+        {
+          "name": "absoluteZOrderPosition",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 11
+        },
+        {
+          "name": "artworkKnockout",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "KnockoutState.INHERITED",
+          "sample": "<KnockoutState.INHERITED>"
+        },
+        {
+          "name": "blendingMode",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "BlendModes.NORMAL",
+          "sample": "<BlendModes.NORMAL>"
+        },
+        {
+          "name": "clipped",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "compoundPathItems",
+          "access": "readonly",
+          "declaredType": "CompoundPathItems",
+          "runtimeType": "CompoundPathItems",
+          "sample": "<CompoundPathItems>"
+        },
+        {
+          "name": "controlBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            419.5,
+            260.5,
+            520.5,
+            159.5
+          ]
+        },
+        {
+          "name": "editable",
+          "access": "readonly",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "geometricBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            420,
+            260,
+            520,
+            160
+          ]
+        },
+        {
+          "name": "graphItems",
+          "access": "readonly",
+          "declaredType": "GraphItems",
+          "runtimeType": "GraphItems",
+          "sample": "<GraphItems>"
+        },
+        {
+          "name": "gridRepeatItems",
+          "access": "readonly",
+          "declaredType": "GridRepeatItems",
+          "runtimeType": "GridRepeatItems",
+          "sample": "<GridRepeatItems>"
+        },
+        {
+          "name": "groupItems",
+          "access": "readonly",
+          "declaredType": "GroupItems",
+          "runtimeType": "GroupItems",
+          "sample": "<GroupItems>"
+        },
+        {
+          "name": "height",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 100
+        },
+        {
+          "name": "hidden",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "isIsolated",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "layer",
+          "access": "readonly",
+          "declaredType": "Layer",
+          "runtimeType": "Layer",
+          "sample": "<Layer>"
+        },
+        {
+          "name": "left",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 419.5
+        },
+        {
+          "name": "legacyTextItems",
+          "access": "readonly",
+          "declaredType": "LegacyTextItems",
+          "runtimeType": "LegacyTextItems",
+          "sample": "<LegacyTextItems>"
+        },
+        {
+          "name": "locked",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "meshItems",
+          "access": "readonly",
+          "declaredType": "MeshItems",
+          "runtimeType": "MeshItems",
+          "sample": "<MeshItems>"
+        },
+        {
+          "name": "name",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "SampleClippingGroup"
+        },
+        {
+          "name": "nonNativeItems",
+          "access": "readonly",
+          "declaredType": "NonNativeItems",
+          "runtimeType": "NonNativeItems",
+          "sample": "<NonNativeItems>"
+        },
+        {
+          "name": "note",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": ""
+        },
+        {
+          "name": "opacity",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 100
+        },
+        {
+          "name": "pageItems",
+          "access": "readonly",
+          "declaredType": "PageItems",
+          "runtimeType": "PageItems",
+          "sample": "<PageItems>"
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Layer",
+          "runtimeType": "Layer",
+          "sample": "<Layer>"
+        },
+        {
+          "name": "pathItems",
+          "access": "readonly",
+          "declaredType": "PathItems",
+          "runtimeType": "PathItems",
+          "sample": "<PathItems>"
+        },
+        {
+          "name": "pixelAligned",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "placedItems",
+          "access": "readonly",
+          "declaredType": "PlacedItems",
+          "runtimeType": "PlacedItems",
+          "sample": "<PlacedItems>"
+        },
+        {
+          "name": "pluginItems",
+          "access": "readonly",
+          "declaredType": "PluginItems",
+          "runtimeType": "PluginItems",
+          "sample": "<PluginItems>"
+        },
+        {
+          "name": "position",
+          "access": "readwrite",
+          "declaredType": "point",
+          "runtimeType": "Array(2)",
+          "sample": [
+            420,
+            260
+          ]
+        },
+        {
+          "name": "radialRepeatItems",
+          "access": "readonly",
+          "declaredType": "RadialRepeatItems",
+          "runtimeType": "RadialRepeatItems",
+          "sample": "<RadialRepeatItems>"
+        },
+        {
+          "name": "rasterItems",
+          "access": "readonly",
+          "declaredType": "RasterItems",
+          "runtimeType": "RasterItems",
+          "sample": "<RasterItems>"
+        },
+        {
+          "name": "selected",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "sliced",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "symbolItems",
+          "access": "readonly",
+          "declaredType": "SymbolItems",
+          "runtimeType": "SymbolItems",
+          "sample": "<SymbolItems>"
+        },
+        {
+          "name": "symmetryRepeatItems",
+          "access": "readonly",
+          "declaredType": "SymmetryRepeatItems",
+          "runtimeType": "SymmetryRepeatItems",
+          "sample": "<SymmetryRepeatItems>"
+        },
+        {
+          "name": "tags",
+          "access": "readonly",
+          "declaredType": "Tags",
+          "runtimeType": "Tags",
+          "sample": "<Tags>"
+        },
+        {
+          "name": "textFrames",
+          "access": "readonly",
+          "declaredType": "TextFrames",
+          "runtimeType": "TextFrames",
+          "sample": "<TextFrames>"
+        },
+        {
+          "name": "top",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 260.5
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "GroupItem"
+        },
+        {
+          "name": "uRL",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": ""
+        },
+        {
+          "name": "uuid",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "520"
+        },
+        {
+          "name": "visibilityVariable",
+          "access": "readwrite",
+          "declaredType": "null",
+          "runtimeType": "null",
+          "sample": null
+        },
+        {
+          "name": "visibleBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            419.5,
+            260.5,
+            520.5,
+            159.5
+          ]
+        },
+        {
+          "name": "width",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 100
+        },
+        {
+          "name": "wrapInside",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "Requested property is only available for wrapped items."
+        },
+        {
+          "name": "wrapOffset",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "Requested property is only available for wrapped items."
+        },
+        {
+          "name": "wrapped",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "zOrderPosition",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 12
+        }
+      ],
+      "methods": [
+        "applyEffect",
+        "bringInPerspective",
+        "canParallelExecutionRun",
+        "duplicate",
+        "isDimensionArt",
+        "move",
+        "remove",
+        "resize",
+        "rotate",
+        "sendScriptMessage",
+        "transform",
+        "translate",
+        "zOrder"
+      ]
+    },
+    "TextFrame_Point": {
+      "label": "TextFrame (point text)",
+      "typename": "TextFrame",
+      "properties": [
+        {
+          "name": "absoluteZOrderPosition",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 13
+        },
+        {
+          "name": "anchor",
+          "access": "readwrite",
+          "declaredType": "point",
+          "runtimeType": "Array(2)",
+          "sample": [
+            50,
+            80
+          ]
+        },
+        {
+          "name": "antialias",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "TextAntialias.SHARP",
+          "sample": "<TextAntialias.SHARP>"
+        },
+        {
+          "name": "artworkKnockout",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "KnockoutState.DISABLED",
+          "sample": "<KnockoutState.DISABLED>"
+        },
+        {
+          "name": "blendingMode",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "BlendModes.NORMAL",
+          "sample": "<BlendModes.NORMAL>"
+        },
+        {
+          "name": "characters",
+          "access": "readonly",
+          "declaredType": "Characters",
+          "runtimeType": "Characters",
+          "sample": "<Characters>"
+        },
+        {
+          "name": "columnCount",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 1
+        },
+        {
+          "name": "columnGutter",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "contentVariable",
+          "access": "readwrite",
+          "declaredType": "undefined",
+          "runtimeType": "undefined",
+          "sample": null
+        },
+        {
+          "name": "contents",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "Hello BAE"
+        },
+        {
+          "name": "controlBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            49,
+            102.12,
+            163.223,
+            72.904
+          ]
+        },
+        {
+          "name": "editable",
+          "access": "readonly",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "endTValue",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "The requested property is not available for this type of text frame."
+        },
+        {
+          "name": "firstBaseline",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "The requested property is not available for this type of text frame."
+        },
+        {
+          "name": "firstBaselineMin",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "The requested property is not available for this type of text frame."
+        },
+        {
+          "name": "flowLinksHorizontally",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "geometricBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            50,
+            101.12,
+            150.847,
+            73.904
+          ]
+        },
+        {
+          "name": "height",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 27.2158203125
+        },
+        {
+          "name": "hidden",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "insertionPoints",
+          "access": "readonly",
+          "declaredType": "InsertionPoints",
+          "runtimeType": "InsertionPoints",
+          "sample": "<InsertionPoints>"
+        },
+        {
+          "name": "isIsolated",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "kind",
+          "access": "readonly",
+          "declaredType": "Object",
+          "runtimeType": "TextType.POINTTEXT",
+          "sample": "<TextType.POINTTEXT>"
+        },
+        {
+          "name": "layer",
+          "access": "readonly",
+          "declaredType": "Layer",
+          "runtimeType": "Layer",
+          "sample": "<Layer>"
+        },
+        {
+          "name": "left",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 50
+        },
+        {
+          "name": "lines",
+          "access": "readonly",
+          "declaredType": "Lines",
+          "runtimeType": "Lines",
+          "sample": "<Lines>"
+        },
+        {
+          "name": "locked",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "matrix",
+          "access": "readonly",
+          "declaredType": "Matrix",
+          "runtimeType": "Matrix",
+          "sample": "<Matrix>"
+        },
+        {
+          "name": "name",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "SamplePointText"
+        },
+        {
+          "name": "nextFrame",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "The requested property is not available for this type of text frame."
+        },
+        {
+          "name": "note",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": ""
+        },
+        {
+          "name": "opacity",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 100
+        },
+        {
+          "name": "opticalAlignment",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "orientation",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "TextOrientation.HORIZONTAL",
+          "sample": "<TextOrientation.HORIZONTAL>"
+        },
+        {
+          "name": "paragraphs",
+          "access": "readonly",
+          "declaredType": "Paragraphs",
+          "runtimeType": "Paragraphs",
+          "sample": "<Paragraphs>"
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Layer",
+          "runtimeType": "Layer",
+          "sample": "<Layer>"
+        },
+        {
+          "name": "pixelAligned",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "position",
+          "access": "readwrite",
+          "declaredType": "point",
+          "runtimeType": "Array(2)",
+          "sample": [
+            50,
+            101.12
+          ]
+        },
+        {
+          "name": "previousFrame",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "The requested property is not available for this type of text frame."
+        },
+        {
+          "name": "rowCount",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 1
+        },
+        {
+          "name": "rowGutter",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "selected",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "sliced",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "spacing",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "startTValue",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "The requested property is not available for this type of text frame."
+        },
+        {
+          "name": "story",
+          "access": "readonly",
+          "declaredType": "Story",
+          "runtimeType": "Story",
+          "sample": "<Story>"
+        },
+        {
+          "name": "tags",
+          "access": "readonly",
+          "declaredType": "Tags",
+          "runtimeType": "Tags",
+          "sample": "<Tags>"
+        },
+        {
+          "name": "textPath",
+          "access": "readonly",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "The requested property is not available for this type of text frame."
+        },
+        {
+          "name": "textRange",
+          "access": "readonly",
+          "declaredType": "TextRange",
+          "runtimeType": "TextRange",
+          "sample": "<TextRange>"
+        },
+        {
+          "name": "textRanges",
+          "access": "readonly",
+          "declaredType": "TextRanges",
+          "runtimeType": "TextRanges",
+          "sample": "<TextRanges>"
+        },
+        {
+          "name": "textSelection",
+          "access": "readonly",
+          "declaredType": "array",
+          "runtimeType": "Array(0)",
+          "sample": []
+        },
+        {
+          "name": "top",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 101.1201171875
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "TextFrame"
+        },
+        {
+          "name": "uRL",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": ""
+        },
+        {
+          "name": "uuid",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "524"
+        },
+        {
+          "name": "visibilityVariable",
+          "access": "readwrite",
+          "declaredType": "null",
+          "runtimeType": "null",
+          "sample": null
+        },
+        {
+          "name": "visibleBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            50,
+            101.12,
+            150.847,
+            73.904
+          ]
+        },
+        {
+          "name": "width",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 100.8466796875
+        },
+        {
+          "name": "words",
+          "access": "readonly",
+          "declaredType": "Words",
+          "runtimeType": "Words",
+          "sample": "<Words>"
+        },
+        {
+          "name": "wrapInside",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "Requested property is only available for wrapped items."
+        },
+        {
+          "name": "wrapOffset",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "Requested property is only available for wrapped items."
+        },
+        {
+          "name": "wrapped",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "zOrderPosition",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 10
+        }
+      ],
+      "methods": [
+        "applyEffect",
+        "bringInPerspective",
+        "canParallelExecutionRun",
+        "convertAreaObjectToPointObject",
+        "convertPointObjectToAreaObject",
+        "createOutline",
+        "duplicate",
+        "generateThumbnailWithTextFrameProperties",
+        "move",
+        "remove",
+        "resize",
+        "rotate",
+        "sendScriptMessage",
+        "transform",
+        "translate",
+        "zOrder"
+      ]
+    },
+    "TextFrame_Area": {
+      "label": "TextFrame (area text)",
+      "typename": "TextFrame",
+      "properties": [
+        {
+          "name": "absoluteZOrderPosition",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 14
+        },
+        {
+          "name": "anchor",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "The requested property is not available for this type of text frame."
+        },
+        {
+          "name": "antialias",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "TextAntialias.SHARP",
+          "sample": "<TextAntialias.SHARP>"
+        },
+        {
+          "name": "artworkKnockout",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "KnockoutState.DISABLED",
+          "sample": "<KnockoutState.DISABLED>"
+        },
+        {
+          "name": "blendingMode",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "BlendModes.NORMAL",
+          "sample": "<BlendModes.NORMAL>"
+        },
+        {
+          "name": "characters",
+          "access": "readonly",
+          "declaredType": "Characters",
+          "runtimeType": "Characters",
+          "sample": "<Characters>"
+        },
+        {
+          "name": "columnCount",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 1
+        },
+        {
+          "name": "columnGutter",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 18
+        },
+        {
+          "name": "contentVariable",
+          "access": "readwrite",
+          "declaredType": "undefined",
+          "runtimeType": "undefined",
+          "sample": null
+        },
+        {
+          "name": "contents",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "Area text sample"
+        },
+        {
+          "name": "controlBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            294,
+            186,
+            461,
+            99
+          ]
+        },
+        {
+          "name": "editable",
+          "access": "readonly",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "endTValue",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "The requested property is not available for this type of text frame."
+        },
+        {
+          "name": "firstBaseline",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "FirstBaselineType.BASELINEEMBOXHEIGHT",
+          "sample": "<FirstBaselineType.BASELINEEMBOXHEIGHT>"
+        },
+        {
+          "name": "firstBaselineMin",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "flowLinksHorizontally",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "geometricBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            300,
+            180,
+            460,
+            100
+          ]
+        },
+        {
+          "name": "height",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 80
+        },
+        {
+          "name": "hidden",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "insertionPoints",
+          "access": "readonly",
+          "declaredType": "InsertionPoints",
+          "runtimeType": "InsertionPoints",
+          "sample": "<InsertionPoints>"
+        },
+        {
+          "name": "isIsolated",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "kind",
+          "access": "readonly",
+          "declaredType": "Object",
+          "runtimeType": "TextType.AREATEXT",
+          "sample": "<TextType.AREATEXT>"
+        },
+        {
+          "name": "layer",
+          "access": "readonly",
+          "declaredType": "Layer",
+          "runtimeType": "Layer",
+          "sample": "<Layer>"
+        },
+        {
+          "name": "left",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 300
+        },
+        {
+          "name": "lines",
+          "access": "readonly",
+          "declaredType": "Lines",
+          "runtimeType": "Lines",
+          "sample": "<Lines>"
+        },
+        {
+          "name": "locked",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "matrix",
+          "access": "readonly",
+          "declaredType": "Matrix",
+          "runtimeType": "Matrix",
+          "sample": "<Matrix>"
+        },
+        {
+          "name": "name",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "SampleAreaText"
+        },
+        {
+          "name": "nextFrame",
+          "access": "readwrite",
+          "declaredType": "TextFrame",
+          "runtimeType": "TextFrame",
+          "sample": "<TextFrame>"
+        },
+        {
+          "name": "note",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": ""
+        },
+        {
+          "name": "opacity",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 100
+        },
+        {
+          "name": "opticalAlignment",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "orientation",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "TextOrientation.HORIZONTAL",
+          "sample": "<TextOrientation.HORIZONTAL>"
+        },
+        {
+          "name": "paragraphs",
+          "access": "readonly",
+          "declaredType": "Paragraphs",
+          "runtimeType": "Paragraphs",
+          "sample": "<Paragraphs>"
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Layer",
+          "runtimeType": "Layer",
+          "sample": "<Layer>"
+        },
+        {
+          "name": "pixelAligned",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "position",
+          "access": "readwrite",
+          "declaredType": "point",
+          "runtimeType": "Array(2)",
+          "sample": [
+            300,
+            180
+          ]
+        },
+        {
+          "name": "previousFrame",
+          "access": "readwrite",
+          "declaredType": "null",
+          "runtimeType": "null",
+          "sample": null
+        },
+        {
+          "name": "rowCount",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 1
+        },
+        {
+          "name": "rowGutter",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 18
+        },
+        {
+          "name": "selected",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "sliced",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "spacing",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "startTValue",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "The requested property is not available for this type of text frame."
+        },
+        {
+          "name": "story",
+          "access": "readonly",
+          "declaredType": "Story",
+          "runtimeType": "Story",
+          "sample": "<Story>"
+        },
+        {
+          "name": "tags",
+          "access": "readonly",
+          "declaredType": "Tags",
+          "runtimeType": "Tags",
+          "sample": "<Tags>"
+        },
+        {
+          "name": "textPath",
+          "access": "readonly",
+          "declaredType": "TextPath",
+          "runtimeType": "TextPath",
+          "sample": "<TextPath>"
+        },
+        {
+          "name": "textRange",
+          "access": "readonly",
+          "declaredType": "TextRange",
+          "runtimeType": "TextRange",
+          "sample": "<TextRange>"
+        },
+        {
+          "name": "textRanges",
+          "access": "readonly",
+          "declaredType": "TextRanges",
+          "runtimeType": "TextRanges",
+          "sample": "<TextRanges>"
+        },
+        {
+          "name": "textSelection",
+          "access": "readonly",
+          "declaredType": "array",
+          "runtimeType": "Array(0)",
+          "sample": []
+        },
+        {
+          "name": "top",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 180
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "TextFrame"
+        },
+        {
+          "name": "uRL",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": ""
+        },
+        {
+          "name": "uuid",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "526"
+        },
+        {
+          "name": "visibilityVariable",
+          "access": "readwrite",
+          "declaredType": "null",
+          "runtimeType": "null",
+          "sample": null
+        },
+        {
+          "name": "visibleBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            300,
+            180,
+            460,
+            100
+          ]
+        },
+        {
+          "name": "width",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 160
+        },
+        {
+          "name": "words",
+          "access": "readonly",
+          "declaredType": "Words",
+          "runtimeType": "Words",
+          "sample": "<Words>"
+        },
+        {
+          "name": "wrapInside",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "Requested property is only available for wrapped items."
+        },
+        {
+          "name": "wrapOffset",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "Requested property is only available for wrapped items."
+        },
+        {
+          "name": "wrapped",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "zOrderPosition",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 11
+        }
+      ],
+      "methods": [
+        "applyEffect",
+        "bringInPerspective",
+        "canParallelExecutionRun",
+        "convertAreaObjectToPointObject",
+        "convertPointObjectToAreaObject",
+        "createOutline",
+        "duplicate",
+        "generateThumbnailWithTextFrameProperties",
+        "move",
+        "remove",
+        "resize",
+        "rotate",
+        "sendScriptMessage",
+        "transform",
+        "translate",
+        "zOrder"
+      ]
+    },
+    "TextFrame_Path": {
+      "label": "TextFrame (path text)",
+      "typename": "TextFrame",
+      "properties": [
+        {
+          "name": "absoluteZOrderPosition",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 15
+        },
+        {
+          "name": "anchor",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "The requested property is not available for this type of text frame."
+        },
+        {
+          "name": "antialias",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "TextAntialias.SHARP",
+          "sample": "<TextAntialias.SHARP>"
+        },
+        {
+          "name": "artworkKnockout",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "KnockoutState.DISABLED",
+          "sample": "<KnockoutState.DISABLED>"
+        },
+        {
+          "name": "blendingMode",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "BlendModes.NORMAL",
+          "sample": "<BlendModes.NORMAL>"
+        },
+        {
+          "name": "characters",
+          "access": "readonly",
+          "declaredType": "Characters",
+          "runtimeType": "Characters",
+          "sample": "<Characters>"
+        },
+        {
+          "name": "columnCount",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 1
+        },
+        {
+          "name": "columnGutter",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "contentVariable",
+          "access": "readwrite",
+          "declaredType": "undefined",
+          "runtimeType": "undefined",
+          "sample": null
+        },
+        {
+          "name": "contents",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "Path text sample"
+        },
+        {
+          "name": "controlBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            486.905,
+            161.582,
+            660.885,
+            86.521
+          ]
+        },
+        {
+          "name": "editable",
+          "access": "readonly",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "endTValue",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0.99000000953674
+        },
+        {
+          "name": "firstBaseline",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "The requested property is not available for this type of text frame."
+        },
+        {
+          "name": "firstBaselineMin",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "The requested property is not available for this type of text frame."
+        },
+        {
+          "name": "flowLinksHorizontally",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "geometricBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            500,
+            140,
+            650,
+            100
+          ]
+        },
+        {
+          "name": "height",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 40
+        },
+        {
+          "name": "hidden",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "insertionPoints",
+          "access": "readonly",
+          "declaredType": "InsertionPoints",
+          "runtimeType": "InsertionPoints",
+          "sample": "<InsertionPoints>"
+        },
+        {
+          "name": "isIsolated",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "kind",
+          "access": "readonly",
+          "declaredType": "Object",
+          "runtimeType": "TextType.PATHTEXT",
+          "sample": "<TextType.PATHTEXT>"
+        },
+        {
+          "name": "layer",
+          "access": "readonly",
+          "declaredType": "Layer",
+          "runtimeType": "Layer",
+          "sample": "<Layer>"
+        },
+        {
+          "name": "left",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 497.283203125
+        },
+        {
+          "name": "lines",
+          "access": "readonly",
+          "declaredType": "Lines",
+          "runtimeType": "Lines",
+          "sample": "<Lines>"
+        },
+        {
+          "name": "locked",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "matrix",
+          "access": "readonly",
+          "declaredType": "Matrix",
+          "runtimeType": "Matrix",
+          "sample": "<Matrix>"
+        },
+        {
+          "name": "name",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "SamplePathText"
+        },
+        {
+          "name": "nextFrame",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "The requested property is not available for this type of text frame."
+        },
+        {
+          "name": "note",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": ""
+        },
+        {
+          "name": "opacity",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 100
+        },
+        {
+          "name": "opticalAlignment",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "orientation",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "TextOrientation.HORIZONTAL",
+          "sample": "<TextOrientation.HORIZONTAL>"
+        },
+        {
+          "name": "paragraphs",
+          "access": "readonly",
+          "declaredType": "Paragraphs",
+          "runtimeType": "Paragraphs",
+          "sample": "<Paragraphs>"
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Layer",
+          "runtimeType": "Layer",
+          "sample": "<Layer>"
+        },
+        {
+          "name": "pixelAligned",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "position",
+          "access": "readwrite",
+          "declaredType": "point",
+          "runtimeType": "Array(2)",
+          "sample": [
+            500,
+            140
+          ]
+        },
+        {
+          "name": "previousFrame",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "The requested property is not available for this type of text frame."
+        },
+        {
+          "name": "rowCount",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 1
+        },
+        {
+          "name": "rowGutter",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "selected",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "sliced",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "spacing",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "startTValue",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "story",
+          "access": "readonly",
+          "declaredType": "Story",
+          "runtimeType": "Story",
+          "sample": "<Story>"
+        },
+        {
+          "name": "tags",
+          "access": "readonly",
+          "declaredType": "Tags",
+          "runtimeType": "Tags",
+          "sample": "<Tags>"
+        },
+        {
+          "name": "textPath",
+          "access": "readonly",
+          "declaredType": "TextPath",
+          "runtimeType": "TextPath",
+          "sample": "<TextPath>"
+        },
+        {
+          "name": "textRange",
+          "access": "readonly",
+          "declaredType": "TextRange",
+          "runtimeType": "TextRange",
+          "sample": "<TextRange>"
+        },
+        {
+          "name": "textRanges",
+          "access": "readonly",
+          "declaredType": "TextRanges",
+          "runtimeType": "TextRanges",
+          "sample": "<TextRanges>"
+        },
+        {
+          "name": "textSelection",
+          "access": "readonly",
+          "declaredType": "array",
+          "runtimeType": "Array(0)",
+          "sample": []
+        },
+        {
+          "name": "top",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 140
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "TextFrame"
+        },
+        {
+          "name": "uRL",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": ""
+        },
+        {
+          "name": "uuid",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "528"
+        },
+        {
+          "name": "visibilityVariable",
+          "access": "readwrite",
+          "declaredType": "null",
+          "runtimeType": "null",
+          "sample": null
+        },
+        {
+          "name": "visibleBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            497.283,
+            140,
+            650,
+            97.057
+          ]
+        },
+        {
+          "name": "width",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 150
+        },
+        {
+          "name": "words",
+          "access": "readonly",
+          "declaredType": "Words",
+          "runtimeType": "Words",
+          "sample": "<Words>"
+        },
+        {
+          "name": "wrapInside",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "Requested property is only available for wrapped items."
+        },
+        {
+          "name": "wrapOffset",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "Requested property is only available for wrapped items."
+        },
+        {
+          "name": "wrapped",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "zOrderPosition",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 12
+        }
+      ],
+      "methods": [
+        "applyEffect",
+        "bringInPerspective",
+        "canParallelExecutionRun",
+        "convertAreaObjectToPointObject",
+        "convertPointObjectToAreaObject",
+        "createOutline",
+        "duplicate",
+        "generateThumbnailWithTextFrameProperties",
+        "move",
+        "remove",
+        "resize",
+        "rotate",
+        "sendScriptMessage",
+        "transform",
+        "translate",
+        "zOrder"
+      ]
+    },
+    "TextRange": {
+      "label": "TextRange",
+      "typename": "TextRange",
+      "properties": [
+        {
+          "name": "characterAttributes",
+          "access": "readonly",
+          "declaredType": "CharacterAttributes",
+          "runtimeType": "CharacterAttributes",
+          "sample": "<CharacterAttributes>"
+        },
+        {
+          "name": "characterOffset",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 1
+        },
+        {
+          "name": "characterStyles",
+          "access": "readonly",
+          "declaredType": "CharacterStyles",
+          "runtimeType": "CharacterStyles",
+          "sample": "<CharacterStyles>"
+        },
+        {
+          "name": "characters",
+          "access": "readonly",
+          "declaredType": "Characters",
+          "runtimeType": "Characters",
+          "sample": "<Characters>"
+        },
+        {
+          "name": "contents",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "Hello BAE"
+        },
+        {
+          "name": "end",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 9
+        },
+        {
+          "name": "insertionPoints",
+          "access": "readonly",
+          "declaredType": "InsertionPoints",
+          "runtimeType": "InsertionPoints",
+          "sample": "<InsertionPoints>"
+        },
+        {
+          "name": "kerning",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "There is no manual kerning amount set at this location"
+        },
+        {
+          "name": "length",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 9
+        },
+        {
+          "name": "lines",
+          "access": "readonly",
+          "declaredType": "Lines",
+          "runtimeType": "Lines",
+          "sample": "<Lines>"
+        },
+        {
+          "name": "paragraphAttributes",
+          "access": "readonly",
+          "declaredType": "ParagraphAttributes",
+          "runtimeType": "ParagraphAttributes",
+          "sample": "<ParagraphAttributes>"
+        },
+        {
+          "name": "paragraphStyles",
+          "access": "readonly",
+          "declaredType": "ParagraphStyles",
+          "runtimeType": "ParagraphStyles",
+          "sample": "<ParagraphStyles>"
+        },
+        {
+          "name": "paragraphs",
+          "access": "readonly",
+          "declaredType": "Paragraphs",
+          "runtimeType": "Paragraphs",
+          "sample": "<Paragraphs>"
+        },
+        {
+          "name": "start",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "story",
+          "access": "readonly",
+          "declaredType": "Story",
+          "runtimeType": "Story",
+          "sample": "<Story>"
+        },
+        {
+          "name": "textRanges",
+          "access": "readonly",
+          "declaredType": "TextRanges",
+          "runtimeType": "TextRanges",
+          "sample": "<TextRanges>"
+        },
+        {
+          "name": "textSelection",
+          "access": "readonly",
+          "declaredType": "array",
+          "runtimeType": "Array(0)",
+          "sample": []
+        },
+        {
+          "name": "words",
+          "access": "readonly",
+          "declaredType": "Words",
+          "runtimeType": "Words",
+          "sample": "<Words>"
+        }
+      ],
+      "methods": [
+        "changeCaseTo",
+        "deSelect",
+        "duplicate",
+        "getParagraphLength",
+        "getTextRunLength",
+        "move",
+        "remove",
+        "select"
+      ]
+    },
+    "CharacterAttributes": {
+      "label": "CharacterAttributes",
+      "typename": "CharacterAttributes",
+      "properties": [
+        {
+          "name": "Tsume",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "akiLeft",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": -1
+        },
+        {
+          "name": "akiRight",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": -1
+        },
+        {
+          "name": "alignment",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "StyleRunAlignmentType.ROMANBASELINE",
+          "sample": "<StyleRunAlignmentType.ROMANBASELINE>"
+        },
+        {
+          "name": "alternateGlyphs",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "AlternateGlyphsForm.DEFAULTFORM",
+          "sample": "<AlternateGlyphsForm.DEFAULTFORM>"
+        },
+        {
+          "name": "autoLeading",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "baselineDirection",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "BaselineDirectionType.Standard",
+          "sample": "<BaselineDirectionType.Standard>"
+        },
+        {
+          "name": "baselinePosition",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "FontBaselineOption.NORMALBASELINE",
+          "sample": "<FontBaselineOption.NORMALBASELINE>"
+        },
+        {
+          "name": "baselineShift",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "capitalization",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "FontCapsOption.NORMALCAPS",
+          "sample": "<FontCapsOption.NORMALCAPS>"
+        },
+        {
+          "name": "connectionForms",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "contextualLigature",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "diacVPos",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "DiacVPosType.DEFAULT_POSITION",
+          "sample": "<DiacVPosType.DEFAULT_POSITION>"
+        },
+        {
+          "name": "diacXOffset",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "diacYOffset",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "digitSet",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "DigitSetType.DEFAULT_DIGITS",
+          "sample": "<DigitSetType.DEFAULT_DIGITS>"
+        },
+        {
+          "name": "dirOverride",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "DirOverrideType.DEFAULT_DIRECTION",
+          "sample": "<DirOverrideType.DEFAULT_DIRECTION>"
+        },
+        {
+          "name": "discretionaryLigature",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "figureStyle",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "FigureStyleType.DEFAULTFIGURESTYLE",
+          "sample": "<FigureStyleType.DEFAULTFIGURESTYLE>"
+        },
+        {
+          "name": "fillColor",
+          "access": "readwrite",
+          "declaredType": "RGBColor",
+          "runtimeType": "RGBColor",
+          "sample": "<RGBColor>"
+        },
+        {
+          "name": "fractions",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "horizontalScale",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 100
+        },
+        {
+          "name": "italics",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "justificationAlternates",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "kana",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "kashidas",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "KashidasType.DEFAULT_KASHIDAS",
+          "sample": "<KashidasType.DEFAULT_KASHIDAS>"
+        },
+        {
+          "name": "kerningMethod",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "AutoKernType.AUTO",
+          "sample": "<AutoKernType.AUTO>"
+        },
+        {
+          "name": "language",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "LanguageType.ENGLISH",
+          "sample": "<LanguageType.ENGLISH>"
+        },
+        {
+          "name": "leading",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 28.8000011444092
+        },
+        {
+          "name": "ligature",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "noBreak",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "openTypePosition",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "FontOpenTypePositionOption.OPENTYPEDEFAULT",
+          "sample": "<FontOpenTypePositionOption.OPENTYPEDEFAULT>"
+        },
+        {
+          "name": "ordinals",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "ornaments",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "overprintFill",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "overprintStroke",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Story",
+          "runtimeType": "Story",
+          "sample": "<Story>"
+        },
+        {
+          "name": "proportionalMetrics",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "rotation",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "size",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 24
+        },
+        {
+          "name": "strikeThrough",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "strokeColor",
+          "access": "readwrite",
+          "declaredType": "NoColor",
+          "runtimeType": "NoColor",
+          "sample": "<NoColor>"
+        },
+        {
+          "name": "strokeWeight",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 1
+        },
+        {
+          "name": "stylisticAlternates",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "stylisticSets",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "swash",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "tateChuYokoHorizontal",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "tateChuYokoVertical",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "textFont",
+          "access": "readwrite",
+          "declaredType": "TextFont",
+          "runtimeType": "TextFont",
+          "sample": "<redacted:TextFont>"
+        },
+        {
+          "name": "titling",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "tracking",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "CharacterAttributes"
+        },
+        {
+          "name": "underline",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "verticalScale",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 100
+        },
+        {
+          "name": "wariChuCharactersAfterBreak",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 2
+        },
+        {
+          "name": "wariChuCharactersBeforeBreak",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 2
+        },
+        {
+          "name": "wariChuEnabled",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "wariChuJustification",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "WariChuJustificationType.WARICHUAUTOJUSTIFY",
+          "sample": "<WariChuJustificationType.WARICHUAUTOJUSTIFY>"
+        },
+        {
+          "name": "wariChuLineGap",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "wariChuLines",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 2
+        },
+        {
+          "name": "wariChuScale",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 50
+        }
+      ],
+      "methods": []
+    },
+    "ParagraphAttributes": {
+      "label": "ParagraphAttributes",
+      "typename": "ParagraphAttributes",
+      "properties": [
+        {
+          "name": "autoLeadingAmount",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 120.000004768372
+        },
+        {
+          "name": "bunriKinshi",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "burasagariType",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "BurasagariTypeEnum.None",
+          "sample": "<BurasagariTypeEnum.None>"
+        },
+        {
+          "name": "composerEngine",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "ComposerEngineType.latinCJKComposer",
+          "sample": "<ComposerEngineType.latinCJKComposer>"
+        },
+        {
+          "name": "desiredGlyphScaling",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 100
+        },
+        {
+          "name": "desiredLetterSpacing",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "desiredWordSpacing",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 100
+        },
+        {
+          "name": "everyLineComposer",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "firstLineIndent",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "hyphenateCapitalizedWords",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "hyphenation",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "hyphenationPreference",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0.5
+        },
+        {
+          "name": "hyphenationZone",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 36
+        },
+        {
+          "name": "justification",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "Justification.LEFT",
+          "sample": "<Justification.LEFT>"
+        },
+        {
+          "name": "kashidaWidth",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "KashidaWidthType.kashidaMedium",
+          "sample": "<KashidaWidthType.kashidaMedium>"
+        },
+        {
+          "name": "kinsoku",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "the requested attribute is undefined for the text range"
+        },
+        {
+          "name": "kinsokuOrder",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "KinsokuOrderEnum.PUSHIN",
+          "sample": "<KinsokuOrderEnum.PUSHIN>"
+        },
+        {
+          "name": "kurikaeshiMojiShori",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "leadingType",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "AutoLeadingType.BOTTOMTOBOTTOM",
+          "sample": "<AutoLeadingType.BOTTOMTOBOTTOM>"
+        },
+        {
+          "name": "leftIndent",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "listStyle",
+          "access": "readwrite",
+          "declaredType": "ListStyle",
+          "runtimeType": "ListStyle",
+          "sample": "<ListStyle>"
+        },
+        {
+          "name": "listStyleTier",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "maximumConsecutiveHyphens",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "maximumGlyphScaling",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 100
+        },
+        {
+          "name": "maximumLetterSpacing",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "maximumWordSpacing",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 133.000004291534
+        },
+        {
+          "name": "minimumAfterHyphen",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 2
+        },
+        {
+          "name": "minimumBeforeHyphen",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 2
+        },
+        {
+          "name": "minimumGlyphScaling",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 100
+        },
+        {
+          "name": "minimumHyphenatedWordSize",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 6
+        },
+        {
+          "name": "minimumLetterSpacing",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "minimumWordSpacing",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 80.0000011920929
+        },
+        {
+          "name": "mojikumi",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "the requested attribute is undefined for the text range"
+        },
+        {
+          "name": "paragraphDirection",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "ParagraphDirectionType.LEFT_TO_RIGHT_DIRECTION",
+          "sample": "<ParagraphDirectionType.LEFT_TO_RIGHT_DIRECTION>"
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Story",
+          "runtimeType": "Story",
+          "sample": "<Story>"
+        },
+        {
+          "name": "rightIndent",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "romanHanging",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "singleWordJustification",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "Justification.FULLJUSTIFY",
+          "sample": "<Justification.FULLJUSTIFY>"
+        },
+        {
+          "name": "spaceAfter",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "spaceBefore",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "tabStops",
+          "access": "readwrite",
+          "declaredType": "array",
+          "runtimeType": "Array(0)",
+          "sample": []
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "ParagraphAttributes"
+        }
+      ],
+      "methods": []
+    },
+    "Gradient": {
+      "label": "Gradient",
+      "typename": "Gradient",
+      "properties": [
+        {
+          "name": "gradientStops",
+          "access": "readonly",
+          "declaredType": "GradientStops",
+          "runtimeType": "GradientStops",
+          "sample": "<GradientStops>"
+        },
+        {
+          "name": "name",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "SampleLinearGradient"
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Document",
+          "runtimeType": "Document",
+          "sample": "<Document>"
+        },
+        {
+          "name": "type",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "GradientType.LINEAR",
+          "sample": "<GradientType.LINEAR>"
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "Gradient"
+        }
+      ],
+      "methods": [
+        "remove"
+      ]
+    },
+    "GradientStop": {
+      "label": "GradientStop",
+      "typename": "GradientStop",
+      "properties": [
+        {
+          "name": "color",
+          "access": "readwrite",
+          "declaredType": "RGBColor",
+          "runtimeType": "RGBColor",
+          "sample": "<RGBColor>"
+        },
+        {
+          "name": "midPoint",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 50
+        },
+        {
+          "name": "opacity",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 100
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Gradient",
+          "runtimeType": "Gradient",
+          "sample": "<Gradient>"
+        },
+        {
+          "name": "rampPoint",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "GradientStop"
+        }
+      ],
+      "methods": [
+        "remove"
+      ]
+    },
+    "GradientColor_Linear": {
+      "label": "GradientColor (linear)",
+      "typename": "GradientColor",
+      "properties": [
+        {
+          "name": "angle",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 45
+        },
+        {
+          "name": "gradient",
+          "access": "readwrite",
+          "declaredType": "Gradient",
+          "runtimeType": "Gradient",
+          "sample": "<Gradient>"
+        },
+        {
+          "name": "hiliteAngle",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "hiliteLength",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "length",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 120
+        },
+        {
+          "name": "matrix",
+          "access": "readwrite",
+          "declaredType": "Matrix",
+          "runtimeType": "Matrix",
+          "sample": "<Matrix>"
+        },
+        {
+          "name": "origin",
+          "access": "readwrite",
+          "declaredType": "50,150",
+          "runtimeType": "Array(2)",
+          "sample": [
+            50,
+            150
+          ]
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "GradientColor"
+        }
+      ],
+      "methods": []
+    },
+    "GradientColor_Radial": {
+      "label": "GradientColor (radial)",
+      "typename": "GradientColor",
+      "properties": [
+        {
+          "name": "angle",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "gradient",
+          "access": "readwrite",
+          "declaredType": "Gradient",
+          "runtimeType": "Gradient",
+          "sample": "<Gradient>"
+        },
+        {
+          "name": "hiliteAngle",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 30
+        },
+        {
+          "name": "hiliteLength",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 25
+        },
+        {
+          "name": "length",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 60
+        },
+        {
+          "name": "matrix",
+          "access": "readwrite",
+          "declaredType": "Matrix",
+          "runtimeType": "Matrix",
+          "sample": "<Matrix>"
+        },
+        {
+          "name": "origin",
+          "access": "readwrite",
+          "declaredType": "240,160",
+          "runtimeType": "Array(2)",
+          "sample": [
+            240,
+            160
+          ]
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "GradientColor"
+        }
+      ],
+      "methods": []
+    },
+    "RGBColor": {
+      "label": "RGBColor",
+      "typename": "RGBColor",
+      "properties": [
+        {
+          "name": "blue",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 220
+        },
+        {
+          "name": "green",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 128
+        },
+        {
+          "name": "red",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 42
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "RGBColor"
+        }
+      ],
+      "methods": []
+    },
+    "CMYKColor": {
+      "label": "CMYKColor",
+      "typename": "CMYKColor",
+      "properties": [
+        {
+          "name": "black",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 5
+        },
+        {
+          "name": "cyan",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 10
+        },
+        {
+          "name": "magenta",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 40
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "CMYKColor"
+        },
+        {
+          "name": "yellow",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 80
+        }
+      ],
+      "methods": []
+    },
+    "GrayColor": {
+      "label": "GrayColor",
+      "typename": "GrayColor",
+      "properties": [
+        {
+          "name": "gray",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 50
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "GrayColor"
+        }
+      ],
+      "methods": []
+    },
+    "Spot": {
+      "label": "Spot",
+      "typename": "Spot",
+      "properties": [
+        {
+          "name": "color",
+          "access": "readwrite",
+          "declaredType": "RGBColor",
+          "runtimeType": "RGBColor",
+          "sample": "<RGBColor>"
+        },
+        {
+          "name": "colorType",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "ColorModel.SPOT",
+          "sample": "<ColorModel.SPOT>"
+        },
+        {
+          "name": "name",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "Sample Spot"
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Document",
+          "runtimeType": "Document",
+          "sample": "<Document>"
+        },
+        {
+          "name": "spotKind",
+          "access": "readonly",
+          "declaredType": "Object",
+          "runtimeType": "SpotColorKind.SPOTRGB",
+          "sample": "<SpotColorKind.SPOTRGB>"
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "Spot"
+        }
+      ],
+      "methods": [
+        "getInternalColor",
+        "remove"
+      ]
+    },
+    "SpotColor": {
+      "label": "SpotColor",
+      "typename": "SpotColor",
+      "properties": [
+        {
+          "name": "spot",
+          "access": "readwrite",
+          "declaredType": "Spot",
+          "runtimeType": "Spot",
+          "sample": "<Spot>"
+        },
+        {
+          "name": "tint",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 75
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "SpotColor"
+        }
+      ],
+      "methods": []
+    },
+    "NoColor": {
+      "label": "NoColor",
+      "typename": "NoColor",
+      "properties": [
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "NoColor"
+        }
+      ],
+      "methods": []
+    },
+    "PatternColor": {
+      "label": "PatternColor",
+      "typename": "PatternColor",
+      "properties": [],
+      "methods": []
+    },
+    "Pattern": {
+      "label": "Pattern",
+      "typename": "Pattern",
+      "properties": [
+        {
+          "name": "name",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "小白花"
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Document",
+          "runtimeType": "Document",
+          "sample": "<Document>"
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "Pattern"
+        }
+      ],
+      "methods": [
+        "remove"
+      ]
+    },
+    "Symbol": {
+      "label": "Symbol",
+      "typename": "Symbol",
+      "properties": [
+        {
+          "name": "name",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "SampleSymbol"
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Document",
+          "runtimeType": "Document",
+          "sample": "<Document>"
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "Symbol"
+        }
+      ],
+      "methods": [
+        "duplicate",
+        "remove"
+      ]
+    },
+    "SymbolItem": {
+      "label": "SymbolItem",
+      "typename": "SymbolItem",
+      "properties": [
+        {
+          "name": "absoluteZOrderPosition",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 17
+        },
+        {
+          "name": "artworkKnockout",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "KnockoutState.INHERITED",
+          "sample": "<KnockoutState.INHERITED>"
+        },
+        {
+          "name": "blendingMode",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "BlendModes.NORMAL",
+          "sample": "<BlendModes.NORMAL>"
+        },
+        {
+          "name": "controlBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            378.211,
+            321.628,
+            421.211,
+            278.628
+          ]
+        },
+        {
+          "name": "editable",
+          "access": "readonly",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "geometricBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            379.211,
+            320.628,
+            420.211,
+            279.628
+          ]
+        },
+        {
+          "name": "height",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 41
+        },
+        {
+          "name": "hidden",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "isIsolated",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "layer",
+          "access": "readonly",
+          "declaredType": "Layer",
+          "runtimeType": "Layer",
+          "sample": "<Layer>"
+        },
+        {
+          "name": "left",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 379.210622710622
+        },
+        {
+          "name": "locked",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "name",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "SampleSymbolInstance"
+        },
+        {
+          "name": "note",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": ""
+        },
+        {
+          "name": "opacity",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 100
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Layer",
+          "runtimeType": "Layer",
+          "sample": "<Layer>"
+        },
+        {
+          "name": "pixelAligned",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "position",
+          "access": "readwrite",
+          "declaredType": "point",
+          "runtimeType": "Array(2)",
+          "sample": [
+            379.211,
+            320.628
+          ]
+        },
+        {
+          "name": "selected",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "sliced",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "symbol",
+          "access": "readwrite",
+          "declaredType": "Symbol",
+          "runtimeType": "Symbol",
+          "sample": "<Symbol>"
+        },
+        {
+          "name": "tags",
+          "access": "readonly",
+          "declaredType": "Tags",
+          "runtimeType": "Tags",
+          "sample": "<Tags>"
+        },
+        {
+          "name": "top",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 320.628205128205
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "SymbolItem"
+        },
+        {
+          "name": "uRL",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": ""
+        },
+        {
+          "name": "uuid",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "535"
+        },
+        {
+          "name": "visibilityVariable",
+          "access": "readwrite",
+          "declaredType": "null",
+          "runtimeType": "null",
+          "sample": null
+        },
+        {
+          "name": "visibleBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            379.211,
+            320.628,
+            420.211,
+            279.628
+          ]
+        },
+        {
+          "name": "width",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 41.0000000000009
+        },
+        {
+          "name": "wrapInside",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "Requested property is only available for wrapped items."
+        },
+        {
+          "name": "wrapOffset",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "Requested property is only available for wrapped items."
+        },
+        {
+          "name": "wrapped",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "zOrderPosition",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 12
+        }
+      ],
+      "methods": [
+        "applyEffect",
+        "breakLink",
+        "bringInPerspective",
+        "canParallelExecutionRun",
+        "duplicate",
+        "move",
+        "remove",
+        "resize",
+        "rotate",
+        "sendScriptMessage",
+        "transform",
+        "translate",
+        "zOrder"
+      ]
+    },
+    "Swatch": {
+      "label": "Swatch",
+      "typename": "Swatch",
+      "properties": [
+        {
+          "name": "color",
+          "access": "readwrite",
+          "declaredType": "NoColor",
+          "runtimeType": "NoColor",
+          "sample": "<NoColor>"
+        },
+        {
+          "name": "name",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "[无]"
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Document",
+          "runtimeType": "Document",
+          "sample": "<Document>"
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "Swatch"
+        }
+      ],
+      "methods": [
+        "remove"
+      ]
+    },
+    "SwatchGroup": {
+      "label": "SwatchGroup",
+      "typename": "SwatchGroup",
+      "properties": [
+        {
+          "name": "name",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": ""
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Document",
+          "runtimeType": "Document",
+          "sample": "<Document>"
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "SwatchGroup"
+        }
+      ],
+      "methods": [
+        "addSpot",
+        "addSwatch",
+        "getAllSwatches",
+        "remove"
+      ]
+    },
+    "GraphicStyle": {
+      "label": "GraphicStyle",
+      "typename": "GraphicStyle",
+      "properties": [
+        {
+          "name": "name",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "[默认]"
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Document",
+          "runtimeType": "Document",
+          "sample": "<Document>"
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "GraphicStyle"
+        }
+      ],
+      "methods": [
+        "applyTo",
+        "mergeTo",
+        "remove"
+      ]
+    },
+    "Brush": {
+      "label": "Brush",
+      "typename": "Brush",
+      "properties": [
+        {
+          "name": "name",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "3 点圆形"
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Document",
+          "runtimeType": "Document",
+          "sample": "<Document>"
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "Brush"
+        }
+      ],
+      "methods": [
+        "applyTo"
+      ]
+    },
+    "RasterItem": {
+      "label": "RasterItem",
+      "typename": "RasterItem",
+      "properties": [
+        {
+          "name": "absoluteZOrderPosition",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 18
+        },
+        {
+          "name": "artworkKnockout",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "KnockoutState.DISABLED",
+          "sample": "<KnockoutState.DISABLED>"
+        },
+        {
+          "name": "bitsPerChannel",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 8
+        },
+        {
+          "name": "blendingMode",
+          "access": "readwrite",
+          "declaredType": "Object",
+          "runtimeType": "BlendModes.NORMAL",
+          "sample": "<BlendModes.NORMAL>"
+        },
+        {
+          "name": "boundingBox",
+          "access": "readwrite",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            0,
+            40,
+            40,
+            0
+          ]
+        },
+        {
+          "name": "channels",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 4
+        },
+        {
+          "name": "colorants",
+          "access": "readonly",
+          "declaredType": "array",
+          "runtimeType": "Array(3)",
+          "sample": [
+            "Red",
+            "Green",
+            "Blue"
+          ]
+        },
+        {
+          "name": "colorizedGrayscale",
+          "access": "readonly",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "contentVariable",
+          "access": "readwrite",
+          "declaredType": "undefined",
+          "runtimeType": "undefined",
+          "sample": null
+        },
+        {
+          "name": "controlBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            619,
+            551,
+            661,
+            509
+          ]
+        },
+        {
+          "name": "editable",
+          "access": "readonly",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "embedded",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "file",
+          "access": "readonly",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "There is no file associated with this item"
+        },
+        {
+          "name": "geometricBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            620,
+            550,
+            660,
+            510
+          ]
+        },
+        {
+          "name": "height",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 40
+        },
+        {
+          "name": "hidden",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "imageColorSpace",
+          "access": "readonly",
+          "declaredType": "Object",
+          "runtimeType": "ImageColorSpace.RGB",
+          "sample": "<ImageColorSpace.RGB>"
+        },
+        {
+          "name": "isIsolated",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "layer",
+          "access": "readonly",
+          "declaredType": "Layer",
+          "runtimeType": "Layer",
+          "sample": "<Layer>"
+        },
+        {
+          "name": "left",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 620
+        },
+        {
+          "name": "locked",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "matrix",
+          "access": "readwrite",
+          "declaredType": "Matrix",
+          "runtimeType": "Matrix",
+          "sample": "<Matrix>"
+        },
+        {
+          "name": "name",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": ""
+        },
+        {
+          "name": "note",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": ""
+        },
+        {
+          "name": "opacity",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 100
+        },
+        {
+          "name": "overprint",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "parent",
+          "access": "readonly",
+          "declaredType": "Layer",
+          "runtimeType": "Layer",
+          "sample": "<Layer>"
+        },
+        {
+          "name": "pixelAligned",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "position",
+          "access": "readwrite",
+          "declaredType": "point",
+          "runtimeType": "Array(2)",
+          "sample": [
+            620,
+            550
+          ]
+        },
+        {
+          "name": "selected",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "sliced",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "status",
+          "access": "readonly",
+          "declaredType": "Object",
+          "runtimeType": "RasterLinkState.DATAFROMFILE",
+          "sample": "<RasterLinkState.DATAFROMFILE>"
+        },
+        {
+          "name": "tags",
+          "access": "readonly",
+          "declaredType": "Tags",
+          "runtimeType": "Tags",
+          "sample": "<Tags>"
+        },
+        {
+          "name": "top",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 550
+        },
+        {
+          "name": "transparent",
+          "access": "readonly",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": true
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "RasterItem"
+        },
+        {
+          "name": "uRL",
+          "access": "readwrite",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": ""
+        },
+        {
+          "name": "uuid",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "537"
+        },
+        {
+          "name": "visibilityVariable",
+          "access": "readwrite",
+          "declaredType": "null",
+          "runtimeType": "null",
+          "sample": null
+        },
+        {
+          "name": "visibleBounds",
+          "access": "readonly",
+          "declaredType": "rect",
+          "runtimeType": "Array(4)",
+          "sample": [
+            620,
+            550,
+            660,
+            510
+          ]
+        },
+        {
+          "name": "width",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 40
+        },
+        {
+          "name": "wrapInside",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "Requested property is only available for wrapped items."
+        },
+        {
+          "name": "wrapOffset",
+          "access": "readwrite",
+          "declaredType": "any",
+          "runtimeType": "unreadable",
+          "readError": "Requested property is only available for wrapped items."
+        },
+        {
+          "name": "wrapped",
+          "access": "readwrite",
+          "declaredType": "boolean",
+          "runtimeType": "boolean",
+          "sample": false
+        },
+        {
+          "name": "zOrderPosition",
+          "access": "readonly",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 12
+        }
+      ],
+      "methods": [
+        "applyEffect",
+        "bringInPerspective",
+        "canParallelExecutionRun",
+        "colorize",
+        "duplicate",
+        "move",
+        "remove",
+        "resize",
+        "rotate",
+        "sendScriptMessage",
+        "trace",
+        "transform",
+        "translate",
+        "zOrder"
+      ]
+    },
+    "Matrix": {
+      "label": "Matrix",
+      "typename": "Matrix",
+      "properties": [
+        {
+          "name": "mValueA",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 1
+        },
+        {
+          "name": "mValueB",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "mValueC",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "mValueD",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 1
+        },
+        {
+          "name": "mValueTX",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "mValueTY",
+          "access": "readwrite",
+          "declaredType": "number",
+          "runtimeType": "number",
+          "sample": 0
+        },
+        {
+          "name": "typename",
+          "access": "readonly",
+          "declaredType": "string",
+          "runtimeType": "string",
+          "sample": "Matrix"
+        }
+      ],
+      "methods": []
+    }
+  }
+}

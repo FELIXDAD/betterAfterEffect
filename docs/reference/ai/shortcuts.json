@@ -1,0 +1,4419 @@
+{
+  "source": {
+    "application": "Adobe Illustrator 2026",
+    "version": "30.1.0",
+    "build_number": "136R",
+    "locale": "zh_CN",
+    "platform": "Microsoft Windows 11 专业版 (10.0.26200, Build 26200, 64 位)",
+    "extracted_date": "2026-11-21"
+  },
+  "preset_name": "Illustrator 默认值",
+  "stats": {
+    "menu_commands_total": 603,
+    "menu_commands_assigned": 184,
+    "tool_actions_total": 130,
+    "tool_actions_assigned": 58
+  },
+  "menus": [
+    {
+      "id": "about",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Activate...",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "actualsize",
+      "context": "global",
+      "shortcut": "Ctrl+1",
+      "assigned": true
+    },
+    {
+      "id": "Add Anchor Points2",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AddArrowHeads2",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adjust Colors Dialog",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adjust3",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Action Palette",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Actions Batch",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe AI Device center",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe AI Save For Web",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+S",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Apply Last Effect",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+E",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Art Style Plugin Other libraries menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Bridge Browse",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+O",
+      "assigned": true
+    },
+    {
+      "id": "Adobe BrushManager Menu Item",
+      "context": "global",
+      "shortcut": "F5",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Color Palette",
+      "context": "global",
+      "shortcut": "F6",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Color Palette Secondary",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Default Workspace",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Flattening Preview",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Gradient Palette",
+      "context": "global",
+      "shortcut": "Ctrl+F9",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Harmony Palette",
+      "context": "global",
+      "shortcut": "Shift+F3",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Illustrator About Plug-ins2",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Illustrator Find Font Menu Item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Illustrator Smart Punctuation Menu Item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Last Effect",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+E",
+      "assigned": true
+    },
+    {
+      "id": "Adobe LinkPalette Menu Item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Manage Workspace",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Minimal Workspace",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe New Fill Shortcut",
+      "context": "global",
+      "shortcut": "Ctrl+/",
+      "assigned": true
+    },
+    {
+      "id": "Adobe New Stroke Shortcut",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+/",
+      "assigned": true
+    },
+    {
+      "id": "Adobe New Style Shortcut",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe New Swatch Shortcut Menu",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe New Symbol Shortcut",
+      "context": "global",
+      "shortcut": "F8",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Optical Alignment Item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Paragraph Styles Palette",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Save a Version",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Save Workspace",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Stroke Palette",
+      "context": "global",
+      "shortcut": "Ctrl+F10",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Style Palette",
+      "context": "global",
+      "shortcut": "Shift+F5",
+      "assigned": true
+    },
+    {
+      "id": "Adobe SVG Interactivity Palette",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Swatches Menu Item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Symbol Palette",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+F11",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Symbol Palette Plugin Other libraries menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Transparency Palette Menu Item",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+F10",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Update Link Shortcut",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Variables Palette Menu Item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AdobeAlignObjects2",
+      "context": "global",
+      "shortcut": "Shift+F7",
+      "assigned": true
+    },
+    {
+      "id": "AdobeBrushMgr Other libraries menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AdobeBuiltInToolbox1",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AdobeCheatSheetMenu",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AdobeLayerPalette1",
+      "context": "global",
+      "shortcut": "F7",
+      "assigned": true
+    },
+    {
+      "id": "AdobeLayerPalette2",
+      "context": "global",
+      "shortcut": "Ctrl+L",
+      "assigned": true
+    },
+    {
+      "id": "AdobeLayerPalette3",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+L",
+      "assigned": true
+    },
+    {
+      "id": "AdobeNavigator1",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AdobeNavigator2",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AdobePathfinderPalette1",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+F9",
+      "assigned": true
+    },
+    {
+      "id": "AdobeSwatch_ Other libraries menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AdobeTransformObjects1",
+      "context": "global",
+      "shortcut": "Shift+F8",
+      "assigned": true
+    },
+    {
+      "id": "AI Bounding Box Toggle",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+B",
+      "assigned": true
+    },
+    {
+      "id": "AI Magic Wand",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AI Object Mosaic Plug-in3",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AI Place",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+P",
+      "assigned": true
+    },
+    {
+      "id": "AI Reset Bounding Box",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "ai_browse_for_script",
+      "context": "global",
+      "shortcut": "Ctrl+F12",
+      "assigned": true
+    },
+    {
+      "id": "AISlice Clip to Artboard",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AISlice Combine",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AISlice Create from Guides",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AISlice Create from Selection",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AISlice Delete All Slices",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AISlice Divide",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AISlice Duplicate",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AISlice Feedback Menu",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AISlice Lock Menu",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AISlice Make Slice",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AISlice Release Slice",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "AISlice Slice Options",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "alternate glyph palette plugin",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "alternate glyph palette plugin 2",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Appearance of Black 1",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "areatextoptions",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "arrangeicon",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "artboard",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+H",
+      "assigned": true
+    },
+    {
+      "id": "assignprofile",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "average",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+J",
+      "assigned": true
+    },
+    {
+      "id": "avgAndJoin",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+J",
+      "assigned": true
+    },
+    {
+      "id": "bringAllToFront",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Brush Strokes menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "cascade",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "centerAlign",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+C",
+      "assigned": true
+    },
+    {
+      "id": "Character Styles",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Check Spelling",
+      "context": "global",
+      "shortcut": "Ctrl+I",
+      "assigned": true
+    },
+    {
+      "id": "cleanup menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "clear",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "clearguide",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "clearTrack",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Q",
+      "assigned": true
+    },
+    {
+      "id": "clearTypeScale",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+X",
+      "assigned": true
+    },
+    {
+      "id": "Clipping Masks menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "close",
+      "context": "global",
+      "shortcut": "Ctrl+W",
+      "assigned": true
+    },
+    {
+      "id": "closeAll",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+W",
+      "assigned": true
+    },
+    {
+      "id": "color",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+K",
+      "assigned": true
+    },
+    {
+      "id": "Colors3",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Colors4",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Colors5",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Colors6",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Colors7",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Colors8",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Colors9",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "compoundPath",
+      "context": "global",
+      "shortcut": "Ctrl+8",
+      "assigned": true
+    },
+    {
+      "id": "control palette plugin",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Convert to Shape",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "convertlegacyText",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "convertlegacyText1",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "convertlegacyText2",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "convertlegacyText3",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "convertlegacyText4",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "copy",
+      "context": "global",
+      "shortcut": "Ctrl+C",
+      "assigned": true
+    },
+    {
+      "id": "copy2",
+      "context": "global",
+      "shortcut": "F3",
+      "assigned": true
+    },
+    {
+      "id": "Create Envelope Grid",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+M",
+      "assigned": true
+    },
+    {
+      "id": "cut",
+      "context": "global",
+      "shortcut": "Ctrl+X",
+      "assigned": true
+    },
+    {
+      "id": "cut2",
+      "context": "global",
+      "shortcut": "F2",
+      "assigned": true
+    },
+    {
+      "id": "Deactivate...",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "debugPalette",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+F12",
+      "assigned": true
+    },
+    {
+      "id": "Define Pattern Menu Item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "deselectall",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+A",
+      "assigned": true
+    },
+    {
+      "id": "Distort2",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "doc-color-cmyk",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "doc-color-rgb",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "DocInfo1",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "document",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+P",
+      "assigned": true
+    },
+    {
+      "id": "DropShadow2",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Dynamic Text",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "edge",
+      "context": "global",
+      "shortcut": "Ctrl+H",
+      "assigned": true
+    },
+    {
+      "id": "Edit Custom Dictionary...",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Edit Envelope Contents",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "editGraphData",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "editMask",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "EditOriginal Menu Item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "editview",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "enterFocus",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Envelope Options",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "exitFocus",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Expand as Viewed",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Expand Envelope",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Expand Planet X",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Expand Shape",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Expand Tracing",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Expand3",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "expandStyle",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "export",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "exportForScreens",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+E",
+      "assigned": true
+    },
+    {
+      "id": "faceSizeDown",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+,",
+      "assigned": true
+    },
+    {
+      "id": "faceSizeUp",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+.",
+      "assigned": true
+    },
+    {
+      "id": "File Handling & Clipboard 1",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "File Info",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+I",
+      "assigned": true
+    },
+    {
+      "id": "Find and Replace",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Find Blending Mode menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Find Fill & Stroke menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Find Fill Color menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Find Link Block Series menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Find Next",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Find Opacity menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Find Reselect menu item",
+      "context": "global",
+      "shortcut": "Ctrl+6",
+      "assigned": true
+    },
+    {
+      "id": "Find Stroke Color menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Find Stroke Weight menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Find Style menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Find Symbol Instance menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "fitall",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+0",
+      "assigned": true
+    },
+    {
+      "id": "fitHeadline",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "fitin",
+      "context": "global",
+      "shortcut": "Ctrl+0",
+      "assigned": true
+    },
+    {
+      "id": "Flash Text",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "FlattenTransparency1",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Generate Modal File Menu\\",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+G",
+      "assigned": true
+    },
+    {
+      "id": "Gradient Feedback",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+G",
+      "assigned": true
+    },
+    {
+      "id": "graphDesigns",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "group",
+      "context": "global",
+      "shortcut": "Ctrl+G",
+      "assigned": true
+    },
+    {
+      "id": "guidegridPref",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "helpcontent",
+      "context": "global",
+      "shortcut": "F1",
+      "assigned": true
+    },
+    {
+      "id": "helpcontent2",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "hide",
+      "context": "global",
+      "shortcut": "Ctrl+3",
+      "assigned": true
+    },
+    {
+      "id": "hide2",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+3",
+      "assigned": true
+    },
+    {
+      "id": "hideApp",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "hideOthers",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+H",
+      "assigned": true
+    },
+    {
+      "id": "highlightFont",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+F",
+      "assigned": true
+    },
+    {
+      "id": "highlightFont2",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+M",
+      "assigned": true
+    },
+    {
+      "id": "hyphenPref",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "ink",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+Y",
+      "assigned": true
+    },
+    {
+      "id": "Input Text",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "internal palettes posing as plug-in menus-attributes",
+      "context": "global",
+      "shortcut": "Ctrl+F11",
+      "assigned": true
+    },
+    {
+      "id": "internal palettes posing as plug-in menus-character",
+      "context": "global",
+      "shortcut": "Ctrl+T",
+      "assigned": true
+    },
+    {
+      "id": "internal palettes posing as plug-in menus-info",
+      "context": "global",
+      "shortcut": "Ctrl+F8",
+      "assigned": true
+    },
+    {
+      "id": "internal palettes posing as plug-in menus-opentype",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+T",
+      "assigned": true
+    },
+    {
+      "id": "internal palettes posing as plug-in menus-paragraph",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+T",
+      "assigned": true
+    },
+    {
+      "id": "internal palettes posing as plug-in menus-tab",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+T",
+      "assigned": true
+    },
+    {
+      "id": "Inverse menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "join",
+      "context": "global",
+      "shortcut": "Ctrl+J",
+      "assigned": true
+    },
+    {
+      "id": "justify",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+J",
+      "assigned": true
+    },
+    {
+      "id": "justifyAll",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+F",
+      "assigned": true
+    },
+    {
+      "id": "justifyCenter",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "justifyRight",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "KBSC Menu Item",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+K",
+      "assigned": true
+    },
+    {
+      "id": "keyboardPref",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Knife Tool2",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Last Filter",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+E",
+      "assigned": true
+    },
+    {
+      "id": "leftAlign",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+L",
+      "assigned": true
+    },
+    {
+      "id": "Live 3DExtrude",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live 3DRevolve",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live 3DRotate",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live AddArrowHeads2",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Color Dialog",
+      "context": "global",
+      "shortcut": "Shift+F4",
+      "assigned": true
+    },
+    {
+      "id": "Live Deform Arc",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Deform Arc Lower",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Deform Arc Upper",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Deform Arch",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Deform Bulge",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Deform Fish",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Deform Fisheye",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Deform Flag",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Deform Inflate",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Deform Rise",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Deform Shell Lower",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Deform Shell Upper",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Deform Squeeze",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Deform Twist",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Deform Wave",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live DropShadow2",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Ellipse",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Feather",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Free Distort",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Inner Glow",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Offset Path",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Outer Glow",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Outline Object",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Outline Stroke",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Pathfinder Add",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Pathfinder Crop",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Pathfinder Divide",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Pathfinder Exclude",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Pathfinder Hard Mix",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Pathfinder Intersect",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Pathfinder Merge",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Pathfinder Minus Back",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Pathfinder Outline",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Pathfinder Soft Mix",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Pathfinder Subtract",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Pathfinder Trap",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Pathfinder Trim",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_AccE",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_AngS",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_BsRl",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_ChlC",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Chrc",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Chrm",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_ClrH",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_ClrP",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_CntC",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Crql",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Crsh",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Crst",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Ct \\",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_DfsG",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Dntr",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_DrkS",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_DryB",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_FlmG",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Frsc",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_GblR",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_GEfc",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Gls\\",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_GlwE",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_GraP",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Grn\\",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_HlfS",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_InkO",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_MscT",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Mztn",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_NGlw",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_NtPr",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_NTSC",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_OcnR",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Phtc",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Plst",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_PlsW",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_PltK",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_PntD",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Pntl",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_PstE",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Ptch",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_RdlB",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_RghP",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Rtcl",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_SmdS",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Smie",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_SmrB",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Spng",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_SprS",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Spt\\",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Stmp",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_StnG",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_TrnE",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Txtz",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Undr",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_USMk",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_Wtrc",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live PSAdapter_plugin_WtrP",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Pucker & Bloat",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Rasterize",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Rasterize Effect Setting",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Rectangle",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Roughen",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Round3",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Rounded Rectangle",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Scribble and Tweak",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Scribble Fill",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Transform",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Twist",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Live Zig Zag",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "lock",
+      "context": "global",
+      "shortcut": "Ctrl+2",
+      "assigned": true
+    },
+    {
+      "id": "lock2",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+2",
+      "assigned": true
+    },
+    {
+      "id": "lockguide",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+;",
+      "assigned": true
+    },
+    {
+      "id": "LowerCase Change Case Item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Make and Convert to Live Paint",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Make and Expand",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Make Envelope",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+C",
+      "assigned": true
+    },
+    {
+      "id": "make mesh",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Make Planet X",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+X",
+      "assigned": true
+    },
+    {
+      "id": "Make Text Wrap",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Make Tracing",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Make Warp",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+W",
+      "assigned": true
+    },
+    {
+      "id": "makeguide",
+      "context": "global",
+      "shortcut": "Ctrl+5",
+      "assigned": true
+    },
+    {
+      "id": "makeMask",
+      "context": "global",
+      "shortcut": "Ctrl+7",
+      "assigned": true
+    },
+    {
+      "id": "Marge Planet X",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "minimizeWindow",
+      "context": "global",
+      "shortcut": "Ctrl+M",
+      "assigned": true
+    },
+    {
+      "id": "navigateToNextDocument",
+      "context": "global",
+      "shortcut": "Ctrl+F6",
+      "assigned": true
+    },
+    {
+      "id": "navigateToNextDocumentGroup",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+F6",
+      "assigned": true
+    },
+    {
+      "id": "navigateToPreviousDocument",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+F6",
+      "assigned": true
+    },
+    {
+      "id": "navigateToPreviousDocumentGroup",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+F6",
+      "assigned": true
+    },
+    {
+      "id": "new",
+      "context": "global",
+      "shortcut": "Ctrl+N",
+      "assigned": true
+    },
+    {
+      "id": "new2",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+N",
+      "assigned": true
+    },
+    {
+      "id": "newFromTemplate",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+N",
+      "assigned": true
+    },
+    {
+      "id": "newview",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "newwindow",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "noCompoundPath",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+8",
+      "assigned": true
+    },
+    {
+      "id": "OffsetPath v22",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "OffsetPath v23",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "open",
+      "context": "global",
+      "shortcut": "Ctrl+O",
+      "assigned": true
+    },
+    {
+      "id": "OpenGLCompositorPreview",
+      "context": "global",
+      "shortcut": "Ctrl+E",
+      "assigned": true
+    },
+    {
+      "id": "outline",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+O",
+      "assigned": true
+    },
+    {
+      "id": "Overprint2",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "pagetiling",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Paint Tracing",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "paste",
+      "context": "global",
+      "shortcut": "Ctrl+V",
+      "assigned": true
+    },
+    {
+      "id": "paste2",
+      "context": "global",
+      "shortcut": "F4",
+      "assigned": true
+    },
+    {
+      "id": "pasteBack",
+      "context": "global",
+      "shortcut": "Ctrl+B",
+      "assigned": true
+    },
+    {
+      "id": "pasteFront",
+      "context": "global",
+      "shortcut": "Ctrl+F",
+      "assigned": true
+    },
+    {
+      "id": "pasteInAllArtboard",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+V",
+      "assigned": true
+    },
+    {
+      "id": "pasteInPlace",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+V",
+      "assigned": true
+    },
+    {
+      "id": "pasteWithoutFormatting",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+V",
+      "assigned": true
+    },
+    {
+      "id": "Path Blend Expand",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Path Blend Make",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+B",
+      "assigned": true
+    },
+    {
+      "id": "Path Blend Options",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Path Blend Release",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+B",
+      "assigned": true
+    },
+    {
+      "id": "Path Blend Replace Spine",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Path Blend Reverse Spine",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Path Blend Reverse Stack",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PDF Presets",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Planet X Options",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "pluginPref",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "preference",
+      "context": "global",
+      "shortcut": "Ctrl+K",
+      "assigned": true
+    },
+    {
+      "id": "preview",
+      "context": "global",
+      "shortcut": "Ctrl+Y",
+      "assigned": true
+    },
+    {
+      "id": "Print",
+      "context": "global",
+      "shortcut": "Ctrl+P",
+      "assigned": true
+    },
+    {
+      "id": "Print Presets",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "proof-custom",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "proof-document",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "proof-mac-rgb",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "proof-monitor-rgb",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "proof-win-rgb",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "proofColors",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_AccE",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_AngS",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_BsRl",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_ChlC",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Chrc",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Chrm",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_ClrH",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_ClrP",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_CntC",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Crql",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Crsh",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Crst",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Ct \\",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_DfsG",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Dntr",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_DrkS",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_DryB",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_FlmG",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Frsc",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_GblR",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_GEfc",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Gls\\",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_GlwE",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_GraP",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Grn\\",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_HlfS",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_InkO",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_MscT",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Mztn",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_NGlw",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_NtPr",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_NTSC",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_OcnR",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Phtc",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Plst",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_PlsW",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_PltK",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_PntD",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Pntl",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_PstE",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Ptch",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_RdlB",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_RghP",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Rtcl",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_SmdS",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Smie",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_SmrB",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Spng",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_SprS",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Spt\\",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Stmp",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_StnG",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_TrnE",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Txtz",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Undr",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_USMk",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_Wtrc",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "PSAdapter_plugin_WtrP",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Punk2",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "quit",
+      "context": "global",
+      "shortcut": "Ctrl+Q",
+      "assigned": true
+    },
+    {
+      "id": "raster",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Y",
+      "assigned": true
+    },
+    {
+      "id": "Rasterize 8 menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Recolor Art Dialog",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "redo",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+Z",
+      "assigned": true
+    },
+    {
+      "id": "Registration...",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Release Envelope",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Release Planet X",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Release Text Wrap",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Release Tracing",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "releaseCropMarks",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "releaseguide",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+5",
+      "assigned": true
+    },
+    {
+      "id": "releaseMask",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+7",
+      "assigned": true
+    },
+    {
+      "id": "releaseThreadedTextSelection",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Remove Anchor Points menu",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "removeThreading",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "repeatPathfinder",
+      "context": "global",
+      "shortcut": "Ctrl+4",
+      "assigned": true
+    },
+    {
+      "id": "Replace Colors Dialog",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "resetRotationView",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+1",
+      "assigned": true
+    },
+    {
+      "id": "rightAlign",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+R",
+      "assigned": true
+    },
+    {
+      "id": "Roughen3",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Round3",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Rows and Columns....",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "ruler",
+      "context": "global",
+      "shortcut": "Ctrl+R",
+      "assigned": true
+    },
+    {
+      "id": "rulerCoordinateSystem",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+R",
+      "assigned": true
+    },
+    {
+      "id": "Saturate3",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "save",
+      "context": "global",
+      "shortcut": "Ctrl+S",
+      "assigned": true
+    },
+    {
+      "id": "Save for Office",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "saveacopy",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+S",
+      "assigned": true
+    },
+    {
+      "id": "saveas",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+S",
+      "assigned": true
+    },
+    {
+      "id": "saveasTemplate",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Scribble3",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "selectall",
+      "context": "global",
+      "shortcut": "Ctrl+A",
+      "assigned": true
+    },
+    {
+      "id": "selectallinartboard",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+A",
+      "assigned": true
+    },
+    {
+      "id": "Selection Hat 1",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Selection Hat 10",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Selection Hat 11",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Selection Hat 2",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Selection Hat 3",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Selection Hat 4",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Selection Hat 5",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Selection Hat 6",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Selection Hat 7",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Selection Hat 8",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+]",
+      "assigned": true
+    },
+    {
+      "id": "Selection Hat 9",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+[",
+      "assigned": true
+    },
+    {
+      "id": "selectionPref",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "sendBackward",
+      "context": "global",
+      "shortcut": "Ctrl+[",
+      "assigned": true
+    },
+    {
+      "id": "sendForward",
+      "context": "global",
+      "shortcut": "Ctrl+]",
+      "assigned": true
+    },
+    {
+      "id": "sendToBack",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+[",
+      "assigned": true
+    },
+    {
+      "id": "sendToFront",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+]",
+      "assigned": true
+    },
+    {
+      "id": "Sentence case Change Case Item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "setBarDesign",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "setCropMarks",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "setGraphStyle",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "setIconDesign",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Show Gaps Planet X",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Show Perspective Grid",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+I",
+      "assigned": true
+    },
+    {
+      "id": "Show Preprocessed Image",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "showAll",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+3",
+      "assigned": true
+    },
+    {
+      "id": "showAllWindows",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "ShowArtwork",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "showgrid",
+      "context": "global",
+      "shortcut": "Ctrl+\"",
+      "assigned": true
+    },
+    {
+      "id": "showguide",
+      "context": "global",
+      "shortcut": "Ctrl+;",
+      "assigned": true
+    },
+    {
+      "id": "showHiddenChar",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+I",
+      "assigned": true
+    },
+    {
+      "id": "ShowNoArtwork",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "ShowNoImage",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "ShowOriginalImage",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "ShowPaths",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "ShowPathsAndTransparentArtwork",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "showtemplate",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+W",
+      "assigned": true
+    },
+    {
+      "id": "ShowTransparentImage",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "simplify menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "sizeStepDown",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+,",
+      "assigned": true
+    },
+    {
+      "id": "sizeStepUp",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+.",
+      "assigned": true
+    },
+    {
+      "id": "snapgrid",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+\"",
+      "assigned": true
+    },
+    {
+      "id": "Snapomatic on-off menu item",
+      "context": "global",
+      "shortcut": "Ctrl+U",
+      "assigned": true
+    },
+    {
+      "id": "snappoint",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+\"",
+      "assigned": true
+    },
+    {
+      "id": "snapPref",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "spacing",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+O",
+      "assigned": true
+    },
+    {
+      "id": "Stray Points menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Style Palette",
+      "context": "global",
+      "shortcut": "Shift+F6",
+      "assigned": true
+    },
+    {
+      "id": "SWFPresets",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "switchSelTool",
+      "context": "global",
+      "shortcut": "Ctrl+`",
+      "assigned": true
+    },
+    {
+      "id": "switchUnits",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+U",
+      "assigned": true
+    },
+    {
+      "id": "systemInfo",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Text Objects menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Text Wrap Options...",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "textpathtype3d",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "textpathtypeGravity",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "textpathtypeOptions",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "textpathtypeRainbow",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "textpathtypeSkew",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "textpathtypestairs",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "textthreads",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+Y",
+      "assigned": true
+    },
+    {
+      "id": "threadTextCreate",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "tile",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Title Case Change Case Item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "toggleAutoHyphen",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+H",
+      "assigned": true
+    },
+    {
+      "id": "toggleLineComposer",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+C",
+      "assigned": true
+    },
+    {
+      "id": "Tracing Options",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "TracingPresets",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "tracking",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+K",
+      "assigned": true
+    },
+    {
+      "id": "Transform3",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+Shift+D",
+      "assigned": true
+    },
+    {
+      "id": "transformagain",
+      "context": "global",
+      "shortcut": "Ctrl+D",
+      "assigned": true
+    },
+    {
+      "id": "transformmove",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+M",
+      "assigned": true
+    },
+    {
+      "id": "transformreflect",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "transformrotate",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "transformscale",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "transformshear",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Transparency Presets",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "TransparencyGrid Menu Item",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+D",
+      "assigned": true
+    },
+    {
+      "id": "TrimMark2",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Twirl Tool2",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "type-horizontal",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "type-vertical",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "undo",
+      "context": "global",
+      "shortcut": "Ctrl+Z",
+      "assigned": true
+    },
+    {
+      "id": "undo2",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "ungroup",
+      "context": "global",
+      "shortcut": "Ctrl+Shift+G",
+      "assigned": true
+    },
+    {
+      "id": "ungroupAll",
+      "context": "global",
+      "shortcut": "Alt+Shift+G",
+      "assigned": true
+    },
+    {
+      "id": "unitundoPref",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "unlockAll",
+      "context": "global",
+      "shortcut": "Ctrl+Alt+2",
+      "assigned": true
+    },
+    {
+      "id": "Updates...",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "UpperCase Change Case Item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "userInterfacePref",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "view1",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "view10",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "view2",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "view3",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "view4",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "view5",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "view6",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "view7",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "view8",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "view9",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Welcome screen menu item",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "ZigZag2",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "zoomin",
+      "context": "global",
+      "shortcut": "Ctrl++",
+      "assigned": true
+    },
+    {
+      "id": "zoomin2",
+      "context": "global",
+      "shortcut": "Ctrl++",
+      "assigned": true
+    },
+    {
+      "id": "zoomout",
+      "context": "global",
+      "shortcut": "Ctrl+-",
+      "assigned": true
+    },
+    {
+      "id": "~bullet",
+      "context": "text",
+      "shortcut": "Alt+8",
+      "assigned": true
+    },
+    {
+      "id": "~copyright",
+      "context": "text",
+      "shortcut": "Alt+G",
+      "assigned": true
+    },
+    {
+      "id": "~discretionaryHyphen",
+      "context": "text",
+      "shortcut": "Ctrl+Shift+-",
+      "assigned": true
+    },
+    {
+      "id": "~doubleLeftQuote",
+      "context": "text",
+      "shortcut": "Alt+[",
+      "assigned": true
+    },
+    {
+      "id": "~doubleRightQuote",
+      "context": "text",
+      "shortcut": "Alt+Shift+[",
+      "assigned": true
+    },
+    {
+      "id": "~ellipsis",
+      "context": "text",
+      "shortcut": "Alt+;",
+      "assigned": true
+    },
+    {
+      "id": "~emDash",
+      "context": "text",
+      "shortcut": "Alt+Shift+-",
+      "assigned": true
+    },
+    {
+      "id": "~emSpace",
+      "context": "text",
+      "shortcut": "Ctrl+Shift+M",
+      "assigned": true
+    },
+    {
+      "id": "~enDash",
+      "context": "text",
+      "shortcut": "Alt+-",
+      "assigned": true
+    },
+    {
+      "id": "~enSpace",
+      "context": "text",
+      "shortcut": "Ctrl+Shift+N",
+      "assigned": true
+    },
+    {
+      "id": "~forcedLineBreak",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "~hairSpace",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "~kernCloser",
+      "context": "text",
+      "shortcut": "Ctrl+Shift+[",
+      "assigned": true
+    },
+    {
+      "id": "~kernFurther",
+      "context": "text",
+      "shortcut": "Ctrl+Shift+]",
+      "assigned": true
+    },
+    {
+      "id": "~paragraphSymbol",
+      "context": "text",
+      "shortcut": "Alt+7",
+      "assigned": true
+    },
+    {
+      "id": "~registeredTrademark",
+      "context": "text",
+      "shortcut": "Alt+R",
+      "assigned": true
+    },
+    {
+      "id": "~sectionSymbol",
+      "context": "text",
+      "shortcut": "Alt+6",
+      "assigned": true
+    },
+    {
+      "id": "~singleLeftQuote",
+      "context": "text",
+      "shortcut": "Alt+]",
+      "assigned": true
+    },
+    {
+      "id": "~singleRightQuote",
+      "context": "text",
+      "shortcut": "Alt+Shift+]",
+      "assigned": true
+    },
+    {
+      "id": "~subscript",
+      "context": "text",
+      "shortcut": "Ctrl+Alt+Shift++",
+      "assigned": true
+    },
+    {
+      "id": "~subscript2",
+      "context": "text",
+      "shortcut": "Ctrl+Alt+Shift++",
+      "assigned": true
+    },
+    {
+      "id": "~superScript",
+      "context": "text",
+      "shortcut": "Ctrl+Shift++",
+      "assigned": true
+    },
+    {
+      "id": "~superScript2",
+      "context": "text",
+      "shortcut": "Ctrl+Shift++",
+      "assigned": true
+    },
+    {
+      "id": "~textBold",
+      "context": "text",
+      "shortcut": "Ctrl+Shift+B",
+      "assigned": true
+    },
+    {
+      "id": "~textItalic",
+      "context": "text",
+      "shortcut": "Ctrl+Shift+I",
+      "assigned": true
+    },
+    {
+      "id": "~textUnderline",
+      "context": "text",
+      "shortcut": "Ctrl+Shift+U",
+      "assigned": true
+    },
+    {
+      "id": "~thinSpace",
+      "context": "text",
+      "shortcut": "Ctrl+Alt+Shift+M",
+      "assigned": true
+    },
+    {
+      "id": "~trademarkSymbol",
+      "context": "text",
+      "shortcut": "Alt+2",
+      "assigned": true
+    }
+  ],
+  "tools": [
+    {
+      "id": "Adobe Add Anchor Point Tool",
+      "context": "global",
+      "shortcut": "+",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Anchor Point Tool",
+      "context": "global",
+      "shortcut": "Shift+C",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Arc Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Area Graph Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Area Type Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Bar Graph Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Color",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Color Burn",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Color Dodge",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Darken",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Difference",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Exclusion",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Hard Light",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Hue",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Lighten",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Luminosity",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Multiply",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Next Mode",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Normal",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Overlay",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Prev Mode",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Saturation",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Screen",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Mode Soft Light",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blend Tool",
+      "context": "global",
+      "shortcut": "W",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Bloat Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Blob Brush Tool",
+      "context": "global",
+      "shortcut": "Shift+B",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Brush Tool",
+      "context": "global",
+      "shortcut": "B",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Column Graph Tool",
+      "context": "global",
+      "shortcut": "J",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Crop Tool",
+      "context": "global",
+      "shortcut": "Shift+O",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Curvature Tool",
+      "context": "global",
+      "shortcut": "Shift+~",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Cyrstallize Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Default Fill Stroke",
+      "context": "global",
+      "shortcut": "D",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Delete Anchor Point Tool",
+      "context": "global",
+      "shortcut": "-",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Direct Lasso Tool",
+      "context": "global",
+      "shortcut": "Q",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Direct Object Select Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Direct Select Tool",
+      "context": "global",
+      "shortcut": "A",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Ellipse Shape Tool",
+      "context": "global",
+      "shortcut": "L",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Eraser Tool",
+      "context": "global",
+      "shortcut": "Shift+E",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Eyedropper Tool",
+      "context": "global",
+      "shortcut": "I",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Flare Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Free Transform Tool",
+      "context": "global",
+      "shortcut": "E",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Freehand Erase Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Freehand Smooth Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Freehand Tool",
+      "context": "global",
+      "shortcut": "N",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Gradient Vector Tool",
+      "context": "global",
+      "shortcut": "G",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Knife Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Line Graph Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Line Tool",
+      "context": "global",
+      "shortcut": "\\",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Magic Wand Tool",
+      "context": "global",
+      "shortcut": "Y",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Measure Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Mesh Editing Tool",
+      "context": "global",
+      "shortcut": "U",
+      "assigned": true
+    },
+    {
+      "id": "Adobe New Twirl Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 0",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 10",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 100",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 20",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 30",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 40",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 50",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 60",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 70",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 80",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Opacity 90",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Page Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Paint Color",
+      "context": "global",
+      "shortcut": "<",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Paint Gradient",
+      "context": "global",
+      "shortcut": ">",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Paint None",
+      "context": "global",
+      "shortcut": "/",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Path Type Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Pen Tool",
+      "context": "global",
+      "shortcut": "P",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Pie Graph Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Planar Face Select Tool",
+      "context": "global",
+      "shortcut": "Shift+L",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Planar Paintbucket Tool",
+      "context": "global",
+      "shortcut": "K",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Polar Grid Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Presentation Mode",
+      "context": "global",
+      "shortcut": "Shift+F",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Pucker Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Quick Pen Tool",
+      "context": "global",
+      "shortcut": "Shift+Q",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Radar Graph Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Rectangle Shape Tool",
+      "context": "global",
+      "shortcut": "M",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Rectangular Grid Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Reflect Tool",
+      "context": "global",
+      "shortcut": "O",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Reshape Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Rotate Canvas Tool",
+      "context": "global",
+      "shortcut": "Shift+H",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Rotate Tool",
+      "context": "global",
+      "shortcut": "R",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Rounded Rectangle Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Scale Tool",
+      "context": "global",
+      "shortcut": "S",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Scallop Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Scatter Graph Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Scissors Tool",
+      "context": "global",
+      "shortcut": "C",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Scroll Tool",
+      "context": "global",
+      "shortcut": "H",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Select Tool",
+      "context": "global",
+      "shortcut": "V",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Shape Builder Tool",
+      "context": "global",
+      "shortcut": "Shift+M",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Shape Construction Regular Polygon Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Shape Construction Spiral Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Shape Construction Star Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Shaper Tool",
+      "context": "global",
+      "shortcut": "Shift+N",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Shear Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Slice Select Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Slice Tool",
+      "context": "global",
+      "shortcut": "Shift+K",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Stacked Bar Graph Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Stacked Column Graph Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Swap Fill Stroke",
+      "context": "global",
+      "shortcut": "Shift+X",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Symbol Screener Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Symbol Scruncher Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Symbol Shifter Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Symbol Sizer Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Symbol Spinner Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Symbol Sprayer Tool",
+      "context": "global",
+      "shortcut": "Shift+S",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Symbol Stainer Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Symbol Styler Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Symbolism Dec Intensity",
+      "context": "global",
+      "shortcut": "Shift+{",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Symbolism Inc Intensity",
+      "context": "global",
+      "shortcut": "Shift+}",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Toggle Closing Palettes",
+      "context": "global",
+      "shortcut": "Shift+Tab",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Toggle Drawing Mode",
+      "context": "global",
+      "shortcut": "Shift+D",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Toggle Fill Stroke",
+      "context": "global",
+      "shortcut": "X",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Toggle Palettes",
+      "context": "global",
+      "shortcut": "Tab",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Toggle Screen Mode",
+      "context": "global",
+      "shortcut": "F",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Tool Dec Diameter",
+      "context": "global",
+      "shortcut": "[",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Tool Inc Diameter",
+      "context": "global",
+      "shortcut": "]",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Touch Type Tool",
+      "context": "global",
+      "shortcut": "Shift+T",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Type Tool",
+      "context": "global",
+      "shortcut": "T",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Vertical Area Type Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Vertical Path Type Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Vertical Type Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Warp Tool",
+      "context": "global",
+      "shortcut": "Shift+R",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Width Tool",
+      "context": "global",
+      "shortcut": "Shift+W",
+      "assigned": true
+    },
+    {
+      "id": "Adobe Wrinkle Tool",
+      "context": "global",
+      "shortcut": null,
+      "assigned": false
+    },
+    {
+      "id": "Adobe Zoom Tool",
+      "context": "global",
+      "shortcut": "Z",
+      "assigned": true
+    },
+    {
+      "id": "Perspective Grid Tool",
+      "context": "global",
+      "shortcut": "Shift+P",
+      "assigned": true
+    },
+    {
+      "id": "Perspective Selection Tool",
+      "context": "global",
+      "shortcut": "Shift+V",
+      "assigned": true
+    }
+  ]
+}
