@@ -356,3 +356,121 @@
 | 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
 |---|---|---|---|---|---|---|
 | `do_not_warn_missing_fonts` | `checkbox` | 打开项目时，不要提醒我缺失字体。 | Do not warn me about missing fonts when opening a project. | 不勾选 | — | `[General Section] Hide Missing Font Dialog` |
+
+### 4.9 第 9 页：导入 (Import) — `import`
+
+#### 导入默认值 / Import Defaults
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `indeterminate_media_ntsc` | `dropdown` | 不确定的媒体 NTSC: | Indeterminate Media Timebase NTSC: | 丢帧 (`Drop-Frame`) | 丢帧 (Drop-Frame) / 无丢帧 (Non-Drop-Frame) | `[Import Options Preference Section] Import Options Default NTSC Dropframe` |
+| `interpret_unlabeled_alpha_as` | `dropdown` | 将未标记的 Alpha 解释为: | Interpret Unlabeled Alpha As: | 询问用户 (`Ask User`) | 询问用户 (Ask User) / 猜测 (Guess) / 忽略 Alpha (Ignore Alpha) / 直接（无遮罩） (Straight - Unmatted) / 预乘（黑色遮罩） (Premultiplied - Matted With Black) / 预乘（白色遮罩） (Premultiplied - Matted With White) | `[Import Options Preference Section] Import Options Default Unlabeled Alpha` |
+| `drag_import_multiple_items_as` | `dropdown` | 通过拖动将多个项目导入为: | Default Drag Import Multiple Items As: | 素材 (`Footage`) | 素材 (Footage) / 合成 (Composition) / 合成 - 保持图层大小 (Composition - Retain Layer Sizes) | `[Import Options Preference Section] Import Options Default Import Type` |
+| `footage_interpretation_on_replace` | `dropdown` | 有关替换的素材解释： | Footage Interpretation on Replace: | 重置 (`Reset`) | 重置 (Reset) / 记住 (Remember) | `[Import Options Preference Section] Footage Interpretation On Replace` |
+
+#### 静止素材 / Still Footage
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `still_footage_duration_mode` | `radio_group` | 静止素材初始长度 | Still Footage Initial Duration | 合成的长度 (`Length of Composition`) | 合成的长度 (Length of Composition) / 指定时长 (Fixed Duration) | — |
+| `still_footage_duration_timecode` | `timecode_input` | 静止素材时长 | Still Footage Duration | `0:00:01:00` | — | — |
+
+#### 序列素材 / Sequence Footage
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `sequence_footage_fps` | `number_input` | 每秒帧数: | Frames Per Second: | `30` 帧/秒 | 范围 `0.01..999` 帧/秒 | `[Import Options Preference Section] Import Options Default Sequence FPS` |
+| `report_missing_frames` | `checkbox` | 报告缺失帧 | Report Missing Frames | 勾选 | — | `[Import Options Preference Section] Report Missing Frames From Sequences` |
+| `verify_individual_frames` | `checkbox` | 验证各个帧（较慢） | Verify Individual Frames (Slower) | 不勾选 | — | `[Import Options Preference Section] Import Options Verify Individual Sequence Files` |
+
+#### 视频素材 / Video Footage
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `enable_hardware_accelerated_decoding` | `checkbox` | 启用硬件加速解码（需要重新启动） | Enable Hardware Accelerated Decoding (Requires Restart) | 勾选 | — | — |
+
+#### 自动重新加载素材 / Auto-Reload Footage
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `auto_reload_mode` | `dropdown` | 自动重新加载: | Auto-Reload: | 非序列素材 (`Non-Sequence Footage`) | 所有素材类型 (All Footage Types) / 非序列素材 (Non-Sequence Footage) / 关 (Off) | `[Auto Reload Footage On Application Focus] Enabled` |
+
+### 4.10 第 10 页：导出 (Export) — `export`
+
+#### 导出默认值 / Export Defaults
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `use_default_filename_and_folder` | `checkbox` | 使用默认文件名和文件夹 | Use Default File Name and Folder | 勾选 | — | `[Misc Section] Guess Default Output File Name` |
+| `preview_output_during_render_queue` | `checkbox` | 渲染队列输出期间预览输出 | Preview Output During Render Queue Output | 勾选 | — | — |
+| `play_sound_when_render_finishes` | `checkbox` | 在渲染完成时播放声音 | Play Sound When Render Finishes | 勾选 | — | `[Misc Section] Play sound when render finishes` |
+| `enable_prores_hardware_encoding` | `checkbox` | 启用 ProRes 硬件加速编码（如果可用） | Enable Hardware Accelerated Encoding for ProRes (if available) | 不勾选 | 默认置灰（依硬件/缓存状态）；Windows 无 ProRes 硬件编码器时默认置灰；Apple Silicon macOS 上可用 | — |
+
+#### 区段输出 / Segment Output
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `segment_sequences_enabled` | `checkbox` | 序列拆分为 | Segment Sequences At | 不勾选 | — | — |
+| `segment_sequences_files` | `number_input` | 序列拆分文件数 | Segment Sequences File Count | `700` 个文件 | 范围 `1..99999` 个文件 | `[Main Pref Section v2] Pref_LIMIT_FILES_PER_FOLDER v2` |
+| `segment_video_only_movies_enabled` | `checkbox` | 仅拆分视频影片为 | Segment Video-Only Movies At | 不勾选 | — | — |
+| `segment_video_only_movies_mb` | `number_input` | 影片拆分大小 | Segment Movie Size | `1024` MB | 范围 `1..999999` MB | `[Main Pref Section v2] Pref_LIMIT_FILESIZE_K` |
+
+#### 渲染通知 / Render Notifications
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `auto_enable_render_notifications` | `checkbox` | 将合成添加到渲染队列时自动启用通知 | Automatically Enable Notifications when Adding a Composition to the Render Queue | 不勾选 | — | `[Notifications] Enable Automatically Set Notifications` |
+
+### 4.11 第 11 页：音频 (Audio) — `audio`
+
+#### 音频硬件 / Audio Hardware
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `audio_device_class` | `dropdown` | 设备类型: | Device Class: | MME (`MME`) | ASIO (ASIO) / MME (MME)；Windows 提供 ASIO / MME；macOS 为 CoreAudio | `[Audio Settings Preference Section] Audio Device Class ID` |
+| `audio_default_output` | `dropdown` | 默认输出: | Default Output: | System Default - <系统默认输出设备> (`System Default - <OS Output Device>`) | System Default - <系统默认输出设备> (System Default - <OS Output Device>)；下拉列表动态枚举当前系统全部音频输出设备 | — |
+| `audio_latency_ms` | `dropdown` | 等待时间: | Latency: | 200 (`200`) | 共 13 项：30 (30)、40 (40)、50 (50)、60 (60)、80 (80)、100 (100) 等（完整列表见 JSON）；仅 MME 模式显示毫秒下拉；ASIO 模式由驱动面板控制 | — |
+| `audio_sample_rate` | `readonly_text` | 采样率: | Sample Rate: | `44100 Hz` | 动态显示当前输出设备的采样率 | — |
+| `audio_hardware_settings` | `button` | 设置... | Settings... | — | 位于分隔线下方，打开系统音频或 ASIO 驱动控制面板 | — |
+
+#### 输出渠道映射 / Output Channel Mapping
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `audio_map_left` | `dropdown` | 左侧: | Left: | <输出设备> 1 (`<Output Device> 1`) | <输出设备> 1 (<Output Device> 1) / <输出设备> 2 (<Output Device> 2) | `[Audio Settings Preference Section] Audio Device Channel Map` |
+| `audio_map_right` | `dropdown` | 右侧: | Right: | <输出设备> 2 (`<Output Device> 2`) | <输出设备> 1 (<Output Device> 1) / <输出设备> 2 (<Output Device> 2) | `[Audio Settings Preference Section] Audio Device Channel Map` |
+
+#### 导出 / Export
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `audio_block_duration` | `timecode_input` | 音频块持续时间: | Audio Block Duration: | `0:00:01:00` | — | `[Main Pref Section v2] Pref_SOUND_CHUNK_DURATION` |
+
+### 4.12 第 12 页：磁盘 (Disk) — `disk`
+
+#### 磁盘缓存 / Disk Cache
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `enable_disk_cache` | `checkbox` | 启用磁盘缓存 | Enable Disk Cache | 勾选 | — | `[Disk Cache Controls] Enabled 2` |
+| `max_disk_cache_size_gb` | `number_input` | 最大磁盘缓存大小: | Maximum Disk Cache Size: | `dynamic_10pct_volume` GB | 启用条件：`enable_disk_cache == True`；默认值按缓存盘可用空间动态计算（约 10%）；本机实测为 43 GB | `[Disk Cache Controls] Max Size 3` |
+| `choose_disk_cache_folder` | `button` | 选择文件夹... | Choose Folder... | — | 启用条件：`enable_disk_cache == True` | `[Disk Cache Controls] Folder 7` |
+| `disk_cache_folder_display` | `readonly_text` | 磁盘缓存路径 | Disk Cache Path | `<LocalAppData>/Adobe/After Effects/26.0/Disk Cache` | — | — |
+| `empty_disk_cache` | `button` | 清空磁盘缓存... | Empty Disk Cache... | — | — | — |
+| `enable_preview_from_disk_cache` | `checkbox` | 启用从磁盘缓存预览 | Enable Preview from Disk Cache | 勾选 | 启用条件：`enable_disk_cache == True` | `[Playback From Disk] Enabled` |
+| `enable_compressed_frames_lossless` | `checkbox` | 启用压缩帧（无损） | Enable Compressed Frames (Lossless) | 勾选 | 启用条件：`enable_disk_cache == True` | `[Disk Cache Controls] Compressed` |
+
+#### 符合的媒体缓存 / Conformed Media Cache
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `media_cache_database_choose` | `button` | 数据库: 选择文件夹... | Database: Choose Folder... | `<AppData>/Adobe/Common/` | — | — |
+| `media_cache_choose` | `button` | 缓存: 选择文件夹... | Cache: Choose Folder... | `<AppData>/Adobe/Common/` | — | — |
+| `clean_database_and_cache` | `button` | 清理数据库和缓存 | Clean Database & Cache | — | — | — |
+
+#### XMP 元数据 / XMP Metadata
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `write_xmp_ids_on_import` | `checkbox` | 导入时将 XMP ID 写入文件 | Write XMP IDs to Files on Import | 不勾选 | — | — |
+| `create_layer_markers_from_xmp` | `checkbox` | 从素材 XMP 元数据创建图层标记 | Create Layer Markers from Footage XMP Metadata | 勾选 | — | `[Metadata] CreateLayerMarkersFromFootageXMP` |
