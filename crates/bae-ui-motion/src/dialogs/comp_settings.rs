@@ -848,22 +848,13 @@ pub(crate) fn next_comp_name(
 
 /// The greyed Save / Delete preset buttons (floppy disk, trash can).
 fn preset_buttons(ui: &mut Ui) {
-    for (i, label) in ["Save Preset", "Delete Preset"].into_iter().enumerate() {
+    for (icon, label) in [
+        (bae_ui::Icon::Save, "Save Preset"),
+        (bae_ui::Icon::Trash, "Delete Preset"),
+    ] {
         let (rect, resp) = ui.allocate_exact_size(egui::Vec2::splat(18.0), Sense::hover());
         let _ = resp.labeled(egui::WidgetType::Button, tr(label));
-        let p = ui.painter();
-        let c = color::TEXT_DISABLED;
-        if i == 0 {
-            let r = rect.shrink(4.0);
-            p.rect_stroke(r, 1.0, egui::Stroke::new(1.2, c), egui::StrokeKind::Inside);
-            p.rect_filled(
-                egui::Rect::from_min_size(r.min + vec2(2.5, 0.0), vec2(r.width() - 5.0, 3.5)),
-                0.0,
-                c,
-            );
-        } else {
-            bae_ui::icons::paint(p, rect.shrink(2.0), bae_ui::Icon::Trash, c);
-        }
+        bae_ui::icons::paint(ui.painter(), rect.shrink(2.0), icon, color::TEXT_DISABLED);
     }
 }
 
