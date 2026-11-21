@@ -37,6 +37,8 @@ mod type_tool;
 pub(crate) use transform::nudge_layers;
 
 const MAGNIFICATIONS: [f32; 9] = [0.125, 0.25, 0.333, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0];
+/// Magnification change per mouse-wheel notch (AE Smooth Zoom; step 待核).
+const WHEEL_ZOOM: f32 = 1.15;
 
 #[derive(Default)]
 pub struct CompositionViewer {
@@ -380,13 +382,40 @@ impl Panel for CompositionViewer {
             }
             None => {}
         }
-        // Zoom: pinch / Cmd+scroll around the pointer; plain scroll pans.
+        // Wheel (AE-UI-011): a mouse wheel zooms around the pointer (Alt/Option:
+        // around the view's center; Shift: scrolls sideways); trackpad scrolling
+        // pans (AE 25.3+ on macOS); pinch and Cmd/Ctrl+scroll zoom.
         if resp.hovered() && self.shape.is_none() {
-            let (zoom, scroll) = ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta));
+            let (zoom, wheel) = ui.input(|i| {
+                let mut notches = 0.0f32;
+                let mut pan = Vec2::ZERO;
+                for e in &i.events {
+                    if let egui::Event::MouseWheel {
+                        unit,
+                        delta,
+                        modifiers,
+                        ..
+                    } = e
+                    {
+                        match unit {
+                            egui::MouseWheelUnit::Point => pan += *delta,
+                            _ if modifiers.shift => pan.x += (delta.x + delta.y) * 40.0,
+                            egui::MouseWheelUnit::Line => notches += delta.y,
+                            egui::MouseWheelUnit::Page => notches += delta.y * 4.0,
+                        }
+                    }
+                }
+                (i.zoom_delta(), (notches, pan, i.modifiers.alt))
+            });
+            let (notches, pan, alt) = wheel;
             if zoom != 1.0 {
                 self.zoom_by(zoom, resp.hover_pos(), area, &info, ppp);
-            } else if scroll != Vec2::ZERO {
-                self.pan += scroll;
+            } else {
+                if notches != 0.0 {
+                    let around = if alt { None } else { resp.hover_pos() };
+                    self.zoom_by(WHEEL_ZOOM.powf(notches), around, area, &info, ppp);
+                }
+                self.pan += pan;
             }
         }
         if resp.dragged_by(egui::PointerButton::Middle)
