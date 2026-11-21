@@ -809,6 +809,17 @@ name = "bae-plugin-sdk"
 version = "0.1.0"
 
 [[package]]
+name = "bae-prefs"
+version = "0.1.0"
+dependencies = [
+ "bae-platform",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "bae-render"
 version = "0.1.0"
 dependencies = [
