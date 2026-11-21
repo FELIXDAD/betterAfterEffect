@@ -69,6 +69,16 @@ pub fn items() -> Vec<(&'static str, MenuItemSpec)> {
                 .group(1)
                 .enabled_when(has_comp),
         ),
+        (
+            "motion.composition.render_queue",
+            item(
+                &["Composition"],
+                "Add to Render Queue",
+                ids::ADD_TO_RENDER_QUEUE,
+            )
+            .group(2)
+            .enabled_when(has_comp),
+        ),
         // Layer ▸ New (AE order), then the shape presets.
         ("motion.layer.new.text", new_layer("Text", "text", 1)),
         ("motion.layer.new.solid", new_layer("Solid", "solid", 2)),

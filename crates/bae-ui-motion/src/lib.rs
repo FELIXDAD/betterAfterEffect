@@ -9,6 +9,7 @@
 //! | `properties` | Properties (AE 2024+): the selected layer's transform, text and shape fill |
 //! | `effect_controls` | Effect Controls (F3) |
 //! | `preview` | Preview: play/stop, frame stepping, loop |
+//! | `render_queue` | Render Queue: queued comps, output format / path / frames, render on a background thread through 04's export pipeline, progress, stop, show in Finder |
 //!
 //! Panels share a [`SharedSession`] app resource (active comp, current time,
 //! selection, playback); it holds view state only. All project changes are
@@ -29,6 +30,7 @@ mod panels;
 mod project;
 mod props;
 mod render;
+pub mod render_queue;
 pub mod session;
 mod timeline;
 mod viewer;
@@ -39,6 +41,7 @@ use bae_ui::{ActionHandler, ActionInfo, KeymapBindings, MenuItemSpec, PanelKind}
 pub use gpu_preview::PreviewSources;
 pub use panels::{EffectControlsPanel, PreviewPanel, PropertiesPanel};
 pub use project::ProjectPanel;
+pub use render_queue::{RenderQueuePanel, SharedRenderQueue};
 pub use session::{Session, SharedSession};
 pub use timeline::TimelinePanel;
 pub use viewer::CompositionViewer;
@@ -59,9 +62,12 @@ impl AppModule for MotionUiModule {
         if app.resource::<SharedSession>().is_none() {
             app.insert_resource(SharedSession::default());
         }
+        if app.resource::<SharedRenderQueue>().is_none() {
+            app.insert_resource(SharedRenderQueue::default());
+        }
         let owner = app.current_owner();
         let kinds = app.registry::<PanelKind>();
-        let panels: [(&str, PanelKind); 6] = [
+        let panels: [(&str, PanelKind); 7] = [
             (
                 "project",
                 PanelKind::new("Project", |_| Box::new(ProjectPanel::default())),
@@ -89,6 +95,10 @@ impl AppModule for MotionUiModule {
             (
                 "preview",
                 PanelKind::new("Preview", |_| Box::new(PreviewPanel)),
+            ),
+            (
+                "render_queue",
+                PanelKind::new("Render Queue", |_| Box::new(RenderQueuePanel::default())),
             ),
         ];
         kinds.batch(|tx| {

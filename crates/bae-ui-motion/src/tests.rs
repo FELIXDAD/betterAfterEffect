@@ -699,3 +699,46 @@ fn timeline_and_project_rename_commit_on_enter_and_click_away() {
         "Enter after a commit starts a new rename, it does not commit one"
     );
 }
+
+/// Composition ▸ Add to Render Queue (Cmd/Ctrl+M) queues the active comp with
+/// its work area and opens the Render Queue panel; the panel draws it.
+#[test]
+fn add_to_render_queue_action() {
+    let mut h = Harness::new();
+    h.resources
+        .insert(crate::render_queue::SharedRenderQueue::default());
+    let (comp, _, _) = h.comp_with_layers();
+    let mut tl = TimelinePanel::default();
+    let r = h.action(
+        &mut tl,
+        Invocation::new(crate::actions::ids::ADD_TO_RENDER_QUEUE),
+    );
+    assert_eq!(r.open, vec![PanelId::new("render_queue")]);
+    let queue = h
+        .resources
+        .get::<crate::render_queue::SharedRenderQueue>()
+        .unwrap()
+        .clone();
+    {
+        let q = queue.lock();
+        assert_eq!(q.items().len(), 1);
+        assert_eq!(q.items()[0].comp, comp);
+        assert_eq!(q.items()[0].status, crate::render_queue::ItemStatus::Queued);
+    }
+    let mut panel = crate::RenderQueuePanel::default();
+    assert!(h.frame("render_queue", &mut panel, Vec::new()).is_empty());
+    // The menu item and its AE shortcut.
+    assert!(
+        crate::menus::items()
+            .iter()
+            .any(|(id, item)| *id == "motion.composition.render_queue"
+                && item.action == crate::actions::ids::ADD_TO_RENDER_QUEUE)
+    );
+    assert!(
+        crate::actions::bindings()
+            .bindings
+            .iter()
+            .any(|b| b.chord == bae_ui::Chord::parse("Cmd+M").unwrap()
+                && b.action == crate::actions::ids::ADD_TO_RENDER_QUEUE)
+    );
+}
