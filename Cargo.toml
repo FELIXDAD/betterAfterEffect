@@ -95,7 +95,9 @@ fontique = { version = "0.13.0", default-features = false, features = ["std", "s
 skrifa = "0.49.0"
 
 # ---- UI (egui 0.36: the newest line egui_dock supports) ----
-egui = "0.36.2"
+# No `default_fonts`: the UI uses the system's fonts (bae-ui `theme::system_ui_fonts`),
+# so egui's bundled Ubuntu / Hack / Noto Emoji / emoji-icon fonts (1.4 MiB) are not linked.
+egui = { version = "0.36.2", default-features = false }
 egui-wgpu = { version = "0.36.2", default-features = false }
 egui-winit = { version = "0.36.2", default-features = false, features = ["clipboard", "links"] }
 egui_dock = "0.21.1"
