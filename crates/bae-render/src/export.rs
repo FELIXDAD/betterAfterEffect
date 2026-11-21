@@ -462,7 +462,6 @@ impl ExportReadback {
 pub(crate) struct EncoderThread {
     sender: Option<std::sync::mpsc::SyncSender<MappedFrame>>,
     handle: Option<std::thread::JoinHandle<Result<EncoderOutput, RenderError>>>,
-    abort: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// What the encoder thread did.
@@ -478,36 +477,26 @@ impl EncoderThread {
     /// Frames queued ahead of the encoder thread.
     const QUEUE: usize = 2;
 
+    /// Frames that were written stay written when the export stops or fails
+    /// (AE keeps the frames rendered before Stop): on an error the encoder is
+    /// finished, not aborted, so complete files are kept.
     pub(crate) fn spawn(mut encoder: Box<dyn bae_media::Encoder>) -> Self {
-        use std::sync::atomic::Ordering;
         let (sender, receiver) = std::sync::mpsc::sync_channel::<MappedFrame>(Self::QUEUE);
-        let abort = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let stop = abort.clone();
         let handle = std::thread::Builder::new()
             .name("bae-render.encode".into())
             .spawn(move || {
                 let mut copy = Duration::ZERO;
                 for mapped in receiver.iter() {
-                    if stop.load(Ordering::Relaxed) {
-                        break;
+                    let pushed = mapped.into_frame().and_then(|frame| {
+                        copy += frame.copy;
+                        let frame = cpu_frame(frame, encoder.settings());
+                        encoder.push_frame_owned(frame).map_err(media_error)
+                    });
+                    if let Err(error) = pushed {
+                        // Wait for the frames before this one; keep them.
+                        let _ = encoder.finish();
+                        return Err(error);
                     }
-                    let frame = match mapped.into_frame() {
-                        Ok(frame) => frame,
-                        Err(error) => {
-                            encoder.abort();
-                            return Err(error);
-                        }
-                    };
-                    copy += frame.copy;
-                    let frame = cpu_frame(frame, encoder.settings());
-                    if let Err(error) = encoder.push_frame_owned(frame) {
-                        encoder.abort();
-                        return Err(media_error(error));
-                    }
-                }
-                if stop.load(Ordering::Relaxed) {
-                    encoder.abort();
-                    return Err(RenderError::Canceled);
                 }
                 let output = encoder.finish().map_err(media_error)?;
                 Ok(EncoderOutput { output, copy })
@@ -516,7 +505,6 @@ impl EncoderThread {
         Self {
             sender: Some(sender),
             handle: Some(handle),
-            abort,
         }
     }
 
@@ -541,9 +529,9 @@ impl EncoderThread {
         self.join()
     }
 
-    /// Stops and removes what was written.
-    pub(crate) fn abort(mut self) {
-        self.abort.store(true, std::sync::atomic::Ordering::Relaxed);
+    /// Stops after an error: waits for the queued frames, keeps what was
+    /// written.
+    pub(crate) fn close(mut self) {
         self.sender = None;
         let _ = self.join();
     }
@@ -563,7 +551,6 @@ impl EncoderThread {
 impl Drop for EncoderThread {
     fn drop(&mut self) {
         if self.handle.is_some() {
-            self.abort.store(true, std::sync::atomic::Ordering::Relaxed);
             self.sender = None;
             let _ = self.join();
         }
@@ -1200,21 +1187,15 @@ impl Sink {
         }
     }
 
-    /// Stops after an error and removes partial output.
-    fn abort(self) {
+    /// Stops after an error, keeping every file written so far.
+    fn close(self) {
         match self {
             #[cfg(feature = "media")]
-            Sink::Encoder { thread, .. } => thread.abort(),
+            Sink::Encoder { thread, .. } => thread.close(),
             #[cfg(feature = "media")]
-            Sink::Image { path, .. } => {
-                let _ = std::fs::remove_file(path);
-            }
+            Sink::Image { .. } => {}
             #[cfg(not(feature = "media"))]
-            Sink::Png { files, .. } => {
-                for file in files {
-                    let _ = std::fs::remove_file(file);
-                }
-            }
+            Sink::Png { .. } => {}
         }
     }
 }
@@ -1333,6 +1314,9 @@ pub struct ExportReport {
     pub stats: ExportStats,
     /// Things not rendered faithfully (deduplicated).
     pub warnings: Vec<String>,
+    /// Stopped through the cancel flag: `frames` are the ones rendered before
+    /// (all written), the rest of the range was not rendered.
+    pub stopped: bool,
 }
 
 /// A frame submitted for readback, not yet handed to the sink.
@@ -1410,9 +1394,11 @@ impl Run<'_> {
 /// asynchronously ([`ExportReadback`], [`READBACK_DEPTH`] in flight) and hands
 /// it to the encoder on its own thread (bae-media's sequence writer compresses
 /// and writes on every core). `on_frame` is called, in order, as each frame
-/// is handed over. Setting `cancel` stops after the current frame. On
-/// cancellation ([`RenderError::Canceled`]) or any error the partial output
-/// is removed.
+/// is handed over. Setting `cancel` stops rendering new frames: the frames
+/// already rendered are still written and the report says `stopped` (AE keeps
+/// the frames rendered before Stop). On an error the files written so far
+/// are kept and the error names the frame (render errors) or the file (write
+/// errors).
 pub fn export_frames(
     renderer: &mut Renderer,
     evaluator: &mut dyn CompEvaluator,
@@ -1432,16 +1418,22 @@ pub fn export_frames(
         on_frame,
     };
     let mut warnings: Vec<String> = Vec::new();
+    let mut stopped = false;
     let result = (|| -> Result<(), RenderError> {
         for (index, (frame, time)) in job.times.iter().enumerate() {
             if cancel.is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed)) {
-                return Err(RenderError::Canceled);
+                stopped = true;
+                break;
             }
+            let at = |error: RenderError| match frame {
+                Some(f) => RenderError::Other(format!("frame {f}: {error}")),
+                None => error,
+            };
             let t0 = Instant::now();
-            let rc = evaluator.evaluate(job.stage, job.comp, *time)?;
+            let rc = evaluator.evaluate(job.stage, job.comp, *time).map_err(at)?;
             let eval = t0.elapsed();
             let t1 = Instant::now();
-            let rendered = renderer.render_frame(&rc, job.request)?;
+            let rendered = renderer.render_frame(&rc, job.request).map_err(at)?;
             let render = t1.elapsed();
             run.stats.eval += eval;
             run.stats.render += render;
@@ -1483,12 +1475,13 @@ pub fn export_frames(
             drop(rendered);
             run.collect_ready()?;
         }
+        // Frames already rendered (in flight on the GPU) are written too.
         while run.wait_one()? {}
         Ok(())
     })();
     if let Err(error) = result {
         if let Some(sink) = run.sink.take() {
-            sink.abort();
+            sink.close();
         }
         return Err(error);
     }
@@ -1511,5 +1504,6 @@ pub fn export_frames(
         frames: run.frames,
         stats,
         warnings,
+        stopped,
     })
 }

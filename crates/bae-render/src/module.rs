@@ -863,8 +863,9 @@ mod tests {
         );
     }
 
-    /// A file that cannot be written stops the export with that error, the
-    /// encoder threads exit, and the partial sequence is removed.
+    /// A file that cannot be written stops the export with that error (naming
+    /// the file), the encoder threads exit, and the frames written before it
+    /// are kept.
     #[test]
     fn write_failure_stops_cleanly() {
         if !has_gpu() {
@@ -890,12 +891,12 @@ mod tests {
             format!("{error:#}").contains("f_0005.png"),
             "error names the file: {error:#}"
         );
-        let left: Vec<_> = std::fs::read_dir(&out_dir)
-            .unwrap()
-            .map(|e| e.unwrap().path())
-            .filter(|p| p.is_file())
-            .collect();
-        assert!(left.is_empty(), "partial output removed: {left:?}");
+        for f in 0..5 {
+            let file = frame_file(&out_dir.join("f_####.png"), f);
+            let (w, _, _) = crate::png_out::read_rgba8(&file)
+                .unwrap_or_else(|e| panic!("{} kept: {e}", file.display()));
+            assert_eq!(w, 37);
+        }
 
         // An output directory that cannot be created fails up front.
         let blocker = dir.path().join("not_a_dir");
@@ -1005,8 +1006,7 @@ mod tests {
     }
 
     /// The library entry point (what the render queue runs on a worker
-    /// thread): progress per frame in order, cancellation removes the partial
-    /// sequence.
+    /// thread): progress per frame in order; stopping keeps what was rendered.
     #[test]
     fn export_frames_reports_progress_and_cancels() {
         if !has_gpu() {
@@ -1062,7 +1062,7 @@ mod tests {
             settings: &settings,
             ..job
         };
-        let error = export_frames(
+        let report = export_frames(
             &mut renderer,
             &mut evaluator,
             &job,
@@ -1073,12 +1073,18 @@ mod tests {
                 }
             },
         )
-        .unwrap_err();
-        assert!(matches!(error, crate::RenderError::Canceled), "{error}");
-        let left = std::fs::read_dir(dir.path().join("c"))
-            .map(|d| d.count())
-            .unwrap_or(0);
-        assert_eq!(left, 0, "cancelled output removed");
+        .unwrap();
+        // Stopped: the frames rendered before Stop are all written and kept (AE).
+        assert!(report.stopped);
+        let n = report.frames.len();
+        assert!((4..20).contains(&n), "{n}");
+        assert_eq!(report.stats.files, n);
+        let left = std::fs::read_dir(dir.path().join("c")).unwrap().count();
+        assert_eq!(left, n, "stopped output kept");
+        for (i, f) in report.frames.iter().enumerate() {
+            assert_eq!(f.frame, Some(i as i64), "contiguous from the start");
+            assert!(f.file.is_file());
+        }
     }
 
     #[cfg(feature = "media")]

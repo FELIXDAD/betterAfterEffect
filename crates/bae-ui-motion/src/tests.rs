@@ -807,3 +807,70 @@ fn render_button_activates_with_space_and_enter() {
         }
     }
 }
+
+/// The 5090 keyboard run: Enter on a focused button (Render Queue ▸ Stop) is
+/// that button's; the Project panel holding the dock focus must not also start
+/// renaming its selected item. Without a focused widget, Enter renames (AE).
+#[test]
+fn enter_on_a_focused_button_does_not_rename_in_the_project_panel() {
+    let mut h = Harness::new();
+    let (comp, _, _) = h.comp_with_layers();
+    h.session().lock().selected_items = vec![comp.clone()];
+    let enter = || Event::Key {
+        key: egui::Key::Enter,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Default::default(),
+    };
+    // One frame: a button (focused on request) next to the Project panel.
+    let frame = |h: &Harness, project: &mut ProjectPanel, focus: bool, events: Vec<Event>| {
+        let mut presses = 0;
+        let mut requests = PanelRequests::default();
+        let id = PanelId::new("project");
+        let raw = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 800.0))),
+            events,
+            ..Default::default()
+        };
+        let mut out = h.ctx.run_ui(raw, |ui| {
+            let stop = ui.button("Stop");
+            if focus {
+                stop.request_focus();
+            }
+            if stop.clicked() {
+                presses += 1;
+            }
+            let mut cx = PanelContext::new(
+                &id,
+                "Project",
+                &h.stage,
+                &h.author,
+                &h.resources,
+                &mut requests,
+            );
+            cx.focused = true;
+            project.ui(ui, &mut cx);
+        });
+        out.textures_delta.clear();
+        presses
+    };
+
+    let mut project = ProjectPanel::default();
+    frame(&h, &mut project, true, Vec::new());
+    frame(&h, &mut project, false, Vec::new());
+    assert!(h.ctx.memory(|m| m.focused().is_some()));
+    assert_eq!(
+        frame(&h, &mut project, false, vec![enter()]),
+        1,
+        "Stop pressed"
+    );
+    assert!(!project.is_renaming(), "the Enter was the button's");
+
+    // Nothing focused: Enter renames the selected item.
+    h.ctx.memory_mut(|m| m.stop_text_input());
+    frame(&h, &mut project, false, Vec::new());
+    assert!(h.ctx.memory(|m| m.focused().is_none()));
+    assert_eq!(frame(&h, &mut project, false, vec![enter()]), 0);
+    assert!(project.is_renaming());
+}
