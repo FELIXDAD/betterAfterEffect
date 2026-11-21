@@ -27,6 +27,7 @@ const AE_ITEMS: &[(&str, Option<&str>, &str)] = &[
         Some("Cmd+Shift+Y"),
         "图层设置",
     ),
+    ("motion.layer.pre_compose", Some("Cmd+Shift+C"), "预合成"),
     // AE 26 shortens this item to “将合成裁剪到工作区”. BAE keeps the glossary
     // terms (issue #109): Work Area = 工作区域 (工作区 is Workspace), Trim = 修剪
     // (as in 将入点修剪到当前时间; 裁剪 is Crop).

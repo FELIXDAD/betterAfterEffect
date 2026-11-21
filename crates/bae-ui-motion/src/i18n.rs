@@ -537,6 +537,32 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Light Gray", "浅灰色"),
     ("{gray}-{hue}", "{gray}-{hue}"),
     ("Dark {hue}", "深{hue}"),
+    // Pre-compose (`dialogs::precompose`, docs/spec/ae AE-PRJ-401).
+    ("Pre-compose", "预合成"),
+    ("Pre-compose...", "预合成..."),
+    ("New composition name:", "新合成名称:"),
+    ("New composition name", "新合成名称"),
+    (
+        "Leave all attributes in \"{comp}\"",
+        "保留“{comp}”中的所有属性",
+    ),
+    (
+        "Use this option to create a new intermediate composition with only \"{layer}\" in it. The new composition will become the source to the current layer.",
+        "使用此选项可创建一个只包含“{layer}”的新中间合成，新合成将成为当前图层的源。",
+    ),
+    (
+        "Move all attributes into the new composition",
+        "将所有属性移动到新合成",
+    ),
+    (
+        "Use this option to place the currently selected layers together into a new intermediate composition.",
+        "使用此选项可将当前选中的图层一起放入新的中间合成中。",
+    ),
+    (
+        "Adjust composition duration to the time span of the selected layers",
+        "将合成持续时间调整为所选图层的时间跨度",
+    ),
+    ("Open New Composition", "打开新合成"),
     // Camera Settings and Light Settings (`dialogs::camera_settings`,
     // `dialogs::light_settings`); AE 26 terms (docs/spec/ae AE-CMP-417/430).
     ("Camera Settings", "摄像机设置"),

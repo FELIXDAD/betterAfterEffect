@@ -443,3 +443,35 @@ fn camera_and_light_settings_in_chinese() {
     key(&mut h, Modifiers::NONE, Key::Enter);
     assert_eq!(h.state().name(&h.state().layers()[0]), "聚光 1");
 }
+
+#[test]
+fn precompose_moves_the_selected_layers_in_one_undo_step() {
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.null", "motion.layer.new.solid"]);
+    let comp = h.state().active_comp().unwrap();
+    // Nothing selected: the item is greyed and the shortcut idle.
+    h.state().session().lock().selected_layers.clear();
+    settle(&mut h);
+    assert!(!h.state().menu_item("motion.layer.pre_compose").enabled);
+    key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::C);
+    assert!(!dialog_open(&h));
+    // Both layers: Move all attributes.
+    let layers = h.state().layers();
+    h.state().session().lock().selected_layers = layers.clone();
+    settle(&mut h);
+    assert!(h.state().menu_item("motion.layer.pre_compose").enabled);
+    key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::C);
+    assert!(dialog_open(&h), "Cmd+Shift+C opened no Pre-compose");
+    assert!(find_text(&h, "Pre-compose").is_some());
+    type_text(&mut h, "Group");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(!dialog_open(&h));
+    let now = h.state().layers();
+    assert_eq!(now.len(), 1);
+    assert_eq!(h.state().name(&now[0]), "Group");
+    assert_eq!(h.state().active_comp(), Some(comp.clone()));
+    let (undo, _) = h.state().doc.undo_state();
+    assert_eq!(undo.as_deref(), Some("Pre-compose"));
+    key(&mut h, Modifiers::COMMAND, Key::Z);
+    assert_eq!(h.state().layers(), layers);
+}

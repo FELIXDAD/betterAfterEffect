@@ -1332,3 +1332,167 @@ fn camera_and_light_settings_edit_at_the_current_time_in_one_step() {
             .is_err()
     );
 }
+
+#[test]
+fn precompose_moves_layers_into_a_new_comp_in_one_step() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let nul = fx.layer(&comp, "null", json!({}));
+    let solid = fx.layer(&comp, "solid", json!({"name": "BG"}));
+    let shape = fx.layer(&comp, "shape", json!({"shape": "rect"}));
+    let text = fx.layer(&comp, "text", json!({"text": "Hi"}));
+    // Stack: text, shape, solid, null. The shape follows the solid (moved
+    // along) and the solid follows the null (stays outside).
+    fx.run(
+        "layer.set_parent",
+        json!({"layers": [shape], "parent": solid, "keep_transform": false}),
+    );
+    fx.run(
+        "layer.set_parent",
+        json!({"layers": [solid], "parent": nul, "keep_transform": false}),
+    );
+    let names = |fx: &Fx, c: &PrimPath| -> Vec<String> {
+        query::comp_layers(&fx.stage, c)
+            .iter()
+            .map(|l| query::display_name_of(&fx.stage, l))
+            .collect()
+    };
+    assert_eq!(
+        bae_motion::precompose::default_precomp_name(&fx.stage, &[shape.clone(), solid.clone()]),
+        "Pre-comp 1"
+    );
+    let out = fx.run(
+        "layer.precompose",
+        json!({"layers": [solid, shape], "mode": "move"}),
+    );
+    let inner = p(out["comp"].as_str().unwrap());
+    let pre = p(out["layer"].as_str().unwrap());
+    let info = query::comp_info(&fx.stage, &inner).unwrap();
+    assert_eq!(info.name, "Pre-comp 1");
+    assert_eq!(
+        (info.width, info.height, info.duration),
+        (1920, 1080, Time::from_seconds(10.0))
+    );
+    // The new comp holds the two layers in their order; the pre-comp layer
+    // takes the topmost one's place.
+    assert_eq!(names(&fx, &inner), ["Shape Layer 1", "BG"]);
+    assert_eq!(names(&fx, &comp), ["Hi", "Pre-comp 1", "Null 1"]);
+    assert_eq!(query::comp_layers(&fx.stage, &comp)[1], pre);
+    assert_eq!(
+        fx.value(&pre, "source"),
+        Some(Value::PrimRef(inner.clone()))
+    );
+    // The parent inside the new comp follows; the one across comps is gone.
+    let moved = query::comp_layers(&fx.stage, &inner);
+    assert_eq!(
+        fx.value(&moved[0], "parent"),
+        Some(Value::PrimRef(moved[1].clone()))
+    );
+    assert_eq!(fx.value(&moved[1], "parent"), None);
+    let _ = text;
+    // One undo step.
+    fx.stage.undo(&fx.author).unwrap();
+    assert!(!fx.stage.has_prim(&inner));
+    assert_eq!(names(&fx, &comp), ["Hi", "Shape Layer 1", "BG", "Null 1"]);
+    assert_eq!(
+        fx.value(&solid, "parent"),
+        Some(Value::PrimRef(nul.clone()))
+    );
+}
+
+#[test]
+fn precompose_adjusts_the_duration_to_the_layers() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let a = fx.layer(&comp, "solid", json!({"start": 2 * SEC}));
+    let b = fx.layer(&comp, "null", json!({"start": 3 * SEC}));
+    fx.run("layer.trim", json!({"layers": [a], "out_point": 5 * SEC}));
+    let span_a = query::layer_timing(&fx.stage, &a);
+    assert_eq!(
+        (span_a.in_point, span_a.out_point),
+        (Time(2 * SEC), Time(5 * SEC))
+    );
+    let out = fx.run(
+        "layer.precompose",
+        json!({"layers": [a, b], "adjust_duration": true, "name": "Part"}),
+    );
+    let inner = p(out["comp"].as_str().unwrap());
+    let pre = p(out["layer"].as_str().unwrap());
+    // From the earliest in point (2 s) to the latest out point (10 s).
+    let info = query::comp_info(&fx.stage, &inner).unwrap();
+    assert_eq!(info.duration, Time(8 * SEC));
+    let moved = query::comp_layers(&fx.stage, &inner);
+    let t = query::layer_timing(&fx.stage, &moved[1]);
+    assert_eq!((t.in_point, t.out_point), (Time::ZERO, Time(3 * SEC)));
+    let t = query::layer_timing(&fx.stage, &pre);
+    assert_eq!(
+        (t.start_time, t.in_point, t.out_point),
+        (Time(2 * SEC), Time(2 * SEC), Time(10 * SEC))
+    );
+}
+
+#[test]
+fn precompose_leaving_the_attributes_on_the_layer() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let solid = fx.layer(
+        &comp,
+        "solid",
+        json!({"name": "Red Solid 1", "size": [400, 300]}),
+    );
+    let item = bae_motion::solid::layer_solid(&fx.stage, &solid).unwrap();
+    fx.run(
+        "attr.set_at",
+        json!({"path": solid, "attr": "transform:position", "time": 0, "value": {"type": "vec3", "value": [100.0, 200.0, 0.0]}}),
+    );
+    assert_eq!(
+        bae_motion::precompose::default_precomp_name(&fx.stage, std::slice::from_ref(&solid)),
+        "Red Solid 1 Comp 1"
+    );
+    let out = fx.run(
+        "layer.precompose",
+        json!({"layers": [solid], "mode": "leave"}),
+    );
+    let inner = p(out["comp"].as_str().unwrap());
+    assert_eq!(p(out["layer"].as_str().unwrap()), solid);
+    // The new comp has the solid's size and holds the solid.
+    let info = query::comp_info(&fx.stage, &inner).unwrap();
+    assert_eq!((info.width, info.height), (400, 300));
+    let inside = query::comp_layers(&fx.stage, &inner);
+    assert_eq!(inside.len(), 1);
+    assert_eq!(fx.value(&inside[0], "source"), Some(Value::PrimRef(item)));
+    // The layer keeps its place and attributes and now shows the new comp.
+    assert_eq!(fx.value(&solid, "source"), Some(Value::PrimRef(inner)));
+    assert_eq!(
+        fx.value(&solid, "kind"),
+        Some(Value::Enum("pre_comp".into()))
+    );
+    assert_eq!(
+        fx.value(&solid, "transform:position"),
+        Some(Value::Vec3([100.0, 200.0, 0.0]))
+    );
+    assert_eq!(
+        query::display_name_of(&fx.stage, &solid),
+        "Red Solid 1 Comp 1"
+    );
+    // Text and several layers cannot leave their attributes.
+    let text = fx.layer(&comp, "text", json!({"text": "T"}));
+    assert!(
+        fx.try_run(
+            "layer.precompose",
+            json!({"layers": [text], "mode": "leave"})
+        )
+        .is_err()
+    );
+    assert!(
+        fx.try_run(
+            "layer.precompose",
+            json!({"layers": [text, solid], "mode": "leave"})
+        )
+        .is_err()
+    );
+    assert!(
+        fx.try_run("layer.precompose", json!({"layers": []}))
+            .is_err()
+    );
+}

@@ -116,6 +116,30 @@ pub struct CreateLayerParams {
     pub light: Option<crate::camera::LightSettings>,
 }
 
+impl CreateLayerParams {
+    /// A layer of `kind` in `comp` showing `source` (a comp or an asset),
+    /// starting at comp time `start`; everything else default.
+    pub fn with_source(comp: &PrimPath, kind: LayerKind, source: &PrimPath, start: Time) -> Self {
+        CreateLayerParams {
+            comp: comp.clone(),
+            kind,
+            name: None,
+            source: Some(source.clone()),
+            index: None,
+            color: None,
+            size: None,
+            pixel_aspect: None,
+            text: None,
+            font_size: None,
+            shape: None,
+            position: None,
+            start: Some(start),
+            camera: None,
+            light: None,
+        }
+    }
+}
+
 fn source_size_and_duration(stage: &Stage, source: &PrimPath) -> Option<([f64; 2], Option<Time>)> {
     if let Some(info) = query::comp_info(stage, source) {
         return Some((

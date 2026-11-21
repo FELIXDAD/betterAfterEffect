@@ -138,6 +138,13 @@ pub fn items() -> Vec<(&'static str, MenuItemSpec)> {
                 .order(1)
                 .enabled_when(has_layer_settings),
         ),
+        (
+            "motion.layer.pre_compose",
+            item(&["Layer"], "Pre-compose...", ids::PRE_COMPOSE)
+                .group(3)
+                .order(1)
+                .enabled_when(has_layers),
+        ),
         // Layer ▸ Arrange
         (
             "motion.layer.arrange.front",

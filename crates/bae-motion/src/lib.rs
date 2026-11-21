@@ -17,6 +17,7 @@
 //! | `camera.set_settings` | Layer > Camera Settings (Layer Settings, Cmd/Ctrl+Shift+Y, on a camera) |
 //! | `light.set_settings` | Layer > Light Settings (Layer Settings on a light) |
 //! | `solid.set_settings` | Layer > Solid Settings (Cmd/Ctrl+Shift+Y); Solid Settings of a solid item |
+//! | `layer.precompose` | Layer > Pre-compose (Cmd/Ctrl+Shift+C) |
 //! | `layer.reorder` | drag layers; Bring Forward / Send Backward (Cmd/Ctrl+] / [) |
 //! | `layer.duplicate` | Edit > Duplicate (Cmd/Ctrl+D) |
 //! | `layer.split` | Edit > Split Layer (Cmd/Ctrl+Shift+D) |
@@ -51,6 +52,7 @@ pub mod dimensions;
 pub mod keys;
 pub mod layer;
 pub mod names;
+pub mod precompose;
 pub mod query;
 pub mod solid;
 mod util;
@@ -75,6 +77,7 @@ pub use layer::{
     CreateLayer, DeleteItems, DeleteLayers, DuplicateLayers, LayerOutput, LayersOutput,
     ReorderLayers, SetParent, ShapePreset, ShiftLayers, SplitLayers, TrimLayers,
 };
+pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
 pub use solid::{SetSolidSettings, SolidInfo, SolidOutput};
 
 /// Register every motion command.
@@ -86,6 +89,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(TrimCompToWorkArea),
         r.register(CreateFolder),
         r.register(CreateLayer),
+        r.register(Precompose),
         r.register(SetSolidSettings),
         r.register(SetCameraSettings),
         r.register(SetLightSettings),

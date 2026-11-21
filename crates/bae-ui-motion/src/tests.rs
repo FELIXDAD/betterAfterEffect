@@ -1448,3 +1448,55 @@ fn camera_and_light_settings_dialogs() {
     h.apply(r);
     assert_eq!(value(&h, &cam, "camera:zoom"), Some(Value::Float(1000.0)));
 }
+
+#[test]
+fn precompose_dialog_options() {
+    use crate::dialogs::Dialog;
+    let mut h = Harness::new();
+    let (comp, solid, shape) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let pre = || Invocation::new(crate::actions::ids::PRE_COMPOSE);
+    // Nothing selected: no dialog.
+    h.session().lock().selected_layers.clear();
+    h.action(&mut viewer, pre());
+    assert!(!h.dialogs().is_open());
+    // One solid: Leave all attributes is offered and chosen.
+    h.session().lock().selected_layers = vec![solid.clone()];
+    h.action(&mut viewer, pre());
+    {
+        let d = h.dialogs();
+        let d = d.lock();
+        let Some(Dialog::Precompose(p)) = d.open.as_ref() else {
+            panic!("Pre-compose is not open");
+        };
+        assert!(p.leave);
+        assert!(p.name.ends_with(" Comp 1"), "{}", p.name);
+    }
+    h.answer_dialog(egui::Key::Escape);
+    // Two layers: Move all attributes only; OK is one layer.precompose.
+    h.session().lock().selected_layers = vec![solid.clone(), shape.clone()];
+    h.action(&mut viewer, pre());
+    {
+        let d = h.dialogs();
+        let mut d = d.lock();
+        let Some(Dialog::Precompose(p)) = d.open.as_mut() else {
+            panic!("Pre-compose is not open");
+        };
+        assert!(!p.leave);
+        assert_eq!(p.name, "Pre-comp 1");
+        p.open_new = true;
+    }
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "layer.precompose");
+    assert_eq!(r.invocations[0].params["mode"], "move");
+    h.apply(r);
+    h.frame("composition", &mut viewer, Vec::new());
+    assert_eq!(query::comp_layers(&h.stage, &comp).len(), 1);
+    // Open New Composition: the new comp is the active one.
+    let active = h.session().lock().active_comp.clone().unwrap();
+    assert_ne!(active, comp);
+    assert_eq!(query::display_name_of(&h.stage, &active), "Pre-comp 1");
+    assert_eq!(query::comp_layers(&h.stage, &active).len(), 2);
+}

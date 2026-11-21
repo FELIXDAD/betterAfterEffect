@@ -54,6 +54,8 @@ pub mod ids {
     /// Settings of the selected layer, or Solid Settings of the solid item
     /// selected in the focused Project panel.
     pub const LAYER_SETTINGS: &str = "motion.layer.layer_settings";
+    /// Layer > Pre-compose (Cmd/Ctrl+Shift+C): the selected layers.
+    pub const PRE_COMPOSE: &str = "motion.layer.pre_compose";
     /// Params `{"to": "forward" | "backward" | "front" | "back"}`.
     pub const ORDER: &str = "motion.order";
     pub const TRIM_COMP: &str = "motion.trim_comp";
@@ -103,6 +105,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::COMP_SETTINGS, "Composition Settings"),
     (ids::NEW_LAYER, "New"),
     (ids::LAYER_SETTINGS, "Layer Settings"),
+    (ids::PRE_COMPOSE, "Pre-compose"),
     (ids::ORDER, "Bring Layer Forward"),
     (ids::TRIM_COMP, "Trim Comp to Work Area"),
     (ids::ADD_TO_RENDER_QUEUE, "Add to Render Queue"),
@@ -251,6 +254,7 @@ pub fn bindings() -> KeymapBindings {
         b("Cmd+N", ids::NEW_COMP),
         b("Cmd+K", ids::COMP_SETTINGS),
         b("Cmd+Shift+Y", ids::LAYER_SETTINGS),
+        b("Cmd+Shift+C", ids::PRE_COMPOSE),
         b("Cmd+Shift+X", ids::TRIM_COMP),
         b("Cmd+M", ids::ADD_TO_RENDER_QUEUE),
         b("Shift+F3", ids::GRAPH_EDITOR),
@@ -441,6 +445,18 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 return true;
             }
             common::new_layer(cx, session, kind, extra);
+            return true;
+        }
+        ids::PRE_COMPOSE => {
+            // The selected layers; locked ones cannot be pre-composed (AE).
+            let layers: Vec<PrimPath> = session
+                .lock()
+                .selected_layers
+                .iter()
+                .filter(|l| !query::is_locked(cx.stage, l))
+                .cloned()
+                .collect();
+            crate::dialogs::precompose(cx, layers);
             return true;
         }
         ids::LAYER_SETTINGS => {

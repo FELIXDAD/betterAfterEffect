@@ -10,6 +10,7 @@ mod comp_settings;
 pub(crate) mod fields;
 mod light_settings;
 pub mod memory;
+mod precompose;
 mod solid_settings;
 
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -22,6 +23,7 @@ use bae_ui::PanelContext;
 pub use camera_settings::{CameraSettings, CameraSettingsMemory, CameraValues, FilmUnits};
 pub use comp_settings::{CompSettings, CompSettingsMemory};
 pub use light_settings::{LightSettings, LightSettingsMemory, LightValues};
+pub use precompose::{PrecomposeDialog, PrecomposeMemory};
 pub use solid_settings::{SolidSettings, SolidSettingsMemory, Units};
 
 use crate::session::SharedSession;
@@ -38,6 +40,8 @@ pub enum Dialog {
     CameraSettings(Box<CameraSettings>),
     /// Layer > New > Light and Light Settings.
     LightSettings(Box<LightSettings>),
+    /// Layer > Pre-compose (Cmd/Ctrl+Shift+C).
+    Precompose(Box<PrecomposeDialog>),
 }
 
 /// Open dialog and remembered values.
@@ -58,6 +62,8 @@ pub struct Dialogs {
     pub camera: CameraSettingsMemory,
     /// Settings of the last new light.
     pub light: LightSettingsMemory,
+    /// Pre-compose options.
+    pub precompose: PrecomposeMemory,
 }
 
 /// The dialogs as an app resource (inserted by [`crate::MotionUiModule`]).
@@ -174,6 +180,18 @@ pub(crate) fn layer_settings(cx: &PanelContext<'_>, session: &SharedSession, tar
     }
 }
 
+/// Open Pre-compose for `layers` (unlocked layers of one comp).
+pub(crate) fn precompose(cx: &PanelContext<'_>, layers: Vec<PrimPath>) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_some() || layers.is_empty() {
+        return;
+    }
+    if let Some(p) = PrecomposeDialog::new(cx.stage, layers, &d.precompose) {
+        d.open = Some(Dialog::Precompose(Box::new(p)));
+    }
+}
+
 /// Open Camera Settings for a new camera in the active comp.
 pub(crate) fn new_camera(cx: &PanelContext<'_>, session: &SharedSession) {
     let dialogs = shared(cx.resources);
@@ -212,6 +230,7 @@ pub(crate) fn strings() -> Vec<&'static str> {
         solid_settings::STRINGS,
         camera_settings::STRINGS,
         light_settings::STRINGS,
+        precompose::STRINGS,
     ]
     .concat()
 }
@@ -237,6 +256,7 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::SolidSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::CameraSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::LightSettings(d) => d.ui(ctx, cx, &session, &dialogs),
+            Dialog::Precompose(d) => d.ui(ctx, cx, &session, &dialogs),
         };
         let mut lock = dialogs.lock();
         if keep && lock.open.is_none() {
