@@ -64,7 +64,7 @@ pub use keys::{
 };
 pub use layer::{
     CreateLayer, DeleteItems, DeleteLayers, DuplicateLayers, LayerOutput, LayersOutput,
-    ReorderLayers, SetParent, ShapePreset, ShiftLayers, SplitLayers, TrimLayers,
+    ReorderLayers, SetParent, ShapePreset, ShiftLayers, SlipLayers, SplitLayers, TrimLayers,
 };
 pub use markers::{AddMarker, DeleteMarkers, EditMarker, MarkerFields, MarkerOutput, MoveMarkers};
 
@@ -81,6 +81,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(SplitLayers),
         r.register(TrimLayers),
         r.register(ShiftLayers),
+        r.register(SlipLayers),
         r.register(DeleteLayers),
         r.register(DeleteItems),
         r.register(SetParent),

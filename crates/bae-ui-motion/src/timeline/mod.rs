@@ -166,6 +166,11 @@ enum Drag {
     },
     /// A new comp marker dragged out of the marker bin.
     MarkerFromBin,
+    /// Slip edit of a layer with a time-based source.
+    Slip {
+        origin: f32,
+        layer: PrimPath,
+    },
 }
 
 #[derive(Default)]
@@ -195,6 +200,8 @@ pub struct TimelinePanel {
     press_mods: egui::Modifiers,
     /// The marker being dragged and its comp-time offset this frame.
     marker_plan: Option<(PrimPath, Time)>,
+    /// The bar drag's offset this frame.
+    bar_plan: Option<layer_bar::BarPlan>,
     /// Last frame's time axis, for tests.
     #[cfg(test)]
     pub(crate) last_axis: Option<TimeAxis>,
@@ -503,6 +510,7 @@ impl Panel for TimelinePanel {
         let (pointer_x, shift) =
             ui.input(|i| (i.pointer.interact_pos().map(|p| p.x), i.modifiers.shift));
         self.marker_plan = self.plan_marker_drag(stage, &info, &axis, now, pointer_x, shift);
+        self.bar_plan = self.plan_bar_drag(stage, &info, &axis, now, pointer_x, shift);
         self.header(ui, cx, &session, &info, head, colrow, &cols, &axis, now);
 
         // Rows.

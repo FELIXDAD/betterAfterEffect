@@ -970,3 +970,60 @@ fn markers_add_edit_move_delete() {
             .is_err()
     );
 }
+
+#[test]
+fn slip_edit_moves_the_source_inside_fixed_in_and_out_points() {
+    let mut fx = Fx::new();
+    let main = fx.comp();
+    // A 10 s pre-comp in the main comp, trimmed to 2 s .. 5 s.
+    let inner = fx.comp();
+    let layer = fx.layer(&main, "pre_comp", json!({"source": inner}));
+    assert_eq!(
+        query::source_duration(&fx.stage, &layer),
+        Some(Time(10 * SEC))
+    );
+    fx.run(
+        "layer.trim",
+        json!({"layers": [layer], "in_point": 2 * SEC, "out_point": 5 * SEC}),
+    );
+    // Two keyframes: the one at layer time 3 s is selected and moves with the
+    // source, the other keeps its comp time.
+    let attr = "transform:rotation";
+    fx.run(
+        "attr.set_animated",
+        json!({"path": layer, "attr": attr, "animated": true, "time": 3 * SEC}),
+    );
+    fx.run("attr.set_at", json!({"path": layer, "attr": attr, "time": 4 * SEC, "value": {"type": "float", "value": 90.0}}));
+    fx.run(
+        "layer.slip",
+        json!({"layers": [layer], "delta": -SEC, "keys": [key(&layer, attr, 3 * SEC)]}),
+    );
+    let t = query::layer_timing(&fx.stage, &layer);
+    assert_eq!(t.start_time, Time(-SEC));
+    assert_eq!((t.in_point, t.out_point), (Time(2 * SEC), Time(5 * SEC)));
+    // Kept key: layer time 3 s (comp 2 s); the other: comp 4 s = layer time 5 s.
+    assert_eq!(fx.keys(&layer, attr), vec![3 * SEC, 5 * SEC]);
+    // Clamped: the source (comp -1 s .. 9 s) cannot start after In (2 s).
+    fx.run("layer.slip", json!({"layers": [layer], "delta": 10 * SEC}));
+    assert_eq!(
+        query::layer_timing(&fx.stage, &layer).start_time,
+        Time(2 * SEC)
+    );
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(
+        query::layer_timing(&fx.stage, &layer).start_time,
+        Time(-SEC)
+    );
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(
+        query::layer_timing(&fx.stage, &layer).start_time,
+        Time::ZERO
+    );
+    assert_eq!(fx.keys(&layer, attr), vec![3 * SEC, 4 * SEC]);
+    // Layers without a time-based source cannot slip.
+    let solid = fx.layer(&main, "solid", json!({}));
+    assert!(
+        fx.try_run("layer.slip", json!({"layers": [solid], "delta": SEC}))
+            .is_err()
+    );
+}
