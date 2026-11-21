@@ -642,7 +642,6 @@ fn ranges_are_limited_to_the_comp() {
 }
 
 #[test]
-#[ignore = "issue #110"]
 fn progress_of_a_limited_range_counts_the_frames_it_renders() {
     // 290–400 on a 300-frame comp renders 10 frames; the progress must say
     // “x / 10”, not “x / 111” (or the fields must show the limited range).
@@ -672,7 +671,6 @@ fn progress_of_a_limited_range_counts_the_frames_it_renders() {
 }
 
 #[test]
-#[ignore = "issue #110"]
 fn a_folder_as_output_renders_into_the_folder() {
     // “…/输出/” (or an existing folder) names a folder: the frames belong in it,
     // not next to it as “输出_0000.png”.
@@ -696,7 +694,6 @@ fn a_folder_as_output_renders_into_the_folder() {
 }
 
 #[test]
-#[ignore = "issue #110"]
 fn the_file_extension_matches_the_format() {
     // A typed “.png” name with TIFF chosen writes TIFF data into .png files.
     let Some(mut h) = gpu_gui() else { return };

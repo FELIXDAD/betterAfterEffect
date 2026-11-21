@@ -165,18 +165,23 @@ pub fn bindings() -> KeymapBindings {
 }
 
 /// Selected layers, or the layers of the selected keyframes.
+/// The layers an action applies to: the selected ones (or those of the
+/// selected keys), never locked ones (AE: menu commands do not act on them).
 fn target_layers(stage: &bae_model::Stage, s: &crate::session::Session) -> Vec<PrimPath> {
-    if !s.selected_layers.is_empty() {
-        return s.selected_layers.clone();
-    }
-    let mut out: Vec<PrimPath> = Vec::new();
-    for k in &s.selected_keys {
-        if let Some(l) = query::owning_layer(stage, &k.path)
-            && !out.contains(&l)
-        {
-            out.push(l);
+    let mut out: Vec<PrimPath> = if !s.selected_layers.is_empty() {
+        s.selected_layers.clone()
+    } else {
+        let mut out: Vec<PrimPath> = Vec::new();
+        for k in &s.selected_keys {
+            if let Some(l) = query::owning_layer(stage, &k.path)
+                && !out.contains(&l)
+            {
+                out.push(l);
+            }
         }
-    }
+        out
+    };
+    out.retain(|l| !query::is_locked(stage, l));
     out
 }
 
@@ -397,7 +402,11 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             cx.invoke_with("key.reverse", json!({"keys": keys}));
         }
         ids::SELECT_ALL => {
-            s.selected_layers = query::comp_layers(stage, &info.path);
+            // AE: Select All skips locked layers.
+            s.selected_layers = query::comp_layers(stage, &info.path)
+                .into_iter()
+                .filter(|l| !query::is_locked(stage, l))
+                .collect();
         }
         ids::DESELECT_ALL => {
             s.selected_layers.clear();

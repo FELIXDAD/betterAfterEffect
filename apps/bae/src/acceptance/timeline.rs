@@ -567,7 +567,6 @@ fn lock(h: &mut Ui, layer: &PrimPath) {
 }
 
 #[test]
-#[ignore = "issue #124"]
 fn locked_layers_are_skipped_by_clicks_ranges_select_all_and_delete() {
     // docs/spec/ae/project-comp-layers.md: a locked layer cannot be selected by
     // Timeline clicks, Select All skips locked layers, locked layers cannot be
