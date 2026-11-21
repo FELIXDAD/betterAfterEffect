@@ -449,18 +449,26 @@
         writeJsonFile("meta_raw.json", metaRaw);
         log("Wrote meta_raw.json");
 
-        // 2. Effects catalog
+        // 2. Effects catalog (Adobe built-in/bundled only; third-party plugins are counted only)
         var effectsCatalog = [];
+        var thirdPartyCount = 0;
         for (var ci = 0; ci < app.effects.length; ci++) {
             var cef = app.effects[ci];
+            if (!isAdobeOrBundledEffect(cef.matchName, cef.category)) {
+                thirdPartyCount++;
+                continue;
+            }
             effectsCatalog.push({
                 displayName: cef.displayName,
                 matchName: cef.matchName,
                 category: cef.category
             });
         }
-        writeJsonFile("effects_catalog_raw.json", { catalog: effectsCatalog });
-        log("Wrote effects_catalog_raw.json: " + effectsCatalog.length);
+        writeJsonFile("effects_catalog_raw.json", {
+            catalog: effectsCatalog,
+            thirdPartyCount: thirdPartyCount
+        });
+        log("Wrote effects_catalog_raw.json: " + effectsCatalog.length + " (excluded third-party: " + thirdPartyCount + ")");
 
         // 3 & 4. Layer property trees & Render Queue (skip when running effects-only pass)
         if (!onlyEffects) {
@@ -820,6 +828,7 @@
         if (startIndex === 0) {
             writeJsonFile("effects_raw.json", {
                 catalog: effectsCatalog,
+                thirdPartyCount: thirdPartyCount,
                 detailed: effectsDetailed,
                 skipped: effectsSkipped
             });
@@ -834,7 +843,8 @@
             buildName: app.buildName,
             isoLanguage: app.isoLanguage,
             startIndex: startIndex,
-            effectsTotal: effectsCatalog.length,
+            effectsTotal: effectsCatalog.length + thirdPartyCount,
+            effectsThirdParty: thirdPartyCount,
             effectsDetailed: effectsDetailed.length,
             effectsSkipped: effectsSkipped.length
         };

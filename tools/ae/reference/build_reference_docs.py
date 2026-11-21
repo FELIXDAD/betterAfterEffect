@@ -404,7 +404,7 @@ def main() -> None:
     skipped_by_match = {e["matchName"]: e for e in skipped}
     by_category_slug: dict[str, list[dict[str, Any]]] = defaultdict(list)
     category_display_names: dict[str, str] = {}
-    third_party_list: list[dict[str, Any]] = []
+    third_party_count = int(effects_raw.get("thirdPartyCount", 0))
     adobe_builtin_count = 0
     adobe_bundled_count = 0
     total_effect_params = 0
@@ -415,12 +415,7 @@ def main() -> None:
         cat = entry.get("category", "")
         origin = classify_effect_origin(mn, cat)
         if origin == "third-party":
-            third_party_list.append({
-                "displayName": entry["displayName"],
-                "matchName": mn,
-                "category": cat,
-                "origin": origin,
-            })
+            third_party_count += 1
             continue
 
         if origin == "adobe-builtin":
@@ -452,6 +447,8 @@ def main() -> None:
                 item_obj["skipReason"] = skipped_by_match[mn].get("reason")
         by_category_slug[slug].append(item_obj)
 
+    catalog_total = adobe_builtin_count + adobe_bundled_count + third_party_count
+
     effects_dir = out_dir / "effects"
     effects_dir.mkdir(parents=True, exist_ok=True)
     for old in effects_dir.glob("*.json"):
@@ -471,14 +468,6 @@ def main() -> None:
         sz = write_json(fpath, payload, compact=True)
         effect_files_meta.append((slug, category_display_names[slug], len(items), sz))
 
-    tp_payload = {
-        "source": source_header,
-        "note": "Non-Adobe third-party plugins detected on the extraction host; catalog metadata only (parameters not expanded).",
-        "effectCount": len(third_party_list),
-        "effects": sorted(third_party_list, key=lambda x: (x["category"], x["matchName"])),
-    }
-    write_json(effects_dir / "third-party.json", tp_payload, compact=True)
-
     ef_md: list[str] = [
         "# After Effects 效果目录总表",
         "",
@@ -486,12 +475,12 @@ def main() -> None:
         "",
         "## 统计摘要",
         "",
-        f"- `app.effects` 总条目：{len(catalog)}",
+        f"- `app.effects` 总条目：{catalog_total}",
         f"- Adobe 内置效果（`ADBE` / `APC` / `PSL` / `VISINF` / `Mettle` / `Pseudo/ADBE`）：{adobe_builtin_count}",
         f"- Adobe 随附效果（CycoreFX HD `CC`/`CS`、Keylight、ProEXR、Cineware、Mocha AE）：{adobe_bundled_count}",
         f"- 成功展开参数的效果数：{len(detailed)}（共 {total_effect_params} 个叶子参数，其中 {total_dropdown_params} 个含下拉选项列表）",
         f"- 因模态框或图层类型限制跳过的自带效果数：{len(skipped)}",
-        f"- 本机检测到的第三方插件（仅录目录，见 `effects/third-party.json`）：{len(third_party_list)}",
+        f"- 本机另有 {third_party_count} 个第三方插件，不在本数据范围内",
         "",
         "## 分类文件索引",
         "",
@@ -500,7 +489,6 @@ def main() -> None:
     ]
     for slug, cat_name, cnt, _ in effect_files_meta:
         ef_md.append(f"| {md_escape(cat_name)} | `effects/{slug}.json` | {cnt} |")
-    ef_md.append(f"| *(第三方插件目录)* | `effects/third-party.json` | {len(third_party_list)} |")
 
     ef_md.extend([
         "",
@@ -530,19 +518,6 @@ def main() -> None:
             ef_md.append(
                 f"| {md_escape(sk.get('category'))} | {md_escape(sk.get('displayName'))} | "
                 f"`{md_escape(sk.get('matchName'))}` | {md_escape(sk.get('reason'))} |"
-            )
-
-    if third_party_list:
-        ef_md.extend([
-            "",
-            "## 本机第三方插件（非 Adobe，仅作区分标注）",
-            "",
-            "| 分类 | 名称 | matchName |",
-            "|---|---|---|",
-        ])
-        for tp in sorted(third_party_list, key=lambda x: (x["category"], x["matchName"])):
-            ef_md.append(
-                f"| {md_escape(tp['category'])} | {md_escape(tp['displayName'])} | `{md_escape(tp['matchName'])}` |"
             )
 
     write_md(out_dir / "effects.md", ef_md)
@@ -842,14 +817,14 @@ def main() -> None:
             "propertyReflectProbe": meta_raw.get("propertyReflectProbe"),
         },
         "counts": {
-            "effectsCatalogTotal": len(catalog),
+            "effectsCatalogTotal": catalog_total,
             "effectsAdobeBuiltin": adobe_builtin_count,
             "effectsAdobeBundled": adobe_bundled_count,
             "effectsDetailedExtracted": len(detailed),
             "effectsTotalLeafParams": total_effect_params,
             "effectsDropdownParams": total_dropdown_params,
             "effectsSkipped": len(skipped),
-            "effectsThirdParty": len(third_party_list),
+            "effectsThirdParty": third_party_count,
             "effectCategoryFiles": len(effect_files_meta),
             "layerTypeFiles": len(layer_bundles),
             "layerLeafPropertiesByType": layer_count_summary,
