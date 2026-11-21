@@ -75,3 +75,6 @@ app.register("timeline", PanelKind::new("Timeline", |spawn| Box::new(Timeline::n
 ## 无障碍（accesskit）
 
 自绘控件（`ui.interact` / `allocate_exact_size` 做的按钮、开关、标签页、拆分条、热文本）都要用 `bae_ui::Accessible`（`labeled` / `labeled_toggle` / `labeled_value`）给出标签，固定文字走 `tr`、中英文都要有；egui 自带控件自己带标签。读屏（VoiceOver、讲述人）和 Windows 上的 UI 自动化都靠这些标签找控件，验收测试 `startup::controls_have_accessibility_labels` 要求没有标签的控件不超过 10%。工具栏工具和工作区栏条目用单选按钮角色（同时只有一个处于选中状态）。
+
+- 同一面板内同角色的可交互控件名字不能重复（#128）。重复出现的控件在标签里带上下文，用 `bae_ui::a11y::context` 以「 · 」连接，从大到小：图层（`a11y::layer`：图层“Solid 1”）、形状组、属性、控件，例如「图层“Solid 1” · 位置 · 时间变化秒表」「图层“Solid 1” · 位置 · X」「图层“Solid 1” · 锁定」；面板标签页上的按钮带面板名（「项目 · 关闭面板」），拆分条带两侧的面板名。`widgets::stopwatch_for` / `keyframe_nav_for` 和 `HotNumber::label` 接收这个名字。
+- 每个面板的内容区是一个以面板标题命名的 accesskit 区域（Pane），读屏会报面板名；测试按它分组检查重名（`startup::interactive_widgets_have_unique_names_per_panel`，中文界面另跑一遍）。

@@ -225,7 +225,7 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
                 eprintln!(
                     "{}: {}",
                     bae_platform::BINARY_NAME,
-                    crate::open_error::describe(path, &error)
+                    crate::file_error::describe_open(path, &error)
                 );
                 return ExitCode::FAILURE;
             }
@@ -233,7 +233,7 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
                 startup_error = Some(format!(
                     "{}\n\n{}",
                     crate::i18n::tr("Could not open the project."),
-                    crate::open_error::describe(path, &error)
+                    crate::file_error::describe_open(path, &error)
                 ));
             }
         }

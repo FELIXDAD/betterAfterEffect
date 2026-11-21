@@ -224,7 +224,7 @@ pub fn open(
             dialogs.error(&format!(
                 "{}\n\n{}",
                 tr("Could not open the project."),
-                crate::open_error::describe(&path, &error)
+                crate::file_error::describe_open(&path, &error)
             ));
             return FileOutcome::Failed;
         }
@@ -245,7 +245,8 @@ pub fn save(doc: &mut Document, dialogs: &mut dyn FileDialogs) -> FileOutcome {
     match doc.save() {
         Ok(()) => FileOutcome::Saved,
         Err(error) => {
-            report_save_error(dialogs, &error);
+            let location = doc.location().map(Path::to_owned).unwrap_or_default();
+            report_save_error(dialogs, &location, &error);
             FileOutcome::Failed
         }
     }
@@ -272,7 +273,7 @@ pub fn save_as(doc: &mut Document, dialogs: &mut dyn FileDialogs) -> FileOutcome
             FileOutcome::Saved
         }
         Err(error) => {
-            report_save_error(dialogs, &error);
+            report_save_error(dialogs, &path, &error);
             FileOutcome::Failed
         }
     }
@@ -296,10 +297,11 @@ fn with_project_extension(path: PathBuf) -> PathBuf {
     }
 }
 
-fn report_save_error(dialogs: &mut dyn FileDialogs, error: &anyhow::Error) {
+fn report_save_error(dialogs: &mut dyn FileDialogs, path: &Path, error: &anyhow::Error) {
     dialogs.error(&format!(
-        "{}\n\n{error:#}",
-        tr("Could not save the project.")
+        "{}\n\n{}",
+        tr("Could not save the project."),
+        crate::file_error::describe_save(path, error)
     ));
 }
 

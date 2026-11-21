@@ -467,6 +467,16 @@ struct Splitter {
     rect: Rect,
     /// Lengths of all children along the axis, in points.
     lengths: Vec<f32>,
+    /// A panel on each side (accessibility name: "Resize Panels · A / B").
+    between: [Option<PanelId>; 2],
+}
+
+/// The active panel of the first frame under `node`.
+fn first_tab(node: &Node) -> Option<PanelId> {
+    match node {
+        Node::Frame(f) => f.tabs.get(f.active).or(f.tabs.first()).cloned(),
+        Node::Split { children, .. } => children.iter().find_map(first_tab),
+    }
 }
 
 /// The dock widget and its transient interaction state.
@@ -739,7 +749,17 @@ impl Dock {
                 &mut frames,
                 &mut splitters,
             );
-            if self.drag_splitters(ui, &splitters) {
+            let names: Vec<String> = splitters
+                .iter()
+                .map(|s| {
+                    let [a, b] = s.between.clone().map(|p| {
+                        p.map(|p| tr(&host.tab(&p).title).to_owned())
+                            .unwrap_or_default()
+                    });
+                    crate::a11y::context(&[tr("Resize Panels"), &format!("{a} / {b}")])
+                })
+                .collect();
+            if self.drag_splitters(ui, &splitters, &names) {
                 frames.clear();
                 splitters.clear();
                 layout_node(
@@ -777,13 +797,13 @@ impl Dock {
         }
     }
 
-    fn drag_splitters(&mut self, ui: &Ui, splitters: &[Splitter]) -> bool {
+    fn drag_splitters(&mut self, ui: &Ui, splitters: &[Splitter], names: &[String]) -> bool {
         let mut changed = false;
-        for s in splitters {
+        for (s, name) in splitters.iter().zip(names) {
             let id = self.id.with(("split", &s.path, s.index));
             let resp = ui
                 .interact(s.rect.expand(1.0), id, Sense::drag())
-                .labeled(egui::WidgetType::ResizeHandle, tr("Resize Panels"));
+                .labeled(egui::WidgetType::ResizeHandle, name);
             if resp.hovered() || resp.dragged() {
                 ui.ctx().set_cursor_icon(match s.axis {
                     Axis::Row => CursorIcon::ResizeHorizontal,
@@ -924,7 +944,10 @@ impl Dock {
             let close_rect = Rect::from_center_size(pos2(close_x + 2.0, mid_y), Vec2::splat(10.0));
             let close_resp = ui
                 .interact(close_rect, tab_id.with("close"), Sense::click())
-                .labeled(egui::WidgetType::Button, tr("Close Panel"));
+                .labeled(
+                    egui::WidgetType::Button,
+                    &crate::a11y::context(&[tr(&info.title), tr("Close Panel")]),
+                );
             if (active && info.viewer) || hovered || close_resp.hovered() {
                 let c = if close_resp.hovered() {
                     color::TEXT_STRONG
@@ -953,7 +976,11 @@ impl Dock {
                 );
                 let lr = ui
                     .interact(r, tab_id.with("lock"), Sense::click())
-                    .labeled_toggle(egui::WidgetType::Checkbox, tr("Lock"), locked);
+                    .labeled_toggle(
+                        egui::WidgetType::Checkbox,
+                        &crate::a11y::context(&[tr(&info.title), tr("Lock")]),
+                        locked,
+                    );
                 let icon = if locked { Icon::Lock } else { Icon::Unlock };
                 let c = if lr.hovered() {
                     color::TEXT_STRONG
@@ -980,7 +1007,10 @@ impl Dock {
                 let mr = Rect::from_min_size(pos2(cx, mid_y - 6.0), vec2(geom::MENU_W, 12.0));
                 let menu_resp = ui
                     .interact(mr.expand(3.0), tab_id.with("menu"), Sense::click())
-                    .labeled(egui::WidgetType::Button, tr("Panel Menu"));
+                    .labeled(
+                        egui::WidgetType::Button,
+                        &crate::a11y::context(&[tr(&info.title), tr("Panel Menu")]),
+                    );
                 let mc = if menu_resp.hovered() {
                     color::TEXT_STRONG
                 } else {
@@ -1027,7 +1057,17 @@ impl Dock {
         );
         let resp = ui
             .interact(r, self.id.with(("overflow", frame.id)), Sense::click())
-            .labeled(egui::WidgetType::Button, tr("More Panels"));
+            .labeled(
+                egui::WidgetType::Button,
+                &crate::a11y::context(&[
+                    &frame
+                        .tabs
+                        .first()
+                        .map(|p| tr(&host.tab(p).title).to_owned())
+                        .unwrap_or_default(),
+                    tr("More Panels"),
+                ]),
+            );
         let c = if resp.hovered() {
             color::TEXT_STRONG
         } else {
@@ -1176,9 +1216,10 @@ impl Dock {
                     pos2(rect.right() - geom::STACK_SEP_MARGIN - 9.0, y + 12.5),
                     Vec2::splat(16.0),
                 );
-                let menu_resp = ui
-                    .interact(mr, id.with("menu"), Sense::click())
-                    .labeled(egui::WidgetType::Button, tr("Panel Menu"));
+                let menu_resp = ui.interact(mr, id.with("menu"), Sense::click()).labeled(
+                    egui::WidgetType::Button,
+                    &crate::a11y::context(&[tr(&info.title), tr("Panel Menu")]),
+                );
                 let mc = if menu_resp.hovered() {
                     color::TEXT_STRONG
                 } else {
@@ -1197,7 +1238,10 @@ impl Dock {
                 let handle = sep_stroke_rect(y).expand2(vec2(0.0, 2.0));
                 let hr = ui
                     .interact(handle, id.with("stack-resize"), Sense::drag())
-                    .labeled(egui::WidgetType::ResizeHandle, tr("Resize Panels"));
+                    .labeled(
+                        egui::WidgetType::ResizeHandle,
+                        &crate::a11y::context(&[tr("Resize Panels"), tr(&info.title)]),
+                    );
                 if hr.hovered() || hr.dragged() {
                     ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
                 }
@@ -1447,6 +1491,14 @@ fn panel_contents(ui: &mut Ui, rect: Rect, panel: &PanelId, host: &mut impl Pane
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
     child.set_clip_rect(rect.intersect(ui.clip_rect()));
+    // The panel is a named region for screen readers; widgets inside it are
+    // told apart within it (issue #128).
+    let title = tr(&host.tab(panel).title).to_owned();
+    let pane = child.unique_id();
+    child.ctx().accesskit_node_builder(pane, |node| {
+        node.set_role(egui::accesskit::Role::Pane);
+        node.set_label(title);
+    });
     host.ui(&mut child, panel);
 }
 
@@ -1546,6 +1598,7 @@ fn layout_node(
                         axis: *axis,
                         rect: handle,
                         lengths: lengths.clone(),
+                        between: [first_tab(child), children.get(i + 1).and_then(first_tab)],
                     });
                     pos += gap;
                 }

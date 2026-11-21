@@ -247,12 +247,22 @@ pub fn eval(s: &str) -> Option<f64> {
 
 /// Stopwatch toggle that enables keyframing for a property.
 pub fn stopwatch(ui: &mut Ui, on: &mut bool) -> Response {
+    stopwatch_for(ui, on, "")
+}
+
+/// [`stopwatch`] of the property `name` ("Layer “Solid 1” · Position"), so
+/// screen readers tell the stopwatches apart.
+pub fn stopwatch_for(ui: &mut Ui, on: &mut bool, name: &str) -> Response {
     let (rect, mut resp) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::click());
     if resp.clicked() {
         *on = !*on;
         resp.mark_changed();
     }
-    let resp = resp.labeled_toggle(egui::WidgetType::Checkbox, tr("Time-Vary Stopwatch"), *on);
+    let resp = resp.labeled_toggle(
+        egui::WidgetType::Checkbox,
+        &crate::a11y::context(&[name, tr("Time-Vary Stopwatch")]),
+        *on,
+    );
     let c = if *on {
         color::ACCENT
     } else if resp.hovered() {
@@ -273,6 +283,17 @@ pub enum KeyNav {
 
 /// The ◀ ◆ ▶ keyframe navigator shown left of animated properties.
 pub fn keyframe_nav(ui: &mut Ui, has_prev: bool, on_key: bool, has_next: bool) -> Option<KeyNav> {
+    keyframe_nav_for(ui, has_prev, on_key, has_next, "")
+}
+
+/// [`keyframe_nav`] of the property `name` (screen-reader names include it).
+pub fn keyframe_nav_for(
+    ui: &mut Ui,
+    has_prev: bool,
+    on_key: bool,
+    has_next: bool,
+    name: &str,
+) -> Option<KeyNav> {
     let mut out = None;
     let parts = [
         (Icon::TriangleLeft, KeyNav::Prev, has_prev),
@@ -283,12 +304,15 @@ pub fn keyframe_nav(ui: &mut Ui, has_prev: bool, on_key: bool, has_next: bool) -
         ui.spacing_mut().item_spacing.x = 0.0;
         for (icon, nav, enabled) in parts {
             let (rect, resp) = ui.allocate_exact_size(vec2(13.0, 16.0), Sense::click());
-            let name = match nav {
+            let what = match nav {
                 KeyNav::Prev => "Go to Previous Keyframe",
                 KeyNav::Toggle => "Add or Remove Keyframe at Current Time",
                 KeyNav::Next => "Go to Next Keyframe",
             };
-            let resp = resp.labeled(egui::WidgetType::Button, tr(name));
+            let resp = resp.labeled(
+                egui::WidgetType::Button,
+                &crate::a11y::context(&[name, tr(what)]),
+            );
             if enabled && resp.clicked() {
                 out = Some(nav);
             }

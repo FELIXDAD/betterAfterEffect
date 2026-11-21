@@ -187,7 +187,11 @@ impl Command for Scan {
     const DESCRIPTION: &'static str = "Report what packing would do without writing anything: every asset (used or unused, found or missing, where it was found, size), fonts used, referenced projects and totals.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: PackParams) -> Result<PackageReport, CommandError> {
-        let source = PackSource::stage(tx.stage(), p.project.as_deref());
+        let manifest = p.project.as_deref().and_then(pack::read_manifest);
+        let source = PackSource {
+            manifest: manifest.as_ref(),
+            ..PackSource::stage(tx.stage(), p.project.as_deref())
+        };
         Ok(pack::scan(&source, &p.options)?)
     }
 }
@@ -218,7 +222,11 @@ impl Command for Pack {
         tx: &mut Transaction<'_>,
         p: PackOutputParams,
     ) -> Result<PackageReport, CommandError> {
-        let source = PackSource::stage(tx.stage(), p.pack.project.as_deref());
+        let manifest = p.pack.project.as_deref().and_then(pack::read_manifest);
+        let source = PackSource {
+            manifest: manifest.as_ref(),
+            ..PackSource::stage(tx.stage(), p.pack.project.as_deref())
+        };
         Ok(pack::pack(
             &source,
             &p.output,
@@ -253,7 +261,11 @@ impl Command for Collect {
         tx: &mut Transaction<'_>,
         p: CollectParams,
     ) -> Result<PackageReport, CommandError> {
-        let source = PackSource::stage(tx.stage(), p.pack.project.as_deref());
+        let manifest = p.pack.project.as_deref().and_then(pack::read_manifest);
+        let source = PackSource {
+            manifest: manifest.as_ref(),
+            ..PackSource::stage(tx.stage(), p.pack.project.as_deref())
+        };
         Ok(pack::collect_files(&source, &p.output, &p.pack.options)?)
     }
 }

@@ -56,7 +56,7 @@ impl AppModule for ModelCliModule {
                 let m = ctx.matches;
                 let path = m.get_one::<PathBuf>("project").expect("required");
                 let project = Project::open(path).map_err(|error| {
-                    anyhow::anyhow!(crate::open_error::describe(path, &error.into()))
+                    anyhow::anyhow!(crate::file_error::describe_open(path, &error.into()))
                 })?;
                 let json = match (m.get_one::<String>("sublayer"), m.get_one::<String>("prim")) {
                     (Some(id), _) => {
