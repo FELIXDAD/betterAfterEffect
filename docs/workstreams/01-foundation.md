@@ -54,6 +54,9 @@
 - [x] 0.0.1 前体积清理（PR #89，2026-11-21）：egui 的 epaint 用 `vendor/epaint` 补丁到 vello/parley 的字体栈（skrifa 0.49 / harfrust 0.15），去掉一整套重复字体代码；插件清单和音频标签解析的冷路径 crate 改 `opt-level = "s"`；CI 增加「One font stack in the app」检查。`bae`：macOS 22.60 → 21.65 MiB，Windows 29.09 → 27.98 MiB。B1 和 egui 排版性能不变或更快。
   - `panic = "abort"` 能再减 Windows 7.1 MiB、macOS 3.2 MiB，但崩溃恢复（`bae-platform` 的 `run_emergency_saves` 用 `catch_unwind`）和 MCP 服务的 tokio 任务隔离依赖 unwind。协调人决定 0.0.1 不做，0.0.1 之后先设计替代方案再评估（记在 `docs/spec/dependencies.md` 第 9 节）。egui 内置字体（`default_fonts`，1.41 MiB）是 emoji/符号的兜底字体，换成系统字体要 11 决定。windows-sys 0.52 / objc2 0.5 来自 winit 0.30，要等 winit 0.31 正式版。
 
+- [x] 工程文件（分支 `app/project-files`，2026-11-21，0.0.1 硬阻塞）：文件菜单接到模型——新建项目（Cmd/Ctrl+Alt+N）、打开项目（Cmd/Ctrl+O，`.bae` 目录 / `.baez` 文件，经 `bae_package::open_project`）、关闭项目、保存（Cmd/Ctrl+S）、另存为（Cmd/Ctrl+Shift+S）；原生对话框用 rfd（只在 macOS / Windows 依赖，关掉 Linux 后端），放在 `files::FileDialogs` trait 后面；未保存修改由工程层版本向量推出，标题加 ` *`，关闭 / 新建 / 打开 / 退出前问 保存 / 不保存 / 取消；`bae <工程>` 和 `bae --headless [--smoke-test N] <工程>` 启动时打开工程。说明见 `docs/spec/app-shell.md`「工程文件」。
+  - 已知限制：macOS 从程序坞退出、系统注销关机时 winit 0.30 不给拦截的机会，不会提示未保存的修改；第二个实例 `bae <工程>` 仍然只提示已在运行（转给已运行实例是后续工作）；Windows 的打开对话框选不了目录，`.bae` 工程要选里面的 `project.json`。
+
 后续（不阻塞合并）：
 
 - 浮动面板的原生多窗口（每个 egui 视口一个 winit 窗口和 surface，共用同一设备）；目前用 `set_embed_viewports(true)` 画在主窗口内。
