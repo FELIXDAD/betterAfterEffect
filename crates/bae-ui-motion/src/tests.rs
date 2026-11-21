@@ -613,3 +613,89 @@ fn every_menu_title_has_chinese() {
     }
     assert!(missing.is_empty(), "missing Chinese for {missing:?}");
 }
+
+fn key(k: egui::Key) -> Event {
+    Event::Key {
+        key: k,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Default::default(),
+    }
+}
+
+fn renamed_to(r: &PanelRequests) -> Option<String> {
+    r.invocations
+        .iter()
+        .find(|i| i.id == "attr.set" && i.params["attr"] == "name")
+        .and_then(|i| i.params["value"]["value"].as_str().map(str::to_owned))
+}
+
+/// AE: Enter commits a rename, clicking elsewhere commits, Esc cancels.
+#[test]
+fn timeline_and_project_rename_commit_on_enter_and_click_away() {
+    let mut h = Harness::new();
+    let (comp, solid, _shape) = h.comp_with_layers();
+    let mut tl = TimelinePanel::default();
+    // Enter commits (typed text included).
+    tl.start_rename(solid.clone(), "Bg");
+    h.frame("timeline", &mut tl, Vec::new());
+    h.frame("timeline", &mut tl, vec![Event::Text("X".into())]);
+    let r = h.frame("timeline", &mut tl, vec![key(egui::Key::Enter)]);
+    assert_eq!(
+        renamed_to(&r).as_deref(),
+        Some("BgX"),
+        "{:?}",
+        r.invocations
+    );
+    assert!(
+        h.frame("timeline", &mut tl, Vec::new())
+            .invocations
+            .is_empty(),
+        "rename ended"
+    );
+    // Clicking elsewhere commits.
+    tl.start_rename(solid.clone(), "Away");
+    h.frame("timeline", &mut tl, Vec::new());
+    h.frame("timeline", &mut tl, Vec::new());
+    let far = pos2(1200.0, 780.0);
+    let mut evs = Vec::new();
+    pointer(&mut evs, far, Some(true));
+    h.frame("timeline", &mut tl, evs);
+    let mut evs = Vec::new();
+    pointer(&mut evs, far, Some(false));
+    let r = h.frame("timeline", &mut tl, evs);
+    let r2 = h.frame("timeline", &mut tl, Vec::new());
+    let name = renamed_to(&r).or_else(|| renamed_to(&r2));
+    assert_eq!(name.as_deref(), Some("Away"));
+    // Escape cancels.
+    tl.start_rename(solid.clone(), "Nope");
+    h.frame("timeline", &mut tl, Vec::new());
+    h.frame("timeline", &mut tl, Vec::new());
+    let r = h.frame("timeline", &mut tl, vec![key(egui::Key::Escape)]);
+    assert_eq!(renamed_to(&r), None);
+    assert!(
+        h.frame("timeline", &mut tl, vec![key(egui::Key::Enter)])
+            .invocations
+            .is_empty()
+    );
+
+    // Project panel: Enter commits once and does not reopen the field.
+    let mut project = ProjectPanel::default();
+    h.session().lock().selected_items = vec![comp.clone()];
+    project.start_rename(comp.clone(), "Main Comp");
+    h.frame("project", &mut project, Vec::new());
+    let r = h.frame("project", &mut project, vec![key(egui::Key::Enter)]);
+    assert_eq!(renamed_to(&r).as_deref(), Some("Main Comp"));
+    assert!(
+        h.frame("project", &mut project, vec![Event::Text("z".into())])
+            .invocations
+            .is_empty()
+    );
+    let r = h.frame("project", &mut project, vec![key(egui::Key::Enter)]);
+    assert_eq!(
+        renamed_to(&r),
+        None,
+        "Enter after a commit starts a new rename, it does not commit one"
+    );
+}
