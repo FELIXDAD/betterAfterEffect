@@ -461,6 +461,11 @@ fn read_only_folder_reports_and_keeps_the_changes() {
             message.contains("只读 目录"),
             "message does not name the folder: {message}"
         );
+        // Issue #111: our own words, not the system's "Permission denied".
+        assert!(
+            message.contains("You don't have permission to save in"),
+            "{message}"
+        );
         assert!(g.doc.is_dirty() && g.doc.location().is_none());
         assert_eq!(export(&h), edited);
         h.state_mut().dialogs.errors.clear();
@@ -865,7 +870,8 @@ fn broken_files_are_explained_in_chinese_too() {
     cases.push(("damaged sublayer data", p, "已损坏"));
     let p = copy("无权限.bae");
     fs::set_permissions(p.join("project.json"), fs::Permissions::from_mode(0o000)).unwrap();
-    cases.push(("unreadable project.json", p, "无法读取"));
+    // Issue #111: permission problems in our own words, not the system's.
+    cases.push(("unreadable project.json", p, "没有权限打开"));
 
     let mut h = gui();
     comp_with(&mut h, &["motion.layer.new.solid"]);

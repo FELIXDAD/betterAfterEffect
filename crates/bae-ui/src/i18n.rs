@@ -259,6 +259,7 @@ const ZH: &[(&str, &str)] = &[
     ("Expand", "展开"),
     ("Collapse", "折叠"),
     ("Color", "颜色"),
+    ("Layer “{name}”", "图层“{name}”"),
     // Common controls
     ("Search", "搜索"),
     ("Reset", "重置"),

@@ -186,6 +186,50 @@ mod tests {
         assert_eq!(s.time(&b), Time(Time::FLICKS_PER_SECOND));
     }
 
+    /// Issue #131: `.bae` → `bae pack` → `.baez` → open: the same comps, tab
+    /// order, active comp and current times.
+    #[test]
+    fn packing_keeps_the_open_comps() {
+        let dir = tempfile::tempdir().unwrap();
+        let bae = dir.path().join("打包 视图.bae");
+        let baez = dir.path().join("打包 视图.baez");
+        let (app, mut doc) = app_and_doc();
+        for name in ["A", "B", "C"] {
+            run(&mut doc, "comp.create", json!({"name": name, "fps": 30}));
+        }
+        let comp = |n: &str| -> PrimPath { format!("/comps/{n}").parse().unwrap() };
+        let sec = Time::FLICKS_PER_SECOND;
+        {
+            let session = app.resource::<SharedSession>().unwrap().clone();
+            let mut s = session.lock();
+            for (name, t) in [("B", sec), ("C", 2 * sec), ("A", 0)] {
+                let info = query::comp_info(doc.stage(), &comp(name)).unwrap();
+                s.open_comp(&comp(name));
+                s.set_time(&info, Time(t));
+            }
+            s.open_comp(&comp("C"));
+        }
+        remember(&app, &mut doc);
+        doc.save_as(&bae).unwrap();
+        crate::pack_cli::pack(
+            &bae,
+            &baez,
+            &bae_package::PackOptions::default(),
+            bae_package::WriteOptions::default(),
+        )
+        .unwrap();
+
+        let (mut app2, mut doc2) = app_and_doc();
+        doc2.open(&baez).unwrap();
+        restore(&mut app2, &doc2);
+        let s = app2.resource::<SharedSession>().unwrap().lock();
+        assert_eq!(s.open_comps, [comp("B"), comp("C"), comp("A")], "tab order");
+        assert_eq!(s.active_comp.as_ref(), Some(&comp("C")));
+        assert_eq!(s.time(&comp("B")), Time(sec));
+        assert_eq!(s.time(&comp("C")), Time(2 * sec));
+        assert_eq!(s.time(&comp("A")), Time(0));
+    }
+
     #[test]
     fn no_record_or_missing_comps_open_the_first_comp() {
         let dir = tempfile::tempdir().unwrap();

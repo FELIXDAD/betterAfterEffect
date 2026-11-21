@@ -150,6 +150,16 @@ fn export_json_names_a_broken_file() {
             stderr.contains("坏的 文件.baez"),
             "{args:?} does not name the file: {stderr}"
         );
+        // Issue #111: the error is printed once, without a log line in front.
+        assert_eq!(
+            stderr.matches("error:").count(),
+            1,
+            "{args:?} printed the error more than once: {stderr}"
+        );
+        assert!(
+            !stderr.contains("ERROR") && !stderr.contains("bae_platform::cli"),
+            "{args:?} printed a log line: {stderr}"
+        );
     }
 }
 
@@ -415,7 +425,6 @@ fn cli_errors_name_the_file() {
 }
 
 #[test]
-#[ignore = "issue #111"]
 fn cli_errors_are_printed_once_without_a_log_line() {
     // `bae export-json` / `bae render` print the error twice: a timestamped
     // `ERROR bae_platform::cli: …` log line, then `bae …: error: …`.
@@ -437,6 +446,89 @@ fn cli_errors_are_printed_once_without_a_log_line() {
             "{args:?}: log line in the error output: {stderr}"
         );
     }
+}
+
+/// Issue #131: `bae pack` writes a self-contained .baez (no longer "not
+/// implemented"), keeps the project's saved view, and names the file when it
+/// cannot.
+#[test]
+fn pack_writes_a_baez_and_names_the_file_on_errors() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tricky(tmp.path());
+    let project = dir.join("打包 工程.bae");
+    let want = make_project(&project);
+    // The desktop app's saved view rides along in project.json.
+    let manifest = project.join("project.json");
+    let mut m: Json = serde_json::from_slice(&std::fs::read(&manifest).unwrap()).unwrap();
+    let view = json!({"comps": [{"path": "/comps/x", "time": 705600000}], "active": "/comps/x"});
+    m["view"] = view.clone();
+    std::fs::write(&manifest, serde_json::to_vec_pretty(&m).unwrap()).unwrap();
+
+    // Default output: next to the project, same name.
+    let out = bae().arg("pack").arg(&project).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    let baez = dir.join("打包 工程.baez");
+    assert!(stdout.contains("打包 工程.baez"), "{stdout}");
+    assert!(baez.is_file());
+    let exported = bae().arg("export-json").arg(&baez).output().unwrap();
+    let got: Json = serde_json::from_slice(&exported.stdout).unwrap();
+    assert_eq!(got, want, "the package differs from the project");
+    let packed = bae_package::read_manifest(&baez).unwrap();
+    assert_eq!(packed.extra.get("view"), Some(&view), "view lost");
+
+    // -o and --json; an existing output is refused without --overwrite.
+    let other = dir.join("输出 文件");
+    let out = bae()
+        .arg("pack")
+        .arg(&project)
+        .arg("-o")
+        .arg(&other)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report: Json = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(report["kind"], "baez");
+    assert!(
+        dir.join("输出 文件.baez").is_file(),
+        "the .baez extension is added"
+    );
+    let out = bae().arg("pack").arg(&project).output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        stderr.contains("打包 工程.baez") && stderr.contains("--overwrite"),
+        "{stderr}"
+    );
+    assert_eq!(stderr.matches("error:").count(), 1, "{stderr}");
+    let out = bae()
+        .arg("pack")
+        .arg(&project)
+        .arg("--overwrite")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // A project that does not open.
+    let missing = dir.join("没有 这个.bae");
+    let out = bae().arg("pack").arg(&missing).output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        stderr.contains("没有 这个.bae") && stderr.contains("does not exist"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("not implemented"), "{stderr}");
 }
 
 impl Mcp {

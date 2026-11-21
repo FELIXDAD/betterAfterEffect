@@ -39,7 +39,7 @@ pub use container::{EntryReader, PackageReader, PackagedEntry};
 pub use error::PackageError;
 pub use pack::{
     FontPolicy, OpenedProject, PackOptions, PackSource, TrimMode, TrimOptions, UnpackReport,
-    WriteOptions, collect_files, open_project, pack, scan, unpack,
+    WriteOptions, collect_files, open_project, pack, read_manifest, scan, unpack,
 };
 pub use report::{
     AssetReport, AssetStatus, FontReport, PackageReport, PackageStats, ReportKind, Warning,

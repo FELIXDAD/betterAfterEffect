@@ -66,7 +66,7 @@ pub fn run(app: &mut App, global: &GlobalOptions) -> ExitCode {
                 eprintln!(
                     "{}: {}",
                     bae_platform::BINARY_NAME,
-                    crate::open_error::describe(path, &error)
+                    crate::file_error::describe_open(path, &error)
                 );
                 ExitCode::FAILURE
             }
@@ -88,7 +88,7 @@ fn smoke_test(
             ExitCode::SUCCESS
         }
         Err(error) => {
-            tracing::error!("smoke test failed: {error:#}");
+            tracing::debug!("smoke test failed: {error:#}");
             eprintln!("smoke test failed: {error:#}");
             ExitCode::FAILURE
         }
@@ -136,7 +136,7 @@ fn render_offscreen(
     if let Some(path) = project {
         document
             .open(path)
-            .map_err(|error| anyhow::anyhow!(crate::open_error::describe(path, &error)))?;
+            .map_err(|error| anyhow::anyhow!(crate::file_error::describe_open(path, &error)))?;
         crate::view_state::restore(app, &document);
     }
     // `BAE_SMOKE_DEMO=1`: a demo project open in the Motion workspace (screenshots).

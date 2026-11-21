@@ -7,6 +7,7 @@ use bae_anim::Evaluator;
 use bae_app::Resources;
 use bae_model::{LayerKind, PrimPath, PrimType, Stage, Time, Value};
 use bae_motion::query::{self, CompInfo};
+use bae_ui::Accessible as _;
 use bae_ui::history::HistoryLog;
 use bae_ui::theme::{self, color};
 use bae_ui::widgets::{self, HotNumber};
@@ -153,10 +154,9 @@ enum Num {
 }
 
 /// A hot number whose scrubbed value is kept until the drag ends (one command per drag).
-fn number(ui: &mut Ui, id: Id, model: f64, attr: &str, suffix: &str) -> Num {
+fn number(ui: &mut Ui, id: Id, model: f64, attr: &str, suffix: &str, name: &str) -> Num {
     let key = id.with("scrub");
     let mut v = ui.data(|d| d.get_temp::<f64>(key)).unwrap_or(model);
-    let name = tr(&attr_label(None, attr, false)).to_owned();
     let resp = ui
         .push_id(id, |ui| {
             ui.add(
@@ -164,7 +164,7 @@ fn number(ui: &mut Ui, id: Id, model: f64, attr: &str, suffix: &str) -> Num {
                     .decimals(decimals(attr))
                     .speed(if attr.ends_with("opacity") { 1.0 } else { 0.5 })
                     .suffix(suffix)
-                    .label(&name),
+                    .label(name),
             )
         })
         .inner;
@@ -183,8 +183,18 @@ fn number(ui: &mut Ui, id: Id, model: f64, attr: &str, suffix: &str) -> Num {
 }
 
 /// Editor for one property value (hot numbers, color swatch, checkbox, text).
-/// `dims` limits vector components (2 for 2D layers).
-pub(crate) fn value_editor(ui: &mut Ui, id: Id, attr: &str, value: &Value, dims: usize) -> Edit {
+/// `dims` limits vector components (2 for 2D layers). `name` is what screen
+/// readers call the property ("Layer “Solid 1” · Position"); components get
+/// X / Y / Z after it (issue #128).
+pub(crate) fn value_editor(
+    ui: &mut Ui,
+    id: Id,
+    attr: &str,
+    value: &Value,
+    dims: usize,
+    name: &str,
+) -> Edit {
+    let axis = |i: usize| bae_ui::a11y::context(&[name, ["X", "Y", "Z"][i.min(2)]]);
     let mut out = Edit::None;
     let mut apply = |n: Num, f: &dyn Fn(f64) -> Value| match n {
         Num::None => {}
@@ -197,17 +207,31 @@ pub(crate) fn value_editor(ui: &mut Ui, id: Id, attr: &str, value: &Value, dims:
             // AE shows rotation as revolutions + degrees: 1x+30.0°.
             let revs = (v / 360.0).trunc();
             let deg = v - revs * 360.0;
-            let n = number(ui, id.with(0), revs, "points", "x+");
+            let n = number(
+                ui,
+                id.with(0),
+                revs,
+                "points",
+                "x+",
+                &bae_ui::a11y::context(&[name, tr("Revolutions")]),
+            );
             apply(n, &|r| Value::Float(r.trunc() * 360.0 + deg));
-            let n = number(ui, id.with(1), deg, attr, "°");
+            let n = number(
+                ui,
+                id.with(1),
+                deg,
+                attr,
+                "°",
+                &bae_ui::a11y::context(&[name, tr("Degrees")]),
+            );
             apply(n, &|d| Value::Float(revs * 360.0 + d));
         }
         Value::Float(v) => {
-            let n = number(ui, id, *v, attr, suffix(attr));
+            let n = number(ui, id, *v, attr, suffix(attr), name);
             apply(n, &|x| Value::Float(x));
         }
         Value::Int(v) => {
-            let n = number(ui, id, *v as f64, "points", "");
+            let n = number(ui, id, *v as f64, "points", "", name);
             apply(n, &|x| Value::Int(x.round() as i64));
         }
         Value::Vec2(v) | Value::Vec3([v @ .., _])
@@ -226,6 +250,7 @@ pub(crate) fn value_editor(ui: &mut Ui, id: Id, attr: &str, value: &Value, dims:
                     v[i],
                     attr,
                     if i == 1 { suffix(attr) } else { "" },
+                    &axis(i),
                 );
                 apply(n, &|x| {
                     let mut w = v;
@@ -262,6 +287,7 @@ pub(crate) fn value_editor(ui: &mut Ui, id: Id, attr: &str, value: &Value, dims:
                     v[i],
                     attr,
                     if i == 2 { suffix(attr) } else { "" },
+                    &axis(i),
                 );
                 apply(n, &|x| {
                     let mut w = v;
@@ -285,7 +311,9 @@ pub(crate) fn value_editor(ui: &mut Ui, id: Id, attr: &str, value: &Value, dims:
                 c[2] as f32,
                 c[3] as f32,
             ]);
-            let resp = ui.color_edit_button_rgba_unmultiplied(&mut rgba);
+            let resp = ui
+                .color_edit_button_rgba_unmultiplied(&mut rgba)
+                .labeled(egui::WidgetType::ColorButton, name);
             let to_value = |c: [f32; 4]| Value::Color(c.map(f64::from));
             if resp.changed() {
                 ui.data_mut(|d| d.insert_temp(key, rgba));
@@ -299,7 +327,10 @@ pub(crate) fn value_editor(ui: &mut Ui, id: Id, attr: &str, value: &Value, dims:
         }
         Value::Bool(b) => {
             let mut b2 = *b;
-            if widgets::checkbox(ui, &mut b2, "").changed() {
+            if widgets::checkbox(ui, &mut b2, "")
+                .labeled_toggle(egui::WidgetType::Checkbox, name, b2)
+                .changed()
+            {
                 out = Edit::Commit(Value::Bool(b2));
             }
         }
@@ -308,11 +339,13 @@ pub(crate) fn value_editor(ui: &mut Ui, id: Id, attr: &str, value: &Value, dims:
             let mut text = ui
                 .data(|d| d.get_temp::<String>(key))
                 .unwrap_or_else(|| doc.text.clone());
-            let resp = ui.add(
-                egui::TextEdit::singleline(&mut text)
-                    .desired_width(160.0)
-                    .text_color(color::TEXT_STRONG),
-            );
+            let resp = ui
+                .add(
+                    egui::TextEdit::singleline(&mut text)
+                        .desired_width(160.0)
+                        .text_color(color::TEXT_STRONG),
+                )
+                .labeled(egui::WidgetType::TextEdit, name);
             if resp.changed() {
                 ui.data_mut(|d| d.insert_temp(key, text.clone()));
             }

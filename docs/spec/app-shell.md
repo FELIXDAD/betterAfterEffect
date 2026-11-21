@@ -41,7 +41,10 @@ bae --smoke-test <N>        渲染 N 帧后退出（0 = 成功），可与 --hea
 bae --log <FILTER>          日志过滤，例如 "info,bae_gpu=debug"
 bae --version
 bae gpu-info [--json]       GPU、特性、限制、格式支持
-bae render | mcp | export-json | pack …   其他工作流实现
+bae export-json <工程>       工程导出成可读 JSON
+bae pack <工程> [-o 输出.baez] [--overwrite] [--used-only] [--fail-on-missing] [--json]
+                            打包成自带素材的 .baez（bae-package），保留保存的视图
+bae render | mcp …          其他工作流实现
 ```
 
 ## 3. 启动流程

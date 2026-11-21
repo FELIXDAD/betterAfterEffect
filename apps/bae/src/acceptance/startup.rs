@@ -169,6 +169,12 @@ fn controls_have_accessibility_labels() {
 
 // ---- Retest of #116 (dev d23a328): find controls by accessible name ----
 
+/// Whether accessible name `label` is the control `name`, alone or with its
+/// context in front (issue #128: "Project · Close Panel").
+fn names(label: &str, name: &str) -> bool {
+    label == name || label.ends_with(&format!(" · {name}"))
+}
+
 /// Labels of every node in the accesskit tree.
 fn labels(h: &Ui) -> Vec<String> {
     h.root()
@@ -207,7 +213,7 @@ fn main_controls_are_found_by_accessible_name() {
     let all = labels(&h);
     let mut missing = Vec::new();
     for (label, min) in MAIN_CONTROLS {
-        let n = all.iter().filter(|l| l == label).count();
+        let n = all.iter().filter(|l| names(l, label)).count();
         if n < *min {
             missing.push(format!("{label} ({n} < {min})"));
         }
@@ -308,11 +314,11 @@ fn accessible_names_are_chinese_in_the_chinese_ui() {
             wrong.push(format!("{en}: not translated"));
             continue;
         }
-        let n = all.iter().filter(|l| *l == zh).count();
+        let n = all.iter().filter(|l| names(l, zh)).count();
         if n < *min {
             wrong.push(format!("{en} → {zh}: {n} < {min} in the tree"));
         }
-        if all.iter().any(|l| l == en) {
+        if all.iter().any(|l| names(l, en)) {
             wrong.push(format!("{en}: English label still in the tree"));
         }
     }
@@ -327,4 +333,94 @@ fn accessible_names_are_chinese_in_the_chinese_ui() {
         wrong.is_empty() && leaked.is_empty(),
         "{wrong:?} leaked {leaked:?}"
     );
+}
+
+/// Issue #128: within one panel (an accesskit Pane named after it) or the
+/// window chrome outside panels, no two interactive widgets of the same role
+/// have the same name — screen readers and UI automation must tell them apart
+/// (seven stopwatches all called "Time-Vary Stopwatch", layer switches without
+/// the layer).
+#[test]
+fn interactive_widgets_have_unique_names_per_panel() {
+    unique_names_per_panel();
+}
+
+/// The same in Chinese: two English labels must not translate to one name.
+#[test]
+fn interactive_widgets_have_unique_names_in_chinese() {
+    if !in_child(
+        "acceptance::startup::interactive_widgets_have_unique_names_in_chinese",
+        &[("BAE_LANG", "zh")],
+    ) {
+        return;
+    }
+    crate::i18n::init_from_env();
+    assert_eq!(bae_ui::i18n::lang(), bae_ui::Lang::Zh);
+    unique_names_per_panel();
+}
+
+fn unique_names_per_panel() {
+    use egui::accesskit::{Action, Role};
+    let mut h = gui();
+    comp_with(
+        &mut h,
+        &["motion.layer.new.solid", "motion.layer.new.rectangle"],
+    );
+    // Both layers selected, Position revealed on each: two Position rows with
+    // stopwatches, keyframe navigators and values, two sets of layer switches.
+    key(&mut h, Modifiers::COMMAND, Key::A);
+    key(&mut h, Modifiers::NONE, Key::P);
+    settle(&mut h);
+    let mut seen: std::collections::HashMap<(String, String, String), usize> =
+        std::collections::HashMap::new();
+    let mut panes = std::collections::BTreeSet::new();
+    let mut checked = 0;
+    for n in h.root().children_recursive() {
+        let a = n.accesskit_node();
+        if a.role() == Role::Pane {
+            panes.insert(a.label().unwrap_or_default());
+        }
+        let data = a.data();
+        let interactive =
+            data.supports_action(Action::Click) || data.supports_action(Action::Focus);
+        if !interactive || a.bounding_box().is_none() || a.is_hidden() {
+            continue;
+        }
+        let Some(label) = a.label().filter(|l| !l.is_empty()) else {
+            continue; // unlabelled widgets are controls_have_accessibility_labels' job
+        };
+        let mut group = "window".to_owned();
+        let mut up = a.parent();
+        while let Some(p) = up {
+            if p.role() == Role::Pane {
+                group = p.label().unwrap_or_default();
+                break;
+            }
+            up = p.parent();
+        }
+        checked += 1;
+        *seen
+            .entry((group, format!("{:?}", a.role()), label))
+            .or_default() += 1;
+    }
+    let dupes: Vec<_> = seen.iter().filter(|(_, n)| **n > 1).collect();
+    for ((group, role, label), n) in &dupes {
+        println!("duplicate ×{n} in {group}: {role} “{label}”");
+    }
+    println!("checked {checked} interactive widgets in panes {panes:?}");
+    // Panes are named like the panel tabs ("Timeline Comp 1").
+    for panel in [
+        "Project",
+        "Timeline",
+        "Properties",
+        "Composition",
+        "Preview",
+    ] {
+        let panel = bae_ui::tr(panel);
+        assert!(
+            panes.iter().any(|p| p.starts_with(panel)),
+            "{panel} is not marked as a pane: {panes:?}"
+        );
+    }
+    assert!(dupes.is_empty(), "{} duplicate names", dupes.len());
 }
