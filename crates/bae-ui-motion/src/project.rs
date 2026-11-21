@@ -171,8 +171,13 @@ fn columns(width: f32) -> [f32; 5] {
     ]
 }
 
+#[cfg(test)]
 impl ProjectPanel {
-    #[cfg(test)]
+    /// An item is being renamed.
+    pub(crate) fn is_renaming(&self) -> bool {
+        self.rename.is_some()
+    }
+
     pub(crate) fn start_rename(&mut self, item: PrimPath, text: &str) {
         self.rename = Some((item, text.to_owned()));
     }
@@ -448,11 +453,12 @@ impl Panel for ProjectPanel {
             cx.open_panel("timeline");
             cx.open_panel("composition");
         }
-        // Enter renames the selected item (AE).
+        // Enter renames the selected item (AE) — unless a focused widget, e.g. a
+        // button in another panel, took the Enter.
         if cx.focused
             && !rename_finished
             && self.rename.is_none()
-            && ui.input(|i| i.key_pressed(egui::Key::Enter))
+            && bae_ui::panel_key_pressed(ui, egui::Key::Enter)
             && let Some(p) = &selected_first
         {
             self.rename = Some((p.clone(), query::display_name_of(stage, p)));

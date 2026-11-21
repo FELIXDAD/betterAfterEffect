@@ -555,3 +555,38 @@ fn sequence_write_error_surfaces_and_abort_removes_files() {
         "abort removes written files: {files:?}"
     );
 }
+
+/// A failed frame does not take the frames before it with it: they are all
+/// written (writer threads skip only later frames), and `finish` reports the
+/// failing file.
+#[test]
+fn sequence_write_error_keeps_earlier_frames() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("f_02.png")).unwrap();
+    let mut settings = EncodeSettings::new(
+        dir.path().join("f_##.png"),
+        VideoCodec::Png,
+        16,
+        8,
+        FrameRate::FPS_24,
+    );
+    settings.threads = Some(4);
+    let mut encoder = bae_media::MediaEncoders::builtin()
+        .create(&settings)
+        .unwrap();
+    let mut pushed = Ok(());
+    for n in 0..12 {
+        pushed = encoder.push_frame_owned(rgba8_frame(n, 16, 8));
+        if pushed.is_err() {
+            break;
+        }
+    }
+    // As the export does after an error: finish (waits for the writers, keeps
+    // the files) instead of abort (removes them).
+    let finished = encoder.finish();
+    let error = pushed.err().or(finished.err()).expect("frame 2 fails");
+    assert!(error.to_string().contains("f_02.png"), "{error}");
+    for kept in ["f_00.png", "f_01.png"] {
+        assert!(dir.path().join(kept).is_file(), "{kept} kept");
+    }
+}

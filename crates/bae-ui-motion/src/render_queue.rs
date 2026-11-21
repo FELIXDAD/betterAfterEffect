@@ -53,8 +53,15 @@ pub enum ItemStatus {
     },
     /// Failed with this message.
     Failed(String),
-    /// Stopped by the user (partial output removed).
-    Canceled,
+    /// Stopped by the user; the frames rendered before are kept (AE).
+    Stopped {
+        /// Frames written.
+        done: usize,
+        /// Frames in the range.
+        total: usize,
+        /// The first file written, if any.
+        first: Option<PathBuf>,
+    },
 }
 
 /// One comp in the queue.
@@ -174,7 +181,11 @@ impl RenderQueue {
         if let Some(item) = self.items.iter_mut().find(|i| i.id == id) {
             item.cancel.store(true, Ordering::Relaxed);
             if item.status == ItemStatus::Queued {
-                item.status = ItemStatus::Canceled;
+                item.status = ItemStatus::Stopped {
+                    done: 0,
+                    total: item.frame_count(),
+                    first: None,
+                };
                 self.batch.retain(|b| *b != id);
             }
         }
@@ -389,14 +400,19 @@ pub(crate) fn render_job(
         Some(&job.cancel),
         &mut |frame| progress(frame.index + 1),
     )?;
-    Ok(ItemStatus::Done {
-        files: report.stats.files,
-        first: report
-            .frames
-            .first()
-            .map(|f| f.file.clone())
-            .unwrap_or_default(),
-        seconds: started.elapsed().as_secs_f64(),
+    let first = report.frames.first().map(|f| f.file.clone());
+    Ok(if report.stopped {
+        ItemStatus::Stopped {
+            done: report.frames.len(),
+            total: times.len(),
+            first,
+        }
+    } else {
+        ItemStatus::Done {
+            files: report.stats.files,
+            first: first.unwrap_or_default(),
+            seconds: started.elapsed().as_secs_f64(),
+        }
     })
 }
 
@@ -479,8 +495,7 @@ pub(crate) fn run_worker(
                     );
                 };
                 match render_job(&mut renderer, &mut evaluator, stage, &job, &mut progress) {
-                    Ok(done) => done,
-                    Err(RenderError::Canceled) => ItemStatus::Canceled,
+                    Ok(status) => status,
                     Err(error) => ItemStatus::Failed(error.to_string()),
                 }
             }
@@ -503,9 +518,15 @@ pub fn reveal(path: &Path) {
         .arg(path)
         .spawn();
     #[cfg(windows)]
-    let result = std::process::Command::new("explorer")
-        .arg(format!("/select,{}", path.display()))
-        .spawn();
+    let result = {
+        use std::os::windows::process::CommandExt;
+        // explorer parses its own command line: a quoted "/select,…" argument
+        // (what `arg` makes of a path with spaces) is not recognised and it
+        // opens Documents instead. Quote only the path.
+        std::process::Command::new("explorer")
+            .raw_arg(explorer_select_arg(path))
+            .spawn()
+    };
     #[cfg(not(any(target_os = "macos", windows)))]
     let result = std::process::Command::new("xdg-open")
         .arg(path.parent().unwrap_or(path))
@@ -513,6 +534,12 @@ pub fn reveal(path: &Path) {
     if let Err(error) = result {
         tracing::warn!("cannot show {}: {error}", path.display());
     }
+}
+
+/// explorer.exe's argument selecting `path`: `/select,"<path>"`.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn explorer_select_arg(path: &Path) -> String {
+    format!("/select,\"{}\"", path.display())
 }
 
 /// "Show in Finder" in the platform's words.
@@ -605,7 +632,7 @@ fn item_ui(
 ) {
     let editable = matches!(
         item.status,
-        ItemStatus::Queued | ItemStatus::Failed(_) | ItemStatus::Canceled
+        ItemStatus::Queued | ItemStatus::Failed(_) | ItemStatus::Stopped { .. }
     );
     ui.horizontal(|ui| {
         ui.strong(&item.comp_name);
@@ -642,8 +669,17 @@ fn item_ui(
                 ui.colored_label(ui.visuals().error_fg_color, tr("Failed"))
                     .on_hover_text(message);
             }
-            ItemStatus::Canceled => {
-                ui.label(tr("Canceled"));
+            ItemStatus::Stopped { done, total, first } => {
+                ui.label(
+                    tr("Stopped ({done}/{total} frames)")
+                        .replace("{done}", &done.to_string())
+                        .replace("{total}", &total.to_string()),
+                );
+                if let Some(first) = first
+                    && ui.button(tr(reveal_label())).clicked()
+                {
+                    reveal(first);
+                }
             }
         }
         if !matches!(
@@ -764,7 +800,14 @@ mod tests {
 
         // A queued item that is stopped is canceled; it can be queued again.
         q.cancel(b);
-        assert_eq!(q.items()[1].status, ItemStatus::Canceled);
+        assert_eq!(
+            q.items()[1].status,
+            ItemStatus::Stopped {
+                done: 0,
+                total: 6,
+                first: None
+            }
+        );
         q.requeue(b);
         assert_eq!(q.items()[1].status, ItemStatus::Queued);
         assert!(!q.items()[1].cancel.load(Ordering::Relaxed));
@@ -776,6 +819,53 @@ mod tests {
         assert_eq!(q.items().len(), 1);
         assert_eq!(sanitize("  ../a#b  "), "_a_b");
         assert_eq!(sanitize("..."), "comp");
+    }
+
+    #[test]
+    fn explorer_selects_paths_with_spaces() {
+        // The whole argument must not be quoted, only the path.
+        assert_eq!(
+            explorer_select_arg(Path::new(r"E:\bae-test\rq final\png\Comp1_0000.png")),
+            r#"/select,"E:\bae-test\rq final\png\Comp1_0000.png""#
+        );
+    }
+
+    /// Stop keeps the frames rendered before it (AE): the item shows
+    /// "Stopped (N/M frames)" and the N files are on disk.
+    #[test]
+    fn stop_keeps_the_rendered_frames() {
+        let Some(gpu) = gpu() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let (stage, comp) = project();
+        let info = bae_motion::query::comp_info(&stage, &comp).unwrap();
+        let mut q = RenderQueue::default();
+        let id = q.add(&info, dir.path());
+        q.item_mut(id).unwrap().output = dir
+            .path()
+            .join("stop/f_####.png")
+            .to_string_lossy()
+            .into_owned();
+        assert!(q.begin());
+        let job = q.take_next().unwrap();
+        let mut renderer = Renderer::new(gpu);
+        let mut evaluator = AnimEvaluator::new(None);
+        let cancel = job.cancel.clone();
+        let status = render_job(&mut renderer, &mut evaluator, &stage, &job, &mut |done| {
+            if done == 5 {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        })
+        .unwrap();
+        let ItemStatus::Stopped { done, total, first } = status else {
+            panic!("{status:?}");
+        };
+        assert_eq!(total, 30);
+        assert!((5..30).contains(&done), "{done}");
+        assert_eq!(first, Some(dir.path().join("stop/f_0000.png")));
+        let on_disk = std::fs::read_dir(dir.path().join("stop")).unwrap().count();
+        assert_eq!(on_disk, done, "every rendered frame is kept");
     }
 
     #[test]
@@ -900,7 +990,14 @@ mod tests {
             }
             other => panic!("tiff: {other:?}"),
         }
-        assert_eq!(status(stopped), ItemStatus::Canceled);
+        assert_eq!(
+            status(stopped),
+            ItemStatus::Stopped {
+                done: 0,
+                total: 30,
+                first: None
+            }
+        );
         assert!(!dir.path().join("stopped/f_0000.png").exists());
         match status(bad) {
             ItemStatus::Failed(message) => assert!(message.contains("blocker"), "{message}"),

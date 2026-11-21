@@ -72,7 +72,10 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Queued", "已加入队列"),
     ("Done", "完成"),
     ("Failed", "失败"),
-    ("Canceled", "用户已停止"),
+    (
+        "Stopped ({done}/{total} frames)",
+        "已停止（{done}/{total} 帧）",
+    ),
     ("Stop", "停止"),
     ("Render Again", "重新渲染"),
     ("Format", "格式"),
