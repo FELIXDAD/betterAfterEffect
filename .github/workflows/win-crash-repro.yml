@@ -105,16 +105,19 @@ jobs:
                 pageheap: $pageheap, fresh: $fresh, env: $env, debuglayer: $dl, n: $n }]}')"
           else
             # The plan for pushes to ci/win-crash-repro. Run 44951964323 crashed 3 times in
-            # 2000 runs of bae-render --test render (dxilconv.dll, converting FXC's DXBC to
-            # DXIL for WARP during concurrent device creation). Controls: the same loop
-            # without the D3D12 debug layer, and with DXC (DXIL directly, no dxilconv).
+            # 2000 runs of bae-render --test render (dxilconv.dll converting FXC's DXBC to
+            # DXIL for WARP while devices were created concurrently). This run checks the
+            # fix (#173 merged in: shared test context, serialized device creation, D3D12
+            # warm-up), debug layer on as in the crashing runs, plus a stress test that
+            # creates devices from 4 threads at once.
             matrix='{"include":[
-              {"id":"render-nodebuglayer-1","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"","debuglayer":"off","n":"700"},
-              {"id":"render-nodebuglayer-2","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"","debuglayer":"off","n":"700"},
-              {"id":"render-nodebuglayer-3","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"","debuglayer":"off","n":"700"},
-              {"id":"render-dxc-1","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"WGPU_DX12_COMPILER=dxc","debuglayer":"on","n":"700"},
-              {"id":"render-dxc-2","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"WGPU_DX12_COMPILER=dxc","debuglayer":"on","n":"700"},
-              {"id":"render-dxc-3","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"WGPU_DX12_COMPILER=dxc","debuglayer":"on","n":"700"}
+              {"id":"fixed-render-1","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"","debuglayer":"on","n":"700"},
+              {"id":"fixed-render-2","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"","debuglayer":"on","n":"700"},
+              {"id":"fixed-render-3","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"","debuglayer":"on","n":"700"},
+              {"id":"fixed-render-4","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"","debuglayer":"on","n":"700"},
+              {"id":"fixed-render-5","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"","debuglayer":"on","n":"700"},
+              {"id":"fixed-stress-1","set":"bae-gpu:stress_154","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"","debuglayer":"on","n":"500"},
+              {"id":"fixed-stress-2","set":"bae-gpu:stress_154","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"","debuglayer":"on","n":"500"}
             ]}'
             matrix="$(echo "$matrix" | jq -c .)"
           fi
