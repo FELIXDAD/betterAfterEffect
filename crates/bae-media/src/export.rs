@@ -720,13 +720,17 @@ impl WriterPool {
         let receiver = Arc::new(parking_lot::Mutex::new(receiver));
         let error: Arc<parking_lot::Mutex<Option<MediaError>>> = Arc::default();
         let stats: Arc<parking_lot::Mutex<EncodeStats>> = Arc::default();
+        // Index of the first frame that failed: later frames are skipped,
+        // earlier ones are still written (complete files are kept).
+        let failed_at = Arc::new(std::sync::atomic::AtomicU64::new(u64::MAX));
         let workers = (0..threads)
             .map(|i| {
-                let (writer, receiver, error, stats) = (
+                let (writer, receiver, error, stats, failed_at) = (
                     writer.clone(),
                     receiver.clone(),
                     error.clone(),
                     stats.clone(),
+                    failed_at.clone(),
                 );
                 std::thread::Builder::new()
                     .name(format!("bae-media.write.{i}"))
@@ -736,12 +740,13 @@ impl WriterPool {
                             let Ok(job) = receiver.lock().recv() else {
                                 break;
                             };
-                            if error.lock().is_some() {
+                            if job.index > failed_at.load(Ordering::Relaxed) {
                                 continue;
                             }
                             match writer.write(&job.path, &job.frame, job.index) {
                                 Ok(s) => stats.lock().add(&s),
                                 Err(e) => {
+                                    failed_at.fetch_min(job.index, Ordering::Relaxed);
                                     error.lock().get_or_insert(e);
                                 }
                             }
@@ -861,7 +866,11 @@ impl SequenceWriter {
             other => unreachable!("checked in ImageSequenceEncoder::new: {other:?}"),
         };
         let encoded = Instant::now();
-        std::fs::write(path, &bytes).map_err(|e| MediaError::write(path, e))?;
+        if let Err(e) = std::fs::write(path, &bytes) {
+            // No half-written file: what is on disk is complete.
+            let _ = std::fs::remove_file(path);
+            return Err(MediaError::write(path, e));
+        }
         Ok(EncodeStats {
             encode: encoded - started,
             write: encoded.elapsed(),
