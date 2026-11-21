@@ -1,0 +1,6 @@
+# Real Illustrator output used by the tests on every platform (Windows CI included).
+# .ai files are PDF inside, with byte offsets in the xref table: never convert line
+# endings, never diff or merge them as text.
+*.ai binary
+# The bridge JSON is compared and parsed byte for byte: LF everywhere, UTF-8.
+*.json text eol=lf

@@ -1,0 +1,55 @@
+# Tint (ADBE Tint): docs/spec/ae/_parts/effects--fx-a.md AE-FX-036.
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "tint"
+name = "Tint"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE Tint"]
+keywords = ["tint", "colorize", "duotone", "map"]
+flags = ["pixel-independent"]
+shader = "shaders/tint.wgsl"
+identity_when = "params.amount == 0"
+
+[[effect.param]]
+id = 1
+key = "map_black"
+type = "color"
+name = "Map Black To"
+default = [0.0, 0.0, 0.0, 1.0]
+
+[[effect.param]]
+id = 2
+key = "map_white"
+type = "color"
+name = "Map White To"
+default = [1.0, 1.0, 1.0, 1.0]
+
+[[effect.param]]
+id = 3
+key = "amount"
+type = "float"
+name = "Amount to Tint"
+default = 100.0
+range = [0.0, 100.0]
+precision = 1
+display = "percent"
+
+# Swaps parameters 1 and 2 (a UI command; no value).
+
+[[effect.param]]
+id = 4
+key = "swap_colors"
+type = "button"
+name = "Swap Colors"
+label = "Swap Colors"

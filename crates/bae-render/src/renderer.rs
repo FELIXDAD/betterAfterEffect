@@ -316,6 +316,19 @@ impl Renderer {
         frame: &RenderedFrame,
         alpha: OutputAlpha,
     ) -> Result<ImageData, RenderError> {
+        let target = self.output_texture(frame, alpha)?;
+        Ok(bae_gpu::transfer::read_texture(&self.gpu, &target)?)
+    }
+
+    /// Converts a frame to an 8-bit RGBA texture on the GPU, without reading it
+    /// back (what [`Renderer::read_rgba8`] reads): `Rgba8Unorm`, usable as a copy
+    /// source and as a sampled texture, e.g. published to the viewport registry for
+    /// a viewer. The work is submitted; the texture is ready for later commands.
+    pub fn output_texture(
+        &mut self,
+        frame: &RenderedFrame,
+        alpha: OutputAlpha,
+    ) -> Result<wgpu::Texture, RenderError> {
         let device = self.gpu.device();
         let [w, h] = frame.image.texel_size();
         let target = device.create_texture(&wgpu::TextureDescriptor {
@@ -329,7 +342,9 @@ impl Renderer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
         let view = target.create_view(&wgpu::TextureViewDescriptor::default());
@@ -387,7 +402,7 @@ impl Renderer {
             pass.draw(0..3, 0..1);
         }
         self.gpu.queue().submit([encoder.finish()]);
-        Ok(bae_gpu::transfer::read_texture(&self.gpu, &target)?)
+        Ok(target)
     }
 
     /// Writes a frame as an 8-bit RGBA PNG (straight alpha unless `alpha` says
