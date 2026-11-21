@@ -623,3 +623,179 @@ fn chinese_window_items_and_render_messages() {
         bae_ui::tr("Choose where to render: Output To is empty.")
     );
 }
+
+/// Painted characters egui's built-in fonts cannot draw (macOS shortcut modifiers
+/// excepted: drawn with SF, see `ui_text`).
+fn missing_glyphs(h: &Ui) -> Vec<String> {
+    painted_texts(h)
+        .into_iter()
+        .filter_map(|t| {
+            let missing: Vec<char> = crate::ui_text::missing_from_builtin_fonts(t.chars())
+                .into_iter()
+                .filter(|c| !crate::ui_text::MACOS_MODIFIERS.contains(c))
+                .collect();
+            (!missing.is_empty()).then(|| format!("{missing:?} in {t:?}"))
+        })
+        .collect()
+}
+
+fn open_empty_render_queue() -> Ui {
+    let mut h = gui();
+    assert!(h.state_mut().menu("motion.window.render_queue"));
+    settle(&mut h);
+    // Opened: the callers find its hint (in either language).
+    h
+}
+
+/// #135: the empty Render Queue's hint named the menu path with `▸`, which egui's
+/// built-in fonts do not have (a box on Windows). Nothing painted may need a glyph
+/// they lack.
+#[test]
+fn render_queue_hint_has_no_missing_glyphs() {
+    let h = open_empty_render_queue();
+    let texts = painted_texts(&h);
+    assert!(
+        texts
+            .iter()
+            .any(|t| t == "Add a composition with Composition > Add to Render Queue."),
+        "hint not shown: {texts:?}"
+    );
+    let missing = missing_glyphs(&h);
+    assert!(missing.is_empty(), "missing glyphs: {missing:#?}");
+}
+
+#[test]
+fn render_queue_hint_has_no_missing_glyphs_in_chinese() {
+    if !in_child(
+        "acceptance::menus::render_queue_hint_has_no_missing_glyphs_in_chinese",
+        &[("BAE_LANG", "zh")],
+    ) {
+        return;
+    }
+    crate::i18n::init_from_env();
+    let h = open_empty_render_queue();
+    let texts = painted_texts(&h);
+    assert!(
+        texts
+            .iter()
+            .any(|t| t == "用“合成 > 添加到渲染队列”添加合成。"),
+        "hint not shown: {texts:?}"
+    );
+    let missing = missing_glyphs(&h);
+    assert!(missing.is_empty(), "missing glyphs: {missing:#?}");
+}
+
+/// Latin words left in Chinese text, product names aside.
+fn english_words(zh: &str) -> Option<String> {
+    let mut rest = zh.to_owned();
+    for name in crate::ui_text::SAME_IN_CHINESE {
+        rest = rest.replace(name, "");
+    }
+    rest.chars()
+        .any(|c| c.is_ascii_alphabetic())
+        .then(|| zh.to_owned())
+}
+
+/// #136 / #140: with `BAE_LANG=zh`, Edit > Undo, the History panel and the Keyboard
+/// Shortcuts window showed English command names ("撤消 New Layer") and raw panel
+/// ids ("打开面板: character"); variants of one command (PageUp / PageDown /
+/// Shift+PageUp, Cmd+[ / Cmd+], Alt+Shift+P / S …) shared one name.
+#[test]
+fn chinese_ui_names_every_command_and_panel() {
+    if !in_child(
+        "acceptance::menus::chinese_ui_names_every_command_and_panel",
+        &[("BAE_LANG", "zh")],
+    ) {
+        return;
+    }
+    crate::i18n::init_from_env();
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+
+    let (undo, redo) = h.state().doc.undo_state();
+    assert_eq!(
+        crate::shell::undo_redo_text("Undo", undo.as_deref()),
+        "撤消 新建纯色"
+    );
+    assert_eq!(
+        crate::shell::undo_redo_text("Redo", redo.as_deref()),
+        "重做"
+    );
+
+    let log = h
+        .state()
+        .app
+        .resource::<Arc<bae_ui::history::HistoryLog>>()
+        .cloned()
+        .expect("history log");
+    let history: Vec<String> = log
+        .entries()
+        .iter()
+        .map(|e| bae_ui::tr(&e.label).to_owned())
+        .collect();
+    assert!(history.iter().any(|l| l == "新建纯色"), "{history:?}");
+    let english: Vec<String> = history.iter().filter_map(|l| english_words(l)).collect();
+    assert!(english.is_empty(), "History shows English: {english:?}");
+
+    let rows = h.state().workspace.shortcut_rows();
+    let english: Vec<String> = rows
+        .iter()
+        .filter_map(|r| english_words(&r.shown).map(|s| format!("{} {}: {s}", r.id, r.params)))
+        .collect();
+    assert!(
+        english.is_empty(),
+        "Keyboard Shortcuts shows English: {english:#?}"
+    );
+    let shown = |id: &str, params: serde_json::Value| {
+        rows.iter()
+            .find(|r| r.id == id && r.params == params)
+            .map(|r| r.shown.clone())
+            .unwrap_or_else(|| panic!("no shortcut row {id} {params}"))
+    };
+    for (frames, zh) in [
+        (-1, "上一帧"),
+        (1, "下一帧"),
+        (-10, "后退 10 帧"),
+        (10, "前进 10 帧"),
+    ] {
+        assert_eq!(
+            shown("motion.step", serde_json::json!({ "frames": frames })),
+            zh
+        );
+    }
+    for (to, zh) in [
+        ("forward", "前移一层"),
+        ("backward", "后移一层"),
+        ("front", "置于顶层"),
+        ("back", "置于底层"),
+    ] {
+        assert_eq!(shown("motion.order", serde_json::json!({ "to": to })), zh);
+    }
+    assert_eq!(
+        shown(
+            "motion.toggle_key",
+            serde_json::json!({ "attr": "transform:position" })
+        ),
+        "位置：添加或移除关键帧"
+    );
+    assert_eq!(
+        shown("motion.new_layer", serde_json::json!({ "kind": "solid" })),
+        "新建纯色"
+    );
+    let mut names: Vec<&str> = rows.iter().map(|r| r.shown.as_str()).collect();
+    names.sort_unstable();
+    let total = names.len();
+    names.dedup();
+    assert_eq!(names.len(), total, "shortcut rows share a name");
+    for (id, zh) in [
+        ("character", "字符"),
+        ("paragraph", "段落"),
+        ("tools", "工具"),
+    ] {
+        let row = rows
+            .iter()
+            .find(|r| r.params.get("id").and_then(|v| v.as_str()) == Some(id))
+            .unwrap_or_else(|| panic!("no shortcut row for the {id} panel"));
+        assert_eq!(row.shown, format!("打开面板: {zh}"));
+    }
+}

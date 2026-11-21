@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use bae_model::{LayerKind, PrimPath, Time};
 use bae_motion::query::{self, CompInfo};
 use bae_motion::{CopiedKey, KeyRef};
-use bae_ui::{Binding, Invocation, KeymapBindings, PanelContext};
+use bae_ui::{Binding, CommandVariant, Invocation, KeymapBindings, PanelContext};
 use serde_json::json;
 
 use crate::common;
@@ -86,7 +86,100 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::ORDER, "Bring Layer Forward"),
     (ids::TRIM_COMP, "Trim Comp to Work Area"),
     (ids::ADD_TO_RENDER_QUEUE, "Add to Render Queue"),
+    // Panel-scoped (`bindings`): handled by the timeline and the viewer. Registered
+    // so the Keyboard Shortcuts window shows a name, not the id (#136).
+    ("timeline.zoom_in", "Zoom In Time"),
+    ("timeline.zoom_out", "Zoom Out Time"),
+    ("viewer.zoom_in", "Zoom In"),
+    ("viewer.zoom_out", "Zoom Out"),
+    ("viewer.fit", "Fit"),
 ];
+
+/// The properties the P / S / R / T / A shortcuts act on, with their English names.
+const TRANSFORM_PROPERTIES: [(&str, &str, &str); 5] = [
+    ("P", "transform:position", "Position"),
+    ("S", "transform:scale", "Scale"),
+    ("R", "transform:rotation", "Rotation"),
+    ("T", "transform:opacity", "Opacity"),
+    ("A", "transform:anchor_point", "Anchor Point"),
+];
+
+/// Variants with fixed parameters: (command, parameters as JSON, English name). A
+/// table rather than `json!` calls keeps the code small (parsed once at startup).
+const VARIANTS: &[(&str, &str, &str)] = &[
+    (ids::STEP, r#"{"frames":-1}"#, "Previous Frame"),
+    (ids::STEP, r#"{"frames":1}"#, "Next Frame"),
+    (ids::STEP, r#"{"frames":-10}"#, "Back 10 Frames"),
+    (ids::STEP, r#"{"frames":10}"#, "Forward 10 Frames"),
+    (ids::EASE, r#"{"mode":"easy_ease"}"#, "Easy Ease"),
+    (ids::EASE, r#"{"mode":"ease_in"}"#, "Easy Ease In"),
+    (ids::EASE, r#"{"mode":"ease_out"}"#, "Easy Ease Out"),
+    ("key.ease", r#"{"mode":"easy_ease"}"#, "Easy Ease"),
+    ("key.ease", r#"{"mode":"ease_in"}"#, "Easy Ease In"),
+    ("key.ease", r#"{"mode":"ease_out"}"#, "Easy Ease Out"),
+    (ids::ORDER, r#"{"to":"forward"}"#, "Bring Layer Forward"),
+    (ids::ORDER, r#"{"to":"backward"}"#, "Send Layer Backward"),
+    (ids::ORDER, r#"{"to":"front"}"#, "Bring Layer to Front"),
+    (ids::ORDER, r#"{"to":"back"}"#, "Send Layer to Back"),
+    (
+        ids::REVEAL,
+        r#"{"what":"animated","add":false}"#,
+        "Reveal Animated Properties",
+    ),
+];
+
+/// Layer kinds by name, for both the UI action and the model command it runs.
+const LAYER_VARIANTS: &[(&str, &str)] = &[
+    (r#"{"kind":"solid"}"#, "New Solid"),
+    (r#"{"kind":"adjustment"}"#, "New Adjustment Layer"),
+    (r#"{"kind":"null"}"#, "New Null Object"),
+    (r#"{"kind":"text"}"#, "New Text Layer"),
+    (r#"{"kind":"camera"}"#, "New Camera"),
+    (r#"{"kind":"light"}"#, "New Light"),
+    (r#"{"kind":"shape"}"#, "New Shape Layer"),
+    (r#"{"kind":"shape","shape":"rect"}"#, "New Rectangle"),
+    (r#"{"kind":"shape","shape":"ellipse"}"#, "New Ellipse"),
+];
+
+/// Names of the variants of motion actions and of the model commands they run, so
+/// the Keyboard Shortcuts window, Edit > Undo and History say which one (#140):
+/// "Back 10 Frames", not four "Next Frame" rows; "Undo New Solid", not "Undo New
+/// Layer". `(registry id, variant)`.
+pub fn variants() -> Vec<(String, CommandVariant)> {
+    let mut v = Vec::new();
+    let mut add = |command: &str, params: serde_json::Value, title: String| {
+        let id = format!("{command}/{params}");
+        v.push((id, CommandVariant::new(command, params, title)));
+    };
+    let parse = |json: &str| serde_json::from_str(json).expect("variant parameters are JSON");
+    for (command, params, title) in VARIANTS {
+        add(command, parse(params), (*title).to_owned());
+    }
+    for (params, title) in LAYER_VARIANTS {
+        add(ids::NEW_LAYER, parse(params), (*title).to_owned());
+        add("layer.create", parse(params), (*title).to_owned());
+    }
+    for (_, attr, name) in TRANSFORM_PROPERTIES {
+        for add_to_shown in [false, true] {
+            let title = if add_to_shown {
+                format!("Add {name} to Shown Properties")
+            } else {
+                format!("Show {name}")
+            };
+            add(
+                ids::REVEAL,
+                json!({ "what": attr, "add": add_to_shown }),
+                title,
+            );
+        }
+        add(
+            ids::TOGGLE_KEY,
+            json!({ "attr": attr }),
+            format!("{name}: Add or Remove Keyframe"),
+        );
+    }
+    v
+}
 
 /// AE shortcuts of the motion workspace, added to the shell's `ae` keymap.
 pub fn bindings() -> KeymapBindings {
@@ -145,13 +238,7 @@ pub fn bindings() -> KeymapBindings {
         order("Cmd+Shift+CloseBracket", "front"),
         order("Cmd+Shift+OpenBracket", "back"),
     ];
-    for (k, attr) in [
-        ("P", "transform:position"),
-        ("S", "transform:scale"),
-        ("R", "transform:rotation"),
-        ("T", "transform:opacity"),
-        ("A", "transform:anchor_point"),
-    ] {
+    for (k, attr, _) in TRANSFORM_PROPERTIES {
         v.push(reveal(k, attr, false));
         v.push(reveal(&format!("Shift+{k}"), attr, true));
         v.push(key(&format!("Alt+Shift+{k}"), attr));

@@ -1518,9 +1518,23 @@ impl Dock {
     }
 }
 
+/// A menu button with a check mark in front when `checked`. The mark is painted:
+/// egui's built-in fonts have no check mark glyph (#135).
 fn check_item(ui: &mut Ui, checked: bool, text: &str) -> Response {
-    let mark = if checked { "✓  " } else { "    " };
-    ui.button(format!("{mark}{text}"))
+    let response = ui.button(format!("     {text}"));
+    if checked {
+        let height = ui.text_style_height(&egui::TextStyle::Button);
+        let left = response.rect.left() + ui.spacing().button_padding.x;
+        crate::widgets::paint_check(
+            ui.painter(),
+            egui::Rect::from_min_size(
+                egui::pos2(left, response.rect.center().y - height * 0.5),
+                egui::vec2(height, height),
+            ),
+            ui.visuals().text_color(),
+        );
+    }
+    response
 }
 
 /// How a frame's tabs share the tab bar.

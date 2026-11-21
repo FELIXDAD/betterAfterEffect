@@ -132,6 +132,9 @@ fn describe(event: &StageEvent) -> String {
         EventOrigin::Redo => "Redo",
         EventOrigin::Local => "Change",
     };
+    // Translated here (the language is fixed at startup): the panel shows labels
+    // through `tr`, which cannot translate a word followed by a path.
+    let what = crate::i18n::tr(what);
     match event.changes.first() {
         Some(c) => format!("{what} {}", c.path()),
         None => what.to_owned(),

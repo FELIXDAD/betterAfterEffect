@@ -14,7 +14,7 @@ use crate::theme::color;
 pub struct CommandEntry {
     pub id: String,
     pub params: serde_json::Value,
-    /// English title.
+    /// English name of the row (variant title, or command title and argument).
     pub title: String,
     /// Panel kind for panel-scoped actions.
     pub panel: Option<String>,
@@ -33,45 +33,111 @@ pub(super) struct ShortcutEditor {
 }
 
 impl Workbench {
-    /// Commands listed in the shortcut editor: registered UI actions, the extra
-    /// commands the shell supplied (model commands) and every bound command.
+    /// Commands listed in the shortcut editor, one row per command and parameters:
+    /// every bound command, the named variants of UI actions ("Back 10 Frames"), the
+    /// other registered UI actions, and the model commands the shell supplied. Every
+    /// row has its own name (#140): a UI action with variants is listed by them (not
+    /// also bare), and a model command named like a row already listed (`comp.create`
+    /// next to the New Composition action that runs it) is left out.
     pub fn shortcut_commands(&self) -> Vec<CommandEntry> {
         let mut out: Vec<CommandEntry> = Vec::new();
-        let mut push = |e: CommandEntry| {
+        let english = |id: &str, params: &serde_json::Value| {
+            let (title, arg) = self.command_title_parts(id, params);
+            match arg {
+                Some(arg) => format!("{title}: {arg}"),
+                None => title,
+            }
+        };
+        fn push(out: &mut Vec<CommandEntry>, e: CommandEntry) {
             if !out.iter().any(|o| o.id == e.id && o.params == e.params) {
                 out.push(e);
             }
-        };
+        }
         let actions = self.actions.snapshot();
+        let variants = self.variants.snapshot();
         for b in &self.keymap.bindings {
-            push(CommandEntry {
-                id: b.action.clone(),
-                params: b.params.clone(),
-                title: self.command_title(&b.action, &b.params),
-                panel: b.when.clone(),
-            });
+            push(
+                &mut out,
+                CommandEntry {
+                    id: b.action.clone(),
+                    params: b.params.clone(),
+                    title: english(&b.action, &b.params),
+                    panel: b.when.clone(),
+                },
+            );
+        }
+        for v in variants.iter().map(|e| e.item()) {
+            if let Some(action) = actions.get(v.command.as_str()) {
+                push(
+                    &mut out,
+                    CommandEntry {
+                        id: v.command.clone(),
+                        params: v.params.clone(),
+                        title: v.title.clone(),
+                        panel: action.panel.clone(),
+                    },
+                );
+            }
         }
         for e in actions.iter() {
-            push(CommandEntry {
-                id: e.id().to_string(),
-                params: serde_json::Value::Null,
-                title: e.item().title.clone(),
-                panel: e.item().panel.clone(),
-            });
+            if variants
+                .iter()
+                .any(|v| v.item().command == *e.id().as_ref())
+            {
+                continue;
+            }
+            push(
+                &mut out,
+                CommandEntry {
+                    id: e.id().to_string(),
+                    params: serde_json::Value::Null,
+                    title: e.item().title.clone(),
+                    panel: e.item().panel.clone(),
+                },
+            );
         }
-        for (id, title) in &self.extra_commands {
-            push(CommandEntry {
-                id: id.clone(),
-                params: serde_json::Value::Null,
-                title: title.clone(),
-                panel: None,
-            });
+        for (id, _) in &self.extra_commands {
+            let title = english(id, &serde_json::Value::Null);
+            if out.iter().any(|o| o.title == title) {
+                continue;
+            }
+            push(
+                &mut out,
+                CommandEntry {
+                    id: id.clone(),
+                    params: serde_json::Value::Null,
+                    title,
+                    panel: None,
+                },
+            );
         }
         out
     }
 
     /// Display title of a command id with parameters, translated.
     pub fn command_title(&self, id: &str, params: &serde_json::Value) -> String {
+        let (base, arg) = self.command_title_parts(id, params);
+        match arg {
+            Some(arg) => format!("{}: {}", tr(&base), tr(&arg)),
+            None => tr(&base).to_owned(),
+        }
+    }
+
+    /// The English parts of [`Self::command_title`]: the command's title and, for
+    /// commands with a panel, workspace or preset argument, that argument's title
+    /// (unregistered AE panels by their AE name, never a raw id when known).
+    pub fn command_title_parts(
+        &self,
+        id: &str,
+        params: &serde_json::Value,
+    ) -> (String, Option<String>) {
+        // A named variant ("Back 10 Frames", "New Solid") says it all (#140).
+        let variants = self.variants.snapshot();
+        if let Some(title) =
+            crate::action::variant_title(variants.iter().map(|e| &**e.item()), id, params)
+        {
+            return (title.to_owned(), None);
+        }
         let base = self
             .actions
             .get(id)
@@ -83,28 +149,25 @@ impl Workbench {
                     .map(|(_, t)| t.clone())
             })
             .unwrap_or_else(|| id.to_owned());
-        let base = tr(&base).to_owned();
         let arg = params
             .get("id")
             .and_then(|v| v.as_str())
             .map(|arg| {
                 self.kinds
                     .get(arg)
-                    .map(|k| tr(&k.title).to_owned())
-                    .or_else(|| self.preset(arg).map(|p| tr(&p.title).to_owned()))
+                    .map(|k| k.title.clone())
+                    .or_else(|| self.preset(arg).map(|p| p.title.clone()))
+                    .or_else(|| crate::known_panel_title(arg).map(str::to_owned))
                     .unwrap_or_else(|| arg.to_owned())
             })
             .or_else(|| {
                 params.get("index").and_then(|v| v.as_u64()).map(|i| {
                     self.workspaces
                         .get(i as usize)
-                        .map_or_else(|| format!("#{}", i + 1), |(_, p)| tr(&p.title).to_owned())
+                        .map_or_else(|| format!("#{}", i + 1), |(_, p)| p.title.clone())
                 })
             });
-        match arg {
-            Some(arg) => format!("{base}: {arg}"),
-            None => base,
-        }
+        (base, arg)
     }
 
     /// Capture the next key press while recording; returns `true` if it consumed
@@ -236,7 +299,7 @@ impl Workbench {
             ui.colored_label(
                 color::ACCENT_HOVER,
                 format!(
-                    "{} {} → {}",
+                    "{} {} {}",
                     binding.chord.display(),
                     tr("is already used by"),
                     other

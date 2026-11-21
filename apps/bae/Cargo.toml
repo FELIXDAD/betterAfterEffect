@@ -52,6 +52,9 @@ objc2.workspace = true
 objc2-foundation = { workspace = true, features = ["NSArray", "NSString", "NSURL"] }
 
 [dev-dependencies]
+# Glyph coverage test (ui_text.rs) reads font character maps; already linked through
+# egui's epaint, so no new code.
+skrifa.workspace = true
 tempfile.workspace = true
 # Acceptance tests drive the real workbench through accesskit (labels, not coordinates).
 egui_kittest.workspace = true

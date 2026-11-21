@@ -3,6 +3,63 @@
 //! `docs/glossary.md`.
 
 pub(crate) const ZH: &[(&str, &str)] = &[
+    // Titles of bae-motion's commands: Edit > Undo / Redo, History, Keyboard Shortcuts
+    // (#136). The command crate stays UI-free; its titles are translated here.
+    ("Change Value", "更改值"),
+    ("Change Values", "更改多个值"),
+    ("Set Work Area", "设置工作区域"),
+    ("Delete Keyframes", "删除关键帧"),
+    ("Move Keyframes", "移动关键帧"),
+    ("Paste Keyframes", "粘贴关键帧"),
+    ("New Layer", "新建图层"),
+    ("Delete Layers", "删除图层"),
+    ("Reorder Layers", "排列图层"),
+    ("Set Parent", "设置父级"),
+    ("Move Layer in Time", "在时间上移动图层"),
+    ("Trim Layer", "修剪图层"),
+    // Variants of motion actions and commands (`actions::variants`, #140): the
+    // Keyboard Shortcuts window, Edit > Undo and History name each one.
+    ("Back 10 Frames", "后退 10 帧"),
+    ("Forward 10 Frames", "前进 10 帧"),
+    ("New Solid", "新建纯色"),
+    ("New Adjustment Layer", "新建调整图层"),
+    ("New Null Object", "新建空对象"),
+    ("New Text Layer", "新建文本图层"),
+    ("New Camera", "新建摄像机"),
+    ("New Light", "新建灯光"),
+    ("New Shape Layer", "新建形状图层"),
+    ("New Rectangle", "新建矩形"),
+    ("New Ellipse", "新建椭圆"),
+    ("Show Position", "显示位置"),
+    ("Add Position to Shown Properties", "将位置添加到显示的属性"),
+    ("Position: Add or Remove Keyframe", "位置：添加或移除关键帧"),
+    ("Show Scale", "显示缩放"),
+    ("Add Scale to Shown Properties", "将缩放添加到显示的属性"),
+    ("Scale: Add or Remove Keyframe", "缩放：添加或移除关键帧"),
+    ("Show Rotation", "显示旋转"),
+    ("Add Rotation to Shown Properties", "将旋转添加到显示的属性"),
+    ("Rotation: Add or Remove Keyframe", "旋转：添加或移除关键帧"),
+    ("Show Opacity", "显示不透明度"),
+    (
+        "Add Opacity to Shown Properties",
+        "将不透明度添加到显示的属性",
+    ),
+    (
+        "Opacity: Add or Remove Keyframe",
+        "不透明度：添加或移除关键帧",
+    ),
+    ("Show Anchor Point", "显示锚点"),
+    (
+        "Add Anchor Point to Shown Properties",
+        "将锚点添加到显示的属性",
+    ),
+    (
+        "Anchor Point: Add or Remove Keyframe",
+        "锚点：添加或移除关键帧",
+    ),
+    // Panel-scoped zoom shortcuts (timeline: = / -, viewer: . / , / ?)
+    ("Zoom In Time", "放大时间"),
+    ("Zoom Out Time", "缩小时间"),
     // Accessibility labels (timeline switches, keyframes, pick whip, ruler)
     ("Parent Pick Whip", "父级关联器"),
     ("Keyframe", "关键帧"),
@@ -114,8 +171,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "文件会按格式保存为 .{ext}。",
     ),
     (
-        "Add a composition with Composition ▸ Add to Render Queue.",
-        "用“合成 ▸ 添加到渲染队列”添加合成。",
+        "Add a composition with Composition > Add to Render Queue.",
+        "用“合成 > 添加到渲染队列”添加合成。",
     ),
     // Keyframes
     ("Keyframe Assistant", "关键帧辅助"),

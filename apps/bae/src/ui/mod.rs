@@ -5,6 +5,8 @@ mod renderer;
 mod workspace;
 
 pub use renderer::{UiOutput, UiRenderer};
+#[cfg(test)]
+pub use workspace::ShortcutRow;
 pub use workspace::{PlaceholderViewer, StatusInfo, Workspace, failure_notice, register_panels};
 
 use bae_gpu::viewport::{ViewportTextureId, ViewportTextureRegistry};

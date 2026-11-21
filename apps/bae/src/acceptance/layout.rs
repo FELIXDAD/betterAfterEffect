@@ -244,8 +244,9 @@ fn keyboard_shortcuts_window_columns() {
             .min_by(|a, b| a.top().total_cmp(&b.top()))
             .unwrap_or_else(|| panic!("no row {text}"))
     };
-    // Long names, from the #134 screenshots.
-    let names = ["Add or Remove Keyframe at Current Time", "Accept Proposal"];
+    // Long names, from the #134 screenshots (since #140 the keyframe toggle is
+    // listed per property: Alt+Shift+A is the longest).
+    let names = ["Anchor Point: Add or Remove Keyframe", "Accept Proposal"];
     for name in names {
         let r = line(&h, name);
         assert!(r.height() < 20.0, "{name} wraps: {r:?}");
@@ -459,8 +460,10 @@ fn keyboard_shortcuts_window_in_chinese_in_a_small_retina_window() {
     );
     // Long Chinese command names stay on one line.
     let mut checked = 0;
+    // (Since #140 the keyframe toggle is listed per property; Opacity's row sorts
+    // near the top in Chinese.)
     for en in [
-        "Add or Remove Keyframe at Current Time",
+        "Opacity: Add or Remove Keyframe",
         "Accept Proposal",
         "Go to Previous Keyframe",
     ] {
