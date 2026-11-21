@@ -1,0 +1,604 @@
+{
+  "source": {
+    "application": "Adobe Illustrator 2026",
+    "version": "30.1.0",
+    "build_number": "136R",
+    "locale": "zh_CN",
+    "platform": "Microsoft Windows 11 专业版 (10.0.26200, Build 26200, 64 位)",
+    "extracted_date": "2026-11-21"
+  },
+  "stats": {
+    "illustrator_groups": 8,
+    "illustrator_effects": 59,
+    "illustrator_with_id": 59,
+    "photoshop_groups": 9,
+    "photoshop_effects": 57,
+    "photoshop_with_id": 57,
+    "other_items": 3,
+    "other_with_id": 3,
+    "total_items": 119,
+    "total_with_id": 119
+  },
+  "top_commands": [
+    {
+      "id": "Adobe Apply Last Effect",
+      "label": "应用上一个效果",
+      "shortcut": "Shift+Ctrl+E"
+    },
+    {
+      "id": "Adobe Last Effect",
+      "label": "上一个效果",
+      "shortcut": "Alt+Shift+Ctrl+E"
+    },
+    {
+      "id": "Live Rasterize Effect Setting",
+      "label": "文档栅格效果设置..."
+    }
+  ],
+  "illustrator_effects": [
+    {
+      "group": "3D 和材质",
+      "items": [
+        {
+          "id": "Live Adobe Geometry3D Extrude",
+          "label": "凸出和斜角..."
+        },
+        {
+          "id": "Live Adobe Geometry3D Revolve",
+          "label": "绕转..."
+        },
+        {
+          "id": "Live Adobe Geometry3D Inflate",
+          "label": "膨胀..."
+        },
+        {
+          "id": "Live Adobe Geometry3D Rotate",
+          "label": "旋转..."
+        },
+        {
+          "id": "Live Adobe Geometry3D Materials",
+          "label": "材质..."
+        },
+        {
+          "id": "Live 3DExtrude",
+          "label": "凸出和斜角（经典）...",
+          "subgroup": "3D（经典）"
+        },
+        {
+          "id": "Live 3DRevolve",
+          "label": "绕转（经典）...",
+          "subgroup": "3D（经典）"
+        },
+        {
+          "id": "Live 3DRotate",
+          "label": "旋转（经典）...",
+          "subgroup": "3D（经典）"
+        }
+      ]
+    },
+    {
+      "group": "SVG 滤镜",
+      "items": [
+        {
+          "id": "Live SVG Filters",
+          "label": "应用 SVG 滤镜..."
+        },
+        {
+          "id": "SVG Filter Import",
+          "label": "导入 SVG 滤镜..."
+        }
+      ]
+    },
+    {
+      "group": "变形",
+      "items": [
+        {
+          "id": "Live Deform Arc",
+          "label": "弧形..."
+        },
+        {
+          "id": "Live Deform Arc Lower",
+          "label": "下弧形..."
+        },
+        {
+          "id": "Live Deform Arc Upper",
+          "label": "上弧形..."
+        },
+        {
+          "id": "Live Deform Arch",
+          "label": "拱形..."
+        },
+        {
+          "id": "Live Deform Bulge",
+          "label": "凸出..."
+        },
+        {
+          "id": "Live Deform Shell Lower",
+          "label": "凹壳..."
+        },
+        {
+          "id": "Live Deform Shell Upper",
+          "label": "凸壳..."
+        },
+        {
+          "id": "Live Deform Flag",
+          "label": "旗形..."
+        },
+        {
+          "id": "Live Deform Wave",
+          "label": "波形..."
+        },
+        {
+          "id": "Live Deform Fish",
+          "label": "鱼形..."
+        },
+        {
+          "id": "Live Deform Rise",
+          "label": "上升..."
+        },
+        {
+          "id": "Live Deform Fisheye",
+          "label": "鱼眼..."
+        },
+        {
+          "id": "Live Deform Inflate",
+          "label": "膨胀..."
+        },
+        {
+          "id": "Live Deform Squeeze",
+          "label": "挤压..."
+        },
+        {
+          "id": "Live Deform Twist",
+          "label": "扭转..."
+        }
+      ]
+    },
+    {
+      "group": "扭曲和变换",
+      "items": [
+        {
+          "id": "Live Transform",
+          "label": "变换..."
+        },
+        {
+          "id": "Live Scribble and Tweak",
+          "label": "扭拧..."
+        },
+        {
+          "id": "Live Twist",
+          "label": "扭转..."
+        },
+        {
+          "id": "Live Pucker & Bloat",
+          "label": "收缩和膨胀..."
+        },
+        {
+          "id": "Live Zig Zag",
+          "label": "波纹效果..."
+        },
+        {
+          "id": "Live Roughen",
+          "label": "粗糙化..."
+        },
+        {
+          "id": "Live Free Distort",
+          "label": "自由扭曲..."
+        }
+      ]
+    },
+    {
+      "group": "路径",
+      "items": [
+        {
+          "id": "Live Offset Path",
+          "label": "偏移路径..."
+        },
+        {
+          "id": "Live Outline Object",
+          "label": "轮廓化对象"
+        },
+        {
+          "id": "Live Outline Stroke",
+          "label": "轮廓化描边"
+        }
+      ]
+    },
+    {
+      "group": "路径查找器",
+      "items": [
+        {
+          "id": "Live Pathfinder Add",
+          "label": "相加"
+        },
+        {
+          "id": "Live Pathfinder Intersect",
+          "label": "交集"
+        },
+        {
+          "id": "Live Pathfinder Exclude",
+          "label": "差集"
+        },
+        {
+          "id": "Live Pathfinder Subtract",
+          "label": "相减"
+        },
+        {
+          "id": "Live Pathfinder Minus Back",
+          "label": "减去后方对象"
+        },
+        {
+          "id": "Live Pathfinder Divide",
+          "label": "分割"
+        },
+        {
+          "id": "Live Pathfinder Trim",
+          "label": "修边"
+        },
+        {
+          "id": "Live Pathfinder Merge",
+          "label": "合并"
+        },
+        {
+          "id": "Live Pathfinder Crop",
+          "label": "裁剪"
+        },
+        {
+          "id": "Live Pathfinder Outline",
+          "label": "轮廓"
+        },
+        {
+          "id": "Live Pathfinder Hard Mix",
+          "label": "实色混合"
+        },
+        {
+          "id": "Live Pathfinder Soft Mix",
+          "label": "透明混合..."
+        },
+        {
+          "id": "Live Pathfinder Trap",
+          "label": "陷印..."
+        }
+      ]
+    },
+    {
+      "group": "转换为形状",
+      "items": [
+        {
+          "id": "Live Rectangle",
+          "label": "矩形..."
+        },
+        {
+          "id": "Live Rounded Rectangle",
+          "label": "圆角矩形..."
+        },
+        {
+          "id": "Live Ellipse",
+          "label": "椭圆..."
+        }
+      ]
+    },
+    {
+      "group": "风格化",
+      "items": [
+        {
+          "id": "Live Inner Glow",
+          "label": "内发光..."
+        },
+        {
+          "id": "Live Adobe Round Corners",
+          "label": "圆角..."
+        },
+        {
+          "id": "Live Outer Glow",
+          "label": "外发光..."
+        },
+        {
+          "id": "Live Adobe Drop Shadow",
+          "label": "投影..."
+        },
+        {
+          "id": "Live Scribble Fill",
+          "label": "涂抹..."
+        },
+        {
+          "id": "Live Feather",
+          "label": "羽化..."
+        }
+      ]
+    },
+    {
+      "group": "其他（顶层）",
+      "items": [
+        {
+          "id": "Live Rasterize",
+          "label": "栅格化..."
+        },
+        {
+          "id": "Live Trim Marks",
+          "label": "裁剪标记"
+        }
+      ]
+    }
+  ],
+  "photoshop_effects": [
+    {
+      "group": "通用（顶层）",
+      "items": [
+        {
+          "id": "Live PSAdapter_plugin_GEfc",
+          "label": "效果画廊..."
+        }
+      ]
+    },
+    {
+      "group": "像素化",
+      "items": [
+        {
+          "id": "Live PSAdapter_plugin_ClrH",
+          "label": "彩色半调..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_Crst",
+          "label": "晶格化..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_Pntl",
+          "label": "点状化..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_Mztn",
+          "label": "铜版雕刻..."
+        }
+      ]
+    },
+    {
+      "group": "扭曲",
+      "items": [
+        {
+          "id": "Live PSAdapter_plugin_DfsG",
+          "label": "扩散亮光..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_OcnR",
+          "label": "海洋波纹..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_Gls ",
+          "label": "玻璃..."
+        }
+      ]
+    },
+    {
+      "group": "模糊",
+      "items": [
+        {
+          "id": "Live PSAdapter_plugin_RdlB",
+          "label": "径向模糊..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_SmrB",
+          "label": "特殊模糊..."
+        },
+        {
+          "id": "Live Adobe PSL Gaussian Blur",
+          "label": "高斯模糊..."
+        }
+      ]
+    },
+    {
+      "group": "画笔描边",
+      "items": [
+        {
+          "id": "Live PSAdapter_plugin_Spt ",
+          "label": "喷溅..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_SprS",
+          "label": "喷色描边..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_InkO",
+          "label": "墨水轮廓..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_AccE",
+          "label": "强化的边缘..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_AngS",
+          "label": "成角的线条..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_DrkS",
+          "label": "深色线条..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_Smie",
+          "label": "烟灰墨..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_Crsh",
+          "label": "阴影线..."
+        }
+      ]
+    },
+    {
+      "group": "素描",
+      "items": [
+        {
+          "id": "Live PSAdapter_plugin_NtPr",
+          "label": "便条纸..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_HlfS",
+          "label": "半调图案..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_Stmp",
+          "label": "图章..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_BsRl",
+          "label": "基底凸现..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_Phtc",
+          "label": "影印..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_TrnE",
+          "label": "撕边..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_WtrP",
+          "label": "水彩画纸..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_Chrc",
+          "label": "炭笔..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_CntC",
+          "label": "炭精笔..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_Plst",
+          "label": "石膏效果..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_ChlC",
+          "label": "粉笔和炭笔..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_GraP",
+          "label": "绘图笔..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_Rtcl",
+          "label": "网状..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_Chrm",
+          "label": "铬黄..."
+        }
+      ]
+    },
+    {
+      "group": "纹理",
+      "items": [
+        {
+          "id": "Live PSAdapter_plugin_Ptch",
+          "label": "拼缀图..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_StnG",
+          "label": "染色玻璃..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_Txtz",
+          "label": "纹理化..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_Grn ",
+          "label": "颗粒..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_MscT",
+          "label": "马赛克拼贴..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_Crql",
+          "label": "龟裂缝..."
+        }
+      ]
+    },
+    {
+      "group": "艺术效果",
+      "items": [
+        {
+          "id": "Live PSAdapter_plugin_PlsW",
+          "label": "塑料包装..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_Frsc",
+          "label": "壁画..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_DryB",
+          "label": "干画笔..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_Undr",
+          "label": "底纹效果..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_ClrP",
+          "label": "彩色铅笔..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_Ct  ",
+          "label": "木刻..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_Wtrc",
+          "label": "水彩..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_PstE",
+          "label": "海报边缘..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_Spng",
+          "label": "海绵..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_SmdS",
+          "label": "涂抹棒..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_RghP",
+          "label": "粗糙蜡笔..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_PntD",
+          "label": "绘画涂抹..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_FlmG",
+          "label": "胶片颗粒..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_PltK",
+          "label": "调色刀..."
+        },
+        {
+          "id": "Live PSAdapter_plugin_NGlw",
+          "label": "霓虹灯光..."
+        }
+      ]
+    },
+    {
+      "group": "视频",
+      "items": [
+        {
+          "id": "Live PSAdapter_plugin_NTSC",
+          "label": "NTSC 颜色"
+        },
+        {
+          "id": "Live PSAdapter_plugin_Dntr",
+          "label": "逐行..."
+        }
+      ]
+    },
+    {
+      "group": "风格化",
+      "items": [
+        {
+          "id": "Live PSAdapter_plugin_GlwE",
+          "label": "照亮边缘..."
+        }
+      ]
+    }
+  ]
+}
