@@ -16,10 +16,11 @@
 //! - [`import_ai`]: read a file and plan its import.
 //! - [`ImportAi`] (`ai.import`): the same as a command, for menus and agents.
 //!
-//! Readers: `.ai`/PDF and the bridge JSON land in the next PRs; until then
-//! [`read_document`] recognises the formats and reports them as unsupported.
-//! Exports (PDF, SVG, the Illustrator rebuild script) and clipboard paste come
-//! after the importers.
+//! Readers: `.ai` (PDF compatible) and PDF files are read by the built-in PDF
+//! reader (`pdf/`, no external PDF library). The Illustrator bridge JSON
+//! reader is workstream 16's Illustrator side (`bridge.rs`). Exports (PDF,
+//! SVG, the Illustrator rebuild script) and clipboard paste come after the
+//! importers.
 //!
 //! No GPU, window or platform dependencies.
 
@@ -28,6 +29,7 @@ mod command;
 mod doc;
 mod error;
 mod import;
+mod pdf;
 
 use std::path::Path;
 
@@ -92,7 +94,7 @@ pub fn read_document(path: &Path) -> Result<AiDocument, Error> {
 /// Reads a document from memory; `name` becomes the document name.
 pub fn read_bytes(name: &str, bytes: &[u8]) -> Result<AiDocument, Error> {
     match sniff(bytes) {
-        FileKind::Pdf => Err(Error::Unsupported("reading .ai / PDF files".into())),
+        FileKind::Pdf => pdf::read_pdf(name, bytes),
         FileKind::Bridge => Err(Error::Unsupported("reading Illustrator bridge files".into())),
         FileKind::LegacyAi => Err(Error::Unsupported(
             "Illustrator files saved without PDF compatibility (re-save with \"Create PDF Compatible File\")"
