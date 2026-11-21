@@ -106,6 +106,15 @@ enum UserEvent {
     Menu(muda::MenuEvent),
     /// The GPU device was lost (not destroyed on purpose).
     DeviceLost,
+    /// A screen reader or UI automation client asked for the accessibility
+    /// tree or for an action (accesskit).
+    AccessKit(egui_winit::accesskit_winit::Event),
+}
+
+impl From<egui_winit::accesskit_winit::Event> for UserEvent {
+    fn from(event: egui_winit::accesskit_winit::Event) -> Self {
+        UserEvent::AccessKit(event)
+    }
 }
 
 /// A smoke test stops as failed if no frame completes for this long.
@@ -238,6 +247,7 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         gate: CommitGate::default(),
         gate_deadline: None,
         ui_passes: 0,
+        accesskit_active: false,
         exit_code: ExitCode::SUCCESS,
     };
     if let Err(error) = event_loop.run_app(&mut shell) {
@@ -297,6 +307,8 @@ struct Shell {
     gate_deadline: Option<Instant>,
     /// UI frames run so far (egui passes, presented or not).
     ui_passes: u64,
+    /// A screen reader / automation client is reading the accesskit tree.
+    accesskit_active: bool,
     exit_code: ExitCode,
 }
 
@@ -329,7 +341,12 @@ impl Shell {
             &egui::Context::default(),
             bae_ui::titlebar::viewport_builder(bae_platform::APP_NAME),
         );
-        let attributes = self.window_state.apply(attributes, event_loop);
+        // Hidden until the accesskit adapter exists (it must be created before
+        // the window is first shown); `resumed` shows it.
+        let attributes = self
+            .window_state
+            .apply(attributes, event_loop)
+            .with_visible(false);
         let window = event_loop
             .create_window(attributes)
             .context("cannot create the main window")?;
@@ -613,9 +630,17 @@ impl Shell {
             return;
         }
         let window = view.window.clone();
+        // The accesskit adapter cannot be created again for a visible window:
+        // move it to the new egui state.
+        let mut view = view;
+        let accesskit = view.egui_state.accesskit.take();
         drop(view); // Release every resource of the dead device first.
         match self.create_view(window) {
-            Ok(view) => {
+            Ok(mut view) => {
+                view.egui_state.accesskit = accesskit;
+                if self.accesskit_active {
+                    view.egui_ctx.enable_accesskit();
+                }
                 view.window.request_redraw();
                 self.view = Some(view);
             }
@@ -851,7 +876,12 @@ impl ApplicationHandler<UserEvent> for Shell {
             Err(error) => return self.fail(event_loop, &error),
         };
         match self.create_view(window) {
-            Ok(view) => {
+            Ok(mut view) => {
+                // Screen readers (VoiceOver, Narrator) and UI automation read the
+                // labelled widgets through accesskit (issue #116).
+                view.egui_state
+                    .init_accesskit(event_loop, &view.window, self.proxy.clone());
+                view.window.set_visible(true);
                 if self.menu.is_none() {
                     let contributed = self.workspace.contributed_menus(&self.app);
                     match menu::AppMenu::new(&self.workspace.workspaces(), &contributed) {
@@ -928,6 +958,26 @@ impl ApplicationHandler<UserEvent> for Shell {
                 self.pending.push(inv);
             }
             UserEvent::DeviceLost => self.recover_device(event_loop),
+            UserEvent::AccessKit(event) => {
+                use egui_winit::accesskit_winit::WindowEvent as A;
+                let Some(view) = self.view.as_mut() else {
+                    return;
+                };
+                match event.window_event {
+                    A::InitialTreeRequested => {
+                        self.accesskit_active = true;
+                        view.egui_ctx.enable_accesskit();
+                    }
+                    A::ActionRequested(request) => {
+                        view.egui_state.on_accesskit_action_request(request);
+                    }
+                    A::AccessibilityDeactivated => {
+                        self.accesskit_active = false;
+                        view.egui_ctx.disable_accesskit();
+                    }
+                }
+                view.window.request_redraw();
+            }
         }
     }
 

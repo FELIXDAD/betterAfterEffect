@@ -16,6 +16,7 @@
 //! Add [`UiModule`] (the shell does) so the built-in actions are registered and
 //! layouts never show an unknown panel. See `docs/spec/ui-shell.md`.
 
+pub mod a11y;
 pub mod action;
 pub mod agent;
 pub mod dock;
@@ -34,6 +35,7 @@ pub mod workspace;
 
 use bae_app::{AppBuilder, AppModule};
 
+pub use a11y::Accessible;
 pub use action::{ActionHandler, ActionInfo, Invocation};
 pub use dock::{Dock, DropZone, Frame, FrameId, Layout, Node, PanelHost, PanelId, TabInfo};
 pub use i18n::{Lang, tr};

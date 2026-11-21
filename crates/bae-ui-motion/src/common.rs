@@ -156,13 +156,15 @@ enum Num {
 fn number(ui: &mut Ui, id: Id, model: f64, attr: &str, suffix: &str) -> Num {
     let key = id.with("scrub");
     let mut v = ui.data(|d| d.get_temp::<f64>(key)).unwrap_or(model);
+    let name = tr(&attr_label(None, attr, false)).to_owned();
     let resp = ui
         .push_id(id, |ui| {
             ui.add(
                 HotNumber::new(&mut v)
                     .decimals(decimals(attr))
                     .speed(if attr.ends_with("opacity") { 1.0 } else { 0.5 })
-                    .suffix(suffix),
+                    .suffix(suffix)
+                    .label(&name),
             )
         })
         .inner;

@@ -7,6 +7,7 @@ use std::collections::HashSet;
 
 use bae_model::{PrimPath, PrimType, Stage, Value};
 use bae_motion::query;
+use bae_ui::Accessible as _;
 use bae_ui::icons::{self, Icon};
 use bae_ui::theme::{self, color};
 use bae_ui::widgets;
@@ -249,6 +250,8 @@ impl Panel for ProjectPanel {
                 for (i, row) in rows.iter().enumerate() {
                     let (rect, resp) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::click_and_drag());
                     let selected = session.lock().selected_items.contains(&row.path);
+                    let resp =
+                        resp.labeled_toggle(egui::WidgetType::SelectableLabel, &query::display_name_of(stage, &row.path), selected);
                     let p = ui.painter();
                     let bg = if selected {
                         color::ROW_SELECTED
@@ -379,7 +382,9 @@ impl Panel for ProjectPanel {
                 // Empty area: deselect / context menu.
                 let rest = ui.available_rect_before_wrap();
                 if rest.height() > 4.0 {
-                    let resp = ui.allocate_rect(rest, Sense::click());
+                    let resp = ui
+                        .allocate_rect(rest, Sense::click())
+                        .labeled(egui::WidgetType::Panel, tr("Project"));
                     if resp.clicked() {
                         session.lock().selected_items.clear();
                     }
@@ -415,7 +420,9 @@ impl Panel for ProjectPanel {
         let mut button = |ui: &mut Ui, icon: Icon, tip: &str| {
             x -= 24.0;
             let r = Rect::from_min_size(pos2(x, foot.top() + 3.0), vec2(22.0, 22.0));
-            let resp = ui.put(r, |ui: &mut Ui| icons::button(ui, icon, 22.0, false));
+            let resp = ui
+                .put(r, |ui: &mut Ui| icons::button(ui, icon, 22.0, false))
+                .labeled(egui::WidgetType::Button, tr(tip));
             resp.on_hover_text(tr(tip)).clicked()
         };
         if button(ui, Icon::Trash, "Delete") {
