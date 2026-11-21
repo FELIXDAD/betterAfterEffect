@@ -2,9 +2,10 @@
 //!
 //! Tests that each create their own [`GpuContext`] run several devices at once,
 //! because the test harness runs tests in parallel. The app never does that, and on
-//! Windows CI (WARP with the D3D12 debug layer) it crashed the test process
-//! (STATUS_ACCESS_VIOLATION, #154). GPU tests share [`shared_context`] instead,
-//! which is also closer to the app: one device used from several threads.
+//! Windows CI (WARP) it crashed the test process: D3D12 converted shaders for two
+//! new devices at once with `dxilconv.dll`, which is not safe for that (#154; device
+//! creation is serialized now, see `GpuContext`). GPU tests share [`shared_context`]
+//! instead, which is also closer to the app: one device used from several threads.
 //!
 //! Tests that need a context of their own (a custom descriptor, destroying the
 //! device) still call [`GpuContext::new_headless`].

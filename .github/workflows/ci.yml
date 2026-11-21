@@ -81,15 +81,14 @@ jobs:
         # GPU tests skip themselves when no adapter is available (Windows runners have WARP).
         # Windows runners have the D3D12 debug layer installed; debug builds would turn it
         # on (GpuContextDescriptor::validation), so this pass runs without it, like user
-        # machines, and the next step runs with it (#154).
+        # machines, and the next step runs with it.
         env:
           BAE_GPU_VALIDATION: ${{ runner.os == 'Windows' && '0' || '' }}
         run: cargo test --workspace --locked
 
       - name: Test with the D3D12 debug layer
-        # Same test binaries (no rebuild) with D3D12 validation on. GPU tests share one
-        # context per test process (bae_gpu::testing) and validating wgpu instances are
-        # created once per process, so the debug layer is enabled before any device.
+        # Same test binaries (no rebuild) with D3D12 validation on, so debug-layer errors
+        # still fail CI. GPU tests share one context per test process (bae_gpu::testing).
         if: runner.os == 'Windows'
         env:
           BAE_GPU_VALIDATION: "1"
