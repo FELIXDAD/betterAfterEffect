@@ -24,6 +24,7 @@ bridges/ai 导出的 JSON ─┼─► AiDocument ──plan_import──► Com
 | `ai.import`（`ImportAi`，`register_commands`） | 同一件事做成命令，菜单「文件 > 导入」和 Agent（MCP）直接调用，参数是 `file` 加 `ImportOptions` 的各项，返回 `ImportReport` |
 | `ImportOptions` | 合成放在哪个文件夹（默认 `/comps`）、导入哪些画板、帧率、时长、是否同时建 `Artboard` Prim、文字怎么导、隐藏内容是否跳过 |
 | `ImportReport` | 新建的合成和画板 Prim、形状图层 / 文字图层 / 路径数量、警告（哪些东西做了近似或没导入） |
+| `read_bridge(name, bytes)` / `read_bridge_with(…, &BridgeOptions)` | 读 Illustrator 里 `bridges/ai/bae-ai-export.jsx` 导出的桥接 JSON（格式见 [`bridges/ai/FORMAT.md`](../../bridges/ai/FORMAT.md)）：图层名、编组、画板名、锁定、符号（展开后的图稿）这些 PDF 里看不到的信息都有。`BridgeOptions::text_outlines` 改用导出时做的文字轮廓 |
 
 ## 导入结果（对齐 AE「导入为合成」+「从矢量图层创建形状」）
 
@@ -41,7 +42,7 @@ bridges/ai 导出的 JSON ─┼─► AiDocument ──plan_import──► Com
 
 - [x] 公共接口：中间表示、命令批次、规划器、`ai.import` 命令
 - [x] .ai / PDF 读取
-- [ ] Illustrator 导出脚本 `bridges/ai/` 与 JSON 读取（Illustrator 一侧，`interop/ai-bridge`）
+- [x] Illustrator 导出脚本 `bridges/ai/` 与 JSON 读取（Illustrator 30.4 实测）
 - [ ] 剪贴板粘贴、导出 PDF / SVG / .jsx
 
 ## .ai / PDF 读取（`src/pdf/`）
@@ -73,3 +74,7 @@ cargo run -p bae-interop-ai --example ai_dump -- some.ai   # 看读出来的结�
 `tests/pdf.rs`：在测试里按 Illustrator 的写法生成 PDF（两种交叉引用方式各一份：普通 xref 表，以及 Flate + 对象流 + xref 流），检查图层顺序和可见性、复合路径和虚线描边、线性 / 径向渐变、透明组、剪切组、CID 文字、多画板，再走一遍导入、求值和显示列表；截断和随机改字节的文件不会崩溃，startxref 错误能扫描修复。真机数据（Illustrator 30 导出的 `tests/data/illustrator/*.ai`，由 Illustrator 一侧提供）存在时会逐项检查，不存在时跳过；`BAE_AI_TEST_DATA` 可以指向别的目录。
 
 `tests/import.rs`：在代码里搭一个 Ai 文档（复合路径 + 奇偶填充 + 虚线描边、线性和径向渐变、半透明正片叠底、编组里的文字、剪切组、隐藏锁定图层），生成命令批次、执行、用 03 求值、用 05 生成显示列表，再与文档自己的形状树逐项比对几何、绘画、渐变和不透明度；另外检查撤销、重名、失败回滚、批次 JSON 和命令注册。
+
+`tests/illustrator.rs`：Illustrator 30.4 真机导出的 5 个测试文档（`tests/data/illustrator/`：多画板、复合路径、虚线、CMYK / 专色 / 灰度、旋转线性渐变和中点、椭圆径向渐变、渐变描边、混合模式、子图层、嵌套编组和剪切组、跨画板对象、符号、模板图层、点 / 区域 / 路径文字、中文、文字轮廓），读取、导入、求值、生成显示列表，逐项对照造这些文档的脚本里的数值；渐变位置对照 Illustrator 自己导出的 SVG。CI（macOS、Windows，没有 Illustrator）只用这些固定数据。`live_illustrator` 要真 Illustrator，默认跳过：在装了 Illustrator 的 Mac 上 `BAE_TEST_ILLUSTRATOR=1 cargo test -p bae-interop-ai --test illustrator live_illustrator -- --nocapture`，它通过 `tools/ai/aictl` 检查脚本通道，用 `bridges/ai/tests/regen.sh --out` 重新生成全部文档，再对新数据跑同样的检查。
+
+`tests/export_script.rs`：不开 Illustrator 测导出脚本，`bridges/ai/tests/harness.js` 用一个模拟的 Illustrator 脚本 DOM（只有 ES3 内置函数）跑 `bae-ai-export.jsx`；需要 node 或 macOS 自带的 jsc，都没有时跳过并说明原因。另外检查在 Illustrator 里执行的 .jsx 都是纯 ASCII。
