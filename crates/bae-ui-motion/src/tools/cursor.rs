@@ -94,3 +94,10 @@ pub(crate) fn shape_star(painter: &Painter, pos: Pos2) {
         }
     }
 }
+
+/// The small circle by the Pen when a click closes the path.
+pub(crate) fn close_mark(painter: &Painter, pos: Pos2) {
+    let c = pos + vec2(9.0, 12.0);
+    painter.circle_stroke(c, 3.0, egui::Stroke::new(2.5, Color32::BLACK));
+    painter.circle_stroke(c, 3.0, egui::Stroke::new(1.0, Color32::WHITE));
+}

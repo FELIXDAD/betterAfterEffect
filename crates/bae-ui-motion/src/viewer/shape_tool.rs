@@ -352,7 +352,8 @@ fn names(kind: ShapeKind, bezier: bool) -> serde_json::Value {
 }
 
 /// Create the shape or mask `g` (target space) for `target`; new shape layers are
-/// selected once they exist.
+/// selected once they exist. Returns the layer that gets it (for a new layer, the
+/// path it will have).
 pub(crate) fn run(
     cx: &mut PanelContext<'_>,
     session: &SharedSession,
@@ -361,7 +362,7 @@ pub(crate) fn run(
     g: Geometry,
     bezier: bool,
     options: &ToolOptions,
-) {
+) -> Option<PrimPath> {
     let stage = cx.stage;
     let mut params = serde_json::to_value(&g).unwrap_or_default();
     let obj = params.as_object_mut().expect("geometry is an object");
@@ -377,18 +378,20 @@ pub(crate) fn run(
                 json!(format!("{} {}", tr("Mask"), count + 1)),
             );
             cx.invoke_with("mask.create", params);
+            Some(layer.clone())
         }
         Target::Shape(layer) => {
             obj.insert("layer".into(), json!(layer));
             add_paint_and_names(obj, &g, bezier, options);
             cx.invoke_with("shape.add", params);
+            Some(layer.clone())
         }
         Target::NewLayer => {
             let folder = query::layers_folder(&info.path);
             let name = common::numbered(stage, session, &folder, "Shape Layer");
-            let Ok(path) = folder.child(&query::unique_child_name(stage, &folder, &name)) else {
-                return;
-            };
+            let path = folder
+                .child(&query::unique_child_name(stage, &folder, &name))
+                .ok()?;
             // Above the selected layer (a null or camera that cannot take a mask).
             let index = {
                 let s = session.lock();
@@ -410,7 +413,8 @@ pub(crate) fn run(
             cx.invoke_with("shape.add", params);
             let mut s = session.lock();
             s.expect(Pending::Layer(path.clone()));
-            s.reserve_name(path, name);
+            s.reserve_name(path.clone(), name);
+            Some(path)
         }
     }
 }
@@ -549,7 +553,7 @@ fn empty_geometry() -> Geometry {
 
 /// Outline color of the shape being drawn: the next mask color on a mask target,
 /// the shape layer's label color otherwise (AE draws the rubber band in it).
-fn preview_color(stage: &Stage, target: &Target) -> Color32 {
+pub(super) fn preview_color(stage: &Stage, target: &Target) -> Color32 {
     match target {
         Target::Mask(layer) => {
             let count = layer

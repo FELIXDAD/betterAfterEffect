@@ -31,6 +31,9 @@
 //! | `key.paste` | pasting keyframes |
 //! | `shape.add` | drawing with a shape tool or the Pen tool in (or into a new) shape layer |
 //! | `mask.create` | drawing with a shape tool or the Pen tool on a layer that gets a mask |
+//! | `path.set_vertices` | Pen tool clicks, Convert Vertex tool, dragging path vertices and handles |
+//! | `path.insert_vertex` | Add Vertex tool (every keyframe) |
+//! | `path.delete_vertex` | Delete Vertex tool (every keyframe) |
 //!
 //! **Times** are flicks (705,600,000 per second). Layer in/out points, split and work
 //! area times are comp times. Keyframe times are the stored keyframe times — layer
@@ -44,6 +47,7 @@
 pub mod comp;
 pub mod keys;
 pub mod layer;
+pub mod path;
 pub mod query;
 pub mod shape;
 mod util;
@@ -62,6 +66,7 @@ pub use layer::{
     CreateLayer, DeleteItems, DeleteLayers, DuplicateLayers, LayerOutput, LayersOutput,
     ReorderLayers, SetParent, ShapePreset, ShiftLayers, SplitLayers, TrimLayers,
 };
+pub use path::{DeleteVertex, InsertVertex, SetVertices};
 pub use shape::{AddShape, CreateMask, Geometry, ShapeKind};
 
 /// Register every motion command.
@@ -91,6 +96,9 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(PasteKeys),
         r.register(AddShape),
         r.register(CreateMask),
+        r.register(SetVertices),
+        r.register(InsertVertex),
+        r.register(DeleteVertex),
     ];
     for res in results {
         res.expect("motion command IDs are unique");

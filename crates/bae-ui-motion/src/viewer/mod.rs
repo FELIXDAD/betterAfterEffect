@@ -24,6 +24,7 @@ use crate::tools::{Tool, ViewRequest};
 
 mod bar;
 mod overlay;
+mod pen_tool;
 mod shape_tool;
 #[cfg(test)]
 mod tests;
@@ -63,6 +64,8 @@ pub struct CompositionViewer {
     panning: bool,
     /// A shape being drawn with a shape tool.
     shape: Option<shape_tool::ShapeDrag>,
+    /// Pen tools: the open path being drawn, a Convert Vertex drag.
+    pen: pen_tool::PenState,
     /// Comp → screen mapping of the last frame.
     last_view: Option<View>,
 }
@@ -262,7 +265,7 @@ impl Panel for CompositionViewer {
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
         // While a shape is being drawn the keys belong to the drag: Space moves
         // the shape (not playback), arrows and Page Up / Down change it.
-        if self.shape.is_some() {
+        if self.shape.is_some() || self.pen.busy() {
             return true;
         }
         let session = common::session(cx.resources);
@@ -530,12 +533,24 @@ impl Panel for CompositionViewer {
         let space = ui.input(|i| i.key_down(egui::Key::Space)) && !ui.ctx().text_edit_focused();
         if !space {
             self.space_hold = None;
-        } else if self.space_hold.is_none() && resp.hovered() && self.shape.is_none() {
+        } else if self.space_hold.is_none()
+            && resp.hovered()
+            && self.shape.is_none()
+            && !self.pen.busy()
+        {
             let s = session.lock();
             self.space_hold = Some((s.is_playing(), s.time(&info.path)));
         }
         let hand = tool == Tool::Hand || self.space_hold.is_some() || self.panning;
-        let effective = if hand { Tool::Hand } else { tool };
+        // Cmd/Ctrl makes the pen tools the Selection tool while held (AE-SHP-044).
+        let command = ui.input(|i| i.modifiers.command);
+        let effective = if hand {
+            Tool::Hand
+        } else if tool.is_pen() && command && !self.pen.busy() {
+            Tool::Selection
+        } else {
+            tool
+        };
         if hand && resp.drag_started_by(egui::PointerButton::Primary) {
             self.panning = true;
             // Space started playback when pressed; a Space-drag only pans.
@@ -576,6 +591,18 @@ impl Panel for CompositionViewer {
         if let Some(d) = &self.shape {
             d.paint(&painter, &view);
         }
+        let pen = pen_tool::frame(
+            &mut self.pen,
+            ui,
+            &resp,
+            cx,
+            &session,
+            &info,
+            &comp,
+            &view,
+            effective,
+            &painter,
+        );
         if resp.hovered()
             && let Some(pos) = resp.hover_pos()
         {
@@ -583,7 +610,11 @@ impl Panel for CompositionViewer {
                 alt: ui.input(|i| i.modifiers.alt),
                 dragging: self.panning,
             };
-            cursor::show(ui, &painter, pos, cursor::for_tool(effective, hover));
+            let shown = pen.as_ref().map_or(effective, |p| p.tool);
+            cursor::show(ui, &painter, pos, cursor::for_tool(shown, hover));
+            if pen.as_ref().is_some_and(|p| p.close) {
+                cursor::close_mark(&painter, pos);
+            }
             // A small star by the crosshair: the drag makes a shape, not a mask.
             if effective.is_shape() {
                 let makes_shape = match &self.shape {

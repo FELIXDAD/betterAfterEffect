@@ -214,7 +214,7 @@ fn bezier(path: &BezierPath) -> Poly {
     }
 }
 
-fn group_matrix(p: &EvaluatedPrim) -> DMat4 {
+pub(crate) fn group_matrix(p: &EvaluatedPrim) -> DMat4 {
     let anchor = vec2_attr(p, "transform:anchor_point", [0.0, 0.0]);
     let pos = vec2_attr(p, "transform:position", [0.0, 0.0]);
     let scale = vec2_attr(p, "transform:scale", [100.0, 100.0]) / 100.0;
