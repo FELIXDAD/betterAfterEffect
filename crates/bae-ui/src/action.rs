@@ -108,9 +108,12 @@ pub mod ids {
     pub const ABOUT: &str = "app.about";
     /// Open the keyboard shortcut editor.
     pub const KEYBOARD_SHORTCUTS: &str = "app.keyboard_shortcuts";
-    /// New / open / save project (handled by the shell's project owner).
+    /// New / open / close / save project (handled by the shell's project owner).
+    /// `file.open_project` takes an optional `{"path": "<.bae or .baez>"}` (no
+    /// dialog); without it the shell shows the native open dialog.
     pub const NEW_PROJECT: &str = "file.new_project";
     pub const OPEN_PROJECT: &str = "file.open_project";
+    pub const CLOSE_PROJECT: &str = "file.close_project";
     pub const SAVE: &str = "file.save";
     pub const SAVE_AS: &str = "file.save_as";
     /// Switch workspace; params `{"id": "<workspace id>"}`.
@@ -145,6 +148,7 @@ pub(crate) const SHELL_ACTIONS: &[(&str, &str)] = &[
     (ids::KEYBOARD_SHORTCUTS, "Keyboard Shortcuts"),
     (ids::NEW_PROJECT, "New Project"),
     (ids::OPEN_PROJECT, "Open Project..."),
+    (ids::CLOSE_PROJECT, "Close Project"),
     (ids::SAVE, "Save"),
     (ids::SAVE_AS, "Save As..."),
     (ids::SWITCH_WORKSPACE, "Switch Workspace"),

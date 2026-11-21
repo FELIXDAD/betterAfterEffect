@@ -58,6 +58,11 @@ impl Workbench {
         self.dialogs.role_picker = true;
     }
 
+    /// Whether the first-launch role picker is showing.
+    pub fn role_picker_open(&self) -> bool {
+        self.dialogs.role_picker
+    }
+
     /// "Save as New Workspace": the current layout under a new name; switches to it.
     /// Returns the new workspace id.
     pub fn save_as_new_workspace(&mut self, title: &str) -> Option<String> {
@@ -145,12 +150,29 @@ impl Workbench {
             .map(|(id, p)| (id.clone(), p.title.clone(), p.description.clone()))
             .collect();
         let mut chosen = None;
-        egui::Window::new(tr("Welcome to BAE"))
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .default_width(420.0)
+        let mut close = false;
+        // Modal: Esc, a click outside or the close button dismiss it and keep the
+        // current workspace (the picker is a suggestion, not a required step).
+        let modal = egui::Modal::new(egui::Id::new("bae-role-picker"))
+            .frame(egui::Frame::window(&ctx.global_style()))
             .show(ctx, |ui| {
+                ui.set_width(420.0);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(tr("Welcome to BAE"))
+                            .strong()
+                            .color(color::TEXT_STRONG),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if crate::icons::button(ui, crate::icons::Icon::Close, 16.0, false)
+                            .on_hover_text(tr("Close"))
+                            .clicked()
+                        {
+                            close = true;
+                        }
+                    });
+                });
+                ui.add_space(4.0);
                 ui.label(tr("What do you do? BAE opens the matching workspace; you can switch any time in the workspace bar."));
                 ui.add_space(8.0);
                 for (id, title, description) in &roles {
@@ -171,6 +193,8 @@ impl Workbench {
             });
         if let Some(id) = chosen {
             self.switch_workspace(&id);
+            self.dialogs.role_picker = false;
+        } else if close || modal.should_close() {
             self.dialogs.role_picker = false;
         }
     }
