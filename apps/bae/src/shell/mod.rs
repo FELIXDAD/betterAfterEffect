@@ -602,7 +602,7 @@ impl Shell {
     /// Buttons of the Preferences window that need the system.
     fn run_settings_requests(&mut self) {
         for request in self.workspace.take_settings_requests() {
-            if request == "general.reveal" {
+            if request == crate::ui::REVEAL_PREFERENCES {
                 if let Some(dirs) = self.app.resource::<AppDirs>() {
                     reveal(&dirs.config_file(bae_prefs::FILE_NAME));
                 }
@@ -611,7 +611,7 @@ impl Shell {
                 if let Some(view) = &self.view {
                     dialog = dialog.set_parent(&*view.window);
                 }
-                let picked = if key == "new_project.template" {
+                let picked = if key == "project.project_template" {
                     dialog.add_filter("BAE", &["bae", "baez"]).pick_file()
                 } else {
                     dialog.pick_folder()

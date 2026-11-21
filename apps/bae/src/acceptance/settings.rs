@@ -58,7 +58,7 @@ fn cancel_keeps_the_stored_values() {
     ));
     settle(&mut h);
     assert_eq!(h.state_mut().workspace.settings_dialog().page(), "project");
-    h.get_by_label("Automatically Save Projects").click();
+    h.get_by_label("Save Every:").click();
     settle(&mut h);
     h.get_by_label("Cancel").click();
     settle(&mut h);
@@ -67,12 +67,12 @@ fn cancel_keeps_the_stored_values() {
     assert_eq!(h.state().prefs.current().auto_save_minutes(), Some(5));
 }
 
-/// Label colors and the brightness reach the theme (process-wide state: runs in
+/// Label colors and the color theme reach the theme (process-wide state: runs in
 /// a child process).
 #[test]
-fn label_colors_and_brightness_apply() {
+fn label_colors_and_color_theme_apply() {
     if !in_child(
-        "acceptance::settings::label_colors_and_brightness_apply",
+        "acceptance::settings::label_colors_and_color_theme_apply",
         &[],
     ) {
         return;
@@ -84,9 +84,9 @@ fn label_colors_and_brightness_apply() {
     ));
     settle(&mut h);
     let dialog = h.state_mut().workspace.settings_dialog();
-    dialog.set("labels.color_1", "#00ff00");
-    dialog.set("labels.name_1", "Hot");
-    dialog.set(keys::BRIGHTNESS, 1.0);
+    dialog.set("labels.label_color_1", "#00ff00");
+    dialog.set("labels.label_name_1", "Hot");
+    dialog.set(keys::COLOR_THEME, "light");
     h.get_by_label("OK").click();
     settle(&mut h);
     assert_eq!(
@@ -94,5 +94,8 @@ fn label_colors_and_brightness_apply() {
         egui::Color32::from_rgb(0, 255, 0)
     );
     assert_eq!(bae_ui::theme::label_name(1), "Hot");
-    assert_eq!(bae_ui::theme::appearance().brightness, 1.0);
+    assert_eq!(
+        bae_ui::theme::appearance(),
+        bae_ui::theme::Appearance::Light
+    );
 }

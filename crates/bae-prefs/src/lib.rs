@@ -1,7 +1,9 @@
-//! BAE preferences: AE 26's Edit > Preferences (macOS: After Effects > Settings), 16 pages.
+//! BAE preferences: AE 26's Edit > Preferences (macOS: After Effects > Settings…),
+//! 16 pages.
 //!
 //! * [`schema`] describes every page and control: label, type, range, unit,
-//!   default, the AE preferences key, enable conditions.
+//!   default, the AE preferences key, enable conditions. The pages are generated
+//!   from R1's AE 26 data ([`pages`], `gen/pages.py`).
 //! * [`Preferences`] holds the values, keyed by the dotted schema key. Reading is
 //!   lenient: a missing, mistyped or out-of-range value falls back to the default
 //!   (clamped for numbers), and unknown keys (a newer BAE) are kept and written
@@ -15,6 +17,7 @@
 //! command crates can read preferences too.
 
 pub mod i18n;
+pub mod pages;
 pub mod schema;
 
 use std::collections::BTreeMap;
@@ -23,7 +26,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use serde_json::{Map, Value};
 
-pub use schema::{DefaultValue, Item, Kind, LABEL_NAMES, Os, PAGES, Page, Pref, When};
+pub use schema::{DefaultValue, Item, Kind, LABEL_NAMES, Opt, Os, PAGES, Page, Pref, Style, When};
 
 /// File name in the config directory.
 pub const FILE_NAME: &str = "preferences.json";
@@ -70,17 +73,26 @@ fn validate(p: &Pref, v: &Value) -> Option<Value> {
             let f = v.as_f64().filter(|f| f.is_finite())?;
             Value::from(f.clamp(min, max))
         }
-        Kind::Duration { max } => {
-            let f = v.as_f64().filter(|f| f.is_finite())?;
-            Value::from(f.clamp(0.0, max))
-        }
         Kind::Choice { options, .. } => {
             let s = v.as_str()?;
-            Value::from(*options.iter().find(|o| **o == s)?)
+            Value::from(options.iter().find(|o| o.value == s)?.value)
         }
         Kind::Color => Value::from(parse_color(v.as_str()?).map(format_color)?),
-        Kind::Text | Kind::Path { .. } => Value::from(v.as_str()?),
+        Kind::Timecode => Value::from(parse_timecode(v.as_str()?).map(|_| v.as_str())??),
+        Kind::Text | Kind::Path => Value::from(v.as_str()?),
     })
+}
+
+/// Parses a timecode `h:mm:ss:ff` into its four numbers.
+pub fn parse_timecode(s: &str) -> Option<[u32; 4]> {
+    let mut parts = s.split(':').map(|p| p.trim().parse::<u32>().ok());
+    let tc = [
+        parts.next()??,
+        parts.next()??,
+        parts.next()??,
+        parts.next()??,
+    ];
+    (parts.next().is_none() && tc[1] < 60 && tc[2] < 60).then_some(tc)
 }
 
 /// Parses `#rrggbb`.
@@ -181,37 +193,50 @@ impl Preferences {
 
     /// Whether the control for `p` is enabled (its [`When`] condition holds).
     pub fn enabled(&self, p: &Pref) -> bool {
-        match p.enabled {
-            None => true,
-            Some(When::On(key)) => self.bool(key),
-            Some(When::Is(key, option)) => self.str(key) == option,
+        p.enabled.is_none_or(|w| self.holds(&w))
+    }
+
+    /// Whether an enable condition holds.
+    pub fn holds(&self, w: &When) -> bool {
+        match w {
+            When::On(key) => self.bool(key),
+            When::Off(key) => !self.bool(key),
+            When::Is(key, value) => self.str(key) == *value,
+            When::All(all) => all.iter().all(|w| self.holds(w)),
         }
     }
 
     // ---- typed accessors for the settings features use ------------------------------
 
-    /// General > Levels of Undo.
+    /// Levels of Undo (not in AE 26's dialog; stored only).
     pub fn levels_of_undo(&self) -> usize {
         self.int(keys::LEVELS_OF_UNDO) as usize
     }
 
-    /// Label color `index` (1..=16; 0 is None).
+    /// Label color `index` (1..=16) as stored (AE's values, e.g. Red `#b53838`);
+    /// index 0 (None) is not a setting and returns black.
     pub fn label_color(&self, index: usize) -> [u8; 3] {
-        let key = format!("labels.color_{index}");
-        match self.get(&key) {
-            Some(_) => self.color(&key),
-            None => parse_color(schema::LABEL_COLORS[0]).unwrap_or_default(),
+        self.get(&format!("labels.label_color_{index}"))
+            .and_then(Value::as_str)
+            .and_then(parse_color)
+            .unwrap_or_default()
+    }
+
+    /// Whether label color `index` is still AE's default.
+    pub fn label_color_is_default(&self, index: usize) -> bool {
+        let key = format!("labels.label_color_{index}");
+        match schema::find(&key) {
+            Some(Pref {
+                default: DefaultValue::Str(d),
+                ..
+            }) => self.str(&key) == *d,
+            _ => true,
         }
     }
 
     /// Label name `index` (the English default name until the user renames it).
     pub fn label_name(&self, index: usize) -> &str {
-        self.str(&format!("labels.name_{index}"))
-    }
-
-    /// Label colors 0..=16 (index 0 is the fixed None color).
-    pub fn label_colors(&self) -> [[u8; 3]; 17] {
-        std::array::from_fn(|i| self.label_color(i))
+        self.str(&format!("labels.label_name_{index}"))
     }
 
     /// Auto-save interval in minutes, or `None` when auto-save is off.
@@ -224,37 +249,44 @@ impl Preferences {
 /// Keys features read (the schema has them all).
 pub mod keys {
     pub const LEVELS_OF_UNDO: &str = "general.levels_of_undo";
-    pub const PATH_POINT_SIZE: &str = "general.path_point_size";
-    pub const CREATE_LAYERS_AT_START: &str = "general.create_layers_at_start";
-    pub const DEFAULT_SPATIAL_LINEAR: &str = "general.default_spatial_linear";
-    pub const SPLIT_LAYERS_ABOVE: &str = "general.split_layers_above";
-    pub const GRID_COLOR: &str = "grids.grid_color";
-    pub const GRID_STYLE: &str = "grids.grid_style";
-    pub const GRID_SPACING: &str = "grids.grid_spacing";
-    pub const GRID_SUBDIVISIONS: &str = "grids.grid_subdivisions";
-    pub const PROP_GRID_H: &str = "grids.prop_horizontal";
-    pub const PROP_GRID_V: &str = "grids.prop_vertical";
-    pub const GUIDE_COLOR: &str = "grids.guide_color";
-    pub const GUIDE_STYLE: &str = "grids.guide_style";
-    pub const ACTION_SAFE: &str = "grids.action_safe";
-    pub const TITLE_SAFE: &str = "grids.title_safe";
-    pub const CC_ACTION_SAFE: &str = "grids.cc_action_safe";
-    pub const CC_TITLE_SAFE: &str = "grids.cc_title_safe";
-    pub const BRIGHTNESS: &str = "appearance.brightness";
-    pub const AFFECT_LABELS: &str = "appearance.affect_labels";
-    pub const INTERACTIVE: &str = "appearance.interactive";
-    pub const FOCUS: &str = "appearance.focus";
-    pub const LABEL_HANDLES: &str = "appearance.label_handles";
-    pub const AUTO_SAVE: &str = "auto_save.enabled";
-    pub const AUTO_SAVE_INTERVAL: &str = "auto_save.interval";
-    pub const AUTO_SAVE_MAX_VERSIONS: &str = "auto_save.max_versions";
-    pub const AUTO_SAVE_LOCATION: &str = "auto_save.location";
-    pub const AUTO_SAVE_FOLDER: &str = "auto_save.folder";
-    pub const STILL_LENGTH: &str = "import.still_length";
-    pub const STILL_DURATION: &str = "import.still_duration";
-    pub const SEQUENCE_FPS: &str = "import.sequence_fps";
-    pub const EXPR_FONT: &str = "scripting.font";
-    pub const EXPR_FONT_SIZE: &str = "scripting.font_size";
+    // Appearance
+    pub const PATH_POINT_SIZE: &str = "appearance.path_point_and_handle_size";
+    pub const COLOR_THEME: &str = "appearance.color_theme";
+    pub const LABEL_HANDLES: &str = "appearance.use_label_color_for_handles_and_paths";
+    pub const MOTION_PATH_MODE: &str = "appearance.motion_path_mode";
+    // Composition
+    pub const CREATE_LAYERS_AT_START: &str = "composition.create_layers_at_comp_start";
+    pub const DEFAULT_SPATIAL_LINEAR: &str = "composition.default_spatial_interpolation_linear";
+    pub const SPLIT_LAYERS_ABOVE: &str = "composition.create_split_layers_above_original";
+    pub const CENTER_SHAPE_ANCHOR: &str = "composition.center_anchor_point_new_shape";
+    // Grids & Guides
+    pub const GRID_COLOR: &str = "grids_guides.grid_color";
+    pub const GRID_STYLE: &str = "grids_guides.grid_style";
+    pub const GRID_SPACING: &str = "grids_guides.gridline_every";
+    pub const GRID_SUBDIVISIONS: &str = "grids_guides.grid_subdivisions";
+    pub const PROP_GRID_H: &str = "grids_guides.proportional_grid_horizontal";
+    pub const PROP_GRID_V: &str = "grids_guides.proportional_grid_vertical";
+    pub const GUIDE_COLOR: &str = "grids_guides.guides_color";
+    pub const GUIDE_STYLE: &str = "grids_guides.guides_style";
+    pub const ACTION_SAFE: &str = "grids_guides.action_safe";
+    pub const TITLE_SAFE: &str = "grids_guides.title_safe";
+    pub const CC_ACTION_SAFE: &str = "grids_guides.center_cut_action_safe";
+    pub const CC_TITLE_SAFE: &str = "grids_guides.center_cut_title_safe";
+    // Project > Auto-Save
+    pub const AUTO_SAVE: &str = "project.auto_save_every_enabled";
+    pub const AUTO_SAVE_INTERVAL: &str = "project.auto_save_interval_minutes";
+    pub const AUTO_SAVE_MAX_VERSIONS: &str = "project.max_project_versions";
+    pub const AUTO_SAVE_LOCATION: &str = "project.auto_save_location_mode";
+    pub const AUTO_SAVE_FOLDER: &str = "project.auto_save_folder";
+    /// [`AUTO_SAVE_LOCATION`] value for a custom folder.
+    pub const CUSTOM_LOCATION: &str = "custom_location";
+    // Import
+    pub const STILL_LENGTH: &str = "import.still_footage_duration_mode";
+    pub const STILL_DURATION: &str = "import.still_footage_duration_timecode";
+    pub const SEQUENCE_FPS: &str = "import.sequence_footage_fps";
+    // Scripting & Expressions
+    pub const EXPR_FONT_SIZE: &str = "scripting_expressions.expr_font_size";
+    pub const EXPR_THEME: &str = "scripting_expressions.expr_theme";
 }
 
 type Subscriber = Box<dyn Fn(&Preferences) + Send + Sync>;

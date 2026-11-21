@@ -52,7 +52,7 @@ fn every_page_has_its_controls_with_defaults() {
             page.title
         );
         let mut check = |p: &'static Pref| {
-            if !p.os.current() || p.label.is_empty() {
+            if p.label.is_empty() || p.quiet || p.kind == Kind::Path {
                 return;
             }
             assert!(
@@ -82,16 +82,19 @@ fn ok_returns_the_edits_cancel_drops_them() {
     h.get_by_label("Default Spatial Interpolation to Linear")
         .click();
     h.run();
-    assert!(toggled(&h, "Default Spatial Interpolation to Linear"));
+    assert!(!toggled(&h, "Default Spatial Interpolation to Linear"));
     h.get_by_label("OK").click();
     h.run();
     let [Outcome::Ok(saved)] = h.state().outcomes.as_slice() else {
         panic!("{:?}", h.state().outcomes);
     };
-    assert!(saved.bool(keys::DEFAULT_SPATIAL_LINEAR));
+    assert!(
+        !saved.bool(keys::DEFAULT_SPATIAL_LINEAR),
+        "AE 26's default is on; one click turned it off"
+    );
     assert!(!h.state().dialog.is_open());
 
-    let mut h = harness("startup_repair", &prefs);
+    let mut h = harness("appearance", &prefs);
     h.get_by_label("Show Tool Tips").click();
     h.run();
     h.get_by_label("Cancel").click();
@@ -107,88 +110,81 @@ fn escape_cancels() {
     assert_eq!(h.state().outcomes, [Outcome::Cancel]);
 }
 
+/// AE 26: Previous / Next wrap around and are never disabled.
 #[test]
-fn previous_next_and_page_list() {
+fn previous_next_wrap_and_page_list() {
     let mut h = harness("startup_repair", &Preferences::default());
-    assert!(h.get_by_label("Previous").accesskit_node().is_disabled());
+    assert!(!h.get_by_label("Previous").accesskit_node().is_disabled());
+    h.get_by_label("Previous").click();
+    h.run();
+    assert_eq!(h.state().dialog.page(), "scripting_expressions");
+    h.get_by_label("Next").click();
+    h.run();
+    assert_eq!(h.state().dialog.page(), "startup_repair");
     h.get_by_label("Next").click();
     h.run();
     assert_eq!(h.state().dialog.page(), "project");
-    h.get_by_label("Previous").click();
-    h.run();
-    assert_eq!(h.state().dialog.page(), "startup_repair");
     h.get_by_label("Grids & Guides").click();
     h.run();
     assert_eq!(h.state().dialog.page(), "grids_guides");
-    let mut h = harness("scripting_expressions", &Preferences::default());
-    assert!(h.get_by_label("Next").accesskit_node().is_disabled());
-    h.run();
 }
 
 #[test]
 fn dependent_controls_gray_out() {
     let mut h = harness("project", &Preferences::default());
     let enabled = |h: &Harness<'_, State>| {
-        h.query_all_by_label("Save Every:")
+        h.query_all_by_label("Save Every Interval")
             .any(|n| !n.accesskit_node().is_disabled())
     };
     assert!(enabled(&h));
-    h.get_by_label("Automatically Save Projects").click();
+    h.get_by_label("Save Every:").click();
     h.run();
-    assert!(
-        !enabled(&h),
-        "Save Every follows Automatically Save Projects"
-    );
+    assert!(!enabled(&h), "the interval follows Save Every");
+    // Choose Folder... follows Auto-Save Location (a radio value).
+    let choose = |h: &Harness<'_, State>| {
+        h.query_all_by_label("Choose Folder...")
+            .all(|n| n.accesskit_node().is_disabled())
+    };
+    assert!(choose(&h));
 }
 
 #[test]
-fn default_buttons_reset_sliders() {
-    let mut prefs = Preferences::default();
-    prefs.set(keys::BRIGHTNESS, 0.8);
-    let mut h = harness("appearance", &prefs);
-    h.query_all_by_label("Default").next().unwrap().click();
+fn color_theme_cards() {
+    let mut h = harness("appearance", &Preferences::default());
+    h.get_by_label("Light").click();
     h.run();
-    assert_eq!(h.state().dialog.draft().float(keys::BRIGHTNESS), 0.0);
+    assert_eq!(h.state().dialog.draft().str(keys::COLOR_THEME), "light");
 }
 
 #[test]
-fn unknown_page_opens_general() {
+fn unknown_page_opens_the_first_page() {
     let h = harness("nope", &Preferences::default());
     assert_eq!(h.state().dialog.page(), "startup_repair");
 }
 
 #[test]
-fn appearance_brightness_lightens_grays_only() {
+fn color_theme_changes_grays_only() {
     use crate::theme::{self, Appearance, color};
-    let labels: [Color32; 17] = std::array::from_fn(theme::label_color);
-    let def = Appearance::default();
-    assert_eq!(theme::adjust(color::PANEL, &def, &labels), color::PANEL);
-    let light = Appearance {
-        brightness: 1.0,
-        ..def
-    };
-    let panel = theme::adjust(color::PANEL, &light, &labels);
-    assert!(panel.r() > color::PANEL.r() + 40, "{panel:?}");
-    assert_eq!(panel.r(), panel.g());
-    // Label colors stay unless "Affect Label Colors" is on.
-    let red = labels[1];
-    assert_eq!(theme::adjust(red, &light, &labels), red);
-    let affect = Appearance {
-        affect_labels: true,
-        ..light
-    };
-    assert_ne!(theme::adjust(red, &affect, &labels), red);
-    // Interactive controls: the accent blue follows its own slider.
-    let darker = Appearance {
-        interactive: 0.0,
-        ..def
-    };
-    let accent = theme::adjust(color::ACCENT, &darker, &labels);
-    assert!(accent.b() < color::ACCENT.b());
-    assert_eq!(theme::adjust(color::FOCUS, &darker, &labels), color::FOCUS);
-    // Transparent stays transparent.
     assert_eq!(
-        theme::adjust(Color32::TRANSPARENT, &light, &labels),
+        theme::adjust(color::PANEL, Appearance::Darkest),
+        color::PANEL
+    );
+    let dark = theme::adjust(color::PANEL, Appearance::Dark);
+    assert!(dark.r() > color::PANEL.r() && dark.r() == dark.g());
+    let light = theme::adjust(color::PANEL, Appearance::Light);
+    assert!(light.r() > 0xc0, "{light:?}");
+    assert!(
+        theme::adjust(color::TEXT, Appearance::Light).r() < 0x80,
+        "dark text"
+    );
+    let red = theme::LABELS[1].1;
+    assert_eq!(theme::adjust(red, Appearance::Light), red);
+    assert_eq!(
+        theme::adjust(color::ACCENT, Appearance::Light),
+        color::ACCENT
+    );
+    assert_eq!(
+        theme::adjust(Color32::TRANSPARENT, Appearance::Light),
         Color32::TRANSPARENT
     );
 }
@@ -207,7 +203,9 @@ fn grid_and_safe_margins_follow_preferences() {
     assert!((cc_action[1] - cc_action[0] - 1296.0).abs() < 0.5);
     prefs.set(bae_prefs::keys::ACTION_SAFE, 20.0);
     prefs.set(bae_prefs::keys::GRID_COLOR, "#ff0000");
+    prefs.set(bae_prefs::keys::GRID_STYLE, "dots");
     let g = GridGuides::from_prefs(&prefs);
     assert_eq!(g.safe_rects(comp).0[0].width(), 1920.0 * 0.8);
     assert_eq!(g.grid_color, Color32::from_rgb(255, 0, 0));
+    assert_eq!(g.grid_style, "dots");
 }
