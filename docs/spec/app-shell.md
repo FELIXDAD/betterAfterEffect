@@ -85,6 +85,7 @@ bae render | mcp | export-json | pack …   其他工作流实现
 - 对话框都在 `files::FileDialogs` trait 后面：外壳用 `shell::dialogs::Native`（rfd），冒烟测试用 `files::NoDialogs`（从不阻塞），测试注入路径和回答。
 - 命令行：`bae <工程>` 启动时打开；打不开时窗口出来后弹错误提示，`--smoke-test` 时直接以 1 退出。`bae --headless <工程>` 打开并打印一行摘要；`bae --headless --smoke-test N <工程>` 带着这个工程渲染界面。
 - 打开另一个工程时清空历史记录面板，并重置动效工作区的会话状态（当前合成、选择、播放）。
+- 从访达打开（macOS）：`BAE.app` 的 Info.plist 声明了 `.bae`（UTI `io.github.felixdad.bae.project`，作为包显示成一个文档）和 `.baez`（`io.github.felixdad.bae.package`）两种文档类型，见 `xtask/src/dist.rs`。双击、拖到程序坞图标、`open 工程.bae` 都不是命令行参数，而是 Apple 事件，由 `NSApplication` 交给代理的 `application:openURLs:`。winit 0.30 的代理（`WinitApplicationDelegate`）没有实现这个方法，`shell::open_documents` 在事件循环创建后、`run_app` 之前把它加到这个类上（winit 自己也是这样替换 `sendEvent:` 的），所以双击工程启动 BAE 的那一次也收得到。路径变成 `UserEvent::OpenFiles`，再变成普通的 `file.open_project`：未保存的修改照常先问，坏文件照常报错，一次只开第一个。BAE 已经在运行时，macOS 把事件发给正在运行的实例。Windows 的双击打开要靠安装器写文件关联，0.0.1 没有安装器，暂时只能在 BAE 里打开或用 `bae <工程>`。
 
 ### 设备丢失
 

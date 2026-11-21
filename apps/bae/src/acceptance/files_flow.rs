@@ -318,6 +318,87 @@ fn unsaved_changes_question_on_close_quit_new_and_open() {
     }
 }
 
+/// Projects opened from Finder (double-click, Dock drop: `application:openURLs:`, see
+/// `shell::open_documents`) go through `file.open_project` like File > Open: the
+/// unsaved-changes question first, `.bae` and `.baez` alike, only the first of several
+/// paths, and a file that is not a project is reported without touching the open one
+/// (#115).
+#[test]
+fn finder_open_goes_through_the_open_flow() {
+    use crate::shell::open_files_invocation;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tricky_dir(tmp.path());
+    let folder = dir.join("Finder 打开.bae");
+    let packed = dir.join("Finder 打开.baez");
+    {
+        let mut h = gui();
+        comp_with(&mut h, &["motion.layer.new.null"]);
+        save_as(&mut h, folder.clone());
+        save_as(&mut h, packed.clone());
+        no_surprises(&h);
+    }
+    let opened_export = export_file(&folder);
+    assert!(open_files_invocation(&[]).is_none());
+
+    for (target, choice) in [
+        (&folder, UnsavedChoice::Cancel),
+        (&folder, UnsavedChoice::DontSave),
+        (&packed, UnsavedChoice::DontSave),
+    ] {
+        let case = format!("{} / {choice:?}", target.display());
+        let mut h = gui();
+        comp_with(&mut h, &["motion.layer.new.solid"]);
+        let mine = dir.join(format!("当前 {choice:?}.bae"));
+        save_as(&mut h, mine.clone());
+        key(&mut h, Modifiers::COMMAND, Key::Y); // an unsaved edit
+        let edited = export(&h);
+        assert!(h.state().doc.is_dirty(), "{case}");
+
+        h.state_mut().dialogs.answers.push_back(choice);
+        // Finder sent two; BAE opens one project at a time.
+        let inv = open_files_invocation(&[target.clone(), dir.join("第二个.bae")]).unwrap();
+        h.state_mut().invoke(inv);
+        settle(&mut h);
+
+        let g = h.state();
+        assert_eq!(
+            g.dialogs.asked,
+            [mine.file_name().unwrap().to_string_lossy().into_owned()],
+            "{case}: question"
+        );
+        no_surprises(&h);
+        match choice {
+            UnsavedChoice::Cancel => {
+                assert_eq!(export(&h), edited, "{case}");
+                assert!(h.state().doc.is_dirty(), "{case}");
+            }
+            _ => {
+                assert_eq!(export(&h), opened_export, "{case}");
+                assert_eq!(h.state().doc.location(), Some(target.as_path()), "{case}");
+                assert!(!h.state().doc.is_dirty(), "{case}");
+            }
+        }
+    }
+
+    // Not a project: reported, the open project stays.
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let before = export(&h);
+    let notes = dir.join("说明.txt");
+    fs::write(&notes, "not a project").unwrap();
+    h.state_mut()
+        .invoke(open_files_invocation(std::slice::from_ref(&notes)).unwrap());
+    settle(&mut h);
+    assert_eq!(
+        h.state().dialogs.errors.len(),
+        1,
+        "{:?}",
+        h.state().dialogs.errors
+    );
+    assert_eq!(export(&h), before);
+}
+
 #[test]
 fn untitled_project_save_at_the_question_asks_where() {
     let tmp = tempfile::tempdir().unwrap();

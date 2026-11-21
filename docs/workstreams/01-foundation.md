@@ -61,6 +61,8 @@
 
 - [x] macOS 包 ad-hoc 签名（#105，2026-11-21）：`cargo xtask dist` 组装好 `BAE.app` 后先签 `Contents/MacOS` 里的可执行文件、再签整个 bundle（`codesign --force --sign -`，不用 `--deep`，不开 hardened runtime，以免插件库加载被库校验拦下），然后 `codesign --verify --deep --strict`。CI 在打包后把 zip 按用户下载的方式解开（`ditto` + 隔离属性）再校验，签名错误直接失败。Developer ID 签名和公证要苹果开发者账号，放到 0.0.1 之后。
 
+- [x] 应用图标和文档类型（#115，2026-11-21）：`cargo xtask icons` 从 `xtask/src/icon.rs` 的矢量定义（vello_cpu 渲染）生成 `assets/icons/app/` 下的 `bae.icns`、`bae.ico`、`bae.res`、`bae.svg`；`dist` 把 `bae.icns` 放进 `BAE.app`，Info.plist 声明 `.bae`（包）和 `.baez` 两种文档类型并导出 UTI；`apps/bae/build.rs` 把 `bae.res` 链接进 `bae.exe`，`dist` 在 Windows 上检查 exe 带图标。macOS 从访达双击打开工程：`shell::open_documents` 给 winit 的应用代理加上 `application:openURLs:`，走普通的 `file.open_project`。Windows 的双击打开要等安装器写文件关联。
+
 后续（不阻塞合并）：
 
 - 浮动面板的原生多窗口（每个 egui 视口一个 winit 窗口和 surface，共用同一设备）；目前用 `set_embed_viewports(true)` 画在主窗口内。
