@@ -695,7 +695,10 @@ fn catalog_doc_is_up_to_date() {
         std::fs::write(DOC_PATH, &doc).unwrap();
         return;
     }
-    let current = std::fs::read_to_string(DOC_PATH).unwrap_or_default();
+    // Windows checkouts may convert the doc to CRLF.
+    let current = std::fs::read_to_string(DOC_PATH)
+        .unwrap_or_default()
+        .replace("\r\n", "\n");
     assert!(
         current == doc,
         "docs/ui/ae-commands.md is stale: run BAE_UPDATE_DOCS=1 cargo test -p bae-ui-motion catalog"
