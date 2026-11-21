@@ -338,6 +338,25 @@ fn visit_item(item: &'static Item, f: &mut impl FnMut(&'static Pref)) {
     }
 }
 
+/// Visits the preferences of `items` the dialog shows on this platform (skips
+/// [`Item::Only`] items for the other one).
+pub fn visit_here(items: &'static [Item], f: &mut impl FnMut(&'static Pref)) {
+    for item in items {
+        match item {
+            Item::Only(os, _) if !os.current() => {}
+            Item::Only(_, item) | Item::When(_, item) => visit_here(std::slice::from_ref(*item), f),
+            Item::Row(items) | Item::Group(_, items) => visit_here(items, f),
+            Item::Cols(cols) => {
+                for col in *cols {
+                    visit_here(col, f);
+                }
+            }
+            Item::P(p) => f(p),
+            Item::Button(..) | Item::Info(..) | Item::Table(..) | Item::Preview(_) => {}
+        }
+    }
+}
+
 /// Every preference: the pages' in page order, then [`HIDDEN`].
 pub fn all() -> &'static [&'static Pref] {
     static ALL: std::sync::OnceLock<Vec<&'static Pref>> = std::sync::OnceLock::new();

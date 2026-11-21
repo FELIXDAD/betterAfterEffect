@@ -71,8 +71,16 @@ fn every_page_has_its_controls_with_defaults() {
                 );
             }
         };
-        schema::visit(page.items, &mut check);
+        schema::visit_here(page.items, &mut check);
     }
+    // Platform-only controls: "Use System Shortcut Keys" is macOS only.
+    let h = harness("composition", &prefs);
+    assert_eq!(
+        h.query_all_by_label("Use System Shortcut Keys")
+            .next()
+            .is_some(),
+        cfg!(target_os = "macos")
+    );
 }
 
 #[test]
