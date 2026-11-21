@@ -10,6 +10,11 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Frame Blending", "帧混合"),
     ("Switch", "开关"),
     ("Time Ruler", "时间标尺"),
+    ("Revolutions", "圈数"),
+    ("Degrees", "度"),
+    ("Time Graph", "时间图表"),
+    ("Project Items", "项目条目"),
+    ("Duration Bar", "持续时间条"),
     // Panels and tabs
     ("Composition", "合成"),
     ("Timeline", "时间轴"),

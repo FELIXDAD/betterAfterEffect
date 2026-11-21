@@ -42,7 +42,7 @@ fn prop_line(
             .map(|v| bae_model::schema::is_animatable(v.prim_type(), attr))
             .unwrap_or(false);
         if animatable {
-            if widgets::stopwatch(ui, &mut on).clicked() {
+            if widgets::stopwatch_for(ui, &mut on, tr(label)).clicked() {
                 cx.invoke_with(
                     "attr.set_animated",
                     json!({"path": path, "attr": attr, "animated": !spec.is_animated(), "time": key_now}),
@@ -62,7 +62,7 @@ fn prop_line(
             .or_else(|| common::current_value(eval.get(cx.resources), stage, path, attr, now));
         if let Some(v) = value {
             let id = ui.id().with(("prop", path.as_str(), attr));
-            let edit = common::value_editor(ui, id, attr, &v, dims);
+            let edit = common::value_editor(ui, id, attr, &v, dims, tr(label));
             common::apply_edit(cx, session, path, attr, now, edit);
         }
     });

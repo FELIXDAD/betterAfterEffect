@@ -8,6 +8,23 @@
 
 use egui::{Response, WidgetInfo, WidgetType};
 
+/// A label with its context, most general first: `["Layer “Solid 1”",
+/// "Position", "Time-Vary Stopwatch"]` → "Layer “Solid 1” · Position ·
+/// Time-Vary Stopwatch". Empty parts are left out.
+pub fn context(parts: &[&str]) -> String {
+    parts
+        .iter()
+        .filter(|p| !p.is_empty())
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+/// "Layer “name”", translated: the context of a layer's controls.
+pub fn layer(name: &str) -> String {
+    crate::i18n::tr("Layer “{name}”").replace("{name}", name)
+}
+
 /// Accessibility labels for a [`Response`].
 pub trait Accessible: Sized {
     /// Name the widget.
@@ -55,6 +72,7 @@ pub const LABELS: &[&str] = &[
     "Collapse",
     "Color",
     "Search",
+    "Layer “{name}”",
 ];
 
 impl Accessible for Response {

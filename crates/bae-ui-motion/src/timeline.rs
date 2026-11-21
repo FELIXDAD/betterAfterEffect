@@ -387,10 +387,11 @@ fn switch_name(icon: Icon) -> &'static str {
     }
 }
 
-fn switch(ui: &Ui, rect: Rect, on: bool, icon: Icon, id: Id) -> bool {
+/// A layer switch; `layer` is the accessibility context ("Layer “Solid 1”").
+fn switch(ui: &Ui, rect: Rect, on: bool, icon: Icon, id: Id, layer: &str) -> bool {
     let resp = ui.interact(rect, id, Sense::click()).labeled_toggle(
         egui::WidgetType::Checkbox,
-        tr(switch_name(icon)),
+        &bae_ui::a11y::context(&[layer, tr(switch_name(icon))]),
         on,
     );
     widgets::paint_switch(
@@ -509,7 +510,7 @@ impl Panel for TimelinePanel {
                 ui.id().with("graph_bg"),
                 Sense::click_and_drag(),
             )
-            .labeled(egui::WidgetType::Panel, tr("Timeline"));
+            .labeled(egui::WidgetType::Other, tr("Time Graph"));
         if bg.drag_started_by(egui::PointerButton::Primary)
             && let Some(p) = bg.interact_pointer_pos()
         {
@@ -625,7 +626,7 @@ fn comp_tabs(ui: &Ui, rect: Rect, stage: &Stage, session: &SharedSession) {
         p.text(
             pos2(tab.left() + 18.0, tab.center().y),
             Align2::LEFT_CENTER,
-            name,
+            &name,
             theme::body(),
             if is_active {
                 color::TAB_ACTIVE
@@ -643,7 +644,10 @@ fn comp_tabs(ui: &Ui, rect: Rect, stage: &Stage, session: &SharedSession) {
         let xr = Rect::from_center_size(pos2(tab.right() - 8.0, tab.center().y), vec2(10.0, 10.0));
         let xresp = ui
             .interact(xr, ui.id().with(("comp_tab_x", c.as_str())), Sense::click())
-            .labeled(egui::WidgetType::Button, tr("Close"));
+            .labeled(
+                egui::WidgetType::Button,
+                &bae_ui::a11y::context(&[&name, tr("Close")]),
+            );
         if resp.hovered() || is_active {
             icons::paint(ui.painter(), xr, Icon::Close, color::TAB_CLOSE);
         }
@@ -1026,6 +1030,8 @@ impl TimelinePanel {
         }
         let base = ui.id().with((layer.as_str(), row.depth, row_key(row)));
         let rid = |s: &str| base.with(s);
+        // Screen readers tell the rows' controls apart by layer (issue #128).
+        let layer_ctx = bae_ui::a11y::layer(&query::display_name_of(stage, layer));
 
         match &row.kind {
             RowKind::Layer => {
@@ -1049,7 +1055,7 @@ impl TimelinePanel {
                         continue;
                     }
                     let on = bool_attr(stage, layer, attr);
-                    if switch(ui, av(i), on, icon, rid(attr)) {
+                    if switch(ui, av(i), on, icon, rid(attr), &layer_ctx) {
                         cx.invoke_with("attr.set", json!({"path": layer, "attr": attr, "value": {"type": "bool", "value": !on}}));
                     }
                 }
@@ -1089,7 +1095,10 @@ impl TimelinePanel {
                     .interact(tw, rid("twirl"), Sense::click())
                     .labeled_toggle(
                         egui::WidgetType::CollapsingHeader,
-                        tr(if open { "Collapse" } else { "Expand" }),
+                        &bae_ui::a11y::context(&[
+                            &layer_ctx,
+                            tr(if open { "Collapse" } else { "Expand" }),
+                        ]),
                         open,
                     )
                     .clicked()
@@ -1175,7 +1184,7 @@ impl TimelinePanel {
                     (6, "adjustment_layer", Icon::Adjustment),
                 ] {
                     let on = bool_attr(stage, layer, attr);
-                    if switch(ui, sw(i), on, icon, rid(attr)) {
+                    if switch(ui, sw(i), on, icon, rid(attr), &layer_ctx) {
                         cx.invoke_with("attr.set", json!({"path": layer, "attr": attr, "value": {"type": "bool", "value": !on}}));
                     }
                 }
@@ -1183,7 +1192,7 @@ impl TimelinePanel {
                     .prim(layer)
                     .and_then(|v| query::static_value(&v, "quality"))
                     .is_some_and(|v| v.as_str() == Some("draft"));
-                if switch(ui, sw(2), !draft, Icon::Quality, rid("quality")) {
+                if switch(ui, sw(2), !draft, Icon::Quality, rid("quality"), &layer_ctx) {
                     let to = if draft { "best" } else { "draft" };
                     cx.invoke_with("attr.set", json!({"path": layer, "attr": "quality", "value": {"type": "enum", "value": to}}));
                 }
@@ -1198,6 +1207,7 @@ impl TimelinePanel {
                     three_d,
                     Icon::Cube,
                     rid("three_d"),
+                    &layer_ctx,
                 ) {
                     cx.invoke_with("attr.set", json!({"path": layer, "attr": "three_d", "value": {"type": "bool", "value": !three_d}}));
                 }
@@ -1205,9 +1215,10 @@ impl TimelinePanel {
                 let whip =
                     Rect::from_center_size(pos2(l + cols.parent + 8.0, cy), vec2(14.0, 14.0));
                 icons::paint(ui.painter(), whip, Icon::Pickwhip, color::ICON);
-                let wresp = ui
-                    .interact(whip, rid("whip"), Sense::drag())
-                    .labeled(egui::WidgetType::Button, tr("Parent Pick Whip"));
+                let wresp = ui.interact(whip, rid("whip"), Sense::drag()).labeled(
+                    egui::WidgetType::Button,
+                    &bae_ui::a11y::context(&[&layer_ctx, tr("Parent Pick Whip")]),
+                );
                 if wresp.drag_started() {
                     let layers = if layer_selected {
                         session.lock().selected_layers.clone()
@@ -1244,12 +1255,18 @@ impl TimelinePanel {
                         .max_rect(drop_rect)
                         .id_salt(rid("parent")),
                 );
+                let current = items.get(sel).map(|s| s.to_string()).unwrap_or_default();
                 widgets::dropdown(
                     &mut child,
                     rid("parent_dd"),
                     &mut sel,
                     &items,
                     drop_rect.width(),
+                )
+                .labeled_value(
+                    egui::WidgetType::ComboBox,
+                    &bae_ui::a11y::context(&[&layer_ctx, tr("Parent & Link")]),
+                    &current,
                 );
                 if sel != before {
                     let parent = (sel > 0).then(|| comp_layers[sel - 1].clone());
@@ -1285,7 +1302,11 @@ impl TimelinePanel {
                         rid("group"),
                         Sense::click(),
                     )
-                    .labeled_toggle(egui::WidgetType::CollapsingHeader, tr(label), *open);
+                    .labeled_toggle(
+                        egui::WidgetType::CollapsingHeader,
+                        &bae_ui::a11y::context(&[&layer_ctx, tr(label)]),
+                        *open,
+                    );
                 if resp.clicked() {
                     self.toggle(id);
                 }
@@ -1367,7 +1388,10 @@ impl TimelinePanel {
             )
             .labeled_toggle(
                 egui::WidgetType::Other,
-                &query::display_name_of(stage, layer),
+                &bae_ui::a11y::context(&[
+                    &bae_ui::a11y::layer(&query::display_name_of(stage, layer)),
+                    tr("Duration Bar"),
+                ]),
                 selected,
             );
         let hover_edge = resp.hover_pos().map(|p| {
@@ -1462,6 +1486,18 @@ impl TimelinePanel {
         let animated = spec.is_animated();
         let key_now = query::to_key_time(stage, path, now);
         let id = ui.id().with(("prop", path.as_str(), attr));
+        // What screen readers call this property: layer, shape group (when the
+        // property is not on the layer itself), property (issue #128).
+        let group = if *path == row.layer {
+            String::new()
+        } else {
+            query::display_name_of(stage, path)
+        };
+        let prop_name = bae_ui::a11y::context(&[
+            &bae_ui::a11y::layer(&query::display_name_of(stage, &row.layer)),
+            &group,
+            tr(label),
+        ]);
         // Keyframe navigator (A/V columns).
         if animated {
             let nav = Rect::from_min_size(
@@ -1473,7 +1509,7 @@ impl TimelinePanel {
             let on_key = spec.keyframes.contains_key(&key_now);
             let mut child =
                 ui.new_child(egui::UiBuilder::new().max_rect(nav).id_salt(id.with("nav")));
-            match widgets::keyframe_nav(&mut child, has_prev, on_key, has_next) {
+            match widgets::keyframe_nav_for(&mut child, has_prev, on_key, has_next, &prop_name) {
                 Some(KeyNav::Prev) => {
                     if let Some((t, _)) = spec.keyframes.range(..key_now).next_back() {
                         session
@@ -1515,7 +1551,7 @@ impl TimelinePanel {
             .prim(path)
             .map(|v| bae_model::schema::is_animatable(v.prim_type(), attr))
             .unwrap_or(false);
-        if animatable && widgets::stopwatch(&mut child, &mut on).clicked() {
+        if animatable && widgets::stopwatch_for(&mut child, &mut on, &prop_name).clicked() {
             if ui.input(|i| i.modifiers.alt) {
                 // Alt+click: add (or remove) an expression.
                 let source = if spec.expression.is_some() {
@@ -1570,7 +1606,8 @@ impl TimelinePanel {
             } else {
                 2
             };
-            let edit = common::value_editor(&mut child, id.with("ed"), attr, &value, dims);
+            let edit =
+                common::value_editor(&mut child, id.with("ed"), attr, &value, dims, &prop_name);
             common::apply_edit(cx, session, path, attr, now, edit);
         }
         // Keyframes.
@@ -1604,7 +1641,15 @@ impl TimelinePanel {
             };
             let resp = ui
                 .interact(hit, ui.id().with(("key", path.as_str(), attr, t.0)), sense)
-                .labeled_toggle(egui::WidgetType::Button, tr("Keyframe"), selected);
+                .labeled_toggle(
+                    egui::WidgetType::Button,
+                    &bae_ui::a11y::context(&[
+                        &prop_name,
+                        tr("Keyframe"),
+                        &common::timecode(info, query::to_comp_time(stage, path, *t)),
+                    ]),
+                    selected,
+                );
             if resp.clicked() {
                 let mods = ui.input(|i| i.modifiers);
                 let mut s = session.lock();
@@ -1674,7 +1719,16 @@ impl TimelinePanel {
                 ui.id().with(("expr_on", path.as_str(), attr)),
                 Sense::click(),
             )
-            .labeled(egui::WidgetType::Checkbox, tr("Enable Expression"));
+            .labeled(
+                egui::WidgetType::Checkbox,
+                &bae_ui::a11y::context(&[
+                    &query::owning_layer(cx.stage, path)
+                        .map(|l| bae_ui::a11y::layer(&query::display_name_of(cx.stage, &l)))
+                        .unwrap_or_default(),
+                    tr(&common::attr_label(None, attr, false)),
+                    tr("Enable Expression"),
+                ]),
+            );
         ui.painter().text(
             eq.center(),
             Align2::CENTER_CENTER,

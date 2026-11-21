@@ -384,7 +384,7 @@ impl Panel for ProjectPanel {
                 if rest.height() > 4.0 {
                     let resp = ui
                         .allocate_rect(rest, Sense::click())
-                        .labeled(egui::WidgetType::Panel, tr("Project"));
+                        .labeled(egui::WidgetType::Other, tr("Project Items"));
                     if resp.clicked() {
                         session.lock().selected_items.clear();
                     }

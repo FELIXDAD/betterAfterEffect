@@ -957,3 +957,40 @@ fn viewer_does_not_pick_locked_layers() {
         drag.invocations
     );
 }
+
+/// Accessibility labels the motion panels add (issues #116, #128) have Chinese.
+#[test]
+fn accessibility_labels_have_chinese() {
+    let labels = [
+        "Video",
+        "Audio",
+        "Solo",
+        "Lock",
+        "Shy",
+        "Collapse Transformations",
+        "Quality and Sampling",
+        "Frame Blending",
+        "Motion Blur",
+        "Adjustment Layer",
+        "3D Layer",
+        "Switch",
+        "Time Graph",
+        "Current Time",
+        "Work Area",
+        "Time Ruler",
+        "Parent Pick Whip",
+        "Parent & Link",
+        "Duration Bar",
+        "Keyframe",
+        "Enable Expression",
+        "Revolutions",
+        "Degrees",
+        "Project Items",
+    ];
+    let zh = crate::i18n::ZH;
+    let missing: Vec<_> = labels
+        .iter()
+        .filter(|l| !zh.iter().any(|(en, _)| en == *l) && !bae_ui::i18n::has_translation(l))
+        .collect();
+    assert!(missing.is_empty(), "no Chinese for {missing:?}");
+}
