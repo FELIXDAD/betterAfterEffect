@@ -1259,3 +1259,63 @@ fn mcp_autosave_failures_are_explained() {
     );
     assert!(!saved.contains("os error"), "{reply}");
 }
+
+// ---- Retest of #111 (dev dbdbb7c): one sentence at every entry ----
+
+#[test]
+fn every_entry_says_the_same_sentence_in_both_languages() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tricky(tmp.path());
+    let broken = dir.join("坏的 包.baez");
+    std::fs::write(&broken, b"PK\x03\x04 x").unwrap();
+    let missing = dir.join("没有 的.bae");
+    for (lang, missing_says, broken_says) in [
+        (
+            "en",
+            "does not exist.",
+            "is damaged or is not a .baez project package.",
+        ),
+        ("zh", "不存在。", "已损坏，或者不是 .baez 项目包。"),
+    ] {
+        let entries: Vec<Vec<std::ffi::OsString>> = vec![
+            vec!["--headless".into()],
+            vec!["export-json".into()],
+            vec!["pack".into()],
+            vec!["mcp".into()],
+        ];
+        for entry in &entries {
+            for (path, says) in [(&missing, missing_says), (&broken, broken_says)] {
+                let out = Command::new(BAE)
+                    .env("BAE_LANG", lang)
+                    .args(entry)
+                    .arg(path)
+                    .stdin(Stdio::null())
+                    .output()
+                    .unwrap();
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let last = stderr
+                    .lines()
+                    .rfind(|l| !l.contains(" INFO "))
+                    .unwrap_or_default()
+                    .to_owned();
+                assert_eq!(
+                    out.status.code(),
+                    Some(1),
+                    "{lang} {entry:?} {}: {stderr}",
+                    path.display()
+                );
+                assert!(
+                    last.contains(says),
+                    "{lang} {entry:?} {}: {last}",
+                    path.display()
+                );
+                for raw in ["EOCD", "os error", "is not a BAE project (expected"] {
+                    assert!(
+                        !stderr.contains(raw),
+                        "{lang} {entry:?}: raw cause {raw:?}: {stderr}"
+                    );
+                }
+            }
+        }
+    }
+}
