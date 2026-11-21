@@ -74,7 +74,7 @@ pub(crate) fn catalog_node(ui: &mut Ui, cx: &mut PanelContext<'_>, node: &'stati
             if s.children.is_empty() {
                 ui.add_enabled(false, egui::Button::new(tr(s.title)));
             } else {
-                widgets::menu_button(ui, tr(s.title), |ui| catalog_nodes(ui, cx, s.children));
+                common::submenu(ui, tr(s.title), &mut |ui| catalog_nodes(ui, cx, s.children));
             }
         }
         Node::Submenu(_) => {}
@@ -167,7 +167,7 @@ pub(crate) fn layer_menu(
             ("Effect", "") => {
                 if let Some((_, nodes)) = catalog::MENUS.iter().find(|(t, _)| *t == "Effect") {
                     let cats: &'static [Node] = nodes;
-                    widgets::menu_button(ui, tr("Effect"), |ui| {
+                    common::submenu(ui, tr("Effect"), &mut |ui| {
                         for n in cats.iter().filter(|n| matches!(n, Node::Effects)) {
                             catalog_node(ui, cx, n);
                         }

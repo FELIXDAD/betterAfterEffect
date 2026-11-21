@@ -517,7 +517,7 @@ impl Panel for TimelinePanel {
                 s.selected_props.clear();
             }
             // Right-click on empty space: New ▸ (as Layer ▸ New).
-            bg.context_menu(|ui| {
+            crate::common::context_menu(&bg, &mut |ui| {
                 if let Some(n) = menus::catalog_entry("Layer", "New") {
                     menus::catalog_node(ui, cx, n);
                 }

@@ -626,3 +626,22 @@ pub(crate) fn text_button(ui: &mut Ui, text: &str) -> egui::Response {
             .min_size(vec2(0.0, 20.0)),
     )
 }
+
+// Menus through non-generic entry points: egui's popup and menu code is generic over
+// the closure and costs several KiB per closure type (about 14 KiB for a submenu), so
+// the timeline and Graph Editor menus share one instantiation each.
+
+/// `resp.context_menu(add)`.
+pub(crate) fn context_menu(resp: &egui::Response, add: &mut dyn FnMut(&mut Ui)) {
+    resp.context_menu(|ui| add(ui));
+}
+
+/// `egui::Popup::menu(resp).show(add)`.
+pub(crate) fn popup_menu(resp: &egui::Response, add: &mut dyn FnMut(&mut Ui)) {
+    egui::Popup::menu(resp).show(|ui| add(ui));
+}
+
+/// `widgets::menu_button(ui, title, add)` (a submenu inside a menu).
+pub(crate) fn submenu(ui: &mut Ui, title: &str, add: &mut dyn FnMut(&mut Ui)) {
+    widgets::menu_button(ui, title, |ui| add(ui));
+}

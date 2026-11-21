@@ -1771,7 +1771,7 @@ impl GraphEditor {
         // Right-click on a keyframe: the keyframe menu; elsewhere the Keyframe
         // Assistant and Toggle Hold items for the selection.
         let menu_key = self.menu_key.clone();
-        resp.context_menu(|ui| match &menu_key {
+        crate::common::context_menu(&resp, &mut |ui| match &menu_key {
             Some(k) => crate::timeline::key_menu(ui, cx, session, k),
             None => crate::timeline::keyframe_menu(ui, cx, session),
         });
@@ -2528,7 +2528,7 @@ impl GraphEditor {
             None,
             Glyph::Eye,
         );
-        egui::Popup::menu(&resp).show(|ui| {
+        crate::common::popup_menu(&resp, &mut |ui| {
             ui.set_min_width(220.0);
             let s = &mut self.settings;
             menu_check(ui, &mut s.show_selected, tr("Show Selected Properties"));
@@ -2545,7 +2545,7 @@ impl GraphEditor {
             None,
             Glyph::GraphType,
         );
-        egui::Popup::menu(&resp).show(|ui| {
+        crate::common::popup_menu(&resp, &mut |ui| {
             ui.set_min_width(240.0);
             let s = &mut self.settings;
             for (t, label) in [
@@ -2703,7 +2703,7 @@ impl GraphEditor {
             Glyph::EditKeys,
         );
         let first = session.lock().selected_keys.first().cloned();
-        egui::Popup::menu(&resp).show(|ui| {
+        crate::common::popup_menu(&resp, &mut |ui| {
             // AE: the keyframe context menu for the selected keyframes.
             if let Some(k) = &first {
                 crate::timeline::key_menu(ui, cx, session, k);

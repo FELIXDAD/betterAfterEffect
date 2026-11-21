@@ -224,7 +224,7 @@ impl TimelinePanel {
                         });
                     }
                     let mut menu_out = None;
-                    resp.context_menu(|ui| {
+                    crate::common::context_menu(&resp, &mut |ui| {
                         if !session.lock().selected_layers.contains(layer) {
                             select_layer(session, stage, layer, egui::Modifiers::NONE);
                         }

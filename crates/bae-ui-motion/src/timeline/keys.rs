@@ -210,7 +210,7 @@ impl TimelinePanel {
                     scale: alt,
                 });
             }
-            resp.context_menu(|ui| {
+            crate::common::context_menu(&resp, &mut |ui| {
                 if !session.lock().selected_keys.contains(&kr) {
                     session.lock().selected_keys = vec![kr.clone()];
                 }
