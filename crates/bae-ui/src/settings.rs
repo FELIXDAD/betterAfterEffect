@@ -41,20 +41,35 @@ pub fn register(app: &mut bae_app::AppBuilder) {
     if !actions.snapshot().contains(ACTION) {
         let _ = actions.register(owner.clone(), ACTION, crate::ActionInfo::new(title()));
     }
+    // One named variant per page ("Preferences: General"), as the Keyboard
+    // Shortcuts window and the menus list them.
+    let zh_title = bae_prefs::i18n::ZH
+        .iter()
+        .find(|(en, _)| *en == title())
+        .map_or(title(), |(_, zh)| zh);
+    let mut names: Vec<(&'static str, &'static str)> = Vec::new();
     let variants = app.registry::<crate::CommandVariant>();
     variants.batch(|tx| {
         for page in PAGES {
+            let en: &'static str =
+                Box::leak(format!("{}: {}", title(), page.title).into_boxed_str());
+            let zh_page = bae_prefs::i18n::ZH
+                .iter()
+                .find(|(e, _)| *e == page.title)
+                .map_or(page.title, |(_, zh)| zh);
+            names.push((
+                en,
+                Box::leak(format!("{zh_title}：{zh_page}").into_boxed_str()),
+            ));
             let id = format!("{ACTION}.{}", page.id);
             if !tx.contains(id.as_str()) {
-                let v = crate::CommandVariant::new(
-                    ACTION,
-                    serde_json::json!({ "page": page.id }),
-                    page.title,
-                );
+                let v =
+                    crate::CommandVariant::new(ACTION, serde_json::json!({ "page": page.id }), en);
                 let _ = tx.register(owner.clone(), id.as_str(), v);
             }
         }
     });
+    crate::i18n::register(&names);
     let bindings = crate::KeymapBindings::new(
         crate::presets::AE_KEYMAP,
         vec![
@@ -62,6 +77,26 @@ pub fn register(app: &mut bae_app::AppBuilder) {
         ],
     );
     let _ = app.register(ACTION, bindings);
+}
+
+/// Applies the preferences the UI shell draws with: label colors and names
+/// (Labels page) and the Appearance sliders. Call at startup and after OK.
+pub fn apply(prefs: &Preferences) {
+    use bae_prefs::keys;
+    let colors = prefs
+        .label_colors()
+        .map(|[r, g, b]| Color32::from_rgb(r, g, b));
+    crate::theme::set_label_colors(colors);
+    crate::theme::set_label_names(std::array::from_fn(|i| {
+        let name = prefs.label_name(i);
+        (i > 0 && !name.is_empty() && name != schema::LABEL_NAMES[i]).then(|| name.to_owned())
+    }));
+    crate::theme::set_appearance(crate::theme::Appearance {
+        brightness: prefs.float(keys::BRIGHTNESS) as f32,
+        affect_labels: prefs.bool(keys::AFFECT_LABELS),
+        interactive: prefs.float(keys::INTERACTIVE) as f32,
+        focus: prefs.float(keys::FOCUS) as f32,
+    });
 }
 
 /// What the dialog produced this frame.

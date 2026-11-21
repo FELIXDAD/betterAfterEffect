@@ -519,6 +519,7 @@ dependencies = [
  "bae-package",
  "bae-platform",
  "bae-plugin",
+ "bae-prefs",
  "bae-render",
  "bae-text",
  "bae-ui",

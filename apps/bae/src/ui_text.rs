@@ -98,7 +98,7 @@ fn names(a: &Assembled) -> BTreeMap<String, String> {
 /// Names that read the same in Chinese (product names; "Agent" per docs/glossary.md).
 /// They still need a table entry, so a new English name never slips through as "the
 /// same".
-pub(crate) const SAME_IN_CHINESE: &[&str] = &["BAE", "After Effects", "Agent"];
+pub(crate) const SAME_IN_CHINESE: &[&str] = &["BAE", "After Effects", "Agent", "3D"];
 
 #[test]
 fn every_command_panel_and_action_has_a_chinese_name() {

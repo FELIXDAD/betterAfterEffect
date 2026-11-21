@@ -156,3 +156,39 @@ fn unknown_page_opens_general() {
     let h = harness("nope", &Preferences::default());
     assert_eq!(h.state().dialog.page(), "general");
 }
+
+#[test]
+fn appearance_brightness_lightens_grays_only() {
+    use crate::theme::{self, Appearance, color};
+    let labels: [Color32; 17] = std::array::from_fn(theme::label_color);
+    let def = Appearance::default();
+    assert_eq!(theme::adjust(color::PANEL, &def, &labels), color::PANEL);
+    let light = Appearance {
+        brightness: 1.0,
+        ..def
+    };
+    let panel = theme::adjust(color::PANEL, &light, &labels);
+    assert!(panel.r() > color::PANEL.r() + 40, "{panel:?}");
+    assert_eq!(panel.r(), panel.g());
+    // Label colors stay unless "Affect Label Colors" is on.
+    let red = labels[1];
+    assert_eq!(theme::adjust(red, &light, &labels), red);
+    let affect = Appearance {
+        affect_labels: true,
+        ..light
+    };
+    assert_ne!(theme::adjust(red, &affect, &labels), red);
+    // Interactive controls: the accent blue follows its own slider.
+    let darker = Appearance {
+        interactive: 0.0,
+        ..def
+    };
+    let accent = theme::adjust(color::ACCENT, &darker, &labels);
+    assert!(accent.b() < color::ACCENT.b());
+    assert_eq!(theme::adjust(color::FOCUS, &darker, &labels), color::FOCUS);
+    // Transparent stays transparent.
+    assert_eq!(
+        theme::adjust(Color32::TRANSPARENT, &light, &labels),
+        Color32::TRANSPARENT
+    );
+}

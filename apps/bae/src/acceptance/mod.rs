@@ -23,6 +23,7 @@ mod layers;
 mod layout;
 mod menus;
 mod render_queue;
+mod settings;
 mod startup;
 mod stress;
 mod timeline;
@@ -143,6 +144,9 @@ pub(crate) struct Gui {
     pub outcomes: Vec<(String, String)>,
     /// Quit went through (the window would close).
     pub quit: bool,
+    /// Preferences (in memory) and the generation last applied.
+    pub prefs: Arc<bae_prefs::PrefsStore>,
+    prefs_generation: u64,
 }
 
 impl Gui {
@@ -150,9 +154,16 @@ impl Gui {
         let mut app = build_app();
         let mut doc = Document::new(app.resource::<Arc<bae_ui::history::HistoryLog>>().cloned());
         doc.add_module_commands(&app);
+        // Preferences in memory (as the shell's store, never written). Applied
+        // after a change only: the stress tests keep the model's deep undo stack
+        // (the app starts with Levels of Undo, AE's 99 at most).
+        let prefs = Arc::new(bae_prefs::PrefsStore::default());
+        app.insert_resource(prefs.clone());
         let mut workspace = Workspace::new(&mut app, WorkbenchState::default());
         workspace.set_extra_commands(doc.command_titles());
         Gui {
+            prefs_generation: prefs.generation(),
+            prefs,
             app,
             workspace,
             doc,
@@ -190,6 +201,13 @@ impl Gui {
             .ui(ui, &self.status, &self.doc, self.app.resources());
         self.pending.extend(invocations);
         self.passes += 1;
+        // As `Shell::sync_prefs`.
+        let prefs = self.prefs.clone();
+        if prefs.generation() != self.prefs_generation {
+            self.prefs_generation = prefs.generation();
+            bae_ui::settings::apply(&prefs.current());
+            self.doc.set_undo_limit(prefs.current().levels_of_undo());
+        }
     }
 
     /// `shell::Shell::dispatch` without the window.
@@ -205,6 +223,9 @@ impl Gui {
                 }
             }
             ids::ABOUT => self.workspace.show_about(),
+            bae_ui::settings::ACTION => self
+                .workspace
+                .show_settings(inv.params.get("page").and_then(|p| p.as_str())),
             id if files::is_file_command(id) => {
                 // As `Shell::dispatch`.
                 crate::view_state::run_file_command(
