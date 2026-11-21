@@ -807,3 +807,32 @@ fn rotobezier_pen_paths_get_automatic_tangents() {
         b.out_tangents[1]
     );
 }
+
+#[test]
+fn command_makes_the_pen_the_selection_tool() {
+    let mut h = H::new();
+    let solid = h.layer("solid");
+    h.tools().lock().set(Tool::Pen);
+    // Cmd/Ctrl-click selects the layer instead of starting a path.
+    let r = h.click(320.0, 180.0, Modifiers::COMMAND);
+    assert!(r.invocations.is_empty(), "{:?}", r.invocations);
+    assert_eq!(
+        h.session().lock().selected_layers,
+        std::slice::from_ref(&solid)
+    );
+    assert!(h.viewer.pen.drawing.is_none());
+    // An open mask path ends when Cmd-clicking away deselects the layer.
+    let r = h.click(100.0, 100.0, Modifiers::NONE);
+    h.apply(&r);
+    let r = h.click(200.0, 100.0, Modifiers::NONE);
+    h.apply(&r);
+    assert!(h.viewer.pen.drawing.is_some());
+    h.session().lock().selected_layers.clear();
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert!(h.viewer.pen.drawing.is_none());
+    assert_eq!(
+        h.tools().lock().current(),
+        Tool::Pen,
+        "the tool stays the Pen"
+    );
+}

@@ -29,3 +29,6 @@ tracing.workspace = true
 # Render queue tests write TIFF too (bae-media encoders).
 bae-render = { workspace = true, features = ["media"] }
 tempfile.workspace = true
+# Text-field tests need glyphs; the app uses system fonts (no bundled fonts in
+# release), tests alone get egui's bundled ones (test-only, not in the binary).
+egui = { workspace = true, features = ["default_fonts"] }
