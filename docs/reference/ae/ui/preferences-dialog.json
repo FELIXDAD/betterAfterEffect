@@ -3483,6 +3483,1057 @@
           ]
         }
       ]
+    },
+    {
+      "index": 13,
+      "id": "memory_cpu",
+      "labelZh": "内存和 CPU",
+      "labelEn": "Memory & CPU",
+      "menuCommandId": 24182800,
+      "groups": [
+        {
+          "id": "memory",
+          "titleZh": "内存",
+          "titleEn": "Memory",
+          "controls": [
+            {
+              "id": "installed_ram",
+              "type": "readonly_text",
+              "labelZh": "安装的 RAM:",
+              "labelEn": "Installed RAM:",
+              "default": "<InstalledRAM> GB",
+              "note": "动态读取系统物理内存总量（例如 16 GB / 32 GB / 64 GB / 128 GB）"
+            },
+            {
+              "id": "ram_reserved_for_other_apps_gb",
+              "type": "number_input",
+              "labelZh": "为其他应用程序保留的 RAM:",
+              "labelEn": "RAM Reserved for Other Applications:",
+              "default": "<Dynamic>",
+              "unitZh": "GB",
+              "unitEn": "GB",
+              "range": {
+                "min": 3,
+                "max": "<InstalledRAM - 2>",
+                "note": "随系统总内存动态计算默认值（如 128 GB 机器默认 24 GB）"
+              },
+              "winControlName": "UI_HotTextNumberT"
+            },
+            {
+              "id": "ram_available_for_adobe",
+              "type": "readonly_text",
+              "labelZh": "RAM 可用 [AE/Pr/AME/Au]:",
+              "labelEn": "RAM Available for [AE/Pr/AME/Au]:",
+              "default": "<InstalledRAM - ReservedRAM> GB",
+              "hasNoteText": true,
+              "noteSummary": "共享内存池，同时影响 AE、Premiere、AME、Audition；行内带 4 个应用图标"
+            },
+            {
+              "id": "show_memory_usage_details",
+              "type": "button",
+              "labelZh": "显示内存使用情况详细信息...",
+              "labelEn": "Show Memory Usage Details...",
+              "layout": "horizontal_row_with_gpu_info"
+            },
+            {
+              "id": "gpu_information",
+              "type": "button",
+              "labelZh": "GPU 信息...",
+              "labelEn": "GPU Information...",
+              "layout": "horizontal_row_with_memory_details",
+              "note": "旧版 AE 位于「预览」页，AE 26 移至「内存和 CPU」页"
+            }
+          ]
+        },
+        {
+          "id": "cpu",
+          "titleZh": "CPU",
+          "titleEn": "CPU",
+          "controls": [
+            {
+              "id": "enable_multi_frame_rendering",
+              "type": "checkbox",
+              "labelZh": "启用多帧渲染",
+              "labelEn": "Enable Multi-Frame Rendering",
+              "default": true,
+              "controlsEnablementOf": [
+                "reserved_cpu_power_percent"
+              ],
+              "hasNoteText": true,
+              "noteSummary": "预览、渲染队列及 AME/Premiere 渲染时同时渲染多帧",
+              "preferencesKey": {
+                "section": "Concurrent Frame Rendering",
+                "key": "Enable Concurrent Frame Renders"
+              }
+            },
+            {
+              "id": "reserved_cpu_power_percent",
+              "type": "number_input",
+              "labelZh": "为其他应用程序保留 CPU：",
+              "labelEn": "% CPU Reserved for Other Applications:",
+              "default": 10,
+              "unitZh": "%",
+              "unitEn": "%",
+              "range": {
+                "min": 0,
+                "max": 90
+              },
+              "enabledWhen": {
+                "control": "enable_multi_frame_rendering",
+                "equals": true
+              },
+              "hasNoteText": true,
+              "noteSummary": "限制多帧渲染占用的 CPU 比例，为其他应用留出余量",
+              "winControlName": "MemoryCPUV2Pref_htReservedCPUPower",
+              "preferencesKey": {
+                "section": "Concurrent Frame Rendering",
+                "key": "Reserved CPU Power"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 14,
+      "id": "video",
+      "labelZh": "视频",
+      "labelEn": "Video",
+      "menuCommandId": 24182801,
+      "groups": [
+        {
+          "id": "video_options",
+          "titleZh": "视频选项",
+          "titleEn": "Video Options",
+          "controls": [
+            {
+              "id": "enable_hdr_previews",
+              "type": "checkbox",
+              "labelZh": "启用扩展显示范围/高动态范围预览（可用时）",
+              "labelEn": "Enable Extended Display Range / High Dynamic Range Previews (When Available)",
+              "default": true
+            }
+          ]
+        },
+        {
+          "id": "mercury_transmit",
+          "titleZh": "Mercury Transmit",
+          "titleEn": "Mercury Transmit",
+          "controls": [
+            {
+              "id": "enable_mercury_transmit",
+              "type": "checkbox",
+              "labelZh": "启用 Mercury Transmit",
+              "labelEn": "Enable Mercury Transmit",
+              "default": false,
+              "controlsEnablementOf": [
+                "video_device_table",
+                "disable_video_output_when_in_background"
+              ],
+              "hasNoteText": true,
+              "noteSummary": "小键盘 / 键可快速切换 Mercury Transmit 开关",
+              "preferencesKey": {
+                "section": "Win32 Video Preview Pref Section",
+                "key": "Video Preview Enabled"
+              }
+            },
+            {
+              "id": "video_device_table",
+              "type": "table",
+              "labelZh": "传输设备回放：",
+              "labelEn": "Video Device:",
+              "columns": [
+                {
+                  "id": "device_name",
+                  "labelZh": "设备名称",
+                  "labelEn": "Device Name",
+                  "type": "text"
+                },
+                {
+                  "id": "video_stream",
+                  "labelZh": "视频流",
+                  "labelEn": "Video Stream",
+                  "type": "checkbox"
+                },
+                {
+                  "id": "setup",
+                  "labelZh": "",
+                  "labelEn": "Setup...",
+                  "type": "button"
+                }
+              ],
+              "enabledWhen": {
+                "control": "enable_mercury_transmit",
+                "equals": true
+              },
+              "note": "动态列出系统外接/多屏显示器及 Mercury Transmit 视频 I/O 插件设备；每行含启用复选框与设置按钮"
+            },
+            {
+              "id": "disable_video_output_when_in_background",
+              "type": "checkbox",
+              "labelZh": "在后台时禁用视频输出",
+              "labelEn": "Disable Video Output When in the Background",
+              "default": true,
+              "enabledWhen": {
+                "control": "enable_mercury_transmit",
+                "equals": true
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 15,
+      "id": "3d",
+      "labelZh": "3D",
+      "labelEn": "3D",
+      "menuCommandId": 24182803,
+      "groups": [
+        {
+          "id": "camera_navigation",
+          "titleZh": "摄像机导航",
+          "titleEn": "Camera Navigation",
+          "controls": [
+            {
+              "id": "override_123456_for_gizmos",
+              "type": "checkbox",
+              "labelZh": "小工具的 1/2/3 用于导航，4/5/6 用于变换",
+              "labelEn": "1/2/3 for Navigation, 4/5/6 for Transform Gizmos",
+              "default": true,
+              "hasNoteText": true,
+              "noteSummary": "开启后数字键 1–6 不再跳转/创建标记（注：对话框资源中另存隐藏的下拉变体控件，实测可见控件为复选框）",
+              "preferencesKey": {
+                "section": "Tool Palette Settings v4",
+                "key": "3D Override 123456"
+              }
+            },
+            {
+              "id": "override_alt_for_camera_navigation",
+              "type": "checkbox",
+              "labelZh": "激活 Alt-单击鼠标左/中/右键以进行摄像机导航",
+              "labelEn": "Activate Alt-Left/Middle/Right Click for Camera Navigation",
+              "default": true,
+              "hasNoteText": true,
+              "noteSummary": "开启后将停用临时线框模式（macOS 为 Option 键；对话框资源中另存隐藏的下拉变体控件）",
+              "platformNotes": "Windows 使用 Alt；macOS 使用 Option",
+              "preferencesKey": {
+                "section": "Tool Palette Settings v4",
+                "key": "3D Override Alt"
+              }
+            },
+            {
+              "id": "camera_point_of_interest",
+              "type": "dropdown",
+              "labelZh": "摄像机操作点：",
+              "labelEn": "Camera Point of Interest:",
+              "default": "indicator",
+              "options": [
+                {
+                  "value": "none",
+                  "labelZh": "无",
+                  "labelEn": "None"
+                },
+                {
+                  "value": "indicator",
+                  "labelZh": "指示器",
+                  "labelEn": "Indicator"
+                },
+                {
+                  "value": "directional_indicator",
+                  "labelZh": "方向指示器",
+                  "labelEn": "Directional Indicator"
+                }
+              ],
+              "preferencesKey": {
+                "section": "Tool Palette Settings v4",
+                "key": "3D ManipulationPoint"
+              }
+            }
+          ]
+        },
+        {
+          "id": "camera_navigation_dolly",
+          "titleZh": "摄像机导航-推拉镜头",
+          "titleEn": "Camera Navigation - Dolly",
+          "controls": [
+            {
+              "id": "mouse_wheel_behavior",
+              "type": "dropdown",
+              "labelZh": "鼠标滚轮行为：",
+              "labelEn": "Mouse Wheel Behavior:",
+              "default": "zoom_comp",
+              "options": [
+                {
+                  "value": "zoom_comp",
+                  "labelZh": "放大合成",
+                  "labelEn": "Zoom Comp"
+                },
+                {
+                  "value": "dolly_camera",
+                  "labelZh": "推拉摄像机",
+                  "labelEn": "Dolly Camera"
+                },
+                {
+                  "value": "reverse_dolly",
+                  "labelZh": "反向推拉镜头",
+                  "labelEn": "Reverse Dolly"
+                }
+              ],
+              "preferencesKey": {
+                "section": "Tool Palette Settings v4",
+                "key": "3D Dolly Wheel Mode v2"
+              }
+            },
+            {
+              "id": "drag_direction",
+              "type": "dropdown",
+              "labelZh": "拖动方向：",
+              "labelEn": "Drag Direction:",
+              "default": "normal",
+              "options": [
+                {
+                  "value": "normal",
+                  "labelZh": "正常",
+                  "labelEn": "Normal"
+                },
+                {
+                  "value": "inverted",
+                  "labelZh": "反向",
+                  "labelEn": "Inverted"
+                }
+              ],
+              "preferencesKey": {
+                "section": "Tool Palette Settings v4",
+                "key": "3D Dolly Drag Mode"
+              }
+            }
+          ]
+        },
+        {
+          "id": "3d_cache",
+          "titleZh": "3D 缓存",
+          "titleEn": "3D Cache",
+          "controls": [
+            {
+              "id": "empty_3d_cache",
+              "type": "button",
+              "labelZh": "清空 3D 缓存...",
+              "labelEn": "Empty 3D Cache...",
+              "note": "点击弹出确认对话框以清空 3D 渲染缓存"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 16,
+      "id": "scripting_expressions",
+      "labelZh": "脚本和表达式",
+      "labelEn": "Scripting & Expressions",
+      "menuCommandId": 24182804,
+      "groups": [
+        {
+          "id": "application_scripting",
+          "titleZh": "应用程序脚本",
+          "titleEn": "Application Scripting",
+          "controls": [
+            {
+              "id": "allow_scripts_to_write_files",
+              "type": "checkbox",
+              "labelZh": "允许脚本写入文件和访问网络",
+              "labelEn": "Allow Scripts to Write Files and Access Network",
+              "default": false,
+              "note": "出厂默认不勾选（本测试机因执行自动化提取脚本曾手动开启）",
+              "preferencesKey": {
+                "section": "Main Pref Section v2",
+                "key": "Pref_SCRIPTING_FILE_NETWORK_SECURITY"
+              }
+            },
+            {
+              "id": "enable_javascript_debugger",
+              "type": "checkbox",
+              "labelZh": "启用 JavaScript 调试器",
+              "labelEn": "Enable JavaScript Debugger",
+              "default": false,
+              "preferencesKey": {
+                "section": "Main Pref Section v2",
+                "key": "Pref_JAVASCRIPT_DEBUGGER"
+              }
+            },
+            {
+              "id": "warn_user_when_executing_files",
+              "type": "checkbox",
+              "labelZh": "执行文件时警告用户",
+              "labelEn": "Warn User When Executing Files",
+              "default": true,
+              "preferencesKey": {
+                "section": "Main Pref Section v2",
+                "key": "Pref_WARN_WHEN_RUNNING_SCRIPTS"
+              }
+            },
+            {
+              "id": "show_scripts_progress_dialog",
+              "type": "checkbox",
+              "labelZh": "显示脚本进度对话框",
+              "labelEn": "Show Scripts Progress Dialog",
+              "default": true,
+              "note": "底层键为反向布尔（Disable=0 表示显示）",
+              "preferencesKey": {
+                "section": "Main Pref Section v2",
+                "key": "Pref_DISABLE_SCRIPTS_PROGRESS_DIALOG"
+              }
+            }
+          ]
+        },
+        {
+          "id": "expressions",
+          "titleZh": "表达式",
+          "titleEn": "Expressions",
+          "controls": [
+            {
+              "id": "write_expression_pick_whip_in_plain_english",
+              "type": "checkbox",
+              "labelZh": "以简明英语编写表达式拾取",
+              "labelEn": "Write Expression Pick Whip in Plain English",
+              "default": true,
+              "preferencesKey": {
+                "section": "Main Pref Section v2",
+                "key": "Pref_USE_COMPACT_EXPRS"
+              }
+            },
+            {
+              "id": "show_expression_error_warning_banner",
+              "type": "checkbox",
+              "labelZh": "当项目包含表达式错误时显示警告横幅",
+              "labelEn": "Show Warning Banner when Project Contains Expression Errors",
+              "default": true,
+              "preferencesKey": {
+                "section": "Misc Section",
+                "key": "Show Expression Error Warning Banner"
+              }
+            }
+          ]
+        },
+        {
+          "id": "expression_editor",
+          "titleZh": "表达式编辑器",
+          "titleEn": "Expression Editor",
+          "note": "上半区左右两列（左侧字体大小 + 9 个编辑开关；右侧折叠/换行/制表符 + 实时代码预览框）；下半区为「主题」下拉、保存/删除图标按钮与 3 列共 13 项配色拾取器 + 选择项 Alpha",
+          "controls": [
+            {
+              "id": "expr_font_size",
+              "type": "number_input",
+              "labelZh": "字体大小:",
+              "labelEn": "Font Size:",
+              "default": 12,
+              "unitZh": "px",
+              "unitEn": "px",
+              "range": {
+                "min": 6,
+                "max": 72
+              },
+              "winControlName": "ExpressionScriptsPref_htFontSize",
+              "preferencesKey": {
+                "section": "Expression Editor Settings (v9)",
+                "key": "Font Size"
+              }
+            },
+            {
+              "id": "expr_syntax_highlighting",
+              "type": "checkbox",
+              "labelZh": "语法突出显示",
+              "labelEn": "Syntax Highlighting",
+              "default": true,
+              "controlsEnablementOf": [
+                "expr_highlight_matching_braces",
+                "expr_color_line_numbers",
+                "expr_color_keywords",
+                "expr_color_identifiers",
+                "expr_color_comments",
+                "expr_color_numbers",
+                "expr_color_strings",
+                "expr_color_operators",
+                "expr_color_correct_braces",
+                "expr_color_incorrect_braces",
+                "expr_color_selection"
+              ],
+              "preferencesKey": {
+                "section": "Expression Editor Settings (v9)",
+                "key": "Syntax Highlighting - Enabled"
+              }
+            },
+            {
+              "id": "expr_show_line_numbers",
+              "type": "checkbox",
+              "labelZh": "显示行号",
+              "labelEn": "Show Line Numbers",
+              "default": true,
+              "controlsEnablementOf": [
+                "expr_color_line_numbers"
+              ],
+              "preferencesKey": {
+                "section": "Expression Editor Settings (v9)",
+                "key": "Show Line Numbers"
+              }
+            },
+            {
+              "id": "expr_show_indent_guides",
+              "type": "checkbox",
+              "labelZh": "显示缩进标尺",
+              "labelEn": "Show Indent Guides",
+              "default": false,
+              "controlsEnablementOf": [
+                "expr_color_indent_guides"
+              ],
+              "preferencesKey": {
+                "section": "Expression Editor Settings (v9)",
+                "key": "Indent Guides - Enabled"
+              }
+            },
+            {
+              "id": "expr_highlight_matching_braces",
+              "type": "checkbox",
+              "labelZh": "突出显示匹配的大括号",
+              "labelEn": "Highlight Matching Braces",
+              "default": true,
+              "enabledWhen": {
+                "control": "expr_syntax_highlighting",
+                "equals": true
+              },
+              "controlsEnablementOf": [
+                "expr_color_correct_braces",
+                "expr_color_incorrect_braces"
+              ],
+              "preferencesKey": {
+                "section": "Expression Editor Settings (v9)",
+                "key": "Bracing - Enable Brace Matching"
+              }
+            },
+            {
+              "id": "expr_auto_insert_braces",
+              "type": "checkbox",
+              "labelZh": "自动插入括号",
+              "labelEn": "Auto-Insert Braces",
+              "default": true,
+              "preferencesKey": {
+                "section": "Expression Editor Settings (v9)",
+                "key": "Bracing - Enable Brace Insert"
+              }
+            },
+            {
+              "id": "expr_auto_indent_braces",
+              "type": "checkbox",
+              "labelZh": "自动缩进大括号",
+              "labelEn": "Auto-Indent Braces",
+              "default": true,
+              "preferencesKey": {
+                "section": "Expression Editor Settings (v9)",
+                "key": "Bracing - Enable Auto Indent"
+              }
+            },
+            {
+              "id": "expr_backspace_unindents",
+              "type": "checkbox",
+              "labelZh": "回车取消缩进",
+              "labelEn": "Backspace Unindents",
+              "default": true,
+              "preferencesKey": {
+                "section": "Expression Editor Settings (v9)",
+                "key": "Indent - Enable Backspace Unindents"
+              }
+            },
+            {
+              "id": "expr_inline_errors",
+              "type": "checkbox",
+              "labelZh": "内联错误",
+              "labelEn": "Inline Errors",
+              "default": true,
+              "preferencesKey": {
+                "section": "Expression Editor Settings (v9)",
+                "key": "Inline Errors - Enabled"
+              }
+            },
+            {
+              "id": "expr_auto_complete",
+              "type": "checkbox",
+              "labelZh": "自动完成",
+              "labelEn": "Auto-Complete",
+              "default": true,
+              "preferencesKey": {
+                "section": "Expression Editor Settings (v9)",
+                "key": "Auto Complete - Enabled"
+              }
+            },
+            {
+              "id": "expr_folding",
+              "type": "dropdown",
+              "labelZh": "折叠:",
+              "labelEn": "Folding:",
+              "default": "box_tree",
+              "options": [
+                {
+                  "value": "off",
+                  "labelZh": "关",
+                  "labelEn": "Off"
+                },
+                {
+                  "value": "arrows",
+                  "labelZh": "箭头",
+                  "labelEn": "Arrows"
+                },
+                {
+                  "value": "plus_minus",
+                  "labelZh": "加号和减号",
+                  "labelEn": "Plus & Minus"
+                },
+                {
+                  "value": "circle_tree",
+                  "labelZh": "圆圈树状图",
+                  "labelEn": "Circle Tree"
+                },
+                {
+                  "value": "box_tree",
+                  "labelZh": "方框树状图",
+                  "labelEn": "Box Tree"
+                }
+              ],
+              "preferencesKey": {
+                "section": "Expression Editor Settings (v9)",
+                "key": "Folding - Preset Option (0: Arrow, 1: Plus Minus, 2: Circle Tree, 3: Square Tree)"
+              }
+            },
+            {
+              "id": "expr_word_wrap",
+              "type": "dropdown",
+              "labelZh": "自动换行:",
+              "labelEn": "Word Wrap:",
+              "default": "word",
+              "options": [
+                {
+                  "value": "none",
+                  "labelZh": "无",
+                  "labelEn": "None"
+                },
+                {
+                  "value": "word",
+                  "labelZh": "单词",
+                  "labelEn": "Word"
+                },
+                {
+                  "value": "character",
+                  "labelZh": "字符",
+                  "labelEn": "Character"
+                }
+              ],
+              "preferencesKey": {
+                "section": "Expression Editor Settings (v9)",
+                "key": "Word Wrap - Word Wrap Mode (0: None, 1: Word, 3: Character)"
+              }
+            },
+            {
+              "id": "expr_use_tabs",
+              "type": "checkbox",
+              "labelZh": "使用选项卡",
+              "labelEn": "Use Tabs",
+              "default": true,
+              "preferencesKey": {
+                "section": "Expression Editor Settings (v9)",
+                "key": "Tabs - Enable Use Tabs"
+              }
+            },
+            {
+              "id": "expr_tab_width",
+              "type": "number_input",
+              "labelZh": "宽度:",
+              "labelEn": "Width:",
+              "default": 4,
+              "range": {
+                "min": 1,
+                "max": 16
+              },
+              "winControlName": "ExpressionScriptsPref_htTabWidth",
+              "preferencesKey": {
+                "section": "Expression Editor Settings (v9)",
+                "key": "Tabs - Tab Width"
+              }
+            },
+            {
+              "id": "expr_code_preview",
+              "type": "code_preview",
+              "labelZh": "表达式编辑器预览",
+              "labelEn": "Expression Editor Live Preview",
+              "note": "实时预览当前字体大小、主题配色、行号、折叠、自动换行与缩进效果（Scintilla 控件）"
+            },
+            {
+              "id": "expr_theme",
+              "type": "dropdown",
+              "labelZh": "主题:",
+              "labelEn": "Theme:",
+              "default": "ae_classic_dark",
+              "options": [
+                {
+                  "value": "custom",
+                  "labelZh": "自定义",
+                  "labelEn": "Custom"
+                },
+                {
+                  "value": "boundstone",
+                  "labelZh": "界石",
+                  "labelEn": "Boundstone"
+                },
+                {
+                  "value": "ae_classic_dark",
+                  "labelZh": "After Effects 经典暗色",
+                  "labelEn": "After Effects Classic Dark"
+                },
+                {
+                  "value": "ae_classic_light",
+                  "labelZh": "After Effects 经典亮色",
+                  "labelEn": "After Effects Classic Light"
+                },
+                {
+                  "value": "ae_green_cache",
+                  "labelZh": "After Effects 绿色缓存",
+                  "labelEn": "After Effects Green Cache"
+                },
+                {
+                  "value": "ae_high_contrast",
+                  "labelZh": "After Effects 高对比度",
+                  "labelEn": "After Effects High Contrast"
+                },
+                {
+                  "value": "ae_pastel",
+                  "labelZh": "After Effects 蜡笔",
+                  "labelEn": "After Effects Pastel"
+                },
+                {
+                  "value": "basic_dark",
+                  "labelZh": "基本暗色",
+                  "labelEn": "Basic Dark"
+                },
+                {
+                  "value": "basic_light",
+                  "labelZh": "基本亮色",
+                  "labelEn": "Basic Light"
+                },
+                {
+                  "value": "classic",
+                  "labelZh": "经典",
+                  "labelEn": "Classic"
+                },
+                {
+                  "value": "cloak_o_nut",
+                  "labelZh": "Cloak-O-Nut",
+                  "labelEn": "Cloak-O-Nut"
+                },
+                {
+                  "value": "down_n_away",
+                  "labelZh": "Down N' Away",
+                  "labelEn": "Down N' Away"
+                },
+                {
+                  "value": "grayscale_dark",
+                  "labelZh": "灰度暗色",
+                  "labelEn": "Grayscale Dark"
+                },
+                {
+                  "value": "grayscale_light",
+                  "labelZh": "灰度亮色",
+                  "labelEn": "Grayscale Light"
+                },
+                {
+                  "value": "hough_dark",
+                  "labelZh": "霍夫暗色",
+                  "labelEn": "Hough Dark"
+                },
+                {
+                  "value": "hough_light",
+                  "labelZh": "霍夫亮色",
+                  "labelEn": "Hough Light"
+                },
+                {
+                  "value": "labels",
+                  "labelZh": "标签",
+                  "labelEn": "Labels"
+                },
+                {
+                  "value": "lowlight",
+                  "labelZh": "低亮度",
+                  "labelEn": "Lowlight"
+                },
+                {
+                  "value": "monakai",
+                  "labelZh": "Monakai",
+                  "labelEn": "Monakai"
+                },
+                {
+                  "value": "neon",
+                  "labelZh": "霓虹",
+                  "labelEn": "Neon"
+                },
+                {
+                  "value": "playfield",
+                  "labelZh": "运动场",
+                  "labelEn": "Playfield"
+                },
+                {
+                  "value": "raven",
+                  "labelZh": "渡鸦",
+                  "labelEn": "Raven"
+                },
+                {
+                  "value": "slate",
+                  "labelZh": "板岩",
+                  "labelEn": "Slate"
+                },
+                {
+                  "value": "solarized_dark",
+                  "labelZh": "过曝暗色",
+                  "labelEn": "Solarized Dark"
+                },
+                {
+                  "value": "solarized_light",
+                  "labelZh": "过曝亮色",
+                  "labelEn": "Solarized Light"
+                },
+                {
+                  "value": "terminal",
+                  "labelZh": "黑底绿字",
+                  "labelEn": "Terminal"
+                },
+                {
+                  "value": "yellow_alert",
+                  "labelZh": "黄色警告",
+                  "labelEn": "Yellow Alert"
+                },
+                {
+                  "value": "zakai",
+                  "labelZh": "Zakai",
+                  "labelEn": "Zakai"
+                }
+              ],
+              "preferencesKey": {
+                "section": "Expression Editor Settings (v9)",
+                "key": "Current Expression Theme"
+              }
+            },
+            {
+              "id": "expr_save_theme",
+              "type": "icon_button",
+              "labelZh": "保存主题",
+              "labelEn": "Save Theme",
+              "note": "位于「主题」下拉框右侧的保存图标按钮，修改配色变为「自定义」后可另存主题"
+            },
+            {
+              "id": "expr_delete_theme",
+              "type": "icon_button",
+              "labelZh": "删除主题",
+              "labelEn": "Delete Theme",
+              "defaultEnabled": false,
+              "note": "仅选中用户自定义主题时可用，内置主题置灰"
+            },
+            {
+              "id": "expr_color_default",
+              "type": "color_picker",
+              "labelZh": "默认设置:",
+              "labelEn": "Default:",
+              "defaultColorHex": "#CCCCCC",
+              "hasEyedropper": true,
+              "layoutColumn": 1
+            },
+            {
+              "id": "expr_color_background",
+              "type": "color_picker",
+              "labelZh": "背景:",
+              "labelEn": "Background:",
+              "defaultColorHex": "#1D1D1D",
+              "hasEyedropper": true,
+              "layoutColumn": 1
+            },
+            {
+              "id": "expr_color_line_numbers",
+              "type": "color_picker",
+              "labelZh": "行号:",
+              "labelEn": "Line Numbers:",
+              "defaultColorHex": "#4D4C4D",
+              "hasEyedropper": true,
+              "layoutColumn": 1,
+              "enabledWhen": {
+                "all": [
+                  {
+                    "control": "expr_syntax_highlighting",
+                    "equals": true
+                  },
+                  {
+                    "control": "expr_show_line_numbers",
+                    "equals": true
+                  }
+                ]
+              }
+            },
+            {
+              "id": "expr_color_keywords",
+              "type": "color_picker",
+              "labelZh": "关键字:",
+              "labelEn": "Keywords:",
+              "defaultColorHex": "#348EE8",
+              "hasEyedropper": true,
+              "layoutColumn": 1,
+              "enabledWhen": {
+                "control": "expr_syntax_highlighting",
+                "equals": true
+              }
+            },
+            {
+              "id": "expr_color_identifiers",
+              "type": "color_picker",
+              "labelZh": "标识符:",
+              "labelEn": "Identifiers:",
+              "defaultColorHex": "#EAC885",
+              "hasEyedropper": true,
+              "layoutColumn": 1,
+              "enabledWhen": {
+                "control": "expr_syntax_highlighting",
+                "equals": true
+              }
+            },
+            {
+              "id": "expr_color_comments",
+              "type": "color_picker",
+              "labelZh": "注释:",
+              "labelEn": "Comments:",
+              "defaultColorHex": "#1D9E27",
+              "hasEyedropper": true,
+              "layoutColumn": 2,
+              "enabledWhen": {
+                "control": "expr_syntax_highlighting",
+                "equals": true
+              }
+            },
+            {
+              "id": "expr_color_numbers",
+              "type": "color_picker",
+              "labelZh": "数字:",
+              "labelEn": "Numbers:",
+              "defaultColorHex": "#3ED9FF",
+              "hasEyedropper": true,
+              "layoutColumn": 2,
+              "enabledWhen": {
+                "control": "expr_syntax_highlighting",
+                "equals": true
+              }
+            },
+            {
+              "id": "expr_color_strings",
+              "type": "color_picker",
+              "labelZh": "字符串:",
+              "labelEn": "Strings:",
+              "defaultColorHex": "#F67476",
+              "hasEyedropper": true,
+              "layoutColumn": 2,
+              "enabledWhen": {
+                "control": "expr_syntax_highlighting",
+                "equals": true
+              }
+            },
+            {
+              "id": "expr_color_operators",
+              "type": "color_picker",
+              "labelZh": "运算符:",
+              "labelEn": "Operators:",
+              "defaultColorHex": "#988A2E",
+              "hasEyedropper": true,
+              "layoutColumn": 2,
+              "enabledWhen": {
+                "control": "expr_syntax_highlighting",
+                "equals": true
+              }
+            },
+            {
+              "id": "expr_color_indent_guides",
+              "type": "color_picker",
+              "labelZh": "缩进指示:",
+              "labelEn": "Indent Guides:",
+              "defaultColorHex": "#4D4C4D",
+              "hasEyedropper": true,
+              "layoutColumn": 3,
+              "enabledWhen": {
+                "control": "expr_show_indent_guides",
+                "equals": true
+              }
+            },
+            {
+              "id": "expr_color_correct_braces",
+              "type": "color_picker",
+              "labelZh": "正确的大括号:",
+              "labelEn": "Correct Braces:",
+              "defaultColorHex": "#5BF677",
+              "hasEyedropper": true,
+              "layoutColumn": 3,
+              "enabledWhen": {
+                "all": [
+                  {
+                    "control": "expr_syntax_highlighting",
+                    "equals": true
+                  },
+                  {
+                    "control": "expr_highlight_matching_braces",
+                    "equals": true
+                  }
+                ]
+              }
+            },
+            {
+              "id": "expr_color_incorrect_braces",
+              "type": "color_picker",
+              "labelZh": "错误的大括号:",
+              "labelEn": "Incorrect Braces:",
+              "defaultColorHex": "#E50000",
+              "hasEyedropper": true,
+              "layoutColumn": 3,
+              "enabledWhen": {
+                "all": [
+                  {
+                    "control": "expr_syntax_highlighting",
+                    "equals": true
+                  },
+                  {
+                    "control": "expr_highlight_matching_braces",
+                    "equals": true
+                  }
+                ]
+              }
+            },
+            {
+              "id": "expr_color_selection",
+              "type": "color_picker",
+              "labelZh": "选择项:",
+              "labelEn": "Selection:",
+              "defaultColorHex": "#A2E3F2",
+              "hasEyedropper": true,
+              "layoutColumn": 3,
+              "enabledWhen": {
+                "control": "expr_syntax_highlighting",
+                "equals": true
+              }
+            },
+            {
+              "id": "expr_selection_alpha",
+              "type": "number_input",
+              "labelZh": "选择项 Alpha:",
+              "labelEn": "Selection Alpha:",
+              "default": 0.3,
+              "range": {
+                "min": 0.0,
+                "max": 1.0
+              },
+              "layoutColumn": 3,
+              "winControlName": "ExpressionScriptsPref_htSelectionAlpha"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

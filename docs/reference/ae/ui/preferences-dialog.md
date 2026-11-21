@@ -474,3 +474,116 @@
 |---|---|---|---|---|---|---|
 | `write_xmp_ids_on_import` | `checkbox` | 导入时将 XMP ID 写入文件 | Write XMP IDs to Files on Import | 不勾选 | — | — |
 | `create_layer_markers_from_xmp` | `checkbox` | 从素材 XMP 元数据创建图层标记 | Create Layer Markers from Footage XMP Metadata | 勾选 | — | `[Metadata] CreateLayerMarkersFromFootageXMP` |
+
+### 4.13 第 13 页：内存和 CPU (Memory & CPU) — `memory_cpu`
+
+#### 内存 / Memory
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `installed_ram` | `readonly_text` | 安装的 RAM: | Installed RAM: | `<InstalledRAM> GB` | 动态读取系统物理内存总量（例如 16 GB / 32 GB / 64 GB / 128 GB） | — |
+| `ram_reserved_for_other_apps_gb` | `number_input` | 为其他应用程序保留的 RAM: | RAM Reserved for Other Applications: | `<Dynamic>` GB | 范围 `3..<InstalledRAM - 2>` GB；随系统总内存动态计算默认值（如 128 GB 机器默认 24 GB） | — |
+| `ram_available_for_adobe` | `readonly_text` | RAM 可用 [AE/Pr/AME/Au]: | RAM Available for [AE/Pr/AME/Au]: | `<InstalledRAM - ReservedRAM> GB` | — | — |
+| `show_memory_usage_details` | `button` | 显示内存使用情况详细信息... | Show Memory Usage Details... | — | — | — |
+| `gpu_information` | `button` | GPU 信息... | GPU Information... | — | 旧版 AE 位于「预览」页，AE 26 移至「内存和 CPU」页 | — |
+
+#### CPU / CPU
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `enable_multi_frame_rendering` | `checkbox` | 启用多帧渲染 | Enable Multi-Frame Rendering | 勾选 | — | `[Concurrent Frame Rendering] Enable Concurrent Frame Renders` |
+| `reserved_cpu_power_percent` | `number_input` | 为其他应用程序保留 CPU： | % CPU Reserved for Other Applications: | `10` % | 范围 `0..90` %；启用条件：`enable_multi_frame_rendering == True` | `[Concurrent Frame Rendering] Reserved CPU Power` |
+
+### 4.14 第 14 页：视频 (Video) — `video`
+
+#### 视频选项 / Video Options
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `enable_hdr_previews` | `checkbox` | 启用扩展显示范围/高动态范围预览（可用时） | Enable Extended Display Range / High Dynamic Range Previews (When Available) | 勾选 | — | — |
+
+#### Mercury Transmit / Mercury Transmit
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `enable_mercury_transmit` | `checkbox` | 启用 Mercury Transmit | Enable Mercury Transmit | 不勾选 | — | `[Win32 Video Preview Pref Section] Video Preview Enabled` |
+| `video_device_table` | `table` | 传输设备回放： | Video Device: | — | 启用条件：`enable_mercury_transmit == True`；动态列出系统外接/多屏显示器及 Mercury Transmit 视频 I/O 插件设备；每行含启用复选框与设置按钮 | — |
+| `disable_video_output_when_in_background` | `checkbox` | 在后台时禁用视频输出 | Disable Video Output When in the Background | 勾选 | 启用条件：`enable_mercury_transmit == True` | — |
+
+### 4.15 第 15 页：3D (3D) — `3d`
+
+#### 摄像机导航 / Camera Navigation
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `override_123456_for_gizmos` | `checkbox` | 小工具的 1/2/3 用于导航，4/5/6 用于变换 | 1/2/3 for Navigation, 4/5/6 for Transform Gizmos | 勾选 | — | `[Tool Palette Settings v4] 3D Override 123456` |
+| `override_alt_for_camera_navigation` | `checkbox` | 激活 Alt-单击鼠标左/中/右键以进行摄像机导航 | Activate Alt-Left/Middle/Right Click for Camera Navigation | 勾选 | Windows 使用 Alt；macOS 使用 Option | `[Tool Palette Settings v4] 3D Override Alt` |
+| `camera_point_of_interest` | `dropdown` | 摄像机操作点： | Camera Point of Interest: | 指示器 (`Indicator`) | 无 (None) / 指示器 (Indicator) / 方向指示器 (Directional Indicator) | `[Tool Palette Settings v4] 3D ManipulationPoint` |
+
+#### 摄像机导航-推拉镜头 / Camera Navigation - Dolly
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `mouse_wheel_behavior` | `dropdown` | 鼠标滚轮行为： | Mouse Wheel Behavior: | 放大合成 (`Zoom Comp`) | 放大合成 (Zoom Comp) / 推拉摄像机 (Dolly Camera) / 反向推拉镜头 (Reverse Dolly) | `[Tool Palette Settings v4] 3D Dolly Wheel Mode v2` |
+| `drag_direction` | `dropdown` | 拖动方向： | Drag Direction: | 正常 (`Normal`) | 正常 (Normal) / 反向 (Inverted) | `[Tool Palette Settings v4] 3D Dolly Drag Mode` |
+
+#### 3D 缓存 / 3D Cache
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `empty_3d_cache` | `button` | 清空 3D 缓存... | Empty 3D Cache... | — | 点击弹出确认对话框以清空 3D 渲染缓存 | — |
+
+### 4.16 第 16 页：脚本和表达式 (Scripting & Expressions) — `scripting_expressions`
+
+#### 应用程序脚本 / Application Scripting
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `allow_scripts_to_write_files` | `checkbox` | 允许脚本写入文件和访问网络 | Allow Scripts to Write Files and Access Network | 不勾选 | 出厂默认不勾选（本测试机因执行自动化提取脚本曾手动开启） | `[Main Pref Section v2] Pref_SCRIPTING_FILE_NETWORK_SECURITY` |
+| `enable_javascript_debugger` | `checkbox` | 启用 JavaScript 调试器 | Enable JavaScript Debugger | 不勾选 | — | `[Main Pref Section v2] Pref_JAVASCRIPT_DEBUGGER` |
+| `warn_user_when_executing_files` | `checkbox` | 执行文件时警告用户 | Warn User When Executing Files | 勾选 | — | `[Main Pref Section v2] Pref_WARN_WHEN_RUNNING_SCRIPTS` |
+| `show_scripts_progress_dialog` | `checkbox` | 显示脚本进度对话框 | Show Scripts Progress Dialog | 勾选 | 底层键为反向布尔（Disable=0 表示显示） | `[Main Pref Section v2] Pref_DISABLE_SCRIPTS_PROGRESS_DIALOG` |
+
+#### 表达式 / Expressions
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `write_expression_pick_whip_in_plain_english` | `checkbox` | 以简明英语编写表达式拾取 | Write Expression Pick Whip in Plain English | 勾选 | — | `[Main Pref Section v2] Pref_USE_COMPACT_EXPRS` |
+| `show_expression_error_warning_banner` | `checkbox` | 当项目包含表达式错误时显示警告横幅 | Show Warning Banner when Project Contains Expression Errors | 勾选 | — | `[Misc Section] Show Expression Error Warning Banner` |
+
+#### 表达式编辑器 / Expression Editor（上半区左右两列（左侧字体大小 + 9 个编辑开关；右侧折叠/换行/制表符 + 实时代码预览框）；下半区为「主题」下拉、保存/删除图标按钮与 3 列共 13 项配色拾取器 + 选择项 Alpha）
+
+| 控件 ID | 类型 | 中文标签 | 英文标签 | 默认值 | 选项 / 范围 / 联动与平台说明 | `preferences.json` 键 |
+|---|---|---|---|---|---|---|
+| `expr_font_size` | `number_input` | 字体大小: | Font Size: | `12` px | 范围 `6..72` px | `[Expression Editor Settings (v9)] Font Size` |
+| `expr_syntax_highlighting` | `checkbox` | 语法突出显示 | Syntax Highlighting | 勾选 | — | `[Expression Editor Settings (v9)] Syntax Highlighting - Enabled` |
+| `expr_show_line_numbers` | `checkbox` | 显示行号 | Show Line Numbers | 勾选 | — | `[Expression Editor Settings (v9)] Show Line Numbers` |
+| `expr_show_indent_guides` | `checkbox` | 显示缩进标尺 | Show Indent Guides | 不勾选 | — | `[Expression Editor Settings (v9)] Indent Guides - Enabled` |
+| `expr_highlight_matching_braces` | `checkbox` | 突出显示匹配的大括号 | Highlight Matching Braces | 勾选 | 启用条件：`expr_syntax_highlighting == True` | `[Expression Editor Settings (v9)] Bracing - Enable Brace Matching` |
+| `expr_auto_insert_braces` | `checkbox` | 自动插入括号 | Auto-Insert Braces | 勾选 | — | `[Expression Editor Settings (v9)] Bracing - Enable Brace Insert` |
+| `expr_auto_indent_braces` | `checkbox` | 自动缩进大括号 | Auto-Indent Braces | 勾选 | — | `[Expression Editor Settings (v9)] Bracing - Enable Auto Indent` |
+| `expr_backspace_unindents` | `checkbox` | 回车取消缩进 | Backspace Unindents | 勾选 | — | `[Expression Editor Settings (v9)] Indent - Enable Backspace Unindents` |
+| `expr_inline_errors` | `checkbox` | 内联错误 | Inline Errors | 勾选 | — | `[Expression Editor Settings (v9)] Inline Errors - Enabled` |
+| `expr_auto_complete` | `checkbox` | 自动完成 | Auto-Complete | 勾选 | — | `[Expression Editor Settings (v9)] Auto Complete - Enabled` |
+| `expr_folding` | `dropdown` | 折叠: | Folding: | 方框树状图 (`Box Tree`) | 关 (Off) / 箭头 (Arrows) / 加号和减号 (Plus & Minus) / 圆圈树状图 (Circle Tree) / 方框树状图 (Box Tree) | `[Expression Editor Settings (v9)] Folding - Preset Option (0: Arrow, 1: Plus Minus, 2: Circle Tree, 3: Square Tree)` |
+| `expr_word_wrap` | `dropdown` | 自动换行: | Word Wrap: | 单词 (`Word`) | 无 (None) / 单词 (Word) / 字符 (Character) | `[Expression Editor Settings (v9)] Word Wrap - Word Wrap Mode (0: None, 1: Word, 3: Character)` |
+| `expr_use_tabs` | `checkbox` | 使用选项卡 | Use Tabs | 勾选 | — | `[Expression Editor Settings (v9)] Tabs - Enable Use Tabs` |
+| `expr_tab_width` | `number_input` | 宽度: | Width: | `4` | 范围 `1..16` | `[Expression Editor Settings (v9)] Tabs - Tab Width` |
+| `expr_code_preview` | `code_preview` | 表达式编辑器预览 | Expression Editor Live Preview | — | 实时预览当前字体大小、主题配色、行号、折叠、自动换行与缩进效果（Scintilla 控件） | — |
+| `expr_theme` | `dropdown` | 主题: | Theme: | After Effects 经典暗色 (`After Effects Classic Dark`) | 共 28 项：自定义 (Custom)、界石 (Boundstone)、After Effects 经典暗色 (After Effects Classic Dark)、After Effects 经典亮色 (After Effects Classic Light)、After Effects 绿色缓存 (After Effects Green Cache)、After Effects 高对比度 (After Effects High Contrast) 等（完整列表见 JSON） | `[Expression Editor Settings (v9)] Current Expression Theme` |
+| `expr_save_theme` | `icon_button` | 保存主题 | Save Theme | — | 位于「主题」下拉框右侧的保存图标按钮，修改配色变为「自定义」后可另存主题 | — |
+| `expr_delete_theme` | `icon_button` | 删除主题 | Delete Theme | — | 默认置灰（依硬件/缓存状态）；仅选中用户自定义主题时可用，内置主题置灰 | — |
+| `expr_color_default` | `color_picker` | 默认设置: | Default: | `#CCCCCC` | — | — |
+| `expr_color_background` | `color_picker` | 背景: | Background: | `#1D1D1D` | — | — |
+| `expr_color_line_numbers` | `color_picker` | 行号: | Line Numbers: | `#4D4C4D` | 启用条件：`expr_syntax_highlighting == True` && `expr_show_line_numbers == True` | — |
+| `expr_color_keywords` | `color_picker` | 关键字: | Keywords: | `#348EE8` | 启用条件：`expr_syntax_highlighting == True` | — |
+| `expr_color_identifiers` | `color_picker` | 标识符: | Identifiers: | `#EAC885` | 启用条件：`expr_syntax_highlighting == True` | — |
+| `expr_color_comments` | `color_picker` | 注释: | Comments: | `#1D9E27` | 启用条件：`expr_syntax_highlighting == True` | — |
+| `expr_color_numbers` | `color_picker` | 数字: | Numbers: | `#3ED9FF` | 启用条件：`expr_syntax_highlighting == True` | — |
+| `expr_color_strings` | `color_picker` | 字符串: | Strings: | `#F67476` | 启用条件：`expr_syntax_highlighting == True` | — |
+| `expr_color_operators` | `color_picker` | 运算符: | Operators: | `#988A2E` | 启用条件：`expr_syntax_highlighting == True` | — |
+| `expr_color_indent_guides` | `color_picker` | 缩进指示: | Indent Guides: | `#4D4C4D` | 启用条件：`expr_show_indent_guides == True` | — |
+| `expr_color_correct_braces` | `color_picker` | 正确的大括号: | Correct Braces: | `#5BF677` | 启用条件：`expr_syntax_highlighting == True` && `expr_highlight_matching_braces == True` | — |
+| `expr_color_incorrect_braces` | `color_picker` | 错误的大括号: | Incorrect Braces: | `#E50000` | 启用条件：`expr_syntax_highlighting == True` && `expr_highlight_matching_braces == True` | — |
+| `expr_color_selection` | `color_picker` | 选择项: | Selection: | `#A2E3F2` | 启用条件：`expr_syntax_highlighting == True` | — |
+| `expr_selection_alpha` | `number_input` | 选择项 Alpha: | Selection Alpha: | `0.3` | 范围 `0.0..1.0` | — |
