@@ -416,7 +416,7 @@ fn render_doc() -> String {
     );
     let _ = writeln!(
         s,
-        "- 设置（首选项）各页用 `app.settings`，参数是页面名：`{{\"page\":\"general\"}}`。"
+        "- 设置（首选项）各页用 `app.settings`，参数是页面 id：`{{\"page\":\"startup_repair\"}}`。"
     );
     let _ = writeln!(
         s,

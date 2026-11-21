@@ -99,6 +99,10 @@ pub struct Item {
     pub owner: Owner,
     pub status: Status,
     pub platform: Platform,
+    /// AE sorts the item by its localized title among the marked items of its
+    /// group (Keyframe Assistant, Export, the Window panel list, workspaces):
+    /// alphabetically in English, by code point in Chinese.
+    pub sorted: bool,
 }
 
 /// A submenu.
@@ -107,9 +111,6 @@ pub struct Submenu {
     /// English title (AE's).
     pub title: &'static str,
     pub children: &'static [Node],
-    /// AE sorts the entries by their localized title (Keyframe Assistant, the
-    /// Window panel list, workspaces, effects).
-    pub sorted: bool,
     pub platform: Platform,
 }
 
