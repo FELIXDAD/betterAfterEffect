@@ -27,6 +27,7 @@ pub mod keymap;
 pub mod menu;
 pub mod panel;
 pub mod presets;
+pub mod settings;
 pub mod theme;
 pub mod titlebar;
 pub mod widgets;
@@ -80,6 +81,7 @@ impl AppModule for UiModule {
         if let Err(error) = app.register(presets::AE_KEYMAP, presets::ae_keymap()) {
             debug_assert!(false, "keymap: {error}");
         }
+        settings::register(app);
         // The history log the shell feeds from `Stage::subscribe`.
         if app
             .resource::<std::sync::Arc<history::HistoryLog>>()

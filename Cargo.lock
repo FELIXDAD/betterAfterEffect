@@ -887,8 +887,10 @@ version = "0.1.0"
 dependencies = [
  "bae-app",
  "bae-model",
+ "bae-prefs",
  "eframe",
  "egui",
+ "egui_kittest",
  "fontique",
  "serde",
  "serde_json",

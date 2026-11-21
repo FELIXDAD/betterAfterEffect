@@ -136,6 +136,8 @@ pub struct Workbench {
     state: WorkbenchState,
     requests: PanelRequests,
     tool: usize,
+    /// A dialog the host draws (Preferences) is open: shortcuts wait.
+    external_modal: bool,
 }
 
 impl Workbench {
@@ -234,6 +236,7 @@ impl Workbench {
             state,
             requests: PanelRequests::default(),
             tool: 1,
+            external_modal: false,
         };
         wb.refresh_registries();
         let active = wb
@@ -245,6 +248,12 @@ impl Workbench {
             .unwrap_or_default();
         wb.load_workspace(&active);
         wb
+    }
+
+    /// A modal dialog drawn by the host (Preferences) is open: like the role
+    /// picker, it owns the keyboard and no shortcut reaches the workbench.
+    pub fn set_external_modal(&mut self, open: bool) {
+        self.external_modal = open;
     }
 
     // ---- queries -----------------------------------------------------------------
@@ -513,7 +522,7 @@ impl Workbench {
         self.refresh_registries();
         // A modal dialog (the welcome / role picker) owns the keyboard: no
         // shortcuts and no panel keys reach the project behind it.
-        let modal = self.role_picker_open();
+        let modal = self.role_picker_open() || self.external_modal;
         crate::panel::set_modal_open(ui.ctx(), modal);
         if !modal && !self.record_shortcut(ui.ctx()) {
             self.collect_shortcuts(ui.ctx());
