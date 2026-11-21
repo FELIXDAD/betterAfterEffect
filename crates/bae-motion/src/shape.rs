@@ -158,8 +158,8 @@ pub struct StrokeParams {
 }
 
 /// Base names of the items a new shape group contains, numbered by the command
-/// ("Rectangle 1", "Rectangle Path 1", "Stroke 1", "Fill 1"). The UI passes
-/// translated names ("矩形", "矩形路径", "描边", "填充").
+/// ("Rectangle 1", "Rectangle Path 1", "Stroke 1", "Fill 1"). Omitted ones are
+/// the defaults in the naming language ([`crate::names`]: "矩形", "矩形路径" …).
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct ShapeNames {
     #[serde(default)]
@@ -306,7 +306,8 @@ impl Command for AddShape {
         }
         let names = p.names.clone().unwrap_or_default();
         let (group_en, path_en) = english_names(p.geometry.kind, p.bezier);
-        let group_base = names.group.as_deref().unwrap_or(group_en);
+        let local = crate::names::localized;
+        let group_base = names.group.as_deref().unwrap_or(local(group_en));
         let group_name = query::next_numbered_name(tx.stage(), &contents, group_base);
         let group = child(
             &contents,
@@ -323,7 +324,7 @@ impl Command for AddShape {
         create(tx, &inner, PrimType::FOLDER, None)?;
 
         // Path first, then Stroke above Fill (AE's order).
-        let path_name = format!("{} 1", names.path.as_deref().unwrap_or(path_en));
+        let path_name = format!("{} 1", names.path.as_deref().unwrap_or(local(path_en)));
         let shape = child(&inner, &query::sanitize_name(&path_name))?;
         let g = &p.geometry;
         let ty = if parametric {
@@ -374,7 +375,7 @@ impl Command for AddShape {
             set(tx, &shape, "path", Value::Bezier(outline))?;
         }
         if let Some(stroke) = &p.stroke {
-            let name = format!("{} 1", names.stroke.as_deref().unwrap_or("Stroke"));
+            let name = format!("{} 1", names.stroke.as_deref().unwrap_or(local("Stroke")));
             let s = child(&inner, &query::sanitize_name(&name))?;
             create(tx, &s, PrimType::STROKE, None)?;
             set(tx, &s, "name", Value::String(name))?;
@@ -385,7 +386,7 @@ impl Command for AddShape {
             }
         }
         if let Some(fill) = &p.fill {
-            let name = format!("{} 1", names.fill.as_deref().unwrap_or("Fill"));
+            let name = format!("{} 1", names.fill.as_deref().unwrap_or(local("Fill")));
             let f = child(&inner, &query::sanitize_name(&name))?;
             create(tx, &f, PrimType::FILL, None)?;
             set(tx, &f, "name", Value::String(name))?;
@@ -451,7 +452,8 @@ pub struct CreateMaskParams {
     /// The mask path, in layer space (pixels from the layer's top-left corner).
     #[serde(flatten)]
     pub geometry: Geometry,
-    /// Display name (default "Mask N", N = number of masks after this one is added).
+    /// Display name (default "Mask N" in the naming language, N = number of masks
+    /// after this one is added).
     #[serde(default)]
     pub name: Option<String>,
     /// none, add, subtract, intersect, lighten, darken or difference (default add).
@@ -501,7 +503,7 @@ impl Command for CreateMask {
         let name = match p.name.filter(|n| !n.trim().is_empty()) {
             Some(n) => n,
             // AE: "Mask N", N = the mask's index when it is created.
-            None => format!("Mask {}", count + 1),
+            None => format!("{} {}", crate::names::localized("Mask"), count + 1),
         };
         let mask = child(&masks, &query::unique_child_name(tx.stage(), &masks, &name))?;
         create(tx, &mask, PrimType::MASK, None)?;

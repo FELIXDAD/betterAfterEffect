@@ -15,8 +15,8 @@ use bae_anim::glam::{DMat4, DVec2, DVec3};
 use bae_model::{PrimPath, Stage, Value};
 use bae_motion::query::{self, CompInfo};
 use bae_motion::shape::{Geometry, ShapeKind, mask_color, takes_masks};
+use bae_ui::PanelContext;
 use bae_ui::theme;
-use bae_ui::{PanelContext, tr};
 use egui::{Color32, Event, Key, Painter, PointerButton, Response, Shape, Stroke, Ui};
 use serde_json::json;
 
@@ -339,18 +339,6 @@ fn paint_json(p: &crate::tools::Paint) -> Option<serde_json::Value> {
     (p.kind != PaintKind::None).then(|| json!({"color": p.color, "opacity": p.opacity}))
 }
 
-/// Translated base names of a new group's items ("矩形", "矩形路径" …).
-fn names(kind: ShapeKind, bezier: bool) -> serde_json::Value {
-    let (group, path) = match kind {
-        ShapeKind::Rect => ("Rectangle", "Rectangle Path"),
-        ShapeKind::Ellipse => ("Ellipse", "Ellipse Path"),
-        ShapeKind::Polygon | ShapeKind::Star => ("Polystar", "Polystar Path"),
-        ShapeKind::Path => ("Shape", "Path"),
-    };
-    let path = if bezier { "Path" } else { path };
-    json!({"group": tr(group), "path": tr(path), "fill": tr("Fill"), "stroke": tr("Stroke")})
-}
-
 /// Create the shape or mask `g` (target space) for `target`; new shape layers are
 /// selected once they exist.
 pub(crate) fn run(
@@ -367,20 +355,13 @@ pub(crate) fn run(
     let obj = params.as_object_mut().expect("geometry is an object");
     match target {
         Target::Mask(layer) => {
-            let count = layer
-                .child("masks")
-                .map(|m| stage.children(&m).len())
-                .unwrap_or(0);
+            // "Mask N" / "蒙版 N": named by the command in the naming language.
             obj.insert("layer".into(), json!(layer));
-            obj.insert(
-                "name".into(),
-                json!(format!("{} {}", tr("Mask"), count + 1)),
-            );
             cx.invoke_with("mask.create", params);
         }
         Target::Shape(layer) => {
             obj.insert("layer".into(), json!(layer));
-            add_paint_and_names(obj, &g, bezier, options);
+            add_paint(obj, bezier, options);
             cx.invoke_with("shape.add", params);
         }
         Target::NewLayer => {
@@ -406,7 +387,7 @@ pub(crate) fn run(
                 "center_anchor".into(),
                 json!(prefs::CENTER_ANCHOR_IN_NEW_SHAPES),
             );
-            add_paint_and_names(obj, &g, bezier, options);
+            add_paint(obj, bezier, options);
             cx.invoke_with("shape.add", params);
             let mut s = session.lock();
             s.expect(Pending::Layer(path.clone()));
@@ -415,9 +396,8 @@ pub(crate) fn run(
     }
 }
 
-fn add_paint_and_names(
+fn add_paint(
     obj: &mut serde_json::Map<String, serde_json::Value>,
-    g: &Geometry,
     bezier: bool,
     options: &ToolOptions,
 ) {
@@ -429,7 +409,6 @@ fn add_paint_and_names(
         s["width"] = json!(options.stroke_width);
         obj.insert("stroke".into(), s);
     }
-    obj.insert("names".into(), names(g.kind, bezier));
 }
 
 /// Settings other workstreams will provide (D's Preferences); AE defaults until

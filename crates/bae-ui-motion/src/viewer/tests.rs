@@ -268,7 +268,10 @@ fn rectangle_without_a_selection_makes_a_selected_shape_layer() {
     assert_eq!(layers.len(), 1);
     let layer = layers[0].clone();
     assert_eq!(h.name(&layer), "Shape Layer 1");
-    assert_eq!(h.session().lock().selected_layers, std::slice::from_ref(&layer));
+    assert_eq!(
+        h.session().lock().selected_layers,
+        std::slice::from_ref(&layer)
+    );
     // Rectangle 1: Rectangle Path 1, Stroke 1, Fill 1; the group sits at the drag
     // center relative to the comp center (the layer's origin).
     let group = h.contents(&layer)[0].clone();
@@ -313,8 +316,14 @@ fn every_shape_tool_on_a_selected_shape_layer_adds_a_group() {
         let top = h.contents(&shape)[0].clone();
         assert_eq!(h.name(&top), name, "{tool:?}: new groups go on top");
     }
-    assert_eq!(query::comp_layers(&h.stage, &h.comp), std::slice::from_ref(&shape));
-    assert_eq!(h.session().lock().selected_layers, std::slice::from_ref(&shape));
+    assert_eq!(
+        query::comp_layers(&h.stage, &h.comp),
+        std::slice::from_ref(&shape)
+    );
+    assert_eq!(
+        h.session().lock().selected_layers,
+        std::slice::from_ref(&shape)
+    );
     let rounded = h.contents(&shape)[3].clone();
     let path = h.contents(&rounded)[0].clone();
     assert_eq!(float(h.value(&path, "roundness")), 10.0, "tool roundness");
@@ -331,7 +340,7 @@ fn shape_tools_on_other_layers_or_with_tool_creates_mask_make_masks() {
     let r = h.draw(Tool::Rectangle, (100.0, 50.0), (300.0, 150.0));
     let params = one(&r, "mask.create");
     assert_eq!(params["layer"], json!(solid));
-    assert_eq!(params["name"], "Mask 1");
+    assert!(params.get("name").is_none(), "the command names it");
     h.apply(&r);
     let masks = h.children(&solid.child("masks").unwrap());
     assert_eq!(masks.len(), 1);
@@ -563,7 +572,10 @@ fn double_clicking_a_shape_tool_fills_the_comp_or_the_layer() {
     assert_eq!(p["position"], json!([0.0, 0.0]));
     h.apply(&r);
     let layer = query::comp_layers(&h.stage, &h.comp)[0].clone();
-    assert_eq!(h.session().lock().selected_layers, std::slice::from_ref(&layer));
+    assert_eq!(
+        h.session().lock().selected_layers,
+        std::slice::from_ref(&layer)
+    );
     // That layer selected, Shift: the largest circle that fits, added to it.
     let r = fill(&mut h, Tool::Ellipse, true);
     let p = one(&r, "shape.add");

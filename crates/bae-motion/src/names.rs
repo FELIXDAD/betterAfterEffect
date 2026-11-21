@@ -47,6 +47,10 @@ const ZH: &[(&str, &str)] = &[
     ("Polystar Path", "多边星形路径"),
     ("Fill", "填充"),
     ("Stroke", "描边"),
+    // Pen-drawn shapes and masks.
+    ("Shape", "形状"),
+    ("Path", "路径"),
+    ("Mask", "蒙版"),
 ];
 
 /// The default name `en` in the language new items are named in.
