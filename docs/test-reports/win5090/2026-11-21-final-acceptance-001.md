@@ -13,7 +13,7 @@
 | 项 | 结果 | 一句话 |
 |---|---|---|
 | **A 速度对比**（PNG / 不压缩 TIFF，AE vs BAE） | **通过** | BAE PNG **2.008 s** / TIFF **2.006 s** vs AE **22.017** / **18.515**（~11× / ~9×）。AE 磁盘缓存已启用但原三次无 M4 式递加快；清缓存后 TIFF 几乎不变，PNG 变慢→倍率约 **14×** |
-| **B 保存 / 打开**（#13b） | **部分** | CLI/`Ctrl+O` 能打开工程；`BAE_LANG=zh` 菜单中文；**未能在时间轴打开合成**，故 3 图层 + 两位置关键帧往返、`.baez`、脏关闭提示按钮未完整目视闭环 |
+| **B 保存 / 打开**（#13b） | **部分（关键帧保存疑似丢数据）** | `proj1` 来自 #13@6e4fb38；**a775f2c 复现：保存前时间轴 2 个 Position 菱形，存盘后 export-json 仅 1 个**（见「关键帧往返」节） |
 | **C 渲染队列导出** | **部分** | `Composition ▸ Add to Render Queue` 在无活动合成时为 **disabled**（符合预期）；因自动化打不开 Project 面板里的合成，**未能跑完** PNG/TIFF/EXR/停止/坏路径/资源管理器全路径 |
 
 **结论（给发布）：A 已过；B/C 主路径有证据但 GUI 往返与 RQ 实渲未闭环——是否进 0.0.1 由产品决定是否接受「部分」或要求补测。**
@@ -148,7 +148,60 @@ BAE EXR（参考，1 次，#12 同机先前构建）：约 **3.0 s** / 300 帧�
 | 5 | File Close「取消」后 `IsWindowEnabled` | **部分（Open 对话框）** | Open 对话框取消后主窗 **恢复 enabled**。File Close MessageBox 的取消未在本轮干净复现 |
 | 6 | `BAE_LANG=zh` | **通过（菜单）** | 菜单为 **文件 / 编辑 / 合成 / 图层 / 动画 / 窗口 / 帮助**；工作区 **动效 / 审阅**（[`02`](./final-acceptance-shots/02-lang-zh-menus.jpg)）。系统 Open/Save 对话框语言随 Windows；脏提示中文按钮未拍到 |
 
-历史对照：#13 在保存前曾做出带关键帧时间轴（见 [`07-layers-keyframes-from-13.jpg`](./final-acceptance-shots/07-layers-keyframes-from-13.jpg)）；`proj1.bae/project.json` 仍仅 80 B 元数据，数据在 `root.loro`——**打开后读回完整性仍待人工点开合成确认**。
+历史对照：#13 在保存前曾做出带关键帧时间轴（见 [`07-layers-keyframes-from-13.jpg`](./final-acceptance-shots/07-layers-keyframes-from-13.jpg)）；`proj1.bae/project.json` 仍仅 80 B 元数据，数据在 `root.loro`。
+
+### 关键帧往返核查（优先追加）
+
+#### 1) `proj1` 的 `export-json` 读的是什么
+
+| | |
+|---|---|
+| 文件 | `E:\bae-test\acc\proj1.bae`（`project.json` + `sublayers\root.loro` mtime **2026-11-21 11:50:56**） |
+| 写入时代 | **#13 / #96**，会话在 **`6e4fb38`（#93）** 上操作保存（早于 `a775f2c` 12:16 的 release 构建） |
+| 读取二进制 | 后来用 **`a775f2c`** 的 `bae.exe` 跑 `export-json` |
+| 统计 | 1 合成（Comp 1）、3 图层（Text / Shape Layer 1 / Solid 1）；Shape `transform:position` **仅 1 个关键帧**（`"0"` → `[960,540,0]`） |
+
+因此 `proj1`「只有 1 个位置关键帧」**不能单独证明 a775f2c 保存丢数据**（也可能 #13 当时就没打成第 2 个）。需在 a775f2c 上从零复现。
+
+#### 2) a775f2c 从零复现（有 UI 证据）
+
+步骤（默认设置、`gui.lock`）：
+
+1. Composition ▸ **New Composition...**（`Ctrl+N` 合成键在本机未可靠送达；菜单点击成功）→ Comp 2  
+2. Layer ▸ New ▸ **Rectangle** → Shape Layer 1（红矩形）  
+3. 选中图层，`P` 展开 Position；Home；**Alt+Shift+P** → 第 1 个关键帧  
+4. 步进时间码（本轮实际到 **0:00:00:03**）；再 **Alt+Shift+P**（并拖动试图改值）  
+
+**保存前截图**（[`kf2-shots/02-before-save-two-diamonds.jpg`](./kf2-shots/02-before-save-two-diamonds.jpg)）：时间轴 Position 行可见 **两个关键帧菱形**（约 0s 与第 3 帧）；秒表已点亮。对照 [`01-before-kf2-one-diamond.jpg`](./kf2-shots/01-before-kf2-one-diamond.jpg) 仅 1 个菱形。
+
+#### 3–4) 存盘后 `export-json`（原样摘录）
+
+- 另存为 `E:\bae-test\acc\kf2.bae`（目录合计 **3827 B**）  
+- 另存为 `E:\bae-test\acc\kf2.baez`（**2998 B**）  
+- `bae export-json`（`a775f2c`）两者 Shape Layer 1 的 `transform:position` **相同，均只有 1 个关键帧**：
+
+```json
+"transform:position": {
+  "keyframes": {
+    "0": {
+      "interp_in": "linear",
+      "interp_out": "linear",
+      "value": { "type": "vec3", "value": [960.0, 540.0, 0.0] }
+    }
+  },
+  "value": { "type": "vec3", "value": [960.0, 540.0, 0.0] }
+}
+```
+
+（两关键帧在 UI 上数值同为 960,540——若产品对「同值关键帧」去重，也应在文档/行为上说明；当前表现为 **UI 2 个 → 磁盘 1 个**。）
+
+#### 5) 判定
+
+**判定为保存/序列化丢数据（产品 bug），不是「第 2 个关键帧没打成」。**
+
+- 保存前截图明确 2 个 Position 菱形  
+- 同一次会话 Save As 之后，`.bae` / `.baez` 的 `export-json` 都只剩 `"0"`  
+- 复现：New Comp → Rectangle → Alt+Shift+P @0 → 移到非 0 帧 → Alt+Shift+P → Save As → `export-json` 看 `keyframes` 键数量  
 
 ---
 
