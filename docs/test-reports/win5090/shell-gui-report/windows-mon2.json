@@ -1,0 +1,38 @@
+﻿{
+  "id": "70983bb2-977b-4182-9c44-a34c2113fa21",
+  "ok": true,
+  "result": {
+    "app": {
+      "name": "bae",
+      "bundleId": "bae",
+      "pid": 48936
+    },
+    "windows": [
+      {
+        "index": 0,
+        "app": {
+          "name": "bae",
+          "bundleId": "bae",
+          "pid": 48936
+        },
+        "id": 1180906,
+        "title": "BAE",
+        "x": 4050,
+        "y": 300,
+        "width": 1800,
+        "height": 1350,
+        "isMinimized": false,
+        "isOffscreen": false,
+        "screenIndex": null,
+        "platform": {
+          "backend": "uia",
+          "nativeWindowHandle": 1180906
+        }
+      }
+    ]
+  },
+  "_meta": {
+    "runtimeId": "aff76b58-02be-4c41-b590-0070d346c1f7"
+  }
+}
+
