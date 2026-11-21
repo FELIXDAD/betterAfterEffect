@@ -1,12 +1,15 @@
-//! The menu tables in the executable: `catalog.bin` is the catalog's menus, the
-//! macOS application menu, the effect categories and the Chinese menu titles as
-//! deflate-compressed text, decompressed once on first use. The tables in
-//! `menu.rs` and `zh.rs` are the source (compiled into tests only);
+//! The catalog's tables in the executable: `catalog.bin` is the menus, the macOS
+//! application menu, the effect categories, the Chinese menu titles and AE's
+//! default shortcuts as deflate-compressed text, decompressed once on first use.
+//! The tables in `menu.rs`, `zh.rs` and `keys.rs` are the source (compiled into
+//! tests only);
 //! `BAE_UPDATE_DOCS=1 cargo test -p bae-ui-motion catalog` rewrites the file and
 //! a test fails while it is stale.
 //!
 //! Text format, one entry per line, fields separated by tabs:
-//! `@menu <title>` / `@app` / `@categories` / `@zh` start a section; in a menu,
+//! `@menu <title>` / `@app` / `@categories` / `@zh` / `@keys` / `@mackeys` start
+//! a section; a key is `context command keys action params owner status flags`, a
+//! macOS exception `context command keys`; in a menu,
 //! `I depth ae title action params owner status platform sorted` is an item,
 //! `S depth title platform` a submenu (its entries follow one level deeper),
 //! `- depth` a separator and `X depth` the effect categories.
@@ -14,7 +17,7 @@
 use std::io::Read as _;
 use std::sync::OnceLock;
 
-use super::{Item, Node, Owner, Platform, Status, Submenu};
+use super::{Item, Key, Node, Owner, Platform, Status, Submenu};
 
 const BLOB: &[u8] = include_bytes!("catalog.bin");
 
@@ -24,6 +27,8 @@ pub(super) struct Tables {
     pub mac_app_menu: &'static [Node],
     pub effect_categories: &'static [&'static str],
     pub zh: &'static [(&'static str, &'static str)],
+    pub keys: &'static [Key],
+    pub mac_keys: &'static [(&'static str, &'static str, &'static str)],
 }
 
 pub(super) fn tables() -> &'static Tables {
@@ -107,12 +112,16 @@ fn decode(text: &'static str) -> Tables {
     let mut mac_app_menu: &'static [Node] = &[];
     let mut categories: Vec<&'static str> = Vec::new();
     let mut zh: Vec<(&'static str, &'static str)> = Vec::new();
+    let mut keys: Vec<Key> = Vec::new();
+    let mut mac_keys: Vec<(&'static str, &'static str, &'static str)> = Vec::new();
     #[derive(PartialEq)]
     enum Section {
         Menu(&'static str),
         App,
         Categories,
         Zh,
+        Keys,
+        MacKeys,
     }
     let mut section: Option<Section> = None;
     let mut frames = Frames::new();
@@ -131,6 +140,8 @@ fn decode(text: &'static str) -> Tables {
                 Some(("menu", title)) => Section::Menu(title),
                 _ if head == "app" => Section::App,
                 _ if head == "categories" => Section::Categories,
+                _ if head == "keys" => Section::Keys,
+                _ if head == "mackeys" => Section::MacKeys,
                 _ => Section::Zh,
             });
             continue;
@@ -140,6 +151,27 @@ fn decode(text: &'static str) -> Tables {
             Some(Section::Zh) => {
                 if let Some(pair) = line.split_once('\t') {
                     zh.push(pair);
+                }
+            }
+            Some(Section::Keys) => {
+                let f: Vec<&'static str> = line.split('\t').collect();
+                if f.len() == 8 {
+                    keys.push(Key {
+                        context: f[0],
+                        command: f[1],
+                        keys: f[2],
+                        action: f[3],
+                        params: f[4],
+                        owner: owner(f[5]),
+                        status: status(f[6]),
+                        flags: f[7].parse().unwrap_or(0),
+                    });
+                }
+            }
+            Some(Section::MacKeys) => {
+                let f: Vec<&'static str> = line.split('\t').collect();
+                if f.len() == 3 {
+                    mac_keys.push((f[0], f[1], f[2]));
                 }
             }
             Some(Section::Menu(_) | Section::App) => {
@@ -175,6 +207,8 @@ fn decode(text: &'static str) -> Tables {
         mac_app_menu,
         effect_categories: leak(categories),
         zh: leak(zh),
+        keys: leak(keys),
+        mac_keys: leak(mac_keys),
     }
 }
 
@@ -185,6 +219,8 @@ pub(super) fn encode(
     mac_app_menu: &[Node],
     categories: &[&str],
     zh: &[(&str, &str)],
+    keys: &[Key],
+    mac_keys: &[(&str, &str, &str)],
 ) -> String {
     use std::fmt::Write as _;
     fn field(s: &str) -> &str {
@@ -245,14 +281,40 @@ pub(super) fn encode(
     for (en, zh) in zh {
         let _ = writeln!(out, "{}\t{}", field(en), field(zh));
     }
+    out.push_str("@keys\n");
+    for k in keys {
+        let _ = writeln!(
+            out,
+            "{}\t{}\t{}\t{}\t{}\t{:?}\t{:?}\t{}",
+            field(k.context),
+            field(k.command),
+            field(k.keys),
+            field(k.action),
+            field(k.params),
+            k.owner,
+            k.status,
+            k.flags
+        );
+    }
+    out.push_str("@mackeys\n");
+    for (ctx, cmd, keys) in mac_keys {
+        let _ = writeln!(out, "{}\t{}\t{}", field(ctx), field(cmd), field(keys));
+    }
     out
 }
 
 /// `catalog.bin` holds the source tables: `BAE_UPDATE_DOCS=1` rewrites it.
 #[test]
 fn catalog_bin_is_up_to_date() {
-    use super::{EFFECT_CATEGORIES, MAC_APP_MENU, MENU_ZH, MENUS};
-    let want = encode(MENUS, MAC_APP_MENU, EFFECT_CATEGORIES, MENU_ZH);
+    use super::{EFFECT_CATEGORIES, KEYS, MAC_APP_MENU, MAC_KEYS, MENU_ZH, MENUS};
+    let want = encode(
+        MENUS,
+        MAC_APP_MENU,
+        EFFECT_CATEGORIES,
+        MENU_ZH,
+        KEYS,
+        MAC_KEYS,
+    );
     if std::env::var_os("BAE_UPDATE_DOCS").is_some() {
         use std::io::Write as _;
         let mut enc = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::best());
@@ -272,7 +334,14 @@ fn catalog_bin_is_up_to_date() {
     // Decoding gives back the same tables.
     let t = tables();
     assert_eq!(
-        encode(t.menus, t.mac_app_menu, t.effect_categories, t.zh),
+        encode(
+            t.menus,
+            t.mac_app_menu,
+            t.effect_categories,
+            t.zh,
+            t.keys,
+            t.mac_keys
+        ),
         want
     );
 }

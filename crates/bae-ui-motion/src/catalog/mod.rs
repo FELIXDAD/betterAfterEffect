@@ -17,14 +17,16 @@
 //! (`motion.layer.blending_mode {"mode": "multiply"}`).
 
 mod blob;
-mod keys;
-// The menu tables are compiled into tests only; the app reads them from the
+// The tables are compiled into tests only; the app reads them from the
 // compressed `catalog.bin` (see `blob`).
+#[cfg(test)]
+mod keys;
 #[cfg(test)]
 mod menu;
 #[cfg(test)]
 mod zh;
 
+#[cfg(test)]
 pub use keys::{KEYS, MAC_KEYS};
 #[cfg(test)]
 pub use menu::{EFFECT_CATEGORIES, MAC_APP_MENU, MENUS};
@@ -51,6 +53,18 @@ pub fn effect_categories() -> &'static [&'static str] {
 /// Chinese titles of the menu entries (`bae_ui::i18n` pairs).
 pub fn menu_zh() -> &'static [(&'static str, &'static str)] {
     blob::tables().zh
+}
+
+/// Every AE default-shortcut command (`docs/reference/ae/shortcuts.json`) plus
+/// the menu shortcuts AE's file does not list, in AE's order.
+pub fn keys() -> &'static [Key] {
+    blob::tables().keys
+}
+
+/// The commands whose macOS shortcuts are not the Windows ones with Ctrl → ⌘
+/// and Alt → Option: `(context, command, keys in AE's macOS notation)`.
+pub fn mac_keys() -> &'static [(&'static str, &'static str, &'static str)] {
+    blob::tables().mac_keys
 }
 
 /// Menu titles that read the same in Chinese (AE keeps them in English).
@@ -224,7 +238,7 @@ impl Key {
     /// in BAE notation (see [`chords`]).
     pub fn chords(&self, mac: bool) -> Vec<String> {
         if mac
-            && let Some((_, _, keys)) = MAC_KEYS
+            && let Some((_, _, keys)) = mac_keys()
                 .iter()
                 .find(|(ctx, cmd, _)| *ctx == self.context && *cmd == self.command)
         {
@@ -467,3 +481,91 @@ pub fn display_chord(chord: &str, mac: bool) -> String {
 
 #[cfg(test)]
 mod tests;
+
+/// Action ids some catalog entry runs already (status done or partial). Their
+/// other variants (`motion.reveal {"what":"modified"}` next to the working
+/// `{"what":"animated"}`) are not live just because the action has a handler:
+/// they wait for the catalog. Panel items are told apart by their panel instead
+/// (`bae_ui::menu::handler_key`).
+pub fn working_actions() -> &'static std::collections::HashSet<&'static str> {
+    static SET: std::sync::OnceLock<std::collections::HashSet<&'static str>> =
+        std::sync::OnceLock::new();
+    SET.get_or_init(|| {
+        let mut set = std::collections::HashSet::new();
+        for k in keys() {
+            if k.status.works() {
+                set.insert(k.action);
+            }
+        }
+        let mut path = Vec::new();
+        let tops = menus().iter().copied().chain([("BAE", mac_app_menu())]);
+        for (top, nodes) in tops {
+            path.push(top);
+            walk(nodes, &mut path, &mut |_, it| {
+                if it.status.works() {
+                    set.insert(it.action);
+                }
+            });
+            path.pop();
+        }
+        set.remove(bae_ui::action::ids::OPEN_PANEL);
+        set
+    })
+}
+
+/// Whether a catalog entry whose command is not done yet can light up because a
+/// module handles it (`handled`: `bae_ui::menu::handled_actions`): its action is
+/// new, not a further variant of a working one ([`working_actions`]).
+pub fn live_by_handler(
+    action: &str,
+    params: &str,
+    handled: &std::collections::HashSet<String>,
+) -> bool {
+    if working_actions().contains(action) {
+        return false;
+    }
+    let params: serde_json::Value = if params.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_str(params).unwrap_or_default()
+    };
+    handled.contains(&bae_ui::menu::handler_key(action, &params))
+}
+
+/// AE's default shortcuts as keymap bindings for the platform BAE runs on: one
+/// binding per chord of every command `live` accepts, scoped to the panel kind of
+/// AE's context. Commands text fields handle ([`NATIVE`]), commands another
+/// module binds ([`BOUND_ELSEWHERE`]), commands AE shadows ([`SHADOWED`]) and
+/// chords BAE cannot tell apart yet (numpad keys) are left out.
+pub fn ae_bindings(keys: &[Key], live: &dyn Fn(&Key) -> bool) -> Vec<bae_ui::Binding> {
+    let mac = cfg!(target_os = "macos");
+    let mut out: Vec<bae_ui::Binding> = Vec::new();
+    for k in keys {
+        if k.flags & (NATIVE | BOUND_ELSEWHERE | SHADOWED) != 0 || !live(k) {
+            continue;
+        }
+        let params: serde_json::Value = if k.params.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_str(k.params).expect("catalog params are JSON")
+        };
+        for chord in k.chords(mac) {
+            if bae_ui::Chord::parse(&chord).is_err() {
+                continue;
+            }
+            let mut b = bae_ui::Binding::new(&chord, k.action).params(params.clone());
+            if let Some(scope) = k.scope() {
+                b = b.when(scope);
+            }
+            if !out.iter().any(|o| {
+                o.chord == b.chord
+                    && o.when == b.when
+                    && o.action == b.action
+                    && o.params == b.params
+            }) {
+                out.push(b);
+            }
+        }
+    }
+    out
+}

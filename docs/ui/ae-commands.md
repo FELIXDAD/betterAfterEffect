@@ -38,6 +38,7 @@
 
 - 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 57，◐ 6，☐ 256，⏸ 221，Ⓐ 30
 - 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 115 条。
+- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 115 条，macOS 115 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
 
 ## 主菜单
 
@@ -73,7 +74,7 @@
 | Export ▸ Maxon Cinema 4D Exporter... | 11665409 | `motion.file.maxon_cinema_4d_exporter` |  |  |  | B | Ⓐ |
 | Export ▸ Export Adobe Premiere Project... | 11665410 | `motion.file.export_adobe_premiere_project` |  |  |  | B | Ⓐ |
 | Export ▸ Add to Adobe Media Encoder Queue... | 11665411 | `motion.comp.add_to_adobe_media_encoder_queue` |  | Ctrl+Alt+M | Cmd+Opt+M | B | Ⓐ |
-| Export ▸ Add to Render Queue | 11665412 | `motion.add_to_render_queue` |  | Ctrl+Shift+/ / Ctrl+M | Cmd+Shift+/ / Cmd+M | B | ✅ |
+| Export ▸ Add to Render Queue | 11665412 | `motion.add_to_render_queue` |  | Ctrl+M / Ctrl+Shift+/ | Cmd+M / Cmd+Shift+/ | B | ✅ |
 | Add Fonts from Adobe... | 131089 | `motion.file.add_fonts_from_adobe` |  |  |  | B | Ⓐ |
 | Adobe Dynamic Link ▸ New Premiere Sequence... | 12845057 | `motion.file.new_premiere_sequence` |  |  |  | B | Ⓐ |
 | Adobe Dynamic Link ▸ Import Premiere Sequence... | 12845058 | `motion.file.import_premiere_sequence` |  |  |  | B | Ⓐ |
@@ -144,7 +145,7 @@
 | Lift Work Area | 196626 | `motion.edit.lift_work_area` |  |  |  | B | ☐ |
 | Extract Work Area | 196627 | `motion.edit.extract_work_area` |  |  |  | B | ☐ |
 | Select All | 196628 | `motion.select_all` |  | Ctrl+A | Cmd+A | B | ✅ |
-| Deselect All | 196629 | `motion.deselect_all` |  | F2 / Ctrl+Shift+A | F2 / Cmd+Shift+A | B | ✅ |
+| Deselect All | 196629 | `motion.deselect_all` |  | Ctrl+Shift+A / F2 | Cmd+Shift+A / F2 | B | ✅ |
 | Label ▸ Select Label Group | 16646145 | `motion.edit.select_label_group` |  |  |  | B | ☐ |
 | Label ▸ None | 16646147 | `motion.edit.label` | `{"label":0}` |  |  | B | ☐ |
 | Label ▸ Red | 16646149 | `motion.edit.label` | `{"label":1}` |  |  | B | ☐ |
@@ -210,7 +211,7 @@
 | Crop Comp to Region of Interest | 327686 | `motion.comp.crop_comp_to_region_of_interest` |  |  |  | B | ⏸ |
 | Crop Comp to Selected Layer(s) Bounds | 327687 | `motion.comp.crop_comp_to_selected_layer_bounds` |  |  |  | B | ⏸ |
 | Add to Adobe Media Encoder Queue... | 327689 | `motion.comp.add_to_adobe_media_encoder_queue` |  | Ctrl+Alt+M | Cmd+Opt+M | B | Ⓐ |
-| Add to Render Queue | 327690 | `motion.add_to_render_queue` |  | Ctrl+Shift+/ / Ctrl+M | Cmd+Shift+/ / Cmd+M | B | ✅ |
+| Add to Render Queue | 327690 | `motion.add_to_render_queue` |  | Ctrl+M / Ctrl+Shift+/ | Cmd+M / Cmd+Shift+/ | B | ✅ |
 | Add Output Module | 327691 | `motion.comp.add_output_module` |  |  |  | B | ⏸ |
 | Preview ▸ Play Current Preview | 10682369 | `motion.play` |  | Space | Space | B | ✅ |
 | Preview ▸ Cache Frames When Idle | 10682370 | `motion.comp.cache_frames_when_idle` |  | Alt+Shift+I | Opt+Shift+I | B | ⏸ |
@@ -389,10 +390,10 @@
 | Track Matte ▸ Matte with Layer Below ▸ Alpha Inverted Matte | 23724034 | `motion.layer.track_matte` | `{"matte":"alpha_inverted","source":"below"}` |  |  | B | ☐ |
 | Track Matte ▸ Matte with Layer Below ▸ Luma Matte | 23724035 | `motion.layer.track_matte` | `{"matte":"luma","source":"below"}` |  |  | B | ☐ |
 | Track Matte ▸ Matte with Layer Below ▸ Luma Inverted Matte | 23724036 | `motion.layer.track_matte` | `{"matte":"luma_inverted","source":"below"}` |  |  | B | ☐ |
-| Arrange ▸ Bring to Front | 12910593 | `motion.order` | `{"to":"front"}` | Ctrl+Alt+Shift+Up / Ctrl+Shift+= / Ctrl+Shift+] | Cmd+Opt+Shift+Up / Cmd+Shift+= / Cmd+Shift+] | B | ✅ |
-| Arrange ▸ Bring Forward | 12910594 | `motion.order` | `{"to":"forward"}` | Ctrl+Alt+Up / Ctrl+] | Cmd+Opt+Up / Cmd+] | B | ✅ |
-| Arrange ▸ Send Backward | 12910595 | `motion.order` | `{"to":"backward"}` | Ctrl+Alt+Down / Ctrl+[ | Cmd+Opt+Down / Cmd+[ | B | ✅ |
-| Arrange ▸ Send to Back | 12910596 | `motion.order` | `{"to":"back"}` | Ctrl+Alt+Shift+Down / Ctrl+Shift+- / Ctrl+Shift+[ | Cmd+Opt+Shift+Down / Cmd+Shift+- / Cmd+Shift+[ | B | ✅ |
+| Arrange ▸ Bring to Front | 12910593 | `motion.order` | `{"to":"front"}` | Ctrl+Shift+] / Ctrl+Alt+Shift+Up / Ctrl+Shift+= | Cmd+Shift+] / Cmd+Opt+Shift+Up / Cmd+Shift+= | B | ✅ |
+| Arrange ▸ Bring Forward | 12910594 | `motion.order` | `{"to":"forward"}` | Ctrl+] / Ctrl+Alt+Up | Cmd+] / Cmd+Opt+Up | B | ✅ |
+| Arrange ▸ Send Backward | 12910595 | `motion.order` | `{"to":"backward"}` | Ctrl+[ / Ctrl+Alt+Down | Cmd+[ / Cmd+Opt+Down | B | ✅ |
+| Arrange ▸ Send to Back | 12910596 | `motion.order` | `{"to":"back"}` | Ctrl+Shift+[ / Ctrl+Alt+Shift+Down / Ctrl+Shift+- | Cmd+Shift+[ / Cmd+Opt+Shift+Down / Cmd+Shift+- | B | ✅ |
 | Reveal ▸ Reveal in Explorer | 23003137 | `motion.file.reveal_in_explorer` |  |  |  | B | ☐ |
 | Reveal ▸ Reveal Layer Source in Project | 23003138 | `motion.layer.reveal_layer_source_in_project` |  |  |  | B | ☐ |
 | Reveal ▸ Reveal Layer in Project Flowchart | 23003139 | `motion.layer.reveal_layer_in_project_flowchart` |  |  |  | E | ⏸ |
@@ -428,7 +429,7 @@
 
 | AE 菜单路径 | AE id | BAE 动作 id | 参数 | Windows | macOS | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
-| Effect Controls | 458753 | `window.panel` | `{"id":"effect_controls","toggle":true}` | Ctrl+Shift+T / F3 | Cmd+Shift+T / F3 | B | ✅ |
+| Effect Controls | 458753 | `window.panel` | `{"id":"effect_controls","toggle":true}` | F3 / Ctrl+Shift+T | F3 / Cmd+Shift+T | B | ✅ |
 | Last Effect | 458754 | `motion.effect.last_effect` |  | Ctrl+Alt+Shift+E | Cmd+Opt+Shift+E | B | ☐ |
 | Remove All | 458755 | `motion.effect.remove_all` |  | Ctrl+Shift+E | Cmd+Shift+E | B | ☐ |
 | Manage Effects... | 458757 | `motion.effect.manage_effects` |  |  |  | E | ⏸ |
@@ -507,8 +508,8 @@
 | AE 菜单路径 | AE id | BAE 动作 id | 参数 | Windows | macOS | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
 | Split with New Locked Viewer | 589825 | `motion.view.split_with_new_locked_viewer` |  | Ctrl+Alt+Shift+N | Cmd+Opt+Shift+N | A | ⏸ |
-| Zoom In | 589827 | `viewer.zoom_in` |  | Ctrl+Alt+= / . | Cmd+Opt+= / . | A | ✅ |
-| Zoom Out | 589828 | `viewer.zoom_out` |  | Ctrl+Alt+- / , | Cmd+Opt+- / , | A | ✅ |
+| Zoom In | 589827 | `viewer.zoom_in` |  | . / Ctrl+Alt+= | . / Cmd+Opt+= | A | ✅ |
+| Zoom Out | 589828 | `viewer.zoom_out` |  | , / Ctrl+Alt+- | , / Cmd+Opt+- | A | ✅ |
 | Resolution ▸ Full | 8650753 | `motion.view.resolution` | `{"factor":1}` | Ctrl+J | Cmd+J | B | ☐ |
 | Resolution ▸ Half | 8650754 | `motion.view.resolution` | `{"factor":2}` | Ctrl+Shift+J | Cmd+Shift+J | B | ☐ |
 | Resolution ▸ Third | 8650755 | `motion.view.resolution` | `{"factor":3}` |  |  | B | ☐ |
@@ -626,7 +627,7 @@
 | Preview | 524320 | `window.panel` | `{"id":"preview","toggle":true}` | Ctrl+3 | Cmd+3 | B | ✅ |
 | Composition | 524322 | `window.panel` | `{"id":"composition","toggle":true}` |  |  | B | ✅ |
 | Layer | 524323 | `window.panel` | `{"id":"layer","toggle":true}` |  |  | E | ⏸ |
-| Effect Controls | 524324 | `window.panel` | `{"id":"effect_controls","toggle":true}` | Ctrl+Shift+T / F3 | Cmd+Shift+T / F3 | B | ✅ |
+| Effect Controls | 524324 | `window.panel` | `{"id":"effect_controls","toggle":true}` | F3 / Ctrl+Shift+T | F3 / Cmd+Shift+T | B | ✅ |
 | Timeline | 524325 | `window.panel` | `{"id":"timeline","toggle":true}` |  |  | B | ✅ |
 | Flowchart | 524326 | `window.panel` | `{"id":"flowchart","toggle":true}` |  |  | E | ⏸ |
 | Render Queue | 524327 | `window.panel` | `{"id":"render_queue","toggle":true}` | Ctrl+Alt+0 | Cmd+Opt+0 | B | ✅ |

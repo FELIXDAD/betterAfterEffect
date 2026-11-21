@@ -139,6 +139,28 @@ impl AppModule for MotionUiModule {
     }
 
     fn finish(&self, app: &mut AppBuilder) {
+        // AE's shortcuts for the AE commands other modules handle (registered in
+        // their `build`): bound now that every handler is known.
+        let handled = bae_ui::menu::handled_actions(
+            &app.registry::<dyn ActionHandler>().snapshot(),
+            &app.registry::<ActionInfo>().snapshot(),
+            &app.registry::<PanelKind>().snapshot(),
+        );
+        let taken: Vec<bae_ui::Binding> = app
+            .registry::<KeymapBindings>()
+            .snapshot()
+            .iter()
+            .filter(|e| e.item().keymap == bae_ui::presets::AE_KEYMAP)
+            .flat_map(|e| e.item().bindings.clone())
+            .collect();
+        let late = actions::late_bindings(&handled, &taken);
+        if !late.is_empty() {
+            let _ = app.register::<KeymapBindings>(
+                "motion.ae",
+                KeymapBindings::new(bae_ui::presets::AE_KEYMAP, late)
+                    .for_workspace(menus::WORKSPACE),
+            );
+        }
         // Layer sources other modules registered (05's shape layers …) for the
         // viewer's GPU preview.
         let sources = app.registry::<dyn bae_render::SourceProvider>();

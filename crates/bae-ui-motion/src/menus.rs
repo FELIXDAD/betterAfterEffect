@@ -332,6 +332,12 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
     }
     match item.status {
         Status::Dynamic => return spec.placeholder(),
+        // A further variant of a command that runs (Reveal All Modified
+        // Properties next to Reveal Properties with Keyframes): greyed until the
+        // catalog says it works.
+        s if !s.works() && catalog::working_actions().contains(item.action) => {
+            return spec.enabled_when(|_| false);
+        }
         s if !s.works() => spec = spec.needs_handler(),
         _ => {}
     }

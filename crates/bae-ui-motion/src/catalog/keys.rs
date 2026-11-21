@@ -37,7 +37,9 @@ const fn k(
 }
 
 /// Every AE default-shortcut command, plus the menu shortcuts AE's shortcut file
-/// does not list (context `Menu`).
+/// does not list (context `Menu`). When a menu item shows one of several chords
+/// (Bring Forward: Ctrl+] of Ctrl+Alt+Up, Ctrl+]), that chord comes first, so the
+/// BAE menu shows the same one.
 #[rustfmt::skip]
 pub const KEYS: &[Key] = &[
     k("AE_TopLevelWindow", "CloseTimelinePanelsToLeft", "", "motion.timeline.close_timeline_panels_to_left", "", C, Later, 0),
@@ -341,10 +343,10 @@ pub const KEYS: &[Key] = &[
     k("CPanoECOutline", "TwirlClosed", "LeftArrow", "motion.panel.twirl_closed", "", B, Todo, 0),
     k("CPanoECOutline", "TwirlOpen", "RightArrow", "motion.panel.twirl_open", "", B, Todo, 0),
     k("CPanoECOutline", "Zoom100Percent", "/", "motion.viewer.zoom_100", "", A, Todo, 0),
-    k("CPanoECOutline", "ZoomIn", "Ctrl+Alt+=|.", "viewer.zoom_in", "", A, Done, 0),
+    k("CPanoECOutline", "ZoomIn", ".|Ctrl+Alt+=", "viewer.zoom_in", "", A, Done, 0),
     k("CPanoECOutline", "ZoomInResize", "Alt+.|Ctrl+=", "motion.viewer.zoom_in_resize", "", A, Later, 0),
     k("CPanoECOutline", "ZoomNoScroll", "Ctrl+Alt+/", "motion.viewer.zoom_100_resize", "", A, Later, 0),
-    k("CPanoECOutline", "ZoomOut", "Ctrl+Alt+-|Comma", "viewer.zoom_out", "", A, Done, 0),
+    k("CPanoECOutline", "ZoomOut", "Comma|Ctrl+Alt+-", "viewer.zoom_out", "", A, Done, 0),
     k("CPanoECOutline", "ZoomOutResize", "Alt+Comma|Ctrl+-", "motion.viewer.zoom_out_resize", "", A, Later, 0),
     k("CPanoProjFootage", "TimeJumpToIn", "I", "motion.go_in", "", B, Done, 0),
     k("CPanoProjFootage", "TimeJumpToOut", "O", "motion.go_out", "", B, Done, 0),
@@ -358,10 +360,10 @@ pub const KEYS: &[Key] = &[
     k("CPanoProjItem", "SelectNextMask", "Alt+`", "motion.layer.select_next_mask", "", A, Later, 0),
     k("CPanoProjItem", "SelectPreviousMask", "Alt+Shift+`", "motion.layer.select_previous_mask", "", A, Later, 0),
     k("CPanoProjItem", "Zoom100Percent", "/", "motion.viewer.zoom_100", "", A, Todo, 0),
-    k("CPanoProjItem", "ZoomIn", "Ctrl+Alt+=|.", "viewer.zoom_in", "", A, Done, 0),
+    k("CPanoProjItem", "ZoomIn", ".|Ctrl+Alt+=", "viewer.zoom_in", "", A, Done, 0),
     k("CPanoProjItem", "ZoomInResize", "Alt+.|Ctrl+=", "motion.viewer.zoom_in_resize", "", A, Later, 0),
     k("CPanoProjItem", "ZoomNoScroll", "Ctrl+Alt+/", "motion.viewer.zoom_100_resize", "", A, Later, 0),
-    k("CPanoProjItem", "ZoomOut", "Ctrl+Alt+-|Comma", "viewer.zoom_out", "", A, Done, 0),
+    k("CPanoProjItem", "ZoomOut", "Comma|Ctrl+Alt+-", "viewer.zoom_out", "", A, Done, 0),
     k("CPanoProjItem", "ZoomOutResize", "Alt+Comma|Ctrl+-", "motion.viewer.zoom_out_resize", "", A, Later, 0),
     k("CPanoProjLayer", "Clear", "Delete|FwdDel", "motion.delete", "", B, Done, 0),
     k("CPanoProjLayer", "ClearMask", "Alt+Delete|Alt+FwdDel", "motion.layer.delete_mask_or_vertices", "", A, Later, 0),
@@ -396,7 +398,7 @@ pub const KEYS: &[Key] = &[
     k("CPanoProjLayerPanoMask", "ZoomIn", ".", "viewer.zoom_in", "", A, Done, 0),
     k("CPanoProjLayerPanoMask", "ZoomOut", "Comma", "viewer.zoom_out", "", A, Done, 0),
     k("CPanoRender", "StopRenderQueue", "Ctrl+.|Esc", "motion.comp.stop_rendering", "", B, Todo, 0),
-    k("CSwitchboard", "AddCompToRenderQueue", "Ctrl+Shift+/|Ctrl+M", "motion.add_to_render_queue", "", B, Done, 0),
+    k("CSwitchboard", "AddCompToRenderQueue", "Ctrl+M|Ctrl+Shift+/", "motion.add_to_render_queue", "", B, Done, 0),
     k("CSwitchboard", "AddItemToComp", "Ctrl+/", "motion.file.add_footage_to_comp", "", E, Todo, 0),
     k("CSwitchboard", "AddItemToCompReplaceLayer", "Ctrl+Alt+/", "motion.file.replace_layer_with_footage", "", E, Todo, 0),
     k("CSwitchboard", "AddItemsToNewComp", "Alt+Backslash", "motion.file.new_comp_from_selection", "", E, Todo, 0),
@@ -404,8 +406,8 @@ pub const KEYS: &[Key] = &[
     k("CSwitchboard", "AutoOrient", "Ctrl+Alt+O", "motion.layer.auto_orient", "", E, Todo, 0),
     k("CSwitchboard", "BestQuality", "Ctrl+U", "motion.layer.quality", r#"{"quality":"best"}"#, B, Todo, 0),
     k("CSwitchboard", "BestQualityRecurse", "Ctrl+macControl+U", "motion.layer.quality", r#"{"quality":"best","nested":true}"#, B, Later, 0),
-    k("CSwitchboard", "BringCloser", "Ctrl+Alt+UpArrow|Ctrl+]", "motion.order", r#"{"to":"forward"}"#, B, Done, 0),
-    k("CSwitchboard", "BringToFront", "Ctrl+Alt+Shift+UpArrow|Ctrl+Shift+=|Ctrl+Shift+]", "motion.order", r#"{"to":"front"}"#, B, Done, 0),
+    k("CSwitchboard", "BringCloser", "Ctrl+]|Ctrl+Alt+UpArrow", "motion.order", r#"{"to":"forward"}"#, B, Done, 0),
+    k("CSwitchboard", "BringToFront", "Ctrl+Shift+]|Ctrl+Alt+Shift+UpArrow|Ctrl+Shift+=", "motion.order", r#"{"to":"front"}"#, B, Done, 0),
     k("CSwitchboard", "Close", "Ctrl+W", "window.close_panel", "", B, Done, 0),
     k("CSwitchboard", "CloseAll", "Ctrl+Alt+W", "motion.window.close_all", "", B, Todo, 0),
     k("CSwitchboard", "CloseWindow", "Ctrl+Shift+W", "motion.window.close_panel_group", "", B, Todo, 0),
@@ -423,7 +425,7 @@ pub const KEYS: &[Key] = &[
     k("CSwitchboard", "CustResNoDialog", "Ctrl+Alt+J", "motion.view.resolution_custom", "", E, Later, 0),
     k("CSwitchboard", "CustResNoDialogRecurse", "Ctrl+Alt+macControl+J", "motion.view.resolution_custom", r#"{"nested":true}"#, E, Later, 0),
     k("CSwitchboard", "Cut", "Ctrl+X", "edit.cut", "", B, Todo, 0),
-    k("CSwitchboard", "DeselectAll", "F2|Ctrl+Shift+A", "motion.deselect_all", "", B, Done, 0),
+    k("CSwitchboard", "DeselectAll", "Ctrl+Shift+A|F2", "motion.deselect_all", "", B, Done, 0),
     k("CSwitchboard", "DeselectAllKeyframes", "Shift+F2|Ctrl+Alt+Shift+A", "motion.comp.deselect_all_keyframes", "", B, Todo, 0),
     k("CSwitchboard", "DraftQuality", "Ctrl+Shift+U", "motion.layer.quality", r#"{"quality":"draft"}"#, B, Todo, 0),
     k("CSwitchboard", "DraftQualityRecurse", "Ctrl+Shift+macControl+U", "motion.layer.quality", r#"{"quality":"draft","nested":true}"#, B, Later, 0),
@@ -522,8 +524,8 @@ pub const KEYS: &[Key] = &[
     k("CSwitchboard", "SelectAll", "Ctrl+A", "motion.select_all", "", B, Done, 0),
     k("CSwitchboard", "SelectNextViewerContext", "Shift+.", "motion.panel.select_next_viewer", "", B, Later, 0),
     k("CSwitchboard", "SelectPrevViewerContext", "Shift+Comma", "motion.panel.select_previous_viewer", "", B, Later, 0),
-    k("CSwitchboard", "SendFarther", "Ctrl+Alt+DownArrow|Ctrl+[", "motion.order", r#"{"to":"backward"}"#, B, Done, 0),
-    k("CSwitchboard", "SendToBack", "Ctrl+Alt+Shift+DownArrow|Ctrl+Shift+-|Ctrl+Shift+[", "motion.order", r#"{"to":"back"}"#, B, Done, 0),
+    k("CSwitchboard", "SendFarther", "Ctrl+[|Ctrl+Alt+DownArrow", "motion.order", r#"{"to":"backward"}"#, B, Done, 0),
+    k("CSwitchboard", "SendToBack", "Ctrl+Shift+[|Ctrl+Alt+Shift+DownArrow|Ctrl+Shift+-", "motion.order", r#"{"to":"back"}"#, B, Done, 0),
     k("CSwitchboard", "SetProxyFile", "Ctrl+Alt+P", "motion.file.set_proxy_file", "", E, Later, 0),
     k("CSwitchboard", "SetSamplingQualityBicubic", "Alt+Shift+B", "motion.layer.sampling", r#"{"sampling":"bicubic"}"#, B, Todo, 0),
     k("CSwitchboard", "SetSamplingQualityBilinear", "Alt+B", "motion.layer.sampling", r#"{"sampling":"bilinear"}"#, B, Todo, 0),
@@ -553,7 +555,7 @@ pub const KEYS: &[Key] = &[
     k("CSwitchboard", "SwitchToWorkspaceB", "Shift+F11", "workspace.switch", r#"{"id":"review"}"#, B, Done, 0),
     k("CSwitchboard", "SwitchToWorkspaceC", "Shift+F12", "workspace.switch", r#"{"id":"ae_learn"}"#, B, Todo, 0),
     k("CSwitchboard", "ToggleCastsShadows", "Alt+Shift+C", "motion.layer.casts_shadows", "", B, Later, 0),
-    k("CSwitchboard", "ToggleEffectControls", "Ctrl+Shift+T|F3", "window.panel", r#"{"id":"effect_controls","toggle":true}"#, B, Done, 0),
+    k("CSwitchboard", "ToggleEffectControls", "F3|Ctrl+Shift+T", "window.panel", r#"{"id":"effect_controls","toggle":true}"#, B, Done, 0),
     k("CSwitchboard", "ToggleExpression", "Alt+Shift+=", "motion.anim.add_expression", "", C, Todo, 0),
     k("CSwitchboard", "ToggleKeyframeHoldInterp", "Ctrl+Alt+H", "motion.toggle_hold", "", B, Done, 0),
     k("CSwitchboard", "ToggleLayerControls", "Ctrl+Shift+H", "motion.view.show_layer_controls", "", B, Todo, 0),

@@ -86,6 +86,9 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::ORDER, "Bring Layer Forward"),
     (ids::TRIM_COMP, "Trim Comp to Work Area"),
     (ids::ADD_TO_RENDER_QUEUE, "Add to Render Queue"),
+    // Edit > Copy / Paste (Cmd+C / Cmd+V): selected keyframes.
+    (ids::COPY, "Copy"),
+    (ids::PASTE, "Paste"),
     // Panel-scoped (`bindings`): handled by the timeline and the viewer. Registered
     // so the Keyboard Shortcuts window shows a name, not the id (#136).
     ("timeline.zoom_in", "Zoom In Time"),
@@ -181,74 +184,53 @@ pub fn variants() -> Vec<(String, CommandVariant)> {
     v
 }
 
-/// AE shortcuts of the motion workspace, added to the shell's `ae` keymap.
+/// AE's default shortcuts of the commands that run (catalog status done or
+/// partial), added to the shell's `ae` keymap: every chord of AE's shortcut file
+/// for this platform, scoped like AE's context, except the chords the shell's own
+/// `ae` keymap already binds. Commands other modules handle are bound when the
+/// app starts ([`late_bindings`]).
 pub fn bindings() -> KeymapBindings {
-    let b = Binding::new;
-    let step = |chord: &str, frames: i64| b(chord, ids::STEP).params(json!({ "frames": frames }));
-    let ease = |chord: &str, mode: &str| b(chord, ids::EASE).params(json!({ "mode": mode }));
-    let reveal = |chord: &str, what: &str, add: bool| {
-        b(chord, ids::REVEAL).params(json!({ "what": what, "add": add }))
-    };
-    let key = |chord: &str, attr: &str| b(chord, ids::TOGGLE_KEY).params(json!({ "attr": attr }));
-    let layer = |chord: &str, kind: &str| b(chord, ids::NEW_LAYER).params(json!({ "kind": kind }));
-    let order = |chord: &str, to: &str| b(chord, ids::ORDER).params(json!({ "to": to }));
-    let mut v = vec![
-        b("Space", ids::PLAY),
-        b("Home", ids::GO_START),
-        b("End", ids::GO_END),
-        step("PageUp", -1),
-        step("PageDown", 1),
-        step("Cmd+ArrowLeft", -1),
-        step("Cmd+ArrowRight", 1),
-        step("Shift+PageUp", -10),
-        step("Shift+PageDown", 10),
-        b("J", ids::PREV_KEY),
-        b("K", ids::NEXT_KEY),
-        b("I", ids::GO_IN),
-        b("O", ids::GO_OUT),
-        b("B", ids::WORK_AREA_START),
-        b("N", ids::WORK_AREA_END),
-        b("Alt+OpenBracket", ids::TRIM_IN),
-        b("Alt+CloseBracket", ids::TRIM_OUT),
-        b("OpenBracket", ids::MOVE_IN),
-        b("CloseBracket", ids::MOVE_OUT),
-        b("Cmd+D", ids::DUPLICATE),
-        b("Cmd+Shift+D", ids::SPLIT),
-        b("Delete", ids::DELETE),
-        b("Backspace", ids::DELETE),
-        ease("F9", "easy_ease"),
-        ease("Shift+F9", "ease_in"),
-        ease("Cmd+Shift+F9", "ease_out"),
-        b("Cmd+Alt+H", ids::TOGGLE_HOLD),
-        b("Cmd+A", ids::SELECT_ALL),
-        b("Cmd+Shift+A", ids::DESELECT_ALL),
-        b("F2", ids::DESELECT_ALL),
-        reveal("U", "animated", false),
-        b("Cmd+N", ids::NEW_COMP),
-        b("Cmd+Shift+X", ids::TRIM_COMP),
-        b("Cmd+M", ids::ADD_TO_RENDER_QUEUE),
-        layer("Cmd+Y", "solid"),
-        layer("Cmd+Alt+Y", "adjustment"),
-        layer("Cmd+Alt+Shift+Y", "null"),
-        layer("Cmd+Alt+Shift+T", "text"),
-        layer("Cmd+Alt+Shift+C", "camera"),
-        layer("Cmd+Alt+Shift+L", "light"),
-        order("Cmd+CloseBracket", "forward"),
-        order("Cmd+OpenBracket", "backward"),
-        order("Cmd+Shift+CloseBracket", "front"),
-        order("Cmd+Shift+OpenBracket", "back"),
-    ];
-    for (k, attr, _) in TRANSFORM_PROPERTIES {
-        v.push(reveal(k, attr, false));
-        v.push(reveal(&format!("Shift+{k}"), attr, true));
-        v.push(key(&format!("Alt+Shift+{k}"), attr));
-    }
-    v.push(b("Equals", "timeline.zoom_in").when("timeline"));
-    v.push(b("Minus", "timeline.zoom_out").when("timeline"));
-    v.push(b("Period", "viewer.zoom_in").when("composition"));
-    v.push(b("Comma", "viewer.zoom_out").when("composition"));
-    v.push(b("Shift+Slash", "viewer.fit").when("composition"));
+    let v = without_base(crate::catalog::ae_bindings(crate::catalog::keys(), &|k| {
+        k.status.works()
+    }));
     KeymapBindings::new(bae_ui::presets::AE_KEYMAP, v).for_workspace(crate::menus::WORKSPACE)
+}
+
+/// AE's default shortcuts of the commands another module handles (`handled`,
+/// `bae_ui::menu::handled_actions`) that are not done in the catalog yet, minus
+/// the chords and commands already bound (`taken`: the other keymap
+/// extensions). An agent that implements an AE command gets AE's shortcut for
+/// it without touching the catalog.
+pub fn late_bindings(
+    handled: &std::collections::HashSet<String>,
+    taken: &[Binding],
+) -> Vec<Binding> {
+    let live = |k: &crate::catalog::Key| {
+        !k.status.works() && crate::catalog::live_by_handler(k.action, k.params, handled)
+    };
+    without_base(crate::catalog::ae_bindings(crate::catalog::keys(), &live))
+        .into_iter()
+        .filter(|b| {
+            !taken.iter().any(|t| {
+                (t.chord == b.chord && t.when == b.when)
+                    || (t.action == b.action && t.params == b.params)
+            })
+        })
+        .collect()
+}
+
+/// Drops the bindings whose chord the shell's `ae` keymap binds already (its
+/// File, Edit, Window shortcuts).
+fn without_base(v: Vec<Binding>) -> Vec<Binding> {
+    let base = bae_ui::presets::ae_keymap();
+    v.into_iter()
+        .filter(|b| {
+            !base
+                .bindings
+                .iter()
+                .any(|x| x.chord == b.chord && x.when == b.when)
+        })
+        .collect()
 }
 
 /// Selected layers, or the layers of the selected keyframes.

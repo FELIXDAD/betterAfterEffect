@@ -281,12 +281,7 @@ impl MenuItemSpec {
     /// action id, or `window.panel:<kind>` for a Window panel item (a real panel
     /// of that kind, not a placeholder).
     pub fn handler_key(&self) -> String {
-        match self.params.get("id").and_then(|v| v.as_str()) {
-            Some(kind) if self.action == crate::action::ids::OPEN_PANEL => {
-                format!("{}:{kind}", self.action)
-            }
-            _ => self.action.clone(),
-        }
+        handler_key(&self.action, &self.params)
     }
 
     /// Whether the item is enabled now: its action can run
@@ -458,6 +453,15 @@ impl Level {
             });
         }
         out
+    }
+}
+
+/// What [`handled_actions`] lists for an invocation: the action id, or
+/// `window.panel:<kind>` for opening a panel (a real panel of that kind).
+pub fn handler_key(action: &str, params: &serde_json::Value) -> String {
+    match params.get("id").and_then(|v| v.as_str()) {
+        Some(kind) if action == crate::action::ids::OPEN_PANEL => format!("{action}:{kind}"),
+        _ => action.to_owned(),
     }
 }
 
