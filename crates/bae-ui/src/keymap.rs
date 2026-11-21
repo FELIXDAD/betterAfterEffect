@@ -173,10 +173,14 @@ fn is_navigation_key(key: Key) -> bool {
     )
 }
 
-/// Key name for display. Arrow keys use egui's own symbols (`⏴⏵⏶⏷`), which are in
-/// egui's built-in fonts; `←→↑↓` are not and showed as missing glyphs (#135).
+/// Key name for display. Arrow keys are `←→↑↓`, which the system UI fonts have (egui's
+/// `⏴⏵⏶⏷` are only in egui's bundled fonts, which BAE does not ship).
 fn key_label(key: Key) -> &'static str {
     match key {
+        Key::ArrowLeft => "←",
+        Key::ArrowRight => "→",
+        Key::ArrowUp => "↑",
+        Key::ArrowDown => "↓",
         Key::Escape => "Esc",
         Key::Comma => ",",
         Key::Period => ".",
