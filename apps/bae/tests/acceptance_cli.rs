@@ -623,6 +623,292 @@ fn mcp_agents_cannot_edit_locked_layers() {
     );
 }
 
+// ---- Retest of #124 (dev 2c94655): every MCP entry point, batches, history ----
+
+fn pos(x: f64) -> Json {
+    json!({"type": "vec3", "value": [x, 20.0, 0.0]})
+}
+
+fn lock_args(layer: &str, on: bool) -> Json {
+    json!({"path": layer, "attr": "locked", "value": {"type": "bool", "value": on}})
+}
+
+/// A comp with three layers; returns (comp, locked, other, third).
+fn mcp_three_layers(mcp: &mut Mcp) -> (String, String, String, String) {
+    let comp = mcp.call(
+        "comp_create",
+        json!({"name": "锁 合成", "fps": 30, "duration": 2 * SEC}),
+    );
+    let comp = comp["output"]["path"].as_str().unwrap().to_owned();
+    let mut make = |name: &str, kind: &str| {
+        mcp.call(
+            "layer_create",
+            json!({"comp": comp, "kind": kind, "name": name}),
+        )["output"]["path"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let locked = make("锁定 层", "solid");
+    let other = make("其他 层", "solid");
+    let third = make("第三 层", "null");
+    (comp, locked, other, third)
+}
+
+#[test]
+fn every_mcp_tool_respects_the_lock() {
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tricky(tmp.path()).join("全部 入口.bae");
+    let mut mcp = Mcp::start(&project);
+    let (_comp, locked, other, _third) = mcp_three_layers(&mut mcp);
+    mcp.call(
+        "attr_set_animated",
+        json!({"path": other, "attr": "transform:position", "animated": true, "time": 0}),
+    );
+    mcp.call("history_checkpoint", json!({"name": "锁定前"}));
+    let list = mcp.call("history_list", json!({}));
+    let checkpoint = list["output"]["checkpoints"][0]["id"]
+        .as_str()
+        .or_else(|| list["checkpoints"][0]["id"].as_str())
+        .unwrap_or_else(|| panic!("no checkpoint id: {list}"))
+        .to_owned();
+    mcp.call(
+        "attr_set",
+        json!({"path": locked, "attr": "transform:position", "value": pos(111.0)}),
+    );
+    let (err, text) = mcp.try_call("attr_set", lock_args(&locked, true));
+    assert!(!err, "locking: {text}");
+    let refused = [
+        (
+            "attr_set",
+            json!({"path": locked, "attr": "transform:position", "value": pos(1.0)}),
+        ),
+        (
+            "attr_set_many",
+            json!({"edits": [{"path": locked, "attr": "transform:opacity", "time": 0, "value": {"type": "float", "value": 50.0}}]}),
+        ),
+        (
+            "attr_clear",
+            json!({"path": locked, "attr": "transform:position"}),
+        ),
+        (
+            "attr_set_expression",
+            json!({"path": locked, "attr": "transform:rotation", "source": "time * 10"}),
+        ),
+        (
+            "attr_set_at",
+            json!({"path": locked, "attr": "transform:position", "time": 0, "value": pos(2.0)}),
+        ),
+        ("prim_rename", json!({"path": locked, "name": "改名"})),
+        (
+            "prim_move",
+            json!({"from": locked, "to": format!("{locked}_moved")}),
+        ),
+        (
+            "prim_create",
+            json!({"path": format!("{locked}/child"), "prim_type": "Group"}),
+        ),
+        ("prim_delete", json!({"path": locked})),
+        ("layer_delete", json!({"layers": [locked]})),
+        (
+            "layer_shift_time",
+            json!({"layers": [locked], "delta": SEC / 2}),
+        ),
+        (
+            "layer_trim",
+            json!({"layers": [locked], "in_point": SEC / 2}),
+        ),
+        (
+            "layer_set_parent",
+            json!({"layers": [locked], "parent": other}),
+        ),
+    ];
+    let mut wrongly_allowed = Vec::new();
+    let mut messages = Vec::new();
+    for (tool, args) in refused {
+        let (err, text) = mcp.try_call(tool, args);
+        messages.push(format!(
+            "{tool}: error={err} {}",
+            text.chars().take(120).collect::<String>()
+        ));
+        if !err {
+            wrongly_allowed.push(tool);
+        } else if !text.contains("锁定 层") {
+            wrongly_allowed.push("(message does not name the layer)");
+        }
+    }
+    // Allowed: reading, moving another layer past it, duplicating it.
+    let allowed = [
+        ("prim_get", json!({"path": locked})),
+        ("layer_reorder", json!({"layers": [other], "index": 0})),
+        ("layer_duplicate", json!({"layers": [locked]})),
+        (
+            "attr_set",
+            json!({"path": other, "attr": "transform:opacity", "value": {"type": "float", "value": 40.0}}),
+        ),
+    ];
+    let mut wrongly_refused = Vec::new();
+    for (tool, args) in allowed {
+        let (err, text) = mcp.try_call(tool, args);
+        messages.push(format!(
+            "{tool}: error={err} {}",
+            text.chars().take(120).collect::<String>()
+        ));
+        if err {
+            wrongly_refused.push(tool);
+        }
+    }
+    // Reverting to a version from before the lock restores that version as a
+    // whole, lock switch included: the layer comes back unlocked with its old
+    // values (like an unlock-edit batch). It must not leave a locked layer
+    // with changed values.
+    let (err, text) = mcp.try_call("history_revert", json!({"checkpoint": checkpoint}));
+    let after = mcp.call("prim_get", json!({"path": locked}));
+    let locked_after = after["output"]["attributes"]["locked"]["value"]["value"]
+        .as_bool()
+        .or_else(|| after["attributes"]["locked"]["value"]["value"].as_bool());
+    let after_text = after.to_string();
+    messages.push(format!(
+        "history_revert: error={err} {} → locked {locked_after:?}, still 111: {}",
+        text.chars().take(80).collect::<String>(),
+        after_text.contains("111")
+    ));
+    if !err && locked_after == Some(true) && !after_text.contains("111") {
+        wrongly_allowed.push("history_revert (changed a layer that is still locked)");
+    }
+    // Lock it again for the rest.
+    mcp.call("attr_set", lock_args(&locked, true));
+    // The agent's own undo replays history (not a new edit).
+    let (err, text) = mcp.try_call("history_undo", json!({}));
+    messages.push(format!(
+        "history_undo: error={err} {}",
+        text.chars().take(120).collect::<String>()
+    ));
+    println!("{}", messages.join("\n"));
+    assert!(
+        wrongly_allowed.is_empty(),
+        "allowed on a locked layer: {wrongly_allowed:?}"
+    );
+    assert!(
+        wrongly_refused.is_empty(),
+        "refused although the locked layer is not edited: {wrongly_refused:?}"
+    );
+    // (history_undo above undid the re-lock.) Lock again: refused again.
+    mcp.call("attr_set", lock_args(&locked, true));
+    let (err, _) = mcp.try_call(
+        "attr_set",
+        json!({"path": locked, "attr": "transform:position", "value": pos(3.0)}),
+    );
+    assert!(err, "not locked at the end");
+}
+
+#[test]
+fn batches_are_all_or_nothing_and_can_unlock_edit_relock() {
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tricky(tmp.path()).join("批量.bae");
+    let mut mcp = Mcp::start(&project);
+    let (_comp, locked, other, _third) = mcp_three_layers(&mut mcp);
+    mcp.call("attr_set", lock_args(&locked, true));
+    // One step touches the locked layer: nothing of the batch is applied.
+    let (err, text) = mcp.try_call(
+        "command_batch",
+        json!({"commands": [
+            {"command": "attr_set", "params": {"path": other, "attr": "transform:position", "value": pos(500.0)}},
+            {"command": "attr_set", "params": {"path": locked, "attr": "transform:position", "value": pos(600.0)}},
+        ]}),
+    );
+    assert!(err, "the batch went through: {text}");
+    assert!(text.contains("锁定 层"), "message: {text}");
+    let other_now = mcp.call("prim_get", json!({"path": other})).to_string();
+    assert!(
+        !other_now.contains("500"),
+        "half of the batch was applied: {other_now}"
+    );
+    // Unlock, edit, lock again in one batch: allowed (the lock switch itself).
+    let (err, text) = mcp.try_call(
+        "command_batch",
+        json!({"commands": [
+            {"command": "attr_set", "params": lock_args(&locked, false)},
+            {"command": "attr_set", "params": {"path": locked, "attr": "transform:position", "value": pos(700.0)}},
+            {"command": "attr_set", "params": lock_args(&locked, true)},
+        ]}),
+    );
+    assert!(!err, "unlock-edit-relock batch: {text}");
+    let now = mcp.call("prim_get", json!({"path": locked})).to_string();
+    assert!(now.contains("700"), "{now}");
+    // And it is locked again.
+    let (err, _) = mcp.try_call(
+        "attr_set",
+        json!({"path": locked, "attr": "transform:position", "value": pos(800.0)}),
+    );
+    assert!(err, "not locked after the batch");
+    // Undo the batch (one step): unlocked, back at the old value? (history replay)
+    let (err, text) = mcp.try_call("history_undo", json!({}));
+    assert!(!err, "undo of the batch: {text}");
+    let after_undo = mcp.call("prim_get", json!({"path": locked})).to_string();
+    assert!(
+        !after_undo.contains("700"),
+        "undo did not revert the batch: {after_undo}"
+    );
+    let (err, text) = mcp.try_call("history_redo", json!({}));
+    assert!(!err, "redo: {text}");
+    assert!(
+        mcp.call("prim_get", json!({"path": locked}))
+            .to_string()
+            .contains("700")
+    );
+}
+
+#[test]
+fn a_lock_from_another_sublayer_binds_the_agent() {
+    // The user locks the layer (root sublayer); an agent writing to its own
+    // sublayer cannot edit it, but can switch the lock off like any user.
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tricky(tmp.path()).join("别的 层.bae");
+    let layer = {
+        let mut builder = bae_app::AppBuilder::new();
+        builder.add_module(bae_motion::MotionModule);
+        let app = builder.build();
+        let mut reg = bae_model::CommandRegistry::with_builtins();
+        if let Some(r) = app.get_registry::<dyn bae_model::DynCommand>() {
+            for e in r.snapshot().iter() {
+                let _ = reg.register_dyn(e.item().clone());
+            }
+        }
+        let mut p = Project::new();
+        let author = bae_model::AuthorId::new("user:acceptance").unwrap();
+        let mut run = |id: &str, a: Json| reg.execute(&mut p.stage, &author, id, a).unwrap().output;
+        let comp = run(
+            "comp.create",
+            json!({"name": "用户 合成", "fps": 30, "duration": 2 * SEC}),
+        );
+        let comp = comp["path"].as_str().unwrap().to_owned();
+        let l = run(
+            "layer.create",
+            json!({"comp": comp, "kind": "solid", "name": "用户 锁定"}),
+        );
+        let l = l["path"].as_str().unwrap().to_owned();
+        run("attr.set", lock_args(&l, true));
+        p.save_as(&project).unwrap();
+        l
+    };
+    let mut mcp = Mcp::start(&project); // own-layer: writes go to agent/acceptance
+    let (err, text) = mcp.try_call(
+        "attr_set",
+        json!({"path": layer, "attr": "transform:position", "value": pos(5.0)}),
+    );
+    assert!(err, "the agent edited a layer the user locked: {text}");
+    let (err, text) = mcp.try_call("prim_delete", json!({"path": layer}));
+    assert!(err, "the agent deleted a layer the user locked: {text}");
+    let (err, text) = mcp.try_call("attr_set", lock_args(&layer, false));
+    assert!(!err, "the agent cannot switch the lock off: {text}");
+    let (err, text) = mcp.try_call(
+        "attr_set",
+        json!({"path": layer, "attr": "transform:position", "value": pos(6.0)}),
+    );
+    assert!(!err, "after unlocking: {text}");
+}
+
 // ---- Retest of #131 / #111 (dev 277f11a): bae pack, CLI errors ----
 
 /// A `.bae` with two comps, a saved view (second comp active at 1 s) and a
