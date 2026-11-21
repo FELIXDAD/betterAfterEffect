@@ -1,0 +1,643 @@
+{
+  "format": "bae-ai-bridge",
+  "format_version": "0.1.0",
+  "generator": {
+    "name": "bae-ai-export",
+    "version": "0.1.0"
+  },
+  "host": {
+    "app": "Adobe Illustrator",
+    "version": "30.4.0",
+    "os": "Macintosh OS 26.7.3/64",
+    "locale": "en_US"
+  },
+  "source": {
+    "name": "basic.ai"
+  },
+  "document": {
+    "name": "basic",
+    "color_space": "rgb",
+    "units": "pt",
+    "y_axis": "down"
+  },
+  "artboards": [
+    {
+      "name": "Poster",
+      "rect": [0, -300, 400, 0]
+    },
+    {
+      "name": "Badge",
+      "rect": [450, -300, 650, -200]
+    }
+  ],
+  "layers": [
+    {
+      "type": "layer",
+      "name": "Text",
+      "visible": true,
+      "locked": false,
+      "printable": true,
+      "preview": true,
+      "opacity": 1,
+      "blend": "normal",
+      "color": [0.3086, 0.3086, 1],
+      "items": [
+        {
+          "type": "text",
+          "hidden": false,
+          "locked": false,
+          "opacity": 1,
+          "blend": "normal",
+          "bounds": [20, -50.1318, 98.2627, -11],
+          "text_kind": "point",
+          "contents": "Hello",
+          "anchor": [20, -20],
+          "matrix": [1, 0, 0, 1],
+          "orientation": "horizontal",
+          "paragraphs": [
+            {
+              "justification": "left"
+            }
+          ],
+          "runs": [
+            {
+              "font": "MyriadPro-Regular",
+              "family": "Myriad Pro",
+              "style": "Regular",
+              "size": 36,
+              "leading": 43.2,
+              "auto_leading": true,
+              "tracking": 0,
+              "baseline_shift": 0,
+              "h_scale": 100,
+              "v_scale": 100,
+              "fill": {
+                "type": "color",
+                "color": [0.2, 0.2, 0.2, 1],
+                "source": {
+                  "model": "rgb",
+                  "values": [51, 51, 51]
+                }
+              },
+              "stroke": null,
+              "text": "Hello"
+            }
+          ],
+          "outline": {
+            "type": "group",
+            "hidden": false,
+            "locked": false,
+            "opacity": 1,
+            "blend": "normal",
+            "bounds": [22.7358, -45.5566, 96.8926, -19.6045],
+            "clipped": false,
+            "items": [
+              {
+                "type": "path",
+                "hidden": false,
+                "locked": false,
+                "opacity": 1,
+                "blend": "normal",
+                "bounds": [79.8667, -37.8174, 96.8926, -19.6045],
+                "compound": true,
+                "subpaths": [
+                  {
+                    "closed": true,
+                    "points": [
+                      [83.0703, -28.6748, 83.0703, -31.9863, 83.0703, -24.8594],
+                      [88.3618, -21.9795, 85.2661, -21.9795, 91.3853, -21.9795],
+                      [93.6533, -28.7471, 93.6533, -24.8232, 93.6533, -31.6982],
+                      [88.4336, -35.4424, 92.1772, -35.4424, 84.6904, -35.4424]
+                    ]
+                  },
+                  {
+                    "closed": true,
+                    "points": [
+                      [96.8926, -28.8545, 96.8926, -34.1826, 96.8926, -22.4121],
+                      [88.2178, -19.6045, 92.4292, -19.6045, 83.5024, -19.6045],
+                      [79.8667, -28.5674, 79.8667, -23.0596, 79.8667, -34.3984],
+                      [88.5059, -37.8174, 83.6826, -37.8174, 93.5093, -37.8174]
+                    ]
+                  }
+                ],
+                "fill_rule": "non_zero",
+                "fill": {
+                  "type": "color",
+                  "color": [0.2, 0.2, 0.2, 1],
+                  "source": {
+                    "model": "rgb",
+                    "values": [51, 51, 51]
+                  }
+                },
+                "stroke": null
+              },
+              {
+                "type": "path",
+                "hidden": false,
+                "locked": false,
+                "opacity": 1,
+                "blend": "normal",
+                "bounds": [72.6304, -45.5566, 75.7983, -20],
+                "compound": true,
+                "subpaths": [
+                  {
+                    "closed": true,
+                    "points": [
+                      [72.6304, -45.5566, 72.6304, -45.5566, 72.6304, -45.5566],
+                      [75.7983, -45.5566, 75.7983, -45.5566, 75.7983, -45.5566],
+                      [75.7983, -20, 75.7983, -20, 75.7983, -20],
+                      [72.6304, -20, 72.6304, -20, 72.6304, -20]
+                    ]
+                  }
+                ],
+                "fill_rule": "non_zero",
+                "fill": {
+                  "type": "color",
+                  "color": [0.2, 0.2, 0.2, 1],
+                  "source": {
+                    "model": "rgb",
+                    "values": [51, 51, 51]
+                  }
+                },
+                "stroke": null
+              },
+              {
+                "type": "path",
+                "hidden": false,
+                "locked": false,
+                "opacity": 1,
+                "blend": "normal",
+                "bounds": [64.1348, -45.5566, 67.3027, -20],
+                "compound": true,
+                "subpaths": [
+                  {
+                    "closed": true,
+                    "points": [
+                      [64.1348, -45.5566, 64.1348, -45.5566, 64.1348, -45.5566],
+                      [67.3027, -45.5566, 67.3027, -45.5566, 67.3027, -45.5566],
+                      [67.3027, -20, 67.3027, -20, 67.3027, -20],
+                      [64.1348, -20, 64.1348, -20, 64.1348, -20]
+                    ]
+                  }
+                ],
+                "fill_rule": "non_zero",
+                "fill": {
+                  "type": "color",
+                  "color": [0.2, 0.2, 0.2, 1],
+                  "source": {
+                    "model": "rgb",
+                    "values": [51, 51, 51]
+                  }
+                },
+                "stroke": null
+              },
+              {
+                "type": "path",
+                "hidden": false,
+                "locked": false,
+                "opacity": 1,
+                "blend": "normal",
+                "bounds": [44.8394, -37.8174, 60.2095, -19.6396],
+                "compound": true,
+                "subpaths": [
+                  {
+                    "closed": true,
+                    "points": [
+                      [57.1499, -30.4023, 57.1499, -30.4023, 57.186, -32.418],
+                      [52.7583, -35.5498, 56.3223, -35.5498, 49.5547, -35.5498],
+                      [47.8989, -30.4023, 48.1509, -32.5986, 47.8989, -30.4023]
+                    ]
+                  },
+                  {
+                    "closed": true,
+                    "points": [
+                      [47.8633, -28.1348, 47.8633, -28.1348, 47.9351, -23.8516],
+                      [53.8384, -22.0879, 50.6709, -22.0879, 56.106, -22.0879],
+                      [58.6616, -22.9873, 57.4741, -22.4834, 58.6616, -22.9873],
+                      [59.2017, -20.7197, 59.2017, -20.7197, 58.0859, -20.2158],
+                      [53.4063, -19.6396, 56.1782, -19.6396, 48.043, -19.6396],
+                      [44.8394, -28.4229, 44.8394, -23.168, 44.8394, -33.6787],
+                      [53.0103, -37.8174, 47.9351, -37.8174, 58.6978, -37.8174],
+                      [60.2095, -29.6104, 60.2095, -32.8145, 60.2095, -28.9629],
+                      [60.1016, -28.1348, 60.1377, -28.459, 60.1016, -28.1348]
+                    ]
+                  }
+                ],
+                "fill_rule": "non_zero",
+                "fill": {
+                  "type": "color",
+                  "color": [0.2, 0.2, 0.2, 1],
+                  "source": {
+                    "model": "rgb",
+                    "values": [51, 51, 51]
+                  }
+                },
+                "stroke": null
+              },
+              {
+                "type": "path",
+                "hidden": false,
+                "locked": false,
+                "opacity": 1,
+                "blend": "normal",
+                "bounds": [22.7358, -44.2607, 40.7695, -20],
+                "compound": true,
+                "subpaths": [
+                  {
+                    "closed": true,
+                    "points": [
+                      [25.8672, -44.2607, 25.8672, -44.2607, 25.8672, -44.2607],
+                      [25.8672, -34.1104, 25.8672, -34.1104, 25.8672, -34.1104],
+                      [37.6016, -34.1104, 37.6016, -34.1104, 37.6016, -34.1104],
+                      [37.6016, -44.2607, 37.6016, -44.2607, 37.6016, -44.2607],
+                      [40.7695, -44.2607, 40.7695, -44.2607, 40.7695, -44.2607],
+                      [40.7695, -20, 40.7695, -20, 40.7695, -20],
+                      [37.6016, -20, 37.6016, -20, 37.6016, -20],
+                      [37.6016, -31.375, 37.6016, -31.375, 37.6016, -31.375],
+                      [25.8672, -31.375, 25.8672, -31.375, 25.8672, -31.375],
+                      [25.8672, -20, 25.8672, -20, 25.8672, -20],
+                      [22.7358, -20, 22.7358, -20, 22.7358, -20],
+                      [22.7358, -44.2607, 22.7358, -44.2607, 22.7358, -44.2607]
+                    ]
+                  }
+                ],
+                "fill_rule": "non_zero",
+                "fill": {
+                  "type": "color",
+                  "color": [0.2, 0.2, 0.2, 1],
+                  "source": {
+                    "model": "rgb",
+                    "values": [51, 51, 51]
+                  }
+                },
+                "stroke": null
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "layer",
+      "name": "图层 1",
+      "visible": true,
+      "locked": false,
+      "printable": true,
+      "preview": true,
+      "opacity": 1,
+      "blend": "normal",
+      "color": [0.3086, 1, 0.3086],
+      "items": [
+        {
+          "type": "path",
+          "hidden": false,
+          "locked": false,
+          "opacity": 1,
+          "blend": "normal",
+          "bounds": [469, -291, 631, -209],
+          "compound": false,
+          "subpaths": [
+            {
+              "closed": true,
+              "points": [
+                [470, -250, 470, -227.9086, 470, -272.0914],
+                [550, -290, 505.8172, -290, 594.1828, -290],
+                [630, -250, 630, -272.0914, 630, -227.9086],
+                [550, -210, 594.1828, -210, 505.8172, -210]
+              ]
+            }
+          ],
+          "fill_rule": "non_zero",
+          "fill": {
+            "type": "color",
+            "color": [1, 0.902, 0, 1],
+            "source": {
+              "model": "rgb",
+              "values": [255, 230, 0]
+            }
+          },
+          "stroke": {
+            "paint": {
+              "type": "color",
+              "color": [0, 0, 0, 1],
+              "source": {
+                "model": "rgb",
+                "values": [0, 0, 0]
+              }
+            },
+            "width": 2,
+            "cap": "butt",
+            "join": "miter",
+            "miter_limit": 10,
+            "dashes": [],
+            "dash_offset": 0
+          }
+        },
+        {
+          "type": "group",
+          "name": "Logo",
+          "hidden": false,
+          "locked": false,
+          "opacity": 0.9,
+          "blend": "normal",
+          "bounds": [18, -282, 350, -30],
+          "clipped": false,
+          "items": [
+            {
+              "type": "path",
+              "name": "Frame",
+              "hidden": false,
+              "locked": false,
+              "opacity": 1,
+              "blend": "normal",
+              "bounds": [18, -282, 182, -158],
+              "compound": true,
+              "subpaths": [
+                {
+                  "closed": true,
+                  "points": [
+                    [140, -190, 140, -190, 140, -190],
+                    [140, -250, 140, -250, 140, -250],
+                    [60, -250, 60, -250, 60, -250],
+                    [60, -190, 60, -190, 60, -190]
+                  ]
+                },
+                {
+                  "closed": true,
+                  "points": [
+                    [20, -160, 20, -160, 20, -160],
+                    [20, -280, 20, -280, 20, -280],
+                    [180, -280, 180, -280, 180, -280],
+                    [180, -160, 180, -160, 180, -160]
+                  ]
+                }
+              ],
+              "fill_rule": "even_odd",
+              "fill": {
+                "type": "color",
+                "color": [0.8, 0.102, 0.102, 1],
+                "source": {
+                  "model": "rgb",
+                  "values": [204, 26, 26]
+                }
+              },
+              "stroke": {
+                "paint": {
+                  "type": "color",
+                  "color": [0, 0, 1, 1],
+                  "source": {
+                    "model": "rgb",
+                    "values": [0, 0, 255]
+                  }
+                },
+                "width": 4,
+                "cap": "round",
+                "join": "bevel",
+                "miter_limit": 10,
+                "dashes": [6, 3],
+                "dash_offset": 0
+              }
+            },
+            {
+              "type": "path",
+              "hidden": false,
+              "locked": false,
+              "opacity": 0.5,
+              "blend": "multiply",
+              "bounds": [250, -270, 350, -170],
+              "compound": false,
+              "subpaths": [
+                {
+                  "closed": true,
+                  "points": [
+                    [250, -220, 250, -192.3858, 250, -247.6142],
+                    [300, -270, 272.3858, -270, 327.6142, -270],
+                    [350, -220, 350, -247.6142, 350, -192.3858],
+                    [300, -170, 327.6142, -170, 272.3858, -170]
+                  ]
+                }
+              ],
+              "fill_rule": "non_zero",
+              "fill": {
+                "type": "gradient",
+                "gradient": "linear",
+                "name": "Untitled Gradient 2",
+                "stops": [
+                  {
+                    "offset": 0,
+                    "midpoint": 0.5,
+                    "color": [1, 0.502, 0, 1],
+                    "source": {
+                      "model": "rgb",
+                      "values": [255, 128, 0]
+                    }
+                  },
+                  {
+                    "offset": 0.4,
+                    "midpoint": 0.5,
+                    "color": [0, 0.251, 1, 1],
+                    "source": {
+                      "model": "rgb",
+                      "values": [0, 64, 255]
+                    }
+                  },
+                  {
+                    "offset": 1,
+                    "midpoint": 0.5,
+                    "color": [0, 0, 0, 1],
+                    "source": {
+                      "model": "rgb",
+                      "values": [0, 0, 0]
+                    }
+                  }
+                ],
+                "start": [250, -220],
+                "end": [350, -220],
+                "matrix": [1, 0, 0, 1, 0, 0],
+                "raw": {
+                  "origin": [250, 220],
+                  "angle": 0,
+                  "length": 100,
+                  "hilite_angle": 0,
+                  "hilite_length": 0,
+                  "matrix": [1, 0, 0, 1, 0, 0]
+                }
+              },
+              "stroke": null
+            },
+            {
+              "type": "path",
+              "hidden": false,
+              "locked": false,
+              "opacity": 1,
+              "blend": "normal",
+              "bounds": [220, -120, 340, -30],
+              "compound": false,
+              "subpaths": [
+                {
+                  "closed": true,
+                  "points": [
+                    [220, -30, 220, -30, 220, -30],
+                    [220, -120, 220, -120, 220, -120],
+                    [340, -120, 340, -120, 340, -120],
+                    [340, -30, 340, -30, 340, -30]
+                  ]
+                }
+              ],
+              "fill_rule": "non_zero",
+              "fill": {
+                "type": "gradient",
+                "gradient": "radial",
+                "name": "Untitled Gradient",
+                "stops": [
+                  {
+                    "offset": 0,
+                    "midpoint": 0.5,
+                    "color": [1, 0.502, 0, 1],
+                    "source": {
+                      "model": "rgb",
+                      "values": [255, 128, 0]
+                    }
+                  },
+                  {
+                    "offset": 1,
+                    "midpoint": 0.5,
+                    "color": [0, 0, 0, 1],
+                    "source": {
+                      "model": "rgb",
+                      "values": [0, 0, 0]
+                    }
+                  }
+                ],
+                "start": [280, -75],
+                "end": [333.033, -75],
+                "matrix": [1, 0, 0, 1, 0, 0],
+                "raw": {
+                  "origin": [280, 75],
+                  "angle": 0,
+                  "length": 53.033,
+                  "hilite_angle": 0,
+                  "hilite_length": 0,
+                  "matrix": [1, 0, 0, 1, 0, 0]
+                },
+                "focal": [280, -75]
+              },
+              "stroke": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "layer",
+      "name": "Masked",
+      "visible": true,
+      "locked": false,
+      "printable": true,
+      "preview": true,
+      "opacity": 1,
+      "blend": "normal",
+      "color": [1, 0.3086, 0.3086],
+      "items": [
+        {
+          "type": "group",
+          "hidden": false,
+          "locked": false,
+          "opacity": 1,
+          "blend": "normal",
+          "bounds": [0, -165, 200, 15],
+          "clipped": true,
+          "clip": [
+            {
+              "closed": true,
+              "points": [
+                [0, 0, 0, 0, 0, 0],
+                [0, -150, 0, -150, 0, -150],
+                [200, -150, 200, -150, 200, -150],
+                [200, 0, 200, 0, 200, 0]
+              ]
+            }
+          ],
+          "items": [
+            {
+              "type": "path",
+              "hidden": false,
+              "locked": false,
+              "opacity": 1,
+              "blend": "normal",
+              "bounds": [10, -165, 190, 15],
+              "compound": false,
+              "subpaths": [
+                {
+                  "closed": true,
+                  "points": [
+                    [10, -75, 10, -25.2944, 10, -124.7056],
+                    [100, -165, 50.2944, -165, 149.7056, -165],
+                    [190, -75, 190, -124.7056, 190, -25.2944],
+                    [100, 15, 149.7056, 15, 50.2944, 15]
+                  ]
+                }
+              ],
+              "fill_rule": "non_zero",
+              "fill": {
+                "type": "color",
+                "color": [0.102, 0.702, 0.2, 1],
+                "source": {
+                  "model": "rgb",
+                  "values": [26, 179, 51]
+                }
+              },
+              "stroke": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "layer",
+      "name": "Hidden",
+      "visible": false,
+      "locked": true,
+      "printable": true,
+      "preview": true,
+      "opacity": 1,
+      "blend": "normal",
+      "color": [0.3086, 0.5, 1],
+      "items": [
+        {
+          "type": "path",
+          "hidden": false,
+          "locked": false,
+          "opacity": 1,
+          "blend": "normal",
+          "bounds": [0, -300, 10, -290],
+          "compound": false,
+          "subpaths": [
+            {
+              "closed": true,
+              "points": [
+                [0, -290, 0, -290, 0, -290],
+                [0, -300, 0, -300, 0, -300],
+                [10, -300, 10, -300, 10, -300],
+                [10, -290, 10, -290, 10, -290]
+              ]
+            }
+          ],
+          "fill_rule": "non_zero",
+          "fill": {
+            "type": "color",
+            "color": [1, 1, 1, 1],
+            "source": {
+              "model": "rgb",
+              "values": [255, 255, 255]
+            }
+          },
+          "stroke": null
+        }
+      ]
+    }
+  ],
+  "report": {
+    "warnings": []
+  }
+}
