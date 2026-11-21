@@ -19,6 +19,9 @@ resolver = "3"
 # a Cargo.toml).
 members = ["apps/*", "crates/*", "services/*", "xtask", "tools/dep-probe"]
 default-members = ["apps/bae"]
+# Vendored third-party crates are `[patch.crates-io]` targets, not BAE crates: they keep
+# their upstream lints and formatting (see the `[patch.crates-io]` section below).
+exclude = ["vendor/epaint"]
 
 [workspace.package]
 version = "0.1.0"
@@ -188,6 +191,18 @@ rmcp = { version = "3.11.0", default-features = false }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 insta = { version = "1.49.0", features = ["json"] }
 tempfile = "3.27.0"
+
+# ---------------------------------------------------------------------------
+# Patches
+# ---------------------------------------------------------------------------
+
+[patch.crates-io]
+# epaint 0.36.2 with egui's upstream font-stack update (emilk/egui#8874) backported:
+# harfrust 0.12 -> 0.15 and skrifa 0.44 -> 0.49, the versions vello 0.12 and parley 0.13
+# use. Without it the binary links two skrifa / read-fonts / harfrust sets (~0.9 MiB).
+# Delete when the egui group moves to a release that has #8874 (egui 0.38).
+# Details: vendor/epaint/BAE-PATCH.md, docs/spec/dependencies.md.
+epaint = { path = "vendor/epaint" }
 
 # ---------------------------------------------------------------------------
 # Profiles (ARCHITECTURE §11)
