@@ -379,3 +379,62 @@ fn mcp_builds_animates_and_saves_a_project() {
         .keyframes;
     assert_eq!(keys.len(), 3, "{keys:?}");
 }
+
+#[test]
+fn cli_errors_name_the_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tricky(tmp.path());
+    let garbage = dir.join("坏的 文件.baez");
+    std::fs::write(&garbage, b"PK\x03\x04 not really a zip").unwrap();
+    let missing = dir.join("没有 这个.bae");
+    for (path, args) in [
+        (&garbage, vec!["export-json"]),
+        (&missing, vec!["export-json"]),
+        (&garbage, vec!["--headless"]),
+        (&missing, vec!["--headless"]),
+    ] {
+        let out = bae().args(&args).arg(path).output().unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        println!("{args:?} {}:\n{stderr}", path.display());
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+        let file = path.file_name().unwrap().to_string_lossy();
+        assert!(stderr.contains(&*file), "{args:?}: {stderr}");
+        assert!(!stderr.contains("panicked"), "{args:?}: {stderr}");
+    }
+    // render with a broken project.
+    let out = bae()
+        .args(["render", "--comp", "x", "-o"])
+        .arg(tmp.path().join("o_####.png"))
+        .arg(&garbage)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    println!("render:\n{stderr}");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr.contains("坏的 文件.baez"), "{stderr}");
+}
+
+#[test]
+#[ignore = "issue #111"]
+fn cli_errors_are_printed_once_without_a_log_line() {
+    // `bae export-json` / `bae render` print the error twice: a timestamped
+    // `ERROR bae_platform::cli: …` log line, then `bae …: error: …`.
+    let tmp = tempfile::tempdir().unwrap();
+    let garbage = tricky(tmp.path()).join("坏的 文件.baez");
+    std::fs::write(&garbage, b"PK\x03\x04 not really a zip").unwrap();
+    for args in [
+        vec!["export-json"],
+        vec!["render", "--comp", "x", "-o", "o_####.png"],
+    ] {
+        let out = Command::new(BAE)
+            .args(&args)
+            .arg(&garbage)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains(" ERROR "),
+            "{args:?}: log line in the error output: {stderr}"
+        );
+    }
+}

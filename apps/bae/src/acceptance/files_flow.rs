@@ -561,3 +561,247 @@ fn reopening_shows_the_comp_that_was_open() {
     );
     assert!(find_text(&h, "Solid 1").is_some());
 }
+
+// ---- Retest of #113 / #111 (dev d23a328): edge cases ----
+
+/// Two comps open (tabs), different times, the second active; saved.
+fn two_comps_saved(
+    h: &mut Ui,
+    path: &Path,
+) -> (PrimPath, PrimPath, bae_model::Time, bae_model::Time) {
+    comp_with(h, &["motion.layer.new.solid"]);
+    let first = h.state().active_comp().unwrap();
+    for _ in 0..15 {
+        press(h, Modifiers::NONE, Key::PageDown);
+    }
+    settle(h);
+    let t1 = h.state().now();
+    comp_with(h, &["motion.layer.new.null"]);
+    let second = h.state().active_comp().unwrap();
+    for _ in 0..45 {
+        press(h, Modifiers::NONE, Key::PageDown);
+    }
+    settle(h);
+    let t2 = h.state().now();
+    save_as(h, path.to_owned());
+    no_surprises(h);
+    (first, second, t1, t2)
+}
+
+fn reopen(h: &mut Ui, path: &Path) {
+    key(h, Modifiers::COMMAND | Modifiers::ALT, Key::N);
+    h.state_mut().dialogs.open.push_back(Some(path.to_owned()));
+    key(h, Modifiers::COMMAND, Key::O);
+    no_surprises(h);
+}
+
+#[test]
+fn reopening_restores_every_open_comp_its_time_and_the_active_one() {
+    let tmp = tempfile::tempdir().unwrap();
+    for name in ["两个 合成.bae", "两个 合成.baez"] {
+        let path = tricky_dir(tmp.path()).join(name);
+        let mut h = gui();
+        let (first, second, t1, t2) = two_comps_saved(&mut h, &path);
+        reopen(&mut h, &path);
+        let s = h.state().session();
+        let s = s.lock();
+        assert_eq!(
+            s.open_comps,
+            [first.clone(), second.clone()],
+            "{name}: tabs"
+        );
+        assert_eq!(s.active_comp.as_ref(), Some(&second), "{name}: active comp");
+        assert_eq!(s.time(&first), t1, "{name}: time of the first comp");
+        assert_eq!(s.time(&second), t2, "{name}: time of the active comp");
+        drop(s);
+        // The timeline shows the active comp's layers.
+        assert!(
+            find_text(&h, "Null 1").is_some(),
+            "{name}: {:?}",
+            painted_texts(&h)
+        );
+    }
+}
+
+#[test]
+fn view_changes_do_not_mark_the_project_changed_or_add_undo_steps() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("视图.bae");
+    let mut h = gui();
+    two_comps_saved(&mut h, &path);
+    reopen(&mut h, &path);
+    assert!(!h.state().doc.is_dirty());
+    let undo_before = h.state().doc.undo_state();
+    // Move the time, play, switch comps (double-click in the Project panel).
+    for _ in 0..10 {
+        press(&mut h, Modifiers::NONE, Key::PageDown);
+    }
+    key(&mut h, Modifiers::NONE, Key::Home);
+    let comp = find_text(&h, "Comp 1").expect("Comp 1 in the Project panel");
+    double_click_at(&mut h, comp.center());
+    assert!(
+        !h.state().doc.is_dirty(),
+        "view changes marked the project as changed"
+    );
+    assert_eq!(
+        h.state().doc.undo_state(),
+        undo_before,
+        "view changes became undo steps"
+    );
+    // Closing asks nothing (no data changed).
+    assert!(h.state_mut().menu("shell.file.close_project"));
+    settle(&mut h);
+    assert!(
+        h.state().dialogs.asked.is_empty(),
+        "{:?}",
+        h.state().dialogs.asked
+    );
+}
+
+/// Replace the `view` record in a saved `.bae`'s project.json.
+fn set_view(path: &Path, view: Json) {
+    let manifest = path.join("project.json");
+    let mut json: Json = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+    json["view"] = view;
+    fs::write(&manifest, serde_json::to_vec_pretty(&json).unwrap()).unwrap();
+}
+
+#[test]
+fn a_broken_or_stale_view_record_falls_back_to_the_first_comp() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("视图 记录.bae");
+    let mut h = gui();
+    let (first, _second, _, _) = two_comps_saved(&mut h, &path);
+    let cases = [
+        (
+            "comps that no longer exist",
+            json!({"comps": [{"path": "/comps/Gone", "time": 0}], "active": "/comps/Gone"}),
+        ),
+        ("not an object", json!(42)),
+        ("wrong field types", json!({"comps": "nope", "active": 7})),
+        (
+            "time far past the end",
+            json!({"comps": [{"path": first, "time": 9_000_000_000_000_000i64}], "active": first}),
+        ),
+        (
+            "negative time",
+            json!({"comps": [{"path": first, "time": -705_600_000}], "active": first}),
+        ),
+        ("removed (old project)", Json::Null),
+    ];
+    for (label, view) in cases {
+        if view.is_null() {
+            let manifest = path.join("project.json");
+            let mut json: Json = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+            json.as_object_mut().unwrap().remove("view");
+            fs::write(&manifest, serde_json::to_vec_pretty(&json).unwrap()).unwrap();
+        } else {
+            set_view(&path, view);
+        }
+        // The previous case left an edit (Cmd+Y below): discard it.
+        if h.state().doc.is_dirty() {
+            h.state_mut()
+                .dialogs
+                .answers
+                .push_back(UnsavedChoice::DontSave);
+        }
+        reopen(&mut h, &path);
+        let active = h.state().active_comp();
+        assert_eq!(
+            active.as_ref(),
+            Some(&first),
+            "{label}: expected the first comp"
+        );
+        let info = bae_motion::query::comp_info(h.state().stage(), &first).unwrap();
+        let now = h.state().now();
+        assert!(
+            now >= bae_model::Time::ZERO && now <= info.duration,
+            "{label}: time {now:?} outside the comp"
+        );
+        // The project still works.
+        key(&mut h, Modifiers::COMMAND, Key::Y);
+        assert!(h.state().doc.is_dirty(), "{label}");
+    }
+}
+
+#[test]
+fn broken_files_are_explained_in_chinese_too() {
+    if !in_child(
+        "acceptance::files_flow::broken_files_are_explained_in_chinese_too",
+        &[("BAE_LANG", "zh")],
+    ) {
+        return;
+    }
+    crate::i18n::init_from_env();
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tricky_dir(tmp.path());
+    let good = dir.join("好的.bae");
+    {
+        let mut h = gui();
+        comp_with(&mut h, &["motion.layer.new.solid"]);
+        save_as(&mut h, good.clone());
+    }
+    let copy = |name: &str| {
+        let p = dir.join(name);
+        let status = std::process::Command::new("cp")
+            .arg("-R")
+            .arg(&good)
+            .arg(&p)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        p
+    };
+    let mut cases: Vec<(&str, PathBuf, &str)> = Vec::new();
+    cases.push(("missing", dir.join("不存在.bae"), "不存在"));
+    let p = dir.join("空目录.bae");
+    fs::create_dir(&p).unwrap();
+    cases.push(("empty folder", p, "没有 project.json"));
+    let p = dir.join("坏包.baez");
+    fs::write(&p, b"PK\x03\x04 nope").unwrap();
+    cases.push(("damaged baez", p, "已损坏，或者不是 .baez 项目包"));
+    let p = copy("新版本.bae");
+    let manifest = p.join("project.json");
+    let mut json: Json = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+    json["version"] = json!(999);
+    fs::write(&manifest, serde_json::to_vec(&json).unwrap()).unwrap();
+    cases.push(("newer version", p, "更新版本的 BAE 保存的"));
+    let p = copy("缺层.bae");
+    fs::remove_dir_all(p.join("sublayers")).unwrap();
+    cases.push(("missing sublayer data", p, "数据缺失"));
+    let p = copy("坏层.bae");
+    for e in fs::read_dir(p.join("sublayers")).unwrap() {
+        fs::write(e.unwrap().path(), b"\x00\x01garbage").unwrap();
+    }
+    cases.push(("damaged sublayer data", p, "已损坏"));
+    let p = copy("无权限.bae");
+    fs::set_permissions(p.join("project.json"), fs::Permissions::from_mode(0o000)).unwrap();
+    cases.push(("unreadable project.json", p, "无法读取"));
+
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let mut report = Vec::new();
+    for (label, path, why) in &cases {
+        h.state_mut().dialogs.open.push_back(Some(path.clone()));
+        key(&mut h, Modifiers::COMMAND, Key::O);
+        let errors = std::mem::take(&mut h.state_mut().dialogs.errors);
+        assert_eq!(errors.len(), 1, "{label}: {errors:?}");
+        let m = &errors[0];
+        report.push(format!("{label}: {}", m.replace('\n', " ⏎ ")));
+        assert!(m.starts_with("无法打开项目。"), "{label}: {m}");
+        assert!(
+            m.contains(&*path.file_name().unwrap().to_string_lossy()),
+            "{label}: no file name: {m}"
+        );
+        assert!(m.contains(why), "{label}: no reason {why:?}: {m}");
+        // A missing file needs no technical detail; the others add one.
+        if *label != "missing" {
+            assert!(m.contains("详细信息："), "{label}: {m}");
+        }
+    }
+    let _ = fs::set_permissions(
+        dir.join("无权限.bae/project.json"),
+        fs::Permissions::from_mode(0o644),
+    );
+    println!("ZH ERRORS\n{}", report.join("\n"));
+}
