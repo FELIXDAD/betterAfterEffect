@@ -1,0 +1,124 @@
+{
+  "commit": "0c63a4b",
+  "mcpA_build": {
+    "project": "E:\\bae-test\\acc\\mcpA.bae",
+    "label": "mcpA",
+    "pos0": [
+      400.0,
+      540.0,
+      0.0
+    ],
+    "pos60": [
+      1400.0,
+      540.0,
+      0.0
+    ],
+    "init_ok": true,
+    "tool_count": 61,
+    "has_command_batch": true,
+    "exit": 0
+  },
+  "mcpB_build": {
+    "project": "E:\\bae-test\\acc\\mcpB.bae",
+    "label": "mcpB",
+    "pos0": [
+      960.0,
+      540.0,
+      0.0
+    ],
+    "pos60": [
+      960.0,
+      540.0,
+      0.0
+    ],
+    "init_ok": true,
+    "tool_count": 61,
+    "has_command_batch": true,
+    "exit": 0
+  },
+  "mcpA_export": {
+    "rc": 0,
+    "json": "E:\\bae-test\\acc\\mcpA.json",
+    "layer_stack": [
+      "agent/win5090",
+      "root"
+    ],
+    "key_times": [
+      "0",
+      "1411200000"
+    ],
+    "key_vals": [
+      [
+        400.0,
+        540.0,
+        0.0
+      ],
+      [
+        1400.0,
+        540.0,
+        0.0
+      ]
+    ],
+    "key_count": 2,
+    "ok": true
+  },
+  "mcpB_export": {
+    "rc": 0,
+    "json": "E:\\bae-test\\acc\\mcpB.json",
+    "layer_stack": [
+      "agent/win5090",
+      "root"
+    ],
+    "key_times": [
+      "0",
+      "1411200000"
+    ],
+    "key_vals": [
+      [
+        960.0,
+        540.0,
+        0.0
+      ],
+      [
+        960.0,
+        540.0,
+        0.0
+      ]
+    ],
+    "key_count": 2,
+    "ok": true
+  },
+  "baez_note": "mcp --create .baez ok",
+  "mcpA_baez_export": {
+    "rc": 0,
+    "json": "E:\\bae-test\\acc\\mcpA-baez.json",
+    "layer_stack": [
+      "agent/win5090",
+      "root"
+    ],
+    "key_times": [
+      "0",
+      "1411200000"
+    ],
+    "key_vals": [
+      [
+        400.0,
+        540.0,
+        0.0
+      ],
+      [
+        1400.0,
+        540.0,
+        0.0
+      ]
+    ],
+    "key_count": 2,
+    "ok": true
+  },
+  "batch_errors": {
+    "mcpA_b1": false,
+    "mcpA_b2": false,
+    "mcpB_b1": false,
+    "mcpB_b2": false
+  }
+}
