@@ -22,10 +22,8 @@ pub(crate) fn ensure_unlocked<'a>(
 ) -> Result<(), CommandError> {
     for path in paths {
         if let Some(layer) = crate::query::locked_layer_of(stage, path) {
-            return Err(fail(format!(
-                "{} is locked; unlock it first",
-                crate::query::display_name_of(stage, &layer)
-            )));
+            let name = crate::query::display_name_of(stage, &layer);
+            return Err(ModelError::LayerLocked { layer, name }.into());
         }
     }
     Ok(())

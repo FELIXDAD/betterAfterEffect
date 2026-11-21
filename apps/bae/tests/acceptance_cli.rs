@@ -453,7 +453,6 @@ impl Mcp {
 }
 
 #[test]
-#[ignore = "issue #124"]
 fn mcp_agents_cannot_edit_locked_layers() {
     // AE scripts cannot change a locked layer either (docs/spec/ae
     // project-comp-layers.md, Lock); only the Lock switch itself.

@@ -535,15 +535,26 @@ impl Shell {
             }
             ids::HELP => tracing::info!("`{}` is not implemented yet", inv.id),
             _ => match self.document.run(&inv) {
-                Outcome::Changed | Outcome::Unchanged => {}
+                Outcome::Changed => self.set_notice(String::new()),
+                Outcome::Unchanged => {}
                 Outcome::Unknown => tracing::debug!("no handler for command `{}`", inv.id),
-                Outcome::Failed(error) => tracing::warn!("command `{}` failed: {error}", inv.id),
+                Outcome::Failed(error) => {
+                    tracing::warn!("command `{}` failed: {error}", inv.id);
+                    self.set_notice(ui::failure_notice(&error));
+                }
             },
         }
         if let Some(menu) = &mut self.menu {
             menu.set_undo_state(self.document.undo_state());
         }
         self.request_redraw();
+    }
+
+    /// Show `text` in the status bar (empty clears it).
+    fn set_notice(&mut self, text: String) {
+        if let Some(view) = &mut self.view {
+            view.status.notice = text;
+        }
     }
 
     fn request_redraw(&self) {

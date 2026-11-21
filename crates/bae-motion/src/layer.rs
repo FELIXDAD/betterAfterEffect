@@ -651,7 +651,9 @@ impl Command for SetParent {
     const DESCRIPTION: &'static str = "Parent layers to another layer of the same comp, or remove the parent (AE pick whip). By default the layers keep their on-screen transform.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
-        ensure_unlocked(tx.stage(), &p.layers)?;
+        if !tx.locks_allowed() {
+            ensure_unlocked(tx.stage(), &p.layers)?;
+        }
         let comp = same_comp(tx.stage(), &p.layers)?;
         if let Some(parent) = &p.parent {
             if query::owning_comp(tx.stage(), parent).as_ref() != Some(&comp)
@@ -841,16 +843,19 @@ fn delete_prims(
             }
         }
     }
+    // AE unparents them in place, locked ones too (the parent is gone).
     for l in orphans {
-        SetParent.run(
-            tx,
-            SetParentParams {
-                layers: vec![l],
-                parent: None,
-                keep_transform: true,
-                time,
-            },
-        )?;
+        tx.allow_locked(|tx| {
+            SetParent.run(
+                tx,
+                SetParentParams {
+                    layers: vec![l],
+                    parent: None,
+                    keep_transform: true,
+                    time,
+                },
+            )
+        })?;
     }
     // Deepest first, so deleting a folder and its contents together works.
     let mut sorted: Vec<PrimPath> = paths.to_vec();

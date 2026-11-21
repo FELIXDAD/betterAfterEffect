@@ -204,29 +204,34 @@ impl Command for TrimCompToWorkArea {
             .ok_or_else(|| fail(format!("{} is not a comp", p.comp)))?;
         let shift = info.work_area.start;
         let duration = info.work_area.duration();
+        // AE shifts every layer, locked ones too: the comp's range moves,
+        // not what the layers show.
         if shift != Time::ZERO {
-            for layer in query::comp_layers(tx.stage(), &p.comp) {
-                let timing = query::layer_timing(tx.stage(), &layer);
-                set(
-                    tx,
-                    &layer,
-                    "start_time",
-                    Value::Time(timing.start_time - shift),
-                )?;
-                set(tx, &layer, "in_point", Value::Time(timing.in_point - shift))?;
-                let has_out = tx
-                    .stage()
-                    .prim(&layer)
-                    .is_some_and(|v| v.value("out_point").is_some());
-                if has_out {
+            tx.allow_locked(|tx| -> Result<(), CommandError> {
+                for layer in query::comp_layers(tx.stage(), &p.comp) {
+                    let timing = query::layer_timing(tx.stage(), &layer);
                     set(
                         tx,
                         &layer,
-                        "out_point",
-                        Value::Time(timing.out_point - shift),
+                        "start_time",
+                        Value::Time(timing.start_time - shift),
                     )?;
+                    set(tx, &layer, "in_point", Value::Time(timing.in_point - shift))?;
+                    let has_out = tx
+                        .stage()
+                        .prim(&layer)
+                        .is_some_and(|v| v.value("out_point").is_some());
+                    if has_out {
+                        set(
+                            tx,
+                            &layer,
+                            "out_point",
+                            Value::Time(timing.out_point - shift),
+                        )?;
+                    }
                 }
-            }
+                Ok(())
+            })?;
         }
         set(tx, &p.comp, "duration", Value::Time(duration))?;
         set(tx, &p.comp, "work_area_start", Value::Time(Time::ZERO))?;

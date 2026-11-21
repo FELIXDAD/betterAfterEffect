@@ -83,6 +83,15 @@ const ZH: &[(&str, &str)] = &[
     ("“{file}” could not be opened.", "无法打开“{file}”。"),
     ("Details:", "详细信息："),
     ("Could not save the project.", "无法保存项目。"),
+    // Status bar: why the last command failed
+    (
+        "Layer “{name}” is locked. Unlock it first.",
+        "图层“{name}”已锁定，请先解锁。",
+    ),
+    (
+        "The last action failed: {reason}",
+        "上一个操作失败：{reason}",
+    ),
     (
         "GPU-first motion graphics and compositing.",
         "以 GPU 为基础的动态图形与合成应用。",
@@ -134,6 +143,8 @@ mod tests {
                 "Could not open the project.",
                 "Could not save the project.",
                 "Untitled Project",
+                "Layer “{name}” is locked. Unlock it first.",
+                "The last action failed: {reason}",
             ]
             .map(String::from),
         );
@@ -142,6 +153,18 @@ mod tests {
             .filter(|s| !i18n::has_translation(s))
             .collect();
         assert!(missing.is_empty(), "no Chinese for {missing:?}");
+    }
+
+    #[test]
+    fn a_locked_layer_failure_names_the_layer() {
+        let error = bae_model::CommandError::Model(bae_model::ModelError::LayerLocked {
+            layer: bae_model::PrimPath::new("/comps/c/layers/a").unwrap(),
+            name: "背景".into(),
+        });
+        let text = crate::ui::failure_notice(&error);
+        assert!(text.contains("“背景”") && text.contains("locked"), "{text}");
+        let other = crate::ui::failure_notice(&bae_model::CommandError::Failed("nope".into()));
+        assert!(other.ends_with("nope"), "{other}");
     }
 
     #[test]

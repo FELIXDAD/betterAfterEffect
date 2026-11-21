@@ -5,7 +5,7 @@ mod renderer;
 mod workspace;
 
 pub use renderer::{UiOutput, UiRenderer};
-pub use workspace::{PlaceholderViewer, StatusInfo, Workspace, register_panels};
+pub use workspace::{PlaceholderViewer, StatusInfo, Workspace, failure_notice, register_panels};
 
 use bae_gpu::viewport::{ViewportTextureId, ViewportTextureRegistry};
 use bae_gpu::{GpuContext, transfer, wgpu};

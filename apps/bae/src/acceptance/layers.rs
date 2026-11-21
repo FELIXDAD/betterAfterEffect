@@ -806,7 +806,6 @@ fn viewer_clicks_go_through_a_locked_layer() {
 }
 
 #[test]
-#[ignore = "issue #124"]
 fn locking_a_selected_layer_deselects_it() {
     // AE: a locked layer cannot be selected, so locking a selected one
     // deselects it (BAE keeps it selected and highlighted; actions skip it).
@@ -823,7 +822,6 @@ fn locking_a_selected_layer_deselects_it() {
 }
 
 #[test]
-#[ignore = "issue #124"]
 fn deleting_the_parent_of_a_locked_layer_is_not_silent() {
     // Deleting an unlocked parent whose child is locked fails with “… is
     // locked; unlock it first” in the log only: Delete looks like it does

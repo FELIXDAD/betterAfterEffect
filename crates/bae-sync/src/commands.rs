@@ -72,9 +72,13 @@ impl Command for Revert {
         let edits = revert_edits(tx.stage(), &version, &scope)
             .map_err(|e| CommandError::Failed(e.to_string()))?;
         let n = edits.len();
-        for (layer, op) in edits {
-            tx.apply_to(&layer, op)?;
-        }
+        // Like undo, a rollback restores locked layers too.
+        tx.allow_locked(|tx| {
+            for (layer, op) in edits {
+                tx.apply_to(&layer, op)?;
+            }
+            Ok::<_, CommandError>(())
+        })?;
         Ok(RevertOutput { edits: n })
     }
 }

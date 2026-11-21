@@ -7,7 +7,7 @@ use crate::event::{Change, EventOrigin, StageEvent};
 use crate::ids::{AuthorId, SublayerId};
 use crate::op::{Edit, Op};
 use crate::path::PrimPath;
-use crate::prim::Specifier;
+use crate::prim::{PrimType, Specifier};
 use crate::sublayer::Sublayer;
 
 /// Maximum undo steps kept per author.
@@ -228,6 +228,23 @@ impl Stage {
         event
     }
 
+    // ---- layer lock ----
+
+    /// The layer `path` belongs to (itself for a layer prim).
+    pub fn layer_of(&self, path: &PrimPath) -> Option<PrimPath> {
+        std::iter::once(path.clone())
+            .chain(path.ancestors())
+            .find(|p| !p.is_root() && self.prim(p).is_some_and(|v| v.is_a(&PrimType::LAYER)))
+    }
+
+    /// The layer's Lock switch is on.
+    pub fn is_layer_locked(&self, layer: &PrimPath) -> bool {
+        self.prim(layer)
+            .and_then(|v| v.value("locked"))
+            .and_then(|v| v.as_bool())
+            == Some(true)
+    }
+
     // ---- editing ----
 
     /// Run `f` as one undoable step by `author`. Edits go to the edit target unless
@@ -282,6 +299,8 @@ impl Stage {
             changes: Vec::new(),
             touched: Vec::new(),
             guard,
+            locked_at_start: FxHashMap::default(),
+            allow_locked: false,
         };
         match f(&mut tx) {
             Ok(r) => {
@@ -475,6 +494,10 @@ pub struct Transaction<'s> {
     changes: Vec<Change>,
     touched: Vec<SublayerId>,
     guard: Option<&'s dyn Fn(&SublayerId) -> bool>,
+    /// Lock state of each layer when the transaction first touched it.
+    locked_at_start: FxHashMap<PrimPath, bool>,
+    /// Inside [`Transaction::allow_locked`].
+    allow_locked: bool,
 }
 
 impl Transaction<'_> {
@@ -518,9 +541,84 @@ impl Transaction<'_> {
         }
     }
 
+    /// Run `f` with the layer lock check off: for consequences of an edit
+    /// elsewhere that AE also applies to locked layers (deleting a parent
+    /// unparents its locked children and keeps them in place). Never for
+    /// edits the caller asked for on the locked layer itself.
+    pub fn allow_locked<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        let before = std::mem::replace(&mut self.allow_locked, true);
+        let r = f(self);
+        self.allow_locked = before;
+        r
+    }
+
+    /// Inside [`Transaction::allow_locked`].
+    pub fn locks_allowed(&self) -> bool {
+        self.allow_locked
+    }
+
+    /// Every transaction (commands, agents, scripts) refuses ops on a layer
+    /// that was locked when the transaction first touched it and still is:
+    /// the layer itself, its properties, keyframes and children. Allowed: the
+    /// layer's own `locked` attribute, and pure reorders (another layer moved
+    /// past it). Undo / redo replay history directly and are not checked.
+    fn check_locks(&mut self, op: &Op) -> Result<()> {
+        if self.allow_locked {
+            return Ok(());
+        }
+        let paths: Vec<&PrimPath> = match op {
+            Op::MovePrim { from, to, .. } if from == to => return Ok(()),
+            Op::MovePrim { from, to, .. } => vec![from, to],
+            // An `over` with no type changes nothing by itself; it only makes
+            // room for the edits that follow (which are checked).
+            Op::CreatePrim {
+                specifier: Specifier::Over,
+                prim_type: None,
+                ..
+            } => return Ok(()),
+            other => vec![other.path()],
+        };
+        for path in paths {
+            let Some(layer) = self.stage.layer_of(path) else {
+                continue;
+            };
+            let locked_now = self.stage.is_layer_locked(&layer);
+            let locked_at_start = *self
+                .locked_at_start
+                .entry(layer.clone())
+                .or_insert(locked_now);
+            if !(locked_at_start && locked_now) {
+                continue;
+            }
+            let lock_switch = match op {
+                Op::SetValue { path, attr, .. }
+                | Op::SetAttr { path, attr, .. }
+                | Op::SetKeyframe { path, attr, .. }
+                | Op::RemoveKeyframe { path, attr, .. }
+                | Op::SetExpression { path, attr, .. } => *path == layer && attr == "locked",
+                _ => false,
+            };
+            if !lock_switch {
+                let name = self
+                    .stage
+                    .prim(&layer)
+                    .and_then(|v| v.value("name").and_then(|n| n.as_str().map(str::to_owned)))
+                    .unwrap_or_else(|| layer.name().to_owned());
+                return Err(ModelError::LayerLocked { layer, name });
+            }
+        }
+        // A layer made in this transaction (new, pasted, duplicated, undone
+        // delete) was not locked when it started, even if it arrives locked.
+        if let Op::CreatePrim { path, .. } | Op::RestorePrim { path, .. } = op {
+            self.locked_at_start.insert(path.clone(), false);
+        }
+        Ok(())
+    }
+
     /// Apply an op to a specific sublayer.
     pub fn apply_to(&mut self, sublayer: &SublayerId, op: Op) -> Result<()> {
         self.check_write(sublayer)?;
+        self.check_locks(&op)?;
         let layer = self
             .stage
             .sublayers
