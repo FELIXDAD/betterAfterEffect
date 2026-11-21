@@ -338,10 +338,17 @@ impl Workbench {
                     || chords
                         .iter()
                         .any(|b| b.chord.display().to_lowercase().contains(&query));
+                // The panel a shortcut works in, by its (translated) title.
                 let scope = entry
                     .panel
                     .as_deref()
-                    .map(|p| format!(" · {}", tr(p)))
+                    .map(|p| {
+                        let title = self
+                            .kinds
+                            .get(p)
+                            .map_or_else(|| tr(p).to_owned(), |k| tr(&k.title).to_owned());
+                        format!(" · {title}")
+                    })
                     .unwrap_or_default();
                 let detail = format!("{}{scope}", entry.id);
                 matches.then_some(Row {
