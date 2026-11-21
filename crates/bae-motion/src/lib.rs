@@ -47,6 +47,7 @@
 pub mod comp;
 pub mod keys;
 pub mod layer;
+pub mod names;
 pub mod path;
 pub mod query;
 pub mod shape;

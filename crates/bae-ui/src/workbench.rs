@@ -533,6 +533,7 @@ impl Workbench {
         status: impl FnOnce(&mut Ui),
     ) -> Vec<Invocation> {
         self.refresh_registries();
+        crate::a11y::install(ui.ctx());
         // A modal dialog (the welcome / role picker) owns the keyboard: no
         // shortcuts and no panel keys reach the project behind it.
         let modal = self.role_picker_open();
