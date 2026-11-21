@@ -1,11 +1,14 @@
-//! Messages for projects that cannot be opened: which file, and what is wrong
-//! with it in words a user understands ("does not exist", "is damaged", "was
-//! saved by a newer version"), in the UI language. The technical cause follows
-//! on its own line for support.
+//! Messages for projects that cannot be opened or saved: which file, and what
+//! is wrong in words a user understands ("does not exist", "no permission",
+//! "is damaged", "was saved by a newer version"), in the UI language — never the
+//! system's English text. The technical cause follows on its own line for
+//! support.
 //!
-//! Used by File ▸ Open, `bae <project>`, `bae --headless <project>` and
-//! `bae export-json`.
+//! Opening: File ▸ Open, `bae <project>`, `bae --headless <project>`,
+//! `bae export-json` ([`describe_open`]). Saving: Save / Save As
+//! ([`describe_save`]).
 
+use std::io::ErrorKind;
 use std::path::Path;
 
 use bae_model::{ModelError, ProjectError};
@@ -32,8 +35,10 @@ pub enum Problem {
     Incomplete(String),
     /// Sublayer data that cannot be decoded.
     DamagedLayers,
-    /// The file system refused (permissions, …).
-    CannotRead(String),
+    /// The user may not read it.
+    NoPermission,
+    /// Another file system error (the cause is in the details).
+    CannotRead,
     /// Anything else.
     Other,
 }
@@ -42,6 +47,16 @@ pub enum Problem {
 pub fn classify(path: &Path, error: &anyhow::Error) -> Problem {
     if !path.exists() {
         return Problem::Missing;
+    }
+    // A folder that cannot be listed would otherwise look like one without
+    // project.json.
+    let readable = if path.is_dir() {
+        std::fs::read_dir(path).map(drop)
+    } else {
+        std::fs::File::open(path).map(drop)
+    };
+    if readable.is_err_and(|e| e.kind() == ErrorKind::PermissionDenied) {
+        return Problem::NoPermission;
     }
     for cause in error.chain() {
         let project = cause.downcast_ref::<ProjectError>().or_else(|| {
@@ -88,8 +103,9 @@ fn from_project_error(path: &Path, error: &ProjectError) -> Problem {
 
 fn from_io(error: &std::io::Error) -> Problem {
     match error.kind() {
-        std::io::ErrorKind::NotFound => Problem::Missing,
-        _ => Problem::CannotRead(error.to_string()),
+        ErrorKind::NotFound => Problem::Missing,
+        ErrorKind::PermissionDenied => Problem::NoPermission,
+        _ => Problem::CannotRead,
     }
 }
 
@@ -120,9 +136,8 @@ pub fn sentence(path: &Path, problem: &Problem) -> String {
             tr("“{file}” is incomplete: the data of sublayer “{id}” is missing.").replace("{id}", id)
         }
         Problem::DamagedLayers => tr("The sublayer data in “{file}” is damaged.").to_owned(),
-        Problem::CannotRead(reason) => {
-            tr("“{file}” cannot be read: {reason}").replace("{reason}", reason)
-        }
+        Problem::NoPermission => tr("You don't have permission to open “{file}”.").to_owned(),
+        Problem::CannotRead => tr("“{file}” cannot be read.").to_owned(),
         Problem::Other => tr("“{file}” could not be opened.").to_owned(),
     };
     text.replace("{file}", &file)
@@ -130,12 +145,72 @@ pub fn sentence(path: &Path, problem: &Problem) -> String {
 
 /// The full message: the sentence, then the technical cause (left out for a
 /// missing file, where it would only say the same less clearly).
-pub fn describe(path: &Path, error: &anyhow::Error) -> String {
+pub fn describe_open(path: &Path, error: &anyhow::Error) -> String {
     let problem = classify(path, error);
     let sentence = sentence(path, &problem);
     if problem == Problem::Missing {
         return sentence;
     }
+    format!("{sentence}\n{} {error:#}", tr("Details:"))
+}
+
+/// Why a save failed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SaveProblem {
+    /// No write permission in the folder (or the file is read-only).
+    NoPermission,
+    /// The folder to save in is gone.
+    FolderMissing,
+    /// The disk is full.
+    DiskFull,
+    /// Anything else (the cause is in the details).
+    Other,
+}
+
+/// Classify why saving to `path` failed.
+pub fn classify_save(error: &anyhow::Error) -> SaveProblem {
+    let io = error.chain().find_map(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .or_else(|| match cause.downcast_ref::<ProjectError>() {
+                Some(ProjectError::Io { source, .. }) => Some(source),
+                _ => None,
+            })
+            .or_else(|| match cause.downcast_ref::<PackageError>() {
+                Some(PackageError::Io { source, .. }) => Some(source),
+                Some(PackageError::Project(ProjectError::Io { source, .. })) => Some(source),
+                _ => None,
+            })
+    });
+    match io.map(std::io::Error::kind) {
+        Some(ErrorKind::PermissionDenied | ErrorKind::ReadOnlyFilesystem) => {
+            SaveProblem::NoPermission
+        }
+        Some(ErrorKind::NotFound) => SaveProblem::FolderMissing,
+        Some(ErrorKind::StorageFull | ErrorKind::QuotaExceeded) => SaveProblem::DiskFull,
+        _ => SaveProblem::Other,
+    }
+}
+
+/// The message for a failed save to `path`: the sentence, then the cause.
+pub fn describe_save(path: &Path, error: &anyhow::Error) -> String {
+    let file = path.display().to_string();
+    let folder = path
+        .parent()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| file.clone());
+    let sentence = match classify_save(error) {
+        SaveProblem::NoPermission => {
+            tr("You don't have permission to save in “{folder}”.").replace("{folder}", &folder)
+        }
+        SaveProblem::FolderMissing => {
+            tr("The folder “{folder}” does not exist.").replace("{folder}", &folder)
+        }
+        SaveProblem::DiskFull => {
+            tr("There is not enough space to save “{file}”.").replace("{file}", &file)
+        }
+        SaveProblem::Other => tr("“{file}” could not be saved.").replace("{file}", &file),
+    };
     format!("{sentence}\n{} {error:#}", tr("Details:"))
 }
 
@@ -220,11 +295,78 @@ mod tests {
         let path = dir.path().join("坏的 文件.baez");
         fs::write(&path, b"PK\x03\x04 not really a zip").unwrap();
         let error = Document::load(&path).err().unwrap();
-        let message = describe(&path, &error);
+        let message = describe_open(&path, &error);
         let (first, cause) = message.split_once('\n').unwrap();
         assert!(first.contains(&path.display().to_string()), "{message}");
         assert!(first.contains("damaged"), "{message}");
         assert!(cause.starts_with("Details:"), "{message}");
+    }
+
+    /// Unreadable projects get our own sentence, not the system's text.
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_projects_say_permission() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("locked.baez");
+        fs::write(&file, b"PK").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
+        let folder = dir.path().join("locked.bae");
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("project.json"), b"{}").unwrap();
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o000)).unwrap();
+        let file_problem = problem_of(&file);
+        let folder_problem = problem_of(&folder);
+        let message = describe_open(&file, &Document::load(&file).unwrap_err());
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
+        if nix_root() {
+            return; // root reads anything
+        }
+        assert_eq!(file_problem, Problem::NoPermission);
+        assert_eq!(folder_problem, Problem::NoPermission);
+        let first = message.lines().next().unwrap();
+        assert!(
+            first.starts_with("You don't have permission to open"),
+            "{message}"
+        );
+        assert!(!first.contains("os error"), "{message}");
+    }
+
+    #[cfg(unix)]
+    fn nix_root() -> bool {
+        std::env::var("USER").is_ok_and(|u| u == "root")
+    }
+
+    #[test]
+    fn save_failures_are_explained() {
+        let io = |kind: ErrorKind| {
+            anyhow::Error::new(ProjectError::Io {
+                path: "/x/a.bae".into(),
+                source: std::io::Error::from(kind),
+            })
+            .context("/x/a.bae")
+        };
+        assert_eq!(
+            classify_save(&io(ErrorKind::PermissionDenied)),
+            SaveProblem::NoPermission
+        );
+        assert_eq!(
+            classify_save(&io(ErrorKind::ReadOnlyFilesystem)),
+            SaveProblem::NoPermission
+        );
+        assert_eq!(
+            classify_save(&io(ErrorKind::NotFound)),
+            SaveProblem::FolderMissing
+        );
+        assert_eq!(
+            classify_save(&io(ErrorKind::StorageFull)),
+            SaveProblem::DiskFull
+        );
+        assert_eq!(classify_save(&io(ErrorKind::Other)), SaveProblem::Other);
+        let message = describe_save(Path::new("/x/a.bae"), &io(ErrorKind::PermissionDenied));
+        let first = message.lines().next().unwrap();
+        assert_eq!(first, "You don't have permission to save in “/x”.");
     }
 
     #[test]
@@ -239,7 +381,12 @@ mod tests {
             "“{file}” was saved by a newer version of BAE (format {found}; this version reads up to {supported}). Update BAE to open it.",
             "“{file}” is incomplete: the data of sublayer “{id}” is missing.",
             "The sublayer data in “{file}” is damaged.",
-            "“{file}” cannot be read: {reason}",
+            "You don't have permission to open “{file}”.",
+            "“{file}” cannot be read.",
+            "You don't have permission to save in “{folder}”.",
+            "The folder “{folder}” does not exist.",
+            "There is not enough space to save “{file}”.",
+            "“{file}” could not be saved.",
             "“{file}” could not be opened.",
             "Details:",
         ];

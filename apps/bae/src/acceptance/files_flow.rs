@@ -461,6 +461,11 @@ fn read_only_folder_reports_and_keeps_the_changes() {
             message.contains("只读 目录"),
             "message does not name the folder: {message}"
         );
+        // Issue #111: our own words, not the system's "Permission denied".
+        assert!(
+            message.contains("You don't have permission to save in"),
+            "{message}"
+        );
         assert!(g.doc.is_dirty() && g.doc.location().is_none());
         assert_eq!(export(&h), edited);
         h.state_mut().dialogs.errors.clear();

@@ -150,6 +150,16 @@ fn export_json_names_a_broken_file() {
             stderr.contains("坏的 文件.baez"),
             "{args:?} does not name the file: {stderr}"
         );
+        // Issue #111: the error is printed once, without a log line in front.
+        assert_eq!(
+            stderr.matches("error:").count(),
+            1,
+            "{args:?} printed the error more than once: {stderr}"
+        );
+        assert!(
+            !stderr.contains("ERROR") && !stderr.contains("bae_platform::cli"),
+            "{args:?} printed a log line: {stderr}"
+        );
     }
 }
 

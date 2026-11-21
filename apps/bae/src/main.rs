@@ -15,12 +15,12 @@
 mod acceptance;
 mod agent_feed;
 mod document;
+mod file_error;
 mod files;
 mod headless;
 mod i18n;
 mod mcp_cli;
 mod model_cli;
-mod open_error;
 #[cfg(test)]
 mod save_roundtrip;
 mod shell;

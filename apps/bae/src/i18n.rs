@@ -77,9 +77,23 @@ const ZH: &[(&str, &str)] = &[
         "“{file}”里的工程层数据已损坏。",
     ),
     (
-        "“{file}” cannot be read: {reason}",
-        "无法读取“{file}”：{reason}",
+        "You don't have permission to open “{file}”.",
+        "没有权限打开“{file}”。",
     ),
+    ("“{file}” cannot be read.", "无法读取“{file}”。"),
+    (
+        "You don't have permission to save in “{folder}”.",
+        "没有权限保存到“{folder}”。",
+    ),
+    (
+        "The folder “{folder}” does not exist.",
+        "文件夹“{folder}”不存在。",
+    ),
+    (
+        "There is not enough space to save “{file}”.",
+        "空间不足，无法保存“{file}”。",
+    ),
+    ("“{file}” could not be saved.", "无法保存“{file}”。"),
     ("“{file}” could not be opened.", "无法打开“{file}”。"),
     ("Details:", "详细信息："),
     ("Could not save the project.", "无法保存项目。"),

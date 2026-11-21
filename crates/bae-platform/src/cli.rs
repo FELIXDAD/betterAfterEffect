@@ -255,7 +255,6 @@ pub fn command<'a>(subcommands: impl IntoIterator<Item = &'a CliSubcommand>) -> 
         .about("BAE — GPU-first motion graphics and compositing")
         .version(crate::VERSION)
         .long_version(crate::version_details())
-        .args_conflicts_with_subcommands(true)
         .arg(
             Arg::new("headless")
                 .long("headless")
@@ -349,7 +348,9 @@ pub fn dispatch(
     match run(&mut ctx) {
         Ok(code) => code,
         Err(error) => {
-            tracing::error!(subcommand = name, "{error:#}");
+            // Printed once for the user; the log line only with --log / BAE_LOG /
+            // RUST_LOG turned up (stderr already shows warnings by default).
+            tracing::debug!(subcommand = name, "{error:#}");
             eprintln!("{} {name}: error: {error:#}", crate::BINARY_NAME);
             ExitCode::FAILURE
         }
@@ -412,6 +413,22 @@ mod tests {
         assert_eq!(name, "render");
         let code = dispatch(&mut app, &name, &matches, &global);
         assert_eq!(code, ExitCode::from(EXIT_NOT_IMPLEMENTED));
+    }
+
+    #[test]
+    fn global_log_before_subcommand() {
+        // `bae --log debug export-json x` must run the subcommand, not open the
+        // GUI with a project called "export-json".
+        let mut app = app();
+        let inv = parse_args(&mut app, &["--log", "debug", "gpu-info", "--json"]).unwrap();
+        let Invocation::Subcommand { name, global, .. } = inv else {
+            panic!("expected the subcommand");
+        };
+        assert_eq!(name, "gpu-info");
+        assert_eq!(global.log.as_deref(), Some("debug"));
+        // A project path is still a project path.
+        let inv = parse_args(&mut app, &["--log", "debug", "film.bae"]).unwrap();
+        assert!(matches!(inv, Invocation::Gui(ref g) if g.open.len() == 1));
     }
 
     #[test]
