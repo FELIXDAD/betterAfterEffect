@@ -52,11 +52,13 @@ fn widgets<'t>(node: AccessKitNode<'t>, out: &mut Vec<AccessKitNode<'t>>) {
     }
 }
 
-fn rect_of(node: &AccessKitNode<'_>) -> Rect {
+/// A node's bounds in logical points (accesskit has them in physical pixels:
+/// `ppp` times larger on a Retina display).
+fn rect_of(node: &AccessKitNode<'_>, ppp: f32) -> Rect {
     let b = node.bounding_box().expect("bounds");
     Rect::from_min_max(
-        egui::pos2(b.x0 as f32, b.y0 as f32),
-        egui::pos2(b.x1 as f32, b.y1 as f32),
+        egui::pos2(b.x0 as f32 / ppp, b.y0 as f32 / ppp),
+        egui::pos2(b.x1 as f32 / ppp, b.y1 as f32 / ppp),
     )
 }
 
@@ -85,7 +87,7 @@ fn layout_problems(h: &Ui) -> Vec<String> {
         widgets(pane, &mut nodes);
         let inside = a.rect.expand(1.0);
         for n in nodes {
-            let r = rect_of(&n);
+            let r = rect_of(&n, h.ctx.pixels_per_point());
             if r.width() <= 0.0 || r.height() <= 0.0 || inside.contains_rect(r) {
                 continue;
             }
@@ -124,7 +126,11 @@ fn click_tab(h: &mut Ui, title: &str) {
 /// The default workspace with a comp, a solid and a Render Queue item in
 /// every state, at one window size: everything fits.
 fn check_default_workspace(screen: &str, size: [f32; 2]) -> Vec<String> {
-    let mut h = gui_sized(Gui::new(), vec2(size[0], size[1]));
+    check_default_workspace_at(screen, size, 1.0)
+}
+
+fn check_default_workspace_at(screen: &str, size: [f32; 2], ppp: f32) -> Vec<String> {
+    let mut h = gui_scaled(Gui::new(), vec2(size[0], size[1]), ppp);
     let mut problems = Vec::new();
     let check = |h: &mut Ui, what: &str, problems: &mut Vec<String>| {
         settle(h);
@@ -292,4 +298,183 @@ fn keyboard_shortcuts_window_columns() {
     key(&mut h, Modifiers::NONE, Key::Escape);
     settle(&mut h);
     assert!(window(&h).is_none(), "Escape did not close the window");
+}
+
+// ---- Retest of #133 / #134 on macOS (dev af27424): Retina scales, narrow
+// windows, the shortcuts window in Chinese ----
+
+/// Mac windows at 2× (Retina) and 1.5×: the default BAE window, MacBook Air
+/// 13" and Pro 14" / 16" maximized.
+const MAC_WINDOWS: [(&str, [f32; 2]); 4] = [
+    ("BAE default window", [1440.0, 900.0]),
+    ("MacBook Air 13\" Retina, maximized", [1470.0, 919.0]),
+    ("MacBook Pro 14\" Retina, maximized", [1512.0, 945.0]),
+    ("MacBook Pro 16\" Retina, maximized", [1728.0, 1084.0]),
+];
+
+fn mac_problems() -> Vec<String> {
+    let mut out = Vec::new();
+    for ppp in [2.0, 1.5] {
+        for (screen, size) in MAC_WINDOWS {
+            out.extend(check_default_workspace_at(
+                &format!("{screen} @{ppp}x"),
+                size,
+                ppp,
+            ));
+        }
+    }
+    out
+}
+
+#[test]
+fn default_workspace_fits_mac_retina_screens() {
+    let problems = mac_problems();
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+#[test]
+fn default_workspace_fits_mac_retina_screens_in_chinese() {
+    if !in_child(
+        "acceptance::layout::default_workspace_fits_mac_retina_screens_in_chinese",
+        &[("BAE_LANG", "zh")],
+    ) {
+        return;
+    }
+    crate::i18n::init_from_env();
+    let problems = mac_problems();
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// Windows smaller than any default (a user drags the window small): panels
+/// that do not fit must scroll, not clip; panels that fit keep every widget
+/// inside; every frame still shows its active tab.
+#[test]
+fn narrow_windows_scroll_instead_of_clipping() {
+    let mut report = Vec::new();
+    for size in [[1280.0, 720.0], [1024.0, 640.0], [900.0, 600.0]] {
+        let mut h = gui_scaled(Gui::new(), vec2(size[0], size[1]), 2.0);
+        comp_with(&mut h, &["motion.layer.new.solid", "motion.layer.new.text"]);
+        key(&mut h, Modifiers::COMMAND, Key::M);
+        settle(&mut h);
+        let areas = panel_areas(&h.ctx);
+        // More than rounding (a 152-point column holding 153.4 points of
+        // content shows everything).
+        let overflowing: Vec<String> = areas
+            .iter()
+            .filter(|a| a.content.x > a.rect.width() + 2.0 || a.content.y > a.rect.height() + 2.0)
+            .map(|a| a.panel.as_str().to_owned())
+            .collect();
+        // Widgets reaching more than 2 points out of a panel that does not
+        // scroll: that is clipping (a box touching the edge is not).
+        let ppp = h.ctx.pixels_per_point();
+        let mut clipped: Vec<String> = Vec::new();
+        for a in &areas {
+            let panel = a.panel.as_str();
+            if overflowing.iter().any(|o| o == panel) {
+                continue;
+            }
+            let Some(pane) = find_pane(h.root().accesskit_node(), panel) else {
+                continue;
+            };
+            let mut nodes = Vec::new();
+            widgets(pane, &mut nodes);
+            for n in nodes {
+                let r = rect_of(&n, ppp);
+                if r.width() > 0.0 && r.height() > 0.0 && !a.rect.expand(2.0).contains_rect(r) {
+                    clipped.push(format!(
+                        "{panel}: {:?} {:?} {r:?} outside {:?}",
+                        n.role(),
+                        n.label().unwrap_or_default(),
+                        a.rect
+                    ));
+                }
+            }
+        }
+        // Every overflowing panel offers scrolling (a scroll view in its pane).
+        let root = h.root();
+        let not_scrollable: Vec<String> = overflowing
+            .iter()
+            .filter(|panel| {
+                find_pane(root.accesskit_node(), panel).is_some_and(|pane| {
+                    let mut stack = vec![pane];
+                    let mut found = false;
+                    while let Some(n) = stack.pop() {
+                        if n.role() == Role::ScrollView {
+                            found = true;
+                            break;
+                        }
+                        stack.extend(n.children());
+                    }
+                    !found
+                })
+            })
+            .cloned()
+            .collect();
+        // The active tab of the main frames is shown.
+        let hidden_tabs: Vec<&str> = ["Timeline", "Project"]
+            .into_iter()
+            .filter(|t| {
+                h.query_all_by_label_contains(bae_ui::tr(t))
+                    .next()
+                    .is_none()
+            })
+            .collect();
+        report.push(format!(
+            "{size:?}@2x: overflowing (scroll) {overflowing:?}, clipped {clipped:?}, not scrollable {not_scrollable:?}, hidden tabs {hidden_tabs:?}"
+        ));
+        assert!(clipped.is_empty(), "{size:?}: {clipped:#?}");
+        assert!(
+            not_scrollable.is_empty(),
+            "{size:?}: overflowing panels without scrolling {not_scrollable:?}"
+        );
+        assert!(hidden_tabs.is_empty(), "{size:?}: {hidden_tabs:?}");
+    }
+    println!("{}", report.join("\n"));
+}
+
+#[test]
+fn keyboard_shortcuts_window_in_chinese_in_a_small_retina_window() {
+    if !in_child(
+        "acceptance::layout::keyboard_shortcuts_window_in_chinese_in_a_small_retina_window",
+        &[("BAE_LANG", "zh")],
+    ) {
+        return;
+    }
+    crate::i18n::init_from_env();
+    let size = vec2(1024.0, 640.0);
+    let mut h = gui_scaled(Gui::new(), size, 2.0);
+    // Opened with its shortcut (Cmd+Alt+'), like a user.
+    key(&mut h, Modifiers::COMMAND | Modifiers::ALT, Key::Quote);
+    let title = bae_ui::tr("Keyboard Shortcuts");
+    let window = |h: &Ui| {
+        h.query_all_by_role(Role::Window)
+            .find(|n| n.accesskit_node().label().as_deref() == Some(title))
+            .map(|n| n.rect())
+    };
+    let w = window(&h).expect("the shortcut opened no Keyboard Shortcuts window");
+    let screen = Rect::from_min_size(egui::Pos2::ZERO, size);
+    assert!(
+        screen.expand(1.0).contains_rect(w),
+        "window {w:?} outside the screen {screen:?}"
+    );
+    // Long Chinese command names stay on one line.
+    let mut checked = 0;
+    for en in [
+        "Add or Remove Keyframe at Current Time",
+        "Accept Proposal",
+        "Go to Previous Keyframe",
+    ] {
+        let zh = bae_ui::tr(en);
+        if let Some(r) = h
+            .query_all_by_label(zh)
+            .map(|n| n.rect())
+            .find(|r| w.contains_rect(*r))
+        {
+            assert!(r.height() < 20.0, "{zh} wraps: {r:?}");
+            checked += 1;
+        }
+    }
+    assert!(checked >= 1, "no command rows found in the window");
+    key(&mut h, Modifiers::NONE, Key::Escape);
+    assert!(window(&h).is_none(), "Escape did not close it");
 }
