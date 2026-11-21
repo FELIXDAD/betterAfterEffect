@@ -26,6 +26,10 @@ const SCREENSHOT_ENV: &str = "BAE_SMOKE_SCREENSHOT";
 
 /// Runs headless mode.
 pub fn run(app: &mut App, global: &GlobalOptions) -> ExitCode {
+    if global.smoke_test.is_some() {
+        // The smoke test draws the UI: load its system fonts during GPU setup.
+        bae_ui::theme::prefetch_system_ui_fonts();
+    }
     crate::i18n::init_from_env();
     let desc = app
         .resource::<GpuContextDescriptor>()
@@ -150,7 +154,7 @@ fn render_offscreen(
         bae_ui_motion::demo::open(app.resources(), document.stage());
     }
     let mut status = StatusInfo {
-        gpu: gpu.summary(),
+        gpu: ui::gpu_summary(gpu),
         size_px: SMOKE_SIZE,
         pixels_per_point: 1.0,
         ..StatusInfo::default()

@@ -143,6 +143,8 @@ const MAX_DEVICE_RECOVERIES: u32 = 3;
 
 /// Runs the GUI until the window closes. Returns the process exit code.
 pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
+    // The UI's system fonts load while the window and GPU are being set up.
+    bae_ui::theme::prefetch_system_ui_fonts();
     crate::i18n::init_from_env();
     let dirs = app.resource::<AppDirs>().cloned();
 
@@ -458,7 +460,7 @@ impl Shell {
         }
 
         let status = StatusInfo {
-            gpu: gpu.summary(),
+            gpu: ui::gpu_summary(&gpu),
             size_px: [size.width, size.height],
             pixels_per_point: window.scale_factor() as f32,
             ..StatusInfo::default()
