@@ -103,6 +103,10 @@ egui_kittest = { version = "0.36.2", default-features = false }
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06"] }
 raw-window-handle = "0.6.2"
 muda = { version = "0.21.2", default-features = false }
+# Native open / save / message dialogs (NSOpenPanel / NSSavePanel / NSAlert,
+# IFileDialog / MessageBoxW). No default features: the Linux GTK / portal backends
+# are not built; the app depends on it only on macOS and Windows.
+rfd = { version = "0.18.0", default-features = false }
 
 # ---- document model, collaboration, scripting ----
 loro = "1.18.0"

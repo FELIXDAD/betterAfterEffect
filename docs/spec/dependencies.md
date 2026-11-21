@@ -90,6 +90,7 @@ wgpu v30.0.2
 | egui | 不关 | 默认 `default_fonts` | 内嵌约 1.4 MB 字体（Ubuntu-Light、Hack、两个 emoji 字体）。界面用系统字体（SF / 苹方），以后体积紧张时可以考虑关掉，只留图标字体 |
 | egui_kittest | （无默认） | 无 | 界面测试只用无窗口模式；需要截图对比的 crate 自己开 `wgpu` / `snapshot` |
 | muda | `gtk3` | 无 | Linux 菜单后端，不需要 |
+| rfd | `xdg-portal`、`wayland` | 无 | Linux 对话框后端，不需要；应用只在 macOS / Windows 上依赖它 |
 | tracing-subscriber | 无实际差别 | `std`、`fmt`、`ansi`、`registry`、`tracing-log`、`smallvec` | 明确**不开** `env-filter`（会带入 `regex-automata`）；日志过滤用 `tracing_subscriber::filter::Targets`（见 `bae-platform::logging`） |
 | clap | 无实际差别 | 默认那几个 + `string` | 不开 `derive`（不用过程宏，命令行用 builder 写，子命令在运行时注册）；`string` 用于运行时生成的子命令名和说明 |
 | image | `rayon`、`default-formats` | 无 | 08 只开需要的格式（PNG、JPEG、WebP…） |
@@ -135,6 +136,7 @@ wgpu v30.0.2
 | winit | 0.30.13 | `rwh_06` | bae | 0.30 系列最新；egui-winit / egui-wgpu 0.36.2 要求 `^0.30.13`。0.31 仍是 beta（0.31.0-beta.4） |
 | raw-window-handle | 0.6.2 | 默认 | 01（bae-gpu 表面）、19 | 最新；wgpu 30 和 egui-winit 0.36 都要求 `^0.6.2` |
 | muda | 0.21.2 | 无默认 | bae；11 | 最新。要求 windows-sys `>=0.60, <=0.61`、objc2 `^0.6.1` |
+| rfd | 0.18.0 | 无默认（不编 Linux 的 GTK / xdg-portal 后端） | bae（只在 macOS 和 Windows 上依赖；文件 ▸ 打开 / 另存为、未保存修改提示） | 最新；用的 objc2 0.6 / objc2-app-kit 0.3 / windows-sys 0.61 都是树里已有的版本，只新增 objc2-uniform-type-identifiers 0.3.2（macOS）。不开 `common-controls-v6`：TaskDialog 需要可执行文件带 comctl32 v6 清单，否则启动时找不到入口 |
 
 ### 文档模型、协同、脚本
 

@@ -70,6 +70,14 @@ pub fn tr(en: &str) -> &str {
     t.get(en).copied().unwrap_or(en)
 }
 
+/// Whether `en` has a Chinese translation in the registered tables, whatever the
+/// current language (for tests that check coverage without switching the global
+/// language under other tests).
+pub fn has_translation(en: &str) -> bool {
+    let t = tables().read().unwrap_or_else(|e| e.into_inner());
+    t.contains_key(en)
+}
+
 /// Shorthand for [`tr`].
 #[macro_export]
 macro_rules! tr {
@@ -115,6 +123,7 @@ const ZH: &[(&str, &str)] = &[
         "把当前布局和快捷键存成一个新工作区。",
     ),
     ("Welcome to BAE", "欢迎使用 BAE"),
+    ("Close", "关闭"),
     (
         "What do you do? BAE opens the matching workspace; you can switch any time in the workspace bar.",
         "你主要做什么？BAE 会打开对应的工作区，之后随时可以在工作区栏切换。",
@@ -142,6 +151,7 @@ const ZH: &[(&str, &str)] = &[
     ("Keyboard Shortcuts", "键盘快捷键"),
     ("New Project", "新建项目"),
     ("Open Project...", "打开项目..."),
+    ("Close Project", "关闭项目"),
     ("Save", "保存"),
     ("Save As...", "另存为..."),
     ("Switch Workspace", "切换工作区"),
@@ -233,6 +243,7 @@ mod tests {
         assert_eq!(tr("No such string"), "No such string");
         register(&[("Project", "项目")]);
         assert_eq!(tr("Project"), "项目");
+        assert!(has_translation("Close Panel") && !has_translation("No such string"));
         set_lang(Lang::En);
         assert_eq!(tr("Project"), "Project");
     }
