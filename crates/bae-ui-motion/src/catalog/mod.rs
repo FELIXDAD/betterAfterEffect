@@ -55,6 +55,23 @@ pub fn menu_zh() -> &'static [(&'static str, &'static str)] {
     blob::tables().zh
 }
 
+/// The menu tables: the source tables in tests (so a test run that rewrites
+/// `catalog.bin` and the docs reads the new tables), `catalog.bin` in the app.
+fn source_menus() -> (&'static [(&'static str, &'static [Node])], &'static [Node]) {
+    #[cfg(test)]
+    return (MENUS, MAC_APP_MENU);
+    #[cfg(not(test))]
+    (menus(), mac_app_menu())
+}
+
+/// [`mac_keys`], from the source table in tests (see [`source_menus`]).
+fn source_mac_keys() -> &'static [(&'static str, &'static str, &'static str)] {
+    #[cfg(test)]
+    return MAC_KEYS;
+    #[cfg(not(test))]
+    mac_keys()
+}
+
 /// Every AE default-shortcut command (`docs/reference/ae/shortcuts.json`) plus
 /// the menu shortcuts AE's file does not list, in AE's order.
 pub fn keys() -> &'static [Key] {
@@ -238,7 +255,7 @@ impl Key {
     /// in BAE notation (see [`chords`]).
     pub fn chords(&self, mac: bool) -> Vec<String> {
         if mac
-            && let Some((_, _, keys)) = mac_keys()
+            && let Some((_, _, keys)) = source_mac_keys()
                 .iter()
                 .find(|(ctx, cmd, _)| *ctx == self.context && *cmd == self.command)
         {
@@ -320,7 +337,8 @@ pub fn walk(
 /// application menu (path `BAE`) included.
 pub fn menu_items() -> Vec<(Vec<&'static str>, &'static Item)> {
     let mut out = Vec::new();
-    let tops = menus().iter().copied().chain([("BAE", mac_app_menu())]);
+    let (menus, app) = source_menus();
+    let tops = menus.iter().copied().chain([("BAE", app)]);
     for (top, nodes) in tops {
         let mut path = vec![top];
         walk(nodes, &mut path, &mut |p, it| out.push((p.to_vec(), it)));

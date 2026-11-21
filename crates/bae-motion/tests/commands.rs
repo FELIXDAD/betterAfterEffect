@@ -648,3 +648,45 @@ fn locked_layers_follow_comp_level_changes() {
         Time(-2 * SEC)
     );
 }
+
+/// `layer.set_attr`: one undo step for several layers; only switches, quality
+/// and label.
+#[test]
+fn set_layer_attr_sets_switches_in_one_step() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let a = fx.layer(&comp, "solid", json!({}));
+    let b = fx.layer(&comp, "null", json!({}));
+    let shy = |fx: &Fx, l: &PrimPath| {
+        fx.stage
+            .prim(l)
+            .and_then(|v| query::static_value(&v, "shy"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+    };
+    fx.run(
+        "layer.set_attr",
+        json!({"layers": [a, b], "attr": "shy", "value": {"type": "bool", "value": true}}),
+    );
+    assert!(shy(&fx, &a) && shy(&fx, &b));
+    assert_eq!(fx.stage.undo_label(&fx.author), Some("Change Layers"));
+    fx.stage.undo(&fx.author).unwrap();
+    assert!(!shy(&fx, &a) && !shy(&fx, &b), "one undo step");
+    fx.run(
+        "layer.set_attr",
+        json!({"layers": [a], "attr": "label", "value": {"type": "int", "value": 9}}),
+    );
+    let label = fx
+        .stage
+        .prim(&a)
+        .and_then(|v| query::static_value(&v, "label"))
+        .and_then(|v| v.as_f64());
+    assert_eq!(label, Some(9.0));
+    assert!(
+        fx.try_run(
+            "layer.set_attr",
+            json!({"layers": [a], "attr": "name", "value": {"type": "string", "value": "x"}}),
+        )
+        .is_err()
+    );
+}

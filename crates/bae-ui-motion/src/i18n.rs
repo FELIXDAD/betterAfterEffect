@@ -17,6 +17,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Set Parent", "设置父级"),
     ("Move Layer in Time", "在时间上移动图层"),
     ("Trim Layer", "修剪图层"),
+    ("Change Layers", "更改图层"),
     // Variants of motion actions and commands (`actions::variants`, #140): the
     // Keyboard Shortcuts window, Edit > Undo and History name each one.
     ("Back 10 Frames", "后退 10 帧"),
@@ -30,6 +31,17 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("New Shape Layer", "新建形状图层"),
     ("New Rectangle", "新建矩形"),
     ("New Ellipse", "新建椭圆"),
+    // Layer menu actions and their variants (Keyboard Shortcuts, Undo).
+    ("Layer Switch", "图层开关"),
+    ("Unlock All Layers", "解锁所有图层"),
+    ("Show All Video", "显示所有视频"),
+    ("Hide Other Video", "隐藏其他视频"),
+    ("Quality", "品质"),
+    ("Best Quality", "最佳品质"),
+    ("Draft Quality", "草图品质"),
+    ("Wireframe Quality", "线框品质"),
+    ("Label", "标签"),
+    ("Select Label Group", "选择标签组"),
     ("Show Position", "显示位置"),
     ("Add Position to Shown Properties", "将位置添加到显示的属性"),
     ("Position: Add or Remove Keyframe", "位置：添加或移除关键帧"),

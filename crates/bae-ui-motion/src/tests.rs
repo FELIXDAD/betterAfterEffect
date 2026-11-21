@@ -1340,3 +1340,109 @@ fn ae_shortcuts_follow_other_modules_handlers() {
         "variants of a working command wait for the catalog"
     );
 }
+
+/// Layer ▸ Switches, 3D Layer, Quality, Edit ▸ Label: each is one undo step on
+/// the selected layers, AE's toggle rule (on for all unless all are on), and
+/// the menu shows check marks for the selection's state.
+#[test]
+fn layer_switch_menu_commands_and_undo() {
+    use crate::actions::{ids, label_of, quality_of, switch_on};
+    let mut h = Harness::new();
+    let (_comp, solid, shape) = h.comp_with_layers();
+    let mut tl = TimelinePanel::default();
+    let select = |h: &Harness, layers: &[&PrimPath]| {
+        let s = h.session();
+        let mut s = s.lock();
+        s.selected_layers = layers.iter().map(|l| (*l).clone()).collect();
+        s.selected_keys.clear();
+    };
+    let run = |h: &mut Harness, tl: &mut TimelinePanel, id: &str, params: serde_json::Value| {
+        let r = h.action(tl, Invocation::with_params(id, params));
+        h.apply(r);
+    };
+    // Shy: on for both, then off (all on), undo back to on.
+    select(&h, &[&solid, &shape]);
+    run(&mut h, &mut tl, ids::LAYER_SWITCH, json!({"switch": "shy"}));
+    assert!(switch_on(&h.stage, &solid, "shy") && switch_on(&h.stage, &shape, "shy"));
+    run(&mut h, &mut tl, ids::LAYER_SWITCH, json!({"switch": "shy"}));
+    assert!(!switch_on(&h.stage, &solid, "shy") && !switch_on(&h.stage, &shape, "shy"));
+    h.stage.undo(&h.author).unwrap();
+    assert!(switch_on(&h.stage, &solid, "shy") && switch_on(&h.stage, &shape, "shy"));
+    // Check marks follow the selection.
+    let tree = motion_menu_tree();
+    let item = |id: &str| {
+        tree.items()
+            .into_iter()
+            .find(|(i, _)| *i == id)
+            .unwrap_or_else(|| panic!("no menu item {id}"))
+            .1
+            .clone()
+    };
+    let cx = bae_ui::menu::MenuContext::new(&h.stage, &h.resources, "motion");
+    let shy = item("menu.layer.switches.shy");
+    assert!(shy.is_enabled(&cx) && shy.is_checked(&cx));
+    assert!(!item("menu.layer.switches.solo").is_checked(&cx));
+    assert!(item("menu.layer.quality.best").is_checked(&cx));
+    // Lock, then Unlock All Layers.
+    select(&h, &[&solid]);
+    run(
+        &mut h,
+        &mut tl,
+        ids::LAYER_SWITCH,
+        json!({"switch": "locked"}),
+    );
+    assert!(switch_on(&h.stage, &solid, "locked"));
+    run(&mut h, &mut tl, ids::UNLOCK_ALL_LAYERS, json!(null));
+    assert!(!switch_on(&h.stage, &solid, "locked"));
+    // Hide Other Video, Show All Video.
+    select(&h, &[&shape]);
+    run(&mut h, &mut tl, ids::HIDE_OTHER_VIDEO, json!(null));
+    assert!(!switch_on(&h.stage, &solid, "enabled") && switch_on(&h.stage, &shape, "enabled"));
+    run(&mut h, &mut tl, ids::SHOW_ALL_VIDEO, json!(null));
+    assert!(switch_on(&h.stage, &solid, "enabled"));
+    h.stage.undo(&h.author).unwrap();
+    assert!(
+        !switch_on(&h.stage, &solid, "enabled"),
+        "Show All Video undoes"
+    );
+    // 3D Layer and Quality.
+    select(&h, &[&solid, &shape]);
+    run(
+        &mut h,
+        &mut tl,
+        ids::LAYER_SWITCH,
+        json!({"switch": "three_d"}),
+    );
+    assert!(switch_on(&h.stage, &solid, "three_d") && switch_on(&h.stage, &shape, "three_d"));
+    run(&mut h, &mut tl, ids::QUALITY, json!({"quality": "draft"}));
+    assert_eq!(quality_of(&h.stage, &solid), "draft");
+    assert_eq!(quality_of(&h.stage, &shape), "draft");
+    let cx = bae_ui::menu::MenuContext::new(&h.stage, &h.resources, "motion");
+    assert!(item("menu.layer.quality.draft").is_checked(&cx));
+    assert!(!item("menu.layer.quality.best").is_checked(&cx));
+    h.stage.undo(&h.author).unwrap();
+    assert_eq!(quality_of(&h.stage, &solid), "best", "one undo step");
+    assert_eq!(quality_of(&h.stage, &shape), "best");
+    // Label, then Select Label Group.
+    select(&h, &[&solid]);
+    run(&mut h, &mut tl, ids::LABEL, json!({"label": 9}));
+    assert_eq!(label_of(&h.stage, &solid), 9);
+    select(&h, &[&shape]);
+    run(&mut h, &mut tl, ids::LABEL, json!({"label": 9}));
+    select(&h, &[&solid]);
+    run(&mut h, &mut tl, ids::SELECT_LABEL_GROUP, json!(null));
+    assert_eq!(h.session().lock().selected_layers.len(), 2);
+    h.stage.undo(&h.author).unwrap();
+    assert_ne!(label_of(&h.stage, &shape), 9);
+    // Reveal All Modified Properties.
+    run(
+        &mut h,
+        &mut tl,
+        "motion.reveal",
+        json!({"what": "modified", "add": false}),
+    );
+    assert!(matches!(
+        h.session().lock().reveal.get(&solid),
+        Some(crate::session::Reveal::Modified)
+    ));
+}

@@ -38,7 +38,7 @@ pub mod ids {
     pub const REVERSE_KEYS: &str = "motion.reverse_keys";
     pub const SELECT_ALL: &str = "motion.select_all";
     pub const DESELECT_ALL: &str = "motion.deselect_all";
-    /// Params `{"what": "animated" | "<attr>", "add": bool}`.
+    /// Params `{"what": "animated" | "animation" | "modified" | "<attr>", "add": bool}`.
     pub const REVEAL: &str = "motion.reveal";
     /// Params `{"attr": "<attr>"}`.
     pub const TOGGLE_KEY: &str = "motion.toggle_key";
@@ -53,6 +53,58 @@ pub mod ids {
     /// Shell clipboard actions (Cmd+C / Cmd+V outside text fields).
     pub const COPY: &str = "edit.copy";
     pub const PASTE: &str = "edit.paste";
+    /// Layer ▸ Switches ▸ Shy, Lock … and Layer ▸ 3D Layer: params `{"switch":
+    /// "<attr>"}` (see [`super::SWITCHES`]); toggles the selected layers.
+    pub const LAYER_SWITCH: &str = "motion.layer.switch";
+    pub const UNLOCK_ALL_LAYERS: &str = "motion.layer.unlock_all_layers";
+    pub const SHOW_ALL_VIDEO: &str = "motion.layer.show_all_video";
+    pub const HIDE_OTHER_VIDEO: &str = "motion.layer.hide_other_video";
+    /// Layer ▸ Quality: params `{"quality": "best" | "draft"}`.
+    pub const QUALITY: &str = "motion.layer.quality";
+    /// Edit ▸ Label ▸ colour: params `{"label": 0..=16}`.
+    pub const LABEL: &str = "motion.edit.label";
+    pub const SELECT_LABEL_GROUP: &str = "motion.edit.select_label_group";
+}
+
+/// The layer switches the Layer menu toggles (`layer.set_attr` attributes) with
+/// their English names (AE's menu titles).
+pub const SWITCHES: &[(&str, &str)] = &[
+    ("shy", "Shy"),
+    ("locked", "Lock"),
+    ("audio_enabled", "Audio"),
+    ("enabled", "Video"),
+    ("solo", "Solo"),
+    ("collapse_transformation", "Collapse"),
+    ("motion_blur", "Motion Blur"),
+    ("adjustment_layer", "Adjustment Layer"),
+    ("three_d", "3D Layer"),
+];
+
+/// Whether a switch is on for a layer.
+pub(crate) fn switch_on(stage: &bae_model::Stage, layer: &PrimPath, attr: &str) -> bool {
+    stage
+        .prim(layer)
+        .and_then(|v| query::static_value(&v, attr))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+/// A layer's quality (`best`, `draft`, `wireframe`).
+pub(crate) fn quality_of(stage: &bae_model::Stage, layer: &PrimPath) -> String {
+    stage
+        .prim(layer)
+        .and_then(|v| query::static_value(&v, "quality"))
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "best".to_owned())
+}
+
+/// A layer's label (0 = none, 1–16).
+pub(crate) fn label_of(stage: &bae_model::Stage, layer: &PrimPath) -> i64 {
+    stage
+        .prim(layer)
+        .and_then(|v| query::static_value(&v, "label"))
+        .and_then(|v| v.as_f64())
+        .map_or(0, |v| v as i64)
 }
 
 /// `(id, English title)` of every motion action, for the shortcut editor.
@@ -89,6 +141,13 @@ pub const ACTIONS: &[(&str, &str)] = &[
     // Edit > Copy / Paste (Cmd+C / Cmd+V): selected keyframes.
     (ids::COPY, "Copy"),
     (ids::PASTE, "Paste"),
+    (ids::LAYER_SWITCH, "Layer Switch"),
+    (ids::UNLOCK_ALL_LAYERS, "Unlock All Layers"),
+    (ids::SHOW_ALL_VIDEO, "Show All Video"),
+    (ids::HIDE_OTHER_VIDEO, "Hide Other Video"),
+    (ids::QUALITY, "Quality"),
+    (ids::LABEL, "Label"),
+    (ids::SELECT_LABEL_GROUP, "Select Label Group"),
     // Panel-scoped (`bindings`): handled by the timeline and the viewer. Registered
     // so the Keyboard Shortcuts window shows a name, not the id (#136).
     ("timeline.zoom_in", "Zoom In Time"),
@@ -162,6 +221,35 @@ pub fn variants() -> Vec<(String, CommandVariant)> {
         add(ids::NEW_LAYER, parse(params), (*title).to_owned());
         add("layer.create", parse(params), (*title).to_owned());
     }
+    for (attr, name) in SWITCHES {
+        add(
+            ids::LAYER_SWITCH,
+            json!({ "switch": attr }),
+            (*name).to_owned(),
+        );
+        add(
+            "layer.set_attr",
+            json!({ "attr": attr }),
+            (*name).to_owned(),
+        );
+    }
+    for (quality, name) in [
+        ("best", "Best Quality"),
+        ("draft", "Draft Quality"),
+        ("wireframe", "Wireframe Quality"),
+    ] {
+        add(ids::QUALITY, json!({ "quality": quality }), name.to_owned());
+    }
+    add(
+        "layer.set_attr",
+        json!({ "attr": "quality" }),
+        "Quality".to_owned(),
+    );
+    add(
+        "layer.set_attr",
+        json!({ "attr": "label" }),
+        "Label".to_owned(),
+    );
     for (_, attr, name) in TRANSFORM_PROPERTIES {
         for add_to_shown in [false, true] {
             let title = if add_to_shown {
@@ -503,6 +591,13 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 } else {
                     Some(Reveal::Animated)
                 }
+            } else if what == "modified" {
+                // Animation ▸ Reveal All Modified Properties (UU).
+                Some(Reveal::Modified)
+            } else if what == "animation" {
+                // Animation ▸ Reveal Properties with Animation: keyframes or
+                // expressions, without UU's double-press.
+                Some(Reveal::Animated)
             } else {
                 None
             };
@@ -587,6 +682,105 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 "layer.reorder",
                 json!({"layers": s.selected_layers, "index": index}),
             );
+        }
+        ids::LAYER_SWITCH => {
+            let Some(attr) = inv.params.get("switch").and_then(|v| v.as_str()) else {
+                return true;
+            };
+            if !SWITCHES.iter().any(|(a, _)| *a == attr) {
+                return true;
+            }
+            // Lock acts on the selected layers even when they are locked.
+            let targets = if attr == "locked" {
+                s.selected_layers.clone()
+            } else {
+                layers.clone()
+            };
+            if targets.is_empty() {
+                return true;
+            }
+            // AE: on for all unless every one is on already.
+            let on = !targets.iter().all(|l| switch_on(stage, l, attr));
+            cx.invoke_with(
+                "layer.set_attr",
+                json!({"layers": targets, "attr": attr, "value": {"type": "bool", "value": on}}),
+            );
+        }
+        ids::UNLOCK_ALL_LAYERS | ids::SHOW_ALL_VIDEO | ids::HIDE_OTHER_VIDEO => {
+            let all = query::comp_layers(stage, &info.path);
+            let (attr, on, targets): (&str, bool, Vec<PrimPath>) = match id {
+                ids::UNLOCK_ALL_LAYERS => (
+                    "locked",
+                    false,
+                    all.into_iter()
+                        .filter(|l| switch_on(stage, l, "locked"))
+                        .collect(),
+                ),
+                ids::SHOW_ALL_VIDEO => (
+                    "enabled",
+                    true,
+                    all.into_iter()
+                        .filter(|l| !switch_on(stage, l, "enabled"))
+                        .collect(),
+                ),
+                _ => (
+                    "enabled",
+                    false,
+                    all.into_iter()
+                        .filter(|l| !layers.contains(l) && switch_on(stage, l, "enabled"))
+                        .collect(),
+                ),
+            };
+            if !targets.is_empty() && (id != ids::HIDE_OTHER_VIDEO || !layers.is_empty()) {
+                cx.invoke_with(
+                    "layer.set_attr",
+                    json!({"layers": targets, "attr": attr, "value": {"type": "bool", "value": on}}),
+                );
+            }
+        }
+        ids::QUALITY => {
+            let quality = inv
+                .params
+                .get("quality")
+                .and_then(|v| v.as_str())
+                .unwrap_or("best");
+            let targets: Vec<PrimPath> = layers
+                .iter()
+                .filter(|l| quality_of(stage, l) != quality)
+                .cloned()
+                .collect();
+            if !targets.is_empty() {
+                cx.invoke_with(
+                    "layer.set_attr",
+                    json!({"layers": targets, "attr": "quality", "value": {"type": "enum", "value": quality}}),
+                );
+            }
+        }
+        ids::LABEL => {
+            let label = inv
+                .params
+                .get("label")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0)
+                .clamp(0, 16);
+            if !layers.is_empty() {
+                cx.invoke_with(
+                    "layer.set_attr",
+                    json!({"layers": layers, "attr": "label", "value": {"type": "int", "value": label}}),
+                );
+            }
+        }
+        ids::SELECT_LABEL_GROUP => {
+            // AE: selects every layer with the label of a selected one.
+            let labels: Vec<i64> = layers.iter().map(|l| label_of(stage, l)).collect();
+            if !labels.is_empty() {
+                let group: Vec<PrimPath> = query::comp_layers(stage, &info.path)
+                    .into_iter()
+                    .filter(|l| labels.contains(&label_of(stage, l)) && !query::is_locked(stage, l))
+                    .collect();
+                s.selected_layers = group;
+                s.selected_keys.clear();
+            }
         }
         ids::COPY => {
             let Some(first) = keys.first() else {
