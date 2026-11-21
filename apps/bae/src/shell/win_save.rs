@@ -47,7 +47,7 @@ pub struct SaveRequest<'a> {
 }
 
 /// Show the dialog; `None` = cancelled (or the dialog could not be shown).
-pub fn pick(request: &SaveRequest) -> Option<PathBuf> {
+pub fn pick(request: &SaveRequest<'_>) -> Option<PathBuf> {
     let _com = Com::init();
     match show(request) {
         Ok(path) => path,
@@ -66,7 +66,7 @@ struct Events {
     extensions: Vec<String>,
 }
 
-fn show(request: &SaveRequest) -> windows::core::Result<Option<PathBuf>> {
+fn show(request: &SaveRequest<'_>) -> windows::core::Result<Option<PathBuf>> {
     // SAFETY: COM is initialized on this thread (`pick`); the class and interface
     // are the documented FileSaveDialog / IFileSaveDialog pair.
     let dialog: IFileSaveDialog =
@@ -93,7 +93,7 @@ fn show(request: &SaveRequest) -> windows::core::Result<Option<PathBuf>> {
     }
 }
 
-fn configure(dialog: &IFileSaveDialog, request: &SaveRequest) -> windows::core::Result<()> {
+fn configure(dialog: &IFileSaveDialog, request: &SaveRequest<'_>) -> windows::core::Result<()> {
     let names: Vec<HSTRING> = request
         .types
         .iter()
@@ -135,7 +135,7 @@ fn configure(dialog: &IFileSaveDialog, request: &SaveRequest) -> windows::core::
 }
 
 impl IFileDialogEvents_Impl for Events_Impl {
-    fn OnFileOk(&self, pfd: Ref<IFileDialog>) -> windows::core::Result<()> {
+    fn OnFileOk(&self, pfd: Ref<'_, IFileDialog>) -> windows::core::Result<()> {
         let Some(dialog) = pfd.as_ref() else {
             return Ok(());
         };
@@ -165,8 +165,8 @@ impl IFileDialogEvents_Impl for Events_Impl {
 
     fn OnFolderChanging(
         &self,
-        pfd: Ref<IFileDialog>,
-        psifolder: Ref<IShellItem>,
+        pfd: Ref<'_, IFileDialog>,
+        psifolder: Ref<'_, IShellItem>,
     ) -> windows::core::Result<()> {
         let (Some(dialog), Some(target)) = (pfd.as_ref(), psifolder.as_ref().and_then(item_path))
         else {
@@ -193,31 +193,31 @@ impl IFileDialogEvents_Impl for Events_Impl {
         Err(cancelled.into())
     }
 
-    fn OnFolderChange(&self, _pfd: Ref<IFileDialog>) -> windows::core::Result<()> {
+    fn OnFolderChange(&self, _pfd: Ref<'_, IFileDialog>) -> windows::core::Result<()> {
         self.guard.borrow_mut().folder_changed();
         Ok(())
     }
 
-    fn OnSelectionChange(&self, _pfd: Ref<IFileDialog>) -> windows::core::Result<()> {
+    fn OnSelectionChange(&self, _pfd: Ref<'_, IFileDialog>) -> windows::core::Result<()> {
         Ok(())
     }
 
     fn OnShareViolation(
         &self,
-        _pfd: Ref<IFileDialog>,
-        _psi: Ref<IShellItem>,
+        _pfd: Ref<'_, IFileDialog>,
+        _psi: Ref<'_, IShellItem>,
     ) -> windows::core::Result<FDE_SHAREVIOLATION_RESPONSE> {
         Ok(FDESVR_DEFAULT)
     }
 
-    fn OnTypeChange(&self, _pfd: Ref<IFileDialog>) -> windows::core::Result<()> {
+    fn OnTypeChange(&self, _pfd: Ref<'_, IFileDialog>) -> windows::core::Result<()> {
         Ok(())
     }
 
     fn OnOverwrite(
         &self,
-        _pfd: Ref<IFileDialog>,
-        psi: Ref<IShellItem>,
+        _pfd: Ref<'_, IFileDialog>,
+        psi: Ref<'_, IShellItem>,
     ) -> windows::core::Result<FDE_OVERWRITE_RESPONSE> {
         let ours = psi
             .as_ref()
