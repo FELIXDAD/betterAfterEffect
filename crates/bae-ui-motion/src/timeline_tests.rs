@@ -1440,6 +1440,21 @@ fn dragging_a_marker_moves_it_and_shift_snaps_to_the_cti() {
 }
 
 #[test]
+fn shift_snaps_a_dragged_keyframe_to_a_marker() {
+    let mut h = H::new();
+    h.keys(ROT, &[(0.0, float(0.0)), (3.0, float(90.0))]);
+    let comp = h.comp.clone();
+    h.run("marker.add", json!({"owner": comp, "time": 2 * SEC}));
+    let mut tl = h.bars();
+    let k = h.key(ROT, 3.0);
+    let from = bar_key(&tl, &k);
+    let to = pos2(x_of(&tl, 2.0) + 3.0, from.y);
+    let r = h.drag(&mut tl, from, to, Modifiers::SHIFT);
+    h.apply(&r);
+    assert_eq!(h.times(ROT), vec![0, 2 * SEC], "snapped to the comp marker");
+}
+
+#[test]
 fn a_comp_marker_dragged_out_of_the_bin_lands_where_dropped() {
     let mut h = H::new();
     let mut tl = h.bars();
