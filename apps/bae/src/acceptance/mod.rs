@@ -688,7 +688,7 @@ pub(crate) fn in_child_at(test: &str, env: &[(&str, &str)], cwd: Option<&Path>) 
     for (k, v) in env {
         command.env(k, v);
     }
-    let output = command.output().expect("run the child test");
+    let output = output_within(&mut command, std::time::Duration::from_secs(600));
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -696,6 +696,36 @@ pub(crate) fn in_child_at(test: &str, env: &[(&str, &str)], cwd: Option<&Path>) 
         "child test {test} failed:\n{stdout}\n{stderr}"
     );
     false
+}
+
+/// `Command::output` (stdin closed, output captured) that fails the test, and
+/// kills the process, if it has not exited within `limit`: a hang then fails
+/// with a message instead of holding the CI job until its own limit.
+pub(crate) fn output_within(
+    command: &mut std::process::Command,
+    limit: std::time::Duration,
+) -> std::process::Output {
+    use std::process::Stdio;
+    let child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("run {command:?}: {e}"));
+    let pid = child.id();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+    match rx.recv_timeout(limit) {
+        Ok(output) => output.unwrap_or_else(|e| panic!("wait for {command:?}: {e}")),
+        Err(_) => {
+            let _ = std::process::Command::new("kill")
+                .args(["-9", &pid.to_string()])
+                .status();
+            panic!("{command:?} still running after {limit:?}");
+        }
+    }
 }
 
 /// A path under the temp dir with spaces and Chinese characters.

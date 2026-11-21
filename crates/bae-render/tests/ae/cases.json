@@ -1388,6 +1388,1115 @@
      "opacity": 40
     }
    ]
+  },
+  {
+   "name": "mask_modes",
+   "size": [
+    384,
+    128
+   ],
+   "layers": [
+    {
+     "name": "alone_add",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      64,
+      64
+     ],
+     "pos": [
+      32,
+      32
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "rect": [
+        12,
+        12,
+        52,
+        52
+       ],
+       "opacity": 50
+      }
+     ]
+    },
+    {
+     "name": "after_add_add",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      64,
+      64
+     ],
+     "pos": [
+      32,
+      96
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "rect": [
+        6,
+        6,
+        40,
+        40
+       ],
+       "opacity": 60
+      },
+      {
+       "mode": "add",
+       "rect": [
+        24,
+        24,
+        58,
+        58
+       ],
+       "opacity": 50
+      }
+     ]
+    },
+    {
+     "name": "alone_subtract",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      64,
+      64
+     ],
+     "pos": [
+      96,
+      32
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "subtract",
+       "rect": [
+        12,
+        12,
+        52,
+        52
+       ],
+       "opacity": 50
+      }
+     ]
+    },
+    {
+     "name": "after_add_subtract",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      64,
+      64
+     ],
+     "pos": [
+      96,
+      96
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "rect": [
+        6,
+        6,
+        40,
+        40
+       ],
+       "opacity": 60
+      },
+      {
+       "mode": "subtract",
+       "rect": [
+        24,
+        24,
+        58,
+        58
+       ],
+       "opacity": 50
+      }
+     ]
+    },
+    {
+     "name": "alone_intersect",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      64,
+      64
+     ],
+     "pos": [
+      160,
+      32
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "intersect",
+       "rect": [
+        12,
+        12,
+        52,
+        52
+       ],
+       "opacity": 50
+      }
+     ]
+    },
+    {
+     "name": "after_add_intersect",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      64,
+      64
+     ],
+     "pos": [
+      160,
+      96
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "rect": [
+        6,
+        6,
+        40,
+        40
+       ],
+       "opacity": 60
+      },
+      {
+       "mode": "intersect",
+       "rect": [
+        24,
+        24,
+        58,
+        58
+       ],
+       "opacity": 50
+      }
+     ]
+    },
+    {
+     "name": "alone_lighten",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      64,
+      64
+     ],
+     "pos": [
+      224,
+      32
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "lighten",
+       "rect": [
+        12,
+        12,
+        52,
+        52
+       ],
+       "opacity": 50
+      }
+     ]
+    },
+    {
+     "name": "after_add_lighten",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      64,
+      64
+     ],
+     "pos": [
+      224,
+      96
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "rect": [
+        6,
+        6,
+        40,
+        40
+       ],
+       "opacity": 60
+      },
+      {
+       "mode": "lighten",
+       "rect": [
+        24,
+        24,
+        58,
+        58
+       ],
+       "opacity": 50
+      }
+     ]
+    },
+    {
+     "name": "alone_darken",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      64,
+      64
+     ],
+     "pos": [
+      288,
+      32
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "darken",
+       "rect": [
+        12,
+        12,
+        52,
+        52
+       ],
+       "opacity": 50
+      }
+     ]
+    },
+    {
+     "name": "after_add_darken",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      64,
+      64
+     ],
+     "pos": [
+      288,
+      96
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "rect": [
+        6,
+        6,
+        40,
+        40
+       ],
+       "opacity": 60
+      },
+      {
+       "mode": "darken",
+       "rect": [
+        24,
+        24,
+        58,
+        58
+       ],
+       "opacity": 50
+      }
+     ]
+    },
+    {
+     "name": "alone_difference",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      64,
+      64
+     ],
+     "pos": [
+      352,
+      32
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "difference",
+       "rect": [
+        12,
+        12,
+        52,
+        52
+       ],
+       "opacity": 50
+      }
+     ]
+    },
+    {
+     "name": "after_add_difference",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      64,
+      64
+     ],
+     "pos": [
+      352,
+      96
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "rect": [
+        6,
+        6,
+        40,
+        40
+       ],
+       "opacity": 60
+      },
+      {
+       "mode": "difference",
+       "rect": [
+        24,
+        24,
+        58,
+        58
+       ],
+       "opacity": 50
+      }
+     ]
+    }
+   ],
+   "tolerance": 2,
+   "pending_golden": true,
+   "notes": "AE-CMP-038 start value and partial-coverage formulas (Add src-over vs sum, Difference, Darken first)"
+  },
+  {
+   "name": "mask_invert_opacity",
+   "size": [
+    256,
+    64
+   ],
+   "layers": [
+    {
+     "name": "inv",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      64,
+      64
+     ],
+     "pos": [
+      32,
+      32
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "rect": [
+        16,
+        16,
+        48,
+        48
+       ],
+       "inverted": true
+      }
+     ]
+    },
+    {
+     "name": "inv40",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      64,
+      64
+     ],
+     "pos": [
+      96,
+      32
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "rect": [
+        16,
+        16,
+        48,
+        48
+       ],
+       "inverted": true,
+       "opacity": 40
+      }
+     ]
+    },
+    {
+     "name": "ell70",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      64,
+      64
+     ],
+     "pos": [
+      160,
+      32
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "ellipse": [
+        4,
+        10,
+        60,
+        54
+       ],
+       "opacity": 70
+      }
+     ]
+    },
+    {
+     "name": "three",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      64,
+      64
+     ],
+     "pos": [
+      224,
+      32
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "rect": [
+        0,
+        0,
+        32,
+        64
+       ]
+      },
+      {
+       "mode": "add",
+       "rect": [
+        32,
+        0,
+        64,
+        64
+       ]
+      },
+      {
+       "mode": "subtract",
+       "rect": [
+        20,
+        20,
+        44,
+        44
+       ],
+       "opacity": 80
+      }
+     ]
+    }
+   ],
+   "tolerance": 2,
+   "pending_golden": true,
+   "notes": "AE-CMP-039/040: opacity after inversion"
+  },
+  {
+   "name": "mask_feather",
+   "size": [
+    640,
+    160
+   ],
+   "layers": [
+    {
+     "name": "f0",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      160,
+      160
+     ],
+     "pos": [
+      80,
+      80
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "rect": [
+        40.5,
+        40.5,
+        119.5,
+        119.5
+       ]
+      }
+     ]
+    },
+    {
+     "name": "f10",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      160,
+      160
+     ],
+     "pos": [
+      240,
+      80
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "rect": [
+        40,
+        40,
+        120,
+        120
+       ],
+       "feather": [
+        10,
+        10
+       ]
+      }
+     ]
+    },
+    {
+     "name": "f40",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      160,
+      160
+     ],
+     "pos": [
+      400,
+      80
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "ellipse": [
+        30,
+        30,
+        130,
+        130
+       ],
+       "feather": [
+        40,
+        40
+       ]
+      }
+     ]
+    },
+    {
+     "name": "f30x5",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      160,
+      160
+     ],
+     "pos": [
+      560,
+      80
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "rect": [
+        40,
+        40,
+        120,
+        120
+       ],
+       "feather": [
+        30,
+        5
+       ]
+      }
+     ]
+    }
+   ],
+   "tolerance": 3,
+   "pending_golden": true,
+   "notes": "AE-CMP-041: sigma = 0.38 x feather (Skottie) to verify; x/y feathers"
+  },
+  {
+   "name": "mask_feather_large",
+   "size": [
+    600,
+    100
+   ],
+   "layers": [
+    {
+     "name": "wide",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      600,
+      100
+     ],
+     "pos": [
+      300,
+      50
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "rect": [
+        -200,
+        -200,
+        300,
+        300
+       ],
+       "feather": [
+        200,
+        0
+       ]
+      }
+     ]
+    }
+   ],
+   "tolerance": 3,
+   "pending_golden": true,
+   "notes": "AE-CMP-041: feather profile across 200 px (Gaussian width)"
+  },
+  {
+   "name": "mask_feather_frame",
+   "size": [
+    200,
+    200
+   ],
+   "layers": [
+    {
+     "name": "frame",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      100,
+      100
+     ],
+     "pos": [
+      100,
+      100
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "rect": [
+        -50,
+        -50,
+        150,
+        150
+       ],
+       "feather": [
+        30,
+        30
+       ]
+      }
+     ]
+    }
+   ],
+   "tolerance": 3,
+   "pending_golden": true,
+   "notes": "AE-CMP-041: feather reads transparent pixels outside the layer frame"
+  },
+  {
+   "name": "mask_expansion",
+   "size": [
+    512,
+    128
+   ],
+   "layers": [
+    {
+     "name": "grow",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      128,
+      128
+     ],
+     "pos": [
+      64,
+      64
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "rect": [
+        34,
+        34,
+        94,
+        94
+       ],
+       "expansion": 12
+      }
+     ]
+    },
+    {
+     "name": "shrink",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      128,
+      128
+     ],
+     "pos": [
+      192,
+      64
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "rect": [
+        24,
+        24,
+        104,
+        104
+       ],
+       "expansion": -12
+      }
+     ]
+    },
+    {
+     "name": "grow_ell",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      128,
+      128
+     ],
+     "pos": [
+      320,
+      64
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "ellipse": [
+        34,
+        44,
+        94,
+        84
+       ],
+       "expansion": 10
+      }
+     ]
+    },
+    {
+     "name": "shrink_star",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      128,
+      128
+     ],
+     "pos": [
+      448,
+      64
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "poly": [
+        [
+         64.0,
+         8.0
+        ],
+        [
+         78.107,
+         44.584
+        ],
+        [
+         117.259,
+         46.695
+        ],
+        [
+         86.825,
+         71.416
+        ],
+        [
+         96.916,
+         109.305
+        ],
+        [
+         64.0,
+         88.0
+        ],
+        [
+         31.084,
+         109.305
+        ],
+        [
+         41.175,
+         71.416
+        ],
+        [
+         10.741,
+         46.695
+        ],
+        [
+         49.893,
+         44.584
+        ]
+       ],
+       "expansion": -5
+      }
+     ]
+    }
+   ],
+   "tolerance": 3,
+   "pending_golden": true,
+   "notes": "AE-CMP-044: round outer corners when growing, sharp when shrinking"
+  },
+  {
+   "name": "mask_fill_rule",
+   "size": [
+    128,
+    128
+   ],
+   "layers": [
+    {
+     "name": "pentagram",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      128,
+      128
+     ],
+     "pos": [
+      64,
+      64
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "poly": [
+        [
+         64.0,
+         8.0
+        ],
+        [
+         96.916,
+         109.305
+        ],
+        [
+         10.741,
+         46.695
+        ],
+        [
+         117.259,
+         46.695
+        ],
+        [
+         31.084,
+         109.305
+        ]
+       ]
+      }
+     ]
+    }
+   ],
+   "tolerance": 2,
+   "pending_golden": true,
+   "notes": "AE-CMP-045: centre filled = nonzero, hole = even-odd"
+  },
+  {
+   "name": "mask_scaled_matte",
+   "size": [
+    256,
+    128
+   ],
+   "layers": [
+    {
+     "name": "scaled",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      40,
+      40
+     ],
+     "pos": [
+      64,
+      64
+     ],
+     "opacity": 100,
+     "masks": [
+      {
+       "mode": "add",
+       "rect": [
+        10.25,
+        10.25,
+        29.75,
+        29.75
+       ]
+      }
+     ],
+     "scale": [
+      250,
+      250
+     ]
+    },
+    {
+     "name": "matte",
+     "solid": [
+      255,
+      255,
+      255
+     ],
+     "size": [
+      128,
+      128
+     ],
+     "pos": [
+      192,
+      64
+     ],
+     "opacity": 100,
+     "enabled": false,
+     "masks": [
+      {
+       "mode": "add",
+       "ellipse": [
+        24,
+        24,
+        104,
+        104
+       ],
+       "feather": [
+        8,
+        8
+       ]
+      }
+     ]
+    },
+    {
+     "name": "fill",
+     "solid": [
+      230,
+      120,
+      40
+     ],
+     "size": [
+      128,
+      128
+     ],
+     "pos": [
+      192,
+      64
+     ],
+     "opacity": 100,
+     "matte": {
+      "layer": 1,
+      "mode": "alpha"
+     }
+    }
+   ],
+   "tolerance": 3,
+   "pending_golden": true,
+   "notes": "AE-CMP-045/048: masks on a scaled solid; a masked layer as track matte"
   }
  ]
 }
