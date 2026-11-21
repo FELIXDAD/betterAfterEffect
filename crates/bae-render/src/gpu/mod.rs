@@ -1,12 +1,18 @@
 //! GPU resources of the compositor: pipelines, bind group layouts, the per-draw
-//! record shared with `composite.wgsl`, and the 8-bit output pass.
+//! record shared with `composite.wgsl`, the mask passes (`mask.wgsl`) and the
+//! 8-bit output pass.
 
 use bae_gpu::wgpu;
 use bytemuck::{Pod, Zeroable};
 use glam::DAffine2;
 use rustc_hash::FxHashMap;
 
-use crate::blend::BlendMode;
+use crate::blend::{BlendMode, MaskMode};
+
+/// Coverage accumulation buffers of masks (R: path winding, G: expansion outline).
+pub(crate) const MASK_ACCUM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg16Float;
+/// Mask coverage and combined mask images.
+pub(crate) const MASK_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R16Float;
 
 /// Shader flags (must match `composite.wgsl`).
 pub(crate) mod flags {
@@ -17,6 +23,7 @@ pub(crate) mod flags {
     pub const PRESERVE: u32 = 16;
     pub const CLAMP: u32 = 32;
     pub const OPAQUE: u32 = 64;
+    pub const MASK: u32 = 128;
 }
 
 /// One draw (layer op), laid out like `struct Draw` in `composite.wgsl`.
@@ -34,6 +41,10 @@ pub(crate) struct DrawData {
     pub matte: [f32; 4],
     pub target: [f32; 4],
     pub mode: [u32; 4],
+    /// Input texel `u` → mask texture uv: `u · xy + zw`.
+    pub mask_uv: [f32; 4],
+    /// Mask value `a + b · sample` (x, y).
+    pub mask_val: [f32; 4],
 }
 
 impl DrawData {
@@ -151,6 +162,8 @@ pub(crate) struct Pipelines {
     output_pipeline_layout: wgpu::PipelineLayout,
     /// Output conversions into other formats (export), created on first use.
     outputs: FxHashMap<wgpu::TextureFormat, wgpu::RenderPipeline>,
+    /// Mask passes, created on first use.
+    masks: Option<MaskPipelines>,
 }
 
 impl Pipelines {
@@ -194,6 +207,7 @@ impl Pipelines {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                tex(4),
             ],
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -244,6 +258,10 @@ impl Pipelines {
                 wgpu::BindGroupEntry {
                     binding: 3,
                     resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&dummy),
                 },
             ],
         });
@@ -304,6 +322,7 @@ impl Pipelines {
             output_module,
             output_pipeline_layout,
             outputs: FxHashMap::default(),
+            masks: None,
         }
     }
 
@@ -367,6 +386,7 @@ impl Pipelines {
         src: Option<&wgpu::TextureView>,
         matte: Option<&wgpu::TextureView>,
         dst: Option<&wgpu::TextureView>,
+        mask: Option<&wgpu::TextureView>,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bae-render.textures"),
@@ -388,9 +408,217 @@ impl Pipelines {
                     binding: 3,
                     resource: wgpu::BindingResource::Sampler(&self.sampler),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(mask.unwrap_or(&self.dummy)),
+                },
             ],
         })
     }
+
+    /// The mask pipelines (compiled on first use).
+    pub fn masks(&mut self, device: &wgpu::Device) -> &mut MaskPipelines {
+        self.masks.get_or_insert_with(|| MaskPipelines::new(device))
+    }
+}
+
+/// How a mask pass writes its target.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum MaskBlend {
+    /// Overwrite (resolve and blur passes).
+    Replace,
+    /// Merge into the accumulator with a mask mode (AE-CMP-038).
+    Mode(MaskMode),
+}
+
+impl MaskBlend {
+    fn state(self) -> Option<wgpu::BlendState> {
+        use wgpu::{BlendComponent as C, BlendFactor as F, BlendOperation as O};
+        let c = |src_factor, dst_factor, operation| C {
+            src_factor,
+            dst_factor,
+            operation,
+        };
+        let component = match self {
+            MaskBlend::Replace | MaskBlend::Mode(MaskMode::None) => return None,
+            // acc + m − acc·m
+            MaskBlend::Mode(MaskMode::Add) => c(F::One, F::OneMinusSrc, O::Add),
+            // acc · (1 − m)
+            MaskBlend::Mode(MaskMode::Subtract) => c(F::Zero, F::OneMinusSrc, O::Add),
+            // acc · m
+            MaskBlend::Mode(MaskMode::Intersect) => c(F::Zero, F::Src, O::Add),
+            MaskBlend::Mode(MaskMode::Lighten) => c(F::One, F::One, O::Max),
+            MaskBlend::Mode(MaskMode::Darken) => c(F::One, F::One, O::Min),
+            // m·(1 − acc) + acc·(1 − m) = acc + m − 2·acc·m
+            MaskBlend::Mode(MaskMode::Difference) => c(F::OneMinusDst, F::OneMinusSrc, O::Add),
+        };
+        Some(wgpu::BlendState {
+            color: component,
+            alpha: component,
+        })
+    }
+}
+
+/// One mask edge, laid out like `struct Edge` in `mask.wgsl`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
+pub(crate) struct EdgeData {
+    pub p0: [f32; 2],
+    pub p1: [f32; 2],
+    pub xmax: f32,
+    pub chan: u32,
+    pub size: [f32; 2],
+}
+
+/// One full-screen mask pass, laid out like `struct Pass` in `mask.wgsl`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
+pub(crate) struct MaskPassData {
+    pub map: [f32; 4],
+    pub src: [f32; 4],
+    pub blur: [f32; 4],
+    pub clip: [f32; 4],
+    pub value: [f32; 4],
+    pub mode: [u32; 4],
+}
+
+/// Pipelines of `mask.wgsl`.
+pub(crate) struct MaskPipelines {
+    module: wgpu::ShaderModule,
+    pipeline_layout: wgpu::PipelineLayout,
+    pub layout: wgpu::BindGroupLayout,
+    pub sampler: wgpu::Sampler,
+    pub edges: wgpu::RenderPipeline,
+    passes: FxHashMap<MaskBlend, wgpu::RenderPipeline>,
+}
+
+impl MaskPipelines {
+    fn new(device: &wgpu::Device) -> Self {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("bae-render.mask"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("mask.wgsl").into()),
+        });
+        let storage = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("bae-render.mask"),
+            entries: &[
+                storage(0),
+                storage(1),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("bae-render.mask"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("bae-render.mask"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let additive = wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::One,
+            dst_factor: wgpu::BlendFactor::One,
+            operation: wgpu::BlendOperation::Add,
+        };
+        let edges = mask_pipeline(
+            device,
+            &module,
+            &pipeline_layout,
+            ("vs_edge", "fs_edge"),
+            MASK_ACCUM_FORMAT,
+            Some(wgpu::BlendState {
+                color: additive,
+                alpha: additive,
+            }),
+        );
+        Self {
+            module,
+            pipeline_layout,
+            layout,
+            sampler,
+            edges,
+            passes: FxHashMap::default(),
+        }
+    }
+
+    /// The full-screen pass writing `MASK_FORMAT` with `blend`.
+    pub fn pass(&mut self, device: &wgpu::Device, blend: MaskBlend) -> &wgpu::RenderPipeline {
+        let (module, layout) = (&self.module, &self.pipeline_layout);
+        self.passes.entry(blend).or_insert_with(|| {
+            mask_pipeline(
+                device,
+                module,
+                layout,
+                ("vs_full", "fs_pass"),
+                MASK_FORMAT,
+                blend.state(),
+            )
+        })
+    }
+}
+
+fn mask_pipeline(
+    device: &wgpu::Device,
+    module: &wgpu::ShaderModule,
+    layout: &wgpu::PipelineLayout,
+    (vs, fs): (&str, &str),
+    format: wgpu::TextureFormat,
+    blend: Option<wgpu::BlendState>,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("bae-render.mask"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module,
+            entry_point: Some(vs),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module,
+            entry_point: Some(fs),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
 }
 
 /// A full-screen pass converting a working buffer into `format` (`output.wgsl`).
@@ -435,8 +663,10 @@ mod tests {
 
     #[test]
     fn draw_record_matches_wgsl_layout() {
-        // 11 vec4s: the WGSL struct stride.
-        assert_eq!(std::mem::size_of::<DrawData>(), 176);
+        // 13 vec4s: the WGSL struct stride.
+        assert_eq!(std::mem::size_of::<DrawData>(), 208);
+        assert_eq!(std::mem::size_of::<EdgeData>(), 32);
+        assert_eq!(std::mem::size_of::<MaskPassData>(), 96);
     }
 
     #[test]

@@ -143,7 +143,11 @@ impl TexturePool {
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format,
-                    usage: POOL_USAGE,
+                    // Mask formats (R16F, RG16F) have no storage access in core WebGPU.
+                    usage: POOL_USAGE
+                        & format
+                            .guaranteed_format_features(device.features())
+                            .allowed_usages,
                     view_formats: &[],
                 });
                 let view = texture.create_view(&wgpu::TextureViewDescriptor::default());

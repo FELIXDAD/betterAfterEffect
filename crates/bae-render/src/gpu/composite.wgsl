@@ -28,6 +28,10 @@ struct Draw {
     tgt: vec4<f32>,
     // Blend mode index, flags, matte mode (1 alpha, 2 alpha inv, 3 luma, 4 luma inv), _.
     mode: vec4<u32>,
+    // Input texel -> mask texture uv: u * xy + zw.
+    mask_uv: vec4<f32>,
+    // Mask value a + b * sample (x, y).
+    mask_val: vec4<f32>,
 }
 
 const FLAG_TEXTURE: u32 = 1u;
@@ -37,12 +41,14 @@ const FLAG_DST: u32 = 8u;
 const FLAG_PRESERVE: u32 = 16u;
 const FLAG_CLAMP: u32 = 32u;
 const FLAG_OPAQUE: u32 = 64u;
+const FLAG_MASK: u32 = 128u;
 
 @group(0) @binding(0) var<storage, read> draws: array<Draw>;
 @group(1) @binding(0) var t_src: texture_2d<f32>;
 @group(1) @binding(1) var t_matte: texture_2d<f32>;
 @group(1) @binding(2) var t_dst: texture_2d<f32>;
 @group(1) @binding(3) var s_linear: sampler;
+@group(1) @binding(4) var t_mask: texture_2d<f32>;
 
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
@@ -143,7 +149,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         src = vec4<f32>(d.color.rgb * d.color.a, d.color.a);
     }
 
-    // Coverage x opacity (AE-CMP-031), then the track matte (AE-CMP-034).
+    // Coverage x opacity (AE-CMP-031), then the track matte (AE-CMP-034) and masks.
     var k = cov2.x * cov2.y * d.tgt.z;
     if (flags & FLAG_MATTE) != 0u {
         let mt = vec2<i32>(floor(p - d.matte.xy));
@@ -157,6 +163,12 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             v = 1.0 - v;
         }
         k = k * clamp(v, 0.0, 1.0);
+    }
+    // Layer masks (AE-CMP-038): the combined mask, or one mask's coverage with
+    // its value transform, in layer space.
+    if (flags & FLAG_MASK) != 0u {
+        let mv = textureSampleLevel(t_mask, s_linear, u * d.mask_uv.xy + d.mask_uv.zw, 0.0).x;
+        k = k * clamp(d.mask_val.x + d.mask_val.y * mv, 0.0, 1.0);
     }
     src = src * k;
 
