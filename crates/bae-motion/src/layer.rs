@@ -165,12 +165,16 @@ impl Command for CreateLayer {
                 (LayerKind::Text, _, Some(t)) if !t.trim().is_empty() => t
                     .lines()
                     .next()
-                    .unwrap_or("Text")
+                    .unwrap_or(crate::names::localized("Text"))
                     .chars()
                     .take(64)
                     .collect(),
                 (_, Some(src), _) => query::display_name_of(tx.stage(), src),
-                _ => query::next_numbered_name(tx.stage(), &folder, default_base_name(kind)),
+                _ => query::next_numbered_name(
+                    tx.stage(),
+                    &folder,
+                    crate::names::localized(default_base_name(kind)),
+                ),
             },
         };
         let path = child(
@@ -302,21 +306,23 @@ fn add_shape(
     side: f64,
     color: [f64; 4],
 ) -> Result<(), CommandError> {
-    let (group_name, path_name, ty) = match preset {
-        ShapePreset::Rect => ("Rectangle 1", "Rectangle Path 1", PrimType::RECT),
-        ShapePreset::Ellipse => ("Ellipse 1", "Ellipse Path 1", PrimType::ELLIPSE),
-        ShapePreset::Star => ("Polystar 1", "Polystar Path 1", PrimType::STAR),
+    let (group_base, path_base, ty) = match preset {
+        ShapePreset::Rect => ("Rectangle", "Rectangle Path", PrimType::RECT),
+        ShapePreset::Ellipse => ("Ellipse", "Ellipse Path", PrimType::ELLIPSE),
+        ShapePreset::Star => ("Polystar", "Polystar Path", PrimType::STAR),
     };
+    // Paths keep the English names; the names follow the UI language (AE).
+    let named = |base: &'static str| format!("{} 1", crate::names::localized(base));
     let contents = child(layer, query::CONTENTS)?;
     create(tx, &contents, PrimType::FOLDER, None)?;
-    let group = child(&contents, &query::sanitize_name(group_name))?;
+    let group = child(&contents, &query::sanitize_name(&format!("{group_base} 1")))?;
     create(tx, &group, PrimType::SHAPE_GROUP, None)?;
-    set(tx, &group, "name", Value::String(group_name.into()))?;
+    set(tx, &group, "name", Value::String(named(group_base)))?;
     let inner = child(&group, query::CONTENTS)?;
     create(tx, &inner, PrimType::FOLDER, None)?;
-    let shape = child(&inner, &query::sanitize_name(path_name))?;
+    let shape = child(&inner, &query::sanitize_name(&format!("{path_base} 1")))?;
     create(tx, &shape, ty.clone(), None)?;
-    set(tx, &shape, "name", Value::String(path_name.into()))?;
+    set(tx, &shape, "name", Value::String(named(path_base)))?;
     if ty == PrimType::STAR {
         set(tx, &shape, "outer_radius", Value::Float(side / 2.0))?;
         set(tx, &shape, "inner_radius", Value::Float(side / 4.0))?;
@@ -325,7 +331,7 @@ fn add_shape(
     }
     let fill = child(&inner, "Fill_1")?;
     create(tx, &fill, PrimType::FILL, None)?;
-    set(tx, &fill, "name", Value::String("Fill 1".into()))?;
+    set(tx, &fill, "name", Value::String(named("Fill")))?;
     set(tx, &fill, "color", Value::Color(color))?;
     Ok(())
 }
