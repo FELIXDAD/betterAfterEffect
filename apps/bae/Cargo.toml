@@ -44,6 +44,12 @@ winit.workspace = true
 [target.'cfg(any(target_os = "macos", windows))'.dependencies]
 rfd.workspace = true
 
+# Save As on Windows drives IFileSaveDialog itself (`shell::win_save`, issue #126).
+# Same 0.62 line wgpu-hal already links; only the shell dialog bindings are added.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_UI_Shell_Common", "Win32_System_Com"] }
+windows-core = { workspace = true, features = ["std"] }
+
 # Projects opened from Finder (double-click, Dock drop) arrive as an Apple event:
 # `shell::open_documents` adds `application:openURLs:` to winit's app delegate. Both
 # crates are already linked through winit / wgpu-hal / muda.
