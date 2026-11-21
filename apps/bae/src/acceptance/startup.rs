@@ -218,9 +218,11 @@ fn main_controls_are_found_by_accessible_name() {
             missing.push(format!("{label} ({n} < {min})"));
         }
     }
-    // Names shown in the UI: layers, comp tab, workspaces.
+    // Names shown in the UI: layers (timeline rows carry the layer number,
+    // "Layer 1 “Text”", #128), comp tab, workspaces.
     for label in ["Solid 1", "Text", "Comp 1", "Motion", "Review"] {
-        if !all.iter().any(|l| l == label) {
+        let quoted = format!("“{label}”");
+        if !all.iter().any(|l| l == label || l.ends_with(&quoted)) {
             missing.push(label.to_owned());
         }
     }
@@ -251,7 +253,7 @@ fn main_controls_are_found_by_accessible_name() {
     h.state().session().lock().selected_layers.clear();
     let rows: Vec<_> = h
         .root()
-        .query_all_by_label("Text")
+        .query_all_by_label("Layer 1 “Text”")
         .map(|n| n.rect())
         .collect();
     let head = find_text(&h, "Layer Name").unwrap();

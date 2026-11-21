@@ -22,6 +22,7 @@ use bae_render::{
     AnimEvaluator, ExportFormat, ExportJob, ExportSettings, RenderError, RenderPurpose,
     RenderRequest, Renderer, RendererConfig, SourceProvider, export_frames, frame_file,
 };
+use bae_ui::Accessible as _;
 use bae_ui::{Panel, PanelContext, TabInfo, tr};
 
 use crate::gpu_preview::PreviewSources;
@@ -754,7 +755,9 @@ fn item_ui(
     }
     ui.add_enabled_ui(editable, |ui| {
         egui::Grid::new("output").num_columns(2).show(ui, |ui| {
-            ui.label(tr("Format"));
+            // Fields are named by the label in front of them (screen readers read
+            // "Format: PNG", issue #128).
+            let label = ui.label(tr("Format"));
             let mut format = item.format;
             egui::ComboBox::from_id_salt("format")
                 .selected_text(format_label(format))
@@ -762,14 +765,17 @@ fn item_ui(
                     for f in FORMATS {
                         ui.selectable_value(&mut format, f, format_label(f));
                     }
-                });
+                })
+                .response
+                .labelled_by(label.id);
             if format != item.format {
                 item.set_format(format);
             }
             ui.end_row();
-            ui.label(tr("Output To"));
+            let label = ui.label(tr("Output To"));
             ui.vertical(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut item.output).desired_width(f32::INFINITY));
+                ui.add(egui::TextEdit::singleline(&mut item.output).desired_width(f32::INFINITY))
+                    .labelled_by(label.id);
                 // AE: the format decides the extension.
                 if let Some(ext) = extension_follows_format(&item.output, item.format) {
                     ui.weak(
@@ -785,16 +791,28 @@ fn item_ui(
             // entirely outside, at render time.
             let last = last.unwrap_or(i64::MAX).max(0);
             ui.horizontal(|ui| {
+                let start = item.start.to_string();
                 ui.add(
                     egui::DragValue::new(&mut item.start)
                         .range(0..=item.end.clamp(0, last))
                         .clamp_existing_to_range(false),
+                )
+                .labeled_value(
+                    egui::WidgetType::DragValue,
+                    &bae_ui::a11y::context(&[tr("Frames"), tr("Start")]),
+                    &start,
                 );
                 ui.label("–");
+                let end = item.end.to_string();
                 ui.add(
                     egui::DragValue::new(&mut item.end)
                         .range(item.start.clamp(0, last)..=last)
                         .clamp_existing_to_range(false),
+                )
+                .labeled_value(
+                    egui::WidgetType::DragValue,
+                    &bae_ui::a11y::context(&[tr("Frames"), tr("End")]),
+                    &end,
                 );
             });
             ui.end_row();

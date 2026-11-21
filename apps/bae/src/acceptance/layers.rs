@@ -5,7 +5,7 @@ use bae_motion::query;
 use egui::{Key, Modifiers};
 
 use super::*;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 fn kind(h: &Ui, layer: &PrimPath) -> String {
     query::layer_kind(h.state().stage(), layer).unwrap_or_default()
@@ -537,13 +537,18 @@ fn row_of(h: &Ui, name: &str) -> egui::Rect {
 }
 
 /// Clicks the Lock switch on `name`'s timeline row (accesskit name
-/// "Layer “name” · Lock", issue #128).
+/// "Layer 1 “name” · Lock", issue #128).
 fn click_lock_switch(h: &mut Ui, name: &str) {
     let row = row_of(h, name);
-    let label = format!("Layer “{name}” · Lock");
+    let suffix = format!("“{name}” · Lock");
     let switch = h
         .root()
-        .query_all_by_label(&label)
+        .children_recursive()
+        .filter(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with("Layer ") && l.ends_with(&suffix))
+        })
         .map(|n| n.rect())
         .find(|r| (r.center().y - row.center().y).abs() < 6.0)
         .unwrap_or_else(|| panic!("no Lock switch on {name}'s row"));

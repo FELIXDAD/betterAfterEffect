@@ -78,6 +78,12 @@ impl AppModule for ModelCliModule {
                 }
                 Ok(ExitCode::SUCCESS)
             });
+        // Every entry point that opens a project explains a failure the same way
+        // (issue #111): export-json, pack, mcp here; `bae render` (bae-render)
+        // through this resource.
+        app.insert_resource(cli::ProjectOpenError(std::sync::Arc::new(|path, error| {
+            crate::file_error::describe_open(path, error)
+        })));
         if let Err(error) = cli::implement(&registry, app.current_owner(), export) {
             tracing::warn!("export-json not registered: {error}");
         }

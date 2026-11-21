@@ -9,7 +9,7 @@
 //! `layer.reorder`, parenting → `layer.set_parent`. Drags preview locally and run
 //! one command when released.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use bae_model::{Interpolation, Keyframe, LayerKind, PrimPath, Stage, Time};
 use bae_motion::KeyRef;
@@ -122,6 +122,9 @@ pub struct TimelinePanel {
     title: String,
     /// Expression sources being edited, by `path.attr`.
     expr_edit: Option<(PrimPath, String, String)>,
+    /// AE layer numbers (# column) of the shown comp, for accessibility names:
+    /// two layers may share a name (issue #128).
+    layer_numbers: HashMap<PrimPath, usize>,
 }
 
 /// Comp time ↔ x in the graph.
@@ -405,6 +408,14 @@ fn switch(ui: &Ui, rect: Rect, on: bool, icon: Icon, id: Id, layer: &str) -> boo
 }
 
 impl TimelinePanel {
+    /// "Layer 2 “Solid”": the accessibility context of a layer's controls.
+    fn layer_ctx(&self, stage: &bae_model::Stage, layer: &PrimPath) -> String {
+        bae_ui::a11y::layer(
+            self.layer_numbers.get(layer).copied(),
+            &query::display_name_of(stage, layer),
+        )
+    }
+
     #[cfg(test)]
     pub(crate) fn start_rename(&mut self, layer: PrimPath, text: &str) {
         self.rename = Some((layer, text.to_owned()));
@@ -502,6 +513,11 @@ impl Panel for TimelinePanel {
             self.rows(stage, &info.path, &s)
         };
         let comp_layers = query::comp_layers(stage, &info.path);
+        self.layer_numbers = comp_layers
+            .iter()
+            .enumerate()
+            .map(|(i, l)| (l.clone(), i + 1))
+            .collect();
 
         // Background of the graph body: marquee selection and deselect.
         let bg = ui
@@ -1031,7 +1047,7 @@ impl TimelinePanel {
         let base = ui.id().with((layer.as_str(), row.depth, row_key(row)));
         let rid = |s: &str| base.with(s);
         // Screen readers tell the rows' controls apart by layer (issue #128).
-        let layer_ctx = bae_ui::a11y::layer(&query::display_name_of(stage, layer));
+        let layer_ctx = self.layer_ctx(stage, layer);
 
         match &row.kind {
             RowKind::Layer => {
@@ -1134,7 +1150,12 @@ impl TimelinePanel {
                     );
                     let resp = ui
                         .interact(name_rect, rid("name"), Sense::click_and_drag())
-                        .labeled_toggle(egui::WidgetType::SelectableLabel, &name, layer_selected);
+                        // "Layer 2 “Solid 1”": two layers may share a name (#128).
+                        .labeled_toggle(
+                            egui::WidgetType::SelectableLabel,
+                            &layer_ctx,
+                            layer_selected,
+                        );
                     if resp.clicked() {
                         select_layer(session, stage, layer, ui.input(|i| i.modifiers));
                     }
@@ -1388,10 +1409,7 @@ impl TimelinePanel {
             )
             .labeled_toggle(
                 egui::WidgetType::Other,
-                &bae_ui::a11y::context(&[
-                    &bae_ui::a11y::layer(&query::display_name_of(stage, layer)),
-                    tr("Duration Bar"),
-                ]),
+                &bae_ui::a11y::context(&[&self.layer_ctx(stage, layer), tr("Duration Bar")]),
                 selected,
             );
         let hover_edge = resp.hover_pos().map(|p| {
@@ -1493,11 +1511,8 @@ impl TimelinePanel {
         } else {
             query::display_name_of(stage, path)
         };
-        let prop_name = bae_ui::a11y::context(&[
-            &bae_ui::a11y::layer(&query::display_name_of(stage, &row.layer)),
-            &group,
-            tr(label),
-        ]);
+        let prop_name =
+            bae_ui::a11y::context(&[&self.layer_ctx(stage, &row.layer), &group, tr(label)]);
         // Keyframe navigator (A/V columns).
         if animated {
             let nav = Rect::from_min_size(
@@ -1723,7 +1738,7 @@ impl TimelinePanel {
                 egui::WidgetType::Checkbox,
                 &bae_ui::a11y::context(&[
                     &query::owning_layer(cx.stage, path)
-                        .map(|l| bae_ui::a11y::layer(&query::display_name_of(cx.stage, &l)))
+                        .map(|l| self.layer_ctx(cx.stage, &l))
                         .unwrap_or_default(),
                     tr(&common::attr_label(None, attr, false)),
                     tr("Enable Expression"),
@@ -1767,12 +1782,21 @@ impl TimelinePanel {
         } else {
             expr.source.clone()
         };
-        let r = ui.put(
-            field,
-            egui::TextEdit::singleline(&mut buf)
-                .font(egui::TextStyle::Monospace)
-                .text_color(color::TEXT_STRONG),
-        );
+        let name = bae_ui::a11y::context(&[
+            &query::owning_layer(cx.stage, path)
+                .map(|l| self.layer_ctx(cx.stage, &l))
+                .unwrap_or_default(),
+            tr(&common::attr_label(None, attr, false)),
+            tr("Expression"),
+        ]);
+        let r = ui
+            .put(
+                field,
+                egui::TextEdit::singleline(&mut buf)
+                    .font(egui::TextStyle::Monospace)
+                    .text_color(color::TEXT_STRONG),
+            )
+            .labeled(egui::WidgetType::TextEdit, &name);
         if r.changed() || r.has_focus() {
             self.expr_edit = Some((path.clone(), attr.to_owned(), buf.clone()));
         }

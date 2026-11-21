@@ -20,9 +20,16 @@ pub fn context(parts: &[&str]) -> String {
         .join(" · ")
 }
 
-/// "Layer “name”", translated: the context of a layer's controls.
-pub fn layer(name: &str) -> String {
-    crate::i18n::tr("Layer “{name}”").replace("{name}", name)
+/// "Layer 2 “name”" (AE's layer number; two layers may share a name), or
+/// "Layer “name”" without a number, translated: the context of a layer's
+/// controls.
+pub fn layer(number: Option<usize>, name: &str) -> String {
+    match number {
+        Some(n) => crate::i18n::tr("Layer {n} “{name}”")
+            .replace("{n}", &n.to_string())
+            .replace("{name}", name),
+        None => crate::i18n::tr("Layer “{name}”").replace("{name}", name),
+    }
 }
 
 /// Accessibility labels for a [`Response`].
@@ -73,6 +80,7 @@ pub const LABELS: &[&str] = &[
     "Color",
     "Search",
     "Layer “{name}”",
+    "Layer {n} “{name}”",
 ];
 
 impl Accessible for Response {

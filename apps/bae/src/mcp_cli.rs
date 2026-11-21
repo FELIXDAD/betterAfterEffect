@@ -81,7 +81,9 @@ impl AppModule for McpCliModule {
                     project.save_as(path)?;
                     project
                 }
-                Some(path) => Project::open(path)?,
+                Some(path) => Project::open(path).map_err(|error| {
+                    anyhow::anyhow!(crate::file_error::describe_open(path, &error.into()))
+                })?,
                 None => {
                     tracing::warn!("no project given: serving an unsaved, empty project");
                     Project::new()

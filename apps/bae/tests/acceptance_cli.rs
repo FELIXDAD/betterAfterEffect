@@ -1156,3 +1156,63 @@ fn mcp_says_a_missing_project_does_not_exist() {
     assert!(stderr.contains("does not exist"), "{stderr}");
     assert!(!stderr.contains("is not a BAE project"), "{stderr}");
 }
+
+/// Issue #111: every entry point that takes a project path explains a project
+/// that does not open in the same words (`file_error::describe_open`), naming
+/// the file — never the model's "is not a BAE project" for a missing path.
+#[test]
+fn every_entry_point_explains_open_failures_the_same_way() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tricky(tmp.path());
+    let missing = dir.join("没有 的.bae");
+    let garbage = dir.join("坏的 包.baez");
+    std::fs::write(&garbage, b"PK\x03\x04 not really a zip").unwrap();
+    let out_png = tmp.path().join("o_####.png");
+    let entries: Vec<(&str, Vec<std::ffi::OsString>)> = vec![
+        ("export-json", vec!["export-json".into()]),
+        (
+            "render",
+            vec![
+                "render".into(),
+                "--comp".into(),
+                "x".into(),
+                "-o".into(),
+                out_png.clone().into(),
+            ],
+        ),
+        ("pack", vec!["pack".into()]),
+        ("mcp", vec!["mcp".into()]),
+        ("--headless", vec!["--headless".into()]),
+        (
+            "--headless --smoke-test",
+            vec!["--headless".into(), "--smoke-test".into(), "1".into()],
+        ),
+        // `bae <project>` opening the window; the smoke test exits before any
+        // window when the project does not open.
+        ("--smoke-test", vec!["--smoke-test".into(), "1".into()]),
+    ];
+    for (path, why) in [
+        (&missing, "does not exist"),
+        (&garbage, "is damaged or is not a .baez project package"),
+    ] {
+        let file = path.file_name().unwrap().to_string_lossy().into_owned();
+        for (name, args) in &entries {
+            let out = Command::new(BAE)
+                .args(args)
+                .arg(path)
+                .stdin(Stdio::null())
+                .output()
+                .unwrap();
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert_eq!(out.status.code(), Some(1), "{name} {file}: {stderr}");
+            assert!(
+                stderr.contains(&file) && stderr.contains(why),
+                "{name} {file}: expected “{why}”: {stderr}"
+            );
+            assert!(
+                !stderr.contains("is not a BAE project"),
+                "{name} {file}: the model's wording leaked: {stderr}"
+            );
+        }
+    }
+}
