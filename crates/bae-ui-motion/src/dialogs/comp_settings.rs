@@ -396,28 +396,14 @@ impl CompSettings {
         ui.set_width(520.0);
         ui.horizontal(|ui| {
             ui.label(tr("Composition Name:"));
-            let r = ui
-                .add(
-                    egui::TextEdit::singleline(&mut self.name)
-                        .id(id.with("name"))
-                        .desired_width(300.0)
-                        .text_color(color::TEXT_STRONG),
-                )
-                .labeled(egui::WidgetType::TextEdit, tr("Composition Name"));
-            if !self.name_focused {
-                r.request_focus();
-                if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), r.id) {
-                    let end = egui::text::CCursor::new(self.name.chars().count());
-                    state
-                        .cursor
-                        .set_char_range(Some(egui::text::CCursorRange::two(
-                            egui::text::CCursor::new(0),
-                            end,
-                        )));
-                    state.store(ui.ctx(), r.id);
-                }
-                self.name_focused = true;
-            }
+            fields::name_field(
+                ui,
+                id.with("name"),
+                &mut self.name,
+                300.0,
+                tr("Composition Name"),
+                &mut self.name_focused,
+            );
         });
         ui.add_space(4.0);
         tabs(ui, &mut self.tab, &["Basic", "Advanced", "3D Renderer"]);

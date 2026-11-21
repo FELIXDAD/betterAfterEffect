@@ -666,14 +666,33 @@ pub(crate) fn new_comp(h: &mut Ui) {
     assert!(!dialog_open(h), "Enter did not close Composition Settings");
 }
 
-/// New comp (Cmd+N, OK) with one layer from `Layer > New > <registry id>`;
-/// returns the harness settled.
+/// OK (Enter) in the motion dialog when one is open: Layer > New > Solid asks
+/// for Solid Settings first.
+pub(crate) fn confirm_dialog(h: &mut Ui) {
+    if dialog_open(h) {
+        key(h, Modifiers::NONE, Key::Enter);
+        assert!(!dialog_open(h), "Enter did not close the dialog");
+    }
+}
+
+/// New Solid the AE way: Cmd+Y opens Solid Settings, Enter (OK) creates the
+/// solid with the dialog's settings.
+pub(crate) fn new_solid(h: &mut Ui) {
+    let (m, k) = cmd(Key::Y);
+    key(h, m, k);
+    assert!(dialog_open(h), "Cmd+Y opened no Solid Settings");
+    confirm_dialog(h);
+}
+
+/// New comp (Cmd+N, OK) with one layer from `Layer > New > <registry id>`
+/// (OK in Solid Settings); returns the harness settled.
 pub(crate) fn comp_with(h: &mut Ui, layers: &[&str]) {
     new_comp(h);
     assert!(h.state().active_comp().is_some(), "Cmd+N opened no comp");
     for id in layers {
         assert!(h.state_mut().menu(id), "{id} disabled with a comp open");
         settle(h);
+        confirm_dialog(h);
     }
 }
 

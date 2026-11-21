@@ -184,3 +184,144 @@ fn color_picker_from_the_background_swatch() {
     let info = bae_motion::query::comp_info(h.state().stage(), &comp).unwrap();
     assert_eq!(info.bg_color, [1.0, 128.0 / 255.0, 0.0, 1.0]);
 }
+
+/// The open Solid Settings dialog's values (name, width, height).
+fn solid_dialog(h: &Ui) -> Option<(String, u32, u32)> {
+    let dialogs = h.state().app.resource::<bae_ui_motion::SharedDialogs>()?;
+    let d = dialogs.lock();
+    match d.open.as_ref()? {
+        bae_ui_motion::dialogs::Dialog::SolidSettings(s) => {
+            Some((s.values.name.clone(), s.values.width, s.values.height))
+        }
+        _ => None,
+    }
+}
+
+fn solid_of(h: &Ui, layer: &bae_model::PrimPath) -> bae_motion::SolidInfo {
+    let stage = h.state().stage();
+    let item = bae_motion::solid::layer_solid(stage, layer).expect("a solid layer");
+    bae_motion::solid::solid_info(stage, &item).unwrap()
+}
+
+#[test]
+fn new_solid_asks_for_solid_settings_first() {
+    let mut h = gui();
+    new_comp(&mut h);
+    key(&mut h, Modifiers::COMMAND, Key::Y);
+    assert!(dialog_open(&h), "Cmd+Y opened no dialog");
+    assert!(find_text(&h, "Solid Settings").is_some());
+    assert!(h.state().layers().is_empty(), "created before OK");
+    // AE's defaults: comp size, named after the color.
+    assert_eq!(
+        solid_dialog(&h),
+        Some(("Dark Gray Solid 1".to_owned(), 1920, 1080))
+    );
+    // The name is selected: typing replaces it.
+    type_text(&mut h, "Backdrop");
+    type_into(&mut h, "Width", "640");
+    type_into(&mut h, "Height", "200");
+    assert_eq!(solid_dialog(&h), Some(("Backdrop".to_owned(), 640, 200)));
+    // Make Comp Size: back to the comp's size.
+    click_label(&mut h, "Make Comp Size");
+    assert_eq!(solid_dialog(&h), Some(("Backdrop".to_owned(), 1920, 1080)));
+    type_into(&mut h, "Height", "300");
+    click_label(&mut h, "OK");
+    assert!(!dialog_open(&h));
+    let layers = h.state().layers();
+    assert_eq!(layers.len(), 1);
+    assert_eq!(h.state().name(&layers[0]), "Backdrop");
+    let solid = solid_of(&h, &layers[0]);
+    assert_eq!((solid.width, solid.height), (1920, 300));
+    let (undo, _) = h.state().doc.undo_state();
+    assert_eq!(undo.as_deref(), Some("New Solid"));
+    // Cancel creates nothing.
+    key(&mut h, Modifiers::COMMAND, Key::Y);
+    click_label(&mut h, "Cancel");
+    assert!(!dialog_open(&h));
+    assert_eq!(h.state().layers().len(), 1);
+}
+
+#[test]
+fn solid_color_names_the_new_solid() {
+    let mut h = gui();
+    new_comp(&mut h);
+    key(&mut h, Modifiers::COMMAND, Key::Y);
+    click_label(&mut h, "Solid Color");
+    type_into(&mut h, "Hex Color", "FF0000");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    // Picker closed with OK: the default name follows the color.
+    assert_eq!(solid_dialog(&h).unwrap().0, "Red Solid 1");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    let layer = h.state().layers()[0].clone();
+    assert_eq!(solid_of(&h, &layer).color, [1.0, 0.0, 0.0, 1.0]);
+    // The next New Solid starts from the last color.
+    key(&mut h, Modifiers::COMMAND, Key::Y);
+    assert_eq!(solid_dialog(&h).unwrap().0, "Red Solid 2");
+    key(&mut h, Modifiers::NONE, Key::Escape);
+}
+
+#[test]
+fn layer_settings_edits_the_selected_solid_in_one_undo_step() {
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.null"]);
+    // A null has no Solid Settings: the item is greyed, the shortcut idle.
+    assert!(!h.state().menu_item("motion.layer.layer_settings").enabled);
+    key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::Y);
+    assert!(!dialog_open(&h));
+    new_solid(&mut h);
+    let layer = h.state().layers()[0].clone();
+    assert!(h.state().menu_item("motion.layer.layer_settings").enabled);
+    key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::Y);
+    assert!(dialog_open(&h), "Cmd+Shift+Y opened no Solid Settings");
+    assert!(find_text(&h, "This change will affect 1 layer.").is_some());
+    type_text(&mut h, "Sky");
+    type_into(&mut h, "Width", "500");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(!dialog_open(&h));
+    assert_eq!(h.state().name(&layer), "Sky");
+    let solid = solid_of(&h, &layer);
+    assert_eq!((solid.name.as_str(), solid.width), ("Sky", 500));
+    let (undo, _) = h.state().doc.undo_state();
+    assert_eq!(undo.as_deref(), Some("Solid Settings"));
+    key(&mut h, Modifiers::COMMAND, Key::Z);
+    let solid = solid_of(&h, &layer);
+    assert_eq!(
+        (solid.name.as_str(), solid.width),
+        ("Dark Gray Solid 1", 1920)
+    );
+    assert_eq!(h.state().name(&layer), "Dark Gray Solid 1");
+    // The menu item opens the same dialog.
+    assert!(h.state_mut().menu("motion.layer.layer_settings"));
+    settle(&mut h);
+    assert!(solid_dialog(&h).is_some());
+    key(&mut h, Modifiers::NONE, Key::Escape);
+}
+
+#[test]
+fn solid_settings_in_chinese() {
+    if !in_child(
+        "acceptance::dialogs::solid_settings_in_chinese",
+        &[("BAE_LANG", "zh")],
+    ) {
+        return;
+    }
+    crate::i18n::init_from_env();
+    let mut h = gui();
+    new_comp(&mut h);
+    key(&mut h, Modifiers::COMMAND, Key::Y);
+    for text in [
+        "纯色设置",
+        "名称:",
+        "大小",
+        "宽度:",
+        "单位:",
+        "像素长宽比:",
+        "颜色",
+    ] {
+        assert!(find_text(&h, text).is_some(), "{text} missing");
+    }
+    assert!(h.query_by_label("制作合成大小").is_some());
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    let layer = h.state().layers()[0].clone();
+    assert_eq!(h.state().name(&layer), "深灰色 纯色 1");
+}

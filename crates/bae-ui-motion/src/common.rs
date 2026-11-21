@@ -525,6 +525,10 @@ pub(crate) fn new_layer(
         _ => "Layer",
     };
     let name = match (kind, extra.get("text").and_then(|t| t.as_str())) {
+        // A name from a dialog (Solid Settings).
+        _ if extra.get("name").and_then(|n| n.as_str()).is_some() => {
+            extra["name"].as_str().unwrap_or_default().to_owned()
+        }
         (LayerKind::Text, Some(t)) => t.to_owned(),
         _ => numbered(stage, session, &folder, base),
     };

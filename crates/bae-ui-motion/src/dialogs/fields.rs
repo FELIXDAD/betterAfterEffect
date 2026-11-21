@@ -233,6 +233,42 @@ pub(crate) fn number(
     r
 }
 
+/// A dialog's name field. The first time it is drawn it takes the focus with
+/// its text selected, so typing replaces the default name (AE); `focused`
+/// remembers that this happened.
+pub(crate) fn name_field(
+    ui: &mut Ui,
+    id: Id,
+    name: &mut String,
+    width: f32,
+    label: &str,
+    focused: &mut bool,
+) -> Response {
+    let r = ui
+        .add(
+            TextEdit::singleline(name)
+                .id(id)
+                .desired_width(width)
+                .text_color(color::TEXT_STRONG),
+        )
+        .labeled(egui::WidgetType::TextEdit, label);
+    if !*focused {
+        r.request_focus();
+        if let Some(mut state) = TextEdit::load_state(ui.ctx(), r.id) {
+            let end = egui::text::CCursor::new(name.chars().count());
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    end,
+                )));
+            state.store(ui.ctx(), r.id);
+        }
+        *focused = true;
+    }
+    r
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

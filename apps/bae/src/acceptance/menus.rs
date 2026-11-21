@@ -22,6 +22,11 @@ const AE_ITEMS: &[(&str, Option<&str>, &str)] = &[
         Some("Cmd+K"),
         "合成设置",
     ),
+    (
+        "motion.layer.layer_settings",
+        Some("Cmd+Shift+Y"),
+        "图层设置",
+    ),
     // AE 26 shortens this item to “将合成裁剪到工作区”. BAE keeps the glossary
     // terms (issue #109): Work Area = 工作区域 (工作区 is Workspace), Trim = 修剪
     // (as in 将入点修剪到当前时间; 裁剪 is Crop).
@@ -202,6 +207,7 @@ fn menu_enabled_state_follows_the_selection() {
     // A selected layer: Arrange, Duplicate, Split; not the keyframe items.
     assert!(h.state_mut().menu("motion.layer.new.solid"));
     settle(&mut h);
+    confirm_dialog(&mut h);
     let layer = enabled(&h);
     for id in [
         "motion.edit.duplicate",
@@ -367,7 +373,7 @@ fn shortcuts_run_once_whichever_panel_has_focus() {
         focus_panel(&mut h, anchor, offset);
         let layers = h.state().layers().len();
         let dispatched = h.state().dispatched.len();
-        key(&mut h, Modifiers::COMMAND, Key::Y);
+        new_solid(&mut h);
         let new_layer_runs = h.state().dispatched[dispatched..]
             .iter()
             .filter(|i| i.id == "motion.new_layer")
@@ -945,7 +951,7 @@ fn undo_labels(h: &mut Ui) -> Vec<String> {
     };
     new_comp(h);
     step(h, "new comp");
-    key(h, Modifiers::COMMAND, Key::Y);
+    new_solid(h);
     step(h, "new solid");
     key(
         h,

@@ -64,6 +64,7 @@ fn every_layer_new_item_from_the_menu() {
         let before = h.state().layers();
         assert!(h.state_mut().menu(id), "{id} disabled with a comp open");
         settle(&mut h);
+        confirm_dialog(&mut h);
         let after = h.state().layers();
         assert_eq!(
             after.len(),
@@ -115,6 +116,8 @@ fn layer_shortcuts_follow_ae() {
     for (m, k, want) in cases {
         let before = h.state().layers();
         key(&mut h, m, k);
+        // Cmd+Y asks for Solid Settings first.
+        confirm_dialog(&mut h);
         let after = h.state().layers();
         assert_eq!(after.len(), before.len() + 1, "{m:?}+{k:?} ({want})");
         assert_eq!(kind(&h, &after[0]), want, "{m:?}+{k:?}");
@@ -568,7 +571,7 @@ fn lock_switch_with_undo_and_redo() {
     // A keyframe before locking.
     key(&mut h, Modifiers::ALT | Modifiers::SHIFT, Key::P);
     assert_eq!(position_keys(&h, &l), 1);
-    click_lock_switch(&mut h, "Solid 1");
+    click_lock_switch(&mut h, "Dark Gray Solid 1");
     assert!(is_locked(&h, &l), "the Lock switch did not lock");
     // Locked: Option+Shift+P does nothing, even with the layer forced into the selection.
     h.state().session().lock().selected_layers = vec![l.clone()];
@@ -591,7 +594,7 @@ fn lock_switch_with_undo_and_redo() {
     // across a lock; redo the lock again.
     key(&mut h, Modifiers::COMMAND, Key::Z);
     assert_eq!(position_keys(&h, &l), 1);
-    click_lock_switch(&mut h, "Solid 1");
+    click_lock_switch(&mut h, "Dark Gray Solid 1");
     assert!(is_locked(&h, &l));
     key(&mut h, Modifiers::COMMAND, Key::Z); // unlock
     key(&mut h, Modifiers::COMMAND, Key::Z); // first keyframe
@@ -603,7 +606,7 @@ fn lock_switch_with_undo_and_redo() {
         "redo did not restore key + lock"
     );
     // The switch unlocks it again.
-    click_lock_switch(&mut h, "Solid 1");
+    click_lock_switch(&mut h, "Dark Gray Solid 1");
     assert!(!is_locked(&h, &l), "the Lock switch did not unlock");
 }
 
@@ -820,7 +823,7 @@ fn locking_a_selected_layer_deselects_it() {
     comp_with(&mut h, &["motion.layer.new.solid"]);
     let l = h.state().layers()[0].clone();
     assert_eq!(h.state().selected_layers(), std::slice::from_ref(&l));
-    click_lock_switch(&mut h, "Solid 1");
+    click_lock_switch(&mut h, "Dark Gray Solid 1");
     assert!(is_locked(&h, &l));
     assert!(
         !h.state().selected_layers().contains(&l),
@@ -877,7 +880,7 @@ fn a_refused_edit_is_explained_in_the_status_bar() {
                            "value": {"type": "vec3", "value": [1.0, 2.0, 0.0]}}),
     ));
     settle(&mut h);
-    let notice = "Layer “Solid 1” is locked. Unlock it first.";
+    let notice = "Layer “Dark Gray Solid 1” is locked. Unlock it first.";
     assert!(
         find_text(&h, notice).is_some(),
         "no status bar notice: {:?}",
@@ -893,7 +896,7 @@ fn a_refused_edit_is_explained_in_the_status_bar() {
         export_before
     );
     // A successful change clears it.
-    key(&mut h, Modifiers::COMMAND, Key::Y);
+    new_solid(&mut h);
     assert!(
         find_text(&h, notice).is_none(),
         "the notice stayed after a change"

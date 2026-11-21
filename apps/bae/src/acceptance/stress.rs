@@ -54,9 +54,10 @@ fn deep_undo_stack_round_trips() {
 fn rapid_repeated_commands() {
     let mut h = gui();
     new_comp(&mut h);
-    // 100 Cmd+Y presses in a row: 100 solids, unique names.
+    // 100 Cmd+Y, Enter (Solid Settings, OK) in a row: 100 solids, unique names.
     for _ in 0..100 {
         press(&mut h, Modifiers::COMMAND, Key::Y);
+        press(&mut h, Modifiers::NONE, Key::Enter);
     }
     settle(&mut h);
     let names = h.state().layer_names();
@@ -108,8 +109,9 @@ fn rapid_repeated_commands() {
 fn frame_time_with_many_layers() {
     let mut h = gui();
     new_comp(&mut h);
+    // Adjustment layers: solid-sourced like solids, made without a dialog.
     for _ in 0..200 {
-        press(&mut h, Modifiers::COMMAND, Key::Y);
+        press(&mut h, Modifiers::COMMAND | Modifiers::ALT, Key::Y);
     }
     settle(&mut h);
     assert_eq!(h.state().layers().len(), 200);
@@ -129,9 +131,23 @@ fn key_presses_piled_up_in_one_frame() {
     // still runs once, against the project as the previous one left it.
     let mut h = gui();
     new_comp(&mut h);
+    // Five Cmd+Y in one frame: one Solid Settings dialog, OK makes one solid.
     let mut events = Vec::new();
     for _ in 0..5 {
         events.extend(key_events(Modifiers::COMMAND, Key::Y));
+    }
+    send_batch(&mut h, events);
+    settle(&mut h);
+    assert!(dialog_open(&h));
+    confirm_dialog(&mut h);
+    settle(&mut h);
+    assert_eq!(h.state().layer_names().len(), 1);
+    key(&mut h, Modifiers::COMMAND, Key::Z);
+    assert!(h.state().layer_names().is_empty());
+    // Layers made without a dialog: each press runs once.
+    let mut events = Vec::new();
+    for _ in 0..5 {
+        events.extend(key_events(Modifiers::COMMAND | Modifiers::ALT, Key::Y));
     }
     send_batch(&mut h, events);
     settle(&mut h);
@@ -140,7 +156,7 @@ fn key_presses_piled_up_in_one_frame() {
     let mut unique = names.clone();
     unique.sort();
     unique.dedup();
-    println!("five Cmd+Y in one frame: {names:?}");
+    println!("five Cmd+Alt+Y in one frame: {names:?}");
     assert_eq!(
         unique.len(),
         5,
@@ -152,21 +168,25 @@ fn key_presses_piled_up_in_one_frame() {
 fn same_frame_names_stay_unique_across_kinds_comps_and_renamed_layers() {
     let mut h = gui();
     new_comp(&mut h);
-    // A layer renamed to "Solid 7": new solids continue after it (AE: max + 1).
-    assert!(h.state_mut().menu("motion.layer.new.solid"));
+    // A layer renamed to "Adjustment Layer 7": new ones continue after it
+    // (AE: max + 1). (New Solid asks for Solid Settings, one at a time.)
+    assert!(h.state_mut().menu("motion.layer.new.adjustment"));
     settle(&mut h);
     let first = h.state().layers()[0].clone();
     h.state_mut().invoke(Invocation::with_params(
         "attr.set",
-        serde_json::json!({"path": first, "attr": "name", "value": {"type": "string", "value": "Solid 7"}}),
+        serde_json::json!({"path": first, "attr": "name", "value": {"type": "string", "value": "Adjustment Layer 7"}}),
     ));
     settle(&mut h);
     let mut events = Vec::new();
     for _ in 0..3 {
-        events.extend(key_events(Modifiers::COMMAND, Key::Y));
+        events.extend(key_events(Modifiers::COMMAND | Modifiers::ALT, Key::Y));
     }
     for _ in 0..2 {
-        events.extend(key_events(Modifiers::COMMAND | Modifiers::ALT, Key::Y));
+        events.extend(key_events(
+            Modifiers::COMMAND | Modifiers::ALT | Modifiers::SHIFT,
+            Key::Y,
+        ));
     }
     send_batch(&mut h, events);
     settle(&mut h);
@@ -175,12 +195,12 @@ fn same_frame_names_stay_unique_across_kinds_comps_and_renamed_layers() {
     assert_eq!(
         names,
         [
-            "Adjustment Layer 1",
-            "Adjustment Layer 2",
-            "Solid 10",
-            "Solid 7",
-            "Solid 8",
-            "Solid 9"
+            "Adjustment Layer 10",
+            "Adjustment Layer 7",
+            "Adjustment Layer 8",
+            "Adjustment Layer 9",
+            "Null 1",
+            "Null 2"
         ],
         "same-frame names"
     );

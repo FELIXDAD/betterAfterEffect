@@ -168,6 +168,8 @@ fn long_comp(h: &mut Ui) -> PrimPath {
     h.state().session().lock().open_comp(&comp);
     settle(h);
     assert!(h.state_mut().menu("motion.layer.new.solid"));
+    settle(h);
+    confirm_dialog(h);
     assert!(h.state_mut().menu("motion.layer.new.ellipse"));
     settle(h);
     comp
@@ -369,6 +371,7 @@ fn editing_while_rendering_and_several_items() {
     new_comp(&mut h);
     assert!(h.state_mut().menu("motion.layer.new.solid"));
     settle(&mut h);
+    confirm_dialog(&mut h);
     key(&mut h, Modifiers::COMMAND, Key::M);
     key(&mut h, Modifiers::COMMAND, Key::M);
     configure(
@@ -396,7 +399,7 @@ fn editing_while_rendering_and_several_items() {
     // outlast them, so they land while the worker renders its snapshot.
     let started = Instant::now();
     for _ in 0..5 {
-        key(&mut h, Modifiers::COMMAND, Key::Y);
+        new_solid(&mut h);
     }
     key(&mut h, Modifiers::COMMAND, Key::Z);
     let edits_took = started.elapsed();
@@ -539,7 +542,7 @@ fn full_disk_fails_cleanly() {
         println!("FULL DISK: {status:?}; files {files:?}");
         assert!(matches!(status, ItemStatus::Failed(_)), "{status:?}");
         // The app keeps working.
-        key(&mut h, Modifiers::COMMAND, Key::Y);
+        new_solid(&mut h);
     }));
     let _ = std::process::Command::new("hdiutil")
         .args(["detach", &dev])

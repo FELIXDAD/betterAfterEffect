@@ -47,8 +47,13 @@ pub mod ids {
     /// Composition > Composition Settings (Cmd/Ctrl+K): the active comp, or the
     /// comp selected in the focused Project panel.
     pub const COMP_SETTINGS: &str = "motion.comp.composition_settings";
-    /// Params `{"kind": "<layer kind>", "shape": "rect" | …}`.
+    /// Params `{"kind": "<layer kind>", "shape": "rect" | …}`. A solid opens
+    /// Solid Settings first.
     pub const NEW_LAYER: &str = "motion.new_layer";
+    /// Layer > Layer Settings (Cmd/Ctrl+Shift+Y): Solid Settings of the
+    /// selected solid / adjustment layer, or of the solid item selected in the
+    /// focused Project panel.
+    pub const LAYER_SETTINGS: &str = "motion.layer.layer_settings";
     /// Params `{"to": "forward" | "backward" | "front" | "back"}`.
     pub const ORDER: &str = "motion.order";
     pub const TRIM_COMP: &str = "motion.trim_comp";
@@ -97,6 +102,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::NEW_COMP, "New Composition"),
     (ids::COMP_SETTINGS, "Composition Settings"),
     (ids::NEW_LAYER, "New"),
+    (ids::LAYER_SETTINGS, "Layer Settings"),
     (ids::ORDER, "Bring Layer Forward"),
     (ids::TRIM_COMP, "Trim Comp to Work Area"),
     (ids::ADD_TO_RENDER_QUEUE, "Add to Render Queue"),
@@ -244,6 +250,7 @@ pub fn bindings() -> KeymapBindings {
         reveal("U", "animated", false),
         b("Cmd+N", ids::NEW_COMP),
         b("Cmd+K", ids::COMP_SETTINGS),
+        b("Cmd+Shift+Y", ids::LAYER_SETTINGS),
         b("Cmd+Shift+X", ids::TRIM_COMP),
         b("Cmd+M", ids::ADD_TO_RENDER_QUEUE),
         b("Shift+F3", ids::GRAPH_EDITOR),
@@ -286,6 +293,27 @@ pub(crate) fn settings_target(cx: &PanelContext<'_>, session: &SharedSession) ->
     s.active_comp
         .clone()
         .filter(|c| query::comp_info(cx.stage, c).is_some())
+}
+
+/// What Layer Settings edits: the solid item selected in the Project panel
+/// when that panel has focus, otherwise the one selected layer when it uses a
+/// solid (solid and adjustment layers).
+pub(crate) fn layer_settings_target(
+    stage: &bae_model::Stage,
+    session: &SharedSession,
+    project_focused: bool,
+) -> Option<PrimPath> {
+    let s = session.lock();
+    if project_focused
+        && let [item] = s.selected_items.as_slice()
+        && bae_motion::solid::solid_info(stage, item).is_some()
+    {
+        return Some(item.clone());
+    }
+    match s.selected_layers.as_slice() {
+        [layer] if bae_motion::solid::layer_solid(stage, layer).is_some() => Some(layer.clone()),
+        _ => None,
+    }
 }
 
 /// Selected layers, or the layers of the selected keyframes.
@@ -393,7 +421,19 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             if kind == LayerKind::Text {
                 extra["text"] = json!(bae_ui::tr("Text"));
             }
+            if kind == LayerKind::Solid {
+                // AE: Solid Settings first; OK creates the solid.
+                crate::dialogs::new_solid(cx, session);
+                return true;
+            }
             common::new_layer(cx, session, kind, extra);
+            return true;
+        }
+        ids::LAYER_SETTINGS => {
+            let project = cx.panel.kind() == "project";
+            if let Some(target) = layer_settings_target(cx.stage, session, project) {
+                crate::dialogs::solid_settings(cx, session, &target);
+            }
             return true;
         }
         _ => {}

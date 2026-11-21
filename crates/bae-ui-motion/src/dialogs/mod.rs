@@ -8,6 +8,7 @@
 mod comp_settings;
 pub(crate) mod fields;
 pub mod memory;
+mod solid_settings;
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -16,6 +17,7 @@ use bae_model::PrimPath;
 use bae_ui::PanelContext;
 
 pub use comp_settings::{CompSettings, CompSettingsMemory};
+pub use solid_settings::{SolidSettings, SolidSettingsMemory, Units};
 
 use crate::session::SharedSession;
 
@@ -25,6 +27,8 @@ pub enum Dialog {
     /// Composition > New Composition (Cmd/Ctrl+N) and Composition Settings
     /// (Cmd/Ctrl+K).
     CompSettings(Box<CompSettings>),
+    /// Layer > New > Solid (Cmd/Ctrl+Y) and Solid Settings (Cmd/Ctrl+Shift+Y).
+    SolidSettings(Box<SolidSettings>),
 }
 
 /// Open dialog and remembered values.
@@ -39,6 +43,8 @@ pub struct Dialogs {
     /// The file was looked for (on the first dialog: the config folder is
     /// known only after start-up).
     pub loaded: bool,
+    /// Color and options of the last new solid.
+    pub solid: SolidSettingsMemory,
 }
 
 /// The dialogs as an app resource (inserted by [`crate::MotionUiModule`]).
@@ -118,10 +124,40 @@ pub(crate) fn comp_settings(cx: &PanelContext<'_>, comp: &PrimPath) {
     }
 }
 
-/// English strings of Composition Settings (i18n completeness test).
+/// Open Solid Settings for a new solid in the active comp.
+pub(crate) fn new_solid(cx: &PanelContext<'_>, session: &SharedSession) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_some() {
+        return;
+    }
+    if let Some(s) = SolidSettings::new_solid(cx.stage, session, &d.solid) {
+        d.open = Some(Dialog::SolidSettings(Box::new(s)));
+    }
+}
+
+/// Open Solid Settings for a layer that uses a solid, or a solid item.
+pub(crate) fn solid_settings(cx: &PanelContext<'_>, session: &SharedSession, target: &PrimPath) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_some() {
+        return;
+    }
+    if let Some(s) = SolidSettings::edit(cx.stage, session, &d.solid, target) {
+        d.open = Some(Dialog::SolidSettings(Box::new(s)));
+    }
+}
+
+/// AE's initial New Solid color (tests).
 #[cfg(test)]
-pub(crate) fn comp_settings_strings() -> &'static [&'static str] {
-    comp_settings::STRINGS
+pub(crate) fn solid_settings_default_color() -> [f64; 4] {
+    solid_settings::DEFAULT_COLOR
+}
+
+/// English strings of the dialogs (i18n completeness test).
+#[cfg(test)]
+pub(crate) fn strings() -> Vec<&'static str> {
+    [comp_settings::STRINGS, solid_settings::STRINGS].concat()
 }
 
 /// Draws the open motion dialog (registered in `Registry<dyn DialogHost>`).
@@ -142,6 +178,7 @@ impl bae_ui::DialogHost for MotionDialogs {
         let session = crate::common::session(cx.resources);
         let keep = match &mut open {
             Dialog::CompSettings(d) => d.ui(ctx, cx, &session, &dialogs),
+            Dialog::SolidSettings(d) => d.ui(ctx, cx, &session, &dialogs),
         };
         let mut lock = dialogs.lock();
         if keep && lock.open.is_none() {

@@ -246,14 +246,15 @@ fn default_names_stay_unique_within_a_frame() {
         h.frame("composition", &mut viewer, Vec::new());
     }
     assert_eq!(query::comps(&h.stage).len(), 2);
-    let solid =
-        || Invocation::with_params(crate::actions::ids::NEW_LAYER, json!({"kind": "solid"}));
-    let solids = twice(&mut h, &mut viewer, solid());
-    assert_eq!(solids, ["Solid 1", "Solid 2"]);
+    // New Solid asks first too (Solid Settings); layers made directly still
+    // reserve their names within a frame.
+    let null = || Invocation::with_params(crate::actions::ids::NEW_LAYER, json!({"kind": "null"}));
+    let nulls = twice(&mut h, &mut viewer, null());
+    assert_eq!(nulls, ["Null 1", "Null 2"]);
     h.frame("composition", &mut viewer, Vec::new());
     // Reservations end once the items exist: the next one continues the count.
-    let next = h.action(&mut viewer, solid());
-    assert_eq!(next.invocations[0].params["name"], "Solid 3");
+    let next = h.action(&mut viewer, null());
+    assert_eq!(next.invocations[0].params["name"], "Null 3");
 }
 
 #[test]
@@ -599,7 +600,7 @@ fn menus_and_global_handler() {
         names,
         [
             "Text",
-            "Solid",
+            "Solid...",
             "Light",
             "Camera",
             "Null Object",
@@ -684,7 +685,10 @@ fn menus_and_global_handler() {
         };
         assert!(solid_item.is_enabled(&cx));
     }
+    // Layer ▸ New ▸ Solid... opens Solid Settings; OK creates the solid.
     run(&mut h, solid_item.invocation());
+    let ok = h.answer_dialog(egui::Key::Enter);
+    h.apply(ok);
     assert_eq!(query::comp_layers(&h.stage, &comp).len(), 1);
     let _ = &mut app;
 }
@@ -1197,11 +1201,136 @@ fn composition_settings_follows_the_project_panel_selection() {
 
 #[test]
 fn dialog_strings_have_chinese() {
-    let missing: Vec<_> = crate::dialogs::comp_settings_strings()
-        .iter()
+    let missing: Vec<_> = crate::dialogs::strings()
+        .into_iter()
         .filter(|s| {
-            !bae_ui::i18n::has_translation(s) && !crate::i18n::ZH.iter().any(|(en, _)| en == *s)
+            !bae_ui::i18n::has_translation(s) && !crate::i18n::ZH.iter().any(|(en, _)| en == s)
         })
         .collect();
     assert!(missing.is_empty(), "no Chinese for {missing:?}");
+}
+
+#[test]
+fn new_solid_dialog_and_solid_settings() {
+    use crate::dialogs::{Dialog, solid_settings_default_color};
+    let mut h = Harness::new();
+    let mut viewer = CompositionViewer::new(None);
+    let r = h.new_comp_requests(&mut viewer);
+    h.apply(r);
+    h.frame("composition", &mut viewer, Vec::new());
+    let comp = h.session().lock().active_comp.clone().expect("opened");
+    let solid =
+        || Invocation::with_params(crate::actions::ids::NEW_LAYER, json!({"kind": "solid"}));
+    // Cancel (Esc): nothing is created.
+    assert!(h.action(&mut viewer, solid()).invocations.is_empty());
+    assert!(h.answer_dialog(egui::Key::Escape).invocations.is_empty());
+    assert!(query::comp_layers(&h.stage, &comp).is_empty());
+    // AE's defaults: comp size, 17% gray, named after the color.
+    h.action(&mut viewer, solid());
+    {
+        let d = h.dialogs();
+        let mut d = d.lock();
+        let Some(Dialog::SolidSettings(s)) = d.open.as_mut() else {
+            panic!("Solid Settings is not open");
+        };
+        assert!(s.is_new());
+        assert_eq!(s.values.name, "Dark Gray Solid 1");
+        assert_eq!((s.values.width, s.values.height), (1920, 1080));
+        assert_eq!(s.values.color, solid_settings_default_color());
+        s.values.width = 640;
+        s.values.color = [1.0, 0.0, 0.0, 1.0];
+    }
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "layer.create");
+    h.apply(r);
+    h.frame("composition", &mut viewer, Vec::new());
+    let layer = query::comp_layers(&h.stage, &comp)[0].clone();
+    assert_eq!(
+        query::display_name_of(&h.stage, &layer),
+        "Dark Gray Solid 1"
+    );
+    let item = bae_motion::solid::layer_solid(&h.stage, &layer).unwrap();
+    let info = bae_motion::solid::solid_info(&h.stage, &item).unwrap();
+    assert_eq!((info.width, info.height), (640, 1080));
+    assert_eq!(info.color, [1.0, 0.0, 0.0, 1.0]);
+    assert_eq!(h.session().lock().selected_layers, vec![layer.clone()]);
+    // The next New Solid starts from the last color, named after it.
+    h.action(&mut viewer, solid());
+    {
+        let d = h.dialogs();
+        let d = d.lock();
+        let Some(Dialog::SolidSettings(s)) = d.open.as_ref() else {
+            panic!("Solid Settings is not open");
+        };
+        assert_eq!(s.values.color, [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(s.values.name, "Red Solid 1");
+    }
+    h.answer_dialog(egui::Key::Escape);
+    // Layer Settings (Cmd/Ctrl+Shift+Y) on the selected solid: nothing
+    // changed, no command; a change is one solid.set_settings.
+    let settings = || Invocation::new(crate::actions::ids::LAYER_SETTINGS);
+    h.action(&mut viewer, settings());
+    assert!(h.answer_dialog(egui::Key::Enter).invocations.is_empty());
+    h.action(&mut viewer, settings());
+    {
+        let d = h.dialogs();
+        let mut d = d.lock();
+        let Some(Dialog::SolidSettings(s)) = d.open.as_mut() else {
+            panic!("Solid Settings is not open");
+        };
+        assert!(!s.is_new());
+        assert_eq!(s.values.name, "Dark Gray Solid 1");
+        s.values.name = "Backdrop".into();
+        s.values.height = 200;
+    }
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "solid.set_settings");
+    assert_eq!(r.invocations[0].params["affect_all"], false);
+    h.apply(r);
+    let info = bae_motion::solid::solid_info(&h.stage, &item).unwrap();
+    assert_eq!((info.name.as_str(), info.height), ("Backdrop", 200));
+    assert_eq!(query::display_name_of(&h.stage, &layer), "Backdrop");
+    // One undo step.
+    h.stage.undo(&h.author).unwrap();
+    let info = bae_motion::solid::solid_info(&h.stage, &item).unwrap();
+    assert_eq!(
+        (info.name.as_str(), info.height),
+        ("Dark Gray Solid 1", 1080)
+    );
+    // A shape layer has no Solid Settings.
+    let r = h.action(
+        &mut viewer,
+        Invocation::with_params(
+            crate::actions::ids::NEW_LAYER,
+            json!({"kind": "shape", "shape": "rect"}),
+        ),
+    );
+    h.apply(r);
+    h.frame("composition", &mut viewer, Vec::new());
+    h.action(&mut viewer, settings());
+    assert!(!h.dialogs().is_open());
+}
+
+#[test]
+fn layer_settings_target_follows_focus_and_selection() {
+    let mut h = Harness::new();
+    let (_, solid, shape) = h.comp_with_layers();
+    let item = bae_motion::solid::layer_solid(&h.stage, &solid).unwrap();
+    let target = |h: &Harness, project: bool| {
+        crate::actions::layer_settings_target(&h.stage, &h.session(), project)
+    };
+    // The Project panel has focus with the solid item selected: the item
+    // (Solid Settings then changes every layer that uses it).
+    h.session().lock().selected_items = vec![item.clone()];
+    h.session().lock().selected_layers = vec![shape.clone()];
+    assert_eq!(target(&h, true), Some(item.clone()));
+    // Elsewhere: the one selected layer, when it uses a solid.
+    assert_eq!(target(&h, false), None);
+    h.session().lock().selected_layers = vec![solid.clone()];
+    assert_eq!(target(&h, false), Some(solid.clone()));
+    // Several layers: none (AE edits one layer's settings).
+    h.session().lock().selected_layers = vec![solid.clone(), shape];
+    assert_eq!(target(&h, false), None);
 }

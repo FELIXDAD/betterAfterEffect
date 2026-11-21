@@ -1022,3 +1022,158 @@ fn comp_settings_anchor_and_validation() {
         Some(Value::Time(Time(SEC)))
     );
 }
+
+#[test]
+fn solid_settings_edit_the_solid_and_keep_the_layer_centered() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let layer = fx.layer(
+        &comp,
+        "solid",
+        json!({"name": "Dark Gray Solid 1", "color": [0.2, 0.2, 0.2, 1.0], "pixel_aspect": 2.0}),
+    );
+    let item = bae_motion::solid::layer_solid(&fx.stage, &layer).unwrap();
+    let info = bae_motion::solid::solid_info(&fx.stage, &item).unwrap();
+    assert_eq!(
+        (info.width, info.height, info.pixel_aspect),
+        (1920, 1080, 2.0)
+    );
+    let out = fx.run(
+        "solid.set_settings",
+        json!({"target": layer, "name": "Red Solid 1", "width": 500, "height": 300,
+               "pixel_aspect": 1.0, "color": [1.0, 0.0, 0.0, 1.0]}),
+    );
+    // The only user: the item changes in place.
+    assert_eq!(out["solid"], json!(item));
+    let info = bae_motion::solid::solid_info(&fx.stage, &item).unwrap();
+    assert_eq!(info.name, "Red Solid 1");
+    assert_eq!(
+        (info.width, info.height, info.pixel_aspect),
+        (500, 300, 1.0)
+    );
+    assert_eq!(info.color, [1.0, 0.0, 0.0, 1.0]);
+    // The layer showed the solid's name and follows it; its anchor was at the
+    // center and stays there, so the solid stays centered in the comp.
+    assert_eq!(query::display_name_of(&fx.stage, &layer), "Red Solid 1");
+    assert_eq!(
+        fx.value(&layer, "transform:anchor_point"),
+        Some(Value::Vec3([250.0, 150.0, 0.0]))
+    );
+    // One undo step.
+    fx.stage.undo(&fx.author).unwrap();
+    let info = bae_motion::solid::solid_info(&fx.stage, &item).unwrap();
+    assert_eq!(
+        (info.name.as_str(), info.width),
+        ("Dark Gray Solid 1", 1920)
+    );
+    assert_eq!(
+        query::display_name_of(&fx.stage, &layer),
+        "Dark Gray Solid 1"
+    );
+    assert_eq!(
+        fx.value(&layer, "transform:anchor_point"),
+        Some(Value::Vec3([960.0, 540.0, 0.0]))
+    );
+}
+
+#[test]
+fn solid_settings_fork_or_affect_all_layers_that_use_the_solid() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let a = fx.layer(&comp, "solid", json!({"name": "Gray Solid 1"}));
+    let item = bae_motion::solid::layer_solid(&fx.stage, &a).unwrap();
+    let b = fx.layer(&comp, "solid", json!({"source": item}));
+    // A renamed layer keeps its own name.
+    fx.run(
+        "attr.set",
+        json!({"path": b, "attr": "name", "value": {"type": "string", "value": "BG"}}),
+    );
+    assert_eq!(bae_motion::solid::solid_users(&fx.stage, &item).len(), 2);
+    // Unchecked "Affect all layers that use this solid": A gets its own copy.
+    let out = fx.run(
+        "solid.set_settings",
+        json!({"target": a, "name": "Blue Solid 1", "color": [0.0, 0.0, 1.0, 1.0]}),
+    );
+    let copy = p(out["solid"].as_str().unwrap());
+    assert_ne!(copy, item);
+    assert_eq!(
+        bae_motion::solid::layer_solid(&fx.stage, &a),
+        Some(copy.clone())
+    );
+    assert_eq!(
+        bae_motion::solid::layer_solid(&fx.stage, &b),
+        Some(item.clone())
+    );
+    let shared = bae_motion::solid::solid_info(&fx.stage, &item).unwrap();
+    assert_eq!(shared.name, "Gray Solid 1");
+    let forked = bae_motion::solid::solid_info(&fx.stage, &copy).unwrap();
+    assert_eq!(
+        (forked.name.as_str(), forked.color),
+        ("Blue Solid 1", [0.0, 0.0, 1.0, 1.0])
+    );
+    assert_eq!((forked.width, forked.height), (shared.width, shared.height));
+    fx.stage.undo(&fx.author).unwrap();
+    assert!(!fx.stage.has_prim(&copy));
+    assert_eq!(
+        bae_motion::solid::layer_solid(&fx.stage, &a),
+        Some(item.clone())
+    );
+    // Checked: the shared solid changes for both layers.
+    fx.run(
+        "solid.set_settings",
+        json!({"target": a, "name": "Green Solid 1", "affect_all": true}),
+    );
+    assert_eq!(
+        bae_motion::solid::layer_solid(&fx.stage, &a),
+        Some(item.clone())
+    );
+    assert_eq!(query::display_name_of(&fx.stage, &item), "Green Solid 1");
+    assert_eq!(query::display_name_of(&fx.stage, &a), "Green Solid 1");
+    assert_eq!(query::display_name_of(&fx.stage, &b), "BG");
+    // The solid item itself (Project panel) always affects every layer.
+    let out = fx.run("solid.set_settings", json!({"target": item, "width": 100}));
+    assert_eq!(out["layers"].as_array().unwrap().len(), 2);
+    assert_eq!(out["solid"], json!(item));
+}
+
+#[test]
+fn solid_settings_validation() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let solid = fx.layer(&comp, "solid", json!({}));
+    let shape = fx.layer(&comp, "shape", json!({"shape": "rect"}));
+    let adjustment = fx.layer(&comp, "adjustment", json!({}));
+    assert!(
+        fx.try_run("solid.set_settings", json!({"target": shape}))
+            .is_err()
+    );
+    assert!(
+        fx.try_run("solid.set_settings", json!({"target": comp}))
+            .is_err()
+    );
+    for bad in [
+        json!({"name": "  "}),
+        json!({"width": 0}),
+        json!({"height": 30001}),
+        json!({"pixel_aspect": 0.0}),
+    ] {
+        let mut params = bad.clone();
+        params["target"] = json!(solid);
+        assert!(fx.try_run("solid.set_settings", params).is_err(), "{bad}");
+    }
+    // Adjustment layers use a solid too (AE: Solid Settings works on them).
+    assert!(
+        fx.try_run(
+            "solid.set_settings",
+            json!({"target": adjustment, "width": 640})
+        )
+        .is_ok()
+    );
+    assert!(
+        fx.try_run(
+            "layer.create",
+            json!({"comp": comp, "kind": "solid", "pixel_aspect": -1.0})
+        )
+        .is_err()
+    );
+}

@@ -24,6 +24,13 @@ fn has_layers(cx: &MenuContext<'_>) -> bool {
             .is_empty()
 }
 
+/// Layer Settings has a target: a selected layer that uses a solid, or a
+/// solid item selected in the Project panel.
+fn has_layer_settings(cx: &MenuContext<'_>) -> bool {
+    let session = common::session(cx.resources);
+    actions::layer_settings_target(cx.stage, &session, true).is_some()
+}
+
 fn has_keys(cx: &MenuContext<'_>) -> bool {
     has_comp(cx)
         && !common::session(cx.resources)
@@ -91,7 +98,7 @@ pub fn items() -> Vec<(&'static str, MenuItemSpec)> {
         ),
         // Layer ▸ New (AE order), then the shape presets.
         ("motion.layer.new.text", new_layer("Text", "text", 1)),
-        ("motion.layer.new.solid", new_layer("Solid", "solid", 2)),
+        ("motion.layer.new.solid", new_layer("Solid...", "solid", 2)),
         ("motion.layer.new.light", new_layer("Light", "light", 3)),
         ("motion.layer.new.camera", new_layer("Camera", "camera", 4)),
         ("motion.layer.new.null", new_layer("Null Object", "null", 5)),
@@ -118,6 +125,15 @@ pub fn items() -> Vec<(&'static str, MenuItemSpec)> {
                 .group(1)
                 .order(2)
                 .enabled_when(has_comp),
+        ),
+        // Layer ▸ Layer Settings (AE names it after the selected layer:
+        // Solid Settings…; the menu title is static for now).
+        (
+            "motion.layer.layer_settings",
+            item(&["Layer"], "Layer Settings...", ids::LAYER_SETTINGS)
+                .group(1)
+                .order(1)
+                .enabled_when(has_layer_settings),
         ),
         // Layer ▸ Arrange
         (

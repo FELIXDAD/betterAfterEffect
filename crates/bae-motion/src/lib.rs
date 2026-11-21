@@ -14,6 +14,7 @@
 //! | `comp.trim_to_work_area` | Composition > Trim Comp to Work Area |
 //! | `folder.create` | Project panel > New Folder |
 //! | `layer.create` | Layer > New > Shape / Text / Solid / Null / Camera / Light / Adjustment; drag an item into a comp |
+//! | `solid.set_settings` | Layer > Solid Settings (Cmd/Ctrl+Shift+Y); Solid Settings of a solid item |
 //! | `layer.reorder` | drag layers; Bring Forward / Send Backward (Cmd/Ctrl+] / [) |
 //! | `layer.duplicate` | Edit > Duplicate (Cmd/Ctrl+D) |
 //! | `layer.split` | Edit > Split Layer (Cmd/Ctrl+Shift+D) |
@@ -48,6 +49,7 @@ pub mod keys;
 pub mod layer;
 pub mod names;
 pub mod query;
+pub mod solid;
 mod util;
 
 use std::sync::Arc;
@@ -69,6 +71,7 @@ pub use layer::{
     CreateLayer, DeleteItems, DeleteLayers, DuplicateLayers, LayerOutput, LayersOutput,
     ReorderLayers, SetParent, ShapePreset, ShiftLayers, SplitLayers, TrimLayers,
 };
+pub use solid::{SetSolidSettings, SolidInfo, SolidOutput};
 
 /// Register every motion command.
 pub fn register_commands(r: &mut CommandRegistry) {
@@ -79,6 +82,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(TrimCompToWorkArea),
         r.register(CreateFolder),
         r.register(CreateLayer),
+        r.register(SetSolidSettings),
         r.register(ReorderLayers),
         r.register(DuplicateLayers),
         r.register(SplitLayers),

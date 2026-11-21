@@ -89,6 +89,9 @@ pub struct CreateLayerParams {
     /// Solid size in pixels (default the comp size).
     #[serde(default)]
     pub size: Option<[u32; 2]>,
+    /// Solid pixel aspect ratio (default the comp's).
+    #[serde(default)]
+    pub pixel_aspect: Option<f64>,
     /// Text layers: the text (default "Text").
     #[serde(default)]
     pub text: Option<String>,
@@ -238,6 +241,13 @@ impl Command for CreateLayer {
                 set(tx, &asset, "solid_color", Value::Color(color))?;
                 set(tx, &asset, "width", Value::Int(i64::from(sw)))?;
                 set(tx, &asset, "height", Value::Int(i64::from(sh)))?;
+                let par = p.pixel_aspect.unwrap_or(info.pixel_aspect);
+                if !(par.is_finite() && (0.01..=100.0).contains(&par)) {
+                    return Err(fail("pixel aspect ratio must be between 0.01 and 100"));
+                }
+                if par != 1.0 {
+                    set(tx, &asset, "pixel_aspect", Value::Float(par))?;
+                }
                 set(tx, &path, "source", Value::PrimRef(asset))?;
                 anchor = [f64::from(sw) / 2.0, f64::from(sh) / 2.0];
                 if kind == LayerKind::Adjustment {
