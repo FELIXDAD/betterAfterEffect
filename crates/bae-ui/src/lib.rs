@@ -130,9 +130,16 @@ impl AppModule for UiModule {
     }
 }
 
-/// English titles of the AE panels the default workspaces use, for placeholders.
+/// English title of a placeholder panel: the AE name when known, else the id.
 fn placeholder_title(kind: &str) -> String {
-    let known = [
+    known_panel_title(kind).map_or_else(|| kind.to_owned(), str::to_owned)
+}
+
+/// English titles of the AE panels the default workspaces and keymaps use. The
+/// shortcut editor also uses them for panels that are not registered (a binding
+/// such as Cmd+6 = Character), so it never shows a raw id (#136).
+pub(crate) fn known_panel_title(kind: &str) -> Option<&'static str> {
+    const KNOWN: [(&str, &str); 17] = [
         ("project", "Project"),
         ("composition", "Composition"),
         ("timeline", "Timeline"),
@@ -151,10 +158,10 @@ fn placeholder_title(kind: &str) -> String {
         ("agent_activity", "Agent Activity"),
         ("agent_proposals", "Proposals"),
     ];
-    known
+    KNOWN
         .iter()
         .find(|(k, _)| *k == kind)
-        .map_or_else(|| kind.to_owned(), |(_, title)| (*title).to_owned())
+        .map(|(_, title)| *title)
 }
 
 #[cfg(test)]

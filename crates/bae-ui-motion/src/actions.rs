@@ -86,6 +86,13 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::ORDER, "Bring Layer Forward"),
     (ids::TRIM_COMP, "Trim Comp to Work Area"),
     (ids::ADD_TO_RENDER_QUEUE, "Add to Render Queue"),
+    // Panel-scoped (`bindings`): handled by the timeline and the viewer. Registered
+    // so the Keyboard Shortcuts window shows a name, not the id (#136).
+    ("timeline.zoom_in", "Zoom In Time"),
+    ("timeline.zoom_out", "Zoom Out Time"),
+    ("viewer.zoom_in", "Zoom In"),
+    ("viewer.zoom_out", "Zoom Out"),
+    ("viewer.fit", "Fit"),
 ];
 
 /// AE shortcuts of the motion workspace, added to the shell's `ae` keymap.

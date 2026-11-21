@@ -60,6 +60,20 @@ pub fn register_panels(app: &mut bae_app::AppBuilder) {
     }
 }
 
+/// A row of the Keyboard Shortcuts window (tests).
+#[cfg(test)]
+#[derive(Clone, Debug)]
+pub struct ShortcutRow {
+    pub id: String,
+    pub params: serde_json::Value,
+    /// English command title.
+    pub title: String,
+    /// English title of the panel / workspace argument (or a raw id when unknown).
+    pub arg: Option<String>,
+    /// The title in the current language, as the window shows it.
+    pub shown: String,
+}
+
 /// The workbench plus shell-owned windows.
 pub struct Workspace {
     workbench: Workbench,
@@ -88,6 +102,27 @@ impl Workspace {
     /// Model commands listed in the shortcut editor.
     pub fn set_extra_commands(&mut self, commands: Vec<(String, String)>) {
         self.workbench.set_extra_commands(commands);
+    }
+
+    /// Every row of the Keyboard Shortcuts window: command id, parameters, the
+    /// English title parts (command, argument) and the title as shown now.
+    #[cfg(test)]
+    pub fn shortcut_rows(&self) -> Vec<ShortcutRow> {
+        self.workbench
+            .shortcut_commands()
+            .into_iter()
+            .map(|e| {
+                let (title, arg) = self.workbench.command_title_parts(&e.id, &e.params);
+                let shown = self.workbench.command_title(&e.id, &e.params);
+                ShortcutRow {
+                    id: e.id,
+                    params: e.params,
+                    title,
+                    arg,
+                    shown,
+                }
+            })
+            .collect()
     }
 
     /// The state to persist between sessions.

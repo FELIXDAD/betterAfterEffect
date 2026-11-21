@@ -351,13 +351,11 @@ impl AppMenu {
         if state == self.undo_state {
             return;
         }
-        let text = |base: &str, label: &Option<String>| match label {
-            Some(label) if !label.is_empty() => format!("{} {label}", tr(base)),
-            _ => tr(base).to_owned(),
-        };
-        self.undo.set_text(text("Undo", &state.0));
+        self.undo
+            .set_text(undo_redo_text("Undo", state.0.as_deref()));
         self.undo.set_enabled(state.0.is_some());
-        self.redo.set_text(text("Redo", &state.1));
+        self.redo
+            .set_text(undo_redo_text("Redo", state.1.as_deref()));
         self.redo.set_enabled(state.1.is_some());
         self.undo_state = state;
     }
@@ -547,6 +545,16 @@ fn about_metadata() -> AboutMetadata {
 #[allow(dead_code)]
 fn about_metadata() -> AboutMetadata {
     AboutMetadata::default()
+}
+
+/// "Undo New Layer" / "撤消 新建图层": the Edit menu's undo and redo items. `label` is
+/// the command's English title (what the stage records); both parts are translated
+/// (#136).
+pub(crate) fn undo_redo_text(base: &str, label: Option<&str>) -> String {
+    match label {
+        Some(label) if !label.is_empty() => format!("{} {}", tr(base), tr(label)),
+        _ => tr(base).to_owned(),
+    }
 }
 
 #[cfg(test)]

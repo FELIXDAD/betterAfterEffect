@@ -27,6 +27,8 @@ mod save_roundtrip;
 mod shell;
 mod startup;
 mod ui;
+#[cfg(test)]
+mod ui_text;
 mod view_state;
 
 use std::process::ExitCode;
@@ -34,6 +36,12 @@ use std::process::ExitCode;
 use bae_app::AppBuilder;
 
 fn main() -> ExitCode {
+    startup::run(app_builder().build())
+}
+
+/// Every module of the app, in order. Tests assemble the same app from it (so they
+/// see the same commands, panels and translation tables).
+fn app_builder() -> AppBuilder {
     let mut builder = AppBuilder::new();
     builder
         .add_module(bae_platform::PlatformModule)
@@ -65,5 +73,5 @@ fn main() -> ExitCode {
         tracing::warn!("text layer source not registered: {error}");
     }
     // Feature modules from other workstreams are added here.
-    startup::run(builder.build())
+    builder
 }

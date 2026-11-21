@@ -642,7 +642,7 @@ impl Panel for RenderQueuePanel {
         let mut q = queue.lock();
         if q.items.is_empty() {
             ui.weak(tr(
-                "Add a composition with Composition ▸ Add to Render Queue.",
+                "Add a composition with Composition > Add to Render Queue.",
             ));
             return;
         }

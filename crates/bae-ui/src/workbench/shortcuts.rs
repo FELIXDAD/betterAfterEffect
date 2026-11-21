@@ -72,6 +72,21 @@ impl Workbench {
 
     /// Display title of a command id with parameters, translated.
     pub fn command_title(&self, id: &str, params: &serde_json::Value) -> String {
+        let (base, arg) = self.command_title_parts(id, params);
+        match arg {
+            Some(arg) => format!("{}: {}", tr(&base), tr(&arg)),
+            None => tr(&base).to_owned(),
+        }
+    }
+
+    /// The English parts of [`Self::command_title`]: the command's title and, for
+    /// commands with a panel, workspace or preset argument, that argument's title
+    /// (unregistered AE panels by their AE name, never a raw id when known).
+    pub fn command_title_parts(
+        &self,
+        id: &str,
+        params: &serde_json::Value,
+    ) -> (String, Option<String>) {
         let base = self
             .actions
             .get(id)
@@ -83,28 +98,25 @@ impl Workbench {
                     .map(|(_, t)| t.clone())
             })
             .unwrap_or_else(|| id.to_owned());
-        let base = tr(&base).to_owned();
         let arg = params
             .get("id")
             .and_then(|v| v.as_str())
             .map(|arg| {
                 self.kinds
                     .get(arg)
-                    .map(|k| tr(&k.title).to_owned())
-                    .or_else(|| self.preset(arg).map(|p| tr(&p.title).to_owned()))
+                    .map(|k| k.title.clone())
+                    .or_else(|| self.preset(arg).map(|p| p.title.clone()))
+                    .or_else(|| crate::known_panel_title(arg).map(str::to_owned))
                     .unwrap_or_else(|| arg.to_owned())
             })
             .or_else(|| {
                 params.get("index").and_then(|v| v.as_u64()).map(|i| {
                     self.workspaces
                         .get(i as usize)
-                        .map_or_else(|| format!("#{}", i + 1), |(_, p)| tr(&p.title).to_owned())
+                        .map_or_else(|| format!("#{}", i + 1), |(_, p)| p.title.clone())
                 })
             });
-        match arg {
-            Some(arg) => format!("{base}: {arg}"),
-            None => base,
-        }
+        (base, arg)
     }
 
     /// Capture the next key press while recording; returns `true` if it consumed
@@ -236,7 +248,7 @@ impl Workbench {
             ui.colored_label(
                 color::ACCENT_HOVER,
                 format!(
-                    "{} {} → {}",
+                    "{} {} {}",
                     binding.chord.display(),
                     tr("is already used by"),
                     other

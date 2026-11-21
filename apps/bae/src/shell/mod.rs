@@ -22,6 +22,9 @@ mod menu;
 mod open_documents;
 mod window_state;
 
+#[cfg(test)]
+pub(crate) use menu::undo_redo_text;
+
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::{Duration, Instant};

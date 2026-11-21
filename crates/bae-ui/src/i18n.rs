@@ -78,6 +78,21 @@ pub fn has_translation(en: &str) -> bool {
     t.contains_key(en)
 }
 
+/// The Chinese for `en`, whatever the current language (`None` when there is none).
+/// For tests and tools that check translations without switching the global language.
+pub fn translation(en: &str) -> Option<&'static str> {
+    let t = tables().read().unwrap_or_else(|e| e.into_inner());
+    t.get(en).copied()
+}
+
+/// Every registered (English, Chinese) pair, sorted by the English key.
+pub fn all_pairs() -> Vec<(&'static str, &'static str)> {
+    let t = tables().read().unwrap_or_else(|e| e.into_inner());
+    let mut pairs: Vec<_> = t.iter().map(|(en, zh)| (*en, *zh)).collect();
+    pairs.sort_unstable();
+    pairs
+}
+
 /// Shorthand for [`tr`].
 #[macro_export]
 macro_rules! tr {
@@ -169,6 +184,9 @@ const ZH: &[(&str, &str)] = &[
     ("Accept All", "全部接受"),
     ("Reject All", "全部拒绝"),
     ("Accept", "接受"),
+    // Proposal commands (bae-agent), shown in Undo, History and Keyboard Shortcuts.
+    ("Accept Proposal", "接受提案"),
+    ("Reject Proposal", "拒绝提案"),
     ("Reject", "拒绝"),
     ("New", "新建"),
     ("Changed", "已修改"),

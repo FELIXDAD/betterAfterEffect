@@ -365,6 +365,25 @@ pub fn disclosure(ui: &mut Ui, open: &mut bool) -> Response {
     resp
 }
 
+/// A check mark drawn in `rect` (the same shape as [`checkbox`]'s). Used instead of
+/// `✓`, which egui's built-in fonts do not have (#135).
+pub fn paint_check(p: &egui::Painter, rect: Rect, color: Color32) {
+    let pts = vec![
+        rect.lerp_inside(vec2(0.2, 0.52)),
+        rect.lerp_inside(vec2(0.42, 0.74)),
+        rect.lerp_inside(vec2(0.8, 0.28)),
+    ];
+    icons::path(p, pts, false, Stroke::new(1.6, color));
+}
+
+/// A cross drawn in `rect`, the failure counterpart of [`paint_check`] (instead of `✗`).
+pub fn paint_cross(p: &egui::Painter, rect: Rect, color: Color32) {
+    let r = rect.shrink(rect.width() * 0.25);
+    let stroke = Stroke::new(1.6, color);
+    p.line_segment([r.left_top(), r.right_bottom()], stroke);
+    p.line_segment([r.right_top(), r.left_bottom()], stroke);
+}
+
 /// AE-style checkbox: outlined when off, filled with a dark check when on.
 pub fn checkbox(ui: &mut Ui, checked: &mut bool, label: &str) -> Response {
     let font = theme::body();

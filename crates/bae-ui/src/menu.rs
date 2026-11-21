@@ -271,8 +271,8 @@ pub fn build_menus(items: &RegistrySnapshot<MenuItemSpec>, active_workspace: &st
             .find(|(path, title, _)| *path == spec.path && *title == spec.title)
         {
             let message = format!(
-                "menu item `{id}` ({} ▸ {}) conflicts with `{winner}`; `{winner}` is used",
-                spec.path.join(" ▸ "),
+                "menu item `{id}` ({} > {}) conflicts with `{winner}`; `{winner}` is used",
+                spec.path.join(" > "),
                 spec.title
             );
             tracing::warn!("{message}");
