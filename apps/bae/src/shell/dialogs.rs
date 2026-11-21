@@ -117,6 +117,42 @@ impl FileDialogs for Native {
         }
     }
 
+    fn confirm_replace(&mut self, name: &str) -> bool {
+        let question = tr("“{}” already exists. Do you want to replace it?").replace("{}", name);
+        let detail = tr("The existing project is replaced. This cannot be undone.");
+        let dialog = self.message(rfd::MessageLevel::Warning);
+        #[cfg(target_os = "macos")]
+        {
+            let replace = tr("Replace").to_owned();
+            let result = dialog
+                .set_title(question.as_str())
+                .set_description(detail)
+                .set_buttons(rfd::MessageButtons::OkCancelCustom(
+                    replace.clone(),
+                    tr("Cancel").to_owned(),
+                ))
+                .show();
+            matches!(result, rfd::MessageDialogResult::Custom(c) if c == replace)
+        }
+        #[cfg(windows)]
+        {
+            let result = dialog
+                .set_title(bae_platform::APP_NAME)
+                .set_description(format!("{question}\n\n{detail}"))
+                .set_buttons(rfd::MessageButtons::YesNo)
+                .show();
+            result == rfd::MessageDialogResult::Yes
+        }
+    }
+
+    fn save_dialog_confirms_replace(&self) -> bool {
+        // In BAE.app, `.bae` is a package (Info.plist), so the save panel treats
+        // it as a file and asks before replacing; a bare binary does not.
+        cfg!(target_os = "macos")
+            && std::env::current_exe()
+                .is_ok_and(|exe| exe.to_string_lossy().contains(".app/Contents/MacOS/"))
+    }
+
     fn error(&mut self, message: &str) {
         tracing::error!("{message}");
         let (title, detail) = message.split_once("\n\n").unwrap_or((message, ""));
@@ -147,6 +183,10 @@ impl FileDialogs for Native {
 
     fn ask_unsaved(&mut self, name: &str) -> UnsavedChoice {
         NoDialogs.ask_unsaved(name)
+    }
+
+    fn confirm_replace(&mut self, name: &str) -> bool {
+        NoDialogs.confirm_replace(name)
     }
 
     fn error(&mut self, message: &str) {

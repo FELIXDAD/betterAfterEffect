@@ -242,6 +242,9 @@ impl FileDialogs for NoQuestions {
     fn ask_unsaved(&mut self, _: &str) -> UnsavedChoice {
         panic!("unexpected question")
     }
+    fn confirm_replace(&mut self, _: &str) -> bool {
+        panic!("unexpected replace question")
+    }
     fn error(&mut self, message: &str) {
         panic!("{message}")
     }

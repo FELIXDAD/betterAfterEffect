@@ -289,6 +289,65 @@ impl Document {
         self.write(path)
     }
 
+    /// Save As over another existing `.bae` project folder (issue #126): the
+    /// project is written to a temporary folder next to it first, then swapped
+    /// in; if anything fails, the existing project is left as it was. Files
+    /// embedded in a `.baez` the project came from are extracted with it.
+    pub fn save_as_replacing(&mut self, target: &Path) -> anyhow::Result<()> {
+        let context = || target.display().to_string();
+        let tmp = sibling(target, "saving");
+        let backup = sibling(target, "replaced");
+        let written = (|| -> anyhow::Result<()> {
+            let mut copy = self.detached_copy()?;
+            copy.save_as(&tmp)?;
+            if let Some(pkg) = self.assets.package() {
+                for entry in pkg.entries() {
+                    pkg.extract_entry(&entry.name, &tmp.join(native(&entry.name)))?;
+                }
+            }
+            Ok(())
+        })();
+        if let Err(error) = written {
+            let _ = fs::remove_dir_all(&tmp);
+            return Err(error.context(context()));
+        }
+        if let Err(error) = fs::rename(target, &backup) {
+            let _ = fs::remove_dir_all(&tmp);
+            return Err(anyhow::Error::new(error).context(context()));
+        }
+        if let Err(error) = fs::rename(&tmp, target) {
+            let _ = fs::rename(&backup, target);
+            let _ = fs::remove_dir_all(&tmp);
+            return Err(anyhow::Error::new(error).context(context()));
+        }
+        let _ = fs::remove_dir_all(&backup);
+        // The folder holds the project now; make it the location (rewrites the
+        // same project files in place, atomically per file).
+        self.project.save_as(target).with_context(context)?;
+        self.saved = SavePoint::of(&self.project.stage);
+        self.assets = AssetLocator::for_project(&self.project).with_context(context)?;
+        Ok(())
+    }
+
+    /// The project as an independent copy (same sublayers and manifest, no
+    /// location), for writing somewhere without touching the open one.
+    fn detached_copy(&self) -> anyhow::Result<Project> {
+        let stage = &self.project.stage;
+        let mut layers = Vec::with_capacity(stage.layer_stack().len());
+        for id in stage.layer_stack() {
+            let layer = stage
+                .sublayer(id)
+                .with_context(|| format!("sublayer {id} is missing"))?;
+            layers.push(bae_model::Sublayer::from_snapshot(
+                id.clone(),
+                &layer.export_snapshot()?,
+            )?);
+        }
+        let mut copy = Project::from_stage(Stage::from_sublayers(layers)?);
+        copy.manifest = self.project.manifest.clone();
+        Ok(copy)
+    }
+
     /// Serialize the project to `target`. Files embedded in the `.baez` the project
     /// came from stay reachable under the same `assets/…` names: they are copied
     /// into a `.baez` target and extracted into a `.bae` target (whose folder is
@@ -372,12 +431,21 @@ pub(crate) fn is_baez(path: &Path) -> bool {
 }
 
 /// Two paths name the same file or folder (symlinks and `..` resolved).
-fn same_path(a: &Path, b: &Path) -> bool {
+pub(crate) fn same_path(a: &Path, b: &Path) -> bool {
     a == b
         || matches!(
             (fs::canonicalize(a), fs::canonicalize(b)),
             (Ok(a), Ok(b)) if a == b
         )
+}
+
+/// A hidden sibling of `target` for temporary work (`.<name>.<what>-<pid>`).
+fn sibling(target: &Path, what: &str) -> PathBuf {
+    let name = target
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    target.with_file_name(format!(".{name}.{what}-{}", std::process::id()))
 }
 
 /// A `/`-separated entry name as a relative native path.

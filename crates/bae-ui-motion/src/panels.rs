@@ -303,7 +303,16 @@ impl Panel for EffectControlsPanel {
 #[derive(Default)]
 pub struct PreviewPanel;
 
+/// Content size the Preview panel needs (transport row with Loop, timecode).
+const PREVIEW_MIN_W: f32 = 210.0;
+const PREVIEW_MIN_H: f32 = 56.0;
+
 impl Panel for PreviewPanel {
+    fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
+        // The transport row and the timecode line below it, never cut off.
+        TabInfo::new(tr("Preview")).min_size(egui::vec2(PREVIEW_MIN_W, PREVIEW_MIN_H))
+    }
+
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
         let session = common::session(cx.resources);
         actions::handle(action, cx, &session)

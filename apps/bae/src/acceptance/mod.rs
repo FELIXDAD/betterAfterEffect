@@ -20,6 +20,7 @@
 
 mod files_flow;
 mod layers;
+mod layout;
 mod menus;
 mod render_queue;
 mod startup;
@@ -80,6 +81,10 @@ pub(crate) struct Script {
     /// Suggested names of the save dialogs.
     pub suggested: Vec<String>,
     pub errors: Vec<String>,
+    /// Answers to "replace the existing project?" (Save As onto one).
+    pub replace: VecDeque<bool>,
+    /// Project names that question was asked about.
+    pub asked_replace: Vec<String>,
     /// Dialogs that were shown with nothing scripted (a test bug or a surprise).
     pub unexpected: Vec<String>,
 }
@@ -105,6 +110,14 @@ impl FileDialogs for Script {
         self.answers.pop_front().unwrap_or_else(|| {
             self.unexpected.push(format!("unsaved question ({name})"));
             UnsavedChoice::Cancel
+        })
+    }
+
+    fn confirm_replace(&mut self, name: &str) -> bool {
+        self.asked_replace.push(name.to_owned());
+        self.replace.pop_front().unwrap_or_else(|| {
+            self.unexpected.push(format!("replace question ({name})"));
+            false
         })
     }
 
@@ -353,8 +366,13 @@ pub(crate) fn gui() -> Ui {
 }
 
 pub(crate) fn gui_with(gui: Gui) -> Ui {
+    gui_sized(gui, egui::vec2(SIZE[0], SIZE[1]))
+}
+
+/// A harness with a window client area of `size` logical points.
+pub(crate) fn gui_sized(gui: Gui, size: egui::Vec2) -> Ui {
     let mut h = Harness::builder()
-        .with_size(egui::vec2(SIZE[0], SIZE[1]))
+        .with_size(size)
         .with_max_steps(64)
         // A 60 Hz display: double-clicks and playback see real frame times.
         .with_step_dt(1.0 / 60.0)

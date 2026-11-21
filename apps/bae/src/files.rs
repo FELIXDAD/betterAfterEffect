@@ -33,6 +33,16 @@ pub trait FileDialogs {
     fn pick_save_path(&mut self, name: &str, dir: Option<&Path>) -> Option<PathBuf>;
     /// Ask whether to save the changes to project `name` before it is closed.
     fn ask_unsaved(&mut self, name: &str) -> UnsavedChoice;
+    /// Ask whether to replace the existing project `name` (Save As onto it).
+    /// `true` = replace.
+    fn confirm_replace(&mut self, name: &str) -> bool;
+    /// Whether the save dialog itself already asked before returning an existing
+    /// project's path (macOS app bundle: `.bae` is a package there, a file to the
+    /// save panel). Then [`confirm_replace`](Self::confirm_replace) is not asked
+    /// again.
+    fn save_dialog_confirms_replace(&self) -> bool {
+        false
+    }
     /// Tell the user something failed.
     fn error(&mut self, message: &str);
 }
@@ -57,6 +67,11 @@ impl FileDialogs for NoDialogs {
     fn ask_unsaved(&mut self, name: &str) -> UnsavedChoice {
         tracing::warn!("{name} has unsaved changes and no dialog can ask about them");
         UnsavedChoice::Cancel
+    }
+
+    fn confirm_replace(&mut self, name: &str) -> bool {
+        tracing::warn!("{name} exists and no dialog can ask to replace it; not saved");
+        false
     }
 
     fn error(&mut self, message: &str) {
@@ -263,11 +278,39 @@ pub fn save_as(doc: &mut Document, dialogs: &mut dyn FileDialogs) -> FileOutcome
         None => format!("{}.bae", tr("Untitled Project")),
     };
     let dir = location.as_deref().and_then(Path::parent);
-    let Some(path) = dialogs.pick_save_path(&name, dir) else {
+    let Some(picked) = dialogs.pick_save_path(&name, dir) else {
         return FileOutcome::Cancelled;
     };
-    let path = with_project_extension(path);
-    match doc.save_as(&path) {
+    let picked = with_project_extension(picked);
+    // Issue #126: a path inside an existing `.bae` project folder (Windows save
+    // dialogs walk into such folders) means that project — never a project
+    // nested in another.
+    let path = save_target(&picked);
+    let is_open_project = location
+        .as_deref()
+        .is_some_and(|l| crate::document::same_path(l, &path));
+    let result = if is_bae_project_dir(&path) && !is_open_project {
+        let native_asked = path == picked && dialogs.save_dialog_confirms_replace();
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if !native_asked && !dialogs.confirm_replace(&name) {
+            return FileOutcome::Cancelled;
+        }
+        doc.save_as_replacing(&path)
+    } else if is_foreign_folder(&path) {
+        dialogs.error(&format!(
+            "{}\n\n{}",
+            tr("Could not save the project."),
+            tr("“{file}” is a folder but not a BAE project. Choose another name.")
+                .replace("{file}", &path.display().to_string())
+        ));
+        return FileOutcome::Failed;
+    } else {
+        doc.save_as(&path)
+    };
+    match result {
         Ok(()) => {
             tracing::info!("saved {}", path.display());
             FileOutcome::Saved
@@ -277,6 +320,33 @@ pub fn save_as(doc: &mut Document, dialogs: &mut dyn FileDialogs) -> FileOutcome
             FileOutcome::Failed
         }
     }
+}
+
+/// Where Save As writes `picked`: the outermost `.bae` project folder it lies
+/// in, or `picked` itself.
+pub fn save_target(picked: &Path) -> PathBuf {
+    let mut chain: Vec<&Path> = picked.ancestors().collect();
+    chain.reverse(); // root first
+    chain
+        .into_iter()
+        .find(|p| is_bae_project_dir(p))
+        .unwrap_or(picked)
+        .to_owned()
+}
+
+/// A `.bae` folder holding a project.
+pub fn is_bae_project_dir(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("bae"))
+        && path.join("project.json").is_file()
+}
+
+/// A non-empty folder named like a project that is not one (writing there
+/// would mix the project into someone else's files).
+fn is_foreign_folder(path: &Path) -> bool {
+    path.is_dir()
+        && !is_bae_project_dir(path)
+        && std::fs::read_dir(path).is_ok_and(|mut d| d.next().is_some())
 }
 
 /// `MyFilm` → `MyFilm.bae`; `.bae` and `.baez` names are kept (the extension
@@ -322,6 +392,9 @@ mod tests {
         asked: Vec<String>,
         suggested: Vec<String>,
         errors: Vec<String>,
+        /// Answers to "replace the existing project?" and who was asked.
+        replace: VecDeque<bool>,
+        asked_replace: Vec<String>,
     }
 
     impl FileDialogs for Script {
@@ -337,6 +410,12 @@ mod tests {
             self.answers
                 .pop_front()
                 .expect("unexpected unsaved question")
+        }
+        fn confirm_replace(&mut self, name: &str) -> bool {
+            self.asked_replace.push(name.to_owned());
+            self.replace
+                .pop_front()
+                .expect("unexpected replace question")
         }
         fn error(&mut self, message: &str) {
             self.errors.push(message.to_owned());
@@ -510,6 +589,26 @@ mod tests {
         assert!(!confirm_discard(&mut doc, &mut NoDialogs));
         assert_eq!(open(&mut doc, &mut NoDialogs, None), FileOutcome::Cancelled);
         assert!(has(&doc, "/Comp1"));
+    }
+
+    /// Issue #126: paths inside an existing `.bae` project mean that project.
+    #[test]
+    fn save_targets_never_nest_projects() {
+        let dir = tempfile::tempdir().unwrap();
+        let outer = dir.path().join("outer.bae");
+        fs::create_dir_all(outer.join("sublayers")).unwrap();
+        fs::write(outer.join("project.json"), "{}").unwrap();
+        // The project folder itself, a project picked inside it, any path inside.
+        assert_eq!(save_target(&outer), outer);
+        assert_eq!(save_target(&outer.join("outer.bae")), outer);
+        assert_eq!(save_target(&outer.join("sublayers/x.bae")), outer);
+        // Elsewhere: unchanged. A `.bae` folder without project.json is not a project.
+        let plain = dir.path().join("new.bae");
+        assert_eq!(save_target(&plain), plain);
+        let fake = dir.path().join("fake.bae");
+        fs::create_dir(&fake).unwrap();
+        assert_eq!(save_target(&fake.join("a.bae")), fake.join("a.bae"));
+        assert!(is_bae_project_dir(&outer) && !is_bae_project_dir(&fake));
     }
 
     #[test]

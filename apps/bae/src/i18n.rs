@@ -45,6 +45,19 @@ const ZH: &[(&str, &str)] = &[
         "如果不保存，你的更改将会丢失。",
     ),
     ("Don't Save", "不保存"),
+    (
+        "“{}” already exists. Do you want to replace it?",
+        "“{}”已存在。要替换它吗？",
+    ),
+    (
+        "The existing project is replaced. This cannot be undone.",
+        "已有的项目会被替换，无法撤消。",
+    ),
+    ("Replace", "替换"),
+    (
+        "“{file}” is a folder but not a BAE project. Choose another name.",
+        "“{file}”是一个文件夹，但不是 BAE 项目。请换一个名字。",
+    ),
     ("Could not open the project.", "无法打开项目。"),
     // Why a project did not open (open_error)
     ("“{file}” does not exist.", "“{file}”不存在。"),
