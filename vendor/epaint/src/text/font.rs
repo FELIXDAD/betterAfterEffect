@@ -814,7 +814,7 @@ pub struct StyledMetrics {
 ///
 /// See also [`FontFace::ignore_character`].
 #[inline]
-fn invisible_char(c: char) -> bool {
+pub(crate) fn invisible_char(c: char) -> bool {
     if c == '\r' {
         // A character most vile and pernicious. Don't display it.
         return true;
@@ -854,6 +854,24 @@ fn invisible_char(c: char) -> bool {
             | '\u{206E}' // NATIONAL DIGIT SHAPES
             | '\u{206F}' // NOMINAL DIGIT SHAPES
             | '\u{FEFF}' // ZERO WIDTH NO-BREAK SPACE
+            // BAE: the rest of Unicode's Default_Ignorable_Code_Point, so text such
+            // as an emoji followed by VARIATION SELECTOR-16 draws no missing-glyph box
+            // (see BAE-PATCH.md).
+            | '\u{00AD}' // SOFT HYPHEN
+            | '\u{034F}' // COMBINING GRAPHEME JOINER
+            | '\u{061C}' // ARABIC LETTER MARK
+            | '\u{115F}' // HANGUL CHOSEONG FILLER
+            | '\u{1160}' // HANGUL JUNGSEONG FILLER
+            | '\u{17B4}' // KHMER VOWEL INHERENT AQ
+            | '\u{17B5}' // KHMER VOWEL INHERENT AA
+            | '\u{180B}'..='\u{180F}' // MONGOLIAN FREE VARIATION SELECTORS, VOWEL SEPARATOR
+            | '\u{3164}' // HANGUL FILLER
+            | '\u{FE00}'..='\u{FE0F}' // VARIATION SELECTORS
+            | '\u{FFA0}' // HALFWIDTH HANGUL FILLER
+            | '\u{FFF0}'..='\u{FFF8}' // unassigned specials
+            | '\u{1BCA0}'..='\u{1BCA3}' // SHORTHAND FORMAT CONTROLS
+            | '\u{1D173}'..='\u{1D17A}' // MUSICAL SYMBOL BEGIN BEAM .. END PHRASE
+            | '\u{E0000}'..='\u{E0FFF}' // TAGS, VARIATION SELECTORS SUPPLEMENT
     )
 }
 
