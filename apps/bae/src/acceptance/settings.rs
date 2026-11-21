@@ -57,10 +57,7 @@ fn cancel_keeps_the_stored_values() {
         serde_json::json!({"page": "project"}),
     ));
     settle(&mut h);
-    assert_eq!(
-        h.state_mut().workspace.settings_dialog().page(),
-        "project"
-    );
+    assert_eq!(h.state_mut().workspace.settings_dialog().page(), "project");
     h.get_by_label("Automatically Save Projects").click();
     settle(&mut h);
     h.get_by_label("Cancel").click();

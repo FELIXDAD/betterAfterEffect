@@ -1,5 +1,5 @@
 //! The Preferences dialog (AE: Edit > Preferences on Windows, After Effects >
-//! Settings on macOS): a movable modal window with the page list on the left and
+//! Settings… on macOS; the window is titled Preferences on both): a movable modal window with the page list on the left and
 //! the current page on the right, built from [`bae_prefs::schema`]. Edits go to a
 //! draft; OK hands it back to the host to store, Cancel drops it.
 //!
@@ -24,13 +24,11 @@ pub const SIZE: egui::Vec2 = vec2(760.0, 540.0);
 const LIST_W: f32 = 170.0;
 const BUTTONS_W: f32 = 80.0;
 
-/// Window title: "Settings" on macOS (AE 2026), "Preferences" elsewhere.
+/// Window title: "Preferences" on both platforms. On macOS the app menu item reads
+/// "Settings…" (the system renames AE's Preferences item since macOS 13), but the
+/// window keeps its title (`docs/reference/ae/mac/menus.md` §4).
 pub fn title() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "Settings"
-    } else {
-        "Preferences"
-    }
+    "Preferences"
 }
 
 /// Registers the `app.settings` action, one named variant per page (Keyboard

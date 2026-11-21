@@ -1,6 +1,6 @@
 # 首选项（macOS：设置）
 
-AE：Windows 上是 编辑 ▸ 首选项 ▸ 各页，macOS 上是 After Effects ▸ 设置 ▸ 各页（AE 2026 在 Mac 上叫"设置"）。BAE 的动作 id 是 `app.settings`，参数 `{"page": "<页面 id>"}`；Cmd+Option+; / Ctrl+Alt+; 打开"启动和修复"页。菜单入口由主菜单工作流（B）放，处理器在外壳里。
+AE：Windows 上是 编辑 ▸ 首选项 ▸ 各页，macOS 上是 After Effects ▸ 设置… ▸ 各页（macOS 13 起系统把 Preferences 菜单项显示成"设置…"），两个平台打开的窗口标题都是"首选项"（`docs/reference/ae/mac/menus.md` 第 4 节）。BAE 的动作 id 是 `app.settings`，参数 `{"page": "<页面 id>"}`；Cmd+Option+; / Ctrl+Alt+; 打开"启动和修复"页。菜单入口由主菜单工作流（B）放，处理器在外壳里。
 
 AE 26 把首选项改成 16 页（`docs/reference/ae/menus.json`，Mac 见 R2 的 `docs/reference/ae/mac/`），顺序和菜单里的分隔线：
 
