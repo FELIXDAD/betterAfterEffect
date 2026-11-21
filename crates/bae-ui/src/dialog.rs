@@ -161,7 +161,10 @@ pub fn buttons(ui: &mut Ui, ok_enabled: bool) -> Outcome {
 pub fn buttons_labeled(ui: &mut Ui, ok_enabled: bool, ok: &str, cancel: &str) -> Outcome {
     let mut out = Outcome::None;
     ui.add_space(4.0);
-    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+    // One row high: a right-to-left layout straight in a vertical one would
+    // take all the height the window offers and leave a gap above the row.
+    let row = vec2(ui.available_width(), 24.0);
+    ui.allocate_ui_with_layout(row, Layout::right_to_left(Align::Center), |ui| {
         // Right to left: the first button drawn is the rightmost.
         let mac = cfg!(target_os = "macos");
         let order: [bool; 2] = if mac { [true, false] } else { [false, true] };
