@@ -11,6 +11,7 @@
   "stats": {
     "menu_commands_total": 603,
     "menu_commands_assigned": 184,
+    "menu_commands_matched_in_menus": 398,
     "tool_actions_total": 130,
     "tool_actions_assigned": 58
   },
@@ -19,3619 +20,4222 @@
       "id": "about",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "帮助 > 关于 Illustrator..."
     },
     {
       "id": "Activate...",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "actualsize",
       "context": "global",
       "shortcut": "Ctrl+1",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 实际大小"
     },
     {
       "id": "Add Anchor Points2",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 路径 > 添加锚点"
     },
     {
       "id": "AddArrowHeads2",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Adjust Colors Dialog",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Adjust3",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 编辑颜色 > 调整色彩平衡..."
     },
     {
       "id": "Adobe Action Palette",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "窗口 > 动作"
     },
     {
       "id": "Adobe Actions Batch",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Adobe AI Device center",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Adobe AI Save For Web",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+S",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文件 > 导出 > 存储为 Web 所用格式（旧版）..."
     },
     {
       "id": "Adobe Apply Last Effect",
       "context": "global",
       "shortcut": "Ctrl+Shift+E",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "效果 > 应用上一个效果"
     },
     {
       "id": "Adobe Art Style Plugin Other libraries menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "窗口 > 图形样式库 > 其它库..."
     },
     {
       "id": "Adobe Bridge Browse",
       "context": "global",
       "shortcut": "Ctrl+Alt+O",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文件 > 在 Bridge 中浏览..."
     },
     {
       "id": "Adobe BrushManager Menu Item",
       "context": "global",
       "shortcut": "F5",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "窗口 > 画笔"
     },
     {
       "id": "Adobe Color Palette",
       "context": "global",
       "shortcut": "F6",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "窗口 > 颜色"
     },
     {
       "id": "Adobe Color Palette Secondary",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Adobe Default Workspace",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Adobe Flattening Preview",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "窗口 > 拼合器预览"
     },
     {
       "id": "Adobe Gradient Palette",
       "context": "global",
       "shortcut": "Ctrl+F9",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "窗口 > 渐变"
     },
     {
       "id": "Adobe Harmony Palette",
       "context": "global",
       "shortcut": "Shift+F3",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "窗口 > 颜色参考"
     },
     {
       "id": "Adobe Illustrator About Plug-ins2",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Adobe Illustrator Find Font Menu Item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 查找/替换字体..."
     },
     {
       "id": "Adobe Illustrator Smart Punctuation Menu Item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 智能标点..."
     },
     {
       "id": "Adobe Last Effect",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+E",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "效果 > 上一个效果"
     },
     {
       "id": "Adobe LinkPalette Menu Item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "窗口 > 链接"
     },
     {
       "id": "Adobe Manage Workspace",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "窗口 > 工作区 > 管理工作区..."
     },
     {
       "id": "Adobe Minimal Workspace",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Adobe New Fill Shortcut",
       "context": "global",
       "shortcut": "Ctrl+/",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "Adobe New Stroke Shortcut",
       "context": "global",
       "shortcut": "Ctrl+Alt+/",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "Adobe New Style Shortcut",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Adobe New Swatch Shortcut Menu",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Adobe New Symbol Shortcut",
       "context": "global",
       "shortcut": "F8",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "Adobe Optical Alignment Item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 视觉边距对齐方式"
     },
     {
       "id": "Adobe Paragraph Styles Palette",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "窗口 > 文字 > 段落样式"
     },
     {
       "id": "Adobe Save a Version",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Adobe Save Workspace",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Adobe Stroke Palette",
       "context": "global",
       "shortcut": "Ctrl+F10",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "窗口 > 描边"
     },
     {
       "id": "Adobe Style Palette",
       "context": "global",
       "shortcut": "Shift+F5",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "窗口 > 图形样式"
     },
     {
       "id": "Adobe SVG Interactivity Palette",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "窗口 > SVG 交互"
     },
     {
       "id": "Adobe Swatches Menu Item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "窗口 > 色板"
     },
     {
       "id": "Adobe Symbol Palette",
       "context": "global",
       "shortcut": "Ctrl+Shift+F11",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "窗口 > 符号"
     },
     {
       "id": "Adobe Symbol Palette Plugin Other libraries menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "窗口 > 符号库 > 其它库..."
     },
     {
       "id": "Adobe Transparency Palette Menu Item",
       "context": "global",
       "shortcut": "Ctrl+Shift+F10",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "窗口 > 透明度"
     },
     {
       "id": "Adobe Update Link Shortcut",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Adobe Variables Palette Menu Item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "窗口 > 变量"
     },
     {
       "id": "AdobeAlignObjects2",
       "context": "global",
       "shortcut": "Shift+F7",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "窗口 > 对齐"
     },
     {
       "id": "AdobeBrushMgr Other libraries menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "AdobeBuiltInToolbox1",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "AdobeCheatSheetMenu",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "AdobeLayerPalette1",
       "context": "global",
       "shortcut": "F7",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "窗口 > 图层"
     },
     {
       "id": "AdobeLayerPalette2",
       "context": "global",
       "shortcut": "Ctrl+L",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "AdobeLayerPalette3",
       "context": "global",
       "shortcut": "Ctrl+Alt+L",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "AdobeNavigator1",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "AdobeNavigator2",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "AdobePathfinderPalette1",
       "context": "global",
       "shortcut": "Ctrl+Shift+F9",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "窗口 > 路径查找器"
     },
     {
       "id": "AdobeSwatch_ Other libraries menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "窗口 > 色板库 > 其它库..."
     },
     {
       "id": "AdobeTransformObjects1",
       "context": "global",
       "shortcut": "Shift+F8",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "窗口 > 变换"
     },
     {
       "id": "AI Bounding Box Toggle",
       "context": "global",
       "shortcut": "Ctrl+Shift+B",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 隐藏定界框"
     },
     {
       "id": "AI Magic Wand",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "窗口 > 魔棒"
     },
     {
       "id": "AI Object Mosaic Plug-in3",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "AI Place",
       "context": "global",
       "shortcut": "Ctrl+Shift+P",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文件 > 置入..."
     },
     {
       "id": "AI Reset Bounding Box",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 变换 > 重置定界框"
     },
     {
       "id": "ai_browse_for_script",
       "context": "global",
       "shortcut": "Ctrl+F12",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文件 > 脚本 > 其它脚本..."
     },
     {
       "id": "AISlice Clip to Artboard",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 切片 > 剪切到画板"
     },
     {
       "id": "AISlice Combine",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 切片 > 组合切片"
     },
     {
       "id": "AISlice Create from Guides",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 切片 > 从参考线创建"
     },
     {
       "id": "AISlice Create from Selection",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 切片 > 从所选对象创建"
     },
     {
       "id": "AISlice Delete All Slices",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 切片 > 全部删除"
     },
     {
       "id": "AISlice Divide",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 切片 > 划分切片..."
     },
     {
       "id": "AISlice Duplicate",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 切片 > 复制切片"
     },
     {
       "id": "AISlice Feedback Menu",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "视图 > 显示切片"
     },
     {
       "id": "AISlice Lock Menu",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "视图 > 锁定切片"
     },
     {
       "id": "AISlice Make Slice",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 切片 > 建立"
     },
     {
       "id": "AISlice Release Slice",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 切片 > 释放"
     },
     {
       "id": "AISlice Slice Options",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 切片 > 切片选项..."
     },
     {
       "id": "alternate glyph palette plugin",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 字形"
     },
     {
       "id": "alternate glyph palette plugin 2",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "窗口 > 文字 > 字形"
     },
     {
       "id": "Appearance of Black 1",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "areatextoptions",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "arrangeicon",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "artboard",
       "context": "global",
       "shortcut": "Ctrl+Shift+H",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 显示画板"
     },
     {
       "id": "assignprofile",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 指定配置文件..."
     },
     {
       "id": "average",
       "context": "global",
       "shortcut": "Ctrl+Alt+J",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 路径 > 平均..."
     },
     {
       "id": "avgAndJoin",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+J",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "bringAllToFront",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Brush Strokes menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "选择 > 对象 > 画笔描边"
     },
     {
       "id": "cascade",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "窗口 > 排列 > 层叠"
     },
     {
       "id": "centerAlign",
       "context": "global",
       "shortcut": "Ctrl+Shift+C",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "Character Styles",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "窗口 > 文字 > 字符样式"
     },
     {
       "id": "Check Spelling",
       "context": "global",
       "shortcut": "Ctrl+I",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "编辑 > 拼写检查 > 拼写检查..."
     },
     {
       "id": "cleanup menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 路径 > 清理..."
     },
     {
       "id": "clear",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 清除"
     },
     {
       "id": "clearguide",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "视图 > 参考线 > 清除参考线"
     },
     {
       "id": "clearTrack",
       "context": "global",
       "shortcut": "Ctrl+Alt+Q",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "clearTypeScale",
       "context": "global",
       "shortcut": "Ctrl+Shift+X",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "Clipping Masks menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "选择 > 对象 > 剪切蒙版"
     },
     {
       "id": "close",
       "context": "global",
       "shortcut": "Ctrl+W",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文件 > 关闭"
     },
     {
       "id": "closeAll",
       "context": "global",
       "shortcut": "Ctrl+Alt+W",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文件 > 关闭全部"
     },
     {
       "id": "color",
       "context": "global",
       "shortcut": "Ctrl+Shift+K",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "编辑 > 颜色设置..."
     },
     {
       "id": "Colors3",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 编辑颜色 > 前后混合"
     },
     {
       "id": "Colors4",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 编辑颜色 > 水平混合"
     },
     {
       "id": "Colors5",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 编辑颜色 > 垂直混合"
     },
     {
       "id": "Colors6",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 编辑颜色 > 反相颜色"
     },
     {
       "id": "Colors7",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 编辑颜色 > 转换为灰度"
     },
     {
       "id": "Colors8",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 编辑颜色 > 转换为 CMYK"
     },
     {
       "id": "Colors9",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 编辑颜色 > 转换为 RGB"
     },
     {
       "id": "compoundPath",
       "context": "global",
       "shortcut": "Ctrl+8",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 复合路径 > 建立"
     },
     {
       "id": "control palette plugin",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Convert to Shape",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 形状 > 转换为形状"
     },
     {
       "id": "convertlegacyText",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 旧版文本 > 更新所有旧版文本"
     },
     {
       "id": "convertlegacyText1",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 旧版文本 > 更新所选的旧版文本"
     },
     {
       "id": "convertlegacyText2",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 旧版文本 > 隐藏副本"
     },
     {
       "id": "convertlegacyText3",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 旧版文本 > 删除副本"
     },
     {
       "id": "convertlegacyText4",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 旧版文本 > 选择副本"
     },
     {
       "id": "copy",
       "context": "global",
       "shortcut": "Ctrl+C",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "编辑 > 复制"
     },
     {
       "id": "copy2",
       "context": "global",
       "shortcut": "F3",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "Create Envelope Grid",
       "context": "global",
       "shortcut": "Ctrl+Alt+M",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 封套扭曲 > 用网格建立..."
     },
     {
       "id": "cut",
       "context": "global",
       "shortcut": "Ctrl+X",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "编辑 > 剪切"
     },
     {
       "id": "cut2",
       "context": "global",
       "shortcut": "F2",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "Deactivate...",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "debugPalette",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+F12",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "Define Pattern Menu Item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "deselectall",
       "context": "global",
       "shortcut": "Ctrl+Shift+A",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "选择 > 取消选择"
     },
     {
       "id": "Distort2",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "doc-color-cmyk",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文件 > 文档颜色模式 > CMYK 颜色"
     },
     {
       "id": "doc-color-rgb",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文件 > 文档颜色模式 > RGB 颜色"
     },
     {
       "id": "DocInfo1",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "窗口 > 文档信息"
     },
     {
       "id": "document",
       "context": "global",
       "shortcut": "Ctrl+Alt+P",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文件 > 文档设置..."
     },
     {
       "id": "DropShadow2",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Dynamic Text",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "edge",
       "context": "global",
       "shortcut": "Ctrl+H",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 显示边缘"
     },
     {
       "id": "Edit Custom Dictionary...",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 编辑自定词典..."
     },
     {
       "id": "Edit Envelope Contents",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 封套扭曲 > 编辑内容"
     },
     {
       "id": "editGraphData",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 图表 > 数据..."
     },
     {
       "id": "editMask",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 剪切蒙版 > 编辑内容"
     },
     {
       "id": "EditOriginal Menu Item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 编辑原稿"
     },
     {
       "id": "editview",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "视图 > 编辑视图..."
     },
     {
       "id": "enterFocus",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Envelope Options",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 封套扭曲 > 封套选项..."
     },
     {
       "id": "exitFocus",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Expand as Viewed",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Expand Envelope",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 封套扭曲 > 扩展"
     },
     {
       "id": "Expand Planet X",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 实时上色 > 扩展"
     },
     {
       "id": "Expand Shape",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 形状 > 扩展形状"
     },
     {
       "id": "Expand Tracing",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Expand3",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 扩展..."
     },
     {
       "id": "expandStyle",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 扩展外观"
     },
     {
       "id": "export",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文件 > 导出 > 导出为..."
     },
     {
       "id": "exportForScreens",
       "context": "global",
       "shortcut": "Ctrl+Alt+E",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文件 > 导出 > 导出为多种屏幕所用格式..."
     },
     {
       "id": "faceSizeDown",
       "context": "global",
       "shortcut": "Ctrl+Shift+,",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "faceSizeUp",
       "context": "global",
       "shortcut": "Ctrl+Shift+.",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "File Handling & Clipboard 1",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "File Info",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+I",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文件 > 文件信息..."
     },
     {
       "id": "Find and Replace",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 查找和替换..."
     },
     {
       "id": "Find Blending Mode menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "选择 > 相同 > 混合模式"
     },
     {
       "id": "Find Fill & Stroke menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "选择 > 相同 > 填色和描边"
     },
     {
       "id": "Find Fill Color menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "选择 > 相同 > 填充颜色"
     },
     {
       "id": "Find Link Block Series menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "选择 > 相同 > 链接块系列"
     },
     {
       "id": "Find Next",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 查找下一个"
     },
     {
       "id": "Find Opacity menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "选择 > 相同 > 不透明度"
     },
     {
       "id": "Find Reselect menu item",
       "context": "global",
       "shortcut": "Ctrl+6",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "选择 > 重新选择"
     },
     {
       "id": "Find Stroke Color menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "选择 > 相同 > 描边颜色"
     },
     {
       "id": "Find Stroke Weight menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "选择 > 相同 > 描边粗细"
     },
     {
       "id": "Find Style menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "选择 > 相同 > 图形样式"
     },
     {
       "id": "Find Symbol Instance menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "选择 > 相同 > 符号实例"
     },
     {
       "id": "fitall",
       "context": "global",
       "shortcut": "Ctrl+Alt+0",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 全部适合窗口大小"
     },
     {
       "id": "fitHeadline",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 适合标题"
     },
     {
       "id": "fitin",
       "context": "global",
       "shortcut": "Ctrl+0",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 画板适合窗口大小"
     },
     {
       "id": "Flash Text",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "FlattenTransparency1",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
-      "id": "Generate Modal File Menu\\",
+      "id": "Generate Modal File Menu ",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+G",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "Gradient Feedback",
       "context": "global",
       "shortcut": "Ctrl+Alt+G",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 隐藏渐变批注者"
     },
     {
       "id": "graphDesigns",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 图表 > 设计..."
     },
     {
       "id": "group",
       "context": "global",
       "shortcut": "Ctrl+G",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 编组"
     },
     {
       "id": "guidegridPref",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 首选项 > 参考线和网格..."
     },
     {
       "id": "helpcontent",
       "context": "global",
       "shortcut": "F1",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "帮助 > Illustrator 帮助..."
     },
     {
       "id": "helpcontent2",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "hide",
       "context": "global",
       "shortcut": "Ctrl+3",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 隐藏 > 所选对象"
     },
     {
       "id": "hide2",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+3",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "hideApp",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "hideOthers",
       "context": "global",
       "shortcut": "Ctrl+Alt+H",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "highlightFont",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+F",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "highlightFont2",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+M",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "hyphenPref",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 首选项 > 连字..."
     },
     {
       "id": "ink",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+Y",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 叠印预览"
     },
     {
       "id": "Input Text",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "internal palettes posing as plug-in menus-attributes",
       "context": "global",
       "shortcut": "Ctrl+F11",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "窗口 > 特性"
     },
     {
       "id": "internal palettes posing as plug-in menus-character",
       "context": "global",
       "shortcut": "Ctrl+T",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "窗口 > 文字 > 字符"
     },
     {
       "id": "internal palettes posing as plug-in menus-info",
       "context": "global",
       "shortcut": "Ctrl+F8",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "窗口 > 信息"
     },
     {
       "id": "internal palettes posing as plug-in menus-opentype",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+T",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "窗口 > 文字 > OpenType"
     },
     {
       "id": "internal palettes posing as plug-in menus-paragraph",
       "context": "global",
       "shortcut": "Ctrl+Alt+T",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "窗口 > 文字 > 段落"
     },
     {
       "id": "internal palettes posing as plug-in menus-tab",
       "context": "global",
       "shortcut": "Ctrl+Shift+T",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "窗口 > 文字 > 制表符"
     },
     {
       "id": "Inverse menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "选择 > 反向"
     },
     {
       "id": "join",
       "context": "global",
       "shortcut": "Ctrl+J",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 路径 > 连接"
     },
     {
       "id": "justify",
       "context": "global",
       "shortcut": "Ctrl+Shift+J",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "justifyAll",
       "context": "global",
       "shortcut": "Ctrl+Shift+F",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "justifyCenter",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "justifyRight",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "KBSC Menu Item",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+K",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "编辑 > 键盘快捷键..."
     },
     {
       "id": "keyboardPref",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 首选项 > 文字..."
     },
     {
       "id": "Knife Tool2",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 路径 > 分割下方对象"
     },
     {
       "id": "Last Filter",
       "context": "global",
       "shortcut": "Ctrl+Alt+E",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "leftAlign",
       "context": "global",
       "shortcut": "Ctrl+Shift+L",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "Live 3DExtrude",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 3D 和材质 > 3D（经典） > 凸出和斜角（经典）..."
     },
     {
       "id": "Live 3DRevolve",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 3D 和材质 > 3D（经典） > 绕转（经典）..."
     },
     {
       "id": "Live 3DRotate",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 3D 和材质 > 3D（经典） > 旋转（经典）..."
     },
     {
       "id": "Live AddArrowHeads2",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Live Color Dialog",
       "context": "global",
       "shortcut": "Shift+F4",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "Live Deform Arc",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 变形 > 弧形..."
     },
     {
       "id": "Live Deform Arc Lower",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 变形 > 下弧形..."
     },
     {
       "id": "Live Deform Arc Upper",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 变形 > 上弧形..."
     },
     {
       "id": "Live Deform Arch",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 变形 > 拱形..."
     },
     {
       "id": "Live Deform Bulge",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 变形 > 凸出..."
     },
     {
       "id": "Live Deform Fish",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 变形 > 鱼形..."
     },
     {
       "id": "Live Deform Fisheye",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 变形 > 鱼眼..."
     },
     {
       "id": "Live Deform Flag",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 变形 > 旗形..."
     },
     {
       "id": "Live Deform Inflate",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 变形 > 膨胀..."
     },
     {
       "id": "Live Deform Rise",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 变形 > 上升..."
     },
     {
       "id": "Live Deform Shell Lower",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 变形 > 凹壳..."
     },
     {
       "id": "Live Deform Shell Upper",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 变形 > 凸壳..."
     },
     {
       "id": "Live Deform Squeeze",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 变形 > 挤压..."
     },
     {
       "id": "Live Deform Twist",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 变形 > 扭转..."
     },
     {
       "id": "Live Deform Wave",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 变形 > 波形..."
     },
     {
       "id": "Live DropShadow2",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Live Ellipse",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 转换为形状 > 椭圆..."
     },
     {
       "id": "Live Feather",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 风格化 > 羽化..."
     },
     {
       "id": "Live Free Distort",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 扭曲和变换 > 自由扭曲..."
     },
     {
       "id": "Live Inner Glow",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 风格化 > 内发光..."
     },
     {
       "id": "Live Offset Path",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 路径 > 偏移路径..."
     },
     {
       "id": "Live Outer Glow",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 风格化 > 外发光..."
     },
     {
       "id": "Live Outline Object",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 路径 > 轮廓化对象"
     },
     {
       "id": "Live Outline Stroke",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 路径 > 轮廓化描边"
     },
     {
       "id": "Live Pathfinder Add",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 路径查找器 > 相加"
     },
     {
       "id": "Live Pathfinder Crop",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 路径查找器 > 裁剪"
     },
     {
       "id": "Live Pathfinder Divide",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 路径查找器 > 分割"
     },
     {
       "id": "Live Pathfinder Exclude",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 路径查找器 > 差集"
     },
     {
       "id": "Live Pathfinder Hard Mix",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 路径查找器 > 实色混合"
     },
     {
       "id": "Live Pathfinder Intersect",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 路径查找器 > 交集"
     },
     {
       "id": "Live Pathfinder Merge",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 路径查找器 > 合并"
     },
     {
       "id": "Live Pathfinder Minus Back",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 路径查找器 > 减去后方对象"
     },
     {
       "id": "Live Pathfinder Outline",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 路径查找器 > 轮廓"
     },
     {
       "id": "Live Pathfinder Soft Mix",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 路径查找器 > 透明混合..."
     },
     {
       "id": "Live Pathfinder Subtract",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 路径查找器 > 相减"
     },
     {
       "id": "Live Pathfinder Trap",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 路径查找器 > 陷印..."
     },
     {
       "id": "Live Pathfinder Trim",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 路径查找器 > 修边"
     },
     {
       "id": "Live PSAdapter_plugin_AccE",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 画笔描边 > 强化的边缘..."
     },
     {
       "id": "Live PSAdapter_plugin_AngS",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 画笔描边 > 成角的线条..."
     },
     {
       "id": "Live PSAdapter_plugin_BsRl",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 素描 > 基底凸现..."
     },
     {
       "id": "Live PSAdapter_plugin_ChlC",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 素描 > 粉笔和炭笔..."
     },
     {
       "id": "Live PSAdapter_plugin_Chrc",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 素描 > 炭笔..."
     },
     {
       "id": "Live PSAdapter_plugin_Chrm",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 素描 > 铬黄..."
     },
     {
       "id": "Live PSAdapter_plugin_ClrH",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 像素化 > 彩色半调..."
     },
     {
       "id": "Live PSAdapter_plugin_ClrP",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 艺术效果 > 彩色铅笔..."
     },
     {
       "id": "Live PSAdapter_plugin_CntC",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 素描 > 炭精笔..."
     },
     {
       "id": "Live PSAdapter_plugin_Crql",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 纹理 > 龟裂缝..."
     },
     {
       "id": "Live PSAdapter_plugin_Crsh",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 画笔描边 > 阴影线..."
     },
     {
       "id": "Live PSAdapter_plugin_Crst",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 像素化 > 晶格化..."
     },
     {
-      "id": "Live PSAdapter_plugin_Ct \\",
+      "id": "Live PSAdapter_plugin_Ct  ",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 艺术效果 > 木刻..."
     },
     {
       "id": "Live PSAdapter_plugin_DfsG",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 扭曲 > 扩散亮光..."
     },
     {
       "id": "Live PSAdapter_plugin_Dntr",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 视频 > 逐行..."
     },
     {
       "id": "Live PSAdapter_plugin_DrkS",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 画笔描边 > 深色线条..."
     },
     {
       "id": "Live PSAdapter_plugin_DryB",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 艺术效果 > 干画笔..."
     },
     {
       "id": "Live PSAdapter_plugin_FlmG",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 艺术效果 > 胶片颗粒..."
     },
     {
       "id": "Live PSAdapter_plugin_Frsc",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 艺术效果 > 壁画..."
     },
     {
       "id": "Live PSAdapter_plugin_GblR",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Live PSAdapter_plugin_GEfc",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 效果画廊..."
     },
     {
-      "id": "Live PSAdapter_plugin_Gls\\",
+      "id": "Live PSAdapter_plugin_Gls ",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 扭曲 > 玻璃..."
     },
     {
       "id": "Live PSAdapter_plugin_GlwE",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 风格化 > 照亮边缘..."
     },
     {
       "id": "Live PSAdapter_plugin_GraP",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 素描 > 绘图笔..."
     },
     {
-      "id": "Live PSAdapter_plugin_Grn\\",
+      "id": "Live PSAdapter_plugin_Grn ",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 纹理 > 颗粒..."
     },
     {
       "id": "Live PSAdapter_plugin_HlfS",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 素描 > 半调图案..."
     },
     {
       "id": "Live PSAdapter_plugin_InkO",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 画笔描边 > 墨水轮廓..."
     },
     {
       "id": "Live PSAdapter_plugin_MscT",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 纹理 > 马赛克拼贴..."
     },
     {
       "id": "Live PSAdapter_plugin_Mztn",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 像素化 > 铜版雕刻..."
     },
     {
       "id": "Live PSAdapter_plugin_NGlw",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 艺术效果 > 霓虹灯光..."
     },
     {
       "id": "Live PSAdapter_plugin_NtPr",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 素描 > 便条纸..."
     },
     {
       "id": "Live PSAdapter_plugin_NTSC",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 视频 > NTSC 颜色"
     },
     {
       "id": "Live PSAdapter_plugin_OcnR",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 扭曲 > 海洋波纹..."
     },
     {
       "id": "Live PSAdapter_plugin_Phtc",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 素描 > 影印..."
     },
     {
       "id": "Live PSAdapter_plugin_Plst",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 素描 > 石膏效果..."
     },
     {
       "id": "Live PSAdapter_plugin_PlsW",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 艺术效果 > 塑料包装..."
     },
     {
       "id": "Live PSAdapter_plugin_PltK",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 艺术效果 > 调色刀..."
     },
     {
       "id": "Live PSAdapter_plugin_PntD",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 艺术效果 > 绘画涂抹..."
     },
     {
       "id": "Live PSAdapter_plugin_Pntl",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 像素化 > 点状化..."
     },
     {
       "id": "Live PSAdapter_plugin_PstE",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 艺术效果 > 海报边缘..."
     },
     {
       "id": "Live PSAdapter_plugin_Ptch",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 纹理 > 拼缀图..."
     },
     {
       "id": "Live PSAdapter_plugin_RdlB",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 模糊 > 径向模糊..."
     },
     {
       "id": "Live PSAdapter_plugin_RghP",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 艺术效果 > 粗糙蜡笔..."
     },
     {
       "id": "Live PSAdapter_plugin_Rtcl",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 素描 > 网状..."
     },
     {
       "id": "Live PSAdapter_plugin_SmdS",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 艺术效果 > 涂抹棒..."
     },
     {
       "id": "Live PSAdapter_plugin_Smie",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 画笔描边 > 烟灰墨..."
     },
     {
       "id": "Live PSAdapter_plugin_SmrB",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 模糊 > 特殊模糊..."
     },
     {
       "id": "Live PSAdapter_plugin_Spng",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 艺术效果 > 海绵..."
     },
     {
       "id": "Live PSAdapter_plugin_SprS",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 画笔描边 > 喷色描边..."
     },
     {
-      "id": "Live PSAdapter_plugin_Spt\\",
+      "id": "Live PSAdapter_plugin_Spt ",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 画笔描边 > 喷溅..."
     },
     {
       "id": "Live PSAdapter_plugin_Stmp",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 素描 > 图章..."
     },
     {
       "id": "Live PSAdapter_plugin_StnG",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 纹理 > 染色玻璃..."
     },
     {
       "id": "Live PSAdapter_plugin_TrnE",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 素描 > 撕边..."
     },
     {
       "id": "Live PSAdapter_plugin_Txtz",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 纹理 > 纹理化..."
     },
     {
       "id": "Live PSAdapter_plugin_Undr",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 艺术效果 > 底纹效果..."
     },
     {
       "id": "Live PSAdapter_plugin_USMk",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Live PSAdapter_plugin_Wtrc",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 艺术效果 > 水彩..."
     },
     {
       "id": "Live PSAdapter_plugin_WtrP",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 素描 > 水彩画纸..."
     },
     {
       "id": "Live Pucker & Bloat",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 扭曲和变换 > 收缩和膨胀..."
     },
     {
       "id": "Live Rasterize",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 栅格化..."
     },
     {
       "id": "Live Rasterize Effect Setting",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 文档栅格效果设置..."
     },
     {
       "id": "Live Rectangle",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 转换为形状 > 矩形..."
     },
     {
       "id": "Live Roughen",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 扭曲和变换 > 粗糙化..."
     },
     {
       "id": "Live Round3",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Live Rounded Rectangle",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 转换为形状 > 圆角矩形..."
     },
     {
       "id": "Live Scribble and Tweak",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 扭曲和变换 > 扭拧..."
     },
     {
       "id": "Live Scribble Fill",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 风格化 > 涂抹..."
     },
     {
       "id": "Live Transform",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 扭曲和变换 > 变换..."
     },
     {
       "id": "Live Twist",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 扭曲和变换 > 扭转..."
     },
     {
       "id": "Live Zig Zag",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "效果 > 扭曲和变换 > 波纹效果..."
     },
     {
       "id": "lock",
       "context": "global",
       "shortcut": "Ctrl+2",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 锁定 > 所选对象"
     },
     {
       "id": "lock2",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+2",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "lockguide",
       "context": "global",
       "shortcut": "Ctrl+Alt+;",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 参考线 > 锁定参考线"
     },
     {
       "id": "LowerCase Change Case Item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 更改大小写 > 小写"
     },
     {
       "id": "Make and Convert to Live Paint",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Make and Expand",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Make Envelope",
       "context": "global",
       "shortcut": "Ctrl+Alt+C",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 封套扭曲 > 用顶层对象建立"
     },
     {
       "id": "make mesh",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 创建渐变网格..."
     },
     {
       "id": "Make Planet X",
       "context": "global",
       "shortcut": "Ctrl+Alt+X",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 实时上色 > 建立"
     },
     {
       "id": "Make Text Wrap",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 文本绕排 > 建立"
     },
     {
       "id": "Make Tracing",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Make Warp",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+W",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 封套扭曲 > 用变形建立..."
     },
     {
       "id": "makeguide",
       "context": "global",
       "shortcut": "Ctrl+5",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 参考线 > 建立参考线"
     },
     {
       "id": "makeMask",
       "context": "global",
       "shortcut": "Ctrl+7",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 剪切蒙版 > 建立"
     },
     {
       "id": "Marge Planet X",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 实时上色 > 合并"
     },
     {
       "id": "minimizeWindow",
       "context": "global",
       "shortcut": "Ctrl+M",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "navigateToNextDocument",
       "context": "global",
       "shortcut": "Ctrl+F6",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "navigateToNextDocumentGroup",
       "context": "global",
       "shortcut": "Ctrl+Alt+F6",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "navigateToPreviousDocument",
       "context": "global",
       "shortcut": "Ctrl+Shift+F6",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "navigateToPreviousDocumentGroup",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+F6",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "new",
       "context": "global",
       "shortcut": "Ctrl+N",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文件 > 新建..."
     },
     {
       "id": "new2",
       "context": "global",
       "shortcut": "Ctrl+Alt+N",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "newFromTemplate",
       "context": "global",
       "shortcut": "Ctrl+Shift+N",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文件 > 从模板新建..."
     },
     {
       "id": "newview",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "视图 > 新建视图..."
     },
     {
       "id": "newwindow",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "窗口 > 新建窗口"
     },
     {
       "id": "noCompoundPath",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+8",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 复合路径 > 释放"
     },
     {
       "id": "OffsetPath v22",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 路径 > 轮廓化描边"
     },
     {
       "id": "OffsetPath v23",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 路径 > 偏移路径..."
     },
     {
       "id": "open",
       "context": "global",
       "shortcut": "Ctrl+O",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文件 > 打开..."
     },
     {
       "id": "OpenGLCompositorPreview",
       "context": "global",
       "shortcut": "Ctrl+E",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 使用 GPU 查看"
     },
     {
       "id": "outline",
       "context": "global",
       "shortcut": "Ctrl+Shift+O",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文字 > 创建轮廓"
     },
     {
       "id": "Overprint2",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 编辑颜色 > 叠印黑色..."
     },
     {
       "id": "pagetiling",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "视图 > 显示打印拼贴"
     },
     {
       "id": "Paint Tracing",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "paste",
       "context": "global",
       "shortcut": "Ctrl+V",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "编辑 > 粘贴"
     },
     {
       "id": "paste2",
       "context": "global",
       "shortcut": "F4",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "pasteBack",
       "context": "global",
       "shortcut": "Ctrl+B",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "编辑 > 贴在后面"
     },
     {
       "id": "pasteFront",
       "context": "global",
       "shortcut": "Ctrl+F",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "编辑 > 贴在前面"
     },
     {
       "id": "pasteInAllArtboard",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+V",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "编辑 > 在所有画板上粘贴"
     },
     {
       "id": "pasteInPlace",
       "context": "global",
       "shortcut": "Ctrl+Shift+V",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "编辑 > 就地粘贴"
     },
     {
       "id": "pasteWithoutFormatting",
       "context": "global",
       "shortcut": "Ctrl+Alt+V",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "编辑 > 粘贴时不包含格式"
     },
     {
       "id": "Path Blend Expand",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 混合 > 扩展"
     },
     {
       "id": "Path Blend Make",
       "context": "global",
       "shortcut": "Ctrl+Alt+B",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 混合 > 建立"
     },
     {
       "id": "Path Blend Options",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 混合 > 混合选项..."
     },
     {
       "id": "Path Blend Release",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+B",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 混合 > 释放"
     },
     {
       "id": "Path Blend Replace Spine",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 混合 > 替换混合轴"
     },
     {
       "id": "Path Blend Reverse Spine",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 混合 > 反向混合轴"
     },
     {
       "id": "Path Blend Reverse Stack",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 混合 > 反向堆叠"
     },
     {
       "id": "PDF Presets",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > Adobe PDF 预设..."
     },
     {
       "id": "Planet X Options",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 实时上色 > 间隙选项..."
     },
     {
       "id": "pluginPref",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 首选项 > 增效工具和暂存盘..."
     },
     {
       "id": "preference",
       "context": "global",
       "shortcut": "Ctrl+K",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "编辑 > 首选项 > 常规..."
     },
     {
       "id": "preview",
       "context": "global",
       "shortcut": "Ctrl+Y",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 预览"
     },
     {
       "id": "Print",
       "context": "global",
       "shortcut": "Ctrl+P",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文件 > 打印..."
     },
     {
       "id": "Print Presets",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 打印预设..."
     },
     {
       "id": "proof-custom",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "视图 > 校样设置 > 自定..."
     },
     {
       "id": "proof-document",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "视图 > 校样设置 > 文档 CMYK(D):"
     },
     {
       "id": "proof-mac-rgb",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "视图 > 校样设置 > 旧版 Macintosh RGB（灰度系数 1.8）"
     },
     {
       "id": "proof-monitor-rgb",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "视图 > 校样设置 > 显示器 RGB"
     },
     {
       "id": "proof-win-rgb",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "视图 > 校样设置 > Internet 标准 RGB (sRGB)"
     },
     {
       "id": "proofColors",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "视图 > 校样颜色"
     },
     {
       "id": "PSAdapter_plugin_AccE",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_AngS",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_BsRl",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_ChlC",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_Chrc",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_Chrm",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_ClrH",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_ClrP",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_CntC",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_Crql",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_Crsh",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_Crst",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
-      "id": "PSAdapter_plugin_Ct \\",
+      "id": "PSAdapter_plugin_Ct  ",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_DfsG",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_Dntr",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_DrkS",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_DryB",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_FlmG",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_Frsc",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_GblR",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_GEfc",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
-      "id": "PSAdapter_plugin_Gls\\",
+      "id": "PSAdapter_plugin_Gls ",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_GlwE",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_GraP",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
-      "id": "PSAdapter_plugin_Grn\\",
+      "id": "PSAdapter_plugin_Grn ",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_HlfS",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_InkO",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_MscT",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_Mztn",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_NGlw",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_NtPr",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_NTSC",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_OcnR",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_Phtc",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_Plst",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_PlsW",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_PltK",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_PntD",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_Pntl",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_PstE",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_Ptch",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_RdlB",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_RghP",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_Rtcl",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_SmdS",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_Smie",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_SmrB",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_Spng",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_SprS",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
-      "id": "PSAdapter_plugin_Spt\\",
+      "id": "PSAdapter_plugin_Spt ",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_Stmp",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_StnG",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_TrnE",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_Txtz",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_Undr",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_USMk",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_Wtrc",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "PSAdapter_plugin_WtrP",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Punk2",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "quit",
       "context": "global",
       "shortcut": "Ctrl+Q",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文件 > 退出"
     },
     {
       "id": "raster",
       "context": "global",
       "shortcut": "Ctrl+Alt+Y",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 像素预览"
     },
     {
       "id": "Rasterize 8 menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 栅格化..."
     },
     {
       "id": "Recolor Art Dialog",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 编辑颜色 > 重新着色图稿..."
     },
     {
       "id": "redo",
       "context": "global",
       "shortcut": "Ctrl+Shift+Z",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "编辑 > 重做"
     },
     {
       "id": "Registration...",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Release Envelope",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 封套扭曲 > 释放"
     },
     {
       "id": "Release Planet X",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 实时上色 > 释放"
     },
     {
       "id": "Release Text Wrap",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 文本绕排 > 释放"
     },
     {
       "id": "Release Tracing",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "releaseCropMarks",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "releaseguide",
       "context": "global",
       "shortcut": "Ctrl+Alt+5",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 参考线 > 释放参考线"
     },
     {
       "id": "releaseMask",
       "context": "global",
       "shortcut": "Ctrl+Alt+7",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 剪切蒙版 > 释放"
     },
     {
       "id": "releaseThreadedTextSelection",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 串接文本 > 释放所选文字"
     },
     {
       "id": "Remove Anchor Points menu",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 路径 > 移去锚点"
     },
     {
       "id": "removeThreading",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 串接文本 > 移去串接文字"
     },
     {
       "id": "repeatPathfinder",
       "context": "global",
       "shortcut": "Ctrl+4",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "Replace Colors Dialog",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "resetRotationView",
       "context": "global",
       "shortcut": "Ctrl+Shift+1",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 重置旋转视图"
     },
     {
       "id": "rightAlign",
       "context": "global",
       "shortcut": "Ctrl+Shift+R",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "Roughen3",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Round3",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Rows and Columns....",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 路径 > 分割为网格..."
     },
     {
       "id": "ruler",
       "context": "global",
       "shortcut": "Ctrl+R",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 标尺 > 显示标尺"
     },
     {
       "id": "rulerCoordinateSystem",
       "context": "global",
       "shortcut": "Ctrl+Alt+R",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 标尺 > 更改为全局标尺"
     },
     {
       "id": "Saturate3",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 编辑颜色 > 调整饱和度..."
     },
     {
       "id": "save",
       "context": "global",
       "shortcut": "Ctrl+S",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文件 > 存储"
     },
     {
       "id": "Save for Office",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "saveacopy",
       "context": "global",
       "shortcut": "Ctrl+Alt+S",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文件 > 存储副本..."
     },
     {
       "id": "saveas",
       "context": "global",
       "shortcut": "Ctrl+Shift+S",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文件 > 存储为..."
     },
     {
       "id": "saveasTemplate",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文件 > 存储为模板..."
     },
     {
       "id": "Scribble3",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "selectall",
       "context": "global",
       "shortcut": "Ctrl+A",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "选择 > 全部"
     },
     {
       "id": "selectallinartboard",
       "context": "global",
       "shortcut": "Ctrl+Alt+A",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "选择 > 现用画板上的全部对象"
     },
     {
       "id": "Selection Hat 1",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "选择 > 对象 > 方向手柄"
     },
     {
       "id": "Selection Hat 10",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "选择 > 存储所选对象..."
     },
     {
       "id": "Selection Hat 11",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "选择 > 编辑所选对象..."
     },
     {
       "id": "Selection Hat 2",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 排列 > 发送至当前图层"
     },
     {
       "id": "Selection Hat 3",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "选择 > 对象 > 同一图层上的所有对象"
     },
     {
       "id": "Selection Hat 4",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 隐藏 > 上方所有图稿"
     },
     {
       "id": "Selection Hat 5",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 锁定 > 上方所有图稿"
     },
     {
       "id": "Selection Hat 6",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 隐藏 > 其它图层"
     },
     {
       "id": "Selection Hat 7",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 锁定 > 其它图层"
     },
     {
       "id": "Selection Hat 8",
       "context": "global",
       "shortcut": "Ctrl+Alt+]",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "选择 > 上方的下一个对象"
     },
     {
       "id": "Selection Hat 9",
       "context": "global",
       "shortcut": "Ctrl+Alt+[",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "选择 > 下方的下一个对象"
     },
     {
       "id": "selectionPref",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "sendBackward",
       "context": "global",
       "shortcut": "Ctrl+[",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 排列 > 后移一层"
     },
     {
       "id": "sendForward",
       "context": "global",
       "shortcut": "Ctrl+]",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 排列 > 前移一层"
     },
     {
       "id": "sendToBack",
       "context": "global",
       "shortcut": "Ctrl+Shift+[",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 排列 > 置于底层"
     },
     {
       "id": "sendToFront",
       "context": "global",
       "shortcut": "Ctrl+Shift+]",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 排列 > 置于顶层"
     },
     {
       "id": "Sentence case Change Case Item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 更改大小写 > 句首大写"
     },
     {
       "id": "setBarDesign",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 图表 > 柱形图..."
     },
     {
       "id": "setCropMarks",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 画板 > 转换为画板"
     },
     {
       "id": "setGraphStyle",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 图表 > 类型..."
     },
     {
       "id": "setIconDesign",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 图表 > 标记..."
     },
     {
       "id": "Show Gaps Planet X",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "视图 > 显示实时上色间隙"
     },
     {
       "id": "Show Perspective Grid",
       "context": "global",
       "shortcut": "Ctrl+Shift+I",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 透视网格 > 显示网格"
     },
     {
       "id": "Show Preprocessed Image",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "showAll",
       "context": "global",
       "shortcut": "Ctrl+Alt+3",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 显示全部"
     },
     {
       "id": "showAllWindows",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "ShowArtwork",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "showgrid",
       "context": "global",
       "shortcut": "Ctrl+\"",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 显示网格"
     },
     {
       "id": "showguide",
       "context": "global",
       "shortcut": "Ctrl+;",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 参考线 > 显示参考线"
     },
     {
       "id": "showHiddenChar",
       "context": "global",
       "shortcut": "Ctrl+Alt+I",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文字 > 显示隐藏字符"
     },
     {
       "id": "ShowNoArtwork",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "ShowNoImage",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "ShowOriginalImage",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "ShowPaths",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "ShowPathsAndTransparentArtwork",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "showtemplate",
       "context": "global",
       "shortcut": "Ctrl+Shift+W",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 显示模板"
     },
     {
       "id": "ShowTransparentImage",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "simplify menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 路径 > 简化..."
     },
     {
       "id": "sizeStepDown",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+,",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "sizeStepUp",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+.",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "snapgrid",
       "context": "global",
       "shortcut": "Ctrl+Shift+\"",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 对齐网格"
     },
     {
       "id": "Snapomatic on-off menu item",
       "context": "global",
       "shortcut": "Ctrl+U",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 智能参考线"
     },
     {
       "id": "snappoint",
       "context": "global",
       "shortcut": "Ctrl+Alt+\"",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 对齐点"
     },
     {
       "id": "snapPref",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 首选项 > 智能参考线..."
     },
     {
       "id": "spacing",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+O",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "Stray Points menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "选择 > 对象 > 游离点"
     },
     {
       "id": "Style Palette",
       "context": "global",
       "shortcut": "Shift+F6",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "窗口 > 外观"
     },
     {
       "id": "SWFPresets",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "switchSelTool",
       "context": "global",
       "shortcut": "Ctrl+`",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "switchUnits",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+U",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "systemInfo",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "帮助 > 系统信息..."
     },
     {
       "id": "Text Objects menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "选择 > 对象 > 所有文本对象"
     },
     {
       "id": "Text Wrap Options...",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 文本绕排 > 文本绕排选项..."
     },
     {
       "id": "textpathtype3d",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "textpathtypeGravity",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "textpathtypeOptions",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "textpathtypeRainbow",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "textpathtypeSkew",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "textpathtypestairs",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "textthreads",
       "context": "global",
       "shortcut": "Ctrl+Shift+Y",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 显示文本串接"
     },
     {
       "id": "threadTextCreate",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 串接文本 > 创建"
     },
     {
       "id": "tile",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "窗口 > 排列 > 平铺"
     },
     {
       "id": "Title Case Change Case Item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 更改大小写 > 词首大写"
     },
     {
       "id": "toggleAutoHyphen",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+H",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "toggleLineComposer",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+C",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "Tracing Options",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "TracingPresets",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "tracking",
       "context": "global",
       "shortcut": "Ctrl+Alt+K",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "Transform3",
       "context": "global",
       "shortcut": "Ctrl+Alt+Shift+D",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 变换 > 分别变换..."
     },
     {
       "id": "transformagain",
       "context": "global",
       "shortcut": "Ctrl+D",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 变换 > 再次变换"
     },
     {
       "id": "transformmove",
       "context": "global",
       "shortcut": "Ctrl+Shift+M",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 变换 > 移动..."
     },
     {
       "id": "transformreflect",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 变换 > 镜像..."
     },
     {
       "id": "transformrotate",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 变换 > 旋转..."
     },
     {
       "id": "transformscale",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 变换 > 缩放..."
     },
     {
       "id": "transformshear",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "对象 > 变换 > 倾斜..."
     },
     {
       "id": "Transparency Presets",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 透明度拼合器预设..."
     },
     {
       "id": "TransparencyGrid Menu Item",
       "context": "global",
       "shortcut": "Ctrl+Shift+D",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 显示透明度网格"
     },
     {
       "id": "TrimMark2",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Twirl Tool2",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "type-horizontal",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 文字方向 > 水平"
     },
     {
       "id": "type-vertical",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 文字方向 > 垂直"
     },
     {
       "id": "undo",
       "context": "global",
       "shortcut": "Ctrl+Z",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "编辑 > 还原"
     },
     {
       "id": "undo2",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "ungroup",
       "context": "global",
       "shortcut": "Ctrl+Shift+G",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 取消编组"
     },
     {
       "id": "ungroupAll",
       "context": "global",
       "shortcut": "Alt+Shift+G",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 取消全部编组"
     },
     {
       "id": "unitundoPref",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "编辑 > 首选项 > 单位..."
     },
     {
       "id": "unlockAll",
       "context": "global",
       "shortcut": "Ctrl+Alt+2",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "对象 > 全部解锁"
     },
     {
       "id": "Updates...",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "帮助 > 更新..."
     },
     {
       "id": "UpperCase Change Case Item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 更改大小写 > 大写"
     },
     {
       "id": "userInterfacePref",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "view1",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "view10",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "view2",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "view3",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "view4",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "view5",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "view6",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "view7",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "view8",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "view9",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "Welcome screen menu item",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "ZigZag2",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": null
     },
     {
       "id": "zoomin",
       "context": "global",
       "shortcut": "Ctrl++",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 放大"
     },
     {
       "id": "zoomin2",
       "context": "global",
       "shortcut": "Ctrl++",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "zoomout",
       "context": "global",
       "shortcut": "Ctrl+-",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "视图 > 缩小"
     },
     {
       "id": "~bullet",
       "context": "text",
       "shortcut": "Alt+8",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文字 > 插入特殊字符 > 符号 > 项目符号"
     },
     {
       "id": "~copyright",
       "context": "text",
       "shortcut": "Alt+G",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文字 > 插入特殊字符 > 符号 > 版权符号"
     },
     {
       "id": "~discretionaryHyphen",
       "context": "text",
       "shortcut": "Ctrl+Shift+-",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文字 > 插入特殊字符 > 连字符和破折号 > 自由连字符"
     },
     {
       "id": "~doubleLeftQuote",
       "context": "text",
       "shortcut": "Alt+[",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文字 > 插入特殊字符 > 引号 > 左双引号"
     },
     {
       "id": "~doubleRightQuote",
       "context": "text",
       "shortcut": "Alt+Shift+[",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文字 > 插入特殊字符 > 引号 > 右双引号"
     },
     {
       "id": "~ellipsis",
       "context": "text",
       "shortcut": "Alt+;",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文字 > 插入特殊字符 > 符号 > 省略号"
     },
     {
       "id": "~emDash",
       "context": "text",
       "shortcut": "Alt+Shift+-",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文字 > 插入特殊字符 > 连字符和破折号 > 全角破折号"
     },
     {
       "id": "~emSpace",
       "context": "text",
       "shortcut": "Ctrl+Shift+M",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文字 > 插入空白字符 > 全角空格"
     },
     {
       "id": "~enDash",
       "context": "text",
       "shortcut": "Alt+-",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文字 > 插入特殊字符 > 连字符和破折号 > 半角破折号"
     },
     {
       "id": "~enSpace",
       "context": "text",
       "shortcut": "Ctrl+Shift+N",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文字 > 插入空白字符 > 半角空格"
     },
     {
       "id": "~forcedLineBreak",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 插入分隔符 > 强制换行符"
     },
     {
       "id": "~hairSpace",
       "context": "global",
       "shortcut": null,
-      "assigned": false
+      "assigned": false,
+      "menu_path": "文字 > 插入空白字符 > 微间隔"
     },
     {
       "id": "~kernCloser",
       "context": "text",
       "shortcut": "Ctrl+Shift+[",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "~kernFurther",
       "context": "text",
       "shortcut": "Ctrl+Shift+]",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "~paragraphSymbol",
       "context": "text",
       "shortcut": "Alt+7",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文字 > 插入特殊字符 > 符号 > 段落符号"
     },
     {
       "id": "~registeredTrademark",
       "context": "text",
       "shortcut": "Alt+R",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文字 > 插入特殊字符 > 符号 > 注册商标符号"
     },
     {
       "id": "~sectionSymbol",
       "context": "text",
       "shortcut": "Alt+6",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文字 > 插入特殊字符 > 符号 > 分节符"
     },
     {
       "id": "~singleLeftQuote",
       "context": "text",
       "shortcut": "Alt+]",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文字 > 插入特殊字符 > 引号 > 左单引号"
     },
     {
       "id": "~singleRightQuote",
       "context": "text",
       "shortcut": "Alt+Shift+]",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文字 > 插入特殊字符 > 引号 > 右单引号"
     },
     {
       "id": "~subscript",
       "context": "text",
       "shortcut": "Ctrl+Alt+Shift++",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "~subscript2",
       "context": "text",
       "shortcut": "Ctrl+Alt+Shift++",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "~superScript",
       "context": "text",
       "shortcut": "Ctrl+Shift++",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "~superScript2",
       "context": "text",
       "shortcut": "Ctrl+Shift++",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "~textBold",
       "context": "text",
       "shortcut": "Ctrl+Shift+B",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "~textItalic",
       "context": "text",
       "shortcut": "Ctrl+Shift+I",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "~textUnderline",
       "context": "text",
       "shortcut": "Ctrl+Shift+U",
-      "assigned": true
+      "assigned": true,
+      "menu_path": null
     },
     {
       "id": "~thinSpace",
       "context": "text",
       "shortcut": "Ctrl+Alt+Shift+M",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文字 > 插入空白字符 > 窄间隔"
     },
     {
       "id": "~trademarkSymbol",
       "context": "text",
       "shortcut": "Alt+2",
-      "assigned": true
+      "assigned": true,
+      "menu_path": "文字 > 插入特殊字符 > 符号 > 商标符号"
     }
   ],
   "tools": [

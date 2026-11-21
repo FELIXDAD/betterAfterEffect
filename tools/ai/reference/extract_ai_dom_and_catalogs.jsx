@@ -123,6 +123,21 @@
         return { runtimeType: t, sample: str };
     }
 
+    function classifyReadError(err) {
+        var msg = "";
+        try { msg = String(err && err.message ? err.message : err); } catch (e) { msg = ""; }
+        var low = msg.toLowerCase();
+        if (low.indexOf("wrapped items") !== -1) { return "wrapped_items_only"; }
+        if (low.indexOf("this type of text frame") !== -1) { return "text_frame_kind"; }
+        if (low.indexOf("dataset was not found") !== -1) { return "no_active_dataset"; }
+        if (low.indexOf("manual kerning") !== -1) { return "no_manual_kerning"; }
+        if (low.indexOf("undefined for the text range") !== -1) { return "undefined_for_text_range"; }
+        if (low.indexOf("no file associated") !== -1) { return "no_associated_file"; }
+        var codeMatch = msg.match(/\b(\d{3,6})\b/);
+        if (codeMatch) { return "error_" + codeMatch[1]; }
+        return "unreadable";
+    }
+
     function inspectObject(obj, label) {
         var info = {
             label: label,
@@ -152,7 +167,7 @@
                 entry.sample = summary.sample;
             } catch (err) {
                 entry.runtimeType = "unreadable";
-                entry.readError = String(err.message || err);
+                entry.sample = { unavailable: classifyReadError(err) };
             }
             info.properties.push(entry);
         }
@@ -216,7 +231,7 @@
             if (!Ctor) { return null; }
             inst = new Ctor();
         } catch (e) {
-            return { className: className, error: String(e.message || e) };
+            return { className: className, unavailable: classifyReadError(e) };
         }
         var reflected = inspectObject(inst, className);
         var propMap = [];
@@ -615,11 +630,11 @@
             result.dom.Matrix = inspectObject(mtx, "Matrix");
         } finally {
             try { doc.close(SaveOptions.DONOTSAVECHANGES); } catch (closeErr) {
-                result.errors.push("close doc failed: " + String(closeErr));
+                result.errors.push("close_doc:" + classifyReadError(closeErr));
             }
         }
     } catch (topErr) {
-        result.errors.push("top-level error: " + String(topErr.message || topErr));
+        result.errors.push("top_level:" + classifyReadError(topErr));
     } finally {
         app.userInteractionLevel = prevInteraction;
     }

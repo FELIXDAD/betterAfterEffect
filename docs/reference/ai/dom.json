@@ -29,7 +29,9 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "The dataset was not found"
+          "sample": {
+            "unavailable": "no_active_dataset"
+          }
         },
         {
           "name": "activeLayer",
@@ -78,7 +80,9 @@
           "access": "readonly",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "an Illustrator error occurred: 2072 ('')"
+          "sample": {
+            "unavailable": "error_2072"
+          }
         },
         {
           "name": "colorProfileName",
@@ -1432,14 +1436,18 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "Requested property is only available for wrapped items."
+          "sample": {
+            "unavailable": "wrapped_items_only"
+          }
         },
         {
           "name": "wrapOffset",
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "Requested property is only available for wrapped items."
+          "sample": {
+            "unavailable": "wrapped_items_only"
+          }
         },
         {
           "name": "wrapped",
@@ -1773,14 +1781,18 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "Requested property is only available for wrapped items."
+          "sample": {
+            "unavailable": "wrapped_items_only"
+          }
         },
         {
           "name": "wrapOffset",
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "Requested property is only available for wrapped items."
+          "sample": {
+            "unavailable": "wrapped_items_only"
+          }
         },
         {
           "name": "wrapped",
@@ -2154,14 +2166,18 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "Requested property is only available for wrapped items."
+          "sample": {
+            "unavailable": "wrapped_items_only"
+          }
         },
         {
           "name": "wrapOffset",
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "Requested property is only available for wrapped items."
+          "sample": {
+            "unavailable": "wrapped_items_only"
+          }
         },
         {
           "name": "wrapped",
@@ -2536,14 +2552,18 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "Requested property is only available for wrapped items."
+          "sample": {
+            "unavailable": "wrapped_items_only"
+          }
         },
         {
           "name": "wrapOffset",
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "Requested property is only available for wrapped items."
+          "sample": {
+            "unavailable": "wrapped_items_only"
+          }
         },
         {
           "name": "wrapped",
@@ -2677,21 +2697,27 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "The requested property is not available for this type of text frame."
+          "sample": {
+            "unavailable": "text_frame_kind"
+          }
         },
         {
           "name": "firstBaseline",
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "The requested property is not available for this type of text frame."
+          "sample": {
+            "unavailable": "text_frame_kind"
+          }
         },
         {
           "name": "firstBaselineMin",
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "The requested property is not available for this type of text frame."
+          "sample": {
+            "unavailable": "text_frame_kind"
+          }
         },
         {
           "name": "flowLinksHorizontally",
@@ -2794,7 +2820,9 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "The requested property is not available for this type of text frame."
+          "sample": {
+            "unavailable": "text_frame_kind"
+          }
         },
         {
           "name": "note",
@@ -2860,7 +2888,9 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "The requested property is not available for this type of text frame."
+          "sample": {
+            "unavailable": "text_frame_kind"
+          }
         },
         {
           "name": "rowCount",
@@ -2902,7 +2932,9 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "The requested property is not available for this type of text frame."
+          "sample": {
+            "unavailable": "text_frame_kind"
+          }
         },
         {
           "name": "story",
@@ -2923,7 +2955,9 @@
           "access": "readonly",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "The requested property is not available for this type of text frame."
+          "sample": {
+            "unavailable": "text_frame_kind"
+          }
         },
         {
           "name": "textRange",
@@ -3012,14 +3046,18 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "Requested property is only available for wrapped items."
+          "sample": {
+            "unavailable": "wrapped_items_only"
+          }
         },
         {
           "name": "wrapOffset",
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "Requested property is only available for wrapped items."
+          "sample": {
+            "unavailable": "wrapped_items_only"
+          }
         },
         {
           "name": "wrapped",
@@ -3071,7 +3109,9 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "The requested property is not available for this type of text frame."
+          "sample": {
+            "unavailable": "text_frame_kind"
+          }
         },
         {
           "name": "antialias",
@@ -3153,7 +3193,9 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "The requested property is not available for this type of text frame."
+          "sample": {
+            "unavailable": "text_frame_kind"
+          }
         },
         {
           "name": "firstBaseline",
@@ -3378,7 +3420,9 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "The requested property is not available for this type of text frame."
+          "sample": {
+            "unavailable": "text_frame_kind"
+          }
         },
         {
           "name": "story",
@@ -3488,14 +3532,18 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "Requested property is only available for wrapped items."
+          "sample": {
+            "unavailable": "wrapped_items_only"
+          }
         },
         {
           "name": "wrapOffset",
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "Requested property is only available for wrapped items."
+          "sample": {
+            "unavailable": "wrapped_items_only"
+          }
         },
         {
           "name": "wrapped",
@@ -3547,7 +3595,9 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "The requested property is not available for this type of text frame."
+          "sample": {
+            "unavailable": "text_frame_kind"
+          }
         },
         {
           "name": "antialias",
@@ -3636,14 +3686,18 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "The requested property is not available for this type of text frame."
+          "sample": {
+            "unavailable": "text_frame_kind"
+          }
         },
         {
           "name": "firstBaselineMin",
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "The requested property is not available for this type of text frame."
+          "sample": {
+            "unavailable": "text_frame_kind"
+          }
         },
         {
           "name": "flowLinksHorizontally",
@@ -3746,7 +3800,9 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "The requested property is not available for this type of text frame."
+          "sample": {
+            "unavailable": "text_frame_kind"
+          }
         },
         {
           "name": "note",
@@ -3812,7 +3868,9 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "The requested property is not available for this type of text frame."
+          "sample": {
+            "unavailable": "text_frame_kind"
+          }
         },
         {
           "name": "rowCount",
@@ -3964,14 +4022,18 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "Requested property is only available for wrapped items."
+          "sample": {
+            "unavailable": "wrapped_items_only"
+          }
         },
         {
           "name": "wrapOffset",
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "Requested property is only available for wrapped items."
+          "sample": {
+            "unavailable": "wrapped_items_only"
+          }
         },
         {
           "name": "wrapped",
@@ -4065,7 +4127,9 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "There is no manual kerning amount set at this location"
+          "sample": {
+            "unavailable": "no_manual_kerning"
+          }
         },
         {
           "name": "length",
@@ -4697,7 +4761,9 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "the requested attribute is undefined for the text range"
+          "sample": {
+            "unavailable": "undefined_for_text_range"
+          }
         },
         {
           "name": "kinsokuOrder",
@@ -4816,7 +4882,9 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "the requested attribute is undefined for the text range"
+          "sample": {
+            "unavailable": "undefined_for_text_range"
+          }
         },
         {
           "name": "paragraphDirection",
@@ -5600,14 +5668,18 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "Requested property is only available for wrapped items."
+          "sample": {
+            "unavailable": "wrapped_items_only"
+          }
         },
         {
           "name": "wrapOffset",
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "Requested property is only available for wrapped items."
+          "sample": {
+            "unavailable": "wrapped_items_only"
+          }
         },
         {
           "name": "wrapped",
@@ -5879,7 +5951,9 @@
           "access": "readonly",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "There is no file associated with this item"
+          "sample": {
+            "unavailable": "no_associated_file"
+          }
         },
         {
           "name": "geometricBounds",
@@ -6095,14 +6169,18 @@
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "Requested property is only available for wrapped items."
+          "sample": {
+            "unavailable": "wrapped_items_only"
+          }
         },
         {
           "name": "wrapOffset",
           "access": "readwrite",
           "declaredType": "any",
           "runtimeType": "unreadable",
-          "readError": "Requested property is only available for wrapped items."
+          "sample": {
+            "unavailable": "wrapped_items_only"
+          }
         },
         {
           "name": "wrapped",

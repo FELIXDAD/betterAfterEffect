@@ -4,7 +4,7 @@
 
 ## 工具列表（高级工具栏 Default 预设）
 
-高级工具栏共 30 个槽位 / 91 个工具；基本工具栏（Basic）包含 37 个工具；快速入门（Getting Started）包含 34 个工具。
+高级工具栏共 30 个槽位 / 91 个工具（100% 含内部工具 ID）；基本工具栏（Basic）包含 37 个工具；快速入门（Getting Started）包含 34 个工具。
 
 | 槽位 | 内部工具 ID | 默认快捷键 | Basic 包含 |
 |---:|---|---|---|
@@ -114,7 +114,7 @@
 
 ### 快捷键集中额外的工具与交互动作
 
-除上述工具栏槽位外，`.kys` `/Tools` 节还定义了 44 项交互/模式/画笔/不透明度/混合模式动作（下表列出已分配快捷键的项及未分配项统计）：
+除上述工具栏槽位外，`.kys` `/Tools` 节还定义了 44 项交互/模式/画笔/不透明度/混合模式动作（100% 含内部 ID；下表列出已分配快捷键的项及未分配项统计）：
 
 | 动作 ID | 默认快捷键 |
 |---|---|
@@ -134,67 +134,77 @@
 | `Adobe Tool Dec Diameter` | `[` |
 | `Adobe Tool Inc Diameter` | `]` |
 
-未分配默认快捷键的 `/Tools` 动作（29 项，完整见 `shortcuts.json`）：`Adobe Blend Mode Color`, `Adobe Blend Mode Color Burn`, `Adobe Blend Mode Color Dodge`, `Adobe Blend Mode Darken`, `Adobe Blend Mode Difference`, `Adobe Blend Mode Exclusion`, `Adobe Blend Mode Hard Light`, `Adobe Blend Mode Hue`, `Adobe Blend Mode Lighten`, `Adobe Blend Mode Luminosity`, `Adobe Blend Mode Multiply`, `Adobe Blend Mode Next Mode`, `Adobe Blend Mode Normal`, `Adobe Blend Mode Overlay`, `Adobe Blend Mode Prev Mode`, `Adobe Blend Mode Saturation`, `Adobe Blend Mode Screen`, `Adobe Blend Mode Soft Light`, `Adobe Opacity 0`, `Adobe Opacity 10`, `Adobe Opacity 100`, `Adobe Opacity 20`, `Adobe Opacity 30`, `Adobe Opacity 40`, `Adobe Opacity 50`, `Adobe Opacity 60`, `Adobe Opacity 70`, `Adobe Opacity 80`, `Adobe Opacity 90`。
+未分配默认快捷键的 `/Tools` 动作（29 项，完整见 `shortcuts.json` / `panels-tools.json`）：`Adobe Blend Mode Color`, `Adobe Blend Mode Color Burn`, `Adobe Blend Mode Color Dodge`, `Adobe Blend Mode Darken`, `Adobe Blend Mode Difference`, `Adobe Blend Mode Exclusion`, `Adobe Blend Mode Hard Light`, `Adobe Blend Mode Hue`, `Adobe Blend Mode Lighten`, `Adobe Blend Mode Luminosity`, `Adobe Blend Mode Multiply`, `Adobe Blend Mode Next Mode`, `Adobe Blend Mode Normal`, `Adobe Blend Mode Overlay`, `Adobe Blend Mode Prev Mode`, `Adobe Blend Mode Saturation`, `Adobe Blend Mode Screen`, `Adobe Blend Mode Soft Light`, `Adobe Opacity 0`, `Adobe Opacity 10`, `Adobe Opacity 100`, `Adobe Opacity 20`, `Adobe Opacity 30`, `Adobe Opacity 40`, `Adobe Opacity 50`, `Adobe Opacity 60`, `Adobe Opacity 70`, `Adobe Opacity 80`, `Adobe Opacity 90`。
 
 ## 面板与窗口菜单项（来自「窗口」菜单）
 
-| 菜单项 | 类型 | 快捷键 | 子项摘要 |
-|---|---|---|---|
-| 新建窗口 | 面板/命令 | — | |
-| --- | 分隔线 | | |
-| **排列** | 子菜单 | — | 层叠、平铺、在窗口中浮动、全部在窗口中浮动、合并所有窗口 |
-| 查找有关 Exchange 的扩展功能... | 面板/命令 | — | |
-| **工作区** | 子菜单 | — | Web、上色、传统基本功能、基本功能、快速入门、打印和校样、排版规则、描摹、版面、自动、触摸、重置 等共 14 项 |
-| --- | 分隔线 | | |
-| **扩展功能** | 子菜单 | — | *(动态本地项 `local_installed_extensions` 已省略)* |
-| --- | 分隔线 | | |
-| 上下文任务栏 | 面板/命令 | — | |
-| **工具栏** | 子菜单 | — | 基本、快速入门、高级、新建工具栏...、管理工具栏... |
-| 帮助栏 | 面板/命令 | — | |
-| 控制 | 面板/命令 | — | |
-| 隐藏生成式菜单 | 面板/命令 | — | |
-| --- | 分隔线 | | |
-| 3D 和材质 | 面板/命令 | — | |
-| CSS 属性（已弃用） | 面板/命令 | — | |
-| Retype | 面板/命令 | — | |
-| SVG 交互 | 面板/命令 | — | |
-| 信息 | 面板/命令 | `Ctrl+F8` | |
-| 分色预览 | 面板/命令 | — | |
-| 动作 | 面板/命令 | — | |
-| 历史记录 | 面板/命令 | — | |
-| 变换 | 面板/命令 | `Shift+F8` | |
-| 变量 | 面板/命令 | — | |
-| 图像描摹 | 面板/命令 | — | |
-| 图层 | 面板/命令 | `F7` | |
-| 图形样式 | 面板/命令 | `Shift+F5` | |
-| 图案选项 | 面板/命令 | — | |
-| 外观 | 面板/命令 | `Shift+F6` | |
-| 对齐 | 面板/命令 | `Shift+F7` | |
-| 导航器 | 面板/命令 | — | |
-| 属性 | 面板/命令 | — | |
-| 库 | 面板/命令 | — | |
-| 拼合器预览 | 面板/命令 | — | |
-| 描边 | 面板/命令 | `Ctrl+F10` | |
-| **文字** | 子菜单 | — | OpenType、Reflow 查看器、制表符、字形、字符、字符样式、段落、段落样式 |
-| 文档信息 | 面板/命令 | — | |
-| 模型 | 面板/命令 | — | |
-| 注释 | 面板/命令 | — | |
-| 渐变 | 面板/命令 | `Ctrl+F9` | |
-| 版本历史记录 | 面板/命令 | — | |
-| 特性 | 面板/命令 | `Ctrl+F11` | |
-| 画板 | 面板/命令 | — | |
-| 画笔 | 面板/命令 | `F5` | |
-| 符号 | 面板/命令 | `Shift+Ctrl+F11` | |
-| 色板 | 面板/命令 | — | |
-| 资源导出 | 面板/命令 | — | |
-| 路径查找器 | 面板/命令 | `Shift+Ctrl+F9` | |
-| 透明度 | 面板/命令 | `Shift+Ctrl+F10` | |
-| 链接 | 面板/命令 | — | |
-| 颜色 | 面板/命令 | `F6` | |
-| 颜色参考 | 面板/命令 | `Shift+F3` | |
-| 魔棒 | 面板/命令 | — | |
-| --- | 分隔线 | | |
-| **图形样式库** | 子菜单 | — | 3D 效果、Vonster 图案样式、图像效果、按钮和翻转效果、文字效果、斑点画笔的附属品、涂抹效果、照亮样式、纹理、艺术效果、附属品、霓虹效果 等共 14 项 |
-| **画笔库** | 子菜单 | — | Wacom 6D 画笔、图像画笔、毛刷画笔、矢量包、箭头、艺术效果、装饰、边框、用户定义、其它库... |
-| **符号库** | 子菜单 | — | 3D 符号、Web 按钮和条形、传家宝、原始、图表、地图、复古、寿司、庆祝、徽标元素、提基、时尚 等共 30 项 |
-| **色板库** | 子菜单 | — | VisiBone2、Web、中性、儿童物品、公司、图案、大地色调、庆祝、渐变、科学、系统 (Macintosh)、系统 (Windows) 等共 23 项 |
+顶层面板/命令共 44 项（含内部 ID 41 项），另含 9 个子菜单（其中「文字」子面板 8/8 项含内部 ID）。
+
+| 菜单项 | 内部 ID | 类型 | 快捷键 | 子项摘要 |
+|---|---|---|---|---|
+| 新建窗口 | `newwindow` | 面板/命令 | — | |
+| **排列** | — | 子菜单 | — | 层叠、平铺、在窗口中浮动、全部在窗口中浮动、合并所有窗口 |
+| 查找有关 Exchange 的扩展功能... | `Browse Add-Ons Menu` | 面板/命令 | — | |
+| **工作区** | — | 子菜单 | — | Web、上色、传统基本功能、基本功能、快速入门、打印和校样、排版规则、描摹、版面、自动、触摸、重置 等共 14 项 |
+| **扩展功能** | — | 子菜单 | — | *(动态本地项 `local_installed_extensions` 已省略)* |
+| 上下文任务栏 | — | 面板/命令 | — | |
+| **工具栏** | — | 子菜单 | — | 基本、快速入门、高级、新建工具栏...、管理工具栏... |
+| 帮助栏 | — | 面板/命令 | — | |
+| 控制 | `drover control palette plugin` | 面板/命令 | — | |
+| 隐藏生成式菜单 | — | 面板/命令 | — | |
+| 3D 和材质 | `Adobe 3D Panel` | 面板/命令 | — | |
+| CSS 属性（已弃用） | `CSS Menu Item` | 面板/命令 | — | |
+| Retype | `ReTypeWindowMenu` | 面板/命令 | — | |
+| SVG 交互 | `Adobe SVG Interactivity Palette` | 面板/命令 | — | |
+| 信息 | `internal palettes posing as plug-in menus-info` | 面板/命令 | `Ctrl+F8` | |
+| 分色预览 | `Adobe Separation Preview Panel` | 面板/命令 | — | |
+| 动作 | `Adobe Action Palette` | 面板/命令 | — | |
+| 历史记录 | `Adobe History Panel Menu Item` | 面板/命令 | — | |
+| 变换 | `AdobeTransformObjects1` | 面板/命令 | `Shift+F8` | |
+| 变量 | `Adobe Variables Palette Menu Item` | 面板/命令 | — | |
+| 图像描摹 | `Adobe Vectorize Panel` | 面板/命令 | — | |
+| 图层 | `AdobeLayerPalette1` | 面板/命令 | `F7` | |
+| 图形样式 | `Adobe Style Palette` | 面板/命令 | `Shift+F5` | |
+| 图案选项 | `Adobe Pattern Panel Toggle` | 面板/命令 | — | |
+| 外观 | `Style Palette` | 面板/命令 | `Shift+F6` | |
+| 对齐 | `AdobeAlignObjects2` | 面板/命令 | `Shift+F7` | |
+| 导航器 | `AdobeNavigator` | 面板/命令 | — | |
+| 属性 | `Adobe Property Palette` | 面板/命令 | — | |
+| 库 | `Adobe CSXS Extension com.adobe.DesignLibraries.angularLibraries` | 面板/命令 | — | |
+| 拼合器预览 | `Adobe Flattening Preview` | 面板/命令 | — | |
+| 描边 | `Adobe Stroke Palette` | 面板/命令 | `Ctrl+F10` | |
+| **文字** | — | 子菜单 | — | OpenType、Reflow 查看器、制表符、字形、字符、字符样式、段落、段落样式 |
+| 文档信息 | `DocInfo1` | 面板/命令 | — | |
+| 模型 | `Adobe Vector Edge Panel` | 面板/命令 | — | |
+| 注释 | `Adobe Commenting Palette` | 面板/命令 | — | |
+| 渐变 | `Adobe Gradient Palette` | 面板/命令 | `Ctrl+F9` | |
+| 版本历史记录 | `Adobe Version History File Menu Item` | 面板/命令 | — | |
+| 特性 | `internal palettes posing as plug-in menus-attributes` | 面板/命令 | `Ctrl+F11` | |
+| 画板 | `Adobe Artboard Palette` | 面板/命令 | — | |
+| 画笔 | `Adobe BrushManager Menu Item` | 面板/命令 | `F5` | |
+| 符号 | `Adobe Symbol Palette` | 面板/命令 | `Shift+Ctrl+F11` | |
+| 色板 | `Adobe Swatches Menu Item` | 面板/命令 | — | |
+| 资源导出 | `Adobe SmartExport Panel Menu Item` | 面板/命令 | — | |
+| 路径查找器 | `AdobePathfinderPalette1` | 面板/命令 | `Shift+Ctrl+F9` | |
+| 透明度 | `Adobe Transparency Palette Menu Item` | 面板/命令 | `Shift+Ctrl+F10` | |
+| 链接 | `Adobe LinkPalette Menu Item` | 面板/命令 | — | |
+| 颜色 | `Adobe Color Palette` | 面板/命令 | `F6` | |
+| 颜色参考 | `Adobe Harmony Palette` | 面板/命令 | `Shift+F3` | |
+| 魔棒 | `AI Magic Wand` | 面板/命令 | — | |
+| **图形样式库** | — | 子菜单 | — | 3D 效果、Vonster 图案样式、图像效果、按钮和翻转效果、文字效果、斑点画笔的附属品、涂抹效果、照亮样式、纹理、艺术效果、附属品、霓虹效果 等共 14 项 |
+| **画笔库** | — | 子菜单 | — | Wacom 6D 画笔、图像画笔、毛刷画笔、矢量包、箭头、艺术效果、装饰、边框、用户定义、其它库... |
+| **符号库** | — | 子菜单 | — | 3D 符号、Web 按钮和条形、传家宝、原始、图表、地图、复古、寿司、庆祝、徽标元素、提基、时尚 等共 30 项 |
+| **色板库** | — | 子菜单 | — | VisiBone2、Web、中性、儿童物品、公司、图案、大地色调、庆祝、渐变、科学、系统 (Macintosh)、系统 (Windows) 等共 23 项 |
+
+### 「窗口 > 文字」子面板
+
+| 子面板 | 内部 ID | 快捷键 |
+|---|---|---|
+| OpenType | `internal palettes posing as plug-in menus-opentype` | `Alt+Shift+Ctrl+T` |
+| Reflow 查看器 | `ReflowWindowMenu` | — |
+| 制表符 | `internal palettes posing as plug-in menus-tab` | `Shift+Ctrl+T` |
+| 字形 | `alternate glyph palette plugin 2` | — |
+| 字符 | `internal palettes posing as plug-in menus-character` | `Ctrl+T` |
+| 字符样式 | `Character Styles` | — |
+| 段落 | `internal palettes posing as plug-in menus-paragraph` | `Alt+Ctrl+T` |
+| 段落样式 | `Adobe Paragraph Styles Palette` | — |

@@ -48,14 +48,14 @@
 | 属性名 | 读写 | 声明类型 | 运行时类型 | 示例值 |
 |---|---|---|---|---|
 | `XMPString` | readwrite | `string` | `string` | `<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?> <x:xmpme...` |
-| `activeDataSet` | readwrite | `any` | `unreadable` | *(不可读: The dataset was not found)* |
+| `activeDataSet` | readwrite | `any` | `unreadable` | *(不可用: `no_active_dataset`)* |
 | `activeLayer` | readwrite | `Layer` | `Layer` | `<Layer>` |
 | `activeView` | readonly | `View` | `View` | `<View>` |
 | `artboards` | readonly | `Artboards` | `Artboards` | `<Artboards>` |
 | `assets` | readonly | `Assets` | `Assets` | `<Assets>` |
 | `brushes` | readonly | `Brushes` | `Brushes` | `<Brushes>` |
 | `characterStyles` | readonly | `CharacterStyles` | `CharacterStyles` | `<CharacterStyles>` |
-| `cloudPath` | readonly | `any` | `unreadable` | *(不可读: an Illustrator error occurred: 2072 (''))* |
+| `cloudPath` | readonly | `any` | `unreadable` | *(不可用: `error_2072`)* |
 | `colorProfileName` | readonly | `string` | `string` | `sRGB IEC61966-2.1` |
 | `compoundPathItems` | readonly | `CompoundPathItems` | `CompoundPathItems` | `<CompoundPathItems>` |
 | `cropBox` | readwrite | `rect` | `Array(4)` | `[850, 600, 1250, 200]` |
@@ -246,8 +246,8 @@
 | `visibilityVariable` | readwrite | `null` | `null` | `null` |
 | `visibleBounds` | readonly | `rect` | `Array(4)` | `[48.5, 501.5, 251.5, 378.5]` |
 | `width` | readwrite | `number` | `number` | `200` |
-| `wrapInside` | readwrite | `any` | `unreadable` | *(不可读: Requested property is only available for wrapped items.)* |
-| `wrapOffset` | readwrite | `any` | `unreadable` | *(不可读: Requested property is only available for wrapped items.)* |
+| `wrapInside` | readwrite | `any` | `unreadable` | *(不可用: `wrapped_items_only`)* |
+| `wrapOffset` | readwrite | `any` | `unreadable` | *(不可用: `wrapped_items_only`)* |
 | `wrapped` | readwrite | `boolean` | `boolean` | `false` |
 | `zOrderPosition` | readonly | `number` | `number` | `4` |
 
@@ -300,8 +300,8 @@
 | `visibilityVariable` | readwrite | `null` | `null` | `null` |
 | `visibleBounds` | readonly | `rect` | `Array(4)` | `[299.5, 450.5, 440.5, 309.5]` |
 | `width` | readwrite | `number` | `number` | `140` |
-| `wrapInside` | readwrite | `any` | `unreadable` | *(不可读: Requested property is only available for wrapped items.)* |
-| `wrapOffset` | readwrite | `any` | `unreadable` | *(不可读: Requested property is only available for wrapped items.)* |
+| `wrapInside` | readwrite | `any` | `unreadable` | *(不可用: `wrapped_items_only`)* |
+| `wrapOffset` | readwrite | `any` | `unreadable` | *(不可用: `wrapped_items_only`)* |
 | `wrapped` | readwrite | `boolean` | `boolean` | `false` |
 | `zOrderPosition` | readonly | `number` | `number` | `12` |
 
@@ -356,8 +356,8 @@
 | `visibilityVariable` | readwrite | `null` | `null` | `null` |
 | `visibleBounds` | readonly | `rect` | `Array(4)` | `[299.5, 300.5, 380.5, 219.5]` |
 | `width` | readwrite | `number` | `number` | `80` |
-| `wrapInside` | readwrite | `any` | `unreadable` | *(不可读: Requested property is only available for wrapped items.)* |
-| `wrapOffset` | readwrite | `any` | `unreadable` | *(不可读: Requested property is only available for wrapped items.)* |
+| `wrapInside` | readwrite | `any` | `unreadable` | *(不可用: `wrapped_items_only`)* |
+| `wrapOffset` | readwrite | `any` | `unreadable` | *(不可用: `wrapped_items_only`)* |
 | `wrapped` | readwrite | `boolean` | `boolean` | `false` |
 | `zOrderPosition` | readonly | `number` | `number` | `11` |
 
@@ -412,8 +412,8 @@
 | `visibilityVariable` | readwrite | `null` | `null` | `null` |
 | `visibleBounds` | readonly | `rect` | `Array(4)` | `[419.5, 260.5, 520.5, 159.5]` |
 | `width` | readwrite | `number` | `number` | `100` |
-| `wrapInside` | readwrite | `any` | `unreadable` | *(不可读: Requested property is only available for wrapped items.)* |
-| `wrapOffset` | readwrite | `any` | `unreadable` | *(不可读: Requested property is only available for wrapped items.)* |
+| `wrapInside` | readwrite | `any` | `unreadable` | *(不可用: `wrapped_items_only`)* |
+| `wrapOffset` | readwrite | `any` | `unreadable` | *(不可用: `wrapped_items_only`)* |
 | `wrapped` | readwrite | `boolean` | `boolean` | `false` |
 | `zOrderPosition` | readonly | `number` | `number` | `12` |
 
@@ -435,9 +435,9 @@
 | `contents` | readwrite | `string` | `string` | `Hello BAE` |
 | `controlBounds` | readonly | `rect` | `Array(4)` | `[49, 102.12, 163.223, 72.904]` |
 | `editable` | readonly | `boolean` | `boolean` | `true` |
-| `endTValue` | readwrite | `any` | `unreadable` | *(不可读: The requested property is not available for this type of text frame.)* |
-| `firstBaseline` | readwrite | `any` | `unreadable` | *(不可读: The requested property is not available for this type of text frame.)* |
-| `firstBaselineMin` | readwrite | `any` | `unreadable` | *(不可读: The requested property is not available for this type of text frame.)* |
+| `endTValue` | readwrite | `any` | `unreadable` | *(不可用: `text_frame_kind`)* |
+| `firstBaseline` | readwrite | `any` | `unreadable` | *(不可用: `text_frame_kind`)* |
+| `firstBaselineMin` | readwrite | `any` | `unreadable` | *(不可用: `text_frame_kind`)* |
 | `flowLinksHorizontally` | readwrite | `boolean` | `boolean` | `true` |
 | `geometricBounds` | readonly | `rect` | `Array(4)` | `[50, 101.12, 150.847, 73.904]` |
 | `height` | readwrite | `number` | `number` | `27.2158203125` |
@@ -451,7 +451,7 @@
 | `locked` | readwrite | `boolean` | `boolean` | `false` |
 | `matrix` | readonly | `Matrix` | `Matrix` | `<Matrix>` |
 | `name` | readwrite | `string` | `string` | `SamplePointText` |
-| `nextFrame` | readwrite | `any` | `unreadable` | *(不可读: The requested property is not available for this type of text frame.)* |
+| `nextFrame` | readwrite | `any` | `unreadable` | *(不可用: `text_frame_kind`)* |
 | `note` | readwrite | `string` | `string` | `` |
 | `opacity` | readwrite | `number` | `number` | `100` |
 | `opticalAlignment` | readwrite | `boolean` | `boolean` | `false` |
@@ -460,16 +460,16 @@
 | `parent` | readonly | `Layer` | `Layer` | `<Layer>` |
 | `pixelAligned` | readwrite | `boolean` | `boolean` | `true` |
 | `position` | readwrite | `point` | `Array(2)` | `[50, 101.12]` |
-| `previousFrame` | readwrite | `any` | `unreadable` | *(不可读: The requested property is not available for this type of text frame.)* |
+| `previousFrame` | readwrite | `any` | `unreadable` | *(不可用: `text_frame_kind`)* |
 | `rowCount` | readwrite | `number` | `number` | `1` |
 | `rowGutter` | readwrite | `number` | `number` | `0` |
 | `selected` | readwrite | `boolean` | `boolean` | `false` |
 | `sliced` | readwrite | `boolean` | `boolean` | `false` |
 | `spacing` | readwrite | `number` | `number` | `0` |
-| `startTValue` | readwrite | `any` | `unreadable` | *(不可读: The requested property is not available for this type of text frame.)* |
+| `startTValue` | readwrite | `any` | `unreadable` | *(不可用: `text_frame_kind`)* |
 | `story` | readonly | `Story` | `Story` | `<Story>` |
 | `tags` | readonly | `Tags` | `Tags` | `<Tags>` |
-| `textPath` | readonly | `any` | `unreadable` | *(不可读: The requested property is not available for this type of text frame.)* |
+| `textPath` | readonly | `any` | `unreadable` | *(不可用: `text_frame_kind`)* |
 | `textRange` | readonly | `TextRange` | `TextRange` | `<TextRange>` |
 | `textRanges` | readonly | `TextRanges` | `TextRanges` | `<TextRanges>` |
 | `textSelection` | readonly | `array` | `Array(0)` | `[]` |
@@ -481,8 +481,8 @@
 | `visibleBounds` | readonly | `rect` | `Array(4)` | `[50, 101.12, 150.847, 73.904]` |
 | `width` | readwrite | `number` | `number` | `100.8466796875` |
 | `words` | readonly | `Words` | `Words` | `<Words>` |
-| `wrapInside` | readwrite | `any` | `unreadable` | *(不可读: Requested property is only available for wrapped items.)* |
-| `wrapOffset` | readwrite | `any` | `unreadable` | *(不可读: Requested property is only available for wrapped items.)* |
+| `wrapInside` | readwrite | `any` | `unreadable` | *(不可用: `wrapped_items_only`)* |
+| `wrapOffset` | readwrite | `any` | `unreadable` | *(不可用: `wrapped_items_only`)* |
 | `wrapped` | readwrite | `boolean` | `boolean` | `false` |
 | `zOrderPosition` | readonly | `number` | `number` | `10` |
 
@@ -493,7 +493,7 @@
 | 属性名 | 读写 | 声明类型 | 运行时类型 | 示例值 |
 |---|---|---|---|---|
 | `absoluteZOrderPosition` | readonly | `number` | `number` | `14` |
-| `anchor` | readwrite | `any` | `unreadable` | *(不可读: The requested property is not available for this type of text frame.)* |
+| `anchor` | readwrite | `any` | `unreadable` | *(不可用: `text_frame_kind`)* |
 | `antialias` | readwrite | `Object` | `TextAntialias.SHARP` | `<TextAntialias.SHARP>` |
 | `artworkKnockout` | readwrite | `Object` | `KnockoutState.DISABLED` | `<KnockoutState.DISABLED>` |
 | `blendingMode` | readwrite | `Object` | `BlendModes.NORMAL` | `<BlendModes.NORMAL>` |
@@ -504,7 +504,7 @@
 | `contents` | readwrite | `string` | `string` | `Area text sample` |
 | `controlBounds` | readonly | `rect` | `Array(4)` | `[294, 186, 461, 99]` |
 | `editable` | readonly | `boolean` | `boolean` | `true` |
-| `endTValue` | readwrite | `any` | `unreadable` | *(不可读: The requested property is not available for this type of text frame.)* |
+| `endTValue` | readwrite | `any` | `unreadable` | *(不可用: `text_frame_kind`)* |
 | `firstBaseline` | readwrite | `Object` | `FirstBaselineType.BASELINEEMBOXHEIGHT` | `<FirstBaselineType.BASELINEEMBOXHEIGHT>` |
 | `firstBaselineMin` | readwrite | `number` | `number` | `0` |
 | `flowLinksHorizontally` | readwrite | `boolean` | `boolean` | `true` |
@@ -535,7 +535,7 @@
 | `selected` | readwrite | `boolean` | `boolean` | `false` |
 | `sliced` | readwrite | `boolean` | `boolean` | `false` |
 | `spacing` | readwrite | `number` | `number` | `0` |
-| `startTValue` | readwrite | `any` | `unreadable` | *(不可读: The requested property is not available for this type of text frame.)* |
+| `startTValue` | readwrite | `any` | `unreadable` | *(不可用: `text_frame_kind`)* |
 | `story` | readonly | `Story` | `Story` | `<Story>` |
 | `tags` | readonly | `Tags` | `Tags` | `<Tags>` |
 | `textPath` | readonly | `TextPath` | `TextPath` | `<TextPath>` |
@@ -550,8 +550,8 @@
 | `visibleBounds` | readonly | `rect` | `Array(4)` | `[300, 180, 460, 100]` |
 | `width` | readwrite | `number` | `number` | `160` |
 | `words` | readonly | `Words` | `Words` | `<Words>` |
-| `wrapInside` | readwrite | `any` | `unreadable` | *(不可读: Requested property is only available for wrapped items.)* |
-| `wrapOffset` | readwrite | `any` | `unreadable` | *(不可读: Requested property is only available for wrapped items.)* |
+| `wrapInside` | readwrite | `any` | `unreadable` | *(不可用: `wrapped_items_only`)* |
+| `wrapOffset` | readwrite | `any` | `unreadable` | *(不可用: `wrapped_items_only`)* |
 | `wrapped` | readwrite | `boolean` | `boolean` | `false` |
 | `zOrderPosition` | readonly | `number` | `number` | `11` |
 
@@ -562,7 +562,7 @@
 | 属性名 | 读写 | 声明类型 | 运行时类型 | 示例值 |
 |---|---|---|---|---|
 | `absoluteZOrderPosition` | readonly | `number` | `number` | `15` |
-| `anchor` | readwrite | `any` | `unreadable` | *(不可读: The requested property is not available for this type of text frame.)* |
+| `anchor` | readwrite | `any` | `unreadable` | *(不可用: `text_frame_kind`)* |
 | `antialias` | readwrite | `Object` | `TextAntialias.SHARP` | `<TextAntialias.SHARP>` |
 | `artworkKnockout` | readwrite | `Object` | `KnockoutState.DISABLED` | `<KnockoutState.DISABLED>` |
 | `blendingMode` | readwrite | `Object` | `BlendModes.NORMAL` | `<BlendModes.NORMAL>` |
@@ -574,8 +574,8 @@
 | `controlBounds` | readonly | `rect` | `Array(4)` | `[486.905, 161.582, 660.885, 86.521]` |
 | `editable` | readonly | `boolean` | `boolean` | `true` |
 | `endTValue` | readwrite | `number` | `number` | `0.99000000953674` |
-| `firstBaseline` | readwrite | `any` | `unreadable` | *(不可读: The requested property is not available for this type of text frame.)* |
-| `firstBaselineMin` | readwrite | `any` | `unreadable` | *(不可读: The requested property is not available for this type of text frame.)* |
+| `firstBaseline` | readwrite | `any` | `unreadable` | *(不可用: `text_frame_kind`)* |
+| `firstBaselineMin` | readwrite | `any` | `unreadable` | *(不可用: `text_frame_kind`)* |
 | `flowLinksHorizontally` | readwrite | `boolean` | `boolean` | `true` |
 | `geometricBounds` | readonly | `rect` | `Array(4)` | `[500, 140, 650, 100]` |
 | `height` | readwrite | `number` | `number` | `40` |
@@ -589,7 +589,7 @@
 | `locked` | readwrite | `boolean` | `boolean` | `false` |
 | `matrix` | readonly | `Matrix` | `Matrix` | `<Matrix>` |
 | `name` | readwrite | `string` | `string` | `SamplePathText` |
-| `nextFrame` | readwrite | `any` | `unreadable` | *(不可读: The requested property is not available for this type of text frame.)* |
+| `nextFrame` | readwrite | `any` | `unreadable` | *(不可用: `text_frame_kind`)* |
 | `note` | readwrite | `string` | `string` | `` |
 | `opacity` | readwrite | `number` | `number` | `100` |
 | `opticalAlignment` | readwrite | `boolean` | `boolean` | `false` |
@@ -598,7 +598,7 @@
 | `parent` | readonly | `Layer` | `Layer` | `<Layer>` |
 | `pixelAligned` | readwrite | `boolean` | `boolean` | `true` |
 | `position` | readwrite | `point` | `Array(2)` | `[500, 140]` |
-| `previousFrame` | readwrite | `any` | `unreadable` | *(不可读: The requested property is not available for this type of text frame.)* |
+| `previousFrame` | readwrite | `any` | `unreadable` | *(不可用: `text_frame_kind`)* |
 | `rowCount` | readwrite | `number` | `number` | `1` |
 | `rowGutter` | readwrite | `number` | `number` | `0` |
 | `selected` | readwrite | `boolean` | `boolean` | `false` |
@@ -619,8 +619,8 @@
 | `visibleBounds` | readonly | `rect` | `Array(4)` | `[497.283, 140, 650, 97.057]` |
 | `width` | readwrite | `number` | `number` | `150` |
 | `words` | readonly | `Words` | `Words` | `<Words>` |
-| `wrapInside` | readwrite | `any` | `unreadable` | *(不可读: Requested property is only available for wrapped items.)* |
-| `wrapOffset` | readwrite | `any` | `unreadable` | *(不可读: Requested property is only available for wrapped items.)* |
+| `wrapInside` | readwrite | `any` | `unreadable` | *(不可用: `wrapped_items_only`)* |
+| `wrapOffset` | readwrite | `any` | `unreadable` | *(不可用: `wrapped_items_only`)* |
 | `wrapped` | readwrite | `boolean` | `boolean` | `false` |
 | `zOrderPosition` | readonly | `number` | `number` | `12` |
 
@@ -637,7 +637,7 @@
 | `contents` | readwrite | `string` | `string` | `Hello BAE` |
 | `end` | readwrite | `number` | `number` | `9` |
 | `insertionPoints` | readonly | `InsertionPoints` | `InsertionPoints` | `<InsertionPoints>` |
-| `kerning` | readwrite | `any` | `unreadable` | *(不可读: There is no manual kerning amount set at this location)* |
+| `kerning` | readwrite | `any` | `unreadable` | *(不可用: `no_manual_kerning`)* |
 | `length` | readwrite | `number` | `number` | `9` |
 | `lines` | readonly | `Lines` | `Lines` | `<Lines>` |
 | `paragraphAttributes` | readonly | `ParagraphAttributes` | `ParagraphAttributes` | `<ParagraphAttributes>` |
@@ -736,7 +736,7 @@
 | `hyphenationZone` | readwrite | `number` | `number` | `36` |
 | `justification` | readwrite | `Object` | `Justification.LEFT` | `<Justification.LEFT>` |
 | `kashidaWidth` | readwrite | `Object` | `KashidaWidthType.kashidaMedium` | `<KashidaWidthType.kashidaMedium>` |
-| `kinsoku` | readwrite | `any` | `unreadable` | *(不可读: the requested attribute is undefined for the text range)* |
+| `kinsoku` | readwrite | `any` | `unreadable` | *(不可用: `undefined_for_text_range`)* |
 | `kinsokuOrder` | readwrite | `Object` | `KinsokuOrderEnum.PUSHIN` | `<KinsokuOrderEnum.PUSHIN>` |
 | `kurikaeshiMojiShori` | readwrite | `boolean` | `boolean` | `false` |
 | `leadingType` | readwrite | `Object` | `AutoLeadingType.BOTTOMTOBOTTOM` | `<AutoLeadingType.BOTTOMTOBOTTOM>` |
@@ -753,7 +753,7 @@
 | `minimumHyphenatedWordSize` | readwrite | `number` | `number` | `6` |
 | `minimumLetterSpacing` | readwrite | `number` | `number` | `0` |
 | `minimumWordSpacing` | readwrite | `number` | `number` | `80.0000011920929` |
-| `mojikumi` | readwrite | `any` | `unreadable` | *(不可读: the requested attribute is undefined for the text range)* |
+| `mojikumi` | readwrite | `any` | `unreadable` | *(不可用: `undefined_for_text_range`)* |
 | `paragraphDirection` | readwrite | `Object` | `ParagraphDirectionType.LEFT_TO_RIGHT_DIRECTION` | `<ParagraphDirectionType.LEFT_TO_RIGHT_DIRECTION>` |
 | `parent` | readonly | `Story` | `Story` | `<Story>` |
 | `rightIndent` | readwrite | `number` | `number` | `0` |
@@ -926,8 +926,8 @@
 | `visibilityVariable` | readwrite | `null` | `null` | `null` |
 | `visibleBounds` | readonly | `rect` | `Array(4)` | `[379.211, 320.628, 420.211, 279.628]` |
 | `width` | readwrite | `number` | `number` | `41.0000000000009` |
-| `wrapInside` | readwrite | `any` | `unreadable` | *(不可读: Requested property is only available for wrapped items.)* |
-| `wrapOffset` | readwrite | `any` | `unreadable` | *(不可读: Requested property is only available for wrapped items.)* |
+| `wrapInside` | readwrite | `any` | `unreadable` | *(不可用: `wrapped_items_only`)* |
+| `wrapOffset` | readwrite | `any` | `unreadable` | *(不可用: `wrapped_items_only`)* |
 | `wrapped` | readwrite | `boolean` | `boolean` | `false` |
 | `zOrderPosition` | readonly | `number` | `number` | `12` |
 
@@ -990,7 +990,7 @@
 | `controlBounds` | readonly | `rect` | `Array(4)` | `[619, 551, 661, 509]` |
 | `editable` | readonly | `boolean` | `boolean` | `true` |
 | `embedded` | readwrite | `boolean` | `boolean` | `true` |
-| `file` | readonly | `any` | `unreadable` | *(不可读: There is no file associated with this item)* |
+| `file` | readonly | `any` | `unreadable` | *(不可用: `no_associated_file`)* |
 | `geometricBounds` | readonly | `rect` | `Array(4)` | `[620, 550, 660, 510]` |
 | `height` | readwrite | `number` | `number` | `40` |
 | `hidden` | readwrite | `boolean` | `boolean` | `false` |
@@ -1019,8 +1019,8 @@
 | `visibilityVariable` | readwrite | `null` | `null` | `null` |
 | `visibleBounds` | readonly | `rect` | `Array(4)` | `[620, 550, 660, 510]` |
 | `width` | readwrite | `number` | `number` | `40` |
-| `wrapInside` | readwrite | `any` | `unreadable` | *(不可读: Requested property is only available for wrapped items.)* |
-| `wrapOffset` | readwrite | `any` | `unreadable` | *(不可读: Requested property is only available for wrapped items.)* |
+| `wrapInside` | readwrite | `any` | `unreadable` | *(不可用: `wrapped_items_only`)* |
+| `wrapOffset` | readwrite | `any` | `unreadable` | *(不可用: `wrapped_items_only`)* |
 | `wrapped` | readwrite | `boolean` | `boolean` | `false` |
 | `zOrderPosition` | readonly | `number` | `number` | `12` |
 
