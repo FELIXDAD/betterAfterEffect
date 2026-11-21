@@ -33,6 +33,7 @@ use crate::icons::{self, Icon};
 use crate::keymap::{Chord, Keymap, KeymapBindings, KeymapOverrides};
 use crate::panel::{Panel, PanelContext, PanelKind, PanelRequests, PanelSpawn};
 use crate::theme::{color, metrics};
+use crate::toolbar::Toolbar;
 use crate::workspace::WorkspacePreset;
 use crate::{titlebar, widgets};
 
@@ -84,8 +85,8 @@ pub struct WorkbenchContext<'a> {
     pub dirty: bool,
 }
 
-/// The tools shown in the toolbar of AE-keymap workspaces (selection is view state
-/// until the motion workspace, workstream 12, registers real tools).
+/// The tools shown in the toolbar of AE-keymap workspaces when no module registers
+/// a [`Toolbar`] for the `ae` keymap (the Motion workspace module does).
 const AE_TOOLS: [(Icon, &str); 18] = [
     (Icon::Home, "Home"),
     (Icon::Selection, "Selection Tool"),
@@ -136,6 +137,10 @@ pub struct Workbench {
     state: WorkbenchState,
     requests: PanelRequests,
     tool: usize,
+    /// Toolbars by keymap id (`Registry<dyn Toolbar>`).
+    toolbars: Arc<Registry<dyn Toolbar>>,
+    /// Keymaps whose toolbar got its saved state back.
+    toolbars_loaded: Vec<String>,
 }
 
 impl Workbench {
@@ -151,6 +156,14 @@ impl Workbench {
         .with_keymap_extensions(app.registry::<KeymapBindings>())
         .with_action_handlers(app.registry::<dyn ActionHandler>())
         .with_command_variants(app.registry::<crate::action::CommandVariant>())
+        .with_toolbars(app.registry::<dyn Toolbar>())
+    }
+
+    /// Toolbars modules register for their keymaps (`Registry<dyn Toolbar>`).
+    pub fn with_toolbars(mut self, toolbars: Arc<Registry<dyn Toolbar>>) -> Self {
+        self.toolbars = toolbars;
+        self.toolbars_loaded.clear();
+        self
     }
 
     /// Names of command variants (`Registry<CommandVariant>`) for the shortcut editor.
@@ -234,6 +247,8 @@ impl Workbench {
             state,
             requests: PanelRequests::default(),
             tool: 1,
+            toolbars: Arc::new(Registry::new()),
+            toolbars_loaded: Vec::new(),
         };
         wb.refresh_registries();
         let active = wb
@@ -413,6 +428,13 @@ impl Workbench {
                 self.state.panels.insert(id.0.clone(), state);
             }
         }
+        for keymap in &self.toolbars_loaded {
+            if let Some(state) = self.toolbars.get(keymap).and_then(|t| t.save_state()) {
+                self.state
+                    .panels
+                    .insert(crate::toolbar::state_key(keymap), state);
+            }
+        }
     }
 
     fn refresh_registries(&mut self) {
@@ -537,7 +559,10 @@ impl Workbench {
             toolbar.y_range(),
             egui::Stroke::new(1.0, color::APP_BG),
         );
-        if self.keymap_id() == "ae" {
+        let keymap_id = self.keymap_id();
+        if let Some(tb) = self.toolbars.get(&keymap_id) {
+            self.module_toolbar(ui, cx, &*tb, &keymap_id, toolbar, ws_rect.left());
+        } else if keymap_id == "ae" {
             self.tools(ui, toolbar, ws_rect.left());
         }
         self.workspace_bar(ui, ws_rect);
@@ -577,6 +602,44 @@ impl Workbench {
         self.workspace_dialogs(ui.ctx());
         ime_follows_caret(ui.ctx());
         std::mem::take(&mut self.requests.invocations)
+    }
+
+    /// A module's toolbar (tools and tool options) left of the workspace bar.
+    fn module_toolbar(
+        &mut self,
+        ui: &mut Ui,
+        cx: &WorkbenchContext<'_>,
+        tb: &dyn Toolbar,
+        keymap_id: &str,
+        toolbar: Rect,
+        right: f32,
+    ) {
+        if !self.toolbars_loaded.iter().any(|k| k == keymap_id) {
+            if let Some(state) = self.state.panels.get(&crate::toolbar::state_key(keymap_id)) {
+                tb.load_state(state);
+            }
+            self.toolbars_loaded.push(keymap_id.to_owned());
+        }
+        let area = Rect::from_min_max(
+            toolbar.min + vec2(20.0, 4.0),
+            pos2(right - 8.0, toolbar.bottom() - 4.0),
+        );
+        let mut row = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(area)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        row.set_clip_rect(area);
+        let id = PanelId::new("toolbar");
+        let mut pcx = PanelContext::new(
+            &id,
+            "",
+            cx.stage,
+            cx.author,
+            cx.resources,
+            &mut self.requests,
+        );
+        tb.ui(&mut row, &mut pcx, &self.keymap);
     }
 
     fn tools(&mut self, ui: &mut Ui, toolbar: Rect, right: f32) {
@@ -1173,6 +1236,68 @@ mod tests {
                 _ => {}
             }
         }
+    }
+
+    /// A toolbar that counts frames, remembers its state and sees the keymap.
+    #[derive(Default)]
+    struct CountingToolbar {
+        frames: std::sync::atomic::AtomicUsize,
+        loaded: std::sync::Mutex<Option<serde_json::Value>>,
+        saw_u: std::sync::atomic::AtomicBool,
+    }
+    impl Toolbar for CountingToolbar {
+        fn ui(&self, ui: &mut Ui, cx: &mut PanelContext<'_>, keymap: &Keymap) {
+            use std::sync::atomic::Ordering::Relaxed;
+            self.frames.fetch_add(1, Relaxed);
+            assert_eq!(cx.panel.as_str(), "toolbar");
+            self.saw_u.store(
+                keymap.chords_for("layer.reveal_keyframes").next().is_some(),
+                Relaxed,
+            );
+            ui.label("tools");
+        }
+        fn save_state(&self) -> Option<serde_json::Value> {
+            Some(serde_json::json!({"tool": "pen"}))
+        }
+        fn load_state(&self, state: &serde_json::Value) {
+            *self.loaded.lock().unwrap() = Some(state.clone());
+        }
+    }
+
+    #[test]
+    fn registered_toolbar_draws_and_keeps_its_state() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let (kinds, presets, keymaps, actions) = registries();
+        let toolbars = Arc::new(Registry::<dyn Toolbar>::new());
+        let tb = Arc::new(CountingToolbar::default());
+        toolbars
+            .register_arc(Owner::module("test"), "km", tb.clone() as Arc<dyn Toolbar>)
+            .unwrap();
+        let mut state = WorkbenchState::default();
+        state.panels.insert(
+            crate::toolbar::state_key("km"),
+            serde_json::json!({"tool": "hand"}),
+        );
+        let mut wb = Workbench::with_registries(kinds, presets, keymaps, actions, state)
+            .with_toolbars(toolbars);
+        frame(&mut wb, vec![]);
+        frame(&mut wb, vec![]);
+        assert_eq!(tb.frames.load(Relaxed), 2, "drawn every frame");
+        assert!(tb.saw_u.load(Relaxed), "gets the active keymap");
+        assert_eq!(
+            *tb.loaded.lock().unwrap(),
+            Some(serde_json::json!({"tool": "hand"})),
+            "saved state restored once"
+        );
+        let saved = wb.state();
+        assert_eq!(
+            saved.panels.get("toolbar:km"),
+            Some(&serde_json::json!({"tool": "pen"}))
+        );
+        // A workspace with another keymap and no toolbar: not drawn.
+        assert!(wb.switch_workspace("two"));
+        frame(&mut wb, vec![]);
+        assert_eq!(tb.frames.load(Relaxed), 2);
     }
 
     #[test]

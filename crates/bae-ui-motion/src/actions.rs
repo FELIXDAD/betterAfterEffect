@@ -642,7 +642,8 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 );
             }
         }
-        _ => {}
+        // Not a session action: let module handlers (tools, menus) have it.
+        _ => return false,
     }
     true
 }

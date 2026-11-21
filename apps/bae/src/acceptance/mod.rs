@@ -26,6 +26,7 @@ mod render_queue;
 mod startup;
 mod stress;
 mod timeline;
+mod tools;
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};

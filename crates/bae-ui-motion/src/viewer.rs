@@ -20,6 +20,8 @@ use crate::gpu_preview::GpuPreview;
 use crate::project::ItemDrag;
 use crate::render::{self, Affine, View};
 use crate::session::{Scrub, SharedSession};
+use crate::tools::cursor::{self, Hover};
+use crate::tools::{Tool, ViewRequest};
 
 const MAGNIFICATIONS: [f32; 9] = [0.125, 0.25, 0.333, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0];
 
@@ -48,6 +50,12 @@ pub struct CompositionViewer {
     gpu_tried: bool,
     /// The last frame came from the GPU compositor.
     on_gpu: bool,
+    /// Space is held over the viewer (temporary Hand tool): whether the comp was
+    /// playing and its time when Space went down, so a Space-drag that pans does
+    /// not leave the playback Space started behind.
+    space_hold: Option<(bool, Time)>,
+    /// A Hand-tool (or Space) drag is panning the view.
+    panning: bool,
 }
 
 impl CompositionViewer {
@@ -104,6 +112,23 @@ impl CompositionViewer {
         };
         if let Some(m) = next {
             self.zoom_by(m / mag, None, area, info, ppp);
+        }
+    }
+
+    /// Zoom tool click: the next magnification step, keeping `at` in place.
+    fn step_zoom_at(&mut self, up: bool, at: Pos2, area: Rect, info: &CompInfo, ppp: f32) {
+        let (_, mag) = self.view(area, info, ppp);
+        let next = if up {
+            MAGNIFICATIONS.iter().copied().find(|m| *m > mag * 1.01)
+        } else {
+            MAGNIFICATIONS
+                .iter()
+                .rev()
+                .copied()
+                .find(|m| *m < mag * 0.99)
+        };
+        if let Some(m) = next {
+            self.zoom_by(m / mag, Some(at), area, info, ppp);
         }
     }
 }
@@ -266,6 +291,19 @@ impl Panel for CompositionViewer {
 
         if let Some(up) = self.pending_zoom.take() {
             self.step_zoom(up, area, &info, ppp);
+        }
+        // Double-clicking the Hand / Zoom tool buttons.
+        let request = crate::tools::shared(cx.resources)
+            .lock()
+            .view_request
+            .take();
+        match request {
+            Some(ViewRequest::Center) => self.pan = Vec2::ZERO,
+            Some(ViewRequest::Actual) => {
+                self.zoom = Some(1.0);
+                self.pan = Vec2::ZERO;
+            }
+            None => {}
         }
         // Zoom: pinch / Cmd+scroll around the pointer; plain scroll pans.
         if resp.hovered() {
@@ -462,9 +500,64 @@ impl Panel for CompositionViewer {
             );
         }
 
-        // Interaction: select and move with the Selection tool.
+        // Interaction by tool. Space held over the viewer is the Hand tool until
+        // released (AE-UI-307).
         let pointer = resp.interact_pointer_pos().or(resp.hover_pos());
-        if resp.clicked_by(egui::PointerButton::Primary)
+        let tools = crate::tools::shared(cx.resources);
+        let tool = tools.lock().current();
+        let space = ui.input(|i| i.key_down(egui::Key::Space)) && !ui.ctx().text_edit_focused();
+        if !space {
+            self.space_hold = None;
+        } else if self.space_hold.is_none() && resp.hovered() {
+            let s = session.lock();
+            self.space_hold = Some((s.is_playing(), s.time(&info.path)));
+        }
+        let hand = tool == Tool::Hand || self.space_hold.is_some() || self.panning;
+        let effective = if hand { Tool::Hand } else { tool };
+        if hand && resp.drag_started_by(egui::PointerButton::Primary) {
+            self.panning = true;
+            // Space started playback when pressed; a Space-drag only pans.
+            if let Some((false, t0)) = self.space_hold {
+                let mut s = session.lock();
+                if s.is_playing() {
+                    s.stop();
+                    s.set_time(&info, t0);
+                }
+            }
+        }
+        if self.panning {
+            if resp.dragged_by(egui::PointerButton::Primary) {
+                self.pan += resp.drag_delta();
+            }
+            if resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down()) {
+                self.panning = false;
+            }
+        }
+        if effective == Tool::Zoom
+            && resp.clicked_by(egui::PointerButton::Primary)
+            && let Some(pos) = pointer
+        {
+            let out = ui.input(|i| i.modifiers.alt);
+            self.step_zoom_at(!out, pos, area, &info, ppp);
+        }
+        if resp.hovered()
+            && let Some(pos) = resp.hover_pos()
+        {
+            let hover = Hover {
+                alt: ui.input(|i| i.modifiers.alt),
+                dragging: self.panning,
+            };
+            cursor::show(ui, &painter, pos, cursor::for_tool(effective, hover));
+        }
+        // Clicking a layer selects it with the Selection, Rotation and Pan Behind
+        // tools; only the Selection tool moves layers.
+        let selects = matches!(
+            effective,
+            Tool::Selection | Tool::Rotation | Tool::PanBehind
+        );
+        let moves = effective == Tool::Selection;
+        if selects
+            && resp.clicked_by(egui::PointerButton::Primary)
             && let Some(pos) = pointer
         {
             let hit = hit_test(cx.stage, &comp, &view, pos);
@@ -488,7 +581,8 @@ impl Panel for CompositionViewer {
                 }
             }
         }
-        if resp.drag_started_by(egui::PointerButton::Primary)
+        if moves
+            && resp.drag_started_by(egui::PointerButton::Primary)
             && let Some(pos) = resp.interact_pointer_pos()
         {
             let hit = hit_test(cx.stage, &comp, &view, pos);
