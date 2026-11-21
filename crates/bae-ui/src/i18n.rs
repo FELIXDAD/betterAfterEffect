@@ -139,6 +139,7 @@ const ZH: &[(&str, &str)] = &[
     ),
     ("Welcome to BAE", "欢迎使用 BAE"),
     ("Close", "关闭"),
+    ("Close Window", "关闭窗口"),
     (
         "What do you do? BAE opens the matching workspace; you can switch any time in the workspace bar.",
         "你主要做什么？BAE 会打开对应的工作区，之后随时可以在工作区栏切换。",
