@@ -186,6 +186,49 @@ impl Command for SetAt {
 
 // ---------------------------------------------------------------------------
 
+pub struct SetMany;
+
+/// One value edit of [`SetMany`].
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ValueEdit {
+    pub path: PrimPath,
+    pub attr: String,
+    /// Keyframe time in flicks (layer time for layer attributes).
+    pub time: Time,
+    pub value: Value,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SetManyParams {
+    pub edits: Vec<ValueEdit>,
+}
+
+impl Command for SetMany {
+    type Params = SetManyParams;
+    type Output = ();
+    const ID: &'static str = "attr.set_many";
+    const TITLE: &'static str = "Change Values";
+    const DESCRIPTION: &'static str =
+        "Several attr.set_at edits as one undo step (e.g. moving several layers in the viewer).";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        for e in p.edits {
+            SetAt.run(
+                tx,
+                SetAtParams {
+                    path: e.path,
+                    attr: e.attr,
+                    time: e.time,
+                    value: e.value,
+                },
+            )?;
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+
 /// Which side(s) of the keyframes an ease applies to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]

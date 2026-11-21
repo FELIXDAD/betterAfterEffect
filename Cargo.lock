@@ -242,6 +242,7 @@ dependencies = [
  "bae-render",
  "bae-text",
  "bae-ui",
+ "bae-ui-motion",
  "bae-vector",
  "clap",
  "egui",
@@ -375,6 +376,7 @@ dependencies = [
  "bae-anim",
  "bae-model",
  "bae-vector",
+ "flate2",
  "kurbo",
  "schemars",
  "serde",
@@ -574,6 +576,20 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "wgpu",
+]
+
+[[package]]
+name = "bae-ui-motion"
+version = "0.1.0"
+dependencies = [
+ "bae-anim",
+ "bae-app",
+ "bae-model",
+ "bae-motion",
+ "bae-ui",
+ "egui",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -58,6 +58,19 @@ impl Document {
         }
     }
 
+    /// Add the commands app modules published in `Registry<dyn DynCommand>` (domain
+    /// command crates such as `bae-motion`). Built-in ids are kept.
+    pub fn add_module_commands(&mut self, app: &bae_app::App) {
+        let Some(registry) = app.get_registry::<dyn bae_model::DynCommand>() else {
+            return;
+        };
+        for entry in registry.snapshot().iter() {
+            if self.commands.get(entry.id()).is_none() {
+                let _ = self.commands.register_dyn(entry.item().clone());
+            }
+        }
+    }
+
     /// `(id, English title)` of every model command (for the shortcut editor).
     pub fn command_titles(&self) -> Vec<(String, String)> {
         self.commands

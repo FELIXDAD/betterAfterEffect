@@ -36,7 +36,9 @@ fn main() -> ExitCode {
         .add_module(bae_motion::MotionModule)
         // Plugin host: `bae plugin check|list`; plugin effects in the app registries.
         .add_module(bae_plugin::PluginModule)
-        .add_module(shell::ShellModule);
+        .add_module(shell::ShellModule)
+        // Motion workspace panels (project, composition, timeline …).
+        .add_module(bae_ui_motion::MotionUiModule);
     // Layer sources drawn by other workstreams (05: shape and text layers), used by the
     // renderer and `bae render`.
     if let Err(error) = builder.register_arc::<dyn bae_render::SourceProvider>(

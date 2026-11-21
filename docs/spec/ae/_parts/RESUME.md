@@ -15,3 +15,7 @@
   `{write:[...], verify:[...], assemble:[...], gated:[...], critique, readme}`; verifiers checkpoint in
   scratchpad/research/<key>/verify-progress.md and commit `spec(draft): verifying part <key> (through <ID>)`.
   To resume: derive the remaining keys from git log and pass them as args.
+- 14:35 CET: PRJ, ANI, CMP, SHP, TXT final files verified and assembled (they equal their parts). Running run
+  wf_bf2edcf7-19b with args {write/verify: fx-a..c, ui-a..c; assemble: effects.md, ui-preview-render-io.md; gated: []},
+  then critique -> fix (edits FINAL files, parts become stale) -> README. Note: never resume a run whose verifier
+  prompts embed writer JSON (cache keys change); start a fresh run with narrowed args instead.
