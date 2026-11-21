@@ -317,11 +317,14 @@ fn ui_text_glyphs_are_in_the_ui_fonts() {
     texts.push(("Japanese".into(), japanese_sample()));
 
     let fonts = bae_ui::theme::system_ui_fonts();
-    let names: Vec<&str> = fonts.iter().map(|f| f.name).collect();
+    let names: Vec<String> = fonts
+        .iter()
+        .map(|f| format!("{} = {}", f.name, f.family))
+        .collect();
     for name in ["ui-text", "ui-cjk", "ui-symbols"] {
         assert!(
-            names.contains(&name),
-            "no system font for {name}: {fonts:?}"
+            fonts.iter().any(|f| f.name == name),
+            "no system font for {name}: {names:?}"
         );
     }
     let mut problems = Vec::new();

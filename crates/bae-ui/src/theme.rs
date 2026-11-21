@@ -167,9 +167,10 @@ pub struct SystemFont {
 /// The UI's fonts, in fallback order. Nothing is bundled (egui's own fonts are off):
 ///
 /// 1. `ui-text`: the system UI font (SF on macOS, Segoe UI on Windows);
-/// 2. `ui-cjk`: the Simplified Chinese UI font (PingFang SC, Microsoft YaHei), which
-///    also has kana;
-/// 3. `ui-symbols`: the platform symbol font (Apple Symbols, Segoe UI Symbol) for
+/// 2. `ui-cjk`: the Simplified Chinese UI font (PingFang SC, Microsoft YaHei);
+/// 3. `ui-ja`: the Japanese font (Hiragino Sans, Yu Gothic / Meiryo) for kana and
+///    punctuation the Chinese font lacks on some systems (`・`);
+/// 4. `ui-symbols`: the platform symbol font (Apple Symbols, Segoe UI Symbol) for
 ///    arrows, marks and the missing-glyph box `◻`.
 ///
 /// Found through fontique, the font database bae-text and parley use, once per process.
@@ -233,10 +234,34 @@ fn find_system_ui_fonts_uncached() -> Vec<SystemFont> {
             &["PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei"],
         )
     });
+    let ja_locale = Language::parse("ja").ok();
+    let japanese: Vec<FamilyId> = collection
+        .fallback_families(FallbackKey::new(
+            Script::from_bytes(*b"Hira"),
+            ja_locale.as_ref(),
+        ))
+        .collect();
+    // The first Japanese fallback that is not the Chinese font already chosen.
+    let japanese = japanese
+        .iter()
+        .copied()
+        .find(|id| Some(*id) != cjk)
+        .or_else(|| {
+            named(
+                &mut collection,
+                &["Hiragino Sans", "Yu Gothic UI", "Meiryo UI", "Meiryo"],
+            )
+            .filter(|id| Some(*id) != cjk)
+        });
     let symbols = named(&mut collection, &["Apple Symbols", "Segoe UI Symbol"]);
 
     let mut out = Vec::new();
-    for (name, id) in [("ui-text", ui), ("ui-cjk", cjk), ("ui-symbols", symbols)] {
+    for (name, id) in [
+        ("ui-text", ui),
+        ("ui-cjk", cjk),
+        ("ui-ja", japanese),
+        ("ui-symbols", symbols),
+    ] {
         let Some(family) = id.and_then(|id| collection.family(id)) else {
             tracing::warn!("no system font for {name}");
             continue;
