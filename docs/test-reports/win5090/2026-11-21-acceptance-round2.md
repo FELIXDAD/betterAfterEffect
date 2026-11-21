@@ -21,10 +21,12 @@
 | **B** | 新建合成、图层 ▸ 新建、菜单与快捷键 | **失败** | [#117](https://github.com/FELIXDAD/betterAfterEffect/issues/117), [#118](https://github.com/FELIXDAD/betterAfterEffect/issues/118) | 新建合成与 `Layer ▸ New` 全部 9 项图层创建及 `export-json` 均通过；无合成/有合成/有图层菜单置灰逻辑正确；`Edit ▸ Undo/Redo` 等 Shell 自有菜单项缺失快捷键显示（#117）；`Window` 菜单缺少 `Render Queue` 入口（#118）；`Ctrl+Shift+S` 在本机被系统全局热键占用（1409），归类为环境/自动化受限 |
 | **C** | 时间轴改名（IME / 空格 / Emoji / 超长名） | **通过**（复现 [#106](https://github.com/FELIXDAD/betterAfterEffect/issues/106)、[#113](https://github.com/FELIXDAD/betterAfterEffect/issues/113)） | [#106](https://github.com/FELIXDAD/betterAfterEffect/issues/106), [#113](https://github.com/FELIXDAD/betterAfterEffect/issues/113) | 双击图层名触发行内改名；真实微软拼音 IME 组字选词（`ni'hao` → `你好`）、含空格名（物理空格键不触发播放）、Emoji（`🎬 场记测试`）、323 字符超长名全部正常显示且经保存—重开后与 `export-json` 逐字一致；另在 Windows 上复现并补充评论了已有 issue #106（Enter 不能改名/不全选原名）与 #113（重开工程不自动打开合成） |
 | **D** | 关键帧、播放、焦点与撤销重做 | **通过** | — | 秒表与导航器 ◆ 打 3 个关键帧（0s/1s/2s）均确认 ◆ 变蓝并落盘；J/K 精准跳转；空格播放/停止在时间轴、查看器、项目、历史 4 个面板均生效，在项目搜索框与时间轴改名框中输入空格且不触发播放；连续 4 步图层与 3 步关键帧撤销/重做经 `export-json` 核验一致；选中关键帧后 `Animation` 菜单 5 项全部启用 |
-| **E** | 保存和打开（边界与异常） | 进行中 | — | — |
-| **F** | 渲染队列（格式 / 停止 / 错误 / 满盘 / 多合成） | 待测 | — | — |
-| **G** | 语言（`BAE_LANG=zh` / `en`） | 待测 | — | — |
-| **H** | 150% DPI 清晰度与布局 | 待测 | — | — |
+| **E** | 保存和打开（边界与异常） | **失败** | [#126](https://github.com/FELIXDAD/betterAfterEffect/issues/126), [#111](https://github.com/FELIXDAD/betterAfterEffect/issues/111) | `.bae`/`.baez` 保存重开、`Ctrl+S`、脏关闭三键（取消 `Esc`/不保存 `N`/保存 `Y`）、空格路径、中文路径、只读目录报错不崩、命令行打开、`.baez` 另存覆盖确认均通过；Windows 另存为覆盖已存在的 `.bae` 文件夹时系统对话框直接进入该目录而非提示覆盖（#126）；损坏 `.baez` 报错透出 `Could not find EOCD`（复现并评论 #111） |
+| **F** | 渲染队列（格式 / 停止 / 错误 / 满盘 / 多合成） | 待测（切 `763eaad` 后） | — | — |
+| **G** | 语言（`BAE_LANG=zh` / `en`） | 待测（切 `763eaad` 后） | — | — |
+| **H** | 150% DPI 清晰度与布局 | 待测（切 `763eaad` 后） | — | — |
+
+> 说明：**A–E** 测于 `origin/dev` @ `fb08040`；**已有 issue 复测（#117/#118/#106/#107/#108/#110/#112/#114）与 F–H** 测于合并 #121 后的最新 `origin/dev`。
 
 ---
 
@@ -109,5 +111,29 @@
 | 连续撤销与重做（图层 + 关键帧） | 1) 连续 4 次图层操作（`Ctrl+Y` / `Ctrl+Y` / `Ctrl+D` / `Ctrl+Y`，4→8 层）→ `Ctrl+Z` ×4 → `Ctrl+Shift+Z` ×4；2) 3 个关键帧 → `Ctrl+Z` ×3 → `Ctrl+Shift+Z` ×3；每步保存后用 `export-json` 核对 | **通过** | 图层：`8 层 → 4 层 → 8 层` 完全一致；关键帧：`3 帧（0/1s/2s）→ 0 帧（纯静态值）→ 3 帧（0/1s/2s）` 完全一致 |
 
 ![图 5：秒表与导航器 ◆ 打出 0s / 1s / 2s 三个 Position 关键帧，导航器 ◆ 与秒表均呈蓝色](./acceptance-round2-shots/05-d-keyframes-blue.jpg)
+
+---
+
+## E. 保存和打开
+
+**结论：失败（新提 bug：[#126](https://github.com/FELIXDAD/betterAfterEffect/issues/126)；复现并评论已有 bug：[#111](https://github.com/FELIXDAD/betterAfterEffect/issues/111)）**
+
+本节全部用例均测于 `origin/dev` @ `fb08040`，结果均经 Win32 对话框检查、`IsWindowEnabled` 与 `bae.exe export-json` 核对。
+
+| 检查项 | 操作与验证方式 | 结果 | 实测现象与证据 |
+|---|---|---|---|
+| `.bae` 与 `.baez` 保存/重开 | 新建工程保存为 `e_test.bae`，`File ▸ Save As...` 保存为 `e_test.baez`（确认合法 zip），再命令行打开 `.baez` 增层并 `Ctrl+S` | **通过** | `.bae` 与 `.baez` 均可读写；`.baez` 增层保存后 `export-json` 确认 `['Solid 3', 'Solid 2', 'Solid 1']` |
+| `Ctrl+S` 增量保存 | 打开 `e_test.bae`（1 层）后增层（标题变 `BAE - e_test.bae *`），按 `Ctrl+S` | **通过** | 无弹窗直接原地保存，标题 `*` 清除，`export-json` 更新为 `['Solid 2', 'Solid 1']` |
+| 脏关闭提示 — 取消（`Esc`） | 修改 `e_test.bae`（新增 `Comp 2`，标题带 `*`）→ `File ▸ Exit` 弹出 `Save changes to “e_test.bae” before closing?`（`是(Y)` / `否(N)` / `取消`）→ 按 `Esc` | **通过** | 弹窗关闭，主窗口保留运行（`IsWindowEnabled=True`，标题仍 `BAE - e_test.bae *`），磁盘仍为 `['Comp_1']` |
+| 脏关闭提示 — 不保存（`N`） | 再次 `File ▸ Exit` → 按 `N` | **通过** | 进程正常退出，磁盘 `export-json` 仍为 `['Comp_1']`（未保存 `Comp_2`） |
+| 脏关闭提示 — 保存（`Y`） | 重开 `e_test.bae`，新增 `Comp 2` → `File ▸ Exit` → 按 `Y` | **通过** | 进程正常退出，磁盘 `export-json` 更新为 `['Comp_1', 'Comp_2']` |
+| 路径带空格 | 另存为 `E:\bae-test\acc2\dir with space\proj with space.bae`，命令行重新打开并用 `export-json` 核对 | **通过** | 成功保存并重开，标题 `BAE - proj with space.bae`，`export-json` 完整包含 2 层 |
+| 路径带中文 | 另存为 `E:\bae-test\acc2\中文目录\测试工程.bae` 与 `测试工程.baez`，均命令行重开并 `export-json` 核对 | **通过** | `.bae` 与 `.baez` 均保存与重开正常，标题无乱码，`export-json` 核验一致 |
+| 保存到只读目录 | 1) `icacls /deny` 只读目录 `Save As`：系统对话框提示无写权限；2) 打开只读目录内 `locked.baez` 与 `locked.bae` 后修改并 `Ctrl+S` | **通过** | BAE 弹出明确错误弹窗（`.baez` 报 `Could not save the project... 拒绝访问。 (os error 5)`，`.bae` 报 `os error 183`），不崩溃；点确定后 `IsWindowEnabled=True`，标题仍带 `*`，内存工程未丢失 |
+| 另存为覆盖已存在文件 — `.baez` | 另存为覆盖磁盘已有 1 层 `e_ow_clean.baez` | **通过** | 弹出系统 `确认另存为`（`是(Y)` / `否(N)`），按 `Y` 确认后 `export-json` 更新为新工程 2 层 |
+| 另存为覆盖已存在工程 — `.bae` | 另存为覆盖磁盘已有 `e_ow.bae` / `e_ow2.bae` 目录（复现两次） | **失败（#126）** | 因 `.bae` 在 Windows 上为普通文件夹，`IFileSaveDialog` 点击 `保存(S)` 后**直接进入该目录内部**（地址栏变为 `地址: E:\bae-test\acc2\e_ow2.bae`），既不提示覆盖也不写入，已提 [#126](https://github.com/FELIXDAD/betterAfterEffect/issues/126) |
+| 打开损坏文件（`.bae` / `.baez`） | 1) 在已打开工程中通过 `File ▸ Open` 打开非 zip 垃圾 `.baez`；2) 命令行分别启动截断 `project.json` 的 `.bae` 与损坏 `.baez` | **部分通过 / 复现 #111** | 均弹出错误弹窗、不崩溃、GUI 下原打开工程保持不受影响；但错误文案直接暴露底层 `zip: invalid Zip archive: Could not find EOCD` 与 serde 行列报错，已在 [#111](https://github.com/FELIXDAD/betterAfterEffect/issues/111) 下补充 Windows 复现评论 |
+| 命令行 `bae.exe <工程>` 打开 | 依次用命令行打开 `.bae`、`.baez`、空格路径与中文路径工程 | **通过** | 全部正常启动并加载对应工程 |
+
 
 
