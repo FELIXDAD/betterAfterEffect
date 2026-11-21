@@ -36,7 +36,7 @@ const NEW_ITEMS: [(&str, &str); 9] = [
 fn new_composition_with_cmd_n_opens_it() {
     let mut h = gui();
     assert!(h.state().active_comp().is_none());
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     let comp = h.state().active_comp().expect("Cmd+N opened no comp");
     assert_eq!(h.state().name(&comp), "Comp 1");
     // Timeline and viewer show it.
@@ -45,7 +45,7 @@ fn new_composition_with_cmd_n_opens_it() {
         "{:?}",
         painted_texts(&h)
     );
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     let second = h.state().active_comp().unwrap();
     assert_eq!(h.state().name(&second), "Comp 2");
     // Undo removes the second comp; the timeline falls back without crashing.
@@ -59,7 +59,7 @@ fn new_composition_with_cmd_n_opens_it() {
 #[test]
 fn every_layer_new_item_from_the_menu() {
     let mut h = gui();
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     for (id, want) in NEW_ITEMS {
         let before = h.state().layers();
         assert!(h.state_mut().menu(id), "{id} disabled with a comp open");
@@ -111,7 +111,7 @@ fn layer_shortcuts_follow_ae() {
         (cmd | Modifiers::ALT | Modifiers::SHIFT, Key::L, "light"),
     ];
     let mut h = gui();
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     for (m, k, want) in cases {
         let before = h.state().layers();
         key(&mut h, m, k);
@@ -180,7 +180,7 @@ fn layer_items_are_greyed_out_and_shortcuts_do_nothing_without_a_comp() {
     );
 
     // After closing the last comp's project (File ▸ Close Project) they grey out again.
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     assert!(h.state().menu_item("motion.layer.new.solid").enabled);
     h.state_mut()
         .dialogs

@@ -42,7 +42,11 @@ pub mod ids {
     pub const REVEAL: &str = "motion.reveal";
     /// Params `{"attr": "<attr>"}`.
     pub const TOGGLE_KEY: &str = "motion.toggle_key";
+    /// Composition > New Composition (Cmd/Ctrl+N): opens Composition Settings.
     pub const NEW_COMP: &str = "motion.new_comp";
+    /// Composition > Composition Settings (Cmd/Ctrl+K): the active comp, or the
+    /// comp selected in the focused Project panel.
+    pub const COMP_SETTINGS: &str = "motion.comp.composition_settings";
     /// Params `{"kind": "<layer kind>", "shape": "rect" | …}`.
     pub const NEW_LAYER: &str = "motion.new_layer";
     /// Params `{"to": "forward" | "backward" | "front" | "back"}`.
@@ -91,6 +95,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::REVEAL, "Reveal Animated Properties"),
     (ids::TOGGLE_KEY, "Add or Remove Keyframe at Current Time"),
     (ids::NEW_COMP, "New Composition"),
+    (ids::COMP_SETTINGS, "Composition Settings"),
     (ids::NEW_LAYER, "New"),
     (ids::ORDER, "Bring Layer Forward"),
     (ids::TRIM_COMP, "Trim Comp to Work Area"),
@@ -238,6 +243,7 @@ pub fn bindings() -> KeymapBindings {
         b("F2", ids::DESELECT_ALL),
         reveal("U", "animated", false),
         b("Cmd+N", ids::NEW_COMP),
+        b("Cmd+K", ids::COMP_SETTINGS),
         b("Cmd+Shift+X", ids::TRIM_COMP),
         b("Cmd+M", ids::ADD_TO_RENDER_QUEUE),
         b("Shift+F3", ids::GRAPH_EDITOR),
@@ -265,6 +271,21 @@ pub fn bindings() -> KeymapBindings {
     v.push(b("Comma", "viewer.zoom_out").when("composition"));
     v.push(b("Shift+Slash", "viewer.fit").when("composition"));
     KeymapBindings::new(bae_ui::presets::AE_KEYMAP, v).for_workspace(crate::menus::WORKSPACE)
+}
+
+/// The comp Composition Settings edits: the one selected in the Project panel
+/// when that panel has focus (AE), otherwise the active comp.
+pub(crate) fn settings_target(cx: &PanelContext<'_>, session: &SharedSession) -> Option<PrimPath> {
+    let s = session.lock();
+    if cx.panel.kind() == "project"
+        && let [item] = s.selected_items.as_slice()
+        && query::comp_info(cx.stage, item).is_some()
+    {
+        return Some(item.clone());
+    }
+    s.active_comp
+        .clone()
+        .filter(|c| query::comp_info(cx.stage, c).is_some())
 }
 
 /// Selected layers, or the layers of the selected keyframes.
@@ -350,6 +371,12 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
     match id {
         ids::NEW_COMP => {
             common::new_comp(cx, session, None);
+            return true;
+        }
+        ids::COMP_SETTINGS => {
+            if let Some(comp) = settings_target(cx, session) {
+                crate::dialogs::comp_settings(cx, &comp);
+            }
             return true;
         }
         ids::NEW_LAYER => {

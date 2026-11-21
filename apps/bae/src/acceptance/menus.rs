@@ -17,6 +17,11 @@ const AE_ITEMS: &[(&str, Option<&str>, &str)] = &[
     ("shell.file.save", Some("Cmd+S"), "保存"),
     ("shell.file.save_as", Some("Cmd+Shift+S"), "另存为"),
     ("motion.composition.new", Some("Cmd+N"), "新建合成"),
+    (
+        "motion.comp.composition_settings",
+        Some("Cmd+K"),
+        "合成设置",
+    ),
     // AE 26 shortens this item to “将合成裁剪到工作区”. BAE keeps the glossary
     // terms (issue #109): Work Area = 工作区域 (工作区 is Workspace), Trim = 修剪
     // (as in 将入点修剪到当前时间; 裁剪 is Crop).
@@ -170,7 +175,7 @@ fn menu_enabled_state_follows_the_selection() {
     assert_eq!(got, want_none, "enabled without a comp");
 
     // A comp, nothing selected: Layer ▸ New, Trim, Add to Render Queue.
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     let comp = enabled(&h);
     for id in [
         "motion.layer.new.solid",
@@ -342,7 +347,7 @@ fn focus_panel(h: &mut Ui, anchor: &str, offset: egui::Vec2) {
 #[test]
 fn shortcuts_run_once_whichever_panel_has_focus() {
     let mut h = gui();
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     let targets: [(&str, egui::Vec2); 5] = [
         ("Name", egui::vec2(0.0, 420.0)), // Project panel, below the rows
         ("Layer Name", egui::vec2(700.0, 120.0)), // Timeline graph
@@ -475,7 +480,7 @@ fn window_render_queue_item_opens_and_closes_the_panel() {
     key(&mut h, Modifiers::COMMAND | Modifiers::ALT, Key::Num0);
     assert!(render_queue_open(&h), "Cmd+Alt+0 did not open it");
     // Closing it with items queued keeps the items (runtime queue).
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     key(&mut h, Modifiers::COMMAND, Key::M);
     assert!(h.state_mut().menu("motion.window.render_queue"));
     settle(&mut h);
@@ -488,7 +493,7 @@ fn window_render_queue_item_opens_and_closes_the_panel() {
 #[test]
 fn window_panel_items_toggle_and_reopen_panels() {
     let mut h = gui();
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     // Project: Cmd+0 / Window ▸ Project toggle the Project panel.
     let shown = |h: &Ui| find_text(h, "Name").is_some() && find_text(h, "Type").is_some();
     assert!(shown(&h));
@@ -589,7 +594,7 @@ fn welcome_dialog_blocks_panel_keys_and_reports_modal() {
     assert!(find_text(&h, "Welcome to BAE").is_some());
     key(&mut h, Modifiers::NONE, Key::Escape);
     assert!(!h.state().workspace.modal_open(h.state().app.resources()));
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     assert!(
         h.state().active_comp().is_some(),
         "shortcuts dead after the dialog closed"
@@ -938,7 +943,7 @@ fn undo_labels(h: &mut Ui) -> Vec<String> {
         let label = h.state().doc.undo_state().0.unwrap_or_default();
         labels.push(format!("{what} → {label}"));
     };
-    key(h, Modifiers::COMMAND, Key::N);
+    new_comp(h);
     step(h, "new comp");
     key(h, Modifiers::COMMAND, Key::Y);
     step(h, "new solid");

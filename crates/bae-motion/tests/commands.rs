@@ -885,3 +885,140 @@ fn separate_and_recombine_position() {
         Some(Value::Bool(true))
     );
 }
+
+#[test]
+fn comp_settings_resize_keeps_layers_in_place_and_undo_restores() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let solid = fx.layer(&comp, "solid", json!({}));
+    let nul = fx.layer(&comp, "null", json!({}));
+    let child = fx.layer(&comp, "shape", json!({"shape": "rect"}));
+    let camera = fx.layer(&comp, "camera", json!({}));
+    fx.run(
+        "layer.set_parent",
+        json!({"layers": [child], "parent": nul}),
+    );
+    // A keyframed position moves with the frame, keyframes included.
+    fx.run(
+        "attr.set_animated",
+        json!({"path": solid, "attr": "transform:position", "animated": true, "time": 0}),
+    );
+    fx.run(
+        "attr.set_at",
+        json!({"path": solid, "attr": "transform:position", "time": SEC, "value": {"type": "vec3", "value": [100.0, 200.0, 0.0]}}),
+    );
+    let child_before = fx.value(&child, "transform:position");
+    let child_world = fx.world_pos(&comp, &child);
+    fx.run(
+        "comp.set_settings",
+        json!({"comp": comp, "name": "Main", "width": 1280, "height": 720,
+               "fps": 29.97, "duration": 5 * SEC, "bg_color": [1.0, 1.0, 1.0, 1.0],
+               "start_timecode": SEC, "shutter_angle": 90.0, "renderer": "advanced_3d"}),
+    );
+    let info = query::comp_info(&fx.stage, &comp).unwrap();
+    assert_eq!((info.width, info.height), (1280, 720));
+    assert_eq!(info.name, "Main");
+    assert_eq!(info.frame_rate, FrameRate::FPS_29_97);
+    assert_eq!(info.duration, Time(5 * SEC));
+    assert_eq!(info.display_start, Time(SEC));
+    assert_eq!(info.bg_color, [1.0, 1.0, 1.0, 1.0]);
+    assert_eq!(info.work_area.end, Time(5 * SEC));
+    // Center anchor: top-level layers move by half the size change.
+    let spec = query::attr_spec(&fx.stage, &solid, "transform:position").unwrap();
+    let at = |t: i64| spec.keyframes.get(&Time(t)).unwrap().value.clone();
+    assert_eq!(at(0), Value::Vec3([640.0, 360.0, 0.0]));
+    assert_eq!(at(SEC), Value::Vec3([-220.0, 20.0, 0.0]));
+    assert_eq!(
+        fx.value(&nul, "transform:position"),
+        Some(Value::Vec3([640.0, 360.0, 0.0]))
+    );
+    // The camera's point of interest moves too; children stay relative to
+    // their parent (and so keep their place on screen).
+    assert_eq!(
+        fx.value(&camera, "transform:point_of_interest"),
+        Some(Value::Vec3([640.0, 360.0, 0.0]))
+    );
+    assert_eq!(fx.value(&child, "transform:position"), child_before);
+    let moved = fx.world_pos(&comp, &child);
+    assert!((moved - child_world - DVec3::new(-320.0, -180.0, 0.0)).length() < 1e-6);
+    assert_eq!(
+        fx.value(&comp, "renderer"),
+        Some(Value::Enum("advanced_3d".into()))
+    );
+    // One undo step restores everything.
+    fx.stage.undo(&fx.author).unwrap();
+    let info = query::comp_info(&fx.stage, &comp).unwrap();
+    assert_eq!(
+        (info.width, info.height, info.name.as_str()),
+        (1920, 1080, "Comp 1")
+    );
+    assert_eq!(
+        fx.value(&nul, "transform:position"),
+        Some(Value::Vec3([960.0, 540.0, 0.0]))
+    );
+}
+
+#[test]
+fn comp_settings_anchor_and_validation() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let solid = fx.layer(&comp, "solid", json!({}));
+    // Top-left anchor: layers keep their coordinates.
+    fx.run(
+        "comp.set_settings",
+        json!({"comp": comp, "width": 1000, "height": 500, "anchor": "top_left"}),
+    );
+    assert_eq!(
+        fx.value(&solid, "transform:position"),
+        Some(Value::Vec3([960.0, 540.0, 0.0]))
+    );
+    // Bottom-right anchor: they move by the whole change.
+    fx.run(
+        "comp.set_settings",
+        json!({"comp": comp, "width": 1100, "height": 600, "anchor": "bottom_right"}),
+    );
+    assert_eq!(
+        fx.value(&solid, "transform:position"),
+        Some(Value::Vec3([1060.0, 640.0, 0.0]))
+    );
+    assert!(
+        fx.try_run("comp.set_settings", json!({"comp": comp, "width": 0}))
+            .is_err()
+    );
+    assert!(
+        fx.try_run("comp.set_settings", json!({"comp": comp, "name": "  "}))
+            .is_err()
+    );
+    assert!(
+        fx.try_run("comp.set_settings", json!({"comp": comp, "duration": 0}))
+            .is_err()
+    );
+    // Shortening the comp clamps the work area.
+    fx.run(
+        "comp.set_work_area",
+        json!({"comp": comp, "start": 2 * SEC, "end": 8 * SEC}),
+    );
+    fx.run(
+        "comp.set_settings",
+        json!({"comp": comp, "duration": 4 * SEC}),
+    );
+    let info = query::comp_info(&fx.stage, &comp).unwrap();
+    assert_eq!(info.work_area.start, Time(2 * SEC));
+    assert_eq!(info.work_area.end, Time(4 * SEC));
+    // comp.create takes the same settings.
+    let out = fx.run(
+        "comp.create",
+        json!({"width": 640, "height": 480, "fps": 25, "resolution": [2, 2],
+               "start_timecode": SEC, "preserve_resolution": true, "drop_frame": false}),
+    );
+    let c2 = p(out["path"].as_str().unwrap());
+    assert_eq!(fx.value(&c2, "resolution"), Some(Value::Vec2([2.0, 2.0])));
+    assert_eq!(
+        fx.value(&c2, "preserve_resolution"),
+        Some(Value::Bool(true))
+    );
+    assert_eq!(
+        fx.value(&c2, "display_start_time"),
+        Some(Value::Time(Time(SEC)))
+    );
+}

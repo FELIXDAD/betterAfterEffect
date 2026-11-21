@@ -9,6 +9,7 @@
 //! | Command id | AE equivalent |
 //! |---|---|
 //! | `comp.create` | Composition > New Composition (Cmd/Ctrl+N) |
+//! | `comp.set_settings` | Composition > Composition Settings (Cmd/Ctrl+K) |
 //! | `comp.set_work_area` | B / N (work area start / end) |
 //! | `comp.trim_to_work_area` | Composition > Trim Comp to Work Area |
 //! | `folder.create` | Project panel > New Folder |
@@ -54,7 +55,10 @@ use std::sync::Arc;
 use bae_app::{AppBuilder, AppModule};
 use bae_model::{CommandRegistry, DynCommand};
 
-pub use comp::{CompOutput, CreateComp, CreateFolder, SetWorkArea, TrimCompToWorkArea};
+pub use comp::{
+    CompOutput, CreateComp, CreateFolder, ResizeAnchor, SetCompSettings, SetWorkArea,
+    TrimCompToWorkArea,
+};
 pub use dimensions::SeparateDimensions;
 pub use keys::{
     CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, KeyEdit, KeyRef, KeysOutput, MoveKeys,
@@ -70,6 +74,7 @@ pub use layer::{
 pub fn register_commands(r: &mut CommandRegistry) {
     let results = [
         r.register(CreateComp),
+        r.register(SetCompSettings),
         r.register(SetWorkArea),
         r.register(TrimCompToWorkArea),
         r.register(CreateFolder),

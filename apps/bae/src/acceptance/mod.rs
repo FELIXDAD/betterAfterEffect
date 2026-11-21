@@ -18,6 +18,7 @@
 //! re-run themselves in a child process ([`in_child`]) so they cannot disturb
 //! the other tests of this binary.
 
+mod dialogs;
 mod files_flow;
 mod i18n_scan;
 mod layers;
@@ -647,11 +648,28 @@ pub(crate) fn gpu() -> Option<Arc<bae_gpu::GpuContext>> {
         .clone()
 }
 
-/// New comp (Cmd+N) with one layer from `Layer > New > <registry id>`; returns
-/// the harness settled.
-pub(crate) fn comp_with(h: &mut Ui, layers: &[&str]) {
+/// Whether a motion dialog (Composition Settings …) is open.
+pub(crate) fn dialog_open(h: &Ui) -> bool {
+    h.state()
+        .app
+        .resource::<bae_ui_motion::SharedDialogs>()
+        .is_some_and(|d| d.is_open())
+}
+
+/// New Composition the AE way: Cmd+N opens Composition Settings, Enter (OK)
+/// creates the comp with the dialog's settings and opens it.
+pub(crate) fn new_comp(h: &mut Ui) {
     let (m, k) = cmd(Key::N);
     key(h, m, k);
+    assert!(dialog_open(h), "Cmd+N opened no Composition Settings");
+    key(h, Modifiers::NONE, Key::Enter);
+    assert!(!dialog_open(h), "Enter did not close Composition Settings");
+}
+
+/// New comp (Cmd+N, OK) with one layer from `Layer > New > <registry id>`;
+/// returns the harness settled.
+pub(crate) fn comp_with(h: &mut Ui, layers: &[&str]) {
+    new_comp(h);
     assert!(h.state().active_comp().is_some(), "Cmd+N opened no comp");
     for id in layers {
         assert!(h.state_mut().menu(id), "{id} disabled with a comp open");

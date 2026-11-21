@@ -1,0 +1,120 @@
+//! Modal dialogs of the motion workspace (AE's Composition Settings, …), drawn by
+//! the workbench through [`bae_ui::DialogHost`].
+//!
+//! The open dialog and the values AE remembers between uses ("last used"
+//! settings) live in the [`SharedDialogs`] app resource. A dialog only collects
+//! values; OK runs one `bae-motion` command (one undo step), Cancel runs none.
+
+mod comp_settings;
+pub(crate) mod fields;
+
+use std::sync::{Arc, Mutex, MutexGuard};
+
+use bae_app::Resources;
+use bae_model::PrimPath;
+use bae_ui::PanelContext;
+
+pub use comp_settings::{CompSettings, CompSettingsMemory};
+
+use crate::session::SharedSession;
+
+/// The dialog that is open.
+#[derive(Clone, Debug)]
+pub enum Dialog {
+    /// Composition > New Composition (Cmd/Ctrl+N) and Composition Settings
+    /// (Cmd/Ctrl+K).
+    CompSettings(Box<CompSettings>),
+}
+
+/// Open dialog and remembered values.
+#[derive(Debug, Default)]
+pub struct Dialogs {
+    pub open: Option<Dialog>,
+    /// Settings of the last comp created through the dialog (AE starts the next
+    /// New Composition from them).
+    pub comp: CompSettingsMemory,
+}
+
+/// The dialogs as an app resource (inserted by [`crate::MotionUiModule`]).
+#[derive(Clone, Debug, Default)]
+pub struct SharedDialogs(Arc<Mutex<Dialogs>>);
+
+impl SharedDialogs {
+    pub fn lock(&self) -> MutexGuard<'_, Dialogs> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Whether a motion dialog is open.
+    pub fn is_open(&self) -> bool {
+        self.lock().open.is_some()
+    }
+}
+
+/// The dialogs resource; a private one when the app did not insert it (tests).
+pub(crate) fn shared(resources: &Resources) -> SharedDialogs {
+    resources
+        .get::<SharedDialogs>()
+        .cloned()
+        .unwrap_or_else(|| {
+            thread_local! {
+                static LOCAL: SharedDialogs = SharedDialogs::default();
+            }
+            LOCAL.with(Clone::clone)
+        })
+}
+
+/// Open Composition Settings for a new comp (in `folder`, default /comps).
+pub(crate) fn new_comp(cx: &PanelContext<'_>, session: &SharedSession, folder: Option<PrimPath>) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    // One dialog at a time (two Cmd+N in one frame open it once).
+    if d.open.is_some() {
+        return;
+    }
+    let settings = CompSettings::new_comp(cx.stage, session, &d.comp, folder);
+    d.open = Some(Dialog::CompSettings(Box::new(settings)));
+}
+
+/// Open Composition Settings for an existing comp.
+pub(crate) fn comp_settings(cx: &PanelContext<'_>, comp: &PrimPath) {
+    let Some(settings) = CompSettings::edit(cx.stage, comp) else {
+        return;
+    };
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none() {
+        d.open = Some(Dialog::CompSettings(Box::new(settings)));
+    }
+}
+
+/// English strings of Composition Settings (i18n completeness test).
+#[cfg(test)]
+pub(crate) fn comp_settings_strings() -> &'static [&'static str] {
+    comp_settings::STRINGS
+}
+
+/// Draws the open motion dialog (registered in `Registry<dyn DialogHost>`).
+#[derive(Debug, Default)]
+pub struct MotionDialogs;
+
+impl bae_ui::DialogHost for MotionDialogs {
+    fn is_open(&self, resources: &Resources) -> bool {
+        shared(resources).is_open()
+    }
+
+    fn ui(&self, ctx: &egui::Context, cx: &mut PanelContext<'_>) {
+        let dialogs = shared(cx.resources);
+        // Draw without holding the lock (a dialog may read the memory).
+        let Some(mut open) = dialogs.lock().open.take() else {
+            return;
+        };
+        let session = crate::common::session(cx.resources);
+        let keep = match &mut open {
+            Dialog::CompSettings(d) => d.ui(ctx, cx, &session, &dialogs),
+        };
+        let mut lock = dialogs.lock();
+        if keep && lock.open.is_none() {
+            lock.open = Some(open);
+        }
+    }
+}

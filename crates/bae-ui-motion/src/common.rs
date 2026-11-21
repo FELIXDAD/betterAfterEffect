@@ -484,47 +484,10 @@ fn number_after(name: &str, base: &str) -> Option<u32> {
     name.strip_prefix(base)?.trim().parse().ok()
 }
 
-/// Create a comp with a localized default name and open it once it exists.
-pub(crate) fn new_comp(
-    cx: &mut PanelContext<'_>,
-    session: &SharedSession,
-    folder: Option<&PrimPath>,
-) {
-    let stage = cx.stage;
-    let base = tr("Comp");
-    let max = query::comps(stage)
-        .iter()
-        .filter_map(|c| {
-            query::display_name_of(stage, c)
-                .strip_prefix(base)?
-                .trim()
-                .parse::<u32>()
-                .ok()
-        })
-        .max()
-        .unwrap_or(0);
-    let parent = folder
-        .cloned()
-        .unwrap_or_else(|| PrimPath::new(query::COMPS_FOLDER).expect("valid"));
-    // Comps about to be created this frame count too (Cmd+N twice).
-    let reserved = session
-        .lock()
-        .reserved_names(&parent)
-        .filter_map(|n| number_after(&n, base))
-        .max()
-        .unwrap_or(0);
-    let name = format!("{base} {}", max.max(reserved) + 1);
-    let Ok(path) = parent.child(&query::unique_child_name(stage, &parent, &name)) else {
-        return;
-    };
-    let mut params = json!({"name": name});
-    if let Some(f) = folder {
-        params["parent"] = json!(f);
-    }
-    cx.invoke_with("comp.create", params);
-    let mut s = session.lock();
-    s.expect(Pending::Comp(path.clone()));
-    s.reserve_name(path, name);
+/// New Composition: open Composition Settings for a new comp in `folder`
+/// (default /comps); OK creates it and opens it (AE).
+pub(crate) fn new_comp(cx: &PanelContext<'_>, session: &SharedSession, folder: Option<&PrimPath>) {
+    crate::dialogs::new_comp(cx, session, folder.cloned());
 }
 
 /// Create a layer in the active comp (above the selected layer, like AE) and select

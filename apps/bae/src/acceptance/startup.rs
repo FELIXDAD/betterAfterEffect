@@ -28,7 +28,7 @@ fn welcome_open(h: &Ui) -> bool {
 
 /// The dialog still works as an app afterwards: Cmd+N makes a comp.
 fn app_works(h: &mut Ui) {
-    key(h, Modifiers::COMMAND, Key::N);
+    new_comp(h);
     assert!(
         h.state().active_comp().is_some(),
         "Cmd+N after closing the welcome dialog"
@@ -109,6 +109,10 @@ fn shortcuts_behind_the_welcome_dialog() {
     // behind it while it is open.
     let mut h = first_launch();
     key(&mut h, Modifiers::COMMAND, Key::N);
+    assert!(
+        !dialog_open(&h),
+        "Cmd+N behind the welcome dialog opened Composition Settings"
+    );
     let leaked = h.state().active_comp().is_some();
     assert!(
         !leaked,

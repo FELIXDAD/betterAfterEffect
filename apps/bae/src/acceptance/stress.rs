@@ -53,7 +53,7 @@ fn deep_undo_stack_round_trips() {
 #[test]
 fn rapid_repeated_commands() {
     let mut h = gui();
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     // 100 Cmd+Y presses in a row: 100 solids, unique names.
     for _ in 0..100 {
         press(&mut h, Modifiers::COMMAND, Key::Y);
@@ -107,7 +107,7 @@ fn rapid_repeated_commands() {
 #[test]
 fn frame_time_with_many_layers() {
     let mut h = gui();
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     for _ in 0..200 {
         press(&mut h, Modifiers::COMMAND, Key::Y);
     }
@@ -128,7 +128,7 @@ fn key_presses_piled_up_in_one_frame() {
     // A slow frame (heavy comp, debug build) collects several key events; each
     // still runs once, against the project as the previous one left it.
     let mut h = gui();
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     let mut events = Vec::new();
     for _ in 0..5 {
         events.extend(key_events(Modifiers::COMMAND, Key::Y));
@@ -151,7 +151,7 @@ fn key_presses_piled_up_in_one_frame() {
 #[test]
 fn same_frame_names_stay_unique_across_kinds_comps_and_renamed_layers() {
     let mut h = gui();
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     // A layer renamed to "Solid 7": new solids continue after it (AE: max + 1).
     assert!(h.state_mut().menu("motion.layer.new.solid"));
     settle(&mut h);
@@ -184,19 +184,23 @@ fn same_frame_names_stay_unique_across_kinds_comps_and_renamed_layers() {
         ],
         "same-frame names"
     );
-    // Two Cmd+N in one frame: Comp 2 and Comp 3, the last one open.
+    // Two Cmd+N in one frame: one Composition Settings (a second dialog does
+    // not replace or stack on the first); OK makes Comp 2 and opens it.
     let mut events = Vec::new();
     for _ in 0..2 {
         events.extend(key_events(Modifiers::COMMAND, Key::N));
     }
     send_batch(&mut h, events);
     settle(&mut h);
+    assert!(dialog_open(&h));
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(!dialog_open(&h));
     let mut comps: Vec<String> = bae_motion::query::comps(h.state().stage())
         .iter()
         .map(|c| h.state().name(c))
         .collect();
     comps.sort();
-    assert_eq!(comps, ["Comp 1", "Comp 2", "Comp 3"]);
+    assert_eq!(comps, ["Comp 1", "Comp 2"]);
     let active = h.state().active_comp().unwrap();
-    assert_eq!(h.state().name(&active), "Comp 3");
+    assert_eq!(h.state().name(&active), "Comp 2");
 }

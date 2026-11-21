@@ -64,6 +64,16 @@ pub fn items() -> Vec<(&'static str, MenuItemSpec)> {
             item(&["Composition"], "New Composition...", ids::NEW_COMP),
         ),
         (
+            "motion.comp.composition_settings",
+            item(
+                &["Composition"],
+                "Composition Settings...",
+                ids::COMP_SETTINGS,
+            )
+            .order(1)
+            .enabled_when(has_comp),
+        ),
+        (
             "motion.composition.trim",
             item(&["Composition"], "Trim Comp to Work Area", ids::TRIM_COMP)
                 .group(1)

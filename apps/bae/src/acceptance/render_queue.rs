@@ -366,7 +366,7 @@ fn editing_while_rendering_and_several_items() {
         119,
     );
     // A second comp, queued twice with different ranges and formats.
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     assert!(h.state_mut().menu("motion.layer.new.solid"));
     settle(&mut h);
     key(&mut h, Modifiers::COMMAND, Key::M);

@@ -24,6 +24,7 @@ pub mod actions;
 pub mod catalog;
 mod common;
 pub mod demo;
+pub mod dialogs;
 mod gpu_preview;
 mod graph;
 mod i18n;
@@ -40,6 +41,7 @@ mod viewer;
 use bae_app::{AppBuilder, AppModule};
 use bae_ui::{ActionHandler, ActionInfo, KeymapBindings, MenuItemSpec, PanelKind};
 
+pub use dialogs::{MotionDialogs, SharedDialogs};
 pub use gpu_preview::PreviewSources;
 pub use panels::{EffectControlsPanel, PreviewPanel, PropertiesPanel};
 pub use project::ProjectPanel;
@@ -67,6 +69,11 @@ impl AppModule for MotionUiModule {
         if app.resource::<SharedRenderQueue>().is_none() {
             app.insert_resource(SharedRenderQueue::default());
         }
+        if app.resource::<SharedDialogs>().is_none() {
+            app.insert_resource(SharedDialogs::default());
+        }
+        let dialogs: std::sync::Arc<dyn bae_ui::DialogHost> = std::sync::Arc::new(MotionDialogs);
+        let _ = app.register_arc::<dyn bae_ui::DialogHost>("bae-ui-motion", dialogs);
         let owner = app.current_owner();
         let kinds = app.registry::<PanelKind>();
         let panels: [(&str, PanelKind); 7] = [
