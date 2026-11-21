@@ -175,9 +175,9 @@ fn every_string_translated() {
                     check(p.unit);
                     match p.kind {
                         Kind::Choice { options, .. } => options.iter().for_each(|o| check(o)),
-                        Kind::Slider { left, right, .. } => {
-                            check(left);
-                            check(right);
+                        Kind::Slider { .. } => {
+                            check("Darker");
+                            check("Lighter");
                         }
                         Kind::Path { button } => check(button),
                         _ => {}

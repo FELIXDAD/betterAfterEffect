@@ -580,14 +580,9 @@ impl SettingsDialog {
                 }
                 unit_label(ui, tr("seconds"));
             }
-            Kind::Slider {
-                min,
-                max,
-                left,
-                right,
-            } => {
+            Kind::Slider { min, max } => {
                 field_label(ui, label);
-                ui.label(RichText::new(tr(left)).color(color::TEXT_DIM));
+                ui.label(RichText::new(tr("Darker")).color(color::TEXT_DIM));
                 let mut v = draft.float(p.key);
                 let r = ui.add(
                     egui::Slider::new(&mut v, min..=max)
@@ -598,7 +593,7 @@ impl SettingsDialog {
                 if r.changed() {
                     draft.set(p.key, v);
                 }
-                ui.label(RichText::new(tr(right)).color(color::TEXT_DIM));
+                ui.label(RichText::new(tr("Lighter")).color(color::TEXT_DIM));
             }
             Kind::Choice { options, radio } => {
                 field_label(ui, label);

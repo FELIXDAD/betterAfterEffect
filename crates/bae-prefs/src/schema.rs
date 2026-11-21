@@ -14,13 +14,9 @@ pub enum Kind {
     Int { min: i64, max: i64 },
     /// Number field with `decimals` digits.
     Float { min: f64, max: f64, decimals: u8 },
-    /// Slider from `min` to `max` with labels at both ends (Appearance).
-    Slider {
-        min: f64,
-        max: f64,
-        left: &'static str,
-        right: &'static str,
-    },
+    /// Slider from `min` to `max`, "Darker" on the left and "Lighter" on the
+    /// right (Appearance).
+    Slider { min: f64, max: f64 },
     /// Dropdown (or radio buttons when `radio`); the value is the English option text.
     Choice {
         options: &'static [&'static str],
@@ -86,7 +82,9 @@ pub struct Pref {
     pub default: DefaultValue,
     /// Unit after the field ("minutes", "%"), English, translated.
     pub unit: &'static str,
-    /// `Section/Key` in AE's preferences file.
+    /// `Section/Key` in AE's preferences file. Debug builds only (empty in
+    /// release builds, to keep the strings out of the executable); the source is
+    /// the reference.
     pub ae: &'static str,
     pub enabled: Option<When>,
     pub os: Os,
@@ -119,7 +117,9 @@ impl Pref {
         self
     }
     const fn ae(mut self, ae: &'static str) -> Self {
-        self.ae = ae;
+        if cfg!(debug_assertions) {
+            self.ae = ae;
+        }
         self
     }
     const fn when(mut self, key: &'static str) -> Self {
@@ -207,12 +207,7 @@ const fn slider(key: &'static str, label: &'static str, v: f64) -> Pref {
     Pref::new(
         key,
         label,
-        Kind::Slider {
-            min: 0.0,
-            max: 1.0,
-            left: "Darker",
-            right: "Lighter",
-        },
+        Kind::Slider { min: 0.0, max: 1.0 },
         DefaultValue::Float(v),
     )
 }
