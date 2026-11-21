@@ -25,6 +25,7 @@ use bae_model::{AuthorId, Stage};
 use egui::{Context, Event, Key, Rect, Ui, pos2, vec2};
 use serde::{Deserialize, Serialize};
 
+use crate::a11y::Accessible as _;
 use crate::action::{ActionHandler, ActionInfo, Invocation, ids};
 use crate::dock::{Dock, Layout, PanelHost, PanelId, TabInfo};
 use crate::i18n::tr;
@@ -85,25 +86,25 @@ pub struct WorkbenchContext<'a> {
 
 /// The tools shown in the toolbar of AE-keymap workspaces (selection is view state
 /// until the motion workspace, workstream 12, registers real tools).
-const AE_TOOLS: [Icon; 18] = [
-    Icon::Home,
-    Icon::Selection,
-    Icon::Hand,
-    Icon::Zoom,
-    Icon::Orbit,
-    Icon::PanCamera,
-    Icon::Dolly,
-    Icon::Rotate,
-    Icon::PanBehind,
-    Icon::Rectangle,
-    Icon::Extrude,
-    Icon::Pen,
-    Icon::Type,
-    Icon::Brush,
-    Icon::CloneStamp,
-    Icon::Eraser,
-    Icon::RotoBrush,
-    Icon::Puppet,
+const AE_TOOLS: [(Icon, &str); 18] = [
+    (Icon::Home, "Home"),
+    (Icon::Selection, "Selection Tool"),
+    (Icon::Hand, "Hand Tool"),
+    (Icon::Zoom, "Zoom Tool"),
+    (Icon::Orbit, "Orbit Around Cursor Tool"),
+    (Icon::PanCamera, "Pan Under Cursor Tool"),
+    (Icon::Dolly, "Dolly Towards Cursor Tool"),
+    (Icon::Rotate, "Rotation Tool"),
+    (Icon::PanBehind, "Pan Behind (Anchor Point) Tool"),
+    (Icon::Rectangle, "Rectangle Tool"),
+    (Icon::Extrude, "Cube Tool"),
+    (Icon::Pen, "Pen Tool"),
+    (Icon::Type, "Horizontal Type Tool"),
+    (Icon::Brush, "Brush Tool"),
+    (Icon::CloneStamp, "Clone Stamp Tool"),
+    (Icon::Eraser, "Eraser Tool"),
+    (Icon::RotoBrush, "Roto Brush Tool"),
+    (Icon::Puppet, "Puppet Position Pin Tool"),
 ];
 
 pub struct Workbench {
@@ -497,7 +498,11 @@ impl Workbench {
         status: impl FnOnce(&mut Ui),
     ) -> Vec<Invocation> {
         self.refresh_registries();
-        if !self.record_shortcut(ui.ctx()) {
+        // A modal dialog (the welcome / role picker) owns the keyboard: no
+        // shortcuts and no panel keys reach the project behind it.
+        let modal = self.role_picker_open();
+        crate::panel::set_modal_open(ui.ctx(), modal);
+        if !modal && !self.record_shortcut(ui.ctx()) {
             self.collect_shortcuts(ui.ctx());
         }
 
@@ -572,8 +577,15 @@ impl Workbench {
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
         tools.set_clip_rect(area);
-        for (i, icon) in AE_TOOLS.into_iter().enumerate() {
-            if icons::button(&mut tools, icon, 24.0, i == self.tool).clicked() && i > 0 {
+        for (i, (icon, name)) in AE_TOOLS.into_iter().enumerate() {
+            let selected = i == self.tool;
+            // One tool is active at a time: radio buttons.
+            let resp = icons::button(&mut tools, icon, 24.0, selected).labeled_toggle(
+                egui::WidgetType::RadioButton,
+                tr(name),
+                selected,
+            );
+            if resp.clicked() && i > 0 {
                 self.tool = i;
             }
         }
@@ -1496,6 +1508,28 @@ mod tests {
         frame(&mut wb, vec![]);
         wb.show_role_picker();
         frame(&mut wb, vec![]);
+    }
+
+    /// Issue #112: while the modal welcome / role picker is open, shortcuts
+    /// and panel keys do not reach the project behind it.
+    #[test]
+    fn no_shortcuts_behind_a_modal() {
+        let (kinds, presets, keymaps, actions) = registries();
+        let mut wb =
+            Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
+        let ctx = Context::default();
+        wb.show_role_picker();
+        frame_in(&ctx, &mut wb, vec![]);
+        assert!(frame_in(&ctx, &mut wb, vec![key(Key::U, Modifiers::NONE)]).is_empty());
+        assert!(crate::panel::modal_open(&ctx));
+        frame_in(&ctx, &mut wb, vec![key(Key::Escape, Modifiers::NONE)]);
+        assert!(!wb.role_picker_open());
+        frame_in(&ctx, &mut wb, vec![]);
+        assert!(!crate::panel::modal_open(&ctx));
+        assert_eq!(
+            frame_in(&ctx, &mut wb, vec![key(Key::U, Modifiers::NONE)]),
+            vec![Invocation::new("layer.reveal_keyframes")]
+        );
     }
 
     #[test]

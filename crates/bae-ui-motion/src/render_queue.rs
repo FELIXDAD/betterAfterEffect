@@ -370,14 +370,26 @@ pub(crate) fn render_job(
     progress: &mut dyn FnMut(usize),
 ) -> Result<ItemStatus, RenderError> {
     let started = Instant::now();
-    let times: Vec<(Option<i64>, Time)> = (job.start..=job.end)
+    let output = output_path(&job.output, job.format)?;
+    // AE limits the range to the comp.
+    let last = bae_motion::query::comp_info(stage, &job.comp)
+        .map(|c| c.frame_count() - 1)
+        .ok_or_else(|| RenderError::Other(tr("The composition no longer exists.").to_owned()))?;
+    let (start, end) = (job.start.max(0), job.end.min(last));
+    if start > end {
+        return Err(RenderError::Other(
+            tr("The frames are outside the composition (0–{last}).")
+                .replace("{last}", &last.to_string()),
+        ));
+    }
+    let times: Vec<(Option<i64>, Time)> = (start..=end)
         .map(|f| (Some(f), job.rate.frame_to_time(f)))
         .collect();
     // One frame of a sequence pattern still gets a numbered file.
     let path = if times.len() == 1 && job.format.is_image() {
-        frame_file(&job.output, job.start)
+        frame_file(&output, start)
     } else {
-        job.output.clone()
+        output
     };
     let settings = ExportSettings::new(job.format, path);
     let request = RenderRequest {
@@ -413,6 +425,28 @@ pub(crate) fn render_job(
             first: first.unwrap_or_default(),
             seconds: started.elapsed().as_secs_f64(),
         }
+    })
+}
+
+/// The output file to write: refuses an empty one (it would land in the
+/// process's working directory, `/` for an app started from Finder) and adds
+/// the format's extension when the name has none (AE).
+fn output_path(output: &Path, format: ExportFormat) -> Result<PathBuf, RenderError> {
+    if output.as_os_str().to_string_lossy().trim().is_empty() || output.file_name().is_none() {
+        return Err(RenderError::Other(
+            tr("Choose where to render: Output To is empty.").to_owned(),
+        ));
+    }
+    let has_extension = output
+        .extension()
+        .is_some_and(|e| ExportFormat::parse(&e.to_string_lossy().to_ascii_lowercase()).is_some());
+    Ok(if has_extension {
+        output.to_owned()
+    } else {
+        let mut name = output.file_name().unwrap_or_default().to_os_string();
+        name.push(".");
+        name.push(format.extension());
+        output.with_file_name(name)
     })
 }
 
@@ -819,6 +853,31 @@ mod tests {
         assert_eq!(q.items().len(), 1);
         assert_eq!(sanitize("  ../a#b  "), "_a_b");
         assert_eq!(sanitize("..."), "comp");
+    }
+
+    /// Issue #110: an empty output is refused; a name without the format's
+    /// extension gets it; one with an image or movie extension is kept.
+    #[test]
+    fn output_path_rules() {
+        assert!(output_path(Path::new(""), ExportFormat::Png).is_err());
+        assert!(output_path(Path::new("  "), ExportFormat::Png).is_err());
+        let p = |s: &str, f| output_path(Path::new(s), f).unwrap();
+        assert_eq!(
+            p("/r/noext_[####]", ExportFormat::Png),
+            Path::new("/r/noext_[####].png")
+        );
+        assert_eq!(
+            p("/r/v1.2_[####]", ExportFormat::Tiff),
+            Path::new("/r/v1.2_[####].tif")
+        );
+        assert_eq!(
+            p("/r/a_####.exr", ExportFormat::Exr),
+            Path::new("/r/a_####.exr")
+        );
+        assert_eq!(
+            p("/r/a_####.png", ExportFormat::Tiff),
+            Path::new("/r/a_####.png")
+        );
     }
 
     #[test]

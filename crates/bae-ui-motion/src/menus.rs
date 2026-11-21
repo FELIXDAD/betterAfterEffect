@@ -167,6 +167,14 @@ pub fn items() -> Vec<(&'static str, MenuItemSpec)> {
                 .order(2)
                 .enabled_when(has_layers),
         ),
+        // Window > Render Queue (AE, Cmd/Ctrl+Alt+0): the same invocation as the
+        // keymap's panel binding, so the menu shows that shortcut and toggles.
+        (
+            "motion.window.render_queue",
+            MenuItemSpec::new(&["Window"], "Render Queue", bae_ui::action::ids::OPEN_PANEL)
+                .params(json!({"id": "render_queue", "toggle": true}))
+                .order(75),
+        ),
     ]
 }
 

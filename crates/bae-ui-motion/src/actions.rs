@@ -11,7 +11,7 @@ use bae_ui::{Binding, Invocation, KeymapBindings, PanelContext};
 use serde_json::json;
 
 use crate::common;
-use crate::session::{KeyClipboard, Reveal, SharedSession};
+use crate::session::{KeyClipboard, Pending, Reveal, SharedSession};
 
 pub mod ids {
     pub const PLAY: &str = "motion.play";
@@ -132,6 +132,7 @@ pub fn bindings() -> KeymapBindings {
         b("F2", ids::DESELECT_ALL),
         reveal("U", "animated", false),
         b("Cmd+N", ids::NEW_COMP),
+        b("Cmd+Shift+X", ids::TRIM_COMP),
         b("Cmd+M", ids::ADD_TO_RENDER_QUEUE),
         layer("Cmd+Y", "solid"),
         layer("Cmd+Alt+Y", "adjustment"),
@@ -344,11 +345,21 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 }
             }
         }
+        // AE selects the new layers, so the next edit (or the next split
+        // further on) applies to them.
         ids::DUPLICATE if !layers.is_empty() => {
             cx.invoke_with("layer.duplicate", json!({"layers": layers}));
+            s.expect(Pending::NewLayers {
+                comp: info.path.clone(),
+                before: query::comp_layers(stage, &info.path),
+            });
         }
         ids::SPLIT if !layers.is_empty() => {
             cx.invoke_with("layer.split", json!({"layers": layers, "time": now}));
+            s.expect(Pending::NewLayers {
+                comp: info.path.clone(),
+                before: query::comp_layers(stage, &info.path),
+            });
         }
         ids::DELETE => {
             if !keys.is_empty() {

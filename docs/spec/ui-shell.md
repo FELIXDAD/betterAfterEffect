@@ -71,3 +71,7 @@ app.register("timeline", PanelKind::new("Timeline", |spawn| Box::new(Timeline::n
 ## 7. 输入法
 
 `Workbench` 每帧把 `PlatformOutput::ime` 的锚点换成光标矩形（`workbench::ime_follows_caret`），拼音候选框出现在光标下方。自己画文字编辑的面板（例如合成查看器里的文字工具）设置 `PlatformOutput::ime` 时同样会被处理。文本框有焦点时，不带修饰键的快捷键和文本编辑键不会触发命令。验证报告见 `docs/workstreams/11-ui-shell.md`。
+
+## 无障碍（accesskit）
+
+自绘控件（`ui.interact` / `allocate_exact_size` 做的按钮、开关、标签页、拆分条、热文本）都要用 `bae_ui::Accessible`（`labeled` / `labeled_toggle` / `labeled_value`）给出标签，固定文字走 `tr`、中英文都要有；egui 自带控件自己带标签。读屏（VoiceOver、讲述人）和 Windows 上的 UI 自动化都靠这些标签找控件，验收测试 `startup::controls_have_accessibility_labels` 要求没有标签的控件不超过 10%。工具栏工具和工作区栏条目用单选按钮角色（同时只有一个处于选中状态）。

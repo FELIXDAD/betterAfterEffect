@@ -63,7 +63,11 @@ pub fn run(app: &mut App, global: &GlobalOptions) -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(error) => {
-                eprintln!("{}: {error:#}", bae_platform::BINARY_NAME);
+                eprintln!(
+                    "{}: {}",
+                    bae_platform::BINARY_NAME,
+                    crate::open_error::describe(path, &error)
+                );
                 ExitCode::FAILURE
             }
         };
@@ -130,7 +134,10 @@ fn render_offscreen(
     let mut document = Document::new(app.resource::<Arc<bae_ui::history::HistoryLog>>().cloned());
     document.add_module_commands(app);
     if let Some(path) = project {
-        document.open(path)?;
+        document
+            .open(path)
+            .map_err(|error| anyhow::anyhow!(crate::open_error::describe(path, &error)))?;
+        crate::view_state::restore(app, &document);
     }
     // `BAE_SMOKE_DEMO=1`: a demo project open in the Motion workspace (screenshots).
     let demo = std::env::var_os("BAE_SMOKE_DEMO").is_some();

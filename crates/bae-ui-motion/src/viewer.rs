@@ -7,6 +7,7 @@ use bae_anim::glam::{DMat4, DVec2, DVec3};
 use bae_anim::{EvaluatedComp, Transform};
 use bae_model::{LayerKind, PrimPath, Time, Value};
 use bae_motion::query::{self, CompInfo};
+use bae_ui::Accessible as _;
 use bae_ui::icons::{self, Icon};
 use bae_ui::theme::{self, color};
 use bae_ui::widgets;
@@ -256,7 +257,9 @@ impl Panel for CompositionViewer {
         let bar_h = 28.0;
         let area = Rect::from_min_max(full.min, pos2(full.right(), full.bottom() - bar_h));
         let bar = Rect::from_min_max(pos2(full.left(), area.bottom()), full.max);
-        let resp = ui.allocate_rect(area, Sense::click_and_drag());
+        let resp = ui
+            .allocate_rect(area, Sense::click_and_drag())
+            .labeled(egui::WidgetType::Image, tr("Composition"));
 
         if let Some(up) = self.pending_zoom.take() {
             self.step_zoom(up, area, &info, ppp);
@@ -681,6 +684,7 @@ fn bottom_bar(
         (&mut v.grid, Icon::Guides, "Grid"),
     ] {
         if icons::button(ui, icon, 20.0, *on)
+            .labeled_toggle(egui::WidgetType::Checkbox, tr(tip), *on)
             .on_hover_text(tr(tip))
             .clicked()
         {

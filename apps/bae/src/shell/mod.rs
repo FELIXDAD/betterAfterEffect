@@ -41,7 +41,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::window::{Window, WindowId};
 
 use crate::document::{Document, Outcome};
-use crate::files::{self, CommitGate, FileDialogs, FileOutcome, NoDialogs};
+use crate::files::{self, CommitGate, FileDialogs, NoDialogs};
 use crate::ui::{self, PlaceholderViewer, StatusInfo, UiOutput, UiRenderer, Workspace};
 use bae_ui::Invocation;
 use bae_ui::action::ids;
@@ -75,7 +75,7 @@ impl AppModule for ShellModule {
         let owner = app.current_owner();
         let menu = app.registry::<bae_ui::MenuItemSpec>();
         menu.batch(|tx| {
-            for (id, item) in menu::file_items() {
+            for (id, item) in menu::file_items().into_iter().chain(menu::window_items()) {
                 if !tx.contains(id) {
                     let _ = tx.register(owner.clone(), id, item);
                 }
@@ -108,10 +108,19 @@ enum UserEvent {
     Menu(muda::MenuEvent),
     /// The GPU device was lost (not destroyed on purpose).
     DeviceLost,
+    /// A screen reader or UI automation client asked for the accessibility
+    /// tree or for an action (accesskit).
+    AccessKit(egui_winit::accesskit_winit::Event),
     /// Finder asked to open projects (double-click, Dock drop, `open`): macOS only,
     /// see `open_documents`.
     #[cfg(target_os = "macos")]
     OpenFiles(Vec<std::path::PathBuf>),
+}
+
+impl From<egui_winit::accesskit_winit::Event> for UserEvent {
+    fn from(event: egui_winit::accesskit_winit::Event) -> Self {
+        UserEvent::AccessKit(event)
+    }
 }
 
 /// A smoke test stops as failed if no frame completes for this long.
@@ -208,15 +217,23 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
             tracing::warn!("only the first project is opened: {}", path.display());
         }
         match document.open(path) {
-            Ok(()) => tracing::info!("opened {}", path.display()),
+            Ok(()) => {
+                tracing::info!("opened {}", path.display());
+                crate::view_state::restore(&mut app, &document);
+            }
             Err(error) if global.smoke_test.is_some() => {
-                eprintln!("{}: {error:#}", bae_platform::BINARY_NAME);
+                eprintln!(
+                    "{}: {}",
+                    bae_platform::BINARY_NAME,
+                    crate::open_error::describe(path, &error)
+                );
                 return ExitCode::FAILURE;
             }
             Err(error) => {
                 startup_error = Some(format!(
-                    "{}\n\n{error:#}",
-                    crate::i18n::tr("Could not open the project.")
+                    "{}\n\n{}",
+                    crate::i18n::tr("Could not open the project."),
+                    crate::open_error::describe(path, &error)
                 ));
             }
         }
@@ -248,6 +265,7 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         gate: CommitGate::default(),
         gate_deadline: None,
         ui_passes: 0,
+        accesskit_active: false,
         exit_code: ExitCode::SUCCESS,
     };
     if let Err(error) = event_loop.run_app(&mut shell) {
@@ -307,6 +325,8 @@ struct Shell {
     gate_deadline: Option<Instant>,
     /// UI frames run so far (egui passes, presented or not).
     ui_passes: u64,
+    /// A screen reader / automation client is reading the accesskit tree.
+    accesskit_active: bool,
     exit_code: ExitCode,
 }
 
@@ -339,7 +359,12 @@ impl Shell {
             &egui::Context::default(),
             bae_ui::titlebar::viewport_builder(bae_platform::APP_NAME),
         );
-        let attributes = self.window_state.apply(attributes, event_loop);
+        // Hidden until the accesskit adapter exists (it must be created before
+        // the window is first shown); `resumed` shows it.
+        let attributes = self
+            .window_state
+            .apply(attributes, event_loop)
+            .with_visible(false);
         #[cfg(windows)]
         let attributes = with_exe_icon(attributes);
         let window = event_loop
@@ -499,12 +524,14 @@ impl Shell {
             }
             ids::ABOUT => self.workspace.show_about(),
             id if files::is_file_command(id) => {
+                // Saves record the open comps; another project restores its own.
                 let mut dialogs = self.dialogs();
-                if files::run(&mut self.document, &mut *dialogs, &inv)
-                    == Some(FileOutcome::Replaced)
-                {
-                    self.project_replaced();
-                }
+                crate::view_state::run_file_command(
+                    &mut self.app,
+                    &mut self.document,
+                    &mut *dialogs,
+                    &inv,
+                );
             }
             ids::HELP => tracing::info!("`{}` is not implemented yet", inv.id),
             _ => match self.document.run(&inv) {
@@ -574,21 +601,13 @@ impl Shell {
     fn quit(&mut self, event_loop: &ActiveEventLoop) {
         if self.smoke.is_none() {
             let mut dialogs = self.dialogs();
-            if !files::confirm_discard(&mut self.document, &mut *dialogs) {
+            if !crate::view_state::confirm_quit(&self.app, &mut self.document, &mut *dialogs) {
                 self.request_redraw();
                 return;
             }
         }
         self.save_window_state();
         event_loop.exit();
-    }
-
-    /// Another project is open: drop the motion workspace's view state (active
-    /// comp, selection, playback) that belonged to the old one. The history log
-    /// was cleared by the document.
-    fn project_replaced(&mut self) {
-        self.app
-            .insert_resource(bae_ui_motion::SharedSession::default());
     }
 
     /// Keeps the native window title in step with the project name and the
@@ -631,9 +650,17 @@ impl Shell {
             return;
         }
         let window = view.window.clone();
+        // The accesskit adapter cannot be created again for a visible window:
+        // move it to the new egui state.
+        let mut view = view;
+        let accesskit = view.egui_state.accesskit.take();
         drop(view); // Release every resource of the dead device first.
         match self.create_view(window) {
-            Ok(view) => {
+            Ok(mut view) => {
+                view.egui_state.accesskit = accesskit;
+                if self.accesskit_active {
+                    view.egui_ctx.enable_accesskit();
+                }
                 view.window.request_redraw();
                 self.view = Some(view);
             }
@@ -902,7 +929,12 @@ impl ApplicationHandler<UserEvent> for Shell {
             Err(error) => return self.fail(event_loop, &error),
         };
         match self.create_view(window) {
-            Ok(view) => {
+            Ok(mut view) => {
+                // Screen readers (VoiceOver, Narrator) and UI automation read the
+                // labelled widgets through accesskit (issue #116).
+                view.egui_state
+                    .init_accesskit(event_loop, &view.window, self.proxy.clone());
+                view.window.set_visible(true);
                 if self.menu.is_none() {
                     let contributed = self.workspace.contributed_menus(&self.app);
                     match menu::AppMenu::new(&self.workspace.workspaces(), &contributed) {
@@ -974,6 +1006,34 @@ impl ApplicationHandler<UserEvent> for Shell {
                     .as_ref()
                     .and_then(|m| m.contributed_invocation(id))
                     .unwrap_or_else(|| menu::invocation(id));
+                // A modal dialog is open: menu commands (and their key
+                // equivalents) do not reach the project behind it; Quit still works.
+                if self.workspace.modal_open() && inv.id != ids::QUIT {
+                    return;
+                }
+                // Undo / Redo (their native key equivalents too) while a text
+                // field is focused undo the typing, as in any Mac / Windows app.
+                if (inv.id == ids::UNDO || inv.id == ids::REDO)
+                    && let Some(view) = self.view.as_mut()
+                    && view.egui_ctx.text_edit_focused()
+                {
+                    let modifiers = egui::Modifiers {
+                        shift: inv.id == ids::REDO,
+                        ..egui::Modifiers::COMMAND
+                    };
+                    view.egui_state
+                        .egui_input_mut()
+                        .events
+                        .push(egui::Event::Key {
+                            key: egui::Key::Z,
+                            physical_key: Some(egui::Key::Z),
+                            pressed: true,
+                            repeat: false,
+                            modifiers,
+                        });
+                    view.window.request_redraw();
+                    return;
+                }
                 // Queued behind the edits the last frame produced (about_to_wait
                 // runs them in order), not ahead of them.
                 self.pending.push(inv);
@@ -981,9 +1041,31 @@ impl ApplicationHandler<UserEvent> for Shell {
             UserEvent::DeviceLost => self.recover_device(event_loop),
             #[cfg(target_os = "macos")]
             UserEvent::OpenFiles(paths) => {
+                // A file command like File > Open: `dispatch` runs it through
+                // `view_state::run_file_command`, so the project's comps are restored.
                 if let Some(inv) = open_files_invocation(&paths) {
                     self.pending.push(inv);
                 }
+            }
+            UserEvent::AccessKit(event) => {
+                use egui_winit::accesskit_winit::WindowEvent as A;
+                let Some(view) = self.view.as_mut() else {
+                    return;
+                };
+                match event.window_event {
+                    A::InitialTreeRequested => {
+                        self.accesskit_active = true;
+                        view.egui_ctx.enable_accesskit();
+                    }
+                    A::ActionRequested(request) => {
+                        view.egui_state.on_accesskit_action_request(request);
+                    }
+                    A::AccessibilityDeactivated => {
+                        self.accesskit_active = false;
+                        view.egui_ctx.disable_accesskit();
+                    }
+                }
+                view.window.request_redraw();
             }
         }
     }

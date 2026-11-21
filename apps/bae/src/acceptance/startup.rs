@@ -104,7 +104,6 @@ fn welcome_dialog_role_choice_switches_workspace() {
 }
 
 #[test]
-#[ignore = "issue #112"]
 fn shortcuts_behind_the_welcome_dialog() {
     // The dialog is modal: AE-style shortcuts should not change the project
     // behind it while it is open.
@@ -133,7 +132,6 @@ fn version_line_and_about() {
 }
 
 #[test]
-#[ignore = "issue #116"]
 fn controls_have_accessibility_labels() {
     // VoiceOver reads accesskit labels; icon buttons (toolbar tools, panel
     // close / menu buttons, stopwatches), tabs and timeline rows have none.
@@ -150,6 +148,15 @@ fn controls_have_accessibility_labels() {
             labelled += 1;
         } else {
             unlabelled += 1;
+            let b = a.bounding_box().unwrap();
+            println!(
+                "unlabelled {:?} at ({:.0}, {:.0}) {:.0}×{:.0}",
+                a.role(),
+                b.x0,
+                b.y0,
+                b.width(),
+                b.height()
+            );
         }
     }
     println!("accessibility: {labelled} labelled, {unlabelled} unlabelled widgets");

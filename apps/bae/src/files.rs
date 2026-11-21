@@ -222,8 +222,9 @@ pub fn open(
         Ok(opened) => opened,
         Err(error) => {
             dialogs.error(&format!(
-                "{}\n\n{error:#}",
-                tr("Could not open the project.")
+                "{}\n\n{}",
+                tr("Could not open the project."),
+                crate::open_error::describe(&path, &error)
             ));
             return FileOutcome::Failed;
         }

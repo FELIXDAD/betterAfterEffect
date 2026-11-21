@@ -62,6 +62,12 @@ impl Workspace {
     }
 
     /// Ask for the user's role (first launch).
+    /// A modal dialog (the welcome / role picker) is open: it owns the keyboard
+    /// and the menu commands wait.
+    pub fn modal_open(&self) -> bool {
+        self.workbench.role_picker_open()
+    }
+
     pub fn show_role_picker(&mut self) {
         self.workbench.show_role_picker();
     }
@@ -170,8 +176,10 @@ fn status_bar(ui: &mut egui::Ui, status: &StatusInfo) {
             .size(10.5)
             .color(bae_ui::theme::color::TEXT_DIM)
     };
-    ui.label(small(status.gpu.clone()));
-    ui.separator();
+    if !status.gpu.is_empty() {
+        ui.label(small(status.gpu.clone()));
+        ui.separator();
+    }
     ui.label(small(format!("{} {:.2} ms", tr("frame"), status.frame_ms)));
     ui.separator();
     ui.label(small(format!(

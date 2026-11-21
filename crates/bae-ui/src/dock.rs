@@ -16,6 +16,7 @@ use egui::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::a11y::Accessible as _;
 use crate::i18n::tr;
 use crate::icons::{self, Icon};
 use crate::theme::{self, color, metrics};
@@ -764,7 +765,7 @@ impl Dock {
     }
 
     fn handle_keys(&mut self, ui: &Ui, frames: &[(FrameId, Rect)]) {
-        if ui.ctx().text_edit_focused() {
+        if ui.ctx().text_edit_focused() || crate::panel::modal_open(ui.ctx()) {
             return;
         }
         // AE: the ` (tilde) key maximizes the panel group under the pointer.
@@ -780,7 +781,9 @@ impl Dock {
         let mut changed = false;
         for s in splitters {
             let id = self.id.with(("split", &s.path, s.index));
-            let resp = ui.interact(s.rect.expand(1.0), id, Sense::drag());
+            let resp = ui
+                .interact(s.rect.expand(1.0), id, Sense::drag())
+                .labeled(egui::WidgetType::ResizeHandle, tr("Resize Panels"));
             if resp.hovered() || resp.dragged() {
                 ui.ctx().set_cursor_icon(match s.axis {
                     Axis::Row => CursorIcon::ResizeHorizontal,
@@ -888,7 +891,9 @@ impl Dock {
             );
             tab_rects.push((i, tab_rect));
             let tab_id = self.id.with(("tab", panel));
-            let resp = ui.interact(tab_rect, tab_id, Sense::click_and_drag());
+            let resp = ui
+                .interact(tab_rect, tab_id, Sense::click_and_drag())
+                .labeled_toggle(egui::WidgetType::SelectableLabel, tr(&info.title), active);
             let hovered = resp.hovered();
 
             if resp.clicked() || resp.secondary_clicked() {
@@ -917,7 +922,9 @@ impl Dock {
                 cx += geom::CLOSE_W + geom::CLOSE_GAP;
             }
             let close_rect = Rect::from_center_size(pos2(close_x + 2.0, mid_y), Vec2::splat(10.0));
-            let close_resp = ui.interact(close_rect, tab_id.with("close"), Sense::click());
+            let close_resp = ui
+                .interact(close_rect, tab_id.with("close"), Sense::click())
+                .labeled(egui::WidgetType::Button, tr("Close Panel"));
             if (active && info.viewer) || hovered || close_resp.hovered() {
                 let c = if close_resp.hovered() {
                     color::TEXT_STRONG
@@ -944,7 +951,9 @@ impl Dock {
                     pos2(cx + geom::LOCK_W / 2.0, mid_y - 0.5),
                     Vec2::splat(15.0),
                 );
-                let lr = ui.interact(r, tab_id.with("lock"), Sense::click());
+                let lr = ui
+                    .interact(r, tab_id.with("lock"), Sense::click())
+                    .labeled_toggle(egui::WidgetType::Checkbox, tr("Lock"), locked);
                 let icon = if locked { Icon::Lock } else { Icon::Unlock };
                 let c = if lr.hovered() {
                     color::TEXT_STRONG
@@ -969,7 +978,9 @@ impl Dock {
             if active {
                 cx += geom::MENU_GAP;
                 let mr = Rect::from_min_size(pos2(cx, mid_y - 6.0), vec2(geom::MENU_W, 12.0));
-                let menu_resp = ui.interact(mr.expand(3.0), tab_id.with("menu"), Sense::click());
+                let menu_resp = ui
+                    .interact(mr.expand(3.0), tab_id.with("menu"), Sense::click())
+                    .labeled(egui::WidgetType::Button, tr("Panel Menu"));
                 let mc = if menu_resp.hovered() {
                     color::TEXT_STRONG
                 } else {
@@ -1014,7 +1025,9 @@ impl Dock {
             pos2(bar.right() - 11.5, bar.top() + 12.5),
             Vec2::splat(14.0),
         );
-        let resp = ui.interact(r, self.id.with(("overflow", frame.id)), Sense::click());
+        let resp = ui
+            .interact(r, self.id.with(("overflow", frame.id)), Sense::click())
+            .labeled(egui::WidgetType::Button, tr("More Panels"));
         let c = if resp.hovered() {
             color::TEXT_STRONG
         } else {
@@ -1129,7 +1142,9 @@ impl Dock {
             };
             let header = Rect::from_min_size(pos2(rect.left(), y), vec2(rect.width(), h));
             let id = self.id.with(("tab", panel));
-            let resp = ui.interact(header, id, Sense::click_and_drag());
+            let resp = ui
+                .interact(header, id, Sense::click_and_drag())
+                .labeled_toggle(egui::WidgetType::CollapsingHeader, tr(&info.title), is_open);
             if resp.clicked() {
                 if is_open {
                     self.actions.push(Action::ToggleCollapsed(frame.id));
@@ -1161,7 +1176,9 @@ impl Dock {
                     pos2(rect.right() - geom::STACK_SEP_MARGIN - 9.0, y + 12.5),
                     Vec2::splat(16.0),
                 );
-                let menu_resp = ui.interact(mr, id.with("menu"), Sense::click());
+                let menu_resp = ui
+                    .interact(mr, id.with("menu"), Sense::click())
+                    .labeled(egui::WidgetType::Button, tr("Panel Menu"));
                 let mc = if menu_resp.hovered() {
                     color::TEXT_STRONG
                 } else {
@@ -1178,7 +1195,9 @@ impl Dock {
                 y += content_h;
                 // Drag the line under an expanded panel to change its height.
                 let handle = sep_stroke_rect(y).expand2(vec2(0.0, 2.0));
-                let hr = ui.interact(handle, id.with("stack-resize"), Sense::drag());
+                let hr = ui
+                    .interact(handle, id.with("stack-resize"), Sense::drag())
+                    .labeled(egui::WidgetType::ResizeHandle, tr("Resize Panels"));
                 if hr.hovered() || hr.dragged() {
                     ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
                 }
