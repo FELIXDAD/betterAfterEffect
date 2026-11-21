@@ -219,6 +219,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "Continuous (Lock Outgoing to Incoming)",
         "连续（锁定输入和输出）",
     ),
+    // Layer context menu items that are not in the menu bar.
+    ("Invert Selection", "反向选择"),
+    ("Select Children", "选择子项"),
     (
         "Add or Remove Keyframe at Current Time",
         "在当前时间添加或移除关键帧",

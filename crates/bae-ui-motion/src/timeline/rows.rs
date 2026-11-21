@@ -223,25 +223,16 @@ impl TimelinePanel {
                             layers: session.lock().selected_layers.clone(),
                         });
                     }
+                    let mut menu_out = None;
                     resp.context_menu(|ui| {
                         if !session.lock().selected_layers.contains(layer) {
                             select_layer(session, stage, layer, egui::Modifiers::NONE);
                         }
-                        new_layer_menu(ui, cx, session);
-                        ui.separator();
-                        for (title, id) in [
-                            ("Duplicate", ids::DUPLICATE),
-                            ("Split Layer", ids::SPLIT),
-                            ("Delete", ids::DELETE),
-                        ] {
-                            if ui.button(tr(title)).clicked() {
-                                actions::handle(&Invocation::new(id), cx, session);
-                                ui.close();
-                            }
-                        }
-                        ui.separator();
-                        keyframe_menu(ui, cx, session);
+                        menu_out = menus::layer_menu(ui, cx, session, layer);
                     });
+                    if menu_out == Some(menus::LayerMenuOut::Rename) {
+                        self.rename = Some((layer.clone(), name.clone()));
+                    }
                 }
                 // Switches.
                 let sw = |i: usize| {

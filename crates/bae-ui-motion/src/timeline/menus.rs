@@ -1,56 +1,253 @@
 //! Timeline context menus.
 
+use crate::catalog::{self, Node};
+
 use super::*;
 
-pub(super) fn new_layer_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, session: &SharedSession) {
-    bae_ui::widgets::menu_button(ui, tr("New"), |ui| {
-        let items: [(&str, LayerKind, Option<&str>); 9] = [
-            ("Text", LayerKind::Text, None),
-            ("Solid", LayerKind::Solid, None),
-            ("Light", LayerKind::Light, None),
-            ("Camera", LayerKind::Camera, None),
-            ("Null Object", LayerKind::Null, None),
-            ("Shape Layer", LayerKind::Shape, None),
-            ("Rectangle", LayerKind::Shape, Some("rect")),
-            ("Ellipse", LayerKind::Shape, Some("ellipse")),
-            ("Adjustment Layer", LayerKind::Adjustment, None),
-        ];
-        for (title, kind, shape) in items {
-            if ui.button(tr(title)).clicked() {
-                let mut params = json!({"kind": kind});
-                if let Some(s) = shape {
-                    params["shape"] = json!(s);
-                }
-                actions::handle(
-                    &Invocation::with_params(ids::NEW_LAYER, params),
-                    cx,
-                    session,
-                );
-                ui.close();
-            }
-        }
-    });
-}
-
-/// Keyframe Assistant ▸ (the implemented assistants).
+/// Keyframe Assistant ▸, as in Animation ▸ Keyframe Assistant (the command catalog).
 pub(crate) fn keyframe_assistant_menu(
     ui: &mut Ui,
     cx: &mut PanelContext<'_>,
-    session: &SharedSession,
+    _session: &SharedSession,
 ) {
-    bae_ui::widgets::menu_button(ui, tr("Keyframe Assistant"), |ui| {
-        for (title, id, params) in [
-            ("Easy Ease", ids::EASE, json!({"mode": "easy_ease"})),
-            ("Easy Ease In", ids::EASE, json!({"mode": "ease_in"})),
-            ("Easy Ease Out", ids::EASE, json!({"mode": "ease_out"})),
-            ("Time-Reverse Keyframes", ids::REVERSE_KEYS, json!({})),
-        ] {
-            if ui.button(tr(title)).clicked() {
-                actions::handle(&Invocation::with_params(id, params), cx, session);
-                ui.close();
+    if let Some(n) = catalog_entry("Animation", "Keyframe Assistant") {
+        catalog_node(ui, cx, n);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Menus from the command catalog (`crate::catalog`): the same entries, action ids
+// and greying as the menu bar.
+
+/// The entry titled `title` directly in the top-level menu `top`.
+pub(crate) fn catalog_entry(top: &str, title: &str) -> Option<&'static Node> {
+    let (_, nodes) = catalog::MENUS.iter().find(|(t, _)| *t == top)?;
+    nodes.iter().find(|n| match n {
+        Node::Item(it) => it.title == title,
+        Node::Submenu(s) => s.title == title,
+        _ => false,
+    })
+}
+
+/// AE's title of a catalog item on this platform.
+fn menu_title(title: &'static str) -> &'static str {
+    match title {
+        "Reveal in Explorer" if cfg!(target_os = "macos") => "Reveal in Finder",
+        t => t,
+    }
+}
+
+/// Catalog entries as menu entries. AE sorts the marked items of a group by their
+/// localized title.
+pub(crate) fn catalog_nodes(ui: &mut Ui, cx: &mut PanelContext<'_>, nodes: &'static [Node]) {
+    let mut i = 0;
+    while i < nodes.len() {
+        if matches!(&nodes[i], Node::Item(it) if it.sorted) {
+            let mut run: Vec<&'static catalog::Item> = Vec::new();
+            while let Some(Node::Item(it)) = nodes
+                .get(i)
+                .filter(|n| matches!(n, Node::Item(it) if it.sorted))
+            {
+                run.push(it);
+                i += 1;
+            }
+            run.sort_by(|a, b| tr(a.title).cmp(tr(b.title)));
+            for it in run {
+                catalog_item(ui, cx, it);
+            }
+            continue;
+        }
+        catalog_node(ui, cx, &nodes[i]);
+        i += 1;
+    }
+}
+
+/// One catalog entry: an item runs its action (greyed until its command works), a
+/// submenu opens.
+pub(crate) fn catalog_node(ui: &mut Ui, cx: &mut PanelContext<'_>, node: &'static Node) {
+    match node {
+        Node::Item(it) => catalog_item(ui, cx, it),
+        Node::Separator => {
+            ui.separator();
+        }
+        Node::Submenu(s) if s.platform.current() => {
+            if s.children.is_empty() {
+                ui.add_enabled(false, egui::Button::new(tr(s.title)));
+            } else {
+                widgets::menu_button(ui, tr(s.title), |ui| catalog_nodes(ui, cx, s.children));
             }
         }
-    });
+        Node::Submenu(_) => {}
+        // The effect list comes from the effect registry (not wired to menus yet).
+        Node::Effects => {
+            for c in catalog::EFFECT_CATEGORIES {
+                ui.add_enabled(false, egui::Button::new(tr(c)));
+            }
+        }
+    }
+}
+
+fn catalog_item(ui: &mut Ui, cx: &mut PanelContext<'_>, it: &'static catalog::Item) {
+    if !it.platform.current() {
+        return;
+    }
+    let enabled = it.status.works();
+    if ui
+        .add_enabled(enabled, egui::Button::new(tr(menu_title(it.title))))
+        .clicked()
+    {
+        let params = if it.params.is_empty() {
+            json!({})
+        } else {
+            serde_json::from_str(it.params).unwrap_or_else(|_| json!({}))
+        };
+        cx.invoke_with(it.action, params);
+        ui.close();
+    }
+}
+
+/// AE's layer context menu: entries of the Layer, Effect and Animation menus,
+/// `(top-level menu, entry title)`; `("", "")` is a separator. The last group
+/// (Invert Selection, Select Children, Rename) only exists here.
+pub(crate) const LAYER_MENU: &[(&str, &str)] = &[
+    ("Layer", "New"),
+    ("Layer", "Layer Settings..."),
+    ("Layer", "Open Layer"),
+    ("Layer", "Open Layer Source"),
+    ("Layer", "Reveal in Explorer"),
+    ("", ""),
+    ("Layer", "Mask"),
+    ("Layer", "Mask and Shape Path"),
+    ("Layer", "Quality"),
+    ("Layer", "Switches"),
+    ("Layer", "Transform"),
+    ("Layer", "Time"),
+    ("Layer", "Frame Blending"),
+    ("Layer", "3D Layer"),
+    ("Layer", "Guide Layer"),
+    ("Layer", "Environment Layer"),
+    ("Layer", "Markers"),
+    ("", ""),
+    ("Layer", "Blending Mode"),
+    ("Layer", "Layer Styles"),
+    ("", ""),
+    ("Effect", ""),
+    ("Animation", "Keyframe Assistant"),
+    ("", ""),
+    ("Animation", "Track Camera"),
+    ("Animation", "Warp Stabilizer VFX"),
+    ("Animation", "Track Motion"),
+    ("Animation", "Track Mask"),
+    ("", ""),
+    ("Layer", "Pre-compose..."),
+    ("", ""),
+    ("Layer", "Reveal"),
+    ("Layer", "Create"),
+];
+
+/// What the layer menu asks the Timeline to do itself.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum LayerMenuOut {
+    Rename,
+}
+
+/// Right-click on a layer (its name or bar): AE's layer context menu.
+pub(crate) fn layer_menu(
+    ui: &mut Ui,
+    cx: &mut PanelContext<'_>,
+    session: &SharedSession,
+    layer: &PrimPath,
+) -> Option<LayerMenuOut> {
+    let stage = cx.stage;
+    for (top, title) in LAYER_MENU {
+        match (*top, *title) {
+            ("", "") => {
+                ui.separator();
+            }
+            ("Effect", "") => {
+                if let Some((_, nodes)) = catalog::MENUS.iter().find(|(t, _)| *t == "Effect") {
+                    let cats: &'static [Node] = nodes;
+                    widgets::menu_button(ui, tr("Effect"), |ui| {
+                        for n in cats.iter().filter(|n| matches!(n, Node::Effects)) {
+                            catalog_node(ui, cx, n);
+                        }
+                    });
+                }
+            }
+            (top, title) => {
+                if let Some(n) = catalog_entry(top, title) {
+                    catalog_node(ui, cx, n);
+                }
+            }
+        }
+    }
+    ui.separator();
+    let mut out = None;
+    if ui.button(tr("Invert Selection")).clicked() {
+        invert_layer_selection(stage, session, layer);
+        ui.close();
+    }
+    if ui.button(tr("Select Children")).clicked() {
+        select_children(stage, session);
+        ui.close();
+    }
+    let locked = query::is_locked(stage, layer);
+    if ui
+        .add_enabled(!locked, egui::Button::new(tr("Rename")))
+        .clicked()
+    {
+        out = Some(LayerMenuOut::Rename);
+        ui.close();
+    }
+    out
+}
+
+/// Invert Selection: the comp's other unlocked layers become the selection.
+pub(crate) fn invert_layer_selection(stage: &Stage, session: &SharedSession, layer: &PrimPath) {
+    let Some(comp) = query::owning_comp(stage, layer) else {
+        return;
+    };
+    let mut s = session.lock();
+    let selected = s.selected_layers.clone();
+    s.selected_layers = query::comp_layers(stage, &comp)
+        .into_iter()
+        .filter(|l| !selected.contains(l) && !query::is_locked(stage, l))
+        .collect();
+    s.selected_keys.clear();
+}
+
+/// Select Children: adds every layer parented (directly or further down) to a
+/// selected layer.
+pub(crate) fn select_children(stage: &Stage, session: &SharedSession) {
+    let mut s = session.lock();
+    let Some(comp) = s
+        .selected_layers
+        .first()
+        .and_then(|l| query::owning_comp(stage, l))
+    else {
+        return;
+    };
+    let layers = query::comp_layers(stage, &comp);
+    let parent_of = |l: &PrimPath| {
+        stage
+            .prim(l)
+            .and_then(|v| v.value("parent").and_then(|v| v.as_prim_ref()).cloned())
+    };
+    loop {
+        let more: Vec<PrimPath> = layers
+            .iter()
+            .filter(|l| {
+                !s.selected_layers.contains(l)
+                    && !query::is_locked(stage, l)
+                    && parent_of(l).is_some_and(|p| s.selected_layers.contains(&p))
+            })
+            .cloned()
+            .collect();
+        if more.is_empty() {
+            break;
+        }
+        s.selected_layers.extend(more);
+    }
 }
 
 /// The layer menu's keyframe items: Keyframe Assistant ▸ and Toggle Hold Keyframe.

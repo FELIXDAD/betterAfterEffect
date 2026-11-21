@@ -19,7 +19,7 @@ mod rows;
 
 use std::collections::{HashMap, HashSet};
 
-use bae_model::{Interpolation, Keyframe, LayerKind, PrimPath, Stage, Time};
+use bae_model::{Interpolation, Keyframe, PrimPath, Stage, Time};
 use bae_motion::KeyRef;
 use bae_motion::query::{self, CompInfo};
 use bae_ui::Accessible as _;
@@ -39,9 +39,11 @@ use crate::session::{Session, SharedSession};
 
 pub(crate) use dialogs::{InterpolationDialog, KeyDialog, VelocityDialog};
 use header::comp_tabs;
-use menus::new_layer_menu;
 #[cfg(test)]
-pub(crate) use menus::{Related, rove_state, select_related};
+pub(crate) use menus::{
+    LAYER_MENU, Related, catalog_entry, invert_layer_selection, rove_state, select_children,
+    select_related,
+};
 pub(crate) use menus::{key_menu, keyframe_menu};
 
 const ROW_H: f32 = 19.0;
@@ -514,7 +516,12 @@ impl Panel for TimelinePanel {
                 s.selected_layers.clear();
                 s.selected_props.clear();
             }
-            bg.context_menu(|ui| new_layer_menu(ui, cx, &session));
+            // Right-click on empty space: New ▸ (as Layer ▸ New).
+            bg.context_menu(|ui| {
+                if let Some(n) = menus::catalog_entry("Layer", "New") {
+                    menus::catalog_node(ui, cx, n);
+                }
+            });
             // Dropped project items.
             if let Some(item) = bg.dnd_release_payload::<ItemDrag>() {
                 crate::viewer::add_item_as_layer(cx, &session, &item.0, None);

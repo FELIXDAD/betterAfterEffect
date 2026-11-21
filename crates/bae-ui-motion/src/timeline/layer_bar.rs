@@ -80,6 +80,17 @@ impl TimelinePanel {
         if resp.clicked() {
             select_layer(session, stage, layer, ui.input(|i| i.modifiers));
         }
+        // Right-click: the layer context menu (as on the layer name).
+        let mut menu_out = None;
+        resp.context_menu(|ui| {
+            if !session.lock().selected_layers.contains(layer) {
+                select_layer(session, stage, layer, egui::Modifiers::NONE);
+            }
+            menu_out = menus::layer_menu(ui, cx, session, layer);
+        });
+        if menu_out == Some(menus::LayerMenuOut::Rename) {
+            self.rename = Some((layer.clone(), query::display_name_of(stage, layer)));
+        }
         // A locked layer's bar does not move or trim (AE).
         if resp.drag_started()
             && !query::is_locked(stage, layer)

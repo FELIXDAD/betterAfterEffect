@@ -879,8 +879,8 @@ const ANIMATION: &[Node] = &[
     SEP,
     it(851975, "Set Keyframe", "motion.anim.set_keyframe", "", B, Todo),
     it(851976, "Toggle Hold Keyframe", "motion.toggle_hold", "", B, Done),
-    it(851977, "Keyframe Interpolation...", "motion.anim.keyframe_interpolation", "", C, Todo),
-    it(851978, "Keyframe Velocity...", "motion.anim.keyframe_velocity", "", C, Todo),
+    it(851977, "Keyframe Interpolation...", "motion.anim.keyframe_interpolation", "", C, Done),
+    it(851978, "Keyframe Velocity...", "motion.anim.keyframe_velocity", "", C, Done),
     sub(
         "Keyframe Assistant",
         &[

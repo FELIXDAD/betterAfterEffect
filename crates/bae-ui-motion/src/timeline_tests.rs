@@ -1171,6 +1171,57 @@ fn rove_across_time_needs_inner_spatial_keyframes() {
     assert!(!crate::timeline::rove_state(st, &[]).0);
 }
 
+#[test]
+fn layer_menu_entries_come_from_the_command_catalog() {
+    for (top, title) in crate::timeline::LAYER_MENU {
+        if title.is_empty() {
+            continue;
+        }
+        assert!(
+            crate::timeline::catalog_entry(top, title).is_some(),
+            "{top} ▸ {title} is not in the command catalog"
+        );
+    }
+}
+
+#[test]
+fn invert_selection_and_select_children() {
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let a = h.layer.clone();
+    let b = path(&h.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"]);
+    let c = path(&h.run("layer.create", json!({"comp": comp, "kind": "null"}))["path"]);
+    let d = path(&h.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"]);
+    // c is parented to a, d to c; b is locked.
+    h.run(
+        "layer.set_parent",
+        json!({"layers": [c], "parent": a, "time": 0}),
+    );
+    h.run(
+        "layer.set_parent",
+        json!({"layers": [d], "parent": c, "time": 0}),
+    );
+    h.run(
+        "attr.set",
+        json!({"path": b, "attr": "locked", "value": {"type": "bool", "value": true}}),
+    );
+    let session = h.session();
+    session.lock().selected_layers = vec![a.clone()];
+    crate::timeline::select_children(&h.stage, &session);
+    let mut sel = session.lock().selected_layers.clone();
+    sel.sort();
+    let mut want = vec![a.clone(), c.clone(), d.clone()];
+    want.sort();
+    assert_eq!(sel, want, "children and grandchildren");
+    session.lock().selected_layers = vec![c.clone()];
+    crate::timeline::invert_layer_selection(&h.stage, &session, &c);
+    let mut sel = session.lock().selected_layers.clone();
+    sel.sort();
+    let mut want = vec![a, d];
+    want.sort();
+    assert_eq!(sel, want, "the others, without the locked one");
+}
+
 /// Frame cost with the B1-sized project (61 layers × Position, Scale, Rotation with
 /// three eased keys each), every layer selected so the Graph Editor shows 183
 /// properties. Run with
