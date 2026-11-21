@@ -50,7 +50,6 @@ pub(crate) fn for_tool(tool: Tool, hover: Hover) -> Cursor {
         Pen => glyph(Icon::Pen, (8.0, 1.5)),
         AddVertex | DeleteVertex | ConvertVertex | MaskFeather => glyph(tool.icon(), (5.5, 2.0)),
         TypeHorizontal => Cursor::System(CursorIcon::Text),
-        TypeVertical => Cursor::System(CursorIcon::VerticalText),
         // Not available in the Composition viewer in this version.
         _ => Cursor::System(CursorIcon::NotAllowed),
     }

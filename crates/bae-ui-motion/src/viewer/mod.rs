@@ -31,6 +31,7 @@ mod shape_tool;
 #[cfg(test)]
 mod tests;
 mod transform;
+mod type_tool;
 
 pub(crate) use transform::nudge_layers;
 
@@ -68,6 +69,8 @@ pub struct CompositionViewer {
     select: select_tool::SelectState,
     /// Magnification of the last frame (arrow keys nudge by screen pixels).
     mag: f32,
+    /// Type tool: text being typed or edited.
+    type_tool: type_tool::TypeState,
     /// Comp → screen mapping of the last frame.
     last_view: Option<View>,
 }
@@ -419,6 +422,12 @@ impl Panel for CompositionViewer {
         }
         let scrub = session.lock().scrub.clone();
         apply_overrides(&mut comp, scrub.as_ref(), self.select.drag.as_ref());
+        // Text being edited is drawn by the text field, not the layer.
+        if let Some(edited) = self.type_tool.edited_layer()
+            && let Some(l) = comp.layers.iter_mut().find(|l| &l.path == edited)
+        {
+            l.visible = false;
+        }
         // Double-clicking a shape tool button: a layer- or comp-sized shape.
         let tools = crate::tools::shared(cx.resources);
         let fill = tools.lock().fill_request.take();
@@ -659,6 +668,19 @@ impl Panel for CompositionViewer {
             &mut self.pen,
             ui,
             &resp,
+            cx,
+            &session,
+            &info,
+            &comp,
+            &view,
+            effective,
+            &painter,
+        );
+        type_tool::frame(
+            &mut self.type_tool,
+            ui,
+            &resp,
+            area,
             cx,
             &session,
             &info,

@@ -275,7 +275,8 @@ impl Tool {
             Group::Selection | Group::Hand | Group::Zoom | Group::Rotation | Group::PanBehind
         ) || self.is_shape()
             || self.is_pen()
-            || self.is_type()
+            // Vertical type needs a text direction in the model (not yet).
+            || self == Tool::TypeHorizontal
     }
 }
 
@@ -697,6 +698,9 @@ pub struct ToolState {
     pub fill_request: Option<FillRequest>,
     /// Cmd/Ctrl double-click on the Pan Behind tool: center the anchor points.
     pub center_anchor_request: bool,
+    /// Edit this text layer in the viewer now (Layer > New > Text): the viewer
+    /// switches to the Horizontal Type tool and puts the caret in it.
+    pub edit_text_request: Option<bae_model::PrimPath>,
     /// Magnification of the Composition viewer (1 = 100%), for the arrow keys.
     pub magnification: f32,
 }
@@ -711,6 +715,7 @@ impl Default for ToolState {
             view_request: None,
             fill_request: None,
             center_anchor_request: false,
+            edit_text_request: None,
             magnification: 1.0,
         }
     }

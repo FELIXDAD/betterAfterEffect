@@ -34,6 +34,8 @@
 //! | `path.set_vertices` | Pen tool clicks, Convert Vertex tool, dragging path vertices and handles |
 //! | `path.insert_vertex` | Add Vertex tool (every keyframe) |
 //! | `path.delete_vertex` | Delete Vertex tool (every keyframe) |
+//! | `text.create` | typing new point or paragraph text with the Type tool |
+//! | `text.set_text` | editing a text layer's characters with the Type tool |
 //!
 //! **Times** are flicks (705,600,000 per second). Layer in/out points, split and work
 //! area times are comp times. Keyframe times are the stored keyframe times — layer
@@ -51,6 +53,7 @@ pub mod names;
 pub mod path;
 pub mod query;
 pub mod shape;
+pub mod text;
 mod util;
 
 use std::sync::Arc;
@@ -69,6 +72,7 @@ pub use layer::{
 };
 pub use path::{DeleteVertex, InsertVertex, SetVertices};
 pub use shape::{AddShape, CreateMask, Geometry, ShapeKind};
+pub use text::{CreateText, SetText};
 
 /// Register every motion command.
 pub fn register_commands(r: &mut CommandRegistry) {
@@ -100,6 +104,8 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(SetVertices),
         r.register(InsertVertex),
         r.register(DeleteVertex),
+        r.register(CreateText),
+        r.register(SetText),
     ];
     for res in results {
         res.expect("motion command IDs are unique");
