@@ -244,8 +244,9 @@ fn keyboard_shortcuts_window_columns() {
             .min_by(|a, b| a.top().total_cmp(&b.top()))
             .unwrap_or_else(|| panic!("no row {text}"))
     };
-    // Long names, from the #134 screenshots.
-    let names = ["Add or Remove Keyframe at Current Time", "Accept Proposal"];
+    // Long names, from the #134 screenshots (since #140 the keyframe toggle is
+    // listed per property: Alt+Shift+A is the longest).
+    let names = ["Anchor Point: Add or Remove Keyframe", "Accept Proposal"];
     for name in names {
         let r = line(&h, name);
         assert!(r.height() < 20.0, "{name} wraps: {r:?}");
