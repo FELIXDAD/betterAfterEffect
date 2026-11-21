@@ -121,3 +121,13 @@ P3 再做（现在别堵死）：R04-06 节点自带暂存内存（进程外零�
 3. **（M4）剪辑的渲染顺序**：标准效果按 `effects/` 顺序先做，运动和不透明度最后做（Pr 的规则，PR-FX-007）；调整图层片段对下方所有轨道的合成结果做效果；**效果级蒙版**（效果只在蒙版内生效，再与原图混合，PR-FX-006）。
 4. **（M4）渲染条状态**：按序列时间范围查询"已缓存 / 可实时 / 需要渲染"，给时间轴画 Pr 式渲染条；Enter 触发后台把入出点范围渲染进缓存（与 AE 的 RAM 预览同一机制）。
 5. **（M4）渲染请求的"忽略效果"标志**：全局 FX 静音（PR-FX-009），以及导出时的后处理节点（叠加时间码、水印、LUT，PR-EXP-014）。
+
+### 12 ui/motion（2026-11-20）：合成查看器接 GPU 预览
+
+12 的合成查看器（`crates/bae-ui-motion/src/viewer.rs`）现在用 egui 画简化的矢量预览。希望 04 提供一个应用资源（例如 `Arc<CompPreview>`），查看器每帧调用：
+
+- `request(comp: &PrimPath, time: Time, resolution: u32 /* 1、2、3、4 */, region: Option<Rect>) -> Option<ViewportTextureId>`：渲染（或从帧缓存取）这一帧，发布到 `ViewportTextureRegistry`，返回视口 id；渲染尚未完成时返回上一帧的 id。
+- 一个"已缓存帧"的查询（`cached_times(comp)`），时间轴用来画绿条。
+- 查看器拖动、数值拖动时的实时预览需要"临时覆盖"：查看器会把被拖动图层的变换覆盖到 `EvaluatedComp` 上（见 `viewer::apply_overrides`），所以接口最好能接收调用方给的 `EvaluatedComp`（或一个覆盖列表），而不是只接收 stage。
+
+有了这个资源，查看器会优先显示视口纹理，没有时退回现在的简化预览。

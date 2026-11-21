@@ -17,9 +17,12 @@
 //! | `layer.duplicate` | Edit > Duplicate (Cmd/Ctrl+D) |
 //! | `layer.split` | Edit > Split Layer (Cmd/Ctrl+Shift+D) |
 //! | `layer.trim` | Alt+[ / Alt+] (trim in / out point) |
+//! | `layer.shift_time` | dragging a layer bar; [ / ] (move in / out point to the current time) |
 //! | `layer.set_parent` | Parent & Link column, pick whip |
+//! | `layer.delete`, `item.delete` | Delete (layers; project items) |
 //! | `attr.set_animated` | the stopwatch |
 //! | `attr.set_at` | editing a value in the timeline at the current time |
+//! | `attr.set_many` | several such edits at once (moving several layers in the viewer) |
 //! | `key.ease` | Keyframe Assistant > Easy Ease (F9), Ease In (Shift+F9), Ease Out (Cmd/Ctrl+Shift+F9) |
 //! | `key.set_interpolation` | Keyframe Interpolation (Cmd/Ctrl+Alt+K), Toggle Hold Keyframe |
 //! | `key.move` | dragging keyframes |
@@ -50,11 +53,11 @@ use bae_model::{CommandRegistry, DynCommand};
 pub use comp::{CompOutput, CreateComp, CreateFolder, SetWorkArea, TrimCompToWorkArea};
 pub use keys::{
     CopiedKey, DeleteKeys, EaseKeys, EaseMode, KeyRef, KeysOutput, MoveKeys, PasteKeys,
-    ReverseKeys, SetAnimated, SetAt, SetInterpolation,
+    ReverseKeys, SetAnimated, SetAt, SetInterpolation, SetMany, ValueEdit,
 };
 pub use layer::{
-    CreateLayer, DuplicateLayers, LayerOutput, LayersOutput, ReorderLayers, SetParent, ShapePreset,
-    SplitLayers, TrimLayers,
+    CreateLayer, DeleteItems, DeleteLayers, DuplicateLayers, LayerOutput, LayersOutput,
+    ReorderLayers, SetParent, ShapePreset, ShiftLayers, SplitLayers, TrimLayers,
 };
 
 /// Register every motion command.
@@ -69,9 +72,13 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(DuplicateLayers),
         r.register(SplitLayers),
         r.register(TrimLayers),
+        r.register(ShiftLayers),
+        r.register(DeleteLayers),
+        r.register(DeleteItems),
         r.register(SetParent),
         r.register(SetAnimated),
         r.register(SetAt),
+        r.register(SetMany),
         r.register(EaseKeys),
         r.register(SetInterpolation),
         r.register(MoveKeys),

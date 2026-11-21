@@ -26,6 +26,7 @@ bae-plugin.workspace = true
 bae-ui.workspace = true
 bae-render = { workspace = true, features = ["media"] }
 bae-vector = { workspace = true, features = ["render"] }
+bae-ui-motion.workspace = true
 bae-text = { workspace = true, features = ["render"] }
 egui.workspace = true
 egui-wgpu.workspace = true
