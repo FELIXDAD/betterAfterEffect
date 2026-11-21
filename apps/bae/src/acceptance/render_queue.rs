@@ -642,8 +642,9 @@ fn ranges_are_limited_to_the_comp() {
 
 #[test]
 fn progress_of_a_limited_range_counts_the_frames_it_renders() {
-    // 290–400 on a 300-frame comp renders 10 frames; the progress must say
-    // “x / 10”, not “x / 111” (or the fields must show the limited range).
+    // 1780–1900 on an 1800-frame comp renders 20 frames; the progress must
+    // say “x / 20”, not “x / 121” (or the fields must show the limited range),
+    // from the moment the item starts (“0 / 20”, issue #157) to the end.
     let Some(mut h) = gpu_gui() else { return };
     let tmp = tempfile::tempdir().unwrap();
     long_comp(&mut h); // 1 800 frames, slow enough to see the progress
