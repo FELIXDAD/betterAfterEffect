@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use bae_model::{FrameRate, PrimPath, Time, Value};
-use bae_render::fixture::{SceneBuilder, write_label_png};
+use bae_render::fixture::{SceneBuilder, ellipse_path, rect_path, write_label_png};
 use bae_render::png_out::{read_rgba8, write_rgba8};
 use serde_json::Value as Json;
 
@@ -151,6 +151,9 @@ pub fn build(assets: &Path) -> (SceneBuilder, Vec<(String, u8)>) {
                 b.set(&layer, "enabled", Value::Bool(false))
                     .expect("enabled");
             }
+            for (i, m) in l["masks"].as_array().into_iter().flatten().enumerate() {
+                add_mask(&mut b, &layer, i, m);
+            }
             paths.push(layer);
         }
         for (i, l) in layers.iter().enumerate() {
@@ -178,6 +181,65 @@ pub fn build(assets: &Path) -> (SceneBuilder, Vec<(String, u8)>) {
         }
     }
     (b, outer)
+}
+
+/// Mask `i` of a case layer: `rect` / `ellipse` `[x0, y0, x1, y1]` or `poly`
+/// `[[x, y], …]` in layer pixels, `mode`, `inverted`, `opacity` (%), `feather`
+/// `[x, y]`, `expansion` – the same keys `render_cases.jsx` reads.
+fn add_mask(b: &mut SceneBuilder, layer: &PrimPath, i: usize, m: &Json) {
+    let r = |k: &str| {
+        let a = m[k].as_array().expect("rect");
+        [num(&a[0]), num(&a[1]), num(&a[2]), num(&a[3])]
+    };
+    let shape = if m["rect"].is_array() {
+        let [x0, y0, x1, y1] = r("rect");
+        rect_path(x0, y0, x1, y1)
+    } else if m["ellipse"].is_array() {
+        let [x0, y0, x1, y1] = r("ellipse");
+        ellipse_path(x0, y0, x1, y1)
+    } else {
+        let pts: Vec<[f64; 2]> = m["poly"]
+            .as_array()
+            .expect("rect, ellipse or poly")
+            .iter()
+            .map(vec2)
+            .collect();
+        bae_model::BezierPath {
+            in_tangents: vec![[0.0, 0.0]; pts.len()],
+            out_tangents: vec![[0.0, 0.0]; pts.len()],
+            vertices: pts,
+            closed: true,
+            feather: Vec::new(),
+        }
+    };
+    let mode = m["mode"].as_str().unwrap_or("add");
+    let mask = b
+        .mask(layer, &format!("mask_{}", i + 1), shape, mode)
+        .expect("mask");
+    if m["inverted"].as_bool() == Some(true) {
+        b.set(&mask, "inverted", Value::Bool(true))
+            .expect("inverted");
+    }
+    if let Some(o) = m["opacity"].as_f64() {
+        b.set(&mask, "opacity", Value::Float(o)).expect("opacity");
+    }
+    if m["feather"].is_array() {
+        b.set(&mask, "feather", Value::Vec2(vec2(&m["feather"])))
+            .expect("feather");
+    }
+    if let Some(e) = m["expansion"].as_f64() {
+        b.set(&mask, "expansion", Value::Float(e))
+            .expect("expansion");
+    }
+}
+
+/// Cases whose AE golden has not been rendered yet (`pending_golden`).
+pub fn pending(name: &str) -> bool {
+    cases()["cases"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|c| c["name"].as_str() == Some(name) && c["pending_golden"].as_bool() == Some(true))
 }
 
 #[derive(Default)]

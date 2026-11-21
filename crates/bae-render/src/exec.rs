@@ -6,6 +6,10 @@
 //! Normal / Add / Screen on fixed-function blending, and for backdrop-reading
 //! modes (Multiply, Overlay, preserve transparency, clamped Add) end the pass,
 //! copy the layer's destination bounds into a scratch texture and continue.
+//!
+//! Mask nodes run their own passes (`gpu/mask.wgsl`, see [`crate::mask`]):
+//! coverage accumulation, resolve + horizontal feather, vertical feather, and –
+//! with several masks – one accumulator pass merging them with blend states.
 
 use std::sync::Arc;
 
@@ -17,6 +21,8 @@ use crate::error::RenderError;
 use crate::geom::IRect;
 use crate::gpu::{BlendKind, DrawData, Pipelines, flags};
 use crate::graph::{CompositeNode, LayerOp, Node, NodeKind, OpInput, RenderGraph};
+
+mod masks;
 use crate::pool::TexturePool;
 use crate::source::{EncodeContext, GpuImage, ImageAllocator, ImageAlpha};
 
@@ -55,6 +61,36 @@ impl DrawBuffer {
     }
 }
 
+/// A storage buffer grown on demand and reused across frames.
+#[derive(Default)]
+struct GrowBuffer {
+    buffer: Option<(wgpu::Buffer, u64)>,
+}
+
+impl GrowBuffer {
+    fn ensure(&mut self, device: &wgpu::Device, label: &'static str, bytes: u64) -> &wgpu::Buffer {
+        let needed = bytes.max(256);
+        if self.buffer.as_ref().is_none_or(|(_, cap)| *cap < needed) {
+            let capacity = needed.next_power_of_two();
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: capacity,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.buffer = Some((buffer, capacity));
+        }
+        &self.buffer.as_ref().expect("ensured").0
+    }
+}
+
+/// Per-renderer buffers of mask edges and mask pass records.
+#[derive(Default)]
+pub(crate) struct MaskBuffers {
+    edges: GrowBuffer,
+    passes: GrowBuffer,
+}
+
 /// What executing a graph produced.
 pub(crate) struct Executed {
     pub image: GpuImage,
@@ -81,6 +117,7 @@ pub(crate) fn execute(
     pipelines: &mut Pipelines,
     pool: &mut TexturePool,
     draw_buffer: &mut DrawBuffer,
+    mask_buffers: &mut MaskBuffers,
     graph: &RenderGraph,
     format: wgpu::TextureFormat,
 ) -> Result<Executed, RenderError> {
@@ -96,7 +133,6 @@ pub(crate) fn execute(
         .sum();
     draw_buffer.ensure(device, &pipelines.draws_layout, total_draws as u64);
     let (buffer, draws_group, _) = draw_buffer.buffer.as_ref().expect("ensured");
-
     let blendable = format != wgpu::TextureFormat::Rgba32Float
         || gpu.features().contains(wgpu::Features::FLOAT32_BLENDABLE);
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -114,7 +150,10 @@ pub(crate) fn execute(
         blendable,
         draw_calls: 0,
         passes: 0,
+        mask_outs: Vec::new(),
     };
+    // Every mask of the frame at once, in shared atlases (they have no inputs).
+    ctx.mask_outs = masks::encode(&mut ctx, &mut encoder, pool, mask_buffers, graph)?;
 
     for (index, node) in graph.nodes.iter().enumerate() {
         let image = match &node.kind {
@@ -167,6 +206,10 @@ pub(crate) fn execute(
                 };
                 fx.effect.render(&mut ectx, &params, &input, node.rect)?
             }
+            NodeKind::Mask(_) => ctx.mask_outs[index]
+                .as_ref()
+                .map(|m| m.image.clone())
+                .ok_or_else(|| RenderError::Other("mask not encoded".into()))?,
         };
         outputs[index] = Some(image);
         // Free inputs whose last consumer this was.
@@ -201,6 +244,8 @@ struct ExecCtx<'a> {
     blendable: bool,
     draw_calls: usize,
     passes: usize,
+    /// Where each mask node's output lives (by node index).
+    mask_outs: Vec<Option<masks::MaskOut>>,
 }
 
 /// A planned draw of one op.
@@ -258,7 +303,7 @@ impl ExecCtx<'_> {
                 kind = BlendKind::Normal;
                 backdrop = false;
             }
-            let Some(mut data) = plan_op(node, op, outputs, tsize)? else {
+            let Some(mut data) = plan_op(node, op, outputs, &self.mask_outs, tsize)? else {
                 continue;
             };
             let mut fl = data.mode[1];
@@ -280,17 +325,24 @@ impl ExecCtx<'_> {
             let matte_view = op
                 .matte
                 .and_then(|m| outputs[m.node.index()].as_ref().map(|i| &i.view));
+            let mask_view = op
+                .mask
+                .and_then(|m| outputs[m.node.index()].as_ref().map(|i| &i.view));
             let dst_view = if backdrop {
                 scratch.map(|s| &s.view)
             } else {
                 None
             };
-            let textures = if src_view.is_none() && matte_view.is_none() && dst_view.is_none() {
+            let textures = if src_view.is_none()
+                && matte_view.is_none()
+                && dst_view.is_none()
+                && mask_view.is_none()
+            {
                 None
             } else {
                 Some(
                     self.pipelines
-                        .textures(device, src_view, matte_view, dst_view),
+                        .textures(device, src_view, matte_view, dst_view, mask_view),
                 )
             };
             let bounds = IRect::new(
@@ -512,6 +564,7 @@ fn plan_op(
     node: &Node,
     op: &LayerOp,
     outputs: &[Option<GpuImage>],
+    mask_outs: &[Option<masks::MaskOut>],
     target_size: [u32; 2],
 ) -> Result<Option<DrawData>, RenderError> {
     // Composite texel → … : target texel = comp px / scale − rect origin.
@@ -580,6 +633,42 @@ fn plan_op(
         ];
         data.mode[1] |= flags::MATTE;
         data.mode[2] = m.mode as u32;
+    }
+    if let Some(m) = op.mask {
+        let mask = mask_outs
+            .get(m.node.index())
+            .and_then(Option::as_ref)
+            .ok_or_else(|| RenderError::Other(format!("mask of {} missing", op.layer)))?;
+        // Input texel u → layer pixels: solids are drawn in layer pixels, images
+        // map their texels; then layer pixels → the mask's atlas uv.
+        let (in_scale, in_origin) = match &op.input {
+            OpInput::Solid { .. } => (1.0, [0.0, 0.0]),
+            OpInput::Image(id) => {
+                let img = outputs[id.index()]
+                    .as_ref()
+                    .ok_or_else(|| RenderError::Other(format!("input of {} missing", op.layer)))?;
+                (
+                    img.pixel_scale,
+                    [f64::from(img.rect.x0), f64::from(img.rect.y0)],
+                )
+            }
+        };
+        let [pw, ph] = mask.image.texture_size();
+        let page = [f64::from(pw), f64::from(ph)];
+        let mut uv = [0.0f32; 4];
+        let mut clip = [0.0f32; 4];
+        for i in 0..2 {
+            uv[i] = (in_scale / (mask.scale[i] * page[i])) as f32;
+            uv[i + 2] = (((in_origin[i] - mask.px_origin[i]) / mask.scale[i] + mask.origin[i])
+                / page[i]) as f32;
+            // Half a texel into the zero gutter around the region, no further.
+            clip[i] = ((mask.origin[i] - 0.5) / page[i]) as f32;
+            clip[i + 2] = ((mask.origin[i] + mask.texels[i] + 0.5) / page[i]) as f32;
+        }
+        data.mask_uv = uv;
+        data.mask_clip = clip;
+        data.mask_val = [m.value[0], m.value[1], 0.0, 0.0];
+        data.mode[1] |= flags::MASK;
     }
     Ok(Some(data))
 }
