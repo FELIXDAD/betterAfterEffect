@@ -452,9 +452,11 @@ fn show_in_finder_passes_the_path_to_open() {
     wait_done(&mut h, Duration::from_secs(30));
     h.get_by_label("Show in Finder").click();
     settle(&mut h);
+    // `reveal` spawns `open` without waiting for it: wait for the fake's
+    // record, which appears in one rename (see `in_child_with_fake_open`).
     let log = PathBuf::from(std::env::var("BAE_ACC_OPEN_LOG").unwrap());
     let started = Instant::now();
-    while !log.exists() && started.elapsed() < Duration::from_secs(5) {
+    while !log.exists() && started.elapsed() < Duration::from_secs(30) {
         std::thread::sleep(Duration::from_millis(20));
     }
     let args: Vec<String> = fs::read_to_string(&log)
@@ -480,7 +482,10 @@ fn in_child_with_fake_open(test: &str) -> bool {
     let script = bin.path().join("open");
     fs::write(
         &script,
-        "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > \"$BAE_ACC_OPEN_LOG\"\n",
+        // Written to a temporary file and renamed into place, so the record
+        // appears complete or not at all (a plain `> log` creates the file
+        // before the arguments are in it: the test could read it empty).
+        "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > \"$BAE_ACC_OPEN_LOG.tmp\" && mv \"$BAE_ACC_OPEN_LOG.tmp\" \"$BAE_ACC_OPEN_LOG\"\n",
     )
     .unwrap();
     use std::os::unix::fs::PermissionsExt as _;
