@@ -1,4 +1,4 @@
-//! BAE preferences: AE's Edit > Preferences (macOS: After Effects > Settings).
+//! BAE preferences: AE 26's Edit > Preferences (macOS: After Effects > Settings), 16 pages.
 //!
 //! * [`schema`] describes every page and control: label, type, range, unit,
 //!   default, the AE preferences key, enable conditions.

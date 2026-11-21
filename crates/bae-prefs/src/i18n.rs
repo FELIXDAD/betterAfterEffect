@@ -49,7 +49,15 @@ pub const ZH: &[(&str, &str)] = &[
     ("Style:", "样式:"),
     ("Choose Folder...", "选择文件夹..."),
     ("System Default", "系统默认值"),
-    // General
+    // Pages new in AE 26
+    ("Startup & Repair", "启动和修复"),
+    ("Project", "项目"),
+    ("Export", "导出"),
+    ("Audio", "音频"),
+    ("Disk", "磁盘"),
+    ("Memory & CPU", "内存和 CPU"),
+    ("Video", "视频"),
+    // General (AE 2025 page names, still group titles or stored keys)
     ("General", "常规"),
     ("Levels of Undo:", "撤消级别:"),
     ("Path Point and Handle Size:", "路径点和手柄大小:"),

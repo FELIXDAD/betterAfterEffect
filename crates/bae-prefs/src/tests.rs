@@ -7,25 +7,22 @@ fn pages_in_ae_order() {
     assert_eq!(
         titles,
         [
-            "General",
+            "Startup & Repair",
+            "Project",
+            "Composition",
             "Previews",
-            "Display",
-            "Import",
-            "Output",
+            "Appearance",
             "Grids & Guides",
             "Labels",
-            "Media & Disk Cache",
-            "Video Preview",
-            "Appearance",
-            "New Project",
-            "Auto-Save",
-            "Memory & Performance",
-            "Audio Hardware",
-            "Audio Output Mapping",
             "Type",
-            "Scripting & Expressions",
+            "Import",
+            "Export",
+            "Audio",
+            "Disk",
+            "Memory & CPU",
+            "Video",
             "3D",
-            "Notifications",
+            "Scripting & Expressions",
         ]
     );
 }
@@ -36,8 +33,6 @@ fn keys_unique_and_defaults_valid() {
     let defaults = Preferences::default();
     for p in schema::all() {
         assert!(seen.insert(p.key), "duplicate key {}", p.key);
-        let page = p.key.split('.').next().unwrap();
-        assert!(!page.is_empty());
         let v = defaults.get(p.key).unwrap();
         assert_eq!(
             validate(p, v).as_ref(),

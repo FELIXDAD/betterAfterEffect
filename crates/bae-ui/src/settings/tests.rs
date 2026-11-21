@@ -78,7 +78,7 @@ fn every_page_has_its_controls_with_defaults() {
 #[test]
 fn ok_returns_the_edits_cancel_drops_them() {
     let prefs = Preferences::default();
-    let mut h = harness("general", &prefs);
+    let mut h = harness("composition", &prefs);
     h.get_by_label("Default Spatial Interpolation to Linear")
         .click();
     h.run();
@@ -91,7 +91,7 @@ fn ok_returns_the_edits_cancel_drops_them() {
     assert!(saved.bool(keys::DEFAULT_SPATIAL_LINEAR));
     assert!(!h.state().dialog.is_open());
 
-    let mut h = harness("general", &prefs);
+    let mut h = harness("startup_repair", &prefs);
     h.get_by_label("Show Tool Tips").click();
     h.run();
     h.get_by_label("Cancel").click();
@@ -101,7 +101,7 @@ fn ok_returns_the_edits_cancel_drops_them() {
 
 #[test]
 fn escape_cancels() {
-    let mut h = harness("general", &Preferences::default());
+    let mut h = harness("startup_repair", &Preferences::default());
     h.key_press(egui::Key::Escape);
     h.run();
     assert_eq!(h.state().outcomes, [Outcome::Cancel]);
@@ -109,25 +109,25 @@ fn escape_cancels() {
 
 #[test]
 fn previous_next_and_page_list() {
-    let mut h = harness("general", &Preferences::default());
+    let mut h = harness("startup_repair", &Preferences::default());
     assert!(h.get_by_label("Previous").accesskit_node().is_disabled());
     h.get_by_label("Next").click();
     h.run();
-    assert_eq!(h.state().dialog.page(), "previews");
+    assert_eq!(h.state().dialog.page(), "project");
     h.get_by_label("Previous").click();
     h.run();
-    assert_eq!(h.state().dialog.page(), "general");
+    assert_eq!(h.state().dialog.page(), "startup_repair");
     h.get_by_label("Grids & Guides").click();
     h.run();
     assert_eq!(h.state().dialog.page(), "grids_guides");
-    let mut h = harness("notifications", &Preferences::default());
+    let mut h = harness("scripting_expressions", &Preferences::default());
     assert!(h.get_by_label("Next").accesskit_node().is_disabled());
     h.run();
 }
 
 #[test]
 fn dependent_controls_gray_out() {
-    let mut h = harness("auto_save", &Preferences::default());
+    let mut h = harness("project", &Preferences::default());
     let enabled = |h: &Harness<'_, State>| {
         h.query_all_by_label("Save Every:")
             .any(|n| !n.accesskit_node().is_disabled())
@@ -154,7 +154,7 @@ fn default_buttons_reset_sliders() {
 #[test]
 fn unknown_page_opens_general() {
     let h = harness("nope", &Preferences::default());
-    assert_eq!(h.state().dialog.page(), "general");
+    assert_eq!(h.state().dialog.page(), "startup_repair");
 }
 
 #[test]

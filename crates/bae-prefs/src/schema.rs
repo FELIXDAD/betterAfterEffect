@@ -297,23 +297,112 @@ macro_rules! label_rows {
 const GRID_STYLES: &[&str] = &["Lines", "Dashed Lines", "Dots"];
 const GUIDE_STYLES: &[&str] = &["Lines", "Dashed Lines"];
 
-/// All pages, in AE's order.
+/// All pages, in AE 26's order (Edit > Preferences, macOS: After Effects > Settings).
+/// Storage keys keep their own prefixes (`general.*`, `auto_save.*`): they are not page ids.
 pub static PAGES: &[Page] = &[
     Page {
-        id: "general",
-        title: "General",
+        id: "startup_repair",
+        title: "Startup & Repair",
         items: &[
+            Item::P(b("general.show_home_screen", "Show Home Screen at Launch", true)
+                .ae("General Section/Show Welcome Screen")),
             Item::P(
                 int("general.levels_of_undo", "Levels of Undo:", 99, 1, 99)
                     .ae("General Section/Levels of Undo v2")
                     .live(),
             ),
+            Item::P(b("general.show_tool_tips", "Show Tool Tips", true).ae("Main Pref Section v2/Pref_TOOL_TIPS")),
+            Item::P(
+                b("general.system_color_picker", "Use System Color Picker", false)
+                    .ae("Main Pref Section v2/Use Adobe Color Picker"),
+            ),
+            Item::P(
+                b("general.system_shortcuts", "Use System Shortcut Keys", false).os(Os::Mac),
+            ),
+            Item::Gap,
+            Item::Only(
+                Os::Windows,
+                &Item::Button("general.reveal", "Reveal Preferences in Explorer"),
+            ),
+            Item::Only(
+                Os::Mac,
+                &Item::Button("general.reveal", "Reveal Preferences in Finder"),
+            ),
+        ],
+    },
+    Page {
+        id: "project",
+        title: "Project",
+        items: &[
+            Item::P(b("general.synchronize_time", "Synchronize Time of All Related Items", true)
+                .ae("General Section/Synchronize Time")),
+            Item::P(b("display.disable_thumbnails", "Disable Thumbnails in Project Panel", false)
+                .ae("Main Pref Section v2/Pref_RENDER_THUMBNAILS")),
+            Item::Group(
+                "Auto-Save",
+                &[
+                    Item::P(b("auto_save.enabled", "Automatically Save Projects", true).ae("Auto Save/Enable Auto Save3").live()),
+                    Item::P(
+                        int("auto_save.interval", "Save Every:", 5, 1, 1440)
+                            .unit("Minutes")
+                            .when("auto_save.enabled")
+                            .ae("Auto Save/Auto Save Interval")
+                            .live(),
+                    ),
+                    Item::P(b("auto_save.on_render", "Start auto-save when render queue starts", true)
+                        .when("auto_save.enabled")
+                        .ae("Auto Save/Enable Auto Save RQ2")),
+                    Item::P(
+                        int("auto_save.max_versions", "Maximum Project Versions:", 3, 1, 99)
+                            .ae("Auto Save/Auto Save Max Project Vers")
+                            .live(),
+                    ),
+                    Item::Group(
+                        "Auto-Save Location",
+                        &[
+                            Item::P(radio(
+                                "auto_save.location",
+                                "",
+                                &["Next to Project", "Custom Location"],
+                                "Next to Project",
+                            )
+                            .ae("Auto Save/Save To Custom Location")
+                            .live()),
+                            Item::P(path("auto_save.folder", "", "Choose Folder...")
+                                .when_is("auto_save.location", "Custom Location")
+                                .ae("Auto Save/Auto Save Folder")
+                                .live()),
+                        ],
+                    ),
+                ],
+            ),
+            Item::Group(
+                "New Project",
+                &[
+                    Item::Row(&[
+                        Item::P(b("new_project.use_template", "New Project Loads Template:", false).ae("Template Project/Enabled")),
+                        Item::P(path("new_project.template", "", "Choose Template...").when("new_project.use_template").ae("Template Project/Location")),
+                    ]),
+                    Item::Group(
+                        "New Project Folders",
+                        &[
+                            Item::P(text("new_project.solids_folder", "Solids Folder:", "Solids").ae("Template Project/New Project Solids Folder")),
+                            Item::P(text("new_project.fills_folder", "Fills Folder:", "Fills").ae("Template Project/New Project Fills Folder")),
+                        ],
+                    ),
+                ],
+            ),
+        ],
+    },
+    Page {
+        id: "composition",
+        title: "Composition",
+        items: &[
             Item::P(
                 int("general.path_point_size", "Path Point and Handle Size:", 5, 1, 30)
                     .ae("General Section/Path Point and Handle Radius (pixels)"),
             ),
             Item::Gap,
-            Item::P(b("general.show_tool_tips", "Show Tool Tips", true).ae("Main Pref Section v2/Pref_TOOL_TIPS")),
             Item::P(
                 b("general.create_layers_at_start", "Create Layers at Composition Start Time", true)
                     .ae("General Section/Create New Layers At Time Zero"),
@@ -332,37 +421,33 @@ pub static PAGES: &[Page] = &[
                 )
                 .ae("Main Pref Section v2/Pref_USE_SMART_MASK"),
             ),
-            Item::P(b("general.synchronize_time", "Synchronize Time of All Related Items", true)
-                .ae("General Section/Synchronize Time")),
-            Item::P(
-                b("general.compact_english", "Expression Pick Whip Writes Compact English", true)
-                    .ae("Main Pref Section v2/Pref_USE_COMPACT_EXPRS"),
-            ),
             Item::P(
                 b("general.split_layers_above", "Create Split Layers Above Original Layer", false)
                     .ae("Split Layer/Grow Layer Stack Upwards"),
             ),
             Item::P(
-                b("general.system_color_picker", "Use System Color Picker", false)
-                    .ae("Main Pref Section v2/Use Adobe Color Picker"),
-            ),
-            Item::P(
                 b("general.center_shape_anchor", "Center Anchor Point in New Shape Layers", true)
                     .ae("General Section/Shape Layer Center Anchor Point"),
             ),
-            Item::P(b("general.show_home_screen", "Show Home Screen at Launch", true)
-                .ae("General Section/Show Welcome Screen")),
-            Item::P(
-                b("general.system_shortcuts", "Use System Shortcut Keys", false).os(Os::Mac),
-            ),
-            Item::Gap,
-            Item::Only(
-                Os::Windows,
-                &Item::Button("general.reveal", "Reveal Preferences in Explorer"),
-            ),
-            Item::Only(
-                Os::Mac,
-                &Item::Button("general.reveal", "Reveal Preferences in Finder"),
+            Item::Group(
+                "Motion Path",
+                &[
+                    Item::P(radio(
+                        "display.motion_path",
+                        "",
+                        &["No Motion Path", "All Keyframes", "No More Than (Keyframes)", "No More Than (Time)"],
+                        "No More Than (Keyframes)",
+                    )
+                    .ae("Main Pref Section v2/Pref_COMP_PATH_DISPLAY_PRE")),
+                    Item::P(
+                        int("display.motion_path_keys", "Keyframes:", 15, 1, 999)
+                            .when_is("display.motion_path", "No More Than (Keyframes)"),
+                    ),
+                    Item::P(
+                        dur("display.motion_path_time", "Time:", 15.0)
+                            .when_is("display.motion_path", "No More Than (Time)"),
+                    ),
+                ],
             ),
         ],
     },
@@ -416,154 +501,60 @@ pub static PAGES: &[Page] = &[
             ),
             Item::P(b("previews.simultaneous", "Enable Simultaneous Previews", false)
                 .ae("General Section/Enable Simultaneous Previews")),
-        ],
-    },
-    Page {
-        id: "display",
-        title: "Display",
-        items: &[
-            Item::Group(
-                "Motion Path",
-                &[
-                    Item::P(radio(
-                        "display.motion_path",
-                        "",
-                        &["No Motion Path", "All Keyframes", "No More Than (Keyframes)", "No More Than (Time)"],
-                        "No More Than (Keyframes)",
-                    )
-                    .ae("Main Pref Section v2/Pref_COMP_PATH_DISPLAY_PRE")),
-                    Item::P(
-                        int("display.motion_path_keys", "Keyframes:", 15, 1, 999)
-                            .when_is("display.motion_path", "No More Than (Keyframes)"),
-                    ),
-                    Item::P(
-                        dur("display.motion_path_time", "Time:", 15.0)
-                            .when_is("display.motion_path", "No More Than (Time)"),
-                    ),
-                ],
-            ),
-            Item::P(b("display.disable_thumbnails", "Disable Thumbnails in Project Panel", false)
-                .ae("Main Pref Section v2/Pref_RENDER_THUMBNAILS")),
-            Item::P(b(
-                "display.show_render_progress",
-                "Show Rendering in Progress in Info Panel and Flowchart",
-                false,
-            )
-            .ae("Main Pref Section v2/Pref_SHOW_INFO_FLOATER_PROGRESS")),
             Item::P(b(
                 "display.hw_accelerate",
                 "Hardware Accelerate Composition, Layer, and Footage Panels",
                 true,
             )
             .ae("Hardware Accelerated Viewer 2/Enabled")),
+            Item::P(b(
+                "display.show_render_progress",
+                "Show Rendering in Progress in Info Panel and Flowchart",
+                false,
+            )
+            .ae("Main Pref Section v2/Pref_SHOW_INFO_FLOATER_PROGRESS")),
             Item::P(b("display.alternate_time", "Show Alternate Time Display", true)
                 .ae("Prefs.Display/Show Alternate Time Display")),
         ],
     },
     Page {
-        id: "import",
-        title: "Import",
+        id: "appearance",
+        title: "Appearance",
         items: &[
+            Item::P(b("appearance.label_handles", "Use Label Color for Layer Handles and Paths", true)),
+            Item::P(b("appearance.label_tabs", "Use Label Color for Related Tabs", true)),
+            Item::P(b("appearance.cycle_mask_colors", "Cycle Mask Colors (uses Label Colors)", true)
+                .ae("Mask Colors/Cycle Mask Label Colors")),
+            Item::P(b("appearance.contrasting_mask", "Use Contrasting Color for New Masks", true)
+                .ae("Mask Colors/Use Contrasting Color For Mask Path Enabled")),
+            Item::P(b("appearance.gradients", "Use Gradients", true).ae("Main Pref Section v2/Enable Gradients")),
             Item::Group(
-                "Still Footage",
+                "Brightness",
                 &[
-                    Item::P(radio(
-                        "import.still_length",
-                        "",
-                        &["Length of Composition", "Duration"],
-                        "Length of Composition",
-                    )
-                    .ae("Main Pref Section v2/Pref_DEFAULT_STILL_OUT_POINT v2")),
-                    Item::P(
-                        dur("import.still_duration", "Duration:", 5.0)
-                            .when_is("import.still_length", "Duration"),
-                    ),
+                    Item::Row(&[
+                        Item::P(slider("appearance.brightness", "", 0.0)
+                            .ae("Main Pref Section v2/User Interface Brightness (4) [0.0..1.0]").live()),
+                        Item::Button("appearance.brightness_default", "Default"),
+                    ]),
+                    Item::P(b("appearance.affect_labels", "Affect Label Colors", false).live()),
                 ],
             ),
             Item::Group(
-                "Sequence Footage",
-                &[
-                    Item::P(
-                        num("import.sequence_fps", "", 30.0, 1.0, 999.0, 2)
-                            .unit("frames per second")
-                            .ae("Import Options Preference Section/Import Options Default Sequence FPS"),
-                    ),
-                    Item::P(b("import.report_missing", "Report Missing Frames", true)
-                        .ae("Import Options Preference Section/Report Missing Frames From Sequences")),
-                    Item::P(b("import.verify_sequence", "Verify Individual Sequence Files (Slower)", false)
-                        .ae("Import Options Preference Section/Import Options Verify Individual Sequence Files")),
-                ],
+                "Interactive Controls",
+                &[Item::Row(&[
+                    Item::P(slider("appearance.interactive", "", 0.5).live()),
+                    Item::Button("appearance.interactive_default", "Default"),
+                ])],
             ),
-            Item::P(
-                choice(
-                    "import.unlabeled_alpha",
-                    "Interpret Unlabeled Alpha As:",
-                    &[
-                        "Ask User",
-                        "Guess",
-                        "Ignore Alpha",
-                        "Straight (Unmatted)",
-                        "Premultiplied (Matted With Black)",
-                        "Premultiplied (Matted With White)",
-                    ],
-                    "Guess",
-                )
-                .ae("Import Options Preference Section/Import Options Default Unlabeled Alpha"),
+            Item::Group(
+                "Focus Indicator",
+                &[Item::Row(&[
+                    Item::P(slider("appearance.focus", "", 0.5).live()),
+                    Item::Button("appearance.focus_default", "Default"),
+                ])],
             ),
-            Item::P(
-                choice(
-                    "import.drag_as",
-                    "Default Drag Import As:",
-                    &["Footage", "Composition", "Composition - Retain Layer Sizes"],
-                    "Composition",
-                )
-                .ae("Import Options Preference Section/Import Options Default Import Type"),
-            ),
-            Item::P(
-                choice(
-                    "import.auto_reload",
-                    "Automatically Reload Footage:",
-                    &["Off", "All Footage", "Non-Sequence Footage"],
-                    "Non-Sequence Footage",
-                )
-                .ae("Auto Reload Footage On Application Focus/Enabled"),
-            ),
-        ],
-    },
-    Page {
-        id: "output",
-        title: "Output",
-        items: &[
-            Item::Row(&[
-                Item::P(b("output.segment_sequences", "Segment Sequences At:", false)
-                    .ae("Main Pref Section v2/Pref_LIMIT_FILES_PER_FOLDER v2")),
-                Item::P(
-                    int("output.segment_files", "", 700, 1, 100000)
-                        .unit("files")
-                        .when("output.segment_sequences"),
-                ),
-            ]),
-            Item::Row(&[
-                Item::P(b("output.segment_movies", "Segment Movie Files At:", false)
-                    .ae("Main Pref Section v2/Pref_LIMIT_FILESIZE_K")),
-                Item::P(
-                    int("output.segment_mb", "", 1024, 1, 1_000_000)
-                        .unit("MB")
-                        .when("output.segment_movies"),
-                ),
-            ]),
-            Item::P(
-                int("output.min_disk_space", "Minimum Diskspace Before Overflowing:", 50, 1, 1_000_000)
-                    .unit("MB")
-                    .ae("Misc Section/Minimum space left on output disk in MB"),
-            ),
-            Item::P(
-                num("output.audio_block", "Audio Block Duration:", 1.0, 0.01, 60.0, 2)
-                    .unit("seconds")
-                    .ae("Main Pref Section v2/Pref_SOUND_CHUNK_DURATION"),
-            ),
-            Item::P(b("output.default_file_name", "Use Default File Name and Folder", true)
-                .ae("Misc Section/Guess Default Output File Name")),
+            Item::P(b("appearance.accessible_contrast", "Use Accessible Contrast", false)
+                .ae("Main Pref Section v2/Use Accessible Contrast")),
         ],
     },
     Page {
@@ -650,8 +641,168 @@ pub static PAGES: &[Page] = &[
         ],
     },
     Page {
-        id: "media_cache",
-        title: "Media & Disk Cache",
+        id: "type",
+        title: "Type",
+        items: &[
+            Item::Group(
+                "Text Engine",
+                &[Item::P(radio(
+                    "type.engine",
+                    "",
+                    &["Latin and East Asian", "South Asian and Middle Eastern"],
+                    "Latin and East Asian",
+                ))],
+            ),
+            Item::P(radio(
+                "type.paragraph_direction",
+                "Default Paragraph Direction:",
+                &["Left-to-Right", "Right-to-Left"],
+                "Left-to-Right",
+            )
+            .ae("Type/Default Paragraph Direction")),
+            Item::P(int("type.recent_fonts", "Number of Recent Fonts to Display:", 10, 0, 30)
+                .ae("General Section/Font Panel MRU Size")),
+            Item::P(b("type.english_font_names", "Show Font Names in English", false)
+                .ae("Text and Fonts/Show English Font Names")),
+            Item::P(b("type.missing_glyph", "Enable Missing Glyph Protection", true)),
+            Item::P(b("type.smart_quotes", "Use Smart Quotes", true).ae("Text and Fonts/Smart Quotes")),
+        ],
+    },
+    Page {
+        id: "import",
+        title: "Import",
+        items: &[
+            Item::Group(
+                "Still Footage",
+                &[
+                    Item::P(radio(
+                        "import.still_length",
+                        "",
+                        &["Length of Composition", "Duration"],
+                        "Length of Composition",
+                    )
+                    .ae("Main Pref Section v2/Pref_DEFAULT_STILL_OUT_POINT v2")),
+                    Item::P(
+                        dur("import.still_duration", "Duration:", 5.0)
+                            .when_is("import.still_length", "Duration"),
+                    ),
+                ],
+            ),
+            Item::Group(
+                "Sequence Footage",
+                &[
+                    Item::P(
+                        num("import.sequence_fps", "", 30.0, 1.0, 999.0, 2)
+                            .unit("frames per second")
+                            .ae("Import Options Preference Section/Import Options Default Sequence FPS"),
+                    ),
+                    Item::P(b("import.report_missing", "Report Missing Frames", true)
+                        .ae("Import Options Preference Section/Report Missing Frames From Sequences")),
+                    Item::P(b("import.verify_sequence", "Verify Individual Sequence Files (Slower)", false)
+                        .ae("Import Options Preference Section/Import Options Verify Individual Sequence Files")),
+                ],
+            ),
+            Item::P(
+                choice(
+                    "import.unlabeled_alpha",
+                    "Interpret Unlabeled Alpha As:",
+                    &[
+                        "Ask User",
+                        "Guess",
+                        "Ignore Alpha",
+                        "Straight (Unmatted)",
+                        "Premultiplied (Matted With Black)",
+                        "Premultiplied (Matted With White)",
+                    ],
+                    "Guess",
+                )
+                .ae("Import Options Preference Section/Import Options Default Unlabeled Alpha"),
+            ),
+            Item::P(
+                choice(
+                    "import.drag_as",
+                    "Default Drag Import As:",
+                    &["Footage", "Composition", "Composition - Retain Layer Sizes"],
+                    "Composition",
+                )
+                .ae("Import Options Preference Section/Import Options Default Import Type"),
+            ),
+            Item::P(
+                choice(
+                    "import.auto_reload",
+                    "Automatically Reload Footage:",
+                    &["Off", "All Footage", "Non-Sequence Footage"],
+                    "Non-Sequence Footage",
+                )
+                .ae("Auto Reload Footage On Application Focus/Enabled"),
+            ),
+        ],
+    },
+    Page {
+        id: "export",
+        title: "Export",
+        items: &[
+            Item::Row(&[
+                Item::P(b("output.segment_sequences", "Segment Sequences At:", false)
+                    .ae("Main Pref Section v2/Pref_LIMIT_FILES_PER_FOLDER v2")),
+                Item::P(
+                    int("output.segment_files", "", 700, 1, 100000)
+                        .unit("files")
+                        .when("output.segment_sequences"),
+                ),
+            ]),
+            Item::Row(&[
+                Item::P(b("output.segment_movies", "Segment Movie Files At:", false)
+                    .ae("Main Pref Section v2/Pref_LIMIT_FILESIZE_K")),
+                Item::P(
+                    int("output.segment_mb", "", 1024, 1, 1_000_000)
+                        .unit("MB")
+                        .when("output.segment_movies"),
+                ),
+            ]),
+            Item::P(
+                int("output.min_disk_space", "Minimum Diskspace Before Overflowing:", 50, 1, 1_000_000)
+                    .unit("MB")
+                    .ae("Misc Section/Minimum space left on output disk in MB"),
+            ),
+            Item::P(
+                num("output.audio_block", "Audio Block Duration:", 1.0, 0.01, 60.0, 2)
+                    .unit("seconds")
+                    .ae("Main Pref Section v2/Pref_SOUND_CHUNK_DURATION"),
+            ),
+            Item::P(b("output.default_file_name", "Use Default File Name and Folder", true)
+                .ae("Misc Section/Guess Default Output File Name")),
+            Item::P(b("notifications.enabled", "Notify when Render Queue completes", false)
+                .ae("Notifications/Enable Queue Notifications")),
+            Item::P(b("notifications.play_sound", "Play Sound When Render Finishes", true)
+                .ae("Misc Section/Play sound when render finishes")),
+        ],
+    },
+    Page {
+        id: "audio",
+        title: "Audio",
+        items: &[
+            Item::Group(
+                "Audio Hardware",
+                &[
+                    Item::P(choice("audio.device_class", "Device Class:", &["System Default"], "System Default")),
+                    Item::P(choice("audio.default_output", "Default Output:", &["System Default"], "System Default")),
+                    Item::Button("audio.settings", "Settings..."),
+                ],
+            ),
+            Item::Group(
+                "Audio Output Mapping",
+                &[
+                    Item::P(choice("audio_map.device", "Map Output For:", &["System Default"], "System Default")),
+                    Item::P(choice("audio_map.left", "Left:", &["Output 1", "Output 2"], "Output 1")),
+                    Item::P(choice("audio_map.right", "Right:", &["Output 1", "Output 2"], "Output 2")),
+                ],
+            ),
+        ],
+    },
+    Page {
+        id: "disk",
+        title: "Disk",
         items: &[
             Item::Group(
                 "Disk Cache",
@@ -689,124 +840,8 @@ pub static PAGES: &[Page] = &[
         ],
     },
     Page {
-        id: "video_preview",
-        title: "Video Preview",
-        items: &[
-            Item::P(b("video.mercury_transmit", "Enable Mercury Transmit", false).ae("Win32 Video Preview Pref Section/Video Preview Enabled")),
-            Item::P(choice("video.device", "Video Device:", &["None"], "None").when("video.mercury_transmit")),
-            Item::P(b("video.disable_background", "Disable video output when in background", true).when("video.mercury_transmit")),
-            Item::Group(
-                "Video Output During:",
-                &[Item::Row(&[
-                    Item::P(b("video.during_previews", "Previews", true).when("video.mercury_transmit")),
-                    Item::P(b("video.during_interactions", "Interactions", true).when("video.mercury_transmit")),
-                    Item::P(b("video.during_renders", "Renders", false).when("video.mercury_transmit")
-                        .ae("Win32 Video Preview Pref Section/Video Preview During Render")),
-                ])],
-            ),
-            Item::P(b("video.scale_frame", "Scale and Letterbox Output to Fit Video Monitor", true).when("video.mercury_transmit")),
-            Item::Button("video.audio_hardware", "Audio Hardware..."),
-        ],
-    },
-    Page {
-        id: "appearance",
-        title: "Appearance",
-        items: &[
-            Item::P(b("appearance.label_handles", "Use Label Color for Layer Handles and Paths", true)),
-            Item::P(b("appearance.label_tabs", "Use Label Color for Related Tabs", true)),
-            Item::P(b("appearance.cycle_mask_colors", "Cycle Mask Colors (uses Label Colors)", true)
-                .ae("Mask Colors/Cycle Mask Label Colors")),
-            Item::P(b("appearance.contrasting_mask", "Use Contrasting Color for New Masks", true)
-                .ae("Mask Colors/Use Contrasting Color For Mask Path Enabled")),
-            Item::P(b("appearance.gradients", "Use Gradients", true).ae("Main Pref Section v2/Enable Gradients")),
-            Item::Group(
-                "Brightness",
-                &[
-                    Item::Row(&[
-                        Item::P(slider("appearance.brightness", "", 0.0)
-                            .ae("Main Pref Section v2/User Interface Brightness (4) [0.0..1.0]").live()),
-                        Item::Button("appearance.brightness_default", "Default"),
-                    ]),
-                    Item::P(b("appearance.affect_labels", "Affect Label Colors", false).live()),
-                ],
-            ),
-            Item::Group(
-                "Interactive Controls",
-                &[Item::Row(&[
-                    Item::P(slider("appearance.interactive", "", 0.5).live()),
-                    Item::Button("appearance.interactive_default", "Default"),
-                ])],
-            ),
-            Item::Group(
-                "Focus Indicator",
-                &[Item::Row(&[
-                    Item::P(slider("appearance.focus", "", 0.5).live()),
-                    Item::Button("appearance.focus_default", "Default"),
-                ])],
-            ),
-            Item::P(b("appearance.accessible_contrast", "Use Accessible Contrast", false)
-                .ae("Main Pref Section v2/Use Accessible Contrast")),
-        ],
-    },
-    Page {
-        id: "new_project",
-        title: "New Project",
-        items: &[
-            Item::Row(&[
-                Item::P(b("new_project.use_template", "New Project Loads Template:", false).ae("Template Project/Enabled")),
-                Item::P(path("new_project.template", "", "Choose Template...").when("new_project.use_template").ae("Template Project/Location")),
-            ]),
-            Item::Group(
-                "New Project Folders",
-                &[
-                    Item::P(text("new_project.solids_folder", "Solids Folder:", "Solids").ae("Template Project/New Project Solids Folder")),
-                    Item::P(text("new_project.fills_folder", "Fills Folder:", "Fills").ae("Template Project/New Project Fills Folder")),
-                ],
-            ),
-        ],
-    },
-    Page {
-        id: "auto_save",
-        title: "Auto-Save",
-        items: &[
-            Item::P(b("auto_save.enabled", "Automatically Save Projects", true).ae("Auto Save/Enable Auto Save3").live()),
-            Item::P(
-                int("auto_save.interval", "Save Every:", 5, 1, 1440)
-                    .unit("Minutes")
-                    .when("auto_save.enabled")
-                    .ae("Auto Save/Auto Save Interval")
-                    .live(),
-            ),
-            Item::P(b("auto_save.on_render", "Start auto-save when render queue starts", true)
-                .when("auto_save.enabled")
-                .ae("Auto Save/Enable Auto Save RQ2")),
-            Item::P(
-                int("auto_save.max_versions", "Maximum Project Versions:", 3, 1, 99)
-                    .ae("Auto Save/Auto Save Max Project Vers")
-                    .live(),
-            ),
-            Item::Group(
-                "Auto-Save Location",
-                &[
-                    Item::P(radio(
-                        "auto_save.location",
-                        "",
-                        &["Next to Project", "Custom Location"],
-                        "Next to Project",
-                    )
-                    .ae("Auto Save/Save To Custom Location")
-                    .live()),
-                    Item::P(path("auto_save.folder", "", "Choose Folder...")
-                        .when_is("auto_save.location", "Custom Location")
-                        .ae("Auto Save/Auto Save Folder")
-                        .live()),
-                ],
-            ),
-        ],
-    },
-    Page {
-        id: "memory",
-        title: "Memory & Performance",
+        id: "memory_cpu",
+        title: "Memory & CPU",
         items: &[
             Item::Group(
                 "Memory",
@@ -830,53 +865,44 @@ pub static PAGES: &[Page] = &[
         ],
     },
     Page {
-        id: "audio_hardware",
-        title: "Audio Hardware",
+        id: "video",
+        title: "Video",
         items: &[
-            Item::P(choice("audio.device_class", "Device Class:", &["System Default"], "System Default")),
-            Item::P(choice("audio.default_output", "Default Output:", &["System Default"], "System Default")),
-            Item::Button("audio.settings", "Settings..."),
-        ],
-    },
-    Page {
-        id: "audio_output_mapping",
-        title: "Audio Output Mapping",
-        items: &[
-            Item::P(choice("audio_map.device", "Map Output For:", &["System Default"], "System Default")),
-            Item::P(choice("audio_map.left", "Left:", &["Output 1", "Output 2"], "Output 1")),
-            Item::P(choice("audio_map.right", "Right:", &["Output 1", "Output 2"], "Output 2")),
-        ],
-    },
-    Page {
-        id: "type",
-        title: "Type",
-        items: &[
+            Item::P(b("video.mercury_transmit", "Enable Mercury Transmit", false).ae("Win32 Video Preview Pref Section/Video Preview Enabled")),
+            Item::P(choice("video.device", "Video Device:", &["None"], "None").when("video.mercury_transmit")),
+            Item::P(b("video.disable_background", "Disable video output when in background", true).when("video.mercury_transmit")),
             Item::Group(
-                "Text Engine",
-                &[Item::P(radio(
-                    "type.engine",
-                    "",
-                    &["Latin and East Asian", "South Asian and Middle Eastern"],
-                    "Latin and East Asian",
-                ))],
+                "Video Output During:",
+                &[Item::Row(&[
+                    Item::P(b("video.during_previews", "Previews", true).when("video.mercury_transmit")),
+                    Item::P(b("video.during_interactions", "Interactions", true).when("video.mercury_transmit")),
+                    Item::P(b("video.during_renders", "Renders", false).when("video.mercury_transmit")
+                        .ae("Win32 Video Preview Pref Section/Video Preview During Render")),
+                ])],
             ),
-            Item::P(radio(
-                "type.paragraph_direction",
-                "Default Paragraph Direction:",
-                &["Left-to-Right", "Right-to-Left"],
-                "Left-to-Right",
-            )
-            .ae("Type/Default Paragraph Direction")),
-            Item::P(int("type.recent_fonts", "Number of Recent Fonts to Display:", 10, 0, 30)
-                .ae("General Section/Font Panel MRU Size")),
-            Item::P(b("type.english_font_names", "Show Font Names in English", false)
-                .ae("Text and Fonts/Show English Font Names")),
-            Item::P(b("type.missing_glyph", "Enable Missing Glyph Protection", true)),
-            Item::P(b("type.smart_quotes", "Use Smart Quotes", true).ae("Text and Fonts/Smart Quotes")),
+            Item::P(b("video.scale_frame", "Scale and Letterbox Output to Fit Video Monitor", true).when("video.mercury_transmit")),
+            Item::Button("video.audio_hardware", "Audio Hardware..."),
         ],
     },
     Page {
-        id: "scripting",
+        id: "3d",
+        title: "3D",
+        items: &[
+            Item::P(choice(
+                "3d.renderer",
+                "Renderer for New Compositions:",
+                &["Advanced 3D", "Cinema 4D", "Classic 3D"],
+                "Advanced 3D",
+            )
+            .ae("Renderer Preference Section/New Composition Default")),
+            Item::P(b("3d.multiprocessing", "Enable Multiprocessing", true).ae("Advanced 3D/Enable Multiprocessing")),
+            Item::P(b("3d.labels_visible", "Show 3D View Labels", true).ae("3D View Preference Section/Labels Visible")),
+            Item::P(b("3d.active_camera_preview", "Previews Favor the Active Camera", true)
+                .ae("Unified Preview Options Shared/Preview Favors Active Camera")),
+        ],
+    },
+    Page {
+        id: "scripting_expressions",
         title: "Scripting & Expressions",
         items: &[
             Item::Group(
@@ -935,33 +961,6 @@ pub static PAGES: &[Page] = &[
                     Item::Button("scripting.reset_editor", "Reset to Default Settings"),
                 ],
             ),
-        ],
-    },
-    Page {
-        id: "3d",
-        title: "3D",
-        items: &[
-            Item::P(choice(
-                "3d.renderer",
-                "Renderer for New Compositions:",
-                &["Advanced 3D", "Cinema 4D", "Classic 3D"],
-                "Advanced 3D",
-            )
-            .ae("Renderer Preference Section/New Composition Default")),
-            Item::P(b("3d.multiprocessing", "Enable Multiprocessing", true).ae("Advanced 3D/Enable Multiprocessing")),
-            Item::P(b("3d.labels_visible", "Show 3D View Labels", true).ae("3D View Preference Section/Labels Visible")),
-            Item::P(b("3d.active_camera_preview", "Previews Favor the Active Camera", true)
-                .ae("Unified Preview Options Shared/Preview Favors Active Camera")),
-        ],
-    },
-    Page {
-        id: "notifications",
-        title: "Notifications",
-        items: &[
-            Item::P(b("notifications.enabled", "Notify when Render Queue completes", false)
-                .ae("Notifications/Enable Queue Notifications")),
-            Item::P(b("notifications.play_sound", "Play Sound When Render Finishes", true)
-                .ae("Misc Section/Play sound when render finishes")),
         ],
     },
 ];

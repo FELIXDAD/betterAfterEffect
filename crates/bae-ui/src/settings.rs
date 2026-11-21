@@ -34,7 +34,8 @@ pub fn title() -> &'static str {
 }
 
 /// Registers the `app.settings` action, one named variant per page (Keyboard
-/// Shortcuts window, menus) and AE's shortcut for General (Cmd+Opt+; / Ctrl+Alt+;).
+/// Shortcuts window, menus) and AE's shortcut for Startup & Repair (Cmd+Opt+; /
+/// Ctrl+Alt+;).
 pub fn register(app: &mut bae_app::AppBuilder) {
     crate::i18n::register(bae_prefs::i18n::ZH);
     let owner = app.current_owner();
@@ -74,7 +75,8 @@ pub fn register(app: &mut bae_app::AppBuilder) {
     let bindings = crate::KeymapBindings::new(
         crate::presets::AE_KEYMAP,
         vec![
-            crate::Binding::new("Cmd+Alt+;", ACTION).params(serde_json::json!({"page": "general"})),
+            crate::Binding::new("Cmd+Alt+;", ACTION)
+                .params(serde_json::json!({"page": "startup_repair"})),
         ],
     );
     let _ = app.register(ACTION, bindings);
@@ -295,7 +297,7 @@ impl SettingsDialog {
         self
     }
 
-    /// Opens on `page` (an id like `grids_guides`; unknown or `None`: General) with
+    /// Opens on `page` (an id like `grids_guides`; unknown or `None`: the first page) with
     /// a copy of `current`.
     pub fn open(&mut self, page: Option<&str>, current: &Preferences) {
         self.page = page

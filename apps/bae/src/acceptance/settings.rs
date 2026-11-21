@@ -14,10 +14,13 @@ fn open_general(h: &mut Ui) {
 }
 
 #[test]
-fn shortcut_opens_general_ok_applies_levels_of_undo() {
+fn shortcut_opens_startup_repair_ok_applies_levels_of_undo() {
     let mut h = gui();
     open_general(&mut h);
-    assert_eq!(h.state_mut().workspace.settings_dialog().page(), "general");
+    assert_eq!(
+        h.state_mut().workspace.settings_dialog().page(),
+        "startup_repair"
+    );
     // Shortcuts wait while the dialog is open (N would otherwise do nothing
     // harmful, but Cmd+N would create a comp).
     let (m, k) = cmd(Key::N);
@@ -51,12 +54,12 @@ fn cancel_keeps_the_stored_values() {
     let mut h = gui();
     h.state_mut().dispatch(Invocation::with_params(
         bae_ui::settings::ACTION,
-        serde_json::json!({"page": "auto_save"}),
+        serde_json::json!({"page": "project"}),
     ));
     settle(&mut h);
     assert_eq!(
         h.state_mut().workspace.settings_dialog().page(),
-        "auto_save"
+        "project"
     );
     h.get_by_label("Automatically Save Projects").click();
     settle(&mut h);
