@@ -1,0 +1,66 @@
+cargo :     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.33s
+所在位置 行:6 字符: 1
++ cargo test -p bae-effects *> docs/test-reports/win5090/effects-step1- ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Finished `t...get(s) in 0.33s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+     Running unittests src\lib.rs (target\debug\build\bae-effects/a2cc9ceed58baa17\out\bae_effects-a2cc9ceed58baa17.exe
+)
+
+running 2 tests
+test blur::tests::levels ... ok
+test blur::tests::plan_regions_cover_reads ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\ae_golden.rs (target\debug\build\bae-effects/d29411baf21cadc8\out\ae_golden-d29411baf21cadc8.exe)
+
+running 1 test
+test matches_after_effects ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\blur.rs (target\debug\build\bae-effects/4b355860ff52235e\out\blur-4b355860ff52235e.exe)
+
+running 6 tests
+test zero_blur_is_identity ... ok
+test fast_box_blur ... ok
+test gaussian_roi_is_tile_independent ... ok
+test gaussian_direct ... ok
+test gaussian_half_resolution ... ok
+test gaussian_pyramid ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.11s
+
+     Running tests\color.rs (target\debug\build\bae-effects/e1840411246e47d8\out\color-e1840411246e47d8.exe)
+
+running 8 tests
+test identity_skips_the_pass ... ok
+test tritone ... ok
+test tint ... ok
+test pro_levels ... ok
+test brightness_contrast ... ok
+test exposure ... ok
+test levels ... ok
+test hue_saturation ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.47s
+
+     Running tests\registry.rs (target\debug\build\bae-effects/a6bc24f413377a37\out\registry-a6bc24f413377a37.exe)
+
+running 3 tests
+test ae_parameter_ids_and_defaults ... ok
+test builtins_register_through_the_plugin_registries ... ok
+test prewarm_compiles_every_pipeline ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.63s
+
+   Doc-tests bae_effects
+
+running 1 test
+test crates\bae-effects\src\lib.rs - (line 21) ... ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+all doctests ran in 0.31s; merged doctests compilation took 0.26s

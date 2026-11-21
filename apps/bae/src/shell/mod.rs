@@ -9,9 +9,14 @@
 //! * `--smoke-test N` renders N frames as fast as possible and exits 0; when the
 //!   window cannot present (occluded, headless CI desktop) frames are rendered
 //!   offscreen so the test still exercises the full UI path.
+//! * File commands (new / open / close / save / save as) run through
+//!   [`crate::files`] with the native dialogs ([`dialogs::Native`]); closing the
+//!   window or quitting asks about unsaved changes first. `bae <project>` opens a
+//!   project at startup.
 //!
 //! See `docs/spec/app-shell.md`.
 
+mod dialogs;
 mod menu;
 mod window_state;
 
@@ -34,6 +39,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::window::{Window, WindowId};
 
 use crate::document::{Document, Outcome};
+use crate::files::{self, FileDialogs, FileOutcome, NoDialogs};
 use crate::ui::{self, PlaceholderViewer, StatusInfo, UiOutput, UiRenderer, Workspace};
 use bae_ui::Invocation;
 use bae_ui::action::ids;
@@ -62,7 +68,33 @@ impl AppModule for ShellModule {
 
     fn finish(&self, app: &mut AppBuilder) {
         ui::register_panels(app);
+        // File menu items: registered like any module's menu items, so the native
+        // menu shows the shortcut the active keymap binds to each.
+        let owner = app.current_owner();
+        let menu = app.registry::<bae_ui::MenuItemSpec>();
+        menu.batch(|tx| {
+            for (id, item) in menu::file_items() {
+                if !tx.contains(id) {
+                    let _ = tx.register(owner.clone(), id, item);
+                }
+            }
+        });
     }
+}
+
+/// English titles of the File menu items and their menu path (i18n test).
+#[cfg(test)]
+pub fn file_menu_titles() -> Vec<String> {
+    menu::file_items()
+        .into_iter()
+        .flat_map(|(_, spec)| {
+            spec.path
+                .iter()
+                .cloned()
+                .chain([spec.title.clone()])
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 /// Events delivered to the event loop from other threads.
@@ -148,6 +180,26 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     let workbench_state = loaded.map(|l| l.value.0).unwrap_or_default();
     let mut document = Document::new(app.resource::<Arc<HistoryLog>>().cloned());
     document.add_module_commands(&app);
+    // `bae <project>`: open it now. One project at a time, like AE.
+    let mut startup_error = None;
+    if let Some(path) = global.open.first() {
+        if global.open.len() > 1 {
+            tracing::warn!("only the first project is opened: {}", path.display());
+        }
+        match document.open(path) {
+            Ok(()) => tracing::info!("opened {}", path.display()),
+            Err(error) if global.smoke_test.is_some() => {
+                eprintln!("{}: {error:#}", bae_platform::BINARY_NAME);
+                return ExitCode::FAILURE;
+            }
+            Err(error) => {
+                startup_error = Some(format!(
+                    "{}\n\n{error:#}",
+                    crate::i18n::tr("Could not open the project.")
+                ));
+            }
+        }
+    }
     let mut workspace = Workspace::new(&mut app, workbench_state);
     workspace.set_extra_commands(document.command_titles());
     if first_run {
@@ -164,6 +216,8 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         workspace,
         workbench_file,
         document,
+        startup_error,
+        window_title: String::new(),
         pending: Vec::new(),
         viewer: None,
         view: None,
@@ -211,6 +265,10 @@ struct Shell {
     workspace: Workspace,
     workbench_file: Option<SettingsFile<WorkbenchSettings>>,
     document: Document,
+    /// `bae <project>` failed; reported once the window is up.
+    startup_error: Option<String>,
+    /// Title last given to the native window.
+    window_title: String,
     /// Invocations collected during the last frame, run in `about_to_wait`.
     pending: Vec<Invocation>,
     viewer: Option<ViewportTextureId>,
@@ -404,14 +462,19 @@ impl Shell {
         };
         match inv.id.as_str() {
             ids::QUIT => {
-                self.save_window_state();
-                event_loop.exit();
+                self.quit(event_loop);
                 return;
             }
             ids::ABOUT => self.workspace.show_about(),
-            ids::NEW_PROJECT | ids::OPEN_PROJECT | ids::SAVE | ids::SAVE_AS | ids::HELP => {
-                tracing::info!("`{}` is not implemented yet", inv.id);
+            id if files::is_file_command(id) => {
+                let mut dialogs = self.dialogs();
+                if files::run(&mut self.document, &mut *dialogs, &inv)
+                    == Some(FileOutcome::Replaced)
+                {
+                    self.project_replaced();
+                }
             }
+            ids::HELP => tracing::info!("`{}` is not implemented yet", inv.id),
             _ => match self.document.run(&inv) {
                 Outcome::Changed | Outcome::Unchanged => {}
                 Outcome::Unknown => tracing::debug!("no handler for command `{}`", inv.id),
@@ -427,6 +490,57 @@ impl Shell {
     fn request_redraw(&self) {
         if let Some(view) = &self.view {
             view.window.request_redraw();
+        }
+    }
+
+    /// The dialogs file commands use: native ones owned by the window, none in
+    /// smoke tests (they must never block).
+    fn dialogs(&self) -> Box<dyn FileDialogs> {
+        if self.smoke.is_some() {
+            Box::new(NoDialogs)
+        } else {
+            Box::new(dialogs::Native::new(
+                self.view.as_ref().map(|v| v.window.clone()),
+            ))
+        }
+    }
+
+    /// Quit (menu, Cmd/Ctrl+Q, closing the window) unless the user keeps the
+    /// project open at the unsaved-changes question.
+    fn quit(&mut self, event_loop: &ActiveEventLoop) {
+        if self.smoke.is_none() {
+            let mut dialogs = self.dialogs();
+            if !files::confirm_discard(&mut self.document, &mut *dialogs) {
+                self.request_redraw();
+                return;
+            }
+        }
+        self.save_window_state();
+        event_loop.exit();
+    }
+
+    /// Another project is open: drop the motion workspace's view state (active
+    /// comp, selection, playback) that belonged to the old one. The history log
+    /// was cleared by the document.
+    fn project_replaced(&mut self) {
+        self.app
+            .insert_resource(bae_ui_motion::SharedSession::default());
+    }
+
+    /// Keeps the native window title in step with the project name and the
+    /// unsaved-changes mark (Windows title bar, macOS Window menu and Mission
+    /// Control; macOS also gets the "edited" state).
+    fn sync_window_title(&mut self) {
+        let Some(view) = &self.view else { return };
+        let title = self.document.title();
+        if title != self.window_title {
+            view.window.set_title(&title);
+            #[cfg(target_os = "macos")]
+            {
+                use winit::platform::macos::WindowExtMacOS as _;
+                view.window.set_document_edited(self.document.is_dirty());
+            }
+            self.window_title = title;
         }
     }
 
@@ -491,6 +605,14 @@ impl Shell {
         let output = view.egui_ctx.run_ui(input, |ui| {
             invocations = workspace.ui(ui, status, document, resources);
         });
+        if let Some(menu) = &mut self.menu {
+            let cx = bae_ui::menu::MenuContext {
+                stage: document.stage(),
+                resources,
+                workspace: workspace.active_workspace(),
+            };
+            menu.sync(workspace.keymap(), &cx);
+        }
         view.egui_state.handle_platform_output_with_event_loop(
             &view.window,
             event_loop,
@@ -609,8 +731,8 @@ impl Shell {
             return;
         }
         if close_requested {
-            self.save_window_state();
-            event_loop.exit();
+            // Asked (unsaved changes) after the frame, outside the redraw.
+            self.pending.push(Invocation::new(ids::QUIT));
             return;
         }
         if presented && let Some(smoke) = &mut self.smoke {
@@ -684,7 +806,8 @@ impl ApplicationHandler<UserEvent> for Shell {
         match self.create_view(window) {
             Ok(view) => {
                 if self.menu.is_none() {
-                    match menu::AppMenu::new(&self.workspace.workspaces()) {
+                    let contributed = self.workspace.contributed_menus(&self.app);
+                    match menu::AppMenu::new(&self.workspace.workspaces(), &contributed) {
                         Ok(menu) => {
                             menu.attach(&view.window);
                             self.menu = Some(menu);
@@ -694,6 +817,9 @@ impl ApplicationHandler<UserEvent> for Shell {
                 }
                 view.window.request_redraw();
                 self.view = Some(view);
+                if let Some(message) = self.startup_error.take() {
+                    self.dialogs().error(&message);
+                }
             }
             Err(error) => self.fail(event_loop, &error),
         }
@@ -720,8 +846,8 @@ impl ApplicationHandler<UserEvent> for Shell {
         }
         match event {
             WindowEvent::CloseRequested => {
-                self.save_window_state();
-                event_loop.exit();
+                // Through the dispatch: unsaved changes are asked about first.
+                self.pending.push(Invocation::new(ids::QUIT));
             }
             WindowEvent::Resized(size) => {
                 // A minimize also arrives as a zero-size resize; that is not a
@@ -744,7 +870,13 @@ impl ApplicationHandler<UserEvent> for Shell {
         match event {
             UserEvent::Repaint { delay } => self.schedule_repaint(delay),
             UserEvent::Menu(event) => {
-                self.dispatch(event_loop, menu::invocation(event.id.as_ref()));
+                let id = event.id.as_ref();
+                let inv = self
+                    .menu
+                    .as_ref()
+                    .and_then(|m| m.contributed_invocation(id))
+                    .unwrap_or_else(|| menu::invocation(id));
+                self.dispatch(event_loop, inv);
             }
             UserEvent::DeviceLost => self.recover_device(event_loop),
         }
@@ -754,6 +886,8 @@ impl ApplicationHandler<UserEvent> for Shell {
         for inv in std::mem::take(&mut self.pending) {
             self.dispatch(event_loop, inv);
         }
+        // Every project change goes through the dispatch above.
+        self.sync_window_title();
         if let Some(smoke) = &self.smoke {
             if smoke.last_progress.elapsed() > SMOKE_STALL_TIMEOUT {
                 let rendered = smoke.rendered;

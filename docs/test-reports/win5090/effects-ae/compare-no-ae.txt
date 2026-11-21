@@ -1,0 +1,36 @@
+cargo :     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.29s
+所在位置 行:16 字符: 1
++ cargo run -p bae-effects --example ae_compare -- compare 2>&1 | Tee-O ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Finished `d...get(s) in 0.29s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+     Running `target\debug\examples\ae_compare.exe compare`
+| case | max Δ | mean Δ | px Δ>1 | px Δ>3 |
+|---|---:|---:|---:|---:|
+| gauss_5 | (no AE render) | | | |
+| gauss_25_repeat | (no AE render) | | | |
+| gauss_60 | (no AE render) | | | |
+| gauss_150_h | (no AE render) | | | |
+| gauss_20_soft | (no AE render) | | | |
+| gauss_legacy_20 | (no AE render) | | | |
+| box_4 | (no AE render) | | | |
+| box_10_x3 | (no AE render) | | | |
+| box_3_5_x2_repeat | (no AE render) | | | |
+| box_8_soft | (no AE render) | | | |
+| tint_default | (no AE render) | | | |
+| tint_colors_50 | (no AE render) | | | |
+| tritone_default | (no AE render) | | | |
+| levels_gamma | (no AE render) | | | |
+| levels_red | (no AE render) | | | |
+| levels_alpha | (no AE render) | | | |
+| pro_levels_red_gamma | (no AE render) | | | |
+| huesat_master | (no AE render) | | | |
+| huesat_desaturate | (no AE render) | | | |
+| huesat_colorize | (no AE render) | | | |
+| bc_modern | (no AE render) | | | |
+| bc_modern_dark | (no AE render) | | | |
+| bc_legacy | (no AE render) | | | |
+| exposure_1 | (no AE render) | | | |
+| exposure_offset_gamma | (no AE render) | | | |
+| exposure_bypass | (no AE render) | | | |

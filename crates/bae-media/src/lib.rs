@@ -40,7 +40,7 @@
 //! | Video (Windows) | H.264, HEVC | Media Foundation (placeholder; next PR) |
 //!
 //! Export: [`export`] (encoders, async GPU readback, render loop, render
-//! queue); PNG / OpenEXR sequence encoders built in. Audio: [`audio`]
+//! queue); PNG / TIFF / OpenEXR sequence encoders built in. Audio: [`audio`]
 //! (sample access, waveforms). Packaging: [`trim`] (time-range clips on GOP
 //! boundaries, keyframe lookup). Proxies are reserved
 //! ([`FrameRequest::downscale`]).
@@ -82,9 +82,9 @@ pub use time::{FrameRate, Time, Timecode};
 
 pub use audio::{AudioBuffer, AudioSource, FileAudio, MemoryAudio, Waveform};
 pub use export::{
-    CancelToken, EncodeOutput, EncodeSettings, Encoder, EncoderFormat, ExrCompression,
-    FrameProducer, FrameReadback, MediaEncoders, ProResProfile, ProducedFrame, RenderJob,
-    RenderJobId, RenderProgress, RenderQueue, RenderStatus, VideoCodec,
+    CancelToken, EncodeOutput, EncodeSettings, EncodeStats, Encoder, EncoderFormat, ExrCompression,
+    FrameProducer, FrameReadback, MediaEncoders, PngCompression, ProResProfile, ProducedFrame,
+    RenderJob, RenderJobId, RenderProgress, RenderQueue, RenderStatus, TiffCompression, VideoCodec,
 };
 pub use trim::{TimeRange, TrimMode, TrimPlan, TrimRequest, TrimResult, Trimmer, plan_trim};
 

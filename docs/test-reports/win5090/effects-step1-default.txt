@@ -1,0 +1,36 @@
+cargo :    Compiling bae-render v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-render)
+所在位置 行:10 字符: 1
++ cargo test -p bae-effects *> docs/test-reports/win5090/effects-step1- ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ba...tes\bae-render):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   Compiling bae-plugin v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-plugin)
+   Compiling bae-effects v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-effects)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.50s
+     Running unittests src\lib.rs (target\debug\build\bae-effects/a2cc9ceed58baa17\out\bae_effects-a2cc9ceed58baa17.exe
+)
+
+running 2 tests
+test blur::tests::levels ... ok
+test blur::tests::plan_regions_cover_reads ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\ae_golden.rs (target\debug\build\bae-effects/d29411baf21cadc8\out\ae_golden-d29411baf21cadc8.exe)
+
+running 1 test
+test matches_after_effects ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\blur.rs (target\debug\build\bae-effects/4b355860ff52235e\out\blur-4b355860ff52235e.exe)
+
+running 6 tests
+test zero_blur_is_identity ... ok
+error: test failed, to rerun pass `-p bae-effects --test blur`
+
+Caused by:
+  process didn't exit successfully: `E:\05_Orca\betterAfterEffect\dev\target\debug\build\bae-effects/4b355860ff52235e\o
+ut\blur-4b355860ff52235e.exe` (exit code: 0xc000001d, STATUS_ILLEGAL_INSTRUCTION)
+note: test exited abnormally; to see the full output pass --no-capture to the harness.

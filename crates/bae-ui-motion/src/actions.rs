@@ -48,6 +48,8 @@ pub mod ids {
     /// Params `{"to": "forward" | "backward" | "front" | "back"}`.
     pub const ORDER: &str = "motion.order";
     pub const TRIM_COMP: &str = "motion.trim_comp";
+    /// Queue the active comp in the Render Queue (AE Cmd/Ctrl+M).
+    pub const ADD_TO_RENDER_QUEUE: &str = "motion.add_to_render_queue";
     /// Shell clipboard actions (Cmd+C / Cmd+V outside text fields).
     pub const COPY: &str = "edit.copy";
     pub const PASTE: &str = "edit.paste";
@@ -83,6 +85,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::NEW_LAYER, "New"),
     (ids::ORDER, "Bring Layer Forward"),
     (ids::TRIM_COMP, "Trim Comp to Work Area"),
+    (ids::ADD_TO_RENDER_QUEUE, "Add to Render Queue"),
 ];
 
 /// AE shortcuts of the motion workspace, added to the shell's `ae` keymap.
@@ -129,6 +132,7 @@ pub fn bindings() -> KeymapBindings {
         b("F2", ids::DESELECT_ALL),
         reveal("U", "animated", false),
         b("Cmd+N", ids::NEW_COMP),
+        b("Cmd+M", ids::ADD_TO_RENDER_QUEUE),
         layer("Cmd+Y", "solid"),
         layer("Cmd+Alt+Y", "adjustment"),
         layer("Cmd+Alt+Shift+Y", "null"),
@@ -156,7 +160,7 @@ pub fn bindings() -> KeymapBindings {
     v.push(b("Period", "viewer.zoom_in").when("composition"));
     v.push(b("Comma", "viewer.zoom_out").when("composition"));
     v.push(b("Shift+Slash", "viewer.fit").when("composition"));
-    KeymapBindings::new(bae_ui::presets::AE_KEYMAP, v)
+    KeymapBindings::new(bae_ui::presets::AE_KEYMAP, v).for_workspace(crate::menus::WORKSPACE)
 }
 
 /// Selected layers, or the layers of the selected keyframes.
@@ -311,6 +315,12 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::TRIM_COMP => {
             cx.invoke_with("comp.trim_to_work_area", json!({"comp": info.path}));
+        }
+        ids::ADD_TO_RENDER_QUEUE => {
+            crate::render_queue::shared(cx.resources)
+                .lock()
+                .add(&info, &crate::render_queue::default_output_dir());
+            cx.open_panel("render_queue");
         }
         ids::TRIM_IN if !layers.is_empty() => {
             cx.invoke_with("layer.trim", json!({"layers": layers, "in_point": now}));

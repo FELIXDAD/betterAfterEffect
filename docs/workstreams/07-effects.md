@@ -40,10 +40,26 @@
 
 ## 进度
 
-- [ ] 第一批效果
-- [ ] matchName 对照表
-- [ ] golden image 测试
+- [ ] 第一批效果（0.0.1 先合并第一阶段，#70）
+  - [x] `crates/bae-effects`：注册接口 `register` / `builtins` / `get` / `catalog` / `prewarm`，`Standalone` 渲染目标（测试、基准用）
+  - [x] 颜色校正（声明式 WGSL 内嵌包，走 19 的 `DeclarativeEffect::load_builtin`）：色调、三色调、色阶、色阶（单独控件）、色相/饱和度、亮度和对比度、曝光度
+  - [x] 模糊（Rust 效果）：高斯模糊（含旧版）、快速方框模糊（含旧版 Box Blur）
+  - [ ] 曲线、填充、梯度渐变、四色渐变、线性/径向擦除、百叶窗、分形杂色、定向/径向模糊、发光、投影、简单阻塞工具、变换、动态拼贴、湍流置换、置换图、毛边（下一阶段）
+- [x] matchName 对照表 `docs/interop/ae-effects.md`（已实现的 11 个 + 计划中的第一批）
+- [ ] golden image 测试：AE 对照用例、JSX、对比工具已写（`crates/bae-effects/tests/ae/`），需要在装了 AE 的机器上跑出 golden
+- [ ] 应用接入：`bae_effects::register` 还没在 `apps/bae` / 渲染器里调用（要和 04/01 一起接，接入时再看体积）
 - [ ] 第二批效果
+
+### 0.0.1 记录（2026-11-21）
+
+- 文档身份用 AE matchName（与 02 数据模型一致，AE 工程不用查表），参数 id = AE disk id；内置效果 `plugin = None`。
+- 性能回退的原因：wgpu 默认清零 workgroup 内存，生成的 Metal 代码在每个工作组里串行清零，卷积核慢了约 100 倍。07 的核都先写后读，已关掉清零。另外每线程算 4 个输出、降采样展开读取、金字塔阈值 σ ≥ 6。
+- 偶发失败的原因：uniform 环形缓冲新建时未初始化，wgpu 的延迟清零和其他线程写入的槽位冲突，整张输出变 0。改为创建时映射（整块视为已初始化）后稳定通过。
+- 基准（M1 Pro，GPU 时间为主）：4K 高斯 模糊度 100 = 1.16 ms/帧、模糊度 25 = 2.48、模糊度 10 = 4.3；颜色校正 4K ≈ 0.9–1.1 ms。
+- 已知：快速方框模糊大半径偏慢（4K r20×3 ≈ 23 ms）；19 的 `DeclarativeEffect` 管线缓存不区分设备（测试里每个测试二进制共用一个 `GpuContext` 绕过）。
+- 体积：`bae-effects` 还没有链进应用，release 体积不变；根 `Cargo.toml` 只加了一行路径依赖。
+
+## 请求（其他工作流在这里留言）
 
 ## 请求（其他工作流在这里留言）
 

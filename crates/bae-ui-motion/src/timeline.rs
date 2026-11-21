@@ -380,6 +380,13 @@ fn switch(ui: &Ui, rect: Rect, on: bool, icon: Icon, id: Id) -> bool {
     resp.clicked()
 }
 
+impl TimelinePanel {
+    #[cfg(test)]
+    pub(crate) fn start_rename(&mut self, layer: PrimPath, text: &str) {
+        self.rename = Some((layer, text.to_owned()));
+    }
+}
+
 impl Panel for TimelinePanel {
     fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
         if self.title.is_empty() {
@@ -1036,16 +1043,7 @@ impl TimelinePanel {
                 if self.rename.as_ref().is_some_and(|(p, _)| p == layer) {
                     let mut done = None;
                     if let Some((_, buf)) = &mut self.rename {
-                        let r = ui.put(
-                            name_rect,
-                            egui::TextEdit::singleline(buf).text_color(color::TEXT_STRONG),
-                        );
-                        r.request_focus();
-                        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                            done = Some(None);
-                        } else if r.lost_focus() {
-                            done = Some(Some(buf.clone()));
-                        }
+                        done = common::rename_field(ui, name_rect, buf, rid("rename"));
                     }
                     if let Some(result) = done {
                         if let Some(new) = result.filter(|n| !n.trim().is_empty() && *n != name) {

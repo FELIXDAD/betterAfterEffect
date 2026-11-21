@@ -1,0 +1,55 @@
+[effect.pro-levels]
+name = "色阶（单独控件）"
+keywords = ["色阶", "单独控件", "通道", "灰度系数"]
+
+[effect.pro-levels.params]
+channel = "通道"
+clip_black = "剪切以输出黑色"
+clip_white = "剪切以输出白色"
+rgb = "RGB"
+rgb_input_black = "输入黑色"
+rgb_input_white = "输入白色"
+rgb_gamma = "灰度系数"
+rgb_output_black = "输出黑色"
+rgb_output_white = "输出白色"
+red = "红色"
+red_input_black = "红色输入黑色"
+red_input_white = "红色输入白色"
+red_gamma = "红色灰度系数"
+red_output_black = "红色输出黑色"
+red_output_white = "红色输出白色"
+green = "绿色"
+green_input_black = "绿色输入黑色"
+green_input_white = "绿色输入白色"
+green_gamma = "绿色灰度系数"
+green_output_black = "绿色输出黑色"
+green_output_white = "绿色输出白色"
+blue = "蓝色"
+blue_input_black = "蓝色输入黑色"
+blue_input_white = "蓝色输入白色"
+blue_gamma = "蓝色灰度系数"
+blue_output_black = "蓝色输出黑色"
+blue_output_white = "蓝色输出白色"
+alpha = "Alpha"
+alpha_input_black = "Alpha 输入黑色"
+alpha_input_white = "Alpha 输入白色"
+alpha_gamma = "Alpha 灰度系数"
+alpha_output_black = "Alpha 输出黑色"
+alpha_output_white = "Alpha 输出白色"
+
+[effect.pro-levels.choices.channel]
+1 = "RGB"
+2 = "红色"
+3 = "绿色"
+4 = "蓝色"
+5 = "Alpha"
+
+[effect.pro-levels.choices.clip_black]
+1 = "开"
+2 = "关"
+3 = "对 32 bpc 颜色关闭"
+
+[effect.pro-levels.choices.clip_white]
+1 = "开"
+2 = "关"
+3 = "对 32 bpc 颜色关闭"

@@ -23,6 +23,7 @@ pub mod history;
 pub mod i18n;
 pub mod icons;
 pub mod keymap;
+pub mod menu;
 pub mod panel;
 pub mod presets;
 pub mod theme;
@@ -33,11 +34,12 @@ pub mod workspace;
 
 use bae_app::{AppBuilder, AppModule};
 
-pub use action::{ActionInfo, Invocation};
+pub use action::{ActionHandler, ActionInfo, Invocation};
 pub use dock::{Dock, DropZone, Frame, FrameId, Layout, Node, PanelHost, PanelId, TabInfo};
 pub use i18n::{Lang, tr};
 pub use icons::Icon;
 pub use keymap::{Binding, Chord, Conflict, Keymap, KeymapBindings, KeymapOverrides};
+pub use menu::{MenuContext, MenuEntry, MenuItemSpec, MenuTree};
 pub use panel::{Panel, PanelContext, PanelKind, PanelRequests, PanelSpawn};
 pub use workbench::{Workbench, WorkbenchContext, WorkbenchState};
 pub use workspace::WorkspacePreset;

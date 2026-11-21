@@ -1,0 +1,9 @@
+[effect.tint]
+name = "色调"
+keywords = ["色调", "着色", "双色调", "映射"]
+
+[effect.tint.params]
+map_black = "将黑色映射到"
+map_white = "将白色映射到"
+amount = "着色数量"
+swap_colors = "交换颜色"

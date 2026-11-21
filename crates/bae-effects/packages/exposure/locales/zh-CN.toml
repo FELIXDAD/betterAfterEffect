@@ -1,0 +1,27 @@
+[effect.exposure]
+name = "曝光度"
+keywords = ["曝光度", "曝光", "档", "偏移", "灰度系数", "HDR"]
+
+[effect.exposure.params]
+channels = "通道"
+bypass_linear = "不使用线性光转换"
+master = "主"
+master_exposure = "曝光度"
+master_offset = "偏移"
+master_gamma = "灰度系数校正"
+red = "红色"
+red_exposure = "红色曝光度"
+red_offset = "红色偏移"
+red_gamma = "红色灰度系数校正"
+green = "绿色"
+green_exposure = "绿色曝光度"
+green_offset = "绿色偏移"
+green_gamma = "绿色灰度系数校正"
+blue = "蓝色"
+blue_exposure = "蓝色曝光度"
+blue_offset = "蓝色偏移"
+blue_gamma = "蓝色灰度系数校正"
+
+[effect.exposure.choices.channels]
+1 = "主"
+2 = "单个通道"

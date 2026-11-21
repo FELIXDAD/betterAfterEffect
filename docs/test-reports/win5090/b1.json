@@ -1,0 +1,20 @@
+{
+  "description": "1080p30 10 s: 50 animated solids (shape stand-ins, 1/5 Add/Screen/Multiply/Overlay) + 10 animated RGBA textures (text stand-ins) + background",
+  "draw_calls_per_frame": 21,
+  "draws_per_frame": 51,
+  "encode_ms": 0.4167,
+  "eval_ms_mean": 0.12036133333333336,
+  "eval_ms_p95": 0.1782,
+  "export_fps_full": 303.6840212299425,
+  "frames": 300,
+  "gpu": "NVIDIA GeForce RTX 5090 D v2 (D3D12, discrete)",
+  "graph_build_ms": 0.0209,
+  "latency_ms_p50": 0.5315,
+  "latency_ms_p95": 0.6518999999999999,
+  "layers": 61,
+  "passes_per_frame": 8,
+  "preview_fps_full": 2584.5581267122698,
+  "preview_fps_half": 3339.0988440039805,
+  "scenario": "B1",
+  "scene_build_ms": 46.1041
+}

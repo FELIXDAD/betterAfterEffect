@@ -20,14 +20,45 @@
 |---|---|
 | `preview_fps_full` / `preview_fps_half` | 全部帧连续提交渲染（不等 GPU），最后等 GPU 完成；帧数 ÷ 总时间。对应时间轴播放 / RAM 预览的吞吐。 |
 | `latency_ms_p50` / `p95` | 每帧渲染并等 GPU 完成后再渲染下一帧，单帧耗时的分位数。对应拖动时间指针时的跟手程度。 |
-| `export_fps_full` | 求值 + 渲染 + 回读 8 位 RGBA（不含文件编码）。对应最终渲染的计算部分。 |
+| `export_fps_full` | 求值 + 渲染 + 回读 8 位 RGBA（不含文件编码），每帧同步等回读完成。旧的 `bae render` 就是这样逐帧串行的。 |
+| `export_fps_async` | 同上，但走导出流水线的异步回读（`ExportReadback`，3 个暂存缓冲在途）：GPU 渲第 N+1 帧时第 N 帧在映射、拷出。对应新 `bae render` 的计算部分上限。 |
 | `eval_ms_mean` / `p95` | 03 的求值器（经适配器）每帧耗时。 |
 | `graph_build_ms`、`encode_ms` | 建渲染图、编码 GPU 命令的 CPU 时间。 |
 | `draws_per_frame`、`draw_calls_per_frame`、`passes_per_frame` | 图层绘制数、合批后的 draw call 数、render pass 数。 |
 
 报告同时打印成表格并写到 `target/bench/b1.json`（`BAE_BENCH_OUT` 可改目录），CI 接入后按 JSON 记录趋势。`BAE_BENCH_FRAMES` 可以减少帧数做快速检查。
 
-`bae render` 也打印每帧的求值和渲染耗时（`--json` 给 Agent 和脚本用），可以对任意工程做同样的测量。
+`bae render` 也打印每帧的求值和渲染耗时（`--json` 给 Agent 和脚本用），可以对任意工程做同样的测量，见下一节。
+
+### `bae render` 的导出流水线与 `--json` 分段计时
+
+导出（`bae_render::export_frames`，`bae render` 和以后的渲染队列共用）是流水线：
+
+```text
+渲染线程  求值 N ─ 渲染 N ─ 转换+拷贝 N（GPU）─ 取回 N−3 的映射 ─► 编码线程
+GPU                 … 第 N−1 帧 … 第 N 帧 …
+编码线程  从暂存缓冲拷出 ─► bae-media 序列写出（每个核一个线程，有界队列）压缩 + 写盘
+```
+
+- 回读：输出转换（预乘 → 直通 / 预乘 / 叠背景色，8 位或浮点）写进复用的目标纹理，再拷进 3 个轮换的暂存缓冲（`READBACK_DEPTH`），异步映射；只在三个都在途时等最老那一帧的那次提交，不等整个 GPU。映射好的缓冲交给编码线程拷出，拷完还回来复用。
+- 编码：08 的序列写出（`ImageSequenceEncoder`）每个逻辑核一个线程（`--threads` 可改），队列每线程 1 帧；线程数再按 512 MiB 帧内存上限截断（4K 浮点帧也不会随核数涨内存），内存不随帧数增长。每个文件先在内存里压缩，再一次写盘。
+- 格式：PNG（默认 `fast` = fdeflate + 自适应滤波；`--compression none|fastest|fast|balanced|high|0-9`）、TIFF（默认不压缩，和 AE 的 TIFF 公平对比；`lzw|deflate`）、EXR（默认 ZIP，`none|rle|zips|zip|piz`；`--bits 16|32`；EXR 一律预乘）；macOS 上还有 H.264 / HEVC / ProRes 422 HQ / ProRes 4444（08 的 AVFoundation 编码器）。`--format` 不给时按 `-o` 的扩展名选。
+- 出错（写盘失败、磁盘满）：报出出错的文件，停掉编码线程，删掉已写出的部分序列，进程以非零码退出。
+
+`--json` 的 `stages` 是每段的总毫秒数（除以帧数就是每帧）：
+
+| 字段 | 含义 |
+|---|---|
+| `setup_ms` | 打开工程、建 GPU 设备和渲染器（第一帧之前）。进程启动不在内，固定开销用 `--frame 0` 的墙钟测。 |
+| `eval_ms` | 求值。 |
+| `render_ms` | 建渲染图、编码并提交 GPU 命令（CPU）。注意：旧版这个字段含同步回读，新版不含。 |
+| `readback_wait_ms` | 渲染线程等 GPU（渲染 + 转换 + 拷贝）和映射的时间。大说明 GPU 是瓶颈。 |
+| `readback_copy_ms` | 从暂存缓冲拷出（序列和影片在编码线程上，不占渲染线程）。 |
+| `encoder_stall_ms` | 渲染线程等编码器（队列满）的时间。大说明编码 / 写盘是瓶颈。 |
+| `encode_ms` / `write_ms` | 编码器的像素转换 + 压缩 / 写文件，**各线程相加**（并行，所以可以超过墙钟）。 |
+| `drain_ms` | 最后一帧交出后等编码器写完。 |
+
+另有 `throughput.fps`、`throughput.mb_per_s`、`output`（格式、压缩、文件数、字节数、编码线程数）和 `total_ms`（第一帧到最后一个字节写完）。
 
 ## 3. 与 AE 对比的方法
 
@@ -39,7 +70,8 @@
 
 **速度**（同一台机器，AE 和 BAE 先后运行，不同时跑别的重负载）：
 
-- 最终渲染：同一工程在 AE 渲染队列里渲染全部帧（最佳质量、完整分辨率、8 bpc），用脚本里的 `Date` 计时；BAE 用 `bae render <工程> --comp <合成> --frames all` 计时。两边输出格式要一致（AE 的 PNG 序列需要输出模块模板；没有时用 TIFF 序列，并在结果里注明编码格式不同）。
+- 最终渲染：同一工程在 AE 渲染队列里渲染全部帧（最佳质量、完整分辨率、8 bpc），用脚本里的 `Date` 计时；BAE 用 `bae render <工程> --comp <合成> --frames all` 计时。两边输出格式要一致：PNG 对 PNG（`-o out_####.png`），不压缩对不压缩（AE「TIFF 序列」对 `bae render --format tiff`，两边都带 alpha）。
+- 拆分：固定开销 = 只渲 1 帧（`--frame 0`）的墙钟；每帧 = (全部帧墙钟 − 固定开销) ÷ 帧数；BAE 的每帧再用 `--json` 的 `stages` 拆成求值 / 渲染 / 回读 / 编码 / 写盘。取 3 次中位数。不压缩的序列有 2.5 GB（B1），受磁盘写速度限制，记录磁盘型号和剩余空间。
 - 预览：AE 的 RAM 预览帧率只能在界面里看，记录"缓存完成所需时间 ÷ 帧数"；BAE 用 `preview_fps_full`。
 - 记录 AE 版本、项目位深、渲染器、机器型号、电源模式。
 
@@ -53,13 +85,45 @@
 | 半分辨率预览 | 1076 fps | |
 | 单帧延迟 p50 / p95 | 1.44 / 1.67 ms | < 33 ms |
 | 导出（求值 + 渲染 + 回读） | 334 fps | |
+| 导出，异步回读（2026-11-21） | 672 fps（同次同步回读 359 fps） | |
 | 求值（bae-anim，61 个图层） | 0.098 ms/帧 | |
 | 建图 / 编码 GPU 命令 | 0.008 / 0.25 ms | |
 | 每帧 | 51 个图层绘制 → 21 个 draw call、8 个 render pass | |
 
 说明：形状和文字还是纯色和纹理代替品，没有模糊和发光，所以这是合成本身的开销上限；真实的 B1 要等 05 和 07。render pass 数来自相乘、叠加这类要读底图的混合模式（每个这样的图层要拷贝它覆盖的那块底图，再开一个 pass）。
 
-**与 AE 的速度对比还没做**（方法见第 3 节）：B1 需要先能在 AE 里搭出同样的工程（15 的交换格式导入，或者从 `fixture::b1` 导出 JSON 给 JSX 搭建）。画面一致性对比已经做了，见 `crates/bae-render/tests/ae/README.md`。
+**与 AE 的速度对比**（Windows RTX 5090 D，`docs/test-reports/win5090/2026-11-21-speed-b1.md`，导出流水线之前的 dev）：AE 输出 PNG 22.645 s，BAE（逐帧串行 PNG）13.010 s，约 1.74 倍；固定开销 AE 约 7.88 s、BAE 约 0.96 s；扣掉后每帧 AE 约 49 ms、BAE 约 40 ms，其中 BAE 的求值、渲染、回读只占约 3 ms，其余是单线程 PNG 编码和写盘。流水线之后的数字等 5090 重测。画面一致性对比见 `crates/bae-render/tests/ae/README.md`。
+
+### 导出端到端（`bae render`，B1 300 帧，Apple M4 10 核，macOS，2026-11-21）
+
+3 次取中位，墙钟含进程启动。之前 = dev 6aae5b8（逐帧串行：同步回读、单线程 PNG）；之后 = 本 PR（流水线 + 并行编码 + `png` 回到 opt-level 3）。
+
+| | 墙钟 | 固定开销（`--frame 0`） | 每帧 | 加速 | 文件 |
+|---|---:|---:|---:|---:|---:|
+| 之前：PNG（fast） | 5.027 s | 0.033 s | 16.65 ms | 1× | 76 MB |
+| 之后：PNG（fast，默认） | **0.468 s** | 0.043 s | **1.42 ms** | **10.7×** | 79 MB |
+| 之后：PNG（fastest） | 0.452 s | 0.032 s | 1.40 ms | 11.1× | 88 MB |
+| 之后：PNG（fast，8 线程） | 0.472 s | 0.034 s | 1.46 ms | 10.7× | 79 MB |
+| 之后：TIFF 不压缩 | 1.262 s | 0.033 s | 4.10 ms | — | 2.49 GB |
+| 之后：EXR（ZIP，half） | 2.185 s | 0.066 s | 7.06 ms | — | 193 MB |
+
+之后每帧各阶段（ms/帧；编码、写盘是 10 个线程相加）：
+
+| | 求值 | 渲染（CPU） | 等 GPU | 拷出 | 等编码器 | 编码 | 写盘 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| PNG fast | 0.20 | 0.61 | 0.43 | 0.85 | 0.003 | 5.61 | 0.46 |
+| PNG fastest | 0.08 | 0.36 | 0.90 | 0.65 | 0.001 | 1.55 | 0.50 |
+| TIFF 不压缩 | 0.16 | 0.56 | 0.52 | 0.81 | 2.34 | 0.68 | 33.5 |
+| EXR ZIP | 0.22 | 1.10 | 0.13 | 1.12 | 5.02 | 68.9 | 0.95 |
+
+之前每帧：求值 0.05 ms，渲染 + 同步回读 2.78 ms，PNG 编码 + 写盘约 13.8 ms（单线程；其中 `png` 在 opt-level "s" 下自适应滤波慢约 3.5 倍）。
+
+说明：
+
+- PNG：M4 上现在是 **GPU 受限**（渲染线程主要在等 GPU；B1 合成本身约 1.0–1.2 ms/帧，再加输出转换和拷贝）。编码器余量很大：fast 档 10 线程每秒能压约 1800 帧，`fastest` 和 8 线程都不改变墙钟。
+- TIFF 不压缩：2.49 GB 写盘受磁盘限制（约 2 GB/s，本机磁盘剩余不足 5 GiB，第三次跑到 4.96 s）；编码只占 0.68 ms/帧。
+- EXR ZIP：压缩（exr crate 的 zlib）是瓶颈；要快用 `--compression none`（文件 5 GB）或 `piz`。
+- 计算部分单独看：`export_fps_full`（同步回读）359 fps → `export_fps_async`（流水线回读）672 fps（见下表）。
 
 ### 体积
 
@@ -71,6 +135,8 @@
 | 加 `bae render`，不含素材解码（bae-render + bae-anim） | 13.72 MiB（+0.47 MiB） |
 | 加素材解码（`media` 特性：bae-media 的 PNG/JPEG/WebP/EXR 和 macOS 视频） | 15.55 MiB（+2.30 MiB） |
 
+导出流水线（2026-11-21，macOS arm64 strip 后，`cargo build --release -p bae`）：dev 6aae5b8 22,870,912 字节 → 23,568,144 字节，**+697,232 字节（+0.665 MiB）**。没有新依赖：以前 `bae render` 不调用 bae-media 的编码器，LTO 把它们整个删掉了；现在链接进来的是 EXR 写出（exr 的各种压缩器 +92 KiB，miniz_oxide +16 KiB）、PNG / TIFF / EXR 写出与并行写出（bae_media +104 KiB，含 macOS 影片编码器）、TIFF 编码（+17 KiB）、导出流水线（bae_render +33 KiB）和标准库的线程 / 通道实例化（cargo bloat 估算，.text 合计约 +387 KiB）。Windows 没有影片编码器那部分。`png` 从 opt-level "s" 改回 3：strip 后的二进制大小不变（同字节数）。
+
 `cargo bloat`：bae-render 自身约 134 KiB，其余主要是第一次进入应用的 bae-media 解码器（exr、image-webp、zune-jpeg 等）和 bae-anim。素材解码是 bae-render 的 `media` 特性（默认开）；根 `Cargo.toml` 的条目关掉默认特性，`apps/bae` 显式打开，需要更小的二进制（例如只渲染形状的服务端）时可以不开。
 
 ## 5. 历史
@@ -78,3 +144,4 @@
 | 日期 | 提交 | 机器 | preview full | preview half | latency p50 / p95 | export | eval | 说明 |
 |---|---|---|---:|---:|---:|---:|---:|---|
 | 2026-11-20 | PR 2 | Apple M4 | 852 fps | 1076 fps | 1.44 / 1.67 ms | 334 fps | 0.098 ms | 第一版：纯色 + 纹理代替形状和文字；`benches/results/2026-11-20-apple-m4.json` |
+| 2026-11-21 | 导出流水线 | Apple M4 | 1004 fps | 1083 fps | 1.34 / 1.49 ms | 359 fps（异步回读 672 fps） | 0.033 ms | `bae render` B1 PNG 300 帧 5.03 s → 0.47 s；`benches/results/2026-11-21-apple-m4.json` |

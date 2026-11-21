@@ -482,6 +482,46 @@ pub(crate) fn is_3d(stage: &Stage, layer: &PrimPath) -> bool {
         )
 }
 
+/// An inline rename field (AE: Enter or clicking elsewhere commits, Esc cancels).
+/// Returns `None` while editing, `Some(None)` when cancelled, `Some(Some(text))`
+/// when committed. Focus is requested once, when the field first appears.
+pub(crate) fn rename_field(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    buf: &mut String,
+    id: Id,
+) -> Option<Option<String>> {
+    let started = ui.data(|d| d.get_temp::<bool>(id)).is_none();
+    let r = ui.put(
+        rect,
+        egui::TextEdit::singleline(buf)
+            .id(id.with("field"))
+            .text_color(color::TEXT_STRONG),
+    );
+    if started {
+        r.request_focus();
+        ui.data_mut(|d| d.insert_temp(id, true));
+        return None;
+    }
+    let (enter, escape) = ui.input(|i| {
+        (
+            i.key_pressed(egui::Key::Enter),
+            i.key_pressed(egui::Key::Escape),
+        )
+    });
+    let result = if escape {
+        Some(None)
+    } else if enter || r.lost_focus() || !r.has_focus() {
+        Some(Some(buf.clone()))
+    } else {
+        None
+    };
+    if result.is_some() {
+        ui.data_mut(|d| d.remove::<bool>(id));
+    }
+    result
+}
+
 /// A centered hint in an empty panel.
 pub(crate) fn empty_hint(ui: &mut Ui, title: &str, body: &str) {
     ui.add_space((ui.available_height() / 2.0 - 30.0).max(8.0));

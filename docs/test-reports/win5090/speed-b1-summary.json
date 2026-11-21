@@ -1,0 +1,38 @@
+{
+    "date":  "2026-11-21T10:00:25.9838296+08:00",
+    "machine":  "Windows 11 + NVIDIA GeForce RTX 5090 D v2 (D3D12, discrete)",
+    "power":  "plugged-in (assumed)",
+    "ae_version":  "After Effects 2026 26.0x67",
+    "bae_commit":  "afc054f (origin/dev)",
+    "scene":  {
+                  "spec":  "1080p30, 10s (300 frames), 61 layers: 50 animated solids + 10 footage label PNGs + background; blend modes on every 5th solid; NO blur/glow (fixture stand-in per docs/perf.md)",
+                  "name":  "B1-like motion graphics",
+                  "note":  "AE and BAE scenes are structurally matched (same counts/duration/fps); AE RNG approx mirrors fixture seed 0xB1 but not bit-identical"
+              },
+    "method":  {
+                   "fair":  "Same machine, sequential (not concurrent), no other heavy load; AE TIFF vs BAE PNG — encode formats differ (noted)",
+                   "ae":  "aerender.exe renders RQ already saved in B1.aep (RS template 最佳设置, OM 带有 Alpha 的 TIFF 序列); wall clock = process lifetime",
+                   "bae":  "bae render B1.bae --comp b1 --frames all --depth 8 --resolution full -o PNG sequence; WGPU_DX12_COMPILER=fxc; wall clock = process lifetime"
+               },
+    "frames":  300,
+    "ae":  {
+               "tool":  "aerender.exe",
+               "exit":  0,
+               "format":  "TIFF sequence with Alpha",
+               "om_template":  "带有 Alpha 的 TIFF 序列 ",
+               "export_fps":  16.42,
+               "rs_template":  "最佳设置",
+               "wall_sec":  18.269,
+               "outputs":  300
+           },
+    "bae":  {
+                "compiler":  "fxc",
+                "outputs":  300,
+                "wall_sec":  13.016,
+                "export_fps":  23.05,
+                "exit":  0,
+                "tool":  "bae render",
+                "format":  "PNG sequence 8bpc"
+            },
+    "speedup_wall":  1.4
+}

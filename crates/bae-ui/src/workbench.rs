@@ -25,7 +25,7 @@ use bae_model::{AuthorId, Stage};
 use egui::{Context, Event, Key, Rect, Ui, pos2, vec2};
 use serde::{Deserialize, Serialize};
 
-use crate::action::{ActionInfo, Invocation, ids};
+use crate::action::{ActionHandler, ActionInfo, Invocation, ids};
 use crate::dock::{Dock, Layout, PanelHost, PanelId, TabInfo};
 use crate::i18n::tr;
 use crate::icons::{self, Icon};
@@ -114,6 +114,11 @@ pub struct Workbench {
     keymaps: Arc<Registry<Keymap>>,
     keymap_extensions: Arc<Registry<KeymapBindings>>,
     actions: Arc<Registry<ActionInfo>>,
+    /// Module action handlers, tried after the focused panel.
+    handlers: Arc<Registry<dyn ActionHandler>>,
+    handlers_gen: u64,
+    handler_conflicts: Vec<String>,
+    keymap_conflicts: Vec<String>,
     /// Model commands `(id, English title)` for the shortcut editor.
     extra_commands: Vec<(String, String)>,
     editor: shortcuts::ShortcutEditor,
@@ -141,6 +146,39 @@ impl Workbench {
             state,
         )
         .with_keymap_extensions(app.registry::<KeymapBindings>())
+        .with_action_handlers(app.registry::<dyn ActionHandler>())
+    }
+
+    /// Module action handlers (`Registry<dyn ActionHandler>`), tried after the
+    /// focused panel and before the shell's actions.
+    pub fn with_action_handlers(mut self, handlers: Arc<Registry<dyn ActionHandler>>) -> Self {
+        self.handlers = handlers;
+        self.handlers_gen = u64::MAX;
+        self.refresh_registries();
+        self
+    }
+
+    /// Action ids claimed by more than one module handler (also logged).
+    pub fn handler_conflicts(&self) -> &[String] {
+        &self.handler_conflicts
+    }
+
+    /// Chords bound by more than one module keymap extension (also logged).
+    pub fn keymap_conflicts(&self) -> &[String] {
+        &self.keymap_conflicts
+    }
+
+    /// Module handlers in priority order: the active workspace's first, then
+    /// registration order.
+    fn ordered_handlers(&self) -> Vec<Arc<dyn ActionHandler>> {
+        let snapshot = self.handlers.snapshot();
+        let mut v: Vec<(usize, Arc<dyn ActionHandler>)> = snapshot
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (i, e.item().clone()))
+            .collect();
+        v.sort_by_key(|(i, h)| (h.workspace() != Some(self.active.as_str()), *i));
+        v.into_iter().map(|(_, h)| h).collect()
     }
 
     /// Merge bindings other modules add to keymaps (`Registry<KeymapBindings>`).
@@ -166,6 +204,10 @@ impl Workbench {
             keymaps,
             keymap_extensions: Arc::new(Registry::new()),
             actions,
+            handlers: Arc::new(Registry::new()),
+            handlers_gen: u64::MAX,
+            handler_conflicts: Vec::new(),
+            keymap_conflicts: Vec::new(),
             extra_commands: Vec::new(),
             editor: shortcuts::ShortcutEditor::default(),
             dialogs: workspaces::Dialogs::default(),
@@ -373,6 +415,29 @@ impl Workbench {
             (self.keymaps_gen, self.extensions_gen) = generations;
             self.rebuild_keymap();
         }
+        let generation = self.handlers.generation();
+        if generation != self.handlers_gen {
+            self.handlers_gen = generation;
+            let snapshot = self.handlers.snapshot();
+            let mut owners: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            for e in snapshot.iter() {
+                for a in e.item().actions() {
+                    owners.entry(a).or_default().push(e.id().to_string());
+                }
+            }
+            self.handler_conflicts = owners
+                .into_iter()
+                .filter(|(_, o)| o.len() > 1)
+                .map(|(a, o)| {
+                    let m = format!(
+                        "action `{a}` is claimed by several modules: {}",
+                        o.join(", ")
+                    );
+                    tracing::warn!("{m}");
+                    m
+                })
+                .collect();
+        }
     }
 
     fn rebuild_keymap(&mut self) {
@@ -382,9 +447,38 @@ impl Workbench {
             .get(&id)
             .map(|k| (*k).clone())
             .unwrap_or_default();
+        // Modules of the active workspace first, then registration order: the
+        // first binding of a chord wins.
         let extensions = self.keymap_extensions.snapshot();
-        for e in extensions.iter().filter(|e| e.item().keymap == id) {
-            base.bindings.extend(e.item().bindings.iter().cloned());
+        let mut ext: Vec<(usize, &str, &KeymapBindings)> = extensions
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.item().keymap == id)
+            .map(|(i, e)| (i, e.id().as_ref(), e.item().as_ref()))
+            .collect();
+        ext.sort_by_key(|(i, _, k)| (k.workspace.as_deref() != Some(self.active.as_str()), *i));
+        self.keymap_conflicts.clear();
+        let mut claimed: Vec<(&Chord, Option<&str>, &str)> = Vec::new();
+        for (_, owner, k) in &ext {
+            for b in &k.bindings {
+                if let Some((_, _, first)) = claimed
+                    .iter()
+                    .find(|(c, w, o)| **c == b.chord && *w == b.when.as_deref() && o != owner)
+                {
+                    let m = format!(
+                        "shortcut {} ({}) of `{owner}` conflicts with `{first}`; `{first}` wins",
+                        b.chord,
+                        b.when.as_deref().unwrap_or("global")
+                    );
+                    tracing::warn!("{m}");
+                    self.keymap_conflicts.push(m);
+                } else {
+                    claimed.push((&b.chord, b.when.as_deref(), owner));
+                }
+            }
+        }
+        for (_, _, k) in &ext {
+            base.bindings.extend(k.bindings.iter().cloned());
         }
         self.keymap = match self.state.keymaps.get(&id) {
             Some(overrides) => base.with_overrides(overrides),
@@ -616,6 +710,29 @@ impl Workbench {
             );
             pcx.focused = true;
             if panel.on_action(inv, &mut pcx) {
+                self.apply_panel_requests(cx);
+                return true;
+            }
+        }
+        // Module handlers (menus and shortcuts work whichever panel has focus).
+        let focused = self
+            .dock
+            .focused_panel()
+            .cloned()
+            .unwrap_or_else(|| PanelId::new("workbench"));
+        for h in self.ordered_handlers() {
+            if !h.actions().contains(&inv.id) {
+                continue;
+            }
+            let mut pcx = PanelContext::new(
+                &focused,
+                "",
+                cx.stage,
+                cx.author,
+                cx.resources,
+                &mut self.requests,
+            );
+            if h.handle(inv, &mut pcx) {
                 self.apply_panel_requests(cx);
                 return true;
             }
@@ -1231,6 +1348,47 @@ mod tests {
     }
 
     #[test]
+    fn role_picker_closes_on_escape_and_outside_click() {
+        let (kinds, presets, keymaps, actions) = registries();
+        let mut wb =
+            Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
+        let ctx = Context::default();
+        let pointer = |pos: egui::Pos2, pressed: bool| {
+            vec![
+                Event::PointerMoved(pos),
+                Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                },
+            ]
+        };
+        wb.show_role_picker();
+        for _ in 0..3 {
+            frame_in(&ctx, &mut wb, vec![]);
+        }
+        assert!(wb.role_picker_open());
+        // A click inside the dialog keeps it open.
+        let inside = egui::pos2(700.0, 450.0);
+        frame_in(&ctx, &mut wb, pointer(inside, true));
+        frame_in(&ctx, &mut wb, pointer(inside, false));
+        assert!(wb.role_picker_open());
+        frame_in(&ctx, &mut wb, vec![key(Key::Escape, Modifiers::NONE)]);
+        assert!(!wb.role_picker_open());
+        assert_eq!(wb.active_workspace(), "one", "closing keeps the workspace");
+
+        wb.show_role_picker();
+        for _ in 0..3 {
+            frame_in(&ctx, &mut wb, vec![]);
+        }
+        let outside = egui::pos2(20.0, 880.0);
+        frame_in(&ctx, &mut wb, pointer(outside, true));
+        frame_in(&ctx, &mut wb, pointer(outside, false));
+        assert!(!wb.role_picker_open());
+    }
+
+    #[test]
     fn modules_extend_keymaps() {
         let (kinds, presets, keymaps, actions) = registries();
         let extensions = Arc::new(Registry::<KeymapBindings>::new());
@@ -1259,6 +1417,109 @@ mod tests {
         // Unregistering (plugin unload) removes the shortcut.
         extensions.unregister("motion.timeline");
         assert!(frame(&mut wb, vec![key(Key::J, Modifiers::NONE)]).is_empty());
+    }
+
+    struct Claim {
+        workspace: Option<&'static str>,
+        tag: &'static str,
+        log: Arc<std::sync::Mutex<Vec<&'static str>>>,
+    }
+
+    impl ActionHandler for Claim {
+        fn actions(&self) -> Vec<String> {
+            vec!["mod.go".into()]
+        }
+        fn workspace(&self) -> Option<&str> {
+            self.workspace
+        }
+        fn handle(&self, _inv: &Invocation, _cx: &mut PanelContext<'_>) -> bool {
+            self.log.lock().unwrap().push(self.tag);
+            true
+        }
+    }
+
+    #[test]
+    fn module_handlers_run_by_workspace_priority() {
+        let (kinds, presets, keymaps, actions) = registries();
+        let handlers = Arc::new(Registry::<dyn ActionHandler>::new());
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        for (id, workspace) in [("a", None), ("b", Some("two"))] {
+            let h = Claim {
+                workspace,
+                tag: id,
+                log: log.clone(),
+            };
+            handlers
+                .register_arc(Owner::module(id), id, Arc::new(h))
+                .unwrap();
+        }
+        let mut wb =
+            Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default())
+                .with_action_handlers(handlers);
+        assert_eq!(
+            wb.handler_conflicts().len(),
+            1,
+            "{:?}",
+            wb.handler_conflicts()
+        );
+        let resources = Resources::new();
+        let stage = Stage::new();
+        let author = AuthorId::system();
+        let cx = WorkbenchContext {
+            stage: &stage,
+            author: &author,
+            resources: &resources,
+            title: "",
+            dirty: false,
+        };
+        // Workspace "one": no preference, registration order → a.
+        assert!(wb.handle(&Invocation::new("mod.go"), &cx));
+        // Workspace "two": b belongs to it and goes first.
+        wb.switch_workspace("two");
+        assert!(wb.handle(&Invocation::new("mod.go"), &cx));
+        assert_eq!(*log.lock().unwrap(), ["a", "b"]);
+        // Ids nobody claims fall through to the shell.
+        assert!(!wb.handle(&Invocation::new("model.command"), &cx));
+    }
+
+    #[test]
+    fn keymap_extensions_prefer_the_active_workspace() {
+        let (kinds, presets, keymaps, actions) = registries();
+        let extensions = Arc::new(Registry::<KeymapBindings>::new());
+        let mut wb =
+            Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default())
+                .with_keymap_extensions(extensions.clone());
+        let first = KeymapBindings::new("km", vec![Binding::new("J", "first.j")]);
+        extensions
+            .register(Owner::module("first"), "first", first)
+            .unwrap();
+        let second = |ws: &str| {
+            Arc::new(
+                KeymapBindings::new("km", vec![Binding::new("J", "second.j")]).for_workspace(ws),
+            )
+        };
+        extensions
+            .register_arc(Owner::module("second"), "second", second("elsewhere"))
+            .unwrap();
+        // Same chord in two modules: a conflict, the first registered wins.
+        assert_eq!(
+            frame(&mut wb, vec![key(Key::J, Modifiers::NONE)]),
+            vec![Invocation::new("first.j")]
+        );
+        assert_eq!(wb.keymap_conflicts().len(), 1);
+        // The module of the active workspace ("one") wins.
+        extensions
+            .replace(Owner::module("second"), "second", second("one"))
+            .unwrap();
+        assert_eq!(
+            frame(&mut wb, vec![key(Key::J, Modifiers::NONE)]),
+            vec![Invocation::new("second.j")]
+        );
+        assert!(
+            wb.keymap_conflicts()[0].ends_with("`second` wins"),
+            "{:?}",
+            wb.keymap_conflicts()
+        );
     }
 
     #[test]

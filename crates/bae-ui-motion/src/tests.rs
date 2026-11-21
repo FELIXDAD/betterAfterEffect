@@ -407,3 +407,338 @@ fn demo_project_builds_and_renders() {
     h.frame("timeline", &mut tl, Vec::new());
     h.frame("composition", &mut viewer, Vec::new());
 }
+
+/// The viewer's GPU path: 04's renderer draws the comp, the 8-bit texture is
+/// published, and the viewer gets the egui handle the shell set.
+#[test]
+fn gpu_preview_publishes_the_rendered_comp() {
+    use bae_gpu::viewport::ViewportTextureRegistry;
+    use bae_gpu::{GpuContext, GpuContextDescriptor, wgpu};
+    let gpu = match GpuContext::new_headless(GpuContextDescriptor::default()) {
+        Ok(gpu) => gpu,
+        Err(e) => {
+            eprintln!("no GPU, skipping: {e}");
+            return;
+        }
+    };
+    eprintln!(
+        "adapter: {} ({:?})",
+        gpu.adapter_info().name,
+        gpu.adapter_info().device_type
+    );
+    let mut h = Harness::new();
+    let (comp, _solid, _shape) = h.comp_with_layers();
+    let registry = std::sync::Arc::new(ViewportTextureRegistry::new());
+    let mut preview = crate::gpu_preview::GpuPreview::with(gpu, registry.clone());
+    let evaluated = bae_anim::evaluate_comp(&h.stage, &comp, Time::ZERO).unwrap();
+    // No display handle until the shell registers the texture.
+    assert!(
+        preview
+            .frame(&h.resources, &h.stage, &evaluated, 1)
+            .is_none()
+    );
+    let published = registry.get(preview.viewport()).expect("published");
+    assert_eq!(published.size, [640, 360]);
+    assert_eq!(published.format, wgpu::TextureFormat::Rgba8Unorm);
+    registry.set_display_handle(preview.viewport(), Some(7));
+    let img = preview
+        .frame(&h.resources, &h.stage, &evaluated, 1)
+        .expect("image");
+    assert_eq!(img.handle, 7);
+    assert_eq!(
+        (img.rect.x1 - img.rect.x0, img.rect.y1 - img.rect.y0),
+        (640, 360)
+    );
+    // Half resolution publishes a half-size texture.
+    preview.frame(&h.resources, &h.stage, &evaluated, 2);
+    assert_eq!(registry.get(preview.viewport()).unwrap().size, [320, 180]);
+    // The pixels: the full-comp red solid shows where the star is not.
+    let mut anim = bae_render::AnimEvaluator::new(None);
+    let rc = anim.convert(&h.stage, &evaluated, 0).unwrap();
+    let frame = preview
+        .renderer()
+        .render_frame(&rc, &bae_render::RenderRequest::full())
+        .unwrap();
+    let pixels = preview
+        .renderer()
+        .read_rgba8(&frame, bae_render::OutputAlpha::Premultiplied)
+        .unwrap();
+    let px = pixels.pixel(10, 10);
+    assert!(
+        px[0] >= 250 && px[1] <= 3 && px[2] <= 3 && px[3] >= 250,
+        "{px:?}"
+    );
+    let id = preview.viewport();
+    drop(preview);
+    assert!(registry.get(id).is_none(), "removed on drop");
+}
+
+/// Menus: AE structure, enabled only when they can act, same invocation as the
+/// shortcut; the global handler runs them with no motion panel focused.
+#[test]
+fn menus_and_global_handler() {
+    use bae_ui::menu::{MenuContext, MenuEntry, build_menus};
+    use bae_ui::{ActionHandler, MenuItemSpec};
+    let mut b = AppBuilder::new();
+    b.add_module(bae_ui::UiModule)
+        .add_module(crate::MotionUiModule);
+    let mut app = b.build();
+    let tree = build_menus(&app.registry::<MenuItemSpec>().snapshot(), "motion");
+    assert!(tree.conflicts.is_empty(), "{:?}", tree.conflicts);
+    let tops: Vec<&str> = tree.menus.iter().map(|(t, _)| t.as_str()).collect();
+    assert_eq!(tops, ["Edit", "Composition", "Layer", "Animation"]);
+    let layer = &tree.menus[2].1;
+    let MenuEntry::Submenu { title, entries } = &layer[0] else {
+        panic!("Layer ▸ New");
+    };
+    assert_eq!(title, "New");
+    let names: Vec<String> = entries
+        .iter()
+        .map(|e| match e {
+            MenuEntry::Item { spec, .. } => spec.title.clone(),
+            MenuEntry::Separator => "---".into(),
+            MenuEntry::Submenu { title, .. } => title.clone(),
+        })
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "Text",
+            "Solid",
+            "Light",
+            "Camera",
+            "Null Object",
+            "Shape Layer",
+            "Adjustment Layer",
+            "---",
+            "Rectangle",
+            "Ellipse"
+        ]
+    );
+    // Menu items show the shortcut bound to the same invocation.
+    let mut keymap = bae_ui::presets::ae_keymap();
+    keymap.bindings.extend(crate::actions::bindings().bindings);
+    let shortcut = |id: &str| {
+        let (_, spec) = tree.items().into_iter().find(|(i, _)| *i == id).unwrap();
+        keymap
+            .chord_for_invocation(&spec.invocation())
+            .map(|c| c.to_string())
+    };
+    assert_eq!(shortcut("motion.composition.new").as_deref(), Some("Cmd+N"));
+    assert_eq!(shortcut("motion.layer.new.solid").as_deref(), Some("Cmd+Y"));
+    assert_eq!(
+        shortcut("motion.layer.new.null").as_deref(),
+        Some("Cmd+Alt+Shift+Y")
+    );
+    assert_eq!(shortcut("motion.animation.ease").as_deref(), Some("F9"));
+    assert_eq!(shortcut("motion.layer.new.rectangle"), None);
+
+    // Enabled state follows the session.
+    let mut h = Harness::new();
+    let solid_item = tree
+        .items()
+        .into_iter()
+        .find(|(i, _)| *i == "motion.layer.new.solid")
+        .unwrap()
+        .1
+        .clone();
+    let new_comp = tree
+        .items()
+        .into_iter()
+        .find(|(i, _)| *i == "motion.composition.new")
+        .unwrap()
+        .1
+        .clone();
+    {
+        let cx = MenuContext {
+            stage: &h.stage,
+            resources: &h.resources,
+            workspace: "motion",
+        };
+        assert!(!solid_item.is_enabled(&cx), "no comp yet");
+        assert!(new_comp.is_enabled(&cx));
+    }
+    // The handler runs a menu item with a non-motion panel focused.
+    let handler = crate::menus::MotionActions;
+    assert!(handler.actions().iter().any(|a| a == "motion.new_layer"));
+    let run = |h: &mut Harness, inv: Invocation| {
+        let mut requests = PanelRequests::default();
+        let id = PanelId::new("history");
+        let mut cx = PanelContext::new(
+            &id,
+            "History",
+            &h.stage,
+            &h.author,
+            &h.resources,
+            &mut requests,
+        );
+        assert!(handler.handle(&inv, &mut cx));
+        h.apply(requests);
+        h.frame("history", &mut NoopPanel, Vec::new());
+    };
+    run(&mut h, new_comp.invocation());
+    let comp = h.session().lock().active_comp.clone().expect("comp opened");
+    {
+        let cx = MenuContext {
+            stage: &h.stage,
+            resources: &h.resources,
+            workspace: "motion",
+        };
+        assert!(solid_item.is_enabled(&cx));
+    }
+    run(&mut h, solid_item.invocation());
+    assert_eq!(query::comp_layers(&h.stage, &comp).len(), 1);
+    let _ = &mut app;
+}
+
+struct NoopPanel;
+
+impl Panel for NoopPanel {
+    fn ui(&mut self, _ui: &mut egui::Ui, cx: &mut PanelContext<'_>) {
+        // Like every motion panel: resolve pending selections once per frame.
+        crate::common::session(cx.resources).lock().sync(cx.stage);
+    }
+}
+
+#[test]
+fn every_menu_title_has_chinese() {
+    let zh = crate::i18n::ZH;
+    let mut missing = Vec::new();
+    for (id, spec) in crate::menus::items() {
+        for t in spec.path.iter().chain(std::iter::once(&spec.title)) {
+            if !zh.iter().any(|(en, _)| en == t) {
+                missing.push(format!("{id}: {t}"));
+            }
+        }
+    }
+    assert!(missing.is_empty(), "missing Chinese for {missing:?}");
+}
+
+fn key(k: egui::Key) -> Event {
+    Event::Key {
+        key: k,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Default::default(),
+    }
+}
+
+fn renamed_to(r: &PanelRequests) -> Option<String> {
+    r.invocations
+        .iter()
+        .find(|i| i.id == "attr.set" && i.params["attr"] == "name")
+        .and_then(|i| i.params["value"]["value"].as_str().map(str::to_owned))
+}
+
+/// AE: Enter commits a rename, clicking elsewhere commits, Esc cancels.
+#[test]
+fn timeline_and_project_rename_commit_on_enter_and_click_away() {
+    let mut h = Harness::new();
+    let (comp, solid, _shape) = h.comp_with_layers();
+    let mut tl = TimelinePanel::default();
+    // Enter commits (typed text included).
+    tl.start_rename(solid.clone(), "Bg");
+    h.frame("timeline", &mut tl, Vec::new());
+    h.frame("timeline", &mut tl, vec![Event::Text("X".into())]);
+    let r = h.frame("timeline", &mut tl, vec![key(egui::Key::Enter)]);
+    assert_eq!(
+        renamed_to(&r).as_deref(),
+        Some("BgX"),
+        "{:?}",
+        r.invocations
+    );
+    assert!(
+        h.frame("timeline", &mut tl, Vec::new())
+            .invocations
+            .is_empty(),
+        "rename ended"
+    );
+    // Clicking elsewhere commits.
+    tl.start_rename(solid.clone(), "Away");
+    h.frame("timeline", &mut tl, Vec::new());
+    h.frame("timeline", &mut tl, Vec::new());
+    let far = pos2(1200.0, 780.0);
+    let mut evs = Vec::new();
+    pointer(&mut evs, far, Some(true));
+    h.frame("timeline", &mut tl, evs);
+    let mut evs = Vec::new();
+    pointer(&mut evs, far, Some(false));
+    let r = h.frame("timeline", &mut tl, evs);
+    let r2 = h.frame("timeline", &mut tl, Vec::new());
+    let name = renamed_to(&r).or_else(|| renamed_to(&r2));
+    assert_eq!(name.as_deref(), Some("Away"));
+    // Escape cancels.
+    tl.start_rename(solid.clone(), "Nope");
+    h.frame("timeline", &mut tl, Vec::new());
+    h.frame("timeline", &mut tl, Vec::new());
+    let r = h.frame("timeline", &mut tl, vec![key(egui::Key::Escape)]);
+    assert_eq!(renamed_to(&r), None);
+    assert!(
+        h.frame("timeline", &mut tl, vec![key(egui::Key::Enter)])
+            .invocations
+            .is_empty()
+    );
+
+    // Project panel: Enter commits once and does not reopen the field.
+    let mut project = ProjectPanel::default();
+    h.session().lock().selected_items = vec![comp.clone()];
+    project.start_rename(comp.clone(), "Main Comp");
+    h.frame("project", &mut project, Vec::new());
+    let r = h.frame("project", &mut project, vec![key(egui::Key::Enter)]);
+    assert_eq!(renamed_to(&r).as_deref(), Some("Main Comp"));
+    assert!(
+        h.frame("project", &mut project, vec![Event::Text("z".into())])
+            .invocations
+            .is_empty()
+    );
+    let r = h.frame("project", &mut project, vec![key(egui::Key::Enter)]);
+    assert_eq!(
+        renamed_to(&r),
+        None,
+        "Enter after a commit starts a new rename, it does not commit one"
+    );
+}
+
+/// Composition ▸ Add to Render Queue (Cmd/Ctrl+M) queues the active comp with
+/// its work area and opens the Render Queue panel; the panel draws it.
+#[test]
+fn add_to_render_queue_action() {
+    let mut h = Harness::new();
+    h.resources
+        .insert(crate::render_queue::SharedRenderQueue::default());
+    let (comp, _, _) = h.comp_with_layers();
+    let mut tl = TimelinePanel::default();
+    let r = h.action(
+        &mut tl,
+        Invocation::new(crate::actions::ids::ADD_TO_RENDER_QUEUE),
+    );
+    assert_eq!(r.open, vec![PanelId::new("render_queue")]);
+    let queue = h
+        .resources
+        .get::<crate::render_queue::SharedRenderQueue>()
+        .unwrap()
+        .clone();
+    {
+        let q = queue.lock();
+        assert_eq!(q.items().len(), 1);
+        assert_eq!(q.items()[0].comp, comp);
+        assert_eq!(q.items()[0].status, crate::render_queue::ItemStatus::Queued);
+    }
+    let mut panel = crate::RenderQueuePanel::default();
+    assert!(h.frame("render_queue", &mut panel, Vec::new()).is_empty());
+    // The menu item and its AE shortcut.
+    assert!(
+        crate::menus::items()
+            .iter()
+            .any(|(id, item)| *id == "motion.composition.render_queue"
+                && item.action == crate::actions::ids::ADD_TO_RENDER_QUEUE)
+    );
+    assert!(
+        crate::actions::bindings()
+            .bindings
+            .iter()
+            .any(|b| b.chord == bae_ui::Chord::parse("Cmd+M").unwrap()
+                && b.action == crate::actions::ids::ADD_TO_RENDER_QUEUE)
+    );
+}

@@ -304,6 +304,23 @@ impl Keymap {
         }
     }
 
+    /// The chord bound to exactly this invocation (action and parameters), e.g. the
+    /// shortcut a menu item shows. Global bindings first.
+    pub fn chord_for_invocation(&self, inv: &crate::action::Invocation) -> Option<&Chord> {
+        let same = |b: &&Binding| {
+            b.action == inv.id
+                && (b.params == inv.params
+                    || (b.params.is_null() && inv.params == serde_json::json!({}))
+                    || (inv.params.is_null() && b.params == serde_json::json!({})))
+        };
+        self.bindings
+            .iter()
+            .filter(same)
+            .find(|b| b.when.is_none())
+            .or_else(|| self.bindings.iter().find(same))
+            .map(|b| &b.chord)
+    }
+
     /// The binding for a chord, preferring one scoped to the focused panel kind.
     pub fn lookup(&self, chord: &Chord, focused_kind: Option<&str>) -> Option<&Binding> {
         let scoped = focused_kind.and_then(|kind| {
@@ -413,6 +430,10 @@ pub struct KeymapBindings {
     /// Id of the keymap to extend (`"ae"`).
     pub keymap: String,
     pub bindings: Vec<Binding>,
+    /// Workspace of the contributing module: while it is active, these bindings
+    /// win over other modules' bindings on the same chord (otherwise the first
+    /// registered extension wins). `None` = no preference.
+    pub workspace: Option<String>,
 }
 
 impl KeymapBindings {
@@ -420,7 +441,14 @@ impl KeymapBindings {
         KeymapBindings {
             keymap: keymap.into(),
             bindings,
+            workspace: None,
         }
+    }
+
+    /// Prefer these bindings while `workspace` is active.
+    pub fn for_workspace(mut self, workspace: impl Into<String>) -> Self {
+        self.workspace = Some(workspace.into());
+        self
     }
 }
 

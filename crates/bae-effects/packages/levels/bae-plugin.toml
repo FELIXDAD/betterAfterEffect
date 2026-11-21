@@ -1,0 +1,99 @@
+# Levels (ADBE Easy Levels2): docs/spec/ae/_parts/effects--fx-a.md AE-FX-038.
+# Parameter 2 (Histogram, arbitrary data, UI only) is not declared: declarative
+# effects have no arbitrary-data parameters. Its project value is preserved as
+# an unknown parameter.
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "levels"
+name = "Levels"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE Easy Levels2"]
+keywords = ["levels", "gamma", "input", "output", "black point", "white point"]
+flags = ["pixel-independent"]
+shader = "shaders/levels.wgsl"
+identity_when = "params.input_black == 0 && params.input_white == 1 && params.gamma == 1 && params.output_black == 0 && params.output_white == 1"
+
+[[effect.param]]
+id = 1
+key = "channel"
+type = "popup"
+name = "Channel"
+default = 1
+choices = ["RGB", "Red", "Green", "Blue", "Alpha"]
+
+[[effect.param]]
+id = 3
+key = "input_black"
+type = "float"
+name = "Input Black"
+default = 0.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+
+[[effect.param]]
+id = 4
+key = "input_white"
+type = "float"
+name = "Input White"
+default = 1.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+
+[[effect.param]]
+id = 5
+key = "gamma"
+type = "float"
+name = "Gamma"
+default = 1.0
+range = [0.01, 100.0]
+slider = [0.1, 10.0]
+precision = 2
+
+[[effect.param]]
+id = 6
+key = "output_black"
+type = "float"
+name = "Output Black"
+default = 0.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+
+[[effect.param]]
+id = 7
+key = "output_white"
+type = "float"
+name = "Output White"
+default = 1.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+
+[[effect.param]]
+id = 8
+key = "clip_black"
+type = "popup"
+name = "Clip To Output Black"
+default = 3
+choices = ["On", "Off", "Off for 32 bpc Color"]
+
+[[effect.param]]
+id = 9
+key = "clip_white"
+type = "popup"
+name = "Clip To Output White"
+default = 3
+choices = ["On", "Off", "Off for 32 bpc Color"]
