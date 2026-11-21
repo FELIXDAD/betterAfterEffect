@@ -1,34 +1,58 @@
-# Crash hunt on a Windows runner (issue #154): runs one test binary many times under
-# Sysinternals procdump, saves full dumps of unhandled exceptions, prints symbolized
-# stacks with cdb and uploads dumps + exe + pdb. Manual only: it does not run with
-# normal CI. Added for #154 by the app workstream (`.github` belongs to 01).
+# Crash hunt on Windows runners (issue #154): runs GPU test binaries many times, saves
+# full dumps of crashes, prints symbolized stacks with cdb and uploads dumps + exe + pdb.
+# Manual only: it does not run with normal CI. Added for #154 by the app workstream
+# (`.github` belongs to 01).
 #
-#   gh workflow run win-crash-repro.yml --ref <branch> -f threads=both -f iterations=200
+#   gh workflow run win-crash-repro.yml --ref <branch> -f set=bae-render:render -f wrap=wer
 #
-# Pushes to the `ci/win-crash-repro` branch also run it, so it can be used before the
-# file is on the default branch (GitHub only lists dispatchable workflows from there).
+# Pushes to the `ci/win-crash-repro` branch also run it, with the plan in the `plan` job
+# below, so it can be used before the file is on the default branch (GitHub only lists
+# dispatchable workflows from there).
+#
+# Wrappers:
+# - wer: the test runs with no debugger attached (CI does the same); Windows Error
+#   Reporting LocalDumps writes the dump. Debuggers change timing and exception handling.
+# - procdump: Sysinternals procdump -e -ma -x launches the test as a debugger.
+# Page heap (full) puts every heap allocation against a guard page, so a heap overrun or
+# use-after-free faults at the bad access instead of corrupting memory silently.
 
 name: Windows crash repro
 
 on:
   workflow_dispatch:
     inputs:
-      iterations:
-        description: Runs of the test binary per job
-        default: "200"
+      set:
+        description: "Test binaries run per iteration, 'package:test' comma-separated, or 'gpu-all'"
+        default: bae-render:render
         type: string
       threads:
-        description: Test threads (default = the harness default, 1 = --test-threads=1, both = one job each)
-        default: both
-        type: choice
-        options: [both, default, "1"]
-      package:
-        description: Cargo package of the test
-        default: bae-text
+        description: "Test threads: default (harness default) or a number"
+        default: default
         type: string
-      test:
-        description: Integration test target (tests/<name>.rs)
-        default: cpu
+      wrap:
+        description: Crash dump capture
+        default: wer
+        type: choice
+        options: [wer, procdump]
+      pageheap:
+        description: Full page heap for the test binaries
+        default: false
+        type: boolean
+      fresh_cache:
+        description: Delete the D3D shader cache (%LOCALAPPDATA%\D3DSCache) before every run
+        default: false
+        type: boolean
+      env:
+        description: "Extra environment for the tests, 'NAME=value;NAME=value'"
+        default: ""
+        type: string
+      iterations:
+        description: Iterations per job
+        default: "300"
+        type: string
+      jobs:
+        description: Identical jobs (runners) to spread the iterations over
+        default: "1"
         type: string
   push:
     branches: [ci/win-crash-repro]
@@ -40,21 +64,73 @@ env:
   CARGO_TERM_COLOR: never
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: 1
-  ITERATIONS: ${{ github.event.inputs.iterations || '200' }}
-  PACKAGE: ${{ github.event.inputs.package || 'bae-text' }}
-  TEST_TARGET: ${{ github.event.inputs.test || 'cpu' }}
-  # Full dumps kept per job (each can be hundreds of MB); later crashes are only counted.
-  MAX_DUMPS: 3
+  # Full dumps kept per job (each can be hundreds of MB); later crashes get minidumps.
+  MAX_FULL_DUMPS: 3
+  MAX_MINI_DUMPS: 12
+  # A run longer than this is a hang: dumped and killed.
+  RUN_TIMEOUT_SECONDS: 300
+  # Iterations stop after this long so the dumps still get analyzed and uploaded.
+  RUN_BUDGET_MINUTES: 120
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          IN_SET: ${{ inputs.set }}
+          IN_THREADS: ${{ inputs.threads }}
+          IN_WRAP: ${{ inputs.wrap }}
+          IN_PAGEHEAP: ${{ inputs.pageheap }}
+          IN_FRESH: ${{ inputs.fresh_cache }}
+          IN_ENV: ${{ inputs.env }}
+          IN_N: ${{ inputs.iterations }}
+          IN_JOBS: ${{ inputs.jobs }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ]; then
+            matrix="$(jq -cn --arg set "$IN_SET" --arg threads "$IN_THREADS" --arg wrap "$IN_WRAP" \
+              --arg pageheap "$IN_PAGEHEAP" --arg fresh "$IN_FRESH" --arg env "$IN_ENV" \
+              --arg n "$IN_N" --argjson jobs "${IN_JOBS:-1}" '
+              {include: [range(1; $jobs + 1) as $j | {
+                id: "dispatch-\($j)", set: $set, threads: $threads, wrap: $wrap,
+                pageheap: $pageheap, fresh: $fresh, env: $env, n: $n }]}')"
+          else
+            # The plan for pushes to ci/win-crash-repro. CI crashed (0xc0000005) in
+            # bae-render --test render (8 tests, each with its own WARP device) and in
+            # bae-text --test cpu (2 tests, 2 devices), never under procdump so far.
+            matrix='{"include":[
+              {"id":"render-wer-a","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"","n":"700"},
+              {"id":"render-wer-b","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"","n":"700"},
+              {"id":"render-wer-cold","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"false","fresh":"true","env":"","n":"600"},
+              {"id":"render-t8-wer","set":"bae-render:render","threads":"8","wrap":"wer","pageheap":"false","fresh":"false","env":"","n":"700"},
+              {"id":"render-pageheap","set":"bae-render:render","threads":"default","wrap":"wer","pageheap":"true","fresh":"false","env":"","n":"150"},
+              {"id":"text-wer-cold","set":"bae-text:cpu","threads":"default","wrap":"wer","pageheap":"false","fresh":"true","env":"","n":"700"},
+              {"id":"gpu-all-wer","set":"gpu-all","threads":"default","wrap":"wer","pageheap":"false","fresh":"true","env":"","n":"40"}
+            ]}'
+            matrix="$(echo "$matrix" | jq -c .)"
+          fi
+          echo "$matrix" | jq .
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   repro:
-    name: threads=${{ matrix.threads }}
+    needs: plan
+    name: ${{ matrix.id }}
     runs-on: windows-latest
-    timeout-minutes: 150
+    timeout-minutes: 170
     strategy:
       fail-fast: false
-      matrix:
-        threads: ${{ fromJSON((github.event.inputs.threads || 'both') == 'both' && '["default","1"]' || format('["{0}"]', github.event.inputs.threads)) }}
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      SET: ${{ matrix.set }}
+      THREADS: ${{ matrix.threads }}
+      WRAP: ${{ matrix.wrap }}
+      PAGEHEAP: ${{ matrix.pageheap }}
+      FRESH_CACHE: ${{ matrix.fresh }}
+      EXTRA_ENV: ${{ matrix.env }}
+      ITERATIONS: ${{ matrix.n }}
     steps:
       - uses: actions/checkout@v4
 
@@ -80,127 +156,283 @@ jobs:
           $os = Get-CimInstance Win32_OperatingSystem
           $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
           $gpus = (Get-CimInstance Win32_VideoController | ForEach-Object { "$($_.Name) ($($_.DriverVersion))" }) -join "; "
+          $dxcOnPath = (& where.exe dxcompiler.dll 2>$null) -join "; "
+          $global:LASTEXITCODE = 0
+          if (-not $dxcOnPath) { $dxcOnPath = "none" }
+          $sys = "$env:WINDIR\System32"
           $lines = @(
-            "OS: $($os.Caption) $($os.Version) build $($os.BuildNumber)",
-            "CPU: $($cpu.Name.Trim()) ($($cpu.NumberOfCores) cores, $($cpu.NumberOfLogicalProcessors) threads)",
+            "Job: ${{ matrix.id }}",
+            "OS: $($os.Caption) $($os.Version) build $($os.BuildNumber); image $env:ImageOS $env:ImageVersion",
+            "CPU: $($cpu.Name.Trim()) ($($cpu.NumberOfCores) cores, $($cpu.NumberOfLogicalProcessors) threads); RAM $([math]::Round($os.TotalVisibleMemorySize / 1MB, 1)) GiB",
             "Display adapters: $gpus",
-            "d3d10warp.dll: $(Version "$env:WINDIR\System32\d3d10warp.dll")",
-            "d3d12.dll: $(Version "$env:WINDIR\System32\d3d12.dll")",
-            "D3D12Core.dll: $(Version "$env:WINDIR\System32\D3D12Core.dll")",
-            "dxgi.dll: $(Version "$env:WINDIR\System32\dxgi.dll")",
-            "DWrite.dll: $(Version "$env:WINDIR\System32\DWrite.dll")",
-            "Threads mode: ${{ matrix.threads }}; iterations: $env:ITERATIONS; test: $env:PACKAGE --test $env:TEST_TARGET"
+            "d3d10warp.dll: $(Version "$sys\d3d10warp.dll")",
+            "d3d12.dll: $(Version "$sys\d3d12.dll")",
+            "D3D12Core.dll: $(Version "$sys\D3D12Core.dll")",
+            "d3d12SDKLayers.dll (debug layer): $(Version "$sys\d3d12SDKLayers.dll")",
+            "dxgi.dll: $(Version "$sys\dxgi.dll")",
+            "dxgidebug.dll: $(Version "$sys\dxgidebug.dll")",
+            "d3dcompiler_47.dll (FXC): $(Version "$sys\d3dcompiler_47.dll")",
+            "dxcompiler.dll in System32: $(Version "$sys\dxcompiler.dll"); on PATH: $dxcOnPath",
+            "DWrite.dll: $(Version "$sys\DWrite.dll")",
+            "Set: $env:SET; threads: $env:THREADS; wrap: $env:WRAP; page heap: $env:PAGEHEAP; fresh shader cache: $env:FRESH_CACHE; env: '$env:EXTRA_ENV'; iterations: $env:ITERATIONS"
           )
           $lines | Tee-Object -FilePath "$out\machine.txt"
-          "## Machine (threads=${{ matrix.threads }})" >> $env:GITHUB_STEP_SUMMARY
+          "## ${{ matrix.id }}" >> $env:GITHUB_STEP_SUMMARY
           $lines | ForEach-Object { "- $_" } >> $env:GITHUB_STEP_SUMMARY
 
-      - name: Build the test (Debug, line tables for every crate)
+      - name: Build the tests (Debug, line tables for every crate)
         shell: bash
         run: |
-          # Same opt-levels as CI (deps at 2), plus line tables for dependencies so their
-          # frames have names and lines. PDBs are kept next to the exe.
-          cargo test -p "$PACKAGE" --test "$TEST_TARGET" --no-run --locked --message-format=json \
+          if [ "$SET" = gpu-all ]; then
+            # Every integration test that creates a GPU context, in `cargo test --workspace` order.
+            SET="bae-color:gpu,bae-effects:ae_golden,bae-effects:registry,bae-gpu:headless,bae-media:gpu,bae-plugin:declarative_gpu,bae-plugin:host,bae-render:ae_golden,bae-render:render,bae-text:cpu,bae-text:gpu,bae-vector:cpu,bae-vector:evaluated,bae-vector:gpu"
+          fi
+          # The whole workspace, like CI's `cargo test --workspace`, so features unify the
+          # same way and the binaries are the ones CI runs. Same opt-levels as CI (deps at
+          # 2), plus line tables for dependencies so their frames have names and lines.
+          cargo test --workspace --no-run --locked --message-format=json \
             --config 'profile.dev.package."*".debug="line-tables-only"' > "$RUNNER_TEMP/build.json"
-          exe="$(jq -r --arg t "$TEST_TARGET" 'select(.reason == "compiler-artifact" and .target.name == $t and .executable != null) | .executable' "$RUNNER_TEMP/build.json" | tail -1)"
-          test -n "$exe"
-          echo "TEST_EXE=$exe" >> "$GITHUB_ENV"
-          exe_u="$(cygpath -u "$exe")"
-          test -f "$exe_u"
           bin="$(cygpath -u "$RUNNER_TEMP")/repro/bin"
           mkdir -p "$bin"
-          cp "$exe_u" "$bin/"
-          stem="$(basename "$exe_u" .exe)"
-          find "$(dirname "$exe_u")" -maxdepth 1 -iname "*.pdb" \( -iname "${stem}*" -o -iname "${stem//-/_}*" -o -iname "${TEST_TARGET}*" \) -exec cp {} "$bin/" \;
+          : > "$RUNNER_TEMP/tests.txt"
+          IFS=, read -ra specs <<< "$SET"
+          for spec in "${specs[@]}"; do
+            pkg="${spec%%:*}"; test="${spec#*:}"
+            exe="$(jq -r --arg p "$pkg" --arg t "$test" 'select(.reason == "compiler-artifact" and .target.name == $t and .executable != null and (.manifest_path | gsub("\\\\"; "/") | endswith("/" + $p + "/Cargo.toml"))) | .executable' "$RUNNER_TEMP/build.json" | tail -1)"
+            if [ -z "$exe" ]; then echo "no test binary for $spec"; exit 1; fi
+            exe_u="$(cygpath -u "$exe")"
+            test -f "$exe_u"
+            cp "$exe_u" "$bin/"
+            stem="$(basename "$exe_u" .exe)"
+            # PDBs stay next to the exe too (the dump records that path).
+            find "$(dirname "$exe_u")" -maxdepth 1 -iname "*.pdb" \( -iname "${stem}*" -o -iname "${stem//-/_}*" \) -exec cp {} "$bin/" \;
+            printf '%s\t%s\n' "$pkg" "$exe" >> "$RUNNER_TEMP/tests.txt"
+          done
+          cat "$RUNNER_TEMP/tests.txt"
           ls -la "$bin"
 
-      - name: Install procdump
+      - name: Install procdump (hang dumps; wrap=procdump)
         shell: pwsh
         run: |
           $dir = "$env:RUNNER_TEMP\procdump"
           Invoke-WebRequest https://download.sysinternals.com/files/Procdump.zip -OutFile "$dir.zip"
           Expand-Archive "$dir.zip" -DestinationPath $dir -Force
           "PROCDUMP=$dir\procdump64.exe" >> $env:GITHUB_ENV
-          & "$dir\procdump64.exe" -accepteula -? 2>&1 | Select-Object -First 3
 
-      - name: Run ${{ env.ITERATIONS }} times
-        id: runs
+      - name: Set up crash capture
         shell: pwsh
-        working-directory: ${{ github.workspace }}
         run: |
+          # Non-zero exits of the tests are data, not step errors.
+          $PSNativeCommandUseErrorActionPreference = $false
           $out = "$env:RUNNER_TEMP\repro"
-          $dumps = New-Item -ItemType Directory -Force "$out\dumps"
-          $logs = New-Item -ItemType Directory -Force "$out\logs"
-          # Like `cargo test`: the package directory as the working directory.
-          $manifest = (cargo metadata --format-version 1 --no-deps --locked | ConvertFrom-Json).packages |
-            Where-Object name -eq $env:PACKAGE | Select-Object -First 1 -ExpandProperty manifest_path
-          $pkgDir = Split-Path $manifest
-          $env:CARGO_MANIFEST_DIR = $pkgDir
-          $testArgs = @()
-          if ('${{ matrix.threads }}' -eq '1') { $testArgs += '--test-threads=1' }
-          $n = [int]$env:ITERATIONS
-          $maxDumps = [int]$env:MAX_DUMPS
-          $crashed = @()
-          $failed = @()
-          # Runs where procdump saw a first-chance access violation that was handled
-          # (no dump, test passed): drivers sometimes probe memory this way.
-          $handledAv = @()
-          Push-Location $pkgDir
-          for ($i = 1; $i -le $n; $i++) {
-            $log = "$logs\run-$i.log"
-            $before = @(Get-ChildItem $dumps -Filter *.dmp).Count
-            $start = Get-Date
-            if ($before -lt $maxDumps) {
-              # -e: dump on an unhandled (second-chance) exception; -ma: full memory;
-              # -x: launch the image under procdump.
-              & $env:PROCDUMP -accepteula -e -ma -x $dumps $env:TEST_EXE @testArgs *> $log
-              $code = $LASTEXITCODE
-              $dumped = @(Get-ChildItem $dumps -Filter *.dmp).Count -gt $before
-            } else {
-              & $env:TEST_EXE @testArgs *> $log
-              $code = $LASTEXITCODE
-              $dumped = $false
-            }
-            $secs = [math]::Round(((Get-Date) - $start).TotalSeconds, 2)
-            $text = Get-Content $log -Raw
-            # A crash: procdump wrote a dump (unhandled exception), or the exe exited with
-            # STATUS_ACCESS_VIOLATION when run directly.
-            $av = $dumped -or ($code -eq -1073741819)
-            if (-not $av -and $text -match 'Exception: C0000005') { $handledAv += $i }
-            if ($av) {
-              $crashed += $i
-              Write-Output "::warning::run ${i}: crash (exit $code, $secs s, dump: $dumped)"
-              Get-Content $log -Tail 60
-              if ($dumped) {
-                Get-ChildItem $dumps -Filter *.dmp | Where-Object { -not $_.Name.StartsWith('run') } |
-                  ForEach-Object { Rename-Item $_.FullName ("run{0:D3}-{1}" -f $i, $_.Name) }
-              }
-            } elseif ($text -notmatch 'test result: ok') {
-              $failed += $i
-              Write-Output "::warning::run ${i}: no 'test result: ok' (exit $code, $secs s)"
-              Get-Content $log -Tail 40
-            } elseif ($i -le 2 -or $i % 25 -eq 0) {
-              Write-Output "run ${i}: ok ($secs s)"
-              if ($i -eq 1) { Get-Content $log }
+          $full = New-Item -ItemType Directory -Force "$out\dumps"
+          $mini = New-Item -ItemType Directory -Force "$out\minidumps"
+          # Windows Error Reporting LocalDumps: full dumps of any crashing process.
+          $wer = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting'
+          New-Item $wer -Force | Out-Null
+          Set-ItemProperty $wer -Name Disabled -Value 0 -Type DWord
+          Set-ItemProperty $wer -Name DontShowUI -Value 1 -Type DWord
+          New-Item "$wer\LocalDumps" -Force | Out-Null
+          Set-ItemProperty "$wer\LocalDumps" -Name DumpFolder -Value $full.FullName -Type ExpandString
+          Set-ItemProperty "$wer\LocalDumps" -Name DumpType -Value 2 -Type DWord
+          Set-ItemProperty "$wer\LocalDumps" -Name DumpCount -Value 50 -Type DWord
+          Set-Service WerSvc -StartupType Manual -ErrorAction SilentlyContinue
+          Start-Service WerSvc -ErrorAction SilentlyContinue
+          Get-Service WerSvc | Format-Table -AutoSize | Out-String | Write-Output
+          # Self-test: a process that writes to an unmapped address must leave a dump.
+          $src = "$env:RUNNER_TEMP\crasher.rs"
+          'fn main() { unsafe { std::ptr::write_volatile(0x10 as *mut u32, 1) } }' | Set-Content $src
+          rustc -O -o "$env:RUNNER_TEMP\crasher.exe" $src
+          Add-Type -Namespace Native -Name Kernel32 -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetErrorMode(uint mode);'
+          $previous = [Native.Kernel32]::SetErrorMode(0)
+          Write-Output ("error mode inherited by this shell: 0x{0:X}" -f $previous)
+          & "$env:RUNNER_TEMP\crasher.exe"
+          Write-Output ("crasher exit code: 0x{0:X8}" -f $LASTEXITCODE)
+          $deadline = (Get-Date).AddSeconds(60)
+          while (-not (Get-ChildItem $full -Filter 'crasher*.dmp') -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+          $dump = Get-ChildItem $full -Filter 'crasher*.dmp' | Select-Object -First 1
+          if ($dump) {
+            Write-Output "WER self-test: ok ($($dump.Name), $([math]::Round($dump.Length / 1KB)) KiB)"
+            Remove-Item $dump.FullName
+          } else {
+            Write-Output "::warning::WER self-test: no dump; crashes under wrap=wer will be counted but not dumped"
+          }
+          if ($env:PAGEHEAP -eq 'true') {
+            Get-Content "$env:RUNNER_TEMP\tests.txt" | ForEach-Object {
+              $exe = Split-Path ($_ -split "`t")[1] -Leaf
+              $ifeo = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\$exe"
+              New-Item $ifeo -Force | Out-Null
+              # FLG_HEAP_PAGE_ALLOCS; PageHeapFlags 3 = full page heap + stack traces.
+              Set-ItemProperty $ifeo -Name GlobalFlag -Value 0x02000000 -Type DWord
+              Set-ItemProperty $ifeo -Name PageHeapFlags -Value 3 -Type DWord
+              Write-Output "full page heap: $exe"
             }
           }
-          Pop-Location
-          $summary = "threads=${{ matrix.threads }}: $($crashed.Count) crash(es), $($failed.Count) other failure(s) in $n runs"
-          if ($crashed.Count) { $summary += "; crashed runs: $($crashed -join ', ')" }
-          if ($failed.Count) { $summary += "; failed runs: $($failed -join ', ')" }
-          if ($handledAv.Count) { $summary += "; handled first-chance access violations in runs: $($handledAv -join ', ')" }
-          Write-Output $summary
-          $summary | Out-File -Append "$out\machine.txt"
-          "## Result" >> $env:GITHUB_STEP_SUMMARY
-          "- $summary" >> $env:GITHUB_STEP_SUMMARY
-          "crashes=$($crashed.Count)" >> $env:GITHUB_OUTPUT
-          "failures=$($failed.Count)" >> $env:GITHUB_OUTPUT
+          # GitHub fails a pwsh step whose last native command exited non-zero (the crasher).
+          $global:LASTEXITCODE = 0
 
-      - name: Analyze dumps (cdb)
-        if: ${{ !cancelled() && steps.runs.outputs.crashes != '0' }}
+      - name: Run ${{ matrix.n }} iterations
+        id: runs
         shell: pwsh
         run: |
+          # Non-zero exits of the tests are data, not step errors.
+          $PSNativeCommandUseErrorActionPreference = $false
           $out = "$env:RUNNER_TEMP\repro"
+          $full = "$out\dumps"
+          $mini = "$out\minidumps"
+          $logs = New-Item -ItemType Directory -Force "$out\logs"
+          $wer = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps'
+          Add-Type -Namespace Native -Name Kernel32 -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetErrorMode(uint mode);'
+          # Children inherit the error mode; SEM_NOGPFAULTERRORBOX would skip WER entirely.
+          [void][Native.Kernel32]::SetErrorMode(0)
+          foreach ($pair in ($env:EXTRA_ENV -split ';' | Where-Object { $_ -match '=' })) {
+            $name, $value = $pair -split '=', 2
+            Set-Item "env:$($name.Trim())" $value
+            Write-Output "env: $($name.Trim())=$value"
+          }
+          $packages = (cargo metadata --format-version 1 --no-deps --locked | ConvertFrom-Json).packages
+          $tests = Get-Content "$env:RUNNER_TEMP\tests.txt" | ForEach-Object {
+            $pkg, $exe = $_ -split "`t"
+            $dir = Split-Path ($packages | Where-Object name -eq $pkg | Select-Object -First 1 -ExpandProperty manifest_path)
+            [pscustomobject]@{ Package = $pkg; Exe = $exe; Name = [IO.Path]::GetFileNameWithoutExtension($exe); Dir = $dir }
+          }
+          $testArgs = @()
+          if ($env:THREADS -ne 'default') { $testArgs += "--test-threads=$env:THREADS" }
+          $n = [int]$env:ITERATIONS
+          $timeoutMs = [int]$env:RUN_TIMEOUT_SECONDS * 1000
+          $crashes = [System.Collections.Generic.List[string]]::new()
+          $failures = [System.Collections.Generic.List[string]]::new()
+          $hangs = [System.Collections.Generic.List[string]]::new()
+          $codes = @{}
+          $runs = 0
+          $miniMode = $false
+          $started = Get-Date
+          $done = 0
+          for ($i = 1; $i -le $n; $i++) {
+            if (((Get-Date) - $started).TotalMinutes -gt [int]$env:RUN_BUDGET_MINUTES) {
+              Write-Output "::notice::stopping after $done iterations: $env:RUN_BUDGET_MINUTES min budget used"
+              break
+            }
+            $done = $i
+            foreach ($t in $tests) {
+              $runs++
+              $tag = "{0:D4}-{1}" -f $i, $t.Name
+              $log = "$logs\$tag.log"
+              if ($env:FRESH_CACHE -eq 'true') {
+                Remove-Item "$env:LOCALAPPDATA\D3DSCache" -Recurse -Force -ErrorAction SilentlyContinue
+              }
+              $env:CARGO_MANIFEST_DIR = $t.Dir
+              $before = @(Get-ChildItem $full, $mini -Filter *.dmp).Count
+              $start = Get-Date
+              if ($env:WRAP -eq 'procdump') {
+                $file = $env:PROCDUMP
+                $argList = @('-accepteula', '-e', '-ma', '-x', $(if ($miniMode) { $mini } else { $full }), $t.Exe) + $testArgs
+              } else {
+                $file = $t.Exe
+                $argList = $testArgs
+              }
+              $psi = [System.Diagnostics.ProcessStartInfo]::new($file)
+              foreach ($a in $argList) { $psi.ArgumentList.Add($a) }
+              $psi.WorkingDirectory = $t.Dir
+              $psi.UseShellExecute = $false
+              $psi.RedirectStandardOutput = $true
+              $psi.RedirectStandardError = $true
+              $p = [System.Diagnostics.Process]::Start($psi)
+              $stdout = $p.StandardOutput.ReadToEndAsync()
+              $stderr = $p.StandardError.ReadToEndAsync()
+              $hung = -not $p.WaitForExit($timeoutMs)
+              if ($hung) {
+                $hangs.Add($tag)
+                Write-Output "::warning::$tag hung for $env:RUN_TIMEOUT_SECONDS s; dumping and killing"
+                & $env:PROCDUMP -accepteula -ma $p.Id $full *> "$logs\$tag-hang-procdump.log"
+                Get-CimInstance Win32_Process -Filter "ParentProcessId = $($p.Id)" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+                $p.Kill($true)
+                $p.WaitForExit()
+              }
+              $p.WaitForExit()
+              $code = $p.ExitCode
+              $text = $stdout.Result + "`n----- stderr -----`n" + $stderr.Result
+              Set-Content -Path $log -Value $text
+              $secs = [math]::Round(((Get-Date) - $start).TotalSeconds, 2)
+              # Rust tests exit 0 (pass) or 101 (a test failed); anything else is a crash.
+              $dumped = @(Get-ChildItem $full, $mini -Filter *.dmp).Count -gt $before
+              if ($hung) {
+                $crashed = $false
+                Get-ChildItem $full -Filter *.dmp | Where-Object { -not $_.Name.StartsWith('run') } |
+                  ForEach-Object { Rename-Item $_.FullName "hang$tag-$($_.Name)" }
+              } elseif ($env:WRAP -eq 'procdump') {
+                # procdump -e writes a dump only for an unhandled exception.
+                $crashed = $dumped
+              } else {
+                $crashed = $dumped -or (($code -ne 0) -and ($code -ne 101))
+              }
+              if ($hung) {
+                Write-Output ($text -split "`n" | Select-Object -Last 40)
+              } elseif ($crashed) {
+                $hex = "0x{0:X8}" -f $code
+                $crashes.Add("$tag ($hex)")
+                $codes[$hex] = 1 + [int]$codes[$hex]
+                Write-Output "::warning::$tag crashed: exit $hex after $secs s, dump: $dumped"
+                Write-Output ($text -split "`n" | Select-Object -Last 60)
+                if ($dumped) {
+                  # Let WER finish writing, then name the dump after the run.
+                  $deadline = (Get-Date).AddSeconds(90)
+                  do {
+                    $sizes = (Get-ChildItem $full, $mini -Filter *.dmp | Measure-Object Length -Sum).Sum
+                    Start-Sleep -Seconds 2
+                  } while ($sizes -ne (Get-ChildItem $full, $mini -Filter *.dmp | Measure-Object Length -Sum).Sum -and (Get-Date) -lt $deadline)
+                  Get-ChildItem $full, $mini -Filter *.dmp | Where-Object { -not ($_.Name.StartsWith('run') -or $_.Name.StartsWith('hang')) } |
+                    ForEach-Object { Rename-Item $_.FullName "run$tag-$($_.Name)" }
+                }
+                if (-not $miniMode -and @(Get-ChildItem $full -Filter *.dmp).Count -ge [int]$env:MAX_FULL_DUMPS) {
+                  # Later crashes: minidumps (stacks, no heap) to keep the artifact small.
+                  $miniMode = $true
+                  Set-ItemProperty $wer -Name DumpFolder -Value $mini -Type ExpandString
+                  Set-ItemProperty $wer -Name DumpType -Value 1 -Type DWord
+                }
+                if (@(Get-ChildItem $mini -Filter *.dmp).Count -ge [int]$env:MAX_MINI_DUMPS) {
+                  Set-ItemProperty $wer -Name DumpType -Value 0 -Type DWord
+                  Set-ItemProperty $wer -Name CustomDumpFlags -Value 0 -Type DWord
+                }
+              } elseif ($code -eq 101 -or $text -notmatch 'test result: ok') {
+                $failures.Add("$tag (exit $code)")
+                Write-Output "::warning::$tag failed: exit $code after $secs s"
+                Write-Output ($text -split "`n" | Select-Object -Last 40)
+              } else {
+                Remove-Item $log
+                if ($i -eq 1) { Write-Output "$tag ok ($secs s)"; Write-Output $text }
+              }
+            }
+            if ($i % 50 -eq 0) {
+              $mins = [math]::Round(((Get-Date) - $started).TotalMinutes, 1)
+              Write-Output "iteration ${i}: $($crashes.Count) crash(es), $($failures.Count) failure(s), $($hangs.Count) hang(s) after $mins min"
+            }
+            if ($i -eq 1 -and (Test-Path "$env:LOCALAPPDATA\D3DSCache")) {
+              $files = Get-ChildItem "$env:LOCALAPPDATA\D3DSCache" -Recurse -File
+              Write-Output "D3DSCache after the first iteration: $($files.Count) files, $([math]::Round(($files | Measure-Object Length -Sum).Sum / 1KB)) KiB"
+            }
+          }
+          $summary = "${{ matrix.id }}: $($crashes.Count) crash(es), $($failures.Count) other failure(s), $($hangs.Count) hang(s) in $runs test-binary runs ($done of $n iterations)"
+          if ($codes.Count) { $summary += "; exit codes: " + (($codes.GetEnumerator() | ForEach-Object { "$($_.Key) x$($_.Value)" }) -join ', ') }
+          if ($crashes.Count) { $summary += "; crashed: $($crashes -join ', ')" }
+          if ($failures.Count) { $summary += "; failed: $($failures -join ', ')" }
+          if ($hangs.Count) { $summary += "; hung: $($hangs -join ', ')" }
+          Write-Output $summary
+          $summary | Out-File -Append "$out\machine.txt"
+          "- **Result:** $summary" >> $env:GITHUB_STEP_SUMMARY
+          "crashes=$($crashes.Count)" >> $env:GITHUB_OUTPUT
+          "failures=$($failures.Count + $hangs.Count)" >> $env:GITHUB_OUTPUT
+          $global:LASTEXITCODE = 0
+
+      - name: Analyze dumps (cdb)
+        if: ${{ !cancelled() && (steps.runs.outputs.crashes != '0' || steps.runs.outputs.failures != '0') }}
+        shell: pwsh
+        run: |
+          # Non-zero exits of the tests are data, not step errors.
+          $PSNativeCommandUseErrorActionPreference = $false
+          $out = "$env:RUNNER_TEMP\repro"
+          $dumps = Get-ChildItem "$out\dumps", "$out\minidumps" -Filter *.dmp | Sort-Object Name | Select-Object -First 8
+          if (-not $dumps) { Write-Output "no dumps"; exit 0 }
           $cdb = @(
             "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\cdb.exe",
             "$env:ProgramFiles\Windows Kits\10\Debuggers\x64\cdb.exe"
@@ -216,19 +448,20 @@ jobs:
           Write-Output "cdb: $cdb"
           $bin = "$out\bin"
           $sym = "cache*$env:RUNNER_TEMP\symcache;$bin;srv*https://msdl.microsoft.com/download/symbols"
-          $commands = '.lines -e; !analyze -v; .echo ===== EXCEPTION CONTEXT =====; .ecxr; kb 60; .echo ===== ALL THREADS =====; ~*kb 40; .echo ===== MODULES =====; lmv m d3d10warp; lmv m D3D12Core; lmv m DWrite; q'
-          Get-ChildItem "$out\dumps" -Filter *.dmp | Sort-Object Name | ForEach-Object {
-            $report = "$out\$($_.BaseName)-analysis.txt"
-            Write-Output "===== $($_.Name) ====="
-            & $cdb -z $_.FullName -y $sym -i $bin -srcpath $env:GITHUB_WORKSPACE -c $commands *> $report
+          $commands = '.lines -e; .echo ===== ANALYZE =====; !analyze -v; .echo ===== EXCEPTION CONTEXT =====; .ecxr; r; ub @rip L12; u @rip L4; kb 80; .echo ===== ALL THREADS =====; ~*kb 50; .echo ===== MODULES =====; lmv m d3d10warp; lmv m D3D12Core; lmv m d3d12SDKLayers; lmv m d3dcompiler_47; lmv m dxcompiler; lmv m DWrite; q'
+          foreach ($d in $dumps) {
+            $report = "$out\$($d.BaseName)-analysis.txt"
+            Write-Output "===== $($d.Name) ($([math]::Round($d.Length / 1MB)) MiB) ====="
+            & $cdb -z $d.FullName -y $sym -i $bin -srcpath $env:GITHUB_WORKSPACE -c $commands *> $report
             Get-Content $report
           }
+          $global:LASTEXITCODE = 0
 
       - name: Upload dumps, binaries and logs
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: win-crash-repro-threads-${{ matrix.threads }}
+          name: win-crash-repro-${{ matrix.id }}
           path: ${{ runner.temp }}/repro
           if-no-files-found: warn
           retention-days: 14
@@ -238,6 +471,6 @@ jobs:
         shell: pwsh
         run: |
           if ('${{ steps.runs.outputs.crashes }}' -ne '0' -or '${{ steps.runs.outputs.failures }}' -ne '0') {
-            Write-Output "::error::crashes: ${{ steps.runs.outputs.crashes }}, other failures: ${{ steps.runs.outputs.failures }} (see the step summary and the artifact)"
+            Write-Output "::error::crashes: ${{ steps.runs.outputs.crashes }}, other failures and hangs: ${{ steps.runs.outputs.failures }} (see the step summary and the artifact)"
             exit 1
           }
