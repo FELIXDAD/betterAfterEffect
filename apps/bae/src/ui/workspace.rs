@@ -32,6 +32,47 @@ pub struct StatusInfo {
     pub notice: String,
 }
 
+/// The About window's version line: [`bae_platform::version_line`] with the
+/// build kind translated (the line itself stays English for logs).
+fn about_version() -> String {
+    let build = if cfg!(debug_assertions) {
+        tr("debug")
+    } else {
+        tr("release")
+    };
+    format!(
+        "{} {} ({}-{}, {build})",
+        bae_platform::APP_NAME,
+        bae_platform::VERSION,
+        std::env::consts::ARCH,
+        std::env::consts::OS
+    )
+}
+
+/// The GPU in the status bar: `name (backend, kind)`, the kind translated
+/// (backend and adapter names are proper nouns).
+pub fn gpu_summary(gpu: &bae_gpu::GpuContext) -> String {
+    let info = gpu.adapter_info();
+    format!(
+        "{} ({}, {})",
+        info.name,
+        bae_gpu::backend_name(info.backend),
+        tr(gpu_kind(info.device_type))
+    )
+}
+
+/// English name of a kind of GPU (translated with `tr`).
+pub(crate) fn gpu_kind(kind: bae_gpu::wgpu::DeviceType) -> &'static str {
+    use bae_gpu::wgpu::DeviceType;
+    match kind {
+        DeviceType::DiscreteGpu => "Discrete GPU",
+        DeviceType::IntegratedGpu => "Integrated GPU",
+        DeviceType::VirtualGpu => "Virtual GPU",
+        DeviceType::Cpu => "Software Rendering",
+        DeviceType::Other => "Other GPU",
+    }
+}
+
 /// The status bar text for a failed command.
 pub fn failure_notice(error: &bae_model::CommandError) -> String {
     match error {
@@ -199,9 +240,9 @@ impl Workspace {
                 .resizable(false)
                 .show(ui.ctx(), |ui| {
                     ui.heading(bae_platform::APP_NAME);
-                    ui.label(bae_platform::version_line());
+                    ui.label(about_version());
                     ui.label(tr("GPU-first motion graphics and compositing."));
-                    ui.label("Apache-2.0");
+                    ui.label(tr("License: {license}").replace("{license}", "Apache-2.0"));
                 });
             self.show_about = open;
         }
@@ -275,7 +316,9 @@ fn status_bar(ui: &mut egui::Ui, status: &StatusInfo) {
         ui.label(small(status.gpu.clone()));
         ui.separator();
     }
-    ui.label(small(format!("{} {:.2} ms", tr("frame"), status.frame_ms)));
+    ui.label(small(
+        tr("frame {ms} ms").replace("{ms}", &format!("{:.2}", status.frame_ms)),
+    ));
     ui.separator();
     ui.label(small(format!(
         "{}×{} @{:.2}x",

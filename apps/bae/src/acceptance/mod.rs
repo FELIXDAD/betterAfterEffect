@@ -19,6 +19,7 @@
 //! the other tests of this binary.
 
 mod files_flow;
+mod i18n_scan;
 mod layers;
 mod layout;
 mod menus;
@@ -301,6 +302,12 @@ impl Gui {
                 invocation: spec.invocation(),
             })
             .collect()
+    }
+
+    /// What the status bar shows about the GPU (the window sets it from the
+    /// device it created).
+    pub fn set_gpu_status(&mut self, text: String) {
+        self.status.gpu = text;
     }
 
     /// Queues an invocation as if a panel produced it this frame.

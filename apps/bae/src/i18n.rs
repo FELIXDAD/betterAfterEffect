@@ -24,7 +24,11 @@ const ZH: &[(&str, &str)] = &[
     ("Workspace", "工作区"),
     ("Minimize", "最小化"),
     ("Full Screen", "全屏"),
-    ("frame", "帧"),
+    ("frame {ms} ms", "帧 {ms} 毫秒"),
+    // About window
+    ("debug", "调试版"),
+    ("release", "发布版"),
+    ("License: {license}", "许可证：{license}"),
     ("English", "English"),
     // File commands and their dialogs
     ("Open Project", "打开项目"),
@@ -129,6 +133,12 @@ const ZH: &[(&str, &str)] = &[
         "缺少 {n} 个素材文件，没有写出任何文件。",
     ),
     ("Could not save the project.", "无法保存项目。"),
+    // Status bar: the kind of GPU
+    ("Discrete GPU", "独立显卡"),
+    ("Integrated GPU", "集成显卡"),
+    ("Virtual GPU", "虚拟显卡"),
+    ("Software Rendering", "软件渲染"),
+    ("Other GPU", "其他显卡"),
     // Status bar: why the last command failed
     (
         "Layer “{name}” is locked. Unlock it first.",
@@ -160,7 +170,10 @@ pub fn init_from_env() {
         .or_else(|| std::env::var("LC_MESSAGES").ok())
         .or_else(|| std::env::var("LANG").ok())
         .unwrap_or_default();
-    i18n::set_lang(Lang::from_locale(&locale));
+    let lang = Lang::from_locale(&locale);
+    i18n::set_lang(lang);
+    // New folders, comps, layers and shape contents are named in it (AE).
+    bae_motion::names::set_chinese(lang == Lang::Zh);
 }
 
 #[cfg(test)]
@@ -199,6 +212,22 @@ mod tests {
             .filter(|s| !i18n::has_translation(s))
             .collect();
         assert!(missing.is_empty(), "no Chinese for {missing:?}");
+    }
+
+    #[test]
+    fn every_gpu_kind_has_chinese() {
+        use bae_gpu::wgpu::DeviceType;
+        i18n::register(ZH);
+        for kind in [
+            DeviceType::DiscreteGpu,
+            DeviceType::IntegratedGpu,
+            DeviceType::VirtualGpu,
+            DeviceType::Cpu,
+            DeviceType::Other,
+        ] {
+            let en = crate::ui::workspace_gpu_kind(kind);
+            assert!(i18n::has_translation(en), "{en}");
+        }
     }
 
     #[test]
