@@ -270,6 +270,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Add Marker", "添加标记"),
     ("Delete All Markers", "删除所有标记"),
     ("Edit Marker", "编辑标记"),
+    ("Slip Edit", "滑动编辑"),
     ("Move Markers", "移动标记"),
     ("Delete Markers", "删除标记"),
     ("Add Marker with Dialog", "通过对话框添加标记"),
