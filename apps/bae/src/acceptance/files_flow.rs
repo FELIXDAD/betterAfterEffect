@@ -1407,3 +1407,58 @@ fn replace_texts_are_translated() {
         assert!(bae_ui::i18n::has_translation(en), "no Chinese for {en:?}");
     }
 }
+
+/// Issue #215: File > Close Project and File > New Project put the
+/// Composition and Timeline tabs (and their accessible names) back to their
+/// empty titles; opening the comp again shows its name.
+#[test]
+fn closing_the_project_empties_the_comp_and_timeline_tabs() {
+    use egui_kittest::kittest::Queryable as _;
+    let tabs = |h: &Ui, name: &str| {
+        (
+            h.query_all_by_label(&format!("Composition {name}"))
+                .next()
+                .is_some(),
+            h.query_all_by_label(&format!("Timeline {name}"))
+                .next()
+                .is_some(),
+        )
+    };
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.null"]);
+    assert_eq!(tabs(&h, "Comp 1"), (true, true));
+    for away in ["close", "new"] {
+        h.state_mut()
+            .dialogs
+            .answers
+            .push_back(UnsavedChoice::DontSave);
+        if away == "close" {
+            assert!(h.state_mut().menu("shell.file.close_project"));
+        } else {
+            press(&mut h, Modifiers::COMMAND | Modifiers::ALT, Key::N);
+        }
+        // The app goes idle after this: no frame may show a stale tab once the
+        // comp is gone (the tab bar used to show the last drawn title).
+        for _ in 0..4 {
+            let gone = h.state().active_comp().is_none();
+            frame(&mut h);
+            if gone {
+                assert_eq!(tabs(&h, "Comp 1"), (false, false), "{away}: stale tab");
+            }
+        }
+        assert!(h.state().active_comp().is_none(), "{away}");
+        assert_eq!(tabs(&h, "Comp 1"), (false, false), "{away}: stale tab");
+        assert!(
+            find_text(&h, "Comp 1").is_none(),
+            "{away}: stale title painted"
+        );
+        assert!(
+            h.query_all_by_label("Composition").next().is_some(),
+            "{away}"
+        );
+        assert!(h.query_all_by_label("Timeline").next().is_some(), "{away}");
+        // A new comp shows its name again.
+        new_comp(&mut h);
+        assert_eq!(tabs(&h, "Comp 1"), (true, true), "{away}: new comp");
+    }
+}
