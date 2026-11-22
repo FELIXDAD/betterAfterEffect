@@ -11,7 +11,9 @@
   - #215 关闭项目后，合成和时间轴面板标签仍显示旧合成名（共用代码，macOS 上应该也有）
   - #216 Windows：渲染队列默认输出目录优先用 `%USERPROFILE%\Movies`，忽略被移动过的“视频”已知文件夹
   - #217 Windows 发布包：README 没写 SmartScreen“仍要运行”的放行步骤；`bae.exe` 没有版本资源
-- 建议：第 1 批的结果支持发布。#217 的 README 说明建议在发布前补上（只改文档）。
+  - #220 Windows：Ctrl+Shift+C（预合成）、Ctrl+Alt+Shift+C（新建摄像机）等“Ctrl+修饰键+C/X/V”快捷键无效，被当成复制/剪切/粘贴
+  - #222 输入框里 Ctrl+Z 会恢复出输入法组字的中间文本（小问题）
+- 建议：第 1、2 批的结果支持发布。总协调已定：#215、#216 发布前修；#217 的放行步骤写进发布说明和 README，版本资源排到 0.0.1 之后。#220 影响常用的 AE 快捷键（预合成），菜单仍可用，建议发布前修。
 - 后续批次的结论见下面各节（做完一批更新一次）。
 
 ## 环境
@@ -71,7 +73,34 @@ zip 复制到 `E:\bae-test\final 0.0.1\发布 包\`，加 Zone.Identifier（`[Zo
 
 ## 第 2 批：键盘
 
-（进行中）
+期望以 `docs/ui/ae-commands.md`（AE 26 Windows 默认快捷键）和 `docs/ui/motion-parity.md` 为准。没有文字输入框有焦点时按键，结果用 UIA（对话框、图层、工具单选按钮的选中状态）和原生菜单“编辑 ▸ 撤消 <命令名>”判断。
+
+先排除环境：用 `RegisterHotKey` 探测，这台机器上被其他程序注册成全局热键的有 **Ctrl+Shift+S、Alt+Shift+R、Ctrl+Alt+Y、Ctrl+Alt+M、Ctrl+Shift+A**，这些组合在本机测不了，不算 BAE 的问题。
+
+| 用例 | 结果 | 说明 |
+|---|---|---|
+| Ctrl+N | 通过 | 打开“Composition Settings”，Enter 确定后建合成 |
+| Ctrl+K | 通过 | 打开当前合成的合成设置，Esc 关闭 |
+| Ctrl+Y | 通过 | 打开“Solid Settings”，Enter 后新建纯色层；撤消项是“Undo New Solid” |
+| Ctrl+Shift+Y | 通过 | 选中纯色层时打开“Solid Settings” |
+| Ctrl+Shift+C | 未通过 #220 | 没有预合成对话框（菜单 图层 ▸ 预合成… 可用，点菜单能打开）。原因：egui-winit 把“Ctrl + 任意修饰键 + C/X/V”转成复制/剪切/粘贴事件，BAE 当成 编辑 ▸ 复制。macOS 由原生菜单先处理，只有 Windows 受影响 |
+| Ctrl+Alt+Shift+C | 未通过 #220 | 不出摄像机设置；对照 Ctrl+Alt+Shift+L 正常打开“Light Settings” |
+| Ctrl+I | 通过 | 弹原生“Import File”对话框，Esc 取消 |
+| Ctrl+M | 通过 | 渲染队列新增“Render Item 1 “Comp 1”” |
+| Ctrl+Z / Ctrl+Shift+Z | 通过 | 新建第二个纯色层后 Ctrl+Z 少一层、Ctrl+Shift+Z 恢复 |
+| V W H Z Y | 通过 | 选择、旋转、抓手、缩放、向后平移（锚点）工具 |
+| Q 重复 | 通过 | 矩形 → 圆角矩形 → 椭圆 → 多边形 → 星形 → 矩形 |
+| G 重复 | 通过 | 钢笔 → 蒙版羽化 → 钢笔（和 AE 一样只在这两个之间循环） |
+| Ctrl+T 重复 | 通过 | 横排文字 ↔ 直排文字 |
+| T | 通过 | AE 里 T 是“只显示不透明度”，不是文字工具：选中图层按 T，时间轴只显示 Opacity 100%（P 显示 Position） |
+| Alt+[ / Alt+] | 通过 | 时间指示器移到第 10 帧 / 倒数第 10 帧后修剪入点 / 出点，撤消项“Undo Trim Layer” |
+| Ctrl+Alt+Shift+L | 通过 | 新建灯光对话框 |
+| Alt+Shift+P，只装微软拼音 | 通过 | 第 15 帧，打开位置秒表并加关键帧（撤消项“Undo Time-Vary Stopwatch”），输入法没被切换 |
+| Alt+Shift+P，英文（美国）键盘 | 通过 | 用 `LoadKeyboardLayout("00000409")` + `WM_INPUTLANGCHANGEREQUEST` 把 BAE 切到英文布局，第 25 帧按下，加关键帧（“Undo Change Value”），布局仍是 0409 |
+| Alt+Shift+P，两种布局都在、当前是微软拼音 | 通过 | 这是 Alt+Shift 切换输入法热键生效的场景；第 40 帧按下照样加关键帧，布局仍是 0804。测完卸载英文布局，`HKCU:\Keyboard Layout\Preload` 没变（仍只有 00000804） |
+| 工具快捷键在微软拼音（中文模式）下 | 通过 | 上面的单键工具快捷键都是在 HKL 0804 下按的，没有被输入法吃掉 |
+| 文本框有焦点时不抢键 | 通过 | 项目面板搜索框获得焦点后打 w q g t：工具保持“选择工具”；输入法组字显示 `w'q'g't`，Enter 上屏 `wqgt`；框里 Ctrl+Z 只撤销文字，不触发全局撤销 |
+| 文本框里的撤销 | 未通过 #222（小） | 框里 Ctrl+Z 恢复出组字中间态 `w'q'g't`，这段文字从来没上屏过 |
 
 ## 第 3 批：渲染（DX12 真显卡）
 
@@ -96,3 +125,5 @@ zip 复制到 `E:\bae-test\final 0.0.1\发布 包\`，加 Zone.Identifier（`[Zo
 ## 建议补的用例（留给 macOS 验收 agent）
 
 - 关闭项目后检查合成 / 时间轴 / 渲染队列面板标签和状态都清空（#215）。
+- 键盘：对“Cmd + 修饰键 + C/X/V”的每个 AE 快捷键（预合成、新建摄像机、将合成修剪至工作区域、开关 ▸ 视频）各发一次真实按键，确认执行的是对应命令而不是复制 / 剪切 / 粘贴（#220；macOS 上应当已经正确，作为回归保护）。
+- 输入法：在搜索框、图层改名框用中文输入法组字后按 Esc / Enter / Ctrl+Z，确认撤销历史里没有组字中间态（#222）。
