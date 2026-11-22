@@ -14,6 +14,7 @@
 #[cfg(all(test, target_os = "macos"))]
 mod acceptance;
 mod agent_feed;
+mod autosave;
 mod document;
 mod file_error;
 mod files;

@@ -519,6 +519,7 @@ dependencies = [
  "bae-package",
  "bae-platform",
  "bae-plugin",
+ "bae-prefs",
  "bae-render",
  "bae-text",
  "bae-ui",
@@ -809,6 +810,17 @@ name = "bae-plugin-sdk"
 version = "0.1.0"
 
 [[package]]
+name = "bae-prefs"
+version = "0.1.0"
+dependencies = [
+ "bae-platform",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "bae-render"
 version = "0.1.0"
 dependencies = [
@@ -877,8 +889,10 @@ version = "0.1.0"
 dependencies = [
  "bae-app",
  "bae-model",
+ "bae-prefs",
  "eframe",
  "egui",
+ "egui_kittest",
  "fontique",
  "serde",
  "serde_json",

@@ -57,6 +57,7 @@ needless_pass_by_ref_mut = "warn"
 # ---- internal crates (path deps; add one line per crate as it lands) ----
 bae-app = { path = "crates/bae-app" }
 bae-platform = { path = "crates/bae-platform" }
+bae-prefs = { path = "crates/bae-prefs" }
 bae-gpu = { path = "crates/bae-gpu" }
 bae-model = { path = "crates/bae-model" }
 bae-anim = { path = "crates/bae-anim" }
@@ -250,6 +251,9 @@ opt-level = "s"
 [profile.release.package.bae-motion]
 opt-level = "s"
 [profile.release.package.bae-platform]
+opt-level = "s"
+# Preferences: schema, validation and storage, read once per change.
+[profile.release.package.bae-prefs]
 opt-level = "s"
 [profile.release.package.rmcp]
 opt-level = "s"
