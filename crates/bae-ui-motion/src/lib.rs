@@ -35,6 +35,7 @@ mod render;
 pub mod render_queue;
 pub mod session;
 mod timeline;
+pub mod tools;
 mod viewer;
 
 use bae_app::{AppBuilder, AppModule};
@@ -46,6 +47,7 @@ pub use project::ProjectPanel;
 pub use render_queue::{RenderQueuePanel, SharedRenderQueue};
 pub use session::{Session, SharedSession};
 pub use timeline::TimelinePanel;
+pub use tools::{SharedTools, Tool};
 pub use viewer::CompositionViewer;
 
 /// App module: the motion commands ([`bae_motion::MotionModule`]) plus the panels,
@@ -61,9 +63,13 @@ impl AppModule for MotionUiModule {
     fn build(&self, app: &mut AppBuilder) {
         app.add_module(bae_motion::MotionModule);
         bae_ui::i18n::register(i18n::ZH);
+        bae_ui::i18n::register(tools::ZH);
         bae_ui::i18n::register(catalog::menu_zh());
         if app.resource::<SharedSession>().is_none() {
             app.insert_resource(SharedSession::default());
+        }
+        if app.resource::<SharedTools>().is_none() {
+            app.insert_resource(SharedTools::default());
         }
         if app.resource::<SharedRenderQueue>().is_none() {
             app.insert_resource(SharedRenderQueue::default());
@@ -119,9 +125,25 @@ impl AppModule for MotionUiModule {
             }
         });
         let _ = app.register::<KeymapBindings>("motion", actions::bindings());
+        // Tools: the toolbar of the `ae` keymap, tool shortcuts and their handler.
+        let _ = app.register::<KeymapBindings>("motion.tools", tools::keymap_bindings());
+        actions.batch(|tx| {
+            for (id, title) in tools::actions() {
+                if !tx.contains(id) {
+                    let _ = tx.register(owner.clone(), id, ActionInfo::new(title));
+                }
+            }
+        });
+        let shared_tools = app.resource::<SharedTools>().cloned().unwrap_or_default();
+        let toolbar: std::sync::Arc<dyn bae_ui::Toolbar> =
+            std::sync::Arc::new(tools::toolbar::AeToolbar::new(shared_tools));
+        let _ = app.register_arc::<dyn bae_ui::Toolbar>(bae_ui::presets::AE_KEYMAP, toolbar);
+        let tool_actions: std::sync::Arc<dyn ActionHandler> =
+            std::sync::Arc::new(tools::ToolActions);
+        let _ = app.register_arc::<dyn ActionHandler>("bae-ui-motion.tools", tool_actions);
         let variants = app.registry::<bae_ui::CommandVariant>();
         variants.batch(|tx| {
-            for (id, variant) in actions::variants() {
+            for (id, variant) in actions::variants().into_iter().chain(tools::variants()) {
                 let _ = tx.register(owner.clone(), id, variant);
             }
         });

@@ -13,6 +13,7 @@
 | `Registry<Keymap>` | 键位表，如 `"ae"`、`"ai"` | 快捷键列表（`Binding`） |
 | `Registry<KeymapBindings>` | 任意唯一 id，如 `"motion.timeline"` | 模块往某个键位表追加的快捷键（12 的时间轴 `U`、`J`/`K` 等），不必替换整个键位表 |
 | `Registry<ActionInfo>` | 命令 id，如 `"edit.undo"` | 界面层动作的标题；`bae-model` 的命令不用在这里注册 |
+| `Registry<dyn Toolbar>` | 键位表 id，如 `"ae"` | 工具栏左侧的工具区（工具按钮和工具选项），见第 5b 节 |
 
 `bae_ui::UiModule` 由外壳加载：注册外壳自己的动作；所有模块 build 完之后，给工作区布局里用到、但没有模块注册的面板补一个占位面板（显示"尚未实现"）。所以 12 号先注册 `"timeline"` 也好、晚一点注册也好，布局都不会出错；注册了同名 id 就替换掉占位。
 
@@ -59,6 +60,15 @@ app.register("timeline", PanelKind::new("Timeline", |spawn| Box::new(Timeline::n
 ## 5. 工作区
 
 `WorkspacePreset::new(title, keymap, root)` 给出默认布局。用户的修改由外壳保存：切换工作区时保留各自当前的布局；"重置为已保存的布局"回到用户上次"保存对此工作区所做的更改"时的布局，没保存过就回到预设。
+
+## 5b. 工具栏的工具区
+
+窗口顶部工具栏左边（工作区栏左侧）的工具按钮和工具选项由工作区模块提供：实现 `bae_ui::Toolbar`，以键位表 id 注册到 `Registry<dyn Toolbar>`（动效工作区的 `ae` 由 12 的 `bae-ui-motion` 注册）。外壳每帧对当前工作区键位表的工具栏调用：
+
+- `ui(ui, cx, keymap)`：`ui` 是裁剪到工作区栏左侧的一行（从左往右排）；`cx` 和面板的一样（`cx.panel` 是 `"toolbar"`），命令通过 `cx.invoke_with` 发出；`keymap` 是当前生效的键位表（提示里显示快捷键；按住工具键临时切换时用它判断键是否还按着）。
+- `save_state()` / `load_state(state)`：工具状态（当前工具、新形状的填充描边等工具选项）是应用状态，不进工程。外壳把它和面板视图状态一起存在 `WorkbenchState::panels["toolbar:<键位表 id>"]`，第一次画之前交回 `load_state`。
+
+当前工具本身放在提供工具栏的模块的应用资源里，供它的面板读取（动效工作区是 `bae_ui_motion::SharedTools`，查看器、时间轴按它决定指针行为）。工具快捷键照常注册成 `KeymapBindings`（动作 id `motion.tool.*`），由模块的 `ActionHandler` 处理，在快捷键编辑器里可以改。没有注册工具栏的键位表不画工具区（`ae` 键位表在动效模块没加载时退回静态图标）。
 
 ## 6. 外壳提供的应用资源
 
