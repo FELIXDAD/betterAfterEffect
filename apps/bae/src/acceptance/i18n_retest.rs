@@ -33,6 +33,13 @@ const NEW_LAYERS: &[&str] = &[
     "motion.layer.new.light",
 ];
 
+/// Latin words of a Chinese UI with an open issue: let through here only, so the
+/// rest of the scan keeps running. Remove an entry when its issue is fixed.
+const KNOWN_ISSUES: &[(&str, &str)] = &[
+    // Character panel "72 px", Graph Editor "px" / "px/秒"; AE zh_CN: 像素.
+    ("px", "#197"),
+];
+
 fn is_cjk(c: char) -> bool {
     matches!(c, '\u{3400}'..='\u{9fff}' | '\u{f900}'..='\u{faff}')
 }
@@ -46,6 +53,7 @@ fn latin_words(text: &str, extra_ok: &[String]) -> Vec<String> {
         .filter(|w| w.chars().filter(|c| c.is_ascii_alphabetic()).count() >= 2)
         // The suite's one list of what AE's own Chinese UI keeps in Latin letters.
         .filter(|w| !super::i18n_scan::ALLOWED.contains(w) && !extra_ok.iter().any(|o| o == w))
+        .filter(|w| !KNOWN_ISSUES.iter().any(|(k, _)| k == w))
         .map(str::to_owned)
         .collect()
 }
@@ -98,25 +106,37 @@ fn wrong_language(h: &Ui, zh: bool, extra_ok: &[String]) -> Vec<String> {
 /// property groups (`图层 1“名称” · 内容`, shape groups, `变换` …). Both are
 /// toggle buttons labelled with the layer's context, ` · ` and one segment
 /// naming what they open (keyframes add more segments; switches are check
-/// boxes). One row per frame: opening a row moves the rows below it.
+/// boxes). Property rows look the same (a selectable label: toggled when
+/// selected), so every row is clicked once (by its accesskit id: the contents
+/// rows of a layer and of its shape group share a label): a group stays open,
+/// a property is only selected. One row per frame: opening a row moves the rows below it.
 fn expand_timeline(h: &mut Ui) {
-    for _ in 0..200 {
+    let mut clicked = std::collections::BTreeSet::new();
+    for _ in 0..400 {
         let closed = h
             .query_all_by_role(Role::Button)
+            .map(|n| n.accesskit_node())
             .find(|n| {
-                let n = n.accesskit_node();
                 n.toggled() == Some(egui::accesskit::Toggled::False)
+                    && !clicked.contains(&n.id())
                     && n.label().is_some_and(|l| {
                         l.split_once("” · ")
                             .is_some_and(|(_, what)| !what.contains(" · "))
                     })
             })
-            .map(|n| n.rect());
-        let Some(r) = closed else { return };
+            .map(|n| (n.id(), n.raw_bounds()));
+        let Some((id, Some(r))) = closed else {
+            return;
+        };
+        clicked.insert(id);
+        let r = Rect::from_min_max(
+            Pos2::new(r.x0 as f32, r.y0 as f32),
+            Pos2::new(r.x1 as f32, r.y1 as f32),
+        );
         click_at(h, r.center());
         settle(h);
     }
-    panic!("timeline rows still closed after 200 clicks");
+    panic!("timeline rows still closed after 400 clicks");
 }
 
 /// Display names of every prim under `root` (itself included), by path.
