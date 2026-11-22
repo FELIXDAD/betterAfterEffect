@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 bae-app.workspace = true
 bae-model.workspace = true
+bae-prefs.workspace = true
 egui.workspace = true
 # Inflates the embedded icon data (icons/vector.rs); already linked through bae-model's zip.
 flate2.workspace = true
@@ -27,6 +28,7 @@ tracing.workspace = true
 # bae-gpu device (docs/spec/dependencies.md §10). `wgpu_no_default_features` plus the
 # workspace wgpu keeps one wgpu with only the Metal/D3D12 backends.
 [dev-dependencies]
+egui_kittest.workspace = true
 eframe = { version = "0.36.2", default-features = false, features = ["wgpu_no_default_features", "default_fonts"] }
 wgpu.workspace = true
 

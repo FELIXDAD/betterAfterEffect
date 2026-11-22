@@ -467,7 +467,12 @@ pub(super) fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) -
             None => color,
             Some(c) => c.gamma_multiply(tint_alpha),
         };
-        let tint = base.gamma_multiply(f32::from(layer.alpha) / 255.0);
+        // The shell applies Preferences > Appearance only to meshes on egui's
+        // own texture (`theme::apply_appearance`), so atlas quads adjust here.
+        let tint = crate::theme::adjust(
+            base.gamma_multiply(f32::from(layer.alpha) / 255.0),
+            crate::theme::appearance(),
+        );
         let mut mesh = Mesh::with_texture(atlas.pages[slot.page].texture.id());
         mesh.add_rect_with_uv(quad, slot.uv, tint);
         painter.add(Shape::mesh(mesh));
@@ -578,6 +583,32 @@ mod tests {
             "no re-upload for cached sizes or a new tint"
         );
         output_drop(again);
+    }
+
+    #[test]
+    fn appearance_adjusts_theme_tints_but_not_fixed_colors() {
+        use crate::theme::{Appearance, adjust, set_appearance};
+        let ctx = Context::default();
+        let gray = Color32::from_gray(0xb1);
+        set_appearance(Appearance::Light);
+        let out = paint_all(&ctx, 1.0, gray);
+        set_appearance(Appearance::Darkest);
+        let colors: Vec<Color32> = icon_meshes(&out)
+            .iter()
+            .map(|m| m.vertices[0].color)
+            .collect();
+        output_drop(out);
+        let mut expected = Vec::new();
+        for data in table().iter().flatten() {
+            for layer in &data.layers {
+                let base = layer.color.unwrap_or(gray);
+                let c = base.gamma_multiply(f32::from(layer.alpha) / 255.0);
+                expected.push(adjust(c, Appearance::Light));
+            }
+        }
+        assert_eq!(colors, expected);
+        // A light gray icon becomes dark on the light theme.
+        assert!(adjust(gray, Appearance::Light).r() < 0x80);
     }
 
     fn output_drop(out: egui::FullOutput) {
