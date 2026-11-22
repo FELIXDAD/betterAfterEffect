@@ -13,7 +13,7 @@
 - 所有对工程数据的修改都通过 `bae-model` 的 Command。不要在界面或其他 crate 里直接改数据。
 - 命令只能定义在不依赖界面和 GPU 的 crate 里。界面 crate 只调用命令。
 - `bae-model`、`bae-anim`、`bae-sync` 和各领域命令 crate 不能依赖 GPU、窗口或平台 API。
-- 新增依赖前先看有没有已经在用的同类库；PR 里写明 release 体积增加了多少（`cargo xtask size` 的结果）。不允许引入 Chromium/WebView、Qt、静态链接的 FFmpeg、OpenColorIO、OpenUSD 这类大型运行时。
+- 新增依赖前先看有没有已经在用的同类库；PR 里写明 release 体积增加了多少（`cargo xtask size` 的结果）。单个 PR 让可执行文件增加超过 0.3 MiB 时，还要写明理由和已经做过的去浪费措施（见 `docs/ARCHITECTURE.md` 第 11 节）。不允许引入 Chromium/WebView、Qt、静态链接的 FFmpeg、OpenColorIO、OpenUSD 这类大型运行时。
 - 代码、标识符、代码注释用英文。面向用户的文档用中文；界面文字走 i18n，中英文都要有。
 - 不复制 Adobe 的图标、图片、示例工程、SDK 代码或头文件。可以参考公开文档、脚本 API 文档和界面布局。
 - 不提交大于 1MB 的二进制文件。测试素材尽量用脚本生成。

@@ -226,18 +226,21 @@ impl RenderQueue {
         true
     }
 
-    /// Takes the next item of the running render.
-    fn take_next(&mut self) -> Option<Job> {
+    /// Takes the next item of the running render. `comp_frames` gives a
+    /// comp's frame count: the progress counts the frames that will render
+    /// (the range limited to the comp) from the start (issue #157).
+    fn take_next(&mut self, comp_frames: &dyn Fn(&PrimPath) -> Option<i64>) -> Option<Job> {
         let batch = &mut self.batch;
         let item = self
             .items
             .iter_mut()
             .find(|i| i.status == ItemStatus::Queued && batch.contains(&i.id))?;
         batch.retain(|id| *id != item.id);
-        item.status = ItemStatus::Rendering {
-            done: 0,
-            total: item.frame_count(),
-        };
+        // A missing comp or a range outside it renders nothing (and fails).
+        let total = comp_frames(&item.comp)
+            .and_then(|frames| limited_range(item.start, item.end, frames))
+            .map_or(0, |(start, end)| (end - start + 1) as usize);
+        item.status = ItemStatus::Rendering { done: 0, total };
         Some(Job {
             id: item.id,
             comp: item.comp.clone(),
@@ -363,6 +366,13 @@ impl StageSnapshot {
 }
 
 /// Renders one item; `progress` gets the frames done so far.
+/// The part of `start..=end` a comp of `frames` frames renders: AE limits the
+/// range to the comp. `None` when nothing of it is inside.
+pub(crate) fn limited_range(start: i64, end: i64, frames: i64) -> Option<(i64, i64)> {
+    let (start, end) = (start.max(0), end.min(frames - 1));
+    (start <= end).then_some((start, end))
+}
+
 pub(crate) fn render_job(
     renderer: &mut Renderer,
     evaluator: &mut AnimEvaluator,
@@ -375,14 +385,12 @@ pub(crate) fn render_job(
         .ok_or_else(|| RenderError::Other(tr("The composition no longer exists.").to_owned()))?;
     let output = output_path(&job.output, job.format, &info.name)?;
     // AE limits the range to the comp.
-    let last = info.frame_count() - 1;
-    let (start, end) = (job.start.max(0), job.end.min(last));
-    if start > end {
+    let Some((start, end)) = limited_range(job.start, job.end, info.frame_count()) else {
         return Err(RenderError::Other(
             tr("The frames are outside the composition (0–{last}).")
-                .replace("{last}", &last.to_string()),
+                .replace("{last}", &(info.frame_count() - 1).to_string()),
         ));
-    }
+    };
     let times: Vec<(Option<i64>, Time)> = (start..=end)
         .map(|f| (Some(f), job.rate.frame_to_time(f)))
         .collect();
@@ -534,8 +542,12 @@ pub(crate) fn run_worker(
         renderer.providers_mut().register(provider.clone());
     }
     let mut evaluator = AnimEvaluator::new(None);
+    let comp_frames = |comp: &PrimPath| {
+        let stage = stage.as_ref().ok()?;
+        bae_motion::query::comp_info(stage, comp).map(|c| c.frame_count())
+    };
     loop {
-        let Some(job) = queue.lock().take_next() else {
+        let Some(job) = queue.lock().take_next(&comp_frames) else {
             break;
         };
         let status = match &stage {
@@ -918,7 +930,7 @@ mod tests {
         assert!(q.begin());
         assert!(!q.begin(), "already rendering");
         let late = q.add(&comp_info("/comps/late", "Late"), dir);
-        let job = q.take_next().unwrap();
+        let job = q.take_next(&|_| Some(30)).unwrap();
         assert_eq!((job.id, job.start, job.end), (a, 3, 8));
         assert!(matches!(
             q.items()[0].status,
@@ -945,7 +957,7 @@ mod tests {
         assert_eq!(q.items()[1].status, ItemStatus::Queued);
         assert!(!q.items()[1].cancel.load(Ordering::Relaxed));
         // Queued after Render was pressed: waits for the next render.
-        assert!(q.take_next().is_none());
+        assert!(q.take_next(&|_| Some(30)).is_none());
         assert_eq!(q.items()[2].status, ItemStatus::Queued);
         assert!(q.remove(late));
         assert!(q.remove(b));
@@ -1030,7 +1042,9 @@ mod tests {
             .to_string_lossy()
             .into_owned();
         assert!(q.begin());
-        let job = q.take_next().unwrap();
+        let job = q
+            .take_next(&|c| bae_motion::query::comp_info(&stage, c).map(|i| i.frame_count()))
+            .unwrap();
         let mut renderer = Renderer::new(gpu);
         let mut evaluator = AnimEvaluator::new(None);
         let cancel = job.cancel.clone();
@@ -1054,6 +1068,44 @@ mod tests {
         assert_eq!(first, Some(dir.path().join("stop/f_0000.png")));
         let on_disk = std::fs::read_dir(dir.path().join("stop")).unwrap().count();
         assert_eq!(on_disk, done, "every rendered frame is kept");
+    }
+
+    #[test]
+    fn progress_counts_the_limited_range_from_the_start() {
+        // #157: 1780–1900 of an 1800-frame comp renders 20 frames. The item
+        // shows “0 / 20” as soon as the worker takes it, not “0 / 121” until
+        // render_job has limited the range.
+        let mut q = RenderQueue::default();
+        let dir = Path::new("/renders");
+        let add = |q: &mut RenderQueue, comp: &str, start: i64, end: i64| {
+            let id = q.add(&comp_info(comp, "C"), dir);
+            let item = q.item_mut(id).unwrap();
+            (item.start, item.end) = (start, end);
+            id
+        };
+        let past_end = add(&mut q, "/comps/long", 1780, 1900);
+        let outside = add(&mut q, "/comps/long", 1900, 1950);
+        let gone = add(&mut q, "/comps/deleted", 0, 10);
+        let frames = |c: &PrimPath| (c.as_str() == "/comps/long").then_some(1800);
+        assert!(q.begin());
+        let status = |q: &RenderQueue, id: u64| {
+            q.items()
+                .iter()
+                .find(|i| i.id == id)
+                .unwrap()
+                .status
+                .clone()
+        };
+        for (id, total) in [(past_end, 20), (outside, 0), (gone, 0)] {
+            let job = q.take_next(&frames).unwrap();
+            assert_eq!(job.id, id);
+            assert_eq!(status(&q, id), ItemStatus::Rendering { done: 0, total });
+        }
+        // render_job uses the same limits.
+        assert_eq!(limited_range(1780, 1900, 1800), Some((1780, 1799)));
+        assert_eq!(limited_range(-5, 3, 10), Some((0, 3)));
+        assert_eq!(limited_range(10, 20, 10), None);
+        assert_eq!(limited_range(4, 4, 10), Some((4, 4)));
     }
 
     #[test]
