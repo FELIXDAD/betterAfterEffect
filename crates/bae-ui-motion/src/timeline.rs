@@ -24,6 +24,7 @@ use serde_json::json;
 
 use crate::actions::{self, ids};
 use crate::common::{self, EvalCache};
+use crate::graph::GraphEditor;
 use crate::project::ItemDrag;
 use crate::props::{self, Node};
 use crate::session::{Session, SharedSession};
@@ -125,31 +126,38 @@ pub struct TimelinePanel {
     /// AE layer numbers (# column) of the shown comp, for accessibility names:
     /// two layers may share a name (issue #128).
     layer_numbers: HashMap<PrimPath, usize>,
+    /// Graph Editor mode state (shown when the session's `graph_editor` is on).
+    graph: GraphEditor,
+    /// This frame shows the Graph Editor.
+    graph_mode: bool,
+    /// Last frame's time axis, for tests.
+    #[cfg(test)]
+    pub(crate) last_axis: Option<TimeAxis>,
 }
 
 /// Comp time ↔ x in the graph.
 #[derive(Clone, Copy)]
-struct TimeAxis {
-    left: f32,
-    width: f32,
-    start: Time,
-    span: Time,
+pub(crate) struct TimeAxis {
+    pub(crate) left: f32,
+    pub(crate) width: f32,
+    pub(crate) start: Time,
+    pub(crate) span: Time,
 }
 
 impl TimeAxis {
-    fn x(&self, t: Time) -> f32 {
+    pub(crate) fn x(&self, t: Time) -> f32 {
         self.left
             + PAD
             + (t - self.start).0 as f32 / self.span.0.max(1) as f32 * (self.width - 2.0 * PAD)
     }
 
-    fn t(&self, x: f32) -> Time {
+    pub(crate) fn t(&self, x: f32) -> Time {
         let f = (x - self.left - PAD) / (self.width - 2.0 * PAD).max(1.0);
         self.start + Time((f64::from(f) * self.span.0 as f64).round() as i64)
     }
 
     /// Time per point.
-    fn per_point(&self) -> f64 {
+    pub(crate) fn per_point(&self) -> f64 {
         self.span.0 as f64 / f64::from((self.width - 2.0 * PAD).max(1.0))
     }
 }
@@ -370,6 +378,21 @@ impl TimelinePanel {
         let axis = self.axis(info, 0.0, 1000.0);
         self.scroll = now - Time(axis.span.0 / 2);
     }
+
+    /// Zoom and scroll so `[a, b]` (comp time) fills the time graph with a margin.
+    fn fit_time(&mut self, info: &CompInfo, a: Time, b: Time) {
+        let full = info.duration;
+        let min = Time(info.frame_duration().0 * 10).min(full);
+        let want = Time((((b - a).0 as f64) * 1.2) as i64).max(min).min(full);
+        let f = if full.0 > min.0 {
+            ((want.0 - min.0) as f64 / (full.0 - min.0) as f64).cbrt()
+        } else {
+            1.0
+        };
+        self.zoom = (1.0 - f as f32).clamp(0.0, 1.0);
+        let span = self.axis(info, 0.0, 1000.0).span;
+        self.scroll = Time((a.0 + b.0) / 2 - span.0 / 2);
+    }
 }
 
 /// AE's name of a layer switch, for screen readers.
@@ -419,6 +442,11 @@ impl TimelinePanel {
     #[cfg(test)]
     pub(crate) fn start_rename(&mut self, layer: PrimPath, text: &str) {
         self.rename = Some((layer, text.to_owned()));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn graph_editor(&mut self) -> &mut GraphEditor {
+        &mut self.graph
     }
 }
 
@@ -482,10 +510,15 @@ impl Panel for TimelinePanel {
             ui.ctx().request_repaint();
         }
         let now = session.lock().time(&info.path);
+        self.graph_mode = session.lock().graph_editor;
         let cols = Cols::new(full.width());
         let graph_left = full.left() + cols.end + 2.0;
         let graph_w = (full.right() - graph_left).max(40.0);
         let axis = self.axis(&info, graph_left, graph_w);
+        #[cfg(test)]
+        {
+            self.last_axis = Some(axis);
+        }
 
         let head = Rect::from_min_max(
             pos2(full.left(), tabs.bottom()),
@@ -519,31 +552,35 @@ impl Panel for TimelinePanel {
             .map(|(i, l)| (l.clone(), i + 1))
             .collect();
 
-        // Background of the graph body: marquee selection and deselect.
-        let bg = ui
-            .interact(
-                graph_body,
-                ui.id().with("graph_bg"),
-                Sense::click_and_drag(),
-            )
-            .labeled(egui::WidgetType::Other, tr("Time Graph"));
-        if bg.drag_started_by(egui::PointerButton::Primary)
-            && let Some(p) = bg.interact_pointer_pos()
-        {
-            self.drag = Some(Drag::Marquee {
-                origin: p,
-                additive: ui.input(|i| i.modifiers.shift),
-            });
-        }
-        if bg.clicked() {
-            let mut s = session.lock();
-            s.selected_keys.clear();
-            s.selected_layers.clear();
-        }
-        bg.context_menu(|ui| new_layer_menu(ui, cx, &session));
-        // Dropped project items.
-        if let Some(item) = bg.dnd_release_payload::<ItemDrag>() {
-            crate::viewer::add_item_as_layer(cx, &session, &item.0, None);
+        // Background of the graph body: marquee selection and deselect (the Graph
+        // Editor has its own).
+        if !self.graph_mode {
+            let bg = ui
+                .interact(
+                    graph_body,
+                    ui.id().with("graph_bg"),
+                    Sense::click_and_drag(),
+                )
+                .labeled(egui::WidgetType::Other, tr("Time Graph"));
+            if bg.drag_started_by(egui::PointerButton::Primary)
+                && let Some(p) = bg.interact_pointer_pos()
+            {
+                self.drag = Some(Drag::Marquee {
+                    origin: p,
+                    additive: ui.input(|i| i.modifiers.shift),
+                });
+            }
+            if bg.clicked() {
+                let mut s = session.lock();
+                s.selected_keys.clear();
+                s.selected_layers.clear();
+                s.selected_props.clear();
+            }
+            bg.context_menu(|ui| new_layer_menu(ui, cx, &session));
+            // Dropped project items.
+            if let Some(item) = bg.dnd_release_payload::<ItemDrag>() {
+                crate::viewer::add_item_as_layer(cx, &session, &item.0, None);
+            }
         }
 
         let mut key_rects: Vec<(Rect, KeyRef)> = Vec::new();
@@ -588,10 +625,24 @@ impl Panel for TimelinePanel {
             &comp_layers,
         );
 
+        let mut cti_body = graph_body;
+        if self.graph_mode {
+            let out = self
+                .graph
+                .ui(ui, cx, &session, &info, &axis, graph_body, now);
+            if let Some((a, b)) = out.fit_time {
+                self.fit_time(&info, a, b);
+            }
+            if out.zoom_by != 0.0 {
+                self.zoom_step(out.zoom_by, &info, now);
+            }
+            cti_body.max.y -= crate::graph::BAR_H;
+        }
+
         // CTI through the body.
-        let p = ui.painter().with_clip_rect(graph_body);
+        let p = ui.painter().with_clip_rect(cti_body);
         let x = axis.x(now);
-        p.vline(x, graph_body.y_range(), Stroke::new(1.0, color::ACCENT));
+        p.vline(x, cti_body.y_range(), Stroke::new(1.0, color::ACCENT));
 
         self.footer(ui, foot, &info, &axis, now, graph_left);
 
@@ -713,7 +764,7 @@ fn new_layer_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, session: &SharedSessio
     });
 }
 
-fn keyframe_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, session: &SharedSession) {
+pub(crate) fn keyframe_menu(ui: &mut Ui, cx: &mut PanelContext<'_>, session: &SharedSession) {
     bae_ui::widgets::menu_button(ui, tr("Keyframe Assistant"), |ui| {
         for (title, id, params) in [
             ("Easy Ease", ids::EASE, json!({"mode": "easy_ease"})),
@@ -786,6 +837,35 @@ impl TimelinePanel {
                 s.set_time(info, now + Time(info.frame_duration().0 * frames));
             }
         }
+
+        // Graph Editor switch (AE's comp button; Shift+F3).
+        let ge = Rect::from_center_size(
+            pos2(head.left() + cols.end - 14.0, head.center().y),
+            vec2(20.0, 20.0),
+        );
+        let on = session.lock().graph_editor;
+        let gresp = ui
+            .interact(ge, ui.id().with("graph_editor_switch"), Sense::click())
+            .labeled_toggle(egui::WidgetType::Button, tr("Graph Editor"), on);
+        if on {
+            ui.painter().rect_filled(ge, 2.0, color::BUTTON_ON);
+        }
+        icons::paint(
+            ui.painter(),
+            ge.shrink(3.0),
+            Icon::GraphEditor,
+            if on {
+                color::ACCENT
+            } else if gresp.hovered() {
+                color::ICON
+            } else {
+                color::ICON_DIM
+            },
+        );
+        if gresp.clicked() {
+            session.lock().graph_editor = !on;
+        }
+        gresp.on_hover_text(tr("Graph Editor"));
 
         // Column headers.
         let p = ui.painter();
@@ -1023,9 +1103,18 @@ impl TimelinePanel {
         );
         {
             let p = ui.painter();
+            let prop_selected = match &row.kind {
+                RowKind::Prop { path, attr, .. } => session
+                    .lock()
+                    .selected_props
+                    .iter()
+                    .any(|(p, a)| p == path && a == attr),
+                _ => false,
+            };
             let bg = match row.kind {
                 RowKind::Layer if layer_selected => color::ROW_SELECTED,
                 RowKind::Layer => color::ROW,
+                RowKind::Prop { .. } if prop_selected => color::ROW_SELECTED,
                 _ => color::PANEL,
             };
             p.rect_filled(outline, 0.0, bg);
@@ -1299,7 +1388,9 @@ impl TimelinePanel {
                     }
                 }
                 // Duration bar.
-                self.layer_bar(ui, cx, session, info, axis, layer, rect, layer_selected);
+                if !self.graph_mode {
+                    self.layer_bar(ui, cx, session, info, axis, layer, rect, layer_selected);
+                }
             }
             RowKind::Group { id, label, open } => {
                 let x = l + cols.name + row.depth as f32 * 14.0;
@@ -1590,6 +1681,40 @@ impl TimelinePanel {
         } else {
             color::TEXT
         };
+        // Graph Editor Set switch (animated properties), left of the stopwatch so the
+        // stopwatch stays next to the name as in AE.
+        let id_pair = (path.clone(), attr.to_owned());
+        if animated {
+            let gs = Rect::from_center_size(pos2(x - 8.0, cy), vec2(14.0, 14.0));
+            let on = session.lock().graph_set.contains(&id_pair);
+            let resp = ui
+                .interact(gs, id.with("graph_set"), Sense::click())
+                .labeled_toggle(
+                    egui::WidgetType::Checkbox,
+                    &bae_ui::a11y::context(&[&prop_name, tr("Graph Editor Set")]),
+                    on,
+                );
+            icons::paint(
+                ui.painter(),
+                gs.shrink(1.0),
+                Icon::GraphEditor,
+                if on {
+                    color::ACCENT
+                } else if resp.hovered() {
+                    color::ICON
+                } else {
+                    color::ICON_DIM
+                },
+            );
+            if resp.clicked() {
+                let mut s = session.lock();
+                if let Some(i) = s.graph_set.iter().position(|p| *p == id_pair) {
+                    s.graph_set.remove(i);
+                } else {
+                    s.graph_set.push(id_pair.clone());
+                }
+            }
+        }
         ui.painter().text(
             pos2(x + 18.0, cy),
             Align2::LEFT_CENTER,
@@ -1597,6 +1722,43 @@ impl TimelinePanel {
             theme::body(),
             name_color,
         );
+        // Clicking the name selects the property and its keyframes (AE); Shift or
+        // Cmd/Ctrl adds it.
+        let name_rect = Rect::from_min_max(
+            pos2(x + 16.0, rect.top()),
+            pos2((l + cols.switches - 2.0).max(x + 22.0), rect.bottom()),
+        );
+        let selected_prop = session.lock().selected_props.contains(&id_pair);
+        let nresp = ui
+            .interact(name_rect, id.with("name"), Sense::click())
+            .labeled_toggle(egui::WidgetType::SelectableLabel, &prop_name, selected_prop);
+        if nresp.clicked() && query::locked_layer_of(stage, path).is_none() {
+            let mods = ui.input(|i| i.modifiers);
+            let keys: Vec<KeyRef> = spec
+                .keyframes
+                .keys()
+                .map(|t| KeyRef::new(path.clone(), attr, *t))
+                .collect();
+            let mut s = session.lock();
+            if mods.shift || mods.command {
+                if let Some(i) = s.selected_props.iter().position(|p| *p == id_pair) {
+                    s.selected_props.remove(i);
+                    s.selected_keys
+                        .retain(|k| !(k.path == *path && k.attr == attr));
+                } else {
+                    s.selected_props.push(id_pair.clone());
+                    for k in keys {
+                        if !s.selected_keys.contains(&k) {
+                            s.selected_keys.push(k);
+                        }
+                    }
+                }
+            } else {
+                s.selected_props = vec![id_pair.clone()];
+                s.selected_keys = keys;
+                s.selected_layers = vec![row.layer.clone()];
+            }
+        }
         // Value.
         let value = session
             .lock()
@@ -1625,7 +1787,10 @@ impl TimelinePanel {
                 common::value_editor(&mut child, id.with("ed"), attr, &value, dims, &prop_name);
             common::apply_edit(cx, session, path, attr, now, edit);
         }
-        // Keyframes.
+        // Keyframes (layer bar mode; the Graph Editor draws its own).
+        if self.graph_mode {
+            return;
+        }
         let graph = Rect::from_min_max(pos2(axis.left, rect.top()), rect.max);
         let p = ui.painter().with_clip_rect(graph);
         let selected_keys = session.lock().selected_keys.clone();
@@ -2065,6 +2230,7 @@ fn select_layer(session: &SharedSession, stage: &Stage, layer: &PrimPath, mods: 
     } else {
         s.selected_layers = vec![layer.clone()];
         s.selected_keys.clear();
+        s.selected_props.clear();
     }
 }
 
