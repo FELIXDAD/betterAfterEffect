@@ -1348,6 +1348,9 @@ pub(super) struct ShaderCacheValue {
 #[derive(Clone)]
 pub(super) enum CompiledShader {
     Dxc(Direct3D::Dxc::IDxcBlob),
+    // BAE patch (betterAfterEffect#154): FXC output is stored as `Precompiled` bytes,
+    // see `compile_fxc`.
+    #[allow(dead_code)]
     Fxc(Direct3D::ID3DBlob),
     Precompiled(Vec<u8>),
 }

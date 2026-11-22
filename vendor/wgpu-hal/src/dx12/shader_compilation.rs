@@ -254,7 +254,21 @@ fn compile_fxc(
     match hr {
         Ok(()) => {
             let shader_data = shader_data.unwrap();
-            Ok(super::CompiledShader::Fxc(shader_data))
+            // BAE patch (betterAfterEffect#154): FXC's ID3DBlob has a non-atomic
+            // reference count (`D3DX11Core::CBuffer::AddRef` / `Release` are plain
+            // `inc` / `dec`), and the device's shader cache hands clones of a compiled
+            // shader to every thread that loads it, so concurrent pipeline creation
+            // corrupted the heap. Copy the bytecode out and release the blob here, on
+            // the thread that created it.
+            let bytecode = unsafe {
+                core::slice::from_raw_parts(
+                    shader_data.GetBufferPointer().cast::<u8>(),
+                    shader_data.GetBufferSize(),
+                )
+            }
+            .to_vec();
+            drop(shader_data);
+            Ok(super::CompiledShader::Precompiled(bytecode))
         }
         Err(e) => {
             let mut full_msg = format!("FXC D3DCompile error ({e})");
