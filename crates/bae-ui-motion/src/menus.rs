@@ -37,6 +37,8 @@ pub enum Need {
     LayersOrKeys,
     /// Selected Project panel items (File ▸ Interpret Footage, Replace Footage …).
     Items,
+    /// An active composition and something on the clipboard (Edit ▸ Paste).
+    Paste,
 }
 
 /// The state the enabled checks look at, computed once per menu update.
@@ -46,6 +48,8 @@ struct Facts {
     layers: bool,
     keys: bool,
     items: bool,
+    /// Something on the clipboard (layers or keyframes).
+    clip: bool,
     /// Bit `i`: every selected layer has `actions::SWITCHES[i]` on.
     switches: u16,
     /// The selected layers' common quality (index in [`QUALITIES`] + 1; 0 =
@@ -89,6 +93,7 @@ impl Facts {
             layers: comp && !selected.is_empty(),
             keys: comp && !s.selected_keys.is_empty(),
             items: !s.selected_items.is_empty(),
+            clip: s.clipboard.is_some() || !s.layer_clipboard.is_empty(),
             switches,
             quality,
         }
@@ -121,6 +126,7 @@ impl Facts {
             Need::Keys => self.keys,
             Need::LayersOrKeys => self.layers || self.keys,
             Need::Items => self.items,
+            Need::Paste => self.comp && self.clip,
         }
     }
 }
@@ -130,7 +136,8 @@ pub fn need(path: &[&str], item: &Item) -> Need {
     use Need::*;
     match item.action {
         "edit.copy" | "edit.cut" | "motion.delete" => return LayersOrKeys,
-        "edit.paste" | "motion.select_all" | "motion.deselect_all" => return Comp,
+        "edit.paste" => return Paste,
+        "motion.select_all" | "motion.deselect_all" => return Comp,
         "motion.duplicate" | "motion.split" | "motion.order" => return Layers,
         "motion.ease" | "motion.toggle_hold" | "motion.reverse_keys" => return Keys,
         "motion.new_comp" => return Nothing,

@@ -424,7 +424,7 @@ pub const KEYS: &[Key] = &[
     k("CSwitchboard", "CopyExpressionLinkedInstanceRelative", "", "motion.edit.copy_with_relative_property_links", "", B, Later, 0),
     k("CSwitchboard", "CustResNoDialog", "Ctrl+Alt+J", "motion.view.resolution_custom", "", E, Later, 0),
     k("CSwitchboard", "CustResNoDialogRecurse", "Ctrl+Alt+macControl+J", "motion.view.resolution_custom", r#"{"nested":true}"#, E, Later, 0),
-    k("CSwitchboard", "Cut", "Ctrl+X", "edit.cut", "", B, Todo, 0),
+    k("CSwitchboard", "Cut", "Ctrl+X", "edit.cut", "", B, Done, 0),
     k("CSwitchboard", "DeselectAll", "Ctrl+Shift+A|F2", "motion.deselect_all", "", B, Done, 0),
     k("CSwitchboard", "DeselectAllKeyframes", "Shift+F2|Ctrl+Alt+Shift+A", "motion.comp.deselect_all_keyframes", "", B, Todo, 0),
     k("CSwitchboard", "DraftQuality", "Ctrl+Shift+U", "motion.layer.quality", r#"{"quality":"draft"}"#, B, Done, 0),

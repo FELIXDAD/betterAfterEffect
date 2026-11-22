@@ -2205,3 +2205,72 @@ fn split_layer_follows_the_preference() {
         );
     }
 }
+
+/// #204: Edit ▸ Copy / Paste / Cut with layers selected. Paste puts copies
+/// above the topmost selected layer (named like Duplicate, selected), one undo
+/// step; Cut removes the layers and they still paste, also into another comp.
+/// Paste is greyed while the clipboard is empty.
+#[test]
+fn layer_copy_cut_and_paste() {
+    use crate::actions::ids;
+    let mut h = Harness::new();
+    let (comp, solid, shape) = h.comp_with_layers();
+    let mut tl = TimelinePanel::default();
+    let run = |h: &mut Harness, tl: &mut TimelinePanel, id: &str| {
+        let r = h.action(tl, Invocation::new(id));
+        h.apply(r);
+        h.frame("timeline", tl, Vec::new());
+    };
+    let tree = motion_menu_tree();
+    let paste_item = tree
+        .items()
+        .into_iter()
+        .find(|(_, s)| s.action == ids::PASTE)
+        .unwrap()
+        .1
+        .clone();
+    let paste_enabled = |h: &Harness| {
+        paste_item.is_enabled(&bae_ui::menu::MenuContext::new(
+            &h.stage,
+            &h.resources,
+            "motion",
+        ))
+    };
+    assert!(!paste_enabled(&h), "nothing to paste yet");
+    // Copy the solid, select the shape (on top), paste: the copy goes above it.
+    h.session().lock().selected_layers = vec![solid.clone()];
+    run(&mut h, &mut tl, ids::COPY);
+    assert!(paste_enabled(&h));
+    h.session().lock().selected_layers = vec![shape.clone()];
+    run(&mut h, &mut tl, ids::PASTE);
+    let layers = query::comp_layers(&h.stage, &comp);
+    assert_eq!(layers.len(), 3);
+    let pasted = layers[0].clone();
+    assert_eq!(layers[1], shape);
+    assert_eq!(query::display_name_of(&h.stage, &pasted), "Solid 2");
+    assert_eq!(h.session().lock().selected_layers, vec![pasted.clone()]);
+    h.stage.undo(&h.author).unwrap();
+    assert_eq!(
+        query::comp_layers(&h.stage, &comp).len(),
+        2,
+        "one undo step"
+    );
+    // Cut the solid, paste into a new comp.
+    h.session().lock().selected_layers = vec![solid.clone()];
+    run(&mut h, &mut tl, ids::CUT);
+    assert!(!h.stage.has_prim(&solid), "Cut removes the layer");
+    let other = PrimPath::new(
+        h.run("comp.create", json!({"width": 320, "height": 240}))["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    h.session().lock().open_comp(&other);
+    run(&mut h, &mut tl, ids::PASTE);
+    let in_other = query::comp_layers(&h.stage, &other);
+    assert_eq!(in_other.len(), 1);
+    assert_eq!(
+        query::layer_kind(&h.stage, &in_other[0]).as_deref(),
+        Some("solid")
+    );
+}

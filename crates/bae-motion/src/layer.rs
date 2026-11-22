@@ -564,6 +564,129 @@ fn duplicate_layer_at(
     Ok(new_path)
 }
 
+/// A layer on the clipboard (Edit > Copy): where it was and everything it holds
+/// (properties, keyframes, effects, masks, contents), composed.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CopiedLayer {
+    pub path: PrimPath,
+    pub tree: bae_model::PrimTree,
+}
+
+/// The clipboard form of `layers` (top first), for [`PasteLayers`].
+pub fn copy_layers(stage: &Stage, layers: &[PrimPath]) -> Vec<CopiedLayer> {
+    let mut v: Vec<PrimPath> = layers.to_vec();
+    // Top first, as in the comp.
+    if let Some(folder) = v.first().and_then(PrimPath::parent) {
+        let order = stage.children(&folder);
+        v.sort_by_key(|l| order.iter().position(|o| o == l).unwrap_or(usize::MAX));
+    }
+    v.iter()
+        .map(|l| CopiedLayer {
+            path: l.clone(),
+            tree: composed_tree(stage, l),
+        })
+        .collect()
+}
+
+pub struct PasteLayers;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PasteLayersParams {
+    /// Comp to paste into (any comp, not only the one the layers came from).
+    pub comp: PrimPath,
+    /// The copied layers, top first (`copy_layers`).
+    pub layers: Vec<CopiedLayer>,
+    /// Paste directly above this layer of `comp`; default the top of the comp.
+    #[serde(default)]
+    pub above: Option<PrimPath>,
+}
+
+impl Command for PasteLayers {
+    type Params = PasteLayersParams;
+    type Output = LayersOutput;
+    const ID: &'static str = "layer.paste";
+    const TITLE: &'static str = "Paste";
+    const DESCRIPTION: &'static str = "Paste copied layers into a comp (above a layer, or on top), named like Duplicate; links between the pasted layers follow them, links to layers of another comp are dropped.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<LayersOutput, CommandError> {
+        tx.stage().require_prim(&p.comp)?;
+        let folder = query::layers_folder(&p.comp);
+        let start = match &p.above {
+            Some(above) => tx
+                .stage()
+                .sublayer(tx.target())
+                .and_then(|s| s.child_index(above))
+                .unwrap_or(0),
+            None => 0,
+        };
+        // New paths first, so links between the pasted layers can follow them.
+        let mut names: Vec<(PrimPath, String)> = Vec::new();
+        for c in &p.layers {
+            let stage = tx.stage();
+            let name = c
+                .tree
+                .spec
+                .attrs
+                .get("name")
+                .and_then(|a| a.value.as_ref())
+                .and_then(|v| match v {
+                    Value::String(s) => Some(s.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| c.path.name().to_owned());
+            let mut new_name = duplicate_name(stage, &folder, &name);
+            // Names already given in this paste count as taken.
+            while names.iter().any(|(_, n)| *n == new_name) {
+                new_name = format!("{new_name} 2");
+            }
+            let mut leaf = query::unique_child_name(stage, &folder, &new_name);
+            while names.iter().any(|(p, _)| p.name() == leaf) {
+                leaf = format!("{leaf}_2");
+            }
+            names.push((child(&folder, &leaf)?, new_name));
+        }
+        tx.ensure_spec(&folder)?;
+        let mut paths = Vec::new();
+        for (i, (c, (new_path, new_name))) in p.layers.iter().zip(&names).enumerate() {
+            let mut tree = c.tree.clone();
+            tree.name = new_path.name().to_owned();
+            for (other, (other_new, _)) in p.layers.iter().zip(&names) {
+                retarget_refs(&mut tree, &other.path, other_new);
+            }
+            if c.path.parent().as_ref() != Some(&folder) {
+                drop_refs_into(&mut tree, c.path.parent().as_ref());
+            }
+            tx.apply(Op::RestorePrim {
+                path: new_path.clone(),
+                tree,
+                index: Some(start + i),
+            })?;
+            set(tx, new_path, "name", Value::String(new_name.clone()))?;
+            paths.push(new_path.clone());
+        }
+        Ok(LayersOutput { paths })
+    }
+}
+
+/// Clears links into `folder` (the source comp's layers) that pasting into
+/// another comp would leave dangling (parent, track matte).
+fn drop_refs_into(tree: &mut bae_model::PrimTree, folder: Option<&PrimPath>) {
+    let Some(folder) = folder else {
+        return;
+    };
+    let inside = |v: &Value| matches!(v, Value::PrimRef(r) if r.reparent(folder, folder).is_some());
+    for a in tree.spec.attrs.values_mut() {
+        if a.value.as_ref().is_some_and(inside) {
+            a.value = None;
+        }
+    }
+    for c in &mut tree.children {
+        drop_refs_into(c, Some(folder));
+    }
+}
+
+// ---------------------------------------------------------------------------
+
 pub struct DuplicateLayers;
 
 #[derive(Deserialize, JsonSchema)]

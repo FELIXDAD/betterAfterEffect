@@ -1642,3 +1642,53 @@ fn split_layer_above_or_below() {
         assert_eq!(query::layer_timing(&fx.stage, &a).out_point, Time(SEC));
     }
 }
+
+/// `layer.paste` (Edit > Paste): copies of the copied layers with their keyframes,
+/// above a layer or on top, named like Duplicate, into the same or another comp,
+/// in one undo step; the copies work after the originals are deleted (Cut).
+#[test]
+fn paste_layers_same_and_other_comp() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let a = fx.layer(&comp, "solid", json!({}));
+    let b = fx.layer(&comp, "null", json!({}));
+    fx.run(
+        "attr.set_at",
+        json!({"path": a, "attr": "transform:opacity", "time": 0, "value": {"type": "float", "value": 50.0}}),
+    );
+    fx.run(
+        "attr.set_animated",
+        json!({"path": a, "attr": "transform:opacity", "animated": true, "time": 0}),
+    );
+    let copied = bae_motion::copy_layers(&fx.stage, std::slice::from_ref(&a));
+    // Same comp, above the null (top): Solid 1 → Solid 2.
+    let out = fx.run(
+        "layer.paste",
+        json!({"comp": comp, "layers": copied, "above": b}),
+    );
+    let pasted = p(out["paths"][0].as_str().unwrap());
+    let layers = query::comp_layers(&fx.stage, &comp);
+    assert_eq!(layers[0], pasted, "{layers:?}");
+    assert_eq!(query::display_name_of(&fx.stage, &pasted), "Solid 2");
+    assert_eq!(
+        query::attr_spec(&fx.stage, &pasted, "transform:opacity").map(|s| s.keyframes.len()),
+        query::attr_spec(&fx.stage, &a, "transform:opacity").map(|s| s.keyframes.len())
+    );
+    assert_eq!(fx.stage.undo_label(&fx.author), Some("Paste"));
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(
+        query::comp_layers(&fx.stage, &comp).len(),
+        2,
+        "one undo step"
+    );
+    // Cut: the original is gone, the clipboard still pastes, into another comp.
+    fx.run("layer.delete", json!({"layers": [a]}));
+    let other = fx.comp();
+    let out = fx.run("layer.paste", json!({"comp": other, "layers": copied}));
+    let pasted = p(out["paths"][0].as_str().unwrap());
+    assert_eq!(query::comp_layers(&fx.stage, &other), vec![pasted.clone()]);
+    assert_eq!(
+        query::layer_kind(&fx.stage, &pasted).as_deref(),
+        Some("solid")
+    );
+}
