@@ -36,6 +36,48 @@
         return item;
     }
 
+    // AE's ellipse handle factor (4/3 tan(pi/8)); vertices top, right, bottom, left.
+    var K = 0.5522847498307936;
+    function maskShape(md) {
+        var sh = new Shape();
+        var v, it, ot, n, q;
+        if (md.rect) {
+            q = md.rect;
+            v = [[q[0], q[1]], [q[2], q[1]], [q[2], q[3]], [q[0], q[3]]];
+            it = [[0, 0], [0, 0], [0, 0], [0, 0]];
+            ot = [[0, 0], [0, 0], [0, 0], [0, 0]];
+        } else if (md.ellipse) {
+            q = md.ellipse;
+            var cx = (q[0] + q[2]) / 2, cy = (q[1] + q[3]) / 2, rx = (q[2] - q[0]) / 2, ry = (q[3] - q[1]) / 2;
+            v = [[cx, q[1]], [q[2], cy], [cx, q[3]], [q[0], cy]];
+            it = [[-rx * K, 0], [0, -ry * K], [rx * K, 0], [0, ry * K]];
+            ot = [[rx * K, 0], [0, ry * K], [-rx * K, 0], [0, -ry * K]];
+        } else {
+            v = md.poly;
+            it = [];
+            ot = [];
+            for (n = 0; n < v.length; n++) { it.push([0, 0]); ot.push([0, 0]); }
+        }
+        sh.vertices = v;
+        sh.inTangents = it;
+        sh.outTangents = ot;
+        sh.closed = true;
+        return sh;
+    }
+    // Masks top first (Mask 1 = md[0]), in layer pixels (AE-CMP-036).
+    function addMasks(layer, masks) {
+        for (var mi = 0; mi < masks.length; mi++) {
+            var md = masks[mi];
+            var atom = layer.property("ADBE Mask Parade").addProperty("ADBE Mask Atom");
+            atom.property("ADBE Mask Shape").setValue(maskShape(md));
+            atom.maskMode = MaskMode[(md.mode || "add").toUpperCase()];
+            if (md.inverted) { atom.inverted = true; }
+            if (md.opacity !== undefined) { atom.property("ADBE Mask Opacity").setValue(md.opacity); }
+            if (md.feather) { atom.property("ADBE Mask Feather").setValue(md.feather); }
+            if (md.expansion) { atom.property("ADBE Mask Offset").setValue(md.expansion); }
+        }
+    }
+
     var comps = {};
     function build(c) {
         var comp = proj.items.addComp(c.name, c.size[0], c.size[1], 1.0, 1.0, 30);
@@ -63,6 +105,7 @@
             if (l.opacity !== undefined) { layer.property("ADBE Transform Group").property("ADBE Opacity").setValue(l.opacity); }
             if (l.mode) { layer.blendingMode = BlendingMode[l.mode.toUpperCase()]; }
             if (l.preserve) { layer.preserveTransparency = true; }
+            if (l.masks) { addMasks(layer, l.masks); }
         }
         for (i = 0; i < c.layers.length; i++) {
             l = c.layers[i];

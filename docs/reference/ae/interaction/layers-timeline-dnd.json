@@ -1,0 +1,5996 @@
+{
+  "schemaVersion": "1.0",
+  "source": {
+    "application": "Adobe After Effects 26.0 (26.0x67)",
+    "platform": "Windows 11 Pro x64 (3840x2160 @ 150% DPI)",
+    "locale": "zh_CN",
+    "testComp": {
+      "width": 1920,
+      "height": 1080,
+      "frameRate": 30,
+      "duration": 10
+    },
+    "method": "Live Win32 input + WM_COMMAND + ExtendScript comp state dump + MSAA modal dialog capture"
+  },
+  "summary": {
+    "totalMeasuredCases": 48,
+    "groups": [
+      "new_layers",
+      "layer_insertion",
+      "timeline_workarea",
+      "timeline_layer_bar",
+      "timeline_keyframes",
+      "drag_and_drop",
+      "effects_application"
+    ],
+    "keyRules": {
+      "newLayerTiming": "All 7 new layer types span full comp (inPoint=0, outPoint=comp.duration, startTime=0), regardless of current playhead time.",
+      "newLayerInsertionIndex": "0 selected -> index 1 (top); single L_k selected -> index k (directly above L_k); multi-select -> directly above topmost selected layer. Selection resets to ONLY the newly created layer.",
+      "nullLayerDefaults": "100x100 solid with anchorPoint=[0,0,0] (top-left, NOT [50,50]), position=compCenter, opacity=0, label=1.",
+      "adjustmentLayerDefaults": "comp-sized solid with anchorPoint=compCenter, position=compCenter, opacity=100, label=5.",
+      "cameraDefaults": "CameraLayer, label=4, POI/anchorPoint=compCenter, position=[cx, cy, -zoom] where zoom = comp.width * focalLength / filmSize; Depth of Field off (0), Blur Level 100.",
+      "lightDefaults": "LightLayer (default Spot), label=6, POI/anchorPoint=compCenter, position=[cx+80, cy-80, -666.66667], Intensity=100, Color=[1,1,1,1], ConeAngle=90, ConeFeather=50, Falloff=None(1), CastsShadows=0.",
+      "duplicateLayer": "Ctrl+D (cmd 196624) inserts duplicate directly ABOVE the original (at original index, shifting original down by 1) and selects only the new duplicate.",
+      "splitLayer": "Ctrl+Shift+D (cmd 196625) keeps lower/earlier half at original index+1 (outPoint=playhead, unselected) and places new upper/later half directly ABOVE at original index (inPoint=playhead, selected). Both halves retain ALL keyframes (including outside trimmed span) and ALL effects.",
+      "oneFrameInclusiveEndRule": "N (work area end), ']' (align layer out), and Alt+] (trim layer out) are ALL 1-frame inclusive: end = playhead + 1/fps so the frame at the playhead remains visible. B, '[', and Alt+[ align exactly to playhead.",
+      "trimCompToWorkArea": "Ctrl+Shift+X (cmd 327685) sets comp.duration = workAreaDuration, workAreaStart = 0, shifts every layer's startTime by -oldWorkAreaStart, and clamps inPoint/outPoint to [0, newDuration].",
+      "keyframeEasingDefaults": "Linear default temporal influence = 16.66667% (1/6). Easy Ease (F9) sets both sides to BEZIER {speed:0, influence:33.33333} (1/3). Shift+F9 affects in-side only; Ctrl+Shift+F9 affects out-side only. Ctrl+Alt+H sets outInterp=HOLD (inInterp unchanged).",
+      "keyframeAltTimeScaling": "Alt MUST be held BEFORE mouse-down on the first or last keyframe of a multi-keyframe selection to enter proportional time-scaling anchored at the opposite end; pressing Alt after drag start keeps rigid translation.",
+      "keyframeNudge": "Alt+Left/Right nudges selected keyframes by +/-1 frame; Alt+Shift+Left/Right nudges by +/-10 frames.",
+      "projectDragAndDrop": "Project -> Comp Viewer places layer(s) at exact drop coordinate (in comp space); Project -> Timeline always centers layer(s) at comp center [cx, cy] and inserts at the drop slot (empty/between/bottom). Multi-select preserves Project list order top-to-bottom and selects all dropped layers.",
+      "effectsStackOrder": "Applying an effect appends it to the BOTTOM of the layer's Effects stack (index 1 = first applied, index 2 = second applied) with enabled=true. Multi-layer selection applies the effect to every selected layer; 0 layers selected is a no-op."
+    }
+  },
+  "cases": [
+    {
+      "id": "new_layer_solid",
+      "group": "new_layers",
+      "description": "Layer > New > Solid (Ctrl+Y, cmd 11862018) on 1920x1080@30fps 10s comp at t=0",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 0,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "红色 纯色 1",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 1920,
+            "height": 1080,
+            "transform": {
+              "anchorPoint": [
+                960,
+                540,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              1,
+              0,
+              0
+            ]
+          }
+        ],
+        "dialogControls": [
+          {
+            "type": "label",
+            "name": "名称:"
+          },
+          {
+            "type": "edit",
+            "name": "名称:",
+            "defaultValue": "红色 纯色 1"
+          },
+          {
+            "type": "label",
+            "name": "宽度:"
+          },
+          {
+            "type": "spinbox",
+            "name": "LayoutSolidBase_width",
+            "defaultValue": "1920"
+          },
+          {
+            "type": "label",
+            "name": "高度:"
+          },
+          {
+            "type": "spinbox",
+            "name": "LayoutSolidBase_height",
+            "defaultValue": "1080"
+          },
+          {
+            "type": "checkbox",
+            "name": "将长宽比锁定为 16:9 (1.78)",
+            "checked": false
+          },
+          {
+            "type": "label",
+            "name": "单位:"
+          },
+          {
+            "type": "label",
+            "name": "像素长宽比:"
+          },
+          {
+            "type": "label",
+            "name": "宽度:"
+          },
+          {
+            "type": "label",
+            "name": "合成的 100.0%"
+          },
+          {
+            "type": "label",
+            "name": "高度:"
+          },
+          {
+            "type": "label",
+            "name": "合成的 100.0%"
+          },
+          {
+            "type": "label",
+            "name": "画面长宽比:"
+          },
+          {
+            "type": "label",
+            "name": "16:9 (1.78)"
+          },
+          {
+            "type": "button",
+            "name": "制作合成大小"
+          },
+          {
+            "type": "button",
+            "name": "UI_Button"
+          },
+          {
+            "type": "button",
+            "name": "LayoutSolidBase_ColorPickerControl_colorButton"
+          },
+          {
+            "type": "checkbox",
+            "name": "预览",
+            "checked": false
+          },
+          {
+            "type": "button",
+            "name": "确定"
+          },
+          {
+            "type": "button",
+            "name": "取消"
+          }
+        ]
+      }
+    },
+    {
+      "id": "new_layer_text",
+      "group": "new_layers",
+      "description": "Layer > New > Text (Ctrl+Alt+Shift+T, cmd 11862017) at t=0",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 0,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "<空文本图层>",
+            "matchName": "ADBE Text Layer",
+            "layerType": "TextLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 1920,
+            "height": 1080,
+            "transform": {
+              "anchorPoint": [
+                0,
+                0,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "new_layer_shape",
+      "group": "new_layers",
+      "description": "Layer > New > Shape Layer (cmd 11862022) at t=0",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 0,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "形状图层 1",
+            "matchName": "ADBE Vector Layer",
+            "layerType": "ShapeLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 8,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 1920,
+            "height": 1080,
+            "transform": {
+              "anchorPoint": [
+                0,
+                0,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "new_layer_null",
+      "group": "new_layers",
+      "description": "Layer > New > Null Object (Ctrl+Alt+Shift+Y, cmd 11862021) at t=0",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 0,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "空 1",
+            "matchName": "ADBE AV Layer",
+            "layerType": "NullLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 100,
+            "height": 100,
+            "transform": {
+              "anchorPoint": [
+                0,
+                0,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 0
+            },
+            "solidColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "new_layer_adjustment",
+      "group": "new_layers",
+      "description": "Layer > New > Adjustment Layer (Ctrl+Alt+Y, cmd 11862023) at t=0",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 0,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "调整图层 1",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AdjustmentLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 5,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 1920,
+            "height": 1080,
+            "transform": {
+              "anchorPoint": [
+                960,
+                540,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "new_layer_camera",
+      "group": "new_layers",
+      "description": "Layer > New > Camera (Ctrl+Alt+Shift+C, cmd 11862020) at t=0",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 0,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "摄像机 1",
+            "matchName": "ADBE Camera Layer",
+            "layerType": "CameraLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 4,
+            "threeDLayer": null,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": null,
+            "height": null,
+            "transform": {
+              "anchorPoint": [
+                960,
+                540,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                -3555.55556
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "cameraOptions": {
+              "ADBE Camera Zoom": 3555.55556,
+              "ADBE Camera Depth of Field": 0,
+              "ADBE Camera Focus Distance": 3555.55556,
+              "ADBE Camera Aperture": 25.30934,
+              "ADBE Camera Blur Level": 100,
+              "ADBE Iris Shape": 1,
+              "ADBE Iris Rotation": 0,
+              "ADBE Iris Roundness": 0,
+              "ADBE Iris Aspect Ratio": 1,
+              "ADBE Iris Diffraction Fringe": 0,
+              "ADBE Iris Highlight Gain": 0,
+              "ADBE Iris Highlight Threshold": 1,
+              "ADBE Iris Hightlight Saturation": 0
+            }
+          }
+        ],
+        "dialogControls": [
+          {
+            "type": "label",
+            "name": "名称:"
+          },
+          {
+            "type": "edit",
+            "name": "名称:",
+            "defaultValue": "摄像机 1"
+          },
+          {
+            "type": "label",
+            "name": "预设:"
+          },
+          {
+            "type": "button",
+            "name": "savePreset"
+          },
+          {
+            "type": "button",
+            "name": "deletePreset"
+          },
+          {
+            "type": "label",
+            "name": "缩放:"
+          },
+          {
+            "type": "spinbox",
+            "name": "zoom",
+            "defaultValue": "1254.32"
+          },
+          {
+            "type": "label",
+            "name": "胶片大小:"
+          },
+          {
+            "type": "spinbox",
+            "name": "filmSize",
+            "defaultValue": "36.00"
+          },
+          {
+            "type": "label",
+            "name": "视角:"
+          },
+          {
+            "type": "spinbox",
+            "name": "angleOfView",
+            "defaultValue": "30.22"
+          },
+          {
+            "type": "label",
+            "name": "合成大小"
+          },
+          {
+            "type": "label",
+            "name": "677.33 毫米"
+          },
+          {
+            "type": "label",
+            "name": "焦距:"
+          },
+          {
+            "type": "spinbox",
+            "name": "focalLength",
+            "defaultValue": "66.67"
+          },
+          {
+            "type": "checkbox",
+            "name": "启用景深",
+            "checked": false
+          },
+          {
+            "type": "label",
+            "name": "焦距:"
+          },
+          {
+            "type": "spinbox",
+            "name": "focusDistance",
+            "defaultValue": "1254.32"
+          },
+          {
+            "type": "checkbox",
+            "name": "锁定到缩放",
+            "checked": true
+          },
+          {
+            "type": "label",
+            "name": "光圈:"
+          },
+          {
+            "type": "spinbox",
+            "name": "aperture",
+            "defaultValue": "8.93"
+          },
+          {
+            "type": "label",
+            "name": "光圈大小:"
+          },
+          {
+            "type": "spinbox",
+            "name": "fStop",
+            "defaultValue": "7.5"
+          },
+          {
+            "type": "label",
+            "name": "模糊层次:"
+          },
+          {
+            "type": "spinbox",
+            "name": "blurLevel",
+            "defaultValue": "100.0"
+          },
+          {
+            "type": "label",
+            "name": "单位:"
+          },
+          {
+            "type": "label",
+            "name": "量度胶片大小:"
+          },
+          {
+            "type": "label",
+            "name": "类型:"
+          },
+          {
+            "type": "checkbox",
+            "name": "基于当前视图创建摄像机",
+            "checked": false
+          },
+          {
+            "type": "button",
+            "name": "确定"
+          },
+          {
+            "type": "button",
+            "name": "取消"
+          }
+        ]
+      }
+    },
+    {
+      "id": "new_layer_light",
+      "group": "new_layers",
+      "description": "Layer > New > Light (Ctrl+Alt+Shift+L, cmd 11862019) at t=0",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 0,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "聚光 1",
+            "matchName": "ADBE Light Layer",
+            "layerType": "LightLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 6,
+            "threeDLayer": null,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": null,
+            "height": null,
+            "transform": {
+              "anchorPoint": [
+                960,
+                540,
+                0
+              ],
+              "position": [
+                1040,
+                460,
+                -666.66667
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "lightType": "SPOT",
+            "lightOptions": {
+              "ADBE Light Env Atom": null,
+              "ADBE Light Backgd Visible": 0,
+              "ADBE Light Backgd Opacity": 100,
+              "ADBE Light Backgd Blur": 0,
+              "ADBE Light Intensity": 100,
+              "ADBE Light Color": [
+                1,
+                1,
+                1,
+                1
+              ],
+              "ADBE Light Cone Angle": 90,
+              "ADBE Light Cone Feather 2": 50,
+              "ADBE Light Falloff Type": 1,
+              "ADBE Light Falloff Start": 500,
+              "ADBE Light Falloff Distance": 500,
+              "ADBE Casts Shadows": 0,
+              "ADBE Light Shadow Darkness": 100,
+              "ADBE Light Shadow Diffusion": 0
+            }
+          }
+        ],
+        "dialogControls": [
+          {
+            "type": "label",
+            "name": "名称:"
+          },
+          {
+            "type": "edit",
+            "name": "名称:",
+            "defaultValue": "聚光 1"
+          },
+          {
+            "type": "label",
+            "name": "灯光类型:"
+          },
+          {
+            "type": "label",
+            "name": "颜色:"
+          },
+          {
+            "type": "button",
+            "name": "UI_Button"
+          },
+          {
+            "type": "button",
+            "name": "CPControlWithLabel_colorButton"
+          },
+          {
+            "type": "label",
+            "name": "强度:"
+          },
+          {
+            "type": "spinbox",
+            "name": "intensity",
+            "defaultValue": "100"
+          },
+          {
+            "type": "label",
+            "name": "锥形角度:"
+          },
+          {
+            "type": "spinbox",
+            "name": "coneAngle",
+            "defaultValue": "90"
+          },
+          {
+            "type": "label",
+            "name": "锥形羽化:"
+          },
+          {
+            "type": "spinbox",
+            "name": "coneFeather",
+            "defaultValue": "50"
+          },
+          {
+            "type": "label",
+            "name": "衰减:"
+          },
+          {
+            "type": "label",
+            "name": "半径:"
+          },
+          {
+            "type": "spinbox",
+            "name": "falloffStart",
+            "defaultValue": "500"
+          },
+          {
+            "type": "label",
+            "name": "衰减距离:"
+          },
+          {
+            "type": "spinbox",
+            "name": "falloffDistance",
+            "defaultValue": "500"
+          },
+          {
+            "type": "checkbox",
+            "name": "投影",
+            "checked": false
+          },
+          {
+            "type": "label",
+            "name": "阴影深度:"
+          },
+          {
+            "type": "spinbox",
+            "name": "shadowDarkness",
+            "defaultValue": "100"
+          },
+          {
+            "type": "label",
+            "name": "阴影扩散:"
+          },
+          {
+            "type": "spinbox",
+            "name": "shadowDiffusion",
+            "defaultValue": "0"
+          },
+          {
+            "type": "checkbox",
+            "name": "预览",
+            "checked": false
+          },
+          {
+            "type": "button",
+            "name": "确定"
+          },
+          {
+            "type": "button",
+            "name": "取消"
+          }
+        ]
+      }
+    },
+    {
+      "id": "new_layer_null_at_t2",
+      "group": "new_layers",
+      "description": "Layer > New > Null Object with playhead at t=2.0s (verifies full-comp span)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 2,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "空 2",
+            "matchName": "ADBE AV Layer",
+            "layerType": "NullLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 100,
+            "height": 100,
+            "transform": {
+              "anchorPoint": [
+                0,
+                0,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 0
+            },
+            "solidColor": [
+              1,
+              1,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "insert_null_none_sel",
+      "group": "layer_insertion",
+      "description": "4 solids [S1..S4], none selected: New Null -> inserted at L1 (top)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 0,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 5,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "空 3",
+            "matchName": "ADBE AV Layer",
+            "layerType": "NullLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 100,
+            "height": 100,
+            "transform": {
+              "anchorPoint": [
+                0,
+                0,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 0
+            },
+            "solidColor": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "index": 2,
+            "name": "S1",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.3,
+              0.5
+            ]
+          },
+          {
+            "index": 3,
+            "name": "S2",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.4,
+              0.3,
+              0.5
+            ]
+          },
+          {
+            "index": 4,
+            "name": "S3",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.6,
+              0.3,
+              0.5
+            ]
+          },
+          {
+            "index": 5,
+            "name": "S4",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.8,
+              0.3,
+              0.5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "insert_null_sel2",
+      "group": "layer_insertion",
+      "description": "4 solids [S1..S4], L2 (S2) selected: New Null -> inserted at L2 (above S2)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 0,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 5,
+          "selectedLayerIndices": [
+            2
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "S1",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.3,
+              0.5
+            ]
+          },
+          {
+            "index": 2,
+            "name": "空 8",
+            "matchName": "ADBE AV Layer",
+            "layerType": "NullLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 100,
+            "height": 100,
+            "transform": {
+              "anchorPoint": [
+                0,
+                0,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 0
+            },
+            "solidColor": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "index": 3,
+            "name": "S2",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.4,
+              0.3,
+              0.5
+            ]
+          },
+          {
+            "index": 4,
+            "name": "S3",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.6,
+              0.3,
+              0.5
+            ]
+          },
+          {
+            "index": 5,
+            "name": "S4",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.8,
+              0.3,
+              0.5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "insert_null_sel2_sel4",
+      "group": "layer_insertion",
+      "description": "4 solids [S1..S4], L2 & L4 selected: New Null -> inserted at L2 (above topmost selected)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 0,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 5,
+          "selectedLayerIndices": [
+            2
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "S1",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.3,
+              0.5
+            ]
+          },
+          {
+            "index": 2,
+            "name": "空 9",
+            "matchName": "ADBE AV Layer",
+            "layerType": "NullLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 100,
+            "height": 100,
+            "transform": {
+              "anchorPoint": [
+                0,
+                0,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 0
+            },
+            "solidColor": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "index": 3,
+            "name": "S2",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.4,
+              0.3,
+              0.5
+            ]
+          },
+          {
+            "index": 4,
+            "name": "S3",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.6,
+              0.3,
+              0.5
+            ]
+          },
+          {
+            "index": 5,
+            "name": "S4",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.8,
+              0.3,
+              0.5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "insert_shape_sel2",
+      "group": "layer_insertion",
+      "description": "4 solids [S1..S4], L2 (S2) selected: New Shape -> inserted at L2 (above S2)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 0,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 5,
+          "selectedLayerIndices": [
+            2
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "S1",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.3,
+              0.5
+            ]
+          },
+          {
+            "index": 2,
+            "name": "形状图层 1",
+            "matchName": "ADBE Vector Layer",
+            "layerType": "ShapeLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 8,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 1920,
+            "height": 1080,
+            "transform": {
+              "anchorPoint": [
+                0,
+                0,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            }
+          },
+          {
+            "index": 3,
+            "name": "S2",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.4,
+              0.3,
+              0.5
+            ]
+          },
+          {
+            "index": 4,
+            "name": "S3",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.6,
+              0.3,
+              0.5
+            ]
+          },
+          {
+            "index": 5,
+            "name": "S4",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.8,
+              0.3,
+              0.5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "layer_duplicate_ctrl_d_sel2",
+      "group": "layer_insertion",
+      "description": "4 solids [S1..S4], L2 (S2) selected: Edit > Duplicate (Ctrl+D, cmd 196624)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 0,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 5,
+          "selectedLayerIndices": [
+            2
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "S1",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.3,
+              0.5
+            ]
+          },
+          {
+            "index": 2,
+            "name": "S2",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.4,
+              0.3,
+              0.5
+            ]
+          },
+          {
+            "index": 3,
+            "name": "S2",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.4,
+              0.3,
+              0.5
+            ]
+          },
+          {
+            "index": 4,
+            "name": "S3",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.6,
+              0.3,
+              0.5
+            ]
+          },
+          {
+            "index": 5,
+            "name": "S4",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.8,
+              0.3,
+              0.5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "layer_split_ctrl_shift_d",
+      "group": "layer_insertion",
+      "description": "Solid with 2 keyframes (1s, 5s) + Gaussian Blur, playhead t=3.0s: Split Layer (Ctrl+Shift+D, cmd 196625)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 2,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "SplitLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 3,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                900.00777,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ],
+            "effects": [
+              {
+                "index": 1,
+                "name": "高斯模糊",
+                "matchName": "ADBE Gaussian Blur 2",
+                "enabled": true,
+                "selected": false
+              }
+            ],
+            "keys": {
+              "position": [
+                {
+                  "index": 1,
+                  "time": 1,
+                  "frame": 30,
+                  "value": [
+                    400,
+                    540,
+                    0
+                  ],
+                  "selected": false,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 250,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 2,
+                  "time": 5,
+                  "frame": 150,
+                  "value": [
+                    1400,
+                    540,
+                    0
+                  ],
+                  "selected": false,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 250,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "index": 2,
+            "name": "SplitLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 3,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                900.00777,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ],
+            "effects": [
+              {
+                "index": 1,
+                "name": "高斯模糊",
+                "matchName": "ADBE Gaussian Blur 2",
+                "enabled": true,
+                "selected": false
+              }
+            ],
+            "keys": {
+              "position": [
+                {
+                  "index": 1,
+                  "time": 1,
+                  "frame": 30,
+                  "value": [
+                    400,
+                    540,
+                    0
+                  ],
+                  "selected": false,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 250,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 2,
+                  "time": 5,
+                  "frame": 150,
+                  "value": [
+                    1400,
+                    540,
+                    0
+                  ],
+                  "selected": false,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 250,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "workarea_B_2s_N_5s",
+      "group": "timeline_workarea",
+      "description": "10s@30fps comp: B at t=2.0s, N at t=5.0s -> workArea=[2.0, 5.03333] (91f inclusive)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 5,
+          "workAreaStart": 2,
+          "workAreaDuration": 3.03333,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "TrimLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 2,
+            "outPoint": 6,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "workarea_trim_comp",
+      "group": "timeline_workarea",
+      "description": "After B=2.0s & N=5.0s: Trim Comp to Work Area (Ctrl+Shift+X, cmd 327685)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 3.03333,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 3.03333,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "TrimLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 3.03333,
+            "startTime": -2,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "layer_move_in_bracket",
+      "group": "timeline_layer_bar",
+      "description": "TrimLayer (in=2, out=6, st=0), playhead t=3.0s: '[' aligns inPoint to 3.0s",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "TrimLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 3,
+            "outPoint": 7,
+            "startTime": 1,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "layer_move_out_bracket",
+      "group": "timeline_layer_bar",
+      "description": "TrimLayer (in=2, out=6, st=0), playhead t=3.0s: ']' aligns outPoint to 3.03333s (1f inclusive)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "TrimLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": -0.96667,
+            "outPoint": 3.03333,
+            "startTime": -2.96667,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "layer_trim_in_alt_bracket",
+      "group": "timeline_layer_bar",
+      "description": "TrimLayer (in=2, out=6, st=0), playhead t=3.0s: Alt+[ trims inPoint to 3.0s",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "TrimLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 3,
+            "outPoint": 6,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "layer_trim_out_alt_bracket",
+      "group": "timeline_layer_bar",
+      "description": "TrimLayer (in=2, out=6, st=0), playhead t=3.0s: Alt+] trims outPoint to 3.03333s (1f inclusive)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "TrimLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 2,
+            "outPoint": 3.03333,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "layer_bar_drag_body_plus1_5s",
+      "group": "timeline_layer_bar",
+      "description": "TrimLayer (in=2, out=6, st=0): mouse drag bar body +1.5s",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "TrimLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 3.5,
+            "outPoint": 7.5,
+            "startTime": 1.5,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "layer_bar_drag_left_trim_to_3s",
+      "group": "timeline_layer_bar",
+      "description": "TrimLayer (in=2, out=6, st=0): mouse drag left edge 2.0s -> 3.0s",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "TrimLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 3,
+            "outPoint": 6,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "layer_bar_drag_right_trim_to_7_5s",
+      "group": "timeline_layer_bar",
+      "description": "TrimLayer (in=2, out=6, st=0): mouse drag right edge 6.0s -> 7.5s",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "TrimLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 2,
+            "outPoint": 7.5,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "layer_bar_shift_snap_to_playhead",
+      "group": "timeline_layer_bar",
+      "description": "TrimLayer (in=2, out=6, st=0), playhead t=3.0s: Shift-drag body near playhead -> inPoint snaps to 3.0s",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "TrimLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 3,
+            "outPoint": 7,
+            "startTime": 1,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "kf_easy_ease_f9",
+      "group": "timeline_keyframes",
+      "description": "3 Position keyframes [1s, 3s, 5s], middle selected: Easy Ease (F9, cmd 11075597)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "KfLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ],
+            "keys": {
+              "position": [
+                {
+                  "index": 1,
+                  "time": 1,
+                  "frame": 30,
+                  "value": [
+                    400,
+                    540,
+                    0
+                  ],
+                  "selected": false,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 2,
+                  "time": 3,
+                  "frame": 90,
+                  "value": [
+                    960,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "BEZIER",
+                  "outInterp": "BEZIER",
+                  "inEase": [
+                    {
+                      "speed": 0,
+                      "influence": 33.33333
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 0,
+                      "influence": 33.33333
+                    }
+                  ]
+                },
+                {
+                  "index": 3,
+                  "time": 5,
+                  "frame": 150,
+                  "value": [
+                    1520,
+                    540,
+                    0
+                  ],
+                  "selected": false,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "kf_easy_ease_in_shift_f9",
+      "group": "timeline_keyframes",
+      "description": "Middle keyframe selected: Easy Ease In (Shift+F9, cmd 11075595)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "KfLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ],
+            "keys": {
+              "position": [
+                {
+                  "index": 1,
+                  "time": 1,
+                  "frame": 30,
+                  "value": [
+                    400,
+                    540,
+                    0
+                  ],
+                  "selected": false,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 2,
+                  "time": 3,
+                  "frame": 90,
+                  "value": [
+                    960,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "BEZIER",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 0,
+                      "influence": 33.33333
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 3,
+                  "time": 5,
+                  "frame": 150,
+                  "value": [
+                    1520,
+                    540,
+                    0
+                  ],
+                  "selected": false,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "kf_easy_ease_out_ctrl_shift_f9",
+      "group": "timeline_keyframes",
+      "description": "Middle keyframe selected: Easy Ease Out (Ctrl+Shift+F9, cmd 11075596)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "KfLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ],
+            "keys": {
+              "position": [
+                {
+                  "index": 1,
+                  "time": 1,
+                  "frame": 30,
+                  "value": [
+                    400,
+                    540,
+                    0
+                  ],
+                  "selected": false,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 2,
+                  "time": 3,
+                  "frame": 90,
+                  "value": [
+                    960,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "BEZIER",
+                  "inEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 0,
+                      "influence": 33.33333
+                    }
+                  ]
+                },
+                {
+                  "index": 3,
+                  "time": 5,
+                  "frame": 150,
+                  "value": [
+                    1520,
+                    540,
+                    0
+                  ],
+                  "selected": false,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "kf_toggle_hold_ctrl_alt_h",
+      "group": "timeline_keyframes",
+      "description": "Middle keyframe selected: Toggle Hold Keyframe (Ctrl+Alt+H, cmd 851976)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "KfLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ],
+            "keys": {
+              "position": [
+                {
+                  "index": 1,
+                  "time": 1,
+                  "frame": 30,
+                  "value": [
+                    400,
+                    540,
+                    0
+                  ],
+                  "selected": false,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 2,
+                  "time": 3,
+                  "frame": 90,
+                  "value": [
+                    960,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "HOLD",
+                  "inEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 3,
+                  "time": 5,
+                  "frame": 150,
+                  "value": [
+                    1520,
+                    540,
+                    0
+                  ],
+                  "selected": false,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "kf_time_reverse",
+      "group": "timeline_keyframes",
+      "description": "All 3 keyframes selected: Time-Reverse Keyframes (cmd 11075592)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "KfLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ],
+            "keys": {
+              "position": [
+                {
+                  "index": 1,
+                  "time": 1,
+                  "frame": 30,
+                  "value": [
+                    1520,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 2,
+                  "time": 3,
+                  "frame": 90,
+                  "value": [
+                    960,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 3,
+                  "time": 5,
+                  "frame": 150,
+                  "value": [
+                    400,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "kf_nudge_alt_right_1f",
+      "group": "timeline_keyframes",
+      "description": "Middle keyframe @ 90f selected: Alt+Right nudges +1 frame -> 91f",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "KfLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                950.82008,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ],
+            "keys": {
+              "position": [
+                {
+                  "index": 1,
+                  "time": 1,
+                  "frame": 30,
+                  "value": [
+                    400,
+                    540,
+                    0
+                  ],
+                  "selected": false,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 275.40984,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 2,
+                  "time": 3.03333,
+                  "frame": 91,
+                  "value": [
+                    960,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 275.40984,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 284.74576,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 3,
+                  "time": 5,
+                  "frame": 150,
+                  "value": [
+                    1520,
+                    540,
+                    0
+                  ],
+                  "selected": false,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 284.74576,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "kf_nudge_alt_shift_right_10f",
+      "group": "timeline_keyframes",
+      "description": "After +1f nudge (@ 91f): Alt+Shift+Right nudges +10 frames -> 101f",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "KfLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                873.23954,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ],
+            "keys": {
+              "position": [
+                {
+                  "index": 1,
+                  "time": 1,
+                  "frame": 30,
+                  "value": [
+                    400,
+                    540,
+                    0
+                  ],
+                  "selected": false,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 236.61972,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 2,
+                  "time": 3.36667,
+                  "frame": 101,
+                  "value": [
+                    960,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 236.61972,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 342.85714,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 3,
+                  "time": 5,
+                  "frame": 150,
+                  "value": [
+                    1520,
+                    540,
+                    0
+                  ],
+                  "selected": false,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 342.85714,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "kf_drag_single_3s_to_4s",
+      "group": "timeline_keyframes",
+      "description": "Single keyframe drag from 3.0s (90f) -> 4.0s (120f)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "KfLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                773.3302,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ],
+            "keys": {
+              "position": [
+                {
+                  "index": 1,
+                  "time": 1,
+                  "frame": 30,
+                  "value": [
+                    400,
+                    540,
+                    0
+                  ],
+                  "selected": false,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 186.66667,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 2,
+                  "time": 4,
+                  "frame": 120,
+                  "value": [
+                    960,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 186.66667,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 560,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 3,
+                  "time": 5,
+                  "frame": 150,
+                  "value": [
+                    1520,
+                    540,
+                    0
+                  ],
+                  "selected": false,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 560,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "kf_shift_drag_snap_playhead",
+      "group": "timeline_keyframes",
+      "description": "Shift-drag keyframe from 3.0s near playhead t=4.0s (dropped at 3.96s) -> snaps to 4.0s (120f)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 4,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "KfLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ],
+            "keys": {
+              "position": [
+                {
+                  "index": 1,
+                  "time": 1,
+                  "frame": 30,
+                  "value": [
+                    400,
+                    540,
+                    0
+                  ],
+                  "selected": false,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 186.66667,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 2,
+                  "time": 4,
+                  "frame": 120,
+                  "value": [
+                    960,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 186.66667,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 560,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 3,
+                  "time": 5,
+                  "frame": 150,
+                  "value": [
+                    1520,
+                    540,
+                    0
+                  ],
+                  "selected": false,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 560,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "kf_marquee_select_3",
+      "group": "timeline_keyframes",
+      "description": "Marquee drag across Position row [0.5s..5.8s] -> selects all 3 keyframes [30f, 90f, 150f]",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "KfLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ],
+            "keys": {
+              "position": [
+                {
+                  "index": 1,
+                  "time": 1,
+                  "frame": 30,
+                  "value": [
+                    400,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 2,
+                  "time": 3,
+                  "frame": 90,
+                  "value": [
+                    960,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 3,
+                  "time": 5,
+                  "frame": 150,
+                  "value": [
+                    1520,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "kf_drag_all3_plain_plus2s",
+      "group": "timeline_keyframes",
+      "description": "All 3 keyframes [1s, 3s, 5s] selected: plain drag last keyframe 5s -> 7s shifts all rigidly to [3s, 5s, 7s]",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "KfLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                400,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ],
+            "keys": {
+              "position": [
+                {
+                  "index": 1,
+                  "time": 3,
+                  "frame": 90,
+                  "value": [
+                    400,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 2,
+                  "time": 5,
+                  "frame": 150,
+                  "value": [
+                    960,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 3,
+                  "time": 7,
+                  "frame": 210,
+                  "value": [
+                    1520,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "kf_alt_drag_before_down",
+      "group": "timeline_keyframes",
+      "description": "All 3 keyframes [1s, 3s, 5s] selected: Alt held BEFORE mouse-down dragging 5s -> 7s scales proportionally to [1s, 4s, 7s]",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "KfLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                773.3302,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ],
+            "keys": {
+              "position": [
+                {
+                  "index": 1,
+                  "time": 1,
+                  "frame": 30,
+                  "value": [
+                    400,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 186.66667,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 2,
+                  "time": 4,
+                  "frame": 120,
+                  "value": [
+                    960,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 186.66667,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 186.66667,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 3,
+                  "time": 7,
+                  "frame": 210,
+                  "value": [
+                    1520,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 186.66667,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "kf_alt_drag_after_down",
+      "group": "timeline_keyframes",
+      "description": "All 3 keyframes [1s, 3s, 5s] selected: Alt pressed AFTER mouse-down stays rigid shift [3s, 5s, 7s]",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "KfLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                400,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ],
+            "keys": {
+              "position": [
+                {
+                  "index": 1,
+                  "time": 3,
+                  "frame": 90,
+                  "value": [
+                    400,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 2,
+                  "time": 5,
+                  "frame": 150,
+                  "value": [
+                    960,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ]
+                },
+                {
+                  "index": 3,
+                  "time": 7,
+                  "frame": 210,
+                  "value": [
+                    1520,
+                    540,
+                    0
+                  ],
+                  "selected": true,
+                  "inInterp": "LINEAR",
+                  "outInterp": "LINEAR",
+                  "inEase": [
+                    {
+                      "speed": 280,
+                      "influence": 16.66667
+                    }
+                  ],
+                  "outEase": [
+                    {
+                      "speed": 0,
+                      "influence": 16.66667
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "dnd_project_to_viewer_at_500_400",
+      "group": "drag_and_drop",
+      "description": "Drag 01_DragA from Project -> Comp Viewer at (500, 400)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 0,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "01_DragA",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 300,
+            "height": 200,
+            "transform": {
+              "anchorPoint": [
+                150,
+                100,
+                0
+              ],
+              "position": [
+                500,
+                400,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.9,
+              0.2,
+              0.2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "dnd_project_to_viewer_shift_500_400",
+      "group": "drag_and_drop",
+      "description": "Shift-drag 01_DragA from Project -> Comp Viewer at (500, 400) (position stays at drop point)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 0,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "01_DragA",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 300,
+            "height": 200,
+            "transform": {
+              "anchorPoint": [
+                150,
+                100,
+                0
+              ],
+              "position": [
+                500,
+                400,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.9,
+              0.2,
+              0.2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "dnd_project_multi_to_viewer_500_400",
+      "group": "drag_and_drop",
+      "description": "Multi-select [01_DragA, 02_DragB] dragged from Project -> Comp Viewer at (500, 400)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 0,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 2,
+          "selectedLayerIndices": [
+            1,
+            2
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "01_DragA",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 300,
+            "height": 200,
+            "transform": {
+              "anchorPoint": [
+                150,
+                100,
+                0
+              ],
+              "position": [
+                500,
+                400,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.9,
+              0.2,
+              0.2
+            ]
+          },
+          {
+            "index": 2,
+            "name": "02_DragB",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 300,
+            "height": 200,
+            "transform": {
+              "anchorPoint": [
+                150,
+                100,
+                0
+              ],
+              "position": [
+                500,
+                400,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.9,
+              0.2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "dnd_project_to_timeline_empty",
+      "group": "drag_and_drop",
+      "description": "Drag 01_DragA from Project -> empty Timeline area (centered at [960, 540])",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 0,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "01_DragA",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 300,
+            "height": 200,
+            "transform": {
+              "anchorPoint": [
+                150,
+                100,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.9,
+              0.2,
+              0.2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "dnd_project_to_timeline_between_L1_L2",
+      "group": "drag_and_drop",
+      "description": "Drag 01_DragA from Project -> Timeline gap between L1 (Existing1) and L2 (Existing2)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 0,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 3,
+          "selectedLayerIndices": [
+            2
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "Existing1",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.6,
+              0.8
+            ]
+          },
+          {
+            "index": 2,
+            "name": "01_DragA",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 300,
+            "height": 200,
+            "transform": {
+              "anchorPoint": [
+                150,
+                100,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.9,
+              0.2,
+              0.2
+            ]
+          },
+          {
+            "index": 3,
+            "name": "Existing2",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.2,
+              0.8
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "dnd_project_to_timeline_bottom",
+      "group": "drag_and_drop",
+      "description": "Drag 01_DragA from Project -> Timeline below bottom layer (L2)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 0,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 3,
+          "selectedLayerIndices": [
+            3
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "Existing1",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.6,
+              0.8
+            ]
+          },
+          {
+            "index": 2,
+            "name": "Existing2",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.2,
+              0.8
+            ]
+          },
+          {
+            "index": 3,
+            "name": "01_DragA",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 300,
+            "height": 200,
+            "transform": {
+              "anchorPoint": [
+                150,
+                100,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.9,
+              0.2,
+              0.2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "dnd_project_multi_to_timeline",
+      "group": "drag_and_drop",
+      "description": "Multi-select [01_DragA, 02_DragB] dragged from Project -> Timeline",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 0,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 2,
+          "selectedLayerIndices": [
+            1,
+            2
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "01_DragA",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 300,
+            "height": 200,
+            "transform": {
+              "anchorPoint": [
+                150,
+                100,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.9,
+              0.2,
+              0.2
+            ]
+          },
+          {
+            "index": 2,
+            "name": "02_DragB",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 300,
+            "height": 200,
+            "transform": {
+              "anchorPoint": [
+                150,
+                100,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.9,
+              0.2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "effects_apply_first_gaussian_blur",
+      "group": "effects_application",
+      "description": "1 solid selected: apply Effect > Blur & Sharpen > Gaussian Blur (cmd 460652560)",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "TrimLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 2,
+            "outPoint": 6,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ],
+            "effects": [
+              {
+                "index": 1,
+                "name": "高斯模糊",
+                "matchName": "ADBE Gaussian Blur 2",
+                "enabled": true,
+                "selected": true
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "effects_apply_second_levels",
+      "group": "effects_application",
+      "description": "After Gaussian Blur: apply Effect > Color Correction > Levels (cmd 461307923) -> appended at index 2",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": [
+            1
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "TrimLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 2,
+            "outPoint": 6,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ],
+            "effects": [
+              {
+                "index": 1,
+                "name": "高斯模糊",
+                "matchName": "ADBE Gaussian Blur 2",
+                "enabled": true,
+                "selected": false
+              },
+              {
+                "index": 2,
+                "name": "色阶",
+                "matchName": "ADBE Easy Levels2",
+                "enabled": true,
+                "selected": true
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "effects_apply_multi_selected",
+      "group": "effects_application",
+      "description": "2 solids [Existing1, Existing2] selected: apply Gaussian Blur -> applied to both",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 0,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 2,
+          "selectedLayerIndices": [
+            1,
+            2
+          ]
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "Existing1",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.6,
+              0.8
+            ],
+            "effects": [
+              {
+                "index": 1,
+                "name": "高斯模糊",
+                "matchName": "ADBE Gaussian Blur 2",
+                "enabled": true,
+                "selected": true
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "name": "Existing2",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": true,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 0,
+            "outPoint": 10,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.2,
+              0.8
+            ],
+            "effects": [
+              {
+                "index": 1,
+                "name": "高斯模糊",
+                "matchName": "ADBE Gaussian Blur 2",
+                "enabled": true,
+                "selected": true
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "effects_apply_none_selected",
+      "group": "effects_application",
+      "description": "0 layers selected: apply Gaussian Blur -> no-op",
+      "measured": {
+        "comp": {
+          "width": 1920,
+          "height": 1080,
+          "frameRate": 30,
+          "duration": 10,
+          "time": 3,
+          "workAreaStart": 0,
+          "workAreaDuration": 10,
+          "numLayers": 1,
+          "selectedLayerIndices": []
+        },
+        "layers": [
+          {
+            "index": 1,
+            "name": "TrimLayer",
+            "matchName": "ADBE AV Layer",
+            "layerType": "AVLayer",
+            "selected": false,
+            "enabled": true,
+            "label": 1,
+            "threeDLayer": false,
+            "inPoint": 2,
+            "outPoint": 6,
+            "startTime": 0,
+            "width": 400,
+            "height": 300,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "orientation": [
+                0,
+                0,
+                0
+              ],
+              "opacity": 100
+            },
+            "solidColor": [
+              0.2,
+              0.5,
+              0.9
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

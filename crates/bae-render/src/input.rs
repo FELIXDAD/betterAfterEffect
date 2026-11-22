@@ -168,7 +168,7 @@ pub struct RenderLayer {
     pub active: bool,
     /// 调整图层 (reserved: not rendered yet).
     pub adjustment: bool,
-    /// Masks, top first (reserved: not rendered yet).
+    /// Masks, top first (applied to the source before effects, AE-CMP-038).
     pub masks: Vec<RenderMask>,
     /// Effects in stack order (applied through the effect registry).
     pub effects: Vec<RenderEffect>,
@@ -343,7 +343,7 @@ impl fmt::Debug for CustomContent {
     }
 }
 
-/// An evaluated mask (reserved: masks are not rendered yet).
+/// An evaluated mask (rendered by [`crate::mask`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct RenderMask {
     /// The `Mask` prim.
@@ -363,7 +363,7 @@ pub struct RenderMask {
 }
 
 impl RenderMask {
-    fn hash_into(&self, h: &mut impl Hasher) {
+    pub(crate) fn hash_into(&self, h: &mut impl Hasher) {
         self.path.hash(h);
         hash_bezier(&self.shape, h);
         self.mode.hash(h);
