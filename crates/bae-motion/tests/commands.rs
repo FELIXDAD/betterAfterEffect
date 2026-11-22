@@ -770,6 +770,63 @@ fn auto_bezier_is_recomputed_after_edits_and_moves() {
 }
 
 #[test]
+fn edit_keys_sets_spatial_interpolation_and_roving() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let solid = fx.layer(&comp, "solid", json!({}));
+    let attr = "transform:position";
+    fx.run(
+        "attr.set_animated",
+        json!({"path": solid, "attr": attr, "animated": true, "time": 0}),
+    );
+    for (t, x, y) in [(SEC, 100.0, 0.0), (2 * SEC, 100.0, 100.0)] {
+        fx.run(
+            "attr.set_at",
+            json!({"path": solid, "attr": attr, "time": t, "value": {"type": "vec3", "value": [x, y, 0.0]}}),
+        );
+    }
+    let flags = |fx: &Fx, t: i64| {
+        let spec = query::attr_spec(&fx.stage, &solid, attr).unwrap();
+        let k = &spec.keyframes[&Time(t)];
+        (
+            k.flags.spatial_continuous,
+            k.flags.spatial_auto_bezier,
+            k.flags.roving,
+            k.spatial_out,
+        )
+    };
+    // Spatial Auto Bezier: continuous too, tangents computed from the neighbours.
+    fx.run(
+        "key.edit",
+        json!({"edits": [{"key": key(&solid, attr, SEC), "spatial_auto_bezier": true}]}),
+    );
+    let (c, a, _, out) = flags(&fx, SEC);
+    assert!(c && a);
+    assert!(out.is_some_and(|t| t != [0.0; 3]), "{out:?}");
+    // Continuous Bezier: keeps the tangents, no longer automatic.
+    fx.run(
+        "key.edit",
+        json!({"edits": [{"key": key(&solid, attr, SEC), "spatial_auto_bezier": false, "spatial_continuous": true}]}),
+    );
+    let (c, a, _, kept) = flags(&fx, SEC);
+    assert!(c && !a);
+    assert_eq!(kept, out);
+    // Linear: zero tangents, neither flag; and Rove Across Time.
+    fx.run(
+        "key.edit",
+        json!({"edits": [{"key": key(&solid, attr, SEC), "spatial_in": [0.0, 0.0, 0.0], "spatial_out": [0.0, 0.0, 0.0], "spatial_continuous": false, "spatial_auto_bezier": false, "roving": true}]}),
+    );
+    let spec = query::attr_spec(&fx.stage, &solid, attr).unwrap();
+    let k = spec.keyframes.values().nth(1).unwrap();
+    assert!(!k.flags.spatial_continuous && !k.flags.spatial_auto_bezier && k.flags.roving);
+    assert_eq!(k.spatial_out, Some([0.0; 3]));
+    // Each edit is one undo step.
+    fx.stage.undo(&fx.author).unwrap();
+    let (c, a, r, _) = flags(&fx, SEC);
+    assert!(c && !a && !r);
+}
+
+#[test]
 fn separate_and_recombine_position() {
     let mut fx = Fx::new();
     let comp = fx.comp();

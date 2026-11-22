@@ -52,6 +52,13 @@ pub mod ids {
     pub const ADD_TO_RENDER_QUEUE: &str = "motion.add_to_render_queue";
     /// Toggle the Timeline between layer bars and the Graph Editor (AE Shift+F3).
     pub const GRAPH_EDITOR: &str = "motion.timeline.graph_editor";
+    /// Animation > Keyframe Interpolation… (AE Cmd/Ctrl+Alt+K).
+    pub const KEY_INTERPOLATION: &str = "motion.anim.keyframe_interpolation";
+    /// Animation > Keyframe Velocity… (AE Cmd/Ctrl+Shift+K).
+    pub const KEY_VELOCITY: &str = "motion.anim.keyframe_velocity";
+    /// Edit > Select Keyframe Label Group ▸ (params `{"scope": "selected_layers" |
+    /// "all_layers" | "visible_selected_layers" | "visible_all_layers"}`).
+    pub const SELECT_KEY_LABEL_GROUP: &str = "motion.edit.select_keyframe_label_group";
     /// Shell clipboard actions (Cmd+C / Cmd+V outside text fields).
     pub const COPY: &str = "edit.copy";
     pub const PASTE: &str = "edit.paste";
@@ -89,6 +96,9 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::TRIM_COMP, "Trim Comp to Work Area"),
     (ids::ADD_TO_RENDER_QUEUE, "Add to Render Queue"),
     (ids::GRAPH_EDITOR, "Graph Editor"),
+    (ids::KEY_INTERPOLATION, "Keyframe Interpolation"),
+    (ids::KEY_VELOCITY, "Keyframe Velocity"),
+    (ids::SELECT_KEY_LABEL_GROUP, "Select Keyframe Label Group"),
     // Panel-scoped (`bindings`): handled by the timeline and the viewer. Registered
     // so the Keyboard Shortcuts window shows a name, not the id (#136).
     ("timeline.zoom_in", "Zoom In Time"),
@@ -231,6 +241,8 @@ pub fn bindings() -> KeymapBindings {
         b("Cmd+Shift+X", ids::TRIM_COMP),
         b("Cmd+M", ids::ADD_TO_RENDER_QUEUE),
         b("Shift+F3", ids::GRAPH_EDITOR),
+        b("Cmd+Alt+K", ids::KEY_INTERPOLATION),
+        b("Cmd+Shift+K", ids::KEY_VELOCITY),
         layer("Cmd+Y", "solid"),
         layer("Cmd+Alt+Y", "adjustment"),
         layer("Cmd+Alt+Shift+Y", "null"),
@@ -489,6 +501,42 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 "key.set_interpolation",
                 json!({"keys": keys, "interp_out": to}),
             );
+        }
+        ids::SELECT_KEY_LABEL_GROUP if !keys.is_empty() => {
+            // The labels of the selected keyframes, on the selected layers or all.
+            let mut labels: Vec<u8> = keys
+                .iter()
+                .filter_map(|k| {
+                    query::attr_spec(stage, &k.path, &k.attr)
+                        .and_then(|a| a.keyframes.get(&k.time))
+                        .map(|kf| kf.label)
+                })
+                .filter(|l| *l != 0)
+                .collect();
+            labels.sort_unstable();
+            labels.dedup();
+            let scope = inv
+                .params
+                .get("scope")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let on: Vec<PrimPath> = if scope.ends_with("all_layers") {
+                query::comp_layers(stage, &info.path)
+            } else {
+                layers.clone()
+            };
+            if !labels.is_empty() {
+                s.selected_keys = crate::timeline::keys_with_labels(stage, &on, &labels);
+            }
+        }
+        ids::KEY_INTERPOLATION if !keys.is_empty() => {
+            s.key_dialog = Some(crate::timeline::KeyDialog::Interpolation(
+                crate::timeline::InterpolationDialog::new(keys),
+            ));
+        }
+        ids::KEY_VELOCITY if !keys.is_empty() => {
+            s.key_dialog = crate::timeline::VelocityDialog::new(stage, keys)
+                .map(crate::timeline::KeyDialog::Velocity);
         }
         ids::REVERSE_KEYS if keys.len() > 1 => {
             cx.invoke_with("key.reverse", json!({"keys": keys}));

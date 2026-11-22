@@ -25,12 +25,16 @@ impl Harness {
         bae_motion::register_commands(&mut reg);
         let mut resources = Resources::new();
         resources.insert(SharedSession::default());
+        // BAE ships no bundled fonts (#149): without the system UI fonts text has no
+        // glyphs and text fields lose their selection.
+        let ctx = egui::Context::default();
+        bae_ui::theme::install_fonts(&ctx);
         Harness {
             stage: Stage::new(),
             reg,
             author: AuthorId::new("user:test").unwrap(),
             resources,
-            ctx: egui::Context::default(),
+            ctx,
         }
     }
 

@@ -287,6 +287,21 @@ const ZH: &[(&str, &str)] = &[
     ("OK", "确定"),
     ("Cancel", "取消"),
     ("Language", "语言"),
+    // Color Picker (`color_picker`); AE's picker labels H/S/B/R/G/B by letter,
+    // the full names are for screen readers.
+    ("Color Field", "颜色场"),
+    ("Color Slider", "颜色滑块"),
+    ("Original Color", "原始颜色"),
+    ("Hex Color", "十六进制颜色"),
+    ("Eyedropper", "吸管"),
+    ("Only Web Colors", "仅限 Web 颜色"),
+    ("Hue", "色相"),
+    ("Saturation", "饱和度"),
+    ("Brightness", "亮度"),
+    ("Red", "红色"),
+    ("Green", "绿色"),
+    ("Blue", "蓝色"),
+    ("Value", "值"),
 ];
 
 #[cfg(test)]
