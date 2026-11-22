@@ -184,7 +184,7 @@ B1 导出（release，`bae render B1.bae --comp b1 --depth 8 --resolution full -
 
 - `apps/bae/src/acceptance/`（只在 macOS 上编译）：
   - `mod.rs`：没有窗口的 shell 和输入工具
-  - `startup.rs`、`layers.rs`、`timeline.rs`、`files_flow.rs`、`render_queue.rs`、`menus.rs`、`stress.rs`
+  - `startup.rs`、`layers.rs`、`timeline.rs`、`files_flow.rs`、`render_queue.rs`、`menus.rs`、`stress.rs`、`i18n_retest.rs`（#152 复测）
 - `apps/bae/tests/acceptance_cli.rs`：真实可执行文件
 - 新增依赖：`egui_kittest`（工作区里已经声明，0.36.2，default-features = false），只作为 `apps/bae` 的 dev-dependency，release 体积不变
 - 唯一改到的非测试文件：`apps/bae/src/main.rs` 加了一行 `#[cfg(all(test, target_os = "macos"))] mod acceptance;`，测试模块只能这样接进 bin crate
@@ -338,3 +338,21 @@ release 体积：24,072,784 B（+287,248 B，来自 accesskit 适配器），mac
   - 渲染完成的等待（`wait_done`、进度观察、停止前等出够 20 帧、“在访达中显示”等假 `open` 的记录）本来就是按条件等，上限从 30 / 60 秒统一放宽到 120 秒（CI 上多个用例并行共用 GPU）。
   - 真实 `bae` 进程（`acceptance_cli.rs` 的 28 处）、`bae mcp` 的每条回复、子进程里重跑的用例（`in_child`）：原来没有上限，卡住的话要等 CI 的 90 分钟才失败。现在都是 600 秒，到时间杀掉进程，失败信息里写明是哪条命令。
   - 其余固定次数的循环（`settle`、`pause`、连按 PageDown 等）都是同步的界面输入，用的是模拟时间，不依赖机器快慢，不用改。只在手动跑的满盘用例里用到的 `hdiutil` / `diskutil` 也没改。
+
+### dev `8fb98fe`（#153）：#152 中文界面残留
+
+#153 新增的测试都通过（`i18n_scan::chinese_ui_has_no_english_words`、`bae-motion` 的 `names_zh`、`bae-ui` 的 `a11y`）。另外写了一组不依赖 #153 那个扫描的复测（`acceptance::i18n_retest`，以及 `acceptance_cli.rs` 的 `mcp_names_new_items_in_the_language_of_its_environment`）：
+
+- **中文界面新建的东西是中文名**（`BAE_LANG=zh`，子进程）：Cmd+N 两次得到“合成 1”“合成 2”；图层 ▸ 新建 的 9 项依次是 形状图层 1 / 2 / 3、纯色 1、空 1、文本、调整图层 1、摄像机 1、灯光 1。默认文件夹显示为 合成 / 素材 / 纯色。矩形图层里是 矩形 1 / 矩形路径 1 / 填充 1，椭圆是 椭圆 1 / 椭圆路径 1 / 填充 1，它们的路径仍然是英文段（`contents/Rectangle_1/contents/Fill_1`）。第二个合成里的图层从“形状图层 1”重新编号（和 AE 一样按合成编号）。窗口标题“BAE - 未命名项目”，另存为建议的文件名“未命名项目.bae”。
+- **时间轴画出来的也是这些名字**：把时间轴里所有图层和属性组（内容、矩形 1、矩形路径 1、填充 1、变换……）逐行展开，画出的行里有 形状图层 1、矩形 1、矩形路径 1、填充 1、椭圆 1、椭圆路径 1。#153 的扫描只点“展开”，不会展开属性组，所以没看到这些行；这次补上了。
+- **#152 列的其余几处**：快捷键对话框里每行的作用范围都是中文（合成、时间轴），没有 composition / timeline；无障碍树里关闭按钮是“关闭窗口”，没有“Close window”（快捷键对话框和关于窗口都看了）；状态栏显示“Apple M4 (Metal, 集成显卡)”和“帧 … 毫秒”；关于窗口里是“调试版”和“许可证：Apache-2.0”。
+- **画出来的文字也扫了一遍**：#153 的扫描只看无障碍树，面板自己画、没有无障碍节点的文字（时间轴的行、帧速率、项目面板的列）看不到。这次在开始、两个展开的合成、渲染队列、快捷键、关于这几步，把画出来的文字和无障碍树一起扫：中文界面下除了白名单，没有英文单词；英文界面下没有中文字符。扫出来的只有时间轴的“00000 (30.00 fps)”：AE 官方中文也写 fps（`docs/reference/ae/preferences.json` 的合成预设“社交媒体纵向 HD • 1080x1920 • 30 fps”），按约定加进了 `i18n_scan.rs` 的白名单。渲染输出路径里的 Users、Movies 是文件系统的路径，不算界面文字。
+- **英文界面**（`BAE_LANG=en`）：Comp 1 / 2，Shape Layer 1 / 2 / 3、Solid 1、Null 1、Text、Adjustment Layer 1、Camera 1、Light 1，Rectangle 1 / Rectangle Path 1 / Fill 1；作用范围 Composition、Timeline；“Close Window”；“License: Apache-2.0”；“Integrated GPU”“frame … ms”；建议的文件名“Untitled Project.bae”。默认文件夹是路径名 comps / assets / solids（英文 AE 没有默认的“合成”文件夹，素材文件夹叫 Solids，这里不算 #152 的问题）。
+- **切换语言不改名**：中文会话新建并保存（带空格和中文的路径），英文会话打开后所有名字不变，再新建的合成和图层是“Comp 1”“Shape Layer 1”，保存；中文会话再打开，中英文的名字都不变，再新建的合成是“合成 2”（只按同名的“合成 N”编号）。
+- **命令行和 MCP**：`bae mcp` 新建合成和矩形图层时不给名字，名字跟着进程的语言走：`BAE_LANG=zh`、`BAE_LANG=zh-CN`、`LANG=zh_CN.UTF-8`、`LC_ALL=zh_CN.UTF-8`（`LANG` 是英文）都是中文；`BAE_LANG=en`（`LC_ALL` 是中文）和完全没有语言变量都是英文。中文工程用英文的 `bae mcp` 打开，名字不变、新建的是英文名；`bae export-json` 在中英文下输出的字节完全相同。
+- **真实程序**：用 `bae mcp`（`BAE_LANG=zh`）做了一个带纯色、矩形、椭圆的工程，再用 `bae --headless --smoke-test 5` 分别在中英文下截图。中文截图里项目面板、时间轴、状态栏都是中文，系统字体显示正常，没有缺字；英文截图界面是英文，工程里的中文名字不变。
+- **观察（不阻塞，没开 issue）**：界面语言只看 `BAE_LANG` / `LC_ALL` / `LC_MESSAGES` / `LANG`。从访达或开始菜单启动时这些变量都没有，所以系统语言是中文的电脑上默认也是英文界面。Windows 验收在 #136 里记过同样的情况，macOS 也一样。另外 `zh_TW`、`zh-Hant` 也会被当成简体中文。
+
+- **合进 dev 5bac4f2 之后**（#161 首选项、#165 图表编辑器等）：时间轴的属性行现在可以选中，无障碍上和属性组一样是“图层 1“名称” · 位置”这样的开关按钮，图层的“内容”和形状组里的“内容”也同名。展开时间轴改成按无障碍节点 id 每行点一次。扫描多扫出一处：字符面板的字号“72 px”。AE 官方中文的像素单位是“像素”（`docs/reference/ae/layers/text.json` 的 `unitsText`），算残留，提了 **#197**（bug；图表编辑器的“px”“px/秒”是同一个问题，从代码看到）。用例里暂时只放行 `px` 这个词并写明 #197，其余照常检查。
+
+**#152 已关闭**（Windows 的部分并入最终回归）。快捷键对话框里显示内部命令 ID 的问题，09fe9cc0 那组的 B 在改，不算 #152。
