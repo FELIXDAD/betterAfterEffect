@@ -1,6 +1,11 @@
 //! Keyframe commands: the stopwatch (`attr.set_animated`), value edits at a time
-//! (`attr.set_at`) and AE's keyframe assistants (`key.ease`, `key.set_interpolation`,
-//! `key.move`, `key.delete`, `key.reverse`, `key.paste`).
+//! (`attr.set_at`), AE's keyframe assistants (`key.ease`, `key.set_interpolation`,
+//! `key.move`, `key.delete`, `key.reverse`, `key.paste`) and free keyframe edits
+//! (`key.edit`: the Graph Editor, keyframe dialogs).
+//!
+//! Commands that change keyframe times or values recompute AE's automatic values
+//! afterwards (temporal / spatial auto-Bezier, roving key times; see
+//! [`bae_anim::edit`]), so the stored keyframes stay what AE would store.
 //!
 //! **Time base.** Keyframe times are the times stored in the model: layer time for
 //! layer attributes and the prims below a layer, comp time for comp attributes
@@ -87,6 +92,22 @@ fn animated_spec(
         }
     }
     Ok(spec)
+}
+
+/// Recompute AE's automatic keyframe values of `attr` (auto-Bezier eases and
+/// tangents, roving times) after its keyframes changed.
+pub(crate) fn refresh_auto(attr: &str, spec: &mut AttrSpec) {
+    if spec.keyframes.len() < 2 {
+        return;
+    }
+    let auto = spec
+        .keyframes
+        .values()
+        .any(|k| k.flags.temporal_auto_bezier || k.flags.spatial_auto_bezier || k.flags.roving);
+    if auto {
+        let kind = bae_anim::schema::curve_kind(attr, spec);
+        spec.keyframes = bae_anim::edit::update_auto_values(&spec.keyframes, kind);
+    }
 }
 
 fn check_value(
@@ -182,6 +203,7 @@ impl Command for SetAt {
         } else {
             spec.value = Some(p.value);
         }
+        refresh_auto(&p.attr, &mut spec);
         write_attr(tx, &p.path, &p.attr, spec)
     }
 }
@@ -389,6 +411,7 @@ impl Command for MoveKeys {
                 spec.keyframes.insert(nt, k);
                 out.keys.push(KeyRef::new(path.clone(), attr.clone(), nt));
             }
+            refresh_auto(&attr, &mut spec);
             write_attr(tx, &path, &attr, spec)?;
         }
         Ok(out)
@@ -422,6 +445,7 @@ impl Command for DeleteKeys {
             if spec.keyframes.is_empty() && spec.value.is_none() {
                 spec.value = last;
             }
+            refresh_auto(&attr, &mut spec);
             write_attr(tx, &path, &attr, spec)?;
         }
         Ok(())
@@ -469,6 +493,7 @@ impl Command for ReverseKeys {
                 spec.keyframes.insert(nt, k);
                 out.keys.push(KeyRef::new(path.clone(), attr.clone(), nt));
             }
+            refresh_auto(&attr, &mut spec);
             write_attr(tx, &path, &attr, spec)?;
         }
         Ok(out)
@@ -521,7 +546,212 @@ impl Command for PasteKeys {
                 .push(KeyRef::new(p.path.clone(), p.attr.clone(), t));
         }
         spec.keyframes.extend(added);
+        refresh_auto(&p.attr, &mut spec);
         write_attr(tx, &p.path, &p.attr, spec)?;
         Ok(out)
     }
+}
+
+// ---------------------------------------------------------------------------
+
+pub struct EditKeys;
+
+/// One keyframe change of `key.edit`. Omitted fields keep their current value.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct KeyEdit {
+    /// The keyframe: its attribute and current time.
+    pub key: KeyRef,
+    /// New keyframe time in flicks (layer time for layer attributes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time: Option<Time>,
+    /// New value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<Value>,
+    /// Incoming temporal interpolation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interp_in: Option<Interpolation>,
+    /// Outgoing temporal interpolation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interp_out: Option<Interpolation>,
+    /// Incoming temporal ease (speed in units per second, influence in percent), one
+    /// entry per dimension (one entry for spatial properties such as Position).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ease_in: Option<Vec<Ease>>,
+    /// Outgoing temporal ease.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ease_out: Option<Vec<Ease>>,
+    /// Temporal continuous: the incoming and outgoing handles stay joined.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continuous: Option<bool>,
+    /// Temporal auto-Bezier: AE computes the eases from the neighbouring keyframes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_bezier: Option<bool>,
+    /// Spatial tangents (Position-like properties), relative to the value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spatial_in: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spatial_out: Option<[f64; 3]>,
+    /// Rove across time (spatial properties; not the first or last keyframe).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roving: Option<bool>,
+}
+
+impl KeyEdit {
+    /// An edit of `key` that changes nothing yet.
+    pub fn new(key: KeyRef) -> Self {
+        KeyEdit {
+            key,
+            time: None,
+            value: None,
+            interp_in: None,
+            interp_out: None,
+            ease_in: None,
+            ease_out: None,
+            continuous: None,
+            auto_bezier: None,
+            spatial_in: None,
+            spatial_out: None,
+            roving: None,
+        }
+    }
+
+    fn apply(&self, k: &mut Keyframe, dims: usize) {
+        if let Some(v) = &self.value {
+            k.value = v.clone();
+        }
+        if let Some(i) = self.interp_in {
+            k.interp_in = i;
+        }
+        if let Some(o) = self.interp_out {
+            k.interp_out = o;
+        }
+        let clamp = |e: &[Ease]| -> Vec<Ease> {
+            e.iter()
+                .map(|e| Ease {
+                    speed: if e.speed.is_finite() { e.speed } else { 0.0 },
+                    influence: e.influence.clamp(0.1, 100.0),
+                })
+                .collect()
+        };
+        let eased = self.ease_in.is_some() || self.ease_out.is_some();
+        if let Some(e) = &self.ease_in {
+            k.ease_in = clamp(e);
+        }
+        if let Some(e) = &self.ease_out {
+            k.ease_out = clamp(e);
+        }
+        // Editing an automatic ease by hand makes it a plain (continuous) Bezier, as
+        // dragging an auto-Bezier handle does in AE.
+        if eased && self.auto_bezier.is_none() && k.flags.temporal_auto_bezier {
+            k.flags.temporal_auto_bezier = false;
+            k.flags.temporal_continuous = true;
+        }
+        if let Some(c) = self.continuous {
+            k.flags.temporal_continuous = c;
+        }
+        match self.auto_bezier {
+            Some(true) => {
+                k.interp_in = Interpolation::Bezier;
+                k.interp_out = Interpolation::Bezier;
+                k.flags.temporal_auto_bezier = true;
+                k.flags.temporal_continuous = true;
+            }
+            Some(false) => k.flags.temporal_auto_bezier = false,
+            None => {}
+        }
+        if k.interp_in == Interpolation::Bezier && k.ease_in.is_empty() {
+            k.ease_in = vec![Ease::default(); dims];
+        }
+        if k.interp_out == Interpolation::Bezier && k.ease_out.is_empty() {
+            k.ease_out = vec![Ease::default(); dims];
+        }
+        if let Some(t) = self.spatial_in {
+            k.spatial_in = Some(t);
+            k.flags.spatial_auto_bezier = false;
+        }
+        if let Some(t) = self.spatial_out {
+            k.spatial_out = Some(t);
+            k.flags.spatial_auto_bezier = false;
+        }
+        if let Some(r) = self.roving {
+            k.flags.roving = r;
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct EditKeysParams {
+    pub edits: Vec<KeyEdit>,
+}
+
+impl Command for EditKeys {
+    type Params = EditKeysParams;
+    type Output = KeysOutput;
+    const ID: &'static str = "key.edit";
+    const TITLE: &'static str = "Edit Keyframes";
+    const DESCRIPTION: &'static str = "Change keyframes' times, values, temporal interpolation, ease (speed and influence per dimension), continuity, auto-Bezier, spatial tangents or roving in one undo step (Graph Editor drags, keyframe dialogs). Keyframes moved onto other keyframes replace them. Returns the keyframes' new references, in input order.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<KeysOutput, CommandError> {
+        ensure_unlocked(tx.stage(), p.edits.iter().map(|e| &e.key.path))?;
+        let refs: Vec<KeyRef> = p.edits.iter().map(|e| e.key.clone()).collect();
+        let mut out = KeysOutput { keys: refs.clone() };
+        for ((path, attr), times) in group(&refs) {
+            let spec = animated_spec(tx, &path, &attr, &times)?;
+            let mine: Vec<(usize, &KeyEdit)> = p
+                .edits
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| e.key.path == path && e.key.attr == attr)
+                .collect();
+            for (_, e) in &mine {
+                if let Some(v) = &e.value {
+                    check_value(tx, &path, &attr, v)?;
+                }
+            }
+            let edits: Vec<&KeyEdit> = mine.iter().map(|(_, e)| *e).collect();
+            let (spec, times) = apply_key_edits(&attr, &spec, &edits);
+            for ((i, _), t) in mine.iter().zip(times) {
+                out.keys[*i].time = t;
+            }
+            write_attr(tx, &path, &attr, spec)?;
+        }
+        Ok(out)
+    }
+}
+
+/// Apply `edits` to `spec`, the keyframes of `attr`, as `key.edit` does (without
+/// checking values), and recompute AE's automatic values. The Graph Editor previews
+/// drags with it, so the preview is exactly what the command will store. Edits whose
+/// keyframe does not exist are ignored. Returns the new keyframes and each edit's new
+/// keyframe time.
+pub fn apply_key_edits(attr: &str, spec: &AttrSpec, edits: &[&KeyEdit]) -> (AttrSpec, Vec<Time>) {
+    let mut out = spec.clone();
+    let mut times: Vec<Time> = edits.iter().map(|e| e.key.time).collect();
+    // Take every edited keyframe out first, so keyframes can swap places.
+    let mut taken: Vec<(Time, Keyframe, Vec<usize>)> = Vec::new();
+    for (i, e) in edits.iter().enumerate() {
+        match taken.iter_mut().find(|(t, _, _)| *t == e.key.time) {
+            Some(entry) => entry.2.push(i),
+            None => {
+                if let Some(k) = out.keyframes.remove(&e.key.time) {
+                    taken.push((e.key.time, k, vec![i]));
+                }
+            }
+        }
+    }
+    for (t, mut k, indices) in taken {
+        let mut nt = t;
+        for i in &indices {
+            let e = edits[*i];
+            let dims = query::ease_dimensions(attr, spec, &k.value);
+            e.apply(&mut k, dims);
+            nt = e.time.unwrap_or(nt);
+        }
+        for i in indices {
+            times[i] = nt;
+        }
+        out.keyframes.insert(nt, k);
+    }
+    refresh_auto(attr, &mut out);
+    (out, times)
 }
