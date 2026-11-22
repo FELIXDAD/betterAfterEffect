@@ -57,6 +57,8 @@ pub enum Icon {
     InterpretFootage,
     Send,
     Trash,
+    /// Save (a floppy disk), e.g. Save Preset in Composition Settings.
+    Save,
     // Tools
     Home,
     Selection,
@@ -174,6 +176,7 @@ impl Icon {
         Icon::InterpretFootage,
         Icon::Send,
         Icon::Trash,
+        Icon::Save,
         Icon::Home,
         Icon::Selection,
         Icon::Hand,
@@ -532,6 +535,17 @@ fn draw(g: &Pen<'_>, icon: Icon) {
             for x in [6.5, 9.5] {
                 g.line(&[(x, 6.5), (x, 11.5)]);
             }
+        }
+        Icon::Save => {
+            g.closed(&[
+                (2.5, 2.5),
+                (11.5, 2.5),
+                (13.5, 4.5),
+                (13.5, 13.5),
+                (2.5, 13.5),
+            ]);
+            g.rect_fill(5.0, 2.5, 10.5, 6.0, 0.0);
+            g.rect(4.5, 8.5, 11.5, 13.5, 0.0);
         }
         Icon::Home => {
             g.fill(&[(1.5, 8.0), (8.0, 1.8), (14.5, 8.0)]);

@@ -501,13 +501,14 @@ fn delete_and_batch_edits() {
         Some(Value::Float(10.0))
     );
     fx.stage.undo(&fx.author).unwrap();
+    // Both are nulls: AE 26 makes nulls at 0% opacity.
     assert_eq!(
         fx.value(&parent, "transform:opacity"),
-        Some(Value::Float(100.0))
+        Some(Value::Float(0.0))
     );
     assert_eq!(
         fx.value(&child, "transform:opacity"),
-        Some(Value::Float(100.0))
+        Some(Value::Float(0.0))
     );
 
     // A solid layer from an existing solid item reuses it.
@@ -884,4 +885,694 @@ fn separate_and_recombine_position() {
         fx.value(&solid, "transform:separate_dimensions"),
         Some(Value::Bool(true))
     );
+}
+
+#[test]
+fn comp_settings_resize_keeps_layers_in_place_and_undo_restores() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let solid = fx.layer(&comp, "solid", json!({}));
+    let nul = fx.layer(&comp, "null", json!({}));
+    let child = fx.layer(&comp, "shape", json!({"shape": "rect"}));
+    let camera = fx.layer(&comp, "camera", json!({}));
+    fx.run(
+        "layer.set_parent",
+        json!({"layers": [child], "parent": nul}),
+    );
+    // A keyframed position moves with the frame, keyframes included.
+    fx.run(
+        "attr.set_animated",
+        json!({"path": solid, "attr": "transform:position", "animated": true, "time": 0}),
+    );
+    fx.run(
+        "attr.set_at",
+        json!({"path": solid, "attr": "transform:position", "time": SEC, "value": {"type": "vec3", "value": [100.0, 200.0, 0.0]}}),
+    );
+    let child_before = fx.value(&child, "transform:position");
+    let child_world = fx.world_pos(&comp, &child);
+    fx.run(
+        "comp.set_settings",
+        json!({"comp": comp, "name": "Main", "width": 1280, "height": 720,
+               "fps": 29.97, "duration": 5 * SEC, "bg_color": [1.0, 1.0, 1.0, 1.0],
+               "start_timecode": SEC, "shutter_angle": 90.0, "renderer": "advanced_3d"}),
+    );
+    let info = query::comp_info(&fx.stage, &comp).unwrap();
+    assert_eq!((info.width, info.height), (1280, 720));
+    assert_eq!(info.name, "Main");
+    assert_eq!(info.frame_rate, FrameRate::FPS_29_97);
+    assert_eq!(info.duration, Time(5 * SEC));
+    assert_eq!(info.display_start, Time(SEC));
+    assert_eq!(info.bg_color, [1.0, 1.0, 1.0, 1.0]);
+    assert_eq!(info.work_area.end, Time(5 * SEC));
+    // Center anchor: top-level layers move by half the size change.
+    let spec = query::attr_spec(&fx.stage, &solid, "transform:position").unwrap();
+    let at = |t: i64| spec.keyframes.get(&Time(t)).unwrap().value.clone();
+    assert_eq!(at(0), Value::Vec3([640.0, 360.0, 0.0]));
+    assert_eq!(at(SEC), Value::Vec3([-220.0, 20.0, 0.0]));
+    assert_eq!(
+        fx.value(&nul, "transform:position"),
+        Some(Value::Vec3([640.0, 360.0, 0.0]))
+    );
+    // The camera's point of interest moves too; children stay relative to
+    // their parent (and so keep their place on screen).
+    assert_eq!(
+        fx.value(&camera, "transform:point_of_interest"),
+        Some(Value::Vec3([640.0, 360.0, 0.0]))
+    );
+    assert_eq!(fx.value(&child, "transform:position"), child_before);
+    let moved = fx.world_pos(&comp, &child);
+    assert!((moved - child_world - DVec3::new(-320.0, -180.0, 0.0)).length() < 1e-6);
+    assert_eq!(
+        fx.value(&comp, "renderer"),
+        Some(Value::Enum("advanced_3d".into()))
+    );
+    // One undo step restores everything.
+    fx.stage.undo(&fx.author).unwrap();
+    let info = query::comp_info(&fx.stage, &comp).unwrap();
+    assert_eq!(
+        (info.width, info.height, info.name.as_str()),
+        (1920, 1080, "Comp 1")
+    );
+    assert_eq!(
+        fx.value(&nul, "transform:position"),
+        Some(Value::Vec3([960.0, 540.0, 0.0]))
+    );
+}
+
+#[test]
+fn comp_settings_anchor_and_validation() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let solid = fx.layer(&comp, "solid", json!({}));
+    // Top-left anchor: layers keep their coordinates.
+    fx.run(
+        "comp.set_settings",
+        json!({"comp": comp, "width": 1000, "height": 500, "anchor": "top_left"}),
+    );
+    assert_eq!(
+        fx.value(&solid, "transform:position"),
+        Some(Value::Vec3([960.0, 540.0, 0.0]))
+    );
+    // Bottom-right anchor: they move by the whole change.
+    fx.run(
+        "comp.set_settings",
+        json!({"comp": comp, "width": 1100, "height": 600, "anchor": "bottom_right"}),
+    );
+    assert_eq!(
+        fx.value(&solid, "transform:position"),
+        Some(Value::Vec3([1060.0, 640.0, 0.0]))
+    );
+    assert!(
+        fx.try_run("comp.set_settings", json!({"comp": comp, "width": 0}))
+            .is_err()
+    );
+    assert!(
+        fx.try_run("comp.set_settings", json!({"comp": comp, "name": "  "}))
+            .is_err()
+    );
+    assert!(
+        fx.try_run("comp.set_settings", json!({"comp": comp, "duration": 0}))
+            .is_err()
+    );
+    // Shortening the comp clamps the work area.
+    fx.run(
+        "comp.set_work_area",
+        json!({"comp": comp, "start": 2 * SEC, "end": 8 * SEC}),
+    );
+    fx.run(
+        "comp.set_settings",
+        json!({"comp": comp, "duration": 4 * SEC}),
+    );
+    let info = query::comp_info(&fx.stage, &comp).unwrap();
+    assert_eq!(info.work_area.start, Time(2 * SEC));
+    assert_eq!(info.work_area.end, Time(4 * SEC));
+    // comp.create takes the same settings.
+    let out = fx.run(
+        "comp.create",
+        json!({"width": 640, "height": 480, "fps": 25, "resolution": [2, 2],
+               "start_timecode": SEC, "preserve_resolution": true, "drop_frame": false}),
+    );
+    let c2 = p(out["path"].as_str().unwrap());
+    assert_eq!(fx.value(&c2, "resolution"), Some(Value::Vec2([2.0, 2.0])));
+    assert_eq!(
+        fx.value(&c2, "preserve_resolution"),
+        Some(Value::Bool(true))
+    );
+    assert_eq!(
+        fx.value(&c2, "display_start_time"),
+        Some(Value::Time(Time(SEC)))
+    );
+}
+
+#[test]
+fn solid_settings_edit_the_solid_and_keep_the_layer_centered() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let layer = fx.layer(
+        &comp,
+        "solid",
+        json!({"name": "Dark Gray Solid 1", "color": [0.2, 0.2, 0.2, 1.0], "pixel_aspect": 2.0}),
+    );
+    let item = bae_motion::solid::layer_solid(&fx.stage, &layer).unwrap();
+    let info = bae_motion::solid::solid_info(&fx.stage, &item).unwrap();
+    assert_eq!(
+        (info.width, info.height, info.pixel_aspect),
+        (1920, 1080, 2.0)
+    );
+    let out = fx.run(
+        "solid.set_settings",
+        json!({"target": layer, "name": "Red Solid 1", "width": 500, "height": 300,
+               "pixel_aspect": 1.0, "color": [1.0, 0.0, 0.0, 1.0]}),
+    );
+    // The only user: the item changes in place.
+    assert_eq!(out["solid"], json!(item));
+    let info = bae_motion::solid::solid_info(&fx.stage, &item).unwrap();
+    assert_eq!(info.name, "Red Solid 1");
+    assert_eq!(
+        (info.width, info.height, info.pixel_aspect),
+        (500, 300, 1.0)
+    );
+    assert_eq!(info.color, [1.0, 0.0, 0.0, 1.0]);
+    // The layer showed the solid's name and follows it; its anchor scales
+    // with the size (AE), so the solid stays centered in the comp.
+    assert_eq!(query::display_name_of(&fx.stage, &layer), "Red Solid 1");
+    assert_eq!(
+        fx.value(&layer, "transform:anchor_point"),
+        Some(Value::Vec3([250.0, 150.0, 0.0]))
+    );
+    // An off-center anchor scales too (R1: [50,50] on 400x300 → [75,83.33] on 600x500).
+    fx.run(
+        "attr.set_at",
+        json!({"path": layer, "attr": "transform:anchor_point", "time": 0, "value": {"type": "vec3", "value": [50.0, 50.0, 0.0]}}),
+    );
+    fx.run(
+        "solid.set_settings",
+        json!({"target": layer, "width": 750, "height": 500}),
+    );
+    match fx.value(&layer, "transform:anchor_point") {
+        Some(Value::Vec3([x, y, _])) => {
+            assert!(
+                (x - 75.0).abs() < 1e-9 && (y - 50.0 * 500.0 / 300.0).abs() < 1e-9,
+                "{x} {y}"
+            )
+        }
+        other => panic!("{other:?}"),
+    }
+    fx.stage.undo(&fx.author).unwrap();
+    fx.stage.undo(&fx.author).unwrap();
+    // One undo step.
+    fx.stage.undo(&fx.author).unwrap();
+    let info = bae_motion::solid::solid_info(&fx.stage, &item).unwrap();
+    assert_eq!(
+        (info.name.as_str(), info.width),
+        ("Dark Gray Solid 1", 1920)
+    );
+    assert_eq!(
+        query::display_name_of(&fx.stage, &layer),
+        "Dark Gray Solid 1"
+    );
+    assert_eq!(
+        fx.value(&layer, "transform:anchor_point"),
+        Some(Value::Vec3([960.0, 540.0, 0.0]))
+    );
+}
+
+#[test]
+fn solid_settings_fork_or_affect_all_layers_that_use_the_solid() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let a = fx.layer(&comp, "solid", json!({"name": "Gray Solid 1"}));
+    let item = bae_motion::solid::layer_solid(&fx.stage, &a).unwrap();
+    let b = fx.layer(&comp, "solid", json!({"source": item}));
+    // A renamed layer keeps its own name.
+    fx.run(
+        "attr.set",
+        json!({"path": b, "attr": "name", "value": {"type": "string", "value": "BG"}}),
+    );
+    assert_eq!(bae_motion::solid::solid_users(&fx.stage, &item).len(), 2);
+    // Unchecked "Affect all layers that use this solid": A gets its own copy.
+    let out = fx.run(
+        "solid.set_settings",
+        json!({"target": a, "name": "Blue Solid 1", "color": [0.0, 0.0, 1.0, 1.0]}),
+    );
+    let copy = p(out["solid"].as_str().unwrap());
+    assert_ne!(copy, item);
+    assert_eq!(
+        bae_motion::solid::layer_solid(&fx.stage, &a),
+        Some(copy.clone())
+    );
+    assert_eq!(
+        bae_motion::solid::layer_solid(&fx.stage, &b),
+        Some(item.clone())
+    );
+    let shared = bae_motion::solid::solid_info(&fx.stage, &item).unwrap();
+    assert_eq!(shared.name, "Gray Solid 1");
+    let forked = bae_motion::solid::solid_info(&fx.stage, &copy).unwrap();
+    assert_eq!(
+        (forked.name.as_str(), forked.color),
+        ("Blue Solid 1", [0.0, 0.0, 1.0, 1.0])
+    );
+    assert_eq!((forked.width, forked.height), (shared.width, shared.height));
+    fx.stage.undo(&fx.author).unwrap();
+    assert!(!fx.stage.has_prim(&copy));
+    assert_eq!(
+        bae_motion::solid::layer_solid(&fx.stage, &a),
+        Some(item.clone())
+    );
+    // Checked: the shared solid changes for both layers.
+    fx.run(
+        "solid.set_settings",
+        json!({"target": a, "name": "Green Solid 1", "affect_all": true}),
+    );
+    assert_eq!(
+        bae_motion::solid::layer_solid(&fx.stage, &a),
+        Some(item.clone())
+    );
+    assert_eq!(query::display_name_of(&fx.stage, &item), "Green Solid 1");
+    assert_eq!(query::display_name_of(&fx.stage, &a), "Green Solid 1");
+    assert_eq!(query::display_name_of(&fx.stage, &b), "BG");
+    // The solid item itself (Project panel) always affects every layer.
+    let out = fx.run("solid.set_settings", json!({"target": item, "width": 100}));
+    assert_eq!(out["layers"].as_array().unwrap().len(), 2);
+    assert_eq!(out["solid"], json!(item));
+}
+
+#[test]
+fn solid_settings_validation() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let solid = fx.layer(&comp, "solid", json!({}));
+    let shape = fx.layer(&comp, "shape", json!({"shape": "rect"}));
+    let adjustment = fx.layer(&comp, "adjustment", json!({}));
+    assert!(
+        fx.try_run("solid.set_settings", json!({"target": shape}))
+            .is_err()
+    );
+    assert!(
+        fx.try_run("solid.set_settings", json!({"target": comp}))
+            .is_err()
+    );
+    for bad in [
+        json!({"name": "  "}),
+        json!({"width": 0}),
+        json!({"height": 30001}),
+        json!({"pixel_aspect": 0.0}),
+    ] {
+        let mut params = bad.clone();
+        params["target"] = json!(solid);
+        assert!(fx.try_run("solid.set_settings", params).is_err(), "{bad}");
+    }
+    // Adjustment layers use a solid too (AE: Solid Settings works on them).
+    assert!(
+        fx.try_run(
+            "solid.set_settings",
+            json!({"target": adjustment, "width": 640})
+        )
+        .is_ok()
+    );
+    assert!(
+        fx.try_run(
+            "layer.create",
+            json!({"comp": comp, "kind": "solid", "pixel_aspect": -1.0})
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn new_cameras_and_lights_take_their_settings() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let cam = fx.layer(
+        &comp,
+        "camera",
+        json!({"name": "Camera 1", "camera": {"camera_type": "one_node", "zoom": 1280.0,
+               "depth_of_field": true, "focus_distance": 1000.0, "aperture": 50.0}}),
+    );
+    assert_eq!(
+        fx.value(&cam, "camera:type"),
+        Some(Value::Enum("one_node".into()))
+    );
+    assert_eq!(fx.value(&cam, "camera:zoom"), Some(Value::Float(1280.0)));
+    assert_eq!(
+        fx.value(&cam, "camera:depth_of_field"),
+        Some(Value::Bool(true))
+    );
+    assert_eq!(
+        fx.value(&cam, "camera:focus_distance"),
+        Some(Value::Float(1000.0))
+    );
+    // The camera stands `zoom` in front of the comp.
+    assert_eq!(
+        fx.value(&cam, "transform:position"),
+        Some(Value::Vec3([960.0, 540.0, -1280.0]))
+    );
+    // Without settings: AE's 50mm camera, focus distance = zoom.
+    let default_cam = fx.layer(&comp, "camera", json!({}));
+    let zoom = 1920.0 * 50.0 / 36.0;
+    assert_eq!(
+        fx.value(&default_cam, "camera:zoom"),
+        Some(Value::Float(zoom))
+    );
+    assert_eq!(
+        fx.value(&default_cam, "camera:focus_distance"),
+        Some(Value::Float(zoom))
+    );
+    let light = fx.layer(
+        &comp,
+        "light",
+        json!({"name": "Point Light 1", "light": {"light_type": "point", "intensity": 150.0,
+               "color": [1.0, 0.5, 0.0, 1.0], "casts_shadows": true}}),
+    );
+    assert_eq!(
+        fx.value(&light, "light:type"),
+        Some(Value::Enum("point".into()))
+    );
+    assert_eq!(
+        fx.value(&light, "light:intensity"),
+        Some(Value::Float(150.0))
+    );
+    assert_eq!(
+        fx.value(&light, "light:casts_shadows"),
+        Some(Value::Bool(true))
+    );
+    assert!(
+        fx.try_run(
+            "layer.create",
+            json!({"comp": comp, "kind": "light", "light": {"light_type": "laser"}})
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn camera_and_light_settings_edit_at_the_current_time_in_one_step() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let cam = fx.layer(&comp, "camera", json!({}));
+    let light = fx.layer(&comp, "light", json!({}));
+    // Zoom is keyframed: the edit adds a keyframe at the time; static values change.
+    fx.run(
+        "attr.set_animated",
+        json!({"path": cam, "attr": "camera:zoom", "animated": true, "time": 0}),
+    );
+    fx.run(
+        "camera.set_settings",
+        json!({"layer": cam, "name": "Main Cam", "camera_type": "one_node", "zoom": 800.0,
+               "blur_level": 50.0, "time": SEC}),
+    );
+    assert_eq!(fx.keys(&cam, "camera:zoom"), vec![0, SEC]);
+    assert_eq!(
+        fx.value(&cam, "camera:blur_level"),
+        Some(Value::Float(50.0))
+    );
+    assert_eq!(query::display_name_of(&fx.stage, &cam), "Main Cam");
+    // One-node: no longer aims at the point of interest.
+    assert_eq!(
+        fx.value(&cam, "auto_orient"),
+        Some(Value::Enum("off".into()))
+    );
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(fx.keys(&cam, "camera:zoom"), vec![0]);
+    assert_eq!(query::display_name_of(&fx.stage, &cam), "Camera 1");
+    fx.run(
+        "light.set_settings",
+        json!({"layer": light, "light_type": "parallel", "cone_angle": 45.0, "falloff": "smooth"}),
+    );
+    assert_eq!(
+        fx.value(&light, "light:type"),
+        Some(Value::Enum("parallel".into()))
+    );
+    assert_eq!(
+        fx.value(&light, "light:falloff"),
+        Some(Value::Enum("smooth".into()))
+    );
+    // Wrong kinds and out-of-range values are refused.
+    assert!(
+        fx.try_run("camera.set_settings", json!({"layer": light}))
+            .is_err()
+    );
+    assert!(
+        fx.try_run("light.set_settings", json!({"layer": cam}))
+            .is_err()
+    );
+    assert!(
+        fx.try_run(
+            "light.set_settings",
+            json!({"layer": light, "cone_angle": 270.0})
+        )
+        .is_err()
+    );
+    assert!(
+        fx.try_run("camera.set_settings", json!({"layer": cam, "zoom": 0.0}))
+            .is_err()
+    );
+    assert!(
+        fx.try_run("camera.set_settings", json!({"layer": cam, "name": " "}))
+            .is_err()
+    );
+}
+
+#[test]
+fn precompose_moves_layers_into_a_new_comp_in_one_step() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let nul = fx.layer(&comp, "null", json!({}));
+    let solid = fx.layer(&comp, "solid", json!({"name": "BG"}));
+    let shape = fx.layer(&comp, "shape", json!({"shape": "rect"}));
+    let text = fx.layer(&comp, "text", json!({"text": "Hi"}));
+    // Stack: text, shape, solid, null. The shape follows the solid (moved
+    // along) and the solid follows the null (stays outside).
+    fx.run(
+        "layer.set_parent",
+        json!({"layers": [shape], "parent": solid, "keep_transform": false}),
+    );
+    fx.run(
+        "layer.set_parent",
+        json!({"layers": [solid], "parent": nul, "keep_transform": false}),
+    );
+    let names = |fx: &Fx, c: &PrimPath| -> Vec<String> {
+        query::comp_layers(&fx.stage, c)
+            .iter()
+            .map(|l| query::display_name_of(&fx.stage, l))
+            .collect()
+    };
+    assert_eq!(
+        bae_motion::precompose::default_precomp_name(&fx.stage, &[shape.clone(), solid.clone()]),
+        "Pre-comp 1"
+    );
+    let solid_world = fx.world_pos(&comp, &solid);
+    let out = fx.run(
+        "layer.precompose",
+        json!({"layers": [solid, shape], "mode": "move"}),
+    );
+    let inner = p(out["comp"].as_str().unwrap());
+    let pre = p(out["layer"].as_str().unwrap());
+    let info = query::comp_info(&fx.stage, &inner).unwrap();
+    assert_eq!(info.name, "Pre-comp 1");
+    assert_eq!(
+        (info.width, info.height, info.duration),
+        (1920, 1080, Time::from_seconds(10.0))
+    );
+    // The new comp holds the two layers in their order; the pre-comp layer
+    // takes the topmost one's place.
+    assert_eq!(names(&fx, &inner), ["Shape Layer 1", "BG"]);
+    assert_eq!(names(&fx, &comp), ["Hi", "Pre-comp 1", "Null 1"]);
+    assert_eq!(query::comp_layers(&fx.stage, &comp)[1], pre);
+    assert_eq!(
+        fx.value(&pre, "source"),
+        Some(Value::PrimRef(inner.clone()))
+    );
+    // The parent inside the new comp follows; the one across comps is gone.
+    let moved = query::comp_layers(&fx.stage, &inner);
+    assert_eq!(
+        fx.value(&moved[0], "parent"),
+        Some(Value::PrimRef(moved[1].clone()))
+    );
+    assert_eq!(fx.value(&moved[1], "parent"), None);
+    // … and the layer keeps its place on screen (AE bakes the parent in).
+    assert!((fx.world_pos(&inner, &moved[1]) - solid_world).length() < 1e-6);
+    let _ = text;
+    // One undo step.
+    fx.stage.undo(&fx.author).unwrap();
+    assert!(!fx.stage.has_prim(&inner));
+    assert_eq!(names(&fx, &comp), ["Hi", "Shape Layer 1", "BG", "Null 1"]);
+    assert_eq!(
+        fx.value(&solid, "parent"),
+        Some(Value::PrimRef(nul.clone()))
+    );
+}
+
+#[test]
+fn precompose_adjusts_the_duration_to_the_layers() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let a = fx.layer(&comp, "solid", json!({"start": 2 * SEC}));
+    let b = fx.layer(&comp, "null", json!({"start": 3 * SEC}));
+    fx.run("layer.trim", json!({"layers": [a], "out_point": 5 * SEC}));
+    let span_a = query::layer_timing(&fx.stage, &a);
+    assert_eq!(
+        (span_a.in_point, span_a.out_point),
+        (Time(2 * SEC), Time(5 * SEC))
+    );
+    let out = fx.run(
+        "layer.precompose",
+        json!({"layers": [a, b], "adjust_duration": true, "name": "Part"}),
+    );
+    let inner = p(out["comp"].as_str().unwrap());
+    let pre = p(out["layer"].as_str().unwrap());
+    // From the earliest in point (2 s) to the latest out point (10 s).
+    let info = query::comp_info(&fx.stage, &inner).unwrap();
+    assert_eq!(info.duration, Time(8 * SEC));
+    let moved = query::comp_layers(&fx.stage, &inner);
+    let t = query::layer_timing(&fx.stage, &moved[1]);
+    assert_eq!((t.in_point, t.out_point), (Time::ZERO, Time(3 * SEC)));
+    let t = query::layer_timing(&fx.stage, &pre);
+    assert_eq!(
+        (t.start_time, t.in_point, t.out_point),
+        (Time(2 * SEC), Time(2 * SEC), Time(10 * SEC))
+    );
+}
+
+#[test]
+fn precompose_leaving_the_attributes_on_the_layer() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let solid = fx.layer(
+        &comp,
+        "solid",
+        json!({"name": "Red Solid 1", "size": [400, 300]}),
+    );
+    let item = bae_motion::solid::layer_solid(&fx.stage, &solid).unwrap();
+    fx.run(
+        "attr.set_at",
+        json!({"path": solid, "attr": "transform:position", "time": 0, "value": {"type": "vec3", "value": [100.0, 200.0, 0.0]}}),
+    );
+    assert_eq!(
+        bae_motion::precompose::default_precomp_name(&fx.stage, std::slice::from_ref(&solid)),
+        "Red Solid 1 Comp 1"
+    );
+    let out = fx.run(
+        "layer.precompose",
+        json!({"layers": [solid], "mode": "leave"}),
+    );
+    let inner = p(out["comp"].as_str().unwrap());
+    assert_eq!(p(out["layer"].as_str().unwrap()), solid);
+    // The new comp has the solid's size and holds the solid.
+    let info = query::comp_info(&fx.stage, &inner).unwrap();
+    assert_eq!((info.width, info.height), (400, 300));
+    let inside = query::comp_layers(&fx.stage, &inner);
+    assert_eq!(inside.len(), 1);
+    // The inner layer starts at 0 (the layer's timing stays outside).
+    assert_eq!(
+        query::layer_timing(&fx.stage, &inside[0]).start_time,
+        Time::ZERO
+    );
+    assert_eq!(fx.value(&inside[0], "source"), Some(Value::PrimRef(item)));
+    // The layer keeps its place and attributes and now shows the new comp.
+    assert_eq!(fx.value(&solid, "source"), Some(Value::PrimRef(inner)));
+    assert_eq!(
+        fx.value(&solid, "kind"),
+        Some(Value::Enum("pre_comp".into()))
+    );
+    assert_eq!(
+        fx.value(&solid, "transform:position"),
+        Some(Value::Vec3([100.0, 200.0, 0.0]))
+    );
+    assert_eq!(
+        query::display_name_of(&fx.stage, &solid),
+        "Red Solid 1 Comp 1"
+    );
+    // Text and several layers cannot leave their attributes.
+    let text = fx.layer(&comp, "text", json!({"text": "T"}));
+    assert!(
+        fx.try_run(
+            "layer.precompose",
+            json!({"layers": [text], "mode": "leave"})
+        )
+        .is_err()
+    );
+    assert!(
+        fx.try_run(
+            "layer.precompose",
+            json!({"layers": [text, solid], "mode": "leave"})
+        )
+        .is_err()
+    );
+    assert!(
+        fx.try_run("layer.precompose", json!({"layers": []}))
+            .is_err()
+    );
+}
+
+#[test]
+fn import_creates_footage_items_in_one_step() {
+    let dir = std::env::temp_dir().join(format!("bae-import-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("plates")).unwrap();
+    let still = dir.join("logo.png");
+    let frame = dir.join("plates").join("shot_0001.png");
+    std::fs::write(&still, b"not really a png").unwrap();
+    std::fs::write(&frame, b"frame").unwrap();
+    let mut fx = Fx::new();
+    let out = fx.run(
+        "item.import",
+        json!({"files": [
+            {"path": still, "attrs": {
+                "width": {"type": "int", "value": 640}, "height": {"type": "int", "value": 360}}},
+            {"path": frame, "name": "shot_[0001-0024].png", "folder": "plates", "attrs": {
+                "kind": {"type": "enum", "value": "sequence"},
+                "sequence:first_frame": {"type": "int", "value": 1}}},
+        ]}),
+    );
+    let items: Vec<PrimPath> = out["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| p(v.as_str().unwrap()))
+        .collect();
+    assert_eq!(items[0].parent().unwrap(), p(query::ASSETS_FOLDER));
+    assert_eq!(query::display_name_of(&fx.stage, &items[0]), "logo.png");
+    assert_eq!(
+        fx.value(&items[0], "kind"),
+        Some(Value::Enum("footage".into()))
+    );
+    assert_eq!(fx.value(&items[0], "width"), Some(Value::Int(640)));
+    let original = fx.value(&items[0], "file:original").unwrap();
+    assert!(
+        original.as_str().unwrap().ends_with("logo.png"),
+        "{original:?}"
+    );
+    assert_eq!(fx.value(&items[0], "file:size"), Some(Value::Int(16)));
+    // A dropped folder keeps its structure.
+    let folder = items[1].parent().unwrap();
+    assert_eq!(query::display_name_of(&fx.stage, &folder), "plates");
+    assert_eq!(folder.parent().unwrap(), p(query::ASSETS_FOLDER));
+    assert_eq!(
+        fx.value(&items[1], "kind"),
+        Some(Value::Enum("sequence".into()))
+    );
+    assert_eq!(
+        query::display_name_of(&fx.stage, &items[1]),
+        "shot_[0001-0024].png"
+    );
+    // One undo step removes both (and the new folder).
+    fx.stage.undo(&fx.author).unwrap();
+    assert!(!fx.stage.has_prim(&items[0]) && !fx.stage.has_prim(&folder));
+    // Missing files, unknown attributes and empty lists are refused.
+    assert!(
+        fx.try_run(
+            "item.import",
+            json!({"files": [{"path": dir.join("nope.png")}]})
+        )
+        .is_err()
+    );
+    assert!(
+        fx.try_run(
+            "item.import",
+            json!({"files": [{"path": still, "attrs": {"name": {"type": "string", "value": "x"}}}]})
+        )
+        .is_err()
+    );
+    assert!(fx.try_run("item.import", json!({"files": []})).is_err());
+    let _ = std::fs::remove_dir_all(&dir);
 }

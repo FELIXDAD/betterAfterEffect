@@ -464,6 +464,15 @@ impl Shell {
         egui_winit::update_viewport_info(&mut viewport_info, &egui_ctx, &window, true);
         let renderer = UiRenderer::new(&gpu, surface.format());
 
+        // Native open panels for modules (File > Import …), owned by the window;
+        // none in smoke tests (they must never block).
+        if self.smoke.is_none() {
+            self.app
+                .insert_resource(bae_ui::files::SharedFilePicker::new(
+                    dialogs::NativePicker::new(Some(window.clone())),
+                ));
+        }
+
         // Placeholder composition until the renderer (workstream 04) publishes one.
         if let Some(registry) = self.app.resource::<Arc<ViewportTextureRegistry>>().cloned() {
             if let Some(old) = self.viewer.take() {

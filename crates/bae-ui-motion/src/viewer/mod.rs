@@ -801,7 +801,7 @@ pub(crate) fn add_item_as_layer(
     common::new_layer(cx, session, kind, extra);
 }
 
-fn empty_viewer(ui: &mut Ui, cx: &mut PanelContext<'_>, session: &SharedSession) {
+fn empty_viewer(ui: &mut Ui, cx: &PanelContext<'_>, session: &SharedSession) {
     ui.add_space((ui.available_height() / 2.0 - 40.0).max(8.0));
     ui.vertical_centered(|ui| {
         icons::show(ui, Icon::Composition, 32.0, color::ICON_DIM);

@@ -42,9 +42,24 @@ pub mod ids {
     pub const REVEAL: &str = "motion.reveal";
     /// Params `{"attr": "<attr>"}`.
     pub const TOGGLE_KEY: &str = "motion.toggle_key";
+    /// Composition > New Composition (Cmd/Ctrl+N): opens Composition Settings.
     pub const NEW_COMP: &str = "motion.new_comp";
-    /// Params `{"kind": "<layer kind>", "shape": "rect" | …}`.
+    /// Composition > Composition Settings (Cmd/Ctrl+K): the active comp, or the
+    /// comp selected in the focused Project panel.
+    pub const COMP_SETTINGS: &str = "motion.comp.composition_settings";
+    /// Params `{"kind": "<layer kind>", "shape": "rect" | …}`. A solid opens
+    /// Solid Settings first.
     pub const NEW_LAYER: &str = "motion.new_layer";
+    /// Layer > Layer Settings (Cmd/Ctrl+Shift+Y): Solid, Camera or Light
+    /// Settings of the selected layer, or Solid Settings of the solid item
+    /// selected in the focused Project panel.
+    pub const LAYER_SETTINGS: &str = "motion.layer.layer_settings";
+    /// Layer > Pre-compose (Cmd/Ctrl+Shift+C): the selected layers.
+    pub const PRE_COMPOSE: &str = "motion.layer.pre_compose";
+    /// File > Import > File (Cmd/Ctrl+I).
+    pub const IMPORT_FILE: &str = "motion.file.import_file";
+    /// File > Import > Multiple Files (Cmd/Ctrl+Alt+I).
+    pub const IMPORT_MULTIPLE: &str = "motion.file.import_multiple_files";
     /// Params `{"to": "forward" | "backward" | "front" | "back"}`.
     pub const ORDER: &str = "motion.order";
     pub const TRIM_COMP: &str = "motion.trim_comp";
@@ -91,7 +106,12 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::REVEAL, "Reveal Animated Properties"),
     (ids::TOGGLE_KEY, "Add or Remove Keyframe at Current Time"),
     (ids::NEW_COMP, "New Composition"),
+    (ids::COMP_SETTINGS, "Composition Settings"),
     (ids::NEW_LAYER, "New"),
+    (ids::LAYER_SETTINGS, "Layer Settings"),
+    (ids::PRE_COMPOSE, "Pre-compose"),
+    (ids::IMPORT_FILE, "Import File"),
+    (ids::IMPORT_MULTIPLE, "Import Multiple Files"),
     (ids::ORDER, "Bring Layer Forward"),
     (ids::TRIM_COMP, "Trim Comp to Work Area"),
     (ids::ADD_TO_RENDER_QUEUE, "Add to Render Queue"),
@@ -238,6 +258,11 @@ pub fn bindings() -> KeymapBindings {
         b("F2", ids::DESELECT_ALL),
         reveal("U", "animated", false),
         b("Cmd+N", ids::NEW_COMP),
+        b("Cmd+K", ids::COMP_SETTINGS),
+        b("Cmd+Shift+Y", ids::LAYER_SETTINGS),
+        b("Cmd+Shift+C", ids::PRE_COMPOSE),
+        b("Cmd+I", ids::IMPORT_FILE),
+        b("Cmd+Alt+I", ids::IMPORT_MULTIPLE),
         b("Cmd+Shift+X", ids::TRIM_COMP),
         b("Cmd+M", ids::ADD_TO_RENDER_QUEUE),
         b("Shift+F3", ids::GRAPH_EDITOR),
@@ -265,6 +290,50 @@ pub fn bindings() -> KeymapBindings {
     v.push(b("Comma", "viewer.zoom_out").when("composition"));
     v.push(b("Shift+Slash", "viewer.fit").when("composition"));
     KeymapBindings::new(bae_ui::presets::AE_KEYMAP, v).for_workspace(crate::menus::WORKSPACE)
+}
+
+/// The comp Composition Settings edits: the one selected in the Project panel
+/// when that panel has focus (AE), otherwise the active comp.
+pub(crate) fn settings_target(cx: &PanelContext<'_>, session: &SharedSession) -> Option<PrimPath> {
+    let s = session.lock();
+    if cx.panel.kind() == "project"
+        && let [item] = s.selected_items.as_slice()
+        && query::comp_info(cx.stage, item).is_some()
+    {
+        return Some(item.clone());
+    }
+    s.active_comp
+        .clone()
+        .filter(|c| query::comp_info(cx.stage, c).is_some())
+}
+
+/// What Layer Settings edits: the solid item selected in the Project panel
+/// when that panel has focus, otherwise the one selected layer when it has
+/// settings (solid and adjustment layers, cameras, lights).
+pub(crate) fn layer_settings_target(
+    stage: &bae_model::Stage,
+    session: &SharedSession,
+    project_focused: bool,
+) -> Option<PrimPath> {
+    let s = session.lock();
+    if project_focused
+        && let [item] = s.selected_items.as_slice()
+        && bae_motion::solid::solid_info(stage, item).is_some()
+    {
+        return Some(item.clone());
+    }
+    match s.selected_layers.as_slice() {
+        [layer]
+            if bae_motion::solid::layer_solid(stage, layer).is_some()
+                || matches!(
+                    query::layer_kind(stage, layer).as_deref(),
+                    Some("camera" | "light")
+                ) =>
+        {
+            Some(layer.clone())
+        }
+        _ => None,
+    }
 }
 
 /// Selected layers, or the layers of the selected keyframes.
@@ -352,6 +421,12 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             common::new_comp(cx, session, None);
             return true;
         }
+        ids::COMP_SETTINGS => {
+            if let Some(comp) = settings_target(cx, session) {
+                crate::dialogs::comp_settings(cx, &comp);
+            }
+            return true;
+        }
         ids::NEW_LAYER => {
             let kind = inv
                 .params
@@ -366,7 +441,45 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             if kind == LayerKind::Text {
                 extra["text"] = json!(bae_ui::tr("Text"));
             }
+            // AE: Solid, Camera and Light Settings first; OK creates the layer.
+            let dialog = match kind {
+                LayerKind::Solid => Some(crate::dialogs::new_solid as fn(&_, &_)),
+                LayerKind::Camera => Some(crate::dialogs::new_camera as fn(&_, &_)),
+                LayerKind::Light => Some(crate::dialogs::new_light as fn(&_, &_)),
+                _ => None,
+            };
+            if let Some(open) = dialog {
+                open(cx, session);
+                return true;
+            }
             common::new_layer(cx, session, kind, extra);
+            return true;
+        }
+        ids::IMPORT_FILE => {
+            crate::import::import_file(cx, session);
+            return true;
+        }
+        ids::IMPORT_MULTIPLE => {
+            crate::import::import_multiple(cx, session);
+            return true;
+        }
+        ids::PRE_COMPOSE => {
+            // The selected layers; locked ones cannot be pre-composed (AE).
+            let layers: Vec<PrimPath> = session
+                .lock()
+                .selected_layers
+                .iter()
+                .filter(|l| !query::is_locked(cx.stage, l))
+                .cloned()
+                .collect();
+            crate::dialogs::precompose(cx, layers);
+            return true;
+        }
+        ids::LAYER_SETTINGS => {
+            let project = cx.panel.kind() == "project";
+            if let Some(target) = layer_settings_target(cx.stage, session, project) {
+                crate::dialogs::layer_settings(cx, session, &target);
+            }
             return true;
         }
         _ => {}

@@ -89,6 +89,10 @@ impl Command for CreateText {
                 shape: None,
                 position: Some(p.position),
                 start: None,
+                pixel_aspect: None,
+                camera: None,
+                light: None,
+                label: None,
             },
         )?;
         let mut doc =

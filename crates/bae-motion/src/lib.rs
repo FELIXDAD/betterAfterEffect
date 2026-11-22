@@ -9,10 +9,16 @@
 //! | Command id | AE equivalent |
 //! |---|---|
 //! | `comp.create` | Composition > New Composition (Cmd/Ctrl+N) |
+//! | `comp.set_settings` | Composition > Composition Settings (Cmd/Ctrl+K) |
 //! | `comp.set_work_area` | B / N (work area start / end) |
 //! | `comp.trim_to_work_area` | Composition > Trim Comp to Work Area |
+//! | `item.import` | File > Import > File (Cmd/Ctrl+I); files dropped on the Project panel |
 //! | `folder.create` | Project panel > New Folder |
 //! | `layer.create` | Layer > New > Shape / Text / Solid / Null / Camera / Light / Adjustment; drag an item into a comp |
+//! | `camera.set_settings` | Layer > Camera Settings (Layer Settings, Cmd/Ctrl+Shift+Y, on a camera) |
+//! | `light.set_settings` | Layer > Light Settings (Layer Settings on a light) |
+//! | `solid.set_settings` | Layer > Solid Settings (Cmd/Ctrl+Shift+Y); Solid Settings of a solid item |
+//! | `layer.precompose` | Layer > Pre-compose (Cmd/Ctrl+Shift+C) |
 //! | `layer.reorder` | drag layers; Bring Forward / Send Backward (Cmd/Ctrl+] / [) |
 //! | `layer.duplicate` | Edit > Duplicate (Cmd/Ctrl+D) |
 //! | `layer.split` | Edit > Split Layer (Cmd/Ctrl+Shift+D) |
@@ -48,14 +54,18 @@
 //! [`MotionModule`] to the app: it publishes them in `bae_app::Registry<dyn DynCommand>`
 //! (id = command id), from which the application builds its command registry.
 
+pub mod camera;
 pub mod comp;
 pub mod dimensions;
+pub mod import;
 pub mod keys;
 pub mod layer;
 pub mod names;
 pub mod path;
+pub mod precompose;
 pub mod query;
 pub mod shape;
+pub mod solid;
 pub mod text;
 mod util;
 
@@ -64,8 +74,13 @@ use std::sync::Arc;
 use bae_app::{AppBuilder, AppModule};
 use bae_model::{CommandRegistry, DynCommand};
 
-pub use comp::{CompOutput, CreateComp, CreateFolder, SetWorkArea, TrimCompToWorkArea};
+pub use camera::{CameraSettings, LightSettings, SetCameraSettings, SetLightSettings};
+pub use comp::{
+    CompOutput, CreateComp, CreateFolder, ResizeAnchor, SetCompSettings, SetWorkArea,
+    TrimCompToWorkArea,
+};
 pub use dimensions::SeparateDimensions;
+pub use import::{ImportFile, ImportItems, ImportOutput};
 pub use keys::{
     CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, KeyEdit, KeyRef, KeysOutput, MoveKeys,
     PasteKeys, ReverseKeys, SetAnimated, SetAt, SetInterpolation, SetMany, ValueEdit,
@@ -76,17 +91,25 @@ pub use layer::{
     ReorderLayers, SetParent, ShapePreset, ShiftLayers, SplitLayers, TrimLayers,
 };
 pub use path::{DeleteVertex, InsertVertex, SetVertices};
+pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
 pub use shape::{AddShape, CreateMask, Geometry, ShapeKind};
+pub use solid::{SetSolidSettings, SolidInfo, SolidOutput};
 pub use text::{CreateText, SetText};
 
 /// Register every motion command.
 pub fn register_commands(r: &mut CommandRegistry) {
     let results = [
         r.register(CreateComp),
+        r.register(SetCompSettings),
         r.register(SetWorkArea),
         r.register(TrimCompToWorkArea),
         r.register(CreateFolder),
+        r.register(ImportItems),
         r.register(CreateLayer),
+        r.register(Precompose),
+        r.register(SetSolidSettings),
+        r.register(SetCameraSettings),
+        r.register(SetLightSettings),
         r.register(ReorderLayers),
         r.register(DuplicateLayers),
         r.register(SplitLayers),

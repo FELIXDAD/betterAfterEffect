@@ -183,8 +183,8 @@ fn make_everything(h: &mut Ui) -> Made {
         h.state().layer_names()
     );
     let layers = NEW_LAYERS.iter().copied().zip(layers).collect();
-    let (m, k) = cmd(Key::N);
-    key(h, m, k);
+    // Cmd+N asks for Composition Settings first; OK makes the comp.
+    new_comp(h);
     let second = h.state().active_comp().unwrap();
     assert_ne!(first, second, "second Cmd+N made no comp");
     Made {
@@ -322,7 +322,8 @@ fn chinese_ui_names_new_items_in_chinese() {
     assert_eq!(by_id("motion.layer.new.null"), "空 1");
     assert_eq!(by_id("motion.layer.new.adjustment"), "调整图层 1");
     assert_eq!(by_id("motion.layer.new.camera"), "摄像机 1");
-    assert_eq!(by_id("motion.layer.new.light"), "灯光 1");
+    // AE 26 zh_CN names a new light after its type (R1, #192): "聚光 1".
+    assert_eq!(by_id("motion.layer.new.light"), "聚光 1");
     let rect = contents(stage, made.layer("shape:rect"));
     let ellipse = contents(stage, made.layer("shape:ellipse"));
     println!("zh rectangle contents: {rect:?}\nzh ellipse contents: {ellipse:?}");
@@ -635,8 +636,7 @@ fn names_stay_when_the_language_changes() {
                 before,
                 "renamed on open in Chinese"
             );
-            let (m, k) = cmd(Key::N);
-            key(&mut h, m, k);
+            new_comp(&mut h);
             let comp = h.state().active_comp().unwrap();
             assert_eq!(h.state().name(&comp), "合成 2", "AE numbers comps per name");
         }

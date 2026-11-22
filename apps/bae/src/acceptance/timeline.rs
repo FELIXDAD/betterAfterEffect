@@ -38,7 +38,7 @@ fn layer_row(h: &Ui, name: &str) -> Pos2 {
 fn comp_with_solid() -> Ui {
     let mut h = gui();
     comp_with(&mut h, &["motion.layer.new.solid"]);
-    assert_eq!(h.state().layer_names(), ["Solid 1"]);
+    assert_eq!(h.state().layer_names(), ["Dark Gray Solid 1"]);
     h
 }
 
@@ -86,7 +86,7 @@ fn rename_commits_on_enter_and_click_away_and_esc_cancels() {
     let layer = h.state().layers()[0].clone();
 
     // Double-click, type, Enter.
-    start_rename_by_double_click(&mut h, "Solid 1");
+    start_rename_by_double_click(&mut h, "Dark Gray Solid 1");
     replace_text(&mut h, "Hero");
     key(&mut h, Modifiers::NONE, Key::Enter);
     assert_eq!(h.state().name(&layer), "Hero");
@@ -117,7 +117,7 @@ fn rename_commits_on_enter_and_click_away_and_esc_cancels() {
     undo(&mut h);
     assert_eq!(h.state().name(&layer), "Hero");
     undo(&mut h);
-    assert_eq!(h.state().name(&layer), "Solid 1");
+    assert_eq!(h.state().name(&layer), "Dark Gray Solid 1");
     redo(&mut h);
     redo(&mut h);
     assert_eq!(h.state().name(&layer), "Hero 2");
@@ -128,7 +128,7 @@ fn rename_field_starts_with_the_whole_name_selected() {
     // AE selects the whole name when the field opens: typing replaces it.
     let mut h = comp_with_solid();
     let layer = h.state().layers()[0].clone();
-    start_rename_by_double_click(&mut h, "Solid 1");
+    start_rename_by_double_click(&mut h, "Dark Gray Solid 1");
     type_text(&mut h, "Hero");
     key(&mut h, Modifiers::NONE, Key::Enter);
     assert_eq!(h.state().name(&layer), "Hero");
@@ -138,13 +138,13 @@ fn rename_field_starts_with_the_whole_name_selected() {
 fn enter_on_a_selected_timeline_layer_starts_rename() {
     // AE: select a layer in the timeline, press Enter (Return) to rename it.
     let mut h = comp_with_solid();
-    let at = layer_row(&h, "Solid 1");
+    let at = layer_row(&h, "Dark Gray Solid 1");
     click_at(&mut h, at);
     assert_eq!(h.state().selected_layers(), h.state().layers());
     key(&mut h, Modifiers::NONE, Key::Enter);
     assert_eq!(
         rename_field_value(&h).as_deref(),
-        Some("Solid 1"),
+        Some("Dark Gray Solid 1"),
         "Enter on the selected layer did not open the rename field"
     );
 }
@@ -155,7 +155,7 @@ fn rename_with_ime_spaces_emoji_and_long_names() {
     let layer = h.state().layers()[0].clone();
 
     // Chinese through a Pinyin composition: marked text, then the commit.
-    start_rename_by_double_click(&mut h, "Solid 1");
+    start_rename_by_double_click(&mut h, "Dark Gray Solid 1");
     press(&mut h, Modifiers::COMMAND, Key::A);
     settle(&mut h);
     ime_compose(&mut h, &["b", "bei", "bei j", "bei jing"], "背景");
@@ -198,13 +198,13 @@ fn rename_with_ime_spaces_emoji_and_long_names() {
     for _ in 0..5 {
         undo(&mut h);
     }
-    assert_eq!(h.state().name(&layer), "Solid 1");
+    assert_eq!(h.state().name(&layer), "Dark Gray Solid 1");
 }
 
 #[test]
 fn space_in_a_text_field_types_and_does_not_play() {
     let mut h = comp_with_solid();
-    start_rename_by_double_click(&mut h, "Solid 1");
+    start_rename_by_double_click(&mut h, "Dark Gray Solid 1");
     replace_text(&mut h, "A");
     press(&mut h, Modifiers::NONE, Key::Space);
     send(&mut h, Event::Text(" ".into()));
@@ -426,10 +426,10 @@ fn project_panel_enter_renames_the_selected_item() {
 fn enter_rename_then_ime_replaces_the_selected_name() {
     let mut h = comp_with_solid();
     let layer = h.state().layers()[0].clone();
-    let at = layer_row(&h, "Solid 1");
+    let at = layer_row(&h, "Dark Gray Solid 1");
     click_at(&mut h, at);
     key(&mut h, Modifiers::NONE, Key::Enter);
-    assert_eq!(rename_field_value(&h).as_deref(), Some("Solid 1"));
+    assert_eq!(rename_field_value(&h).as_deref(), Some("Dark Gray Solid 1"));
     ime_compose(&mut h, &["bei", "bei jing"], "背景");
     assert_eq!(
         rename_field_value(&h).as_deref(),
@@ -507,7 +507,7 @@ fn enter_on_a_focused_button_does_not_start_a_rename() {
 fn double_click_rename_also_selects_the_name_for_ime() {
     let mut h = comp_with_solid();
     let layer = h.state().layers()[0].clone();
-    start_rename_by_double_click(&mut h, "Solid 1");
+    start_rename_by_double_click(&mut h, "Dark Gray Solid 1");
     ime_compose(&mut h, &["wen", "wen zi"], "文字");
     key(&mut h, Modifiers::NONE, Key::Enter);
     assert_eq!(h.state().name(&layer), "文字");
