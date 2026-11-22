@@ -36,6 +36,21 @@ fn prop(stage: &Stage, path: &PrimPath, attr: &str, three_d: bool) -> Node {
 
 /// Transform properties of a layer (AE order).
 pub(crate) fn transform_attrs(stage: &Stage, layer: &PrimPath) -> Vec<&'static str> {
+    let mut attrs = transform_attrs_combined(stage, layer);
+    // Separate Dimensions: X / Y (/ Z) Position in place of Position.
+    if bae_motion::dimensions::is_separated(stage, layer)
+        && let Some(i) = attrs.iter().position(|a| *a == "transform:position")
+    {
+        let n = if common::is_3d(stage, layer) { 3 } else { 2 };
+        attrs.splice(
+            i..=i,
+            bae_motion::dimensions::COMPONENTS[..n].iter().copied(),
+        );
+    }
+    attrs
+}
+
+fn transform_attrs_combined(stage: &Stage, layer: &PrimPath) -> Vec<&'static str> {
     let kind = query::layer_kind(stage, layer).unwrap_or_default();
     let three_d = common::is_3d(stage, layer);
     match kind.as_str() {
@@ -283,7 +298,14 @@ pub(crate) fn revealed(stage: &Stage, layer: &PrimPath, reveal: &Reveal) -> Vec<
             match reveal {
                 Reveal::Animated => spec.is_some_and(|s| s.is_animated() || s.expression.is_some()),
                 Reveal::Modified => spec.is_some_and(|s| !s.is_empty()),
-                Reveal::Attrs(list) => path == layer && list.iter().any(|a| a == attr),
+                Reveal::Attrs(list) => {
+                    path == layer
+                        && list.iter().any(|a| {
+                            a == attr
+                                || (a == "transform:position"
+                                    && bae_motion::dimensions::COMPONENTS.contains(&attr.as_str()))
+                        })
+                }
             }
         })
         .collect()

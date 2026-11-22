@@ -75,6 +75,12 @@ pub struct Session {
     times: HashMap<PrimPath, Time>,
     pub selected_layers: Vec<PrimPath>,
     pub selected_keys: Vec<KeyRef>,
+    /// Properties selected in the timeline outline (`path`, `attr`).
+    pub selected_props: Vec<(PrimPath, String)>,
+    /// The Graph Editor Set: properties whose graph switch is on (`path`, `attr`).
+    pub graph_set: Vec<(PrimPath, String)>,
+    /// The Timeline shows the Graph Editor instead of layer bars (Shift+F3).
+    pub graph_editor: bool,
     /// Project panel selection.
     pub selected_items: Vec<PrimPath>,
     pub playback: Option<Playback>,
@@ -143,6 +149,7 @@ impl Session {
         if self.active_comp.as_ref() != Some(comp) {
             self.selected_layers.clear();
             self.selected_keys.clear();
+            self.selected_props.clear();
             self.stop();
         }
         if !self.open_comps.contains(comp) {
@@ -158,6 +165,7 @@ impl Session {
             self.active_comp = self.open_comps.last().cloned();
             self.selected_layers.clear();
             self.selected_keys.clear();
+            self.selected_props.clear();
             self.stop();
         }
     }
@@ -247,6 +255,9 @@ impl Session {
                 .is_some_and(|s| s.keyframes.contains_key(&k.time))
         });
         self.reveal.retain(|l, _| stage.has_prim(l));
+        self.selected_props
+            .retain(|(p, _)| stage.has_prim(p) && query::locked_layer_of(stage, p).is_none());
+        self.graph_set.retain(|(p, _)| stage.has_prim(p));
     }
 
     pub fn is_playing(&self) -> bool {
