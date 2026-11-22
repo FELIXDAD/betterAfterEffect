@@ -918,26 +918,36 @@ fn close3(a: [f64; 3], b: [f64; 3]) -> bool {
 #[test]
 fn moving_layers_snaps_to_other_layers_and_the_comp() {
     let mut h = H::new();
-    let b = h.solid([100.0, 100.0], [100.0, 100.0]);
+    // B's right edge midpoint is at (150, 180).
+    let b = h.solid([100.0, 100.0], [100.0, 180.0]);
     let a = h.solid([200.0, 100.0], [320.0, 180.0]);
     h.tools().lock().set(Tool::Selection);
+    // Grabbed near its left edge midpoint (220, 180) but away from the scale
+    // handle there, A moves by −67.
+    let grab = (228.0, 180.0);
+    let to = (161.0, 180.0);
     // Snapping off: the layer follows the pointer.
-    let r = h.drag((300.0, 170.0), (233.0, 170.0), Modifiers::NONE);
+    let r = h.drag(grab, to, Modifiers::NONE);
     one(&r, "attr.set_many");
     h.apply(&r);
     assert!(close3(h.v3(&a, "transform:position"), [253.0, 180.0, 0.0]));
     assert_eq!(h.session().lock().selected_layers, std::slice::from_ref(&a));
     h.stage.undo(&h.author).unwrap();
-    // On: its left edge (220 − 67 = 153) snaps to the other solid's right edge.
+    // On: the grabbed feature (left midpoint, 153) snaps to B's right midpoint.
     h.tools().lock().options.snapping = true;
-    let r = h.drag((300.0, 170.0), (233.0, 170.0), Modifiers::NONE);
+    let r = h.drag(grab, to, Modifiers::NONE);
     h.apply(&r);
-    assert!(close3(h.v3(&a, "transform:position"), [250.0, 180.0, 0.0]));
+    assert!(close3(h.v3(&a, "transform:position"), [250.0, 180.0, 0.0]), "{:?}", h.v3(&a, "transform:position"));
     h.stage.undo(&h.author).unwrap();
     // Cmd/Ctrl inverts the switch while held.
-    let r = h.drag((300.0, 170.0), (233.0, 170.0), Modifiers::COMMAND);
+    let r = h.drag(grab, to, Modifiers::COMMAND);
     h.apply(&r);
     assert!(close3(h.v3(&a, "transform:position"), [253.0, 180.0, 0.0]));
+    h.stage.undo(&h.author).unwrap();
+    // The comp frame is not a target (AE 26): 5 px from the left edge stays.
+    let r = h.drag(grab, (13.0, 180.0), Modifiers::NONE);
+    h.apply(&r);
+    assert!(close3(h.v3(&a, "transform:position"), [105.0, 180.0, 0.0]));
     let _ = b;
 }
 

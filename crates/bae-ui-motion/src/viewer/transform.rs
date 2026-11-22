@@ -15,8 +15,9 @@ use serde_json::json;
 use crate::render::{self, Affine, View};
 use crate::session::SharedSession;
 
-/// Snapping distance on screen (points; AE's 待核).
-pub(super) const SNAP_DISTANCE: f32 = 8.0;
+/// Snapping distance on screen (points): AE 26 snaps at 13.3 DIP, not at 16
+/// (R1, transform-tools.md §4).
+pub(super) const SNAP_DISTANCE: f32 = 14.0;
 /// Pick radius of bounding-box handles and the anchor point (points).
 pub(super) const HANDLE_PICK: f32 = 5.0;
 pub(super) const ANCHOR_PICK: f32 = 8.0;
@@ -119,14 +120,14 @@ pub(super) enum Kind {
     },
 }
 
-/// Points a moving layer snaps with, and what it snaps to (comp space).
+/// The point that snaps and what it snaps to (comp space).
 struct Snapping {
-    features: Vec<DVec2>,
-    xs: Vec<f64>,
-    ys: Vec<f64>,
+    feature: DVec2,
+    targets: Vec<DVec2>,
 }
 
-/// Bounds corners, edge midpoints, center and anchor of a layer (comp space).
+/// The 9 snap features of a layer: bounds corners, edge midpoints and center
+/// (comp space).
 fn features(l: &EvaluatedLayer, out: &mut Vec<DVec2>) {
     if let Some((a, b)) = render::layer_bounds(l) {
         let m = Affine::new(l.world_matrix);
@@ -145,8 +146,6 @@ fn features(l: &EvaluatedLayer, out: &mut Vec<DVec2>) {
             out.push(m.apply(p));
         }
     }
-    let a = l.world_matrix.transform_point3(l.transform.anchor_point);
-    out.push(DVec2::new(a.x, a.y));
 }
 
 /// A drag of the selected layers.
@@ -154,8 +153,8 @@ pub(super) struct TransformDrag {
     pub edits: Vec<LayerEdit>,
     pub kind: Kind,
     snapping: Option<Snapping>,
-    /// Snap guides of the last frame (comp x, comp y).
-    guides: (Option<f64>, Option<f64>),
+    /// The point snapped to in the last frame (comp space).
+    guide: Option<DVec2>,
 }
 
 impl TransformDrag {
@@ -171,84 +170,85 @@ impl TransformDrag {
             edits,
             kind,
             snapping: None,
-            guides: (None, None),
+            guide: None,
         }
     }
 
-    /// Collect snap points for a move: features of the moving layers; edges,
-    /// centers and anchors of the other visible layers and the comp frame.
-    pub fn with_snapping(mut self, comp: &EvaluatedComp, info: &CompInfo) -> Self {
-        if !matches!(self.kind, Kind::Move { .. }) {
+    /// Snapping as AE 26 does it (R1, transform-tools.md §4): only one point
+    /// snaps — for a move, the 9-point feature of the grabbed layer nearest the
+    /// grab point; for an anchor drag, the anchor — point to point to the 9
+    /// features of the other visible layers (and, dragging the anchor, of its own
+    /// layer). The comp frame is not a target.
+    pub fn with_snapping(mut self, comp: &EvaluatedComp, primary: &PrimPath, grab: DVec2) -> Self {
+        let anchor = matches!(
+            self.kind,
+            Kind::Anchor {
+                compensate: true,
+                ..
+            }
+        );
+        if !matches!(self.kind, Kind::Move { .. }) && !anchor {
             return self;
         }
         let moving: Vec<&PrimPath> = self.edits.iter().map(|e| &e.path).collect();
         let mut own = Vec::new();
-        let mut others = Vec::new();
+        let mut targets = Vec::new();
         for l in &comp.layers {
             if moving.contains(&&l.path) {
-                features(l, &mut own);
+                if &l.path == primary {
+                    features(l, &mut own);
+                }
             } else if l.visible && !matches!(l.kind, LayerKind::Camera | LayerKind::Light) {
-                features(l, &mut others);
+                features(l, &mut targets);
             }
         }
-        let (w, h) = (f64::from(info.width), f64::from(info.height));
-        let mut xs: Vec<f64> = others.iter().map(|p| p.x).collect();
-        let mut ys: Vec<f64> = others.iter().map(|p| p.y).collect();
-        xs.extend([0.0, w / 2.0, w]);
-        ys.extend([0.0, h / 2.0, h]);
-        self.snapping = Some(Snapping {
-            features: own,
-            xs,
-            ys,
-        });
+        let feature = if anchor {
+            targets.extend(own);
+            grab
+        } else {
+            match own
+                .iter()
+                .min_by(|a, b| a.distance(grab).total_cmp(&b.distance(grab)))
+            {
+                Some(f) => *f,
+                None => return self,
+            }
+        };
+        self.snapping = Some(Snapping { feature, targets });
         self
     }
 
     /// Follow the pointer (comp space). `snap`: snapping distance in comp
     /// pixels, when snapping is on for this frame.
     pub fn update(&mut self, p: DVec2, shift: bool, snap: Option<f64>) {
-        self.guides = (None, None);
-        match &mut self.kind {
-            Kind::Move { start } => {
-                let mut d = p - *start;
-                if shift {
-                    if d.x.abs() > d.y.abs() {
-                        d.y = 0.0;
-                    } else {
-                        d.x = 0.0;
-                    }
-                }
-                if let (Some(thr), Some(s)) = (snap, &self.snapping) {
-                    let best = |fs: &mut dyn Iterator<Item = f64>, ts: &[f64]| {
-                        let mut best: Option<(f64, f64)> = None;
-                        for f in fs {
-                            for &t in ts {
-                                let off = t - f;
-                                if off.abs() <= thr && best.is_none_or(|(b, _)| off.abs() < b.abs())
-                                {
-                                    best = Some((off, t));
-                                }
-                            }
+        self.guide = None;
+        // Move and anchor drags: the pointer offset, axis-locked with Shift
+        // (moves), then snapped.
+        let offset = match self.kind {
+            Kind::Move { start } | Kind::Anchor { start, .. } => {
+                let lock = shift && matches!(self.kind, Kind::Move { .. });
+                let axis = |mut d: DVec2| {
+                    if lock {
+                        if (p - start).x.abs() > (p - start).y.abs() {
+                            d.y = 0.0;
+                        } else {
+                            d.x = 0.0;
                         }
-                        best
-                    };
-                    let lock_x = shift && d.x == 0.0;
-                    let lock_y = shift && d.y == 0.0;
-                    if !lock_x
-                        && let Some((off, t)) =
-                            best(&mut s.features.iter().map(|f| f.x + d.x), &s.xs)
-                    {
-                        d.x += off;
-                        self.guides.0 = Some(t);
                     }
-                    if !lock_y
-                        && let Some((off, t)) =
-                            best(&mut s.features.iter().map(|f| f.y + d.y), &s.ys)
-                    {
-                        d.y += off;
-                        self.guides.1 = Some(t);
-                    }
+                    d
+                };
+                let mut d = axis(p - start);
+                if let Some(t) = self.snap_target(d, snap) {
+                    d = axis(t - self.snapping.as_ref().expect("snapping").feature);
+                    self.guide = Some(t);
                 }
+                d
+            }
+            _ => DVec2::ZERO,
+        };
+        match &mut self.kind {
+            Kind::Move { .. } => {
+                let d = offset;
                 for e in &mut self.edits {
                     e.now.position = e.start.position + e.to_parent(d);
                 }
@@ -324,9 +324,9 @@ impl TransformDrag {
                     }
                 }
             }
-            Kind::Anchor { start, compensate } => {
-                let d = p - *start;
+            Kind::Anchor { compensate, .. } => {
                 let compensate = *compensate;
+                let d = offset;
                 for e in &mut self.edits {
                     let local = e
                         .world()
@@ -343,17 +343,25 @@ impl TransformDrag {
         }
     }
 
-    /// Snap guides across the comp.
-    pub fn paint_guides(&self, painter: &Painter, view: &View, info: &CompInfo) {
-        let r = render::comp_rect(view, info.width, info.height);
+    /// The target within `snap` comp pixels of the snapping point moved by `d`.
+    fn snap_target(&self, d: DVec2, snap: Option<f64>) -> Option<DVec2> {
+        let (thr, s) = (snap?, self.snapping.as_ref()?);
+        let f = s.feature + d;
+        s.targets
+            .iter()
+            .filter(|t| t.distance(f) <= thr)
+            .min_by(|a, b| a.distance(f).total_cmp(&b.distance(f)))
+            .copied()
+    }
+
+    /// The snapped-to point: a small target mark.
+    pub fn paint_guides(&self, painter: &Painter, view: &View, _info: &CompInfo) {
         let stroke = Stroke::new(1.0, Color32::from_rgb(0x52, 0xb8, 0xff));
-        if let Some(x) = self.guides.0 {
-            let sx = view.to_screen(DVec2::new(x, 0.0)).x;
-            painter.vline(sx, r.y_range(), stroke);
-        }
-        if let Some(y) = self.guides.1 {
-            let sy = view.to_screen(DVec2::new(0.0, y)).y;
-            painter.hline(r.x_range(), sy, stroke);
+        if let Some(t) = self.guide {
+            let c = view.to_screen(t);
+            painter.circle_stroke(c, 5.0, stroke);
+            painter.line_segment([c - egui::vec2(8.0, 0.0), c + egui::vec2(8.0, 0.0)], stroke);
+            painter.line_segment([c - egui::vec2(0.0, 8.0), c + egui::vec2(0.0, 8.0)], stroke);
         }
     }
 
