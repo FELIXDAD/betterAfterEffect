@@ -20,7 +20,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::comp::{CreateComp, CreateCompParams};
-use crate::layer::{CreateLayer, CreateLayerParams, ShiftLayers, ShiftLayersParams};
+use crate::layer::{
+    CreateLayer, CreateLayerParams, SetParent, SetParentParams, ShiftLayers, ShiftLayersParams,
+};
 use crate::query;
 use crate::util::{ensure_unlocked, fail, set, write_attr};
 
@@ -50,6 +52,10 @@ pub struct PrecomposeParams {
     /// out point of the layers, and the pre-comp layer starts there.
     #[serde(default)]
     pub adjust_duration: bool,
+    /// Comp time (flicks) whose transforms are kept when a parent link across
+    /// the comps is removed (default 0; the UI passes the current time).
+    #[serde(default)]
+    pub time: Option<Time>,
 }
 
 /// Output of `layer.precompose`.
@@ -84,9 +90,14 @@ fn source_of(stage: &Stage, layer: &PrimPath) -> Option<PrimPath> {
 /// AE's default name for the new comp: "<layer name> Comp N" for one layer,
 /// "Pre-comp N" for several (N: the first number no comp uses yet).
 pub fn default_precomp_name(stage: &Stage, layers: &[PrimPath]) -> String {
+    // AE names them in the UI language: "<layer> 合成 1", "预合成 1".
     let base = match layers {
-        [one] => format!("{} Comp", query::display_name_of(stage, one)),
-        _ => "Pre-comp".to_owned(),
+        [one] => format!(
+            "{} {}",
+            query::display_name_of(stage, one),
+            crate::names::localized("Comp")
+        ),
+        _ => crate::names::localized("Pre-comp").to_owned(),
     };
     let taken = |n: &str| {
         query::comps(stage)
@@ -261,10 +272,11 @@ impl Command for Precompose {
                 }
             };
             let created = new_comp(tx, size[0], size[1], info.duration)?;
-            let start = query::layer_timing(tx.stage(), layer).start_time;
+            // AE: the inner layer starts at 0 and spans the new comp; the
+            // layer's own timing stays on the layer outside.
             CreateLayer.run(
                 tx,
-                CreateLayerParams::with_source(&created.path, kind, &source, start),
+                CreateLayerParams::with_source(&created.path, kind, &source, Time::ZERO),
             )?;
             // The layer now shows the new comp; a name that was its source's
             // becomes the new comp's.
@@ -294,6 +306,34 @@ impl Command for Precompose {
         } else {
             info.duration
         };
+        // A parent link that will cross the comps is removed first, keeping the
+        // layer where it is on screen (AE bakes the parent's transform in:
+        // parent at [300,200], child at [100,50] → [300,150] inside).
+        let moving: Vec<PrimPath> = layers.iter().map(|(_, l)| l.clone()).collect();
+        let time = p.time.unwrap_or(Time::ZERO);
+        for l in query::comp_layers(tx.stage(), &comp) {
+            let parent = match tx
+                .stage()
+                .prim(&l)
+                .and_then(|v| query::static_value(&v, "parent"))
+            {
+                Some(Value::PrimRef(p)) => p,
+                _ => continue,
+            };
+            if moving.contains(&l) != moving.contains(&parent) {
+                tx.allow_locked(|tx| {
+                    SetParent.run(
+                        tx,
+                        SetParentParams {
+                            layers: vec![l.clone()],
+                            parent: None,
+                            keep_transform: true,
+                            time,
+                        },
+                    )
+                })?;
+            }
+        }
         // An unset out point means "the comp's end": pin it before the layers
         // move into a comp of another duration.
         for (_, l) in &layers {

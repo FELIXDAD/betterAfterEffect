@@ -1361,6 +1361,7 @@ fn precompose_moves_layers_into_a_new_comp_in_one_step() {
         bae_motion::precompose::default_precomp_name(&fx.stage, &[shape.clone(), solid.clone()]),
         "Pre-comp 1"
     );
+    let solid_world = fx.world_pos(&comp, &solid);
     let out = fx.run(
         "layer.precompose",
         json!({"layers": [solid, shape], "mode": "move"}),
@@ -1389,6 +1390,8 @@ fn precompose_moves_layers_into_a_new_comp_in_one_step() {
         Some(Value::PrimRef(moved[1].clone()))
     );
     assert_eq!(fx.value(&moved[1], "parent"), None);
+    // … and the layer keeps its place on screen (AE bakes the parent in).
+    assert!((fx.world_pos(&inner, &moved[1]) - solid_world).length() < 1e-6);
     let _ = text;
     // One undo step.
     fx.stage.undo(&fx.author).unwrap();
@@ -1460,6 +1463,11 @@ fn precompose_leaving_the_attributes_on_the_layer() {
     assert_eq!((info.width, info.height), (400, 300));
     let inside = query::comp_layers(&fx.stage, &inner);
     assert_eq!(inside.len(), 1);
+    // The inner layer starts at 0 (the layer's timing stays outside).
+    assert_eq!(
+        query::layer_timing(&fx.stage, &inside[0]).start_time,
+        Time::ZERO
+    );
     assert_eq!(fx.value(&inside[0], "source"), Some(Value::PrimRef(item)));
     // The layer keeps its place and attributes and now shows the new comp.
     assert_eq!(fx.value(&solid, "source"), Some(Value::PrimRef(inner)));

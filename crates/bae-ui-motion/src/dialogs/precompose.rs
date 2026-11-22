@@ -48,7 +48,12 @@ impl PrecomposeDialog {
     ) -> Option<Self> {
         let comp = query::owning_comp(stage, layers.first()?)?;
         let can_leave = matches!(layers.as_slice(), [one] if can_leave_attributes(stage, one));
-        let layer_name = layers.first().map(|l| query::display_name_of(stage, l));
+        // The Leave option's text names the topmost selected layer (AE).
+        let stack = query::comp_layers(stage, &comp);
+        let layer_name = stack
+            .iter()
+            .find(|l| layers.contains(l))
+            .map(|l| query::display_name_of(stage, l));
         Some(PrecomposeDialog {
             name: default_precomp_name(stage, &layers),
             comp_name: query::display_name_of(stage, &comp),
@@ -98,6 +103,7 @@ impl PrecomposeDialog {
                 "name": name,
                 "mode": if leave { "leave" } else { "move" },
                 "adjust_duration": !leave && self.adjust_duration,
+                "time": session.lock().time(&self.comp),
             }),
         );
         // The paths the command will use: the new comp next to this one, and
