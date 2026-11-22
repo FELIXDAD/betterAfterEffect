@@ -763,7 +763,27 @@ impl Workbench {
         let keymap = &self.keymap;
         let mut hits = Vec::new();
         ctx.input_mut(|input| {
+            // egui-winit turns every Cmd/Ctrl+C / X / V into Copy / Cut / Paste,
+            // with Shift or Alt held too (and sends no key event): those chords
+            // are other shortcuts (Ctrl+Shift+C Pre-compose, Ctrl+Alt+Shift+C New
+            // Camera, Ctrl+Shift+X Trim Comp to Work Area …), #220.
+            let mods = input.modifiers;
+            let other_chord = mods.command && (mods.shift || mods.alt);
             input.events.retain(|event| match event {
+                Event::Copy | Event::Cut | Event::Paste(_) if other_chord && !typing => {
+                    let key = match event {
+                        Event::Copy => Key::C,
+                        Event::Cut => Key::X,
+                        _ => Key::V,
+                    };
+                    match keymap.match_event(key, Some(key), mods, focused.as_deref()) {
+                        Some(binding) => {
+                            hits.push(binding.invocation());
+                            false
+                        }
+                        None => true,
+                    }
+                }
                 Event::Key {
                     key,
                     physical_key,
@@ -1236,6 +1256,16 @@ mod tests {
     }
 
     fn frame_in(ctx: &Context, wb: &mut Workbench, events: Vec<Event>) -> Vec<Invocation> {
+        frame_mods(ctx, wb, Modifiers::NONE, events)
+    }
+
+    /// [`frame_in`] with these modifiers held.
+    fn frame_mods(
+        ctx: &Context,
+        wb: &mut Workbench,
+        modifiers: Modifiers,
+        events: Vec<Event>,
+    ) -> Vec<Invocation> {
         let stage = Stage::new();
         let author = AuthorId::system();
         let resources = Resources::new();
@@ -1246,9 +1276,11 @@ mod tests {
             title: "BAE",
             dirty: false,
         };
+        let mut all = vec![Event::ModifiersChanged(modifiers)];
+        all.extend(events);
         let input = RawInput {
             screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1400.0, 900.0))),
-            events,
+            events: all,
             ..Default::default()
         };
         let mut out = Vec::new();
@@ -1434,6 +1466,86 @@ mod tests {
         );
         assert!(typed.is_empty(), "{typed:?}");
         assert_eq!(text.lock().unwrap().as_str(), "a U");
+    }
+
+    /// #220: egui-winit reports Cmd/Ctrl+Shift+C, Cmd/Ctrl+Alt+Shift+C … as
+    /// Copy / Cut / Paste (no key event). Those run their own shortcuts (Pre-compose,
+    /// New Camera); plain Cmd/Ctrl+C / V stay Copy / Paste, and a text field still
+    /// gets its paste.
+    #[test]
+    fn modified_copy_keys_run_their_own_shortcuts() {
+        let text = Arc::new(std::sync::Mutex::new(String::from("a")));
+        let focus = Arc::new(std::sync::Mutex::new(None));
+        let (kinds, presets, keymaps, actions) = registries();
+        let (t, f) = (text.clone(), focus.clone());
+        let clicks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        kinds
+            .replace(
+                Owner::module("test"),
+                "a",
+                Arc::new(PanelKind::new("A", move |_| {
+                    Box::new(Focusable {
+                        clicks: clicks.clone(),
+                        text: t.clone(),
+                        focus: f.clone(),
+                    })
+                })),
+            )
+            .unwrap();
+        let camera = serde_json::json!({ "kind": "camera" });
+        keymaps
+            .replace(
+                Owner::module("test"),
+                "km",
+                Arc::new(Keymap::new(
+                    "KM",
+                    vec![
+                        Binding::new("Cmd+Shift+C", "motion.layer.pre_compose"),
+                        Binding::new("Cmd+Alt+Shift+C", "motion.new_layer").params(camera.clone()),
+                    ],
+                )),
+            )
+            .unwrap();
+        let mut wb =
+            Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
+        let ctx = crate::testing::ctx_with_fonts();
+        frame_in(&ctx, &mut wb, vec![]);
+        let cmd = Modifiers::COMMAND;
+        assert_eq!(
+            frame_mods(&ctx, &mut wb, cmd | Modifiers::SHIFT, vec![Event::Copy]),
+            vec![Invocation::new("motion.layer.pre_compose")]
+        );
+        assert_eq!(
+            frame_mods(
+                &ctx,
+                &mut wb,
+                cmd | Modifiers::ALT | Modifiers::SHIFT,
+                vec![Event::Copy]
+            ),
+            vec![Invocation::with_params("motion.new_layer", camera)]
+        );
+        assert_eq!(
+            frame_mods(&ctx, &mut wb, cmd, vec![Event::Copy]),
+            vec![Invocation::new("edit.copy")]
+        );
+        assert_eq!(
+            frame_mods(&ctx, &mut wb, cmd, vec![Event::Paste("x".into())]),
+            vec![Invocation::with_params(
+                "edit.paste",
+                serde_json::json!({ "text": "x" })
+            )]
+        );
+        // A focused text field pastes the text itself.
+        *focus.lock().unwrap() = Some("field");
+        frame_in(&ctx, &mut wb, vec![]);
+        frame_in(&ctx, &mut wb, vec![]);
+        let pasted = frame_mods(&ctx, &mut wb, cmd, vec![Event::Paste("bc".into())]);
+        assert!(pasted.is_empty(), "{pasted:?}");
+        assert!(
+            text.lock().unwrap().contains("bc"),
+            "{:?}",
+            text.lock().unwrap()
+        );
     }
 
     #[test]

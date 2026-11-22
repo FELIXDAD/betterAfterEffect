@@ -18,6 +18,20 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+/// The user's videos folder: the Videos known folder on Windows
+/// (`FOLDERID_Videos`, wherever the user moved it), `~/Movies` on macOS,
+/// `$XDG_VIDEOS_DIR` on Linux. `None` when the system has none.
+pub fn videos_dir() -> Option<PathBuf> {
+    directories::UserDirs::new()?
+        .video_dir()
+        .map(Path::to_path_buf)
+}
+
+/// The user's home folder.
+pub fn home_dir() -> Option<PathBuf> {
+    directories::BaseDirs::new().map(|b| b.home_dir().to_path_buf())
+}
+
 /// Environment variable that relocates every directory under one root.
 pub const HOME_ENV: &str = "BAE_HOME";
 

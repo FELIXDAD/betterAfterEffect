@@ -53,7 +53,6 @@ pub struct CompositionViewer {
     grid: bool,
     checker: bool,
     locked: bool,
-    title: String,
     /// Zoom step requested by a shortcut, applied in `ui` (needs the panel rect).
     pending_zoom: Option<bool>,
     gpu: Option<GpuPreview>,
@@ -300,11 +299,12 @@ fn checkerboard(p: &egui::Painter, r: Rect) {
 }
 
 impl Panel for CompositionViewer {
-    fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
-        let title = if self.title.is_empty() {
-            tr("Composition").to_owned()
-        } else {
-            format!("{} {}", tr("Composition"), self.title)
+    fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
+        // Read from the session every frame, so New / Open / Close Project
+        // update the tab (and its accessible name) at once (issue #215).
+        let title = match common::active_comp(cx.stage, &common::session(cx.resources)) {
+            Some(info) => format!("{} {}", tr("Composition"), info.name),
+            None => tr("Composition").to_owned(),
         };
         TabInfo::new(title).viewer().locked(self.locked)
     }
@@ -361,11 +361,9 @@ impl Panel for CompositionViewer {
         session.lock().sync(cx.stage);
         self.prefs = prefs::ViewerPrefs::current(cx.resources);
         let Some(info) = common::active_comp(cx.stage, &session) else {
-            self.title.clear();
             empty_viewer(ui, cx, &session);
             return;
         };
-        self.title = info.name.clone();
         if session.lock().tick(&info) {
             ui.ctx().request_repaint();
         }
