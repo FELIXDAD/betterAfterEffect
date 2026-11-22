@@ -307,7 +307,7 @@ mod tests {
         let mut requests = PanelRequests::default();
         let mut activity = ActivityPanel::default();
         let mut proposals = ProposalsPanel::default();
-        let ctx = egui::Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         for round in 0..2 {
             if round == 1 {
                 fake.calls.lock().unwrap().push(call(3));

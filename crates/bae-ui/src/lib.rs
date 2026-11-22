@@ -30,6 +30,7 @@ pub mod menu;
 pub mod panel;
 pub mod presets;
 pub mod settings;
+pub mod testing;
 pub mod theme;
 pub mod titlebar;
 pub mod widgets;

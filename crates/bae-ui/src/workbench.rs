@@ -1168,7 +1168,7 @@ mod tests {
     }
 
     fn frame(wb: &mut Workbench, events: Vec<Event>) -> Vec<Invocation> {
-        let ctx = Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         frame_in(&ctx, wb, events)
     }
 
@@ -1269,7 +1269,7 @@ mod tests {
             .unwrap();
         let mut wb =
             Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
-        let ctx = Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         let none = Modifiers::NONE;
         frame_in(&ctx, &mut wb, vec![]);
         // Nothing focused: Space plays.
@@ -1472,7 +1472,7 @@ mod tests {
             title: "",
             dirty: false,
         };
-        let ctx = Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         let run = |wb: &mut Workbench, events: Vec<Event>| {
             let input = RawInput {
                 screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1400.0, 900.0))),
@@ -1588,7 +1588,7 @@ mod tests {
         let (kinds, presets, keymaps, actions) = registries();
         let mut wb =
             Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
-        let ctx = Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         wb.show_role_picker();
         frame_in(&ctx, &mut wb, vec![]);
         assert!(frame_in(&ctx, &mut wb, vec![key(Key::U, Modifiers::NONE)]).is_empty());
@@ -1608,7 +1608,7 @@ mod tests {
         let (kinds, presets, keymaps, actions) = registries();
         let mut wb =
             Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
-        let ctx = Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         let pointer = |pos: egui::Pos2, pressed: bool| {
             vec![
                 Event::PointerMoved(pos),
@@ -1785,7 +1785,7 @@ mod tests {
         let mut wb =
             Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default())
                 .with_dialog_hosts(hosts);
-        let ctx = Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         let u = || key(Key::U, Modifiers::NONE);
         // Closed: shortcuts work.
         assert_eq!(
