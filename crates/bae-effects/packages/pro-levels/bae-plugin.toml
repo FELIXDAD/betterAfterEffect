@@ -1,0 +1,358 @@
+# Levels (Individual Controls) (ADBE Pro Levels2): AE-FX-039. Group start and
+# end markers each consume a parameter id, as in AE (ids = AE disk ids).
+# Parameter 2 (Histogram, UI only) is not declared.
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "pro-levels"
+name = "Levels (Individual Controls)"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE Pro Levels2"]
+keywords = ["levels", "individual", "channels", "gamma"]
+flags = ["pixel-independent"]
+shader = "shaders/pro_levels.wgsl"
+entry = "pro_levels"
+
+[[effect.param]]
+id = 1
+key = "channel"
+type = "popup"
+name = "Channel"
+default = 1
+choices = ["RGB", "Red", "Green", "Blue", "Alpha"]
+
+[[effect.param]]
+id = 3
+key = "rgb"
+type = "group"
+name = "RGB"
+end_id = 9
+
+[[effect.param]]
+id = 4
+key = "rgb_input_black"
+type = "float"
+name = "Input Black"
+default = 0.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+group = "rgb"
+
+[[effect.param]]
+id = 5
+key = "rgb_input_white"
+type = "float"
+name = "Input White"
+default = 1.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+group = "rgb"
+
+[[effect.param]]
+id = 6
+key = "rgb_gamma"
+type = "float"
+name = "Gamma"
+default = 1.0
+range = [0.01, 100.0]
+slider = [0.1, 10.0]
+precision = 2
+group = "rgb"
+
+[[effect.param]]
+id = 7
+key = "rgb_output_black"
+type = "float"
+name = "Output Black"
+default = 0.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+group = "rgb"
+
+[[effect.param]]
+id = 8
+key = "rgb_output_white"
+type = "float"
+name = "Output White"
+default = 1.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+group = "rgb"
+
+[[effect.param]]
+id = 10
+key = "red"
+type = "group"
+name = "Red"
+end_id = 16
+
+[[effect.param]]
+id = 11
+key = "red_input_black"
+type = "float"
+name = "Red Input Black"
+default = 0.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+group = "red"
+
+[[effect.param]]
+id = 12
+key = "red_input_white"
+type = "float"
+name = "Red Input White"
+default = 1.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+group = "red"
+
+[[effect.param]]
+id = 13
+key = "red_gamma"
+type = "float"
+name = "Red Gamma"
+default = 1.0
+range = [0.01, 100.0]
+slider = [0.1, 10.0]
+precision = 2
+group = "red"
+
+[[effect.param]]
+id = 14
+key = "red_output_black"
+type = "float"
+name = "Red Output Black"
+default = 0.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+group = "red"
+
+[[effect.param]]
+id = 15
+key = "red_output_white"
+type = "float"
+name = "Red Output White"
+default = 1.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+group = "red"
+
+[[effect.param]]
+id = 17
+key = "green"
+type = "group"
+name = "Green"
+end_id = 23
+
+[[effect.param]]
+id = 18
+key = "green_input_black"
+type = "float"
+name = "Green Input Black"
+default = 0.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+group = "green"
+
+[[effect.param]]
+id = 19
+key = "green_input_white"
+type = "float"
+name = "Green Input White"
+default = 1.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+group = "green"
+
+[[effect.param]]
+id = 20
+key = "green_gamma"
+type = "float"
+name = "Green Gamma"
+default = 1.0
+range = [0.01, 100.0]
+slider = [0.1, 10.0]
+precision = 2
+group = "green"
+
+[[effect.param]]
+id = 21
+key = "green_output_black"
+type = "float"
+name = "Green Output Black"
+default = 0.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+group = "green"
+
+[[effect.param]]
+id = 22
+key = "green_output_white"
+type = "float"
+name = "Green Output White"
+default = 1.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+group = "green"
+
+[[effect.param]]
+id = 24
+key = "blue"
+type = "group"
+name = "Blue"
+end_id = 30
+
+[[effect.param]]
+id = 25
+key = "blue_input_black"
+type = "float"
+name = "Blue Input Black"
+default = 0.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+group = "blue"
+
+[[effect.param]]
+id = 26
+key = "blue_input_white"
+type = "float"
+name = "Blue Input White"
+default = 1.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+group = "blue"
+
+[[effect.param]]
+id = 27
+key = "blue_gamma"
+type = "float"
+name = "Blue Gamma"
+default = 1.0
+range = [0.01, 100.0]
+slider = [0.1, 10.0]
+precision = 2
+group = "blue"
+
+[[effect.param]]
+id = 28
+key = "blue_output_black"
+type = "float"
+name = "Blue Output Black"
+default = 0.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+group = "blue"
+
+[[effect.param]]
+id = 29
+key = "blue_output_white"
+type = "float"
+name = "Blue Output White"
+default = 1.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+group = "blue"
+
+[[effect.param]]
+id = 31
+key = "alpha"
+type = "group"
+name = "Alpha"
+end_id = 37
+
+[[effect.param]]
+id = 32
+key = "alpha_input_black"
+type = "float"
+name = "Alpha Input Black"
+default = 0.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+group = "alpha"
+
+[[effect.param]]
+id = 33
+key = "alpha_input_white"
+type = "float"
+name = "Alpha Input White"
+default = 1.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+group = "alpha"
+
+[[effect.param]]
+id = 34
+key = "alpha_gamma"
+type = "float"
+name = "Alpha Gamma"
+default = 1.0
+range = [0.01, 100.0]
+slider = [0.1, 10.0]
+precision = 2
+group = "alpha"
+
+[[effect.param]]
+id = 35
+key = "alpha_output_black"
+type = "float"
+name = "Alpha Output Black"
+default = 0.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+group = "alpha"
+
+[[effect.param]]
+id = 36
+key = "alpha_output_white"
+type = "float"
+name = "Alpha Output White"
+default = 1.0
+range = [-100.0, 100.0]
+slider = [0.0, 1.0]
+precision = 3
+group = "alpha"
+
+[[effect.param]]
+id = 38
+key = "clip_black"
+type = "popup"
+name = "Clip To Output Black"
+default = 3
+choices = ["On", "Off", "Off for 32 bpc Color"]
+
+[[effect.param]]
+id = 39
+key = "clip_white"
+type = "popup"
+name = "Clip To Output White"
+default = 3
+choices = ["On", "Off", "Off for 32 bpc Color"]

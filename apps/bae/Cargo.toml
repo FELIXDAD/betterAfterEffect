@@ -1,0 +1,72 @@
+[package]
+name = "bae"
+description = "BAE desktop application (assembly only: every feature is an AppModule)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+default-run = "bae"
+
+[[bin]]
+name = "bae"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+bae-agent.workspace = true
+bae-app.workspace = true
+bae-gpu.workspace = true
+bae-model.workspace = true
+bae-motion.workspace = true
+bae-package.workspace = true
+bae-platform.workspace = true
+bae-prefs = { workspace = true, features = ["file"] }
+bae-plugin.workspace = true
+bae-ui.workspace = true
+bae-render = { workspace = true, features = ["media"] }
+bae-vector = { workspace = true, features = ["render"] }
+bae-ui-motion.workspace = true
+bae-text = { workspace = true, features = ["render"] }
+egui.workspace = true
+egui-wgpu.workspace = true
+# accesskit: VoiceOver / Narrator / UI Automation see the labelled widgets (issue #116).
+egui-winit = { workspace = true, features = ["accesskit"] }
+muda.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+winit.workspace = true
+
+# Native file dialogs (File > Open / Save As, unsaved-changes prompt). Other
+# platforms get no dialogs (`shell::dialogs::Headless`).
+[target.'cfg(any(target_os = "macos", windows))'.dependencies]
+rfd.workspace = true
+
+# Save As on Windows drives IFileSaveDialog itself (`shell::win_save`, issue #126).
+# Same 0.62 line wgpu-hal already links; only the shell dialog bindings are added.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_UI_Shell_Common", "Win32_System_Com"] }
+windows-core = { workspace = true, features = ["std"] }
+
+# Projects opened from Finder (double-click, Dock drop) arrive as an Apple event:
+# `shell::open_documents` adds `application:openURLs:` to winit's app delegate. Both
+# crates are already linked through winit / wgpu-hal / muda.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = ["NSArray", "NSString", "NSURL"] }
+
+[dev-dependencies]
+# Glyph coverage test (ui_text.rs) reads font character maps; already linked through
+# egui's epaint, so no new code.
+skrifa.workspace = true
+tempfile.workspace = true
+# Acceptance tests drive the real workbench through accesskit (labels, not coordinates).
+egui_kittest.workspace = true
+# Acceptance: world transforms of layers (locked child keeps its place, #124).
+bae-anim.workspace = true
+
+[lints]
+workspace = true

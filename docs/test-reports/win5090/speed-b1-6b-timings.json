@@ -1,0 +1,70 @@
+{
+  "ae_png_all_runs": [
+    25.652,
+    22.645,
+    22.419
+  ],
+  "ae_png_one_runs": [
+    1.728,
+    1.81,
+    1.81
+  ],
+  "ae_tiff_one_runs": [
+    8.1797016,
+    7.9145689,
+    7.939394999999999
+  ],
+  "bae_png_all_runs": [
+    13.014902999999999,
+    13.0102932,
+    13.008863199999999
+  ],
+  "bae_png_one_runs": [
+    1.0058082,
+    1.0068734,
+    1.003466
+  ],
+  "med": {
+    "ae_png_all": 22.645,
+    "ae_png_one": 1.81,
+    "ae_tiff_one": 7.939394999999999,
+    "bae_png_all": 13.0102932,
+    "bae_png_one": 1.0058082
+  },
+  "note": "AE PNG via saveFrameToPng+File restat (OM Format not settable on CN AE)",
+  "derived": {
+    "ae_tiff_all_prior_s": 18.269,
+    "overhead_ae_tiff_s": 7.878498333333333,
+    "overhead_ae_png_s": 1.7345166666666667,
+    "overhead_bae_png_s": 0.9624405559999999,
+    "fps_ae_png": 13.247957606535659,
+    "fps_bae_png": 23.058665580265323,
+    "ratio_ae_png_over_bae": 1.7405449402170277
+  },
+  "bae_json_phases": {
+    "bae-all-1.json": {
+      "sum_eval_ms": 88.537,
+      "sum_render_ms": 1578.977,
+      "total_ms": 11955.2723,
+      "n": 300
+    },
+    "bae-all-2.json": {
+      "sum_eval_ms": 94.677,
+      "sum_render_ms": 1585.962,
+      "total_ms": 12063.831900000001,
+      "n": 300
+    },
+    "bae-all-3.json": {
+      "sum_eval_ms": 87.985,
+      "sum_render_ms": 1530.088,
+      "total_ms": 11801.9394,
+      "n": 300
+    },
+    "bae-one-2.json": {
+      "sum_eval_ms": 0.796,
+      "sum_render_ms": 45.848,
+      "total_ms": 57.3224,
+      "n": 1
+    }
+  }
+}

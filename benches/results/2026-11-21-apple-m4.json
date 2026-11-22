@@ -1,0 +1,150 @@
+{
+  "description": "1080p30 10 s: 50 animated solids (shape stand-ins, 1/5 Add/Screen/Multiply/Overlay) + 10 animated RGBA textures (text stand-ins) + background",
+  "draw_calls_per_frame": 21,
+  "draws_per_frame": 51,
+  "encode_ms": 0.239166,
+  "eval_ms_mean": 0.03268962000000003,
+  "eval_ms_p95": 0.032208,
+  "export_fps_async": 672.4242364315162,
+  "export_fps_full": 359.37414963091845,
+  "frames": 300,
+  "gpu": "Apple M4 (Metal, integrated)",
+  "graph_build_ms": 0.008291999999999999,
+  "latency_ms_p50": 1.3444170000000002,
+  "latency_ms_p95": 1.493541,
+  "layers": 61,
+  "passes_per_frame": 8,
+  "preview_fps_full": 1004.0282449879119,
+  "preview_fps_half": 1083.361508255892,
+  "scenario": "B1",
+  "scene_build_ms": 22.689084,
+  "bae_render_export": {
+    "note": "bae render B1 300 frames, wall clock incl. process start, median of 3; fixed = --frame 0; per-frame stages in ms/frame (encode/write summed over encoder threads). before = dev 6aae5b8 serial PNG; after = export pipeline",
+    "runs": [
+      {
+        "label": "before: dev serial PNG",
+        "wall_s": 5.027,
+        "fixed_s": 0.033,
+        "per_frame_ms": 16.65,
+        "walls": [
+          5.01,
+          5.027,
+          5.027
+        ],
+        "eval_ms": 0.045,
+        "render+readback_ms": 2.781,
+        "loop_fps": 59.9
+      },
+      {
+        "label": "after: PNG (fast, default)",
+        "wall_s": 0.468,
+        "fixed_s": 0.043,
+        "per_frame_ms": 1.42,
+        "walls": [
+          0.464,
+          0.468,
+          0.468
+        ],
+        "drain_ms": 0.021,
+        "encode_ms": 5.611,
+        "encoder_stall_ms": 0.003,
+        "eval_ms": 0.196,
+        "readback_copy_ms": 0.847,
+        "readback_wait_ms": 0.427,
+        "render_ms": 0.606,
+        "write_ms": 0.462,
+        "threads": 10,
+        "MB": 78.9,
+        "loop_fps": 683.6
+      },
+      {
+        "label": "after: PNG fastest",
+        "wall_s": 0.452,
+        "fixed_s": 0.032,
+        "per_frame_ms": 1.4,
+        "walls": [
+          0.451,
+          0.452,
+          0.465
+        ],
+        "drain_ms": 0.008,
+        "encode_ms": 1.549,
+        "encoder_stall_ms": 0.001,
+        "eval_ms": 0.079,
+        "readback_copy_ms": 0.65,
+        "readback_wait_ms": 0.903,
+        "render_ms": 0.363,
+        "write_ms": 0.499,
+        "threads": 10,
+        "MB": 88.0,
+        "loop_fps": 707.5
+      },
+      {
+        "label": "after: PNG fast, 8 threads",
+        "wall_s": 0.472,
+        "fixed_s": 0.034,
+        "per_frame_ms": 1.46,
+        "walls": [
+          0.471,
+          0.472,
+          0.475
+        ],
+        "drain_ms": 0.021,
+        "encode_ms": 5.574,
+        "encoder_stall_ms": 0.004,
+        "eval_ms": 0.181,
+        "readback_copy_ms": 0.867,
+        "readback_wait_ms": 0.419,
+        "render_ms": 0.642,
+        "write_ms": 0.382,
+        "threads": 8,
+        "MB": 78.9,
+        "loop_fps": 676.1
+      },
+      {
+        "label": "after: EXR (zip, half)",
+        "wall_s": 2.185,
+        "fixed_s": 0.066,
+        "per_frame_ms": 7.06,
+        "walls": [
+          2.174,
+          2.185,
+          2.669
+        ],
+        "drain_ms": 0.466,
+        "encode_ms": 68.9,
+        "encoder_stall_ms": 5.022,
+        "eval_ms": 0.22,
+        "readback_copy_ms": 1.117,
+        "readback_wait_ms": 0.128,
+        "render_ms": 1.102,
+        "write_ms": 0.952,
+        "threads": 10,
+        "MB": 193.2,
+        "loop_fps": 139.4
+      },
+      {
+        "label": "after: TIFF uncompressed",
+        "wall_s": 1.262,
+        "fixed_s": 0.033,
+        "per_frame_ms": 4.1,
+        "walls": [
+          1.17,
+          1.262,
+          4.957
+        ],
+        "drain_ms": 0.337,
+        "encode_ms": 0.679,
+        "encoder_stall_ms": 2.336,
+        "eval_ms": 0.159,
+        "readback_copy_ms": 0.807,
+        "readback_wait_ms": 0.517,
+        "render_ms": 0.561,
+        "write_ms": 33.518,
+        "threads": 10,
+        "MB": 2488.4,
+        "loop_fps": 245.5
+      }
+    ]
+  }
+}

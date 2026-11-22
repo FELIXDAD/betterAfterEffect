@@ -1,0 +1,27 @@
+﻿{
+    "method_note":  "PNG=saveFrameToPng (same as published); TIFF=aerender; cache cleared before EACH run; Disk Cache Enabled; Folder=D:\\\\05_Documents\\\\Temp\\\\AECache",
+    "prior_png":  [
+                      22.395,
+                      22.017,
+                      21.898
+                  ],
+    "prior_tif":  [
+                      18.515,
+                      18.87,
+                      18.491
+                  ],
+    "nocache_png":  [
+                        29.077,
+                        28.799,
+                        28.572
+                    ],
+    "nocache_tif":  [
+                        18.757004,
+                        18.9569112,
+                        19.3391224
+                    ],
+    "med_prior_png":  22.017,
+    "med_prior_tif":  18.515,
+    "med_nocache_png":  28.799,
+    "med_nocache_tif":  18.9569112
+}

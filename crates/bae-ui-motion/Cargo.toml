@@ -1,0 +1,38 @@
+[package]
+name = "bae-ui-motion"
+description = "BAE motion workspace UI (AE-style): project panel, composition viewer, timeline, properties, effect controls, preview"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bae-app.workspace = true
+bae-model.workspace = true
+bae-anim.workspace = true
+bae-motion.workspace = true
+bae-prefs.workspace = true
+bae-ui.workspace = true
+# Decompresses the embedded menu tables (catalog.bin); already in the app (zip, png).
+flate2.workspace = true
+bae-gpu.workspace = true
+bae-platform.workspace = true
+# The app enables `media`; the viewer itself does not need it.
+bae-render = { workspace = true, default-features = false }
+# Probing files for File > Import (the app links bae-media through bae-render's
+# `media` feature already).
+bae-media.workspace = true
+egui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+# Render queue tests write TIFF too (bae-media encoders).
+bae-render = { workspace = true, features = ["media"] }
+tempfile.workspace = true

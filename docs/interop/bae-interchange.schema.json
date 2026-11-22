@@ -1,0 +1,903 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bae.invalid/schema/bae-interchange-0.1.json",
+  "title": "BAE interchange file (draft 0.2)",
+  "description": "AE <-> BAE interchange. The prim tree uses the bae-model PrimTree / AttrSpec / Keyframe / Value JSON encoding. See docs/interop/bae-interchange.md.",
+  "type": "object",
+  "required": [
+    "format",
+    "format_version",
+    "profile",
+    "generator",
+    "time",
+    "prims",
+    "assets",
+    "report"
+  ],
+  "properties": {
+    "format": {
+      "const": "bae-interchange"
+    },
+    "format_version": {
+      "type": "string",
+      "pattern": "^0\\.[0-9]+\\.[0-9]+$"
+    },
+    "profile": {
+      "enum": [
+        "ae"
+      ]
+    },
+    "generator": {
+      "type": "object",
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "build": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        }
+      }
+    },
+    "exported_at": {
+      "type": "string"
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "project_path": {
+          "type": "string"
+        },
+        "project_name": {
+          "type": "string"
+        }
+      }
+    },
+    "time": {
+      "type": "object",
+      "required": [
+        "unit",
+        "flicks_per_second",
+        "key_time_base"
+      ],
+      "properties": {
+        "unit": {
+          "const": "flicks"
+        },
+        "flicks_per_second": {
+          "const": 705600000
+        },
+        "key_time_base": {
+          "enum": [
+            "comp",
+            "layer"
+          ]
+        }
+      }
+    },
+    "prims": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PrimTree"
+      }
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/AssetFile"
+      }
+    },
+    "report": {
+      "$ref": "#/$defs/Report"
+    }
+  },
+  "$defs": {
+    "PrimName": {
+      "description": "bae-model validate_name: Unicode letters/digits, '_' and '-', not starting with '-'. The pattern accepts any non-ASCII character; bae-model's stricter Unicode check runs on import.",
+      "type": "string",
+      "pattern": "^[0-9A-Za-z_\\u0080-\\uFFFF][0-9A-Za-z_\\u0080-\\uFFFF-]*$"
+    },
+    "PrimPath": {
+      "type": "string",
+      "pattern": "^/([0-9A-Za-z_\\u0080-\\uFFFF][0-9A-Za-z_\\u0080-\\uFFFF-]*(/[0-9A-Za-z_\\u0080-\\uFFFF][0-9A-Za-z_\\u0080-\\uFFFF-]*)*)?$"
+    },
+    "AttrName": {
+      "description": "bae-model validate_attr_name: letters/digits/'_'/'-', ':' as namespace separator (not first or last), at most 256 bytes. AE property names are 'ae:' + encoded matchName segments (bae-interchange.md 4.8).",
+      "type": "string",
+      "maxLength": 256,
+      "pattern": "^[0-9A-Za-z_\\u0080-\\uFFFF-]([0-9A-Za-z_\\u0080-\\uFFFF:-]*[0-9A-Za-z_\\u0080-\\uFFFF-])?$"
+    },
+    "PrimTree": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/PrimName"
+        },
+        "specifier": {
+          "enum": [
+            "def",
+            "over"
+          ]
+        },
+        "prim_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attrs": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/AttrName"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/AttrSpec"
+          }
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "prim"
+            ],
+            "properties": {
+              "project": {
+                "type": "string"
+              },
+              "prim": {
+                "$ref": "#/$defs/PrimPath"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrimTree"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "prim_type": {
+                "const": "Layer"
+              }
+            },
+            "required": [
+              "prim_type"
+            ]
+          },
+          "then": {
+            "required": [
+              "attrs"
+            ],
+            "properties": {
+              "attrs": {
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "properties": {
+                      "value": {
+                        "properties": {
+                          "type": {
+                            "const": "enum"
+                          },
+                          "value": {
+                            "enum": [
+                              "shape",
+                              "text",
+                              "solid",
+                              "footage",
+                              "null",
+                              "camera",
+                              "light",
+                              "adjustment",
+                              "pre_comp",
+                              "audio"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "prim_type": {
+                "const": "Effect"
+              }
+            },
+            "required": [
+              "prim_type"
+            ]
+          },
+          "then": {
+            "required": [
+              "attrs"
+            ],
+            "properties": {
+              "attrs": {
+                "required": [
+                  "match_name"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "AttrSpec": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "$ref": "#/$defs/Value"
+        },
+        "keyframes": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^-?[0-9]+$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/Keyframe"
+          }
+        },
+        "expression": {
+          "$ref": "#/$defs/Expression"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Expression": {
+      "type": "object",
+      "required": [
+        "source"
+      ],
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Interpolation": {
+      "enum": [
+        "linear",
+        "bezier",
+        "hold"
+      ]
+    },
+    "Ease": {
+      "type": "object",
+      "required": [
+        "speed",
+        "influence"
+      ],
+      "properties": {
+        "speed": {
+          "type": "number"
+        },
+        "influence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        }
+      },
+      "additionalProperties": false
+    },
+    "Vec3": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "Keyframe": {
+      "type": "object",
+      "required": [
+        "value"
+      ],
+      "properties": {
+        "value": {
+          "$ref": "#/$defs/Value"
+        },
+        "interp_in": {
+          "$ref": "#/$defs/Interpolation"
+        },
+        "interp_out": {
+          "$ref": "#/$defs/Interpolation"
+        },
+        "ease_in": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Ease"
+          }
+        },
+        "ease_out": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Ease"
+          }
+        },
+        "spatial_in": {
+          "$ref": "#/$defs/Vec3"
+        },
+        "spatial_out": {
+          "$ref": "#/$defs/Vec3"
+        },
+        "flags": {
+          "type": "object",
+          "properties": {
+            "temporal_continuous": {
+              "type": "boolean"
+            },
+            "temporal_auto_bezier": {
+              "type": "boolean"
+            },
+            "spatial_continuous": {
+              "type": "boolean"
+            },
+            "spatial_auto_bezier": {
+              "type": "boolean"
+            },
+            "roving": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "label": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        }
+      },
+      "additionalProperties": false
+    },
+    "Point2": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "BezierPath": {
+      "type": "object",
+      "required": [
+        "vertices",
+        "in_tangents",
+        "out_tangents",
+        "closed"
+      ],
+      "properties": {
+        "vertices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Point2"
+          }
+        },
+        "in_tangents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Point2"
+          }
+        },
+        "out_tangents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Point2"
+          }
+        },
+        "closed": {
+          "type": "boolean"
+        },
+        "feather": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FeatherPoint"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "TextDocument": {
+      "description": "bae-model TextDocument (value.rs). Fields bae-model does not have yet (font_family, font_style, apply_fill, apply_stroke, auto_leading, horizontal_scale, vertical_scale, superscript, subscript, tsume, point_text) are allowed and ignored by bae-model.",
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "font": {
+          "type": "string"
+        },
+        "font_family": {
+          "type": "string"
+        },
+        "font_style": {
+          "type": "string"
+        },
+        "font_size": {
+          "type": "number"
+        },
+        "fill_color": {
+          "$ref": "#/$defs/Color"
+        },
+        "stroke_color": {
+          "$ref": "#/$defs/Color"
+        },
+        "stroke_width": {
+          "type": "number"
+        },
+        "apply_fill": {
+          "type": "boolean"
+        },
+        "apply_stroke": {
+          "type": "boolean"
+        },
+        "stroke_over_fill": {
+          "type": "boolean"
+        },
+        "justification": {
+          "enum": [
+            "left",
+            "right",
+            "center",
+            "justify_last_left",
+            "justify_last_right",
+            "justify_last_center",
+            "justify_all",
+            "multiple"
+          ]
+        },
+        "tracking": {
+          "type": "number"
+        },
+        "leading": {
+          "type": "number"
+        },
+        "auto_leading": {
+          "type": "boolean"
+        },
+        "baseline_shift": {
+          "type": "number"
+        },
+        "horizontal_scale": {
+          "type": "number"
+        },
+        "vertical_scale": {
+          "type": "number"
+        },
+        "faux_bold": {
+          "type": "boolean"
+        },
+        "faux_italic": {
+          "type": "boolean"
+        },
+        "all_caps": {
+          "type": "boolean"
+        },
+        "small_caps": {
+          "type": "boolean"
+        },
+        "superscript": {
+          "type": "boolean"
+        },
+        "subscript": {
+          "type": "boolean"
+        },
+        "tsume": {
+          "type": "number"
+        },
+        "box_size": {
+          "$ref": "#/$defs/Point2"
+        },
+        "box_position": {
+          "$ref": "#/$defs/Point2"
+        },
+        "point_text": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "text",
+        "font",
+        "font_size"
+      ],
+      "additionalProperties": true
+    },
+    "Color": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "Value": {
+      "type": "object",
+      "required": [
+        "type",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "float"
+            },
+            "value": {
+              "type": "number"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "int"
+            },
+            "value": {
+              "type": "integer"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "bool"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "vec2"
+            },
+            "value": {
+              "$ref": "#/$defs/Point2"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "vec3"
+            },
+            "value": {
+              "$ref": "#/$defs/Vec3"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "color"
+            },
+            "value": {
+              "$ref": "#/$defs/Color"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "bezier"
+            },
+            "value": {
+              "$ref": "#/$defs/BezierPath"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "enum"
+            },
+            "value": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "asset_ref"
+            },
+            "value": {
+              "$ref": "#/$defs/PrimPath"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "prim_ref"
+            },
+            "value": {
+              "$ref": "#/$defs/PrimPath"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "bytes"
+            },
+            "value": {
+              "type": "string",
+              "contentEncoding": "base64"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "float_list"
+            },
+            "value": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "text_document"
+            },
+            "value": {
+              "$ref": "#/$defs/TextDocument"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "time"
+            },
+            "value": {
+              "type": "integer"
+            }
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "frame_rate"
+            },
+            "value": {
+              "$ref": "#/$defs/FrameRate"
+            }
+          }
+        }
+      ]
+    },
+    "AssetFile": {
+      "type": "object",
+      "required": [
+        "prim",
+        "path_absolute"
+      ],
+      "properties": {
+        "prim": {
+          "$ref": "#/$defs/PrimPath"
+        },
+        "path_absolute": {
+          "type": "string"
+        },
+        "path_relative": {
+          "type": "string"
+        },
+        "aep_relative": {
+          "type": "string"
+        },
+        "missing": {
+          "type": "boolean"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "modified": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "object",
+          "required": [
+            "first"
+          ],
+          "properties": {
+            "first": {
+              "type": "string"
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "collected": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ReportItem": {
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "attr": {
+          "type": "string"
+        },
+        "match_name": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Report": {
+      "type": "object",
+      "required": [
+        "warnings",
+        "unsupported"
+      ],
+      "properties": {
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ReportItem"
+          }
+        },
+        "unsupported": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ReportItem"
+          }
+        },
+        "stats": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "FeatherPoint": {
+      "description": "bae-model FeatherPoint (AE mask feather point).",
+      "type": "object",
+      "required": [
+        "segment",
+        "t",
+        "radius"
+      ],
+      "properties": {
+        "segment": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "t": {
+          "type": "number"
+        },
+        "radius": {
+          "type": "number"
+        },
+        "tension": {
+          "type": "number"
+        },
+        "hold": {
+          "type": "boolean"
+        },
+        "inner": {
+          "type": "boolean"
+        },
+        "corner_angle": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FrameRate": {
+      "type": "object",
+      "required": [
+        "num",
+        "den"
+      ],
+      "properties": {
+        "num": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "den": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

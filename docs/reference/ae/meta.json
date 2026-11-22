@@ -1,0 +1,82 @@
+{
+  "source": {
+    "app": "Adobe After Effects",
+    "version": "26.0x67",
+    "buildName": "26.0x67",
+    "buildNumber": 67,
+    "language": "zh_CN",
+    "platform": "Windows 11 Pro (10.0.26200, x64)",
+    "extractedAt": "2026-11-21"
+  },
+  "extractionMethods": {
+    "effectsAndLayersAndRender": "AfterFX.exe -r tools/ae/reference/extract_ae_data.jsx (ExtendScript DOM)",
+    "menus": "tools/ae/reference/extract_ae_menus.ps1 (win32_user32_GetMenu)",
+    "shortcutsAndPreferences": "tools/ae/reference/parse_ae_configs.py (parsed from %APPDATA%/Adobe/After Effects/26.0)"
+  },
+  "compRenderers": [
+    "ADBE Advanced 3d",
+    "ADBE Calder",
+    "ADBE Ernst"
+  ],
+  "defaultCompRenderer": "ADBE Advanced 3d",
+  "extendScriptCapabilities": {
+    "dropdownOptionLabelsExposed": true,
+    "dropdownPropertyName": "Property.propertyParameters",
+    "dropdownParamsExtracted": 940,
+    "propertyReflectProbe": {
+      "effect": "ADBE Gaussian Blur 2",
+      "paramName": "模糊方向",
+      "paramMatchName": "ADBE Gaussian Blur 2-0002",
+      "propertyValueType": "OneD",
+      "hasMin": true,
+      "minValue": 1,
+      "hasMax": true,
+      "maxValue": 3,
+      "propertyParameters": [
+        "水平和垂直",
+        "水平",
+        "垂直"
+      ]
+    }
+  },
+  "counts": {
+    "effectsCatalogTotal": 749,
+    "effectsAdobeBuiltin": 362,
+    "effectsAdobeBundled": 83,
+    "effectsDetailedExtracted": 439,
+    "effectsTotalLeafParams": 5637,
+    "effectsDropdownParams": 940,
+    "effectsSkipped": 6,
+    "effectsThirdParty": 304,
+    "effectCategoryFiles": 24,
+    "layerTypeFiles": 9,
+    "layerLeafPropertiesByType": {
+      "solid": 278,
+      "text": 276,
+      "shape": 332,
+      "camera": 52,
+      "light": 130,
+      "null": 137,
+      "adjustment": 137,
+      "footage": 274,
+      "precomp": 137
+    },
+    "renderSettingsTemplates": 6,
+    "renderSettingsKeys": 17,
+    "outputModuleTemplates": 18,
+    "outputModuleKeys": 11,
+    "shortcutContexts": 32,
+    "shortcutCommands": 669,
+    "tools": 27,
+    "panelsCore": 8,
+    "panelsAuxiliary": 25,
+    "panelsScriptUI": 2,
+    "workspaces": 16,
+    "menuTopLevel": 9,
+    "menuSubmenus": 94,
+    "menuItems": 867,
+    "preferenceSections": 128,
+    "preferenceKeys": 975,
+    "menuItemsWithCommandId": 863
+  }
+}

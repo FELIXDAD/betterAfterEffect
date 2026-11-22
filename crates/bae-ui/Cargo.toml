@@ -1,0 +1,39 @@
+[package]
+name = "bae-ui"
+description = "BAE UI shell: theme, docking, title bar, icons, widgets, panels, workspaces and shortcuts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+bae-app.workspace = true
+bae-model.workspace = true
+bae-prefs.workspace = true
+egui.workspace = true
+# Inflates the embedded icon data (icons/vector.rs); already linked through bae-model's zip.
+flate2.workspace = true
+# System UI fonts (theme::system_ui_fonts): the font database bae-text / parley use,
+# already linked, so the app bundles no fonts.
+fontique.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+# The shell demo (`cargo run -p bae-ui --example shell`) runs on eframe. eframe is not a
+# workspace pin: the app drives bae-ui through egui-winit + egui-wgpu on the shared
+# bae-gpu device (docs/spec/dependencies.md §10). `wgpu_no_default_features` plus the
+# workspace wgpu keeps one wgpu with only the Metal/D3D12 backends.
+# No `default_fonts`: the demo installs the system fonts (`theme::apply`) as the app does,
+# and egui's bundled fonts would reach every test build through feature unification,
+# hiding tests that run without fonts (bae_ui::testing::ctx_with_fonts).
+[dev-dependencies]
+egui_kittest.workspace = true
+eframe = { version = "0.36.2", default-features = false, features = ["wgpu_no_default_features"] }
+wgpu.workspace = true
+
+[lints]
+workspace = true

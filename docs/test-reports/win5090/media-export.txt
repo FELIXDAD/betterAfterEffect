@@ -1,0 +1,19 @@
+cargo :     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s
+所在位置 行:10 字符: 1
++ cargo test -p bae-media --test export -- --nocapture *> docs/test-rep ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Finished `t...get(s) in 0.31s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+     Running tests\export.rs (target\debug\build\bae-media/a387290b7c20484b\out\export-a387290b7c20484b.exe)
+
+running 6 tests
+test cancel_removes_partial_output ... ok
+test png_sixteen_bit_rgb_is_premultiplied_over_black ... ok
+test png_sequence_round_trip_straight_alpha ... ok
+test queue_renders_jobs_in_order ... ok
+test exr_sequence_keeps_hdr_tags_and_timecode ... ok
+test gpu_frames_are_read_back_in_order ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s
+

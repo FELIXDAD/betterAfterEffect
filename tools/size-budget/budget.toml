@@ -1,0 +1,59 @@
+# BAE 体积预算（docs/ARCHITECTURE.md 第 11 节）。
+#
+# 由 `cargo xtask size`（应用本体）和 `cargo xtask dist`（打包产物）读取，CI 每次都检查。
+# 提高预算需要单独的 PR 并写明理由。
+#
+# 每个表是一项被测产物，字段：
+#   description  测量的是什么（报告里显示）
+#   max_mib      默认上限，单位 MiB（1 MiB = 1024 × 1024 字节）。第 11 节写的 "MB" 一律按 MiB 计。
+#   enforced     true：超出预算时命令以非零退出码失败；false（默认）：只在报告里提示
+#   targets      按 target triple 覆盖上限：[<名称>.targets."<triple>"] max_mib = …
+#                没有覆盖的 target 用默认 max_mib。
+
+# 应用本体：release 构建的 bae 可执行文件（strip 后）。
+# M0 是 15 MiB。M1 起调为 30 MiB：数据模型（loro）、MCP（rmcp + tokio）、界面、音频、渲染、
+# 表达式引擎陆续链接进来，冷路径 crate 已经用 opt-level = "s"（根 Cargo.toml）。
+# 2026-11-21 临时放宽到 32 MiB（只在 M1 和 0.0.1 期间）：体积清理（#89）、改用系统字体（#149）
+# 都已做完，这一轮的 PR 也都用了冷路径 opt-level = "s"、压缩嵌入数据、不加依赖；剩下的增长
+# 来自真实的新功能（AE 一致性 P0 和效果库接入），预计合完约 30.3–31 MiB。0.0.1 之后的第一项
+# 体积工作是 panic = "abort"（Windows 约 -7.1 MiB），完成后回到 30 MiB 以下。
+# 详见 docs/ARCHITECTURE.md 第 11 节、docs/spec/dependencies.md 第 9 节。
+# 解压后的应用包 40 MiB 和压缩后安装包 20 MiB 这两条总约束不变（见下）。
+# 检查方：cargo xtask size
+[app]
+description = "bae executable (release, stripped)"
+max_mib = 32.0
+enforced = true
+
+[app.targets."aarch64-apple-darwin"]
+max_mib = 32.0
+
+[app.targets."x86_64-pc-windows-msvc"]
+max_mib = 32.0
+
+# 解压后的应用包：macOS 的 BAE.app，Windows 的程序及依赖目录。
+# 检查方：cargo xtask dist（目前只报告）
+[app-bundle]
+description = "unpacked application (BAE.app / Windows folder)"
+max_mib = 40.0
+enforced = false
+
+[app-bundle.targets."aarch64-apple-darwin"]
+max_mib = 40.0
+
+[app-bundle.targets."x86_64-pc-windows-msvc"]
+max_mib = 40.0
+
+# 压缩后的安装包。目前用 dist 产出的 zip 计量，以后换成 dmg / 安装器。
+# 检查方：cargo xtask dist（目前只报告）
+[installer]
+description = "compressed distributable (zip now, installer later)"
+max_mib = 20.0
+enforced = false
+
+# bae-hub 服务端二进制（services/bae-hub，工作流 10 落地后接入检查）。
+# 检查方：暂无
+[bae-hub]
+description = "bae-hub server executable (release, stripped)"
+max_mib = 15.0
+enforced = false

@@ -1,0 +1,107 @@
+{
+  "source": {
+    "application": "Adobe Illustrator 2026",
+    "version": "30.1.0",
+    "build_number": "136R",
+    "locale": "zh_CN",
+    "platform": "Microsoft Windows 11 专业版 (10.0.26200, Build 26200, 64 位)",
+    "extracted_date": "2026-11-21"
+  },
+  "illustrator": {
+    "product_name": "Adobe Illustrator 2026",
+    "version": "30.1.0",
+    "build_number": "136R",
+    "executable_version": "30.1.0",
+    "scripting_version": "30.0",
+    "extendscript_version": "4.5.6",
+    "ui_locale": "zh_CN"
+  },
+  "windows": {
+    "caption": "Microsoft Windows 11 专业版",
+    "version": "10.0.26200",
+    "build_number": "26200",
+    "architecture": "64 位"
+  },
+  "extraction": {
+    "date": "2026-11-21",
+    "methods": {
+      "menus": "win32_orca_hotkey_alt_MN_GETHMENU",
+      "menu_ids": "matched_from_default_kys_and_public_executeMenuCommand_reference",
+      "shortcuts": "parsed_default_kys_preset",
+      "tools": "parsed_tool_panel_preset_and_kys",
+      "panels": "extracted_from_window_menu_with_internal_ids",
+      "effects": "extracted_from_effect_menu_with_internal_ids",
+      "catalogs": "com_extendscript_and_omv_enum_ids_and_presets_listing",
+      "dom": "com_extendscript_temp_document_reflection_with_symbolic_unavailable_tags"
+    },
+    "script_errors": []
+  },
+  "counts": {
+    "menus": {
+      "submenus": 122,
+      "items": 801,
+      "with_id": 558,
+      "static_items": 631,
+      "static_with_id": 558,
+      "dynamic_items": 170,
+      "with_shortcut": 134,
+      "separators": 125,
+      "top_level": 9
+    },
+    "shortcuts": {
+      "menu_commands_total": 603,
+      "menu_commands_assigned": 184,
+      "menu_commands_matched_in_menus": 398,
+      "tool_actions_total": 130,
+      "tool_actions_assigned": 58
+    },
+    "panels_and_tools": {
+      "default_toolbar_slots": 30,
+      "default_toolbar_tools": 91,
+      "default_toolbar_tools_with_id": 91,
+      "basic_toolbar_tools": 37,
+      "getting_started_tools": 34,
+      "extra_kys_tool_actions": 44,
+      "extra_kys_tool_actions_with_id": 44,
+      "window_menu_items": 44,
+      "window_menu_items_with_id": 41,
+      "window_type_subpanels": 8,
+      "window_type_subpanels_with_id": 8,
+      "window_menu_submenus": 9
+    },
+    "effects": {
+      "illustrator_groups": 8,
+      "illustrator_effects": 59,
+      "illustrator_with_id": 59,
+      "photoshop_groups": 9,
+      "photoshop_effects": 57,
+      "photoshop_with_id": 57,
+      "other_items": 3,
+      "other_with_id": 3,
+      "total_items": 119,
+      "total_with_id": 119
+    },
+    "catalogs": {
+      "available_font_count": 652,
+      "document_profiles": 7,
+      "preset_libraries": {
+        "swatches": 97,
+        "brushes": 25,
+        "graphic_styles": 12,
+        "symbols": 28,
+        "workspaces": 12,
+        "scripts": 3,
+        "actions": 1,
+        "save_for_web": 16
+      },
+      "enums": 135,
+      "save_option_classes": 4,
+      "export_option_classes": 21
+    },
+    "dom": {
+      "object_types": 34,
+      "total_properties": 779,
+      "total_methods": 231
+    }
+  }
+}

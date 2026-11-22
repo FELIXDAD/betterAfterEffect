@@ -1,0 +1,42 @@
+cargo :    Compiling bae-render v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-render)
+所在位置 行:16 字符: 1
++ cargo bench -p bae-effects --bench effects *> docs/test-reports/win50 ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ba...tes\bae-render):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   Compiling bae-plugin v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-plugin)
+   Compiling bae-effects v0.1.0 (E:\05_Orca\betterAfterEffect\dev\crates\bae-effects)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 1m 11s
+     Running benches\effects.rs (target\release\build\bae-effects/ecaaddf489945704\out\effects-ecaaddf489945704.exe)
+adapter: NVIDIA GeForce RTX 5090 D v2 (D3D12, discrete)
+prewarm (all pipelines, RGBA16F): 350.0 ms
+case                                           ms/frame    latency
+4K gaussian blurriness 10                         0.454      0.675
+4K gaussian blurriness 25                         0.241      0.461
+4K gaussian blurriness 100                        0.173      0.410
+4K gaussian blurriness 300                        0.184      0.398
+4K fast box blur r5 x1                            0.409      0.539
+4K fast box blur r20 x3                           1.455      2.430
+4K fast box blur r100 x3                          1.169      1.401
+4K ADBE Tint                                      0.141      0.276
+4K ADBE Tritone                                   0.074      0.497
+4K ADBE Easy Levels2                              0.113      0.216
+4K ADBE Pro Levels2                               0.081      0.226
+4K ADBE HUE SATURATION                            0.116      0.244
+4K ADBE Brightness & Contrast 2                   0.074      0.261
+4K ADBE Exposure2                                 0.095      0.294
+1080p gaussian blurriness 10                      0.126      0.332
+1080p gaussian blurriness 25                      0.154      0.275
+1080p gaussian blurriness 100                     0.123      0.280
+1080p gaussian blurriness 300                     0.188      0.296
+1080p fast box blur r5 x1                         0.110      0.259
+1080p fast box blur r20 x3                        0.435      0.635
+1080p fast box blur r100 x3                       0.639      0.915
+1080p ADBE Tint                                   0.098      0.227
+1080p ADBE Tritone                                0.158      0.201
+1080p ADBE Easy Levels2                           0.099      0.219
+1080p ADBE Pro Levels2                            0.106      0.184
+1080p ADBE HUE SATURATION                         0.104      0.188
+1080p ADBE Brightness & Contrast 2                0.153      0.281
+1080p ADBE Exposure2                              0.106      0.215
