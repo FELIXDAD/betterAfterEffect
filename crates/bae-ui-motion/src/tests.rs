@@ -449,13 +449,9 @@ fn demo_project_builds_and_renders() {
 #[test]
 fn gpu_preview_publishes_the_rendered_comp() {
     use bae_gpu::viewport::ViewportTextureRegistry;
-    use bae_gpu::{GpuContext, GpuContextDescriptor, wgpu};
-    let gpu = match GpuContext::new_headless(GpuContextDescriptor::default()) {
-        Ok(gpu) => gpu,
-        Err(e) => {
-            eprintln!("no GPU, skipping: {e}");
-            return;
-        }
+    use bae_gpu::wgpu;
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
     };
     eprintln!(
         "adapter: {} ({:?})",
@@ -1013,9 +1009,7 @@ fn add_to_render_queue_action() {
 /// focused widget; see bae-ui's `focused_widgets_get_their_keys_before_shortcuts`).
 #[test]
 fn render_button_activates_with_space_and_enter() {
-    let Ok(gpu) = bae_gpu::GpuContext::new_headless(bae_gpu::GpuContextDescriptor::default())
-    else {
-        eprintln!("no GPU, skipping");
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
         return;
     };
     let dir = tempfile::tempdir().unwrap();
