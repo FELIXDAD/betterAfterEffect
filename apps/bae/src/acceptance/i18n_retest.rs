@@ -36,7 +36,11 @@ const NEW_LAYERS: &[&str] = &[
 
 /// Latin words of a Chinese UI with an open issue: let through here only, so the
 /// rest of the scan keeps running. Remove an entry when its issue is fixed.
-const KNOWN_ISSUES: &[(&str, &str)] = &[];
+const KNOWN_ISSUES: &[(&str, &str)] = &[
+    // Settings ▸ Project: the New Project Solids Folder default "Solids"; new
+    // projects name the folder 纯色.
+    ("Solids", "#206"),
+];
 
 fn is_cjk(c: char) -> bool {
     matches!(c, '\u{3400}'..='\u{9fff}' | '\u{f900}'..='\u{faff}')
@@ -45,7 +49,25 @@ fn is_cjk(c: char) -> bool {
 /// Latin words (two letters or more) of `text` that a Chinese UI should not
 /// show; command ids (`viewer.fit`) are identifiers and pass.
 fn latin_words(text: &str, extra_ok: &[String]) -> Vec<String> {
+    // Whole English phrases AE's official Chinese shows as they are
+    // (docs/reference/ae/ui/preferences-dialog.json: the Project page's group
+    // titles, titleZh "Project Options" / "Solids Folder"; Audio "System Default -
+    // <系统默认输出设备>").
+    let mut text = text.to_owned();
+    for phrase in ["Project Options", "Solids Folder", "System Default"] {
+        text = text.replace(phrase, " ");
+    }
+    // Data, not words: colour codes (#2D2D2D) and numbers with a unit (50mm, 8bpc).
+    let data = |w: &str| {
+        (w.len() == 6 && w.chars().all(|c| c.is_ascii_hexdigit()))
+            || (w.starts_with(|c: char| c.is_ascii_digit())
+                && matches!(
+                    w.trim_start_matches(|c: char| c.is_ascii_digit()),
+                    "mm" | "bpc" | "px" | "K"
+                ))
+    };
     text.split(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '_')
+        .filter(|w| !data(w))
         .filter(|w| !(w.contains('.') && w.chars().any(|c| c.is_ascii_lowercase())))
         .flat_map(|w| w.split(['.', '_']))
         .filter(|w| w.chars().filter(|c| c.is_ascii_alphabetic()).count() >= 2)
@@ -79,7 +101,7 @@ fn a11y_texts(h: &Ui) -> Vec<String> {
 
 /// Painted and accessible texts of the last frame that break the language:
 /// Latin words in Chinese, Chinese characters in English.
-fn wrong_language(h: &Ui, zh: bool, extra_ok: &[String]) -> Vec<String> {
+pub(super) fn wrong_language(h: &Ui, zh: bool, extra_ok: &[String]) -> Vec<String> {
     let mut texts = painted_texts(h);
     texts.extend(a11y_texts(h));
     texts.sort();
@@ -210,7 +232,7 @@ fn contents(stage: &Stage, layer: &PrimPath) -> Vec<(String, String)> {
 }
 
 /// A GUI with the status bar showing the GPU like the window does.
-fn gui_with_status() -> (Ui, Vec<String>) {
+pub(super) fn gui_with_status() -> (Ui, Vec<String>) {
     let mut g = Gui::new();
     let mut extra_ok = Vec::new();
     if let Some(gpu) = gpu() {
