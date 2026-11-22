@@ -639,8 +639,9 @@ fn ranges_are_limited_to_the_comp() {
 
 #[test]
 fn progress_of_a_limited_range_counts_the_frames_it_renders() {
-    // 290–400 on a 300-frame comp renders 10 frames; the progress must say
-    // “x / 10”, not “x / 111” (or the fields must show the limited range).
+    // 1780–1900 on an 1800-frame comp renders 20 frames; the progress must
+    // say “x / 20”, not “x / 121” (or the fields must show the limited range),
+    // from the moment the item starts (“0 / 20”, issue #157) to the end.
     let Some(mut h) = gpu_gui() else { return };
     let tmp = tempfile::tempdir().unwrap();
     long_comp(&mut h); // 1 800 frames, slow enough to see the progress
@@ -658,15 +659,9 @@ fn progress_of_a_limited_range_counts_the_frames_it_renders() {
         items(&h)[i].status
     );
     let item = items(&h)[i].clone();
-    // Only the progress once frames are rendering: between taking the item and
-    // limiting its range, the worker briefly shows “0 / 121” (issue #157). A UI
-    // frame sees that state only if it lands in that gap, so checking it here
-    // made this test pass or fail by timing.
-    let totals: std::collections::BTreeSet<usize> = seen
-        .iter()
-        .filter(|(done, _)| *done > 0)
-        .map(|(_, total)| *total)
-        .collect();
+    // Every state counts, the first “0 / x” included: the worker limits the
+    // range when it takes the item (issue #157).
+    let totals: std::collections::BTreeSet<usize> = seen.iter().map(|(_, total)| *total).collect();
     println!("progress seen: {seen:?}");
     assert!(
         totals.iter().all(|t| *t == 20) || (item.start, item.end) == (1780, 1799),
