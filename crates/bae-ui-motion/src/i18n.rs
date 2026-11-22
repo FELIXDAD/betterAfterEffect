@@ -560,7 +560,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ),
     (
         "Adjust composition duration to the time span of the selected layers",
-        "将合成持续时间调整为所选图层的时间跨度",
+        "将合成持续时间调整为所选图层的时间范围",
     ),
     ("Open New Composition", "打开新合成"),
     // Camera Settings and Light Settings (`dialogs::camera_settings`,

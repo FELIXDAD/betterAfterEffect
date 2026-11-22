@@ -67,14 +67,13 @@ pub struct PrecomposeOutput {
     pub layer: PrimPath,
 }
 
-/// Whether `layer` can be pre-composed leaving its attributes (AE: one AV
-/// layer with a source; not text, shape, camera, light or null layers).
+/// Whether `layer` can be pre-composed leaving its attributes (AE 26: one
+/// footage, solid or pre-comp layer; not shape, text, null, camera, light or
+/// adjustment layers).
 pub fn can_leave_attributes(stage: &Stage, layer: &PrimPath) -> bool {
     let kind = query::layer_kind(stage, layer);
-    matches!(
-        kind.as_deref(),
-        Some("solid" | "adjustment" | "footage" | "pre_comp")
-    ) && source_of(stage, layer).is_some()
+    matches!(kind.as_deref(), Some("solid" | "footage" | "pre_comp"))
+        && source_of(stage, layer).is_some()
 }
 
 fn source_of(stage: &Stage, layer: &PrimPath) -> Option<PrimPath> {
@@ -174,7 +173,7 @@ impl Command for Precompose {
     type Output = PrecomposeOutput;
     const ID: &'static str = "layer.precompose";
     const TITLE: &'static str = "Pre-compose";
-    const DESCRIPTION: &'static str = "Pre-compose layers (AE Layer > Pre-compose, Cmd/Ctrl+Shift+C). mode=move puts the layers into a new comp (original comp's size, frame rate, duration; or their time span with adjust_duration) shown by one pre-comp layer at the topmost layer's place. mode=leave (one solid, adjustment, footage or pre-comp layer) puts the layer's source into a new comp of the layer's size and makes it the layer's source, keeping the layer's attributes. Parent, track matte and other links that would cross comps are removed.";
+    const DESCRIPTION: &'static str = "Pre-compose layers (AE Layer > Pre-compose, Cmd/Ctrl+Shift+C). mode=move puts the layers into a new comp (original comp's size, frame rate, duration; or their time span with adjust_duration) shown by one pre-comp layer at the topmost layer's place. mode=leave (one solid, footage or pre-comp layer) puts the layer's source into a new comp of the layer's size and makes it the layer's source, keeping the layer's attributes. Parent, track matte and other links that would cross comps are removed.";
 
     fn run(
         &self,
@@ -247,7 +246,7 @@ impl Command for Precompose {
             };
             if !can_leave_attributes(tx.stage(), layer) {
                 return Err(fail(
-                    "leave all attributes needs a solid, adjustment, footage or pre-comp layer",
+                    "leave all attributes needs a solid, footage or pre-comp layer",
                 ));
             }
             let source = source_of(tx.stage(), layer).expect("checked");

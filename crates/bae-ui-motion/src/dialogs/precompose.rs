@@ -20,6 +20,9 @@ use crate::session::{Pending, SharedSession};
 pub struct PrecomposeMemory {
     pub open_new: bool,
     pub adjust_duration: bool,
+    /// The last choice was Leave all attributes (AE remembers it; the factory
+    /// default is Move).
+    pub leave: bool,
 }
 
 /// The open Pre-compose dialog.
@@ -60,7 +63,7 @@ impl PrecomposeDialog {
             comp,
             layer_name,
             can_leave,
-            leave: can_leave,
+            leave: can_leave && memory.leave,
             adjust_duration: memory.adjust_duration,
             open_new: memory.open_new,
             layers,
@@ -129,6 +132,9 @@ impl PrecomposeDialog {
         let mut d = dialogs.lock();
         d.precompose.open_new = self.open_new;
         d.precompose.adjust_duration = self.adjust_duration;
+        if self.can_leave {
+            d.precompose.leave = self.leave;
+        }
     }
 
     fn body(&mut self, ui: &mut Ui, id: Id) -> Outcome {

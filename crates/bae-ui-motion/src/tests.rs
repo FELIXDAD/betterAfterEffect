@@ -1461,8 +1461,22 @@ fn precompose_dialog_options() {
     h.session().lock().selected_layers.clear();
     h.action(&mut viewer, pre());
     assert!(!h.dialogs().is_open());
-    // One solid: Leave all attributes is offered and chosen.
+    // One solid: Leave all attributes is offered; AE's factory choice is
+    // Move, and the last choice is remembered (#199).
     h.session().lock().selected_layers = vec![solid.clone()];
+    h.action(&mut viewer, pre());
+    {
+        let d = h.dialogs();
+        let mut d = d.lock();
+        let Some(Dialog::Precompose(p)) = d.open.as_mut() else {
+            panic!("Pre-compose is not open");
+        };
+        assert!(!p.leave);
+        assert!(p.name.ends_with(" Comp 1"), "{}", p.name);
+        p.leave = true;
+        d.precompose.leave = true;
+    }
+    h.answer_dialog(egui::Key::Escape);
     h.action(&mut viewer, pre());
     {
         let d = h.dialogs();
@@ -1470,8 +1484,7 @@ fn precompose_dialog_options() {
         let Some(Dialog::Precompose(p)) = d.open.as_ref() else {
             panic!("Pre-compose is not open");
         };
-        assert!(p.leave);
-        assert!(p.name.ends_with(" Comp 1"), "{}", p.name);
+        assert!(p.leave, "the last choice is remembered");
     }
     h.answer_dialog(egui::Key::Escape);
     // Two layers: Move all attributes only; OK is one layer.precompose.
