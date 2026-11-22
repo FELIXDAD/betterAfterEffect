@@ -339,7 +339,7 @@ const EDIT: &[Node] = &[
         ],
     ),
     SEP,
-    it(196613, "Cut", "edit.cut", "", B, Todo),
+    it(196613, "Cut", "edit.cut", "", B, Done),
     it(196614, "Copy", "edit.copy", "", B, Partial),
     it(196615, "Copy with Property Links", "motion.edit.copy_with_property_links", "", B, Later),
     it(196616, "Copy with Relative Property Links", "motion.edit.copy_with_relative_property_links", "", B, Later),

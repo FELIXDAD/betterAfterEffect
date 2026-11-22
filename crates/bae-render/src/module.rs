@@ -865,6 +865,44 @@ mod tests {
             still,
             serial_frames(&project, 4..=4, ExportAlpha::Straight)[0]
         );
+        // #207: a `#` run is numbered for one frame too (AE), so frame-by-frame
+        // renders into one pattern do not overwrite each other.
+        for pattern in ["one/x_####.png", "one/y_[####].png"] {
+            let out = dir.path().join(pattern);
+            for range in ["5-5", "6-6"] {
+                let args = [
+                    project.to_str().unwrap(),
+                    "--comp",
+                    "main",
+                    "--frames",
+                    range,
+                    "-o",
+                    out.to_str().unwrap(),
+                    "--json",
+                ];
+                assert_eq!(render_cli(&args).unwrap(), ExitCode::SUCCESS);
+            }
+        }
+        let mut names: Vec<String> = std::fs::read_dir(dir.path().join("one"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            [
+                "still.png",
+                "x_0005.png",
+                "x_0006.png",
+                "y_0005.png",
+                "y_0006.png"
+            ]
+        );
+        let (_, _, five) = crate::png_out::read_rgba8(&dir.path().join("one/x_0005.png")).unwrap();
+        assert_eq!(
+            five,
+            serial_frames(&project, 5..=5, ExportAlpha::Straight)[0]
+        );
     }
 
     /// A file that cannot be written stops the export with that error (naming

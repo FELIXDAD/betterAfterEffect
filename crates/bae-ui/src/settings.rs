@@ -361,6 +361,8 @@ impl SettingsDialog {
                 ui.allocate_response(screen.size(), egui::Sense::click_and_drag());
             });
         let mut window_open = true;
+        // Enter is OK even on a focused button or menu (AE); Space clicks it.
+        let enter = crate::dialog::take_enter(ctx);
         egui::Window::new(tr(title()))
             .id(egui::Id::new("bae-settings"))
             .order(egui::Order::Foreground)
@@ -373,7 +375,7 @@ impl SettingsDialog {
         let typing = ctx.egui_wants_keyboard_input();
         if !window_open || (!typing && ctx.input(|i| i.key_pressed(Key::Escape))) {
             outcome = Outcome::Cancel;
-        } else if !typing && ctx.input(|i| i.key_pressed(Key::Enter)) {
+        } else if enter || (!typing && ctx.input(|i| i.key_pressed(Key::Enter))) {
             outcome = Outcome::Ok(self.draft.clone());
         }
         if outcome != Outcome::None {

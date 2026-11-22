@@ -77,6 +77,8 @@ pub mod ids {
     /// Shell clipboard actions (Cmd+C / Cmd+V outside text fields).
     pub const COPY: &str = "edit.copy";
     pub const PASTE: &str = "edit.paste";
+    /// Edit > Cut: Copy, then Clear.
+    pub const CUT: &str = "edit.cut";
     /// Layer ▸ Switches ▸ Shy, Lock … and Layer ▸ 3D Layer: params `{"switch":
     /// "<attr>"}` (see [`super::SWITCHES`]); toggles the selected layers.
     pub const LAYER_SWITCH: &str = "motion.layer.switch";
@@ -169,6 +171,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::ADD_TO_RENDER_QUEUE, "Add to Render Queue"),
     // Edit > Copy / Paste (Cmd+C / Cmd+V): selected keyframes.
     (ids::COPY, "Copy"),
+    (ids::CUT, "Cut"),
     (ids::PASTE, "Paste"),
     (ids::LAYER_SWITCH, "Layer Switch"),
     (ids::UNLOCK_ALL_LAYERS, "Unlock All Layers"),
@@ -475,8 +478,15 @@ fn jump_to_key(
 pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &SharedSession) -> bool {
     let stage = cx.stage;
     let id = inv.id.as_str();
-    if !id.starts_with("motion.") && id != ids::COPY && id != ids::PASTE {
+    if !id.starts_with("motion.") && id != ids::COPY && id != ids::PASTE && id != ids::CUT {
         return false;
+    }
+    if id == ids::CUT {
+        // AE: Cut = Copy + Clear (one undo step: the Clear).
+        if handle(&Invocation::new(ids::COPY), cx, session) {
+            handle(&Invocation::new(ids::DELETE), cx, session);
+        }
+        return true;
     }
     match id {
         ids::NEW_COMP => {
@@ -949,10 +959,20 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 s.selected_keys.clear();
             }
         }
+        ids::COPY if keys.is_empty() => {
+            // Layers: everything they hold, so Paste works after a Cut and in
+            // another comp.
+            if layers.is_empty() {
+                return false;
+            }
+            s.layer_clipboard = bae_motion::copy_layers(stage, &layers);
+            s.clipboard = None;
+        }
         ids::COPY => {
             let Some(first) = keys.first() else {
                 return false;
             };
+            s.layer_clipboard.clear();
             let same: Vec<&KeyRef> = keys
                 .iter()
                 .filter(|k| k.path == first.path && k.attr == first.attr)
@@ -971,6 +991,23 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             s.clipboard = Some(KeyClipboard {
                 attr: first.attr.clone(),
                 keys: copied,
+            });
+        }
+        ids::PASTE if !s.layer_clipboard.is_empty() => {
+            // Above the topmost selected layer, else on top; named like
+            // Duplicate; the pasted layers end up selected.
+            let before = query::comp_layers(stage, &info.path);
+            let above = before
+                .iter()
+                .find(|l| s.selected_layers.contains(l))
+                .cloned();
+            cx.invoke_with(
+                "layer.paste",
+                json!({"comp": info.path, "layers": s.layer_clipboard, "above": above}),
+            );
+            s.expect(Pending::NewLayers {
+                comp: info.path.clone(),
+                before,
             });
         }
         ids::PASTE => {
