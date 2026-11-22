@@ -264,7 +264,7 @@ pub struct CompSettingsParams {
     /// Motion blur samples per frame (2D layers), 2–64.
     #[serde(default)]
     pub samples_per_frame: Option<i64>,
-    /// Motion blur adaptive sample limit, 16–256.
+    /// Motion blur adaptive sample limit, 64–256.
     #[serde(default)]
     pub adaptive_sample_limit: Option<i64>,
     #[serde(default)]
@@ -325,8 +325,8 @@ impl Command for SetCompSettings {
         }
         let width = p.width.unwrap_or(info.width);
         let height = p.height.unwrap_or(info.height);
-        if !(4..=30_000).contains(&width) || !(4..=30_000).contains(&height) {
-            return Err(fail("comp size must be between 4 and 30000 pixels"));
+        if !(1..=30_000).contains(&width) || !(1..=30_000).contains(&height) {
+            return Err(fail("comp size must be between 1 and 30000 pixels"));
         }
         if (width, height) != (info.width, info.height) {
             set(tx, &p.comp, "width", Value::Int(i64::from(width)))?;
@@ -457,7 +457,7 @@ impl Command for SetCompSettings {
                 tx,
                 &p.comp,
                 "motion_blur_adaptive_limit",
-                Value::Int(n.clamp(16, 256)),
+                Value::Int(n.clamp(64, 256)),
             )?;
         }
         if let Some(b) = p.preserve_frame_rate {

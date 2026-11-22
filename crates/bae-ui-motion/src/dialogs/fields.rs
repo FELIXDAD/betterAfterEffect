@@ -15,9 +15,9 @@ pub(crate) const PIXEL_ASPECTS: &[(&str, f64)] = &[
     ("D1/DV NTSC Widescreen (1.21)", 40.0 / 33.0),
     ("D1/DV PAL (1.09)", 128.0 / 117.0),
     ("D1/DV PAL Widescreen (1.46)", 512.0 / 351.0),
-    ("Anamorphic 2:1 (2)", 2.0),
     ("HDV 1080/DVCPRO HD 720 (1.33)", 4.0 / 3.0),
     ("DVCPRO HD 1080 (1.5)", 1.5),
+    ("Anamorphic 2:1 (2)", 2.0),
 ];
 
 /// Frames per second used for timecode digits (30 for 29.97).

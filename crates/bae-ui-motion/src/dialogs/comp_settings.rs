@@ -59,7 +59,7 @@ const PRESETS: &[Option<Preset>] = &[
 
 /// The frame rate menu.
 const FRAME_RATES: &[f64] = &[
-    8.0, 10.0, 12.0, 12.5, 15.0, 23.976, 24.0, 25.0, 29.97, 30.0, 48.0, 50.0, 59.94, 60.0, 120.0,
+    8.0, 12.0, 15.0, 23.976, 24.0, 25.0, 29.97, 30.0, 50.0, 59.94, 60.0, 120.0,
 ];
 
 /// Resolution menu: English name and pixel step (`0`: Custom).
@@ -74,8 +74,8 @@ const RESOLUTIONS: &[(&str, u32)] = &[
 /// 3D renderers: English name and model token.
 const RENDERERS: &[(&str, &str)] = &[
     ("Classic 3D", "classic_3d"),
-    ("Cinema 4D", "cinema_4d"),
     ("Advanced 3D", "advanced_3d"),
+    ("Cinema 4D", "cinema_4d"),
 ];
 
 /// The 3×3 anchor grid, row by row.
@@ -125,13 +125,13 @@ impl Default for Values {
             height: 1080,
             pixel_aspect: 1.0,
             fps: 30.0,
-            drop_frame: true,
+            drop_frame: false,
             resolution: [1, 1],
             start: Time::ZERO,
             duration: Time::from_seconds(10.0),
             bg: [0.0, 0.0, 0.0, 1.0],
             shutter_angle: 180.0,
-            shutter_phase: -90.0,
+            shutter_phase: 0.0,
             samples: 16,
             adaptive_limit: 128,
             preserve_frame_rate: false,
@@ -160,13 +160,13 @@ impl Values {
             height: info.height,
             pixel_aspect: info.pixel_aspect,
             fps: info.frame_rate.as_f64(),
-            drop_frame: flag("drop_frame", true),
+            drop_frame: flag("drop_frame", false),
             resolution,
             start: info.display_start,
             duration: info.duration,
             bg: info.bg_color,
             shutter_angle: num("shutter_angle", 180.0),
-            shutter_phase: num("shutter_phase", -90.0),
+            shutter_phase: num("shutter_phase", 0.0),
             samples: num("motion_blur_samples", 16.0) as i64,
             adaptive_limit: num("motion_blur_adaptive_limit", 128.0) as i64,
             preserve_frame_rate: flag("preserve_frame_rate", false),
@@ -275,7 +275,7 @@ impl CompSettings {
             aspect,
             anchor: ResizeAnchor::Center,
             fps_text: None,
-            preview: true,
+            preview: false,
             name_focused: false,
         }
     }
@@ -479,10 +479,10 @@ impl CompSettings {
         let (mut w, mut h) = (f64::from(v.width), f64::from(v.height));
         let ratio = frame_aspect_text(v.width, v.height, 1.0);
         dialog::row(ui, LW, tr("Width:"), |ui| {
-            if fields::number(ui, &mut w, 4.0..=30000.0, 0, tr("px"), tr("Width")).changed() {
+            if fields::number(ui, &mut w, 1.0..=30000.0, 0, tr("px"), tr("Width")).changed() {
                 v.width = w as u32;
                 if self.lock_aspect {
-                    v.height = ((w / self.aspect).round() as u32).clamp(4, 30000);
+                    v.height = ((w / self.aspect).round() as u32).clamp(1, 30000);
                 }
             }
             ui.add_space(24.0);
@@ -494,10 +494,10 @@ impl CompSettings {
             }
         });
         dialog::row(ui, LW, tr("Height:"), |ui| {
-            if fields::number(ui, &mut h, 4.0..=30000.0, 0, tr("px"), tr("Height")).changed() {
+            if fields::number(ui, &mut h, 1.0..=30000.0, 0, tr("px"), tr("Height")).changed() {
                 v.height = h as u32;
                 if self.lock_aspect {
-                    v.width = ((h * self.aspect).round() as u32).clamp(4, 30000);
+                    v.width = ((h * self.aspect).round() as u32).clamp(1, 30000);
                 }
             }
         });
@@ -687,7 +687,14 @@ impl CompSettings {
         const LW: f32 = 128.0;
         let editing = !self.is_new();
         dialog::row(ui, LW, tr("Anchor:"), |ui| {
-            ui.add_enabled_ui(editing, |ui| anchor_grid(ui, &mut self.anchor));
+            // AE: only when editing, and only once the size changed.
+            let resized = match &self.target {
+                Target::Edit { initial, .. } => {
+                    (initial.width, initial.height) != (self.values.width, self.values.height)
+                }
+                Target::New { .. } => false,
+            };
+            ui.add_enabled_ui(editing && resized, |ui| anchor_grid(ui, &mut self.anchor));
         });
         ui.add_space(6.0);
         let v = &mut self.values;
@@ -743,7 +750,7 @@ impl CompSettings {
                 ui.add_space(16.0);
                 ui.label(tr("Adaptive Sample Limit:"));
                 let mut a = v.adaptive_limit as f64;
-                if fields::number(ui, &mut a, 16.0..=256.0, 0, "", tr("Adaptive Sample Limit"))
+                if fields::number(ui, &mut a, 64.0..=256.0, 0, "", tr("Adaptive Sample Limit"))
                     .changed()
                 {
                     v.adaptive_limit = a as i64;
@@ -774,8 +781,10 @@ impl CompSettings {
             ) {
                 v.renderer = RENDERERS[i].1.to_owned();
             }
+            // The renderer options and About windows are not implemented yet.
             ui.add_enabled_ui(false, |ui| {
                 let _ = ui.button(tr("Options..."));
+                let _ = ui.button(tr("About..."));
             });
         });
         ui.add_space(8.0);
@@ -1110,6 +1119,7 @@ pub(crate) const STRINGS: &[&str] = &[
     "Cinema 4D",
     "Advanced 3D",
     "Options...",
+    "About...",
     "Extruded text and shapes, reflections; slower than Classic 3D.",
     "GPU-accelerated 3D with lights, shadows and 3D models.",
     "Layers as planes in 3D space; supports all 2D features.",

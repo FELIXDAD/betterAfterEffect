@@ -503,6 +503,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Cinema 4D", "CINEMA 4D"),
     ("Advanced 3D", "高级 3D"),
     ("Options...", "选项..."),
+    ("About...", "关于..."),
     (
         "Extruded text and shapes, reflections; slower than Classic 3D.",
         "可以凸出文本和形状、反射；比经典 3D 慢。",
