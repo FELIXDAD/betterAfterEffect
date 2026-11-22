@@ -64,6 +64,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   CARGO_TERM_COLOR: never
@@ -104,17 +105,9 @@ jobs:
                 id: "dispatch-\($j)", set: $set, threads: $threads, wrap: $wrap,
                 pageheap: $pageheap, fresh: $fresh, env: $env, debuglayer: $dl, n: $n }]}')"
           else
-            # The plan for pushes to ci/win-crash-repro. With the #154 fix (#173 merged in),
-            # PR CI run 44955420991 still crashed (0xc0000005) in bae-render's unit tests
-            # (export tests: threaded rendering, `bae render` creating its own device),
-            # with BAE_GPU_VALIDATION=0 as in CI's first test pass. Loop that binary.
-            matrix='{"include":[
-              {"id":"fixed-renderlib-1","set":"bae-render:bae_render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"BAE_GPU_VALIDATION=0","debuglayer":"on","n":"600"},
-              {"id":"fixed-renderlib-2","set":"bae-render:bae_render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"BAE_GPU_VALIDATION=0","debuglayer":"on","n":"600"},
-              {"id":"fixed-renderlib-3","set":"bae-render:bae_render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"BAE_GPU_VALIDATION=0","debuglayer":"on","n":"600"},
-              {"id":"fixed-renderlib-4","set":"bae-render:bae_render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"BAE_GPU_VALIDATION=0","debuglayer":"on","n":"600"},
-              {"id":"fixed-renderlib-5","set":"bae-render:bae_render","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"BAE_GPU_VALIDATION=0","debuglayer":"on","n":"600"}
-            ]}'
+            # The plan for pushes to ci/win-crash-repro: no loops this time; the
+            # `inspect` job re-analyzes a dump from an earlier run.
+            matrix='{"include":[]}'
             matrix="$(echo "$matrix" | jq -c .)"
           fi
           echo "$matrix" | jq .
@@ -122,6 +115,7 @@ jobs:
 
   repro:
     needs: plan
+    if: ${{ needs.plan.outputs.matrix != '{"include":[]}' }}
     name: ${{ matrix.id }}
     runs-on: windows-latest
     timeout-minutes: 170
@@ -477,7 +471,9 @@ jobs:
           Write-Output "cdb: $cdb"
           $bin = "$out\bin"
           $sym = "cache*$env:RUNNER_TEMP\symcache;$bin;srv*https://msdl.microsoft.com/download/symbols"
-          $commands = '.lines -e; .echo ===== ANALYZE =====; !analyze -v; .echo ===== EXCEPTION CONTEXT =====; .ecxr; r; ub @rip L12; u @rip L4; kb 80; .echo ===== ALL THREADS =====; ~*kb 50; .echo ===== MODULES =====; lmv m d3d10warp; lmv m D3D12Core; lmv m d3d12SDKLayers; lmv m d3dcompiler_47; lmv m dxcompiler; lmv m DWrite; q'
+          # Commands that can fail (disassembly at a bad rip) come last: cdb drops the
+          # rest of the command line after an error.
+          $commands = '.lines -e; .echo ===== ANALYZE =====; !analyze -v; .echo ===== ALL THREADS =====; ~*kb 50; .echo ===== EXCEPTION CONTEXT =====; .ecxr; r; kb 80; .echo ===== MODULES =====; lmv m d3d10warp; lmv m D3D12Core; lmv m d3d12SDKLayers; lmv m d3dcompiler_47; lmv m dxcompiler; lmv m DWrite; .echo ===== CODE =====; ub @rip L12; u @rip L4; q'
           foreach ($d in $dumps) {
             $report = "$out\$($d.BaseName)-analysis.txt"
             Write-Output "===== $($d.Name) ($([math]::Round($d.Length / 1MB)) MiB) ====="
@@ -503,3 +499,36 @@ jobs:
             Write-Output "::error::crashes: ${{ steps.runs.outputs.crashes }}, other failures and hangs: ${{ steps.runs.outputs.failures }} (see the step summary and the artifact)"
             exit 1
           }
+
+  inspect:
+    # One-off analysis of a dump uploaded by an earlier run (#154): run
+    # 44957484008, job fixed-renderlib-4 (heap corruption freeing an FXC blob).
+    if: ${{ github.event_name == 'push' }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: win-crash-repro-fixed-renderlib-4
+          run-id: 44957484008
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/dump
+      - name: cdb
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $cdb = @(
+            "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\cdb.exe",
+            "$env:ProgramFiles\Windows Kits\10\Debuggers\x64\cdb.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          $root = "$env:RUNNER_TEMP\dump"
+          Get-ChildItem $root -Recurse -Filter *.dmp | ForEach-Object { "$($_.FullName) $([math]::Round($_.Length / 1MB)) MiB" }
+          $bin = "$root\bin"
+          $sym = "cache*$env:RUNNER_TEMP\symcache;$bin;srv*https://msdl.microsoft.com/download/symbols"
+          $commands = '.lines -e; .echo ===== ALL THREADS =====; ~*kb 60; .echo ===== EXCEPTION =====; .exr -1; .ecxr; kb 80; .echo ===== HEAP =====; !analyze -v; .echo ===== FXC BLOB REFCOUNT =====; x d3dcompiler_47!D3DX11Core::CBuffer::*; uf d3dcompiler_47!D3DX11Core::CBuffer::AddRef; uf d3dcompiler_47!D3DX11Core::CBuffer::Release; q'
+          Get-ChildItem $root -Recurse -Filter *.dmp | ForEach-Object {
+            & $cdb -z $_.FullName -y $sym -i $bin -c $commands
+          }
+          # The same functions straight from the runner's DLL (image opened as a dump).
+          & $cdb -z "$env:WINDIR\System32\d3dcompiler_47.dll" -y "cache*$env:RUNNER_TEMP\symcache;srv*https://msdl.microsoft.com/download/symbols" -c '.reload /f; uf d3dcompiler_47!D3DX11Core::CBuffer::AddRef; uf d3dcompiler_47!D3DX11Core::CBuffer::Release; uf d3dcompiler_47!D3DX11Core::CBuffer::QueryInterface; q'
+          $global:LASTEXITCODE = 0
