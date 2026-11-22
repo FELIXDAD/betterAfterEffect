@@ -318,7 +318,7 @@ impl FreeTransform {
         painter.add(egui::Shape::closed_line(q.to_vec(), stroke));
         for h in shown.handles() {
             painter.rect_stroke(
-                Rect::from_center_size(shown.screen(view, h), vec2(5.0, 5.0)),
+                Rect::from_center_size(shown.screen(view, h), vec2(view.point, view.point)),
                 0.0,
                 stroke,
                 egui::StrokeKind::Middle,

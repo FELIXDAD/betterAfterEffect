@@ -165,7 +165,7 @@ pub(super) fn frame(
     });
     let selected = session.lock().selected_layers.clone();
     let paths: Vec<EditablePath> = if tool == Tool::Selection {
-        overlay::editable_paths(stage, comp, &selected, false)
+        overlay::editable_paths(stage, comp, &selected, None)
     } else {
         Vec::new()
     };

@@ -19,6 +19,8 @@ pub(crate) struct View {
     pub origin: Pos2,
     /// Points per comp pixel.
     pub scale: f32,
+    /// Path point and handle size in points (Preferences > Appearance).
+    pub point: f32,
 }
 
 impl View {

@@ -361,8 +361,11 @@ pub(crate) fn run(
     let obj = params.as_object_mut().expect("geometry is an object");
     match target {
         Target::Mask(layer) => {
-            // "Mask N" / "蒙版 N": named by the command in the naming language.
+            // "Mask N" / "蒙版 N": named by the command in the naming language;
+            // Appearance > Cycle Mask Colors.
             obj.insert("layer".into(), json!(layer));
+            let cycle = super::prefs::ViewerPrefs::current(cx.resources).cycle_mask_colors;
+            obj.insert("cycle_colors".into(), json!(cycle));
             cx.invoke_with("mask.create", params);
             Some(layer.clone())
         }
@@ -391,10 +394,9 @@ pub(crate) fn run(
             obj.insert("comp".into(), json!(info.path));
             obj.insert("name".into(), json!(name));
             obj.insert("index".into(), json!(index));
-            obj.insert(
-                "center_anchor".into(),
-                json!(prefs::CENTER_ANCHOR_IN_NEW_SHAPES),
-            );
+            // Composition > Center Anchor Point in New Shape Layers.
+            let center = super::prefs::ViewerPrefs::current(cx.resources).center_shape_anchor;
+            obj.insert("center_anchor".into(), json!(center));
             add_paint(obj, bezier, options);
             cx.invoke_with("shape.add", params);
             let mut s = session.lock();
@@ -418,14 +420,6 @@ fn add_paint(
         s["width"] = json!(options.stroke_width);
         obj.insert("stroke".into(), s);
     }
-}
-
-/// Settings other workstreams will provide (D's Preferences); AE defaults until
-/// then, in one place.
-pub(crate) mod prefs {
-    /// General > "Center Anchor Point in New Shape Layers" (off in AE's defaults
-    /// as the tutorials show; 待核).
-    pub const CENTER_ANCHOR_IN_NEW_SHAPES: bool = false;
 }
 
 /// Size of a layer's own pixels (solid, footage, pre-comp source) in layer space;

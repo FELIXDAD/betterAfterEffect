@@ -103,12 +103,13 @@ impl EditablePath {
 }
 
 /// Editable paths of the selected layers, topmost layer first: masks, then
-/// (with `shapes`) the Bezier paths of shape layers.
+/// (with `shapes`, the settings their colors follow) the Bezier paths of shape
+/// layers.
 pub(crate) fn editable_paths(
     stage: &Stage,
     comp: &EvaluatedComp,
     selected: &[PrimPath],
-    shapes: bool,
+    shapes: Option<super::prefs::ViewerPrefs>,
 ) -> Vec<EditablePath> {
     let mut out = Vec::new();
     for l in comp.layers.iter().filter(|l| selected.contains(&l.path)) {
@@ -120,13 +121,15 @@ pub(crate) fn editable_paths(
                 color: mask_color(stage, &m.path),
             });
         }
-        if shapes && l.kind == bae_model::LayerKind::Shape {
+        if let Some(prefs) = shapes
+            && l.kind == bae_model::LayerKind::Shape
+        {
             let label = stage
                 .prim(&l.path)
                 .and_then(|v| query::static_value(&v, "label"))
                 .and_then(|v| v.as_f64())
                 .map_or(8, |v| v as usize);
-            let color = bae_ui::theme::label_color(label);
+            let color = prefs.handle_color(bae_ui::theme::label_color(label));
             shape_paths(&l.contents, &l.world_matrix, color, &mut out);
         }
     }
@@ -165,7 +168,7 @@ fn shape_paths(
 /// Vertex squares (AE: hollow; `filled` ones are selected).
 pub(super) fn vertices(painter: &Painter, view: &View, p: &EditablePath, filled: Option<usize>) {
     for i in 0..p.path.vertices.len() {
-        let r = egui::Rect::from_center_size(p.screen(view, i), egui::vec2(5.0, 5.0));
+        let r = egui::Rect::from_center_size(p.screen(view, i), egui::vec2(view.point, view.point));
         if filled == Some(i) {
             painter.rect_filled(r, 0.0, p.color);
         } else {

@@ -196,7 +196,8 @@ pub(super) fn frame(
         return None;
     }
     let options = tools.lock().options.clone();
-    let paths = overlay::editable_paths(stage, comp, &selected, true);
+    let prefs = super::prefs::ViewerPrefs::current(cx.resources);
+    let paths = overlay::editable_paths(stage, comp, &selected, Some(prefs));
     let (alt, shift, space, primary_down, pressed) = ui.input(|i| {
         (
             i.modifiers.alt,
@@ -571,7 +572,7 @@ fn paint_handles(
         }
         let h = overlay::to_screen(view, to_comp, [v[0] + t[0], v[1] + t[1]]);
         painter.line_segment([vs, h], Stroke::new(1.0, color));
-        painter.circle_filled(h, 2.5, color);
+        painter.circle_filled(h, view.point / 2.0, color);
     }
 }
 
@@ -582,7 +583,7 @@ fn paint_open_path(painter: &Painter, view: &View, d: &PenPath) {
     painter.extend(overlay::path_shapes(&d.path, &d.to_comp, view, stroke));
     let n = d.path.vertices.len();
     for i in 0..n {
-        let r = Rect::from_center_size(d.screen(view, i), vec2(5.0, 5.0));
+        let r = Rect::from_center_size(d.screen(view, i), vec2(view.point, view.point));
         if i + 1 == n {
             painter.rect_filled(r, 0.0, d.color);
         } else {

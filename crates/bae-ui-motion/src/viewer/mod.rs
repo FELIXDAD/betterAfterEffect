@@ -27,6 +27,7 @@ mod free_transform;
 mod overlay;
 mod path_edit;
 mod pen_tool;
+pub(crate) mod prefs;
 mod select_tool;
 mod shape_tool;
 #[cfg(test)]
@@ -76,6 +77,8 @@ pub struct CompositionViewer {
     mag: f32,
     /// Type tool: text being typed or edited.
     type_tool: type_tool::TypeState,
+    /// Settings read at the start of each frame.
+    prefs: prefs::ViewerPrefs,
     /// Comp → screen mapping of the last frame.
     last_view: Option<View>,
 }
@@ -100,7 +103,15 @@ impl CompositionViewer {
         let fit = fit.min(1.0 / ppp);
         let scale = self.zoom.map_or(fit, |m| m / ppp);
         let origin = area.center() - vec2(w, h) * scale / 2.0 + self.pan;
-        (View { origin, scale }, scale * ppp)
+        let point = self.prefs.point_size;
+        (
+            View {
+                origin,
+                scale,
+                point,
+            },
+            scale * ppp,
+        )
     }
 
     fn zoom_by(
@@ -148,7 +159,7 @@ impl CompositionViewer {
             return false;
         };
         let selected = session.lock().selected_layers.clone();
-        let paths = overlay::editable_paths(cx.stage, &comp, &selected, false);
+        let paths = overlay::editable_paths(cx.stage, &comp, &selected, None);
         path_edit::nudge(cx, session, info, &paths, &self.select.vertices, d)
     }
 
@@ -162,7 +173,7 @@ impl CompositionViewer {
             return;
         };
         let selected = session.lock().selected_layers.clone();
-        let paths = overlay::editable_paths(cx.stage, &comp, &selected, false);
+        let paths = overlay::editable_paths(cx.stage, &comp, &selected, None);
         if path_edit::delete(cx, &paths, &self.select.vertices) {
             self.select.vertices.clear();
         }
@@ -348,6 +359,7 @@ impl Panel for CompositionViewer {
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
+        self.prefs = prefs::ViewerPrefs::current(cx.resources);
         let Some(info) = common::active_comp(cx.stage, &session) else {
             self.title.clear();
             empty_viewer(ui, cx, &session);
@@ -585,14 +597,14 @@ impl Panel for CompositionViewer {
                 .and_then(|v| query::static_value(&v, "label"))
                 .and_then(|v| v.as_f64())
                 .map_or(8, |v| v as usize);
-            let c = theme::label_color(label);
+            let c = self.prefs.handle_color(theme::label_color(label));
             if let Some(q) = render::bounds_quad(l, &view, &outer) {
                 painter.add(egui::Shape::closed_line(q.to_vec(), Stroke::new(1.0, c)));
                 for i in 0..4 {
                     let mid = q[i] + (q[(i + 1) % 4] - q[i]) / 2.0;
                     for p in [q[i], mid] {
                         painter.rect_stroke(
-                            Rect::from_center_size(p, vec2(5.0, 5.0)),
+                            Rect::from_center_size(p, vec2(view.point, view.point)),
                             0.0,
                             Stroke::new(1.0, c),
                             egui::StrokeKind::Middle,

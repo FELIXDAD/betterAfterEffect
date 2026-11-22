@@ -1491,3 +1491,27 @@ fn mouse_wheel_zooms_around_the_pointer_and_trackpads_pan() {
         v2.origin - o
     );
 }
+
+#[test]
+fn tools_follow_the_preferences() {
+    let mut h = H::new();
+    let mut p = bae_prefs::Preferences::default();
+    p.set(bae_prefs::keys::CENTER_SHAPE_ANCHOR, true);
+    p.set("appearance.cycle_mask_colors", false);
+    p.set(bae_prefs::keys::PATH_POINT_SIZE, 9);
+    h.resources
+        .insert(std::sync::Arc::new(bae_prefs::PrefsStore::new(p)));
+    h.frame(Vec::new(), Modifiers::NONE);
+    assert_eq!(h.viewer.last_view.unwrap().point, 9.0, "point and handle size");
+    // Composition > Center Anchor Point in New Shape Layers.
+    let r = h.draw(Tool::Rectangle, (100.0, 50.0), (300.0, 150.0));
+    assert_eq!(one(&r, "shape.add")["center_anchor"], true);
+    h.apply(&r);
+    let layer = query::comp_layers(&h.stage, &h.comp)[0].clone();
+    assert!(close3(h.v3(&layer, "transform:position"), [200.0, 100.0, 0.0]));
+    // Appearance > Cycle Mask Colors off.
+    let solid = h.layer("solid");
+    h.select(&[&solid]);
+    let r = h.draw(Tool::Ellipse, (100.0, 50.0), (300.0, 150.0));
+    assert_eq!(one(&r, "mask.create")["cycle_colors"], false);
+}

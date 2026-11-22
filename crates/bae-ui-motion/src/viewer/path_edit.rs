@@ -299,7 +299,8 @@ pub(super) fn delete(
 pub(super) fn paint(painter: &Painter, view: &View, paths: &[EditablePath], sel: &VertexSelection) {
     for p in paths {
         for i in 0..p.path.vertices.len() {
-            let r = egui::Rect::from_center_size(p.screen(view, i), egui::vec2(5.0, 5.0));
+            let r =
+                egui::Rect::from_center_size(p.screen(view, i), egui::vec2(view.point, view.point));
             if sel.has(&p.prim, i) {
                 painter.rect_filled(r, 0.0, p.color);
                 let v = p.path.vertices[i];
@@ -310,7 +311,7 @@ pub(super) fn paint(painter: &Painter, view: &View, paths: &[EditablePath], sel:
                     }
                     let h = overlay::to_screen(view, &p.to_comp, [v[0] + t[0], v[1] + t[1]]);
                     painter.line_segment([vs, h], Stroke::new(1.0, p.color));
-                    painter.circle_filled(h, 2.5, p.color);
+                    painter.circle_filled(h, view.point / 2.0, p.color);
                 }
             } else {
                 painter.rect_filled(r, 0.0, egui::Color32::from_black_alpha(160));
