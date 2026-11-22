@@ -94,6 +94,16 @@ jobs:
           BAE_GPU_VALIDATION: "1"
         run: cargo test --workspace --locked
 
+      - name: Test the UI crates one by one
+        # `--workspace` unifies features across all crates, so a test that only passes
+        # with a feature some other crate enables (e.g. egui's bundled fonts, through a
+        # dev-dependency) still passes there and fails when the crate is tested alone.
+        # These are the crates whose tests run egui.
+        run: |
+          for crate in bae-ui bae-ui-motion bae; do
+            cargo test --locked -p "$crate"
+          done
+
       - name: One wgpu in the dependency graph
         # Errors ("specification `wgpu` is ambiguous") when two wgpu versions are resolved:
         # renderer, UI and plugins must share one wgpu::Device (docs/spec/dependencies.md).
