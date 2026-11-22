@@ -102,10 +102,11 @@ pub(crate) const SAME_IN_CHINESE: &[&str] = &[
     "BAE",
     "After Effects",
     "Agent",
-    // AE's Chinese UI keeps these: RotoBezier, Roto 笔刷工具, 3D 图层.
+    "3D",
+    "CPU",
+    // AE's Chinese UI keeps these: RotoBezier, Roto 笔刷工具.
     "RotoBezier",
     "Roto",
-    "3D",
 ];
 
 #[test]

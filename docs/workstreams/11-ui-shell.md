@@ -50,10 +50,11 @@
 - [x] 历史面板（命令名 + 作者，含协作者和 Agent；数据来自 Stage 事件）
 - [x] Agent 活动记录、提案面板（`bae_ui::agent::AgentFeed`；`apps/bae` 用 bae-agent 的 `AuditLog` 和 `proposal::proposals` 实现）
 - [x] 首次启动选择岗位、编辑工作区对话框（排序、显示/隐藏、另存为新工作区、删除自定义工作区）
-- [ ] 界面亮度设置（主题色现在是常量，需要把绘制统一经过一个亮度函数）
+- [x] 界面亮度设置：AE 26 改成"外观 ▸ 颜色主题"（最暗 / 深色 / 灯光）。主题 token 仍是常量，每帧细分后的顶点颜色统一经过 `theme::adjust`（只改灰色；默认"最暗"时不处理），见 `docs/ui/settings.md`（D，#161 / #188）
 - [x] 输入法验证报告（模拟测试通过，候选框改为跟随光标；真实拼音端到端待授权后确认，见下文）
 - [ ] 原生多窗口（浮动面板目前画在主窗口内）
 - [x] 工程文件配套（01 的 `app/project-files` 分支代改，2026-11-21，11 当时没有 worker）：新增 `ids::CLOSE_PROJECT`（关闭项目）；`HistoryLog::clear`（打开另一个工程时清空，序号继续增加，按序号缓存的面板会刷新）；`i18n::has_translation`（测试中文覆盖时不必切换全局语言）；欢迎框改成 `egui::Modal`，加关闭按钮，Esc 和点框外都能关掉，关掉时保持当前工作区。
+- [x] 首选项对话框（D，`ui/ae-settings` #161、`ui/ae-settings-align` #188，2026-11-22 合并）：新 crate `bae-prefs`（设置结构、默认值、宽松读写、`PrefsStore` 变更通知，存 `<配置目录>/preferences.json`）；`bae_ui::settings` 对话框按 R1 的 AE 26.0 逐页数据生成（16 页、214 个控件，`crates/bae-prefs/gen/pages.py`），动作 `app.settings {page}`，Cmd+Option+; 打开启动和修复页；已接撤消级别（不显示，默认 1000）、颜色主题、标签颜色和名称、查看器网格和安全边距、自动保存。其余设置能改能存、暂不生效，由 A / C / E 和 bae-motion 接，清单见 `docs/ui/settings.md`。待办：R2 的 Mac 差异、分组说明文字、从机器读的值（内存、采样率）。
 
 ### 进展记录
 

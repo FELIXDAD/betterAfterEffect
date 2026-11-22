@@ -30,6 +30,7 @@ bytemuck.workspace = true
 clap.workspace = true
 glam.workspace = true
 half.workspace = true
+kurbo.workspace = true
 parking_lot.workspace = true
 png.workspace = true
 rustc-hash.workspace = true
@@ -44,6 +45,10 @@ tempfile.workspace = true
 name = "b1"
 harness = false
 required-features = ["media"]
+
+[[bench]]
+name = "masks"
+harness = false
 
 [[test]]
 name = "ae_golden"

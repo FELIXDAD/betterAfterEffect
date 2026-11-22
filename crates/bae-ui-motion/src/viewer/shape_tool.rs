@@ -39,8 +39,12 @@ pub(crate) enum Target {
 }
 
 impl Target {
-    /// The target for the current selection (topmost selected layer first).
+    /// The target for the current selection. Several selected layers: a new
+    /// shape layer above the topmost one (AE 26, R1).
     pub(crate) fn of(stage: &Stage, comp: &PrimPath, selected: &[PrimPath], mask: bool) -> Target {
+        if selected.len() > 1 {
+            return Target::NewLayer;
+        }
         let Some(layer) = query::comp_layers(stage, comp)
             .into_iter()
             .find(|l| selected.contains(l))
@@ -94,8 +98,9 @@ impl DragKey {
 
 /// Roundness step of the Up / Down arrows (pixels; AE's step 待核).
 const ROUNDNESS_STEP: f64 = 1.0;
-/// Polystar roundness step of the arrows and Page Up / Down (percent; 待核).
-const STAR_ROUNDNESS_STEP: f64 = 5.0;
+/// Polystar roundness step of the arrows and Page Up / Down (percent; AE 26
+/// measured 10 % for Left / Right, Page Up / Down 待核).
+const STAR_ROUNDNESS_STEP: f64 = 10.0;
 /// Default inner / outer radius ratio of a new star (AE-SHP-053, 待核).
 const STAR_RATIO: f64 = 0.5;
 /// Scrolled points per Up / Down step while drawing (one wheel notch).

@@ -386,6 +386,18 @@ fn shape_tools_on_other_layers_or_with_tool_creates_mask_make_masks() {
     let r = h.draw(Tool::Rectangle, (100.0, 50.0), (300.0, 150.0));
     let params = one(&r, "shape.add");
     assert!(params.get("layer").is_none() && params["comp"] == json!(h.comp));
+
+    // Several layers selected: a new shape layer above the topmost (AE 26).
+    h.select(&[&solid, &shape]);
+    let r = h.draw(Tool::Rectangle, (100.0, 50.0), (300.0, 150.0));
+    let params = one(&r, "shape.add");
+    assert!(params.get("layer").is_none(), "{params}");
+    let order = query::comp_layers(&h.stage, &h.comp);
+    let top = order
+        .iter()
+        .position(|l| *l == solid || *l == shape)
+        .unwrap();
+    assert_eq!(params["index"], top);
 }
 
 #[test]
@@ -516,8 +528,8 @@ fn arrows_change_roundness_points_and_roundness_of_polystars() {
     assert!((p["inner_radius"].as_f64().unwrap() - 50.0).abs() < 0.01);
     assert!(p["rotation"].as_f64().unwrap().abs() < 0.01, "pointing up");
     assert_eq!(p["points"], 6.0);
-    assert_eq!(p["outer_roundness"], 5.0);
-    assert_eq!(p["inner_roundness"], 5.0);
+    assert_eq!(p["outer_roundness"], 10.0);
+    assert_eq!(p["inner_roundness"], 10.0);
     assert_eq!(h.tools().lock().options.points, 6.0);
     h.apply(&r);
     // Polygon: Down removes a point (never below 3).
