@@ -37,6 +37,9 @@ pub(super) const ALLOWED: &[&str] = &[
     "macos",
     "windows",
     "linux",
+    // AE's official Chinese keeps this abbreviation: the Preferences page
+    // "Memory & CPU" is "内存和 CPU" (docs/reference/ae/menus.json, 编辑 ▸ 首选项).
+    "CPU",
     // GPU APIs (the adapter's own name is added at run time).
     "GPU",
     "Metal",

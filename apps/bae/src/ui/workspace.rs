@@ -115,25 +115,61 @@ pub struct ShortcutRow {
     pub shown: String,
 }
 
+/// Preferences > Startup & Repair > Reveal Preferences in Explorer / Finder.
+pub const REVEAL_PREFERENCES: &str = "startup_repair.reveal_preferences_in_explorer";
+
 /// The workbench plus shell-owned windows.
 pub struct Workspace {
     workbench: Workbench,
     show_about: bool,
+    /// Preferences (app resource `Arc<PrefsStore>`; in memory when absent).
+    prefs: Arc<bae_prefs::PrefsStore>,
+    settings: bae_ui::settings::SettingsDialog,
 }
 
 impl Workspace {
     pub fn new(app: &mut App, state: WorkbenchState) -> Self {
+        let prefs = app
+            .resource::<Arc<bae_prefs::PrefsStore>>()
+            .cloned()
+            .unwrap_or_default();
         Self {
             workbench: Workbench::new(app, state),
             show_about: false,
+            prefs,
+            settings: bae_ui::settings::SettingsDialog::default()
+                .with_host_buttons(&[REVEAL_PREFERENCES, "choose"]),
         }
+    }
+
+    /// Opens Preferences (macOS: Settings) on `page` (`general`, …).
+    pub fn show_settings(&mut self, page: Option<&str>) {
+        let current = self.prefs.current();
+        self.settings.open(page, &current);
+    }
+
+    /// The Preferences window (acceptance tests, macOS run).
+    #[cfg(all(test, target_os = "macos"))]
+    pub fn settings_dialog(&mut self) -> &mut bae_ui::settings::SettingsDialog {
+        &mut self.settings
+    }
+
+    /// Buttons of the Preferences window the shell runs ([`REVEAL_PREFERENCES`],
+    /// `choose:<key>`).
+    pub fn take_settings_requests(&mut self) -> Vec<String> {
+        self.settings.take_requests()
+    }
+
+    /// Answers a Choose Folder… button.
+    pub fn set_setting(&mut self, key: &str, value: String) {
+        self.settings.set(key, value);
     }
 
     /// Ask for the user's role (first launch).
     /// A modal dialog (the welcome / role picker) is open: it owns the keyboard
     /// and the menu commands wait.
     pub fn modal_open(&self) -> bool {
-        self.workbench.role_picker_open()
+        self.workbench.role_picker_open() || self.settings.is_open()
     }
 
     pub fn show_role_picker(&mut self) {
@@ -192,7 +228,13 @@ impl Workspace {
             title: &title,
             dirty: doc.is_dirty(),
         };
+        self.workbench.set_external_modal(self.settings.is_open());
         let out = self.workbench.ui(ui, &cx, |ui| status_bar(ui, status));
+        if let bae_ui::settings::Outcome::Ok(prefs) = self.settings.show(ui.ctx())
+            && let Err(error) = self.prefs.set(prefs)
+        {
+            tracing::warn!("could not save preferences: {error}");
+        }
         if self.show_about {
             let mut open = true;
             egui::Window::new(tr("About BAE"))
