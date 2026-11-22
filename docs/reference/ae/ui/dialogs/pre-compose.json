@@ -1,0 +1,111 @@
+{
+  "schemaVersion": "1.0",
+  "id": "pre-compose",
+  "title": {
+    "zh": "预合成",
+    "en": "Pre-compose"
+  },
+  "triggers": [
+    {
+      "action": "Pre-compose",
+      "shortcutWin": "Ctrl+Shift+C",
+      "menuZh": "图层 ▸ 预合成(P)..."
+    }
+  ],
+  "source": {
+    "application": "Adobe After Effects 26.0 (26.0x67)",
+    "platform": "Windows 11 Pro x64 (3840x2160 @ 150% DPI)",
+    "localeObserved": "zh_CN",
+    "method": "Live MSAA inspection + interactive tab/radio/dropdown probing + ExtendScript range probing"
+  },
+  "geometry": {
+    "physicalPxAt144Dpi": {
+      "w": 646,
+      "h": 515
+    },
+    "logicalPxAt96Dpi": {
+      "w": 431,
+      "h": 343
+    }
+  },
+  "persistence": {
+    "remembersLastValues": true,
+    "persistsAcrossRestarts": false,
+    "notesZh": "单选模式（保留/移动）与两个复选框在可用条件下记住上次选择；新合成名称每次按当前选中图层动态生成（单图层为“<图层名> 合成 1”，多图层为“预合成 1”）。"
+  },
+  "buttonBar": {
+    "position": "bottom_right",
+    "right": [
+      {
+        "id": "ok",
+        "type": "button",
+        "zh": "确定",
+        "en": "OK",
+        "role": "accept"
+      },
+      {
+        "id": "cancel",
+        "type": "button",
+        "zh": "取消",
+        "en": "Cancel",
+        "role": "reject"
+      }
+    ]
+  },
+  "tabs": [],
+  "controls": [
+    {
+      "id": "new_comp_name",
+      "type": "text_input",
+      "zh": "新合成名称:",
+      "en": "New composition name:",
+      "defaultValue": {
+        "singleLayerZh": "<图层名> 合成 1",
+        "singleLayerEn": "<Layer Name> Comp 1",
+        "multiLayerZh": "预合成 1",
+        "multiLayerEn": "Pre-comp 1"
+      },
+      "notesZh": "实测选中单图层 MySolid 默认“MySolid 合成 1”，选中单形状层 ShapeLayer 默认“ShapeLayer 合成 1”，选中多图层默认“预合成 1”。"
+    },
+    {
+      "id": "attributes_mode",
+      "type": "radio_group",
+      "zh": "属性处理方式",
+      "en": "Attributes Placement",
+      "defaultValue": {
+        "zh": "将所有属性移动到新合成",
+        "en": "Move all attributes into the new composition"
+      },
+      "options": [
+        {
+          "id": "leave_all",
+          "zh": "保留“<当前合成名>”中的所有属性",
+          "en": "Leave all attributes in '<Comp Name>'",
+          "enableRuleZh": "仅当选中单个带源图层（素材/纯色/嵌套合成）时可用；多选图层或选中无源图层（形状/文字/空对象/摄像机/灯光/调整图层）时置灰禁用。"
+        },
+        {
+          "id": "move_all",
+          "zh": "将所有属性移动到新合成",
+          "en": "Move all attributes into the new composition",
+          "enableRuleZh": "始终可用；当“保留所有属性”不可用时强制选中此项。"
+        }
+      ]
+    },
+    {
+      "id": "adjust_duration",
+      "type": "checkbox",
+      "zh": "将合成持续时间调整为所选图层的时间范围",
+      "en": "Adjust composition duration to the time span of the selected layers",
+      "defaultValue": false,
+      "enableRuleZh": "仅当选中“将所有属性移动到新合成”时可用；切换到“保留所有属性”时立即置灰禁用。"
+    },
+    {
+      "id": "open_new_comp",
+      "type": "checkbox",
+      "zh": "打开新合成",
+      "en": "Open New Composition",
+      "defaultValue": false,
+      "enableRuleZh": "始终可用；勾选后确定时会立即在查看器/时间轴打开新预合成。"
+    }
+  ]
+}

@@ -711,11 +711,21 @@ def render_index_md(dialogs: list[dict[str, Any]]) -> str:
         lines.append(f"| {i} | {d['title']['zh']}（{d['title']['en']}） | `{trig}` | [`dialogs/{d['id']}.json`](dialogs/{d['id']}.json) |")
     lines.append("")
 
-    for d in dialogs:
+    for i, d in enumerate(dialogs, 1):
         if d["id"] == "composition-settings":
             lines.extend(render_comp_settings_md(d))
+        else:
+            from dialogs_batch2 import render_generic_dialog_md
+            lines.extend(render_generic_dialog_md(i, d))
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    with path.open("w", encoding="utf-8", newline="\n") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    print(f"Wrote {path} ({path.stat().st_size} bytes)")
 
 
 def main() -> None:
@@ -729,17 +739,38 @@ def main() -> None:
     dialogs_dir.mkdir(parents=True, exist_ok=True)
 
     cs = build_composition_settings(args.raw_dir, args.repo_root)
-    cs_path = dialogs_dir / "composition-settings.json"
-    with cs_path.open("w", encoding="utf-8", newline="\n") as f:
-        json.dump(cs, f, ensure_ascii=False, indent=2)
-        f.write("\n")
+    dialogs: list[dict[str, Any]] = [cs]
 
-    dialogs = [cs]
+    b2_path = args.raw_dir / "dialogs_batch2_zh.json"
+    b2_extra_path = args.raw_dir / "dialogs_batch2_extra.json"
+    if b2_path.exists() and b2_extra_path.exists():
+        from dialogs_batch2 import (
+            build_auto_orient,
+            build_interpret_footage,
+            build_pre_compose,
+            build_project_settings,
+            build_time_stretch,
+        )
+
+        raw_b2 = load_json(b2_path)
+        raw_b2_extra = load_json(b2_extra_path)
+        dialogs.extend(
+            [
+                build_pre_compose(raw_b2),
+                build_project_settings(raw_b2, raw_b2_extra),
+                build_interpret_footage(raw_b2),
+                build_time_stretch(raw_b2),
+                build_auto_orient(raw_b2),
+            ]
+        )
+
+    for d in dialogs:
+        _write_json(dialogs_dir / f"{d['id']}.json", d)
+
     md_path = args.out_dir / "dialogs.md"
     with md_path.open("w", encoding="utf-8", newline="\n") as f:
         f.write(render_index_md(dialogs))
 
-    print(f"Wrote {cs_path} ({cs_path.stat().st_size} bytes)")
     print(f"Wrote {md_path} ({md_path.stat().st_size} bytes)")
 
 
