@@ -386,6 +386,18 @@ fn shape_tools_on_other_layers_or_with_tool_creates_mask_make_masks() {
     let r = h.draw(Tool::Rectangle, (100.0, 50.0), (300.0, 150.0));
     let params = one(&r, "shape.add");
     assert!(params.get("layer").is_none() && params["comp"] == json!(h.comp));
+
+    // Several layers selected: a new shape layer above the topmost (AE 26).
+    h.select(&[&solid, &shape]);
+    let r = h.draw(Tool::Rectangle, (100.0, 50.0), (300.0, 150.0));
+    let params = one(&r, "shape.add");
+    assert!(params.get("layer").is_none(), "{params}");
+    let order = query::comp_layers(&h.stage, &h.comp);
+    let top = order
+        .iter()
+        .position(|l| *l == solid || *l == shape)
+        .unwrap();
+    assert_eq!(params["index"], top);
 }
 
 #[test]
@@ -516,8 +528,8 @@ fn arrows_change_roundness_points_and_roundness_of_polystars() {
     assert!((p["inner_radius"].as_f64().unwrap() - 50.0).abs() < 0.01);
     assert!(p["rotation"].as_f64().unwrap().abs() < 0.01, "pointing up");
     assert_eq!(p["points"], 6.0);
-    assert_eq!(p["outer_roundness"], 5.0);
-    assert_eq!(p["inner_roundness"], 5.0);
+    assert_eq!(p["outer_roundness"], 10.0);
+    assert_eq!(p["inner_roundness"], 10.0);
     assert_eq!(h.tools().lock().options.points, 6.0);
     h.apply(&r);
     // Polygon: Down removes a point (never below 3).
@@ -704,6 +716,8 @@ fn pen_closes_a_mask_on_its_first_vertex() {
     let mask = h.children(&solid.child("masks").unwrap())[0].clone();
     assert_eq!(h.name(&mask), "Mask 1");
     assert!(!h.bezier(&mask).closed);
+    // An open mask is mode None until it is closed (AE 26).
+    assert_eq!(h.value(&mask, "mode"), Some(Value::Enum("none".into())));
     // Back on the first vertex: closed, and the Pen starts over.
     let r = h.click(101.0, 101.0, Modifiers::NONE);
     one(&r, "path.set_vertices");
@@ -711,6 +725,7 @@ fn pen_closes_a_mask_on_its_first_vertex() {
     let b = h.bezier(&mask);
     assert!(b.closed);
     assert_eq!(b.vertices, [[100.0, 100.0], [300.0, 100.0], [300.0, 250.0]]);
+    assert_eq!(h.value(&mask, "mode"), Some(Value::Enum("add".into())));
     assert!(h.viewer.pen.drawing.is_none());
     // Shift: the segment from the last vertex snaps to 45°.
     let r = h.click(400.0, 50.0, Modifiers::NONE);
@@ -752,10 +767,12 @@ fn vertex_tools_and_the_pen_over_paths() {
     assert_eq!(one(&r, "path.delete_vertex")["index"], 4);
     h.apply(&r);
     assert_eq!(h.bezier(&mask).vertices.len(), 4);
-    // Convert Vertex: a click on a corner makes it smooth, again a corner; a
-    // drag pulls out handles.
+    // Convert Vertex: a click on a corner does nothing; a drag pulls out
+    // symmetric handles; a click on a smooth vertex makes it a corner (AE 26).
     h.tools().lock().set(Tool::ConvertVertex);
     let r = h.click(300.0, 100.0, Modifiers::NONE);
+    assert!(r.invocations.is_empty(), "{:?}", r.invocations);
+    let r = h.click_drag((300.0, 100.0), (30.0, 0.0), Modifiers::NONE);
     one(&r, "path.set_vertices");
     h.apply(&r);
     assert!(!bae_motion::path::is_corner(&h.bezier(&mask), 0));
@@ -774,9 +791,11 @@ fn vertex_tools_and_the_pen_over_paths() {
     assert_eq!(one(&r, "path.insert_vertex")["segment"], 2);
     h.apply(&r);
     assert_eq!(h.bezier(&mask).vertices.len(), 5);
-    let r = h.click(100.0, 100.0, Modifiers::ALT);
+    // Alt over the smooth vertex (300, 200): Convert Vertex makes it a corner.
+    let r = h.click(300.0, 200.0, Modifiers::ALT);
     one(&r, "path.set_vertices");
     h.apply(&r);
+    assert!(bae_motion::path::is_corner(&h.bezier(&mask), 1));
     let r = h.click(100.0, 100.0, Modifiers::NONE);
     one(&r, "path.delete_vertex");
     h.apply(&r);
@@ -799,11 +818,18 @@ fn rotobezier_pen_paths_get_automatic_tangents() {
     let b = h.bezier(&path);
     assert_eq!(b.vertices.len(), 3);
     assert!(bae_motion::path::is_corner(&b, 0) && bae_motion::path::is_corner(&b, 2));
-    // The middle vertex is smooth, parallel to the line through its neighbours.
+    // The middle vertex is smooth, along the line through its neighbours, each
+    // handle a third of its own segment (AE 26).
+    let third = 100f64.hypot(50.0) / 3.0;
     assert!(
-        near(b.out_tangents[1], [200.0 / 6.0, 0.0]),
+        near(b.out_tangents[1], [third, 0.0]),
         "{:?}",
         b.out_tangents[1]
+    );
+    assert!(
+        near(b.in_tangents[1], [-third, 0.0]),
+        "{:?}",
+        b.in_tangents[1]
     );
 }
 
@@ -892,26 +918,36 @@ fn close3(a: [f64; 3], b: [f64; 3]) -> bool {
 #[test]
 fn moving_layers_snaps_to_other_layers_and_the_comp() {
     let mut h = H::new();
-    let b = h.solid([100.0, 100.0], [100.0, 100.0]);
+    // B's right edge midpoint is at (150, 180).
+    let b = h.solid([100.0, 100.0], [100.0, 180.0]);
     let a = h.solid([200.0, 100.0], [320.0, 180.0]);
     h.tools().lock().set(Tool::Selection);
+    // Grabbed near its left edge midpoint (220, 180) but away from the scale
+    // handle there, A moves by −67.
+    let grab = (228.0, 180.0);
+    let to = (161.0, 180.0);
     // Snapping off: the layer follows the pointer.
-    let r = h.drag((300.0, 170.0), (233.0, 170.0), Modifiers::NONE);
+    let r = h.drag(grab, to, Modifiers::NONE);
     one(&r, "attr.set_many");
     h.apply(&r);
     assert!(close3(h.v3(&a, "transform:position"), [253.0, 180.0, 0.0]));
     assert_eq!(h.session().lock().selected_layers, std::slice::from_ref(&a));
     h.stage.undo(&h.author).unwrap();
-    // On: its left edge (220 − 67 = 153) snaps to the other solid's right edge.
+    // On: the grabbed feature (left midpoint, 153) snaps to B's right midpoint.
     h.tools().lock().options.snapping = true;
-    let r = h.drag((300.0, 170.0), (233.0, 170.0), Modifiers::NONE);
+    let r = h.drag(grab, to, Modifiers::NONE);
     h.apply(&r);
-    assert!(close3(h.v3(&a, "transform:position"), [250.0, 180.0, 0.0]));
+    assert!(close3(h.v3(&a, "transform:position"), [250.0, 180.0, 0.0]), "{:?}", h.v3(&a, "transform:position"));
     h.stage.undo(&h.author).unwrap();
     // Cmd/Ctrl inverts the switch while held.
-    let r = h.drag((300.0, 170.0), (233.0, 170.0), Modifiers::COMMAND);
+    let r = h.drag(grab, to, Modifiers::COMMAND);
     h.apply(&r);
     assert!(close3(h.v3(&a, "transform:position"), [253.0, 180.0, 0.0]));
+    h.stage.undo(&h.author).unwrap();
+    // The comp frame is not a target (AE 26): 5 px from the left edge stays.
+    let r = h.drag(grab, (13.0, 180.0), Modifiers::NONE);
+    h.apply(&r);
+    assert!(close3(h.v3(&a, "transform:position"), [105.0, 180.0, 0.0]));
     let _ = b;
 }
 

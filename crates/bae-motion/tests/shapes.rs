@@ -363,10 +363,29 @@ fn masks_are_named_colored_and_in_layer_space() {
         .as_str()
         .unwrap());
     assert_eq!(query::display_name_of(&fx.stage, &m2), "蒙版 2");
-    // Mask colors cycle through the label colors, starting at Yellow.
+    // Mask colors cycle through the label colors in AE 26's order: Sea Foam
+    // (#B3C7B3), Orange (#E8920D) …
     assert_eq!(
         fx.value(&m1, "color"),
         Some(Value::Color(bae_motion::shape::mask_color(0, true)))
+    );
+    let [r, g, b, _] = bae_motion::shape::mask_color(0, true);
+    assert_eq!(
+        [
+            (r * 255.0).round(),
+            (g * 255.0).round(),
+            (b * 255.0).round()
+        ],
+        [179.0, 199.0, 179.0]
+    );
+    let [r, g, b, _] = bae_motion::shape::mask_color(1, true);
+    assert_eq!(
+        [
+            (r * 255.0).round(),
+            (g * 255.0).round(),
+            (b * 255.0).round()
+        ],
+        [232.0, 146.0, 13.0]
     );
     assert_ne!(fx.value(&m1, "color"), fx.value(&m2, "color"));
     let m3 = p(fx.run(
@@ -377,7 +396,7 @@ fn masks_are_named_colored_and_in_layer_space() {
         .as_str()
         .unwrap());
     assert_eq!(query::display_name_of(&fx.stage, &m3), "Mask 3");
-    assert_eq!(fx.value(&m3, "color"), fx.value(&m1, "color"), "yellow");
+    assert_eq!(fx.value(&m3, "color"), fx.value(&m1, "color"), "no cycling");
     // Undo removes one mask per step.
     fx.stage.undo(&fx.author).unwrap();
     assert!(!fx.stage.has_prim(&m3));

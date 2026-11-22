@@ -12,7 +12,7 @@ use bae_model::{PrimPath, StageEvent, Time};
 use crate::cache::{FrameCache, FrameKey};
 use crate::effect::EffectLibrary;
 use crate::error::RenderError;
-use crate::exec::{DrawBuffer, execute};
+use crate::exec::{DrawBuffer, MaskBuffers, execute};
 use crate::footage::FootageCache;
 use crate::gpu::Pipelines;
 use crate::graph::{self, SourceResolver};
@@ -111,6 +111,7 @@ pub struct Renderer {
     pipelines: Pipelines,
     pool: TexturePool,
     draws: DrawBuffer,
+    mask_buffers: MaskBuffers,
     frames: FrameCache<GpuImage>,
     footage: FootageCache,
     providers: SourceProviders,
@@ -168,6 +169,7 @@ impl Renderer {
             pipelines,
             pool: TexturePool::new(config.pool_idle_bytes),
             draws: DrawBuffer::default(),
+            mask_buffers: MaskBuffers::default(),
             frames: FrameCache::new(config.frame_cache_bytes),
             footage: FootageCache::new(gpu.clone()),
             providers: SourceProviders::new(),
@@ -289,6 +291,7 @@ impl Renderer {
             &mut self.pipelines,
             &mut self.pool,
             &mut self.draws,
+            &mut self.mask_buffers,
             &graph,
             format,
         )?;

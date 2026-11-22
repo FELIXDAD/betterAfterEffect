@@ -401,30 +401,35 @@ impl Command for AddShape {
 
 // ---------------------------------------------------------------------------
 
-/// AE's label colors (straight RGB 0–1) in label order, Red first; new masks
-/// cycle through them starting at Yellow (AE "Cycle Mask Colors", 待核).
+/// AE 26's default label colors in label order (1 Red … 16 Dark Green).
 const LABEL_RGB: [[u8; 3]; 16] = [
-    [0xa7, 0x41, 0x3d],
-    [0xd6, 0xcd, 0x5a],
-    [0xa5, 0xc6, 0xc2],
-    [0xdc, 0xb9, 0xc5],
-    [0xa5, 0xa6, 0xc7],
-    [0xde, 0xbf, 0x9f],
-    [0xb0, 0xc3, 0xb0],
-    [0x6b, 0x7c, 0xd9],
-    [0x52, 0x9c, 0x4e],
-    [0x86, 0x37, 0x93],
-    [0xde, 0x8f, 0x2b],
-    [0x77, 0x47, 0x30],
-    [0xe5, 0x71, 0xcf],
-    [0x45, 0x9d, 0xa0],
-    [0xa1, 0x92, 0x76],
-    [0x2c, 0x43, 0x2c],
+    [0xb5, 0x38, 0x38],
+    [0xe4, 0xd8, 0x4c],
+    [0xa9, 0xcb, 0xc7],
+    [0xe5, 0xbc, 0xc9],
+    [0xa9, 0xa9, 0xca],
+    [0xe7, 0xc1, 0x9e],
+    [0xb3, 0xc7, 0xb3],
+    [0x67, 0x7d, 0xe0],
+    [0x4a, 0xa4, 0x4c],
+    [0x8e, 0x2c, 0x9a],
+    [0xe8, 0x92, 0x0d],
+    [0x7f, 0x45, 0x2a],
+    [0xf4, 0x6d, 0xd6],
+    [0x3d, 0xa2, 0xa5],
+    [0xa8, 0x96, 0x77],
+    [0x1e, 0x40, 0x1e],
 ];
+
+/// Label indices (0-based) new masks cycle through ("Cycle Mask Colors" on):
+/// the first six as measured in AE 26 (Sea Foam, Orange, Fuchsia, Red, Yellow,
+/// Peach); the rest in label order (待核).
+const MASK_CYCLE: [usize; 16] = [6, 10, 12, 0, 1, 5, 2, 3, 4, 7, 8, 9, 11, 13, 14, 15];
 
 /// Color of the `n`-th mask (0-based) of a layer.
 pub fn mask_color(n: usize, cycle: bool) -> [f64; 4] {
-    let i = if cycle { (1 + n) % LABEL_RGB.len() } else { 1 };
+    // Cycling off: every mask gets the first color of the cycle (待核).
+    let i = MASK_CYCLE[if cycle { n % MASK_CYCLE.len() } else { 0 }];
     let [r, g, b] = LABEL_RGB[i];
     [
         f64::from(r) / 255.0,
@@ -456,7 +461,8 @@ pub struct CreateMaskParams {
     /// after this one is added).
     #[serde(default)]
     pub name: Option<String>,
-    /// none, add, subtract, intersect, lighten, darken or difference (default add).
+    /// none, add, subtract, intersect, lighten, darken or difference (default:
+    /// add for a closed path, none for an open one).
     #[serde(default)]
     pub mode: Option<String>,
     #[serde(default)]
@@ -508,8 +514,13 @@ impl Command for CreateMask {
         let mask = child(&masks, &query::unique_child_name(tx.stage(), &masks, &name))?;
         create(tx, &mask, PrimType::MASK, None)?;
         set(tx, &mask, "name", Value::String(name))?;
+        let closed = path.closed;
         set(tx, &mask, "path", Value::Bezier(path))?;
-        let mode = p.mode.unwrap_or_else(|| "add".into());
+        // An open path (the Pen's first clicks) is mode None; closed ones Add
+        // (AE 26, R1).
+        let mode = p
+            .mode
+            .unwrap_or_else(|| if closed { "add" } else { "none" }.into());
         set(tx, &mask, "mode", Value::Enum(mode))?;
         if p.inverted {
             set(tx, &mask, "inverted", Value::Bool(true))?;

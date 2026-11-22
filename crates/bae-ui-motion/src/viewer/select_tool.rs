@@ -334,7 +334,14 @@ pub(super) fn frame(
                 }
             }
             Press::Anchor(layer) => {
-                state.drag = Some(TransformDrag::new(
+                let anchor = comp
+                    .layer(&layer)
+                    .map(|l| {
+                        let a = l.world_matrix.transform_point3(l.transform.anchor_point);
+                        DVec2::new(a.x, a.y)
+                    })
+                    .unwrap_or(at);
+                let drag = TransformDrag::new(
                     stage,
                     comp,
                     std::slice::from_ref(&layer),
@@ -342,7 +349,8 @@ pub(super) fn frame(
                         start: at,
                         compensate: true,
                     },
-                ));
+                );
+                state.drag = Some(drag.with_snapping(comp, &layer, anchor));
             }
             Press::Layer(layer) => {
                 let layers = {
@@ -379,7 +387,7 @@ pub(super) fn frame(
                     _ => Kind::Move { start: at },
                 };
                 let drag = TransformDrag::new(stage, comp, &layers, kind);
-                state.drag = Some(primary_first(drag.with_snapping(comp, info), &layer));
+                state.drag = Some(primary_first(drag.with_snapping(comp, &layer, at), &layer));
             }
             Press::Empty if tool == Tool::Selection => {
                 state.marquee = Some(Marquee {

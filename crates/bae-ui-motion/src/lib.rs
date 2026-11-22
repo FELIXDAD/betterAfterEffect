@@ -21,6 +21,7 @@
 //! without one (tests, headless hosts).
 
 pub mod actions;
+pub mod catalog;
 mod common;
 pub mod demo;
 mod gpu_preview;

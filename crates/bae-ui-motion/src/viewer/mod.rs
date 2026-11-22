@@ -545,37 +545,17 @@ impl Panel for CompositionViewer {
         );
         clip.extend(shapes);
 
+        // Preferences > Grids & Guides (bae-prefs, workstream D).
+        let guides = bae_ui::settings::GridGuides::current(cx.resources);
         if self.grid {
-            let step = (100.0 * view.scale).max(4.0);
-            let mut x = comp_rect.left();
-            while x <= comp_rect.right() {
-                clip.vline(
-                    x,
-                    comp_rect.y_range(),
-                    Stroke::new(0.5, Color32::from_rgba_unmultiplied(120, 120, 120, 90)),
-                );
-                x += step;
-            }
-            let mut y = comp_rect.top();
-            while y <= comp_rect.bottom() {
-                clip.hline(
-                    comp_rect.x_range(),
-                    y,
-                    Stroke::new(0.5, Color32::from_rgba_unmultiplied(120, 120, 120, 90)),
-                );
-                y += step;
-            }
+            guides.paint_grid(&clip, comp_rect, view.scale);
         }
         if self.safe {
-            for f in [0.9f32, 0.8] {
-                let r = Rect::from_center_size(comp_rect.center(), comp_rect.size() * f);
-                painter.rect_stroke(
-                    r,
-                    0.0,
-                    Stroke::new(1.0, Color32::from_gray(150)),
-                    egui::StrokeKind::Middle,
-                );
-            }
+            guides.paint_safe(
+                &painter,
+                comp_rect,
+                Stroke::new(1.0, Color32::from_gray(150)),
+            );
             let c = comp_rect.center();
             painter.line_segment(
                 [c - vec2(8.0, 0.0), c + vec2(8.0, 0.0)],
