@@ -202,6 +202,37 @@ fn undo_is_per_author() {
     assert!(stage.undo(&author("user:nobody")).is_none());
 }
 
+/// AE: Preferences > General > Levels of Undo.
+#[test]
+fn undo_limit_drops_the_oldest_steps() {
+    let reg = CommandRegistry::with_builtins();
+    let mut stage = base_stage(&reg);
+    let title = "/comps/main/layers/title";
+    let set =
+        |v: f64| json!({"path": title, "attr": "opacity", "value": {"type": "float", "value": v}});
+    let alice = author("user:alice");
+    for v in 1..=5 {
+        run(
+            &reg,
+            &mut stage,
+            "user:alice",
+            "attr.set",
+            set(f64::from(v)),
+        );
+    }
+    stage.set_undo_limit(3);
+    assert_eq!(stage.undo_limit(), 3);
+    run(&reg, &mut stage, "user:alice", "attr.set", set(6.0));
+    let mut steps = 0;
+    while stage.undo(&alice).is_some() {
+        steps += 1;
+    }
+    assert_eq!(steps, 3);
+    assert_eq!(float(&stage, title, "opacity"), Some(3.0));
+    stage.set_undo_limit(0);
+    assert_eq!(stage.undo_limit(), 1, "at least one level");
+}
+
 #[test]
 fn delete_and_undo_restore_the_whole_subtree() {
     let reg = CommandRegistry::with_builtins();
