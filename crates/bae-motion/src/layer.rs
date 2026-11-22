@@ -114,6 +114,10 @@ pub struct CreateLayerParams {
     /// Light layers: Light Settings (type, color, intensity …).
     #[serde(default)]
     pub light: Option<crate::camera::LightSettings>,
+    /// Label color index (default AE's per kind; the UI passes the
+    /// Preferences > Labels default).
+    #[serde(default)]
+    pub label: Option<i64>,
 }
 
 impl CreateLayerParams {
@@ -136,6 +140,7 @@ impl CreateLayerParams {
             start: Some(start),
             camera: None,
             light: None,
+            label: None,
         }
     }
 }
@@ -223,7 +228,11 @@ impl Command for CreateLayer {
         create(tx, &path, PrimType::LAYER, Some(index.min(siblings)))?;
         set(tx, &path, "kind", Value::Enum(kind.as_str().to_owned()))?;
         set(tx, &path, "name", Value::String(name.clone()))?;
-        set(tx, &path, "label", Value::Int(default_label(kind)))?;
+        let label = p
+            .label
+            .filter(|l| (0..=16).contains(l))
+            .unwrap_or(default_label(kind));
+        set(tx, &path, "label", Value::Int(label))?;
         let start = p.start.unwrap_or(Time::ZERO);
         if start != Time::ZERO {
             set(tx, &path, "start_time", Value::Time(start))?;

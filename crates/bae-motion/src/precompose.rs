@@ -236,6 +236,7 @@ impl Command for Precompose {
                     preserve_frame_rate: None,
                     preserve_resolution: None,
                     renderer: None,
+                    label: None,
                 },
             )
         };

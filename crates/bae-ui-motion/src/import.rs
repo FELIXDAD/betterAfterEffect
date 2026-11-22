@@ -61,11 +61,49 @@ fn file_name(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
+/// Import defaults (Preferences > Import and Labels).
+#[derive(Clone, Debug)]
+pub struct ImportDefaults {
+    /// Frames per second of image sequences.
+    pub sequence_fps: f64,
+    /// Duration given to stills (`None`: the length of the composition).
+    pub still_duration: Option<bae_model::Time>,
+    /// Labels of stills, moving footage and audio.
+    pub labels: Option<[i64; 3]>,
+}
+
+impl Default for ImportDefaults {
+    /// AE's factory defaults.
+    fn default() -> Self {
+        ImportDefaults {
+            sequence_fps: 30.0,
+            still_duration: None,
+            labels: None,
+        }
+    }
+}
+
+impl ImportDefaults {
+    pub(crate) fn of(prefs: &bae_prefs::Preferences) -> Self {
+        use bae_media::MediaKind;
+        ImportDefaults {
+            sequence_fps: crate::prefs::sequence_fps(prefs),
+            still_duration: crate::prefs::still_duration(prefs),
+            labels: Some([
+                crate::prefs::footage_label(prefs, MediaKind::Still),
+                crate::prefs::footage_label(prefs, MediaKind::Movie),
+                crate::prefs::footage_label(prefs, MediaKind::Audio),
+            ]),
+        }
+    }
+}
+
 /// Probe one file (or the sequence it belongs to when `sequences`).
 fn probe_file(
     path: &Path,
     folder: Option<&str>,
     sequences: bool,
+    defaults: &ImportDefaults,
     seen: &mut HashSet<PathBuf>,
     out: &mut Probed,
 ) {
@@ -75,7 +113,7 @@ fn probe_file(
         } else {
             SequenceMode::Single
         },
-        ..OpenOptions::default()
+        sequence_frame_rate: bae_model::FrameRate::from_fps(defaults.sequence_fps),
     };
     match formats().open(path, &options) {
         Ok(source) => {
@@ -88,14 +126,29 @@ fn probe_file(
                 Some(seq) => sequence_name(seq),
                 None => file_name(path),
             };
+            let mut attrs: std::collections::BTreeMap<String, bae_model::Value> = info
+                .asset_attributes()
+                .into_iter()
+                .map(|(k, v)| (k.to_owned(), v))
+                .collect();
+            use bae_media::MediaKind;
+            if info.kind == MediaKind::Still
+                && let Some(d) = defaults.still_duration
+            {
+                attrs.insert("duration".into(), bae_model::Value::Time(d));
+            }
+            if let Some([still, video, audio]) = defaults.labels {
+                let label = match info.kind {
+                    MediaKind::Still => still,
+                    MediaKind::Audio => audio,
+                    MediaKind::ImageSequence | MediaKind::Movie => video,
+                };
+                attrs.insert("label".into(), bae_model::Value::Int(label));
+            }
             out.files.push(ImportFile {
                 path: info.path.to_string_lossy().into_owned(),
                 name: Some(name),
-                attrs: info
-                    .asset_attributes()
-                    .into_iter()
-                    .map(|(k, v)| (k.to_owned(), v))
-                    .collect(),
+                attrs,
                 folder: folder.map(str::to_owned),
             });
         }
@@ -105,7 +158,13 @@ fn probe_file(
 
 /// Probe a dropped folder: its sequences and files, then its subfolders, in
 /// a project folder of the same name (`rel`).
-fn probe_dir(dir: &Path, rel: &str, seen: &mut HashSet<PathBuf>, out: &mut Probed) {
+fn probe_dir(
+    dir: &Path,
+    rel: &str,
+    defaults: &ImportDefaults,
+    seen: &mut HashSet<PathBuf>,
+    out: &mut Probed,
+) {
     let Ok(items) = scan_directory(dir, &[]) else {
         out.failed.push(file_name(dir));
         return;
@@ -118,11 +177,16 @@ fn probe_dir(dir: &Path, rel: &str, seen: &mut HashSet<PathBuf>, out: &mut Probe
                 if name.starts_with('.') || name.eq_ignore_ascii_case("thumbs.db") {
                     continue;
                 }
-                probe_file(&p, Some(rel), false, seen, out);
+                probe_file(&p, Some(rel), false, defaults, seen, out);
             }
-            ScannedItem::Sequence(seq) => {
-                probe_file(&seq.path_for(seq.first()), Some(rel), true, seen, out)
-            }
+            ScannedItem::Sequence(seq) => probe_file(
+                &seq.path_for(seq.first()),
+                Some(rel),
+                true,
+                defaults,
+                seen,
+                out,
+            ),
         }
     }
     let mut subdirs: Vec<PathBuf> = std::fs::read_dir(dir)
@@ -134,19 +198,25 @@ fn probe_dir(dir: &Path, rel: &str, seen: &mut HashSet<PathBuf>, out: &mut Probe
         .collect();
     subdirs.sort();
     for sub in subdirs {
-        probe_dir(&sub, &format!("{rel}/{}", file_name(&sub)), seen, out);
+        probe_dir(
+            &sub,
+            &format!("{rel}/{}", file_name(&sub)),
+            defaults,
+            seen,
+            out,
+        );
     }
 }
 
 /// Probe chosen or dropped paths: files (with their sequences) and folders.
-pub fn probe(paths: &[PathBuf]) -> Probed {
+pub fn probe(paths: &[PathBuf], defaults: &ImportDefaults) -> Probed {
     let mut out = Probed::default();
     let mut seen = HashSet::new();
     for path in paths {
         if path.is_dir() {
-            probe_dir(path, &file_name(path), &mut seen, &mut out);
+            probe_dir(path, &file_name(path), defaults, &mut seen, &mut out);
         } else {
-            probe_file(path, None, true, &mut seen, &mut out);
+            probe_file(path, None, true, defaults, &mut seen, &mut out);
         }
     }
     out
@@ -158,7 +228,8 @@ pub(crate) fn import_paths(cx: &mut PanelContext<'_>, paths: &[PathBuf], parent:
     if paths.is_empty() {
         return;
     }
-    let probed = probe(paths);
+    let defaults = ImportDefaults::of(&crate::prefs::current(cx.resources));
+    let probed = probe(paths, &defaults);
     if !probed.files.is_empty() {
         let mut params = json!({ "files": probed.files });
         if let Some(p) = parent {

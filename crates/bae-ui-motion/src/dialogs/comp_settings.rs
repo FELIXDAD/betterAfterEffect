@@ -342,6 +342,8 @@ impl CompSettings {
             Target::New { folder } => {
                 let mut params = self.values.params();
                 params["name"] = json!(name);
+                let prefs = crate::prefs::current(cx.resources);
+                params["label"] = json!(crate::prefs::comp_label(&prefs));
                 let parent = folder
                     .clone()
                     .unwrap_or_else(|| PrimPath::new(query::COMPS_FOLDER).expect("valid"));

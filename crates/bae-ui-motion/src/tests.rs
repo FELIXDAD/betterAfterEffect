@@ -1544,12 +1544,16 @@ fn import_fixture(tag: &str) -> std::path::PathBuf {
 #[test]
 fn import_probes_files_sequences_and_folders() {
     let dir = import_fixture("probe");
-    let probed = crate::import::probe(&[
-        dir.join("logo.png"),
-        dir.join("plates").join("shot_0002.png"),
-        dir.join("plates").join("shot_0003.png"),
-        dir.join("readme.txt"),
-    ]);
+    let defaults = crate::import::ImportDefaults::default();
+    let probed = crate::import::probe(
+        &[
+            dir.join("logo.png"),
+            dir.join("plates").join("shot_0002.png"),
+            dir.join("plates").join("shot_0003.png"),
+            dir.join("readme.txt"),
+        ],
+        &defaults,
+    );
     let names: Vec<_> = probed
         .files
         .iter()
@@ -1560,7 +1564,7 @@ fn import_probes_files_sequences_and_folders() {
     assert_eq!(probed.files[0].attrs.get("width"), Some(&Value::Int(1)));
     assert_eq!(probed.failed, ["readme.txt"]);
     // A dropped folder keeps its name as a project folder.
-    let probed = crate::import::probe(&[dir.join("plates")]);
+    let probed = crate::import::probe(&[dir.join("plates")], &defaults);
     assert_eq!(probed.files.len(), 1);
     assert_eq!(probed.files[0].folder.as_deref(), Some("plates"));
     let _ = std::fs::remove_dir_all(&dir);
@@ -1665,5 +1669,57 @@ fn import_file_and_files_dropped_on_the_project_panel() {
         h.dialogs().lock().open,
         Some(crate::dialogs::Dialog::Alert { .. })
     ));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preferences_reach_new_layers_comps_and_imports() {
+    let mut prefs = bae_prefs::Preferences::default();
+    assert!(prefs.set("labels.label_default_null", 9));
+    assert!(prefs.set("labels.label_default_comp", 11));
+    assert!(prefs.set("composition.create_layers_at_comp_start", false));
+    assert!(prefs.set("import.still_footage_duration_mode", "fixed_duration"));
+    assert!(prefs.set("import.still_footage_duration_timecode", "0:00:05:00"));
+    assert!(prefs.set("labels.label_default_still", 12));
+    let mut h = Harness::new();
+    h.resources
+        .insert(std::sync::Arc::new(bae_prefs::PrefsStore::new(
+            prefs.clone(),
+        )));
+    let mut viewer = CompositionViewer::new(None);
+    // New Composition: the comp gets the Composition label.
+    let r = h.new_comp_requests(&mut viewer);
+    h.apply(r);
+    h.frame("composition", &mut viewer, Vec::new());
+    let comp = h.session().lock().active_comp.clone().unwrap();
+    let value =
+        |h: &Harness, p: &PrimPath, a: &str| query::static_value(&h.stage.prim(p).unwrap(), a);
+    assert_eq!(value(&h, &comp, "label"), Some(Value::Int(11)));
+    // A new null at 2 s: Create Layers at Composition Start Time is off.
+    let info = query::comp_info(&h.stage, &comp).unwrap();
+    h.session().lock().set_time(&info, Time::from_seconds(2.0));
+    let r = h.action(
+        &mut viewer,
+        Invocation::with_params(crate::actions::ids::NEW_LAYER, json!({"kind": "null"})),
+    );
+    h.apply(r);
+    let null = query::comp_layers(&h.stage, &comp)[0].clone();
+    assert_eq!(value(&h, &null, "label"), Some(Value::Int(9)));
+    assert_eq!(
+        query::layer_timing(&h.stage, &null).start_time,
+        Time::from_seconds(2.0)
+    );
+    // Import: a still gets the fixed duration and the Still label.
+    let dir = import_fixture("prefs");
+    let plain = crate::import::probe(&[dir.join("logo.png")], &Default::default());
+    assert!(!plain.files[0].attrs.contains_key("duration"));
+    let defaults = crate::import::ImportDefaults::of(&prefs);
+    let still = crate::import::probe(&[dir.join("logo.png")], &defaults);
+    let attrs = &still.files[0].attrs;
+    assert_eq!(
+        attrs.get("duration"),
+        Some(&Value::Time(Time::from_seconds(5.0)))
+    );
+    assert_eq!(attrs.get("label"), Some(&Value::Int(12)));
     let _ = std::fs::remove_dir_all(&dir);
 }

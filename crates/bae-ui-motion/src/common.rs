@@ -536,6 +536,13 @@ pub(crate) fn new_layer(
         return;
     };
     let mut params = json!({"comp": comp, "kind": kind, "name": name, "index": index});
+    // Preferences: the kind's default label; new layers start at the comp's
+    // start, or at the current time when that option is off.
+    let prefs = crate::prefs::current(cx.resources);
+    params["label"] = json!(crate::prefs::layer_label(&prefs, kind));
+    if !crate::prefs::layers_at_comp_start(&prefs) {
+        params["start"] = json!(session.lock().time(&comp));
+    }
     if let (Some(p), serde_json::Value::Object(m)) = (params.as_object_mut(), extra) {
         p.extend(m);
     }

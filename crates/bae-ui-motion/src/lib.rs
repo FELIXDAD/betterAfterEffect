@@ -31,6 +31,7 @@ mod i18n;
 pub mod import;
 pub mod menus;
 mod panels;
+mod prefs;
 mod project;
 mod props;
 mod render;

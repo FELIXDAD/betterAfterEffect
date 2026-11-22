@@ -80,6 +80,9 @@ pub struct CreateCompParams {
     pub preserve_resolution: Option<bool>,
     #[serde(default)]
     pub renderer: Option<String>,
+    /// Label color index (the UI passes the Preferences > Labels default).
+    #[serde(default)]
+    pub label: Option<i64>,
 }
 
 impl Command for CreateComp {
@@ -119,6 +122,9 @@ impl Command for CreateComp {
         let layers = child(&path, query::LAYERS)?;
         create(tx, &layers, PrimType::FOLDER, None)?;
         set(tx, &path, "name", Value::String(name))?;
+        if let Some(l) = p.label.filter(|l| (0..=16).contains(l)) {
+            set(tx, &path, "label", Value::Int(l))?;
+        }
         set(tx, &path, "width", Value::Int(i64::from(p.width)))?;
         set(tx, &path, "height", Value::Int(i64::from(p.height)))?;
         set(
