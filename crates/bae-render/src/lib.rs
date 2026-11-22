@@ -63,7 +63,7 @@ pub use eval::{CompEvaluator, MockEvaluator};
 pub use export::{
     ExportAlpha, ExportFormat, ExportJob, ExportReadback, ExportReport, ExportSettings,
     ExportStats, ExportedFrame, READBACK_DEPTH, ReadFrame, ReadbackFormat, export_frames,
-    frame_file,
+    frame_file, has_frame_run,
 };
 pub use geom::{IRect, Rect};
 pub use graph::EffectFrame;
