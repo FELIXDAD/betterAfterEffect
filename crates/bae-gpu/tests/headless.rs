@@ -8,14 +8,38 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use bae_gpu::transfer::{self, TextureReadback, TextureRegion};
 use bae_gpu::wgpu;
 use bae_gpu::{GpuContext, GpuContextDescriptor, GpuError, GpuReport, timer::GpuTimer};
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-fn context() -> Option<Arc<GpuContext>> {
-    context_with(GpuContextDescriptor::default().with_env())
+/// Tests share the process-wide context (`bae_gpu::testing`, #154); a test that
+/// destroys a device takes [`exclusive_context`] and runs alone.
+static SHARED: RwLock<()> = RwLock::new(());
+
+/// The shared context, held for the test's duration.
+struct Gpu {
+    ctx: Arc<GpuContext>,
+    _shared: RwLockReadGuard<'static, ()>,
 }
 
-fn context_with(desc: GpuContextDescriptor) -> Option<Arc<GpuContext>> {
-    match GpuContext::new_headless(desc) {
-        Ok(ctx) => Some(ctx),
+impl std::ops::Deref for Gpu {
+    type Target = Arc<GpuContext>;
+    fn deref(&self) -> &Arc<GpuContext> {
+        &self.ctx
+    }
+}
+
+fn context() -> Option<Gpu> {
+    let shared = SHARED.read();
+    bae_gpu::testing::shared_context().map(|ctx| Gpu {
+        ctx,
+        _shared: shared,
+    })
+}
+
+/// A context of its own, while no other test of this binary uses the GPU.
+fn exclusive_context() -> Option<(Arc<GpuContext>, RwLockWriteGuard<'static, ()>)> {
+    let exclusive = SHARED.write();
+    match GpuContext::new_headless(GpuContextDescriptor::default().with_env()) {
+        Ok(ctx) => Some((ctx, exclusive)),
         Err(error @ GpuError::NoAdapter { .. }) => {
             if std::env::var_os("BAE_REQUIRE_GPU").is_some_and(|v| v == "1") {
                 panic!("BAE_REQUIRE_GPU=1 but {error}");
@@ -275,7 +299,9 @@ fn timer_smoke() {
 
 #[test]
 fn device_lost_callback_fires_on_destroy() {
-    let Some(ctx) = context() else { return };
+    let Some((ctx, _exclusive)) = exclusive_context() else {
+        return;
+    };
     let calls = Arc::new(AtomicUsize::new(0));
     let removed = ctx.on_device_lost(|_| unreachable!("removed callbacks must not run"));
     assert!(ctx.remove_device_lost_callback(removed));

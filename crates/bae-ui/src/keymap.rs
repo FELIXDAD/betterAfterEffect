@@ -173,6 +173,8 @@ fn is_navigation_key(key: Key) -> bool {
     )
 }
 
+/// Key name for display. Arrow keys are `←→↑↓`, which the system UI fonts have (egui's
+/// `⏴⏵⏶⏷` are only in egui's bundled fonts, which BAE does not ship).
 fn key_label(key: Key) -> &'static str {
     match key {
         Key::ArrowLeft => "←",

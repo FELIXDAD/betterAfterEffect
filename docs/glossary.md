@@ -85,6 +85,12 @@
 | Untitled Project | 未命名项目 |
 | Agent Activity（BAE） | Agent 活动 |
 | Proposals（BAE） | 提案 |
+| Work Area | 工作区域（AE 26 的“将合成裁剪到工作区”这一项缩写成“工作区”；BAE 统一用“工作区域”，不和 Workspace“工作区”混用） |
+| Trim | 修剪（如“将入点修剪到当前时间”“将合成修剪至工作区域”；“裁剪”是 Crop） |
+| Bring Layer to Front / Bring Layer Forward | 置于顶层 / 前移一层（AE 26 图层 ▸ 排列，也是通用叫法） |
+| Send Layer Backward / Send Layer to Back | 后移一层 / 置于底层 |
+| Add to Render Queue | 添加到渲染队列 |
+| Render Queue | 渲染队列 |
 
 ## 五、工具栏
 
@@ -183,3 +189,31 @@
 | Quarter | 四分之一 |
 | Custom | 自定义 |
 | Auto | 自动 |
+
+## 十、新建项目的默认名称
+
+新建的文件夹、合成、图层和形状内容按**创建时的界面语言**起名（`bae_motion::names`）。名字是工程数据，之后切换界面语言不会改名，和 AE 一致。prim 路径始终用英文段（`/comps`、`contents/Rectangle_1`），所以各语言下路径相同。
+
+| 英文 | 中文 | 出处 |
+|---|---|---|
+| comps（默认合成文件夹） | 合成 | BAE 约定，与“合成”同名 |
+| assets（默认素材文件夹） | 素材 | 与项目面板 Footage“素材”一致 |
+| solids（纯色文件夹） | 纯色 | AE 中文版自动建立的“纯色”文件夹 |
+| Comp N | 合成 N | AE 中文版 |
+| Shape Layer N / Solid N / Null N | 形状图层 N / 纯色 N / 空 N | AE 中文版 |
+| Rectangle 1 / Ellipse 1 / Polystar 1（组） | 矩形 1 / 椭圆 1 / 多边星形 1 | AE 中文版形状工具 |
+| Rectangle Path 1 / Ellipse Path 1 / Polystar Path 1 | 矩形路径 1 / 椭圆路径 1 / 多边星形路径 1 | `docs/reference/ae/layers/shape.json`（AE 26.0 zh_CN） |
+| Fill 1 / Stroke 1 | 填充 1 / 描边 1 | 同上 |
+| Untitled N（文件夹） | 未命名 N | 同“未命名项目” |
+
+## 十一、状态栏与关于
+
+| 英文 | 中文 | 说明 |
+|---|---|---|
+| Discrete GPU | 独立显卡 | 状态栏中的显卡类型；显卡型号和图形接口名（Metal、Vulkan、DX12）不翻译 |
+| Integrated GPU | 集成显卡 | |
+| Virtual GPU | 虚拟显卡 | |
+| Software Rendering | 软件渲染 | 没有可用显卡、用 CPU 渲染时 |
+| Close Window | 关闭窗口 | 对话框关闭按钮的无障碍名称（替换 egui 内置的 “Close window”） |
+| debug / release | 调试版 / 发布版 | 关于窗口版本行里的构建类型 |
+| License | 许可证 | |

@@ -3,6 +3,7 @@
 
 use bae_model::{PrimPath, Stage, Time, Value};
 use bae_motion::query;
+use bae_ui::Accessible as _;
 use bae_ui::icons::{self, Icon};
 use bae_ui::theme::{self, color};
 use bae_ui::widgets;
@@ -41,7 +42,7 @@ fn prop_line(
             .map(|v| bae_model::schema::is_animatable(v.prim_type(), attr))
             .unwrap_or(false);
         if animatable {
-            if widgets::stopwatch(ui, &mut on).clicked() {
+            if widgets::stopwatch_for(ui, &mut on, tr(label)).clicked() {
                 cx.invoke_with(
                     "attr.set_animated",
                     json!({"path": path, "attr": attr, "animated": !spec.is_animated(), "time": key_now}),
@@ -61,7 +62,7 @@ fn prop_line(
             .or_else(|| common::current_value(eval.get(cx.resources), stage, path, attr, now));
         if let Some(v) = value {
             let id = ui.id().with(("prop", path.as_str(), attr));
-            let edit = common::value_editor(ui, id, attr, &v, dims);
+            let edit = common::value_editor(ui, id, attr, &v, dims, tr(label));
             common::apply_edit(cx, session, path, attr, now, edit);
         }
     });
@@ -152,7 +153,10 @@ impl Panel for PropertiesPanel {
                 if let Some(Value::TextDocument(doc)) = doc {
                     let key = ui.id().with(("text_src", layer.as_str()));
                     let mut text = ui.data(|d| d.get_temp::<String>(key)).unwrap_or_else(|| doc.text.clone());
-                    let r = ui.add(egui::TextEdit::multiline(&mut text).desired_rows(2).desired_width(f32::INFINITY));
+                    let value = text.clone();
+                    let r = ui
+                        .add(egui::TextEdit::multiline(&mut text).desired_rows(2).desired_width(f32::INFINITY))
+                        .labeled_value(egui::WidgetType::TextEdit, tr("Source Text"), &value);
                     if r.changed() {
                         ui.data_mut(|d| d.insert_temp(key, text.clone()));
                     }
@@ -168,7 +172,8 @@ impl Panel for PropertiesPanel {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(tr("Font Size")).color(color::TEXT));
                         let mut size = d2.font_size;
-                        let r = ui.add(widgets::HotNumber::new(&mut size).decimals(0).suffix(" px").range(1.0..=2000.0));
+                        let px = format!(" {}", tr("px")); // 像素 in Chinese (#197)
+                        let r = ui.add(widgets::HotNumber::new(&mut size).decimals(0).suffix(&px).range(1.0..=2000.0).label(tr("Font Size")));
                         if r.drag_stopped() || (r.changed() && !r.dragged()) {
                             d2.font_size = size;
                             commit = true;
@@ -302,7 +307,16 @@ impl Panel for EffectControlsPanel {
 #[derive(Default)]
 pub struct PreviewPanel;
 
+/// Content size the Preview panel needs (transport row with Loop, timecode).
+const PREVIEW_MIN_W: f32 = 210.0;
+const PREVIEW_MIN_H: f32 = 56.0;
+
 impl Panel for PreviewPanel {
+    fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
+        // The transport row and the timecode line below it, never cut off.
+        TabInfo::new(tr("Preview")).min_size(egui::vec2(PREVIEW_MIN_W, PREVIEW_MIN_H))
+    }
+
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
         let session = common::session(cx.resources);
         actions::handle(action, cx, &session)
@@ -346,6 +360,7 @@ impl Panel for PreviewPanel {
             ];
             for (icon, tip, inv) in buttons {
                 if icons::button(ui, icon, 24.0, false)
+                    .labeled(egui::WidgetType::Button, tr(tip))
                     .on_hover_text(tr(tip))
                     .clicked()
                 {

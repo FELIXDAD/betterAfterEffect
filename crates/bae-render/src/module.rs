@@ -5,7 +5,7 @@
 //!            [-o FILE|PATTERN] [--format png|tiff|exr|h264|hevc|prores|prores4444]
 //!            [--compression LEVEL] [--bits 8|16|32] [--threads N]
 //!            [--resolution full|half|third|quarter|N] [--depth 8|16|32]
-//!            [--alpha straight|premultiplied|background] [--roi X,Y,W,H] [--mock-eval] [--json]
+//!            [--alpha straight|premultiplied|background] [--roi X,Y,W,H] [--json]
 //! ```
 //!
 //! Without a window, on the shared GPU context; for CI, agents and render farms.
@@ -30,7 +30,7 @@ use clap::{Arg, ArgAction, ArgMatches};
 
 use crate::anim::AnimEvaluator;
 use crate::assets::AssetFiles;
-use crate::eval::{CompEvaluator, MockEvaluator, sample};
+use crate::eval::sample;
 use crate::export::{
     Encoders, ExportAlpha, ExportFormat, ExportJob, ExportSettings, ExportedFrame, export_frames,
 };
@@ -91,7 +91,17 @@ impl AppModule for RenderModule {
                 .iter()
                 .map(|e| e.item().clone())
                 .collect();
-            run(ctx.matches, desc, media, encoders, &providers)
+            // The app's wording for projects that do not open (same as
+            // `bae export-json`).
+            let open_error = ctx.app.resource::<cli::ProjectOpenError>().cloned();
+            run(
+                ctx.matches,
+                move || GpuContext::new_headless(desc),
+                media,
+                encoders,
+                &providers,
+                open_error.as_ref(),
+            )
         });
         if let Err(error) = cli::implement(&registry, app.current_owner(), render) {
             tracing::warn!("render not registered: {error}");
@@ -215,12 +225,6 @@ fn args(cmd: clap::Command) -> clap::Command {
             .help("Render only this region (comp pixels)"),
     )
     .arg(
-        Arg::new("mock-eval")
-            .long("mock-eval")
-            .action(ArgAction::SetTrue)
-            .help("Use the renderer's mock evaluator instead of bae-anim"),
-    )
-    .arg(
         Arg::new("json")
             .long("json")
             .action(ArgAction::SetTrue)
@@ -285,18 +289,22 @@ type MediaHandle = std::sync::Arc<bae_media::MediaLibrary>;
 #[cfg(not(feature = "media"))]
 type MediaHandle = ();
 
+/// `gpu` creates the context once the options are checked (tests pass the
+/// process-wide test context instead, #154).
 fn run(
     m: &ArgMatches,
-    desc: GpuContextDescriptor,
+    gpu: impl FnOnce() -> Result<std::sync::Arc<GpuContext>, bae_gpu::GpuError>,
     media: Option<MediaHandle>,
     encoders: Option<Encoders>,
     providers: &[std::sync::Arc<dyn SourceProvider>],
+    open_error: Option<&cli::ProjectOpenError>,
 ) -> anyhow::Result<ExitCode> {
     let entered = Instant::now();
     let project_path = m.get_one::<PathBuf>("project").expect("required");
     let comp = comp_path(m.get_one::<String>("comp").expect("required"))?;
     let json = m.get_flag("json");
-    let project = Project::open(project_path)?;
+    let project = Project::open(project_path)
+        .map_err(|error| cli::project_open_error(open_error, project_path, error.into()))?;
     let stage = &project.stage;
     let (rate, duration) = comp_timing(stage, &comp)?;
 
@@ -374,7 +382,7 @@ fn run(
     // Reject bad output options before any GPU work.
     settings.validate(rate, &request)?;
 
-    let gpu = GpuContext::new_headless(desc)?;
+    let gpu = gpu()?;
     let mut renderer = Renderer::with_config(
         gpu.clone(),
         RendererConfig {
@@ -394,11 +402,7 @@ fn run(
     }
     // Footage on disk or inside the .baez the project was opened from.
     let assets = AssetFiles::for_project(&project)?;
-    let mut evaluator: Box<dyn CompEvaluator> = if m.get_flag("mock-eval") {
-        Box::new(MockEvaluator::new(None).with_assets(assets))
-    } else {
-        Box::new(AnimEvaluator::new(None).with_assets(assets))
-    };
+    let mut evaluator = AnimEvaluator::new(None).with_assets(assets);
 
     let setup = entered.elapsed();
     let ms = |d: Duration| d.as_secs_f64() * 1e3;
@@ -417,7 +421,7 @@ fn run(
     };
     let report = export_frames(
         &mut renderer,
-        evaluator.as_mut(),
+        &mut evaluator,
         &ExportJob {
             stage,
             comp: &comp,
@@ -525,6 +529,7 @@ fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::eval::CompEvaluator;
     use crate::export::frame_file;
     use bae_model::Value;
     use std::path::Path;
@@ -534,8 +539,7 @@ mod tests {
     #[cfg(feature = "media")]
     #[test]
     fn renders_packaged_footage_from_baez() {
-        if GpuContext::new_headless(GpuContextDescriptor::default()).is_err() {
-            eprintln!("no GPU, skipping");
+        if bae_gpu::testing::shared_context().is_none() {
             return;
         }
         let dir = tempfile::tempdir().unwrap();
@@ -585,7 +589,7 @@ mod tests {
             ])
             .unwrap();
         assert_eq!(
-            run(&m, GpuContextDescriptor::default(), None, None, &[]).unwrap(),
+            run(&m, test_gpu, None, None, &[], None).unwrap(),
             ExitCode::SUCCESS
         );
         let (w, _, data) = crate::png_out::read_rgba8(&out).unwrap();
@@ -597,11 +601,9 @@ mod tests {
 
     #[test]
     fn renders_a_saved_project_to_png() {
-        let Ok(gpu) = GpuContext::new_headless(GpuContextDescriptor::default()) else {
-            eprintln!("no GPU, skipping");
+        if bae_gpu::testing::shared_context().is_none() {
             return;
-        };
-        drop(gpu);
+        }
         let dir = tempfile::tempdir().unwrap();
         let mut b = crate::fixture::SceneBuilder::new();
         let comp = b
@@ -629,7 +631,7 @@ mod tests {
             ])
             .unwrap();
         assert_eq!(
-            run(&m, GpuContextDescriptor::default(), None, None, &[]).unwrap(),
+            run(&m, test_gpu, None, None, &[], None).unwrap(),
             ExitCode::SUCCESS
         );
         for f in ["out_00.png", "out_01.png"] {
@@ -697,7 +699,7 @@ mod tests {
         alpha: ExportAlpha,
     ) -> Vec<Vec<u8>> {
         let project = Project::open(project).unwrap();
-        let gpu = GpuContext::new_headless(GpuContextDescriptor::default()).unwrap();
+        let gpu = bae_gpu::testing::shared_context().unwrap();
         let mut renderer = Renderer::with_config(
             gpu,
             RendererConfig {
@@ -730,15 +732,17 @@ mod tests {
         let m = args(clap::Command::new("render"))
             .try_get_matches_from(std::iter::once("render").chain(argv.iter().copied()))
             .unwrap();
-        run(&m, GpuContextDescriptor::default(), None, None, &[])
+        run(&m, test_gpu, None, None, &[], None)
+    }
+
+    /// The context `bae render` runs get in tests: the process-wide test context,
+    /// not a device of their own (#154).
+    fn test_gpu() -> Result<std::sync::Arc<GpuContext>, bae_gpu::GpuError> {
+        Ok(bae_gpu::testing::shared_context().expect("callers check has_gpu() first"))
     }
 
     fn has_gpu() -> bool {
-        let ok = GpuContext::new_headless(GpuContextDescriptor::default()).is_ok();
-        if !ok {
-            eprintln!("no GPU, skipping");
-        }
-        ok
+        bae_gpu::testing::shared_context().is_some()
     }
 
     /// The pipelined export (async readback ring, encoder threads) writes
@@ -1014,7 +1018,7 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         let project = Project::open(animated_project(dir.path())).unwrap();
-        let gpu = GpuContext::new_headless(GpuContextDescriptor::default()).unwrap();
+        let gpu = bae_gpu::testing::shared_context().unwrap();
         let mut renderer = Renderer::new(gpu);
         let mut evaluator = AnimEvaluator::new(None);
         let comp = comp_path("main").unwrap();

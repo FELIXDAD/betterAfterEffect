@@ -5,7 +5,7 @@
 //! |---|---|
 //! | `project` | Project: folders, comps, footage and solids (AE columns) |
 //! | `composition` | Composition viewer: active comp at the current time, selection and moving, zoom, safe areas, grid |
-//! | `timeline` | Timeline: layer outline with switches and Parent & Link, properties with stopwatches and values, ruler, work area, CTI, layer bars, keyframes |
+//! | `timeline` | Timeline: layer outline with switches and Parent & Link, properties with stopwatches and values, ruler, work area, CTI, layer bars, keyframes; the Graph Editor (`graph`, Shift+F3) |
 //! | `properties` | Properties (AE 2024+): the selected layer's transform, text and shape fill |
 //! | `effect_controls` | Effect Controls (F3) |
 //! | `preview` | Preview: play/stop, frame stepping, loop |
@@ -21,29 +21,37 @@
 //! without one (tests, headless hosts).
 
 pub mod actions;
+pub mod catalog;
 mod common;
 pub mod demo;
+pub mod dialogs;
 mod gpu_preview;
+mod graph;
 mod i18n;
+pub mod import;
 pub mod menus;
 mod panels;
+mod prefs;
 mod project;
 mod props;
 mod render;
 pub mod render_queue;
 pub mod session;
 mod timeline;
+pub mod tools;
 mod viewer;
 
 use bae_app::{AppBuilder, AppModule};
 use bae_ui::{ActionHandler, ActionInfo, KeymapBindings, MenuItemSpec, PanelKind};
 
+pub use dialogs::{MotionDialogs, SharedDialogs};
 pub use gpu_preview::PreviewSources;
 pub use panels::{EffectControlsPanel, PreviewPanel, PropertiesPanel};
 pub use project::ProjectPanel;
 pub use render_queue::{RenderQueuePanel, SharedRenderQueue};
 pub use session::{Session, SharedSession};
 pub use timeline::TimelinePanel;
+pub use tools::{SharedTools, Tool};
 pub use viewer::CompositionViewer;
 
 /// App module: the motion commands ([`bae_motion::MotionModule`]) plus the panels,
@@ -59,12 +67,22 @@ impl AppModule for MotionUiModule {
     fn build(&self, app: &mut AppBuilder) {
         app.add_module(bae_motion::MotionModule);
         bae_ui::i18n::register(i18n::ZH);
+        bae_ui::i18n::register(tools::ZH);
+        bae_ui::i18n::register(catalog::menu_zh());
         if app.resource::<SharedSession>().is_none() {
             app.insert_resource(SharedSession::default());
+        }
+        if app.resource::<SharedTools>().is_none() {
+            app.insert_resource(SharedTools::default());
         }
         if app.resource::<SharedRenderQueue>().is_none() {
             app.insert_resource(SharedRenderQueue::default());
         }
+        if app.resource::<SharedDialogs>().is_none() {
+            app.insert_resource(SharedDialogs::default());
+        }
+        let dialogs: std::sync::Arc<dyn bae_ui::DialogHost> = std::sync::Arc::new(MotionDialogs);
+        let _ = app.register_arc::<dyn bae_ui::DialogHost>("bae-ui-motion", dialogs);
         let owner = app.current_owner();
         let kinds = app.registry::<PanelKind>();
         let panels: [(&str, PanelKind); 7] = [
@@ -116,6 +134,28 @@ impl AppModule for MotionUiModule {
             }
         });
         let _ = app.register::<KeymapBindings>("motion", actions::bindings());
+        // Tools: the toolbar of the `ae` keymap, tool shortcuts and their handler.
+        let _ = app.register::<KeymapBindings>("motion.tools", tools::keymap_bindings());
+        actions.batch(|tx| {
+            for (id, title) in tools::actions() {
+                if !tx.contains(id) {
+                    let _ = tx.register(owner.clone(), id, ActionInfo::new(title));
+                }
+            }
+        });
+        let shared_tools = app.resource::<SharedTools>().cloned().unwrap_or_default();
+        let toolbar: std::sync::Arc<dyn bae_ui::Toolbar> =
+            std::sync::Arc::new(tools::toolbar::AeToolbar::new(shared_tools));
+        let _ = app.register_arc::<dyn bae_ui::Toolbar>(bae_ui::presets::AE_KEYMAP, toolbar);
+        let tool_actions: std::sync::Arc<dyn ActionHandler> =
+            std::sync::Arc::new(tools::ToolActions);
+        let _ = app.register_arc::<dyn ActionHandler>("bae-ui-motion.tools", tool_actions);
+        let variants = app.registry::<bae_ui::CommandVariant>();
+        variants.batch(|tx| {
+            for (id, variant) in actions::variants().into_iter().chain(tools::variants()) {
+                let _ = tx.register(owner.clone(), id, variant);
+            }
+        });
         // Menus and the global handler: AE shortcuts and menu items work whichever
         // panel has focus.
         let handler: std::sync::Arc<dyn ActionHandler> = std::sync::Arc::new(menus::MotionActions);
@@ -123,7 +163,7 @@ impl AppModule for MotionUiModule {
         let menu = app.registry::<MenuItemSpec>();
         menu.batch(|tx| {
             for (id, item) in menus::items() {
-                if !tx.contains(id) {
+                if !tx.contains(&id) {
                     let _ = tx.register(owner.clone(), id, item);
                 }
             }
@@ -140,3 +180,5 @@ impl AppModule for MotionUiModule {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod timeline_tests;

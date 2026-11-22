@@ -41,7 +41,10 @@ bae --smoke-test <N>        渲染 N 帧后退出（0 = 成功），可与 --hea
 bae --log <FILTER>          日志过滤，例如 "info,bae_gpu=debug"
 bae --version
 bae gpu-info [--json]       GPU、特性、限制、格式支持
-bae render | mcp | export-json | pack …   其他工作流实现
+bae export-json <工程>       工程导出成可读 JSON
+bae pack <工程> [-o 输出.baez] [--overwrite] [--used-only] [--fail-on-missing] [--json]
+                            打包成自带素材的 .baez（bae-package），保留保存的视图
+bae render | mcp …          其他工作流实现
 ```
 
 ## 3. 启动流程
@@ -82,9 +85,19 @@ bae render | mcp | export-json | pack …   其他工作流实现
 - 未保存的修改不另外记标志：比较每个工程层的 Loro 版本向量和层叠顺序与上次打开 / 保存时是否相同（命令、撤销、重做、远程导入都会推进版本）。保存后撤销算作新的修改。窗口标题在有修改时加 ` *`（AE 的写法），macOS 同时设置窗口的"已编辑"状态。
 - 关闭工程、新建、打开、退出（菜单、Cmd/Ctrl+Q、关闭窗口）前，有修改时弹原生提示：保存 / 不保存 / 取消。macOS 是 NSAlert（保存是默认按钮）；Windows 是 MessageBox 的 是 / 否 / 取消（自定义按钮文字需要 comctl32 v6 清单，可执行文件目前没有）。"保存"失败或取消保存对话框时不关闭。
 - 顺序（`files::CommitGate`）：文件命令和退出总在它们之前的编辑之后执行。同一帧里快捷键先于面板的提交被读到（输入数值、回车、Cmd/Ctrl+S 连按时是 `[file.save, attr.set_at]`），外壳把这一批的其他命令先跑；macOS 菜单和快捷键也排在上一帧的编辑后面。正在输入数值时按保存 / 退出，外壳先结束输入（字段失去焦点时提交，同 AE 的点别处），下一帧提交后再执行；窗口 300 ms 内不重绘（例如最小化）就不再等。
+- 另存为到已有的 `.bae` 工程（#126）：`.bae` 在 Windows（以及不在 BAE.app 里运行的 macOS 程序）上是普通文件夹，保存对话框会走进去。选中的路径如果本身是 `.bae` 工程目录，或者在某个 `.bae` 工程里面（取最外层），就当作替换这个工程，绝不在工程里再嵌套一个工程；先问「“…”已存在。要替换它吗？」（BAE.app 里 `.bae` 是包，保存面板自己已经问过，就不再问）。替换先写到旁边的临时文件夹，成功后再换上，失败时原工程不动。路径落在当前工程自己的文件夹里时直接原位保存；名字像工程、但不是工程的非空文件夹拒绝写入。
+- Windows 的另存为对话框不用 rfd，而是我们自己调 IFileSaveDialog，并注册 IFileDialogEvents（`shell::win_save`）。判断逻辑在 `shell::save_guard`，不依赖 Win32，所有平台都测：
+  - 在对话框里选中 `proj.bae` 点保存、双击它，或者在对话框打开后用任何方式进入一个 `.bae` 工程目录：`OnFolderChanging` 拒绝进入，关掉对话框，返回这个工程的路径，再走上面的「要替换它吗？」。
+  - 对话框打开时自己导航到起始文件夹，这一步不拦截（起始文件夹可能是系统记住的、在某个工程里面的位置）。
+  - 名字像工程、但里面没有 `project.json` 的文件夹照常进入。
+  - 输入不带扩展名的 `proj`，默认扩展名补成 `proj.bae` 后正好是已有工程：打开 `FOS_NOTESTFILECREATE`，系统不再先试着在文件夹上建文件、报「你没有权限在此位置中保存文件」；`OnFileOk` 认出这个工程，同样走替换确认。写入失败由另存为用我们自己的说法报告。
+  - `OnOverwrite` 遇到工程目录时直接接受，不弹系统的覆盖提示（我们自己会问）；已有的 `.baez` 文件仍然由系统提示覆盖。
+  - macOS 保持用 rfd。
 - 对话框都在 `files::FileDialogs` trait 后面：外壳用 `shell::dialogs::Native`（rfd），冒烟测试用 `files::NoDialogs`（从不阻塞），测试注入路径和回答。
 - 命令行：`bae <工程>` 启动时打开；打不开时窗口出来后弹错误提示，`--smoke-test` 时直接以 1 退出。`bae --headless <工程>` 打开并打印一行摘要；`bae --headless --smoke-test N <工程>` 带着这个工程渲染界面。
-- 打开另一个工程时清空历史记录面板，并重置动效工作区的会话状态（当前合成、选择、播放）。
+- 打开另一个工程时清空历史记录面板，并重置动效工作区的会话状态（选择、播放）。打开的合成按 AE 的做法恢复：保存时把打开着的合成和各自的当前时间记在 `project.json` 的 `view` 里（`view_state.rs`），打开时恢复；没有记录（或记录里的合成都不在了）就打开第一个合成。
+- 打不开的工程（`open_error.rs`）：提示写明是哪个文件、出了什么问题——不存在、文件夹里没有 project.json、不是 BAE 项目、.baez 已损坏、project.json 已损坏、更新版本保存的、工程层数据缺失或损坏、没有读取权限——中英文都有，下面一行是技术原因。打开对话框、`bae <工程>`、`bae --headless <工程>`、`bae export-json`、`bae pack`、`bae mcp` 都用它；`bae render`（在 bae-render 里打开工程）通过应用放进去的 `bae_platform::cli::ProjectOpenError` 资源用同一套说法。`acceptance_cli::every_entry_point_explains_open_failures_the_same_way` 逐个入口检查。
+- 从访达打开（macOS）：`BAE.app` 的 Info.plist 声明了 `.bae`（UTI `io.github.felixdad.bae.project`，作为包显示成一个文档）和 `.baez`（`io.github.felixdad.bae.package`）两种文档类型，见 `xtask/src/dist.rs`。双击、拖到程序坞图标、`open 工程.bae` 都不是命令行参数，而是 Apple 事件，由 `NSApplication` 交给代理的 `application:openURLs:`。winit 0.30 的代理（`WinitApplicationDelegate`）没有实现这个方法，`shell::open_documents` 在事件循环创建后、`run_app` 之前把它加到这个类上（winit 自己也是这样替换 `sendEvent:` 的），所以双击工程启动 BAE 的那一次也收得到。路径变成 `UserEvent::OpenFiles`，再变成普通的 `file.open_project`（经 `view_state::run_file_command`）：未保存的修改照常先问，坏文件照常报错（`open_error.rs`），打开后恢复上次打开的合成，一次只开第一个。BAE 已经在运行时，macOS 把事件发给正在运行的实例。Windows 的双击打开要靠安装器写文件关联，0.0.1 没有安装器，暂时只能在 BAE 里打开或用 `bae <工程>`。
 
 ### 设备丢失
 

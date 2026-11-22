@@ -72,6 +72,9 @@ pub fn run(mut app: App) -> ExitCode {
     // Installed plugins (user, system, bundled, BAE_PLUGIN_PATH); problems are logged.
     bae_plugin::load_installed(&app);
 
+    // Messages of subcommands (e.g. why `bae export-json` cannot open a file)
+    // follow the UI language too.
+    crate::i18n::init_from_env();
     match invocation {
         Invocation::Subcommand {
             name,

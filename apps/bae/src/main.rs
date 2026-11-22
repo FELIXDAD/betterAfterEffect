@@ -14,29 +14,43 @@
 #[cfg(all(test, target_os = "macos"))]
 mod acceptance;
 mod agent_feed;
+mod autosave;
 mod document;
+mod file_error;
 mod files;
 mod headless;
 mod i18n;
 mod mcp_cli;
 mod model_cli;
+mod pack_cli;
 #[cfg(test)]
 mod save_roundtrip;
 mod shell;
 mod startup;
 mod ui;
+#[cfg(test)]
+mod ui_text;
+mod view_state;
 
 use std::process::ExitCode;
 
 use bae_app::AppBuilder;
 
 fn main() -> ExitCode {
+    startup::run(app_builder().build())
+}
+
+/// Every module of the app, in order. Tests assemble the same app from it (so they
+/// see the same commands, panels and translation tables).
+fn app_builder() -> AppBuilder {
     let mut builder = AppBuilder::new();
     builder
         .add_module(bae_platform::PlatformModule)
         .add_module(bae_gpu::GpuModule)
         .add_module(model_cli::ModelCliModule)
         .add_module(mcp_cli::McpCliModule)
+        // `bae pack`: one self-contained .baez (bae-package).
+        .add_module(pack_cli::PackCliModule)
         .add_module(bae_render::RenderModule)
         // Motion commands (comp.create, layer.create, key.ease …) for menus and agents.
         .add_module(bae_motion::MotionModule)
@@ -60,5 +74,5 @@ fn main() -> ExitCode {
         tracing::warn!("text layer source not registered: {error}");
     }
     // Feature modules from other workstreams are added here.
-    startup::run(builder.build())
+    builder
 }

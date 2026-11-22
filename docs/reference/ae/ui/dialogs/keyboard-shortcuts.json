@@ -1,0 +1,250 @@
+{
+  "schemaVersion": "1.0",
+  "id": "keyboard-shortcuts",
+  "title": {
+    "zh": "键盘快捷键",
+    "en": "Keyboard Shortcuts"
+  },
+  "triggers": [
+    {
+      "action": "Keyboard Shortcuts",
+      "shortcutWin": "Ctrl+Alt+'",
+      "menuZh": "编辑 ▸ 键盘快捷键"
+    }
+  ],
+  "source": {
+    "application": "Adobe After Effects 26.0 (26.0x67)",
+    "platform": "Windows 11 Pro x64 (3840x2160 @ 150% DPI)",
+    "localeObserved": "zh_CN",
+    "method": "Live MSAA inspection + interactive tab/radio/dropdown probing + ExtendScript range probing"
+  },
+  "geometry": {
+    "physicalPxAt144Dpi": {
+      "w": 2302,
+      "h": 1339
+    },
+    "logicalPxAt96Dpi": {
+      "w": 1535,
+      "h": 893
+    }
+  },
+  "persistence": {
+    "remembersLastValues": true,
+    "persistsAcrossRestarts": true,
+    "notesZh": "所选快捷键预设与自定义绑定跨重启持久化保存为用户目录 `aeks/` 下的 `.txt` 预设文件；修改内置 `After Effects 默认值.txt` 时自动切换为 `自定义.txt`（或用户另存的新预设）。"
+  },
+  "buttonBar": {
+    "position": "bottom_right",
+    "right": [
+      {
+        "id": "ok",
+        "type": "button",
+        "zh": "确定",
+        "en": "OK",
+        "role": "accept"
+      },
+      {
+        "id": "cancel",
+        "type": "button",
+        "zh": "取消",
+        "en": "Cancel",
+        "role": "reject"
+      }
+    ]
+  },
+  "tabs": [],
+  "controls": [
+    {
+      "id": "preset",
+      "type": "dropdown",
+      "zh": "预设:",
+      "en": "Keyboard Layout Preset:",
+      "defaultValue": {
+        "zh": "After Effects 默认值.txt",
+        "en": "After Effects Default.txt"
+      },
+      "options": [
+        {
+          "zh": "After Effects 默认值.txt",
+          "en": "After Effects Default.txt"
+        },
+        {
+          "zh": "自定义.txt",
+          "en": "Custom.txt"
+        }
+      ],
+      "notesZh": "列出内置只读预设及所有用户自定义 `.txt` 预设文件。"
+    },
+    {
+      "id": "save_as",
+      "type": "button",
+      "zh": "另存为...",
+      "en": "Save As..."
+    },
+    {
+      "id": "delete_preset",
+      "type": "button",
+      "zh": "删除",
+      "en": "Delete",
+      "enableRuleZh": "选中内置 `After Effects 默认值.txt` 时置灰禁用；选中自定义/用户预设时可用。"
+    },
+    {
+      "id": "copy_to_clipboard",
+      "type": "button",
+      "zh": "复制到剪贴板",
+      "en": "Copy to Clipboard",
+      "notesZh": "将当前预设的完整快捷键表复制为纯文本。"
+    },
+    {
+      "id": "keyboard_layout",
+      "type": "dropdown",
+      "zh": "键盘布局 -",
+      "en": "Keyboard Layout:",
+      "defaultValue": {
+        "zh": "en",
+        "en": "en"
+      },
+      "options": [
+        {
+          "zh": "en",
+          "en": "en"
+        },
+        {
+          "zh": "pt",
+          "en": "pt"
+        },
+        {
+          "zh": "ja",
+          "en": "ja"
+        },
+        {
+          "zh": "ko",
+          "en": "ko"
+        },
+        {
+          "zh": "sv",
+          "en": "sv"
+        },
+        {
+          "zh": "ru",
+          "en": "ru"
+        },
+        {
+          "zh": "fr",
+          "en": "fr"
+        },
+        {
+          "zh": "es",
+          "en": "es"
+        },
+        {
+          "zh": "nb",
+          "en": "nb"
+        },
+        {
+          "zh": "it",
+          "en": "it"
+        },
+        {
+          "zh": "de",
+          "en": "de"
+        }
+      ],
+      "notesZh": "共 11 种物理键盘区域布局代码，仅影响可视化键盘绘制与键帽标签。"
+    },
+    {
+      "id": "command_scope",
+      "type": "dropdown",
+      "zh": "命令:",
+      "en": "Commands:",
+      "defaultValue": {
+        "zh": "应用程序",
+        "en": "Application"
+      },
+      "options": [
+        {
+          "zh": "应用程序",
+          "en": "Application"
+        },
+        {
+          "zh": "合成面板",
+          "en": "Composition Panel"
+        },
+        {
+          "zh": "图层面板",
+          "en": "Layer Panel"
+        },
+        {
+          "zh": "字符和段落面板",
+          "en": "Character and Paragraph Panels"
+        },
+        {
+          "zh": "应用",
+          "en": "App"
+        },
+        {
+          "zh": "效果控件面板",
+          "en": "Effect Controls Panel"
+        },
+        {
+          "zh": "时间轴面板",
+          "en": "Timeline Panel"
+        },
+        {
+          "zh": "查看器面板",
+          "en": "Viewer Panel"
+        },
+        {
+          "zh": "流程图面板",
+          "en": "Flowchart Panel"
+        },
+        {
+          "zh": "渲染队列面板",
+          "en": "Render Queue Panel"
+        },
+        {
+          "zh": "绘画面板",
+          "en": "Paint Panel"
+        },
+        {
+          "zh": "跟踪器面板",
+          "en": "Tracker Panel"
+        },
+        {
+          "zh": "项目面板",
+          "en": "Project Panel"
+        }
+      ],
+      "notesZh": "共 13 个作用域；切换后联动刷新可视化键盘高亮（紫色=全局应用快捷键，绿色=当前面板覆盖快捷键）。"
+    },
+    {
+      "id": "visual_keyboard",
+      "type": "custom_keyboard_map",
+      "zh": "可视化键盘布局",
+      "en": "Visual Keyboard Layout",
+      "notesZh": "按主键盘、功能区、方向键、小键盘分布；点击任意键位可在右下查看其全部修饰键组合，支持从下方命令树拖拽到键帽上绑定；下方附 3 色图例（应用全局快捷键 / 面板焦点覆盖快捷键 / 按下辅助按键）。"
+    },
+    {
+      "id": "search_box",
+      "type": "text_input",
+      "zh": "搜索框",
+      "en": "Search",
+      "defaultValue": "",
+      "notesZh": "按命令名称或快捷键文字实时过滤下方命令树。"
+    },
+    {
+      "id": "command_tree",
+      "type": "tree_table",
+      "zh": "命令与快捷键列表",
+      "en": "Command / Shortcut List",
+      "notesZh": "位于左下区域（宽 1170 px @ 144 DPI），按菜单与面板分组折叠展示命令与绑定快捷键胶囊，支持双击/点击胶囊录制或删除多个快捷键。"
+    },
+    {
+      "id": "key_modifier_list",
+      "type": "table",
+      "zh": "键: <所选键位>",
+      "en": "Key: <Selected Key>",
+      "notesZh": "位于右下区域，展示当前所选物理键搭配 Ctrl / Shift / Alt 等所有修饰键组合的对应命令及冲突提示。"
+    }
+  ]
+}

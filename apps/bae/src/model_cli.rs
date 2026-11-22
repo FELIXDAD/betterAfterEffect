@@ -55,7 +55,9 @@ impl AppModule for ModelCliModule {
             .with_run(|ctx| {
                 let m = ctx.matches;
                 let path = m.get_one::<PathBuf>("project").expect("required");
-                let project = Project::open(path)?;
+                let project = Project::open(path).map_err(|error| {
+                    anyhow::anyhow!(crate::file_error::describe_open(path, &error.into()))
+                })?;
                 let json = match (m.get_one::<String>("sublayer"), m.get_one::<String>("prim")) {
                     (Some(id), _) => {
                         bae_model::export_sublayer_json(&project.stage, &SublayerId::new(id)?)?
@@ -76,6 +78,12 @@ impl AppModule for ModelCliModule {
                 }
                 Ok(ExitCode::SUCCESS)
             });
+        // Every entry point that opens a project explains a failure the same way
+        // (issue #111): export-json, pack, mcp here; `bae render` (bae-render)
+        // through this resource.
+        app.insert_resource(cli::ProjectOpenError(std::sync::Arc::new(|path, error| {
+            crate::file_error::describe_open(path, error)
+        })));
         if let Err(error) = cli::implement(&registry, app.current_owner(), export) {
             tracing::warn!("export-json not registered: {error}");
         }

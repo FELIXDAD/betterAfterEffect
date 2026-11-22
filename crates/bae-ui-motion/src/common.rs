@@ -7,6 +7,7 @@ use bae_anim::Evaluator;
 use bae_app::Resources;
 use bae_model::{LayerKind, PrimPath, PrimType, Stage, Time, Value};
 use bae_motion::query::{self, CompInfo};
+use bae_ui::Accessible as _;
 use bae_ui::history::HistoryLog;
 use bae_ui::theme::{self, color};
 use bae_ui::widgets::{self, HotNumber};
@@ -18,7 +19,51 @@ use crate::session::{Pending, Scrub, SharedSession};
 
 /// The session resource (inserted by [`crate::MotionUiModule`]); a private one when
 /// the app did not insert it (tests, other hosts).
+/// Preferences the motion commands read (Default Spatial Interpolation to Linear),
+/// pushed to them when they change. Every motion panel calls this once a frame
+/// through [`session`]; it is an atomic compare when nothing changed.
+fn sync_prefs(resources: &Resources) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEEN: AtomicU64 = AtomicU64::new(u64::MAX);
+    let Some(store) = resources.get::<Arc<bae_prefs::PrefsStore>>() else {
+        return;
+    };
+    let generation = store.generation();
+    if SEEN.swap(generation, Ordering::Relaxed) != generation {
+        bae_motion::set_default_spatial_linear(
+            store
+                .current()
+                .bool(bae_prefs::keys::DEFAULT_SPATIAL_LINEAR),
+        );
+    }
+}
+
+/// Expression fields (timeline rows, Graph Editor): font size and colours from
+/// Preferences > Scripting & Expressions > Expression Editor (AE defaults without a
+/// preferences store). Returns (font, text colour, background).
+pub(crate) fn expression_style(
+    resources: &Resources,
+) -> (egui::FontId, egui::Color32, egui::Color32) {
+    let rgb = |c: [u8; 3]| egui::Color32::from_rgb(c[0], c[1], c[2]);
+    match resources.get::<Arc<bae_prefs::PrefsStore>>() {
+        Some(store) => {
+            let p = store.current();
+            (
+                egui::FontId::monospace(p.int(bae_prefs::keys::EXPR_FONT_SIZE).clamp(6, 72) as f32),
+                rgb(p.color("scripting_expressions.expr_color_default")),
+                rgb(p.color("scripting_expressions.expr_color_background")),
+            )
+        }
+        None => (
+            egui::FontId::monospace(12.0),
+            egui::Color32::from_rgb(0xcc, 0xcc, 0xcc),
+            egui::Color32::from_rgb(0x1d, 0x1d, 0x1d),
+        ),
+    }
+}
+
 pub(crate) fn session(resources: &Resources) -> SharedSession {
+    sync_prefs(resources);
     resources
         .get::<SharedSession>()
         .cloned()
@@ -70,6 +115,9 @@ pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool
     let fixed = match attr {
         "transform:anchor_point" => "Anchor Point",
         "transform:position" => "Position",
+        "transform:position_x" => "X Position",
+        "transform:position_y" => "Y Position",
+        "transform:position_z" => "Z Position",
         "transform:scale" => "Scale",
         "transform:rotation" if three_d => "Z Rotation",
         "transform:rotation" => "Rotation",
@@ -153,7 +201,7 @@ enum Num {
 }
 
 /// A hot number whose scrubbed value is kept until the drag ends (one command per drag).
-fn number(ui: &mut Ui, id: Id, model: f64, attr: &str, suffix: &str) -> Num {
+fn number(ui: &mut Ui, id: Id, model: f64, attr: &str, suffix: &str, name: &str) -> Num {
     let key = id.with("scrub");
     let mut v = ui.data(|d| d.get_temp::<f64>(key)).unwrap_or(model);
     let resp = ui
@@ -162,7 +210,8 @@ fn number(ui: &mut Ui, id: Id, model: f64, attr: &str, suffix: &str) -> Num {
                 HotNumber::new(&mut v)
                     .decimals(decimals(attr))
                     .speed(if attr.ends_with("opacity") { 1.0 } else { 0.5 })
-                    .suffix(suffix),
+                    .suffix(suffix)
+                    .label(name),
             )
         })
         .inner;
@@ -181,8 +230,18 @@ fn number(ui: &mut Ui, id: Id, model: f64, attr: &str, suffix: &str) -> Num {
 }
 
 /// Editor for one property value (hot numbers, color swatch, checkbox, text).
-/// `dims` limits vector components (2 for 2D layers).
-pub(crate) fn value_editor(ui: &mut Ui, id: Id, attr: &str, value: &Value, dims: usize) -> Edit {
+/// `dims` limits vector components (2 for 2D layers). `name` is what screen
+/// readers call the property ("Layer “Solid 1” · Position"); components get
+/// X / Y / Z after it (issue #128).
+pub(crate) fn value_editor(
+    ui: &mut Ui,
+    id: Id,
+    attr: &str,
+    value: &Value,
+    dims: usize,
+    name: &str,
+) -> Edit {
+    let axis = |i: usize| bae_ui::a11y::context(&[name, ["X", "Y", "Z"][i.min(2)]]);
     let mut out = Edit::None;
     let mut apply = |n: Num, f: &dyn Fn(f64) -> Value| match n {
         Num::None => {}
@@ -195,17 +254,31 @@ pub(crate) fn value_editor(ui: &mut Ui, id: Id, attr: &str, value: &Value, dims:
             // AE shows rotation as revolutions + degrees: 1x+30.0°.
             let revs = (v / 360.0).trunc();
             let deg = v - revs * 360.0;
-            let n = number(ui, id.with(0), revs, "points", "x+");
+            let n = number(
+                ui,
+                id.with(0),
+                revs,
+                "points",
+                "x+",
+                &bae_ui::a11y::context(&[name, tr("Revolutions")]),
+            );
             apply(n, &|r| Value::Float(r.trunc() * 360.0 + deg));
-            let n = number(ui, id.with(1), deg, attr, "°");
+            let n = number(
+                ui,
+                id.with(1),
+                deg,
+                attr,
+                "°",
+                &bae_ui::a11y::context(&[name, tr("Degrees")]),
+            );
             apply(n, &|d| Value::Float(revs * 360.0 + d));
         }
         Value::Float(v) => {
-            let n = number(ui, id, *v, attr, suffix(attr));
+            let n = number(ui, id, *v, attr, suffix(attr), name);
             apply(n, &|x| Value::Float(x));
         }
         Value::Int(v) => {
-            let n = number(ui, id, *v as f64, "points", "");
+            let n = number(ui, id, *v as f64, "points", "", name);
             apply(n, &|x| Value::Int(x.round() as i64));
         }
         Value::Vec2(v) | Value::Vec3([v @ .., _])
@@ -224,6 +297,7 @@ pub(crate) fn value_editor(ui: &mut Ui, id: Id, attr: &str, value: &Value, dims:
                     v[i],
                     attr,
                     if i == 1 { suffix(attr) } else { "" },
+                    &axis(i),
                 );
                 apply(n, &|x| {
                     let mut w = v;
@@ -260,6 +334,7 @@ pub(crate) fn value_editor(ui: &mut Ui, id: Id, attr: &str, value: &Value, dims:
                     v[i],
                     attr,
                     if i == 2 { suffix(attr) } else { "" },
+                    &axis(i),
                 );
                 apply(n, &|x| {
                     let mut w = v;
@@ -283,7 +358,9 @@ pub(crate) fn value_editor(ui: &mut Ui, id: Id, attr: &str, value: &Value, dims:
                 c[2] as f32,
                 c[3] as f32,
             ]);
-            let resp = ui.color_edit_button_rgba_unmultiplied(&mut rgba);
+            let resp = ui
+                .color_edit_button_rgba_unmultiplied(&mut rgba)
+                .labeled(egui::WidgetType::ColorButton, name);
             let to_value = |c: [f32; 4]| Value::Color(c.map(f64::from));
             if resp.changed() {
                 ui.data_mut(|d| d.insert_temp(key, rgba));
@@ -297,7 +374,10 @@ pub(crate) fn value_editor(ui: &mut Ui, id: Id, attr: &str, value: &Value, dims:
         }
         Value::Bool(b) => {
             let mut b2 = *b;
-            if widgets::checkbox(ui, &mut b2, "").changed() {
+            if widgets::checkbox(ui, &mut b2, "")
+                .labeled_toggle(egui::WidgetType::Checkbox, name, b2)
+                .changed()
+            {
                 out = Edit::Commit(Value::Bool(b2));
             }
         }
@@ -306,11 +386,13 @@ pub(crate) fn value_editor(ui: &mut Ui, id: Id, attr: &str, value: &Value, dims:
             let mut text = ui
                 .data(|d| d.get_temp::<String>(key))
                 .unwrap_or_else(|| doc.text.clone());
-            let resp = ui.add(
-                egui::TextEdit::singleline(&mut text)
-                    .desired_width(160.0)
-                    .text_color(color::TEXT_STRONG),
-            );
+            let resp = ui
+                .add(
+                    egui::TextEdit::singleline(&mut text)
+                        .desired_width(160.0)
+                        .text_color(color::TEXT_STRONG),
+                )
+                .labeled(egui::WidgetType::TextEdit, name);
             if resp.changed() {
                 ui.data_mut(|d| d.insert_temp(key, text.clone()));
             }
@@ -376,43 +458,36 @@ pub(crate) fn current_value(
         .or_else(|| query::static_value(&stage.prim(path)?, attr))
 }
 
-/// Localized AE-style default name for a new item: `"<base> N"`.
-pub(crate) fn numbered(stage: &Stage, parent: &PrimPath, base: &str) -> String {
-    query::next_numbered_name(stage, parent, tr(base))
+/// Localized AE-style default name for a new item: `"<base> N"`, one more than
+/// the highest N among the existing siblings and the items commands are about
+/// to create (several Cmd+Y in one frame get Solid 1, Solid 2 …).
+pub(crate) fn numbered(
+    stage: &Stage,
+    session: &SharedSession,
+    parent: &PrimPath,
+    base: &str,
+) -> String {
+    let base = tr(base);
+    let existing = query::next_numbered_name(stage, parent, base);
+    let next_existing = number_after(&existing, base).unwrap_or(1);
+    let reserved = session
+        .lock()
+        .reserved_names(parent)
+        .filter_map(|n| number_after(&n, base))
+        .max()
+        .map_or(0, |n| n + 1);
+    format!("{base} {}", next_existing.max(reserved))
 }
 
-/// Create a comp with a localized default name and open it once it exists.
-pub(crate) fn new_comp(
-    cx: &mut PanelContext<'_>,
-    session: &SharedSession,
-    folder: Option<&PrimPath>,
-) {
-    let stage = cx.stage;
-    let base = tr("Comp");
-    let max = query::comps(stage)
-        .iter()
-        .filter_map(|c| {
-            query::display_name_of(stage, c)
-                .strip_prefix(base)?
-                .trim()
-                .parse::<u32>()
-                .ok()
-        })
-        .max()
-        .unwrap_or(0);
-    let name = format!("{base} {}", max + 1);
-    let parent = folder
-        .cloned()
-        .unwrap_or_else(|| PrimPath::new(query::COMPS_FOLDER).expect("valid"));
-    let Ok(path) = parent.child(&query::unique_child_name(stage, &parent, &name)) else {
-        return;
-    };
-    let mut params = json!({"name": name});
-    if let Some(f) = folder {
-        params["parent"] = json!(f);
-    }
-    cx.invoke_with("comp.create", params);
-    session.lock().expect(Pending::Comp(path));
+/// `N` of `"<base> N"`.
+fn number_after(name: &str, base: &str) -> Option<u32> {
+    name.strip_prefix(base)?.trim().parse().ok()
+}
+
+/// New Composition: open Composition Settings for a new comp in `folder`
+/// (default /comps); OK creates it and opens it (AE).
+pub(crate) fn new_comp(cx: &PanelContext<'_>, session: &SharedSession, folder: Option<&PrimPath>) {
+    crate::dialogs::new_comp(cx, session, folder.cloned());
 }
 
 /// Create a layer in the active comp (above the selected layer, like AE) and select
@@ -450,18 +525,31 @@ pub(crate) fn new_layer(
         _ => "Layer",
     };
     let name = match (kind, extra.get("text").and_then(|t| t.as_str())) {
+        // A name from a dialog (Solid Settings).
+        _ if extra.get("name").and_then(|n| n.as_str()).is_some() => {
+            extra["name"].as_str().unwrap_or_default().to_owned()
+        }
         (LayerKind::Text, Some(t)) => t.to_owned(),
-        _ => numbered(stage, &folder, base),
+        _ => numbered(stage, session, &folder, base),
     };
     let Ok(path) = folder.child(&query::unique_child_name(stage, &folder, &name)) else {
         return;
     };
     let mut params = json!({"comp": comp, "kind": kind, "name": name, "index": index});
+    // Preferences: the kind's default label; new layers start at the comp's
+    // start, or at the current time when that option is off.
+    let prefs = crate::prefs::current(cx.resources);
+    params["label"] = json!(crate::prefs::layer_label(&prefs, kind));
+    if !crate::prefs::layers_at_comp_start(&prefs) {
+        params["start"] = json!(session.lock().time(&comp));
+    }
     if let (Some(p), serde_json::Value::Object(m)) = (params.as_object_mut(), extra) {
         p.extend(m);
     }
     cx.invoke_with("layer.create", params);
-    session.lock().expect(Pending::Layer(path));
+    let mut s = session.lock();
+    s.expect(Pending::Layer(path.clone()));
+    s.reserve_name(path, name);
 }
 
 /// The comp info of the session's active comp.
@@ -492,14 +580,27 @@ pub(crate) fn rename_field(
     id: Id,
 ) -> Option<Option<String>> {
     let started = ui.data(|d| d.get_temp::<bool>(id)).is_none();
-    let r = ui.put(
-        rect,
-        egui::TextEdit::singleline(buf)
-            .id(id.with("field"))
-            .text_color(color::TEXT_STRONG),
-    );
+    let r = ui
+        .put(
+            rect,
+            egui::TextEdit::singleline(buf)
+                .id(id.with("field"))
+                .text_color(color::TEXT_STRONG),
+        )
+        .labeled(egui::WidgetType::TextEdit, tr("Name"));
     if started {
         r.request_focus();
+        // AE selects the whole name: typing replaces it.
+        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), r.id) {
+            let end = egui::text::CCursor::new(buf.chars().count());
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    end,
+                )));
+            state.store(ui.ctx(), r.id);
+        }
         ui.data_mut(|d| d.insert_temp(id, true));
         return None;
     }
@@ -542,4 +643,23 @@ pub(crate) fn text_button(ui: &mut Ui, text: &str) -> egui::Response {
         egui::Button::new(egui::RichText::new(text).color(color::TEXT_STRONG))
             .min_size(vec2(0.0, 20.0)),
     )
+}
+
+// Menus through non-generic entry points: egui's popup and menu code is generic over
+// the closure and costs several KiB per closure type (about 14 KiB for a submenu), so
+// the timeline and Graph Editor menus share one instantiation each.
+
+/// `resp.context_menu(add)`.
+pub(crate) fn context_menu(resp: &egui::Response, add: &mut dyn FnMut(&mut Ui)) {
+    resp.context_menu(|ui| add(ui));
+}
+
+/// `egui::Popup::menu(resp).show(add)`.
+pub(crate) fn popup_menu(resp: &egui::Response, add: &mut dyn FnMut(&mut Ui)) {
+    egui::Popup::menu(resp).show(|ui| add(ui));
+}
+
+/// `widgets::menu_button(ui, title, add)` (a submenu inside a menu).
+pub(crate) fn submenu(ui: &mut Ui, title: &str, add: &mut dyn FnMut(&mut Ui)) {
+    widgets::menu_button(ui, title, |ui| add(ui));
 }

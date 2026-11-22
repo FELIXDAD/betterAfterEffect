@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::query::{self, SOLIDS_FOLDER};
 use crate::util::{
-    child, composed_tree, create, ensure_folder, fail, retarget_refs, set, write_attr,
+    child, composed_tree, create, ensure_folder, ensure_unlocked, fail, retarget_refs, set,
+    write_attr,
 };
 
 /// Output of commands that create one layer.
@@ -40,8 +41,9 @@ fn default_label(kind: LayerKind) -> i64 {
     match kind {
         LayerKind::Shape => 8,
         LayerKind::Text | LayerKind::Solid | LayerKind::Null => 1,
-        LayerKind::Camera | LayerKind::Light => 4,
-        LayerKind::Adjustment => 10,
+        LayerKind::Camera => 4,
+        LayerKind::Light => 6,
+        LayerKind::Adjustment => 5,
         LayerKind::PreComp => 15,
         LayerKind::Footage => 3,
         LayerKind::Audio => 7,
@@ -88,6 +90,9 @@ pub struct CreateLayerParams {
     /// Solid size in pixels (default the comp size).
     #[serde(default)]
     pub size: Option<[u32; 2]>,
+    /// Solid pixel aspect ratio (default the comp's).
+    #[serde(default)]
+    pub pixel_aspect: Option<f64>,
     /// Text layers: the text (default "Text").
     #[serde(default)]
     pub text: Option<String>,
@@ -103,6 +108,41 @@ pub struct CreateLayerParams {
     /// Comp time (flicks) where the layer starts: its start time and in point (default 0).
     #[serde(default)]
     pub start: Option<Time>,
+    /// Camera layers: Camera Settings (type, zoom, depth of field …).
+    #[serde(default)]
+    pub camera: Option<crate::camera::CameraSettings>,
+    /// Light layers: Light Settings (type, color, intensity …).
+    #[serde(default)]
+    pub light: Option<crate::camera::LightSettings>,
+    /// Label color index (default AE's per kind; the UI passes the
+    /// Preferences > Labels default).
+    #[serde(default)]
+    pub label: Option<i64>,
+}
+
+impl CreateLayerParams {
+    /// A layer of `kind` in `comp` showing `source` (a comp or an asset),
+    /// starting at comp time `start`; everything else default.
+    pub fn with_source(comp: &PrimPath, kind: LayerKind, source: &PrimPath, start: Time) -> Self {
+        CreateLayerParams {
+            comp: comp.clone(),
+            kind,
+            name: None,
+            source: Some(source.clone()),
+            index: None,
+            color: None,
+            size: None,
+            pixel_aspect: None,
+            text: None,
+            font_size: None,
+            shape: None,
+            position: None,
+            start: Some(start),
+            camera: None,
+            light: None,
+            label: None,
+        }
+    }
 }
 
 fn source_size_and_duration(stage: &Stage, source: &PrimPath) -> Option<([f64; 2], Option<Time>)> {
@@ -164,12 +204,16 @@ impl Command for CreateLayer {
                 (LayerKind::Text, _, Some(t)) if !t.trim().is_empty() => t
                     .lines()
                     .next()
-                    .unwrap_or("Text")
+                    .unwrap_or(crate::names::localized("Text"))
                     .chars()
                     .take(64)
                     .collect(),
                 (_, Some(src), _) => query::display_name_of(tx.stage(), src),
-                _ => query::next_numbered_name(tx.stage(), &folder, default_base_name(kind)),
+                _ => query::next_numbered_name(
+                    tx.stage(),
+                    &folder,
+                    crate::names::localized(default_base_name(kind)),
+                ),
             },
         };
         let path = child(
@@ -184,7 +228,11 @@ impl Command for CreateLayer {
         create(tx, &path, PrimType::LAYER, Some(index.min(siblings)))?;
         set(tx, &path, "kind", Value::Enum(kind.as_str().to_owned()))?;
         set(tx, &path, "name", Value::String(name.clone()))?;
-        set(tx, &path, "label", Value::Int(default_label(kind)))?;
+        let label = p
+            .label
+            .filter(|l| (0..=16).contains(l))
+            .unwrap_or(default_label(kind));
+        set(tx, &path, "label", Value::Int(label))?;
         let start = p.start.unwrap_or(Time::ZERO);
         if start != Time::ZERO {
             set(tx, &path, "start_time", Value::Time(start))?;
@@ -233,6 +281,13 @@ impl Command for CreateLayer {
                 set(tx, &asset, "solid_color", Value::Color(color))?;
                 set(tx, &asset, "width", Value::Int(i64::from(sw)))?;
                 set(tx, &asset, "height", Value::Int(i64::from(sh)))?;
+                let par = p.pixel_aspect.unwrap_or(info.pixel_aspect);
+                if !(par.is_finite() && (0.01..=100.0).contains(&par)) {
+                    return Err(fail("pixel aspect ratio must be between 0.01 and 100"));
+                }
+                if par != 1.0 {
+                    set(tx, &asset, "pixel_aspect", Value::Float(par))?;
+                }
                 set(tx, &path, "source", Value::PrimRef(asset))?;
                 anchor = [f64::from(sw) / 2.0, f64::from(sh) / 2.0];
                 if kind == LayerKind::Adjustment {
@@ -249,7 +304,9 @@ impl Command for CreateLayer {
                 }
             }
             LayerKind::Null => {
-                anchor = [50.0, 50.0];
+                // AE 26: a 100x100 null anchored at its top-left corner, at 0%
+                // opacity (docs/reference/ae/interaction/layers-timeline-dnd).
+                set(tx, &path, "transform:opacity", Value::Float(0.0))?;
             }
             LayerKind::Text => {
                 let text = p.text.clone().filter(|t| !t.is_empty()).unwrap_or(name);
@@ -272,6 +329,27 @@ impl Command for CreateLayer {
                 position = [pos[0], pos[1], -zoom];
                 if kind == LayerKind::Camera {
                     set(tx, &path, "camera:zoom", Value::Float(zoom))?;
+                    set(tx, &path, "camera:focus_distance", Value::Float(zoom))?;
+                    if let Some(c) = &p.camera {
+                        for (attr, value) in c.attrs()? {
+                            set(tx, &path, attr, value)?;
+                        }
+                        // The camera stands `zoom` in front of the comp (AE).
+                        if let Some(z) = c.zoom {
+                            position = [pos[0], pos[1], -z];
+                        }
+                    }
+                } else {
+                    if let Some(l) = &p.light {
+                        for (attr, value) in l.attrs()? {
+                            set(tx, &path, attr, value)?;
+                        }
+                    }
+                    // AE 26 puts a new light up and to the right of the comp
+                    // center, aiming at it: [cx + 80, cy - 80, -666.67].
+                    if p.position.is_none() {
+                        position = [pos[0] + 80.0, pos[1] - 80.0, -2000.0 / 3.0];
+                    }
                 }
                 set(
                     tx,
@@ -301,21 +379,23 @@ fn add_shape(
     side: f64,
     color: [f64; 4],
 ) -> Result<(), CommandError> {
-    let (group_name, path_name, ty) = match preset {
-        ShapePreset::Rect => ("Rectangle 1", "Rectangle Path 1", PrimType::RECT),
-        ShapePreset::Ellipse => ("Ellipse 1", "Ellipse Path 1", PrimType::ELLIPSE),
-        ShapePreset::Star => ("Polystar 1", "Polystar Path 1", PrimType::STAR),
+    let (group_base, path_base, ty) = match preset {
+        ShapePreset::Rect => ("Rectangle", "Rectangle Path", PrimType::RECT),
+        ShapePreset::Ellipse => ("Ellipse", "Ellipse Path", PrimType::ELLIPSE),
+        ShapePreset::Star => ("Polystar", "Polystar Path", PrimType::STAR),
     };
+    // Paths keep the English names; the names follow the UI language (AE).
+    let named = |base: &'static str| format!("{} 1", crate::names::localized(base));
     let contents = child(layer, query::CONTENTS)?;
     create(tx, &contents, PrimType::FOLDER, None)?;
-    let group = child(&contents, &query::sanitize_name(group_name))?;
+    let group = child(&contents, &query::sanitize_name(&format!("{group_base} 1")))?;
     create(tx, &group, PrimType::SHAPE_GROUP, None)?;
-    set(tx, &group, "name", Value::String(group_name.into()))?;
+    set(tx, &group, "name", Value::String(named(group_base)))?;
     let inner = child(&group, query::CONTENTS)?;
     create(tx, &inner, PrimType::FOLDER, None)?;
-    let shape = child(&inner, &query::sanitize_name(path_name))?;
+    let shape = child(&inner, &query::sanitize_name(&format!("{path_base} 1")))?;
     create(tx, &shape, ty.clone(), None)?;
-    set(tx, &shape, "name", Value::String(path_name.into()))?;
+    set(tx, &shape, "name", Value::String(named(path_base)))?;
     if ty == PrimType::STAR {
         set(tx, &shape, "outer_radius", Value::Float(side / 2.0))?;
         set(tx, &shape, "inner_radius", Value::Float(side / 4.0))?;
@@ -324,7 +404,7 @@ fn add_shape(
     }
     let fill = child(&inner, "Fill_1")?;
     create(tx, &fill, PrimType::FILL, None)?;
-    set(tx, &fill, "name", Value::String("Fill 1".into()))?;
+    set(tx, &fill, "name", Value::String(named("Fill")))?;
     set(tx, &fill, "color", Value::Color(color))?;
     Ok(())
 }
@@ -408,6 +488,7 @@ impl Command for ReorderLayers {
     const DESCRIPTION: &'static str = "Move layers up or down in their comp's layer stack (AE: drag in the timeline, Bring Forward / Send Backward).";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        ensure_unlocked(tx.stage(), &p.layers)?;
         let comp = same_comp(tx.stage(), &p.layers)?;
         let current = query::comp_layers(tx.stage(), &comp);
         let moved: Vec<PrimPath> = current
@@ -518,6 +599,7 @@ impl Command for SplitLayers {
     const DESCRIPTION: &'static str = "Split layers at a comp time: the original ends there and a duplicate above it starts there.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<LayersOutput, CommandError> {
+        ensure_unlocked(tx.stage(), &p.layers)?;
         same_comp(tx.stage(), &p.layers)?;
         let mut paths = Vec::new();
         for l in &p.layers {
@@ -565,6 +647,7 @@ impl Command for TrimLayers {
     const DESCRIPTION: &'static str = "Set the in and/or out point of layers (AE: Alt+[ and Alt+]). The in point must stay before the out point.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        ensure_unlocked(tx.stage(), &p.layers)?;
         same_comp(tx.stage(), &p.layers)?;
         for l in &p.layers {
             let t = query::layer_timing(tx.stage(), l);
@@ -647,6 +730,9 @@ impl Command for SetParent {
     const DESCRIPTION: &'static str = "Parent layers to another layer of the same comp, or remove the parent (AE pick whip). By default the layers keep their on-screen transform.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        if !tx.locks_allowed() {
+            ensure_unlocked(tx.stage(), &p.layers)?;
+        }
         let comp = same_comp(tx.stage(), &p.layers)?;
         if let Some(parent) = &p.parent {
             if query::owning_comp(tx.stage(), parent).as_ref() != Some(&comp)
@@ -789,6 +875,7 @@ impl Command for ShiftLayers {
     const DESCRIPTION: &'static str = "Move layers earlier or later in their comp (dragging the layer bar; AE [ and ] move the in or out point to the current time). Keyframes move with the layer.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        ensure_unlocked(tx.stage(), &p.layers)?;
         same_comp(tx.stage(), &p.layers)?;
         if p.delta == Time::ZERO {
             return Ok(());
@@ -835,16 +922,19 @@ fn delete_prims(
             }
         }
     }
+    // AE unparents them in place, locked ones too (the parent is gone).
     for l in orphans {
-        SetParent.run(
-            tx,
-            SetParentParams {
-                layers: vec![l],
-                parent: None,
-                keep_transform: true,
-                time,
-            },
-        )?;
+        tx.allow_locked(|tx| {
+            SetParent.run(
+                tx,
+                SetParentParams {
+                    layers: vec![l],
+                    parent: None,
+                    keep_transform: true,
+                    time,
+                },
+            )
+        })?;
     }
     // Deepest first, so deleting a folder and its contents together works.
     let mut sorted: Vec<PrimPath> = paths.to_vec();
@@ -892,6 +982,7 @@ impl Command for DeleteLayers {
     const DESCRIPTION: &'static str = "Delete layers (with their keyframes, masks, effects and contents). Layers parented to them are unparented and stay where they are.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        ensure_unlocked(tx.stage(), &p.layers)?;
         same_comp(tx.stage(), &p.layers)?;
         delete_prims(tx, &p.layers, p.time)
     }

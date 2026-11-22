@@ -13,6 +13,7 @@
 | `Registry<Keymap>` | 键位表，如 `"ae"`、`"ai"` | 快捷键列表（`Binding`） |
 | `Registry<KeymapBindings>` | 任意唯一 id，如 `"motion.timeline"` | 模块往某个键位表追加的快捷键（12 的时间轴 `U`、`J`/`K` 等），不必替换整个键位表 |
 | `Registry<ActionInfo>` | 命令 id，如 `"edit.undo"` | 界面层动作的标题；`bae-model` 的命令不用在这里注册 |
+| `Registry<dyn Toolbar>` | 键位表 id，如 `"ae"` | 工具栏左侧的工具区（工具按钮和工具选项），见第 5b 节 |
 
 `bae_ui::UiModule` 由外壳加载：注册外壳自己的动作；所有模块 build 完之后，给工作区布局里用到、但没有模块注册的面板补一个占位面板（显示"尚未实现"）。所以 12 号先注册 `"timeline"` 也好、晚一点注册也好，布局都不会出错；注册了同名 id 就替换掉占位。
 
@@ -60,6 +61,15 @@ app.register("timeline", PanelKind::new("Timeline", |spawn| Box::new(Timeline::n
 
 `WorkspacePreset::new(title, keymap, root)` 给出默认布局。用户的修改由外壳保存：切换工作区时保留各自当前的布局；"重置为已保存的布局"回到用户上次"保存对此工作区所做的更改"时的布局，没保存过就回到预设。
 
+## 5b. 工具栏的工具区
+
+窗口顶部工具栏左边（工作区栏左侧）的工具按钮和工具选项由工作区模块提供：实现 `bae_ui::Toolbar`，以键位表 id 注册到 `Registry<dyn Toolbar>`（动效工作区的 `ae` 由 12 的 `bae-ui-motion` 注册）。外壳每帧对当前工作区键位表的工具栏调用：
+
+- `ui(ui, cx, keymap)`：`ui` 是裁剪到工作区栏左侧的一行（从左往右排）；`cx` 和面板的一样（`cx.panel` 是 `"toolbar"`），命令通过 `cx.invoke_with` 发出；`keymap` 是当前生效的键位表（提示里显示快捷键；按住工具键临时切换时用它判断键是否还按着）。
+- `save_state()` / `load_state(state)`：工具状态（当前工具、新形状的填充描边等工具选项）是应用状态，不进工程。外壳把它和面板视图状态一起存在 `WorkbenchState::panels["toolbar:<键位表 id>"]`，第一次画之前交回 `load_state`。
+
+当前工具本身放在提供工具栏的模块的应用资源里，供它的面板读取（动效工作区是 `bae_ui_motion::SharedTools`，查看器、时间轴按它决定指针行为）。工具快捷键照常注册成 `KeymapBindings`（动作 id `motion.tool.*`），由模块的 `ActionHandler` 处理，在快捷键编辑器里可以改。没有注册工具栏的键位表不画工具区（`ae` 键位表在动效模块没加载时退回静态图标）。
+
 ## 6. 外壳提供的应用资源
 
 | 资源 | 谁插入 | 用途 |
@@ -71,3 +81,23 @@ app.register("timeline", PanelKind::new("Timeline", |spawn| Box::new(Timeline::n
 ## 7. 输入法
 
 `Workbench` 每帧把 `PlatformOutput::ime` 的锚点换成光标矩形（`workbench::ime_follows_caret`），拼音候选框出现在光标下方。自己画文字编辑的面板（例如合成查看器里的文字工具）设置 `PlatformOutput::ime` 时同样会被处理。文本框有焦点时，不带修饰键的快捷键和文本编辑键不会触发命令。验证报告见 `docs/workstreams/11-ui-shell.md`。
+
+## 8. 模块对话框与拾色器
+
+AE 的模态对话框（合成设置、纯色设置、预合成、首选项……）由各模块自己画，外壳负责挂点和模态规则。代码在 `bae_ui::dialog` 和 `bae_ui::color_picker`，模块文档里有可运行的示例。
+
+- **注册**：`Registry<dyn DialogHost>`（id 用模块名）。`DialogHost::is_open(resources)` 说明本模块有没有打开的对话框；`DialogHost::ui(ctx, cx)` 每帧在停靠区之后调用，`cx` 和面板的 `PanelContext` 一样，`invoke_with` 的命令在本帧结束后执行。对话框只收集数值，确定时执行一条命令（一步撤销），取消不执行命令。
+- **模态**：任何一个 `is_open` 为真（或欢迎窗口、拾色器打开）时，工作台不分派快捷键和面板按键；`Workbench::modal_open(resources)` / `Workspace::modal_open(resources)` 给外壳用来让原生菜单命令等待（退出除外）。
+- **外观**：`dialog::window(ctx, id, 标题, |ui| …)` 画 AE 式对话框：自己的标题栏（标题写在标题栏里）、可拖动、每次打开时居中在主窗口上、不能改大小；主窗口不压暗，但点击被挡住。窗口标题栏的关闭按钮等于取消（`dialog::closed_by_title_bar`）。外壳以后支持系统子窗口时只改这个函数。
+- **按钮**：`dialog::buttons(ui, ok_enabled)` 按平台顺序画确定 / 取消（Windows：确定、取消；macOS：取消、确定在最右），Enter 是确定（多行文本框里的 Enter 除外）、Esc 是取消。按键被消耗，叠在下面的对话框（例如拾色器下面的纯色设置）不会再收到。`dialog::row`（标签列 + 控件）和 `dialog::group`（带标题的分组框）是 AE 设置对话框的排版。
+- **拾色器**：`color_picker::color_button(ui, id, &mut rgba, 大小, 标题, 读屏名称)` 是色块按钮，点击打开 AE 拾色器（颜色场 + 滑块，H/S/B/R/G/B 单选决定滑块编辑哪个通道，默认色相；H、S、B、R、G、B 数值，十六进制，新 / 原始颜色，仅限 Web 颜色，吸管），确定返回 `ColorEdit::Commit`，编辑中返回 `ColorEdit::Live`（面板可以实时预览），取消返回 `ColorEdit::Cancel`。`color_picker::eyedropper_button` 是色块旁边单独的吸管。颜色是工程里的直通 RGBA（0–1），数值显示 8 位（0–255）。
+- **吸管**：点吸管后在窗口任意位置点击取色。实现方式是 egui 的 `ViewportCommand::Screenshot`：外壳把这一帧再离屏画一遍、回读，在下一帧以 `Event::Screenshot` 交回；不支持截图的宿主不改颜色。
+- **测试**：`BAE_SMOKE_INVOKE=<动作 id>[,…]` 让无窗口冒烟测试在第一帧后执行这些动作（例如 `motion.comp.composition_settings`），配合 `BAE_SMOKE_SCREENSHOT` 截对话框。
+
+## 无障碍（accesskit）
+
+自绘控件（`ui.interact` / `allocate_exact_size` 做的按钮、开关、标签页、拆分条、热文本）都要用 `bae_ui::Accessible`（`labeled` / `labeled_toggle` / `labeled_value`）给出标签，固定文字走 `tr`、中英文都要有；egui 自带控件自己带标签。读屏（VoiceOver、讲述人）和 Windows 上的 UI 自动化都靠这些标签找控件，验收测试 `startup::controls_have_accessibility_labels` 要求没有标签的控件不超过 10%。工具栏工具和工作区栏条目用单选按钮角色（同时只有一个处于选中状态）。
+
+- 同一面板内同角色的可交互控件名字不能重复（#128）。重复出现的控件在标签里带上下文，用 `bae_ui::a11y::context` 以「 · 」连接，从大到小：图层（`a11y::layer`：图层 2“Solid 1”，带 AE 时间轴的图层编号，两个图层可以同名）、形状组、属性、控件，例如「图层“Solid 1” · 位置 · 时间变化秒表」「图层“Solid 1” · 位置 · X」「图层“Solid 1” · 锁定」；面板标签页上的按钮带面板名（「项目 · 关闭面板」），拆分条带两侧的面板名。`widgets::stopwatch_for` / `keyframe_nav_for` 和 `HotNumber::label` 接收这个名字。
+- 每个面板的内容区是一个以面板标题命名的 accesskit 区域（Pane），读屏会报面板名；测试按它分组检查重名（`startup::interactive_widgets_have_unique_names_per_panel`，中文界面另跑一遍）。
+- 输入控件（下拉框、文本框、数值框）的名字和值分开：名字来自前面的文字标签（`Response::labelled_by`，如渲染队列的「格式」「输出到」），或用 `labeled_value` 直接给出（「帧 · 开始」「源文本」）；屏幕阅读器读成「输出到：…」。

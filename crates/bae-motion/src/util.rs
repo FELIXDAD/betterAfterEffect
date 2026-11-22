@@ -13,6 +13,22 @@ pub(crate) fn fail(msg: impl Into<String>) -> CommandError {
     CommandError::Failed(msg.into())
 }
 
+/// Commands do not edit locked layers (AE: a locked layer, its properties and
+/// keyframes cannot be changed until it is unlocked; its Lock switch — a plain
+/// `attr.set` — still can).
+pub(crate) fn ensure_unlocked<'a>(
+    stage: &Stage,
+    paths: impl IntoIterator<Item = &'a PrimPath>,
+) -> Result<(), CommandError> {
+    for path in paths {
+        if let Some(layer) = crate::query::locked_layer_of(stage, path) {
+            let name = crate::query::display_name_of(stage, &layer);
+            return Err(ModelError::LayerLocked { layer, name }.into());
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn child(parent: &PrimPath, name: &str) -> Result<PrimPath, CommandError> {
     parent
         .child(name)
@@ -53,7 +69,18 @@ pub(crate) fn ensure_folder(tx: &mut Transaction<'_>, path: &PrimPath) -> Result
     if let Some(parent) = path.parent() {
         ensure_folder(tx, &parent)?;
     }
-    create(tx, path, PrimType::FOLDER, None)
+    create(tx, path, PrimType::FOLDER, None)?;
+    // The default folders are named in the UI language they are created in.
+    let default_folder = [
+        crate::query::COMPS_FOLDER,
+        crate::query::ASSETS_FOLDER,
+        crate::query::SOLIDS_FOLDER,
+    ]
+    .contains(&path.as_str());
+    if let Some(name) = crate::names::folder_name(path.name()).filter(|_| default_folder) {
+        set(tx, path, "name", Value::String(name.into()))?;
+    }
+    Ok(())
 }
 
 /// Set a static value after checking it against the prim schema.

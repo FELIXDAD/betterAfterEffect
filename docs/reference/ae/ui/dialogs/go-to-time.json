@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "1.0",
+  "id": "go-to-time",
+  "title": {
+    "zh": "转到时间",
+    "en": "Go to Time"
+  },
+  "triggers": [
+    {
+      "action": "Go to Time",
+      "shortcutWin": "Alt+Shift+J",
+      "menuZh": "视图 ▸ 转到时间(G)..."
+    }
+  ],
+  "source": {
+    "application": "Adobe After Effects 26.0 (26.0x67)",
+    "platform": "Windows 11 Pro x64 (3840x2160 @ 150% DPI)",
+    "localeObserved": "zh_CN",
+    "method": "Live MSAA inspection + interactive tab/radio/dropdown probing + ExtendScript range probing"
+  },
+  "geometry": {
+    "physicalPxAt144Dpi": {
+      "w": 610,
+      "h": 229
+    },
+    "logicalPxAt96Dpi": {
+      "w": 407,
+      "h": 153
+    }
+  },
+  "persistence": {
+    "remembersLastValues": false,
+    "notesZh": "每次打开自动填入当前合成的播放头时间（CTI）并全选，不保留上次输入值。"
+  },
+  "buttonBar": {
+    "position": "bottom_right",
+    "right": [
+      {
+        "id": "ok",
+        "type": "button",
+        "zh": "确定",
+        "en": "OK",
+        "role": "accept"
+      },
+      {
+        "id": "cancel",
+        "type": "button",
+        "zh": "取消",
+        "en": "Cancel",
+        "role": "reject"
+      }
+    ]
+  },
+  "tabs": [],
+  "controls": [
+    {
+      "id": "time_input",
+      "type": "timecode_input",
+      "zh": "时间码输入",
+      "en": "Time Input",
+      "defaultValue": "<当前合成播放头时间>",
+      "notesZh": "支持绝对时间码/帧数输入与相对偏移（如 +10、-15 帧，+2. 表示 +2 秒）；右侧静态文本实时显示解析结果与帧率基准（如“是 0:00:02:00  基础 30”）。"
+    }
+  ]
+}

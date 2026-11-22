@@ -90,11 +90,28 @@ pub trait Panel: 'static {
 }
 
 /// A key a panel handles itself (not through the keymap), such as Enter to
-/// rename the selected item: pressed this frame **and** no widget has keyboard
-/// focus. A focused widget (a button pressed with Enter, a text field) consumes
-/// the keys it gets, so they do not also reach the panel.
+/// rename the selected item: pressed this frame, no widget has keyboard focus
+/// (a focused widget — a button pressed with Enter, a text field — consumes
+/// the keys it gets) and no modal dialog is open.
 pub fn panel_key_pressed(ui: &Ui, key: egui::Key) -> bool {
-    ui.memory(|m| m.focused().is_none()) && ui.input(|i| i.key_pressed(key))
+    !modal_open(ui.ctx())
+        && ui.memory(|m| m.focused().is_none())
+        && ui.input(|i| i.key_pressed(key))
+}
+
+fn modal_id() -> egui::Id {
+    egui::Id::new("bae-ui.modal-open")
+}
+
+/// The workbench marks the frames in which a modal dialog is open.
+pub(crate) fn set_modal_open(ctx: &egui::Context, open: bool) {
+    ctx.data_mut(|d| d.insert_temp(modal_id(), open));
+}
+
+/// A modal dialog owns the keyboard this frame.
+pub fn modal_open(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(modal_id()))
+        .unwrap_or(false)
 }
 
 /// Creates panel instances of one kind.
@@ -108,6 +125,9 @@ pub struct PanelKind {
     pub multi_instance: bool,
     /// Listed in the Window menu (false for panels opened only by other panels).
     pub in_window_menu: bool,
+    /// A "Not implemented yet." stand-in ([`PanelKind::placeholder`]): the menus
+    /// show its Window item greyed.
+    pub is_placeholder: bool,
     factory: Box<PanelFactory>,
 }
 
@@ -120,6 +140,7 @@ impl PanelKind {
             title: title.into(),
             multi_instance: false,
             in_window_menu: true,
+            is_placeholder: false,
             factory: Box::new(factory),
         }
     }
@@ -137,7 +158,10 @@ impl PanelKind {
     /// A placeholder kind showing "Not implemented yet." (used for workspace panels
     /// whose owning workstream has not registered them yet).
     pub fn placeholder(title: impl Into<String>) -> Self {
-        PanelKind::new(title, |_| Box::new(Placeholder))
+        PanelKind {
+            is_placeholder: true,
+            ..PanelKind::new(title, |_| Box::new(Placeholder))
+        }
     }
 
     pub fn create(&self, spawn: &PanelSpawn<'_>) -> Box<dyn Panel> {
@@ -313,7 +337,7 @@ mod tests {
         let stage = Stage::new();
         let author = AuthorId::system();
         let mut requests = PanelRequests::default();
-        let ctx = egui::Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
             let mut cx =
                 PanelContext::new(&id, &kind.title, &stage, &author, &resources, &mut requests);

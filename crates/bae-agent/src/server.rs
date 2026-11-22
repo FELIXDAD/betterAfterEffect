@@ -98,7 +98,13 @@ pub struct BaeMcpServer {
     options: Arc<McpOptions>,
     audit: Arc<AuditLog>,
     renderer: Arc<dyn FrameRenderer>,
+    save_error_text: Option<SaveErrorText>,
 }
+
+/// How the host application words a failed save (which file, what is wrong, in
+/// its UI language); the autosave reports it instead of the system's text.
+pub type SaveErrorText =
+    Arc<dyn Fn(&std::path::Path, &(dyn std::error::Error + 'static)) -> String + Send + Sync>;
 
 impl std::fmt::Debug for BaeMcpServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -239,7 +245,15 @@ impl BaeMcpServer {
             options: Arc::new(options),
             audit: Arc::new(AuditLog::new()),
             renderer: Arc::new(PlaceholderRenderer),
+            save_error_text: None,
         }
+    }
+
+    /// Word autosave failures like the host application (`bae mcp` passes the
+    /// desktop app's messages); the system's error goes to the debug log.
+    pub fn with_save_error_text(mut self, text: SaveErrorText) -> Self {
+        self.save_error_text = Some(text);
+        self
     }
 
     pub fn with_audit_log(mut self, audit: Arc<AuditLog>) -> Self {
@@ -694,8 +708,13 @@ impl BaeMcpServer {
         Some(match ws.project.save() {
             Ok(()) => json!(true),
             Err(e) => {
-                tracing::warn!("autosave failed: {e}");
-                json!(format!("save failed: {e}"))
+                let message = match (&self.save_error_text, ws.project.location()) {
+                    (Some(text), Some(path)) => text(path, &e),
+                    _ => format!("save failed: {e}"),
+                };
+                tracing::debug!("autosave: {e}");
+                tracing::warn!("{message}");
+                json!(message)
             }
         })
     }

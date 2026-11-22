@@ -573,6 +573,96 @@ async fn read_only_agent_cannot_modify_anything() {
     drop(client);
 }
 
+/// AE-PRJ-360: scripts cannot change a locked layer; neither can agents, through
+/// any tool. Only the Lock switch itself.
+#[tokio::test]
+async fn agents_cannot_edit_locked_layers() {
+    let user = bae_model::AuthorId::new("user:felix").unwrap();
+    let mut ws = Workspace::new(Project::new());
+    let layer = "/c/layers/bg";
+    for (id, params) in [
+        ("prim.create", json!({"path": "/c", "prim_type": "Comp"})),
+        (
+            "prim.create",
+            json!({"path": "/c/layers", "prim_type": "Folder"}),
+        ),
+        ("prim.create", json!({"path": layer, "prim_type": "Layer"})),
+        (
+            "attr.set",
+            json!({"path": layer, "attr": "name", "value": {"type": "string", "value": "背景"}}),
+        ),
+        (
+            "attr.set",
+            json!({"path": layer, "attr": "locked", "value": {"type": "bool", "value": true}}),
+        ),
+    ] {
+        ws.registry
+            .execute(&mut ws.project.stage, &user, id, params)
+            .unwrap();
+    }
+    let workspace = ws.shared();
+    let before = bae_model::export_flattened_json(&workspace.lock().project.stage);
+    // Any-layer permission, so delete / rename reach the lock check.
+    let options = McpOptions {
+        permission: Permission::AnyLayer,
+        ..Default::default()
+    };
+    let client = connect(BaeMcpServer::new(workspace.clone(), options), "Lock Agent").await;
+    let pos = json!({"type": "vec3", "value": [10.0, 20.0, 0.0]});
+    for (name, args) in [
+        (
+            "attr_set",
+            json!({"path": layer, "attr": "transform:position", "value": pos}),
+        ),
+        (
+            "attr_set",
+            json!({"path": layer, "attr": "name", "value": {"type": "string", "value": "改了"}}),
+        ),
+        (
+            "key_set",
+            json!({"path": layer, "attr": "transform:position", "time": 0, "keyframe": {"value": pos}}),
+        ),
+        ("prim_rename", json!({"path": layer, "name": "moved"})),
+        ("prim_delete", json!({"path": layer})),
+        (
+            "command_batch",
+            json!({"commands": [{"command": "prim.delete", "params": {"path": layer}}]}),
+        ),
+    ] {
+        let r = call(&client, name, args).await;
+        let text = text_of(&r);
+        assert_eq!(r.is_error, Some(true), "{name}: {text}");
+        assert!(
+            text.contains("“背景”") || text.contains("\"背景\""),
+            "{name}: {text}"
+        );
+        assert!(text.contains("locked; unlock it first"), "{name}: {text}");
+    }
+    // Nothing changed (the agent's empty proposal sublayer may now exist).
+    assert_eq!(
+        bae_model::export_flattened_json(&workspace.lock().project.stage)["prims"],
+        before["prims"]
+    );
+    // The Lock switch itself still works.
+    ok_json(
+        &call(
+            &client,
+            "attr_set",
+            json!({"path": layer, "attr": "locked", "value": {"type": "bool", "value": false}}),
+        )
+        .await,
+    );
+    ok_json(
+        &call(
+            &client,
+            "attr_set",
+            json!({"path": layer, "attr": "transform:position", "value": pos}),
+        )
+        .await,
+    );
+    drop(client);
+}
+
 /// A client that speaks raw newline-delimited JSON-RPC, as Claude Code and Codex do
 /// over stdio (protocol 2025-06-18 handshake).
 #[tokio::test]

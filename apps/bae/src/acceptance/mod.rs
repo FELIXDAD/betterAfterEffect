@@ -18,13 +18,19 @@
 //! re-run themselves in a child process ([`in_child`]) so they cannot disturb
 //! the other tests of this binary.
 
+mod dialogs;
 mod files_flow;
+mod i18n_retest;
+mod i18n_scan;
 mod layers;
+mod layout;
 mod menus;
 mod render_queue;
+mod settings;
 mod startup;
 mod stress;
 mod timeline;
+mod tools;
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -38,7 +44,7 @@ use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect};
 use egui_kittest::Harness;
 
 use crate::document::{Document, Outcome};
-use crate::files::{self, CommitGate, FileDialogs, FileOutcome, UnsavedChoice};
+use crate::files::{self, CommitGate, FileDialogs, UnsavedChoice};
 use crate::ui::{StatusInfo, Workspace};
 
 /// Window size of the simulated GUI (logical points).
@@ -52,6 +58,7 @@ pub(crate) fn build_app() -> App {
         .add_module(bae_gpu::GpuModule)
         .add_module(crate::model_cli::ModelCliModule)
         .add_module(crate::mcp_cli::McpCliModule)
+        .add_module(crate::pack_cli::PackCliModule)
         .add_module(bae_render::RenderModule)
         .add_module(bae_motion::MotionModule)
         .add_module(bae_plugin::PluginModule)
@@ -79,6 +86,10 @@ pub(crate) struct Script {
     /// Suggested names of the save dialogs.
     pub suggested: Vec<String>,
     pub errors: Vec<String>,
+    /// Answers to "replace the existing project?" (Save As onto one).
+    pub replace: VecDeque<bool>,
+    /// Project names that question was asked about.
+    pub asked_replace: Vec<String>,
     /// Dialogs that were shown with nothing scripted (a test bug or a surprise).
     pub unexpected: Vec<String>,
 }
@@ -107,6 +118,14 @@ impl FileDialogs for Script {
         })
     }
 
+    fn confirm_replace(&mut self, name: &str) -> bool {
+        self.asked_replace.push(name.to_owned());
+        self.replace.pop_front().unwrap_or_else(|| {
+            self.unexpected.push(format!("replace question ({name})"));
+            false
+        })
+    }
+
     fn error(&mut self, message: &str) {
         self.errors.push(message.to_owned());
     }
@@ -129,6 +148,9 @@ pub(crate) struct Gui {
     pub outcomes: Vec<(String, String)>,
     /// Quit went through (the window would close).
     pub quit: bool,
+    /// Preferences (in memory) and the generation last applied.
+    pub prefs: Arc<bae_prefs::PrefsStore>,
+    prefs_generation: u64,
 }
 
 impl Gui {
@@ -136,9 +158,16 @@ impl Gui {
         let mut app = build_app();
         let mut doc = Document::new(app.resource::<Arc<bae_ui::history::HistoryLog>>().cloned());
         doc.add_module_commands(&app);
+        // Preferences in memory (as the shell's store, never written). Applied
+        // after a change only: the stress tests keep the model's deep undo stack
+        // (the app starts with Levels of Undo, AE's 99 at most).
+        let prefs = Arc::new(bae_prefs::PrefsStore::default());
+        app.insert_resource(prefs.clone());
         let mut workspace = Workspace::new(&mut app, WorkbenchState::default());
         workspace.set_extra_commands(doc.command_titles());
         Gui {
+            prefs_generation: prefs.generation(),
+            prefs,
             app,
             workspace,
             doc,
@@ -168,14 +197,28 @@ impl Gui {
 
     fn frame(&mut self, ui: &mut egui::Ui) {
         if !self.themed {
+            // kittest creates its own context and runs this first pass at once, so the
+            // fonts `theme::apply` installs (egui's bundled fonts are off) only take
+            // effect from the next pass. Draw nothing and discard the pass: egui reruns
+            // it with the fonts, as the app's first frame has them (`create_view`
+            // themes the context before it). kittest's first frame has no input.
             bae_ui::theme::apply(ui.ctx());
             self.themed = true;
+            ui.ctx().request_discard("bae: UI fonts installed");
+            return;
         }
         let invocations = self
             .workspace
             .ui(ui, &self.status, &self.doc, self.app.resources());
         self.pending.extend(invocations);
         self.passes += 1;
+        // As `Shell::sync_prefs`.
+        let prefs = self.prefs.clone();
+        if prefs.generation() != self.prefs_generation {
+            self.prefs_generation = prefs.generation();
+            bae_ui::settings::apply(&prefs.current());
+            self.doc.set_undo_limit(prefs.current().levels_of_undo());
+        }
     }
 
     /// `shell::Shell::dispatch` without the window.
@@ -186,26 +229,38 @@ impl Gui {
         };
         match inv.id.as_str() {
             ids::QUIT => {
-                if files::confirm_discard(&mut self.doc, &mut self.dialogs) {
+                if crate::view_state::confirm_quit(&self.app, &mut self.doc, &mut self.dialogs) {
                     self.quit = true;
                 }
             }
             ids::ABOUT => self.workspace.show_about(),
+            bae_ui::settings::ACTION => self
+                .workspace
+                .show_settings(inv.params.get("page").and_then(|p| p.as_str())),
             id if files::is_file_command(id) => {
-                if files::run(&mut self.doc, &mut self.dialogs, &inv) == Some(FileOutcome::Replaced)
-                {
-                    // `Shell::project_replaced`.
-                    self.app
-                        .insert_resource(bae_ui_motion::SharedSession::default());
-                }
+                // As `Shell::dispatch`.
+                crate::view_state::run_file_command(
+                    &mut self.app,
+                    &mut self.doc,
+                    &mut self.dialogs,
+                    &inv,
+                );
             }
             ids::HELP => {}
             _ => {
+                // As `Shell::dispatch`: a failure is explained in the status bar
+                // until the next change.
                 let outcome = match self.doc.run(&inv) {
-                    Outcome::Changed => "changed".to_owned(),
+                    Outcome::Changed => {
+                        self.status.notice.clear();
+                        "changed".to_owned()
+                    }
                     Outcome::Unchanged => "unchanged".to_owned(),
                     Outcome::Unknown => "unknown".to_owned(),
-                    Outcome::Failed(error) => format!("failed: {error}"),
+                    Outcome::Failed(error) => {
+                        self.status.notice = crate::ui::failure_notice(&error);
+                        format!("failed: {error}")
+                    }
                 };
                 self.outcomes.push((inv.id.clone(), outcome));
             }
@@ -236,11 +291,15 @@ impl Gui {
     /// `shell::menu::AppMenu::sync` shows it.
     pub fn menu_items(&self) -> Vec<MenuItemView> {
         let tree = self.workspace.contributed_menus(&self.app);
-        let cx = bae_ui::menu::MenuContext {
-            stage: self.doc.stage(),
-            resources: self.app.resources(),
-            workspace: self.workspace.active_workspace(),
-        };
+        let open = self.workspace.open_panels();
+        let actions = self.workspace.handled_actions(&self.app);
+        let cx = bae_ui::menu::MenuContext::new(
+            self.doc.stage(),
+            self.app.resources(),
+            self.workspace.active_workspace(),
+        )
+        .with_open_panels(&open)
+        .with_actions(&actions);
         tree.items()
             .into_iter()
             .map(|(id, spec)| MenuItemView {
@@ -257,6 +316,12 @@ impl Gui {
                 invocation: spec.invocation(),
             })
             .collect()
+    }
+
+    /// What the status bar shows about the GPU (the window sets it from the
+    /// device it created).
+    pub fn set_gpu_status(&mut self, text: String) {
+        self.status.gpu = text;
     }
 
     /// Queues an invocation as if a panel produced it this frame.
@@ -343,8 +408,20 @@ pub(crate) fn gui() -> Ui {
 }
 
 pub(crate) fn gui_with(gui: Gui) -> Ui {
+    gui_sized(gui, egui::vec2(SIZE[0], SIZE[1]))
+}
+
+/// A harness with a window client area of `size` logical points.
+pub(crate) fn gui_sized(gui: Gui, size: egui::Vec2) -> Ui {
+    gui_scaled(gui, size, 1.0)
+}
+
+/// A harness with a window client area of `size` logical points on a display
+/// with `pixels_per_point` (2.0: Retina).
+pub(crate) fn gui_scaled(gui: Gui, size: egui::Vec2, pixels_per_point: f32) -> Ui {
     let mut h = Harness::builder()
-        .with_size(egui::vec2(SIZE[0], SIZE[1]))
+        .with_size(size)
+        .with_pixels_per_point(pixels_per_point)
         .with_max_steps(64)
         // A 60 Hz display: double-clicks and playback see real frame times.
         .with_step_dt(1.0 / 60.0)
@@ -512,6 +589,22 @@ pub(crate) fn pause(h: &mut Ui) {
     }
 }
 
+/// The control `what` ("Stop", "Remove", "Show in Finder" …) of Render Queue item
+/// `number` (1-based): its accessible name is "Render Item N “Comp” · what".
+pub(crate) fn queue_control<'a>(
+    h: &'a Ui,
+    number: usize,
+    what: &str,
+) -> Option<egui_kittest::Node<'a>> {
+    use egui_kittest::kittest::Queryable as _;
+    let prefix = format!("Render Item {number} “");
+    let suffix = format!("” · {what}");
+    h.query_by(move |n| {
+        n.label()
+            .is_some_and(|l| l.starts_with(&prefix) && l.ends_with(&suffix))
+    })
+}
+
 /// Where the text `text` was painted in the last frame (first match, inside its
 /// clip rect). Finds rows the panels paint themselves (timeline layer names).
 pub(crate) fn find_text(h: &Ui, text: &str) -> Option<Rect> {
@@ -561,22 +654,74 @@ pub(crate) fn painted_texts(h: &Ui) -> Vec<String> {
     out
 }
 
-/// The process-wide GPU for tests (`None` without an adapter).
+/// The process-wide GPU for tests (`None` without an adapter), shared with every
+/// other GPU test in this binary (#154).
 pub(crate) fn gpu() -> Option<Arc<bae_gpu::GpuContext>> {
-    static GPU: std::sync::OnceLock<Option<Arc<bae_gpu::GpuContext>>> = std::sync::OnceLock::new();
-    GPU.get_or_init(|| bae_gpu::GpuContext::new_headless(Default::default()).ok())
-        .clone()
+    bae_gpu::testing::shared_context()
 }
 
-/// New comp (Cmd+N) with one layer from `Layer > New > <registry id>`; returns
-/// the harness settled.
-pub(crate) fn comp_with(h: &mut Ui, layers: &[&str]) {
+/// Whether a motion dialog (Composition Settings …) is open.
+pub(crate) fn dialog_open(h: &Ui) -> bool {
+    h.state()
+        .app
+        .resource::<bae_ui_motion::SharedDialogs>()
+        .is_some_and(|d| d.is_open())
+}
+
+/// New Composition the AE way: Cmd+N opens Composition Settings, Enter (OK)
+/// creates the comp with the dialog's settings and opens it.
+pub(crate) fn new_comp(h: &mut Ui) {
     let (m, k) = cmd(Key::N);
     key(h, m, k);
+    assert!(dialog_open(h), "Cmd+N opened no Composition Settings");
+    key(h, Modifiers::NONE, Key::Enter);
+    assert!(!dialog_open(h), "Enter did not close Composition Settings");
+}
+
+/// OK (Enter) in the motion dialog when one is open: Layer > New > Solid asks
+/// for Solid Settings first.
+pub(crate) fn confirm_dialog(h: &mut Ui) {
+    if dialog_open(h) {
+        key(h, Modifiers::NONE, Key::Enter);
+        assert!(!dialog_open(h), "Enter did not close the dialog");
+    }
+}
+
+/// New Solid the AE way: Cmd+Y opens Solid Settings, Enter (OK) creates the
+/// solid with the dialog's settings.
+pub(crate) fn new_solid(h: &mut Ui) {
+    let (m, k) = cmd(Key::Y);
+    key(h, m, k);
+    assert!(dialog_open(h), "Cmd+Y opened no Solid Settings");
+    confirm_dialog(h);
+}
+
+/// New comp (Cmd+N, OK) with one layer from `Layer > New > <registry id>`
+/// (OK in Solid Settings); returns the harness settled.
+pub(crate) fn comp_with(h: &mut Ui, layers: &[&str]) {
+    new_comp(h);
     assert!(h.state().active_comp().is_some(), "Cmd+N opened no comp");
     for id in layers {
-        assert!(h.state_mut().menu(id), "{id} disabled with a comp open");
+        assert!(add_layer(h, id), "{id} disabled with a comp open");
         settle(h);
+        confirm_dialog(h);
+    }
+}
+
+/// Adds a layer through the menu item `id`, or, for `shape:rect` /
+/// `shape:ellipse`, a shape layer with that path (what BAE's old Layer ▸ New ▸
+/// Rectangle / Ellipse made; AE has no such menu items, it draws them with the
+/// shape tools). Returns `false` when the menu item is greyed.
+pub(crate) fn add_layer(h: &mut Ui, id: &str) -> bool {
+    match id.strip_prefix("shape:") {
+        Some(shape) => {
+            h.state_mut().invoke(Invocation::with_params(
+                "motion.new_layer",
+                serde_json::json!({ "kind": "shape", "shape": shape }),
+            ));
+            true
+        }
+        None => h.state_mut().menu(id),
     }
 }
 
@@ -609,7 +754,7 @@ pub(crate) fn in_child_at(test: &str, env: &[(&str, &str)], cwd: Option<&Path>) 
     for (k, v) in env {
         command.env(k, v);
     }
-    let output = command.output().expect("run the child test");
+    let output = output_within(&mut command, std::time::Duration::from_secs(600));
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -617,6 +762,36 @@ pub(crate) fn in_child_at(test: &str, env: &[(&str, &str)], cwd: Option<&Path>) 
         "child test {test} failed:\n{stdout}\n{stderr}"
     );
     false
+}
+
+/// `Command::output` (stdin closed, output captured) that fails the test, and
+/// kills the process, if it has not exited within `limit`: a hang then fails
+/// with a message instead of holding the CI job until its own limit.
+pub(crate) fn output_within(
+    command: &mut std::process::Command,
+    limit: std::time::Duration,
+) -> std::process::Output {
+    use std::process::Stdio;
+    let child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("run {command:?}: {e}"));
+    let pid = child.id();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+    match rx.recv_timeout(limit) {
+        Ok(output) => output.unwrap_or_else(|e| panic!("wait for {command:?}: {e}")),
+        Err(_) => {
+            let _ = std::process::Command::new("kill")
+                .args(["-9", &pid.to_string()])
+                .status();
+            panic!("{command:?} still running after {limit:?}");
+        }
+    }
 }
 
 /// A path under the temp dir with spaces and Chinese characters.

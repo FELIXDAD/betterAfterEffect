@@ -45,6 +45,11 @@ pub enum ModelError {
     /// sublayer its guard does not allow. Nothing was written to that sublayer.
     #[error("writing sublayer {0} is not allowed")]
     WriteDenied(SublayerId),
+    /// The layer's Lock switch is on: it, its properties and keyframes cannot
+    /// be changed or deleted until it is unlocked (AE). Only `locked` itself
+    /// can be set.
+    #[error("layer \"{name}\" is locked; unlock it first ({layer})")]
+    LayerLocked { layer: PrimPath, name: String },
     #[error("{path}.{attr}: expected {expected}, got {got}")]
     TypeMismatch {
         path: PrimPath,

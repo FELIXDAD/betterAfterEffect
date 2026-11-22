@@ -68,6 +68,24 @@ impl<'a> PackSource<'a> {
     }
 }
 
+/// The `project.json` of the project at `location` (`.bae` folder or `.baez`
+/// file), if it can be read. The packing commands only see the stage; this
+/// carries the manifest's other fields (path mappings, the desktop app's saved
+/// view, fields newer builds added) into the package.
+pub fn read_manifest(location: &Path) -> Option<ProjectManifest> {
+    let bytes = if location.is_dir() {
+        fs::read(location.join("project.json")).ok()?
+    } else {
+        let file = fs::File::open(location).ok()?;
+        let mut zip = zip::ZipArchive::new(std::io::BufReader::new(file)).ok()?;
+        let mut entry = zip.by_name("project.json").ok()?;
+        let mut buf = Vec::new();
+        std::io::Read::read_to_end(&mut entry, &mut buf).ok()?;
+        buf
+    };
+    bae_model::project::parse_manifest(&bytes).ok()
+}
+
 /// Fonts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]

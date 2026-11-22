@@ -1,25 +1,28 @@
 //! Native menu bar (muda).
 //!
-//! Every menu item id is a command id (`bae_ui::action::ids`, `bae-model` command
-//! ids); an id with parameters is written `command:argument` and becomes the
-//! invocation `{"id": argument}` (`workspace.switch:motion`, `window.panel:project`).
-//! Clicks go through the same dispatch as shortcuts and panel requests.
+//! The menu bar is the registered `Registry<MenuItemSpec>` tree: After Effects
+//! 26's menus, which the motion workspace builds from its AE command catalog
+//! (`bae_ui_motion::catalog`, with the macOS application menu), plus the shell's
+//! BAE-only entries ([`extra_items`]: the History and Agent panels, the Agent
+//! workspace). Like AE, items whose command cannot run now are greyed, not
+//! hidden; checkable items (Window panels, workspaces) show a check mark.
 //!
-//! The shell's own items deliberately carry no native key equivalents (except Quit
-//! on macOS): an NSMenu key equivalent would swallow Cmd+Z / Cmd+C before egui sees
-//! them, and the shortcuts switch with the workspace. `bae-ui`'s keymap handles
-//! every shortcut. Items in `Registry<MenuItemSpec>` — the File items
-//! ([`file_items`]) and the menus modules contribute — show the chord the active
-//! keymap binds to their invocation ([`AppMenu::sync`]).
+//! A click runs the item's invocation through the same dispatch as shortcuts
+//! and panel requests. Every item shows the chord the active keymap binds to
+//! its invocation ([`AppMenu::sync`]); the native key equivalent then handles
+//! the key. Undo, Redo, Cut, Copy, Paste and Select All while a text field has
+//! focus are handed back to the field (`Shell::user_event`), so the usual keys
+//! still edit the text. The macOS application menu's About, Services, Hide,
+//! Hide Others and Show All are the system's own items.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use bae_ui::action::ids;
-use bae_ui::menu::{MenuContext, MenuEntry, MenuItemSpec, MenuTree};
+use bae_ui::menu::{APP_MENU, MenuContext, MenuEntry, MenuItemSpec, MenuPos, MenuTree};
 use bae_ui::{Chord, Invocation, Keymap};
 use muda::accelerator::{Accelerator, Code, Modifiers};
-use muda::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
+use muda::{AboutMetadata, CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 
 use crate::i18n::tr;
 
@@ -34,274 +37,206 @@ pub fn invocation(menu_id: &str) -> Invocation {
 /// Prefix of the ids of items modules contribute (`Registry<MenuItemSpec>`).
 const CONTRIBUTED: &str = "bae.menu:";
 
-/// The shell's File menu items (AE order: New Project, Open Project… — Close
-/// Project, Save, Save As…). Groups 0 and 10; other modules' File items (Import,
-/// Export …) use other groups and are sorted in between or after.
-pub fn file_items() -> Vec<(&'static str, MenuItemSpec)> {
-    let item = |title: &str, action: &str, group: i32, order: i32| {
-        MenuItemSpec::new(&["File"], title, action)
-            .group(group)
+/// Actions a focused text field takes over from the Edit menu (their native key
+/// equivalents would otherwise never reach it).
+pub const TEXT_EDIT_ACTIONS: &[&str] = &[
+    ids::UNDO,
+    ids::REDO,
+    "edit.cut",
+    "edit.copy",
+    "edit.paste",
+    "motion.select_all",
+];
+
+/// BAE's own entries, beyond AE's menus: the History and Agent panels (a group
+/// after AE's panels in Window) and the Agent workspace (sorted among AE's
+/// workspaces in Window ▸ Workspace).
+pub fn extra_items() -> Vec<(&'static str, MenuItemSpec)> {
+    let panel = |panel: &str, title: &str, order: i32| {
+        let open = panel.to_owned();
+        MenuItemSpec::new(&["Window"], title, ids::OPEN_PANEL)
+            .params(serde_json::json!({ "id": panel, "toggle": true }))
+            .group(10)
             .order(order)
+            .checked_when(move |cx| cx.panel_open(&open))
     };
     vec![
+        ("shell.window.history", panel("history", "History", 1)),
         (
-            "shell.file.new_project",
-            item("New Project", ids::NEW_PROJECT, 0, 0),
+            "shell.window.agent_activity",
+            panel("agent_activity", "Agent Activity", 2),
         ),
         (
-            "shell.file.open_project",
-            item("Open Project...", ids::OPEN_PROJECT, 0, 1),
+            "shell.window.agent_proposals",
+            panel("agent_proposals", "Proposals", 3),
         ),
         (
-            "shell.file.close_project",
-            item("Close Project", ids::CLOSE_PROJECT, 10, 0),
-        ),
-        ("shell.file.save", item("Save", ids::SAVE, 10, 1)),
-        (
-            "shell.file.save_as",
-            item("Save As...", ids::SAVE_AS, 10, 2),
+            "shell.window.workspace.agent",
+            MenuItemSpec::new(&["Window", "Workspace"], "Agent", ids::SWITCH_WORKSPACE)
+                .params(serde_json::json!({ "id": "agent" }))
+                .at(vec![MenuPos::new(0, 1), MenuPos::new(0, 0).sorted()])
+                .checked_when(|cx| cx.workspace == "agent"),
         ),
     ]
 }
 
+/// A native item: plain or with a check mark.
+enum Native {
+    Plain(MenuItem),
+    Check(CheckMenuItem),
+}
+
+impl Native {
+    fn set_enabled(&self, enabled: bool) {
+        match self {
+            Native::Plain(i) => i.set_enabled(enabled),
+            Native::Check(i) => i.set_enabled(enabled),
+        }
+    }
+
+    fn set_accelerator(&self, accelerator: Option<Accelerator>) {
+        let _ = match self {
+            Native::Plain(i) => i.set_accelerator(accelerator),
+            Native::Check(i) => i.set_accelerator(accelerator),
+        };
+    }
+
+    fn set_text(&self, text: &str) {
+        match self {
+            Native::Plain(i) => i.set_text(text),
+            Native::Check(i) => i.set_text(text),
+        }
+    }
+}
+
 /// A contributed item and the state last pushed to the native menu.
 struct Contributed {
-    item: MenuItem,
+    item: Native,
     spec: Arc<MenuItemSpec>,
     enabled: bool,
+    checked: bool,
     chord: Option<Chord>,
 }
 
 /// The application menu bar.
 pub struct AppMenu {
     menu: Menu,
-    undo: MenuItem,
-    redo: MenuItem,
     undo_state: (Option<String>, Option<String>),
     /// Contributed items by registry id.
     contributed: HashMap<String, Contributed>,
+    /// Registry ids of the Edit menu's Undo and Redo items.
+    undo: Option<String>,
+    redo: Option<String>,
+    /// Action ids modules handle (`bae_ui::menu::handled_actions`).
+    actions: HashSet<String>,
+    /// Counts [`AppMenu::sync`] calls (`MenuContext::generation`).
+    generation: u64,
 }
 
 impl AppMenu {
-    /// Builds the menu bar; `workspaces` are `(id, English title)` in bar order,
-    /// `contributed` the menus modules registered (placed in AE order between Edit
-    /// and Window; items for File / Edit / Window / Help are appended to those).
-    pub fn new(workspaces: &[(String, String)], contributed: &MenuTree) -> muda::Result<Self> {
+    /// Builds the menu bar from the registered menus (`contributed`, AE order);
+    /// `actions` are the action ids modules handle.
+    pub fn new(contributed: &MenuTree, actions: HashSet<String>) -> muda::Result<Self> {
         let menu = Menu::new();
         let mut items: HashMap<String, Contributed> = HashMap::new();
-        let extra = |title: &str| {
-            contributed
-                .menus
-                .iter()
-                .find(|(t, _)| t == title)
-                .map(|(_, e)| e)
-        };
-
-        #[cfg(target_os = "macos")]
-        {
-            let app = Submenu::new(bae_platform::APP_NAME, true);
-            app.append_items(&[
-                &PredefinedMenuItem::about(Some(tr("About BAE")), Some(about_metadata())),
-                &PredefinedMenuItem::separator(),
-                &MenuItem::with_id(
-                    ids::KEYBOARD_SHORTCUTS,
-                    tr("Keyboard Shortcuts"),
-                    true,
-                    None,
-                ),
-                &PredefinedMenuItem::separator(),
-                &PredefinedMenuItem::services(None),
-                &PredefinedMenuItem::separator(),
-                &PredefinedMenuItem::hide(None),
-                &PredefinedMenuItem::hide_others(None),
-                &PredefinedMenuItem::show_all(None),
-                &PredefinedMenuItem::separator(),
-                &MenuItem::with_id(
-                    ids::QUIT,
-                    tr("Quit BAE"),
-                    true,
-                    Some(muda::accelerator::Accelerator::new(
-                        muda::accelerator::Modifiers::META,
-                        muda::accelerator::Code::KeyQ,
-                    )),
-                ),
-            ])?;
-            menu.append(&app)?;
-        }
-
-        // File: the registered items (the shell's own come from `file_items`),
-        // then Exit on Windows.
-        let file = Submenu::new(tr("File"), true);
-        let file_entries = extra("File").map(Vec::as_slice).unwrap_or_default();
-        append_entries(&file, file_entries, &mut items)?;
-        #[cfg(not(target_os = "macos"))]
-        {
-            if !file_entries.is_empty() {
-                file.append(&PredefinedMenuItem::separator())?;
-            }
-            file.append(&MenuItem::with_id(ids::QUIT, tr("Exit"), true, None))?;
-        }
-        menu.append(&file)?;
-
-        let edit = Submenu::new(tr("Edit"), true);
-        let undo = MenuItem::with_id(ids::UNDO, tr("Undo"), false, None);
-        let redo = MenuItem::with_id(ids::REDO, tr("Redo"), false, None);
-        edit.append_items(&[&undo, &redo])?;
-        #[cfg(not(target_os = "macos"))]
-        edit.append_items(&[
-            &PredefinedMenuItem::separator(),
-            &MenuItem::with_id(
-                ids::KEYBOARD_SHORTCUTS,
-                tr("Keyboard Shortcuts"),
-                true,
-                None,
-            ),
-        ])?;
-        if let Some(entries) = extra("Edit") {
-            edit.append(&PredefinedMenuItem::separator())?;
-            append_entries(&edit, entries, &mut items)?;
-        }
-        menu.append(&edit)?;
-
-        // Menus contributed by modules (Composition, Layer, Animation …).
         for (title, entries) in &contributed.menus {
-            if ["File", "Edit", "Window", "Help"].contains(&title.as_str()) {
+            if title == APP_MENU {
+                // The macOS application menu, under the application's name.
+                if cfg!(target_os = "macos") {
+                    let app = Submenu::new(bae_platform::APP_NAME, true);
+                    append_entries(&app, entries, &mut items)?;
+                    menu.append(&app)?;
+                }
                 continue;
             }
             let sub = Submenu::new(tr(title), true);
             append_entries(&sub, entries, &mut items)?;
             menu.append(&sub)?;
         }
-
-        let window = Submenu::new(tr("Window"), true);
-        let workspace = Submenu::new(tr("Workspace"), true);
-        for (id, title) in workspaces {
-            workspace.append(&MenuItem::with_id(
-                format!("{}:{id}", ids::SWITCH_WORKSPACE),
-                tr(title),
-                true,
-                None,
-            ))?;
-        }
-        workspace.append_items(&[
-            &PredefinedMenuItem::separator(),
-            &MenuItem::with_id(
-                ids::SAVE_WORKSPACE,
-                tr("Save Changes to this Workspace"),
-                true,
-                None,
-            ),
-            &MenuItem::with_id(
-                ids::RESET_WORKSPACE,
-                tr("Reset to Saved Layout"),
-                true,
-                None,
-            ),
-            &MenuItem::with_id(
-                ids::NEW_WORKSPACE,
-                tr("Save as New Workspace..."),
-                true,
-                None,
-            ),
-            &MenuItem::with_id(ids::EDIT_WORKSPACES, tr("Edit Workspaces..."), true, None),
-        ])?;
-        window.append(&workspace)?;
-        window.append(&PredefinedMenuItem::separator())?;
-        #[cfg(target_os = "macos")]
-        window.append_items(&[
-            &PredefinedMenuItem::minimize(Some(tr("Minimize"))),
-            &PredefinedMenuItem::fullscreen(Some(tr("Full Screen"))),
-            &PredefinedMenuItem::separator(),
-        ])?;
-        for (panel, title) in [
-            ("project", "Project"),
-            ("composition", "Composition"),
-            ("timeline", "Timeline"),
-            ("effect_controls", "Effect Controls"),
-            ("effects", "Effects & Presets"),
-            ("preview", "Preview"),
-            ("properties", "Properties"),
-            ("info", "Info"),
-            ("history", "History"),
-            ("agent_activity", "Agent Activity"),
-            ("agent_proposals", "Proposals"),
-        ] {
-            window.append(&MenuItem::with_id(
-                format!("{}:{panel}", ids::OPEN_PANEL),
-                tr(title),
-                true,
-                None,
-            ))?;
-        }
-        if let Some(entries) = extra("Window") {
-            window.append(&PredefinedMenuItem::separator())?;
-            append_entries(&window, entries, &mut items)?;
-        }
-        menu.append(&window)?;
-
-        let help = Submenu::new(tr("Help"), true);
-        help.append(&MenuItem::with_id(ids::HELP, tr("BAE Help"), true, None))?;
-        #[cfg(not(target_os = "macos"))]
-        help.append_items(&[
-            &PredefinedMenuItem::separator(),
-            &MenuItem::with_id(ids::ABOUT, tr("About BAE"), true, None),
-        ])?;
-        if let Some(entries) = extra("Help") {
-            help.append(&PredefinedMenuItem::separator())?;
-            append_entries(&help, entries, &mut items)?;
-        }
-        menu.append(&help)?;
-
-        Ok(Self {
+        let find = |action: &str| {
+            items
+                .iter()
+                .find(|(_, c)| c.spec.action == action)
+                .map(|(id, _)| id.clone())
+        };
+        let undo = find(ids::UNDO);
+        let redo = find(ids::REDO);
+        let mut menu = Self {
             menu,
+            undo_state: (Some(String::new()), None),
+            contributed: items,
             undo,
             redo,
-            undo_state: (None, None),
-            contributed: items,
-        })
+            actions,
+            generation: 0,
+        };
+        menu.set_undo_state((None, None));
+        Ok(menu)
     }
 
-    /// The invocation of a contributed item (`None` for the shell's own items,
-    /// which [`invocation`] decodes).
+    /// The invocation of a contributed item (`None` for ids this menu did not
+    /// make, which [`invocation`] decodes).
     pub fn contributed_invocation(&self, menu_id: &str) -> Option<Invocation> {
         let id = menu_id.strip_prefix(CONTRIBUTED)?;
         self.contributed.get(id).map(|c| c.spec.invocation())
     }
 
-    /// Updates contributed items: enabled state, and the shortcut the active
-    /// keymap binds to the same invocation (display; on macOS the menu also
-    /// handles the key, which then does not reach the UI, so it runs once).
-    pub fn sync(&mut self, keymap: &Keymap, cx: &MenuContext<'_>) {
-        for c in self.contributed.values_mut() {
-            let enabled = c.spec.is_enabled(cx);
+    /// Updates the items: enabled state, check marks, and the shortcut the
+    /// active keymap binds to the same invocation (display; on macOS the menu
+    /// also handles the key, which then does not reach the UI, so it runs once).
+    /// `text_focus`: a text field has focus, so the Edit menu's text commands
+    /// stay enabled for it ([`TEXT_EDIT_ACTIONS`]).
+    pub fn sync(&mut self, keymap: &Keymap, cx: &MenuContext<'_>, text_focus: bool) {
+        self.generation += 1;
+        let cx = MenuContext::new(cx.stage, cx.resources, cx.workspace)
+            .with_open_panels(cx.open_panels)
+            .with_generation(self.generation)
+            .with_actions(&self.actions);
+        let undo = self.undo_state.0.is_some();
+        let redo = self.undo_state.1.is_some();
+        for (id, c) in &mut self.contributed {
+            let enabled = if Some(id) == self.undo.as_ref() {
+                undo || text_focus
+            } else if Some(id) == self.redo.as_ref() {
+                redo || text_focus
+            } else {
+                c.spec.is_enabled(&cx)
+                    || (text_focus && TEXT_EDIT_ACTIONS.contains(&c.spec.action.as_str()))
+            };
             if enabled != c.enabled {
                 c.item.set_enabled(enabled);
                 c.enabled = enabled;
             }
-            let chord = keymap
-                .chord_for_invocation(&c.spec.invocation())
-                .filter(|ch| !ch.is_typing_key())
-                .cloned();
+            if let Native::Check(item) = &c.item {
+                let checked = c.spec.is_checked(&cx);
+                // A click toggles the native mark itself: always re-assert it.
+                if checked != c.checked || item.is_checked() != checked {
+                    item.set_checked(checked);
+                    c.checked = checked;
+                }
+            }
+            let chord = shell_chord(keymap, &c.spec.invocation());
             if chord != c.chord {
-                let _ = c.item.set_accelerator(chord.as_ref().and_then(accelerator));
+                c.item.set_accelerator(chord.as_ref().and_then(accelerator));
                 c.chord = chord;
             }
         }
     }
 
-    /// Updates the Undo / Redo items (`Some(label)` = enabled, AE: "Undo <step>").
+    /// Updates the Undo / Redo items (`Some(label)` = enabled, AE: "Undo <step>",
+    /// "Can’t Undo" when there is nothing to undo).
     pub fn set_undo_state(&mut self, state: (Option<String>, Option<String>)) {
         if state == self.undo_state {
             return;
         }
-        let text = |base: &str, label: &Option<String>| match label {
-            Some(label) if !label.is_empty() => format!("{} {label}", tr(base)),
-            _ => tr(base).to_owned(),
-        };
-        self.undo.set_text(text("Undo", &state.0));
-        self.undo.set_enabled(state.0.is_some());
-        self.redo.set_text(text("Redo", &state.1));
-        self.redo.set_enabled(state.1.is_some());
+        for (id, base, label) in [
+            (&self.undo, "Undo", state.0.as_deref()),
+            (&self.redo, "Redo", state.1.as_deref()),
+        ] {
+            if let Some(c) = id.as_ref().and_then(|id| self.contributed.get(id)) {
+                c.item.set_text(&undo_redo_text(base, label));
+            }
+        }
         self.undo_state = state;
     }
 
@@ -334,6 +269,22 @@ impl AppMenu {
     }
 }
 
+/// The system's own item for a macOS application-menu action, if it has one.
+fn predefined(spec: &MenuItemSpec) -> Option<PredefinedMenuItem> {
+    if !cfg!(target_os = "macos") || spec.path.first().map(String::as_str) != Some(APP_MENU) {
+        return None;
+    }
+    let text = Some(tr(&spec.title));
+    Some(match spec.action.as_str() {
+        ids::ABOUT => PredefinedMenuItem::about(text, Some(about_metadata())),
+        "app.services" => PredefinedMenuItem::services(text),
+        "app.hide" => PredefinedMenuItem::hide(text),
+        "app.hide_others" => PredefinedMenuItem::hide_others(text),
+        "app.show_all" => PredefinedMenuItem::show_all(text),
+        _ => return None,
+    })
+}
+
 /// Appends resolved menu entries (items, separators, submenus) to `menu`.
 fn append_entries(
     menu: &Submenu,
@@ -344,27 +295,49 @@ fn append_entries(
         match e {
             MenuEntry::Separator => menu.append(&PredefinedMenuItem::separator())?,
             MenuEntry::Item { id, spec } => {
-                let item =
-                    MenuItem::with_id(format!("{CONTRIBUTED}{id}"), tr(&spec.title), true, None);
-                menu.append(&item)?;
+                if let Some(item) = predefined(spec) {
+                    menu.append(&item)?;
+                    continue;
+                }
+                let menu_id = format!("{CONTRIBUTED}{id}");
+                let item = if spec.is_checkable() {
+                    let item = CheckMenuItem::with_id(menu_id, tr(&spec.title), true, false, None);
+                    menu.append(&item)?;
+                    Native::Check(item)
+                } else {
+                    let item = MenuItem::with_id(menu_id, tr(&spec.title), true, None);
+                    menu.append(&item)?;
+                    Native::Plain(item)
+                };
                 items.insert(
                     id.clone(),
                     Contributed {
                         item,
                         spec: spec.clone(),
                         enabled: true,
+                        checked: false,
                         chord: None,
                     },
                 );
             }
             MenuEntry::Submenu { title, entries } => {
-                let sub = Submenu::new(tr(title), true);
+                // AE shows a submenu with nothing in it (History) greyed.
+                let sub = Submenu::new(tr(title), !entries.is_empty());
                 append_entries(&sub, entries, items)?;
                 menu.append(&sub)?;
             }
         }
     }
     Ok(())
+}
+
+/// The chord an item shows: what the keymap binds to its command (plain typing
+/// keys never: the menu would take them from text fields).
+fn shell_chord(keymap: &Keymap, invocation: &Invocation) -> Option<Chord> {
+    keymap
+        .chord_for_invocation(invocation)
+        .filter(|ch| !ch.is_typing_key())
+        .cloned()
 }
 
 /// The native accelerator for a chord (`None` for keys the menu cannot show).
@@ -483,6 +456,18 @@ fn about_metadata() -> AboutMetadata {
     AboutMetadata::default()
 }
 
+/// "Undo New Layer" / "撤消 新建图层": the Edit menu's undo and redo items. `label` is
+/// the command's English title (what the stage records); both parts are translated
+/// (#136). `None`: nothing to undo ("Can’t Undo").
+pub(crate) fn undo_redo_text(base: &str, label: Option<&str>) -> String {
+    match label {
+        Some(label) if !label.is_empty() => format!("{} {}", tr(base), tr(label)),
+        Some(_) => tr(base).to_owned(),
+        // AE: "Can't Undo" / "Can't Redo" while there is nothing to undo.
+        None => tr(&format!("Can’t {base}")).to_owned(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -493,6 +478,128 @@ mod tests {
         let inv = invocation("workspace.switch:review");
         assert_eq!(inv.id, "workspace.switch");
         assert_eq!(inv.id_param(), Some("review"));
+    }
+
+    /// The menu bar the app's modules register, as `AppMenu::new` gets it.
+    fn app_menu_tree() -> MenuTree {
+        let mut app = crate::app_builder().build();
+        let tree = bae_ui::menu::build_menus(&app.registry::<MenuItemSpec>().snapshot(), "motion");
+        assert!(tree.conflicts.is_empty(), "{:?}", tree.conflicts);
+        tree
+    }
+
+    fn titles(entries: &[MenuEntry]) -> Vec<String> {
+        entries
+            .iter()
+            .map(|e| match e {
+                MenuEntry::Item { spec, .. } => spec.title.clone(),
+                MenuEntry::Separator => "---".into(),
+                MenuEntry::Submenu { title, .. } => format!("{title} ▸"),
+            })
+            .collect()
+    }
+
+    /// Issue #117: the menu shows the keymap's shortcut for each item (Undo
+    /// Cmd+Z, Redo Cmd+Shift+Z, Keyboard Shortcuts, Quit / Exit, the Window panel
+    /// bindings).
+    #[test]
+    fn items_show_keymap_shortcuts() {
+        let keymap = bae_ui::presets::ae_keymap();
+        let tree = app_menu_tree();
+        let shown = |action: &str, params: serde_json::Value| {
+            let (_, spec) = tree
+                .items()
+                .into_iter()
+                .find(|(_, s)| s.action == action && s.params == params)
+                .unwrap_or_else(|| panic!("no menu item for {action} {params}"));
+            shell_chord(&keymap, &spec.invocation()).map(|c| c.to_string())
+        };
+        let parse = |s: &str| Some(Chord::parse(s).unwrap().to_string());
+        let none = serde_json::Value::Null;
+        assert_eq!(shown(ids::UNDO, none.clone()), parse("Cmd+Z"));
+        assert_eq!(shown(ids::REDO, none.clone()), parse("Cmd+Shift+Z"));
+        assert_eq!(
+            shown(ids::KEYBOARD_SHORTCUTS, none.clone()),
+            parse("Cmd+Alt+Quote")
+        );
+        assert_eq!(shown(ids::QUIT, none), parse("Cmd+Q"));
+        let panel = |id: &str| serde_json::json!({ "id": id, "toggle": true });
+        assert_eq!(shown(ids::OPEN_PANEL, panel("project")), parse("Cmd+0"));
+        assert_eq!(
+            shown(ids::OPEN_PANEL, panel("effect_controls")),
+            parse("F3")
+        );
+        assert_eq!(shown(ids::OPEN_PANEL, panel("timeline")), None);
+    }
+
+    /// The File menu is AE's (New ▸, Open Project…, Open Recent ▸ …) with AE's
+    /// shortcuts; BAE's own panels follow AE's in Window, the Agent workspace is
+    /// sorted among AE's workspaces.
+    #[test]
+    fn menu_bar_is_ae_with_bae_extras() {
+        let tree = app_menu_tree();
+        let menu = |title: &str| {
+            &tree
+                .menus
+                .iter()
+                .find(|(t, _)| t == title)
+                .unwrap_or_else(|| panic!("no {title} menu"))
+                .1
+        };
+        assert_eq!(
+            titles(menu("File"))[..9],
+            [
+                "New ▸",
+                "Open Project...",
+                "Open Recent ▸",
+                "Browse in Bridge...",
+                "---",
+                "Close",
+                "Close Project",
+                "Save",
+                "Save As ▸",
+            ]
+        );
+        let keymap = bae_ui::presets::ae_keymap();
+        let chord = |id: &str| {
+            let (_, spec) = tree.items().into_iter().find(|(i, _)| *i == id).unwrap();
+            keymap
+                .chord_for_invocation(&spec.invocation())
+                .map(|c| c.to_string())
+        };
+        assert_eq!(
+            chord("shell.file.new_project").as_deref(),
+            Some("Cmd+Alt+N")
+        );
+        assert_eq!(chord("shell.file.open_project").as_deref(), Some("Cmd+O"));
+        assert_eq!(chord("shell.file.close_project"), None);
+        assert_eq!(chord("shell.file.save").as_deref(), Some("Cmd+S"));
+        assert_eq!(chord("shell.file.save_as").as_deref(), Some("Cmd+Shift+S"));
+        let window = titles(menu("Window"));
+        assert_eq!(
+            window[window.len() - 4..],
+            ["---", "History", "Agent Activity", "Proposals"]
+        );
+        let Some(MenuEntry::Submenu { entries, .. }) = menu("Window").first() else {
+            panic!("Window ▸ Workspace");
+        };
+        assert_eq!(titles(entries)[..3], ["Agent", "All Panels", "Animation"]);
+    }
+
+    /// AE: "Undo <step>", and "Can’t Undo" / "Can’t Redo" (无法撤消) when there
+    /// is nothing to undo.
+    #[test]
+    fn undo_items_say_what_they_undo() {
+        crate::i18n::register_tables();
+        assert_eq!(
+            undo_redo_text("Undo", Some("New Solid")),
+            format!("{} {}", tr("Undo"), tr("New Solid"))
+        );
+        for base in ["Undo", "Redo"] {
+            let cant = format!("Can’t {base}");
+            assert!(bae_ui::i18n::has_translation(&cant), "{cant}");
+            assert_eq!(undo_redo_text(base, None), tr(&cant));
+        }
     }
 
     #[test]
@@ -519,67 +626,6 @@ mod tests {
             a("Cmd+CloseBracket"),
             Some(Accelerator::new(cmd, Code::BracketRight))
         );
-    }
-
-    #[test]
-    fn file_items_follow_ae_order_and_shortcuts() {
-        let registry = bae_app::Registry::<MenuItemSpec>::new();
-        for (id, item) in file_items() {
-            registry.register(bae_app::Owner::Core, id, item).unwrap();
-        }
-        let tree = bae_ui::menu::build_menus(&registry.snapshot(), "motion");
-        assert_eq!(tree.menus.len(), 1);
-        let (title, entries) = &tree.menus[0];
-        assert_eq!(title, "File");
-        let shown: Vec<String> = entries
-            .iter()
-            .map(|e| match e {
-                MenuEntry::Item { spec, .. } => spec.title.clone(),
-                MenuEntry::Separator => "---".into(),
-                MenuEntry::Submenu { title, .. } => title.clone(),
-            })
-            .collect();
-        assert_eq!(
-            shown,
-            [
-                "New Project",
-                "Open Project...",
-                "---",
-                "Close Project",
-                "Save",
-                "Save As..."
-            ]
-        );
-        // The AE keymap's chords are what the native menu shows (and on macOS
-        // handles) for these items.
-        let keymap = bae_ui::presets::ae_keymap();
-        let chords: Vec<Option<String>> = tree
-            .items()
-            .iter()
-            .map(|(_, spec)| {
-                keymap
-                    .chord_for_invocation(&spec.invocation())
-                    .map(|c| c.to_string())
-            })
-            .collect();
-        let expect = |s: &str| Some(s.to_owned());
-        assert_eq!(
-            chords,
-            [
-                expect("Cmd+Alt+N"),
-                expect("Cmd+O"),
-                None, // AE has no default shortcut for Close Project
-                expect("Cmd+S"),
-                expect("Cmd+Shift+S"),
-            ]
-        );
-        for (_, spec) in tree.items() {
-            assert!(
-                crate::files::is_file_command(&spec.action),
-                "{}",
-                spec.action
-            );
-        }
     }
 
     #[test]

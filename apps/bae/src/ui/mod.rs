@@ -5,7 +5,14 @@ mod renderer;
 mod workspace;
 
 pub use renderer::{UiOutput, UiRenderer};
-pub use workspace::{PlaceholderViewer, StatusInfo, Workspace, register_panels};
+#[cfg(test)]
+pub use workspace::ShortcutRow;
+#[cfg(test)]
+pub(crate) use workspace::gpu_kind as workspace_gpu_kind;
+pub use workspace::{
+    PlaceholderViewer, REVEAL_PREFERENCES, StatusInfo, Workspace, failure_notice, gpu_summary,
+    register_panels,
+};
 
 use bae_gpu::viewport::{ViewportTextureId, ViewportTextureRegistry};
 use bae_gpu::{GpuContext, transfer, wgpu};

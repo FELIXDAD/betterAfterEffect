@@ -118,11 +118,13 @@ impl Panel for ActivityPanel {
 
 fn activity_row(ui: &mut Ui, e: &AgentActivity) {
     ui.horizontal(|ui| {
-        let (mark, c) = match &e.error {
-            None => ("✓", color::CACHE_GREEN),
-            Some(_) => ("✗", color::TRAFFIC_CLOSE),
-        };
-        ui.label(RichText::new(mark).color(c));
+        // Painted, not ✓ / ✗: egui's built-in fonts have neither (#135).
+        let size = ui.text_style_height(&egui::TextStyle::Body);
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+        match &e.error {
+            None => crate::widgets::paint_check(ui.painter(), rect, color::CACHE_GREEN),
+            Some(_) => crate::widgets::paint_cross(ui.painter(), rect, color::TRAFFIC_CLOSE),
+        }
         ui.label(
             RichText::new(clock(e.unix_ms))
                 .size(10.5)
@@ -305,7 +307,7 @@ mod tests {
         let mut requests = PanelRequests::default();
         let mut activity = ActivityPanel::default();
         let mut proposals = ProposalsPanel::default();
-        let ctx = egui::Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         for round in 0..2 {
             if round == 1 {
                 fake.calls.lock().unwrap().push(call(3));

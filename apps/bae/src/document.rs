@@ -43,6 +43,11 @@ pub struct Document {
     /// Sublayer versions when the project was last opened or saved.
     saved: SavePoint,
     history: Option<Arc<HistoryLog>>,
+    /// Names of command variants ("New Solid" for `layer.create` with a solid), which
+    /// label undo steps and History entries (#140).
+    variants: Option<Arc<bae_app::Registry<bae_ui::CommandVariant>>>,
+    /// Preferences > General > Levels of Undo, applied to every project opened.
+    undo_limit: usize,
 }
 
 /// What [`Document::run`] did with an invocation.
@@ -91,6 +96,8 @@ impl Document {
             },
             author: local_author(),
             history,
+            variants: None,
+            undo_limit: bae_model::DEFAULT_UNDO_LIMIT,
         };
         doc.watch_history();
         doc
@@ -99,6 +106,7 @@ impl Document {
     /// Add the commands app modules published in `Registry<dyn DynCommand>` (domain
     /// command crates such as `bae-motion`). Built-in ids are kept.
     pub fn add_module_commands(&mut self, app: &bae_app::App) {
+        self.variants = app.get_registry::<bae_ui::CommandVariant>();
         let Some(registry) = app.get_registry::<dyn bae_model::DynCommand>() else {
             return;
         };
@@ -128,6 +136,25 @@ impl Document {
     /// The `.bae` folder or `.baez` file of the project (`None` until saved).
     pub fn location(&self) -> Option<&Path> {
         self.project.location()
+    }
+
+    /// A top-level field of `project.json` that is not project data (e.g. the
+    /// saved view, `view_state`).
+    pub fn manifest_field(&self, key: &str) -> Option<&serde_json::Value> {
+        self.project.manifest.extra.get(key)
+    }
+
+    /// Set (`None`: remove) such a field; it is written with the next save and
+    /// does not count as an unsaved change.
+    pub fn set_manifest_field(&mut self, key: &str, value: Option<serde_json::Value>) {
+        match value {
+            Some(v) => {
+                self.project.manifest.extra.insert(key.to_owned(), v);
+            }
+            None => {
+                self.project.manifest.extra.remove(key);
+            }
+        }
     }
 
     /// Whether the project changed since it was opened or last saved.
@@ -186,17 +213,29 @@ impl Document {
                 stage.redo(&self.author).is_some()
             }
             id => {
-                let Some(cmd) = self.commands.get(id) else {
+                let Some(cmd) = self.commands.get(id).cloned() else {
                     return Outcome::Unknown;
                 };
-                label(Some(&cmd.info().title));
                 let params = if inv.params.is_null() {
                     serde_json::json!({})
                 } else {
                     inv.params.clone()
                 };
-                match self.commands.execute(stage, &self.author, id, params) {
-                    Ok(out) => !out.event.is_empty(),
+                // The variant's name ("New Solid") when one matches, else the title.
+                // It becomes the undo label (Edit > Undo) and the History entry.
+                let variants = self.variants.as_ref().map(|r| r.snapshot());
+                let text = variants
+                    .as_ref()
+                    .and_then(|v| {
+                        bae_ui::action::variant_title(v.iter().map(|e| &**e.item()), id, &params)
+                    })
+                    .unwrap_or(&cmd.info().title)
+                    .to_owned();
+                label(Some(&text));
+                // `CommandRegistry::execute` with our label (same transaction, same
+                // lock and write checks inside `Stage::transact`).
+                match stage.transact(&self.author, &text, |tx| cmd.run_json(tx, params)) {
+                    Ok((_, event)) => !event.is_empty(),
                     Err(error) => return Outcome::Failed(error),
                 }
             }
@@ -230,12 +269,20 @@ impl Document {
     /// ask first).
     pub fn replace(&mut self, opened: OpenedProject) {
         self.project = opened.project;
+        self.project.stage.set_undo_limit(self.undo_limit);
         self.assets = opened.assets;
         self.saved = SavePoint::of(&self.project.stage);
         if let Some(log) = &self.history {
             log.clear();
         }
         self.watch_history();
+    }
+
+    /// Undo steps kept (Preferences > General > Levels of Undo), now and for every
+    /// project opened later.
+    pub fn set_undo_limit(&mut self, limit: usize) {
+        self.undo_limit = limit;
+        self.project.stage.set_undo_limit(limit);
     }
 
     /// Open a project in place of the current one ([`Document::load`] +
@@ -268,6 +315,74 @@ impl Document {
     /// has that extension, otherwise a `.bae` folder.
     pub fn save_as(&mut self, path: &Path) -> anyhow::Result<()> {
         self.write(path)
+    }
+
+    /// Save As over another existing `.bae` project folder (issue #126): the
+    /// project is written to a temporary folder next to it first, then swapped
+    /// in; if anything fails, the existing project is left as it was. Files
+    /// embedded in a `.baez` the project came from are extracted with it.
+    pub fn save_as_replacing(&mut self, target: &Path) -> anyhow::Result<()> {
+        let context = || target.display().to_string();
+        let tmp = sibling(target, "saving");
+        let backup = sibling(target, "replaced");
+        let written = (|| -> anyhow::Result<()> {
+            let mut copy = self.detached_copy()?;
+            copy.save_as(&tmp)?;
+            if let Some(pkg) = self.assets.package() {
+                for entry in pkg.entries() {
+                    pkg.extract_entry(&entry.name, &tmp.join(native(&entry.name)))?;
+                }
+            }
+            Ok(())
+        })();
+        if let Err(error) = written {
+            let _ = fs::remove_dir_all(&tmp);
+            return Err(error.context(context()));
+        }
+        if let Err(error) = fs::rename(target, &backup) {
+            let _ = fs::remove_dir_all(&tmp);
+            return Err(anyhow::Error::new(error).context(context()));
+        }
+        if let Err(error) = fs::rename(&tmp, target) {
+            let _ = fs::rename(&backup, target);
+            let _ = fs::remove_dir_all(&tmp);
+            return Err(anyhow::Error::new(error).context(context()));
+        }
+        let _ = fs::remove_dir_all(&backup);
+        // The folder holds the project now; make it the location (rewrites the
+        // same project files in place, atomically per file).
+        self.project.save_as(target).with_context(context)?;
+        self.saved = SavePoint::of(&self.project.stage);
+        self.assets = AssetLocator::for_project(&self.project).with_context(context)?;
+        Ok(())
+    }
+
+    /// Writes a copy of the project to `target` (a `.bae` folder) without changing
+    /// its location or saved state (auto-save).
+    pub fn save_copy(&self, target: &Path) -> anyhow::Result<()> {
+        let mut copy = self.detached_copy()?;
+        copy.save_as(target)
+            .with_context(|| target.display().to_string())?;
+        Ok(())
+    }
+
+    /// The project as an independent copy (same sublayers and manifest, no
+    /// location), for writing somewhere without touching the open one.
+    fn detached_copy(&self) -> anyhow::Result<Project> {
+        let stage = &self.project.stage;
+        let mut layers = Vec::with_capacity(stage.layer_stack().len());
+        for id in stage.layer_stack() {
+            let layer = stage
+                .sublayer(id)
+                .with_context(|| format!("sublayer {id} is missing"))?;
+            layers.push(bae_model::Sublayer::from_snapshot(
+                id.clone(),
+                &layer.export_snapshot()?,
+            )?);
+        }
+        let mut copy = Project::from_stage(Stage::from_sublayers(layers)?);
+        copy.manifest = self.project.manifest.clone();
+        Ok(copy)
     }
 
     /// Serialize the project to `target`. Files embedded in the `.baez` the project
@@ -348,17 +463,26 @@ pub fn project_path(path: &Path) -> PathBuf {
 
 /// Whether `path` names a single-file package (the model's rule: exactly the
 /// `.baez` extension; `files` lower-cases chosen extensions first).
-fn is_baez(path: &Path) -> bool {
+pub(crate) fn is_baez(path: &Path) -> bool {
     path.extension().is_some_and(|e| e == BAEZ)
 }
 
 /// Two paths name the same file or folder (symlinks and `..` resolved).
-fn same_path(a: &Path, b: &Path) -> bool {
+pub(crate) fn same_path(a: &Path, b: &Path) -> bool {
     a == b
         || matches!(
             (fs::canonicalize(a), fs::canonicalize(b)),
             (Ok(a), Ok(b)) if a == b
         )
+}
+
+/// A hidden sibling of `target` for temporary work (`.<name>.<what>-<pid>`).
+fn sibling(target: &Path, what: &str) -> PathBuf {
+    let name = target
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    target.with_file_name(format!(".{name}.{what}-{}", std::process::id()))
 }
 
 /// A `/`-separated entry name as a relative native path.

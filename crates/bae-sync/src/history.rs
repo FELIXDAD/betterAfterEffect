@@ -742,11 +742,14 @@ pub fn revert(
     scope: &RevertScope,
 ) -> Result<StageEvent, SyncError> {
     let edits = revert_edits(stage, to, scope)?;
+    // Like undo, a rollback restores locked layers too.
     let (_, event) = stage.transact(author, label, |tx| {
-        for (layer, op) in edits {
-            tx.apply_to(&layer, op)?;
-        }
-        Ok::<_, SyncError>(())
+        tx.allow_locked(|tx| {
+            for (layer, op) in edits {
+                tx.apply_to(&layer, op)?;
+            }
+            Ok::<_, SyncError>(())
+        })
     })?;
     Ok(event)
 }

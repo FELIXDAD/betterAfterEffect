@@ -7,11 +7,11 @@ use std::time::{Duration, Instant};
 use bae_model::{LayerKind, PrimPath, Time};
 use bae_motion::query::{self, CompInfo};
 use bae_motion::{CopiedKey, KeyRef};
-use bae_ui::{Binding, Invocation, KeymapBindings, PanelContext};
+use bae_ui::{Binding, CommandVariant, Invocation, KeymapBindings, PanelContext};
 use serde_json::json;
 
 use crate::common;
-use crate::session::{KeyClipboard, Reveal, SharedSession};
+use crate::session::{KeyClipboard, Pending, Reveal, SharedSession};
 
 pub mod ids {
     pub const PLAY: &str = "motion.play";
@@ -42,14 +42,38 @@ pub mod ids {
     pub const REVEAL: &str = "motion.reveal";
     /// Params `{"attr": "<attr>"}`.
     pub const TOGGLE_KEY: &str = "motion.toggle_key";
+    /// Composition > New Composition (Cmd/Ctrl+N): opens Composition Settings.
     pub const NEW_COMP: &str = "motion.new_comp";
-    /// Params `{"kind": "<layer kind>", "shape": "rect" | …}`.
+    /// Composition > Composition Settings (Cmd/Ctrl+K): the active comp, or the
+    /// comp selected in the focused Project panel.
+    pub const COMP_SETTINGS: &str = "motion.comp.composition_settings";
+    /// Params `{"kind": "<layer kind>", "shape": "rect" | …}`. A solid opens
+    /// Solid Settings first.
     pub const NEW_LAYER: &str = "motion.new_layer";
+    /// Layer > Layer Settings (Cmd/Ctrl+Shift+Y): Solid, Camera or Light
+    /// Settings of the selected layer, or Solid Settings of the solid item
+    /// selected in the focused Project panel.
+    pub const LAYER_SETTINGS: &str = "motion.layer.layer_settings";
+    /// Layer > Pre-compose (Cmd/Ctrl+Shift+C): the selected layers.
+    pub const PRE_COMPOSE: &str = "motion.layer.pre_compose";
+    /// File > Import > File (Cmd/Ctrl+I).
+    pub const IMPORT_FILE: &str = "motion.file.import_file";
+    /// File > Import > Multiple Files (Cmd/Ctrl+Alt+I).
+    pub const IMPORT_MULTIPLE: &str = "motion.file.import_multiple_files";
     /// Params `{"to": "forward" | "backward" | "front" | "back"}`.
     pub const ORDER: &str = "motion.order";
     pub const TRIM_COMP: &str = "motion.trim_comp";
     /// Queue the active comp in the Render Queue (AE Cmd/Ctrl+M).
     pub const ADD_TO_RENDER_QUEUE: &str = "motion.add_to_render_queue";
+    /// Toggle the Timeline between layer bars and the Graph Editor (AE Shift+F3).
+    pub const GRAPH_EDITOR: &str = "motion.timeline.graph_editor";
+    /// Animation > Keyframe Interpolation… (AE Cmd/Ctrl+Alt+K).
+    pub const KEY_INTERPOLATION: &str = "motion.anim.keyframe_interpolation";
+    /// Animation > Keyframe Velocity… (AE Cmd/Ctrl+Shift+K).
+    pub const KEY_VELOCITY: &str = "motion.anim.keyframe_velocity";
+    /// Edit > Select Keyframe Label Group ▸ (params `{"scope": "selected_layers" |
+    /// "all_layers" | "visible_selected_layers" | "visible_all_layers"}`).
+    pub const SELECT_KEY_LABEL_GROUP: &str = "motion.edit.select_keyframe_label_group";
     /// Shell clipboard actions (Cmd+C / Cmd+V outside text fields).
     pub const COPY: &str = "edit.copy";
     pub const PASTE: &str = "edit.paste";
@@ -82,11 +106,113 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::REVEAL, "Reveal Animated Properties"),
     (ids::TOGGLE_KEY, "Add or Remove Keyframe at Current Time"),
     (ids::NEW_COMP, "New Composition"),
+    (ids::COMP_SETTINGS, "Composition Settings"),
     (ids::NEW_LAYER, "New"),
+    (ids::LAYER_SETTINGS, "Layer Settings"),
+    (ids::PRE_COMPOSE, "Pre-compose"),
+    (ids::IMPORT_FILE, "Import File"),
+    (ids::IMPORT_MULTIPLE, "Import Multiple Files"),
     (ids::ORDER, "Bring Layer Forward"),
     (ids::TRIM_COMP, "Trim Comp to Work Area"),
     (ids::ADD_TO_RENDER_QUEUE, "Add to Render Queue"),
+    (ids::GRAPH_EDITOR, "Graph Editor"),
+    (ids::KEY_INTERPOLATION, "Keyframe Interpolation"),
+    (ids::KEY_VELOCITY, "Keyframe Velocity"),
+    (ids::SELECT_KEY_LABEL_GROUP, "Select Keyframe Label Group"),
+    // Panel-scoped (`bindings`): handled by the timeline and the viewer. Registered
+    // so the Keyboard Shortcuts window shows a name, not the id (#136).
+    ("timeline.zoom_in", "Zoom In Time"),
+    ("timeline.zoom_out", "Zoom Out Time"),
+    ("viewer.zoom_in", "Zoom In"),
+    ("viewer.zoom_out", "Zoom Out"),
+    ("viewer.fit", "Fit"),
 ];
+
+/// The properties the P / S / R / T / A shortcuts act on, with their English names.
+const TRANSFORM_PROPERTIES: [(&str, &str, &str); 5] = [
+    ("P", "transform:position", "Position"),
+    ("S", "transform:scale", "Scale"),
+    ("R", "transform:rotation", "Rotation"),
+    ("T", "transform:opacity", "Opacity"),
+    ("A", "transform:anchor_point", "Anchor Point"),
+];
+
+/// Variants with fixed parameters: (command, parameters as JSON, English name). A
+/// table rather than `json!` calls keeps the code small (parsed once at startup).
+const VARIANTS: &[(&str, &str, &str)] = &[
+    (ids::STEP, r#"{"frames":-1}"#, "Previous Frame"),
+    (ids::STEP, r#"{"frames":1}"#, "Next Frame"),
+    (ids::STEP, r#"{"frames":-10}"#, "Back 10 Frames"),
+    (ids::STEP, r#"{"frames":10}"#, "Forward 10 Frames"),
+    (ids::EASE, r#"{"mode":"easy_ease"}"#, "Easy Ease"),
+    (ids::EASE, r#"{"mode":"ease_in"}"#, "Easy Ease In"),
+    (ids::EASE, r#"{"mode":"ease_out"}"#, "Easy Ease Out"),
+    ("key.ease", r#"{"mode":"easy_ease"}"#, "Easy Ease"),
+    ("key.ease", r#"{"mode":"ease_in"}"#, "Easy Ease In"),
+    ("key.ease", r#"{"mode":"ease_out"}"#, "Easy Ease Out"),
+    (ids::ORDER, r#"{"to":"forward"}"#, "Bring Layer Forward"),
+    (ids::ORDER, r#"{"to":"backward"}"#, "Send Layer Backward"),
+    (ids::ORDER, r#"{"to":"front"}"#, "Bring Layer to Front"),
+    (ids::ORDER, r#"{"to":"back"}"#, "Send Layer to Back"),
+    (
+        ids::REVEAL,
+        r#"{"what":"animated","add":false}"#,
+        "Reveal Animated Properties",
+    ),
+];
+
+/// Layer kinds by name, for both the UI action and the model command it runs.
+const LAYER_VARIANTS: &[(&str, &str)] = &[
+    (r#"{"kind":"solid"}"#, "New Solid"),
+    (r#"{"kind":"adjustment"}"#, "New Adjustment Layer"),
+    (r#"{"kind":"null"}"#, "New Null Object"),
+    (r#"{"kind":"text"}"#, "New Text Layer"),
+    (r#"{"kind":"camera"}"#, "New Camera"),
+    (r#"{"kind":"light"}"#, "New Light"),
+    (r#"{"kind":"shape"}"#, "New Shape Layer"),
+    (r#"{"kind":"shape","shape":"rect"}"#, "New Rectangle"),
+    (r#"{"kind":"shape","shape":"ellipse"}"#, "New Ellipse"),
+];
+
+/// Names of the variants of motion actions and of the model commands they run, so
+/// the Keyboard Shortcuts window, Edit > Undo and History say which one (#140):
+/// "Back 10 Frames", not four "Next Frame" rows; "Undo New Solid", not "Undo New
+/// Layer". `(registry id, variant)`.
+pub fn variants() -> Vec<(String, CommandVariant)> {
+    let mut v = Vec::new();
+    let mut add = |command: &str, params: serde_json::Value, title: String| {
+        let id = format!("{command}/{params}");
+        v.push((id, CommandVariant::new(command, params, title)));
+    };
+    let parse = |json: &str| serde_json::from_str(json).expect("variant parameters are JSON");
+    for (command, params, title) in VARIANTS {
+        add(command, parse(params), (*title).to_owned());
+    }
+    for (params, title) in LAYER_VARIANTS {
+        add(ids::NEW_LAYER, parse(params), (*title).to_owned());
+        add("layer.create", parse(params), (*title).to_owned());
+    }
+    for (_, attr, name) in TRANSFORM_PROPERTIES {
+        for add_to_shown in [false, true] {
+            let title = if add_to_shown {
+                format!("Add {name} to Shown Properties")
+            } else {
+                format!("Show {name}")
+            };
+            add(
+                ids::REVEAL,
+                json!({ "what": attr, "add": add_to_shown }),
+                title,
+            );
+        }
+        add(
+            ids::TOGGLE_KEY,
+            json!({ "attr": attr }),
+            format!("{name}: Add or Remove Keyframe"),
+        );
+    }
+    v
+}
 
 /// AE shortcuts of the motion workspace, added to the shell's `ae` keymap.
 pub fn bindings() -> KeymapBindings {
@@ -132,7 +258,16 @@ pub fn bindings() -> KeymapBindings {
         b("F2", ids::DESELECT_ALL),
         reveal("U", "animated", false),
         b("Cmd+N", ids::NEW_COMP),
+        b("Cmd+K", ids::COMP_SETTINGS),
+        b("Cmd+Shift+Y", ids::LAYER_SETTINGS),
+        b("Cmd+Shift+C", ids::PRE_COMPOSE),
+        b("Cmd+I", ids::IMPORT_FILE),
+        b("Cmd+Alt+I", ids::IMPORT_MULTIPLE),
+        b("Cmd+Shift+X", ids::TRIM_COMP),
         b("Cmd+M", ids::ADD_TO_RENDER_QUEUE),
+        b("Shift+F3", ids::GRAPH_EDITOR),
+        b("Cmd+Alt+K", ids::KEY_INTERPOLATION),
+        b("Cmd+Shift+K", ids::KEY_VELOCITY),
         layer("Cmd+Y", "solid"),
         layer("Cmd+Alt+Y", "adjustment"),
         layer("Cmd+Alt+Shift+Y", "null"),
@@ -144,13 +279,7 @@ pub fn bindings() -> KeymapBindings {
         order("Cmd+Shift+CloseBracket", "front"),
         order("Cmd+Shift+OpenBracket", "back"),
     ];
-    for (k, attr) in [
-        ("P", "transform:position"),
-        ("S", "transform:scale"),
-        ("R", "transform:rotation"),
-        ("T", "transform:opacity"),
-        ("A", "transform:anchor_point"),
-    ] {
+    for (k, attr, _) in TRANSFORM_PROPERTIES {
         v.push(reveal(k, attr, false));
         v.push(reveal(&format!("Shift+{k}"), attr, true));
         v.push(key(&format!("Alt+Shift+{k}"), attr));
@@ -163,19 +292,68 @@ pub fn bindings() -> KeymapBindings {
     KeymapBindings::new(bae_ui::presets::AE_KEYMAP, v).for_workspace(crate::menus::WORKSPACE)
 }
 
-/// Selected layers, or the layers of the selected keyframes.
-fn target_layers(stage: &bae_model::Stage, s: &crate::session::Session) -> Vec<PrimPath> {
-    if !s.selected_layers.is_empty() {
-        return s.selected_layers.clone();
+/// The comp Composition Settings edits: the one selected in the Project panel
+/// when that panel has focus (AE), otherwise the active comp.
+pub(crate) fn settings_target(cx: &PanelContext<'_>, session: &SharedSession) -> Option<PrimPath> {
+    let s = session.lock();
+    if cx.panel.kind() == "project"
+        && let [item] = s.selected_items.as_slice()
+        && query::comp_info(cx.stage, item).is_some()
+    {
+        return Some(item.clone());
     }
-    let mut out: Vec<PrimPath> = Vec::new();
-    for k in &s.selected_keys {
-        if let Some(l) = query::owning_layer(stage, &k.path)
-            && !out.contains(&l)
+    s.active_comp
+        .clone()
+        .filter(|c| query::comp_info(cx.stage, c).is_some())
+}
+
+/// What Layer Settings edits: the solid item selected in the Project panel
+/// when that panel has focus, otherwise the one selected layer when it has
+/// settings (solid and adjustment layers, cameras, lights).
+pub(crate) fn layer_settings_target(
+    stage: &bae_model::Stage,
+    session: &SharedSession,
+    project_focused: bool,
+) -> Option<PrimPath> {
+    let s = session.lock();
+    if project_focused
+        && let [item] = s.selected_items.as_slice()
+        && bae_motion::solid::solid_info(stage, item).is_some()
+    {
+        return Some(item.clone());
+    }
+    match s.selected_layers.as_slice() {
+        [layer]
+            if bae_motion::solid::layer_solid(stage, layer).is_some()
+                || matches!(
+                    query::layer_kind(stage, layer).as_deref(),
+                    Some("camera" | "light")
+                ) =>
         {
-            out.push(l);
+            Some(layer.clone())
         }
+        _ => None,
     }
+}
+
+/// Selected layers, or the layers of the selected keyframes.
+/// The layers an action applies to: the selected ones (or those of the
+/// selected keys), never locked ones (AE: menu commands do not act on them).
+fn target_layers(stage: &bae_model::Stage, s: &crate::session::Session) -> Vec<PrimPath> {
+    let mut out: Vec<PrimPath> = if !s.selected_layers.is_empty() {
+        s.selected_layers.clone()
+    } else {
+        let mut out: Vec<PrimPath> = Vec::new();
+        for k in &s.selected_keys {
+            if let Some(l) = query::owning_layer(stage, &k.path)
+                && !out.contains(&l)
+            {
+                out.push(l);
+            }
+        }
+        out
+    };
+    out.retain(|l| !query::is_locked(stage, l));
     out
 }
 
@@ -243,6 +421,12 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             common::new_comp(cx, session, None);
             return true;
         }
+        ids::COMP_SETTINGS => {
+            if let Some(comp) = settings_target(cx, session) {
+                crate::dialogs::comp_settings(cx, &comp);
+            }
+            return true;
+        }
         ids::NEW_LAYER => {
             let kind = inv
                 .params
@@ -257,7 +441,45 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             if kind == LayerKind::Text {
                 extra["text"] = json!(bae_ui::tr("Text"));
             }
+            // AE: Solid, Camera and Light Settings first; OK creates the layer.
+            let dialog = match kind {
+                LayerKind::Solid => Some(crate::dialogs::new_solid as fn(&_, &_)),
+                LayerKind::Camera => Some(crate::dialogs::new_camera as fn(&_, &_)),
+                LayerKind::Light => Some(crate::dialogs::new_light as fn(&_, &_)),
+                _ => None,
+            };
+            if let Some(open) = dialog {
+                open(cx, session);
+                return true;
+            }
             common::new_layer(cx, session, kind, extra);
+            return true;
+        }
+        ids::IMPORT_FILE => {
+            crate::import::import_file(cx, session);
+            return true;
+        }
+        ids::IMPORT_MULTIPLE => {
+            crate::import::import_multiple(cx, session);
+            return true;
+        }
+        ids::PRE_COMPOSE => {
+            // The selected layers; locked ones cannot be pre-composed (AE).
+            let layers: Vec<PrimPath> = session
+                .lock()
+                .selected_layers
+                .iter()
+                .filter(|l| !query::is_locked(cx.stage, l))
+                .cloned()
+                .collect();
+            crate::dialogs::precompose(cx, layers);
+            return true;
+        }
+        ids::LAYER_SETTINGS => {
+            let project = cx.panel.kind() == "project";
+            if let Some(target) = layer_settings_target(cx.stage, session, project) {
+                crate::dialogs::layer_settings(cx, session, &target);
+            }
             return true;
         }
         _ => {}
@@ -278,6 +500,7 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 s.play(&info);
             }
         }
+        ids::GRAPH_EDITOR => s.graph_editor = !s.graph_editor,
         ids::GO_START => s.set_time(&info, Time::ZERO),
         ids::GO_END => s.set_time(&info, info.duration),
         ids::STEP => {
@@ -344,11 +567,21 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 }
             }
         }
+        // AE selects the new layers, so the next edit (or the next split
+        // further on) applies to them.
         ids::DUPLICATE if !layers.is_empty() => {
             cx.invoke_with("layer.duplicate", json!({"layers": layers}));
+            s.expect(Pending::NewLayers {
+                comp: info.path.clone(),
+                before: query::comp_layers(stage, &info.path),
+            });
         }
         ids::SPLIT if !layers.is_empty() => {
             cx.invoke_with("layer.split", json!({"layers": layers, "time": now}));
+            s.expect(Pending::NewLayers {
+                comp: info.path.clone(),
+                before: query::comp_layers(stage, &info.path),
+            });
         }
         ids::DELETE => {
             if !keys.is_empty() {
@@ -382,11 +615,51 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 json!({"keys": keys, "interp_out": to}),
             );
         }
+        ids::SELECT_KEY_LABEL_GROUP if !keys.is_empty() => {
+            // The labels of the selected keyframes, on the selected layers or all.
+            let mut labels: Vec<u8> = keys
+                .iter()
+                .filter_map(|k| {
+                    query::attr_spec(stage, &k.path, &k.attr)
+                        .and_then(|a| a.keyframes.get(&k.time))
+                        .map(|kf| kf.label)
+                })
+                .filter(|l| *l != 0)
+                .collect();
+            labels.sort_unstable();
+            labels.dedup();
+            let scope = inv
+                .params
+                .get("scope")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let on: Vec<PrimPath> = if scope.ends_with("all_layers") {
+                query::comp_layers(stage, &info.path)
+            } else {
+                layers.clone()
+            };
+            if !labels.is_empty() {
+                s.selected_keys = crate::timeline::keys_with_labels(stage, &on, &labels);
+            }
+        }
+        ids::KEY_INTERPOLATION if !keys.is_empty() => {
+            s.key_dialog = Some(crate::timeline::KeyDialog::Interpolation(
+                crate::timeline::InterpolationDialog::new(keys),
+            ));
+        }
+        ids::KEY_VELOCITY if !keys.is_empty() => {
+            s.key_dialog = crate::timeline::VelocityDialog::new(stage, keys)
+                .map(crate::timeline::KeyDialog::Velocity);
+        }
         ids::REVERSE_KEYS if keys.len() > 1 => {
             cx.invoke_with("key.reverse", json!({"keys": keys}));
         }
         ids::SELECT_ALL => {
-            s.selected_layers = query::comp_layers(stage, &info.path);
+            // AE: Select All skips locked layers.
+            s.selected_layers = query::comp_layers(stage, &info.path)
+                .into_iter()
+                .filter(|l| !query::is_locked(stage, l))
+                .collect();
         }
         ids::DESELECT_ALL => {
             s.selected_layers.clear();
@@ -535,7 +808,9 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 );
             }
         }
-        _ => {}
+        // This module's actions are handled even when there is nothing to do
+        // (e.g. no keys selected); others go on to their handlers (tools, menus).
+        id => return ACTIONS.iter().any(|(a, _)| *a == id),
     }
     true
 }

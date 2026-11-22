@@ -9,7 +9,7 @@
 | 功能 | 接口 | 命令 |
 |---|---|---|
 | 检查素材：哪些用到、哪些没用到、哪些缺失、用了哪些字体 | `scan`、`collect::collect` | `package.scan` |
-| 打包成单文件 `.baez` | `pack` | `package.pack` |
+| 打包成单文件 `.baez` | `pack` | `package.pack`；命令行 `bae pack` |
 | 收集文件到文件夹（AE 的"收集文件"） | `collect_files` | `package.collect` |
 | 解包成普通 `.bae` 目录 | `unpack` | `package.unpack` |
 | 直接打开 `.baez`，素材从包内读取 | `open_project`、`PackageReader` | — |
@@ -64,7 +64,7 @@
 
 ## 打包后的 `project.json`
 
-包内工程的 `project.json` 多一个 `package` 字段，记录打包工具版本、用到的字体、是否裁片、打包范围：
+包内工程的 `project.json` 保留原工程清单的其他字段（路径映射、桌面应用保存的视图 `view` 等；命令只拿到工程层时从 `project` 位置读清单，`read_manifest`），并多一个 `package` 字段，记录打包工具版本、用到的字体、是否裁片、打包范围：
 
 ```json
 "package": { "tool": "bae-package 0.1.0", "fonts": ["Inter-Regular"], "trimmed": false }

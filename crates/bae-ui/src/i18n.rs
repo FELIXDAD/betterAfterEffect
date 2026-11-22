@@ -78,6 +78,21 @@ pub fn has_translation(en: &str) -> bool {
     t.contains_key(en)
 }
 
+/// The Chinese for `en`, whatever the current language (`None` when there is none).
+/// For tests and tools that check translations without switching the global language.
+pub fn translation(en: &str) -> Option<&'static str> {
+    let t = tables().read().unwrap_or_else(|e| e.into_inner());
+    t.get(en).copied()
+}
+
+/// Every registered (English, Chinese) pair, sorted by the English key.
+pub fn all_pairs() -> Vec<(&'static str, &'static str)> {
+    let t = tables().read().unwrap_or_else(|e| e.into_inner());
+    let mut pairs: Vec<_> = t.iter().map(|(en, zh)| (*en, *zh)).collect();
+    pairs.sort_unstable();
+    pairs
+}
+
 /// Shorthand for [`tr`].
 #[macro_export]
 macro_rules! tr {
@@ -124,6 +139,7 @@ const ZH: &[(&str, &str)] = &[
     ),
     ("Welcome to BAE", "欢迎使用 BAE"),
     ("Close", "关闭"),
+    ("Close Window", "关闭窗口"),
     (
         "What do you do? BAE opens the matching workspace; you can switch any time in the workspace bar.",
         "你主要做什么？BAE 会打开对应的工作区，之后随时可以在工作区栏切换。",
@@ -169,6 +185,9 @@ const ZH: &[(&str, &str)] = &[
     ("Accept All", "全部接受"),
     ("Reject All", "全部拒绝"),
     ("Accept", "接受"),
+    // Proposal commands (bae-agent), shown in Undo, History and Keyboard Shortcuts.
+    ("Accept Proposal", "接受提案"),
+    ("Reject Proposal", "拒绝提案"),
     ("Reject", "拒绝"),
     ("New", "新建"),
     ("Changed", "已修改"),
@@ -223,6 +242,44 @@ const ZH: &[(&str, &str)] = &[
     ("Paragraph", "段落"),
     ("Render Queue", "渲染队列"),
     ("Tools", "工具"),
+    // Accessibility labels (a11y): toolbar, title bar, dock, controls
+    ("Home", "主页"),
+    ("Selection Tool", "选取工具"),
+    ("Hand Tool", "手形工具"),
+    ("Zoom Tool", "缩放工具"),
+    ("Orbit Around Cursor Tool", "绕光标旋转工具"),
+    ("Pan Under Cursor Tool", "在光标下移动工具"),
+    ("Dolly Towards Cursor Tool", "向光标方向推拉镜头工具"),
+    ("Rotation Tool", "旋转工具"),
+    ("Pan Behind (Anchor Point) Tool", "向后平移（锚点）工具"),
+    ("Rectangle Tool", "矩形工具"),
+    ("Cube Tool", "立方体工具"),
+    ("Pen Tool", "钢笔工具"),
+    ("Horizontal Type Tool", "横排文字工具"),
+    ("Brush Tool", "画笔工具"),
+    ("Clone Stamp Tool", "仿制图章工具"),
+    ("Eraser Tool", "橡皮擦工具"),
+    ("Roto Brush Tool", "Roto 笔刷工具"),
+    ("Puppet Position Pin Tool", "人偶位置控点工具"),
+    ("Minimize", "最小化"),
+    ("Zoom", "缩放"),
+    ("Resize Panels", "调整面板大小"),
+    ("Panel Menu", "面板菜单"),
+    ("More Panels", "更多面板"),
+    ("Lock", "锁定"),
+    ("Workspace Menu", "工作区菜单"),
+    ("Time-Vary Stopwatch", "时间变化秒表"),
+    ("Go to Previous Keyframe", "转到上一个关键帧"),
+    (
+        "Add or Remove Keyframe at Current Time",
+        "在当前时间添加或移除关键帧",
+    ),
+    ("Go to Next Keyframe", "转到下一个关键帧"),
+    ("Expand", "展开"),
+    ("Collapse", "折叠"),
+    ("Color", "颜色"),
+    ("Layer “{name}”", "图层“{name}”"),
+    ("Layer {n} “{name}”", "图层 {n}“{name}”"),
     // Common controls
     ("Search", "搜索"),
     ("Reset", "重置"),
@@ -230,6 +287,21 @@ const ZH: &[(&str, &str)] = &[
     ("OK", "确定"),
     ("Cancel", "取消"),
     ("Language", "语言"),
+    // Color Picker (`color_picker`); AE's picker labels H/S/B/R/G/B by letter,
+    // the full names are for screen readers.
+    ("Color Field", "颜色场"),
+    ("Color Slider", "颜色滑块"),
+    ("Original Color", "原始颜色"),
+    ("Hex Color", "十六进制颜色"),
+    ("Eyedropper", "吸管"),
+    ("Only Web Colors", "仅限 Web 颜色"),
+    ("Hue", "色相"),
+    ("Saturation", "饱和度"),
+    ("Brightness", "亮度"),
+    ("Red", "红色"),
+    ("Green", "绿色"),
+    ("Blue", "蓝色"),
+    ("Value", "值"),
 ];
 
 #[cfg(test)]

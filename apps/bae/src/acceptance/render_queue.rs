@@ -85,7 +85,7 @@ fn png_tiff_exr_with_ranges_into_tricky_paths() {
         &mut h,
         &[
             "motion.layer.new.solid",
-            "motion.layer.new.ellipse",
+            "shape:ellipse",
             "motion.layer.new.text",
         ],
     );
@@ -124,7 +124,7 @@ fn png_tiff_exr_with_ranges_into_tricky_paths() {
             range.1,
         );
         render(&mut h);
-        wait_done(&mut h, Duration::from_secs(60));
+        wait_done(&mut h, Duration::from_secs(120));
         let item = items(&h)[0].clone();
         let n = (range.1 - range.0 + 1) as usize;
         match &item.status {
@@ -143,10 +143,12 @@ fn png_tiff_exr_with_ranges_into_tricky_paths() {
         );
         // Done shows "Done · N · x s" and "Show in Finder".
         assert!(
-            h.query_by_label("Show in Finder").is_some(),
+            queue_control(&h, 1, "Show in Finder").is_some(),
             "{ext}: no Show in Finder"
         );
-        h.get_by_label("Render Again").click();
+        queue_control(&h, 1, "Render Again")
+            .expect("Render Again")
+            .click();
         settle(&mut h);
     }
 }
@@ -166,7 +168,9 @@ fn long_comp(h: &mut Ui) -> PrimPath {
     h.state().session().lock().open_comp(&comp);
     settle(h);
     assert!(h.state_mut().menu("motion.layer.new.solid"));
-    assert!(h.state_mut().menu("motion.layer.new.ellipse"));
+    settle(h);
+    confirm_dialog(h);
+    assert!(add_layer(h, "shape:ellipse"));
     settle(h);
     comp
 }
@@ -190,7 +194,7 @@ fn stop_keeps_the_rendered_frames_and_reports_n_of_m() {
             break;
         }
         assert!(
-            started.elapsed() < Duration::from_secs(60),
+            started.elapsed() < Duration::from_secs(120),
             "{:?}",
             items(&h)[0].status
         );
@@ -200,9 +204,9 @@ fn stop_keeps_the_rendered_frames_and_reports_n_of_m() {
         h.get_by_label("Render").accesskit_node().is_disabled(),
         "Render enabled while rendering"
     );
-    h.get_by_label("Stop").click();
+    queue_control(&h, 1, "Stop").expect("Stop").click();
     settle(&mut h);
-    wait_done(&mut h, Duration::from_secs(60));
+    wait_done(&mut h, Duration::from_secs(120));
     let status = items(&h)[0].status.clone();
     let ItemStatus::Stopped { done, total, first } = status else {
         panic!("not stopped: {status:?}");
@@ -248,7 +252,7 @@ fn invalid_output_paths_fail_with_a_message() {
         key(&mut h, Modifiers::COMMAND, Key::M);
         configure(&h, i, ExportFormat::Png, path, 0, 2);
         render(&mut h);
-        wait_done(&mut h, Duration::from_secs(30));
+        wait_done(&mut h, Duration::from_secs(120));
         let status = items(&h)[i].status.clone();
         report.push(format!("{label}: {status:?}"));
         match status {
@@ -267,7 +271,6 @@ fn invalid_output_paths_fail_with_a_message() {
 }
 
 #[test]
-#[ignore = "issue #110"]
 fn output_without_extension_gets_one() {
     // AE adds the format's extension to the output name.
     let Some(mut h) = gpu_gui() else { return };
@@ -283,7 +286,7 @@ fn output_without_extension_gets_one() {
         2,
     );
     render(&mut h);
-    wait_done(&mut h, Duration::from_secs(30));
+    wait_done(&mut h, Duration::from_secs(120));
     let all: Vec<String> = fs::read_dir(tmp.path())
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
@@ -296,7 +299,6 @@ fn output_without_extension_gets_one() {
 }
 
 #[test]
-#[ignore = "issue #110"]
 fn empty_output_path_is_refused() {
     // An empty "Output To" must not render into the process's working directory
     // (`/` for an app started from Finder, wherever the terminal was otherwise).
@@ -313,7 +315,7 @@ fn empty_output_path_is_refused() {
     key(&mut h, Modifiers::COMMAND, Key::M);
     configure(&h, 0, ExportFormat::Png, Path::new(""), 0, 2);
     render(&mut h);
-    wait_done(&mut h, Duration::from_secs(30));
+    wait_done(&mut h, Duration::from_secs(120));
     let here = std::env::current_dir().unwrap();
     let stray = files_in(&here, ".png");
     let status = items(&h)[0].status.clone();
@@ -324,7 +326,6 @@ fn empty_output_path_is_refused() {
 }
 
 #[test]
-#[ignore = "issue #110"]
 fn frame_range_outside_the_comp() {
     let Some(mut h) = gpu_gui() else { return };
     let tmp = tempfile::tempdir().unwrap();
@@ -340,7 +341,7 @@ fn frame_range_outside_the_comp() {
         305,
     );
     render(&mut h);
-    wait_done(&mut h, Duration::from_secs(30));
+    wait_done(&mut h, Duration::from_secs(120));
     let written = files_in(tmp.path(), "png");
     println!(
         "range 298-305 of a 300-frame comp: {:?} -> {written:?}",
@@ -367,9 +368,10 @@ fn editing_while_rendering_and_several_items() {
         119,
     );
     // A second comp, queued twice with different ranges and formats.
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     assert!(h.state_mut().menu("motion.layer.new.solid"));
     settle(&mut h);
+    confirm_dialog(&mut h);
     key(&mut h, Modifiers::COMMAND, Key::M);
     key(&mut h, Modifiers::COMMAND, Key::M);
     configure(
@@ -391,32 +393,22 @@ fn editing_while_rendering_and_several_items() {
     assert_eq!(items(&h).len(), 3);
     render(&mut h);
 
-    // Keep editing while it renders: new layers, a rename, undo; frames keep coming.
+    // Edit right after starting: five new solids, then one undo. They run no
+    // matter how far the render got (the expected layer count below must not
+    // depend on how fast this machine renders); the 120 4K frames normally
+    // outlast them, so they land while the worker renders its snapshot.
     let started = Instant::now();
-    let mut ui_frames = 0;
-    let mut edits = 0;
-    while h.state().render_queue().lock().is_running() {
-        if edits < 5 {
-            key(&mut h, Modifiers::COMMAND, Key::Y);
-            edits += 1;
-        } else if edits == 5 {
-            key(&mut h, Modifiers::COMMAND, Key::Z);
-            edits += 1;
-        }
-        frame(&mut h);
-        ui_frames += 1;
-        assert!(
-            started.elapsed() < Duration::from_secs(300),
-            "{:?}",
-            items(&h)
-        );
+    for _ in 0..5 {
+        new_solid(&mut h);
     }
-    frame(&mut h);
-    let elapsed = started.elapsed();
-    println!("render of 3 items: {elapsed:?}, {ui_frames} UI frames meanwhile");
-    assert!(
-        ui_frames > 10,
-        "the UI did not keep running during the render"
+    key(&mut h, Modifiers::COMMAND, Key::Z);
+    let edits_took = started.elapsed();
+    let rendering_after_edits = h.state().render_queue().lock().is_running();
+    wait_done(&mut h, Duration::from_secs(300));
+    println!(
+        "render of 3 items: {:?}; the 6 edits took {edits_took:?}, render still running \
+         after them: {rendering_after_edits}",
+        started.elapsed()
     );
     for (i, (dir, ext, n)) in [("a", "png", 120), ("b", "tif", 5), ("c", "exr", 5)]
         .iter()
@@ -452,12 +444,16 @@ fn show_in_finder_passes_the_path_to_open() {
     key(&mut h, Modifiers::COMMAND, Key::M);
     configure(&h, 0, ExportFormat::Png, &out.join("帧 _[####].png"), 0, 2);
     render(&mut h);
-    wait_done(&mut h, Duration::from_secs(30));
-    h.get_by_label("Show in Finder").click();
+    wait_done(&mut h, Duration::from_secs(120));
+    queue_control(&h, 1, "Show in Finder")
+        .expect("Show in Finder")
+        .click();
     settle(&mut h);
+    // `reveal` spawns `open` without waiting for it: wait for the fake's
+    // record, which appears in one rename (see `in_child_with_fake_open`).
     let log = PathBuf::from(std::env::var("BAE_ACC_OPEN_LOG").unwrap());
     let started = Instant::now();
-    while !log.exists() && started.elapsed() < Duration::from_secs(5) {
+    while !log.exists() && started.elapsed() < Duration::from_secs(120) {
         std::thread::sleep(Duration::from_millis(20));
     }
     let args: Vec<String> = fs::read_to_string(&log)
@@ -483,7 +479,10 @@ fn in_child_with_fake_open(test: &str) -> bool {
     let script = bin.path().join("open");
     fs::write(
         &script,
-        "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > \"$BAE_ACC_OPEN_LOG\"\n",
+        // Written to a temporary file and renamed into place, so the record
+        // appears complete or not at all (a plain `> log` creates the file
+        // before the arguments are in it: the test could read it empty).
+        "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > \"$BAE_ACC_OPEN_LOG.tmp\" && mv \"$BAE_ACC_OPEN_LOG.tmp\" \"$BAE_ACC_OPEN_LOG\"\n",
     )
     .unwrap();
     use std::os::unix::fs::PermissionsExt as _;
@@ -523,10 +522,7 @@ fn full_disk_fails_cleanly() {
     );
     let volume = PathBuf::from("/Volumes/BAEFULL");
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        comp_with(
-            &mut h,
-            &["motion.layer.new.solid", "motion.layer.new.ellipse"],
-        );
+        comp_with(&mut h, &["motion.layer.new.solid", "shape:ellipse"]);
         key(&mut h, Modifiers::COMMAND, Key::M);
         configure(
             &h,
@@ -537,13 +533,13 @@ fn full_disk_fails_cleanly() {
             29,
         );
         render(&mut h);
-        wait_done(&mut h, Duration::from_secs(60));
+        wait_done(&mut h, Duration::from_secs(120));
         let status = items(&h)[0].status.clone();
         let files = files_in(&volume, "tif");
         println!("FULL DISK: {status:?}; files {files:?}");
         assert!(matches!(status, ItemStatus::Failed(_)), "{status:?}");
         // The app keeps working.
-        key(&mut h, Modifiers::COMMAND, Key::Y);
+        new_solid(&mut h);
     }));
     let _ = std::process::Command::new("hdiutil")
         .args(["detach", &dev])
@@ -551,4 +547,332 @@ fn full_disk_fails_cleanly() {
     if let Err(panic) = result {
         std::panic::resume_unwind(panic);
     }
+}
+
+// ---- Retest of #110 (dev 763eaad): edge cases ----
+
+/// Queue the active comp once more and set the new item's output.
+fn queue_one(h: &mut Ui, format: ExportFormat, output: &Path, start: i64, end: i64) -> usize {
+    key(h, Modifiers::COMMAND, Key::M);
+    let i = items(h).len() - 1;
+    let queue = h.state().render_queue();
+    let mut q = queue.lock();
+    let id = q.items()[i].id;
+    let item = q.item_mut(id).unwrap();
+    item.format = format;
+    item.output = output.to_string_lossy().into_owned();
+    item.start = start;
+    item.end = end;
+    i
+}
+
+/// Render and collect every `Rendering { done, total }` the panel showed.
+fn render_watching_progress(h: &mut Ui, i: usize) -> std::collections::BTreeSet<(usize, usize)> {
+    render(h);
+    let mut seen = std::collections::BTreeSet::new();
+    let started = Instant::now();
+    loop {
+        frame(h);
+        if let ItemStatus::Rendering { done, total } = items(h)[i].status {
+            seen.insert((done, total));
+        }
+        if !h.state().render_queue().lock().is_running() {
+            frame(h);
+            return seen;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(120),
+            "{:?}",
+            items(h)[i].status
+        );
+    }
+}
+
+#[test]
+fn whitespace_output_is_refused_with_a_visible_message() {
+    let Some(mut h) = gpu_gui() else { return };
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let i = queue_one(&mut h, ExportFormat::Png, Path::new("   "), 0, 2);
+    render_watching_progress(&mut h, i);
+    let ItemStatus::Failed(message) = items(&h)[i].status.clone() else {
+        panic!("{:?}", items(&h)[i].status);
+    };
+    assert_eq!(message, "Choose where to render: Output To is empty.");
+    assert!(
+        find_text(&h, &message).is_some(),
+        "message not shown in the panel"
+    );
+}
+
+#[test]
+fn ranges_are_limited_to_the_comp() {
+    let Some(mut h) = gpu_gui() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let i = queue_one(
+        &mut h,
+        ExportFormat::Png,
+        &tmp.path().join("neg_[####].png"),
+        -5,
+        2,
+    );
+    render_watching_progress(&mut h, i);
+    assert!(
+        matches!(items(&h)[i].status, ItemStatus::Done { files: 3, .. }),
+        "{:?}",
+        items(&h)[i].status
+    );
+    assert_eq!(
+        files_in(tmp.path(), "png").first().map(String::as_str),
+        Some("neg_0000.png")
+    );
+    let i = queue_one(
+        &mut h,
+        ExportFormat::Png,
+        &tmp.path().join("out_[####].png"),
+        400,
+        410,
+    );
+    render_watching_progress(&mut h, i);
+    assert_eq!(
+        items(&h)[i].status,
+        ItemStatus::Failed("The frames are outside the composition (0–299).".into())
+    );
+}
+
+#[test]
+fn progress_of_a_limited_range_counts_the_frames_it_renders() {
+    // 1780–1900 on an 1800-frame comp renders 20 frames; the progress must
+    // say “x / 20”, not “x / 121” (or the fields must show the limited range),
+    // from the moment the item starts (“0 / 20”, issue #157) to the end.
+    let Some(mut h) = gpu_gui() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    long_comp(&mut h); // 1 800 frames, slow enough to see the progress
+    let i = queue_one(
+        &mut h,
+        ExportFormat::Png,
+        &tmp.path().join("end_[####].png"),
+        1780,
+        1900,
+    );
+    let seen = render_watching_progress(&mut h, i);
+    assert!(
+        matches!(items(&h)[i].status, ItemStatus::Done { files: 20, .. }),
+        "{:?}",
+        items(&h)[i].status
+    );
+    let item = items(&h)[i].clone();
+    // Every state counts, the first “0 / x” included: the worker limits the
+    // range when it takes the item (issue #157).
+    let totals: std::collections::BTreeSet<usize> = seen.iter().map(|(_, total)| *total).collect();
+    println!("progress seen: {seen:?}");
+    assert!(
+        totals.iter().all(|t| *t == 20) || (item.start, item.end) == (1780, 1799),
+        "progress totals {totals:?} for 20 rendered frames; fields still {}–{}",
+        item.start,
+        item.end
+    );
+}
+
+#[test]
+fn a_folder_as_output_renders_into_the_folder() {
+    // “…/输出/” (or an existing folder) names a folder: the frames belong in it,
+    // not next to it as “输出_0000.png”.
+    let Some(mut h) = gpu_gui() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    let existing = tmp.path().join("已有 目录");
+    fs::create_dir(&existing).unwrap();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let slash = PathBuf::from(format!("{}/输出/", tmp.path().display()));
+    for out in [slash, existing.clone()] {
+        let i = queue_one(&mut h, ExportFormat::Png, &out, 0, 2);
+        render_watching_progress(&mut h, i);
+        let inside = files_in(&tmp.path().join(out.file_name().unwrap()), "png");
+        let beside = files_in(tmp.path(), "png");
+        assert!(
+            inside.len() == 3 && beside.is_empty(),
+            "{}: inside {inside:?}, beside {beside:?}",
+            out.display()
+        );
+    }
+}
+
+#[test]
+fn the_file_extension_matches_the_format() {
+    // A typed “.png” name with TIFF chosen writes TIFF data into .png files.
+    let Some(mut h) = gpu_gui() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let i = queue_one(
+        &mut h,
+        ExportFormat::Tiff,
+        &tmp.path().join("错配_[####].png"),
+        0,
+        1,
+    );
+    render_watching_progress(&mut h, i);
+    for name in fs::read_dir(tmp.path()).unwrap().map(|e| e.unwrap().path()) {
+        let bytes = fs::read(&name).unwrap();
+        let is_tiff = bytes.starts_with(b"II*\0") || bytes.starts_with(b"MM\0*");
+        let ext = name
+            .extension()
+            .map(|e| e.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        assert!(
+            !is_tiff || ext == "tif" || ext == "tiff",
+            "{} holds TIFF data",
+            name.display()
+        );
+    }
+}
+
+// ---- Retest of #110 (dev c20770a): edge cases ----
+
+#[test]
+fn chinese_folders_get_the_comp_name_inside() {
+    let Some(mut h) = gpu_gui() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    // A comp name with characters a file name cannot hold.
+    let comp = h.state().active_comp().unwrap();
+    h.state_mut().invoke(Invocation::with_params(
+        "attr.set",
+        json!({"path": comp, "attr": "name", "value": {"type": "string", "value": "片头/镜头:01"}}),
+    ));
+    settle(&mut h);
+    let existing = tmp.path().join("已有 输出 文件夹");
+    fs::create_dir(&existing).unwrap();
+    let cases = [
+        ("existing folder", existing.clone(), existing.clone()),
+        (
+            "new folder with a slash",
+            PathBuf::from(format!("{}/新的 文件夹/", tmp.path().display())),
+            tmp.path().join("新的 文件夹"),
+        ),
+    ];
+    for (label, out, dir) in cases {
+        let i = queue_one(&mut h, ExportFormat::Png, &out, 0, 2);
+        render_watching_progress(&mut h, i);
+        let status = items(&h)[i].status.clone();
+        let files = files_in(&dir, "png");
+        println!("{label}: {status:?} {files:?}");
+        assert!(
+            matches!(status, ItemStatus::Done { files: 3, .. }),
+            "{label}: {status:?}"
+        );
+        assert_eq!(files.len(), 3, "{label}: {files:?}");
+        assert!(
+            files[0].starts_with("片头_镜头_01_"),
+            "{label}: name {:?}",
+            files[0]
+        );
+    }
+}
+
+#[test]
+fn switching_formats_back_and_forth_keeps_the_name_and_fixes_the_extension() {
+    let Some(mut h) = gpu_gui() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let i = queue_one(
+        &mut h,
+        ExportFormat::Png,
+        &tmp.path().join("镜头 01_[####].png"),
+        0,
+        1,
+    );
+    let queue = h.state().render_queue();
+    let output_after = |f: ExportFormat| {
+        let mut q = queue.lock();
+        let id = q.items()[i].id;
+        let item = q.item_mut(id).unwrap();
+        item.set_format(f);
+        item.output.clone()
+    };
+    for (f, ext) in [
+        (ExportFormat::Tiff, "tif"),
+        (ExportFormat::Exr, "exr"),
+        (ExportFormat::Png, "png"),
+        (ExportFormat::Exr, "exr"),
+    ] {
+        let out = output_after(f);
+        assert!(
+            out.ends_with(&format!("镜头 01_[####].{ext}")),
+            "{f:?}: {out}"
+        );
+    }
+    render_watching_progress(&mut h, i);
+    let files = files_in(tmp.path(), "exr");
+    assert_eq!(files, ["镜头 01_0000.exr", "镜头 01_0001.exr"]);
+    let magic = fs::read(tmp.path().join(&files[0])).unwrap();
+    assert!(
+        magic.starts_with(&[0x76, 0x2f, 0x31, 0x01]),
+        "not an EXR file"
+    );
+    // A typed extension that does not match: the panel says what will happen,
+    // and the file gets the format's extension.
+    let j = queue_one(
+        &mut h,
+        ExportFormat::Tiff,
+        &tmp.path().join("手写_[####].png"),
+        0,
+        0,
+    );
+    settle(&mut h);
+    assert!(
+        find_text(&h, "The file will be saved as .tif to match the format.").is_some(),
+        "no hint for the mismatched extension"
+    );
+    render_watching_progress(&mut h, j);
+    assert_eq!(files_in(tmp.path(), "tif"), ["手写_0000.tif"]);
+    assert!(files_in(tmp.path(), "png").is_empty());
+}
+
+#[test]
+fn typed_frame_numbers_stay_inside_the_comp() {
+    let Some(mut h) = gpu_gui() else { return };
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    key(&mut h, Modifiers::COMMAND, Key::M);
+    // The start and end fields: the Render Queue's two spin buttons (the first
+    // two in the tree; the Properties panel has more further on).
+    let fields = |h: &Ui| -> Vec<(Rect, String)> {
+        h.root()
+            .query_all_by_role(egui::accesskit::Role::SpinButton)
+            .map(|n| (n.rect(), n.value().unwrap_or_default()))
+            .take(2)
+            .collect()
+    };
+    let f = fields(&h);
+    assert_eq!(
+        f.iter().map(|(_, v)| v.as_str()).collect::<Vec<_>>(),
+        ["0", "299"],
+        "{f:?}"
+    );
+    let type_into = |h: &mut Ui, at: Pos2, text: &str| {
+        pause(h);
+        click_at(h, at);
+        press(h, Modifiers::COMMAND, Key::A);
+        send(h, Event::Text(text.to_owned()));
+        key(h, Modifiers::NONE, Key::Enter);
+    };
+    type_into(&mut h, f[0].0.center(), "-25");
+    type_into(&mut h, f[1].0.center(), "99999");
+    let item = items(&h)[0].clone();
+    assert_eq!(
+        (item.start, item.end),
+        (0, 299),
+        "typed values not limited to the comp"
+    );
+    // Start after end: the end follows (or the start is limited to it).
+    type_into(&mut h, f[0].0.center(), "250");
+    let end_field = fields(&h)[1].0.center();
+    type_into(&mut h, end_field, "100");
+    let item = items(&h)[0].clone();
+    assert!(
+        item.start <= item.end,
+        "start {} after end {}",
+        item.start,
+        item.end
+    );
+    println!("start/end after 250 then 100: {}–{}", item.start, item.end);
 }

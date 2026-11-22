@@ -8,22 +8,12 @@ use bae_color::{
     ColorOp, ColorSpace, ColorTransform, GpuSnippet, Interpolation, Lut1d, Lut3d, LutDimension,
     TransferFunction, builtin,
 };
+use bae_gpu::GpuContext;
 use bae_gpu::wgpu;
-use bae_gpu::{GpuContext, GpuContextDescriptor, GpuError};
 use wgpu::util::DeviceExt;
 
 fn context() -> Option<Arc<GpuContext>> {
-    match GpuContext::new_headless(GpuContextDescriptor::default().with_env()) {
-        Ok(ctx) => Some(ctx),
-        Err(error @ GpuError::NoAdapter { .. }) => {
-            if std::env::var_os("BAE_REQUIRE_GPU").is_some_and(|v| v == "1") {
-                panic!("BAE_REQUIRE_GPU=1 but {error}");
-            }
-            eprintln!("skipping GPU test: {error}");
-            None
-        }
-        Err(error) => panic!("GPU context creation failed: {error}"),
-    }
+    bae_gpu::testing::shared_context()
 }
 
 /// Runs `snippet` over `input` (RGBA) in a compute shader.

@@ -6,10 +6,16 @@
 //!
 //! ```text
 //! layer content (solid / Source / nested Composite)
-//!   → masks (Mask, reserved) → effects (Effect …) ─┐
+//!   → masks (Mask) → effects (Effect …) ───────────┐
 //!                                                  ├→ LayerOp in the parent Composite:
 //! track matte layer → matte Composite ─────────────┘   transform · opacity · matte · blend
 //! ```
+//!
+//! Masks: a [`MaskNode`] computes the layer's combined mask in layer space. Without
+//! effects the layer op samples it while drawing (no extra pass over the layer);
+//! with effects a one-op layer-space Composite applies it before the first effect.
+//! The masks' support (where the result can be non-zero) shrinks the layer's
+//! bounds, so a small mask on a large layer draws only its own area.
 //!
 //! **ROI negotiation.** Every node has a `rect`: the part of its output that is
 //! actually needed. The root composite needs the request ROI; a layer op needs the
@@ -43,6 +49,8 @@ use crate::geom::{IRect, Rect, is_invertible, scale_affine};
 use crate::input::{
     CustomContent, FootageRef, LayerContent, RenderComp, RenderEffect, RenderLayer,
 };
+use crate::mask::MaskStack;
+pub use crate::mask::{Expansion, MaskEdge, MaskNode, MaskRaster};
 use crate::request::RenderRequest;
 use crate::source::{LayerSource, SourceRequest};
 
@@ -131,6 +139,8 @@ pub enum NodeKind {
     Source(SourceNode),
     /// An effect applied to its input.
     Effect(EffectNode),
+    /// A layer's masks combined into one coverage image (layer space).
+    Mask(MaskNode),
 }
 
 impl NodeKind {
@@ -145,10 +155,13 @@ impl NodeKind {
                     if let Some(m) = &op.matte {
                         f(m.node);
                     }
+                    if let Some(m) = &op.mask {
+                        f(m.node);
+                    }
                 }
             }
             NodeKind::Effect(e) => f(e.input),
-            NodeKind::Fill(_) | NodeKind::Source(_) => {}
+            NodeKind::Fill(_) | NodeKind::Source(_) | NodeKind::Mask(_) => {}
         }
     }
 
@@ -159,6 +172,7 @@ impl NodeKind {
             NodeKind::Fill(_) => "fill",
             NodeKind::Source(_) => "source",
             NodeKind::Effect(_) => "effect",
+            NodeKind::Mask(_) => "mask",
         }
     }
 }
@@ -194,6 +208,8 @@ pub struct LayerOp {
     pub preserve_transparency: bool,
     /// Track matte image (composite space, same units as the composite).
     pub matte: Option<MatteRef>,
+    /// Mask image (input's layer space).
+    pub mask: Option<MaskRef>,
     /// Destination region in composite texels (clipped to the composite rect).
     pub bounds: IRect,
     /// The layer's content bounds in input-space pixels (anti-aliased edges).
@@ -221,6 +237,15 @@ pub struct MatteRef {
     pub node: NodeId,
     /// How the matte is read.
     pub mode: TrackMatteMode,
+}
+
+/// A layer's mask input.
+#[derive(Clone, Copy, Debug)]
+pub struct MaskRef {
+    /// The [`MaskNode`].
+    pub node: NodeId,
+    /// The draw multiplies alpha by `value[0] + value[1] · sample`.
+    pub value: [f32; 2],
 }
 
 /// A solid rendered into an image.
@@ -518,7 +543,16 @@ impl Builder<'_> {
             purpose: self.purpose,
             shutter: comp.shutter,
         };
-        let mut bounds_chain = vec![units(&content_rect, scale)];
+        // Masks only remove pixels: where they can leave any bounds the layer.
+        let masks = MaskStack::new(&layer.masks);
+        let visible = match masks.as_ref().and_then(MaskStack::support) {
+            Some(support) => crate::mask::intersect(&content_rect, &support),
+            None => content_rect,
+        };
+        if visible.is_empty() {
+            return Ok(None);
+        }
+        let mut bounds_chain = vec![units(&visible, scale)];
         for (effect, instance) in &effects {
             let params = frame.params(instance);
             let prev = *bounds_chain.last().unwrap_or(&IRect::EMPTY);
@@ -582,12 +616,15 @@ impl Builder<'_> {
                 layer.path, layer.blend_mode
             ));
         }
-        if !layer.masks.is_empty() {
-            self.warn(format!("{}: masks are not rendered yet", layer.path));
-        }
+        let has_effects = !effects.is_empty();
+        let mask = masks
+            .as_ref()
+            .map(|stack| self.mask(layer, stack, roi, scale, has_effects, content_rect));
 
         let mut input = match content {
             Content::Solid { color, rect } => OpInput::Solid { color, rect },
+            // The masked layer-space composite draws the solid itself.
+            Content::Fill { color, rect } if mask.is_some() => OpInput::Solid { color, rect },
             Content::Fill { color, rect } => {
                 let key = hash_of(&(
                     "fill",
@@ -640,6 +677,13 @@ impl Builder<'_> {
                 OpInput::Image(self.composite(&nested, roi, scale, depth + 1, true)?)
             }
         };
+        let mut op_mask = mask;
+        if let Some(m) = mask
+            && has_effects
+        {
+            input = self.masked(layer, input, m, roi, scale, content_rect);
+            op_mask = None;
+        }
         for (i, (effect, instance)) in effects.into_iter().enumerate() {
             let OpInput::Image(input_id) = input else {
                 unreachable!("solids with effects are planned as fills")
@@ -679,8 +723,120 @@ impl Builder<'_> {
             blend,
             preserve_transparency: layer.preserve_transparency,
             matte,
+            mask: op_mask,
             bounds,
             content: content_px,
+        }))
+    }
+
+    /// Plans the mask node of `layer` for its content ROI `roi` (layer texels at
+    /// `scale`). With effects the mask is computed at the effects' resolution;
+    /// otherwise at the layer's density on screen, so mask edges stay sharp when
+    /// the layer is scaled up (and cheap when it is scaled down).
+    fn mask(
+        &mut self,
+        layer: &RenderLayer,
+        stack: &MaskStack<'_>,
+        roi: IRect,
+        scale: f64,
+        has_effects: bool,
+        content: Rect,
+    ) -> MaskRef {
+        let roi_px = Rect::new(
+            f64::from(roi.x0) * scale,
+            f64::from(roi.y0) * scale,
+            f64::from(roi.x1) * scale,
+            f64::from(roi.y1) * scale,
+        )
+        .round_out();
+        let ps = if has_effects {
+            scale
+        } else {
+            // Whole texels per layer pixel (or layer pixels per texel), so mask
+            // texel edges fall on the layer's pixel grid.
+            let density = source_density(&layer.transform, scale, roi_px);
+            if density >= 1.0 {
+                1.0 / (density - 1e-6).ceil()
+            } else {
+                (1.0 / density + 1e-6).floor().max(1.0)
+            }
+        };
+        let region = roi_px.inflate((2.0 * ps).ceil() as i32);
+        // Raster layers feather inside their frame only (AE-CMP-041); vector
+        // content (shapes, text) is continuously rasterised and has no frame.
+        let frame = (!matches!(layer.content, LayerContent::Custom(_))).then_some(content);
+        let mut h = FxHasher::default();
+        "mask".hash(&mut h);
+        layer.path.hash(&mut h);
+        stack.hash_into(&mut h);
+        region.hash(&mut h);
+        ps.to_bits().hash(&mut h);
+        frame.map(|f| rect_bits(&f)).hash(&mut h);
+        let key = h.finish();
+        let value = stack.output_value();
+        if let Some(&node) = self.dedup.get(&key) {
+            return MaskRef { node, value };
+        }
+        let node = stack.plan(&layer.path, region, ps, frame);
+        let pixel_scale = node.pixel_scale;
+        let node = self.push(Node {
+            kind: NodeKind::Mask(node),
+            rect: units(&region.to_rect(), pixel_scale),
+            pixel_scale,
+            key,
+            cacheable: true,
+        });
+        MaskRef { node, value }
+    }
+
+    /// `input` with `mask` applied, as a layer-space image covering `roi` (the
+    /// input of the layer's first effect).
+    fn masked(
+        &mut self,
+        layer: &RenderLayer,
+        input: OpInput,
+        mask: MaskRef,
+        roi: IRect,
+        scale: f64,
+        content: Rect,
+    ) -> OpInput {
+        let mut h = FxHasher::default();
+        "masked".hash(&mut h);
+        match &input {
+            OpInput::Image(id) => self.nodes[id.index()].key.hash(&mut h),
+            OpInput::Solid { color, rect } => {
+                color.map(f32::to_bits).hash(&mut h);
+                rect_bits(rect).hash(&mut h);
+            }
+        }
+        self.nodes[mask.node.index()].key.hash(&mut h);
+        mask.value.map(f32::to_bits).hash(&mut h);
+        roi.hash(&mut h);
+        scale.to_bits().hash(&mut h);
+        self.clamp.hash(&mut h);
+        let op = LayerOp {
+            layer: layer.path.clone(),
+            input,
+            transform: DAffine2::IDENTITY,
+            opacity: 1.0,
+            blend: BlendMode::Normal,
+            preserve_transparency: false,
+            matte: None,
+            mask: Some(mask),
+            bounds: roi,
+            content,
+        };
+        OpInput::Image(self.push(Node {
+            kind: NodeKind::Composite(CompositeNode {
+                prim: layer.path.clone(),
+                time: layer.time,
+                ops: vec![op],
+                clamp: self.clamp,
+            }),
+            rect: roi,
+            pixel_scale: scale,
+            key: h.finish(),
+            cacheable: false,
         }))
     }
 

@@ -12,6 +12,8 @@ use egui::{
     TextFormat, Ui, Vec2, Widget, pos2, vec2,
 };
 
+use crate::a11y::Accessible as _;
+use crate::i18n::tr;
 use crate::icons::{self, Icon};
 use crate::theme::{self, color};
 
@@ -25,6 +27,8 @@ pub struct HotNumber<'a> {
     range: RangeInclusive<f64>,
     width: Option<f32>,
     font: FontId,
+    /// Accessibility name (the property, e.g. "Position X").
+    label: &'a str,
 }
 
 impl<'a> HotNumber<'a> {
@@ -37,7 +41,14 @@ impl<'a> HotNumber<'a> {
             range: f64::NEG_INFINITY..=f64::INFINITY,
             width: None,
             font: theme::body(),
+            label: "",
         }
+    }
+
+    /// What the number is, for screen readers (the property name, translated).
+    pub fn label(mut self, label: &'a str) -> Self {
+        self.label = label;
+        self
     }
 
     /// Value change per point dragged (before modifiers).
@@ -82,6 +93,9 @@ impl<'a> HotNumber<'a> {
 #[derive(Clone, Default)]
 struct HotState {
     editing: Option<String>,
+    /// The text field appears this frame and takes the focus then (focusing an
+    /// id that is not drawn yet leaves accesskit with a focus outside its tree).
+    focus: bool,
     /// Sub-step drag remainder so slow drags still add up.
     carry: f64,
 }
@@ -102,6 +116,9 @@ impl Widget for HotNumber<'_> {
                 .margin(vec2(1.0, 0.0))
                 .text_color(color::TEXT_STRONG);
             let mut resp = ui.add(edit);
+            if std::mem::take(&mut state.focus) {
+                resp.request_focus();
+            }
             let enter = ui.input(|i| i.key_pressed(Key::Enter));
             let escape = ui.input(|i| i.key_pressed(Key::Escape));
             if escape {
@@ -142,6 +159,8 @@ impl Widget for HotNumber<'_> {
             .max(galley.size().x + 3.0)
             .max(8.0);
         let (rect, mut resp) = ui.allocate_exact_size(vec2(width, height), Sense::click_and_drag());
+        let spoken = format!("{text}{}", self.suffix);
+        resp = resp.labeled_value(egui::WidgetType::DragValue, self.label, &spoken);
         let resp_hover = resp.hovered() || resp.dragged();
         if resp_hover {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
@@ -174,7 +193,8 @@ impl Widget for HotNumber<'_> {
         }
         if resp.clicked() {
             state.editing = Some(text.clone());
-            ui.memory_mut(|m| m.request_focus(id.with("edit")));
+            state.focus = true;
+            ui.ctx().request_repaint();
         }
         ui.data_mut(|d| d.insert_temp(id, state));
 
@@ -234,11 +254,22 @@ pub fn eval(s: &str) -> Option<f64> {
 
 /// Stopwatch toggle that enables keyframing for a property.
 pub fn stopwatch(ui: &mut Ui, on: &mut bool) -> Response {
+    stopwatch_for(ui, on, "")
+}
+
+/// [`stopwatch`] of the property `name` ("Layer “Solid 1” · Position"), so
+/// screen readers tell the stopwatches apart.
+pub fn stopwatch_for(ui: &mut Ui, on: &mut bool, name: &str) -> Response {
     let (rect, mut resp) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::click());
     if resp.clicked() {
         *on = !*on;
         resp.mark_changed();
     }
+    let resp = resp.labeled_toggle(
+        egui::WidgetType::Checkbox,
+        &crate::a11y::context(&[name, tr("Time-Vary Stopwatch")]),
+        *on,
+    );
     let c = if *on {
         color::ACCENT
     } else if resp.hovered() {
@@ -259,6 +290,17 @@ pub enum KeyNav {
 
 /// The ◀ ◆ ▶ keyframe navigator shown left of animated properties.
 pub fn keyframe_nav(ui: &mut Ui, has_prev: bool, on_key: bool, has_next: bool) -> Option<KeyNav> {
+    keyframe_nav_for(ui, has_prev, on_key, has_next, "")
+}
+
+/// [`keyframe_nav`] of the property `name` (screen-reader names include it).
+pub fn keyframe_nav_for(
+    ui: &mut Ui,
+    has_prev: bool,
+    on_key: bool,
+    has_next: bool,
+    name: &str,
+) -> Option<KeyNav> {
     let mut out = None;
     let parts = [
         (Icon::TriangleLeft, KeyNav::Prev, has_prev),
@@ -269,6 +311,15 @@ pub fn keyframe_nav(ui: &mut Ui, has_prev: bool, on_key: bool, has_next: bool) -
         ui.spacing_mut().item_spacing.x = 0.0;
         for (icon, nav, enabled) in parts {
             let (rect, resp) = ui.allocate_exact_size(vec2(13.0, 16.0), Sense::click());
+            let what = match nav {
+                KeyNav::Prev => "Go to Previous Keyframe",
+                KeyNav::Toggle => "Add or Remove Keyframe at Current Time",
+                KeyNav::Next => "Go to Next Keyframe",
+            };
+            let resp = resp.labeled(
+                egui::WidgetType::Button,
+                &crate::a11y::context(&[name, tr(what)]),
+            );
             if enabled && resp.clicked() {
                 out = Some(nav);
             }
@@ -297,6 +348,11 @@ pub fn disclosure(ui: &mut Ui, open: &mut bool) -> Response {
         *open = !*open;
         resp.mark_changed();
     }
+    let resp = resp.labeled_toggle(
+        egui::WidgetType::CollapsingHeader,
+        tr(if *open { "Collapse" } else { "Expand" }),
+        *open,
+    );
     let icon = if *open {
         Icon::ChevronDown
     } else {
@@ -316,6 +372,46 @@ pub fn disclosure(ui: &mut Ui, open: &mut bool) -> Response {
     resp
 }
 
+/// Arrow on submenu buttons: `›`, which the system UI fonts have. egui's own `⏵` is only
+/// in egui's bundled fonts, which BAE does not ship.
+pub const SUBMENU_ARROW: &str = "›";
+
+/// [`Ui::menu_button`] with BAE's submenu arrow ([`SUBMENU_ARROW`]): a submenu button
+/// inside a menu, a menu button elsewhere. Use it instead of `ui.menu_button`.
+pub fn menu_button<'a, R>(
+    ui: &mut Ui,
+    title: impl egui::IntoAtoms<'a>,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    use egui::containers::menu;
+    let (response, inner) = if menu::is_in_menu(ui) {
+        menu::SubMenuButton::from_button(egui::Button::new(title).right_text(SUBMENU_ARROW))
+            .ui(ui, add_contents)
+    } else {
+        menu::MenuButton::new(title).ui(ui, add_contents)
+    };
+    egui::InnerResponse::new(inner.map(|i| i.inner), response)
+}
+
+/// A check mark drawn in `rect` (the same shape as [`checkbox`]'s). Used instead of
+/// `✓`, which egui's built-in fonts do not have (#135).
+pub fn paint_check(p: &egui::Painter, rect: Rect, color: Color32) {
+    let pts = vec![
+        rect.lerp_inside(vec2(0.2, 0.52)),
+        rect.lerp_inside(vec2(0.42, 0.74)),
+        rect.lerp_inside(vec2(0.8, 0.28)),
+    ];
+    icons::path(p, pts, false, Stroke::new(1.6, color));
+}
+
+/// A cross drawn in `rect`, the failure counterpart of [`paint_check`] (instead of `✗`).
+pub fn paint_cross(p: &egui::Painter, rect: Rect, color: Color32) {
+    let r = rect.shrink(rect.width() * 0.25);
+    let stroke = Stroke::new(1.6, color);
+    p.line_segment([r.left_top(), r.right_bottom()], stroke);
+    p.line_segment([r.right_top(), r.left_bottom()], stroke);
+}
+
 /// AE-style checkbox: outlined when off, filled with a dark check when on.
 pub fn checkbox(ui: &mut Ui, checked: &mut bool, label: &str) -> Response {
     let font = theme::body();
@@ -333,6 +429,7 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, label: &str) -> Response {
         *checked = !*checked;
         resp.mark_changed();
     }
+    let resp = resp.labeled_toggle(egui::WidgetType::Checkbox, label, *checked);
     if ui.is_rect_visible(rect) {
         let p = ui.painter();
         let b = Rect::from_min_size(
@@ -378,6 +475,8 @@ pub fn dropdown(
     width: f32,
 ) -> Response {
     let (rect, mut resp) = ui.allocate_exact_size(vec2(width, 17.0), Sense::click());
+    let current = items.get(*selected).copied().unwrap_or("");
+    resp = resp.labeled_value(egui::WidgetType::ComboBox, current, current);
     let id = ui.id().with(id_salt);
     if ui.is_rect_visible(rect) {
         let p = ui.painter();
@@ -440,14 +539,16 @@ pub fn search_field(ui: &mut Ui, text: &mut String, width: f32) -> Response {
     icons::paint(p, chev, Icon::ChevronDown, color::ICON);
     let inner = Rect::from_min_max(pos2(rect.left() + 27.0, rect.top()), rect.max);
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
-    child.add(
+    let resp = child.add(
         TextEdit::singleline(text)
             .frame(egui::Frame::NONE)
             .desired_width(inner.width() - 6.0)
             .vertical_align(egui::Align::Center)
             .min_size(vec2(0.0, height))
             .text_color(color::TEXT_STRONG),
-    )
+    );
+    let value = text.clone();
+    resp.labeled_value(egui::WidgetType::TextEdit, tr("Search"), &value)
 }
 
 /// Blue text button, like "Reset" in the Properties panel.
@@ -456,6 +557,7 @@ pub fn link(ui: &mut Ui, text: &str) -> Response {
         .painter()
         .layout_no_wrap(text.to_owned(), theme::body(), color::ACCENT);
     let (rect, resp) = ui.allocate_exact_size(galley.size(), Sense::click());
+    let resp = resp.labeled(egui::WidgetType::Link, text);
     let c = if resp.hovered() {
         color::ACCENT_HOVER
     } else {
@@ -469,6 +571,8 @@ pub fn link(ui: &mut Ui, text: &str) -> Response {
 /// Color swatch button (e.g. the Fill color in the toolbar).
 pub fn color_swatch(ui: &mut Ui, fill: Color32, size: Vec2) -> Response {
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    let hex = format!("#{:02x}{:02x}{:02x}", fill.r(), fill.g(), fill.b());
+    let resp = resp.labeled_value(egui::WidgetType::ColorButton, tr("Color"), &hex);
     let p = ui.painter();
     p.rect_filled(rect, 1.0, fill);
     if resp.hovered() {
@@ -549,8 +653,11 @@ pub fn workspace_bar(
             continue;
         }
         let item = Rect::from_min_max(pos2(x - 6.0, rect.top()), pos2(x + w + 6.0, rect.bottom()));
-        let resp = ui.interact(item, ui.id().with(("bae-workspace", i)), Sense::click());
         let is_active = i == active;
+        let resp = ui
+            .interact(item, ui.id().with(("bae-workspace", i)), Sense::click())
+            // One workspace is active at a time: radio buttons.
+            .labeled_toggle(egui::WidgetType::RadioButton, text, is_active);
         let tc = if is_active || resp.hovered() {
             color::TAB_ACTIVE
         } else {
@@ -599,7 +706,9 @@ pub fn workspace_bar(
         pos2(rect.right() - 27.0, rect.top() + BASELINE - 4.5),
         Vec2::splat(14.0),
     );
-    let resp = ui.interact(r, ui.id().with("bae-workspace-more"), Sense::click());
+    let resp = ui
+        .interact(r, ui.id().with("bae-workspace-more"), Sense::click())
+        .labeled(egui::WidgetType::Button, tr("Workspace Menu"));
     let c = if resp.hovered() {
         color::TEXT_STRONG
     } else {

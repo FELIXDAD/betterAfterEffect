@@ -18,7 +18,17 @@
 
 mod dialogs;
 mod menu;
+#[cfg(target_os = "macos")]
+mod open_documents;
+#[cfg(any(windows, test))]
+mod save_guard;
+#[cfg(windows)]
+mod win_save;
 mod window_state;
+
+// Only the macOS acceptance suite calls it (Windows test builds would warn).
+#[cfg(all(test, target_os = "macos"))]
+pub(crate) use menu::undo_redo_text;
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -39,7 +49,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::window::{Window, WindowId};
 
 use crate::document::{Document, Outcome};
-use crate::files::{self, CommitGate, FileDialogs, FileOutcome, NoDialogs};
+use crate::files::{self, CommitGate, FileDialogs, NoDialogs};
 use crate::ui::{self, PlaceholderViewer, StatusInfo, UiOutput, UiRenderer, Workspace};
 use bae_ui::Invocation;
 use bae_ui::action::ids;
@@ -68,12 +78,12 @@ impl AppModule for ShellModule {
 
     fn finish(&self, app: &mut AppBuilder) {
         ui::register_panels(app);
-        // File menu items: registered like any module's menu items, so the native
-        // menu shows the shortcut the active keymap binds to each.
+        // BAE's own menu entries (History and Agent panels, Agent workspace),
+        // registered next to the AE menus the motion workspace contributes.
         let owner = app.current_owner();
         let menu = app.registry::<bae_ui::MenuItemSpec>();
         menu.batch(|tx| {
-            for (id, item) in menu::file_items() {
+            for (id, item) in menu::extra_items() {
                 if !tx.contains(id) {
                     let _ = tx.register(owner.clone(), id, item);
                 }
@@ -82,10 +92,10 @@ impl AppModule for ShellModule {
     }
 }
 
-/// English titles of the File menu items and their menu path (i18n test).
+/// English titles of the shell's menu items and their menu path (i18n test).
 #[cfg(test)]
 pub fn file_menu_titles() -> Vec<String> {
-    menu::file_items()
+    menu::extra_items()
         .into_iter()
         .flat_map(|(_, spec)| {
             spec.path
@@ -106,6 +116,19 @@ enum UserEvent {
     Menu(muda::MenuEvent),
     /// The GPU device was lost (not destroyed on purpose).
     DeviceLost,
+    /// A screen reader or UI automation client asked for the accessibility
+    /// tree or for an action (accesskit).
+    AccessKit(egui_winit::accesskit_winit::Event),
+    /// Finder asked to open projects (double-click, Dock drop, `open`): macOS only,
+    /// see `open_documents`.
+    #[cfg(target_os = "macos")]
+    OpenFiles(Vec<std::path::PathBuf>),
+}
+
+impl From<egui_winit::accesskit_winit::Event> for UserEvent {
+    fn from(event: egui_winit::accesskit_winit::Event) -> Self {
+        UserEvent::AccessKit(event)
+    }
 }
 
 /// A smoke test stops as failed if no frame completes for this long.
@@ -120,6 +143,8 @@ const MAX_DEVICE_RECOVERIES: u32 = 3;
 
 /// Runs the GUI until the window closes. Returns the process exit code.
 pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
+    // The UI's system fonts load while the window and GPU are being set up.
+    bae_ui::theme::prefetch_system_ui_fonts();
     crate::i18n::init_from_env();
     let dirs = app.resource::<AppDirs>().cloned();
 
@@ -158,6 +183,18 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
             let _ = proxy.send_event(UserEvent::Menu(event));
         }));
     }
+    // After the event loop exists (it registers winit's app delegate class), before
+    // `run_app` (so a project double-clicked to launch BAE is not missed).
+    #[cfg(target_os = "macos")]
+    {
+        let proxy = std::sync::Mutex::new(proxy.clone());
+        open_documents::install(move |paths| {
+            let proxy = proxy
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let _ = proxy.send_event(UserEvent::OpenFiles(paths));
+        });
+    }
 
     let window_file = dirs
         .as_ref()
@@ -190,19 +227,38 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
             tracing::warn!("only the first project is opened: {}", path.display());
         }
         match document.open(path) {
-            Ok(()) => tracing::info!("opened {}", path.display()),
+            Ok(()) => {
+                tracing::info!("opened {}", path.display());
+                crate::view_state::restore(&mut app, &document);
+            }
             Err(error) if global.smoke_test.is_some() => {
-                eprintln!("{}: {error:#}", bae_platform::BINARY_NAME);
+                eprintln!(
+                    "{}: {}",
+                    bae_platform::BINARY_NAME,
+                    crate::file_error::describe_open(path, &error)
+                );
                 return ExitCode::FAILURE;
             }
             Err(error) => {
                 startup_error = Some(format!(
-                    "{}\n\n{error:#}",
-                    crate::i18n::tr("Could not open the project.")
+                    "{}\n\n{}",
+                    crate::i18n::tr("Could not open the project."),
+                    crate::file_error::describe_open(path, &error)
                 ));
             }
         }
     }
+    // Preferences: read from the config folder; smoke tests use the defaults and
+    // never write them.
+    let prefs = Arc::new(match &dirs {
+        Some(dirs) if global.smoke_test.is_none() => {
+            bae_prefs::PrefsStore::open(dirs.config_file(bae_prefs::FILE_NAME)).0
+        }
+        _ => bae_prefs::PrefsStore::default(),
+    });
+    app.insert_resource(prefs.clone());
+    bae_ui::settings::apply(&prefs.current());
+    document.set_undo_limit(prefs.current().levels_of_undo());
     let mut workspace = Workspace::new(&mut app, workbench_state);
     workspace.set_extra_commands(document.command_titles());
     if first_run {
@@ -230,7 +286,11 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         gate: CommitGate::default(),
         gate_deadline: None,
         ui_passes: 0,
+        accesskit_active: false,
         exit_code: ExitCode::SUCCESS,
+        prefs_generation: prefs.generation(),
+        prefs,
+        autosave: crate::autosave::AutoSave::default(),
     };
     if let Err(error) = event_loop.run_app(&mut shell) {
         tracing::error!("event loop error: {error}");
@@ -262,6 +322,10 @@ impl SmokeTest {
 }
 
 struct Shell {
+    /// Preferences and the generation last applied.
+    prefs: Arc<bae_prefs::PrefsStore>,
+    prefs_generation: u64,
+    autosave: crate::autosave::AutoSave,
     app: App,
     proxy: EventLoopProxy<UserEvent>,
     smoke: Option<SmokeTest>,
@@ -289,6 +353,8 @@ struct Shell {
     gate_deadline: Option<Instant>,
     /// UI frames run so far (egui passes, presented or not).
     ui_passes: u64,
+    /// A screen reader / automation client is reading the accesskit tree.
+    accesskit_active: bool,
     exit_code: ExitCode,
 }
 
@@ -303,8 +369,11 @@ struct WindowView {
     renderer: UiRenderer,
     status: StatusInfo,
     lost_subscription: DeviceLostSubscription,
-    /// Smoke-test fallback target when the window cannot present.
+    /// Smoke-test fallback target when the window cannot present; also the
+    /// target of screenshots (`ViewportCommand::Screenshot`).
     offscreen: Option<(wgpu::Texture, wgpu::TextureView)>,
+    /// Screenshot replies for the next frame's input (the eyedropper).
+    screenshots: Vec<egui::Event>,
 }
 
 impl Drop for WindowView {
@@ -321,7 +390,14 @@ impl Shell {
             &egui::Context::default(),
             bae_ui::titlebar::viewport_builder(bae_platform::APP_NAME),
         );
-        let attributes = self.window_state.apply(attributes, event_loop);
+        // Hidden until the accesskit adapter exists (it must be created before
+        // the window is first shown); `resumed` shows it.
+        let attributes = self
+            .window_state
+            .apply(attributes, event_loop)
+            .with_visible(false);
+        #[cfg(windows)]
+        let attributes = with_exe_icon(attributes);
         let window = event_loop
             .create_window(attributes)
             .context("cannot create the main window")?;
@@ -388,6 +464,15 @@ impl Shell {
         egui_winit::update_viewport_info(&mut viewport_info, &egui_ctx, &window, true);
         let renderer = UiRenderer::new(&gpu, surface.format());
 
+        // Native open panels for modules (File > Import …), owned by the window;
+        // none in smoke tests (they must never block).
+        if self.smoke.is_none() {
+            self.app
+                .insert_resource(bae_ui::files::SharedFilePicker::new(
+                    dialogs::NativePicker::new(Some(window.clone())),
+                ));
+        }
+
         // Placeholder composition until the renderer (workstream 04) publishes one.
         if let Some(registry) = self.app.resource::<Arc<ViewportTextureRegistry>>().cloned() {
             if let Some(old) = self.viewer.take() {
@@ -405,7 +490,7 @@ impl Shell {
         }
 
         let status = StatusInfo {
-            gpu: gpu.summary(),
+            gpu: ui::gpu_summary(&gpu),
             size_px: [size.width, size.height],
             pixels_per_point: window.scale_factor() as f32,
             ..StatusInfo::default()
@@ -421,6 +506,7 @@ impl Shell {
             status,
             lost_subscription,
             offscreen: None,
+            screenshots: Vec::new(),
         })
     }
 
@@ -478,25 +564,99 @@ impl Shell {
                 return;
             }
             ids::ABOUT => self.workspace.show_about(),
+            bae_ui::settings::ACTION => self
+                .workspace
+                .show_settings(inv.params.get("page").and_then(|p| p.as_str())),
             id if files::is_file_command(id) => {
+                // Saves record the open comps; another project restores its own.
                 let mut dialogs = self.dialogs();
-                if files::run(&mut self.document, &mut *dialogs, &inv)
-                    == Some(FileOutcome::Replaced)
-                {
-                    self.project_replaced();
-                }
+                crate::view_state::run_file_command(
+                    &mut self.app,
+                    &mut self.document,
+                    &mut *dialogs,
+                    &inv,
+                );
+                // A save or another project restarts the auto-save interval.
+                self.autosave.reset();
             }
             ids::HELP => tracing::info!("`{}` is not implemented yet", inv.id),
             _ => match self.document.run(&inv) {
-                Outcome::Changed | Outcome::Unchanged => {}
+                Outcome::Changed => self.set_notice(String::new()),
+                Outcome::Unchanged => {}
                 Outcome::Unknown => tracing::debug!("no handler for command `{}`", inv.id),
-                Outcome::Failed(error) => tracing::warn!("command `{}` failed: {error}", inv.id),
+                Outcome::Failed(error) => {
+                    tracing::warn!("command `{}` failed: {error}", inv.id);
+                    self.set_notice(ui::failure_notice(&error));
+                }
             },
         }
         if let Some(menu) = &mut self.menu {
             menu.set_undo_state(self.document.undo_state());
         }
         self.request_redraw();
+    }
+
+    /// Preferences changed (OK in the dialog): apply what the shell owns.
+    fn sync_prefs(&mut self) {
+        let generation = self.prefs.generation();
+        if generation == self.prefs_generation {
+            return;
+        }
+        self.prefs_generation = generation;
+        let prefs = self.prefs.current();
+        bae_ui::settings::apply(&prefs);
+        self.document.set_undo_limit(prefs.levels_of_undo());
+        if let Some(menu) = &mut self.menu {
+            menu.set_undo_state(self.document.undo_state());
+        }
+        self.request_redraw();
+    }
+
+    /// Buttons of the Preferences window that need the system.
+    fn run_settings_requests(&mut self) {
+        for request in self.workspace.take_settings_requests() {
+            if request == crate::ui::REVEAL_PREFERENCES {
+                if let Some(dirs) = self.app.resource::<AppDirs>() {
+                    reveal(&dirs.config_file(bae_prefs::FILE_NAME));
+                }
+            } else if let Some(key) = request.strip_prefix("choose:") {
+                let mut dialog = rfd::FileDialog::new();
+                if let Some(view) = &self.view {
+                    dialog = dialog.set_parent(&*view.window);
+                }
+                let picked = if key == "project.project_template" {
+                    dialog.add_filter("BAE", &["bae", "baez"]).pick_file()
+                } else {
+                    dialog.pick_folder()
+                };
+                if let Some(path) = picked {
+                    self.workspace
+                        .set_setting(key, path.to_string_lossy().into_owned());
+                    self.request_redraw();
+                }
+            }
+        }
+    }
+
+    /// Auto-save (Preferences > Auto-Save); returns when it is due next.
+    fn run_autosave(&mut self) -> Option<Instant> {
+        if self.smoke.is_some() {
+            return None;
+        }
+        let prefs = self.prefs.current();
+        match self.autosave.tick(Instant::now(), &prefs, &self.document) {
+            Some(Ok(path)) => tracing::info!("auto-saved {}", path.display()),
+            Some(Err(error)) => tracing::warn!("auto-save failed: {error:#}"),
+            None => {}
+        }
+        self.autosave.deadline(&prefs)
+    }
+
+    /// Show `text` in the status bar (empty clears it).
+    fn set_notice(&mut self, text: String) {
+        if let Some(view) = &mut self.view {
+            view.status.notice = text;
+        }
     }
 
     fn request_redraw(&self) {
@@ -554,21 +714,13 @@ impl Shell {
     fn quit(&mut self, event_loop: &ActiveEventLoop) {
         if self.smoke.is_none() {
             let mut dialogs = self.dialogs();
-            if !files::confirm_discard(&mut self.document, &mut *dialogs) {
+            if !crate::view_state::confirm_quit(&self.app, &mut self.document, &mut *dialogs) {
                 self.request_redraw();
                 return;
             }
         }
         self.save_window_state();
         event_loop.exit();
-    }
-
-    /// Another project is open: drop the motion workspace's view state (active
-    /// comp, selection, playback) that belonged to the old one. The history log
-    /// was cleared by the document.
-    fn project_replaced(&mut self) {
-        self.app
-            .insert_resource(bae_ui_motion::SharedSession::default());
     }
 
     /// Keeps the native window title in step with the project name and the
@@ -611,9 +763,17 @@ impl Shell {
             return;
         }
         let window = view.window.clone();
+        // The accesskit adapter cannot be created again for a visible window:
+        // move it to the new egui state.
+        let mut view = view;
+        let accesskit = view.egui_state.accesskit.take();
         drop(view); // Release every resource of the dead device first.
         match self.create_view(window) {
-            Ok(view) => {
+            Ok(mut view) => {
+                view.egui_state.accesskit = accesskit;
+                if self.accesskit_active {
+                    view.egui_ctx.enable_accesskit();
+                }
                 view.window.request_redraw();
                 self.view = Some(view);
             }
@@ -638,6 +798,7 @@ impl Shell {
         input
             .viewports
             .insert(egui::ViewportId::ROOT, view.viewport_info.clone());
+        input.events.append(&mut view.screenshots);
         view.viewport_info.events.clear();
 
         let registry = self.app.resource::<Arc<ViewportTextureRegistry>>().cloned();
@@ -651,12 +812,14 @@ impl Shell {
         });
         self.ui_passes += 1;
         if let Some(menu) = &mut self.menu {
-            let cx = bae_ui::menu::MenuContext {
-                stage: document.stage(),
+            let open = workspace.open_panels();
+            let cx = bae_ui::menu::MenuContext::new(
+                document.stage(),
                 resources,
-                workspace: workspace.active_workspace(),
-            };
-            menu.sync(workspace.keymap(), &cx);
+                workspace.active_workspace(),
+            )
+            .with_open_panels(&open);
+            menu.sync(workspace.keymap(), &cx, view.egui_ctx.text_edit_focused());
         }
         view.egui_state.handle_platform_output_with_event_loop(
             &view.window,
@@ -667,6 +830,22 @@ impl Shell {
         // Root-viewport commands from the UI (custom title bar: drag, minimize,
         // maximize, close …).
         let mut close_requested = false;
+        // Screenshots the UI asked for (the color picker's eyedropper): the
+        // frame is drawn a second time offscreen and read back below.
+        let screenshots: Vec<egui::UserData> = output
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .map(|root| {
+                root.commands
+                    .iter()
+                    .filter_map(|c| match c {
+                        egui::ViewportCommand::Screenshot(u) => Some(u.clone()),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let screenshot_shapes = (!screenshots.is_empty()).then(|| output.shapes.clone());
         if let Some(root) = output.viewport_output.get(&egui::ViewportId::ROOT) {
             let cancel = root
                 .commands
@@ -755,6 +934,23 @@ impl Shell {
             }
         }
         view.gpu.poll();
+        if let Some(shapes) = screenshot_shapes
+            && presented
+            && !device_lost
+        {
+            let ppp = output.pixels_per_point;
+            if let Some(image) = screenshot(view, shapes, [width, height], ppp, background) {
+                let image = Arc::new(image);
+                for user_data in screenshots {
+                    view.screenshots.push(egui::Event::Screenshot {
+                        viewport_id: egui::ViewportId::ROOT,
+                        user_data,
+                        image: image.clone(),
+                    });
+                }
+                view.window.request_redraw();
+            }
+        }
 
         if presented {
             let ms = frame_start.elapsed().as_secs_f32() * 1000.0;
@@ -827,7 +1023,7 @@ fn offscreen_target(view: &mut WindowView, size: [u32; 2]) -> wgpu::TextureView 
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let target = texture.create_view(&Default::default());
@@ -837,6 +1033,109 @@ fn offscreen_target(view: &mut WindowView, size: [u32; 2]) -> wgpu::TextureView 
         .as_ref()
         .map(|(_, target)| target.clone())
         .unwrap_or_else(|| unreachable!("offscreen target was just created"))
+}
+
+/// Shows `path` in Finder / Explorer (Reveal Preferences).
+fn reveal(path: &std::path::Path) {
+    let result = if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .spawn()
+    } else if cfg!(windows) {
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path.display()))
+            .spawn()
+    } else {
+        std::process::Command::new("xdg-open")
+            .arg(path.parent().unwrap_or(path))
+            .spawn()
+    };
+    if let Err(error) = result {
+        tracing::warn!("could not reveal {}: {error}", path.display());
+    }
+}
+
+/// Draws `shapes` (this frame's UI, textures already uploaded) offscreen and
+/// reads the pixels back, for `ViewportCommand::Screenshot`. Rare (one click of
+/// the eyedropper), so the readback waits for the GPU.
+fn screenshot(
+    view: &mut WindowView,
+    shapes: Vec<egui::epaint::ClippedShape>,
+    size: [u32; 2],
+    pixels_per_point: f32,
+    background: egui::Color32,
+) -> Option<egui::ColorImage> {
+    let target = offscreen_target(view, size);
+    view.renderer.render(
+        &view.gpu,
+        &view.egui_ctx,
+        UiOutput {
+            shapes,
+            textures_delta: Default::default(),
+            pixels_per_point,
+        },
+        &target,
+        size,
+        background,
+    );
+    let texture = view.offscreen.as_ref()?.0.clone();
+    let data = bae_gpu::transfer::read_texture(&view.gpu, &texture)
+        .map_err(|e| tracing::warn!("screenshot readback failed: {e}"))
+        .ok()?;
+    let bgra = matches!(
+        data.format,
+        wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+    );
+    let mut pixels = Vec::with_capacity((data.width * data.height) as usize);
+    for y in 0..data.height {
+        for x in 0..data.width {
+            let p = data.pixel(x, y);
+            let (r, g, b) = if bgra {
+                (p[2], p[1], p[0])
+            } else {
+                (p[0], p[1], p[2])
+            };
+            pixels.push(egui::Color32::from_rgb(r, g, b));
+        }
+    }
+    Some(egui::ColorImage::new(
+        [data.width as usize, data.height as usize],
+        pixels,
+    ))
+}
+
+/// The command for projects Finder asked to open: one project at a time, like AE and
+/// like `bae <project>`, so only the first is opened. Goes through the normal
+/// `file.open_project` (unsaved-changes question, error dialog).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn open_files_invocation(paths: &[std::path::PathBuf]) -> Option<Invocation> {
+    let (first, rest) = paths.split_first()?;
+    if !rest.is_empty() {
+        tracing::warn!("only the first project is opened: {}", first.display());
+    }
+    Some(Invocation::with_params(
+        ids::OPEN_PROJECT,
+        serde_json::json!({ "path": first.to_string_lossy() }),
+    ))
+}
+
+/// Window and taskbar icon from the icon group linked into `bae.exe`
+/// (`apps/bae/build.rs`, `assets/icons/app/bae.res`).
+#[cfg(windows)]
+fn with_exe_icon(attributes: winit::window::WindowAttributes) -> winit::window::WindowAttributes {
+    use winit::platform::windows::{IconExtWindows as _, WindowAttributesExtWindows as _};
+    /// `GROUP_ICON_ID` in `xtask/src/icon.rs`.
+    const APP_ICON_RESOURCE: u16 = 1;
+    match winit::window::Icon::from_resource(APP_ICON_RESOURCE, None) {
+        Ok(icon) => attributes
+            .with_window_icon(Some(icon.clone()))
+            .with_taskbar_icon(Some(icon)),
+        Err(error) => {
+            tracing::warn!("app icon resource not found: {error}");
+            attributes
+        }
+    }
 }
 
 impl ApplicationHandler<UserEvent> for Shell {
@@ -849,10 +1148,16 @@ impl ApplicationHandler<UserEvent> for Shell {
             Err(error) => return self.fail(event_loop, &error),
         };
         match self.create_view(window) {
-            Ok(view) => {
+            Ok(mut view) => {
+                // Screen readers (VoiceOver, Narrator) and UI automation read the
+                // labelled widgets through accesskit (issue #116).
+                view.egui_state
+                    .init_accesskit(event_loop, &view.window, self.proxy.clone());
+                view.window.set_visible(true);
                 if self.menu.is_none() {
                     let contributed = self.workspace.contributed_menus(&self.app);
-                    match menu::AppMenu::new(&self.workspace.workspaces(), &contributed) {
+                    let actions = self.workspace.handled_actions(&self.app);
+                    match menu::AppMenu::new(&contributed, actions) {
                         Ok(menu) => {
                             menu.attach(&view.window);
                             self.menu = Some(menu);
@@ -921,16 +1226,83 @@ impl ApplicationHandler<UserEvent> for Shell {
                     .as_ref()
                     .and_then(|m| m.contributed_invocation(id))
                     .unwrap_or_else(|| menu::invocation(id));
+                // A modal dialog is open: menu commands (and their key
+                // equivalents) do not reach the project behind it; Quit still works.
+                if self.workspace.modal_open(self.app.resources()) && inv.id != ids::QUIT {
+                    return;
+                }
+                // Undo / Redo, Cut / Copy / Paste and Select All (their native
+                // key equivalents too) while a text field is focused edit the
+                // text, as in any Mac / Windows app.
+                if menu::TEXT_EDIT_ACTIONS.contains(&inv.id.as_str())
+                    && let Some(view) = self.view.as_mut()
+                    && view.egui_ctx.text_edit_focused()
+                {
+                    let key = |key: egui::Key, shift: bool| egui::Event::Key {
+                        key,
+                        physical_key: Some(key),
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers {
+                            shift,
+                            ..egui::Modifiers::COMMAND
+                        },
+                    };
+                    let event = match inv.id.as_str() {
+                        ids::UNDO => key(egui::Key::Z, false),
+                        ids::REDO => key(egui::Key::Z, true),
+                        "edit.cut" => egui::Event::Cut,
+                        "edit.copy" => egui::Event::Copy,
+                        "edit.paste" => {
+                            egui::Event::Paste(view.egui_state.clipboard_text().unwrap_or_default())
+                        }
+                        _ => key(egui::Key::A, false),
+                    };
+                    view.egui_state.egui_input_mut().events.push(event);
+                    view.window.request_redraw();
+                    return;
+                }
                 // Queued behind the edits the last frame produced (about_to_wait
                 // runs them in order), not ahead of them.
                 self.pending.push(inv);
             }
             UserEvent::DeviceLost => self.recover_device(event_loop),
+            #[cfg(target_os = "macos")]
+            UserEvent::OpenFiles(paths) => {
+                // A file command like File > Open: `dispatch` runs it through
+                // `view_state::run_file_command`, so the project's comps are restored.
+                if let Some(inv) = open_files_invocation(&paths) {
+                    self.pending.push(inv);
+                }
+            }
+            UserEvent::AccessKit(event) => {
+                use egui_winit::accesskit_winit::WindowEvent as A;
+                let Some(view) = self.view.as_mut() else {
+                    return;
+                };
+                match event.window_event {
+                    A::InitialTreeRequested => {
+                        self.accesskit_active = true;
+                        view.egui_ctx.enable_accesskit();
+                    }
+                    A::ActionRequested(request) => {
+                        view.egui_state.on_accesskit_action_request(request);
+                    }
+                    A::AccessibilityDeactivated => {
+                        self.accesskit_active = false;
+                        view.egui_ctx.disable_accesskit();
+                    }
+                }
+                view.window.request_redraw();
+            }
         }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.run_pending(event_loop);
+        self.sync_prefs();
+        self.run_settings_requests();
+        let autosave_at = self.run_autosave();
         // Every project change goes through the dispatch above.
         self.sync_window_title();
         if let Some(smoke) = &self.smoke {
@@ -964,6 +1336,9 @@ impl ApplicationHandler<UserEvent> for Shell {
             }
         }
         if let Some(at) = self.gate_deadline {
+            deadline = Some(deadline.map_or(at, |d| d.min(at)));
+        }
+        if let Some(at) = autosave_at {
             deadline = Some(deadline.map_or(at, |d| d.min(at)));
         }
         if let Some(at) = self.repaint_at {

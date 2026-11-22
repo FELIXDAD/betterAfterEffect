@@ -22,6 +22,7 @@ use bae_render::{
     AnimEvaluator, ExportFormat, ExportJob, ExportSettings, RenderError, RenderPurpose,
     RenderRequest, Renderer, RendererConfig, SourceProvider, export_frames, frame_file,
 };
+use bae_ui::Accessible as _;
 use bae_ui::{Panel, PanelContext, TabInfo, tr};
 
 use crate::gpu_preview::PreviewSources;
@@ -225,18 +226,21 @@ impl RenderQueue {
         true
     }
 
-    /// Takes the next item of the running render.
-    fn take_next(&mut self) -> Option<Job> {
+    /// Takes the next item of the running render. `comp_frames` gives a
+    /// comp's frame count: the progress counts the frames that will render
+    /// (the range limited to the comp) from the start (issue #157).
+    fn take_next(&mut self, comp_frames: &dyn Fn(&PrimPath) -> Option<i64>) -> Option<Job> {
         let batch = &mut self.batch;
         let item = self
             .items
             .iter_mut()
             .find(|i| i.status == ItemStatus::Queued && batch.contains(&i.id))?;
         batch.retain(|id| *id != item.id);
-        item.status = ItemStatus::Rendering {
-            done: 0,
-            total: item.frame_count(),
-        };
+        // A missing comp or a range outside it renders nothing (and fails).
+        let total = comp_frames(&item.comp)
+            .and_then(|frames| limited_range(item.start, item.end, frames))
+            .map_or(0, |(start, end)| (end - start + 1) as usize);
+        item.status = ItemStatus::Rendering { done: 0, total };
         Some(Job {
             id: item.id,
             comp: item.comp.clone(),
@@ -362,22 +366,42 @@ impl StageSnapshot {
 }
 
 /// Renders one item; `progress` gets the frames done so far.
+/// The part of `start..=end` a comp of `frames` frames renders: AE limits the
+/// range to the comp. `None` when nothing of it is inside.
+pub(crate) fn limited_range(start: i64, end: i64, frames: i64) -> Option<(i64, i64)> {
+    let (start, end) = (start.max(0), end.min(frames - 1));
+    (start <= end).then_some((start, end))
+}
+
 pub(crate) fn render_job(
     renderer: &mut Renderer,
     evaluator: &mut AnimEvaluator,
     stage: &Stage,
     job: &Job,
-    progress: &mut dyn FnMut(usize),
+    progress: &mut dyn FnMut(usize, usize),
 ) -> Result<ItemStatus, RenderError> {
     let started = Instant::now();
-    let times: Vec<(Option<i64>, Time)> = (job.start..=job.end)
+    let info = bae_motion::query::comp_info(stage, &job.comp)
+        .ok_or_else(|| RenderError::Other(tr("The composition no longer exists.").to_owned()))?;
+    let output = output_path(&job.output, job.format, &info.name)?;
+    // AE limits the range to the comp.
+    let Some((start, end)) = limited_range(job.start, job.end, info.frame_count()) else {
+        return Err(RenderError::Other(
+            tr("The frames are outside the composition (0–{last}).")
+                .replace("{last}", &(info.frame_count() - 1).to_string()),
+        ));
+    };
+    let times: Vec<(Option<i64>, Time)> = (start..=end)
         .map(|f| (Some(f), job.rate.frame_to_time(f)))
         .collect();
+    // The progress counts the frames actually rendered (the limited range).
+    let total = times.len();
+    progress(0, total);
     // One frame of a sequence pattern still gets a numbered file.
     let path = if times.len() == 1 && job.format.is_image() {
-        frame_file(&job.output, job.start)
+        frame_file(&output, start)
     } else {
-        job.output.clone()
+        output
     };
     let settings = ExportSettings::new(job.format, path);
     let request = RenderRequest {
@@ -398,7 +422,7 @@ pub(crate) fn render_job(
             encoders: None,
         },
         Some(&job.cancel),
-        &mut |frame| progress(frame.index + 1),
+        &mut |frame| progress(frame.index + 1, total),
     )?;
     let first = report.frames.first().map(|f| f.file.clone());
     Ok(if report.stopped {
@@ -414,6 +438,48 @@ pub(crate) fn render_job(
             seconds: started.elapsed().as_secs_f64(),
         }
     })
+}
+
+/// The output file to write (AE rules):
+/// - an empty one is refused (it would land in the process's working
+///   directory, `/` for an app started from Finder);
+/// - a folder (ending in a separator, or an existing directory) gets
+///   `<comp>_[####].<ext>` inside it;
+/// - the format decides the extension: a missing one is added, another image
+///   or movie extension is replaced (the panel says so,
+///   [`extension_follows_format`]).
+fn output_path(output: &Path, format: ExportFormat, comp: &str) -> Result<PathBuf, RenderError> {
+    let text = output.as_os_str().to_string_lossy();
+    if text.trim().is_empty() {
+        return Err(RenderError::Other(
+            tr("Choose where to render: Output To is empty.").to_owned(),
+        ));
+    }
+    if text.ends_with(['/', '\\']) || output.is_dir() || output.file_name().is_none() {
+        let name = sanitize(comp);
+        return Ok(output.join(format!("{name}_[####].{}", format.extension())));
+    }
+    let known = output
+        .extension()
+        .and_then(|e| ExportFormat::parse(&e.to_string_lossy().to_ascii_lowercase()));
+    Ok(match known {
+        Some(f) if f == format => output.to_owned(),
+        Some(_) => output.with_extension(format.extension()),
+        None => {
+            let mut name = output.file_name().unwrap_or_default().to_os_string();
+            name.push(".");
+            name.push(format.extension());
+            output.with_file_name(name)
+        }
+    })
+}
+
+/// The extension the output will get when the typed one does not match the
+/// format (`None` when it matches or there is none yet).
+fn extension_follows_format(output: &str, format: ExportFormat) -> Option<&'static str> {
+    let ext = Path::new(output.trim()).extension()?;
+    let typed = ExportFormat::parse(&ext.to_string_lossy().to_ascii_lowercase())?;
+    (typed != format).then(|| format.extension())
 }
 
 /// Starts rendering the queued items on a background thread, one after
@@ -476,23 +542,20 @@ pub(crate) fn run_worker(
         renderer.providers_mut().register(provider.clone());
     }
     let mut evaluator = AnimEvaluator::new(None);
+    let comp_frames = |comp: &PrimPath| {
+        let stage = stage.as_ref().ok()?;
+        bae_motion::query::comp_info(stage, comp).map(|c| c.frame_count())
+    };
     loop {
-        let Some(job) = queue.lock().take_next() else {
+        let Some(job) = queue.lock().take_next(&comp_frames) else {
             break;
         };
         let status = match &stage {
             Err(error) => ItemStatus::Failed(error.clone()),
             Ok(stage) => {
-                let total = job.end - job.start + 1;
-                let mut progress = |done: usize| {
+                let mut progress = |done: usize, total: usize| {
                     let mut q = queue.lock();
-                    q.set_status(
-                        job.id,
-                        ItemStatus::Rendering {
-                            done,
-                            total: total.max(0) as usize,
-                        },
-                    );
+                    q.set_status(job.id, ItemStatus::Rendering { done, total });
                 };
                 match render_job(&mut renderer, &mut evaluator, stage, &job, &mut progress) {
                     Ok(status) => status,
@@ -592,7 +655,7 @@ impl Panel for RenderQueuePanel {
         let mut q = queue.lock();
         if q.items.is_empty() {
             ui.weak(tr(
-                "Add a composition with Composition ▸ Add to Render Queue.",
+                "Add a composition with Composition > Add to Render Queue.",
             ));
             return;
         }
@@ -600,9 +663,19 @@ impl Panel for RenderQueuePanel {
         let mut cancel = None;
         let mut requeue = None;
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for item in &mut q.items {
+            for (i, item) in q.items.iter_mut().enumerate() {
+                let last =
+                    bae_motion::query::comp_info(cx.stage, &item.comp).map(|c| c.frame_count() - 1);
                 ui.push_id(item.id, |ui| {
-                    item_ui(ui, item, &mut remove, &mut cancel, &mut requeue);
+                    item_ui(
+                        ui,
+                        i + 1,
+                        item,
+                        last,
+                        &mut remove,
+                        &mut cancel,
+                        &mut requeue,
+                    );
                 });
                 ui.separator();
             }
@@ -623,9 +696,12 @@ impl Panel for RenderQueuePanel {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn item_ui(
     ui: &mut egui::Ui,
+    number: usize,
     item: &mut QueueItem,
+    last: Option<i64>,
     remove: &mut Option<u64>,
     cancel: &mut Option<u64>,
     requeue: &mut Option<u64>,
@@ -634,7 +710,15 @@ fn item_ui(
         item.status,
         ItemStatus::Queued | ItemStatus::Failed(_) | ItemStatus::Stopped { .. }
     );
-    ui.horizontal(|ui| {
+    // Screen-reader names carry the item ("Render Item 1 “Comp 1” · Output To"):
+    // two items show the same controls, possibly for the same comp (#128).
+    let item_ctx = tr("Render Item {n} “{comp}”")
+        .replace("{n}", &number.to_string())
+        .replace("{comp}", &item.comp_name);
+    let name = |what: &str| bae_ui::a11y::context(&[&item_ctx, tr(what)]);
+    // Name, status and actions wrap in a narrow panel instead of running
+    // off its edge.
+    ui.horizontal_wrapped(|ui| {
         ui.strong(&item.comp_name);
         match &item.status {
             ItemStatus::Queued => {
@@ -648,10 +732,14 @@ fn item_ui(
                 };
                 ui.add(
                     egui::ProgressBar::new(fraction)
-                        .desired_width(160.0)
+                        .desired_width(ui.available_width().clamp(60.0, 160.0))
                         .text(format!("{done} / {total}")),
                 );
-                if ui.button(tr("Stop")).clicked() {
+                if ui
+                    .button(tr("Stop"))
+                    .labeled(egui::WidgetType::Button, &name("Stop"))
+                    .clicked()
+                {
                     *cancel = Some(item.id);
                 }
             }
@@ -661,7 +749,11 @@ fn item_ui(
                 seconds,
             } => {
                 ui.label(format!("{} · {files} · {seconds:.1} s", tr("Done")));
-                if ui.button(tr(reveal_label())).clicked() {
+                if ui
+                    .button(tr(reveal_label()))
+                    .labeled(egui::WidgetType::Button, &name(reveal_label()))
+                    .clicked()
+                {
                     reveal(first);
                 }
             }
@@ -676,7 +768,10 @@ fn item_ui(
                         .replace("{total}", &total.to_string()),
                 );
                 if let Some(first) = first
-                    && ui.button(tr(reveal_label())).clicked()
+                    && ui
+                        .button(tr(reveal_label()))
+                        .labeled(egui::WidgetType::Button, &name(reveal_label()))
+                        .clicked()
                 {
                     reveal(first);
                 }
@@ -685,11 +780,18 @@ fn item_ui(
         if !matches!(
             item.status,
             ItemStatus::Rendering { .. } | ItemStatus::Queued
-        ) && ui.button(tr("Render Again")).clicked()
+        ) && ui
+            .button(tr("Render Again"))
+            .labeled(egui::WidgetType::Button, &name("Render Again"))
+            .clicked()
         {
             *requeue = Some(item.id);
         }
-        if !matches!(item.status, ItemStatus::Rendering { .. }) && ui.button(tr("Remove")).clicked()
+        if !matches!(item.status, ItemStatus::Rendering { .. })
+            && ui
+                .button(tr("Remove"))
+                .labeled(egui::WidgetType::Button, &name("Remove"))
+                .clicked()
         {
             *remove = Some(item.id);
         }
@@ -699,6 +801,8 @@ fn item_ui(
     }
     ui.add_enabled_ui(editable, |ui| {
         egui::Grid::new("output").num_columns(2).show(ui, |ui| {
+            // Fields are named after the label in front of them and the item
+            // (screen readers read "… · Format: PNG", issue #128).
             ui.label(tr("Format"));
             let mut format = item.format;
             egui::ComboBox::from_id_salt("format")
@@ -707,19 +811,60 @@ fn item_ui(
                     for f in FORMATS {
                         ui.selectable_value(&mut format, f, format_label(f));
                     }
-                });
+                })
+                .response
+                .labeled_value(
+                    egui::WidgetType::ComboBox,
+                    &name("Format"),
+                    format_label(item.format),
+                );
             if format != item.format {
                 item.set_format(format);
             }
             ui.end_row();
             ui.label(tr("Output To"));
-            ui.add(egui::TextEdit::singleline(&mut item.output).desired_width(f32::INFINITY));
+            ui.vertical(|ui| {
+                let output = item.output.clone();
+                ui.add(egui::TextEdit::singleline(&mut item.output).desired_width(f32::INFINITY))
+                    .labeled_value(egui::WidgetType::TextEdit, &name("Output To"), &output);
+                // AE: the format decides the extension.
+                if let Some(ext) = extension_follows_format(&item.output, item.format) {
+                    ui.weak(
+                        tr("The file will be saved as .{ext} to match the format.")
+                            .replace("{ext}", ext),
+                    );
+                }
+            });
             ui.end_row();
             ui.label(tr("Frames"));
+            // Typed and dragged values stay inside the comp (AE); a range set
+            // otherwise (or a comp shortened later) is limited, or refused when
+            // entirely outside, at render time.
+            let last = last.unwrap_or(i64::MAX).max(0);
             ui.horizontal(|ui| {
-                ui.add(egui::DragValue::new(&mut item.start).range(i64::MIN..=item.end));
+                let start = item.start.to_string();
+                ui.add(
+                    egui::DragValue::new(&mut item.start)
+                        .range(0..=item.end.clamp(0, last))
+                        .clamp_existing_to_range(false),
+                )
+                .labeled_value(
+                    egui::WidgetType::DragValue,
+                    &bae_ui::a11y::context(&[&item_ctx, tr("Frames"), tr("Start")]),
+                    &start,
+                );
                 ui.label("–");
-                ui.add(egui::DragValue::new(&mut item.end).range(item.start..=i64::MAX));
+                let end = item.end.to_string();
+                ui.add(
+                    egui::DragValue::new(&mut item.end)
+                        .range(item.start.clamp(0, last)..=last)
+                        .clamp_existing_to_range(false),
+                )
+                .labeled_value(
+                    egui::WidgetType::DragValue,
+                    &bae_ui::a11y::context(&[&item_ctx, tr("Frames"), tr("End")]),
+                    &end,
+                );
             });
             ui.end_row();
         });
@@ -740,7 +885,6 @@ fn format_label(format: ExportFormat) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use bae_gpu::GpuContextDescriptor;
     use bae_model::{Project, TimeRange, Value};
 
     use super::*;
@@ -785,7 +929,7 @@ mod tests {
         assert!(q.begin());
         assert!(!q.begin(), "already rendering");
         let late = q.add(&comp_info("/comps/late", "Late"), dir);
-        let job = q.take_next().unwrap();
+        let job = q.take_next(&|_| Some(30)).unwrap();
         assert_eq!((job.id, job.start, job.end), (a, 3, 8));
         assert!(matches!(
             q.items()[0].status,
@@ -812,13 +956,62 @@ mod tests {
         assert_eq!(q.items()[1].status, ItemStatus::Queued);
         assert!(!q.items()[1].cancel.load(Ordering::Relaxed));
         // Queued after Render was pressed: waits for the next render.
-        assert!(q.take_next().is_none());
+        assert!(q.take_next(&|_| Some(30)).is_none());
         assert_eq!(q.items()[2].status, ItemStatus::Queued);
         assert!(q.remove(late));
         assert!(q.remove(b));
         assert_eq!(q.items().len(), 1);
         assert_eq!(sanitize("  ../a#b  "), "_a_b");
         assert_eq!(sanitize("..."), "comp");
+    }
+
+    /// Issue #110: an empty output is refused; a name without the format's
+    /// extension gets it; one with an image or movie extension is kept.
+    #[test]
+    fn output_path_rules() {
+        assert!(output_path(Path::new(""), ExportFormat::Png, "C").is_err());
+        assert!(output_path(Path::new("  "), ExportFormat::Png, "C").is_err());
+        let p = |s: &str, f| output_path(Path::new(s), f, "Comp 1").unwrap();
+        assert_eq!(
+            p("/r/noext_[####]", ExportFormat::Png),
+            Path::new("/r/noext_[####].png")
+        );
+        assert_eq!(
+            p("/r/v1.2_[####]", ExportFormat::Tiff),
+            Path::new("/r/v1.2_[####].tif")
+        );
+        assert_eq!(
+            p("/r/a_####.exr", ExportFormat::Exr),
+            Path::new("/r/a_####.exr")
+        );
+        // The format decides the extension (AE).
+        assert_eq!(
+            p("/r/a_####.png", ExportFormat::Tiff),
+            Path::new("/r/a_####.tif")
+        );
+        assert_eq!(
+            p("/r/a_####.tiff", ExportFormat::Tiff),
+            Path::new("/r/a_####.tiff")
+        );
+        // A folder: the comp's name inside it.
+        assert_eq!(
+            p("/r/out/", ExportFormat::Png),
+            Path::new("/r/out/Comp 1_[####].png")
+        );
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            p(dir.path().to_str().unwrap(), ExportFormat::Exr),
+            dir.path().join("Comp 1_[####].exr")
+        );
+        assert_eq!(
+            extension_follows_format("/r/a.png", ExportFormat::Tiff),
+            Some("tif")
+        );
+        assert_eq!(
+            extension_follows_format("/r/a.tif", ExportFormat::Tiff),
+            None
+        );
+        assert_eq!(extension_follows_format("/r/a", ExportFormat::Tiff), None);
     }
 
     #[test]
@@ -848,15 +1041,23 @@ mod tests {
             .to_string_lossy()
             .into_owned();
         assert!(q.begin());
-        let job = q.take_next().unwrap();
+        let job = q
+            .take_next(&|c| bae_motion::query::comp_info(&stage, c).map(|i| i.frame_count()))
+            .unwrap();
         let mut renderer = Renderer::new(gpu);
         let mut evaluator = AnimEvaluator::new(None);
         let cancel = job.cancel.clone();
-        let status = render_job(&mut renderer, &mut evaluator, &stage, &job, &mut |done| {
-            if done == 5 {
-                cancel.store(true, Ordering::Relaxed);
-            }
-        })
+        let status = render_job(
+            &mut renderer,
+            &mut evaluator,
+            &stage,
+            &job,
+            &mut |done, _| {
+                if done == 5 {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            },
+        )
         .unwrap();
         let ItemStatus::Stopped { done, total, first } = status else {
             panic!("{status:?}");
@@ -866,6 +1067,83 @@ mod tests {
         assert_eq!(first, Some(dir.path().join("stop/f_0000.png")));
         let on_disk = std::fs::read_dir(dir.path().join("stop")).unwrap().count();
         assert_eq!(on_disk, done, "every rendered frame is kept");
+    }
+
+    /// The app's render queue renders on the app's `Arc<GpuContext>` resource and
+    /// never creates a device of its own (one device per process, #154).
+    #[test]
+    fn start_renders_on_the_apps_gpu_context() {
+        let Some(gpu) = gpu() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let (stage, comp) = project();
+        let info = bae_motion::query::comp_info(&stage, &comp).unwrap();
+        let queue = SharedRenderQueue::default();
+        let id = {
+            let mut q = queue.lock();
+            let id = q.add(&info, dir.path());
+            q.item_mut(id).unwrap().output = dir.path().join("f_####.png").to_string_lossy().into();
+            id
+        };
+        let mut resources = Resources::new();
+        resources.insert(gpu);
+        let extra_before = GpuContext::extra_devices_created();
+        start(&queue, &stage, &resources).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        while queue.lock().is_running() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "render queue timed out"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let q = queue.lock();
+        let item = q.items().iter().find(|i| i.id == id).unwrap();
+        assert!(
+            matches!(item.status, ItemStatus::Done { .. }),
+            "{:?}",
+            item.status
+        );
+        assert_eq!(GpuContext::extra_devices_created(), extra_before);
+    }
+
+    #[test]
+    fn progress_counts_the_limited_range_from_the_start() {
+        // #157: 1780–1900 of an 1800-frame comp renders 20 frames. The item
+        // shows “0 / 20” as soon as the worker takes it, not “0 / 121” until
+        // render_job has limited the range.
+        let mut q = RenderQueue::default();
+        let dir = Path::new("/renders");
+        let add = |q: &mut RenderQueue, comp: &str, start: i64, end: i64| {
+            let id = q.add(&comp_info(comp, "C"), dir);
+            let item = q.item_mut(id).unwrap();
+            (item.start, item.end) = (start, end);
+            id
+        };
+        let past_end = add(&mut q, "/comps/long", 1780, 1900);
+        let outside = add(&mut q, "/comps/long", 1900, 1950);
+        let gone = add(&mut q, "/comps/deleted", 0, 10);
+        let frames = |c: &PrimPath| (c.as_str() == "/comps/long").then_some(1800);
+        assert!(q.begin());
+        let status = |q: &RenderQueue, id: u64| {
+            q.items()
+                .iter()
+                .find(|i| i.id == id)
+                .unwrap()
+                .status
+                .clone()
+        };
+        for (id, total) in [(past_end, 20), (outside, 0), (gone, 0)] {
+            let job = q.take_next(&frames).unwrap();
+            assert_eq!(job.id, id);
+            assert_eq!(status(&q, id), ItemStatus::Rendering { done: 0, total });
+        }
+        // render_job uses the same limits.
+        assert_eq!(limited_range(1780, 1900, 1800), Some((1780, 1799)));
+        assert_eq!(limited_range(-5, 3, 10), Some((0, 3)));
+        assert_eq!(limited_range(10, 20, 10), None);
+        assert_eq!(limited_range(4, 4, 10), Some((4, 4)));
     }
 
     #[test]
@@ -908,11 +1186,7 @@ mod tests {
     }
 
     fn gpu() -> Option<Arc<GpuContext>> {
-        let gpu = GpuContext::new_headless(GpuContextDescriptor::default()).ok();
-        if gpu.is_none() {
-            eprintln!("no GPU, skipping");
-        }
-        gpu
+        bae_gpu::testing::shared_context()
     }
 
     /// The worker renders every queued item in order (PNG and TIFF), with

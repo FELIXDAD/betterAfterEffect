@@ -30,6 +30,7 @@ MyFilm.bae/
 
 - `layer_stack`：强 → 弱。
 - `path_mappings`：团队的素材路径映射（见第 5 节），可省略。
+- `view`：桌面应用保存时打开着的合成和各自的当前时间（`{"comps": [{"path": "/comps/Comp_1", "time": 0}], "active": "/comps/Comp_1"}`），打开工程时恢复（同 AE）。不是工程数据：不经过命令、不算未保存的修改，可省略；由 `apps/bae/src/view_state.rs` 读写。打包（`bae pack`、`package.pack`）时和其他字段一起带进 `.baez`，打开包时恢复（#131）。
 - 不认识的字段原样保留，保存时写回（新版本加的字段不会被旧版本丢掉）。
 
 ### 版本与迁移

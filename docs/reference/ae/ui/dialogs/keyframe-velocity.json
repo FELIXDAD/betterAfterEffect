@@ -1,0 +1,143 @@
+{
+  "schemaVersion": "1.0",
+  "id": "keyframe-velocity",
+  "title": {
+    "zh": "关键帧速度",
+    "en": "Keyframe Velocity"
+  },
+  "triggers": [
+    {
+      "action": "Keyframe Velocity",
+      "shortcutWin": "Ctrl+Shift+K",
+      "menuZh": "动画 ▸ 关键帧速度..."
+    }
+  ],
+  "source": {
+    "application": "Adobe After Effects 26.0 (26.0x67)",
+    "platform": "Windows 11 Pro x64 (3840x2160 @ 150% DPI)",
+    "localeObserved": "zh_CN",
+    "method": "Live MSAA inspection + interactive tab/radio/dropdown probing + ExtendScript range probing"
+  },
+  "geometry": {
+    "physicalPxAt144Dpi": {
+      "w": 904,
+      "h": 401
+    },
+    "logicalPxAt96Dpi": {
+      "w": 603,
+      "h": 267
+    },
+    "multiDim2dPhysicalPxAt144Dpi": {
+      "w": 904,
+      "h": 527
+    },
+    "multiDim2dLogicalPxAt96Dpi": {
+      "w": 603,
+      "h": 351
+    }
+  },
+  "persistence": {
+    "remembersLastValues": false,
+    "notesZh": "实时读取当前选中关键帧的传入/传出速度、影响百分比与连续性状态；不同属性维度会动态调整窗口高度与行数。"
+  },
+  "buttonBar": {
+    "position": "bottom_right",
+    "right": [
+      {
+        "id": "ok",
+        "type": "button",
+        "zh": "确定",
+        "en": "OK",
+        "role": "accept"
+      },
+      {
+        "id": "cancel",
+        "type": "button",
+        "zh": "取消",
+        "en": "Cancel",
+        "role": "reject"
+      }
+    ]
+  },
+  "tabs": [],
+  "controls": [
+    {
+      "id": "keyframe_type_header",
+      "type": "static_text",
+      "zh": "关键帧类型: <属性名>",
+      "en": "Keyframe Type: <Property Name>",
+      "notesZh": "实测显示“关键帧类型: 位置”、“关键帧类型: 缩放”、“关键帧类型: 不透明度”。"
+    },
+    {
+      "id": "lock_dimensions_in_out",
+      "type": "checkbox_pair",
+      "zh": "锁定维度（传入 / 传出各一）",
+      "en": "Lock Dimensions (Incoming & Outgoing)",
+      "defaultValue": false,
+      "enableRuleZh": "仅非空间多维属性（如 2D/3D 缩放）显示；单维属性（不透明度）与空间属性（位置）隐藏此控件。"
+    },
+    {
+      "id": "incoming_velocity",
+      "type": "number_scrub_group",
+      "internalName": "VelInfGroup1..3_velocityValue",
+      "zh": "传入速度（空间显示“速度:”；多维按“维度: X/Y/Z”分行）",
+      "en": "Incoming Velocity (Speed: for spatial; Dimension: X/Y/Z rows for multi-dim)",
+      "unit": "property_units/sec (px/sec for spatial)",
+      "defaultValue": "<当前关键帧传入速度>",
+      "notesZh": "左右双栏对称排布（左栏传入速度，右栏传出速度）；线性位置关键帧显示路径标量速率（px/s），缩放/不透明度显示带符号变化率（%/s）。"
+    },
+    {
+      "id": "incoming_influence",
+      "type": "number_scrub_group",
+      "internalName": "VelInfGroup1..3_influenceValue",
+      "zh": "传入影响:",
+      "en": "Incoming Influence:",
+      "unit": "%",
+      "defaultValue": 33.33,
+      "range": {
+        "min": 0.1,
+        "max": 100.0,
+        "uiLinearDisplay": 0.01
+      },
+      "notesZh": "ExtendScript KeyframeEase 实测硬边界为 0.1–100%；线性关键帧在 UI 中初始显示 0.01%，缓动关键帧默认 33.33%。"
+    },
+    {
+      "id": "outgoing_velocity",
+      "type": "number_scrub_group",
+      "internalName": "VelInfGroup4..6_velocityValue",
+      "zh": "传出速度（结构同左栏）",
+      "en": "Outgoing Velocity (mirrors Incoming)",
+      "unit": "property_units/sec (px/sec for spatial)",
+      "defaultValue": "<当前关键帧传出速度>"
+    },
+    {
+      "id": "outgoing_influence",
+      "type": "number_scrub_group",
+      "internalName": "VelInfGroup4..6_influenceValue",
+      "zh": "传出影响:",
+      "en": "Outgoing Influence:",
+      "unit": "%",
+      "defaultValue": 33.33,
+      "range": {
+        "min": 0.1,
+        "max": 100.0,
+        "uiLinearDisplay": 0.01
+      }
+    },
+    {
+      "id": "continuous_lock",
+      "type": "checkbox",
+      "zh": "连续（锁定传出到传入）",
+      "en": "Continuous (Lock Outgoing to Incoming)",
+      "defaultValue": false,
+      "enableRuleZh": "勾选后自动将传出速度锁定为与传入速度一致（转为连续贝塞尔）。"
+    },
+    {
+      "id": "keyframe_status_footer",
+      "type": "static_text",
+      "zh": "对于在时间 <时间码> 的关键帧 #<序号>",
+      "en": "For keyframe #<Index> at time <Timecode>",
+      "notesZh": "右下按钮上方只读提示当前编辑的关键帧序号与时间位置。"
+    }
+  ]
+}

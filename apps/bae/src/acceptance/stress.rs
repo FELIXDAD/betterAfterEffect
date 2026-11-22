@@ -53,10 +53,11 @@ fn deep_undo_stack_round_trips() {
 #[test]
 fn rapid_repeated_commands() {
     let mut h = gui();
-    key(&mut h, Modifiers::COMMAND, Key::N);
-    // 100 Cmd+Y presses in a row: 100 solids, unique names.
+    new_comp(&mut h);
+    // 100 Cmd+Y, Enter (Solid Settings, OK) in a row: 100 solids, unique names.
     for _ in 0..100 {
         press(&mut h, Modifiers::COMMAND, Key::Y);
+        press(&mut h, Modifiers::NONE, Key::Enter);
     }
     settle(&mut h);
     let names = h.state().layer_names();
@@ -94,13 +95,12 @@ fn rapid_repeated_commands() {
     );
     key(&mut h, Modifiers::COMMAND, Key::Z);
     assert_eq!(h.state().layers().len(), after_split);
-    // Repeated splits after the first fail while #108 keeps the first half
-    // selected ("no layer is active at the split time"); nothing else may fail.
+    // Split selects the new part (#108), so repeated splits all succeed.
     let failed: Vec<_> = h
         .state()
         .outcomes
         .iter()
-        .filter(|(id, o)| o.starts_with("failed") && id != "layer.split")
+        .filter(|(_, o)| o.starts_with("failed"))
         .collect();
     assert!(failed.is_empty(), "{failed:?}");
 }
@@ -108,9 +108,10 @@ fn rapid_repeated_commands() {
 #[test]
 fn frame_time_with_many_layers() {
     let mut h = gui();
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
+    // Adjustment layers: solid-sourced like solids, made without a dialog.
     for _ in 0..200 {
-        press(&mut h, Modifiers::COMMAND, Key::Y);
+        press(&mut h, Modifiers::COMMAND | Modifiers::ALT, Key::Y);
     }
     settle(&mut h);
     assert_eq!(h.state().layers().len(), 200);
@@ -125,15 +126,28 @@ fn frame_time_with_many_layers() {
 }
 
 #[test]
-#[ignore = "issue #114"]
 fn key_presses_piled_up_in_one_frame() {
     // A slow frame (heavy comp, debug build) collects several key events; each
     // still runs once, against the project as the previous one left it.
     let mut h = gui();
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
+    // Five Cmd+Y in one frame: one Solid Settings dialog, OK makes one solid.
     let mut events = Vec::new();
     for _ in 0..5 {
         events.extend(key_events(Modifiers::COMMAND, Key::Y));
+    }
+    send_batch(&mut h, events);
+    settle(&mut h);
+    assert!(dialog_open(&h));
+    confirm_dialog(&mut h);
+    settle(&mut h);
+    assert_eq!(h.state().layer_names().len(), 1);
+    key(&mut h, Modifiers::COMMAND, Key::Z);
+    assert!(h.state().layer_names().is_empty());
+    // Layers made without a dialog: each press runs once.
+    let mut events = Vec::new();
+    for _ in 0..5 {
+        events.extend(key_events(Modifiers::COMMAND | Modifiers::ALT, Key::Y));
     }
     send_batch(&mut h, events);
     settle(&mut h);
@@ -142,10 +156,71 @@ fn key_presses_piled_up_in_one_frame() {
     let mut unique = names.clone();
     unique.sort();
     unique.dedup();
-    println!("five Cmd+Y in one frame: {names:?}");
+    println!("five Cmd+Alt+Y in one frame: {names:?}");
     assert_eq!(
         unique.len(),
         5,
         "same-frame presses made layers with the same name: {names:?}"
     );
+}
+
+#[test]
+fn same_frame_names_stay_unique_across_kinds_comps_and_renamed_layers() {
+    let mut h = gui();
+    new_comp(&mut h);
+    // A layer renamed to "Adjustment Layer 7": new ones continue after it
+    // (AE: max + 1). (New Solid asks for Solid Settings, one at a time.)
+    assert!(h.state_mut().menu("motion.layer.new.adjustment"));
+    settle(&mut h);
+    let first = h.state().layers()[0].clone();
+    h.state_mut().invoke(Invocation::with_params(
+        "attr.set",
+        serde_json::json!({"path": first, "attr": "name", "value": {"type": "string", "value": "Adjustment Layer 7"}}),
+    ));
+    settle(&mut h);
+    let mut events = Vec::new();
+    for _ in 0..3 {
+        events.extend(key_events(Modifiers::COMMAND | Modifiers::ALT, Key::Y));
+    }
+    for _ in 0..2 {
+        events.extend(key_events(
+            Modifiers::COMMAND | Modifiers::ALT | Modifiers::SHIFT,
+            Key::Y,
+        ));
+    }
+    send_batch(&mut h, events);
+    settle(&mut h);
+    let mut names = h.state().layer_names();
+    names.sort();
+    assert_eq!(
+        names,
+        [
+            "Adjustment Layer 10",
+            "Adjustment Layer 7",
+            "Adjustment Layer 8",
+            "Adjustment Layer 9",
+            "Null 1",
+            "Null 2"
+        ],
+        "same-frame names"
+    );
+    // Two Cmd+N in one frame: one Composition Settings (a second dialog does
+    // not replace or stack on the first); OK makes Comp 2 and opens it.
+    let mut events = Vec::new();
+    for _ in 0..2 {
+        events.extend(key_events(Modifiers::COMMAND, Key::N));
+    }
+    send_batch(&mut h, events);
+    settle(&mut h);
+    assert!(dialog_open(&h));
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(!dialog_open(&h));
+    let mut comps: Vec<String> = bae_motion::query::comps(h.state().stage())
+        .iter()
+        .map(|c| h.state().name(c))
+        .collect();
+    comps.sort();
+    assert_eq!(comps, ["Comp 1", "Comp 2"]);
+    let active = h.state().active_comp().unwrap();
+    assert_eq!(h.state().name(&active), "Comp 2");
 }

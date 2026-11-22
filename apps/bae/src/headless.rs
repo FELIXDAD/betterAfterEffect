@@ -26,6 +26,10 @@ const SCREENSHOT_ENV: &str = "BAE_SMOKE_SCREENSHOT";
 
 /// Runs headless mode.
 pub fn run(app: &mut App, global: &GlobalOptions) -> ExitCode {
+    if global.smoke_test.is_some() {
+        // The smoke test draws the UI: load its system fonts during GPU setup.
+        bae_ui::theme::prefetch_system_ui_fonts();
+    }
     crate::i18n::init_from_env();
     let desc = app
         .resource::<GpuContextDescriptor>()
@@ -63,7 +67,11 @@ pub fn run(app: &mut App, global: &GlobalOptions) -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(error) => {
-                eprintln!("{}: {error:#}", bae_platform::BINARY_NAME);
+                eprintln!(
+                    "{}: {}",
+                    bae_platform::BINARY_NAME,
+                    crate::file_error::describe_open(path, &error)
+                );
                 ExitCode::FAILURE
             }
         };
@@ -84,7 +92,7 @@ fn smoke_test(
             ExitCode::SUCCESS
         }
         Err(error) => {
-            tracing::error!("smoke test failed: {error:#}");
+            tracing::debug!("smoke test failed: {error:#}");
             eprintln!("smoke test failed: {error:#}");
             ExitCode::FAILURE
         }
@@ -130,7 +138,10 @@ fn render_offscreen(
     let mut document = Document::new(app.resource::<Arc<bae_ui::history::HistoryLog>>().cloned());
     document.add_module_commands(app);
     if let Some(path) = project {
-        document.open(path)?;
+        document
+            .open(path)
+            .map_err(|error| anyhow::anyhow!(crate::file_error::describe_open(path, &error)))?;
+        crate::view_state::restore(app, &document);
     }
     // `BAE_SMOKE_DEMO=1`: a demo project open in the Motion workspace (screenshots).
     let demo = std::env::var_os("BAE_SMOKE_DEMO").is_some();
@@ -143,7 +154,7 @@ fn render_offscreen(
         bae_ui_motion::demo::open(app.resources(), document.stage());
     }
     let mut status = StatusInfo {
-        gpu: gpu.summary(),
+        gpu: ui::gpu_summary(gpu),
         size_px: SMOKE_SIZE,
         pixels_per_point: 1.0,
         ..StatusInfo::default()
@@ -166,8 +177,18 @@ fn render_offscreen(
         let output = egui_ctx.run_ui(input, |ui| {
             invocations = workspace.ui(ui, &status, &document, resources);
         });
+        // `BAE_SMOKE_INVOKE=<action>[,<action>…]`: run actions after the first
+        // frame (screenshots of dialogs, e.g. `motion.comp.composition_settings`).
+        if frame == 1
+            && let Some(ids) = std::env::var_os("BAE_SMOKE_INVOKE")
+        {
+            for id in ids.to_string_lossy().split(',').filter(|s| !s.is_empty()) {
+                invocations.push(bae_ui::Invocation::new(id.trim()));
+            }
+        }
         // Cycle through every workspace so each preset's panels get drawn.
-        if !demo && frame % 10 == 9 && !workspaces.is_empty() {
+        let invoking = std::env::var_os("BAE_SMOKE_INVOKE").is_some();
+        if !demo && !invoking && frame % 10 == 9 && !workspaces.is_empty() {
             let next = &workspaces[(frame as usize / 10 + 1) % workspaces.len()].0;
             invocations.push(bae_ui::Invocation::with_params(
                 bae_ui::action::ids::SWITCH_WORKSPACE,

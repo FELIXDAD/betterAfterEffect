@@ -242,6 +242,9 @@ impl FileDialogs for NoQuestions {
     fn ask_unsaved(&mut self, _: &str) -> UnsavedChoice {
         panic!("unexpected question")
     }
+    fn confirm_replace(&mut self, _: &str) -> bool {
+        panic!("unexpected replace question")
+    }
     fn error(&mut self, message: &str) {
         panic!("{message}")
     }
@@ -450,7 +453,7 @@ mod edit_then_save {
 
     #[test]
     fn enter_and_save_in_one_frame_save_after_the_edit() {
-        let ctx = Context::default();
+        let ctx = bae_ui::testing::ctx_with_fonts();
         let mut wb = workbench();
         frame(&ctx, &mut wb, vec![]);
         frame(&ctx, &mut wb, vec![]);
@@ -474,7 +477,7 @@ mod edit_then_save {
 
     #[test]
     fn save_while_typing_commits_the_value_first() {
-        let ctx = Context::default();
+        let ctx = bae_ui::testing::ctx_with_fonts();
         let mut wb = workbench();
         frame(&ctx, &mut wb, vec![]);
         frame(&ctx, &mut wb, vec![]);
@@ -573,7 +576,7 @@ mod ui_flow {
                 app,
                 workspace,
                 doc,
-                ctx: Context::default(),
+                ctx: bae_ui::testing::ctx_with_fonts(),
             }
         }
 

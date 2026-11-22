@@ -5,7 +5,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use bae_gpu::{GpuContext, GpuContextDescriptor, GpuError};
+use bae_gpu::GpuContext;
 
 /// Writes an 8-bit PNG.
 pub fn write_png(path: &Path, width: u32, height: u32, color: png::ColorType, data: &[u8]) {
@@ -47,17 +47,7 @@ pub fn write_solid_png(path: &Path, width: u32, height: u32, rgba: [u8; 4]) {
 
 /// The shared device, or `None` (test skipped) without an adapter.
 pub fn gpu() -> Option<Arc<GpuContext>> {
-    match GpuContext::new_headless(GpuContextDescriptor::default().with_env()) {
-        Ok(ctx) => Some(ctx),
-        Err(error @ GpuError::NoAdapter { .. }) => {
-            if std::env::var_os("BAE_REQUIRE_GPU").is_some_and(|v| v == "1") {
-                panic!("BAE_REQUIRE_GPU=1 but {error}");
-            }
-            eprintln!("skipping GPU test: {error}");
-            None
-        }
-        Err(error) => panic!("GPU context creation failed: {error}"),
-    }
+    bae_gpu::testing::shared_context()
 }
 
 /// Asserts two float pixels are within `tolerance`.

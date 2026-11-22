@@ -16,9 +16,13 @@
 //! Add [`UiModule`] (the shell does) so the built-in actions are registered and
 //! layouts never show an unknown panel. See `docs/spec/ui-shell.md`.
 
+pub mod a11y;
 pub mod action;
 pub mod agent;
+pub mod color_picker;
+pub mod dialog;
 pub mod dock;
+pub mod files;
 pub mod history;
 pub mod i18n;
 pub mod icons;
@@ -26,21 +30,29 @@ pub mod keymap;
 pub mod menu;
 pub mod panel;
 pub mod presets;
+pub mod settings;
+pub mod testing;
 pub mod theme;
 pub mod titlebar;
+pub mod toolbar;
 pub mod widgets;
 pub mod workbench;
 pub mod workspace;
 
 use bae_app::{AppBuilder, AppModule};
 
-pub use action::{ActionHandler, ActionInfo, Invocation};
+pub use a11y::Accessible;
+pub use action::{ActionHandler, ActionInfo, CommandVariant, Invocation};
+pub use dialog::DialogHost;
 pub use dock::{Dock, DropZone, Frame, FrameId, Layout, Node, PanelHost, PanelId, TabInfo};
 pub use i18n::{Lang, tr};
 pub use icons::Icon;
 pub use keymap::{Binding, Chord, Conflict, Keymap, KeymapBindings, KeymapOverrides};
 pub use menu::{MenuContext, MenuEntry, MenuItemSpec, MenuTree};
-pub use panel::{Panel, PanelContext, PanelKind, PanelRequests, PanelSpawn, panel_key_pressed};
+pub use panel::{
+    Panel, PanelContext, PanelKind, PanelRequests, PanelSpawn, modal_open, panel_key_pressed,
+};
+pub use toolbar::Toolbar;
 pub use workbench::{Workbench, WorkbenchContext, WorkbenchState};
 pub use workspace::WorkspacePreset;
 
@@ -76,6 +88,7 @@ impl AppModule for UiModule {
         if let Err(error) = app.register(presets::AE_KEYMAP, presets::ae_keymap()) {
             debug_assert!(false, "keymap: {error}");
         }
+        settings::register(app);
         // The history log the shell feeds from `Stage::subscribe`.
         if app
             .resource::<std::sync::Arc<history::HistoryLog>>()
@@ -126,9 +139,16 @@ impl AppModule for UiModule {
     }
 }
 
-/// English titles of the AE panels the default workspaces use, for placeholders.
+/// English title of a placeholder panel: the AE name when known, else the id.
 fn placeholder_title(kind: &str) -> String {
-    let known = [
+    known_panel_title(kind).map_or_else(|| kind.to_owned(), str::to_owned)
+}
+
+/// English titles of the AE panels the default workspaces and keymaps use. The
+/// shortcut editor also uses them for panels that are not registered (a binding
+/// such as Cmd+6 = Character), so it never shows a raw id (#136).
+pub(crate) fn known_panel_title(kind: &str) -> Option<&'static str> {
+    const KNOWN: [(&str, &str); 17] = [
         ("project", "Project"),
         ("composition", "Composition"),
         ("timeline", "Timeline"),
@@ -147,10 +167,10 @@ fn placeholder_title(kind: &str) -> String {
         ("agent_activity", "Agent Activity"),
         ("agent_proposals", "Proposals"),
     ];
-    known
+    KNOWN
         .iter()
         .find(|(k, _)| *k == kind)
-        .map_or_else(|| kind.to_owned(), |(_, title)| (*title).to_owned())
+        .map(|(_, title)| *title)
 }
 
 #[cfg(test)]

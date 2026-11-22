@@ -10,7 +10,7 @@
 
 use std::path::Path;
 
-use bae_gpu::{GpuContext, GpuContextDescriptor, wgpu};
+use bae_gpu::{GpuContext, wgpu};
 use bae_model::{PrimPath, Time};
 use bae_render::png_out::read_rgba8;
 use bae_render::{AnimEvaluator, CompEvaluator, OutputAlpha, RenderRequest, Renderer};
@@ -33,12 +33,8 @@ fn adapter_slack(gpu: &GpuContext) -> u8 {
 
 #[test]
 fn matches_after_effects() {
-    let gpu = match GpuContext::new_headless(GpuContextDescriptor::default()) {
-        Ok(gpu) => gpu,
-        Err(e) => {
-            eprintln!("no GPU, skipping: {e}");
-            return;
-        }
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
     };
     let assets = tempfile::tempdir().unwrap();
     cases::prepare(assets.path());
@@ -62,7 +58,13 @@ fn matches_after_effects() {
         let img = renderer
             .read_rgba8(&frame, OutputAlpha::Premultiplied)
             .unwrap();
-        let (w, h, ae) = read_rgba8(&golden.join(format!("{name}.png"))).unwrap();
+        let file = golden.join(format!("{name}.png"));
+        if !file.exists() && cases::pending(name) {
+            // Needs a run on a machine with AE (tests/ae/README.md).
+            eprintln!("{name}: no AE golden yet (pending_golden), skipped");
+            continue;
+        }
+        let (w, h, ae) = read_rgba8(&file).unwrap();
         assert_eq!((w, h), (img.width, img.height), "{name}: size");
         let d = cases::diff(w, &img.data, &ae);
         eprintln!(

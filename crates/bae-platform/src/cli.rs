@@ -19,7 +19,7 @@
 
 use std::ffi::OsString;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -162,6 +162,44 @@ pub fn reserved_subcommands() -> Vec<CliSubcommand> {
     ]
 }
 
+/// How the application explains a project that does not open (which file, what
+/// is wrong, in the UI language). The app installs it as a resource; subcommands
+/// from other crates (`bae render`) use it through [`project_open_error`] so every
+/// entry point says the same as `bae export-json`.
+#[derive(Clone)]
+pub struct ProjectOpenError(pub DescribeOpenError);
+
+/// Turns a project path and the error that kept it from opening into a message.
+pub type DescribeOpenError = Arc<dyn Fn(&Path, &anyhow::Error) -> String + Send + Sync>;
+
+impl fmt::Debug for ProjectOpenError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ProjectOpenError")
+    }
+}
+
+/// The error for a project at `path` that did not open: the app's wording when
+/// it installed [`ProjectOpenError`], otherwise "cannot open the project <path>:
+/// <cause>".
+pub fn project_open_error(
+    describe: Option<&ProjectOpenError>,
+    path: &Path,
+    error: anyhow::Error,
+) -> anyhow::Error {
+    match describe {
+        Some(d) => anyhow::anyhow!((d.0)(path, &error)),
+        None => {
+            let shown = path.display().to_string();
+            let message = format!("{error:#}");
+            if message.contains(&shown) {
+                anyhow::anyhow!("cannot open the project: {message}")
+            } else {
+                anyhow::anyhow!("cannot open the project {shown}: {message}")
+            }
+        }
+    }
+}
+
 /// Errors from [`implement`].
 #[derive(Debug, thiserror::Error)]
 pub enum ImplementError {
@@ -255,7 +293,6 @@ pub fn command<'a>(subcommands: impl IntoIterator<Item = &'a CliSubcommand>) -> 
         .about("BAE — GPU-first motion graphics and compositing")
         .version(crate::VERSION)
         .long_version(crate::version_details())
-        .args_conflicts_with_subcommands(true)
         .arg(
             Arg::new("headless")
                 .long("headless")
@@ -349,7 +386,9 @@ pub fn dispatch(
     match run(&mut ctx) {
         Ok(code) => code,
         Err(error) => {
-            tracing::error!(subcommand = name, "{error:#}");
+            // Printed once for the user; the log line only with --log / BAE_LOG /
+            // RUST_LOG turned up (stderr already shows warnings by default).
+            tracing::debug!(subcommand = name, "{error:#}");
             eprintln!("{} {name}: error: {error:#}", crate::BINARY_NAME);
             ExitCode::FAILURE
         }
@@ -412,6 +451,22 @@ mod tests {
         assert_eq!(name, "render");
         let code = dispatch(&mut app, &name, &matches, &global);
         assert_eq!(code, ExitCode::from(EXIT_NOT_IMPLEMENTED));
+    }
+
+    #[test]
+    fn global_log_before_subcommand() {
+        // `bae --log debug export-json x` must run the subcommand, not open the
+        // GUI with a project called "export-json".
+        let mut app = app();
+        let inv = parse_args(&mut app, &["--log", "debug", "gpu-info", "--json"]).unwrap();
+        let Invocation::Subcommand { name, global, .. } = inv else {
+            panic!("expected the subcommand");
+        };
+        assert_eq!(name, "gpu-info");
+        assert_eq!(global.log.as_deref(), Some("debug"));
+        // A project path is still a project path.
+        let inv = parse_args(&mut app, &["--log", "debug", "film.bae"]).unwrap();
+        assert!(matches!(inv, Invocation::Gui(ref g) if g.open.len() == 1));
     }
 
     #[test]
