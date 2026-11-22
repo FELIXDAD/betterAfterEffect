@@ -876,3 +876,28 @@ fn typed_frame_numbers_stay_inside_the_comp() {
     );
     println!("start/end after 250 then 100: {}–{}", item.start, item.end);
 }
+
+#[test]
+fn a_single_frame_numbers_the_output_name() {
+    // #207: start = end still numbers “[####]”; frame 5 then frame 6 keeps both.
+    let Some(mut h) = gpu_gui() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    for (format, ext) in [
+        (ExportFormat::Png, "png"),
+        (ExportFormat::Tiff, "tif"),
+        (ExportFormat::Exr, "exr"),
+    ] {
+        for frame in [5, 6] {
+            let out = tmp.path().join(format!("单帧_[####].{ext}"));
+            let i = queue_one(&mut h, format, &out, frame, frame);
+            render_watching_progress(&mut h, i);
+        }
+        let got = files_in(tmp.path(), ext);
+        assert_eq!(
+            got,
+            [format!("单帧_0005.{ext}"), format!("单帧_0006.{ext}")],
+            "{ext}"
+        );
+    }
+}

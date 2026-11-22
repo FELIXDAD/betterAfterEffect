@@ -1589,3 +1589,52 @@ fn mcp_names_new_items_in_the_language_of_its_environment() {
         "export-json depends on the UI language"
     );
 }
+
+/// #207 retest: a one-frame range still numbers a `####` / `[####]` output name,
+/// for PNG, TIFF and EXR, so rendering frame by frame keeps every frame.
+#[test]
+fn single_frame_renders_number_the_output_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tricky(tmp.path());
+    let project = dir.join("单帧 工程.bae");
+    make_project(&project);
+    // The comp's prim path (`--comp` does not take the display name: #214).
+    let comp = bae_motion::query::comps(&Project::open(&project).unwrap().stage)[0].to_string();
+    for ext in ["png", "tif", "exr"] {
+        for (pattern, want) in [
+            (format!("帧 a_####.{ext}"), ["帧 a_0005", "帧 a_0006"]),
+            (format!("帧 b_[####].{ext}"), ["帧 b_0005", "帧 b_0006"]),
+        ] {
+            for frames in ["5-5", "6-6"] {
+                let out = bae()
+                    .args(["render"])
+                    .arg(&project)
+                    .args(["--comp", &comp, "--frames", frames, "-o"])
+                    .arg(dir.join(&pattern))
+                    .output_within_limit()
+                    .unwrap();
+                assert!(
+                    out.status.success(),
+                    "{pattern} {frames}: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+            }
+            for name in want {
+                let file = dir.join(format!("{name}.{ext}"));
+                assert!(
+                    file.is_file(),
+                    "{pattern}: {} missing; folder has {:?}",
+                    file.display(),
+                    std::fs::read_dir(&dir)
+                        .unwrap()
+                        .map(|e| e.unwrap().file_name())
+                        .collect::<Vec<_>>()
+                );
+            }
+            assert!(
+                !dir.join(&pattern).exists(),
+                "{pattern} written with the # in its name"
+            );
+        }
+    }
+}
