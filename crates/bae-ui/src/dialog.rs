@@ -118,6 +118,7 @@ pub fn window<R>(
     if opened {
         w = w.current_pos(ctx.content_rect().center());
     }
+    take_enter(ctx);
     let shown = w.show(ctx, |ui| {
         ui.style_mut().spacing.item_spacing = vec2(8.0, 6.0);
         add_contents(ui)
@@ -191,6 +192,53 @@ pub fn buttons_labeled(ui: &mut Ui, ok_enabled: bool, ok: &str, cancel: &str) ->
     out
 }
 
+fn enter_id() -> Id {
+    Id::new("bae_ui.dialog.enter")
+}
+
+/// AE: in a dialog, Enter (and keypad Enter) is always the default button,
+/// OK; Space activates the focused control. egui clicks a focused button on
+/// Enter too, so unless a text field has the focus (a single-line one commits
+/// on Enter, a multi-line one makes a new line), this takes this frame's Enter
+/// before the dialog's controls see it, and [`keys`] reports it as OK. Call
+/// it before drawing the dialog ([`window`] does); returns whether it took
+/// one.
+pub fn take_enter(ctx: &egui::Context) -> bool {
+    let typing = ctx
+        .memory(|m| m.focused())
+        .is_some_and(|id| egui::TextEdit::load_state(ctx, id).is_some());
+    if typing {
+        return false;
+    }
+    let taken = ctx.input_mut(|i| {
+        let before = i.events.len();
+        i.events.retain(|e| {
+            !matches!(
+                e,
+                egui::Event::Key {
+                    key: egui::Key::Enter,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } if !modifiers.shift
+            )
+        });
+        i.events.len() != before
+    });
+    if taken {
+        let pass = ctx.cumulative_pass_nr();
+        ctx.data_mut(|d| d.insert_temp(enter_id(), pass));
+    }
+    taken
+}
+
+/// An Enter [`take_enter`] took in this pass (once: the first dialog that
+/// asks gets it).
+fn taken_enter(ctx: &egui::Context) -> bool {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| d.remove_temp::<u64>(enter_id())) == Some(pass)
+}
+
 /// Enter (OK) and Esc (Cancel) pressed this frame. Enter in a multi-line text
 /// field (one that keeps focus after Enter) does not count.
 pub fn keys(ctx: &egui::Context, ok_enabled: bool) -> Outcome {
@@ -200,6 +248,7 @@ pub fn keys(ctx: &egui::Context, ok_enabled: bool) -> Outcome {
             i.key_pressed(egui::Key::Escape),
         )
     });
+    let enter = enter || (ok_enabled && taken_enter(ctx));
     // Consume the key so a dialog under this one (the Color Picker over Solid
     // Settings) does not see it too.
     if escape {
@@ -245,4 +294,115 @@ pub fn group<R>(ui: &mut Ui, title: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
         .inner_margin(egui::Margin::same(8))
         .show(ui, add)
         .inner
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One dialog with a swatch-like button, a dropdown, a number, a
+    /// single-line and a multi-line text field.
+    struct Form {
+        clicked: bool,
+        number: f64,
+        line: String,
+        text: String,
+    }
+
+    const CONTROLS: [&str; 5] = ["button", "combo", "number", "line", "text"];
+
+    fn frame(
+        ctx: &egui::Context,
+        form: &mut Form,
+        events: Vec<egui::Event>,
+        focus: Option<&str>,
+    ) -> Outcome {
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                vec2(800.0, 600.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let mut outcome = Outcome::None;
+        let mut out = ctx.run_ui(raw, |ui| {
+            let shown = window(ui.ctx(), Id::new("form"), "Form", |ui| {
+                let mut responses = Vec::new();
+                let b = ui.button("Swatch");
+                form.clicked |= b.clicked();
+                responses.push(b);
+                let mut sel = 0;
+                responses.push(
+                    egui::ComboBox::from_id_salt("combo")
+                        .selected_text("A")
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut sel, 1, "B");
+                        })
+                        .response,
+                );
+                responses.push(ui.add(egui::DragValue::new(&mut form.number)));
+                responses.push(ui.text_edit_singleline(&mut form.line));
+                responses.push(ui.text_edit_multiline(&mut form.text));
+                if let Some(name) = focus {
+                    let i = CONTROLS.iter().position(|c| *c == name).unwrap();
+                    responses[i].request_focus();
+                }
+                buttons(ui, true)
+            });
+            outcome = shown.unwrap_or(Outcome::None);
+        });
+        out.textures_delta.clear();
+        outcome
+    }
+
+    fn key(k: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key: k,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// Issue #205: Enter is OK whatever control has the focus (AE), except in
+    /// a multi-line text field; it never activates the focused control.
+    #[test]
+    fn enter_is_ok_on_every_focused_control_but_multiline_text() {
+        for (control, ok) in [
+            ("button", true),
+            ("combo", true),
+            ("number", true),
+            ("line", true),
+            ("text", false),
+        ] {
+            let ctx = crate::testing::ctx_with_fonts();
+            let mut form = Form {
+                clicked: false,
+                number: 1.0,
+                line: String::new(),
+                text: String::new(),
+            };
+            frame(&ctx, &mut form, Vec::new(), Some(control));
+            frame(&ctx, &mut form, Vec::new(), None);
+            let got = frame(&ctx, &mut form, vec![key(egui::Key::Enter)], None);
+            let want = if ok { Outcome::Ok } else { Outcome::None };
+            assert_eq!(got, want, "Enter with {control} focused");
+            assert!(!form.clicked, "Enter clicked the focused {control}");
+        }
+        // Space still activates the focused button.
+        let ctx = crate::testing::ctx_with_fonts();
+        let mut form = Form {
+            clicked: false,
+            number: 1.0,
+            line: String::new(),
+            text: String::new(),
+        };
+        frame(&ctx, &mut form, Vec::new(), Some("button"));
+        frame(&ctx, &mut form, Vec::new(), None);
+        let got = frame(&ctx, &mut form, vec![key(egui::Key::Space)], None);
+        assert_eq!(got, Outcome::None);
+        assert!(form.clicked, "Space did not press the focused button");
+    }
 }
