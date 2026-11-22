@@ -149,7 +149,7 @@ impl AppMenu {
                 }
                 continue;
             }
-            let sub = Submenu::new(tr(title), true);
+            let sub = Submenu::new(native_text(tr(title)), true);
             append_entries(&sub, entries, &mut items)?;
             menu.append(&sub)?;
         }
@@ -234,7 +234,7 @@ impl AppMenu {
             (&self.redo, "Redo", state.1.as_deref()),
         ] {
             if let Some(c) = id.as_ref().and_then(|id| self.contributed.get(id)) {
-                c.item.set_text(&undo_redo_text(base, label));
+                c.item.set_text(&native_text(&undo_redo_text(base, label)));
             }
         }
         self.undo_state = state;
@@ -269,12 +269,20 @@ impl AppMenu {
     }
 }
 
+/// A title as the native menu needs it: muda reads a single `&` as a mnemonic
+/// marker and drops it (Windows and macOS), so "Effects & Presets" showed as
+/// "Effects  Presets" (#226); `&&` shows one `&`.
+fn native_text(text: &str) -> String {
+    text.replace('&', "&&")
+}
+
 /// The system's own item for a macOS application-menu action, if it has one.
 fn predefined(spec: &MenuItemSpec) -> Option<PredefinedMenuItem> {
     if !cfg!(target_os = "macos") || spec.path.first().map(String::as_str) != Some(APP_MENU) {
         return None;
     }
-    let text = Some(tr(&spec.title));
+    let owned = native_text(tr(&spec.title));
+    let text = Some(owned.as_str());
     Some(match spec.action.as_str() {
         ids::ABOUT => PredefinedMenuItem::about(text, Some(about_metadata())),
         "app.services" => PredefinedMenuItem::services(text),
@@ -301,11 +309,17 @@ fn append_entries(
                 }
                 let menu_id = format!("{CONTRIBUTED}{id}");
                 let item = if spec.is_checkable() {
-                    let item = CheckMenuItem::with_id(menu_id, tr(&spec.title), true, false, None);
+                    let item = CheckMenuItem::with_id(
+                        menu_id,
+                        native_text(tr(&spec.title)),
+                        true,
+                        false,
+                        None,
+                    );
                     menu.append(&item)?;
                     Native::Check(item)
                 } else {
-                    let item = MenuItem::with_id(menu_id, tr(&spec.title), true, None);
+                    let item = MenuItem::with_id(menu_id, native_text(tr(&spec.title)), true, None);
                     menu.append(&item)?;
                     Native::Plain(item)
                 };
@@ -322,7 +336,7 @@ fn append_entries(
             }
             MenuEntry::Submenu { title, entries } => {
                 // AE shows a submenu with nothing in it (History) greyed.
-                let sub = Submenu::new(tr(title), !entries.is_empty());
+                let sub = Submenu::new(native_text(tr(title)), !entries.is_empty());
                 append_entries(&sub, entries, items)?;
                 menu.append(&sub)?;
             }
@@ -599,6 +613,31 @@ mod tests {
             let cant = format!("Can’t {base}");
             assert!(bae_ui::i18n::has_translation(&cant), "{cant}");
             assert_eq!(undo_redo_text(base, None), tr(&cant));
+        }
+    }
+
+    /// #226: titles with `&` (Effects & Presets, Blur & Sharpen, Startup & Repair…)
+    /// keep it in the native menu.
+    #[test]
+    fn ampersands_survive_the_native_menu() {
+        assert_eq!(native_text("Effects & Presets"), "Effects && Presets");
+        assert_eq!(native_text("效果和预设"), "效果和预设");
+        assert_eq!(native_text("A && B"), "A &&&& B");
+        // Every registered title with an `&` is escaped where the menu is built.
+        let tree = app_menu_tree();
+        let with_amp: Vec<&str> = tree
+            .items()
+            .iter()
+            .map(|(_, s)| s.title.as_str())
+            .filter(|t| t.contains('&'))
+            .collect();
+        assert!(with_amp.contains(&"Effects & Presets"), "{with_amp:?}");
+        for t in with_amp {
+            assert_eq!(
+                native_text(t).matches("&&").count(),
+                t.matches('&').count(),
+                "{t}"
+            );
         }
     }
 
