@@ -661,10 +661,7 @@ fn click_labelled(h: &mut Ui, role: Role, label: &str) {
 fn pixel_units(zh: bool) {
     crate::i18n::init_from_env();
     let (mut h, extra_ok) = gui_with_status();
-    comp_with(
-        &mut h,
-        &["motion.layer.new.text", "motion.layer.new.rectangle"],
-    );
+    comp_with(&mut h, &["motion.layer.new.text", "shape:rect"]);
     let [rect, text]: [PrimPath; 2] = h.state().layers().try_into().unwrap();
     // Position keyframes at 0 s and 1 s on the rectangle.
     h.state().session().lock().selected_layers = vec![rect.clone()];
