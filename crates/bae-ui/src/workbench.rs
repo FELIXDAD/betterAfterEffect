@@ -1785,7 +1785,7 @@ mod tests {
         let mut wb =
             Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default())
                 .with_dialog_hosts(hosts);
-        let ctx = Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         let u = || key(Key::U, Modifiers::NONE);
         // Closed: shortcuts work.
         assert_eq!(
