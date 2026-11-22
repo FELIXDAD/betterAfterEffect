@@ -14,6 +14,11 @@
 | 4 | 解释素材: <文件名>（Interpret Footage: <Filename>） | `Ctrl+Alt+G` | [`dialogs/interpret-footage.json`](dialogs/interpret-footage.json) |
 | 5 | 时间延长（Time Stretch） | `图层 ▸ 时间 ▸ 时间伸缩(C)...` | [`dialogs/time-stretch.json`](dialogs/time-stretch.json) |
 | 6 | 自动方向（Auto-Orientation） | `Ctrl+Alt+O` | [`dialogs/auto-orient.json`](dialogs/auto-orient.json) |
+| 7 | 关键帧插值（Keyframe Interpolation） | `Ctrl+Alt+K` | [`dialogs/keyframe-interpolation.json`](dialogs/keyframe-interpolation.json) |
+| 8 | 关键帧速度（Keyframe Velocity） | `Ctrl+Shift+K` | [`dialogs/keyframe-velocity.json`](dialogs/keyframe-velocity.json) |
+| 9 | 转到时间（Go to Time） | `Alt+Shift+J` | [`dialogs/go-to-time.json`](dialogs/go-to-time.json) |
+| 10 | 合成标记 / 图层标记（Composition Marker / Layer Marker） | `Alt+Numpad * / Alt+Numpad *` | [`dialogs/markers.json`](dialogs/markers.json) |
+| 11 | <调用属性名>（如“背景颜色”、“灯光颜色”、“颜色”）（<Property Name> (e.g. Background Color, Light Color, Color)） | `点击任意颜色色块（如合成设置背景颜色、纯色/灯光/效果/文字颜色）` | [`dialogs/color-picker.json`](dialogs/color-picker.json) |
 
 ## 1. 合成设置（Composition Settings）
 
@@ -265,3 +270,99 @@
 |---:|---|---|---|---|---|---|
 | 1 | `radio_group` | 自动方向模式 | Auto-Orientation Mode | 关 | 关 / 沿路径定向 / 定位于摄像机 | 关：2D 与 3D 图层均显示；沿路径定向：2D 与 3D 图层均显示；定位于摄像机：仅 3D 图层显示；2D 图层隐藏该项（不渲染）。 |
 | 2 | `checkbox` | 独立定向每个字符（需要逐字 3D 化） | Orient Each Character Independently (requires Per-character 3D) | 未勾选 | — | 2D 图层完全隐藏；3D 非文字图层显示但置灰禁用；仅 3D 文字图层启用可勾选（与“定位于摄像机”配合，可自动开启逐字 3D）。 |
+
+## 7. 关键帧插值（Keyframe Interpolation）
+
+- **结构化数据**：[`dialogs/keyframe-interpolation.json`](dialogs/keyframe-interpolation.json)
+- **入口**：`动画 ▸ 关键帧插值...`（`Ctrl+Alt+K`）
+- **窗口尺寸**：`474 × 422` 物理像素 @ 144 DPI（`316 × 281` 逻辑像素 @ 96 DPI）
+- **页签**：无（单页对话框）
+- **底部按钮栏**：右下 `确定`（OK） + `取消`（Cancel） 水平并排。
+- **记住上次的值**：打开时直接反映所选关键帧的当前插值类型（多选混合状态时显示“当前设置”），不记住上次弹窗选择。
+
+| 顺序 | 控件类型 | 中文标签 | 英文标签 | 默认值 | 范围 / 单位 / 选项 | 联动与置灰规则 |
+|---:|---|---|---|---|---|---|
+| 1 | `dropdown` | 临时插值: | Temporal Interpolation: | 线性 | 当前设置 / 线性 / 贝塞尔曲线 / 连续贝塞尔曲线 / 自动贝塞尔曲线 / 定格 | 选中任意关键帧时始终可用（注：zh_CN 界面将 Temporal 译为“临时插值:”）。 |
+| 2 | `dropdown` | 空间插值: | Spatial Interpolation: | 线性 | 当前设置 / 线性 / 贝塞尔曲线 / 连续贝塞尔曲线 / 自动贝塞尔曲线 | 仅空间属性（位置/锚点/目标点/效果点等）可用；非空间属性（缩放/不透明度/旋转）置灰禁用且值为空；不含“定格”项。 |
+| 3 | `dropdown` | 浮动: | Roving: | 锁定到时间 | 当前设置 / 漂浮穿梭时间 / 锁定到时间 | 仅空间属性的中间关键帧（非首帧、非末帧）可用；非空间属性或首/末关键帧置灰禁用。 |
+
+## 8. 关键帧速度（Keyframe Velocity）
+
+- **结构化数据**：[`dialogs/keyframe-velocity.json`](dialogs/keyframe-velocity.json)
+- **入口**：`动画 ▸ 关键帧速度...`（`Ctrl+Shift+K`）
+- **窗口尺寸**：`904 × 401` 物理像素 @ 144 DPI（`603 × 267` 逻辑像素 @ 96 DPI）
+- **页签**：无（单页对话框）
+- **底部按钮栏**：右下 `确定`（OK） + `取消`（Cancel） 水平并排。
+- **记住上次的值**：实时读取当前选中关键帧的传入/传出速度、影响百分比与连续性状态；不同属性维度会动态调整窗口高度与行数。
+
+| 顺序 | 控件类型 | 中文标签 | 英文标签 | 默认值 | 范围 / 单位 / 选项 | 联动与置灰规则 |
+|---:|---|---|---|---|---|---|
+| 1 | `static_text` | 关键帧类型: <属性名> | Keyframe Type: <Property Name> | — | — | 实测显示“关键帧类型: 位置”、“关键帧类型: 缩放”、“关键帧类型: 不透明度”。 |
+| 2 | `checkbox_pair` | 锁定维度（传入 / 传出各一） | Lock Dimensions (Incoming & Outgoing) | 未勾选 | — | 仅非空间多维属性（如 2D/3D 缩放）显示；单维属性（不透明度）与空间属性（位置）隐藏此控件。 |
+| 3 | `number_scrub_group` | 传入速度（空间显示“速度:”；多维按“维度: X/Y/Z”分行） | Incoming Velocity (Speed: for spatial; Dimension: X/Y/Z rows for multi-dim) | <当前关键帧传入速度> | property_units/sec (px/sec for spatial) | 左右双栏对称排布（左栏传入速度，右栏传出速度）；线性位置关键帧显示路径标量速率（px/s），缩放/不透明度显示带符号变化率（%/s）。 |
+| 4 | `number_scrub_group` | 传入影响: | Incoming Influence: | 33.33 | 0.1–100.0 % | ExtendScript KeyframeEase 实测硬边界为 0.1–100%；线性关键帧在 UI 中初始显示 0.01%，缓动关键帧默认 33.33%。 |
+| 5 | `number_scrub_group` | 传出速度（结构同左栏） | Outgoing Velocity (mirrors Incoming) | <当前关键帧传出速度> | property_units/sec (px/sec for spatial) | — |
+| 6 | `number_scrub_group` | 传出影响: | Outgoing Influence: | 33.33 | 0.1–100.0 % | — |
+| 7 | `checkbox` | 连续（锁定传出到传入） | Continuous (Lock Outgoing to Incoming) | 未勾选 | — | 勾选后自动将传出速度锁定为与传入速度一致（转为连续贝塞尔）。 |
+| 8 | `static_text` | 对于在时间 <时间码> 的关键帧 #<序号> | For keyframe #<Index> at time <Timecode> | — | — | 右下按钮上方只读提示当前编辑的关键帧序号与时间位置。 |
+
+## 9. 转到时间（Go to Time）
+
+- **结构化数据**：[`dialogs/go-to-time.json`](dialogs/go-to-time.json)
+- **入口**：`视图 ▸ 转到时间(G)...`（`Alt+Shift+J`）
+- **窗口尺寸**：`610 × 229` 物理像素 @ 144 DPI（`407 × 153` 逻辑像素 @ 96 DPI）
+- **页签**：无（单页对话框）
+- **底部按钮栏**：右下 `确定`（OK） + `取消`（Cancel） 水平并排。
+- **记住上次的值**：每次打开自动填入当前合成的播放头时间（CTI）并全选，不保留上次输入值。
+
+| 顺序 | 控件类型 | 中文标签 | 英文标签 | 默认值 | 范围 / 单位 / 选项 | 联动与置灰规则 |
+|---:|---|---|---|---|---|---|
+| 1 | `timecode_input` | 时间码输入 | Time Input | <当前合成播放头时间> | — | 支持绝对时间码/帧数输入与相对偏移（如 +10、-15 帧，+2. 表示 +2 秒）；右侧静态文本实时显示解析结果与帧率基准（如“是 0:00:02:00  基础 30”）。 |
+
+## 10. 合成标记 / 图层标记（Composition Marker / Layer Marker）
+
+- **结构化数据**：[`dialogs/markers.json`](dialogs/markers.json)
+- **入口**：`未选中图层时按 Alt+Numpad *（或双击合成标记）`（`Alt+Numpad *`）；`选中图层时按 Alt+Numpad *（或双击图层标记）`（`Alt+Numpad *`）
+- **窗口尺寸**：`673 × 572` 物理像素 @ 144 DPI（`449 × 381` 逻辑像素 @ 96 DPI）
+- **变体（2 个）**：`合成标记（标题：合成标记）`（Composition Marker）｜`图层标记（标题：图层标记）`（Layer Marker）
+- **底部按钮栏**：右下 `确定`（OK） + `取消`（Cancel） 水平并排。
+- **记住上次的值**：新建标记默认时间为当前播放头、持续时间 0:00:00:00、注释为空、标签为“无”；AE 26 已精简移除旧版章节/Web 链接/Flash 提示点字段。
+
+### 10.1 变体：合成标记（标题：合成标记）（Composition Marker）
+
+| 顺序 | 控件类型 | 中文标签 | 英文标签 | 默认值 | 范围 / 单位 / 选项 | 联动与置灰规则 |
+|---:|---|---|---|---|---|---|
+| 1 | `timecode_scrub` | 时间: | Time: | <当前播放头时间> | — | 右侧只读显示解析时间与基准帧率（如“是 0:00:02:00  基础 30”）。 |
+| 2 | `timecode_scrub` | 持续时间: | Duration: | 0:00:00:00 | — | 非零值会在时间轴上显示带范围条的区间标记。 |
+| 3 | `multiline_text` | 注释: | Comment: |  | — | — |
+| 4 | `dropdown` | 标签: | Label: | 无 | 无 / 红色 / 黄色 / 浅绿色 / 粉色 / 淡紫色 / 桃红色 / 海泡沫 / 蓝色 / 绿色 / 紫色 / 橙色 / 棕色 / 紫红色 / 青色 / 砂岩 / 深绿色 | 共 17 项：无 + 16 个 AE 标签颜色。 |
+| 5 | `checkbox` | 受保护区域 | Protected Region | 未勾选 | — | 合成标记独有控件；用于响应设计时间（Responsive Design - Time）锁定时间段不被拉伸。 |
+
+### 10.2 变体：图层标记（标题：图层标记）（Layer Marker）
+
+| 顺序 | 控件类型 | 中文标签 | 英文标签 | 默认值 | 范围 / 单位 / 选项 | 联动与置灰规则 |
+|---:|---|---|---|---|---|---|
+| 1 | `timecode_scrub` | 时间: | Time: | <当前播放头时间> | — | — |
+| 2 | `timecode_scrub` | 持续时间: | Duration: | 0:00:00:00 | — | — |
+| 3 | `multiline_text` | 注释: | Comment: |  | — | — |
+| 4 | `dropdown` | 标签: | Label: | 无 | 无 / 红色 / 黄色 / 浅绿色 / 粉色 / 淡紫色 / 桃红色 / 海泡沫 / 蓝色 / 绿色 / 紫色 / 橙色 / 棕色 / 紫红色 / 青色 / 砂岩 / 深绿色 | — |
+| 5 | `radio_group` | 标记类型 | Marker Type | 注释标记 | 注释标记 / 分段标记 | 图层标记独有控件（替代合成标记的“受保护区域”）；分段标记用于时间重映射/关键帧分段。 |
+
+## 11. <调用属性名>（如“背景颜色”、“灯光颜色”、“颜色”）（<Property Name> (e.g. Background Color, Light Color, Color)）
+
+- **结构化数据**：[`dialogs/color-picker.json`](dialogs/color-picker.json)
+- **入口**：`点击任意颜色色块（如合成设置背景颜色、纯色/灯光/效果/文字颜色）`（无默认快捷键）
+- **窗口尺寸**：`738 × 493` 物理像素 @ 144 DPI（`492 × 329` 逻辑像素 @ 96 DPI）
+- **页签**：无（单页对话框）
+- **按钮栏**：右侧顶部纵向排列 `确定`（OK） / `取消`（Cancel）（按钮位于对话框右侧顶部纵向排列（确定在上、取消在下），下方同列依次为吸管图标按钮与预览复选框。）
+- **记住上次的值**：记住上次选中的色彩轴单选（默认 H）及窗口屏幕位置；颜色值与预览状态实时绑定调用方属性。
+
+| 顺序 | 控件类型 | 中文标签 | 英文标签 | 默认值 | 范围 / 单位 / 选项 | 联动与置灰规则 |
+|---:|---|---|---|---|---|---|
+| 1 | `custom_color_canvas` | 二维色域面板 + 垂直色相/通道滑条 + 新/旧色块对比 | 2D Color Field + Vertical Channel Slider + New/Current Swatches | — | — | 位于左侧区域；垂直滑条与二维色域随右侧 H/S/B/R/G/B 单选切换坐标轴。 |
+| 2 | `radio_group` | 色彩轴单选（H / S / B / R / G / B） | Color Axis Radio (H / S / B / R / G / B) | H | H / S / B / R / G / B | — |
+| 3 | `number_scrub_group` | H / S / B 数值 | H / S / B Numeric Scrubs | — | H: 0–360°, S: 0–100%, B: 0–100% | — |
+| 4 | `number_scrub_group` | R / G / B 数值 | R / G / B Numeric Scrubs | — | 8 bpc: 0–255; 16 bpc: 0–32768; 32 bpc float: 0.0–1.0+ (HDR) | 实测 32 bpc 项目的灯光/效果颜色自动切为浮点 0.0–1.0+（白色显示 1/1/1）；合成背景颜色在 32 bpc 下仍保持 8 位 0–255。 |
+| 5 | `text_input` | # | # | 000000 | — | 6 位十六进制 RGB 颜色码（如 FFFFFF / 000000），与 HSB/RGB 实时双向同步。 |
+| 6 | `icon_button` | 吸管 | Eyedropper | — | — | 位于右列取消按钮下方，支持从屏幕任意位置取色。 |
+| 7 | `checkbox` | 预览 | Preview | 勾选 | — | 默认勾选，位于右列吸管下方，实时将颜色变化反馈到合成查看器。 |

@@ -886,6 +886,10 @@ def _fmt_spec(ctl: dict[str, Any]) -> str:
         if "min" in rg and "max" in rg:
             u = ctl.get("unit") or ctl.get("unitZh") or ""
             parts.append(f"{rg['min']}–{rg['max']}{(' ' + u) if u else ''}")
+        elif ctl.get("unit"):
+            parts.append(str(ctl["unit"]))
+    elif ctl.get("unit"):
+        parts.append(str(ctl["unit"]))
     if "options" in ctl:
         parts.append(" / ".join(o["zh"] for o in ctl["options"]))
     elif "ocioAces12Options" in ctl:
@@ -937,22 +941,29 @@ def render_generic_dialog_md(index_num: int, d: dict[str, Any]) -> list[str]:
     tabs = d.get("tabs") or []
     if tabs:
         tab_s = "｜".join(f"`{t['zh']}`（{t['en']}）" for t in tabs)
-        lines.append(f"- **页签（{len(tabs)} 个）**：{tab_s}")
+        label = "变体" if d["id"] == "markers" else "页签"
+        lines.append(f"- **{label}（{len(tabs)} 个）**：{tab_s}")
     else:
         lines.append("- **页签**：无（单页对话框）")
 
     bb = d["buttonBar"]
-    left_s = ""
-    if bb.get("left"):
-        left_s = "左下 " + " / ".join(f"`{b['zh']}`（{b['en']}）" for b in bb["left"]) + "；"
-    right_s = "右下 " + " + ".join(f"`{b['zh']}`（{b['en']}）" for b in bb["right"]) + " 水平并排"
-    lines.append(f"- **底部按钮栏**：{left_s}{right_s}。")
+    if bb.get("position") == "right_column":
+        right_s = "右侧顶部纵向排列 " + " / ".join(f"`{b['zh']}`（{b['en']}）" for b in bb["right"])
+        extra_bb = f"（{bb['notesZh']}）" if bb.get("notesZh") else ""
+        lines.append(f"- **按钮栏**：{right_s}{extra_bb}")
+    else:
+        left_s = ""
+        if bb.get("left"):
+            left_s = "左下 " + " / ".join(f"`{b['zh']}`（{b['en']}）" for b in bb["left"]) + "；"
+        right_s = "右下 " + " + ".join(f"`{b['zh']}`（{b['en']}）" for b in bb["right"]) + " 水平并排"
+        lines.append(f"- **底部按钮栏**：{left_s}{right_s}。")
     lines.append(f"- **记住上次的值**：{d['persistence']['notesZh']}")
     lines.append("")
 
     if tabs:
+        sub_label = "变体" if d["id"] == "markers" else "页签"
         for ti, tab in enumerate(tabs, 1):
-            lines.append(f"### {index_num}.{ti} 页签：{tab['zh']}（{tab['en']}）")
+            lines.append(f"### {index_num}.{ti} {sub_label}：{tab['zh']}（{tab['en']}）")
             lines.append("")
             lines.extend(_render_controls_table(tab["controls"]))
     else:

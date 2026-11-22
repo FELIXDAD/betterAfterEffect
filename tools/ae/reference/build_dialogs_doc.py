@@ -764,6 +764,27 @@ def main() -> None:
             ]
         )
 
+    b3_path = args.raw_dir / "dialogs_batch3_zh.json"
+    if b3_path.exists():
+        from dialogs_batch3 import (
+            build_color_picker,
+            build_go_to_time,
+            build_keyframe_interpolation,
+            build_keyframe_velocity,
+            build_markers,
+        )
+
+        raw_b3 = load_json(b3_path)
+        dialogs.extend(
+            [
+                build_keyframe_interpolation(raw_b3),
+                build_keyframe_velocity(raw_b3),
+                build_go_to_time(raw_b3),
+                build_markers(raw_b3),
+                build_color_picker(raw_b3),
+            ]
+        )
+
     for d in dialogs:
         _write_json(dialogs_dir / f"{d['id']}.json", d)
 
