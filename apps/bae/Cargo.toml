@@ -23,6 +23,7 @@ bae-model.workspace = true
 bae-motion.workspace = true
 bae-package.workspace = true
 bae-platform.workspace = true
+bae-prefs = { workspace = true, features = ["file"] }
 bae-plugin.workspace = true
 bae-ui.workspace = true
 bae-render = { workspace = true, features = ["media"] }

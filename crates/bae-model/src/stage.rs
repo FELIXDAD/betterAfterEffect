@@ -10,8 +10,8 @@ use crate::path::PrimPath;
 use crate::prim::{PrimType, Specifier};
 use crate::sublayer::Sublayer;
 
-/// Maximum undo steps kept per author.
-const UNDO_LIMIT: usize = 1000;
+/// Default maximum of undo steps kept per author ([`Stage::set_undo_limit`]).
+pub const DEFAULT_UNDO_LIMIT: usize = 1000;
 
 /// Sublayer IDs that differ only in case map to the same file on macOS/Windows.
 fn same_file_name(a: &SublayerId, b: &SublayerId) -> bool {
@@ -51,6 +51,8 @@ pub struct Stage {
     edit_target: SublayerId,
     undo: FxHashMap<AuthorId, Vec<UndoEntry>>,
     redo: FxHashMap<AuthorId, Vec<UndoEntry>>,
+    /// Undo steps kept per author (AE: Preferences > General > Levels of Undo).
+    undo_limit: usize,
     subscribers: Vec<(SubscriptionId, Subscriber)>,
     next_subscription: u64,
 }
@@ -98,11 +100,27 @@ impl Stage {
             edit_target,
             undo: FxHashMap::default(),
             redo: FxHashMap::default(),
+            undo_limit: DEFAULT_UNDO_LIMIT,
             subscribers: Vec::new(),
             next_subscription: 0,
             externals: FxHashMap::default(),
             ref_index: None,
         })
+    }
+
+    /// Undo steps kept per author (at least 1); older steps are dropped now and
+    /// from then on.
+    pub fn set_undo_limit(&mut self, limit: usize) {
+        self.undo_limit = limit.max(1);
+        for stack in self.undo.values_mut().chain(self.redo.values_mut()) {
+            let extra = stack.len().saturating_sub(self.undo_limit);
+            stack.drain(..extra);
+        }
+    }
+
+    /// Undo steps kept per author.
+    pub fn undo_limit(&self) -> usize {
+        self.undo_limit
     }
 
     // ---- layer stack ----
@@ -367,7 +385,7 @@ impl Stage {
             };
             let stack = push.entry(author.clone()).or_default();
             stack.push(entry);
-            if stack.len() > UNDO_LIMIT {
+            if stack.len() > self.undo_limit {
                 stack.remove(0);
             }
             if let Some(redo) = clear {
