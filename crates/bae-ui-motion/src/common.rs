@@ -71,6 +71,9 @@ pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool
     let fixed = match attr {
         "transform:anchor_point" => "Anchor Point",
         "transform:position" => "Position",
+        "transform:position_x" => "X Position",
+        "transform:position_y" => "Y Position",
+        "transform:position_z" => "Z Position",
         "transform:scale" => "Scale",
         "transform:rotation" if three_d => "Z Rotation",
         "transform:rotation" => "Rotation",

@@ -29,6 +29,8 @@
 //! | `key.delete` | deleting keyframes |
 //! | `key.reverse` | Keyframe Assistant > Time-Reverse Keyframes |
 //! | `key.paste` | pasting keyframes |
+//! | `key.edit` | Graph Editor drags (key time / value, Bezier handles, transform box), keyframe dialogs |
+//! | `transform.separate_dimensions` | Animation > Separate Dimensions (Position → X / Y / Z Position) |
 //!
 //! **Times** are flicks (705,600,000 per second). Layer in/out points, split and work
 //! area times are comp times. Keyframe times are the stored keyframe times — layer
@@ -40,6 +42,7 @@
 //! (id = command id), from which the application builds its command registry.
 
 pub mod comp;
+pub mod dimensions;
 pub mod keys;
 pub mod layer;
 pub mod names;
@@ -52,9 +55,11 @@ use bae_app::{AppBuilder, AppModule};
 use bae_model::{CommandRegistry, DynCommand};
 
 pub use comp::{CompOutput, CreateComp, CreateFolder, SetWorkArea, TrimCompToWorkArea};
+pub use dimensions::SeparateDimensions;
 pub use keys::{
-    CopiedKey, DeleteKeys, EaseKeys, EaseMode, KeyRef, KeysOutput, MoveKeys, PasteKeys,
-    ReverseKeys, SetAnimated, SetAt, SetInterpolation, SetMany, ValueEdit,
+    CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, KeyEdit, KeyRef, KeysOutput, MoveKeys,
+    PasteKeys, ReverseKeys, SetAnimated, SetAt, SetInterpolation, SetMany, ValueEdit,
+    apply_key_edits,
 };
 pub use layer::{
     CreateLayer, DeleteItems, DeleteLayers, DuplicateLayers, LAYER_SWITCH_ATTRS, LayerOutput,
@@ -88,6 +93,8 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(DeleteKeys),
         r.register(ReverseKeys),
         r.register(PasteKeys),
+        r.register(EditKeys),
+        r.register(SeparateDimensions),
     ];
     for res in results {
         res.expect("motion command IDs are unique");

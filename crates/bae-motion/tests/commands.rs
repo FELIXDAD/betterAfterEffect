@@ -649,6 +649,186 @@ fn locked_layers_follow_comp_level_changes() {
     );
 }
 
+#[test]
+fn edit_keys_changes_time_value_and_ease_in_one_step() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let solid = fx.layer(&comp, "solid", json!({}));
+    let attr = "transform:rotation";
+    fx.run(
+        "attr.set_animated",
+        json!({"path": solid, "attr": attr, "animated": true, "time": 0}),
+    );
+    fx.run("attr.set_at", json!({"path": solid, "attr": attr, "time": SEC, "value": {"type": "float", "value": 90.0}}));
+    let out = fx.run(
+        "key.edit",
+        json!({"edits": [{
+            "key": key(&solid, attr, SEC),
+            "time": 2 * SEC,
+            "value": {"type": "float", "value": 180.0},
+            "interp_in": "bezier",
+            "ease_in": [{"speed": 10.0, "influence": 250.0}],
+        }]}),
+    );
+    assert_eq!(out["keys"][0]["time"], json!(2 * SEC));
+    assert_eq!(fx.keys(&solid, attr), vec![0, 2 * SEC]);
+    let spec = query::attr_spec(&fx.stage, &solid, attr).unwrap();
+    let k = &spec.keyframes[&Time(2 * SEC)];
+    assert_eq!(k.value, Value::Float(180.0));
+    assert_eq!(k.interp_in, Interpolation::Bezier);
+    assert_eq!(k.interp_out, Interpolation::Linear);
+    // Influence is clamped to AE's 0.1–100 %.
+    assert_eq!((k.ease_in[0].speed, k.ease_in[0].influence), (10.0, 100.0));
+    // One undo step restores the key at 1 s with its old value.
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(fx.keys(&solid, attr), vec![0, SEC]);
+    let spec = query::attr_spec(&fx.stage, &solid, attr).unwrap();
+    assert_eq!(spec.keyframes[&Time(SEC)].value, Value::Float(90.0));
+}
+
+#[test]
+fn edit_keys_swaps_and_replaces() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let solid = fx.layer(&comp, "solid", json!({}));
+    let attr = "transform:opacity";
+    fx.run(
+        "attr.set_animated",
+        json!({"path": solid, "attr": attr, "animated": true, "time": 0}),
+    );
+    for (t, v) in [(SEC, 50.0), (2 * SEC, 0.0)] {
+        fx.run(
+            "attr.set_at",
+            json!({"path": solid, "attr": attr, "time": t, "value": {"type": "float", "value": v}}),
+        );
+    }
+    // Swap the keys at 0 and 1 s.
+    fx.run(
+        "key.edit",
+        json!({"edits": [
+            {"key": key(&solid, attr, 0), "time": SEC},
+            {"key": key(&solid, attr, SEC), "time": 0},
+        ]}),
+    );
+    let spec = query::attr_spec(&fx.stage, &solid, attr).unwrap();
+    assert_eq!(spec.keyframes[&Time(0)].value, Value::Float(50.0));
+    assert_eq!(spec.keyframes[&Time(SEC)].value, Value::Float(100.0));
+    // A key moved onto an unedited key replaces it.
+    fx.run(
+        "key.edit",
+        json!({"edits": [{"key": key(&solid, attr, 0), "time": 2 * SEC}]}),
+    );
+    assert_eq!(fx.keys(&solid, attr), vec![SEC, 2 * SEC]);
+    let spec = query::attr_spec(&fx.stage, &solid, attr).unwrap();
+    assert_eq!(spec.keyframes[&Time(2 * SEC)].value, Value::Float(50.0));
+}
+
+#[test]
+fn auto_bezier_is_recomputed_after_edits_and_moves() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let solid = fx.layer(&comp, "solid", json!({}));
+    let attr = "transform:rotation";
+    fx.run(
+        "attr.set_animated",
+        json!({"path": solid, "attr": attr, "animated": true, "time": 0}),
+    );
+    for (t, v) in [(SEC, 100.0), (2 * SEC, 300.0)] {
+        fx.run(
+            "attr.set_at",
+            json!({"path": solid, "attr": attr, "time": t, "value": {"type": "float", "value": v}}),
+        );
+    }
+    // Cmd+click: Linear → Auto Bezier on the middle key.
+    fx.run(
+        "key.edit",
+        json!({"edits": [{"key": key(&solid, attr, SEC), "auto_bezier": true}]}),
+    );
+    let speed = |fx: &Fx, t: i64| {
+        let spec = query::attr_spec(&fx.stage, &solid, attr).unwrap();
+        let k = &spec.keyframes[&Time(t)];
+        assert!(k.flags.temporal_auto_bezier);
+        (k.ease_in[0].speed, k.ease_out[0].speed)
+    };
+    // Slope between the neighbours: (300 − 0) / 2 s.
+    assert_eq!(speed(&fx, SEC), (150.0, 150.0));
+    // Moving the last key recomputes it: (300 − 0) / 3 s.
+    fx.run(
+        "key.move",
+        json!({"keys": [key(&solid, attr, 2 * SEC)], "delta": SEC}),
+    );
+    assert_eq!(speed(&fx, SEC), (100.0, 100.0));
+    // Dragging its handle makes it a continuous Bezier.
+    fx.run(
+        "key.edit",
+        json!({"edits": [{"key": key(&solid, attr, SEC), "ease_out": [{"speed": 20.0, "influence": 50.0}]}]}),
+    );
+    let spec = query::attr_spec(&fx.stage, &solid, attr).unwrap();
+    let k = &spec.keyframes[&Time(SEC)];
+    assert!(!k.flags.temporal_auto_bezier && k.flags.temporal_continuous);
+    assert_eq!(k.ease_out[0].speed, 20.0);
+}
+
+#[test]
+fn separate_and_recombine_position() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let solid = fx.layer(&comp, "solid", json!({}));
+    let pos = "transform:position";
+    fx.run(
+        "attr.set_animated",
+        json!({"path": solid, "attr": pos, "animated": true, "time": 0}),
+    );
+    fx.run("attr.set_at", json!({"path": solid, "attr": pos, "time": 2 * SEC, "value": {"type": "vec3", "value": [1160.0, 340.0, 0.0]}}));
+    let mid = |fx: &Fx| {
+        let e = bae_anim::evaluate_comp(&fx.stage, &comp, Time(SEC)).unwrap();
+        e.layer(&solid)
+            .unwrap()
+            .world_matrix
+            .transform_point3(DVec3::ZERO)
+    };
+    let before = mid(&fx);
+    fx.run("transform.separate_dimensions", json!({"layers": [solid]}));
+    assert_eq!(
+        fx.value(&solid, "transform:separate_dimensions"),
+        Some(Value::Bool(true))
+    );
+    assert_eq!(fx.keys(&solid, "transform:position_x"), vec![0, 2 * SEC]);
+    assert_eq!(fx.keys(&solid, "transform:position_y"), vec![0, 2 * SEC]);
+    // 2D layer: Z stays static.
+    assert!(fx.keys(&solid, "transform:position_z").is_empty());
+    let spec = query::attr_spec(&fx.stage, &solid, "transform:position_x").unwrap();
+    assert_eq!(spec.keyframes[&Time(2 * SEC)].value, Value::Float(1160.0));
+    // A linear move evaluates the same separated.
+    let after = mid(&fx);
+    assert!((before - after).length() < 1e-6, "{before} {after}");
+    // Move Y's last key in time: recombining keys every component key time.
+    fx.run(
+        "key.move",
+        json!({"keys": [key(&solid, "transform:position_y", 2 * SEC)], "delta": SEC}),
+    );
+    fx.run(
+        "transform.separate_dimensions",
+        json!({"layers": [solid], "separated": false}),
+    );
+    assert_eq!(
+        fx.value(&solid, "transform:separate_dimensions"),
+        Some(Value::Bool(false))
+    );
+    assert_eq!(fx.keys(&solid, pos), vec![0, 2 * SEC, 3 * SEC]);
+    let spec = query::attr_spec(&fx.stage, &solid, pos).unwrap();
+    assert_eq!(
+        spec.keyframes[&Time(3 * SEC)].value,
+        Value::Vec3([1160.0, 340.0, 0.0])
+    );
+    // Undo goes back to separated.
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(
+        fx.value(&solid, "transform:separate_dimensions"),
+        Some(Value::Bool(true))
+    );
+}
+
 /// `layer.set_attr`: one undo step for several layers; only switches, quality
 /// and label.
 #[test]

@@ -25,8 +25,8 @@ impl Harness {
         bae_motion::register_commands(&mut reg);
         let mut resources = Resources::new();
         resources.insert(SharedSession::default());
-        // The app's fonts (egui has none built in): text fields need glyphs
-        // for their cursor and selection.
+        // BAE ships no bundled fonts (#149): without the system UI fonts text has no
+        // glyphs and text fields lose their selection.
         let ctx = egui::Context::default();
         bae_ui::theme::install_fonts(&ctx);
         Harness {
