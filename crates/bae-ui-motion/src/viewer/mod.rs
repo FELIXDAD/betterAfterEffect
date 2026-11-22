@@ -37,8 +37,10 @@ mod type_tool;
 pub(crate) use transform::nudge_layers;
 
 const MAGNIFICATIONS: [f32; 9] = [0.125, 0.25, 0.333, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0];
-/// Magnification change per mouse-wheel notch (AE Smooth Zoom; step 待核).
-const WHEEL_ZOOM: f32 = 1.15;
+/// Magnification change per mouse-wheel notch, in and out (AE 26 Smooth Zoom:
+/// ×9/8 and ×7/8, R1).
+const WHEEL_ZOOM_IN: f32 = 9.0 / 8.0;
+const WHEEL_ZOOM_OUT: f32 = 7.0 / 8.0;
 
 #[derive(Default)]
 pub struct CompositionViewer {
@@ -413,7 +415,12 @@ impl Panel for CompositionViewer {
             } else {
                 if notches != 0.0 {
                     let around = if alt { None } else { resp.hover_pos() };
-                    self.zoom_by(WHEEL_ZOOM.powf(notches), around, area, &info, ppp);
+                    let step = if notches > 0.0 {
+                        WHEEL_ZOOM_IN
+                    } else {
+                        WHEEL_ZOOM_OUT
+                    };
+                    self.zoom_by(step.powf(notches.abs()), around, area, &info, ppp);
                 }
                 self.pan += pan;
             }

@@ -93,17 +93,25 @@ fn point_and_paragraph_text_in_one_step() {
     assert_eq!(query::display_name_of(&fx.stage, &layer), "Title");
     let d = fx.doc(&layer);
     assert_eq!(d.box_size, Some([200.0, 80.0]));
-    assert_eq!(d.box_position, Some([0.0, 0.0]));
+    // AE 26: the layer sits at the box's center, the box offset by half.
+    assert_eq!(d.box_position, Some([-100.0, -40.0]));
+    assert_eq!(
+        fx.v3(&layer, "transform:position"),
+        Some(Value::Vec3([150.0, 100.0, 0.0]))
+    );
     assert_eq!(d.font_size, 24.0);
     assert_eq!(d.fill_color, [1.0, 0.0, 0.0, 1.0]);
-    // Empty text is refused.
-    assert!(
-        fx.try_run(
-            "text.create",
-            json!({"comp": comp, "text": "", "position": [0.0, 0.0]})
-        )
-        .is_err()
+    // Empty text makes an empty text layer (AE keeps those).
+    let out = fx.run(
+        "text.create",
+        json!({"comp": comp, "text": "", "position": [0.0, 0.0]}),
     );
+    let empty = p(&out["path"]);
+    assert_eq!(
+        query::display_name_of(&fx.stage, &empty),
+        "<empty text layer>"
+    );
+    assert_eq!(fx.doc(&empty).text, "");
 }
 
 #[test]

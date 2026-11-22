@@ -937,7 +937,11 @@ fn moving_layers_snaps_to_other_layers_and_the_comp() {
     h.tools().lock().options.snapping = true;
     let r = h.drag(grab, to, Modifiers::NONE);
     h.apply(&r);
-    assert!(close3(h.v3(&a, "transform:position"), [250.0, 180.0, 0.0]), "{:?}", h.v3(&a, "transform:position"));
+    assert!(
+        close3(h.v3(&a, "transform:position"), [250.0, 180.0, 0.0]),
+        "{:?}",
+        h.v3(&a, "transform:position")
+    );
     h.stage.undo(&h.author).unwrap();
     // Cmd/Ctrl inverts the switch while held.
     let r = h.drag(grab, to, Modifiers::COMMAND);
@@ -1215,10 +1219,30 @@ fn type_tool_click_and_type_makes_point_text() {
     // One undo step.
     h.stage.undo(&h.author).unwrap();
     assert!(query::comp_layers(&h.stage, &h.comp).is_empty());
-    // Empty text creates nothing.
+    // Committing without typing still makes an (empty) text layer (AE 26).
     h.click(300.0, 200.0, Modifiers::NONE);
     let r = h.escape();
-    assert!(r.invocations.is_empty());
+    let p = one(&r, "text.create");
+    assert_eq!(p["text"], "");
+    assert_eq!(p["name"], "<empty text layer>");
+    // While editing, clicking elsewhere in the viewer keeps editing; Cmd/Ctrl+
+    // Enter commits.
+    h.click(100.0, 300.0, Modifiers::NONE);
+    h.type_text(vec![Event::Text("A".into())]);
+    let r = h.click(500.0, 100.0, Modifiers::NONE);
+    assert!(r.invocations.is_empty(), "{:?}", r.invocations);
+    assert!(h.viewer.type_tool.editing.is_some());
+    h.type_text(vec![Event::Text("B".into())]);
+    let enter = |pressed| Event::Key {
+        key: Key::Enter,
+        physical_key: None,
+        pressed,
+        repeat: false,
+        modifiers: Modifiers::COMMAND,
+    };
+    let r = h.frame(vec![enter(true)], Modifiers::COMMAND);
+    h.frame(vec![enter(false)], Modifiers::COMMAND);
+    assert_eq!(one(&r, "text.create")["text"], "AB");
 }
 
 #[test]
@@ -1261,7 +1285,12 @@ fn type_tool_drag_makes_paragraph_text() {
     let layer = query::comp_layers(&h.stage, &h.comp)[0].clone();
     let d = h.doc(&layer);
     assert_eq!(d.box_size, Some([200.0, 100.0]));
-    assert_eq!(d.box_position, Some([0.0, 0.0]));
+    // AE 26: the layer sits at the box's center, the box offset by half.
+    assert_eq!(d.box_position, Some([-100.0, -50.0]));
+    assert!(close3(
+        h.v3(&layer, "transform:position"),
+        [200.0, 100.0, 0.0]
+    ));
 }
 
 #[test]
@@ -1434,7 +1463,7 @@ fn mouse_wheel_zooms_around_the_pointer_and_trackpads_pan() {
     h.frame(Vec::new(), Modifiers::NONE);
     let v = h.viewer.last_view.unwrap();
     assert!(
-        (v.scale / before - 1.15).abs() < 1e-3,
+        (v.scale / before - 1.125).abs() < 1e-3,
         "{} → {}",
         before,
         v.scale

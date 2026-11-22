@@ -51,6 +51,7 @@ const ZH: &[(&str, &str)] = &[
     ("Shape", "形状"),
     ("Path", "路径"),
     ("Mask", "蒙版"),
+    ("<empty text layer>", "<空文本图层>"),
 ];
 
 /// The default name `en` in the language new items are named in.

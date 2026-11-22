@@ -41,6 +41,8 @@ pub(crate) struct Editing {
     focused_once: bool,
     /// Where an existing text was clicked: the caret goes there (screen).
     caret_at: Option<Pos2>,
+    /// The viewer was clicked outside the field: take the focus back.
+    refocus: bool,
 }
 
 /// Type tool state of the viewer.
@@ -92,6 +94,7 @@ fn edit_layer(
         color: color32(doc.fill_color),
         focused_once: false,
         caret_at,
+        refocus: false,
     })
 }
 
@@ -107,6 +110,7 @@ fn new_text(info: &CompInfo, origin: DVec2, text_box: Option<[f64; 2]>) -> Editi
         color: Color32::WHITE,
         focused_once: false,
         caret_at: None,
+        refocus: false,
     }
 }
 
@@ -161,9 +165,6 @@ impl Editing {
                 }
             }
             None => {
-                if self.buffer.is_empty() {
-                    return;
-                }
                 let origin = self.to_comp.transform_point3(DVec3::ZERO);
                 let folder = query::layers_folder(&self.comp);
                 // AE names a text layer after its text.
@@ -175,7 +176,8 @@ impl Editing {
                     .trim()
                     .to_owned();
                 let name = if name.is_empty() {
-                    bae_motion::names::localized("Text").to_owned()
+                    // AE keeps a new text layer even without text.
+                    bae_motion::names::localized("<empty text layer>").to_owned()
                 } else {
                     name
                 };
@@ -273,13 +275,12 @@ pub(super) fn frame(
         && let Some(pos) = press_pos
     {
         let inside = field.is_some_and(|r| r.contains(pos));
-        if !inside {
-            if let Some(e) = state.editing.take() {
-                // Clicking away commits (and does not start new text).
-                e.commit(cx, session);
-            } else {
-                state.press = Some((pos, hit_text(cx.stage, comp, view, pos)));
-            }
+        // While editing, a click elsewhere in the viewer keeps editing (AE 26:
+        // Esc, switching tools or Cmd/Ctrl+Enter commit).
+        match state.editing.as_mut() {
+            Some(e) if !inside => e.refocus = true,
+            Some(_) => {}
+            None => state.press = Some((pos, hit_text(cx.stage, comp, view, pos))),
         }
     }
     if let Some((origin, hit)) = state.press.clone() {
@@ -333,6 +334,13 @@ pub(super) fn frame(
             Stroke::new(1.0, Color32::from_gray(160)),
         ));
     }
+    // Read before the field sees the keys (it would type the Enter).
+    let (escape, command_enter) = ui.input_mut(|i| {
+        (
+            i.key_pressed(Key::Escape),
+            i.consume_key(egui::Modifiers::COMMAND, Key::Enter),
+        )
+    });
     let size = (e.font_size as f32 * e.scale(view)).max(4.0);
     let edit = egui::TextEdit::multiline(&mut e.buffer)
         .id(text_id())
@@ -366,9 +374,18 @@ pub(super) fn frame(
             .set_char_range(Some(egui::text::CCursorRange::one(caret)));
         state.store(ui.ctx(), text_id());
     }
-    let escape = ui.input(|i| i.key_pressed(Key::Escape));
-    if escape || (out.lost_focus() && !out.has_focus()) {
-        let e = state.editing.take().expect("editing");
+    if e.refocus && !escape && !command_enter && !out.has_focus() {
+        // Clicked elsewhere in the viewer: keep typing.
+        out.request_focus();
+        if !ui.input(|i| i.pointer.any_down()) {
+            e.refocus = false;
+        }
+    } else if escape || command_enter || (out.lost_focus() && !out.has_focus()) {
+        let mut e = state.editing.take().expect("editing");
+        if command_enter && e.buffer.ends_with('\n') {
+            // The Enter of Cmd/Ctrl+Enter is not part of the text.
+            e.buffer.pop();
+        }
         e.commit(cx, session);
     }
 }

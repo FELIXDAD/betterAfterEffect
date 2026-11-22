@@ -28,11 +28,13 @@ pub struct CreateText;
 #[derive(Deserialize, JsonSchema)]
 pub struct CreateTextParams {
     pub comp: PrimPath,
-    /// The characters (line breaks as `\n`).
+    /// The characters (line breaks as `\n`); empty makes an empty text layer
+    /// (AE keeps those, named "<empty text layer>").
     pub text: String,
     /// Point text: where the first line's baseline starts (comp pixels), the
     /// layer's Position (its anchor stays at 0, 0). Paragraph text: the box's
-    /// top-left corner.
+    /// top-left corner (the layer's Position becomes the box's center, as AE
+    /// places it).
     pub position: [f64; 2],
     /// Paragraph text: the box size in pixels; omitted = point text.
     #[serde(default)]
@@ -63,9 +65,6 @@ impl Command for CreateText {
     const DESCRIPTION: &'static str = "Create a point or paragraph text layer with its text, like typing with the Type tool in the Composition panel: point text starts its first baseline at `position`; paragraph text fills a box whose top-left corner is `position`.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<LayerOutput, CommandError> {
-        if p.text.is_empty() {
-            return Err(fail("text.create needs some text"));
-        }
         let size = p.font_size.unwrap_or(DEFAULT_SIZE);
         if size.is_nan() || size <= 0.0 {
             return Err(fail("font_size must be positive"));
@@ -75,7 +74,12 @@ impl Command for CreateText {
             CreateLayerParams {
                 comp: p.comp,
                 kind: LayerKind::Text,
-                name: p.name,
+                name: p.name.or_else(|| {
+                    p.text
+                        .trim()
+                        .is_empty()
+                        .then(|| crate::names::localized("<empty text layer>").to_owned())
+                }),
                 source: None,
                 index: p.index,
                 color: None,
@@ -95,10 +99,14 @@ impl Command for CreateText {
         if let Some(j) = p.justification {
             doc.justification = j;
         }
+        // Paragraph text (AE 26, R1): the layer sits at the box's center and the
+        // box is offset by half its size.
+        let mut position = p.position;
         if let Some(b) = p.box_size {
-            // The layer origin is the box's top-left corner.
-            doc.box_size = Some([b[0].abs(), b[1].abs()]);
-            doc.box_position = Some([0.0, 0.0]);
+            let (w, h) = (b[0].abs(), b[1].abs());
+            doc.box_size = Some([w, h]);
+            doc.box_position = Some([-w / 2.0, -h / 2.0]);
+            position = [p.position[0] + w / 2.0, p.position[1] + h / 2.0];
         }
         set(tx, &out.path, SOURCE, Value::TextDocument(Box::new(doc)))?;
         set(
@@ -111,7 +119,7 @@ impl Command for CreateText {
             tx,
             &out.path,
             "transform:position",
-            Value::Vec3([p.position[0], p.position[1], 0.0]),
+            Value::Vec3([position[0], position[1], 0.0]),
         )?;
         Ok(out)
     }
