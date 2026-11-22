@@ -20,6 +20,24 @@ pub fn ctx_with_fonts() -> egui::Context {
     ctx
 }
 
+/// For a harness that creates its own context and runs the first pass at once
+/// (egui_kittest's `Harness::builder().build_ui_state(..)`), where
+/// [`ctx_with_fonts`] cannot be used. Call it first in the harness's UI closure:
+/// on the context's first pass it installs the UI fonts, which take effect from the
+/// next pass, and discards this pass, so egui runs it again with the fonts; the
+/// caller draws nothing and returns when it gets `true`. kittest's first pass has
+/// no input, so the discarded pass loses no events.
+pub fn first_pass_installs_fonts(ctx: &egui::Context) -> bool {
+    let installed = egui::Id::new("bae_ui::testing::fonts_installed");
+    if ctx.data(|d| d.get_temp::<bool>(installed)).is_some() {
+        return false;
+    }
+    ctx.data_mut(|d| d.insert_temp(installed, true));
+    theme::install_fonts(ctx);
+    ctx.request_discard("bae_ui::testing: UI fonts installed");
+    true
+}
+
 #[cfg(test)]
 mod tests {
     fn first_pass_text_width(ctx: &egui::Context) -> f32 {
@@ -42,5 +60,24 @@ mod tests {
     fn a_default_context_lays_text_out_empty() {
         let width = first_pass_text_width(&egui::Context::default());
         assert_eq!(width, 0.0);
+    }
+
+    /// The first pass that draws, in the run that installed the fonts, has them;
+    /// later runs draw at once.
+    #[test]
+    fn the_first_drawn_pass_has_fonts_when_installed_on_the_first_pass() {
+        let ctx = egui::Context::default();
+        let mut widths = Vec::new();
+        for _ in 0..2 {
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                if super::first_pass_installs_fonts(ui.ctx()) {
+                    return;
+                }
+                widths.push(ui.label("Ag 中").rect.width());
+            });
+            out.textures_delta.clear();
+        }
+        assert_eq!(widths.len(), 2, "one drawn pass per run: {widths:?}");
+        assert!(widths.iter().all(|w| *w > 10.0), "{widths:?}");
     }
 }
