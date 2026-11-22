@@ -1015,8 +1015,8 @@ fn curve_color(p: &Prop, dim: usize) -> Color32 {
 }
 
 /// Unit drawn after a value of `attr`.
-fn unit(attr: &str) -> &'static str {
-    match attr {
+fn unit(attr: &str) -> String {
+    let u: &str = match attr {
         "transform:scale" | "transform:opacity" | "opacity" | "roundness" => "%",
         "transform:rotation"
         | "transform:rotation_x"
@@ -1025,9 +1025,13 @@ fn unit(attr: &str) -> &'static str {
         | "transform:skew"
         | "transform:skew_axis"
         | "transform:orientation" => "°",
-        a if a.contains("position") || a.contains("anchor") || a == "size" => " px",
+        // AE's Chinese UI says 像素 (#197).
+        a if a.contains("position") || a.contains("anchor") || a == "size" => {
+            return format!(" {}", tr("px"));
+        }
         _ => "",
-    }
+    };
+    u.to_owned()
 }
 
 pub(crate) fn fmt_num(v: f64) -> String {
@@ -2061,7 +2065,7 @@ impl GraphEditor {
             let suffix = if fp.speed {
                 format!("{}/{}", unit(&fp.attr).trim(), tr("sec"))
             } else {
-                unit(&fp.attr).to_owned()
+                unit(&fp.attr)
             };
             let mut n = 0;
             while v <= va.hi && n < 200 {

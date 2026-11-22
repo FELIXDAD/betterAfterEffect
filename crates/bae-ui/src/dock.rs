@@ -2157,7 +2157,7 @@ mod tests {
 
     #[test]
     fn dragging_a_splitter_resizes() {
-        let ctx = egui::Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         let mut dock = Dock::new(ae_default());
         run(&ctx, &mut dock, vec![]);
         let screen = Rect::from_min_size(Pos2::ZERO, vec2(1728.0, 1000.0));
@@ -2179,7 +2179,7 @@ mod tests {
 
     #[test]
     fn dragging_a_tab_onto_a_frame_edge_redocks() {
-        let ctx = egui::Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         let mut dock = Dock::new(ae_default());
         let screen = Rect::from_min_size(Pos2::ZERO, vec2(1728.0, 1000.0));
         run(&ctx, &mut dock, vec![]);

@@ -79,8 +79,16 @@ fn names(a: &Assembled) -> BTreeMap<String, String> {
     if let Some(r) = a.app.get_registry::<MenuItemSpec>() {
         for e in r.snapshot().iter() {
             let spec = e.item();
+            if spec.is_placeholder {
+                // Never shown (it only makes its submenu exist).
+                continue;
+            }
             out.insert(format!("menu item {}", e.id()), spec.title.clone());
             for (i, part) in spec.path.iter().enumerate() {
+                if part == bae_ui::menu::APP_MENU {
+                    // The macOS application menu: shown as the application's name.
+                    continue;
+                }
                 out.insert(format!("menu {} path {i}", e.id()), part.clone());
             }
         }
@@ -98,7 +106,16 @@ fn names(a: &Assembled) -> BTreeMap<String, String> {
 /// Names that read the same in Chinese (product names; "Agent" per docs/glossary.md).
 /// They still need a table entry, so a new English name never slips through as "the
 /// same".
-pub(crate) const SAME_IN_CHINESE: &[&str] = &["BAE", "After Effects", "Agent", "3D", "CPU"];
+pub(crate) const SAME_IN_CHINESE: &[&str] = &[
+    "BAE",
+    "After Effects",
+    "Agent",
+    "3D",
+    "CPU",
+    // AE's Chinese UI keeps these: RotoBezier, Roto 笔刷工具.
+    "RotoBezier",
+    "Roto",
+];
 
 #[test]
 fn every_command_panel_and_action_has_a_chinese_name() {
@@ -110,7 +127,11 @@ fn every_command_panel_and_action_has_a_chinese_name() {
     for (source, en) in &names {
         match i18n::translation(en) {
             None => missing.push(format!("{source}: {en:?}")),
-            Some(zh) if zh == en && !SAME_IN_CHINESE.contains(&en.as_str()) => {
+            Some(zh)
+                if zh == en
+                    && !SAME_IN_CHINESE.contains(&en.as_str())
+                    && !bae_ui_motion::catalog::SAME_IN_CHINESE.contains(&en.as_str()) =>
+            {
                 untranslated.push(format!("{source}: {en:?}"));
             }
             Some(_) => {}

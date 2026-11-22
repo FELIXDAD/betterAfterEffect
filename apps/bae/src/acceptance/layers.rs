@@ -20,7 +20,7 @@ fn redo(h: &mut Ui) {
 }
 
 /// Layer ▸ New items: registry id, expected layer kind.
-const NEW_ITEMS: [(&str, &str); 9] = [
+const NEW_ITEMS: [(&str, &str); 7] = [
     ("motion.layer.new.text", "text"),
     ("motion.layer.new.solid", "solid"),
     ("motion.layer.new.light", "light"),
@@ -28,8 +28,6 @@ const NEW_ITEMS: [(&str, &str); 9] = [
     ("motion.layer.new.null", "null"),
     ("motion.layer.new.shape", "shape"),
     ("motion.layer.new.adjustment", "adjustment"),
-    ("motion.layer.new.rectangle", "shape"),
-    ("motion.layer.new.ellipse", "shape"),
 ];
 
 #[test]

@@ -31,8 +31,10 @@ pub mod menu;
 pub mod panel;
 pub mod presets;
 pub mod settings;
+pub mod testing;
 pub mod theme;
 pub mod titlebar;
+pub mod toolbar;
 pub mod widgets;
 pub mod workbench;
 pub mod workspace;
@@ -50,6 +52,7 @@ pub use menu::{MenuContext, MenuEntry, MenuItemSpec, MenuTree};
 pub use panel::{
     Panel, PanelContext, PanelKind, PanelRequests, PanelSpawn, modal_open, panel_key_pressed,
 };
+pub use toolbar::Toolbar;
 pub use workbench::{Workbench, WorkbenchContext, WorkbenchState};
 pub use workspace::WorkspacePreset;
 

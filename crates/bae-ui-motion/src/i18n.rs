@@ -17,6 +17,13 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Set Parent", "设置父级"),
     ("Move Layer in Time", "在时间上移动图层"),
     ("Trim Layer", "修剪图层"),
+    ("Add Shape", "添加形状"),
+    ("New Mask", "新建蒙版"),
+    ("Edit Path", "编辑路径"),
+    ("Add Vertex", "添加顶点"),
+    ("Delete Vertex", "删除顶点"),
+    ("New Text", "新建文本"),
+    ("Edit Text", "编辑文本"),
     // Variants of motion actions and commands (`actions::variants`, #140): the
     // Keyboard Shortcuts window, Edit > Undo and History name each one.
     ("Back 10 Frames", "后退 10 帧"),
@@ -188,6 +195,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Bezier", "贝塞尔曲线"),
     ("Hold", "定格"),
     ("Keyframe Interpolation", "关键帧插值"),
+    // Pixel unit after numbers (AE zh_CN unitsText, #197).
+    ("px", "像素"),
     // Keyframe context menu and keyframe dialogs (AE-ANI-029, -047, -048). Terms as in
     // the AE zh_CN Animation menu; "选择跟随关键帧" and the speed units are to be
     // checked against AE (PR "待核").
@@ -445,7 +454,6 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Width", "宽度"),
     ("Height:", "高度:"),
     ("Height", "高度"),
-    ("px", "px"),
     ("Lock Aspect Ratio to {ratio}", "锁定长宽比为 {ratio}"),
     ("Pixel Aspect Ratio:", "像素长宽比:"),
     ("Pixel Aspect Ratio", "像素长宽比"),

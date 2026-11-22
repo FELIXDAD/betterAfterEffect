@@ -1,0 +1,152 @@
+{
+  "schemaVersion": "1.0",
+  "id": "keyframe-interpolation",
+  "title": {
+    "zh": "关键帧插值",
+    "en": "Keyframe Interpolation"
+  },
+  "triggers": [
+    {
+      "action": "Keyframe Interpolation",
+      "shortcutWin": "Ctrl+Alt+K",
+      "menuZh": "动画 ▸ 关键帧插值..."
+    }
+  ],
+  "source": {
+    "application": "Adobe After Effects 26.0 (26.0x67)",
+    "platform": "Windows 11 Pro x64 (3840x2160 @ 150% DPI)",
+    "localeObserved": "zh_CN",
+    "method": "Live MSAA inspection + interactive tab/radio/dropdown probing + ExtendScript range probing"
+  },
+  "geometry": {
+    "physicalPxAt144Dpi": {
+      "w": 474,
+      "h": 422
+    },
+    "logicalPxAt96Dpi": {
+      "w": 316,
+      "h": 281
+    }
+  },
+  "persistence": {
+    "remembersLastValues": false,
+    "notesZh": "打开时直接反映所选关键帧的当前插值类型（多选混合状态时显示“当前设置”），不记住上次弹窗选择。"
+  },
+  "buttonBar": {
+    "position": "bottom_right",
+    "right": [
+      {
+        "id": "ok",
+        "type": "button",
+        "zh": "确定",
+        "en": "OK",
+        "role": "accept"
+      },
+      {
+        "id": "cancel",
+        "type": "button",
+        "zh": "取消",
+        "en": "Cancel",
+        "role": "reject"
+      }
+    ]
+  },
+  "tabs": [],
+  "controls": [
+    {
+      "id": "temporal_interpolation",
+      "type": "dropdown",
+      "zh": "临时插值:",
+      "en": "Temporal Interpolation:",
+      "defaultValue": {
+        "zh": "线性",
+        "en": "Linear"
+      },
+      "options": [
+        {
+          "zh": "当前设置",
+          "en": "Current Settings"
+        },
+        {
+          "zh": "线性",
+          "en": "Linear"
+        },
+        {
+          "zh": "贝塞尔曲线",
+          "en": "Bezier"
+        },
+        {
+          "zh": "连续贝塞尔曲线",
+          "en": "Continuous Bezier"
+        },
+        {
+          "zh": "自动贝塞尔曲线",
+          "en": "Auto Bezier"
+        },
+        {
+          "zh": "定格",
+          "en": "Hold"
+        }
+      ],
+      "enableRuleZh": "选中任意关键帧时始终可用（注：zh_CN 界面将 Temporal 译为“临时插值:”）。"
+    },
+    {
+      "id": "spatial_interpolation",
+      "type": "dropdown",
+      "zh": "空间插值:",
+      "en": "Spatial Interpolation:",
+      "defaultValue": {
+        "zh": "线性",
+        "en": "Linear"
+      },
+      "options": [
+        {
+          "zh": "当前设置",
+          "en": "Current Settings"
+        },
+        {
+          "zh": "线性",
+          "en": "Linear"
+        },
+        {
+          "zh": "贝塞尔曲线",
+          "en": "Bezier"
+        },
+        {
+          "zh": "连续贝塞尔曲线",
+          "en": "Continuous Bezier"
+        },
+        {
+          "zh": "自动贝塞尔曲线",
+          "en": "Auto Bezier"
+        }
+      ],
+      "enableRuleZh": "仅空间属性（位置/锚点/目标点/效果点等）可用；非空间属性（缩放/不透明度/旋转）置灰禁用且值为空；不含“定格”项。"
+    },
+    {
+      "id": "roving",
+      "type": "dropdown",
+      "zh": "浮动:",
+      "en": "Roving:",
+      "defaultValue": {
+        "zh": "锁定到时间",
+        "en": "Lock to Time"
+      },
+      "options": [
+        {
+          "zh": "当前设置",
+          "en": "Current Settings"
+        },
+        {
+          "zh": "漂浮穿梭时间",
+          "en": "Rove Across Time"
+        },
+        {
+          "zh": "锁定到时间",
+          "en": "Lock to Time"
+        }
+      ],
+      "enableRuleZh": "仅空间属性的中间关键帧（非首帧、非末帧）可用；非空间属性或首/末关键帧置灰禁用。"
+    }
+  ]
+}

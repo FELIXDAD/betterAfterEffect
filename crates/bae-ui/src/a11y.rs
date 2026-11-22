@@ -147,7 +147,7 @@ impl Accessible for Response {
 mod tests {
     #[test]
     fn egui_labels_are_replaced_by_ours() {
-        let ctx = egui::Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         ctx.enable_accesskit();
         super::install(&ctx);
         super::install(&ctx);

@@ -37,6 +37,13 @@
 //! | `key.paste` | pasting keyframes |
 //! | `key.edit` | Graph Editor drags (key time / value, Bezier handles, transform box), keyframe dialogs |
 //! | `transform.separate_dimensions` | Animation > Separate Dimensions (Position → X / Y / Z Position) |
+//! | `shape.add` | drawing with a shape tool or the Pen tool in (or into a new) shape layer |
+//! | `mask.create` | drawing with a shape tool or the Pen tool on a layer that gets a mask |
+//! | `path.set_vertices` | Pen tool clicks, Convert Vertex tool, dragging path vertices and handles |
+//! | `path.insert_vertex` | Add Vertex tool (every keyframe) |
+//! | `path.delete_vertex` | Delete Vertex tool (every keyframe) |
+//! | `text.create` | typing new point or paragraph text with the Type tool |
+//! | `text.set_text` | editing a text layer's characters with the Type tool |
 //!
 //! **Times** are flicks (705,600,000 per second). Layer in/out points, split and work
 //! area times are comp times. Keyframe times are the stored keyframe times — layer
@@ -54,9 +61,12 @@ pub mod import;
 pub mod keys;
 pub mod layer;
 pub mod names;
+pub mod path;
 pub mod precompose;
 pub mod query;
+pub mod shape;
 pub mod solid;
+pub mod text;
 mod util;
 
 use std::sync::Arc;
@@ -80,8 +90,11 @@ pub use layer::{
     CreateLayer, DeleteItems, DeleteLayers, DuplicateLayers, LayerOutput, LayersOutput,
     ReorderLayers, SetParent, ShapePreset, ShiftLayers, SplitLayers, TrimLayers,
 };
+pub use path::{DeleteVertex, InsertVertex, SetVertices};
 pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
+pub use shape::{AddShape, CreateMask, Geometry, ShapeKind};
 pub use solid::{SetSolidSettings, SolidInfo, SolidOutput};
+pub use text::{CreateText, SetText};
 
 /// Register every motion command.
 pub fn register_commands(r: &mut CommandRegistry) {
@@ -116,6 +129,13 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(PasteKeys),
         r.register(EditKeys),
         r.register(SeparateDimensions),
+        r.register(AddShape),
+        r.register(CreateMask),
+        r.register(SetVertices),
+        r.register(InsertVertex),
+        r.register(DeleteVertex),
+        r.register(CreateText),
+        r.register(SetText),
     ];
     for res in results {
         res.expect("motion command IDs are unique");

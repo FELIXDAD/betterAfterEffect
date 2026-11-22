@@ -368,10 +368,7 @@ fn interactive_widgets_have_unique_names_in_chinese() {
 fn unique_names_per_panel() {
     use egui::accesskit::{Action, Role};
     let mut h = gui();
-    comp_with(
-        &mut h,
-        &["motion.layer.new.solid", "motion.layer.new.rectangle"],
-    );
+    comp_with(&mut h, &["motion.layer.new.solid", "shape:rect"]);
     // Both layers selected, Position revealed on each: two Position rows with
     // stopwatches, keyframe navigators and values, two sets of layer switches.
     key(&mut h, Modifiers::COMMAND, Key::A);

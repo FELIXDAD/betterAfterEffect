@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use bae_gpu::{GpuContext, GpuContextDescriptor};
+use bae_gpu::GpuContext;
 use bae_model::{PrimPath, Time};
 use bae_render::{
     BitDepth, BlendMode, IRect, LayerContent, OutputAlpha, RenderComp, RenderLayer, RenderRequest,
@@ -12,13 +12,7 @@ use bae_render::{
 use glam::{DAffine2, DVec2};
 
 fn gpu() -> Option<Arc<GpuContext>> {
-    match GpuContext::new_headless(GpuContextDescriptor::default()) {
-        Ok(gpu) => Some(gpu),
-        Err(e) => {
-            eprintln!("no GPU, skipping: {e}");
-            None
-        }
-    }
+    bae_gpu::testing::shared_context()
 }
 
 fn p(s: &str) -> PrimPath {

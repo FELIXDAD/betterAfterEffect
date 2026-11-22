@@ -26,16 +26,12 @@ impl Harness {
         let mut resources = Resources::new();
         resources.insert(SharedSession::default());
         resources.insert(crate::SharedDialogs::default());
-        // BAE ships no bundled fonts (#149): without the system UI fonts text has no
-        // glyphs and text fields lose their selection.
-        let ctx = egui::Context::default();
-        bae_ui::theme::install_fonts(&ctx);
         Harness {
             stage: Stage::new(),
             reg,
             author: AuthorId::new("user:test").unwrap(),
             resources,
-            ctx,
+            ctx: bae_ui::testing::ctx_with_fonts(),
         }
     }
 
@@ -506,13 +502,9 @@ fn demo_project_builds_and_renders() {
 #[test]
 fn gpu_preview_publishes_the_rendered_comp() {
     use bae_gpu::viewport::ViewportTextureRegistry;
-    use bae_gpu::{GpuContext, GpuContextDescriptor, wgpu};
-    let gpu = match GpuContext::new_headless(GpuContextDescriptor::default()) {
-        Ok(gpu) => gpu,
-        Err(e) => {
-            eprintln!("no GPU, skipping: {e}");
-            return;
-        }
+    use bae_gpu::wgpu;
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
     };
     eprintln!(
         "adapter: {} ({:?})",
@@ -566,65 +558,200 @@ fn gpu_preview_publishes_the_rendered_comp() {
     assert!(registry.get(id).is_none(), "removed on drop");
 }
 
-/// Menus: AE structure, enabled only when they can act, same invocation as the
-/// shortcut; the global handler runs them with no motion panel focused.
-#[test]
-fn menus_and_global_handler() {
-    use bae_ui::menu::{MenuContext, MenuEntry, build_menus};
-    use bae_ui::{ActionHandler, MenuItemSpec};
+/// The menu bar the motion module registers, as the shell builds it.
+fn motion_menu_tree() -> bae_ui::MenuTree {
     let mut b = AppBuilder::new();
     b.add_module(bae_ui::UiModule)
         .add_module(crate::MotionUiModule);
     let mut app = b.build();
-    let tree = build_menus(&app.registry::<MenuItemSpec>().snapshot(), "motion");
+    let tree =
+        bae_ui::menu::build_menus(&app.registry::<bae_ui::MenuItemSpec>().snapshot(), "motion");
     assert!(tree.conflicts.is_empty(), "{:?}", tree.conflicts);
+    tree
+}
+
+/// `Top > Sub > Title` lines of a menu tree (`---` separators, `▸` submenus).
+fn menu_lines(tree: &bae_ui::MenuTree) -> Vec<String> {
+    use bae_ui::menu::MenuEntry;
+    fn walk(prefix: &str, entries: &[MenuEntry], out: &mut Vec<String>) {
+        for e in entries {
+            match e {
+                MenuEntry::Item { spec, .. } => out.push(format!("{prefix} > {}", spec.title)),
+                MenuEntry::Separator => out.push(format!("{prefix} > ---")),
+                MenuEntry::Submenu { title, entries } => {
+                    out.push(format!("{prefix} > {title} ▸"));
+                    walk(&format!("{prefix} > {title}"), entries, out);
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for (top, entries) in &tree.menus {
+        out.push(format!("{top} ▸"));
+        walk(top, entries, &mut out);
+    }
+    out
+}
+
+/// The same lines from the catalog for this platform: run-time list
+/// placeholders are not shown, so separators around them fold away; the
+/// entries AE sorts by name are in English alphabetical order (the catalog
+/// lists them in the order of AE's Chinese menu).
+fn catalog_lines() -> Vec<String> {
+    use crate::catalog::{EFFECT_CATEGORIES, MAC_APP_MENU, MENUS, Node, Status};
+    fn walk(prefix: &str, nodes: &[Node], out: &mut Vec<String>) {
+        let mut level: Vec<String> = Vec::new();
+        // Start of the current run of sorted items in `level`.
+        let mut run: Option<usize> = None;
+        let sort_run = |level: &mut Vec<String>, run: &mut Option<usize>| {
+            if let Some(start) = run.take() {
+                level[start..].sort();
+            }
+        };
+        for n in nodes {
+            match n {
+                Node::Item(it) if it.platform.current() && it.status != Status::Dynamic => {
+                    if it.sorted {
+                        run.get_or_insert(level.len());
+                    } else {
+                        sort_run(&mut level, &mut run);
+                    }
+                    level.push(format!(
+                        "{prefix} > {}",
+                        crate::catalog::shown_title(it.title)
+                    ));
+                }
+                Node::Separator => {
+                    sort_run(&mut level, &mut run);
+                    level.push(format!("{prefix} > ---"));
+                }
+                Node::Submenu(sub) if sub.platform.current() => {
+                    sort_run(&mut level, &mut run);
+                    level.push(format!("{prefix} > {} ▸", sub.title));
+                    let mut inner = Vec::new();
+                    walk(
+                        &format!("{prefix} > {}", sub.title),
+                        sub.children,
+                        &mut inner,
+                    );
+                    level.extend(inner);
+                }
+                Node::Effects => {
+                    for c in EFFECT_CATEGORIES {
+                        level.push(format!("{prefix} > {c} ▸"));
+                    }
+                }
+                _ => {}
+            }
+        }
+        sort_run(&mut level, &mut run);
+        // Fold separators that no longer separate anything at this level.
+        let sep = format!("{prefix} > ---");
+        let child = format!("{prefix} > ");
+        let own = |l: &String| l.starts_with(&child) && !l[child.len()..].contains(" > ");
+        let mut folded: Vec<String> = Vec::new();
+        for l in level {
+            if l == sep {
+                let last_own = folded.iter().rev().find(|l| own(l));
+                if last_own.is_none_or(|l| *l == sep) {
+                    continue;
+                }
+            }
+            folded.push(l);
+        }
+        while let Some(i) = folded.iter().rposition(&own) {
+            if folded[i] != sep {
+                break;
+            }
+            folded.remove(i);
+        }
+        out.extend(folded);
+    }
+    let mut out = Vec::new();
+    let app = cfg!(target_os = "macos").then_some(("App", MAC_APP_MENU));
+    for (top, nodes) in app.into_iter().chain(MENUS.iter().copied()) {
+        out.push(format!("{top} ▸"));
+        walk(top, nodes, &mut out);
+    }
+    out
+}
+
+/// The menu bar is AE 26's, entry by entry: top-level menus, submenus, order and
+/// separators as in the catalog (which a catalog test checks against AE's
+/// `menus.json`). A change that drops, adds or moves an entry fails here.
+#[test]
+fn menu_bar_follows_the_ae_catalog() {
+    let tree = motion_menu_tree();
     let tops: Vec<&str> = tree.menus.iter().map(|(t, _)| t.as_str()).collect();
-    assert_eq!(
-        tops,
-        [
-            "File",
-            "Edit",
-            "Composition",
-            "Layer",
-            "Animation",
-            "Window"
-        ]
-    );
-    let layer = &tree.menus[3].1;
-    let MenuEntry::Submenu { title, entries } = &layer[0] else {
-        panic!("Layer ▸ New");
-    };
-    assert_eq!(title, "New");
-    let names: Vec<String> = entries
+    let mut expect = vec![
+        "File",
+        "Edit",
+        "Composition",
+        "Layer",
+        "Effect",
+        "Animation",
+        "View",
+        "Window",
+        "Help",
+    ];
+    if cfg!(target_os = "macos") {
+        expect.insert(0, "App");
+    }
+    assert_eq!(tops, expect);
+    let built = menu_lines(&tree);
+    let wanted = catalog_lines();
+    let first_diff = built
         .iter()
-        .map(|e| match e {
-            MenuEntry::Item { spec, .. } => spec.title.clone(),
-            MenuEntry::Separator => "---".into(),
-            MenuEntry::Submenu { title, .. } => title.clone(),
-        })
-        .collect();
+        .zip(&wanted)
+        .position(|(a, b)| a != b)
+        .unwrap_or(built.len().min(wanted.len()));
     assert_eq!(
-        names,
-        [
-            "Text",
-            "Solid...",
-            "Light...",
-            "Camera...",
-            "Null Object",
-            "Shape Layer",
-            "Adjustment Layer",
-            "---",
-            "Rectangle",
-            "Ellipse"
-        ]
+        built.len(),
+        wanted.len(),
+        "first difference at {first_diff}: {:?} vs {:?}",
+        built.get(first_diff),
+        wanted.get(first_diff)
     );
-    // Menu items show the shortcut bound to the same invocation.
+    assert_eq!(built, wanted, "first difference at line {first_diff}");
+    // Spot checks of the AE layout.
+    let has = |line: &str| built.iter().any(|l| l == line);
+    assert!(has("Layer > New > Solid..."));
+    assert!(has("Edit > History ▸"), "empty AE submenus stay");
+    assert!(has("Effect > Blur & Sharpen ▸"));
+    assert_eq!(
+        cfg!(target_os = "macos"),
+        has("App > Settings > Startup & Repair..."),
+        "macOS: Settings in the application menu"
+    );
+    assert_eq!(
+        !cfg!(target_os = "macos"),
+        has("Edit > Preferences > Startup & Repair..."),
+        "Windows: Edit > Preferences"
+    );
+    assert_eq!(!cfg!(target_os = "macos"), has("File > Exit"));
+    assert_eq!(!cfg!(target_os = "macos"), has("Help > About BAE..."));
+}
+
+/// Menu items show the shortcut bound to the same invocation; the global
+/// handler runs them with no motion panel focused.
+#[test]
+fn menus_and_global_handler() {
+    use bae_ui::ActionHandler;
+    use bae_ui::menu::MenuContext;
+    let tree = motion_menu_tree();
+    let item = |id: &str| {
+        tree.items()
+            .into_iter()
+            .find(|(i, _)| *i == id)
+            .unwrap_or_else(|| panic!("no menu item {id}"))
+            .1
+            .clone()
+    };
     let mut keymap = bae_ui::presets::ae_keymap();
     keymap.bindings.extend(crate::actions::bindings().bindings);
     let shortcut = |id: &str| {
-        let (_, spec) = tree.items().into_iter().find(|(i, _)| *i == id).unwrap();
         keymap
-            .chord_for_invocation(&spec.invocation())
+            .chord_for_invocation(&item(id).invocation())
             .map(|c| c.to_string())
     };
     assert_eq!(shortcut("motion.composition.new").as_deref(), Some("Cmd+N"));
@@ -634,30 +761,14 @@ fn menus_and_global_handler() {
         Some("Cmd+Alt+Shift+Y")
     );
     assert_eq!(shortcut("motion.animation.ease").as_deref(), Some("F9"));
-    assert_eq!(shortcut("motion.layer.new.rectangle"), None);
+    assert_eq!(shortcut("motion.layer.new.shape"), None);
 
     // Enabled state follows the session.
     let mut h = Harness::new();
-    let solid_item = tree
-        .items()
-        .into_iter()
-        .find(|(i, _)| *i == "motion.layer.new.solid")
-        .unwrap()
-        .1
-        .clone();
-    let new_comp = tree
-        .items()
-        .into_iter()
-        .find(|(i, _)| *i == "motion.composition.new")
-        .unwrap()
-        .1
-        .clone();
+    let solid_item = item("motion.layer.new.solid");
+    let new_comp = item("motion.composition.new");
     {
-        let cx = MenuContext {
-            stage: &h.stage,
-            resources: &h.resources,
-            workspace: "motion",
-        };
+        let cx = MenuContext::new(&h.stage, &h.resources, "motion");
         assert!(!solid_item.is_enabled(&cx), "no comp yet");
         assert!(new_comp.is_enabled(&cx));
     }
@@ -685,11 +796,7 @@ fn menus_and_global_handler() {
     h.frame("history", &mut NoopPanel, Vec::new());
     let comp = h.session().lock().active_comp.clone().expect("comp opened");
     {
-        let cx = MenuContext {
-            stage: &h.stage,
-            resources: &h.resources,
-            workspace: "motion",
-        };
+        let cx = MenuContext::new(&h.stage, &h.resources, "motion");
         assert!(solid_item.is_enabled(&cx));
     }
     // Layer ▸ New ▸ Solid... opens Solid Settings; OK creates the solid.
@@ -697,7 +804,101 @@ fn menus_and_global_handler() {
     let ok = h.answer_dialog(egui::Key::Enter);
     h.apply(ok);
     assert_eq!(query::comp_layers(&h.stage, &comp).len(), 1);
-    let _ = &mut app;
+}
+
+/// AE's greying: items need an open comp, selected layers or selected
+/// keyframes; items whose command no module handles stay greyed; Window and
+/// Workspace items show check marks.
+#[test]
+fn menu_items_grey_and_check_like_ae() {
+    use bae_ui::menu::MenuContext;
+    let tree = motion_menu_tree();
+    let item = |id: &str| {
+        tree.items()
+            .into_iter()
+            .find(|(i, _)| *i == id)
+            .unwrap_or_else(|| panic!("no menu item {id}"))
+            .1
+            .clone()
+    };
+    let ids = [
+        "motion.composition.new",
+        "motion.layer.new.solid",
+        "motion.composition.trim",
+        "motion.edit.duplicate",
+        "motion.layer.arrange.front",
+        "motion.animation.ease",
+        "menu.edit.copy",
+        "menu.layer.transform.fit_to_comp",
+        "menu.view.show_grid",
+        "shell.file.save",
+    ];
+    let mut h = Harness::new();
+    let handled: std::collections::HashSet<String> = ["motion.layer.fit_to_comp".to_owned()].into();
+    let enabled = |h: &Harness, handled: Option<&std::collections::HashSet<String>>| {
+        let mut cx = MenuContext::new(&h.stage, &h.resources, "motion");
+        if let Some(a) = handled {
+            cx = cx.with_actions(a);
+        }
+        ids.iter()
+            .filter(|id| item(id).is_enabled(&cx))
+            .copied()
+            .collect::<Vec<_>>()
+    };
+    // Nothing open: only what needs nothing.
+    assert_eq!(
+        enabled(&h, None),
+        ["motion.composition.new", "shell.file.save"]
+    );
+    // A comp, nothing selected.
+    let (_comp, solid, _shape) = h.comp_with_layers();
+    h.session().lock().selected_layers.clear();
+    assert_eq!(
+        enabled(&h, None),
+        [
+            "motion.composition.new",
+            "motion.layer.new.solid",
+            "motion.composition.trim",
+            "shell.file.save"
+        ]
+    );
+    // A selected layer: layer commands too; Fit to Comp once handled.
+    h.session().lock().selected_layers = vec![solid.clone()];
+    let layer_cmds = [
+        "motion.composition.new",
+        "motion.layer.new.solid",
+        "motion.composition.trim",
+        "motion.edit.duplicate",
+        "motion.layer.arrange.front",
+        "menu.edit.copy",
+        "shell.file.save",
+    ];
+    assert_eq!(enabled(&h, None), layer_cmds);
+    let mut with_fit = layer_cmds.to_vec();
+    with_fit.insert(6, "menu.layer.transform.fit_to_comp");
+    assert_eq!(enabled(&h, Some(&handled)), with_fit);
+    // Selected keyframes: the keyframe assistants.
+    h.session().lock().selected_layers.clear();
+    h.session().lock().selected_keys = vec![bae_motion::KeyRef {
+        path: solid.clone(),
+        attr: "transform:opacity".into(),
+        time: Time::ZERO,
+    }];
+    let keys = enabled(&h, None);
+    assert!(keys.contains(&"motion.animation.ease"), "{keys:?}");
+    assert!(keys.contains(&"menu.edit.copy"));
+    assert!(!keys.contains(&"motion.edit.duplicate"));
+
+    // Check marks: open panels and the active workspace.
+    let open = [PanelId::new("project")];
+    let cx = MenuContext::new(&h.stage, &h.resources, "motion").with_open_panels(&open);
+    let project = item("shell.window.project");
+    assert!(project.is_checkable() && project.is_checked(&cx));
+    assert!(!item("shell.window.timeline").is_checked(&cx));
+    let default = item("menu.window.workspace.default");
+    assert!(default.is_checked(&cx));
+    assert!(!item("menu.window.workspace.review").is_checked(&cx));
+    assert!(!item("motion.layer.new.solid").is_checkable());
 }
 
 struct NoopPanel;
@@ -709,16 +910,30 @@ impl Panel for NoopPanel {
     }
 }
 
+/// Every menu title (items and submenus) has a Chinese name.
 #[test]
 fn every_menu_title_has_chinese() {
-    let zh = crate::i18n::ZH;
-    let mut missing = Vec::new();
-    for (id, spec) in crate::menus::items() {
-        for t in spec.path.iter().chain(std::iter::once(&spec.title)) {
-            if !zh.iter().any(|(en, _)| en == t) {
-                missing.push(format!("{id}: {t}"));
-            }
+    bae_ui::i18n::register(crate::i18n::ZH);
+    bae_ui::i18n::register(crate::catalog::MENU_ZH);
+    let mut missing = std::collections::BTreeSet::new();
+    let mut check = |t: &str| {
+        if bae_ui::i18n::translation(t).is_none() {
+            missing.insert(t.to_owned());
         }
+    };
+    for (path, item) in crate::catalog::menu_items() {
+        for t in path.iter().skip(1) {
+            check(t);
+        }
+        if item.status != crate::catalog::Status::Dynamic {
+            check(item.title);
+        }
+    }
+    for (top, _) in crate::catalog::MENUS {
+        check(top);
+    }
+    for c in crate::catalog::EFFECT_CATEGORIES {
+        check(c);
     }
     assert!(missing.is_empty(), "missing Chinese for {missing:?}");
 }
@@ -836,7 +1051,7 @@ fn add_to_render_queue_action() {
     assert!(
         crate::menus::items()
             .iter()
-            .any(|(id, item)| *id == "motion.composition.render_queue"
+            .any(|(id, item)| id == "motion.composition.render_queue"
                 && item.action == crate::actions::ids::ADD_TO_RENDER_QUEUE)
     );
     assert!(
@@ -853,9 +1068,7 @@ fn add_to_render_queue_action() {
 /// focused widget; see bae-ui's `focused_widgets_get_their_keys_before_shortcuts`).
 #[test]
 fn render_button_activates_with_space_and_enter() {
-    let Ok(gpu) = bae_gpu::GpuContext::new_headless(bae_gpu::GpuContextDescriptor::default())
-    else {
-        eprintln!("no GPU, skipping");
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
         return;
     };
     let dir = tempfile::tempdir().unwrap();

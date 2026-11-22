@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use bae_gpu::{GpuContext, GpuContextDescriptor, wgpu};
+use bae_gpu::{GpuContext, wgpu};
 use bae_model::{BezierPath, EffectDef, FrameRate, PrimPath, Time, Value};
 use bae_render::fixture::{SceneBuilder, ellipse_path, rect_path};
 use bae_render::mask::FEATHER_TO_SIGMA;
@@ -15,13 +15,7 @@ use bae_render::{
 use glam::{DAffine2, DVec2};
 
 fn gpu() -> Option<Arc<GpuContext>> {
-    match GpuContext::new_headless(GpuContextDescriptor::default()) {
-        Ok(gpu) => Some(gpu),
-        Err(e) => {
-            eprintln!("no GPU, skipping: {e}");
-            None
-        }
-    }
+    bae_gpu::testing::shared_context()
 }
 
 fn p(s: &str) -> PrimPath {

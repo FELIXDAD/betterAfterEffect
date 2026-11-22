@@ -808,7 +808,9 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 );
             }
         }
-        _ => {}
+        // This module's actions are handled even when there is nothing to do
+        // (e.g. no keys selected); others go on to their handlers (tools, menus).
+        id => return ACTIONS.iter().any(|(a, _)| *a == id),
     }
     true
 }
