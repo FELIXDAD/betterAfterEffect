@@ -17,6 +17,9 @@ const ZH: &[(&str, &str)] = &[
     ),
     ("Edit", "编辑"),
     ("Exit", "退出"),
+    // Edit > Undo / Redo with nothing to undo (AE 26).
+    ("Can’t Undo", "无法撤消"),
+    ("Can’t Redo", "无法重做"),
     ("File", "文件"),
     ("Help", "帮助"),
     ("Quit BAE", "退出 BAE"),

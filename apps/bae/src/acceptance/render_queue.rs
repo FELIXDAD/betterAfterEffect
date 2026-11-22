@@ -85,7 +85,7 @@ fn png_tiff_exr_with_ranges_into_tricky_paths() {
         &mut h,
         &[
             "motion.layer.new.solid",
-            "motion.layer.new.ellipse",
+            "shape:ellipse",
             "motion.layer.new.text",
         ],
     );
@@ -168,7 +168,7 @@ fn long_comp(h: &mut Ui) -> PrimPath {
     h.state().session().lock().open_comp(&comp);
     settle(h);
     assert!(h.state_mut().menu("motion.layer.new.solid"));
-    assert!(h.state_mut().menu("motion.layer.new.ellipse"));
+    assert!(add_layer(h, "shape:ellipse"));
     settle(h);
     comp
 }
@@ -519,10 +519,7 @@ fn full_disk_fails_cleanly() {
     );
     let volume = PathBuf::from("/Volumes/BAEFULL");
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        comp_with(
-            &mut h,
-            &["motion.layer.new.solid", "motion.layer.new.ellipse"],
-        );
+        comp_with(&mut h, &["motion.layer.new.solid", "shape:ellipse"]);
         key(&mut h, Modifiers::COMMAND, Key::M);
         configure(
             &h,
