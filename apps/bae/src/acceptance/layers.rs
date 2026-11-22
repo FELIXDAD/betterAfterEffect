@@ -34,7 +34,7 @@ const NEW_ITEMS: [(&str, &str); 7] = [
 fn new_composition_with_cmd_n_opens_it() {
     let mut h = gui();
     assert!(h.state().active_comp().is_none());
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     let comp = h.state().active_comp().expect("Cmd+N opened no comp");
     assert_eq!(h.state().name(&comp), "Comp 1");
     // Timeline and viewer show it.
@@ -43,7 +43,7 @@ fn new_composition_with_cmd_n_opens_it() {
         "{:?}",
         painted_texts(&h)
     );
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     let second = h.state().active_comp().unwrap();
     assert_eq!(h.state().name(&second), "Comp 2");
     // Undo removes the second comp; the timeline falls back without crashing.
@@ -57,11 +57,12 @@ fn new_composition_with_cmd_n_opens_it() {
 #[test]
 fn every_layer_new_item_from_the_menu() {
     let mut h = gui();
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     for (id, want) in NEW_ITEMS {
         let before = h.state().layers();
         assert!(h.state_mut().menu(id), "{id} disabled with a comp open");
         settle(&mut h);
+        confirm_dialog(&mut h);
         let after = h.state().layers();
         assert_eq!(
             after.len(),
@@ -109,10 +110,12 @@ fn layer_shortcuts_follow_ae() {
         (cmd | Modifiers::ALT | Modifiers::SHIFT, Key::L, "light"),
     ];
     let mut h = gui();
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     for (m, k, want) in cases {
         let before = h.state().layers();
         key(&mut h, m, k);
+        // Cmd+Y asks for Solid Settings first.
+        confirm_dialog(&mut h);
         let after = h.state().layers();
         assert_eq!(after.len(), before.len() + 1, "{m:?}+{k:?} ({want})");
         assert_eq!(kind(&h, &after[0]), want, "{m:?}+{k:?}");
@@ -178,7 +181,7 @@ fn layer_items_are_greyed_out_and_shortcuts_do_nothing_without_a_comp() {
     );
 
     // After closing the last comp's project (File ▸ Close Project) they grey out again.
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     assert!(h.state().menu_item("motion.layer.new.solid").enabled);
     h.state_mut()
         .dialogs
@@ -566,7 +569,7 @@ fn lock_switch_with_undo_and_redo() {
     // A keyframe before locking.
     key(&mut h, Modifiers::ALT | Modifiers::SHIFT, Key::P);
     assert_eq!(position_keys(&h, &l), 1);
-    click_lock_switch(&mut h, "Solid 1");
+    click_lock_switch(&mut h, "Dark Gray Solid 1");
     assert!(is_locked(&h, &l), "the Lock switch did not lock");
     // Locked: Option+Shift+P does nothing, even with the layer forced into the selection.
     h.state().session().lock().selected_layers = vec![l.clone()];
@@ -589,7 +592,7 @@ fn lock_switch_with_undo_and_redo() {
     // across a lock; redo the lock again.
     key(&mut h, Modifiers::COMMAND, Key::Z);
     assert_eq!(position_keys(&h, &l), 1);
-    click_lock_switch(&mut h, "Solid 1");
+    click_lock_switch(&mut h, "Dark Gray Solid 1");
     assert!(is_locked(&h, &l));
     key(&mut h, Modifiers::COMMAND, Key::Z); // unlock
     key(&mut h, Modifiers::COMMAND, Key::Z); // first keyframe
@@ -601,7 +604,7 @@ fn lock_switch_with_undo_and_redo() {
         "redo did not restore key + lock"
     );
     // The switch unlocks it again.
-    click_lock_switch(&mut h, "Solid 1");
+    click_lock_switch(&mut h, "Dark Gray Solid 1");
     assert!(!is_locked(&h, &l), "the Lock switch did not unlock");
 }
 
@@ -818,7 +821,7 @@ fn locking_a_selected_layer_deselects_it() {
     comp_with(&mut h, &["motion.layer.new.solid"]);
     let l = h.state().layers()[0].clone();
     assert_eq!(h.state().selected_layers(), std::slice::from_ref(&l));
-    click_lock_switch(&mut h, "Solid 1");
+    click_lock_switch(&mut h, "Dark Gray Solid 1");
     assert!(is_locked(&h, &l));
     assert!(
         !h.state().selected_layers().contains(&l),
@@ -875,7 +878,7 @@ fn a_refused_edit_is_explained_in_the_status_bar() {
                            "value": {"type": "vec3", "value": [1.0, 2.0, 0.0]}}),
     ));
     settle(&mut h);
-    let notice = "Layer “Solid 1” is locked. Unlock it first.";
+    let notice = "Layer “Dark Gray Solid 1” is locked. Unlock it first.";
     assert!(
         find_text(&h, notice).is_some(),
         "no status bar notice: {:?}",
@@ -891,7 +894,7 @@ fn a_refused_edit_is_explained_in_the_status_bar() {
         export_before
     );
     // A successful change clears it.
-    key(&mut h, Modifiers::COMMAND, Key::Y);
+    new_solid(&mut h);
     assert!(
         find_text(&h, notice).is_none(),
         "the notice stayed after a change"

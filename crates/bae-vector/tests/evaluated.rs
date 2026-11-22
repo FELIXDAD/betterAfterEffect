@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use bae_anim::evaluate_comp;
-use bae_gpu::{GpuContext, GpuContextDescriptor, GpuError};
+use bae_gpu::GpuContext;
 use bae_model::{AuthorId, CommandRegistry, FrameRate, Keyframe, PrimPath, Stage, Time, Value};
 use bae_render::fixture::SceneBuilder;
 use bae_render::{IRect, LayerSource, SourceRequest, testing};
@@ -122,18 +122,9 @@ fn evaluated_contents_become_a_display_list() {
 
 #[test]
 fn evaluated_shape_layer_renders_on_the_gpu() {
-    let gpu: Arc<GpuContext> =
-        match GpuContext::new_headless(GpuContextDescriptor::default().with_env()) {
-            Ok(ctx) => ctx,
-            Err(error @ GpuError::NoAdapter { .. }) => {
-                if std::env::var_os("BAE_REQUIRE_GPU").is_some_and(|v| v == "1") {
-                    panic!("BAE_REQUIRE_GPU=1 but {error}");
-                }
-                eprintln!("skipping GPU test: {error}");
-                return;
-            }
-            Err(error) => panic!("{error}"),
-        };
+    let Some(gpu): Option<Arc<GpuContext>> = bae_gpu::testing::shared_context() else {
+        return;
+    };
     // Vello's compute pipelines crash the process (STATUS_ACCESS_VIOLATION) on WARP,
     // the software D3D12 adapter of GPU-less Windows CI runners. Skip software
     // adapters like the no-GPU case; making the render path itself refuse CPU adapters

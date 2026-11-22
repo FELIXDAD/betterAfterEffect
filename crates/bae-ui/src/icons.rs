@@ -57,6 +57,8 @@ pub enum Icon {
     InterpretFootage,
     Send,
     Trash,
+    /// Save (a floppy disk), e.g. Save Preset in Composition Settings.
+    Save,
     // Tools
     Home,
     Selection,
@@ -76,6 +78,26 @@ pub enum Icon {
     Eraser,
     RotoBrush,
     Puppet,
+    // Members of tool groups (toolbar flyouts)
+    RoundedRectangle,
+    Ellipse,
+    Polygon,
+    StarTool,
+    Sphere,
+    Cylinder,
+    Cone,
+    Torus,
+    Plane,
+    PenAdd,
+    PenDelete,
+    PenConvert,
+    MaskFeather,
+    TypeVertical,
+    RefineEdge,
+    PuppetStarch,
+    PuppetBend,
+    PuppetAdvanced,
+    PuppetOverlap,
     AxisLocal,
     AxisWorld,
     AxisView,
@@ -154,6 +176,7 @@ impl Icon {
         Icon::InterpretFootage,
         Icon::Send,
         Icon::Trash,
+        Icon::Save,
         Icon::Home,
         Icon::Selection,
         Icon::Hand,
@@ -172,6 +195,25 @@ impl Icon {
         Icon::Eraser,
         Icon::RotoBrush,
         Icon::Puppet,
+        Icon::RoundedRectangle,
+        Icon::Ellipse,
+        Icon::Polygon,
+        Icon::StarTool,
+        Icon::Sphere,
+        Icon::Cylinder,
+        Icon::Cone,
+        Icon::Torus,
+        Icon::Plane,
+        Icon::PenAdd,
+        Icon::PenDelete,
+        Icon::PenConvert,
+        Icon::MaskFeather,
+        Icon::TypeVertical,
+        Icon::RefineEdge,
+        Icon::PuppetStarch,
+        Icon::PuppetBend,
+        Icon::PuppetAdvanced,
+        Icon::PuppetOverlap,
         Icon::AxisLocal,
         Icon::AxisWorld,
         Icon::AxisView,
@@ -494,6 +536,17 @@ fn draw(g: &Pen<'_>, icon: Icon) {
                 g.line(&[(x, 6.5), (x, 11.5)]);
             }
         }
+        Icon::Save => {
+            g.closed(&[
+                (2.5, 2.5),
+                (11.5, 2.5),
+                (13.5, 4.5),
+                (13.5, 13.5),
+                (2.5, 13.5),
+            ]);
+            g.rect_fill(5.0, 2.5, 10.5, 6.0, 0.0);
+            g.rect(4.5, 8.5, 11.5, 13.5, 0.0);
+        }
         Icon::Home => {
             g.fill(&[(1.5, 8.0), (8.0, 1.8), (14.5, 8.0)]);
             g.rect_fill(3.5, 7.5, 12.5, 14.0, 0.0);
@@ -581,6 +634,97 @@ fn draw(g: &Pen<'_>, icon: Icon) {
         Icon::Eraser => {
             g.fill(&[(9.0, 2.0), (14.0, 7.0), (9.0, 12.0), (4.0, 7.0)]);
             g.closed(&[(4.0, 7.0), (9.0, 12.0), (7.0, 14.0), (2.0, 9.0)]);
+        }
+        Icon::RoundedRectangle => {
+            let g = Pen { width: 1.4, ..*g };
+            g.rect(2.0, 3.0, 14.0, 13.0, 3.0);
+        }
+        Icon::Ellipse => {
+            let g = Pen { width: 1.4, ..*g };
+            g.ellipse(8.0, 8.0, 6.0, 5.0);
+        }
+        Icon::Polygon | Icon::StarTool => {
+            let g = Pen { width: 1.3, ..*g };
+            let star = icon == Icon::StarTool;
+            let n = if star { 10 } else { 5 };
+            let pts: Vec<(f32, f32)> = (0..n)
+                .map(|i| {
+                    let r = if star && i % 2 == 1 { 2.8 } else { 6.2 };
+                    let a = (-90.0 + i as f32 * 360.0 / n as f32).to_radians();
+                    (8.0 + r * a.cos(), 8.6 + r * a.sin())
+                })
+                .collect();
+            g.closed(&pts);
+        }
+        Icon::Sphere => {
+            g.circle(8.0, 8.0, 5.8);
+            g.ellipse(8.0, 8.0, 5.8, 2.0);
+        }
+        Icon::Cylinder => {
+            g.ellipse(8.0, 3.8, 5.0, 1.8);
+            g.line(&[(3.0, 3.8), (3.0, 12.2)]);
+            g.line(&[(13.0, 3.8), (13.0, 12.2)]);
+            g.arc(8.0, 12.2, 5.0, 0.0, 180.0);
+        }
+        Icon::Cone => {
+            g.line(&[(8.0, 2.0), (3.0, 12.0)]);
+            g.line(&[(8.0, 2.0), (13.0, 12.0)]);
+            g.ellipse(8.0, 12.0, 5.0, 1.8);
+        }
+        Icon::Torus => {
+            g.ellipse(8.0, 8.0, 6.5, 4.0);
+            g.ellipse(8.0, 8.0, 2.6, 1.3);
+        }
+        Icon::Plane => {
+            g.closed(&[(4.5, 4.0), (14.5, 4.0), (11.5, 12.0), (1.5, 12.0)]);
+        }
+        Icon::PenAdd | Icon::PenDelete | Icon::PenConvert | Icon::MaskFeather => {
+            // A smaller nib on the left, the modifier on the right.
+            g.closed(&[(5.5, 2.0), (9.0, 6.5), (7.5, 11.5), (3.5, 11.5), (2.0, 6.5)]);
+            g.line(&[(5.5, 2.0), (5.5, 7.0)]);
+            g.rect_fill(3.5, 11.5, 7.5, 13.0, 0.0);
+            let g2 = Pen { width: 1.5, ..*g };
+            match icon {
+                Icon::PenAdd => {
+                    g2.line(&[(10.5, 11.0), (15.0, 11.0)]);
+                    g2.line(&[(12.75, 8.75), (12.75, 13.25)]);
+                }
+                Icon::PenDelete => g2.line(&[(10.5, 11.0), (15.0, 11.0)]),
+                Icon::PenConvert => g2.line(&[(10.0, 13.5), (12.5, 8.5), (15.0, 13.5)]),
+                _ => {
+                    g.circle(12.5, 11.0, 2.4);
+                    g.circle(12.5, 11.0, 0.8);
+                }
+            }
+        }
+        Icon::TypeVertical => {
+            let g = Pen { width: 1.6, ..*g };
+            g.line(&[(5.0, 3.0), (3.0, 3.0), (3.0, 13.0), (5.0, 13.0)]);
+            g.line(&[(3.0, 8.0), (13.0, 8.0)]);
+            g.line(&[(13.0, 6.0), (13.0, 10.0)]);
+        }
+        Icon::RefineEdge => {
+            g.arc(8.0, 8.0, 5.5, 0.0, 60.0);
+            g.arc(8.0, 8.0, 5.5, 90.0, 150.0);
+            g.arc(8.0, 8.0, 5.5, 180.0, 240.0);
+            g.arc(8.0, 8.0, 5.5, 270.0, 330.0);
+            g.disc(8.0, 8.0, 1.6);
+        }
+        Icon::PuppetStarch | Icon::PuppetBend | Icon::PuppetAdvanced | Icon::PuppetOverlap => {
+            g.disc(8.0, 5.5, 3.0);
+            g.line(&[(8.0, 8.5), (8.0, 14.5)]);
+            match icon {
+                Icon::PuppetStarch => g.rect(3.0, 1.0, 13.0, 10.0, 1.0),
+                Icon::PuppetBend => g.arc(8.0, 5.5, 5.5, 200.0, 340.0),
+                Icon::PuppetAdvanced => {
+                    g.circle(8.0, 5.5, 5.5);
+                    g.rect_fill(12.0, 1.0, 14.5, 3.5, 0.0);
+                }
+                _ => {
+                    g.line(&[(2.0, 12.0), (14.0, 12.0)]);
+                    g.line(&[(2.0, 14.5), (14.0, 14.5)]);
+                }
+            }
         }
         Icon::Puppet => {
             g.disc(8.0, 5.5, 3.6);

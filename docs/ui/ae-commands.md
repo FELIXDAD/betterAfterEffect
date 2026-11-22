@@ -36,9 +36,9 @@
 
 ## 统计
 
-- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 95，◐ 8，☐ 220，⏸ 217，Ⓐ 30
-- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 124 条。
-- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 115 条，macOS 115 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
+- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 100，◐ 8，☐ 215，⏸ 217，Ⓐ 30
+- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 129 条。
+- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 120 条，macOS 120 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
 
 ## 主菜单
 
@@ -63,8 +63,8 @@
 | Save As ▸ Save a Copy As 24.x... | 21889029 | `motion.file.save_a_copy_as_24_x` |  |  |  | B | Ⓐ |
 | Increment and Save | 131082 | `motion.file.increment_and_save` |  | Ctrl+Alt+Shift+S | Cmd+Opt+Shift+S | B | ☐ |
 | Revert | 131083 | `motion.file.revert` |  |  |  | B | ☐ |
-| Import ▸ File... | 9764865 | `motion.file.import_file` |  | Ctrl+I | Cmd+I | E | ☐ |
-| Import ▸ Multiple Files... | 9764866 | `motion.file.import_multiple_files` |  | Ctrl+Alt+I | Cmd+Opt+I | E | ☐ |
+| Import ▸ File... | 9764865 | `motion.file.import_file` |  | Ctrl+I | Cmd+I | E | ✅ |
+| Import ▸ Multiple Files... | 9764866 | `motion.file.import_multiple_files` |  | Ctrl+Alt+I | Cmd+Opt+I | E | ✅ |
 | Import ▸ From Libraries... | 9764867 | `motion.file.from_libraries` |  |  |  | B | Ⓐ |
 | Import ▸ Import Adobe Premiere Project... | 9764868 | `motion.file.import_adobe_premiere_project` |  |  |  | B | Ⓐ |
 | Import ▸ Vanishing Point (.vpe)... | 9764869 | `motion.file.vanishing_point_vpe` |  |  |  | B | Ⓐ |
@@ -205,7 +205,7 @@
 | AE 菜单路径 | AE id | BAE 动作 id | 参数 | Windows | macOS | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
 | New Composition... | 327681 | `motion.new_comp` |  | Ctrl+N | Cmd+N | B | ◐ |
-| Composition Settings... | 327683 | `motion.comp.composition_settings` |  | Ctrl+K | Cmd+K | E | ☐ |
+| Composition Settings... | 327683 | `motion.comp.composition_settings` |  | Ctrl+K | Cmd+K | E | ✅ |
 | Set Poster Time | 327684 | `motion.comp.set_poster_time` |  |  |  | B | ☐ |
 | Trim Comp to Work Area | 327685 | `motion.trim_comp` |  | Ctrl+Shift+X | Cmd+Shift+X | B | ✅ |
 | Crop Comp to Region of Interest | 327686 | `motion.comp.crop_comp_to_region_of_interest` |  |  |  | B | ⏸ |
@@ -250,7 +250,7 @@
 | New ▸ Torus | 11862031 | `motion.layer.new_3d_shape` | `{"shape":"torus"}` |  |  | B | ⏸ |
 | New ▸ Cone | 11862032 | `motion.layer.new_3d_shape` | `{"shape":"cone"}` |  |  | B | ⏸ |
 | New ▸ Cylinder | 11862033 | `motion.layer.new_3d_shape` | `{"shape":"cylinder"}` |  |  | B | ⏸ |
-| Layer Settings... | 393218 | `motion.layer.layer_settings` |  | Ctrl+Shift+Y | Cmd+Shift+Y | E | ☐ |
+| Layer Settings... | 393218 | `motion.layer.layer_settings` |  | Ctrl+Shift+Y | Cmd+Shift+Y | E | ✅ |
 | Open Layer | 393220 | `motion.layer.open_layer` |  |  |  | E | ⏸ |
 | Open Layer Source | 393221 | `motion.layer.open_layer_source` |  | Alt+PadEnter | Opt+PadEnter | B | ☐ |
 | Reveal in Explorer | 393222 | `motion.file.reveal_in_explorer` |  |  |  | B | ☐ |
@@ -422,7 +422,7 @@
 | Light ▸ Control Light with Camera | 328990722 | `motion.layer.control_light_with_camera` |  |  |  | B | ⏸ |
 | Light ▸ Create Environment Light Background Layer | 328990723 | `motion.layer.create_environment_light_background_layer` |  |  |  | B | ⏸ |
 | Auto-trace... | 393250 | `motion.layer.auto_trace` |  |  |  | B | ⏸ |
-| Pre-compose... | 393251 | `motion.layer.pre_compose` |  | Ctrl+Shift+C | Cmd+Shift+C | E | ☐ |
+| Pre-compose... | 393251 | `motion.layer.pre_compose` |  | Ctrl+Shift+C | Cmd+Shift+C | E | ✅ |
 | Scene Edit Detection... | 393252 | `motion.layer.scene_edit_detection` |  |  |  | B | ⏸ |
 
 ### Effect

@@ -15,6 +15,8 @@ workspace = true
 bae-app.workspace = true
 bae-model.workspace = true
 bae-anim.workspace = true
+# Geometry only (AE's parametric path construction); no GPU without the `render` feature.
+bae-vector.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true

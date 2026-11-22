@@ -253,6 +253,18 @@ const LEGACY_IDS: &[(&str, &str)] = &[
     ("Window/Properties", "shell.window.properties"),
     ("Window/Info", "shell.window.info"),
     ("Window/Render Queue", "motion.window.render_queue"),
+    // E's dialogs and import (their ids from before the catalog menu bar).
+    ("File/Import/File...", "motion.file.import_file"),
+    (
+        "File/Import/Multiple Files...",
+        "motion.file.import_multiple_files",
+    ),
+    (
+        "Composition/Composition Settings...",
+        "motion.comp.composition_settings",
+    ),
+    ("Layer/Layer Settings...", "motion.layer.layer_settings"),
+    ("Layer/Pre-compose...", "motion.layer.pre_compose"),
 ];
 
 /// `snake_case` of an English menu title (`"Save As..."` → `save_as`).
@@ -377,6 +389,14 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
     let need = need(path, item);
     if need != Need::Nothing {
         spec = spec.enabled_when(move |cx| Facts::of(cx).meets(need));
+    }
+    // Layer Settings needs a layer that has settings (solid, adjustment,
+    // camera, light) or a solid item in the Project panel.
+    if item.action == actions::ids::LAYER_SETTINGS {
+        spec = spec.enabled_when(|cx| {
+            let session = common::session(cx.resources);
+            actions::layer_settings_target(cx.stage, &session, true).is_some()
+        });
     }
     let id_param = || {
         spec_param(item.params, "id")

@@ -18,6 +18,7 @@
 //!   upload (plugin CPU nodes, thumbnails, Agent screenshots).
 //! * [`native`] — raw Metal / D3D12 handles for plugin interop.
 //! * [`GpuModule`] — the app module (resources + `bae gpu-info`).
+//! * [`testing::shared_context`] — one context per test process for GPU tests.
 //!
 //! `wgpu` is re-exported so dependants use exactly the pinned version.
 
@@ -26,6 +27,7 @@ mod context;
 mod module;
 pub mod native;
 pub mod surface;
+pub mod testing;
 pub mod timer;
 pub mod transfer;
 pub mod viewport;

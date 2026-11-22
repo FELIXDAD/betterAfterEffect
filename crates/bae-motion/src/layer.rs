@@ -41,8 +41,9 @@ fn default_label(kind: LayerKind) -> i64 {
     match kind {
         LayerKind::Shape => 8,
         LayerKind::Text | LayerKind::Solid | LayerKind::Null => 1,
-        LayerKind::Camera | LayerKind::Light => 4,
-        LayerKind::Adjustment => 10,
+        LayerKind::Camera => 4,
+        LayerKind::Light => 6,
+        LayerKind::Adjustment => 5,
         LayerKind::PreComp => 15,
         LayerKind::Footage => 3,
         LayerKind::Audio => 7,
@@ -89,6 +90,9 @@ pub struct CreateLayerParams {
     /// Solid size in pixels (default the comp size).
     #[serde(default)]
     pub size: Option<[u32; 2]>,
+    /// Solid pixel aspect ratio (default the comp's).
+    #[serde(default)]
+    pub pixel_aspect: Option<f64>,
     /// Text layers: the text (default "Text").
     #[serde(default)]
     pub text: Option<String>,
@@ -104,6 +108,41 @@ pub struct CreateLayerParams {
     /// Comp time (flicks) where the layer starts: its start time and in point (default 0).
     #[serde(default)]
     pub start: Option<Time>,
+    /// Camera layers: Camera Settings (type, zoom, depth of field …).
+    #[serde(default)]
+    pub camera: Option<crate::camera::CameraSettings>,
+    /// Light layers: Light Settings (type, color, intensity …).
+    #[serde(default)]
+    pub light: Option<crate::camera::LightSettings>,
+    /// Label color index (default AE's per kind; the UI passes the
+    /// Preferences > Labels default).
+    #[serde(default)]
+    pub label: Option<i64>,
+}
+
+impl CreateLayerParams {
+    /// A layer of `kind` in `comp` showing `source` (a comp or an asset),
+    /// starting at comp time `start`; everything else default.
+    pub fn with_source(comp: &PrimPath, kind: LayerKind, source: &PrimPath, start: Time) -> Self {
+        CreateLayerParams {
+            comp: comp.clone(),
+            kind,
+            name: None,
+            source: Some(source.clone()),
+            index: None,
+            color: None,
+            size: None,
+            pixel_aspect: None,
+            text: None,
+            font_size: None,
+            shape: None,
+            position: None,
+            start: Some(start),
+            camera: None,
+            light: None,
+            label: None,
+        }
+    }
 }
 
 fn source_size_and_duration(stage: &Stage, source: &PrimPath) -> Option<([f64; 2], Option<Time>)> {
@@ -189,7 +228,11 @@ impl Command for CreateLayer {
         create(tx, &path, PrimType::LAYER, Some(index.min(siblings)))?;
         set(tx, &path, "kind", Value::Enum(kind.as_str().to_owned()))?;
         set(tx, &path, "name", Value::String(name.clone()))?;
-        set(tx, &path, "label", Value::Int(default_label(kind)))?;
+        let label = p
+            .label
+            .filter(|l| (0..=16).contains(l))
+            .unwrap_or(default_label(kind));
+        set(tx, &path, "label", Value::Int(label))?;
         let start = p.start.unwrap_or(Time::ZERO);
         if start != Time::ZERO {
             set(tx, &path, "start_time", Value::Time(start))?;
@@ -238,6 +281,13 @@ impl Command for CreateLayer {
                 set(tx, &asset, "solid_color", Value::Color(color))?;
                 set(tx, &asset, "width", Value::Int(i64::from(sw)))?;
                 set(tx, &asset, "height", Value::Int(i64::from(sh)))?;
+                let par = p.pixel_aspect.unwrap_or(info.pixel_aspect);
+                if !(par.is_finite() && (0.01..=100.0).contains(&par)) {
+                    return Err(fail("pixel aspect ratio must be between 0.01 and 100"));
+                }
+                if par != 1.0 {
+                    set(tx, &asset, "pixel_aspect", Value::Float(par))?;
+                }
                 set(tx, &path, "source", Value::PrimRef(asset))?;
                 anchor = [f64::from(sw) / 2.0, f64::from(sh) / 2.0];
                 if kind == LayerKind::Adjustment {
@@ -254,7 +304,9 @@ impl Command for CreateLayer {
                 }
             }
             LayerKind::Null => {
-                anchor = [50.0, 50.0];
+                // AE 26: a 100x100 null anchored at its top-left corner, at 0%
+                // opacity (docs/reference/ae/interaction/layers-timeline-dnd).
+                set(tx, &path, "transform:opacity", Value::Float(0.0))?;
             }
             LayerKind::Text => {
                 let text = p.text.clone().filter(|t| !t.is_empty()).unwrap_or(name);
@@ -277,6 +329,27 @@ impl Command for CreateLayer {
                 position = [pos[0], pos[1], -zoom];
                 if kind == LayerKind::Camera {
                     set(tx, &path, "camera:zoom", Value::Float(zoom))?;
+                    set(tx, &path, "camera:focus_distance", Value::Float(zoom))?;
+                    if let Some(c) = &p.camera {
+                        for (attr, value) in c.attrs()? {
+                            set(tx, &path, attr, value)?;
+                        }
+                        // The camera stands `zoom` in front of the comp (AE).
+                        if let Some(z) = c.zoom {
+                            position = [pos[0], pos[1], -z];
+                        }
+                    }
+                } else {
+                    if let Some(l) = &p.light {
+                        for (attr, value) in l.attrs()? {
+                            set(tx, &path, attr, value)?;
+                        }
+                    }
+                    // AE 26 puts a new light up and to the right of the comp
+                    // center, aiming at it: [cx + 80, cy - 80, -666.67].
+                    if p.position.is_none() {
+                        position = [pos[0] + 80.0, pos[1] - 80.0, -2000.0 / 3.0];
+                    }
                 }
                 set(
                     tx,

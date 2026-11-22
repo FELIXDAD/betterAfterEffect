@@ -199,8 +199,8 @@ const FILE: &[Node] = &[
     sub(
         "Import",
         &[
-            it(9764865, "File...", "motion.file.import_file", "", E, Todo),
-            it(9764866, "Multiple Files...", "motion.file.import_multiple_files", "", E, Todo),
+            it(9764865, "File...", "motion.file.import_file", "", E, Done),
+            it(9764866, "Multiple Files...", "motion.file.import_multiple_files", "", E, Done),
             it(9764867, "From Libraries...", "motion.file.from_libraries", "", B, Adobe),
             it(9764868, "Import Adobe Premiere Project...", "motion.file.import_adobe_premiere_project", "", B, Adobe),
             it(9764869, "Vanishing Point (.vpe)...", "motion.file.vanishing_point_vpe", "", B, Adobe),
@@ -459,7 +459,7 @@ const EDIT: &[Node] = &[
 const COMPOSITION: &[Node] = &[
     it(327681, "New Composition...", "motion.new_comp", "", B, Partial),
     SEP,
-    it(327683, "Composition Settings...", "motion.comp.composition_settings", "", E, Todo),
+    it(327683, "Composition Settings...", "motion.comp.composition_settings", "", E, Done),
     it(327684, "Set Poster Time", "motion.comp.set_poster_time", "", B, Todo),
     it(327685, "Trim Comp to Work Area", "motion.trim_comp", "", B, Done),
     it(327686, "Crop Comp to Region of Interest", "motion.comp.crop_comp_to_region_of_interest", "", B, Later),
@@ -537,7 +537,7 @@ const LAYER: &[Node] = &[
             it(11862033, "Cylinder", "motion.layer.new_3d_shape", r#"{"shape":"cylinder"}"#, B, Later),
         ],
     ),
-    it(393218, "Layer Settings...", "motion.layer.layer_settings", "", E, Todo),
+    it(393218, "Layer Settings...", "motion.layer.layer_settings", "", E, Done),
     SEP,
     it(393220, "Open Layer", "motion.layer.open_layer", "", E, Later),
     it(393221, "Open Layer Source", "motion.layer.open_layer_source", "", B, Todo),
@@ -847,7 +847,7 @@ const LAYER: &[Node] = &[
         ],
     ),
     it(393250, "Auto-trace...", "motion.layer.auto_trace", "", B, Later),
-    it(393251, "Pre-compose...", "motion.layer.pre_compose", "", E, Todo),
+    it(393251, "Pre-compose...", "motion.layer.pre_compose", "", E, Done),
     it(393252, "Scene Edit Detection...", "motion.layer.scene_edit_detection", "", B, Later),
 ];
 

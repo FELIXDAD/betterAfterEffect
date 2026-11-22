@@ -18,6 +18,7 @@
 //! re-run themselves in a child process ([`in_child`]) so they cannot disturb
 //! the other tests of this binary.
 
+mod dialogs;
 mod files_flow;
 mod i18n_retest;
 mod i18n_scan;
@@ -29,6 +30,7 @@ mod settings;
 mod startup;
 mod stress;
 mod timeline;
+mod tools;
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -652,22 +654,57 @@ pub(crate) fn painted_texts(h: &Ui) -> Vec<String> {
     out
 }
 
-/// The process-wide GPU for tests (`None` without an adapter).
+/// The process-wide GPU for tests (`None` without an adapter), shared with every
+/// other GPU test in this binary (#154).
 pub(crate) fn gpu() -> Option<Arc<bae_gpu::GpuContext>> {
-    static GPU: std::sync::OnceLock<Option<Arc<bae_gpu::GpuContext>>> = std::sync::OnceLock::new();
-    GPU.get_or_init(|| bae_gpu::GpuContext::new_headless(Default::default()).ok())
-        .clone()
+    bae_gpu::testing::shared_context()
 }
 
-/// New comp (Cmd+N) with one layer from `Layer > New > <registry id>`; returns
-/// the harness settled.
-pub(crate) fn comp_with(h: &mut Ui, layers: &[&str]) {
+/// Whether a motion dialog (Composition Settings …) is open.
+pub(crate) fn dialog_open(h: &Ui) -> bool {
+    h.state()
+        .app
+        .resource::<bae_ui_motion::SharedDialogs>()
+        .is_some_and(|d| d.is_open())
+}
+
+/// New Composition the AE way: Cmd+N opens Composition Settings, Enter (OK)
+/// creates the comp with the dialog's settings and opens it.
+pub(crate) fn new_comp(h: &mut Ui) {
     let (m, k) = cmd(Key::N);
     key(h, m, k);
+    assert!(dialog_open(h), "Cmd+N opened no Composition Settings");
+    key(h, Modifiers::NONE, Key::Enter);
+    assert!(!dialog_open(h), "Enter did not close Composition Settings");
+}
+
+/// OK (Enter) in the motion dialog when one is open: Layer > New > Solid asks
+/// for Solid Settings first.
+pub(crate) fn confirm_dialog(h: &mut Ui) {
+    if dialog_open(h) {
+        key(h, Modifiers::NONE, Key::Enter);
+        assert!(!dialog_open(h), "Enter did not close the dialog");
+    }
+}
+
+/// New Solid the AE way: Cmd+Y opens Solid Settings, Enter (OK) creates the
+/// solid with the dialog's settings.
+pub(crate) fn new_solid(h: &mut Ui) {
+    let (m, k) = cmd(Key::Y);
+    key(h, m, k);
+    assert!(dialog_open(h), "Cmd+Y opened no Solid Settings");
+    confirm_dialog(h);
+}
+
+/// New comp (Cmd+N, OK) with one layer from `Layer > New > <registry id>`
+/// (OK in Solid Settings); returns the harness settled.
+pub(crate) fn comp_with(h: &mut Ui, layers: &[&str]) {
+    new_comp(h);
     assert!(h.state().active_comp().is_some(), "Cmd+N opened no comp");
     for id in layers {
         assert!(add_layer(h, id), "{id} disabled with a comp open");
         settle(h);
+        confirm_dialog(h);
     }
 }
 

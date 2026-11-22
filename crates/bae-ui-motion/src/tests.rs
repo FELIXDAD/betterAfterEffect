@@ -25,6 +25,7 @@ impl Harness {
         bae_motion::register_commands(&mut reg);
         let mut resources = Resources::new();
         resources.insert(SharedSession::default());
+        resources.insert(crate::SharedDialogs::default());
         Harness {
             stage: Stage::new(),
             reg,
@@ -75,6 +76,55 @@ impl Harness {
         });
         out.textures_delta.clear();
         requests
+    }
+
+    fn dialogs(&self) -> crate::SharedDialogs {
+        self.resources
+            .get::<crate::SharedDialogs>()
+            .unwrap()
+            .clone()
+    }
+
+    /// One frame of the motion dialogs (as the workbench draws them after the
+    /// dock); returns their requests.
+    fn dialog_frame(&self, events: Vec<Event>) -> PanelRequests {
+        use bae_ui::DialogHost as _;
+        let mut requests = PanelRequests::default();
+        let id = PanelId::new("dialog");
+        let raw = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 800.0))),
+            events,
+            ..Default::default()
+        };
+        let mut out = self.ctx.run_ui(raw, |ui| {
+            let mut cx = PanelContext::new(
+                &id,
+                "",
+                &self.stage,
+                &self.author,
+                &self.resources,
+                &mut requests,
+            );
+            crate::MotionDialogs.ui(ui.ctx(), &mut cx);
+        });
+        out.textures_delta.clear();
+        requests
+    }
+
+    /// Composition Settings is open: press `k` (Enter = OK, Escape = Cancel)
+    /// and return what OK asked for.
+    fn answer_dialog(&self, k: egui::Key) -> PanelRequests {
+        assert!(self.dialogs().is_open(), "no dialog open");
+        let first = self.dialog_frame(Vec::new());
+        assert!(first.invocations.is_empty());
+        self.dialog_frame(vec![key(k)])
+    }
+
+    /// New Composition through its dialog (Cmd+N, Enter): the requests.
+    fn new_comp_requests(&self, panel: &mut dyn Panel) -> PanelRequests {
+        let r = self.action(panel, Invocation::new(crate::actions::ids::NEW_COMP));
+        assert!(r.invocations.is_empty(), "the dialog comes first");
+        self.answer_dialog(egui::Key::Enter)
     }
 
     fn action(&self, panel: &mut dyn Panel, inv: Invocation) -> PanelRequests {
@@ -183,30 +233,33 @@ fn default_names_stay_unique_within_a_frame() {
         h.apply(b);
         out
     }
-    let comps = twice(
-        &mut h,
-        &mut viewer,
-        Invocation::new(crate::actions::ids::NEW_COMP),
-    );
-    assert_eq!(comps, ["Comp 1", "Comp 2"]);
-    h.frame("composition", &mut viewer, Vec::new());
+    // New Composition asks first (Composition Settings); each OK names the
+    // next comp.
+    for n in 1..=2 {
+        let r = h.new_comp_requests(&mut viewer);
+        assert_eq!(r.invocations[0].params["name"], format!("Comp {n}"));
+        h.apply(r);
+        h.frame("composition", &mut viewer, Vec::new());
+    }
     assert_eq!(query::comps(&h.stage).len(), 2);
-    let solid =
-        || Invocation::with_params(crate::actions::ids::NEW_LAYER, json!({"kind": "solid"}));
-    let solids = twice(&mut h, &mut viewer, solid());
-    assert_eq!(solids, ["Solid 1", "Solid 2"]);
+    // New Solid asks first too (Solid Settings); layers made directly still
+    // reserve their names within a frame.
+    let null = || Invocation::with_params(crate::actions::ids::NEW_LAYER, json!({"kind": "null"}));
+    let nulls = twice(&mut h, &mut viewer, null());
+    assert_eq!(nulls, ["Null 1", "Null 2"]);
     h.frame("composition", &mut viewer, Vec::new());
     // Reservations end once the items exist: the next one continues the count.
-    let next = h.action(&mut viewer, solid());
-    assert_eq!(next.invocations[0].params["name"], "Solid 3");
+    let next = h.action(&mut viewer, null());
+    assert_eq!(next.invocations[0].params["name"], "Null 3");
 }
 
 #[test]
 fn new_comp_and_layers_are_selected_once_created() {
     let mut h = Harness::new();
     let mut viewer = CompositionViewer::new(None);
-    // Empty viewer offers "New Composition"; the action does the same.
-    let r = h.action(&mut viewer, Invocation::new(crate::actions::ids::NEW_COMP));
+    // Empty viewer offers "New Composition"; the action does the same: the
+    // Composition Settings dialog, then OK creates the comp.
+    let r = h.new_comp_requests(&mut viewer);
     assert_eq!(r.invocations[0].id, "comp.create");
     h.apply(r);
     h.frame("composition", &mut viewer, Vec::new());
@@ -449,13 +502,9 @@ fn demo_project_builds_and_renders() {
 #[test]
 fn gpu_preview_publishes_the_rendered_comp() {
     use bae_gpu::viewport::ViewportTextureRegistry;
-    use bae_gpu::{GpuContext, GpuContextDescriptor, wgpu};
-    let gpu = match GpuContext::new_headless(GpuContextDescriptor::default()) {
-        Ok(gpu) => gpu,
-        Err(e) => {
-            eprintln!("no GPU, skipping: {e}");
-            return;
-        }
+    use bae_gpu::wgpu;
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
+        return;
     };
     eprintln!(
         "adapter: {} ({:?})",
@@ -742,12 +791,18 @@ fn menus_and_global_handler() {
         h.frame("history", &mut NoopPanel, Vec::new());
     };
     run(&mut h, new_comp.invocation());
+    let ok = h.answer_dialog(egui::Key::Enter);
+    h.apply(ok);
+    h.frame("history", &mut NoopPanel, Vec::new());
     let comp = h.session().lock().active_comp.clone().expect("comp opened");
     {
         let cx = MenuContext::new(&h.stage, &h.resources, "motion");
         assert!(solid_item.is_enabled(&cx));
     }
+    // Layer ▸ New ▸ Solid... opens Solid Settings; OK creates the solid.
     run(&mut h, solid_item.invocation());
+    let ok = h.answer_dialog(egui::Key::Enter);
+    h.apply(ok);
     assert_eq!(query::comp_layers(&h.stage, &comp).len(), 1);
 }
 
@@ -1013,9 +1068,7 @@ fn add_to_render_queue_action() {
 /// focused widget; see bae-ui's `focused_widgets_get_their_keys_before_shortcuts`).
 #[test]
 fn render_button_activates_with_space_and_enter() {
-    let Ok(gpu) = bae_gpu::GpuContext::new_headless(bae_gpu::GpuContextDescriptor::default())
-    else {
-        eprintln!("no GPU, skipping");
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
         return;
     };
     let dir = tempfile::tempdir().unwrap();
@@ -1223,6 +1276,665 @@ fn accessibility_labels_have_chinese() {
         .filter(|l| !zh.iter().any(|(en, _)| en == *l) && !bae_ui::i18n::has_translation(l))
         .collect();
     assert!(missing.is_empty(), "no Chinese for {missing:?}");
+}
+
+#[test]
+fn new_composition_dialog_ok_and_cancel() {
+    let mut h = Harness::new();
+    let mut viewer = CompositionViewer::new(None);
+    // Cancel (Esc): nothing is created.
+    let r = h.action(&mut viewer, Invocation::new(crate::actions::ids::NEW_COMP));
+    assert!(r.invocations.is_empty());
+    let r = h.answer_dialog(egui::Key::Escape);
+    assert!(r.invocations.is_empty());
+    assert!(!h.dialogs().is_open());
+    assert!(query::comps(&h.stage).is_empty());
+    // OK with changed settings creates the comp with all of them in one step.
+    h.action(&mut viewer, Invocation::new(crate::actions::ids::NEW_COMP));
+    {
+        let d = h.dialogs();
+        let mut d = d.lock();
+        let Some(crate::dialogs::Dialog::CompSettings(cs)) = d.open.as_mut() else {
+            panic!("Composition Settings is not open");
+        };
+        assert!(cs.is_new());
+        assert_eq!(cs.name, "Comp 1");
+        assert_eq!((cs.values.width, cs.values.height), (1920, 1080));
+        cs.name = "Title".into();
+        cs.values.width = 1280;
+        cs.values.height = 720;
+        cs.values.fps = 25.0;
+        cs.values.bg = [1.0, 1.0, 1.0, 1.0];
+        cs.values.duration = Time::from_seconds(4.0);
+    }
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "comp.create");
+    h.apply(r);
+    h.frame("composition", &mut viewer, Vec::new());
+    let comp = h.session().lock().active_comp.clone().expect("opened");
+    let info = query::comp_info(&h.stage, &comp).unwrap();
+    assert_eq!(info.name, "Title");
+    assert_eq!((info.width, info.height), (1280, 720));
+    assert_eq!(info.frame_rate, bae_model::FrameRate::FPS_25);
+    assert_eq!(info.bg_color, [1.0, 1.0, 1.0, 1.0]);
+    assert_eq!(info.duration, Time::from_seconds(4.0));
+    // The next New Composition starts from the last settings (AE), named on.
+    h.action(&mut viewer, Invocation::new(crate::actions::ids::NEW_COMP));
+    {
+        let d = h.dialogs();
+        let d = d.lock();
+        let Some(crate::dialogs::Dialog::CompSettings(cs)) = d.open.as_ref() else {
+            panic!("Composition Settings is not open");
+        };
+        assert_eq!(cs.name, "Comp 1");
+        assert_eq!((cs.values.width, cs.values.fps), (1280, 25.0));
+    }
+    let r = h.answer_dialog(egui::Key::Escape);
+    assert!(r.invocations.is_empty());
+}
+
+#[test]
+fn composition_settings_edit_is_one_undo_step() {
+    let mut h = Harness::new();
+    let (comp, solid, shape) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let before = |h: &Harness, l: &PrimPath| {
+        query::static_value(&h.stage.prim(l).unwrap(), "transform:position")
+    };
+    let solid_pos = before(&h, &solid);
+    let shape_pos = before(&h, &shape);
+    // Cmd+K with nothing changed: OK runs no command.
+    h.action(
+        &mut viewer,
+        Invocation::new(crate::actions::ids::COMP_SETTINGS),
+    );
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert!(r.invocations.is_empty(), "{:?}", r.invocations);
+    // Cmd+K, change size and name, OK: one comp.set_settings.
+    h.action(
+        &mut viewer,
+        Invocation::new(crate::actions::ids::COMP_SETTINGS),
+    );
+    {
+        let d = h.dialogs();
+        let mut d = d.lock();
+        let Some(crate::dialogs::Dialog::CompSettings(cs)) = d.open.as_mut() else {
+            panic!("Composition Settings is not open");
+        };
+        assert!(!cs.is_new());
+        assert_eq!((cs.values.width, cs.values.height), (640, 360));
+        cs.values.width = 800;
+        cs.values.height = 400;
+        cs.name = "Renamed".into();
+    }
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "comp.set_settings");
+    assert_eq!(r.invocations[0].params["anchor"], "center");
+    h.apply(r);
+    let info = query::comp_info(&h.stage, &comp).unwrap();
+    assert_eq!(
+        (info.width, info.height, info.name.as_str()),
+        (800, 400, "Renamed")
+    );
+    // Layers keep their place in the frame (moved by half the change).
+    let moved = |p: Option<Value>| match p {
+        Some(Value::Vec3([x, y, z])) => Some(Value::Vec3([x + 80.0, y + 20.0, z])),
+        other => other,
+    };
+    assert_eq!(before(&h, &solid), moved(solid_pos.clone()));
+    assert_eq!(before(&h, &shape), moved(shape_pos.clone()));
+    // One undo restores the comp and the layers.
+    h.stage.undo(&h.author).unwrap();
+    let info = query::comp_info(&h.stage, &comp).unwrap();
+    assert_eq!((info.width, info.height), (640, 360));
+    assert_eq!(before(&h, &solid), solid_pos);
+    assert_eq!(before(&h, &shape), shape_pos);
+}
+
+#[test]
+fn composition_settings_follows_the_project_panel_selection() {
+    let mut h = Harness::new();
+    let (comp, _, _) = h.comp_with_layers();
+    let other = PrimPath::new(
+        h.run(
+            "comp.create",
+            json!({"name": "Other", "width": 320, "height": 240}),
+        )["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    h.session().lock().selected_items = vec![other.clone()];
+    let target = |h: &Harness, kind: &str| {
+        let mut requests = PanelRequests::default();
+        let id = PanelId::new(kind);
+        let cx = PanelContext::new(&id, kind, &h.stage, &h.author, &h.resources, &mut requests);
+        crate::actions::settings_target(&cx, &h.session())
+    };
+    // The Project panel has focus: its selected comp; elsewhere: the active comp.
+    assert_eq!(target(&h, "project"), Some(other));
+    assert_eq!(target(&h, "timeline"), Some(comp));
+}
+
+#[test]
+fn dialog_strings_have_chinese() {
+    let missing: Vec<_> = crate::dialogs::strings()
+        .into_iter()
+        .filter(|s| {
+            !bae_ui::i18n::has_translation(s) && !crate::i18n::ZH.iter().any(|(en, _)| en == s)
+        })
+        .collect();
+    assert!(missing.is_empty(), "no Chinese for {missing:?}");
+}
+
+#[test]
+fn new_solid_dialog_and_solid_settings() {
+    use crate::dialogs::{Dialog, solid_settings_default_color};
+    let mut h = Harness::new();
+    let mut viewer = CompositionViewer::new(None);
+    let r = h.new_comp_requests(&mut viewer);
+    h.apply(r);
+    h.frame("composition", &mut viewer, Vec::new());
+    let comp = h.session().lock().active_comp.clone().expect("opened");
+    let solid =
+        || Invocation::with_params(crate::actions::ids::NEW_LAYER, json!({"kind": "solid"}));
+    // Cancel (Esc): nothing is created.
+    assert!(h.action(&mut viewer, solid()).invocations.is_empty());
+    assert!(h.answer_dialog(egui::Key::Escape).invocations.is_empty());
+    assert!(query::comp_layers(&h.stage, &comp).is_empty());
+    // AE's defaults: comp size, 17% gray, named after the color.
+    h.action(&mut viewer, solid());
+    {
+        let d = h.dialogs();
+        let mut d = d.lock();
+        let Some(Dialog::SolidSettings(s)) = d.open.as_mut() else {
+            panic!("Solid Settings is not open");
+        };
+        assert!(s.is_new());
+        assert_eq!(s.values.name, "Dark Gray Solid 1");
+        assert_eq!((s.values.width, s.values.height), (1920, 1080));
+        assert_eq!(s.values.color, solid_settings_default_color());
+        s.values.width = 640;
+        s.values.color = [1.0, 0.0, 0.0, 1.0];
+    }
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "layer.create");
+    h.apply(r);
+    h.frame("composition", &mut viewer, Vec::new());
+    let layer = query::comp_layers(&h.stage, &comp)[0].clone();
+    assert_eq!(
+        query::display_name_of(&h.stage, &layer),
+        "Dark Gray Solid 1"
+    );
+    let item = bae_motion::solid::layer_solid(&h.stage, &layer).unwrap();
+    let info = bae_motion::solid::solid_info(&h.stage, &item).unwrap();
+    assert_eq!((info.width, info.height), (640, 1080));
+    assert_eq!(info.color, [1.0, 0.0, 0.0, 1.0]);
+    assert_eq!(h.session().lock().selected_layers, vec![layer.clone()]);
+    // The next New Solid starts from the last color, named after it.
+    h.action(&mut viewer, solid());
+    {
+        let d = h.dialogs();
+        let d = d.lock();
+        let Some(Dialog::SolidSettings(s)) = d.open.as_ref() else {
+            panic!("Solid Settings is not open");
+        };
+        assert_eq!(s.values.color, [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(s.values.name, "Red Solid 1");
+    }
+    h.answer_dialog(egui::Key::Escape);
+    // Layer Settings (Cmd/Ctrl+Shift+Y) on the selected solid: nothing
+    // changed, no command; a change is one solid.set_settings.
+    let settings = || Invocation::new(crate::actions::ids::LAYER_SETTINGS);
+    h.action(&mut viewer, settings());
+    assert!(h.answer_dialog(egui::Key::Enter).invocations.is_empty());
+    h.action(&mut viewer, settings());
+    {
+        let d = h.dialogs();
+        let mut d = d.lock();
+        let Some(Dialog::SolidSettings(s)) = d.open.as_mut() else {
+            panic!("Solid Settings is not open");
+        };
+        assert!(!s.is_new());
+        assert_eq!(s.values.name, "Dark Gray Solid 1");
+        s.values.name = "Backdrop".into();
+        s.values.height = 200;
+    }
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "solid.set_settings");
+    assert_eq!(r.invocations[0].params["affect_all"], false);
+    h.apply(r);
+    let info = bae_motion::solid::solid_info(&h.stage, &item).unwrap();
+    assert_eq!((info.name.as_str(), info.height), ("Backdrop", 200));
+    assert_eq!(query::display_name_of(&h.stage, &layer), "Backdrop");
+    // One undo step.
+    h.stage.undo(&h.author).unwrap();
+    let info = bae_motion::solid::solid_info(&h.stage, &item).unwrap();
+    assert_eq!(
+        (info.name.as_str(), info.height),
+        ("Dark Gray Solid 1", 1080)
+    );
+    // A shape layer has no Solid Settings.
+    let r = h.action(
+        &mut viewer,
+        Invocation::with_params(
+            crate::actions::ids::NEW_LAYER,
+            json!({"kind": "shape", "shape": "rect"}),
+        ),
+    );
+    h.apply(r);
+    h.frame("composition", &mut viewer, Vec::new());
+    h.action(&mut viewer, settings());
+    assert!(!h.dialogs().is_open());
+}
+
+#[test]
+fn layer_settings_target_follows_focus_and_selection() {
+    let mut h = Harness::new();
+    let (_, solid, shape) = h.comp_with_layers();
+    let item = bae_motion::solid::layer_solid(&h.stage, &solid).unwrap();
+    let target = |h: &Harness, project: bool| {
+        crate::actions::layer_settings_target(&h.stage, &h.session(), project)
+    };
+    // The Project panel has focus with the solid item selected: the item
+    // (Solid Settings then changes every layer that uses it).
+    h.session().lock().selected_items = vec![item.clone()];
+    h.session().lock().selected_layers = vec![shape.clone()];
+    assert_eq!(target(&h, true), Some(item.clone()));
+    // Elsewhere: the one selected layer, when it uses a solid.
+    assert_eq!(target(&h, false), None);
+    h.session().lock().selected_layers = vec![solid.clone()];
+    assert_eq!(target(&h, false), Some(solid.clone()));
+    // Several layers: none (AE edits one layer's settings).
+    h.session().lock().selected_layers = vec![solid.clone(), shape];
+    assert_eq!(target(&h, false), None);
+}
+
+#[test]
+fn camera_and_light_settings_dialogs() {
+    use crate::dialogs::Dialog;
+    let mut h = Harness::new();
+    let mut viewer = CompositionViewer::new(None);
+    let r = h.new_comp_requests(&mut viewer);
+    h.apply(r);
+    h.frame("composition", &mut viewer, Vec::new());
+    let comp = h.session().lock().active_comp.clone().expect("opened");
+    let new =
+        |kind: &str| Invocation::with_params(crate::actions::ids::NEW_LAYER, json!({"kind": kind}));
+    // New Camera: AE's 50mm two-node camera; OK creates it in one step.
+    assert!(h.action(&mut viewer, new("camera")).invocations.is_empty());
+    {
+        let d = h.dialogs();
+        let mut d = d.lock();
+        let Some(Dialog::CameraSettings(c)) = d.open.as_mut() else {
+            panic!("Camera Settings is not open");
+        };
+        assert!(c.is_new());
+        assert_eq!(c.values.name, "Camera 1");
+        assert_eq!(c.values.camera_type, "two_node");
+        assert!((c.values.zoom - 1920.0 * 50.0 / 36.0).abs() < 1e-3);
+        c.values.camera_type = "one_node".into();
+        c.values.depth_of_field = true;
+    }
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "layer.create");
+    h.apply(r);
+    h.frame("composition", &mut viewer, Vec::new());
+    let cam = query::comp_layers(&h.stage, &comp)[0].clone();
+    let value =
+        |h: &Harness, l: &PrimPath, a: &str| query::static_value(&h.stage.prim(l).unwrap(), a);
+    assert_eq!(
+        value(&h, &cam, "camera:type"),
+        Some(Value::Enum("one_node".into()))
+    );
+    assert_eq!(
+        value(&h, &cam, "camera:depth_of_field"),
+        Some(Value::Bool(true))
+    );
+    // New Light: Spot Light 1; switching the type renames it until typed.
+    assert!(h.action(&mut viewer, new("light")).invocations.is_empty());
+    {
+        let d = h.dialogs();
+        let mut d = d.lock();
+        let Some(Dialog::LightSettings(l)) = d.open.as_mut() else {
+            panic!("Light Settings is not open");
+        };
+        assert_eq!(l.values.name, "Spot Light 1");
+        assert_eq!(l.values.intensity, 100.0);
+        l.values.light_type = "point".into();
+        l.values.name = "Key".into();
+        l.values.intensity = 80.0;
+    }
+    let r = h.answer_dialog(egui::Key::Enter);
+    h.apply(r);
+    h.frame("composition", &mut viewer, Vec::new());
+    let light = query::comp_layers(&h.stage, &comp)[0].clone();
+    assert_eq!(query::display_name_of(&h.stage, &light), "Key");
+    assert_eq!(
+        value(&h, &light, "light:type"),
+        Some(Value::Enum("point".into()))
+    );
+    assert_eq!(
+        value(&h, &light, "light:intensity"),
+        Some(Value::Float(80.0))
+    );
+    // Layer Settings on the light: Light Settings; one light.set_settings.
+    h.session().lock().selected_layers = vec![light.clone()];
+    let settings = || Invocation::new(crate::actions::ids::LAYER_SETTINGS);
+    h.action(&mut viewer, settings());
+    {
+        let d = h.dialogs();
+        let mut d = d.lock();
+        let Some(Dialog::LightSettings(l)) = d.open.as_mut() else {
+            panic!("Light Settings is not open");
+        };
+        assert!(!l.is_new());
+        assert_eq!(l.values.intensity, 80.0);
+        l.values.intensity = 120.0;
+    }
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "light.set_settings");
+    assert_eq!(r.invocations[0].params["intensity"], 120.0);
+    assert!(
+        r.invocations[0].params.get("light_type").is_none(),
+        "only changes"
+    );
+    h.apply(r);
+    assert_eq!(
+        value(&h, &light, "light:intensity"),
+        Some(Value::Float(120.0))
+    );
+    // Layer Settings on the camera: Camera Settings.
+    h.session().lock().selected_layers = vec![cam.clone()];
+    h.action(&mut viewer, settings());
+    {
+        let d = h.dialogs();
+        let mut d = d.lock();
+        let Some(Dialog::CameraSettings(c)) = d.open.as_mut() else {
+            panic!("Camera Settings is not open");
+        };
+        assert!(!c.is_new());
+        c.values.zoom = 1000.0;
+    }
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations[0].id, "camera.set_settings");
+    h.apply(r);
+    assert_eq!(value(&h, &cam, "camera:zoom"), Some(Value::Float(1000.0)));
+}
+
+#[test]
+fn precompose_dialog_options() {
+    use crate::dialogs::Dialog;
+    let mut h = Harness::new();
+    let (comp, solid, shape) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let pre = || Invocation::new(crate::actions::ids::PRE_COMPOSE);
+    // Nothing selected: no dialog.
+    h.session().lock().selected_layers.clear();
+    h.action(&mut viewer, pre());
+    assert!(!h.dialogs().is_open());
+    // One solid: Leave all attributes is offered; AE's factory choice is
+    // Move, and the last choice is remembered (#199).
+    h.session().lock().selected_layers = vec![solid.clone()];
+    h.action(&mut viewer, pre());
+    {
+        let d = h.dialogs();
+        let mut d = d.lock();
+        let Some(Dialog::Precompose(p)) = d.open.as_mut() else {
+            panic!("Pre-compose is not open");
+        };
+        assert!(!p.leave);
+        assert!(p.name.ends_with(" Comp 1"), "{}", p.name);
+        p.leave = true;
+        d.precompose.leave = true;
+    }
+    h.answer_dialog(egui::Key::Escape);
+    h.action(&mut viewer, pre());
+    {
+        let d = h.dialogs();
+        let d = d.lock();
+        let Some(Dialog::Precompose(p)) = d.open.as_ref() else {
+            panic!("Pre-compose is not open");
+        };
+        assert!(p.leave, "the last choice is remembered");
+    }
+    h.answer_dialog(egui::Key::Escape);
+    // Two layers: Move all attributes only; OK is one layer.precompose.
+    h.session().lock().selected_layers = vec![solid.clone(), shape.clone()];
+    h.action(&mut viewer, pre());
+    {
+        let d = h.dialogs();
+        let mut d = d.lock();
+        let Some(Dialog::Precompose(p)) = d.open.as_mut() else {
+            panic!("Pre-compose is not open");
+        };
+        assert!(!p.leave);
+        assert_eq!(p.name, "Pre-comp 1");
+        p.open_new = true;
+    }
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "layer.precompose");
+    assert_eq!(r.invocations[0].params["mode"], "move");
+    h.apply(r);
+    h.frame("composition", &mut viewer, Vec::new());
+    assert_eq!(query::comp_layers(&h.stage, &comp).len(), 1);
+    // Open New Composition: the new comp is the active one.
+    let active = h.session().lock().active_comp.clone().unwrap();
+    assert_ne!(active, comp);
+    assert_eq!(query::display_name_of(&h.stage, &active), "Pre-comp 1");
+    assert_eq!(query::comp_layers(&h.stage, &active).len(), 2);
+}
+
+/// A valid 1×1 RGBA PNG.
+const PNG_1X1: &[u8] = &[
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0,
+    0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 218, 99, 100, 96, 248, 95, 15, 0, 2,
+    135, 1, 128, 235, 71, 186, 146, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+];
+
+/// A folder with a still, a 3-frame sequence in `plates/` and a text file.
+fn import_fixture(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("bae-import-ui-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("plates")).unwrap();
+    std::fs::write(dir.join("logo.png"), PNG_1X1).unwrap();
+    for n in 1..=3 {
+        std::fs::write(dir.join("plates").join(format!("shot_{n:04}.png")), PNG_1X1).unwrap();
+    }
+    std::fs::write(dir.join("readme.txt"), b"notes").unwrap();
+    dir
+}
+
+#[test]
+fn import_probes_files_sequences_and_folders() {
+    let dir = import_fixture("probe");
+    let defaults = crate::import::ImportDefaults::default();
+    let probed = crate::import::probe(
+        &[
+            dir.join("logo.png"),
+            dir.join("plates").join("shot_0002.png"),
+            dir.join("plates").join("shot_0003.png"),
+            dir.join("readme.txt"),
+        ],
+        &defaults,
+    );
+    let names: Vec<_> = probed
+        .files
+        .iter()
+        .map(|f| f.name.clone().unwrap())
+        .collect();
+    // One numbered frame imports its whole sequence, once, named like AE.
+    assert_eq!(names, ["logo.png", "shot_[0001-0003].png"]);
+    assert_eq!(probed.files[0].attrs.get("width"), Some(&Value::Int(1)));
+    assert_eq!(probed.failed, ["readme.txt"]);
+    // A dropped folder keeps its name as a project folder.
+    let probed = crate::import::probe(&[dir.join("plates")], &defaults);
+    assert_eq!(probed.files.len(), 1);
+    assert_eq!(probed.files[0].folder.as_deref(), Some("plates"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[derive(Debug)]
+struct Dropped(std::path::PathBuf);
+
+impl egui::DroppedFile for Dropped {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|e| e.to_string())
+    }
+}
+
+struct Picker(std::sync::Mutex<Vec<Vec<std::path::PathBuf>>>);
+
+impl bae_ui::files::FilePicker for Picker {
+    fn open(&self, _: &bae_ui::files::OpenRequest) -> Vec<std::path::PathBuf> {
+        let mut answers = self.0.lock().unwrap();
+        if answers.is_empty() {
+            Vec::new()
+        } else {
+            answers.remove(0)
+        }
+    }
+}
+
+#[test]
+fn import_file_and_files_dropped_on_the_project_panel() {
+    let dir = import_fixture("ui");
+    let mut h = Harness::new();
+    // File > Import > File: the picker's files become one item.import.
+    h.resources
+        .insert(bae_ui::files::SharedFilePicker::new(Picker(
+            std::sync::Mutex::new(vec![vec![dir.join("logo.png")]]),
+        )));
+    let mut project = ProjectPanel::default();
+    let r = h.action(
+        &mut project,
+        Invocation::new(crate::actions::ids::IMPORT_FILE),
+    );
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "item.import");
+    h.apply(r);
+    let assets = PrimPath::new(query::ASSETS_FOLDER).unwrap();
+    let names = |h: &Harness| -> Vec<String> {
+        h.stage
+            .children(&assets)
+            .iter()
+            .map(|c| query::display_name_of(&h.stage, c))
+            .collect()
+    };
+    assert_eq!(names(&h), ["logo.png"]);
+    // Cancelled: nothing.
+    let r = h.action(
+        &mut project,
+        Invocation::new(crate::actions::ids::IMPORT_FILE),
+    );
+    assert!(r.invocations.is_empty());
+    // A folder dropped from Finder / Explorer onto the panel.
+    let raw = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 800.0))),
+        dropped_files: vec![std::sync::Arc::new(Dropped(dir.join("plates")))],
+        ..Default::default()
+    };
+    let mut requests = PanelRequests::default();
+    let id = PanelId::new("project");
+    let mut out = h.ctx.run_ui(raw, |ui| {
+        let mut cx = PanelContext::new(
+            &id,
+            "project",
+            &h.stage,
+            &h.author,
+            &h.resources,
+            &mut requests,
+        );
+        project.ui(ui, &mut cx);
+    });
+    out.textures_delta.clear();
+    assert_eq!(requests.invocations.len(), 1, "{:?}", requests.invocations);
+    h.apply(requests);
+    assert_eq!(names(&h), ["logo.png", "plates"]);
+    // An unreadable file: an alert, no import.
+    let r = h.action(
+        &mut project,
+        Invocation::new(crate::actions::ids::IMPORT_FILE),
+    );
+    assert!(r.invocations.is_empty());
+    h.resources
+        .insert(bae_ui::files::SharedFilePicker::new(Picker(
+            std::sync::Mutex::new(vec![vec![dir.join("readme.txt")]]),
+        )));
+    let r = h.action(
+        &mut project,
+        Invocation::new(crate::actions::ids::IMPORT_FILE),
+    );
+    assert!(r.invocations.is_empty());
+    assert!(matches!(
+        h.dialogs().lock().open,
+        Some(crate::dialogs::Dialog::Alert { .. })
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preferences_reach_new_layers_comps_and_imports() {
+    let mut prefs = bae_prefs::Preferences::default();
+    assert!(prefs.set("labels.label_default_null", 9));
+    assert!(prefs.set("labels.label_default_comp", 11));
+    assert!(prefs.set("composition.create_layers_at_comp_start", false));
+    assert!(prefs.set("import.still_footage_duration_mode", "fixed_duration"));
+    assert!(prefs.set("import.still_footage_duration_timecode", "0:00:05:00"));
+    assert!(prefs.set("labels.label_default_still", 12));
+    let mut h = Harness::new();
+    h.resources
+        .insert(std::sync::Arc::new(bae_prefs::PrefsStore::new(
+            prefs.clone(),
+        )));
+    let mut viewer = CompositionViewer::new(None);
+    // New Composition: the comp gets the Composition label.
+    let r = h.new_comp_requests(&mut viewer);
+    h.apply(r);
+    h.frame("composition", &mut viewer, Vec::new());
+    let comp = h.session().lock().active_comp.clone().unwrap();
+    let value =
+        |h: &Harness, p: &PrimPath, a: &str| query::static_value(&h.stage.prim(p).unwrap(), a);
+    assert_eq!(value(&h, &comp, "label"), Some(Value::Int(11)));
+    // A new null at 2 s: Create Layers at Composition Start Time is off.
+    let info = query::comp_info(&h.stage, &comp).unwrap();
+    h.session().lock().set_time(&info, Time::from_seconds(2.0));
+    let r = h.action(
+        &mut viewer,
+        Invocation::with_params(crate::actions::ids::NEW_LAYER, json!({"kind": "null"})),
+    );
+    h.apply(r);
+    let null = query::comp_layers(&h.stage, &comp)[0].clone();
+    assert_eq!(value(&h, &null, "label"), Some(Value::Int(9)));
+    assert_eq!(
+        query::layer_timing(&h.stage, &null).start_time,
+        Time::from_seconds(2.0)
+    );
+    // Import: a still gets the fixed duration and the Still label.
+    let dir = import_fixture("prefs");
+    let plain = crate::import::probe(&[dir.join("logo.png")], &Default::default());
+    assert!(!plain.files[0].attrs.contains_key("duration"));
+    let defaults = crate::import::ImportDefaults::of(&prefs);
+    let still = crate::import::probe(&[dir.join("logo.png")], &defaults);
+    let attrs = &still.files[0].attrs;
+    assert_eq!(
+        attrs.get("duration"),
+        Some(&Value::Time(Time::from_seconds(5.0)))
+    );
+    assert_eq!(attrs.get("label"), Some(&Value::Int(12)));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Every AE default shortcut of a command that runs is in the AE keymap (the
