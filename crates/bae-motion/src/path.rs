@@ -124,60 +124,44 @@ pub fn is_corner(p: &BezierPath, i: usize) -> bool {
     len(p.in_tangents[i]) < 1e-9 && len(p.out_tangents[i]) < 1e-9
 }
 
-/// Convert Vertex tool click: a smooth vertex becomes a corner (no handles), a
-/// corner becomes smooth, its handles along the direction from the previous to
-/// the next vertex, each a third of the adjacent segment's chord (AE-SHP-044,
-/// handle length 待核).
-pub fn toggle_corner(p: &BezierPath, i: usize) -> BezierPath {
+/// Convert Vertex tool click on a smooth vertex: it becomes a corner (no
+/// handles). A click on a corner does nothing; dragging pulls out handles
+/// (AE 26, R1).
+pub fn to_corner(p: &BezierPath, i: usize) -> BezierPath {
     let mut out = p.clone();
-    let n = p.vertices.len();
-    if i >= n {
-        return out;
-    }
-    if !is_corner(p, i) {
+    if i < out.vertices.len() {
         out.in_tangents[i] = [0.0, 0.0];
         out.out_tangents[i] = [0.0, 0.0];
-        return out;
     }
-    let v = p.vertices[i];
-    let prev = (i > 0 || p.closed).then(|| p.vertices[(i + n - 1) % n]);
-    let next = (i + 1 < n || p.closed).then(|| p.vertices[(i + 1) % n]);
-    let (dir, l_in, l_out) = match (prev, next) {
-        (Some(a), Some(b)) => (sub(b, a), len(sub(v, a)), len(sub(b, v))),
-        (None, Some(b)) => (sub(b, v), 0.0, len(sub(b, v))),
-        (Some(a), None) => (sub(v, a), len(sub(v, a)), 0.0),
-        (None, None) => return out,
-    };
-    let d = len(dir);
-    if d < 1e-9 {
-        return out;
-    }
-    let u = scale(dir, 1.0 / d);
-    out.in_tangents[i] = scale(u, -l_in / 3.0);
-    out.out_tangents[i] = scale(u, l_out / 3.0);
     out
 }
 
-/// RotoBezier tangents (AE-SHP-045): every vertex smooth, its handles parallel
-/// to the line through its neighbours (Catmull-Rom, a sixth of that distance;
-/// AE's formula and default 33 % tension 待核). End points of open paths stay
-/// corners.
+/// RotoBezier tangents (AE-SHP-045, measured in AE 26 by R1): each vertex's
+/// handles lie along the line from the previous to the next vertex, each a third
+/// of its own adjacent segment's chord. End points of open paths stay corners
+/// (待核).
 pub fn roto_bezier(p: &BezierPath) -> BezierPath {
     let mut out = p.clone();
     let n = p.vertices.len();
     for i in 0..n {
         let has_prev = i > 0 || p.closed;
         let has_next = i + 1 < n || p.closed;
+        out.in_tangents[i] = [0.0, 0.0];
+        out.out_tangents[i] = [0.0, 0.0];
         if n < 3 && !p.closed || !has_prev || !has_next {
-            out.in_tangents[i] = [0.0, 0.0];
-            out.out_tangents[i] = [0.0, 0.0];
             continue;
         }
+        let v = p.vertices[i];
         let a = p.vertices[(i + n - 1) % n];
         let b = p.vertices[(i + 1) % n];
-        let t = scale(sub(b, a), 1.0 / 6.0);
-        out.in_tangents[i] = scale(t, -1.0);
-        out.out_tangents[i] = t;
+        let d = sub(b, a);
+        let l = len(d);
+        if l < 1e-9 {
+            continue;
+        }
+        let u = scale(d, 1.0 / l);
+        out.in_tangents[i] = scale(u, -len(sub(v, a)) / 3.0);
+        out.out_tangents[i] = scale(u, len(sub(b, v)) / 3.0);
     }
     out
 }
@@ -250,6 +234,26 @@ impl Command for SetVertices {
                 "a path needs vertices with matching in/out tangent arrays",
             ));
         }
+        // Closing an open mask drawn with the Pen (mode None) makes it Add
+        // (AE 26, R1).
+        let is_mask = tx
+            .stage()
+            .prim(&p.path)
+            .and_then(|v| v.prim_type().cloned())
+            == Some(PrimType::MASK);
+        let was_open = matches!(
+            tx.stage().prim(&p.path).and_then(|v| query::static_value(&v, PATH_ATTR)),
+            Some(Value::Bezier(ref b)) if !b.closed
+        );
+        let mode_none = tx
+            .stage()
+            .prim(&p.path)
+            .and_then(|v| query::static_value(&v, "mode"))
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .as_deref()
+            == Some("none");
+        let closes = is_mask && was_open && p.shape.closed && mode_none;
+        let path = p.path.clone();
         SetAt.run(
             tx,
             SetAtParams {
@@ -258,7 +262,11 @@ impl Command for SetVertices {
                 time: p.time.unwrap_or(Time::ZERO),
                 value: Value::Bezier(p.shape),
             },
-        )
+        )?;
+        if closes {
+            crate::util::set(tx, &path, "mode", Value::Enum("add".into()))?;
+        }
+        Ok(())
     }
 }
 
@@ -379,14 +387,12 @@ mod tests {
     fn corners_and_smooth_points() {
         let p = square();
         assert!(is_corner(&p, 1));
-        let s = toggle_corner(&p, 1);
-        assert!(!is_corner(&s, 1));
+        let r = roto_bezier(&p);
         // Along prev → next (from (0,0) to (100,100)), a third of each chord.
         let d = 100.0 / 3.0 / 2f64.sqrt();
-        assert!(len(sub(s.out_tangents[1], [d, d])) < 1e-9);
-        assert!(len(sub(s.in_tangents[1], [-d, -d])) < 1e-9);
-        assert_eq!(toggle_corner(&s, 1), p);
-        let r = roto_bezier(&p);
+        assert!(len(sub(r.out_tangents[1], [d, d])) < 1e-9);
+        assert!(len(sub(r.in_tangents[1], [-d, -d])) < 1e-9);
+        assert_eq!(to_corner(&r, 1).in_tangents[1], [0.0, 0.0]);
         assert!((0..4).all(|i| !is_corner(&r, i)));
         let mut open = p.clone();
         open.closed = false;

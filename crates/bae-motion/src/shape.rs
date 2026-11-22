@@ -461,7 +461,8 @@ pub struct CreateMaskParams {
     /// after this one is added).
     #[serde(default)]
     pub name: Option<String>,
-    /// none, add, subtract, intersect, lighten, darken or difference (default add).
+    /// none, add, subtract, intersect, lighten, darken or difference (default:
+    /// add for a closed path, none for an open one).
     #[serde(default)]
     pub mode: Option<String>,
     #[serde(default)]
@@ -513,8 +514,13 @@ impl Command for CreateMask {
         let mask = child(&masks, &query::unique_child_name(tx.stage(), &masks, &name))?;
         create(tx, &mask, PrimType::MASK, None)?;
         set(tx, &mask, "name", Value::String(name))?;
+        let closed = path.closed;
         set(tx, &mask, "path", Value::Bezier(path))?;
-        let mode = p.mode.unwrap_or_else(|| "add".into());
+        // An open path (the Pen's first clicks) is mode None; closed ones Add
+        // (AE 26, R1).
+        let mode = p
+            .mode
+            .unwrap_or_else(|| if closed { "add" } else { "none" }.into());
         set(tx, &mask, "mode", Value::Enum(mode))?;
         if p.inverted {
             set(tx, &mask, "inverted", Value::Bool(true))?;

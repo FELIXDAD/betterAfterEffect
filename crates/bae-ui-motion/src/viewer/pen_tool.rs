@@ -15,7 +15,7 @@
 use bae_anim::EvaluatedComp;
 use bae_anim::glam::{DMat4, DVec2, DVec3};
 use bae_model::{BezierPath, PrimPath, PrimType, Value};
-use bae_motion::path::{roto_bezier, toggle_corner};
+use bae_motion::path::{is_corner, roto_bezier, to_corner};
 use bae_motion::query::{self, CompInfo};
 use bae_motion::shape::{Geometry, ShapeKind};
 use bae_ui::PanelContext;
@@ -61,8 +61,8 @@ struct Placing {
     dragged: bool,
 }
 
-/// Convert Vertex press on a vertex: a click toggles corner / smooth, a drag
-/// pulls out new symmetric handles.
+/// Convert Vertex press on a vertex: a click makes a smooth vertex a corner, a
+/// drag pulls out new symmetric handles.
 struct ConvertDrag {
     path: EditablePath,
     index: usize,
@@ -318,12 +318,18 @@ pub(super) fn frame(
         cv.path.path.in_tangents[cv.index] = [-out[0], -out[1]];
     }
     if !primary_down && let Some(cv) = state.convert.take() {
+        // A click makes a smooth vertex a corner (a corner stays one); a drag
+        // pulls out symmetric handles (AE 26).
         let new = if cv.dragged {
-            cv.path.path.clone()
+            Some(cv.path.path.clone())
+        } else if !is_corner(&cv.path.path, cv.index) {
+            Some(to_corner(&cv.path.path, cv.index))
         } else {
-            toggle_corner(&cv.path.path, cv.index)
+            None
         };
-        set_vertices(cx, session, info, &cv.path.prim, &new);
+        if let Some(new) = new {
+            set_vertices(cx, session, info, &cv.path.prim, &new);
+        }
     }
 
     // Paint: editable paths with their vertices, the open path, a convert drag.

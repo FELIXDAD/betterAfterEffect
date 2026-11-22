@@ -716,6 +716,8 @@ fn pen_closes_a_mask_on_its_first_vertex() {
     let mask = h.children(&solid.child("masks").unwrap())[0].clone();
     assert_eq!(h.name(&mask), "Mask 1");
     assert!(!h.bezier(&mask).closed);
+    // An open mask is mode None until it is closed (AE 26).
+    assert_eq!(h.value(&mask, "mode"), Some(Value::Enum("none".into())));
     // Back on the first vertex: closed, and the Pen starts over.
     let r = h.click(101.0, 101.0, Modifiers::NONE);
     one(&r, "path.set_vertices");
@@ -723,6 +725,7 @@ fn pen_closes_a_mask_on_its_first_vertex() {
     let b = h.bezier(&mask);
     assert!(b.closed);
     assert_eq!(b.vertices, [[100.0, 100.0], [300.0, 100.0], [300.0, 250.0]]);
+    assert_eq!(h.value(&mask, "mode"), Some(Value::Enum("add".into())));
     assert!(h.viewer.pen.drawing.is_none());
     // Shift: the segment from the last vertex snaps to 45°.
     let r = h.click(400.0, 50.0, Modifiers::NONE);
@@ -764,10 +767,12 @@ fn vertex_tools_and_the_pen_over_paths() {
     assert_eq!(one(&r, "path.delete_vertex")["index"], 4);
     h.apply(&r);
     assert_eq!(h.bezier(&mask).vertices.len(), 4);
-    // Convert Vertex: a click on a corner makes it smooth, again a corner; a
-    // drag pulls out handles.
+    // Convert Vertex: a click on a corner does nothing; a drag pulls out
+    // symmetric handles; a click on a smooth vertex makes it a corner (AE 26).
     h.tools().lock().set(Tool::ConvertVertex);
     let r = h.click(300.0, 100.0, Modifiers::NONE);
+    assert!(r.invocations.is_empty(), "{:?}", r.invocations);
+    let r = h.click_drag((300.0, 100.0), (30.0, 0.0), Modifiers::NONE);
     one(&r, "path.set_vertices");
     h.apply(&r);
     assert!(!bae_motion::path::is_corner(&h.bezier(&mask), 0));
@@ -786,9 +791,11 @@ fn vertex_tools_and_the_pen_over_paths() {
     assert_eq!(one(&r, "path.insert_vertex")["segment"], 2);
     h.apply(&r);
     assert_eq!(h.bezier(&mask).vertices.len(), 5);
-    let r = h.click(100.0, 100.0, Modifiers::ALT);
+    // Alt over the smooth vertex (300, 200): Convert Vertex makes it a corner.
+    let r = h.click(300.0, 200.0, Modifiers::ALT);
     one(&r, "path.set_vertices");
     h.apply(&r);
+    assert!(bae_motion::path::is_corner(&h.bezier(&mask), 1));
     let r = h.click(100.0, 100.0, Modifiers::NONE);
     one(&r, "path.delete_vertex");
     h.apply(&r);
@@ -811,11 +818,18 @@ fn rotobezier_pen_paths_get_automatic_tangents() {
     let b = h.bezier(&path);
     assert_eq!(b.vertices.len(), 3);
     assert!(bae_motion::path::is_corner(&b, 0) && bae_motion::path::is_corner(&b, 2));
-    // The middle vertex is smooth, parallel to the line through its neighbours.
+    // The middle vertex is smooth, along the line through its neighbours, each
+    // handle a third of its own segment (AE 26).
+    let third = 100f64.hypot(50.0) / 3.0;
     assert!(
-        near(b.out_tangents[1], [200.0 / 6.0, 0.0]),
+        near(b.out_tangents[1], [third, 0.0]),
         "{:?}",
         b.out_tangents[1]
+    );
+    assert!(
+        near(b.in_tangents[1], [-third, 0.0]),
+        "{:?}",
+        b.in_tangents[1]
     );
 }
 
