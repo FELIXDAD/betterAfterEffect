@@ -31,6 +31,9 @@ fn pages_in_ae_order() {
 fn keys_unique_and_defaults_valid() {
     let mut seen = std::collections::HashSet::new();
     let defaults = Preferences::default();
+    // 214 controls in R1's data: 205 stored values (label entries hold a color and
+    // a name; buttons, notes, the device table and the preview hold none) + 1 hidden.
+    assert_eq!(schema::all().len(), 206);
     for p in schema::all() {
         assert!(seen.insert(p.key), "duplicate key {}", p.key);
         let v = defaults.get(p.key).unwrap();
@@ -40,71 +43,96 @@ fn keys_unique_and_defaults_valid() {
             "default of {} is invalid",
             p.key
         );
-        if let Some(When::On(k) | When::Is(k, _)) = p.enabled {
-            assert!(
-                schema::find(k).is_some(),
-                "{} depends on unknown {k}",
-                p.key
-            );
-        }
-        if let Some(When::Is(k, option)) = p.enabled {
-            let Kind::Choice { options, .. } = schema::find(k).unwrap().kind else {
-                panic!("{k} is not a choice");
-            };
-            assert!(options.contains(&option), "{option} not an option of {k}");
+        if let Some(w) = &p.enabled {
+            check_when(p.key, w);
         }
     }
 }
 
+fn check_when(key: &str, w: &When) {
+    match w {
+        When::On(k) | When::Off(k) => {
+            assert_eq!(
+                schema::find(k).map(|p| p.kind),
+                Some(Kind::Bool),
+                "{key}: {k}"
+            );
+        }
+        When::Is(k, value) => {
+            let Some(Kind::Choice { options, .. }) = schema::find(k).map(|p| p.kind) else {
+                panic!("{key}: {k} is not a choice");
+            };
+            assert!(options.iter().any(|o| o.value == *value), "{key}: {value}");
+        }
+        When::All(all) => all.iter().for_each(|w| check_when(key, w)),
+    }
+}
+
+/// AE 26 defaults as R1 read them (docs/reference/ae/ui/preferences-dialog.json).
 #[test]
 fn ae_defaults() {
     let p = Preferences::default();
-    assert_eq!(p.levels_of_undo(), 99);
+    assert_eq!(
+        p.levels_of_undo(),
+        1000,
+        "BAE default; AE 26 has no UI for it"
+    );
     assert_eq!(p.int(keys::PATH_POINT_SIZE), 5);
     assert!(p.bool(keys::CREATE_LAYERS_AT_START));
-    assert!(!p.bool(keys::DEFAULT_SPATIAL_LINEAR));
-    assert_eq!(p.float(keys::GRID_SPACING), 80.0);
+    assert!(p.bool(keys::DEFAULT_SPATIAL_LINEAR));
+    assert!(p.bool(keys::SPLIT_LAYERS_ABOVE));
+    assert!(!p.bool(keys::CENTER_SHAPE_ANCHOR));
+    assert_eq!(p.str(keys::COLOR_THEME), "darkest");
+    assert_eq!(p.int(keys::GRID_SPACING), 80);
     assert_eq!(p.int(keys::GRID_SUBDIVISIONS), 4);
     assert_eq!(p.color(keys::GRID_COLOR), [0, 0x80, 0]);
+    assert_eq!(p.str(keys::GRID_STYLE), "lines");
+    assert_eq!(p.color(keys::GUIDE_COLOR), [0x20, 0xe0, 0xff]);
     assert_eq!(p.float(keys::ACTION_SAFE), 10.0);
     assert_eq!(p.float(keys::TITLE_SAFE), 20.0);
     assert_eq!(p.float(keys::CC_ACTION_SAFE), 32.5);
     assert_eq!(p.float(keys::CC_TITLE_SAFE), 40.0);
     assert_eq!(p.auto_save_minutes(), Some(5));
     assert_eq!(p.int(keys::AUTO_SAVE_MAX_VERSIONS), 3);
+    assert_eq!(p.str(keys::AUTO_SAVE_LOCATION), "next_to_project");
     assert_eq!(p.float(keys::SEQUENCE_FPS), 30.0);
-    assert_eq!(p.int("labels.default_comp"), 15);
+    assert_eq!(p.str(keys::STILL_DURATION), "0:00:01:00");
+    assert_eq!(p.int(keys::EXPR_FONT_SIZE), 12);
+    assert_eq!(p.int("labels.label_default_comp"), 15);
     assert_eq!(p.label_name(2), "Yellow");
-    assert_eq!(p.label_color(1), [0xa7, 0x41, 0x3d]);
-    assert_eq!(p.label_color(0), [0x3a, 0x3a, 0x3a]);
+    assert_eq!(p.label_color(1), [0xb5, 0x38, 0x38]);
+    assert!(p.label_color_is_default(1));
 }
 
 #[test]
 fn lenient_reading() {
     let data = json!({
-        "general.levels_of_undo": 500,      // clamped to 99
-        "general.show_tool_tips": "yes",    // wrong type: default
-        "grids.grid_style": "Zigzag",       // unknown option: default
-        "grids.grid_color": "#FF0000",      // normalized
-        "labels.name_1": "Hot",
-        "future.setting": [1, 2],           // kept
+        "appearance.path_point_and_handle_size": 500, // clamped to 15
+        "appearance.show_tool_tips": "yes",          // wrong type: default
+        "grids_guides.grid_style": "zigzag",         // unknown option: default
+        "grids_guides.grid_color": "#FF0000",        // normalized
+        "import.still_footage_duration_timecode": "1:99:00:00", // bad timecode
+        "labels.label_name_1": "Hot",
+        "future.setting": [1, 2],                   // kept
     });
     let (p, fixed) = Preferences::from_json(data.as_object().unwrap());
-    assert_eq!(p.levels_of_undo(), 99);
-    assert!(p.bool("general.show_tool_tips"));
-    assert_eq!(p.str(keys::GRID_STYLE), "Lines");
+    assert_eq!(p.int(keys::PATH_POINT_SIZE), 15);
+    assert!(p.bool("appearance.show_tool_tips"));
+    assert_eq!(p.str(keys::GRID_STYLE), "lines");
     assert_eq!(p.color(keys::GRID_COLOR), [255, 0, 0]);
+    assert_eq!(p.str(keys::STILL_DURATION), "0:00:01:00");
     assert_eq!(p.label_name(1), "Hot");
     for k in [
-        "general.levels_of_undo",
-        "general.show_tool_tips",
-        "grids.grid_style",
+        "appearance.path_point_and_handle_size",
+        "appearance.show_tool_tips",
+        "grids_guides.grid_style",
+        "import.still_footage_duration_timecode",
     ] {
         assert!(fixed.iter().any(|f| f == k), "{k} not reported");
     }
     let out = p.to_json();
     assert_eq!(out["future.setting"], json!([1, 2]));
-    assert_eq!(out["labels.name_1"], json!("Hot"));
+    assert_eq!(out["labels.label_name_1"], json!("Hot"));
 }
 
 #[test]
@@ -116,8 +144,10 @@ fn set_validates() {
     assert_eq!(p.levels_of_undo(), 1);
     assert!(!p.set("nope", 1));
     assert!(!p.set(keys::GRID_COLOR, "red"));
+    assert!(!p.set(keys::GRID_STYLE, "Lines"), "values are option ids");
+    assert!(p.set(keys::GRID_STYLE, "dots"));
     p.reset(keys::LEVELS_OF_UNDO);
-    assert_eq!(p.levels_of_undo(), 99);
+    assert_eq!(p.levels_of_undo(), 1000);
 }
 
 #[test]
@@ -128,10 +158,11 @@ fn enable_conditions() {
     p.set(keys::AUTO_SAVE, false);
     assert!(!p.enabled(interval));
     assert_eq!(p.auto_save_minutes(), None);
-    let folder = schema::find(keys::AUTO_SAVE_FOLDER).unwrap();
-    assert!(!p.enabled(folder));
-    p.set(keys::AUTO_SAVE_LOCATION, "Custom Location");
-    assert!(p.enabled(folder));
+    // All: line-number color needs syntax highlighting and line numbers.
+    let line_color = schema::find("scripting_expressions.expr_color_line_numbers").unwrap();
+    assert!(p.enabled(line_color));
+    p.set("scripting_expressions.expr_show_line_numbers", false);
+    assert!(!p.enabled(line_color));
 }
 
 #[test]
@@ -156,11 +187,11 @@ fn store_notifies() {
 
 #[test]
 fn every_string_translated() {
-    let zh: std::collections::HashMap<_, _> = i18n::ZH.iter().copied().collect();
-    let proper = ["Source Code Pro", "Menlo", "Consolas", "Courier New"];
+    // Kept in English in AE's Chinese UI (R1 recorded them so).
+    let proper = crate::pages::SAME_IN_ZH;
     let mut missing = Vec::new();
     let mut check = |s: &str| {
-        if s.chars().any(char::is_alphabetic) && !zh.contains_key(s) && !proper.contains(&s) {
+        if s.chars().any(char::is_alphabetic) && i18n::zh(s).is_none() && !proper.contains(&s) {
             missing.push(s.to_owned());
         }
     };
@@ -174,29 +205,29 @@ fn every_string_translated() {
                     check(p.label);
                     check(p.unit);
                     match p.kind {
-                        Kind::Choice { options, .. } => options.iter().for_each(|o| check(o)),
-                        Kind::Slider { .. } => {
-                            check("Darker");
-                            check("Lighter");
+                        Kind::Choice { options, .. } => options.iter().for_each(|o| check(o.label)),
+                        Kind::Slider { left, right, .. } => {
+                            check(left);
+                            check(right);
                         }
-                        Kind::Path { button } => check(button),
                         _ => {}
-                    }
-                    if let DefaultValue::Str(s) = p.default
-                        && matches!(p.kind, Kind::Text)
-                        && p.key.starts_with("new_project")
-                    {
-                        check(s);
                     }
                 }
                 Item::Row(list) => items(list, check),
+                Item::Cols(cols) => cols.iter().for_each(|c| items(c, check)),
                 Item::Group(title, list) => {
                     check(title);
                     items(list, check);
                 }
-                Item::Button(_, text) | Item::Note(text) => check(text),
-                Item::Only(_, item) => items(std::slice::from_ref(*item), check),
-                Item::Gap => {}
+                Item::Button(_, text) | Item::Info(text, _) => check(text),
+                Item::Table(text, cols) => {
+                    check(text);
+                    cols.iter().for_each(|c| check(c));
+                }
+                Item::Only(_, item) | Item::When(_, item) => {
+                    items(std::slice::from_ref(*item), check)
+                }
+                Item::Preview(_) => {}
             }
         }
     }
@@ -204,6 +235,10 @@ fn every_string_translated() {
         check(page.title);
         items(page.items, &mut check);
     }
+    for s in ["Preferences", "OK", "Cancel", "Previous", "Next"] {
+        check(s);
+    }
+    missing.sort();
     missing.dedup();
     assert!(missing.is_empty(), "no Chinese for: {missing:?}");
 }
@@ -237,10 +272,10 @@ fn file_roundtrip_and_corrupt_fallback() {
     // Old/odd data in a valid envelope: per-key fallback.
     std::fs::write(
         &path,
-        r#"{"kind":"bae-preferences","version":1,"data":{"general.levels_of_undo":"x","auto_save.interval":30}}"#,
+        r#"{"kind":"bae-preferences","version":1,"data":{"general.levels_of_undo":"x","project.auto_save_interval_minutes":30}}"#,
     )
     .unwrap();
     let (odd, _) = PrefsStore::open(&path);
-    assert_eq!(odd.current().levels_of_undo(), 99);
+    assert_eq!(odd.current().levels_of_undo(), 1000);
     assert_eq!(odd.current().auto_save_minutes(), Some(30));
 }

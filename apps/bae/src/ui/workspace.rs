@@ -115,6 +115,9 @@ pub struct ShortcutRow {
     pub shown: String,
 }
 
+/// Preferences > Startup & Repair > Reveal Preferences in Explorer / Finder.
+pub const REVEAL_PREFERENCES: &str = "startup_repair.reveal_preferences_in_explorer";
+
 /// The workbench plus shell-owned windows.
 pub struct Workspace {
     workbench: Workbench,
@@ -135,7 +138,7 @@ impl Workspace {
             show_about: false,
             prefs,
             settings: bae_ui::settings::SettingsDialog::default()
-                .with_host_buttons(&["general.reveal", "choose"]),
+                .with_host_buttons(&[REVEAL_PREFERENCES, "choose"]),
         }
     }
 
@@ -151,7 +154,7 @@ impl Workspace {
         &mut self.settings
     }
 
-    /// Buttons of the Preferences window the shell runs (`general.reveal`,
+    /// Buttons of the Preferences window the shell runs ([`REVEAL_PREFERENCES`],
     /// `choose:<key>`).
     pub fn take_settings_requests(&mut self) -> Vec<String> {
         self.settings.take_requests()

@@ -1,17 +1,22 @@
-//! The Preferences dialog (AE: Edit > Preferences on Windows, After Effects >
-//! Settings… on macOS; the window is titled Preferences on both): a movable modal window with the page list on the left and
-//! the current page on the right, built from [`bae_prefs::schema`]. Edits go to a
-//! draft; OK hands it back to the host to store, Cancel drops it.
+//! The Preferences dialog (AE 26: Edit > Preferences on Windows, After Effects >
+//! Settings… on macOS; the window is titled Preferences on both), built from
+//! [`bae_prefs::schema`] (generated from R1's reading of AE 26.0): a fixed-size
+//! modal window with the 16 pages listed on the left, the current page in the
+//! middle and OK, Cancel, Previous, Next in a column at the top right. Edits go to
+//! a draft; OK hands it back to the host to store, Cancel drops it. Previous and
+//! Next wrap around.
 //!
 //! The host opens it for the `app.settings` action (parameter `page`, e.g.
-//! `general`) and runs the buttons it cannot handle itself (Reveal Preferences,
-//! Choose Folder…) from [`SettingsDialog::take_requests`].
+//! `startup_repair`) and runs the buttons it handles (Reveal Preferences,
+//! Choose Folder…) from [`SettingsDialog::take_requests`]; every other button is
+//! drawn disabled.
 
-use bae_prefs::schema::{self, Item, Kind, PAGES, Pref};
-use bae_prefs::{Preferences, parse_color};
+use bae_prefs::schema::{self, Item, Kind, PAGES, Pref, Style};
+use bae_prefs::{Preferences, parse_color, parse_timecode};
 use egui::{Color32, Key, RichText, Ui, vec2};
 use serde_json::Value;
 
+use crate::a11y::Accessible as _;
 use crate::i18n::tr;
 use crate::theme::color;
 use crate::widgets;
@@ -19,10 +24,15 @@ use crate::widgets;
 /// Action id that opens the dialog; parameter `{"page": "<page id>"}`.
 pub const ACTION: &str = "app.settings";
 
-/// Dialog size in points (AE's Preferences window at 100%).
-pub const SIZE: egui::Vec2 = vec2(760.0, 540.0);
-const LIST_W: f32 = 170.0;
-const BUTTONS_W: f32 = 80.0;
+/// Dialog size in points: AE 26's window at 96 DPI (948 × 801 px).
+pub const SIZE: egui::Vec2 = vec2(948.0, 801.0);
+/// Page list width and row height (R1: 210 px, 24 px rows).
+const LIST_W: f32 = 210.0;
+const LIST_ROW: f32 = 24.0;
+/// Content column (593 px) and button column (60 × 24 px buttons, 8 px apart).
+const CONTENT_W: f32 = 593.0;
+const BUTTON: egui::Vec2 = vec2(60.0, 24.0);
+const BUTTON_GAP: f32 = 8.0;
 
 /// Window title: "Preferences" on both platforms. On macOS the app menu item reads
 /// "Settings…" (the system renames AE's Preferences item since macOS 13), but the
@@ -35,28 +45,29 @@ pub fn title() -> &'static str {
 /// Shortcuts window, menus) and AE's shortcut for Startup & Repair (Cmd+Opt+; /
 /// Ctrl+Alt+;).
 pub fn register(app: &mut bae_app::AppBuilder) {
-    crate::i18n::register(bae_prefs::i18n::ZH);
+    // The app's own terms win: only labels it does not translate yet are added.
+    let new: Vec<(&'static str, &'static str)> = bae_prefs::i18n::ZH
+        .iter()
+        .copied()
+        .filter(|(en, _)| !crate::i18n::has_translation(en))
+        .collect();
+    crate::i18n::register(&new);
+    let zh = |en: &'static str| bae_prefs::i18n::zh(en).unwrap_or(en);
     let owner = app.current_owner();
     let actions = app.registry::<crate::ActionInfo>();
     if !actions.snapshot().contains(ACTION) {
         let _ = actions.register(owner.clone(), ACTION, crate::ActionInfo::new(title()));
     }
-    // One named variant per page ("Preferences: General"), as the Keyboard
+    // One named variant per page ("Preferences: Project"), as the Keyboard
     // Shortcuts window and the menus list them.
-    let zh_title = bae_prefs::i18n::ZH
-        .iter()
-        .find(|(en, _)| *en == title())
-        .map_or(title(), |(_, zh)| zh);
+    let zh_title = zh(title());
     let mut names: Vec<(&'static str, &'static str)> = Vec::new();
     let variants = app.registry::<crate::CommandVariant>();
     variants.batch(|tx| {
         for page in PAGES {
             let en: &'static str =
                 Box::leak(format!("{}: {}", title(), page.title).into_boxed_str());
-            let zh_page = bae_prefs::i18n::ZH
-                .iter()
-                .find(|(e, _)| *e == page.title)
-                .map_or(page.title, |(_, zh)| zh);
+            let zh_page = zh(page.title);
             names.push((
                 en,
                 Box::leak(format!("{zh_title}：{zh_page}").into_boxed_str()),
@@ -81,30 +92,33 @@ pub fn register(app: &mut bae_app::AppBuilder) {
 }
 
 /// Applies the preferences the UI shell draws with: label colors and names
-/// (Labels page) and the Appearance sliders. Call at startup and after OK.
+/// (Labels page) and the color theme (Appearance). Call at startup and after OK.
+/// A label color left at AE's value is drawn as measured on screen in AE
+/// (`theme::LABELS`); a changed one is drawn as chosen.
 pub fn apply(prefs: &Preferences) {
     use bae_prefs::keys;
-    let colors = prefs
-        .label_colors()
-        .map(|[r, g, b]| Color32::from_rgb(r, g, b));
-    crate::theme::set_label_colors(colors);
+    crate::theme::set_label_colors(std::array::from_fn(|i| {
+        if i == 0 || prefs.label_color_is_default(i) {
+            crate::theme::LABELS[i].1
+        } else {
+            let [r, g, b] = prefs.label_color(i);
+            Color32::from_rgb(r, g, b)
+        }
+    }));
     crate::theme::set_label_names(std::array::from_fn(|i| {
         let name = prefs.label_name(i);
         (i > 0 && !name.is_empty() && name != schema::LABEL_NAMES[i]).then(|| name.to_owned())
     }));
-    crate::theme::set_appearance(crate::theme::Appearance {
-        brightness: prefs.float(keys::BRIGHTNESS) as f32,
-        affect_labels: prefs.bool(keys::AFFECT_LABELS),
-        interactive: prefs.float(keys::INTERACTIVE) as f32,
-        focus: prefs.float(keys::FOCUS) as f32,
-    });
+    crate::theme::set_appearance(crate::theme::Appearance::from_id(
+        prefs.str(keys::COLOR_THEME),
+    ));
 }
 
 /// Preferences > Grids & Guides, as the Composition viewer draws them.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GridGuides {
     pub grid_color: Color32,
-    /// `Lines`, `Dashed Lines` or `Dots`.
+    /// `lines`, `dashed_lines` or `dots`.
     pub grid_style: &'static str,
     /// Gridline spacing in composition pixels.
     pub spacing: f32,
@@ -131,9 +145,9 @@ impl GridGuides {
         let pct = |k| (p.float(k) / 100.0) as f32;
         // No allocation per frame: the style is one of the schema's options.
         let style = |k| match p.str(k) {
-            "Dashed Lines" => "Dashed Lines",
-            "Dots" => "Dots",
-            _ => "Lines",
+            "dashed_lines" => "dashed_lines",
+            "dots" => "dots",
+            _ => "lines",
         };
         GridGuides {
             grid_color: c(keys::GRID_COLOR),
@@ -208,10 +222,10 @@ impl GridGuides {
 
     fn line(&self, painter: &egui::Painter, [a, b]: [egui::Pos2; 2], stroke: egui::Stroke) {
         match self.grid_style {
-            "Dashed Lines" => {
+            "dashed_lines" => {
                 painter.extend(egui::Shape::dashed_line(&[a, b], stroke, 4.0, 3.0));
             }
-            "Dots" => {
+            "dots" => {
                 painter.extend(egui::Shape::dotted_line(&[a, b], stroke.color, 4.0, 0.75));
             }
             _ => {
@@ -273,7 +287,8 @@ pub enum Outcome {
     Cancel,
 }
 
-/// A button the host runs (`general.reveal`, `choose:<key>` for Choose Folder…).
+/// A button the host runs (`startup_repair.reveal_preferences_in_explorer`,
+/// `choose:<key>` for Choose…).
 pub type Request = String;
 
 /// The Preferences window.
@@ -283,20 +298,21 @@ pub struct SettingsDialog {
     page: usize,
     draft: Preferences,
     requests: Vec<Request>,
-    /// Buttons the host implements (others are drawn disabled).
+    /// Buttons the host implements (others are drawn disabled); `choose` stands
+    /// for every Choose… button.
     host_buttons: Vec<String>,
 }
 
 impl SettingsDialog {
     /// Buttons the host handles from [`Self::take_requests`]; every other button
-    /// that the dialog does not handle itself is drawn disabled.
+    /// is drawn disabled.
     pub fn with_host_buttons(mut self, ids: &[&str]) -> Self {
         self.host_buttons = ids.iter().map(|s| (*s).to_owned()).collect();
         self
     }
 
-    /// Opens on `page` (an id like `grids_guides`; unknown or `None`: the first page) with
-    /// a copy of `current`.
+    /// Opens on `page` (an id like `grids_guides`; unknown or `None`: the first
+    /// page, Startup & Repair) with a copy of `current`.
     pub fn open(&mut self, page: Option<&str>, current: &Preferences) {
         self.page = page
             .and_then(|id| PAGES.iter().position(|p| p.id == id))
@@ -319,7 +335,7 @@ impl SettingsDialog {
         &self.draft
     }
 
-    /// Sets a draft value (host answers to Choose Folder…, tests).
+    /// Sets a draft value (host answers to Choose…, tests).
     pub fn set(&mut self, key: &str, value: impl Into<Value>) {
         self.draft.set(key, value);
     }
@@ -365,56 +381,46 @@ impl SettingsDialog {
         outcome
     }
 
-    /// Page list | current page | buttons in a column on the right (OK, Cancel,
-    /// then Previous, Next), as AE's Preferences window.
+    /// Page list | current page | OK, Cancel, Previous, Next at the top right.
     fn contents(&mut self, ui: &mut Ui) -> Outcome {
         let mut outcome = Outcome::None;
-        let body_h = SIZE.y - 16.0;
+        let body_h = SIZE.y - 24.0;
         ui.horizontal_top(|ui| {
-            // Page list.
             egui::Frame::new()
                 .fill(color::FIELD)
-                .inner_margin(4)
+                .inner_margin(2)
                 .show(ui, |ui| {
                     ui.set_width(LIST_W);
                     ui.set_height(body_h);
                     ui.spacing_mut().item_spacing.y = 0.0;
                     ui.vertical(|ui| self.page_list(ui));
                 });
-            ui.separator();
-            // Current page.
+            ui.add_space(16.0);
             ui.vertical(|ui| {
+                ui.set_width(CONTENT_W);
                 ui.set_height(body_h);
-                ui.set_width(SIZE.x - LIST_W - BUTTONS_W - 40.0);
-                ui.label(
-                    RichText::new(tr(PAGES[self.page].title))
-                        .strong()
-                        .size(13.0),
-                );
-                ui.add_space(6.0);
                 egui::ScrollArea::vertical()
                     .id_salt(PAGES[self.page].id)
                     .auto_shrink([false, false])
                     .show(ui, |ui| self.items(ui, PAGES[self.page].items));
             });
-            // Buttons.
+            ui.add_space(16.0);
             ui.vertical(|ui| {
-                ui.set_width(BUTTONS_W);
-                let button =
-                    |text: &str| egui::Button::new(tr(text)).min_size(vec2(BUTTONS_W, 20.0));
+                ui.spacing_mut().item_spacing.y = BUTTON_GAP;
+                let button = |text: &str| egui::Button::new(tr(text)).min_size(BUTTON);
                 if ui.add(button("OK")).clicked() {
                     outcome = Outcome::Ok(self.draft.clone());
                 }
                 if ui.add(button("Cancel")).clicked() {
                     outcome = Outcome::Cancel;
                 }
-                ui.add_space(16.0);
-                let last = PAGES.len() - 1;
-                if ui.add_enabled(self.page > 0, button("Previous")).clicked() {
-                    self.page -= 1;
+                // Previous / Next wrap around and are never disabled (AE 26).
+                let n = PAGES.len();
+                if ui.add(button("Previous")).clicked() {
+                    self.page = (self.page + n - 1) % n;
                 }
-                if ui.add_enabled(self.page < last, button("Next")).clicked() {
-                    self.page += 1;
+                if ui.add(button("Next")).clicked() {
+                    self.page = (self.page + 1) % n;
                 }
             });
         });
@@ -430,7 +436,7 @@ impl SettingsDialog {
                 color::TEXT
             });
             let button = egui::Button::selectable(selected, text).frame_when_inactive(false);
-            if ui.add_sized(vec2(LIST_W, 20.0), button).clicked() {
+            if ui.add_sized(vec2(LIST_W, LIST_ROW), button).clicked() {
                 self.page = i;
             }
         }
@@ -444,16 +450,19 @@ impl SettingsDialog {
 
     fn item(&mut self, ui: &mut Ui, item: &'static Item) {
         match item {
-            Item::P(p) => {
-                if p.os.current() {
-                    self.pref(ui, p);
-                }
-            }
+            Item::P(p) => self.pref(ui, p),
             Item::Row(list) => {
                 ui.horizontal(|ui| {
                     for item in *list {
                         self.item(ui, item);
-                        ui.add_space(12.0);
+                        ui.add_space(10.0);
+                    }
+                });
+            }
+            Item::Cols(cols) => {
+                ui.columns(cols.len(), |uis| {
+                    for (ui, col) in uis.iter_mut().zip(cols.iter()) {
+                        self.items(ui, col);
                     }
                 });
             }
@@ -471,62 +480,79 @@ impl SettingsDialog {
                 ui.add_space(4.0);
             }
             Item::Button(id, label) => {
-                let enabled = self.handles(id);
                 if ui
-                    .add_enabled(enabled, egui::Button::new(tr(label)))
+                    .add_enabled(self.handles(id), egui::Button::new(tr(label)))
                     .clicked()
                 {
-                    self.button(id);
+                    self.requests.push((*id).to_owned());
                 }
             }
-            Item::Note(text) => {
-                ui.label(tr(text).replace("{ram}", "—").replace("{shared}", "—"));
+            Item::Info(label, value) => {
+                ui.horizontal(|ui| {
+                    if !label.is_empty() {
+                        ui.label(tr(label));
+                    }
+                    // `<…>` values come from the machine (installed RAM, …).
+                    let shown = if value.contains('<') { "—" } else { value };
+                    if !shown.is_empty() {
+                        ui.label(RichText::new(shown).color(color::TEXT_DIM));
+                    }
+                });
+            }
+            Item::Table(label, columns) => {
+                ui.label(tr(label));
+                egui::Frame::new()
+                    .fill(color::FIELD)
+                    .inner_margin(4)
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width() - 4.0);
+                        ui.horizontal(|ui| {
+                            for c in *columns {
+                                ui.label(RichText::new(tr(c)).color(color::TEXT_DIM));
+                                ui.add_space(24.0);
+                            }
+                        });
+                        ui.add_space(40.0);
+                    });
+            }
+            Item::Preview(_) => self.expression_preview(ui),
+            Item::When(w, item) => {
+                let on = self.draft.holds(w);
+                ui.add_enabled_ui(on, |ui| self.item(ui, item));
             }
             Item::Only(os, item) => {
                 if os.current() {
                     self.item(ui, item);
                 }
             }
-            Item::Gap => ui.add_space(8.0),
         }
     }
 
-    /// Whether a button does something (in the dialog or in the host).
+    /// Whether the host runs a button (others are drawn disabled).
     fn handles(&self, id: &str) -> bool {
-        id.ends_with("_default")
-            || id == "scripting.reset_editor"
-            || self.host_buttons.iter().any(|h| h == id)
-    }
-
-    fn button(&mut self, id: &str) {
-        if let Some(prefix) = id.strip_suffix("_default") {
-            self.draft.reset(prefix);
-        } else if id == "scripting.reset_editor" {
-            for p in schema::all() {
-                if p.key.starts_with("scripting.")
-                    && !p.key.starts_with("scripting.allow")
-                    && !p.key.starts_with("scripting.debugger")
-                    && !p.key.starts_with("scripting.warn")
-                    && !p.key.starts_with("scripting.error")
-                    && !p.key.starts_with("scripting.compact")
-                {
-                    self.draft.reset(p.key);
-                }
-            }
+        let id = if id.starts_with("choose:") {
+            "choose"
         } else {
-            self.requests.push(id.to_owned());
-        }
+            id
+        };
+        self.host_buttons.iter().any(|h| h == id)
     }
 
     fn pref(&mut self, ui: &mut Ui, p: &'static Pref) {
         let enabled = self.draft.enabled(p);
         ui.add_enabled_ui(enabled, |ui| {
-            ui.horizontal(|ui| self.control(ui, p));
+            ui.horizontal(|ui| {
+                if p.indent {
+                    ui.add_space(18.0);
+                }
+                self.control(ui, p)
+            });
         });
     }
 
     fn control(&mut self, ui: &mut Ui, p: &'static Pref) {
         let label = tr(p.label);
+        let shown = if p.quiet { "" } else { label };
         let unit = tr(p.unit);
         let draft = &mut self.draft;
         match p.kind {
@@ -537,7 +563,7 @@ impl SettingsDialog {
                 }
             }
             Kind::Int { min, max } => {
-                field_label(ui, label);
+                field_label(ui, shown);
                 let mut v = draft.int(p.key) as f64;
                 let r = ui.add(
                     widgets::HotNumber::new(&mut v)
@@ -548,10 +574,10 @@ impl SettingsDialog {
                 if r.changed() {
                     draft.set(p.key, v.round() as i64);
                 }
-                unit_label(ui, unit);
+                field_label(ui, unit);
             }
             Kind::Float { min, max, decimals } => {
-                field_label(ui, label);
+                field_label(ui, shown);
                 let mut v = draft.float(p.key);
                 let r = ui.add(
                     widgets::HotNumber::new(&mut v)
@@ -563,62 +589,66 @@ impl SettingsDialog {
                 if r.changed() {
                     draft.set(p.key, v);
                 }
-                unit_label(ui, unit);
+                field_label(ui, unit);
             }
-            Kind::Duration { max } => {
-                field_label(ui, label);
-                let mut v = draft.float(p.key);
-                let r = ui.add(
-                    widgets::HotNumber::new(&mut v)
-                        .range(0.0..=max)
-                        .decimals(2)
-                        .label(a11y_name(p))
-                        .speed(0.1),
-                );
-                if r.changed() {
-                    draft.set(p.key, v);
-                }
-                unit_label(ui, tr("seconds"));
-            }
-            Kind::Slider { min, max } => {
-                field_label(ui, label);
-                ui.label(RichText::new(tr("Darker")).color(color::TEXT_DIM));
+            Kind::Slider {
+                min,
+                max,
+                left,
+                right,
+            } => {
+                field_label(ui, shown);
+                ui.label(RichText::new(tr(left)).color(color::TEXT_DIM));
                 let mut v = draft.float(p.key);
                 let r = ui.add(
                     egui::Slider::new(&mut v, min..=max)
-                        .show_value(false)
-                        .text(""),
+                        .step_by(1.0)
+                        .show_value(false),
                 );
-                let r = r.on_hover_text(a11y_name(p));
-                if r.changed() {
+                if r.on_hover_text(a11y_name(p)).changed() {
                     draft.set(p.key, v);
                 }
-                ui.label(RichText::new(tr("Lighter")).color(color::TEXT_DIM));
+                ui.label(RichText::new(tr(right)).color(color::TEXT_DIM));
             }
-            Kind::Choice { options, radio } => {
-                field_label(ui, label);
+            Kind::Choice { options, style } => {
                 let current = draft.str(p.key).to_owned();
-                if radio {
-                    ui.vertical(|ui| {
-                        for o in options {
-                            if ui.radio(current == *o, tr(o)).clicked() {
-                                draft.set(p.key, *o);
-                            }
+                match style {
+                    Style::Dropdown => {
+                        field_label(ui, shown);
+                        let names: Vec<&str> = options.iter().map(|o| tr(o.label)).collect();
+                        let mut i = options.iter().position(|o| o.value == current).unwrap_or(0);
+                        if widgets::dropdown(ui, p.key, &mut i, &names, 220.0).changed() {
+                            draft.set(p.key, options[i].value);
                         }
-                    });
-                } else {
-                    let names: Vec<&str> = options.iter().map(|o| tr(o)).collect();
-                    let mut i = options.iter().position(|o| *o == current).unwrap_or(0);
-                    if widgets::dropdown(ui, p.key, &mut i, &names, 220.0).changed() {
-                        draft.set(p.key, options[i]);
+                    }
+                    Style::Radio => {
+                        ui.vertical(|ui| {
+                            field_label(ui, shown);
+                            for o in options {
+                                if ui.radio(current == o.value, tr(o.label)).clicked() {
+                                    draft.set(p.key, o.value);
+                                }
+                            }
+                        });
+                    }
+                    Style::Theme => {
+                        ui.vertical(|ui| {
+                            field_label(ui, shown);
+                            ui.horizontal(|ui| {
+                                for o in options {
+                                    if theme_card(ui, o.value, tr(o.label), current == o.value) {
+                                        draft.set(p.key, o.value);
+                                    }
+                                }
+                            });
+                        });
                     }
                 }
             }
             Kind::Label => {
-                field_label(ui, label);
+                field_label(ui, shown);
                 let index = draft.int(p.key).clamp(0, 16) as usize;
-                let [r, g, b] = draft.label_color(index);
-                swatch(ui, Color32::from_rgb(r, g, b));
+                swatch(ui, crate::theme::label_color(index));
                 let names: Vec<String> = (0..17).map(|i| label_name(draft, i)).collect();
                 let names: Vec<&str> = names.iter().map(String::as_str).collect();
                 let mut i = index;
@@ -627,37 +657,85 @@ impl SettingsDialog {
                 }
             }
             Kind::Color => {
-                field_label(ui, label);
+                field_label(ui, shown);
                 let mut rgb = draft.color(p.key);
                 if ui.color_edit_button_srgb(&mut rgb).changed() {
                     draft.set(p.key, bae_prefs::format_color(rgb));
                 }
             }
             Kind::Text => {
-                field_label(ui, label);
+                field_label(ui, shown);
                 let mut s = draft.str(p.key).to_owned();
-                if p.key.starts_with("labels.name_") {
+                if p.key.starts_with("labels.label_name_") {
                     s = label_name(draft, label_index(p.key));
                 }
-                let r = ui.add(egui::TextEdit::singleline(&mut s).desired_width(160.0));
+                let r = ui.add(
+                    egui::TextEdit::singleline(&mut s)
+                        .desired_width(160.0)
+                        .hint_text(a11y_name(p)),
+                );
                 if r.changed() {
                     draft.set(p.key, s);
                 }
             }
-            Kind::Path { button } => {
-                field_label(ui, label);
-                let shown = draft.str(p.key);
-                let shown = if shown.is_empty() { "—" } else { shown };
-                ui.label(RichText::new(shown).color(color::TEXT_DIM));
-                let choose = format!("choose:{}", p.key);
-                if ui
-                    .add_enabled(self.handles("choose"), egui::Button::new(tr(button)))
-                    .clicked()
-                {
-                    self.requests.push(choose);
+            Kind::Timecode => {
+                field_label(ui, shown);
+                // Edited as text; a well-formed timecode is stored when typed.
+                let id = ui.id().with(p.key);
+                let mut s = ui
+                    .data(|d| d.get_temp::<String>(id))
+                    .unwrap_or_else(|| draft.str(p.key).to_owned());
+                let r = ui.add(egui::TextEdit::singleline(&mut s).desired_width(90.0));
+                if r.changed() && parse_timecode(&s).is_some() {
+                    draft.set(p.key, s.clone());
+                }
+                if r.has_focus() {
+                    ui.data_mut(|d| d.insert_temp(id, s));
+                } else {
+                    ui.data_mut(|d| d.remove::<String>(id));
                 }
             }
+            Kind::Path => {
+                let path = draft.str(p.key);
+                let path = if path.is_empty() { "—" } else { path };
+                ui.label(RichText::new(path).color(color::TEXT_DIM))
+                    .on_hover_text(label);
+            }
         }
+    }
+
+    /// Expression editor preview (Scripting & Expressions): a few lines of code
+    /// in the editor's font size and colors.
+    fn expression_preview(&self, ui: &mut Ui) {
+        let p = &self.draft;
+        let c = |k: &str| {
+            let [r, g, b] = p.color(&format!("scripting_expressions.expr_color_{k}"));
+            Color32::from_rgb(r, g, b)
+        };
+        let size = p.int(bae_prefs::keys::EXPR_FONT_SIZE) as f32;
+        let font = egui::FontId::monospace(size);
+        let mut job = egui::text::LayoutJob::default();
+        let mut add = |text: &str, color: Color32| {
+            job.append(text, 0.0, egui::TextFormat::simple(font.clone(), color));
+        };
+        add("// wiggle the position\n", c("comments"));
+        add("var ", c("keywords"));
+        add("amp", c("identifiers"));
+        add(" = ", c("operators"));
+        add("20", c("numbers"));
+        add(";\n", c("default"));
+        add("wiggle", c("identifiers"));
+        add("(", c("default"));
+        add("2", c("numbers"));
+        add(", amp); ", c("default"));
+        add("\"done\"", c("strings"));
+        egui::Frame::new()
+            .fill(c("background"))
+            .inner_margin(6)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width() - 4.0);
+                ui.label(job);
+            });
     }
 }
 
@@ -667,15 +745,47 @@ fn field_label(ui: &mut Ui, label: &str) {
     }
 }
 
-fn unit_label(ui: &mut Ui, unit: &str) {
-    if !unit.is_empty() {
-        ui.label(unit);
-    }
-}
-
 fn swatch(ui: &mut Ui, c: Color32) {
     let (rect, _) = ui.allocate_exact_size(vec2(14.0, 12.0), egui::Sense::hover());
     ui.painter().rect_filled(rect, 1.0, c);
+}
+
+/// A Color Theme card: a small picture of the theme above its name.
+fn theme_card(ui: &mut Ui, id: &str, name: &str, selected: bool) -> bool {
+    let (bg, fg) = match id {
+        "light" => (Color32::from_gray(0xe1), Color32::from_gray(0x50)),
+        "dark" => (Color32::from_gray(0x32), Color32::from_gray(0xb8)),
+        _ => (Color32::from_gray(0x1d), Color32::from_gray(0xb1)),
+    };
+    let (rect, resp) = ui.allocate_exact_size(vec2(96.0, 72.0), egui::Sense::click());
+    let resp = resp.labeled_toggle(egui::WidgetType::RadioButton, name, selected);
+    let p = ui.painter();
+    let pic = egui::Rect::from_min_size(rect.min, vec2(rect.width(), 52.0));
+    p.rect_filled(pic, 3.0, bg);
+    p.rect_filled(
+        egui::Rect::from_min_size(pic.min + vec2(8.0, 10.0), vec2(48.0, 4.0)),
+        1.0,
+        fg,
+    );
+    p.rect_filled(
+        egui::Rect::from_min_size(pic.min + vec2(8.0, 20.0), vec2(64.0, 4.0)),
+        1.0,
+        fg,
+    );
+    let stroke = if selected {
+        egui::Stroke::new(2.0, color::ACCENT)
+    } else {
+        egui::Stroke::new(1.0, color::DIVIDER)
+    };
+    p.rect_stroke(pic, 3.0, stroke, egui::StrokeKind::Inside);
+    p.text(
+        egui::pos2(rect.center().x, rect.bottom() - 8.0),
+        egui::Align2::CENTER_CENTER,
+        name,
+        crate::theme::body(),
+        color::TEXT,
+    );
+    resp.clicked()
 }
 
 /// Accessible name of a field: its label, or the key for unlabeled ones.

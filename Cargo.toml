@@ -252,6 +252,9 @@ opt-level = "s"
 opt-level = "s"
 [profile.release.package.bae-platform]
 opt-level = "s"
+# Preferences: schema, validation and storage, read once per change.
+[profile.release.package.bae-prefs]
+opt-level = "s"
 [profile.release.package.rmcp]
 opt-level = "s"
 [profile.release.package.tokio]

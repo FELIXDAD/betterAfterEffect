@@ -157,125 +157,86 @@ pub fn brighten(c: Color32, amount: i16) -> Color32 {
     Color32::from_rgba_unmultiplied(f(c.r()), f(c.g()), f(c.b()), c.a())
 }
 
-/// Preferences > Appearance: every color the UI draws goes through [`adjust`]
-/// (the shell applies it to the tessellated frame, [`apply_appearance`]), so the
-/// theme tokens stay constants.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Appearance {
-    /// Brightness slider, 0 (AE 2026 default, darkest) ..= 1 (lightest).
-    pub brightness: f32,
-    /// Also lighten label colors.
-    pub affect_labels: bool,
-    /// Interactive Controls slider, 0 ..= 1 (0.5 default).
-    pub interactive: f32,
-    /// Focus Indicator slider, 0 ..= 1 (0.5 default).
-    pub focus: f32,
+/// Preferences > Appearance > Color Theme (AE 26: Darkest, Dark, Light). The
+/// theme tokens are measured from Darkest; every color the UI draws goes
+/// through [`adjust`] (the shell applies it to the tessellated frame,
+/// [`apply_appearance`]), so the tokens stay constants.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Appearance {
+    /// AE 26's default; the measured tokens as they are.
+    #[default]
+    Darkest,
+    /// Grays lifted (panels about #323232).
+    Dark,
+    /// Grays inverted to a light UI with dark text.
+    Light,
 }
 
-impl Default for Appearance {
-    fn default() -> Self {
-        Appearance {
-            brightness: 0.0,
-            affect_labels: false,
-            interactive: 0.5,
-            focus: 0.5,
+impl Appearance {
+    /// From the stored option value (`darkest`, `dark`, `light`).
+    pub fn from_id(id: &str) -> Self {
+        match id {
+            "dark" => Appearance::Dark,
+            "light" => Appearance::Light,
+            _ => Appearance::Darkest,
         }
     }
 }
 
-static APPEARANCE: std::sync::RwLock<Appearance> = std::sync::RwLock::new(Appearance {
-    brightness: 0.0,
-    affect_labels: false,
-    interactive: 0.5,
-    focus: 0.5,
-});
+static APPEARANCE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
 /// Uses `a` from the next frame on.
 pub fn set_appearance(a: Appearance) {
-    *APPEARANCE.write().unwrap_or_else(|e| e.into_inner()) = a;
+    APPEARANCE.store(a as u8, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// The appearance in use.
 pub fn appearance() -> Appearance {
-    *APPEARANCE.read().unwrap_or_else(|e| e.into_inner())
+    match APPEARANCE.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => Appearance::Dark,
+        2 => Appearance::Light,
+        _ => Appearance::Darkest,
+    }
 }
 
-/// `c` (premultiplied) as drawn with appearance `a`.
-pub fn adjust(c: Color32, a: &Appearance, labels: &[Color32; 17]) -> Color32 {
+/// `c` (premultiplied) as drawn with appearance `a`: only grays change; accent,
+/// label and image colors keep their values.
+pub fn adjust(c: Color32, a: Appearance) -> Color32 {
     let alpha = c.a();
-    if alpha == 0 {
+    if alpha == 0 || a == Appearance::Darkest {
         return c;
     }
     let un = |v: u8| (f32::from(v) * 255.0 / f32::from(alpha)).min(255.0);
     let (r, g, b) = (un(c.r()), un(c.g()), un(c.b()));
-    let lighten = |v: f32, amount: f32| v + (255.0 - v) * amount;
-    let darken = |v: f32, amount: f32| v * (1.0 - amount);
-    // Interactive controls and focus: lighter above 0.5, darker below.
-    let tone = |v: f32, t: f32| {
-        let k = (t - 0.5) * 0.8;
-        if k >= 0.0 {
-            lighten(v, k)
-        } else {
-            darken(v, -k)
-        }
-    };
-    let premul_eq = |token: Color32| {
-        let t = token.gamma_multiply(f32::from(alpha) / 255.0);
-        t.r().abs_diff(c.r()) <= 1 && t.g().abs_diff(c.g()) <= 1 && t.b().abs_diff(c.b()) <= 1
-    };
-    // FOCUS is one step away from ACCENT: match it exactly, first.
-    let mapped: Option<[f32; 3]> = if c == color::FOCUS.gamma_multiply(f32::from(alpha) / 255.0) {
-        (a.focus != 0.5).then(|| [tone(r, a.focus), tone(g, a.focus), tone(b, a.focus)])
-    } else if [
-        color::ACCENT,
-        color::ACCENT_HOVER,
-        color::ACCENT_DIM,
-        color::TOOL_SELECTED,
-    ]
-    .into_iter()
-    .any(premul_eq)
-    {
-        (a.interactive != 0.5).then(|| {
-            [
-                tone(r, a.interactive),
-                tone(g, a.interactive),
-                tone(b, a.interactive),
-            ]
-        })
-    } else {
-        let max = r.max(g).max(b);
-        let min = r.min(g).min(b);
-        let gray = max - min <= 6.0;
-        let label = a.affect_labels && labels[1..].iter().copied().any(premul_eq);
-        (a.brightness > 0.0 && (gray || label)).then(|| {
-            let k = a.brightness * 0.27;
-            [lighten(r, k), lighten(g, k), lighten(b, k)]
-        })
-    };
-    match mapped {
-        Some([r, g, b]) => {
-            let q = |v: f32| (v * f32::from(alpha) / 255.0).round().clamp(0.0, 255.0) as u8;
-            Color32::from_rgba_premultiplied(q(r), q(g), q(b), alpha)
-        }
-        None => c,
+    if r.max(g).max(b) - r.min(g).min(b) > 6.0 {
+        return c;
     }
+    let map = |v: f32| match a {
+        Appearance::Dark => v + (255.0 - v) * 0.09,
+        _ => 240.0 - v * 0.8,
+    };
+    let q = |v: f32| {
+        (map(v) * f32::from(alpha) / 255.0)
+            .round()
+            .clamp(0.0, 255.0) as u8
+    };
+    Color32::from_rgba_premultiplied(q(r), q(g), q(b), alpha)
 }
 
 /// Applies the current [`Appearance`] to a tessellated frame. Only meshes drawn
 /// with egui's own texture (shapes and text) change; images and the viewer are
-/// left alone. Does nothing at the defaults.
+/// left alone. Does nothing for Darkest (the default).
 pub fn apply_appearance(prims: &mut [egui::ClippedPrimitive]) {
     let a = appearance();
-    if a == Appearance::default() {
+    if a == Appearance::Darkest {
         return;
     }
-    let labels = *LABEL_COLORS.read().unwrap_or_else(|e| e.into_inner());
     for prim in prims {
         if let egui::epaint::Primitive::Mesh(mesh) = &mut prim.primitive
             && mesh.texture_id == egui::TextureId::default()
         {
             for v in &mut mesh.vertices {
-                v.color = adjust(v.color, &a, &labels);
+                v.color = adjust(v.color, a);
             }
         }
     }

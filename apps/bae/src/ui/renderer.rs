@@ -149,7 +149,7 @@ impl UiRenderer {
         let queue = gpu.queue();
         self.upload_textures(gpu, &mut output.textures_delta);
         let mut paint_jobs = egui_ctx.tessellate(output.shapes, output.pixels_per_point);
-        // Preferences > Appearance (brightness, interactive controls, focus).
+        // Preferences > Appearance > Color Theme.
         bae_ui::theme::apply_appearance(&mut paint_jobs);
         let screen = egui_wgpu::ScreenDescriptor {
             size_in_pixels,

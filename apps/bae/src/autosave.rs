@@ -69,7 +69,7 @@ impl AutoSave {
 
 /// The file the next auto-save of the project at `location` writes.
 pub fn target(location: Option<&Path>, name: &str, prefs: &Preferences) -> Option<PathBuf> {
-    let dir = if prefs.str(keys::AUTO_SAVE_LOCATION) == "Custom Location"
+    let dir = if prefs.str(keys::AUTO_SAVE_LOCATION) == keys::CUSTOM_LOCATION
         && !prefs.str(keys::AUTO_SAVE_FOLDER).is_empty()
     {
         PathBuf::from(prefs.str(keys::AUTO_SAVE_FOLDER))
@@ -125,7 +125,7 @@ mod tests {
         assert_eq!(doc.location(), Some(project.as_path()));
         // Untitled: only with a custom folder.
         assert_eq!(target(None, "Untitled", &prefs), None);
-        prefs.set(keys::AUTO_SAVE_LOCATION, "Custom Location");
+        prefs.set(keys::AUTO_SAVE_LOCATION, keys::CUSTOM_LOCATION);
         prefs.set(
             keys::AUTO_SAVE_FOLDER,
             dir.path().to_string_lossy().as_ref(),
