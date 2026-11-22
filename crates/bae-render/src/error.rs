@@ -1,11 +1,14 @@
 //! Renderer errors.
 
+use std::fmt;
 use std::path::PathBuf;
 
 use bae_model::PrimPath;
 
 /// Errors from evaluation, graph building, GPU execution and output.
-#[derive(Debug, thiserror::Error)]
+///
+/// `Debug` prints the message (see the impl below), not a field dump.
+#[derive(thiserror::Error)]
 pub enum RenderError {
     /// The prim is not a comp or does not exist.
     #[error("{0} is not a composition")]
@@ -64,4 +67,13 @@ pub enum RenderError {
     /// An export was cancelled.
     #[error("export canceled")]
     Canceled,
+}
+
+impl fmt::Debug for RenderError {
+    // The message, not the derived field dump: a derived impl inlines the Debug
+    // formatting of every nested wgpu / naga error type into this crate (about
+    // 50 KB of release code, a second copy of what bae-gpu already has).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "RenderError({self})")
+    }
 }

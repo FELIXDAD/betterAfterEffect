@@ -4,7 +4,7 @@
 //! ```text
 //! cargo run -p bae-render --example ae_compare -- prepare [ASSETS]      # footage for both sides
 //! tools/ae/aectl run crates/bae-render/tests/ae/render_cases.jsx         # AE → /private/tmp/bae-04-ae/ae
-//! cargo run -p bae-render --example ae_compare -- compare [AE_DIR] [OUT] # BAE render + diff table
+//! cargo run -p bae-render --example ae_compare -- compare [AE_DIR] [OUT] [ASSETS] # BAE render + diff table
 //! ```
 //!
 //! Both sides output premultiplied 8-bit RGBA (AE's `saveFrameToPng`).
@@ -85,8 +85,8 @@ fn main() {
         Some("compare") => compare(
             &arg(1, DEFAULT_AE),
             &arg(2, DEFAULT_OUT),
-            &PathBuf::from(DEFAULT_ASSETS),
+            &arg(3, DEFAULT_ASSETS),
         ),
-        _ => eprintln!("usage: ae_compare prepare [ASSETS] | compare [AE_DIR] [OUT]"),
+        _ => eprintln!("usage: ae_compare prepare [ASSETS] | compare [AE_DIR] [OUT] [ASSETS]"),
     }
 }
