@@ -355,15 +355,16 @@ fn new_camera_and_light_ask_for_their_settings() {
     assert!(dialog_open(&h), "no Camera Settings");
     assert!(find_text(&h, "Camera Settings").is_some());
     assert!(h.state().layers().is_empty(), "created before OK");
-    type_into(&mut h, "Zoom", "1000");
+    // Lengths are in millimeters by default, at 72 ppi (AE).
+    type_into(&mut h, "Zoom", "254");
     key(&mut h, Modifiers::NONE, Key::Enter);
     assert!(!dialog_open(&h));
     let cam = h.state().layers()[0].clone();
     assert_eq!(h.state().name(&cam), "Camera 1");
-    assert_eq!(
-        attr(&h, &cam, "camera:zoom"),
-        Some(bae_model::Value::Float(1000.0))
-    );
+    match attr(&h, &cam, "camera:zoom") {
+        Some(bae_model::Value::Float(z)) => assert!((z - 720.0).abs() < 1e-6, "{z}"),
+        other => panic!("{other:?}"),
+    }
     let (undo, _) = h.state().doc.undo_state();
     assert_eq!(undo.as_deref(), Some("New Camera"));
     // Light: Cmd+Alt+Shift+L opens Light Settings.
@@ -420,7 +421,9 @@ fn camera_and_light_settings_in_chinese() {
         "视角:",
         "启用景深",
         "胶片大小:",
-        "焦长:",
+        "焦距:",
+        "合成大小",
+        "量度胶片大小:",
     ] {
         assert!(find_text(&h, text).is_some(), "{text} missing");
     }
@@ -438,5 +441,5 @@ fn camera_and_light_settings_in_chinese() {
         assert!(find_text(&h, text).is_some(), "{text} missing");
     }
     key(&mut h, Modifiers::NONE, Key::Enter);
-    assert_eq!(h.state().name(&h.state().layers()[0]), "聚光灯 1");
+    assert_eq!(h.state().name(&h.state().layers()[0]), "聚光 1");
 }

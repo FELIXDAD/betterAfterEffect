@@ -11,7 +11,6 @@ use bae_model::{PrimPath, Stage, Time, Value};
 use bae_motion::query;
 use bae_ui::color_picker::{self, ColorEdit};
 use bae_ui::dialog::{self, Outcome};
-use bae_ui::theme::color;
 use bae_ui::{PanelContext, tr};
 use egui::{Id, Ui, vec2};
 use serde_json::json;
@@ -431,12 +430,6 @@ impl LightSettings {
                 );
             });
         });
-        ui.label(
-            egui::RichText::new(tr(
-                "Note: Shadows are only cast from layers with 'Casts Shadows' enabled to layers with 'Accepts Shadows' enabled.",
-            ))
-            .color(color::TEXT_DIM),
-        );
         // A new light's default name follows its type until it is typed.
         if retyped
             && !self.name_edited
@@ -508,6 +501,5 @@ pub(crate) const STRINGS: &[&str] = &[
     "Shadow Darkness",
     "Shadow Diffusion:",
     "Shadow Diffusion",
-    "Note: Shadows are only cast from layers with 'Casts Shadows' enabled to layers with 'Accepts Shadows' enabled.",
     "Preview",
 ];

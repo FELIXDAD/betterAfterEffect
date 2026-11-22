@@ -41,8 +41,9 @@ fn default_label(kind: LayerKind) -> i64 {
     match kind {
         LayerKind::Shape => 8,
         LayerKind::Text | LayerKind::Solid | LayerKind::Null => 1,
-        LayerKind::Camera | LayerKind::Light => 4,
-        LayerKind::Adjustment => 10,
+        LayerKind::Camera => 4,
+        LayerKind::Light => 6,
+        LayerKind::Adjustment => 5,
         LayerKind::PreComp => 15,
         LayerKind::Footage => 3,
         LayerKind::Audio => 7,
@@ -270,7 +271,9 @@ impl Command for CreateLayer {
                 }
             }
             LayerKind::Null => {
-                anchor = [50.0, 50.0];
+                // AE 26: a 100x100 null anchored at its top-left corner, at 0%
+                // opacity (docs/reference/ae/interaction/layers-timeline-dnd).
+                set(tx, &path, "transform:opacity", Value::Float(0.0))?;
             }
             LayerKind::Text => {
                 let text = p.text.clone().filter(|t| !t.is_empty()).unwrap_or(name);
@@ -303,9 +306,16 @@ impl Command for CreateLayer {
                             position = [pos[0], pos[1], -z];
                         }
                     }
-                } else if let Some(l) = &p.light {
-                    for (attr, value) in l.attrs()? {
-                        set(tx, &path, attr, value)?;
+                } else {
+                    if let Some(l) = &p.light {
+                        for (attr, value) in l.attrs()? {
+                            set(tx, &path, attr, value)?;
+                        }
+                    }
+                    // AE 26 puts a new light up and to the right of the comp
+                    // center, aiming at it: [cx + 80, cy - 80, -666.67].
+                    if p.position.is_none() {
+                        position = [pos[0] + 80.0, pos[1] - 80.0, -2000.0 / 3.0];
                     }
                 }
                 set(

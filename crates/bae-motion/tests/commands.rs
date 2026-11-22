@@ -501,13 +501,14 @@ fn delete_and_batch_edits() {
         Some(Value::Float(10.0))
     );
     fx.stage.undo(&fx.author).unwrap();
+    // Both are nulls: AE 26 makes nulls at 0% opacity.
     assert_eq!(
         fx.value(&parent, "transform:opacity"),
-        Some(Value::Float(100.0))
+        Some(Value::Float(0.0))
     );
     assert_eq!(
         fx.value(&child, "transform:opacity"),
-        Some(Value::Float(100.0))
+        Some(Value::Float(0.0))
     );
 
     // A solid layer from an existing solid item reuses it.

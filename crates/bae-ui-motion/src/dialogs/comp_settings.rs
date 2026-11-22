@@ -846,7 +846,7 @@ pub(crate) fn next_comp_name(
 }
 
 /// The greyed Save / Delete preset buttons (floppy disk, trash can).
-fn preset_buttons(ui: &mut Ui) {
+pub(crate) fn preset_buttons(ui: &mut Ui) {
     for (icon, label) in [
         (bae_ui::Icon::Save, "Save Preset"),
         (bae_ui::Icon::Trash, "Delete Preset"),

@@ -76,7 +76,6 @@ pub struct CameraSettings {
     pub units: FilmUnits,
     pub measure: Measure,
     name_focused: bool,
-    preview: bool,
 }
 
 impl CameraSettings {
@@ -110,7 +109,6 @@ impl CameraSettings {
             units: memory.units,
             measure: memory.measure,
             name_focused: false,
-            preview: true,
         })
     }
 
@@ -158,7 +156,6 @@ impl CameraSettings {
             units: FilmUnits::default(),
             measure: Measure::default(),
             name_focused: false,
-            preview: true,
         })
     }
 
@@ -244,7 +241,23 @@ impl CameraSettings {
         let (w, h) = self.size;
         let dim = lens::dim(w, h, self.measure);
         let wf = f64::from(w);
+        // Every length is shown in the chosen units at 72 pixels per inch (AE:
+        // a 3555.56 px zoom reads 1254.32 mm); film size and focal length are
+        // millimeters of film.
+        let (per_px, unit) = match self.units {
+            FilmUnits::Pixels => (1.0, tr("pixels")),
+            FilmUnits::Inches => (1.0 / 72.0, tr("inches")),
+            FilmUnits::Millimeters => (25.4 / 72.0, tr("millimeters")),
+        };
+        let per_mm = per_px * 72.0 / 25.4;
+        let lock = self.lock_to_zoom;
         let v = &mut self.values;
+        let set_zoom = |v: &mut CameraValues, z: f64| {
+            v.zoom = z.max(1.0);
+            if lock {
+                v.focus_distance = v.zoom;
+            }
+        };
         dialog::row(ui, LW, tr("Type:"), |ui| {
             let types = [
                 ("one_node", "One-Node Camera"),
@@ -277,7 +290,7 @@ impl CameraSettings {
                 &mut self.name_focused,
             );
         });
-        // Lens: the focal length and film size on the comp width.
+        // Lens: focal length and film size (mm) on the comp width.
         let focal = lens::focal(v.zoom, self.film_h, wf);
         let preset = (self.film_h == lens::FILM_SIZE)
             .then(|| {
@@ -296,29 +309,44 @@ impl CameraSettings {
             {
                 // AE: a preset always goes back to 36 mm film.
                 self.film_h = lens::FILM_SIZE;
-                v.zoom = lens::zoom(lens::PRESETS[i - 2].1, lens::FILM_SIZE, wf);
-                if self.lock_to_zoom {
-                    v.focus_distance = v.zoom;
-                }
+                set_zoom(v, lens::zoom(lens::PRESETS[i - 2].1, lens::FILM_SIZE, wf));
             }
+            // Saving and deleting presets are not implemented yet: greyed.
+            super::comp_settings::preset_buttons(ui);
         });
         ui.add_space(4.0);
+        let measured_film = self.film_h * dim / wf;
         dialog::row(ui, LW, tr("Zoom:"), |ui| {
-            let mut z = v.zoom;
-            if fields::number(ui, &mut z, 1.0..=1.0e6, 2, tr("pixels"), tr("Zoom")).changed() {
-                v.zoom = z;
-                if self.lock_to_zoom {
-                    v.focus_distance = z;
-                }
+            let mut z = v.zoom * per_px;
+            if fields::number(ui, &mut z, per_px..=1.0e6, 2, unit, tr("Zoom")).changed() {
+                set_zoom(v, z / per_px);
             }
-            ui.add_space(16.0);
-            ui.label(tr("Angle of View:"));
+        });
+        dialog::row(ui, LW, tr("Film Size:"), |ui| {
+            let mut f = measured_film * per_mm;
+            if fields::number(ui, &mut f, 0.01..=1.0e5, 2, unit, tr("Film Size")).changed() {
+                // The focal length stays; the zoom follows the film.
+                let film_h = (f / per_mm) * wf / dim;
+                set_zoom(v, lens::zoom(focal, film_h, wf));
+                self.film_h = film_h;
+            }
+        });
+        dialog::row(ui, LW, tr("Angle of View:"), |ui| {
             let mut aov = lens::angle_of_view(v.zoom, dim);
             if fields::number(ui, &mut aov, 0.01..=179.99, 2, "°", tr("Angle of View")).changed() {
-                v.zoom = lens::zoom_from_angle(aov, dim);
-                if self.lock_to_zoom {
-                    v.focus_distance = v.zoom;
-                }
+                set_zoom(v, lens::zoom_from_angle(aov, dim));
+            }
+        });
+        dialog::row(ui, LW, tr("Comp Size"), |ui| {
+            ui.label(
+                egui::RichText::new(format!("{:.2} {unit}", dim * per_px))
+                    .color(bae_ui::theme::color::TEXT_DIM),
+            );
+        });
+        dialog::row(ui, LW, tr("Focal Length:"), |ui| {
+            let mut f = focal * per_mm;
+            if fields::number(ui, &mut f, 0.01..=1.0e6, 2, unit, tr("Focal Length")).changed() {
+                set_zoom(v, lens::zoom(f / per_mm, self.film_h, wf));
             }
         });
         ui.add_space(4.0);
@@ -326,18 +354,11 @@ impl CameraSettings {
         ui.add_enabled_ui(v.depth_of_field, |ui| {
             dialog::row(ui, LW, tr("Focus Distance:"), |ui| {
                 ui.add_enabled_ui(!self.lock_to_zoom, |ui| {
-                    let mut f = v.focus_distance;
-                    if fields::number(
-                        ui,
-                        &mut f,
-                        0.0..=1.0e6,
-                        2,
-                        tr("pixels"),
-                        tr("Focus Distance"),
-                    )
-                    .changed()
+                    let mut f = v.focus_distance * per_px;
+                    if fields::number(ui, &mut f, 0.0..=1.0e6, 2, unit, tr("Focus Distance"))
+                        .changed()
                     {
-                        v.focus_distance = f;
+                        v.focus_distance = f / per_px;
                     }
                 });
                 ui.add_space(16.0);
@@ -349,11 +370,9 @@ impl CameraSettings {
                 }
             });
             dialog::row(ui, LW, tr("Aperture:"), |ui| {
-                let mut a = v.aperture;
-                if fields::number(ui, &mut a, 0.0..=1.0e6, 2, tr("pixels"), tr("Aperture"))
-                    .changed()
-                {
-                    v.aperture = a;
+                let mut a = v.aperture * per_px;
+                if fields::number(ui, &mut a, 0.0..=1.0e6, 2, unit, tr("Aperture")).changed() {
+                    v.aperture = a / per_px;
                 }
             });
             dialog::row(ui, LW, tr("F-Stop:"), |ui| {
@@ -374,37 +393,6 @@ impl CameraSettings {
             });
         });
         ui.add_space(4.0);
-        // Film size and focal length in the chosen units.
-        let (scale, unit) = match self.units {
-            FilmUnits::Millimeters => (1.0, tr("mm")),
-            FilmUnits::Inches => (1.0 / 25.4, tr("in")),
-            FilmUnits::Pixels => (wf / self.film_h, tr("pixels")),
-        };
-        let measured = |film_h: f64| film_h * dim / wf;
-        dialog::row(ui, LW, tr("Film Size:"), |ui| {
-            let mut f = measured(self.film_h) * scale;
-            let editable = self.units != FilmUnits::Pixels;
-            ui.add_enabled_ui(editable, |ui| {
-                if fields::number(ui, &mut f, 0.01..=1.0e5, 2, unit, tr("Film Size")).changed() {
-                    // The focal length stays; the zoom follows the film.
-                    let film_h = (f / scale) * wf / dim;
-                    v.zoom = lens::zoom(focal, film_h, wf);
-                    self.film_h = film_h;
-                    if self.lock_to_zoom {
-                        v.focus_distance = v.zoom;
-                    }
-                }
-            });
-        });
-        dialog::row(ui, LW, tr("Focal Length:"), |ui| {
-            let mut f = focal * scale;
-            if fields::number(ui, &mut f, 0.01..=1.0e6, 2, unit, tr("Focal Length")).changed() {
-                v.zoom = lens::zoom(f / scale, self.film_h, wf);
-                if self.lock_to_zoom {
-                    v.focus_distance = v.zoom;
-                }
-            }
-        });
         dialog::row(ui, LW, tr("Units:"), |ui| {
             let all = [
                 (FilmUnits::Pixels, "pixels"),
@@ -449,18 +437,18 @@ impl CameraSettings {
                 self.measure = all[i].0;
             }
         });
-        let mut out = Outcome::None;
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            // Live preview of edits is not implemented yet: shown like AE.
-            ui.add_enabled_ui(false, |ui| {
-                bae_ui::widgets::checkbox(ui, &mut self.preview, tr("Preview"));
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                out = dialog::buttons(ui, !self.values.name.trim().is_empty());
-            });
+        // AE 25+: a camera matching the viewer's current view; BAE's viewer has
+        // no 3D views yet, so it is shown greyed.
+        let mut from_view = false;
+        ui.add_enabled_ui(false, |ui| {
+            bae_ui::widgets::checkbox(
+                ui,
+                &mut from_view,
+                tr("Create Camera Based on Current View"),
+            );
         });
-        out
+        ui.add_space(4.0);
+        dialog::buttons(ui, !self.values.name.trim().is_empty())
     }
 }
 
@@ -505,6 +493,8 @@ pub(crate) const STRINGS: &[&str] = &[
     "F-Stop",
     "Blur Level:",
     "Blur Level",
+    "Comp Size",
+    "Create Camera Based on Current View",
     "Film Size:",
     "Film Size",
     "Focal Length:",
@@ -517,5 +507,4 @@ pub(crate) const STRINGS: &[&str] = &[
     "Horizontally",
     "Vertically",
     "Diagonally",
-    "Preview",
 ];
