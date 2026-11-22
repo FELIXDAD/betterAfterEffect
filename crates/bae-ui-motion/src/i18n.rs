@@ -464,7 +464,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "{w} x {h}, {mb} MB per 8bpc frame",
         "{w} x {h}，{mb} MB（每 8bpc 帧）",
     ),
-    ("is {tc} Base {n}", "是 {tc} 基础 {n}"),
+    ("is {tc} Base {n}", "是 {tc}  基础 {n}"),
     ("Start Timecode:", "开始时间码:"),
     ("Start Timecode", "开始时间码"),
     ("Duration:", "持续时间:"),

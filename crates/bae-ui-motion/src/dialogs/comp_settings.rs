@@ -96,7 +96,8 @@ const MAX_DURATION_S: f64 = 3.0 * 3600.0;
 const MAX_START_S: f64 = 24.0 * 3600.0;
 
 /// The settings the dialog edits.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Values {
     pub width: u32,
     pub height: u32,
@@ -217,8 +218,10 @@ impl Values {
     }
 }
 
-/// What New Composition starts from: the last comp created with the dialog.
-#[derive(Clone, Debug, Default)]
+/// What New Composition starts from: the last comp created with the dialog
+/// (kept across runs, like AE).
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct CompSettingsMemory {
     pub values: Option<Values>,
     pub lock_aspect: bool,
@@ -357,6 +360,7 @@ impl CompSettings {
                 let mut d = dialogs.lock();
                 d.comp.values = Some(self.values.clone());
                 d.comp.lock_aspect = self.lock_aspect;
+                super::memory::save(&d);
             }
             Target::Edit {
                 comp,
@@ -784,7 +788,7 @@ impl CompSettings {
     }
 }
 
-/// Localized label of `PRESETS[i]`: "HD • 1920x1080 • 29.97 fps".
+/// Localized label of `PRESETS[i]`: "HD  •  1920x1080 • 29.97 fps".
 fn preset_label(i: usize) -> String {
     let Some(Some((name, w, h, par, fps))) = PRESETS.get(i) else {
         return String::new();
@@ -794,7 +798,7 @@ fn preset_label(i: usize) -> String {
     } else {
         format!("{w}x{h} ({par:.2})")
     };
-    format!("{} • {size} • {} fps", tr(name), fps_text(*fps))
+    format!("{}  •  {size} • {} fps", tr(name), fps_text(*fps))
 }
 
 /// "29.97", "30", "23.976", "12.5".
@@ -1148,8 +1152,8 @@ mod tests {
             ..Values::default()
         };
         assert_eq!(v.preset(), Some(2));
-        assert_eq!(preset_label(2), "HD • 1920x1080 • 29.97 fps");
-        assert_eq!(preset_label(17), "HDV • 1440x1080 (1.33) • 25 fps");
+        assert_eq!(preset_label(2), "HD  •  1920x1080 • 29.97 fps");
+        assert_eq!(preset_label(17), "HDV  •  1440x1080 (1.33) • 25 fps");
         // The default (1920x1080, 30 fps) is Social Media Landscape HD.
         assert_eq!(Values::default().preset(), Some(10));
     }

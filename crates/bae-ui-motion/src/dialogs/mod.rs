@@ -7,6 +7,7 @@
 
 mod comp_settings;
 pub(crate) mod fields;
+pub mod memory;
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -33,6 +34,11 @@ pub struct Dialogs {
     /// Settings of the last comp created through the dialog (AE starts the next
     /// New Composition from them).
     pub comp: CompSettingsMemory,
+    /// Where the remembered values are saved (`dialogs.json`), if anywhere.
+    pub file: Option<std::path::PathBuf>,
+    /// The file was looked for (on the first dialog: the config folder is
+    /// known only after start-up).
+    pub loaded: bool,
 }
 
 /// The dialogs as an app resource (inserted by [`crate::MotionUiModule`]).
@@ -40,6 +46,15 @@ pub struct Dialogs {
 pub struct SharedDialogs(Arc<Mutex<Dialogs>>);
 
 impl SharedDialogs {
+    /// Dialogs that remember their values in `file` across runs (loaded now).
+    pub fn with_file(file: std::path::PathBuf) -> Self {
+        let mut d = Dialogs::default();
+        memory::load(&file).apply(&mut d);
+        d.file = Some(file);
+        d.loaded = true;
+        SharedDialogs(Arc::new(Mutex::new(d)))
+    }
+
     pub fn lock(&self) -> MutexGuard<'_, Dialogs> {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -47,6 +62,21 @@ impl SharedDialogs {
     /// Whether a motion dialog is open.
     pub fn is_open(&self) -> bool {
         self.lock().open.is_some()
+    }
+}
+
+/// Read the remembered values from the config folder the first time a
+/// dialog opens (the app knows the folder only after start-up; tests have
+/// none and remember nothing across runs).
+fn remember(resources: &Resources, d: &mut Dialogs) {
+    if d.loaded {
+        return;
+    }
+    d.loaded = true;
+    if let Some(dirs) = resources.get::<bae_platform::AppDirs>() {
+        let file = dirs.config_file(memory::FILE_NAME);
+        memory::load(&file).apply(d);
+        d.file = Some(file);
     }
 }
 
@@ -71,6 +101,7 @@ pub(crate) fn new_comp(cx: &PanelContext<'_>, session: &SharedSession, folder: O
     if d.open.is_some() {
         return;
     }
+    remember(cx.resources, &mut d);
     let settings = CompSettings::new_comp(cx.stage, session, &d.comp, folder);
     d.open = Some(Dialog::CompSettings(Box::new(settings)));
 }
