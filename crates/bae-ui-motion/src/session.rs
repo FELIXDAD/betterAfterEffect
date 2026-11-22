@@ -93,6 +93,9 @@ pub struct Session {
     pub reveal: HashMap<PrimPath, Reveal>,
     pub scrub: Option<Scrub>,
     pub clipboard: Option<KeyClipboard>,
+    /// Layers on the clipboard (Edit > Copy with layers selected); the last
+    /// copy wins over [`Session::clipboard`].
+    pub layer_clipboard: Vec<bae_motion::CopiedLayer>,
     pending: Vec<(Pending, u32)>,
     /// Names of items commands are about to create (path, name), so default
     /// names given in the same frame stay unique.

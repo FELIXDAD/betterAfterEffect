@@ -18,6 +18,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Move Layer in Time", "在时间上移动图层"),
     ("Trim Layer", "修剪图层"),
     ("Change Layers", "更改图层"),
+    ("Cut", "剪切"),
     ("Add Shape", "添加形状"),
     ("New Mask", "新建蒙版"),
     ("Edit Path", "编辑路径"),

@@ -87,9 +87,9 @@ pub use keys::{
     apply_key_edits, set_default_spatial_linear,
 };
 pub use layer::{
-    CreateLayer, DeleteItems, DeleteLayers, DuplicateLayers, LAYER_SWITCH_ATTRS, LayerOutput,
-    LayersOutput, ReorderLayers, SetLayerAttr, SetParent, ShapePreset, ShiftLayers, SplitLayers,
-    TrimLayers,
+    CopiedLayer, CreateLayer, DeleteItems, DeleteLayers, DuplicateLayers, LAYER_SWITCH_ATTRS,
+    LayerOutput, LayersOutput, PasteLayers, ReorderLayers, SetLayerAttr, SetParent, ShapePreset,
+    ShiftLayers, SplitLayers, TrimLayers, copy_layers,
 };
 pub use path::{DeleteVertex, InsertVertex, SetVertices};
 pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
@@ -113,6 +113,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(SetLightSettings),
         r.register(ReorderLayers),
         r.register(DuplicateLayers),
+        r.register(PasteLayers),
         r.register(SplitLayers),
         r.register(TrimLayers),
         r.register(ShiftLayers),

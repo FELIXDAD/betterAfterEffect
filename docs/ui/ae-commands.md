@@ -36,9 +36,9 @@
 
 ## 统计
 
-- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 100，◐ 8，☐ 215，⏸ 217，Ⓐ 30
-- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 129 条。
-- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 120 条，macOS 120 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
+- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 101，◐ 8，☐ 214，⏸ 217，Ⓐ 30
+- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 130 条。
+- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 121 条，macOS 121 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
 
 ## 主菜单
 
@@ -130,7 +130,7 @@
 |---|---|---|---|---|---|---|---|
 | Undo | 196609 | `edit.undo` |  | Ctrl+Z | Cmd+Z | B | ✅ |
 | Redo | 196610 | `edit.redo` |  | Ctrl+Shift+Z | Cmd+Shift+Z | B | ✅ |
-| Cut | 196613 | `edit.cut` |  | Ctrl+X | Cmd+X | B | ☐ |
+| Cut | 196613 | `edit.cut` |  | Ctrl+X | Cmd+X | B | ✅ |
 | Copy | 196614 | `edit.copy` |  | Ctrl+C | Cmd+C | B | ◐ |
 | Copy with Property Links | 196615 | `motion.edit.copy_with_property_links` |  | Ctrl+Alt+C | Cmd+Opt+C | B | ⏸ |
 | Copy with Relative Property Links | 196616 | `motion.edit.copy_with_relative_property_links` |  |  |  | B | ⏸ |
