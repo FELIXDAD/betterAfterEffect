@@ -894,6 +894,7 @@ dependencies = [
  "eframe",
  "egui",
  "egui_kittest",
+ "flate2",
  "fontique",
  "serde",
  "serde_json",

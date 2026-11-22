@@ -1,13 +1,16 @@
-//! Vector icons painted with the egui `Painter`.
+//! UI icons.
 //!
-//! Every icon is drawn on a 16×16 design grid and scaled to the target rect, so
-//! icons stay sharp at any size and no image assets are shipped. The shapes are
-//! our own drawings of common metaphors; no Adobe artwork is used.
+//! Icons with fill-path data in `assets/icons/icons.bin` (built from the SVGs in
+//! `assets/icons/` by `tools/icons/build_icons.py`) are rasterized at the exact
+//! pixel size and tinted with the caller's color; see [`vector`]. The rest are
+//! painted with the egui `Painter` on a 16×16 design grid scaled to the target rect.
 
 use egui::epaint::{CubicBezierShape, PathShape, PathStroke};
 use egui::{Color32, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2, vec2};
 
 use crate::theme::color;
+
+mod vector;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Icon {
@@ -382,6 +385,9 @@ impl Pen<'_> {
 
 /// Paint `icon` centered in `rect`, scaled to fit.
 pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
+    if vector::paint(painter, rect, icon, color) {
+        return;
+    }
     let side = rect.width().min(rect.height());
     let scale = side / 16.0;
     let origin = rect.center() - Vec2::splat(side / 2.0);
@@ -432,17 +438,12 @@ fn draw(g: &Pen<'_>, icon: Icon) {
             let g = Pen { width: 1.5, ..*g };
             g.line(&[(9.0, 9.0), (12.5, 12.5)]);
         }
-        Icon::SortUp => g.fill(&[(4.0, 10.0), (12.0, 10.0), (8.0, 6.0)]),
         Icon::Stopwatch => {
             g.circle(8.0, 9.0, 4.8);
             g.line(&[(6.5, 2.8), (9.5, 2.8)]);
             g.line(&[(8.0, 2.8), (8.0, 4.2)]);
             g.line(&[(4.4, 4.6), (3.4, 3.6)]);
         }
-        Icon::Keyframe => g.fill(&[(8.0, 3.5), (12.5, 8.0), (8.0, 12.5), (3.5, 8.0)]),
-        Icon::KeyframeOutline => g.closed(&[(8.0, 4.0), (12.0, 8.0), (8.0, 12.0), (4.0, 8.0)]),
-        Icon::TriangleLeft => g.fill(&[(10.0, 4.5), (10.0, 11.5), (5.0, 8.0)]),
-        Icon::TriangleRight => g.fill(&[(6.0, 4.5), (11.0, 8.0), (6.0, 11.5)]),
         Icon::Link => {
             let g = Pen { width: 1.3, ..*g };
             g.rect(1.5, 5.8, 9.0, 10.2, 2.2);
@@ -466,34 +467,9 @@ fn draw(g: &Pen<'_>, icon: Icon) {
             g.arc(9.5, 8.0, 2.5, -50.0, 50.0);
             g.arc(9.5, 8.0, 4.8, -50.0, 50.0);
         }
-        Icon::Solo => g.disc(8.0, 8.0, 3.2),
         Icon::Tag => {
             g.fill(&[(2.0, 2.5), (8.5, 2.5), (14.0, 8.0), (8.0, 14.0), (2.0, 8.5)]);
             g.disc_with(5.2, 5.7, 1.3, hole);
-        }
-        Icon::Shy => {
-            // A small face peeking over a wall.
-            g.rect_fill(2.5, 3.5, 13.5, 9.0, 5.5);
-            g.disc_with(6.2, 6.8, 0.9, hole);
-            g.disc_with(9.8, 6.8, 0.9, hole);
-            g.rect_fill(1.5, 9.0, 14.5, 12.0, 0.5);
-            g.rect_fill(5.0, 12.0, 6.5, 14.0, 0.0);
-            g.rect_fill(9.5, 12.0, 11.0, 14.0, 0.0);
-        }
-        Icon::Collapse => {
-            g.circle(8.0, 8.0, 2.5);
-            for i in 0..8 {
-                let a = (i as f32 * 45.0).to_radians();
-                let (c, s) = (a.cos(), a.sin());
-                g.line(&[
-                    (8.0 + 4.0 * c, 8.0 + 4.0 * s),
-                    (8.0 + 6.0 * c, 8.0 + 6.0 * s),
-                ]);
-            }
-        }
-        Icon::Quality => {
-            let g = Pen { width: 1.3, ..*g };
-            g.line(&[(4.0, 13.0), (12.0, 3.0)]);
         }
         Icon::Fx => {
             let g = Pen { width: 1.2, ..*g };
@@ -503,71 +479,10 @@ fn draw(g: &Pen<'_>, icon: Icon) {
             g.line(&[(8.5, 7.0), (13.5, 13.0)]);
             g.line(&[(13.5, 7.0), (8.5, 13.0)]);
         }
-        Icon::FrameBlend => {
-            g.rect(3.0, 2.5, 13.0, 13.5, 0.5);
-            g.line(&[(5.5, 2.5), (5.5, 13.5)]);
-            g.line(&[(10.5, 2.5), (10.5, 13.5)]);
-            for y in [4.5, 8.0, 11.5] {
-                g.rect_fill(3.0, y - 0.6, 5.5, y + 0.6, 0.0);
-                g.rect_fill(10.5, y - 0.6, 13.0, y + 0.6, 0.0);
-            }
-        }
-        Icon::MotionBlur => {
-            g.circle(5.0, 8.0, 3.0);
-            g.circle(8.0, 8.0, 3.0);
-            g.disc(11.0, 8.0, 3.2);
-        }
-        Icon::Adjustment => {
-            g.circle(8.0, 8.0, 5.0);
-            let pts: Vec<(f32, f32)> = (0..=18)
-                .map(|i| {
-                    let a = (-90.0 + i as f32 * 10.0f32).to_radians();
-                    (8.0 + 5.0 * a.cos(), 8.0 + 5.0 * a.sin())
-                })
-                .collect();
-            g.fill(&pts);
-        }
-        Icon::Cube | Icon::Extrude => {
-            g.closed(&[
-                (8.0, 2.5),
-                (13.0, 5.0),
-                (13.0, 11.0),
-                (8.0, 13.5),
-                (3.0, 11.0),
-                (3.0, 5.0),
-            ]);
-            g.line(&[(3.0, 5.0), (8.0, 7.5), (13.0, 5.0)]);
-            g.line(&[(8.0, 7.5), (8.0, 13.5)]);
-            if icon == Icon::Extrude {
-                g.fill(&[(8.0, 7.5), (13.0, 5.0), (13.0, 11.0), (8.0, 13.5)]);
-            }
-        }
-        Icon::Pickwhip => {
-            // Spiral.
-            let pts: Vec<(f32, f32)> = (0..=60)
-                .map(|i| {
-                    let t = i as f32 / 60.0;
-                    let a = (t * 900.0f32 - 90.0).to_radians();
-                    let r = 0.6 + 5.2 * t;
-                    (8.0 + r * a.cos(), 8.0 + r * a.sin())
-                })
-                .collect();
-            g.line(&pts);
-        }
         Icon::Folder => {
             g.fill(&[(1.5, 3.5), (6.0, 3.5), (7.5, 5.0), (1.5, 5.0)]);
             g.rect_fill(1.5, 5.0, 14.5, 13.0, 0.5);
             g.line(&[(1.5, 6.2), (14.5, 6.2)]);
-        }
-        Icon::Composition => {
-            g.rect(1.5, 2.5, 14.5, 13.5, 1.0);
-            let red = Color32::from_rgb(0xe0, 0x4b, 0x3c);
-            let blue = Color32::from_rgb(0x48, 0x8c, 0xe8);
-            let yellow = Color32::from_rgb(0xe8, 0xc5, 0x4a);
-            g.with_color(red)
-                .fill(&[(3.5, 11.5), (6.8, 5.0), (10.0, 11.5)]);
-            g.disc_with(10.5, 6.6, 2.2, blue);
-            g.rect_fill_with(9.0, 9.0, 12.5, 12.0, 0.0, yellow);
         }
         Icon::Footage => {
             g.rect(2.0, 3.0, 14.0, 13.0, 0.5);
@@ -604,13 +519,6 @@ fn draw(g: &Pen<'_>, icon: Icon) {
             g.rect_fill(10.5, 10.5, 14.5, 14.0, 0.5);
             g.line(&[(8.0, 5.5), (8.0, 8.0)]);
             g.line(&[(3.5, 10.5), (3.5, 8.0), (12.5, 8.0), (12.5, 10.5)]);
-        }
-        Icon::InterpretFootage => {
-            g.rect(1.5, 3.5, 11.0, 12.5, 0.5);
-            g.line(&[(4.0, 3.5), (4.0, 12.5)]);
-            for y in [6.0, 8.5, 11.0] {
-                g.line(&[(9.0, y), (14.5, y)]);
-            }
         }
         Icon::Send => {
             g.fill(&[(1.5, 7.5), (14.5, 2.0), (8.0, 9.5)]);
@@ -713,15 +621,6 @@ fn draw(g: &Pen<'_>, icon: Icon) {
             g.fill(&[(9.0, 2.0), (14.0, 7.0), (9.0, 12.0), (4.0, 7.0)]);
             g.closed(&[(4.0, 7.0), (9.0, 12.0), (7.0, 14.0), (2.0, 9.0)]);
         }
-        Icon::RotoBrush => {
-            g.disc(5.0, 3.5, 1.8);
-            let g2 = Pen { width: 1.6, ..*g };
-            g2.line(&[(5.0, 6.0), (4.5, 10.0), (2.5, 14.0)]);
-            g2.line(&[(4.5, 10.0), (7.0, 14.0)]);
-            g2.line(&[(2.0, 7.5), (8.0, 7.5)]);
-            g2.line(&[(14.0, 2.0), (10.0, 7.0)]);
-            g.fill(&[(9.2, 6.2), (10.8, 7.8), (9.0, 10.5), (7.5, 9.0)]);
-        }
         Icon::RoundedRectangle => {
             let g = Pen { width: 1.4, ..*g };
             g.rect(2.0, 3.0, 14.0, 13.0, 3.0);
@@ -818,43 +717,10 @@ fn draw(g: &Pen<'_>, icon: Icon) {
             g.line(&[(8.0, 9.0), (8.0, 14.5)]);
             g.disc_with(6.8, 4.4, 1.0, hole);
         }
-        Icon::AxisLocal | Icon::AxisWorld | Icon::AxisView => {
-            let o = (8.0, 9.5);
-            g.line(&[o, (8.0, 2.5)]);
-            g.line(&[o, (2.5, 13.0)]);
-            g.line(&[o, (13.5, 13.0)]);
-            g.disc(8.0, 2.5, 1.2);
-            g.disc(2.5, 13.0, 1.2);
-            g.disc(13.5, 13.0, 1.2);
-            match icon {
-                Icon::AxisWorld => g.ellipse(8.0, 9.5, 4.0, 1.8),
-                Icon::AxisView => g.rect(5.5, 7.0, 10.5, 12.0, 0.0),
-                _ => {}
-            }
-        }
-        Icon::SnapEdges => {
-            g.line(&[(3.0, 13.0), (12.0, 4.0)]);
-            g.arrow_head((13.0, 3.0), (1.0, -1.0), 2.6);
-            g.line(&[(10.0, 13.0), (13.0, 13.0), (13.0, 10.0)]);
-        }
-        Icon::SnapFeatures => {
-            for (x, y) in [(3.0, 3.0), (13.0, 3.0), (3.0, 13.0), (13.0, 13.0)] {
-                let dx = if x < 8.0 { 2.0 } else { -2.0 };
-                let dy = if y < 8.0 { 2.0 } else { -2.0 };
-                g.line(&[(x + dx, y), (x, y), (x, y + dy)]);
-            }
-            g.rect_fill(6.5, 6.5, 9.5, 9.5, 0.0);
-        }
         Icon::PlayCircle => {
             g.disc(8.0, 8.0, 6.5);
             g.with_color(hole)
                 .fill(&[(6.3, 4.8), (11.2, 8.0), (6.3, 11.2)]);
-        }
-        Icon::AutoOpen => {
-            g.rect(1.5, 2.5, 14.5, 13.5, 0.5);
-            g.line(&[(6.0, 2.5), (6.0, 13.5)]);
-            g.line(&[(8.0, 8.0), (13.0, 8.0)]);
-            g.arrow_head((8.0, 8.0), (-1.0, 0.0), 2.4);
         }
         Icon::FastPreview => {
             g.rect(1.5, 2.0, 14.5, 14.0, 1.0);
@@ -872,30 +738,9 @@ fn draw(g: &Pen<'_>, icon: Icon) {
             }
             g.rect(2.0, 2.0, 14.0, 14.0, 0.0);
         }
-        Icon::MaskVisibility => {
-            g.closed(&[(3.0, 4.0), (12.0, 2.5), (13.0, 12.0), (4.0, 13.0)]);
-            for (x, y) in [(3.0, 4.0), (12.0, 2.5), (13.0, 12.0), (4.0, 13.0)] {
-                g.rect_fill(x - 1.2, y - 1.2, x + 1.2, y + 1.2, 0.0);
-            }
-        }
         Icon::RegionOfInterest => {
             g.rect(1.5, 3.0, 14.5, 13.0, 0.0);
             g.rect_fill(5.0, 6.0, 11.0, 10.0, 0.0);
-        }
-        Icon::Guides => {
-            g.rect(1.5, 1.5, 12.5, 12.5, 0.0);
-            g.line(&[(7.0, 1.5), (7.0, 12.5)]);
-            g.line(&[(1.5, 7.0), (12.5, 7.0)]);
-            g.fill(&[(11.5, 13.5), (15.5, 13.5), (13.5, 15.5)]);
-        }
-        Icon::Channels => {
-            let r = Color32::from_rgb(0xe0, 0x40, 0x3a);
-            let gr = Color32::from_rgb(0x4c, 0xb0, 0x4c);
-            let b = Color32::from_rgb(0x46, 0x7c, 0xe6);
-            g.disc_with(8.0, 4.8, 3.2, r);
-            g.disc_with(5.0, 9.6, 3.2, gr);
-            g.disc_with(11.0, 9.6, 3.2, b);
-            g.fill(&[(11.5, 14.0), (15.5, 14.0), (13.5, 16.0)]);
         }
         Icon::Exposure => {
             g.circle(8.0, 8.0, 5.8);
@@ -914,16 +759,6 @@ fn draw(g: &Pen<'_>, icon: Icon) {
             g.disc_with(8.0, 9.2, 3.0, hole);
             g.disc(8.0, 9.2, 1.8);
         }
-        Icon::ShowSnapshot => {
-            g.cubic([(1.0, 9.0), (3.5, 4.5), (10.5, 4.5), (13.0, 9.0)]);
-            g.cubic([(1.0, 9.0), (3.5, 13.5), (10.5, 13.5), (13.0, 9.0)]);
-            g.disc(7.0, 9.0, 2.0);
-            g.rect_fill(11.0, 1.5, 15.0, 5.0, 0.5);
-        }
-        Icon::GraphEditor => {
-            g.rect(1.5, 2.5, 14.5, 13.5, 1.0);
-            g.cubic([(3.0, 12.0), (8.0, 12.0), (8.0, 4.0), (13.0, 4.0)]);
-        }
         Icon::Marker => {
             g.fill(&[
                 (3.0, 2.5),
@@ -933,63 +768,8 @@ fn draw(g: &Pen<'_>, icon: Icon) {
                 (3.0, 10.0),
             ]);
         }
-        Icon::CompButton => {
-            g.rect_fill(2.0, 2.0, 7.0, 6.0, 0.5);
-            g.rect_fill(9.0, 10.0, 14.0, 14.0, 0.5);
-            g.line(&[(4.5, 6.0), (4.5, 12.0), (9.0, 12.0)]);
-            g.arrow_head((12.5, 4.0), (1.0, 0.0), 2.2);
-            g.line(&[(7.0, 4.0), (11.0, 4.0)]);
-        }
-        Icon::MountainSmall => {
-            g.fill(&[(4.0, 12.0), (8.0, 7.0), (12.0, 12.0)]);
-        }
-        Icon::MountainLarge => {
-            g.fill(&[(1.5, 13.0), (6.5, 5.0), (11.5, 13.0)]);
-            g.fill(&[(7.0, 13.0), (10.5, 8.0), (14.5, 13.0)]);
-        }
-        Icon::PaneSwitches => {
-            g.rect(1.5, 3.0, 14.5, 13.0, 1.0);
-            g.rect_fill(3.5, 5.0, 6.0, 7.5, 0.0);
-            g.rect_fill(3.5, 8.5, 6.0, 11.0, 0.0);
-            g.line(&[(7.5, 6.2), (12.5, 6.2)]);
-            g.line(&[(7.5, 9.8), (12.5, 9.8)]);
-        }
-        Icon::PaneModes => {
-            g.rect(1.5, 3.0, 14.5, 13.0, 1.0);
-            g.line(&[(8.0, 3.0), (8.0, 13.0)]);
-            g.rect_fill(1.5, 3.0, 8.0, 13.0, 1.0);
-        }
-        Icon::PaneInOut => {
-            g.line(&[(5.5, 3.0), (3.0, 3.0), (3.0, 13.0), (5.5, 13.0)]);
-            g.line(&[(10.5, 3.0), (13.0, 3.0), (13.0, 13.0), (10.5, 13.0)]);
-            g.line(&[(5.5, 8.0), (10.5, 8.0)]);
-        }
-        Icon::PaneRenderTime => {
-            g.circle(8.0, 8.5, 5.5);
-            g.line(&[(8.0, 8.5), (8.0, 5.0)]);
-            g.line(&[(8.0, 8.5), (10.5, 10.0)]);
-        }
-        Icon::FirstFrame => {
-            g.rect_fill(3.0, 3.5, 4.6, 12.5, 0.0);
-            g.fill(&[(12.5, 3.5), (12.5, 12.5), (5.5, 8.0)]);
-        }
-        Icon::PrevFrame => {
-            g.fill(&[(10.0, 3.5), (10.0, 12.5), (3.5, 8.0)]);
-            g.rect_fill(11.4, 3.5, 13.0, 12.5, 0.0);
-        }
-        Icon::Play => g.fill(&[(4.5, 2.5), (13.0, 8.0), (4.5, 13.5)]),
-        Icon::Pause => {
-            g.rect_fill(4.0, 3.0, 6.8, 13.0, 0.0);
-            g.rect_fill(9.2, 3.0, 12.0, 13.0, 0.0);
-        }
-        Icon::NextFrame => {
-            g.rect_fill(3.0, 3.5, 4.6, 12.5, 0.0);
-            g.fill(&[(6.0, 3.5), (12.5, 8.0), (6.0, 12.5)]);
-        }
-        Icon::LastFrame => {
-            g.fill(&[(3.5, 3.5), (10.5, 8.0), (3.5, 12.5)]);
-            g.rect_fill(11.4, 3.5, 13.0, 12.5, 0.0);
-        }
+        // Drawn from fill-path data (see `vector`); nothing to paint here.
+        _ => {}
     }
 }
 
@@ -1053,4 +833,35 @@ pub fn show(ui: &mut Ui, icon: Icon, size: f32, color: Color32) -> Response {
 /// Small solid label swatch (layer and project item labels).
 pub fn swatch(painter: &Painter, center: Pos2, side: f32, fill: Color32) {
     painter.rect_filled(Rect::from_center_size(center, Vec2::splat(side)), 0.0, fill);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every icon draws something, whether from fill-path data or the painter.
+    #[test]
+    fn every_icon_has_a_picture() {
+        let ctx = egui::Context::default();
+        for icon in Icon::ALL {
+            let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let rect = Rect::from_min_size(Pos2::new(10.0, 10.0), Vec2::splat(16.0));
+                paint(ui.painter(), rect, *icon, color::ICON);
+            });
+            let drawn = out
+                .shapes
+                .iter()
+                .filter(|s| !matches!(s.shape, Shape::Noop))
+                .count();
+            out.drop_without_applying_deltas();
+            assert!(drawn >= 1, "{icon:?} draws nothing");
+        }
+    }
+
+    #[test]
+    fn all_lists_every_variant_in_declaration_order() {
+        for (i, icon) in Icon::ALL.iter().enumerate() {
+            assert_eq!(*icon as usize, i, "{icon:?} is out of order in Icon::ALL");
+        }
+    }
 }

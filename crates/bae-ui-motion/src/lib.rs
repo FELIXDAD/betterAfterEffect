@@ -5,7 +5,7 @@
 //! |---|---|
 //! | `project` | Project: folders, comps, footage and solids (AE columns) |
 //! | `composition` | Composition viewer: active comp at the current time, selection and moving, zoom, safe areas, grid |
-//! | `timeline` | Timeline: layer outline with switches and Parent & Link, properties with stopwatches and values, ruler, work area, CTI, layer bars, keyframes |
+//! | `timeline` | Timeline: layer outline with switches and Parent & Link, properties with stopwatches and values, ruler, work area, CTI, layer bars, keyframes; the Graph Editor (`graph`, Shift+F3) |
 //! | `properties` | Properties (AE 2024+): the selected layer's transform, text and shape fill |
 //! | `effect_controls` | Effect Controls (F3) |
 //! | `preview` | Preview: play/stop, frame stepping, loop |
@@ -25,6 +25,7 @@ pub mod catalog;
 mod common;
 pub mod demo;
 mod gpu_preview;
+mod graph;
 mod i18n;
 pub mod menus;
 mod panels;
@@ -169,3 +170,5 @@ impl AppModule for MotionUiModule {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod timeline_tests;

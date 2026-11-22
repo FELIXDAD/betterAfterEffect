@@ -29,6 +29,8 @@
 //! | `key.delete` | deleting keyframes |
 //! | `key.reverse` | Keyframe Assistant > Time-Reverse Keyframes |
 //! | `key.paste` | pasting keyframes |
+//! | `key.edit` | Graph Editor drags (key time / value, Bezier handles, transform box), keyframe dialogs |
+//! | `transform.separate_dimensions` | Animation > Separate Dimensions (Position → X / Y / Z Position) |
 //! | `shape.add` | drawing with a shape tool or the Pen tool in (or into a new) shape layer |
 //! | `mask.create` | drawing with a shape tool or the Pen tool on a layer that gets a mask |
 //! | `path.set_vertices` | Pen tool clicks, Convert Vertex tool, dragging path vertices and handles |
@@ -47,6 +49,7 @@
 //! (id = command id), from which the application builds its command registry.
 
 pub mod comp;
+pub mod dimensions;
 pub mod keys;
 pub mod layer;
 pub mod names;
@@ -62,9 +65,11 @@ use bae_app::{AppBuilder, AppModule};
 use bae_model::{CommandRegistry, DynCommand};
 
 pub use comp::{CompOutput, CreateComp, CreateFolder, SetWorkArea, TrimCompToWorkArea};
+pub use dimensions::SeparateDimensions;
 pub use keys::{
-    CopiedKey, DeleteKeys, EaseKeys, EaseMode, KeyRef, KeysOutput, MoveKeys, PasteKeys,
-    ReverseKeys, SetAnimated, SetAt, SetInterpolation, SetMany, ValueEdit,
+    CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, KeyEdit, KeyRef, KeysOutput, MoveKeys,
+    PasteKeys, ReverseKeys, SetAnimated, SetAt, SetInterpolation, SetMany, ValueEdit,
+    apply_key_edits,
 };
 pub use layer::{
     CreateLayer, DeleteItems, DeleteLayers, DuplicateLayers, LayerOutput, LayersOutput,
@@ -99,6 +104,8 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(DeleteKeys),
         r.register(ReverseKeys),
         r.register(PasteKeys),
+        r.register(EditKeys),
+        r.register(SeparateDimensions),
         r.register(AddShape),
         r.register(CreateMask),
         r.register(SetVertices),

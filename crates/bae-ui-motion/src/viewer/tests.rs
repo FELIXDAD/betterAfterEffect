@@ -1502,13 +1502,20 @@ fn tools_follow_the_preferences() {
     h.resources
         .insert(std::sync::Arc::new(bae_prefs::PrefsStore::new(p)));
     h.frame(Vec::new(), Modifiers::NONE);
-    assert_eq!(h.viewer.last_view.unwrap().point, 9.0, "point and handle size");
+    assert_eq!(
+        h.viewer.last_view.unwrap().point,
+        9.0,
+        "point and handle size"
+    );
     // Composition > Center Anchor Point in New Shape Layers.
     let r = h.draw(Tool::Rectangle, (100.0, 50.0), (300.0, 150.0));
     assert_eq!(one(&r, "shape.add")["center_anchor"], true);
     h.apply(&r);
     let layer = query::comp_layers(&h.stage, &h.comp)[0].clone();
-    assert!(close3(h.v3(&layer, "transform:position"), [200.0, 100.0, 0.0]));
+    assert!(close3(
+        h.v3(&layer, "transform:position"),
+        [200.0, 100.0, 0.0]
+    ));
     // Appearance > Cycle Mask Colors off.
     let solid = h.layer("solid");
     h.select(&[&solid]);
