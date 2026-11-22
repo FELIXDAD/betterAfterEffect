@@ -25,6 +25,7 @@ mod i18n_scan;
 mod layers;
 mod layout;
 mod menus;
+mod release_001;
 mod render_queue;
 mod settings;
 mod startup;
