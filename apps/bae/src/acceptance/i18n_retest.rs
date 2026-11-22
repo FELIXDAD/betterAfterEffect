@@ -36,11 +36,7 @@ const NEW_LAYERS: &[&str] = &[
 
 /// Latin words of a Chinese UI with an open issue: let through here only, so the
 /// rest of the scan keeps running. Remove an entry when its issue is fixed.
-const KNOWN_ISSUES: &[(&str, &str)] = &[
-    // Settings ▸ Project: the New Project Solids Folder default "Solids"; new
-    // projects name the folder 纯色.
-    ("Solids", "#206"),
-];
+const KNOWN_ISSUES: &[(&str, &str)] = &[];
 
 fn is_cjk(c: char) -> bool {
     matches!(c, '\u{3400}'..='\u{9fff}' | '\u{f900}'..='\u{faff}')

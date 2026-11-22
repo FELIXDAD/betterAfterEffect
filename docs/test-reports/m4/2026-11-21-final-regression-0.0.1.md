@@ -126,3 +126,14 @@
 - **#207**：`bae render --frames 5-5` 再 `--frames 6-6`，PNG / TIFF / EXR 各用 `帧 a_####.ext` 和 `帧 b_[####].ext` 两种写法，输出到带空格和中文的目录：6 种组合都写出 `…_0005` 和 `…_0006` 两个文件，第二次没有覆盖第一次，没有名字里带 `#` 的文件（`acceptance_cli::single_frame_renders_number_the_output_name`）。渲染队列里起止帧相同（5–5、6–6）、输出 `单帧_[####].ext`，三种格式都是 `单帧_0005`、`单帧_0006`（`render_queue::a_single_frame_numbers_the_output_name`）。**已关闭。**
 - **#157**：`progress_of_a_limited_range_counts_the_frames_it_renders`（1780–1900 帧，合成只有 1800 帧，实际渲 20 帧）现在连“0 / x”那一刻也检查，连跑 8 次，第一个状态都是 (0, 20)，之后的总数也都是 20，没有再出现 121。**已关闭。**
 - 顺手发现：`bae render --comp` 只接受内部路径名（`主_合成`），用界面上的合成名“主 合成”会报 invalid prim name，提了 **#214**（bug）。
+
+### dev `5aa3b76`（#209）：#205 Tab 到色块后按 Enter
+
+`acceptance::release_001::enter_is_ok_after_tab_to_a_swatch`（新）：合成设置里在“持续时间”输入 100、按 Tab（焦点到背景颜色色块）、按 Enter：确定并关闭，持续时间 0:00:01:00。纯色设置从“宽度”一路 Tab 到色块再按 Enter：确定，建出纯色。焦点在色块上时按空格仍然打开拾色器；拾色器里按 Enter 只关拾色器，再按 Enter 才确定合成设置。**已关闭。**
+
+### dev `6911155`（#212 #221 #219 #224）：#206 #215 #216 #220
+
+- **#206**（#212）：`i18n_retest` 去掉了对 `Solids` 的放行，`new_ui_has_no_english_in_chinese` 照常通过：中文界面首选项 ▸ 项目 显示“纯色”；英文界面扫描也通过（没有中文）。开发的 `settings::solids_folder_default_matches_the_folder_bae_makes_in_chinese` 通过。**已关闭。**
+- **#215**（#221）：`close_project_leaves_no_old_comp_name_in_the_panels`（新）：合成名“合成 测试”、加纯色、另存，关闭前面板标签和无障碍树里有这个名字；文件 ▸ 关闭项目 之后，画出来的文字和无障碍树里都没有了，也没有打开的合成；重新打开工程后名字又出现。**已关闭。**
+- **#216**（#219，Windows 问题）：`render_queue_output_defaults_to_movies_on_macos`（新）：macOS 上新渲染项的默认输出仍在 `~/Movies` 下。Windows 部分由 5090 复核，issue 等那边再关。
+- **#220**（#224，Windows 问题）：`cmd_modifier_c_and_v_run_their_commands_on_macos`（新）：Cmd+Shift+C 打开预合成对话框；Cmd+Opt+Shift+C 打开摄像机设置，确定后建出摄像机；Cmd+C / Cmd+V 照样复制粘贴图层；改名输入框里粘贴（shell 把原生菜单的粘贴交给 egui 的 Paste）得到文字“粘贴 文字”，图层数不变。目录里全部已实现快捷键的用例（121 个组合）也通过。Windows 部分由 5090 复核。

@@ -504,7 +504,7 @@ fn type_into(h: &mut Ui, label: &str, text: &str) {
 }
 
 /// Cmd+N, `field` set to `text`, Enter straight from the field (OK): the new
-/// comp's settings. (Tab then Enter: #205.)
+/// comp's settings (Tab then Enter: `enter_is_ok_after_tab_to_a_swatch`).
 fn new_comp_with(h: &mut Ui, field: &str, text: &str) -> bae_motion::query::CompInfo {
     let (m, k) = cmd(Key::N);
     key(h, m, k);
@@ -1095,4 +1095,220 @@ fn layers_copy_cut_and_paste_like_ae() {
     key(&mut h, Modifiers::COMMAND, Key::V);
     assert_eq!(count(&h), n, "Cmd+V pasted layers while renaming");
     key(&mut h, Modifiers::NONE, Key::Escape);
+}
+
+// ---------------------------------------------------------------------------
+// #205 retest: Enter is OK wherever the focus is (AE), Space activates the
+// focused control.
+
+/// Whether the accessibility tree's focused node is a colour well.
+fn color_well_focused(h: &Ui) -> bool {
+    use egui_kittest::kittest::{AccessKitNode, NodeT as _};
+    fn walk(n: AccessKitNode<'_>) -> bool {
+        (n.is_focused() && n.role() == egui::accesskit::Role::ColorWell) || n.children().any(walk)
+    }
+    walk(h.root().accesskit_node())
+}
+
+#[test]
+fn enter_is_ok_after_tab_to_a_swatch() {
+    let mut h = gui();
+    let (m, k) = cmd(Key::N);
+    // Composition Settings: Duration, Tab (onto the background swatch), Enter.
+    key(&mut h, m, k);
+    type_into(&mut h, "Duration", "100");
+    assert!(
+        color_well_focused(&h),
+        "Tab after Duration is not on the swatch any more"
+    );
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(
+        !dialog_open(&h),
+        "Enter on the focused swatch did not press OK"
+    );
+    let comp = h.state().active_comp().expect("no comp after OK");
+    let info = bae_motion::query::comp_info(h.state().stage(), &comp).unwrap();
+    assert_eq!(
+        info.duration,
+        bae_model::Time::from_seconds(1.0),
+        "Duration “100” = 0:00:01:00"
+    );
+
+    // Solid Settings: Tab from Width round to the swatch, Enter makes the solid.
+    key(&mut h, Modifiers::COMMAND, Key::Y);
+    let r = dialog_control(&h, "Width");
+    click_at(&mut h, r.center());
+    for _ in 0..12 {
+        if color_well_focused(&h) {
+            break;
+        }
+        key(&mut h, Modifiers::NONE, Key::Tab);
+    }
+    assert!(
+        color_well_focused(&h),
+        "Tab never reached Solid Settings' swatch"
+    );
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(
+        !dialog_open(&h),
+        "Enter on Solid Settings' swatch did not press OK"
+    );
+    assert_eq!(h.state().layers().len(), 1, "no solid after OK");
+
+    // Space still activates the focused swatch: the colour picker opens; Enter
+    // there is the picker's OK, then Enter is the dialog's OK.
+    key(&mut h, m, k);
+    type_into(&mut h, "Duration", "200");
+    assert!(color_well_focused(&h));
+    let titles = |h: &Ui| {
+        painted_texts(h)
+            .iter()
+            .filter(|t| t.contains("Background Color"))
+            .count()
+    };
+    let closed = titles(&h);
+    key(&mut h, Modifiers::NONE, Key::Space);
+    assert!(titles(&h) > closed, "Space did not open the colour picker");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(titles(&h), closed, "Enter did not close the picker");
+    assert!(
+        dialog_open(&h),
+        "Enter in the picker closed Composition Settings too"
+    );
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(
+        !dialog_open(&h),
+        "second Enter did not press Composition Settings' OK"
+    );
+    let comp = h.state().active_comp().unwrap();
+    let info = bae_motion::query::comp_info(h.state().stage(), &comp).unwrap();
+    assert_eq!(info.duration, bae_model::Time::from_seconds(2.0));
+    no_failures(&h, "#205");
+}
+
+// ---------------------------------------------------------------------------
+// Retests on dev 6911155: #215 (panel tabs after Close Project), #216 (macOS
+// default output folder), #220 (Cmd+modifier+C / V shortcuts on macOS).
+
+/// Every painted and accessible text of the last frame.
+fn all_texts(h: &Ui) -> Vec<String> {
+    use egui_kittest::kittest::{AccessKitNode, NodeT as _};
+    fn walk(n: AccessKitNode<'_>, out: &mut Vec<String>) {
+        out.extend(n.label());
+        out.extend(n.value());
+        for c in n.children() {
+            walk(c, out);
+        }
+    }
+    let mut out = painted_texts(h);
+    walk(h.root().accesskit_node(), &mut out);
+    out
+}
+
+#[test]
+fn close_project_leaves_no_old_comp_name_in_the_panels() {
+    let mut h = gui();
+    let (m, k) = cmd(Key::N);
+    key(&mut h, m, k);
+    let r = dialog_control(&h, "Composition Name");
+    click_at(&mut h, r.center());
+    key(&mut h, Modifiers::COMMAND, Key::A);
+    type_text(&mut h, "合成 测试");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(add_layer(&mut h, "motion.layer.new.solid"));
+    settle(&mut h);
+    confirm_dialog(&mut h);
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tricky_dir(tmp.path()).join("关闭 项目.bae");
+    h.state_mut().dialogs.save.push_back(Some(path.clone()));
+    key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::S);
+    let named = |h: &Ui| -> Vec<String> {
+        all_texts(h)
+            .into_iter()
+            .filter(|t| t.contains("合成 测试"))
+            .collect()
+    };
+    assert!(
+        !named(&h).is_empty(),
+        "the comp name is not shown before closing"
+    );
+    let close = h
+        .state()
+        .menu_items()
+        .into_iter()
+        .find(|i| i.invocation.id == "file.close_project")
+        .expect("File ▸ Close Project");
+    assert!(h.state_mut().menu(&close.id));
+    settle(&mut h);
+    settle(&mut h);
+    assert!(h.state().active_comp().is_none(), "a comp is still open");
+    assert!(named(&h).is_empty(), "after Close Project: {:?}", named(&h));
+    // Reopening shows it again.
+    h.state_mut().dialogs.open.push_back(Some(path));
+    key(&mut h, Modifiers::COMMAND, Key::O);
+    settle(&mut h);
+    assert!(!named(&h).is_empty(), "reopened, the comp name is missing");
+}
+
+#[test]
+fn render_queue_output_defaults_to_movies_on_macos() {
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    key(&mut h, Modifiers::COMMAND, Key::M);
+    let queue = h.state().render_queue();
+    let output = queue.lock().items().last().unwrap().output.clone();
+    let movies = bae_platform::dirs::home_dir().unwrap().join("Movies");
+    assert!(
+        std::path::Path::new(&output).starts_with(&movies),
+        "default output {output} is not under {}",
+        movies.display()
+    );
+}
+
+#[test]
+fn cmd_modifier_c_and_v_run_their_commands_on_macos() {
+    let mut h = three_layers();
+    let [rect, _, solid]: [PrimPath; 3] = h.state().layers().try_into().unwrap();
+    // Cmd+Shift+C: Pre-compose (dialog); Esc.
+    select(&h, std::slice::from_ref(&solid));
+    key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::C);
+    assert!(dialog_open(&h), "Cmd+Shift+C opened no Pre-compose dialog");
+    key(&mut h, Modifiers::NONE, Key::Escape);
+    // Cmd+Opt+Shift+C: New Camera (Camera Settings); Enter makes the camera.
+    let n = h.state().layers().len();
+    key(
+        &mut h,
+        Modifiers::COMMAND | Modifiers::ALT | Modifiers::SHIFT,
+        Key::C,
+    );
+    assert!(dialog_open(&h), "Cmd+Opt+Shift+C opened no Camera Settings");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(h.state().layers().len(), n + 1, "no camera after OK");
+    // Cmd+C / Cmd+V still copy and paste layers.
+    focus(&mut h, TIMELINE.0, TIMELINE.1);
+    select(&h, std::slice::from_ref(&rect));
+    key(&mut h, Modifiers::COMMAND, Key::C);
+    key(&mut h, Modifiers::COMMAND, Key::V);
+    assert_eq!(
+        h.state().layers().len(),
+        n + 2,
+        "Cmd+C / Cmd+V did not paste the layer"
+    );
+    // In a text field (renaming), the paste is text: egui gets it as Paste
+    // (the shell turns the native Edit ▸ Paste into it while a text field is
+    // focused).
+    let top = h.state().layers()[0].clone();
+    select(&h, std::slice::from_ref(&top));
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(h.ctx.text_edit_focused());
+    key(&mut h, Modifiers::COMMAND, Key::A);
+    send(&mut h, Event::Paste("粘贴 文字".into()));
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(h.state().name(&top), "粘贴 文字");
+    assert_eq!(
+        h.state().layers().len(),
+        n + 2,
+        "the text paste pasted layers"
+    );
+    no_failures(&h, "#220");
 }
