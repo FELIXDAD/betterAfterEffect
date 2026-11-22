@@ -11,7 +11,10 @@ publish.workspace = true
 [dependencies]
 bae-app.workspace = true
 bae-model.workspace = true
+bae-prefs.workspace = true
 egui.workspace = true
+# Inflates the embedded icon data (icons/vector.rs); already linked through bae-model's zip.
+flate2.workspace = true
 # System UI fonts (theme::system_ui_fonts): the font database bae-text / parley use,
 # already linked, so the app bundles no fonts.
 fontique.workspace = true
@@ -28,6 +31,7 @@ tracing.workspace = true
 # and egui's bundled fonts would reach every test build through feature unification,
 # hiding tests that run without fonts (bae_ui::testing::ctx_with_fonts).
 [dev-dependencies]
+egui_kittest.workspace = true
 eframe = { version = "0.36.2", default-features = false, features = ["wgpu_no_default_features"] }
 wgpu.workspace = true
 

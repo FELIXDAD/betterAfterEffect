@@ -296,7 +296,7 @@ ARCHITECTURE 里提到但还没有 pin 的：`psd`（08）。bae-hub 不用 axum
 - **macOS 缩放抖动**：egui-wgpu 的 `macos-window-resize-jitter-fix` 只在 `egui_wgpu::winit::Painter` 里生效，BAE 不用这个 Painter。`bae-gpu` 的表面管理需要自己在拖动缩放期间打开 `CAMetalLayer.presentsWithTransaction` 并把帧延迟提到 2（参考 egui-wgpu 0.36.2 `src/winit.rs`）。
 - **读屏（accesskit）**：已开启（#116）。窗口先隐藏创建，accesskit 适配器建好后再显示（适配器必须在窗口第一次显示前创建）；设备丢失重建时把适配器移到新的 egui 状态。体积见 PR。
 - **浮动面板的原生多窗口**：见第 10 节。
-- **以后可选：`panic = "abort"`**（0.0.1 之后再评估，协调人 2026-11-21 决定 0.0.1 不做）。可省 Windows 7.1 MiB、macOS 3.2 MiB（PR #89 实测：Windows 27.98 → 20.86 MiB，macOS 21.65 → 18.44 MiB；Windows 省得多，是因为 MSVC 的 unwind 要给每个析构清理生成单独的 funclet）。前提是下面两处依赖 unwind 的地方有了替代方案：`bae-platform` 崩溃处理里用 `catch_unwind` 兜住保存回调（`run_emergency_saves`），以及 Agent / MCP（tokio 任务）、插件的 panic 隔离，防止一个工具调用拖垮整个应用。例如在 panic hook 里自动保存，并给插件和 Agent 设计新的隔离策略。不能只为了体积改。
+- **0.0.1 之后的第一项体积工作：`panic = "abort"`**（协调人 2026-11-21 决定 0.0.1 不做；同一天可执行文件预算临时从 30 MiB 放宽到 32 MiB，只在 M1 和 0.0.1 期间有效，做完这一项后回到 30 MiB 以下，见 `docs/ARCHITECTURE.md` 第 11 节）。可省 Windows 7.1 MiB、macOS 3.2 MiB（PR #89 实测：Windows 27.98 → 20.86 MiB，macOS 21.65 → 18.44 MiB；Windows 省得多，是因为 MSVC 的 unwind 要给每个析构清理生成单独的 funclet）。前提是下面两处依赖 unwind 的地方有了替代方案：`bae-platform` 崩溃处理里用 `catch_unwind` 兜住保存回调（`run_emergency_saves`），以及 Agent / MCP（tokio 任务）、插件的 panic 隔离，防止一个工具调用拖垮整个应用。具体要先做到三件事：自动保存加崩溃恢复（panic hook 里不再需要 unwind 也能保存，重启后能恢复）；MCP 和 Agent 的代码路径不 panic（错误都变成返回值）；原生插件放到进程外隔离。不能只为了体积改。
 
 ## 10. ui/shell（PR #1）迁移说明
 

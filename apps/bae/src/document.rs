@@ -46,6 +46,8 @@ pub struct Document {
     /// Names of command variants ("New Solid" for `layer.create` with a solid), which
     /// label undo steps and History entries (#140).
     variants: Option<Arc<bae_app::Registry<bae_ui::CommandVariant>>>,
+    /// Preferences > General > Levels of Undo, applied to every project opened.
+    undo_limit: usize,
 }
 
 /// What [`Document::run`] did with an invocation.
@@ -95,6 +97,7 @@ impl Document {
             author: local_author(),
             history,
             variants: None,
+            undo_limit: bae_model::DEFAULT_UNDO_LIMIT,
         };
         doc.watch_history();
         doc
@@ -266,12 +269,20 @@ impl Document {
     /// ask first).
     pub fn replace(&mut self, opened: OpenedProject) {
         self.project = opened.project;
+        self.project.stage.set_undo_limit(self.undo_limit);
         self.assets = opened.assets;
         self.saved = SavePoint::of(&self.project.stage);
         if let Some(log) = &self.history {
             log.clear();
         }
         self.watch_history();
+    }
+
+    /// Undo steps kept (Preferences > General > Levels of Undo), now and for every
+    /// project opened later.
+    pub fn set_undo_limit(&mut self, limit: usize) {
+        self.undo_limit = limit;
+        self.project.stage.set_undo_limit(limit);
     }
 
     /// Open a project in place of the current one ([`Document::load`] +
@@ -343,6 +354,15 @@ impl Document {
         self.project.save_as(target).with_context(context)?;
         self.saved = SavePoint::of(&self.project.stage);
         self.assets = AssetLocator::for_project(&self.project).with_context(context)?;
+        Ok(())
+    }
+
+    /// Writes a copy of the project to `target` (a `.bae` folder) without changing
+    /// its location or saved state (auto-save).
+    pub fn save_copy(&self, target: &Path) -> anyhow::Result<()> {
+        let mut copy = self.detached_copy()?;
+        copy.save_as(target)
+            .with_context(|| target.display().to_string())?;
         Ok(())
     }
 
