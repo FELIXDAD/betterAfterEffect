@@ -44,7 +44,7 @@ impl H {
             reg,
             author: AuthorId::new("user:test").unwrap(),
             resources,
-            ctx: egui::Context::default(),
+            ctx: bae_ui::testing::ctx_with_fonts(),
             viewer: CompositionViewer::new(None),
             comp: PrimPath::new("/x").unwrap(),
             time: 0.0,

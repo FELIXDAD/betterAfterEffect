@@ -82,6 +82,18 @@ app.register("timeline", PanelKind::new("Timeline", |spawn| Box::new(Timeline::n
 
 `Workbench` 每帧把 `PlatformOutput::ime` 的锚点换成光标矩形（`workbench::ime_follows_caret`），拼音候选框出现在光标下方。自己画文字编辑的面板（例如合成查看器里的文字工具）设置 `PlatformOutput::ime` 时同样会被处理。文本框有焦点时，不带修饰键的快捷键和文本编辑键不会触发命令。验证报告见 `docs/workstreams/11-ui-shell.md`。
 
+## 8. 模块对话框与拾色器
+
+AE 的模态对话框（合成设置、纯色设置、预合成、首选项……）由各模块自己画，外壳负责挂点和模态规则。代码在 `bae_ui::dialog` 和 `bae_ui::color_picker`，模块文档里有可运行的示例。
+
+- **注册**：`Registry<dyn DialogHost>`（id 用模块名）。`DialogHost::is_open(resources)` 说明本模块有没有打开的对话框；`DialogHost::ui(ctx, cx)` 每帧在停靠区之后调用，`cx` 和面板的 `PanelContext` 一样，`invoke_with` 的命令在本帧结束后执行。对话框只收集数值，确定时执行一条命令（一步撤销），取消不执行命令。
+- **模态**：任何一个 `is_open` 为真（或欢迎窗口、拾色器打开）时，工作台不分派快捷键和面板按键；`Workbench::modal_open(resources)` / `Workspace::modal_open(resources)` 给外壳用来让原生菜单命令等待（退出除外）。
+- **外观**：`dialog::window(ctx, id, 标题, |ui| …)` 画 AE 式对话框：自己的标题栏（标题写在标题栏里）、可拖动、每次打开时居中在主窗口上、不能改大小；主窗口不压暗，但点击被挡住。窗口标题栏的关闭按钮等于取消（`dialog::closed_by_title_bar`）。外壳以后支持系统子窗口时只改这个函数。
+- **按钮**：`dialog::buttons(ui, ok_enabled)` 按平台顺序画确定 / 取消（Windows：确定、取消；macOS：取消、确定在最右），Enter 是确定（多行文本框里的 Enter 除外）、Esc 是取消。按键被消耗，叠在下面的对话框（例如拾色器下面的纯色设置）不会再收到。`dialog::row`（标签列 + 控件）和 `dialog::group`（带标题的分组框）是 AE 设置对话框的排版。
+- **拾色器**：`color_picker::color_button(ui, id, &mut rgba, 大小, 标题, 读屏名称)` 是色块按钮，点击打开 AE 拾色器（颜色场 + 滑块，H/S/B/R/G/B 单选决定滑块编辑哪个通道，默认色相；H、S、B、R、G、B 数值，十六进制，新 / 原始颜色，仅限 Web 颜色，吸管），确定返回 `ColorEdit::Commit`，编辑中返回 `ColorEdit::Live`（面板可以实时预览），取消返回 `ColorEdit::Cancel`。`color_picker::eyedropper_button` 是色块旁边单独的吸管。颜色是工程里的直通 RGBA（0–1），数值显示 8 位（0–255）。
+- **吸管**：点吸管后在窗口任意位置点击取色。实现方式是 egui 的 `ViewportCommand::Screenshot`：外壳把这一帧再离屏画一遍、回读，在下一帧以 `Event::Screenshot` 交回；不支持截图的宿主不改颜色。
+- **测试**：`BAE_SMOKE_INVOKE=<动作 id>[,…]` 让无窗口冒烟测试在第一帧后执行这些动作（例如 `motion.comp.composition_settings`），配合 `BAE_SMOKE_SCREENSHOT` 截对话框。
+
 ## 无障碍（accesskit）
 
 自绘控件（`ui.interact` / `allocate_exact_size` 做的按钮、开关、标签页、拆分条、热文本）都要用 `bae_ui::Accessible`（`labeled` / `labeled_toggle` / `labeled_value`）给出标签，固定文字走 `tr`、中英文都要有；egui 自带控件自己带标签。读屏（VoiceOver、讲述人）和 Windows 上的 UI 自动化都靠这些标签找控件，验收测试 `startup::controls_have_accessibility_labels` 要求没有标签的控件不超过 10%。工具栏工具和工作区栏条目用单选按钮角色（同时只有一个处于选中状态）。

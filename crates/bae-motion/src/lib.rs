@@ -69,7 +69,7 @@ pub use dimensions::SeparateDimensions;
 pub use keys::{
     CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, KeyEdit, KeyRef, KeysOutput, MoveKeys,
     PasteKeys, ReverseKeys, SetAnimated, SetAt, SetInterpolation, SetMany, ValueEdit,
-    apply_key_edits,
+    apply_key_edits, set_default_spatial_linear,
 };
 pub use layer::{
     CreateLayer, DeleteItems, DeleteLayers, DuplicateLayers, LayerOutput, LayersOutput,

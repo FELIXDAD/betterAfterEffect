@@ -19,6 +19,7 @@
 //! the other tests of this binary.
 
 mod files_flow;
+mod i18n_retest;
 mod i18n_scan;
 mod layers;
 mod layout;
@@ -195,8 +196,15 @@ impl Gui {
 
     fn frame(&mut self, ui: &mut egui::Ui) {
         if !self.themed {
+            // kittest creates its own context and runs this first pass at once, so the
+            // fonts `theme::apply` installs (egui's bundled fonts are off) only take
+            // effect from the next pass. Draw nothing and discard the pass: egui reruns
+            // it with the fonts, as the app's first frame has them (`create_view`
+            // themes the context before it). kittest's first frame has no input.
             bae_ui::theme::apply(ui.ctx());
             self.themed = true;
+            ui.ctx().request_discard("bae: UI fonts installed");
+            return;
         }
         let invocations = self
             .workspace
@@ -282,11 +290,15 @@ impl Gui {
     /// `shell::menu::AppMenu::sync` shows it.
     pub fn menu_items(&self) -> Vec<MenuItemView> {
         let tree = self.workspace.contributed_menus(&self.app);
-        let cx = bae_ui::menu::MenuContext {
-            stage: self.doc.stage(),
-            resources: self.app.resources(),
-            workspace: self.workspace.active_workspace(),
-        };
+        let open = self.workspace.open_panels();
+        let actions = self.workspace.handled_actions(&self.app);
+        let cx = bae_ui::menu::MenuContext::new(
+            self.doc.stage(),
+            self.app.resources(),
+            self.workspace.active_workspace(),
+        )
+        .with_open_panels(&open)
+        .with_actions(&actions);
         tree.items()
             .into_iter()
             .map(|(id, spec)| MenuItemView {
@@ -641,11 +653,10 @@ pub(crate) fn painted_texts(h: &Ui) -> Vec<String> {
     out
 }
 
-/// The process-wide GPU for tests (`None` without an adapter).
+/// The process-wide GPU for tests (`None` without an adapter), shared with every
+/// other GPU test in this binary (#154).
 pub(crate) fn gpu() -> Option<Arc<bae_gpu::GpuContext>> {
-    static GPU: std::sync::OnceLock<Option<Arc<bae_gpu::GpuContext>>> = std::sync::OnceLock::new();
-    GPU.get_or_init(|| bae_gpu::GpuContext::new_headless(Default::default()).ok())
-        .clone()
+    bae_gpu::testing::shared_context()
 }
 
 /// New comp (Cmd+N) with one layer from `Layer > New > <registry id>`; returns
@@ -655,8 +666,25 @@ pub(crate) fn comp_with(h: &mut Ui, layers: &[&str]) {
     key(h, m, k);
     assert!(h.state().active_comp().is_some(), "Cmd+N opened no comp");
     for id in layers {
-        assert!(h.state_mut().menu(id), "{id} disabled with a comp open");
+        assert!(add_layer(h, id), "{id} disabled with a comp open");
         settle(h);
+    }
+}
+
+/// Adds a layer through the menu item `id`, or, for `shape:rect` /
+/// `shape:ellipse`, a shape layer with that path (what BAE's old Layer ▸ New ▸
+/// Rectangle / Ellipse made; AE has no such menu items, it draws them with the
+/// shape tools). Returns `false` when the menu item is greyed.
+pub(crate) fn add_layer(h: &mut Ui, id: &str) -> bool {
+    match id.strip_prefix("shape:") {
+        Some(shape) => {
+            h.state_mut().invoke(Invocation::with_params(
+                "motion.new_layer",
+                serde_json::json!({ "kind": "shape", "shape": shape }),
+            ));
+            true
+        }
+        None => h.state_mut().menu(id),
     }
 }
 

@@ -13,6 +13,7 @@
 //! comp time.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use bae_model::{
     AttrSpec, Command, CommandError, Ease, Interpolation, Keyframe, ModelError, PrimPath, Time,
@@ -96,6 +97,30 @@ fn animated_spec(
 
 /// Recompute AE's automatic keyframe values of `attr` (auto-Bezier eases and
 /// tangents, roving times) after its keyframes changed.
+/// Preferences > Composition > Default Spatial Interpolation to Linear (on by
+/// default). When off, new keyframes of spatial properties (Position, Anchor Point …)
+/// get Auto Bezier spatial interpolation, as in AE. The UI sets it from the
+/// preferences; the commands read it when they create keyframes.
+static DEFAULT_SPATIAL_LINEAR: AtomicBool = AtomicBool::new(true);
+
+/// Set the Default Spatial Interpolation to Linear preference (see above).
+pub fn set_default_spatial_linear(on: bool) {
+    DEFAULT_SPATIAL_LINEAR.store(on, Ordering::Relaxed);
+}
+
+/// A new keyframe of `attr` (keyframes `spec`): linear in time; spatially linear or
+/// Auto Bezier as the preference says.
+pub(crate) fn new_key(attr: &str, spec: &AttrSpec, value: Value) -> Keyframe {
+    let mut k = Keyframe::linear(value);
+    if !DEFAULT_SPATIAL_LINEAR.load(Ordering::Relaxed)
+        && bae_anim::schema::curve_kind(attr, spec) == bae_anim::CurveKind::Spatial
+    {
+        k.flags.spatial_auto_bezier = true;
+        k.flags.spatial_continuous = true;
+    }
+    k
+}
+
 pub(crate) fn refresh_auto(attr: &str, spec: &mut AttrSpec) {
     if spec.keyframes.len() < 2 {
         return;
@@ -156,7 +181,8 @@ impl Command for SetAnimated {
         let value = query::sample_attr(tx.stage(), &p.path, &p.attr, p.time)
             .ok_or_else(|| fail(format!("{}.{} has no value", p.path, p.attr)))?;
         if p.animated {
-            spec.keyframes.insert(p.time, Keyframe::linear(value));
+            spec.keyframes
+                .insert(p.time, new_key(&p.attr, &spec, value));
         } else {
             spec.keyframes.clear();
             spec.value = Some(value);
@@ -197,7 +223,8 @@ impl Command for SetAt {
             match spec.keyframes.get_mut(&p.time) {
                 Some(k) => k.value = p.value,
                 None => {
-                    spec.keyframes.insert(p.time, Keyframe::linear(p.value));
+                    let k = new_key(&p.attr, &spec, p.value);
+                    spec.keyframes.insert(p.time, k);
                 }
             }
         } else {
@@ -591,9 +618,20 @@ pub struct KeyEdit {
     pub spatial_in: Option<[f64; 3]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spatial_out: Option<[f64; 3]>,
+    /// Spatial continuous: the motion path's incoming and outgoing tangents stay
+    /// joined (Continuous Bezier).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spatial_continuous: Option<bool>,
+    /// Spatial auto-Bezier: AE computes the tangents from the neighbouring keyframes
+    /// (implies continuous).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spatial_auto_bezier: Option<bool>,
     /// Rove across time (spatial properties; not the first or last keyframe).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub roving: Option<bool>,
+    /// Keyframe label colour (0 = none, 1–16).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<u8>,
 }
 
 impl KeyEdit {
@@ -611,7 +649,10 @@ impl KeyEdit {
             auto_bezier: None,
             spatial_in: None,
             spatial_out: None,
+            spatial_continuous: None,
+            spatial_auto_bezier: None,
             roving: None,
+            label: None,
         }
     }
 
@@ -673,8 +714,22 @@ impl KeyEdit {
             k.spatial_out = Some(t);
             k.flags.spatial_auto_bezier = false;
         }
+        if let Some(c) = self.spatial_continuous {
+            k.flags.spatial_continuous = c;
+        }
+        match self.spatial_auto_bezier {
+            Some(true) => {
+                k.flags.spatial_auto_bezier = true;
+                k.flags.spatial_continuous = true;
+            }
+            Some(false) => k.flags.spatial_auto_bezier = false,
+            None => {}
+        }
         if let Some(r) = self.roving {
             k.flags.roving = r;
+        }
+        if let Some(l) = self.label {
+            k.label = l.min(16);
         }
     }
 }
@@ -689,7 +744,7 @@ impl Command for EditKeys {
     type Output = KeysOutput;
     const ID: &'static str = "key.edit";
     const TITLE: &'static str = "Edit Keyframes";
-    const DESCRIPTION: &'static str = "Change keyframes' times, values, temporal interpolation, ease (speed and influence per dimension), continuity, auto-Bezier, spatial tangents or roving in one undo step (Graph Editor drags, keyframe dialogs). Keyframes moved onto other keyframes replace them. Returns the keyframes' new references, in input order.";
+    const DESCRIPTION: &'static str = "Change keyframes' times, values, temporal interpolation, ease (speed and influence per dimension), continuity, auto-Bezier, spatial tangents, spatial continuity / auto-Bezier, roving or label in one undo step (Graph Editor drags, keyframe dialogs). Keyframes moved onto other keyframes replace them. Returns the keyframes' new references, in input order.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<KeysOutput, CommandError> {
         ensure_unlocked(tx.stage(), p.edits.iter().map(|e| &e.key.path))?;

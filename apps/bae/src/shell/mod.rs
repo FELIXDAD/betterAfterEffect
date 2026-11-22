@@ -78,12 +78,12 @@ impl AppModule for ShellModule {
 
     fn finish(&self, app: &mut AppBuilder) {
         ui::register_panels(app);
-        // File menu items: registered like any module's menu items, so the native
-        // menu shows the shortcut the active keymap binds to each.
+        // BAE's own menu entries (History and Agent panels, Agent workspace),
+        // registered next to the AE menus the motion workspace contributes.
         let owner = app.current_owner();
         let menu = app.registry::<bae_ui::MenuItemSpec>();
         menu.batch(|tx| {
-            for (id, item) in menu::file_items().into_iter().chain(menu::window_items()) {
+            for (id, item) in menu::extra_items() {
                 if !tx.contains(id) {
                     let _ = tx.register(owner.clone(), id, item);
                 }
@@ -92,10 +92,10 @@ impl AppModule for ShellModule {
     }
 }
 
-/// English titles of the File menu items and their menu path (i18n test).
+/// English titles of the shell's menu items and their menu path (i18n test).
 #[cfg(test)]
 pub fn file_menu_titles() -> Vec<String> {
-    menu::file_items()
+    menu::extra_items()
         .into_iter()
         .flat_map(|(_, spec)| {
             spec.path
@@ -369,8 +369,11 @@ struct WindowView {
     renderer: UiRenderer,
     status: StatusInfo,
     lost_subscription: DeviceLostSubscription,
-    /// Smoke-test fallback target when the window cannot present.
+    /// Smoke-test fallback target when the window cannot present; also the
+    /// target of screenshots (`ViewportCommand::Screenshot`).
     offscreen: Option<(wgpu::Texture, wgpu::TextureView)>,
+    /// Screenshot replies for the next frame's input (the eyedropper).
+    screenshots: Vec<egui::Event>,
 }
 
 impl Drop for WindowView {
@@ -494,6 +497,7 @@ impl Shell {
             status,
             lost_subscription,
             offscreen: None,
+            screenshots: Vec::new(),
         })
     }
 
@@ -785,6 +789,7 @@ impl Shell {
         input
             .viewports
             .insert(egui::ViewportId::ROOT, view.viewport_info.clone());
+        input.events.append(&mut view.screenshots);
         view.viewport_info.events.clear();
 
         let registry = self.app.resource::<Arc<ViewportTextureRegistry>>().cloned();
@@ -798,12 +803,14 @@ impl Shell {
         });
         self.ui_passes += 1;
         if let Some(menu) = &mut self.menu {
-            let cx = bae_ui::menu::MenuContext {
-                stage: document.stage(),
+            let open = workspace.open_panels();
+            let cx = bae_ui::menu::MenuContext::new(
+                document.stage(),
                 resources,
-                workspace: workspace.active_workspace(),
-            };
-            menu.sync(workspace.keymap(), &cx);
+                workspace.active_workspace(),
+            )
+            .with_open_panels(&open);
+            menu.sync(workspace.keymap(), &cx, view.egui_ctx.text_edit_focused());
         }
         view.egui_state.handle_platform_output_with_event_loop(
             &view.window,
@@ -814,6 +821,22 @@ impl Shell {
         // Root-viewport commands from the UI (custom title bar: drag, minimize,
         // maximize, close …).
         let mut close_requested = false;
+        // Screenshots the UI asked for (the color picker's eyedropper): the
+        // frame is drawn a second time offscreen and read back below.
+        let screenshots: Vec<egui::UserData> = output
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .map(|root| {
+                root.commands
+                    .iter()
+                    .filter_map(|c| match c {
+                        egui::ViewportCommand::Screenshot(u) => Some(u.clone()),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let screenshot_shapes = (!screenshots.is_empty()).then(|| output.shapes.clone());
         if let Some(root) = output.viewport_output.get(&egui::ViewportId::ROOT) {
             let cancel = root
                 .commands
@@ -902,6 +925,23 @@ impl Shell {
             }
         }
         view.gpu.poll();
+        if let Some(shapes) = screenshot_shapes
+            && presented
+            && !device_lost
+        {
+            let ppp = output.pixels_per_point;
+            if let Some(image) = screenshot(view, shapes, [width, height], ppp, background) {
+                let image = Arc::new(image);
+                for user_data in screenshots {
+                    view.screenshots.push(egui::Event::Screenshot {
+                        viewport_id: egui::ViewportId::ROOT,
+                        user_data,
+                        image: image.clone(),
+                    });
+                }
+                view.window.request_redraw();
+            }
+        }
 
         if presented {
             let ms = frame_start.elapsed().as_secs_f32() * 1000.0;
@@ -974,7 +1014,7 @@ fn offscreen_target(view: &mut WindowView, size: [u32; 2]) -> wgpu::TextureView 
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let target = texture.create_view(&Default::default());
@@ -1005,6 +1045,55 @@ fn reveal(path: &std::path::Path) {
     if let Err(error) = result {
         tracing::warn!("could not reveal {}: {error}", path.display());
     }
+}
+
+/// Draws `shapes` (this frame's UI, textures already uploaded) offscreen and
+/// reads the pixels back, for `ViewportCommand::Screenshot`. Rare (one click of
+/// the eyedropper), so the readback waits for the GPU.
+fn screenshot(
+    view: &mut WindowView,
+    shapes: Vec<egui::epaint::ClippedShape>,
+    size: [u32; 2],
+    pixels_per_point: f32,
+    background: egui::Color32,
+) -> Option<egui::ColorImage> {
+    let target = offscreen_target(view, size);
+    view.renderer.render(
+        &view.gpu,
+        &view.egui_ctx,
+        UiOutput {
+            shapes,
+            textures_delta: Default::default(),
+            pixels_per_point,
+        },
+        &target,
+        size,
+        background,
+    );
+    let texture = view.offscreen.as_ref()?.0.clone();
+    let data = bae_gpu::transfer::read_texture(&view.gpu, &texture)
+        .map_err(|e| tracing::warn!("screenshot readback failed: {e}"))
+        .ok()?;
+    let bgra = matches!(
+        data.format,
+        wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+    );
+    let mut pixels = Vec::with_capacity((data.width * data.height) as usize);
+    for y in 0..data.height {
+        for x in 0..data.width {
+            let p = data.pixel(x, y);
+            let (r, g, b) = if bgra {
+                (p[2], p[1], p[0])
+            } else {
+                (p[0], p[1], p[2])
+            };
+            pixels.push(egui::Color32::from_rgb(r, g, b));
+        }
+    }
+    Some(egui::ColorImage::new(
+        [data.width as usize, data.height as usize],
+        pixels,
+    ))
 }
 
 /// The command for projects Finder asked to open: one project at a time, like AE and
@@ -1058,7 +1147,8 @@ impl ApplicationHandler<UserEvent> for Shell {
                 view.window.set_visible(true);
                 if self.menu.is_none() {
                     let contributed = self.workspace.contributed_menus(&self.app);
-                    match menu::AppMenu::new(&self.workspace.workspaces(), &contributed) {
+                    let actions = self.workspace.handled_actions(&self.app);
+                    match menu::AppMenu::new(&contributed, actions) {
                         Ok(menu) => {
                             menu.attach(&view.window);
                             self.menu = Some(menu);
@@ -1129,29 +1219,37 @@ impl ApplicationHandler<UserEvent> for Shell {
                     .unwrap_or_else(|| menu::invocation(id));
                 // A modal dialog is open: menu commands (and their key
                 // equivalents) do not reach the project behind it; Quit still works.
-                if self.workspace.modal_open() && inv.id != ids::QUIT {
+                if self.workspace.modal_open(self.app.resources()) && inv.id != ids::QUIT {
                     return;
                 }
-                // Undo / Redo (their native key equivalents too) while a text
-                // field is focused undo the typing, as in any Mac / Windows app.
-                if (inv.id == ids::UNDO || inv.id == ids::REDO)
+                // Undo / Redo, Cut / Copy / Paste and Select All (their native
+                // key equivalents too) while a text field is focused edit the
+                // text, as in any Mac / Windows app.
+                if menu::TEXT_EDIT_ACTIONS.contains(&inv.id.as_str())
                     && let Some(view) = self.view.as_mut()
                     && view.egui_ctx.text_edit_focused()
                 {
-                    let modifiers = egui::Modifiers {
-                        shift: inv.id == ids::REDO,
-                        ..egui::Modifiers::COMMAND
+                    let key = |key: egui::Key, shift: bool| egui::Event::Key {
+                        key,
+                        physical_key: Some(key),
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers {
+                            shift,
+                            ..egui::Modifiers::COMMAND
+                        },
                     };
-                    view.egui_state
-                        .egui_input_mut()
-                        .events
-                        .push(egui::Event::Key {
-                            key: egui::Key::Z,
-                            physical_key: Some(egui::Key::Z),
-                            pressed: true,
-                            repeat: false,
-                            modifiers,
-                        });
+                    let event = match inv.id.as_str() {
+                        ids::UNDO => key(egui::Key::Z, false),
+                        ids::REDO => key(egui::Key::Z, true),
+                        "edit.cut" => egui::Event::Cut,
+                        "edit.copy" => egui::Event::Copy,
+                        "edit.paste" => {
+                            egui::Event::Paste(view.egui_state.clipboard_text().unwrap_or_default())
+                        }
+                        _ => key(egui::Key::A, false),
+                    };
+                    view.egui_state.egui_input_mut().events.push(event);
                     view.window.request_redraw();
                     return;
                 }

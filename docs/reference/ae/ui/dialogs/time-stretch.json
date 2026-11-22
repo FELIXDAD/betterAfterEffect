@@ -1,0 +1,115 @@
+{
+  "schemaVersion": "1.0",
+  "id": "time-stretch",
+  "title": {
+    "zh": "时间延长",
+    "en": "Time Stretch"
+  },
+  "triggers": [
+    {
+      "action": "Time Stretch",
+      "shortcutWin": null,
+      "menuZh": "图层 ▸ 时间 ▸ 时间伸缩(C)...",
+      "notesZh": "菜单显示“时间伸缩(C)...”，弹窗标题实测为“时间延长”。"
+    }
+  ],
+  "source": {
+    "application": "Adobe After Effects 26.0 (26.0x67)",
+    "platform": "Windows 11 Pro x64 (3840x2160 @ 150% DPI)",
+    "localeObserved": "zh_CN",
+    "method": "Live MSAA inspection + interactive tab/radio/dropdown probing + ExtendScript range probing"
+  },
+  "geometry": {
+    "physicalPxAt144Dpi": {
+      "w": 685,
+      "h": 509
+    },
+    "logicalPxAt96Dpi": {
+      "w": 457,
+      "h": 339
+    }
+  },
+  "persistence": {
+    "remembersLastValues": false,
+    "notesZh": "拉伸因数与新持续时间始终读取当前选中图层的实时 stretch/duration（默认 100%）；“固定位置”单选默认“图层进入点”（同会话记住上次选择）。"
+  },
+  "buttonBar": {
+    "position": "bottom_right",
+    "right": [
+      {
+        "id": "ok",
+        "type": "button",
+        "zh": "确定",
+        "en": "OK",
+        "role": "accept"
+      },
+      {
+        "id": "cancel",
+        "type": "button",
+        "zh": "取消",
+        "en": "Cancel",
+        "role": "reject"
+      }
+    ]
+  },
+  "tabs": [],
+  "controls": [
+    {
+      "id": "original_duration",
+      "type": "static_text",
+      "zh": "原持续时间:",
+      "en": "Original Duration:",
+      "defaultValue": "<当前图层未拉伸持续时间>"
+    },
+    {
+      "id": "stretch_factor",
+      "type": "number_scrub",
+      "internalName": "StretchFactor",
+      "zh": "拉伸因数 -",
+      "en": "Stretch Factor:",
+      "unit": "%",
+      "defaultValue": 100,
+      "range": {
+        "min": -9900,
+        "max": 9900,
+        "deadZoneClamp": "±1"
+      },
+      "notesZh": "ExtendScript layer.stretch 实测范围为 -9900% 至 +9900%；(-1, 1) 区间会被钳位到 ±1%（负值表示时间倒放）；与“新持续时间”双向联动。"
+    },
+    {
+      "id": "new_duration",
+      "type": "timecode_scrub",
+      "zh": "新持续时间:",
+      "en": "New Duration:",
+      "defaultValue": "<当前图层持续时间>",
+      "notesZh": "与“拉伸因数”双向联动，右侧只读显示合成帧率基准（如“是 0:00:10:00  基础 30”）。"
+    },
+    {
+      "id": "hold_in_place",
+      "type": "radio_group",
+      "zh": "固定位置",
+      "en": "Hold in Place",
+      "defaultValue": {
+        "zh": "图层进入点",
+        "en": "Layer In-point"
+      },
+      "options": [
+        {
+          "id": "layer_in_point",
+          "zh": "图层进入点",
+          "en": "Layer In-point"
+        },
+        {
+          "id": "current_frame",
+          "zh": "当前帧",
+          "en": "Current Frame"
+        },
+        {
+          "id": "layer_out_point",
+          "zh": "图层输出点",
+          "en": "Layer Out-point"
+        }
+      ]
+    }
+  ]
+}

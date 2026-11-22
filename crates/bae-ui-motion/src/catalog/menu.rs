@@ -387,11 +387,11 @@ const EDIT: &[Node] = &[
     sub(
         "Select Keyframe Label Group",
         &[
-            it(23592961, "On Selected Layers", "motion.edit.select_keyframe_label_group", r#"{"scope":"selected_layers"}"#, C, Later),
-            it(23592962, "On All Layers", "motion.edit.select_keyframe_label_group", r#"{"scope":"all_layers"}"#, C, Later),
+            it(23592961, "On Selected Layers", "motion.edit.select_keyframe_label_group", r#"{"scope":"selected_layers"}"#, C, Done),
+            it(23592962, "On All Layers", "motion.edit.select_keyframe_label_group", r#"{"scope":"all_layers"}"#, C, Done),
             SEP,
-            it(23592964, "Visible Keyframes on Selected Layers", "motion.edit.select_keyframe_label_group", r#"{"scope":"visible_selected_layers"}"#, C, Later),
-            it(23592965, "Visible Keyframes on All Layers", "motion.edit.select_keyframe_label_group", r#"{"scope":"visible_all_layers"}"#, C, Later),
+            it(23592964, "Visible Keyframes on Selected Layers", "motion.edit.select_keyframe_label_group", r#"{"scope":"visible_selected_layers"}"#, C, Partial),
+            it(23592965, "Visible Keyframes on All Layers", "motion.edit.select_keyframe_label_group", r#"{"scope":"visible_all_layers"}"#, C, Partial),
         ],
     ),
     SEP,
@@ -879,8 +879,8 @@ const ANIMATION: &[Node] = &[
     SEP,
     it(851975, "Set Keyframe", "motion.anim.set_keyframe", "", B, Todo),
     it(851976, "Toggle Hold Keyframe", "motion.toggle_hold", "", B, Done),
-    it(851977, "Keyframe Interpolation...", "motion.anim.keyframe_interpolation", "", C, Todo),
-    it(851978, "Keyframe Velocity...", "motion.anim.keyframe_velocity", "", C, Todo),
+    it(851977, "Keyframe Interpolation...", "motion.anim.keyframe_interpolation", "", C, Done),
+    it(851978, "Keyframe Velocity...", "motion.anim.keyframe_velocity", "", C, Done),
     sub(
         "Keyframe Assistant",
         &[
@@ -1142,7 +1142,7 @@ const WINDOW: &[Node] = &[
     SEP,
     s(it(524296, "Lumetri Scopes", "window.panel", r#"{"id":"lumetri_scopes","toggle":true}"#, E, Later)),
     s(it(524297, "Review with Frame.io", "window.panel", r#"{"id":"frame_io","toggle":true}"#, B, Adobe)),
-    s(it(524298, "Info", "window.panel", r#"{"id":"info","toggle":true}"#, E, Partial)),
+    s(it(524298, "Info", "window.panel", r#"{"id":"info","toggle":true}"#, E, Todo)),
     s(it(524299, "Metadata", "window.panel", r#"{"id":"metadata","toggle":true}"#, E, Later)),
     s(it(524300, "Content-Aware Fill", "window.panel", r#"{"id":"content_aware_fill","toggle":true}"#, E, Later)),
     s(it(524301, "Motion Sketch", "window.panel", r#"{"id":"motion_sketch","toggle":true}"#, E, Later)),

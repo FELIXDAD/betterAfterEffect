@@ -16,10 +16,7 @@ fn matches_after_effects() {
         eprintln!("no AE golden images yet ({}): skipped", golden.display());
         return;
     }
-    let Ok(gpu) =
-        bae_gpu::GpuContext::new_headless(bae_gpu::GpuContextDescriptor::default().with_env())
-    else {
-        eprintln!("skipping GPU test: no adapter");
+    let Some(gpu) = bae_gpu::testing::shared_context() else {
         return;
     };
     let mut failures = Vec::new();

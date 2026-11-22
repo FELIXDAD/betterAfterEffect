@@ -81,6 +81,8 @@ pub struct Session {
     pub graph_set: Vec<(PrimPath, String)>,
     /// The Timeline shows the Graph Editor instead of layer bars (Shift+F3).
     pub graph_editor: bool,
+    /// The open keyframe dialog (Keyframe Interpolation / Velocity).
+    pub key_dialog: Option<crate::timeline::KeyDialog>,
     /// Project panel selection.
     pub selected_items: Vec<PrimPath>,
     pub playback: Option<Playback>,

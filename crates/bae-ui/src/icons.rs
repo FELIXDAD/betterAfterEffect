@@ -842,7 +842,7 @@ mod tests {
     /// Every icon draws something, whether from fill-path data or the painter.
     #[test]
     fn every_icon_has_a_picture() {
-        let ctx = egui::Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         for icon in Icon::ALL {
             let out = ctx.run_ui(egui::RawInput::default(), |ui| {
                 let rect = Rect::from_min_size(Pos2::new(10.0, 10.0), Vec2::splat(16.0));

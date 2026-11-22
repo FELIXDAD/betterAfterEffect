@@ -96,7 +96,7 @@ impl AppModule for RenderModule {
             let open_error = ctx.app.resource::<cli::ProjectOpenError>().cloned();
             run(
                 ctx.matches,
-                desc,
+                move || GpuContext::new_headless(desc),
                 media,
                 encoders,
                 &providers,
@@ -289,9 +289,11 @@ type MediaHandle = std::sync::Arc<bae_media::MediaLibrary>;
 #[cfg(not(feature = "media"))]
 type MediaHandle = ();
 
+/// `gpu` creates the context once the options are checked (tests pass the
+/// process-wide test context instead, #154).
 fn run(
     m: &ArgMatches,
-    desc: GpuContextDescriptor,
+    gpu: impl FnOnce() -> Result<std::sync::Arc<GpuContext>, bae_gpu::GpuError>,
     media: Option<MediaHandle>,
     encoders: Option<Encoders>,
     providers: &[std::sync::Arc<dyn SourceProvider>],
@@ -380,7 +382,7 @@ fn run(
     // Reject bad output options before any GPU work.
     settings.validate(rate, &request)?;
 
-    let gpu = GpuContext::new_headless(desc)?;
+    let gpu = gpu()?;
     let mut renderer = Renderer::with_config(
         gpu.clone(),
         RendererConfig {
@@ -537,8 +539,7 @@ mod tests {
     #[cfg(feature = "media")]
     #[test]
     fn renders_packaged_footage_from_baez() {
-        if GpuContext::new_headless(GpuContextDescriptor::default()).is_err() {
-            eprintln!("no GPU, skipping");
+        if bae_gpu::testing::shared_context().is_none() {
             return;
         }
         let dir = tempfile::tempdir().unwrap();
@@ -588,7 +589,7 @@ mod tests {
             ])
             .unwrap();
         assert_eq!(
-            run(&m, GpuContextDescriptor::default(), None, None, &[], None).unwrap(),
+            run(&m, test_gpu, None, None, &[], None).unwrap(),
             ExitCode::SUCCESS
         );
         let (w, _, data) = crate::png_out::read_rgba8(&out).unwrap();
@@ -600,11 +601,9 @@ mod tests {
 
     #[test]
     fn renders_a_saved_project_to_png() {
-        let Ok(gpu) = GpuContext::new_headless(GpuContextDescriptor::default()) else {
-            eprintln!("no GPU, skipping");
+        if bae_gpu::testing::shared_context().is_none() {
             return;
-        };
-        drop(gpu);
+        }
         let dir = tempfile::tempdir().unwrap();
         let mut b = crate::fixture::SceneBuilder::new();
         let comp = b
@@ -632,7 +631,7 @@ mod tests {
             ])
             .unwrap();
         assert_eq!(
-            run(&m, GpuContextDescriptor::default(), None, None, &[], None).unwrap(),
+            run(&m, test_gpu, None, None, &[], None).unwrap(),
             ExitCode::SUCCESS
         );
         for f in ["out_00.png", "out_01.png"] {
@@ -700,7 +699,7 @@ mod tests {
         alpha: ExportAlpha,
     ) -> Vec<Vec<u8>> {
         let project = Project::open(project).unwrap();
-        let gpu = GpuContext::new_headless(GpuContextDescriptor::default()).unwrap();
+        let gpu = bae_gpu::testing::shared_context().unwrap();
         let mut renderer = Renderer::with_config(
             gpu,
             RendererConfig {
@@ -733,15 +732,17 @@ mod tests {
         let m = args(clap::Command::new("render"))
             .try_get_matches_from(std::iter::once("render").chain(argv.iter().copied()))
             .unwrap();
-        run(&m, GpuContextDescriptor::default(), None, None, &[], None)
+        run(&m, test_gpu, None, None, &[], None)
+    }
+
+    /// The context `bae render` runs get in tests: the process-wide test context,
+    /// not a device of their own (#154).
+    fn test_gpu() -> Result<std::sync::Arc<GpuContext>, bae_gpu::GpuError> {
+        Ok(bae_gpu::testing::shared_context().expect("callers check has_gpu() first"))
     }
 
     fn has_gpu() -> bool {
-        let ok = GpuContext::new_headless(GpuContextDescriptor::default()).is_ok();
-        if !ok {
-            eprintln!("no GPU, skipping");
-        }
-        ok
+        bae_gpu::testing::shared_context().is_some()
     }
 
     /// The pipelined export (async readback ring, encoder threads) writes
@@ -1017,7 +1018,7 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         let project = Project::open(animated_project(dir.path())).unwrap();
-        let gpu = GpuContext::new_headless(GpuContextDescriptor::default()).unwrap();
+        let gpu = bae_gpu::testing::shared_context().unwrap();
         let mut renderer = Renderer::new(gpu);
         let mut evaluator = AnimEvaluator::new(None);
         let comp = comp_path("main").unwrap();
