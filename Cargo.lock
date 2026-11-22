@@ -910,6 +910,7 @@ dependencies = [
  "bae-gpu",
  "bae-model",
  "bae-motion",
+ "bae-prefs",
  "bae-render",
  "bae-ui",
  "egui",

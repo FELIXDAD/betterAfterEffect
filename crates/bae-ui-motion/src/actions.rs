@@ -517,7 +517,16 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             });
         }
         ids::SPLIT if !layers.is_empty() => {
-            cx.invoke_with("layer.split", json!({"layers": layers, "time": now}));
+            // Preferences > Composition > Create Split Layers Above Original
+            // Layer (AE default on).
+            let above = cx
+                .resources
+                .get::<std::sync::Arc<bae_prefs::PrefsStore>>()
+                .is_none_or(|p| p.current().bool(bae_prefs::keys::SPLIT_LAYERS_ABOVE));
+            cx.invoke_with(
+                "layer.split",
+                json!({"layers": layers, "time": now, "above": above}),
+            );
             s.expect(Pending::NewLayers {
                 comp: info.path.clone(),
                 before: query::comp_layers(stage, &info.path),

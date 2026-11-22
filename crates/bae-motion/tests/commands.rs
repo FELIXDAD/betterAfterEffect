@@ -690,3 +690,27 @@ fn set_layer_attr_sets_switches_in_one_step() {
         .is_err()
     );
 }
+
+/// `layer.split` puts the new layer above the original (AE's default) or,
+/// with `above: false` (the preference off), below it.
+#[test]
+fn split_layer_above_or_below() {
+    for above in [true, false] {
+        let mut fx = Fx::new();
+        let comp = fx.comp();
+        let a = fx.layer(&comp, "solid", json!({}));
+        let out = fx.run(
+            "layer.split",
+            json!({"layers": [a], "time": SEC, "above": above}),
+        );
+        let new = p(out["paths"][0].as_str().unwrap());
+        let layers = query::comp_layers(&fx.stage, &comp);
+        let (i_new, i_old) = (
+            layers.iter().position(|l| *l == new).unwrap(),
+            layers.iter().position(|l| *l == a).unwrap(),
+        );
+        assert_eq!(i_new < i_old, above, "above = {above}: {layers:?}");
+        assert_eq!(query::layer_timing(&fx.stage, &new).in_point, Time(SEC));
+        assert_eq!(query::layer_timing(&fx.stage, &a).out_point, Time(SEC));
+    }
+}

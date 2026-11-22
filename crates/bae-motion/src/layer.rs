@@ -458,6 +458,15 @@ fn duplicate_name(stage: &Stage, folder: &PrimPath, name: &str) -> String {
 
 /// Duplicate `layer` directly above itself; returns the new path.
 fn duplicate_layer(tx: &mut Transaction<'_>, layer: &PrimPath) -> Result<PrimPath, CommandError> {
+    duplicate_layer_at(tx, layer, false)
+}
+
+/// Duplicates `layer` directly above it, or directly below it (`below`).
+fn duplicate_layer_at(
+    tx: &mut Transaction<'_>,
+    layer: &PrimPath,
+    below: bool,
+) -> Result<PrimPath, CommandError> {
     let stage = tx.stage();
     let folder = layer.parent().ok_or(ModelError::RootNotEditable)?;
     let name = query::display_name_of(stage, layer);
@@ -470,7 +479,8 @@ fn duplicate_layer(tx: &mut Transaction<'_>, layer: &PrimPath) -> Result<PrimPat
     retarget_refs(&mut tree, layer, &new_path);
     let index = stage
         .sublayer(tx.target())
-        .and_then(|s| s.child_index(layer));
+        .and_then(|s| s.child_index(layer))
+        .map(|i| i + usize::from(below));
     tx.ensure_spec(&folder)?;
     tx.apply(Op::RestorePrim {
         path: new_path.clone(),
@@ -516,6 +526,14 @@ pub struct SplitLayersParams {
     pub layers: Vec<PrimPath>,
     /// Comp time (flicks) to split at; layers not active at that time are skipped.
     pub time: Time,
+    /// Put each new layer above its original (default, AE's Preferences >
+    /// Composition > Create Split Layers Above Original Layer) or below it.
+    #[serde(default = "default_true")]
+    pub above: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Command for SplitLayers {
@@ -523,7 +541,7 @@ impl Command for SplitLayers {
     type Output = LayersOutput;
     const ID: &'static str = "layer.split";
     const TITLE: &'static str = "Split Layer";
-    const DESCRIPTION: &'static str = "Split layers at a comp time: the original ends there and a duplicate above it starts there.";
+    const DESCRIPTION: &'static str = "Split layers at a comp time: the original ends there and a duplicate above it (or below it, `above: false`) starts there.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<LayersOutput, CommandError> {
         ensure_unlocked(tx.stage(), &p.layers)?;
@@ -538,7 +556,7 @@ impl Command for SplitLayers {
             if !(a < p.time && p.time < b) {
                 continue;
             }
-            let new = duplicate_layer(tx, l)?;
+            let new = duplicate_layer_at(tx, l, !p.above)?;
             set(tx, l, "out_point", Value::Time(p.time))?;
             set(tx, &new, "in_point", Value::Time(p.time))?;
             paths.push(new);

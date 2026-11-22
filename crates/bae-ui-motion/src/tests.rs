@@ -1450,3 +1450,47 @@ fn layer_switch_menu_commands_and_undo() {
         Some(crate::session::Reveal::Modified)
     ));
 }
+
+/// Edit ▸ Split Layer follows Preferences ▸ Composition ▸ Create Split Layers
+/// Above Original Layer: the new layer goes above the original (default) or
+/// below it.
+#[test]
+fn split_layer_follows_the_preference() {
+    for above in [true, false] {
+        let mut h = Harness::new();
+        let mut prefs = bae_prefs::Preferences::default();
+        prefs.set(bae_prefs::keys::SPLIT_LAYERS_ABOVE, above);
+        h.resources
+            .insert(std::sync::Arc::new(bae_prefs::PrefsStore::new(prefs)));
+        let (comp, solid, _shape) = h.comp_with_layers();
+        {
+            let s = h.session();
+            let mut s = s.lock();
+            s.selected_layers = vec![solid.clone()];
+            let info = query::comp_info(&h.stage, &comp).unwrap();
+            s.set_time(&info, Time(Time::FLICKS_PER_SECOND));
+        }
+        let mut tl = TimelinePanel::default();
+        let r = h.action(&mut tl, Invocation::new(crate::actions::ids::SPLIT));
+        h.apply(r);
+        let layers = query::comp_layers(&h.stage, &comp);
+        assert_eq!(layers.len(), 3);
+        let i_old = layers.iter().position(|l| *l == solid).unwrap();
+        let new = if above {
+            &layers[i_old - 1]
+        } else {
+            &layers[i_old + 1]
+        };
+        assert_eq!(
+            query::layer_timing(&h.stage, new).in_point,
+            Time(Time::FLICKS_PER_SECOND),
+            "above = {above}: {layers:?}"
+        );
+        h.stage.undo(&h.author).unwrap();
+        assert_eq!(
+            query::comp_layers(&h.stage, &comp).len(),
+            2,
+            "one undo step"
+        );
+    }
+}
