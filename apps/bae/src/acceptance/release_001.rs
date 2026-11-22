@@ -113,7 +113,7 @@ const VIEWER: (&str, egui::Vec2) = ("Fit", egui::vec2(300.0, -250.0));
 
 /// Enabled menu items that do nothing in the state of [`rich`] (a layer
 /// selected, no keyframe selected), with their issue. Remove when fixed.
-const KNOWN_NOOPS: &[(&str, &str)] = &[("edit.copy", "#204"), ("edit.paste", "#204")];
+const KNOWN_NOOPS: &[(&str, &str)] = &[];
 
 /// Clicks an empty part of the panel whose header shows `anchor`.
 fn focus(h: &mut Ui, anchor: &str, offset: egui::Vec2) {
@@ -926,4 +926,173 @@ fn new_dialogs_and_tools_fifty_times_in_a_row() {
         "50 rounds of dialogs and tools: {:.1} s (debug build)",
         start.elapsed().as_secs_f64()
     );
+}
+
+// ---------------------------------------------------------------------------
+// #204 retest: layers through Edit ▸ Copy / Cut / Paste (AE: Copy, Cut and
+// Paste are global commands, `CSwitchboard` in docs/reference/ae/mac/shortcuts.json).
+
+fn three_layers() -> Ui {
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid", "motion.layer.new.text"]);
+    assert!(add_layer(&mut h, "shape:rect"));
+    settle(&mut h);
+    focus(&mut h, TIMELINE.0, TIMELINE.1);
+    h
+}
+
+fn item_enabled(h: &Ui, id: &str) -> bool {
+    h.state()
+        .menu_items()
+        .into_iter()
+        .find(|i| i.invocation.id == id)
+        .map(|i| i.enabled)
+        .unwrap_or_else(|| panic!("no menu item {id}"))
+}
+
+fn select(h: &Ui, layers: &[PrimPath]) {
+    let s = h.state().session();
+    let mut s = s.lock();
+    s.selected_layers = layers.to_vec();
+    s.selected_keys.clear();
+}
+
+#[test]
+fn layers_copy_cut_and_paste_like_ae() {
+    let mut h = three_layers();
+    let [rect, text, solid]: [PrimPath; 3] = h.state().layers().try_into().unwrap();
+    let names = |h: &Ui| h.state().layer_names();
+    let before = names(&h);
+    assert!(
+        !item_enabled(&h, "edit.paste"),
+        "Paste enabled with an empty clipboard"
+    );
+
+    // Cmd+C on two layers, Cmd+V with the middle one selected.
+    select(&h, &[rect.clone(), solid.clone()]);
+    key(&mut h, Modifiers::COMMAND, Key::C);
+    assert!(item_enabled(&h, "edit.paste"), "Paste greyed after Copy");
+    select(&h, std::slice::from_ref(&text));
+    key(&mut h, Modifiers::COMMAND, Key::V);
+    let after = names(&h);
+    assert_eq!(after.len(), 5, "{after:?}");
+    // Above the topmost selected layer (the text), named like Duplicate, selected.
+    let mut d = three_layers();
+    let [drect, _, dsolid]: [PrimPath; 3] = d.state().layers().try_into().unwrap();
+    select(&d, &[drect, dsolid]);
+    key(&mut d, Modifiers::COMMAND, Key::D);
+    let mut dup: Vec<String> = names(&d)
+        .into_iter()
+        .filter(|n| !before.contains(n))
+        .collect();
+    let mut pasted: Vec<String> = after
+        .iter()
+        .filter(|n| !before.contains(n))
+        .cloned()
+        .collect();
+    dup.sort();
+    pasted.sort();
+    assert_eq!(
+        pasted, dup,
+        "pasted names differ from Duplicate's: {after:?}"
+    );
+    let text_at = after.iter().position(|n| *n == before[1]).unwrap();
+    assert_eq!(
+        text_at, 3,
+        "the pasted layers are not just above the text layer: {after:?}"
+    );
+    let selected: Vec<String> = h
+        .state()
+        .selected_layers()
+        .iter()
+        .map(|l| h.state().name(l))
+        .collect();
+    let mut sel_sorted = selected.clone();
+    sel_sorted.sort();
+    assert_eq!(
+        sel_sorted, pasted,
+        "the pasted layers are not the selection"
+    );
+    let count = |h: &Ui| h.state().layers().len();
+    one_undo_step(&mut h, "paste", count);
+    no_failures(&h, "copy / paste");
+
+    // The menu items do the same.
+    let paste = h
+        .state()
+        .menu_items()
+        .into_iter()
+        .find(|i| i.invocation.id == "edit.paste")
+        .unwrap();
+    assert!(h.state_mut().menu(&paste.id));
+    settle(&mut h);
+    assert_eq!(count(&h), 7, "Edit ▸ Paste");
+
+    // Cmd+X: the solid goes (one undo step), Cmd+V brings it back.
+    let solid_name = h.state().name(&solid);
+    select(&h, std::slice::from_ref(&solid));
+    key(&mut h, Modifiers::COMMAND, Key::X);
+    assert_eq!(count(&h), 6, "Cut did not remove the layer");
+    one_undo_step(&mut h, "cut", |h: &Ui| {
+        usize::MAX - h.state().layers().len()
+    });
+    key(&mut h, Modifiers::COMMAND, Key::V);
+    assert_eq!(count(&h), 7, "Paste after Cut");
+    let solids = |h: &Ui| {
+        h.state()
+            .layers()
+            .iter()
+            .filter(|l| {
+                bae_motion::query::layer_kind(h.state().stage(), l).as_deref() == Some("solid")
+            })
+            .count()
+    };
+    assert_eq!(
+        solids(&h),
+        3,
+        "the cut solid did not come back: {:?}",
+        names(&h)
+    );
+    println!("cut “{solid_name}”, pasted back as {:?}", names(&h)[0]);
+
+    // Into another comp.
+    comp_with(&mut h, &[]);
+    focus(&mut h, TIMELINE.0, TIMELINE.1);
+    key(&mut h, Modifiers::COMMAND, Key::V);
+    let other = h.state().layers();
+    assert_eq!(other.len(), 1, "paste into the second comp");
+    println!(
+        "pasted into an empty comp as “{}”",
+        h.state().name(&other[0])
+    );
+    assert_eq!(
+        bae_motion::query::layer_kind(h.state().stage(), &other[0]).as_deref(),
+        Some("solid")
+    );
+    no_failures(&h, "cut / paste across comps");
+
+    // Saved and reopened, identical.
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tricky_dir(tmp.path()).join("复制 粘贴.bae");
+    let saved = bae_model::export_flattened_json(h.state().stage());
+    h.state_mut().dialogs.save.push_back(Some(path.clone()));
+    key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::S);
+    let mut g = gui();
+    g.state_mut().dialogs.open.push_back(Some(path));
+    key(&mut g, Modifiers::COMMAND, Key::O);
+    assert_eq!(bae_model::export_flattened_json(g.state().stage()), saved);
+
+    // Renaming a layer (Enter): Cmd+C / Cmd+V belong to the text field. The
+    // shell hands the native menu's Cut / Copy / Paste to it
+    // (`shell::menu::TEXT_EDIT_ACTIONS` while `text_edit_focused`); the keys
+    // must not paste layers either.
+    let layer = h.state().layers()[0].clone();
+    select(&h, &[layer]);
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(h.ctx.text_edit_focused(), "Enter did not start renaming");
+    let n = count(&h);
+    key(&mut h, Modifiers::COMMAND, Key::C);
+    key(&mut h, Modifiers::COMMAND, Key::V);
+    assert_eq!(count(&h), n, "Cmd+V pasted layers while renaming");
+    key(&mut h, Modifiers::NONE, Key::Escape);
 }

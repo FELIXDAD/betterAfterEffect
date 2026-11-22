@@ -105,3 +105,18 @@
 ## Launch Services
 
 现在注册了三个 BAE：`bae-01-size-pass/target/dist/BAE.app`（开发构建）、`~/Downloads/BAE-0.0.1-rc/app/BAE.app`（之前的候选版）、`/private/tmp/bae-acc-m4/final/…/BAE.app`（本轮回归用的 160fab5 CI 包）。按约定先把清单给协调人，确认要保留哪一个后再用 `lsregister -u` 注销其余的。
+
+## 复测记录
+
+### dev `c4537d7`（#210）：#204 图层复制 / 剪切 / 粘贴
+
+`acceptance::release_001::layers_copy_cut_and_paste_like_ae`（新）和 `every_enabled_menu_item_does_something`（去掉了对复制 / 粘贴的放行）都通过：
+
+- 剪贴板是空的时候，编辑 ▸ 粘贴 置灰；复制后可用。
+- 时间轴有焦点，选中形状图层和纯色两个图层 Cmd+C，再选中中间的文本图层 Cmd+V：多出 2 个图层，放在文本图层正上方，名字和对同样两个图层按 Cmd+D 重复得到的一样，粘贴出来的两个图层是选中状态；一个撤销步骤（撤销回到 3 个、重做回到 5 个）。编辑 ▸ 粘贴 菜单项效果一样。
+- Cmd+X 剪掉纯色（一个撤销步骤），Cmd+V 粘回来；新建第二个合成后 Cmd+V，纯色进了第二个合成。
+- 粘贴后另存 .bae（带空格和中文的路径）重新打开，导出的 JSON 完全相同。
+- 按 Enter 改名、输入框有焦点时，Cmd+C / Cmd+V 不复制、不粘贴图层（原生菜单的剪切 / 复制 / 粘贴在输入框有焦点时交给输入框，`shell::menu::TEXT_EDIT_ACTIONS`）。
+- 观察：粘贴的名字按“重复”的规则递增。剪掉“Dark Gray Solid 1”后粘回同一个合成叫“Dark Gray Solid 4”（2、3 已存在），粘到空合成叫“Dark Gray Solid 2”。AE 粘贴到别的合成时是否保留原名，参考数据里没有，先记录。
+
+**#204 已关闭。**
