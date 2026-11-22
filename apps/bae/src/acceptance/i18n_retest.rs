@@ -20,10 +20,11 @@ use egui_kittest::kittest::{AccessKitNode, NodeT as _, Queryable as _};
 
 use super::*;
 
-/// `Layer > New` items made in the first comp, in order.
+/// `Layer > New` items made in the first comp, in order (`shape:rect` /
+/// `shape:ellipse`: shape layers with that path, see `add_layer`).
 const NEW_LAYERS: &[&str] = &[
-    "motion.layer.new.rectangle",
-    "motion.layer.new.ellipse",
+    "shape:rect",
+    "shape:ellipse",
     "motion.layer.new.shape",
     "motion.layer.new.solid",
     "motion.layer.new.null",
@@ -229,8 +230,8 @@ fn gui_with_status() -> (Ui, Vec<String>) {
 /// In the active (second, empty) comp: a rectangle and an ellipse layer, numbered
 /// per comp like AE, then every timeline row expanded.
 fn two_shapes_expanded(h: &mut Ui) -> Vec<String> {
-    for id in ["motion.layer.new.rectangle", "motion.layer.new.ellipse"] {
-        assert!(h.state_mut().menu(id), "{id} disabled");
+    for id in ["shape:rect", "shape:ellipse"] {
+        assert!(add_layer(h, id), "{id} disabled");
         settle(h);
     }
     let names = h.state().layer_names();
@@ -315,15 +316,15 @@ fn chinese_ui_names_new_items_in_chinese() {
             .1
             .clone()
     };
-    assert_eq!(by_id("motion.layer.new.rectangle"), "形状图层 1");
-    assert_eq!(by_id("motion.layer.new.ellipse"), "形状图层 2");
+    assert_eq!(by_id("shape:rect"), "形状图层 1");
+    assert_eq!(by_id("shape:ellipse"), "形状图层 2");
     assert_eq!(by_id("motion.layer.new.shape"), "形状图层 3");
     assert_eq!(by_id("motion.layer.new.null"), "空 1");
     assert_eq!(by_id("motion.layer.new.adjustment"), "调整图层 1");
     assert_eq!(by_id("motion.layer.new.camera"), "摄像机 1");
     assert_eq!(by_id("motion.layer.new.light"), "灯光 1");
-    let rect = contents(stage, made.layer("motion.layer.new.rectangle"));
-    let ellipse = contents(stage, made.layer("motion.layer.new.ellipse"));
+    let rect = contents(stage, made.layer("shape:rect"));
+    let ellipse = contents(stage, made.layer("shape:ellipse"));
     println!("zh rectangle contents: {rect:?}\nzh ellipse contents: {ellipse:?}");
     let rect_names: Vec<&str> = rect.iter().map(|(_, n)| n.as_str()).collect();
     let ellipse_names: Vec<&str> = ellipse.iter().map(|(_, n)| n.as_str()).collect();
@@ -468,10 +469,10 @@ fn english_ui_names_new_items_in_english() {
             .1
             .clone()
     };
-    assert_eq!(by_id("motion.layer.new.rectangle"), "Shape Layer 1");
-    assert_eq!(by_id("motion.layer.new.ellipse"), "Shape Layer 2");
-    let rect = contents(stage, made.layer("motion.layer.new.rectangle"));
-    let ellipse = contents(stage, made.layer("motion.layer.new.ellipse"));
+    assert_eq!(by_id("shape:rect"), "Shape Layer 1");
+    assert_eq!(by_id("shape:ellipse"), "Shape Layer 2");
+    let rect = contents(stage, made.layer("shape:rect"));
+    let ellipse = contents(stage, made.layer("shape:ellipse"));
     let rect_names: Vec<&str> = rect.iter().map(|(_, n)| n.as_str()).collect();
     let ellipse_names: Vec<&str> = ellipse.iter().map(|(_, n)| n.as_str()).collect();
     for want in ["Rectangle 1", "Rectangle Path 1", "Fill 1"] {
@@ -596,10 +597,7 @@ fn names_stay_when_the_language_changes() {
     match phase.as_str() {
         "1" => {
             let mut h = gui();
-            comp_with(
-                &mut h,
-                &["motion.layer.new.rectangle", "motion.layer.new.solid"],
-            );
+            comp_with(&mut h, &["shape:rect", "motion.layer.new.solid"]);
             h.state_mut().dialogs.save.push_back(Some(project.clone()));
             key(&mut h, Modifiers::COMMAND | Modifiers::SHIFT, Key::S);
             assert!(!h.state().doc.is_dirty());
@@ -616,7 +614,7 @@ fn names_stay_when_the_language_changes() {
                 before,
                 "renamed on open in English"
             );
-            comp_with(&mut h, &["motion.layer.new.rectangle"]);
+            comp_with(&mut h, &["shape:rect"]);
             let comp = h.state().active_comp().unwrap();
             assert_eq!(h.state().name(&comp), "Comp 1");
             assert_eq!(h.state().layer_names(), ["Shape Layer 1"]);
@@ -663,10 +661,7 @@ fn click_labelled(h: &mut Ui, role: Role, label: &str) {
 fn pixel_units(zh: bool) {
     crate::i18n::init_from_env();
     let (mut h, extra_ok) = gui_with_status();
-    comp_with(
-        &mut h,
-        &["motion.layer.new.text", "motion.layer.new.rectangle"],
-    );
+    comp_with(&mut h, &["motion.layer.new.text", "shape:rect"]);
     let [rect, text]: [PrimPath; 2] = h.state().layers().try_into().unwrap();
     // Position keyframes at 0 s and 1 s on the rectangle.
     h.state().session().lock().selected_layers = vec![rect.clone()];

@@ -36,7 +36,7 @@
 
 ## 统计
 
-- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 61，◐ 9，☐ 253，⏸ 217，Ⓐ 30
+- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 61，◐ 8，☐ 254，⏸ 217，Ⓐ 30
 - 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 119 条。
 
 ## 主菜单
@@ -601,7 +601,7 @@
 | Extensions ▸ (extensions) |  | `motion.window.extension` |  |  |  | B | ⋯ |
 | Lumetri Scopes | 524296 | `window.panel` | `{"id":"lumetri_scopes","toggle":true}` |  |  | E | ⏸ |
 | Review with Frame.io | 524297 | `window.panel` | `{"id":"frame_io","toggle":true}` |  |  | B | Ⓐ |
-| Info | 524298 | `window.panel` | `{"id":"info","toggle":true}` | Ctrl+2 | Cmd+2 | E | ◐ |
+| Info | 524298 | `window.panel` | `{"id":"info","toggle":true}` | Ctrl+2 | Cmd+2 | E | ☐ |
 | Metadata | 524299 | `window.panel` | `{"id":"metadata","toggle":true}` |  |  | E | ⏸ |
 | Content-Aware Fill | 524300 | `window.panel` | `{"id":"content_aware_fill","toggle":true}` |  |  | E | ⏸ |
 | Motion Sketch | 524301 | `window.panel` | `{"id":"motion_sketch","toggle":true}` |  |  | E | ⏸ |
@@ -790,8 +790,8 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `CompTwirlScaleNewKF` | `motion.toggle_key` | `{"attr":"transform:scale","only":true}` |  | Opt+S |  | B | ☐ |
 | `NextKeyframe` | `motion.next_key` |  | K | K |  | B | ✅ |
 | `NextKeyframeInSelection` | `motion.timeline.next_keyframe_in_selection` |  | Shift+K | Shift+K |  | C | ☐ |
-| `NudgeDown` | `motion.layer.nudge_position` | `{"dx":0,"dy":1}` | Down | Down |  | B | ☐ |
-| `NudgeDownMore` | `motion.layer.nudge_position` | `{"dx":0,"dy":10}` | Shift+Down | Shift+Down |  | B | ☐ |
+| `NudgeDown` | `motion.layer.nudge_position` | `{"dx":0,"dy":1}` | Down | Down |  | A | ☐ |
+| `NudgeDownMore` | `motion.layer.nudge_position` | `{"dx":0,"dy":10}` | Shift+Down | Shift+Down |  | A | ☐ |
 | `NudgeEarlier` | `motion.layer.nudge_time` | `{"frames":-1}` | Alt+PageUp | Opt+PageUp |  | B | ☐ |
 | `NudgeEarlierMore` | `motion.layer.nudge_time` | `{"frames":-10}` | Alt+Shift+PageUp | Opt+Shift+PageUp |  | B | ☐ |
 | `NudgeKeyframesEarlier` | `motion.timeline.nudge_keyframes` | `{"frames":-1}` | Alt+Left | Opt+Left |  | C | ☐ |
@@ -800,14 +800,14 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `NudgeKeyframesLaterMore` | `motion.timeline.nudge_keyframes` | `{"frames":10}` | Alt+Shift+Right | Opt+Shift+Right |  | C | ☐ |
 | `NudgeLater` | `motion.layer.nudge_time` | `{"frames":1}` | Alt+PageDown | Opt+PageDown |  | B | ☐ |
 | `NudgeLaterMore` | `motion.layer.nudge_time` | `{"frames":10}` | Alt+Shift+PageDown | Opt+Shift+PageDown |  | B | ☐ |
-| `NudgeLeft` | `motion.layer.nudge_position` | `{"dx":-1,"dy":0}` | Left | Left |  | B | ☐ |
-| `NudgeLeftMore` | `motion.layer.nudge_position` | `{"dx":-10,"dy":0}` | Shift+Left | Shift+Left |  | B | ☐ |
+| `NudgeLeft` | `motion.layer.nudge_position` | `{"dx":-1,"dy":0}` | Left | Left |  | A | ☐ |
+| `NudgeLeftMore` | `motion.layer.nudge_position` | `{"dx":-10,"dy":0}` | Shift+Left | Shift+Left |  | A | ☐ |
 | `NudgeOpacityDown` | `motion.layer.nudge_opacity` | `{"delta":-1}` | Ctrl+Alt+PadMinus | Control+Opt+PadMinus |  | B | ☐ |
 | `NudgeOpacityDownMore` | `motion.layer.nudge_opacity` | `{"delta":-10}` | Ctrl+Alt+Shift+PadMinus | Control+Opt+Shift+PadMinus |  | B | ☐ |
 | `NudgeOpacityUp` | `motion.layer.nudge_opacity` | `{"delta":1}` | Ctrl+Alt+PadPlus | Control+Opt+PadPlus |  | B | ☐ |
 | `NudgeOpacityUpMore` | `motion.layer.nudge_opacity` | `{"delta":10}` | Ctrl+Alt+Shift+PadPlus | Control+Opt+Shift+PadPlus |  | B | ☐ |
-| `NudgeRight` | `motion.layer.nudge_position` | `{"dx":1,"dy":0}` | Right | Right |  | B | ☐ |
-| `NudgeRightMore` | `motion.layer.nudge_position` | `{"dx":10,"dy":0}` | Shift+Right | Shift+Right |  | B | ☐ |
+| `NudgeRight` | `motion.layer.nudge_position` | `{"dx":1,"dy":0}` | Right | Right |  | A | ☐ |
+| `NudgeRightMore` | `motion.layer.nudge_position` | `{"dx":10,"dy":0}` | Shift+Right | Shift+Right |  | A | ☐ |
 | `NudgeRotCCW` | `motion.layer.nudge_rotation` | `{"delta":-1}` | PadMinus | PadMinus |  | B | ☐ |
 | `NudgeRotCCWMore` | `motion.layer.nudge_rotation` | `{"delta":-10}` | Shift+PadMinus | Shift+PadMinus |  | B | ☐ |
 | `NudgeRotCW` | `motion.layer.nudge_rotation` | `{"delta":1}` | PadPlus | PadPlus |  | B | ☐ |
@@ -816,8 +816,8 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `NudgeScaleLargerMore` | `motion.layer.nudge_scale` | `{"delta":10}` | Alt+Shift+PadPlus / Ctrl+Shift+PadPlus | Opt+Shift+PadPlus / Cmd+Shift+PadPlus |  | B | ☐ |
 | `NudgeScaleSmaller` | `motion.layer.nudge_scale` | `{"delta":-1}` | Alt+PadMinus / Ctrl+PadMinus | Opt+PadMinus / Cmd+PadMinus |  | B | ☐ |
 | `NudgeScaleSmallerMore` | `motion.layer.nudge_scale` | `{"delta":-10}` | Alt+Shift+PadMinus / Ctrl+Shift+PadMinus | Opt+Shift+PadMinus / Cmd+Shift+PadMinus |  | B | ☐ |
-| `NudgeUp` | `motion.layer.nudge_position` | `{"dx":0,"dy":-1}` | Up | Up |  | B | ☐ |
-| `NudgeUpMore` | `motion.layer.nudge_position` | `{"dx":0,"dy":-10}` | Shift+Up | Shift+Up |  | B | ☐ |
+| `NudgeUp` | `motion.layer.nudge_position` | `{"dx":0,"dy":-1}` | Up | Up |  | A | ☐ |
+| `NudgeUpMore` | `motion.layer.nudge_position` | `{"dx":0,"dy":-10}` | Shift+Up | Shift+Up |  | A | ☐ |
 | `PrevKeyframe` | `motion.prev_key` |  | J | J |  | B | ✅ |
 | `PrevKeyframeInSelection` | `motion.timeline.previous_keyframe_in_selection` |  | Shift+J | Shift+J |  | C | ☐ |
 | `SelectAllVisibleKeyframes` | `motion.timeline.select_all_visible_keyframes` |  | Ctrl+Alt+A | Cmd+Opt+A |  | C | ☐ |
@@ -1083,16 +1083,16 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 
 | AE 命令 | BAE 动作 id | 参数 | Windows | macOS | 作用范围 | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
-| `NudgeDown` | `motion.layer.nudge_position` | `{"dx":0,"dy":1}` | Down / Alt+Down | Down / Opt+Down | layer | B | ☐ |
-| `NudgeDownMore` | `motion.layer.nudge_position` | `{"dx":0,"dy":10}` | Shift+Down / Alt+Shift+Down | Shift+Down / Opt+Shift+Down | layer | B | ☐ |
-| `NudgeLeft` | `motion.layer.nudge_position` | `{"dx":-1,"dy":0}` | Left | Left | layer | B | ☐ |
-| `NudgeLeftMore` | `motion.layer.nudge_position` | `{"dx":-10,"dy":0}` | Shift+Left | Shift+Left | layer | B | ☐ |
+| `NudgeDown` | `motion.layer.nudge_position` | `{"dx":0,"dy":1}` | Down / Alt+Down | Down / Opt+Down | layer | A | ☐ |
+| `NudgeDownMore` | `motion.layer.nudge_position` | `{"dx":0,"dy":10}` | Shift+Down / Alt+Shift+Down | Shift+Down / Opt+Shift+Down | layer | A | ☐ |
+| `NudgeLeft` | `motion.layer.nudge_position` | `{"dx":-1,"dy":0}` | Left | Left | layer | A | ☐ |
+| `NudgeLeftMore` | `motion.layer.nudge_position` | `{"dx":-10,"dy":0}` | Shift+Left | Shift+Left | layer | A | ☐ |
 | `NudgeOpacityDown` | `motion.layer.nudge_opacity` | `{"delta":-1}` | Ctrl+Alt+PadMinus | Control+Opt+PadMinus | layer | B | ☐ |
 | `NudgeOpacityDownMore` | `motion.layer.nudge_opacity` | `{"delta":-10}` | Ctrl+Alt+Shift+PadMinus | Control+Opt+Shift+PadMinus | layer | B | ☐ |
 | `NudgeOpacityUp` | `motion.layer.nudge_opacity` | `{"delta":1}` | Ctrl+Alt+PadPlus | Control+Opt+PadPlus | layer | B | ☐ |
 | `NudgeOpacityUpMore` | `motion.layer.nudge_opacity` | `{"delta":10}` | Ctrl+Alt+Shift+PadPlus | Control+Opt+Shift+PadPlus | layer | B | ☐ |
-| `NudgeRight` | `motion.layer.nudge_position` | `{"dx":1,"dy":0}` | Right | Right | layer | B | ☐ |
-| `NudgeRightMore` | `motion.layer.nudge_position` | `{"dx":10,"dy":0}` | Shift+Right | Shift+Right | layer | B | ☐ |
+| `NudgeRight` | `motion.layer.nudge_position` | `{"dx":1,"dy":0}` | Right | Right | layer | A | ☐ |
+| `NudgeRightMore` | `motion.layer.nudge_position` | `{"dx":10,"dy":0}` | Shift+Right | Shift+Right | layer | A | ☐ |
 | `NudgeRotCCW` | `motion.layer.nudge_rotation` | `{"delta":-1}` | PadMinus | PadMinus | layer | B | ☐ |
 | `NudgeRotCCWMore` | `motion.layer.nudge_rotation` | `{"delta":-10}` | Shift+PadMinus | Shift+PadMinus | layer | B | ☐ |
 | `NudgeRotCW` | `motion.layer.nudge_rotation` | `{"delta":1}` | PadPlus | PadPlus | layer | B | ☐ |
@@ -1101,8 +1101,8 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `NudgeScaleLargerMore` | `motion.layer.nudge_scale` | `{"delta":10}` | Alt+Shift+PadPlus / Ctrl+Shift+PadPlus | Opt+Shift+PadPlus / Cmd+Shift+PadPlus | layer | B | ☐ |
 | `NudgeScaleSmaller` | `motion.layer.nudge_scale` | `{"delta":-1}` | Alt+PadMinus / Ctrl+PadMinus | Opt+PadMinus / Cmd+PadMinus | layer | B | ☐ |
 | `NudgeScaleSmallerMore` | `motion.layer.nudge_scale` | `{"delta":-10}` | Alt+Shift+PadMinus / Ctrl+Shift+PadMinus | Opt+Shift+PadMinus / Cmd+Shift+PadMinus | layer | B | ☐ |
-| `NudgeUp` | `motion.layer.nudge_position` | `{"dx":0,"dy":-1}` | Up / Alt+Up | Up / Opt+Up | layer | B | ☐ |
-| `NudgeUpMore` | `motion.layer.nudge_position` | `{"dx":0,"dy":-10}` | Shift+Up / Alt+Shift+Up | Shift+Up / Opt+Shift+Up | layer | B | ☐ |
+| `NudgeUp` | `motion.layer.nudge_position` | `{"dx":0,"dy":-1}` | Up / Alt+Up | Up / Opt+Up | layer | A | ☐ |
+| `NudgeUpMore` | `motion.layer.nudge_position` | `{"dx":0,"dy":-10}` | Shift+Up / Alt+Shift+Up | Shift+Up / Opt+Shift+Up | layer | A | ☐ |
 
 ### `CPanoProjLayerPanoMask`
 

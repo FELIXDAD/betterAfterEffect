@@ -276,11 +276,33 @@ impl Workspace {
     /// workspace.
     pub fn contributed_menus(&self, app: &App) -> bae_ui::MenuTree {
         match app.get_registry::<bae_ui::MenuItemSpec>() {
-            Some(registry) => {
-                bae_ui::menu::build_menus(&registry.snapshot(), self.workbench.active_workspace())
-            }
+            // Entries AE sorts by name follow the display language.
+            Some(registry) => bae_ui::menu::build_menus_localized(
+                &registry.snapshot(),
+                self.workbench.active_workspace(),
+                &|t| bae_ui::tr(t).to_owned(),
+            ),
             None => bae_ui::MenuTree::default(),
         }
+    }
+
+    /// The action ids the app's modules handle (`bae_ui::menu::handled_actions`):
+    /// menu items of other actions stay greyed.
+    pub fn handled_actions(&self, app: &App) -> std::collections::HashSet<String> {
+        let handlers = app.get_registry::<dyn bae_ui::ActionHandler>();
+        let infos = app.get_registry::<bae_ui::ActionInfo>();
+        let panels = app.get_registry::<bae_ui::PanelKind>();
+        match (handlers, infos, panels) {
+            (Some(h), Some(i), Some(p)) => {
+                bae_ui::menu::handled_actions(&h.snapshot(), &i.snapshot(), &p.snapshot())
+            }
+            _ => Default::default(),
+        }
+    }
+
+    /// Panels open in the dock (Window menu check marks).
+    pub fn open_panels(&self) -> Vec<bae_ui::PanelId> {
+        self.workbench.dock().layout.panel_ids()
     }
 
     /// The effective keymap of the active workspace (menu shortcuts).

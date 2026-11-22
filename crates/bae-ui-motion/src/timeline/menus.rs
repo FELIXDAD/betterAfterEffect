@@ -21,7 +21,7 @@ pub(crate) fn keyframe_assistant_menu(
 
 /// The entry titled `title` directly in the top-level menu `top`.
 pub(crate) fn catalog_entry(top: &str, title: &str) -> Option<&'static Node> {
-    let (_, nodes) = catalog::MENUS.iter().find(|(t, _)| *t == top)?;
+    let (_, nodes) = catalog::menus().iter().find(|(t, _)| *t == top)?;
     nodes.iter().find(|n| match n {
         Node::Item(it) => it.title == title,
         Node::Submenu(s) => s.title == title,
@@ -80,7 +80,7 @@ pub(crate) fn catalog_node(ui: &mut Ui, cx: &mut PanelContext<'_>, node: &'stati
         Node::Submenu(_) => {}
         // The effect list comes from the effect registry (not wired to menus yet).
         Node::Effects => {
-            for c in catalog::EFFECT_CATEGORIES {
+            for c in catalog::effect_categories() {
                 ui.add_enabled(false, egui::Button::new(tr(c)));
             }
         }

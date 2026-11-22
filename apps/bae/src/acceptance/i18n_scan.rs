@@ -178,7 +178,7 @@ fn chinese_ui_has_no_english_words() {
             "motion.layer.new.solid",
             "motion.layer.new.null",
             "motion.layer.new.text",
-            "motion.layer.new.rectangle",
+            "shape:rect",
         ],
     );
     expand_all(&mut h);

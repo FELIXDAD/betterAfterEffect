@@ -915,6 +915,7 @@ dependencies = [
  "bae-render",
  "bae-ui",
  "egui",
+ "flate2",
  "serde",
  "serde_json",
  "tempfile",

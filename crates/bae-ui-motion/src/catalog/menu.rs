@@ -1142,7 +1142,7 @@ const WINDOW: &[Node] = &[
     SEP,
     s(it(524296, "Lumetri Scopes", "window.panel", r#"{"id":"lumetri_scopes","toggle":true}"#, E, Later)),
     s(it(524297, "Review with Frame.io", "window.panel", r#"{"id":"frame_io","toggle":true}"#, B, Adobe)),
-    s(it(524298, "Info", "window.panel", r#"{"id":"info","toggle":true}"#, E, Partial)),
+    s(it(524298, "Info", "window.panel", r#"{"id":"info","toggle":true}"#, E, Todo)),
     s(it(524299, "Metadata", "window.panel", r#"{"id":"metadata","toggle":true}"#, E, Later)),
     s(it(524300, "Content-Aware Fill", "window.panel", r#"{"id":"content_aware_fill","toggle":true}"#, E, Later)),
     s(it(524301, "Motion Sketch", "window.panel", r#"{"id":"motion_sketch","toggle":true}"#, E, Later)),
