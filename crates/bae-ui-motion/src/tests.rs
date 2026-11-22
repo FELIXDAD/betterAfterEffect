@@ -1244,7 +1244,10 @@ fn ae_default_shortcuts_of_working_commands_are_bound() {
     let mut missing = Vec::new();
     let mut active = 0;
     for k in keys() {
-        if !k.status.works() || k.flags & (NATIVE | BOUND_ELSEWHERE | SHADOWED) != 0 {
+        if !k.status.works()
+            || k.flags & (NATIVE | BOUND_ELSEWHERE | SHADOWED) != 0
+            || !crate::catalog::in_own_panel(k)
+        {
             continue;
         }
         let params: serde_json::Value = if k.params.is_empty() {

@@ -569,6 +569,7 @@ fn render_doc() -> String {
             .filter(|k| {
                 k.status.works()
                     && k.flags & (NATIVE | BOUND_ELSEWHERE | SHADOWED) == 0
+                    && in_own_panel(k)
                     && k.chords(mac)
                         .iter()
                         .any(|c| bae_ui::Chord::parse(c).is_ok())

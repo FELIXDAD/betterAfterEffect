@@ -552,6 +552,19 @@ pub fn live_by_handler(
     handled.contains(&bae_ui::menu::handler_key(action, &params))
 }
 
+/// Panel actions (`viewer.*`, `timeline.*`) only run in their own panel: AE
+/// also lists them in other contexts (zoom in the Effect Controls, Layer and
+/// Footage panels, `=` application-wide), but there the key would only be
+/// swallowed. Their bindings stay in the panel they act on.
+pub fn in_own_panel(k: &Key) -> bool {
+    let own = match k.action.split('.').next() {
+        Some("viewer") => "composition",
+        Some("timeline") => "timeline",
+        _ => return true,
+    };
+    k.scope() == Some(own)
+}
+
 /// AE's default shortcuts as keymap bindings for the platform BAE runs on: one
 /// binding per chord of every command `live` accepts, scoped to the panel kind of
 /// AE's context. Commands text fields handle ([`NATIVE`]), commands another
@@ -561,7 +574,7 @@ pub fn ae_bindings(keys: &[Key], live: &dyn Fn(&Key) -> bool) -> Vec<bae_ui::Bin
     let mac = cfg!(target_os = "macos");
     let mut out: Vec<bae_ui::Binding> = Vec::new();
     for k in keys {
-        if k.flags & (NATIVE | BOUND_ELSEWHERE | SHADOWED) != 0 || !live(k) {
+        if k.flags & (NATIVE | BOUND_ELSEWHERE | SHADOWED) != 0 || !live(k) || !in_own_panel(k) {
             continue;
         }
         let params: serde_json::Value = if k.params.is_empty() {
