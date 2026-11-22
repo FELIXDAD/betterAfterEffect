@@ -48,6 +48,7 @@ pub fn register(app: &mut bae_app::AppBuilder) {
     // The app's own terms win: only labels it does not translate yet are added.
     let new: Vec<(&'static str, &'static str)> = bae_prefs::i18n::ZH
         .iter()
+        .chain(bae_prefs::i18n::DEFAULT_VALUES_ZH)
         .copied()
         .filter(|(en, _)| !crate::i18n::has_translation(en))
         .collect();
@@ -668,6 +669,12 @@ impl SettingsDialog {
                 let mut s = draft.str(p.key).to_owned();
                 if p.key.starts_with("labels.label_name_") {
                     s = label_name(draft, label_index(p.key));
+                } else if let bae_prefs::DefaultValue::Str(d) = p.default
+                    && s == d
+                {
+                    // An unchanged default name shows in the UI language
+                    // ("Solids" → "纯色"), as BAE names the folder (#206).
+                    s = tr(d).to_owned();
                 }
                 let r = ui.add(
                     egui::TextEdit::singleline(&mut s)
