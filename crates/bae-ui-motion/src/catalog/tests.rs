@@ -185,8 +185,14 @@ fn every_ae_shortcut_command_is_mapped() {
         })
         .collect();
     assert_eq!(ours.len(), json["commandCount"].as_u64().unwrap() as usize);
+    // The same chords; the catalog may put the one AE's menu shows first.
+    let sorted = |keys: &str| {
+        let mut v: Vec<&str> = keys.split('|').collect();
+        v.sort_unstable();
+        v.join("|")
+    };
     for (a, o) in ae.iter().zip(&ours) {
-        assert_eq!(a, o);
+        assert_eq!((&a.0, &a.1, sorted(&a.2)), (&o.0, &o.1, sorted(&o.2)));
     }
     for k in KEYS {
         params(k.params);
@@ -557,6 +563,19 @@ fn render_doc() -> String {
             .collect::<Vec<_>>()
             .join("，")
     );
+    // In the keymap: the command runs and BAE can bind one of its chords.
+    let active = |mac: bool| {
+        KEYS.iter()
+            .filter(|k| {
+                k.status.works()
+                    && k.flags & (NATIVE | BOUND_ELSEWHERE | SHADOWED) == 0
+                    && in_own_panel(k)
+                    && k.chords(mac)
+                        .iter()
+                        .any(|c| bae_ui::Chord::parse(c).is_ok())
+            })
+            .count()
+    };
     let _ = writeln!(
         s,
         "- 快捷键命令：AE 默认快捷键文件 {} 条（{} 个上下文，{} 个不同的命令），其中 {} 条有默认快捷键；动作已实现的 {} 条。",
@@ -565,6 +584,12 @@ fn render_doc() -> String {
         commands.len(),
         bound,
         working
+    );
+    let _ = writeln!(
+        s,
+        "- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows {} 条，macOS {} 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。",
+        active(false),
+        active(true)
     );
     let _ = writeln!(s);
 
@@ -1020,6 +1045,53 @@ fn sorted_entries_follow_ae_chinese_order() {
             if a >= b {
                 errors.push(format!("{} ({a}) before {} ({b})", pair[0], pair[1]));
             }
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}
+
+/// The menu shows the chord AE's menu shows: of the AE chords of a menu item's
+/// command, the first one BAE can bind is that one (Windows `menus.json`).
+#[test]
+fn menu_items_show_the_chord_ae_shows() {
+    let json: Value = serde_json::from_str(MENUS_JSON).unwrap();
+    let mut shown: BTreeMap<u32, String> = BTreeMap::new();
+    fn collect(v: &Value, out: &mut BTreeMap<u32, String>) {
+        for i in v["items"].as_array().into_iter().flatten() {
+            if let (Some(id), Some(sc)) = (i["commandId"].as_u64(), i["shortcut"].as_str()) {
+                out.insert(id as u32, sc.to_owned());
+            }
+            collect(i, out);
+        }
+    }
+    for top in json["menus"].as_array().unwrap() {
+        collect(top, &mut shown);
+    }
+    let mut errors = Vec::new();
+    for (path, it) in menu_items() {
+        let Some(sc) = shown.get(&it.ae) else {
+            continue;
+        };
+        let want = normalize(sc);
+        let first = KEYS
+            .iter()
+            .filter(|k| k.action == it.action && params(k.params) == params(it.params))
+            .flat_map(|k| k.keys.split('|'))
+            .find(|c| {
+                let bae = chords(c, false);
+                bae.first().is_some_and(|b| bae_ui::Chord::parse(b).is_ok())
+            });
+        if let Some(first) = first
+            && normalize(first) != want
+            && chords(sc, false)
+                .iter()
+                .all(|b| bae_ui::Chord::parse(b).is_ok())
+        {
+            errors.push(format!(
+                "{} ▸ {}: AE shows {sc}, BAE {first}",
+                path.join(" ▸ "),
+                it.title
+            ));
         }
     }
     assert!(errors.is_empty(), "{}", errors.join("\n"));

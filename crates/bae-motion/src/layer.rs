@@ -1,5 +1,5 @@
 //! Layer commands: `layer.create`, `layer.reorder`, `layer.duplicate`, `layer.split`,
-//! `layer.trim`, `layer.set_parent`.
+//! `layer.trim`, `layer.set_parent`, `layer.set_attr`.
 
 use bae_anim::glam::{DMat4, DVec3};
 use bae_model::{
@@ -531,6 +531,15 @@ fn duplicate_name(stage: &Stage, folder: &PrimPath, name: &str) -> String {
 
 /// Duplicate `layer` directly above itself; returns the new path.
 fn duplicate_layer(tx: &mut Transaction<'_>, layer: &PrimPath) -> Result<PrimPath, CommandError> {
+    duplicate_layer_at(tx, layer, false)
+}
+
+/// Duplicates `layer` directly above it, or directly below it (`below`).
+fn duplicate_layer_at(
+    tx: &mut Transaction<'_>,
+    layer: &PrimPath,
+    below: bool,
+) -> Result<PrimPath, CommandError> {
     let stage = tx.stage();
     let folder = layer.parent().ok_or(ModelError::RootNotEditable)?;
     let name = query::display_name_of(stage, layer);
@@ -543,7 +552,8 @@ fn duplicate_layer(tx: &mut Transaction<'_>, layer: &PrimPath) -> Result<PrimPat
     retarget_refs(&mut tree, layer, &new_path);
     let index = stage
         .sublayer(tx.target())
-        .and_then(|s| s.child_index(layer));
+        .and_then(|s| s.child_index(layer))
+        .map(|i| i + usize::from(below));
     tx.ensure_spec(&folder)?;
     tx.apply(Op::RestorePrim {
         path: new_path.clone(),
@@ -589,6 +599,14 @@ pub struct SplitLayersParams {
     pub layers: Vec<PrimPath>,
     /// Comp time (flicks) to split at; layers not active at that time are skipped.
     pub time: Time,
+    /// Put each new layer above its original (default, AE's Preferences >
+    /// Composition > Create Split Layers Above Original Layer) or below it.
+    #[serde(default = "default_true")]
+    pub above: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Command for SplitLayers {
@@ -596,7 +614,7 @@ impl Command for SplitLayers {
     type Output = LayersOutput;
     const ID: &'static str = "layer.split";
     const TITLE: &'static str = "Split Layer";
-    const DESCRIPTION: &'static str = "Split layers at a comp time: the original ends there and a duplicate above it starts there.";
+    const DESCRIPTION: &'static str = "Split layers at a comp time: the original ends there and a duplicate above it (or below it, `above: false`) starts there.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<LayersOutput, CommandError> {
         ensure_unlocked(tx.stage(), &p.layers)?;
@@ -611,7 +629,7 @@ impl Command for SplitLayers {
             if !(a < p.time && p.time < b) {
                 continue;
             }
-            let new = duplicate_layer(tx, l)?;
+            let new = duplicate_layer_at(tx, l, !p.above)?;
             set(tx, l, "out_point", Value::Time(p.time))?;
             set(tx, &new, "in_point", Value::Time(p.time))?;
             paths.push(new);
@@ -962,6 +980,59 @@ fn delete_prims(
     }
     Ok(())
 }
+
+/// Attributes [`SetLayerAttr`] writes: the layer switches, quality and label.
+pub const LAYER_SWITCH_ATTRS: &[&str] = &[
+    "shy",
+    "locked",
+    "enabled",
+    "audio_enabled",
+    "solo",
+    "collapse_transformation",
+    "motion_blur",
+    "adjustment_layer",
+    "three_d",
+    "quality",
+    "label",
+];
+
+pub struct SetLayerAttr;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SetLayerAttrParams {
+    /// Layers (or project items, for `label`).
+    pub layers: Vec<PrimPath>,
+    /// One of the layer switches (`shy`, `locked`, `enabled` = Video,
+    /// `audio_enabled`, `solo`, `collapse_transformation`, `motion_blur`,
+    /// `adjustment_layer`, `three_d`), `quality` (`best` / `draft` /
+    /// `wireframe`) or `label` (0 = none, 1–16 = AE's label colours).
+    pub attr: String,
+    pub value: Value,
+}
+
+impl Command for SetLayerAttr {
+    type Params = SetLayerAttrParams;
+    type Output = ();
+    const ID: &'static str = "layer.set_attr";
+    const TITLE: &'static str = "Change Layers";
+    const DESCRIPTION: &'static str = "Set a layer switch, the quality or the label of several layers in one step (AE: Layer > Switches, Quality, 3D Layer; Edit > Label).";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        if !LAYER_SWITCH_ATTRS.contains(&p.attr.as_str()) {
+            return Err(fail(format!(
+                "layer.set_attr sets switches, quality and label, not `{}`",
+                p.attr
+            )));
+        }
+        for l in &p.layers {
+            tx.stage().require_prim(l)?;
+            set(tx, l, &p.attr, p.value.clone())?;
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
 
 pub struct DeleteLayers;
 

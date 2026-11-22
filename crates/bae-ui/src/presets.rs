@@ -147,9 +147,12 @@ pub fn ae_keymap() -> Keymap {
             panel("Cmd+6", "character"),
             panel("Cmd+7", "paragraph"),
             panel("F3", "effect_controls"),
-            // Window: workspaces (AE-UI-005)
-            workspace("Shift+F10", 0),
-            workspace("Shift+F11", 1),
+            // Window: workspaces (AE-UI-005). AE assigns Shift+F10 / F11 to the
+            // Default and Review workspaces (Window ▸ Assign Shortcut to
+            // Workspace), so the menu items show them; Shift+F12 (AE: Learn, which
+            // BAE does not have) switches to the third workspace.
+            Binding::new("Shift+F10", ids::SWITCH_WORKSPACE).params(json!({ "id": "motion" })),
+            Binding::new("Shift+F11", ids::SWITCH_WORKSPACE).params(json!({ "id": "review" })),
             workspace("Shift+F12", 2),
         ],
     )

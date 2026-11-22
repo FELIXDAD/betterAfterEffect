@@ -46,18 +46,51 @@ struct Facts {
     layers: bool,
     keys: bool,
     items: bool,
+    /// Bit `i`: every selected layer has `actions::SWITCHES[i]` on.
+    switches: u16,
+    /// The selected layers' common quality (index in [`QUALITIES`] + 1; 0 =
+    /// mixed or none).
+    quality: u8,
 }
+
+/// Qualities with a check mark in Layer ▸ Quality.
+const QUALITIES: &[&str] = &["best", "draft", "wireframe"];
 
 impl Facts {
     fn compute(cx: &MenuContext<'_>) -> Facts {
         let session = common::session(cx.resources);
         let comp = common::active_comp(cx.stage, &session).is_some();
         let s = session.lock();
+        let selected = &s.selected_layers;
+        let mut switches = 0u16;
+        let mut quality = 0u8;
+        if comp && !selected.is_empty() {
+            for (i, (attr, _)) in actions::SWITCHES.iter().enumerate() {
+                if selected
+                    .iter()
+                    .all(|l| actions::switch_on(cx.stage, l, attr))
+                {
+                    switches |= 1 << i;
+                }
+            }
+            let first = actions::quality_of(cx.stage, &selected[0]);
+            if selected
+                .iter()
+                .all(|l| actions::quality_of(cx.stage, l) == first)
+            {
+                quality = QUALITIES
+                    .iter()
+                    .position(|q| *q == first)
+                    .map_or(0, |i| i as u8 + 1);
+            }
+        }
         Facts {
             comp,
-            layers: comp && !s.selected_layers.is_empty(),
+            layers: comp && !selected.is_empty(),
             keys: comp && !s.selected_keys.is_empty(),
             items: !s.selected_items.is_empty(),
+            switches,
+            quality,
         }
     }
 
@@ -344,6 +377,12 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
     }
     match item.status {
         Status::Dynamic => return spec.placeholder(),
+        // A further variant of a command that runs (Reveal All Modified
+        // Properties next to Reveal Properties with Keyframes): greyed until the
+        // catalog says it works.
+        s if !s.works() && catalog::working_actions().contains(item.action) => {
+            return spec.enabled_when(|_| false);
+        }
         s if !s.works() => spec = spec.needs_handler(),
         _ => {}
     }
@@ -365,6 +404,22 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
             .unwrap_or_default()
     };
     match item.action {
+        actions::ids::LAYER_SWITCH => {
+            let attr = spec_param(item.params, "switch").unwrap_or_default();
+            let bit = actions::SWITCHES
+                .iter()
+                .position(|(a, _)| *a == attr)
+                .map_or(0, |i| 1u16 << i);
+            spec.checked_when(move |cx| Facts::of(cx).switches & bit != 0)
+        }
+        actions::ids::QUALITY => {
+            let q = spec_param(item.params, "quality").unwrap_or_default();
+            let code = QUALITIES
+                .iter()
+                .position(|x| *x == q)
+                .map_or(u8::MAX, |i| i as u8 + 1);
+            spec.checked_when(move |cx| Facts::of(cx).quality == code)
+        }
         bae_ui::action::ids::OPEN_PANEL => {
             let panel = id_param();
             spec.checked_when(move |cx| cx.panel_open(&panel))

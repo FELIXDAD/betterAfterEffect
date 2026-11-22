@@ -1936,3 +1936,272 @@ fn preferences_reach_new_layers_comps_and_imports() {
     assert_eq!(attrs.get("label"), Some(&Value::Int(12)));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Every AE default shortcut of a command that runs is in the AE keymap (the
+/// shell's own `ae` keymap or the motion workspace's bindings), with AE's chord
+/// for this platform and AE's panel scope; no chord is bound twice.
+#[test]
+fn ae_default_shortcuts_of_working_commands_are_bound() {
+    use crate::catalog::{BOUND_ELSEWHERE, NATIVE, SHADOWED, keys};
+    let base = bae_ui::presets::ae_keymap();
+    let motion = crate::actions::bindings();
+    let mut all = base.bindings.clone();
+    all.extend(motion.bindings.iter().cloned());
+    let keymap = bae_ui::Keymap::new("test", all);
+    assert!(keymap.conflicts().is_empty(), "{:?}", keymap.conflicts());
+    // The shell binds the third AE workspace slot by position (AE's Learn
+    // workspace is not in BAE).
+    const SLOT_KEYS: &[&str] = &["Shift+F12"];
+    let mac = cfg!(target_os = "macos");
+    let mut missing = Vec::new();
+    let mut active = 0;
+    for k in keys() {
+        if !k.status.works()
+            || k.flags & (NATIVE | BOUND_ELSEWHERE | SHADOWED) != 0
+            || !crate::catalog::in_own_panel(k)
+        {
+            continue;
+        }
+        let params: serde_json::Value = if k.params.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_str(k.params).unwrap()
+        };
+        let mut any = false;
+        for chord in k.chords(mac) {
+            let Ok(parsed) = bae_ui::Chord::parse(&chord) else {
+                continue;
+            };
+            any = true;
+            let bound = keymap
+                .bindings
+                .iter()
+                .find(|b| b.chord == parsed && b.when.as_deref() == k.scope());
+            match bound {
+                Some(b)
+                    if b.action == k.action
+                        && (b.params == params || SLOT_KEYS.contains(&chord.as_str())) => {}
+                other => missing.push(format!(
+                    "{}/{} {chord}: {:?}",
+                    k.context,
+                    k.command,
+                    other.map(|b| (&b.action, &b.params))
+                )),
+            }
+        }
+        active += usize::from(any);
+    }
+    assert!(missing.is_empty(), "{missing:#?}");
+    assert!(active > 100, "only {active} AE shortcuts active");
+}
+
+/// A command another module implements gets AE's default shortcut when the app
+/// starts, without a catalog change; further variants of commands the motion
+/// workspace already runs do not.
+#[test]
+fn ae_shortcuts_follow_other_modules_handlers() {
+    struct Center;
+    impl bae_ui::ActionHandler for Center {
+        fn actions(&self) -> Vec<String> {
+            vec!["motion.layer.center_in_view".into()]
+        }
+        fn handle(&self, _: &Invocation, _: &mut PanelContext<'_>) -> bool {
+            true
+        }
+    }
+    #[derive(Debug)]
+    struct CenterModule;
+    impl bae_app::AppModule for CenterModule {
+        fn name(&self) -> &str {
+            "center"
+        }
+        fn build(&self, app: &mut AppBuilder) {
+            let h: std::sync::Arc<dyn bae_ui::ActionHandler> = std::sync::Arc::new(Center);
+            let _ = app.register_arc::<dyn bae_ui::ActionHandler>("center", h);
+        }
+    }
+    let bound = |with_module: bool| {
+        let mut b = AppBuilder::new();
+        b.add_module(bae_ui::UiModule)
+            .add_module(crate::MotionUiModule);
+        if with_module {
+            b.add_module(CenterModule);
+        }
+        let mut app = b.build();
+        app.registry::<bae_ui::KeymapBindings>()
+            .snapshot()
+            .iter()
+            .flat_map(|e| e.item().bindings.clone())
+            .map(|b| (b.chord.to_string(), b.action, b.params))
+            .collect::<Vec<_>>()
+    };
+    let center = |v: &[(String, String, serde_json::Value)]| {
+        v.iter()
+            .filter(|(_, a, _)| a == "motion.layer.center_in_view")
+            .map(|(c, ..)| c.clone())
+            .collect::<Vec<_>>()
+    };
+    assert!(center(&bound(false)).is_empty());
+    let with = bound(true);
+    assert_eq!(
+        center(&with),
+        [bae_ui::Chord::parse("Cmd+Home").unwrap().to_string()]
+    );
+    // motion.reveal runs ("animated"); its unimplemented variants stay unbound.
+    assert!(
+        !with
+            .iter()
+            .any(|(_, a, p)| a == "motion.reveal" && p["what"] == "modified"),
+        "variants of a working command wait for the catalog"
+    );
+}
+
+/// Layer ▸ Switches, 3D Layer, Quality, Edit ▸ Label: each is one undo step on
+/// the selected layers, AE's toggle rule (on for all unless all are on), and
+/// the menu shows check marks for the selection's state.
+#[test]
+fn layer_switch_menu_commands_and_undo() {
+    use crate::actions::{ids, label_of, quality_of, switch_on};
+    let mut h = Harness::new();
+    let (_comp, solid, shape) = h.comp_with_layers();
+    let mut tl = TimelinePanel::default();
+    let select = |h: &Harness, layers: &[&PrimPath]| {
+        let s = h.session();
+        let mut s = s.lock();
+        s.selected_layers = layers.iter().map(|l| (*l).clone()).collect();
+        s.selected_keys.clear();
+    };
+    let run = |h: &mut Harness, tl: &mut TimelinePanel, id: &str, params: serde_json::Value| {
+        let r = h.action(tl, Invocation::with_params(id, params));
+        h.apply(r);
+    };
+    // Shy: on for both, then off (all on), undo back to on.
+    select(&h, &[&solid, &shape]);
+    run(&mut h, &mut tl, ids::LAYER_SWITCH, json!({"switch": "shy"}));
+    assert!(switch_on(&h.stage, &solid, "shy") && switch_on(&h.stage, &shape, "shy"));
+    run(&mut h, &mut tl, ids::LAYER_SWITCH, json!({"switch": "shy"}));
+    assert!(!switch_on(&h.stage, &solid, "shy") && !switch_on(&h.stage, &shape, "shy"));
+    h.stage.undo(&h.author).unwrap();
+    assert!(switch_on(&h.stage, &solid, "shy") && switch_on(&h.stage, &shape, "shy"));
+    // Check marks follow the selection.
+    let tree = motion_menu_tree();
+    let item = |id: &str| {
+        tree.items()
+            .into_iter()
+            .find(|(i, _)| *i == id)
+            .unwrap_or_else(|| panic!("no menu item {id}"))
+            .1
+            .clone()
+    };
+    let cx = bae_ui::menu::MenuContext::new(&h.stage, &h.resources, "motion");
+    let shy = item("menu.layer.switches.shy");
+    assert!(shy.is_enabled(&cx) && shy.is_checked(&cx));
+    assert!(!item("menu.layer.switches.solo").is_checked(&cx));
+    assert!(item("menu.layer.quality.best").is_checked(&cx));
+    // Lock, then Unlock All Layers.
+    select(&h, &[&solid]);
+    run(
+        &mut h,
+        &mut tl,
+        ids::LAYER_SWITCH,
+        json!({"switch": "locked"}),
+    );
+    assert!(switch_on(&h.stage, &solid, "locked"));
+    run(&mut h, &mut tl, ids::UNLOCK_ALL_LAYERS, json!(null));
+    assert!(!switch_on(&h.stage, &solid, "locked"));
+    // Hide Other Video, Show All Video.
+    select(&h, &[&shape]);
+    run(&mut h, &mut tl, ids::HIDE_OTHER_VIDEO, json!(null));
+    assert!(!switch_on(&h.stage, &solid, "enabled") && switch_on(&h.stage, &shape, "enabled"));
+    run(&mut h, &mut tl, ids::SHOW_ALL_VIDEO, json!(null));
+    assert!(switch_on(&h.stage, &solid, "enabled"));
+    h.stage.undo(&h.author).unwrap();
+    assert!(
+        !switch_on(&h.stage, &solid, "enabled"),
+        "Show All Video undoes"
+    );
+    // 3D Layer and Quality.
+    select(&h, &[&solid, &shape]);
+    run(
+        &mut h,
+        &mut tl,
+        ids::LAYER_SWITCH,
+        json!({"switch": "three_d"}),
+    );
+    assert!(switch_on(&h.stage, &solid, "three_d") && switch_on(&h.stage, &shape, "three_d"));
+    run(&mut h, &mut tl, ids::QUALITY, json!({"quality": "draft"}));
+    assert_eq!(quality_of(&h.stage, &solid), "draft");
+    assert_eq!(quality_of(&h.stage, &shape), "draft");
+    let cx = bae_ui::menu::MenuContext::new(&h.stage, &h.resources, "motion");
+    assert!(item("menu.layer.quality.draft").is_checked(&cx));
+    assert!(!item("menu.layer.quality.best").is_checked(&cx));
+    h.stage.undo(&h.author).unwrap();
+    assert_eq!(quality_of(&h.stage, &solid), "best", "one undo step");
+    assert_eq!(quality_of(&h.stage, &shape), "best");
+    // Label, then Select Label Group.
+    select(&h, &[&solid]);
+    run(&mut h, &mut tl, ids::LABEL, json!({"label": 9}));
+    assert_eq!(label_of(&h.stage, &solid), 9);
+    select(&h, &[&shape]);
+    run(&mut h, &mut tl, ids::LABEL, json!({"label": 9}));
+    select(&h, &[&solid]);
+    run(&mut h, &mut tl, ids::SELECT_LABEL_GROUP, json!(null));
+    assert_eq!(h.session().lock().selected_layers.len(), 2);
+    h.stage.undo(&h.author).unwrap();
+    assert_ne!(label_of(&h.stage, &shape), 9);
+    // Reveal All Modified Properties.
+    run(
+        &mut h,
+        &mut tl,
+        "motion.reveal",
+        json!({"what": "modified", "add": false}),
+    );
+    assert!(matches!(
+        h.session().lock().reveal.get(&solid),
+        Some(crate::session::Reveal::Modified)
+    ));
+}
+
+/// Edit ▸ Split Layer follows Preferences ▸ Composition ▸ Create Split Layers
+/// Above Original Layer: the new layer goes above the original (default) or
+/// below it.
+#[test]
+fn split_layer_follows_the_preference() {
+    for above in [true, false] {
+        let mut h = Harness::new();
+        let mut prefs = bae_prefs::Preferences::default();
+        prefs.set(bae_prefs::keys::SPLIT_LAYERS_ABOVE, above);
+        h.resources
+            .insert(std::sync::Arc::new(bae_prefs::PrefsStore::new(prefs)));
+        let (comp, solid, _shape) = h.comp_with_layers();
+        {
+            let s = h.session();
+            let mut s = s.lock();
+            s.selected_layers = vec![solid.clone()];
+            let info = query::comp_info(&h.stage, &comp).unwrap();
+            s.set_time(&info, Time(Time::FLICKS_PER_SECOND));
+        }
+        let mut tl = TimelinePanel::default();
+        let r = h.action(&mut tl, Invocation::new(crate::actions::ids::SPLIT));
+        h.apply(r);
+        let layers = query::comp_layers(&h.stage, &comp);
+        assert_eq!(layers.len(), 3);
+        let i_old = layers.iter().position(|l| *l == solid).unwrap();
+        let new = if above {
+            &layers[i_old - 1]
+        } else {
+            &layers[i_old + 1]
+        };
+        assert_eq!(
+            query::layer_timing(&h.stage, new).in_point,
+            Time(Time::FLICKS_PER_SECOND),
+            "above = {above}: {layers:?}"
+        );
+        h.stage.undo(&h.author).unwrap();
+        assert_eq!(
+            query::comp_layers(&h.stage, &comp).len(),
+            2,
+            "one undo step"
+        );
+    }
+}
