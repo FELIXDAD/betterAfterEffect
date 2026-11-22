@@ -37,8 +37,8 @@
 ## 统计
 
 - 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 57，◐ 6，☐ 256，⏸ 221，Ⓐ 30
-- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 115 条。
-- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 115 条，macOS 115 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
+- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 117 条。
+- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 117 条，macOS 117 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
 
 ## 主菜单
 
@@ -824,7 +824,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `SelectAllVisibleKeyframes` | `motion.timeline.select_all_visible_keyframes` |  | Ctrl+Alt+A | Cmd+Opt+A |  | C | ☐ |
 | `TemporalAlignEnd` | `motion.layer.move_out_point_to_comp_end` |  | Alt+End | Opt+End |  | B | ☐ |
 | `TemporalAlignStart` | `motion.layer.move_in_point_to_comp_start` |  | Alt+Home | Opt+Home |  | B | ☐ |
-| `ToggleGraph` | `motion.timeline.graph_editor` |  | Shift+F3 | Shift+F3 |  | C | ☐ |
+| `ToggleGraph` | `motion.timeline.graph_editor` |  | Shift+F3 | Shift+F3 |  | C | ✅ |
 | `ToggleTlwParentColumn` | `motion.timeline.toggle_parent_column` |  | Shift+F4 | Shift+F4 |  | C | ☐ |
 | `Twirl` | `motion.timeline.twirl` | `{"explode":false,"preserve_solo":false}` |  |  |  | C | ⏸ |
 | `TwirlExplode` | `motion.timeline.twirl` | `{"explode":true,"preserve_solo":false}` | Ctrl+\` | Control+\` |  | C | ☐ |
@@ -1229,7 +1229,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `TimeTrimInRelative` | `motion.trim_in` | `{"relative":true}` | Alt+Shift+[ | Opt+Shift+[ | timeline | B | ☐ |
 | `TimeTrimOut` | `motion.trim_out` |  | Alt+] | Opt+] | timeline | B | ✅ |
 | `TimeTrimOutRelative` | `motion.trim_out` | `{"relative":true}` | Alt+Shift+] | Opt+Shift+] | timeline | B | ☐ |
-| `ToggleGraph` | `motion.timeline.graph_editor` |  | Shift+F3 | Shift+F3 | timeline | C | ☐ |
+| `ToggleGraph` | `motion.timeline.graph_editor` |  | Shift+F3 | Shift+F3 | timeline | C | ✅ |
 | `CompTimeZoomWorkArea`（只在 macOS 26.2 的快捷键文件里） | `motion.timeline.zoom_to_work_area` |  |  | Opt+; | timeline | C | ☐ |
 
 ### `TextLayerUI`

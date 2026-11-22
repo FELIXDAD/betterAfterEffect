@@ -50,6 +50,8 @@ pub mod ids {
     pub const TRIM_COMP: &str = "motion.trim_comp";
     /// Queue the active comp in the Render Queue (AE Cmd/Ctrl+M).
     pub const ADD_TO_RENDER_QUEUE: &str = "motion.add_to_render_queue";
+    /// Toggle the Timeline between layer bars and the Graph Editor (AE Shift+F3).
+    pub const GRAPH_EDITOR: &str = "motion.timeline.graph_editor";
     /// Shell clipboard actions (Cmd+C / Cmd+V outside text fields).
     pub const COPY: &str = "edit.copy";
     pub const PASTE: &str = "edit.paste";
@@ -89,6 +91,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     // Edit > Copy / Paste (Cmd+C / Cmd+V): selected keyframes.
     (ids::COPY, "Copy"),
     (ids::PASTE, "Paste"),
+    (ids::GRAPH_EDITOR, "Graph Editor"),
     // Panel-scoped (`bindings`): handled by the timeline and the viewer. Registered
     // so the Keyboard Shortcuts window shows a name, not the id (#136).
     ("timeline.zoom_in", "Zoom In Time"),
@@ -353,6 +356,7 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 s.play(&info);
             }
         }
+        ids::GRAPH_EDITOR => s.graph_editor = !s.graph_editor,
         ids::GO_START => s.set_time(&info, Time::ZERO),
         ids::GO_END => s.set_time(&info, info.duration),
         ids::STEP => {
