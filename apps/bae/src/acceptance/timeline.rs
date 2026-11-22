@@ -226,12 +226,18 @@ fn space_with_nothing_focused_plays_and_stops() {
     press(&mut h, Modifiers::NONE, Key::Space);
     frame(&mut h);
     assert!(h.state().is_playing(), "Space did not start playback");
-    // Playback advances the time while frames run.
-    for _ in 0..6 {
-        std::thread::sleep(std::time::Duration::from_millis(20));
+    // Playback advances the time while frames run: wait for it (a slow frame
+    // on a busy machine must not fail this), with a limit for a stuck clock.
+    let started = std::time::Instant::now();
+    while h.state().now() == Time::ZERO {
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "time did not advance in 10 s of playback"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
         frame(&mut h);
     }
-    assert!(h.state().now() > Time::ZERO, "time did not advance");
+    assert!(h.state().is_playing(), "playback stopped by itself");
     press(&mut h, Modifiers::NONE, Key::Space);
     frame(&mut h);
     assert!(
