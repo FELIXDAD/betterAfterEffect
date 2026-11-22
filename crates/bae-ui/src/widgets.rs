@@ -93,6 +93,9 @@ impl<'a> HotNumber<'a> {
 #[derive(Clone, Default)]
 struct HotState {
     editing: Option<String>,
+    /// The text field appears this frame and takes the focus then (focusing an
+    /// id that is not drawn yet leaves accesskit with a focus outside its tree).
+    focus: bool,
     /// Sub-step drag remainder so slow drags still add up.
     carry: f64,
 }
@@ -113,6 +116,9 @@ impl Widget for HotNumber<'_> {
                 .margin(vec2(1.0, 0.0))
                 .text_color(color::TEXT_STRONG);
             let mut resp = ui.add(edit);
+            if std::mem::take(&mut state.focus) {
+                resp.request_focus();
+            }
             let enter = ui.input(|i| i.key_pressed(Key::Enter));
             let escape = ui.input(|i| i.key_pressed(Key::Escape));
             if escape {
@@ -187,7 +193,8 @@ impl Widget for HotNumber<'_> {
         }
         if resp.clicked() {
             state.editing = Some(text.clone());
-            ui.memory_mut(|m| m.request_focus(id.with("edit")));
+            state.focus = true;
+            ui.ctx().request_repaint();
         }
         ui.data_mut(|d| d.insert_temp(id, state));
 
