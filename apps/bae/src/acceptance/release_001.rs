@@ -504,7 +504,7 @@ fn type_into(h: &mut Ui, label: &str, text: &str) {
 }
 
 /// Cmd+N, `field` set to `text`, Enter straight from the field (OK): the new
-/// comp's settings. (Tab then Enter: #205.)
+/// comp's settings (Tab then Enter: `enter_is_ok_after_tab_to_a_swatch`).
 fn new_comp_with(h: &mut Ui, field: &str, text: &str) -> bae_motion::query::CompInfo {
     let (m, k) = cmd(Key::N);
     key(h, m, k);
@@ -1095,4 +1095,93 @@ fn layers_copy_cut_and_paste_like_ae() {
     key(&mut h, Modifiers::COMMAND, Key::V);
     assert_eq!(count(&h), n, "Cmd+V pasted layers while renaming");
     key(&mut h, Modifiers::NONE, Key::Escape);
+}
+
+// ---------------------------------------------------------------------------
+// #205 retest: Enter is OK wherever the focus is (AE), Space activates the
+// focused control.
+
+/// Whether the accessibility tree's focused node is a colour well.
+fn color_well_focused(h: &Ui) -> bool {
+    use egui_kittest::kittest::{AccessKitNode, NodeT as _};
+    fn walk(n: AccessKitNode<'_>) -> bool {
+        (n.is_focused() && n.role() == egui::accesskit::Role::ColorWell) || n.children().any(walk)
+    }
+    walk(h.root().accesskit_node())
+}
+
+#[test]
+fn enter_is_ok_after_tab_to_a_swatch() {
+    let mut h = gui();
+    let (m, k) = cmd(Key::N);
+    // Composition Settings: Duration, Tab (onto the background swatch), Enter.
+    key(&mut h, m, k);
+    type_into(&mut h, "Duration", "100");
+    assert!(
+        color_well_focused(&h),
+        "Tab after Duration is not on the swatch any more"
+    );
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(
+        !dialog_open(&h),
+        "Enter on the focused swatch did not press OK"
+    );
+    let comp = h.state().active_comp().expect("no comp after OK");
+    let info = bae_motion::query::comp_info(h.state().stage(), &comp).unwrap();
+    assert_eq!(
+        info.duration,
+        bae_model::Time::from_seconds(1.0),
+        "Duration “100” = 0:00:01:00"
+    );
+
+    // Solid Settings: Tab from Width round to the swatch, Enter makes the solid.
+    key(&mut h, Modifiers::COMMAND, Key::Y);
+    let r = dialog_control(&h, "Width");
+    click_at(&mut h, r.center());
+    for _ in 0..12 {
+        if color_well_focused(&h) {
+            break;
+        }
+        key(&mut h, Modifiers::NONE, Key::Tab);
+    }
+    assert!(
+        color_well_focused(&h),
+        "Tab never reached Solid Settings' swatch"
+    );
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(
+        !dialog_open(&h),
+        "Enter on Solid Settings' swatch did not press OK"
+    );
+    assert_eq!(h.state().layers().len(), 1, "no solid after OK");
+
+    // Space still activates the focused swatch: the colour picker opens; Enter
+    // there is the picker's OK, then Enter is the dialog's OK.
+    key(&mut h, m, k);
+    type_into(&mut h, "Duration", "200");
+    assert!(color_well_focused(&h));
+    let titles = |h: &Ui| {
+        painted_texts(h)
+            .iter()
+            .filter(|t| t.contains("Background Color"))
+            .count()
+    };
+    let closed = titles(&h);
+    key(&mut h, Modifiers::NONE, Key::Space);
+    assert!(titles(&h) > closed, "Space did not open the colour picker");
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert_eq!(titles(&h), closed, "Enter did not close the picker");
+    assert!(
+        dialog_open(&h),
+        "Enter in the picker closed Composition Settings too"
+    );
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(
+        !dialog_open(&h),
+        "second Enter did not press Composition Settings' OK"
+    );
+    let comp = h.state().active_comp().unwrap();
+    let info = bae_motion::query::comp_info(h.state().stage(), &comp).unwrap();
+    assert_eq!(info.duration, bae_model::Time::from_seconds(2.0));
+    no_failures(&h, "#205");
 }

@@ -126,3 +126,7 @@
 - **#207**：`bae render --frames 5-5` 再 `--frames 6-6`，PNG / TIFF / EXR 各用 `帧 a_####.ext` 和 `帧 b_[####].ext` 两种写法，输出到带空格和中文的目录：6 种组合都写出 `…_0005` 和 `…_0006` 两个文件，第二次没有覆盖第一次，没有名字里带 `#` 的文件（`acceptance_cli::single_frame_renders_number_the_output_name`）。渲染队列里起止帧相同（5–5、6–6）、输出 `单帧_[####].ext`，三种格式都是 `单帧_0005`、`单帧_0006`（`render_queue::a_single_frame_numbers_the_output_name`）。**已关闭。**
 - **#157**：`progress_of_a_limited_range_counts_the_frames_it_renders`（1780–1900 帧，合成只有 1800 帧，实际渲 20 帧）现在连“0 / x”那一刻也检查，连跑 8 次，第一个状态都是 (0, 20)，之后的总数也都是 20，没有再出现 121。**已关闭。**
 - 顺手发现：`bae render --comp` 只接受内部路径名（`主_合成`），用界面上的合成名“主 合成”会报 invalid prim name，提了 **#214**（bug）。
+
+### dev `5aa3b76`（#209）：#205 Tab 到色块后按 Enter
+
+`acceptance::release_001::enter_is_ok_after_tab_to_a_swatch`（新）：合成设置里在“持续时间”输入 100、按 Tab（焦点到背景颜色色块）、按 Enter：确定并关闭，持续时间 0:00:01:00。纯色设置从“宽度”一路 Tab 到色块再按 Enter：确定，建出纯色。焦点在色块上时按空格仍然打开拾色器；拾色器里按 Enter 只关拾色器，再按 Enter 才确定合成设置。**已关闭。**
