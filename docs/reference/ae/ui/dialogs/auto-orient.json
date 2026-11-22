@@ -1,0 +1,97 @@
+{
+  "schemaVersion": "1.0",
+  "id": "auto-orient",
+  "title": {
+    "zh": "自动方向",
+    "en": "Auto-Orientation"
+  },
+  "triggers": [
+    {
+      "action": "Auto-Orient",
+      "shortcutWin": "Ctrl+Alt+O",
+      "menuZh": "图层 ▸ 变换(T) ▸ 自动定向...",
+      "notesZh": "菜单显示“自动定向...”，弹窗标题实测为“自动方向”。"
+    }
+  ],
+  "source": {
+    "application": "Adobe After Effects 26.0 (26.0x67)",
+    "platform": "Windows 11 Pro x64 (3840x2160 @ 150% DPI)",
+    "localeObserved": "zh_CN",
+    "method": "Live MSAA inspection + interactive tab/radio/dropdown probing + ExtendScript range probing"
+  },
+  "geometry": {
+    "physicalPxAt144Dpi": {
+      "w": 493,
+      "h": 388
+    },
+    "logicalPxAt96Dpi": {
+      "w": 329,
+      "h": 259
+    }
+  },
+  "persistence": {
+    "remembersLastValues": false,
+    "persistsPerLayer": true,
+    "notesZh": "直接读取并写回当前选中图层的 autoOrient 属性（新建图层默认“关”）。"
+  },
+  "buttonBar": {
+    "position": "bottom_right",
+    "right": [
+      {
+        "id": "ok",
+        "type": "button",
+        "zh": "确定",
+        "en": "OK",
+        "role": "accept"
+      },
+      {
+        "id": "cancel",
+        "type": "button",
+        "zh": "取消",
+        "en": "Cancel",
+        "role": "reject"
+      }
+    ]
+  },
+  "tabs": [],
+  "controls": [
+    {
+      "id": "auto_orient_mode",
+      "type": "radio_group",
+      "zh": "自动方向模式",
+      "en": "Auto-Orientation Mode",
+      "defaultValue": {
+        "zh": "关",
+        "en": "Off"
+      },
+      "options": [
+        {
+          "id": "off",
+          "zh": "关",
+          "en": "Off",
+          "visibilityZh": "2D 与 3D 图层均显示"
+        },
+        {
+          "id": "along_path",
+          "zh": "沿路径定向",
+          "en": "Orient Along Path",
+          "visibilityZh": "2D 与 3D 图层均显示"
+        },
+        {
+          "id": "towards_camera",
+          "zh": "定位于摄像机",
+          "en": "Orient Towards Camera",
+          "visibilityZh": "仅 3D 图层显示；2D 图层隐藏该项（不渲染）。"
+        }
+      ]
+    },
+    {
+      "id": "orient_each_char",
+      "type": "checkbox",
+      "zh": "独立定向每个字符（需要逐字 3D 化）",
+      "en": "Orient Each Character Independently (requires Per-character 3D)",
+      "defaultValue": false,
+      "enableRuleZh": "2D 图层完全隐藏；3D 非文字图层显示但置灰禁用；仅 3D 文字图层启用可勾选（与“定位于摄像机”配合，可自动开启逐字 3D）。"
+    }
+  ]
+}

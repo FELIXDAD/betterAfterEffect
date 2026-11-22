@@ -1,0 +1,568 @@
+{
+  "schemaVersion": "1.0",
+  "id": "project-settings",
+  "title": {
+    "zh": "项目设置",
+    "en": "Project Settings"
+  },
+  "triggers": [
+    {
+      "action": "Project Settings",
+      "shortcutWin": "Ctrl+Alt+Shift+K",
+      "menuZh": "文件 ▸ 项目设置..."
+    }
+  ],
+  "source": {
+    "application": "Adobe After Effects 26.0 (26.0x67)",
+    "platform": "Windows 11 Pro x64 (3840x2160 @ 150% DPI)",
+    "localeObserved": "zh_CN",
+    "method": "Live MSAA inspection + interactive tab/radio/dropdown probing + ExtendScript range probing"
+  },
+  "geometry": {
+    "physicalPxAt144Dpi": {
+      "w": 1029,
+      "h": 1174
+    },
+    "logicalPxAt96Dpi": {
+      "w": 686,
+      "h": 783
+    }
+  },
+  "persistence": {
+    "remembersLastValues": false,
+    "persistsPerProject": true,
+    "notesZh": "各项设置随项目（.aep）保存，不跨新建项目继承上次值；新建空白项目默认 8 bpc、时间码、Adobe 色彩管理（工作空间无）、48.000 kHz、JavaScript。"
+  },
+  "buttonBar": {
+    "position": "bottom_right",
+    "right": [
+      {
+        "id": "ok",
+        "type": "button",
+        "zh": "确定",
+        "en": "OK",
+        "role": "accept"
+      },
+      {
+        "id": "cancel",
+        "type": "button",
+        "zh": "取消",
+        "en": "Cancel",
+        "role": "reject"
+      }
+    ]
+  },
+  "tabs": [
+    {
+      "id": "video_rendering_and_effects",
+      "zh": "视频渲染和效果",
+      "en": "Video Rendering and Effects",
+      "controls": [
+        {
+          "id": "renderer",
+          "type": "dropdown",
+          "zh": "使用范围:",
+          "en": "Use:",
+          "defaultValue": {
+            "zh": "Mercury GPU 加速 (CUDA)",
+            "en": "Mercury GPU Acceleration (CUDA)"
+          },
+          "options": [
+            {
+              "zh": "Mercury GPU 加速 (CUDA)",
+              "en": "Mercury GPU Acceleration (CUDA)"
+            },
+            {
+              "zh": "仅 Mercury 软件",
+              "en": "Mercury Software Only"
+            }
+          ],
+          "notesZh": "GPU 选项按硬件/平台动态显示（NVIDIA Windows 为 CUDA，macOS 为 Metal，OpenCL 卡为 OpenCL）。"
+        }
+      ]
+    },
+    {
+      "id": "time_display_style",
+      "zh": "时间显示样式",
+      "en": "Time Display Style",
+      "controls": [
+        {
+          "id": "time_display_mode",
+          "type": "radio_group",
+          "zh": "显示样式",
+          "en": "Time Display Mode",
+          "defaultValue": {
+            "zh": "时间码",
+            "en": "Timecode"
+          },
+          "options": [
+            {
+              "id": "timecode",
+              "zh": "时间码",
+              "en": "Timecode"
+            },
+            {
+              "id": "frames",
+              "zh": "帧数",
+              "en": "Frames"
+            }
+          ],
+          "notesZh": "实测切换“时间码”与“帧数”时，两组子控件均保持可编辑状态，由当前单选决定生效模式。"
+        },
+        {
+          "id": "footage_start_time",
+          "type": "dropdown",
+          "zh": "素材开始时间:",
+          "en": "Footage Start Time:",
+          "defaultValue": {
+            "zh": "使用媒体源",
+            "en": "Use Media Source"
+          },
+          "options": [
+            {
+              "zh": "使用媒体源",
+              "en": "Use Media Source"
+            },
+            {
+              "zh": "00:00:00:000",
+              "en": "00:00:00:000"
+            }
+          ]
+        },
+        {
+          "id": "default_timecode_base",
+          "type": "number_scrub",
+          "internalName": "timecodeBase",
+          "zh": "默认基准:",
+          "en": "Default Base:",
+          "unit": "fps",
+          "defaultValue": 30,
+          "range": {
+            "min": 1,
+            "max": 999,
+            "type": "integer"
+          }
+        },
+        {
+          "id": "use_feet_frames",
+          "type": "checkbox",
+          "zh": "使用英尺数 + 帧数:",
+          "en": "Use Feet + Frames:",
+          "defaultValue": false
+        },
+        {
+          "id": "feet_frames_film_type",
+          "type": "dropdown",
+          "zh": "胶片规格",
+          "en": "Film Type",
+          "defaultValue": {
+            "zh": "35 毫米",
+            "en": "35mm"
+          },
+          "options": [
+            {
+              "zh": "16 毫米",
+              "en": "16mm"
+            },
+            {
+              "zh": "35 毫米",
+              "en": "35mm"
+            }
+          ]
+        },
+        {
+          "id": "frame_count",
+          "type": "dropdown",
+          "zh": "帧计数:",
+          "en": "Frame Count:",
+          "defaultValue": {
+            "zh": "时间码转换",
+            "en": "Timecode Conversion"
+          },
+          "options": [
+            {
+              "zh": "开始位置 0",
+              "en": "Start at 0"
+            },
+            {
+              "zh": "开始位置 1",
+              "en": "Start at 1"
+            },
+            {
+              "zh": "时间码转换",
+              "en": "Timecode Conversion"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "color",
+      "zh": "颜色",
+      "en": "Color",
+      "controls": [
+        {
+          "id": "color_engine",
+          "type": "dropdown",
+          "zh": "颜色引擎：",
+          "en": "Color Engine:",
+          "defaultValue": {
+            "zh": "Adobe color managed",
+            "en": "Adobe color managed"
+          },
+          "options": [
+            {
+              "zh": "Adobe color managed",
+              "en": "Adobe color managed"
+            },
+            {
+              "zh": "OCIO color managed",
+              "en": "OCIO color managed"
+            }
+          ],
+          "notesZh": "切换引擎时会弹出确认提示框（标题“颜色引擎的更改”，按钮“确定”/“取消”）。"
+        },
+        {
+          "id": "ocio_configuration",
+          "type": "dropdown",
+          "zh": "OCIO 配置 -",
+          "en": "OCIO Configuration:",
+          "defaultValue": {
+            "zh": "ACES 1.2",
+            "en": "ACES 1.2"
+          },
+          "options": [
+            {
+              "zh": "ACES 1.2",
+              "en": "ACES 1.2"
+            },
+            {
+              "zh": "ACES 1.3 CG v1.0",
+              "en": "ACES 1.3 CG v1.0"
+            },
+            {
+              "zh": "ACES 1.3 Studio v1.0",
+              "en": "ACES 1.3 Studio v1.0"
+            },
+            {
+              "zh": "Custom",
+              "en": "Custom"
+            }
+          ],
+          "enableRuleZh": "仅当颜色引擎为 OCIO color managed 时可用；Adobe 模式下置灰。"
+        },
+        {
+          "id": "custom_ocio_config",
+          "type": "file_picker_row",
+          "zh": "自定义 OCIO 配置：",
+          "en": "Custom OCIO Configuration:",
+          "buttons": [
+            {
+              "zh": "选择",
+              "en": "Choose"
+            },
+            {
+              "zh": "重新加载",
+              "en": "Reload"
+            }
+          ],
+          "defaultValue": "",
+          "enableRuleZh": "仅当 OCIO 配置选择 Custom 时启用输入框、选择与重新加载按钮；否则全部置灰。"
+        },
+        {
+          "id": "bit_depth",
+          "type": "dropdown",
+          "zh": "位深度:",
+          "en": "Depth:",
+          "defaultValue": {
+            "zh": "每通道 8 位",
+            "en": "8 bits per channel",
+            "bpc": 8
+          },
+          "options": [
+            {
+              "zh": "每通道 8 位",
+              "en": "8 bits per channel",
+              "bpc": 8
+            },
+            {
+              "zh": "每通道 16 位",
+              "en": "16 bits per channel",
+              "bpc": 16
+            },
+            {
+              "zh": "每通道 32 位（浮点）",
+              "en": "32 bits per channel (float)",
+              "bpc": 32
+            }
+          ]
+        },
+        {
+          "id": "lut_interpolation",
+          "type": "dropdown",
+          "zh": "3D LUT 插值：",
+          "en": "3D LUT Interpolation:",
+          "defaultValue": {
+            "zh": "Tetrahedral (requires GPU acceleration)",
+            "en": "Tetrahedral (requires GPU acceleration)"
+          },
+          "options": [
+            {
+              "zh": "Trilinear",
+              "en": "Trilinear"
+            },
+            {
+              "zh": "Tetrahedral (requires GPU acceleration)",
+              "en": "Tetrahedral (requires GPU acceleration)"
+            }
+          ]
+        },
+        {
+          "id": "working_color_space",
+          "type": "dropdown",
+          "zh": "工作色彩空间:",
+          "en": "Working Color Space:",
+          "defaultValue": {
+            "adobeZh": "无",
+            "adobeEn": "None",
+            "ocioDefault": "compositing_linear: ACES - ACEScg"
+          },
+          "adobeOptionCountObserved": 103,
+          "adobeBuiltInHighlights": [
+            {
+              "zh": "无",
+              "en": "None"
+            },
+            {
+              "zh": "Adobe RGB (1998)",
+              "en": "Adobe RGB (1998)"
+            },
+            {
+              "zh": "Apple RGB",
+              "en": "Apple RGB"
+            },
+            {
+              "zh": "ColorMatch RGB",
+              "en": "ColorMatch RGB"
+            },
+            {
+              "zh": "image P3",
+              "en": "image P3"
+            },
+            {
+              "zh": "ProPhoto RGB",
+              "en": "ProPhoto RGB"
+            },
+            {
+              "zh": "sRGB IEC61966-2.1",
+              "en": "sRGB IEC61966-2.1"
+            },
+            {
+              "zh": "ACEScct",
+              "en": "ACEScct"
+            },
+            {
+              "zh": "ACEScg ACES Working Space AMPAS S-2014-004",
+              "en": "ACEScg ACES Working Space AMPAS S-2014-004"
+            }
+          ],
+          "ocioAces12Options": [
+            "None",
+            "color_picking: Output - sRGB",
+            "color_timing: ACES - ACEScc",
+            "compositing_linear: ACES - ACEScg",
+            "compositing_log: Input - ADX - ADX10",
+            "data: Utility - Raw",
+            "default: ACES - ACES2065-1",
+            "matte_paint: Utility - sRGB - Texture",
+            "reference: Utility - Raw",
+            "rendering: ACES - ACEScg",
+            "scene_linear: ACES - ACEScg",
+            "texture_paint: ACES - ACEScc",
+            "ACES/ACES - ACES2065-1",
+            "ACES/ACES - ACEScc",
+            "ACES/ACES - ACEScct",
+            "ACES/ACES - ACESproxy",
+            "ACES/ACES - ACEScg"
+          ],
+          "notesZh": "Adobe 模式下包含“无”与内置/系统 ICC 配置文件（本机实测 103 项）；OCIO ACES 1.2 默认列出 17 项角色/工作空间。"
+        },
+        {
+          "id": "show_all_working_spaces",
+          "type": "checkbox",
+          "zh": "全部显示",
+          "en": "Show All",
+          "defaultValue": false,
+          "enableRuleZh": "Adobe 模式下置灰；OCIO 模式下可用，勾选后展开全部 OCIO 色彩空间。"
+        },
+        {
+          "id": "assume_working_gamma",
+          "type": "dropdown",
+          "zh": "采用工作灰度系数:",
+          "en": "Assume Working Gamma:",
+          "defaultValue": {
+            "zh": "2.4 (Rec. 709)",
+            "en": "2.4 (Rec. 709)"
+          },
+          "options": [
+            {
+              "zh": "2.2 (sRGB)",
+              "en": "2.2 (sRGB)"
+            },
+            {
+              "zh": "2.4 (Rec. 709)",
+              "en": "2.4 (Rec. 709)"
+            }
+          ],
+          "enableRuleZh": "仅当 Adobe 模式且工作色彩空间为“无”时可用；选择任意色彩空间或切至 OCIO 后置灰。"
+        },
+        {
+          "id": "linearize_working_space",
+          "type": "checkbox",
+          "zh": "线性化工作色彩空间",
+          "en": "Linearize Working Space",
+          "defaultValue": false,
+          "enableRuleZh": "仅当 Adobe 模式且工作色彩空间不为“无”时可用；工作空间为“无”或 OCIO 模式下置灰。"
+        },
+        {
+          "id": "blend_colors_gamma_1",
+          "type": "checkbox",
+          "zh": "使用 1.0 灰度系数混合颜色",
+          "en": "Blend Colors Using 1.0 Gamma",
+          "defaultValue": false,
+          "enableRuleZh": "Adobe 模式下可用（勾选线性化工作色彩空间后置灰）；OCIO 模式下置灰。"
+        },
+        {
+          "id": "compensate_scene_referred",
+          "type": "checkbox",
+          "zh": "补偿场景引用的配置文件",
+          "en": "Compensate for Scene-referred Profiles",
+          "defaultValue": true,
+          "enableRuleZh": "默认勾选；仅当 Adobe 模式且工作色彩空间不为“无”时可用，否则置灰。"
+        },
+        {
+          "id": "display_color_space",
+          "type": "dropdown",
+          "zh": "显示色彩空间：",
+          "en": "Display Color Space:",
+          "defaultValue": {
+            "ocioDefault": "ACES/sRGB"
+          },
+          "ocioAces12Options": [
+            "None",
+            "ACES/sRGB",
+            "ACES/DCDM",
+            "ACES/DCDM P3D60 Limited",
+            "ACES/DCDM P3D65 Limited",
+            "ACES/P3-D60",
+            "ACES/P3-D65 ST2084 1000 nits",
+            "ACES/P3-D65 ST2084 2000 nits",
+            "ACES/P3-D65 ST2084 4000 nits",
+            "ACES/P3-DCI D60 simulation",
+            "ACES/P3-DCI D65 simulation",
+            "ACES/P3D65",
+            "ACES/P3D65 D60 simulation",
+            "ACES/P3D65 Rec.709 Limited",
+            "ACES/P3D65 ST2084 108 nits",
+            "ACES/Rec.2020",
+            "ACES/Rec.2020 P3D65 Limited",
+            "ACES/Rec.2020 Rec.709 Limited",
+            "ACES/Rec.2020 HLG 1000 nits",
+            "ACES/Rec.2020 ST2084 1000 nits",
+            "ACES/Rec.2020 ST2084 2000 nits",
+            "ACES/Rec.2020 ST2084 4000 nits",
+            "ACES/Rec.709",
+            "ACES/Rec.709 D60 sim.",
+            "ACES/sRGB D60 sim.",
+            "ACES/Raw",
+            "ACES/Log"
+          ],
+          "enableRuleZh": "Adobe 模式下置灰为空；OCIO 模式下可用（ACES 1.2 共 27 项，默认 ACES/sRGB）。"
+        },
+        {
+          "id": "color_info",
+          "type": "readonly_text",
+          "internalName": "colorInfo",
+          "zh": "色彩管理状态说明",
+          "en": "Color Management Status Info",
+          "notesZh": "底部只读摘要区域，随引擎和工作空间动态更新色彩管理开关状态。"
+        }
+      ]
+    },
+    {
+      "id": "audio",
+      "zh": "音频",
+      "en": "Audio",
+      "controls": [
+        {
+          "id": "sample_rate",
+          "type": "dropdown",
+          "zh": "采样率:",
+          "en": "Sample Rate:",
+          "defaultValue": {
+            "zh": "48.000 kHz",
+            "en": "48.000 kHz",
+            "hz": 48000
+          },
+          "options": [
+            {
+              "zh": "22.050 kHz",
+              "en": "22.050 kHz",
+              "hz": 22050
+            },
+            {
+              "zh": "32.000 kHz",
+              "en": "32.000 kHz",
+              "hz": 32000
+            },
+            {
+              "zh": "44.100 kHz",
+              "en": "44.100 kHz",
+              "hz": 44100
+            },
+            {
+              "zh": "48.000 kHz",
+              "en": "48.000 kHz",
+              "hz": 48000
+            },
+            {
+              "zh": "96.000 kHz",
+              "en": "96.000 kHz",
+              "hz": 96000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "expressions",
+      "zh": "表达式",
+      "en": "Expressions",
+      "controls": [
+        {
+          "id": "expressions_engine",
+          "type": "dropdown",
+          "zh": "表达式引擎:",
+          "en": "Expressions Engine:",
+          "defaultValue": {
+            "zh": "JavaScript",
+            "en": "JavaScript",
+            "apiValue": "javascript-1.0"
+          },
+          "options": [
+            {
+              "zh": "旧版 ExtendScript",
+              "en": "Legacy ExtendScript",
+              "apiValue": "extendscript"
+            },
+            {
+              "zh": "JavaScript",
+              "en": "JavaScript",
+              "apiValue": "javascript-1.0"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

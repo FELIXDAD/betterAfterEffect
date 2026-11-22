@@ -1,0 +1,320 @@
+{
+  "schemaVersion": "1.0",
+  "id": "markers",
+  "title": {
+    "zh": "合成标记 / 图层标记",
+    "en": "Composition Marker / Layer Marker"
+  },
+  "triggers": [
+    {
+      "action": "Add & Edit Composition Marker",
+      "shortcutWin": "Alt+Numpad *",
+      "menuZh": "未选中图层时按 Alt+Numpad *（或双击合成标记）"
+    },
+    {
+      "action": "Add & Edit Layer Marker",
+      "shortcutWin": "Alt+Numpad *",
+      "menuZh": "选中图层时按 Alt+Numpad *（或双击图层标记）"
+    }
+  ],
+  "source": {
+    "application": "Adobe After Effects 26.0 (26.0x67)",
+    "platform": "Windows 11 Pro x64 (3840x2160 @ 150% DPI)",
+    "localeObserved": "zh_CN",
+    "method": "Live MSAA inspection + interactive tab/radio/dropdown probing + ExtendScript range probing"
+  },
+  "geometry": {
+    "physicalPxAt144Dpi": {
+      "w": 673,
+      "h": 572
+    },
+    "logicalPxAt96Dpi": {
+      "w": 449,
+      "h": 381
+    },
+    "layerMarkerPhysicalPxAt144Dpi": {
+      "w": 639,
+      "h": 560
+    },
+    "layerMarkerLogicalPxAt96Dpi": {
+      "w": 426,
+      "h": 373
+    }
+  },
+  "persistence": {
+    "remembersLastValues": false,
+    "persistsPerMarker": true,
+    "notesZh": "新建标记默认时间为当前播放头、持续时间 0:00:00:00、注释为空、标签为“无”；AE 26 已精简移除旧版章节/Web 链接/Flash 提示点字段。"
+  },
+  "buttonBar": {
+    "position": "bottom_right",
+    "right": [
+      {
+        "id": "ok",
+        "type": "button",
+        "zh": "确定",
+        "en": "OK",
+        "role": "accept"
+      },
+      {
+        "id": "cancel",
+        "type": "button",
+        "zh": "取消",
+        "en": "Cancel",
+        "role": "reject"
+      }
+    ]
+  },
+  "tabs": [
+    {
+      "id": "composition_marker",
+      "zh": "合成标记（标题：合成标记）",
+      "en": "Composition Marker",
+      "controls": [
+        {
+          "id": "time",
+          "type": "timecode_scrub",
+          "zh": "时间:",
+          "en": "Time:",
+          "defaultValue": "<当前播放头时间>",
+          "notesZh": "右侧只读显示解析时间与基准帧率（如“是 0:00:02:00  基础 30”）。"
+        },
+        {
+          "id": "duration",
+          "type": "timecode_scrub",
+          "zh": "持续时间:",
+          "en": "Duration:",
+          "defaultValue": "0:00:00:00",
+          "notesZh": "非零值会在时间轴上显示带范围条的区间标记。"
+        },
+        {
+          "id": "comment",
+          "type": "multiline_text",
+          "zh": "注释:",
+          "en": "Comment:",
+          "defaultValue": ""
+        },
+        {
+          "id": "label",
+          "type": "dropdown",
+          "zh": "标签:",
+          "en": "Label:",
+          "defaultValue": {
+            "zh": "无",
+            "en": "None"
+          },
+          "options": [
+            {
+              "zh": "无",
+              "en": "None"
+            },
+            {
+              "zh": "红色",
+              "en": "Red"
+            },
+            {
+              "zh": "黄色",
+              "en": "Yellow"
+            },
+            {
+              "zh": "浅绿色",
+              "en": "Aqua"
+            },
+            {
+              "zh": "粉色",
+              "en": "Pink"
+            },
+            {
+              "zh": "淡紫色",
+              "en": "Lavender"
+            },
+            {
+              "zh": "桃红色",
+              "en": "Peach"
+            },
+            {
+              "zh": "海泡沫",
+              "en": "Sea Foam"
+            },
+            {
+              "zh": "蓝色",
+              "en": "Blue"
+            },
+            {
+              "zh": "绿色",
+              "en": "Green"
+            },
+            {
+              "zh": "紫色",
+              "en": "Purple"
+            },
+            {
+              "zh": "橙色",
+              "en": "Orange"
+            },
+            {
+              "zh": "棕色",
+              "en": "Brown"
+            },
+            {
+              "zh": "紫红色",
+              "en": "Fuchsia"
+            },
+            {
+              "zh": "青色",
+              "en": "Cyan"
+            },
+            {
+              "zh": "砂岩",
+              "en": "Sandstone"
+            },
+            {
+              "zh": "深绿色",
+              "en": "Dark Green"
+            }
+          ],
+          "notesZh": "共 17 项：无 + 16 个 AE 标签颜色。"
+        },
+        {
+          "id": "protected_region",
+          "type": "checkbox",
+          "zh": "受保护区域",
+          "en": "Protected Region",
+          "defaultValue": false,
+          "enableRuleZh": "合成标记独有控件；用于响应设计时间（Responsive Design - Time）锁定时间段不被拉伸。"
+        }
+      ]
+    },
+    {
+      "id": "layer_marker",
+      "zh": "图层标记（标题：图层标记）",
+      "en": "Layer Marker",
+      "controls": [
+        {
+          "id": "time",
+          "type": "timecode_scrub",
+          "zh": "时间:",
+          "en": "Time:",
+          "defaultValue": "<当前播放头时间>"
+        },
+        {
+          "id": "duration",
+          "type": "timecode_scrub",
+          "zh": "持续时间:",
+          "en": "Duration:",
+          "defaultValue": "0:00:00:00"
+        },
+        {
+          "id": "comment",
+          "type": "multiline_text",
+          "zh": "注释:",
+          "en": "Comment:",
+          "defaultValue": ""
+        },
+        {
+          "id": "label",
+          "type": "dropdown",
+          "zh": "标签:",
+          "en": "Label:",
+          "defaultValue": {
+            "zh": "无",
+            "en": "None"
+          },
+          "options": [
+            {
+              "zh": "无",
+              "en": "None"
+            },
+            {
+              "zh": "红色",
+              "en": "Red"
+            },
+            {
+              "zh": "黄色",
+              "en": "Yellow"
+            },
+            {
+              "zh": "浅绿色",
+              "en": "Aqua"
+            },
+            {
+              "zh": "粉色",
+              "en": "Pink"
+            },
+            {
+              "zh": "淡紫色",
+              "en": "Lavender"
+            },
+            {
+              "zh": "桃红色",
+              "en": "Peach"
+            },
+            {
+              "zh": "海泡沫",
+              "en": "Sea Foam"
+            },
+            {
+              "zh": "蓝色",
+              "en": "Blue"
+            },
+            {
+              "zh": "绿色",
+              "en": "Green"
+            },
+            {
+              "zh": "紫色",
+              "en": "Purple"
+            },
+            {
+              "zh": "橙色",
+              "en": "Orange"
+            },
+            {
+              "zh": "棕色",
+              "en": "Brown"
+            },
+            {
+              "zh": "紫红色",
+              "en": "Fuchsia"
+            },
+            {
+              "zh": "青色",
+              "en": "Cyan"
+            },
+            {
+              "zh": "砂岩",
+              "en": "Sandstone"
+            },
+            {
+              "zh": "深绿色",
+              "en": "Dark Green"
+            }
+          ]
+        },
+        {
+          "id": "marker_kind",
+          "type": "radio_group",
+          "zh": "标记类型",
+          "en": "Marker Type",
+          "defaultValue": {
+            "zh": "注释标记",
+            "en": "Comment Marker"
+          },
+          "options": [
+            {
+              "id": "comment",
+              "zh": "注释标记",
+              "en": "Comment Marker"
+            },
+            {
+              "id": "segmentation",
+              "zh": "分段标记",
+              "en": "Segmentation Marker"
+            }
+          ],
+          "enableRuleZh": "图层标记独有控件（替代合成标记的“受保护区域”）；分段标记用于时间重映射/关键帧分段。"
+        }
+      ]
+    }
+  ]
+}

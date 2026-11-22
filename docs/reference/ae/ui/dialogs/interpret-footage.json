@@ -1,0 +1,484 @@
+{
+  "schemaVersion": "1.0",
+  "id": "interpret-footage",
+  "title": {
+    "zh": "解释素材: <文件名>",
+    "en": "Interpret Footage: <Filename>"
+  },
+  "triggers": [
+    {
+      "action": "Interpret Footage - Main",
+      "shortcutWin": "Ctrl+Alt+G",
+      "menuZh": "文件 ▸ 解释素材(G) ▸ 主要..."
+    }
+  ],
+  "source": {
+    "application": "Adobe After Effects 26.0 (26.0x67)",
+    "platform": "Windows 11 Pro x64 (3840x2160 @ 150% DPI)",
+    "localeObserved": "zh_CN",
+    "method": "Live MSAA inspection + interactive tab/radio/dropdown probing + ExtendScript range probing"
+  },
+  "geometry": {
+    "physicalPxAt144Dpi": {
+      "w": 895,
+      "h": 1249
+    },
+    "logicalPxAt96Dpi": {
+      "w": 597,
+      "h": 833
+    }
+  },
+  "persistence": {
+    "remembersLastValues": false,
+    "persistsPerItem": true,
+    "notesZh": "设置随单个素材项保存；可通过“记住解释”（Ctrl+Alt+C）/“应用解释”（Ctrl+Alt+V）手动复制，图像序列默认帧率继承自“首选项 ▸ 导入”。"
+  },
+  "buttonBar": {
+    "position": "bottom",
+    "left": [
+      {
+        "id": "preview",
+        "type": "checkbox",
+        "zh": "预览",
+        "en": "Preview",
+        "defaultValue": true
+      }
+    ],
+    "right": [
+      {
+        "id": "ok",
+        "type": "button",
+        "zh": "确定",
+        "en": "OK",
+        "role": "accept"
+      },
+      {
+        "id": "cancel",
+        "type": "button",
+        "zh": "取消",
+        "en": "Cancel",
+        "role": "reject"
+      }
+    ]
+  },
+  "tabs": [
+    {
+      "id": "main_options",
+      "zh": "主要选项",
+      "en": "Main Options",
+      "controls": [
+        {
+          "id": "alpha_mode",
+          "type": "radio_group",
+          "zh": "Alpha",
+          "en": "Alpha",
+          "defaultValue": {
+            "zh": "直接 - 无遮罩",
+            "en": "Straight - Unmatted"
+          },
+          "options": [
+            {
+              "id": "ignore",
+              "zh": "忽略",
+              "en": "Ignore"
+            },
+            {
+              "id": "straight",
+              "zh": "直接 - 无遮罩",
+              "en": "Straight - Unmatted"
+            },
+            {
+              "id": "premultiplied",
+              "zh": "预乘 - 有彩色遮罩:",
+              "en": "Premultiplied - Matted With Color:"
+            }
+          ],
+          "enableRuleZh": "素材含 Alpha 通道时可用；无 Alpha 通道时整组置灰。"
+        },
+        {
+          "id": "invert_alpha",
+          "type": "checkbox",
+          "zh": "反转 Alpha",
+          "en": "Invert Alpha",
+          "defaultValue": false,
+          "enableRuleZh": "选择“忽略”时置灰，选择“直接”或“预乘”时可用。"
+        },
+        {
+          "id": "premultiplied_color",
+          "type": "color_swatch_with_eyedropper",
+          "zh": "遮罩颜色 + 吸管",
+          "en": "Matte Color Swatch + Eyedropper",
+          "defaultValue": {
+            "hex": "#000000"
+          },
+          "enableRuleZh": "仅当选择“预乘 - 有彩色遮罩:”时生效。"
+        },
+        {
+          "id": "guess_alpha",
+          "type": "button",
+          "zh": "猜测",
+          "en": "Guess",
+          "enableRuleZh": "含 Alpha 通道时可用，自动判断直接或预乘。"
+        },
+        {
+          "id": "frame_rate_mode",
+          "type": "radio_group",
+          "zh": "帧速率",
+          "en": "Frame Rate",
+          "defaultValue": {
+            "sequenceZh": "假定此帧速率:",
+            "videoZh": "使用文件中的帧速率:"
+          },
+          "options": [
+            {
+              "id": "from_file",
+              "zh": "使用文件中的帧速率:",
+              "en": "Use frame rate from file:"
+            },
+            {
+              "id": "assume_or_conform",
+              "zh": "假定此帧速率:（静帧/视频显示“匹配帧速率:”）",
+              "en": "Assume this frame rate: / Conform to frame rate:"
+            }
+          ],
+          "enableRuleZh": "静帧图像整组置灰；图像序列无内嵌帧率，故“使用文件中的帧速率”置灰、“假定此帧速率”默认选中。"
+        },
+        {
+          "id": "conform_frame_rate",
+          "type": "number_input",
+          "zh": "帧速率数值",
+          "en": "Frame Rate Value",
+          "unit": "fps",
+          "unitZh": "帧/秒",
+          "defaultValue": 30,
+          "range": {
+            "min": 0.01,
+            "max": 999,
+            "apiMin": 0
+          },
+          "enableRuleZh": "静帧时置灰；ExtendScript conformFrameRate 实测范围 0–999（0 表示使用源帧率，UI 最小 0.01）。"
+        },
+        {
+          "id": "drop_frame",
+          "type": "dropdown",
+          "zh": "丢帧模式",
+          "en": "Drop Frame Mode",
+          "defaultValue": {
+            "zh": "丢帧",
+            "en": "Drop Frame"
+          },
+          "options": [
+            {
+              "zh": "丢帧",
+              "en": "Drop Frame"
+            },
+            {
+              "zh": "无丢帧",
+              "en": "Non-Drop Frame"
+            }
+          ],
+          "enableRuleZh": "仅在 29.97 / 59.94 等支持丢帧的帧率下可用，30 fps 与静帧下置灰。"
+        },
+        {
+          "id": "start_timecode_mode",
+          "type": "radio_group",
+          "zh": "开始时间码",
+          "en": "Start Timecode",
+          "defaultValue": {
+            "zh": "使用文件中的源时间码:",
+            "en": "Use Source Timecode from File:"
+          },
+          "options": [
+            {
+              "id": "from_file",
+              "zh": "使用文件中的源时间码:",
+              "en": "Use Source Timecode from File:"
+            },
+            {
+              "id": "override",
+              "zh": "覆盖开始时间码:",
+              "en": "Override Start Timecode:"
+            }
+          ],
+          "enableRuleZh": "静帧图像整组置灰；序列和视频可用。"
+        },
+        {
+          "id": "override_start_timecode",
+          "type": "timecode_scrub",
+          "zh": "覆盖时间码数值",
+          "en": "Override Start Timecode Value",
+          "defaultValue": "0:00:00:00",
+          "enableRuleZh": "静帧时置灰；右侧附基准帧率只读显示（如“是 0:00:00:00  基础 30”）。"
+        },
+        {
+          "id": "separate_fields",
+          "type": "dropdown",
+          "zh": "分离场:",
+          "en": "Separate Fields:",
+          "defaultValue": {
+            "zh": "关",
+            "en": "Off"
+          },
+          "options": [
+            {
+              "zh": "关",
+              "en": "Off"
+            },
+            {
+              "zh": "高场优先",
+              "en": "Upper Field First"
+            },
+            {
+              "zh": "低场优先",
+              "en": "Lower Field First"
+            }
+          ]
+        },
+        {
+          "id": "preserve_edges",
+          "type": "checkbox",
+          "zh": "保留边缘（仅最佳品质）",
+          "en": "Preserve Edges (Best Quality Only)",
+          "defaultValue": false,
+          "enableRuleZh": "分离场为“关”时置灰；选择“高场优先”或“低场优先”后可用。"
+        },
+        {
+          "id": "remove_pulldown",
+          "type": "dropdown",
+          "zh": "移除 Pulldown:",
+          "en": "Remove Pulldown:",
+          "defaultValue": {
+            "zh": "关",
+            "en": "Off"
+          },
+          "options": [
+            {
+              "zh": "关",
+              "en": "Off"
+            },
+            {
+              "zh": "WSSWW",
+              "en": "WSSWW"
+            },
+            {
+              "zh": "SSWWW",
+              "en": "SSWWW"
+            },
+            {
+              "zh": "SWWWS",
+              "en": "SWWWS"
+            },
+            {
+              "zh": "WWWSS",
+              "en": "WWWSS"
+            },
+            {
+              "zh": "WWSSW",
+              "en": "WWSSW"
+            },
+            {
+              "zh": "WWWSW - 24P 高级",
+              "en": "WWWSW - 24P Advance"
+            },
+            {
+              "zh": "WWSWW - 24P 高级",
+              "en": "WWSWW - 24P Advance"
+            },
+            {
+              "zh": "WSWWW - 24P 高级",
+              "en": "WSWWW - 24P Advance"
+            },
+            {
+              "zh": "SWWWW - 24P 高级",
+              "en": "SWWWW - 24P Advance"
+            },
+            {
+              "zh": "WWWWS - 24P 高级",
+              "en": "WWWWS - 24P Advance"
+            }
+          ],
+          "enableRuleZh": "静帧时置灰；视频/序列需启用分离场后用于 3:2 / 24Pa 下拉移除。"
+        },
+        {
+          "id": "guess_pulldown_buttons",
+          "type": "button_row",
+          "zh": "猜测 3:2 Pulldown / 猜测 24Pa Pulldown",
+          "en": "Guess 3:2 Pulldown / Guess 24Pa Pulldown",
+          "buttons": [
+            {
+              "zh": "猜测 3:2 Pulldown",
+              "en": "Guess 3:2 Pulldown"
+            },
+            {
+              "zh": "猜测 24Pa Pulldown",
+              "en": "Guess 24Pa Pulldown"
+            }
+          ],
+          "enableRuleZh": "静帧时均置灰；序列/视频按场分离与帧率条件启用。"
+        },
+        {
+          "id": "pixel_aspect_ratio",
+          "type": "dropdown",
+          "zh": "像素长宽比:",
+          "en": "Pixel Aspect Ratio:",
+          "defaultValue": {
+            "zh": "方形像素",
+            "en": "Square Pixels",
+            "value": 1.0
+          },
+          "range": {
+            "min": 0.01,
+            "max": 100.0
+          },
+          "options": [
+            {
+              "zh": "方形像素",
+              "en": "Square Pixels",
+              "value": 1.0
+            },
+            {
+              "zh": "D1/DV NTSC (0.91)",
+              "en": "D1/DV NTSC (0.91)",
+              "value": 0.909091
+            },
+            {
+              "zh": "D1/DV NTSC 宽银幕  (1.21)",
+              "en": "D1/DV NTSC Widescreen (1.21)",
+              "value": 1.212121
+            },
+            {
+              "zh": "D1/DV PAL (1.09)",
+              "en": "D1/DV PAL (1.09)",
+              "value": 1.094017
+            },
+            {
+              "zh": "D1/DV PAL 宽银幕  (1.46)",
+              "en": "D1/DV PAL Widescreen (1.46)",
+              "value": 1.458689
+            },
+            {
+              "zh": "HDV 1080/DVCPRO HD 720 (1.33)",
+              "en": "HDV 1080/DVCPRO HD 720 (1.33)",
+              "value": 1.333333
+            },
+            {
+              "zh": "DVCPRO HD 1080 (1.5)",
+              "en": "DVCPRO HD 1080 (1.5)",
+              "value": 1.5
+            },
+            {
+              "zh": "变形 2:1 (2)",
+              "en": "Anamorphic 2:1 (2)",
+              "value": 2.0
+            }
+          ]
+        },
+        {
+          "id": "loop",
+          "type": "number_input",
+          "zh": "循环:",
+          "en": "Loop:",
+          "unitZh": "次",
+          "unit": "times",
+          "defaultValue": 1,
+          "range": {
+            "min": 1,
+            "max": 9999,
+            "type": "integer"
+          },
+          "enableRuleZh": "静帧图像时置灰；序列/视频可用，ExtendScript 实测范围 1–9999。"
+        },
+        {
+          "id": "more_options",
+          "type": "button",
+          "zh": "更多选项...",
+          "en": "More Options...",
+          "enableRuleZh": "仅当格式提供专属解码选项（如 Cineon/DPX/EXR/R3D/ProRes RAW）时可用；PNG 序列与静帧置灰。"
+        }
+      ]
+    },
+    {
+      "id": "color",
+      "zh": "颜色",
+      "en": "Color",
+      "controls": [
+        {
+          "id": "preserve_rgb",
+          "type": "checkbox",
+          "zh": "保留 RGB（禁用此项的颜色管理转换）",
+          "en": "Preserve RGB (Disable Color Management Conversions for This Item)",
+          "defaultValue": false,
+          "enableRuleZh": "项目未开启色彩管理时置灰；开启项目色彩管理后可用。"
+        },
+        {
+          "id": "media_color_space",
+          "type": "static_text",
+          "zh": "媒体色彩空间：",
+          "en": "Media Color Space:",
+          "defaultValue": {
+            "zh": "无",
+            "en": "None"
+          }
+        },
+        {
+          "id": "override_media_color_space",
+          "type": "dropdown",
+          "zh": "覆盖媒体色彩空间：",
+          "en": "Override Media Color Space:",
+          "defaultValue": {
+            "zh": "工作色彩空间 - 无",
+            "en": "Working Color Space - None"
+          },
+          "optionCountObserved": 105,
+          "builtInPrefixOptions": [
+            {
+              "zh": "工作色彩空间 - <当前工作空间>",
+              "en": "Working Color Space - <Current>"
+            },
+            {
+              "zh": "嵌入",
+              "en": "Embedded"
+            },
+            {
+              "zh": "其他",
+              "en": "Other"
+            }
+          ],
+          "enableRuleZh": "项目未开启色彩管理或勾选“保留 RGB”时置灰。"
+        },
+        {
+          "id": "show_all_color_spaces",
+          "type": "checkbox",
+          "zh": "全部显示",
+          "en": "Show All",
+          "defaultValue": false,
+          "enableRuleZh": "项目启用 OCIO 色彩管理时可用，Adobe 模式下置灰。"
+        },
+        {
+          "id": "interpret_as_linear_light",
+          "type": "dropdown",
+          "zh": "解释为线性光：",
+          "en": "Interpret As Linear Light:",
+          "defaultValue": {
+            "zh": "对 32 bpc 打开",
+            "en": "On for 32 bpc"
+          },
+          "options": [
+            {
+              "zh": "关",
+              "en": "Off"
+            },
+            {
+              "zh": "开",
+              "en": "On"
+            },
+            {
+              "zh": "对 32 bpc 打开",
+              "en": "On for 32 bpc"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
