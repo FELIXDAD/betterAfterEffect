@@ -202,6 +202,55 @@ impl SceneBuilder {
     }
 }
 
+impl SceneBuilder {
+    /// Adds mask `name` to `layer` (`<layer>/masks/<name>`, below the existing
+    /// masks) with `shape` (layer pixels) and `mode` (`add`, `subtract` …).
+    pub fn mask(
+        &mut self,
+        layer: &PrimPath,
+        name: &str,
+        shape: bae_model::BezierPath,
+        mode: &str,
+    ) -> Result<PrimPath, RenderError> {
+        let folder = format!("{}/masks", layer.as_str());
+        if self.stage.prim(&path(&folder)?).is_none() {
+            self.create(&folder, "Folder")?;
+        }
+        let mask = self.create(&format!("{folder}/{name}"), "Mask")?;
+        self.set(&mask, "path", Value::Bezier(shape))?;
+        self.set(&mask, "mode", Value::Enum(mode.into()))?;
+        Ok(mask)
+    }
+}
+
+/// A closed rectangle path `[x0, x1] × [y0, y1]` (clockwise from top-left, like
+/// AE's rectangle mask tool).
+pub fn rect_path(x0: f64, y0: f64, x1: f64, y1: f64) -> bae_model::BezierPath {
+    bae_model::BezierPath {
+        vertices: vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+        in_tangents: vec![[0.0, 0.0]; 4],
+        out_tangents: vec![[0.0, 0.0]; 4],
+        closed: true,
+        feather: Vec::new(),
+    }
+}
+
+/// A closed ellipse path inscribed in `[x0, x1] × [y0, y1]` (four cubic
+/// segments, AE's ellipse tool: starts at the top, clockwise).
+pub fn ellipse_path(x0: f64, y0: f64, x1: f64, y1: f64) -> bae_model::BezierPath {
+    // AE's ellipse handle length factor (4/3 · tan(π/8)).
+    const K: f64 = 0.552_284_749_830_793_6;
+    let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+    let (rx, ry) = ((x1 - x0) / 2.0, (y1 - y0) / 2.0);
+    bae_model::BezierPath {
+        vertices: vec![[cx, y0], [x1, cy], [cx, y1], [x0, cy]],
+        in_tangents: vec![[-rx * K, 0.0], [0.0, -ry * K], [rx * K, 0.0], [0.0, ry * K]],
+        out_tangents: vec![[rx * K, 0.0], [0.0, ry * K], [-rx * K, 0.0], [0.0, -ry * K]],
+        closed: true,
+        feather: Vec::new(),
+    }
+}
+
 /// Deterministic pseudo-random numbers for fixtures (64-bit LCG).
 #[derive(Clone, Debug)]
 pub struct Lcg(u64);

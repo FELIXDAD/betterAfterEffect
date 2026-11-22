@@ -5,7 +5,7 @@
 //!            [-o FILE|PATTERN] [--format png|tiff|exr|h264|hevc|prores|prores4444]
 //!            [--compression LEVEL] [--bits 8|16|32] [--threads N]
 //!            [--resolution full|half|third|quarter|N] [--depth 8|16|32]
-//!            [--alpha straight|premultiplied|background] [--roi X,Y,W,H] [--mock-eval] [--json]
+//!            [--alpha straight|premultiplied|background] [--roi X,Y,W,H] [--json]
 //! ```
 //!
 //! Without a window, on the shared GPU context; for CI, agents and render farms.
@@ -30,7 +30,7 @@ use clap::{Arg, ArgAction, ArgMatches};
 
 use crate::anim::AnimEvaluator;
 use crate::assets::AssetFiles;
-use crate::eval::{CompEvaluator, MockEvaluator, sample};
+use crate::eval::sample;
 use crate::export::{
     Encoders, ExportAlpha, ExportFormat, ExportJob, ExportSettings, ExportedFrame, export_frames,
 };
@@ -225,12 +225,6 @@ fn args(cmd: clap::Command) -> clap::Command {
             .help("Render only this region (comp pixels)"),
     )
     .arg(
-        Arg::new("mock-eval")
-            .long("mock-eval")
-            .action(ArgAction::SetTrue)
-            .help("Use the renderer's mock evaluator instead of bae-anim"),
-    )
-    .arg(
         Arg::new("json")
             .long("json")
             .action(ArgAction::SetTrue)
@@ -408,11 +402,7 @@ fn run(
     }
     // Footage on disk or inside the .baez the project was opened from.
     let assets = AssetFiles::for_project(&project)?;
-    let mut evaluator: Box<dyn CompEvaluator> = if m.get_flag("mock-eval") {
-        Box::new(MockEvaluator::new(None).with_assets(assets))
-    } else {
-        Box::new(AnimEvaluator::new(None).with_assets(assets))
-    };
+    let mut evaluator = AnimEvaluator::new(None).with_assets(assets);
 
     let setup = entered.elapsed();
     let ms = |d: Duration| d.as_secs_f64() * 1e3;
@@ -431,7 +421,7 @@ fn run(
     };
     let report = export_frames(
         &mut renderer,
-        evaluator.as_mut(),
+        &mut evaluator,
         &ExportJob {
             stage,
             comp: &comp,
@@ -539,6 +529,7 @@ fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::eval::CompEvaluator;
     use crate::export::frame_file;
     use bae_model::Value;
     use std::path::Path;

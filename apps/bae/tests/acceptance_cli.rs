@@ -9,7 +9,9 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use bae_model::{Project, Time};
 use serde_json::{Value as Json, json};
@@ -22,6 +24,39 @@ fn bae() -> Command {
     // Keep the user's settings, logs and crash reports out of the way.
     c.env("BAE_LOG", "warn");
     c
+}
+
+/// How long one `bae` run (or one MCP reply) may take. Generous: a debug build
+/// on a busy CI runner; a hang fails the test with a message instead of
+/// holding the CI job until its own limit.
+const LIMIT: Duration = Duration::from_secs(600);
+
+trait OutputWithin {
+    /// `Command::output` (stdin closed, stdout and stderr captured) that fails
+    /// the test, and kills the process, if it has not exited within `LIMIT`.
+    fn output_within_limit(&mut self) -> std::io::Result<Output>;
+}
+
+impl OutputWithin for Command {
+    fn output_within_limit(&mut self) -> std::io::Result<Output> {
+        let child = self
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        let pid = child.id();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(child.wait_with_output());
+        });
+        match rx.recv_timeout(LIMIT) {
+            Ok(output) => output,
+            Err(_) => {
+                let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
+                panic!("{self:?} still running after {LIMIT:?}");
+            }
+        }
+    }
 }
 
 fn tricky(root: &Path) -> PathBuf {
@@ -78,7 +113,7 @@ fn make_project(path: &Path) -> Json {
 
 #[test]
 fn version_flag() {
-    let out = bae().arg("--version").output().unwrap();
+    let out = bae().arg("--version").output_within_limit().unwrap();
     assert!(out.status.success());
     let text = String::from_utf8_lossy(&out.stdout);
     println!("bae --version: {text}");
@@ -92,7 +127,11 @@ fn headless_open_with_spaces_and_chinese() {
     for name in ["工程 一.bae", "工程 二.baez"] {
         let path = dir.join(name);
         make_project(&path);
-        let out = bae().arg("--headless").arg(&path).output().unwrap();
+        let out = bae()
+            .arg("--headless")
+            .arg(&path)
+            .output_within_limit()
+            .unwrap();
         let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(
             out.status.success(),
@@ -117,7 +156,7 @@ fn broken_projects_exit_1_with_a_message() {
         (&garbage, vec!["--headless"]),
         (&missing, vec!["--headless"]),
     ] {
-        let out = bae().args(&args).arg(path).output().unwrap();
+        let out = bae().args(&args).arg(path).output_within_limit().unwrap();
         let stderr = String::from_utf8_lossy(&out.stderr);
         println!(
             "{args:?} {}: exit {:?}: {stderr}",
@@ -143,7 +182,11 @@ fn export_json_names_a_broken_file() {
         vec!["export-json"],
         vec!["render", "--comp", "x", "-o", "o_####.png"],
     ] {
-        let out = bae().args(&args).arg(&garbage).output().unwrap();
+        let out = bae()
+            .args(&args)
+            .arg(&garbage)
+            .output_within_limit()
+            .unwrap();
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert_eq!(out.status.code(), Some(1));
         assert!(
@@ -170,7 +213,11 @@ fn export_json_matches_the_model_for_bae_and_baez() {
     for name in ["导出 测试.bae", "导出 测试.baez"] {
         let path = dir.join(name);
         let want = make_project(&path);
-        let out = bae().arg("export-json").arg(&path).output().unwrap();
+        let out = bae()
+            .arg("export-json")
+            .arg(&path)
+            .output_within_limit()
+            .unwrap();
         assert!(
             out.status.success(),
             "{}",
@@ -188,7 +235,7 @@ fn export_json_matches_the_model_for_bae_and_baez() {
             .arg(&path)
             .arg("--out")
             .arg(&file)
-            .output()
+            .output_within_limit()
             .unwrap();
         assert!(
             out.status.success(),
@@ -215,7 +262,7 @@ fn render_png_into_a_tricky_path() {
             "--comp", &comp, "--frames", "all", "-f", "png", "--json", "-o",
         ])
         .arg(out_dir.join("帧 _####.png"))
-        .output()
+        .output_within_limit()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
@@ -235,7 +282,7 @@ fn smoke_test_with_a_project_and_a_screenshot() {
         .args(["--headless", "--smoke-test", "10"])
         .arg(&project)
         .env("BAE_SMOKE_SCREENSHOT", &shot)
-        .output()
+        .output_within_limit()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     if !out.status.success() && String::from_utf8_lossy(&out.stderr).contains("adapter") {
@@ -259,7 +306,9 @@ fn smoke_test_with_a_project_and_a_screenshot() {
 /// A JSON-RPC session with `bae mcp`.
 struct Mcp {
     child: std::process::Child,
-    out: BufReader<std::process::ChildStdout>,
+    /// Lines of the server's stdout, read on their own thread so that waiting
+    /// for a reply can time out.
+    lines: mpsc::Receiver<String>,
     id: i64,
 }
 
@@ -275,7 +324,20 @@ impl Mcp {
             .spawn()
             .unwrap();
         let out = BufReader::new(child.stdout.take().unwrap());
-        let mut mcp = Mcp { child, out, id: 0 };
+        let (tx, lines) = mpsc::channel();
+        std::thread::spawn(move || {
+            for line in out.lines() {
+                let Ok(line) = line else { break };
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        let mut mcp = Mcp {
+            child,
+            lines,
+            id: 0,
+        };
         let init = mcp.request(
             "initialize",
             json!({"protocolVersion": "2025-06-18", "capabilities": {},
@@ -303,8 +365,12 @@ impl Mcp {
             json!({"jsonrpc": "2.0", "id": self.id, "method": method, "params": params})
         )
         .unwrap();
-        let mut line = String::new();
-        self.out.read_line(&mut line).unwrap();
+        let line = self.lines.recv_timeout(LIMIT).unwrap_or_else(|e| {
+            panic!(
+                "no reply to {method} (id {}) within {LIMIT:?}: {e}",
+                self.id
+            )
+        });
         serde_json::from_str(&line).unwrap_or_else(|e| panic!("{e}: {line}"))
     }
 
@@ -317,7 +383,16 @@ impl Mcp {
 
 impl Drop for Mcp {
     fn drop(&mut self) {
+        // Closing stdin ends the session; kill a server that does not exit.
         drop(self.child.stdin.take());
+        let started = Instant::now();
+        while matches!(self.child.try_wait(), Ok(None)) {
+            if started.elapsed() > LIMIT {
+                let _ = self.child.kill();
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
         let _ = self.child.wait();
     }
 }
@@ -368,7 +443,11 @@ fn mcp_builds_animates_and_saves_a_project() {
         }
         // `bae mcp` saves after every edit (autosave is on by default).
     }
-    let out = bae().arg("export-json").arg(&project).output().unwrap();
+    let out = bae()
+        .arg("export-json")
+        .arg(&project)
+        .output_within_limit()
+        .unwrap();
     assert!(
         out.status.success(),
         "{}",
@@ -403,7 +482,7 @@ fn cli_errors_name_the_file() {
         (&garbage, vec!["--headless"]),
         (&missing, vec!["--headless"]),
     ] {
-        let out = bae().args(&args).arg(path).output().unwrap();
+        let out = bae().args(&args).arg(path).output_within_limit().unwrap();
         let stderr = String::from_utf8_lossy(&out.stderr);
         println!("{args:?} {}:\n{stderr}", path.display());
         assert_eq!(out.status.code(), Some(1), "{args:?}");
@@ -416,7 +495,7 @@ fn cli_errors_name_the_file() {
         .args(["render", "--comp", "x", "-o"])
         .arg(tmp.path().join("o_####.png"))
         .arg(&garbage)
-        .output()
+        .output_within_limit()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     println!("render:\n{stderr}");
@@ -438,7 +517,7 @@ fn cli_errors_are_printed_once_without_a_log_line() {
         let out = Command::new(BAE)
             .args(&args)
             .arg(&garbage)
-            .output()
+            .output_within_limit()
             .unwrap();
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
@@ -465,14 +544,22 @@ fn pack_writes_a_baez_and_names_the_file_on_errors() {
     std::fs::write(&manifest, serde_json::to_vec_pretty(&m).unwrap()).unwrap();
 
     // Default output: next to the project, same name.
-    let out = bae().arg("pack").arg(&project).output().unwrap();
+    let out = bae()
+        .arg("pack")
+        .arg(&project)
+        .output_within_limit()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
     let baez = dir.join("打包 工程.baez");
     assert!(stdout.contains("打包 工程.baez"), "{stdout}");
     assert!(baez.is_file());
-    let exported = bae().arg("export-json").arg(&baez).output().unwrap();
+    let exported = bae()
+        .arg("export-json")
+        .arg(&baez)
+        .output_within_limit()
+        .unwrap();
     let got: Json = serde_json::from_slice(&exported.stdout).unwrap();
     assert_eq!(got, want, "the package differs from the project");
     let packed = bae_package::read_manifest(&baez).unwrap();
@@ -486,7 +573,7 @@ fn pack_writes_a_baez_and_names_the_file_on_errors() {
         .arg("-o")
         .arg(&other)
         .arg("--json")
-        .output()
+        .output_within_limit()
         .unwrap();
     assert!(
         out.status.success(),
@@ -499,7 +586,11 @@ fn pack_writes_a_baez_and_names_the_file_on_errors() {
         dir.join("输出 文件.baez").is_file(),
         "the .baez extension is added"
     );
-    let out = bae().arg("pack").arg(&project).output().unwrap();
+    let out = bae()
+        .arg("pack")
+        .arg(&project)
+        .output_within_limit()
+        .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(1));
     assert!(
@@ -511,7 +602,7 @@ fn pack_writes_a_baez_and_names_the_file_on_errors() {
         .arg("pack")
         .arg(&project)
         .arg("--overwrite")
-        .output()
+        .output_within_limit()
         .unwrap();
     assert!(
         out.status.success(),
@@ -521,7 +612,11 @@ fn pack_writes_a_baez_and_names_the_file_on_errors() {
 
     // A project that does not open.
     let missing = dir.join("没有 这个.bae");
-    let out = bae().arg("pack").arg(&missing).output().unwrap();
+    let out = bae()
+        .arg("pack")
+        .arg(&missing)
+        .output_within_limit()
+        .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(1));
     assert!(
@@ -940,7 +1035,11 @@ fn bae_pack_keeps_the_view_and_unknown_fields_and_guards_overwrites() {
             .unwrap()["view"]
             .clone();
     // Default output: next to the project, same name.
-    let out = bae().arg("pack").arg(&project).output().unwrap();
+    let out = bae()
+        .arg("pack")
+        .arg(&project)
+        .output_within_limit()
+        .unwrap();
     assert!(
         out.status.success(),
         "{}",
@@ -961,7 +1060,11 @@ fn bae_pack_keeps_the_view_and_unknown_fields_and_guards_overwrites() {
     assert_eq!(a, b);
     // Again without --overwrite: refused, file untouched; with it: replaced.
     let before = std::fs::metadata(&packed).unwrap().modified().unwrap();
-    let out = bae().arg("pack").arg(&project).output().unwrap();
+    let out = bae()
+        .arg("pack")
+        .arg(&project)
+        .output_within_limit()
+        .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         !out.status.success() && stderr.contains("--overwrite"),
@@ -975,7 +1078,7 @@ fn bae_pack_keeps_the_view_and_unknown_fields_and_guards_overwrites() {
         .arg("pack")
         .arg(&project)
         .arg("--overwrite")
-        .output()
+        .output_within_limit()
         .unwrap();
     assert!(
         out.status.success(),
@@ -991,7 +1094,7 @@ fn bae_pack_keeps_the_view_and_unknown_fields_and_guards_overwrites() {
         .arg(&packed)
         .arg("-o")
         .arg(&repacked)
-        .output()
+        .output_within_limit()
         .unwrap();
     assert!(
         out.status.success(),
@@ -1010,7 +1113,7 @@ fn bae_pack_keeps_the_view_and_unknown_fields_and_guards_overwrites() {
         .arg("-o")
         .arg(&packed)
         .arg("--overwrite")
-        .output()
+        .output_within_limit()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     println!("pack onto itself: {stderr}");
@@ -1029,7 +1132,7 @@ fn bae_pack_messages_are_chinese_in_the_chinese_ui() {
             .env("BAE_LANG", "zh")
             .arg("pack")
             .arg(&project)
-            .output()
+            .output_within_limit()
             .unwrap()
     };
     let first = run();
@@ -1111,7 +1214,7 @@ fn every_cli_error_is_printed_once_and_names_the_file() {
         let out = Command::new(BAE)
             .args(&args)
             .stdin(Stdio::null())
-            .output()
+            .output_within_limit()
             .unwrap();
         let stderr = String::from_utf8_lossy(&out.stderr);
         let file = if label.contains("missing") {
@@ -1148,7 +1251,7 @@ fn mcp_says_a_missing_project_does_not_exist() {
         .arg("mcp")
         .arg(&missing)
         .stdin(Stdio::null())
-        .output()
+        .output_within_limit()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(1));
@@ -1207,7 +1310,7 @@ fn every_entry_point_explains_open_failures_the_same_way() {
                     .arg(path)
                     .env("BAE_LANG", lang)
                     .stdin(Stdio::null())
-                    .output()
+                    .output_within_limit()
                     .unwrap();
                 let stderr = String::from_utf8_lossy(&out.stderr);
                 let case = format!("{lang} {name} {file}");
@@ -1290,7 +1393,7 @@ fn every_entry_says_the_same_sentence_in_both_languages() {
                     .args(entry)
                     .arg(path)
                     .stdin(Stdio::null())
-                    .output()
+                    .output_within_limit()
                     .unwrap();
                 let stderr = String::from_utf8_lossy(&out.stderr);
                 let last = stderr

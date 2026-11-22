@@ -58,7 +58,13 @@ fn matches_after_effects() {
         let img = renderer
             .read_rgba8(&frame, OutputAlpha::Premultiplied)
             .unwrap();
-        let (w, h, ae) = read_rgba8(&golden.join(format!("{name}.png"))).unwrap();
+        let file = golden.join(format!("{name}.png"));
+        if !file.exists() && cases::pending(name) {
+            // Needs a run on a machine with AE (tests/ae/README.md).
+            eprintln!("{name}: no AE golden yet (pending_golden), skipped");
+            continue;
+        }
+        let (w, h, ae) = read_rgba8(&file).unwrap();
         assert_eq!((w, h), (img.width, img.height), "{name}: size");
         let d = cases::diff(w, &img.data, &ae);
         eprintln!(

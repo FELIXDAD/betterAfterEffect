@@ -1,0 +1,696 @@
+{
+  "schemaVersion": "1.0",
+  "source": {
+    "application": "Adobe After Effects 26.0 (26.0x67)",
+    "platform": "Windows 11 Pro x64 (3840x2160 @ 150% DPI)",
+    "locale": "zh_CN",
+    "method": "Live ExtendScript + Win32 input/WM_COMMAND + Win32 MN_GETHMENU popup inspection + MSAA dialog control capture + AE reference JSON"
+  },
+  "summary": {
+    "totalPRsVerified": 14,
+    "totalItemsVerified": 55,
+    "diffsFound": 20,
+    "matchesFound": 22
+  },
+  "compPresets": [
+    "HD  •  1920x1080 • 24 fps",
+    "HD  •  1920x1080 • 25 fps",
+    "HD  •  1920x1080 • 29.97 fps",
+    "-",
+    "UHD 4K)  •  3840x2160 • 23.976 fps",
+    "UHD 4K)  •  3840x2160 • 25 fps",
+    "UHD 4K)  •  3840x2160 • 29.97 fps",
+    "UHD (8K)  •  7680x4320 • 23.976 fps",
+    "-",
+    "社交媒体纵向 HD  •  1080x1920 • 30 fps",
+    "社交媒体横向 HD  •  1920x1080 • 30 fps",
+    "社交媒体纵向  •  720x1280 • 30 fps",
+    "社交媒体横向  •  1280x720 • 30 fps",
+    "社交媒体方形  •  1080x1080 • 30 fps",
+    "-",
+    "HDV/HDTV  •  1280x720 • 25 fps",
+    "HDV/HDTV  •  1280x720 • 29.97 fps",
+    "HDV  •  1440x1080 (1.33) • 25 fps",
+    "HDV  •  1440x1080 (1.33) • 29.97 fps",
+    "DVCPRO HD  •  960x720 (1.33) • 23.976 fps",
+    "DVCPRO HD  •  960x720 (1.33) • 25 fps",
+    "DVCPRO HD  •  960x720 (1.33) • 29.97 fps",
+    "DVCPRO HD  •  1440x1080 (1.33) • 25 fps",
+    "DVCPRO HD  •  1280x1080 (1.5) • 29.97 fps",
+    "-",
+    "Cineon 1/2  •  1828x1332 • 24 fps",
+    "Cineon 完整  •  3656x2664 • 24 fps",
+    "胶片 (2K)  •  2048x1556 • 24 fps",
+    "胶片 (4K)  •  4096x3112 • 24 fps"
+  ],
+  "layerContextMenu": [
+    "蒙版 >",
+    "  新建蒙版\tCtrl+Shift+N",
+    "  ---",
+    "  蒙版形状...\tCtrl+Shift+M [disabled]",
+    "  蒙版羽化...\tCtrl+Shift+F [disabled]",
+    "  蒙版不透明度... [disabled]",
+    "  蒙版扩展... [disabled]",
+    "  ---",
+    "  重置蒙版 [disabled]",
+    "  移除蒙版 [disabled]",
+    "  移除所有蒙版 [disabled]",
+    "  ---",
+    "  反转\tCtrl+Shift+I [disabled]",
+    "  已锁定 [disabled]",
+    "  运动模糊 [disabled] >",
+    "    与图层相同 [disabled]",
+    "    开 [disabled]",
+    "    关 [disabled]",
+    "  羽化衰减 [disabled] >",
+    "    平滑 [disabled]",
+    "    线性 [disabled]",
+    "  ---",
+    "  解锁所有蒙版 [disabled]",
+    "  锁定其他蒙版 [disabled]",
+    "  隐藏锁定的蒙版 [disabled]",
+    "---",
+    "品质 >",
+    "  最佳\tCtrl+U [checked]",
+    "  草图\tCtrl+Shift+U",
+    "  线框\tCtrl+Alt+Shift+U",
+    "  ---",
+    "  双线性\tAlt+B [checked]",
+    "  双立方\tAlt+Shift+B",
+    "开关 >",
+    "  隐藏其他视频 [disabled]",
+    "  显示所有视频",
+    "  解锁所有图层\tCtrl+Shift+L",
+    "  ---",
+    "  启用表达式",
+    "  禁用表达式",
+    "  ---",
+    "  消隐",
+    "  锁定\tCtrl+L",
+    "  音频 [disabled]",
+    "  视频\tCtrl+Alt+Shift+V [checked]",
+    "  单独",
+    "  效果 [disabled]",
+    "  折叠",
+    "  运动模糊",
+    "  调整图层",
+    "变换 >",
+    "  重置(&R)",
+    "  ---",
+    "  锚点...",
+    "  位置...\tCtrl+Shift+P",
+    "  缩放...",
+    "  方向...\tCtrl+Alt+Shift+R [disabled]",
+    "  旋转...\tCtrl+Shift+R",
+    "  不透明度...\tCtrl+Shift+O",
+    "  ---",
+    "  水平翻转",
+    "  垂直翻转",
+    "  视点居中\tCtrl+Home",
+    "  在图层内容中居中放置锚点\tCtrl+Alt+Home",
+    "  ---",
+    "  适合复合\tCtrl+Alt+F",
+    "  适合复合宽度\tCtrl+Alt+Shift+H",
+    "  适合复合高度\tCtrl+Alt+Shift+G",
+    "  ---",
+    "  自动定向...\tCtrl+Alt+O",
+    "时间 >",
+    "  启用时间重映射\tCtrl+Alt+T [disabled]",
+    "  时间反向图层\tCtrl+Alt+R",
+    "  时间伸缩(&C)...",
+    "  冻结帧 [disabled]",
+    "  在最后一帧上冻结 [disabled]",
+    "  将视频对齐到数据 [disabled]",
+    "帧混合 >",
+    "  关 [checked]",
+    "  帧混合",
+    "  像素运动",
+    "3D 图层",
+    "参考线图层",
+    "环境图层 [disabled]",
+    "标记 >",
+    "  添加标记(&R)\tNumpad *",
+    "  从源更新标记 [disabled]",
+    "  锁定标记",
+    "  删除所有标记 [disabled]",
+    "---",
+    "跟踪和稳定 >",
+    "  跟踪摄像机 [disabled]",
+    "  变形稳定器 VFX [disabled]",
+    "  跟踪运动 [disabled]",
+    "  跟踪蒙版 [disabled]",
+    "---",
+    "打开 >",
+    "  打开效果控件",
+    "  打开图层",
+    "  打开图层源",
+    "  编辑原稿... [disabled]",
+    "显示 >",
+    "  在资源管理器中显示 [disabled]",
+    "  在项目中显示图层源",
+    "  在项目流程图中显示图层",
+    "  在项目中显示合成",
+    "  显示表达式错误",
+    "---",
+    "预合成...",
+    "---",
+    "反向选择",
+    "选择子项",
+    "重命名",
+    "添加到基本图形 [disabled]",
+    "裁切合成至选定图层边界",
+    "场景编辑检测... [disabled]"
+  ],
+  "keyframeContextMenu": [
+    "960.0、540.0",
+    "编辑值...",
+    "转到关键帧时间",
+    "---",
+    "标签(&L) >",
+    "  选择标签组",
+    "  ---",
+    "  无 [checked]",
+    "  ---",
+    "  红色",
+    "  黄色",
+    "  浅绿色",
+    "  粉色",
+    "  淡紫色",
+    "  桃红色",
+    "  海泡沫",
+    "  蓝色",
+    "  绿色",
+    "  紫色",
+    "  橙色",
+    "  棕色",
+    "  紫红色",
+    "  青色",
+    "  砂岩",
+    "  深绿色",
+    "  ---",
+    "  编辑标签颜色...",
+    "选择关键帧标签组 >",
+    "  在选定的图层上",
+    "  在所有图层上",
+    "  ---",
+    "  选定图层上的可见关键帧",
+    "  所有图层上的可见关键帧",
+    "---",
+    "选择相同关键帧",
+    "选择前面的关键帧",
+    "选择跟随关键帧",
+    "---",
+    "切换定格关键帧",
+    "关键帧插值...",
+    "漂浮穿梭时间",
+    "关键帧速度...",
+    "---"
+  ],
+  "compMarkerContextMenu": [
+    "设置...",
+    "---",
+    "从源更新标记 [disabled]",
+    "转到标记时间",
+    "删除此标记",
+    "删除所有标记 [disabled]",
+    "---",
+    "锁定标记",
+    "---",
+    "启用受保护区域"
+  ],
+  "prs": [
+    {
+      "pr": 168,
+      "owner": "A",
+      "area": "Shape tools (shapes, groups, masks)",
+      "refDocs": [
+        "docs/reference/ae/interaction/shapes-pen-type.md (PR #190)",
+        "docs/reference/ae/preferences.json"
+      ],
+      "items": [
+        {
+          "question": "圆角矩形 ↑↓ 步长、多边形/星形圆度步长、星形默认内径",
+          "status": "diff",
+          "ae26Behavior": "圆角矩形拖拽中 Up/Down 每次 ±1 px（Right=min(w,h)/2，Left=0），与当前实现一致；星形默认内径 = 0.5 × 外径，与当前实现一致；但星形拖拽中 Right/Left 调整外圆度步长为 ±10%（实测 Right×3 → 30%），而非 5%。Up/Down 调边数/角数 ±1（默认 5 且跨次拖拽持久化，双击工具图标重置为 5）。",
+          "evidence": "PR #190 shapes-pen-type.json: rrect_empty_up_x3=23, star_empty_right_x3=30, star_empty_drag outer=200 inner=100"
+        },
+        {
+          "question": "新形状图层的变换（锚点/位置/组位置）及“在新形状图层上居中放置锚点”首选项",
+          "status": "match",
+          "ae26Behavior": "首选项关闭时：Layer Anchor=[0,0,0]、Layer Position=合成中心 [960,540,0]、Group.Position = 拖出框中心 - 合成中心；首选项开启（Main Pref Section v2 / Shape Layer Center Anchor Point = true）时：Layer Anchor 移至形状中心，Layer Position 同步补偿保持画面不动。",
+          "evidence": "PR #190 shapes-pen-type.md §2.1-2.2 & rect_empty_center_anchor_on"
+        },
+        {
+          "question": "蒙版颜色循环规则与起始色",
+          "status": "diff",
+          "ae26Behavior": "首选项 Appearance 默认开启“循环遮罩颜色”（Cycle Mask Label Colors）及“使用对比色”（Use Contrasting Color For Mask Path Enabled, choices=5）。实测连续建 6 个蒙版的 RGB 顺序为 #B3C7B3(淡绿) → #E8920D(橙) → #F46DD6(紫红) → #B53838(红) → #E4D84C(黄) → #E7C19E(桃红)，不是固定从黄色开始。",
+          "evidence": "verify_A.json: p168_mask_color_cycle & preferences.json [Mask Colors]"
+        },
+        {
+          "question": "选中多个图层时绘制形状工具画在哪个图层上",
+          "status": "diff",
+          "ae26Behavior": "实测同时选中 2 个纯色图层（TopSolid + BottomSolid）拖矩形工具：AE 不在任一图层上建蒙版，而是直接新建一个形状图层（形状图层 1）插在最上方选中图层之上（L1）！",
+          "evidence": "verify_A.json: p168_rect_two_solids_both_sel (nL=3, L1=形状图层 1)"
+        },
+        {
+          "question": "选中空对象 / 摄像机 / 灯光时拖拽形状工具的行为",
+          "status": "partial",
+          "ae26Behavior": "选中摄像机或灯光时：新建形状图层放在其上方（L1），与当前实现一致。选中空对象（Null）时：因为 AE 的 Null 底层是 100×100 AVLayer，AE 会在 Null 上建蒙版（nL 仍为 1）；BAE 的 Null 无纯色实体，保持新建形状图层是合理差异。",
+          "evidence": "verify_A.json: p168_rect_on_null (nL=1, Mask 1), p168_rect_on_camera (nL=2), p168_rect_on_light (nL=2)"
+        },
+        {
+          "question": "选中形状组时新组加在组内还是 Contents 顶部",
+          "status": "match",
+          "ae26Behavior": "仅选中形状层内的 ExistingGroup 后拖椭圆工具：新组“椭圆 1”添加在根 Contents 索引 1（与 ExistingGroup 同级并在其上方），不嵌套进 ExistingGroup。",
+          "evidence": "verify_A.json: p168_ellipse_with_group_selected"
+        }
+      ]
+    },
+    {
+      "pr": 171,
+      "owner": "A",
+      "area": "Pen tools (open/closed paths, vertices, RotoBezier)",
+      "refDocs": [
+        "docs/reference/ae/interaction/shapes-pen-type.md (PR #190)"
+      ],
+      "items": [
+        {
+          "question": "Shift 单击的角度约束步长（45° 还是 15°）",
+          "status": "match",
+          "ae26Behavior": "实测为 45° 步长（不是 15°）。从 (400,400) Shift 单击 (600,355)（-12.7°）吸附到 0°（[-360,-140]），再 Shift 单击 (800,270)（-33°）吸附到 -45°（[-160,-340]）。当前实现 45° 正确。",
+          "evidence": "verify_A.json: p171_pen_shift_angle_step vertices=[[-560,-140],[-360,-140],[-160,-340]]"
+        },
+        {
+          "question": "RotoBezier 的精确切线公式与张力",
+          "status": "diff",
+          "ae26Behavior": "实测 RotoBezier 闭合三角形 3 个顶点（与 Catmull-Rom 1/6 弦长不同）：方向 u = normalize(v_{i+1} - v_{i-1})；长度分别等于各自相邻边长的精确 1/3，即 inTangent = -(1/3) * |v_i - v_{i-1}| * u，outTangent = +(1/3) * |v_{i+1} - v_i| * u（实测 6 条切线比值均为 0.3333）。",
+          "evidence": "PR #190 shapes-pen-type.json: pen_empty_rotobezier (in/dprev=0.3333, out/dnext=0.3333 on all 3 vertices)"
+        },
+        {
+          "question": "转换顶点工具：单击角点 vs 拖拽角点",
+          "status": "info",
+          "ae26Behavior": "在 AE 中转换“顶点”工具单击角点不会自动拉出手柄（仍为 [0,0]），需按住拖动拉出对称手柄；单击已有手柄的平滑点则将双侧切线归零恢复为角点。另外钢笔工具单选/悬停仅作用于当前选中图层的路径。",
+          "evidence": "verify_A.json: p171_convert_vertex_click & PR #190 pen_empty_bezier_curve / pen_empty_alt_break"
+        }
+      ]
+    },
+    {
+      "pr": 177,
+      "owner": "A",
+      "area": "Selection / Rotation / Pan Behind / Snapping / Nudge",
+      "refDocs": [
+        "docs/reference/ae/interaction/transform-tools.md (PR #191)"
+      ],
+      "items": [
+        {
+          "question": "手柄缩放是否以锚点为中心；多选时其他图层如何缩放",
+          "status": "match",
+          "ae26Behavior": "单选实测以图层自身锚点为中心缩放（偏心锚点 [0,0] 实测确认，见 PR #191）。多选两图层（LeftBox@[600,540] + RightBox@[1200,540]）拖动 LeftBox 右下角手柄：每个选中图层各自绕自己的锚点应用相同缩放比例（两者均变为 Scale=[200,200]，Position 各自保持 [600,540] 与 [1200,540] 不变）。",
+          "evidence": "PR #191 sel_scale_offcenter_anchor & verify_A2.json: p177_multi_select_handle_scale"
+        },
+        {
+          "question": "吸附规则（点对点 vs 按轴）、距离阈值、目标点种类",
+          "status": "info",
+          "ae26Behavior": "详见 PR #191 transform-tools.md：支持按轴独立吸附（X/Y 分别吸附）与点对点吸附，目标涵盖合成中心/边界与其他图层的中心/边界/角点；100% 缩放（150% DPI）下像素阈值约 9–12 物理像素；按住 Ctrl(Cmd) 拖拽可反转当前“对齐”开关。",
+          "evidence": "PR #191 transform-tools.json (snap_center / snap_edge / snap_threshold cases)"
+        },
+        {
+          "question": "微移步长与 3D 图层的方向键微移方向",
+          "status": "match",
+          "ae26Behavior": "2D 方向键按当前缩放下 1 屏幕像素（Shift=10px，100%=1px、200%=0.5px、50%=2px，见 PR #191）。3D 图层绕 Y 轴旋转 45° 后按 Right/Up：Position 从 [960,540,0] 变为 [961,540,0] → [961,539,0]，沿合成/视图屏幕 X/Y 轴移动（Z 不变），不沿图层本地旋转轴。",
+          "evidence": "PR #191 transform-tools.md & verify_A2.json: p177_3d_nudge_right / p177_3d_nudge_right_then_up"
+        },
+        {
+          "question": "旋转工具（W）在空白处拖动是否旋转选中图层",
+          "status": "match",
+          "ae26Behavior": "不旋转！实测选中 RotBox 后用旋转工具（W）在空白画布 (100,100)→(250,200) 拖动，Rotation 保持 0°。必须从选中图层上开始拖拽，与当前实现一致。",
+          "evidence": "verify_A2.json: p177_rotate_drag_empty_canvas (rot=0)"
+        },
+        {
+          "question": "向后平移（Y）工具拖动图层内部是否“内容在锚点后平移”",
+          "status": "match",
+          "ae26Behavior": "已实测确认（见 PR #191）：拖锚点时 Anchor+=delta 且 Position+=delta（画面静止）；在图层内拖蒙版/内容时锚点与蒙版保持原地，图层内容相对平移。",
+          "evidence": "PR #191 transform-tools.json: anchor_drag_move / anchor_pan_behind_masked"
+        }
+      ]
+    },
+    {
+      "pr": 181,
+      "owner": "A",
+      "area": "Type tool (point/paragraph text, editing) & viewer wheel zoom",
+      "refDocs": [
+        "docs/reference/ae/interaction/shapes-pen-type.md (PR #190)"
+      ],
+      "items": [
+        {
+          "question": "新文字默认字体与字号",
+          "status": "info",
+          "ae26Behavior": "继承字符面板当前设置（实测本机 zh_CN 继承 MicrosoftYaHei-Bold / 200px，自动行距 leading = 1.2 × fontSize）。",
+          "evidence": "PR #190 shapes-pen-type.json: type_empty_click textDocument"
+        },
+        {
+          "question": "段落文本图层的锚点与位置",
+          "status": "diff",
+          "ae26Behavior": "实测拖出 (400,300)→(900,550) 段落框（500×250）：Layer Anchor=[0,0,0]，但 Layer Position = [650, 425, 0]（拖出框的几何中心，不是左上角！），而 TextDocument.boxTextPos = [-250, -125]（相对 Position 的左上角偏移 [-w/2, -h/2]）。当前实现将 Position 设为框左上角与 AE 不同。",
+          "evidence": "PR #190 shapes-pen-type.json: type_empty_drag_box (P=[650,425], box=[500,250], boxPos=[-250,-125])"
+        },
+        {
+          "question": "编辑已有文字时，在空白处点击是否新建文字图层",
+          "status": "info",
+          "ae26Behavior": "区分两种状态：(1) 仅选中文字图层但未进入文本编辑态时，用文字工具点空白处会立刻在点击处新建第二个文字图层（PR #190 type_existing_text_away）；(2) 已进入文本编辑态时，点合成空白处不会新建图层（仍停留在当前文字层编辑态，需 Esc / 切工具 / Ctrl+Enter 提交）。",
+          "evidence": "PR #190 type_existing_text_away & verify_E.json: p181_type_click_far_away (nL=1)"
+        },
+        {
+          "question": "把文字删光后提交：删除图层还是保留空文本图层",
+          "status": "match",
+          "ae26Behavior": "保留空文本图层！实测 Ctrl+A → Backspace → 切回 V 提交，图层保留且名称变为 `<空文本图层>`（text=''）。单击未输入直接提交同样保留 `<空文本图层>`（PR #190 type_empty_no_text）。与当前实现一致。",
+          "evidence": "verify_A2.json: p181_type_delete_all_commit & PR #190 type_empty_no_text"
+        },
+        {
+          "question": "查看器鼠标滚轮每格缩放倍率",
+          "status": "diff",
+          "ae26Behavior": "实测滚轮每格并非 1.15 倍：向上滚放大乘以 9/8 = 1.125（1.0 → 1.125 → 1.265625），向下滚缩小乘以 7/8 = 0.875（1.0 → 0.875 → 0.765625）。",
+          "evidence": "verify_A2.json: p181_wheel_zoom_up1/up2/down1/down2"
+        }
+      ]
+    },
+    {
+      "pr": 167,
+      "owner": "E",
+      "area": "Composition Settings (Ctrl+N / Ctrl+K)",
+      "refDocs": [
+        "docs/reference/ae/preferences.json"
+      ],
+      "items": [
+        {
+          "question": "新建合成预设列表的完整顺序与分隔线",
+          "status": "info",
+          "ae26Behavior": "AE 26.0 预设列表共 29 项（含 4 条分隔线 '-'），完整顺序见 verifications.json 的 compPresets 字段（含 HD 1080p 24/25/29.97、UHD 4K/8K、社交媒体纵/横/方 30fps、HDV/DVCPRO HD、Cineon/胶片 2K/4K）。",
+          "evidence": "docs/reference/ae/preferences.json [Composition Preset Names Section v11]"
+        },
+        {
+          "question": "上次的合成设置是仅本次运行记住还是跨重启记住",
+          "status": "diff",
+          "ae26Behavior": "跨重启记住！AE 26 将上次的合成设置（尺寸、帧率、锁定长宽比、开始时间码等）持久化写入偏好文件 [Composition Pref Section]，冷启动后 Ctrl+N 直接恢复上次会话的设置（本机实测冷启打开仍为上次 960×540 @ 60fps）。",
+          "evidence": "verify_E.json: p167_new_comp_dialog & preferences.json [Composition Pref Section]"
+        },
+        {
+          "question": "项目面板有焦点且选中另一个合成时，Ctrl+K 编辑哪个合成",
+          "status": "match",
+          "ae26Behavior": "编辑项目面板中选中的合成！实测 TestComp (1920×1080, 10s, 30fps) 在时间轴打开，焦点切到项目面板并选中 00_OtherComp (1280×720, 5s, 24fps) 后按 Ctrl+K，弹出的是 00_OtherComp 的合成设置。",
+          "evidence": "verify_E.json: p167_ctrl_k_project_focused (1280x720, 0:00:05:00, 基础 24)"
+        },
+        {
+          "question": "改合成尺寸时锁定图层是否跟随移动",
+          "status": "match",
+          "ae26Behavior": "跟随移动！实测将 1920×1080 合成改为 1000×1080（中心锚点），LockedLayer（locked=true）与 FreeLayer 的 Position 均从 [960,540] 变为 [500,540]。与当前实现一致。",
+          "evidence": "verify_CE.json: p167_comp_resize_locked_via_dialog"
+        },
+        {
+          "question": "“是 0:00:10:00 基础 30”这行中文措辞",
+          "status": "match",
+          "ae26Behavior": "AE 26 实测精确中文措辞为 `是 0:00:05:00  基础 24`（“基础”前有两个空格；像素分辨率提示为 `1280 x 720，3.5 MB（每 8bpc 帧）`）。",
+          "evidence": "verify_E.json: p167_new_comp_dialog & p167_ctrl_k_project_focused"
+        }
+      ]
+    },
+    {
+      "pr": 175,
+      "owner": "E",
+      "area": "Solid Settings (Ctrl+Y / Ctrl+Shift+Y)",
+      "refDocs": [
+        "docs/reference/ae/interaction/layers-timeline-dnd.md (PR #192)",
+        "docs/reference/ae/preferences.json"
+      ],
+      "items": [
+        {
+          "question": "纯色中文默认命名格式与持久化字段",
+          "status": "match",
+          "ae26Behavior": "中文格式实测为 `<颜色名> 纯色 <N>`（如 `红色 纯色 1`，颜色名与“纯色”之间有空格），与当前格式“深灰色 纯色 1”一致。跨重启持久化的字段见 preferences.json [Last Solid Section Float (CS6)]：Color R/G/B、Width、Height、Pix Aspect、Parent Comp Width/Height/Pix Aspect。",
+          "evidence": "PR #192 new_layer_solid & preferences.json [Last Solid Section Float (CS6)]"
+        },
+        {
+          "question": "仅 1 个图层使用时，“影响使用此纯色的所有图层”是置灰还是隐藏",
+          "status": "match",
+          "ae26Behavior": "保留显示但勾选并置灰（单层使用：`影响使用此纯色的所有图层` checked+disabled，下方提示 `此更改将影响 1 个图层。`，按钮为 `确定`）。当多个图层共用同一纯色时：复选框默认未勾选且可用，提示 `将为此图层创建新纯色。`，确认按钮文字动态变为 `新建`。",
+          "evidence": "verify_CE.json: p175_solid_settings_single_clean & verify_E.json: p175_solid_settings_shared_use"
+        },
+        {
+          "question": "改纯色尺寸时锚点的处理",
+          "status": "diff",
+          "ae26Behavior": "AE 并非仅在锚点居中时移到新中心，而是对所有锚点按新旧尺寸等比缩放：`ax' = ax * (newW / oldW)`、`ay' = ay * (newH / oldH)`（Position 不变）。实测 400×300 → 600×500：居中锚点 [200,150] → [300,250]；偏心锚点 [50,50] → [75, 83.3333]。",
+          "evidence": "verify_E.json: p175_solid_resize_anchor"
+        },
+        {
+          "question": "英寸和毫米换算是否为 72 ppi",
+          "status": "match",
+          "ae26Behavior": "确认为 72 ppi（1 inch = 72 px，1 mm = 72/25.4 ≈ 2.834646 px；在摄像机设置实测 3555.5556 px / 1254.32 mm = 2.834648 亦严格吻合 72 ppi）。",
+          "evidence": "PR #192 new_layer_camera (zoom=3555.5556px vs dialog 1254.32mm)"
+        }
+      ]
+    },
+    {
+      "pr": 179,
+      "owner": "E",
+      "area": "Camera Settings and Light Settings",
+      "refDocs": [
+        "docs/reference/ae/interaction/layers-timeline-dnd.md (PR #192)"
+      ],
+      "items": [
+        {
+          "question": "摄像机设置里“单位”控制哪些字段",
+          "status": "diff",
+          "ae26Behavior": "单位控制全部 5 个长度字段（缩放 zoom、胶片大小 filmSize、焦距 focalLength、对焦距离 focusDistance、光圈 aperture），而非仅管胶片大小和焦长！实测新建摄像机对话框默认单位为毫米，对话框显示 zoom=1254.32、filmSize=36.00、focalLength=66.67、focusDistance=1254.32、aperture=8.93、fStop=7.5，而建出图层内部按 72 ppi 存像素：Zoom=3555.5556 px（=1254.32×72/25.4）、Aperture=25.30934 px（=8.93×72/25.4）。",
+          "evidence": "PR #192 layers-timeline-dnd.json: new_layer_camera"
+        },
+        {
+          "question": "灯光默认类型、默认参数与中文命名格式",
+          "status": "diff",
+          "ae26Behavior": "默认类型为聚光（SPOT），Intensity=100、Color=[1,1,1,1]、ConeAngle=90°、ConeFeather=50%、Falloff=无(1)、FalloffStart=500、FalloffDistance=500、CastsShadows=关、ShadowDarkness=100%、ShadowDiffusion=0、Position=[cx+80, cy-80, -666.66667]。注意中文默认名为 `聚光 1`（不带“灯”字！当前写“聚光灯 1”有细微差异）。",
+          "evidence": "PR #192 layers-timeline-dnd.json: new_layer_light"
+        },
+        {
+          "question": "灯光设置里“预览”及衰减/阴影控件状态",
+          "status": "info",
+          "ae26Behavior": "新建灯光对话框中“预览”默认置灰不可勾选（st=0x0）；半径(falloffStart)、衰减距离(falloffDistance)、阴影深度(shadowDarkness)、阴影扩散(shadowDiffusion)在默认 衰减=无 / 投影=关 时仍显示在布局中（默认数值 500 / 500 / 100 / 0）并置灰禁用。",
+          "evidence": "verify_last.json: p179_light_dialog_uia"
+        }
+      ]
+    },
+    {
+      "pr": 183,
+      "owner": "E",
+      "area": "Pre-compose dialog and layer.precompose (Ctrl+Shift+C)",
+      "refDocs": [],
+      "items": [
+        {
+          "question": "单个图层与多个图层时的默认名称及中文格式",
+          "status": "diff",
+          "ae26Behavior": "单个图层 `MySolid` 时默认名称为 `MySolid 合成 1`（中文为 `<图层名> 合成 1`，不是 `Comp 1`）；选中多个图层时默认名称为 `预合成 1`。",
+          "evidence": "verify_CE.json: p183_precomp_dialog_single_real & p183_precomp_dialog_multi_real"
+        },
+        {
+          "question": "单层可保留时默认选中项及复选框默认值",
+          "status": "match",
+          "ae26Behavior": "单层可保留时：默认选中 `保留“<合成名>”中的所有属性`；`将合成持续时间调整为所选图层的时间范围` 为未勾选且置灰；`打开新合成` 为未勾选。多选时自动切为 `将所有属性移动到新合成`，`保留` 置灰且其说明文字引用最上方选中图层名（实测引用 `FirstLayer`）。",
+          "evidence": "verify_CE.json: p183_precomp_dialog_single_real & p183_precomp_dialog_multi_real"
+        },
+        {
+          "question": "“移动”后跨合成父级与轨道遮罩的处理",
+          "status": "diff",
+          "ae26Behavior": "跨合成父级（父层留在外部）：AE 会断开父级（insideParent=null），但**烘焙并保留子层的世界/合成画面位置**，不让图层跳位（实测父在 [300,200]、子本地 [100,50] → 预合成内部子层位置为 [300,150]）。当前实现直接断开保留局部值会导致跳位，建议修正！轨道遮罩（仅移动填充层、遮罩层留在外部）：轨道遮罩直接断开清空（insideHasMatte=false、outerHasMatte=false）。",
+          "evidence": "verify_E.json: p183_precomp_behavior.moveWithParentOutside & verify_last.json: p183_precomp_track_matte"
+        },
+        {
+          "question": "“保留”时内部图层的开始时间、新合成尺寸/时长与所在文件夹",
+          "status": "diff",
+          "ae26Behavior": "实测对 startTime=1, in=2, out=6 的 400×300 纯色执行“保留”：新合成尺寸 = 400×300（源尺寸）、时长 = 10s（原合成时长）、所在文件夹 = 原合成所在文件夹（SubFolder）；但**内部图层的 startTime=0, inPoint=0, outPoint=10**（从 0 开始！），原图层的 startTime=1 / in=2 / out=6 留在外层预合成图层上。当前实现将内部图层 startTime 设为原图层 startTime 会造成双倍偏移，请修正！",
+          "evidence": "verify_E.json: p183_precomp_behavior.leaveAttrs"
+        }
+      ]
+    },
+    {
+      "pr": 187,
+      "owner": "E",
+      "area": "File > Import (Ctrl+I) and Project panel drag-and-drop",
+      "refDocs": [
+        "docs/reference/ae/ui/preferences-dialog.md (PR #176)",
+        "docs/reference/ae/interaction/layers-timeline-dnd.md (PR #192)"
+      ],
+      "items": [
+        {
+          "question": "静止图片默认时长与序列帧率的首选项默认值",
+          "status": "info",
+          "ae26Behavior": "见 PR #176 preferences-dialog.md「导入」页：静止素材默认时长为“合成的长度”（可选指定时长），序列素材默认帧速率为 30 帧/秒（30 fps），与 #187 当前默认 30 fps 一致；接 bae-prefs 后可与首选项联动。",
+          "evidence": "PR #176 docs/reference/ae/ui/preferences-dialog.md (import page)"
+        },
+        {
+          "question": "项目素材拖到时间轴 / 合成查看器的位置与多选规则",
+          "status": "info",
+          "ae26Behavior": "已在 PR #192 实测完备：拖到合成视口落点即 Position（多选均落该点并按列表顺序堆叠且全选）；拖到时间轴始终居中合成中心 [cx,cy]，支持空区/层间/底部插入，多选按列表顺序插入且全选。供后续 P1 实现直接对照。",
+          "evidence": "PR #192 layers-timeline-dnd.md §5"
+        }
+      ]
+    },
+    {
+      "pr": 174,
+      "owner": "C",
+      "area": "Timeline context menus, Keyframe Interpolation/Velocity, Alt time-scaling",
+      "refDocs": [
+        "docs/reference/ae/interaction/layers-timeline-dnd.md (PR #192)"
+      ],
+      "items": [
+        {
+          "question": "图层右键菜单完整项与顺序",
+          "status": "info",
+          "ae26Behavior": "实测常规图层右键顶层顺序（123 含子项）：蒙版 ▸ | 品质 ▸、开关 ▸、变换 ▸、时间 ▸、帧混合 ▸、3D 图层、参考线图层、环境图层、标记 ▸ | 跟踪和稳定 ▸（子菜单内含 4 项：跟踪摄像机、变形稳定器 VFX、跟踪运动、跟踪蒙版）| 打开 ▸、显示 ▸ | 预合成... | 反向选择、选择子项、重命名、添加到基本图形、裁切合成至选定图层边界、场景编辑检测...。注：常规纯色图层右键菜单中无 排列 ▸、跟踪遮罩 ▸、保持透明度、摄像机 ▸。",
+          "evidence": "verify_CE.json: p174_layer_context_menu"
+        },
+        {
+          "question": "关键帧右键菜单完整项、是否有“标签 ▸”以及“选择跟随关键帧”中文",
+          "status": "match",
+          "ae26Behavior": "有 `标签(&L) ▸`（含 选择标签组、无、16 色、编辑标签颜色...）及 `选择关键帧标签组 ▸`！顺序：当前值、编辑值...、转到关键帧时间 | 标签 ▸、选择关键帧标签组 ▸ | 选择相同关键帧、选择前面的关键帧、`选择跟随关键帧`（精确中文确认！）| 切换定格关键帧、关键帧插值...、漂浮穿梭时间、关键帧速度... | 关键帧辅助 ▸。",
+          "evidence": "verify_CE.json: p174_keyframe_context_menu"
+        },
+        {
+          "question": "关键帧插值对话框：下拉框下是否有说明文字，“临时插值”中文",
+          "status": "match",
+          "ae26Behavior": "AE 26 精确中文标签确为 `临时插值:`、`空间插值:`、`浮动:`；每个下拉框下方确有 1–2 行简短说明文字（“浮动:”下方有 2 行）。",
+          "evidence": "verify_CE.json: p174_kf_interpolation_dialog"
+        },
+        {
+          "question": "关键帧速度对话框：多维属性行标签与“连续”复选框文案",
+          "status": "diff",
+          "ae26Behavior": "区分空间属性与非空间多维属性：(1) Position 等空间属性合并为单行 `速度:` / `影响:`（不拆维度）；(2) Scale 等非空间多维属性上方有 `锁定维度` 复选框（默认勾选），行标签为 `维度: X`、`维度: Y`（而非 `维度 1/2`）。底部复选框精确中文为 `连续（锁定传出到传入）`（EN: Continuous (Lock Outgoing to Incoming)）。",
+          "evidence": "verify_CE.json: p174_kf_velocity_dialog & verify_last.json: p174_kf_velocity_scale_2d"
+        },
+        {
+          "question": "Ctrl/Cmd 单击已选中的关键帧：只改单击的还是改全部选中的",
+          "status": "diff",
+          "ae26Behavior": "改**全部选中的关键帧**！实测全选 3 个线性关键帧 [30f,90f,150f]，Ctrl 单击中间帧 90f，全部 3 个关键帧同时切换为 BEZIER/BEZIER。当前实现“只改单击的”与 AE 不同，建议调整。",
+          "evidence": "verify_CE.json: p174_ctrl_click_with_3_selected"
+        },
+        {
+          "question": "Alt 缩放时间穿过未选中关键帧时是否覆盖",
+          "status": "diff",
+          "ae26Behavior": "穿过时**不覆盖/不删除**未选中关键帧！实测 4 帧 [1s,2s,4s,5s] 选中前 3 帧，Alt+拖 4s→6s 跨越未选中的 5s：结果为 [30f(sel), 80f(sel), 150f(未选中原值完好), 180f(sel)]。此外须注意 Alt 必须在 mouse-down 前按住才进入等比缩放模式，拖拽后再按 Alt 仍为刚性平移（见 PR #192）。",
+          "evidence": "verify_CE.json: p174_alt_scale_across_unselected & PR #192 kf_alt_drag_before_down/after_down"
+        }
+      ]
+    },
+    {
+      "pr": 185,
+      "owner": "C",
+      "area": "Comp/Layer markers & Layer bar slip edit",
+      "refDocs": [
+        "docs/reference/ae/interaction/layers-timeline-dnd.md (PR #192)"
+      ],
+      "items": [
+        {
+          "question": "滑动编辑：Alt 拖图层条能否滑动；滑动时图层标记是否跟着源走",
+          "status": "diff",
+          "ae26Behavior": "(1) **Alt 拖图层条主体不能滑动编辑**，它仍整体移动图层条（实测 in=3..7,st=0 → in=4..8,st=1）；需用向后平移工具（Y）拖图层条（或拖源素材淡色条）才执行滑动（实测 in=3..7 不动、st=0→1）。(2) 滑动时**图层标记跟着源走**（保持图层时间，合成时间同步平移：4.0s → 5.0s），与当前实现一致！",
+          "evidence": "verify_CE.json: p185_slip_alt_drag_bar & p185_slip_pan_behind_Y_with_marker"
+        },
+        {
+          "question": "标记右键菜单完整项（AE 26 是否有“标签 ▸”）",
+          "status": "match",
+          "ae26Behavior": "合成标记右键菜单共 10 项，**无 `标签 ▸` 子菜单**（标签在 `设置...` 对话框中修改）。完整顺序：`设置...` | `从源更新标记`、`转到标记时间`、`删除此标记`、`删除所有标记` | `锁定标记` | `启用受保护区域`。",
+          "evidence": "verify_last.json: p185_comp_marker_context_menu"
+        },
+        {
+          "question": "Alt+*（通过对话框添加标记）点取消时是否留下标记",
+          "status": "match",
+          "ae26Behavior": "不留下标记！实测 Alt + Numpad * 弹出 `合成标记` 对话框后按 Esc 取消，compMarkers 为空（0 个）。确认为点“确定”才添加，与当前实现一致。",
+          "evidence": "verify_CE.json: p185_comp_marker_dialog_via_alt_star & p185_after_alt_star_cancel"
+        },
+        {
+          "question": "AE 26 标记对话框标题与字段名",
+          "status": "info",
+          "ae26Behavior": "AE 26 精简了旧版 Flash 提示点/章节/Web 链接面板：(1) `合成标记` 对话框含 `时间:`、`持续时间:`、`注释:`、`标签:`、`受保护区域`、`确定`、`取消`；(2) `图层标记` 对话框含 `时间:`、`持续时间:`、`注释:`、`标签:`、单选 `注释标记`（默认）/ `分段标记`、`确定`、`取消`。另外提醒 PR #192 实测的右端 1 帧包含规则：`N`、`]`、`Alt+]` 均对齐到 `playhead + 1/fps`。",
+          "evidence": "verify_CE.json: p185_comp_marker_dialog_via_alt_star & verify_last.json: p185_layer_marker_dialog"
+        }
+      ]
+    },
+    {
+      "pr": 172,
+      "owner": "B",
+      "area": "AE full menu bar & Chinese labels",
+      "refDocs": [
+        "docs/reference/ae/menus.json"
+      ],
+      "items": [
+        {
+          "question": "动画 ▸ Track in Boris FX Mocha 位置与名称",
+          "status": "match",
+          "ae26Behavior": "AE 26.0 `menus.json` 中位于 `动画(A)` 第 1 项，cmd=851969，zh_CN 下名称仍为英文 `Track in Boris FX Mocha`。",
+          "evidence": "docs/reference/ae/menus.json (cmd 851969)"
+        },
+        {
+          "question": "文件 ▸ 导入 下“从库…”与“消失点 (.vpe)…”的准确中文名",
+          "status": "diff",
+          "ae26Behavior": "AE 26.0 zh_CN 精确名称分别为：`从 Libraries 中...`（cmd=9764867，非“从库…”）和 `Vanishing Point (.vpe)...`（cmd=9764869，zh_CN 下保持英文，非“消失点 (.vpe)…”）。",
+          "evidence": "docs/reference/ae/menus.json (cmd 9764867, 9764869)"
+        },
+        {
+          "question": "合成 ▸ 响应式设计 - 时间 下三项精确中文名",
+          "status": "info",
+          "ae26Behavior": "精确顺序与名称：`创建开场`（2097153）、`创建结尾`（2097154）、`通过工作区域创建受保护区域`（2097155）。",
+          "evidence": "docs/reference/ae/menus.json (cmd 2097153-2097155)"
+        },
+        {
+          "question": "动画 ▸ 关键帧辅助 里四个空对象相关项的精确中文名",
+          "status": "info",
+          "ae26Behavior": "精确名称分别为：`位置点的空控制器`（11075587）、`沿路径进行空值追踪`（11075593）、`空值跟随路径点`（11075594）、`路径点的空控制器`（11075598）。",
+          "evidence": "docs/reference/ae/menus.json (cmd 11075587, 11075593, 11075594, 11075598)"
+        },
+        {
+          "question": "图层 ▸ 轨道遮罩 ▸ 以上方/下方图层作为遮罩 的精确中文名",
+          "status": "diff",
+          "ae26Behavior": "AE 26.0 zh_CN 菜单路径为 `图层(L) ▸ 跟踪遮罩(A) ▸ 使用上方图层遮罩` / `使用下方图层遮罩`（子项各 4 个：`Alpha 遮罩`、`Alpha 反转遮罩`、`亮度遮罩`、`亮度反转遮罩`；顶部第一项为 `没有轨道遮罩`）。",
+          "evidence": "docs/reference/ae/menus.json (cmd 16384001-16384006, 23658497-23724036)"
+        },
+        {
+          "question": "视图 ▸ 拆分并新建锁定的查看器 的精确中文名",
+          "status": "diff",
+          "ae26Behavior": "AE 26.0 zh_CN 精确名称为 `视图(V) ▸ 与新锁定的查看器分开`（cmd=589825, Ctrl+Alt+Shift+N），非“拆分并新建锁定的查看器”。",
+          "evidence": "docs/reference/ae/menus.json (cmd 589825)"
+        }
+      ]
+    },
+    {
+      "pr": 182,
+      "owner": "B",
+      "area": "AE default shortcuts keymap",
+      "refDocs": [
+        "docs/reference/ae/shortcuts.json",
+        "docs/reference/ae/menus.json",
+        "docs/reference/ae/interaction/layers-timeline-dnd.md (PR #192)"
+      ],
+      "items": [
+        {
+          "question": "无未决待核项；与实机快捷键行为对照确认",
+          "status": "match",
+          "ae26Behavior": "PR #182 描述中无待核条目。已交叉核对所有在三批实测中使用的 Windows 默认快捷键（V/H/Z/W/Y/Q/G/Ctrl+T、Ctrl+Y/Ctrl+Alt+Shift+T/Y/C/L、Ctrl+D/Ctrl+Shift+D、B/N/Ctrl+Shift+X/[/]/Alt+[/Alt+]、F9/Shift+F9/Ctrl+Shift+F9/Ctrl+Alt+H、Alt+Left/Right/Shift、Ctrl+Alt+K/Ctrl+Shift+K、Ctrl+Shift+C、Ctrl+N/K、Alt+Numpad*），与 AE 26.0 `shortcuts.json` 及 `menus.json` 完全一致。",
+          "evidence": "docs/reference/ae/shortcuts.json & PR #190/#191/#192 live tests"
+        }
+      ]
+    },
+    {
+      "pr": 186,
+      "owner": "B",
+      "area": "Layer > Switches, 3D Layer, Quality, Edit > Label",
+      "refDocs": [
+        "docs/reference/ae/menus.json"
+      ],
+      "items": [
+        {
+          "question": "无未决待核项；开关/品质/标签菜单结构与实机核对",
+          "status": "match",
+          "ae26Behavior": "PR #186 描述中无待核条目。实测图层右键菜单与顶栏 `图层 ▸ 开关` / `品质` / `3D 图层` 与 PR #186 所接条目完全一致；同时确认 `开关` 子菜单在图层右键中的准确中文顺序为：隐藏其他视频、显示所有视频、解锁所有图层(Ctrl+Shift+L) | 启用表达式、禁用表达式 | 消隐、锁定(Ctrl+L)、音频、视频(Ctrl+Alt+Shift+V)、单独（注：顶栏/右键均称“单独”而非“独奏”）、效果、折叠、运动模糊、调整图层。",
+          "evidence": "verify_CE.json: p174_layer_context_menu & docs/reference/ae/menus.json"
+        }
+      ]
+    }
+  ]
+}
