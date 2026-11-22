@@ -1504,3 +1504,75 @@ fn precompose_leaving_the_attributes_on_the_layer() {
             .is_err()
     );
 }
+
+#[test]
+fn import_creates_footage_items_in_one_step() {
+    let dir = std::env::temp_dir().join(format!("bae-import-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("plates")).unwrap();
+    let still = dir.join("logo.png");
+    let frame = dir.join("plates").join("shot_0001.png");
+    std::fs::write(&still, b"not really a png").unwrap();
+    std::fs::write(&frame, b"frame").unwrap();
+    let mut fx = Fx::new();
+    let out = fx.run(
+        "item.import",
+        json!({"files": [
+            {"path": still, "attrs": {
+                "width": {"type": "int", "value": 640}, "height": {"type": "int", "value": 360}}},
+            {"path": frame, "name": "shot_[0001-0024].png", "folder": "plates", "attrs": {
+                "kind": {"type": "enum", "value": "sequence"},
+                "sequence:first_frame": {"type": "int", "value": 1}}},
+        ]}),
+    );
+    let items: Vec<PrimPath> = out["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| p(v.as_str().unwrap()))
+        .collect();
+    assert_eq!(items[0].parent().unwrap(), p(query::ASSETS_FOLDER));
+    assert_eq!(query::display_name_of(&fx.stage, &items[0]), "logo.png");
+    assert_eq!(
+        fx.value(&items[0], "kind"),
+        Some(Value::Enum("footage".into()))
+    );
+    assert_eq!(fx.value(&items[0], "width"), Some(Value::Int(640)));
+    let original = fx.value(&items[0], "file:original").unwrap();
+    assert!(
+        original.as_str().unwrap().ends_with("logo.png"),
+        "{original:?}"
+    );
+    assert_eq!(fx.value(&items[0], "file:size"), Some(Value::Int(16)));
+    // A dropped folder keeps its structure.
+    let folder = items[1].parent().unwrap();
+    assert_eq!(query::display_name_of(&fx.stage, &folder), "plates");
+    assert_eq!(folder.parent().unwrap(), p(query::ASSETS_FOLDER));
+    assert_eq!(
+        fx.value(&items[1], "kind"),
+        Some(Value::Enum("sequence".into()))
+    );
+    assert_eq!(
+        query::display_name_of(&fx.stage, &items[1]),
+        "shot_[0001-0024].png"
+    );
+    // One undo step removes both (and the new folder).
+    fx.stage.undo(&fx.author).unwrap();
+    assert!(!fx.stage.has_prim(&items[0]) && !fx.stage.has_prim(&folder));
+    // Missing files, unknown attributes and empty lists are refused.
+    assert!(
+        fx.try_run(
+            "item.import",
+            json!({"files": [{"path": dir.join("nope.png")}]})
+        )
+        .is_err()
+    );
+    assert!(
+        fx.try_run(
+            "item.import",
+            json!({"files": [{"path": still, "attrs": {"name": {"type": "string", "value": "x"}}}]})
+        )
+        .is_err()
+    );
+    assert!(fx.try_run("item.import", json!({"files": []})).is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}

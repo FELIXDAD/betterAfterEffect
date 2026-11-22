@@ -475,3 +475,70 @@ fn precompose_moves_the_selected_layers_in_one_undo_step() {
     key(&mut h, Modifiers::COMMAND, Key::Z);
     assert_eq!(h.state().layers(), layers);
 }
+
+#[derive(Debug)]
+struct DroppedFile(std::path::PathBuf);
+
+impl egui::DroppedFile for DroppedFile {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|e| e.to_string())
+    }
+}
+
+/// An open panel that answers once.
+struct PickOnce(std::sync::Mutex<Vec<std::path::PathBuf>>);
+
+impl bae_ui::files::FilePicker for PickOnce {
+    fn open(&self, _: &bae_ui::files::OpenRequest) -> Vec<std::path::PathBuf> {
+        std::mem::take(&mut *self.0.lock().unwrap())
+    }
+}
+
+#[test]
+fn import_with_cmd_i_and_by_dropping_files_on_the_project_panel() {
+    const PNG: &[u8] = &[
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6,
+        0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 218, 99, 100, 96, 248, 95, 15,
+        0, 2, 135, 1, 128, 235, 71, 186, 146, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+    ];
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("logo.png"), PNG).unwrap();
+    for n in 1..=2 {
+        std::fs::write(dir.path().join(format!("clip_{n:04}.png")), PNG).unwrap();
+    }
+    let mut h = gui();
+    let picker = PickOnce(std::sync::Mutex::new(vec![dir.path().join("logo.png")]));
+    h.state_mut()
+        .app
+        .insert_resource(bae_ui::files::SharedFilePicker::new(picker));
+    let assets = bae_model::PrimPath::new(bae_motion::query::ASSETS_FOLDER).unwrap();
+    let names = |h: &Ui| -> Vec<String> {
+        let stage = h.state().stage();
+        stage
+            .children(&assets)
+            .iter()
+            .map(|c| bae_motion::query::display_name_of(stage, c))
+            .collect()
+    };
+    // Cmd+I: the open panel, then one import step.
+    key(&mut h, Modifiers::COMMAND, Key::I);
+    assert_eq!(names(&h), ["logo.png"]);
+    let (undo, _) = h.state().doc.undo_state();
+    assert_eq!(undo.as_deref(), Some("Import"));
+    // A frame of a numbered sequence dropped on the Project panel.
+    let over_project =
+        find_text(&h, "Name").expect("Project panel").center() + egui::vec2(0.0, 80.0);
+    send(&mut h, Event::PointerMoved(over_project));
+    h.input_mut()
+        .dropped_files
+        .push(std::sync::Arc::new(DroppedFile(
+            dir.path().join("clip_0001.png"),
+        )));
+    settle(&mut h);
+    assert_eq!(names(&h), ["logo.png", "clip_[0001-0002].png"]);
+    key(&mut h, Modifiers::COMMAND, Key::Z);
+    assert_eq!(names(&h), ["logo.png"]);
+}

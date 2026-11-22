@@ -16,6 +16,12 @@ const AE_ITEMS: &[(&str, Option<&str>, &str)] = &[
     ("shell.file.close_project", None, "关闭项目"),
     ("shell.file.save", Some("Cmd+S"), "保存"),
     ("shell.file.save_as", Some("Cmd+Shift+S"), "另存为"),
+    ("motion.file.import_file", Some("Cmd+I"), "文件"),
+    (
+        "motion.file.import_multiple_files",
+        Some("Cmd+Alt+I"),
+        "多个文件",
+    ),
     ("motion.composition.new", Some("Cmd+N"), "新建合成"),
     (
         "motion.comp.composition_settings",
@@ -171,6 +177,8 @@ fn menu_enabled_state_follows_the_selection() {
         "shell.file.close_project",
         "shell.file.save",
         "shell.file.save_as",
+        "motion.file.import_file",
+        "motion.file.import_multiple_files",
         "motion.composition.new",
     ]
     .map(String::from)

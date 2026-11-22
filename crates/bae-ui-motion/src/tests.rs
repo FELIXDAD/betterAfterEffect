@@ -581,9 +581,16 @@ fn menus_and_global_handler() {
     let tops: Vec<&str> = tree.menus.iter().map(|(t, _)| t.as_str()).collect();
     assert_eq!(
         tops,
-        ["Edit", "Composition", "Layer", "Animation", "Window"]
+        [
+            "File",
+            "Edit",
+            "Composition",
+            "Layer",
+            "Animation",
+            "Window"
+        ]
     );
-    let layer = &tree.menus[2].1;
+    let layer = &tree.menus[3].1;
     let MenuEntry::Submenu { title, entries } = &layer[0] else {
         panic!("Layer ▸ New");
     };
@@ -1512,4 +1519,151 @@ fn precompose_dialog_options() {
     assert_ne!(active, comp);
     assert_eq!(query::display_name_of(&h.stage, &active), "Pre-comp 1");
     assert_eq!(query::comp_layers(&h.stage, &active).len(), 2);
+}
+
+/// A valid 1×1 RGBA PNG.
+const PNG_1X1: &[u8] = &[
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0,
+    0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 218, 99, 100, 96, 248, 95, 15, 0, 2,
+    135, 1, 128, 235, 71, 186, 146, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+];
+
+/// A folder with a still, a 3-frame sequence in `plates/` and a text file.
+fn import_fixture(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("bae-import-ui-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("plates")).unwrap();
+    std::fs::write(dir.join("logo.png"), PNG_1X1).unwrap();
+    for n in 1..=3 {
+        std::fs::write(dir.join("plates").join(format!("shot_{n:04}.png")), PNG_1X1).unwrap();
+    }
+    std::fs::write(dir.join("readme.txt"), b"notes").unwrap();
+    dir
+}
+
+#[test]
+fn import_probes_files_sequences_and_folders() {
+    let dir = import_fixture("probe");
+    let probed = crate::import::probe(&[
+        dir.join("logo.png"),
+        dir.join("plates").join("shot_0002.png"),
+        dir.join("plates").join("shot_0003.png"),
+        dir.join("readme.txt"),
+    ]);
+    let names: Vec<_> = probed
+        .files
+        .iter()
+        .map(|f| f.name.clone().unwrap())
+        .collect();
+    // One numbered frame imports its whole sequence, once, named like AE.
+    assert_eq!(names, ["logo.png", "shot_[0001-0003].png"]);
+    assert_eq!(probed.files[0].attrs.get("width"), Some(&Value::Int(1)));
+    assert_eq!(probed.failed, ["readme.txt"]);
+    // A dropped folder keeps its name as a project folder.
+    let probed = crate::import::probe(&[dir.join("plates")]);
+    assert_eq!(probed.files.len(), 1);
+    assert_eq!(probed.files[0].folder.as_deref(), Some("plates"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[derive(Debug)]
+struct Dropped(std::path::PathBuf);
+
+impl egui::DroppedFile for Dropped {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|e| e.to_string())
+    }
+}
+
+struct Picker(std::sync::Mutex<Vec<Vec<std::path::PathBuf>>>);
+
+impl bae_ui::files::FilePicker for Picker {
+    fn open(&self, _: &bae_ui::files::OpenRequest) -> Vec<std::path::PathBuf> {
+        let mut answers = self.0.lock().unwrap();
+        if answers.is_empty() {
+            Vec::new()
+        } else {
+            answers.remove(0)
+        }
+    }
+}
+
+#[test]
+fn import_file_and_files_dropped_on_the_project_panel() {
+    let dir = import_fixture("ui");
+    let mut h = Harness::new();
+    // File > Import > File: the picker's files become one item.import.
+    h.resources
+        .insert(bae_ui::files::SharedFilePicker::new(Picker(
+            std::sync::Mutex::new(vec![vec![dir.join("logo.png")]]),
+        )));
+    let mut project = ProjectPanel::default();
+    let r = h.action(
+        &mut project,
+        Invocation::new(crate::actions::ids::IMPORT_FILE),
+    );
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "item.import");
+    h.apply(r);
+    let assets = PrimPath::new(query::ASSETS_FOLDER).unwrap();
+    let names = |h: &Harness| -> Vec<String> {
+        h.stage
+            .children(&assets)
+            .iter()
+            .map(|c| query::display_name_of(&h.stage, c))
+            .collect()
+    };
+    assert_eq!(names(&h), ["logo.png"]);
+    // Cancelled: nothing.
+    let r = h.action(
+        &mut project,
+        Invocation::new(crate::actions::ids::IMPORT_FILE),
+    );
+    assert!(r.invocations.is_empty());
+    // A folder dropped from Finder / Explorer onto the panel.
+    let raw = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 800.0))),
+        dropped_files: vec![std::sync::Arc::new(Dropped(dir.join("plates")))],
+        ..Default::default()
+    };
+    let mut requests = PanelRequests::default();
+    let id = PanelId::new("project");
+    let mut out = h.ctx.run_ui(raw, |ui| {
+        let mut cx = PanelContext::new(
+            &id,
+            "project",
+            &h.stage,
+            &h.author,
+            &h.resources,
+            &mut requests,
+        );
+        project.ui(ui, &mut cx);
+    });
+    out.textures_delta.clear();
+    assert_eq!(requests.invocations.len(), 1, "{:?}", requests.invocations);
+    h.apply(requests);
+    assert_eq!(names(&h), ["logo.png", "plates"]);
+    // An unreadable file: an alert, no import.
+    let r = h.action(
+        &mut project,
+        Invocation::new(crate::actions::ids::IMPORT_FILE),
+    );
+    assert!(r.invocations.is_empty());
+    h.resources
+        .insert(bae_ui::files::SharedFilePicker::new(Picker(
+            std::sync::Mutex::new(vec![vec![dir.join("readme.txt")]]),
+        )));
+    let r = h.action(
+        &mut project,
+        Invocation::new(crate::actions::ids::IMPORT_FILE),
+    );
+    assert!(r.invocations.is_empty());
+    assert!(matches!(
+        h.dialogs().lock().open,
+        Some(crate::dialogs::Dialog::Alert { .. })
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
 }

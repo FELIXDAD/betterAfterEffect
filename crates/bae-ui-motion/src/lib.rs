@@ -28,6 +28,7 @@ pub mod dialogs;
 mod gpu_preview;
 mod graph;
 mod i18n;
+pub mod import;
 pub mod menus;
 mod panels;
 mod project;

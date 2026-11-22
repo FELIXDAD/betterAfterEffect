@@ -12,6 +12,7 @@
 //! | `comp.set_settings` | Composition > Composition Settings (Cmd/Ctrl+K) |
 //! | `comp.set_work_area` | B / N (work area start / end) |
 //! | `comp.trim_to_work_area` | Composition > Trim Comp to Work Area |
+//! | `item.import` | File > Import > File (Cmd/Ctrl+I); files dropped on the Project panel |
 //! | `folder.create` | Project panel > New Folder |
 //! | `layer.create` | Layer > New > Shape / Text / Solid / Null / Camera / Light / Adjustment; drag an item into a comp |
 //! | `camera.set_settings` | Layer > Camera Settings (Layer Settings, Cmd/Ctrl+Shift+Y, on a camera) |
@@ -49,6 +50,7 @@
 pub mod camera;
 pub mod comp;
 pub mod dimensions;
+pub mod import;
 pub mod keys;
 pub mod layer;
 pub mod names;
@@ -68,6 +70,7 @@ pub use comp::{
     TrimCompToWorkArea,
 };
 pub use dimensions::SeparateDimensions;
+pub use import::{ImportFile, ImportItems, ImportOutput};
 pub use keys::{
     CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, KeyEdit, KeyRef, KeysOutput, MoveKeys,
     PasteKeys, ReverseKeys, SetAnimated, SetAt, SetInterpolation, SetMany, ValueEdit,
@@ -88,6 +91,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(SetWorkArea),
         r.register(TrimCompToWorkArea),
         r.register(CreateFolder),
+        r.register(ImportItems),
         r.register(CreateLayer),
         r.register(Precompose),
         r.register(SetSolidSettings),

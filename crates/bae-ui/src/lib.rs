@@ -22,6 +22,7 @@ pub mod agent;
 pub mod color_picker;
 pub mod dialog;
 pub mod dock;
+pub mod files;
 pub mod history;
 pub mod i18n;
 pub mod icons;

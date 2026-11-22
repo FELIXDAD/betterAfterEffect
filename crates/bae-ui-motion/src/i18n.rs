@@ -537,6 +537,17 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Light Gray", "浅灰色"),
     ("{gray}-{hue}", "{gray}-{hue}"),
     ("Dark {hue}", "深{hue}"),
+    // File > Import and dropped files (`import`).
+    ("Import File", "导入文件"),
+    ("Import Multiple Files", "导入多个文件"),
+    ("File", "文件"),
+    ("File...", "文件..."),
+    ("Multiple Files...", "多个文件..."),
+    ("Import", "导入"),
+    (
+        "These files could not be imported because their format is not supported:",
+        "以下文件的格式不受支持，无法导入：",
+    ),
     // Pre-compose (`dialogs::precompose`, docs/spec/ae AE-PRJ-401).
     ("Pre-compose", "预合成"),
     ("Pre-compose...", "预合成..."),

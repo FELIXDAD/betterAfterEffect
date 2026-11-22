@@ -129,6 +129,23 @@ pub fn items() -> Vec<(&'static str, MenuItemSpec)> {
                 .order(2)
                 .enabled_when(has_comp),
         ),
+        // File ▸ Import (AE: File > Import > File…, Multiple Files…).
+        (
+            "motion.file.import_file",
+            item(&["File", "Import"], "File...", ids::IMPORT_FILE)
+                .group(5)
+                .order(1),
+        ),
+        (
+            "motion.file.import_multiple_files",
+            item(
+                &["File", "Import"],
+                "Multiple Files...",
+                ids::IMPORT_MULTIPLE,
+            )
+            .group(5)
+            .order(2),
+        ),
         // Layer ▸ Layer Settings (AE names it after the selected layer:
         // Solid Settings…; the menu title is static for now).
         (

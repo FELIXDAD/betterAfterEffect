@@ -22,6 +22,9 @@ bae-gpu.workspace = true
 bae-platform.workspace = true
 # The app enables `media`; the viewer itself does not need it.
 bae-render = { workspace = true, default-features = false }
+# Probing files for File > Import (the app links bae-media through bae-render's
+# `media` feature already).
+bae-media.workspace = true
 egui.workspace = true
 serde.workspace = true
 serde_json.workspace = true

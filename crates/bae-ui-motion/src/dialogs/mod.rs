@@ -42,6 +42,8 @@ pub enum Dialog {
     LightSettings(Box<LightSettings>),
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C).
     Precompose(Box<PrecomposeDialog>),
+    /// An alert: a message and OK (import errors …).
+    Alert { title: String, message: String },
 }
 
 /// Open dialog and remembered values.
@@ -180,6 +182,45 @@ pub(crate) fn layer_settings(cx: &PanelContext<'_>, session: &SharedSession, tar
     }
 }
 
+/// Show an alert (AE's error dialogs): `message` and OK. Waits for the open
+/// dialog to close first when one is open.
+pub(crate) fn alert(cx: &PanelContext<'_>, title: &str, message: String) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none() {
+        d.open = Some(Dialog::Alert {
+            title: title.to_owned(),
+            message,
+        });
+    }
+}
+
+/// Draw an alert; returns whether it stays open.
+fn alert_ui(ctx: &egui::Context, title: &str, message: &str) -> bool {
+    use bae_ui::dialog::{self, Outcome};
+    let id = egui::Id::new("bae-ui-motion.alert");
+    let shown = dialog::window(ctx, id, title, |ui| {
+        ui.set_max_width(420.0);
+        ui.label(message);
+        ui.add_space(8.0);
+        let mut ok = false;
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), 24.0),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                let b = egui::Button::new(bae_ui::tr("OK")).min_size(egui::vec2(72.0, 22.0));
+                ok = ui.add(b).clicked();
+            },
+        );
+        // Enter and Esc both close it.
+        ok || dialog::keys(ui.ctx(), true) != Outcome::None
+    });
+    match shown {
+        Some(done) => !done,
+        None => !dialog::closed_by_title_bar(ctx, id),
+    }
+}
+
 /// Open Pre-compose for `layers` (unlocked layers of one comp).
 pub(crate) fn precompose(cx: &PanelContext<'_>, layers: Vec<PrimPath>) {
     let dialogs = shared(cx.resources);
@@ -257,6 +298,7 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::CameraSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::LightSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::Precompose(d) => d.ui(ctx, cx, &session, &dialogs),
+            Dialog::Alert { title, message } => alert_ui(ctx, title, message),
         };
         let mut lock = dialogs.lock();
         if keep && lock.open.is_none() {
