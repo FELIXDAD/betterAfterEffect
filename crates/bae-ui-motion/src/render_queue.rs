@@ -290,17 +290,16 @@ pub(crate) fn shared(resources: &Resources) -> SharedRenderQueue {
 /// Where new items write: the user's Movies (macOS) / Videos (Windows)
 /// folder, else the home folder, else the current directory.
 pub fn default_output_dir() -> PathBuf {
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from);
-    match home {
-        Some(home) => ["Movies", "Videos"]
-            .iter()
-            .map(|d| home.join(d))
-            .find(|d| d.is_dir())
-            .unwrap_or(home),
-        None => PathBuf::from("."),
-    }
+    output_dir_from(
+        bae_platform::dirs::videos_dir(),
+        bae_platform::dirs::home_dir(),
+    )
+}
+
+/// The user's videos folder (Windows: the Videos known folder, even when the
+/// user moved it, #216; macOS: ~/Movies), else the home folder.
+fn output_dir_from(videos: Option<PathBuf>, home: Option<PathBuf>) -> PathBuf {
+    videos.or(home).unwrap_or_else(|| PathBuf::from("."))
 }
 
 /// A file-name-safe version of a comp name.
@@ -1179,6 +1178,33 @@ mod tests {
             .collect();
         names.sort();
         assert_eq!(names, ["a_0005.png", "b_0005.png", "still.png"]);
+    }
+
+    #[test]
+    fn default_output_dir_is_the_videos_folder() {
+        let videos = PathBuf::from("D:/Media/Videos");
+        let home = PathBuf::from("C:/Users/a");
+        assert_eq!(
+            output_dir_from(Some(videos.clone()), Some(home.clone())),
+            videos
+        );
+        assert_eq!(output_dir_from(None, Some(home.clone())), home);
+        assert_eq!(output_dir_from(None, None), PathBuf::from("."));
+        // The system's own videos folder (Windows: the known folder, which
+        // may live anywhere; macOS: ~/Movies).
+        let dir = default_output_dir();
+        assert_eq!(
+            Some(dir.clone()),
+            bae_platform::dirs::videos_dir().or(bae_platform::dirs::home_dir())
+        );
+        #[cfg(target_os = "macos")]
+        assert_eq!(dir, bae_platform::dirs::home_dir().unwrap().join("Movies"));
+        #[cfg(windows)]
+        assert!(
+            !dir.ends_with("Movies"),
+            "{} is not the Videos known folder",
+            dir.display()
+        );
     }
 
     #[test]
