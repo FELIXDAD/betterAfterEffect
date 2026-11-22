@@ -1,0 +1,2434 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "application": "Adobe After Effects",
+    "version": "26.0x67",
+    "locale": "zh_CN",
+    "platform": "Windows 11 Pro x64 (150% DPI scaling)",
+    "method": "Live Windows SendInput/MSAA automation + ExtendScript DOM readback",
+    "testComp": {
+      "width": 1920,
+      "height": 1080,
+      "frameRate": 30,
+      "duration": 10,
+      "zoom": 1.0
+    },
+    "capturedDate": "2026-11-22"
+  },
+  "rules": {
+    "selectionTool": {
+      "shortcut": "V",
+      "moveDrag": {
+        "free": "Position += (dx, dy); Anchor/Scale/Rotation unchanged",
+        "shiftConstraint": "axis lock ONLY to H or V (NO 45 deg diagonal): if |dx| >= |dy| then dy=0 else dx=0",
+        "arrowNudge": "Arrow = 1 px in comp space; Shift+Arrow = 10 px",
+        "emptyCanvasClick": "deselects all layers (selectedLayerIndices = [])",
+        "marqueeDrag": "selects all layers intersected by marquee rectangle",
+        "autoKeyframe": "when Position stopwatch is on (numKeys >= 1) and playhead is at a new time, drag automatically creates a new keyframe at comp.time"
+      },
+      "boundingBoxScale": {
+        "pivot": "ALWAYS pivots around the layer Anchor Point (Layer.Position NEVER changes), regardless of whether Anchor is centered or off-center",
+        "freeCorner": "sx = (cursorX - anchorCompX) / (handleStartX - anchorCompX) * 100%, sy analogous",
+        "shiftCorner": "uniform scale using max(|sx|, |sy|) preserving sign",
+        "ctrlAndAltCorner": "do NOT change pivot (already anchor-pivoted)",
+        "edgeHandle": "1D scale along edge axis only; dragging past anchor flips sign (negative Scale)",
+        "handleHitRadiusPhysicalPxAt150Dpi": "6..9 px (hit at 6px inside edge, miss at 10px inside edge; ~5-6 logical DIP)"
+      }
+    },
+    "rotationTool": {
+      "shortcut": "W",
+      "pivot": "layer Anchor Point / Position in comp space",
+      "freeDrag": "deltaDeg = atan2(curr - pivot) - atan2(start - pivot) clockwise positive",
+      "shiftConstraint": "snaps Rotation to 45 deg increments (0, 45, 90, ...)",
+      "autoKeyframe": "when Rotation stopwatch is on and playhead is at a new time, drag automatically creates a keyframe at comp.time"
+    },
+    "panBehindAnchorTool": {
+      "shortcut": "Y",
+      "formula": "Layer.Position += dComp; Layer.AnchorPoint += inv(M_layer_linear) * dComp (visual image in comp remains completely stationary)",
+      "shiftConstraint": "H/V axis lock while dragging anchor",
+      "snapping": "when Snapping (对齐) is ON, snaps Anchor Point to the layer's own 9-point bounding box features (corners, edge midpoints, center)",
+      "centerAnchorShortcuts": {
+        "ctrlAltHome": "centers Anchor Point to sourceRect center while compensating Position so visual placement does not move",
+        "ctrlDoubleClickPanBehindIcon": "exact same result as Ctrl+Alt+Home (verified on Shape Layer: A=[0,0],P=[960,540] -> A=[-360,-190],P=[600,350])"
+      },
+      "centerInCompShortcut": {
+        "ctrlHome": "moves Layer.Position to [comp.width/2, comp.height/2] without changing Anchor Point"
+      }
+    },
+    "snapping": {
+      "toolbarCheckboxZh": "对齐",
+      "toolbarSubTogglesZh": [
+        "沿扩展到图层边界以外的边缘对齐",
+        "对齐并显示折叠合成和文本图层内的特性"
+      ],
+      "grabbedFeatureSemantics": "snaps the layer feature handle (9-point: 4 corners, 4 edge midpoints, center/anchor) NEAREST to the mouse-down point on the dragged layer, NOT all edges simultaneously",
+      "snapTargets": "other visible layers' 9-point bounding box features (corners, edge midpoints, center/anchor); does NOT snap to comp center or comp edges when no guides are present",
+      "ctrlTempInvert": "holding Ctrl (Cmd on Mac) mid-drag temporarily ENABLES snapping when checkbox is OFF, and temporarily DISABLES snapping when checkbox is ON",
+      "thresholdAt150DpiZoom1": "snaps at <= 20 physical px (~13.3 DIP), does NOT snap at 24 physical px (~16 DIP)"
+    },
+    "zoomTool": {
+      "shortcut": "Z",
+      "clickZoomIn": "doubles magnification step (1.0 -> 2.0)",
+      "altClickZoomOut": "halves magnification step (2.0 -> 1.0 -> 0.5)"
+    }
+  },
+  "measuredCases": [
+    {
+      "id": "sel_drag_move",
+      "tool": "selection",
+      "action": "400x300 Solid @ [960,540]: drag (960,540)->(1160,640)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1160,
+                640,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sel_drag_shift_horiz",
+      "tool": "selection",
+      "action": "400x300 Solid @ [960,540]: Shift-drag (960,540)->(1160,590) (dx=200,dy=50)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1160,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sel_drag_shift_diag",
+      "tool": "selection",
+      "action": "400x300 Solid @ [960,540]: Shift-drag (960,540)->(1160,720) (dx=200,dy=180)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1160,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sel_scale_br_free",
+      "tool": "selection",
+      "action": "400x300 Solid @ [960,540]: drag BR handle (1160,690)->(1360,740)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                200,
+                133.3333,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sel_scale_br_shift",
+      "tool": "selection",
+      "action": "400x300 Solid @ [960,540]: Shift-drag BR handle (1160,690)->(1360,740) (wide)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                200,
+                200,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sel_scale_br_shift_tall",
+      "tool": "selection",
+      "action": "400x300 Solid @ [960,540]: Shift-drag BR handle (1160,690)->(1210,840) (tall)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                200,
+                200,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sel_scale_br_ctrl",
+      "tool": "selection",
+      "action": "400x300 Solid @ [960,540]: Ctrl-drag BR handle (1160,690)->(1360,740)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                200,
+                133.3333,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sel_scale_br_alt",
+      "tool": "selection",
+      "action": "400x300 Solid @ [960,540]: Alt-drag BR handle (1160,690)->(1360,740)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                200,
+                133.3333,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sel_scale_br_shift_ctrl",
+      "tool": "selection",
+      "action": "400x300 Solid @ [960,540]: Shift+Ctrl-drag BR handle (1160,690)->(1360,740)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                200,
+                200,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sel_scale_offcenter_anchor",
+      "tool": "selection",
+      "action": "400x300 Solid A=[0,0] P=[760,390]: drag BR handle (1160,690)->(1360,840)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "BoxOffAnc",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                0,
+                0,
+                0
+              ],
+              "position": [
+                760,
+                390,
+                0
+              ],
+              "scale": [
+                150,
+                150,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sel_scale_edge_right",
+      "tool": "selection",
+      "action": "400x300 Solid @ [960,540]: drag Right edge (1160,540)->(1360,540)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                200,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sel_scale_edge_flip",
+      "tool": "selection",
+      "action": "400x300 Solid @ [960,540]: drag Right edge across anchor (1160,540)->(560,540)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                -200,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sel_drag_keyframe_auto",
+      "tool": "selection",
+      "action": "Position keyframe at t=0 [960,540], playhead t=1.0: drag (+200,+100)",
+      "result": {
+        "time": 1,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "BoxKF",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1160,
+                640,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            },
+            "keys": {
+              "position": [
+                {
+                  "time": 0,
+                  "value": [
+                    960,
+                    540,
+                    0
+                  ]
+                },
+                {
+                  "time": 1,
+                  "value": [
+                    1160,
+                    640,
+                    0
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sel_nudge_right_1px",
+      "tool": "selection",
+      "action": "400x300 Solid @ [960,540]: Right Arrow key",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                961,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sel_nudge_shift_right_10px",
+      "tool": "selection",
+      "action": "After 1px nudge: Shift + Right Arrow key",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                971,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sel_click_empty_deselect",
+      "tool": "selection",
+      "action": "Click empty canvas (100,100) with Solid selected",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": false,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sel_marquee_two_boxes",
+      "tool": "selection",
+      "action": "Marquee drag (300,200)->(1500,600) enclosing 2 unselected 200x200 solids",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1,
+          2
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "RightBox",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                100,
+                100,
+                0
+              ],
+              "position": [
+                1300,
+                400,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 200,
+              "height": 200
+            }
+          },
+          {
+            "index": 2,
+            "name": "LeftBox",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                100,
+                100,
+                0
+              ],
+              "position": [
+                500,
+                400,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 200,
+              "height": 200
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "handle_hit_probe_inside_6px",
+      "tool": "selection",
+      "action": "Click 6px inside right edge (794,540) and drag +100px",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "MovingBox",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                600,
+                540,
+                0
+              ],
+              "scale": [
+                150,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          },
+          {
+            "index": 2,
+            "name": "TargetBox",
+            "selected": false,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1300,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "handle_hit_probe_inside_10px",
+      "tool": "selection",
+      "action": "Click 10px inside right edge (790,540) and drag +100px",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "MovingBox",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                700,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          },
+          {
+            "index": 2,
+            "name": "TargetBox",
+            "selected": false,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1300,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "rot_drag_90cw",
+      "tool": "rotation",
+      "action": "400x300 Solid @ [960,540]: drag (1160,540)->(960,740) (+90 deg CW)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 90,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "rot_drag_shift_snap45",
+      "tool": "rotation",
+      "action": "400x300 Solid @ [960,540]: Shift-drag (1160,540)->(1100,650) (~38.66 deg)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 45,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "rot_drag_offcenter_anchor",
+      "tool": "rotation",
+      "action": "400x300 Solid A=[0,0] P=[760,390]: drag (960,390)->(760,590) around TL anchor",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "BoxOffAnc",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                0,
+                0,
+                0
+              ],
+              "position": [
+                760,
+                390,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 90,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "rot_drag_keyframe_auto",
+      "tool": "rotation",
+      "action": "Rotation keyframe at t=0 (0 deg), playhead t=1.0: drag +90 deg CW",
+      "result": {
+        "time": 1,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "BoxRotKF",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 90,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            },
+            "keys": {
+              "rotation": [
+                {
+                  "time": 0,
+                  "value": 0
+                },
+                {
+                  "time": 1,
+                  "value": 90
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "panbehind_drag_solid",
+      "tool": "pan_behind",
+      "action": "400x300 Solid @ A=[200,150] P=[960,540]: drag anchor (960,540)->(1060,600)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                300,
+                210,
+                0
+              ],
+              "position": [
+                1060,
+                600,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "panbehind_shift_horiz",
+      "tool": "pan_behind",
+      "action": "400x300 Solid @ A=[200,150] P=[960,540]: Shift-drag anchor (960,540)->(1060,570)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                300,
+                150,
+                0
+              ],
+              "position": [
+                1060,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "panbehind_drag_scaled150",
+      "tool": "pan_behind",
+      "action": "400x300 Solid Scale=[150%,100%]: drag anchor (960,540)->(1110,590) (+150,+50)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "BoxScaled",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                300,
+                200,
+                0
+              ],
+              "position": [
+                1110,
+                590,
+                0
+              ],
+              "scale": [
+                150,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "snap_on_panbehind_to_br_corner",
+      "tool": "pan_behind",
+      "action": "Snapping ON: drag anchor (960,540) to (1154,685) (6px/5px from BR corner)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                400,
+                300,
+                0
+              ],
+              "position": [
+                1160,
+                690,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "panbehind_ctrl_dblclick_shape",
+      "tool": "pan_behind",
+      "action": "Shape Layer (Rect gP=[-360,-190] A=[0,0] P=[960,540]): Ctrl+DoubleClick Pan Behind tool icon",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "形状图层 1",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                -360,
+                -190,
+                0
+              ],
+              "position": [
+                600,
+                350,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": -560,
+              "top": -340,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "shortcut_ctrl_alt_home_shape",
+      "tool": "centering",
+      "action": "Shape Layer (Rect gP=[-360,-190] A=[0,0] P=[960,540]): Ctrl+Alt+Home",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "形状图层 1",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                -360,
+                -190,
+                0
+              ],
+              "position": [
+                600,
+                350,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": -560,
+              "top": -340,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "shortcut_ctrl_home_solid",
+      "tool": "centering",
+      "action": "400x300 Solid @ P=[400,300]: Ctrl+Home",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "BoxOffset",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "snap_off_near_center_5px",
+      "tool": "snapping",
+      "action": "Snapping OFF: drag layer center (700,540)->(955,540) (5px from comp center)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "BoxSnap",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                955,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "snap_on_grab_center_to_comp_center_5px",
+      "tool": "snapping",
+      "action": "Snapping ON: drag layer center (600,540)->(955,540) (5px from comp center)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "MovingBox",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                955,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          },
+          {
+            "index": 2,
+            "name": "TargetBox",
+            "selected": false,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1300,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "snap_on_center_to_comp_left_5px",
+      "tool": "snapping",
+      "action": "Snapping ON: drag layer center (600,540)->(5,540) (5px from comp left edge)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "MovingBox",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                5,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          },
+          {
+            "index": 2,
+            "name": "TargetBox",
+            "selected": false,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1300,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "snap_on_grab_center_to_target_left_6px",
+      "tool": "snapping",
+      "action": "Snapping ON: drag MovingBox center (600,540)->(1094,540) (6px from TargetBox left=1100)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "MovingBox",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1100,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          },
+          {
+            "index": 2,
+            "name": "TargetBox",
+            "selected": false,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1300,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "snap_on_grab_inside_right_25px_to_target_left",
+      "tool": "snapping",
+      "action": "Snapping ON: grab 25px inside right edge (775,540)->(1069,540) (right edge 6px from TargetBox left=1100)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "MovingBox",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                900,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          },
+          {
+            "index": 2,
+            "name": "TargetBox",
+            "selected": false,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1300,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "snap_on_grab_inside_br_to_target_tl",
+      "tool": "snapping",
+      "action": "Snapping ON: grab 25px inside BR corner (775,665)->(1070,370) (BR 5px from TargetBox TL=[1100,390])",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "MovingBox",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                900,
+                240,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          },
+          {
+            "index": 2,
+            "name": "TargetBox",
+            "selected": false,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1300,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "snap_off_ctrl_center_to_target_left_6px",
+      "tool": "snapping",
+      "action": "Snapping OFF + Ctrl mid-drag: MovingBox center (600,540)->(1094,540)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "MovingBox",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1100,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          },
+          {
+            "index": 2,
+            "name": "TargetBox",
+            "selected": false,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1300,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "snap_on_ctrl_center_to_target_left_6px",
+      "tool": "snapping",
+      "action": "Snapping ON + Ctrl mid-drag: MovingBox center (600,540)->(1094,540)",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "MovingBox",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1094,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          },
+          {
+            "index": 2,
+            "name": "TargetBox",
+            "selected": false,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1300,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "snap_center_to_target_left_d16",
+      "tool": "snapping",
+      "action": "Snapping ON threshold probe: 16px from TargetBox left=1100",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "MovingBox",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1100,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          },
+          {
+            "index": 2,
+            "name": "TargetBox",
+            "selected": false,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1300,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "snap_center_to_target_left_d20",
+      "tool": "snapping",
+      "action": "Snapping ON threshold probe: 20px from TargetBox left=1100",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "MovingBox",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1100,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          },
+          {
+            "index": 2,
+            "name": "TargetBox",
+            "selected": false,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1300,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "snap_center_to_target_left_d24",
+      "tool": "snapping",
+      "action": "Snapping ON threshold probe: 24px from TargetBox left=1100",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "MovingBox",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1076,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          },
+          {
+            "index": 2,
+            "name": "TargetBox",
+            "selected": false,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                1300,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "zoom_click_in",
+      "tool": "zoom",
+      "action": "Zoom tool click at (960,540) from zoom=1.0",
+      "result": {
+        "time": 0,
+        "zoom": 2,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "zoom_alt_click_out",
+      "tool": "zoom",
+      "action": "Zoom tool Alt+click at (960,540) from zoom=2.0",
+      "result": {
+        "time": 0,
+        "zoom": 1,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "zoom_alt_click_out_2",
+      "tool": "zoom",
+      "action": "Zoom tool Alt+click at (960,540) from zoom=1.0",
+      "result": {
+        "time": 0,
+        "zoom": 0.5,
+        "selectedLayerIndices": [
+          1
+        ],
+        "layers": [
+          {
+            "index": 1,
+            "name": "Box",
+            "selected": true,
+            "transform": {
+              "anchorPoint": [
+                200,
+                150,
+                0
+              ],
+              "position": [
+                960,
+                540,
+                0
+              ],
+              "scale": [
+                100,
+                100,
+                100
+              ],
+              "rotation": 0,
+              "opacity": 100
+            },
+            "sourceRect": {
+              "left": 0,
+              "top": 0,
+              "width": 400,
+              "height": 300
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
