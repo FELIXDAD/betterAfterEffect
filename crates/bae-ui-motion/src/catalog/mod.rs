@@ -88,6 +88,8 @@ pub const SAME_IN_CHINESE: &[&str] = &[
     "Kodak 5218 to Kodak 2383",
     "Boris FX Mocha",
     "Cinema 4D",
+    "Vanishing Point (.vpe)...",
+    "Track in Boris FX Mocha",
 ];
 
 /// Who implements the command behind an entry (the AE-parity agents, see

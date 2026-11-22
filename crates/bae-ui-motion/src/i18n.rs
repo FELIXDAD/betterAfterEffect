@@ -202,7 +202,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Parent & Link", "父级和链接"),
     ("None", "无"),
     ("Video", "视频"),
-    ("Solo", "独奏"),
+    ("Solo", "单独"),
     ("Lock", "锁定"),
     ("Shy", "消隐"),
     ("Collapse Transformations", "折叠变换"),

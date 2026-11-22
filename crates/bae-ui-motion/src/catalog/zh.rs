@@ -2,7 +2,8 @@
 //! see `bae_ui::i18n`). Terms follow the After Effects Simplified Chinese UI and
 //! `docs/glossary.md`. Entries AE sorts by name (Export, Keyframe Assistant,
 //! workspaces, the Window panel list) sort by these titles in Chinese; a test
-//! checks that order against AE's Chinese menu.
+//! checks that order against AE's Chinese menu. R1 checked the uncertain ones in
+//! AE 26 (`docs/reference/ae/interaction/verifications.md`).
 
 #[rustfmt::skip]
 pub(crate) const MENU_ZH: &[(&str, &str)] = &[
@@ -35,9 +36,9 @@ pub(crate) const MENU_ZH: &[(&str, &str)] = &[
     ("Import", "导入"),
     ("File...", "文件..."),
     ("Multiple Files...", "多个文件..."),
-    ("From Libraries...", "从库..."),
+    ("From Libraries...", "从 Libraries 中..."),
     ("Import Adobe Premiere Project...", "导入 Adobe Premiere 项目..."),
-    ("Vanishing Point (.vpe)...", "消失点 (.vpe)..."),
+    ("Vanishing Point (.vpe)...", "Vanishing Point (.vpe)..."),
     ("Placeholder...", "占位符..."),
     ("Solid...", "纯色..."),
     ("Import Recent Footage", "导入最近的素材"),
@@ -166,7 +167,7 @@ pub(crate) const MENU_ZH: &[(&str, &str)] = &[
     ("Responsive Design — Time", "响应式设计 - 时间"),
     ("Create Intro", "创建开场"),
     ("Create Outro", "创建结尾"),
-    ("Create Protected Region from Work Area", "从工作区域创建受保护区域"),
+    ("Create Protected Region from Work Area", "通过工作区域创建受保护区域"),
     ("Composition Flowchart", "合成流程图"),
     ("Composition Mini-Flowchart", "合成微型流程图"),
     ("Create VR Environment...", "创建 VR 环境..."),
@@ -301,8 +302,8 @@ pub(crate) const MENU_ZH: &[(&str, &str)] = &[
     ("Alpha Inverted Matte", "Alpha 反转遮罩"),
     ("Luma Matte", "亮度遮罩"),
     ("Luma Inverted Matte", "亮度反转遮罩"),
-    ("Matte with Layer Above", "以上方图层作为遮罩"),
-    ("Matte with Layer Below", "以下方图层作为遮罩"),
+    ("Matte with Layer Above", "使用上方图层遮罩"),
+    ("Matte with Layer Below", "使用下方图层遮罩"),
     ("Bring to Front", "置于顶层"),
     ("Bring Forward", "前移一层"),
     ("Send Backward", "后移一层"),
@@ -320,8 +321,8 @@ pub(crate) const MENU_ZH: &[(&str, &str)] = &[
     ("Create Keyframes from Data", "从数据创建关键帧"),
     ("Null Controllers for Positional Points", "位置点的空控制器"),
     ("Null Controllers for Path Points", "路径点的空控制器"),
-    ("Nulls Following Path Points", "空对象跟随路径点"),
-    ("Null Tracing Along Path", "沿路径跟踪空对象"),
+    ("Nulls Following Path Points", "空值跟随路径点"),
+    ("Null Tracing Along Path", "沿路径进行空值追踪"),
     ("Create 3D Layer Instance", "创建 3D 图层实例"),
     ("Create Camera from 3D View", "从 3D 视图创建摄像机"),
     ("Create Stereo 3D Rig", "创建立体 3D 装置"),
@@ -360,7 +361,7 @@ pub(crate) const MENU_ZH: &[(&str, &str)] = &[
     ("Transition", "过渡"),
     ("Utility", "实用工具"),
     // Animation
-    ("Track in Boris FX Mocha", "在 Boris FX Mocha 中跟踪"),
+    ("Track in Boris FX Mocha", "Track in Boris FX Mocha"),
     ("Save Animation Preset...", "保存动画预设..."),
     ("Apply Animation Preset...", "应用动画预设..."),
     ("Recent Animation Presets", "最近的动画预设"),
@@ -399,7 +400,7 @@ pub(crate) const MENU_ZH: &[(&str, &str)] = &[
     ("Reveal Properties with Animation", "显示有动画的属性"),
     ("Reveal All Modified Properties", "显示所有修改的属性"),
     // View
-    ("Split with New Locked Viewer", "拆分并新建锁定的查看器"),
+    ("Split with New Locked Viewer", "与新锁定的查看器分开"),
     ("Custom...", "自定义..."),
     ("Use Display Color Management", "使用显示色彩管理"),
     ("Simulate Output", "模拟输出"),
