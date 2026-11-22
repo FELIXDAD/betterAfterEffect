@@ -46,7 +46,7 @@ pub use project::{
     BaezAsset, OpenOptions, Project, ProjectError, ProjectManifest, export_flattened_json,
     export_prim_json, export_sublayer_json, extract_baez,
 };
-pub use stage::{Stage, SubscriptionId, Transaction};
+pub use stage::{DEFAULT_UNDO_LIMIT, Stage, SubscriptionId, Transaction};
 pub use sublayer::Sublayer;
 pub use time::{FrameRate, Time, TimeRange};
 pub use value::{BezierPath, FeatherPoint, TextDocument, Value, ValueType};
