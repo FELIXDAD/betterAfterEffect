@@ -20,7 +20,7 @@ use bae_model::{FrameRate, PrimPath, Stage, Sublayer, SublayerId, Time};
 use bae_motion::query::CompInfo;
 use bae_render::{
     AnimEvaluator, ExportFormat, ExportJob, ExportSettings, RenderError, RenderPurpose,
-    RenderRequest, Renderer, RendererConfig, SourceProvider, export_frames, frame_file,
+    RenderRequest, Renderer, RendererConfig, SourceProvider, export_frames,
 };
 use bae_ui::Accessible as _;
 use bae_ui::{Panel, PanelContext, TabInfo, tr};
@@ -397,13 +397,9 @@ pub(crate) fn render_job(
     // The progress counts the frames actually rendered (the limited range).
     let total = times.len();
     progress(0, total);
-    // One frame of a sequence pattern still gets a numbered file.
-    let path = if times.len() == 1 && job.format.is_image() {
-        frame_file(&output, start)
-    } else {
-        output
-    };
-    let settings = ExportSettings::new(job.format, path);
+    // A `#` run in the name numbers the frames, one frame too (#207);
+    // export_frames decides, like `bae render`.
+    let settings = ExportSettings::new(job.format, output);
     let request = RenderRequest {
         purpose: RenderPurpose::Final,
         ..RenderRequest::default()
@@ -1144,6 +1140,45 @@ mod tests {
         assert_eq!(limited_range(-5, 3, 10), Some((0, 3)));
         assert_eq!(limited_range(10, 20, 10), None);
         assert_eq!(limited_range(4, 4, 10), Some((4, 4)));
+    }
+
+    /// #207: one frame of a `[####]` / `####` output is numbered (AE); a name
+    /// without `#` stays a single image.
+    #[test]
+    fn one_frame_of_a_pattern_gets_its_number() {
+        let Some(gpu) = gpu() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let (stage, comp) = project();
+        let info = bae_motion::query::comp_info(&stage, &comp).unwrap();
+        let mut q = RenderQueue::default();
+        let outputs = ["a_[####].png", "b_####.png", "still.png"];
+        for name in outputs {
+            let id = q.add(&info, dir.path());
+            let item = q.item_mut(id).unwrap();
+            item.output = dir.path().join(name).to_string_lossy().into_owned();
+            (item.start, item.end) = (5, 5);
+        }
+        assert!(q.begin());
+        let mut renderer = Renderer::new(gpu);
+        let mut evaluator = AnimEvaluator::new(None);
+        let frames =
+            |c: &PrimPath| bae_motion::query::comp_info(&stage, c).map(|i| i.frame_count());
+        while let Some(job) = q.take_next(&frames) {
+            let status =
+                render_job(&mut renderer, &mut evaluator, &stage, &job, &mut |_, _| {}).unwrap();
+            assert!(
+                matches!(status, ItemStatus::Done { files: 1, .. }),
+                "{status:?}"
+            );
+        }
+        let mut names: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["a_0005.png", "b_0005.png", "still.png"]);
     }
 
     #[test]
