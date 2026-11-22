@@ -16,6 +16,7 @@ bae-app.workspace = true
 bae-model.workspace = true
 bae-anim.workspace = true
 bae-motion.workspace = true
+bae-prefs.workspace = true
 bae-ui.workspace = true
 # Decompresses the embedded menu tables (catalog.bin); already in the app (zip, png).
 flate2.workspace = true
