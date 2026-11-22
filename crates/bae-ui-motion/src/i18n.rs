@@ -188,6 +188,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Bezier", "贝塞尔曲线"),
     ("Hold", "定格"),
     ("Keyframe Interpolation", "关键帧插值"),
+    // Pixel unit after numbers (AE zh_CN unitsText, #197).
+    ("px", "像素"),
     // Keyframe context menu and keyframe dialogs (AE-ANI-029, -047, -048). Terms as in
     // the AE zh_CN Animation menu; "选择跟随关键帧" and the speed units are to be
     // checked against AE (PR "待核").

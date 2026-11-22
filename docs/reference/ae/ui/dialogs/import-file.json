@@ -1,0 +1,290 @@
+{
+  "schemaVersion": "1.0",
+  "id": "import-file",
+  "title": {
+    "zh": "导入文件（及文件 ▸ 导入 选项）",
+    "en": "Import File (and File > Import Options)"
+  },
+  "triggers": [
+    {
+      "action": "Import File",
+      "shortcutWin": "Ctrl+I",
+      "menuZh": "文件 ▸ 导入(I) ▸ 文件..."
+    },
+    {
+      "action": "Import Multiple Files",
+      "shortcutWin": "Ctrl+Alt+I",
+      "menuZh": "文件 ▸ 导入(I) ▸ 多个文件..."
+    }
+  ],
+  "source": {
+    "application": "Adobe After Effects 26.0 (26.0x67)",
+    "platform": "Windows 11 Pro x64 (3840x2160 @ 150% DPI)",
+    "localeObserved": "zh_CN",
+    "method": "Live MSAA inspection + interactive tab/radio/dropdown probing + ExtendScript range probing"
+  },
+  "geometry": {
+    "physicalPxAt144Dpi": {
+      "w": 1800,
+      "h": 1461
+    },
+    "logicalPxAt96Dpi": {
+      "w": 1200,
+      "h": 974
+    }
+  },
+  "persistence": {
+    "remembersLastValues": true,
+    "persistsAcrossRestarts": true,
+    "notesZh": "Windows 原生文件对话框记住上次浏览目录与窗口尺寸；“导入为”与“创建合成”在同会话内按所选文件类型动态联动（“多个文件...”会在导入一批后循环重新打开弹窗直至点击“完成”/取消）。"
+  },
+  "buttonBar": {
+    "position": "bottom_right",
+    "right": [
+      {
+        "id": "import_folder",
+        "type": "button",
+        "zh": "导入文件夹",
+        "en": "Import Folder"
+      },
+      {
+        "id": "import",
+        "type": "button",
+        "zh": "导入",
+        "en": "Import",
+        "role": "accept"
+      },
+      {
+        "id": "cancel",
+        "type": "button",
+        "zh": "取消",
+        "en": "Cancel",
+        "role": "reject"
+      }
+    ]
+  },
+  "fileImportSubmenu": [
+    {
+      "zh": "文件...",
+      "en": "File...",
+      "shortcutWin": "Ctrl+I",
+      "commandId": 9764865
+    },
+    {
+      "zh": "多个文件...",
+      "en": "Multiple Files...",
+      "shortcutWin": "Ctrl+Alt+I",
+      "commandId": 9764866
+    },
+    {
+      "zh": "从 Libraries 中...",
+      "en": "From Libraries...",
+      "shortcutWin": null,
+      "commandId": 9764867
+    },
+    {
+      "zh": "导入 Adobe Premiere 项目...",
+      "en": "Adobe Premiere Pro Project...",
+      "shortcutWin": null,
+      "commandId": 9764868
+    },
+    {
+      "zh": "Vanishing Point (.vpe)...",
+      "en": "Vanishing Point (.vpe)...",
+      "shortcutWin": null,
+      "commandId": 9764869
+    },
+    {
+      "zh": "占位符...",
+      "en": "Placeholder...",
+      "shortcutWin": null,
+      "commandId": 9764870
+    },
+    {
+      "zh": "纯色...",
+      "en": "Solid...",
+      "shortcutWin": null,
+      "commandId": 9764871
+    }
+  ],
+  "tabs": [],
+  "controls": [
+    {
+      "id": "format_importer",
+      "type": "dropdown",
+      "zh": "格式:",
+      "en": "Enable: / Format:",
+      "defaultValue": "<按所选文件自动检测>",
+      "enableRuleZh": "未选中文件时置灰禁用（实测 NOFOCUS）；选中受支持文件后按文件扩展名自动匹配对应导入器。"
+    },
+    {
+      "id": "import_as",
+      "type": "dropdown",
+      "zh": "导入为:",
+      "en": "Import As:",
+      "defaultValue": {
+        "zh": "素材",
+        "en": "Footage"
+      },
+      "options": [
+        {
+          "zh": "素材",
+          "en": "Footage"
+        },
+        {
+          "zh": "合成",
+          "en": "Composition"
+        },
+        {
+          "zh": "合成 - 保持图层大小",
+          "en": "Composition - Retain Layer Sizes"
+        }
+      ],
+      "enableRuleZh": "未选中分层文件（如 PSD/AI/AEP/FLA）时置灰禁用；选中多层文档时启用，选为合成方式时还会弹出图层选项子对话框。"
+    },
+    {
+      "id": "sequence_checkbox",
+      "type": "checkbox",
+      "zh": "<格式> 序列（未选中时显示“序列不可用”）",
+      "en": "[Format] Sequence (displays 'Sequence' disabled when unavailable)",
+      "defaultValue": false,
+      "enableRuleZh": "位于“序列选项:”分组；未选中图像文件或所选格式不支持序列时显示“序列不可用”并置灰；选中带编号的静帧图像时自动勾选并显示具体格式（如“PNG 序列”）。"
+    },
+    {
+      "id": "force_alphabetical_order",
+      "type": "checkbox",
+      "zh": "强制按字母顺序排列",
+      "en": "Force alphabetical order",
+      "defaultValue": false,
+      "enableRuleZh": "仅当上方“<格式> 序列”可用且勾选时启用；其余状态置灰禁用。"
+    },
+    {
+      "id": "create_composition",
+      "type": "checkbox",
+      "zh": "创建合成",
+      "en": "Create Composition",
+      "defaultValue": false,
+      "enableRuleZh": "位于“导入选项:”分组，始终可用；勾选后导入完成自动以素材参数新建合成。"
+    },
+    {
+      "id": "file_name",
+      "type": "combobox",
+      "zh": "文件名(N):",
+      "en": "File name:",
+      "defaultValue": "",
+      "notesZh": "Windows 原生文件对话框底栏输入/历史下拉。"
+    },
+    {
+      "id": "files_of_type",
+      "type": "dropdown",
+      "zh": "文件类型(T):",
+      "en": "Files of type:",
+      "defaultValue": {
+        "zh": "所有可接受的文件",
+        "en": "All Acceptable Files"
+      },
+      "notesZh": "位于文件名右侧，按格式类别筛选文件列表。"
+    }
+  ],
+  "relatedDialogs": [
+    {
+      "id": "new-placeholder",
+      "title": {
+        "zh": "新占位符",
+        "en": "New Placeholder"
+      },
+      "trigger": "文件 ▸ 导入(I) ▸ 占位符...",
+      "geometry": {
+        "physicalPxAt144Dpi": {
+          "w": 667,
+          "h": 485
+        },
+        "logicalPxAt96Dpi": {
+          "w": 445,
+          "h": 323
+        }
+      },
+      "controls": [
+        {
+          "id": "name",
+          "type": "text_input",
+          "zh": "名称:",
+          "en": "Name:",
+          "defaultValue": {
+            "zh": "缺少名称",
+            "en": "Missing Name"
+          }
+        },
+        {
+          "id": "width",
+          "type": "number_scrub",
+          "internalName": "enWidth",
+          "zh": "宽度:",
+          "en": "Width:",
+          "unit": "px",
+          "defaultValue": 1920,
+          "range": {
+            "min": 4,
+            "max": 30000,
+            "type": "integer"
+          }
+        },
+        {
+          "id": "height",
+          "type": "number_scrub",
+          "internalName": "enHeight",
+          "zh": "高度:",
+          "en": "Height:",
+          "unit": "px",
+          "defaultValue": 1080,
+          "range": {
+            "min": 4,
+            "max": 30000,
+            "type": "integer"
+          }
+        },
+        {
+          "id": "frame_rate",
+          "type": "number_scrub",
+          "internalName": "enFPS",
+          "zh": "帧速率:",
+          "en": "Frame Rate:",
+          "unit": "fps",
+          "defaultValue": 30,
+          "range": {
+            "min": 1,
+            "max": 999,
+            "type": "float"
+          }
+        },
+        {
+          "id": "duration",
+          "type": "timecode_scrub",
+          "zh": "持续时间:",
+          "en": "Duration:",
+          "defaultValue": "0:01:00:00",
+          "notesZh": "右侧只读显示时间码基准（如“是 0:01:00:00  基础 30”）。"
+        }
+      ],
+      "buttonBar": {
+        "position": "bottom_right",
+        "right": [
+          {
+            "id": "ok",
+            "type": "button",
+            "zh": "确定",
+            "en": "OK",
+            "role": "accept"
+          },
+          {
+            "id": "cancel",
+            "type": "button",
+            "zh": "取消",
+            "en": "Cancel",
+            "role": "reject"
+          }
+        ]
+      }
+    }
+  ]
+}
