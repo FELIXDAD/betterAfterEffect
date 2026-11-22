@@ -899,7 +899,11 @@ def _fmt_spec(ctl: dict[str, Any]) -> str:
         else:
             parts.append(f"OCIO ACES 1.2 共 {n} 项（如 {', '.join(ctl['ocioAces12Options'][:3])} 等）")
     elif "optionCountObserved" in ctl:
-        parts.append(f"共 {ctl['optionCountObserved']} 项（工作空间/嵌入/其他 + ICC 列表）")
+        if "builtInPrefixOptions" in ctl:
+            prefix = "/".join(p["zh"] for p in ctl["builtInPrefixOptions"])
+            parts.append(f"共 {ctl['optionCountObserved']} 项（{prefix} + ICC 列表）")
+        else:
+            parts.append(f"共 {ctl['optionCountObserved']} 项")
     if "buttons" in ctl:
         parts.append("按钮: " + " / ".join(b["zh"] for b in ctl["buttons"]))
     return "；".join(parts) if parts else "—"
@@ -960,6 +964,17 @@ def render_generic_dialog_md(index_num: int, d: dict[str, Any]) -> list[str]:
     lines.append(f"- **记住上次的值**：{d['persistence']['notesZh']}")
     lines.append("")
 
+    has_submenu = bool(d.get("fileImportSubmenu"))
+    if has_submenu:
+        lines.append(f"### {index_num}.1 `文件 ▸ 导入(I)` 子菜单条目")
+        lines.append("")
+        lines.append("| 顺序 | 中文菜单项 | 英文菜单项 | 默认快捷键 | Win32 Command ID |")
+        lines.append("|---:|---|---|---|---|")
+        for si, item in enumerate(d["fileImportSubmenu"], 1):
+            sc = f"`{item['shortcutWin']}`" if item.get("shortcutWin") else "—"
+            lines.append(f"| {si} | `{item['zh']}` | `{item['en']}` | {sc} | `{item['commandId']}` |")
+        lines.append("")
+
     if tabs:
         sub_label = "变体" if d["id"] == "markers" else "页签"
         for ti, tab in enumerate(tabs, 1):
@@ -967,6 +982,29 @@ def render_generic_dialog_md(index_num: int, d: dict[str, Any]) -> list[str]:
             lines.append("")
             lines.extend(_render_controls_table(tab["controls"]))
     else:
+        if has_submenu:
+            lines.append(f"### {index_num}.2 对话框控件（Dialog Controls）")
+            lines.append("")
         lines.extend(_render_controls_table(d["controls"]))
+
+    for ri, rd in enumerate(d.get("relatedDialogs") or [], 1):
+        sub_no = (len(tabs) + ri) if tabs else ((2 + ri) if has_submenu else ri)
+        r_phys = rd["geometry"]["physicalPxAt144Dpi"]
+        r_logi = rd["geometry"]["logicalPxAt96Dpi"]
+        lines.append(f"### {index_num}.{sub_no} 关联对话框：{rd['title']['zh']}（{rd['title']['en']}）")
+        lines.append("")
+        lines.append(
+            f"- **入口**：`{rd['trigger']}`；**窗口尺寸**：`{r_phys['w']} × {r_phys['h']}` 物理像素 @ 144 DPI（`{r_logi['w']} × {r_logi['h']}` 逻辑像素 @ 96 DPI）"
+        )
+        if rd.get("builtInTemplates"):
+            tpl_s = "、".join(f"`{t['zh']}`（{t['en']}）" for t in rd["builtInTemplates"])
+            lines.append(f"- **内置模板（{len(rd['builtInTemplates'])} 个）**：{tpl_s}")
+        rbb = rd.get("buttonBar") or {}
+        if rbb:
+            r_left = ("左下 " + " / ".join(f"`{b['zh']}`（{b['en']}）" for b in rbb["left"]) + "；") if rbb.get("left") else ""
+            r_right = "右下 " + " + ".join(f"`{b['zh']}`（{b['en']}）" for b in rbb.get("right", [])) + " 水平并排"
+            lines.append(f"- **底部按钮栏**：{r_left}{r_right}。")
+        lines.append("")
+        lines.extend(_render_controls_table(rd["controls"]))
 
     return lines

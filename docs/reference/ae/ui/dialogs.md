@@ -19,6 +19,10 @@
 | 9 | 转到时间（Go to Time） | `Alt+Shift+J` | [`dialogs/go-to-time.json`](dialogs/go-to-time.json) |
 | 10 | 合成标记 / 图层标记（Composition Marker / Layer Marker） | `Alt+Numpad * / Alt+Numpad *` | [`dialogs/markers.json`](dialogs/markers.json) |
 | 11 | <调用属性名>（如“背景颜色”、“灯光颜色”、“颜色”）（<Property Name> (e.g. Background Color, Light Color, Color)） | `点击任意颜色色块（如合成设置背景颜色、纯色/灯光/效果/文字颜色）` | [`dialogs/color-picker.json`](dialogs/color-picker.json) |
+| 12 | 渲染设置（Render Settings） | `渲染队列面板 ▸ 点击渲染设置蓝字（如“最佳设置”） / 编辑 ▸ 模板 ▸ 渲染设置(R)... ▸ 编辑...` | [`dialogs/render-settings.json`](dialogs/render-settings.json) |
+| 13 | 输出模块设置（Output Module Settings） | `渲染队列面板 ▸ 点击输出模块蓝字（如“H.264 - 匹配渲染设置 - 40 Mbps”） / 编辑 ▸ 模板 ▸ 输出模块(M)... ▸ 编辑...` | [`dialogs/output-module-settings.json`](dialogs/output-module-settings.json) |
+| 14 | 键盘快捷键（Keyboard Shortcuts） | `Ctrl+Alt+'` | [`dialogs/keyboard-shortcuts.json`](dialogs/keyboard-shortcuts.json) |
+| 15 | 导入文件（及文件 ▸ 导入 选项）（Import File (and File > Import Options)） | `Ctrl+I / Ctrl+Alt+I` | [`dialogs/import-file.json`](dialogs/import-file.json) |
 
 ## 1. 合成设置（Composition Settings）
 
@@ -237,7 +241,7 @@
 |---:|---|---|---|---|---|---|
 | 1 | `checkbox` | 保留 RGB（禁用此项的颜色管理转换） | Preserve RGB (Disable Color Management Conversions for This Item) | 未勾选 | — | 项目未开启色彩管理时置灰；开启项目色彩管理后可用。 |
 | 2 | `static_text` | 媒体色彩空间： | Media Color Space: | 无 | — | — |
-| 3 | `dropdown` | 覆盖媒体色彩空间： | Override Media Color Space: | 工作色彩空间 - 无 | 共 105 项（工作空间/嵌入/其他 + ICC 列表） | 项目未开启色彩管理或勾选“保留 RGB”时置灰。 |
+| 3 | `dropdown` | 覆盖媒体色彩空间： | Override Media Color Space: | 工作色彩空间 - 无 | 共 105 项（工作色彩空间 - <当前工作空间>/嵌入/其他 + ICC 列表） | 项目未开启色彩管理或勾选“保留 RGB”时置灰。 |
 | 4 | `checkbox` | 全部显示 | Show All | 未勾选 | — | 项目启用 OCIO 色彩管理时可用，Adobe 模式下置灰。 |
 | 5 | `dropdown` | 解释为线性光： | Interpret As Linear Light: | 对 32 bpc 打开 | 关 / 开 / 对 32 bpc 打开 | — |
 
@@ -366,3 +370,178 @@
 | 5 | `text_input` | # | # | 000000 | — | 6 位十六进制 RGB 颜色码（如 FFFFFF / 000000），与 HSB/RGB 实时双向同步。 |
 | 6 | `icon_button` | 吸管 | Eyedropper | — | — | 位于右列取消按钮下方，支持从屏幕任意位置取色。 |
 | 7 | `checkbox` | 预览 | Preview | 勾选 | — | 默认勾选，位于右列吸管下方，实时将颜色变化反馈到合成查看器。 |
+
+## 12. 渲染设置（Render Settings）
+
+- **结构化数据**：[`dialogs/render-settings.json`](dialogs/render-settings.json)
+- **入口**：`渲染队列面板 ▸ 点击渲染设置蓝字（如“最佳设置”）`（无默认快捷键）；`编辑 ▸ 模板 ▸ 渲染设置(R)... ▸ 编辑...`（无默认快捷键）
+- **窗口尺寸**：`957 × 899` 物理像素 @ 144 DPI（`638 × 599` 逻辑像素 @ 96 DPI）
+- **页签**：无（单页对话框）
+- **底部按钮栏**：右下 `确定`（OK） + `取消`（Cancel） 水平并排。
+- **记住上次的值**：单次弹窗修改仅作用于当前渲染队列项；新建渲染队列项按“渲染设置模板”对话框中指定的默认模板（影片默认“最佳设置”、帧默认“当前设置”、预渲染默认“最佳设置”、影片代理默认“草图设置”、静止代理默认“最佳设置”）初始化，模板本身跨重启持久化。
+
+| 顺序 | 控件类型 | 中文标签 | 英文标签 | 默认值 | 范围 / 单位 / 选项 | 联动与置灰规则 |
+|---:|---|---|---|---|---|---|
+| 1 | `dropdown` | 品质: | Quality: | 最佳 | 当前设置 / 最佳 / 草图 / 线框 | 默认值以“最佳设置”模板为例。 |
+| 2 | `dropdown` | 分辨率: | Resolution: | 完整 | 当前设置 / 完整 / 二分之一 / 三分之一 / 四分之一 / 自定义... | 选择“自定义...”时弹出自定义分辨率子对话框，指定水平/垂直采样步长；下方只读显示实际渲染尺寸。 |
+| 3 | `dropdown` | 磁盘缓存: | Disk Cache: | 只读 | 当前设置 / 只读 | — |
+| 4 | `dropdown` | 代理使用: | Proxy Use: | 不使用代理 | 当前设置 / 使用所有代理 / 仅使用合成代理 / 不使用代理 | — |
+| 5 | `dropdown` | 效果: | Effects: | 当前设置 | 当前设置 / 全部开启 / 全部关闭 | — |
+| 6 | `dropdown` | 单独开关: | Solo Switches: | 当前设置 | 当前设置 / 全部关闭 | — |
+| 7 | `dropdown` | 引导层: | Guide Layers: | 全部关闭 | 当前设置 / 全部关闭 | — |
+| 8 | `dropdown` | 颜色深度: | Color Depth: | 当前设置 | 当前设置 / 每通道 8 位 / 每通道 16 位 / 每通道 32 位 | — |
+| 9 | `dropdown` | 帧混合: | Frame Blending: | 对选中图层打开 | 当前设置 / 对选中图层打开 / 对所有图层关闭 | 位于下半区“时间采样”（Time Sampling）分组。 |
+| 10 | `dropdown` | 场渲染: | Field Render: | 关 | 关 / 高场优先 / 低场优先 | — |
+| 11 | `dropdown` | 3:2 Pulldown: | 3:2 Pulldown: | 关 | 关 / WSSWW / SSWWW / SWWWS / WWWSS / WWSSW | “场渲染”为“关”时置灰禁用（实测 NOFOCUS）；选择高场优先或低场优先后启用。 |
+| 12 | `dropdown` | 运动模糊: | Motion Blur: | 对选中图层打开 | 当前设置 / 对选中图层打开 / 对所有图层关闭 | — |
+| 13 | `dropdown` | 时间跨度: | Time Span: | 仅工作区域 | 合成长度 / 仅工作区域 / 自定义... | 选择“自定义...”时弹出自定义时间跨度子对话框（开始/结束/持续时间）。 |
+| 14 | `radio_group` | 帧速率 | Frame Rate | 使用合成的帧速率 | 使用合成的帧速率 / 使用此帧速率: | — |
+| 15 | `number_scrub` | 使用此帧速率（数值） | Use this frame rate (value) | 30 | 1–999 fps | 选中“使用此帧速率:”或直接编辑数值时自动切换至自定义帧率。 |
+| 16 | `checkbox` | 跳过现有文件（允许多机渲染） | Skip existing files (allows multi-machine rendering) | 未勾选 | — | 位于底部“选项”分组，仅序列输出时生效。 |
+
+### 12.1 关联对话框：渲染设置模板（Render Settings Templates）
+
+- **入口**：`编辑 ▸ 模板 ▸ 渲染设置(R)...`；**窗口尺寸**：`1185 × 851` 物理像素 @ 144 DPI（`790 × 567` 逻辑像素 @ 96 DPI）
+- **内置模板（5 个）**：`DV 设置`（DV Settings）、`多机设置`（Multi-Machine Settings）、`当前设置`（Current Settings）、`最佳设置`（Best Settings）、`草图设置`（Draft Settings）
+- **底部按钮栏**：左下 `全部保存...`（Save All...） / `加载...`（Load...）；右下 `确定`（OK） + `取消`（Cancel） 水平并排。
+
+| 顺序 | 控件类型 | 中文标签 | 英文标签 | 默认值 | 范围 / 单位 / 选项 | 联动与置灰规则 |
+|---:|---|---|---|---|---|---|
+| 1 | `dropdown` | 影片默认值: | Movie Default: | 最佳设置 | — | — |
+| 2 | `dropdown` | 帧默认值: | Frame Default: | 当前设置 | — | — |
+| 3 | `dropdown` | 预渲染默认值: | Pre-Render Default: | 最佳设置 | — | — |
+| 4 | `dropdown` | 影片代理默认值: | Movie Proxy Default: | 草图设置 | — | — |
+| 5 | `dropdown` | 静止代理默认值: | Still Proxy Default: | 最佳设置 | — | — |
+| 6 | `dropdown` | 设置名称: | Settings Name: | 最佳设置 | 按钮: 新建... / 编辑... / 复制 / 删除 | — |
+
+## 13. 输出模块设置（Output Module Settings）
+
+- **结构化数据**：[`dialogs/output-module-settings.json`](dialogs/output-module-settings.json)
+- **入口**：`渲染队列面板 ▸ 点击输出模块蓝字（如“H.264 - 匹配渲染设置 - 40 Mbps”）`（无默认快捷键）；`编辑 ▸ 模板 ▸ 输出模块(M)... ▸ 编辑...`（无默认快捷键）
+- **窗口尺寸**：`922 × 1090` 物理像素 @ 144 DPI（`615 × 727` 逻辑像素 @ 96 DPI）
+- **页签（2 个）**：`主要选项`（Main Options）｜`颜色`（Color）
+- **底部按钮栏**：右下 `确定`（OK） + `取消`（Cancel） 水平并排。
+- **记住上次的值**：单次弹窗修改仅作用于当前输出模块；新建输出模块按“输出模块模板”中指定的默认模板初始化（影片与保存当前预览默认“H.264 - 匹配渲染设置 - 40 Mbps”、帧默认“Photoshop”、预渲染与影片代理默认“无损”），模板跨重启持久化。
+
+### 13.1 页签：主要选项（Main Options）
+
+| 顺序 | 控件类型 | 中文标签 | 英文标签 | 默认值 | 范围 / 单位 / 选项 | 联动与置灰规则 |
+|---:|---|---|---|---|---|---|
+| 1 | `dropdown` | 格式: | Format: | H.264 | AIFF / AVI / DPX/Cineon 序列 / H.264 / IFF 序列 / JPEG 序列 / MP3 / OpenEXR 序列 / PNG 序列 / Photoshop 序列 / QuickTime / Radiance 序列 / SGI 序列 / TIFF 序列 / Targa 序列 / WAV | 共 16 种输出格式；切换为纯音频格式（AIFF/MP3/WAV）时禁用视频输出分组，切换为图像序列时启用“开始 #”和“使用合成帧编号”。 |
+| 2 | `checkbox` | 包括项目链接 | Include Project Link | 勾选 | — | — |
+| 3 | `dropdown` | 渲染后动作: | Post-Render Action: | 无 | 无 / 导入 / 导入和替换用法 / 设置代理 | — |
+| 4 | `checkbox` | 包括源 XMP 元数据 | Include Source XMP Metadata | 未勾选 | — | — |
+| 5 | `checkbox` | 视频输出 | Video Output | 勾选 | — | 取消勾选或选择纯音频格式时，下方通道/深度/颜色/格式选项/调整大小/裁剪全部置灰。 |
+| 6 | `dropdown` | 通道: | Channels: | RGB | RGB / Alpha / RGB + Alpha | 格式不支持 Alpha（如 H.264/JPEG）时仅 RGB 可选或回退为 RGB。 |
+| 7 | `dropdown` | 深度: | Depth: | 数百万种颜色 | 256 色 / 数百万种颜色 / 数百万种以上颜色 / 数万亿种颜色 / 数万亿种以上颜色 / 浮点 / 浮点+ / 256 种灰色 / 浮点灰度 | 带“+”项表示含 Alpha 通道，与“通道”联动过滤。 |
+| 8 | `dropdown` | 颜色: | Color: | 预乘（遮罩） | 直接（无遮罩） / 预乘（遮罩） | 仅当通道包含 Alpha 时对输出有实质影响。 |
+| 9 | `number_scrub` | 开始 #: | Starting #: | 0 | 0–9999999 | 影片格式（如 H.264/QuickTime/AVI）下置灰禁用；图像序列且未勾选“使用合成帧编号”时启用。 |
+| 10 | `checkbox` | 使用合成帧编号 | Use Comp Frame Number | 勾选 | — | 影片格式下置灰禁用；图像序列下启用，勾选时覆盖“开始 #”。 |
+| 11 | `button` | 格式选项... | Format Options... | — | — | 打开当前视频格式的编解码器设置子对话框；按钮下方只读显示编码摘要（H.264 默认模板显示“VBR，目标 40 Mbps”）。 |
+| 12 | `checkbox` | 调整大小 | Resize | 未勾选 | — | 未勾选时，锁定长宽比、宽高数值框、预设下拉、调整大小后品质全部置灰。 |
+| 13 | `checkbox` | 锁定长宽比为 <W>:<H> (<ratio>) | Lock Aspect Ratio to <W>:<H> (<ratio>) | 勾选 | — | 仅勾选“调整大小”后启用。 |
+| 14 | `number_scrub` | 调整大小到（宽度） | Resize to (Width) | 320 | 4–30000 px | 仅勾选“调整大小”后启用；模板内默认 320×240，实际队列项默认同步当前合成尺寸。 |
+| 15 | `number_scrub` | 调整大小到（高度） | Resize to (Height) | 240 | 4–30000 px | 仅勾选“调整大小”后启用。 |
+| 16 | `dropdown` | 调整大小预设 | Resize Preset | 自定义 | 共 26 项 | 共 26 项（自定义 + 与合成设置完全相同的 25 个内置预设）；仅勾选“调整大小”后启用。 |
+| 17 | `dropdown` | 调整大小后的品质: | Resize Quality: | 高 | 低 / 高 | 仅勾选“调整大小”后启用。 |
+| 18 | `checkbox` | 裁剪 | Crop | 未勾选 | — | 未勾选时，“使用目标区域”和顶部/左侧/底部/右侧数值框全部置灰。 |
+| 19 | `checkbox` | 使用目标区域 | Use Region of Interest | 未勾选 | — | 仅勾选“裁剪”后启用；勾选时自动填充合成当前 ROI 边界。 |
+| 20 | `number_scrub_group` | 顶部 / 左侧 / 底部 / 右侧 | Top / Left / Bottom / Right | 0 | px | 仅勾选“裁剪”后启用；正值向内裁剪、负值向外扩展。 |
+| 21 | `dropdown` | 音频输出 | Audio Output | 自动音频输出 | 打开音频输出 / 自动音频输出 / 关闭音频输出 | 选择“关闭音频输出”或格式不支持音频（图像序列）时，下方采样率/位深/声道/格式选项置灰。 |
+| 22 | `dropdown` | 音频采样率 | Audio Sample Rate | 48.000 kHz | 16.000 kHz / 22.050 kHz / 24.000 kHz / 32.000 kHz / 44.100 kHz / 48.000 kHz | — |
+| 23 | `dropdown` | 音频位深度 | Audio Bit Depth | 16 位 | 8 位 / 16 位 / 32 位 | — |
+| 24 | `dropdown` | 音频声道 | Audio Channels | 立体声 | 单声道 / 立体声 | — |
+| 25 | `button` | 格式选项...（音频） | Format Options... (Audio) | — | — | — |
+
+### 13.2 页签：颜色（Color）
+
+| 顺序 | 控件类型 | 中文标签 | 英文标签 | 默认值 | 范围 / 单位 / 选项 | 联动与置灰规则 |
+|---:|---|---|---|---|---|---|
+| 1 | `checkbox` | 保留 RGB（禁用此项的颜色管理转换） | Preserve RGB (Disable Color Management Conversions for This Item) | 未勾选 | — | 勾选后禁用输出色彩空间转换与下拉选择。 |
+| 2 | `dropdown` | 输出色彩空间： | Output Color Space: | 工作空间 | 共 104 项（工作空间/其他 + ICC 列表） | 项目未开启色彩管理或勾选“保留 RGB”时置灰（实测 Adobe 默认无色彩管理下 NOFOCUS）。 |
+| 3 | `checkbox` | 全部显示 | Show All | 未勾选 | — | 仅项目启用 OCIO 色彩管理时启用，Adobe 模式下置灰。 |
+| 4 | `dropdown` | 转换为线性光: | Convert to Linear Light: | 对 32 bpc 打开 | 关 / 开 / 对 32 bpc 打开 | — |
+| 5 | `checkbox` | 嵌入色彩空间 | Embed Color Profile | 未勾选 | — | 仅当输出格式支持嵌入 ICC 配置文件（如 PNG/TIFF/PSD/JPEG/QuickTime）时启用；H.264 等不支持格式下置灰禁用。 |
+
+### 13.3 关联对话框：输出模块模板（Output Module Templates）
+
+- **入口**：`编辑 ▸ 模板 ▸ 输出模块(M)...`；**窗口尺寸**：`1314 × 779` 物理像素 @ 144 DPI（`876 × 519` 逻辑像素 @ 96 DPI）
+- **内置模板（12 个）**：`多机序列`（Multi-Machine Sequence）、`带有 Alpha 的 TIFF 序列`（TIFF Sequence with Alpha）、`AIFF 48kHz`（AIFF 48kHz）、`H.264 - 匹配渲染设置 - 15 Mbps`（H.264 - Match Render Settings - 15 Mbps）、`H.264 - 匹配渲染设置 - 40 Mbps`（H.264 - Match Render Settings - 40 Mbps）、`H.264 - 匹配渲染设置 - 5 Mbps`（H.264 - Match Render Settings - 5 Mbps）、`Photoshop`（Photoshop）、`具有 Alpha 的高品质`（High Quality with Alpha）、`使用 Alpha 无损耗`（Lossless with Alpha）、`仅 Alpha`（Alpha Only）、`无损`（Lossless）、`高品质`（High Quality）
+- **底部按钮栏**：左下 `全部保存...`（Save All...） / `加载...`（Load...）；右下 `确定`（OK） + `取消`（Cancel） 水平并排。
+
+| 顺序 | 控件类型 | 中文标签 | 英文标签 | 默认值 | 范围 / 单位 / 选项 | 联动与置灰规则 |
+|---:|---|---|---|---|---|---|
+| 1 | `dropdown` | 影片默认值: | Movie Default: | H.264 - 匹配渲染设置 - 40 Mbps | — | — |
+| 2 | `dropdown` | 帧默认值: | Frame Default: | Photoshop | — | — |
+| 3 | `dropdown` | 保存当前预览默认值: | Save Current Preview Default: | H.264 - 匹配渲染设置 - 40 Mbps | — | — |
+| 4 | `dropdown` | 预渲染默认值: | Pre-Render Default: | 无损 | — | — |
+| 5 | `dropdown` | 影片代理默认值: | Movie Proxy Default: | 无损 | — | — |
+| 6 | `dropdown` | 设置名称: | Settings Name: | H.264 - 匹配渲染设置 - 40 Mbps | 按钮: 新建... / 编辑... / 复制 / 删除 | — |
+
+## 14. 键盘快捷键（Keyboard Shortcuts）
+
+- **结构化数据**：[`dialogs/keyboard-shortcuts.json`](dialogs/keyboard-shortcuts.json)
+- **入口**：`编辑 ▸ 键盘快捷键`（`Ctrl+Alt+'`）
+- **窗口尺寸**：`2302 × 1339` 物理像素 @ 144 DPI（`1535 × 893` 逻辑像素 @ 96 DPI）
+- **页签**：无（单页对话框）
+- **底部按钮栏**：右下 `确定`（OK） + `取消`（Cancel） 水平并排。
+- **记住上次的值**：所选快捷键预设与自定义绑定跨重启持久化保存为用户目录 `aeks/` 下的 `.txt` 预设文件；修改内置 `After Effects 默认值.txt` 时自动切换为 `自定义.txt`（或用户另存的新预设）。
+
+| 顺序 | 控件类型 | 中文标签 | 英文标签 | 默认值 | 范围 / 单位 / 选项 | 联动与置灰规则 |
+|---:|---|---|---|---|---|---|
+| 1 | `dropdown` | 预设: | Keyboard Layout Preset: | After Effects 默认值.txt | After Effects 默认值.txt / 自定义.txt | 列出内置只读预设及所有用户自定义 `.txt` 预设文件。 |
+| 2 | `button` | 另存为... | Save As... | — | — | — |
+| 3 | `button` | 删除 | Delete | — | — | 选中内置 `After Effects 默认值.txt` 时置灰禁用；选中自定义/用户预设时可用。 |
+| 4 | `button` | 复制到剪贴板 | Copy to Clipboard | — | — | 将当前预设的完整快捷键表复制为纯文本。 |
+| 5 | `dropdown` | 键盘布局 - | Keyboard Layout: | en | en / pt / ja / ko / sv / ru / fr / es / nb / it / de | 共 11 种物理键盘区域布局代码，仅影响可视化键盘绘制与键帽标签。 |
+| 6 | `dropdown` | 命令: | Commands: | 应用程序 | 应用程序 / 合成面板 / 图层面板 / 字符和段落面板 / 应用 / 效果控件面板 / 时间轴面板 / 查看器面板 / 流程图面板 / 渲染队列面板 / 绘画面板 / 跟踪器面板 / 项目面板 | 共 13 个作用域；切换后联动刷新可视化键盘高亮（紫色=全局应用快捷键，绿色=当前面板覆盖快捷键）。 |
+| 7 | `custom_keyboard_map` | 可视化键盘布局 | Visual Keyboard Layout | — | — | 按主键盘、功能区、方向键、小键盘分布；点击任意键位可在右下查看其全部修饰键组合，支持从下方命令树拖拽到键帽上绑定；下方附 3 色图例（应用全局快捷键 / 面板焦点覆盖快捷键 / 按下辅助按键）。 |
+| 8 | `text_input` | 搜索框 | Search |  | — | 按命令名称或快捷键文字实时过滤下方命令树。 |
+| 9 | `tree_table` | 命令与快捷键列表 | Command / Shortcut List | — | — | 位于左下区域（宽 1170 px @ 144 DPI），按菜单与面板分组折叠展示命令与绑定快捷键胶囊，支持双击/点击胶囊录制或删除多个快捷键。 |
+| 10 | `table` | 键: <所选键位> | Key: <Selected Key> | — | — | 位于右下区域，展示当前所选物理键搭配 Ctrl / Shift / Alt 等所有修饰键组合的对应命令及冲突提示。 |
+
+## 15. 导入文件（及文件 ▸ 导入 选项）（Import File (and File > Import Options)）
+
+- **结构化数据**：[`dialogs/import-file.json`](dialogs/import-file.json)
+- **入口**：`文件 ▸ 导入(I) ▸ 文件...`（`Ctrl+I`）；`文件 ▸ 导入(I) ▸ 多个文件...`（`Ctrl+Alt+I`）
+- **窗口尺寸**：`1800 × 1461` 物理像素 @ 144 DPI（`1200 × 974` 逻辑像素 @ 96 DPI）
+- **页签**：无（单页对话框）
+- **底部按钮栏**：右下 `导入文件夹`（Import Folder） + `导入`（Import） + `取消`（Cancel） 水平并排。
+- **记住上次的值**：Windows 原生文件对话框记住上次浏览目录与窗口尺寸；“导入为”与“创建合成”在同会话内按所选文件类型动态联动（“多个文件...”会在导入一批后循环重新打开弹窗直至点击“完成”/取消）。
+
+### 15.1 `文件 ▸ 导入(I)` 子菜单条目
+
+| 顺序 | 中文菜单项 | 英文菜单项 | 默认快捷键 | Win32 Command ID |
+|---:|---|---|---|---|
+| 1 | `文件...` | `File...` | `Ctrl+I` | `9764865` |
+| 2 | `多个文件...` | `Multiple Files...` | `Ctrl+Alt+I` | `9764866` |
+| 3 | `从 Libraries 中...` | `From Libraries...` | — | `9764867` |
+| 4 | `导入 Adobe Premiere 项目...` | `Adobe Premiere Pro Project...` | — | `9764868` |
+| 5 | `Vanishing Point (.vpe)...` | `Vanishing Point (.vpe)...` | — | `9764869` |
+| 6 | `占位符...` | `Placeholder...` | — | `9764870` |
+| 7 | `纯色...` | `Solid...` | — | `9764871` |
+
+### 15.2 对话框控件（Dialog Controls）
+
+| 顺序 | 控件类型 | 中文标签 | 英文标签 | 默认值 | 范围 / 单位 / 选项 | 联动与置灰规则 |
+|---:|---|---|---|---|---|---|
+| 1 | `dropdown` | 格式: | Enable: / Format: | <按所选文件自动检测> | — | 未选中文件时置灰禁用（实测 NOFOCUS）；选中受支持文件后按文件扩展名自动匹配对应导入器。 |
+| 2 | `dropdown` | 导入为: | Import As: | 素材 | 素材 / 合成 / 合成 - 保持图层大小 | 未选中分层文件（如 PSD/AI/AEP/FLA）时置灰禁用；选中多层文档时启用，选为合成方式时还会弹出图层选项子对话框。 |
+| 3 | `checkbox` | <格式> 序列（未选中时显示“序列不可用”） | [Format] Sequence (displays 'Sequence' disabled when unavailable) | 未勾选 | — | 位于“序列选项:”分组；未选中图像文件或所选格式不支持序列时显示“序列不可用”并置灰；选中带编号的静帧图像时自动勾选并显示具体格式（如“PNG 序列”）。 |
+| 4 | `checkbox` | 强制按字母顺序排列 | Force alphabetical order | 未勾选 | — | 仅当上方“<格式> 序列”可用且勾选时启用；其余状态置灰禁用。 |
+| 5 | `checkbox` | 创建合成 | Create Composition | 未勾选 | — | 位于“导入选项:”分组，始终可用；勾选后导入完成自动以素材参数新建合成。 |
+| 6 | `combobox` | 文件名(N): | File name: |  | — | Windows 原生文件对话框底栏输入/历史下拉。 |
+| 7 | `dropdown` | 文件类型(T): | Files of type: | 所有可接受的文件 | — | 位于文件名右侧，按格式类别筛选文件列表。 |
+
+### 15.3 关联对话框：新占位符（New Placeholder）
+
+- **入口**：`文件 ▸ 导入(I) ▸ 占位符...`；**窗口尺寸**：`667 × 485` 物理像素 @ 144 DPI（`445 × 323` 逻辑像素 @ 96 DPI）
+- **底部按钮栏**：右下 `确定`（OK） + `取消`（Cancel） 水平并排。
+
+| 顺序 | 控件类型 | 中文标签 | 英文标签 | 默认值 | 范围 / 单位 / 选项 | 联动与置灰规则 |
+|---:|---|---|---|---|---|---|
+| 1 | `text_input` | 名称: | Name: | 缺少名称 | — | — |
+| 2 | `number_scrub` | 宽度: | Width: | 1920 | 4–30000 px | — |
+| 3 | `number_scrub` | 高度: | Height: | 1080 | 4–30000 px | — |
+| 4 | `number_scrub` | 帧速率: | Frame Rate: | 30 | 1–999 fps | — |
+| 5 | `timecode_scrub` | 持续时间: | Duration: | 0:01:00:00 | — | 右侧只读显示时间码基准（如“是 0:01:00:00  基础 30”）。 |

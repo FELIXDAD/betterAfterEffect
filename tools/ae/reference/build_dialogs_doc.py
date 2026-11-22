@@ -785,6 +785,25 @@ def main() -> None:
             ]
         )
 
+    b4_path = args.raw_dir / "dialogs_batch4_zh.json"
+    if b4_path.exists():
+        from dialogs_batch4 import (
+            build_import_file,
+            build_keyboard_shortcuts,
+            build_output_module_settings,
+            build_render_settings,
+        )
+
+        raw_b4 = load_json(b4_path)
+        dialogs.extend(
+            [
+                build_render_settings(raw_b4),
+                build_output_module_settings(raw_b4),
+                build_keyboard_shortcuts(raw_b4),
+                build_import_file(raw_b4),
+            ]
+        )
+
     for d in dialogs:
         _write_json(dialogs_dir / f"{d['id']}.json", d)
 
