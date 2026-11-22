@@ -1030,7 +1030,7 @@ fn unit(attr: &str) -> &'static str {
     }
 }
 
-fn fmt_num(v: f64) -> String {
+pub(crate) fn fmt_num(v: f64) -> String {
     // No "-0" for values that are zero up to rounding.
     let v = if v.abs() < 1e-9 { 0.0 } else { v };
     let a = v.abs();
@@ -1711,7 +1711,8 @@ impl GraphEditor {
                 Hit::Key(k) if editable(&frame.props[k.prop]) => {
                     self.focus = Some(frame.props[k.prop].id());
                     if mods.command {
-                        toggle_interpolation(cx, &frame.props[k.prop], &k.key);
+                        let selected = session.lock().selected_keys.clone();
+                        toggle_interpolation(cx, &frame.props[k.prop], &k.key, &selected);
                     } else {
                         let mut s = session.lock();
                         if mods.shift {
@@ -2214,21 +2215,15 @@ fn key_tooltip(stage: &Stage, info: &CompInfo, p: &Prop, k: &KeyPt) -> String {
     )
 }
 
-/// Cmd/Ctrl-click a key: Linear ↔ Auto Bezier; any other Bezier → Linear (AE-ANI-049).
-fn toggle_interpolation(cx: &mut PanelContext<'_>, p: &Prop, key: &KeyRef) {
+/// Cmd/Ctrl-click a key: Linear ↔ Auto Bezier; any other Bezier → Linear (AE-ANI-049),
+/// on every selected key when the clicked one is selected.
+fn toggle_interpolation(cx: &mut PanelContext<'_>, p: &Prop, key: &KeyRef, selected: &[KeyRef]) {
     let Some(k) = p.spec.keyframes.get(&key.time) else {
         return;
     };
-    let mut e = KeyEdit::new(key.clone());
-    if k.interp_in == Interpolation::Linear && k.interp_out == Interpolation::Linear {
-        e.auto_bezier = Some(true);
-    } else {
-        e.interp_in = Some(Interpolation::Linear);
-        e.interp_out = Some(Interpolation::Linear);
-        e.auto_bezier = Some(false);
-        e.continuous = Some(false);
-    }
-    cx.invoke_with("key.edit", json!({ "edits": [e] }));
+    let keys = crate::timeline::clicked_set(selected, key);
+    let edits = crate::timeline::click_conversion(k, &keys, false);
+    cx.invoke_with("key.edit", json!({ "edits": edits }));
 }
 
 /// Keys → one interpolation for both sides (Graph Editor Hold / Linear / Auto Bezier
@@ -2840,12 +2835,14 @@ impl GraphEditor {
         } else {
             expr.source.clone()
         };
+        let (font, text, bg) = crate::common::expression_style(cx.resources);
         let r = ui
             .put(
                 strip.shrink2(vec2(4.0, 1.0)),
                 egui::TextEdit::singleline(&mut buf)
-                    .font(egui::TextStyle::Monospace)
-                    .text_color(color::TEXT_STRONG),
+                    .font(font)
+                    .text_color(text)
+                    .background_color(bg),
             )
             .labeled(egui::WidgetType::TextEdit, tr("Expression"));
         if r.changed() || r.has_focus() {

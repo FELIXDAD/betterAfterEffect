@@ -61,27 +61,47 @@ pub(super) fn paint_key(p: &egui::Painter, c: Pos2, k: &Keyframe, selected: bool
 }
 
 /// Cmd/Ctrl-click on a keyframe (AE-ANI-049): Linear → Auto Bezier, any Bezier →
-/// Linear; with Alt (`hold`): Hold ⇄ Linear.
-pub(crate) fn click_conversion(k: &Keyframe, key: KeyRef, hold: bool) -> KeyEdit {
-    let mut e = KeyEdit::new(key);
+/// Linear; with Alt (`hold`): Hold ⇄ Linear. The clicked keyframe `k` decides; when
+/// it is selected, every selected keyframe gets the same interpolation (R1 on AE
+/// 26), else only the clicked one (`keys`).
+pub(crate) fn click_conversion(k: &Keyframe, keys: &[KeyRef], hold: bool) -> Vec<KeyEdit> {
     let both = |i: Interpolation| k.interp_in == i && k.interp_out == i;
     let to = if hold {
         if both(Interpolation::Hold) {
-            Interpolation::Linear
+            Some(Interpolation::Linear)
         } else {
-            Interpolation::Hold
+            Some(Interpolation::Hold)
         }
     } else if both(Interpolation::Linear) {
-        e.auto_bezier = Some(true);
-        return e;
+        None
     } else {
-        Interpolation::Linear
+        Some(Interpolation::Linear)
     };
-    e.interp_in = Some(to);
-    e.interp_out = Some(to);
-    e.auto_bezier = Some(false);
-    e.continuous = Some(false);
-    e
+    keys.iter()
+        .map(|key| {
+            let mut e = KeyEdit::new(key.clone());
+            match to {
+                None => e.auto_bezier = Some(true),
+                Some(i) => {
+                    e.interp_in = Some(i);
+                    e.interp_out = Some(i);
+                    e.auto_bezier = Some(false);
+                    e.continuous = Some(false);
+                }
+            }
+            e
+        })
+        .collect()
+}
+
+/// The keyframes a click on `clicked` acts on: the selection when it holds the
+/// clicked keyframe, else the clicked keyframe alone.
+pub(crate) fn clicked_set(selected: &[KeyRef], clicked: &KeyRef) -> Vec<KeyRef> {
+    if selected.contains(clicked) {
+        selected.to_vec()
+    } else {
+        vec![clicked.clone()]
+    }
 }
 
 /// Where the dragged keyframes are this frame (computed before the rows draw, so
@@ -173,8 +193,9 @@ impl TimelinePanel {
                 let mods = ui.input(|i| i.modifiers);
                 if mods.command {
                     // Cmd/Ctrl-click converts the interpolation (AE-ANI-049).
-                    let e = click_conversion(k, kr.clone(), mods.alt);
-                    cx.invoke_with("key.edit", json!({ "edits": [e] }));
+                    let keys = clicked_set(&selected_keys, &kr);
+                    let edits = click_conversion(k, &keys, mods.alt);
+                    cx.invoke_with("key.edit", json!({ "edits": edits }));
                 } else {
                     let mut s = session.lock();
                     if mods.shift {
@@ -198,7 +219,8 @@ impl TimelinePanel {
                     .input(|i| i.pointer.press_origin())
                     .or(resp.interact_pointer_pos())
             {
-                let alt = ui.input(|i| i.modifiers.alt);
+                // AE decides at mouse-down: Alt pressed later still moves.
+                let alt = self.press_mods.alt;
                 let mut s = session.lock();
                 if !s.selected_keys.contains(&kr) {
                     s.selected_keys = vec![kr.clone()];

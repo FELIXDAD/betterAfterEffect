@@ -39,10 +39,12 @@ use crate::session::{Session, SharedSession};
 
 pub(crate) use dialogs::{InterpolationDialog, KeyDialog, VelocityDialog};
 use header::comp_tabs;
+pub(crate) use keys::{click_conversion, clicked_set};
+pub(crate) use menus::keys_with_labels;
 #[cfg(test)]
 pub(crate) use menus::{
     LAYER_MENU, Related, catalog_entry, invert_layer_selection, rove_state, select_children,
-    select_related,
+    select_label_group, select_related,
 };
 pub(crate) use menus::{key_menu, keyframe_menu};
 
@@ -177,6 +179,9 @@ pub struct TimelinePanel {
     graph_mode: bool,
     /// Where a keyframe drag puts the keyframes this frame.
     key_plan: Option<keys::KeyPlan>,
+    /// Modifiers held when the primary button last went down (AE decides drag
+    /// modes such as Alt time-scaling at mouse-down).
+    press_mods: egui::Modifiers,
     /// Last frame's time axis, for tests.
     #[cfg(test)]
     pub(crate) last_axis: Option<TimeAxis>,
@@ -484,6 +489,9 @@ impl Panel for TimelinePanel {
         };
         let (pointer_x, shift) =
             ui.input(|i| (i.pointer.interact_pos().map(|p| p.x), i.modifiers.shift));
+        if let Some(m) = ui.input(|i| i.pointer.primary_pressed().then_some(i.modifiers)) {
+            self.press_mods = m;
+        }
         self.key_plan = self.plan_key_drag(stage, &info, &axis, &rows, now, pointer_x, shift);
         let comp_layers = query::comp_layers(stage, &info.path);
         self.layer_numbers = comp_layers

@@ -704,12 +704,14 @@ impl TimelinePanel {
             tr(&common::attr_label(None, attr, false)),
             tr("Expression"),
         ]);
+        let (font, text, bg) = crate::common::expression_style(cx.resources);
         let r = ui
             .put(
                 field,
                 egui::TextEdit::singleline(&mut buf)
-                    .font(egui::TextStyle::Monospace)
-                    .text_color(color::TEXT_STRONG),
+                    .font(font)
+                    .text_color(text)
+                    .background_color(bg),
             )
             .labeled(egui::WidgetType::TextEdit, &name);
         if r.changed() || r.has_focus() {

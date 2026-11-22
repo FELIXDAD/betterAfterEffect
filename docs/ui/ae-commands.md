@@ -36,7 +36,7 @@
 
 ## 统计
 
-- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 59，◐ 7，☐ 253，⏸ 221，Ⓐ 30
+- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 61，◐ 9，☐ 253，⏸ 217，Ⓐ 30
 - 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 119 条。
 
 ## 主菜单
@@ -164,10 +164,10 @@
 | Label ▸ Sandstone | 16646163 | `motion.edit.label` | `{"label":15}` |  |  | B | ☐ |
 | Label ▸ Dark Green | 16646164 | `motion.edit.label` | `{"label":16}` |  |  | B | ☐ |
 | Label ▸ Edit Label Colors... | 16646166 | `motion.edit.edit_label_colors` |  |  |  | D | ⏸ |
-| Select Keyframe Label Group ▸ On Selected Layers | 23592961 | `motion.edit.select_keyframe_label_group` | `{"scope":"selected_layers"}` |  |  | C | ⏸ |
-| Select Keyframe Label Group ▸ On All Layers | 23592962 | `motion.edit.select_keyframe_label_group` | `{"scope":"all_layers"}` |  |  | C | ⏸ |
-| Select Keyframe Label Group ▸ Visible Keyframes on Selected Layers | 23592964 | `motion.edit.select_keyframe_label_group` | `{"scope":"visible_selected_layers"}` |  |  | C | ⏸ |
-| Select Keyframe Label Group ▸ Visible Keyframes on All Layers | 23592965 | `motion.edit.select_keyframe_label_group` | `{"scope":"visible_all_layers"}` |  |  | C | ⏸ |
+| Select Keyframe Label Group ▸ On Selected Layers | 23592961 | `motion.edit.select_keyframe_label_group` | `{"scope":"selected_layers"}` |  |  | C | ✅ |
+| Select Keyframe Label Group ▸ On All Layers | 23592962 | `motion.edit.select_keyframe_label_group` | `{"scope":"all_layers"}` |  |  | C | ✅ |
+| Select Keyframe Label Group ▸ Visible Keyframes on Selected Layers | 23592964 | `motion.edit.select_keyframe_label_group` | `{"scope":"visible_selected_layers"}` |  |  | C | ◐ |
+| Select Keyframe Label Group ▸ Visible Keyframes on All Layers | 23592965 | `motion.edit.select_keyframe_label_group` | `{"scope":"visible_all_layers"}` |  |  | C | ◐ |
 | Purge ▸ All Cache... | 11403265 | `motion.edit.purge` | `{"what":"all_caches"}` | Alt+Z | Opt+Z | B | ⏸ |
 | Purge ▸ All Memory & Disk Cache... | 11403266 | `motion.edit.purge` | `{"what":"memory_and_disk_cache"}` |  |  | B | ⏸ |
 | Purge ▸ All Memory | 11403267 | `motion.edit.purge` | `{"what":"all_memory"}` | Ctrl+Alt+PadSlash | Control+PadClear / Cmd+Opt+PadSlash | B | ⏸ |

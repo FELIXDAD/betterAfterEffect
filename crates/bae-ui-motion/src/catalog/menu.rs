@@ -387,11 +387,11 @@ const EDIT: &[Node] = &[
     sub(
         "Select Keyframe Label Group",
         &[
-            it(23592961, "On Selected Layers", "motion.edit.select_keyframe_label_group", r#"{"scope":"selected_layers"}"#, C, Later),
-            it(23592962, "On All Layers", "motion.edit.select_keyframe_label_group", r#"{"scope":"all_layers"}"#, C, Later),
+            it(23592961, "On Selected Layers", "motion.edit.select_keyframe_label_group", r#"{"scope":"selected_layers"}"#, C, Done),
+            it(23592962, "On All Layers", "motion.edit.select_keyframe_label_group", r#"{"scope":"all_layers"}"#, C, Done),
             SEP,
-            it(23592964, "Visible Keyframes on Selected Layers", "motion.edit.select_keyframe_label_group", r#"{"scope":"visible_selected_layers"}"#, C, Later),
-            it(23592965, "Visible Keyframes on All Layers", "motion.edit.select_keyframe_label_group", r#"{"scope":"visible_all_layers"}"#, C, Later),
+            it(23592964, "Visible Keyframes on Selected Layers", "motion.edit.select_keyframe_label_group", r#"{"scope":"visible_selected_layers"}"#, C, Partial),
+            it(23592965, "Visible Keyframes on All Layers", "motion.edit.select_keyframe_label_group", r#"{"scope":"visible_all_layers"}"#, C, Partial),
         ],
     ),
     SEP,

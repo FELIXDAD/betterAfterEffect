@@ -971,6 +971,130 @@ fn cmd_click_on_a_layer_bar_keyframe_converts_its_interpolation() {
 }
 
 #[test]
+fn cmd_click_on_a_selected_keyframe_converts_the_whole_selection() {
+    let mut h = H::new();
+    h.keys(
+        ROT,
+        &[(0.0, float(0.0)), (1.0, float(90.0)), (2.0, float(0.0))],
+    );
+    let keys = vec![h.key(ROT, 0.0), h.key(ROT, 1.0), h.key(ROT, 2.0)];
+    h.session().lock().selected_keys = keys.clone();
+    let mut tl = h.bars();
+    let p = bar_key(&tl, &keys[1]);
+    let r = h.click(&mut tl, p, cmd());
+    assert_eq!(r.invocations.len(), 1, "one step");
+    h.apply(&r);
+    assert!(
+        h.spec(ROT)
+            .keyframes
+            .values()
+            .all(|k| k.flags.temporal_auto_bezier),
+        "all three became Auto Bezier (R1, AE 26)"
+    );
+}
+
+#[test]
+fn alt_pressed_after_mouse_down_still_moves() {
+    let mut h = H::new();
+    h.keys(
+        ROT,
+        &[(0.0, float(0.0)), (1.0, float(45.0)), (2.0, float(90.0))],
+    );
+    let keys = vec![h.key(ROT, 0.0), h.key(ROT, 1.0), h.key(ROT, 2.0)];
+    h.session().lock().selected_keys = keys.clone();
+    let mut tl = h.bars();
+    let from = bar_key(&tl, &keys[2]);
+    let to = pos2(x_of(&tl, 4.0), from.y);
+    // Press without Alt, then hold Alt while dragging: a rigid move (AE 26).
+    h.frame(&mut tl, vec![Event::PointerMoved(from)], Modifiers::NONE);
+    h.frame(
+        &mut tl,
+        vec![button(from, true, Modifiers::NONE)],
+        Modifiers::NONE,
+    );
+    for i in 1..=6 {
+        let p = from + (to - from) * (i as f32 / 6.0);
+        h.frame(&mut tl, vec![Event::PointerMoved(p)], alt());
+    }
+    let r = h.frame(&mut tl, vec![button(to, false, alt())], alt());
+    assert_eq!(r.invocations[0].id, "key.move");
+    h.apply(&r);
+    assert_eq!(h.times(ROT), vec![2 * SEC, 3 * SEC, 4 * SEC]);
+}
+
+#[test]
+fn keyframe_velocity_shows_linear_sides_as_ae_does() {
+    let mut h = H::new();
+    h.keys(ROT, &[(0.0, float(0.0)), (2.0, float(90.0))]);
+    let d = crate::timeline::VelocityDialog::new(&h.stage, vec![h.key(ROT, 0.0)]).unwrap();
+    // Linear: the segment's speed (45 °/s) and 16.667 % influence.
+    assert!(
+        (d.ease_out[0].speed - 45.0).abs() < 1e-6,
+        "{:?}",
+        d.ease_out
+    );
+    assert!((d.ease_out[0].influence - 100.0 / 6.0).abs() < 1e-6);
+    // Scale: one row per dimension, Lock Dimensions on.
+    h.keys(
+        "transform:scale",
+        &[(0.0, vec3(100.0, 100.0)), (1.0, vec3(200.0, 100.0))],
+    );
+    let d = crate::timeline::VelocityDialog::new(&h.stage, vec![h.key("transform:scale", 0.0)])
+        .unwrap();
+    assert!(d.lock_dims && d.ease_out.len() >= 2);
+    assert!((d.ease_out[0].speed - 100.0).abs() < 1e-6 && d.ease_out[1].speed.abs() < 1e-6);
+}
+
+#[test]
+fn keyframe_labels_and_label_groups() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    h.keys(
+        ROT,
+        &[(0.0, float(0.0)), (1.0, float(90.0)), (2.0, float(0.0))],
+    );
+    h.keys(POS, &[(0.0, vec3(0.0, 0.0)), (1.0, vec3(10.0, 0.0))]);
+    let labelled = [h.key(ROT, 0.0), h.key(ROT, 2.0), h.key(POS, 1.0)];
+    let edits: Vec<Json> = labelled
+        .iter()
+        .map(|k| json!({"key": k, "label": 3}))
+        .collect();
+    h.run("key.edit", json!({ "edits": edits }));
+    assert_eq!(h.spec(ROT).keyframes[&Time::ZERO].label, 3);
+    let session = h.session();
+    crate::timeline::select_label_group(&h.stage, &session, &labelled[0]);
+    let mut sel = session.lock().selected_keys.clone();
+    sel.sort_by_key(|k| (k.attr.clone(), k.time));
+    let mut want = labelled.to_vec();
+    want.sort_by_key(|k| (k.attr.clone(), k.time));
+    assert_eq!(sel, want);
+    // Edit > Select Keyframe Label Group ▸ On All Layers, from one labelled key.
+    let mut tl = h.bars();
+    session.lock().selected_keys = vec![labelled[2].clone()];
+    h.action(
+        &mut tl,
+        Invocation::with_params(ids::SELECT_KEY_LABEL_GROUP, json!({"scope": "all_layers"})),
+    );
+    assert_eq!(session.lock().selected_keys.len(), 3);
+}
+
+#[test]
+fn expression_fields_use_the_expression_editor_preferences() {
+    let mut resources = Resources::new();
+    let (font, text, bg) = crate::common::expression_style(&resources);
+    assert_eq!(font.size, 12.0, "AE default without preferences");
+    assert_eq!(bg, egui::Color32::from_rgb(0x1d, 0x1d, 0x1d));
+    let mut prefs = bae_prefs::Preferences::default();
+    prefs.set(bae_prefs::keys::EXPR_FONT_SIZE, 20);
+    prefs.set("scripting_expressions.expr_color_default", "#ff0000");
+    resources.insert(std::sync::Arc::new(bae_prefs::PrefsStore::new(prefs)));
+    let (font, text2, _) = crate::common::expression_style(&resources);
+    assert_eq!(font.size, 20.0);
+    assert_ne!(text, text2);
+    assert_eq!(text2, egui::Color32::from_rgb(0xff, 0, 0));
+}
+
+#[test]
 fn keyframe_interpolation_dialog_sets_temporal_spatial_and_roving() {
     let mut h = H::new();
     h.keys(
@@ -1174,12 +1298,23 @@ fn rove_across_time_needs_inner_spatial_keyframes() {
 #[test]
 fn layer_menu_entries_come_from_the_command_catalog() {
     for (top, title) in crate::timeline::LAYER_MENU {
-        if title.is_empty() {
+        if top.is_empty() {
             continue;
         }
         assert!(
             crate::timeline::catalog_entry(top, title).is_some(),
             "{top} ▸ {title} is not in the command catalog"
+        );
+    }
+    for (top, title) in [
+        ("Edit", "Select Keyframe Label Group"),
+        ("Animation", "Track Camera"),
+        ("Animation", "Track Mask"),
+        ("Layer", "Open Layer Source"),
+    ] {
+        assert!(
+            crate::timeline::catalog_entry(top, title).is_some(),
+            "{top} ▸ {title}"
         );
     }
 }

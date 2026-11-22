@@ -195,6 +195,22 @@ fn any_spatial(stage: &Stage, keys: &[KeyRef]) -> bool {
         .any(|(_, attr, spec, _)| is_spatial(attr, spec))
 }
 
+/// The line under a menu of the Keyframe Interpolation dialog, for its choice.
+fn interpolation_note(choice: &str, roving: bool) -> &'static str {
+    match (choice, roving) {
+        ("Current Settings", false) => "Keeps the interpolation each selected keyframe has.",
+        ("Current Settings", true) => "Keeps whether each selected keyframe roves.",
+        ("Linear", _) => "Changes at a constant rate between keyframes.",
+        ("Bezier", _) => "Curves you shape with separate incoming and outgoing handles.",
+        ("Continuous Bezier", _) => "Smooth change through the keyframe; the handles stay joined.",
+        ("Auto Bezier", _) => "Smooth change, recomputed when neighbouring keyframes change.",
+        ("Hold", _) => "Keeps the value until the next keyframe.",
+        ("Rove Across Time", _) => "Times the keyframe from its neighbours for an even speed.",
+        ("Lock To Time", _) => "Keeps the keyframe at its current time.",
+        _ => "",
+    }
+}
+
 fn interpolation_body(ui: &mut Ui, stage: &Stage, d: &mut InterpolationDialog) {
     let spatial = any_spatial(stage, &d.keys);
     let row = |ui: &mut Ui, label: &str, sel: &mut usize, items: &[&str], enabled: bool| {
@@ -212,6 +228,15 @@ fn interpolation_body(ui: &mut Ui, stage: &Stage, d: &mut InterpolationDialog) {
                 );
             });
         });
+        let note = interpolation_note(items[*sel], items.len() == ROVING.len());
+        ui.horizontal(|ui| {
+            ui.add_space(154.0);
+            ui.add_enabled(
+                enabled,
+                egui::Label::new(egui::RichText::new(tr(note)).color(color::TEXT_DIM).small()),
+            );
+        });
+        ui.add_space(4.0);
     };
     row(
         ui,
@@ -243,30 +268,56 @@ pub struct VelocityDialog {
     pub ease_out: Vec<Ease>,
     /// Continuous (Lock Outgoing to Incoming).
     pub continuous: bool,
+    /// Lock Dimensions (several dimensions, not spatial): one edit sets them all.
+    pub lock_dims: bool,
 }
 
 impl VelocityDialog {
-    /// The dialog for `keys` (None when the first key is gone).
+    /// The dialog for `keys` (None when the first key is gone). A Bezier side shows
+    /// its ease; a Linear or Hold side what AE shows for it: the segment's average
+    /// speed and 16.667 % influence (R1 on AE 26).
     pub fn new(stage: &Stage, keys: Vec<KeyRef>) -> Option<Self> {
         let k = keys.first()?;
         let spec = query::attr_spec(stage, &k.path, &k.attr)?;
         let kf = spec.keyframes.get(&k.time)?;
         let n = query::ease_dimensions(&k.attr, spec, &kf.value);
-        let fill = |e: &[Ease]| -> Vec<Ease> {
+        let spatial = is_spatial(&k.attr, spec);
+        let a = crate::graph::comps(&kf.value).unwrap_or_default();
+        let side = |bezier: bool, e: &[Ease], neighbour: Option<(&Time, &bae_model::Keyframe)>| {
             (0..n)
                 .map(|i| {
-                    e.get(i).or_else(|| e.first()).copied().unwrap_or(Ease {
-                        speed: 0.0,
-                        influence: Ease::DEFAULT_INFLUENCE,
-                    })
+                    if bezier && let Some(e) = e.get(i).or_else(|| e.first()) {
+                        return *e;
+                    }
+                    let speed = neighbour.map_or(0.0, |(t, nk)| {
+                        let dt = (*t - k.time).as_seconds();
+                        let b = crate::graph::comps(&nk.value).unwrap_or_default();
+                        let d = |j: usize| {
+                            b.get(j).copied().unwrap_or(0.0) - a.get(j).copied().unwrap_or(0.0)
+                        };
+                        if dt.abs() < 1e-9 {
+                            0.0
+                        } else if spatial {
+                            (0..a.len()).map(|j| d(j).powi(2)).sum::<f64>().sqrt() / dt.abs()
+                        } else {
+                            d(i) / dt
+                        }
+                    });
+                    Ease {
+                        speed,
+                        influence: 100.0 / 6.0,
+                    }
                 })
-                .collect()
+                .collect::<Vec<_>>()
         };
+        let next = spec.keyframes.range(k.time + Time(1)..).next();
+        let prev = spec.keyframes.range(..k.time).next_back();
         Some(Self {
             attr: k.attr.clone(),
-            ease_in: fill(&kf.ease_in),
-            ease_out: fill(&kf.ease_out),
+            ease_in: side(kf.interp_in == Interpolation::Bezier, &kf.ease_in, prev),
+            ease_out: side(kf.interp_out == Interpolation::Bezier, &kf.ease_out, next),
             continuous: kf.flags.temporal_continuous,
+            lock_dims: true,
             keys,
         })
     }
@@ -315,19 +366,29 @@ fn speed_unit(attr: &str) -> &'static str {
 fn velocity_body(ui: &mut Ui, d: &mut VelocityDialog) {
     let unit = tr(speed_unit(&d.attr));
     let n = d.ease_in.len();
-    let continuous = d.continuous;
-    let mut changed_in: Option<(usize, f64)> = None;
-    let mut changed_out: Option<(usize, f64)> = None;
-    for (title, eases, changed) in [
-        ("Incoming Velocity", &mut d.ease_in, &mut changed_in),
-        ("Outgoing Velocity", &mut d.ease_out, &mut changed_out),
-    ] {
+    if n > 1 {
+        widgets::checkbox(ui, &mut d.lock_dims, tr("Lock Dimensions"));
+    }
+    let lock = n > 1 && d.lock_dims;
+    // (incoming side, dimension, new speed / influence)
+    let mut speed_edit: Option<(bool, usize, f64)> = None;
+    let mut influence_edit: Option<(bool, f64)> = None;
+    for (incoming, title) in [(true, "Incoming Velocity"), (false, "Outgoing Velocity")] {
+        let eases = if incoming {
+            &mut d.ease_in
+        } else {
+            &mut d.ease_out
+        };
         ui.group(|ui| {
             ui.label(egui::RichText::new(tr(title)).color(color::TEXT_STRONG));
             for (i, e) in eases.iter_mut().enumerate() {
                 ui.horizontal(|ui| {
                     let label = if n > 1 {
-                        format!("{} {}:", tr("Dimension"), i + 1)
+                        format!(
+                            "{} {}",
+                            tr("Dimension:"),
+                            ["X", "Y", "Z"].get(i).copied().unwrap_or("")
+                        )
                     } else {
                         tr("Speed:").to_owned()
                     };
@@ -344,35 +405,57 @@ fn velocity_body(ui: &mut Ui, d: &mut VelocityDialog) {
                         )
                         .changed()
                     {
-                        *changed = Some((i, e.speed));
+                        speed_edit = Some((incoming, i, e.speed));
                     }
                     ui.label(unit);
                 });
                 ui.horizontal(|ui| {
                     ui.add_sized(vec2(90.0, 18.0), egui::Label::new(tr("Influence:")));
-                    ui.add(
-                        egui::DragValue::new(&mut e.influence)
-                            .range(0.1..=100.0)
-                            .speed(0.1)
-                            .max_decimals(2),
-                    )
-                    .labeled(
-                        egui::WidgetType::DragValue,
-                        &format!("{} {}", tr(title), tr("Influence:")),
-                    );
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut e.influence)
+                                .range(0.1..=100.0)
+                                .speed(0.1)
+                                .max_decimals(2),
+                        )
+                        .labeled(
+                            egui::WidgetType::DragValue,
+                            &format!("{} {}", tr(title), tr("Influence:")),
+                        )
+                        .changed()
+                    {
+                        influence_edit = Some((incoming, e.influence));
+                    }
                     ui.label("%");
                 });
             }
         });
     }
-    // Continuous: editing one speed copies it to the other side.
-    if continuous {
-        if let Some((i, v)) = changed_in {
-            d.ease_out[i].speed = v;
+    // Lock Dimensions: one dimension's edit sets them all; Continuous: a speed
+    // edit sets the other side too.
+    if let Some((incoming, i, v)) = speed_edit {
+        let dims: Vec<usize> = if lock { (0..n).collect() } else { vec![i] };
+        for side in [incoming, !incoming] {
+            if side != incoming && !d.continuous {
+                continue;
+            }
+            let eases = if side {
+                &mut d.ease_in
+            } else {
+                &mut d.ease_out
+            };
+            for j in &dims {
+                eases[*j].speed = v;
+            }
         }
-        if let Some((i, v)) = changed_out {
-            d.ease_in[i].speed = v;
-        }
+    }
+    if lock && let Some((incoming, v)) = influence_edit {
+        let eases = if incoming {
+            &mut d.ease_in
+        } else {
+            &mut d.ease_out
+        };
+        eases.iter_mut().for_each(|e| e.influence = v);
     }
     widgets::checkbox(
         ui,

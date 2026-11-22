@@ -106,18 +106,12 @@ fn catalog_item(ui: &mut Ui, cx: &mut PanelContext<'_>, it: &'static catalog::It
     }
 }
 
-/// AE's layer context menu: entries of the Layer, Effect and Animation menus,
-/// `(top-level menu, entry title)`; `("", "")` is a separator. The last group
-/// (Invert Selection, Select Children, Rename) only exists here.
+/// AE 26's layer context menu (R1, a solid layer), as catalog entries `(top-level
+/// menu, title)`; `("", "")` is a separator and `("", name)` a group this function
+/// builds itself (Track & Stabilize ▸, Open ▸, the context-only items).
 pub(crate) const LAYER_MENU: &[(&str, &str)] = &[
-    ("Layer", "New"),
-    ("Layer", "Layer Settings..."),
-    ("Layer", "Open Layer"),
-    ("Layer", "Open Layer Source"),
-    ("Layer", "Reveal in Explorer"),
-    ("", ""),
     ("Layer", "Mask"),
-    ("Layer", "Mask and Shape Path"),
+    ("", ""),
     ("Layer", "Quality"),
     ("Layer", "Switches"),
     ("Layer", "Transform"),
@@ -128,22 +122,28 @@ pub(crate) const LAYER_MENU: &[(&str, &str)] = &[
     ("Layer", "Environment Layer"),
     ("Layer", "Markers"),
     ("", ""),
-    ("Layer", "Blending Mode"),
-    ("Layer", "Layer Styles"),
+    ("", "Track & Stabilize"),
     ("", ""),
-    ("Effect", ""),
-    ("Animation", "Keyframe Assistant"),
-    ("", ""),
-    ("Animation", "Track Camera"),
-    ("Animation", "Warp Stabilizer VFX"),
-    ("Animation", "Track Motion"),
-    ("Animation", "Track Mask"),
+    ("", "Open"),
+    ("Layer", "Reveal"),
     ("", ""),
     ("Layer", "Pre-compose..."),
     ("", ""),
-    ("Layer", "Reveal"),
-    ("Layer", "Create"),
+    ("", "selection"),
+    ("", "Add to Essential Graphics"),
+    ("Composition", "Crop Comp to Selected Layer(s) Bounds"),
+    ("Layer", "Scene Edit Detection..."),
 ];
+
+/// Track & Stabilize ▸: these Animation menu items.
+const TRACK_ITEMS: [&str; 4] = [
+    "Track Camera",
+    "Warp Stabilizer VFX",
+    "Track Motion",
+    "Track Mask",
+];
+/// Open ▸: these Layer menu items.
+const OPEN_ITEMS: [&str; 2] = ["Open Layer", "Open Layer Source"];
 
 /// What the layer menu asks the Timeline to do itself.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -159,20 +159,51 @@ pub(crate) fn layer_menu(
     layer: &PrimPath,
 ) -> Option<LayerMenuOut> {
     let stage = cx.stage;
+    let mut out = None;
     for (top, title) in LAYER_MENU {
         match (*top, *title) {
             ("", "") => {
                 ui.separator();
             }
-            ("Effect", "") => {
-                if let Some((_, nodes)) = catalog::MENUS.iter().find(|(t, _)| *t == "Effect") {
-                    let cats: &'static [Node] = nodes;
-                    common::submenu(ui, tr("Effect"), &mut |ui| {
-                        for n in cats.iter().filter(|n| matches!(n, Node::Effects)) {
+            ("", "Track & Stabilize") => {
+                common::submenu(ui, tr("Track & Stabilize"), &mut |ui| {
+                    for t in TRACK_ITEMS {
+                        if let Some(n) = catalog_entry("Animation", t) {
                             catalog_node(ui, cx, n);
                         }
-                    });
+                    }
+                });
+            }
+            ("", "Open") => {
+                common::submenu(ui, tr("Open"), &mut |ui| {
+                    for t in OPEN_ITEMS {
+                        if let Some(n) = catalog_entry("Layer", t) {
+                            catalog_node(ui, cx, n);
+                        }
+                    }
+                });
+            }
+            ("", "selection") => {
+                if ui.button(tr("Invert Selection")).clicked() {
+                    invert_layer_selection(stage, session, layer);
+                    ui.close();
                 }
+                if ui.button(tr("Select Children")).clicked() {
+                    select_children(stage, session);
+                    ui.close();
+                }
+                let locked = query::is_locked(stage, layer);
+                if ui
+                    .add_enabled(!locked, egui::Button::new(tr("Rename")))
+                    .clicked()
+                {
+                    out = Some(LayerMenuOut::Rename);
+                    ui.close();
+                }
+            }
+            // Not built yet (needs the Essential Graphics panel).
+            ("", name) => {
+                ui.add_enabled(false, egui::Button::new(tr(name)));
             }
             (top, title) => {
                 if let Some(n) = catalog_entry(top, title) {
@@ -180,24 +211,6 @@ pub(crate) fn layer_menu(
                 }
             }
         }
-    }
-    ui.separator();
-    let mut out = None;
-    if ui.button(tr("Invert Selection")).clicked() {
-        invert_layer_selection(stage, session, layer);
-        ui.close();
-    }
-    if ui.button(tr("Select Children")).clicked() {
-        select_children(stage, session);
-        ui.close();
-    }
-    let locked = query::is_locked(stage, layer);
-    if ui
-        .add_enabled(!locked, egui::Button::new(tr("Rename")))
-        .clicked()
-    {
-        out = Some(LayerMenuOut::Rename);
-        ui.close();
     }
     out
 }
@@ -322,9 +335,9 @@ pub(crate) fn rove_state(stage: &Stage, keys: &[KeyRef]) -> (bool, bool) {
     (true, all)
 }
 
-/// Right-click on a keyframe (AE's keyframe context menu; the layer-bar keyframes,
-/// the Graph Editor's keyframes and its Edit Selected Keyframes button). `clicked`
-/// is the keyframe the Select … Keyframes items start from.
+/// Right-click on a keyframe: AE 26's keyframe context menu (the layer-bar
+/// keyframes, the Graph Editor's keyframes and its Edit Selected Keyframes button).
+/// `clicked` is the keyframe the value, Go To and Select … items start from.
 pub(crate) fn key_menu(
     ui: &mut Ui,
     cx: &mut PanelContext<'_>,
@@ -332,8 +345,62 @@ pub(crate) fn key_menu(
     clicked: &KeyRef,
 ) {
     let stage = cx.stage;
+    let spec = query::attr_spec(stage, &clicked.path, &clicked.attr);
+    let kf = spec.and_then(|s| s.keyframes.get(&clicked.time));
+    // The keyframe's value (greyed, as in AE).
+    let value = kf
+        .and_then(|k| crate::graph::comps(&k.value))
+        .map(|c| {
+            c.iter()
+                .map(|v| crate::graph::fmt_num(*v))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    ui.add_enabled(false, egui::Button::new(value));
     // Edit Value… (AE-ANI-073): the value dialog is not built yet.
     ui.add_enabled(false, egui::Button::new(tr("Edit Value...")));
+    if ui.button(tr("Go To Keyframe Time")).clicked() {
+        if let Some(info) = common::active_comp(stage, session) {
+            let t = query::to_comp_time(stage, &clicked.path, clicked.time);
+            session.lock().set_time(&info, t);
+        }
+        ui.close();
+    }
+    ui.separator();
+    let current = kf.map_or(0, |k| usize::from(k.label));
+    common::submenu(ui, tr("Label"), &mut |ui| {
+        if ui.button(tr("Select Label Group")).clicked() {
+            select_label_group(stage, session, clicked);
+            ui.close();
+        }
+        ui.separator();
+        for (i, (name, _)) in theme::LABELS.iter().enumerate() {
+            let mut on = i == current;
+            if widgets::checkbox(ui, &mut on, tr(name)).clicked() {
+                let keys = session.lock().selected_keys.clone();
+                let edits: Vec<bae_motion::KeyEdit> = keys
+                    .iter()
+                    .map(|k| {
+                        let mut e = bae_motion::KeyEdit::new(k.clone());
+                        e.label = Some(i as u8);
+                        e
+                    })
+                    .collect();
+                cx.invoke_with("key.edit", json!({ "edits": edits }));
+                ui.close();
+            }
+        }
+        ui.separator();
+        if ui.button(tr("Edit Label Colors...")).clicked() {
+            cx.invoke_with("app.settings", json!({"page": "labels"}));
+            ui.close();
+        }
+    });
+    if let Some(n) = catalog_entry("Edit", "Select Keyframe Label Group") {
+        catalog_node(ui, cx, n);
+    }
+    ui.separator();
     for (title, related) in [
         ("Select Equal Keyframes", Related::Equal),
         ("Select Previous Keyframes", Related::Previous),
@@ -344,6 +411,7 @@ pub(crate) fn key_menu(
             ui.close();
         }
     }
+    ui.separator();
     if ui.button(tr("Toggle Hold Keyframe")).clicked() {
         actions::handle(&Invocation::new(ids::TOGGLE_HOLD), cx, session);
         ui.close();
@@ -376,5 +444,42 @@ pub(crate) fn key_menu(
         actions::handle(&Invocation::new(ids::KEY_VELOCITY), cx, session);
         ui.close();
     }
+    ui.separator();
     keyframe_assistant_menu(ui, cx, session);
+}
+
+/// Label ▸ Select Label Group: the keyframes of the clicked keyframe's layer with
+/// its label.
+pub(crate) fn select_label_group(stage: &Stage, session: &SharedSession, clicked: &KeyRef) {
+    let Some(label) = query::attr_spec(stage, &clicked.path, &clicked.attr)
+        .and_then(|s| s.keyframes.get(&clicked.time))
+        .map(|k| k.label)
+    else {
+        return;
+    };
+    let Some(layer) = query::owning_layer(stage, &clicked.path) else {
+        return;
+    };
+    session.lock().selected_keys = keys_with_labels(stage, &[layer], &[label]);
+}
+
+/// Every keyframe of `layers` (and the prims below them) whose label is in `labels`.
+pub(crate) fn keys_with_labels(stage: &Stage, layers: &[PrimPath], labels: &[u8]) -> Vec<KeyRef> {
+    let mut out = Vec::new();
+    let mut stack: Vec<PrimPath> = layers.to_vec();
+    while let Some(p) = stack.pop() {
+        if let Some(v) = stage.prim(&p) {
+            for name in v.attr_names() {
+                if let Some(spec) = v.attr(name) {
+                    for (t, k) in &spec.keyframes {
+                        if labels.contains(&k.label) {
+                            out.push(KeyRef::new(p.clone(), name, *t));
+                        }
+                    }
+                }
+            }
+        }
+        stack.extend(stage.children(&p));
+    }
+    out
 }

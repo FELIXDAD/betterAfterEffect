@@ -19,7 +19,51 @@ use crate::session::{Pending, Scrub, SharedSession};
 
 /// The session resource (inserted by [`crate::MotionUiModule`]); a private one when
 /// the app did not insert it (tests, other hosts).
+/// Preferences the motion commands read (Default Spatial Interpolation to Linear),
+/// pushed to them when they change. Every motion panel calls this once a frame
+/// through [`session`]; it is an atomic compare when nothing changed.
+fn sync_prefs(resources: &Resources) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEEN: AtomicU64 = AtomicU64::new(u64::MAX);
+    let Some(store) = resources.get::<Arc<bae_prefs::PrefsStore>>() else {
+        return;
+    };
+    let generation = store.generation();
+    if SEEN.swap(generation, Ordering::Relaxed) != generation {
+        bae_motion::set_default_spatial_linear(
+            store
+                .current()
+                .bool(bae_prefs::keys::DEFAULT_SPATIAL_LINEAR),
+        );
+    }
+}
+
+/// Expression fields (timeline rows, Graph Editor): font size and colours from
+/// Preferences > Scripting & Expressions > Expression Editor (AE defaults without a
+/// preferences store). Returns (font, text colour, background).
+pub(crate) fn expression_style(
+    resources: &Resources,
+) -> (egui::FontId, egui::Color32, egui::Color32) {
+    let rgb = |c: [u8; 3]| egui::Color32::from_rgb(c[0], c[1], c[2]);
+    match resources.get::<Arc<bae_prefs::PrefsStore>>() {
+        Some(store) => {
+            let p = store.current();
+            (
+                egui::FontId::monospace(p.int(bae_prefs::keys::EXPR_FONT_SIZE).clamp(6, 72) as f32),
+                rgb(p.color("scripting_expressions.expr_color_default")),
+                rgb(p.color("scripting_expressions.expr_color_background")),
+            )
+        }
+        None => (
+            egui::FontId::monospace(12.0),
+            egui::Color32::from_rgb(0xcc, 0xcc, 0xcc),
+            egui::Color32::from_rgb(0x1d, 0x1d, 0x1d),
+        ),
+    }
+}
+
 pub(crate) fn session(resources: &Resources) -> SharedSession {
+    sync_prefs(resources);
     resources
         .get::<SharedSession>()
         .cloned()
