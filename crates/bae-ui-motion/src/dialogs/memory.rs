@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use bae_platform::{SettingsFile, VersionedSettings};
 use serde::{Deserialize, Serialize};
 
-use super::{CompSettingsMemory, Dialogs};
+use super::{CompSettingsMemory, Dialogs, SolidSettingsMemory};
 
 /// File name in the config folder.
 pub const FILE_NAME: &str = "dialogs.json";
@@ -18,6 +18,7 @@ pub const FILE_NAME: &str = "dialogs.json";
 #[serde(default)]
 pub struct Remembered {
     pub comp: CompSettingsMemory,
+    pub solid: SolidSettingsMemory,
 }
 
 impl VersionedSettings for Remembered {
@@ -29,11 +30,13 @@ impl Remembered {
     pub(crate) fn of(d: &Dialogs) -> Self {
         Remembered {
             comp: d.comp.clone(),
+            solid: d.solid.clone(),
         }
     }
 
     pub(crate) fn apply(self, d: &mut Dialogs) {
         d.comp = self.comp;
+        d.solid = self.solid;
     }
 }
 

@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::query::{self, SOLIDS_FOLDER};
-use crate::util::{child, create, ensure_folder, fail, set};
+use crate::util::{child, create, ensure_folder, fail, set, write_attr};
 
 /// A solid item's settings.
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
@@ -109,7 +109,7 @@ impl bae_model::Command for SetSolidSettings {
     type Output = SolidOutput;
     const ID: &'static str = "solid.set_settings";
     const TITLE: &'static str = "Solid Settings";
-    const DESCRIPTION: &'static str = "Change a solid's name, size, pixel aspect ratio and color (AE Solid Settings, Cmd/Ctrl+Shift+Y). Target a solid or adjustment layer, or a solid item. For a layer whose solid other layers use too, affect_all=false gives the layer its own copy; true changes the shared solid. Layers whose anchor point was at the solid's center stay centered.";
+    const DESCRIPTION: &'static str = "Change a solid's name, size, pixel aspect ratio and color (AE Solid Settings, Cmd/Ctrl+Shift+Y). Target a solid or adjustment layer, or a solid item. For a layer whose solid other layers use too, affect_all=false gives the layer its own copy; true changes the shared solid. Anchor points scale with the size, so the solid stays in place.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<SolidOutput, CommandError> {
         let stage = tx.stage();
@@ -174,39 +174,36 @@ impl bae_model::Command for SetSolidSettings {
         set(tx, &solid, "pixel_aspect", Value::Float(pixel_aspect))?;
         set(tx, &solid, "solid_color", Value::Color(color))?;
 
-        // The layers follow: a name that was the solid's follows the new name;
-        // an anchor point at the old center moves to the new center.
-        let old_center = [f64::from(old.width) / 2.0, f64::from(old.height) / 2.0];
-        let new_center = [f64::from(width) / 2.0, f64::from(height) / 2.0];
+        // The layers follow: a name that was the solid's follows the new name,
+        // and anchor points scale with the size (AE: [200,150] on 400x300
+        // becomes [300,250] on 600x500), so the solid stays in place.
+        let (nw, ow) = (f64::from(width), f64::from(old.width.max(1)));
+        let (nh, oh) = (f64::from(height), f64::from(old.height.max(1)));
         tx.allow_locked(|tx| -> Result<(), CommandError> {
             for l in &affected {
-                const ANCHOR: &str = "transform:anchor_point";
-                let (layer_name, anchor) = match tx.stage().prim(l) {
-                    Some(v) => (
-                        Some(query::display_name(&v)),
-                        query::static_value(&v, ANCHOR),
-                    ),
-                    None => (None, None),
-                };
+                let layer_name = tx.stage().prim(l).map(|v| query::display_name(&v));
                 if name != old.name && layer_name.as_deref() == Some(old.name.as_str()) {
                     set(tx, l, "name", Value::String(name.clone()))?;
                 }
-                if new_center == old_center {
+                if (nw, nh) == (ow, oh) {
                     continue;
                 }
-                let animated = query::attr_spec(tx.stage(), l, ANCHOR)
-                    .is_some_and(|s| !s.keyframes.is_empty());
-                let (x, y, z) = match anchor {
-                    Some(Value::Vec3([x, y, z])) => (x, y, z),
-                    Some(Value::Vec2([x, y])) => (x, y, 0.0),
-                    _ => continue,
+                const ANCHOR: &str = "transform:anchor_point";
+                let Some(mut spec) = query::attr_spec(tx.stage(), l, ANCHOR).cloned() else {
+                    continue;
                 };
-                let at_center =
-                    (x - old_center[0]).abs() < 1e-6 && (y - old_center[1]).abs() < 1e-6;
-                if at_center && !animated {
-                    let v = Value::Vec3([new_center[0], new_center[1], z]);
-                    set(tx, l, ANCHOR, v)?;
+                let scale = |v: &Value| match v {
+                    Value::Vec3([x, y, z]) => Value::Vec3([x * nw / ow, y * nh / oh, *z]),
+                    Value::Vec2([x, y]) => Value::Vec2([x * nw / ow, y * nh / oh]),
+                    other => other.clone(),
+                };
+                if let Some(v) = &mut spec.value {
+                    *v = scale(v);
                 }
+                for k in spec.keyframes.values_mut() {
+                    k.value = scale(&k.value);
+                }
+                write_attr(tx, l, ANCHOR, spec)?;
             }
             Ok(())
         })?;

@@ -27,7 +27,7 @@ use crate::session::SharedSession;
 pub const DEFAULT_COLOR: [f64; 4] = [45.0 / 255.0, 45.0 / 255.0, 45.0 / 255.0, 1.0];
 
 /// Size units of the dialog (the solid is always stored in pixels).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Units {
     #[default]
     Pixels,
@@ -95,12 +95,20 @@ impl From<SolidInfo> for SolidValues {
     }
 }
 
-/// What New Solid starts from (AE remembers the last color and the options).
-#[derive(Clone, Debug, Default)]
+/// What New Solid starts from, kept across runs (AE's Last Solid Section):
+/// the color and options, and the size and pixel aspect ratio of the last
+/// solid together with its comp's, so a new solid in a comp of that size
+/// gets the same size again.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct SolidSettingsMemory {
     pub color: Option<[f64; 4]>,
     pub lock_aspect: bool,
     pub units: Units,
+    /// Width, height and pixel aspect ratio of the last solid.
+    pub size: Option<(u32, u32, f64)>,
+    /// Its comp's width, height and pixel aspect ratio.
+    pub comp: Option<(u32, u32, f64)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -149,13 +157,18 @@ impl SolidSettings {
     ) -> Option<Self> {
         let comp = comp_size(stage, session)?;
         let color = memory.color.unwrap_or(DEFAULT_COLOR);
+        // The last solid's size when it was made in a comp of this size.
+        let (width, height, pixel_aspect) = match (memory.size, memory.comp) {
+            (Some(size), Some(c)) if c == comp => size,
+            _ => comp,
+        };
         let mut s = SolidSettings {
             target: Target::New,
             values: SolidValues {
                 name: String::new(),
-                width: comp.0,
-                height: comp.1,
-                pixel_aspect: comp.2,
+                width,
+                height,
+                pixel_aspect,
                 color,
             },
             comp: Some(comp),
@@ -262,6 +275,9 @@ impl SolidSettings {
                 d.solid.color = Some(v.color);
                 d.solid.lock_aspect = self.lock_aspect;
                 d.solid.units = self.units;
+                d.solid.size = Some((v.width, v.height, v.pixel_aspect));
+                d.solid.comp = self.comp;
+                super::memory::save(&d);
             }
             Target::Edit {
                 target,
@@ -309,7 +325,6 @@ impl SolidSettings {
                 self.name_edited = true;
             }
         });
-        let editing = !self.is_new();
         let comp = self.comp;
         dialog::group(ui, tr("Size"), |ui| {
             ui.set_width(ui.available_width());
@@ -442,39 +457,45 @@ impl SolidSettings {
         if recolored && !self.name_edited {
             self.values.name = default_name(stage, self.values.color);
         }
+        // AE: one user: the checkbox is checked and greyed; a shared solid:
+        // unchecked by default, and then the layer gets a new solid (OK reads
+        // "New").
+        let mut forks = false;
         if let Target::Edit { users, layer, .. } = &self.target {
             ui.add_space(4.0);
+            let shared = *layer && *users > 1;
             if *layer {
-                ui.add_enabled_ui(*users > 1, |ui| {
+                let mut checked = self.affect_all || !shared;
+                ui.add_enabled_ui(shared, |ui| {
                     bae_ui::widgets::checkbox(
                         ui,
-                        &mut self.affect_all,
+                        &mut checked,
                         tr("Affect all layers that use this solid"),
                     );
                 });
+                if shared {
+                    self.affect_all = checked;
+                }
             }
-            let n = if *layer && !self.affect_all {
-                1
-            } else {
-                *users
-            };
-            let text = if n == 1 {
+            forks = shared && !self.affect_all;
+            let text = if forks {
+                tr("A new solid will be created for this layer.").to_owned()
+            } else if *users <= 1 {
                 tr("This change will affect 1 layer.").to_owned()
             } else {
-                tr("This change will affect {n} layers.").replace("{n}", &n.to_string())
+                tr("This change will affect {n} layers.").replace("{n}", &users.to_string())
             };
             ui.label(egui::RichText::new(text).color(color::TEXT_DIM));
         }
         let mut out = Outcome::None;
         ui.horizontal(|ui| {
-            if editing {
-                // Live preview of edits is not implemented yet: shown like AE, off.
-                ui.add_enabled_ui(false, |ui| {
-                    bae_ui::widgets::checkbox(ui, &mut self.preview, tr("Preview"));
-                });
-            }
+            // Live preview is not implemented yet: shown like AE, off.
+            ui.add_enabled_ui(false, |ui| {
+                bae_ui::widgets::checkbox(ui, &mut self.preview, tr("Preview"));
+            });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                out = dialog::buttons(ui, self.valid());
+                let ok = if forks { tr("New") } else { tr("OK") };
+                out = dialog::buttons_labeled(ui, self.valid(), ok, tr("Cancel"));
             });
         });
         out
@@ -590,6 +611,8 @@ pub(crate) const STRINGS: &[&str] = &[
     "Affect all layers that use this solid",
     "This change will affect 1 layer.",
     "This change will affect {n} layers.",
+    "A new solid will be created for this layer.",
+    "New",
     "Preview",
     "{color} Solid",
     "Black",

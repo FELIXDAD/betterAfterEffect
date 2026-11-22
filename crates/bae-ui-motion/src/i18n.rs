@@ -526,6 +526,10 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "This change will affect {n} layers.",
         "此更改将影响 {n} 个图层。",
     ),
+    (
+        "A new solid will be created for this layer.",
+        "将为此图层创建新纯色。",
+    ),
     ("{color} Solid", "{color} 纯色"),
     ("White", "白色"),
     ("Dark Gray", "深灰色"),

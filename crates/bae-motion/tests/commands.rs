@@ -1052,13 +1052,33 @@ fn solid_settings_edit_the_solid_and_keep_the_layer_centered() {
         (500, 300, 1.0)
     );
     assert_eq!(info.color, [1.0, 0.0, 0.0, 1.0]);
-    // The layer showed the solid's name and follows it; its anchor was at the
-    // center and stays there, so the solid stays centered in the comp.
+    // The layer showed the solid's name and follows it; its anchor scales
+    // with the size (AE), so the solid stays centered in the comp.
     assert_eq!(query::display_name_of(&fx.stage, &layer), "Red Solid 1");
     assert_eq!(
         fx.value(&layer, "transform:anchor_point"),
         Some(Value::Vec3([250.0, 150.0, 0.0]))
     );
+    // An off-center anchor scales too (R1: [50,50] on 400x300 → [75,83.33] on 600x500).
+    fx.run(
+        "attr.set_at",
+        json!({"path": layer, "attr": "transform:anchor_point", "time": 0, "value": {"type": "vec3", "value": [50.0, 50.0, 0.0]}}),
+    );
+    fx.run(
+        "solid.set_settings",
+        json!({"target": layer, "width": 750, "height": 500}),
+    );
+    match fx.value(&layer, "transform:anchor_point") {
+        Some(Value::Vec3([x, y, _])) => {
+            assert!(
+                (x - 75.0).abs() < 1e-9 && (y - 50.0 * 500.0 / 300.0).abs() < 1e-9,
+                "{x} {y}"
+            )
+        }
+        other => panic!("{other:?}"),
+    }
+    fx.stage.undo(&fx.author).unwrap();
+    fx.stage.undo(&fx.author).unwrap();
     // One undo step.
     fx.stage.undo(&fx.author).unwrap();
     let info = bae_motion::solid::solid_info(&fx.stage, &item).unwrap();

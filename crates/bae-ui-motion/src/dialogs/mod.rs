@@ -131,6 +131,7 @@ pub(crate) fn new_solid(cx: &PanelContext<'_>, session: &SharedSession) {
     if d.open.is_some() {
         return;
     }
+    remember(cx.resources, &mut d);
     if let Some(s) = SolidSettings::new_solid(cx.stage, session, &d.solid) {
         d.open = Some(Dialog::SolidSettings(Box::new(s)));
     }
