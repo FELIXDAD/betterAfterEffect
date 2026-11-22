@@ -36,9 +36,9 @@
 
 ## 统计
 
-- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 91，◐ 6，☐ 222，⏸ 221，Ⓐ 30
-- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 122 条。
-- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 122 条，macOS 122 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
+- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 95，◐ 8，☐ 220，⏸ 217，Ⓐ 30
+- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 124 条。
+- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 124 条，macOS 124 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
 
 ## 主菜单
 
@@ -165,10 +165,10 @@
 | Label ▸ Sandstone | 16646163 | `motion.edit.label` | `{"label":15}` |  |  | B | ✅ |
 | Label ▸ Dark Green | 16646164 | `motion.edit.label` | `{"label":16}` |  |  | B | ✅ |
 | Label ▸ Edit Label Colors... | 16646166 | `motion.edit.edit_label_colors` |  |  |  | D | ⏸ |
-| Select Keyframe Label Group ▸ On Selected Layers | 23592961 | `motion.edit.select_keyframe_label_group` | `{"scope":"selected_layers"}` |  |  | C | ⏸ |
-| Select Keyframe Label Group ▸ On All Layers | 23592962 | `motion.edit.select_keyframe_label_group` | `{"scope":"all_layers"}` |  |  | C | ⏸ |
-| Select Keyframe Label Group ▸ Visible Keyframes on Selected Layers | 23592964 | `motion.edit.select_keyframe_label_group` | `{"scope":"visible_selected_layers"}` |  |  | C | ⏸ |
-| Select Keyframe Label Group ▸ Visible Keyframes on All Layers | 23592965 | `motion.edit.select_keyframe_label_group` | `{"scope":"visible_all_layers"}` |  |  | C | ⏸ |
+| Select Keyframe Label Group ▸ On Selected Layers | 23592961 | `motion.edit.select_keyframe_label_group` | `{"scope":"selected_layers"}` |  |  | C | ✅ |
+| Select Keyframe Label Group ▸ On All Layers | 23592962 | `motion.edit.select_keyframe_label_group` | `{"scope":"all_layers"}` |  |  | C | ✅ |
+| Select Keyframe Label Group ▸ Visible Keyframes on Selected Layers | 23592964 | `motion.edit.select_keyframe_label_group` | `{"scope":"visible_selected_layers"}` |  |  | C | ◐ |
+| Select Keyframe Label Group ▸ Visible Keyframes on All Layers | 23592965 | `motion.edit.select_keyframe_label_group` | `{"scope":"visible_all_layers"}` |  |  | C | ◐ |
 | Purge ▸ All Cache... | 11403265 | `motion.edit.purge` | `{"what":"all_caches"}` | Alt+Z | Opt+Z | B | ⏸ |
 | Purge ▸ All Memory & Disk Cache... | 11403266 | `motion.edit.purge` | `{"what":"memory_and_disk_cache"}` |  |  | B | ⏸ |
 | Purge ▸ All Memory | 11403267 | `motion.edit.purge` | `{"what":"all_memory"}` | Ctrl+Alt+PadSlash | Control+PadClear / Cmd+Opt+PadSlash | B | ⏸ |
@@ -446,8 +446,8 @@
 | Browse Presets... | 851973 | `motion.anim.browse_presets` |  |  |  | E | ⏸ |
 | Set Keyframe | 851975 | `motion.anim.set_keyframe` |  |  |  | B | ☐ |
 | Toggle Hold Keyframe | 851976 | `motion.toggle_hold` |  | Ctrl+Alt+H | Cmd+Opt+H | B | ✅ |
-| Keyframe Interpolation... | 851977 | `motion.anim.keyframe_interpolation` |  | Ctrl+Alt+K | Cmd+Opt+K | C | ☐ |
-| Keyframe Velocity... | 851978 | `motion.anim.keyframe_velocity` |  | Ctrl+Shift+K | Cmd+Shift+K | C | ☐ |
+| Keyframe Interpolation... | 851977 | `motion.anim.keyframe_interpolation` |  | Ctrl+Alt+K | Cmd+Opt+K | C | ✅ |
+| Keyframe Velocity... | 851978 | `motion.anim.keyframe_velocity` |  | Ctrl+Shift+K | Cmd+Shift+K | C | ✅ |
 | Keyframe Assistant ▸ RPF Camera Import | 11075585 | `motion.anim.rpf_camera_import` |  |  |  | B | Ⓐ |
 | Keyframe Assistant ▸ Create Keyframes from Data | 11075586 | `motion.anim.create_keyframes_from_data` |  |  |  | B | ⏸ |
 | Keyframe Assistant ▸ Null Controllers for Positional Points | 11075587 | `motion.anim.null_controllers_for_positional_points` |  |  |  | B | ⏸ |

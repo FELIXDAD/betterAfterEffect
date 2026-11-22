@@ -177,8 +177,18 @@ fn render_offscreen(
         let output = egui_ctx.run_ui(input, |ui| {
             invocations = workspace.ui(ui, &status, &document, resources);
         });
+        // `BAE_SMOKE_INVOKE=<action>[,<action>…]`: run actions after the first
+        // frame (screenshots of dialogs, e.g. `motion.comp.composition_settings`).
+        if frame == 1
+            && let Some(ids) = std::env::var_os("BAE_SMOKE_INVOKE")
+        {
+            for id in ids.to_string_lossy().split(',').filter(|s| !s.is_empty()) {
+                invocations.push(bae_ui::Invocation::new(id.trim()));
+            }
+        }
         // Cycle through every workspace so each preset's panels get drawn.
-        if !demo && frame % 10 == 9 && !workspaces.is_empty() {
+        let invoking = std::env::var_os("BAE_SMOKE_INVOKE").is_some();
+        if !demo && !invoking && frame % 10 == 9 && !workspaces.is_empty() {
             let next = &workspaces[(frame as usize / 10 + 1) % workspaces.len()].0;
             invocations.push(bae_ui::Invocation::with_params(
                 bae_ui::action::ids::SWITCH_WORKSPACE,

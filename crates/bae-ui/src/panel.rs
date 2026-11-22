@@ -337,7 +337,7 @@ mod tests {
         let stage = Stage::new();
         let author = AuthorId::system();
         let mut requests = PanelRequests::default();
-        let ctx = egui::Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
             let mut cx =
                 PanelContext::new(&id, &kind.title, &stage, &author, &resources, &mut requests);

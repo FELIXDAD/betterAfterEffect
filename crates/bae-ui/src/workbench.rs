@@ -120,6 +120,8 @@ pub struct Workbench {
     /// Module action handlers, tried after the focused panel.
     handlers: Arc<Registry<dyn ActionHandler>>,
     handlers_gen: u64,
+    /// Module dialogs, drawn over the dock (`crate::dialog`).
+    dialog_hosts: Arc<Registry<dyn crate::dialog::DialogHost>>,
     handler_conflicts: Vec<String>,
     keymap_conflicts: Vec<String>,
     /// Model commands `(id, English title)` for the shortcut editor.
@@ -153,6 +155,49 @@ impl Workbench {
         .with_keymap_extensions(app.registry::<KeymapBindings>())
         .with_action_handlers(app.registry::<dyn ActionHandler>())
         .with_command_variants(app.registry::<crate::action::CommandVariant>())
+        .with_dialog_hosts(app.registry::<dyn crate::dialog::DialogHost>())
+    }
+
+    /// Module dialogs (`Registry<dyn DialogHost>`), drawn after the dock; while
+    /// one is open no shortcuts reach the project.
+    pub fn with_dialog_hosts(
+        mut self,
+        hosts: Arc<Registry<dyn crate::dialog::DialogHost>>,
+    ) -> Self {
+        self.dialog_hosts = hosts;
+        self
+    }
+
+    /// Whether a modal dialog is open: the welcome / role picker or a module
+    /// dialog. Hosts use it to disable the native menu bar, like AE.
+    pub fn modal_open(&self, resources: &bae_app::Resources) -> bool {
+        self.role_picker_open()
+            || self.external_modal
+            || self
+                .dialog_hosts
+                .snapshot()
+                .iter()
+                .any(|h| h.item().is_open(resources))
+    }
+
+    fn module_dialogs(&mut self, ctx: &egui::Context, cx: &WorkbenchContext<'_>) {
+        let hosts = self.dialog_hosts.snapshot();
+        if hosts.is_empty() {
+            return;
+        }
+        let id = PanelId::new("dialog");
+        for h in hosts.iter() {
+            let mut pcx = PanelContext::new(
+                &id,
+                "",
+                cx.stage,
+                cx.author,
+                cx.resources,
+                &mut self.requests,
+            );
+            h.item().ui(ctx, &mut pcx);
+        }
+        self.apply_panel_requests(cx);
     }
 
     /// Names of command variants (`Registry<CommandVariant>`) for the shortcut editor.
@@ -222,6 +267,7 @@ impl Workbench {
             variants: Arc::new(Registry::new()),
             handlers: Arc::new(Registry::new()),
             handlers_gen: u64::MAX,
+            dialog_hosts: Arc::new(Registry::new()),
             handler_conflicts: Vec::new(),
             keymap_conflicts: Vec::new(),
             extra_commands: Vec::new(),
@@ -521,9 +567,10 @@ impl Workbench {
     ) -> Vec<Invocation> {
         self.refresh_registries();
         crate::a11y::install(ui.ctx());
-        // A modal dialog (the welcome / role picker) owns the keyboard: no
-        // shortcuts and no panel keys reach the project behind it.
-        let modal = self.role_picker_open() || self.external_modal;
+        // A modal dialog (the welcome / role picker, an external window such as
+        // Preferences, a module dialog) owns the keyboard: no shortcuts and no
+        // panel keys reach the project behind it.
+        let modal = self.modal_open(cx.resources) || crate::color_picker::open_last_pass(ui.ctx());
         crate::panel::set_modal_open(ui.ctx(), modal);
         if !modal && !self.record_shortcut(ui.ctx()) {
             self.collect_shortcuts(ui.ctx());
@@ -583,6 +630,7 @@ impl Workbench {
         };
         self.dock.show(&mut child, &mut host);
         self.apply_panel_requests(cx);
+        self.module_dialogs(ui.ctx(), cx);
         self.shortcut_window(ui.ctx());
         self.workspace_dialogs(ui.ctx());
         ime_follows_caret(ui.ctx());
@@ -1120,7 +1168,7 @@ mod tests {
     }
 
     fn frame(wb: &mut Workbench, events: Vec<Event>) -> Vec<Invocation> {
-        let ctx = Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         frame_in(&ctx, wb, events)
     }
 
@@ -1221,7 +1269,7 @@ mod tests {
             .unwrap();
         let mut wb =
             Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
-        let ctx = Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         let none = Modifiers::NONE;
         frame_in(&ctx, &mut wb, vec![]);
         // Nothing focused: Space plays.
@@ -1424,7 +1472,7 @@ mod tests {
             title: "",
             dirty: false,
         };
-        let ctx = Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         let run = |wb: &mut Workbench, events: Vec<Event>| {
             let input = RawInput {
                 screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1400.0, 900.0))),
@@ -1540,7 +1588,7 @@ mod tests {
         let (kinds, presets, keymaps, actions) = registries();
         let mut wb =
             Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
-        let ctx = Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         wb.show_role_picker();
         frame_in(&ctx, &mut wb, vec![]);
         assert!(frame_in(&ctx, &mut wb, vec![key(Key::U, Modifiers::NONE)]).is_empty());
@@ -1560,7 +1608,7 @@ mod tests {
         let (kinds, presets, keymaps, actions) = registries();
         let mut wb =
             Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
-        let ctx = Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         let pointer = |pos: egui::Pos2, pressed: bool| {
             vec![
                 Event::PointerMoved(pos),
@@ -1688,6 +1736,78 @@ mod tests {
         assert_eq!(*log.lock().unwrap(), ["a", "b"]);
         // Ids nobody claims fall through to the shell.
         assert!(!wb.handle(&Invocation::new("model.command"), &cx));
+    }
+
+    /// A module dialog: open until OK (runs `ask.ok`) or Cancel.
+    struct Ask {
+        open: Arc<std::sync::Mutex<bool>>,
+    }
+
+    impl crate::dialog::DialogHost for Ask {
+        fn is_open(&self, _: &Resources) -> bool {
+            *self.open.lock().unwrap()
+        }
+        fn ui(&self, ctx: &Context, cx: &mut PanelContext<'_>) {
+            use crate::dialog::{self, Outcome};
+            let mut open = self.open.lock().unwrap();
+            if !*open {
+                return;
+            }
+            let id = egui::Id::new("ask");
+            let shown = dialog::window(ctx, id, "Ask", |ui| {
+                ui.label("Sure?");
+                dialog::buttons(ui, true)
+            });
+            match shown {
+                Some(Outcome::Ok) => {
+                    cx.invoke("ask.ok");
+                    *open = false;
+                }
+                Some(Outcome::Cancel) => *open = false,
+                None if dialog::closed_by_title_bar(ctx, id) => *open = false,
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn module_dialogs_are_modal_and_run_commands_after_the_frame() {
+        let (kinds, presets, keymaps, actions) = registries();
+        let hosts = Arc::new(Registry::<dyn crate::dialog::DialogHost>::new());
+        let open = Arc::new(std::sync::Mutex::new(false));
+        hosts
+            .register_arc(
+                Owner::module("ask"),
+                "ask",
+                Arc::new(Ask { open: open.clone() }),
+            )
+            .unwrap();
+        let mut wb =
+            Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default())
+                .with_dialog_hosts(hosts);
+        let ctx = crate::testing::ctx_with_fonts();
+        let u = || key(Key::U, Modifiers::NONE);
+        // Closed: shortcuts work.
+        assert_eq!(
+            frame_in(&ctx, &mut wb, vec![u()]),
+            vec![Invocation::new("layer.reveal_keyframes")]
+        );
+        assert!(!wb.modal_open(&Resources::new()));
+        // Open: U goes nowhere, Esc cancels without a command.
+        *open.lock().unwrap() = true;
+        assert!(wb.modal_open(&Resources::new()));
+        assert!(frame_in(&ctx, &mut wb, vec![]).is_empty());
+        assert!(frame_in(&ctx, &mut wb, vec![u()]).is_empty());
+        assert!(frame_in(&ctx, &mut wb, vec![key(Key::Escape, Modifiers::NONE)]).is_empty());
+        assert!(!*open.lock().unwrap());
+        // Reopened: Enter is OK, and its command comes out after the frame.
+        *open.lock().unwrap() = true;
+        assert!(frame_in(&ctx, &mut wb, vec![]).is_empty());
+        assert_eq!(
+            frame_in(&ctx, &mut wb, vec![key(Key::Enter, Modifiers::NONE)]),
+            vec![Invocation::new("ask.ok")]
+        );
+        assert!(!*open.lock().unwrap());
     }
 
     #[test]

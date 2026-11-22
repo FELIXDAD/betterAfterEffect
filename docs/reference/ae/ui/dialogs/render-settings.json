@@ -1,0 +1,604 @@
+{
+  "schemaVersion": "1.0",
+  "id": "render-settings",
+  "title": {
+    "zh": "渲染设置",
+    "en": "Render Settings"
+  },
+  "triggers": [
+    {
+      "action": "Render Settings (Render Queue item)",
+      "shortcutWin": null,
+      "menuZh": "渲染队列面板 ▸ 点击渲染设置蓝字（如“最佳设置”）"
+    },
+    {
+      "action": "Render Settings Templates",
+      "shortcutWin": null,
+      "menuZh": "编辑 ▸ 模板 ▸ 渲染设置(R)... ▸ 编辑..."
+    }
+  ],
+  "source": {
+    "application": "Adobe After Effects 26.0 (26.0x67)",
+    "platform": "Windows 11 Pro x64 (3840x2160 @ 150% DPI)",
+    "localeObserved": "zh_CN",
+    "method": "Live MSAA inspection + interactive tab/radio/dropdown probing + ExtendScript range probing"
+  },
+  "geometry": {
+    "physicalPxAt144Dpi": {
+      "w": 957,
+      "h": 899
+    },
+    "logicalPxAt96Dpi": {
+      "w": 638,
+      "h": 599
+    }
+  },
+  "persistence": {
+    "remembersLastValues": false,
+    "persistsViaTemplates": true,
+    "notesZh": "单次弹窗修改仅作用于当前渲染队列项；新建渲染队列项按“渲染设置模板”对话框中指定的默认模板（影片默认“最佳设置”、帧默认“当前设置”、预渲染默认“最佳设置”、影片代理默认“草图设置”、静止代理默认“最佳设置”）初始化，模板本身跨重启持久化。"
+  },
+  "buttonBar": {
+    "position": "bottom_right",
+    "right": [
+      {
+        "id": "ok",
+        "type": "button",
+        "zh": "确定",
+        "en": "OK",
+        "role": "accept"
+      },
+      {
+        "id": "cancel",
+        "type": "button",
+        "zh": "取消",
+        "en": "Cancel",
+        "role": "reject"
+      }
+    ]
+  },
+  "tabs": [],
+  "controls": [
+    {
+      "id": "quality",
+      "type": "dropdown",
+      "zh": "品质:",
+      "en": "Quality:",
+      "defaultValue": {
+        "zh": "最佳",
+        "en": "Best"
+      },
+      "options": [
+        {
+          "zh": "当前设置",
+          "en": "Current Settings"
+        },
+        {
+          "zh": "最佳",
+          "en": "Best"
+        },
+        {
+          "zh": "草图",
+          "en": "Draft"
+        },
+        {
+          "zh": "线框",
+          "en": "Wireframe"
+        }
+      ],
+      "notesZh": "默认值以“最佳设置”模板为例。"
+    },
+    {
+      "id": "resolution",
+      "type": "dropdown",
+      "zh": "分辨率:",
+      "en": "Resolution:",
+      "defaultValue": {
+        "zh": "完整",
+        "en": "Full"
+      },
+      "options": [
+        {
+          "zh": "当前设置",
+          "en": "Current Settings"
+        },
+        {
+          "zh": "完整",
+          "en": "Full"
+        },
+        {
+          "zh": "二分之一",
+          "en": "Half"
+        },
+        {
+          "zh": "三分之一",
+          "en": "Third"
+        },
+        {
+          "zh": "四分之一",
+          "en": "Quarter"
+        },
+        {
+          "zh": "自定义...",
+          "en": "Custom..."
+        }
+      ],
+      "notesZh": "选择“自定义...”时弹出自定义分辨率子对话框，指定水平/垂直采样步长；下方只读显示实际渲染尺寸。"
+    },
+    {
+      "id": "disk_cache",
+      "type": "dropdown",
+      "zh": "磁盘缓存:",
+      "en": "Disk Cache:",
+      "defaultValue": {
+        "zh": "只读",
+        "en": "Read Only"
+      },
+      "options": [
+        {
+          "zh": "当前设置",
+          "en": "Current Settings"
+        },
+        {
+          "zh": "只读",
+          "en": "Read Only"
+        }
+      ]
+    },
+    {
+      "id": "proxy_use",
+      "type": "dropdown",
+      "zh": "代理使用:",
+      "en": "Proxy Use:",
+      "defaultValue": {
+        "zh": "不使用代理",
+        "en": "Use No Proxies"
+      },
+      "options": [
+        {
+          "zh": "当前设置",
+          "en": "Current Settings"
+        },
+        {
+          "zh": "使用所有代理",
+          "en": "Use All Proxies"
+        },
+        {
+          "zh": "仅使用合成代理",
+          "en": "Use Comp Proxies Only"
+        },
+        {
+          "zh": "不使用代理",
+          "en": "Use No Proxies"
+        }
+      ]
+    },
+    {
+      "id": "effects",
+      "type": "dropdown",
+      "zh": "效果:",
+      "en": "Effects:",
+      "defaultValue": {
+        "zh": "当前设置",
+        "en": "Current Settings"
+      },
+      "options": [
+        {
+          "zh": "当前设置",
+          "en": "Current Settings"
+        },
+        {
+          "zh": "全部开启",
+          "en": "All On"
+        },
+        {
+          "zh": "全部关闭",
+          "en": "All Off"
+        }
+      ]
+    },
+    {
+      "id": "solo_switches",
+      "type": "dropdown",
+      "zh": "单独开关:",
+      "en": "Solo Switches:",
+      "defaultValue": {
+        "zh": "当前设置",
+        "en": "Current Settings"
+      },
+      "options": [
+        {
+          "zh": "当前设置",
+          "en": "Current Settings"
+        },
+        {
+          "zh": "全部关闭",
+          "en": "All Off"
+        }
+      ]
+    },
+    {
+      "id": "guide_layers",
+      "type": "dropdown",
+      "zh": "引导层:",
+      "en": "Guide Layers:",
+      "defaultValue": {
+        "zh": "全部关闭",
+        "en": "All Off"
+      },
+      "options": [
+        {
+          "zh": "当前设置",
+          "en": "Current Settings"
+        },
+        {
+          "zh": "全部关闭",
+          "en": "All Off"
+        }
+      ]
+    },
+    {
+      "id": "color_depth",
+      "type": "dropdown",
+      "zh": "颜色深度:",
+      "en": "Color Depth:",
+      "defaultValue": {
+        "zh": "当前设置",
+        "en": "Current Settings"
+      },
+      "options": [
+        {
+          "zh": "当前设置",
+          "en": "Current Settings"
+        },
+        {
+          "zh": "每通道 8 位",
+          "en": "8 bits per channel"
+        },
+        {
+          "zh": "每通道 16 位",
+          "en": "16 bits per channel"
+        },
+        {
+          "zh": "每通道 32 位",
+          "en": "32 bits per channel"
+        }
+      ]
+    },
+    {
+      "id": "frame_blending",
+      "type": "dropdown",
+      "zh": "帧混合:",
+      "en": "Frame Blending:",
+      "defaultValue": {
+        "zh": "对选中图层打开",
+        "en": "On for Checked Layers"
+      },
+      "options": [
+        {
+          "zh": "当前设置",
+          "en": "Current Settings"
+        },
+        {
+          "zh": "对选中图层打开",
+          "en": "On for Checked Layers"
+        },
+        {
+          "zh": "对所有图层关闭",
+          "en": "Off for All Layers"
+        }
+      ],
+      "notesZh": "位于下半区“时间采样”（Time Sampling）分组。"
+    },
+    {
+      "id": "field_render",
+      "type": "dropdown",
+      "zh": "场渲染:",
+      "en": "Field Render:",
+      "defaultValue": {
+        "zh": "关",
+        "en": "Off"
+      },
+      "options": [
+        {
+          "zh": "关",
+          "en": "Off"
+        },
+        {
+          "zh": "高场优先",
+          "en": "Upper Field First"
+        },
+        {
+          "zh": "低场优先",
+          "en": "Lower Field First"
+        }
+      ]
+    },
+    {
+      "id": "pulldown_3_2",
+      "type": "dropdown",
+      "zh": "3:2 Pulldown:",
+      "en": "3:2 Pulldown:",
+      "defaultValue": {
+        "zh": "关",
+        "en": "Off"
+      },
+      "options": [
+        {
+          "zh": "关",
+          "en": "Off"
+        },
+        {
+          "zh": "WSSWW",
+          "en": "WSSWW"
+        },
+        {
+          "zh": "SSWWW",
+          "en": "SSWWW"
+        },
+        {
+          "zh": "SWWWS",
+          "en": "SWWWS"
+        },
+        {
+          "zh": "WWWSS",
+          "en": "WWWSS"
+        },
+        {
+          "zh": "WWSSW",
+          "en": "WWSSW"
+        }
+      ],
+      "enableRuleZh": "“场渲染”为“关”时置灰禁用（实测 NOFOCUS）；选择高场优先或低场优先后启用。"
+    },
+    {
+      "id": "motion_blur",
+      "type": "dropdown",
+      "zh": "运动模糊:",
+      "en": "Motion Blur:",
+      "defaultValue": {
+        "zh": "对选中图层打开",
+        "en": "On for Checked Layers"
+      },
+      "options": [
+        {
+          "zh": "当前设置",
+          "en": "Current Settings"
+        },
+        {
+          "zh": "对选中图层打开",
+          "en": "On for Checked Layers"
+        },
+        {
+          "zh": "对所有图层关闭",
+          "en": "Off for All Layers"
+        }
+      ]
+    },
+    {
+      "id": "time_span",
+      "type": "dropdown",
+      "zh": "时间跨度:",
+      "en": "Time Span:",
+      "defaultValue": {
+        "zh": "仅工作区域",
+        "en": "Work Area Only"
+      },
+      "options": [
+        {
+          "zh": "合成长度",
+          "en": "Length of Comp"
+        },
+        {
+          "zh": "仅工作区域",
+          "en": "Work Area Only"
+        },
+        {
+          "zh": "自定义...",
+          "en": "Custom..."
+        }
+      ],
+      "notesZh": "选择“自定义...”时弹出自定义时间跨度子对话框（开始/结束/持续时间）。"
+    },
+    {
+      "id": "frame_rate_mode",
+      "type": "radio_group",
+      "zh": "帧速率",
+      "en": "Frame Rate",
+      "defaultValue": {
+        "zh": "使用合成的帧速率",
+        "en": "Use comp's frame rate"
+      },
+      "options": [
+        {
+          "id": "use_comp_fps",
+          "zh": "使用合成的帧速率",
+          "en": "Use comp's frame rate"
+        },
+        {
+          "id": "use_this_fps",
+          "zh": "使用此帧速率:",
+          "en": "Use this frame rate:"
+        }
+      ]
+    },
+    {
+      "id": "frame_rate_value",
+      "type": "number_scrub",
+      "internalName": "frameRate",
+      "zh": "使用此帧速率（数值）",
+      "en": "Use this frame rate (value)",
+      "unit": "fps",
+      "defaultValue": 30,
+      "range": {
+        "min": 1,
+        "max": 999,
+        "type": "float"
+      },
+      "enableRuleZh": "选中“使用此帧速率:”或直接编辑数值时自动切换至自定义帧率。"
+    },
+    {
+      "id": "skip_existing_files",
+      "type": "checkbox",
+      "zh": "跳过现有文件（允许多机渲染）",
+      "en": "Skip existing files (allows multi-machine rendering)",
+      "defaultValue": false,
+      "notesZh": "位于底部“选项”分组，仅序列输出时生效。"
+    }
+  ],
+  "relatedDialogs": [
+    {
+      "id": "render-settings-templates",
+      "title": {
+        "zh": "渲染设置模板",
+        "en": "Render Settings Templates"
+      },
+      "trigger": "编辑 ▸ 模板 ▸ 渲染设置(R)...",
+      "geometry": {
+        "physicalPxAt144Dpi": {
+          "w": 1185,
+          "h": 851
+        },
+        "logicalPxAt96Dpi": {
+          "w": 790,
+          "h": 567
+        }
+      },
+      "builtInTemplates": [
+        {
+          "zh": "DV 设置",
+          "en": "DV Settings"
+        },
+        {
+          "zh": "多机设置",
+          "en": "Multi-Machine Settings"
+        },
+        {
+          "zh": "当前设置",
+          "en": "Current Settings"
+        },
+        {
+          "zh": "最佳设置",
+          "en": "Best Settings"
+        },
+        {
+          "zh": "草图设置",
+          "en": "Draft Settings"
+        }
+      ],
+      "controls": [
+        {
+          "id": "movie_default",
+          "type": "dropdown",
+          "zh": "影片默认值:",
+          "en": "Movie Default:",
+          "defaultValue": {
+            "zh": "最佳设置",
+            "en": "Best Settings"
+          }
+        },
+        {
+          "id": "frame_default",
+          "type": "dropdown",
+          "zh": "帧默认值:",
+          "en": "Frame Default:",
+          "defaultValue": {
+            "zh": "当前设置",
+            "en": "Current Settings"
+          }
+        },
+        {
+          "id": "prerender_default",
+          "type": "dropdown",
+          "zh": "预渲染默认值:",
+          "en": "Pre-Render Default:",
+          "defaultValue": {
+            "zh": "最佳设置",
+            "en": "Best Settings"
+          }
+        },
+        {
+          "id": "movie_proxy_default",
+          "type": "dropdown",
+          "zh": "影片代理默认值:",
+          "en": "Movie Proxy Default:",
+          "defaultValue": {
+            "zh": "草图设置",
+            "en": "Draft Settings"
+          }
+        },
+        {
+          "id": "still_proxy_default",
+          "type": "dropdown",
+          "zh": "静止代理默认值:",
+          "en": "Still Proxy Default:",
+          "defaultValue": {
+            "zh": "最佳设置",
+            "en": "Best Settings"
+          }
+        },
+        {
+          "id": "settings_name",
+          "type": "dropdown",
+          "zh": "设置名称:",
+          "en": "Settings Name:",
+          "defaultValue": {
+            "zh": "最佳设置",
+            "en": "Best Settings"
+          },
+          "buttons": [
+            {
+              "zh": "新建...",
+              "en": "New..."
+            },
+            {
+              "zh": "编辑...",
+              "en": "Edit..."
+            },
+            {
+              "zh": "复制",
+              "en": "Duplicate"
+            },
+            {
+              "zh": "删除",
+              "en": "Delete"
+            }
+          ]
+        }
+      ],
+      "buttonBar": {
+        "position": "bottom",
+        "left": [
+          {
+            "id": "save_all",
+            "type": "button",
+            "zh": "全部保存...",
+            "en": "Save All..."
+          },
+          {
+            "id": "load",
+            "type": "button",
+            "zh": "加载...",
+            "en": "Load..."
+          }
+        ],
+        "right": [
+          {
+            "id": "ok",
+            "type": "button",
+            "zh": "确定",
+            "en": "OK",
+            "role": "accept"
+          },
+          {
+            "id": "cancel",
+            "type": "button",
+            "zh": "取消",
+            "en": "Cancel",
+            "role": "reject"
+          }
+        ]
+      }
+    }
+  ]
+}

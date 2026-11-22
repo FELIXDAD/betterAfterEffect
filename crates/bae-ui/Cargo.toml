@@ -27,9 +27,12 @@ tracing.workspace = true
 # workspace pin: the app drives bae-ui through egui-winit + egui-wgpu on the shared
 # bae-gpu device (docs/spec/dependencies.md §10). `wgpu_no_default_features` plus the
 # workspace wgpu keeps one wgpu with only the Metal/D3D12 backends.
+# No `default_fonts`: the demo installs the system fonts (`theme::apply`) as the app does,
+# and egui's bundled fonts would reach every test build through feature unification,
+# hiding tests that run without fonts (bae_ui::testing::ctx_with_fonts).
 [dev-dependencies]
 egui_kittest.workspace = true
-eframe = { version = "0.36.2", default-features = false, features = ["wgpu_no_default_features", "default_fonts"] }
+eframe = { version = "0.36.2", default-features = false, features = ["wgpu_no_default_features"] }
 wgpu.workspace = true
 
 [lints]

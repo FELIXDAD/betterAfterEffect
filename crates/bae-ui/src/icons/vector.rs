@@ -518,7 +518,7 @@ mod tests {
     fn every_icon_paints_at_every_scale() {
         let tint = Color32::from_rgb(10, 200, 30);
         for ppp in [1.0, 1.25, 1.5, 2.0] {
-            let ctx = Context::default();
+            let ctx = crate::testing::ctx_with_fonts();
             let out = paint_all(&ctx, ppp, tint);
             let layers: usize = table().iter().flatten().map(|d| d.layers.len()).sum();
             let meshes = icon_meshes(&out);
@@ -545,7 +545,7 @@ mod tests {
 
     #[test]
     fn theme_layers_take_the_tint_and_fixed_layers_keep_their_color() {
-        let ctx = Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         let tint = Color32::from_rgb(10, 200, 30);
         let out = paint_all(&ctx, 1.0, tint);
         let colors: Vec<Color32> = icon_meshes(&out)
@@ -565,7 +565,7 @@ mod tests {
 
     #[test]
     fn second_frame_reuses_the_atlas() {
-        let ctx = Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         let first = paint_all(&ctx, 1.0, Color32::WHITE);
         output_drop(first);
         let again = ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -588,7 +588,7 @@ mod tests {
     #[test]
     fn appearance_adjusts_theme_tints_but_not_fixed_colors() {
         use crate::theme::{Appearance, adjust, set_appearance};
-        let ctx = Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         let gray = Color32::from_gray(0xb1);
         set_appearance(Appearance::Light);
         let out = paint_all(&ctx, 1.0, gray);

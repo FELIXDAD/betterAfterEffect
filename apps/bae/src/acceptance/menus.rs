@@ -578,7 +578,7 @@ fn welcome_dialog_blocks_panel_keys_and_reports_modal() {
     let mut h = gui_with(g);
     settle(&mut h);
     // `Workspace::modal_open` is what the shell checks for native menu commands.
-    assert!(h.state().workspace.modal_open());
+    assert!(h.state().workspace.modal_open(h.state().app.resources()));
     for (m, k) in [
         (Modifiers::COMMAND, Key::N),
         (Modifiers::COMMAND, Key::Y),
@@ -601,7 +601,7 @@ fn welcome_dialog_blocks_panel_keys_and_reports_modal() {
     );
     assert!(find_text(&h, "Welcome to BAE").is_some());
     key(&mut h, Modifiers::NONE, Key::Escape);
-    assert!(!h.state().workspace.modal_open());
+    assert!(!h.state().workspace.modal_open(h.state().app.resources()));
     key(&mut h, Modifiers::COMMAND, Key::N);
     assert!(
         h.state().active_comp().is_some(),
