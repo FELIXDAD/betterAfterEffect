@@ -10,7 +10,10 @@ use super::*;
 fn open_general(h: &mut Ui) {
     key(h, Modifiers::COMMAND | Modifiers::ALT, Key::Semicolon);
     settle(h);
-    assert!(h.state().workspace.modal_open(), "Cmd+Alt+; opened nothing");
+    assert!(
+        h.state().workspace.modal_open(h.state().app.resources()),
+        "Cmd+Alt+; opened nothing"
+    );
 }
 
 #[test]
@@ -35,7 +38,7 @@ fn shortcut_opens_startup_repair_ok_applies_levels_of_undo() {
         .set(keys::LEVELS_OF_UNDO, 2);
     h.get_by_label("OK").click();
     settle(&mut h);
-    assert!(!h.state().workspace.modal_open());
+    assert!(!h.state().workspace.modal_open(h.state().app.resources()));
     assert_eq!(h.state().prefs.current().levels_of_undo(), 2);
     assert_eq!(h.state().doc.stage().undo_limit(), 2);
     // Three steps, two levels: only two undo.
@@ -62,7 +65,7 @@ fn cancel_keeps_the_stored_values() {
     settle(&mut h);
     h.get_by_label("Cancel").click();
     settle(&mut h);
-    assert!(!h.state().workspace.modal_open());
+    assert!(!h.state().workspace.modal_open(h.state().app.resources()));
     assert_eq!(h.state().prefs.generation(), 0);
     assert_eq!(h.state().prefs.current().auto_save_minutes(), Some(5));
 }

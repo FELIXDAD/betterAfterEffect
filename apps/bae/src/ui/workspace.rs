@@ -166,10 +166,11 @@ impl Workspace {
     }
 
     /// Ask for the user's role (first launch).
-    /// A modal dialog (the welcome / role picker) is open: it owns the keyboard
-    /// and the menu commands wait.
-    pub fn modal_open(&self) -> bool {
-        self.workbench.role_picker_open() || self.settings.is_open()
+    /// A modal dialog (the welcome / role picker, Preferences, a module dialog
+    /// such as Composition Settings) is open: it owns the keyboard and the menu
+    /// commands wait.
+    pub fn modal_open(&self, resources: &Resources) -> bool {
+        self.workbench.modal_open(resources) || self.settings.is_open()
     }
 
     pub fn show_role_picker(&mut self) {
