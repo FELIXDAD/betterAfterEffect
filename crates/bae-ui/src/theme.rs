@@ -95,8 +95,48 @@ pub const LABELS: [(&str, Color32); 17] = [
     ("Dark Green", rgb(0x2c, 0x43, 0x2c)),
 ];
 
+const fn default_label_colors() -> [Color32; 17] {
+    let mut out = [Color32::BLACK; 17];
+    let mut i = 0;
+    while i < 17 {
+        out[i] = LABELS[i].1;
+        i += 1;
+    }
+    out
+}
+
+/// Label colors in use (Preferences > Labels; [`set_label_colors`]).
+static LABEL_COLORS: std::sync::RwLock<[Color32; 17]> =
+    std::sync::RwLock::new(default_label_colors());
+/// Label names the user changed (Preferences > Labels); `None`: the default.
+static LABEL_NAMES: std::sync::RwLock<[Option<String>; 17]> =
+    std::sync::RwLock::new([const { None }; 17]);
+
+/// Uses `colors` for labels 0..=16 from now on (index 0, None, stays fixed).
+pub fn set_label_colors(colors: [Color32; 17]) {
+    let mut table = LABEL_COLORS.write().unwrap_or_else(|e| e.into_inner());
+    *table = colors;
+    table[0] = LABELS[0].1;
+}
+
+/// Uses `names` for labels (`None` or the English default: the translated default).
+pub fn set_label_names(names: [Option<String>; 17]) {
+    *LABEL_NAMES.write().unwrap_or_else(|e| e.into_inner()) = names;
+}
+
+/// Color of label `index` (Preferences > Labels).
 pub fn label_color(index: usize) -> Color32 {
-    LABELS.get(index).map_or(LABELS[0].1, |l| l.1)
+    let table = LABEL_COLORS.read().unwrap_or_else(|e| e.into_inner());
+    table.get(index).copied().unwrap_or(table[0])
+}
+
+/// Name of label `index` as shown (the user's name or the translated default).
+pub fn label_name(index: usize) -> String {
+    let names = LABEL_NAMES.read().unwrap_or_else(|e| e.into_inner());
+    match names.get(index).and_then(Option::as_ref) {
+        Some(name) => name.clone(),
+        None => crate::i18n::tr(LABELS.get(index).map_or(LABELS[0].0, |l| l.0)).to_owned(),
+    }
 }
 
 /// Layer bar color in the timeline: the label color pulled toward the timeline background.
@@ -115,6 +155,91 @@ pub fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
 pub fn brighten(c: Color32, amount: i16) -> Color32 {
     let f = |x: u8| (x as i16 + amount).clamp(0, 255) as u8;
     Color32::from_rgba_unmultiplied(f(c.r()), f(c.g()), f(c.b()), c.a())
+}
+
+/// Preferences > Appearance > Color Theme (AE 26: Darkest, Dark, Light). The
+/// theme tokens are measured from Darkest; every color the UI draws goes
+/// through [`adjust`] (the shell applies it to the tessellated frame,
+/// [`apply_appearance`]), so the tokens stay constants.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Appearance {
+    /// AE 26's default; the measured tokens as they are.
+    #[default]
+    Darkest,
+    /// Grays lifted (panels about #323232).
+    Dark,
+    /// Grays inverted to a light UI with dark text.
+    Light,
+}
+
+impl Appearance {
+    /// From the stored option value (`darkest`, `dark`, `light`).
+    pub fn from_id(id: &str) -> Self {
+        match id {
+            "dark" => Appearance::Dark,
+            "light" => Appearance::Light,
+            _ => Appearance::Darkest,
+        }
+    }
+}
+
+static APPEARANCE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Uses `a` from the next frame on.
+pub fn set_appearance(a: Appearance) {
+    APPEARANCE.store(a as u8, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The appearance in use.
+pub fn appearance() -> Appearance {
+    match APPEARANCE.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => Appearance::Dark,
+        2 => Appearance::Light,
+        _ => Appearance::Darkest,
+    }
+}
+
+/// `c` (premultiplied) as drawn with appearance `a`: only grays change; accent,
+/// label and image colors keep their values.
+pub fn adjust(c: Color32, a: Appearance) -> Color32 {
+    let alpha = c.a();
+    if alpha == 0 || a == Appearance::Darkest {
+        return c;
+    }
+    let un = |v: u8| (f32::from(v) * 255.0 / f32::from(alpha)).min(255.0);
+    let (r, g, b) = (un(c.r()), un(c.g()), un(c.b()));
+    if r.max(g).max(b) - r.min(g).min(b) > 6.0 {
+        return c;
+    }
+    let map = |v: f32| match a {
+        Appearance::Dark => v + (255.0 - v) * 0.09,
+        _ => 240.0 - v * 0.8,
+    };
+    let q = |v: f32| {
+        (map(v) * f32::from(alpha) / 255.0)
+            .round()
+            .clamp(0.0, 255.0) as u8
+    };
+    Color32::from_rgba_premultiplied(q(r), q(g), q(b), alpha)
+}
+
+/// Applies the current [`Appearance`] to a tessellated frame. Only meshes drawn
+/// with egui's own texture (shapes and text) change; images and the viewer are
+/// left alone. Does nothing for Darkest (the default).
+pub fn apply_appearance(prims: &mut [egui::ClippedPrimitive]) {
+    let a = appearance();
+    if a == Appearance::Darkest {
+        return;
+    }
+    for prim in prims {
+        if let egui::epaint::Primitive::Mesh(mesh) = &mut prim.primitive
+            && mesh.texture_id == egui::TextureId::default()
+        {
+            for v in &mut mesh.vertices {
+                v.color = adjust(v.color, a);
+            }
+        }
+    }
 }
 
 pub mod metrics {

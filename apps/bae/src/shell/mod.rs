@@ -248,6 +248,17 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
             }
         }
     }
+    // Preferences: read from the config folder; smoke tests use the defaults and
+    // never write them.
+    let prefs = Arc::new(match &dirs {
+        Some(dirs) if global.smoke_test.is_none() => {
+            bae_prefs::PrefsStore::open(dirs.config_file(bae_prefs::FILE_NAME)).0
+        }
+        _ => bae_prefs::PrefsStore::default(),
+    });
+    app.insert_resource(prefs.clone());
+    bae_ui::settings::apply(&prefs.current());
+    document.set_undo_limit(prefs.current().levels_of_undo());
     let mut workspace = Workspace::new(&mut app, workbench_state);
     workspace.set_extra_commands(document.command_titles());
     if first_run {
@@ -277,6 +288,9 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         ui_passes: 0,
         accesskit_active: false,
         exit_code: ExitCode::SUCCESS,
+        prefs_generation: prefs.generation(),
+        prefs,
+        autosave: crate::autosave::AutoSave::default(),
     };
     if let Err(error) = event_loop.run_app(&mut shell) {
         tracing::error!("event loop error: {error}");
@@ -308,6 +322,10 @@ impl SmokeTest {
 }
 
 struct Shell {
+    /// Preferences and the generation last applied.
+    prefs: Arc<bae_prefs::PrefsStore>,
+    prefs_generation: u64,
+    autosave: crate::autosave::AutoSave,
     app: App,
     proxy: EventLoopProxy<UserEvent>,
     smoke: Option<SmokeTest>,
@@ -533,6 +551,9 @@ impl Shell {
                 return;
             }
             ids::ABOUT => self.workspace.show_about(),
+            bae_ui::settings::ACTION => self
+                .workspace
+                .show_settings(inv.params.get("page").and_then(|p| p.as_str())),
             id if files::is_file_command(id) => {
                 // Saves record the open comps; another project restores its own.
                 let mut dialogs = self.dialogs();
@@ -542,6 +563,8 @@ impl Shell {
                     &mut *dialogs,
                     &inv,
                 );
+                // A save or another project restarts the auto-save interval.
+                self.autosave.reset();
             }
             ids::HELP => tracing::info!("`{}` is not implemented yet", inv.id),
             _ => match self.document.run(&inv) {
@@ -558,6 +581,62 @@ impl Shell {
             menu.set_undo_state(self.document.undo_state());
         }
         self.request_redraw();
+    }
+
+    /// Preferences changed (OK in the dialog): apply what the shell owns.
+    fn sync_prefs(&mut self) {
+        let generation = self.prefs.generation();
+        if generation == self.prefs_generation {
+            return;
+        }
+        self.prefs_generation = generation;
+        let prefs = self.prefs.current();
+        bae_ui::settings::apply(&prefs);
+        self.document.set_undo_limit(prefs.levels_of_undo());
+        if let Some(menu) = &mut self.menu {
+            menu.set_undo_state(self.document.undo_state());
+        }
+        self.request_redraw();
+    }
+
+    /// Buttons of the Preferences window that need the system.
+    fn run_settings_requests(&mut self) {
+        for request in self.workspace.take_settings_requests() {
+            if request == crate::ui::REVEAL_PREFERENCES {
+                if let Some(dirs) = self.app.resource::<AppDirs>() {
+                    reveal(&dirs.config_file(bae_prefs::FILE_NAME));
+                }
+            } else if let Some(key) = request.strip_prefix("choose:") {
+                let mut dialog = rfd::FileDialog::new();
+                if let Some(view) = &self.view {
+                    dialog = dialog.set_parent(&*view.window);
+                }
+                let picked = if key == "project.project_template" {
+                    dialog.add_filter("BAE", &["bae", "baez"]).pick_file()
+                } else {
+                    dialog.pick_folder()
+                };
+                if let Some(path) = picked {
+                    self.workspace
+                        .set_setting(key, path.to_string_lossy().into_owned());
+                    self.request_redraw();
+                }
+            }
+        }
+    }
+
+    /// Auto-save (Preferences > Auto-Save); returns when it is due next.
+    fn run_autosave(&mut self) -> Option<Instant> {
+        if self.smoke.is_some() {
+            return None;
+        }
+        let prefs = self.prefs.current();
+        match self.autosave.tick(Instant::now(), &prefs, &self.document) {
+            Some(Ok(path)) => tracing::info!("auto-saved {}", path.display()),
+            Some(Err(error)) => tracing::warn!("auto-save failed: {error:#}"),
+            None => {}
+        }
+        self.autosave.deadline(&prefs)
     }
 
     /// Show `text` in the status bar (empty clears it).
@@ -909,6 +988,27 @@ fn offscreen_target(view: &mut WindowView, size: [u32; 2]) -> wgpu::TextureView 
         .unwrap_or_else(|| unreachable!("offscreen target was just created"))
 }
 
+/// Shows `path` in Finder / Explorer (Reveal Preferences).
+fn reveal(path: &std::path::Path) {
+    let result = if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .spawn()
+    } else if cfg!(windows) {
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path.display()))
+            .spawn()
+    } else {
+        std::process::Command::new("xdg-open")
+            .arg(path.parent().unwrap_or(path))
+            .spawn()
+    };
+    if let Err(error) = result {
+        tracing::warn!("could not reveal {}: {error}", path.display());
+    }
+}
+
 /// The command for projects Finder asked to open: one project at a time, like AE and
 /// like `bae <project>`, so only the first is opened. Goes through the normal
 /// `file.open_project` (unsaved-changes question, error dialog).
@@ -1104,6 +1204,9 @@ impl ApplicationHandler<UserEvent> for Shell {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.run_pending(event_loop);
+        self.sync_prefs();
+        self.run_settings_requests();
+        let autosave_at = self.run_autosave();
         // Every project change goes through the dispatch above.
         self.sync_window_title();
         if let Some(smoke) = &self.smoke {
@@ -1137,6 +1240,9 @@ impl ApplicationHandler<UserEvent> for Shell {
             }
         }
         if let Some(at) = self.gate_deadline {
+            deadline = Some(deadline.map_or(at, |d| d.min(at)));
+        }
+        if let Some(at) = autosave_at {
             deadline = Some(deadline.map_or(at, |d| d.min(at)));
         }
         if let Some(at) = self.repaint_at {
