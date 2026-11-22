@@ -17,6 +17,9 @@ fn harness(page: &str, prefs: &Preferences) -> Harness<'static, State> {
         .with_step_dt(1.0 / 60.0)
         .build_ui_state(
             |ui, s: &mut State| {
+                if crate::testing::first_pass_installs_fonts(ui.ctx()) {
+                    return;
+                }
                 let o = s.dialog.show(ui.ctx());
                 if o != Outcome::None {
                     s.outcomes.push(o);

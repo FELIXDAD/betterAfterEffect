@@ -643,3 +643,133 @@ fn names_stay_when_the_language_changes() {
         other => panic!("phase {other}"),
     }
 }
+
+/// Clicks the widget with accessible `role` and `label` (first match).
+fn click_labelled(h: &mut Ui, role: Role, label: &str) {
+    let r = h
+        .query_all_by_role(role)
+        .find(|n| n.accesskit_node().label().as_deref() == Some(label))
+        .unwrap_or_else(|| panic!("no {role:?} “{label}”"))
+        .rect();
+    click_at(h, r.center());
+    settle(h);
+}
+
+/// #197: pixel units of the Graph Editor (value and speed graph axes) and the
+/// Character settings' font size follow the UI language: 像素 / 像素/秒 in
+/// Chinese (AE zh_CN), px / px/sec in English.
+fn pixel_units(zh: bool) {
+    crate::i18n::init_from_env();
+    let (mut h, extra_ok) = gui_with_status();
+    comp_with(
+        &mut h,
+        &["motion.layer.new.text", "motion.layer.new.rectangle"],
+    );
+    let [rect, text]: [PrimPath; 2] = h.state().layers().try_into().unwrap();
+    // Position keyframes at 0 s and 1 s on the rectangle.
+    h.state().session().lock().selected_layers = vec![rect.clone()];
+    key(&mut h, Modifiers::ALT | Modifiers::SHIFT, Key::P);
+    h.state_mut().invoke(Invocation::with_params(
+        "attr.set_at",
+        serde_json::json!({"path": rect, "attr": "transform:position",
+                           "time": bae_model::Time::FLICKS_PER_SECOND,
+                           "value": {"type": "vec3", "value": [1500.0, 300.0, 0.0]}}),
+    ));
+    settle(&mut h);
+    let keys = bae_motion::query::attr_spec(h.state().stage(), &rect, "transform:position")
+        .map_or(0, |s| s.keyframes.len());
+    assert_eq!(keys, 2, "{:?}", h.state().outcomes);
+    let (px, per_sec) = if zh {
+        ("像素", "像素/秒")
+    } else {
+        ("px", "px/sec")
+    };
+    let other = if zh { "px" } else { "像素" };
+    let mut problems = Vec::new();
+
+    // Graph Editor, Auto-Select: position is spatial, so the speed graph.
+    click_labelled(&mut h, Role::Button, bae_ui::tr("Graph Editor"));
+    let speed = find_texts(&h, |t| t.ends_with(per_sec)).len();
+    assert!(
+        speed >= 2,
+        "speed graph axis without “{per_sec}”: {:?}",
+        painted_texts(&h)
+    );
+    problems.extend(
+        wrong_language(&h, zh, &extra_ok)
+            .into_iter()
+            .map(|p| format!("speed graph: {p}")),
+    );
+
+    // Graph Type and Options > Edit Value Graph.
+    click_labelled(
+        &mut h,
+        Role::Button,
+        bae_ui::tr("Choose graph type and options"),
+    );
+    click_labelled(&mut h, Role::RadioButton, bae_ui::tr("Edit Value Graph"));
+    let value = find_texts(&h, |t| t.ends_with(&format!(" {px}"))).len();
+    assert!(
+        value >= 2,
+        "value graph axis without “ {px}”: {:?}",
+        painted_texts(&h)
+    );
+    assert!(
+        find_texts(&h, |t| t.ends_with(per_sec)).is_empty(),
+        "still the speed graph"
+    );
+    problems.extend(
+        wrong_language(&h, zh, &extra_ok)
+            .into_iter()
+            .map(|p| format!("value graph: {p}")),
+    );
+    assert!(
+        find_texts(&h, |t| t.contains(other)).is_empty(),
+        "“{other}” in the {} UI: {:?}",
+        if zh { "Chinese" } else { "English" },
+        painted_texts(&h)
+    );
+
+    // Character settings of the selected text layer: the font size.
+    h.state().session().lock().selected_layers = vec![text];
+    settle(&mut h);
+    let size = format!("72 {px}");
+    assert!(
+        find_text(&h, &size).is_some(),
+        "no font size “{size}”: {:?}",
+        painted_texts(&h)
+    );
+    assert!(
+        find_texts(&h, |t| t.contains(other)).is_empty(),
+        "{:?}",
+        painted_texts(&h)
+    );
+    problems.extend(
+        wrong_language(&h, zh, &extra_ok)
+            .into_iter()
+            .map(|p| format!("character: {p}")),
+    );
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+#[test]
+fn pixel_units_are_chinese_in_the_chinese_ui() {
+    if !in_child(
+        "acceptance::i18n_retest::pixel_units_are_chinese_in_the_chinese_ui",
+        &[("BAE_LANG", "zh")],
+    ) {
+        return;
+    }
+    pixel_units(true);
+}
+
+#[test]
+fn pixel_units_stay_px_in_the_english_ui() {
+    if !in_child(
+        "acceptance::i18n_retest::pixel_units_stay_px_in_the_english_ui",
+        &[("BAE_LANG", "en")],
+    ) {
+        return;
+    }
+    pixel_units(false);
+}
