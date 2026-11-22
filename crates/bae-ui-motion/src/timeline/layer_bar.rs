@@ -1,6 +1,7 @@
 //! Layer duration bars (AE-UI-066 / -068): drag the body to move the selected
 //! layers, an end to trim; layers with a time-based source show their untrimmed
-//! source as a pale bar, and dragging it (or Alt-dragging the bar) slip-edits. Shift
+//! source as a pale bar, and dragging it slip-edits (Alt-dragging the bar moves it,
+//! as in AE 26). Shift
 //! snaps the moving edge to the CTI, the work area, the comp's ends, other layers'
 //! In / Out points, keyframes and markers. One command on release.
 
@@ -262,6 +263,8 @@ impl TimelinePanel {
         if bar.width() <= 0.0 {
             return;
         }
+        #[cfg(test)]
+        self.last_bars.push((layer.clone(), bar));
         let c = theme::layer_bar_color(label_of(stage, layer), selected);
         ui.painter().with_clip_rect(graph).rect_filled(bar, 1.0, c);
         let edge = 5.0;
@@ -310,7 +313,6 @@ impl TimelinePanel {
                 .input(|i| i.pointer.press_origin())
                 .or(resp.interact_pointer_pos())
         {
-            let alt = ui.input(|i| i.modifiers.alt);
             let edge = if (p.x - bar.left()).abs() <= edge {
                 Some(1)
             } else if (p.x - bar.right()).abs() <= edge {
@@ -327,11 +329,6 @@ impl TimelinePanel {
                     layer: layer.clone(),
                 },
                 Some(2) => Drag::TrimOut {
-                    origin: p.x,
-                    layer: layer.clone(),
-                },
-                // Alt-drag slips a layer with a time-based source.
-                _ if alt && source.is_some() => Drag::Slip {
                     origin: p.x,
                     layer: layer.clone(),
                 },

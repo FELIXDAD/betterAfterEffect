@@ -41,10 +41,10 @@ use crate::session::{Session, SharedSession};
 pub(crate) use dialogs::{InterpolationDialog, KeyDialog, VelocityDialog};
 use header::comp_tabs;
 pub(crate) use keys::{click_conversion, clicked_set};
-pub(crate) use menus::keys_with_labels;
 pub(crate) use markers::MarkerDialog;
 #[cfg(test)]
 pub(crate) use markers::parse_timecode;
+pub(crate) use menus::keys_with_labels;
 #[cfg(test)]
 pub(crate) use menus::{
     LAYER_MENU, Related, catalog_entry, invert_layer_selection, rove_state, select_children,
@@ -214,6 +214,9 @@ pub struct TimelinePanel {
     /// The comp marker bin, for tests.
     #[cfg(test)]
     pub(crate) last_marker_bin: Option<Rect>,
+    /// Where the last frame drew the layer bars, for tests.
+    #[cfg(test)]
+    pub(crate) last_bars: Vec<(PrimPath, Rect)>,
 }
 
 /// Comp time ↔ x in the graph.
@@ -487,6 +490,7 @@ impl Panel for TimelinePanel {
             self.last_axis = Some(axis);
             self.last_keys.clear();
             self.last_markers.clear();
+            self.last_bars.clear();
         }
 
         let head = Rect::from_min_max(

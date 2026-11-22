@@ -308,7 +308,7 @@ impl TimelinePanel {
     }
 }
 
-/// Right-click on a marker (AE's marker menu).
+/// Right-click on a marker: AE 26's marker menu.
 fn marker_menu(
     ui: &mut Ui,
     cx: &mut PanelContext<'_>,
@@ -323,8 +323,13 @@ fn marker_menu(
             MarkerDialog::edit(stage, info, marker).map(|d| KeyDialog::Marker(Box::new(d)));
         ui.close();
     }
-    ui.add_enabled(false, egui::Button::new(tr("Lock Markers")));
     ui.separator();
+    ui.add_enabled(false, egui::Button::new(tr("Update Markers From Source")));
+    if ui.button(tr("Go To Marker Time")).clicked() {
+        let t = query::to_comp_time(stage, marker, marker_time(stage, marker));
+        session.lock().set_time(info, t);
+        ui.close();
+    }
     if ui.button(tr("Delete This Marker")).clicked() {
         cx.invoke_with("marker.delete", json!({"markers": [marker]}));
         ui.close();
@@ -337,13 +342,16 @@ fn marker_menu(
         cx.invoke_with("marker.delete", json!({"markers": all}));
         ui.close();
     }
+    ui.separator();
+    ui.add_enabled(false, egui::Button::new(tr("Lock Markers")));
     if *owner == info.path {
+        ui.separator();
         let mut on = stage
             .prim(marker)
             .and_then(|v| query::static_value(&v, "protected_region"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        if widgets::checkbox(ui, &mut on, tr("Protected Region")).clicked() {
+        if widgets::checkbox(ui, &mut on, tr("Enable Protected Region")).clicked() {
             cx.invoke_with(
                 "marker.edit",
                 json!({"path": marker, "protected_region": on}),
@@ -367,10 +375,6 @@ pub struct MarkerDialog {
     pub time: Time,
     pub duration: Time,
     pub comment: String,
-    pub chapter: String,
-    pub url: String,
-    pub frame_target: String,
-    pub cue_point_name: String,
     pub label: usize,
     pub protected_region: bool,
 }
@@ -398,10 +402,6 @@ impl MarkerDialog {
             time,
             duration: query::to_comp_time(stage, marker, mt + d) - time,
             comment: s("comment"),
-            chapter: s("chapter"),
-            url: s("url"),
-            frame_target: s("frame_target"),
-            cue_point_name: s("cue_point_name"),
             label: get("label").and_then(|v| v.as_f64()).unwrap_or(0.0) as usize,
             protected_region: get("protected_region")
                 .and_then(|v| v.as_bool())
@@ -418,10 +418,6 @@ impl MarkerDialog {
             time,
             duration: Time::ZERO,
             comment: String::new(),
-            chapter: String::new(),
-            url: String::new(),
-            frame_target: String::new(),
-            cue_point_name: String::new(),
             label: 0,
             protected_region: false,
         }
@@ -437,10 +433,6 @@ impl MarkerDialog {
             "time": t,
             "duration": (end - t).max(Time::ZERO),
             "comment": self.comment,
-            "chapter": self.chapter,
-            "url": self.url,
-            "frame_target": self.frame_target,
-            "cue_point_name": self.cue_point_name,
             "label": self.label,
         });
         if self.owner == self.info.path {
@@ -526,34 +518,21 @@ pub(super) fn marker_body(ui: &mut Ui, d: &mut MarkerDialog) {
             .desired_width(f32::INFINITY),
     )
     .labeled(egui::WidgetType::TextEdit, tr("Comment:"));
-    ui.group(|ui| {
-        ui.label(egui::RichText::new(tr("Chapter and Web Links")).color(color::TEXT_STRONG));
-        for (label, v) in [
-            ("Chapter:", &mut d.chapter),
-            ("URL:", &mut d.url),
-            ("Frame Target:", &mut d.frame_target),
-        ] {
-            ui.horizontal(|ui| {
-                ui.add_sized(label_w, egui::Label::new(tr(label)));
-                ui.add(egui::TextEdit::singleline(v).desired_width(220.0))
-                    .labeled(egui::WidgetType::TextEdit, tr(label));
-            });
-        }
-    });
-    ui.group(|ui| {
-        ui.label(egui::RichText::new(tr("Flash Cue Point")).color(color::TEXT_STRONG));
-        ui.horizontal(|ui| {
-            ui.add_sized(label_w, egui::Label::new(tr("Name:")));
-            ui.add(egui::TextEdit::singleline(&mut d.cue_point_name).desired_width(220.0))
-                .labeled(egui::WidgetType::TextEdit, tr("Name:"));
-        });
-    });
-    if d.owner == d.info.path {
-        widgets::checkbox(ui, &mut d.protected_region, tr("Protected Region"));
-    }
     ui.horizontal(|ui| {
         ui.add_sized(label_w, egui::Label::new(tr("Label:")));
         let names: Vec<&str> = theme::LABELS.iter().map(|(n, _)| tr(n)).collect();
         widgets::dropdown(ui, "marker_label", &mut d.label, &names, 140.0);
     });
+    if d.owner == d.info.path {
+        widgets::checkbox(ui, &mut d.protected_region, tr("Protected Region"));
+    } else {
+        // Layer markers: Comment Marker / Segment Marker (AE 26). The model has no
+        // marker type yet, so only the default is shown.
+        ui.add_enabled_ui(false, |ui| {
+            ui.horizontal(|ui| {
+                let _ = ui.radio(true, tr("Comment Marker"));
+                let _ = ui.radio(false, tr("Segment Marker"));
+            });
+        });
+    }
 }

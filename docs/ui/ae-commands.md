@@ -36,8 +36,8 @@
 
 ## 统计
 
-- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 61，◐ 9，☐ 253，⏸ 217，Ⓐ 30
-- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 119 条。
+- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 63，◐ 9，☐ 251，⏸ 217，Ⓐ 30
+- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 121 条。
 
 ## 主菜单
 
@@ -331,10 +331,10 @@
 | 3D Layer | 393231 | `motion.layer.switch` | `{"switch":"three_d"}` |  |  | B | ☐ |
 | Guide Layer | 393232 | `motion.layer.switch` | `{"switch":"guide"}` |  |  | B | ☐ |
 | Environment Layer | 393233 | `motion.layer.switch` | `{"switch":"environment"}` |  |  | B | ⏸ |
-| Markers ▸ Add Marker | 23265281 | `motion.layer.add_marker` |  | PadMultiply | PadMultiply / Control+8 | C | ☐ |
+| Markers ▸ Add Marker | 23265281 | `motion.layer.add_marker` |  | PadMultiply | PadMultiply / Control+8 | C | ✅ |
 | Markers ▸ Update Markers From Source | 23265282 | `motion.layer.update_markers_from_source` |  |  |  | C | ⏸ |
 | Markers ▸ Lock Markers | 23265283 | `motion.layer.lock_markers` |  |  |  | C | ☐ |
-| Markers ▸ Delete All Markers | 23265284 | `motion.layer.delete_all_markers` |  |  |  | C | ☐ |
+| Markers ▸ Delete All Markers | 23265284 | `motion.layer.delete_all_markers` |  |  |  | C | ✅ |
 | Preserve Transparency | 393236 | `motion.layer.switch` | `{"switch":"preserve_transparency"}` |  |  | B | ☐ |
 | Blending Mode ▸ Normal | 16318465 | `motion.layer.blending_mode` | `{"mode":"normal"}` |  |  | B | ☐ |
 | Blending Mode ▸ Dissolve | 16318466 | `motion.layer.blending_mode` | `{"mode":"dissolve"}` |  |  | B | ☐ |
@@ -711,7 +711,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 
 | AE 命令 | BAE 动作 id | 参数 | Windows | macOS | 作用范围 | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
-| `AddLayerMarkerWithDialog` | `motion.timeline.add_marker_with_dialog` |  | Alt+PadMultiply | Opt+PadMultiply / Control+Opt+8 |  | C | ☐ |
+| `AddLayerMarkerWithDialog` | `motion.timeline.add_marker_with_dialog` |  | Alt+PadMultiply | Opt+PadMultiply / Control+Opt+8 |  | C | ✅ |
 | `ClearMask` | `motion.layer.delete_mask_or_vertices` |  | Alt+Backspace / Alt+Delete | Opt+Backspace / Opt+Delete |  | A | ⏸ |
 | `OpenSource` | `motion.layer.open_source` |  | PadEnter / Enter | PadEnter / Enter |  | B | ☐ |
 | `PasteAlt` | `motion.edit.paste_at_current_time` |  | Ctrl+Alt+V | Cmd+Opt+V |  | B | ☐ |
