@@ -105,9 +105,18 @@ jobs:
                 id: "dispatch-\($j)", set: $set, threads: $threads, wrap: $wrap,
                 pageheap: $pageheap, fresh: $fresh, env: $env, debuglayer: $dl, n: $n }]}')"
           else
-            # The plan for pushes to ci/win-crash-repro: no loops this time; the
-            # `inspect` job re-analyzes a dump from an earlier run.
-            matrix='{"include":[]}'
+            # The plan for pushes to ci/win-crash-repro: #194, FXC blobs shared across
+            # threads by wgpu-hal's shader cache. The same stress test (4 threads build
+            # pipelines from one shader) with crates.io wgpu-hal ("unpatch") and with
+            # vendor/wgpu-hal.
+            matrix='{"include":[
+              {"id":"fxc-unpatched-1","set":"bae-gpu:concurrent_pipelines","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"BAE_STRESS_ITERATIONS=3000","debuglayer":"on","unpatch":"true","n":"150"},
+              {"id":"fxc-unpatched-2","set":"bae-gpu:concurrent_pipelines","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"BAE_STRESS_ITERATIONS=3000","debuglayer":"on","unpatch":"true","n":"150"},
+              {"id":"fxc-unpatched-3","set":"bae-gpu:concurrent_pipelines","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"BAE_STRESS_ITERATIONS=3000","debuglayer":"on","unpatch":"true","n":"150"},
+              {"id":"fxc-patched-1","set":"bae-gpu:concurrent_pipelines","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"BAE_STRESS_ITERATIONS=3000","debuglayer":"on","unpatch":"false","n":"150"},
+              {"id":"fxc-patched-2","set":"bae-gpu:concurrent_pipelines","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"BAE_STRESS_ITERATIONS=3000","debuglayer":"on","unpatch":"false","n":"150"},
+              {"id":"fxc-patched-3","set":"bae-gpu:concurrent_pipelines","threads":"default","wrap":"wer","pageheap":"false","fresh":"false","env":"BAE_STRESS_ITERATIONS=3000","debuglayer":"on","unpatch":"false","n":"150"}
+            ]}'
             matrix="$(echo "$matrix" | jq -c .)"
           fi
           echo "$matrix" | jq .
@@ -130,6 +139,7 @@ jobs:
       FRESH_CACHE: ${{ matrix.fresh }}
       EXTRA_ENV: ${{ matrix.env }}
       DEBUG_LAYER: ${{ matrix.debuglayer || 'on' }}
+      UNPATCH: ${{ matrix.unpatch || 'false' }}
       ITERATIONS: ${{ matrix.n }}
     steps:
       - uses: actions/checkout@v4
@@ -193,7 +203,15 @@ jobs:
           # The whole workspace, like CI's `cargo test --workspace`, so features unify the
           # same way and the binaries are the ones CI runs. Same opt-levels as CI (deps at
           # 2), plus line tables for dependencies so their frames have names and lines.
-          cargo test --workspace --no-run --locked --message-format=json \
+          locked=--locked
+          if [ "$UNPATCH" = true ]; then
+            # crates.io wgpu-hal instead of vendor/wgpu-hal (the lockfile follows).
+            sed -i '/^wgpu-hal = { path = "vendor\/wgpu-hal" }$/d' Cargo.toml
+            if grep -q '^wgpu-hal = { path' Cargo.toml; then echo "patch line still there"; exit 1; fi
+            locked=
+            echo "UNPATCHED: crates.io wgpu-hal" >> "$RUNNER_TEMP/repro/machine.txt"
+          fi
+          cargo test --workspace --no-run $locked --message-format=json \
             --config 'profile.dev.package."*".debug="line-tables-only"' > "$RUNNER_TEMP/build.json"
           bin="$(cygpath -u "$RUNNER_TEMP")/repro/bin"
           mkdir -p "$bin"
@@ -313,7 +331,7 @@ jobs:
             $env:PATH = "$env:SDK_DXC_DIR;$env:PATH"
             Write-Output "DXC from $env:SDK_DXC_DIR"
           }
-          $packages = (cargo metadata --format-version 1 --no-deps --locked | ConvertFrom-Json).packages
+          $packages = (cargo metadata --format-version 1 --no-deps | ConvertFrom-Json).packages
           $tests = Get-Content "$env:RUNNER_TEMP\tests.txt" | ForEach-Object {
             $pkg, $exe = $_ -split "`t"
             $dir = Split-Path ($packages | Where-Object name -eq $pkg | Select-Object -First 1 -ExpandProperty manifest_path)
