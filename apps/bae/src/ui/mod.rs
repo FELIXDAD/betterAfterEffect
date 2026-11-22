@@ -10,7 +10,8 @@ pub use workspace::ShortcutRow;
 #[cfg(test)]
 pub(crate) use workspace::gpu_kind as workspace_gpu_kind;
 pub use workspace::{
-    PlaceholderViewer, StatusInfo, Workspace, failure_notice, gpu_summary, register_panels,
+    PlaceholderViewer, REVEAL_PREFERENCES, StatusInfo, Workspace, failure_notice, gpu_summary,
+    register_panels,
 };
 
 use bae_gpu::viewport::{ViewportTextureId, ViewportTextureRegistry};
