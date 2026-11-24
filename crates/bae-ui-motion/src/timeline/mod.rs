@@ -58,6 +58,8 @@ const HEAD_H: f32 = 34.0;
 const COLS_H: f32 = 20.0;
 const FOOT_H: f32 = 22.0;
 const SW: f32 = 18.0;
+/// Rows an expression field grows to.
+const MAX_EXPR_LINES: usize = 30;
 /// Left padding of the time graph so frame 0 is not on the edge.
 const PAD: f32 = 8.0;
 
@@ -107,9 +109,13 @@ enum RowKind {
         attr: String,
         label: String,
     },
+    /// One row per line of the expression (`line` of `lines`): the first has the
+    /// name and switches, the last draws the field over all of them.
     Expression {
         path: PrimPath,
         attr: String,
+        line: usize,
+        lines: usize,
     },
 }
 
@@ -156,6 +162,11 @@ enum Drag {
         layers: Vec<PrimPath>,
         origin: Pos2,
     },
+    /// Expression pick whip: drop on a property or a layer.
+    ExprWhip {
+        whip: crate::expr::Whip,
+        origin: Pos2,
+    },
     Reorder {
         layers: Vec<PrimPath>,
     },
@@ -185,6 +196,11 @@ pub struct TimelinePanel {
     rename: Option<(PrimPath, String)>,
     /// Expression sources being edited, by `path.attr`.
     expr_edit: Option<(PrimPath, String, String)>,
+    /// The field being edited: its text and selection (chars), for the pick whip
+    /// and the language menu, which take its focus.
+    expr_caret: Option<(PrimPath, String, String, std::ops::Range<usize>)>,
+    /// [`Self::expr_caret`] as it was when the pick whip was pressed.
+    expr_press: Option<(String, std::ops::Range<usize>)>,
     /// AE layer numbers (# column) of the shown comp, for accessibility names:
     /// two layers may share a name (issue #128).
     layer_numbers: HashMap<PrimPath, usize>,
@@ -210,6 +226,9 @@ pub struct TimelinePanel {
     /// Where the last frame drew the markers (glyph centres), for tests.
     #[cfg(test)]
     pub(crate) last_markers: Vec<(PrimPath, Pos2)>,
+    /// Expression rows: property, Enable switch, pick whip.
+    #[cfg(test)]
+    pub(crate) last_expr: Vec<(PrimPath, String, Pos2, Pos2)>,
     /// The comp marker bin, for tests.
     #[cfg(test)]
     pub(crate) last_marker_bin: Option<Rect>,
@@ -304,6 +323,8 @@ fn push_prop(
             kind: RowKind::Expression {
                 path: path.clone(),
                 attr: attr.to_owned(),
+                line: 0,
+                lines: 1,
             },
             layer: layer.clone(),
             depth: depth + 1,
@@ -365,6 +386,38 @@ impl TimelinePanel {
                     stage,
                     &mut out,
                 );
+            }
+        }
+        self.expression_lines(stage, out)
+    }
+
+    /// Multi-line expressions take one row per line (the text being edited, else
+    /// the expression; at most [`MAX_EXPR_LINES`]).
+    fn expression_lines(&self, stage: &Stage, rows: Vec<Row>) -> Vec<Row> {
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            let RowKind::Expression { path, attr, .. } = &row.kind else {
+                out.push(row);
+                continue;
+            };
+            let lines = match &self.expr_edit {
+                Some((p, a, buf)) if p == path && a == attr => buf.split('\n').count(),
+                _ => query::attr_spec(stage, path, attr)
+                    .and_then(|s| s.expression.as_ref())
+                    .map_or(1, |e| e.source.split('\n').count()),
+            }
+            .clamp(1, MAX_EXPR_LINES);
+            for line in 0..lines {
+                out.push(Row {
+                    kind: RowKind::Expression {
+                        path: path.clone(),
+                        attr: attr.clone(),
+                        line,
+                        lines,
+                    },
+                    layer: row.layer.clone(),
+                    depth: row.depth,
+                });
             }
         }
         out
@@ -487,6 +540,7 @@ impl Panel for TimelinePanel {
             self.last_axis = Some(axis);
             self.last_keys.clear();
             self.last_markers.clear();
+            self.last_expr.clear();
             self.last_bars.clear();
         }
 
@@ -568,6 +622,7 @@ impl Panel for TimelinePanel {
 
         let mut key_rects: Vec<(Rect, KeyRef)> = Vec::new();
         let mut layer_rows: Vec<(Rect, PrimPath)> = Vec::new();
+        let mut prop_rows: Vec<(Rect, PrimPath, String)> = Vec::new();
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body));
         egui::ScrollArea::vertical()
             .id_salt("timeline_rows")
@@ -589,8 +644,12 @@ impl Panel for TimelinePanel {
                         &comp_layers,
                         &mut key_rects,
                     );
-                    if matches!(row.kind, RowKind::Layer) {
-                        layer_rows.push((rect, row.layer.clone()));
+                    match &row.kind {
+                        RowKind::Layer => layer_rows.push((rect, row.layer.clone())),
+                        RowKind::Prop { path, attr, .. } => {
+                            prop_rows.push((rect, path.clone(), attr.clone()))
+                        }
+                        _ => {}
                     }
                 }
             });
@@ -604,6 +663,7 @@ impl Panel for TimelinePanel {
             graph_body,
             &key_rects,
             &layer_rows,
+            &prop_rows,
             &comp_layers,
         );
 
@@ -656,7 +716,9 @@ fn row_key(row: &Row) -> String {
         RowKind::Layer => "layer".into(),
         RowKind::Group { id, .. } => id.clone(),
         RowKind::Prop { path, attr, .. } => format!("{path}.{attr}"),
-        RowKind::Expression { path, attr } => format!("{path}.{attr}=expr"),
+        RowKind::Expression {
+            path, attr, line, ..
+        } => format!("{path}.{attr}=expr{line}"),
     }
 }
 

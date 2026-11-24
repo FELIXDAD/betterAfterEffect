@@ -12,7 +12,7 @@ use bae_ui::history::HistoryLog;
 use bae_ui::theme::{self, color};
 use bae_ui::widgets::{self, HotNumber};
 use bae_ui::{PanelContext, tr};
-use egui::{Id, Ui, vec2};
+use egui::{Color32, Id, Ui, vec2};
 use serde_json::json;
 
 use crate::session::{Pending, Scrub, SharedSession};
@@ -201,13 +201,22 @@ enum Num {
 }
 
 /// A hot number whose scrubbed value is kept until the drag ends (one command per drag).
-fn number(ui: &mut Ui, id: Id, model: f64, attr: &str, suffix: &str, name: &str) -> Num {
+fn number(
+    ui: &mut Ui,
+    id: Id,
+    model: f64,
+    attr: &str,
+    suffix: &str,
+    name: &str,
+    tint: Color32,
+) -> Num {
     let key = id.with("scrub");
     let mut v = ui.data(|d| d.get_temp::<f64>(key)).unwrap_or(model);
     let resp = ui
         .push_id(id, |ui| {
             ui.add(
                 HotNumber::new(&mut v)
+                    .tint(tint)
                     .decimals(decimals(attr))
                     .speed(if attr.ends_with("opacity") { 1.0 } else { 0.5 })
                     .suffix(suffix)
@@ -229,6 +238,9 @@ fn number(ui: &mut Ui, id: Id, model: f64, attr: &str, suffix: &str, name: &str)
     Num::None
 }
 
+/// Values an enabled expression drives are red (AE).
+pub(crate) const EXPRESSION_VALUE: Color32 = Color32::from_rgb(0xe0, 0x5a, 0x5a);
+
 /// Editor for one property value (hot numbers, color swatch, checkbox, text).
 /// `dims` limits vector components (2 for 2D layers). `name` is what screen
 /// readers call the property ("Layer “Solid 1” · Position"); components get
@@ -240,7 +252,13 @@ pub(crate) fn value_editor(
     value: &Value,
     dims: usize,
     name: &str,
+    expression: bool,
 ) -> Edit {
+    let tint = if expression {
+        EXPRESSION_VALUE
+    } else {
+        color::ACCENT
+    };
     let axis = |i: usize| bae_ui::a11y::context(&[name, ["X", "Y", "Z"][i.min(2)]]);
     let mut out = Edit::None;
     let mut apply = |n: Num, f: &dyn Fn(f64) -> Value| match n {
@@ -261,6 +279,7 @@ pub(crate) fn value_editor(
                 "points",
                 "x+",
                 &bae_ui::a11y::context(&[name, tr("Revolutions")]),
+                tint,
             );
             apply(n, &|r| Value::Float(r.trunc() * 360.0 + deg));
             let n = number(
@@ -270,15 +289,16 @@ pub(crate) fn value_editor(
                 attr,
                 "°",
                 &bae_ui::a11y::context(&[name, tr("Degrees")]),
+                tint,
             );
             apply(n, &|d| Value::Float(revs * 360.0 + d));
         }
         Value::Float(v) => {
-            let n = number(ui, id, *v, attr, suffix(attr), name);
+            let n = number(ui, id, *v, attr, suffix(attr), name, tint);
             apply(n, &|x| Value::Float(x));
         }
         Value::Int(v) => {
-            let n = number(ui, id, *v as f64, "points", "", name);
+            let n = number(ui, id, *v as f64, "points", "", name, tint);
             apply(n, &|x| Value::Int(x.round() as i64));
         }
         Value::Vec2(v) | Value::Vec3([v @ .., _])
@@ -298,6 +318,7 @@ pub(crate) fn value_editor(
                     attr,
                     if i == 1 { suffix(attr) } else { "" },
                     &axis(i),
+                    tint,
                 );
                 apply(n, &|x| {
                     let mut w = v;
@@ -335,6 +356,7 @@ pub(crate) fn value_editor(
                     attr,
                     if i == 2 { suffix(attr) } else { "" },
                     &axis(i),
+                    tint,
                 );
                 apply(n, &|x| {
                     let mut w = v;

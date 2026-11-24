@@ -87,6 +87,13 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Parent Pick Whip", "父级关联器"),
     ("Keyframe", "关键帧"),
     ("Enable Expression", "启用表达式"),
+    ("Add Expression", "添加表达式"),
+    ("Set Expressions", "设置多个表达式"),
+    ("Expression:", "表达式:"),
+    (
+        "Expression pick whip (insert reference to target)",
+        "表达式关联器（将参考插入目标）",
+    ),
     ("Frame Blending", "帧混合"),
     ("Switch", "开关"),
     ("Time Ruler", "时间标尺"),

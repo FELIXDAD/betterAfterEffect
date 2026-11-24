@@ -1723,3 +1723,99 @@ fn graph_editor_frame_cost() {
     measure(&mut h, &mut tl, "graph editor, key drag", true, true);
     assert_eq!(tl.graph_editor().last.vaxes.len(), 183);
 }
+
+#[test]
+fn expressions_add_pick_whip_switch_and_multiline_edit() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    h.keys(ROT, &[(0.0, float(0.0)), (1.0, float(90.0))]);
+    let layer = h.layer.clone();
+    let expr = |h: &H| {
+        query::attr_spec(&h.stage, &layer, POS)
+            .and_then(|s| s.expression.clone())
+            .map(|e| (e.source, e.enabled))
+    };
+    // Animation > Add Expression on the selected Position: AE's default text.
+    h.session().lock().selected_props = vec![(layer.clone(), POS.to_owned())];
+    let mut tl = h.bars();
+    let r = h.action(&mut tl, Invocation::new(ids::ADD_EXPRESSION));
+    h.apply(&r);
+    assert_eq!(expr(&h), Some(("transform.position".into(), true)));
+    // Pick whip onto Rotation (one value into two): AE's temp spread.
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let row = |tl: &TimelinePanel| tl.last_expr.iter().find(|e| e.1 == POS).cloned().unwrap();
+    let (_, _, _, whip) = row(&tl);
+    let rot = bar_key(&tl, &h.key(ROT, 1.0));
+    let r = h.drag(&mut tl, whip, rot, Modifiers::NONE);
+    h.apply(&r);
+    assert_eq!(
+        expr(&h),
+        Some(("temp = transform.rotation;\n[temp, temp]".into(), true))
+    );
+    // Two lines: the expression takes two rows, Rotation moves down one.
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let rot2 = bar_key(&tl, &h.key(ROT, 1.0));
+    assert!(rot2.y > rot.y + 10.0, "{rot:?} {rot2:?}");
+    // The = switch disables it.
+    let (_, _, eq, _) = row(&tl);
+    let r = h.click(&mut tl, eq, Modifiers::NONE);
+    h.apply(&r);
+    assert_eq!(expr(&h).map(|e| e.1), Some(false));
+    // Edit: Return adds a line, keypad Enter ends editing (one step).
+    let field = pos2(tl.last_axis.unwrap().left + 60.0, eq.y);
+    h.click(&mut tl, field, Modifiers::NONE);
+    h.frame(
+        &mut tl,
+        vec![
+            Event::Key {
+                key: egui::Key::A,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: cmd(),
+            },
+            Event::Text("time".into()),
+        ],
+        Modifiers::NONE,
+    );
+    bae_ui::set_keypad_enter(false);
+    h.frame(
+        &mut tl,
+        vec![press(egui::Key::Enter), Event::Text("+ 1".into())],
+        Modifiers::NONE,
+    );
+    bae_ui::set_keypad_enter(true);
+    let r = h.frame(&mut tl, vec![press(egui::Key::Enter)], Modifiers::NONE);
+    bae_ui::set_keypad_enter(false);
+    h.apply(&r);
+    assert_eq!(expr(&h), Some(("time\n+ 1".into(), false)));
+    // Alt+Shift+= again removes it; undo brings it back.
+    let r = h.action(&mut tl, Invocation::new(ids::ADD_EXPRESSION));
+    h.apply(&r);
+    assert_eq!(expr(&h), None);
+    h.undo();
+    assert_eq!(expr(&h), Some(("time\n+ 1".into(), false)));
+}
+
+#[test]
+fn pick_whip_references_follow_ae() {
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let a = h.layer.clone();
+    let b = path(&h.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"]);
+    let name = query::display_name_of(&h.stage, &b);
+    let r = |from: &PrimPath, to: &PrimPath, attr: Option<&str>| {
+        crate::expr::reference(&h.stage, from, to, attr).unwrap()
+    };
+    assert_eq!(r(&a, &a, Some(ROT)), "transform.rotation");
+    assert_eq!(
+        r(&a, &b, Some(POS)),
+        format!("thisComp.layer(\"{name}\").transform.position")
+    );
+    assert_eq!(r(&a, &b, None), format!("thisComp.layer(\"{name}\")"));
+    assert_eq!(r(&a, &a, None), "thisLayer");
+    assert_eq!(
+        crate::expr::default_expression(&h.stage, &a, "transform:opacity"),
+        "transform.opacity"
+    );
+}

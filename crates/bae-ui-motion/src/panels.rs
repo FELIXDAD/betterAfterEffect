@@ -34,7 +34,7 @@ fn prop_line(
         .cloned()
         .unwrap_or_default();
     let key_now = query::to_key_time(stage, path, now);
-    ui.horizontal(|ui| {
+    let row = ui.horizontal(|ui| {
         ui.set_min_height(20.0);
         let mut on = spec.is_animated();
         let animatable = stage
@@ -62,10 +62,15 @@ fn prop_line(
             .or_else(|| common::current_value(eval.get(cx.resources), stage, path, attr, now));
         if let Some(v) = value {
             let id = ui.id().with(("prop", path.as_str(), attr));
-            let edit = common::value_editor(ui, id, attr, &v, dims, tr(label));
+            let expression = spec.expression.as_ref().is_some_and(|e| e.enabled);
+            let edit = common::value_editor(ui, id, attr, &v, dims, tr(label), expression);
             common::apply_edit(cx, session, path, attr, now, edit);
         }
     });
+    // An expression pick whip dragged from the Timeline.
+    if let Some(whip) = row.response.dnd_release_payload::<crate::expr::Whip>() {
+        crate::expr::link(cx, eval.get(cx.resources), &whip, path, Some(attr), now);
+    }
 }
 
 fn section(ui: &mut Ui, title: &str) {

@@ -1837,3 +1837,54 @@ fn slip_edit_moves_the_source_inside_fixed_in_and_out_points() {
             .is_err()
     );
 }
+
+#[test]
+fn set_expressions_edits_several_properties_in_one_step() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let a = fx.layer(&comp, "solid", json!({}));
+    let b = fx.layer(&comp, "solid", json!({}));
+    let expr = |fx: &Fx, l: &PrimPath, attr: &str| {
+        query::attr_spec(&fx.stage, l, attr).and_then(|s| s.expression.clone())
+    };
+    fx.run(
+        "attr.set_expressions",
+        json!({"items": [
+            {"path": a, "attr": "transform:position", "source": "transform.position"},
+            {"path": b, "attr": "transform:opacity", "source": "50", "enabled": false},
+        ]}),
+    );
+    assert_eq!(
+        expr(&fx, &a, "transform:position").map(|e| (e.source, e.enabled)),
+        Some(("transform.position".to_owned(), true))
+    );
+    assert_eq!(
+        expr(&fx, &b, "transform:opacity").map(|e| (e.source, e.enabled)),
+        Some(("50".to_owned(), false))
+    );
+    // Removing both is one step; undo brings both back.
+    fx.run(
+        "attr.set_expressions",
+        json!({"items": [
+            {"path": a, "attr": "transform:position", "source": null},
+            {"path": b, "attr": "transform:opacity", "source": null},
+        ]}),
+    );
+    assert!(expr(&fx, &a, "transform:position").is_none());
+    assert!(expr(&fx, &b, "transform:opacity").is_none());
+    fx.stage.undo(&fx.author).unwrap();
+    assert!(expr(&fx, &a, "transform:position").is_some());
+    assert!(expr(&fx, &b, "transform:opacity").is_some());
+    // A locked layer is left alone (nothing changes).
+    fx.run(
+        "attr.set",
+        json!({"path": b, "attr": "locked", "value": {"type": "bool", "value": true}}),
+    );
+    assert!(
+        fx.try_run(
+            "attr.set_expressions",
+            json!({"items": [{"path": b, "attr": "transform:opacity", "source": null}]}),
+        )
+        .is_err()
+    );
+}

@@ -25,6 +25,7 @@ pub mod catalog;
 mod common;
 pub mod demo;
 pub mod dialogs;
+mod expr;
 mod gpu_preview;
 mod graph;
 mod i18n;
