@@ -26,6 +26,10 @@ bae_effects::prewarm(&gpu, wgpu::TextureFormat::Rgba16Float)?;
 
 Rust 效果的 uniform 走一个环形缓冲 + 动态偏移，每帧不创建缓冲；管线按（核、格式）缓存在每个 `GpuContext` 的运行时里。
 
+## 按分类登记
+
+每个分类的 `src/categories/<分类>.rs` 负责加载声明式包、登记 Rust 效果和预编译该分类的 GPU 管线。已有分类直接改本分类的 `register` 函数。扭曲和抠像已有独立入口，便于并行开发。基准用例放在 `benches/cases/`，与 AE 的误差和限制记录在 `tests/ae/categories/`。公开的 `builtins()`、`get()`、`catalog()` 和 `register()` 接口沿用原签名。
+
 ## 已有效果
 
 | AE matchName | 名称 | 形态 |
@@ -62,3 +66,21 @@ Rust 效果的 uniform 走一个环形缓冲 + 动态偏移，每帧不创建缓
 - `cargo test -p bae-effects`：GPU 结果与 CPU 参考实现（AE 规格公式）比较，覆盖 RGBA32F / RGBA16F、半分辨率、Repeat Edge Pixels、ROI 分块一致、identity；软件适配器（CI 上的 WARP）容差放宽 4 倍。
 - `cargo bench -p bae-effects`：4K / 1080p 每帧耗时；`-- <过滤词> --steps` 打印每个 dispatch 的 GPU 时间。
 - 与 AE 对照：`tests/ae/golden/` 是 AE 26.2.1 的输出，`tests/ae_golden.rs` 每次测试都比较（每个用例限定最大差和平均差）；重新生成和结论见 `tests/ae/README.md`。
+
+## 生成、杂色和过渡
+
+| 类别 | 效果 | AE matchName |
+|---|---|---|
+| 生成 | 填充、梯度渐变、四色渐变、网格 | `ADBE Fill`、`ADBE Ramp`、`ADBE 4ColorGradient`、`ADBE Grid` |
+| 杂色和颗粒 | 分形杂色、杂色、添加颗粒 | `ADBE Fractal Noise`、`ADBE Noise2`、`VISINF Grain Implant` |
+| 过渡 | 线性擦除、径向擦除、百叶窗、渐变擦除、块溶解 | `ADBE Linear Wipe`、`ADBE Radial Wipe`、`ADBE Venetian Blinds`、`ADBE Gradient Wipe`、`ADBE Block Dissolve` |
+
+渐变擦除目前读取当前图层的亮度。外部渐变图层、添加颗粒的外部蒙版图层、填充的指定蒙版和所有蒙版暂不支持。相关选择器及依赖它们的设置在参数定义里保留并禁用，等待渲染图接入额外输入。无蒙版填充以素材原有的 alpha 为覆盖率，羽化对它无效。
+
+分形杂色支持四种采样方式、分数复杂度、种子、演化与循环。AE 与 BAE 分别在相同的循环起止点复现自己的图像。同种子在两端会生成不同纹理。分形类型中的脏污到线程（菜单值 12–20）暂按基本型渲染。添加颗粒的胶片预设使用 AE 色阶图实测的 RGB 颗粒强度，噪点位置与 AE 有差异。各效果的实测范围见[对照记录](tests/ae/README.md)。
+
+### 颜色校正
+
+曲线、颜色平衡 (HLS)、更改颜色、更改为颜色、通道混合器、阴影/高光均在 GPU 上处理像素。曲线的参数 1 使用 `ParamKind::CurvePoints`，值为 `Value::FloatList`。每三个数依次表示通道、输入、输出。通道 0 为 RGB 总曲线，1 至 4 依次为红、绿、蓝、Alpha，坐标范围为 0 到 1。例如 `[1, 0, 1, 1, 1, 0]` 反转红色，其余通道保持恒等。先应用分通道曲线，再应用总曲线。参数 2 选择编辑通道。曲线编辑器待接入，导入 AE 自定义曲线数据也待接入。
+
+阴影/高光从本帧的亮度直方图估算自动数量，用邻域亮度控制阴影和高光的调整范围。瞬时平滑与场景检测保留 AE 参数和默认值。两项控件暂时禁用，等待渲染图提供同一效果之前的相邻帧。

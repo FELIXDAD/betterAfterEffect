@@ -244,6 +244,7 @@ pub fn render(gpu: &Arc<GpuContext>, case: &Case) -> Vec<[u8; 4]> {
     let p = EffectParams {
         scale: 1.0,
         float: case.bpc == 32,
+        sixteen_bpc: case.bpc == 16,
         ..EffectParams::new(&inst)
     };
     let mut target = Standalone::new(gpu.clone(), wgpu::TextureFormat::Rgba32Float);

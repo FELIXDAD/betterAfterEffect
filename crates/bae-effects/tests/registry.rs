@@ -32,7 +32,11 @@ fn builtins_register_through_the_plugin_registries() {
         assert!(b.info.full_id.starts_with("bae.effects/"));
         // Built-ins are not plugin effects: never removed, never "missing".
         assert!(def.plugin.is_none(), "{}", def.match_name);
-        assert!(def.match_name.starts_with("ADBE "), "{}", def.match_name);
+        assert!(
+            def.match_name.starts_with("ADBE ") || def.match_name == "VISINF Grain Implant",
+            "{}",
+            def.match_name
+        );
         assert!(
             !b.info.name_zh.is_empty() && b.info.name_zh != b.info.name,
             "{}",
