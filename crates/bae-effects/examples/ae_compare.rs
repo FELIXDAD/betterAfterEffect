@@ -16,7 +16,7 @@ const ROOT: &str = "/private/tmp/bae-07-ae";
 
 fn main() {
     let cmd = std::env::args().nth(1).unwrap_or_else(|| "compare".into());
-    // BAE_07_ROOT: a probe directory with its own cases.json (compare only).
+    // BAE_07_ROOT isolates concurrent runs. BAE_07_CASES selects a case list for prepare.
     let root = std::env::var_os("BAE_07_ROOT").map_or_else(|| PathBuf::from(ROOT), PathBuf::from);
     match cmd.as_str() {
         "prepare" => {
@@ -27,14 +27,18 @@ fn main() {
                     &harness::input(name),
                 );
             }
-            std::fs::write(root.join("cases.json"), harness::CASES).unwrap();
+            let cases = std::env::var_os("BAE_07_CASES").map_or_else(
+                || harness::CASES.to_owned(),
+                |path| std::fs::read_to_string(path).unwrap(),
+            );
+            std::fs::write(root.join("cases.json"), cases).unwrap();
             println!("wrote {}/inputs and cases.json", root.display());
         }
         "compare" => compare(&root),
         "golden" => {
             let golden = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ae/golden");
             std::fs::create_dir_all(&golden).unwrap();
-            for case in harness::cases() {
+            for case in load_cases(&root) {
                 let src = root.join("ae").join(format!("{}.png", case.name));
                 if src.exists() {
                     std::fs::copy(&src, golden.join(format!("{}.png", case.name))).unwrap();
@@ -53,11 +57,7 @@ fn compare(root: &Path) {
     std::fs::create_dir_all(root.join("bae")).unwrap();
     println!("| case | max Δ | mean Δ | px Δ>1 | px Δ>3 |");
     println!("|---|---:|---:|---:|---:|");
-    let cases = match std::fs::read_to_string(root.join("cases.json")) {
-        Ok(text) if std::env::var_os("BAE_07_ROOT").is_some() => harness::parse_cases(&text),
-        _ => harness::cases(),
-    };
-    for case in cases {
+    for case in load_cases(root) {
         let bae = harness::render(&gpu, &case);
         harness::write_png(&root.join("bae").join(format!("{}.png", case.name)), &bae);
         match harness::read_png(&root.join("ae").join(format!("{}.png", case.name))) {
@@ -71,5 +71,12 @@ fn compare(root: &Path) {
             }
             None => println!("| {} | (no AE render) | | | |", case.name),
         }
+    }
+}
+
+fn load_cases(root: &Path) -> Vec<harness::Case> {
+    match std::fs::read_to_string(root.join("cases.json")) {
+        Ok(text) if std::env::var_os("BAE_07_ROOT").is_some() => harness::parse_cases(&text),
+        _ => harness::cases(),
     }
 }

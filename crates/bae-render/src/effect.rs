@@ -27,6 +27,8 @@ pub struct EffectParams<'a> {
     pub effect: &'a RenderEffect,
     /// Layer time of the frame.
     pub time: Time,
+    /// Time in the comp containing the layer.
+    pub comp_time: Time,
     /// Resolution scale (0.5 at half resolution): pixel-sized parameters such as a
     /// blur radius must be multiplied by it (AE `downsample_x/y`).
     pub scale: f64,
@@ -68,6 +70,7 @@ impl<'a> EffectParams<'a> {
         Self {
             effect,
             time: Time::ZERO,
+            comp_time: Time::ZERO,
             scale: 1.0,
             layer_bounds: IRect::EMPTY,
             frame_rate: FrameRate::FPS_30,
@@ -134,7 +137,8 @@ impl EffectParams<'_> {
 pub struct LayerDependency {
     /// The layer.
     pub layer: PrimPath,
-    /// The comp time to sample it at.
+    /// The comp time to sample it at. The graph currently exposes the source
+    /// stage of the already evaluated frame.
     pub time: Time,
 }
 
@@ -142,6 +146,12 @@ pub struct LayerDependency {
 pub trait Effect: Send + Sync {
     /// The parameter definition (same object as in `bae_model::EffectRegistry`).
     fn def(&self) -> &EffectDef;
+
+    /// Whether this effect contributes a render node. Parameter-only controls
+    /// are registered so their definitions are available without encoding GPU work.
+    fn renders_pixels(&self) -> bool {
+        true
+    }
 
     /// Output bounds for input bounds (layer pixels at the request scale).
     /// Default: unchanged. A blur grows them by its radius.

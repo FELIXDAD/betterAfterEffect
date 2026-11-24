@@ -182,7 +182,12 @@ impl NodeKind {
                     }
                 }
             }
-            NodeKind::Effect(e) => f(e.input),
+            NodeKind::Effect(e) => {
+                f(e.input);
+                for (_, node) in &e.layers {
+                    f(*node);
+                }
+            }
             NodeKind::Mix(m) => {
                 f(m.base);
                 f(m.over);
@@ -318,6 +323,8 @@ pub struct EffectNode {
     pub frame: EffectFrame,
     /// Input node.
     pub input: NodeId,
+    /// Source-stage inputs keyed by the referenced layer.
+    pub layers: Vec<(PrimPath, NodeId)>,
 }
 
 /// The frame context of an effect call, stored per effect node (everything in
@@ -326,6 +333,8 @@ pub struct EffectNode {
 pub struct EffectFrame {
     /// Layer time.
     pub time: Time,
+    /// Comp time.
+    pub comp_time: Time,
     /// Resolution scale.
     pub scale: f64,
     /// Layer content bounds (layer pixels, full resolution, before effects).
@@ -349,6 +358,7 @@ impl EffectFrame {
     pub fn params<'a>(&self, instance: &'a RenderEffect) -> EffectParams<'a> {
         EffectParams {
             time: self.time,
+            comp_time: self.comp_time,
             scale: self.scale,
             layer_bounds: self.layer_bounds,
             frame_rate: self.frame_rate,
@@ -575,6 +585,7 @@ impl Builder<'_> {
         let effects = self.plan_effects(layer);
         let frame = EffectFrame {
             time: layer.time,
+            comp_time: comp.time,
             scale: 1.0 / scale,
             layer_bounds: content_rect.round_out(),
             frame_rate: comp.frame_rate,
@@ -645,9 +656,11 @@ impl Builder<'_> {
             .round_out()
             .inflate(1)
             .intersect(&layer_bounds);
+        let mut rois = vec![roi; effects.len() + 1];
         for (i, (effect, instance)) in effects.iter().enumerate().rev() {
             let params = frame.params(instance);
             roi = effect.input_roi(&params, roi).intersect(&bounds_chain[i]);
+            rois[i] = roi;
         }
 
         let has_effects = !effects.is_empty();
@@ -722,7 +735,7 @@ impl Builder<'_> {
             let OpInput::Image(input_id) = input else {
                 unreachable!("solids with effects are planned as fills")
             };
-            let rect = bounds_chain[i + 1];
+            let rect = rois[i + 1];
             let mut h = FxHasher::default();
             "effect".hash(&mut h);
             self.nodes[input_id.index()].key.hash(&mut h);
@@ -734,6 +747,14 @@ impl Builder<'_> {
                 crate::input::hash_value(value, &mut h);
             }
             rect.hash(&mut h);
+            let layers = self.effect_inputs(
+                comp,
+                &*effect,
+                &frame.params(&instance),
+                scale,
+                depth,
+                &mut h,
+            )?;
             input = OpInput::Image(self.push(Node {
                 kind: NodeKind::Effect(EffectNode {
                     layer: layer.path.clone(),
@@ -741,6 +762,7 @@ impl Builder<'_> {
                     instance,
                     frame,
                     input: input_id,
+                    layers,
                 }),
                 rect,
                 pixel_scale: scale,
@@ -990,6 +1012,7 @@ impl Builder<'_> {
         let domain = units(&comp_px, scale);
         let frame = EffectFrame {
             time: layer.time,
+            comp_time: comp.time,
             scale: 1.0 / scale,
             layer_bounds: comp_px.round_out(),
             frame_rate: comp.frame_rate,
@@ -1042,6 +1065,14 @@ impl Builder<'_> {
                 crate::input::hash_value(value, &mut h);
             }
             rect.hash(&mut h);
+            let layers = self.effect_inputs(
+                comp,
+                &*effect,
+                &frame.params(&instance),
+                scale,
+                depth,
+                &mut h,
+            )?;
             over = self.push(Node {
                 kind: NodeKind::Effect(EffectNode {
                     layer: layer.path.clone(),
@@ -1049,6 +1080,7 @@ impl Builder<'_> {
                     instance,
                     frame,
                     input: over,
+                    layers,
                 }),
                 rect,
                 pixel_scale: scale,
@@ -1119,16 +1151,98 @@ impl Builder<'_> {
         }])
     }
 
+    /// Plan source-stage checkouts at the evaluated frame time. A source
+    /// checkout bypasses the comp's layer visibility, transforms and effects.
+    fn effect_inputs(
+        &mut self,
+        comp: &RenderComp,
+        effect: &dyn Effect,
+        params: &EffectParams<'_>,
+        scale: f64,
+        depth: usize,
+        hash: &mut FxHasher,
+    ) -> Result<Vec<(PrimPath, NodeId)>, RenderError> {
+        let mut inputs = Vec::new();
+        for dep in effect.layer_dependencies(params) {
+            if dep.time != comp.time {
+                self.warn(format!(
+                    "{}: off-frame effect inputs are unavailable",
+                    dep.layer
+                ));
+                continue;
+            }
+            let Some(layer) = comp.layers.iter().find(|layer| layer.path == dep.layer) else {
+                continue;
+            };
+            let Some(content) = self.plan_content(layer, layer.time)? else {
+                continue;
+            };
+            let node = match content {
+                Content::Solid { color, rect } | Content::Fill { color, rect } => {
+                    let roi = units(&rect, scale);
+                    self.push(Node {
+                        kind: NodeKind::Fill(FillNode { color, rect }),
+                        rect: roi,
+                        pixel_scale: scale,
+                        key: hash_of(&(
+                            "fill",
+                            color.map(f32::to_bits),
+                            rect_bits(&rect),
+                            roi,
+                            scale.to_bits(),
+                        )),
+                        cacheable: false,
+                    })
+                }
+                Content::Source(source, time) => {
+                    let roi = source.bounds();
+                    let request = SourceRequest {
+                        roi,
+                        scale: 1.0 / scale,
+                        time,
+                    };
+                    self.push(Node {
+                        rect: units(&roi.to_rect(), scale),
+                        kind: NodeKind::Source(SourceNode {
+                            layer: layer.path.clone(),
+                            request,
+                            source: source.clone(),
+                        }),
+                        pixel_scale: scale,
+                        key: hash_of(&(
+                            "effect source",
+                            &layer.path,
+                            source.content_hash(time),
+                            roi,
+                            scale.to_bits(),
+                        )),
+                        cacheable: false,
+                    })
+                }
+                Content::Comp(comp) => {
+                    self.composite(&comp, units(&comp.rect(), scale), scale, depth + 1, true)?
+                }
+            };
+            dep.layer.hash(hash);
+            self.nodes[node.index()].key.hash(hash);
+            inputs.push((dep.layer, node));
+        }
+        Ok(inputs)
+    }
+
     fn plan_content(
         &mut self,
         layer: &RenderLayer,
         time: Time,
     ) -> Result<Option<Content>, RenderError> {
         let has_effects = self.skip_effects_of.as_ref() != Some(&layer.path)
-            && layer
-                .effects
-                .iter()
-                .any(|e| e.enabled && self.effects.get(&e.effect).is_some());
+            && layer.effects.iter().any(|e| {
+                e.enabled
+                    && self
+                        .effects
+                        .get(&e.effect)
+                        .is_some_and(|fx| fx.renders_pixels())
+            });
         Ok(match &layer.content {
             LayerContent::None => None,
             LayerContent::Solid {
@@ -1189,7 +1303,10 @@ impl Builder<'_> {
         }
         for instance in layer.effects.iter().filter(|e| e.enabled) {
             match self.effects.get(&instance.effect) {
-                Some(effect) => out.push((effect.clone(), instance.clone())),
+                Some(effect) if effect.renders_pixels() => {
+                    out.push((effect.clone(), instance.clone()))
+                }
+                Some(_) => {}
                 None => self.warn(format!(
                     "{}: effect `{}` is not available, skipped",
                     layer.path, instance.effect

@@ -56,6 +56,10 @@ pub const FRAME_HIGH_QUALITY: u32 = 4;
 /// `frame.flags`: 32-bpc float project. Without it (8 / 16 bpc, AE's default)
 /// a pixel function's result is clamped to `[0, 1]` like AE's integer buffers.
 pub const FRAME_FLOAT: u32 = 8;
+/// The input texture stores straight RGBA (including RGB at alpha zero).
+pub const FRAME_INPUT_STRAIGHT: u32 = 16;
+/// The input texture's alpha component is ignored.
+pub const FRAME_INPUT_OPAQUE: u32 = 32;
 
 /// Summary of what the prelude provides, for documentation and error messages.
 pub const PRELUDE_DOC: &str = "\
@@ -63,7 +67,7 @@ frame: BaeFrame (target_rect, output_rect, layer_bounds, downsample, time, time_
 frame_rate, pixel_aspect, shutter_angle, shutter_phase, flags, seed, frame_index, pass_index); \
 params: BaeParams (one field per numeric param); bae_load_<src>, bae_sample_<src>, \
 bae_rect_<src>, bae_store, bae_target_pixel, bae_in_target, bae_scale, bae_to_layer, \
-bae_from_layer, bae_layer_uv, bae_premultiply, bae_unpremultiply, bae_to_linear, \
+bae_from_layer, bae_layer_uv, bae_premultiply, bae_unpremultiply, bae_input_straight, bae_to_linear, \
 bae_from_linear, bae_luma, bae_hash";
 
 /// A readable source of a declarative effect.
@@ -193,6 +197,8 @@ struct BaeFrame {
 const BAE_FRAME_LINEAR: u32 = 1u;
 const BAE_FRAME_FINAL: u32 = 2u;
 const BAE_FRAME_FLOAT: u32 = 8u;
+const BAE_FRAME_INPUT_STRAIGHT: u32 = 16u;
+const BAE_FRAME_INPUT_OPAQUE: u32 = 32u;
 const BAE_FRAME_HIGH_QUALITY: u32 = 4u;
 
 @group(0) @binding(0) var<uniform> frame: BaeFrame;
@@ -215,9 +221,11 @@ const BAE_FRAME_HIGH_QUALITY: u32 = 4u;
 
     // Sources: rects (host-internal layout) and textures.
     let srcs = sources(effect);
-    s.push_str("\nstruct BaeSources {\n");
+    s.push_str(
+        "\nstruct BaeSource { rect: vec4i, texel_map: vec4f, size: vec4u }\nstruct BaeSources {\n",
+    );
     for src in &srcs {
-        let _ = writeln!(s, "    {}: vec4<i32>,", src.name());
+        let _ = writeln!(s, "    {}: BaeSource,", src.name());
     }
     s.push_str("}\n@group(0) @binding(2) var<uniform> bae_sources: BaeSources;\n");
     let _ = writeln!(
@@ -261,6 +269,17 @@ fn bae_depth_clamp(c: vec4<f32>) -> vec4<f32> {
     }
     let a = clamp(c.a, 0.0, 1.0);
     return vec4<f32>(clamp(c.rgb, vec3<f32>(0.0), vec3<f32>(a)), a);
+}
+
+// Interpret a sample from the primary input texture as straight RGBA.
+fn bae_input_straight(c: vec4<f32>) -> vec4<f32> {
+    if ((frame.flags & BAE_FRAME_INPUT_OPAQUE) != 0u) {
+        return vec4<f32>(c.rgb, 1.0);
+    }
+    if ((frame.flags & BAE_FRAME_INPUT_STRAIGHT) != 0u) {
+        return c;
+    }
+    return bae_unpremultiply(c);
 }
 
 // Full-resolution distance → render pixels.
@@ -356,16 +375,19 @@ fn bae_hash(seed: u32, p: vec2<i32>) -> f32 {
 // Source `{n}`: rect, texel load (transparent outside) and bilinear sample
 // (pixel centers at .5).
 fn bae_rect_{n}() -> BaeRect {{
-    let r = bae_sources.{n};
+    let r = bae_sources.{n}.rect;
     return BaeRect(r.xy, r.zw);
 }}
 
 fn bae_load_{n}(p: vec2<i32>) -> vec4<f32> {{
-    let r = bae_sources.{n};
+    let r = bae_sources.{n}.rect;
     if (any(p < r.xy) || any(p >= r.zw)) {{
         return vec4<f32>(0.0);
     }}
-    return textureLoad(bae_tex_{n}, p - r.xy, 0);
+    let source = bae_sources.{n};
+    let coord = vec2<i32>(floor((vec2f(p) + 0.5 - source.texel_map.xy) * source.texel_map.z));
+    let texel = clamp(coord, vec2i(0), vec2i(source.size.xy) - 1);
+    return textureLoad(bae_tex_{n}, texel, 0);
 }}
 
 fn bae_sample_{n}(p: vec2<f32>) -> vec4<f32> {{
