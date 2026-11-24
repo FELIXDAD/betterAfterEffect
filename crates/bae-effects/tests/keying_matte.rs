@@ -75,7 +75,8 @@ fn median_selects_each_channel_across_workgroups() {
     let roi = IRect::new(1, 3, 64, 12);
     let input = Pixels::new(rect, |x, y| {
         let n = (x + 8 + y * 5) as u32;
-        [n * 37 % 255, n * 19 % 255, n * 83 % 255, 255].map(|v| v as f32 / 255.)
+        let v = |factor| ((n * factor) % 255u32) as f32 / 127.0;
+        [v(37) - 0.9, 1.5 + v(19), v(83), 1.0]
     });
     for r in [1, 3] {
         let got = run(
@@ -99,7 +100,7 @@ fn median_selects_each_channel_across_workgroups() {
                 v[v.len() / 2]
             })
         });
-        assert_close(&got, &expected, roi, 0.002, "median");
+        assert_close(&got, &expected, roi, 0.000001, "median");
     }
 }
 
