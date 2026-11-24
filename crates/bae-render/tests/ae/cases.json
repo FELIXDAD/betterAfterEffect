@@ -1,4 +1,5 @@
 {
+ "hsl_pairs": [[[213,98,27],[73,205,144]], [[255,0,0],[0,255,0]], [[44,88,132],[185,106,27]], [[150,95,40],[65,120,175]], [[102,102,102],[19,210,0]], [[237,51,102],[90,48,190]]],
  "cases": [
   {
    "name": "blend_normal",
@@ -2497,6 +2498,43 @@
    "tolerance": 3,
    "pending_golden": true,
    "notes": "AE-CMP-045/048: masks on a scaled solid; a masked layer as track matte"
-  }
+  },
+  {"name": "blend_dissolve", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "dissolve", "opacity": 100}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_dancing_dissolve", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "dancing_dissolve", "opacity": 100}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_darken", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "darken", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_color_burn", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "color_burn", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_classic_color_burn", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "classic_color_burn", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_linear_burn", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "linear_burn", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_darker_color", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "darker_color", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_lighten", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "lighten", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_color_dodge", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "color_dodge", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_classic_color_dodge", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "classic_color_dodge", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_linear_dodge", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "linear_dodge", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_lighter_color", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "lighter_color", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_soft_light", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "soft_light", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_hard_light", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "hard_light", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_linear_light", "tolerance": 2, "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "linear_light", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_vivid_light", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "vivid_light", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_pin_light", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "pin_light", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_hard_mix", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "hard_mix", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_difference", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "difference", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_classic_difference", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "classic_difference", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_exclusion", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "exclusion", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_subtract", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "subtract", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_divide", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "divide", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_hue", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "hue", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_saturation", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "saturation", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_color", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "color", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_luminosity", "tolerance": 2, "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "luminosity", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_stencil_alpha", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "stencil_alpha", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_stencil_luma", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "stencil_luma", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_silhouette_alpha", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "silhouette_alpha", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_silhouette_luma", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "silhouette_luma", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_alpha_add", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "alpha_add", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "blend_luminescent_premul", "size": [32, 16], "layers": [{"name": "top", "solid": [73, 205, 144], "size": [24, 12], "pos": [16, 8], "mode": "luminescent_premul", "opacity": 65}, {"name": "base", "solid": [213, 98, 27], "size": [32, 16], "pos": [16, 8], "opacity": 80}]},
+  {"name": "grid_hue", "hsl_grid": "hue", "size": [64, 24], "tolerance": 2},
+  {"name": "grid_saturation", "hsl_grid": "saturation", "size": [64, 24], "tolerance": 3},
+  {"name": "grid_color", "hsl_grid": "color", "size": [64, 24], "tolerance": 2},
+  {"name": "grid_luminosity", "hsl_grid": "luminosity", "size": [64, 24], "tolerance": 2}
  ]
 }

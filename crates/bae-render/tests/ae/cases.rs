@@ -12,7 +12,31 @@ use bae_render::png_out::{read_rgba8, write_rgba8};
 use serde_json::Value as Json;
 
 pub fn cases() -> Json {
-    serde_json::from_str(include_str!("cases.json")).expect("cases.json")
+    let mut spec: Json = serde_json::from_str(include_str!("cases.json")).expect("cases.json");
+    let pairs = spec["hsl_pairs"].as_array().unwrap().clone();
+    for case in spec["cases"].as_array_mut().unwrap() {
+        if let Some(mode) = case["hsl_grid"].as_str() {
+            let mut layers = Vec::new();
+            for (row, pair) in pairs.iter().enumerate() {
+                for j in 0..4 {
+                    for k in 0..4 {
+                        let pos = [4 * (k + 4 * j) + 2, 4 * row + 2];
+                        for (level, color, opacity, mode) in [
+                            ("s", &pair[1], (k + 1) * 25, mode),
+                            ("b", &pair[0], (j + 1) * 25, "normal"),
+                        ] {
+                            layers.push(serde_json::json!({
+                                "name": format!("{level}{row}{j}{k}"), "solid": color,
+                                "size": [4,4], "pos": pos, "opacity": opacity, "mode": mode
+                            }));
+                        }
+                    }
+                }
+            }
+            case["layers"] = Json::Array(layers);
+        }
+    }
+    spec
 }
 
 pub fn write_image(path: &Path, w: u32, h: u32, f: impl Fn(u32, u32) -> [u8; 4]) {
