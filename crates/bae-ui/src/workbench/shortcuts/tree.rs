@@ -66,7 +66,8 @@ const AE_SCOPES: &[(&str, &[&str])] = &[
     ("Composition Panel", &["composition", "camera_tool"]),
     ("Effect Controls Panel", &["effect_controls"]),
     ("Flowchart Panel", &["flowchart"]),
-    ("Layer Panel", &["layer"]),
+    // AE 26's Mac list has no Footage Panel: footage is the other item viewer.
+    ("Layer Panel", &["layer", "footage"]),
     ("Paint Panel", &["paint_tool", "clone_tool", "paint"]),
     ("Project Panel", &["project"]),
     ("Render Queue Panel", &["render_queue"]),
@@ -76,10 +77,7 @@ const AE_SCOPES: &[(&str, &[&str])] = &[
 ];
 
 /// Scopes of BAE panel kinds AE has no Commands entry for.
-const EXTRA_SCOPES: &[(&str, &[&str])] = &[
-    ("Footage Panel", &["footage"]),
-    ("Dialog Boxes", &["dialog"]),
-];
+const EXTRA_SCOPES: &[(&str, &[&str])] = &[("Dialog Boxes", &["dialog"])];
 
 /// One node of the tree, in pre-order.
 #[derive(Clone, Debug)]
@@ -366,6 +364,26 @@ impl Tree {
         self.nodes
             .iter()
             .position(|n| n.entry.as_ref().is_some_and(|e| RowKey::of(e) == *key))
+    }
+
+    /// The groups above node `i`, nearest first.
+    pub fn ancestor_nodes(&self, i: usize) -> Vec<usize> {
+        let mut out = Vec::new();
+        let mut at = self.nodes[i].parent;
+        while let Some(j) = at {
+            out.push(j);
+            at = self.nodes[j].parent;
+        }
+        out
+    }
+
+    /// The node of every command row.
+    pub fn row_index(&self) -> HashMap<RowKey, usize> {
+        self.nodes
+            .iter()
+            .enumerate()
+            .filter_map(|(i, n)| n.entry.as_ref().map(|e| (RowKey::of(e), i)))
+            .collect()
     }
 
     /// The group keys above node `i`.
