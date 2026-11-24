@@ -1217,6 +1217,7 @@ pub const LAYER_SWITCH_ATTRS: &[&str] = &[
     "quality",
     "label",
     "blend_mode",
+    "preserve_transparency",
 ];
 
 pub struct SetLayerAttr;

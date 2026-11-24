@@ -68,6 +68,7 @@ pub mod import;
 pub mod keys;
 pub mod layer;
 pub mod markers;
+pub mod matte;
 pub mod names;
 pub mod path;
 pub mod precompose;
@@ -100,6 +101,7 @@ pub use layer::{
     ShiftLayers, SlipLayers, SplitLayers, TrimLayers, copy_layers,
 };
 pub use markers::{AddMarker, DeleteMarkers, EditMarker, MarkerFields, MarkerOutput, MoveMarkers};
+pub use matte::SetTrackMatte;
 pub use path::{DeleteVertex, InsertVertex, SetVertices};
 pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
 pub use shape::{AddShape, CreateMask, Geometry, ShapeKind};
@@ -127,6 +129,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(TrimLayers),
         r.register(ShiftLayers),
         r.register(SlipLayers),
+        r.register(SetTrackMatte),
         r.register(DeleteLayers),
         r.register(DeleteItems),
         r.register(SetParent),
