@@ -41,7 +41,7 @@ pub fn parse_cases(text: &str) -> Vec<Case> {
         .unwrap()
         .iter()
         .map(|c| {
-            let params = c["params"]
+            let mut params: Vec<_> = c["params"]
                 .as_object()
                 .unwrap()
                 .iter()
@@ -62,6 +62,12 @@ pub fn parse_cases(text: &str) -> Vec<Case> {
                     (id, value)
                 })
                 .collect();
+            if let Some(file) = c["lut"].as_str() {
+                let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../bae-color/tests/data/ocio")
+                    .join(file);
+                params.push((1, Value::Bytes(bae_color::lutfile::embed(&path).unwrap())));
+            }
             Case {
                 name: c["name"].as_str().unwrap().to_owned(),
                 bpc: c["bpc"].as_u64().unwrap_or(8),
@@ -111,6 +117,25 @@ pub fn input(name: &str) -> Vec<[u8; 4]> {
                     let v = x as f64 / (w - 1) as f64;
                     let v = if y < h / 2 { v } else { 0.5 * v };
                     [v, v, v, 1.0]
+                }
+                "rgb-cube" | "neutral-cast" => {
+                    let n = y * w + x;
+                    let rgb = [n % 32, (n / 32) % 32, n / 1024].map(|k| f64::from(k) / 31.);
+                    if name == "rgb-cube" {
+                        [rgb[0], rgb[1], rgb[2], 1.]
+                    } else {
+                        [
+                            (35. + 80. * rgb[0]) / 255.,
+                            (60. + 90. * rgb[1]) / 255.,
+                            (20. + 190. * rgb[2]) / 255.,
+                            1.,
+                        ]
+                    }
+                }
+                "color-cast" => {
+                    let x = (x / 4) as f64 / ((w - 1) / 4) as f64;
+                    let y = (y / 4) as f64 / ((h - 1) / 4) as f64;
+                    [0.11 + 0.63 * x * x, 0.18 + 0.5 * y, 0.04 + 0.32 * x * y, 1.]
                 }
                 "speckles" => {
                     let levels = |n: u32| f64::from(n % 251) / 250.0;
@@ -191,7 +216,12 @@ pub fn render(gpu: &Arc<GpuContext>, case: &Case) -> Vec<[u8; 4]> {
     // texels. A straight source keeps that data available, as the AE input does.
     let straight = matches!(
         case.effect.as_str(),
-        "ADBE PS Median"
+        "ADBE AutoLevels"
+            | "ADBE AutoContrast"
+            | "ADBE AutoColor"
+            | "ADBE Equalize"
+            | "APC Colorama"
+            | "ADBE PS Median"
             | "ADBE Dust & Scratches"
             | "ADBE Linear Color Key2"
             | "ADBE Invert"

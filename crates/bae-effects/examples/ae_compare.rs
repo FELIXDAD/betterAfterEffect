@@ -30,6 +30,9 @@ fn main() {
                 "lineg",
                 "fine",
                 "coords",
+                "color-cast",
+                "rgb-cube",
+                "neutral-cast",
                 "speckles",
                 "matte-edge",
             ] {

@@ -56,10 +56,7 @@
         return false;
     }
 
-    var done = [];
-    for (var i = 0; i < cases.length; i++) {
-        var c = cases[i];
-        app.project.bitsPerChannel = c.bpc || 8;
+    function makeComp(c) {
         var src = input(c.input);
         var comp = app.project.items.addComp(c.name, src.width, src.height, 1, 1, 30);
         var layer = comp.layers.add(src);
@@ -73,6 +70,18 @@
             }
             prop.setValue(c.params[id]);
         }
+        return comp;
+    }
+
+    var done = [];
+    var lutComps = {};
+    for (var i = 0; i < cases.length; i++) {
+        var c = cases[i];
+        app.project.bitsPerChannel = c.bpc || 8;
+        // Reuse the same image and LUT across depths. AE opens its picker on addProperty.
+        var key = c.input + "/" + c.lut;
+        var comp = c.lut && lutComps[key] ? lutComps[key] : makeComp(c);
+        if (c.lut) lutComps[key] = comp;
         var out = new File(outDir.fsName + "/" + c.name + ".png");
         if (out.exists) {
             out.remove();

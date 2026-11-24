@@ -1,0 +1,641 @@
+# Tint (ADBE Tint): docs/spec/ae/_parts/effects--fx-a.md AE-FX-036.
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "broadcast-colors"
+name = "Broadcast Colors"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE Broadcast Colors"]
+flags = ["pixel-independent"]
+shader = "shaders/broadcast_colors.wgsl"
+
+[[effect.param]]
+id = 1
+key = "broadcast_locale"
+name = "Broadcast Locale"
+type = "popup"
+default = 1
+choices = ["NTSC", "PAL"]
+
+[[effect.param]]
+id = 2
+key = "how_to_make_color_safe"
+name = "How to Make Color Safe"
+type = "popup"
+default = 1
+choices = ["Reduce Luminance", "Reduce Saturation", "(-", "Key Out Unsafe", "Key Out Safe"]
+
+[[effect.param]]
+id = 3
+key = "maximum_signal_amplitude_ire"
+name = "Maximum Signal Amplitude (IRE)"
+type = "float"
+default = 110
+range = [90, 120]
+
+[[effect]]
+id = "gamma-pedestal-gain"
+name = "Gamma/Pedestal/Gain"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE Gamma/Pedestal/Gain2"]
+flags = ["pixel-independent"]
+shader = "shaders/gamma_pedestal_gain.wgsl"
+
+[[effect.param]]
+id = 1
+key = "black_stretch"
+name = "Black Stretch"
+type = "float"
+default = 1
+range = [1, 4]
+
+[[effect.param]]
+id = 2
+key = "red_gamma"
+name = "Red Gamma"
+type = "float"
+default = 1
+range = [1.5e-05, 32000]
+
+[[effect.param]]
+id = 3
+key = "red_pedestal"
+name = "Red Pedestal"
+type = "float"
+default = 0
+range = [-32000, 32000]
+
+[[effect.param]]
+id = 4
+key = "red_gain"
+name = "Red Gain"
+type = "float"
+default = 1
+range = [-32000, 32000]
+
+[[effect.param]]
+id = 5
+key = "green_gamma"
+name = "Green Gamma"
+type = "float"
+default = 1
+range = [1.5e-05, 32000]
+
+[[effect.param]]
+id = 6
+key = "green_pedestal"
+name = "Green Pedestal"
+type = "float"
+default = 0
+range = [-32000, 32000]
+
+[[effect.param]]
+id = 7
+key = "green_gain"
+name = "Green Gain"
+type = "float"
+default = 1
+range = [-32000, 32000]
+
+[[effect.param]]
+id = 8
+key = "blue_gamma"
+name = "Blue Gamma"
+type = "float"
+default = 1
+range = [1.5e-05, 32000]
+
+[[effect.param]]
+id = 9
+key = "blue_pedestal"
+name = "Blue Pedestal"
+type = "float"
+default = 0
+range = [-32000, 32000]
+
+[[effect.param]]
+id = 10
+key = "blue_gain"
+name = "Blue Gain"
+type = "float"
+default = 1
+range = [-32000, 32000]
+
+[[effect]]
+id = "leave-color"
+name = "Leave Color"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE Leave Color"]
+flags = ["pixel-independent"]
+shader = "shaders/leave_color.wgsl"
+
+[[effect.param]]
+id = 1
+key = "amount_to_decolor"
+name = "Amount to Decolor"
+type = "float"
+default = 0
+range = [0, 100]
+
+[[effect.param]]
+id = 2
+key = "color_to_leave"
+name = "Color To Leave"
+type = "color"
+default = [1, 0, 0, 0]
+
+[[effect.param]]
+id = 3
+key = "tolerance"
+name = "Tolerance"
+type = "float"
+default = 15
+range = [0, 100]
+
+[[effect.param]]
+id = 4
+key = "edge_softness"
+name = "Edge Softness"
+type = "float"
+default = 0
+range = [0, 100]
+
+[[effect.param]]
+id = 5
+key = "match_colors"
+name = "Match colors"
+type = "popup"
+default = 1
+choices = ["Using RGB", "Using Hue"]
+
+[[effect]]
+id = "selective-color"
+name = "Selective Color"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE SelectiveColor"]
+flags = ["pixel-independent"]
+shader = "shaders/selective_color.wgsl"
+
+[[effect.param]]
+id = 1
+key = "method"
+name = "Method:"
+type = "popup"
+default = 1
+choices = ["Relative", "Absolute"]
+
+[[effect.param]]
+id = 2
+key = "colors"
+name = "Colors:"
+type = "popup"
+default = 1
+choices = ["Reds", "Yellows", "Greens", "Cyans", "Blues", "Magentas", "Whites", "Neutrals", "Blacks"]
+
+[[effect.param]]
+id = 3
+key = "cyan"
+name = "Cyan"
+type = "float"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 4
+key = "magenta"
+name = "Magenta"
+type = "float"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 5
+key = "yellow"
+name = "Yellow"
+type = "float"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 6
+key = "black"
+name = "Black"
+type = "float"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 7
+key = "details"
+name = "Details"
+type = "group"
+end_id = 62
+
+[[effect.param]]
+id = 8
+key = "reds"
+name = "Reds"
+type = "group"
+end_id = 13
+group = "details"
+
+[[effect.param]]
+id = 9
+key = "reds_cyan"
+name = "Cyan"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "reds"
+
+[[effect.param]]
+id = 10
+key = "reds_magenta"
+name = "Magenta"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "reds"
+
+[[effect.param]]
+id = 11
+key = "reds_yellow"
+name = "Yellow"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "reds"
+
+[[effect.param]]
+id = 12
+key = "reds_black"
+name = "Black"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "reds"
+
+[[effect.param]]
+id = 14
+key = "yellows"
+name = "Yellows"
+type = "group"
+end_id = 19
+group = "details"
+
+[[effect.param]]
+id = 15
+key = "yellows_cyan"
+name = "Cyan"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "yellows"
+
+[[effect.param]]
+id = 16
+key = "yellows_magenta"
+name = "Magenta"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "yellows"
+
+[[effect.param]]
+id = 17
+key = "yellows_yellow"
+name = "Yellow"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "yellows"
+
+[[effect.param]]
+id = 18
+key = "yellows_black"
+name = "Black"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "yellows"
+
+[[effect.param]]
+id = 20
+key = "greens"
+name = "Greens"
+type = "group"
+end_id = 25
+group = "details"
+
+[[effect.param]]
+id = 21
+key = "greens_cyan"
+name = "Cyan"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "greens"
+
+[[effect.param]]
+id = 22
+key = "greens_magenta"
+name = "Magenta"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "greens"
+
+[[effect.param]]
+id = 23
+key = "greens_yellow"
+name = "Yellow"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "greens"
+
+[[effect.param]]
+id = 24
+key = "greens_black"
+name = "Black"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "greens"
+
+[[effect.param]]
+id = 26
+key = "cyans"
+name = "Cyans"
+type = "group"
+end_id = 31
+group = "details"
+
+[[effect.param]]
+id = 27
+key = "cyans_cyan"
+name = "Cyan"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "cyans"
+
+[[effect.param]]
+id = 28
+key = "cyans_magenta"
+name = "Magenta"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "cyans"
+
+[[effect.param]]
+id = 29
+key = "cyans_yellow"
+name = "Yellow"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "cyans"
+
+[[effect.param]]
+id = 30
+key = "cyans_black"
+name = "Black"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "cyans"
+
+[[effect.param]]
+id = 32
+key = "blues"
+name = "Blues"
+type = "group"
+end_id = 37
+group = "details"
+
+[[effect.param]]
+id = 33
+key = "blues_cyan"
+name = "Cyan"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "blues"
+
+[[effect.param]]
+id = 34
+key = "blues_magenta"
+name = "Magenta"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "blues"
+
+[[effect.param]]
+id = 35
+key = "blues_yellow"
+name = "Yellow"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "blues"
+
+[[effect.param]]
+id = 36
+key = "blues_black"
+name = "Black"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "blues"
+
+[[effect.param]]
+id = 38
+key = "magentas"
+name = "Magentas"
+type = "group"
+end_id = 43
+group = "details"
+
+[[effect.param]]
+id = 39
+key = "magentas_cyan"
+name = "Cyan"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "magentas"
+
+[[effect.param]]
+id = 40
+key = "magentas_magenta"
+name = "Magenta"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "magentas"
+
+[[effect.param]]
+id = 41
+key = "magentas_yellow"
+name = "Yellow"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "magentas"
+
+[[effect.param]]
+id = 42
+key = "magentas_black"
+name = "Black"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "magentas"
+
+[[effect.param]]
+id = 44
+key = "whites"
+name = "Whites"
+type = "group"
+end_id = 49
+group = "details"
+
+[[effect.param]]
+id = 45
+key = "whites_cyan"
+name = "Cyan"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "whites"
+
+[[effect.param]]
+id = 46
+key = "whites_magenta"
+name = "Magenta"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "whites"
+
+[[effect.param]]
+id = 47
+key = "whites_yellow"
+name = "Yellow"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "whites"
+
+[[effect.param]]
+id = 48
+key = "whites_black"
+name = "Black"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "whites"
+
+[[effect.param]]
+id = 50
+key = "neutrals"
+name = "Neutrals"
+type = "group"
+end_id = 55
+group = "details"
+
+[[effect.param]]
+id = 51
+key = "neutrals_cyan"
+name = "Cyan"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "neutrals"
+
+[[effect.param]]
+id = 52
+key = "neutrals_magenta"
+name = "Magenta"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "neutrals"
+
+[[effect.param]]
+id = 53
+key = "neutrals_yellow"
+name = "Yellow"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "neutrals"
+
+[[effect.param]]
+id = 54
+key = "neutrals_black"
+name = "Black"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "neutrals"
+
+[[effect.param]]
+id = 56
+key = "blacks"
+name = "Blacks"
+type = "group"
+end_id = 61
+group = "details"
+
+[[effect.param]]
+id = 57
+key = "blacks_cyan"
+name = "Cyan"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "blacks"
+
+[[effect.param]]
+id = 58
+key = "blacks_magenta"
+name = "Magenta"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "blacks"
+
+[[effect.param]]
+id = 59
+key = "blacks_yellow"
+name = "Yellow"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "blacks"
+
+[[effect.param]]
+id = 60
+key = "blacks_black"
+name = "Black"
+type = "float"
+default = 0
+range = [-100, 100]
+group = "blacks"

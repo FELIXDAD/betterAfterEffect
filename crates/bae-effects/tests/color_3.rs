@@ -1,0 +1,207 @@
+//! GPU pixel and parameter checks for Color Correction and Utility.
+mod common;
+use bae_gpu::wgpu::TextureFormat::Rgba32Float;
+use bae_model::{ParamKind, Value};
+use bae_render::IRect;
+use common::*;
+
+#[test]
+fn ae_disk_ids_and_nested_groups() {
+    let selective = builtin("ADBE SelectiveColor").def();
+    assert_eq!(selective.params.len(), 62);
+    assert_eq!(selective.param(62).unwrap().kind, ParamKind::GroupEnd);
+    let wheel = builtin("APC Colorama").def();
+    assert_eq!(wheel.params[0].id, 3);
+    assert_eq!(wheel.param(12).unwrap().kind, ParamKind::ArbitraryData);
+    assert_eq!(wheel.param(38).unwrap().default, Some(Value::Float(1.)));
+    assert_eq!(builtin("ADBE Apply Color LUT2").info.category, "Utility");
+}
+
+#[test]
+fn embedded_luts_use_the_same_transform_as_bae_color() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::new(-2, 7, 35, 27);
+    let input = test_image(rect);
+    let fixtures =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../bae-color/tests/data/ocio");
+    for name in ["curve1d.cube", "shaper3d.cube", "gamma.spi1d", "look.spi3d"] {
+        let bytes = bae_color::lutfile::embed(&fixtures.join(name)).unwrap();
+        assert_eq!(bae_color::lutfile::embedded_name(&bytes), Some(name));
+        let transform = bae_color::lutfile::from_embedded(&bytes).unwrap();
+        let expected = input.map(|mut c| {
+            transform.apply_premultiplied(std::slice::from_mut(&mut c));
+            c
+        });
+        let got = run(
+            &gpu,
+            Rgba32Float,
+            builtin("ADBE Apply Color LUT2"),
+            vec![(1, Value::Bytes(bytes))],
+            &input,
+            rect,
+            1.,
+        );
+        assert_close(&got, &expected, rect, 0.0001, name);
+    }
+}
+
+#[test]
+fn full_layer_histogram_is_stable_across_tiles() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::new(-7, 3, 92, 54);
+    let roi = IRect::new(5, 10, 50, 32);
+    let input = Pixels::new(rect, |x, y| {
+        let f = (x + 7) as f32 / 100.;
+        let a = if y < 10 { 0. } else { 0.5 };
+        [
+            (0.1 + 0.6 * f) * a,
+            (0.2 + 0.6 * f) * a,
+            (0.15 + 0.35 * f) * a,
+            a,
+        ]
+    });
+    for name in [
+        "ADBE AutoLevels",
+        "ADBE AutoContrast",
+        "ADBE AutoColor",
+        "ADBE Equalize",
+    ] {
+        let fx = builtin(name);
+        let full = run(&gpu, Rgba32Float, fx, vec![], &input, rect, 1.);
+        let tile = run(&gpu, Rgba32Float, fx, vec![], &input, roi, 1.);
+        assert_close(&tile, &full, roi, 1e-6, name);
+        assert!(max_diff(&full, &input, rect).0 > 0.05, "{name}");
+        assert_eq!(full.get(15, 5), [0.; 4]);
+        assert_eq!(full.get(15, 25)[3], 0.5);
+    }
+}
+
+#[test]
+fn wheel_uses_custom_stops_and_phase_wraps() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(8, 4);
+    let input = Pixels::new(rect, |_, _| [0.25, 0.25, 0.25, 1.0]);
+    let render = |angle| {
+        run(
+            &gpu,
+            Rgba32Float,
+            builtin("APC Colorama"),
+            vec![
+                (2, Value::Int(2)),
+                (8, Value::Float(angle)),
+                (12, Value::Bytes(b"[[0,1,0,0,1],[0.5,0,0,1,1]]".to_vec())),
+            ],
+            &input,
+            rect,
+            1.,
+        )
+    };
+    let a = render(0.);
+    assert_close(&a, &render(360.), rect, 1e-6, "phase wraps");
+    assert_close(
+        &a,
+        &Pixels::new(rect, |_, _| [0.5, 0., 0.5, 1.]),
+        rect,
+        0.006,
+        "interpolated custom wheel",
+    );
+}
+
+#[test]
+fn colorama_reads_phase_and_mask_from_a_hidden_layer() {
+    use bae_model::PrimPath;
+    use bae_render::{LayerContent, RenderComp, RenderLayer, RenderRequest, Renderer};
+
+    let Some(gpu) = context() else { return };
+    let mut comp = RenderComp::new(PrimPath::new("/comps/main").unwrap(), 8, 8);
+    let solid = |name: &str, color| {
+        RenderLayer::new(
+            PrimPath::new(&format!("/comps/main/layers/{name}")).unwrap(),
+            LayerContent::Solid {
+                color,
+                width: 8,
+                height: 8,
+            },
+        )
+    };
+    let mut layer = solid("a", [0.0, 0.0, 0.0, 1.0]);
+    let mut control = solid("control", [0.25, 0.0, 0.0, 0.5]);
+    control.visible = false;
+    layer.effects.push(instance(
+        "APC Colorama",
+        vec![
+            (2, Value::Int(10)),
+            (4, Value::PrimRef(control.path.clone())),
+            (6, Value::Int(2)),
+            (28, Value::PrimRef(control.path.clone())),
+            (30, Value::Int(3)),
+            (32, Value::Bool(false)),
+        ],
+    ));
+    comp.layers = vec![layer, control];
+    let mut renderer = Renderer::new(gpu.clone());
+    bae_effects::register(
+        &mut bae_model::EffectRegistry::new(),
+        renderer.effects_mut(),
+    );
+    let frame = renderer
+        .render_frame(&comp, &RenderRequest::full())
+        .unwrap();
+    let image = bae_gpu::transfer::read_texture(&gpu, &frame.image.texture).unwrap();
+    for (channel, expected) in image
+        .pixel(4, 4)
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .zip([0.25, 0.5, 0.0, 0.5])
+    {
+        let actual = half::f16::from_le_bytes(*channel).to_f32();
+        assert!((actual - expected).abs() < 0.01, "{actual} vs {expected}");
+    }
+}
+
+#[test]
+fn legacy_corrections_clip_straight_hdr_before_premultiplying() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(3, 2);
+    let input = Pixels::new(rect, |_, _| [-0.25, 0.75, 0.25, 0.5]);
+    let expected = Pixels::new(rect, |_, _| [0.0, 0.5, 0.25, 0.5]);
+    for name in [
+        "ADBE Gamma/Pedestal/Gain2",
+        "ADBE Leave Color",
+        "ADBE SelectiveColor",
+    ] {
+        let actual = run(&gpu, Rgba32Float, builtin(name), vec![], &input, rect, 1.);
+        assert_close(&actual, &expected, rect, 1e-5, name);
+    }
+    for (name, id, value) in [
+        ("APC Colorama", 36, 100.),
+        ("ADBE AutoLevels", 5, 100.),
+        ("ADBE AutoContrast", 5, 100.),
+        ("ADBE AutoColor", 6, 100.),
+        ("ADBE Equalize", 2, 0.),
+    ] {
+        let original = run(
+            &gpu,
+            Rgba32Float,
+            builtin(name),
+            vec![(id, Value::Float(value))],
+            &input,
+            rect,
+            1.,
+        );
+        assert_close(&original, &expected, rect, 0.005, name);
+    }
+    let overwhite = Pixels::new(rect, |_, _| [0.75, 0.75, 0.75, 0.5]);
+    let white = Pixels::new(rect, |_, _| [0.5; 4]);
+    let actual = run(
+        &gpu,
+        Rgba32Float,
+        builtin("ADBE Broadcast Colors"),
+        vec![],
+        &overwhite,
+        rect,
+        1.,
+    );
+    assert_close(&actual, &white, rect, 1e-5, "broadcast white");
+}

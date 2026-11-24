@@ -1,4 +1,8 @@
 //! Per-channel curves and spatial tone correction.
+pub(crate) mod auto;
+pub(crate) mod colorama;
+pub(crate) mod colorama_definition;
+mod colorama_palettes;
 mod curves;
 mod shadow;
 
@@ -12,6 +16,10 @@ pub(crate) use shadow::ShadowHighlight;
 
 pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
     for entry in [
+        "colorama",
+        "auto_histogram",
+        "auto_mapping",
+        "auto_apply",
         "apply_curves",
         "histogram",
         "percentiles",
@@ -34,6 +42,24 @@ fn kernel(
     };
     rt.kernel(&key, || {
         let (source, bytes, inputs) = match entry {
+            "auto_histogram" | "auto_mapping" | "auto_apply" => (
+                concat!(
+                    include_str!("../../shaders/channel_math.wgsl"),
+                    include_str!("../../shaders/image_grid.wgsl"),
+                    include_str!("auto.wgsl")
+                ),
+                80,
+                if entry == "auto_apply" { 2 } else { 1 },
+            ),
+            "colorama" => (
+                concat!(
+                    include_str!("../../shaders/channel_math.wgsl"),
+                    include_str!("../../shaders/image_grid.wgsl"),
+                    include_str!("colorama.wgsl")
+                ),
+                colorama::BYTES,
+                3,
+            ),
             "apply_curves" => (include_str!("curves.wgsl"), curves::UNIFORM_BYTES, 1),
             "histogram" | "percentiles" => (include_str!("shadow.wgsl"), shadow::UNIFORM_BYTES, 1),
             "shadow_highlight" => (include_str!("shadow.wgsl"), shadow::UNIFORM_BYTES, 4),

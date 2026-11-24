@@ -18,6 +18,7 @@ fn matches_after_effects() {
     cases.extend(harness::parse_cases(include_str!(
         "ae/cases-keying-matte.json"
     )));
+    cases.extend(harness::parse_cases(include_str!("ae/cases-color-3.json")));
     let Some(gpu) = bae_gpu::testing::shared_context() else {
         return;
     };

@@ -24,6 +24,21 @@ pub(super) fn at_size(out: &mut Vec<Case>, size: [u32; 2], tag: &str) {
             size,
         });
     }
+    if size == HD {
+        for (name, effect) in [
+            ("auto levels", "ADBE AutoLevels"),
+            ("auto color", "ADBE AutoColor"),
+            ("equalize", "ADBE Equalize"),
+            ("colorama", "APC Colorama"),
+        ] {
+            out.push(Case {
+                name: format!("1080p color-3 {name}"),
+                match_name: effect,
+                params: vec![],
+                size: HD,
+            });
+        }
+    }
 }
 
 pub(super) fn shadow_highlight(out: &mut Vec<Case>) {
