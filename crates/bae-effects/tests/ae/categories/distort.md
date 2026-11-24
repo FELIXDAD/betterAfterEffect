@@ -1,5 +1,22 @@
 # 单图层扭曲（AE 26.2.1x2）
 
+## 已有效果
+
+| AE matchName | 名称 | 实现 |
+|---|---|---|
+| `ADBE Bulge` | 凸出 | Rust |
+| `ADBE Corner Pin` | 边角定位 | Rust |
+| `ADBE Mirror` | 镜像 | Rust |
+| `ADBE Offset` | 偏移 | Rust |
+| `ADBE Optics Compensation` | 光学补偿 | Rust |
+| `ADBE Polar Coordinates` | 极坐标 | Rust |
+| `ADBE Ripple` | 波纹 | Rust |
+| `ADBE Spherize` | 球面化 | Rust |
+| `ADBE Geometry2` | 变换 | Rust |
+| `ADBE Turbulent Displace` | 湍流置换 | Rust |
+| `ADBE Twirl` | 旋转扭曲 | Rust |
+| `ADBE Wave Warp` | 波形变形 | Rust |
+
 ## 初次对照
 
 macOS、Best、8 bpc、无色彩管理，单次批量渲染 126 帧。除色块和半透明图外，`coords` 用红绿通道编码源像素的 x/y，`fine` 每 16 像素重置坐标斜坡，用于区分亚像素采样与取整。`cases-distort.json` 中的 `time` 为图层秒数，缺省取第 0 帧。
@@ -35,3 +52,10 @@ GPU 测试另查 RGBA16F / RGBA32F、整数范围裁剪、HDR、半分辨率、�
 | 光学补偿 | 312 | 1 | 0.025 | 坐标斜坡标定“最佳像素”的缩放；三种周期的条纹在两个方向上分别测出方形像素的覆盖宽度。测试含偏心、反转及 165° 视场。 |
 
 其中 14 张加入 `cases-distort.json` 的常规 GPU 回归。位深对照和网格生成命令见[空间效果校准方法](../calibration.md)。
+
+## 工作流进度
+
+- 变换、湍流置换、波形变形、凸出、旋转扭曲、极坐标、边角定位、偏移、镜像、球面化、波纹和光学补偿共用 GPU 逆向采样。变换保留合成快门和快门角度参数，子帧运动模糊待做。
+- 126 帧 AE 26.2.1 对照已入库，63 帧峰值 ≤2/255。误差分布和随机场差异见本页的初次对照。
+- 新建与重置效果时，点参数取实际素材的中心或边角。置换图和时间置换待效果读取图层输入接口就绪后接入。
+- 2026-11-24，`effects/calibrate-1` 校准四项扭曲效果，新增 14 张 GPU 回归图，另有两张马赛克图在风格化分类。[网格复现方法](../calibration.md)

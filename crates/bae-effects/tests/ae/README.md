@@ -2,10 +2,12 @@
 
 | 文件 | 用途 |
 |---|---|
-| `cases.json`、`cases-distort.json`、`cases-stylize.json` | 默认一起运行的用例（两边共用）：输入图、效果 matchName、参数（按 AE 参数序号）、`tolerance`（允许的最大单通道差）、`mean`（允许的平均差），单位都是 8 位色阶。 |
+| 分类模块登记的 JSON 清单 | AE 和 BAE 共用的用例，包含输入图、效果 matchName、参数（按 AE 参数序号）、`tolerance`（允许的最大单通道差）、`mean`（允许的平均差），单位都是 8 位色阶。 |
 | `render_cases.jsx` | 在 AE 里逐个建合成（输入图尺寸、用例位深（默认 8 bpc）、不线性混合、无色彩管理、图层质量"最佳"），按 matchName 设参数，`saveFrameToPng` 输出第 0 帧。 |
 | `harness.rs` | 生成输入图（不提交二进制素材），用 BAE 渲染同样的用例（用例指定的位深）并比较。 |
 | `golden/` | AE 26.2.1（macOS）的输出，`tests/ae_golden.rs` 在 CI 里用它比较，不需要 AE。软件 / 虚拟适配器（CI 的 WARP）上最大差加 2、平均差加 0.5。 |
+
+命令行和 GPU 回归共用 [分类模块](categories/mod.rs)。新增本分类的探针和用例时，改对应的 `categories/<分类>.rs`。默认用例登记在 `default_cases`，仅参与常规回归的批次登记在 `golden_only`。使用 `BAE_07_CASES=<文件>` 可单独导出任一批次。已有跨分类清单保持原顺序，每批运行一次。
 
 重新生成：
 
