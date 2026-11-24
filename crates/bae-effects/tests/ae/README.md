@@ -74,3 +74,45 @@ cargo run -p bae-effects --example ae_compare -- golden            # 把 AE 输�
 | 色调分离 | 1 | 0.010 | 去预乘、等宽分箱、重新预乘。2、3、4、7、255 级的灰阶用例完全一致 |
 
 这些 golden 使用 8 bpc。浮点范围与预乘行为另由 RGBA16F / RGBA32F 的 GPU 像素测试覆盖。AE 自动化在启动时恢复了 `unknown-modal` 提示，随后成功输出全部文件。
+
+## 表达式控制、通道、遮罩和简单颜色（AE 26.2.1，macOS）
+
+`cases-controls-channel.json` 的 39 个用例由一次 `aectl run` 批量生成。AE 的启动提示框由 `aectl` 恢复后，批次正常完成。输入采用不透明色块与羽化 alpha 圆盘，PNG 输出是 8 bpc。对照按预乘 RGBA 比较，使用每像素四通道中的最大差，再计算整图平均。
+
+| 效果 | 最大差 / 平均差（8 位色阶） | 观察 |
+|---|---:|---|
+| 8 个表达式控制 | 0 / 0 | 像素不变。表达式命名、数字索引和图层对象另有宿主测试。 |
+| Invert | ≤1 / ≤0.775 | HLS 色相按半圈镜像，反转饱和度后限制最大色度，整数项目在混合前截断反转结果。 |
+| Shift Channels | ≤1 / ≤0.012 | 饱和度取 RGB 极差乘以同亮度可用的最大色度。 |
+| Set Matte | ≤1 / ≤0.033 | AE 用例取自身源，另有 GPU 测试覆盖隐藏图层作为源、居中和半分辨率。 |
+| Minimax | 0 / 0 | 测试覆盖最小、最大、先最小再最大，以及透明边缘。 |
+| Simple Choker | 2–6 / ≤0.062 | 高斯 alpha 后接阈值曲线，正负 4.5 的差集中在羽化边缘。 |
+| Black & White | 0–2 / ≤0.314 | 按原色与间色加权，染色按亮度补偿和色域裁剪。 |
+| Vibrance | 4 / 0.990，8 / 0.616 | 自然饱和度曲线和灰轴混合的近似有残差，集中在半饱和色与蓝紫色。 |
+| Photo Filter | 5 / 0.107（冷色 80，关闭保持发光度），8 / 0.705（默认暖色），5 / 0.761（冷色 80，开启保持发光度） | 根据追加色块网格重建滤镜矩阵和亮度恢复。暗部和色域边界有少量量化偏差。 |
+| Color Balance | ≤1 / ≤0.339 | 色块证实按通道码值独立调整，两种保持发光度状态分别拟合。仅验证了用例参数组合。 |
+
+Invert Alpha、Shift Channels 和 Set Matte 在 AE 中会重新显露直通素材全透明像素的 RGB。声明式像素效果可通过 `bae_input_straight` 从源纹理读取该值，已经预乘且丢失 RGB 的输入仍只能使用可恢复的信息。Black & White、Vibrance、Color Balance 在 32 bpc 工程中限制在 16 bpc 的归一化范围。GPU 测试覆盖 RGBA16F、RGBA32F 和整数/浮点语义。16/32 bpc 的 AE 误差未实测。
+
+重跑该批次时设置独立工作目录。用 `aectl lock --` 包住整批 AE 操作，由工具获取和释放共享锁。
+
+```sh
+export BAE_07_ROOT=/private/tmp/bae-controls-channel-ae
+export BAE_07_CASES="$PWD/crates/bae-effects/tests/ae/cases-controls-channel.json"
+cargo run -p bae-effects --example ae_compare -- prepare
+cat > "$BAE_07_ROOT/run.jsx" <<EOF_JS
+var BAE_07_ROOT = "$BAE_07_ROOT";
+\$.evalFile("$PWD/crates/bae-effects/tests/ae/render_cases.jsx");
+EOF_JS
+tools/ae/aectl lock -- tools/ae/aectl run "$BAE_07_ROOT/run.jsx"
+cargo run -p bae-effects --example ae_compare -- compare
+cargo run -p bae-effects --example ae_compare -- golden
+```
+
+### 照片滤镜追加校准
+
+输入由 RGB 三轴的 11 个码值（0、16、32、64、96、128、160、192、224、240、255）组合成 1,331 个不透明色块。锁定 AE 26.2.1 后生成 20 个预设 × 5 档密度（10、25、50、65、100）× 两种保持发光度状态的 200 帧，另有自定义颜色探针。AE 在批次末尾弹框，`aectl` 恢复时已写出 241 帧，预设矩阵的对照均已完成。另用相同网格分别跑了 16/32 bpc 项目的冷暖样本。32 bpc 的 PNG 在零密度时也与 8 bpc 导出有较大差异，因此误差以 8 bpc 输出为准。
+
+- 关闭保持发光度，AE 在 gamma 2.4 线性化的 RGB 上，用密度在原图与滤镜矩阵之间插值。自定义红、绿、蓝滤色的三个矩阵之和是单位矩阵。黄、品红、青及非原色样本可用三个原色矩阵乘以线性化的滤色分量来解释。预设使用同一矩阵，滤色系数从色块网格拟合，冷暖预设的系数可超出 0–1。
+- 保持发光度先将滤镜结果编码回非线性 RGB 并裁剪到显示色域，再按 0.30、0.59、0.11 恢复源亮度。色度超出色域时，沿同亮度的中性色方向收缩。对默认暖色网格，在已经裁剪的滤镜结果上使用这套模型，平均差约 0.7 级。改用 Rec.709 权重为 2.6 级，线性 RGB 亮度为 30.3 级。AE 的 8 位亮度和滤镜中间值取整能解释一部分尖峰，BAE 的工作纹理在整数项目中保留浮点精度。
+- 原有三张色卡是独立于拟合网格的回归测试。默认暖色和冷色 80 保持发光度的最大差从 87 / 108 降至 8 / 5，均值从 7.483 / 13.103 降至 0.705 / 0.761。全网格 200 个预设条件的整帧平均差均低于 1 级，最大差发生在深翡翠预设的少量暗部色块，约 14 级。

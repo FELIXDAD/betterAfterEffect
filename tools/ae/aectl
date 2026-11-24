@@ -36,30 +36,39 @@ nap() { perl -e "select(undef,undef,undef,$1)"; }
 
 # This is the host-wide lock used by workers. Keep it separate from STATE/lock.d,
 # which serializes individual aectl calls, including calls made inside this scope.
-with_shared_lock() {
-  local path="${BAE_AE_LOCK_DIR:-/private/tmp/bae-locks}/ae.lock"
-  local owner="$$-$RANDOM" deadline=$((SECONDS + lock_timeout)) waiting=0
-  mkdir -p "$(dirname "$path")" || die "cannot create the shared lock directory"
-  while ! mkdir "$path" 2>/dev/null; do
-    (( SECONDS < deadline )) || die "After Effects still reserved after ${lock_timeout}s (lock: $path)"
+SHARED_LOCK="${BAE_AE_LOCK_DIR:-/private/tmp/bae-locks}/ae.lock"
+shared_owner=""
+
+release_shared_lock() {
+  if [[ -n "$shared_owner" && "$(cat "$SHARED_LOCK/owner" 2>/dev/null)" == "$shared_owner" ]]; then
+    rm "$SHARED_LOCK/owner" && rmdir "$SHARED_LOCK"
+  fi
+}
+
+acquire_shared_lock() {
+  if [[ -n "${BAE_AE_LOCK_OWNER:-}" && "$(cat "$SHARED_LOCK/owner" 2>/dev/null)" == "$BAE_AE_LOCK_OWNER" ]]; then
+    return 0
+  fi
+  local deadline=$((SECONDS + lock_timeout)) waiting=0
+  mkdir -p "$(dirname "$SHARED_LOCK")" || die "cannot create the shared lock directory"
+  while ! mkdir "$SHARED_LOCK" 2>/dev/null; do
+    (( SECONDS < deadline )) || die "After Effects still reserved after ${lock_timeout}s (lock: $SHARED_LOCK)"
     if (( ! waiting )); then
-      log "waiting for the shared After Effects lock ($path)"
+      log "waiting for the shared After Effects lock ($SHARED_LOCK)"
       waiting=1
     fi
     sleep 1
   done
-  trap 'if [[ "$(cat "$path/owner" 2>/dev/null)" == "$owner" ]]; then
-    rm "$path/owner" && rmdir "$path"
-  fi' EXIT
+  shared_owner="$$-$RANDOM"
+  trap release_shared_lock EXIT
   trap 'exit 129' HUP
   trap 'exit 130' INT
   trap 'exit 143' TERM
-  if ! printf '%s\n' "$owner" > "$path/owner"; then
-    rmdir "$path"
-    die "cannot record ownership of $path"
+  if ! printf '%s\n' "$shared_owner" > "$SHARED_LOCK/owner"; then
+    rmdir "$SHARED_LOCK"
+    die "cannot record ownership of $SHARED_LOCK"
   fi
-  "$@"
-  exit $?
+  export BAE_AE_LOCK_OWNER="$shared_owner"
 }
 
 cmd="${1:-status}"; shift || true
@@ -78,8 +87,13 @@ while (( $# )); do
 done
 if [[ "$cmd" == lock ]]; then
   [[ ${#args[@]} -gt 0 ]] || die "usage: aectl lock [--lock-timeout <s>] -- command [args...]"
-  with_shared_lock "${args[@]}"
+  acquire_shared_lock
+  "${args[@]}"
+  exit $?
 fi
+case "$cmd" in
+  start|stop|eval|run|clean|install) acquire_shared_lock ;;
+esac
 
 STATE="${BAE_AE_STATE:-/tmp/bae-ae-automation}"
 mkdir -p "$STATE"
@@ -251,26 +265,50 @@ recover() {
   clean_flags
 }
 
+dismiss_disk_cache_warning() {
+  [[ "$(/usr/bin/osascript -l JavaScript "$HERE/dismiss_disk_cache_warning.js" "$1" 2>/dev/null)" == dismissed ]] || return 1
+  log "acknowledged the disk cache warning (Once Per Session)"
+}
+
+restart_after_startup_modal() {
+  local pid="$1" force="$2" why
+  why=$(known_dialog "$(main_stack "$pid")")
+  if [[ "$why" == "$last_modal" ]]; then
+    die "startup dialog returned after a restart: $why. Dismiss it in After Effects and retry."
+  fi
+  last_modal="$why"
+  recover "$pid" "$force" "$why"
+}
+
 wait_ready() {
-  local pid="$1" t0="$2" limit="${3:-180}" i=0 hits=0
+  local pid="$1" t0="$2" limit="${3:-180}" i=0 hits=0 ready=0 dismissed=0
   while (( i < limit * 2 )); do
     nap 0.5; i=$((i + 1))
-    if [[ -f "$STATE/ready.json" ]] && [[ "$(stat -f %m "$STATE/ready.json")" -ge "$t0" ]]; then return 0; fi
     kill -0 "$pid" 2>/dev/null || return 2
-    if (( i % 6 == 0 )); then
-      if is_modal "$pid"; then hits=$((hits + 1)); else hits=0; fi
-      (( hits >= 2 )) && return 3
+    # The startup script can write ready.json before AE shows its warning on idle.
+    if [[ -f "$STATE/ready.json" ]] && [[ "$(stat -f %m "$STATE/ready.json")" -ge "$t0" ]]; then ready=1; fi
+    if (( ready || i % 6 == 0 )); then
+      if is_modal "$pid"; then
+        hits=$((hits + 1))
+      else
+        hits=0
+        (( ready )) && return 0
+      fi
+      if (( hits >= 2 )); then
+        (( ! dismissed )) && dismiss_disk_cache_warning "$pid" || return 3
+        dismissed=1; hits=0
+      fi
     fi
   done
   return 1
 }
 
 start() {
-  local force="${1:-0}" pid attempt
+  local force="${1:-0}" pid attempt last_modal=""
   pid=$(ae_pid)
   if [[ -n "$pid" ]]; then
-    if stuck "$pid"; then
-      recover "$pid" "$force" "$(known_dialog "$(main_stack "$pid")")"
+    if stuck "$pid" && { ! dismiss_disk_cache_warning "$pid" || stuck "$pid"; }; then
+      restart_after_startup_modal "$pid" "$force"
     elif [[ -f "$STATE/ready.json" ]]; then
       return 0
     else
@@ -290,7 +328,7 @@ start() {
     case $? in
       0) log "After Effects $VERSION ready (pid $pid, $(( $(date +%s) - t0 ))s)"; return 0 ;;
       2) log "After Effects exited during startup (attempt $attempt)"; clean_flags ;;
-      3) recover "$pid" 1 "$(known_dialog "$(main_stack "$pid")") (attempt $attempt)" ;;
+      3) restart_after_startup_modal "$pid" 1 ;;
       *) recover "$pid" 1 "startup timeout (attempt $attempt)" ;;
     esac
   done
@@ -337,7 +375,7 @@ EOF
     -e "tell application id \"$BUNDLE_ID\" to DoScriptFile \"$wrapper\"" -e "end timeout" >"$osa_log" 2>&1 &
   # Wall-clock deadline: the stack samples below take time, so counting naps would let
   # osascript's own (timeout + 5) s limit expire first.
-  local osa=$! i=0 hits=0 frozen=0 prev_sig="" text sig why="" deadline=$((SECONDS + timeout))
+  local osa=$! i=0 hits=0 frozen=0 prev_sig="" text sig why="" dismissed=0 deadline=$((SECONDS + timeout))
   local timeout_why="timeout after ${timeout}s; the script was still running"
   while (( SECONDS < deadline )); do
     nap 0.5; i=$((i + 1))
@@ -375,6 +413,10 @@ EOF
     if (( frozen >= FROZEN_CHECKS )); then
       why="main thread frozen outside the script for ~$((FROZEN_CHECKS * 3))s: $(main_stack "$pid" | tail -4 | tr '\n' ' ')"
     elif (( hits >= MODAL_CONFIRMATIONS )); then
+      if (( ! dismissed )) && dismiss_disk_cache_warning "$pid"; then
+        dismissed=1; hits=0; frozen=0
+        continue
+      fi
       why="$(known_dialog "$(main_stack "$pid")")"
     fi
     if [[ -n "$why" ]]; then
@@ -459,7 +501,7 @@ acquire_lock() {
   done
   echo $$ > "$LOCK/pid"
   echo "$(date +%H:%M:%S) $cmd ${args[*]:0:1}" | cut -c1-120 > "$LOCK/what"
-  trap 'rm -rf "$LOCK"' EXIT
+  trap 'rm -rf "$LOCK"; release_shared_lock' EXIT
 }
 
 case "$cmd" in

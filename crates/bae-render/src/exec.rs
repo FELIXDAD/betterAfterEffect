@@ -187,6 +187,7 @@ pub(crate) fn execute(
                     encoder: &mut encoder,
                     format,
                     allocator: &mut alloc,
+                    effect_inputs: &[],
                 };
                 src.source.render(&mut ectx, &src.request)?
             }
@@ -194,6 +195,11 @@ pub(crate) fn execute(
                 let input = outputs[fx.input.index()]
                     .clone()
                     .ok_or_else(|| RenderError::Other("effect input missing".into()))?;
+                let effect_inputs: Vec<_> = fx
+                    .layers
+                    .iter()
+                    .filter_map(|(path, id)| Some((path.clone(), outputs[id.index()].clone()?)))
+                    .collect();
                 let params = fx.frame.params(&fx.instance);
                 let mut alloc = PoolAllocator {
                     pool,
@@ -205,6 +211,7 @@ pub(crate) fn execute(
                     encoder: &mut encoder,
                     format,
                     allocator: &mut alloc,
+                    effect_inputs: &effect_inputs,
                 };
                 fx.effect.render(&mut ectx, &params, &input, node.rect)?
             }

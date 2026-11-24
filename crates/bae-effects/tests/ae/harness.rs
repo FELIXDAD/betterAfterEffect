@@ -156,14 +156,25 @@ pub fn render(gpu: &Arc<GpuContext>, case: &Case) -> Vec<[u8; 4]> {
         bae_effects::get(&case.effect).unwrap_or_else(|| panic!("no built-in {}", case.effect));
     let [w, h] = SIZE;
     let rect = IRect::from_size(w, h);
+    // These channel effects can reveal the original RGB of transparent
+    // texels. A straight source keeps that data available, as the AE input does.
+    let straight = matches!(
+        case.effect.as_str(),
+        "ADBE Invert"
+            | "ADBE Shift Channels"
+            | "ADBE Set Matte3"
+            | "ADBE Simple Choker"
+            | "ADBE Minimax"
+    );
     let data: Vec<u8> = input(&case.input)
         .iter()
         .flat_map(|p| {
             let a = f32::from(p[3]) / 255.0;
+            let gain = if straight { 1.0 } else { a };
             [
-                f32::from(p[0]) / 255.0 * a,
-                f32::from(p[1]) / 255.0 * a,
-                f32::from(p[2]) / 255.0 * a,
+                f32::from(p[0]) / 255.0 * gain,
+                f32::from(p[1]) / 255.0 * gain,
+                f32::from(p[2]) / 255.0 * gain,
                 a,
             ]
         })
@@ -190,7 +201,15 @@ pub fn render(gpu: &Arc<GpuContext>, case: &Case) -> Vec<[u8; 4]> {
         &data,
     )
     .unwrap();
-    let image = Standalone::image(texture, rect, ImageAlpha::Premultiplied);
+    let image = Standalone::image(
+        texture,
+        rect,
+        if straight {
+            ImageAlpha::Straight
+        } else {
+            ImageAlpha::Premultiplied
+        },
+    );
     let inst = RenderEffect {
         path: PrimPath::new("/comps/ae/layers/input/effects/fx").unwrap(),
         effect: case.effect.clone(),
@@ -213,9 +232,12 @@ pub fn render(gpu: &Arc<GpuContext>, case: &Case) -> Vec<[u8; 4]> {
                 continue;
             }
             let b = back.pixel(tx as u32, ty as u32);
-            let c: [f32; 4] = std::array::from_fn(|k| {
+            let mut c: [f32; 4] = std::array::from_fn(|k| {
                 f32::from_le_bytes(b[4 * k..4 * k + 4].try_into().unwrap())
             });
+            if out.alpha == ImageAlpha::Straight {
+                c = [c[0] * c[3], c[1] * c[3], c[2] * c[3], c[3]];
+            }
             px[(y as u32 * w + x as u32) as usize] =
                 c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
         }
