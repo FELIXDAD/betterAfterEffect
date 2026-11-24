@@ -46,6 +46,8 @@ AE 工程能进来，也能回去。让团队里只用 AE 的人照常工作，�
 
 ## 进度
 
+- 2026-11-24，`tools/aectl-multi-instance` 实测 AE 26.2.1。macOS 能创建额外 PID，但测试进程在共用首选项时卡在启动模态框，临时 HOME 也未能进入启动脚本。工具保留单实例，新增 `aectl lock` 供 worker 对整组 golden 操作排队，详见 [aectl 调研记录](../../tools/ae/README.md#macos-多实例实测2026-11-24)。
+
 - [x] 导出脚本 v0（`bridges/ae/bae-export.jsx`）：合成、图层、变换关键帧（时间缓动、空间切线、连续/自动贝塞尔/漂浮、标签）、表达式、遮罩、形状内容、文字（源文本、动画器、选择器）、效果（matchName + 参数，含图层/遮罩参数）、标记、素材清单与收集、导出报告。模拟 DOM 测试（`bridges/ae/tests/`，约 1.8 万项检查 + 金样）；已在 AE 26.2.1 上实测（见下）。
 - [x] 交换格式草案 v0.1（`docs/interop/bae-interchange.md` + `bae-interchange.schema.json`）：容器直接用 02 的 `PrimTree`/`AttrSpec`/`Keyframe`/`Value` JSON；AE 属性名用可逆编码的 `ae:` 名字。用 dev 上的 `bae-model` 实测：示例文件经 `Op::RestorePrim` 写入 Sublayer、读回、重新序列化逐字段一致（`text_document` 除外，见请求）；素材 Prim 带 02 的 `file:*` 引用属性，`AssetFile::from_prim` 能直接读。向 02 报告的 `PrimTree` 反序列化 bug 已在 PR #9 修复并复核。
 - [x] 给 03 的对照样例：格式（`docs/interop/ae-anim-samples.md` + schema）、62 个用例（`bridges/ae/samples/anim-cases.json`，由 `gen_anim_cases.py` 生成）、AE 采样脚本 `bridges/ae/bae-anim-samples.jsx`。AE 26.2.1 参考数据已生成并提交（`bridges/ae/samples/anim-samples.ae-26.json`）。
