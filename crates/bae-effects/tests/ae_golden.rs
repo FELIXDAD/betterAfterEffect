@@ -25,7 +25,7 @@ fn matches_after_effects() {
     let (extra_max, extra_mean) = if soft { (2, 0.5) } else { (0, 0.0) };
     let mut failures = Vec::new();
     for case in &cases {
-        let ae = harness::read_png(&golden.join(format!("{}.png", case.name))).unwrap();
+        let ae = harness::read_png(&golden.join(format!("{}.png", case.name)), case.bpc).unwrap();
         let bae = harness::render(&gpu, case);
         let (max, mean, o1, o3) = harness::diff(&bae, &ae);
         eprintln!("{}: max {max} mean {mean:.3} >1: {o1} >3: {o3}", case.name);
