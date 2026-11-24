@@ -637,8 +637,16 @@ fn catalog_lines() -> Vec<String> {
                     level.extend(inner);
                 }
                 Node::Effects => {
+                    // Each category lists AE's effects by name (crate::effects).
                     for c in EFFECT_CATEGORIES {
                         level.push(format!("{prefix} > {c} ▸"));
+                        let mut names: Vec<&str> = crate::effects::directory()
+                            .iter()
+                            .filter(|e| e.category == *c)
+                            .map(|e| e.name)
+                            .collect();
+                        names.sort_unstable();
+                        level.extend(names.iter().map(|n| format!("{prefix} > {c} > {n}")));
                     }
                 }
                 _ => {}

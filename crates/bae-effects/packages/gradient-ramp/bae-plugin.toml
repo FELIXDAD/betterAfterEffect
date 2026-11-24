@@ -1,0 +1,79 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "gradient-ramp"
+name = "Gradient Ramp"
+category = "Generate"
+implementation = "wgsl"
+ae_match_names = ["ADBE Ramp"]
+keywords = ["gradient", "ramp"]
+shader = "shaders/gradient_ramp.wgsl"
+identity_when = "params.blend_with_original == 1"
+
+[[effect.param]]
+id = 1
+key = "start_of_ramp"
+type = "point"
+name = "Start of Ramp"
+default = [0.5, 0.0]
+
+[[effect.param]]
+id = 2
+key = "start_color"
+type = "color"
+name = "Start Color"
+default = [0, 0, 0, 1]
+
+[[effect.param]]
+id = 3
+key = "end_of_ramp"
+type = "point"
+name = "End of Ramp"
+default = [0.5, 1.0]
+
+[[effect.param]]
+id = 4
+key = "end_color"
+type = "color"
+name = "End Color"
+default = [1, 1, 1, 1]
+
+[[effect.param]]
+id = 5
+key = "ramp_shape"
+type = "popup"
+name = "Ramp Shape"
+default = 1
+choices = ["Linear Ramp", "Radial Ramp"]
+
+[[effect.param]]
+id = 6
+key = "ramp_scatter"
+type = "float"
+name = "Ramp Scatter"
+default = 0
+range = [0, 512]
+
+[[effect.param]]
+id = 7
+key = "blend_with_original"
+type = "float"
+name = "Blend With Original"
+default = 0
+range = [0, 1]
+
+[[effect.param]]
+id = 8
+key = "swap_colors"
+type = "button"
+name = "Swap Colors"
+label = "Swap Colors"

@@ -1,11 +1,11 @@
 // Renders every case of cases.json in After Effects (run with tools/ae/aectl on
 // a machine that has AE):
 //
-//   tools/ae/aectl run crates/bae-effects/tests/ae/render_cases.jsx
+//   tools/ae/aectl lock -- tools/ae/aectl run crates/bae-effects/tests/ae/render_cases.jsx
 //
 // Inputs come from `cargo run -p bae-effects --example ae_compare -- prepare`
 // (/private/tmp/bae-07-ae/inputs/*.png); outputs go to /private/tmp/bae-07-ae/ae/.
-// 8 bpc project, no linearized working space, no colour management, frame 0,
+// Case-specific depth (8 bpc by default), no linearized working space, no colour management, frame 0,
 // layer quality Best. Parameters are set by matchName ("<effect>-NNNN").
 // No alert(): results are returned as a string.
 
@@ -56,13 +56,11 @@
         return false;
     }
 
-    var done = [];
-    for (var i = 0; i < cases.length; i++) {
-        var c = cases[i];
+    function makeComp(c) {
         var src = input(c.input);
         var comp = app.project.items.addComp(c.name, src.width, src.height, 1, 1, 30);
         var layer = comp.layers.add(src);
-        layer.quality = LayerQuality.BEST;
+        layer.quality = c.quality === "draft" ? LayerQuality.DRAFT : LayerQuality.BEST;
         var fx = layer.property("ADBE Effect Parade").addProperty(c.effect);
         for (var id in c.params) {
             var pad = ("0000" + id).slice(-4);
@@ -72,15 +70,28 @@
             }
             prop.setValue(c.params[id]);
         }
+        return comp;
+    }
+
+    var done = [];
+    var lutComps = {};
+    for (var i = 0; i < cases.length; i++) {
+        var c = cases[i];
+        app.project.bitsPerChannel = c.bpc || 8;
+        // Reuse the same image and LUT across depths. AE opens its picker on addProperty.
+        var key = c.input + "/" + c.lut;
+        var comp = c.lut && lutComps[key] ? lutComps[key] : makeComp(c);
+        if (c.lut) lutComps[key] = comp;
         var out = new File(outDir.fsName + "/" + c.name + ".png");
         if (out.exists) {
             out.remove();
         }
-        comp.saveFrameToPng(0, out);
+        comp.saveFrameToPng(c.time || 0, out);
         if (!waitFor(out.fsName)) {
             throw new Error(c.name + ": saveFrameToPng timed out");
         }
         done.push(c.name);
+        comp.remove();
     }
     return "rendered " + done.length + " cases: " + done.join(", ");
 })();

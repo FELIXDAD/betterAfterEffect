@@ -1,0 +1,27 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "posterize"
+name = "Posterize"
+category = "Stylize"
+implementation = "wgsl"
+ae_match_names = ["ADBE Posterize"]
+keywords = ["posterize"]
+shader = "shaders/posterize.wgsl"
+
+[[effect.param]]
+id = 1
+key = "level"
+type = "int"
+name = "Level"
+default = 7
+range = [2, 255]

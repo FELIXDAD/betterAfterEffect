@@ -1,0 +1,13 @@
+[effect.threshold]
+name = "阈值"
+keywords = ["阈值", "黑白"]
+
+[effect.threshold.params]
+level = "级别"
+
+[effect.threshold_legacy]
+name = "阈值"
+keywords = ["阈值", "旧版"]
+
+[effect.threshold_legacy.params]
+level = "级别"

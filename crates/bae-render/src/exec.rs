@@ -7,6 +7,11 @@
 //! modes (Multiply, Overlay, preserve transparency, clamped Add) end the pass,
 //! copy the layer's destination bounds into a scratch texture and continue.
 //!
+//! 3D layers draw with homographies (perspective-correct, clipped at the
+//! camera's near plane) and motion-blurred layers with a list of sample
+//! placements the shader averages per pixel (see `gpu/composite.wgsl`); both
+//! stay one draw per layer.
+//!
 //! Mask nodes run their own passes (`gpu/mask.wgsl`, see [`crate::mask`]):
 //! coverage accumulation, resolve + horizontal feather, vertical feather, and –
 //! with several masks – one accumulator pass merging them with blend states.
@@ -19,7 +24,7 @@ use glam::{DAffine2, DVec2};
 use crate::blend::BlendMode;
 use crate::error::RenderError;
 use crate::geom::IRect;
-use crate::gpu::{BlendKind, DrawData, Pipelines, flags};
+use crate::gpu::{BlendKind, DrawData, Pipelines, SampleData, Variant, flags};
 use crate::graph::{CompositeNode, LayerOp, Node, NodeKind, OpInput, RenderGraph};
 
 pub(crate) mod adjust;
@@ -27,38 +32,80 @@ mod masks;
 use crate::pool::TexturePool;
 use crate::source::{EncodeContext, GpuImage, ImageAllocator, ImageAlpha};
 
-/// Per-renderer buffer of draw records (grown on demand, reused across frames).
+/// Per-renderer buffers of draw records and motion-blur samples (grown on
+/// demand, reused across frames) and their bind group.
 #[derive(Default)]
 pub(crate) struct DrawBuffer {
-    buffer: Option<(wgpu::Buffer, wgpu::BindGroup, u64)>,
+    buffer: Option<DrawBuffers>,
+}
+
+struct DrawBuffers {
+    draws: wgpu::Buffer,
+    samples: wgpu::Buffer,
+    lighting: wgpu::Buffer,
+    group: wgpu::BindGroup,
+    /// Bytes of each buffer.
+    capacity: [u64; 3],
 }
 
 impl DrawBuffer {
-    fn ensure(&mut self, device: &wgpu::Device, layout: &wgpu::BindGroupLayout, draws: u64) {
-        let needed = draws.max(64) * std::mem::size_of::<DrawData>() as u64;
+    fn ensure(
+        &mut self,
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        draws: u64,
+        samples: u64,
+        lighting: u64,
+    ) {
+        let needed = [
+            draws.max(64) * std::mem::size_of::<DrawData>() as u64,
+            samples.max(16) * std::mem::size_of::<SampleData>() as u64,
+            lighting.max(16) * 16,
+        ];
         if self
             .buffer
             .as_ref()
-            .is_some_and(|(_, _, cap)| *cap >= needed)
+            .is_some_and(|b| b.capacity.iter().zip(&needed).all(|(c, n)| c >= n))
         {
             return;
         }
-        let capacity = needed.next_power_of_two();
-        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("bae-render.draws"),
-            size: capacity,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let create = |label, size| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        };
+        let capacity = needed.map(u64::next_power_of_two);
+        let draws = create("bae-render.draws", capacity[0]);
+        let samples = create("bae-render.samples", capacity[1]);
+        let lighting = create("bae-render.lighting", capacity[2]);
+        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bae-render.draws"),
             layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: buffer.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: draws.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: samples.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: lighting.as_entire_binding(),
+                },
+            ],
         });
-        self.buffer = Some((buffer, bind_group, capacity));
+        self.buffer = Some(DrawBuffers {
+            draws,
+            samples,
+            lighting,
+            group,
+            capacity,
+        });
     }
 }
 
@@ -132,8 +179,40 @@ pub(crate) fn execute(
             _ => 0,
         })
         .sum();
-    draw_buffer.ensure(device, &pipelines.draws_layout, total_draws as u64);
-    let (buffer, draws_group, _) = draw_buffer.buffer.as_ref().expect("ensured");
+    let total_samples: usize = graph
+        .nodes
+        .iter()
+        .map(|n| match &n.kind {
+            NodeKind::Composite(c) => c
+                .ops
+                .iter()
+                .filter_map(|op| op.motion.as_ref())
+                .map(|m| m.len())
+                .sum(),
+            _ => 0,
+        })
+        .sum();
+    let total_lighting: usize = graph
+        .nodes
+        .iter()
+        .map(|n| match &n.kind {
+            NodeKind::Composite(c) => c
+                .ops
+                .iter()
+                .filter_map(|op| op.lighting.as_ref())
+                .map(|l| crate::light::HEADER_VEC4S + crate::light::LIGHT_VEC4S * l.lights.len())
+                .sum(),
+            _ => 0,
+        })
+        .sum();
+    draw_buffer.ensure(
+        device,
+        &pipelines.draws_layout,
+        total_draws as u64,
+        total_samples as u64,
+        total_lighting as u64,
+    );
+    let buffers = draw_buffer.buffer.as_ref().expect("ensured");
     let blendable = format != wgpu::TextureFormat::Rgba32Float
         || gpu.features().contains(wgpu::Features::FLOAT32_BLENDABLE);
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -144,9 +223,13 @@ pub(crate) fn execute(
     let mut ctx = ExecCtx {
         gpu,
         pipelines,
-        buffer,
-        draws_group,
+        buffer: &buffers.draws,
+        samples_buffer: &buffers.samples,
+        lighting_buffer: &buffers.lighting,
+        draws_group: &buffers.group,
         next_draw: 0,
+        next_sample: 0,
+        next_lighting: 0,
         depth: graph.depth,
         format,
         blendable,
@@ -187,6 +270,8 @@ pub(crate) fn execute(
                     encoder: &mut encoder,
                     format,
                     allocator: &mut alloc,
+                    effect_inputs: &[],
+                    effect_masks: &[],
                 };
                 src.source.render(&mut ectx, &src.request)?
             }
@@ -194,7 +279,18 @@ pub(crate) fn execute(
                 let input = outputs[fx.input.index()]
                     .clone()
                     .ok_or_else(|| RenderError::Other("effect input missing".into()))?;
-                let params = fx.frame.params(&fx.instance);
+                let effect_inputs: Vec<_> = fx
+                    .layers
+                    .iter()
+                    .filter_map(|(dep, id)| Some((dep.clone(), outputs[id.index()].clone()?)))
+                    .collect();
+                let effect_masks: Vec<_> = fx
+                    .masks
+                    .iter()
+                    .filter_map(|(m, id)| Some((m.clone(), outputs[id.index()].clone()?)))
+                    .collect();
+                let mut params = fx.frame.params(&fx.instance);
+                params.sixteen_bpc = graph.depth == crate::BitDepth::Bpc16;
                 let mut alloc = PoolAllocator {
                     pool,
                     device,
@@ -205,6 +301,8 @@ pub(crate) fn execute(
                     encoder: &mut encoder,
                     format,
                     allocator: &mut alloc,
+                    effect_inputs: &effect_inputs,
+                    effect_masks: &effect_masks,
                 };
                 fx.effect.render(&mut ectx, &params, &input, node.rect)?
             }
@@ -260,8 +358,12 @@ struct ExecCtx<'a> {
     gpu: &'a Arc<GpuContext>,
     pipelines: &'a mut Pipelines,
     buffer: &'a wgpu::Buffer,
+    samples_buffer: &'a wgpu::Buffer,
+    lighting_buffer: &'a wgpu::Buffer,
     draws_group: &'a wgpu::BindGroup,
     next_draw: u32,
+    next_sample: u32,
+    next_lighting: u32,
     depth: crate::request::BitDepth,
     format: wgpu::TextureFormat,
     blendable: bool,
@@ -280,6 +382,8 @@ struct Planned {
     /// Scissor (target texels), and whether the backdrop must be copied first.
     bounds: IRect,
     backdrop: bool,
+    /// Fragment entry point (plain, lit, motion-blurred).
+    variant: Variant,
 }
 
 impl ExecCtx<'_> {
@@ -312,6 +416,8 @@ impl ExecCtx<'_> {
         let device = self.gpu.device();
         let tsize = target.texture_size();
         let mut planned: Vec<Planned> = Vec::with_capacity(c.ops.len());
+        let mut samples: Vec<SampleData> = Vec::new();
+        let mut lighting: Vec<[f32; 4]> = Vec::new();
         let mut drawn_any = false;
         for op in &c.ops {
             let mut kind =
@@ -326,9 +432,24 @@ impl ExecCtx<'_> {
                 kind = BlendKind::Normal;
                 backdrop = false;
             }
-            let Some(mut data) = plan_op(node, op, outputs, &self.mask_outs, tsize)? else {
+            let Some(mut data) = plan_op(
+                node,
+                op,
+                outputs,
+                &self.mask_outs,
+                tsize,
+                &mut samples,
+                &mut lighting,
+            )?
+            else {
                 continue;
             };
+            if op.motion.is_some() {
+                data.extra[1] += self.next_sample;
+            }
+            if op.lighting.is_some() {
+                data.extra[3] += self.next_lighting;
+            }
             let mut fl = data.mode[1];
             if backdrop {
                 fl |= flags::DST;
@@ -396,11 +517,35 @@ impl ExecCtx<'_> {
                 textures,
                 bounds,
                 backdrop,
+                variant: if op.motion.is_some() {
+                    Variant::Motion
+                } else if op.lighting.is_some() {
+                    Variant::Lit
+                } else {
+                    Variant::Plain
+                },
             });
             drawn_any = true;
         }
         let datas: Vec<DrawData> = planned.iter().map(|p| p.data).collect();
         let first = self.write_draws(&datas);
+        if !samples.is_empty() {
+            let offset = u64::from(self.next_sample) * std::mem::size_of::<SampleData>() as u64;
+            self.gpu.queue().write_buffer(
+                self.samples_buffer,
+                offset,
+                bytemuck::cast_slice(&samples),
+            );
+            self.next_sample += samples.len() as u32;
+        }
+        if !lighting.is_empty() {
+            self.gpu.queue().write_buffer(
+                self.lighting_buffer,
+                u64::from(self.next_lighting) * 16,
+                bytemuck::cast_slice(&lighting),
+            );
+            self.next_lighting += lighting.len() as u32;
+        }
 
         let format = self.format;
         let mut i = 0;
@@ -463,16 +608,16 @@ impl ExecCtx<'_> {
             self.passes += 1;
             load = wgpu::LoadOp::Load;
             pass.set_bind_group(0, self.draws_group, &[]);
-            let mut current_kind = None;
+            let mut current = None;
             let start = i;
             while i < planned.len() {
                 let p = &planned[i];
                 if i > start && p.backdrop {
                     break;
                 }
-                if current_kind != Some(p.kind) {
-                    pass.set_pipeline(self.pipelines.composite(device, format, p.kind));
-                    current_kind = Some(p.kind);
+                if current != Some((p.kind, p.variant)) {
+                    pass.set_pipeline(self.pipelines.composite(device, format, p.kind, p.variant));
+                    current = Some((p.kind, p.variant));
                 }
                 // Batch a run of plain solids with the same pipeline.
                 let mut end = i + 1;
@@ -481,6 +626,7 @@ impl ExecCtx<'_> {
                         && planned[end].textures.is_none()
                         && !planned[end].backdrop
                         && planned[end].kind == p.kind
+                        && planned[end].variant == p.variant
                     {
                         end += 1;
                     }
@@ -553,13 +699,67 @@ impl ExecCtx<'_> {
         } else {
             BlendKind::Replace
         };
-        pass.set_pipeline(self.pipelines.composite(device, self.format, kind));
+        pass.set_pipeline(
+            self.pipelines
+                .composite(device, self.format, kind, Variant::Plain),
+        );
         pass.set_bind_group(0, self.draws_group, &[]);
         pass.set_bind_group(1, &self.pipelines.empty_textures, &[]);
         pass.draw(0..6, first..first + 1);
         self.draw_calls += 1;
         Ok(())
     }
+}
+
+/// Shrinks `data.quad` (input texels, the content `rect` plus a margin) to the
+/// part of `rect` inside every half-plane of `clips`, keeping the margin.
+fn shrink_quad(data: &mut DrawData, rect: [f64; 4], clips: &[[f64; 4]]) {
+    let q = data.quad.map(f64::from);
+    let margin = [
+        rect[0] - q[0],
+        rect[1] - q[1],
+        q[2] - rect[2],
+        q[3] - rect[3],
+    ];
+    // The quad's margin is at least one target pixel in input texels; a cut
+    // whose coverage reaches past it (the piece drawn first) moves out by two.
+    let reach = 2.0 * margin.iter().copied().fold(0.0, f64::max);
+    let mut poly = vec![
+        DVec2::new(rect[0], rect[1]),
+        DVec2::new(rect[2], rect[1]),
+        DVec2::new(rect[2], rect[3]),
+        DVec2::new(rect[0], rect[3]),
+    ];
+    for [a, b, c, r] in clips {
+        let c = c + if *r > 0.0 { reach * a.hypot(*b) } else { 0.0 };
+        let d = |p: DVec2| a * p.x + b * p.y + c;
+        let mut out = Vec::with_capacity(poly.len() + 1);
+        for i in 0..poly.len() {
+            let (p, q) = (poly[i], poly[(i + 1) % poly.len()]);
+            let (dp, dq) = (d(p), d(q));
+            if dp >= 0.0 {
+                out.push(p);
+            }
+            if (dp >= 0.0) != (dq >= 0.0) {
+                out.push(p + (q - p) * (dp / (dp - dq)));
+            }
+        }
+        poly = out;
+        if poly.len() < 3 {
+            return;
+        }
+    }
+    let (mut lo, mut hi) = (DVec2::splat(f64::MAX), DVec2::splat(f64::MIN));
+    for p in &poly {
+        lo = lo.min(*p);
+        hi = hi.max(*p);
+    }
+    data.quad = [
+        (lo.x - margin[0]).max(q[0]) as f32,
+        (lo.y - margin[1]).max(q[1]) as f32,
+        (hi.x + margin[2]).min(q[2]) as f32,
+        (hi.y + margin[3]).min(q[3]) as f32,
+    ];
 }
 
 /// A composite or fill node's region in space pixels (its `rect` is in texels
@@ -595,31 +795,31 @@ fn clear(encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
 }
 
 /// Geometry, colour and flags of one op (blend flags are added by the caller).
+/// Motion-blurred ops append their sample placements to `samples`, lit ones
+/// their lighting record to `lighting` (the caller offsets `extra.y` / `extra.w`
+/// by where the composite's records land).
 fn plan_op(
     node: &Node,
     op: &LayerOp,
     outputs: &[Option<GpuImage>],
     mask_outs: &[Option<masks::MaskOut>],
     target_size: [u32; 2],
+    samples: &mut Vec<SampleData>,
+    lighting: &mut Vec<[f32; 4]>,
 ) -> Result<Option<DrawData>, RenderError> {
     // Composite texel → … : target texel = comp px / scale − rect origin.
     let to_target = DAffine2::from_translation(DVec2::new(
         -f64::from(node.rect.x0),
         -f64::from(node.rect.y0),
-    )) * DAffine2::from_scale(DVec2::splat(1.0 / node.pixel_scale))
-        * op.transform;
-    let mut data = match &op.input {
-        OpInput::Solid { color, rect } => {
-            let Some(mut d) = DrawData::geometry(
-                &to_target,
-                [rect.x0, rect.y0, rect.x1, rect.y1],
-                target_size,
-            ) else {
-                return Ok(None);
-            };
-            d.color = *color;
-            d
-        }
+    )) * DAffine2::from_scale(DVec2::splat(1.0 / node.pixel_scale));
+    // Input texel → input space px, the content rectangle in input texels and
+    // the input image.
+    let (from_texel, rect, image) = match &op.input {
+        OpInput::Solid { rect, .. } => (
+            DAffine2::IDENTITY,
+            [rect.x0, rect.y0, rect.x1, rect.y1],
+            None,
+        ),
         OpInput::Image(id) => {
             let img = outputs[id.index()]
                 .as_ref()
@@ -627,32 +827,97 @@ fn plan_op(
             // Input texel t → input space px: rect origin + t · pixel_scale.
             let origin = DVec2::new(f64::from(img.rect.x0), f64::from(img.rect.y0));
             let s = img.pixel_scale;
-            let from_texel =
-                DAffine2::from_translation(origin) * DAffine2::from_scale(DVec2::splat(s));
-            let t = to_target * from_texel;
             // Coverage edges: the layer's content bounds (in input texels).
             let c = &op.content;
-            let rect = [
-                (c.x0 - origin.x) / s,
-                (c.y0 - origin.y) / s,
-                (c.x1 - origin.x) / s,
-                (c.y1 - origin.y) / s,
-            ];
-            let Some(mut d) = DrawData::geometry(&t, rect, target_size) else {
-                return Ok(None);
-            };
-            let [tw, th] = img.texture_size();
-            d.src[0] = 1.0 / tw as f32;
-            d.src[1] = 1.0 / th as f32;
-            d.mode[1] |= flags::TEXTURE;
-            match img.alpha {
-                ImageAlpha::Premultiplied => {}
-                ImageAlpha::Straight => d.mode[1] |= flags::STRAIGHT,
-                ImageAlpha::Opaque => d.mode[1] |= flags::OPAQUE,
-            }
-            d
+            (
+                DAffine2::from_translation(origin) * DAffine2::from_scale(DVec2::splat(s)),
+                [
+                    (c.x0 - origin.x) / s,
+                    (c.y0 - origin.y) / s,
+                    (c.x1 - origin.x) / s,
+                    (c.y1 - origin.y) / s,
+                ],
+                Some(img),
+            )
         }
     };
+    let near = op.projection.is_some().then_some(crate::camera::NEAR);
+    let geometry = if let Some(placements) = &op.motion {
+        let first = samples.len();
+        for h in placements.iter() {
+            let full = h.followed_by(&to_target).preceded_by(&from_texel);
+            if let Some(sample) = SampleData::new(&full, near) {
+                samples.push(sample);
+            }
+        }
+        if samples.len() == first {
+            return Ok(None);
+        }
+        let b = IRect::new(
+            op.bounds.x0 - node.rect.x0,
+            op.bounds.y0 - node.rect.y0,
+            op.bounds.x1 - node.rect.x0,
+            op.bounds.y1 - node.rect.y0,
+        );
+        let mut d = DrawData::motion(
+            [
+                f64::from(b.x0),
+                f64::from(b.y0),
+                f64::from(b.x1),
+                f64::from(b.y1),
+            ],
+            rect,
+            target_size,
+        );
+        d.extra[1] = first as u32;
+        d.extra[2] = (samples.len() - first) as u32;
+        if near.is_some() {
+            d.mode[1] |= flags::PROJECTIVE;
+        }
+        Some(d)
+    } else if let Some(h) = &op.projection {
+        let full = h.followed_by(&to_target).preceded_by(&from_texel);
+        DrawData::projective(&full, rect, target_size, crate::camera::NEAR)
+    } else {
+        DrawData::geometry(&(to_target * op.transform * from_texel), rect, target_size)
+    };
+    let Some(mut data) = geometry else {
+        return Ok(None);
+    };
+    match (&op.input, image) {
+        (OpInput::Solid { color, .. }, _) => data.color = *color,
+        (OpInput::Image(_), Some(img)) => {
+            let [tw, th] = img.texture_size();
+            data.src[0] = 1.0 / tw as f32;
+            data.src[1] = 1.0 / th as f32;
+            data.mode[1] |= flags::TEXTURE;
+            match img.alpha {
+                ImageAlpha::Premultiplied => {}
+                ImageAlpha::Straight => data.mode[1] |= flags::STRAIGHT,
+                ImageAlpha::Opaque => data.mode[1] |= flags::OPAQUE,
+            }
+        }
+        (OpInput::Image(_), None) => unreachable!("images resolved above"),
+    }
+    if let Some(l) = &op.lighting {
+        data.extra[3] = l.pack(&from_texel, lighting);
+        data.mode[1] |= flags::LIT;
+    }
+    if !op.clips.is_empty() {
+        // Input px half-planes → input texels.
+        let (o, s) = (from_texel.translation, from_texel.matrix2.x_axis.x);
+        let clips: Vec<[f64; 4]> = op
+            .clips
+            .iter()
+            .map(|[a, b, c, reach]| [a * s, b * s, a * o.x + b * o.y + c, *reach])
+            .collect();
+        data.set_clips(&clips);
+        if op.motion.is_none() {
+            // Draw only the piece: the rectangle cut by the half-planes, plus
+            // the quad's anti-aliasing margin.
+            shrink_quad(&mut data, rect, &clips);
+        }
+    }
     data.target[2] = op.opacity;
     if let Some(m) = op.matte {
         let matte = outputs[m.node.index()]

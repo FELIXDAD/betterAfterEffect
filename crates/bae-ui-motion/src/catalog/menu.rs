@@ -635,7 +635,7 @@ const LAYER: &[Node] = &[
             it(8847370, "Audio", "motion.layer.switch", r#"{"switch":"audio_enabled"}"#, B, Done),
             it(8847371, "Video", "motion.layer.switch", r#"{"switch":"enabled"}"#, B, Done),
             it(8847372, "Solo", "motion.layer.switch", r#"{"switch":"solo"}"#, B, Done),
-            it(8847373, "Effect", "motion.layer.switch", r#"{"switch":"effects_enabled"}"#, B, Later),
+            it(8847373, "Effect", "motion.layer.switch", r#"{"switch":"effects_enabled"}"#, B, Done),
             it(8847374, "Collapse", "motion.layer.switch", r#"{"switch":"collapse_transformation"}"#, B, Done),
             it(8847375, "Motion Blur", "motion.layer.switch", r#"{"switch":"motion_blur"}"#, B, Done),
             it(8847376, "Adjustment Layer", "motion.layer.switch", r#"{"switch":"adjustment_layer"}"#, B, Done),
@@ -855,8 +855,8 @@ const LAYER: &[Node] = &[
 #[rustfmt::skip]
 const EFFECT: &[Node] = &[
     it(458753, "Effect Controls", "window.panel", r#"{"id":"effect_controls","toggle":true}"#, B, Done),
-    it(458754, "Last Effect", "motion.effect.last_effect", "", B, Todo),
-    it(458755, "Remove All", "motion.effect.remove_all", "", B, Todo),
+    it(458754, "Last Effect", "motion.effect.last_effect", "", B, Done),
+    it(458755, "Remove All", "motion.effect.remove_all", "", B, Done),
     SEP,
     it(458757, "Manage Effects...", "motion.effect.manage_effects", "", E, Later),
     SEP,
@@ -1156,7 +1156,7 @@ const WINDOW: &[Node] = &[
     s(it(524309, "Smoother", "window.panel", r#"{"id":"smoother","toggle":true}"#, E, Later)),
     s(it(524310, "Libraries", "window.panel", r#"{"id":"libraries","toggle":true}"#, B, Adobe)),
     s(it(524311, "Wiggler", "window.panel", r#"{"id":"wiggler","toggle":true}"#, E, Later)),
-    s(it(524312, "Effects & Presets", "window.panel", r#"{"id":"effects","toggle":true}"#, E, Todo)),
+    s(it(524312, "Effects & Presets", "window.panel", r#"{"id":"effects","toggle":true}"#, E, Done)),
     s(it(524313, "Paragraph", "window.panel", r#"{"id":"paragraph","toggle":true}"#, E, Todo)),
     s(it(524314, "Brushes", "window.panel", r#"{"id":"brushes","toggle":true}"#, E, Later)),
     s(it(524315, "Paint", "window.panel", r#"{"id":"paint","toggle":true}"#, E, Later)),

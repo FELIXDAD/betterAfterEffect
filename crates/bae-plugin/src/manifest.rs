@@ -1266,7 +1266,7 @@ impl Validator {
         let mut ids = BTreeSet::new();
         let mut keys = BTreeSet::new();
         let mut groups: Vec<&str> = Vec::new();
-        let mut open_group: Option<&str> = None;
+        let mut open_groups = Vec::<&str>::new();
         let mut progress = 0;
         for (index, p) in e.params.iter().enumerate() {
             self.context = format!("{base}, param \"{}\"", p.key);
@@ -1290,25 +1290,20 @@ impl Validator {
                 }
             }
             // Group membership: members follow their group contiguously.
-            match (&p.group, open_group) {
-                (Some(g), Some(open)) if g == open => {}
-                (Some(g), _) => {
-                    if groups.contains(&g.as_str()) {
-                        self.err(format!(
-                            "params of group `{g}` must directly follow the group param (contiguously)"
-                        ));
-                    } else {
-                        self.err(format!(
-                            "group `{g}` is not a group param defined before this one"
-                        ));
-                    }
+            if let Some(parent) = p.group.as_deref() {
+                if let Some(index) = open_groups.iter().position(|&key| key == parent) {
+                    open_groups.truncate(index + 1);
+                } else if groups.contains(&parent) {
+                    self.err(format!("params of group `{parent}` must directly follow the group param (contiguously)"));
+                } else {
+                    self.err(format!(
+                        "group `{parent}` is not a group param defined before this one"
+                    ));
                 }
-                (None, _) => open_group = None,
+            } else {
+                open_groups.clear();
             }
             if p.ty == ParamType::Group {
-                if p.group.is_some() {
-                    self.err("nested groups are not supported in plugin API 0.1");
-                }
                 match p.end_id {
                     None => self.err("group params need `end_id` (the stable id of the group end, AE counts it as a parameter)"),
                     Some(end) => {
@@ -1321,7 +1316,7 @@ impl Validator {
                     }
                 }
                 groups.push(&p.key);
-                open_group = Some(&p.key);
+                open_groups.push(&p.key);
             }
             self.param(e, p, index);
         }
@@ -1393,6 +1388,8 @@ impl Validator {
             ParamType::String | ParamType::Asset => self.err(format!(
                 "{t} params are reserved; the plugin API 0.1 document model has no {t} parameter values yet"
             )),
+            // A disabled path can preserve imported mask references as metadata.
+            ParamType::Path if p.has_flag(ParamFlag::Disabled) => {}
             ParamType::Arbitrary | ParamType::Path if wgsl => {
                 self.err(format!("{t} params are only available to native effects"))
             }

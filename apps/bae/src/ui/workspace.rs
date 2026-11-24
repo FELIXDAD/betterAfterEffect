@@ -203,6 +203,11 @@ impl Workspace {
             .collect()
     }
 
+    /// Whether the state should be saved now (OK in Keyboard Shortcuts).
+    pub fn take_save_request(&mut self) -> bool {
+        self.workbench.take_save_request()
+    }
+
     /// The state to persist between sessions.
     pub fn state(&mut self) -> WorkbenchState {
         self.workbench.state()
@@ -298,6 +303,20 @@ impl Workspace {
             }
             _ => Default::default(),
         }
+    }
+
+    /// Gives the panel `kind` the keyboard focus (tests: the shortcut sweep).
+    #[cfg(test)]
+    pub fn focus_panel(&mut self, kind: &str) {
+        if let Some(id) = self.open_panels().into_iter().find(|p| p.kind() == kind) {
+            self.workbench.dock_mut().focus_panel(&id);
+        }
+    }
+
+    /// The panel kind that has the keyboard focus.
+    #[cfg(test)]
+    pub fn focused_kind(&self) -> Option<String> {
+        self.workbench.focused_panel().map(|p| p.kind().to_owned())
     }
 
     /// Panels open in the dock (Window menu check marks).

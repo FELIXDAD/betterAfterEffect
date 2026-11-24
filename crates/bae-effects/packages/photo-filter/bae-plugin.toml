@@ -1,0 +1,52 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "photo-filter"
+name = "Photo Filter"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE PhotoFilterPS"]
+flags = ["pixel-independent"]
+shader = "shaders/photo_filter.wgsl"
+identity_when = "params.density == 0"
+
+[[effect.param]]
+id = 1
+key = "preset"
+type = "popup"
+name = "Filter"
+default = 1
+choices = ["Warming Filter (85)", "Warming Filter (LBA)", "Warming Filter (81)", "Cooling Filter (80)", "Cooling Filter (LBB)", "Cooling Filter (82)", "Red", "Orange", "Yellow", "Green", "Cyan", "Blue", "Violet", "Magenta", "Sepia", "Deep Red", "Deep Blue", "Deep Emerald", "Deep Yellow", "Underwater", "(-", "Custom"]
+
+[[effect.param]]
+id = 2
+key = "color"
+type = "color"
+name = "Color"
+default = [0.92549, 0.541176, 0, 0]
+
+[[effect.param]]
+id = 3
+key = "density"
+type = "float"
+name = "Density"
+default = 25
+range = [0, 100]
+precision = 1
+display = "percent"
+
+[[effect.param]]
+id = 4
+key = "preserve"
+type = "checkbox"
+name = "Preserve Luminosity"
+default = true
