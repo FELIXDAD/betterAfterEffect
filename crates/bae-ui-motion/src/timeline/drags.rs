@@ -92,6 +92,31 @@ impl TimelinePanel {
                     self.drag = None;
                 }
             }
+            Some(Drag::MatteWhip { layer, origin }) => {
+                if let Some(p) = pointer {
+                    ui.painter()
+                        .line_segment([origin, p], Stroke::new(1.5, color::ACCENT));
+                }
+                if released {
+                    self.drag = None;
+                    if let Some(p) = pointer
+                        && let Some((_, target)) = layer_rows.iter().find(|(r, _)| r.contains(p))
+                        && *target != layer
+                    {
+                        let matte = cx
+                            .stage
+                            .prim(&layer)
+                            .and_then(|v| query::static_value(&v, "track_matte"))
+                            .and_then(|v| v.as_str().map(str::to_owned))
+                            .filter(|m| m != "none")
+                            .unwrap_or_else(|| "alpha".into());
+                        cx.invoke_with(
+                            "layer.set_track_matte",
+                            json!({"layers": [layer], "matte": matte, "source": target}),
+                        );
+                    }
+                }
+            }
             Some(Drag::PickWhip { layers, origin }) => {
                 if let Some(p) = pointer {
                     ui.painter()

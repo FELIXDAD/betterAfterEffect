@@ -36,9 +36,9 @@
 
 ## 统计
 
-- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 143，◐ 8，☐ 172，⏸ 217，Ⓐ 30
-- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 134 条。
-- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 123 条，macOS 125 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
+- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 157，◐ 8，☐ 158，⏸ 217，Ⓐ 30
+- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 136 条。
+- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 125 条，macOS 127 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
 
 ## 主菜单
 
@@ -336,7 +336,7 @@
 | Markers ▸ Update Markers From Source | 23265282 | `motion.layer.update_markers_from_source` |  |  |  | C | ⏸ |
 | Markers ▸ Lock Markers | 23265283 | `motion.layer.lock_markers` |  |  |  | C | ☐ |
 | Markers ▸ Delete All Markers | 23265284 | `motion.layer.delete_all_markers` |  |  |  | C | ✅ |
-| Preserve Transparency | 393236 | `motion.layer.switch` | `{"switch":"preserve_transparency"}` |  |  | B | ☐ |
+| Preserve Transparency | 393236 | `motion.layer.switch` | `{"switch":"preserve_transparency"}` |  |  | B | ✅ |
 | Blending Mode ▸ Normal | 16318465 | `motion.layer.blending_mode` | `{"mode":"normal"}` |  |  | B | ✅ |
 | Blending Mode ▸ Dissolve | 16318466 | `motion.layer.blending_mode` | `{"mode":"dissolve"}` |  |  | B | ✅ |
 | Blending Mode ▸ Dancing Dissolve | 16318467 | `motion.layer.blending_mode` | `{"mode":"dancing_dissolve"}` |  |  | B | ✅ |
@@ -377,19 +377,19 @@
 | Blending Mode ▸ Luminescent Premul | 16318509 | `motion.layer.blending_mode` | `{"mode":"luminescent_premul"}` |  |  | B | ✅ |
 | Next Blending Mode | 393238 | `motion.layer.blending_mode_step` | `{"step":1}` | Shift+= | Shift+= | B | ✅ |
 | Previous Blending Mode | 393239 | `motion.layer.blending_mode_step` | `{"step":-1}` | Shift+- | Shift+- | B | ✅ |
-| Track Matte ▸ No Track Matte | 16384001 | `motion.layer.track_matte` | `{"matte":"none"}` |  |  | B | ☐ |
-| Track Matte ▸ Alpha Matte | 16384003 | `motion.layer.track_matte` | `{"matte":"alpha"}` |  |  | B | ☐ |
-| Track Matte ▸ Alpha Inverted Matte | 16384004 | `motion.layer.track_matte` | `{"matte":"alpha_inverted"}` |  |  | B | ☐ |
-| Track Matte ▸ Luma Matte | 16384005 | `motion.layer.track_matte` | `{"matte":"luma"}` |  |  | B | ☐ |
-| Track Matte ▸ Luma Inverted Matte | 16384006 | `motion.layer.track_matte` | `{"matte":"luma_inverted"}` |  |  | B | ☐ |
-| Track Matte ▸ Matte with Layer Above ▸ Alpha Matte | 23658497 | `motion.layer.track_matte` | `{"matte":"alpha","source":"above"}` |  |  | B | ☐ |
-| Track Matte ▸ Matte with Layer Above ▸ Alpha Inverted Matte | 23658498 | `motion.layer.track_matte` | `{"matte":"alpha_inverted","source":"above"}` |  |  | B | ☐ |
-| Track Matte ▸ Matte with Layer Above ▸ Luma Matte | 23658499 | `motion.layer.track_matte` | `{"matte":"luma","source":"above"}` |  |  | B | ☐ |
-| Track Matte ▸ Matte with Layer Above ▸ Luma Inverted Matte | 23658500 | `motion.layer.track_matte` | `{"matte":"luma_inverted","source":"above"}` |  |  | B | ☐ |
-| Track Matte ▸ Matte with Layer Below ▸ Alpha Matte | 23724033 | `motion.layer.track_matte` | `{"matte":"alpha","source":"below"}` |  |  | B | ☐ |
-| Track Matte ▸ Matte with Layer Below ▸ Alpha Inverted Matte | 23724034 | `motion.layer.track_matte` | `{"matte":"alpha_inverted","source":"below"}` |  |  | B | ☐ |
-| Track Matte ▸ Matte with Layer Below ▸ Luma Matte | 23724035 | `motion.layer.track_matte` | `{"matte":"luma","source":"below"}` |  |  | B | ☐ |
-| Track Matte ▸ Matte with Layer Below ▸ Luma Inverted Matte | 23724036 | `motion.layer.track_matte` | `{"matte":"luma_inverted","source":"below"}` |  |  | B | ☐ |
+| Track Matte ▸ No Track Matte | 16384001 | `motion.layer.track_matte` | `{"matte":"none"}` |  |  | B | ✅ |
+| Track Matte ▸ Alpha Matte | 16384003 | `motion.layer.track_matte` | `{"matte":"alpha"}` |  |  | B | ✅ |
+| Track Matte ▸ Alpha Inverted Matte | 16384004 | `motion.layer.track_matte` | `{"matte":"alpha_inverted"}` |  |  | B | ✅ |
+| Track Matte ▸ Luma Matte | 16384005 | `motion.layer.track_matte` | `{"matte":"luma"}` |  |  | B | ✅ |
+| Track Matte ▸ Luma Inverted Matte | 16384006 | `motion.layer.track_matte` | `{"matte":"luma_inverted"}` |  |  | B | ✅ |
+| Track Matte ▸ Matte with Layer Above ▸ Alpha Matte | 23658497 | `motion.layer.track_matte` | `{"matte":"alpha","source":"above"}` |  |  | B | ✅ |
+| Track Matte ▸ Matte with Layer Above ▸ Alpha Inverted Matte | 23658498 | `motion.layer.track_matte` | `{"matte":"alpha_inverted","source":"above"}` |  |  | B | ✅ |
+| Track Matte ▸ Matte with Layer Above ▸ Luma Matte | 23658499 | `motion.layer.track_matte` | `{"matte":"luma","source":"above"}` |  |  | B | ✅ |
+| Track Matte ▸ Matte with Layer Above ▸ Luma Inverted Matte | 23658500 | `motion.layer.track_matte` | `{"matte":"luma_inverted","source":"above"}` |  |  | B | ✅ |
+| Track Matte ▸ Matte with Layer Below ▸ Alpha Matte | 23724033 | `motion.layer.track_matte` | `{"matte":"alpha","source":"below"}` |  |  | B | ✅ |
+| Track Matte ▸ Matte with Layer Below ▸ Alpha Inverted Matte | 23724034 | `motion.layer.track_matte` | `{"matte":"alpha_inverted","source":"below"}` |  |  | B | ✅ |
+| Track Matte ▸ Matte with Layer Below ▸ Luma Matte | 23724035 | `motion.layer.track_matte` | `{"matte":"luma","source":"below"}` |  |  | B | ✅ |
+| Track Matte ▸ Matte with Layer Below ▸ Luma Inverted Matte | 23724036 | `motion.layer.track_matte` | `{"matte":"luma_inverted","source":"below"}` |  |  | B | ✅ |
 | Arrange ▸ Bring to Front | 12910593 | `motion.order` | `{"to":"front"}` | Ctrl+Shift+] / Ctrl+Alt+Shift+Up / Ctrl+Shift+= | Cmd+Shift+] / Cmd+Opt+Shift+Up / Cmd+Shift+= | B | ✅ |
 | Arrange ▸ Bring Forward | 12910594 | `motion.order` | `{"to":"forward"}` | Ctrl+] / Ctrl+Alt+Up | Cmd+] / Cmd+Opt+Up | B | ✅ |
 | Arrange ▸ Send Backward | 12910595 | `motion.order` | `{"to":"backward"}` | Ctrl+[ / Ctrl+Alt+Down | Cmd+[ / Cmd+Opt+Down | B | ✅ |
@@ -825,7 +825,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `TemporalAlignEnd` | `motion.layer.move_out_point_to_comp_end` |  | Alt+End | Opt+End |  | B | ☐ |
 | `TemporalAlignStart` | `motion.layer.move_in_point_to_comp_start` |  | Alt+Home | Opt+Home |  | B | ☐ |
 | `ToggleGraph` | `motion.timeline.graph_editor` |  | Shift+F3 | Shift+F3 |  | C | ✅ |
-| `ToggleTlwParentColumn` | `motion.timeline.toggle_parent_column` |  | Shift+F4 | Shift+F4 |  | C | ☐ |
+| `ToggleTlwParentColumn` | `motion.timeline.toggle_parent_column` |  | Shift+F4 | Shift+F4 |  | C | ✅ |
 | `Twirl` | `motion.timeline.twirl` | `{"explode":false,"preserve_solo":false}` |  |  |  | C | ⏸ |
 | `TwirlExplode` | `motion.timeline.twirl` | `{"explode":true,"preserve_solo":false}` | Ctrl+\` | Control+\` |  | C | ☐ |
 | `TwirlPreserveSolo` | `motion.timeline.twirl` | `{"explode":false,"preserve_solo":true}` | Shift+\` | Shift+\` |  | C | ☐ |
@@ -1145,7 +1145,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `SwitchTo3DViewC` | `motion.view.switch_3d_view_shortcut` | `{"slot":"c"}` | F12 | F12 |  | A | ⏸ |
 | `SwitchTo3DViewFirst`（同一快捷键 AE 先给了别的命令） | `motion.view.switch_3d_view_shortcut` | `{"slot":"first"}` | F10 | F10 |  | A | ⏸ |
 | `ToggleCastsShadows` | `motion.layer.casts_shadows` |  | Alt+Shift+C | Opt+Shift+C |  | B | ⏸ |
-| `ToggleSwitchesModes` | `motion.timeline.toggle_switches_modes` |  | F4 | F4 |  | C | ☐ |
+| `ToggleSwitchesModes` | `motion.timeline.toggle_switches_modes` |  | F4 | F4 |  | C | ✅ |
 | `WireframeQualityRecurse` | `motion.layer.quality` | `{"quality":"wireframe","nested":true}` |  | Control+Cmd+Opt+Shift+U |  | B | ⏸ |
 
 ### `CSwitchboardModal`

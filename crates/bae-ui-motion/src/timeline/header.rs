@@ -234,7 +234,7 @@ impl TimelinePanel {
             theme::small(),
             color::TEXT,
         );
-        for (i, icon) in [
+        let switch_icons = [
             Icon::Shy,
             Icon::Collapse,
             Icon::Quality,
@@ -242,9 +242,12 @@ impl TimelinePanel {
             Icon::FrameBlend,
             Icon::MotionBlur,
             Icon::Adjustment,
-        ]
-        .into_iter()
-        .enumerate()
+            Icon::Cube,
+        ];
+        for (i, icon) in switch_icons
+            .into_iter()
+            .enumerate()
+            .filter(|_| cols.panes.switches)
         {
             icons::paint(
                 p,
@@ -256,13 +259,30 @@ impl TimelinePanel {
                 color::ICON_DIM,
             );
         }
-        p.text(
-            pos2(l + cols.parent + 4.0, cy),
-            Align2::LEFT_CENTER,
-            tr("Parent & Link"),
-            theme::small(),
-            color::TEXT,
-        );
+        if cols.panes.modes {
+            for (x, title) in [
+                (4.0, "Mode"),
+                (96.0 + 4.0 + 5.0, "T"),
+                (96.0 + SW + 8.0, "Track Matte"),
+            ] {
+                p.text(
+                    pos2(l + cols.modes + x, cy),
+                    Align2::LEFT_CENTER,
+                    tr(title),
+                    theme::small(),
+                    color::TEXT,
+                );
+            }
+        }
+        if cols.panes.parent {
+            p.text(
+                pos2(l + cols.parent + 4.0, cy),
+                Align2::LEFT_CENTER,
+                tr("Parent & Link"),
+                theme::small(),
+                color::TEXT,
+            );
+        }
 
         // Ruler and work area (right part of both header rows).
         let ruler = Rect::from_min_max(
@@ -416,6 +436,25 @@ impl TimelinePanel {
         graph_left: f32,
     ) {
         ui.painter().rect_filled(foot, 0.0, color::PANEL);
+        // Toggle Switches / Modes (AE's button under the outline; F4).
+        let b = Rect::from_min_size(foot.min + vec2(8.0, 3.0), vec2(150.0, foot.height() - 6.0));
+        let resp = ui
+            .interact(b, ui.id().with("toggle_switches_modes"), Sense::click())
+            .labeled(egui::WidgetType::Button, tr("Toggle Switches / Modes"));
+        ui.painter().text(
+            b.left_center(),
+            Align2::LEFT_CENTER,
+            tr("Toggle Switches / Modes"),
+            theme::small(),
+            if resp.hovered() {
+                color::TEXT_STRONG
+            } else {
+                color::TEXT_DIM
+            },
+        );
+        if resp.clicked() {
+            self.panes.toggle_switches_modes();
+        }
         ui.painter().hline(
             foot.x_range(),
             foot.top() + 0.5,

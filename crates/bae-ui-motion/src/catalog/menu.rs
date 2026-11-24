@@ -697,7 +697,7 @@ const LAYER: &[Node] = &[
         ],
     ),
     SEP,
-    it(393236, "Preserve Transparency", "motion.layer.switch", r#"{"switch":"preserve_transparency"}"#, B, Todo),
+    it(393236, "Preserve Transparency", "motion.layer.switch", r#"{"switch":"preserve_transparency"}"#, B, Done),
     sub(
         "Blending Mode",
         &[
@@ -753,29 +753,29 @@ const LAYER: &[Node] = &[
     sub(
         "Track Matte",
         &[
-            it(16384001, "No Track Matte", "motion.layer.track_matte", r#"{"matte":"none"}"#, B, Todo),
+            it(16384001, "No Track Matte", "motion.layer.track_matte", r#"{"matte":"none"}"#, B, Done),
             SEP,
-            it(16384003, "Alpha Matte", "motion.layer.track_matte", r#"{"matte":"alpha"}"#, B, Todo),
-            it(16384004, "Alpha Inverted Matte", "motion.layer.track_matte", r#"{"matte":"alpha_inverted"}"#, B, Todo),
-            it(16384005, "Luma Matte", "motion.layer.track_matte", r#"{"matte":"luma"}"#, B, Todo),
-            it(16384006, "Luma Inverted Matte", "motion.layer.track_matte", r#"{"matte":"luma_inverted"}"#, B, Todo),
+            it(16384003, "Alpha Matte", "motion.layer.track_matte", r#"{"matte":"alpha"}"#, B, Done),
+            it(16384004, "Alpha Inverted Matte", "motion.layer.track_matte", r#"{"matte":"alpha_inverted"}"#, B, Done),
+            it(16384005, "Luma Matte", "motion.layer.track_matte", r#"{"matte":"luma"}"#, B, Done),
+            it(16384006, "Luma Inverted Matte", "motion.layer.track_matte", r#"{"matte":"luma_inverted"}"#, B, Done),
             SEP,
             sub(
                 "Matte with Layer Above",
                 &[
-                    it(23658497, "Alpha Matte", "motion.layer.track_matte", r#"{"matte":"alpha","source":"above"}"#, B, Todo),
-                    it(23658498, "Alpha Inverted Matte", "motion.layer.track_matte", r#"{"matte":"alpha_inverted","source":"above"}"#, B, Todo),
-                    it(23658499, "Luma Matte", "motion.layer.track_matte", r#"{"matte":"luma","source":"above"}"#, B, Todo),
-                    it(23658500, "Luma Inverted Matte", "motion.layer.track_matte", r#"{"matte":"luma_inverted","source":"above"}"#, B, Todo),
+                    it(23658497, "Alpha Matte", "motion.layer.track_matte", r#"{"matte":"alpha","source":"above"}"#, B, Done),
+                    it(23658498, "Alpha Inverted Matte", "motion.layer.track_matte", r#"{"matte":"alpha_inverted","source":"above"}"#, B, Done),
+                    it(23658499, "Luma Matte", "motion.layer.track_matte", r#"{"matte":"luma","source":"above"}"#, B, Done),
+                    it(23658500, "Luma Inverted Matte", "motion.layer.track_matte", r#"{"matte":"luma_inverted","source":"above"}"#, B, Done),
                 ],
             ),
             sub(
                 "Matte with Layer Below",
                 &[
-                    it(23724033, "Alpha Matte", "motion.layer.track_matte", r#"{"matte":"alpha","source":"below"}"#, B, Todo),
-                    it(23724034, "Alpha Inverted Matte", "motion.layer.track_matte", r#"{"matte":"alpha_inverted","source":"below"}"#, B, Todo),
-                    it(23724035, "Luma Matte", "motion.layer.track_matte", r#"{"matte":"luma","source":"below"}"#, B, Todo),
-                    it(23724036, "Luma Inverted Matte", "motion.layer.track_matte", r#"{"matte":"luma_inverted","source":"below"}"#, B, Todo),
+                    it(23724033, "Alpha Matte", "motion.layer.track_matte", r#"{"matte":"alpha","source":"below"}"#, B, Done),
+                    it(23724034, "Alpha Inverted Matte", "motion.layer.track_matte", r#"{"matte":"alpha_inverted","source":"below"}"#, B, Done),
+                    it(23724035, "Luma Matte", "motion.layer.track_matte", r#"{"matte":"luma","source":"below"}"#, B, Done),
+                    it(23724036, "Luma Inverted Matte", "motion.layer.track_matte", r#"{"matte":"luma_inverted","source":"below"}"#, B, Done),
                 ],
             ),
         ],

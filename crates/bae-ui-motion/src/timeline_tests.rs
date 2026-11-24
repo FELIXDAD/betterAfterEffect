@@ -301,7 +301,7 @@ fn shift_f3_and_the_switch_toggle_the_graph_editor() {
         |x| x.action == crate::actions::ids::GRAPH_EDITOR && x.chord.to_string().contains("F3")
     ));
     // The comp switch in the timeline header (right end of the outline).
-    let sw = pos2(534.0 - 14.0, 22.0 + 17.0);
+    let sw = pos2(tl.last_axis.unwrap().left - 2.0 - 14.0, 22.0 + 17.0);
     h.click(&mut tl, sw, Modifiers::NONE);
     assert!(h.session().lock().graph_editor);
     // The button bar is shown from the next frame.
@@ -1675,6 +1675,104 @@ fn blending_mode_menu_sets_and_steps_the_selected_layers() {
         Invocation::with_params(ids::BLENDING_MODE_STEP, json!({"step": -1})),
     ));
     assert_eq!(mode(&h, &a), Some(Value::Enum("luminescent_premul".into())));
+}
+
+fn modes_cell(tl: &TimelinePanel, l: &PrimPath) -> (Rect, Pos2) {
+    tl.last_modes
+        .iter()
+        .find(|(p, _, _)| p == l)
+        .map(|(_, t, w)| (*t, *w))
+        .unwrap_or_else(|| panic!("modes of {l} not drawn"))
+}
+
+#[test]
+fn f4_alternates_switches_and_modes() {
+    let mut h = H::new();
+    let mut tl = h.bars();
+    let p = |tl: &TimelinePanel| (tl.panes().switches, tl.panes().modes);
+    assert_eq!(p(&tl), (true, true), "both by default");
+    let f4 = || Invocation::new(crate::actions::ids::TOGGLE_SWITCHES_MODES);
+    h.action(&mut tl, f4());
+    assert_eq!(p(&tl), (true, false));
+    h.action(&mut tl, f4());
+    assert_eq!(p(&tl), (false, true));
+    h.action(&mut tl, f4());
+    assert_eq!(p(&tl), (true, false));
+    h.action(
+        &mut tl,
+        Invocation::new(crate::actions::ids::TOGGLE_PARENT_COLUMN),
+    );
+    assert!(!tl.panes().parent);
+    // With Modes hidden no Modes cells are drawn.
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    assert!(tl.last_modes.is_empty());
+}
+
+#[test]
+fn modes_column_t_switch_and_track_matte_pick_whip() {
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let fill = h.layer.clone();
+    let matte = path(&h.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"]);
+    let mut tl = h.bars();
+    let attr = |h: &H, l: &PrimPath, a: &str| query::static_value(&h.stage.prim(l).unwrap(), a);
+    // T: Preserve Underlying Transparency.
+    let (t, _) = modes_cell(&tl, &fill);
+    let r = h.click(&mut tl, t.center(), Modifiers::NONE);
+    h.apply(&r);
+    assert_eq!(
+        attr(&h, &fill, "preserve_transparency"),
+        Some(Value::Bool(true))
+    );
+    // Pick whip from the fill layer onto the other layer: an Alpha matte, and the
+    // matte layer's Video goes off.
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let (_, whip) = modes_cell(&tl, &fill);
+    let (mt, _) = modes_cell(&tl, &matte);
+    let target = pos2(500.0, mt.center().y);
+    let r = h.drag(&mut tl, whip, target, Modifiers::NONE);
+    assert_eq!(r.invocations[0].id, "layer.set_track_matte");
+    h.apply(&r);
+    assert_eq!(
+        attr(&h, &fill, "track_matte"),
+        Some(Value::Enum("alpha".into()))
+    );
+    assert_eq!(
+        attr(&h, &fill, "track_matte_layer"),
+        Some(Value::PrimRef(matte.clone()))
+    );
+    assert_eq!(attr(&h, &matte, "enabled"), Some(Value::Bool(false)));
+    h.undo();
+    assert_eq!(
+        attr(&h, &fill, "track_matte"),
+        Some(Value::Enum("none".into()))
+    );
+    // Layer > Track Matte > Matte with Layer Above > Luma Matte.
+    h.session().lock().selected_layers = vec![fill.clone()];
+    let r = h.action(
+        &mut tl,
+        Invocation::with_params(
+            crate::actions::ids::TRACK_MATTE,
+            json!({"matte": "luma", "source": "above"}),
+        ),
+    );
+    h.apply(&r);
+    assert_eq!(
+        attr(&h, &fill, "track_matte"),
+        Some(Value::Enum("luma".into()))
+    );
+    assert_eq!(
+        attr(&h, &fill, "track_matte_layer"),
+        Some(Value::PrimRef(matte.clone()))
+    );
+    assert_eq!(
+        crate::timeline::flip_matte("luma", false, true),
+        "luma_inverted"
+    );
+    assert_eq!(
+        crate::timeline::flip_matte("alpha_inverted", true, false),
+        "luma_inverted"
+    );
 }
 
 /// Frame cost with the B1-sized project (61 layers × Position, Scale, Rotation with
