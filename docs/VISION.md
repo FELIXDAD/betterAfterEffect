@@ -48,8 +48,7 @@
   - 面板布局、交互方式与 AE/Ai 一致。
   - 术语使用 Adobe 官方中文版的译名（合成、图层、关键帧、预合成、画板……）。
   - 快捷键按工作区切换：动效工作区用 AE 键位，分镜工作区用 Ai 键位。
-  - 只参考布局与交互习惯。不复制 AE、Ai、Pr 安装包里的图标、图片、示例工程、SDK 代码或头文件，不用 Adobe 的应用图标、启动画面和标志。
-  - 例外：界面图标使用 Adobe 以 Apache-2.0 开源发布的 Spectrum 1 图标（`@adobe/spectrum-css-workflow-icons` 1.5.4、`@adobe/react-spectrum-ui` 1.2.1；许可证文件随仓库和安装包提交，见 `assets/icons/spectrum/`）；Spectrum 里没有的 AE 专有图标按 Spectrum 规格自己画。
+  - 只参考布局与交互习惯。不复制 Adobe 的图标、图片、示例工程、SDK 代码或头文件（无论来自 AE、Ai、Pr 安装包、Adobe 网站还是其他地方），不用 Adobe 的应用图标、启动画面和标志。唯一例外：Adobe 以 Apache-2.0 开源发布的 Spectrum 1 图标（`@adobe/spectrum-css-workflow-icons` 1.5.4、`@adobe/react-spectrum-ui` 1.2.1），只用 `tools/icons/fetch_spectrum.py` 获取，许可证文件见 `assets/icons/spectrum/`。许可证文件随仓库和安装包发布；Spectrum 里没有的 AE 专有图标按 Spectrum 规格自己画。
 
 ### 4. 跨平台与工程交接
 
