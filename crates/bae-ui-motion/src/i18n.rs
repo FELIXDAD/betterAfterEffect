@@ -19,7 +19,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Trim Layer", "修剪图层"),
     ("Change Layers", "更改图层"),
     // Effect Controls / Effects & Presets.
-    ("Missing effect", "缺失的效果"),
+    ("Missing effect", "缺失效果"),
     ("BAE built-in effect", "BAE 内置效果"),
     ("Not available in BAE yet", "BAE 暂不支持"),
     ("Effect", "效果"),
