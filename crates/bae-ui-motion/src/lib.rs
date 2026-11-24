@@ -26,6 +26,7 @@ mod common;
 pub mod demo;
 pub mod dialogs;
 mod expr;
+mod expr_menu;
 mod gpu_preview;
 mod graph;
 mod i18n;

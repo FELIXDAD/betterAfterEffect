@@ -127,6 +127,8 @@ pub enum Icon {
     PaneModes,
     PaneInOut,
     PaneRenderTime,
+    /// Warning (an expression error).
+    Alert,
     // Transport
     FirstFrame,
     PrevFrame,
@@ -241,6 +243,7 @@ impl Icon {
         Icon::PaneModes,
         Icon::PaneInOut,
         Icon::PaneRenderTime,
+        Icon::Alert,
         Icon::FirstFrame,
         Icon::PrevFrame,
         Icon::Play,

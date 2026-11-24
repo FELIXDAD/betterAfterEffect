@@ -89,6 +89,22 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Enable Expression", "启用表达式"),
     ("Add Expression", "添加表达式"),
     ("Set Expressions", "设置多个表达式"),
+    (
+        "Error in property '{prop}' of layer {index} ('{layer}') in comp '{comp}'.",
+        "合成“{comp}”中图层 {index}（“{layer}”）的属性“{prop}”中出现错误。",
+    ),
+    (
+        "This project contains expression errors: error {n} of {count}",
+        "此项目包含表达式错误: 错误“{n}”，共“{count}”个",
+    ),
+    ("Previous Error", "上一个错误"),
+    ("Next Error", "下一个错误"),
+    ("Expand or Collapse", "展开或折叠"),
+    (
+        "Indicates there is an error in the expression applied to this property.",
+        "表示应用于此属性的表达式中存在错误。",
+    ),
+    ("Expression language menu", "表达式语言菜单"),
     ("Expression:", "表达式:"),
     (
         "Expression pick whip (insert reference to target)",

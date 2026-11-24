@@ -23,6 +23,7 @@ use crate::tools::cursor::{self, Hover};
 use crate::tools::{Tool, ViewRequest};
 
 mod bar;
+pub(crate) mod errors;
 mod free_transform;
 mod motion_path;
 mod overlay;
@@ -47,6 +48,8 @@ const WHEEL_ZOOM_OUT: f32 = 7.0 / 8.0;
 #[derive(Default)]
 pub struct CompositionViewer {
     eval: EvalCache,
+    /// The expression error banner.
+    banner: errors::Banner,
     /// Magnification (1 = 100%: one comp pixel per screen pixel); `None` = Fit.
     zoom: Option<f32>,
     pan: Vec2,
@@ -465,6 +468,13 @@ impl Panel for CompositionViewer {
                 return;
             }
         };
+        // Expression errors at this time: the banner and the timeline's icons.
+        {
+            let mut s = session.lock();
+            if s.expr_errors != comp.errors {
+                s.expr_errors = comp.errors.clone();
+            }
+        }
         // A value drag that ended without a commit (e.g. cancelled) must not leave
         // its preview behind.
         if !ui.input(|i| i.pointer.any_down()) {
@@ -785,6 +795,7 @@ impl Panel for CompositionViewer {
             add_item_as_layer(cx, &session, &item.0, pointer.map(|p| view.to_comp(p)));
         }
 
+        self.banner.ui(ui, cx, &session, area);
         bar::bottom_bar(ui, bar, self, &info, time, mag, &session);
     }
 }

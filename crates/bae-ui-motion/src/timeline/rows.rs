@@ -399,6 +399,7 @@ impl TimelinePanel {
                 self.expression_row(
                     ui,
                     cx,
+                    session,
                     cols,
                     axis,
                     rect,
@@ -652,6 +653,7 @@ impl TimelinePanel {
         &mut self,
         ui: &mut Ui,
         cx: &mut PanelContext<'_>,
+        session: &SharedSession,
         cols: &Cols,
         axis: &TimeAxis,
         rect: Rect,
@@ -744,6 +746,53 @@ impl TimelinePanel {
                 });
             }
             wresp.on_hover_text(tip);
+            // Expression language menu.
+            let mr = Rect::from_center_size(pos2(ix + SW * 2.5 + 4.0, cy), vec2(16.0, 16.0));
+            icons::paint(ui.painter(), mr, Icon::PlayCircle, color::ICON);
+            let mtip = tr("Expression language menu");
+            let mresp = ui.interact(mr, id.with("lang"), Sense::click()).labeled(
+                egui::WidgetType::Button,
+                &bae_ui::a11y::context(&[&name, mtip]),
+            );
+            if ui.input(|i| i.pointer.primary_pressed()) && mresp.contains_pointer() {
+                self.lang_press = Some((path.clone(), attr.to_owned(), self.caret(path, attr)));
+            }
+            let mut chosen = None;
+            common::popup_menu(&mresp, &mut |ui| crate::expr_menu::ui(ui, &mut chosen));
+            if let Some(item) = chosen {
+                let insert = self
+                    .lang_press
+                    .take()
+                    .filter(|(p, a, _)| p == path && a == attr)
+                    .and_then(|(.., i)| i);
+                self.insert_expression(cx, path, attr, &expr, insert, item);
+            }
+            mresp.on_hover_text(mtip);
+            #[cfg(test)]
+            self.last_lang
+                .push((path.clone(), attr.to_owned(), mr.center()));
+            // An error in this expression (the viewer's evaluation).
+            let error = session
+                .lock()
+                .expr_errors
+                .iter()
+                .find(|e| e.prim == *path && e.attr == attr)
+                .cloned();
+            if let Some(e) = error {
+                let wr = Rect::from_center_size(pos2(ix + SW * 3.5 + 6.0, cy), vec2(14.0, 14.0));
+                icons::paint(ui.painter(), wr, Icon::Alert, crate::viewer::errors::YELLOW);
+                let what =
+                    tr("Indicates there is an error in the expression applied to this property.");
+                ui.interact(wr, id.with("error"), Sense::hover())
+                    .labeled(
+                        egui::WidgetType::Label,
+                        &bae_ui::a11y::context(&[&name, what]),
+                    )
+                    .on_hover_text(format!(
+                        "{what}\n{}",
+                        crate::viewer::errors::describe(stage, &e)
+                    ));
+            }
         }
         if line + 1 < lines {
             return;
@@ -804,6 +853,27 @@ impl TimelinePanel {
                 );
             }
         }
+    }
+
+    /// Insert `text` (the language menu) at the selection of the field being
+    /// edited, or replace the expression.
+    pub(super) fn insert_expression(
+        &mut self,
+        cx: &mut PanelContext<'_>,
+        path: &PrimPath,
+        attr: &str,
+        expr: &bae_model::Expression,
+        insert: Option<(String, std::ops::Range<usize>)>,
+        text: &str,
+    ) {
+        let source = match insert {
+            Some((buf, sel)) => crate::expr::splice(&buf, &sel, text),
+            None => text.to_owned(),
+        };
+        cx.invoke_with(
+            "attr.set_expression",
+            json!({"path": path, "attr": attr, "source": source, "enabled": expr.enabled}),
+        );
     }
 
     /// The text and selection of `path.attr`'s field while it is being edited.

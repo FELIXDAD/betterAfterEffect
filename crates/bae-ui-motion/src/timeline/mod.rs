@@ -201,6 +201,8 @@ pub struct TimelinePanel {
     expr_caret: Option<(PrimPath, String, String, std::ops::Range<usize>)>,
     /// [`Self::expr_caret`] as it was when the pick whip was pressed.
     expr_press: Option<(String, std::ops::Range<usize>)>,
+    /// The property whose language menu is open and its field's selection then.
+    lang_press: Option<(PrimPath, String, Option<(String, std::ops::Range<usize>)>)>,
     /// AE layer numbers (# column) of the shown comp, for accessibility names:
     /// two layers may share a name (issue #128).
     layer_numbers: HashMap<PrimPath, usize>,
@@ -229,6 +231,9 @@ pub struct TimelinePanel {
     /// Expression rows: property, Enable switch, pick whip.
     #[cfg(test)]
     pub(crate) last_expr: Vec<(PrimPath, String, Pos2, Pos2)>,
+    /// Expression rows: property, language menu button.
+    #[cfg(test)]
+    pub(crate) last_lang: Vec<(PrimPath, String, Pos2)>,
     /// The comp marker bin, for tests.
     #[cfg(test)]
     pub(crate) last_marker_bin: Option<Rect>,
@@ -349,6 +354,12 @@ fn label_of(stage: &Stage, path: &PrimPath) -> usize {
 }
 
 impl TimelinePanel {
+    /// The field selection the language menu will replace (tests).
+    #[cfg(test)]
+    pub(crate) fn lang_insert(&self) -> Option<(String, std::ops::Range<usize>)> {
+        self.lang_press.as_ref().and_then(|(.., i)| i.clone())
+    }
+
     fn axis(&self, info: &CompInfo, left: f32, width: f32) -> TimeAxis {
         let full = info.duration;
         let min = Time(info.frame_duration().0 * 10).min(full);
@@ -541,6 +552,7 @@ impl Panel for TimelinePanel {
             self.last_keys.clear();
             self.last_markers.clear();
             self.last_expr.clear();
+            self.last_lang.clear();
             self.last_bars.clear();
         }
 

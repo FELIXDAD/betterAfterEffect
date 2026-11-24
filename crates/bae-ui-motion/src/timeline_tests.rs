@@ -1819,3 +1819,70 @@ fn pick_whip_references_follow_ae() {
         "transform.opacity"
     );
 }
+
+#[test]
+fn expression_language_menu_groups_follow_ae() {
+    let groups = crate::expr_menu::groups();
+    let names: Vec<&str> = groups.iter().map(|(n, _)| *n).collect();
+    assert_eq!(
+        names,
+        [
+            "Global",
+            "Vector Math",
+            "Random Numbers",
+            "Interpolation",
+            "Color Conversion",
+            "Other Math",
+            "JavaScript Math",
+            "Comp",
+            "Footage",
+            "Layer",
+            "Camera",
+            "Light",
+            "Effect",
+            "Path Property",
+            "Property",
+            "Key",
+            "MarkerKey",
+            "Project",
+            "Text",
+        ]
+    );
+    for done in [
+        "Global",
+        "Random Numbers",
+        "Interpolation",
+        "Comp",
+        "Layer",
+        "Property",
+    ] {
+        assert!(groups.iter().any(|(n, c)| *n == done && *c > 0), "{done}");
+    }
+    // Pressing the menu button while editing keeps the field's selection: the
+    // item replaces it.
+    let mut h = H::new();
+    let layer = h.layer.clone();
+    h.run(
+        "attr.set_expression",
+        json!({"path": layer, "attr": POS, "source": "value"}),
+    );
+    let mut tl = h.bars();
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let (_, _, eq, _) = tl.last_expr[0].clone();
+    let field = pos2(tl.last_axis.unwrap().left + 60.0, eq.y);
+    h.click(&mut tl, field, Modifiers::NONE);
+    h.frame(
+        &mut tl,
+        vec![Event::Key {
+            key: egui::Key::A,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: cmd(),
+        }],
+        Modifiers::NONE,
+    );
+    let menu = tl.last_lang[0].2;
+    h.click(&mut tl, menu, Modifiers::NONE);
+    assert_eq!(tl.lang_insert(), Some(("value".to_owned(), 0..5)));
+}
