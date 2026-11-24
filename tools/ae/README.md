@@ -27,6 +27,7 @@ tools/ae/aectl stop                       # 不保存关闭工程并结束 AE
 |---|---|---|
 | 启动后弹 "We detected a crash in your last session…"，建议安全模式，脚本调用一直挂着 | 上次 AE 被结束或崩溃，`com.Adobe.After Effects.<版本>.plist` 里留下了 `CrashOccurred` / `ForceQuitOccured` | 启动前删掉这两个标记、`com.Adobe.After Effects` 的 `AppStates` 会话记录，以及 Sentry 残留的 `*.run` |
 | "Unable to execute script file. Scripting Plugin is not installed." | AE 还没加载完脚本插件（或者卡在上面那个框）时就发了 DoScript | 用户级 `Scripts/Startup/bae_automation_ready.jsx` 在脚本可用时写出 `ready.json`，等它出现后才发脚本 |
+| 启动弹出 "Your disk cache folder … does not have enough available space" | 磁盘剩余空间小于设置的缓存上限 | 有辅助功能权限时，按 PID 确认警告文字和已选中的 `Once Per Session`，只点 `OK`。同一启动弹框重启一次后再次出现就报错，保留 AE 供手动处理 |
 | 弹 "A copy of your project was saved at …/After Effects Crash_N.aep" | 用 `SIGTERM` 结束、甚至正常 `app.quit()`，AE 都会走崩溃流程 | 结束 AE 一律用 `SIGKILL`；`stop` 先不保存关闭工程再结束进程 |
 | 脚本里调用了 `alert()` 等 | 原生模态框 | 主线程连续 3 次（约 9 秒）处在阻塞式模态循环里（`OS_Dialog::ModalLoop`、`runModalForWindow`、`_doModalLoop`），就判定卡住：保存现场 → 结束 → 清理 → 下次自动重启 |
 | 主线程停在同一个不在执行脚本的调用栈上不动（实际遇到过：挂载磁盘卷时卡在 `DiskArbitration → NetFS → NSXPC` 的同步等待里） | 不是对话框，但 AE 永远不会去执行脚本 | 有脚本在等结果时，连续约 30 秒（10 次采样）主线程调用栈完全一样、并且不在执行 ExtendScript，就判定卡死，按同样的流程恢复 |
@@ -65,13 +66,13 @@ tools/ae/aectl lock -- tools/ae/aectl eval 'app.version'
 tools/ae/aectl lock --lock-timeout 600 -- bash path/to/golden.sh
 ```
 
-它通过原子创建 `/private/tmp/bae-locks/ae.lock` 排队，与现有手动创建目录或文件的 worker 兼容。默认最多等 30 分钟，等待超时返回 1，拿到锁后返回所执行命令的退出码。命令结束时释放锁，无需单独解锁。若持锁进程被 SIGKILL，确认持有者和它启动的任务都已退出后，再清理遗留的锁。已经手动持有共享锁的脚本可以继续直接调用 `aectl`。
+单次 `start` / `eval` / `run` / `stop` / `clean` / `install` 也会通过原子创建 `/private/tmp/bae-locks/ae.lock` 排队，避免插入其他 worker 的多步会话。用 `aectl lock` 启动的子命令会识别继承的持锁标记，直接进入原有的单次调用锁 `/private/tmp/bae-ae-automation/lock.d`。原来手动创建共享锁的脚本需要改用 `aectl lock` 包裹。
 
-`start` / `eval` / `run` / `stop` 仍使用 `/private/tmp/bae-ae-automation/lock.d` 串行执行单条命令。调用方用 `lock` 保证多条命令之间也没有别的共享锁持有者插队。
+默认最多等 30 分钟，等待超时返回 1。`aectl lock` 返回所执行命令的退出码，命令结束时释放锁。若持锁进程被 SIGKILL，确认持有者和它启动的任务都已退出后，再清理遗留的锁。
 
 ## 测试
 
-- `bash tools/ae/tests/shared_lock.sh` 检查排队、兼容现有锁、超时、退出码及释放行为。它在临时目录中运行，无需启动 AE。
+- `bash tools/ae/tests/shared_lock.sh` 检查单次调用等待会话锁、子调用继承会话锁、超时、退出码及释放行为。它在临时目录中运行，无需启动 AE。
 - `tools/ae/aectl lock -- bash tools/ae/tests/osascript_exit.sh` 检查 osascript 提前失败和 -1712 超时处理（退出码分别是 5 和 4）。需要本机装有 AE，会结束一次 AE，下一条正常 eval 会重新启动它。
 
 ## 限制

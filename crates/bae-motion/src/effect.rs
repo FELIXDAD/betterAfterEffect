@@ -145,14 +145,16 @@ impl bae_model::Command for ApplyEffect {
     }
 }
 
-// The AE dump records the center of the reference layer. A newly applied or
-// reset Radial Blur starts at the center of the actual layer, in layer pixels.
+// Built-in AE point defaults were measured on a 640 × 360 reference layer.
 fn instance_default(
     stage: &Stage,
     layer: &PrimPath,
+    def: &EffectDef,
     param: &bae_model::EffectParamDef,
 ) -> Option<Value> {
-    if param.match_name.as_deref() == Some("ADBE Radial Blur-0002") {
+    let relative = param.match_name.as_deref() == Some("ADBE Radial Blur-0002")
+        || (def.plugin.is_none() && def.category == "Distort");
+    if let (true, Some(Value::Vec2(reference))) = (relative, &param.default) {
         let source_size = stage
             .prim(layer)
             .and_then(|v| {
@@ -165,7 +167,10 @@ fn instance_default(
             Some([f64::from(comp.width), f64::from(comp.height)])
         });
         if let Some(size) = size {
-            return Some(Value::Vec2(size.map(|n| 0.5 * n)));
+            return Some(Value::Vec2([
+                size[0] * reference[0] / 640.,
+                size[1] * reference[1] / 360.,
+            ]));
         }
     }
     param.default.clone()
@@ -206,7 +211,7 @@ fn add_instance(
         if param.kind.value_type().is_none() {
             continue;
         }
-        if let Some(value) = instance_default(tx.stage(), layer, param) {
+        if let Some(value) = instance_default(tx.stage(), layer, def, param) {
             set(tx, &path, &param_attr(param.id), value)?;
         }
     }
@@ -399,7 +404,7 @@ impl bae_model::Command for ResetEffects {
             let def = find_def(&self.defs, &match_name)
                 .ok_or_else(|| fail(format!("unknown effect `{match_name}`")))?;
             for param in &def.params {
-                let Some(default) = instance_default(tx.stage(), &layer, param) else {
+                let Some(default) = instance_default(tx.stage(), &layer, &def, param) else {
                     continue;
                 };
                 let attr = param_attr(param.id);

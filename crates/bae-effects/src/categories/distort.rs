@@ -1,4 +1,6 @@
-//! Registration for Distort effects.
-use crate::Registry;
+use crate::{Registry, effects};
 
-pub(crate) fn register(_registry: &mut Registry) {}
+pub(crate) fn register(registry: &mut Registry) {
+    registry.prewarm.push(effects::distort::prewarm);
+    registry.effects.extend(effects::distort::builtins());
+}

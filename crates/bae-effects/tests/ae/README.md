@@ -29,6 +29,7 @@ cargo run -p bae-effects --example ae_compare -- golden            # 把 AE 输�
 - [模糊和锐化](categories/blur-sharpen.md)
 - [通道](categories/channel.md)
 - [颜色校正](categories/color.md)
+- [扭曲](categories/distort.md)
 - [表达式控制](categories/controls.md)
 - [生成](categories/generate.md)
 - [遮罩](categories/matte.md)

@@ -21,7 +21,9 @@ fn main() {
     match cmd.as_str() {
         "prepare" => {
             std::fs::create_dir_all(root.join("inputs")).unwrap();
-            for name in ["chart", "soft", "step", "ramp", "line", "lineg"] {
+            for name in [
+                "fine", "coords", "chart", "soft", "step", "ramp", "line", "lineg",
+            ] {
                 harness::write_png(
                     &root.join("inputs").join(format!("{name}.png")),
                     &harness::input(name),
