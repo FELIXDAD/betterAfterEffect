@@ -337,6 +337,13 @@ const LAYER: &[AttrDef] = &[
     boolean("material:casts_shadows", false).kinds(VISUAL),
     boolean("material:accepts_shadows", true).kinds(VISUAL),
     boolean("material:accepts_lights", true).kinds(VISUAL),
+    // Material Options reflectance (AE-CMP-441), percent.
+    float("material:ambient", 100.0).kinds(VISUAL),
+    float("material:diffuse", 50.0).kinds(VISUAL),
+    float("material:specular_intensity", 50.0).kinds(VISUAL),
+    float("material:specular_shininess", 5.0).kinds(VISUAL),
+    float("material:metal", 100.0).kinds(VISUAL),
+    float("material:light_transmission", 0.0).kinds(VISUAL),
 ];
 
 const SHAPE_TRANSFORM: &[AttrDef] = &[

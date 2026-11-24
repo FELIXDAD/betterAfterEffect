@@ -108,6 +108,20 @@ pub(crate) mod flags {
     pub const PROJECTIVE: u32 = 256;
     /// Motion blur: average the samples `extra.y .. extra.y + extra.z`.
     pub const MOTION: u32 = 512;
+    /// Lit by the comp's lights: lighting record at vec4 `extra.w`.
+    pub const LIT: u32 = 1024;
+}
+
+/// Which fragment entry point a composite pipeline uses: plain draws never pay
+/// for the lighting or motion-blur code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Variant {
+    /// `fs_main`.
+    Plain,
+    /// `fs_lit`: 3D layers lit by the comp's lights.
+    Lit,
+    /// `fs_motion`: motion-blurred layers (lit or not).
+    Motion,
 }
 
 /// Most layer-space clip half-planes per draw (3D intersections).
@@ -141,7 +155,7 @@ pub(crate) struct DrawData {
     pub inv_w: [f32; 4],
     /// Half-planes `a·u + b·v + c ≥ 0` in input texels (`extra.x` of them).
     pub clips: [[f32; 4]; MAX_CLIPS],
-    /// Clip count, first motion sample, sample count, unused.
+    /// Clip count, first motion sample, sample count, lighting record offset.
     pub extra: [u32; 4],
 }
 
@@ -384,7 +398,7 @@ pub(crate) struct Pipelines {
     pub draws_layout: wgpu::BindGroupLayout,
     pub textures_layout: wgpu::BindGroupLayout,
     /// By target format, blend kind and motion blur (`fs_motion`).
-    composite: FxHashMap<(wgpu::TextureFormat, BlendKind, bool), wgpu::RenderPipeline>,
+    composite: FxHashMap<(wgpu::TextureFormat, BlendKind, Variant), wgpu::RenderPipeline>,
     pub sampler: wgpu::Sampler,
     pub dummy: wgpu::TextureView,
     pub empty_textures: wgpu::BindGroup,
@@ -417,10 +431,10 @@ impl Pipelines {
             },
             count: None,
         };
-        // Draw records and motion-blur samples.
+        // Draw records, motion-blur samples and lighting records.
         let draws_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("bae-render.draws"),
-            entries: &[storage(0), storage(1)],
+            entries: &[storage(0), storage(1), storage(2)],
         });
         let tex = |binding| wgpu::BindGroupLayoutEntry {
             binding,
@@ -579,18 +593,18 @@ impl Pipelines {
             .or_insert_with(|| output_pipeline(device, module, layout, format))
     }
 
-    /// The composite pipeline for a target format, blend kind and whether the
-    /// draws are motion-blurred (compiled on first use).
+    /// The composite pipeline for a target format, blend kind and fragment
+    /// variant (compiled on first use).
     pub fn composite(
         &mut self,
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
         kind: BlendKind,
-        motion: bool,
+        variant: Variant,
     ) -> &wgpu::RenderPipeline {
         let (module, layout) = (&self.module, &self.layout);
         self.composite
-            .entry((format, kind, motion))
+            .entry((format, kind, variant))
             .or_insert_with(|| {
                 device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some("bae-render.composite"),
@@ -606,7 +620,11 @@ impl Pipelines {
                     multisample: wgpu::MultisampleState::default(),
                     fragment: Some(wgpu::FragmentState {
                         module,
-                        entry_point: Some(if motion { "fs_motion" } else { "fs_main" }),
+                        entry_point: Some(match variant {
+                            Variant::Plain => "fs_main",
+                            Variant::Lit => "fs_lit",
+                            Variant::Motion => "fs_motion",
+                        }),
                         compilation_options: Default::default(),
                         targets: &[Some(wgpu::ColorTargetState {
                             format,

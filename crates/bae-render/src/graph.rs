@@ -65,6 +65,7 @@ use crate::geom::{IRect, Rect, is_invertible, scale_affine};
 use crate::input::{
     CustomContent, FootageRef, LayerContent, RenderComp, RenderEffect, RenderLayer,
 };
+use crate::light::Lighting;
 use crate::mask::MaskStack;
 pub use crate::mask::{Expansion, MaskEdge, MaskNode, MaskRaster};
 use crate::request::RenderRequest;
@@ -271,6 +272,8 @@ pub struct LayerOp {
     /// Pieces of 3D layers cut at intersections: half-planes `a·x + b·y + c ≥ 0`
     /// in input space pixels.
     pub clips: Vec<[f64; 3]>,
+    /// 3D layers lit by the comp's lights (AE-CMP-436).
+    pub lighting: Option<Arc<Lighting>>,
 }
 
 /// The pixels of a layer op.
@@ -910,6 +913,25 @@ impl Builder<'_> {
             }));
         }
 
+        // 3D layers that accept lights, in a comp with lights (AE-CMP-436);
+        // a light with its Adjustment Layer switch on lights only the layers
+        // below it (AE-CMP-435).
+        let lighting = layer
+            .matrix_3d
+            .filter(|_| layer.material.accepts_lights && !comp.lights.is_empty())
+            .map(|matrix| {
+                Arc::new(Lighting {
+                    matrix,
+                    material: layer.material,
+                    lights: comp
+                        .lights
+                        .iter()
+                        .filter(|l| l.scope_below.is_none_or(|light| index > light))
+                        .copied()
+                        .collect(),
+                    eye: comp.view_camera().eye(),
+                })
+            });
         let (transform, projection, motion) = match placement {
             Placement::Affine(t) => (t, None, None),
             Placement::General {
@@ -937,6 +959,7 @@ impl Builder<'_> {
             projection,
             motion,
             clips: Vec::new(),
+            lighting,
         }))
     }
 
@@ -1041,6 +1064,7 @@ impl Builder<'_> {
             projection: None,
             motion: None,
             clips: Vec::new(),
+            lighting: None,
         };
         OpInput::Image(self.push(Node {
             kind: NodeKind::Composite(CompositeNode {
@@ -1313,6 +1337,7 @@ impl Builder<'_> {
             projection: None,
             motion: None,
             clips: Vec::new(),
+            lighting: None,
         }])
     }
 
@@ -1496,6 +1521,7 @@ fn covers(op: &LayerOp, canvas: IRect, scale: f64) -> bool {
         || op.matte.is_some()
         || op.projection.is_some()
         || op.motion.is_some()
+        || op.lighting.is_some()
         || !op.clips.is_empty()
     {
         return false;

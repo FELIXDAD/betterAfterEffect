@@ -24,7 +24,7 @@ use glam::{DAffine2, DVec2};
 use crate::blend::BlendMode;
 use crate::error::RenderError;
 use crate::geom::IRect;
-use crate::gpu::{BlendKind, DrawData, Pipelines, SampleData, flags};
+use crate::gpu::{BlendKind, DrawData, Pipelines, SampleData, Variant, flags};
 use crate::graph::{CompositeNode, LayerOp, Node, NodeKind, OpInput, RenderGraph};
 
 pub(crate) mod adjust;
@@ -42,9 +42,10 @@ pub(crate) struct DrawBuffer {
 struct DrawBuffers {
     draws: wgpu::Buffer,
     samples: wgpu::Buffer,
+    lighting: wgpu::Buffer,
     group: wgpu::BindGroup,
-    draw_capacity: u64,
-    sample_capacity: u64,
+    /// Bytes of each buffer.
+    capacity: [u64; 3],
 }
 
 impl DrawBuffer {
@@ -54,13 +55,17 @@ impl DrawBuffer {
         layout: &wgpu::BindGroupLayout,
         draws: u64,
         samples: u64,
+        lighting: u64,
     ) {
-        let draw_bytes = draws.max(64) * std::mem::size_of::<DrawData>() as u64;
-        let sample_bytes = samples.max(16) * std::mem::size_of::<SampleData>() as u64;
+        let needed = [
+            draws.max(64) * std::mem::size_of::<DrawData>() as u64,
+            samples.max(16) * std::mem::size_of::<SampleData>() as u64,
+            lighting.max(16) * 16,
+        ];
         if self
             .buffer
             .as_ref()
-            .is_some_and(|b| b.draw_capacity >= draw_bytes && b.sample_capacity >= sample_bytes)
+            .is_some_and(|b| b.capacity.iter().zip(&needed).all(|(c, n)| c >= n))
         {
             return;
         }
@@ -72,10 +77,10 @@ impl DrawBuffer {
                 mapped_at_creation: false,
             })
         };
-        let draw_capacity = draw_bytes.next_power_of_two();
-        let sample_capacity = sample_bytes.next_power_of_two();
-        let draws = create("bae-render.draws", draw_capacity);
-        let samples = create("bae-render.samples", sample_capacity);
+        let capacity = needed.map(u64::next_power_of_two);
+        let draws = create("bae-render.draws", capacity[0]);
+        let samples = create("bae-render.samples", capacity[1]);
+        let lighting = create("bae-render.lighting", capacity[2]);
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bae-render.draws"),
             layout,
@@ -88,14 +93,18 @@ impl DrawBuffer {
                     binding: 1,
                     resource: samples.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: lighting.as_entire_binding(),
+                },
             ],
         });
         self.buffer = Some(DrawBuffers {
             draws,
             samples,
+            lighting,
             group,
-            draw_capacity,
-            sample_capacity,
+            capacity,
         });
     }
 }
@@ -183,11 +192,25 @@ pub(crate) fn execute(
             _ => 0,
         })
         .sum();
+    let total_lighting: usize = graph
+        .nodes
+        .iter()
+        .map(|n| match &n.kind {
+            NodeKind::Composite(c) => c
+                .ops
+                .iter()
+                .filter_map(|op| op.lighting.as_ref())
+                .map(|l| crate::light::HEADER_VEC4S + crate::light::LIGHT_VEC4S * l.lights.len())
+                .sum(),
+            _ => 0,
+        })
+        .sum();
     draw_buffer.ensure(
         device,
         &pipelines.draws_layout,
         total_draws as u64,
         total_samples as u64,
+        total_lighting as u64,
     );
     let buffers = draw_buffer.buffer.as_ref().expect("ensured");
     let blendable = format != wgpu::TextureFormat::Rgba32Float
@@ -202,9 +225,11 @@ pub(crate) fn execute(
         pipelines,
         buffer: &buffers.draws,
         samples_buffer: &buffers.samples,
+        lighting_buffer: &buffers.lighting,
         draws_group: &buffers.group,
         next_draw: 0,
         next_sample: 0,
+        next_lighting: 0,
         depth: graph.depth,
         format,
         blendable,
@@ -327,9 +352,11 @@ struct ExecCtx<'a> {
     pipelines: &'a mut Pipelines,
     buffer: &'a wgpu::Buffer,
     samples_buffer: &'a wgpu::Buffer,
+    lighting_buffer: &'a wgpu::Buffer,
     draws_group: &'a wgpu::BindGroup,
     next_draw: u32,
     next_sample: u32,
+    next_lighting: u32,
     depth: crate::request::BitDepth,
     format: wgpu::TextureFormat,
     blendable: bool,
@@ -348,8 +375,8 @@ struct Planned {
     /// Scissor (target texels), and whether the backdrop must be copied first.
     bounds: IRect,
     backdrop: bool,
-    /// Motion-blurred (drawn with the `fs_motion` pipeline).
-    motion: bool,
+    /// Fragment entry point (plain, lit, motion-blurred).
+    variant: Variant,
 }
 
 impl ExecCtx<'_> {
@@ -383,6 +410,7 @@ impl ExecCtx<'_> {
         let tsize = target.texture_size();
         let mut planned: Vec<Planned> = Vec::with_capacity(c.ops.len());
         let mut samples: Vec<SampleData> = Vec::new();
+        let mut lighting: Vec<[f32; 4]> = Vec::new();
         let mut drawn_any = false;
         for op in &c.ops {
             let mut kind =
@@ -397,12 +425,23 @@ impl ExecCtx<'_> {
                 kind = BlendKind::Normal;
                 backdrop = false;
             }
-            let Some(mut data) = plan_op(node, op, outputs, &self.mask_outs, tsize, &mut samples)?
+            let Some(mut data) = plan_op(
+                node,
+                op,
+                outputs,
+                &self.mask_outs,
+                tsize,
+                &mut samples,
+                &mut lighting,
+            )?
             else {
                 continue;
             };
             if op.motion.is_some() {
                 data.extra[1] += self.next_sample;
+            }
+            if op.lighting.is_some() {
+                data.extra[3] += self.next_lighting;
             }
             let mut fl = data.mode[1];
             if backdrop {
@@ -471,7 +510,13 @@ impl ExecCtx<'_> {
                 textures,
                 bounds,
                 backdrop,
-                motion: op.motion.is_some(),
+                variant: if op.motion.is_some() {
+                    Variant::Motion
+                } else if op.lighting.is_some() {
+                    Variant::Lit
+                } else {
+                    Variant::Plain
+                },
             });
             drawn_any = true;
         }
@@ -485,6 +530,14 @@ impl ExecCtx<'_> {
                 bytemuck::cast_slice(&samples),
             );
             self.next_sample += samples.len() as u32;
+        }
+        if !lighting.is_empty() {
+            self.gpu.queue().write_buffer(
+                self.lighting_buffer,
+                u64::from(self.next_lighting) * 16,
+                bytemuck::cast_slice(&lighting),
+            );
+            self.next_lighting += lighting.len() as u32;
         }
 
         let format = self.format;
@@ -555,9 +608,9 @@ impl ExecCtx<'_> {
                 if i > start && p.backdrop {
                     break;
                 }
-                if current != Some((p.kind, p.motion)) {
-                    pass.set_pipeline(self.pipelines.composite(device, format, p.kind, p.motion));
-                    current = Some((p.kind, p.motion));
+                if current != Some((p.kind, p.variant)) {
+                    pass.set_pipeline(self.pipelines.composite(device, format, p.kind, p.variant));
+                    current = Some((p.kind, p.variant));
                 }
                 // Batch a run of plain solids with the same pipeline.
                 let mut end = i + 1;
@@ -566,7 +619,7 @@ impl ExecCtx<'_> {
                         && planned[end].textures.is_none()
                         && !planned[end].backdrop
                         && planned[end].kind == p.kind
-                        && planned[end].motion == p.motion
+                        && planned[end].variant == p.variant
                     {
                         end += 1;
                     }
@@ -639,7 +692,10 @@ impl ExecCtx<'_> {
         } else {
             BlendKind::Replace
         };
-        pass.set_pipeline(self.pipelines.composite(device, self.format, kind, false));
+        pass.set_pipeline(
+            self.pipelines
+                .composite(device, self.format, kind, Variant::Plain),
+        );
         pass.set_bind_group(0, self.draws_group, &[]);
         pass.set_bind_group(1, &self.pipelines.empty_textures, &[]);
         pass.draw(0..6, first..first + 1);
@@ -728,8 +784,9 @@ fn clear(encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
 }
 
 /// Geometry, colour and flags of one op (blend flags are added by the caller).
-/// Motion-blurred ops append their sample placements to `samples` (the
-/// caller offsets `extra.y` by where the composite's samples land).
+/// Motion-blurred ops append their sample placements to `samples`, lit ones
+/// their lighting record to `lighting` (the caller offsets `extra.y` / `extra.w`
+/// by where the composite's records land).
 fn plan_op(
     node: &Node,
     op: &LayerOp,
@@ -737,6 +794,7 @@ fn plan_op(
     mask_outs: &[Option<masks::MaskOut>],
     target_size: [u32; 2],
     samples: &mut Vec<SampleData>,
+    lighting: &mut Vec<[f32; 4]>,
 ) -> Result<Option<DrawData>, RenderError> {
     // Composite texel → … : target texel = comp px / scale − rect origin.
     let to_target = DAffine2::from_translation(DVec2::new(
@@ -829,6 +887,10 @@ fn plan_op(
             }
         }
         (OpInput::Image(_), None) => unreachable!("images resolved above"),
+    }
+    if let Some(l) = &op.lighting {
+        data.extra[3] = l.pack(&from_texel, lighting);
+        data.mode[1] |= flags::LIT;
     }
     if !op.clips.is_empty() {
         // Input px half-planes → input texels.

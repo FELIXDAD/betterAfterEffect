@@ -155,6 +155,44 @@ pub fn build(assets: &Path) -> (SceneBuilder, Vec<(String, u8)>) {
                     .expect("poi");
                 }
                 (layer, None)
+            } else if let Some(lt) = l.get("light").filter(|c| c.is_object()) {
+                let layer = b.layer(&comp, lname, "light", None).expect("light");
+                let kind = lt["type"].as_str().unwrap_or("spot");
+                b.set(&layer, "light:type", Value::Enum(kind.into()))
+                    .expect("type");
+                let c = lt["color"]
+                    .as_array()
+                    .map_or([1.0; 3], |c| [num(&c[0]), num(&c[1]), num(&c[2])]);
+                b.set(&layer, "light:color", Value::Color([c[0], c[1], c[2], 1.0]))
+                    .expect("color");
+                for (key, attr) in [
+                    ("intensity", "light:intensity"),
+                    ("cone", "light:cone_angle"),
+                    ("feather", "light:cone_feather"),
+                    ("radius", "light:radius"),
+                    ("dist", "light:falloff_distance"),
+                ] {
+                    if let Some(v) = lt[key].as_f64() {
+                        b.set(&layer, attr, Value::Float(v)).expect(key);
+                    }
+                }
+                if let Some(f) = lt["falloff"].as_str() {
+                    b.set(&layer, "light:falloff", Value::Enum(f.into()))
+                        .expect("falloff");
+                }
+                if l["poi"].is_array() {
+                    b.set(
+                        &layer,
+                        "transform:point_of_interest",
+                        Value::Vec3(vec3(&l["poi"])),
+                    )
+                    .expect("poi");
+                }
+                if l["adjustment"].as_bool() == Some(true) {
+                    b.set(&layer, "adjustment_layer", Value::Bool(true))
+                        .expect("adjustment");
+                }
+                (layer, None)
             } else if let Some(c) = l["solid"].as_array() {
                 let [sw, sh] = vec2(&l["size"]);
                 let color = [
@@ -229,6 +267,23 @@ pub fn build(assets: &Path) -> (SceneBuilder, Vec<(String, u8)>) {
                     ("transform:rotation", rz),
                 ] {
                     b.set(&layer, attr, Value::Float(v)).expect("rotation");
+                }
+            }
+            if let Some(m) = l.get("mat").filter(|m| m.is_object()) {
+                for (key, attr) in [
+                    ("amb", "material:ambient"),
+                    ("diff", "material:diffuse"),
+                    ("spec", "material:specular_intensity"),
+                    ("shin", "material:specular_shininess"),
+                    ("metal", "material:metal"),
+                ] {
+                    if let Some(v) = m[key].as_f64() {
+                        b.set(&layer, attr, Value::Float(v)).expect(key);
+                    }
+                }
+                if m["accepts"].as_bool() == Some(false) {
+                    b.set(&layer, "material:accepts_lights", Value::Bool(false))
+                        .expect("accepts");
                 }
             }
             if l["orient"].is_array() {
