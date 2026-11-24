@@ -242,6 +242,7 @@ impl TimelinePanel {
             Icon::FrameBlend,
             Icon::MotionBlur,
             Icon::Adjustment,
+            Icon::Cube,
         ]
         .into_iter()
         .enumerate()
@@ -257,7 +258,7 @@ impl TimelinePanel {
             );
         }
         p.text(
-            pos2(l + cols.parent + 4.0, cy),
+            pos2(l + cols.parent + PARENT_PAD, cy),
             Align2::LEFT_CENTER,
             tr("Parent & Link"),
             theme::small(),

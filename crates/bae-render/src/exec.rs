@@ -271,6 +271,7 @@ pub(crate) fn execute(
                     format,
                     allocator: &mut alloc,
                     effect_inputs: &[],
+                    effect_masks: &[],
                 };
                 src.source.render(&mut ectx, &src.request)?
             }
@@ -281,7 +282,12 @@ pub(crate) fn execute(
                 let effect_inputs: Vec<_> = fx
                     .layers
                     .iter()
-                    .filter_map(|(path, id)| Some((path.clone(), outputs[id.index()].clone()?)))
+                    .filter_map(|(dep, id)| Some((dep.clone(), outputs[id.index()].clone()?)))
+                    .collect();
+                let effect_masks: Vec<_> = fx
+                    .masks
+                    .iter()
+                    .filter_map(|(m, id)| Some((m.clone(), outputs[id.index()].clone()?)))
                     .collect();
                 let mut params = fx.frame.params(&fx.instance);
                 params.sixteen_bpc = graph.depth == crate::BitDepth::Bpc16;
@@ -296,6 +302,7 @@ pub(crate) fn execute(
                     format,
                     allocator: &mut alloc,
                     effect_inputs: &effect_inputs,
+                    effect_masks: &effect_masks,
                 };
                 fx.effect.render(&mut ectx, &params, &input, node.rect)?
             }

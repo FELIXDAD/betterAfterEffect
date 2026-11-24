@@ -29,10 +29,9 @@ impl Effect for Colorama {
         [4, 28]
             .into_iter()
             .filter_map(|id| match p.value(id) {
-                Some(Value::PrimRef(layer)) => Some(LayerDependency {
-                    layer: layer.clone(),
-                    time: p.comp_time,
-                }),
+                Some(Value::PrimRef(layer)) => {
+                    Some(LayerDependency::source(layer.clone(), p.comp_time))
+                }
                 _ => None,
             })
             .collect()
