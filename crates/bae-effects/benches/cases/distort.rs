@@ -9,6 +9,16 @@ pub(super) fn register(out: &mut Vec<Case>) {
             "ADBE Twirl",
             vec![(1, Value::Float(100.)), (2, Value::Float(80.))],
         ),
+        (
+            "ADBE Bulge",
+            vec![
+                (1, Value::Float(700.)),
+                (2, Value::Float(400.)),
+                (4, Value::Float(2.)),
+                (6, Value::Int(2)),
+            ],
+        ),
+        ("ADBE Ripple", vec![(1, Value::Float(80.))]),
         ("ADBE Optics Compensation", vec![(1, Value::Float(80.))]),
         (
             "ADBE Geometry2",

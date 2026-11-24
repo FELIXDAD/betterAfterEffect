@@ -127,6 +127,7 @@ fn mosaic_cells(@builtin(global_invocation_id) id: vec3<u32>) {
 }
 
 fn cell_color(cell:vec2<i32>, grid:vec2<i32>, size:vec2<i32>) -> vec4<f32> {
+    if any(cell < vec2(0)) || any(cell >= grid) { return vec4(0.); }
     if f.arg[0].z != 0.0 {
         // AE Sharp Colors picks the last texel covered by the cell.
         let last = ((cell+1)*size-1)/grid;
@@ -142,10 +143,16 @@ fn mosaic_output(@builtin(global_invocation_id) id:vec3<u32>) {
     let size = f.src.zw-f.src.xy;
     let grid = vec2<i32>(f.arg[0].xy);
     let pos = p-f.src.xy;
-    let cell = pos*grid/size;
-    let next = min(cell+1,grid-1);
-    let frac = saturate(vec2<f32>(pos+1)-vec2<f32>((cell+1)*size)/vec2<f32>(grid));
+    // Best filters one destination pixel using the integer block width. The
+    // resulting footprint can cross the outside edge as well as an inner seam.
+    let block = vec2<f32>(size) / vec2<f32>(grid);
+    let center = (vec2<f32>(pos) + 0.5) / block;
+    let width = 1. / floor(block);
+    let cell = vec2<i32>(floor(center - 0.5 * width));
+    let next = cell + 1;
+    let frac = saturate((center + 0.5 * width - vec2<f32>(next)) / width);
     let a = cell_color(cell,grid,size);
+    if all(frac == vec2(0.)) { store(p, a); return; }
     let b = cell_color(vec2<i32>(next.x,cell.y),grid,size);
     let c = cell_color(vec2<i32>(cell.x,next.y),grid,size);
     let d = cell_color(next,grid,size);

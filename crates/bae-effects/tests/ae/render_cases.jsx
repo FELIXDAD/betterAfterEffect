@@ -60,7 +60,7 @@
         var src = input(c.input);
         var comp = app.project.items.addComp(c.name, src.width, src.height, 1, 1, 30);
         var layer = comp.layers.add(src);
-        layer.quality = LayerQuality.BEST;
+        layer.quality = c.quality === "draft" ? LayerQuality.DRAFT : LayerQuality.BEST;
         var fx = layer.property("ADBE Effect Parade").addProperty(c.effect);
         for (var id in c.params) {
             var pad = ("0000" + id).slice(-4);
@@ -91,6 +91,7 @@
             throw new Error(c.name + ": saveFrameToPng timed out");
         }
         done.push(c.name);
+        comp.remove();
     }
     return "rendered " + done.length + " cases: " + done.join(", ");
 })();

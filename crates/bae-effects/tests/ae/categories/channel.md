@@ -1,5 +1,14 @@
 # 通道与 AE 26 的像素对照
 
+## 已有效果
+
+| AE matchName | 名称 | 实现 |
+|---|---|---|
+| `ADBE Invert` | 反转 | 声明式像素 |
+| `ADBE Minimax` | 最小/最大 | Rust |
+| `ADBE Set Matte3` | 设置遮罩 | Rust |
+| `ADBE Shift Channels` | 转换通道 | 声明式像素 |
+
 `cases-controls-channel.json` 的 39 个用例由一次 `aectl run` 批量生成。AE 的启动提示框由 `aectl` 恢复后，批次正常完成。输入采用不透明色块与羽化 alpha 圆盘，PNG 输出是 8 bpc。对照按预乘 RGBA 比较，使用每像素四通道中的最大差，再计算整图平均。
 
 | 效果 | 最大差 / 平均差（8 位色阶） | 观察 |
@@ -25,3 +34,7 @@ tools/ae/aectl lock -- tools/ae/aectl run "$BAE_07_ROOT/run.jsx"
 cargo run -p bae-effects --example ae_compare -- compare
 cargo run -p bae-effects --example ae_compare -- golden
 ```
+
+## 工作流进度
+
+2026-11-24，`effects/controls-channel` 完成通道效果，与表达式控制、颜色校正和遮罩一起生成 39 个 AE 26.2.1 用例。Set Matte 支持当前帧的源阶段图层取样，界面上的源阶段切换由效果控件工作流接入。
