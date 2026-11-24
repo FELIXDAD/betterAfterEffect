@@ -1762,6 +1762,54 @@ fn animate_text_adds_an_animator_that_the_timeline_shows() {
     assert_eq!(animate("\"skew\""), Some(false));
 }
 
+#[test]
+fn blending_mode_menu_sets_and_steps_the_selected_layers() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let a = h.layer.clone();
+    let b = path(&h.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"]);
+    h.session().lock().selected_layers = vec![a.clone(), b.clone()];
+    let mut tl = h.bars();
+    h.session().lock().selected_layers = vec![a.clone(), b.clone()];
+    let mode = |h: &H, l: &PrimPath| query::static_value(&h.stage.prim(l).unwrap(), "blend_mode");
+    // Every mode of the menu is one the model and renderer take.
+    for (_, it) in crate::catalog::menu_items() {
+        if it.action == ids::BLENDING_MODE {
+            assert!(it.status.works(), "{}", it.title);
+            let m: Json = serde_json::from_str(it.params).unwrap();
+            let r = h.action(
+                &mut tl,
+                Invocation::with_params(ids::BLENDING_MODE, m.clone()),
+            );
+            assert_eq!(r.invocations.len(), 1, "one step for both layers");
+            h.apply(&r);
+            let want = Some(Value::Enum(m["mode"].as_str().unwrap().into()));
+            assert_eq!(mode(&h, &a), want);
+            assert_eq!(mode(&h, &b), want);
+        }
+    }
+    // Next / Previous Blending Mode step through the menu order and wrap.
+    h.apply(&h.action(
+        &mut tl,
+        Invocation::with_params(ids::BLENDING_MODE, json!({"mode": "normal"})),
+    ));
+    h.apply(&h.action(
+        &mut tl,
+        Invocation::with_params(ids::BLENDING_MODE_STEP, json!({"step": 1})),
+    ));
+    assert_eq!(mode(&h, &a), Some(Value::Enum("dissolve".into())));
+    h.apply(&h.action(
+        &mut tl,
+        Invocation::with_params(ids::BLENDING_MODE_STEP, json!({"step": -1})),
+    ));
+    h.apply(&h.action(
+        &mut tl,
+        Invocation::with_params(ids::BLENDING_MODE_STEP, json!({"step": -1})),
+    ));
+    assert_eq!(mode(&h, &a), Some(Value::Enum("luminescent_premul".into())));
+}
+
 /// Frame cost with the B1-sized project (61 layers × Position, Scale, Rotation with
 /// three eased keys each), every layer selected so the Graph Editor shows 183
 /// properties. Run with

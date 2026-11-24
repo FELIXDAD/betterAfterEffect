@@ -101,6 +101,10 @@ pub mod ids {
     /// Layer ▸ Switches ▸ Shy, Lock … and Layer ▸ 3D Layer: params `{"switch":
     /// "<attr>"}` (see [`super::SWITCHES`]); toggles the selected layers.
     pub const LAYER_SWITCH: &str = "motion.layer.switch";
+    /// Layer ▸ Blending Mode ▸ … (params `{"mode": "multiply"}`).
+    pub const BLENDING_MODE: &str = "motion.layer.blending_mode";
+    /// Layer ▸ Next / Previous Blending Mode (AE Shift+= / Shift+-; `{"step": ±1}`).
+    pub const BLENDING_MODE_STEP: &str = "motion.layer.blending_mode_step";
     pub const UNLOCK_ALL_LAYERS: &str = "motion.layer.unlock_all_layers";
     pub const SHOW_ALL_VIDEO: &str = "motion.layer.show_all_video";
     pub const HIDE_OTHER_VIDEO: &str = "motion.layer.hide_other_video";
@@ -194,6 +198,8 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::CUT, "Cut"),
     (ids::PASTE, "Paste"),
     (ids::LAYER_SWITCH, "Layer Switch"),
+    (ids::BLENDING_MODE, "Blending Mode"),
+    (ids::BLENDING_MODE_STEP, "Next Blending Mode"),
     (ids::UNLOCK_ALL_LAYERS, "Unlock All Layers"),
     (ids::SHOW_ALL_VIDEO, "Show All Video"),
     (ids::HIDE_OTHER_VIDEO, "Hide Other Video"),
@@ -233,6 +239,16 @@ const TRANSFORM_PROPERTIES: [(&str, &str, &str); 5] = [
 /// Variants with fixed parameters: (command, parameters as JSON, English name). A
 /// table rather than `json!` calls keeps the code small (parsed once at startup).
 const VARIANTS: &[(&str, &str, &str)] = &[
+    (
+        ids::BLENDING_MODE_STEP,
+        r#"{"step":1}"#,
+        "Next Blending Mode",
+    ),
+    (
+        ids::BLENDING_MODE_STEP,
+        r#"{"step":-1}"#,
+        "Previous Blending Mode",
+    ),
     (ids::STEP, r#"{"frames":-1}"#, "Previous Frame"),
     (ids::STEP, r#"{"frames":1}"#, "Next Frame"),
     (ids::STEP, r#"{"frames":-10}"#, "Back 10 Frames"),
@@ -999,6 +1015,39 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                 "layer.reorder",
                 json!({"layers": s.selected_layers, "index": index}),
             );
+        }
+        ids::BLENDING_MODE if !layers.is_empty() => {
+            if let Some(mode) = inv.params.get("mode").and_then(|v| v.as_str()) {
+                cx.invoke_with(
+                    "layer.set_attr",
+                    json!({"layers": layers, "attr": "blend_mode", "value": {"type": "enum", "value": mode}}),
+                );
+            }
+        }
+        ids::BLENDING_MODE_STEP if !layers.is_empty() => {
+            // Each layer steps from its own mode through AE's menu order.
+            let step = inv.params.get("step").and_then(|v| v.as_i64()).unwrap_or(1);
+            let modes = bae_model::schema::BLEND_MODES;
+            let mut by_mode: Vec<(&str, Vec<PrimPath>)> = Vec::new();
+            for l in &layers {
+                let current = stage
+                    .prim(l)
+                    .and_then(|v| query::static_value(&v, "blend_mode"))
+                    .and_then(|v| v.as_str().map(str::to_owned))
+                    .unwrap_or_else(|| "normal".into());
+                let i = modes.iter().position(|m| *m == current).unwrap_or(0) as i64;
+                let next = modes[(i + step).rem_euclid(modes.len() as i64) as usize];
+                match by_mode.iter_mut().find(|(m, _)| *m == next) {
+                    Some((_, ls)) => ls.push(l.clone()),
+                    None => by_mode.push((next, vec![l.clone()])),
+                }
+            }
+            for (mode, ls) in by_mode {
+                cx.invoke_with(
+                    "layer.set_attr",
+                    json!({"layers": ls, "attr": "blend_mode", "value": {"type": "enum", "value": mode}}),
+                );
+            }
         }
         ids::LAYER_SWITCH => {
             let Some(attr) = inv.params.get("switch").and_then(|v| v.as_str()) else {
