@@ -214,7 +214,9 @@ impl<'a> MockPass<'a> {
                 });
             if out.active {
                 out.content = self.content(layer, &kind, local, depth)?;
-                out.effects = self.effects(layer, local);
+                if boolean(layer, "effects_enabled", local).unwrap_or(true) {
+                    out.effects = self.effects(layer, local);
+                }
                 out.masks = self.masks(layer, local);
             }
             if layer_has_expressions(layer) {
@@ -278,7 +280,8 @@ impl<'a> MockPass<'a> {
         local: Time,
         depth: usize,
     ) -> Result<LayerContent, RenderError> {
-        if matches!(kind, "null" | "camera" | "light" | "audio" | "adjustment") {
+        // Adjustment layers keep their source: its alpha is their coverage.
+        if matches!(kind, "null" | "camera" | "light" | "audio") {
             return Ok(LayerContent::None);
         }
         let stage = self.stage;

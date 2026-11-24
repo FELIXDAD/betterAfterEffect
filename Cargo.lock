@@ -513,6 +513,7 @@ dependencies = [
  "bae-agent",
  "bae-anim",
  "bae-app",
+ "bae-effects",
  "bae-gpu",
  "bae-model",
  "bae-motion",
@@ -624,8 +625,11 @@ dependencies = [
 name = "bae-effects"
 version = "0.0.1"
 dependencies = [
+ "bae-anim",
+ "bae-app",
  "bae-gpu",
  "bae-model",
+ "bae-motion",
  "bae-plugin",
  "bae-render",
  "half",
@@ -635,7 +639,9 @@ dependencies = [
  "rustc-hash 2.1.3",
  "serde",
  "serde_json",
+ "tempfile",
  "toml",
+ "tracing",
 ]
 
 [[package]]
