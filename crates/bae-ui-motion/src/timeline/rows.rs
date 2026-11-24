@@ -344,6 +344,7 @@ impl TimelinePanel {
                 // Duration bar.
                 if !self.graph_mode {
                     self.layer_bar(ui, cx, session, info, axis, layer, rect, layer_selected);
+                    self.layer_markers_ui(ui, cx, session, info, axis, layer, rect);
                 }
             }
             RowKind::Group { id, label, open } => {

@@ -34,6 +34,34 @@ impl TimelinePanel {
                     }
                 }
             }
+            Some(
+                drag @ (Drag::Move { .. }
+                | Drag::TrimIn { .. }
+                | Drag::TrimOut { .. }
+                | Drag::Slip { .. }),
+            ) => {
+                if let Some(x) = self.bar_plan.and_then(|p| p.snap_x) {
+                    ui.painter().with_clip_rect(graph_body).vline(
+                        x,
+                        graph_body.y_range(),
+                        Stroke::new(1.0, keys::SNAP),
+                    );
+                }
+                if released {
+                    self.drag = None;
+                    if let Some(plan) = self.bar_plan {
+                        self.commit_bar_drag(cx, session, info, &drag, plan);
+                    }
+                }
+            }
+            Some(Drag::Marker { .. }) => {
+                if released {
+                    self.drag = None;
+                    if let Some((m, d)) = self.marker_plan.clone() {
+                        self.commit_marker_drag(cx, &m, d);
+                    }
+                }
+            }
             Some(Drag::Marquee { origin, additive }) => {
                 if let Some(p) = pointer {
                     let r = Rect::from_two_pos(origin, p).intersect(graph_body);
@@ -130,13 +158,9 @@ impl TimelinePanel {
             }
             // Bar and work-area drags finish in their own widgets; if the row
             // scrolled out of view, drop the drag instead of leaving it stuck.
-            Some(
-                Drag::Cti
-                | Drag::Move { .. }
-                | Drag::TrimIn { .. }
-                | Drag::TrimOut { .. }
-                | Drag::WorkArea { .. },
-            ) if released => self.drag = None,
+            Some(Drag::Cti | Drag::WorkArea { .. } | Drag::MarkerFromBin) if released => {
+                self.drag = None
+            }
             _ => {}
         }
     }
