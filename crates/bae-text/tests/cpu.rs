@@ -109,3 +109,32 @@ fn cpu_text_matches_vello_on_hardware_adapters() {
         / cpu.len() as f32;
     assert!(mean < 0.03, "mean difference {mean}");
 }
+
+#[test]
+fn character_opacity_composites_fill_and_stroke_together() {
+    let Some(gpu) = gpu() else { return };
+    let mut doc = TextDocument::new("H", "ArialMT", 48.0);
+    doc.stroke_color = Some([1., 0., 0., 1.]);
+    doc.stroke_width = 5.;
+    let mut layout = layout_text(&mut FontSystem::new(), &doc);
+    let group = bae_anim::EvaluatedPrim {
+        path: bae_model::PrimPath::new("/animator").unwrap(),
+        prim_type: Some(bae_model::PrimType::TEXT_ANIMATOR),
+        attrs: [("animator:opacity".into(), bae_model::Value::Float(50.))].into(),
+        children: vec![],
+    };
+    bae_text::animator::apply_animators(&mut layout, &[group]);
+    let source = TextSource::new(Arc::new(layout));
+    for backend in [VectorBackend::Cpu, VectorBackend::Gpu] {
+        if backend == VectorBackend::Gpu && gpu.adapter_info().device_type == wgpu::DeviceType::Cpu
+        {
+            continue;
+        }
+        let renderer = VelloRenderer::with_backend(&gpu, backend).unwrap();
+        let peak = premultiplied(&gpu, &renderer, &source)
+            .iter()
+            .map(|p| p[3])
+            .fold(0.0, f32::max);
+        assert!((peak - 0.5).abs() < 0.01, "{backend:?}: peak alpha {peak}");
+    }
+}

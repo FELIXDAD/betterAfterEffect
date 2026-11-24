@@ -683,6 +683,7 @@ pub static SCHEMAS: &[PrimSchema] = &[
                     "smooth",
                 ],
             ),
+            float("smoothness", 100.0),
             float("ease_high", 0.0),
             float("ease_low", 0.0),
             boolean("randomize_order", false),

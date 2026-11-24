@@ -22,6 +22,7 @@
 //! font size in layer pixels. Without the `render` feature this crate has no GPU
 //! dependency; fonts come from the OS through fontique.
 
+pub mod animator;
 pub mod fonts;
 pub mod layout;
 #[cfg(feature = "render")]

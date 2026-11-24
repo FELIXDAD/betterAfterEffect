@@ -170,6 +170,7 @@ Op（JSON 里 `"op"` 字段区分）：`create_prim`、`delete_prim`、`restore_
 - **图层来源**：预合成、素材、纯色都用图层的 `source` 属性（`prim_ref` 指向 Comp 或 Asset）。`references` 用于实例化其他工程（或本工程）里的 Prim 子树，例如链接的 Ai 画板、共享的角色资产。
 - **属性命名**：图层变换是 `transform:anchor_point`、`transform:position`（vec3；`transform:separate_dimensions` 打开时用 `transform:position_x/_y/_z`）、`transform:scale`（vec3，百分比）、`transform:orientation`、`transform:rotation_x`、`transform:rotation_y`、`transform:rotation`、`transform:opacity`、`transform:point_of_interest`（摄像机、灯光）。图层设置是 `name`、`kind`、`source`、`start_time`、`in_point`、`out_point`、`stretch`、`parent`、`blend_mode`、`track_matte`、`track_matte_layer`、`three_d`、`adjustment_layer`、`motion_blur`……。按图层种类区分的属性带前缀：`text:source`、`camera:*`、`light:*`、`audio:levels`、`material:*`。遮罩是单独的 `Mask` Prim，属性不加前缀：`path`、`mode`、`inverted`、`feather`、`opacity`、`expansion`。完整列表以 `schema.rs` 为准。
 - **AE 专有、BAE 不认识的属性**以 `ae:` 开头原样保存（编码规则见 15 的交换格式文档 4.8），导回 AE 时不丢。
+- 文字图层的动画器组位于 `<layer>/animators/<name>`。`text.create_animator` 在一个撤销步骤里创建组及其 `range` 子选择器。只有已写入的 `animator:*` 属性参与组求值。多个 `TextSelector` 是组的有序直接子项。
 - 新增 Prim 类型：`Marker`（`time`、`duration`、`comment`、`chapter`、`url`……，图层标记用图层时间）、`TextAnimator`（`animator:*` 属性）、`TextSelector`（范围、摆动、表达式选择器）。
 
 ## 11. 效果参数（PR D）
