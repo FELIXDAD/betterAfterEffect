@@ -4,8 +4,9 @@ fn difference_levels(v: f32, black: f32, white: f32, gamma: f32) -> f32 {
 }
 
 fn difference_view(c: vec4<f32>, view: u32) -> vec4<f32> {
-    if view == 1u { return c; }
-    let rgb = bae_unpremultiply(c).rgb;
+    let src = bae_input_straight(c);
+    if view == 1u { return bae_premultiply(src); }
+    let rgb = src.rgb;
     let key = params.key_color.rgb;
     // The two partial mattes use adjacent axes on the RGB colour wheel.
     let hi = max(key.r,max(key.g,key.b));
@@ -26,7 +27,7 @@ fn difference_view(c: vec4<f32>, view: u32) -> vec4<f32> {
         difference_levels(b,params.black_in_part_b,params.white_in_part_b,params.gamma_part_b))/255.0;
     let raw = ca + (1.0-ca)*cb;
     let matte = difference_levels(raw,params.black_in_matte,params.white_in_matte,params.gamma_matte);
-    if view == 8u { return c*matte; }
+    if view == 8u { return bae_premultiply(src)*matte; }
     var preview = matte;
     if view==2u { preview=a; }
     if view==3u { preview=ca; }

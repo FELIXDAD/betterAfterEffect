@@ -3,7 +3,8 @@ fn lab_f(t: f32) -> f32 {
 }
 
 fn color_range(c: vec4<f32>, px: BaePixel) -> vec4<f32> {
-    let rgb = bae_unpremultiply(c).rgb;
+    let src = bae_input_straight(c);
+    let rgb = src.rgb;
     var channels = rgb*255.0;
     if params.color_space == 1u {
         let v = pow(max(rgb,vec3<f32>(0)),vec3<f32>(1.8));
@@ -21,5 +22,5 @@ fn color_range(c: vec4<f32>, px: BaePixel) -> vec4<f32> {
     let outside = max(max(lo-channels, channels-hi),vec3<f32>(0));
     let t = saturate(outside/max(params.fuzziness,1e-6));
     let keep = select(2.0*t*t,1.0-2.0*(1.0-t)*(1.0-t),t>vec3<f32>(0.5));
-    return c * (1.0-(1.0-keep.x)*(1.0-keep.y)*(1.0-keep.z));
+    return bae_premultiply(src) * (1.0-(1.0-keep.x)*(1.0-keep.y)*(1.0-keep.z));
 }

@@ -41,7 +41,7 @@ fn sample_cell(pos: vec2<f32>) -> vec4<f32> {
     if params.cell_pattern == 5u || params.cell_pattern == 11u {
         let sample_pos = vec2<i32>(floor(closest*params.size*frame.downsample+params.offset));
         let rect = bae_rect_input();
-        let cell_color = bae_load_input(clamp(sample_pos, rect.min, rect.max-1));
+        let cell_color = bae_premultiply(bae_input_straight(bae_load_input(clamp(sample_pos, rect.min, rect.max-1))));
         return select(cell_color,vec4<f32>(cell_color.a-cell_color.rgb,cell_color.a),params.invert!=0u);
     }
     var gray = 1.0-0.62*f1;

@@ -1,5 +1,6 @@
 fn advanced_spill_suppressor(c: vec4<f32>, px: BaePixel) -> vec4<f32> {
-    let rgb = bae_unpremultiply(c).rgb;
+    let src = bae_input_straight(c);
+    let rgb = src.rgb;
     var corrected = rgb;
     if params.method == 1u {
         corrected.g = min(rgb.g, 0.5*(rgb.r+rgb.b));
@@ -18,5 +19,5 @@ fn advanced_spill_suppressor(c: vec4<f32>, px: BaePixel) -> vec4<f32> {
         corrected += dot(rgb-corrected,vec3<f32>(0.299,0.587,0.114))*params.luma_correction*0.01;
 
     }
-    return vec4<f32>(mix(rgb,corrected,params.suppression/100.0)*c.a,c.a);
+    return vec4<f32>(mix(rgb,corrected,params.suppression/100.0)*src.a,src.a);
 }

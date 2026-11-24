@@ -1,4 +1,5 @@
-fn circle(c: vec4<f32>, px: BaePixel) -> vec4<f32> {
+fn circle(input_color: vec4<f32>, px: BaePixel) -> vec4<f32> {
+    let c = bae_premultiply(bae_input_straight(input_color));
     let r = bae_scale(params.radius);
     let distance = length(vec2<f32>(px.pos)+0.5-params.center);
     var outer = r;

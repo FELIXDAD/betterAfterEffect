@@ -1,4 +1,5 @@
-fn ellipse(c: vec4<f32>, px: BaePixel) -> vec4<f32> {
+fn ellipse(input_color: vec4<f32>, px: BaePixel) -> vec4<f32> {
+    let c = bae_premultiply(bae_input_straight(input_color));
     let radii = max(vec2<f32>(params.width,params.height)*0.5*frame.downsample,vec2<f32>(1e-5));
     let delta = vec2<f32>(px.pos)-params.center;
     // Nearest point on the first quadrant of the ellipse.

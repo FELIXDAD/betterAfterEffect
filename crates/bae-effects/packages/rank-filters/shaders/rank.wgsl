@@ -7,7 +7,7 @@ var<workgroup> chosen: array<atomic<u32>,4>;
 
 fn rank_load(p: vec2<i32>) -> vec4<f32> {
     let rect = bae_rect_input();
-    return bae_unpremultiply(bae_load_input(clamp(p,rect.min,rect.max-1)));
+    return bae_input_straight(bae_load_input(clamp(p,rect.min,rect.max-1)));
 }
 
 fn middle(a: vec4<f32>, b: vec4<f32>, c: vec4<f32>) -> vec4<f32> {
@@ -59,7 +59,7 @@ fn rank_row(group: vec3<u32>, lane: u32, threshold: f32, clip: bool) {
     if radius==0 || (radius==1 && (!clip || interior)) {
         let p = start+vec2<i32>(i32(lane),0);
         if bae_in_target(p) {
-            if radius==0 { bae_store(p,bae_load_input(p)); }
+            if radius==0 { bae_store(p,bae_premultiply(rank_load(p))); }
             else { store_rank(p,median3x3(p),threshold); }
         }
         return;

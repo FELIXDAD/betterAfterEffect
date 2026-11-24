@@ -8,8 +8,9 @@ fn key_hue(c: vec3<f32>) -> f32 {
 }
 
 fn linear_color_key(c: vec4<f32>, px: BaePixel) -> vec4<f32> {
-    if params.view == 2u { return c; }
-    let rgb = bae_unpremultiply(c).rgb;
+    let src = bae_input_straight(c);
+    if params.view == 2u { return bae_premultiply(src); }
+    let rgb = src.rgb;
     let key = params.key_color.rgb;
     let d = (rgb-key)*(255.0/256.0);
     var distance = 0.5*dot(d,d);
@@ -25,7 +26,7 @@ fn linear_color_key(c: vec4<f32>, px: BaePixel) -> vec4<f32> {
     }
     let tol = params.matching_tolerance / 100.0;
     let kept = saturate((distance-tol*tol*scale)/max(1e-8,params.matching_softness/100.0));
-    let a = select(c.a*kept,max(c.a,1.0-kept),params.key_operation==2u);
+    let a = select(src.a*kept,max(src.a,1.0-kept),params.key_operation==2u);
     if params.view == 3u { return vec4<f32>(vec3<f32>(a),1.0); }
     return vec4<f32>(rgb*a,a);
 }

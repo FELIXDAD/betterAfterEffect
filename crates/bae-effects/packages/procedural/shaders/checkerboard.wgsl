@@ -3,7 +3,8 @@ fn stripe_integral(t: vec2<f32>) -> vec2<f32> {
     return 1.0-abs(fract(0.5*t)*2.0-1.0);
 }
 
-fn checkerboard(c: vec4<f32>, px: BaePixel) -> vec4<f32> {
+fn checkerboard(input_color: vec4<f32>, px: BaePixel) -> vec4<f32> {
+    let c = bae_premultiply(bae_input_straight(input_color));
     var size = abs(params.corner - params.anchor);
     if params.size_from != 1u {
         size = vec2<f32>(params.width, select(params.height,params.width,params.size_from==2u))*frame.downsample;

@@ -182,7 +182,10 @@ pub fn render(gpu: &Arc<GpuContext>, case: &Case) -> Vec<[u8; 4]> {
     // texels. A straight source keeps that data available, as the AE input does.
     let straight = matches!(
         case.effect.as_str(),
-        "ADBE Invert"
+        "ADBE PS Median"
+            | "ADBE Dust & Scratches"
+            | "ADBE Linear Color Key2"
+            | "ADBE Invert"
             | "ADBE Shift Channels"
             | "ADBE Set Matte3"
             | "ADBE Simple Choker"
