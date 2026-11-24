@@ -230,6 +230,25 @@ def pause_file():
     return os.path.join(state_dir(), "PAUSED")
 
 
+def auto_pause_file():
+    """Exists while the queue is paused by a red dev commit (holds that commit). A manual
+    pause (`pause`, or the label put on by a person) has no such marker."""
+    return os.path.join(state_dir(), "AUTO_PAUSED")
+
+
+def auto_paused_sha():
+    try:
+        with open(auto_pause_file(), encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def clear_auto_pause():
+    if os.path.exists(auto_pause_file()):
+        os.remove(auto_pause_file())
+
+
 def red_ack_get():
     """dev commit whose red CI was already handled (paused once, or resumed past)."""
     try:
@@ -957,11 +976,40 @@ def rerun_dev_cancelled(st, sha, latest):
         log("dev %s: %s was cancelled; reran job %d" % (sha[:7], name, r["id"]))
 
 
+def auto_resume_if_green(st, sha, latest):
+    """Lift a pause the train put on itself for a red dev commit once the newest dev
+    commit's full checks are all green. Manual pauses are left alone."""
+    red = auto_paused_sha()
+    if not red:
+        return False
+    full = CFG["checks"]["full"]
+    if not all(n in latest and latest[n]["status"] == "completed"
+               and latest[n]["conclusion"] == "success" for n in full):
+        return False
+    line = "merge-train 自动恢复：dev %s 的全量 CI 全绿（暂停原因是 dev %s 红了）" % (sha[:7], red[:7])
+    log(line)
+    if not mutate("auto-resume the queue and notify %s" % LEADERS.get("pause_notify")):
+        return True
+    if os.path.exists(pause_file()):
+        os.remove(pause_file())
+    num = board_issue_number(st)
+    if num:
+        sh(["gh", "issue", "edit", str(num), "--repo", CFG["repo"], "--remove-label",
+            CFG["labels"]["paused"]], check=False)
+    clear_auto_pause()
+    st.pop("paused", None)
+    for leader in LEADERS.get("pause_notify", []):
+        send(leader, line[:120], line)
+    return True
+
+
 def check_dev_red(st):
-    """Pause the queue when the newest dev commit's required full checks failed."""
+    """Pause the queue when the newest dev commit's required full checks failed; lift
+    that pause by itself once the newest dev commit is green again."""
     sha = git("rev-parse", "origin/" + CFG["base"]).strip()
     latest = check_runs(sha)
     rerun_dev_cancelled(st, sha, latest)
+    auto_resume_if_green(st, sha, latest)
     if red_ack_get() == sha:
         return False
     bad = [(n, latest[n]["conclusion"], latest[n]["html_url"]) for n in CFG["checks"]["full"]
@@ -973,10 +1021,11 @@ def check_dev_red(st):
     log("PAUSE: " + reason)
     if mutate("pause the queue and notify %s" % LEADERS.get("pause_notify")):
         red_ack_set(sha)  # pause once per red commit
-        set_paused(st, reason + "（恢复：python3 tools/merge-train/merge_train.py resume）")
+        set_paused(st, reason + "（dev 最新提交全量变绿后自动恢复；也可手动 merge_train.py resume）")
+        with open(auto_pause_file(), "w", encoding="utf-8") as f:
+            f.write(sha + "\n")
         body = reason + "\n" + "\n".join("- %s %s" % (n, u) for n, _, u in bad) + \
-            "\n合并队列已暂停。修好 dev 后运行 `merge_train.py resume`，或去掉看板 issue 上的 %s 标签并删除暂停文件。" \
-            % CFG["labels"]["paused"]
+            "\n合并队列已暂停。dev 最新提交的全量 CI 全绿后会自动恢复并通知；也可以手动运行 `merge_train.py resume`。"
         for leader in LEADERS.get("pause_notify", []):
             send(leader, "merge-train 暂停：" + reason[:80], body, msg_type="escalation",
                  priority="high")
@@ -1359,6 +1408,7 @@ def cmd_setup():
 
 def cmd_pause():
     st = load_state()
+    clear_auto_pause()  # a person paused it: only a person resumes it
     reason = "手动暂停 %s%s" % (dt.datetime.now().strftime("%m-%d %H:%M"),
                               "：" + ARGS.reason if ARGS.reason else "")
     set_paused(st, reason)
@@ -1369,6 +1419,7 @@ def cmd_pause():
 
 def cmd_resume():
     st = load_state()
+    clear_auto_pause()
     if os.path.exists(pause_file()):
         os.remove(pause_file())
     num = board_issue_number(st)

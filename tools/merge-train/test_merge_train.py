@@ -675,5 +675,67 @@ class DevCancelledTest(Base):
         rr.assert_called_once()
 
 
+class AutoResumeTest(Base):
+    def latest(self, conclusion="success", status="completed"):
+        return {n: {"id": i, "name": n, "status": status, "conclusion": conclusion,
+                    "completed_at": "2026-11-24T00:00:00Z", "html_url": "u"}
+                for i, n in enumerate(mt.CFG["checks"]["full"])}
+
+    def check(self, st, sha, latest, ack=""):
+        with mock.patch.object(mt, "git", return_value=sha + "\n"), \
+                mock.patch.object(mt, "check_runs", return_value=latest), \
+                mock.patch.object(mt, "board_issue_number", return_value=250), \
+                mock.patch.object(mt, "sh", return_value=(0, "", "")) as sh, \
+                mock.patch.object(mt, "send") as send:
+            mt.check_dev_red(st)
+        return sh, send
+
+    def test_red_dev_pauses_and_green_dev_resumes_with_one_line(self):
+        st = {}
+        red, green = "a" * 40, "b" * 40
+        _, send = self.check(st, red, self.latest("failure"))
+        self.assertTrue(os.path.exists(mt.pause_file()))
+        self.assertEqual(mt.auto_paused_sha(), red)
+        self.assertEqual(send.call_count, len(mt.LEADERS["pause_notify"]))
+        # dev still running on the fix: stay paused
+        _, send = self.check(st, green, self.latest(None, "in_progress"))
+        self.assertTrue(os.path.exists(mt.pause_file()))
+        send.assert_not_called()
+        # the fix is green: resume, drop the label, tell both leaders in one line
+        sh, send = self.check(st, green, self.latest("success"))
+        self.assertFalse(os.path.exists(mt.pause_file()))
+        self.assertEqual(mt.auto_paused_sha(), "")
+        self.assertTrue(any("--remove-label" in c[0][0] for c in sh.call_args_list))
+        self.assertEqual([c[0][0] for c in send.call_args_list], mt.LEADERS["pause_notify"])
+        self.assertIn("自动恢复", send.call_args[0][1])
+        self.assertIn(green[:7], send.call_args[0][1])
+
+    def test_manual_pause_is_not_lifted(self):
+        mt.ARGS.reason = "等 #123"
+        with mock.patch.object(mt, "board_issue_number", return_value=None):
+            mt.cmd_pause()
+        sh, send = self.check({}, "c" * 40, self.latest("success"))
+        self.assertTrue(os.path.exists(mt.pause_file()))
+        send.assert_not_called()
+
+    def test_manual_pause_over_auto_pause_wins(self):
+        st = {}
+        self.check(st, "a" * 40, self.latest("failure"))
+        mt.ARGS.reason = "人为暂停"
+        with mock.patch.object(mt, "board_issue_number", return_value=None):
+            mt.cmd_pause()
+        _, send = self.check(st, "b" * 40, self.latest("success"))
+        self.assertTrue(os.path.exists(mt.pause_file()))
+        send.assert_not_called()
+
+    def test_dry_run_only_reports(self):
+        st = {}
+        self.check(st, "a" * 40, self.latest("failure"))
+        mt.ARGS.dry_run = True
+        sh, send = self.check(st, "b" * 40, self.latest("success"))
+        self.assertTrue(os.path.exists(mt.pause_file()))
+        send.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

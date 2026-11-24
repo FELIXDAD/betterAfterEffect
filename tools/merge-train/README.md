@@ -44,7 +44,7 @@
 5. `mergeable` 是 `UNKNOWN`（GitHub 刚合完别的 PR 时常见）：等一会儿再查，超过 20 分钟才算失败。
 6. 都满足：`gh pr merge --match-head-commit <head>` 直接合并。代码 PR 用 merge commit；参考数据 PR（标签 `reference-data` 或分支前缀 `ref/`）用 squash。合完给对应领导发一行：PR 号、标题、dev 新提交号。
 
-兜底：每一轮都看 `dev` 最新提交的全量检查。如果是红的，就暂停整个队列，通知 `leaders.toml` 里 `pause_notify` 列出的领导。同一个红提交只暂停一次。
+兜底：每一轮都看 `dev` 最新提交的全量检查。如果是红的，就暂停整个队列，通知 `leaders.toml` 里 `pause_notify` 列出的领导。同一个红提交只暂停一次。等修复合进 dev、dev 最新提交的全量检查全部变绿，脚本就**自动恢复**，并给这几位领导各发一行。只有脚本因为 dev 红了自己加的暂停才会自动恢复；人为的暂停（`pause` 命令）不会。
 
 dev 上的全量 job 被取消时（dev 的运行不会被 concurrency 取消，通常是没分到 runner），dev 就没有任何 CI 结果，红了也发现不了。所以脚本会重跑那个 job，再被取消就再重跑，直到有真正的结果（同样先等 2 分钟；同一次运行里还有 job 在跑时下一轮再试）。
 
@@ -106,7 +106,11 @@ python3 "$R/merge_train.py" resume                         # 恢复：删暂停�
 python3 "$R/merge_train.py" status                         # 看队列和每个 PR 当前的判断
 ```
 
-dev CI 变红时，脚本会自己暂停。修好 dev 以后运行 `resume`。`resume` 会记下当前 dev 提交，这个提交的红灯不会再触发暂停，下一个红提交才会。
+dev CI 变红时，脚本会自己暂停：写暂停文件，给看板 issue 打标签，再写一个标记文件 `AUTO_PAUSED`，里面是红的那个提交。dev 最新提交的全量检查全部变绿后，脚本会自动删掉这三样并通知领导，不用手动 `resume`。
+
+- 人为暂停（`pause` 命令）会清掉 `AUTO_PAUSED`，所以人为暂停只能人来恢复。即使原来是自动暂停，再运行一次 `pause` 也就变成了人为暂停。
+- 想在 dev 变绿之前提前恢复，就运行 `resume`。`resume` 会记下当前 dev 提交，这个提交的红灯不会再触发暂停，下一个红提交才会。
+- 有人在 GitHub 上手动给看板 issue 打 `merge-train-paused` 时，如果当时正处在自动暂停中，脚本分不出这个标签是人打的，dev 变绿后会一并去掉。要确保不被自动恢复，请用 `pause` 命令。
 
 想彻底停掉进程，用 `launchctl bootout gui/$(id -u)/com.bae.merge-train`。重新启动就再跑一次 `install.sh`。
 
