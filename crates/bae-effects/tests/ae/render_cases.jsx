@@ -10,7 +10,8 @@
 // No alert(): results are returned as a string.
 
 (function () {
-    var ROOT = "/private/tmp/bae-07-ae";
+    // A wrapper script may set BAE_07_ROOT (probe runs).
+    var ROOT = (typeof BAE_07_ROOT !== "undefined") ? BAE_07_ROOT : "/private/tmp/bae-07-ae";
     var casesFile = new File(ROOT + "/cases.json");
     if (!casesFile.exists) {
         throw new Error("run `ae_compare prepare` first (copies cases.json to " + ROOT + ")");
@@ -23,6 +24,10 @@
         throw new Error("cannot create " + outDir.fsName);
     }
 
+    // newProject() asks to save an unsaved project (a modal dialog): close it first.
+    if (app.project) {
+        app.project.close(CloseOptions.DO_NOT_SAVE_CHANGES);
+    }
     app.newProject();
     app.project.bitsPerChannel = 8;
     app.project.linearBlending = false;
@@ -38,9 +43,12 @@
         return footage[name];
     }
 
-    function waitFor(file) {
+    // saveFrameToPng returns before the file is written; poll with a fresh File
+    // object each time (a File caches exists/length).
+    function waitFor(path) {
         for (var i = 0; i < 600; i++) {
-            if (file.exists && file.length > 0) {
+            var probe = new File(path);
+            if (probe.exists && probe.length > 0) {
                 return true;
             }
             $.sleep(50);
@@ -69,7 +77,7 @@
             out.remove();
         }
         comp.saveFrameToPng(0, out);
-        if (!waitFor(out)) {
+        if (!waitFor(out.fsName)) {
             throw new Error(c.name + ": saveFrameToPng timed out");
         }
         done.push(c.name);

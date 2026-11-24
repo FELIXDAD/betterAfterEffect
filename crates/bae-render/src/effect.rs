@@ -43,6 +43,11 @@ pub struct EffectParams<'a> {
     pub linear: bool,
     /// Preview or final render.
     pub purpose: RenderPurpose,
+    /// 32-bpc float project: values outside `[0, 1]` survive between effects.
+    /// `false` (8 / 16 bpc, AE's default) means every effect's output is
+    /// clamped like AE's integer buffers, and AE options such as Levels' "Off
+    /// for 32 bpc Color" clip.
+    pub float: bool,
     /// Comp shutter angle in degrees (AE default 180).
     pub shutter_angle: f64,
     /// Comp shutter phase in degrees (AE default −90).
@@ -54,7 +59,8 @@ pub struct EffectParams<'a> {
 
 impl<'a> EffectParams<'a> {
     /// Parameters of `effect` with default frame context: time 0, full
-    /// resolution, empty layer bounds, 30 fps, preview, 180° / −90° shutter.
+    /// resolution, empty layer bounds, 30 fps, preview, 8 bpc, 180° / −90°
+    /// shutter.
     pub fn new(effect: &'a RenderEffect) -> Self {
         use std::hash::{Hash, Hasher};
         let mut h = rustc_hash::FxHasher::default();
@@ -68,6 +74,7 @@ impl<'a> EffectParams<'a> {
             time_step: FrameRate::FPS_30.frame_duration(),
             linear: false,
             purpose: RenderPurpose::Preview,
+            float: false,
             shutter_angle: 180.0,
             shutter_phase: -90.0,
             seed: h.finish(),
