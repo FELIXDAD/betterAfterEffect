@@ -290,7 +290,7 @@ pub(crate) fn comps(v: &Value) -> Option<Vec<f64>> {
 }
 
 /// `template` with its components replaced.
-fn recompose(template: &Value, c: &[f64]) -> Value {
+pub(crate) fn recompose(template: &Value, c: &[f64]) -> Value {
     let g = |i: usize| c.get(i).copied().unwrap_or(0.0);
     match template {
         Value::Float(_) => Value::Float(g(0)),

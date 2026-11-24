@@ -29,7 +29,36 @@ Usage: cargo xtask dist [--target <triple>] [--no-build]
 Builds `bae` in release mode and packages it into <target-dir>/dist/:
   macOS    BAE.app (ad-hoc signed, not notarized) and BAE-<version>-<arch>-macos.zip
   Windows  BAE-<version>-<arch>-windows.zip (bae.exe, LICENSE, README.md)
+Both include ThirdPartyNotices/ (licenses of bundled third-party assets).
 ";
+
+/// Licenses and notices of third-party assets compiled into `bae` (source in the
+/// repository, path inside `ThirdPartyNotices/`): Adobe's open-source Spectrum icons
+/// (Apache-2.0 section 4: ship the license and the copyright notice).
+const THIRD_PARTY_NOTICES: &[(&str, &str)] = &[
+    ("assets/icons/spectrum/LICENSE", "Spectrum-Icons/LICENSE"),
+    (
+        "assets/icons/spectrum/COPYRIGHT",
+        "Spectrum-Icons/COPYRIGHT",
+    ),
+    ("assets/icons/spectrum/NOTICE", "Spectrum-Icons/NOTICE"),
+    (
+        "assets/icons/spectrum/README.md",
+        "Spectrum-Icons/README.md",
+    ),
+];
+
+fn copy_third_party_notices(ws: &Workspace, dest: &Path) -> Result<()> {
+    for (from, to) in THIRD_PARTY_NOTICES {
+        let to = dest.join("ThirdPartyNotices").join(to);
+        if let Some(dir) = to.parent() {
+            fs::create_dir_all(dir)
+                .with_context(|| format!("failed to create {}", dir.display()))?;
+        }
+        copy_file(&ws.workspace_root.join(from), &to)?;
+    }
+    Ok(())
+}
 
 const BUNDLE_ID: &str = "io.github.felixdad.bae";
 const BUNDLE_NAME: &str = "BAE";
@@ -181,6 +210,7 @@ fn package_macos(
         &ws.workspace_root.join("LICENSE"),
         &resources.join("LICENSE"),
     )?;
+    copy_third_party_notices(ws, &resources)?;
     if signing == Signing::AdHoc {
         sign_bundle_ad_hoc(&app)?;
     }
@@ -209,6 +239,7 @@ fn package_windows(
     for doc in ["LICENSE", "README.md"] {
         copy_file(&ws.workspace_root.join(doc), &stage.join(doc))?;
     }
+    copy_third_party_notices(ws, &stage)?;
     let zip = dist.join(format!("{name}.zip"));
     zip_dir(&stage, "", &zip, stamp)?;
     Ok((stage, zip))
@@ -785,6 +816,24 @@ mod tests {
                 file("BAE.app/Contents/MacOS/bae", 0o755),
                 dir("BAE.app/Contents/Resources/"),
                 file("BAE.app/Contents/Resources/LICENSE", 0o644),
+                dir("BAE.app/Contents/Resources/ThirdPartyNotices/"),
+                dir("BAE.app/Contents/Resources/ThirdPartyNotices/Spectrum-Icons/"),
+                file(
+                    "BAE.app/Contents/Resources/ThirdPartyNotices/Spectrum-Icons/COPYRIGHT",
+                    0o644
+                ),
+                file(
+                    "BAE.app/Contents/Resources/ThirdPartyNotices/Spectrum-Icons/LICENSE",
+                    0o644
+                ),
+                file(
+                    "BAE.app/Contents/Resources/ThirdPartyNotices/Spectrum-Icons/NOTICE",
+                    0o644
+                ),
+                file(
+                    "BAE.app/Contents/Resources/ThirdPartyNotices/Spectrum-Icons/README.md",
+                    0o644
+                ),
                 file("BAE.app/Contents/Resources/bae.icns", 0o644),
             ]
         );
@@ -855,6 +904,19 @@ mod tests {
         assert_eq!(file_name(&zip), "BAE-0.1.0-x86_64-windows.zip");
         let names: Vec<String> = zip_entries(&zip).into_iter().map(|e| e.0).collect();
         fs::remove_dir_all(&tmp).unwrap();
-        assert_eq!(names, ["LICENSE", "README.md", "bae.exe"]);
+        assert_eq!(
+            names,
+            [
+                "LICENSE",
+                "README.md",
+                "ThirdPartyNotices/",
+                "ThirdPartyNotices/Spectrum-Icons/",
+                "ThirdPartyNotices/Spectrum-Icons/COPYRIGHT",
+                "ThirdPartyNotices/Spectrum-Icons/LICENSE",
+                "ThirdPartyNotices/Spectrum-Icons/NOTICE",
+                "ThirdPartyNotices/Spectrum-Icons/README.md",
+                "bae.exe",
+            ]
+        );
     }
 }

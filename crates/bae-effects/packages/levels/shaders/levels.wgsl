@@ -1,8 +1,11 @@
 // Levels (ADBE Easy Levels2, AE-FX-038). The five values apply to the channel
 // chosen by Channel (RGB = R, G and B together). Straight colour.
 
-// Clip popups: 1 On, 2 Off, 3 Off for 32 bpc Color. BAE renders in float, so
-// option 3 behaves like a 32 bpc project (no clipping).
+// Clip popups: 1 On, 2 Off, 3 Off for 32 bpc Color (on in 8 / 16 bpc).
+fn levels_clips(option: u32) -> bool {
+    return option == 1u || (option == 3u && (frame.flags & BAE_FRAME_FLOAT) == 0u);
+}
+
 fn levels_map(x: f32, ib: f32, iw: f32, g: f32, ob: f32, ow: f32) -> f32 {
     var t: f32;
     if (iw == ib) {
@@ -10,12 +13,14 @@ fn levels_map(x: f32, ib: f32, iw: f32, g: f32, ob: f32, ow: f32) -> f32 {
     } else {
         t = (x - ib) / (iw - ib);
     }
-    t = pow(max(t, 0.0), 1.0 / max(g, 1e-4));
+    // Mirrored below input black (AE: with clipping off, values below input
+    // black keep falling instead of stopping at output black).
+    t = sign(t) * pow(abs(t), 1.0 / max(g, 1e-4));
     var y = ob + (ow - ob) * t;
-    if (params.clip_black == 1u) {
+    if (levels_clips(params.clip_black)) {
         y = max(y, min(ob, ow));
     }
-    if (params.clip_white == 1u) {
+    if (levels_clips(params.clip_white)) {
         y = min(y, max(ob, ow));
     }
     return y;
