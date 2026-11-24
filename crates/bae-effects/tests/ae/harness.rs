@@ -65,7 +65,7 @@ pub fn parse_cases(text: &str) -> Vec<Case> {
 fn parse_rows(rows: &[serde_json::Value]) -> Vec<Case> {
     rows.iter()
         .map(|c| {
-            let params = c["params"]
+            let mut params: Vec<_> = c["params"]
                 .as_object()
                 .unwrap()
                 .iter()
@@ -86,6 +86,12 @@ fn parse_rows(rows: &[serde_json::Value]) -> Vec<Case> {
                     (id, value)
                 })
                 .collect();
+            if let Some(file) = c["lut"].as_str() {
+                let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../bae-color/tests/data/ocio")
+                    .join(file);
+                params.push((1, Value::Bytes(bae_color::lutfile::embed(&path).unwrap())));
+            }
             Case {
                 name: c["name"].as_str().unwrap().to_owned(),
                 bpc: c["bpc"].as_u64().unwrap_or(8),
