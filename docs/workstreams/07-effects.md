@@ -48,7 +48,8 @@
 - [x] matchName 对照表 `docs/interop/ae-effects.md`（已实现的 11 个 + 计划中的第一批）
 - [x] golden image 测试：AE 26.2.1 的 26 个用例入库（`crates/bae-effects/tests/ae/golden/`），每个用例限定最大差和平均差；偏差来源和修正见 `crates/bae-effects/tests/ae/README.md`
 - [ ] 亮度和对比度新版曲线改用 AE 实测曲线表（Rust 效果 + 曲线纹理）
-- [ ] 应用接入：`bae_effects::register` 还没在 `apps/bae` / 渲染器里调用（要和 04/01 一起接，接入时再看体积）
+- [x] 应用接入：`bae_effects::EffectsModule` 把内置效果发布到 `Registry<EffectDef>` / `Registry<dyn Effect>` / `Registry<EffectInfo>`；查看器、渲染队列、`bae render` 从注册表同步效果库（`Renderer::sync_effects`）；调整图层、图层 fx 开关；`effect.*` 命令（bae-motion）
+- [ ] 界面：效果菜单按 AE 目录列出、效果控件按参数定义画控件、效果和预设面板（PR-C）
 - [ ] 第二批效果
 
 ### 0.0.1 记录（2026-11-21）

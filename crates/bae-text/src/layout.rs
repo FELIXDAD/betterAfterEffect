@@ -184,6 +184,8 @@ pub struct TextLayout {
     pub runs: Vec<GlyphRun>,
     pub lines: Vec<TextLine>,
     pub chars: Vec<TextChar>,
+    /// Per-character drawing state, empty for plain text.
+    pub styles: Vec<crate::animator::CharacterStyle>,
     pub paint: TextPaint,
     /// Paragraph text box (layer pixels); `None` for point text.
     pub box_rect: Option<Rect>,
@@ -201,6 +203,7 @@ impl TextLayout {
             runs: Vec::new(),
             lines: Vec::new(),
             chars: Vec::new(),
+            styles: Vec::new(),
             paint,
             box_rect: None,
             font: FontMatch::Missing,
@@ -217,6 +220,16 @@ impl TextLayout {
     /// `includeExtents = false`, AE-TXT-007); `with_stroke` adds half the stroke
     /// width (times the miter limit for miter joins). `None` when nothing is drawn.
     pub fn bounds(&self, with_stroke: bool) -> Option<Rect> {
+        let stroke = match (with_stroke, self.paint.stroke) {
+            (true, Some(s)) => {
+                let k = match s.join {
+                    LineJoin::Miter => s.miter_limit.max(1.0),
+                    _ => 1.0,
+                };
+                s.width.max(0.0) / 2.0 * k
+            }
+            _ => 0.0,
+        };
         let mut out: Option<Rect> = None;
         for run in &self.runs {
             let Ok(font) = skrifa::FontRef::from_index(run.font.data.as_ref(), run.font.index)
@@ -248,20 +261,15 @@ impl TextLayout {
                     x + f64::from(b.x_max) + lean * top.max(0.0) + grow,
                     y - bottom + grow,
                 );
+                let r = r.inflate(stroke, stroke);
+                let r = self
+                    .styles
+                    .get(g.char_index)
+                    .map_or(r, |s| s.transform.transform_rect_bbox(r));
                 out = Some(out.map_or(r, |o| o.union(r)));
             }
         }
-        let stroke = match (with_stroke, self.paint.stroke) {
-            (true, Some(s)) => {
-                let k = match s.join {
-                    LineJoin::Miter => s.miter_limit.max(1.0),
-                    _ => 1.0,
-                };
-                s.width.max(0.0) / 2.0 * k
-            }
-            _ => 0.0,
-        };
-        out.map(|r| r.inflate(stroke, stroke))
+        out
     }
 
     /// Hash of everything that affects the pixels.
@@ -282,6 +290,16 @@ impl TextLayout {
                 g.y.to_bits().hash(&mut h);
                 g.char_index.hash(&mut h);
             }
+        }
+        for style in &self.styles {
+            style.opacity.to_bits().hash(&mut h);
+            style.transform.as_coeffs().map(f64::to_bits).hash(&mut h);
+            style.paint.fill.map(|c| c.map(f32::to_bits)).hash(&mut h);
+            style
+                .paint
+                .stroke
+                .map(|s| s.color.map(f32::to_bits))
+                .hash(&mut h);
         }
         let p = &self.paint;
         p.fill.map(|c| c.map(f32::to_bits)).hash(&mut h);
@@ -383,6 +401,14 @@ impl DisplayText {
 
 /// Lays out `doc` in layer space.
 pub fn layout_text(fonts: &mut FontSystem, doc: &TextDocument) -> TextLayout {
+    shape_text(fonts, doc, false)
+}
+
+pub(crate) fn shape_text(
+    fonts: &mut FontSystem,
+    doc: &TextDocument,
+    individual_chars: bool,
+) -> TextLayout {
     let paint = document_paint(doc);
     let size = doc.font_size.clamp(0.1, 1296.0);
     let font = fonts.resolve(&doc.font);
@@ -436,8 +462,16 @@ pub fn layout_text(fonts: &mut FontSystem, doc: &TextDocument) -> TextLayout {
     if let Ok(lang) = fontique::Language::parse(&locale) {
         builder.push_default(StyleProperty::Locale(Some(lang)));
     }
-    if doc.small_caps {
-        builder.push_default(StyleProperty::FontFeatures("\"smcp\" 1".into()));
+    // A standard ligature (e.g. "fi") cannot carry two different transforms.
+    // Preserve required script shaping and the document's small-caps feature.
+    let features = match (individual_chars, doc.small_caps) {
+        (true, true) => Some(r#""liga" 0, "clig" 0, "dlig" 0, "smcp" 1"#),
+        (true, false) => Some(r#""liga" 0, "clig" 0, "dlig" 0"#),
+        (false, true) => Some(r#""smcp" 1"#),
+        (false, false) => None,
+    };
+    if let Some(features) = features {
+        builder.push_default(StyleProperty::FontFeatures(features.into()));
     }
     let mut layout = builder.build(&display.text);
 
@@ -475,6 +509,7 @@ pub fn layout_text(fonts: &mut FontSystem, doc: &TextDocument) -> TextLayout {
         runs: Vec::new(),
         lines: Vec::new(),
         chars: Vec::new(),
+        styles: Vec::new(),
         paint,
         box_rect: paragraph,
         font,
@@ -561,7 +596,11 @@ pub fn layout_text(fonts: &mut FontSystem, doc: &TextDocument) -> TextLayout {
                 let src = display.source_range(cluster.text_range(), doc_len);
                 let kind = if cluster.is_hard_line_break() || is_break(&display, &cluster) {
                     CharKind::LineBreak
-                } else if cluster.is_space_or_nbsp() {
+                } else if cluster.is_space_or_nbsp()
+                    || display.text[cluster.text_range()]
+                        .chars()
+                        .all(char::is_whitespace)
+                {
                     CharKind::Space
                 } else {
                     CharKind::Glyph

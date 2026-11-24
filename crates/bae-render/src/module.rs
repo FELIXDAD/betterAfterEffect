@@ -41,7 +41,8 @@ use crate::source::SourceProvider;
 
 /// Registers `bae render`. Layer source providers come from the app's
 /// `Registry<dyn SourceProvider>` (register with
-/// `app.register_arc::<dyn bae_render::SourceProvider>(id, provider)`).
+/// `app.register_arc::<dyn bae_render::SourceProvider>(id, provider)`), effects
+/// from `Registry<dyn Effect>` (built-in effects and plugins).
 #[derive(Debug, Default)]
 pub struct RenderModule;
 
@@ -94,12 +95,16 @@ impl AppModule for RenderModule {
             // The app's wording for projects that do not open (same as
             // `bae export-json`).
             let open_error = ctx.app.resource::<cli::ProjectOpenError>().cloned();
+            // Effects (07's built-ins, plugin effects).
+            let mut effects = crate::EffectLibrary::new();
+            effects.sync(&ctx.app.registry::<dyn crate::Effect>());
             run(
                 ctx.matches,
                 move || GpuContext::new_headless(desc),
                 media,
                 encoders,
                 &providers,
+                effects,
                 open_error.as_ref(),
             )
         });
@@ -343,6 +348,7 @@ fn run(
     media: Option<MediaHandle>,
     encoders: Option<Encoders>,
     providers: &[std::sync::Arc<dyn SourceProvider>],
+    effects: crate::EffectLibrary,
     open_error: Option<&cli::ProjectOpenError>,
 ) -> anyhow::Result<ExitCode> {
     let entered = Instant::now();
@@ -444,6 +450,7 @@ fn run(
     }
     #[cfg(not(feature = "media"))]
     let _ = media;
+    *renderer.effects_mut() = effects;
     for provider in providers {
         renderer.providers_mut().register(provider.clone());
     }
@@ -636,7 +643,7 @@ mod tests {
             ])
             .unwrap();
         assert_eq!(
-            run(&m, test_gpu, None, None, &[], None).unwrap(),
+            run(&m, test_gpu, None, None, &[], Default::default(), None).unwrap(),
             ExitCode::SUCCESS
         );
         let (w, _, data) = crate::png_out::read_rgba8(&out).unwrap();
@@ -678,7 +685,7 @@ mod tests {
             ])
             .unwrap();
         assert_eq!(
-            run(&m, test_gpu, None, None, &[], None).unwrap(),
+            run(&m, test_gpu, None, None, &[], Default::default(), None).unwrap(),
             ExitCode::SUCCESS
         );
         for f in ["out_00.png", "out_01.png"] {
@@ -779,7 +786,7 @@ mod tests {
         let m = args(clap::Command::new("render"))
             .try_get_matches_from(std::iter::once("render").chain(argv.iter().copied()))
             .unwrap();
-        run(&m, test_gpu, None, None, &[], None)
+        run(&m, test_gpu, None, None, &[], Default::default(), None)
     }
 
     /// The context `bae render` runs get in tests: the process-wide test context,

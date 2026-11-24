@@ -38,6 +38,7 @@ pub mod layer {
     pub const START_TIME: &str = "start_time";
     pub const STRETCH: &str = "stretch";
     pub const ENABLED: &str = "enabled";
+    pub const EFFECTS_ENABLED: &str = "effects_enabled";
     pub const SOLO: &str = "solo";
     pub const SHY: &str = "shy";
     pub const GUIDE: &str = "guide";
@@ -130,6 +131,7 @@ pub mod effect {
     pub const MATCH_NAME: &str = "match_name";
     pub const NAME: &str = "name";
     pub const ENABLED: &str = "enabled";
+    pub const EFFECTS_ENABLED: &str = "effects_enabled";
     pub const PARAM_PREFIX: &str = "param:";
 }
 

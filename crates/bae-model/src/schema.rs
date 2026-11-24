@@ -259,6 +259,9 @@ const LAYER: &[AttrDef] = &[
         .fixed()
         .doc("Time stretch in percent."),
     boolean("enabled", true).doc("Video switch."),
+    boolean("effects_enabled", true)
+        .kinds(VISUAL)
+        .doc("Effect switch (fx): off renders the layer without its effects; projects without it read true."),
     boolean("audio_enabled", true),
     boolean("solo", false),
     boolean("locked", false),
@@ -683,6 +686,7 @@ pub static SCHEMAS: &[PrimSchema] = &[
                     "smooth",
                 ],
             ),
+            float("smoothness", 100.0),
             float("ease_high", 0.0),
             float("ease_low", 0.0),
             boolean("randomize_order", false),

@@ -18,6 +18,11 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Move Layer in Time", "在时间上移动图层"),
     ("Trim Layer", "修剪图层"),
     ("Change Layers", "更改图层"),
+    // Effect commands (bae-motion `effect.*`).
+    ("Apply Effect", "应用效果"),
+    ("Remove Effect", "移除效果"),
+    ("Reorder Effects", "排列效果"),
+    ("Effect On/Off", "效果开关"),
     ("Cut", "剪切"),
     ("Add Shape", "添加形状"),
     ("New Mask", "新建蒙版"),
