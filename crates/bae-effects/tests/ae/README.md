@@ -94,30 +94,24 @@ cargo run -p bae-effects --example ae_compare -- golden            # 把 AE 输�
 
 Invert Alpha、Shift Channels 和 Set Matte 在 AE 中会重新显露直通素材全透明像素的 RGB。声明式像素效果可通过 `bae_input_straight` 从源纹理读取该值，已经预乘且丢失 RGB 的输入仍只能使用可恢复的信息。Black & White、Vibrance、Color Balance 在 32 bpc 工程中限制在 16 bpc 的归一化范围。GPU 测试覆盖 RGBA16F、RGBA32F 和整数/浮点语义。16/32 bpc 的 AE 误差未实测。
 
-重跑该批次时设置独立工作目录，再按已有步骤运行 `prepare`、`aectl run`、`compare` 和 `golden`。在跑 AE 前获取共享锁 `/private/tmp/bae-locks/ae.lock`，运行完释放。
+重跑该批次时设置独立工作目录。用 `aectl lock --` 包住整批 AE 操作，由工具获取和释放共享锁。
 
 ```sh
 export BAE_07_ROOT=/private/tmp/bae-controls-channel-ae
 export BAE_07_CASES="$PWD/crates/bae-effects/tests/ae/cases-controls-channel.json"
 cargo run -p bae-effects --example ae_compare -- prepare
-(
-    mkdir -p /private/tmp/bae-locks
-    mkdir /private/tmp/bae-locks/ae.lock || exit 1
-    trap 'rmdir /private/tmp/bae-locks/ae.lock' EXIT
-    cat > "$BAE_07_ROOT/run.jsx" <<EOF_JS
+cat > "$BAE_07_ROOT/run.jsx" <<EOF_JS
 var BAE_07_ROOT = "$BAE_07_ROOT";
 \$.evalFile("$PWD/crates/bae-effects/tests/ae/render_cases.jsx");
 EOF_JS
-    tools/ae/aectl run "$BAE_07_ROOT/run.jsx"
-)
+tools/ae/aectl lock -- tools/ae/aectl run "$BAE_07_ROOT/run.jsx"
 cargo run -p bae-effects --example ae_compare -- compare
 cargo run -p bae-effects --example ae_compare -- golden
 ```
 
-
 ### 照片滤镜追加校准
 
-输入由 RGB 三轴的 11 个码值（0、16、32、64、96、128、160、192、224、240、255）组合成 1,331 个不透明色块。锁定 AE 26.2.1 后生成 20 个预设 × 5 档密度（10、25、50、65、100）× 两种保持发光度状态的 200 帧，另有自定义颜色探针。AE 在批次末尾弹框，`aectl` 恢复时已写出 241 帧，预设矩阵的对照均已完成。另用相同网格分别跑了 16/32 bpc 项目的冷暖样本。32 bpc 的 PNG 在零密度时也与 8 bpc 导出有较大差异，因此下表误差使用 8 bpc 基准。
+输入由 RGB 三轴的 11 个码值（0、16、32、64、96、128、160、192、224、240、255）组合成 1,331 个不透明色块。锁定 AE 26.2.1 后生成 20 个预设 × 5 档密度（10、25、50、65、100）× 两种保持发光度状态的 200 帧，另有自定义颜色探针。AE 在批次末尾弹框，`aectl` 恢复时已写出 241 帧，预设矩阵的对照均已完成。另用相同网格分别跑了 16/32 bpc 项目的冷暖样本。32 bpc 的 PNG 在零密度时也与 8 bpc 导出有较大差异，因此误差以 8 bpc 输出为准。
 
 - 关闭保持发光度，AE 在 gamma 2.4 线性化的 RGB 上，用密度在原图与滤镜矩阵之间插值。自定义红、绿、蓝滤色的三个矩阵之和是单位矩阵。黄、品红、青及非原色样本可用三个原色矩阵乘以线性化的滤色分量来解释。预设使用同一矩阵，滤色系数从色块网格拟合，冷暖预设的系数可超出 0–1。
 - 保持发光度先将滤镜结果编码回非线性 RGB 并裁剪到显示色域，再按 0.30、0.59、0.11 恢复源亮度。色度超出色域时，沿同亮度的中性色方向收缩。对默认暖色网格，在已经裁剪的滤镜结果上使用这套模型，平均差约 0.7 级。改用 Rec.709 权重为 2.6 级，线性 RGB 亮度为 30.3 级。AE 的 8 位亮度和滤镜中间值取整能解释一部分尖峰，BAE 的工作纹理在整数项目中保留浮点精度。
