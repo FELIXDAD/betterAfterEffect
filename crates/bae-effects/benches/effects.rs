@@ -158,6 +158,12 @@ fn main() {
         });
     }
 
+    cases.push(Case {
+        name: "1080p shadow/highlight auto".into(),
+        match_name: "ADBE ShadowHighlight",
+        params: vec![],
+        size: HD,
+    });
     let mut results = Vec::new();
     println!("{:<44} {:>10} {:>10}", "case", "ms/frame", "latency");
     for case in &cases {

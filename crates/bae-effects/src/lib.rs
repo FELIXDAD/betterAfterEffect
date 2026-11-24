@@ -80,6 +80,16 @@ macro_rules! embedded {
 /// The embedded declarative packages, in catalog order.
 const PACKAGES: &[Embedded] = &[
     embedded!("brightness-contrast", ["shaders/brightness_contrast.wgsl"]),
+    embedded!(
+        "color-adjustments",
+        [
+            "shaders/channel_mixer.wgsl",
+            "shaders/change_color.wgsl",
+            "shaders/change_to_color.wgsl",
+            "shaders/color_balance_hls.wgsl",
+            "shaders/hls.wgsl"
+        ]
+    ),
     embedded!("exposure", ["shaders/exposure.wgsl"]),
     embedded!("hue-saturation", ["shaders/hue_saturation.wgsl"]),
     embedded!("levels", ["shaders/levels.wgsl"]),
@@ -228,6 +238,7 @@ pub fn prewarm(gpu: &Arc<GpuContext>, format: wgpu::TextureFormat) -> Result<(),
     let rt = gpu::runtime(gpu);
     blur::prewarm(&rt, format)?;
     effects::spatial::prewarm(&rt, format)?;
+    effects::color::prewarm(&rt, format)?;
     for b in builtins() {
         if let Implementation::Declarative(fx) = &b.implementation {
             fx.prewarm(gpu, format)?;
@@ -260,6 +271,20 @@ fn load() -> Result<Vec<Builtin>, Vec<Diagnostic>> {
     }
     {
         use effects::*;
+        let (curves, zh) = effects::color::Curves::new();
+        out.push(rust_builtin(
+            (Arc::new(curves), zh),
+            "curves",
+            "曲线",
+            &["curve", "曲线"],
+        ));
+        let (shadow, zh) = effects::color::ShadowHighlight::new();
+        out.push(rust_builtin(
+            (Arc::new(shadow), zh),
+            "shadow-highlight",
+            "阴影/高光",
+            &["shadows", "highlights", "阴影", "高光"],
+        ));
         let blur = |fx: GaussianBlur| {
             let names = fx.names_zh.clone();
             (Arc::new(fx) as Arc<dyn TargetEffect>, names)

@@ -58,3 +58,9 @@ Rust 效果的 uniform 走一个环形缓冲 + 动态偏移，每帧不创建缓
 - `cargo test -p bae-effects`：GPU 结果与 CPU 参考实现（AE 规格公式）比较，覆盖 RGBA32F / RGBA16F、半分辨率、Repeat Edge Pixels、ROI 分块一致、identity；软件适配器（CI 上的 WARP）容差放宽 4 倍。
 - `cargo bench -p bae-effects`：4K / 1080p 每帧耗时；`-- <过滤词> --steps` 打印每个 dispatch 的 GPU 时间。
 - 与 AE 对照：`tests/ae/golden/` 是 AE 26.2.1 的输出，`tests/ae_golden.rs` 每次测试都比较（每个用例限定最大差和平均差）；重新生成和结论见 `tests/ae/README.md`。
+
+### 颜色校正
+
+曲线、颜色平衡 (HLS)、更改颜色、更改为颜色、通道混合器、阴影/高光均在 GPU 上处理像素。曲线的参数 1 使用 `ParamKind::CurvePoints`，值为 `Value::FloatList`。每三个数依次表示通道、输入、输出。通道 0 为 RGB 总曲线，1 至 4 依次为红、绿、蓝、Alpha，坐标范围为 0 到 1。例如 `[1, 0, 1, 1, 1, 0]` 反转红色，其余通道保持恒等。先应用分通道曲线，再应用总曲线。参数 2 选择编辑通道。曲线编辑器待接入，导入 AE 自定义曲线数据也待接入。
+
+阴影/高光从本帧的亮度直方图估算自动数量，用邻域亮度控制阴影和高光的调整范围。瞬时平滑与场景检测保留 AE 参数和默认值。两项控件暂时禁用，等待渲染图提供同一效果之前的相邻帧。

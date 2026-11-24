@@ -59,6 +59,7 @@
     var done = [];
     for (var i = 0; i < cases.length; i++) {
         var c = cases[i];
+        app.project.bitsPerChannel = c.bpc || 8;
         var src = input(c.input);
         var comp = app.project.items.addComp(c.name, src.width, src.height, 1, 1, 30);
         var layer = comp.layers.add(src);
