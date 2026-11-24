@@ -11,7 +11,8 @@ JSON line; after each key the script reads the new lines.
 Keys are sent with `orca computer hotkey` / `press-key` (real key events,
 background input to the BAE process, no foreground takeover; plain CGEvent
 postToPid does not reach an inactive winit window). Driving the UI holds
-/private/tmp/bae-locks/gui.lock. orca cannot send F keys yet: those rows are
+the machine's GUI directory lock (`--lock`, mkdir: one holder at a time, at
+most 20 minutes). orca cannot send F keys yet: those rows are
 listed as not pressed (the CI sweep covers them). Chords macOS keeps for itself (Help menu
 search, Mission Control, screenshots, …) are not pressed. After a key that fails,
 BAE is restarted so the next key starts clean.
@@ -31,13 +32,13 @@ import argparse
 import datetime
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-LOCK = "/private/tmp/bae-locks/gui.lock"
 
 # Actions the sweep does not press: they quit, close the project or panels,
 # open file / save dialogs or a web browser, which would stop the run or need
@@ -196,15 +197,24 @@ def main():
     ap.add_argument("--report", default=None)
     ap.add_argument("--settle", type=float, default=0.6, help="seconds to wait after each key")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument(
+        "--lock",
+        default=os.environ.get("BAE_GUI_LOCK"),
+        required=os.environ.get("BAE_GUI_LOCK") is None,
+        help="the machine's GUI directory lock (mkdir), or BAE_GUI_LOCK",
+    )
     args = ap.parse_args()
 
-    os.makedirs(os.path.dirname(LOCK), exist_ok=True)
-    try:
-        fd = os.open(LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        sys.exit(f"{LOCK} is held: {open(LOCK).read().strip()}")
-    os.write(fd, f"shortcut_sweep_mac pid {os.getpid()}\n".encode())
-    os.close(fd)
+    # Wait for the GUI lock (another tool may be driving the screen).
+    os.makedirs(os.path.dirname(args.lock), exist_ok=True)
+    while True:
+        try:
+            os.mkdir(args.lock)
+            break
+        except FileExistsError:
+            time.sleep(5)
+    with open(os.path.join(args.lock, "owner"), "w") as f:
+        f.write(f"shortcut_sweep_mac pid {os.getpid()}\n")
 
     all_rows = rows(args.table)
     working = [r for r in all_rows if r["works"]]
@@ -257,7 +267,7 @@ def main():
     finally:
         if bae:
             bae.quit()
-        os.remove(LOCK)
+        shutil.rmtree(args.lock, ignore_errors=True)
 
     unimplemented = [r for r in all_rows if not r["works"] and r["mac"]]
     by_owner = {}
