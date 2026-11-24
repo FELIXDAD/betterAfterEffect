@@ -228,6 +228,7 @@ pub fn prewarm(gpu: &Arc<GpuContext>, format: wgpu::TextureFormat) -> Result<(),
     let rt = gpu::runtime(gpu);
     blur::prewarm(&rt, format)?;
     effects::spatial::prewarm(&rt, format)?;
+    effects::distort::prewarm(&rt, format)?;
     for b in builtins() {
         if let Implementation::Declarative(fx) = &b.implementation {
             fx.prewarm(gpu, format)?;
@@ -294,6 +295,7 @@ fn load() -> Result<Vec<Builtin>, Vec<Diagnostic>> {
         ));
     }
     out.extend(effects::spatial::builtins());
+    out.extend(effects::distort::builtins());
     out.sort_by(|a, b| {
         (a.info.category.as_str(), a.info.name.as_str())
             .cmp(&(b.info.category.as_str(), b.info.name.as_str()))
