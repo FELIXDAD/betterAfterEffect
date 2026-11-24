@@ -2,6 +2,7 @@ use super::Case;
 mod blur_sharpen;
 mod channel;
 mod color;
+mod distort;
 mod generate;
 mod matte;
 mod noise_grain;
@@ -25,5 +26,6 @@ pub(super) fn all() -> Vec<Case> {
     channel::register(&mut cases);
     matte::register(&mut cases);
     color::shadow_highlight(&mut cases);
+    distort::register(&mut cases);
     cases
 }

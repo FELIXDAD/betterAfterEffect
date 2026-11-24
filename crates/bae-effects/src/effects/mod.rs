@@ -11,6 +11,7 @@ pub(crate) mod set_matte;
 pub use blur::{BoxBlur, GaussianBlur};
 
 pub(crate) mod color;
+pub mod distort;
 pub mod spatial;
 
 pub(crate) fn prewarm(

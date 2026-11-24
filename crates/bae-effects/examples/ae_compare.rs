@@ -28,6 +28,8 @@ fn main() {
                 "ramp",
                 "line",
                 "lineg",
+                "fine",
+                "coords",
                 "speckles",
                 "matte-edge",
             ] {

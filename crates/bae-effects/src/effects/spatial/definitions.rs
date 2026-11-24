@@ -110,7 +110,7 @@ fn shadow() -> DefBuilder {
 }
 
 impl DefBuilder {
-    fn angle(self, id: u32, en: &str, zh: &str, degrees: f64) -> Self {
+    pub(crate) fn angle(self, id: u32, en: &str, zh: &str, degrees: f64) -> Self {
         param(self, id, en, zh, ParamKind::Angle, Value::Float(degrees))
     }
 }
