@@ -443,3 +443,53 @@ fn orthographic_views_draw_without_perspective() {
     assert_eq!(img.px(50, 70)[3], 0);
     assert_eq!(img.px(50, 29)[3], 0);
 }
+
+#[test]
+fn cuts_leave_no_see_through_seams() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    let mut comp = RenderComp::new(p("/comps/main"), 100, 100);
+    // A small layer turned 60° about y crosses a wide flat one; its plane cuts
+    // the flat layer along a line that runs on past the small layer, where
+    // nothing covers the flat layer. (The small layer is at the bottom of the
+    // stack, so its plane is the one that cuts.)
+    comp.layers.push(solid_3d(
+        "wide",
+        RED,
+        [80, 30],
+        DVec3::new(50.0, 50.0, 0.0),
+        DVec3::ZERO,
+    ));
+    comp.layers.push(solid_3d(
+        "small",
+        GREEN,
+        [10, 10],
+        DVec3::new(30.0, 50.0, 0.0),
+        DVec3::new(0.0, 60.0, 0.0),
+    ));
+    let img = render(&mut r, &comp);
+    for y in (36..44).chain(57..64) {
+        for x in 26..35 {
+            assert_eq!(img.px(x, y), [255, 0, 0, 255], "seam at ({x}, {y})");
+        }
+    }
+    // Layers that do not overlap on screen are not cut at all.
+    comp.layers[0] = solid_3d(
+        "wide",
+        RED,
+        [80, 30],
+        DVec3::new(50.0, 60.0, 0.0),
+        DVec3::ZERO,
+    );
+    comp.layers[1] = solid_3d(
+        "apart",
+        GREEN,
+        [20, 20],
+        DVec3::new(50.0, 15.0, 0.0),
+        DVec3::new(0.0, 60.0, 0.0),
+    );
+    let img = render(&mut r, &comp);
+    for x in 12..88 {
+        assert_eq!(img.px(x, 60), [255, 0, 0, 255], "x = {x}");
+    }
+}

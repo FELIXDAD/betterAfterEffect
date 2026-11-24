@@ -14,7 +14,9 @@
 //!
 //! Material percentages are fractions here (`shininess` is used as the exponent
 //! in percent: 5 % → 5). The result is never negative; 8/16 bpc clip it to 1.
-//! A comp without enabled lights, a 2D layer or Accepts Lights off: unlit.
+//! A comp without enabled lights, a 2D layer, Accepts Lights off, or a layer
+//! no light reaches (lights with the Adjustment Layer switch light only the
+//! layers below them): unlit.
 //! Shadows are not rendered yet (casts / accepts shadows are data only).
 
 use std::sync::Arc;
@@ -81,7 +83,8 @@ pub struct Light {
     pub shadow_diffusion: f32,
     /// Light layers with their Adjustment Layer switch on light only the layers
     /// below them (AE-CMP-435): the light's index in [`crate::RenderComp::layers`].
-    /// `None` lights every 3D layer of the comp.
+    /// `None` lights every 3D layer of the comp. A layer no light reaches is
+    /// unlit (not dark; measured in AE 26.2.1).
     pub scope_below: Option<usize>,
 }
 
@@ -104,7 +107,7 @@ pub struct Lighting {
     pub matrix: DMat4,
     /// The layer's Material Options.
     pub material: Material,
-    /// The lights that reach the layer (empty: lit, but dark).
+    /// The lights that reach the layer (at least one).
     pub lights: Arc<[Light]>,
     /// Where the layer is seen from ([`crate::camera::Camera::eye`]).
     pub eye: DVec3,

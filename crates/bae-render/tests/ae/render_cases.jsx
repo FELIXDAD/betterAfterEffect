@@ -169,7 +169,7 @@
             var keys = l.keys || {};
             if (keys.pos) {
                 setKeys(tg.property("ADBE Position"), keys.pos, threeD);
-            } else {
+            } else if (l.pos) {
                 tg.property("ADBE Position").setValue(threeD ? v3(l.pos, 0) : l.pos);
             }
             if (l.scale) { tg.property("ADBE Scale").setValue(threeD ? v3(l.scale, 100) : l.scale); }

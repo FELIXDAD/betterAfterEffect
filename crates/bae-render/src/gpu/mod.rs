@@ -329,10 +329,10 @@ impl DrawData {
     }
 
     /// Adds layer-space clip half-planes given in input texels.
-    pub fn set_clips(&mut self, clips: &[[f64; 3]]) {
+    pub fn set_clips(&mut self, clips: &[[f64; 4]]) {
         let n = clips.len().min(MAX_CLIPS);
         for (dst, c) in self.clips.iter_mut().zip(&clips[..n]) {
-            *dst = [c[0] as f32, c[1] as f32, c[2] as f32, 0.0];
+            *dst = c.map(|v| v as f32);
         }
         self.extra[0] = n as u32;
     }

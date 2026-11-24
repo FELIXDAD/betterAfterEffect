@@ -706,14 +706,16 @@ impl ExecCtx<'_> {
 
 /// Shrinks `data.quad` (input texels, the content `rect` plus a margin) to the
 /// part of `rect` inside every half-plane of `clips`, keeping the margin.
-fn shrink_quad(data: &mut DrawData, rect: [f64; 4], clips: &[[f64; 3]]) {
+fn shrink_quad(data: &mut DrawData, rect: [f64; 4], clips: &[[f64; 4]]) {
     let mut poly = vec![
         DVec2::new(rect[0], rect[1]),
         DVec2::new(rect[2], rect[1]),
         DVec2::new(rect[2], rect[3]),
         DVec2::new(rect[0], rect[3]),
     ];
-    for [a, b, c] in clips {
+    // Cuts whose coverage reaches past them (the piece drawn first) keep the
+    // quad's extent on that side.
+    for [a, b, c, _] in clips.iter().filter(|c| c[3] == 0.0) {
         let d = |p: DVec2| a * p.x + b * p.y + c;
         let mut out = Vec::with_capacity(poly.len() + 1);
         for i in 0..poly.len() {
@@ -895,10 +897,10 @@ fn plan_op(
     if !op.clips.is_empty() {
         // Input px half-planes → input texels.
         let (o, s) = (from_texel.translation, from_texel.matrix2.x_axis.x);
-        let clips: Vec<[f64; 3]> = op
+        let clips: Vec<[f64; 4]> = op
             .clips
             .iter()
-            .map(|[a, b, c]| [a * s, b * s, a * o.x + b * o.y + c])
+            .map(|[a, b, c, reach]| [a * s, b * s, a * o.x + b * o.y + c, *reach])
             .collect();
         data.set_clips(&clips);
         if op.motion.is_none() {

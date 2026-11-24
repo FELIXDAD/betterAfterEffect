@@ -49,7 +49,8 @@ struct Draw {
     fwd_w: vec4<f32>,
     // Inverse homography w row.
     inv_w: vec4<f32>,
-    // Clip half-planes a * u + b * v + c >= 0 in input texels.
+    // Clip half-planes a * u + b * v + c >= 0 in input texels; w: coverage
+    // reach past the cut in target pixels.
     clips: array<vec4<f32>, 4>,
     // Clip count, first motion sample, sample count, lighting record (vec4 index).
     extra: vec4<u32>,
@@ -426,13 +427,14 @@ fn layer_px(d: Draw, di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: ve
         let mv = textureSampleLevel(t_mask, s_linear, muv, 0.0).x;
         k = k * clamp(d.mask_val.x + d.mask_val.y * mv, 0.0, 1.0);
     }
-    // Pieces of 3D layers cut at intersections (AE-CMP-405): anti-aliased over
-    // one target pixel, so the two sides of a cut add up to full coverage.
+    // Pieces of 3D layers cut at intersections (AE-CMP-405): the piece drawn
+    // first reaches c.w pixels past the cut, the one drawn over it
+    // anti-aliases it, so a cut never leaves a see-through seam.
     let clip_count = min(d.extra.x, 4u);
     for (var i = 0u; i < clip_count; i++) {
         let c = draws[di].clips[i];
         let g = vec2<f32>(dot(c.xy, du_dx), dot(c.xy, du_dy));
-        k = k * clamp((dot(c.xy, u) + c.z) / max(length(g), 1e-20) + 0.5, 0.0, 1.0);
+        k = k * clamp((dot(c.xy, u) + c.z) / max(length(g), 1e-20) + 0.5 + c.w, 0.0, 1.0);
     }
     out.src = src;
     out.light = light;

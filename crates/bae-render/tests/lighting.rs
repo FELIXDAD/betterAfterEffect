@@ -191,7 +191,7 @@ fn unlit_cases() {
     let flat = render(&mut r, &comp);
     assert_eq!(flat.px(100, 100), [204, 153, 102, 255]);
     // A light whose Adjustment Layer switch is on lights only the layers below
-    // it: above it the layer is lit by nothing (dark), not unlit.
+    // it: a layer above it that no light reaches stays unlit (AE 26.2.1).
     comp.layers[0] = plane(0.0);
     let mut only = light(
         LightKind::Point,
@@ -200,7 +200,7 @@ fn unlit_cases() {
     );
     only.scope_below = Some(1);
     comp.lights = vec![only];
-    assert_eq!(render(&mut r, &comp).px(100, 100), [0, 0, 0, 255]);
+    assert_eq!(render(&mut r, &comp).px(100, 100), [204, 153, 102, 255]);
     comp.lights[0].scope_below = None;
     let lit = render(&mut r, &comp).px(100, 100);
     // Diffuse 50 % + specular 50 % of a light straight ahead.
