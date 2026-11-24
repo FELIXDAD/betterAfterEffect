@@ -1316,11 +1316,10 @@ fn cmd_modifier_c_and_v_run_their_commands_on_macos() {
 // ---------------------------------------------------------------------------
 // #222 retest: Cmd+Z in a text field never brings back IME composition text.
 
-/// An IME composition as macOS sends it (Enabled, Preedit steps, an empty
+/// An IME composition as egui-winit passes macOS's on (Preedit steps, an empty
 /// Preedit, Commit), each step held for ~1.25 s of frames: egui's TextEdit
 /// takes an undo snapshot when an edit has lasted 1 s.
 fn compose_slowly(h: &mut Ui, preedit: &[&str], commit: &str) {
-    send(h, Event::Ime(egui::ImeEvent::Enabled));
     for p in preedit {
         send(
             h,

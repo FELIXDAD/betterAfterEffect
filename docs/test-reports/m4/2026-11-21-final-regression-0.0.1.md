@@ -140,4 +140,4 @@
 
 ### dev `bf7ccb0`（#238）：#222 输入框撤销恢复出输入法组字文本（macOS 部分）
 
-`acceptance::release_001::undo_in_text_fields_skips_ime_composition`（新）：按 macOS 输入法的事件顺序注入（Enabled → 逐步 Preedit，每步停约 1.25 秒 → 空 Preedit → Commit），在项目面板搜索框、图层改名框、文字工具的输入里各做一遍：组字 `w'q'g't` 提交 `wqgt`，停一下，全选后粘贴 `Dark`，停一下，组字 `ni'hao` 提交 `你好`，再打 `X`，然后连按 6 次 Cmd+Z。三处的撤销序列都是 `Dark你好X` → `Dark` → `wqgt` → 空，没有出现任何组字中间文本，工程的撤销也没变。反向检查：换回修复前的 `bae-ui/src/workbench.rs`，三处都撤销出 `Darkni'hao`、`Darkni'h`、`w'q'g't`，用例失败。Windows 微软拼音部分等 5090 测试，issue 先不关。
+`acceptance::release_001::undo_in_text_fields_skips_ime_composition`（新）：按 egui-winit 转来的 macOS 输入法事件顺序注入（逐步 Preedit，每步停约 1.25 秒 → 空 Preedit → Commit），在项目面板搜索框、图层改名框、文字工具的输入里各做一遍：组字 `w'q'g't` 提交 `wqgt`，停一下，全选后粘贴 `Dark`，停一下，组字 `ni'hao` 提交 `你好`，再打 `X`，然后连按 6 次 Cmd+Z。三处的撤销序列都是 `Dark你好X` → `Dark` → `wqgt` → 空，没有出现任何组字中间文本，工程的撤销也没变。反向检查：换回修复前的 `bae-ui/src/workbench.rs`，三处都撤销出 `Darkni'hao`、`Darkni'h`、`w'q'g't`，用例失败。Windows 微软拼音部分等 5090 测试，issue 先不关。
