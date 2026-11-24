@@ -555,11 +555,10 @@ impl Panel for TimelinePanel {
                 s.selected_layers.clear();
                 s.selected_props.clear();
             }
-            // Right-click on empty space: New ▸ (as Layer ▸ New).
+            // Right-click on empty space: AE 26's comp menu (New ▸, Composition
+            // Settings, Preview ▸ …).
             crate::common::context_menu(&bg, &mut |ui| {
-                if let Some(n) = menus::catalog_entry("Layer", "New") {
-                    menus::catalog_node(ui, cx, n);
-                }
+                crate::context_menu::show(ui, cx, crate::context_menu::TIMELINE_BLANK);
             });
             // Dropped project items.
             if let Some(item) = bg.dnd_release_payload::<ItemDrag>() {

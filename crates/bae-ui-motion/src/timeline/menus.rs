@@ -88,10 +88,11 @@ pub(crate) fn catalog_node(ui: &mut Ui, cx: &mut PanelContext<'_>, node: &'stati
 }
 
 fn catalog_item(ui: &mut Ui, cx: &mut PanelContext<'_>, it: &'static catalog::Item) {
-    if !it.platform.current() {
+    // Run-time lists (recent files …) are filled elsewhere.
+    if !it.platform.current() || it.status == catalog::Status::Dynamic {
         return;
     }
-    let enabled = it.status.works();
+    let enabled = crate::context_menu::runs(cx, it);
     if ui
         .add_enabled(enabled, egui::Button::new(tr(menu_title(it.title))))
         .clicked()

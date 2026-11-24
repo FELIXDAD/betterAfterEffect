@@ -10,7 +10,10 @@
   "notes": [
    "Titles that AE builds from the project are kept as shown: 'Active Camera (Camera 1)', 'Reset Camera 1', 'Camera 1 Settings...'.",
    "AE ends the layer menu with 'Select ▸', the layers under the pointer (here only 'Red Solid 1'); it is not recorded.",
-   "Effect ▸ lists the effect categories; their effects are the Effect menu's (docs/reference/ae/effects.md) and are left out here."
+   "Effect ▸ lists the effect categories; their effects are the Effect menu's (docs/reference/ae/effects.md) and are left out here.",
+   "The layer menu has the same entries for solid, shape, pre-comp layers, on a mask path and with several layers selected (only what is greyed differs); a camera's Transform ▸ has 'Point of Interest...' instead of 'Anchor Point...'. On the Mac the Timeline's layer menu is the same as the Composition panel's.",
+   "Import Recent Footage ▸ lists the user's recent files; left out.",
+   "Not read: the time ruler and the work area bar (no menu opened at the points tried), property names and values in the Timeline."
   ]
  },
  "menus": {
@@ -1487,6 +1490,1118 @@
     "type": "item",
     "title": "Scene Edit Detection...",
     "enabled": false
+   }
+  ],
+  "project.blank": [
+   {
+    "type": "item",
+    "title": "New Composition..."
+   },
+   {
+    "type": "item",
+    "title": "New Folder"
+   },
+   {
+    "type": "item",
+    "title": "New Adobe Photoshop File..."
+   },
+   {
+    "type": "item",
+    "title": "New Maxon Cinema 4D File..."
+   },
+   {
+    "type": "submenu",
+    "title": "Import",
+    "items": [
+     {
+      "type": "item",
+      "title": "File...",
+      "cmdChar": "I",
+      "cmdModifiers": 0
+     },
+     {
+      "type": "item",
+      "title": "Multiple Files...",
+      "cmdChar": "I",
+      "cmdModifiers": 2
+     },
+     {
+      "type": "item",
+      "title": "From Libraries..."
+     },
+     {
+      "type": "item",
+      "title": "Import Adobe Premiere Project..."
+     },
+     {
+      "type": "item",
+      "title": "Vanishing Point (.vpe)..."
+     },
+     {
+      "type": "item",
+      "title": "Placeholder..."
+     },
+     {
+      "type": "item",
+      "title": "Solid..."
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Import Recent Footage",
+    "items": []
+   },
+   {
+    "type": "item",
+    "title": "Reveal Project in Finder",
+    "enabled": false
+   }
+  ],
+  "project.item.comp": [
+   {
+    "type": "item",
+    "title": "Composition Settings..."
+   },
+   {
+    "type": "item",
+    "title": "Open in Essential Graphics"
+   },
+   {
+    "type": "item",
+    "title": "New Comp from Selection"
+   },
+   {
+    "type": "item",
+    "title": "Replace with Precomp",
+    "enabled": false
+   },
+   {
+    "type": "submenu",
+    "title": "Create Proxy",
+    "items": [
+     {
+      "type": "item",
+      "title": "Still..."
+     },
+     {
+      "type": "item",
+      "title": "Movie..."
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Set Proxy",
+    "items": [
+     {
+      "type": "item",
+      "title": "File...",
+      "cmdChar": "P",
+      "cmdModifiers": 2
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "None",
+      "enabled": false
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Import",
+    "enabled": false,
+    "items": [
+     {
+      "type": "item",
+      "title": "File...",
+      "enabled": false,
+      "cmdChar": "I",
+      "cmdModifiers": 0
+     },
+     {
+      "type": "item",
+      "title": "Multiple Files...",
+      "enabled": false,
+      "cmdChar": "I",
+      "cmdModifiers": 2
+     },
+     {
+      "type": "item",
+      "title": "From Libraries...",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Import Adobe Premiere Project...",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Vanishing Point (.vpe)...",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Placeholder...",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Solid...",
+      "enabled": false
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Import Recent Footage",
+    "enabled": false,
+    "items": []
+   },
+   {
+    "type": "submenu",
+    "title": "Interpret Footage",
+    "enabled": false,
+    "items": [
+     {
+      "type": "item",
+      "title": "Main...",
+      "enabled": false,
+      "cmdChar": "G",
+      "cmdModifiers": 2
+     },
+     {
+      "type": "item",
+      "title": "Proxy...",
+      "enabled": false
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Remember Interpretation",
+      "enabled": false,
+      "cmdChar": "C",
+      "cmdModifiers": 2
+     },
+     {
+      "type": "item",
+      "title": "Apply Interpretation",
+      "enabled": false,
+      "cmdChar": "V",
+      "cmdModifiers": 2
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Replace Footage",
+    "enabled": false,
+    "items": [
+     {
+      "type": "item",
+      "title": "File...",
+      "enabled": false,
+      "cmdChar": "H",
+      "cmdModifiers": 4
+     },
+     {
+      "type": "item",
+      "title": "With Layered Comp",
+      "enabled": false
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Placeholder...",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Solid...",
+      "enabled": false
+     }
+    ]
+   },
+   {
+    "type": "item",
+    "title": "Reload Footage",
+    "enabled": false
+   },
+   {
+    "type": "item",
+    "title": "License...",
+    "enabled": false
+   },
+   {
+    "type": "item",
+    "title": "Reveal in Finder",
+    "enabled": false
+   },
+   {
+    "type": "item",
+    "title": "Reveal in Bridge",
+    "enabled": false
+   },
+   {
+    "type": "submenu",
+    "title": "Reveal in Composition",
+    "enabled": false,
+    "items": []
+   },
+   {
+    "type": "item",
+    "title": "Solids Folder",
+    "enabled": false
+   },
+   {
+    "type": "item",
+    "title": "Rename",
+    "cmdChar": "↩",
+    "cmdModifiers": 8
+   }
+  ],
+  "project.item.footage": [
+   {
+    "type": "item",
+    "title": "Composition Settings...",
+    "enabled": false
+   },
+   {
+    "type": "item",
+    "title": "Open in Essential Graphics",
+    "enabled": false
+   },
+   {
+    "type": "item",
+    "title": "New Comp from Selection"
+   },
+   {
+    "type": "item",
+    "title": "Replace with Precomp",
+    "enabled": false
+   },
+   {
+    "type": "submenu",
+    "title": "Create Proxy",
+    "enabled": false,
+    "items": [
+     {
+      "type": "item",
+      "title": "Still...",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Movie...",
+      "enabled": false
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Set Proxy",
+    "enabled": false,
+    "items": [
+     {
+      "type": "item",
+      "title": "File...",
+      "enabled": false,
+      "cmdChar": "P",
+      "cmdModifiers": 2
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "None",
+      "enabled": false
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Import",
+    "items": [
+     {
+      "type": "item",
+      "title": "File...",
+      "cmdChar": "I",
+      "cmdModifiers": 0
+     },
+     {
+      "type": "item",
+      "title": "Multiple Files...",
+      "cmdChar": "I",
+      "cmdModifiers": 2
+     },
+     {
+      "type": "item",
+      "title": "From Libraries..."
+     },
+     {
+      "type": "item",
+      "title": "Import Adobe Premiere Project..."
+     },
+     {
+      "type": "item",
+      "title": "Vanishing Point (.vpe)..."
+     },
+     {
+      "type": "item",
+      "title": "Placeholder..."
+     },
+     {
+      "type": "item",
+      "title": "Solid..."
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Import Recent Footage",
+    "items": []
+   },
+   {
+    "type": "submenu",
+    "title": "Interpret Footage",
+    "enabled": false,
+    "items": [
+     {
+      "type": "item",
+      "title": "Main...",
+      "enabled": false,
+      "cmdChar": "G",
+      "cmdModifiers": 2
+     },
+     {
+      "type": "item",
+      "title": "Proxy...",
+      "enabled": false
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Remember Interpretation",
+      "enabled": false,
+      "cmdChar": "C",
+      "cmdModifiers": 2
+     },
+     {
+      "type": "item",
+      "title": "Apply Interpretation",
+      "enabled": false,
+      "cmdChar": "V",
+      "cmdModifiers": 2
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Replace Footage",
+    "enabled": false,
+    "items": [
+     {
+      "type": "item",
+      "title": "File...",
+      "enabled": false,
+      "cmdChar": "H",
+      "cmdModifiers": 4
+     },
+     {
+      "type": "item",
+      "title": "With Layered Comp",
+      "enabled": false
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Placeholder...",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Solid...",
+      "enabled": false
+     }
+    ]
+   },
+   {
+    "type": "item",
+    "title": "Reload Footage",
+    "enabled": false
+   },
+   {
+    "type": "item",
+    "title": "License...",
+    "enabled": false
+   },
+   {
+    "type": "item",
+    "title": "Reveal in Finder",
+    "enabled": false
+   },
+   {
+    "type": "item",
+    "title": "Reveal in Bridge",
+    "enabled": false
+   },
+   {
+    "type": "submenu",
+    "title": "Reveal in Composition",
+    "enabled": false,
+    "items": []
+   },
+   {
+    "type": "item",
+    "title": "Solids Folder"
+   },
+   {
+    "type": "item",
+    "title": "Rename",
+    "cmdChar": "↩",
+    "cmdModifiers": 8
+   }
+  ],
+  "project.item.folder": [
+   {
+    "type": "item",
+    "title": "Composition Settings...",
+    "enabled": false
+   },
+   {
+    "type": "item",
+    "title": "Open in Essential Graphics",
+    "enabled": false
+   },
+   {
+    "type": "item",
+    "title": "New Comp from Selection"
+   },
+   {
+    "type": "item",
+    "title": "Replace with Precomp",
+    "enabled": false
+   },
+   {
+    "type": "submenu",
+    "title": "Create Proxy",
+    "enabled": false,
+    "items": [
+     {
+      "type": "item",
+      "title": "Still...",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Movie...",
+      "enabled": false
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Set Proxy",
+    "enabled": false,
+    "items": [
+     {
+      "type": "item",
+      "title": "File...",
+      "enabled": false,
+      "cmdChar": "P",
+      "cmdModifiers": 2
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "None",
+      "enabled": false
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Import",
+    "items": [
+     {
+      "type": "item",
+      "title": "File...",
+      "cmdChar": "I",
+      "cmdModifiers": 0
+     },
+     {
+      "type": "item",
+      "title": "Multiple Files...",
+      "cmdChar": "I",
+      "cmdModifiers": 2
+     },
+     {
+      "type": "item",
+      "title": "From Libraries..."
+     },
+     {
+      "type": "item",
+      "title": "Import Adobe Premiere Project..."
+     },
+     {
+      "type": "item",
+      "title": "Vanishing Point (.vpe)..."
+     },
+     {
+      "type": "item",
+      "title": "Placeholder..."
+     },
+     {
+      "type": "item",
+      "title": "Solid..."
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Import Recent Footage",
+    "items": []
+   },
+   {
+    "type": "submenu",
+    "title": "Interpret Footage",
+    "enabled": false,
+    "items": [
+     {
+      "type": "item",
+      "title": "Main...",
+      "enabled": false,
+      "cmdChar": "G",
+      "cmdModifiers": 2
+     },
+     {
+      "type": "item",
+      "title": "Proxy...",
+      "enabled": false
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Remember Interpretation",
+      "enabled": false,
+      "cmdChar": "C",
+      "cmdModifiers": 2
+     },
+     {
+      "type": "item",
+      "title": "Apply Interpretation",
+      "enabled": false,
+      "cmdChar": "V",
+      "cmdModifiers": 2
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Replace Footage",
+    "enabled": false,
+    "items": [
+     {
+      "type": "item",
+      "title": "File...",
+      "enabled": false,
+      "cmdChar": "H",
+      "cmdModifiers": 4
+     },
+     {
+      "type": "item",
+      "title": "With Layered Comp",
+      "enabled": false
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Placeholder...",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Solid...",
+      "enabled": false
+     }
+    ]
+   },
+   {
+    "type": "item",
+    "title": "Reload Footage",
+    "enabled": false
+   },
+   {
+    "type": "item",
+    "title": "License...",
+    "enabled": false
+   },
+   {
+    "type": "item",
+    "title": "Reveal in Finder",
+    "enabled": false
+   },
+   {
+    "type": "item",
+    "title": "Reveal in Bridge",
+    "enabled": false
+   },
+   {
+    "type": "submenu",
+    "title": "Reveal in Composition",
+    "enabled": false,
+    "items": []
+   },
+   {
+    "type": "item",
+    "title": "Solids Folder"
+   },
+   {
+    "type": "item",
+    "title": "Rename",
+    "cmdChar": "↩",
+    "cmdModifiers": 8
+   }
+  ],
+  "project.header": [
+   {
+    "type": "item",
+    "title": "Hide This"
+   },
+   {
+    "type": "item",
+    "title": "Rename This...",
+    "enabled": false
+   },
+   {
+    "type": "separator"
+   },
+   {
+    "type": "submenu",
+    "title": "Columns",
+    "items": [
+     {
+      "type": "item",
+      "title": "Name",
+      "enabled": false,
+      "checked": true
+     },
+     {
+      "type": "item",
+      "title": "Label",
+      "checked": true
+     },
+     {
+      "type": "item",
+      "title": "Type",
+      "checked": true
+     },
+     {
+      "type": "item",
+      "title": "Size",
+      "checked": true
+     },
+     {
+      "type": "item",
+      "title": "Frame Rate",
+      "checked": true
+     },
+     {
+      "type": "item",
+      "title": "Media Start"
+     },
+     {
+      "type": "item",
+      "title": "Media End"
+     },
+     {
+      "type": "item",
+      "title": "Media Duration"
+     },
+     {
+      "type": "item",
+      "title": "In Point",
+      "checked": true
+     },
+     {
+      "type": "item",
+      "title": "Out Point",
+      "checked": true
+     },
+     {
+      "type": "item",
+      "title": "Duration"
+     },
+     {
+      "type": "item",
+      "title": "Tape Name",
+      "checked": true
+     },
+     {
+      "type": "item",
+      "title": "Comment",
+      "checked": true
+     },
+     {
+      "type": "item",
+      "title": "File Path",
+      "checked": true
+     },
+     {
+      "type": "item",
+      "title": "Date"
+     },
+     {
+      "type": "item",
+      "title": "Video Info",
+      "checked": true
+     }
+    ]
+   }
+  ],
+  "timeline.blank": [
+   {
+    "type": "submenu",
+    "title": "New",
+    "items": [
+     {
+      "type": "item",
+      "title": "Split with New Locked Viewer"
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Text"
+     },
+     {
+      "type": "item",
+      "title": "Solid..."
+     },
+     {
+      "type": "item",
+      "title": "Light..."
+     },
+     {
+      "type": "item",
+      "title": "Camera..."
+     },
+     {
+      "type": "item",
+      "title": "Null Object"
+     },
+     {
+      "type": "item",
+      "title": "Shape Layer"
+     },
+     {
+      "type": "item",
+      "title": "Adjustment Layer"
+     },
+     {
+      "type": "item",
+      "title": "Content-Aware Fill Layer..."
+     },
+     {
+      "type": "item",
+      "title": "Adobe Photoshop File..."
+     },
+     {
+      "type": "item",
+      "title": "Maxon Cinema 4D File..."
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Cube"
+     },
+     {
+      "type": "item",
+      "title": "Sphere"
+     },
+     {
+      "type": "item",
+      "title": "Plane"
+     },
+     {
+      "type": "item",
+      "title": "Torus"
+     },
+     {
+      "type": "item",
+      "title": "Cone"
+     },
+     {
+      "type": "item",
+      "title": "Cylinder"
+     }
+    ]
+   },
+   {
+    "type": "separator"
+   },
+   {
+    "type": "item",
+    "title": "Composition Settings..."
+   },
+   {
+    "type": "item",
+    "title": "Reveal Composition in Project"
+   },
+   {
+    "type": "separator"
+   },
+   {
+    "type": "submenu",
+    "title": "Preview",
+    "items": [
+     {
+      "type": "item",
+      "title": "Play Current Preview"
+     },
+     {
+      "type": "item",
+      "title": "Cache Frames When Idle",
+      "checked": true,
+      "cmdChar": "I",
+      "cmdModifiers": 11
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Audio",
+      "checked": true
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Switch View Layout",
+    "items": [
+     {
+      "type": "item",
+      "title": "1 View",
+      "checked": true
+     },
+     {
+      "type": "item",
+      "title": "2 Views"
+     },
+     {
+      "type": "item",
+      "title": "4 Views"
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Share View Options"
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Switch 3D View",
+    "items": [
+     {
+      "type": "item",
+      "title": "Active Camera (Camera 1)",
+      "checked": true,
+      "cmdChar": "",
+      "cmdModifiers": 8
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Default"
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Front",
+      "cmdChar": "",
+      "cmdModifiers": 8
+     },
+     {
+      "type": "item",
+      "title": "Left"
+     },
+     {
+      "type": "item",
+      "title": "Top"
+     },
+     {
+      "type": "item",
+      "title": "Back"
+     },
+     {
+      "type": "item",
+      "title": "Right"
+     },
+     {
+      "type": "item",
+      "title": "Bottom"
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Custom View 1",
+      "cmdChar": "",
+      "cmdModifiers": 8
+     },
+     {
+      "type": "item",
+      "title": "Custom View 2"
+     },
+     {
+      "type": "item",
+      "title": "Custom View 3"
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Reset Camera 1"
+     }
+    ]
+   },
+   {
+    "type": "item",
+    "title": "Rename"
+   },
+   {
+    "type": "separator"
+   },
+   {
+    "type": "item",
+    "title": "Open in Essential Graphics"
+   },
+   {
+    "type": "separator"
+   },
+   {
+    "type": "item",
+    "title": "Composition Flowchart"
+   },
+   {
+    "type": "item",
+    "title": "Composition Mini-Flowchart"
+   }
+  ],
+  "timeline.header": [
+   {
+    "type": "item",
+    "title": "Hide This",
+    "enabled": false
+   },
+   {
+    "type": "item",
+    "title": "Rename This...",
+    "enabled": false
+   },
+   {
+    "type": "separator"
+   },
+   {
+    "type": "submenu",
+    "title": "Columns",
+    "items": [
+     {
+      "type": "item",
+      "title": "A/V Features",
+      "checked": true
+     },
+     {
+      "type": "item",
+      "title": "Label",
+      "checked": true
+     },
+     {
+      "type": "item",
+      "title": "#",
+      "checked": true
+     },
+     {
+      "type": "item",
+      "title": "Source Name",
+      "enabled": false,
+      "checked": true
+     },
+     {
+      "type": "item",
+      "title": "Comment"
+     },
+     {
+      "type": "item",
+      "title": "Switches",
+      "checked": true
+     },
+     {
+      "type": "item",
+      "title": "Modes"
+     },
+     {
+      "type": "item",
+      "title": "Parent & Link",
+      "checked": true
+     },
+     {
+      "type": "item",
+      "title": "Keys"
+     },
+     {
+      "type": "item",
+      "title": "Render Time"
+     },
+     {
+      "type": "item",
+      "title": "In"
+     },
+     {
+      "type": "item",
+      "title": "Out"
+     },
+     {
+      "type": "item",
+      "title": "Duration"
+     },
+     {
+      "type": "item",
+      "title": "Stretch"
+     }
+    ]
    }
   ]
  }
