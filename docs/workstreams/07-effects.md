@@ -77,3 +77,9 @@
 2. **Pr 的 matchName 别名**：Pr 里从 AE 移植的效果 matchName 是 `AE.` 加 AE 的 matchName（例如 `AE.ADBE Gaussian Blur 2`）。导入 Pr 工程 / XML 时去掉前缀查 07 的实现即可；请在 `EffectRegistry` 查找时支持这个别名（或者在 07 注册时一并登记），Pr 独有的效果（Lumetri、极致键……）先登记为已知 ID，缺实现时走占位。
 3. **剪辑常用效果的优先顺序**（供排期参考，PR-FX-013）：高斯模糊、裁剪、变换、投影、亮度和对比度、Lumetri 颜色（与 06 协作）、极致键、Alpha 调整、轨道遮罩键、黑白、色调、边角定位、镜像、偏移、基本 3D。
 4. （M4）生成器：彩条和色调、黑场视频、透明视频、通用倒计时片头（Asset `kind = generator`，PR-PRJ-020）。
+
+### blur-stylize 进度（2026-11-24）
+
+- 新增定向模糊、径向模糊、锐化、钝化蒙版、发光、投影、斜面 Alpha、查找边缘、马赛克、色调分离；快速方框模糊复用已有实现。
+- AE 26.2.1 一次生成本组 61 帧 golden。误差表、取样方法和超出 2/255 的原因见 `crates/bae-effects/tests/ae/README.md`。径向旋转硬边偏差最大，后续需匹配 AE 的逐像素采样序列。
+- 效果面板工作流已约定从 `bae_effects::effects::spatial::options_zh` 取中英文下拉项对应的中文标签。外部 .amp 文件加载需宿主提供设置入口。

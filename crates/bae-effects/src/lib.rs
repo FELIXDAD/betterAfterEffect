@@ -84,6 +84,10 @@ const PACKAGES: &[Embedded] = &[
     embedded!("hue-saturation", ["shaders/hue_saturation.wgsl"]),
     embedded!("levels", ["shaders/levels.wgsl"]),
     embedded!("pro-levels", ["shaders/pro_levels.wgsl"]),
+    embedded!("posterize", ["shaders/posterize.wgsl"]),
+    embedded!("sharpen", ["shaders/sharpen.wgsl"]),
+    embedded!("find-edges", ["shaders/find_edges.wgsl"]),
+    embedded!("bevel-alpha", ["shaders/bevel_alpha.wgsl"]),
     embedded!("tint", ["shaders/tint.wgsl"]),
     embedded!("tritone", ["shaders/tritone.wgsl"]),
 ];
@@ -223,6 +227,7 @@ pub fn register(defs: &mut EffectRegistry, library: &mut EffectLibrary) -> usize
 pub fn prewarm(gpu: &Arc<GpuContext>, format: wgpu::TextureFormat) -> Result<(), RenderError> {
     let rt = gpu::runtime(gpu);
     blur::prewarm(&rt, format)?;
+    effects::spatial::prewarm(&rt, format)?;
     for b in builtins() {
         if let Implementation::Declarative(fx) = &b.implementation {
             fx.prewarm(gpu, format)?;
@@ -288,6 +293,7 @@ fn load() -> Result<Vec<Builtin>, Vec<Diagnostic>> {
             &["blur", "box", "legacy", "模糊", "方框"],
         ));
     }
+    out.extend(effects::spatial::builtins());
     out.sort_by(|a, b| {
         (a.info.category.as_str(), a.info.name.as_str())
             .cmp(&(b.info.category.as_str(), b.info.name.as_str()))
@@ -320,18 +326,16 @@ fn rust_builtin(
     }
 }
 
-/// Chinese popup options of the Rust effects (AE 26 zh_CN): the Blur
-/// Dimensions popup of the blurs.
+/// Chinese popup options of the Rust effects (AE 26 zh_CN): each effect
+/// module's `options_zh` table, then the blurs' Blur Dimensions popup.
 fn rust_options_zh(def: &EffectDef) -> Vec<(u32, Vec<String>)> {
-    const DIMENSIONS_ZH: [&str; 3] = ["水平和垂直", "水平", "垂直"];
+    const DIMENSIONS_ZH: &[&str] = &["水平和垂直", "水平", "垂直"];
     def.params
         .iter()
-        .filter(|p| p.name == "Blur Dimensions")
-        .map(|p| {
-            (
-                p.id,
-                DIMENSIONS_ZH.iter().map(|s| (*s).to_owned()).collect(),
-            )
+        .filter_map(|p| {
+            let zh = effects::spatial::options_zh(&def.match_name, p.id)
+                .or((p.name == "Blur Dimensions").then_some(DIMENSIONS_ZH))?;
+            Some((p.id, zh.iter().map(|s| (*s).to_owned()).collect()))
         })
         .collect()
 }

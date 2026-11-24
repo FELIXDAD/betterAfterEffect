@@ -39,8 +39,13 @@ Rust 效果的 uniform 走一个环形缓冲 + 动态偏移，每帧不创建缓
 | `ADBE Exposure2` | 曝光度 | 声明式 |
 | `ADBE Gaussian Blur 2` / `ADBE Gaussian Blur` | 高斯模糊 / 高斯模糊（旧版） | Rust |
 | `ADBE Box Blur2` / `ADBE Box Blur` | 快速方框模糊 / 方框模糊 | Rust |
+| `ADBE Motion Blur` / `ADBE Radial Blur` | 定向模糊 / 径向模糊 | Rust |
+| `ADBE Sharpen` / `ADBE Unsharp Mask2` | 锐化 / 钝化蒙版 | 声明式计算 / Rust |
+| `ADBE Glo2` / `ADBE Drop Shadow` | 发光 / 投影 | Rust |
+| `ADBE Bevel Alpha` / `ADBE Find Edges` | 斜面 Alpha / 查找边缘 | 声明式计算 |
+| `ADBE Mosaic` / `ADBE Posterize` | 马赛克 / 色调分离 | Rust / 声明式像素 |
 
-完整对照（含尚未实现的第一批效果）见 `docs/interop/ae-effects.md`。
+其余效果的对照和计划见 `docs/interop/ae-effects.md`。
 
 ## 高斯模糊的做法
 
