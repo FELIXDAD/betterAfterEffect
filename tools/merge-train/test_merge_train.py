@@ -321,6 +321,106 @@ class ConflictRepairTest(Base):
         self.assertIn("a.txt", msg)
 
 
+class UnstickTest(Base):
+    MISSING = ("pending", [("fast / macOS arm64", "missing", ""), ("full / macOS arm64", "skipped", "")])
+    RUNNING = ("pending", [("fast / macOS arm64", "in_progress", ""), ("full / macOS arm64", "missing", "")])
+
+    def wait(self, p, st, checks, minutes_stuck):
+        if minutes_stuck is not None:
+            ps = mt.pr_state(st, p["number"])
+            ps["head"] = p["headRefOid"]
+            ps["since"] = mt.now_utc().isoformat()
+            ps["stuck_since"] = (mt.now_utc() - mt.dt.timedelta(minutes=minutes_stuck)).isoformat()
+        with mock.patch.object(mt, "decide", return_value=("wait-ci", "等 CI", {"checks": checks[1]})), \
+                mock.patch.object(mt, "nudge_ci") as nudge:
+            mt.process_head(p, st)
+        return nudge
+
+    def test_missing_checks_nudge_once_after_delay(self):
+        st = {}
+        self.wait(pr(), st, self.MISSING, 3).assert_not_called()      # too early
+        self.wait(pr(), st, self.MISSING, 11).assert_called_once()     # nudge
+        st["prs"]["7"]["nudged_head"] = "h1"
+        self.wait(pr(), st, self.MISSING, 30).assert_not_called()     # once per head
+        self.wait(pr(), {}, self.RUNNING, 60).assert_not_called()     # CI is running: wait
+
+    def test_nudge_behind_runs_update_branch(self):
+        repo = self.make_repo()
+        run(repo, "git", "checkout", "-qb", "feat")
+        head = self.commit(repo, {"c.txt": "pr\n"}, "pr")
+        run(repo, "git", "push", "-q", "origin", "feat")
+        run(repo, "git", "checkout", "-q", "dev")
+        self.commit(repo, {"d.txt": "dev\n"}, "dev moved")
+        run(repo, "git", "push", "-q", "origin", "dev")
+        calls = []
+        real_sh = mt.sh
+
+        def fake_sh(cmd, **kw):
+            if cmd[:2] == ["gh", "pr"]:
+                calls.append(cmd)
+                return (0, "", "")
+            return real_sh(cmd, **kw)
+        ps = {}
+        with mock.patch.object(mt, "sh", side_effect=fake_sh), \
+                mock.patch.object(mt, "fetch_pr_head", side_effect=lambda n: run(repo, "git", "fetch", "-q", "origin")):
+            mt.nudge_ci(pr(headRefName="feat", headRefOid=head), ps)
+        self.assertEqual(calls[0][:3], ["gh", "pr", "update-branch"])
+        self.assertEqual(ps["nudged_head"], head)
+
+    def test_nudge_up_to_date_pushes_empty_commit(self):
+        repo = self.make_repo()
+        run(repo, "git", "checkout", "-qb", "feat")
+        head = self.commit(repo, {"c.txt": "pr\n"}, "pr")
+        run(repo, "git", "push", "-q", "origin", "feat")
+        with mock.patch.object(mt, "fetch_pr_head", side_effect=lambda n: run(repo, "git", "fetch", "-q", "origin")):
+            mt.nudge_ci(pr(headRefName="feat", headRefOid=head), {})
+        run(repo, "git", "fetch", "-q", "origin")
+        self.assertEqual(run(repo, "git", "rev-parse", "origin/feat^"), head)
+        self.assertEqual(run(repo, "git", "diff", "--name-only", head, "origin/feat"), "")
+
+    def queue(self):
+        return [pr(number=1, headRefName="a"), pr(number=2, headRefName="b", headRefOid="h2"),
+                pr(number=3, headRefName="c", headRefOid="h3")]
+
+    def test_skip_ahead_merges_first_ready_later_pr_after_30_min(self):
+        verdicts = {1: ("wait-ci", "x", {}), 2: ("wait-ci", "y", {}), 3: ("merge", "ok", {})}
+        st = {"head_pr": 1, "head_since": (mt.now_utc() - mt.dt.timedelta(minutes=31)).isoformat()}
+        with mock.patch.object(mt, "decide", side_effect=lambda p, s: verdicts[p["number"]]), \
+                mock.patch.object(mt, "do_merge", return_value=True) as merge:
+            self.assertTrue(mt.skip_ahead(self.queue(), st))
+        self.assertEqual(merge.call_args[0][0]["number"], 3)
+
+    def test_no_skip_ahead_before_30_min_or_without_ready_pr(self):
+        st = {"head_pr": 1, "head_since": (mt.now_utc() - mt.dt.timedelta(minutes=10)).isoformat()}
+        with mock.patch.object(mt, "decide", return_value=("merge", "ok", {})), \
+                mock.patch.object(mt, "do_merge") as merge:
+            self.assertFalse(mt.skip_ahead(self.queue(), st))
+        merge.assert_not_called()
+        st["head_since"] = (mt.now_utc() - mt.dt.timedelta(minutes=45)).isoformat()
+        with mock.patch.object(mt, "decide", return_value=("update", "overlap", {})), \
+                mock.patch.object(mt, "do_merge") as merge, \
+                mock.patch.object(mt, "sh") as sh:
+            self.assertFalse(mt.skip_ahead(self.queue(), st))
+        merge.assert_not_called()
+        sh.assert_not_called()  # later PRs are never updated or failed by the look-ahead
+
+    def test_one_pass_tracks_queue_head_and_skips_ahead(self):
+        q = self.queue()
+        st = {}
+        with mock.patch.object(mt, "fetch_queue", return_value=q), \
+                mock.patch.object(mt, "check_dev_red"), \
+                mock.patch.object(mt, "paused_reason", return_value=None), \
+                mock.patch.object(mt, "git", return_value=""), \
+                mock.patch.object(mt, "process_head", return_value=False), \
+                mock.patch.object(mt, "skip_ahead", return_value=False) as sk:
+            mt.one_pass(st)
+            first = st["head_since"]
+            mt.one_pass(st)
+        self.assertEqual(st["head_pr"], 1)
+        self.assertEqual(st["head_since"], first)  # unchanged while #1 stays at the front
+        self.assertEqual(sk.call_count, 2)
+
+
 class BoardTest(Base):
     def test_handoff_section_preserved(self):
         old = "x\n%s\n谁在做什么：A 在写 B\n%s\ny" % (mt.HANDOFF_START, mt.HANDOFF_END)

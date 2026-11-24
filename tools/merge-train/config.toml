@@ -28,6 +28,13 @@ poll_seconds = 60
 ci_timeout_minutes = 150
 # mergeable=UNKNOWN right after another merge is normal; give up only after this long.
 unknown_timeout_minutes = 20
+# Required checks missing/skipped with nothing queued or running for this long (e.g. a
+# head pushed before a CI change): update-branch, or push an empty commit if the PR
+# already contains dev, so CI runs again. Once per head.
+missing_nudge_minutes = 10
+# When the PR at the front has waited this long, a later PR (in label order) that is
+# fully ready merges first; the front PR keeps its place.
+skip_ahead_after_minutes = 30
 
 [labels]
 queue = "merge-ready"
