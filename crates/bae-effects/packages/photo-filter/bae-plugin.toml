@@ -17,7 +17,6 @@ implementation = "wgsl"
 ae_match_names = ["ADBE PhotoFilterPS"]
 flags = ["pixel-independent"]
 shader = "shaders/photo_filter.wgsl"
-includes = ["shaders/channel_math.wgsl"]
 identity_when = "params.density == 0"
 
 [[effect.param]]

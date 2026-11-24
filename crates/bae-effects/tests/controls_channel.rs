@@ -298,3 +298,33 @@ fn pixel_effects_cover_the_render_roi_at_half_resolution() {
         }
     }
 }
+
+#[test]
+fn photo_filter_restores_luminosity_after_gamut_clipping() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(3, 1);
+    let pixels = Pixels::new(rect, |x, _| {
+        [
+            [0.0, 0.0, 0.5, 0.5],
+            [0.5, 0.25, 0.1, 0.5],
+            [0.25, 0.25, 0.25, 0.5],
+        ][x as usize]
+    });
+    let params = vec![(1, Value::Int(4)), (3, Value::Float(65.0))];
+    let filtered = run_depth(
+        &gpu,
+        F32,
+        get("ADBE PhotoFilterPS").unwrap(),
+        params,
+        &pixels,
+        rect,
+        1.0,
+        false,
+    );
+    let lum = |p: [f32; 4]| 0.30 * p[0] + 0.59 * p[1] + 0.11 * p[2];
+    for (original, got) in pixels.data.iter().zip(filtered.data) {
+        assert!((lum(*original) - lum(got)).abs() < 1e-5);
+        assert_eq!(original[3], got[3]);
+        assert_ne!(*original, got);
+    }
+}

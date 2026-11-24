@@ -33,9 +33,9 @@
   {"name": "cc_black_white_tint", "input": "chart", "effect": "ADBE Black&White", "params": {"7": 1}, "tolerance": 2, "mean": 0.5},
   {"name": "cc_vibrance", "input": "chart", "effect": "ADBE Vibrance", "params": {"1": 50}, "tolerance": 4, "mean": 1.07},
   {"name": "cc_vibrance_saturation", "input": "chart", "effect": "ADBE Vibrance", "params": {"2": -50}, "tolerance": 8, "mean": 0.7},
-  {"name": "cc_photo_filter", "input": "chart", "effect": "ADBE PhotoFilterPS", "params": {}, "tolerance": 87, "mean": 7.56},
-  {"name": "cc_photo_filter_cooling", "input": "chart", "effect": "ADBE PhotoFilterPS", "params": {"1": 4, "3": 65, "4": 0}, "tolerance": 6, "mean": 0.5},
-  {"name": "cc_photo_filter_cooling_preserve", "input": "chart", "effect": "ADBE PhotoFilterPS", "params": {"1": 4, "3": 65}, "tolerance": 108, "mean": 13.18},
+  {"name": "cc_photo_filter", "input": "chart", "effect": "ADBE PhotoFilterPS", "params": {}, "tolerance": 8, "mean": 0.8},
+  {"name": "cc_photo_filter_cooling", "input": "chart", "effect": "ADBE PhotoFilterPS", "params": {"1": 4, "3": 65, "4": 0}, "tolerance": 5, "mean": 0.25},
+  {"name": "cc_photo_filter_cooling_preserve", "input": "chart", "effect": "ADBE PhotoFilterPS", "params": {"1": 4, "3": 65}, "tolerance": 5, "mean": 0.85},
   {"name": "cc_color_balance", "input": "chart", "effect": "ADBE Color Balance 2", "params": {"1": 40, "5": 25, "9": -35}, "tolerance": 2, "mean": 0.5},
   {"name": "cc_color_balance_preserve", "input": "chart", "effect": "ADBE Color Balance 2", "params": {"1": 40, "5": 25, "9": -35, "10": 1}, "tolerance": 2, "mean": 0.5}
 ]}

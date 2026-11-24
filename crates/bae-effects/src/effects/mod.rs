@@ -4,9 +4,9 @@
 
 pub mod blur;
 pub(crate) mod controls;
+mod image_grid;
 pub(crate) mod morphology;
 pub(crate) mod set_matte;
-mod image_grid;
 
 pub use blur::{BoxBlur, GaussianBlur};
 
