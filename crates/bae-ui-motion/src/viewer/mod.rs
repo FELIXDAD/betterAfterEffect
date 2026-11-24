@@ -229,6 +229,16 @@ fn apply_overrides(
         let three_d = layer.switches.three_d;
         let mut t: Transform = layer.transform;
         let mut touched = false;
+        // A scrubbed effect parameter of this layer (Effect Controls, timeline).
+        if let Some(s) = scrub.filter(|s| s.attr.starts_with("param:"))
+            && crate::effects::layer_of(&s.path).as_ref() == Some(&layer.path)
+            && let Some(e) = layer.effects.iter_mut().find(|e| e.path == s.path)
+        {
+            e.params.insert(
+                s.attr.trim_start_matches("param:").to_owned(),
+                s.value.clone(),
+            );
+        }
         if let Some(s) = scrub.filter(|s| s.path == layer.path) {
             touched = true;
             let v3 = |v: &Value| match v {
@@ -791,6 +801,13 @@ impl Panel for CompositionViewer {
         // Items dropped from the project panel become layers.
         if let Some(item) = resp.dnd_release_payload::<ItemDrag>() {
             add_item_as_layer(cx, &session, &item.0, pointer.map(|p| view.to_comp(p)));
+        }
+        // An effect dropped on a layer (Effects & Presets) is applied to it.
+        if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>()
+            && let Some(p) = pointer
+            && let Some(layer) = select_tool::hit_layer(cx.stage, &comp, &view, p)
+        {
+            crate::effects::apply(cx, &[layer], &fx.0);
         }
 
         bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);

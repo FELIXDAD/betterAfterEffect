@@ -7,7 +7,8 @@
 //! | `composition` | Composition viewer: active comp at the current time, selection and moving, zoom, safe areas, grid |
 //! | `timeline` | Timeline: layer outline with switches and Parent & Link, properties with stopwatches and values, ruler, work area, CTI, layer bars, keyframes; the Graph Editor (`graph`, Shift+F3) |
 //! | `properties` | Properties (AE 2024+): the selected layer's transform, text and shape fill |
-//! | `effect_controls` | Effect Controls (F3) |
+//! | `effect_controls` | Effect Controls (F3): the selected layer's effects, controls from the effect definitions |
+//! | `effects` | Effects & Presets: AE's effect categories, search, double-click or drag onto a layer to apply |
 //! | `preview` | Preview: play/stop, frame stepping, loop |
 //! | `render_queue` | Render Queue: queued comps, output format / path / frames, render on a background thread through 04's export pipeline, progress, stop, show in Finder |
 //!
@@ -26,6 +27,7 @@ mod common;
 mod context_menu;
 pub mod demo;
 pub mod dialogs;
+pub mod effects;
 mod gpu_preview;
 mod graph;
 mod i18n;
@@ -70,6 +72,7 @@ impl AppModule for MotionUiModule {
         bae_ui::i18n::register(i18n::ZH);
         bae_ui::i18n::register(tools::ZH);
         bae_ui::i18n::register(catalog::menu_zh());
+        effects::register_i18n();
         if app.resource::<SharedSession>().is_none() {
             app.insert_resource(SharedSession::default());
         }
@@ -86,7 +89,7 @@ impl AppModule for MotionUiModule {
         let _ = app.register_arc::<dyn bae_ui::DialogHost>("bae-ui-motion", dialogs);
         let owner = app.current_owner();
         let kinds = app.registry::<PanelKind>();
-        let panels: [(&str, PanelKind); 7] = [
+        let panels: [(&str, PanelKind); 8] = [
             (
                 "project",
                 PanelKind::new("Project", |_| Box::new(ProjectPanel::default())),
@@ -116,6 +119,12 @@ impl AppModule for MotionUiModule {
                 PanelKind::new("Preview", |_| Box::new(PreviewPanel)),
             ),
             (
+                "effects",
+                PanelKind::new("Effects & Presets", |_| {
+                    Box::new(effects::browser::EffectsPanel::default())
+                }),
+            ),
+            (
                 "render_queue",
                 PanelKind::new("Render Queue", |_| Box::new(RenderQueuePanel::default())),
             ),
@@ -128,7 +137,7 @@ impl AppModule for MotionUiModule {
         });
         let actions = app.registry::<ActionInfo>();
         actions.batch(|tx| {
-            for (id, title) in actions::ACTIONS {
+            for (id, title) in actions::ACTIONS.iter().chain(effects::ACTIONS) {
                 if !tx.contains(id) {
                     let _ = tx.register(owner.clone(), *id, ActionInfo::new(*title));
                 }
@@ -161,6 +170,9 @@ impl AppModule for MotionUiModule {
         // panel has focus.
         let handler: std::sync::Arc<dyn ActionHandler> = std::sync::Arc::new(menus::MotionActions);
         let _ = app.register_arc::<dyn ActionHandler>("bae-ui-motion", handler);
+        let effect_actions: std::sync::Arc<dyn ActionHandler> =
+            std::sync::Arc::new(effects::EffectActions);
+        let _ = app.register_arc::<dyn ActionHandler>("bae-ui-motion.effects", effect_actions);
         let menu = app.registry::<MenuItemSpec>();
         menu.batch(|tx| {
             for (id, item) in menus::items() {
@@ -199,8 +211,19 @@ impl AppModule for MotionUiModule {
         let sources = app.registry::<dyn bae_render::SourceProvider>();
         app.insert_resource(PreviewSources(sources));
         // Effects (07's built-ins, plugins) for the viewer and the render queue.
-        let effects = app.registry::<dyn bae_render::Effect>();
-        app.insert_resource(PreviewEffects(effects));
+        let effect_impls = app.registry::<dyn bae_render::Effect>();
+        app.insert_resource(PreviewEffects(effect_impls));
+        // Effect definitions for the Effect menu and the effect panels.
+        let registries = effects::EffectRegistries {
+            defs: app.registry::<bae_model::EffectDef>(),
+            infos: app.registry::<bae_effects::EffectInfo>(),
+        };
+        // Process-wide copy for code without resources (timeline labels). An
+        // app without effect modules (tests) must not replace a real one.
+        if !registries.defs.is_empty() {
+            effects::set_global(registries.clone());
+        }
+        app.insert_resource(registries);
     }
 }
 

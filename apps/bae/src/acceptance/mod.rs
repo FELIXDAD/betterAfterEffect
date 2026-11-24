@@ -17,21 +17,40 @@
 //! Tests that need the global UI language (`BAE_LANG=zh`) or a different `PATH`
 //! re-run themselves in a child process ([`in_child`]) so they cannot disturb
 //! the other tests of this binary.
+// The suites run on macOS (0.0.1 acceptance); the AE shortcut sweep runs on
+// both platforms, so off macOS most helpers are unused.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
 
+#[cfg(target_os = "macos")]
 mod dialogs;
+#[cfg(target_os = "macos")]
 mod files_flow;
+#[cfg(target_os = "macos")]
 mod i18n_retest;
+#[cfg(target_os = "macos")]
 mod i18n_scan;
+#[cfg(target_os = "macos")]
 mod layers;
+#[cfg(target_os = "macos")]
 mod layout;
+#[cfg(target_os = "macos")]
 mod menus;
+#[cfg(target_os = "macos")]
 mod release_001;
+#[cfg(target_os = "macos")]
 mod render_queue;
+#[cfg(target_os = "macos")]
 mod settings;
+mod shortcut_sweep;
+#[cfg(target_os = "macos")]
 mod shortcuts_dialog;
+#[cfg(target_os = "macos")]
 mod startup;
+#[cfg(target_os = "macos")]
 mod stress;
+#[cfg(target_os = "macos")]
 mod timeline;
+#[cfg(target_os = "macos")]
 mod tools;
 
 use std::collections::VecDeque;
