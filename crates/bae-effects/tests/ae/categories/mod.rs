@@ -12,6 +12,7 @@ mod matte;
 mod noise_grain;
 mod perspective;
 mod stylize;
+mod time;
 mod transition;
 
 pub type Pixel = fn(u32, u32) -> [f64; 4];
@@ -49,6 +50,7 @@ pub const ALL: &[Suite] = &[
     noise_grain::SUITE,
     perspective::SUITE,
     stylize::SUITE,
+    time::SUITE,
     transition::SUITE,
 ];
 

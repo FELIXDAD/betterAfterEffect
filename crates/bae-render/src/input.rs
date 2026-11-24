@@ -204,6 +204,8 @@ pub struct RenderLayer {
     /// layer's own keyframes (and those of its masks, effects and contents) are in
     /// layer time (data-model.md §10), so cache invalidation uses it.
     pub time: Time,
+    /// Comp-time seconds per layer-time second (AE time stretch).
+    pub time_scale: f64,
     /// What the layer draws.
     pub content: LayerContent,
     /// Layer space → comp space (pixels). Combines anchor point, position, scale,
@@ -249,6 +251,7 @@ impl RenderLayer {
         Self {
             path,
             time: Time::ZERO,
+            time_scale: 1.0,
             content,
             transform: DAffine2::IDENTITY,
             opacity: 1.0,

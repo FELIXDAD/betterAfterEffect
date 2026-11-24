@@ -246,6 +246,15 @@ pub(crate) const fn layer_stage_id(layer_id: u32) -> u32 {
 pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static str]> {
     Some(match (match_name, param_id) {
         (_, 0x10001 | 0x10003) => &["源", "蒙版", "效果和蒙版"],
+        ("ADBE Echo", 5) => &[
+            "相加",
+            "最大值",
+            "最小值",
+            "滤色",
+            "从后至前组合",
+            "从前至后组合",
+            "混合",
+        ],
         ("ADBE Gradient Wipe", 4) => &["拼贴渐变", "中心渐变", "伸缩渐变以适合"],
         ("ADBE Displacement Map", 2 | 4) => &[
             "红色",

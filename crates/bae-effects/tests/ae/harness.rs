@@ -25,6 +25,7 @@ pub struct Case {
     pub effect: String,
     pub time: f64,
     pub params: Vec<(u32, Value)>,
+    pub frames: Vec<String>,
     pub layers: BTreeMap<String, String>,
     pub masks: Vec<[u32; 4]>,
     /// Allowed max per-channel difference (8-bit levels).
@@ -113,6 +114,9 @@ fn parse_rows(rows: &[serde_json::Value]) -> Vec<Case> {
                 effect: c["effect"].as_str().unwrap().to_owned(),
                 time: c["time"].as_f64().unwrap_or(0.0),
                 params,
+                frames: c
+                    .get("frames")
+                    .map_or_else(Vec::new, |v| serde_json::from_value(v.clone()).unwrap()),
                 layers: c.get("layers").map_or_else(BTreeMap::new, |v| {
                     serde_json::from_value(v.clone()).unwrap()
                 }),
@@ -273,6 +277,13 @@ pub fn render_with_maps(
     let straight = categories::ALL
         .iter()
         .any(|suite| suite.straight_inputs.contains(&case.effect.as_str()));
+    let timeline;
+    let pixels = if case.frames.is_empty() {
+        pixels
+    } else {
+        timeline = load(frame_input(case, Time::from_seconds(case.time)).unwrap()).1;
+        &timeline
+    };
     let masked;
     let pixels = if case.masks.is_empty() {
         pixels
@@ -307,14 +318,18 @@ pub fn render_with_maps(
         ..EffectParams::new(&inst)
     };
     let mut target = Standalone::new(gpu.clone(), wgpu::TextureFormat::Rgba32Float);
-    if !case.layers.is_empty() || !case.masks.is_empty() {
+    if !case.layers.is_empty() || !case.masks.is_empty() || !case.frames.is_empty() {
         let effect = fx.effect();
         let layers = effect
             .layer_dependencies(&p)
             .into_iter()
             .filter_map(|dep| {
                 let name = dep.layer.name();
-                let probe = case.layers.get(name)?;
+                let probe = if dep.layer.as_str() == INPUT_LAYER && !case.frames.is_empty() {
+                    frame_input(case, dep.time)?
+                } else {
+                    case.layers.get(name)?.as_str()
+                };
                 let (size, pixels) = load(probe);
                 Some((dep, image(gpu, size, &pixels, true)))
             })
@@ -362,6 +377,13 @@ pub fn render_with_maps(
         }
     }
     px
+}
+
+fn frame_input(case: &Case, time: Time) -> Option<&str> {
+    let index = bae_model::FrameRate::FPS_30.time_to_frame(time);
+    case.frames
+        .get(usize::try_from(index).ok()?)
+        .map(String::as_str)
 }
 
 fn covered(rects: &[[u32; 4]], x: u32, y: u32) -> bool {

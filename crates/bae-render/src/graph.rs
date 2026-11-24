@@ -365,6 +365,8 @@ pub struct EffectFrame {
     pub time: Time,
     /// Comp time.
     pub comp_time: Time,
+    /// Comp-time seconds per layer-time second.
+    pub layer_time_scale: f64,
     /// Resolution scale.
     pub scale: f64,
     /// Layer content bounds (layer pixels, full resolution, before effects).
@@ -389,6 +391,7 @@ impl EffectFrame {
         EffectParams {
             time: self.time,
             comp_time: self.comp_time,
+            layer_time_scale: self.layer_time_scale,
             scale: self.scale,
             layer_bounds: self.layer_bounds,
             frame_rate: self.frame_rate,
@@ -708,6 +711,7 @@ impl Builder<'_, '_> {
         let frame = EffectFrame {
             time: layer.time,
             comp_time: comp.time,
+            layer_time_scale: layer.time_scale,
             scale: 1.0 / scale,
             layer_bounds: content_rect.round_out(),
             frame_rate: comp.frame_rate,
@@ -1196,6 +1200,7 @@ impl Builder<'_, '_> {
         let frame = EffectFrame {
             time: layer.time,
             comp_time: comp.time,
+            layer_time_scale: layer.time_scale,
             scale: 1.0 / scale,
             layer_bounds: comp_px.round_out(),
             frame_rate: comp.frame_rate,
@@ -1406,7 +1411,10 @@ impl Builder<'_, '_> {
         let Some(layer) = at.layers.iter().find(|l| l.path == dep.layer) else {
             return Ok(None);
         };
-        let mut stage = dep.stage;
+        if matches!(dep.stage, LayerStage::BeforeEffect(_)) && !layer.active {
+            return Ok(None);
+        }
+        let mut stage = dep.stage.clone();
         if stage == LayerStage::EffectsAndMasks && self.resolving.contains(&dep.layer) {
             self.warn(format!(
                 "{}: circular layer reference, using the layer with its masks",
@@ -1486,11 +1494,21 @@ impl Builder<'_, '_> {
                 node = id;
             }
         }
-        if stage == LayerStage::EffectsAndMasks {
-            let effects = self.plan_effects(layer);
+        let effect_count = match stage {
+            LayerStage::EffectsAndMasks => layer.effects.len(),
+            LayerStage::BeforeEffect(path) => layer
+                .effects
+                .iter()
+                .position(|e| e.path == path)
+                .unwrap_or(0),
+            _ => 0,
+        };
+        if effect_count != 0 {
+            let effects = self.plan_effect_prefix(layer, effect_count);
             let frame = EffectFrame {
                 time: layer.time,
                 comp_time: comp.time,
+                layer_time_scale: layer.time_scale,
                 scale: 1.0 / scale,
                 layer_bounds: content_rect.round_out(),
                 frame_rate: comp.frame_rate,
@@ -1622,11 +1640,19 @@ impl Builder<'_, '_> {
     }
 
     fn plan_effects(&mut self, layer: &RenderLayer) -> Vec<(Arc<dyn Effect>, RenderEffect)> {
+        self.plan_effect_prefix(layer, layer.effects.len())
+    }
+
+    fn plan_effect_prefix(
+        &mut self,
+        layer: &RenderLayer,
+        count: usize,
+    ) -> Vec<(Arc<dyn Effect>, RenderEffect)> {
         let mut out = Vec::new();
         if self.skip_effects_of.as_ref() == Some(&layer.path) {
             return out;
         }
-        for instance in layer.effects.iter().filter(|e| e.enabled) {
+        for instance in layer.effects.iter().take(count).filter(|e| e.enabled) {
             match self.effects.get(&instance.effect) {
                 Some(effect) if effect.renders_pixels() => {
                     out.push((effect.clone(), instance.clone()))

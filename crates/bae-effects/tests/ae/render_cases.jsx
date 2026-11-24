@@ -58,7 +58,17 @@
 
     function makeComp(c) {
         var src = input(c.input);
-        var comp = app.project.items.addComp(c.name, src.width, src.height, 1, 1, 30);
+        var duration = c.frames ? Math.max(1, c.frames.length / 30) : 1;
+        var comp = app.project.items.addComp(c.name, src.width, src.height, 1, duration, 30);
+        if (c.frames) {
+            src = app.project.items.addComp(c.name + "_frames", src.width, src.height, 1, c.frames.length / 30, 30);
+            for (var i = 0; i < c.frames.length; i++) {
+                var frame = src.layers.add(input(c.frames[i]));
+                frame.startTime = i / 30;
+                frame.inPoint = i / 30;
+                frame.outPoint = (i + 1) / 30;
+            }
+        }
         var refs = {};
         if (c.layers) {
             for (var name in c.layers) {
