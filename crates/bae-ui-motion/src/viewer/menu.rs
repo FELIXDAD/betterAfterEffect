@@ -41,7 +41,7 @@ pub(super) fn frame(
             context_menu::show(ui, cx, VIEWER_BLANK);
             return;
         };
-        let chosen = context_menu::show(ui, cx, VIEWER_LAYER);
+        let chosen = context_menu::show_with(ui, cx, VIEWER_LAYER, &["Rename"]);
         common::submenu(ui, tr("Select"), &mut |ui| {
             for l in under.iter() {
                 if ui.button(query::display_name_of(cx.stage, l)).clicked() {

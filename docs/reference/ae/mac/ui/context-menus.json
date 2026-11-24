@@ -2603,6 +2603,1315 @@
      }
     ]
    }
+  ],
+  "timeline.layer.camera": [
+   {
+    "type": "submenu",
+    "title": "Mask",
+    "enabled": false,
+    "items": [
+     {
+      "type": "item",
+      "title": "New Mask",
+      "enabled": false,
+      "cmdChar": "N",
+      "cmdModifiers": 1
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Mask Shape...",
+      "enabled": false,
+      "cmdChar": "M",
+      "cmdModifiers": 1
+     },
+     {
+      "type": "item",
+      "title": "Mask Feather...",
+      "enabled": false,
+      "cmdChar": "F",
+      "cmdModifiers": 1
+     },
+     {
+      "type": "item",
+      "title": "Mask Opacity...",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Mask Expansion...",
+      "enabled": false
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Reset Mask",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Remove Mask",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Remove All Masks",
+      "enabled": false
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "submenu",
+      "title": "Mode",
+      "enabled": false,
+      "items": [
+       {
+        "type": "item",
+        "title": "None",
+        "enabled": false
+       },
+       {
+        "type": "separator"
+       },
+       {
+        "type": "item",
+        "title": "Add",
+        "enabled": false
+       },
+       {
+        "type": "item",
+        "title": "Subtract",
+        "enabled": false
+       },
+       {
+        "type": "item",
+        "title": "Intersect",
+        "enabled": false
+       },
+       {
+        "type": "item",
+        "title": "Lighten",
+        "enabled": false
+       },
+       {
+        "type": "item",
+        "title": "Darken",
+        "enabled": false
+       },
+       {
+        "type": "item",
+        "title": "Difference",
+        "enabled": false
+       }
+      ]
+     },
+     {
+      "type": "item",
+      "title": "Inverted",
+      "enabled": false,
+      "cmdChar": "I",
+      "cmdModifiers": 1
+     },
+     {
+      "type": "item",
+      "title": "Locked",
+      "enabled": false
+     },
+     {
+      "type": "submenu",
+      "title": "Motion Blur",
+      "enabled": false,
+      "items": [
+       {
+        "type": "item",
+        "title": "Same As Layer",
+        "enabled": false
+       },
+       {
+        "type": "item",
+        "title": "On",
+        "enabled": false
+       },
+       {
+        "type": "item",
+        "title": "Off",
+        "enabled": false
+       }
+      ]
+     },
+     {
+      "type": "submenu",
+      "title": "Feather Falloff",
+      "enabled": false,
+      "items": [
+       {
+        "type": "item",
+        "title": "Smooth",
+        "enabled": false
+       },
+       {
+        "type": "item",
+        "title": "Linear",
+        "enabled": false
+       }
+      ]
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Unlock All Masks",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Lock Other Masks",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Hide Locked Masks",
+      "enabled": false
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Mask and Shape Path",
+    "enabled": false,
+    "items": [
+     {
+      "type": "item",
+      "title": "RotoBezier",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Closed",
+      "enabled": false
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Convert To Bezier Path",
+      "enabled": false
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Group Shapes",
+      "enabled": false,
+      "cmdChar": "G",
+      "cmdModifiers": 0
+     },
+     {
+      "type": "item",
+      "title": "Ungroup Shapes",
+      "enabled": false,
+      "cmdChar": "G",
+      "cmdModifiers": 1
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Set First Vertex",
+      "enabled": false
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Free Transform Points",
+      "enabled": false,
+      "cmdChar": "T",
+      "cmdModifiers": 0
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Quality",
+    "enabled": false,
+    "items": [
+     {
+      "type": "item",
+      "title": "Best",
+      "enabled": false,
+      "cmdChar": "U",
+      "cmdModifiers": 0
+     },
+     {
+      "type": "item",
+      "title": "Draft",
+      "enabled": false,
+      "cmdChar": "U",
+      "cmdModifiers": 1
+     },
+     {
+      "type": "item",
+      "title": "Wireframe",
+      "enabled": false,
+      "cmdChar": "U",
+      "cmdModifiers": 3
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Bilinear",
+      "enabled": false,
+      "cmdChar": "B",
+      "cmdModifiers": 10
+     },
+     {
+      "type": "item",
+      "title": "Bicubic",
+      "enabled": false,
+      "cmdChar": "B",
+      "cmdModifiers": 11
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Switches",
+    "items": [
+     {
+      "type": "item",
+      "title": "Hide Other Video"
+     },
+     {
+      "type": "item",
+      "title": "Show All Video"
+     },
+     {
+      "type": "item",
+      "title": "Unlock All Layers",
+      "cmdChar": "L",
+      "cmdModifiers": 1
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Enable Expressions"
+     },
+     {
+      "type": "item",
+      "title": "Disable Expressions"
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Shy"
+     },
+     {
+      "type": "item",
+      "title": "Lock",
+      "cmdChar": "L",
+      "cmdModifiers": 0
+     },
+     {
+      "type": "item",
+      "title": "Audio",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Video",
+      "checked": true,
+      "cmdChar": "V",
+      "cmdModifiers": 3
+     },
+     {
+      "type": "item",
+      "title": "Solo"
+     },
+     {
+      "type": "item",
+      "title": "Effect",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Collapse",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Motion Blur",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Adjustment Layer",
+      "enabled": false
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Transform",
+    "items": [
+     {
+      "type": "item",
+      "title": "Reset"
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Point of Interest..."
+     },
+     {
+      "type": "item",
+      "title": "Position...",
+      "cmdChar": "P",
+      "cmdModifiers": 1
+     },
+     {
+      "type": "item",
+      "title": "Scale..."
+     },
+     {
+      "type": "item",
+      "title": "Orientation...",
+      "cmdChar": "R",
+      "cmdModifiers": 3
+     },
+     {
+      "type": "item",
+      "title": "Rotation...",
+      "cmdChar": "R",
+      "cmdModifiers": 1
+     },
+     {
+      "type": "item",
+      "title": "Opacity...",
+      "cmdChar": "O",
+      "cmdModifiers": 1
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Flip Horizontal",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Flip Vertical",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Center In View",
+      "cmdChar": "↖",
+      "cmdModifiers": 0
+     },
+     {
+      "type": "item",
+      "title": "Center Anchor Point in Layer Content",
+      "enabled": false,
+      "cmdChar": "↖",
+      "cmdModifiers": 2
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Fit to Comp",
+      "enabled": false,
+      "cmdChar": "F",
+      "cmdModifiers": 2
+     },
+     {
+      "type": "item",
+      "title": "Fit to Comp Width",
+      "enabled": false,
+      "cmdChar": "H",
+      "cmdModifiers": 3
+     },
+     {
+      "type": "item",
+      "title": "Fit to Comp Height",
+      "enabled": false,
+      "cmdChar": "G",
+      "cmdModifiers": 3
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Auto-Orient...",
+      "cmdChar": "O",
+      "cmdModifiers": 2
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Time",
+    "items": [
+     {
+      "type": "item",
+      "title": "Enable Time Remapping",
+      "enabled": false,
+      "cmdChar": "T",
+      "cmdModifiers": 2
+     },
+     {
+      "type": "item",
+      "title": "Time-Reverse Layer",
+      "cmdChar": "R",
+      "cmdModifiers": 2
+     },
+     {
+      "type": "item",
+      "title": "Time Stretch..."
+     },
+     {
+      "type": "item",
+      "title": "Freeze Frame",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Freeze On Last Frame",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Align Video to Data",
+      "enabled": false
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Frame Blending",
+    "items": [
+     {
+      "type": "item",
+      "title": "Off"
+     },
+     {
+      "type": "item",
+      "title": "Frame Mix"
+     },
+     {
+      "type": "item",
+      "title": "Pixel Motion"
+     }
+    ]
+   },
+   {
+    "type": "item",
+    "title": "3D Layer",
+    "checked": true
+   },
+   {
+    "type": "item",
+    "title": "Guide Layer",
+    "enabled": false
+   },
+   {
+    "type": "item",
+    "title": "Environment Layer",
+    "enabled": false
+   },
+   {
+    "type": "submenu",
+    "title": "Markers",
+    "items": [
+     {
+      "type": "item",
+      "title": "Add Marker",
+      "cmdChar": "8",
+      "cmdModifiers": 12
+     },
+     {
+      "type": "item",
+      "title": "Update Markers From Source",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Lock Markers",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Delete All Markers",
+      "enabled": false
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Blending Mode",
+    "enabled": false,
+    "items": [
+     {
+      "type": "item",
+      "title": "Normal",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Dissolve",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Dancing Dissolve",
+      "enabled": false
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Darken",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Multiply",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Color Burn",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Classic Color Burn",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Linear Burn",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Darker Color",
+      "enabled": false
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Add",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Lighten",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Screen",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Color Dodge",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Classic Color Dodge",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Linear Dodge",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Lighter Color",
+      "enabled": false
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Overlay",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Soft Light",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Hard Light",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Linear Light",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Vivid Light",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Pin Light",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Hard Mix",
+      "enabled": false
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Difference",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Classic Difference",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Exclusion",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Subtract",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Divide",
+      "enabled": false
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Hue",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Saturation",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Color",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Luminosity",
+      "enabled": false
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Stencil Alpha",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Stencil Luma",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Silhouette Alpha",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Silhouette Luma",
+      "enabled": false
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Alpha Add",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Luminescent Premul",
+      "enabled": false
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Layer Styles",
+    "enabled": false,
+    "items": [
+     {
+      "type": "item",
+      "title": "Convert to Editable Styles",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Show All",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Remove All",
+      "enabled": false
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Drop Shadow",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Inner Shadow",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Outer Glow",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Inner Glow",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Bevel and Emboss",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Satin",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Color Overlay",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Gradient Overlay",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Stroke",
+      "enabled": false
+     }
+    ]
+   },
+   {
+    "type": "separator"
+   },
+   {
+    "type": "submenu",
+    "title": "Effect",
+    "items": [
+     {
+      "cmdChar": "",
+      "cmdModifiers": 8,
+      "enabled": false,
+      "title": "Effect Controls",
+      "type": "item"
+     },
+     {
+      "cmdChar": "E",
+      "cmdModifiers": 3,
+      "enabled": false,
+      "title": "Last Effect",
+      "type": "item"
+     },
+     {
+      "cmdChar": "E",
+      "cmdModifiers": 1,
+      "enabled": false,
+      "title": "Remove All",
+      "type": "item"
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "title": "Manage Effects...",
+      "type": "item"
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "submenu",
+      "title": "3D Channel",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Audio",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Blur & Sharpen",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Boris FX Mocha",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Channel",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Cinema 4D",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Color Correction",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Distort",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Expression Controls",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Generate",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Immersive Video",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Keying",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Matte",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Noise & Grain",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Obsolete",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Perspective",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Simulation",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Stylize",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Text",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Time",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Transition",
+      "items": []
+     },
+     {
+      "type": "submenu",
+      "title": "Utility",
+      "items": []
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Keyframe Assistant",
+    "items": [
+     {
+      "type": "item",
+      "title": "Convert Audio to Keyframes",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Convert Expression to Keyframes",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Create Keyframes from Data",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Easy Ease",
+      "enabled": false,
+      "cmdChar": "",
+      "cmdModifiers": 8
+     },
+     {
+      "type": "item",
+      "title": "Easy Ease In",
+      "enabled": false,
+      "cmdChar": "",
+      "cmdModifiers": 9
+     },
+     {
+      "type": "item",
+      "title": "Easy Ease Out",
+      "enabled": false,
+      "cmdChar": "",
+      "cmdModifiers": 1
+     },
+     {
+      "type": "item",
+      "title": "Exponential Scale",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Null Controllers for Path Points",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Null Controllers for Positional Points"
+     },
+     {
+      "type": "item",
+      "title": "Null Tracing Along Path",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Nulls Following Path Points",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "RPF Camera Import",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Sequence Layers...",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Time-Reverse Keyframes",
+      "enabled": false
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Track & Stabilize",
+    "items": [
+     {
+      "type": "item",
+      "title": "Track Camera",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Warp Stabilizer VFX",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Track Motion",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Track Mask",
+      "enabled": false
+     }
+    ]
+   },
+   {
+    "type": "separator"
+   },
+   {
+    "type": "submenu",
+    "title": "Open",
+    "items": [
+     {
+      "type": "item",
+      "title": "Open Effect Controls",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Open Layer",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Open Layer Source",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Edit Original...",
+      "enabled": false
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Reveal",
+    "items": [
+     {
+      "type": "item",
+      "title": "Reveal in Finder",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Reveal Layer Source in Project",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Reveal Layer in Project Flowchart"
+     },
+     {
+      "type": "item",
+      "title": "Reveal Composition in Project"
+     },
+     {
+      "type": "item",
+      "title": "Reveal Expression Errors"
+     }
+    ]
+   },
+   {
+    "type": "submenu",
+    "title": "Create",
+    "items": [
+     {
+      "type": "item",
+      "title": "Convert to Editable Text",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Create Shapes from Text",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Create Masks from Text",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Create Shapes from Vector Layer",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Create Keyframes from Data",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Null Controllers for Positional Points"
+     },
+     {
+      "type": "item",
+      "title": "Null Controllers for Path Points",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Nulls Following Path Points",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Null Tracing Along Path",
+      "enabled": false
+     },
+     {
+      "type": "item",
+      "title": "Create 3D Layer Instance",
+      "enabled": false
+     }
+    ]
+   },
+   {
+    "type": "separator"
+   },
+   {
+    "type": "submenu",
+    "title": "Camera",
+    "items": [
+     {
+      "type": "item",
+      "title": "Create Camera from 3D View"
+     },
+     {
+      "type": "item",
+      "title": "Create Stereo 3D Rig"
+     },
+     {
+      "type": "item",
+      "title": "Create Orbit Null"
+     },
+     {
+      "type": "item",
+      "title": "Create Cameras from 3D Model",
+      "enabled": false
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Link Focus Distance to Point of Interest"
+     },
+     {
+      "type": "item",
+      "title": "Link Focus Distance to Layer"
+     },
+     {
+      "type": "item",
+      "title": "Set Focus Distance to Layer"
+     },
+     {
+      "type": "separator"
+     },
+     {
+      "type": "item",
+      "title": "Camera 1 Settings..."
+     },
+     {
+      "type": "item",
+      "title": "Reset Camera 1"
+     }
+    ]
+   },
+   {
+    "type": "item",
+    "title": "Pre-compose...",
+    "enabled": false
+   },
+   {
+    "type": "separator"
+   },
+   {
+    "type": "item",
+    "title": "Invert Selection"
+   },
+   {
+    "type": "item",
+    "title": "Select Children"
+   },
+   {
+    "type": "item",
+    "title": "Rename"
+   },
+   {
+    "type": "item",
+    "title": "Add to Essential Graphics",
+    "enabled": false
+   },
+   {
+    "type": "item",
+    "title": "Crop Comp to Selected Layer(s) Bounds",
+    "enabled": false
+   },
+   {
+    "type": "item",
+    "title": "Scene Edit Detection...",
+    "enabled": false
+   }
   ]
  }
 }

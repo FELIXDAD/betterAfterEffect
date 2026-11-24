@@ -28,6 +28,8 @@ fn same_title(ae: &str, ours: &str) -> bool {
         "Active Camera (Camera 1)" => "Active Camera (Default)",
         "Reset Camera 1" => "Reset 3D View",
         "Camera 1 Settings..." => "Camera Settings...",
+        // Layer ▸ Transform on a camera.
+        "Point of Interest..." => "Anchor Point...",
         t => t,
     };
     ae == ours
@@ -147,6 +149,8 @@ fn menus_match_ae() {
     check("viewer.blank", VIEWER_BLANK);
     check("viewer.layer.solid", VIEWER_LAYER);
     check("timeline.blank", TIMELINE_BLANK);
+    // The Timeline's layer menu is the same table (AE 26 on the Mac).
+    check("timeline.layer.camera", VIEWER_LAYER);
     check("timeline.header", TIMELINE_HEADER);
     check("project.blank", PROJECT_BLANK);
     check("project.header", PROJECT_HEADER);
