@@ -9,6 +9,8 @@
 #   aectl diagnose               main-thread stack, last error-dialog text, crash flags
 #   aectl clean                  clear crash / force-quit flags (AE must not be running)
 #   aectl install                install the startup "ready" script and enable script file access
+#   aectl lock [--lock-timeout <s>] -- command [args...]
+#                                reserve the shared AE session for a command or batch
 #
 # Exit codes of eval/run: 0 ok, 1 script error, 3 dialog recovered, 4 timeout,
 # 5 osascript failed before the script ran.
@@ -28,16 +30,63 @@
 #   stale session records, relaunch.
 set -uo pipefail
 
+die() { echo "aectl: $*" >&2; exit 1; }
+log() { echo "aectl: $*" >&2; }
+nap() { perl -e "select(undef,undef,undef,$1)"; }
+
+# This is the host-wide lock used by workers. Keep it separate from STATE/lock.d,
+# which serializes individual aectl calls, including calls made inside this scope.
+with_shared_lock() {
+  local path="${BAE_AE_LOCK_DIR:-/private/tmp/bae-locks}/ae.lock"
+  local owner="$$-$RANDOM" deadline=$((SECONDS + lock_timeout)) waiting=0
+  mkdir -p "$(dirname "$path")" || die "cannot create the shared lock directory"
+  while ! mkdir "$path" 2>/dev/null; do
+    (( SECONDS < deadline )) || die "After Effects still reserved after ${lock_timeout}s (lock: $path)"
+    if (( ! waiting )); then
+      log "waiting for the shared After Effects lock ($path)"
+      waiting=1
+    fi
+    sleep 1
+  done
+  trap 'if [[ "$(cat "$path/owner" 2>/dev/null)" == "$owner" ]]; then
+    rm "$path/owner" && rmdir "$path"
+  fi' EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  if ! printf '%s\n' "$owner" > "$path/owner"; then
+    rmdir "$path"
+    die "cannot record ownership of $path"
+  fi
+  "$@"
+  exit $?
+}
+
+cmd="${1:-status}"; shift || true
+force=0; timeout=300; lock_timeout=1800; args=()
+while (( $# )); do
+  case "$1" in
+    --force) force=1 ;;
+    --timeout) [[ $# -ge 2 ]] || die "--timeout requires seconds"; timeout="$2"; shift ;;
+    --lock-timeout)
+      [[ "${2:-}" =~ ^[0-9]{1,9}$ ]] || die "--lock-timeout requires seconds"
+      lock_timeout=$((10#$2)); shift ;;
+    --) shift; args+=("$@"); break ;;
+    *) args+=("$1") ;;
+  esac
+  shift
+done
+if [[ "$cmd" == lock ]]; then
+  [[ ${#args[@]} -gt 0 ]] || die "usage: aectl lock [--lock-timeout <s>] -- command [args...]"
+  with_shared_lock "${args[@]}"
+fi
+
 STATE="${BAE_AE_STATE:-/tmp/bae-ae-automation}"
 mkdir -p "$STATE"
 # Physical path: ExtendScript's Folder.create() fails through symlinks such as /tmp ->
 # /private/tmp, so every path handed to After Effects must be resolved.
 STATE="$(cd "$STATE" && pwd -P)"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-die() { echo "aectl: $*" >&2; exit 1; }
-log() { echo "aectl: $*" >&2; }
-nap() { perl -e "select(undef,undef,undef,$1)"; }
 
 find_app() {
   if [[ -n "${AE_APP:-}" ]]; then echo "$AE_APP"; return; fi
@@ -413,17 +462,6 @@ acquire_lock() {
   trap 'rm -rf "$LOCK"' EXIT
 }
 
-cmd="${1:-status}"; shift || true
-force=0; timeout=300; lock_timeout=1800; args=()
-while (( $# )); do
-  case "$1" in
-    --force) force=1 ;;
-    --timeout) timeout="$2"; shift ;;
-    --lock-timeout) lock_timeout="$2"; shift ;;
-    *) args+=("$1") ;;
-  esac
-  shift
-done
 case "$cmd" in
   start|stop|eval|run|clean|install) acquire_lock "$lock_timeout" ;;
 esac
@@ -436,5 +474,5 @@ case "$cmd" in
   diagnose) diagnose ;;
   clean) clean_flags ;;
   install) install ;;
-  *) sed -n '2,15p' "$0"; exit 2 ;;
+  *) sed -n '2,17p' "$0"; exit 2 ;;
 esac
