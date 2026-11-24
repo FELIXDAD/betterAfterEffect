@@ -725,6 +725,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tiff",
  "tracing",
+ "windows",
  "zune-jpeg",
 ]
 

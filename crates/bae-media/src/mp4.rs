@@ -127,6 +127,28 @@ fn is_sound(trak: &[u8]) -> bool {
     find_path(trak, &[b"mdia", b"hdlr"]).is_some_and(|hdlr| hdlr.get(8..12) == Some(b"soun"))
 }
 
+/// Presentation length of the first video track, in MF's 100 ns units. The
+/// presentation descriptor describes the whole movie, including longer audio.
+#[cfg(windows)]
+pub(crate) fn video_duration(path: &Path) -> Option<i64> {
+    let moov = read_moov(path)?;
+    let scale = mvhd_timescale(find(&moov, b"mvhd")?)?;
+    let (_, track) = children(&moov).find(|(kind, track)| {
+        kind == b"trak"
+            && find_path(track, &[b"mdia", b"hdlr"]).is_some_and(|h| h.get(8..12) == Some(b"vide"))
+    })?;
+    let header = find(track, b"tkhd")?;
+    let duration = if *header.first()? == 1 {
+        be_u64(header, 28)?
+    } else {
+        u64::from(be_u32(header, 20)?)
+    };
+    if duration == 0 || scale == 0 {
+        return None;
+    } // Fragmented movie.
+    i64::try_from(u128::from(duration) * 10_000_000 / u128::from(scale)).ok()
+}
+
 fn elst_trim(trak: &[u8], movie_timescale: u32, sample_rate: u32) -> Option<AudioTrim> {
     let media_timescale = find_path(trak, &[b"mdia", b"mdhd"]).and_then(mvhd_timescale)?;
     let elst = find_path(trak, &[b"edts", b"elst"])?;
