@@ -6,6 +6,14 @@
 // Normal, Add (float) and Screen use fixed-function blending (the shader returns
 // the premultiplied source). Every other case reads the backdrop from a copy of
 // the target (`t_dst`) and the pipeline replaces the pixel.
+//
+// 3D layers (FLAG_PROJECTIVE) use full homographies: the vertex stage emits
+// homogeneous clip positions (w = camera depth, clipped at the near plane) and
+// the fragment stage maps each pixel back into the layer with the inverse,
+// measuring edge ramps with the local Jacobian. Pieces of layers split at 3D
+// intersections carry clip half-planes in layer space. Motion-blurred layers
+// (FLAG_MOTION) draw one quad over all placements and average the layer at
+// every sample placement per pixel (AE-CMP-064).
 
 struct Draw {
     // input texel -> target texel: x' = a * x + b * y + c (a, b, c, ROI origin x), y' likewise.
@@ -34,6 +42,22 @@ struct Draw {
     mask_val: vec4<f32>,
     // The mask's region in its atlas page (uv min, max).
     mask_clip: vec4<f32>,
+    // Forward homography w row (input texel -> target texel), near-plane weight.
+    fwd_w: vec4<f32>,
+    // Inverse homography w row.
+    inv_w: vec4<f32>,
+    // Clip half-planes a * u + b * v + c >= 0 in input texels.
+    clips: array<vec4<f32>, 4>,
+    // Clip count, first motion sample, sample count, unused.
+    extra: vec4<u32>,
+}
+
+// One motion-blur placement: target texel -> input texel (rows of the inverse
+// homography); inv_w.w = 1 / near for 3D samples, 0 otherwise.
+struct Sample {
+    inv_x: vec4<f32>,
+    inv_y: vec4<f32>,
+    inv_w: vec4<f32>,
 }
 
 // Discriminants of BlendMode in blend.rs.
@@ -83,8 +107,11 @@ const FLAG_PRESERVE: u32 = 16u;
 const FLAG_CLAMP: u32 = 32u;
 const FLAG_OPAQUE: u32 = 64u;
 const FLAG_MASK: u32 = 128u;
+const FLAG_PROJECTIVE: u32 = 256u;
+const FLAG_MOTION: u32 = 512u;
 
 @group(0) @binding(0) var<storage, read> draws: array<Draw>;
+@group(0) @binding(1) var<storage, read> samples: array<Sample>;
 @group(1) @binding(0) var t_src: texture_2d<f32>;
 @group(1) @binding(1) var t_matte: texture_2d<f32>;
 @group(1) @binding(2) var t_dst: texture_2d<f32>;
@@ -102,14 +129,18 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     // Two triangles over the corners (x0, y0) (x1, y0) (x0, y1) | (x0, y1) (x1, y0) (x1, y1).
     let cx = vi == 1u || vi == 4u || vi == 5u;
     let cy = vi == 2u || vi == 3u || vi == 5u;
-    let p = vec2<f32>(select(d.quad.x, d.quad.z, cx), select(d.quad.y, d.quad.w, cy));
-    var t = vec2<f32>(dot(d.fwd_x.xyz, vec3<f32>(p, 1.0)), dot(d.fwd_y.xyz, vec3<f32>(p, 1.0)));
+    let p = vec3<f32>(select(d.quad.x, d.quad.z, cx), select(d.quad.y, d.quad.w, cy), 1.0);
+    // Homogeneous target position (w = 1 for affine draws).
+    var t = vec2<f32>(dot(d.fwd_x.xyz, p), dot(d.fwd_y.xyz, p));
+    var w = dot(d.fwd_w.xyz, p);
     if d.mode.x == MODE_STENCIL_ALPHA || d.mode.x == MODE_STENCIL_LUMA {
         // Outside the source a stencil clears the entire underlying composite.
         t = vec2<f32>(select(0.0, d.tgt.x, cx), select(0.0, d.tgt.y, cy));
+        w = 1.0;
     }
     var out: VsOut;
-    out.pos = vec4<f32>(t.x / d.tgt.x * 2.0 - 1.0, 1.0 - t.y / d.tgt.y * 2.0, 0.0, 1.0);
+    // z = (w - near) / 2 keeps 0 <= z <= w only in front of the near plane.
+    out.pos = vec4<f32>(t.x / d.tgt.x * 2.0 - w, w - t.y / d.tgt.y * 2.0, 0.5 * (w - d.fwd_w.w), w);
     out.draw = ii;
     return out;
 }
@@ -221,22 +252,54 @@ fn noise(pixel: vec2<u32>, seed: u32) -> f32 {
     return f32((h ^ (h >> 16u)) >> 8u) / 16777216.0;
 }
 
-@fragment
-fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let d = draws[in.draw];
+// A layer's pixel at target position p for one placement of the layer (rows
+// ix, iy, iw of the target texel -> input texel map): premultiplied colour, the
+// raw texel colour (Luminescent Premul) and the coverage factor k (edge ramps,
+// mask, 3D clip lines; not opacity or matte).
+struct Px {
+    src: vec4<f32>,
+    light: vec3<f32>,
+    k: f32,
+}
+
+fn layer_px(di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: vec4<f32>, projective: bool) -> Px {
+    let d = draws[di];
     let flags = d.mode.y;
-    let p = in.pos.xy;
-    let u = vec2<f32>(dot(d.inv_x.xyz, vec3<f32>(p, 1.0)), dot(d.inv_y.xyz, vec3<f32>(p, 1.0)));
+    let hp = vec3<f32>(p, 1.0);
+    var out: Px;
+    var u: vec2<f32>;
+    var du_dx: vec2<f32>;
+    var du_dy: vec2<f32>;
+    // Target pixels per input texel across the edges x = const and y = const.
+    var kxy: vec2<f32>;
+    if projective {
+        let uh = vec3<f32>(dot(ix.xyz, hp), dot(iy.xyz, hp), dot(iw.xyz, hp));
+        // uh.z = 1 / camera depth: nothing at or behind the near plane.
+        if iw.w > 0.0 && (uh.z <= 0.0 || uh.z > iw.w) { return out; }
+        u = uh.xy / uh.z;
+        du_dx = (vec2<f32>(ix.x, iy.x) - u * iw.x) / uh.z;
+        du_dy = (vec2<f32>(ix.y, iy.y) - u * iw.y) / uh.z;
+        let gx = length(vec2<f32>(du_dx.x, du_dy.x));
+        let gy = length(vec2<f32>(du_dx.y, du_dy.y));
+        kxy = 1.0 / max(vec2<f32>(gx, gy), vec2<f32>(1e-20));
+    } else {
+        u = vec2<f32>(dot(ix.xyz, hp), dot(iy.xyz, hp));
+        du_dx = vec2<f32>(ix.x, iy.x);
+        du_dy = vec2<f32>(ix.y, iy.y);
+        kxy = d.src.zw;
+    }
 
     // Edge coverage, matching AE's resampling of a layer's raster: the edge ramps
     // over max(1 target pixel, 1 source texel) – a box filter when the layer is
     // drawn at or below its size, bilinear magnification with a transparent
     // border when it is enlarged. Edge distances are measured perpendicular, in
     // target pixels, then in units of that footprint.
-    let footprint = max(vec2<f32>(1.0), d.src.zw);
-    let dl = (u - d.rect.xy) * d.src.zw / footprint;
-    let dr = (d.rect.zw - u) * d.src.zw / footprint;
+    let footprint = max(vec2<f32>(1.0), kxy);
+    let dl = (u - d.rect.xy) * kxy / footprint;
+    let dr = (d.rect.zw - u) * kxy / footprint;
     let cov2 = clamp(min(dl, vec2<f32>(0.5)) + min(dr, vec2<f32>(0.5)), vec2<f32>(0.0), vec2<f32>(1.0));
+    var k = cov2.x * cov2.y;
+    if k <= 0.0 { return out; }
 
     var src: vec4<f32>;
     var light: vec3<f32>;
@@ -244,8 +307,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         // Minified layers average a grid of bilinear samples over the pixel's
         // footprint in the source (a box prefilter, like AE's downsampling);
         // others take one sample.
-        let du_dx = vec2<f32>(d.inv_x.x, d.inv_y.x);
-        let du_dy = vec2<f32>(d.inv_x.y, d.inv_y.y);
         let n = u32(clamp(ceil(max(length(du_dx), length(du_dy))), 1.0, 4.0));
         if n == 1u {
             src = textureSampleLevel(t_src, s_linear, u * d.src.xy, 0.0);
@@ -271,8 +332,60 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         src = vec4<f32>(d.color.rgb * d.color.a, d.color.a);
     }
 
-    // Coverage x opacity (AE-CMP-031), then the track matte (AE-CMP-034) and masks.
-    var k = cov2.x * cov2.y * d.tgt.z;
+    // Layer masks (AE-CMP-038): the combined mask, or one mask's coverage with
+    // its value transform, in layer space.
+    if (flags & FLAG_MASK) != 0u {
+        let muv = clamp(u * d.mask_uv.xy + d.mask_uv.zw, d.mask_clip.xy, d.mask_clip.zw);
+        let mv = textureSampleLevel(t_mask, s_linear, muv, 0.0).x;
+        k = k * clamp(d.mask_val.x + d.mask_val.y * mv, 0.0, 1.0);
+    }
+    // Pieces of 3D layers cut at intersections (AE-CMP-405): anti-aliased over
+    // one target pixel, so the two sides of a cut add up to full coverage.
+    let clip_count = min(d.extra.x, 4u);
+    for (var i = 0u; i < clip_count; i++) {
+        let c = draws[di].clips[i];
+        let g = vec2<f32>(dot(c.xy, du_dx), dot(c.xy, du_dy));
+        k = k * clamp((dot(c.xy, u) + c.z) / max(length(g), 1e-20) + 0.5, 0.0, 1.0);
+    }
+    out.src = src;
+    out.light = light;
+    out.k = k;
+    return out;
+}
+
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    let d = draws[in.draw];
+    let flags = d.mode.y;
+    let p = in.pos.xy;
+
+    var src: vec4<f32>;
+    var light: vec3<f32>;
+    var k: f32;
+    if (flags & FLAG_MOTION) != 0u {
+        // Motion blur (AE-CMP-064): the equal-weight average of the layer at
+        // every sample placement, premultiplied, before opacity and matte.
+        var acc = vec4<f32>(0.0);
+        var acc_light = vec3<f32>(0.0);
+        let n = max(d.extra.z, 1u);
+        for (var i = 0u; i < n; i++) {
+            let s = samples[d.extra.y + i];
+            let px = layer_px(in.draw, p, s.inv_x, s.inv_y, s.inv_w, true);
+            acc += px.src * px.k;
+            acc_light += px.light * px.k;
+        }
+        src = acc / f32(n);
+        light = acc_light / f32(n);
+        k = 1.0;
+    } else {
+        let px = layer_px(in.draw, p, d.inv_x, d.inv_y, d.inv_w, (flags & FLAG_PROJECTIVE) != 0u);
+        src = px.src;
+        light = px.light;
+        k = px.k;
+    }
+
+    // Opacity (AE-CMP-031), then the track matte (AE-CMP-034).
+    k = k * d.tgt.z;
     if (flags & FLAG_MATTE) != 0u {
         let mt = vec2<i32>(floor(p - d.matte.xy));
         var v = 0.0;
@@ -285,13 +398,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             v = 1.0 - v;
         }
         k = k * clamp(v, 0.0, 1.0);
-    }
-    // Layer masks (AE-CMP-038): the combined mask, or one mask's coverage with
-    // its value transform, in layer space.
-    if (flags & FLAG_MASK) != 0u {
-        let muv = clamp(u * d.mask_uv.xy + d.mask_uv.zw, d.mask_clip.xy, d.mask_clip.zw);
-        let mv = textureSampleLevel(t_mask, s_linear, muv, 0.0).x;
-        k = k * clamp(d.mask_val.x + d.mask_val.y * mv, 0.0, 1.0);
     }
     src = src * k;
 
