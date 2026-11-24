@@ -224,6 +224,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     // Keyframes
     ("Keyframe Assistant", "关键帧辅助"),
     ("Easy Ease", "缓动"),
+    // Context menus (AE 26).
+    ("Layer Styles", "图层样式"),
+    ("Open Effect Controls", "打开效果控件"),
     ("Easy Ease In", "缓入"),
     ("Easy Ease Out", "缓出"),
     ("Time-Reverse Keyframes", "时间反向关键帧"),

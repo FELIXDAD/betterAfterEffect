@@ -24,6 +24,7 @@
 pub mod actions;
 pub mod catalog;
 mod common;
+mod context_menu;
 pub mod demo;
 pub mod dialogs;
 pub mod effects;
