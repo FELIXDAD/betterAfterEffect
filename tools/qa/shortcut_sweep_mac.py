@@ -199,9 +199,8 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument(
         "--lock",
-        default=os.environ.get("BAE_GUI_LOCK"),
-        required=os.environ.get("BAE_GUI_LOCK") is None,
-        help="the machine's GUI directory lock (mkdir), or BAE_GUI_LOCK",
+        default=os.environ.get("BAE_GUI_LOCK", "/private/tmp/bae-locks/gui.lock"),
+        help="the machine's GUI directory lock (mkdir)",
     )
     args = ap.parse_args()
 
