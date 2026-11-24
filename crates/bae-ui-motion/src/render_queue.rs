@@ -60,13 +60,14 @@ pub fn supports_alpha(format: ExportFormat) -> bool {
     !matches!(format, ExportFormat::H264 | ExportFormat::ProRes)
 }
 
-/// The channels a new output module of `format` starts with: movies RGB (AE's
-/// H.264 / QuickTime templates), ProRes 4444 RGB + Alpha (AE's "High Quality
-/// with Alpha"), image sequences RGB + Alpha.
+/// The channels a new output module of `format` starts with: RGB, as AE's
+/// output module (transparent areas flattened over the comp background,
+/// black by default, #225); ProRes 4444 RGB + Alpha, as AE's "High Quality
+/// with Alpha" template.
 pub fn default_channels(format: ExportFormat) -> Channels {
     match format {
-        ExportFormat::H264 | ExportFormat::Hevc | ExportFormat::ProRes => Channels::Rgb,
-        _ => Channels::RgbAlpha,
+        ExportFormat::ProRes4444 => Channels::RgbAlpha,
+        _ => Channels::Rgb,
     }
 }
 
@@ -1455,11 +1456,7 @@ mod tests {
                 Channels::RgbAlpha,
             ),
             (ExportFormat::ProRes, "/r/Main/Main.mov", Channels::Rgb),
-            (
-                ExportFormat::Tiff,
-                "/r/Main/Main_[####].tif",
-                Channels::RgbAlpha,
-            ),
+            (ExportFormat::Tiff, "/r/Main/Main_[####].tif", Channels::Rgb),
             (ExportFormat::Hevc, "/r/Main/Main.mp4", Channels::Rgb),
         ];
         for (format, output, channels) in steps {
@@ -1556,6 +1553,53 @@ mod tests {
             let len = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
             assert!(len > 0, "{} not written", file.display());
         }
+    }
+
+    /// #225: a new PNG item writes RGB (opaque, transparent areas over the
+    /// comp background) like AE; RGB + Alpha keeps them transparent.
+    #[test]
+    fn png_defaults_to_rgb_and_rgb_alpha_keeps_transparency() {
+        let Some(gpu) = gpu() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let (stage, comp) = project();
+        let info = bae_motion::query::comp_info(&stage, &comp).unwrap();
+        let mut q = RenderQueue::default();
+        for (name, channels) in [("rgb", None), ("alpha", Some(Channels::RgbAlpha))] {
+            let id = q.add(&info, dir.path());
+            let item = q.item_mut(id).unwrap();
+            assert_eq!(
+                (item.format, item.channels),
+                (ExportFormat::Png, Channels::Rgb)
+            );
+            if let Some(c) = channels {
+                item.channels = c;
+            }
+            item.output = dir
+                .path()
+                .join(format!("{name}.png"))
+                .to_string_lossy()
+                .into_owned();
+            (item.start, item.end) = (0, 0);
+        }
+        assert!(q.begin());
+        let mut renderer = Renderer::new(gpu);
+        let mut evaluator = AnimEvaluator::new(None);
+        let frames =
+            |c: &PrimPath| bae_motion::query::comp_info(&stage, c).map(|i| i.frame_count());
+        while let Some(job) = q.take_next(&frames) {
+            render_job(&mut renderer, &mut evaluator, &stage, &job, &mut |_, _| {}).unwrap();
+        }
+        // The fixture's solid covers the top-left 10×10 of a 40×24 comp; the
+        // bottom-right corner is empty.
+        let corner = |file: &str| {
+            let (w, h, px) = bae_render::png_out::read_rgba8(&dir.path().join(file)).unwrap();
+            let i = (((h - 1) * w + (w - 1)) * 4) as usize;
+            px[i..i + 4].to_vec()
+        };
+        assert_eq!(corner("rgb.png"), [0, 0, 0, 255], "RGB: over black");
+        assert_eq!(corner("alpha.png")[3], 0, "RGB + Alpha: transparent");
     }
 
     #[test]
