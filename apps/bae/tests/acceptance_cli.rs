@@ -26,6 +26,19 @@ fn bae() -> Command {
     c
 }
 
+/// Environment variables the UI language comes from, strongest first.
+const LANG_VARS: [&str; 4] = ["BAE_LANG", "LC_ALL", "LC_MESSAGES", "LANG"];
+
+/// [`bae`] with the UI language environment replaced by `env`.
+fn bae_in(env: &[(&str, &str)]) -> Command {
+    let mut c = bae();
+    for k in LANG_VARS {
+        c.env_remove(k);
+    }
+    c.envs(env.iter().copied());
+    c
+}
+
 /// How long one `bae` run (or one MCP reply) may take. Generous: a debug build
 /// on a busy CI runner; a hang fails the test with a message instead of
 /// holding the CI job until its own limit.
@@ -314,7 +327,17 @@ struct Mcp {
 
 impl Mcp {
     fn start(project: &Path) -> Mcp {
-        let mut child = bae()
+        Self::spawn(bae(), project)
+    }
+
+    /// [`Mcp::start`] with the UI language environment (`BAE_LANG`, `LC_ALL`,
+    /// `LC_MESSAGES`, `LANG`) replaced by `env`.
+    fn start_in(project: &Path, env: &[(&str, &str)]) -> Mcp {
+        Self::spawn(bae_in(env), project)
+    }
+
+    fn spawn(mut command: Command, project: &Path) -> Mcp {
+        let mut child = command
             .args(["mcp", "--create", "--name", "acceptance", "--audit-log"])
             .arg(project.with_extension("audit.jsonl"))
             .arg(project)
@@ -1419,6 +1442,199 @@ fn every_entry_says_the_same_sentence_in_both_languages() {
                     );
                 }
             }
+        }
+    }
+}
+
+/// Locale variables for one `bae` run, e.g. `[("LANG", "zh_CN.UTF-8")]`.
+type LangEnv<'a> = &'a [(&'a str, &'a str)];
+
+/// Display name of every prim, by path.
+fn all_names(stage: &bae_model::Stage) -> std::collections::BTreeMap<String, String> {
+    stage
+        .traverse()
+        .into_iter()
+        .map(|p| {
+            let name = bae_motion::query::display_name_of(stage, &p);
+            (p.as_str().to_owned(), name)
+        })
+        .collect()
+}
+
+/// #152 retest: `bae mcp` names unnamed comps, layers, shape contents and the
+/// default folders in the language of its environment (`BAE_LANG`, then
+/// `LC_ALL` / `LC_MESSAGES` / `LANG`, else English); a project reopened in the
+/// other language keeps every name and new items follow that language;
+/// `bae export-json` prints the same in both languages.
+#[test]
+fn mcp_names_new_items_in_the_language_of_its_environment() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tricky(tmp.path());
+    let zh = [
+        "合成 1",
+        "形状图层 1",
+        "矩形 1",
+        "矩形路径 1",
+        "填充 1",
+        "合成",
+    ];
+    let en = [
+        "Comp 1",
+        "Shape Layer 1",
+        "Rectangle 1",
+        "Rectangle Path 1",
+        "Fill 1",
+        "comps",
+    ];
+    let cases: [(LangEnv<'_>, [&str; 6]); 6] = [
+        (&[("BAE_LANG", "zh")], zh),
+        (&[("BAE_LANG", "zh-CN")], zh),
+        (&[("LANG", "zh_CN.UTF-8")], zh),
+        (&[("LC_ALL", "zh_CN.UTF-8"), ("LANG", "en_US.UTF-8")], zh),
+        (&[("BAE_LANG", "en"), ("LC_ALL", "zh_CN.UTF-8")], en),
+        // Launched from Finder / Explorer: no locale variables at all.
+        (&[], en),
+    ];
+    let mut zh_project = None;
+    for (i, (env, want)) in cases.iter().enumerate() {
+        let project = dir.join(format!("语言 {i}.bae"));
+        let (comp, layer) = {
+            let mut mcp = Mcp::start_in(&project, env);
+            let comp = mcp.call("comp_create", json!({"fps": 30, "duration": 2 * SEC}));
+            let comp = comp["output"]["path"].as_str().unwrap().to_owned();
+            let layer = mcp.call(
+                "layer_create",
+                json!({"comp": comp, "kind": "shape", "shape": "rect"}),
+            );
+            let layer = layer["output"]["path"].as_str().unwrap().to_owned();
+            (comp, layer)
+        };
+        let stage = Project::open(&project).unwrap().stage;
+        let names = all_names(&stage);
+        let name = |p: &str| names.get(p).cloned().unwrap_or_default();
+        let contents: Vec<String> = names
+            .iter()
+            .filter(|(p, _)| p.starts_with(&format!("{layer}/contents/")))
+            .map(|(_, n)| n.clone())
+            .collect();
+        let got = [
+            name(&comp),
+            name(&layer),
+            contents
+                .iter()
+                .find(|n| n.starts_with(&want[2][..3]))
+                .cloned()
+                .unwrap_or_default(),
+            name(&format!(
+                "{layer}/contents/Rectangle_1/contents/Rectangle_Path_1"
+            )),
+            name(&format!("{layer}/contents/Rectangle_1/contents/Fill_1")),
+            name("/comps"),
+        ];
+        assert_eq!(got, *want, "{env:?}: {names:#?}");
+        if i == 0 {
+            zh_project = Some((project, comp, names));
+        }
+    }
+
+    // The Chinese project in an English session: nothing renamed, new items English.
+    let (project, comp, before) = zh_project.unwrap();
+    {
+        let mut mcp = Mcp::start_in(&project, &[("BAE_LANG", "en")]);
+        let new_comp = mcp.call("comp_create", json!({"fps": 30, "duration": SEC}));
+        let new_comp = new_comp["output"]["path"].as_str().unwrap().to_owned();
+        let new_layer = mcp.call(
+            "layer_create",
+            json!({"comp": comp, "kind": "shape", "shape": "ellipse"}),
+        );
+        let new_layer = new_layer["output"]["path"].as_str().unwrap().to_owned();
+        let stage = Project::open(&project).unwrap().stage;
+        let names = all_names(&stage);
+        for (path, name) in &before {
+            assert_eq!(names.get(path), Some(name), "{path} renamed in English");
+        }
+        assert_eq!(names[&new_comp], "Comp 1");
+        assert_eq!(names[&new_layer], "Shape Layer 1");
+        assert_eq!(
+            names[&format!("{new_layer}/contents/Ellipse_1/contents/Ellipse_Path_1")],
+            "Ellipse Path 1"
+        );
+    }
+    // Back in Chinese: the next comp is numbered after the Chinese ones.
+    {
+        let mut mcp = Mcp::start_in(&project, &[("BAE_LANG", "zh")]);
+        let c = mcp.call("comp_create", json!({"fps": 30, "duration": SEC}));
+        let c = c["output"]["path"].as_str().unwrap().to_owned();
+        let stage = Project::open(&project).unwrap().stage;
+        assert_eq!(
+            bae_motion::query::display_name_of(&stage, &bae_model::PrimPath::new(&c).unwrap()),
+            "合成 2"
+        );
+    }
+    let export = |lang: &str| {
+        let out = bae_in(&[("BAE_LANG", lang)])
+            .arg("export-json")
+            .arg(&project)
+            .output_within_limit()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        out.stdout
+    };
+    assert!(
+        export("zh") == export("en"),
+        "export-json depends on the UI language"
+    );
+}
+
+/// #207 retest: a one-frame range still numbers a `####` / `[####]` output name,
+/// for PNG, TIFF and EXR, so rendering frame by frame keeps every frame.
+#[test]
+fn single_frame_renders_number_the_output_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tricky(tmp.path());
+    let project = dir.join("单帧 工程.bae");
+    make_project(&project);
+    // The comp's prim path (`--comp` does not take the display name: #214).
+    let comp = bae_motion::query::comps(&Project::open(&project).unwrap().stage)[0].to_string();
+    for ext in ["png", "tif", "exr"] {
+        for (pattern, want) in [
+            (format!("帧 a_####.{ext}"), ["帧 a_0005", "帧 a_0006"]),
+            (format!("帧 b_[####].{ext}"), ["帧 b_0005", "帧 b_0006"]),
+        ] {
+            for frames in ["5-5", "6-6"] {
+                let out = bae()
+                    .args(["render"])
+                    .arg(&project)
+                    .args(["--comp", &comp, "--frames", frames, "-o"])
+                    .arg(dir.join(&pattern))
+                    .output_within_limit()
+                    .unwrap();
+                assert!(
+                    out.status.success(),
+                    "{pattern} {frames}: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+            }
+            for name in want {
+                let file = dir.join(format!("{name}.{ext}"));
+                assert!(
+                    file.is_file(),
+                    "{pattern}: {} missing; folder has {:?}",
+                    file.display(),
+                    std::fs::read_dir(&dir)
+                        .unwrap()
+                        .map(|e| e.unwrap().file_name())
+                        .collect::<Vec<_>>()
+                );
+            }
+            assert!(
+                !dir.join(&pattern).exists(),
+                "{pattern} written with the # in its name"
+            );
         }
     }
 }

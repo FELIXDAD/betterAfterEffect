@@ -1,8 +1,8 @@
 //! [`GpuContext`]: the one wgpu instance / adapter / device / queue per process.
 
 use std::fmt;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Weak};
 
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -301,6 +301,58 @@ impl fmt::Debug for GpuContext {
     }
 }
 
+/// Contexts alive in this process, by their device-lost state (only the context
+/// holds the `Arc`); see [`GpuContext::live_count`] and [`GpuContext::devices_in_use`].
+static LIVE_CONTEXTS: Mutex<Vec<Weak<LostState>>> = Mutex::new(Vec::new());
+
+/// Devices created while another one was in use; see
+/// [`GpuContext::extra_devices_created`].
+static EXTRA_DEVICES: AtomicUsize = AtomicUsize::new(0);
+
+/// (alive, in use = alive and not lost) contexts, dropping entries of dead ones.
+fn live_contexts() -> (usize, usize) {
+    let mut live = LIVE_CONTEXTS.lock();
+    live.retain(|state| state.strong_count() > 0);
+    let in_use = live
+        .iter()
+        .filter_map(Weak::upgrade)
+        .filter(|state| !state.lost.load(Ordering::Acquire))
+        .count();
+    (live.len(), in_use)
+}
+
+/// Held while a device is created and warmed up (#154). On adapters that only take
+/// DXIL (WARP), D3D12 converts FXC's DXBC with Windows' `dxilconv.dll`, whose LLVM
+/// state is not safe to initialize from several threads: two devices created at
+/// once crashed in `llvm::PassRegistry::getPassInfo` (0xc0000005). wgpu converts a
+/// shader inside `request_device` (indirect-draw validation) and
+/// [`warm_up_shader_conversion`] does it again explicitly, so the converter is
+/// initialized by one thread before any device is handed out.
+static DEVICE_CREATION: Mutex<()> = Mutex::new(());
+
+/// Builds a minimal compute pipeline, which on D3D12 compiles a shader and (on
+/// DXIL-only adapters) runs it through `dxilconv`: see [`DEVICE_CREATION`]. Does not
+/// rely on wgpu's indirect validation, which can be turned off with
+/// `WGPU_VALIDATION_INDIRECT_CALL=0`. Costs a few milliseconds per device.
+fn warm_up_shader_conversion(device: &wgpu::Device) {
+    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("bae warm-up"),
+        source: wgpu::ShaderSource::Wgsl("@compute @workgroup_size(1) fn main() {}".into()),
+    });
+    let _pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("bae warm-up"),
+        layout: None,
+        module: &module,
+        entry_point: Some("main"),
+        compilation_options: wgpu::PipelineCompilationOptions::default(),
+        cache: None,
+    });
+    if let Some(error) = pollster::block_on(scope.pop()) {
+        tracing::warn!("shader warm-up failed: {error}");
+    }
+}
+
 impl GpuContext {
     /// Creates a context without a window (render, export, tests, `--headless`).
     /// Blocks on wgpu's async adapter/device requests.
@@ -311,7 +363,7 @@ impl GpuContext {
     /// Async variant of [`Self::new_headless`].
     pub async fn new_headless_async(desc: GpuContextDescriptor) -> Result<Arc<Self>, GpuError> {
         let instance = create_instance(&desc);
-        Self::from_instance(instance, desc, None).await
+        Self::from_instance(instance, desc, None, false).await
     }
 
     /// Creates a context whose adapter can present to `target` (normally an
@@ -323,7 +375,7 @@ impl GpuContext {
     ) -> Result<(Arc<Self>, wgpu::Surface<'static>), GpuError> {
         let instance = create_instance(&desc);
         let surface = instance.create_surface(target)?;
-        let ctx = pollster::block_on(Self::from_instance(instance, desc, Some(&surface)))?;
+        let ctx = pollster::block_on(Self::from_instance(instance, desc, Some(&surface), false))?;
         Ok((ctx, surface))
     }
 
@@ -348,13 +400,37 @@ impl GpuContext {
             self.instance.clone(),
             self.descriptor.clone(),
             None,
+            true,
         ))
     }
 
+    /// How many contexts (GPU devices) are alive in this process, lost ones included.
+    pub fn live_count() -> usize {
+        live_contexts().0
+    }
+
+    /// How many contexts are alive and not lost. The app uses one device per
+    /// process: everything in it shares one `Arc<GpuContext>` (tests share
+    /// [`crate::testing::shared_context`]).
+    pub fn devices_in_use() -> usize {
+        live_contexts().1
+    }
+
+    /// How many devices this process created while another device was in use
+    /// (each is logged as an error). Creating or destroying a device while another
+    /// one converts shaders crashed D3D12 on WARP (#154), so the app must keep
+    /// this at zero; replacing a lost device does not count.
+    pub fn extra_devices_created() -> usize {
+        EXTRA_DEVICES.load(Ordering::Relaxed)
+    }
+
+    /// `replacing`: [`Self::recreate`], which replaces a lost device and is not
+    /// reported even if another device is still in use.
     async fn from_instance(
         instance: wgpu::Instance,
         desc: GpuContextDescriptor,
         surface: Option<&wgpu::Surface<'_>>,
+        replacing: bool,
     ) -> Result<Arc<Self>, GpuError> {
         let all = instance.enumerate_adapters(desc.backends).await;
         let adapters: Vec<wgpu::AdapterInfo> = all.iter().map(wgpu::Adapter::get_info).collect();
@@ -396,16 +472,26 @@ impl GpuContext {
                 wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits())
             }
         };
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: Some(desc.label),
-                required_features: features,
-                required_limits: limits,
-                experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                memory_hints: desc.memory_hints.clone(),
-                trace: wgpu::Trace::Off,
-            })
-            .await?;
+        let device_desc = wgpu::DeviceDescriptor {
+            label: Some(desc.label),
+            required_features: features,
+            required_limits: limits,
+            experimental_features: wgpu::ExperimentalFeatures::disabled(),
+            memory_hints: desc.memory_hints.clone(),
+            trace: wgpu::Trace::Off,
+        };
+        let (device, queue) = {
+            // One device creation at a time in the process, and on D3D12 a first shader
+            // conversion before the device is handed out (#154): see `DEVICE_CREATION`.
+            // Native `request_device` is ready at once; blocking here keeps the guard
+            // out of this future, so `new_headless_async` stays `Send`.
+            let _creating = DEVICE_CREATION.lock();
+            let (device, queue) = pollster::block_on(adapter.request_device(&device_desc))?;
+            if info.backend == wgpu::Backend::Dx12 {
+                warm_up_shader_conversion(&device);
+            }
+            (device, queue)
+        };
 
         let lost = Arc::new(LostState::default());
         {
@@ -443,6 +529,16 @@ impl GpuContext {
             driver = %info.driver,
             "GPU device created"
         );
+        let in_use = live_contexts().1;
+        if in_use > 0 && !replacing {
+            EXTRA_DEVICES.fetch_add(1, Ordering::Relaxed);
+            tracing::error!(
+                in_use,
+                "a second GPU device was created while {in_use} other(s) are in use in this \
+                 process; share one Arc<GpuContext> (on WARP this can crash D3D12, #154)"
+            );
+        }
+        LIVE_CONTEXTS.lock().push(Arc::downgrade(&lost));
         Ok(Arc::new(Self {
             instance,
             adapter,
@@ -594,7 +690,28 @@ fn create_instance(desc: &GpuContextDescriptor) -> wgpu::Instance {
     instance_desc.backend_options = wgpu::BackendOptions::from_env_or_default();
     instance_desc.backend_options.dx12.shader_compiler =
         dx12_compiler(std::env::var(DX12_COMPILER_ENV).ok().as_deref());
-    wgpu::Instance::new(instance_desc)
+    if !flags
+        .intersects(wgpu::InstanceFlags::VALIDATION | wgpu::InstanceFlags::GPU_BASED_VALIDATION)
+    {
+        return wgpu::Instance::new(instance_desc);
+    }
+    // With validation, every D3D12 instance calls `ID3D12Debug::EnableDebugLayer`,
+    // which must happen before any device exists (Microsoft's documentation: calling
+    // it later may remove existing devices). So a process creates each validating
+    // instance once and reuses it for later contexts. Release builds don't validate
+    // by default.
+    static VALIDATING: Mutex<Vec<(String, wgpu::Instance)>> = Mutex::new(Vec::new());
+    let key = format!(
+        "{:?} {:?} {:?}",
+        desc.backends, flags, instance_desc.backend_options.dx12.shader_compiler
+    );
+    let mut instances = VALIDATING.lock();
+    if let Some((_, instance)) = instances.iter().find(|(k, _)| *k == key) {
+        return instance.clone();
+    }
+    let instance = wgpu::Instance::new(instance_desc);
+    instances.push((key, instance.clone()));
+    instance
 }
 
 /// wgpu's environment variable choosing the DX12 shader compiler (`fxc`, `dxc`,
@@ -696,6 +813,14 @@ pub fn device_type_name(device_type: wgpu::DeviceType) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn headless_creation_future_is_send() {
+        // The device-creation lock (#154) must not be held across an await.
+        fn assert_send<T: Send>(_: &T) {}
+        let future = GpuContext::new_headless_async(GpuContextDescriptor::default());
+        assert_send(&future);
+    }
 
     fn info(name: &str, device_type: wgpu::DeviceType) -> wgpu::AdapterInfo {
         wgpu::AdapterInfo {

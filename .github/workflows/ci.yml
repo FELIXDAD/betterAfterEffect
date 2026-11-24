@@ -79,7 +79,30 @@ jobs:
 
       - name: Test
         # GPU tests skip themselves when no adapter is available (Windows runners have WARP).
+        # Windows runners have the D3D12 debug layer installed; debug builds would turn it
+        # on (GpuContextDescriptor::validation), so this pass runs without it, like user
+        # machines, and the next step runs with it.
+        env:
+          BAE_GPU_VALIDATION: ${{ runner.os == 'Windows' && '0' || '' }}
         run: cargo test --workspace --locked
+
+      - name: Test with the D3D12 debug layer
+        # Same test binaries (no rebuild) with D3D12 validation on, so debug-layer errors
+        # still fail CI. GPU tests share one context per test process (bae_gpu::testing).
+        if: runner.os == 'Windows'
+        env:
+          BAE_GPU_VALIDATION: "1"
+        run: cargo test --workspace --locked
+
+      - name: Test the UI crates one by one
+        # `--workspace` unifies features across all crates, so a test that only passes
+        # with a feature some other crate enables (e.g. egui's bundled fonts, through a
+        # dev-dependency) still passes there and fails when the crate is tested alone.
+        # These are the crates whose tests run egui.
+        run: |
+          for crate in bae-ui bae-ui-motion bae; do
+            cargo test --locked -p "$crate"
+          done
 
       - name: One wgpu in the dependency graph
         # Errors ("specification `wgpu` is ambiguous") when two wgpu versions are resolved:

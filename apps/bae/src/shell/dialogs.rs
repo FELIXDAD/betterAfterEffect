@@ -221,3 +221,46 @@ impl FileDialogs for Native {
         NoDialogs.error(message);
     }
 }
+
+/// The native open panel for modules ([`bae_ui::files::FilePicker`]): File >
+/// Import and other choosers, owned by the main window.
+pub struct NativePicker {
+    #[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
+    parent: Option<Arc<Window>>,
+}
+
+impl NativePicker {
+    pub fn new(parent: Option<Arc<Window>>) -> Self {
+        NativePicker { parent }
+    }
+}
+
+impl bae_ui::files::FilePicker for NativePicker {
+    #[cfg(any(target_os = "macos", windows))]
+    fn open(&self, request: &bae_ui::files::OpenRequest) -> Vec<PathBuf> {
+        let mut dialog = Native::new(self.parent.clone())
+            .files()
+            .set_title(&request.title);
+        for (label, extensions) in &request.filters {
+            dialog = dialog.add_filter(label, extensions);
+        }
+        #[cfg(target_os = "macos")]
+        if request.folders {
+            return if request.multiple {
+                dialog.pick_files_or_folders().unwrap_or_default()
+            } else {
+                dialog.pick_file_or_folder().into_iter().collect()
+            };
+        }
+        if request.multiple {
+            dialog.pick_files().unwrap_or_default()
+        } else {
+            dialog.pick_file().into_iter().collect()
+        }
+    }
+
+    #[cfg(not(any(target_os = "macos", windows)))]
+    fn open(&self, _request: &bae_ui::files::OpenRequest) -> Vec<PathBuf> {
+        Vec::new()
+    }
+}

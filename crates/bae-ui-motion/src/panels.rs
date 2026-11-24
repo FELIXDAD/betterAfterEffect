@@ -172,7 +172,8 @@ impl Panel for PropertiesPanel {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(tr("Font Size")).color(color::TEXT));
                         let mut size = d2.font_size;
-                        let r = ui.add(widgets::HotNumber::new(&mut size).decimals(0).suffix(" px").range(1.0..=2000.0).label(tr("Font Size")));
+                        let px = format!(" {}", tr("px")); // 像素 in Chinese (#197)
+                        let r = ui.add(widgets::HotNumber::new(&mut size).decimals(0).suffix(&px).range(1.0..=2000.0).label(tr("Font Size")));
                         if r.drag_stopped() || (r.changed() && !r.dragged()) {
                             d2.font_size = size;
                             commit = true;

@@ -16,7 +16,24 @@ const AE_ITEMS: &[(&str, Option<&str>, &str)] = &[
     ("shell.file.close_project", None, "关闭项目"),
     ("shell.file.save", Some("Cmd+S"), "保存"),
     ("shell.file.save_as", Some("Cmd+Shift+S"), "另存为"),
+    ("motion.file.import_file", Some("Cmd+I"), "文件"),
+    (
+        "motion.file.import_multiple_files",
+        Some("Cmd+Alt+I"),
+        "多个文件",
+    ),
     ("motion.composition.new", Some("Cmd+N"), "新建合成"),
+    (
+        "motion.comp.composition_settings",
+        Some("Cmd+K"),
+        "合成设置",
+    ),
+    (
+        "motion.layer.layer_settings",
+        Some("Cmd+Shift+Y"),
+        "图层设置",
+    ),
+    ("motion.layer.pre_compose", Some("Cmd+Shift+C"), "预合成"),
     // AE 26 shortens this item to “将合成裁剪到工作区”. BAE keeps the glossary
     // terms (issue #109): Work Area = 工作区域 (工作区 is Workspace), Trim = 修剪
     // (as in 将入点修剪到当前时间; 裁剪 is Crop).
@@ -77,14 +94,20 @@ const AE_ITEMS: &[(&str, Option<&str>, &str)] = &[
     ("motion.window.render_queue", Some("Cmd+Alt+0"), "渲染队列"),
 ];
 
-/// BAE-only items (no AE counterpart): Layer ▸ New ▸ Rectangle / Ellipse.
+/// BAE-only items (no AE counterpart): the History and Agent panels, the Agent
+/// workspace.
 const BAE_ONLY: &[&str] = &[
-    "motion.layer.new.rectangle",
-    "motion.layer.new.ellipse",
     "shell.window.history",
     "shell.window.agent_activity",
     "shell.window.agent_proposals",
+    "shell.window.workspace.agent",
 ];
+
+/// The rest of AE's menu bar (`menu.*` ids) comes from the AE command catalog,
+/// whose tests compare every entry with AE's `menus.json` (bae-ui-motion).
+fn from_ae_catalog(id: &str) -> bool {
+    id.starts_with("menu.")
+}
 
 #[test]
 fn every_menu_item_is_compared_with_ae() {
@@ -98,7 +121,7 @@ fn every_menu_item_is_compared_with_ae() {
     let unknown: Vec<&String> = items
         .iter()
         .map(|i| &i.id)
-        .filter(|id| !known.contains(&id.as_str()))
+        .filter(|id| !known.contains(&id.as_str()) && !from_ae_catalog(id))
         .collect();
     assert!(
         unknown.is_empty(),
@@ -134,21 +157,27 @@ fn shortcuts_shown_in_menus_match_ae() {
 #[test]
 fn menu_enabled_state_follows_the_selection() {
     let mut h = gui();
-    // Window items open panels: always enabled (checked below), not part of
-    // what the selection changes.
+    // Window items of implemented panels open them: always enabled (checked
+    // below), not part of what the selection changes. Panels that are only
+    // placeholders so far (Effects & Presets, Info) are greyed, like every AE
+    // item whose command does not run yet.
     let window = |i: &MenuItemView| i.path.first().is_some_and(|p| p == "Window");
-    assert!(
-        h.state()
-            .menu_items()
-            .iter()
-            .filter(|i| window(i))
-            .all(|i| i.enabled)
-    );
+    let placeholder = ["shell.window.effects", "shell.window.info"];
+    let ae_item = |i: &MenuItemView| AE_ITEMS.iter().any(|(id, ..)| *id == i.id);
+    for i in h
+        .state()
+        .menu_items()
+        .iter()
+        .filter(|i| window(i) && ae_item(i))
+    {
+        assert_eq!(i.enabled, !placeholder.contains(&i.id.as_str()), "{}", i.id);
+    }
+    // The items this test follows: AE_ITEMS outside Window.
     let enabled = |h: &Ui| -> Vec<String> {
         h.state()
             .menu_items()
             .into_iter()
-            .filter(|i| i.enabled && !window(i))
+            .filter(|i| i.enabled && !window(i) && ae_item(i))
             .map(|i| i.id)
             .collect()
     };
@@ -160,6 +189,8 @@ fn menu_enabled_state_follows_the_selection() {
         "shell.file.close_project",
         "shell.file.save",
         "shell.file.save_as",
+        "motion.file.import_file",
+        "motion.file.import_multiple_files",
         "motion.composition.new",
     ]
     .map(String::from)
@@ -170,7 +201,7 @@ fn menu_enabled_state_follows_the_selection() {
     assert_eq!(got, want_none, "enabled without a comp");
 
     // A comp, nothing selected: Layer ▸ New, Trim, Add to Render Queue.
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     let comp = enabled(&h);
     for id in [
         "motion.layer.new.solid",
@@ -197,6 +228,7 @@ fn menu_enabled_state_follows_the_selection() {
     // A selected layer: Arrange, Duplicate, Split; not the keyframe items.
     assert!(h.state_mut().menu("motion.layer.new.solid"));
     settle(&mut h);
+    confirm_dialog(&mut h);
     let layer = enabled(&h);
     for id in [
         "motion.edit.duplicate",
@@ -342,7 +374,7 @@ fn focus_panel(h: &mut Ui, anchor: &str, offset: egui::Vec2) {
 #[test]
 fn shortcuts_run_once_whichever_panel_has_focus() {
     let mut h = gui();
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     let targets: [(&str, egui::Vec2); 5] = [
         ("Name", egui::vec2(0.0, 420.0)), // Project panel, below the rows
         ("Layer Name", egui::vec2(700.0, 120.0)), // Timeline graph
@@ -362,7 +394,7 @@ fn shortcuts_run_once_whichever_panel_has_focus() {
         focus_panel(&mut h, anchor, offset);
         let layers = h.state().layers().len();
         let dispatched = h.state().dispatched.len();
-        key(&mut h, Modifiers::COMMAND, Key::Y);
+        new_solid(&mut h);
         let new_layer_runs = h.state().dispatched[dispatched..]
             .iter()
             .filter(|i| i.id == "motion.new_layer")
@@ -475,7 +507,7 @@ fn window_render_queue_item_opens_and_closes_the_panel() {
     key(&mut h, Modifiers::COMMAND | Modifiers::ALT, Key::Num0);
     assert!(render_queue_open(&h), "Cmd+Alt+0 did not open it");
     // Closing it with items queued keeps the items (runtime queue).
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     key(&mut h, Modifiers::COMMAND, Key::M);
     assert!(h.state_mut().menu("motion.window.render_queue"));
     settle(&mut h);
@@ -488,7 +520,7 @@ fn window_render_queue_item_opens_and_closes_the_panel() {
 #[test]
 fn window_panel_items_toggle_and_reopen_panels() {
     let mut h = gui();
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    new_comp(&mut h);
     // Project: Cmd+0 / Window ▸ Project toggle the Project panel.
     let shown = |h: &Ui| find_text(h, "Name").is_some() && find_text(h, "Type").is_some();
     assert!(shown(&h));
@@ -500,12 +532,13 @@ fn window_panel_items_toggle_and_reopen_panels() {
     );
     key(&mut h, Modifiers::COMMAND, Key::Num0);
     assert!(shown(&h), "Cmd+0 did not reopen the Project panel");
-    // Every Window item runs without failing.
+    // Every enabled Window item runs without failing (the others are AE's
+    // panels BAE does not have yet, greyed).
     for item in h
         .state()
         .menu_items()
         .into_iter()
-        .filter(|i| i.path == ["Window"])
+        .filter(|i| i.path == ["Window"] && i.enabled)
     {
         assert!(h.state_mut().menu(&item.id), "{} disabled", item.id);
         settle(&mut h);
@@ -565,7 +598,7 @@ fn welcome_dialog_blocks_panel_keys_and_reports_modal() {
     let mut h = gui_with(g);
     settle(&mut h);
     // `Workspace::modal_open` is what the shell checks for native menu commands.
-    assert!(h.state().workspace.modal_open());
+    assert!(h.state().workspace.modal_open(h.state().app.resources()));
     for (m, k) in [
         (Modifiers::COMMAND, Key::N),
         (Modifiers::COMMAND, Key::Y),
@@ -588,8 +621,8 @@ fn welcome_dialog_blocks_panel_keys_and_reports_modal() {
     );
     assert!(find_text(&h, "Welcome to BAE").is_some());
     key(&mut h, Modifiers::NONE, Key::Escape);
-    assert!(!h.state().workspace.modal_open());
-    key(&mut h, Modifiers::COMMAND, Key::N);
+    assert!(!h.state().workspace.modal_open(h.state().app.resources()));
+    new_comp(&mut h);
     assert!(
         h.state().active_comp().is_some(),
         "shortcuts dead after the dialog closed"
@@ -712,9 +745,10 @@ fn chinese_ui_names_every_command_and_panel() {
         crate::shell::undo_redo_text("Undo", undo.as_deref()),
         "撤消 新建纯色"
     );
+    // Nothing to redo: AE says “无法重做”.
     assert_eq!(
         crate::shell::undo_redo_text("Redo", redo.as_deref()),
-        "重做"
+        "无法重做"
     );
 
     let log = h
@@ -938,9 +972,9 @@ fn undo_labels(h: &mut Ui) -> Vec<String> {
         let label = h.state().doc.undo_state().0.unwrap_or_default();
         labels.push(format!("{what} → {label}"));
     };
-    key(h, Modifiers::COMMAND, Key::N);
+    new_comp(h);
     step(h, "new comp");
-    key(h, Modifiers::COMMAND, Key::Y);
+    new_solid(h);
     step(h, "new solid");
     key(
         h,
@@ -954,7 +988,7 @@ fn undo_labels(h: &mut Ui) -> Vec<String> {
         Key::T,
     );
     step(h, "new text");
-    assert!(h.state_mut().menu("motion.layer.new.rectangle"));
+    assert!(add_layer(h, "shape:rect"));
     settle(h);
     step(h, "new rectangle");
     key(h, Modifiers::ALT | Modifiers::SHIFT, Key::P);

@@ -1547,8 +1547,10 @@ struct TabFit {
 }
 
 /// Fits tabs into `avail` points: AE's spacing when there is room, then
-/// tighter spacing, then shortened inactive titles. Tabs move to the » menu
-/// only when even that is not enough, from the end, never the active one.
+/// tighter spacing, then shortened inactive titles, then a shortened active
+/// title (a long one such as "Effect Controls: Dark Gray Solid 1"). Tabs move
+/// to the » menu only when even that is not enough, from the end, never the
+/// active one.
 fn fit_tabs(titles: &[f32], extras: &[f32], active: usize, avail: f32) -> TabFit {
     const MIN_SPACING: f32 = 10.0;
     const MIN_TITLE: f32 = 28.0;
@@ -1584,6 +1586,14 @@ fn fit_tabs(titles: &[f32], extras: &[f32], active: usize, avail: f32) -> TabFit
             let shrink = (titles[i] - MIN_TITLE).max(0.0) * k;
             out[i] = Some(titles[i] - shrink);
         }
+    }
+    // Then the active title, down to a readable minimum, before any tab
+    // leaves the bar.
+    let over = width(&out) - avail;
+    if over > 0.0 {
+        const MIN_ACTIVE: f32 = 64.0;
+        let t = titles[active];
+        out[active] = Some((t - over).max(MIN_ACTIVE.min(t)));
     }
     // Last resort: hide inactive tabs from the end.
     for i in (0..n).rev() {
@@ -2035,6 +2045,11 @@ mod tests {
             + 20.0;
         assert!(used <= 223.5, "{fit:?}");
         assert!(fit.titles[1].unwrap() < 90.0);
+        // A long active title is shortened too before a tab is hidden.
+        let long = [45.0, 220.0, 82.0];
+        let fit = fit_tabs(&long, &extras, 1, 260.0);
+        assert!(fit.titles.iter().all(Option::is_some), "{fit:?}");
+        assert!(fit.titles[1].unwrap() < 220.0);
         // Far too small: inactive tabs go to the » menu, the active one stays.
         let fit = fit_tabs(&titles, &extras, 0, 80.0);
         assert!(fit.titles[0].is_some());
@@ -2142,7 +2157,7 @@ mod tests {
 
     #[test]
     fn dragging_a_splitter_resizes() {
-        let ctx = egui::Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         let mut dock = Dock::new(ae_default());
         run(&ctx, &mut dock, vec![]);
         let screen = Rect::from_min_size(Pos2::ZERO, vec2(1728.0, 1000.0));
@@ -2164,7 +2179,7 @@ mod tests {
 
     #[test]
     fn dragging_a_tab_onto_a_frame_edge_redocks() {
-        let ctx = egui::Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         let mut dock = Dock::new(ae_default());
         let screen = Rect::from_min_size(Pos2::ZERO, vec2(1728.0, 1000.0));
         run(&ctx, &mut dock, vec![]);

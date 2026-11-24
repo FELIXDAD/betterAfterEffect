@@ -42,7 +42,7 @@ impl H {
             reg,
             author: AuthorId::new("user:test").unwrap(),
             resources,
-            ctx: egui::Context::default(),
+            ctx: bae_ui::testing::ctx_with_fonts(),
             time: 0.0,
             comp: PrimPath::new("/x").unwrap(),
             layer: PrimPath::new("/x").unwrap(),

@@ -48,6 +48,7 @@ pub fn register(app: &mut bae_app::AppBuilder) {
     // The app's own terms win: only labels it does not translate yet are added.
     let new: Vec<(&'static str, &'static str)> = bae_prefs::i18n::ZH
         .iter()
+        .chain(bae_prefs::i18n::DEFAULT_VALUES_ZH)
         .copied()
         .filter(|(en, _)| !crate::i18n::has_translation(en))
         .collect();
@@ -360,6 +361,8 @@ impl SettingsDialog {
                 ui.allocate_response(screen.size(), egui::Sense::click_and_drag());
             });
         let mut window_open = true;
+        // Enter is OK even on a focused button or menu (AE); Space clicks it.
+        let enter = crate::dialog::take_enter(ctx);
         egui::Window::new(tr(title()))
             .id(egui::Id::new("bae-settings"))
             .order(egui::Order::Foreground)
@@ -372,7 +375,7 @@ impl SettingsDialog {
         let typing = ctx.egui_wants_keyboard_input();
         if !window_open || (!typing && ctx.input(|i| i.key_pressed(Key::Escape))) {
             outcome = Outcome::Cancel;
-        } else if !typing && ctx.input(|i| i.key_pressed(Key::Enter)) {
+        } else if enter || (!typing && ctx.input(|i| i.key_pressed(Key::Enter))) {
             outcome = Outcome::Ok(self.draft.clone());
         }
         if outcome != Outcome::None {
@@ -668,6 +671,12 @@ impl SettingsDialog {
                 let mut s = draft.str(p.key).to_owned();
                 if p.key.starts_with("labels.label_name_") {
                     s = label_name(draft, label_index(p.key));
+                } else if let bae_prefs::DefaultValue::Str(d) = p.default
+                    && s == d
+                {
+                    // An unchanged default name shows in the UI language
+                    // ("Solids" → "纯色"), as BAE names the folder (#206).
+                    s = tr(d).to_owned();
                 }
                 let r = ui.add(
                     egui::TextEdit::singleline(&mut s)

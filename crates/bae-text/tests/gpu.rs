@@ -6,31 +6,22 @@
 
 use std::sync::Arc;
 
-use bae_gpu::{GpuContext, GpuContextDescriptor, GpuError, wgpu};
+use bae_gpu::{GpuContext, wgpu};
 use bae_model::{TextDocument, Time};
 use bae_render::{IRect, LayerSource, SourceRequest, testing};
 use bae_text::render::{TextProvider, TextSource};
 use bae_text::{FontMatch, FontSystem, TEXT_PROVIDER, layout_text};
 
 fn gpu() -> Option<Arc<GpuContext>> {
-    match GpuContext::new_headless(GpuContextDescriptor::default().with_env()) {
-        Ok(ctx) if ctx.adapter_info().device_type == wgpu::DeviceType::Cpu => {
-            eprintln!(
-                "skipping Vello GPU test on software adapter {:?}",
-                ctx.adapter_info().name
-            );
-            None
-        }
-        Ok(ctx) => Some(ctx),
-        Err(error @ GpuError::NoAdapter { .. }) => {
-            if std::env::var_os("BAE_REQUIRE_GPU").is_some_and(|v| v == "1") {
-                panic!("BAE_REQUIRE_GPU=1 but {error}");
-            }
-            eprintln!("skipping GPU test: {error}");
-            None
-        }
-        Err(error) => panic!("GPU context creation failed: {error}"),
+    let ctx = bae_gpu::testing::shared_context()?;
+    if ctx.adapter_info().device_type == wgpu::DeviceType::Cpu {
+        eprintln!(
+            "skipping Vello GPU test on software adapter {:?}",
+            ctx.adapter_info().name
+        );
+        return None;
     }
+    Some(ctx)
 }
 
 fn doc(text: &str) -> TextDocument {

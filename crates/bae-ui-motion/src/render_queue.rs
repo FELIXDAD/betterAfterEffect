@@ -20,7 +20,7 @@ use bae_model::{FrameRate, PrimPath, Stage, Sublayer, SublayerId, Time};
 use bae_motion::query::CompInfo;
 use bae_render::{
     AnimEvaluator, ExportFormat, ExportJob, ExportSettings, RenderError, RenderPurpose,
-    RenderRequest, Renderer, RendererConfig, SourceProvider, export_frames, frame_file,
+    RenderRequest, Renderer, RendererConfig, SourceProvider, export_frames,
 };
 use bae_ui::Accessible as _;
 use bae_ui::{Panel, PanelContext, TabInfo, tr};
@@ -290,17 +290,16 @@ pub(crate) fn shared(resources: &Resources) -> SharedRenderQueue {
 /// Where new items write: the user's Movies (macOS) / Videos (Windows)
 /// folder, else the home folder, else the current directory.
 pub fn default_output_dir() -> PathBuf {
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from);
-    match home {
-        Some(home) => ["Movies", "Videos"]
-            .iter()
-            .map(|d| home.join(d))
-            .find(|d| d.is_dir())
-            .unwrap_or(home),
-        None => PathBuf::from("."),
-    }
+    output_dir_from(
+        bae_platform::dirs::videos_dir(),
+        bae_platform::dirs::home_dir(),
+    )
+}
+
+/// The user's videos folder (Windows: the Videos known folder, even when the
+/// user moved it, #216; macOS: ~/Movies), else the home folder.
+fn output_dir_from(videos: Option<PathBuf>, home: Option<PathBuf>) -> PathBuf {
+    videos.or(home).unwrap_or_else(|| PathBuf::from("."))
 }
 
 /// A file-name-safe version of a comp name.
@@ -397,13 +396,9 @@ pub(crate) fn render_job(
     // The progress counts the frames actually rendered (the limited range).
     let total = times.len();
     progress(0, total);
-    // One frame of a sequence pattern still gets a numbered file.
-    let path = if times.len() == 1 && job.format.is_image() {
-        frame_file(&output, start)
-    } else {
-        output
-    };
-    let settings = ExportSettings::new(job.format, path);
+    // A `#` run in the name numbers the frames, one frame too (#207);
+    // export_frames decides, like `bae render`.
+    let settings = ExportSettings::new(job.format, output);
     let request = RenderRequest {
         purpose: RenderPurpose::Final,
         ..RenderRequest::default()
@@ -885,7 +880,6 @@ fn format_label(format: ExportFormat) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use bae_gpu::GpuContextDescriptor;
     use bae_model::{Project, TimeRange, Value};
 
     use super::*;
@@ -1070,6 +1064,45 @@ mod tests {
         assert_eq!(on_disk, done, "every rendered frame is kept");
     }
 
+    /// The app's render queue renders on the app's `Arc<GpuContext>` resource and
+    /// never creates a device of its own (one device per process, #154).
+    #[test]
+    fn start_renders_on_the_apps_gpu_context() {
+        let Some(gpu) = gpu() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let (stage, comp) = project();
+        let info = bae_motion::query::comp_info(&stage, &comp).unwrap();
+        let queue = SharedRenderQueue::default();
+        let id = {
+            let mut q = queue.lock();
+            let id = q.add(&info, dir.path());
+            q.item_mut(id).unwrap().output = dir.path().join("f_####.png").to_string_lossy().into();
+            id
+        };
+        let mut resources = Resources::new();
+        resources.insert(gpu);
+        let extra_before = GpuContext::extra_devices_created();
+        start(&queue, &stage, &resources).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        while queue.lock().is_running() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "render queue timed out"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let q = queue.lock();
+        let item = q.items().iter().find(|i| i.id == id).unwrap();
+        assert!(
+            matches!(item.status, ItemStatus::Done { .. }),
+            "{:?}",
+            item.status
+        );
+        assert_eq!(GpuContext::extra_devices_created(), extra_before);
+    }
+
     #[test]
     fn progress_counts_the_limited_range_from_the_start() {
         // #157: 1780–1900 of an 1800-frame comp renders 20 frames. The item
@@ -1106,6 +1139,72 @@ mod tests {
         assert_eq!(limited_range(-5, 3, 10), Some((0, 3)));
         assert_eq!(limited_range(10, 20, 10), None);
         assert_eq!(limited_range(4, 4, 10), Some((4, 4)));
+    }
+
+    /// #207: one frame of a `[####]` / `####` output is numbered (AE); a name
+    /// without `#` stays a single image.
+    #[test]
+    fn one_frame_of_a_pattern_gets_its_number() {
+        let Some(gpu) = gpu() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let (stage, comp) = project();
+        let info = bae_motion::query::comp_info(&stage, &comp).unwrap();
+        let mut q = RenderQueue::default();
+        let outputs = ["a_[####].png", "b_####.png", "still.png"];
+        for name in outputs {
+            let id = q.add(&info, dir.path());
+            let item = q.item_mut(id).unwrap();
+            item.output = dir.path().join(name).to_string_lossy().into_owned();
+            (item.start, item.end) = (5, 5);
+        }
+        assert!(q.begin());
+        let mut renderer = Renderer::new(gpu);
+        let mut evaluator = AnimEvaluator::new(None);
+        let frames =
+            |c: &PrimPath| bae_motion::query::comp_info(&stage, c).map(|i| i.frame_count());
+        while let Some(job) = q.take_next(&frames) {
+            let status =
+                render_job(&mut renderer, &mut evaluator, &stage, &job, &mut |_, _| {}).unwrap();
+            assert!(
+                matches!(status, ItemStatus::Done { files: 1, .. }),
+                "{status:?}"
+            );
+        }
+        let mut names: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["a_0005.png", "b_0005.png", "still.png"]);
+    }
+
+    #[test]
+    fn default_output_dir_is_the_videos_folder() {
+        let videos = PathBuf::from("D:/Media/Videos");
+        let home = PathBuf::from("C:/Users/a");
+        assert_eq!(
+            output_dir_from(Some(videos.clone()), Some(home.clone())),
+            videos
+        );
+        assert_eq!(output_dir_from(None, Some(home.clone())), home);
+        assert_eq!(output_dir_from(None, None), PathBuf::from("."));
+        // The system's own videos folder (Windows: the known folder, which
+        // may live anywhere; macOS: ~/Movies).
+        let dir = default_output_dir();
+        assert_eq!(
+            Some(dir.clone()),
+            bae_platform::dirs::videos_dir().or(bae_platform::dirs::home_dir())
+        );
+        #[cfg(target_os = "macos")]
+        assert_eq!(dir, bae_platform::dirs::home_dir().unwrap().join("Movies"));
+        #[cfg(windows)]
+        assert!(
+            !dir.ends_with("Movies"),
+            "{} is not the Videos known folder",
+            dir.display()
+        );
     }
 
     #[test]
@@ -1148,11 +1247,7 @@ mod tests {
     }
 
     fn gpu() -> Option<Arc<GpuContext>> {
-        let gpu = GpuContext::new_headless(GpuContextDescriptor::default()).ok();
-        if gpu.is_none() {
-            eprintln!("no GPU, skipping");
-        }
-        gpu
+        bae_gpu::testing::shared_context()
     }
 
     /// The worker renders every queued item in order (PNG and TIFF), with

@@ -186,6 +186,7 @@ impl ProjectPanel {
 
 impl Panel for ProjectPanel {
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        let panel_rect = ui.max_rect();
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
         let stage = cx.stage;
@@ -243,12 +244,17 @@ impl Panel for ProjectPanel {
         let mut menu_new_comp = false;
         let mut menu_new_folder = false;
         let mut delete: Vec<PrimPath> = Vec::new();
+        // Folder rows, for files dropped from Finder / Explorer.
+        let mut folder_rows: Vec<(Rect, PrimPath)> = Vec::new();
         egui::ScrollArea::vertical()
             .max_height(list_h)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for (i, row) in rows.iter().enumerate() {
                     let (rect, resp) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::click_and_drag());
+                    if row.kind == ItemKind::Folder {
+                        folder_rows.push((rect, row.path.clone()));
+                    }
                     let selected = session.lock().selected_items.contains(&row.path);
                     let resp =
                         resp.labeled_toggle(egui::WidgetType::SelectableLabel, &query::display_name_of(stage, &row.path), selected);
@@ -459,6 +465,38 @@ impl Panel for ProjectPanel {
             session.lock().open_comp(&c);
             cx.open_panel("timeline");
             cx.open_panel("composition");
+        }
+        // Files and folders dragged from Finder / Explorer: the panel lights up
+        // while they hover over it; a drop imports them into the folder under
+        // the pointer (else the default folder), like AE.
+        let (hovering, dropped, pointer) = ui.input(|i| {
+            (
+                !i.raw.hovered_files.is_empty(),
+                i.raw
+                    .dropped_files
+                    .iter()
+                    .map(|f| f.path().to_path_buf())
+                    .collect::<Vec<_>>(),
+                i.pointer.latest_pos(),
+            )
+        });
+        let over = pointer.is_none_or(|p| panel_rect.contains(p));
+        if hovering && over {
+            ui.painter().rect_stroke(
+                panel_rect.shrink(1.0),
+                2.0,
+                egui::Stroke::new(2.0, color::ACCENT),
+                egui::StrokeKind::Inside,
+            );
+        }
+        if !dropped.is_empty() && over {
+            let folder = pointer.and_then(|p| {
+                folder_rows
+                    .iter()
+                    .find(|(r, _)| r.contains(p))
+                    .map(|(_, f)| f.clone())
+            });
+            crate::import::import_paths(cx, &dropped, folder);
         }
         // Enter renames the selected item (AE) — unless a focused widget, e.g. a
         // button in another panel, took the Enter.

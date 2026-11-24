@@ -507,7 +507,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "bae"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "bae-agent",
@@ -546,14 +546,14 @@ dependencies = [
 
 [[package]]
 name = "bae-aex-host"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bae-model",
 ]
 
 [[package]]
 name = "bae-agent"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bae-model",
  "bae-package",
@@ -572,7 +572,7 @@ dependencies = [
 
 [[package]]
 name = "bae-anim"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bae-model",
  "glam",
@@ -584,7 +584,7 @@ dependencies = [
 
 [[package]]
 name = "bae-app"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "arc-swap",
  "indexmap",
@@ -594,7 +594,7 @@ dependencies = [
 
 [[package]]
 name = "bae-color"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bae-gpu",
  "bae-media",
@@ -607,7 +607,7 @@ dependencies = [
 
 [[package]]
 name = "bae-dep-probe"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "egui",
  "egui-wgpu",
@@ -622,7 +622,7 @@ dependencies = [
 
 [[package]]
 name = "bae-effects"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bae-gpu",
  "bae-model",
@@ -640,7 +640,7 @@ dependencies = [
 
 [[package]]
 name = "bae-gpu"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bae-app",
  "bae-platform",
@@ -658,7 +658,7 @@ dependencies = [
 
 [[package]]
 name = "bae-hub"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "bae-model",
@@ -678,7 +678,7 @@ dependencies = [
 
 [[package]]
 name = "bae-interop-ai"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bae-anim",
  "bae-model",
@@ -693,7 +693,7 @@ dependencies = [
 
 [[package]]
 name = "bae-media"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bae-app",
  "bae-gpu",
@@ -724,7 +724,7 @@ dependencies = [
 
 [[package]]
 name = "bae-model"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "blake3",
  "indexmap",
@@ -740,11 +740,12 @@ dependencies = [
 
 [[package]]
 name = "bae-motion"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bae-anim",
  "bae-app",
  "bae-model",
+ "bae-vector",
  "schemars",
  "serde",
  "serde_json",
@@ -752,7 +753,7 @@ dependencies = [
 
 [[package]]
 name = "bae-package"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bae-model",
  "schemars",
@@ -765,7 +766,7 @@ dependencies = [
 
 [[package]]
 name = "bae-platform"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "bae-app",
@@ -782,7 +783,7 @@ dependencies = [
 
 [[package]]
 name = "bae-plugin"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "bae-app",
@@ -807,11 +808,11 @@ dependencies = [
 
 [[package]]
 name = "bae-plugin-sdk"
-version = "0.1.0"
+version = "0.0.1"
 
 [[package]]
 name = "bae-prefs"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bae-platform",
  "serde",
@@ -822,7 +823,7 @@ dependencies = [
 
 [[package]]
 name = "bae-render"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "bae-anim",
@@ -848,7 +849,7 @@ dependencies = [
 
 [[package]]
 name = "bae-sync"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bae-model",
  "blake3",
@@ -865,7 +866,7 @@ dependencies = [
 
 [[package]]
 name = "bae-text"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bae-anim",
  "bae-gpu",
@@ -885,7 +886,7 @@ dependencies = [
 
 [[package]]
 name = "bae-ui"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bae-app",
  "bae-model",
@@ -904,17 +905,20 @@ dependencies = [
 
 [[package]]
 name = "bae-ui-motion"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bae-anim",
  "bae-app",
  "bae-gpu",
+ "bae-media",
  "bae-model",
  "bae-motion",
+ "bae-platform",
  "bae-prefs",
  "bae-render",
  "bae-ui",
  "egui",
+ "flate2",
  "serde",
  "serde_json",
  "tempfile",
@@ -923,7 +927,7 @@ dependencies = [
 
 [[package]]
 name = "bae-vector"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bae-anim",
  "bae-gpu",
@@ -1768,7 +1772,6 @@ dependencies = [
  "bytemuck",
  "ecolor",
  "emath",
- "epaint_default_fonts",
  "font-types",
  "harfrust",
  "log",
@@ -1782,12 +1785,6 @@ dependencies = [
  "unicode-segmentation",
  "vello_cpu",
 ]
-
-[[package]]
-name = "epaint_default_fonts"
-version = "0.36.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "773fa9c96dd0dbef887e39d0ed6177f141cce4d68e6041df77570aa3702dfa13"
 
 [[package]]
 name = "equivalent"
@@ -5976,8 +5973,6 @@ dependencies = [
 [[package]]
 name = "wgpu-hal"
 version = "30.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a57452fe453658e141aafdb09de1028afa498805fab518238ddf372a518813ff"
 dependencies = [
  "android_system_properties",
  "arrayvec",
@@ -6457,7 +6452,7 @@ checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "png",

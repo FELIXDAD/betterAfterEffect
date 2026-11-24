@@ -10,7 +10,10 @@ use super::*;
 fn open_general(h: &mut Ui) {
     key(h, Modifiers::COMMAND | Modifiers::ALT, Key::Semicolon);
     settle(h);
-    assert!(h.state().workspace.modal_open(), "Cmd+Alt+; opened nothing");
+    assert!(
+        h.state().workspace.modal_open(h.state().app.resources()),
+        "Cmd+Alt+; opened nothing"
+    );
 }
 
 #[test]
@@ -35,7 +38,7 @@ fn shortcut_opens_startup_repair_ok_applies_levels_of_undo() {
         .set(keys::LEVELS_OF_UNDO, 2);
     h.get_by_label("OK").click();
     settle(&mut h);
-    assert!(!h.state().workspace.modal_open());
+    assert!(!h.state().workspace.modal_open(h.state().app.resources()));
     assert_eq!(h.state().prefs.current().levels_of_undo(), 2);
     assert_eq!(h.state().doc.stage().undo_limit(), 2);
     // Three steps, two levels: only two undo.
@@ -62,7 +65,7 @@ fn cancel_keeps_the_stored_values() {
     settle(&mut h);
     h.get_by_label("Cancel").click();
     settle(&mut h);
-    assert!(!h.state().workspace.modal_open());
+    assert!(!h.state().workspace.modal_open(h.state().app.resources()));
     assert_eq!(h.state().prefs.generation(), 0);
     assert_eq!(h.state().prefs.current().auto_save_minutes(), Some(5));
 }
@@ -98,4 +101,41 @@ fn label_colors_and_color_theme_apply() {
         bae_ui::theme::appearance(),
         bae_ui::theme::Appearance::Light
     );
+}
+
+/// Issue #206: in Chinese, Preferences ▸ Project shows the new project solids
+/// folder as "纯色", the name the folder gets when a solid is made.
+#[test]
+fn solids_folder_default_matches_the_folder_bae_makes_in_chinese() {
+    if !in_child(
+        "acceptance::settings::solids_folder_default_matches_the_folder_bae_makes_in_chinese",
+        &[("BAE_LANG", "zh")],
+    ) {
+        return;
+    }
+    crate::i18n::init_from_env();
+    let mut h = gui();
+    h.state_mut().dispatch(Invocation::with_params(
+        bae_ui::settings::ACTION,
+        serde_json::json!({"page": "project"}),
+    ));
+    settle(&mut h);
+    assert!(
+        find_text(&h, "新建项目纯色文件夹").is_some(),
+        "Project page"
+    );
+    assert!(
+        find_text(&h, "纯色").is_some(),
+        "the default shows in Chinese"
+    );
+    assert!(find_text(&h, "Solids").is_none(), "English default shown");
+    // Cancel: the stored value stays the default.
+    h.get_by_label("取消").click();
+    settle(&mut h);
+    // A solid makes the solids folder with the same name.
+    new_comp(&mut h);
+    new_solid(&mut h);
+    let stage = h.state().stage();
+    let solids = bae_model::PrimPath::new(bae_motion::query::SOLIDS_FOLDER).unwrap();
+    assert_eq!(bae_motion::query::display_name_of(stage, &solids), "纯色");
 }

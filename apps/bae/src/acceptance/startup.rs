@@ -28,7 +28,7 @@ fn welcome_open(h: &Ui) -> bool {
 
 /// The dialog still works as an app afterwards: Cmd+N makes a comp.
 fn app_works(h: &mut Ui) {
-    key(h, Modifiers::COMMAND, Key::N);
+    new_comp(h);
     assert!(
         h.state().active_comp().is_some(),
         "Cmd+N after closing the welcome dialog"
@@ -109,6 +109,10 @@ fn shortcuts_behind_the_welcome_dialog() {
     // behind it while it is open.
     let mut h = first_launch();
     key(&mut h, Modifiers::COMMAND, Key::N);
+    assert!(
+        !dialog_open(&h),
+        "Cmd+N behind the welcome dialog opened Composition Settings"
+    );
     let leaked = h.state().active_comp().is_some();
     assert!(
         !leaked,
@@ -220,7 +224,7 @@ fn main_controls_are_found_by_accessible_name() {
     }
     // Names shown in the UI: layers (timeline rows carry the layer number,
     // "Layer 1 “Text”", #128), comp tab, workspaces.
-    for label in ["Solid 1", "Text", "Comp 1", "Motion", "Review"] {
+    for label in ["Dark Gray Solid 1", "Text", "Comp 1", "Motion", "Review"] {
         let quoted = format!("“{label}”");
         if !all.iter().any(|l| l == label || l.ends_with(&quoted)) {
             missing.push(label.to_owned());
@@ -364,10 +368,7 @@ fn interactive_widgets_have_unique_names_in_chinese() {
 fn unique_names_per_panel() {
     use egui::accesskit::{Action, Role};
     let mut h = gui();
-    comp_with(
-        &mut h,
-        &["motion.layer.new.solid", "motion.layer.new.rectangle"],
-    );
+    comp_with(&mut h, &["motion.layer.new.solid", "shape:rect"]);
     // Both layers selected, Position revealed on each: two Position rows with
     // stopwatches, keyframe navigators and values, two sets of layer switches.
     key(&mut h, Modifiers::COMMAND, Key::A);
@@ -518,7 +519,7 @@ fn control_names_follow_a_rename() {
         .filter(|n| {
             n.accesskit_node()
                 .label()
-                .is_some_and(|l| l.contains("Solid 1"))
+                .is_some_and(|l| l.contains("Dark Gray Solid 1"))
         })
         .map(|n| {
             let mut pane = String::from("window");

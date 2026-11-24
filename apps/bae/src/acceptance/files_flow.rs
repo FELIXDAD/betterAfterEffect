@@ -29,7 +29,7 @@ fn animated_project(h: &mut Ui) {
         h,
         &[
             "motion.layer.new.solid",
-            "motion.layer.new.rectangle",
+            "shape:rect",
             "motion.layer.new.text",
         ],
     );
@@ -162,7 +162,7 @@ fn save_as_bae_and_baez_round_trip_exactly() {
         "double-click did not open the comp"
     );
     // An edit marks the project; Cmd+S writes the package in place, silently.
-    key(&mut h, Modifiers::COMMAND, Key::Y);
+    new_solid(&mut h);
     assert!(title(&h).ends_with(" *"));
     let suggested = h.state().dialogs.suggested.len();
     key(&mut h, Modifiers::COMMAND, Key::S);
@@ -191,7 +191,7 @@ fn cmd_s_while_renaming_saves_the_typed_name() {
 
     // Rename field open, a new name typed, Cmd+S before Enter.
     let head = find_text(&h, "Layer Name").unwrap();
-    let row = find_texts(&h, |t| t == "Solid 1")
+    let row = find_texts(&h, |t| t == "Dark Gray Solid 1")
         .into_iter()
         .find(|r| r.top() > head.bottom())
         .unwrap();
@@ -270,7 +270,7 @@ fn unsaved_changes_question_on_close_quit_new_and_open() {
             save_as(&mut h, path.clone());
             let saved = export(&h);
             // An unsaved edit.
-            key(&mut h, Modifiers::COMMAND, Key::Y);
+            new_solid(&mut h);
             let edited = export(&h);
             assert!(h.state().doc.is_dirty(), "{case}");
 
@@ -358,7 +358,7 @@ fn finder_open_goes_through_the_open_flow() {
         // A new name per case: saving over an existing project asks first (#126).
         let mine = dir.join(format!("当前 {choice:?} {i}.bae"));
         save_as(&mut h, mine.clone());
-        key(&mut h, Modifiers::COMMAND, Key::Y); // an unsaved edit
+        new_solid(&mut h); // an unsaved edit
         let edited = export(&h);
         assert!(h.state().doc.is_dirty(), "{case}");
 
@@ -423,7 +423,7 @@ fn untitled_project_save_at_the_question_asks_where() {
     h.state_mut().dialogs.answers.push_back(UnsavedChoice::Save);
     h.state_mut().dialogs.save.push_back(None);
     go_away(&mut h, Away::Close, tmp.path());
-    assert_eq!(h.state().layer_names(), ["Solid 1"]);
+    assert_eq!(h.state().layer_names(), ["Dark Gray Solid 1"]);
     assert!(h.state().doc.is_dirty());
     // Quit → Save → a path: written, then the app quits.
     let path = tmp.path().join("退出 前 保存");
@@ -492,7 +492,7 @@ fn read_only_folder_reports_and_keeps_the_changes() {
     let mut h = gui();
     comp_with(&mut h, &["motion.layer.new.solid"]);
     save_as(&mut h, path.clone());
-    key(&mut h, Modifiers::COMMAND, Key::Y);
+    new_solid(&mut h);
     fs::set_permissions(&path, fs::Permissions::from_mode(0o555)).unwrap();
     fs::set_permissions(path.join("project.json"), fs::Permissions::from_mode(0o444)).unwrap();
     key(&mut h, Modifiers::COMMAND, Key::S);
@@ -581,7 +581,7 @@ fn save_as_into_an_existing_project_folder_replaces_it_after_asking() {
     assert_eq!(h.state().doc.location(), Some(existing.as_path()));
     assert!(!h.state().doc.is_dirty());
     // Any other name inside it means the same project.
-    key(&mut h, Modifiers::COMMAND, Key::Y);
+    new_solid(&mut h);
     let edited = export(&h);
     save_as(&mut h, existing.join("sublayers").join("别的 名字.bae"));
     no_surprises(&h);
@@ -754,7 +754,7 @@ fn broken_files_are_reported_without_touching_the_open_project() {
     }
     println!("ERROR MESSAGES\n{}", report.join("\n"));
     // The app still works.
-    key(&mut h, Modifiers::COMMAND, Key::Y);
+    new_solid(&mut h);
     assert_eq!(h.state().layers().len(), 2);
     let _ = pos2(0.0, 0.0);
 }
@@ -776,7 +776,7 @@ fn reopening_shows_the_comp_that_was_open() {
         h.state().active_comp().is_some(),
         "no comp open after reopening"
     );
-    assert!(find_text(&h, "Solid 1").is_some());
+    assert!(find_text(&h, "Dark Gray Solid 1").is_some());
 }
 
 // ---- Retest of #113 / #111 (dev d23a328): edge cases ----
@@ -936,7 +936,7 @@ fn a_broken_or_stale_view_record_falls_back_to_the_first_comp() {
             "{label}: time {now:?} outside the comp"
         );
         // The project still works.
-        key(&mut h, Modifiers::COMMAND, Key::Y);
+        new_solid(&mut h);
         assert!(h.state().doc.is_dirty(), "{label}");
     }
 }
@@ -1228,7 +1228,7 @@ fn save_as_onto_the_open_projects_own_folder_saves_in_place() {
     let mut h = gui();
     h.state_mut().dialogs.open.push_back(Some(path.clone()));
     key(&mut h, Modifiers::COMMAND, Key::O);
-    key(&mut h, Modifiers::COMMAND, Key::Y);
+    new_solid(&mut h);
     let edited = export(&h);
     save_as(&mut h, path.clone());
     no_surprises(&h);
@@ -1405,5 +1405,60 @@ fn replace_texts_are_translated() {
     ] {
         crate::i18n::register_tables();
         assert!(bae_ui::i18n::has_translation(en), "no Chinese for {en:?}");
+    }
+}
+
+/// Issue #215: File > Close Project and File > New Project put the
+/// Composition and Timeline tabs (and their accessible names) back to their
+/// empty titles; opening the comp again shows its name.
+#[test]
+fn closing_the_project_empties_the_comp_and_timeline_tabs() {
+    use egui_kittest::kittest::Queryable as _;
+    let tabs = |h: &Ui, name: &str| {
+        (
+            h.query_all_by_label(&format!("Composition {name}"))
+                .next()
+                .is_some(),
+            h.query_all_by_label(&format!("Timeline {name}"))
+                .next()
+                .is_some(),
+        )
+    };
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.null"]);
+    assert_eq!(tabs(&h, "Comp 1"), (true, true));
+    for away in ["close", "new"] {
+        h.state_mut()
+            .dialogs
+            .answers
+            .push_back(UnsavedChoice::DontSave);
+        if away == "close" {
+            assert!(h.state_mut().menu("shell.file.close_project"));
+        } else {
+            press(&mut h, Modifiers::COMMAND | Modifiers::ALT, Key::N);
+        }
+        // The app goes idle after this: no frame may show a stale tab once the
+        // comp is gone (the tab bar used to show the last drawn title).
+        for _ in 0..4 {
+            let gone = h.state().active_comp().is_none();
+            frame(&mut h);
+            if gone {
+                assert_eq!(tabs(&h, "Comp 1"), (false, false), "{away}: stale tab");
+            }
+        }
+        assert!(h.state().active_comp().is_none(), "{away}");
+        assert_eq!(tabs(&h, "Comp 1"), (false, false), "{away}: stale tab");
+        assert!(
+            find_text(&h, "Comp 1").is_none(),
+            "{away}: stale title painted"
+        );
+        assert!(
+            h.query_all_by_label("Composition").next().is_some(),
+            "{away}"
+        );
+        assert!(h.query_all_by_label("Timeline").next().is_some(), "{away}");
+        // A new comp shows its name again.
+        new_comp(&mut h);
+        assert_eq!(tabs(&h, "Comp 1"), (true, true), "{away}: new comp");
     }
 }

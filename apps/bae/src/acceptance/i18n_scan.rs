@@ -10,7 +10,7 @@ use egui_kittest::kittest::{AccessKitNode, NodeT as _, Queryable as _};
 use super::*;
 
 /// Proper nouns and key legends that stay in Latin letters in a Chinese UI.
-const ALLOWED: &[&str] = &[
+pub(super) const ALLOWED: &[&str] = &[
     // Product, formats, color models, codecs.
     "BAE",
     "PNG",
@@ -22,6 +22,9 @@ const ALLOWED: &[&str] = &[
     "HEVC",
     "ProRes",
     "HQ",
+    // Frame rate unit: AE zh_CN keeps it ("社交媒体纵向 HD • 1080x1920 • 30 fps",
+    // docs/reference/ae/preferences.json); the timeline shows "(30.00 fps)".
+    "fps",
     // AE (keyboard layout name, "Roto 笔刷工具") and BAE's Agent workspace
     // (docs/glossary.md).
     "After",
@@ -37,6 +40,33 @@ const ALLOWED: &[&str] = &[
     // AE's official Chinese keeps this abbreviation: the Preferences page
     // "Memory & CPU" is "内存和 CPU" (docs/reference/ae/menus.json, 编辑 ▸ 首选项).
     "CPU",
+    // Settings pages, dialogs and tool options that AE's official Chinese keeps in
+    // Latin letters: docs/reference/ae/ui/preferences-dialog.json (labelZh: "与
+    // After Effects 链接的 Dynamic Link…", "不确定的媒体 NTSC:", "将未标记的 Alpha
+    // 解释为:", "44100 Hz", "MME", "XMP 元数据", "导入时将 XMP ID 写入文件",
+    // "RAM 可用 [AE/Pr/AME/Au]:", "启用 Mercury Transmit", "启用 JavaScript 调试器",
+    // MB / GB), composition-settings.json ("社交媒体横向 HD", "7.9 MB"), menus.json
+    // ("RotoBezier").
+    "Dynamic",
+    "Link",
+    "NTSC",
+    "Alpha",
+    "MB",
+    "GB",
+    "Hz",
+    "MME",
+    "XMP",
+    "ID",
+    "RAM",
+    "AE",
+    "Pr",
+    "AME",
+    "Au",
+    "Mercury",
+    "Transmit",
+    "JavaScript",
+    "HD",
+    "RotoBezier",
     // GPU APIs (the adapter's own name is added at run time).
     "GPU",
     "Metal",
@@ -175,7 +205,7 @@ fn chinese_ui_has_no_english_words() {
             "motion.layer.new.solid",
             "motion.layer.new.null",
             "motion.layer.new.text",
-            "motion.layer.new.rectangle",
+            "shape:rect",
         ],
     );
     expand_all(&mut h);

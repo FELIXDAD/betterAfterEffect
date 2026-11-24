@@ -183,7 +183,6 @@ pub struct TimelinePanel {
     scroll: Time,
     drag: Option<Drag>,
     rename: Option<(PrimPath, String)>,
-    title: String,
     /// Expression sources being edited, by `path.attr`.
     expr_edit: Option<(PrimPath, String, String)>,
     /// AE layer numbers (# column) of the shown comp, for accessibility names:
@@ -421,11 +420,11 @@ impl TimelinePanel {
 }
 
 impl Panel for TimelinePanel {
-    fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
-        if self.title.is_empty() {
-            TabInfo::new(tr("Timeline"))
-        } else {
-            TabInfo::new(self.title.clone())
+    fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
+        // From the session every frame (issue #215), like the viewer's.
+        match common::active_comp(cx.stage, &common::session(cx.resources)) {
+            Some(info) => TabInfo::new(format!("{} {}", tr("Timeline"), info.name)),
+            None => TabInfo::new(tr("Timeline")),
         }
     }
 
@@ -465,7 +464,6 @@ impl Panel for TimelinePanel {
         comp_tabs(ui, tabs, stage, &session);
 
         let Some(info) = common::active_comp(stage, &session) else {
-            self.title.clear();
             let rest = Rect::from_min_max(pos2(full.left(), tabs.bottom()), full.max);
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rest));
             common::empty_hint(
@@ -475,7 +473,6 @@ impl Panel for TimelinePanel {
             );
             return;
         };
-        self.title = format!("{} {}", tr("Timeline"), info.name);
         if session.lock().tick(&info) {
             ui.ctx().request_repaint();
         }

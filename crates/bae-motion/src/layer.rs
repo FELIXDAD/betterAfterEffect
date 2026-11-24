@@ -1,5 +1,5 @@
 //! Layer commands: `layer.create`, `layer.reorder`, `layer.duplicate`, `layer.split`,
-//! `layer.trim`, `layer.set_parent`.
+//! `layer.trim`, `layer.set_parent`, `layer.set_attr`.
 
 use bae_anim::glam::{DMat4, DVec3};
 use bae_model::{
@@ -41,8 +41,9 @@ fn default_label(kind: LayerKind) -> i64 {
     match kind {
         LayerKind::Shape => 8,
         LayerKind::Text | LayerKind::Solid | LayerKind::Null => 1,
-        LayerKind::Camera | LayerKind::Light => 4,
-        LayerKind::Adjustment => 10,
+        LayerKind::Camera => 4,
+        LayerKind::Light => 6,
+        LayerKind::Adjustment => 5,
         LayerKind::PreComp => 15,
         LayerKind::Footage => 3,
         LayerKind::Audio => 7,
@@ -89,6 +90,9 @@ pub struct CreateLayerParams {
     /// Solid size in pixels (default the comp size).
     #[serde(default)]
     pub size: Option<[u32; 2]>,
+    /// Solid pixel aspect ratio (default the comp's).
+    #[serde(default)]
+    pub pixel_aspect: Option<f64>,
     /// Text layers: the text (default "Text").
     #[serde(default)]
     pub text: Option<String>,
@@ -104,6 +108,41 @@ pub struct CreateLayerParams {
     /// Comp time (flicks) where the layer starts: its start time and in point (default 0).
     #[serde(default)]
     pub start: Option<Time>,
+    /// Camera layers: Camera Settings (type, zoom, depth of field …).
+    #[serde(default)]
+    pub camera: Option<crate::camera::CameraSettings>,
+    /// Light layers: Light Settings (type, color, intensity …).
+    #[serde(default)]
+    pub light: Option<crate::camera::LightSettings>,
+    /// Label color index (default AE's per kind; the UI passes the
+    /// Preferences > Labels default).
+    #[serde(default)]
+    pub label: Option<i64>,
+}
+
+impl CreateLayerParams {
+    /// A layer of `kind` in `comp` showing `source` (a comp or an asset),
+    /// starting at comp time `start`; everything else default.
+    pub fn with_source(comp: &PrimPath, kind: LayerKind, source: &PrimPath, start: Time) -> Self {
+        CreateLayerParams {
+            comp: comp.clone(),
+            kind,
+            name: None,
+            source: Some(source.clone()),
+            index: None,
+            color: None,
+            size: None,
+            pixel_aspect: None,
+            text: None,
+            font_size: None,
+            shape: None,
+            position: None,
+            start: Some(start),
+            camera: None,
+            light: None,
+            label: None,
+        }
+    }
 }
 
 fn source_size_and_duration(stage: &Stage, source: &PrimPath) -> Option<([f64; 2], Option<Time>)> {
@@ -189,7 +228,11 @@ impl Command for CreateLayer {
         create(tx, &path, PrimType::LAYER, Some(index.min(siblings)))?;
         set(tx, &path, "kind", Value::Enum(kind.as_str().to_owned()))?;
         set(tx, &path, "name", Value::String(name.clone()))?;
-        set(tx, &path, "label", Value::Int(default_label(kind)))?;
+        let label = p
+            .label
+            .filter(|l| (0..=16).contains(l))
+            .unwrap_or(default_label(kind));
+        set(tx, &path, "label", Value::Int(label))?;
         let start = p.start.unwrap_or(Time::ZERO);
         if start != Time::ZERO {
             set(tx, &path, "start_time", Value::Time(start))?;
@@ -238,6 +281,13 @@ impl Command for CreateLayer {
                 set(tx, &asset, "solid_color", Value::Color(color))?;
                 set(tx, &asset, "width", Value::Int(i64::from(sw)))?;
                 set(tx, &asset, "height", Value::Int(i64::from(sh)))?;
+                let par = p.pixel_aspect.unwrap_or(info.pixel_aspect);
+                if !(par.is_finite() && (0.01..=100.0).contains(&par)) {
+                    return Err(fail("pixel aspect ratio must be between 0.01 and 100"));
+                }
+                if par != 1.0 {
+                    set(tx, &asset, "pixel_aspect", Value::Float(par))?;
+                }
                 set(tx, &path, "source", Value::PrimRef(asset))?;
                 anchor = [f64::from(sw) / 2.0, f64::from(sh) / 2.0];
                 if kind == LayerKind::Adjustment {
@@ -254,7 +304,9 @@ impl Command for CreateLayer {
                 }
             }
             LayerKind::Null => {
-                anchor = [50.0, 50.0];
+                // AE 26: a 100x100 null anchored at its top-left corner, at 0%
+                // opacity (docs/reference/ae/interaction/layers-timeline-dnd).
+                set(tx, &path, "transform:opacity", Value::Float(0.0))?;
             }
             LayerKind::Text => {
                 let text = p.text.clone().filter(|t| !t.is_empty()).unwrap_or(name);
@@ -277,6 +329,27 @@ impl Command for CreateLayer {
                 position = [pos[0], pos[1], -zoom];
                 if kind == LayerKind::Camera {
                     set(tx, &path, "camera:zoom", Value::Float(zoom))?;
+                    set(tx, &path, "camera:focus_distance", Value::Float(zoom))?;
+                    if let Some(c) = &p.camera {
+                        for (attr, value) in c.attrs()? {
+                            set(tx, &path, attr, value)?;
+                        }
+                        // The camera stands `zoom` in front of the comp (AE).
+                        if let Some(z) = c.zoom {
+                            position = [pos[0], pos[1], -z];
+                        }
+                    }
+                } else {
+                    if let Some(l) = &p.light {
+                        for (attr, value) in l.attrs()? {
+                            set(tx, &path, attr, value)?;
+                        }
+                    }
+                    // AE 26 puts a new light up and to the right of the comp
+                    // center, aiming at it: [cx + 80, cy - 80, -666.67].
+                    if p.position.is_none() {
+                        position = [pos[0] + 80.0, pos[1] - 80.0, -2000.0 / 3.0];
+                    }
                 }
                 set(
                     tx,
@@ -458,6 +531,15 @@ fn duplicate_name(stage: &Stage, folder: &PrimPath, name: &str) -> String {
 
 /// Duplicate `layer` directly above itself; returns the new path.
 fn duplicate_layer(tx: &mut Transaction<'_>, layer: &PrimPath) -> Result<PrimPath, CommandError> {
+    duplicate_layer_at(tx, layer, false)
+}
+
+/// Duplicates `layer` directly above it, or directly below it (`below`).
+fn duplicate_layer_at(
+    tx: &mut Transaction<'_>,
+    layer: &PrimPath,
+    below: bool,
+) -> Result<PrimPath, CommandError> {
     let stage = tx.stage();
     let folder = layer.parent().ok_or(ModelError::RootNotEditable)?;
     let name = query::display_name_of(stage, layer);
@@ -470,7 +552,8 @@ fn duplicate_layer(tx: &mut Transaction<'_>, layer: &PrimPath) -> Result<PrimPat
     retarget_refs(&mut tree, layer, &new_path);
     let index = stage
         .sublayer(tx.target())
-        .and_then(|s| s.child_index(layer));
+        .and_then(|s| s.child_index(layer))
+        .map(|i| i + usize::from(below));
     tx.ensure_spec(&folder)?;
     tx.apply(Op::RestorePrim {
         path: new_path.clone(),
@@ -480,6 +563,129 @@ fn duplicate_layer(tx: &mut Transaction<'_>, layer: &PrimPath) -> Result<PrimPat
     set(tx, &new_path, "name", Value::String(new_name))?;
     Ok(new_path)
 }
+
+/// A layer on the clipboard (Edit > Copy): where it was and everything it holds
+/// (properties, keyframes, effects, masks, contents), composed.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CopiedLayer {
+    pub path: PrimPath,
+    pub tree: bae_model::PrimTree,
+}
+
+/// The clipboard form of `layers` (top first), for [`PasteLayers`].
+pub fn copy_layers(stage: &Stage, layers: &[PrimPath]) -> Vec<CopiedLayer> {
+    let mut v: Vec<PrimPath> = layers.to_vec();
+    // Top first, as in the comp.
+    if let Some(folder) = v.first().and_then(PrimPath::parent) {
+        let order = stage.children(&folder);
+        v.sort_by_key(|l| order.iter().position(|o| o == l).unwrap_or(usize::MAX));
+    }
+    v.iter()
+        .map(|l| CopiedLayer {
+            path: l.clone(),
+            tree: composed_tree(stage, l),
+        })
+        .collect()
+}
+
+pub struct PasteLayers;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PasteLayersParams {
+    /// Comp to paste into (any comp, not only the one the layers came from).
+    pub comp: PrimPath,
+    /// The copied layers, top first (`copy_layers`).
+    pub layers: Vec<CopiedLayer>,
+    /// Paste directly above this layer of `comp`; default the top of the comp.
+    #[serde(default)]
+    pub above: Option<PrimPath>,
+}
+
+impl Command for PasteLayers {
+    type Params = PasteLayersParams;
+    type Output = LayersOutput;
+    const ID: &'static str = "layer.paste";
+    const TITLE: &'static str = "Paste";
+    const DESCRIPTION: &'static str = "Paste copied layers into a comp (above a layer, or on top), named like Duplicate; links between the pasted layers follow them, links to layers of another comp are dropped.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<LayersOutput, CommandError> {
+        tx.stage().require_prim(&p.comp)?;
+        let folder = query::layers_folder(&p.comp);
+        let start = match &p.above {
+            Some(above) => tx
+                .stage()
+                .sublayer(tx.target())
+                .and_then(|s| s.child_index(above))
+                .unwrap_or(0),
+            None => 0,
+        };
+        // New paths first, so links between the pasted layers can follow them.
+        let mut names: Vec<(PrimPath, String)> = Vec::new();
+        for c in &p.layers {
+            let stage = tx.stage();
+            let name = c
+                .tree
+                .spec
+                .attrs
+                .get("name")
+                .and_then(|a| a.value.as_ref())
+                .and_then(|v| match v {
+                    Value::String(s) => Some(s.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| c.path.name().to_owned());
+            let mut new_name = duplicate_name(stage, &folder, &name);
+            // Names already given in this paste count as taken.
+            while names.iter().any(|(_, n)| *n == new_name) {
+                new_name = format!("{new_name} 2");
+            }
+            let mut leaf = query::unique_child_name(stage, &folder, &new_name);
+            while names.iter().any(|(p, _)| p.name() == leaf) {
+                leaf = format!("{leaf}_2");
+            }
+            names.push((child(&folder, &leaf)?, new_name));
+        }
+        tx.ensure_spec(&folder)?;
+        let mut paths = Vec::new();
+        for (i, (c, (new_path, new_name))) in p.layers.iter().zip(&names).enumerate() {
+            let mut tree = c.tree.clone();
+            tree.name = new_path.name().to_owned();
+            for (other, (other_new, _)) in p.layers.iter().zip(&names) {
+                retarget_refs(&mut tree, &other.path, other_new);
+            }
+            if c.path.parent().as_ref() != Some(&folder) {
+                drop_refs_into(&mut tree, c.path.parent().as_ref());
+            }
+            tx.apply(Op::RestorePrim {
+                path: new_path.clone(),
+                tree,
+                index: Some(start + i),
+            })?;
+            set(tx, new_path, "name", Value::String(new_name.clone()))?;
+            paths.push(new_path.clone());
+        }
+        Ok(LayersOutput { paths })
+    }
+}
+
+/// Clears links into `folder` (the source comp's layers) that pasting into
+/// another comp would leave dangling (parent, track matte).
+fn drop_refs_into(tree: &mut bae_model::PrimTree, folder: Option<&PrimPath>) {
+    let Some(folder) = folder else {
+        return;
+    };
+    let inside = |v: &Value| matches!(v, Value::PrimRef(r) if r.reparent(folder, folder).is_some());
+    for a in tree.spec.attrs.values_mut() {
+        if a.value.as_ref().is_some_and(inside) {
+            a.value = None;
+        }
+    }
+    for c in &mut tree.children {
+        drop_refs_into(c, Some(folder));
+    }
+}
+
+// ---------------------------------------------------------------------------
 
 pub struct DuplicateLayers;
 
@@ -516,6 +722,14 @@ pub struct SplitLayersParams {
     pub layers: Vec<PrimPath>,
     /// Comp time (flicks) to split at; layers not active at that time are skipped.
     pub time: Time,
+    /// Put each new layer above its original (default, AE's Preferences >
+    /// Composition > Create Split Layers Above Original Layer) or below it.
+    #[serde(default = "default_true")]
+    pub above: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Command for SplitLayers {
@@ -523,7 +737,7 @@ impl Command for SplitLayers {
     type Output = LayersOutput;
     const ID: &'static str = "layer.split";
     const TITLE: &'static str = "Split Layer";
-    const DESCRIPTION: &'static str = "Split layers at a comp time: the original ends there and a duplicate above it starts there.";
+    const DESCRIPTION: &'static str = "Split layers at a comp time: the original ends there and a duplicate above it (or below it, `above: false`) starts there.";
 
     fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<LayersOutput, CommandError> {
         ensure_unlocked(tx.stage(), &p.layers)?;
@@ -538,7 +752,7 @@ impl Command for SplitLayers {
             if !(a < p.time && p.time < b) {
                 continue;
             }
-            let new = duplicate_layer(tx, l)?;
+            let new = duplicate_layer_at(tx, l, !p.above)?;
             set(tx, l, "out_point", Value::Time(p.time))?;
             set(tx, &new, "in_point", Value::Time(p.time))?;
             paths.push(new);
@@ -986,6 +1200,59 @@ pub(crate) fn delete_prims(
     }
     Ok(())
 }
+
+/// Attributes [`SetLayerAttr`] writes: the layer switches, quality and label.
+pub const LAYER_SWITCH_ATTRS: &[&str] = &[
+    "shy",
+    "locked",
+    "enabled",
+    "audio_enabled",
+    "solo",
+    "collapse_transformation",
+    "motion_blur",
+    "adjustment_layer",
+    "three_d",
+    "quality",
+    "label",
+];
+
+pub struct SetLayerAttr;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SetLayerAttrParams {
+    /// Layers (or project items, for `label`).
+    pub layers: Vec<PrimPath>,
+    /// One of the layer switches (`shy`, `locked`, `enabled` = Video,
+    /// `audio_enabled`, `solo`, `collapse_transformation`, `motion_blur`,
+    /// `adjustment_layer`, `three_d`), `quality` (`best` / `draft` /
+    /// `wireframe`) or `label` (0 = none, 1–16 = AE's label colours).
+    pub attr: String,
+    pub value: Value,
+}
+
+impl Command for SetLayerAttr {
+    type Params = SetLayerAttrParams;
+    type Output = ();
+    const ID: &'static str = "layer.set_attr";
+    const TITLE: &'static str = "Change Layers";
+    const DESCRIPTION: &'static str = "Set a layer switch, the quality or the label of several layers in one step (AE: Layer > Switches, Quality, 3D Layer; Edit > Label).";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        if !LAYER_SWITCH_ATTRS.contains(&p.attr.as_str()) {
+            return Err(fail(format!(
+                "layer.set_attr sets switches, quality and label, not `{}`",
+                p.attr
+            )));
+        }
+        for l in &p.layers {
+            tx.stage().require_prim(l)?;
+            set(tx, l, &p.attr, p.value.clone())?;
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
 
 pub struct DeleteLayers;
 

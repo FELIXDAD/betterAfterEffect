@@ -1,0 +1,155 @@
+{
+  "schemaVersion": "1.0",
+  "id": "color-picker",
+  "title": {
+    "zh": "<调用属性名>（如“背景颜色”、“灯光颜色”、“颜色”）",
+    "en": "<Property Name> (e.g. Background Color, Light Color, Color)"
+  },
+  "triggers": [
+    {
+      "action": "Open Adobe Color Picker",
+      "shortcutWin": null,
+      "menuZh": "点击任意颜色色块（如合成设置背景颜色、纯色/灯光/效果/文字颜色）"
+    }
+  ],
+  "source": {
+    "application": "Adobe After Effects 26.0 (26.0x67)",
+    "platform": "Windows 11 Pro x64 (3840x2160 @ 150% DPI)",
+    "localeObserved": "zh_CN",
+    "method": "Live MSAA inspection + interactive tab/radio/dropdown probing + ExtendScript range probing"
+  },
+  "geometry": {
+    "physicalPxAt144Dpi": {
+      "w": 738,
+      "h": 493
+    },
+    "logicalPxAt96Dpi": {
+      "w": 492,
+      "h": 329
+    }
+  },
+  "persistence": {
+    "remembersLastValues": true,
+    "notesZh": "记住上次选中的色彩轴单选（默认 H）及窗口屏幕位置；颜色值与预览状态实时绑定调用方属性。"
+  },
+  "buttonBar": {
+    "position": "right_column",
+    "right": [
+      {
+        "id": "ok",
+        "type": "button",
+        "zh": "确定",
+        "en": "OK",
+        "role": "accept"
+      },
+      {
+        "id": "cancel",
+        "type": "button",
+        "zh": "取消",
+        "en": "Cancel",
+        "role": "reject"
+      }
+    ],
+    "notesZh": "按钮位于对话框右侧顶部纵向排列（确定在上、取消在下），下方同列依次为吸管图标按钮与预览复选框。"
+  },
+  "tabs": [],
+  "controls": [
+    {
+      "id": "color_field_and_slider",
+      "type": "custom_color_canvas",
+      "zh": "二维色域面板 + 垂直色相/通道滑条 + 新/旧色块对比",
+      "en": "2D Color Field + Vertical Channel Slider + New/Current Swatches",
+      "notesZh": "位于左侧区域；垂直滑条与二维色域随右侧 H/S/B/R/G/B 单选切换坐标轴。"
+    },
+    {
+      "id": "channel_axis_radio",
+      "type": "radio_group",
+      "zh": "色彩轴单选（H / S / B / R / G / B）",
+      "en": "Color Axis Radio (H / S / B / R / G / B)",
+      "defaultValue": {
+        "zh": "H",
+        "en": "H"
+      },
+      "options": [
+        {
+          "zh": "H",
+          "en": "H"
+        },
+        {
+          "zh": "S",
+          "en": "S"
+        },
+        {
+          "zh": "B",
+          "en": "B"
+        },
+        {
+          "zh": "R",
+          "en": "R"
+        },
+        {
+          "zh": "G",
+          "en": "G"
+        },
+        {
+          "zh": "B",
+          "en": "B"
+        }
+      ]
+    },
+    {
+      "id": "hsb_inputs",
+      "type": "number_scrub_group",
+      "internalName": "HotText_Hue / HotText_Sat / HotText_Bri",
+      "zh": "H / S / B 数值",
+      "en": "H / S / B Numeric Scrubs",
+      "unit": "H: 0–360°, S: 0–100%, B: 0–100%",
+      "range": {
+        "hue": [
+          0,
+          360
+        ],
+        "sat": [
+          0,
+          100
+        ],
+        "bri": [
+          0,
+          100
+        ]
+      }
+    },
+    {
+      "id": "rgb_inputs",
+      "type": "number_scrub_group",
+      "internalName": "HotText_Red / HotText_Green / HotText_Blue",
+      "zh": "R / G / B 数值",
+      "en": "R / G / B Numeric Scrubs",
+      "unit": "8 bpc: 0–255; 16 bpc: 0–32768; 32 bpc float: 0.0–1.0+ (HDR)",
+      "notesZh": "实测 32 bpc 项目的灯光/效果颜色自动切为浮点 0.0–1.0+（白色显示 1/1/1）；合成背景颜色在 32 bpc 下仍保持 8 位 0–255。"
+    },
+    {
+      "id": "hex_input",
+      "type": "text_input",
+      "zh": "#",
+      "en": "#",
+      "defaultValue": "000000",
+      "notesZh": "6 位十六进制 RGB 颜色码（如 FFFFFF / 000000），与 HSB/RGB 实时双向同步。"
+    },
+    {
+      "id": "eyedropper",
+      "type": "icon_button",
+      "zh": "吸管",
+      "en": "Eyedropper",
+      "notesZh": "位于右列取消按钮下方，支持从屏幕任意位置取色。"
+    },
+    {
+      "id": "preview",
+      "type": "checkbox",
+      "zh": "预览",
+      "en": "Preview",
+      "defaultValue": true,
+      "notesZh": "默认勾选，位于右列吸管下方，实时将颜色变化反馈到合成查看器。"
+    }
+  ]
+}

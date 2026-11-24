@@ -33,6 +33,7 @@ use crate::icons::{self, Icon};
 use crate::keymap::{Chord, Keymap, KeymapBindings, KeymapOverrides};
 use crate::panel::{Panel, PanelContext, PanelKind, PanelRequests, PanelSpawn};
 use crate::theme::{color, metrics};
+use crate::toolbar::Toolbar;
 use crate::workspace::WorkspacePreset;
 use crate::{titlebar, widgets};
 
@@ -84,8 +85,8 @@ pub struct WorkbenchContext<'a> {
     pub dirty: bool,
 }
 
-/// The tools shown in the toolbar of AE-keymap workspaces (selection is view state
-/// until the motion workspace, workstream 12, registers real tools).
+/// The tools shown in the toolbar of AE-keymap workspaces when no module registers
+/// a [`Toolbar`] for the `ae` keymap (the Motion workspace module does).
 const AE_TOOLS: [(Icon, &str); 18] = [
     (Icon::Home, "Home"),
     (Icon::Selection, "Selection Tool"),
@@ -120,6 +121,8 @@ pub struct Workbench {
     /// Module action handlers, tried after the focused panel.
     handlers: Arc<Registry<dyn ActionHandler>>,
     handlers_gen: u64,
+    /// Module dialogs, drawn over the dock (`crate::dialog`).
+    dialog_hosts: Arc<Registry<dyn crate::dialog::DialogHost>>,
     handler_conflicts: Vec<String>,
     keymap_conflicts: Vec<String>,
     /// Model commands `(id, English title)` for the shortcut editor.
@@ -136,6 +139,10 @@ pub struct Workbench {
     state: WorkbenchState,
     requests: PanelRequests,
     tool: usize,
+    /// Toolbars by keymap id (`Registry<dyn Toolbar>`).
+    toolbars: Arc<Registry<dyn Toolbar>>,
+    /// Keymaps whose toolbar got its saved state back.
+    toolbars_loaded: Vec<String>,
     /// A dialog the host draws (Preferences) is open: shortcuts wait.
     external_modal: bool,
 }
@@ -153,6 +160,57 @@ impl Workbench {
         .with_keymap_extensions(app.registry::<KeymapBindings>())
         .with_action_handlers(app.registry::<dyn ActionHandler>())
         .with_command_variants(app.registry::<crate::action::CommandVariant>())
+        .with_toolbars(app.registry::<dyn Toolbar>())
+        .with_dialog_hosts(app.registry::<dyn crate::dialog::DialogHost>())
+    }
+
+    /// Toolbars modules register for their keymaps (`Registry<dyn Toolbar>`).
+    pub fn with_toolbars(mut self, toolbars: Arc<Registry<dyn Toolbar>>) -> Self {
+        self.toolbars = toolbars;
+        self.toolbars_loaded.clear();
+        self
+    }
+
+    /// Module dialogs (`Registry<dyn DialogHost>`), drawn after the dock; while
+    /// one is open no shortcuts reach the project.
+    pub fn with_dialog_hosts(
+        mut self,
+        hosts: Arc<Registry<dyn crate::dialog::DialogHost>>,
+    ) -> Self {
+        self.dialog_hosts = hosts;
+        self
+    }
+
+    /// Whether a modal dialog is open: the welcome / role picker or a module
+    /// dialog. Hosts use it to disable the native menu bar, like AE.
+    pub fn modal_open(&self, resources: &bae_app::Resources) -> bool {
+        self.role_picker_open()
+            || self.external_modal
+            || self
+                .dialog_hosts
+                .snapshot()
+                .iter()
+                .any(|h| h.item().is_open(resources))
+    }
+
+    fn module_dialogs(&mut self, ctx: &egui::Context, cx: &WorkbenchContext<'_>) {
+        let hosts = self.dialog_hosts.snapshot();
+        if hosts.is_empty() {
+            return;
+        }
+        let id = PanelId::new("dialog");
+        for h in hosts.iter() {
+            let mut pcx = PanelContext::new(
+                &id,
+                "",
+                cx.stage,
+                cx.author,
+                cx.resources,
+                &mut self.requests,
+            );
+            h.item().ui(ctx, &mut pcx);
+        }
+        self.apply_panel_requests(cx);
     }
 
     /// Names of command variants (`Registry<CommandVariant>`) for the shortcut editor.
@@ -222,6 +280,7 @@ impl Workbench {
             variants: Arc::new(Registry::new()),
             handlers: Arc::new(Registry::new()),
             handlers_gen: u64::MAX,
+            dialog_hosts: Arc::new(Registry::new()),
             handler_conflicts: Vec::new(),
             keymap_conflicts: Vec::new(),
             extra_commands: Vec::new(),
@@ -236,6 +295,8 @@ impl Workbench {
             state,
             requests: PanelRequests::default(),
             tool: 1,
+            toolbars: Arc::new(Registry::new()),
+            toolbars_loaded: Vec::new(),
             external_modal: false,
         };
         wb.refresh_registries();
@@ -422,6 +483,13 @@ impl Workbench {
                 self.state.panels.insert(id.0.clone(), state);
             }
         }
+        for keymap in &self.toolbars_loaded {
+            if let Some(state) = self.toolbars.get(keymap).and_then(|t| t.save_state()) {
+                self.state
+                    .panels
+                    .insert(crate::toolbar::state_key(keymap), state);
+            }
+        }
     }
 
     fn refresh_registries(&mut self) {
@@ -521,9 +589,10 @@ impl Workbench {
     ) -> Vec<Invocation> {
         self.refresh_registries();
         crate::a11y::install(ui.ctx());
-        // A modal dialog (the welcome / role picker) owns the keyboard: no
-        // shortcuts and no panel keys reach the project behind it.
-        let modal = self.role_picker_open() || self.external_modal;
+        // A modal dialog (the welcome / role picker, an external window such as
+        // Preferences, a module dialog) owns the keyboard: no shortcuts and no
+        // panel keys reach the project behind it.
+        let modal = self.modal_open(cx.resources) || crate::color_picker::open_last_pass(ui.ctx());
         crate::panel::set_modal_open(ui.ctx(), modal);
         if !modal && !self.record_shortcut(ui.ctx()) {
             self.collect_shortcuts(ui.ctx());
@@ -547,7 +616,10 @@ impl Workbench {
             toolbar.y_range(),
             egui::Stroke::new(1.0, color::APP_BG),
         );
-        if self.keymap_id() == "ae" {
+        let keymap_id = self.keymap_id();
+        if let Some(tb) = self.toolbars.get(&keymap_id) {
+            self.module_toolbar(ui, cx, &*tb, &keymap_id, toolbar, ws_rect.left());
+        } else if keymap_id == "ae" {
             self.tools(ui, toolbar, ws_rect.left());
         }
         self.workspace_bar(ui, ws_rect);
@@ -583,10 +655,49 @@ impl Workbench {
         };
         self.dock.show(&mut child, &mut host);
         self.apply_panel_requests(cx);
+        self.module_dialogs(ui.ctx(), cx);
         self.shortcut_window(ui.ctx());
         self.workspace_dialogs(ui.ctx());
         ime_follows_caret(ui.ctx());
         std::mem::take(&mut self.requests.invocations)
+    }
+
+    /// A module's toolbar (tools and tool options) left of the workspace bar.
+    fn module_toolbar(
+        &mut self,
+        ui: &mut Ui,
+        cx: &WorkbenchContext<'_>,
+        tb: &dyn Toolbar,
+        keymap_id: &str,
+        toolbar: Rect,
+        right: f32,
+    ) {
+        if !self.toolbars_loaded.iter().any(|k| k == keymap_id) {
+            if let Some(state) = self.state.panels.get(&crate::toolbar::state_key(keymap_id)) {
+                tb.load_state(state);
+            }
+            self.toolbars_loaded.push(keymap_id.to_owned());
+        }
+        let area = Rect::from_min_max(
+            toolbar.min + vec2(20.0, 4.0),
+            pos2(right - 8.0, toolbar.bottom() - 4.0),
+        );
+        let mut row = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(area)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        row.set_clip_rect(area);
+        let id = PanelId::new("toolbar");
+        let mut pcx = PanelContext::new(
+            &id,
+            "",
+            cx.stage,
+            cx.author,
+            cx.resources,
+            &mut self.requests,
+        );
+        tb.ui(&mut row, &mut pcx, &self.keymap);
     }
 
     fn tools(&mut self, ui: &mut Ui, toolbar: Rect, right: f32) {
@@ -652,7 +763,27 @@ impl Workbench {
         let keymap = &self.keymap;
         let mut hits = Vec::new();
         ctx.input_mut(|input| {
+            // egui-winit turns every Cmd/Ctrl+C / X / V into Copy / Cut / Paste,
+            // with Shift or Alt held too (and sends no key event): those chords
+            // are other shortcuts (Ctrl+Shift+C Pre-compose, Ctrl+Alt+Shift+C New
+            // Camera, Ctrl+Shift+X Trim Comp to Work Area …), #220.
+            let mods = input.modifiers;
+            let other_chord = mods.command && (mods.shift || mods.alt);
             input.events.retain(|event| match event {
+                Event::Copy | Event::Cut | Event::Paste(_) if other_chord && !typing => {
+                    let key = match event {
+                        Event::Copy => Key::C,
+                        Event::Cut => Key::X,
+                        _ => Key::V,
+                    };
+                    match keymap.match_event(key, Some(key), mods, focused.as_deref()) {
+                        Some(binding) => {
+                            hits.push(binding.invocation());
+                            false
+                        }
+                        None => true,
+                    }
+                }
                 Event::Key {
                     key,
                     physical_key,
@@ -1120,11 +1251,21 @@ mod tests {
     }
 
     fn frame(wb: &mut Workbench, events: Vec<Event>) -> Vec<Invocation> {
-        let ctx = Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         frame_in(&ctx, wb, events)
     }
 
     fn frame_in(ctx: &Context, wb: &mut Workbench, events: Vec<Event>) -> Vec<Invocation> {
+        frame_mods(ctx, wb, Modifiers::NONE, events)
+    }
+
+    /// [`frame_in`] with these modifiers held.
+    fn frame_mods(
+        ctx: &Context,
+        wb: &mut Workbench,
+        modifiers: Modifiers,
+        events: Vec<Event>,
+    ) -> Vec<Invocation> {
         let stage = Stage::new();
         let author = AuthorId::system();
         let resources = Resources::new();
@@ -1135,9 +1276,11 @@ mod tests {
             title: "BAE",
             dirty: false,
         };
+        let mut all = vec![Event::ModifiersChanged(modifiers)];
+        all.extend(events);
         let input = RawInput {
             screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1400.0, 900.0))),
-            events,
+            events: all,
             ..Default::default()
         };
         let mut out = Vec::new();
@@ -1185,6 +1328,68 @@ mod tests {
         }
     }
 
+    /// A toolbar that counts frames, remembers its state and sees the keymap.
+    #[derive(Default)]
+    struct CountingToolbar {
+        frames: std::sync::atomic::AtomicUsize,
+        loaded: std::sync::Mutex<Option<serde_json::Value>>,
+        saw_u: std::sync::atomic::AtomicBool,
+    }
+    impl Toolbar for CountingToolbar {
+        fn ui(&self, ui: &mut Ui, cx: &mut PanelContext<'_>, keymap: &Keymap) {
+            use std::sync::atomic::Ordering::Relaxed;
+            self.frames.fetch_add(1, Relaxed);
+            assert_eq!(cx.panel.as_str(), "toolbar");
+            self.saw_u.store(
+                keymap.chords_for("layer.reveal_keyframes").next().is_some(),
+                Relaxed,
+            );
+            ui.label("tools");
+        }
+        fn save_state(&self) -> Option<serde_json::Value> {
+            Some(serde_json::json!({"tool": "pen"}))
+        }
+        fn load_state(&self, state: &serde_json::Value) {
+            *self.loaded.lock().unwrap() = Some(state.clone());
+        }
+    }
+
+    #[test]
+    fn registered_toolbar_draws_and_keeps_its_state() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let (kinds, presets, keymaps, actions) = registries();
+        let toolbars = Arc::new(Registry::<dyn Toolbar>::new());
+        let tb = Arc::new(CountingToolbar::default());
+        toolbars
+            .register_arc(Owner::module("test"), "km", tb.clone() as Arc<dyn Toolbar>)
+            .unwrap();
+        let mut state = WorkbenchState::default();
+        state.panels.insert(
+            crate::toolbar::state_key("km"),
+            serde_json::json!({"tool": "hand"}),
+        );
+        let mut wb = Workbench::with_registries(kinds, presets, keymaps, actions, state)
+            .with_toolbars(toolbars);
+        frame(&mut wb, vec![]);
+        frame(&mut wb, vec![]);
+        assert_eq!(tb.frames.load(Relaxed), 2, "drawn every frame");
+        assert!(tb.saw_u.load(Relaxed), "gets the active keymap");
+        assert_eq!(
+            *tb.loaded.lock().unwrap(),
+            Some(serde_json::json!({"tool": "hand"})),
+            "saved state restored once"
+        );
+        let saved = wb.state();
+        assert_eq!(
+            saved.panels.get("toolbar:km"),
+            Some(&serde_json::json!({"tool": "pen"}))
+        );
+        // A workspace with another keymap and no toolbar: not drawn.
+        assert!(wb.switch_workspace("two"));
+        frame(&mut wb, vec![]);
+        assert_eq!(tb.frames.load(Relaxed), 2);
+    }
+
     #[test]
     fn focused_widgets_get_their_keys_before_shortcuts() {
         let clicks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1221,7 +1426,7 @@ mod tests {
             .unwrap();
         let mut wb =
             Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
-        let ctx = Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         let none = Modifiers::NONE;
         frame_in(&ctx, &mut wb, vec![]);
         // Nothing focused: Space plays.
@@ -1261,6 +1466,86 @@ mod tests {
         );
         assert!(typed.is_empty(), "{typed:?}");
         assert_eq!(text.lock().unwrap().as_str(), "a U");
+    }
+
+    /// #220: egui-winit reports Cmd/Ctrl+Shift+C, Cmd/Ctrl+Alt+Shift+C … as
+    /// Copy / Cut / Paste (no key event). Those run their own shortcuts (Pre-compose,
+    /// New Camera); plain Cmd/Ctrl+C / V stay Copy / Paste, and a text field still
+    /// gets its paste.
+    #[test]
+    fn modified_copy_keys_run_their_own_shortcuts() {
+        let text = Arc::new(std::sync::Mutex::new(String::from("a")));
+        let focus = Arc::new(std::sync::Mutex::new(None));
+        let (kinds, presets, keymaps, actions) = registries();
+        let (t, f) = (text.clone(), focus.clone());
+        let clicks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        kinds
+            .replace(
+                Owner::module("test"),
+                "a",
+                Arc::new(PanelKind::new("A", move |_| {
+                    Box::new(Focusable {
+                        clicks: clicks.clone(),
+                        text: t.clone(),
+                        focus: f.clone(),
+                    })
+                })),
+            )
+            .unwrap();
+        let camera = serde_json::json!({ "kind": "camera" });
+        keymaps
+            .replace(
+                Owner::module("test"),
+                "km",
+                Arc::new(Keymap::new(
+                    "KM",
+                    vec![
+                        Binding::new("Cmd+Shift+C", "motion.layer.pre_compose"),
+                        Binding::new("Cmd+Alt+Shift+C", "motion.new_layer").params(camera.clone()),
+                    ],
+                )),
+            )
+            .unwrap();
+        let mut wb =
+            Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
+        let ctx = crate::testing::ctx_with_fonts();
+        frame_in(&ctx, &mut wb, vec![]);
+        let cmd = Modifiers::COMMAND;
+        assert_eq!(
+            frame_mods(&ctx, &mut wb, cmd | Modifiers::SHIFT, vec![Event::Copy]),
+            vec![Invocation::new("motion.layer.pre_compose")]
+        );
+        assert_eq!(
+            frame_mods(
+                &ctx,
+                &mut wb,
+                cmd | Modifiers::ALT | Modifiers::SHIFT,
+                vec![Event::Copy]
+            ),
+            vec![Invocation::with_params("motion.new_layer", camera)]
+        );
+        assert_eq!(
+            frame_mods(&ctx, &mut wb, cmd, vec![Event::Copy]),
+            vec![Invocation::new("edit.copy")]
+        );
+        assert_eq!(
+            frame_mods(&ctx, &mut wb, cmd, vec![Event::Paste("x".into())]),
+            vec![Invocation::with_params(
+                "edit.paste",
+                serde_json::json!({ "text": "x" })
+            )]
+        );
+        // A focused text field pastes the text itself.
+        *focus.lock().unwrap() = Some("field");
+        frame_in(&ctx, &mut wb, vec![]);
+        frame_in(&ctx, &mut wb, vec![]);
+        let pasted = frame_mods(&ctx, &mut wb, cmd, vec![Event::Paste("bc".into())]);
+        assert!(pasted.is_empty(), "{pasted:?}");
+        assert!(
+            text.lock().unwrap().contains("bc"),
+            "{:?}",
+            text.lock().unwrap()
+        );
     }
 
     #[test]
@@ -1424,7 +1709,7 @@ mod tests {
             title: "",
             dirty: false,
         };
-        let ctx = Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         let run = |wb: &mut Workbench, events: Vec<Event>| {
             let input = RawInput {
                 screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1400.0, 900.0))),
@@ -1540,7 +1825,7 @@ mod tests {
         let (kinds, presets, keymaps, actions) = registries();
         let mut wb =
             Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
-        let ctx = Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         wb.show_role_picker();
         frame_in(&ctx, &mut wb, vec![]);
         assert!(frame_in(&ctx, &mut wb, vec![key(Key::U, Modifiers::NONE)]).is_empty());
@@ -1560,7 +1845,7 @@ mod tests {
         let (kinds, presets, keymaps, actions) = registries();
         let mut wb =
             Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
-        let ctx = Context::default();
+        let ctx = crate::testing::ctx_with_fonts();
         let pointer = |pos: egui::Pos2, pressed: bool| {
             vec![
                 Event::PointerMoved(pos),
@@ -1688,6 +1973,78 @@ mod tests {
         assert_eq!(*log.lock().unwrap(), ["a", "b"]);
         // Ids nobody claims fall through to the shell.
         assert!(!wb.handle(&Invocation::new("model.command"), &cx));
+    }
+
+    /// A module dialog: open until OK (runs `ask.ok`) or Cancel.
+    struct Ask {
+        open: Arc<std::sync::Mutex<bool>>,
+    }
+
+    impl crate::dialog::DialogHost for Ask {
+        fn is_open(&self, _: &Resources) -> bool {
+            *self.open.lock().unwrap()
+        }
+        fn ui(&self, ctx: &Context, cx: &mut PanelContext<'_>) {
+            use crate::dialog::{self, Outcome};
+            let mut open = self.open.lock().unwrap();
+            if !*open {
+                return;
+            }
+            let id = egui::Id::new("ask");
+            let shown = dialog::window(ctx, id, "Ask", |ui| {
+                ui.label("Sure?");
+                dialog::buttons(ui, true)
+            });
+            match shown {
+                Some(Outcome::Ok) => {
+                    cx.invoke("ask.ok");
+                    *open = false;
+                }
+                Some(Outcome::Cancel) => *open = false,
+                None if dialog::closed_by_title_bar(ctx, id) => *open = false,
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn module_dialogs_are_modal_and_run_commands_after_the_frame() {
+        let (kinds, presets, keymaps, actions) = registries();
+        let hosts = Arc::new(Registry::<dyn crate::dialog::DialogHost>::new());
+        let open = Arc::new(std::sync::Mutex::new(false));
+        hosts
+            .register_arc(
+                Owner::module("ask"),
+                "ask",
+                Arc::new(Ask { open: open.clone() }),
+            )
+            .unwrap();
+        let mut wb =
+            Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default())
+                .with_dialog_hosts(hosts);
+        let ctx = crate::testing::ctx_with_fonts();
+        let u = || key(Key::U, Modifiers::NONE);
+        // Closed: shortcuts work.
+        assert_eq!(
+            frame_in(&ctx, &mut wb, vec![u()]),
+            vec![Invocation::new("layer.reveal_keyframes")]
+        );
+        assert!(!wb.modal_open(&Resources::new()));
+        // Open: U goes nowhere, Esc cancels without a command.
+        *open.lock().unwrap() = true;
+        assert!(wb.modal_open(&Resources::new()));
+        assert!(frame_in(&ctx, &mut wb, vec![]).is_empty());
+        assert!(frame_in(&ctx, &mut wb, vec![u()]).is_empty());
+        assert!(frame_in(&ctx, &mut wb, vec![key(Key::Escape, Modifiers::NONE)]).is_empty());
+        assert!(!*open.lock().unwrap());
+        // Reopened: Enter is OK, and its command comes out after the frame.
+        *open.lock().unwrap() = true;
+        assert!(frame_in(&ctx, &mut wb, vec![]).is_empty());
+        assert_eq!(
+            frame_in(&ctx, &mut wb, vec![key(Key::Enter, Modifiers::NONE)]),
+            vec![Invocation::new("ask.ok")]
+        );
+        assert!(!*open.lock().unwrap());
     }
 
     #[test]

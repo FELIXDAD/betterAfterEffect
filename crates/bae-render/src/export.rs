@@ -772,14 +772,19 @@ pub fn frame_file(pattern: &Path, frame: i64) -> PathBuf {
     pattern.with_file_name(format!("{stem}_{}.{ext}", number(4)))
 }
 
+/// The file name has a run of `#` (`name_####.png`, `name_[####].png`): it
+/// names numbered frames, even when only one frame is rendered (AE).
+pub fn has_frame_run(pattern: &Path) -> bool {
+    pattern
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy().contains('#'))
+}
+
 /// `pattern` with an explicit `####` run when its file name has none, so
 /// bae-media numbers files exactly like [`frame_file`].
 #[cfg_attr(not(feature = "media"), allow(dead_code))]
 pub(crate) fn explicit_pattern(pattern: &Path) -> PathBuf {
-    let has_run = pattern
-        .file_name()
-        .is_some_and(|n| n.to_string_lossy().contains('#'));
-    if has_run {
+    if has_frame_run(pattern) {
         return pattern.to_owned();
     }
     let stem = pattern
@@ -1407,7 +1412,12 @@ pub fn export_frames(
     on_frame: &mut dyn FnMut(&ExportedFrame),
 ) -> Result<ExportReport, RenderError> {
     let started = Instant::now();
-    let sequence = job.times.len() > 1;
+    // More than one frame, or one comp frame whose image file name has a `#`
+    // run (AE numbers it too, #207); otherwise a single still image.
+    let sequence = job.times.len() > 1
+        || (job.settings.format.is_image()
+            && has_frame_run(&job.settings.path)
+            && job.times.first().is_some_and(|(frame, _)| frame.is_some()));
     let float_work = renderer.work_format(job.request) == wgpu::TextureFormat::Rgba32Float;
     let mut run = Run {
         readback: ExportReadback::new(renderer.gpu().clone(), READBACK_DEPTH),

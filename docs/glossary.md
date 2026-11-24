@@ -143,7 +143,8 @@
 | Source Name | 源名称 |
 | Parent & Link | 父级和链接 |
 | Mode | 模式 |
-| Track Matte | 轨道遮罩 |
+| Track Matte | 轨道遮罩（时间轴列名和"没有轨道遮罩"；AE 26 的 图层 菜单子菜单标题写作"跟踪遮罩"，BAE 统一用"轨道遮罩"） |
+| Solo | 单独（AE 26 的开关名和 图层 ▸ 开关 ▸ 单独，R1 实测；不是"独奏"） |
 | Toggle Switches / Modes | 切换开关/模式 |
 | Frame Render Time | 帧渲染时间 |
 | Shy | 消隐 |

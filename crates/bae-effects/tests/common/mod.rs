@@ -9,9 +9,9 @@
 use std::sync::Arc;
 
 use bae_effects::{Builtin, Standalone};
+use bae_gpu::GpuContext;
 use bae_gpu::transfer;
 use bae_gpu::wgpu;
-use bae_gpu::{GpuContext, GpuContextDescriptor, GpuError};
 use bae_model::{PrimPath, Value};
 use bae_render::{EffectParams, GpuImage, IRect, ImageAlpha, RenderEffect};
 
@@ -36,27 +36,16 @@ pub fn tolerance_scale(gpu: &GpuContext) -> f32 {
 }
 
 fn create_context() -> Option<Arc<GpuContext>> {
-    match GpuContext::new_headless(GpuContextDescriptor::default().with_env()) {
-        Ok(ctx) => {
-            if tolerance_scale(&ctx) > 1.0 {
-                eprintln!(
-                    "GPU tests on software/virtual adapter {:?} ({:?}): tolerances x{}",
-                    ctx.adapter_info().name,
-                    ctx.adapter_info().device_type,
-                    tolerance_scale(&ctx)
-                );
-            }
-            Some(ctx)
-        }
-        Err(error @ GpuError::NoAdapter { .. }) => {
-            if std::env::var_os("BAE_REQUIRE_GPU").is_some_and(|v| v == "1") {
-                panic!("BAE_REQUIRE_GPU=1 but {error}");
-            }
-            eprintln!("skipping GPU test: {error}");
-            None
-        }
-        Err(error) => panic!("GPU context creation failed: {error}"),
+    let ctx = bae_gpu::testing::shared_context()?;
+    if tolerance_scale(&ctx) > 1.0 {
+        eprintln!(
+            "GPU tests on software/virtual adapter {:?} ({:?}): tolerances x{}",
+            ctx.adapter_info().name,
+            ctx.adapter_info().device_type,
+            tolerance_scale(&ctx)
+        );
     }
+    Some(ctx)
 }
 
 /// An RGBA image (premultiplied unless stated) as f32 pixels covering `rect`.

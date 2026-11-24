@@ -1,0 +1,817 @@
+{
+  "schemaVersion": "1.0",
+  "id": "output-module-settings",
+  "title": {
+    "zh": "输出模块设置",
+    "en": "Output Module Settings"
+  },
+  "triggers": [
+    {
+      "action": "Output Module Settings (Render Queue item)",
+      "shortcutWin": null,
+      "menuZh": "渲染队列面板 ▸ 点击输出模块蓝字（如“H.264 - 匹配渲染设置 - 40 Mbps”）"
+    },
+    {
+      "action": "Output Module Templates",
+      "shortcutWin": null,
+      "menuZh": "编辑 ▸ 模板 ▸ 输出模块(M)... ▸ 编辑..."
+    }
+  ],
+  "source": {
+    "application": "Adobe After Effects 26.0 (26.0x67)",
+    "platform": "Windows 11 Pro x64 (3840x2160 @ 150% DPI)",
+    "localeObserved": "zh_CN",
+    "method": "Live MSAA inspection + interactive tab/radio/dropdown probing + ExtendScript range probing"
+  },
+  "geometry": {
+    "physicalPxAt144Dpi": {
+      "w": 922,
+      "h": 1090
+    },
+    "logicalPxAt96Dpi": {
+      "w": 615,
+      "h": 727
+    }
+  },
+  "persistence": {
+    "remembersLastValues": false,
+    "persistsViaTemplates": true,
+    "notesZh": "单次弹窗修改仅作用于当前输出模块；新建输出模块按“输出模块模板”中指定的默认模板初始化（影片与保存当前预览默认“H.264 - 匹配渲染设置 - 40 Mbps”、帧默认“Photoshop”、预渲染与影片代理默认“无损”），模板跨重启持久化。"
+  },
+  "buttonBar": {
+    "position": "bottom_right",
+    "right": [
+      {
+        "id": "ok",
+        "type": "button",
+        "zh": "确定",
+        "en": "OK",
+        "role": "accept"
+      },
+      {
+        "id": "cancel",
+        "type": "button",
+        "zh": "取消",
+        "en": "Cancel",
+        "role": "reject"
+      }
+    ]
+  },
+  "tabs": [
+    {
+      "id": "main_options",
+      "zh": "主要选项",
+      "en": "Main Options",
+      "controls": [
+        {
+          "id": "format",
+          "type": "dropdown",
+          "zh": "格式:",
+          "en": "Format:",
+          "defaultValue": {
+            "zh": "H.264",
+            "en": "H.264"
+          },
+          "options": [
+            {
+              "zh": "AIFF",
+              "en": "AIFF"
+            },
+            {
+              "zh": "AVI",
+              "en": "AVI"
+            },
+            {
+              "zh": "DPX/Cineon 序列",
+              "en": "DPX/Cineon Sequence"
+            },
+            {
+              "zh": "H.264",
+              "en": "H.264"
+            },
+            {
+              "zh": "IFF 序列",
+              "en": "IFF Sequence"
+            },
+            {
+              "zh": "JPEG 序列",
+              "en": "JPEG Sequence"
+            },
+            {
+              "zh": "MP3",
+              "en": "MP3"
+            },
+            {
+              "zh": "OpenEXR 序列",
+              "en": "OpenEXR Sequence"
+            },
+            {
+              "zh": "PNG 序列",
+              "en": "PNG Sequence"
+            },
+            {
+              "zh": "Photoshop 序列",
+              "en": "Photoshop Sequence"
+            },
+            {
+              "zh": "QuickTime",
+              "en": "QuickTime"
+            },
+            {
+              "zh": "Radiance 序列",
+              "en": "Radiance Sequence"
+            },
+            {
+              "zh": "SGI 序列",
+              "en": "SGI Sequence"
+            },
+            {
+              "zh": "TIFF 序列",
+              "en": "TIFF Sequence"
+            },
+            {
+              "zh": "Targa 序列",
+              "en": "Targa Sequence"
+            },
+            {
+              "zh": "WAV",
+              "en": "WAV"
+            }
+          ],
+          "notesZh": "共 16 种输出格式；切换为纯音频格式（AIFF/MP3/WAV）时禁用视频输出分组，切换为图像序列时启用“开始 #”和“使用合成帧编号”。"
+        },
+        {
+          "id": "include_project_link",
+          "type": "checkbox",
+          "zh": "包括项目链接",
+          "en": "Include Project Link",
+          "defaultValue": true
+        },
+        {
+          "id": "post_render_action",
+          "type": "dropdown",
+          "zh": "渲染后动作:",
+          "en": "Post-Render Action:",
+          "defaultValue": {
+            "zh": "无",
+            "en": "None"
+          },
+          "options": [
+            {
+              "zh": "无",
+              "en": "None"
+            },
+            {
+              "zh": "导入",
+              "en": "Import"
+            },
+            {
+              "zh": "导入和替换用法",
+              "en": "Import & Replace Usage"
+            },
+            {
+              "zh": "设置代理",
+              "en": "Set Proxy"
+            }
+          ]
+        },
+        {
+          "id": "include_source_xmp",
+          "type": "checkbox",
+          "zh": "包括源 XMP 元数据",
+          "en": "Include Source XMP Metadata",
+          "defaultValue": false
+        },
+        {
+          "id": "video_output",
+          "type": "checkbox",
+          "zh": "视频输出",
+          "en": "Video Output",
+          "defaultValue": true,
+          "enableRuleZh": "取消勾选或选择纯音频格式时，下方通道/深度/颜色/格式选项/调整大小/裁剪全部置灰。"
+        },
+        {
+          "id": "channels",
+          "type": "dropdown",
+          "zh": "通道:",
+          "en": "Channels:",
+          "defaultValue": {
+            "zh": "RGB",
+            "en": "RGB"
+          },
+          "options": [
+            {
+              "zh": "RGB",
+              "en": "RGB"
+            },
+            {
+              "zh": "Alpha",
+              "en": "Alpha"
+            },
+            {
+              "zh": "RGB + Alpha",
+              "en": "RGB + Alpha"
+            }
+          ],
+          "enableRuleZh": "格式不支持 Alpha（如 H.264/JPEG）时仅 RGB 可选或回退为 RGB。"
+        },
+        {
+          "id": "depth",
+          "type": "dropdown",
+          "zh": "深度:",
+          "en": "Depth:",
+          "defaultValue": {
+            "zh": "数百万种颜色",
+            "en": "Millions of Colors"
+          },
+          "options": [
+            {
+              "zh": "256 色",
+              "en": "256 Colors"
+            },
+            {
+              "zh": "数百万种颜色",
+              "en": "Millions of Colors"
+            },
+            {
+              "zh": "数百万种以上颜色",
+              "en": "Millions of Colors+"
+            },
+            {
+              "zh": "数万亿种颜色",
+              "en": "Trillions of Colors"
+            },
+            {
+              "zh": "数万亿种以上颜色",
+              "en": "Trillions of Colors+"
+            },
+            {
+              "zh": "浮点",
+              "en": "Floating Point"
+            },
+            {
+              "zh": "浮点+",
+              "en": "Floating Point+"
+            },
+            {
+              "zh": "256 种灰色",
+              "en": "256 Grays"
+            },
+            {
+              "zh": "浮点灰度",
+              "en": "Floating Point Gray"
+            }
+          ],
+          "notesZh": "带“+”项表示含 Alpha 通道，与“通道”联动过滤。"
+        },
+        {
+          "id": "color_alpha_mode",
+          "type": "dropdown",
+          "zh": "颜色:",
+          "en": "Color:",
+          "defaultValue": {
+            "zh": "预乘（遮罩）",
+            "en": "Premultiplied (Matted)"
+          },
+          "options": [
+            {
+              "zh": "直接（无遮罩）",
+              "en": "Straight (Unmatted)"
+            },
+            {
+              "zh": "预乘（遮罩）",
+              "en": "Premultiplied (Matted)"
+            }
+          ],
+          "enableRuleZh": "仅当通道包含 Alpha 时对输出有实质影响。"
+        },
+        {
+          "id": "starting_number",
+          "type": "number_scrub",
+          "internalName": "enStartingNumber",
+          "zh": "开始 #:",
+          "en": "Starting #:",
+          "defaultValue": 0,
+          "range": {
+            "min": 0,
+            "max": 9999999,
+            "type": "integer"
+          },
+          "enableRuleZh": "影片格式（如 H.264/QuickTime/AVI）下置灰禁用；图像序列且未勾选“使用合成帧编号”时启用。"
+        },
+        {
+          "id": "use_comp_frame_number",
+          "type": "checkbox",
+          "zh": "使用合成帧编号",
+          "en": "Use Comp Frame Number",
+          "defaultValue": true,
+          "enableRuleZh": "影片格式下置灰禁用；图像序列下启用，勾选时覆盖“开始 #”。"
+        },
+        {
+          "id": "video_format_options",
+          "type": "button",
+          "zh": "格式选项...",
+          "en": "Format Options...",
+          "notesZh": "打开当前视频格式的编解码器设置子对话框；按钮下方只读显示编码摘要（H.264 默认模板显示“VBR，目标 40 Mbps”）。"
+        },
+        {
+          "id": "resize",
+          "type": "checkbox",
+          "zh": "调整大小",
+          "en": "Resize",
+          "defaultValue": false,
+          "enableRuleZh": "未勾选时，锁定长宽比、宽高数值框、预设下拉、调整大小后品质全部置灰。"
+        },
+        {
+          "id": "resize_lock_aspect",
+          "type": "checkbox",
+          "zh": "锁定长宽比为 <W>:<H> (<ratio>)",
+          "en": "Lock Aspect Ratio to <W>:<H> (<ratio>)",
+          "defaultValue": true,
+          "enableRuleZh": "仅勾选“调整大小”后启用。"
+        },
+        {
+          "id": "resize_width",
+          "type": "number_scrub",
+          "internalName": "enStretchToWidth",
+          "zh": "调整大小到（宽度）",
+          "en": "Resize to (Width)",
+          "unit": "px",
+          "defaultValue": 320,
+          "range": {
+            "min": 4,
+            "max": 30000,
+            "type": "integer"
+          },
+          "enableRuleZh": "仅勾选“调整大小”后启用；模板内默认 320×240，实际队列项默认同步当前合成尺寸。"
+        },
+        {
+          "id": "resize_height",
+          "type": "number_scrub",
+          "internalName": "enStretchToHeight",
+          "zh": "调整大小到（高度）",
+          "en": "Resize to (Height)",
+          "unit": "px",
+          "defaultValue": 240,
+          "range": {
+            "min": 4,
+            "max": 30000,
+            "type": "integer"
+          },
+          "enableRuleZh": "仅勾选“调整大小”后启用。"
+        },
+        {
+          "id": "resize_preset",
+          "type": "dropdown",
+          "zh": "调整大小预设",
+          "en": "Resize Preset",
+          "defaultValue": {
+            "zh": "自定义",
+            "en": "Custom"
+          },
+          "optionCountObserved": 26,
+          "notesZh": "共 26 项（自定义 + 与合成设置完全相同的 25 个内置预设）；仅勾选“调整大小”后启用。"
+        },
+        {
+          "id": "resize_quality",
+          "type": "dropdown",
+          "zh": "调整大小后的品质:",
+          "en": "Resize Quality:",
+          "defaultValue": {
+            "zh": "高",
+            "en": "High"
+          },
+          "options": [
+            {
+              "zh": "低",
+              "en": "Low"
+            },
+            {
+              "zh": "高",
+              "en": "High"
+            }
+          ],
+          "enableRuleZh": "仅勾选“调整大小”后启用。"
+        },
+        {
+          "id": "crop",
+          "type": "checkbox",
+          "zh": "裁剪",
+          "en": "Crop",
+          "defaultValue": false,
+          "enableRuleZh": "未勾选时，“使用目标区域”和顶部/左侧/底部/右侧数值框全部置灰。"
+        },
+        {
+          "id": "use_roi",
+          "type": "checkbox",
+          "zh": "使用目标区域",
+          "en": "Use Region of Interest",
+          "defaultValue": false,
+          "enableRuleZh": "仅勾选“裁剪”后启用；勾选时自动填充合成当前 ROI 边界。"
+        },
+        {
+          "id": "crop_edges",
+          "type": "number_scrub_group",
+          "zh": "顶部 / 左侧 / 底部 / 右侧",
+          "en": "Top / Left / Bottom / Right",
+          "unit": "px",
+          "defaultValue": 0,
+          "fields": [
+            {
+              "internalName": "enCropTop",
+              "zh": "顶部:",
+              "en": "Top:"
+            },
+            {
+              "internalName": "enCropLeft",
+              "zh": "左侧:",
+              "en": "Left:"
+            },
+            {
+              "internalName": "enCropBottom",
+              "zh": "底部:",
+              "en": "Bottom:"
+            },
+            {
+              "internalName": "enCropRight",
+              "zh": "右侧:",
+              "en": "Right:"
+            }
+          ],
+          "enableRuleZh": "仅勾选“裁剪”后启用；正值向内裁剪、负值向外扩展。"
+        },
+        {
+          "id": "audio_output_mode",
+          "type": "dropdown",
+          "zh": "音频输出",
+          "en": "Audio Output",
+          "defaultValue": {
+            "zh": "自动音频输出",
+            "en": "Audio Output Auto"
+          },
+          "options": [
+            {
+              "zh": "打开音频输出",
+              "en": "Audio Output On"
+            },
+            {
+              "zh": "自动音频输出",
+              "en": "Audio Output Auto"
+            },
+            {
+              "zh": "关闭音频输出",
+              "en": "Audio Output Off"
+            }
+          ],
+          "enableRuleZh": "选择“关闭音频输出”或格式不支持音频（图像序列）时，下方采样率/位深/声道/格式选项置灰。"
+        },
+        {
+          "id": "audio_sample_rate",
+          "type": "dropdown",
+          "zh": "音频采样率",
+          "en": "Audio Sample Rate",
+          "defaultValue": {
+            "zh": "48.000 kHz",
+            "en": "48.000 kHz"
+          },
+          "options": [
+            {
+              "zh": "16.000 kHz",
+              "en": "16.000 kHz"
+            },
+            {
+              "zh": "22.050 kHz",
+              "en": "22.050 kHz"
+            },
+            {
+              "zh": "24.000 kHz",
+              "en": "24.000 kHz"
+            },
+            {
+              "zh": "32.000 kHz",
+              "en": "32.000 kHz"
+            },
+            {
+              "zh": "44.100 kHz",
+              "en": "44.100 kHz"
+            },
+            {
+              "zh": "48.000 kHz",
+              "en": "48.000 kHz"
+            }
+          ]
+        },
+        {
+          "id": "audio_bit_depth",
+          "type": "dropdown",
+          "zh": "音频位深度",
+          "en": "Audio Bit Depth",
+          "defaultValue": {
+            "zh": "16 位",
+            "en": "16 Bit"
+          },
+          "options": [
+            {
+              "zh": "8 位",
+              "en": "8 Bit"
+            },
+            {
+              "zh": "16 位",
+              "en": "16 Bit"
+            },
+            {
+              "zh": "32 位",
+              "en": "32 Bit"
+            }
+          ]
+        },
+        {
+          "id": "audio_channels",
+          "type": "dropdown",
+          "zh": "音频声道",
+          "en": "Audio Channels",
+          "defaultValue": {
+            "zh": "立体声",
+            "en": "Stereo"
+          },
+          "options": [
+            {
+              "zh": "单声道",
+              "en": "Mono"
+            },
+            {
+              "zh": "立体声",
+              "en": "Stereo"
+            }
+          ]
+        },
+        {
+          "id": "audio_format_options",
+          "type": "button",
+          "zh": "格式选项...（音频）",
+          "en": "Format Options... (Audio)"
+        }
+      ]
+    },
+    {
+      "id": "color",
+      "zh": "颜色",
+      "en": "Color",
+      "controls": [
+        {
+          "id": "preserve_rgb",
+          "type": "checkbox",
+          "zh": "保留 RGB（禁用此项的颜色管理转换）",
+          "en": "Preserve RGB (Disable Color Management Conversions for This Item)",
+          "defaultValue": false,
+          "enableRuleZh": "勾选后禁用输出色彩空间转换与下拉选择。"
+        },
+        {
+          "id": "output_color_space",
+          "type": "dropdown",
+          "zh": "输出色彩空间：",
+          "en": "Output Color Space:",
+          "defaultValue": {
+            "zh": "工作空间",
+            "en": "Working Space"
+          },
+          "optionCountObserved": 104,
+          "builtInPrefixOptions": [
+            {
+              "zh": "工作空间",
+              "en": "Working Space"
+            },
+            {
+              "zh": "其他",
+              "en": "Other"
+            }
+          ],
+          "enableRuleZh": "项目未开启色彩管理或勾选“保留 RGB”时置灰（实测 Adobe 默认无色彩管理下 NOFOCUS）。"
+        },
+        {
+          "id": "show_all_color_spaces",
+          "type": "checkbox",
+          "zh": "全部显示",
+          "en": "Show All",
+          "defaultValue": false,
+          "enableRuleZh": "仅项目启用 OCIO 色彩管理时启用，Adobe 模式下置灰。"
+        },
+        {
+          "id": "convert_to_linear_light",
+          "type": "dropdown",
+          "zh": "转换为线性光:",
+          "en": "Convert to Linear Light:",
+          "defaultValue": {
+            "zh": "对 32 bpc 打开",
+            "en": "On for 32 bpc"
+          },
+          "options": [
+            {
+              "zh": "关",
+              "en": "Off"
+            },
+            {
+              "zh": "开",
+              "en": "On"
+            },
+            {
+              "zh": "对 32 bpc 打开",
+              "en": "On for 32 bpc"
+            }
+          ]
+        },
+        {
+          "id": "embed_color_profile",
+          "type": "checkbox",
+          "zh": "嵌入色彩空间",
+          "en": "Embed Color Profile",
+          "defaultValue": false,
+          "enableRuleZh": "仅当输出格式支持嵌入 ICC 配置文件（如 PNG/TIFF/PSD/JPEG/QuickTime）时启用；H.264 等不支持格式下置灰禁用。"
+        }
+      ]
+    }
+  ],
+  "relatedDialogs": [
+    {
+      "id": "output-module-templates",
+      "title": {
+        "zh": "输出模块模板",
+        "en": "Output Module Templates"
+      },
+      "trigger": "编辑 ▸ 模板 ▸ 输出模块(M)...",
+      "geometry": {
+        "physicalPxAt144Dpi": {
+          "w": 1314,
+          "h": 779
+        },
+        "logicalPxAt96Dpi": {
+          "w": 876,
+          "h": 519
+        }
+      },
+      "builtInTemplates": [
+        {
+          "zh": "多机序列",
+          "en": "Multi-Machine Sequence"
+        },
+        {
+          "zh": "带有 Alpha 的 TIFF 序列",
+          "en": "TIFF Sequence with Alpha"
+        },
+        {
+          "zh": "AIFF 48kHz",
+          "en": "AIFF 48kHz"
+        },
+        {
+          "zh": "H.264 - 匹配渲染设置 - 15 Mbps",
+          "en": "H.264 - Match Render Settings - 15 Mbps"
+        },
+        {
+          "zh": "H.264 - 匹配渲染设置 - 40 Mbps",
+          "en": "H.264 - Match Render Settings - 40 Mbps"
+        },
+        {
+          "zh": "H.264 - 匹配渲染设置 - 5 Mbps",
+          "en": "H.264 - Match Render Settings - 5 Mbps"
+        },
+        {
+          "zh": "Photoshop",
+          "en": "Photoshop"
+        },
+        {
+          "zh": "具有 Alpha 的高品质",
+          "en": "High Quality with Alpha"
+        },
+        {
+          "zh": "使用 Alpha 无损耗",
+          "en": "Lossless with Alpha"
+        },
+        {
+          "zh": "仅 Alpha",
+          "en": "Alpha Only"
+        },
+        {
+          "zh": "无损",
+          "en": "Lossless"
+        },
+        {
+          "zh": "高品质",
+          "en": "High Quality"
+        }
+      ],
+      "controls": [
+        {
+          "id": "movie_default",
+          "type": "dropdown",
+          "zh": "影片默认值:",
+          "en": "Movie Default:",
+          "defaultValue": {
+            "zh": "H.264 - 匹配渲染设置 - 40 Mbps",
+            "en": "H.264 - Match Render Settings - 40 Mbps"
+          }
+        },
+        {
+          "id": "frame_default",
+          "type": "dropdown",
+          "zh": "帧默认值:",
+          "en": "Frame Default:",
+          "defaultValue": {
+            "zh": "Photoshop",
+            "en": "Photoshop"
+          }
+        },
+        {
+          "id": "save_current_preview_default",
+          "type": "dropdown",
+          "zh": "保存当前预览默认值:",
+          "en": "Save Current Preview Default:",
+          "defaultValue": {
+            "zh": "H.264 - 匹配渲染设置 - 40 Mbps",
+            "en": "H.264 - Match Render Settings - 40 Mbps"
+          }
+        },
+        {
+          "id": "prerender_default",
+          "type": "dropdown",
+          "zh": "预渲染默认值:",
+          "en": "Pre-Render Default:",
+          "defaultValue": {
+            "zh": "无损",
+            "en": "Lossless"
+          }
+        },
+        {
+          "id": "movie_proxy_default",
+          "type": "dropdown",
+          "zh": "影片代理默认值:",
+          "en": "Movie Proxy Default:",
+          "defaultValue": {
+            "zh": "无损",
+            "en": "Lossless"
+          }
+        },
+        {
+          "id": "settings_name",
+          "type": "dropdown",
+          "zh": "设置名称:",
+          "en": "Settings Name:",
+          "defaultValue": {
+            "zh": "H.264 - 匹配渲染设置 - 40 Mbps",
+            "en": "H.264 - Match Render Settings - 40 Mbps"
+          },
+          "buttons": [
+            {
+              "zh": "新建...",
+              "en": "New..."
+            },
+            {
+              "zh": "编辑...",
+              "en": "Edit..."
+            },
+            {
+              "zh": "复制",
+              "en": "Duplicate"
+            },
+            {
+              "zh": "删除",
+              "en": "Delete"
+            }
+          ]
+        }
+      ],
+      "buttonBar": {
+        "position": "bottom",
+        "left": [
+          {
+            "id": "save_all",
+            "type": "button",
+            "zh": "全部保存...",
+            "en": "Save All..."
+          },
+          {
+            "id": "load",
+            "type": "button",
+            "zh": "加载...",
+            "en": "Load..."
+          }
+        ],
+        "right": [
+          {
+            "id": "ok",
+            "type": "button",
+            "zh": "确定",
+            "en": "OK",
+            "role": "accept"
+          },
+          {
+            "id": "cancel",
+            "type": "button",
+            "zh": "取消",
+            "en": "Cancel",
+            "role": "reject"
+          }
+        ]
+      }
+    }
+  ]
+}
