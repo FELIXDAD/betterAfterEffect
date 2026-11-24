@@ -106,7 +106,7 @@ pub fn input(name: &str) -> Vec<[u8; 4]> {
                 // Probes: a hard vertical edge (blur kernels) and grey ramps
                 // (tone curves; the lower half at half range).
                 "comb" => {
-                    let stripe = |v: u32| f64::from(u8::from(v % 4 == 0));
+                    let stripe = |v: u32| f64::from(u8::from(v.is_multiple_of(4)));
                     [stripe(x), stripe(y), stripe(x + y), 1.]
                 }
                 "shift" => [
