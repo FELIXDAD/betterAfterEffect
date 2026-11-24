@@ -14,7 +14,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use bae_gpu::{GpuContext, wgpu};
-use bae_model::Time;
+use bae_model::{PrimPath, Time};
 use rustc_hash::FxHashMap;
 
 use crate::error::RenderError;
@@ -155,9 +155,19 @@ pub struct EncodeContext<'a> {
     /// Working texture format.
     pub format: wgpu::TextureFormat,
     pub(crate) allocator: &'a mut dyn ImageAllocator,
+    pub(crate) effect_inputs: &'a [(PrimPath, GpuImage)],
 }
 
 impl EncodeContext<'_> {
+    /// Source-stage (before masks, effects or transforms) pixels requested by
+    /// the current effect. Missing and unsupported inputs return `None`.
+    pub fn effect_input(&self, layer: &PrimPath) -> Option<&GpuImage> {
+        self.effect_inputs
+            .iter()
+            .find(|(p, _)| p == layer)
+            .map(|(_, image)| image)
+    }
+
     /// A working-format image covering `rect` (pixels of its space) at
     /// `pixel_scale` pixels per texel, usable as a render attachment and storage
     /// texture. Its contents are undefined (clear

@@ -1,0 +1,38 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "vibrance"
+name = "Vibrance"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE Vibrance"]
+flags = ["pixel-independent"]
+shader = "shaders/vibrance.wgsl"
+includes = ["shaders/channel_math.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "vibrance"
+type = "float"
+name = "Vibrance"
+default = 0
+range = [-100, 100]
+precision = 1
+
+[[effect.param]]
+id = 2
+key = "saturation"
+type = "float"
+name = "Saturation"
+default = 0
+range = [-100, 100]
+precision = 1

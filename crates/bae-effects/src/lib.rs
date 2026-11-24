@@ -79,6 +79,12 @@ macro_rules! embedded {
 
 /// The embedded declarative packages, in catalog order.
 const PACKAGES: &[Embedded] = &[
+    embedded!("black-white", ["shaders/black_white.wgsl"]),
+    embedded!("color-balance", ["shaders/color_balance.wgsl"]),
+    embedded!("invert", ["shaders/invert.wgsl"]),
+    embedded!("photo-filter", ["shaders/photo_filter.wgsl"]),
+    embedded!("shift-channels", ["shaders/shift_channels.wgsl"]),
+    embedded!("vibrance", ["shaders/vibrance.wgsl"]),
     embedded!("brightness-contrast", ["shaders/brightness_contrast.wgsl"]),
     embedded!("exposure", ["shaders/exposure.wgsl"]),
     embedded!("hue-saturation", ["shaders/hue_saturation.wgsl"]),
@@ -164,6 +170,10 @@ impl Effect for Forward {
         self.0.def()
     }
 
+    fn renders_pixels(&self) -> bool {
+        self.0.renders_pixels()
+    }
+
     fn output_bounds(&self, params: &EffectParams<'_>, input: IRect) -> IRect {
         self.0.output_bounds(params, input)
     }
@@ -229,6 +239,8 @@ pub fn prewarm(gpu: &Arc<GpuContext>, format: wgpu::TextureFormat) -> Result<(),
     blur::prewarm(&rt, format)?;
     effects::spatial::prewarm(&rt, format)?;
     effects::distort::prewarm(&rt, format)?;
+
+    effects::prewarm(&rt, format)?;
     for b in builtins() {
         if let Implementation::Declarative(fx) = &b.implementation {
             fx.prewarm(gpu, format)?;
@@ -241,7 +253,11 @@ fn load() -> Result<Vec<Builtin>, Vec<Diagnostic>> {
     let mut out = Vec::new();
     for pkg in PACKAGES {
         let mut source = MemorySource::new(format!("builtin:{PLUGIN_ID}/{}", pkg.dir))
-            .with_file("bae-plugin.toml", pkg.manifest);
+            .with_file("bae-plugin.toml", pkg.manifest)
+            .with_file(
+                "shaders/channel_math.wgsl",
+                include_str!("shaders/channel_math.wgsl"),
+            );
         for (path, text) in pkg.files {
             source = source.with_file(*path, *text);
         }
@@ -296,6 +312,11 @@ fn load() -> Result<Vec<Builtin>, Vec<Diagnostic>> {
     }
     out.extend(effects::spatial::builtins());
     out.extend(effects::distort::builtins());
+
+    out.extend(effects::controls::builtins());
+    out.push(effects::set_matte::builtin());
+    out.push(effects::morphology::minimax());
+    out.push(effects::morphology::simple_choker());
     out.sort_by(|a, b| {
         (a.info.category.as_str(), a.info.name.as_str())
             .cmp(&(b.info.category.as_str(), b.info.name.as_str()))
