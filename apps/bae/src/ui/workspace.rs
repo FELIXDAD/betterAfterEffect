@@ -318,6 +318,20 @@ impl Workspace {
         }
     }
 
+    /// Gives the panel `kind` the keyboard focus (tests: the shortcut sweep).
+    #[cfg(test)]
+    pub fn focus_panel(&mut self, kind: &str) {
+        if let Some(id) = self.open_panels().into_iter().find(|p| p.kind() == kind) {
+            self.workbench.dock_mut().focus_panel(&id);
+        }
+    }
+
+    /// The panel kind that has the keyboard focus.
+    #[cfg(test)]
+    pub fn focused_kind(&self) -> Option<String> {
+        self.workbench.focused_panel().map(|p| p.kind().to_owned())
+    }
+
     /// Panels open in the dock (Window menu check marks).
     pub fn open_panels(&self) -> Vec<bae_ui::PanelId> {
         self.workbench.dock().layout.panel_ids()

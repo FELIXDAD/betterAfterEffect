@@ -18,6 +18,13 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Move Layer in Time", "在时间上移动图层"),
     ("Trim Layer", "修剪图层"),
     ("Change Layers", "更改图层"),
+    // Effect Controls / Effects & Presets.
+    ("Missing effect", "缺失效果"),
+    ("BAE built-in effect", "BAE 内置效果"),
+    ("Not available in BAE yet", "BAE 暂不支持"),
+    ("Effect", "效果"),
+    ("Effects & Presets", "效果和预设"),
+    ("Search", "搜索"),
     // Effect commands (bae-motion `effect.*`).
     ("Apply Effect", "应用效果"),
     ("Remove Effect", "移除效果"),
@@ -217,6 +224,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     // Keyframes
     ("Keyframe Assistant", "关键帧辅助"),
     ("Easy Ease", "缓动"),
+    // Context menus (AE 26).
+    ("Layer Styles", "图层样式"),
+    ("Open Effect Controls", "打开效果控件"),
     ("Easy Ease In", "缓入"),
     ("Easy Ease Out", "缓出"),
     ("Time-Reverse Keyframes", "时间反向关键帧"),

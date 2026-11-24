@@ -100,6 +100,9 @@ jobs:
         # machines, and the next step runs with it.
         env:
           BAE_GPU_VALIDATION: ${{ runner.os == 'Windows' && '0' || '' }}
+          # The AE shortcut sweep (apps/bae acceptance::shortcut_sweep) writes its
+          # coverage report here; uploaded with the package.
+          BAE_SHORTCUT_REPORT: ${{ github.workspace }}/shortcut-sweep.md
         run: cargo test --workspace --locked
 
       - name: Test with the D3D12 debug layer
@@ -205,6 +208,7 @@ jobs:
           path: |
             target/dist/*.zip
             size-report.json
+            shortcut-sweep.md
           # Earlier failures already fail the job; still upload whatever exists.
           if-no-files-found: warn
           retention-days: 14
