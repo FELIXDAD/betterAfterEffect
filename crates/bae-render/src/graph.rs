@@ -1110,6 +1110,7 @@ impl Builder<'_> {
             transform: DAffine2::IDENTITY,
             opacity: 1.0,
             blend: BlendMode::Normal,
+            dissolve_seed: 0,
             preserve_transparency: false,
             matte: None,
             mask: None,
