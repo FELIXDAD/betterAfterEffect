@@ -78,8 +78,29 @@ fn cartoon_width(p: Params<'_>) -> f64 {
     p.f(10).clamp(0.001, 20.) * p.p.scale
 }
 
-fn cartoon_margin(p: Params<'_>) -> i32 {
-    cartoon_radius(p).ceil() as i32 + (2.5 * cartoon_width(p)).ceil() as i32 + 3
+fn cartoon_sigmas(width: f64) -> [[f64; 2]; 2] {
+    [[1.065 * width; 2], [1.47 * width; 2]]
+}
+
+fn cartoon_edge_shift(p: Params<'_>) -> f64 {
+    p.f(15).clamp(-100., 100.) * cartoon_width(p) * 0.06
+}
+
+fn cartoon_edge_roi(p: Params<'_>, roi: IRect) -> IRect {
+    roi.inflate((1. + cartoon_edge_shift(p).abs()).ceil() as i32)
+}
+
+fn cartoon_field(p: Params<'_>, roi: IRect) -> IRect {
+    let width = cartoon_width(p);
+    let mut field = roi.inflate((2.5 * width).ceil() as i32 + 2);
+    if p.popup(1) != 1 {
+        let edge_roi = cartoon_edge_roi(p, roi);
+        for sigma in cartoon_sigmas(width) {
+            field =
+                field.union(&blur::plan_gaussian(IRect::EMPTY, sigma, Edge::Repeat, edge_roi).read);
+        }
+    }
+    field
 }
 
 fn rough_border(p: Params<'_>) -> f64 {
@@ -139,7 +160,7 @@ impl Effect for Stylize {
                 let [x, y] = relief(p).map(|v| v.abs().ceil() as i32);
                 IRect::new(roi.x0 - x, roi.y0 - y, roi.x1 + x, roi.y1 + y)
             }
-            Kind::Cartoon => roi.inflate(cartoon_margin(p)),
+            Kind::Cartoon => cartoon_field(p, roi).inflate(cartoon_radius(p).ceil() as i32),
             Kind::Roughen => {
                 blur::plan_gaussian(IRect::EMPTY, rough_sigma(p), Edge::Transparent, roi)
                     .read
@@ -214,40 +235,40 @@ fn motion_tile(
 ) -> Result<GpuImage, RenderError> {
     let layer = layer(p.p, input.rect);
     let [x, y] = pos(p, 1, rect_point(layer, 0.5)).map(|v| v as f32);
-    let [w, h] = layer.size().map(|v| v as f32);
-    let [tile_x, tile_y] = [p.f(2), p.f(3)].map(|v| (v.clamp(0., 100.) * 0.01) as f32);
+    let [w, h] = layer.size();
+    let span = |length: u32, id: u32| f64::from(length) * p.f(id).clamp(0., 100.) / 100.;
+    let [tile_x, tile_y] = [span(w, 2), span(h, 3)];
+    let [width, height] = [tile_x, tile_y].map(|span| (span.floor() as u32).max(1));
     let [cx, cy] = rect_point(layer, 0.5).map(|v| v as f32);
-    let [hw, hh] = [w * p.f(4) as f32, h * p.f(5) as f32].map(|v| v * 0.005);
+    let [hw, hh] = [w as f32 * p.f(4) as f32, h as f32 * p.f(5) as f32].map(|v| v * 0.005);
 
-    // A zero-sized tile axis uses the mean of the source along that axis.
+    // AE area-averages into an integer-sized tile, then places that tile with
+    // subpixel interpolation at the original fractional tile size.
+    let mut shape = layer;
     let mut sampled = input.clone();
-    let mut width = w;
-    let mut height = h;
-    if tile_x == 0. {
-        let r = sampled.rect;
+    if width < w {
+        shape = IRect::new(0, layer.y0, width as i32, layer.y1);
         sampled = dispatch(
             target,
-            "tile_collapse",
+            "tile_resize",
             &sampled,
             &sampled,
-            IRect::new(layer.x0, r.y0, layer.x0 + 1, r.y1),
-            &[[1., layer.x0 as f32, w, 0.]],
+            shape,
+            &[[layer.x0 as f32, w as f32, width as f32, 1.]],
             true,
         )?;
-        width = 1.;
     }
-    if tile_y == 0. {
-        let r = sampled.rect;
+    if height < h {
+        shape = IRect::new(shape.x0, 0, shape.x1, height as i32);
         sampled = dispatch(
             target,
-            "tile_collapse",
+            "tile_resize",
             &sampled,
             &sampled,
-            IRect::new(r.x0, layer.y0, r.x1, layer.y0 + 1),
-            &[[0., layer.y0 as f32, h, 0.]],
+            shape,
+            &[[layer.y0 as f32, h as f32, height as f32, 0.]],
             true,
         )?;
-        height = 1.;
     }
     dispatch(
         target,
@@ -256,8 +277,13 @@ fn motion_tile(
         &sampled,
         out,
         &[
-            [x, y, tile_x * w, tile_y * h],
-            [layer.x0 as f32, layer.y0 as f32, width, height],
+            [x, y, tile_x as f32, tile_y as f32],
+            [
+                shape.x0 as f32,
+                shape.y0 as f32,
+                width as f32,
+                height as f32,
+            ],
             [
                 (p.f(7) / 360.).rem_euclid(1.) as f32,
                 flag(p.b(6)),
@@ -265,7 +291,6 @@ fn motion_tile(
                 0.,
             ],
             [cx - hw, cy - hh, cx + hw, cy + hh],
-            [tile_x, tile_y, 0., 0.],
         ],
         p.p.float,
     )
@@ -281,13 +306,11 @@ fn cartoon(
     out: IRect,
     p: Params<'_>,
 ) -> Result<GpuImage, RenderError> {
-    let width = cartoon_width(p) as f32;
+    let width = cartoon_width(p);
     let radius = cartoon_radius(p) as f32;
     let mode = p.popup(1);
-    let field = out
-        .inflate((2.5 * width).ceil() as i32 + 2)
-        .intersect(&input.rect);
-    let soft = if radius > 0.5 {
+    let field = cartoon_field(p, out).intersect(&input.rect);
+    let soft = if radius >= 1. && p.f(3) > 1. {
         // Two 1D passes keep large detail radii bounded in cost.
         let threshold = (p.f(3) * 0.0015) as f32;
         let wide = dispatch(
@@ -311,27 +334,56 @@ fn cartoon(
     } else {
         input.clone()
     };
-    dispatch(
+    let fill = if mode == 2 {
+        input.clone()
+    } else {
+        dispatch(
+            target,
+            "cartoon_fill",
+            input,
+            &soft,
+            out,
+            &[[
+                p.f(5) as f32,
+                (p.f(6) * 0.01) as f32,
+                width as f32,
+                (p.f(15).clamp(-100., 100.) * 0.01) as f32,
+            ]],
+            p.p.float || mode == 3,
+        )?
+    };
+    if mode == 1 {
+        return Ok(fill);
+    }
+    let luma = dispatch(target, "cartoon_luma", &soft, &soft, field, &[], true)?;
+    let [narrow, wide] = cartoon_sigmas(width);
+    let edge_roi = cartoon_edge_roi(p, out).intersect(&input.rect);
+    let narrow = blurred(target, &luma, narrow, Edge::Repeat, edge_roi)?;
+    let wide = blurred(target, &luma, wide, Edge::Repeat, edge_roi)?;
+    let stroke = dispatch(
         target,
-        "cartoon_output",
-        input,
-        &soft,
+        "cartoon_stroke",
+        &narrow,
+        &wide,
         out,
         &[
             [
-                mode as f32,
-                p.f(5) as f32,
-                (p.f(6) * 0.01) as f32,
-                p.f(9) as f32,
-            ],
-            [
-                width,
-                (p.f(11) * 0.01) as f32,
+                ((1. - 1. / p.f(9).max(1.)) / 0.375).powf(1.44) as f32,
+                (1. - p.f(11) * 0.01) as f32,
                 (p.f(12) * 0.01) as f32,
-                (p.f(15) * 0.01) as f32,
+                (0.009 - 0.0058 * p.f(16) + 0.14 * (p.f(17) - 0.5)) as f32,
             ],
-            [p.f(16) as f32, p.f(17) as f32, 0., 0.],
+            [cartoon_edge_shift(p) as f32, 0., 0., 0.],
         ],
+        true,
+    )?;
+    dispatch(
+        target,
+        "cartoon_finish",
+        &fill,
+        &stroke,
+        out,
+        &[[flag(mode == 2), 0., 0., 0.]],
         p.p.float,
     )
 }

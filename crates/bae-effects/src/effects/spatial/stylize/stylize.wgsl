@@ -58,13 +58,17 @@ fn cartoon_smooth(@builtin(global_invocation_id) id: vec3<u32>) {
     store(p, sum / norm);
 }
 
-fn cartoon_signal(p: vec2<f32>, fallback: f32) -> f32 {
-    let c = bilinear(aux, f.aux, clamp_to_rect(p, f.aux));
-    return select(fallback, dot(straight(c), LUMA), c.a > 0.0);
+fn cartoon_brightness(rgb: vec3<f32>) -> f32 {
+    return dot(pow(max(rgb, vec3<f32>(0.0)), vec3<f32>(0.625)), LUMA);
+}
+
+fn cartoon_signal(p: vec2<i32>, fallback: f32) -> f32 {
+    let c = load(aux, f.aux, clamp(p, f.aux.xy, f.aux.zw - 1));
+    return select(fallback, cartoon_brightness(straight(c)), c.a > 0.0);
 }
 
 @compute @workgroup_size(8, 8)
-fn cartoon_output(@builtin(global_invocation_id) id: vec3<u32>) {
+fn cartoon_fill(@builtin(global_invocation_id) id: vec3<u32>) {
     let p = f.out.xy + vec2<i32>(id.xy);
     if any(p >= f.out.zw) { return; }
     let c = load(src, f.src, p);
@@ -72,44 +76,89 @@ fn cartoon_output(@builtin(global_invocation_id) id: vec3<u32>) {
         store(p, c);
         return;
     }
-    let xy = vec2<f32>(p);
-    let mode = f.arg[0].x;
-    let width = max(0.5, f.arg[1].x) * 2.5;
-    let dx = vec2<f32>(width, 0.0);
-    let dy = vec2<f32>(0.0, width);
-    let source_tone = dot(straight(c), LUMA);
-    let center = cartoon_signal(xy, source_tone);
-    let left = cartoon_signal(xy - dx, center);
-    let right = cartoon_signal(xy + dx, center);
-    let top = cartoon_signal(xy - dy, center);
-    let bottom = cartoon_signal(xy + dy, center);
-    let gradient = vec2<f32>(right - left, bottom - top);
-    let detail = max(max(left, right), max(top, bottom)) - center;
-    let softness = f.arg[1].y;
-    let cutoff = 0.20 / f.arg[0].w;
-    let edge = smoothstep(cutoff * (1.0 - softness * 0.35), cutoff * (1.0 + softness), detail);
-    let contrast = 0.5 + f.arg[2].y;
-    let stroke = min(0.995, saturate((edge * contrast + detail * f.arg[2].x * 0.1)
-        * min(1.0, (1.0 - softness) * 2.5))) * f.arg[1].z;
-    if mode == 2.0 {
-        store(p, vec4<f32>(vec3<f32>(c.a * (1.0 - stroke)), c.a));
-        return;
-    }
 
+    let xy = vec2<f32>(p);
+    let width = max(0.5, f.arg[0].z) * 2.5;
+    let dx = vec2<i32>(1, 0);
+    let dy = vec2<i32>(0, 1);
+    let center = cartoon_signal(p, cartoon_brightness(straight(c)));
+    let left = cartoon_signal(p - dx, center);
+    let right = cartoon_signal(p + dx, center);
+    let top = cartoon_signal(p - dy, center);
+    let bottom = cartoon_signal(p + dy, center);
+    let gradient = vec2<f32>(right - left, bottom - top);
     let laplacian = left + right + top + bottom - 4.0 * center;
-    let warp = -sign(laplacian) * gradient * f.arg[1].w * width;
-    let fill_sample = bilinear(aux, f.aux, clamp_to_rect(xy + warp, f.aux));
-    let rgb = select(straight(c), straight(fill_sample), fill_sample.a > 0.0);
-    let tone = dot(rgb, LUMA);
-    let steps = clamp(f.arg[0].y, 2.0, 30.0) - 1.0;
-    let brightness = pow(max(0.0, tone), 0.625);
+    let warp = -sign(laplacian) * gradient * f.arg[0].w * width;
+    let fill = bilinear(aux, f.aux, clamp_to_rect(xy + warp, f.aux));
+    let rgb = select(straight(c), straight(fill), fill.a > 0.0);
+
+    // AE quantizes Rec.601 luma after encoding each straight channel to
+    // the power 0.625, then changes brightness without changing the hue.
+    let brightness = cartoon_brightness(rgb);
+    let steps = f.arg[0].x - 1.0;
     let bins = brightness * steps;
-    let softness_fill = clamp(f.arg[0].z, 0.001, 1.0);
-    let quantized = (floor(bins) + smoothstep(0.5 - softness_fill * 0.5, 0.5 + softness_fill * 0.5, fract(bins))) / steps;
-    let shaded = pow(quantized, 1.6);
-    let weight = 1.0 - smoothstep(0.0, 0.70, softness_fill);
-    let shade = clamp(mix(shaded, tone, 1.0 - weight) / max(1e-6, tone), 0.0, 16.0);
-    store(p, vec4<f32>(rgb * shade * c.a * select(1.0, 1.0 - stroke, mode == 3.0), c.a));
+    let step = max(max(abs(left - center), abs(right - center)),
+                   max(abs(top - center), abs(bottom - center)));
+    let base_smooth = f.arg[0].y;
+    // At the default smoothness, flat regions keep their shade while the
+    // pixels immediately next to a contrast boundary still quantize.
+    let edge = smoothstep(0.018, 0.068, step) * (1.0 - smoothstep(0.70, 1.0, base_smooth));
+    let flat = (1.0 - smoothstep(0.001, 0.005, step)) * smoothstep(0.45, 0.60, base_smooth);
+    let smoothness = base_smooth - 0.31 * edge + 0.10 * flat;
+    let transition = max(0.001, pow(saturate((smoothness - 0.40) / 0.30), 1.6));
+    let q = floor(bins) + smoothstep(0.5 - transition * 0.5, 0.5 + transition * 0.5, fract(bins));
+    let shading = mix(q / steps, brightness, smoothstep(0.60, 0.70, smoothness));
+    let shade = pow(shading / max(1e-6, brightness), 1.6);
+    store(p, vec4<f32>(rgb * shade * c.a, c.a));
+}
+
+@compute @workgroup_size(8, 8)
+fn cartoon_luma(@builtin(global_invocation_id) id: vec3<u32>) {
+    let p = f.out.xy + vec2<i32>(id.xy);
+    if any(p >= f.out.zw) { return; }
+    let c = load(src, f.src, p);
+    let luma = pow(cartoon_brightness(straight(c)), 0.97);
+    store(p, vec4<f32>(luma * c.a, 0.0, 0.0, c.a));
+}
+
+@compute @workgroup_size(8, 8)
+fn cartoon_stroke(@builtin(global_invocation_id) id: vec3<u32>) {
+    let p = f.out.xy + vec2<i32>(id.xy);
+    if any(p >= f.out.zw) { return; }
+    let xy = vec2<f32>(p);
+    let shift = f.arg[1].x;
+    var small = straight(load(src, f.src, p)).r;
+    var large = straight(load(aux, f.aux, p)).r;
+    if shift != 0.0 {
+        let dx = vec2<i32>(1, 0);
+        let dy = vec2<i32>(0, 1);
+        let left = straight(load(src, f.src, clamp(p - dx, f.src.xy, f.src.zw - 1))).r;
+        let right = straight(load(src, f.src, clamp(p + dx, f.src.xy, f.src.zw - 1))).r;
+        let top = straight(load(src, f.src, clamp(p - dy, f.src.xy, f.src.zw - 1))).r;
+        let bottom = straight(load(src, f.src, clamp(p + dy, f.src.xy, f.src.zw - 1))).r;
+        let gradient = clamp(vec2<f32>(right - left, bottom - top), vec2<f32>(-1), vec2<f32>(1));
+        let laplacian = left + right + top + bottom - 4.0 * small;
+        let pos = xy - sign(laplacian) * shift * gradient;
+        small = straight(bilinear(src, f.src, clamp_to_rect(pos, f.src))).r;
+        large = straight(bilinear(aux, f.aux, clamp_to_rect(pos, f.aux))).r;
+    }
+    // Edge profiles from gray steps match the relative change between two
+    // smoothing scales, with strokes on the darker side of the transition.
+    let relative = (large - small) / (small + 0.119);
+    let response = max(0.0, relative * f.arg[0].x - f.arg[0].w);
+    let strength = pow(response * (1461.0 * f.arg[0].y), 1.31);
+    let stroke = (1.0 - pow(1.0 + strength, -1.09)) * f.arg[0].z;
+    store(p, vec4<f32>(stroke, 0.0, 0.0, 1.0));
+}
+
+@compute @workgroup_size(8, 8)
+fn cartoon_finish(@builtin(global_invocation_id) id: vec3<u32>) {
+    let p = f.out.xy + vec2<i32>(id.xy);
+    if any(p >= f.out.zw) { return; }
+    let c = load(src, f.src, p);
+    let rgb = select(c.rgb, vec3<f32>(c.a), f.arg[0].x != 0.0);
+    let stroke = load(aux, f.aux, p).r;
+    store(p, vec4<f32>(rgb * (1.0 - stroke), c.a));
 }
 
 fn noise_slice(p: vec2<f32>, seed: u32) -> f32 {
@@ -201,33 +250,32 @@ fn odd(n: f32) -> bool {
 }
 
 @compute @workgroup_size(8, 8)
-fn tile_collapse(@builtin(global_invocation_id) id: vec3<u32>) {
+fn tile_resize(@builtin(global_invocation_id) id: vec3<u32>) {
     let p = f.out.xy + vec2<i32>(id.xy);
     if any(p >= f.out.zw) { return; }
-    let x_axis = f.arg[0].x != 0.0;
-    let origin = i32(f.arg[0].y);
-    let size = i32(f.arg[0].z);
-    let lo = max(origin, select(f.src.y, f.src.x, x_axis));
-    let hi = min(origin + size, select(f.src.w, f.src.z, x_axis));
+    let x_axis = f.arg[0].w != 0.0;
+    let origin = i32(f.arg[0].x);
+    let footprint = f.arg[0].y / f.arg[0].z;
+    let index = select(id.y, id.x, x_axis);
+    let lo = f32(index) * footprint;
+    let hi = min(f.arg[0].y, f32(index + 1u) * footprint);
+    let start = max(origin + i32(floor(lo)), select(f.src.y, f.src.x, x_axis));
+    let end = min(origin + i32(ceil(hi)), select(f.src.w, f.src.z, x_axis));
     var sum = vec4<f32>(0.0);
-    for (var i = lo; i < hi; i++) {
-        sum += load(src, f.src, select(vec2<i32>(p.x, i), vec2<i32>(i, p.y), x_axis));
+    for (var i = start; i < end; i++) {
+        let q = select(vec2<i32>(p.x, i), vec2<i32>(i, p.y), x_axis);
+        sum += overlap_1d(i - origin, lo, hi) * load(src, f.src, q);
     }
-    store(p, sum / f32(size));
+    store(p, sum / (hi - lo));
 }
 
-fn tile_radius(scale: f32) -> f32 {
-    if scale == 0.0 || scale == 1.0 { return 0.5; }
-    if scale == 0.5 { return 1.0; }
-    return min(4.0, select(0.5, 0.9, scale < 0.75) / scale);
-}
-
-fn tile_texel(p: vec2<i32>, size: vec2<i32>, mirror: bool) -> vec2<i32> {
-    if mirror {
-        let q = ((p % (2 * size)) + 2 * size) % (2 * size);
-        return min(q, 2 * size - 1 - q);
+fn tile_texel(p: vec2<i32>, origin: vec2<i32>, size: vec2<i32>, mirror: bool) -> vec4<f32> {
+    let q = select(((p % size) + size) % size, clamp(p, vec2<i32>(0), size - 1), mirror);
+    let c = load(src, f.src, origin + q);
+    if f.flags.x == 0u {
+        return floor(saturate(c) * 255.0 + 0.5) / 255.0;
     }
-    return ((p % size) + size) % size;
+    return c;
 }
 
 @compute @workgroup_size(8, 8)
@@ -237,9 +285,8 @@ fn motion_tile(@builtin(global_invocation_id) id: vec3<u32>) {
     let xy = vec2<f32>(p);
     let size = f.arg[1].zw;
     let tile = f.arg[0].zw;
-    let scale = f.arg[4].xy;
     var t = (xy + 0.5 - f.arg[0].xy) / max(tile, vec2<f32>(1e-6)) + 0.5;
-    t = select(t, vec2<f32>(0.5), scale == vec2<f32>(0.0));
+    t = select(t, vec2<f32>(0.5), tile == vec2<f32>(0.0));
     let phase = f.arg[2].x;
     if f.arg[2].z != 0.0 {
         if odd(floor(t.y)) { t.x -= phase; }
@@ -252,22 +299,17 @@ fn motion_tile(@builtin(global_invocation_id) id: vec3<u32>) {
         uv = select(uv, 1.0 - uv, vec2<bool>(odd(floor(t.x)), odd(floor(t.y))));
     }
     let origin = vec2<i32>(f.arg[1].xy);
-    let point = uv * size;
-    let radius = vec2<f32>(tile_radius(scale.x), tile_radius(scale.y));
-    let lo = point - radius;
-    let hi = point + radius;
-    let end = vec2<i32>(ceil(hi));
-    var sum = vec4<f32>(0.0);
-    for (var y = i32(floor(lo.y)); y < end.y; y++) {
-        let wy = overlap_1d(y, lo.y, hi.y);
-        for (var x = i32(floor(lo.x)); x < end.x; x++) {
-            let wx = overlap_1d(x, lo.x, hi.x);
-            let q = tile_texel(vec2<i32>(x, y), vec2<i32>(size), mirror);
-            sum += wx * wy * load(src, f.src, origin + q);
-        }
-    }
+    let point = uv * size - 0.5;
+    let low = vec2<i32>(floor(point));
+    let weight = fract(point);
+    let dims = vec2<i32>(size);
+    let a = tile_texel(low, origin, dims, mirror);
+    let b = tile_texel(low + vec2<i32>(1, 0), origin, dims, mirror);
+    let c = tile_texel(low + vec2<i32>(0, 1), origin, dims, mirror);
+    let d = tile_texel(low + 1, origin, dims, mirror);
+    let color = mix(mix(a, b, weight.x), mix(c, d, weight.x), weight.y);
     let coverage = saturate(min(xy + 1.0, f.arg[3].zw) - max(xy, f.arg[3].xy));
-    store(p, sum * coverage.x * coverage.y / (4.0 * radius.x * radius.y));
+    store(p, color * coverage.x * coverage.y);
 }
 
 @compute @workgroup_size(8, 8)
