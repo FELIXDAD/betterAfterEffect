@@ -176,6 +176,20 @@ impl RenderQueue {
         self.items.len() != before
     }
 
+    /// Empties the queue for another project (AE: the render queue belongs to
+    /// the project). A running render is stopped; the worker finishes the
+    /// frame it is on and finds nothing left.
+    pub fn clear(&mut self) {
+        for item in &self.items {
+            item.cancel.store(true, Ordering::Relaxed);
+        }
+        self.items.clear();
+        self.batch.clear();
+        if let Some(ctx) = &self.repaint {
+            ctx.request_repaint();
+        }
+    }
+
     /// Stops a rendering item; a queued one is canceled and leaves the
     /// running render (queued again, it waits for the next Render).
     pub fn cancel(&mut self, id: u64) {
@@ -1209,6 +1223,22 @@ mod tests {
             !dir.ends_with("Movies"),
             "{} is not the Videos known folder",
             dir.display()
+        );
+    }
+
+    #[test]
+    fn clearing_for_another_project_stops_and_empties() {
+        let mut q = RenderQueue::default();
+        q.add(&comp_info("/comps/a", "A"), Path::new("/r"));
+        q.add(&comp_info("/comps/b", "B"), Path::new("/r"));
+        assert!(q.begin());
+        let job = q.take_next(&|_| Some(30)).unwrap();
+        q.clear();
+        assert!(q.items().is_empty());
+        assert!(job.cancel.load(Ordering::Relaxed), "the running item stops");
+        assert!(
+            q.take_next(&|_| Some(30)).is_none(),
+            "nothing left to render"
         );
     }
 

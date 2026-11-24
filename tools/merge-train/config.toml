@@ -11,12 +11,14 @@ orca_environments = ["米兰Mac"]
 # Handle passed to `orca orchestration send --from` (the daemon runs outside any agent).
 orca_from = "merge-train"
 
-# Runner worktree (a detached checkout the daemon runs from and fetches every pass).
-runner_dir = "~/Documents/Orca/betterAfterEffect/bae-merge-train-runner"
-# Ref the runner worktree follows. Before this tool is merged, install with
-# `--ref origin/tools/merge-train`; after that, origin/dev.
+# Runner: a separate full clone the daemon runs from and fetches every pass. It must live
+# outside ~/Documents: launchd jobs have no access to the Documents folder (macOS privacy
+# protection), and a worktree of the main checkout would keep its .git there.
+runner_dir = "~/Library/Application Support/bae-merge-train/repo"
+# Ref the runner follows; it moves there by itself when the merge train changes.
 runner_ref = "origin/dev"
-# Scratch worktree for Cargo.lock repairs, and its own cargo target dir (never shared).
+# Scratch worktree (of the runner clone) for Cargo.lock repairs, and its own cargo
+# target dir (never shared).
 work_dir = "~/Library/Caches/bae-merge-train/work"
 cargo_target_dir = "~/Library/Caches/bae-merge-train/target"
 state_dir = "~/Library/Application Support/bae-merge-train"

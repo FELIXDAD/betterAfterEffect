@@ -48,19 +48,20 @@
 ## 安装（由协调人做）
 
 ```bash
-# 这个工具还没合进 dev 时（先干跑一天）：
-tools/merge-train/install.sh --dry-run --ref origin/tools/merge-train
-# 合进 dev 以后，改成真跑：
-tools/merge-train/install.sh
+tools/merge-train/install.sh --dry-run    # 先干跑
+tools/merge-train/install.sh              # 看过干跑日志以后，改成真跑
+launchctl kickstart -k gui/$(id -u)/com.bae.merge-train      # 当场跑一轮（看板换成 com.bae.progress-board）
 ```
 
 `install.sh` 做这些事：
 
-1. 建立运行用的工作树 `bae-merge-train-runner`：跟踪 `origin/dev`，分离 HEAD，和其他工作树不共用 `CARGO_TARGET_DIR`。
+1. 建立运行用的独立完整 clone：`~/Library/Application Support/bae-merge-train/repo`。它分离 HEAD，跟踪 `origin/dev`；冲突修复用的工作树也从这个 clone 建，放在 `~/Library/Caches/bae-merge-train/work`，用独立的 `CARGO_TARGET_DIR`。
+   - **为什么不放在 `~/Documents`**：macOS 的隐私保护不允许 launchd 后台任务读“文稿”文件夹，会报 `Operation not permitted`，任务以退出码 2 退出。主仓库的工作树也不行，因为工作树的 `.git` 对象库还在 `~/Documents` 下。所以用放在 `~/Library` 下的独立 clone，不需要申请“完全磁盘访问权限”。
+   - 如果 `runner_dir` 是旧版本留下的工作树，`install.sh` 会停下来，提示先 `git worktree remove`。
 2. 运行 `merge_train.py setup`，建好四个标签：`merge-ready`、`merge-train-paused`、`blocked`、`reference-data`。
 3. 把两个 plist 装进 `~/Library/LaunchAgents`，用 `launchctl bootstrap` 启动。开机登录后自动运行；合并脚本退出或崩溃后 30 秒内由 launchd 拉起。
 
-合并脚本每一轮都会 `git fetch`。运行工作树切到 `runner_ref`（默认 `origin/dev`）以后，如果 `merge_train.py`、`config.toml` 或 `leaders.toml` 变了，脚本会自己退出，由 launchd 用新版本重启。所以改配置只要走 PR 合进 dev。`runner_ref` 上还没有这个脚本时，运行工作树停在当前版本不动。
+合并脚本每一轮都会 `git fetch`。运行用的 clone 切到 `runner_ref`（默认 `origin/dev`）以后，如果 `merge_train.py`、`config.toml` 或 `leaders.toml` 变了，脚本会自己退出，由 launchd 用新版本重启。所以改配置只要走 PR 合进 dev。`runner_ref` 上还没有这个脚本时，clone 停在当前版本不动。`--ref <ref>` 可以让 clone 先检出别的 ref（比如还没合并的分支），用来试新版本。clone 只会向前跟：当前提交还没进 `runner_ref` 时就停在原地，等这个分支合进 dev 后再自动跟到 `origin/dev`。
 
 `--no-board` 只装合并脚本，不装看板。
 
@@ -72,10 +73,9 @@ tools/merge-train/install.sh
 tools/merge-train/uninstall.sh
 ```
 
-这会停掉并删除两个 launchd 任务。运行工作树、状态目录和日志会留下，要删就手动删：
+这会停掉并删除两个 launchd 任务。运行用的 clone、状态目录和日志会留下，要删就手动删（clone 在状态目录里面）：
 
 ```bash
-git worktree remove ~/Documents/Orca/betterAfterEffect/bae-merge-train-runner
 rm -rf ~/Library/Caches/bae-merge-train "$HOME/Library/Application Support/bae-merge-train"
 ```
 
@@ -87,10 +87,10 @@ rm -rf ~/Library/Caches/bae-merge-train "$HOME/Library/Application Support/bae-m
 - 看板 issue 上有 `merge-train-paused` 标签。不在这台 Mac 上的人（比如米兰）可以在 GitHub 上打这个标签来暂停，去掉标签就恢复。
 
 ```bash
-R=~/Documents/Orca/betterAfterEffect/bae-merge-train-runner/tools/merge-train
-python3 $R/merge_train.py pause --reason "等 #123 先合"   # 暂停：写暂停文件，给看板 issue 打标签
-python3 $R/merge_train.py resume                         # 恢复：删暂停文件，去掉标签
-python3 $R/merge_train.py status                         # 看队列和每个 PR 当前的判断
+R="$HOME/Library/Application Support/bae-merge-train/repo/tools/merge-train"
+python3 "$R/merge_train.py" pause --reason "等 #123 先合"   # 暂停：写暂停文件，给看板 issue 打标签
+python3 "$R/merge_train.py" resume                         # 恢复：删暂停文件，去掉标签
+python3 "$R/merge_train.py" status                         # 看队列和每个 PR 当前的判断
 ```
 
 dev CI 变红时，脚本会自己暂停。修好 dev 以后运行 `resume`。`resume` 会记下当前 dev 提交，这个提交的红灯不会再触发暂停，下一个红提交才会。

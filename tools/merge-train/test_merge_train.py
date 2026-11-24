@@ -109,6 +109,29 @@ class OverlapTest(Base):
         self.assertEqual(mt.overlap(pr), ["a.txt"])
 
 
+class RunnerTest(Base):
+    def test_runner_follows_ref_only_forward(self):
+        repo = self.make_repo()
+        mt.HERE = os.path.join(repo, "tools", "merge-train")  # pretend we run from the runner
+        try:
+            run(repo, "git", "checkout", "-qb", "trial")
+            trial = self.commit(repo, {"tools/merge-train/merge_train.py": "v2\n"}, "trial")
+            run(repo, "git", "checkout", "-q", "dev")
+            self.commit(repo, {"tools/merge-train/merge_train.py": "v1\n"}, "dev has v1")
+            run(repo, "git", "push", "-q", "origin", "dev")
+            run(repo, "git", "checkout", "-q", "--detach", trial)
+            self.assertFalse(mt.refresh_runner())  # dev does not contain the trial commit
+            self.assertEqual(run(repo, "git", "rev-parse", "HEAD"), trial)
+            run(repo, "git", "checkout", "-q", "dev")
+            run(repo, "git", "merge", "-q", "--no-edit", "-X", "theirs", trial)
+            run(repo, "git", "push", "-q", "origin", "dev")
+            run(repo, "git", "checkout", "-q", "--detach", trial)
+            mt.refresh_runner()  # now merged: moves forward to origin/dev
+            self.assertEqual(run(repo, "git", "rev-parse", "HEAD"), run(repo, "git", "rev-parse", "origin/dev"))
+        finally:
+            mt.HERE = HERE
+
+
 def pr(**kw):
     d = dict(number=7, title="t", url="u", isDraft=False, state="OPEN", baseRefName="dev",
              headRefName="core/x", headRefOid="h1", mergeable="MERGEABLE",
@@ -271,6 +294,18 @@ class ConflictRepairTest(Base):
         self.assertEqual(run(repo, "git", "show", "origin/feat:Cargo.lock"), "lock-dev\nregenerated")
         parents = run(repo, "git", "log", "-1", "--format=%P", "origin/feat").split()
         self.assertEqual(len(parents), 2)
+
+    def test_stale_scratch_dir_is_recreated(self):
+        repo = self.make_repo()
+        os.makedirs(os.path.join(mt.CFG["work_dir"], "junk"))  # e.g. left from an old layout
+        run(repo, "git", "checkout", "-qb", "feat")
+        head = self.commit(repo, {"c.txt": "pr\n"}, "pr")
+        run(repo, "git", "push", "-q", "origin", "feat")
+        with mock.patch.object(mt, "fetch_pr_head", side_effect=lambda n: run(repo, "git", "fetch", "-q", "origin")):
+            ok, msg = mt.try_conflict_repair(pr(headRefName="feat", headRefOid=head))
+        self.assertTrue(ok, msg)
+        self.assertIn("无需推送", msg)  # dev had nothing new: no empty commit, no push
+        self.assertFalse(os.path.exists(os.path.join(mt.CFG["work_dir"], "junk")))
 
     def test_real_conflict_is_reported(self):
         repo = self.make_repo()

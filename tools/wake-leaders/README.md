@@ -27,15 +27,17 @@ automation 的 prompt（`automation-prompt.txt`）让 `codex / gpt-6.2-sol`（�
 
 ## 安装
 
-先把本分支合进 dev（脚本要在 dev 工作树里），然后：
+脚本装到 `~/Library/Application Support/bae-wake-leaders/tools/wake-leaders/`，不从仓库里直接跑。原因是 macOS 的隐私保护不允许后台任务（launchd）读“文稿”文件夹，从 `~/Documents` 下的仓库跑会报 `Operation not permitted`。`install.sh` 每次都会先用 rsync 把仓库里的 `tools/wake-leaders/` 复制过去，所以**改了工具以后要重新运行 `install.sh`**。不需要申请“完全磁盘访问权限”。
 
 ```bash
-tools/wake-leaders/install.sh --dry-run   # 先看命令
-tools/wake-leaders/install.sh             # 注册：cron "7,37 * * * *"，workspace 为 dev 工作树
-orca automations list --json              # 记下 automation id
+tools/wake-leaders/install.sh --launchd --dry-run   # 先看会做什么
+tools/wake-leaders/install.sh --launchd             # 推荐：不用模型的 launchd 方案（见下文）
+# 或者注册 Orca automation（Codex 执行）：
+tools/wake-leaders/install.sh                       # cron "7,37 * * * *"，workspace 为 dev 工作树
+orca automations list --json                        # 记下 automation id
 ```
 
-等价于 `orca automations create --name wake-leaders --trigger "7,37 * * * *" --precheck "bash <dev>/tools/wake-leaders/precheck.sh" --provider codex --model gpt-6.2-sol --effort low --workspace path:<dev> --prompt "$(cat automation-prompt.txt)"`。
+注册 automation 时，precheck 和 prompt 里的脚本路径都指向复制后的位置：`--precheck "bash '<安装目录>/precheck.sh'"`，prompt 里是 `bash "<安装目录>/wake.sh" wake`。`WAKE_HOME` 可以换安装的基础目录，`WAKE_REPO` 可以换 automation 用的工作区（默认是 dev 工作树）。
 
 > 注意：`orca agent installed` 在本机只列出 grok，注册后先 `orca automations run <id>` 试一次（会绕过 precheck，里面的 wake.sh 看到没人停住会什么都不做），确认 Codex 能在这台机器上被 Orca 启动。不行的话用下面的 launchd 方案，它不需要模型也不要 Codex 额度。
 
@@ -48,16 +50,21 @@ orca automations runs --id <id> --limit 20       # Orca 里的运行历史，被
 orca automations run <id>                        # 立刻跑一次（绕过 precheck）
 
 tail -f ~/.local/state/bae-wake-leaders/wake.log # 本工具自己的日志（JSON 行，超过 1 MB 轮转为 wake.log.1）
-tools/wake-leaders/wake.sh status                # 每个会话当前状态 + 失败计数
-tools/wake-leaders/wake.sh reset [名字]          # 处理完问题后清除 halted 和失败计数
-tools/wake-leaders/precheck.sh -v; echo $?       # 手动看一次判断结果，0 = 会叫醒
+W="$HOME/Library/Application Support/bae-wake-leaders/tools/wake-leaders"
+"$W/wake.sh" status                              # 每个会话当前状态 + 失败计数
+"$W/wake.sh" reset [名字]                        # 处理完问题后清除 halted 和失败计数
+"$W/precheck.sh" -v; echo $?                     # 手动看一次判断结果，0 = 会叫醒
 ```
 
 日志里 `check`（发现有会话停住时才写）、`sent`、`wake_ok` / `wake_failed` 几类事件。状态文件是 `~/.local/state/bae-wake-leaders/state.json`。`precheck.sh` 不碰任何会话，只写自己的状态目录和日志。
 
 ### 不用 Codex 的方案
 
-`wake.sh wake` 本身不需要模型。若 Codex 不能用或额度紧，可以不注册 Orca automation，改用 `com.bae.wake-leaders.plist.example`（复制到 `~/Library/LaunchAgents/`，改 `REPO_PATH`，`launchctl load`）：每 30 分钟直接跑 `wake.sh wake`，判断和限频逻辑完全一样，只是没有 Codex 额度检查（也就不需要）。
+`wake.sh wake` 本身不需要模型。如果 Codex 不能用或额度紧，可以不注册 Orca automation，改用 `install.sh --launchd`。它把脚本复制到上面的安装目录，再用模板 `com.bae.wake-leaders.plist.example` 生成 `~/Library/LaunchAgents/com.bae.wake-leaders.plist` 并用 `launchctl bootstrap` 加载。之后每 30 分钟（:07 和 :37）直接跑 `wake.sh wake`，判断和限频逻辑完全一样，只是没有 Codex 额度检查（这种方案也不需要）。
+
+- 输出：`~/Library/Logs/bae-wake-leaders.out` / `.err`。
+- 立刻跑一次：`launchctl kickstart -k gui/$(id -u)/com.bae.wake-leaders`。
+- 停用：`launchctl bootout gui/$(id -u)/com.bae.wake-leaders && rm ~/Library/LaunchAgents/com.bae.wake-leaders.plist`。
 
 ## 演练
 

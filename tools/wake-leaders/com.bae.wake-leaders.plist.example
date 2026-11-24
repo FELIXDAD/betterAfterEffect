@@ -1,15 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Fallback that needs no model and no Codex quota. Copy to ~/Library/LaunchAgents/com.bae.wake-leaders.plist,
-     fix REPO_PATH, then: launchctl load ~/Library/LaunchAgents/com.bae.wake-leaders.plist
+<!-- Fallback that needs no model and no Codex quota. Template for `install.sh --launchd`, which
+     copies the tool to ~/Library/Application Support/bae-wake-leaders/tools/wake-leaders, fills in
+     __SCRIPTS__ / __HOME__ and loads it as ~/Library/LaunchAgents/com.bae.wake-leaders.plist.
+     (launchd jobs cannot read ~/Documents, so it must not point at the checkout.)
      Runs wake.sh wake every 30 minutes at :07 and :37. wake.sh does its own stalled/recovered/rate-limit checks. -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>com.bae.wake-leaders</string>
-  <key>ProgramArguments</key><array><string>/bin/bash</string><string>REPO_PATH/tools/wake-leaders/wake.sh</string><string>wake</string></array>
+  <key>ProgramArguments</key><array><string>/bin/bash</string><string>__SCRIPTS__/wake.sh</string><string>wake</string></array>
   <key>StartCalendarInterval</key><array>
     <dict><key>Minute</key><integer>7</integer></dict>
     <dict><key>Minute</key><integer>37</integer></dict>
   </array>
-  <key>StandardOutPath</key><string>/tmp/bae-wake-leaders.out</string>
-  <key>StandardErrorPath</key><string>/tmp/bae-wake-leaders.err</string>
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/bae-wake-leaders.out</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/bae-wake-leaders.err</string>
 </dict></plist>
