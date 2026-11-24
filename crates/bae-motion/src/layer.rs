@@ -430,7 +430,7 @@ fn same_comp(stage: &Stage, layers: &[PrimPath]) -> Result<PrimPath, CommandErro
 
 /// Reorder the specs under `folder` in every local sublayer so that the composed
 /// order follows `order` (paths not in `order` keep their relative order at the end).
-fn apply_order(
+pub(crate) fn apply_order(
     tx: &mut Transaction<'_>,
     folder: &PrimPath,
     order: &[PrimPath],
@@ -1109,6 +1109,7 @@ pub const LAYER_SWITCH_ATTRS: &[&str] = &[
     "shy",
     "locked",
     "enabled",
+    "effects_enabled",
     "audio_enabled",
     "solo",
     "collapse_transformation",
@@ -1126,7 +1127,7 @@ pub struct SetLayerAttrParams {
     /// Layers (or project items, for `label`).
     pub layers: Vec<PrimPath>,
     /// One of the layer switches (`shy`, `locked`, `enabled` = Video,
-    /// `audio_enabled`, `solo`, `collapse_transformation`, `motion_blur`,
+    /// `effects_enabled` = Effect (fx), `audio_enabled`, `solo`, `collapse_transformation`, `motion_blur`,
     /// `adjustment_layer`, `three_d`), `quality` (`best` / `draft` /
     /// `wireframe`) or `label` (0 = none, 1–16 = AE's label colours).
     pub attr: String,

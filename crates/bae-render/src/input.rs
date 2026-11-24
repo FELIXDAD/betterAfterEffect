@@ -166,7 +166,8 @@ pub struct RenderLayer {
     /// The comp time is within the layer's in/out range (and solo does not
     /// exclude it). An inactive layer draws nothing, also not as a matte.
     pub active: bool,
-    /// 调整图层 (reserved: not rendered yet).
+    /// Adjustment layer: not drawn itself; its effects apply to the layers
+    /// below, mixed back by its own pixels' coverage (see `graph`).
     pub adjustment: bool,
     /// Masks, top first (applied to the source before effects, AE-CMP-038).
     pub masks: Vec<RenderMask>,

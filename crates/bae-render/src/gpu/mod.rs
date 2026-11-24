@@ -244,6 +244,8 @@ pub(crate) struct Pipelines {
     outputs: FxHashMap<wgpu::TextureFormat, wgpu::RenderPipeline>,
     /// Mask passes, created on first use.
     masks: Option<MaskPipelines>,
+    /// Adjustment layer mix pass, created on first use.
+    pub adjust: Option<crate::exec::adjust::MixPipelines>,
 }
 
 impl Pipelines {
@@ -403,6 +405,7 @@ impl Pipelines {
             output_pipeline_layout,
             outputs: FxHashMap::default(),
             masks: None,
+            adjust: None,
         }
     }
 
