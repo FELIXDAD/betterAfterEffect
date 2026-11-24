@@ -17,16 +17,18 @@ for codec, encoder in [("h264", "libx264"), ("hevc", "libx265"), ("hevc10", "lib
         else ["-x265-params", "scenecut=0:pools=2:log-level=error", "-tag:v", "hvc1"]
     )
     pixel_format = "yuv420p10le" if codec == "hevc10" else "yuv420p"
-    # Longer audio must not extend the reported frame count of the picture.
+    output = args.out / f"{codec}-{args.size}.mp4"
+    raw = output.with_suffix(".source.mp4") if codec == "h264" else output
     audio = ["-f", "lavfi", "-t", "3", "-i", "anullsrc=r=48000:cl=mono",
              "-c:a", "aac"] if codec == "h264" else []
     with subprocess.Popen(
         ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "gray",
-         "-s", args.size, "-r", "30000/1001", "-i", "-", *audio, "-c:v", encoder,
+         "-s", args.size, "-r", "30000/1001", "-i", "-", *audio,
+         "-c:v", encoder,
          "-vf", f"format={pixel_format},drawbox=x=iw/2:y=0:w=iw/4:h=ih:color=red:t=fill",
          "-pix_fmt", pixel_format,
          "-crf", "12", "-g", "12", "-bf", "2",
-         *options, str(args.out / f"{codec}-{args.size}.mp4")],
+         *options, str(raw)],
         stdin=subprocess.PIPE,
     ) as proc:
         for index in range(48):
@@ -36,3 +38,11 @@ for codec, encoder in [("h264", "libx264"), ("hevc", "libx265"), ("hevc10", "lib
         proc.stdin.close()
         if proc.wait():
             raise SystemExit(f"{encoder} failed")
+    if codec == "h264":
+        # Remux the picture to start half a second after the audio.
+        subprocess.run(
+            ["ffmpeg", "-v", "error", "-y", "-itsoffset", "0.5", "-i", str(raw),
+             "-i", str(raw), "-map", "0:v", "-map", "1:a", "-c", "copy", str(output)],
+            check=True,
+        )
+        raw.unlink()

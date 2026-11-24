@@ -101,7 +101,7 @@ Windows 11、D3D12、release 实测，单位为毫秒/帧。素材为 29.97 fps�
 | HEVC Main 1920×1080 | 1.01 | 8.83 | 11.73 |
 | HEVC Main 3840×2160 | 3.85 | 16.53 | 28.12 |
 
-`crates/bae-media/tests/fixtures/generate_mf.py` 用外部 FFmpeg 生成素材。仓库附有小尺寸样片，可以直接运行 `cargo test -p bae-media`。缺少 Media Foundation 或 D3D11 视频设备的 runner 会跳过相应端到端测试，缺少 HEVC 解码器或编码器时只跳过对应场景。加 `-- --nocapture` 可查看具体原因。复测上表时，用脚本的 `--size` 和 `--out` 生成大图，令 `BAE_MF_BENCH` 指向其中一个 MP4，运行 `cargo test --release -p bae-media --lib benchmark_upload -- --ignored --nocapture`。
+`crates/bae-media/tests/fixtures/generate_mf.py` 用外部 FFmpeg 生成素材。H.264 样片的视频比音频晚半秒开始，也先于音频结束，用于核对视频帧数和跨 GOP 跳转。仓库附有小尺寸样片，可以直接运行 `cargo test -p bae-media`。缺少 Media Foundation 或 D3D11 视频设备的 runner 会跳过相应端到端测试，缺少 HEVC 解码器或编码器时只跳过对应场景。加 `-- --nocapture` 可查看具体原因。复测上表时，用脚本的 `--size` 和 `--out` 生成大图，令 `BAE_MF_BENCH` 指向其中一个 MP4，运行 `cargo test --release -p bae-media --lib benchmark_upload -- --ignored --nocapture`。
 
 #### 其他说明
 

@@ -49,6 +49,7 @@ struct Source {
     reader: IMFSourceReader,
     info: MediaInfo,
     rate: FrameRate,
+    start: i64,
     next: Option<i64>,
     _platform: Platform,
 }
@@ -114,12 +115,15 @@ impl Source {
             if !crate::time::is_valid_rate(rate) {
                 return Err(MediaError::decode(path, "missing video frame rate"));
             }
-            let duration = match crate::mp4::video_duration(path) {
-                Some(duration) => duration,
-                None => i64::try_from(&reader.GetPresentationAttribute(
-                    MF_SOURCE_READER_MEDIASOURCE.0 as u32,
-                    &MF_PD_DURATION,
-                )?)?,
+            let (start, duration) = match crate::mp4::video_range(path) {
+                Some(range) => range,
+                None => (
+                    0,
+                    i64::try_from(&reader.GetPresentationAttribute(
+                        MF_SOURCE_READER_MEDIASOURCE.0 as u32,
+                        &MF_PD_DURATION,
+                    )?)?,
+                ),
             };
             let count = frame_index(duration, rate);
             let (x, y) = pair(native.GetUINT64(&MF_MT_PIXEL_ASPECT_RATIO).unwrap_or(0));
@@ -163,6 +167,7 @@ impl Source {
                 reader,
                 info,
                 rate,
+                start,
                 next: Some(0),
                 _platform: platform,
             })
@@ -175,8 +180,10 @@ impl Source {
         // preroll by presentation timestamp, keeping this reader for the next call.
         unsafe {
             if self.next.take() != Some(index) {
-                self.reader
-                    .SetCurrentPosition(&GUID::zeroed(), &timestamp(index, self.rate).into())?;
+                self.reader.SetCurrentPosition(
+                    &GUID::zeroed(),
+                    &(self.start + timestamp(index, self.rate)).into(),
+                )?;
             }
             loop {
                 let mut sample = None;
@@ -198,7 +205,7 @@ impl Source {
                     return Err(MediaError::decode(&self.info.path, "video reader failed"));
                 }
                 if let Some(sample) = sample
-                    && frame_index(pts, self.rate) >= index
+                    && frame_index(pts - self.start, self.rate) >= index
                 {
                     self.next = Some(index + 1);
                     return Ok(sample);
