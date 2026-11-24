@@ -47,8 +47,8 @@ UI_PKG = (
 WORKFLOW = [
     "BookmarkSingle", "Brush", "Camera", "ChevronDoubleRight", "CloneStamp", "Crosshairs", "Delete", "Dolly",
     "Effects", "Ellipse", "Erase", "Exposure", "Filmroll", "FlashOn", "Folder", "Hand",
-    "Home", "Label", "Link", "LockClosed", "LockOpen", "Orbit", "Pan", "PinOn",
-    "PlayCircle", "Polygon", "Rectangle", "RegionSelect", "RotateCW", "Sampler",
+    "Home", "Label", "Link", "LockClosed", "LockOpen", "Move", "Orbit", "PinOn",
+    "PlayCircle", "Polygon", "Rectangle", "RotateCW", "Sampler",
     "SaveFloppy", "Search", "Select", "Send", "ShowMenu", "Star", "StarOutline",
     "Stopwatch", "Text", "Transparency", "VectorDraw", "Visibility", "VolumeThree",
     "Workflow",
