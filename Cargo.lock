@@ -632,6 +632,7 @@ dependencies = [
  "bae-motion",
  "bae-plugin",
  "bae-render",
+ "glam",
  "half",
  "parking_lot",
  "png",

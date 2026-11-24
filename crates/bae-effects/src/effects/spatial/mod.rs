@@ -1,23 +1,20 @@
 //! Spatial filters which need reduced intermediate textures, a derived input,
 //! or access to the full source extent when rendering a tile.
-mod definitions;
+pub(crate) mod choker;
+pub(crate) mod definitions;
 mod pass;
 
 use pass::dispatch;
 pub(crate) use pass::prewarm;
 
 use crate::{
-    Builtin, EffectTarget, TargetEffect,
+    EffectTarget, TargetEffect,
     blur::{self, Edge},
     common,
     params::Params,
 };
 use bae_model::{EffectDef, Value};
 use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderError};
-
-pub(crate) fn builtins() -> [Builtin; 6] {
-    definitions::entries()
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {

@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use bae_gpu::{GpuContext, GpuContextDescriptor};
-use bae_model::{PrimPath, Time};
+use bae_model::PrimPath;
 use bae_render::png_out::{read_rgba8, write_rgba8};
 use bae_render::{AnimEvaluator, CompEvaluator, OutputAlpha, RenderRequest, Renderer};
 
@@ -38,7 +38,9 @@ fn compare(ae_dir: &Path, out: &Path, assets: &Path) {
     println!("|---|---:|---:|---:|---:|---|");
     for (name, _) in names {
         let comp = PrimPath::new(&format!("/comps/{name}")).expect("path");
-        let rc = eval.evaluate(&stage, &comp, Time::ZERO).expect("evaluate");
+        let rc = eval
+            .evaluate(&stage, &comp, cases::render_time(&name))
+            .expect("evaluate");
         let frame = renderer
             .render_frame(&rc, &RenderRequest::full())
             .expect("render");

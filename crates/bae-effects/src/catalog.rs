@@ -209,7 +209,41 @@ impl DefBuilder {
         self
     }
 
+    /// A same-comp layer reference. An unwritten default resolves to self.
+    pub fn layer(mut self, id: u32, name: &str, zh: &str) -> Self {
+        self.push(id, name, zh, ParamKind::Layer, None);
+        let flags = &mut self.def.params.last_mut().unwrap().flags;
+        flags.cannot_animate = true;
+        flags.cannot_time_vary = true;
+        self
+    }
+
     pub fn build(self) -> (EffectDef, Vec<(u32, String)>) {
         (self.def, self.zh)
     }
+}
+
+/// Chinese popup labels for Rust effects in the controls and channel group,
+/// in the same one-based order as the corresponding parameter definition.
+pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static str]> {
+    Some(match (match_name, param_id) {
+        ("ADBE Dropdown Control", 1) => &["项目 1", "项目 2", "项目 3"],
+        ("ADBE Minimax", 1) => &["最小值", "最大值", "先最小值再最大值", "先最大值再最小值"],
+        ("ADBE Minimax", 3) => &["颜色", "Alpha 和颜色", "红色", "绿色", "蓝色", "Alpha"],
+        ("ADBE Minimax", 4) => &["水平和垂直", "仅水平", "仅垂直"],
+        ("ADBE Simple Choker", 1) => &["最终输出", "遮罩"],
+        ("ADBE Set Matte3", 2) => &[
+            "红色通道",
+            "绿色通道",
+            "蓝色通道",
+            "Alpha 通道",
+            "明亮度",
+            "色相",
+            "亮度",
+            "饱和度",
+            "完全",
+            "关闭",
+        ],
+        _ => return None,
+    })
 }

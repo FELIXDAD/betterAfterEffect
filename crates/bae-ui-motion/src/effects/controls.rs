@@ -447,7 +447,7 @@ fn value_control(
             ui.add_enabled(false, egui::Button::new(label));
             Edit::None
         }
-        ParamKind::ArbitraryData | ParamKind::Path => {
+        ParamKind::ArbitraryData | ParamKind::Path | ParamKind::CurvePoints => {
             ui.colored_label(color::TEXT_DISABLED, "—");
             Edit::None
         }

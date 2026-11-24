@@ -148,8 +148,9 @@ impl Default for MotionBlur {
 
 impl MotionBlur {
     /// Sample times for the frame at `time`, `samples` of them:
-    /// `t_k = t_open + dur * (k + 0.5) / N` with `t_open = t + phase/360 · T` and
-    /// `dur = angle/360 · T` (AE-ANI-103; the in-interval distribution is UNVERIFIED).
+    /// `t_k = t_open + dur * k / N` with `t_open = t + phase/360 · T` and
+    /// `dur = angle/360 · T` (AE-ANI-103; the first sample at shutter open, the
+    /// last one `dur / N` before it closes, measured in AE 26.2.1).
     /// Returns just `[time]` when the shutter angle is 0 or `samples` is 0.
     pub fn sample_times(&self, time: Time, frame_rate: FrameRate, samples: u32) -> Vec<Time> {
         if self.shutter_angle <= 0.0 || samples == 0 || frame_rate.num == 0 {
@@ -159,7 +160,7 @@ impl MotionBlur {
         let open = time.0 as f64 + self.shutter_phase / 360.0 * frame;
         let dur = self.shutter_angle / 360.0 * frame;
         (0..samples)
-            .map(|k| Time((open + dur * (k as f64 + 0.5) / samples as f64).round() as i64))
+            .map(|k| Time((open + dur * k as f64 / samples as f64).round() as i64))
             .collect()
     }
 }
@@ -211,7 +212,7 @@ mod tests {
         let t = r.frame_to_time(10);
         let s = mb.sample_times(t, r, 2);
         let quarter = r.frame_duration().0 / 4;
-        // Interval [t - T/4, t + T/4], two samples at 1/4 and 3/4 of it.
-        assert_eq!(s, vec![Time(t.0 - quarter / 2), Time(t.0 + quarter / 2)]);
+        // Interval [t - T/4, t + T/4], two samples at its start and middle.
+        assert_eq!(s, vec![Time(t.0 - quarter), t]);
     }
 }
