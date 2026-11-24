@@ -144,6 +144,26 @@ fn levels_then_exposure(fx: &mut Fx, layer: &PrimPath) -> (PrimPath, PrimPath) {
 }
 
 #[test]
+fn distort_point_defaults_use_the_source_on_apply_and_reset() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let layer = fx.solid(&comp, [0.5; 3], [31, 13]);
+    for (effect_name, id, expected) in [
+        ("ADBE Mirror", 1, [31., 6.5]),
+        ("ADBE Corner Pin", 4, [31., 13.]),
+        ("ADBE Geometry2", 2, [15.5, 6.5]),
+    ] {
+        let effect = fx.apply(&layer, effect_name);
+        let prop = format!("param:{id:04}");
+        let point = |fx: &Fx| fx.stage.prim(&effect).unwrap().value(&prop).cloned();
+        assert_eq!(point(&fx), Some(bae_model::Value::Vec2(expected)));
+        fx.param(&effect, id, json!({"type": "vec2", "value": [4., 5.]}));
+        fx.run("effect.reset", json!({"effects": [effect]}));
+        assert_eq!(point(&fx), Some(bae_model::Value::Vec2(expected)));
+    }
+}
+
+#[test]
 fn effects_render_top_to_bottom() {
     let mut fx = Fx::new();
     let comp = fx.comp();
@@ -438,4 +458,74 @@ fn effects_and_fx_switch_survive_save_and_reopen() {
     let ec = bae_anim::evaluate_comp(stage, &comp, Time::ZERO).unwrap();
     let l = ec.layers.iter().find(|l| l.path == other).unwrap();
     assert!(l.switches.effects, "missing attribute reads as on");
+}
+
+/// Every built-in effect: apply it, change a parameter, keyframe it, render,
+/// and undo back to no effects (one undo step per command).
+#[test]
+fn every_builtin_applies_animates_renders_and_undoes() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let layer = fx.solid(&comp, [0.6, 0.4, 0.2], [64, 32]);
+    for b in bae_effects::builtins() {
+        let def = b.def();
+        let e = fx.apply(&layer, &def.match_name);
+        let mut steps = 1;
+        // The first numeric parameter: a value, then two keyframes.
+        if let Some(p) = def
+            .params
+            .iter()
+            .find(|p| matches!(p.kind, bae_model::effect::ParamKind::Slider { .. }))
+        {
+            let attr = format!("param:{:04}", p.id);
+            let v = |x: f64| json!({"type": "float", "value": x});
+            fx.run(
+                "attr.set",
+                json!({"path": e, "attr": attr, "value": v(1.0)}),
+            );
+            for (t, x) in [(0.0, 0.5), (1.0, 2.0)] {
+                fx.run(
+                    "key.set",
+                    json!({
+                        "path": e,
+                        "attr": attr,
+                        "time": Time::from_seconds(t).flicks(),
+                        "keyframe": bae_model::Keyframe::linear(bae_model::Value::Float(x)),
+                    }),
+                );
+            }
+            steps += 3;
+        }
+        // Renders (some effects change alpha, so only that it works).
+        let _ = fx.pixel_at(&comp, 10, 10, Time::from_seconds(0.5));
+        for _ in 0..steps {
+            fx.undo();
+        }
+        assert!(
+            bae_motion::effect::effects_of(&fx.stage, &layer).is_empty(),
+            "{}: undo leaves effects",
+            def.match_name
+        );
+    }
+}
+
+#[test]
+fn spatial_point_defaults_follow_source_dimensions_on_apply_and_reset() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let layer = fx.solid(&comp, [0.5; 3], [31, 13]);
+    for (name, id, expected) in [
+        ("ADBE Radial Blur", 2, [15.5, 6.5]),
+        ("ADBE Tile", 1, [15.5, 6.5]),
+        ("ADBE Radial Shadow", 3, [7.75, 3.25]),
+    ] {
+        let effect = fx.apply(&layer, name);
+        let attr = format!("param:{id:04}");
+        let point = |fx: &Fx| fx.stage.prim(&effect).unwrap().value(&attr).cloned();
+        let expected = Some(bae_model::Value::Vec2(expected));
+        assert_eq!(point(&fx), expected);
+        fx.param(&effect, id, json!({"type":"vec2","value":[4.0,5.0]}));
+        fx.run("effect.reset", json!({"effects":[effect]}));
+        assert_eq!(point(&fx), expected);
+    }
 }

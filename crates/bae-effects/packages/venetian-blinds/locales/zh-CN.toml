@@ -1,0 +1,9 @@
+[effect.venetian-blinds]
+name = "百叶窗"
+keywords = ["百叶窗"]
+
+[effect.venetian-blinds.params]
+transition_completion = "过渡完成"
+direction = "方向"
+width = "宽度"
+feather = "羽化"

@@ -87,9 +87,9 @@ const AE_ITEMS: &[(&str, Option<&str>, &str)] = &[
     ("shell.window.composition", None, "合成"),
     ("shell.window.timeline", None, "时间轴"),
     ("shell.window.effect_controls", Some("F3"), "效果控件"),
-    // Effects & Presets and Info are placeholder panels so far: greyed, and
-    // AE's Cmd+5 / Cmd+2 bind once the panels are real (#shortcut sweep).
-    ("shell.window.effects", None, "效果和预设"),
+    // Info is a placeholder panel so far: greyed, and AE's Cmd+2 binds once
+    // it is real (#shortcut sweep). Effects & Presets is real: Cmd+5.
+    ("shell.window.effects", Some("Cmd+5"), "效果和预设"),
     ("shell.window.preview", Some("Cmd+3"), "预览"),
     ("shell.window.properties", None, "属性"),
     ("shell.window.info", None, "信息"),
@@ -161,10 +161,10 @@ fn menu_enabled_state_follows_the_selection() {
     let mut h = gui();
     // Window items of implemented panels open them: always enabled (checked
     // below), not part of what the selection changes. Panels that are only
-    // placeholders so far (Effects & Presets, Info) are greyed, like every AE
+    // placeholders so far (Info) are greyed, like every AE
     // item whose command does not run yet.
     let window = |i: &MenuItemView| i.path.first().is_some_and(|p| p == "Window");
-    let placeholder = ["shell.window.effects", "shell.window.info"];
+    let placeholder = ["shell.window.info"];
     let ae_item = |i: &MenuItemView| AE_ITEMS.iter().any(|(id, ..)| *id == i.id);
     for i in h
         .state()

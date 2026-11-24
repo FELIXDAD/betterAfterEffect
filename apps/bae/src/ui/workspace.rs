@@ -203,6 +203,11 @@ impl Workspace {
             .collect()
     }
 
+    /// Whether the state should be saved now (OK in Keyboard Shortcuts).
+    pub fn take_save_request(&mut self) -> bool {
+        self.workbench.take_save_request()
+    }
+
     /// The state to persist between sessions.
     pub fn state(&mut self) -> WorkbenchState {
         self.workbench.state()

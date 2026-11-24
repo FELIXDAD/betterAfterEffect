@@ -6,15 +6,17 @@ use bae_motion::query::CompInfo;
 use bae_ui::Accessible as _;
 use bae_ui::icons::{self, Icon};
 use bae_ui::theme::{self, color};
-use bae_ui::{tr, widgets};
+use bae_ui::{PanelContext, tr, widgets};
 use egui::{Rect, Ui, Vec2, vec2};
 
 use super::{CompositionViewer, MAGNIFICATIONS};
 use crate::common;
 use crate::session::SharedSession;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn bottom_bar(
     ui: &mut Ui,
+    cx: &mut PanelContext<'_>,
     bar: Rect,
     v: &mut CompositionViewer,
     info: &CompInfo,
@@ -71,14 +73,32 @@ pub(super) fn bottom_bar(
         );
     }
 
-    // Resolution (used by the GPU preview once it lands).
-    let res = [tr("Full"), tr("Half"), tr("Third"), tr("Quarter")];
-    let mut r = (session.lock().resolution.clamp(1, 4) - 1) as usize;
+    // Resolution: the comp's (as in Composition Settings), or Auto.
+    let factor = super::comp_resolution(cx.stage, &info.path);
+    let mut res = vec![
+        tr("Auto"),
+        tr("Full"),
+        tr("Half"),
+        tr("Third"),
+        tr("Quarter"),
+    ];
+    if factor > 4 {
+        res.push(tr("Custom"));
+    }
+    let mut r = if session.lock().auto_resolution {
+        0
+    } else {
+        (factor as usize).min(5)
+    };
     if widgets::dropdown(ui, "res", &mut r, &res, 84.0)
         .on_hover_text(tr("Resolution"))
         .changed()
     {
-        session.lock().resolution = r as u32 + 1;
+        match r {
+            0 => session.lock().auto_resolution = true,
+            1..=4 => super::set_resolution(cx, session, r as u32, false),
+            _ => {}
+        }
     }
 
     for (on, icon, tip) in [

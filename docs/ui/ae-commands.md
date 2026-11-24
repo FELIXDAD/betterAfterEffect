@@ -36,9 +36,9 @@
 
 ## 统计
 
-- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 103，◐ 8，☐ 212，⏸ 217，Ⓐ 30
-- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 131 条。
-- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 122 条，macOS 122 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
+- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 107，◐ 8，☐ 209，⏸ 216，Ⓐ 30
+- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 154 条。
+- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 145 条，macOS 145 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
 
 ## 主菜单
 
@@ -301,7 +301,7 @@
 | Switches ▸ Audio | 8847370 | `motion.layer.switch` | `{"switch":"audio_enabled"}` |  |  | B | ✅ |
 | Switches ▸ Video | 8847371 | `motion.layer.switch` | `{"switch":"enabled"}` | Ctrl+Alt+Shift+V | Cmd+Opt+Shift+V | B | ✅ |
 | Switches ▸ Solo | 8847372 | `motion.layer.switch` | `{"switch":"solo"}` |  |  | B | ✅ |
-| Switches ▸ Effect | 8847373 | `motion.layer.switch` | `{"switch":"effects_enabled"}` |  |  | B | ⏸ |
+| Switches ▸ Effect | 8847373 | `motion.layer.switch` | `{"switch":"effects_enabled"}` |  |  | B | ✅ |
 | Switches ▸ Collapse | 8847374 | `motion.layer.switch` | `{"switch":"collapse_transformation"}` |  |  | B | ✅ |
 | Switches ▸ Motion Blur | 8847375 | `motion.layer.switch` | `{"switch":"motion_blur"}` |  |  | B | ✅ |
 | Switches ▸ Adjustment Layer | 8847376 | `motion.layer.switch` | `{"switch":"adjustment_layer"}` |  |  | B | ✅ |
@@ -430,8 +430,8 @@
 | AE 菜单路径 | AE id | BAE 动作 id | 参数 | Windows | macOS | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
 | Effect Controls | 458753 | `window.panel` | `{"id":"effect_controls","toggle":true}` | F3 / Ctrl+Shift+T | F3 / Cmd+Shift+T | B | ✅ |
-| Last Effect | 458754 | `motion.effect.last_effect` |  | Ctrl+Alt+Shift+E | Cmd+Opt+Shift+E | B | ☐ |
-| Remove All | 458755 | `motion.effect.remove_all` |  | Ctrl+Shift+E | Cmd+Shift+E | B | ☐ |
+| Last Effect | 458754 | `motion.effect.last_effect` |  | Ctrl+Alt+Shift+E | Cmd+Opt+Shift+E | B | ✅ |
+| Remove All | 458755 | `motion.effect.remove_all` |  | Ctrl+Shift+E | Cmd+Shift+E | B | ✅ |
 | Manage Effects... | 458757 | `motion.effect.manage_effects` |  |  |  | E | ⏸ |
 | 效果分类（3D Channel、Audio、Blur & Sharpen、Boris FX Mocha、Channel、Cinema 4D、Color Correction、Distort、Expression Controls、Generate、Immersive Video、Keying、Matte、Noise & Grain、Obsolete、Perspective、Simulation、Stylize、Text、Time、Transition、Utility） ▸ 各效果 | | `motion.effect.apply` | `{"match_name":"…"}` | | | B | ☐ |
 
@@ -616,7 +616,7 @@
 | Smoother | 524309 | `window.panel` | `{"id":"smoother","toggle":true}` |  |  | E | ⏸ |
 | Libraries | 524310 | `window.panel` | `{"id":"libraries","toggle":true}` |  |  | B | Ⓐ |
 | Wiggler | 524311 | `window.panel` | `{"id":"wiggler","toggle":true}` |  |  | E | ⏸ |
-| Effects & Presets | 524312 | `window.panel` | `{"id":"effects","toggle":true}` | Ctrl+5 | Cmd+5 | E | ☐ |
+| Effects & Presets | 524312 | `window.panel` | `{"id":"effects","toggle":true}` | Ctrl+5 | Cmd+5 | E | ✅ |
 | Paragraph | 524313 | `window.panel` | `{"id":"paragraph","toggle":true}` | Ctrl+7 | Cmd+7 | E | ☐ |
 | Brushes | 524314 | `window.panel` | `{"id":"brushes","toggle":true}` | Ctrl+9 | Cmd+9 | E | ⏸ |
 | Paint | 524315 | `window.panel` | `{"id":"paint","toggle":true}` | Ctrl+8 | Cmd+8 | E | ⏸ |
@@ -836,26 +836,26 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 
 | AE 命令 | BAE 动作 id | 参数 | Windows | macOS | 作用范围 | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
-| `CompGotoMarker0` | `motion.timeline.go_to_comp_marker` | `{"number":0}` | 0 | 0 | timeline | C | ☐ |
-| `CompGotoMarker1` | `motion.timeline.go_to_comp_marker` | `{"number":1}` | 1 | 1 | timeline | C | ☐ |
-| `CompGotoMarker2` | `motion.timeline.go_to_comp_marker` | `{"number":2}` | 2 | 2 | timeline | C | ☐ |
-| `CompGotoMarker3` | `motion.timeline.go_to_comp_marker` | `{"number":3}` | 3 | 3 | timeline | C | ☐ |
-| `CompGotoMarker4` | `motion.timeline.go_to_comp_marker` | `{"number":4}` | 4 | 4 | timeline | C | ☐ |
-| `CompGotoMarker5` | `motion.timeline.go_to_comp_marker` | `{"number":5}` | 5 | 5 | timeline | C | ☐ |
-| `CompGotoMarker6` | `motion.timeline.go_to_comp_marker` | `{"number":6}` | 6 | 6 | timeline | C | ☐ |
-| `CompGotoMarker7` | `motion.timeline.go_to_comp_marker` | `{"number":7}` | 7 | 7 | timeline | C | ☐ |
-| `CompGotoMarker8` | `motion.timeline.go_to_comp_marker` | `{"number":8}` | 8 | 8 | timeline | C | ☐ |
-| `CompGotoMarker9` | `motion.timeline.go_to_comp_marker` | `{"number":9}` | 9 | 9 | timeline | C | ☐ |
-| `CompMarker0` | `motion.timeline.set_comp_marker` | `{"number":0}` | Shift+0 | Shift+0 | timeline | C | ☐ |
-| `CompMarker1` | `motion.timeline.set_comp_marker` | `{"number":1}` | Shift+1 | Shift+1 | timeline | C | ☐ |
-| `CompMarker2` | `motion.timeline.set_comp_marker` | `{"number":2}` | Shift+2 | Shift+2 | timeline | C | ☐ |
-| `CompMarker3` | `motion.timeline.set_comp_marker` | `{"number":3}` | Shift+3 | Shift+3 | timeline | C | ☐ |
-| `CompMarker4` | `motion.timeline.set_comp_marker` | `{"number":4}` | Shift+4 | Shift+4 | timeline | C | ☐ |
-| `CompMarker5` | `motion.timeline.set_comp_marker` | `{"number":5}` | Shift+5 | Shift+5 | timeline | C | ☐ |
-| `CompMarker6` | `motion.timeline.set_comp_marker` | `{"number":6}` | Shift+6 | Shift+6 | timeline | C | ☐ |
-| `CompMarker7` | `motion.timeline.set_comp_marker` | `{"number":7}` | Shift+7 | Shift+7 | timeline | C | ☐ |
-| `CompMarker8` | `motion.timeline.set_comp_marker` | `{"number":8}` | Shift+8 | Shift+8 | timeline | C | ☐ |
-| `CompMarker9` | `motion.timeline.set_comp_marker` | `{"number":9}` | Shift+9 | Shift+9 | timeline | C | ☐ |
+| `CompGotoMarker0` | `motion.timeline.go_to_comp_marker` | `{"number":0}` | 0 | 0 | timeline | C | ✅ |
+| `CompGotoMarker1` | `motion.timeline.go_to_comp_marker` | `{"number":1}` | 1 | 1 | timeline | C | ✅ |
+| `CompGotoMarker2` | `motion.timeline.go_to_comp_marker` | `{"number":2}` | 2 | 2 | timeline | C | ✅ |
+| `CompGotoMarker3` | `motion.timeline.go_to_comp_marker` | `{"number":3}` | 3 | 3 | timeline | C | ✅ |
+| `CompGotoMarker4` | `motion.timeline.go_to_comp_marker` | `{"number":4}` | 4 | 4 | timeline | C | ✅ |
+| `CompGotoMarker5` | `motion.timeline.go_to_comp_marker` | `{"number":5}` | 5 | 5 | timeline | C | ✅ |
+| `CompGotoMarker6` | `motion.timeline.go_to_comp_marker` | `{"number":6}` | 6 | 6 | timeline | C | ✅ |
+| `CompGotoMarker7` | `motion.timeline.go_to_comp_marker` | `{"number":7}` | 7 | 7 | timeline | C | ✅ |
+| `CompGotoMarker8` | `motion.timeline.go_to_comp_marker` | `{"number":8}` | 8 | 8 | timeline | C | ✅ |
+| `CompGotoMarker9` | `motion.timeline.go_to_comp_marker` | `{"number":9}` | 9 | 9 | timeline | C | ✅ |
+| `CompMarker0` | `motion.timeline.set_comp_marker` | `{"number":0}` | Shift+0 | Shift+0 | timeline | C | ✅ |
+| `CompMarker1` | `motion.timeline.set_comp_marker` | `{"number":1}` | Shift+1 | Shift+1 | timeline | C | ✅ |
+| `CompMarker2` | `motion.timeline.set_comp_marker` | `{"number":2}` | Shift+2 | Shift+2 | timeline | C | ✅ |
+| `CompMarker3` | `motion.timeline.set_comp_marker` | `{"number":3}` | Shift+3 | Shift+3 | timeline | C | ✅ |
+| `CompMarker4` | `motion.timeline.set_comp_marker` | `{"number":4}` | Shift+4 | Shift+4 | timeline | C | ✅ |
+| `CompMarker5` | `motion.timeline.set_comp_marker` | `{"number":5}` | Shift+5 | Shift+5 | timeline | C | ✅ |
+| `CompMarker6` | `motion.timeline.set_comp_marker` | `{"number":6}` | Shift+6 | Shift+6 | timeline | C | ✅ |
+| `CompMarker7` | `motion.timeline.set_comp_marker` | `{"number":7}` | Shift+7 | Shift+7 | timeline | C | ✅ |
+| `CompMarker8` | `motion.timeline.set_comp_marker` | `{"number":8}` | Shift+8 | Shift+8 | timeline | C | ✅ |
+| `CompMarker9` | `motion.timeline.set_comp_marker` | `{"number":9}` | Shift+9 | Shift+9 | timeline | C | ✅ |
 
 ### `CCompPaintCmd`
 

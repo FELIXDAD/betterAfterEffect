@@ -39,6 +39,21 @@ use crate::input::{
 };
 use crate::request::RenderPurpose;
 
+/// Other frames of a comp for effects that read them, from an evaluator and
+/// the stage ([`crate::Renderer::render_frame_with`]).
+pub struct EvaluatorFrames<'a> {
+    /// The stage.
+    pub stage: &'a Stage,
+    /// The evaluator.
+    pub evaluator: &'a mut dyn CompEvaluator,
+}
+
+impl crate::graph::CompFrames for EvaluatorFrames<'_> {
+    fn comp_at(&mut self, comp: &PrimPath, time: Time) -> Result<Option<RenderComp>, RenderError> {
+        self.evaluator.evaluate(self.stage, comp, time).map(Some)
+    }
+}
+
 /// Produces evaluated comps. Implemented by [`MockEvaluator`] and by
 /// [`crate::anim::AnimEvaluator`] (the adapter over 03's `bae-anim`).
 ///
@@ -161,6 +176,10 @@ impl<'a> MockPass<'a> {
                 float(&view, "shutter_phase", time).unwrap_or(-90.0),
             ],
             layers: Vec::new(),
+            // The mock evaluator draws every layer flat and unblurred.
+            camera: None,
+            lights: Vec::new(),
+            motion_blur: None,
         };
 
         let layer_paths = layer_paths(stage, path);

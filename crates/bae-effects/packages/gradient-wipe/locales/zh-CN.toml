@@ -1,0 +1,15 @@
+[effect.gradient-wipe]
+name = "渐变擦除"
+keywords = ["渐变擦除"]
+
+[effect.gradient-wipe.params]
+transition_completion = "过渡完成"
+transition_softness = "过渡柔和度"
+gradient_layer = "渐变图层"
+gradient_placement = "渐变位置"
+invert_gradient = "反转渐变"
+
+[effect.gradient-wipe.choices.gradient_placement]
+1 = "拼贴渐变"
+2 = "中心渐变"
+3 = "伸缩渐变以适合"

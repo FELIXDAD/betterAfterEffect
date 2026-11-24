@@ -322,6 +322,9 @@ pub mod ids {
     /// screen pixels at the viewer's magnification (AE `NudgeUp` …, id from the
     /// command catalog).
     pub const NUDGE: &str = "motion.layer.nudge_position";
+    /// View > Resolution ▸ Full / Half / Third / Quarter (`{factor}`): the active
+    /// comp's resolution (Cmd/Ctrl+J, Cmd/Ctrl+Shift+J, Cmd/Ctrl+Alt+Shift+J).
+    pub const RESOLUTION: &str = "motion.view.resolution";
     /// Layer > Mask and Shape Path > Free Transform Points (catalog id).
     pub const FREE_TRANSFORM: &str = "motion.layer.free_transform_points";
 }
@@ -514,19 +517,46 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
         .map(|(id, title, ..)| (*id, *title))
         .chain([
             (ids::NUDGE, "Nudge Layer Position"),
+            (ids::RESOLUTION, "Resolution"),
             (ids::FREE_TRANSFORM, "Free Transform Points"),
         ])
 }
 
-/// The variants of the nudge action (one row per arrow in the shortcut editor).
+/// AE's resolution shortcuts: `(params, English title)` (AE's names).
+const RESOLUTIONS: &[(&str, &str)] = &[
+    (r#"{"factor":1}"#, "Set Composition Resolution to High"),
+    (r#"{"factor":2}"#, "Set Composition Resolution to Half"),
+    (r#"{"factor":4}"#, "Set Composition Resolution to Low"),
+    (
+        r#"{"factor":1,"nested":true}"#,
+        "Set Composition Resolution to High for the Focused and Nested Comps",
+    ),
+    (
+        r#"{"factor":2,"nested":true}"#,
+        "Set Composition Resolution to Half for the Focused and Nested Comps",
+    ),
+    (
+        r#"{"factor":4,"nested":true}"#,
+        "Set Composition Resolution to Low for the Focused and Nested Comps",
+    ),
+];
+
+/// The variants of the nudge and resolution actions (one row per shortcut in the
+/// shortcut editor).
 pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
-    NUDGES
+    let nudges = NUDGES
         .iter()
-        .map(|(_, dx, dy, title)| {
-            let params = nudge_params(*dx, *dy);
+        .map(|(_, dx, dy, title)| (ids::NUDGE, nudge_params(*dx, *dy), *title));
+    let resolutions = RESOLUTIONS.iter().map(|(p, title)| {
+        let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
+        (ids::RESOLUTION, params, *title)
+    });
+    nudges
+        .chain(resolutions)
+        .map(|(id, params, title)| {
             (
-                format!("{}/{params}", ids::NUDGE),
-                bae_ui::CommandVariant::new(ids::NUDGE, params, (*title).to_owned()),
+                format!("{id}/{params}"),
+                bae_ui::CommandVariant::new(id, params, title.to_owned()),
             )
         })
         .collect()
@@ -913,6 +943,17 @@ impl ActionHandler for ToolActions {
     }
 
     fn handle(&self, inv: &Invocation, cx: &mut PanelContext<'_>) -> bool {
+        if inv.id == ids::RESOLUTION {
+            let factor = inv
+                .params
+                .get("factor")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(1);
+            let session = crate::common::session(cx.resources);
+            let nested = inv.params.get("nested").and_then(|v| v.as_bool()) == Some(true);
+            crate::viewer::set_resolution(cx, &session, factor.max(1) as u32, nested);
+            return true;
+        }
         if inv.id == ids::NUDGE {
             // Another panel has focus (the viewer handles it itself).
             let p = |k: &str| inv.params.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -1018,6 +1059,22 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Mixed", "混合"),
     // Arrow-key nudges.
     ("Nudge Layer Position", "微移图层位置"),
+    // AE's names of the resolution shortcuts.
+    ("Set Composition Resolution to High", "将合成分辨率设为高"),
+    ("Set Composition Resolution to Half", "将合成分辨率设为一半"),
+    ("Set Composition Resolution to Low", "将合成分辨率设为低"),
+    (
+        "Set Composition Resolution to High for the Focused and Nested Comps",
+        "将“合成分辨率”设置为“高”，以便对嵌套在其中的焦点合成和预合成进行处理",
+    ),
+    (
+        "Set Composition Resolution to Half for the Focused and Nested Comps",
+        "将“合成分辨率”设置为“一半”，以便对嵌套在其中的焦点合成和预合成进行处理",
+    ),
+    (
+        "Set Composition Resolution to Low for the Focused and Nested Comps",
+        "将“合成分辨率”设置为“低”，以便对嵌套在其中的焦点合成和预合成进行处理",
+    ),
     ("Free Transform Points", "自由变换点"),
     ("Nudge Up", "向上微移"),
     ("Nudge Down", "向下微移"),

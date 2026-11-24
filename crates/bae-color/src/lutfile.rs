@@ -29,6 +29,29 @@ pub fn load(path: &Path, interpolation: Interpolation) -> Result<ColorTransform,
     parse(name, &text, interpolation)
 }
 
+/// Embeds the display filename and validated LUT text so a project survives a moved file.
+pub fn embed(path: &Path) -> Result<Vec<u8>, ColorError> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| ColorError::Io(format!("{}: {e}", path.display())))?;
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    parse(&name, &text, Interpolation::Linear)?;
+    Ok(format!("{name}\0{text}").into_bytes())
+}
+
+/// Returns the filename for display without decoding the LUT body.
+pub fn embedded_name(data: &[u8]) -> Option<&str> {
+    let end = data.iter().position(|&b| b == 0)?;
+    std::str::from_utf8(&data[..end]).ok()
+}
+
+/// Parses the self-contained value produced by [`embed`].
+pub fn from_embedded(data: &[u8]) -> Result<ColorTransform, ColorError> {
+    let name = embedded_name(data).ok_or_else(|| perr("embedded LUT", 1, "missing filename"))?;
+    let text = std::str::from_utf8(&data[name.len() + 1..])
+        .map_err(|_| perr(name, 1, "expected UTF-8 LUT text"))?;
+    parse(name, text, Interpolation::Linear)
+}
+
 /// Parses LUT text; the format is chosen by the file name's extension.
 pub fn parse(
     name: &str,
@@ -265,6 +288,13 @@ pub fn parse_spi3d(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_name_reads_only_the_embedded_header() {
+        assert_eq!(embedded_name(&[]), None);
+        assert_eq!(embedded_name(b"look.cube"), None);
+        assert_eq!(embedded_name(b"look.cube\0\xff"), Some("look.cube"));
+    }
 
     #[test]
     fn cube_1d_3d_and_shaper() {

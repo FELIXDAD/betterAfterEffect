@@ -39,23 +39,23 @@ use crate::manifest::{
 /// manifests only (invalid values are mapped best-effort).
 pub fn effect_def(plugin: &PluginInfo, effect: &EffectDecl) -> EffectDef {
     let mut params = Vec::with_capacity(effect.params.len() + 2);
-    let mut open_group: Option<(&str, u32)> = None;
+    let mut groups = Vec::<(&str, u32)>::new();
     for p in &effect.params {
         // Close the open group when this param is not one of its members.
-        if let Some((key, end_id)) = open_group
+        while let Some(&(key, end_id)) = groups.last()
             && p.group.as_deref() != Some(key)
         {
             params.push(group_end(end_id));
-            open_group = None;
+            groups.pop();
         }
         if let Some(def) = param_def(p) {
             params.push(def);
         }
         if p.ty == ParamType::Group {
-            open_group = Some((&p.key, p.end_id.unwrap_or(0)));
+            groups.push((&p.key, p.end_id.unwrap_or(0)));
         }
     }
-    if let Some((_, end_id)) = open_group {
+    for (_, end_id) in groups.into_iter().rev() {
         params.push(group_end(end_id));
     }
     let wgsl = effect.implementation == EffectImplementation::Wgsl;

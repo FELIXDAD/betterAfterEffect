@@ -1261,7 +1261,7 @@
 - **What it does:** Decides which 3D layer appears in front in a 3D group: by depth from the camera, not by Timeline stacking order.
 - **Exact semantics:**
   - Inside one 3D group (AE-CMP-406) the Classic 3D renderer composites layers by camera-space depth per pixel (it resolves intersections, AE-CMP-405), so the visible result equals: for every comp pixel, collect each layer fragment covering it with its camera-space depth `zc`, sort far→near, composite with each layer's opacity and blend mode.
-  - Ties (exactly coplanar layers, or equal depth at a pixel): the layer higher in the Timeline stacking order (lower index) is in front.
+  - Ties (exactly coplanar layers, or equal depth at a pixel): the layer higher in the Timeline stacking order (lower index) is in front. Measured in AE 26.2.1 by 04: "equal" means within about 1 px of depth along the view ray — the seam of a layer crossing a camera-facing one at 45° sits one pixel into the lower layer's half.
   - Non-intersecting whole-layer ordering, where AE needs one (e.g. for the CPU legacy path and for shadows): sort by camera-space distance of the layer's centre. UNVERIFIED: AE documentation never states whether layer centre or anchor point is used; community reports favour the layer bounding-box centre for Classic 3D. BAE decision: use per-pixel depth (exact) so the question only affects AE-incompatible corner cases.
   - Semi-transparent layers composite correctly in depth order (no order-dependent artefacts) because sorting is per fragment.
   - 2D layers inside the comp are never depth-sorted; they composite by stacking order and split 3D groups.
@@ -1304,7 +1304,7 @@
   - an adjustment layer (2D or 3D);
   - a 3D layer with a layer style applied;
   - a 3D precomp layer with an effect, a closed mask whose mode is not None, or a track matte;
-  - a 3D precomp layer without Collapse Transformations;
+  - ~~a 3D precomp layer without Collapse Transformations~~ — not a breaker: AE 26.2.1 depth-sorts a plain (non-collapsed, no effect/mask/matte) 3D precomp layer with the other 3D layers of its group (measured by 04, `threed_precomp` in crates/bae-render/tests/ae);
   - a collapsed 3D precomp that contains any 2D layer (its content becomes a flat image).
   - Collapsed precomp with all-3D content: its 3D layers join the outer group individually (they intersect and shadow outer layers); in exchange the precomp layer's own blend mode, quality and motion blur switches are ignored.
   - Lights are not limited by groups: a light lights 3D layers in every group of the comp (subject to the light's own Adjustment Layer scope, AE-CMP-435). Shadows and intersections never cross a group boundary.
@@ -1705,15 +1705,13 @@
 ### AE-CMP-432 · Spot light cone and feather (聚光锥形和羽化)
 
 - **What it does:** Restricts a spot light to a cone around its axis with a soft edge.
-- **Exact semantics:** UNVERIFIED model (Adobe does not publish it):
+- **Exact semantics:** measured in AE 26.2.1 by 04 (feather 0 / 50 / 100 %, exact to 0/255; crates/bae-render/tests/ae/README.md):
   ```
   axis   = normalize(light.POI - light.position)       // or local +z when not auto-oriented
   theta  = angle between axis and (P - light.position)
   outer  = ConeAngle / 2
   inner  = outer * (1 - ConeFeather/100)
-  spot   = 1                              if theta <= inner
-         = smoothstep(outer, inner, theta) if inner < theta < outer   // falls 1 -> 0
-         = 0                              if theta >= outer
+  spot   = smoothstep(cos(outer), cos(inner), cos(theta))   // smoothstep in the cosine, not the angle
   ```
   - Feather 0 % ⇒ hard edge; 100 % ⇒ soft from the axis to the edge.
   - In AE CS6+ the selected spot light's cone wireframe extends to the POI (viewer only).
@@ -1729,12 +1727,9 @@
   d = distance(P, light.position)            // Parallel: see AE-CMP-431
   R = Radius, F = Falloff Distance
   None:                     atten = 1
-  Smooth:                   atten = 1                         if d <= R
-                                  = 1 - (d - R) / F           UNVERIFIED: help calls it a "smooth linear" falloff;
-                                                              linear ramp assumed (a smoothstep-shaped ramp is the alternative)
-                                  = 0                         if d >= R + F
+  Smooth:                   atten = 1 - smoothstep(R, R + F, d)   // measured in AE 26.2.1 by 04 (exact; a linear ramp is off by 9/255)
   Inverse Square Clamped:   atten = 1                         if d <= R
-                                  = (R / d)^2                 otherwise   (F unused)  UNVERIFIED
+                                  = (R / d)^2                 otherwise   (F unused)  // measured, exact
   ```
   - F = 0 with Smooth ⇒ hard cut at R. R = 0 with Inverse Square Clamped ⇒ atten = 0 everywhere except d = 0 UNVERIFIED (AE likely clamps R to a small minimum).
   - Falloff does not affect Ambient lights.
@@ -1760,7 +1755,7 @@
   - Per layer: a 3D layer is lit only if its Material Option Accepts Lights = On (AE-CMP-440). Accepts Lights does not affect shadows.
   - Per light: turning on the light layer's Adjustment Layer switch makes it affect only 3D layers **below** it in the Timeline stack; layers above it receive no light from it, regardless of 3D position. Without the switch, the light affects all 3D layers in the comp (in every 3D group, AE-CMP-406).
   - Lights do not illuminate 2D layers, and a light in comp A does not affect layers in a non-collapsed precomp (AE-CMP-424).
-  - If every light reaching a layer is excluded by scope, that layer renders as if lights exist but none reach it (dark, ambient only), not as unlit. UNVERIFIED: AE's "no lights at all ⇒ unlit" test is comp-wide, not per layer.
+  - If every light is excluded by scope, the layer renders **unlit** (its own colour), measured in AE 26.2.1 by 04 (`light_scope`): the "no lights ⇒ unlit" test is per layer.
 - **Priority:** P1
 - **Owner:** bae-render
 - **Notes:** —
@@ -1768,7 +1763,7 @@
 ### AE-CMP-436 · Classic 3D lighting model (经典 3D 光照模型)
 
 - **What it does:** Computes the lit colour of each 3D layer pixel from layer colour, material options and all lights.
-- **Exact semantics:** Adobe does not document the equation; best-known Phong-style model, all values 0–1, material percentages /100. UNVERIFIED (overall form well established; exact shininess mapping and specular colour mixing unverified):
+- **Exact semantics:** Adobe does not document the equation. Measured in AE 26.2.1 by 04 (crates/bae-render/tests/ae/README.md, errors 0–2/255): Lambert diffuse, **Blinn-Phong** specular with the half vector `H = normalize(L + V)`, exponent `n` = Specular Shininess in percent (5 % → 5), specular only where `N·L > 0`, `specColor = mix(white, C, Metal/100)`. AE's highlight peak is slightly below pure Blinn-Phong at high shininess (249/255 at 100 %). The block below is the original estimate; read `spec = … pow(max(0, dot(N, H)), n)` for the Phong term:
   ```
   // C = layer pixel colour (straight, un-premultiplied RGB), alpha unchanged by lighting
   // N = layer normal facing the camera (layers are double-sided: N flipped toward viewer)

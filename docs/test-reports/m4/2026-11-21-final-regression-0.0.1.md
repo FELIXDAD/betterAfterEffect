@@ -137,3 +137,17 @@
 - **#215**（#221）：`close_project_leaves_no_old_comp_name_in_the_panels`（新）：合成名“合成 测试”、加纯色、另存，关闭前面板标签和无障碍树里有这个名字；文件 ▸ 关闭项目 之后，画出来的文字和无障碍树里都没有了，也没有打开的合成；重新打开工程后名字又出现。**已关闭。**
 - **#216**（#219，Windows 问题）：`render_queue_output_defaults_to_movies_on_macos`（新）：macOS 上新渲染项的默认输出仍在 `~/Movies` 下。Windows 部分由 5090 复核，issue 等那边再关。
 - **#220**（#224，Windows 问题）：`cmd_modifier_c_and_v_run_their_commands_on_macos`（新）：Cmd+Shift+C 打开预合成对话框；Cmd+Opt+Shift+C 打开摄像机设置，确定后建出摄像机；Cmd+C / Cmd+V 照样复制粘贴图层；改名输入框里粘贴（shell 把原生菜单的粘贴交给 egui 的 Paste）得到文字“粘贴 文字”，图层数不变。目录里全部已实现快捷键的用例（121 个组合）也通过。Windows 部分由 5090 复核。
+
+### dev `bf7ccb0`（#238）：#222 输入框撤销恢复出输入法组字文本（macOS 部分）
+
+`acceptance::release_001::undo_in_text_fields_skips_ime_composition`（新）：按 egui-winit 转来的 macOS 输入法事件顺序注入（逐步 Preedit，每步停约 1.25 秒 → 空 Preedit → Commit），在项目面板搜索框、图层改名框、文字工具的输入里各做一遍：组字 `w'q'g't` 提交 `wqgt`，停一下，全选后粘贴 `Dark`，停一下，组字 `ni'hao` 提交 `你好`，再打 `X`，然后连按 6 次 Cmd+Z。三处的撤销序列都是 `Dark你好X` → `Dark` → `wqgt` → 空，没有出现任何组字中间文本，工程的撤销也没变。反向检查：换回修复前的 `bae-ui/src/workbench.rs`，三处都撤销出 `Darkni'hao`、`Darkni'h`、`w'q'g't`，用例失败。Windows 微软拼音部分等 5090 测试，issue 先不关。
+
+### dev `60128ac`：渲染队列（#239 #243）、#214（#258）
+
+- **影片（渲染队列）**：`render_queue::movies_from_the_render_queue_have_their_codec_frames_and_alpha`（新）：带透明背景的矩形，各渲 0–59 帧。H.264 → `.mp4`，avc1；HEVC → `.mp4`，hvc1；ProRes 422 HQ → `.mov`，apch；ProRes 4444 → `.mov`，ap4h，深度 32（带 alpha）。四种都是 60 帧、2.000 秒，各自按输出模块的默认通道（只有 ProRes 4444 默认 RGB + Alpha）。命令行 `bae render` 另外用 AVFoundation 读过：帧数、时长、尺寸都对；ProRes 4444 `--alpha straight` 透明角落 alpha 0，`--alpha background` 不带 alpha；HEVC 默认带 alpha。
+- **停止影片**：`stopping_a_movie_keeps_a_playable_file_of_the_rendered_frames`（新）：1800 帧的 H.264 渲到 20 帧以上时按停止，状态“已停止 (25/1800)”，文件里正好 25 帧，能读（moov、stsz 完整）。
+- **失败**：影片写进只读目录，失败并提示“没有权限”，应用照常（`a_movie_into_a_read_only_folder_fails_with_a_message`）。磁盘满：`a_movie_on_a_full_disk_fails_cleanly`（手动，4 MB 内存盘）跑过，ProRes 4444 失败，状态写“AVAssetWriter: cannot append a frame: Disk Full”，应用照常，内存盘卸掉（提示是技术性的英文，和 PNG 满盘时一样，先记录）。
+- **#225**：新渲染项默认 RGB，写出的 PNG 颜色类型是 2（RGB，无 alpha）（`a_new_png_item_is_rgb_as_in_ae`）。**已关闭。**
+- **#228**：开发的 `layout::render_queue_content_is_inset_from_the_panel_edges` 通过。**已关闭。**
+- **#231**：`closing_the_project_while_rendering_stops_and_empties_the_queue`（新）：1800 帧 PNG 渲染中关闭项目（不保存）：队列立刻清空；磁盘上的帧数在 1 秒内停在 9–16 帧（5 次分别 9、10、11、13、16），之后 10 秒不再增加——是关闭时已在渲染 / 编码流水线里的帧写完，渲染确实停了，不开 bug。新工程的渲染正常。Windows 复核后再关。
+- **#214**：`acceptance_cli::render_comp_by_display_name`（新）：`--comp "主 合成"`、`--comp "Comp A"` 按显示名渲染，prim 路径照常；两个合成都叫“重复”时报错并列出 `/comps/重复`、`/comps/重复_2`；找不到时列出全部合成的显示名和路径。**已关闭。** 这两条新错误信息在中文界面下仍是英文，提了 **#302**（bug）。

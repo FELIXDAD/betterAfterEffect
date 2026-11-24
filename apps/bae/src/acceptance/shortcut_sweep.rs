@@ -113,11 +113,27 @@ fn expected_binding<'a>(keymap: &'a bae_ui::Keymap, row: &Row) -> Option<&'a Bin
     })
 }
 
-/// What pressing `row` in a fresh app dispatched (the panel of its scope
-/// focused; application-wide keys with the Timeline focused).
-fn press(row: &Row) -> Option<Vec<Invocation>> {
+/// The panel to press `row` in: its own scope, or for an application-wide key
+/// the first of Timeline, Composition, Project, Effect Controls where no panel
+/// binding takes the chord first (AE: a panel's shortcuts win while it has
+/// focus, e.g. 1 is Go to Comp Marker in the Timeline, the Orbit tool elsewhere).
+fn panel_for(keymap: &bae_ui::Keymap, row: &Row) -> &'static str {
+    if let Some(scope) = row.scope {
+        return scope;
+    }
+    ["timeline", "composition", "project", "effect_controls"]
+        .into_iter()
+        .find(|p| {
+            keymap
+                .lookup(&row.chord, Some(p))
+                .is_none_or(|b| b.when.is_none())
+        })
+        .unwrap_or("timeline")
+}
+
+/// What pressing `chord` in a fresh app with `panel` focused dispatched.
+fn press(chord: &Chord, panel: &str) -> Option<Vec<Invocation>> {
     let mut h = gui();
-    let panel = row.scope.unwrap_or("timeline");
     let real = h
         .state()
         .app
@@ -147,7 +163,7 @@ fn press(row: &Row) -> Option<Vec<Invocation>> {
     }
     settle(&mut h);
     let before = h.state().dispatched.len();
-    for e in platform_events(&row.chord) {
+    for e in platform_events(chord) {
         send(&mut h, e);
     }
     settle(&mut h);
@@ -220,6 +236,7 @@ fn every_ae_shortcut_runs_its_catalog_action() {
             row.key.context, row.key.command, row.chord, row.key.action, row.key.params
         );
         let bound = expected_binding(&keymap, row);
+        let panel = panel_for(&keymap, row);
         if bound.is_none() {
             // Not running yet (or the chord stays with its own panel): the key
             // must not run the command.
@@ -232,15 +249,12 @@ fn every_ae_shortcut_runs_its_catalog_action() {
                 continue;
             }
             r.unbound += 1;
-            if keymap
-                .lookup(&row.chord, Some(row.scope.unwrap_or("timeline")))
-                .is_some()
-            {
+            if keymap.lookup(&row.chord, Some(panel)).is_some() {
                 // A binding holds the chord in the panel pressed (another
                 // command, or this one scoped to its own panel): not a no-op test.
                 continue;
             }
-            match press(row) {
+            match press(&row.chord, panel) {
                 None => r.missing_panel.push(what),
                 Some(ran) => {
                     if ran.iter().any(|i| i.id == row.key.action) {
@@ -251,7 +265,7 @@ fn every_ae_shortcut_runs_its_catalog_action() {
             continue;
         }
         r.working += 1;
-        let Some(ran) = press(row) else {
+        let Some(ran) = press(&row.chord, panel) else {
             r.missing_panel.push(what);
             continue;
         };
@@ -278,6 +292,26 @@ fn every_ae_shortcut_runs_its_catalog_action() {
     println!("{report}");
     assert!(r.failures.is_empty() && r.conflicts.is_empty(), "{report}");
     assert!(r.passed > 100, "{report}");
+}
+
+/// Digits follow the focused panel like AE: in the Timeline 1 goes to comp
+/// marker 1, in the Composition viewer it picks the Orbit camera tool.
+#[test]
+fn digits_follow_the_focused_panel() {
+    let one = Chord::parse("1").unwrap();
+    let ran = |panel| press(&one, panel).unwrap_or_default();
+    let timeline = ran("timeline");
+    assert!(
+        timeline
+            .iter()
+            .any(|i| i.id == "motion.timeline.go_to_comp_marker" && i.params["number"] == 1),
+        "{timeline:?}"
+    );
+    let viewer = ran("composition");
+    assert!(
+        viewer.iter().any(|i| i.id == "motion.tool.camera_orbit"),
+        "{viewer:?}"
+    );
 }
 
 /// A menu item's shortcut is bound exactly when its command runs: an item

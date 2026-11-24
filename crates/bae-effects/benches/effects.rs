@@ -18,6 +18,8 @@ use bae_gpu::{GpuContext, GpuContextDescriptor};
 use bae_model::{PrimPath, Value};
 use bae_render::{EffectParams, GpuImage, IRect, ImageAlpha, RenderEffect};
 
+mod cases;
+
 const ITER: u32 = 60;
 
 struct Case {
@@ -94,51 +96,7 @@ fn main() {
         t.elapsed().as_secs_f64() * 1e3
     );
 
-    const UHD: [u32; 2] = [3840, 2160];
-    const HD: [u32; 2] = [1920, 1080];
-    let mut cases = Vec::new();
-    for size in [UHD, HD] {
-        let tag = if size == UHD { "4K" } else { "1080p" };
-        for b in [10.0, 25.0, 100.0, 300.0] {
-            cases.push(Case {
-                name: format!("{tag} gaussian blurriness {b}"),
-                match_name: "ADBE Gaussian Blur 2",
-                params: vec![(1, Value::Float(b)), (3, Value::Bool(false))],
-                size,
-            });
-        }
-        for (r, n) in [(5.0, 1), (20.0, 3), (100.0, 3)] {
-            cases.push(Case {
-                name: format!("{tag} fast box blur r{r} x{n}"),
-                match_name: "ADBE Box Blur2",
-                params: vec![(1, Value::Float(r)), (2, Value::Int(n))],
-                size,
-            });
-        }
-        for (name, params) in [
-            ("ADBE Tint", vec![(3, Value::Float(80.0))]),
-            ("ADBE Tritone", vec![(4, Value::Float(20.0))]),
-            ("ADBE Easy Levels2", vec![(5, Value::Float(1.4))]),
-            ("ADBE Pro Levels2", vec![(6, Value::Float(1.4))]),
-            (
-                "ADBE HUE SATURATION",
-                vec![(4, Value::Float(30.0)), (5, Value::Float(20.0))],
-            ),
-            (
-                "ADBE Brightness & Contrast 2",
-                vec![(1, Value::Float(30.0)), (2, Value::Float(20.0))],
-            ),
-            ("ADBE Exposure2", vec![(3, Value::Float(0.5))]),
-        ] {
-            cases.push(Case {
-                name: format!("{tag} {name}"),
-                match_name: name,
-                params,
-                size,
-            });
-        }
-    }
-
+    let cases = cases::all();
     let mut results = Vec::new();
     println!("{:<44} {:>10} {:>10}", "case", "ms/frame", "latency");
     for case in &cases {

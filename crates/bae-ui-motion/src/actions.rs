@@ -77,6 +77,12 @@ pub mod ids {
     /// Layer > Markers > Add Marker (AE numpad *, Mac Control+8): a layer marker at
     /// the current time on each selected layer, or a comp marker when none is.
     pub const ADD_MARKER: &str = "motion.layer.add_marker";
+    /// Numbered comp marker N at the current time (AE Shift+0–9 on the main
+    /// keyboard; params `{"number": n}`): the comp marker whose comment is "N",
+    /// moved here when it exists, else added.
+    pub const SET_COMP_MARKER: &str = "motion.timeline.set_comp_marker";
+    /// Go to numbered comp marker N (AE 0–9 on the main keyboard).
+    pub const GO_TO_COMP_MARKER: &str = "motion.timeline.go_to_comp_marker";
     /// Add a marker through the Marker dialog (AE Alt+numpad *, Mac Option+Control+8).
     pub const ADD_MARKER_DIALOG: &str = "motion.timeline.add_marker_with_dialog";
     /// Layer > Markers > Delete All Markers (of the selected layers).
@@ -106,6 +112,7 @@ pub const SWITCHES: &[(&str, &str)] = &[
     ("locked", "Lock"),
     ("audio_enabled", "Audio"),
     ("enabled", "Video"),
+    ("effects_enabled", "Effect"),
     ("solo", "Solo"),
     ("collapse_transformation", "Collapse"),
     ("motion_blur", "Motion Blur"),
@@ -192,6 +199,8 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::KEY_VELOCITY, "Keyframe Velocity"),
     (ids::SELECT_KEY_LABEL_GROUP, "Select Keyframe Label Group"),
     (ids::ADD_MARKER, "Add Marker"),
+    (ids::SET_COMP_MARKER, "Set Composition Marker"),
+    (ids::GO_TO_COMP_MARKER, "Go to Composition Marker"),
     (ids::ADD_MARKER_DIALOG, "Add Marker with Dialog"),
     (ids::DELETE_ALL_MARKERS, "Delete All Markers"),
     // Panel-scoped (`bindings`): handled by the timeline and the viewer. Registered
@@ -262,6 +271,20 @@ pub fn variants() -> Vec<(String, CommandVariant)> {
     let parse = |json: &str| serde_json::from_str(json).expect("variant parameters are JSON");
     for (command, params, title) in VARIANTS {
         add(command, parse(params), (*title).to_owned());
+    }
+    // Numbered comp markers (Shift+0–9, 0–9): one row per number.
+    for n in 0..10 {
+        let params = json!({ "number": n });
+        add(
+            ids::SET_COMP_MARKER,
+            params.clone(),
+            format!("Set Composition Marker {n}"),
+        );
+        add(
+            ids::GO_TO_COMP_MARKER,
+            params,
+            format!("Go to Composition Marker {n}"),
+        );
     }
     for (params, title) in LAYER_VARIANTS {
         add(ids::NEW_LAYER, parse(params), (*title).to_owned());
@@ -430,6 +453,25 @@ fn target_layers(stage: &bae_model::Stage, s: &crate::session::Session) -> Vec<P
     };
     out.retain(|l| !query::is_locked(stage, l));
     out
+}
+
+/// Numbered comp marker `n` of `comp` (the comp marker whose comment is the number,
+/// as AE names the markers Shift+0–9 set) and its time.
+pub(crate) fn numbered_comp_marker(
+    stage: &bae_model::Stage,
+    comp: &PrimPath,
+    n: i64,
+) -> Option<(PrimPath, Time)> {
+    let label = n.to_string();
+    bae_motion::markers::markers_of(stage, comp)
+        .into_iter()
+        .find(|(m, _)| {
+            stage
+                .prim(m)
+                .and_then(|v| query::static_value(&v, "comment"))
+                .and_then(|v| v.as_str().map(|c| c.trim() == label))
+                .unwrap_or(false)
+        })
 }
 
 /// Comp times of every keyframe of `layer` and the prims below it.
@@ -741,6 +783,31 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         ids::KEY_VELOCITY if !keys.is_empty() => {
             s.key_dialog = crate::timeline::VelocityDialog::new(stage, keys)
                 .map(crate::timeline::KeyDialog::Velocity);
+        }
+        ids::SET_COMP_MARKER | ids::GO_TO_COMP_MARKER => {
+            let n = inv
+                .params
+                .get("number")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            let numbered = numbered_comp_marker(stage, &info.path, n);
+            if id == ids::GO_TO_COMP_MARKER {
+                if let Some((_, t)) = numbered {
+                    s.stop();
+                    s.set_time(&info, t);
+                }
+            } else {
+                match numbered {
+                    Some((m, t)) if t != now => {
+                        cx.invoke_with("marker.edit", json!({"path": m, "time": now}));
+                    }
+                    Some(_) => {}
+                    None => cx.invoke_with(
+                        "marker.add",
+                        json!({"owner": info.path, "time": now, "comment": n.to_string()}),
+                    ),
+                }
+            }
         }
         ids::ADD_MARKER => {
             if layers.is_empty() {

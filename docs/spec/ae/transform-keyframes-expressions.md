@@ -1773,7 +1773,9 @@ Conventions used in this file (apply to every item unless an item says otherwise
   dur    = (shutterAngle / 360) * T
   interval = [t_open, t_open + dur]
   // default 180 / -90: interval = [t - T/4, t + T/4], centred on the frame time
-  // N samples (AE-ANI-104):  t_k = t_open + dur * (k + 0.5) / N,  k = 0..N-1     // UNVERIFIED AE distribution
+  // N samples (AE-ANI-104):  t_k = t_open + dur * k / N,  k = 0..N-1
+  // (measured in AE 26.2.1 by 04: first sample at shutter open, last dur/N before it closes;
+  //  crates/bae-render/tests/ae/README.md)
   ```
 
   - Angle 0 → no blur. Phase = −angle/2 centres the blur on the unblurred position (AE help).
@@ -1792,7 +1794,7 @@ Conventions used in this file (apply to every item unless an item says otherwise
   | Samples Per Frame (每帧样本) | int | 16 | 2 – 64 | minimum; the fixed count for Classic 3D layers, shape layers and certain effects |
   | Adaptive Sample Limit (自适应采样限制) | int | 128 | 16 – 256 | maximum for 2D layer motion |
 
-  - 2D AV layers: N adapts per layer per frame to the layer's motion: `N = clamp(ceil(maxDisplacementPx / step), samplesPerFrame, adaptiveSampleLimit)` where `maxDisplacementPx` is the largest screen-space movement of the layer's corners over the shutter interval; UNVERIFIED step (believed ≈ 1 px, i.e. one sample per pixel of travel).
+  - 2D AV layers: N adapts per layer per frame to the layer's motion: `N = clamp(floor(d / step) + 1, samplesPerFrame, adaptiveSampleLimit)` where `d` is the largest screen-space movement of the layer's corners over the whole shutter interval, `step = 1.3 px` when `d < 32 px` and `1.9 px` otherwise. Measured in AE 26.2.1 by 04 (30 solids translating 3–300 px with Samples Per Frame 2 and limit 256, each fitted exactly; independent of layer size and direction; the limit applies). UNVERIFIED: how rotation/scale travel is measured (corner arc length is consistent with a rotation case within 5/255).
   - 3D layers (Classic 3D), shape layers, text layers? (UNVERIFIED) and effects that use the comp shutter: fixed N = Samples Per Frame.
   - When AE cannot determine an adaptive rate (non-affine motion), it uses Samples Per Frame.
 - **Priority:** P0

@@ -1320,6 +1320,10 @@ impl ApplicationHandler<UserEvent> for Shell {
         self.run_pending(event_loop);
         self.sync_prefs();
         self.run_settings_requests();
+        // OK in Keyboard Shortcuts: save the shortcuts now, not only at exit.
+        if self.workspace.take_save_request() {
+            self.save_window_state();
+        }
         let autosave_at = self.run_autosave();
         // Every project change goes through the dispatch above.
         self.sync_window_title();

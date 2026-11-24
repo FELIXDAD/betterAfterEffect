@@ -145,7 +145,10 @@ impl CreateLayerParams {
     }
 }
 
-fn source_size_and_duration(stage: &Stage, source: &PrimPath) -> Option<([f64; 2], Option<Time>)> {
+pub(crate) fn source_size_and_duration(
+    stage: &Stage,
+    source: &PrimPath,
+) -> Option<([f64; 2], Option<Time>)> {
     if let Some(info) = query::comp_info(stage, source) {
         return Some((
             [f64::from(info.width), f64::from(info.height)],
