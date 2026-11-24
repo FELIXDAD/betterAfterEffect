@@ -6,6 +6,10 @@
 
 | AE matchName | 名称（中文） | 状态 | BAE 实现 | 说明 |
 |---|---|---|---|---|
+| `ADBE Apply Color LUT2` | 应用颜色 LUT | 已实现 | Rust | 参数 0001 内嵌文件，支持 cube、spi1d、spi3d |
+| `APC Colorama` | 色光 | 已实现 | Rust | 支持循环调板、颜色选择、相位及蒙版图层。自定义循环色标使用 BAE 数据格式 |
+| `ADBE Gamma/Pedestal/Gain2` / `ADBE Leave Color` / `ADBE SelectiveColor` / `ADBE Broadcast Colors` | 灰度系数 / 基值 / 增益、保留颜色、可选颜色、广播颜色 | 已实现 | 声明式 | 广播抠像在信号边界可能相差一个像素判定 |
+| `ADBE AutoLevels` / `ADBE AutoContrast` / `ADBE AutoColor` / `ADBE Equalize` | 自动色阶、自动对比度、自动颜色、色调均化 | 已实现 | Rust | 全帧 GPU 直方图。前三项的跨帧平滑及场景检测等待 #286 |
 | `ADBE Linear Color Key2` | 线性颜色键 | 已实现 | 声明式 | 叠加“保留颜色”恢复栈前颜色等待渲染图输入 |
 | `ADBE Color Range` / `ADBE Color Difference Key` | 颜色范围 / 颜色差值键 | 已实现 | 声明式 | 可用参数编辑，自定义预览和吸管尚未接入 |
 | `ADBE Spill2` | 高级溢出抑制器 | 已实现 | 声明式 | 标准最大差 1；极致模式为近似 |

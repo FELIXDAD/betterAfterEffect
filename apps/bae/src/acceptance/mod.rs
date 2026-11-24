@@ -43,6 +43,8 @@ mod render_queue;
 mod settings;
 mod shortcut_sweep;
 #[cfg(target_os = "macos")]
+mod shortcuts_dialog;
+#[cfg(target_os = "macos")]
 mod startup;
 #[cfg(target_os = "macos")]
 mod stress;

@@ -38,6 +38,7 @@ use crate::workspace::WorkspacePreset;
 use crate::{titlebar, widgets};
 
 pub use shortcuts::CommandEntry;
+pub(crate) use shortcuts::ZH as SHORTCUTS_ZH;
 
 /// Height of the status strip at the bottom of the window.
 pub const STATUS_H: f32 = 20.0;
@@ -147,6 +148,10 @@ pub struct Workbench {
     toolbars_loaded: Vec<String>,
     /// A dialog the host draws (Preferences) is open: shortcuts wait.
     external_modal: bool,
+    /// Menu items (`Registry<MenuItemSpec>`): the shortcut editor groups commands by menu.
+    menus: Arc<Registry<crate::menu::MenuItemSpec>>,
+    /// The state changed in a way the shell should save now (OK in Keyboard Shortcuts).
+    save_requested: bool,
 }
 
 impl Workbench {
@@ -164,6 +169,19 @@ impl Workbench {
         .with_command_variants(app.registry::<crate::action::CommandVariant>())
         .with_toolbars(app.registry::<dyn Toolbar>())
         .with_dialog_hosts(app.registry::<dyn crate::dialog::DialogHost>())
+        .with_menus(app.registry::<crate::menu::MenuItemSpec>())
+    }
+
+    /// Menu items (`Registry<MenuItemSpec>`), for the Keyboard Shortcuts tree.
+    pub fn with_menus(mut self, menus: Arc<Registry<crate::menu::MenuItemSpec>>) -> Self {
+        self.menus = menus;
+        self
+    }
+
+    /// Whether the state changed in a way to save now (not only at exit): the
+    /// shell asks once per frame.
+    pub fn take_save_request(&mut self) -> bool {
+        std::mem::take(&mut self.save_requested)
     }
 
     /// Toolbars modules register for their keymaps (`Registry<dyn Toolbar>`).
@@ -188,6 +206,7 @@ impl Workbench {
     pub fn modal_open(&self, resources: &bae_app::Resources) -> bool {
         self.role_picker_open()
             || self.external_modal
+            || self.editor.open
             || self
                 .dialog_hosts
                 .snapshot()
@@ -301,6 +320,8 @@ impl Workbench {
             toolbars: Arc::new(Registry::new()),
             toolbars_loaded: Vec::new(),
             external_modal: false,
+            menus: Arc::new(Registry::new()),
+            save_requested: false,
         };
         wb.refresh_registries();
         let active = wb
@@ -536,21 +557,48 @@ impl Workbench {
 
     fn rebuild_keymap(&mut self) {
         let id = self.keymap_id();
+        let base = self.extended_keymap_logged(&id);
+        self.keymap = match self.state.keymaps.get(&id) {
+            Some(overrides) => base.with_overrides(overrides),
+            None => base,
+        };
+    }
+
+    /// Keymap `id` with the modules' extensions, without the user's changes.
+    pub(super) fn extended_keymap(&self, id: &str) -> Keymap {
         let mut base = self
             .keymaps
-            .get(&id)
+            .get(id)
             .map(|k| (*k).clone())
             .unwrap_or_default();
-        // Modules of the active workspace first, then registration order: the
-        // first binding of a chord wins.
+        for (_, _, k) in self.keymap_extensions_for(id) {
+            base.bindings.extend(k.bindings.iter().cloned());
+        }
+        base
+    }
+
+    /// The extensions of keymap `id` in priority order: modules of the active
+    /// workspace first, then registration order (the first binding of a chord wins).
+    fn keymap_extensions_for(&self, id: &str) -> Vec<(usize, String, Arc<KeymapBindings>)> {
         let extensions = self.keymap_extensions.snapshot();
-        let mut ext: Vec<(usize, &str, &KeymapBindings)> = extensions
+        let mut ext: Vec<(usize, String, Arc<KeymapBindings>)> = extensions
             .iter()
             .enumerate()
             .filter(|(_, e)| e.item().keymap == id)
-            .map(|(i, e)| (i, e.id().as_ref(), e.item().as_ref()))
+            .map(|(i, e)| (i, e.id().to_string(), e.item().clone()))
             .collect();
         ext.sort_by_key(|(i, _, k)| (k.workspace.as_deref() != Some(self.active.as_str()), *i));
+        ext
+    }
+
+    /// [`Self::extended_keymap`], recording chords two modules bind.
+    fn extended_keymap_logged(&mut self, id: &str) -> Keymap {
+        let mut base = self
+            .keymaps
+            .get(id)
+            .map(|k| (*k).clone())
+            .unwrap_or_default();
+        let ext = self.keymap_extensions_for(id);
         self.keymap_conflicts.clear();
         let mut claimed: Vec<(&Chord, Option<&str>, &str)> = Vec::new();
         for (_, owner, k) in &ext {
@@ -567,17 +615,14 @@ impl Workbench {
                     tracing::warn!("{m}");
                     self.keymap_conflicts.push(m);
                 } else {
-                    claimed.push((&b.chord, b.when.as_deref(), owner));
+                    claimed.push((&b.chord, b.when.as_deref(), owner.as_str()));
                 }
             }
         }
         for (_, _, k) in &ext {
             base.bindings.extend(k.bindings.iter().cloned());
         }
-        self.keymap = match self.state.keymaps.get(&id) {
-            Some(overrides) => base.with_overrides(overrides),
-            None => base,
-        };
+        base
     }
 
     // ---- frame ---------------------------------------------------------------------
@@ -598,7 +643,7 @@ impl Workbench {
         // panel keys reach the project behind it.
         let modal = self.modal_open(cx.resources) || crate::color_picker::open_last_pass(ui.ctx());
         crate::panel::set_modal_open(ui.ctx(), modal);
-        if !modal && !self.record_shortcut(ui.ctx()) {
+        if !modal {
             self.collect_shortcuts(ui.ctx());
         }
 
@@ -979,10 +1024,7 @@ impl Workbench {
                 true
             }
             ids::KEYBOARD_SHORTCUTS => {
-                if !self.editor.open {
-                    self.editor.open = true;
-                    self.editor.focus_search = true;
-                }
+                self.open_shortcut_editor();
                 true
             }
             _ => false,
@@ -1841,54 +1883,6 @@ mod tests {
         wb.set_keymap_overrides("km", ov);
         let rest = frame(&mut wb, vec![key(Key::U, Modifiers::NONE)]);
         assert_eq!(rest, vec![Invocation::new("custom.thing")]);
-    }
-
-    #[test]
-    fn shortcut_editor_records_and_asks_before_replacing() {
-        let (kinds, presets, keymaps, actions) = registries();
-        let mut wb =
-            Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
-        wb.set_extra_commands(vec![("prim.create".into(), "Create Prim".into())]);
-        let rows = wb.shortcut_commands();
-        assert!(rows.iter().any(|r| r.id == ids::UNDO));
-        assert!(rows.iter().any(|r| r.id == "prim.create"));
-        assert_eq!(
-            wb.command_title(ids::SWITCH_WORKSPACE, &serde_json::json!({"id": "two"})),
-            "workspace.switch: Two"
-        );
-
-        // Record `U` for prim.create: it collides with layer.reveal_keyframes.
-        let entry = rows.iter().find(|r| r.id == "prim.create").unwrap().clone();
-        wb.editor.open = true;
-        wb.editor.recording = Some(entry.clone());
-        frame(&mut wb, vec![key(Key::U, Modifiers::NONE)]);
-        assert!(wb.editor.confirm.is_some(), "conflict must be confirmed");
-        let (binding, other) = wb.editor.confirm.take().unwrap();
-        assert_eq!(other, "layer.reveal_keyframes");
-        wb.bind(binding);
-        assert_eq!(
-            wb.keymap()
-                .lookup(&Chord::parse("U").unwrap(), None)
-                .unwrap()
-                .action,
-            "prim.create"
-        );
-        assert!(wb.keymap().conflicts().is_empty());
-
-        // A free chord binds immediately; Esc cancels recording.
-        wb.editor.recording = Some(entry.clone());
-        frame(
-            &mut wb,
-            vec![key(Key::K, Modifiers::COMMAND | Modifiers::SHIFT)],
-        );
-        assert!(wb.editor.confirm.is_none());
-        assert_eq!(wb.keymap().chords_for("prim.create").count(), 2);
-        wb.editor.recording = Some(entry);
-        frame(&mut wb, vec![key(Key::Escape, Modifiers::NONE)]);
-        assert!(wb.editor.recording.is_none());
-        assert_eq!(wb.keymap().chords_for("prim.create").count(), 2);
-        // Customizations persist.
-        assert!(!wb.state().keymaps.get("km").unwrap().is_empty());
     }
 
     #[test]

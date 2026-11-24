@@ -152,8 +152,10 @@ fn instance_default(
     def: &EffectDef,
     param: &bae_model::EffectParamDef,
 ) -> Option<Value> {
-    let relative = param.match_name.as_deref() == Some("ADBE Radial Blur-0002")
-        || (def.plugin.is_none() && def.category == "Distort");
+    let relative = matches!(
+        param.match_name.as_deref(),
+        Some("ADBE Radial Blur-0002" | "ADBE Tile-0001" | "ADBE Radial Shadow-0003")
+    ) || (def.plugin.is_none() && def.category == "Distort");
     if let (true, Some(Value::Vec2(reference))) = (relative, &param.default) {
         let source_size = stage
             .prim(layer)

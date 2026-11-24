@@ -510,15 +510,22 @@ fn every_builtin_applies_animates_renders_and_undoes() {
 }
 
 #[test]
-fn radial_blur_center_follows_source_dimensions_on_apply_and_reset() {
+fn spatial_point_defaults_follow_source_dimensions_on_apply_and_reset() {
     let mut fx = Fx::new();
     let comp = fx.comp();
     let layer = fx.solid(&comp, [0.5; 3], [31, 13]);
-    let effect = fx.apply(&layer, "ADBE Radial Blur");
-    let center = |fx: &Fx| fx.stage.prim(&effect).unwrap().value("param:0002").cloned();
-    let expected = Some(bae_model::Value::Vec2([15.5, 6.5]));
-    assert_eq!(center(&fx), expected);
-    fx.param(&effect, 2, json!({"type":"vec2","value":[4.0,5.0]}));
-    fx.run("effect.reset", json!({"effects":[effect]}));
-    assert_eq!(center(&fx), expected);
+    for (name, id, expected) in [
+        ("ADBE Radial Blur", 2, [15.5, 6.5]),
+        ("ADBE Tile", 1, [15.5, 6.5]),
+        ("ADBE Radial Shadow", 3, [7.75, 3.25]),
+    ] {
+        let effect = fx.apply(&layer, name);
+        let attr = format!("param:{id:04}");
+        let point = |fx: &Fx| fx.stage.prim(&effect).unwrap().value(&attr).cloned();
+        let expected = Some(bae_model::Value::Vec2(expected));
+        assert_eq!(point(&fx), expected);
+        fx.param(&effect, id, json!({"type":"vec2","value":[4.0,5.0]}));
+        fx.run("effect.reset", json!({"effects":[effect]}));
+        assert_eq!(point(&fx), expected);
+    }
 }

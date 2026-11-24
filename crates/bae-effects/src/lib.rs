@@ -184,6 +184,7 @@ fn registry() -> &'static Registry {
         categories::perspective::register(&mut r);
         categories::stylize::register(&mut r);
         categories::transition::register(&mut r);
+        categories::utility::register(&mut r);
         r.effects.sort_by(|a, b| {
             (a.info.category.as_str(), a.info.name.as_str())
                 .cmp(&(b.info.category.as_str(), b.info.name.as_str()))

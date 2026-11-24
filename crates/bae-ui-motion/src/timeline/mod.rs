@@ -58,6 +58,8 @@ const HEAD_H: f32 = 34.0;
 const COLS_H: f32 = 20.0;
 const FOOT_H: f32 = 22.0;
 const SW: f32 = 18.0;
+/// Left inset of the Parent & Link title and pick whip.
+const PARENT_PAD: f32 = 4.0;
 /// Left padding of the time graph so frame 0 is not on the edge.
 const PAD: f32 = 8.0;
 
@@ -80,7 +82,9 @@ impl Cols {
         let name = index + 26.0;
         let name_w = 150.0_f32.max(width * 0.0);
         let switches = name + name_w;
-        let parent = switches + 7.0 * SW + 6.0;
+        // AE's eight switches: Shy, Collapse, Quality, fx, Frame Blending, Motion
+        // Blur, Adjustment Layer, 3D Layer.
+        let parent = switches + 8.0 * SW + 6.0;
         let end = parent + 128.0;
         Cols {
             av,

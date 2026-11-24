@@ -27,6 +27,8 @@ pub(crate) enum Binding {
     Uniform(u32),
     /// A sampled float texture (read with `textureLoad`, never filtered).
     Texture,
+    /// An unfiltered 3D lookup texture.
+    Texture3d,
     /// A write-only storage texture.
     Storage(wgpu::TextureFormat),
 }
@@ -223,9 +225,13 @@ impl Runtime {
                         has_dynamic_offset: true,
                         min_binding_size: NonZeroU64::new(u64::from(size)),
                     },
-                    Binding::Texture => wgpu::BindingType::Texture {
+                    Binding::Texture | Binding::Texture3d => wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                        view_dimension: if matches!(kind, Binding::Texture3d) {
+                            wgpu::TextureViewDimension::D3
+                        } else {
+                            wgpu::TextureViewDimension::D2
+                        },
                         multisampled: false,
                     },
                     Binding::Storage(format) => wgpu::BindingType::StorageTexture {
@@ -336,6 +342,13 @@ impl UniformWriter {
 
     pub fn u32(&mut self, offset: usize, v: u32) -> &mut Self {
         self.put(offset, &v.to_le_bytes());
+        self
+    }
+
+    pub fn f32s(&mut self, offset: usize, values: &[f32]) -> &mut Self {
+        for (i, x) in values.iter().enumerate() {
+            self.f32(offset + 4 * i, *x);
+        }
         self
     }
 
