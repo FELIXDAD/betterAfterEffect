@@ -1,0 +1,470 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "four-color-gradient"
+name = "4-Color Gradient"
+category = "Generate"
+implementation = "wgsl"
+ae_match_names = ["ADBE 4ColorGradient"]
+keywords = ["4-color", "gradient"]
+shader = "shaders/four_color_gradient.wgsl"
+includes = ["shaders/blend.wgsl"]
+
+[[effect.param]]
+id = 11
+key = "positions_colors"
+type = "group"
+name = "Positions & Colors"
+end_id = 12
+
+[[effect.param]]
+id = 1
+key = "point_1"
+type = "point"
+name = "Point 1"
+group = "positions_colors"
+default = [0.1, 0.1]
+
+[[effect.param]]
+id = 2
+key = "color_1"
+type = "color"
+name = "Color 1"
+group = "positions_colors"
+default = [1, 1, 0, 1]
+
+[[effect.param]]
+id = 3
+key = "point_2"
+type = "point"
+name = "Point 2"
+group = "positions_colors"
+default = [0.9, 0.1]
+
+[[effect.param]]
+id = 4
+key = "color_2"
+type = "color"
+name = "Color 2"
+group = "positions_colors"
+default = [0, 1, 0, 1]
+
+[[effect.param]]
+id = 5
+key = "point_3"
+type = "point"
+name = "Point 3"
+group = "positions_colors"
+default = [0.1, 0.9]
+
+[[effect.param]]
+id = 6
+key = "color_3"
+type = "color"
+name = "Color 3"
+group = "positions_colors"
+default = [1, 0, 1, 1]
+
+[[effect.param]]
+id = 7
+key = "point_4"
+type = "point"
+name = "Point 4"
+group = "positions_colors"
+default = [0.9, 0.9]
+
+[[effect.param]]
+id = 8
+key = "color_4"
+type = "color"
+name = "Color 4"
+group = "positions_colors"
+default = [0, 0, 1, 1]
+
+[[effect.param]]
+id = 9
+key = "blend"
+type = "float"
+name = "Blend"
+default = 100
+range = [5, 10000]
+
+[[effect.param]]
+id = 10
+key = "jitter"
+type = "float"
+name = "Jitter"
+default = 0
+range = [0, 500]
+
+[[effect.param]]
+id = 13
+key = "opacity"
+type = "float"
+name = "Opacity"
+default = 100
+range = [0, 100]
+
+[[effect.param]]
+id = 14
+key = "blending_mode"
+type = "popup"
+name = "Blending Mode"
+default = 1
+choices = ["None", "Normal", "(-", "Add", "Multiply", "Screen", "Overlay", "Soft Light", "Hard Light", "(-", "Color Dodge", "Color Burn", "(-", "Darken", "Lighten", "Difference", "Exclusion", "(-", "Hue", "Saturation", "Color", "Luminosity"]
+
+[[effect]]
+id = "grid"
+name = "Grid"
+category = "Generate"
+implementation = "wgsl"
+ae_match_names = ["ADBE Grid"]
+keywords = ["grid"]
+shader = "shaders/grid.wgsl"
+includes = ["shaders/blend.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "anchor"
+type = "point"
+name = "Anchor"
+default = [0.5, 0.5]
+
+[[effect.param]]
+id = 2
+key = "size_from"
+type = "popup"
+name = "Size From"
+default = 1
+choices = ["Corner Point", "Width Slider", "Width & Height Sliders"]
+
+[[effect.param]]
+id = 3
+key = "corner"
+type = "point"
+name = "Corner"
+default = [0.6, 0.6]
+
+[[effect.param]]
+id = 4
+key = "width"
+type = "float"
+name = "Width"
+default = 32
+range = [1, 4000]
+
+[[effect.param]]
+id = 5
+key = "height"
+type = "float"
+name = "Height"
+default = 24
+range = [1, 4000]
+
+[[effect.param]]
+id = 6
+key = "border"
+type = "float"
+name = "Border"
+default = 5
+range = [0, 2000]
+
+[[effect.param]]
+id = 7
+key = "feather"
+type = "group"
+name = "Feather"
+end_id = 10
+
+[[effect.param]]
+id = 8
+key = "feather_width"
+type = "float"
+name = "Width"
+group = "feather"
+default = 0
+range = [0, 400]
+
+[[effect.param]]
+id = 9
+key = "feather_height"
+type = "float"
+name = "Height"
+group = "feather"
+default = 0
+range = [0, 400]
+
+[[effect.param]]
+id = 11
+key = "invert_grid"
+type = "checkbox"
+name = "Invert Grid"
+default = false
+
+[[effect.param]]
+id = 12
+key = "color"
+type = "color"
+name = "Color"
+default = [1, 1, 1, 1]
+
+[[effect.param]]
+id = 13
+key = "opacity"
+type = "float"
+name = "Opacity"
+default = 100
+range = [0, 100]
+
+[[effect.param]]
+id = 14
+key = "blending_mode"
+type = "popup"
+name = "Blending Mode"
+default = 1
+choices = ["None", "Normal", "Stencil Alpha", "(-", "Add", "Multiply", "Screen", "Overlay", "Soft Light", "Hard Light", "(-", "Color Dodge", "Color Burn", "(-", "Darken", "Lighten", "Difference", "Exclusion", "(-", "Hue", "Saturation", "Color", "Luminosity"]
+
+[[effect]]
+id = "fractal-noise"
+name = "Fractal Noise"
+category = "Noise & Grain"
+implementation = "wgsl"
+ae_match_names = ["ADBE Fractal Noise"]
+keywords = ["fractal", "noise"]
+shader = "shaders/fractal_noise.wgsl"
+includes = ["shaders/blend.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "fractal_type"
+type = "popup"
+name = "Fractal Type"
+default = 1
+choices = ["Basic", "(-", "Turbulent Smooth", "Turbulent Basic", "Turbulent Sharp", "(-", "Dynamic", "Dynamic Progressive", "Dynamic Twist", "(-", "Max", "Smeary", "Swirly", "Rocky", "Cloudy", "Terrain", "Subscale", "Small Bumps", "Strings", "Threads"]
+
+[[effect.param]]
+id = 2
+key = "noise_type"
+type = "popup"
+name = "Noise Type"
+default = 3
+choices = ["Block", "Linear", "Soft Linear", "Spline"]
+
+[[effect.param]]
+id = 3
+key = "invert"
+type = "checkbox"
+name = "Invert"
+default = false
+
+[[effect.param]]
+id = 4
+key = "contrast"
+type = "float"
+name = "Contrast"
+default = 100
+range = [0, 10000]
+
+[[effect.param]]
+id = 5
+key = "brightness"
+type = "float"
+name = "Brightness"
+default = 0
+range = [-10000, 10000]
+
+[[effect.param]]
+id = 6
+key = "overflow"
+type = "popup"
+name = "Overflow"
+default = 4
+choices = ["Clip", "Soft Clamp", "Wrap Back", "Allow HDR Results"]
+
+[[effect.param]]
+id = 7
+key = "transform"
+type = "group"
+name = "Transform"
+end_id = 14
+
+[[effect.param]]
+id = 8
+key = "rotation"
+type = "angle"
+name = "Rotation"
+group = "transform"
+default = 0
+
+[[effect.param]]
+id = 9
+key = "uniform_scaling"
+type = "checkbox"
+name = "Uniform Scaling"
+group = "transform"
+default = true
+
+[[effect.param]]
+id = 10
+key = "scale"
+type = "float"
+name = "Scale"
+group = "transform"
+default = 100
+range = [1, 10000]
+
+[[effect.param]]
+id = 11
+key = "scale_width"
+type = "float"
+name = "Scale Width"
+group = "transform"
+default = 100
+range = [1, 10000]
+
+[[effect.param]]
+id = 12
+key = "scale_height"
+type = "float"
+name = "Scale Height"
+group = "transform"
+default = 100
+range = [1, 10000]
+
+[[effect.param]]
+id = 13
+key = "offset_turbulence"
+type = "point"
+name = "Offset Turbulence"
+group = "transform"
+default = [0.5, 0.5]
+
+[[effect.param]]
+id = 31
+key = "perspective_offset"
+type = "checkbox"
+name = "Perspective Offset"
+group = "transform"
+default = false
+
+[[effect.param]]
+id = 15
+key = "complexity"
+type = "float"
+name = "Complexity"
+default = 6
+range = [1, 20]
+
+[[effect.param]]
+id = 16
+key = "sub_settings"
+type = "group"
+name = "Sub Settings"
+end_id = 22
+
+[[effect.param]]
+id = 17
+key = "sub_influence"
+type = "float"
+name = "Sub Influence (%)"
+group = "sub_settings"
+default = 70
+range = [1.5e-05, 10000]
+
+[[effect.param]]
+id = 18
+key = "sub_scaling"
+type = "float"
+name = "Sub Scaling"
+group = "sub_settings"
+default = 56
+range = [10, 10000]
+
+[[effect.param]]
+id = 19
+key = "sub_rotation"
+type = "angle"
+name = "Sub Rotation"
+group = "sub_settings"
+default = 0
+
+[[effect.param]]
+id = 20
+key = "sub_offset"
+type = "point"
+name = "Sub Offset"
+group = "sub_settings"
+default = [0.0, 0.0]
+
+[[effect.param]]
+id = 21
+key = "center_subscale"
+type = "checkbox"
+name = "Center Subscale"
+group = "sub_settings"
+default = false
+
+[[effect.param]]
+id = 23
+key = "evolution"
+type = "angle"
+name = "Evolution"
+default = 0
+
+[[effect.param]]
+id = 24
+key = "evolution_options"
+type = "group"
+name = "Evolution Options"
+end_id = 28
+
+[[effect.param]]
+id = 25
+key = "cycle_evolution"
+type = "checkbox"
+name = "Cycle Evolution"
+group = "evolution_options"
+default = false
+
+[[effect.param]]
+id = 26
+key = "cycle_in_revolutions"
+type = "float"
+name = "Cycle (in Revolutions)"
+group = "evolution_options"
+default = 1
+range = [1, 88]
+
+[[effect.param]]
+id = 27
+key = "random_seed"
+type = "int"
+name = "Random Seed"
+group = "evolution_options"
+default = 0
+range = [0, 100000]
+
+[[effect.param]]
+id = 29
+key = "opacity"
+type = "float"
+name = "Opacity"
+default = 100
+range = [0, 100]
+
+[[effect.param]]
+id = 30
+key = "blending_mode"
+type = "popup"
+name = "Blending Mode"
+default = 2
+choices = ["None", "Normal", "(-", "Add", "Multiply", "Screen", "Overlay", "Soft Light", "Hard Light", "(-", "Color Dodge", "Color Burn", "(-", "Darken", "Lighten", "Difference", "Exclusion", "(-", "Hue", "Saturation", "Luminosity"]

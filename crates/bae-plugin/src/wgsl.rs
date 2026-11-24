@@ -61,6 +61,9 @@ pub const FRAME_INPUT_STRAIGHT: u32 = 16;
 /// The input texture's alpha component is ignored.
 pub const FRAME_INPUT_OPAQUE: u32 = 32;
 
+/// 16 bits per channel, with integer quantization.
+pub const FRAME_16_BPC: u32 = 64;
+
 /// Summary of what the prelude provides, for documentation and error messages.
 pub const PRELUDE_DOC: &str = "\
 frame: BaeFrame (target_rect, output_rect, layer_bounds, downsample, time, time_step, \
@@ -199,6 +202,8 @@ const BAE_FRAME_FINAL: u32 = 2u;
 const BAE_FRAME_FLOAT: u32 = 8u;
 const BAE_FRAME_INPUT_STRAIGHT: u32 = 16u;
 const BAE_FRAME_INPUT_OPAQUE: u32 = 32u;
+
+const BAE_FRAME_16_BPC: u32 = 64u;
 const BAE_FRAME_HIGH_QUALITY: u32 = 4u;
 
 @group(0) @binding(0) var<uniform> frame: BaeFrame;

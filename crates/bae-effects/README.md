@@ -58,3 +58,15 @@ Rust 效果的 uniform 走一个环形缓冲 + 动态偏移，每帧不创建缓
 - `cargo test -p bae-effects`：GPU 结果与 CPU 参考实现（AE 规格公式）比较，覆盖 RGBA32F / RGBA16F、半分辨率、Repeat Edge Pixels、ROI 分块一致、identity；软件适配器（CI 上的 WARP）容差放宽 4 倍。
 - `cargo bench -p bae-effects`：4K / 1080p 每帧耗时；`-- <过滤词> --steps` 打印每个 dispatch 的 GPU 时间。
 - 与 AE 对照：`tests/ae/golden/` 是 AE 26.2.1 的输出，`tests/ae_golden.rs` 每次测试都比较（每个用例限定最大差和平均差）；重新生成和结论见 `tests/ae/README.md`。
+
+## 生成、杂色和过渡
+
+| 类别 | 效果 | AE matchName |
+|---|---|---|
+| 生成 | 填充、梯度渐变、四色渐变、网格 | `ADBE Fill`、`ADBE Ramp`、`ADBE 4ColorGradient`、`ADBE Grid` |
+| 杂色和颗粒 | 分形杂色、杂色、添加颗粒 | `ADBE Fractal Noise`、`ADBE Noise2`、`VISINF Grain Implant` |
+| 过渡 | 线性擦除、径向擦除、百叶窗、渐变擦除、块溶解 | `ADBE Linear Wipe`、`ADBE Radial Wipe`、`ADBE Venetian Blinds`、`ADBE Gradient Wipe`、`ADBE Block Dissolve` |
+
+渐变擦除目前读取当前图层的亮度。外部渐变图层、添加颗粒的外部蒙版图层、填充的指定蒙版和所有蒙版暂不支持。相关选择器及依赖它们的设置在参数定义里保留并禁用，等待渲染图接入额外输入。无蒙版填充以素材原有的 alpha 为覆盖率，羽化对它无效。
+
+分形杂色支持四种采样方式、分数复杂度、种子、演化与循环。AE 与 BAE 分别在相同的循环起止点复现自己的图像。同种子在两端会生成不同纹理。分形类型中的脏污到线程（菜单值 12–20）暂按基本型渲染。添加颗粒的胶片预设使用 AE 色阶图实测的 RGB 颗粒强度，噪点位置与 AE 有差异。各效果的实测范围见[对照记录](tests/ae/README.md)。

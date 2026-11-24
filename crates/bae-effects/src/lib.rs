@@ -85,6 +85,25 @@ const PACKAGES: &[Embedded] = &[
     embedded!("photo-filter", ["shaders/photo_filter.wgsl"]),
     embedded!("shift-channels", ["shaders/shift_channels.wgsl"]),
     embedded!("vibrance", ["shaders/vibrance.wgsl"]),
+
+    embedded!("fill", ["shaders/fill.wgsl"]),
+    embedded!("add-grain", ["shaders/add_grain.wgsl"]),
+    embedded!(
+        "procedural",
+        [
+            "shaders/four_color_gradient.wgsl",
+            "shaders/blend.wgsl",
+            "shaders/grid.wgsl",
+            "shaders/fractal_noise.wgsl"
+        ]
+    ),
+    embedded!("gradient-ramp", ["shaders/gradient_ramp.wgsl"]),
+    embedded!("noise", ["shaders/noise.wgsl"]),
+    embedded!("block-dissolve", ["shaders/block_dissolve.wgsl"]),
+    embedded!("gradient-wipe", ["shaders/gradient_wipe.wgsl"]),
+    embedded!("linear-wipe", ["shaders/linear_wipe.wgsl"]),
+    embedded!("radial-wipe", ["shaders/radial_wipe.wgsl"]),
+    embedded!("venetian-blinds", ["shaders/venetian_blinds.wgsl"]),
     embedded!("brightness-contrast", ["shaders/brightness_contrast.wgsl"]),
     embedded!("exposure", ["shaders/exposure.wgsl"]),
     embedded!("hue-saturation", ["shaders/hue_saturation.wgsl"]),

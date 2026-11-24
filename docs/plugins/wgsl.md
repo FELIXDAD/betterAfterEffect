@@ -42,7 +42,7 @@ struct BaeFrame {
   pixel_aspect: f32,
   shutter_angle: f32,       // 度
   shutter_phase: f32,
-  flags: u32,               // BAE_FRAME_LINEAR | BAE_FRAME_FINAL | BAE_FRAME_HIGH_QUALITY | BAE_FRAME_FLOAT
+  flags: u32,               // BAE_FRAME_LINEAR | BAE_FRAME_FINAL | BAE_FRAME_HIGH_QUALITY | BAE_FRAME_FLOAT | BAE_FRAME_16_BPC
   seed: u32,                // 每个效果实例固定的随机种子
   frame_index: i32,
   pass_index: u32,
@@ -64,6 +64,8 @@ var<uniform> params: BaeParams;   // 没有数值参数时不存在
 | `color` | `vec4<f32>` | 非预乘 RGBA |
 | `point` | `vec2<f32>` | 渲染像素 |
 | `point3d` | `vec3<f32>` | 渲染像素 |
+
+`BAE_FRAME_16_BPC` 表示 16 bpc 整数工程，满白为 32768。
 
 `BAE_FRAME_FLOAT`：工程是 32 bpc（浮点）。没有这个标志时（8 / 16 bpc，AE 的默认），像素式效果的返回值由宿主截断到 `[0, 1]`（非预乘值），和 AE 整数缓冲的行为一致；AE 里"32 bpc 颜色时关闭"这类选项也按它判断。
 

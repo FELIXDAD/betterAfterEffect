@@ -140,6 +140,8 @@ fn main() {
     }
 
     for (effect, params) in [
+        ("ADBE Fractal Noise", vec![]),
+        ("VISINF Grain Implant", vec![(21, Value::Int(3))]),
         ("ADBE Motion Blur", vec![(2, Value::Float(100.0))]),
         ("ADBE Radial Blur", vec![(1, Value::Float(25.0))]),
         (

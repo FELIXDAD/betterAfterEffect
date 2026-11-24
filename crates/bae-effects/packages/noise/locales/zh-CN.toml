@@ -1,0 +1,8 @@
+[effect.noise]
+name = "杂色"
+keywords = ["杂色"]
+
+[effect.noise.params]
+amount_of_noise = "杂色数量"
+noise_type = "杂色类型"
+clipping = "剪切"
