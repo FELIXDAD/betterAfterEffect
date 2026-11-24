@@ -1,0 +1,43 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "find-edges"
+name = "Find Edges"
+category = "Stylize"
+implementation = "wgsl"
+ae_match_names = ["ADBE Find Edges"]
+keywords = ["find edges"]
+shader = "shaders/find_edges.wgsl"
+identity_when = "params.blend == 1"
+
+[effect.roi]
+read = "1 / frame.downsample_x"
+
+[[effect.pass]]
+entry = "find_edges"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 1
+key = "invert"
+type = "checkbox"
+name = "Invert"
+default = false
+
+[[effect.param]]
+id = 2
+key = "blend"
+type = "float"
+name = "Blend With Original"
+default = 0
+range = [0, 1]

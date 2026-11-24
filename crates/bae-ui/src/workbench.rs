@@ -139,6 +139,8 @@ pub struct Workbench {
     state: WorkbenchState,
     requests: PanelRequests,
     tool: usize,
+    /// Modifiers held at the end of the last frame (Copy / Cut / Paste chords).
+    held: egui::Modifiers,
     /// Toolbars by keymap id (`Registry<dyn Toolbar>`).
     toolbars: Arc<Registry<dyn Toolbar>>,
     /// Keymaps whose toolbar got its saved state back.
@@ -295,6 +297,7 @@ impl Workbench {
             state,
             requests: PanelRequests::default(),
             tool: 1,
+            held: egui::Modifiers::NONE,
             toolbars: Arc::new(Registry::new()),
             toolbars_loaded: Vec::new(),
             external_modal: false,
@@ -764,15 +767,22 @@ impl Workbench {
         let focused = self.dock.focused_panel().map(|p| p.kind().to_owned());
         let keymap = &self.keymap;
         let mut hits = Vec::new();
-        ctx.input_mut(|input| {
+        let held = ctx.input_mut(|input| {
             // egui-winit turns every Cmd/Ctrl+C / X / V into Copy / Cut / Paste,
             // with Shift or Alt held too (and sends no key event): those chords
             // are other shortcuts (Ctrl+Shift+C Pre-compose, Ctrl+Alt+Shift+C New
             // Camera, Ctrl+Shift+X Trim Comp to Work Area …), #220.
-            let mods = input.modifiers;
-            let other_chord = mods.command && (mods.shift || mods.alt);
+            // The modifiers as of each event: fast input brings modifiers down,
+            // the key and modifiers up in one frame (#279).
+            let mut mods = self.held;
             input.events.retain(|event| match event {
-                Event::Copy | Event::Cut | Event::Paste(_) if other_chord && !typing => {
+                Event::ModifiersChanged(m) => {
+                    mods = *m;
+                    true
+                }
+                Event::Copy | Event::Cut | Event::Paste(_)
+                    if mods.command && (mods.shift || mods.alt) && !typing =>
+                {
                     let key = match event {
                         Event::Copy => Key::C,
                         Event::Cut => Key::X,
@@ -822,7 +832,9 @@ impl Workbench {
                 }
                 _ => true,
             });
+            mods
         });
+        self.held = held;
         self.requests.invocations.extend(hits);
     }
 
@@ -1700,6 +1712,19 @@ mod tests {
         assert_eq!(
             frame_mods(&ctx, &mut wb, cmd, vec![Event::Copy]),
             vec![Invocation::new("edit.copy")]
+        );
+        // Fast input (#279): modifiers down, Copy, modifiers up in one frame.
+        assert_eq!(
+            frame_in(
+                &ctx,
+                &mut wb,
+                vec![
+                    Event::ModifiersChanged(cmd | Modifiers::SHIFT),
+                    Event::Copy,
+                    Event::ModifiersChanged(Modifiers::NONE),
+                ]
+            ),
+            vec![Invocation::new("motion.layer.pre_compose")]
         );
         assert_eq!(
             frame_mods(&ctx, &mut wb, cmd, vec![Event::Paste("x".into())]),

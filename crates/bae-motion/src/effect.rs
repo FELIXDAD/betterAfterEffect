@@ -145,6 +145,37 @@ impl bae_model::Command for ApplyEffect {
     }
 }
 
+// Built-in AE point defaults were measured on a 640 × 360 reference layer.
+fn instance_default(
+    stage: &Stage,
+    layer: &PrimPath,
+    def: &EffectDef,
+    param: &bae_model::EffectParamDef,
+) -> Option<Value> {
+    let relative = param.match_name.as_deref() == Some("ADBE Radial Blur-0002")
+        || (def.plugin.is_none() && def.category == "Distort");
+    if let (true, Some(Value::Vec2(reference))) = (relative, &param.default) {
+        let source_size = stage
+            .prim(layer)
+            .and_then(|v| {
+                crate::layer::source_size_and_duration(stage, v.value("source")?.as_prim_ref()?)
+            })
+            .map(|(size, _)| size)
+            .filter(|[w, h]| *w > 0. && *h > 0.);
+        let size = source_size.or_else(|| {
+            let comp = query::comp_info(stage, &query::owning_comp(stage, layer)?)?;
+            Some([f64::from(comp.width), f64::from(comp.height)])
+        });
+        if let Some(size) = size {
+            return Some(Value::Vec2([
+                size[0] * reference[0] / 640.,
+                size[1] * reference[1] / 360.,
+            ]));
+        }
+    }
+    param.default.clone()
+}
+
 fn add_instance(
     tx: &mut Transaction<'_>,
     layer: &PrimPath,
@@ -180,8 +211,8 @@ fn add_instance(
         if param.kind.value_type().is_none() {
             continue;
         }
-        if let Some(value) = &param.default {
-            set(tx, &path, &param_attr(param.id), value.clone())?;
+        if let Some(value) = instance_default(tx.stage(), layer, def, param) {
+            set(tx, &path, &param_attr(param.id), value)?;
         }
     }
     Ok(path)
@@ -373,7 +404,7 @@ impl bae_model::Command for ResetEffects {
             let def = find_def(&self.defs, &match_name)
                 .ok_or_else(|| fail(format!("unknown effect `{match_name}`")))?;
             for param in &def.params {
-                let Some(default) = param.default.clone() else {
+                let Some(default) = instance_default(tx.stage(), &layer, &def, param) else {
                     continue;
                 };
                 let attr = param_attr(param.id);

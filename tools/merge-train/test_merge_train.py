@@ -170,7 +170,7 @@ class DecideTest(Base):
         with mock.patch.object(mt, "check_runs", return_value=runs(**ok)):
             self.assertEqual(mt.evaluate_checks("s")[0], "green")
         for bad, want in ((("completed", "skipped"), "pending"), (("in_progress", None), "pending"),
-                          (("completed", "cancelled"), "failed"), (("completed", "failure"), "failed")):
+                          (("completed", "cancelled"), "pending"), (("completed", "failure"), "failed")):
             st = dict(ok)
             st[names[-1]] = bad
             with mock.patch.object(mt, "check_runs", return_value=runs(**st)):
@@ -419,6 +419,71 @@ class UnstickTest(Base):
         self.assertEqual(st["head_pr"], 1)
         self.assertEqual(st["head_since"], first)  # unchanged while #1 stays at the front
         self.assertEqual(sk.call_count, 2)
+
+
+class CancelledTest(Base):
+    NAME = "full / macOS arm64"
+
+    def runs(self, cid, minutes_ago=5):
+        done = (mt.now_utc() - mt.dt.timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return {self.NAME: {"id": cid, "name": self.NAME, "status": "completed",
+                            "conclusion": "cancelled", "completed_at": done, "html_url": "u"}}
+
+    def rerun(self, ps, runs, rc=0):
+        calls = []
+
+        def fake_sh(cmd, **kw):
+            calls.append(cmd)
+            return (rc, "", "busy")
+        with mock.patch.object(mt, "check_runs", return_value=runs), \
+                mock.patch.object(mt, "sh", side_effect=fake_sh):
+            why = mt.rerun_cancelled(pr(), ps, [self.NAME])
+        return why, calls
+
+    def test_first_cancel_reruns_job_second_cancel_fails(self):
+        ps = {}
+        why, calls = self.rerun(ps, self.runs(101))
+        self.assertIsNone(why)
+        self.assertEqual(calls[0][:4], ["gh", "api", "-X", "POST"])
+        self.assertTrue(calls[0][4].endswith("/actions/jobs/101/rerun"))
+        why, calls = self.rerun(ps, self.runs(101))     # same cancelled run: just wait
+        self.assertIsNone(why)
+        self.assertEqual(calls, [])
+        why, calls = self.rerun(ps, self.runs(102))     # the rerun was cancelled too
+        self.assertIn("2 次", why)
+        self.assertEqual(calls, [])
+
+    def test_fresh_cancel_waits_for_replacing_run(self):
+        why, calls = self.rerun({}, self.runs(101, minutes_ago=0))
+        self.assertIsNone(why)
+        self.assertEqual(calls, [])
+
+    def test_rerun_refused_is_retried_next_pass(self):
+        ps = {}
+        why, calls = self.rerun(ps, self.runs(101), rc=1)  # run still has other jobs going
+        self.assertIsNone(why)
+        self.assertNotIn(101, ps["cancelled_runs"].get(self.NAME, []))
+        why, calls = self.rerun(ps, self.runs(101), rc=0)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(ps["cancelled_runs"][self.NAME], [101])
+
+    def test_process_head_does_not_fail_on_cancel(self):
+        checks = [(self.NAME, "cancelled", "u"), ("full / Windows x64", "success", "u")]
+        with mock.patch.object(mt, "decide", return_value=("wait-ci", "等 CI", {"checks": checks})), \
+                mock.patch.object(mt, "rerun_cancelled", return_value=None) as rr, \
+                mock.patch.object(mt, "fail_pr") as fail, \
+                mock.patch.object(mt, "nudge_ci") as nudge:
+            self.assertFalse(mt.process_head(pr(), {}))
+        rr.assert_called_once()
+        fail.assert_not_called()
+        nudge.assert_not_called()
+
+    def test_new_head_resets_cancel_count(self):
+        st = {"prs": {"7": {"head": "old", "since": mt.now_utc().isoformat(),
+                            "cancelled_runs": {self.NAME: [1]}}}}
+        with mock.patch.object(mt, "decide", return_value=("wait-ci", "x", {"checks": []})):
+            mt.process_head(pr(headRefOid="new"), st)
+        self.assertNotIn("cancelled_runs", st["prs"]["7"])
 
 
 class BoardTest(Base):

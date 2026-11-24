@@ -32,6 +32,11 @@ unknown_timeout_minutes = 20
 # head pushed before a CI change): update-branch, or push an empty commit if the PR
 # already contains dev, so CI runs again. Once per head.
 missing_nudge_minutes = 10
+# A required check whose newest run on the head was cancelled (not a test failure) is
+# rerun once, after this grace period in case a replacing run is about to start; the
+# PR fails only when the same check is cancelled `max_cancellations` times on one head.
+cancel_grace_minutes = 2
+max_cancellations = 2
 # When the PR at the front has waited this long, a later PR (in label order) that is
 # fully ready merges first; the front PR keeps its place.
 skip_ahead_after_minutes = 30

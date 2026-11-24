@@ -1,0 +1,386 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "color-difference-key"
+name = "Color Difference Key"
+category = "Keying"
+implementation = "wgsl"
+ae_match_names = ["ADBE Color Difference Key"]
+shader = "shaders/color_difference_key.wgsl"
+
+[[effect.pass]]
+entry = "color_difference_key"
+reads = ["input"]
+writes = "output"
+
+# The four-up preview samples the full layer at half resolution.
+[effect.roi]
+read = "(params.view == 10) * 32768 / frame.downsample_x"
+
+[[effect.param]]
+id = 1
+key = "preview"
+type = "button"
+name = "Preview"
+flags = ["disabled"]
+
+[[effect.param]]
+id = 2
+key = "view"
+type = "popup"
+name = "View"
+default = 8
+choices = ["Source", "Uncorrected Matte Part A", "Corrected Matte Part A", "Uncorrected Matte Part B", "Corrected Matte Part B", "Uncorrected Matte", "Corrected Matte", "Final Output", "(-", "Corrected [A, B, Matte], Final"]
+
+[[effect.param]]
+id = 3
+key = "key_color"
+type = "color"
+name = "Key Color"
+default = [0, 0, 1, 1]
+
+[[effect.param]]
+id = 4
+key = "color_matching_accuracy"
+type = "popup"
+name = "Color Matching Accuracy"
+default = 1
+choices = ["Faster", "More Accurate"]
+
+[[effect.param]]
+id = 5
+key = "black_in_part_a"
+type = "float"
+name = "Black In Part A"
+default = 0
+range = [0, 255]
+
+[[effect.param]]
+id = 6
+key = "white_in_part_a"
+type = "float"
+name = "White In Part A"
+default = 255
+range = [0, 255]
+
+[[effect.param]]
+id = 7
+key = "gamma_part_a"
+type = "float"
+name = "Gamma Part A"
+default = 1
+range = [0, 10]
+
+[[effect.param]]
+id = 8
+key = "black_out_part_a"
+type = "float"
+name = "Black Out Part A"
+default = 0
+range = [0, 255]
+
+[[effect.param]]
+id = 9
+key = "white_out_part_a"
+type = "float"
+name = "White Out Part A"
+default = 255
+range = [0, 255]
+
+[[effect.param]]
+id = 10
+key = "black_in_part_b"
+type = "float"
+name = "Black In Part B"
+default = 0
+range = [0, 255]
+
+[[effect.param]]
+id = 11
+key = "white_in_part_b"
+type = "float"
+name = "White In Part B"
+default = 255
+range = [0, 255]
+
+[[effect.param]]
+id = 12
+key = "gamma_part_b"
+type = "float"
+name = "Gamma Part B"
+default = 1
+range = [0, 10]
+
+[[effect.param]]
+id = 13
+key = "black_out_part_b"
+type = "float"
+name = "Black Out Part B"
+default = 0
+range = [0, 255]
+
+[[effect.param]]
+id = 14
+key = "white_out_part_b"
+type = "float"
+name = "White Out Part B"
+default = 255
+range = [0, 255]
+
+[[effect.param]]
+id = 15
+key = "black_in_matte"
+type = "float"
+name = "Black In Matte"
+default = 0
+range = [0, 255]
+
+[[effect.param]]
+id = 16
+key = "white_in_matte"
+type = "float"
+name = "White In Matte"
+default = 255
+range = [0, 255]
+
+[[effect.param]]
+id = 17
+key = "gamma_matte"
+type = "float"
+name = "Gamma Matte"
+default = 1
+range = [0, 10]
+
+[[effect]]
+id = "color-range"
+name = "Color Range"
+category = "Keying"
+implementation = "wgsl"
+ae_match_names = ["ADBE Color Range"]
+shader = "shaders/color_range.wgsl"
+
+[[effect.param]]
+id = 1
+key = "preview"
+type = "button"
+name = "Preview"
+flags = ["disabled"]
+
+[[effect.param]]
+id = 2
+key = "fuzziness"
+type = "float"
+name = "Fuzziness"
+default = 20
+range = [0, 200]
+
+[[effect.param]]
+id = 3
+key = "color_space"
+type = "popup"
+name = "Color Space"
+default = 1
+choices = ["Lab", "YUV", "RGB"]
+
+[[effect.param]]
+id = 4
+key = "min_l_y_r"
+type = "float"
+name = "Min (L, Y, R)"
+default = 127
+range = [0, 255]
+
+[[effect.param]]
+id = 5
+key = "max_l_y_r"
+type = "float"
+name = "Max (L, Y, R)"
+default = 127
+range = [0, 255]
+
+[[effect.param]]
+id = 6
+key = "min_a_u_g"
+type = "float"
+name = "Min (a, U, G)"
+default = 127
+range = [0, 255]
+
+[[effect.param]]
+id = 7
+key = "max_a_u_g"
+type = "float"
+name = "Max (a, U, G)"
+default = 127
+range = [0, 255]
+
+[[effect.param]]
+id = 8
+key = "min_b_v_b"
+type = "float"
+name = "Min (b, V, B)"
+default = 127
+range = [0, 255]
+
+[[effect.param]]
+id = 9
+key = "max_b_v_b"
+type = "float"
+name = "Max (b, V, B)"
+default = 127
+range = [0, 255]
+
+[[effect]]
+id = "linear-color-key"
+name = "Linear Color Key"
+category = "Keying"
+implementation = "wgsl"
+ae_match_names = ["ADBE Linear Color Key2"]
+shader = "shaders/linear_color_key.wgsl"
+
+[[effect.param]]
+id = 1
+key = "preview"
+type = "button"
+name = "Preview"
+flags = ["disabled"]
+
+[[effect.param]]
+id = 2
+key = "view"
+type = "popup"
+name = "View"
+default = 1
+choices = ["Final Output", "Source Only", "Matte Only"]
+
+[[effect.param]]
+id = 3
+key = "key_color"
+type = "color"
+name = "Key Color"
+default = [0, 0, 1, 1]
+
+[[effect.param]]
+id = 4
+key = "match_colors"
+type = "popup"
+name = "Match Colors"
+default = 1
+choices = ["Using RGB", "Using Hue", "Using Chroma"]
+
+[[effect.param]]
+id = 5
+key = "matching_tolerance"
+type = "float"
+name = "Matching Tolerance"
+default = 0
+range = [0, 100]
+
+[[effect.param]]
+id = 6
+key = "matching_softness"
+type = "float"
+name = "Matching Softness"
+default = 10
+range = [0, 100]
+
+[[effect.param]]
+id = 7
+key = "key_operation"
+type = "popup"
+name = "Key Operation"
+default = 1
+choices = ["Key Colors", "Keep Colors"]
+
+[[effect]]
+id = "advanced-spill-suppressor"
+name = "Advanced Spill Suppressor"
+category = "Keying"
+implementation = "wgsl"
+ae_match_names = ["ADBE Spill2"]
+shader = "shaders/advanced_spill_suppressor.wgsl"
+
+[[effect.param]]
+id = 1
+key = "method"
+type = "popup"
+name = "Method"
+default = 1
+choices = ["Standard", "Ultra"]
+
+[[effect.param]]
+id = 1001
+key = "suppression"
+type = "float"
+name = "Suppression"
+default = 100
+range = [0, 100]
+
+[[effect.param]]
+id = 2
+key = "ultra_settings"
+type = "group"
+name = "Ultra Settings"
+end_id = 9
+
+[[effect.param]]
+id = 3
+key = "key_color"
+type = "color"
+name = "Key Color"
+group = "ultra_settings"
+default = [0, 1, 0, 1]
+
+[[effect.param]]
+id = 4
+key = "tolerance"
+type = "float"
+name = "Tolerance"
+group = "ultra_settings"
+default = 50
+range = [0, 100]
+
+[[effect.param]]
+id = 5
+key = "desaturation"
+type = "float"
+name = "Desaturation"
+group = "ultra_settings"
+default = 50
+range = [0, 100]
+
+[[effect.param]]
+id = 6
+key = "range"
+type = "float"
+name = "Range"
+group = "ultra_settings"
+default = 50
+range = [0, 100]
+
+[[effect.param]]
+id = 7
+key = "spill_color_correction"
+type = "float"
+name = "Spill Color Correction"
+group = "ultra_settings"
+default = 50
+range = [0, 100]
+
+[[effect.param]]
+id = 8
+key = "luma_correction"
+type = "float"
+name = "Luma Correction"
+group = "ultra_settings"
+default = 0
+range = [0, 100]

@@ -1,0 +1,36 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "sharpen"
+name = "Sharpen"
+category = "Blur & Sharpen"
+implementation = "wgsl"
+ae_match_names = ["ADBE Sharpen"]
+keywords = ["sharpen"]
+shader = "shaders/sharpen.wgsl"
+identity_when = "params.amount == 0"
+
+[effect.roi]
+read = "1 / frame.downsample_x"
+
+[[effect.pass]]
+entry = "sharpen"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 1
+key = "amount"
+type = "int"
+name = "Sharpen Amount"
+default = 0
+range = [0, 4000]

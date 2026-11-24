@@ -1410,6 +1410,66 @@ fn add_marker_puts_a_layer_or_comp_marker_at_the_cti() {
 }
 
 #[test]
+fn numbered_comp_markers_set_move_and_go_to() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let info = query::comp_info(&h.stage, &h.comp).unwrap();
+    let comp = h.comp.clone();
+    let mut tl = h.bars();
+    let num = |n: i64| json!({ "number": n });
+    // Shift+1 at 1 s: comp marker "1" (even with a layer selected).
+    h.session().lock().set_time(&info, Time::from_seconds(1.0));
+    let r = h.action(
+        &mut tl,
+        Invocation::with_params(ids::SET_COMP_MARKER, num(1)),
+    );
+    h.apply(&r);
+    let m = markers(&h, &comp);
+    assert_eq!(m.len(), 1);
+    assert_eq!(m[0].1, SEC);
+    let comment = |h: &H, p: &PrimPath| query::static_value(&h.stage.prim(p).unwrap(), "comment");
+    assert_eq!(comment(&h, &m[0].0), Some(Value::String("1".into())));
+    // Shift+1 again at 3 s moves it (one marker "1"); Shift+2 adds "2".
+    h.session().lock().set_time(&info, Time::from_seconds(3.0));
+    h.apply(&h.action(
+        &mut tl,
+        Invocation::with_params(ids::SET_COMP_MARKER, num(1)),
+    ));
+    h.session().lock().set_time(&info, Time::from_seconds(5.0));
+    h.apply(&h.action(
+        &mut tl,
+        Invocation::with_params(ids::SET_COMP_MARKER, num(2)),
+    ));
+    let m = markers(&h, &comp);
+    assert_eq!(
+        m.iter().map(|(_, t)| *t).collect::<Vec<_>>(),
+        vec![3 * SEC, 5 * SEC]
+    );
+    // 1 goes to marker "1"; a missing number does nothing.
+    h.action(
+        &mut tl,
+        Invocation::with_params(ids::GO_TO_COMP_MARKER, num(1)),
+    );
+    assert_eq!(h.session().lock().time(&comp), Time(3 * SEC));
+    h.action(
+        &mut tl,
+        Invocation::with_params(ids::GO_TO_COMP_MARKER, num(7)),
+    );
+    assert_eq!(h.session().lock().time(&comp), Time(3 * SEC));
+    // Each set is one undo step.
+    h.undo();
+    assert_eq!(markers(&h, &comp).len(), 1);
+    // The keys are bound: Shift+0–9 and 0–9 from the catalog.
+    let works = |action: &str| {
+        crate::catalog::KEYS
+            .iter()
+            .filter(|k| k.action == action)
+            .all(|k| k.status.works())
+    };
+    assert!(works(ids::SET_COMP_MARKER) && works(ids::GO_TO_COMP_MARKER));
+}
+
+#[test]
 fn dragging_a_marker_moves_it_and_shift_snaps_to_the_cti() {
     let mut h = H::new();
     let info = query::comp_info(&h.stage, &h.comp).unwrap();

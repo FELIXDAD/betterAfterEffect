@@ -1,0 +1,39 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "invert"
+name = "Invert"
+category = "Channel"
+implementation = "wgsl"
+ae_match_names = ["ADBE Invert"]
+flags = ["pixel-independent"]
+shader = "shaders/invert.wgsl"
+includes = ["shaders/channel_math.wgsl"]
+identity_when = "params.blend == 100"
+
+[[effect.param]]
+id = 1
+key = "channel"
+type = "popup"
+name = "Channel"
+default = 1
+choices = ["RGB", "Red", "Green", "Blue", "(-", "HLS", "Hue", "Lightness", "Saturation", "(-", "YIQ", "Luminance", "In Phase Chrominance", "Quadrature Chrominance", "(-", "Alpha"]
+
+[[effect.param]]
+id = 2
+key = "blend"
+type = "float"
+name = "Blend With Original"
+default = 0
+range = [0, 100]
+precision = 1
+display = "percent"

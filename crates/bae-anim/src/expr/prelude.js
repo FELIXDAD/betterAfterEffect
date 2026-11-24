@@ -9,7 +9,7 @@
 //   __h.layerInfo(c, l) -> object                    name, inPoint, outPoint, ...
 //   __h.compInfo(c) -> object                        name, width, height, ...
 //   __h.compByName(name) -> number                   comp id or -1
-//   __h.effect(c, l, nameOrIndex) -> string|null     effect prim path
+//   __h.effect(c, l, nameOrIndex) -> object|null     effect path, active and layerControl
 //   __h.param(c, l, effectPath, nameOrIndex) -> string|null   param attr name
 //   __h.mask(c, l, nameOrIndex) -> string|null       mask prim path
 //   __h.xform(c, l, t, kind, point) -> number[]      0 toComp 1 fromComp 2 toCompVec 3 fromCompVec
@@ -490,16 +490,20 @@ Layer.prototype = {
     return (t - this.startTime) * 100 / this.stretch;
   },
   effect: function (nameOrIndex) {
-    var p = __h.effect(this.__c, this.__l, nameOrIndex);
-    if (p === null) throw new Error("Effect " + JSON.stringify(nameOrIndex) + " is missing or does not exist");
-    var c = this.__c, l = this.__l;
+    var effect = __h.effect(this.__c, this.__l, nameOrIndex);
+    if (effect === null) throw new Error("Effect " + JSON.stringify(nameOrIndex) + " is missing or does not exist");
+    var c = this.__c, l = this.__l, p = effect.path;
     var fx = function (param) {
       var a = __h.param(c, l, p, param);
       if (a === null) throw new Error("Effect parameter " + JSON.stringify(param) + " does not exist");
+      if (effect.layerControl) {
+        var index = __h.effectLayer(c, l, p, a, __now);
+        return index < 0 ? null : new Layer(c, index);
+      }
       return __prop(c, l, p, a);
     };
     fx.param = fx;
-    fx.active = true;
+    fx.active = effect.active;
     return fx;
   },
   mask: function (nameOrIndex) {

@@ -1,0 +1,6 @@
+[effect.posterize]
+name = "色调分离"
+keywords = ["色调分离"]
+
+[effect.posterize.params]
+level = "级别"

@@ -1,0 +1,9 @@
+[effect.bevel-alpha]
+name = "斜面 Alpha"
+keywords = ["斜面 Alpha"]
+
+[effect.bevel-alpha.params]
+thickness = "边缘厚度"
+angle = "灯光角度"
+light = "灯光颜色"
+intensity = "灯光强度"
