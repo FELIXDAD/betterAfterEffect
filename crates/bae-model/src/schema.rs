@@ -405,6 +405,7 @@ pub static SCHEMAS: &[PrimSchema] = &[
                 false,
             ),
             int("motion_blur_samples", 16),
+            int("motion_blur_adaptive_limit", 128).doc("16–256 (AE-ANI-104)."),
             choice(
                 "renderer",
                 "classic_3d",
