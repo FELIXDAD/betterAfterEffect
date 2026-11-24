@@ -5,7 +5,7 @@
 //!   and contiguous runs of 3D layers ("3D bins", AE-CMP-406): 2D layers and
 //!   adjustment layers break a run; cameras, lights and layers without pixels do
 //!   not. A 3D pre-comp is one plane of the run (AE 26.2.1 sorts it by depth
-//!   with the other 3D layers).
+//!   with the other 3D layers) unless effects, masks or a track matte flatten it.
 //! * [`Homography`] is a planar projective map (a 3D layer seen through a camera,
 //!   or a 2D affine), with the clipping and bounds the render graph needs for ROI
 //!   negotiation.
@@ -19,6 +19,7 @@
 
 use glam::{DAffine2, DMat3, DMat4, DVec2, DVec3};
 
+use crate::blend::MaskMode;
 use crate::geom::Rect;
 use crate::input::{LayerContent, RenderLayer};
 
@@ -49,7 +50,21 @@ pub fn segments(layers: &[RenderLayer]) -> Vec<Segment> {
             continue;
         }
         if layer.matrix_3d.is_some() && !layer.adjustment {
-            group.push(index);
+            // A 3D pre-comp with effects, masks or a track matte is flattened
+            // and composited on its own (AE-CMP-406); a plain one sorts with
+            // the group like any 3D layer (measured in AE 26.2.1).
+            let flattened = matches!(layer.content, LayerContent::Comp(_))
+                && (layer.effects.iter().any(|e| e.enabled)
+                    || layer.masks.iter().any(|m| m.mode != MaskMode::None)
+                    || layer.track_matte.is_some());
+            if !flattened {
+                group.push(index);
+                continue;
+            }
+            if !group.is_empty() {
+                out.push(Segment::Group(std::mem::take(&mut group)));
+            }
+            out.push(Segment::Group(vec![index]));
             continue;
         }
         if !group.is_empty() {
@@ -545,8 +560,23 @@ mod tests {
             10,
             10,
         )));
-        let layers = vec![three_d("a"), pre, three_d("b")];
+        let layers = vec![three_d("a"), pre.clone(), three_d("b")];
         assert_eq!(segments(&layers), vec![Segment::Group(vec![2, 1, 0])]);
+        // With a track matte it is flattened and composited on its own.
+        let mut matted = pre;
+        matted.track_matte = Some(crate::TrackMatte {
+            layer: 0,
+            mode: crate::TrackMatteMode::Alpha,
+        });
+        let layers = vec![three_d("a"), matted, three_d("b")];
+        assert_eq!(
+            segments(&layers),
+            vec![
+                Segment::Group(vec![2]),
+                Segment::Group(vec![1]),
+                Segment::Group(vec![0]),
+            ]
+        );
     }
 
     #[test]

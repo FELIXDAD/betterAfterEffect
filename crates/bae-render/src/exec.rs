@@ -347,6 +347,8 @@ struct Planned {
     /// Scissor (target texels), and whether the backdrop must be copied first.
     bounds: IRect,
     backdrop: bool,
+    /// Motion-blurred (drawn with the `fs_motion` pipeline).
+    motion: bool,
 }
 
 impl ExecCtx<'_> {
@@ -468,6 +470,7 @@ impl ExecCtx<'_> {
                 textures,
                 bounds,
                 backdrop,
+                motion: op.motion.is_some(),
             });
             drawn_any = true;
         }
@@ -544,16 +547,16 @@ impl ExecCtx<'_> {
             self.passes += 1;
             load = wgpu::LoadOp::Load;
             pass.set_bind_group(0, self.draws_group, &[]);
-            let mut current_kind = None;
+            let mut current = None;
             let start = i;
             while i < planned.len() {
                 let p = &planned[i];
                 if i > start && p.backdrop {
                     break;
                 }
-                if current_kind != Some(p.kind) {
-                    pass.set_pipeline(self.pipelines.composite(device, format, p.kind));
-                    current_kind = Some(p.kind);
+                if current != Some((p.kind, p.motion)) {
+                    pass.set_pipeline(self.pipelines.composite(device, format, p.kind, p.motion));
+                    current = Some((p.kind, p.motion));
                 }
                 // Batch a run of plain solids with the same pipeline.
                 let mut end = i + 1;
@@ -562,6 +565,7 @@ impl ExecCtx<'_> {
                         && planned[end].textures.is_none()
                         && !planned[end].backdrop
                         && planned[end].kind == p.kind
+                        && planned[end].motion == p.motion
                     {
                         end += 1;
                     }
@@ -634,13 +638,60 @@ impl ExecCtx<'_> {
         } else {
             BlendKind::Replace
         };
-        pass.set_pipeline(self.pipelines.composite(device, self.format, kind));
+        pass.set_pipeline(self.pipelines.composite(device, self.format, kind, false));
         pass.set_bind_group(0, self.draws_group, &[]);
         pass.set_bind_group(1, &self.pipelines.empty_textures, &[]);
         pass.draw(0..6, first..first + 1);
         self.draw_calls += 1;
         Ok(())
     }
+}
+
+/// Shrinks `data.quad` (input texels, the content `rect` plus a margin) to the
+/// part of `rect` inside every half-plane of `clips`, keeping the margin.
+fn shrink_quad(data: &mut DrawData, rect: [f64; 4], clips: &[[f64; 3]]) {
+    let mut poly = vec![
+        DVec2::new(rect[0], rect[1]),
+        DVec2::new(rect[2], rect[1]),
+        DVec2::new(rect[2], rect[3]),
+        DVec2::new(rect[0], rect[3]),
+    ];
+    for [a, b, c] in clips {
+        let d = |p: DVec2| a * p.x + b * p.y + c;
+        let mut out = Vec::with_capacity(poly.len() + 1);
+        for i in 0..poly.len() {
+            let (p, q) = (poly[i], poly[(i + 1) % poly.len()]);
+            let (dp, dq) = (d(p), d(q));
+            if dp >= 0.0 {
+                out.push(p);
+            }
+            if (dp >= 0.0) != (dq >= 0.0) {
+                out.push(p + (q - p) * (dp / (dp - dq)));
+            }
+        }
+        poly = out;
+        if poly.len() < 3 {
+            return;
+        }
+    }
+    let q = data.quad.map(f64::from);
+    let margin = [
+        rect[0] - q[0],
+        rect[1] - q[1],
+        q[2] - rect[2],
+        q[3] - rect[3],
+    ];
+    let (mut lo, mut hi) = (DVec2::splat(f64::MAX), DVec2::splat(f64::MIN));
+    for p in &poly {
+        lo = lo.min(*p);
+        hi = hi.max(*p);
+    }
+    data.quad = [
+        (lo.x - margin[0]).max(q[0]) as f32,
+        (lo.y - margin[1]).max(q[1]) as f32,
+        (hi.x + margin[2]).min(q[2]) as f32,
+        (hi.y + margin[3]).min(q[3]) as f32,
+    ];
 }
 
 /// A composite or fill node's region in space pixels (its `rect` is in texels
@@ -750,6 +801,9 @@ fn plan_op(
         );
         d.extra[1] = first as u32;
         d.extra[2] = (samples.len() - first) as u32;
+        if near.is_some() {
+            d.mode[1] |= flags::PROJECTIVE;
+        }
         Some(d)
     } else if let Some(h) = &op.projection {
         let full = h.followed_by(&to_target).preceded_by(&from_texel);
@@ -784,6 +838,11 @@ fn plan_op(
             .map(|[a, b, c]| [a * s, b * s, a * o.x + b * o.y + c])
             .collect();
         data.set_clips(&clips);
+        if op.motion.is_none() {
+            // Draw only the piece: the rectangle cut by the half-planes, plus
+            // the quad's anti-aliasing margin.
+            shrink_quad(&mut data, rect, &clips);
+        }
     }
     data.target[2] = op.opacity;
     if let Some(m) = op.matte {

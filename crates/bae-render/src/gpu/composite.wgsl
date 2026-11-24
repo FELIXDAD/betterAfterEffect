@@ -53,7 +53,8 @@ struct Draw {
 }
 
 // One motion-blur placement: target texel -> input texel (rows of the inverse
-// homography); inv_w.w = 1 / near for 3D samples, 0 otherwise.
+// homography). 3D samples: inv_w.w = 1 / near. 2D samples: the inverse is
+// affine (inv_w = (0, 0, 1)), so inv_w.xy carries the edge scales instead.
 struct Sample {
     inv_x: vec4<f32>,
     inv_y: vec4<f32>,
@@ -262,8 +263,9 @@ struct Px {
     k: f32,
 }
 
-fn layer_px(di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: vec4<f32>, projective: bool) -> Px {
-    let d = draws[di];
+// `d` is draw `di`, loaded once by the caller (motion blur calls this per
+// sample); `k_affine` are the edge scales of an affine placement.
+fn layer_px(d: Draw, di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: vec4<f32>, projective: bool, k_affine: vec2<f32>) -> Px {
     let flags = d.mode.y;
     let hp = vec3<f32>(p, 1.0);
     var out: Px;
@@ -286,7 +288,7 @@ fn layer_px(di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: vec4<f32>, 
         u = vec2<f32>(dot(ix.xyz, hp), dot(iy.xyz, hp));
         du_dx = vec2<f32>(ix.x, iy.x);
         du_dy = vec2<f32>(ix.y, iy.y);
-        kxy = d.src.zw;
+        kxy = k_affine;
     }
 
     // Edge coverage, matching AE's resampling of a layer's raster: the edge ramps
@@ -362,34 +364,36 @@ fn layer_px(di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: vec4<f32>, 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let d = draws[in.draw];
-    let flags = d.mode.y;
+    let px = layer_px(d, in.draw, in.pos.xy, d.inv_x, d.inv_y, d.inv_w, (d.mode.y & FLAG_PROJECTIVE) != 0u, d.src.zw);
+    return finish(d, in.pos.xy, px.src, px.light, px.k);
+}
+
+// Motion-blurred draws (their own pipeline, so the sample loop costs plain
+// draws nothing): the equal-weight average of the layer at every sample
+// placement, premultiplied, before opacity and matte (AE-CMP-064).
+@fragment
+fn fs_motion(in: VsOut) -> @location(0) vec4<f32> {
+    let d = draws[in.draw];
     let p = in.pos.xy;
-
-    var src: vec4<f32>;
-    var light: vec3<f32>;
-    var k: f32;
-    if (flags & FLAG_MOTION) != 0u {
-        // Motion blur (AE-CMP-064): the equal-weight average of the layer at
-        // every sample placement, premultiplied, before opacity and matte.
-        var acc = vec4<f32>(0.0);
-        var acc_light = vec3<f32>(0.0);
-        let n = max(d.extra.z, 1u);
-        for (var i = 0u; i < n; i++) {
-            let s = samples[d.extra.y + i];
-            let px = layer_px(in.draw, p, s.inv_x, s.inv_y, s.inv_w, true);
-            acc += px.src * px.k;
-            acc_light += px.light * px.k;
-        }
-        src = acc / f32(n);
-        light = acc_light / f32(n);
-        k = 1.0;
-    } else {
-        let px = layer_px(in.draw, p, d.inv_x, d.inv_y, d.inv_w, (flags & FLAG_PROJECTIVE) != 0u);
-        src = px.src;
-        light = px.light;
-        k = px.k;
+    var acc = vec4<f32>(0.0);
+    var acc_light = vec3<f32>(0.0);
+    let n = max(d.extra.z, 1u);
+    let projective = (d.mode.y & FLAG_PROJECTIVE) != 0u;
+    for (var i = 0u; i < n; i++) {
+        let s = samples[d.extra.y + i];
+        let px = layer_px(d, in.draw, p, s.inv_x, s.inv_y, s.inv_w, projective, s.inv_w.xy);
+        acc += px.src * px.k;
+        acc_light += px.light * px.k;
     }
+    return finish(d, p, acc / f32(n), acc_light / f32(n), 1.0);
+}
 
+// Opacity, track matte and blending of a layer pixel: `src` premultiplied,
+// `light` the raw colour (Luminescent Premul), `k_in` its coverage.
+fn finish(d: Draw, p: vec2<f32>, src_in: vec4<f32>, light: vec3<f32>, k_in: f32) -> vec4<f32> {
+    let flags = d.mode.y;
+    var src = src_in;
+    var k = k_in;
     // Opacity (AE-CMP-031), then the track matte (AE-CMP-034).
     k = k * d.tgt.z;
     if (flags & FLAG_MATTE) != 0u {

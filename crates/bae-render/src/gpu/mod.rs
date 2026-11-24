@@ -158,12 +158,30 @@ pub(crate) struct SampleData {
 }
 
 impl SampleData {
-    /// The sample record for `to_target` (input texels → target texels).
+    /// The sample record for `to_target` (input texels → target texels): a 3D
+    /// placement clipped at `near`, or (`near = None`) an affine one.
     pub fn new(to_target: &Homography, near: Option<f64>) -> Option<SampleData> {
+        let affine = match near {
+            Some(_) => None,
+            None => Some(to_target.as_affine()?),
+        };
         let inv = to_target.inverse()?;
         let r = |i: usize| inv.0.row(i).as_vec3().extend(0.0).to_array();
-        let mut inv_w = r(2);
-        inv_w[3] = near.map_or(0.0, |n| (1.0 / n) as f32);
+        let inv_w = match (near, affine) {
+            (Some(n), _) => {
+                let mut w = r(2);
+                w[3] = (1.0 / n) as f32;
+                w
+            }
+            (None, Some(a)) => {
+                // Perpendicular edge scales, as in `DrawData::geometry`.
+                let det = a.matrix2.determinant().abs();
+                let kx = det / a.matrix2.y_axis.length();
+                let ky = det / a.matrix2.x_axis.length();
+                [kx as f32, ky as f32, 1.0, 0.0]
+            }
+            (None, None) => return None,
+        };
         Some(SampleData {
             inv_x: r(0),
             inv_y: r(1),
@@ -365,7 +383,8 @@ pub(crate) struct Pipelines {
     layout: wgpu::PipelineLayout,
     pub draws_layout: wgpu::BindGroupLayout,
     pub textures_layout: wgpu::BindGroupLayout,
-    composite: FxHashMap<(wgpu::TextureFormat, BlendKind), wgpu::RenderPipeline>,
+    /// By target format, blend kind and motion blur (`fs_motion`).
+    composite: FxHashMap<(wgpu::TextureFormat, BlendKind, bool), wgpu::RenderPipeline>,
     pub sampler: wgpu::Sampler,
     pub dummy: wgpu::TextureView,
     pub empty_textures: wgpu::BindGroup,
@@ -560,42 +579,45 @@ impl Pipelines {
             .or_insert_with(|| output_pipeline(device, module, layout, format))
     }
 
-    /// The composite pipeline for a target format and blend kind (compiled on
-    /// first use).
+    /// The composite pipeline for a target format, blend kind and whether the
+    /// draws are motion-blurred (compiled on first use).
     pub fn composite(
         &mut self,
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
         kind: BlendKind,
+        motion: bool,
     ) -> &wgpu::RenderPipeline {
         let (module, layout) = (&self.module, &self.layout);
-        self.composite.entry((format, kind)).or_insert_with(|| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("bae-render.composite"),
-                layout: Some(layout),
-                vertex: wgpu::VertexState {
-                    module,
-                    entry_point: Some("vs_main"),
-                    compilation_options: Default::default(),
-                    buffers: &[],
-                },
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module,
-                    entry_point: Some("fs_main"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: kind.state(),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
+        self.composite
+            .entry((format, kind, motion))
+            .or_insert_with(|| {
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("bae-render.composite"),
+                    layout: Some(layout),
+                    vertex: wgpu::VertexState {
+                        module,
+                        entry_point: Some("vs_main"),
+                        compilation_options: Default::default(),
+                        buffers: &[],
+                    },
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState::default(),
+                    fragment: Some(wgpu::FragmentState {
+                        module,
+                        entry_point: Some(if motion { "fs_motion" } else { "fs_main" }),
+                        compilation_options: Default::default(),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format,
+                            blend: kind.state(),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                    }),
+                    multiview_mask: None,
+                    cache: None,
+                })
             })
-        })
     }
 
     /// A texture bind group (unused slots get the dummy texture).
