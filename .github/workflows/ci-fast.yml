@@ -1,0 +1,130 @@
+# BAE continuous integration, fast tier (docs/spec/ci.md).
+#
+# Every pull request push, on macOS arm64 and Windows x64: fmt (once), clippy on the
+# whole workspace, and the tests of the crates the PR changes plus everything that depends
+# on them (tools/ci/affected.py, from `cargo metadata`). Root manifests, the lockfile, the
+# toolchain, CI, xtask and vendored crates fall back to the whole workspace; a PR that
+# touches no crate (docs) builds nothing and still reports success. Target: about five
+# minutes. The full tier (ci.yml) runs the rest once the PR carries `merge-ready`.
+
+name: CI fast
+
+on:
+  # opened, synchronize, reopened; labeling a PR does not rerun the fast tier.
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: fast-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      mode: ${{ steps.affected.outputs.mode }}
+      packages: ${{ steps.affected.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A pull_request run checks out the merge commit; its first parent is the base.
+          fetch-depth: 2
+
+      - name: Toolchain for cargo metadata
+        # Only `cargo metadata --no-deps`: the pinned channel without components or targets.
+        run: |
+          channel="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)"
+          rustup toolchain install "$channel" --profile minimal --no-self-update
+          echo "RUSTUP_TOOLCHAIN=$channel" >> "$GITHUB_ENV"
+
+      - name: Self-test
+        run: python3 -m unittest discover -s tools/ci
+
+      - name: Crates to test
+        id: affected
+        run: python3 tools/ci/affected.py --github ${{ github.event_name != 'pull_request' && '--full' || '' }}
+
+  fast:
+    name: fast / ${{ matrix.name }}
+    needs: changes
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+          - name: Windows x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+    defaults:
+      run:
+        shell: bash
+    env:
+      MODE: ${{ needs.changes.outputs.mode }}
+      PACKAGES: ${{ needs.changes.outputs.packages }}
+
+    steps:
+      - name: Nothing to build
+        if: env.MODE == 'none'
+        run: |
+          echo "No crate is affected (see the changes job); fmt, clippy and tests are skipped."
+
+      - uses: actions/checkout@v4
+        if: env.MODE != 'none'
+
+      - name: Install Rust toolchain (rust-toolchain.toml)
+        if: env.MODE != 'none'
+        run: |
+          rustup toolchain install || rustup show
+          rustc -vV
+
+      - name: Check host target
+        if: env.MODE != 'none'
+        run: |
+          host="$(rustc -vV | tr -d '\r' | sed -n 's/^host: //p')"
+          test "$host" = "${{ matrix.target }}"
+
+      - uses: Swatinem/rust-cache@v2.9.3
+        if: env.MODE != 'none'
+        with:
+          # The cache the full tier saves on main/dev pushes (same key, see ci.yml); the fast
+          # tier never saves.
+          shared-key: ${{ matrix.target }}-build
+          save-if: false
+
+      - name: Format
+        if: env.MODE != 'none' && runner.os == 'macOS'
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        if: env.MODE != 'none'
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        if: env.MODE != 'none'
+        # Like the full tier's first test pass: Windows without the D3D12 debug layer (the
+        # full tier also runs the debug-layer pass).
+        env:
+          BAE_GPU_VALIDATION: ${{ runner.os == 'Windows' && '0' || '' }}
+        run: |
+          if [ "$MODE" = full ]; then
+            cargo test --workspace --locked
+          else
+            args=()
+            for p in $PACKAGES; do args+=(-p "$p"); done
+            echo "Testing: $PACKAGES"
+            cargo test --locked "${args[@]}"
+          fi
