@@ -808,6 +808,9 @@ def one_pass(st):
     for k in list(st.get("prs", {})):
         if k not in live:
             st["prs"].pop(k)
+    for ref in git("for-each-ref", "--format=%(refname)", "refs/merge-train/").split():
+        if ref.rsplit("-", 1)[-1] not in live:
+            git("update-ref", "-d", ref, check=False)
     if not q:
         return False
     if ARGS.dry_run:
