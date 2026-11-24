@@ -178,6 +178,20 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Render Again", "重新渲染"),
     ("Format", "格式"),
     ("Output To", "输出到"),
+    // Output module (AE 26 输出模块设置)
+    ("PNG Sequence", "PNG 序列"),
+    ("TIFF Sequence", "TIFF 序列"),
+    ("OpenEXR Sequence", "OpenEXR 序列"),
+    ("Channels", "通道"),
+    ("Target Bitrate", "目标比特率"),
+    (
+        "This format has no alpha channel.",
+        "此格式没有 Alpha 通道。",
+    ),
+    (
+        "Movies are not available on Windows yet; they come with Media Foundation in a later version.",
+        "Windows 版暂不能输出影片，后续版本通过 Media Foundation 提供。",
+    ),
     ("Frames", "帧"),
     ("Show in Finder", "在访达中显示"),
     ("Show in Explorer", "在资源管理器中显示"),
