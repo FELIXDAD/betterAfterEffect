@@ -191,7 +191,19 @@ Notes:
 
 The render-graph node interface is **`bae_render::Effect`** (04, merged in PR #16):
 `def()` (the `bae_model::EffectDef`), `output_bounds`, `input_roi`,
-`layer_dependencies` and `render(EncodeContext, EffectParams, input, output_roi)`.
+`layer_dependencies`, `mask_dependencies` and
+`render(EncodeContext, EffectParams, input, output_roi)`.
+
+Inputs beyond the effect's own input *(implemented, #286)*: `layer_dependencies` returns
+`LayerDependency { layer, time, stage }` — a layer of the same comp (also the effect's
+own layer, e.g. Linear Color Key's "Keep Colors"), at a comp time (other times: previous /
+next frames), at `LayerStage::Source` / `Masks` / `EffectsAndMasks` (AE's layer popup);
+the image is in that layer's space (no transform, opacity, visibility or track matte).
+`mask_dependencies` returns `MaskSelect::One(mask prim)` / `All` of the effect's own
+layer, delivered as a layer-space coverage image (alpha). `render` reads them with
+`EncodeContext::effect_layer(&dep)` / `effect_mask(&select)`. Other times come from
+`graph::CompFrames` (`eval::EvaluatorFrames`, passed by `Renderer::render_frame_with`;
+the preview and export pass one); frames that use them are not frame-cached.
 Parameter *definitions* are `bae_model::EffectDef` / `EffectRegistry` (02, merged in
 PR #11). Every form ends up as these two objects:
 
@@ -1064,7 +1076,7 @@ full-resolution layer pixels × downsample, origin at the layer's top-left, y do
 4. `max_result_rect` answers are cached per node and parameter revision; 04 uses them for
    layer-bounds queries (motion-blur extents, collapse transformations, precomp bounds).
 5. Cycles through layer params (A's effect reads B whose effect reads A) are broken: the
-   back edge returns `EMPTY` and a diagnostic.
+   back edge reads the layer with its masks only (no effects) and logs a diagnostic.
 
 ### 10.3 Dependencies
 

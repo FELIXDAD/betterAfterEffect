@@ -21,6 +21,15 @@ pub(crate) fn register(registry: &mut Registry) {
                 ]
             ),
             embedded!("color-balance", ["shaders/color_balance.wgsl"]),
+            embedded!(
+                "color-selection",
+                [
+                    "shaders/gamma_pedestal_gain.wgsl",
+                    "shaders/leave_color.wgsl",
+                    "shaders/broadcast_colors.wgsl",
+                    "shaders/selective_color.wgsl",
+                ]
+            ),
             embedded!("exposure", ["shaders/exposure.wgsl"]),
             embedded!("hue-saturation", ["shaders/hue_saturation.wgsl"]),
             embedded!("levels", ["shaders/levels.wgsl"]),
@@ -31,6 +40,8 @@ pub(crate) fn register(registry: &mut Registry) {
             embedded!("vibrance", ["shaders/vibrance.wgsl"]),
         ],
     );
+    registry.effects.extend(effects::color::auto::builtins());
+    registry.effects.push(effects::color::colorama::builtin());
     let (curves, zh) = effects::color::Curves::new();
     registry.effects.push(rust_builtin(
         (Arc::new(curves), zh),

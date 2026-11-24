@@ -41,7 +41,10 @@ type Table = HashMap<&'static str, &'static str>;
 
 fn tables() -> &'static RwLock<Table> {
     static TABLE: OnceLock<RwLock<Table>> = OnceLock::new();
-    TABLE.get_or_init(|| RwLock::new(ZH.iter().copied().collect()))
+    TABLE.get_or_init(|| {
+        let shortcuts = crate::workbench::SHORTCUTS_ZH;
+        RwLock::new(ZH.iter().chain(shortcuts).copied().collect())
+    })
 }
 
 pub fn set_lang(lang: Lang) {
@@ -199,13 +202,8 @@ const ZH: &[(&str, &str)] = &[
     ("Remote change", "远程更改"),
     ("Layer stack change", "工程层更改"),
     ("Change", "更改"),
-    ("Keyboard Layout", "键盘布局"),
-    ("Reset All", "全部重置"),
-    ("is already used by", "已被以下命令使用："),
     ("Replace", "替换"),
     ("Remove", "移除"),
-    ("Add Shortcut", "添加快捷键"),
-    ("Press a key… (Esc to cancel)", "请按下快捷键…（Esc 取消）"),
     ("After Effects", "After Effects"),
     // bae-model built-in command titles
     ("Create Prim", "创建节点"),

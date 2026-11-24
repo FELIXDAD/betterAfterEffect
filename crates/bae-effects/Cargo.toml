@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 glam.workspace = true
 bae-app.workspace = true
+bae-color.workspace = true
 bae-gpu.workspace = true
 bae-model.workspace = true
 bae-plugin.workspace = true

@@ -301,7 +301,7 @@ fn shift_f3_and_the_switch_toggle_the_graph_editor() {
         |x| x.action == crate::actions::ids::GRAPH_EDITOR && x.chord.to_string().contains("F3")
     ));
     // The comp switch in the timeline header (right end of the outline).
-    let sw = pos2(534.0 - 14.0, 22.0 + 17.0);
+    let sw = pos2(tl.last_axis.unwrap().left - 2.0 - 14.0, 22.0 + 17.0);
     h.click(&mut tl, sw, Modifiers::NONE);
     assert!(h.session().lock().graph_editor);
     // The button bar is shown from the next frame.

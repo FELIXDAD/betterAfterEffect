@@ -33,7 +33,11 @@ fn builtins_register_through_the_plugin_registries() {
         // Built-ins are not plugin effects: never removed, never "missing".
         assert!(def.plugin.is_none(), "{}", def.match_name);
         assert!(
-            def.match_name.starts_with("ADBE ") || def.match_name == "VISINF Grain Implant",
+            def.match_name.starts_with("ADBE ")
+                || matches!(
+                    def.match_name.as_str(),
+                    "VISINF Grain Implant" | "APC Colorama"
+                ),
             "{}",
             def.match_name
         );

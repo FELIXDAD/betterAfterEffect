@@ -261,23 +261,15 @@ impl TimelinePanel {
                     cx.invoke_with("attr.set", json!({"path": layer, "attr": "quality", "value": {"type": "enum", "value": to}}));
                 }
                 let three_d = bool_attr(stage, layer, "three_d");
-                let cube = Rect::from_min_size(
-                    pos2(l + cols.switches + SW * 7.0, rect.top()),
-                    vec2(SW, ROW_H),
-                );
-                if switch(
-                    ui,
-                    cube.translate(vec2(-SW * 0.0, 0.0)),
-                    three_d,
-                    Icon::Cube,
-                    rid("three_d"),
-                    &layer_ctx,
-                ) {
+                if switch(ui, sw(7), three_d, Icon::Cube, rid("three_d"), &layer_ctx) {
                     cx.invoke_with("attr.set", json!({"path": layer, "attr": "three_d", "value": {"type": "bool", "value": !three_d}}));
                 }
-                // Parent & Link: pick whip and dropdown.
-                let whip =
-                    Rect::from_center_size(pos2(l + cols.parent + 8.0, cy), vec2(14.0, 14.0));
+                // Parent & Link: pick whip (left-aligned with the column title, as in
+                // AE) and dropdown.
+                let whip = Rect::from_min_size(
+                    pos2(l + cols.parent + PARENT_PAD, cy - 7.0),
+                    vec2(14.0, 14.0),
+                );
                 icons::paint(ui.painter(), whip, Icon::Pickwhip, color::ICON);
                 let wresp = ui.interact(whip, rid("whip"), Sense::drag()).labeled(
                     egui::WidgetType::Button,
@@ -311,7 +303,7 @@ impl TimelinePanel {
                     .map_or(0, |i| i + 1);
                 let before = sel;
                 let drop_rect = Rect::from_min_max(
-                    pos2(l + cols.parent + 18.0, rect.top() + 1.0),
+                    pos2(whip.right() + 4.0, rect.top() + 1.0),
                     pos2(l + cols.end - 4.0, rect.bottom() - 1.0),
                 );
                 let mut child = ui.new_child(

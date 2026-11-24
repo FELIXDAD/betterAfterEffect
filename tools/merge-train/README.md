@@ -31,6 +31,7 @@
 3. 必需检查（`config.toml` 的 `[checks]`，快检查加全量）：按名字取当前 head 上最新的一条 check run，只有 `success` 算通过。
    - 有失败（`failure`、`timed_out` 等），或者别的检查失败：出队，在 PR 上评论失败的检查和链接，通知负责 agent 和领导。
    - `cancelled` 不算失败：它通常是 concurrency 取消了旧的运行，或者被 GitHub 那边取消，不是测试没过。脚本先等 `cancel_grace_minutes`（2 分钟），看同一个 head 上会不会有新的运行接上；没有的话就重跑那个 job（`POST /actions/jobs/<id>/rerun`；同一次运行的其他 job 还在跑时 GitHub 不让重跑，下一轮再试）。同一个检查在同一个 head 上被取消 `max_cancellations`（2）次，才出队并通知。head 变了，计数清零。
+     - GitHub 因为没有空闲的 runner 取消的 job（注解里写着 `The job was not acquired by Runner …`；macOS arm64 runner 紧张时，排队 15 分钟左右就会这样）不计入次数，一直重跑，直到 `ci_timeout_minutes` 超时。
    - 缺失、还在跑、`skipped`（打标签前全量被跳过）：等。`skipped` 的 job 重跑也还是 `skipped`（重跑沿用原来的事件，那时还没有标签），所以它由下面“主动触发 CI”那条处理。超过 `ci_timeout_minutes`（150 分钟）还没结果，按失败处理。
    - 只有缺失或 `skipped`、没有任何检查在排队或在跑，持续 `missing_nudge_minutes`（10 分钟）：说明 CI 不会自己来了，比如 head 是 CI 改名之前推的。这时脚本主动触发一次：PR 落后 dev 就 `gh pr update-branch`；已经包含最新 dev 就往 PR 分支推一个空提交（`merge-train: retrigger CI …`）。同一个 head 只触发一次。
 4. PR 改的文件和 `dev` 在“PR head 与 dev 的 merge-base”之后改的文件有重叠（PR 一侧不算 `Cargo.lock`；dev 一侧不算 `Cargo.lock` 和 `docs/`）：运行 `gh pr update-branch`，等新 head 的 CI。两边都没改文件时重叠为空，不会误判。

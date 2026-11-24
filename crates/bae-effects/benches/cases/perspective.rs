@@ -8,4 +8,10 @@ pub(super) fn register(out: &mut Vec<Case>) {
         params: vec![(5, Value::Float(100.0))],
         size: HD,
     });
+    out.push(Case {
+        name: "1080p stylize radial shadow softness 100".into(),
+        match_name: "ADBE Radial Shadow",
+        params: vec![(5, Value::Float(100.0))],
+        size: HD,
+    });
 }
