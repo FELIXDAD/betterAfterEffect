@@ -525,6 +525,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Preset:", "预设:"),
     ("Preset", "预设"),
     ("Custom", "自定义"),
+    // The viewer's resolution menu.
+    ("Auto", "自动"),
     ("Save Preset", "保存预设"),
     ("Delete Preset", "删除预设"),
     ("Width:", "宽度:"),
