@@ -44,10 +44,12 @@ Rust 效果的 uniform 走一个环形缓冲 + 动态偏移，每帧不创建缓
 
 ## 高斯模糊的做法
 
-σ = 0.3 × 模糊度 × 降采样因子（AE 的系数待 AE 实测确认），核在 3σ 处截断。σ < 6 渲染像素时做两遍可分离卷积（源行缓存在 workgroup 内存，每线程算 4 个输出）；σ ≥ 6 时先块平均降采样到 1/2ⁿ（层上 σ 保持 3–6），在低分辨率上卷积，再双线性上采样，层上 σ 扣除降采样和上采样引入的方差。降采样网格对齐到 2ⁿ 的倍数，所以不同 ROI 分块渲染的结果一致。
+与 AE 26 实测一致（`tests/ae/README.md`）：非线性工作空间里先按纯幂 2.4 转线性光再模糊（转换折进第一遍读和最后一遍写，不加通道），σ = 0.288 × 模糊度 × 降采样因子，核取 |x| ≤ 3σ 的采样。σ < 6 渲染像素时做两遍可分离卷积（源行缓存在 workgroup 内存，每线程算 4 个输出）；σ ≥ 6 时先块平均降采样到 1/2ⁿ（层上 σ 保持 3–6），在低分辨率上卷积，再双线性上采样，层上 σ 扣除降采样和上采样引入的方差。降采样网格对齐到 2ⁿ 的倍数，所以不同 ROI 分块渲染的结果一致。高斯模糊（旧版）不转线性光，σ 按实测表插值。
+
+8 / 16 bpc 工程里每个效果的输出截断到 [0, 1]（AE 整数缓冲的行为），32 bpc 不截断（`EffectParams.float`）。
 
 ## 测试与基准
 
 - `cargo test -p bae-effects`：GPU 结果与 CPU 参考实现（AE 规格公式）比较，覆盖 RGBA32F / RGBA16F、半分辨率、Repeat Edge Pixels、ROI 分块一致、identity；软件适配器（CI 上的 WARP）容差放宽 4 倍。
 - `cargo bench -p bae-effects`：4K / 1080p 每帧耗时；`-- <过滤词> --steps` 打印每个 dispatch 的 GPU 时间。
-- 与 AE 对照（需要装了 AE 的机器）：见 `tests/ae/`，`cargo run -p bae-effects --example ae_compare -- prepare|compare|golden`，`tests/ae_golden.rs` 在有 golden 图时比较。
+- 与 AE 对照：`tests/ae/golden/` 是 AE 26.2.1 的输出，`tests/ae_golden.rs` 每次测试都比较（每个用例限定最大差和平均差）；重新生成和结论见 `tests/ae/README.md`。

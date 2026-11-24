@@ -1,21 +1,43 @@
 //! Gaussian Blur and Fast Box Blur on the GPU vs exact CPU references
-//! (AE-FX-300, AE-FX-302): separable kernels cut at ceil(3σ), transparent or
-//! clamped (Repeat Edge Pixels) addressing, output bounds.
+//! (AE-FX-300, AE-FX-302): separable kernels cut at 3σ (Gaussian Blur in linear
+//! light), transparent or clamped (Repeat Edge Pixels) addressing, output
+//! bounds.
 
 mod common;
 
 use bae_effects::BLURRINESS_TO_SIGMA;
+use bae_effects::effects::blur::LINEAR_LIGHT_GAMMA;
 use bae_model::Value;
 use bae_render::{EffectParams, IRect};
 use common::*;
 
-/// Exact separable Gaussian, kernel radius ceil(3σ), weights normalised.
-fn gauss_reference(input: &Pixels, sigma: [f64; 2], repeat: bool, out: IRect) -> Pixels {
+/// Premultiplied `c` with its straight colour raised to `g` (sign kept).
+fn regamma(c: [f32; 4], g: f64) -> [f32; 4] {
+    if c[3] <= 0.0 {
+        return c;
+    }
+    let a = f64::from(c[3]);
+    let f = |v: f32| {
+        let s = f64::from(v) / a;
+        (s.signum() * s.abs().powf(g) * a) as f32
+    };
+    [f(c[0]), f(c[1]), f(c[2]), c[3]]
+}
+
+/// Exact separable Gaussian, taps |x| ≤ 3σ, weights normalised, filtering the
+/// straight colour raised to `gamma` (1 = as is).
+fn gauss_reference(
+    input: &Pixels,
+    sigma: [f64; 2],
+    repeat: bool,
+    out: IRect,
+    gamma: f64,
+) -> Pixels {
     let kernel = |s: f64| -> Vec<f64> {
         if s <= 0.0 {
             return vec![1.0];
         }
-        let r = (3.0 * s).ceil() as i32;
+        let r = (3.0 * s + 1e-9).floor() as i32;
         let w: Vec<f64> = (-r..=r)
             .map(|k| (-(k * k) as f64 / (2.0 * s * s)).exp())
             .collect();
@@ -25,11 +47,12 @@ fn gauss_reference(input: &Pixels, sigma: [f64; 2], repeat: bool, out: IRect) ->
     let (kx, ky) = (kernel(sigma[0]), kernel(sigma[1]));
     let (rx, ry) = ((kx.len() / 2) as i32, (ky.len() / 2) as i32);
     let fetch = |x: i32, y: i32| {
-        if repeat {
+        let c = if repeat {
             input.get_clamped(x, y)
         } else {
             input.get(x, y)
-        }
+        };
+        regamma(c, gamma)
     };
     // Horizontal pass over the rows the vertical pass reads.
     let mid_rect = IRect::new(out.x0, out.y0 - ry, out.x1, out.y1 + ry);
@@ -57,7 +80,7 @@ fn gauss_reference(input: &Pixels, sigma: [f64; 2], repeat: bool, out: IRect) ->
                 acc[k] += w * f64::from(c[k]);
             }
         }
-        acc.map(|v| v as f32)
+        regamma(acc.map(|v| v as f32), 1.0 / gamma)
     })
 }
 
@@ -98,7 +121,13 @@ fn gauss_case(blurriness: f64, dims: i64, repeat: bool, scale: f64, tol: f32) {
         3 => [0.0, s],
         _ => [s, s],
     };
-    let r = sigma.map(|x| if x > 0.0 { (3.0 * x).ceil() as i32 } else { 0 });
+    let r = sigma.map(|x| {
+        if x > 0.0 {
+            (3.0 * x + 1e-9).floor() as i32
+        } else {
+            0
+        }
+    });
     let expected_bounds = if repeat {
         in_rect
     } else {
@@ -110,7 +139,7 @@ fn gauss_case(blurriness: f64, dims: i64, repeat: bool, scale: f64, tol: f32) {
         )
     };
     assert_eq!(bounds, expected_bounds);
-    let want = gauss_reference(&input, sigma, repeat, bounds);
+    let want = gauss_reference(&input, sigma, repeat, bounds, LINEAR_LIGHT_GAMMA);
     let soft = tolerance_scale(&gpu);
     for (format, tol) in [(F32, tol * soft), (F16, tol.max(4e-3) * soft)] {
         let got = run(&gpu, format, fx, params.clone(), &input, bounds, scale);
@@ -140,21 +169,23 @@ fn gaussian_direct() {
 
 #[test]
 fn gaussian_pyramid() {
-    // σ ≥ 8: downsample / blur / upsample. Values up to 3.0 (HDR spots); the
-    // bound is relative to that range (≈ 0.75/255 of a 0..1 edge).
-    gauss_case(20.0, 1, false, 1.0, 0.009);
-    gauss_case(25.0, 1, true, 1.0, 0.009);
-    gauss_case(30.0, 1, false, 1.0, 0.009);
-    gauss_case(60.0, 1, true, 1.0, 0.009);
-    gauss_case(100.0, 2, false, 1.0, 0.009);
-    gauss_case(150.0, 1, false, 1.0, 0.009);
+    // σ ≥ 6: downsample / blur / upsample. Values up to 3.0 (HDR spots); the
+    // bound is relative to that range. Linear light (2.4) magnifies the
+    // pyramid's small linear error in dark tones when converting back
+    // (≈ 4/255 at worst next to an HDR spot, < 1/255 on 0..1 edges).
+    gauss_case(20.0, 1, false, 1.0, 0.016);
+    gauss_case(25.0, 1, true, 1.0, 0.016);
+    gauss_case(30.0, 1, false, 1.0, 0.016);
+    gauss_case(60.0, 1, true, 1.0, 0.016);
+    gauss_case(100.0, 2, false, 1.0, 0.016);
+    gauss_case(150.0, 1, false, 1.0, 0.016);
 }
 
 #[test]
 fn gaussian_half_resolution() {
     // Blurriness is scaled by the downsample factor.
     gauss_case(38.0, 1, false, 0.5, 2e-5);
-    gauss_case(100.0, 1, true, 0.5, 0.009);
+    gauss_case(100.0, 1, true, 0.5, 0.016);
 }
 
 #[test]

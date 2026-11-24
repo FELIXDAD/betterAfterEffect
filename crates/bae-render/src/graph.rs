@@ -308,6 +308,8 @@ pub struct EffectFrame {
     pub linear: bool,
     /// Preview or final.
     pub purpose: crate::request::RenderPurpose,
+    /// 32-bpc float semantics (no clamping between effects).
+    pub float: bool,
     /// Shutter angle and phase (degrees).
     pub shutter: [f64; 2],
 }
@@ -323,6 +325,7 @@ impl EffectFrame {
             time_step: self.time_step,
             linear: self.linear,
             purpose: self.purpose,
+            float: self.float,
             shutter_angle: self.shutter[0],
             shutter_phase: self.shutter[1],
             ..EffectParams::new(instance)
@@ -541,6 +544,7 @@ impl Builder<'_> {
             time_step: comp.frame_rate.frame_duration(),
             linear: self.linear,
             purpose: self.purpose,
+            float: !self.clamp,
             shutter: comp.shutter,
         };
         // Masks only remove pixels: where they can leave any bounds the layer.

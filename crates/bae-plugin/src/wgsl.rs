@@ -53,6 +53,9 @@ pub const FRAME_LINEAR: u32 = 1;
 pub const FRAME_FINAL: u32 = 2;
 /// `frame.flags`: high quality (not draft).
 pub const FRAME_HIGH_QUALITY: u32 = 4;
+/// `frame.flags`: 32-bpc float project. Without it (8 / 16 bpc, AE's default)
+/// a pixel function's result is clamped to `[0, 1]` like AE's integer buffers.
+pub const FRAME_FLOAT: u32 = 8;
 
 /// Summary of what the prelude provides, for documentation and error messages.
 pub const PRELUDE_DOC: &str = "\
@@ -189,6 +192,7 @@ struct BaeFrame {
 
 const BAE_FRAME_LINEAR: u32 = 1u;
 const BAE_FRAME_FINAL: u32 = 2u;
+const BAE_FRAME_FLOAT: u32 = 8u;
 const BAE_FRAME_HIGH_QUALITY: u32 = 4u;
 
 @group(0) @binding(0) var<uniform> frame: BaeFrame;
@@ -247,6 +251,16 @@ fn bae_in_target(p: vec2<i32>) -> bool {
 // Writes the current pass target at render pixel `p` (premultiplied).
 fn bae_store(p: vec2<i32>, c: vec4<f32>) {
     textureStore(bae_out, p - frame.target_rect.min, c);
+}
+
+// 8 / 16 bpc: premultiplied colour clamped like an integer buffer (straight
+// values in [0, 1]); 32 bpc keeps it.
+fn bae_depth_clamp(c: vec4<f32>) -> vec4<f32> {
+    if ((frame.flags & BAE_FRAME_FLOAT) != 0u) {
+        return c;
+    }
+    let a = clamp(c.a, 0.0, 1.0);
+    return vec4<f32>(clamp(c.rgb, vec3<f32>(0.0), vec3<f32>(a)), a);
 }
 
 // Full-resolution distance → render pixels.
@@ -396,7 +410,7 @@ fn {PIXEL_KERNEL_ENTRY}(@builtin(global_invocation_id) id: vec3<u32>) {{
     }}
     let center = vec2<f32>(p) + vec2<f32>(0.5);
     let px = BaePixel(p, bae_to_layer(center), bae_layer_uv(center));
-    bae_store(p, {entry}(bae_load_input(p), px));
+    bae_store(p, bae_depth_clamp({entry}(bae_load_input(p), px)));
 }}
 ",
         wx = PIXEL_WORKGROUP[0],
