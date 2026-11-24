@@ -744,6 +744,16 @@ impl Panel for RenderQueuePanel {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, cx: &mut PanelContext<'_>) {
+        // Inset from the panel's edges like the other panels (#228).
+        let pad = bae_ui::theme::metrics::PANEL_PADDING as i8;
+        egui::Frame::new()
+            .inner_margin(egui::Margin::same(pad))
+            .show(ui, |ui| self.contents(ui, cx));
+    }
+}
+
+impl RenderQueuePanel {
+    fn contents(&mut self, ui: &mut egui::Ui, cx: &PanelContext<'_>) {
         let queue = shared(cx.resources);
         let (running, queued) = {
             let mut q = queue.lock();
@@ -1020,7 +1030,8 @@ fn item_ui(
             // otherwise (or a comp shortened later) is limited, or refused when
             // entirely outside, at render time.
             let last = last.unwrap_or(i64::MAX).max(0);
-            ui.horizontal(|ui| {
+            // Start – end wrap in a narrow panel instead of widening it.
+            ui.horizontal_wrapped(|ui| {
                 let start = item.start.to_string();
                 ui.add(
                     egui::DragValue::new(&mut item.start)
