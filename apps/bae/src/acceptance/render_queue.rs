@@ -1063,7 +1063,7 @@ fn a_movie_into_a_read_only_folder_fails_with_a_message() {
     configure(&h, 0, ExportFormat::ProRes, &locked.join("x.mov"), 0, 9);
     render(&mut h);
     let status = wait_item(&mut h, 0, Duration::from_secs(120));
-    perms.set_readonly(false);
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
     fs::set_permissions(&locked, perms).unwrap();
     let ItemStatus::Failed(message) = status else {
         panic!("not failed: {status:?}");
