@@ -1097,7 +1097,10 @@ fn menu_items_show_the_chord_ae_shows() {
     assert!(errors.is_empty(), "{}", errors.join("\n"));
 }
 
-const SHORTCUTS_JSON_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/ui/ae-shortcuts.json");
+const SHORTCUTS_JSON_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../docs/ui/ae-shortcuts.json"
+);
 
 /// The key table as JSON for test tools (`tools/qa/`): every AE default-shortcut
 /// command with its BAE action, both platforms' chords in BAE notation, scope,
