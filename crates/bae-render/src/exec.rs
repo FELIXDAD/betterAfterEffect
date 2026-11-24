@@ -22,6 +22,7 @@ use crate::geom::IRect;
 use crate::gpu::{BlendKind, DrawData, Pipelines, flags};
 use crate::graph::{CompositeNode, LayerOp, Node, NodeKind, OpInput, RenderGraph};
 
+pub(crate) mod adjust;
 mod masks;
 use crate::pool::TexturePool;
 use crate::source::{EncodeContext, GpuImage, ImageAllocator, ImageAlpha};
@@ -205,6 +206,26 @@ pub(crate) fn execute(
                     allocator: &mut alloc,
                 };
                 fx.effect.render(&mut ectx, &params, &input, node.rect)?
+            }
+            NodeKind::Mix(mix) => {
+                let input = |id: crate::graph::NodeId| {
+                    outputs[id.index()]
+                        .clone()
+                        .ok_or_else(|| RenderError::Other("mix input missing".into()))
+                };
+                let images = [input(mix.base)?, input(mix.over)?, input(mix.coverage)?];
+                let target = pool.acquire(device, format, node_pixels(node), node.pixel_scale)?;
+                adjust::encode(
+                    &mut ctx.pipelines.adjust,
+                    device,
+                    gpu.queue(),
+                    &mut encoder,
+                    format,
+                    &target,
+                    [&images[0], &images[1], &images[2]],
+                );
+                ctx.passes += 1;
+                target
             }
             NodeKind::Mask(_) => ctx.mask_outs[index]
                 .as_ref()

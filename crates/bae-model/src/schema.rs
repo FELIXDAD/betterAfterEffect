@@ -259,6 +259,9 @@ const LAYER: &[AttrDef] = &[
         .fixed()
         .doc("Time stretch in percent."),
     boolean("enabled", true).doc("Video switch."),
+    boolean("effects_enabled", true)
+        .kinds(VISUAL)
+        .doc("Effect switch (fx): off renders the layer without its effects; projects without it read true."),
     boolean("audio_enabled", true),
     boolean("solo", false),
     boolean("locked", false),

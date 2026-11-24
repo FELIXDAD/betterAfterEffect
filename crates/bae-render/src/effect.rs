@@ -178,10 +178,37 @@ impl fmt::Debug for dyn Effect {
     }
 }
 
+/// The id of effect `match_name` in the app registries
+/// (`Registry<bae_model::EffectDef>`, `Registry<dyn Effect>`): registry ids
+/// have no whitespace, AE matchNames do (`ADBE Gaussian Blur 2`), so
+/// whitespace becomes `%20` and `%` becomes `%25`. Names without either
+/// (plugin effects, `<plugin-id>/<effect>`) are their own id.
+pub fn registry_id(match_name: &str) -> std::borrow::Cow<'_, str> {
+    if !match_name.contains(|c: char| c == '%' || c.is_whitespace()) {
+        return std::borrow::Cow::Borrowed(match_name);
+    }
+    let mut out = String::with_capacity(match_name.len() + 8);
+    for c in match_name.chars() {
+        match c {
+            '%' => out.push_str("%25"),
+            c if c.is_whitespace() => {
+                let mut buf = [0u8; 4];
+                for b in c.encode_utf8(&mut buf).bytes() {
+                    out.push_str(&format!("%{b:02X}"));
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
 /// Effect implementations by effect ID (match name).
 #[derive(Default)]
 pub struct EffectLibrary {
     effects: FxHashMap<String, Arc<dyn Effect>>,
+    /// Generation of the app registry last synced from ([`Self::sync`]).
+    synced: Option<u64>,
 }
 
 impl EffectLibrary {
@@ -214,10 +241,48 @@ impl EffectLibrary {
     pub fn is_empty(&self) -> bool {
         self.effects.is_empty()
     }
+
+    /// Makes the library hold exactly the effects of the app's
+    /// `Registry<dyn Effect>` (built-in and plugin effects; keyed by their
+    /// match names), dropping effects registered by hand. Cheap when the
+    /// registry has not changed since the last call; returns whether the
+    /// library changed (callers drop cached frames then).
+    pub fn sync(&mut self, registry: &bae_app::Registry<dyn Effect>) -> bool {
+        let generation = registry.generation();
+        if self.synced == Some(generation) {
+            return false;
+        }
+        self.synced = Some(generation);
+        self.effects.clear();
+        for entry in registry.snapshot().iter() {
+            let effect = entry.item().clone();
+            self.effects.insert(effect.def().match_name.clone(), effect);
+        }
+        true
+    }
 }
 
 impl fmt::Debug for EffectLibrary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_set().entries(self.effects.keys()).finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registry_ids_have_no_whitespace() {
+        assert_eq!(
+            registry_id("bae.posterize/posterize"),
+            "bae.posterize/posterize"
+        );
+        assert_eq!(
+            registry_id("ADBE Gaussian Blur 2"),
+            "ADBE%20Gaussian%20Blur%202"
+        );
+        assert_eq!(registry_id("a%b c"), "a%25b%20c");
+        assert_ne!(registry_id("a b"), registry_id("a%20b"));
     }
 }

@@ -36,6 +36,7 @@ pub mod catalog;
 mod common;
 pub mod effects;
 mod gpu;
+mod module;
 mod params;
 pub mod profile;
 mod target;
@@ -51,6 +52,7 @@ use bae_render::{Effect, EffectLibrary, EffectParams, GpuImage, IRect, RenderErr
 
 pub use catalog::{EffectInfo, Form, category_zh};
 pub use effects::blur::BLURRINESS_TO_SIGMA;
+pub use module::EffectsModule;
 pub use target::{EffectTarget, IMAGE_USAGE, Standalone, TargetEffect};
 
 /// Plugin id of the built-in effects (`bae.effects/<id>`).
