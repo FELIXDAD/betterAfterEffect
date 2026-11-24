@@ -190,7 +190,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Move Out Point to Current Time", "将出点移到当前时间"),
     ("Set Work Area Start", "将工作区域开头设置为当前时间"),
     ("Set Work Area End", "将工作区域结尾设置为当前时间"),
-    ("Trim Comp to Work Area", "将合成修剪至工作区域"),
+    ("Trim Comp to Work Area", "将合成裁剪到工作区"),
     // Render Queue (AE 简体中文界面用词)
     ("Window", "窗口"),
     ("Render Queue", "渲染队列"),
@@ -712,7 +712,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("White", "白色"),
     ("Dark Gray", "深灰色"),
     ("Medium Gray", "中灰色"),
-    ("Light Gray", "浅灰色"),
+    ("Light Gray", "淡灰色"),
     ("{gray}-{hue}", "{gray}-{hue}"),
     ("Dark {hue}", "深{hue}"),
     // File > Import and dropped files (`import`).
@@ -789,7 +789,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Diagonally", "对角"),
     ("Light Settings", "灯光设置"),
     ("Light Settings...", "灯光设置..."),
-    ("Light...", "灯光..."),
+    ("Light...", "灯光…"),
     ("Settings", "设置"),
     ("Light Type:", "灯光类型:"),
     ("Light Type", "灯光类型"),
