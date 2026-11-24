@@ -36,9 +36,9 @@
 
 ## 统计
 
-- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 103，◐ 8，☐ 212，⏸ 217，Ⓐ 30
-- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 132 条。
-- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 121 条，macOS 123 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
+- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 143，◐ 8，☐ 172，⏸ 217，Ⓐ 30
+- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 134 条。
+- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 123 条，macOS 125 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
 
 ## 主菜单
 
@@ -337,46 +337,46 @@
 | Markers ▸ Lock Markers | 23265283 | `motion.layer.lock_markers` |  |  |  | C | ☐ |
 | Markers ▸ Delete All Markers | 23265284 | `motion.layer.delete_all_markers` |  |  |  | C | ✅ |
 | Preserve Transparency | 393236 | `motion.layer.switch` | `{"switch":"preserve_transparency"}` |  |  | B | ☐ |
-| Blending Mode ▸ Normal | 16318465 | `motion.layer.blending_mode` | `{"mode":"normal"}` |  |  | B | ☐ |
-| Blending Mode ▸ Dissolve | 16318466 | `motion.layer.blending_mode` | `{"mode":"dissolve"}` |  |  | B | ☐ |
-| Blending Mode ▸ Dancing Dissolve | 16318467 | `motion.layer.blending_mode` | `{"mode":"dancing_dissolve"}` |  |  | B | ☐ |
-| Blending Mode ▸ Darken | 16318469 | `motion.layer.blending_mode` | `{"mode":"darken"}` |  |  | B | ☐ |
-| Blending Mode ▸ Multiply | 16318470 | `motion.layer.blending_mode` | `{"mode":"multiply"}` |  |  | B | ☐ |
-| Blending Mode ▸ Color Burn | 16318471 | `motion.layer.blending_mode` | `{"mode":"color_burn"}` |  |  | B | ☐ |
-| Blending Mode ▸ Classic Color Burn | 16318472 | `motion.layer.blending_mode` | `{"mode":"classic_color_burn"}` |  |  | B | ☐ |
-| Blending Mode ▸ Linear Burn | 16318473 | `motion.layer.blending_mode` | `{"mode":"linear_burn"}` |  |  | B | ☐ |
-| Blending Mode ▸ Darker Color | 16318474 | `motion.layer.blending_mode` | `{"mode":"darker_color"}` |  |  | B | ☐ |
-| Blending Mode ▸ Add | 16318476 | `motion.layer.blending_mode` | `{"mode":"add"}` |  |  | B | ☐ |
-| Blending Mode ▸ Lighten | 16318477 | `motion.layer.blending_mode` | `{"mode":"lighten"}` |  |  | B | ☐ |
-| Blending Mode ▸ Screen | 16318478 | `motion.layer.blending_mode` | `{"mode":"screen"}` |  |  | B | ☐ |
-| Blending Mode ▸ Color Dodge | 16318479 | `motion.layer.blending_mode` | `{"mode":"color_dodge"}` |  |  | B | ☐ |
-| Blending Mode ▸ Classic Color Dodge | 16318480 | `motion.layer.blending_mode` | `{"mode":"classic_color_dodge"}` |  |  | B | ☐ |
-| Blending Mode ▸ Linear Dodge | 16318481 | `motion.layer.blending_mode` | `{"mode":"linear_dodge"}` |  |  | B | ☐ |
-| Blending Mode ▸ Lighter Color | 16318482 | `motion.layer.blending_mode` | `{"mode":"lighter_color"}` |  |  | B | ☐ |
-| Blending Mode ▸ Overlay | 16318484 | `motion.layer.blending_mode` | `{"mode":"overlay"}` |  |  | B | ☐ |
-| Blending Mode ▸ Soft Light | 16318485 | `motion.layer.blending_mode` | `{"mode":"soft_light"}` |  |  | B | ☐ |
-| Blending Mode ▸ Hard Light | 16318486 | `motion.layer.blending_mode` | `{"mode":"hard_light"}` |  |  | B | ☐ |
-| Blending Mode ▸ Linear Light | 16318487 | `motion.layer.blending_mode` | `{"mode":"linear_light"}` |  |  | B | ☐ |
-| Blending Mode ▸ Vivid Light | 16318488 | `motion.layer.blending_mode` | `{"mode":"vivid_light"}` |  |  | B | ☐ |
-| Blending Mode ▸ Pin Light | 16318489 | `motion.layer.blending_mode` | `{"mode":"pin_light"}` |  |  | B | ☐ |
-| Blending Mode ▸ Hard Mix | 16318490 | `motion.layer.blending_mode` | `{"mode":"hard_mix"}` |  |  | B | ☐ |
-| Blending Mode ▸ Difference | 16318492 | `motion.layer.blending_mode` | `{"mode":"difference"}` |  |  | B | ☐ |
-| Blending Mode ▸ Classic Difference | 16318493 | `motion.layer.blending_mode` | `{"mode":"classic_difference"}` |  |  | B | ☐ |
-| Blending Mode ▸ Exclusion | 16318494 | `motion.layer.blending_mode` | `{"mode":"exclusion"}` |  |  | B | ☐ |
-| Blending Mode ▸ Subtract | 16318495 | `motion.layer.blending_mode` | `{"mode":"subtract"}` |  |  | B | ☐ |
-| Blending Mode ▸ Divide | 16318496 | `motion.layer.blending_mode` | `{"mode":"divide"}` |  |  | B | ☐ |
-| Blending Mode ▸ Hue | 16318498 | `motion.layer.blending_mode` | `{"mode":"hue"}` |  |  | B | ☐ |
-| Blending Mode ▸ Saturation | 16318499 | `motion.layer.blending_mode` | `{"mode":"saturation"}` |  |  | B | ☐ |
-| Blending Mode ▸ Color | 16318500 | `motion.layer.blending_mode` | `{"mode":"color"}` |  |  | B | ☐ |
-| Blending Mode ▸ Luminosity | 16318501 | `motion.layer.blending_mode` | `{"mode":"luminosity"}` |  |  | B | ☐ |
-| Blending Mode ▸ Stencil Alpha | 16318503 | `motion.layer.blending_mode` | `{"mode":"stencil_alpha"}` |  |  | B | ☐ |
-| Blending Mode ▸ Stencil Luma | 16318504 | `motion.layer.blending_mode` | `{"mode":"stencil_luma"}` |  |  | B | ☐ |
-| Blending Mode ▸ Silhouette Alpha | 16318505 | `motion.layer.blending_mode` | `{"mode":"silhouette_alpha"}` |  |  | B | ☐ |
-| Blending Mode ▸ Silhouette Luma | 16318506 | `motion.layer.blending_mode` | `{"mode":"silhouette_luma"}` |  |  | B | ☐ |
-| Blending Mode ▸ Alpha Add | 16318508 | `motion.layer.blending_mode` | `{"mode":"alpha_add"}` |  |  | B | ☐ |
-| Blending Mode ▸ Luminescent Premul | 16318509 | `motion.layer.blending_mode` | `{"mode":"luminescent_premul"}` |  |  | B | ☐ |
-| Next Blending Mode | 393238 | `motion.layer.blending_mode_step` | `{"step":1}` | Shift+= | Shift+= | B | ☐ |
-| Previous Blending Mode | 393239 | `motion.layer.blending_mode_step` | `{"step":-1}` | Shift+- | Shift+- | B | ☐ |
+| Blending Mode ▸ Normal | 16318465 | `motion.layer.blending_mode` | `{"mode":"normal"}` |  |  | B | ✅ |
+| Blending Mode ▸ Dissolve | 16318466 | `motion.layer.blending_mode` | `{"mode":"dissolve"}` |  |  | B | ✅ |
+| Blending Mode ▸ Dancing Dissolve | 16318467 | `motion.layer.blending_mode` | `{"mode":"dancing_dissolve"}` |  |  | B | ✅ |
+| Blending Mode ▸ Darken | 16318469 | `motion.layer.blending_mode` | `{"mode":"darken"}` |  |  | B | ✅ |
+| Blending Mode ▸ Multiply | 16318470 | `motion.layer.blending_mode` | `{"mode":"multiply"}` |  |  | B | ✅ |
+| Blending Mode ▸ Color Burn | 16318471 | `motion.layer.blending_mode` | `{"mode":"color_burn"}` |  |  | B | ✅ |
+| Blending Mode ▸ Classic Color Burn | 16318472 | `motion.layer.blending_mode` | `{"mode":"classic_color_burn"}` |  |  | B | ✅ |
+| Blending Mode ▸ Linear Burn | 16318473 | `motion.layer.blending_mode` | `{"mode":"linear_burn"}` |  |  | B | ✅ |
+| Blending Mode ▸ Darker Color | 16318474 | `motion.layer.blending_mode` | `{"mode":"darker_color"}` |  |  | B | ✅ |
+| Blending Mode ▸ Add | 16318476 | `motion.layer.blending_mode` | `{"mode":"add"}` |  |  | B | ✅ |
+| Blending Mode ▸ Lighten | 16318477 | `motion.layer.blending_mode` | `{"mode":"lighten"}` |  |  | B | ✅ |
+| Blending Mode ▸ Screen | 16318478 | `motion.layer.blending_mode` | `{"mode":"screen"}` |  |  | B | ✅ |
+| Blending Mode ▸ Color Dodge | 16318479 | `motion.layer.blending_mode` | `{"mode":"color_dodge"}` |  |  | B | ✅ |
+| Blending Mode ▸ Classic Color Dodge | 16318480 | `motion.layer.blending_mode` | `{"mode":"classic_color_dodge"}` |  |  | B | ✅ |
+| Blending Mode ▸ Linear Dodge | 16318481 | `motion.layer.blending_mode` | `{"mode":"linear_dodge"}` |  |  | B | ✅ |
+| Blending Mode ▸ Lighter Color | 16318482 | `motion.layer.blending_mode` | `{"mode":"lighter_color"}` |  |  | B | ✅ |
+| Blending Mode ▸ Overlay | 16318484 | `motion.layer.blending_mode` | `{"mode":"overlay"}` |  |  | B | ✅ |
+| Blending Mode ▸ Soft Light | 16318485 | `motion.layer.blending_mode` | `{"mode":"soft_light"}` |  |  | B | ✅ |
+| Blending Mode ▸ Hard Light | 16318486 | `motion.layer.blending_mode` | `{"mode":"hard_light"}` |  |  | B | ✅ |
+| Blending Mode ▸ Linear Light | 16318487 | `motion.layer.blending_mode` | `{"mode":"linear_light"}` |  |  | B | ✅ |
+| Blending Mode ▸ Vivid Light | 16318488 | `motion.layer.blending_mode` | `{"mode":"vivid_light"}` |  |  | B | ✅ |
+| Blending Mode ▸ Pin Light | 16318489 | `motion.layer.blending_mode` | `{"mode":"pin_light"}` |  |  | B | ✅ |
+| Blending Mode ▸ Hard Mix | 16318490 | `motion.layer.blending_mode` | `{"mode":"hard_mix"}` |  |  | B | ✅ |
+| Blending Mode ▸ Difference | 16318492 | `motion.layer.blending_mode` | `{"mode":"difference"}` |  |  | B | ✅ |
+| Blending Mode ▸ Classic Difference | 16318493 | `motion.layer.blending_mode` | `{"mode":"classic_difference"}` |  |  | B | ✅ |
+| Blending Mode ▸ Exclusion | 16318494 | `motion.layer.blending_mode` | `{"mode":"exclusion"}` |  |  | B | ✅ |
+| Blending Mode ▸ Subtract | 16318495 | `motion.layer.blending_mode` | `{"mode":"subtract"}` |  |  | B | ✅ |
+| Blending Mode ▸ Divide | 16318496 | `motion.layer.blending_mode` | `{"mode":"divide"}` |  |  | B | ✅ |
+| Blending Mode ▸ Hue | 16318498 | `motion.layer.blending_mode` | `{"mode":"hue"}` |  |  | B | ✅ |
+| Blending Mode ▸ Saturation | 16318499 | `motion.layer.blending_mode` | `{"mode":"saturation"}` |  |  | B | ✅ |
+| Blending Mode ▸ Color | 16318500 | `motion.layer.blending_mode` | `{"mode":"color"}` |  |  | B | ✅ |
+| Blending Mode ▸ Luminosity | 16318501 | `motion.layer.blending_mode` | `{"mode":"luminosity"}` |  |  | B | ✅ |
+| Blending Mode ▸ Stencil Alpha | 16318503 | `motion.layer.blending_mode` | `{"mode":"stencil_alpha"}` |  |  | B | ✅ |
+| Blending Mode ▸ Stencil Luma | 16318504 | `motion.layer.blending_mode` | `{"mode":"stencil_luma"}` |  |  | B | ✅ |
+| Blending Mode ▸ Silhouette Alpha | 16318505 | `motion.layer.blending_mode` | `{"mode":"silhouette_alpha"}` |  |  | B | ✅ |
+| Blending Mode ▸ Silhouette Luma | 16318506 | `motion.layer.blending_mode` | `{"mode":"silhouette_luma"}` |  |  | B | ✅ |
+| Blending Mode ▸ Alpha Add | 16318508 | `motion.layer.blending_mode` | `{"mode":"alpha_add"}` |  |  | B | ✅ |
+| Blending Mode ▸ Luminescent Premul | 16318509 | `motion.layer.blending_mode` | `{"mode":"luminescent_premul"}` |  |  | B | ✅ |
+| Next Blending Mode | 393238 | `motion.layer.blending_mode_step` | `{"step":1}` | Shift+= | Shift+= | B | ✅ |
+| Previous Blending Mode | 393239 | `motion.layer.blending_mode_step` | `{"step":-1}` | Shift+- | Shift+- | B | ✅ |
 | Track Matte ▸ No Track Matte | 16384001 | `motion.layer.track_matte` | `{"matte":"none"}` |  |  | B | ☐ |
 | Track Matte ▸ Alpha Matte | 16384003 | `motion.layer.track_matte` | `{"matte":"alpha"}` |  |  | B | ☐ |
 | Track Matte ▸ Alpha Inverted Matte | 16384004 | `motion.layer.track_matte` | `{"matte":"alpha_inverted"}` |  |  | B | ☐ |
