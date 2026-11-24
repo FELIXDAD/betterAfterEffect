@@ -960,13 +960,24 @@ def one_pass(st):
     return skip_ahead(q, st)
 
 
+def changed_files(sha):
+    """Files a PR head changed since its merge-base with dev, minus Cargo.lock and docs/."""
+    mb = git("merge-base", "origin/" + CFG["base"], sha).strip()
+    ignore = CFG["merge"]["overlap_ignore_dev"]
+    return {f for f in git("diff", "--name-only", mb, sha).splitlines()
+            if f and not any(f == i or (i.endswith("/") and f.startswith(i)) for i in ignore)}
+
+
 def skip_ahead(q, st):
     """When the queue head has been waiting too long, merge the first later PR (in
-    label order) that is ready to merge right now. Later PRs are only merged, never
-    updated, repaired or failed here; the head keeps its place."""
+    label order) that is ready to merge right now and touches none of the head's files.
+    A PR that overlaps the head would push it into another update-branch and full CI
+    run (starving it), so it keeps waiting behind the head. Later PRs are only merged,
+    never updated, repaired or failed here; the head keeps its place."""
     waited = (now_utc() - dt.datetime.fromisoformat(st["head_since"])).total_seconds() / 60
     if len(q) < 2 or waited < CFG.get("skip_ahead_after_minutes", 30):
         return False
+    head_files = None
     for p in q[1:]:
         try:
             decision, detail, _ = decide(p, st)
@@ -976,6 +987,19 @@ def skip_ahead(q, st):
         if (decision, detail) != (ps.get("decision"), ps.get("detail")):
             log("#%d (behind #%d) %s → %s: %s" % (p["number"], q[0]["number"],
                                                   p["headRefOid"][:7], decision, detail))
+        if decision == "merge":
+            try:
+                if head_files is None:
+                    fetch_pr_head(q[0]["number"])
+                    head_files = changed_files(q[0]["headRefOid"])
+                shared = sorted(head_files & changed_files(p["headRefOid"]))
+            except Exception as e:  # noqa: BLE001 — unknown overlap: do not jump the queue
+                shared = ["?（%s）" % str(e)[:80]]
+            if shared:
+                decision, detail = "wait-head", "已就绪，但和队首 #%d 改了同样的文件，不插队：%s" % (
+                    q[0]["number"], ", ".join(shared[:5]))
+                if detail != ps.get("detail"):
+                    log("#%d %s" % (p["number"], detail))
         ps.update(decision=decision, detail=detail, checked=now_utc().isoformat())
         if decision == "merge":
             log("#%d has waited %d min at the front; merging ready #%d ahead of it"

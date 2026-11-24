@@ -386,6 +386,8 @@ class UnstickTest(Base):
         verdicts = {1: ("wait-ci", "x", {}), 2: ("wait-ci", "y", {}), 3: ("merge", "ok", {})}
         st = {"head_pr": 1, "head_since": (mt.now_utc() - mt.dt.timedelta(minutes=31)).isoformat()}
         with mock.patch.object(mt, "decide", side_effect=lambda p, s: verdicts[p["number"]]), \
+                mock.patch.object(mt, "fetch_pr_head"), \
+                mock.patch.object(mt, "changed_files", side_effect=lambda sha: {sha + ".rs"}), \
                 mock.patch.object(mt, "do_merge", return_value=True) as merge:
             self.assertTrue(mt.skip_ahead(self.queue(), st))
         self.assertEqual(merge.call_args[0][0]["number"], 3)
@@ -528,6 +530,40 @@ class BoardTest(Base):
         self.assertIn("c\\|d", body)
         self.assertIn("#9 Ready", body)
         self.assertEqual(body.count(mt.HANDOFF_START), 1)
+
+
+class SkipAheadOverlapTest(Base):
+    def test_ready_pr_sharing_files_with_head_does_not_jump(self):
+        repo = self.make_repo()
+        heads = {}
+        for name, files in (("head", {"crates/fx/lib.rs": "h\n", "docs/a.md": "h\n"}),
+                            ("same", {"crates/fx/lib.rs": "s\n"}),
+                            ("docs", {"docs/a.md": "d\n", "Cargo.lock": "d\n"}),
+                            ("other", {"crates/ui/x.rs": "o\n"})):
+            run(repo, "git", "checkout", "-q", "-b", name, "dev")
+            heads[name] = self.commit(repo, files, name)
+        run(repo, "git", "checkout", "-q", "dev")
+        q = [pr(number=1, headRefName="head", headRefOid=heads["head"]),
+             pr(number=2, headRefName="same", headRefOid=heads["same"]),
+             pr(number=3, headRefName="docs", headRefOid=heads["docs"]),
+             pr(number=4, headRefName="other", headRefOid=heads["other"])]
+        old = (mt.now_utc() - mt.dt.timedelta(minutes=45)).isoformat()
+        with mock.patch.object(mt, "decide", return_value=("merge", "ok", {})), \
+                mock.patch.object(mt, "fetch_pr_head"), \
+                mock.patch.object(mt, "do_merge", return_value=True) as merge:
+            st = {"head_pr": 1, "head_since": old}
+            self.assertTrue(mt.skip_ahead(q, st))
+            # #2 shares crates/fx/lib.rs with the head: waits. #3 only shares docs/ and
+            # Cargo.lock, which never count: it may go first.
+            self.assertEqual(merge.call_args[0][0]["number"], 3)
+            self.assertEqual(st["prs"]["2"]["decision"], "wait-head")
+            self.assertIn("crates/fx/lib.rs", st["prs"]["2"]["detail"])
+            merge.reset_mock()
+            self.assertTrue(mt.skip_ahead([q[0], q[1], q[3]], {"head_pr": 1, "head_since": old}))
+            self.assertEqual(merge.call_args[0][0]["number"], 4)
+            merge.reset_mock()
+            self.assertFalse(mt.skip_ahead(q[:2], {"head_pr": 1, "head_since": old}))
+            merge.assert_not_called()
 
 
 if __name__ == "__main__":
