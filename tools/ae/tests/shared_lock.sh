@@ -60,10 +60,6 @@ wait "$second"
 [[ -f "$test_dir/second" && ! -e "$lock" ]] || fail "second worker did not run and release the lock"
 
 rc=0
-"$AECTL" --instance default lock -- bash -c 'exit 23' || rc=$?
+"$AECTL" lock -- bash -c 'exit 23' || rc=$?
 [[ "$rc" -eq 23 && ! -e "$lock" ]] || fail "lost the command exit code or left a lock behind"
-if output=$("$AECTL" --instance codex-multi-test start 2>&1); then
-  fail "accepted an unsupported instance"
-fi
-[[ "$output" == *"named After Effects instances are unavailable"* ]] || fail "wrong instance error"
 echo "PASS: shared AE lock"

@@ -62,16 +62,10 @@ with_shared_lock() {
   exit $?
 }
 
-instance=default
-if [[ "${1:-}" == --instance ]]; then
-  [[ $# -ge 2 ]] || die "--instance requires a name"
-  instance="$2"; shift 2
-fi
 cmd="${1:-status}"; shift || true
 force=0; timeout=300; lock_timeout=1800; args=()
 while (( $# )); do
   case "$1" in
-    --instance) [[ $# -ge 2 ]] || die "--instance requires a name"; instance="$2"; shift ;;
     --force) force=1 ;;
     --timeout) [[ $# -ge 2 ]] || die "--timeout requires seconds"; timeout="$2"; shift ;;
     --lock-timeout)
@@ -82,7 +76,6 @@ while (( $# )); do
   esac
   shift
 done
-[[ "$instance" == default ]] || die "named After Effects instances are unavailable; use the shared session with 'aectl lock'"
 if [[ "$cmd" == lock ]]; then
   [[ ${#args[@]} -gt 0 ]] || die "usage: aectl lock [--lock-timeout <s>] -- command [args...]"
   with_shared_lock "${args[@]}"

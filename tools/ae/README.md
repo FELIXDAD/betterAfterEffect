@@ -67,7 +67,7 @@ tools/ae/aectl lock --lock-timeout 600 -- bash path/to/golden.sh
 
 它通过原子创建 `/private/tmp/bae-locks/ae.lock` 排队，与现有手动创建目录或文件的 worker 兼容。默认最多等 30 分钟，等待超时返回 1，拿到锁后返回所执行命令的退出码。命令结束时释放锁，无需单独解锁。若持锁进程被 SIGKILL，确认持有者和它启动的任务都已退出后，再清理遗留的锁。已经手动持有共享锁的脚本可以继续直接调用 `aectl`。
 
-`start` / `eval` / `run` / `stop` 仍使用 `/private/tmp/bae-ae-automation/lock.d` 串行执行单条命令。调用方用 `lock` 保证多条命令之间也没有别的共享锁持有者插队。实例参数省略或写 `--instance default` 均指向现有 AE，其他实例名会报错。
+`start` / `eval` / `run` / `stop` 仍使用 `/private/tmp/bae-ae-automation/lock.d` 串行执行单条命令。调用方用 `lock` 保证多条命令之间也没有别的共享锁持有者插队。
 
 ## 测试
 
