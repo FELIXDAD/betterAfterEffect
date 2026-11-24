@@ -2,7 +2,8 @@
 #
 # Every pull request push, on macOS arm64 and Windows x64: fmt (once), clippy on the
 # whole workspace, and the tests of the crates the PR changes plus everything that depends
-# on them (tools/ci/affected.py, from `cargo metadata`). Root manifests, the lockfile, the
+# on them (tools/ci/affected.py, from `cargo metadata`), without bae's acceptance suite.
+# Root manifests, the lockfile, the
 # toolchain, CI, xtask and vendored crates fall back to the whole workspace; a PR that
 # touches no crate (docs) builds nothing and still reports success. Target: about five
 # minutes. The full tier (ci.yml) runs the rest once the PR carries `merge-ready`.
@@ -116,15 +117,16 @@ jobs:
       - name: Test
         if: env.MODE != 'none'
         # Like the full tier's first test pass: Windows without the D3D12 debug layer (the
-        # full tier also runs the debug-layer pass).
+        # full tier also runs the debug-layer pass). The acceptance suite (bae's
+        # `acceptance::` tests, about 3 minutes on the macOS runner) runs in the full tier.
         env:
           BAE_GPU_VALIDATION: ${{ runner.os == 'Windows' && '0' || '' }}
         run: |
           if [ "$MODE" = full ]; then
-            cargo test --workspace --locked
+            cargo test --workspace --locked -- --skip acceptance::
           else
             args=()
             for p in $PACKAGES; do args+=(-p "$p"); done
             echo "Testing: $PACKAGES"
-            cargo test --locked "${args[@]}"
+            cargo test --locked "${args[@]}" -- --skip acceptance::
           fi

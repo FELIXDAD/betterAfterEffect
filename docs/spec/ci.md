@@ -10,7 +10,7 @@
 | `full / macOS arm64`、`full / Windows x64` | `.github/workflows/ci.yml` | 推送到 dev 或 main；PR 带 `merge-ready` 标签时的 labeled（加的就是这个标签）、synchronize、opened、reopened |
 
 - 快检查每次都会出结论：没有改到任何 crate 的 PR（纯文档等）也会跑这个 job，只是跳过编译，结论是 success，不会是 skipped。
-- PR 没有 `merge-ready` 标签时，full job 被跳过（结论 skipped），名字可能是没展开的 `full / ${{ matrix.name }}`。
+- PR 没有 `merge-ready` 标签时，full job 被跳过（结论 skipped），名字是没展开的 `full / ${{ matrix.name }}`，和 `full / macOS arm64` 这些名字不同，按名字取最新一条时不会被它盖住。
 - 合并脚本对每个检查名取 PR 当前 head 上最新的一条 check run（id 最大），**只认 success**；skipped、cancelled、没有记录都算不通过。同一个 head 上可能先有一条 skipped，加标签后再有一条 success。
 - 同一个 PR 推了新提交，旧的运行会被取消（cancelled）。没带标签而被跳过的 full 运行不会取消正在跑的 full。dev/main 上的 full 不取消，每次都跑完并保存构建缓存。
 - 合并脚本 update-branch 以后，PR 带着标签，synchronize 会自动重跑快检查和全量。
@@ -23,7 +23,7 @@
    - `none`：没有改到任何 crate，比如只改了 `docs/` 里没人读的文件、根目录的 `.md`、`tools/ae` 这类脚本。快检查跳过编译。
    - `crates`：只测改到的 crate，以及（用 `cargo metadata` 算出的）所有直接或间接依赖它们的 crate，正常、dev、build 依赖都算。
    - `full`：改了根 `Cargo.toml`、`Cargo.lock`、`rust-toolchain.toml` 等根目录的配置，或者 `.github/`、`.cargo/`、`xtask/`、`vendor/`，或者 `crates/`、`apps/`、`services/` 下不属于现有成员的路径（新增、删除、改名 crate），就测整个工作区。
-2. `fmt`（只在 macOS 上跑一次）、整个工作区的 `clippy --all-targets`、第 1 步算出的测试。Windows 上测试不开 D3D12 调试层（全量里另有一遍开调试层的）。
+2. `fmt`（只在 macOS 上跑一次）、整个工作区的 `clippy --all-targets`、第 1 步算出的测试。测试不跑验收套件（`apps/bae/src/acceptance`，测试名以 `acceptance::` 开头，在 macOS runner 上约 3 分钟），验收套件在全量里跑。Windows 上测试不开 D3D12 调试层（全量里另有一遍开调试层的）。
 
 **代码读的文档不算纯文档。** crate 源码里的字符串字面量提到的仓库路径（`include_str!("../../../../docs/reference/ae/menus.json")`、`concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/ui/ae-commands.md")`）改了，就当作那个 crate 改了。例如改 `docs/agent-guide/mcp-instructions/` 会测 `bae-agent` 和它的下游，改 `tools/size-budget/budget.toml` 会测 `xtask`。只认字符串里带 `/` 的路径，单独的 `"tools"`、`"docs"` 这种词不算。
 
