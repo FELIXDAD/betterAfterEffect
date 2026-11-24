@@ -112,8 +112,9 @@ pub fn file_menu_titles() -> Vec<String> {
 enum UserEvent {
     /// egui asked for a repaint after `delay`.
     Repaint { delay: Duration },
-    /// A native menu item was chosen.
-    Menu(muda::MenuEvent),
+    /// A native menu item was chosen; with the modifiers of the key press when
+    /// its key equivalent fired ([`menu::key_equivalent_modifiers`]).
+    Menu(muda::MenuEvent, Option<egui::Modifiers>),
     /// The GPU device was lost (not destroyed on purpose).
     DeviceLost,
     /// A screen reader or UI automation client asked for the accessibility
@@ -180,7 +181,8 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     {
         let proxy = proxy.clone();
         muda::MenuEvent::set_event_handler(Some(move |event| {
-            let _ = proxy.send_event(UserEvent::Menu(event));
+            let keys = menu::key_equivalent_modifiers();
+            let _ = proxy.send_event(UserEvent::Menu(event, keys));
         }));
     }
     // After the event loop exists (it registers winit's app delegate class), before
@@ -1219,8 +1221,18 @@ impl ApplicationHandler<UserEvent> for Shell {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::Repaint { delay } => self.schedule_repaint(delay),
-            UserEvent::Menu(event) => {
+            UserEvent::Menu(event, keys) => {
                 let id = event.id.as_ref();
+                // The key equivalent fired on a chord with more modifiers than
+                // its own (⌃⌥8 on the ⌃8 item): the UI's keymap gets that press.
+                let chord = self.menu.as_ref().and_then(|m| m.contributed_chord(id));
+                if let Some(press) = menu::key_press_for_ui(chord, keys)
+                    && let Some(view) = self.view.as_mut()
+                {
+                    view.egui_state.egui_input_mut().events.push(press);
+                    view.window.request_redraw();
+                    return;
+                }
                 let inv = self
                     .menu
                     .as_ref()
