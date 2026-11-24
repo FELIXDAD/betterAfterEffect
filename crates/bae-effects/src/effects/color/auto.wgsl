@@ -25,6 +25,8 @@ fn add_reference(bin: u32, rgb: vec3u, weight: u32) {
 @compute @workgroup_size(8, 8)
 fn auto_histogram(@builtin(global_invocation_id) id: vec3u, @builtin(workgroup_id) group: vec3u,
                   @builtin(local_invocation_index) lane: u32) {
+    for (var k = lane; k < 1024u; k += 64u) { atomicStore(&counts[k], 0u); }
+    workgroupBarrier();
     // Each workgroup accumulates its part of the full layer in a private histogram.
     for (var y = id.y; y < u.image.size.y; y += 128u) {
         for (var x = id.x; x < u.image.size.x; x += 128u) {
