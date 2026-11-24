@@ -707,15 +707,24 @@ impl ExecCtx<'_> {
 /// Shrinks `data.quad` (input texels, the content `rect` plus a margin) to the
 /// part of `rect` inside every half-plane of `clips`, keeping the margin.
 fn shrink_quad(data: &mut DrawData, rect: [f64; 4], clips: &[[f64; 4]]) {
+    let q = data.quad.map(f64::from);
+    let margin = [
+        rect[0] - q[0],
+        rect[1] - q[1],
+        q[2] - rect[2],
+        q[3] - rect[3],
+    ];
+    // The quad's margin is at least one target pixel in input texels; a cut
+    // whose coverage reaches past it (the piece drawn first) moves out by two.
+    let reach = 2.0 * margin.iter().copied().fold(0.0, f64::max);
     let mut poly = vec![
         DVec2::new(rect[0], rect[1]),
         DVec2::new(rect[2], rect[1]),
         DVec2::new(rect[2], rect[3]),
         DVec2::new(rect[0], rect[3]),
     ];
-    // Cuts whose coverage reaches past them (the piece drawn first) keep the
-    // quad's extent on that side.
-    for [a, b, c, _] in clips.iter().filter(|c| c[3] == 0.0) {
+    for [a, b, c, r] in clips {
+        let c = c + if *r > 0.0 { reach * a.hypot(*b) } else { 0.0 };
         let d = |p: DVec2| a * p.x + b * p.y + c;
         let mut out = Vec::with_capacity(poly.len() + 1);
         for i in 0..poly.len() {
@@ -733,13 +742,6 @@ fn shrink_quad(data: &mut DrawData, rect: [f64; 4], clips: &[[f64; 4]]) {
             return;
         }
     }
-    let q = data.quad.map(f64::from);
-    let margin = [
-        rect[0] - q[0],
-        rect[1] - q[1],
-        q[2] - rect[2],
-        q[3] - rect[3],
-    ];
     let (mut lo, mut hi) = (DVec2::splat(f64::MAX), DVec2::splat(f64::MIN));
     for p in &poly {
         lo = lo.min(*p);
