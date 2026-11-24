@@ -217,9 +217,11 @@ fn turbulent(p: vec2<f32>) -> vec2<f32> {
 
 fn waveform(x: f32, mode: i32) -> f32 {
     // The seven periodic shapes share a 2048-step phase table in AE 26.
-    let t = floor(fract(x) * 2048.) / 2048.;
+    // A division can round just below an exact table boundary on Metal or D3D.
+    let t = fract(floor(x * 2048. + 0.001) / 2048.);
     let tri = 4. * abs(t - 0.5) - 1.;
-    let circle = sqrt(max(0., 1. - pow(2. * fract(2. * t) - 1., 2.)));
+    let half_arc = 2. * fract(2. * t) - 1.;
+    let circle = sqrt(max(0., 1. - half_arc * half_arc));
     switch mode {
         case 2: {
             return select(1., -1., t < 0.5);
@@ -234,7 +236,8 @@ fn waveform(x: f32, mode: i32) -> f32 {
             return select(circle, -circle, t < 0.5);
         }
         case 6: {
-            return 2. * sqrt(max(0., 1. - pow(2. * t - 1., 2.))) - 1.;
+            let arc = 2. * t - 1.;
+            return 2. * sqrt(max(0., 1. - arc * arc)) - 1.;
         }
         case 7: {
             return select(1. - circle, circle - 1., t < 0.5);
@@ -245,16 +248,16 @@ fn waveform(x: f32, mode: i32) -> f32 {
         case 9: {
             return 0.35 * noise(vec3(t * val(3) * 0.75, 0.5, 0.25), true);
         }
-        default: {
-            return - sin(TAU * t);
-        }
+        default: {}
     }
+    return -sin(TAU * t);
 }
 
-fn wave(p: vec2<f32>) -> vec2<f32> {
+fn wave_displacement(p: vec2<f32>) -> vec2<f32> {
     let a = radians(val(4));
     let axis = vec2(sin(a), -cos(a));
-    let dir = select(axis, vec2(0.), abs(axis) < vec2(1e-6));
+    let cardinal = round(axis);
+    let dir = select(axis, cardinal, abs(axis - cardinal) < vec2(1e-6));
     let perp = vec2(-dir.y, dir.x);
     let xy = p - u.layer.xy;
     let phase = dot(xy, dir) / (2. * val(3) * u.scale) - val(5) * u.time + val(7) / 1440.;
@@ -289,7 +292,7 @@ fn wave(p: vec2<f32>) -> vec2<f32> {
         default: {
         }
     }
-    return p + perp * val(2) * u.scale * waveform(phase, i32(val(1))) * weight;
+    return perp * val(2) * u.scale * waveform(phase, i32(val(1))) * weight;
 }
 
 fn bulge(p: vec2<f32>) -> vec2<f32> {
@@ -317,73 +320,69 @@ fn bulge(p: vec2<f32>) -> vec2<f32> {
 
 fn radial(p: vec2<f32>) -> vec2<f32> {
     let size = u.layer.zw;
-    switch u.kind {
-        case TWIRL: {
-            let c = pt(3) + 0.5;
-            let d = p - c;
-            let r = length(d);
-            let radius = val(2) * 0.01 * max(size.x, size.y);
-            if r >= radius {
-                return p;
-            }
-            let t = mix(round(r), r, 0.35) / radius;
-            let floor_weight = mix(0.0939, 0.0974, clamp((val(2) - 30.) / 50., 0., 1.));
-            let falloff = max(0., (exp(-2.455 * t * t) - floor_weight) / (1. - floor_weight));
-            return c + rot(d, -radians(val(1)) * falloff);
+    if u.kind == TWIRL {
+        let c = pt(3) + 0.5;
+        let d = p - c;
+        let r = length(d);
+        let radius = val(2) * 0.01 * max(size.x, size.y);
+        if r >= radius {
+            return p;
         }
-        case SPHERIZE: {
-            let c = pt(2) + 0.5;
-            let d = p - c;
-            let r = length(d);
-            let radius = val(1) * u.scale;
-            if r >= radius || r == 0. {
-                return p;
-            }
-            let t = r / radius;
-            return c + d * t / sin(t * 0.25 * TAU);
-        }
-        case RIPPLE: {
-            let d = p - pt(2) - 0.5;
-            let r = length(d);
-            let radius = val(1) * 0.01 * max(size.x, size.y);
-            if radius == 0. || r == 0. {
-                return p;
-            }
-            let t = r / radius;
-            let k = mix(1.801, 1.875, clamp((val(1) - 30.) / 50., 0., 1.));
-            let envelope = max(0., (exp(-k * t * t) - 0.093) / 0.907);
-            let phase = 0.5 * r / (val(5) * u.scale) - val(4) * u.time + val(7) / 360.;
-            let displacement = 0.25 * val(6) * u.scale * envelope * cos(TAU * phase);
-            return p + select(vec2(1.), d / r, val(3) == 2.) * displacement;
-        }
-        default: {
-            let d = p - pt(4);
-            let r = length(d);
-            let a = radians(val(1)) * 0.5;
-            if a < 0.00001 || r == 0. {
-                return p;
-            }
-            var span = size.x * 0.5;
-            if val(3) == 2. {
-                span = size.y * 0.5;
-            } else if val(3) == 3. {
-                span = length(size) * 0.5;
-            }
-            let k = tan(a) / span;
-            let rr = r * k;
-            let reverse = val(2) > 0.;
-            var zoom2 = 1.;
-            if val(5) > 0. {
-                let corner = length(0.5 * size) * k;
-                zoom2 = select(1. + 0.384 * corner * corner, 1. / (1. + corner * corner), reverse);
-            }
-            let denom = zoom2 + select(-rr * rr, rr * rr, reverse);
-            if denom <= 0. {
-                return vec2(-1e7);
-            }
-            return pt(4) + d * inverseSqrt(denom);
-        }
+        let t = mix(round(r), r, 0.35) / radius;
+        let floor_weight = mix(0.0939, 0.0974, clamp((val(2) - 30.) / 50., 0., 1.));
+        let falloff = max(0., (exp(-2.455 * t * t) - floor_weight) / (1. - floor_weight));
+        return c + rot(d, -radians(val(1)) * falloff);
     }
+    if u.kind == SPHERIZE {
+        let c = pt(2) + 0.5;
+        let d = p - c;
+        let r = length(d);
+        let radius = val(1) * u.scale;
+        if r >= radius || r == 0. {
+            return p;
+        }
+        let t = r / radius;
+        return c + d * t / sin(t * 0.25 * TAU);
+    }
+    if u.kind == RIPPLE {
+        let d = p - pt(2) - 0.5;
+        let r = length(d);
+        let radius = val(1) * 0.01 * max(size.x, size.y);
+        if radius == 0. || r == 0. {
+            return p;
+        }
+        let t = r / radius;
+        let k = mix(1.801, 1.875, clamp((val(1) - 30.) / 50., 0., 1.));
+        let envelope = max(0., (exp(-k * t * t) - 0.093) / 0.907);
+        let phase = 0.5 * r / (val(5) * u.scale) - val(4) * u.time + val(7) / 360.;
+        let displacement = 0.25 * val(6) * u.scale * envelope * cos(TAU * phase);
+        return p + select(vec2(1.), d / r, val(3) == 2.) * displacement;
+    }
+    let d = p - pt(4);
+    let r = length(d);
+    let a = radians(val(1)) * 0.5;
+    if a < 0.00001 || r == 0. {
+        return p;
+    }
+    var span = size.x * 0.5;
+    if val(3) == 2. {
+        span = size.y * 0.5;
+    } else if val(3) == 3. {
+        span = length(size) * 0.5;
+    }
+    let k = tan(a) / span;
+    let rr = r * k;
+    let reverse = val(2) > 0.;
+    var zoom2 = 1.;
+    if val(5) > 0. {
+        let corner = length(0.5 * size) * k;
+        zoom2 = select(1. + 0.384 * corner * corner, 1. / (1. + corner * corner), reverse);
+    }
+    let denom = zoom2 + select(-rr * rr, rr * rr, reverse);
+    if denom <= 0. {
+        return vec2(-1e7);
+    }
+    return pt(4) + d * inverseSqrt(denom);
 }
 
 fn polar(p: vec2<f32>) -> vec2<f32> {
@@ -408,7 +407,7 @@ fn wave_color(p: vec2<f32>) -> vec4<f32> {
         for (var x = 0; x < count; x++) {
             let sub = p - 0.5 + (vec2<f32>(f32(x), f32(y)) + 0.5) / f32(count);
             let probe = sub + 0.5 / f32(count);
-            let displacement = floor((wave(probe) - probe) * f32(count) + 0.0001) / f32(count);
+            let displacement = floor(wave_displacement(probe) * f32(count) + 0.0001) / f32(count);
             c += texel(vec2<i32>(floor(sub + displacement)), false);
         }
     }
