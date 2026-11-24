@@ -384,6 +384,49 @@ impl TimelinePanel {
                     theme::body(),
                     color::TEXT,
                 );
+                // Text: "Animate:" (a new animator); an animator: "Add:" (AE).
+                let animator = id.strip_suffix("#animator");
+                if (id.ends_with("#text") || animator.is_some()) && !query::is_locked(stage, layer)
+                {
+                    let title = if animator.is_some() {
+                        "Add:"
+                    } else {
+                        "Animate:"
+                    };
+                    let b = Rect::from_min_size(
+                        pos2(l + cols.switches + 4.0, rect.top() + 2.0),
+                        vec2(72.0, ROW_H - 4.0),
+                    );
+                    let bresp = ui.interact(b, rid("animate"), Sense::click()).labeled(
+                        egui::WidgetType::Button,
+                        &bae_ui::a11y::context(&[&layer_ctx, tr(title)]),
+                    );
+                    ui.painter().text(
+                        b.left_center(),
+                        Align2::LEFT_CENTER,
+                        format!("{} {}", tr(title), widgets::SUBMENU_ARROW),
+                        theme::small(),
+                        if bresp.hovered() {
+                            color::TEXT_STRONG
+                        } else {
+                            color::TEXT_DIM
+                        },
+                    );
+                    if bresp.clicked() && !layer_selected {
+                        select_layer(session, stage, layer, egui::Modifiers::NONE);
+                    }
+                    let animator = animator.and_then(|a| PrimPath::new(a).ok());
+                    crate::common::popup_menu(&bresp, &mut |ui| match &animator {
+                        Some(a) => menus::animator_add_menu(ui, cx, a),
+                        None => {
+                            if let Some(n) = menus::catalog_entry("Animation", "Animate Text")
+                                && let crate::catalog::Node::Submenu(sub) = n
+                            {
+                                menus::catalog_nodes(ui, cx, sub.children);
+                            }
+                        }
+                    });
+                }
             }
             RowKind::Prop { path, attr, label } => {
                 self.prop_row(
@@ -610,8 +653,30 @@ impl TimelinePanel {
             } else {
                 2
             };
-            let edit =
-                common::value_editor(&mut child, id.with("ed"), attr, &value, dims, &prop_name);
+            // Choices (a text selector's Units, Based On, Mode, Shape): a dropdown.
+            let options = match &value {
+                bae_model::Value::Enum(_) => stage
+                    .prim(path)
+                    .and_then(|v| v.prim_type().cloned())
+                    .and_then(|t| bae_model::schema::attr_def(&t, attr))
+                    .map(|d| d.options)
+                    .unwrap_or_default(),
+                _ => &[],
+            };
+            let edit = if let (bae_model::Value::Enum(cur), false) = (&value, options.is_empty()) {
+                let names: Vec<&str> = options.iter().map(|o| option_label(o)).collect();
+                let mut sel = options.iter().position(|o| o == cur).unwrap_or(0);
+                let before = sel;
+                widgets::dropdown(&mut child, id.with("choice"), &mut sel, &names, 160.0)
+                    .labeled_value(egui::WidgetType::ComboBox, &prop_name, names[sel]);
+                if sel != before {
+                    common::Edit::Commit(bae_model::Value::Enum(options[sel].into()))
+                } else {
+                    common::Edit::None
+                }
+            } else {
+                common::value_editor(&mut child, id.with("ed"), attr, &value, dims, &prop_name)
+            };
             common::apply_edit(cx, session, path, attr, now, edit);
         }
         // Keyframes (layer bar mode; the Graph Editor draws its own).
@@ -740,4 +805,39 @@ pub(super) fn default_expression(attr: &str) -> String {
         "transform:opacity" => "transform.opacity".into(),
         other => format!("value // {other}"),
     }
+}
+
+/// The name of a choice token in the UI language. A table of its own: some of
+/// these words read differently elsewhere in AE's Chinese UI (a text selector's
+/// Intersect is 相交, a mask's 交集; its Add is 相加, the shape tools' 添加).
+fn option_label(token: &str) -> &'static str {
+    const NAMES: [(&str, &str, &str); 18] = [
+        ("percentage", "Percentage", "百分比"),
+        ("index", "Index", "索引"),
+        ("characters", "Characters", "字符"),
+        (
+            "characters_excluding_spaces",
+            "Characters Excluding Spaces",
+            "不包含空格的字符",
+        ),
+        ("words", "Words", "词"),
+        ("lines", "Lines", "行"),
+        ("add", "Add", "相加"),
+        ("subtract", "Subtract", "相减"),
+        ("intersect", "Intersect", "相交"),
+        ("min", "Min", "最小值"),
+        ("max", "Max", "最大值"),
+        ("difference", "Difference", "差值"),
+        ("square", "Square", "正方形"),
+        ("ramp_up", "Ramp Up", "上斜坡"),
+        ("ramp_down", "Ramp Down", "下斜坡"),
+        ("triangle", "Triangle", "三角形"),
+        ("round", "Round", "圆形"),
+        ("smooth", "Smooth", "平滑"),
+    ];
+    let zh = bae_ui::i18n::lang() == bae_ui::i18n::Lang::Zh;
+    NAMES
+        .iter()
+        .find(|(t, _, _)| *t == token)
+        .map_or("", |(_, en, z)| if zh { z } else { en })
 }

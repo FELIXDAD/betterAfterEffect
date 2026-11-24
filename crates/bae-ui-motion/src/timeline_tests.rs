@@ -1629,6 +1629,79 @@ fn dragging_the_pale_source_bar_slip_edits() {
     assert_eq!(query::layer_timing(&h.stage, &pre).start_time, Time::ZERO);
 }
 
+#[test]
+fn animate_text_adds_an_animator_that_the_timeline_shows() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let text = path(
+        &h.run(
+            "layer.create",
+            json!({"comp": comp, "kind": "text", "text": "Hi"}),
+        )["path"],
+    );
+    h.session().lock().selected_layers = vec![text.clone()];
+    let mut tl = h.bars();
+    h.session().lock().selected_layers = vec![text.clone()];
+    // Animation > Animate Text > Position: one command, one undo step.
+    let r = h.action(
+        &mut tl,
+        Invocation::with_params(ids::ANIMATE_TEXT, json!({"property": "position"})),
+    );
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "text.animate");
+    h.apply(&r);
+    // Text > Animator 1 > Range Selector 1 (Start, End, Offset, Advanced), Position.
+    fn labels(nodes: &[crate::props::Node], out: &mut Vec<String>) {
+        for n in nodes {
+            match n {
+                crate::props::Node::Group {
+                    label, children, ..
+                } => {
+                    out.push(label.clone());
+                    labels(children, out);
+                }
+                crate::props::Node::Prop { label, .. } => out.push(label.clone()),
+            }
+        }
+    }
+    let mut got = Vec::new();
+    labels(&crate::props::layer_tree(&h.stage, &text), &mut got);
+    for want in [
+        "Animator 1",
+        "Range Selector 1",
+        "Start",
+        "Advanced",
+        "Based On",
+        "Ease Low",
+        "Position",
+    ] {
+        assert!(got.iter().any(|g| g == want), "{want} in {got:?}");
+    }
+    assert!(
+        !got.iter().any(|g| g == "Fill Color"),
+        "only what was added"
+    );
+    // Add Text Selector and Remove All Text Animators act on the selected text layer.
+    h.apply(&h.action(&mut tl, Invocation::new(ids::ADD_TEXT_SELECTOR)));
+    let a = bae_motion::text_animators::animators_of(&h.stage, &text);
+    assert_eq!(
+        bae_motion::text_animators::selectors_of(&h.stage, &a[0]).len(),
+        2
+    );
+    h.apply(&h.action(&mut tl, Invocation::new(ids::REMOVE_ALL_TEXT_ANIMATORS)));
+    assert!(bae_motion::text_animators::animators_of(&h.stage, &text).is_empty());
+    // The catalog greys what does not render yet.
+    let animate = |p: &str| {
+        crate::catalog::menu_items()
+            .into_iter()
+            .find(|(_, it)| it.action == ids::ANIMATE_TEXT && it.params.contains(p))
+            .map(|(_, it)| it.status.works())
+    };
+    assert_eq!(animate("\"position\""), Some(true));
+    assert_eq!(animate("\"skew\""), Some(false));
+}
+
 /// Frame cost with the B1-sized project (61 layers × Position, Scale, Rotation with
 /// three eased keys each), every layer selected so the Graph Editor shows 183
 /// properties. Run with
