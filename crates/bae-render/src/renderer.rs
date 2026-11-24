@@ -188,6 +188,17 @@ impl Renderer {
         &mut self.effects
     }
 
+    /// Takes the effects of the app's `Registry<dyn Effect>` (built-in and
+    /// plugin effects, see [`EffectLibrary::sync`]); cached frames are dropped
+    /// when the set changed. Cheap when nothing changed: call every frame.
+    pub fn sync_effects(&mut self, registry: &bae_app::Registry<dyn crate::Effect>) -> bool {
+        let changed = self.effects.sync(registry);
+        if changed {
+            self.frames.clear();
+        }
+        changed
+    }
+
     /// Layer source providers (05's vectors and text, plugin generators).
     pub fn providers_mut(&mut self) -> &mut SourceProviders {
         &mut self.providers

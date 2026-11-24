@@ -111,6 +111,8 @@ pub struct EvaluatedLayer {
 pub struct LayerSwitches {
     /// Video switch (eye).
     pub enabled: bool,
+    /// Effect switch (fx): the layer's effects render (AE default on).
+    pub effects: bool,
     pub solo: bool,
     pub shy: bool,
     pub guide: bool,

@@ -493,6 +493,9 @@ fn compile_layer(
         enabled: setting(v, lt, l::ENABLED)
             .and_then(|v| v.as_bool())
             .unwrap_or(true),
+        effects: setting(v, lt, l::EFFECTS_ENABLED)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
         solo: setting_bool(v, lt, l::SOLO),
         shy: setting_bool(v, lt, l::SHY),
         guide: setting_bool(v, lt, l::GUIDE),

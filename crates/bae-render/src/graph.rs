@@ -11,6 +11,11 @@
 //! track matte layer → matte Composite ─────────────┘   transform · opacity · matte · blend
 //! ```
 //!
+//! Adjustment layers: the layers below are composited into a backdrop, the
+//! backdrop runs through the adjustment layer's effects, and a [`MixNode`]
+//! blends the result back by the adjustment layer's own coverage (its pixels'
+//! alpha with masks, track matte and opacity). Layers above draw on top.
+//!
 //! Masks: a [`MaskNode`] computes the layer's combined mask in layer space. Without
 //! effects the layer op samples it while drawing (no extra pass over the layer);
 //! with effects a one-op layer-space Composite applies it before the first effect.
@@ -142,6 +147,22 @@ pub enum NodeKind {
     Effect(EffectNode),
     /// A layer's masks combined into one coverage image (layer space).
     Mask(MaskNode),
+    /// An adjustment layer's result mixed into its backdrop.
+    Mix(MixNode),
+}
+
+/// `base + (over − base) · coverage.alpha`, per pixel (all three in the
+/// node's space; pixels outside an input's rect read as transparent).
+#[derive(Debug)]
+pub struct MixNode {
+    /// The layer (diagnostics).
+    pub layer: PrimPath,
+    /// The backdrop: the layers below the adjustment layer.
+    pub base: NodeId,
+    /// The backdrop after the adjustment layer's effects.
+    pub over: NodeId,
+    /// The adjustment layer's own pixels (only alpha is read).
+    pub coverage: NodeId,
 }
 
 impl NodeKind {
@@ -162,6 +183,11 @@ impl NodeKind {
                 }
             }
             NodeKind::Effect(e) => f(e.input),
+            NodeKind::Mix(m) => {
+                f(m.base);
+                f(m.over);
+                f(m.coverage);
+            }
             NodeKind::Fill(_) | NodeKind::Source(_) | NodeKind::Mask(_) => {}
         }
     }
@@ -174,6 +200,7 @@ impl NodeKind {
             NodeKind::Source(_) => "source",
             NodeKind::Effect(_) => "effect",
             NodeKind::Mask(_) => "mask",
+            NodeKind::Mix(_) => "mix",
         }
     }
 }
@@ -402,6 +429,7 @@ pub fn build(
         nodes: Vec::new(),
         dedup: FxHashMap::default(),
         warnings: Vec::new(),
+        skip_effects_of: None,
     };
     let output = builder.composite(comp, rect, scale, 0, false)?;
     Ok(RenderGraph {
@@ -432,6 +460,9 @@ struct Builder<'a> {
     nodes: Vec<Node>,
     dedup: FxHashMap<u64, NodeId>,
     warnings: Vec<String>,
+    /// While planning an adjustment layer's coverage: that layer's effects
+    /// apply to the backdrop, not to its own pixels.
+    skip_effects_of: Option<PrimPath>,
 }
 
 /// The content of a layer, planned: its bounds (in layer texel units) and how
@@ -483,10 +514,7 @@ impl Builder<'_> {
                     continue;
                 }
                 if layer.adjustment {
-                    self.warn(format!(
-                        "{}: adjustment layers are not rendered yet",
-                        layer.path
-                    ));
+                    ops = self.adjustment(comp, index, rect, scale, depth, ops)?;
                     continue;
                 }
                 let mut visiting = vec![index];
@@ -910,15 +938,196 @@ impl Builder<'_> {
         })))
     }
 
+    // ---- Adjustment layers ---------------------------------------------------
+
+    /// Adjustment layer `index` of `comp` applied to the layers below it
+    /// (`below`, drawn into a composite covering `canvas`). Returns the ops
+    /// that replace `below`: one draw of the adjusted backdrop.
+    ///
+    /// The effects see the backdrop in comp space (AE renders adjustment
+    /// effects on the comp-sized composite below; outside the comp it is
+    /// transparent). Without enabled effects the layer changes nothing.
+    fn adjustment(
+        &mut self,
+        comp: &RenderComp,
+        index: usize,
+        canvas: IRect,
+        scale: f64,
+        depth: usize,
+        below: Vec<LayerOp>,
+    ) -> Result<Vec<LayerOp>, RenderError> {
+        let layer = &comp.layers[index];
+        let effects = self.plan_effects(layer);
+        if effects.is_empty() || canvas.is_empty() || layer.opacity <= 0.0 {
+            return Ok(below);
+        }
+        if layer.blend_mode.effective() != BlendMode::Normal {
+            self.warn(format!(
+                "{}: adjustment layers blend in Normal mode for now (`{}`)",
+                layer.path, layer.blend_mode
+            ));
+        }
+        // Coverage: the layer's own pixels through its transform, masks,
+        // matte and opacity, without its effects.
+        self.skip_effects_of = Some(layer.path.clone());
+        let mut visiting = vec![index];
+        let coverage = self.layer_op(comp, index, canvas, scale, depth, &mut visiting);
+        self.skip_effects_of = None;
+        let coverage = match coverage? {
+            // No pixels of its own (no source): the whole comp.
+            None if matches!(layer.content, LayerContent::None) => None,
+            // Its pixels miss the canvas: nothing to adjust here.
+            None => return Ok(below),
+            Some(op) if covers(&op, canvas, scale) => None,
+            Some(mut op) => {
+                op.blend = BlendMode::Normal;
+                op.preserve_transparency = false;
+                Some(op)
+            }
+        };
+
+        let comp_px = comp.rect();
+        let domain = units(&comp_px, scale);
+        let frame = EffectFrame {
+            time: layer.time,
+            scale: 1.0 / scale,
+            layer_bounds: comp_px.round_out(),
+            frame_rate: comp.frame_rate,
+            time_step: comp.frame_rate.frame_duration(),
+            linear: self.linear,
+            purpose: self.purpose,
+            float: !self.clamp,
+            shutter: comp.shutter,
+        };
+        // Needed regions, backwards from the canvas through the effects.
+        let mut rois = vec![canvas; effects.len() + 1];
+        for i in (0..effects.len()).rev() {
+            let params = frame.params(&effects[i].1);
+            rois[i] = effects[i]
+                .0
+                .input_roi(&params, rois[i + 1])
+                .intersect(&domain);
+        }
+        let base_rect = rois[0].union(&canvas).intersect(&domain);
+
+        let mut h = FxHasher::default();
+        "adjustment base".hash(&mut h);
+        comp.hash_content(&mut h);
+        index.hash(&mut h);
+        base_rect.hash(&mut h);
+        scale.to_bits().hash(&mut h);
+        self.clamp.hash(&mut h);
+        let base = self.push(Node {
+            kind: NodeKind::Composite(CompositeNode {
+                prim: comp.path.clone(),
+                time: comp.time,
+                ops: below,
+                clamp: self.clamp,
+            }),
+            rect: base_rect,
+            pixel_scale: scale,
+            key: h.finish(),
+            cacheable: false,
+        });
+        let mut over = base;
+        for (i, (effect, instance)) in effects.into_iter().enumerate() {
+            let rect = rois[i + 1];
+            let mut h = FxHasher::default();
+            "adjustment effect".hash(&mut h);
+            self.nodes[over.index()].key.hash(&mut h);
+            layer.time.hash(&mut h);
+            crate::input::hash_value(&bae_model::Value::String(instance.effect.clone()), &mut h);
+            for (id, value) in &instance.params {
+                id.hash(&mut h);
+                crate::input::hash_value(value, &mut h);
+            }
+            rect.hash(&mut h);
+            over = self.push(Node {
+                kind: NodeKind::Effect(EffectNode {
+                    layer: layer.path.clone(),
+                    effect,
+                    instance,
+                    frame,
+                    input: over,
+                }),
+                rect,
+                pixel_scale: scale,
+                key: h.finish(),
+                cacheable: true,
+            });
+        }
+        let out = match coverage {
+            None => over,
+            Some(op) => {
+                let mut h = FxHasher::default();
+                "adjustment coverage".hash(&mut h);
+                comp.hash_content(&mut h);
+                index.hash(&mut h);
+                canvas.hash(&mut h);
+                scale.to_bits().hash(&mut h);
+                let cover = self.push(Node {
+                    kind: NodeKind::Composite(CompositeNode {
+                        prim: layer.path.clone(),
+                        time: comp.time,
+                        ops: vec![op],
+                        clamp: self.clamp,
+                    }),
+                    rect: canvas,
+                    pixel_scale: scale,
+                    key: h.finish(),
+                    cacheable: false,
+                });
+                let key = hash_of(&(
+                    "adjustment mix",
+                    self.nodes[base.index()].key,
+                    self.nodes[over.index()].key,
+                    self.nodes[cover.index()].key,
+                    canvas,
+                ));
+                self.push(Node {
+                    kind: NodeKind::Mix(MixNode {
+                        layer: layer.path.clone(),
+                        base,
+                        over,
+                        coverage: cover,
+                    }),
+                    rect: canvas,
+                    pixel_scale: scale,
+                    key,
+                    cacheable: false,
+                })
+            }
+        };
+        let canvas_px = Rect::new(
+            f64::from(canvas.x0) * scale,
+            f64::from(canvas.y0) * scale,
+            f64::from(canvas.x1) * scale,
+            f64::from(canvas.y1) * scale,
+        );
+        Ok(vec![LayerOp {
+            layer: layer.path.clone(),
+            input: OpInput::Image(out),
+            transform: DAffine2::IDENTITY,
+            opacity: 1.0,
+            blend: BlendMode::Normal,
+            preserve_transparency: false,
+            matte: None,
+            mask: None,
+            bounds: canvas,
+            content: canvas_px,
+        }])
+    }
+
     fn plan_content(
         &mut self,
         layer: &RenderLayer,
         time: Time,
     ) -> Result<Option<Content>, RenderError> {
-        let has_effects = layer
-            .effects
-            .iter()
-            .any(|e| e.enabled && self.effects.get(&e.effect).is_some());
+        let has_effects = self.skip_effects_of.as_ref() != Some(&layer.path)
+            && layer
+                .effects
+                .iter()
+                .any(|e| e.enabled && self.effects.get(&e.effect).is_some());
         Ok(match &layer.content {
             LayerContent::None => None,
             LayerContent::Solid {
@@ -974,6 +1183,9 @@ impl Builder<'_> {
 
     fn plan_effects(&mut self, layer: &RenderLayer) -> Vec<(Arc<dyn Effect>, RenderEffect)> {
         let mut out = Vec::new();
+        if self.skip_effects_of.as_ref() == Some(&layer.path) {
+            return out;
+        }
         for instance in layer.effects.iter().filter(|e| e.enabled) {
             match self.effects.get(&instance.effect) {
                 Some(effect) => out.push((effect.clone(), instance.clone())),
@@ -985,6 +1197,29 @@ impl Builder<'_> {
         }
         out
     }
+}
+
+/// Whether `op` (an adjustment layer's coverage draw) is fully opaque over all
+/// of `canvas` (composite texels at `scale`): an opaque solid, no mask or
+/// matte, full opacity, and an axis-aligned transform whose image of the solid
+/// contains the canvas. The mix is skipped then.
+fn covers(op: &LayerOp, canvas: IRect, scale: f64) -> bool {
+    let OpInput::Solid { color, rect } = &op.input else {
+        return false;
+    };
+    if color[3] < 1.0 || op.opacity < 1.0 || op.mask.is_some() || op.matte.is_some() {
+        return false;
+    }
+    let t = op.transform;
+    if t.matrix2.x_axis.y.abs() > 1e-9 || t.matrix2.y_axis.x.abs() > 1e-9 {
+        return false;
+    }
+    let image = rect.transformed_bounds(&t);
+    let need = canvas.to_rect();
+    image.x0 <= need.x0 * scale
+        && image.y0 <= need.y0 * scale
+        && image.x1 >= need.x1 * scale
+        && image.y1 >= need.y1 * scale
 }
 
 /// Texels per layer pixel a source should deliver: the layer's magnification on
