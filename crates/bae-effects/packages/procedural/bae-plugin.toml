@@ -1,0 +1,234 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "four-color-gradient"
+name = "4-Color Gradient"
+category = "Generate"
+implementation = "wgsl"
+ae_match_names = ["ADBE 4ColorGradient"]
+keywords = ["4-color", "gradient"]
+shader = "shaders/four_color_gradient.wgsl"
+includes = ["shaders/blend.wgsl"]
+
+[[effect.param]]
+id = 11
+key = "positions_colors"
+type = "group"
+name = "Positions & Colors"
+end_id = 12
+
+[[effect.param]]
+id = 1
+key = "point_1"
+type = "point"
+name = "Point 1"
+group = "positions_colors"
+default = [0.1, 0.1]
+
+[[effect.param]]
+id = 2
+key = "color_1"
+type = "color"
+name = "Color 1"
+group = "positions_colors"
+default = [1, 1, 0, 1]
+
+[[effect.param]]
+id = 3
+key = "point_2"
+type = "point"
+name = "Point 2"
+group = "positions_colors"
+default = [0.9, 0.1]
+
+[[effect.param]]
+id = 4
+key = "color_2"
+type = "color"
+name = "Color 2"
+group = "positions_colors"
+default = [0, 1, 0, 1]
+
+[[effect.param]]
+id = 5
+key = "point_3"
+type = "point"
+name = "Point 3"
+group = "positions_colors"
+default = [0.1, 0.9]
+
+[[effect.param]]
+id = 6
+key = "color_3"
+type = "color"
+name = "Color 3"
+group = "positions_colors"
+default = [1, 0, 1, 1]
+
+[[effect.param]]
+id = 7
+key = "point_4"
+type = "point"
+name = "Point 4"
+group = "positions_colors"
+default = [0.9, 0.9]
+
+[[effect.param]]
+id = 8
+key = "color_4"
+type = "color"
+name = "Color 4"
+group = "positions_colors"
+default = [0, 0, 1, 1]
+
+[[effect.param]]
+id = 9
+key = "blend"
+type = "float"
+name = "Blend"
+default = 100
+range = [5, 10000]
+
+[[effect.param]]
+id = 10
+key = "jitter"
+type = "float"
+name = "Jitter"
+default = 0
+range = [0, 500]
+
+[[effect.param]]
+id = 13
+key = "opacity"
+type = "float"
+name = "Opacity"
+default = 100
+range = [0, 100]
+
+[[effect.param]]
+id = 14
+key = "blending_mode"
+type = "popup"
+name = "Blending Mode"
+default = 1
+choices = ["None", "Normal", "(-", "Add", "Multiply", "Screen", "Overlay", "Soft Light", "Hard Light", "(-", "Color Dodge", "Color Burn", "(-", "Darken", "Lighten", "Difference", "Exclusion", "(-", "Hue", "Saturation", "Color", "Luminosity"]
+
+[[effect]]
+id = "grid"
+name = "Grid"
+category = "Generate"
+implementation = "wgsl"
+ae_match_names = ["ADBE Grid"]
+keywords = ["grid"]
+shader = "shaders/grid.wgsl"
+includes = ["shaders/blend.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "anchor"
+type = "point"
+name = "Anchor"
+default = [0.5, 0.5]
+
+[[effect.param]]
+id = 2
+key = "size_from"
+type = "popup"
+name = "Size From"
+default = 1
+choices = ["Corner Point", "Width Slider", "Width & Height Sliders"]
+
+[[effect.param]]
+id = 3
+key = "corner"
+type = "point"
+name = "Corner"
+default = [0.6, 0.6]
+
+[[effect.param]]
+id = 4
+key = "width"
+type = "float"
+name = "Width"
+default = 32
+range = [1, 4000]
+
+[[effect.param]]
+id = 5
+key = "height"
+type = "float"
+name = "Height"
+default = 24
+range = [1, 4000]
+
+[[effect.param]]
+id = 6
+key = "border"
+type = "float"
+name = "Border"
+default = 5
+range = [0, 2000]
+
+[[effect.param]]
+id = 7
+key = "feather"
+type = "group"
+name = "Feather"
+end_id = 10
+
+[[effect.param]]
+id = 8
+key = "feather_width"
+type = "float"
+name = "Width"
+group = "feather"
+default = 0
+range = [0, 400]
+
+[[effect.param]]
+id = 9
+key = "feather_height"
+type = "float"
+name = "Height"
+group = "feather"
+default = 0
+range = [0, 400]
+
+[[effect.param]]
+id = 11
+key = "invert_grid"
+type = "checkbox"
+name = "Invert Grid"
+default = false
+
+[[effect.param]]
+id = 12
+key = "color"
+type = "color"
+name = "Color"
+default = [1, 1, 1, 1]
+
+[[effect.param]]
+id = 13
+key = "opacity"
+type = "float"
+name = "Opacity"
+default = 100
+range = [0, 100]
+
+[[effect.param]]
+id = 14
+key = "blending_mode"
+type = "popup"
+name = "Blending Mode"
+default = 1
+choices = ["None", "Normal", "Stencil Alpha", "(-", "Add", "Multiply", "Screen", "Overlay", "Soft Light", "Hard Light", "(-", "Color Dodge", "Color Burn", "(-", "Darken", "Lighten", "Difference", "Exclusion", "(-", "Hue", "Saturation", "Color", "Luminosity"]

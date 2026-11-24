@@ -17,7 +17,12 @@
 | `ADBE HUE SATURATION` | 色相/饱和度 | 已实现 | 声明式 | 主色相/饱和度/亮度和彩色化；"通道控制"选红色等时把主值限定到对应色相范围（AE 的各范围值存在参数 3 的任意数据里，尚未解码） |
 | `ADBE Brightness & Contrast 2` | 亮度和对比度 | 已实现 | 声明式 | 新版曲线是近似公式，与 AE 26 差 ≤ 8 级（改用实测曲线表，进行中）；旧版为线性（差 0） |
 | `ADBE Exposure2` | 曝光度 | 已实现 | 声明式 | 非线性工作空间按纯幂 2.4 转线性光（AE 26 实测，差 0） |
-| `ADBE CurvesCustom` | 曲线 | 计划 | | |
+| `ADBE CurvesCustom` | 曲线 | 已实现 | `bae.effects/curves`（Rust） | 参数 1 支持 BAE 五通道点列表，AE 自定义曲线数据的导入待接入。 |
+| `ADBE Color Balance (HLS)` | 颜色平衡 (HLS) | 已实现 | `bae.effects/color-balance-hls` | 色相、亮度、饱和度。 |
+| `ADBE Change Color` | 更改颜色 | 已实现 | `bae.effects/change-color` | 柔化与色度蒙版的边缘有舍入差异。 |
+| `ADBE Change To Color` | 更改为颜色 | 已实现 | `bae.effects/change-to-color` | 支持四种分量组合及两种替换方式。 |
+| `ADBE CHANNEL MIXER` | 通道混合器 | 已实现 | `bae.effects/channel-mixer` | 支持单色和浮点超白。 |
+| `ADBE ShadowHighlight` | 阴影/高光 | 已实现 | `bae.effects/shadow-highlight`（Rust） | 本帧自动及手动数量、局部半径。瞬时平滑及场景检测待跨帧输入。 |
 | `ADBE Fill` | 填充 | 计划 | | |
 | `ADBE Ramp` | 梯度渐变 | 计划 | | |
 | `ADBE 4ColorGradient` | 四色渐变 | 计划 | | |

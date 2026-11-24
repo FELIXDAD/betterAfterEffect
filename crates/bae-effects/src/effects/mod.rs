@@ -10,6 +10,7 @@ pub(crate) mod set_matte;
 
 pub use blur::{BoxBlur, GaussianBlur};
 
+pub(crate) mod color;
 pub mod distort;
 pub mod spatial;
 
@@ -19,4 +20,12 @@ pub(crate) fn prewarm(
 ) -> Result<(), bae_render::RenderError> {
     set_matte::prewarm(rt, format)?;
     morphology::prewarm(rt, format)
+}
+
+/// Localized dropdown options for the Color Correction Rust effects.
+pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static str]> {
+    match (match_name, param_id) {
+        ("ADBE CurvesCustom", 2) => Some(&["RGB", "红色", "绿色", "蓝色", "Alpha"]),
+        _ => None,
+    }
 }

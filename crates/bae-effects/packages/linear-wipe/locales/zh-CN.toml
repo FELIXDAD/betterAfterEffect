@@ -1,0 +1,8 @@
+[effect.linear-wipe]
+name = "线性擦除"
+keywords = ["线性擦除"]
+
+[effect.linear-wipe.params]
+transition_completion = "过渡完成"
+wipe_angle = "擦除角度"
+feather = "羽化"

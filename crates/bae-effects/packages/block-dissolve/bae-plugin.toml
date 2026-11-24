@@ -1,0 +1,59 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "block-dissolve"
+name = "Block Dissolve"
+category = "Transition"
+implementation = "wgsl"
+ae_match_names = ["ADBE Block Dissolve"]
+keywords = ["block", "dissolve"]
+shader = "shaders/block_dissolve.wgsl"
+identity_when = "params.transition_completion == 0"
+
+[[effect.param]]
+id = 1
+key = "transition_completion"
+type = "float"
+name = "Transition Completion"
+default = 0
+range = [0, 100]
+
+[[effect.param]]
+id = 2
+key = "block_width"
+type = "float"
+name = "Block Width"
+default = 1
+range = [1, 32000]
+
+[[effect.param]]
+id = 3
+key = "block_height"
+type = "float"
+name = "Block Height"
+default = 1
+range = [1, 32000]
+
+[[effect.param]]
+id = 4
+key = "feather"
+type = "float"
+name = "Feather"
+default = 0
+range = [0, 32000]
+
+[[effect.param]]
+id = 5
+key = "soft_edges_best_quality"
+type = "checkbox"
+name = "Soft Edges (Best Quality)"
+default = true

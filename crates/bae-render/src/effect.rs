@@ -50,6 +50,8 @@ pub struct EffectParams<'a> {
     /// clamped like AE's integer buffers, and AE options such as Levels' "Off
     /// for 32 bpc Color" clip.
     pub float: bool,
+    /// 16-bpc integer project (AE uses 32768 for white).
+    pub sixteen_bpc: bool,
     /// Comp shutter angle in degrees (AE default 180).
     pub shutter_angle: f64,
     /// Comp shutter phase in degrees (AE default −90).
@@ -78,6 +80,7 @@ impl<'a> EffectParams<'a> {
             linear: false,
             purpose: RenderPurpose::Preview,
             float: false,
+            sixteen_bpc: false,
             shutter_angle: 180.0,
             shutter_phase: -90.0,
             seed: h.finish(),
