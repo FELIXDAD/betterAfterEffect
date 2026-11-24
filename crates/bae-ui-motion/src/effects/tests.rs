@@ -2,7 +2,7 @@
 //! the apply actions, the Effect Controls panel and drag payloads.
 
 use bae_app::{AppBuilder, Resources};
-use bae_model::{AuthorId, CommandRegistry, PrimPath, Stage};
+use bae_model::{AuthorId, CommandRegistry, PrimPath, Stage, Value};
 use bae_ui::menu::MenuContext;
 use bae_ui::{ActionHandler, Invocation, Panel, PanelContext, PanelId, PanelRequests};
 use egui::{Pos2, RawInput, Rect, vec2};
@@ -243,4 +243,102 @@ fn effects_panel_lists_ae_categories() {
         matches!(name.as_str(), "Gaussian Blur" | "高斯模糊"),
         "{name}"
     );
+}
+
+/// Every text the panel drew.
+fn drawn_texts(fx: &Fx, panel: &mut dyn Panel) -> Vec<String> {
+    fn collect(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(t) => out.push(t.galley.text().to_owned()),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| collect(s, out)),
+            _ => {}
+        }
+    }
+    let raw = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 700.0))),
+        ..Default::default()
+    };
+    let mut requests = PanelRequests::default();
+    let id = PanelId::new("effect_controls");
+    let mut out = fx.ctx.run_ui(raw, |ui| {
+        let mut cx = PanelContext::new(
+            &id,
+            "effect_controls",
+            &fx.stage,
+            &fx.author,
+            &fx.resources,
+            &mut requests,
+        );
+        panel.ui(ui, &mut cx);
+    });
+    out.textures_delta.clear();
+    let mut texts = Vec::new();
+    for s in &out.shapes {
+        collect(&s.shape, &mut texts);
+    }
+    texts
+}
+
+#[test]
+fn mask_params_pick_a_mask_of_the_layer() {
+    let mut fx = Fx::new();
+    let layer = fx.comp_with_layer();
+    let mask = |fx: &mut Fx| {
+        let out = fx.run(
+            "mask.create",
+            json!({"layer": layer, "kind": "rect", "position": [32.0, 16.0], "size": [20.0, 10.0]}),
+        );
+        PrimPath::new(out["mask"].as_str().unwrap()).unwrap()
+    };
+    let (m1, m2) = (mask(&mut fx), mask(&mut fx));
+    let out = fx.run(
+        "effect.apply",
+        json!({"layers": [layer], "match_name": "ADBE Fill"}),
+    );
+    let effect = PrimPath::new(out["effects"][0].as_str().unwrap()).unwrap();
+    assert_eq!(layer_masks(&fx.stage, &effect), [m1.clone(), m2.clone()]);
+
+    // Fill's Fill Mask as it is once the renderer feeds it (on registries of
+    // this test's own: other tests share the process-wide ones).
+    let mut app = AppBuilder::new();
+    app.add_module(bae_effects::EffectsModule);
+    let mut app = app.build();
+    let own = EffectRegistries {
+        defs: app.registry::<bae_model::EffectDef>(),
+        infos: app.registry::<EffectInfo>(),
+    };
+    let id = bae_render::effect::registry_id("ADBE Fill");
+    let mut fill = (*own.defs.get(&id).unwrap()).clone();
+    fill.params[0].flags.disabled = false;
+    own.defs
+        .replace(bae_app::Owner::Core, id, std::sync::Arc::new(fill))
+        .unwrap();
+    fx.resources.insert(own);
+
+    let mut panel = crate::EffectControlsPanel::default();
+    let name = bae_motion::query::display_name_of(&fx.stage, &m2);
+    let none = |t: &[String]| t.iter().any(|t| t == "None" || t == "无") && !t.contains(&name);
+    let texts = drawn_texts(&fx, &mut panel);
+    assert!(none(&texts), "{texts:?}");
+    // Choosing a mask writes the parameter: one undo step.
+    let attr = bae_model::effect::param_attr(1);
+    fx.run(
+        "attr.set_at",
+        json!({"path": effect, "attr": attr, "time": 0, "value": Value::PrimRef(m2.clone())}),
+    );
+    let texts = drawn_texts(&fx, &mut panel);
+    assert!(texts.contains(&name), "{name} in {texts:?}");
+    fx.stage.undo(&fx.author).unwrap();
+    assert!(none(&drawn_texts(&fx, &mut panel)));
+    // "None" writes an empty reference; a deleted mask also shows "None".
+    fx.run(
+        "attr.set_at",
+        json!({"path": effect, "attr": attr, "time": 0, "value": Value::String(String::new())}),
+    );
+    fx.run(
+        "attr.set_at",
+        json!({"path": effect, "attr": attr, "time": 0, "value": Value::PrimRef(m1.clone())}),
+    );
+    fx.run("prim.delete", json!({"path": m1}));
+    assert!(none(&drawn_texts(&fx, &mut panel)));
 }
