@@ -13,7 +13,7 @@ use gpu::{Binding, KernelKey, KernelSource, Resource, UniformWriter};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u32)]
+#[repr(usize)]
 enum Kind {
     Transform,
     TurbulentDisplace,
@@ -186,20 +186,37 @@ impl Effect for Distortion {
 }
 
 const UNIFORM_SIZE: usize = 352;
+// Indexed by Kind. Each entry compiles only the sampling functions it uses.
+const COLORS: [&str; 12] = [
+    "transform_color",
+    "turbulent_color",
+    "wave_color",
+    "bulge_color",
+    "twirl_color",
+    "polar_color",
+    "corner_color",
+    "offset_color",
+    "mirror_color",
+    "spherize_color",
+    "ripple_color",
+    "optics_color",
+];
 fn pipeline(
     rt: &gpu::Runtime,
     format: wgpu::TextureFormat,
+    color: &'static str,
 ) -> Result<Arc<gpu::Kernel>, RenderError> {
     let key = KernelKey {
         owner: "bae.effects/distort".into(),
-        entry: "warp".into(),
+        entry: color.into(),
         variant: gpu::format_key(format),
     };
     rt.kernel(&key, || {
         Ok(KernelSource {
-            label: "bae.effects.distort",
+            label: color,
             wgsl: include_str!("warp.wgsl")
-                .replace("WORKING_FORMAT", crate::blur::format_name(format)?),
+                .replace("WORKING_FORMAT", crate::blur::format_name(format)?)
+                .replace("SAMPLE_COLOR", color),
             entry: "warp",
             bindings: vec![
                 (0, Binding::Uniform(UNIFORM_SIZE as u32)),
@@ -211,7 +228,10 @@ fn pipeline(
     })
 }
 pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
-    pipeline(rt, format).map(drop)
+    for color in COLORS {
+        pipeline(rt, format, color)?;
+    }
+    Ok(())
 }
 
 impl TargetEffect for Distortion {
@@ -228,7 +248,7 @@ impl TargetEffect for Distortion {
         let out = target.allocate(roi, input.pixel_scale)?;
         let input = common::premultiplied(target, input)?;
         let rt = gpu::runtime(target.gpu());
-        let kernel = pipeline(&rt, target.format())?;
+        let kernel = pipeline(&rt, target.format(), COLORS[self.kind as usize])?;
         let mut w = UniformWriter::with_size(UNIFORM_SIZE);
         w.i32s(
             0,
@@ -238,8 +258,7 @@ impl TargetEffect for Distortion {
         for (i, f) in [origin.x, origin.y, size.x, size.y].into_iter().enumerate() {
             w.f32(32 + 4 * i, f as f32);
         }
-        w.u32(48, self.kind as u32)
-            .f32(52, params.scale as f32)
+        w.f32(52, params.scale as f32)
             .f32(56, params.time.as_seconds() as f32)
             .u32(60, u32::from(params.float));
         for param in &self.def.params {

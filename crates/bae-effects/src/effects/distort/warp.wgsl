@@ -1,25 +1,12 @@
 // Layer coordinates denote pixel edges; texel (0, 0) is centred at (0.5, 0.5).
 struct Uniforms {
     src: vec4<i32>, dst: vec4<i32>, layer: vec4<f32>,
-    kind: u32, scale: f32, time: f32, hdr: u32,
+    padding: u32, scale: f32, time: f32, hdr: u32,
     params: array<vec4<f32>, 15>, inverse: mat3x3<f32>,
 }
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var src: texture_2d<f32>;
 @group(0) @binding(2) var dst: texture_storage_2d<WORKING_FORMAT, write>;
-// Discriminants of the Rust Kind enum.
-const TRANSFORM = 0u;
-const TURBULENT = 1u;
-const WAVE = 2u;
-const BULGE = 3u;
-const TWIRL = 4u;
-const POLAR = 5u;
-const CORNER = 6u;
-const OFFSET = 7u;
-const MIRROR = 8u;
-const SPHERIZE = 9u;
-const RIPPLE = 10u;
-const OPTICS = 11u;
 const TAU = 6.28318530718;
 fn val(i: u32) -> f32 {
     return u.params[i].x;
@@ -118,23 +105,25 @@ fn lattice(i: vec3<i32>) -> f32 {
     return f32(n ^ (n>>13u)) / 2147483648. - 1.;
 }
 
-fn noise(p: vec3<f32>, smoother: bool) -> f32 {
+fn noise_row(i: vec3<i32>, blend: f32, evolution: bool) -> f32 {
+    var base = i;
+    if evolution {
+        if val(8) > 0. {
+            let period = 2 * i32(val(9));
+            base.z = ((base.z % period) + period) % period;
+        }
+        base.z += 13 * i32(val(10));
+    }
+    return mix(lattice(base), lattice(base + vec3(1, 0, 0)), blend);
+}
+
+fn noise(p: vec3<f32>, smoother: bool, evolution: bool) -> f32 {
     let i = vec3<i32>(floor(p));
     let t = fract(p);
     let s = select(t * t * (3. - 2. * t), t * t * t * (t * (6. * t - 15.) + 10.), smoother);
-    var row: array<f32, 4>;
-    for (var j = 0; j < 4; j++) {
-        var base = i + vec3(0, j % 2, j / 2);
-        if u.kind == TURBULENT {
-            if val(8) > 0. {
-                let period = 2 * i32(val(9));
-                base.z = ((base.z % period) + period) % period;
-            }
-            base.z += 13 * i32(val(10));
-        }
-        row[j] = mix(lattice(base), lattice(base + vec3(1, 0, 0)), s.x);
-    }
-    return mix(mix(row[0], row[1], s.y), mix(row[2], row[3], s.y), s.z);
+    let z0 = mix(noise_row(i, s.x, evolution), noise_row(i + vec3(0, 1, 0), s.x, evolution), s.y);
+    let z1 = mix(noise_row(i + vec3(0, 0, 1), s.x, evolution), noise_row(i + vec3(0, 1, 1), s.x, evolution), s.y);
+    return mix(z0, z1, s.z);
 }
 
 // The AE coordinate probes show that vertical displacement is constant down
@@ -145,17 +134,17 @@ fn turbulence_field(p: vec3<f32>, mode: i32) -> vec2<f32> {
     let a = vec3(14.31, 5.19, 2.07);
     let b = vec3(3.79, 41.83, 7.17);
     if mode >= 9 {
-        let h = noise(vec3(0., p.y, p.z) + b, false);
-        let v = noise(vec3(p.x, 0., p.z) + a, false);
+        let h = noise(vec3(0., p.y, p.z) + b, false, true);
+        let v = noise(vec3(p.x, 0., p.z) + a, false, true);
         return 0.65 * vec2(select(h, 0., mode == 9), select(v, 0., mode == 10));
     }
     if mode == 2 || mode == 3 || mode == 6 || mode == 7 {
         let step = vec2(0.35, 0.);
-        let dx = noise(p + a + step.xyy, smoother) - noise(p + a - step.xyy, smoother);
-        let dy = noise(p + a + step.yxy, smoother) - noise(p + a - step.yxy, smoother);
+        let dx = noise(p + a + step.xyy, smoother, true) - noise(p + a - step.xyy, smoother, true);
+        let dy = noise(p + a + step.yxy, smoother, true) - noise(p + a - step.yxy, smoother, true);
         return 0.65 * select(vec2(dx, dy), vec2(-dy, dx), mode == 3 || mode == 7);
     }
-    return 0.65 * vec2(noise(p + a, smoother), noise(p + b, smoother));
+    return 0.65 * vec2(noise(p + a, smoother, true), noise(p + b, smoother, true));
 }
 
 fn turbulent(p: vec2<f32>) -> vec2<f32> {
@@ -183,30 +172,20 @@ fn turbulent(p: vec2<f32>) -> vec2<f32> {
     let lo = clamp((p - u.layer.xy) / span, vec2(0.), vec2(1.));
     let hi = clamp((u.layer.xy + u.layer.zw - p) / span, vec2(0.), vec2(1.));
     var weight = vec2(1.);
-    switch edges {
-        case 3: {
-            weight = min(lo, hi);
-        }
-        case 4: {
-            weight.y = min(lo.y, hi.y);
-        }
-        case 5: {
-            weight.x = min(lo.x, hi.x);
-        }
-        case 6: {
-            weight.x = lo.x;
-        }
-        case 7: {
-            weight.x = hi.x;
-        }
-        case 8: {
-            weight.y = lo.y;
-        }
-        case 9: {
-            weight.y = hi.y;
-        }
-        default: {
-        }
+    if edges == 3 {
+        weight = min(lo, hi);
+    } else if edges == 4 {
+        weight.y = min(lo.y, hi.y);
+    } else if edges == 5 {
+        weight.x = min(lo.x, hi.x);
+    } else if edges == 6 {
+        weight.x = lo.x;
+    } else if edges == 7 {
+        weight.x = hi.x;
+    } else if edges == 8 {
+        weight.y = lo.y;
+    } else if edges == 9 {
+        weight.y = hi.y;
     }
     weight = 0.5 - 0.5 * cos(weight * TAU * 0.5);
     if locked {
@@ -222,33 +201,30 @@ fn waveform(x: f32, mode: i32) -> f32 {
     let tri = 4. * abs(t - 0.5) - 1.;
     let half_arc = 2. * fract(2. * t) - 1.;
     let circle = sqrt(max(0., 1. - half_arc * half_arc));
-    switch mode {
-        case 2: {
-            return select(1., -1., t < 0.5);
-        }
-        case 3: {
-            return tri;
-        }
-        case 4: {
-            return 1. - 2. * t;
-        }
-        case 5: {
-            return select(circle, -circle, t < 0.5);
-        }
-        case 6: {
-            let arc = 2. * t - 1.;
-            return 2. * sqrt(max(0., 1. - arc * arc)) - 1.;
-        }
-        case 7: {
-            return select(1. - circle, circle - 1., t < 0.5);
-        }
-        case 8: {
-            return lattice(vec3(i32(floor(t * val(3) * 2.)), 0, 0));
-        }
-        case 9: {
-            return 0.35 * noise(vec3(t * val(3) * 0.75, 0.5, 0.25), true);
-        }
-        default: {}
+    if mode == 2 {
+        return select(1., -1., t < 0.5);
+    }
+    if mode == 3 {
+        return tri;
+    }
+    if mode == 4 {
+        return 1. - 2. * t;
+    }
+    if mode == 5 {
+        return select(circle, -circle, t < 0.5);
+    }
+    if mode == 6 {
+        let arc = 2. * t - 1.;
+        return 2. * sqrt(max(0., 1. - arc * arc)) - 1.;
+    }
+    if mode == 7 {
+        return select(1. - circle, circle - 1., t < 0.5);
+    }
+    if mode == 8 {
+        return lattice(vec3(i32(floor(t * val(3) * 2.)), 0, 0));
+    }
+    if mode == 9 {
+        return 0.35 * noise(vec3(t * val(3) * 0.75, 0.5, 0.25), true, false);
     }
     return -sin(TAU * t);
 }
@@ -264,33 +240,23 @@ fn wave_displacement(p: vec2<f32>) -> vec2<f32> {
     let n = clamp((xy - 0.75) / (u.layer.zw - vec2(0.5)), vec2(0.), vec2(1.));
     let e = min(4. * min(n, 1. - n), vec2(1.));
     var weight = 1.;
-    switch i32(val(6)) {
-        case 2: {
-            weight = e.x * e.y;
-        }
-        case 3: {
-            weight = 1. - min(e.x, e.y);
-        }
-        case 5: {
-            weight = min(4. * n.x, 1.);
-        }
-        case 6: {
-            weight = min(4. * n.y, 1.);
-        }
-        case 7: {
-            weight = min(4. * (1. - n.x), 1.);
-        }
-        case 8: {
-            weight = min(4. * (1. - n.y), 1.);
-        }
-        case 10: {
-            weight = e.y;
-        }
-        case 11: {
-            weight = e.x;
-        }
-        default: {
-        }
+    let pin = i32(val(6));
+    if pin == 2 {
+        weight = e.x * e.y;
+    } else if pin == 3 {
+        weight = 1. - min(e.x, e.y);
+    } else if pin == 5 {
+        weight = min(4. * n.x, 1.);
+    } else if pin == 6 {
+        weight = min(4. * n.y, 1.);
+    } else if pin == 7 {
+        weight = min(4. * (1. - n.x), 1.);
+    } else if pin == 8 {
+        weight = min(4. * (1. - n.y), 1.);
+    } else if pin == 10 {
+        weight = e.y;
+    } else if pin == 11 {
+        weight = e.x;
     }
     return perp * val(2) * u.scale * waveform(phase, i32(val(1))) * weight;
 }
@@ -318,46 +284,49 @@ fn bulge(p: vec2<f32>) -> vec2<f32> {
     return p + delta * d;
 }
 
-fn radial(p: vec2<f32>) -> vec2<f32> {
+fn twirl(p: vec2<f32>) -> vec2<f32> {
+    let c = pt(3) + 0.5;
+    let d = p - c;
+    let r = length(d);
+    let radius = val(2) * 0.01 * max(u.layer.z, u.layer.w);
+    if r >= radius {
+        return p;
+    }
+    let t = mix(round(r), r, 0.35) / radius;
+    let floor_weight = mix(0.0939, 0.0974, clamp((val(2) - 30.) / 50., 0., 1.));
+    let falloff = max(0., (exp(-2.455 * t * t) - floor_weight) / (1. - floor_weight));
+    return c + rot(d, -radians(val(1)) * falloff);
+}
+
+fn spherize(p: vec2<f32>) -> vec2<f32> {
+    let c = pt(2) + 0.5;
+    let d = p - c;
+    let r = length(d);
+    let radius = val(1) * u.scale;
+    if r >= radius || r == 0. {
+        return p;
+    }
+    let t = r / radius;
+    return c + d * t / sin(t * 0.25 * TAU);
+}
+
+fn ripple(p: vec2<f32>) -> vec2<f32> {
+    let d = p - pt(2) - 0.5;
+    let r = length(d);
+    let radius = val(1) * 0.01 * max(u.layer.z, u.layer.w);
+    if radius == 0. || r == 0. {
+        return p;
+    }
+    let t = r / radius;
+    let k = mix(1.801, 1.875, clamp((val(1) - 30.) / 50., 0., 1.));
+    let envelope = max(0., (exp(-k * t * t) - 0.093) / 0.907);
+    let phase = 0.5 * r / (val(5) * u.scale) - val(4) * u.time + val(7) / 360.;
+    let displacement = 0.25 * val(6) * u.scale * envelope * cos(TAU * phase);
+    return p + select(vec2(1.), d / r, val(3) == 2.) * displacement;
+}
+
+fn optics(p: vec2<f32>) -> vec2<f32> {
     let size = u.layer.zw;
-    if u.kind == TWIRL {
-        let c = pt(3) + 0.5;
-        let d = p - c;
-        let r = length(d);
-        let radius = val(2) * 0.01 * max(size.x, size.y);
-        if r >= radius {
-            return p;
-        }
-        let t = mix(round(r), r, 0.35) / radius;
-        let floor_weight = mix(0.0939, 0.0974, clamp((val(2) - 30.) / 50., 0., 1.));
-        let falloff = max(0., (exp(-2.455 * t * t) - floor_weight) / (1. - floor_weight));
-        return c + rot(d, -radians(val(1)) * falloff);
-    }
-    if u.kind == SPHERIZE {
-        let c = pt(2) + 0.5;
-        let d = p - c;
-        let r = length(d);
-        let radius = val(1) * u.scale;
-        if r >= radius || r == 0. {
-            return p;
-        }
-        let t = r / radius;
-        return c + d * t / sin(t * 0.25 * TAU);
-    }
-    if u.kind == RIPPLE {
-        let d = p - pt(2) - 0.5;
-        let r = length(d);
-        let radius = val(1) * 0.01 * max(size.x, size.y);
-        if radius == 0. || r == 0. {
-            return p;
-        }
-        let t = r / radius;
-        let k = mix(1.801, 1.875, clamp((val(1) - 30.) / 50., 0., 1.));
-        let envelope = max(0., (exp(-k * t * t) - 0.093) / 0.907);
-        let phase = 0.5 * r / (val(5) * u.scale) - val(4) * u.time + val(7) / 360.;
-        let displacement = 0.25 * val(6) * u.scale * envelope * cos(TAU * phase);
-        return p + select(vec2(1.), d / r, val(3) == 2.) * displacement;
-    }
     let d = p - pt(4);
     let r = length(d);
     let a = radians(val(1)) * 0.5;
@@ -414,81 +383,115 @@ fn wave_color(p: vec2<f32>) -> vec4<f32> {
     return c / f32(count * count);
 }
 
-fn color(p: vec2<f32>) -> vec4<f32> {
-    var q = p;
-    switch u.kind {
-        case TRANSFORM, CORNER: {
-            let bias = select(0., 0.5, u.kind == CORNER);
-            let v = u.inverse * vec3(p - bias, 1.);
-            if abs(v.z) < 1e-8 {
-                return vec4(0.);
-            }
-            q = v.xy / v.z + bias;
-            let dx = (u.inverse[0].xy - u.inverse[0].z * v.xy / v.z) / v.z;
-            let dy = (u.inverse[1].xy - u.inverse[1].z * v.xy / v.z) / v.z;
-            let footprint = abs(dx) + abs(dy);
-            if u.kind == TRANSFORM {
-                let opacity = val(8) * 0.01;
-                if val(12) == 2. {
-                    return cubic(q) * opacity;
-                }
-                // Pure rotations and skews preserve AE's bilinear sampling.
-                if min(abs(val(3)), select(abs(val(4)), abs(val(3)), val(11) > 0.)) < 100. {
-                    let width = vec2(length(vec2(dx.x, dy.x)), length(vec2(dx.y, dy.y)));
-                    return area(q, 0.992 * width) * opacity;
-                }
-                return linear(q, false) * opacity;
-            }
-            return area(q, footprint);
+fn projective(p: vec2<f32>, corner: bool) -> vec4<f32> {
+    let bias = select(0., 0.5, corner);
+    let v = u.inverse * vec3(p - bias, 1.);
+    if abs(v.z) < 1e-8 {
+        return vec4(0.);
+    }
+    let q = v.xy / v.z + bias;
+    let dx = (u.inverse[0].xy - u.inverse[0].z * v.xy / v.z) / v.z;
+    let dy = (u.inverse[1].xy - u.inverse[1].z * v.xy / v.z) / v.z;
+    let footprint = abs(dx) + abs(dy);
+    if !corner {
+        let opacity = val(8) * 0.01;
+        if val(12) == 2. {
+            return cubic(q) * opacity;
         }
-        case TURBULENT: {
-            q = turbulent(p);
+        // Pure rotations and skews preserve AE's bilinear sampling.
+        if min(abs(val(3)), select(abs(val(4)), abs(val(3)), val(11) > 0.)) < 100. {
+            let width = vec2(length(vec2(dx.x, dy.x)), length(vec2(dx.y, dy.y)));
+            return area(q, 0.992 * width) * opacity;
         }
-        case WAVE: {
-            return wave_color(p);
-        }
-        case BULGE: {
-            q = bulge(p);
-        }
-        case TWIRL: {
-            q = radial(p);
-            if all(q == p) {
-                return linear(p, false);
-            }
-            let dx = radial(p + vec2(0.5, 0.)) - radial(p - vec2(0.5, 0.));
-            let dy = radial(p + vec2(0., 0.5)) - radial(p - vec2(0., 0.5));
-            return area(q, abs(dx) + abs(dy));
-        }
-        case SPHERIZE, RIPPLE: {
-            q = radial(p);
-        }
-        case OPTICS: {
-            q = radial(p);
-            if val(2) == 0. && all(q > vec2(-1e6)) {
-                let jac = abs(vec2(radial(p + vec2(0.5, 0.)).x - radial(p - vec2(0.5, 0.)).x,
-                radial(p + vec2(0., 0.5)).y - radial(p - vec2(0., 0.5)).y));
-                let footprint = min(3.2 * jac - 3., 1.8 * jac - 0.2);
-                return area(q, footprint);
-            }
-        }
-        case POLAR: {
-            q = polar(p);
-            if val(2) == 1. && q.x >= f32(u.src.z) - 0.5 && q.y >= f32(u.src.y) + 0.5 && q.y <= f32(u.src.w) - 0.5 {
-                return linear(q, true);
-            }
-        }
-        case OFFSET: {
-            return mix(linear(p + center() - pt(1), true), linear(p, false), val(2));
-        }
-        case MIRROR: {
-            let n = rot(vec2(1., 0.), radians(val(2)));
-            q = p - 2. * max(0., dot(p - pt(1) - 0.5, n)) * n;
-        }
-        default: {
-        }
+        return linear(q, false) * opacity;
+    }
+    return area(q, footprint);
+}
+
+fn transform_color(p: vec2<f32>) -> vec4<f32> {
+    return projective(p, false);
+}
+
+fn corner_color(p: vec2<f32>) -> vec4<f32> {
+    return projective(p, true);
+}
+
+fn twirl_color(p: vec2<f32>) -> vec4<f32> {
+    let q = twirl(p);
+    if all(q == p) {
+        return linear(p, false);
+    }
+    let dx = twirl(p + vec2(0.5, 0.)) - twirl(p - vec2(0.5, 0.));
+    let dy = twirl(p + vec2(0., 0.5)) - twirl(p - vec2(0., 0.5));
+    return area(q, abs(dx) + abs(dy));
+}
+
+fn optics_color(p: vec2<f32>) -> vec4<f32> {
+    let q = optics(p);
+    if val(2) == 0. && all(q > vec2(-1e6)) {
+        let jac = abs(vec2(optics(p + vec2(0.5, 0.)).x - optics(p - vec2(0.5, 0.)).x,
+        optics(p + vec2(0., 0.5)).y - optics(p - vec2(0., 0.5)).y));
+        let footprint = min(3.2 * jac - 3., 1.8 * jac - 0.2);
+        return area(q, footprint);
     }
     return linear(q, false);
 }
+
+fn polar_color(p: vec2<f32>) -> vec4<f32> {
+    let q = polar(p);
+    if val(2) == 1. && q.x >= f32(u.src.z) - 0.5 && q.y >= f32(u.src.y) + 0.5 && q.y <= f32(u.src.w) - 0.5 {
+        return linear(q, true);
+    }
+    return linear(q, false);
+}
+
+fn offset_color(p: vec2<f32>) -> vec4<f32> {
+    return mix(linear(p + center() - pt(1), true), linear(p, false), val(2));
+}
+
+fn mirror_color(p: vec2<f32>) -> vec4<f32> {
+    let n = rot(vec2(1., 0.), radians(val(2)));
+    let q = p - 2. * max(0., dot(p - pt(1) - 0.5, n)) * n;
+    return linear(q, false);
+}
+
+fn spherize_color(p: vec2<f32>) -> vec4<f32> {
+    return linear(spherize(p), false);
+}
+
+fn ripple_color(p: vec2<f32>) -> vec4<f32> {
+    return linear(ripple(p), false);
+}
+
+fn bulge_color(p: vec2<f32>) -> vec4<f32> {
+    let delta = abs(p - pt(3));
+    let radius = vec2(val(1), val(2)) * u.scale;
+    let high = val(6) == 2. && val(4) != 0. && all(radius > vec2(0.)) &&
+        length(max(delta - 0.5, vec2(0.)) / radius) < 1.;
+    if !high {
+        return linear(bulge(p), false);
+    }
+    var c = vec4(0.);
+    for (var j = 0u; j < 4u; j++) {
+        let offset = vec2<f32>(f32(j % 2u), f32(j / 2u)) * 0.5 - 0.25;
+        c += linear(bulge(p + offset), false);
+    }
+    return c * 0.25;
+}
+
+fn turbulent_color(p: vec2<f32>) -> vec4<f32> {
+    let high = val(14) == 2. && val(2) != 0.;
+    if !high {
+        return linear(turbulent(p), false);
+    }
+    var c = vec4(0.);
+    for (var j = 0u; j < 4u; j++) {
+        let offset = vec2<f32>(f32(j % 2u), f32(j / 2u)) * 0.5 - 0.25;
+        c += linear(turbulent(p + offset), false);
+    }
+    return c * 0.25;
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn warp(@builtin(global_invocation_id) id: vec3<u32>) {
     let t = vec2<i32>(id.xy);
@@ -496,28 +499,7 @@ fn warp(@builtin(global_invocation_id) id: vec3<u32>) {
         return;
     }
     let p = vec2<f32>(t + u.dst.xy) + 0.5;
-    var c = vec4(0.);
-    var samples = 1;
-    if u.kind == TURBULENT && val(14) == 2. && val(2) != 0. {
-        samples = 2;
-    }
-    if u.kind == BULGE && val(6) == 2. && val(4) != 0. {
-        let delta = abs(p - pt(3));
-        let radius = vec2(val(1), val(2)) * u.scale;
-        if all(radius > vec2(0.)) && length(max(delta - 0.5, vec2(0.)) / radius) < 1. {
-            samples = 2;
-        }
-    }
-    if samples == 1 {
-        c = color(p);
-    } else {
-        for (var y = 0; y < samples; y++) {
-            for (var x = 0; x < samples; x++) {
-                c += color(p + (vec2<f32>(f32(x), f32(y)) + 0.5) / f32(samples) - 0.5);
-            }
-        }
-        c /= f32(samples * samples);
-    }
+    var c = SAMPLE_COLOR(p);
     if u.hdr == 0u {
         let alpha = clamp(c.a, 0., 1.);
         c = vec4(clamp(c.rgb, vec3(0.), vec3(alpha)), alpha);
