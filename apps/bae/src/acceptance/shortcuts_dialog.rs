@@ -5,7 +5,7 @@
 
 use bae_ui::{Chord, Keymap, WorkbenchState};
 use egui::accesskit::Role;
-use egui::{Key, Modifiers, Rect};
+use egui::{Event, Key, Modifiers, PointerButton, Rect};
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 use super::*;
@@ -178,4 +178,91 @@ fn the_commands_menu_shows_a_panel_scope() {
         Some(egui::accesskit::Toggled::True),
         "the group is open"
     );
+}
+
+/// The keyboard: clicking ⌘ (Ctrl on Windows) holds it, clicking K lists its
+/// combinations under "Key:", a command dragged onto a key gets that key.
+#[test]
+fn the_keyboard_holds_modifiers_lists_keys_and_takes_dropped_commands() {
+    let mut h = gui_sized(Gui::new(), egui::vec2(1600.0, 1000.0));
+    key(&mut h, Modifiers::COMMAND | Modifiers::ALT, Key::Quote);
+    settle(&mut h);
+    let w = window(&h).expect("dialog");
+    let cap = |h: &Ui, label: &str| {
+        h.query_all_by_label(label)
+            .find(|n| n.accesskit_node().role() == Role::Button && w.contains_rect(n.rect()))
+            .map(|n| n.rect())
+            .unwrap_or_else(|| panic!("no key {label}"))
+    };
+    let command = if cfg!(target_os = "macos") {
+        "\u{2318} Cmd"
+    } else {
+        "Ctrl"
+    };
+    let at = cap(&h, command).center();
+    click_at(&mut h, at);
+    settle(&mut h);
+    let held = h
+        .query_all_by_label(command)
+        .find(|n| n.accesskit_node().role() == Role::Button)
+        .unwrap();
+    assert_eq!(
+        held.accesskit_node().toggled(),
+        Some(egui::accesskit::Toggled::True),
+        "the modifier cap stays down"
+    );
+    // ⌘K / Ctrl+K: Composition Settings is written on K.
+    let k = h
+        .query_all_by_label("K")
+        .find(|n| n.accesskit_node().role() == Role::Button && w.contains_rect(n.rect()))
+        .unwrap();
+    assert_eq!(k.accesskit_node().value().as_deref(), Some(SETTINGS));
+    let k = k.rect();
+    click_at(&mut h, k.center());
+    settle(&mut h);
+    assert!(
+        find_text(&h, "Key: K (multiple commands assigned)").is_some(),
+        "{:?}",
+        painted_texts(&h)
+    );
+    // Release ⌘, then drag a tool onto F5.
+    let at = cap(&h, command).center();
+    click_at(&mut h, at);
+    settle(&mut h);
+    let (from, _) = row(&h, "Hand Tool").expect("the Hand Tool row");
+    let to = cap(&h, "F5").center();
+    let from = egui::pos2(from.left() + 40.0, from.center().y);
+    h.input_mut().events.extend([
+        Event::PointerMoved(from),
+        Event::PointerButton {
+            pos: from,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        },
+    ]);
+    frame(&mut h);
+    for i in 1..=12 {
+        send(
+            &mut h,
+            Event::PointerMoved(from + (to - from) * (i as f32 / 12.0)),
+        );
+    }
+    send(
+        &mut h,
+        Event::PointerButton {
+            pos: to,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        },
+    );
+    settle(&mut h);
+    let f5 = h
+        .query_all_by_label("F5")
+        .find(|n| n.accesskit_node().role() == Role::Button)
+        .unwrap();
+    assert_eq!(f5.accesskit_node().value().as_deref(), Some("Hand Tool"));
+    let (_, shown) = row(&h, "Hand Tool").unwrap();
+    assert!(shown.ends_with("F5"), "{shown}");
 }

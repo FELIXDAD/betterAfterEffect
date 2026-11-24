@@ -30,6 +30,17 @@ impl Mods {
         ctrl: false,
     };
 
+    /// The chord of `key` with these modifiers.
+    pub fn chord(self, key: Key) -> Chord {
+        Chord {
+            key,
+            command: self.command,
+            mac_ctrl: self.ctrl,
+            shift: self.shift,
+            alt: self.alt,
+        }
+    }
+
     pub fn of(c: &Chord) -> Mods {
         Mods {
             command: c.command,
@@ -209,6 +220,16 @@ pub const ZH: &[(&str, &str)] = &[
         "The shortcut: {chord} is already in use by the Application command: {command}. That command will be overridden by this panel command when the panel has focus.",
         "快捷键“{chord}”已被应用程序命令“{command}”使用，切换到该面板时，该命令将被此面板命令覆盖。",
     ),
+    // The legend under the keyboard ($$$/VisualShortcutsDialog/legend/*).
+    (
+        "Application shortcuts are active regardless of panel focus",
+        "无论面板焦点如何，应用程序快捷键都处于活动状态",
+    ),
+    (
+        "Panel shortcuts override application shortcuts when the panel has focus",
+        "面板具有焦点时，面板快捷键会覆盖应用程序快捷键",
+    ),
+    ("Modifier key pressed", "按下辅助按键"),
     ("Default.txt", "默认值.txt"),
     ("Custom.txt", "自定义.txt"),
     // The scopes of the Commands menu and the Panels groups (AE: $$$/AE/KB/*).
@@ -217,7 +238,6 @@ pub const ZH: &[(&str, &str)] = &[
     ("Effect Controls Panel", "效果控件面板"),
     ("Flowchart Panel", "流程图面板"),
     ("Layer Panel", "图层面板"),
-    ("Footage Panel", "素材面板"),
     ("Paint Panel", "绘画面板"),
     ("Project Panel", "项目面板"),
     ("Render Queue Panel", "渲染队列面板"),
