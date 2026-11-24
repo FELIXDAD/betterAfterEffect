@@ -35,20 +35,17 @@ fn fx_rgb(hsl: vec3f) -> vec3f {
 // Channel enum shared by Shift Channels (alpha first) and Set Matte
 // (alpha fourth, converted to this order by the caller).
 fn fx_channel(c: vec4f, mode: u32) -> f32 {
-    switch mode {
-        case 1u: { return c.a; }
-        case 2u, 3u, 4u: { return c[mode - 2u]; }
-        case 5u: { return fx_luma(c.rgb); }
-        case 6u: { return fx_hsl(c.rgb).x; }
-        case 7u: { return fx_hsl(c.rgb).z; }
-        case 8u: {
-            let lo = min(c.r, min(c.g, c.b));
-            let hi = max(c.r, max(c.g, c.b));
-            return (hi - lo) * (1.0 - abs(hi + lo - 1.0));
-        }
-        case 9u: { return 1.0; }
-        default: { return 0.0; }
-    }
+    if mode == 1u { return c.a; }
+    if mode == 2u { return c.r; }
+    if mode == 3u { return c.g; }
+    if mode == 4u { return c.b; }
+    if mode == 5u { return fx_luma(c.rgb); }
+    if mode == 6u { return fx_hsl(c.rgb).x; }
+    let lo = min(c.r, min(c.g, c.b));
+    let hi = max(c.r, max(c.g, c.b));
+    if mode == 7u { return (hi + lo) * 0.5; }
+    if mode == 8u { return (hi - lo) * (1.0 - abs(hi + lo - 1.0)); }
+    return f32(mode == 9u);
 }
 
 fn fx_unpremult(c: vec4f) -> vec4f {
