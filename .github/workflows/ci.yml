@@ -153,6 +153,26 @@ jobs:
       - name: Package
         run: cargo xtask dist --no-build
 
+      - name: Windows executable version
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+          $version = ($metadata.packages | Where-Object name -eq 'bae').version
+          $expected = ($version -replace '[-+].*$') + '.0'
+          $archive = Join-Path $metadata.target_directory "dist/BAE-$version-x86_64-windows.zip"
+          $check = Join-Path $env:RUNNER_TEMP 'version-check'
+          Expand-Archive -LiteralPath $archive -DestinationPath $check -Force
+          $info = (Get-Item -LiteralPath (Join-Path $check 'bae.exe')).VersionInfo
+          $file = [version]::new($info.FileMajorPart, $info.FileMinorPart, $info.FileBuildPart, $info.FilePrivatePart)
+          $product = [version]::new($info.ProductMajorPart, $info.ProductMinorPart, $info.ProductBuildPart, $info.ProductPrivatePart)
+          if ($info.FileVersion -cne $expected -or $info.ProductVersion -cne $expected -or
+              "$file" -ne $expected -or "$product" -ne $expected -or
+              $info.ProductName -cne 'BAE' -or $info.FileDescription -cne 'BAE') {
+            $info | Format-List *
+            throw "Expected BAE file and product versions $expected"
+          }
+
       - name: macOS bundle signature
         # Checks the zip as a user gets it: unpacked like Archive Utility does, with the
         # quarantine flag a browser download sets. A broken signature makes Gatekeeper call

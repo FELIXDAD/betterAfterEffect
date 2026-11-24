@@ -361,7 +361,7 @@ fn ico(images: &[(u16, Vec<u8>)]) -> Vec<u8> {
 }
 
 const RT_ICON: u16 = 3;
-const RT_GROUP_ICON: u16 = 14;
+pub(crate) const RT_GROUP_ICON: u16 = 14;
 /// `MOVEABLE | DISCARDABLE`, and additionally `PURE` for the group, as rc.exe writes them.
 const ICON_FLAGS: u16 = 0x1010;
 const GROUP_FLAGS: u16 = 0x1030;
@@ -478,9 +478,9 @@ fn read_u32(bytes: &[u8], at: usize) -> Result<u32> {
     Ok(u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]))
 }
 
-/// Whether a PE image (`.exe`) has an `RT_GROUP_ICON` resource, i.e. an icon Explorer
-/// shows. Reads the resource directory's first level only.
-pub fn pe_has_group_icon(bytes: &[u8]) -> Result<bool> {
+/// Whether a PE image (`.exe`) has a resource of the given type ordinal.
+/// Reads the resource directory's first level only.
+pub fn pe_has_resource(bytes: &[u8], kind: u16) -> Result<bool> {
     ensure!(bytes.starts_with(b"MZ"), "not a PE file (no MZ header)");
     let pe = read_u32(bytes, 0x3c)? as usize;
     ensure!(
@@ -519,7 +519,7 @@ pub fn pe_has_group_icon(bytes: &[u8]) -> Result<bool> {
     let ids = usize::from(read_u16(bytes, root + 14)?);
     for entry in named..named + ids {
         let id = read_u32(bytes, root + 16 + 8 * entry)?;
-        if id == u32::from(RT_GROUP_ICON) {
+        if id == u32::from(kind) {
             return Ok(true);
         }
     }
@@ -833,10 +833,13 @@ mod tests {
     }
 
     #[test]
-    fn finds_the_group_icon_in_a_pe_image() {
-        assert!(pe_has_group_icon(&fake_pe(&[3, 14, 16])).unwrap());
-        assert!(!pe_has_group_icon(&fake_pe(&[16, 24])).unwrap());
-        assert!(pe_has_group_icon(b"not an exe").is_err());
+    fn finds_resource_types_in_a_pe_image() {
+        let pe = fake_pe(&[3, 14, 16]);
+        assert!(pe_has_resource(&pe, RT_GROUP_ICON).unwrap());
+        assert!(pe_has_resource(&pe, 16).unwrap());
+        assert!(!pe_has_resource(&fake_pe(&[16, 24]), RT_GROUP_ICON).unwrap());
+        assert!(!pe_has_resource(&fake_pe(&[3, 14]), 16).unwrap());
+        assert!(pe_has_resource(b"not an exe", RT_GROUP_ICON).is_err());
     }
 
     /// macOS's own tools accept the generated files.
