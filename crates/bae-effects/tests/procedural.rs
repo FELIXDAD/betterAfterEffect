@@ -145,7 +145,10 @@ fn gradient_points_stay_with_layer_across_tiles() {
     let bounds = IRect::from_size(128, 128);
     let tile = IRect::new(8, 16, 48, 32);
     let region = Pixels::new(tile, |_, _| [1.; 4]);
-    let image = region.upload(&gpu, F32);
+    let mut image = region.upload(&gpu, F32);
+    // The half-resolution tile covers this region in layer pixels.
+    image.rect = IRect::new(16, 32, 96, 64);
+    image.pixel_scale = 2.0;
     let fx = builtin("ADBE Ramp");
     let inst = instance(&fx.info.match_name, vec![]);
     let p = EffectParams {
@@ -156,8 +159,15 @@ fn gradient_points_stay_with_layer_across_tiles() {
     let mut target = Standalone::new(gpu.clone(), F32);
     let out = fx.render(&mut target, &p, &image, tile).unwrap();
     target.finish().unwrap();
-    assert_eq!(
-        Pixels::download(&gpu, &out).get(8, 16),
-        [0.25, 0.25, 0.25, 1.]
-    );
+    assert_eq!(out.rect, image.rect);
+    assert_eq!(out.texel_size(), tile.size());
+    let data = bae_gpu::transfer::read_texture(&gpu, &out.texture).unwrap();
+    for (x, y) in [(0, 0), (39, 15)] {
+        let value = (tile.y0 as f32 + y as f32) / 64.0;
+        let pixel = data.pixel(x, y);
+        let rgba: [f32; 4] = std::array::from_fn(|i| {
+            f32::from_le_bytes(pixel[4 * i..4 * i + 4].try_into().unwrap())
+        });
+        assert_eq!(rgba, [value, value, value, 1.]);
+    }
 }

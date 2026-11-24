@@ -59,7 +59,7 @@ fn noise_amplitude_matches_ae() {
         if !(is_grain || is_noise || block || lattice) {
             continue;
         }
-        let ae = harness::read_png(&dir.join(format!("{}.png", case.name))).unwrap();
+        let ae = harness::read_png(&dir.join(format!("{}.png", case.name)), case.bpc).unwrap();
         let bae = harness::render(&gpu, &case);
         let input = harness::input(&case.input);
         let channels = if block {

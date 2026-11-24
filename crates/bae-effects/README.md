@@ -26,6 +26,10 @@ bae_effects::prewarm(&gpu, wgpu::TextureFormat::Rgba16Float)?;
 
 Rust 效果的 uniform 走一个环形缓冲 + 动态偏移，每帧不创建缓冲；管线按（核、格式）缓存在每个 `GpuContext` 的运行时里。
 
+## 按分类登记
+
+每个分类的 `src/categories/<分类>.rs` 负责加载声明式包、登记 Rust 效果和预编译该分类的 GPU 管线。已有分类直接改本分类的 `register` 函数。扭曲和抠像已有独立入口，便于并行开发。基准用例放在 `benches/cases/`，与 AE 的误差和限制记录在 `tests/ae/categories/`。公开的 `builtins()`、`get()`、`catalog()` 和 `register()` 接口沿用原签名。
+
 ## 已有效果
 
 | AE matchName | 名称 | 形态 |

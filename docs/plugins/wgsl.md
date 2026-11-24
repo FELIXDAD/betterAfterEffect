@@ -42,7 +42,7 @@ struct BaeFrame {
   pixel_aspect: f32,
   shutter_angle: f32,       // 度
   shutter_phase: f32,
-  flags: u32,               // BAE_FRAME_LINEAR | BAE_FRAME_FINAL | BAE_FRAME_HIGH_QUALITY | BAE_FRAME_FLOAT | BAE_FRAME_16_BPC
+  flags: u32,               // BAE_FRAME_LINEAR | BAE_FRAME_FINAL | BAE_FRAME_HIGH_QUALITY | BAE_FRAME_FLOAT | BAE_FRAME_16_BPC | BAE_FRAME_INPUT_STRAIGHT | BAE_FRAME_INPUT_OPAQUE
   seed: u32,                // 每个效果实例固定的随机种子
   frame_index: i32,
   pass_index: u32,
