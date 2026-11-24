@@ -20,7 +20,7 @@
 
 ## 合并规则
 
-队列：所有打了 `merge-ready`、还开着的 PR，按最后一次打这个标签的时间排序（GitHub timeline 的 labeled 事件）。脚本一次只处理排在最前面的那个，它合并或出队以后才看下一个。
+队列：所有打了 `merge-ready`、还开着的 PR，按最后一次打这个标签的时间排序（GitHub timeline 的 labeled 事件）。脚本一次只处理排在最前面的那个（队首），它合并或出队以后才轮到下一个；唯一的例外见下面的“插队”。
 
 对队首的 PR：
 
@@ -31,6 +31,7 @@
 3. 必需检查（`config.toml` 的 `[checks]`，快检查加全量）：按名字取当前 head 上最新的一条 check run，只有 `success` 算通过。
    - 有失败、`cancelled`，或者别的检查失败：出队，在 PR 上评论失败的检查和链接，通知负责 agent 和领导。
    - 缺失、还在跑、`skipped`（打标签前全量被跳过）：等。超过 `ci_timeout_minutes`（150 分钟）还没结果，按失败处理。
+   - 只有缺失或 `skipped`、没有任何检查在排队或在跑，持续 `missing_nudge_minutes`（10 分钟）：说明 CI 不会自己来了，比如 head 是 CI 改名之前推的。这时脚本主动触发一次：PR 落后 dev 就 `gh pr update-branch`；已经包含最新 dev 就往 PR 分支推一个空提交（`merge-train: retrigger CI …`）。同一个 head 只触发一次。
 4. PR 改的文件和 `dev` 在“PR head 与 dev 的 merge-base”之后改的文件有重叠（PR 一侧不算 `Cargo.lock`；dev 一侧不算 `Cargo.lock` 和 `docs/`）：运行 `gh pr update-branch`，等新 head 的 CI。两边都没改文件时重叠为空，不会误判。
 5. `mergeable` 是 `UNKNOWN`（GitHub 刚合完别的 PR 时常见）：等一会儿再查，超过 20 分钟才算失败。
 6. 都满足：`gh pr merge --match-head-commit <head>` 直接合并。代码 PR 用 merge commit；参考数据 PR（标签 `reference-data` 或分支前缀 `ref/`）用 squash。合完给对应领导发一行：PR 号、标题、dev 新提交号。
@@ -38,6 +39,8 @@
 兜底：每一轮都看 `dev` 最新提交的全量检查。如果是红的，就暂停整个队列，通知 `leaders.toml` 里 `pause_notify` 列出的领导。同一个红提交只暂停一次。
 
 出队就是脚本去掉 `merge-ready` 标签。修好以后，由领导重新打标签。
+
+**插队**：队首已经等了 `skip_ahead_after_minutes`（30 分钟）还没合（在等 CI、等 mergeable 或等 update-branch 之后的 CI），脚本就按打标签的顺序往后看，把第一个此刻已经可以合并的 PR 先合掉（满足上面第 6 条：检查全绿、无重叠、MERGEABLE）。队首保持原位。对后面的 PR，脚本只做“合并”这一个动作，不会去 update-branch、修冲突或让它出队，这些都等它排到队首再做。
 
 ## 通知谁
 
