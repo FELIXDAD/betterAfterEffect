@@ -17,6 +17,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import merge_train as mt  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "tools", "ci"))
+import affected  # noqa: E402  (tools/ci/affected.py of this checkout)
+sys.path.pop(0)
+
+# A small fake workspace: fx depends on render; ui and other stand alone. docs/ui/menu.md
+# is read by ui's sources (string literal), so it counts as a ui change.
+FAKE_GRAPH = (affected,
+              {"crates/fx": "fx", "crates/render": "render", "crates/ui": "ui", "crates/other": "other"},
+              {"fx": {"render"}, "render": set(), "ui": set(), "other": set()},
+              ["crates"], [], {"ui": {"docs/ui/menu.md"}})
 
 
 def run(cwd, *cmd):
@@ -34,8 +44,11 @@ class Base(unittest.TestCase):
         mt.CFG["cargo_target_dir"] = os.path.join(self.tmp, "target")
         mt.CFG["runner_dir"] = os.path.join(self.tmp, "repo")
         mt.ARGS = mt.argparse.Namespace(dry_run=False, once=True, simulate=[], ignore_draft=False)
+        self._graph = mock.patch.object(mt, "crate_graph", return_value=FAKE_GRAPH)
+        self._graph.start()
 
     def tearDown(self):
+        self._graph.stop()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def make_repo(self):
@@ -97,16 +110,16 @@ class OverlapTest(Base):
     def test_overlap_and_ignores(self):
         repo = self.make_repo()
         run(repo, "git", "checkout", "-qb", "feat")
-        pr = self.commit(repo, {"a.txt": "pr\n", "docs/x.md": "pr\n", "Cargo.lock": "pr\n"}, "pr")
+        pr = self.commit(repo, {"crates/ui/a.rs": "pr\n", "docs/x.md": "pr\n", "Cargo.lock": "pr\n"}, "pr")
         run(repo, "git", "checkout", "-q", "dev")
-        self.commit(repo, {"docs/x.md": "dev\n", "Cargo.lock": "dev\n", "b.txt": "b\n"}, "dev1")
+        self.commit(repo, {"docs/x.md": "dev\n", "Cargo.lock": "dev\n", "crates/other/b.rs": "b\n"}, "dev1")
         run(repo, "git", "push", "-q", "origin", "dev")
         run(repo, "git", "fetch", "-q", "origin")
         self.assertEqual(mt.overlap(pr), [])  # docs/ and Cargo.lock never count
-        self.commit(repo, {"a.txt": "dev\n"}, "dev2")
+        self.commit(repo, {"crates/ui/a.rs": "dev\n"}, "dev2")
         run(repo, "git", "push", "-q", "origin", "dev")
         run(repo, "git", "fetch", "-q", "origin")
-        self.assertEqual(mt.overlap(pr), ["a.txt"])
+        self.assertEqual(mt.overlap(pr), ["crates/ui/a.rs"])
 
 
 class RunnerTest(Base):
@@ -387,7 +400,8 @@ class UnstickTest(Base):
         st = {"head_pr": 1, "head_since": (mt.now_utc() - mt.dt.timedelta(minutes=31)).isoformat()}
         with mock.patch.object(mt, "decide", side_effect=lambda p, s: verdicts[p["number"]]), \
                 mock.patch.object(mt, "fetch_pr_head"), \
-                mock.patch.object(mt, "changed_files", side_effect=lambda sha: {sha + ".rs"}), \
+                mock.patch.object(mt, "changed_files", side_effect=lambda sha: {
+                    {"h1": "crates/ui/a.rs", "h2": "crates/other/b.rs", "h3": "crates/fx/c.rs"}[sha]}), \
                 mock.patch.object(mt, "do_merge", return_value=True) as merge:
             self.assertTrue(mt.skip_ahead(self.queue(), st))
         self.assertEqual(merge.call_args[0][0]["number"], 3)
@@ -539,7 +553,7 @@ class SkipAheadOverlapTest(Base):
         for name, files in (("head", {"crates/fx/lib.rs": "h\n", "docs/a.md": "h\n"}),
                             ("same", {"crates/fx/lib.rs": "s\n"}),
                             ("docs", {"docs/a.md": "d\n", "Cargo.lock": "d\n"}),
-                            ("other", {"crates/ui/x.rs": "o\n"})):
+                            ("other", {"crates/other/x.rs": "o\n"})):
             run(repo, "git", "checkout", "-q", "-b", name, "dev")
             heads[name] = self.commit(repo, files, name)
         run(repo, "git", "checkout", "-q", "dev")
@@ -564,6 +578,101 @@ class SkipAheadOverlapTest(Base):
             merge.reset_mock()
             self.assertFalse(mt.skip_ahead(q[:2], {"head_pr": 1, "head_since": old}))
             merge.assert_not_called()
+
+
+class CrateRelationTest(Base):
+    """Overlap by crate dependency: #303 changed bae-render's LayerDependency, #299 built
+    that struct in bae-effects; no shared file, but together dev did not compile."""
+
+    def rel(self, a, b):
+        return mt.crate_relation(set(a), set(b))
+
+    def test_dependency_in_either_direction_is_related(self):
+        self.assertIn("fx 依赖 render", self.rel(["crates/fx/src/a.rs"], ["crates/render/src/layer.rs"]))
+        self.assertIn("fx 依赖 render", self.rel(["crates/render/src/layer.rs"], ["crates/fx/src/a.rs"]))
+        self.assertIn("同一个 crate：ui", self.rel(["crates/ui/a.rs"], ["crates/ui/b.rs"]))
+
+    def test_unrelated_crates_docs_tools_github_are_not(self):
+        self.assertEqual(self.rel(["crates/fx/a.rs"], ["crates/ui/b.rs"]), "")
+        for other in (["docs/spec/x.md"], ["tools/merge-train/merge_train.py"],
+                      [".github/workflows/ci.yml"], ["Cargo.lock"], ["README.md"]):
+            self.assertEqual(self.rel(["crates/fx/a.rs"], other), "", other)
+
+    def test_docs_read_by_code_and_root_manifest_count(self):
+        self.assertIn("ui", self.rel(["docs/ui/menu.md"], ["crates/ui/a.rs"]))
+        self.assertIn("所有 crate", self.rel(["Cargo.toml"], ["crates/other/a.rs"]))
+
+    def test_unknown_graph_is_treated_as_related(self):
+        with mock.patch.object(mt, "crate_graph", side_effect=RuntimeError("no cargo")):
+            self.assertIn("算不出来", self.rel(["crates/fx/a.rs"], ["crates/ui/b.rs"]))
+
+    def test_overlap_reports_crate_dependency_without_shared_files(self):
+        repo = self.make_repo()
+        run(repo, "git", "checkout", "-qb", "feat")
+        pr_head = self.commit(repo, {"crates/fx/src/stack.rs": "uses LayerDependency\n"}, "pr")
+        run(repo, "git", "checkout", "-q", "dev")
+        self.commit(repo, {"crates/render/src/layer.rs": "LayerDependency changed\n"}, "dev")
+        run(repo, "git", "push", "-q", "origin", "dev")
+        run(repo, "git", "fetch", "-q", "origin")
+        over = mt.overlap(pr_head)
+        self.assertEqual(len(over), 1)
+        self.assertIn("fx 依赖 render", over[0])
+        # After update-branch the merge-base is dev's head: nothing to relate any more,
+        # even if the graph cannot be computed (no update-branch loop).
+        run(repo, "git", "checkout", "-q", "feat")
+        run(repo, "git", "merge", "-q", "--no-edit", "origin/dev")
+        merged = run(repo, "git", "rev-parse", "HEAD")
+        with mock.patch.object(mt, "crate_graph", side_effect=RuntimeError("no cargo")):
+            self.assertEqual(mt.overlap(merged), [])
+
+    def test_related_pr_does_not_skip_ahead(self):
+        q = [pr(number=1, headRefOid="h1"), pr(number=2, headRefOid="h2"), pr(number=3, headRefOid="h3")]
+        files = {"h1": {"crates/render/src/layer.rs"}, "h2": {"crates/fx/src/a.rs"}, "h3": {"crates/ui/a.rs"}}
+        st = {"head_pr": 1, "head_since": (mt.now_utc() - mt.dt.timedelta(minutes=40)).isoformat()}
+        with mock.patch.object(mt, "decide", return_value=("merge", "ok", {})), \
+                mock.patch.object(mt, "fetch_pr_head"), \
+                mock.patch.object(mt, "changed_files", side_effect=lambda sha: files[sha]), \
+                mock.patch.object(mt, "do_merge", return_value=True) as merge:
+            self.assertTrue(mt.skip_ahead(q, st))
+        self.assertEqual(merge.call_args[0][0]["number"], 3)
+        self.assertIn("fx 依赖 render", st["prs"]["2"]["detail"])
+
+
+class DevCancelledTest(Base):
+    def run_check(self, st, conclusion="cancelled", minutes_ago=5, rc=0, cid=900):
+        done = (mt.now_utc() - mt.dt.timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        latest = {n: {"id": cid, "name": n, "status": "completed", "conclusion": conclusion,
+                      "completed_at": done, "html_url": "u"} for n in mt.CFG["checks"]["full"][:1]}
+        calls = []
+
+        def fake_sh(cmd, **kw):
+            calls.append(cmd)
+            return (rc, "", "run in progress")
+        with mock.patch.object(mt, "sh", side_effect=fake_sh):
+            mt.rerun_dev_cancelled(st, "d" * 40, latest)
+        return [c for c in calls if c[:4] == ["gh", "api", "-X", "POST"]]
+
+    def test_cancelled_dev_job_is_rerun_until_it_has_a_result(self):
+        st = {}
+        self.assertEqual(len(self.run_check(st)), 1)          # rerun
+        self.assertEqual(self.run_check(st), [])               # same job: already rerun
+        self.assertEqual(len(self.run_check(st, cid=901)), 1)  # cancelled again: rerun again
+        self.assertEqual(self.run_check(st, conclusion="success", cid=902), [])
+
+    def test_waits_for_grace_and_retries_when_refused(self):
+        st = {}
+        self.assertEqual(self.run_check(st, minutes_ago=0), [])
+        self.assertEqual(len(self.run_check(st, rc=1)), 1)  # GitHub refused (run still going)
+        self.assertEqual(len(self.run_check(st, rc=0)), 1)  # retried next pass
+        self.assertEqual(self.run_check(st), [])
+
+    def test_check_dev_red_reruns_before_ack_shortcut(self):
+        with mock.patch.object(mt, "git", return_value="d" * 40 + "\n"), \
+                mock.patch.object(mt, "check_runs", return_value={}), \
+                mock.patch.object(mt, "red_ack_get", return_value="d" * 40), \
+                mock.patch.object(mt, "rerun_dev_cancelled") as rr:
+            self.assertFalse(mt.check_dev_red({}))
+        rr.assert_called_once()
 
 
 if __name__ == "__main__":
