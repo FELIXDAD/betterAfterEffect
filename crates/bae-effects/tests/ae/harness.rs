@@ -11,7 +11,6 @@ use bae_gpu::wgpu;
 use bae_model::{PrimPath, Value};
 use bae_render::{EffectParams, IRect, ImageAlpha, RenderEffect};
 
-pub const CASES: &str = include_str!("cases.json");
 pub const SIZE: [u32; 2] = [256, 128];
 
 /// One comparison case.
@@ -29,17 +28,36 @@ pub struct Case {
     pub mean: f64,
 }
 
+fn case_rows(text: &str) -> Vec<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Manifest {
+        cases: Vec<serde_json::Value>,
+    }
+    serde_json::from_str::<Manifest>(text).unwrap().cases
+}
+
+pub fn default_case_rows() -> Vec<serde_json::Value> {
+    [
+        include_str!("cases.json"),
+        include_str!("cases-distort.json"),
+        include_str!("cases-stylize.json"),
+    ]
+    .into_iter()
+    .flat_map(case_rows)
+    .collect()
+}
+
 pub fn cases() -> Vec<Case> {
-    parse_cases(CASES)
+    parse_rows(&default_case_rows())
 }
 
 /// Cases of a `cases.json` text.
 pub fn parse_cases(text: &str) -> Vec<Case> {
-    let v: serde_json::Value = serde_json::from_str(text).unwrap();
-    v["cases"]
-        .as_array()
-        .unwrap()
-        .iter()
+    parse_rows(&case_rows(text))
+}
+
+fn parse_rows(rows: &[serde_json::Value]) -> Vec<Case> {
+    rows.iter()
         .map(|c| {
             let params = c["params"]
                 .as_object()
@@ -87,6 +105,45 @@ pub fn input(name: &str) -> Vec<[u8; 4]> {
             let px = match name {
                 // Probes: a hard vertical edge (blur kernels) and grey ramps
                 // (tone curves; the lower half at half range).
+                "comb" => {
+                    let stripe = |v: u32| f64::from(u8::from(v % 4 == 0));
+                    [stripe(x), stripe(y), stripe(x + y), 1.]
+                }
+                "shift" => [
+                    f64::from((x + 8) % 16 * 16) / 255.,
+                    f64::from((y + 8) % 16 * 16) / 255.,
+                    f64::from(u8::from(x % 8 == 0 && y % 8 == 0)),
+                    1.,
+                ],
+                "white" => [1.; 4],
+                "edge" | "ush" => {
+                    let a = [255., 192., 128., 64.][(y / 16 % 4) as usize] / 255.;
+                    if name == "edge" {
+                        [
+                            f64::from(x / 16 % 2),
+                            f64::from(y / 16 % 2),
+                            f64::from(u8::from((x + 2 * y) % 32 < 16)),
+                            a,
+                        ]
+                    } else {
+                        let [r, g, b] = if x % 32 >= 16 {
+                            [180., 80., 120.]
+                        } else {
+                            [60., 140., 124.]
+                        };
+                        [r / 255., g / 255., b / 255., a]
+                    }
+                }
+                "alpha" => [
+                    220. / 255.,
+                    93. / 255.,
+                    47. / 255.,
+                    if x % 32 >= 16 {
+                        192. / 255.
+                    } else {
+                        64. / 255.
+                    },
+                ],
                 "fine" => [
                     (x % 16) as f64 * 16. / 255.,
                     (y % 16) as f64 * 16. / 255.,
@@ -183,6 +240,10 @@ fn hsv_to_rgb(h: f64, s: f64, v: f64) -> [f64; 3] {
 /// Renders `case` with BAE (RGBA32F working buffer, effect at full resolution,
 /// output = the comp rect) and returns premultiplied RGBA8.
 pub fn render(gpu: &Arc<GpuContext>, case: &Case) -> Vec<[u8; 4]> {
+    render_pixels(gpu, case, &input(&case.input))
+}
+
+pub fn render_pixels(gpu: &Arc<GpuContext>, case: &Case, pixels: &[[u8; 4]]) -> Vec<[u8; 4]> {
     let fx =
         bae_effects::get(&case.effect).unwrap_or_else(|| panic!("no built-in {}", case.effect));
     let [w, h] = SIZE;
@@ -200,7 +261,8 @@ pub fn render(gpu: &Arc<GpuContext>, case: &Case) -> Vec<[u8; 4]> {
             | "ADBE Simple Choker"
             | "ADBE Minimax"
     );
-    let data: Vec<u8> = input(&case.input)
+    assert_eq!(pixels.len(), (w * h) as usize);
+    let data: Vec<u8> = pixels
         .iter()
         .flat_map(|p| {
             let a = f32::from(p[3]) / 255.0;

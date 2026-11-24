@@ -202,3 +202,49 @@ fn collapsed_transform_has_zero_coverage_and_integer_output_is_premultiplied() {
         assert_eq!(hdr.get(4, 3)[0], 1.5);
     }
 }
+
+#[test]
+fn calibrated_warps_filter_premultiplied_color_and_alpha_together() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(32, 24);
+    let input = Pixels::new(rect, |x, _| {
+        let alpha = if x < 16 { 0. } else { 0.5 };
+        [2. * alpha, 0.25 * alpha, 0., alpha]
+    });
+    for (name, params) in [
+        ("ADBE Twirl", vec![(1, Value::Float(100.))]),
+        (
+            "ADBE Bulge",
+            vec![(4, Value::Float(2.)), (6, Value::Int(2))],
+        ),
+        ("ADBE Ripple", vec![(1, Value::Float(80.))]),
+        ("ADBE Optics Compensation", vec![(1, Value::Float(100.))]),
+    ] {
+        for (format, hdr) in [(F16, false), (F16, true), (F32, true)] {
+            let out = run_depth(
+                &gpu,
+                format,
+                builtin(name),
+                params.clone(),
+                &input,
+                rect,
+                1.,
+                hdr,
+            );
+            let mut mixed = false;
+            for y in rect.y0..rect.y1 {
+                for x in rect.x0..rect.x1 {
+                    let [red, green, _, alpha] = out.get(x, y);
+                    mixed |= alpha > 0.001 && alpha < 0.499;
+                    let gain = if hdr { 2. } else { 1. };
+                    assert!((red - gain * alpha).abs() < 0.001, "{name} red at {x},{y}");
+                    assert!(
+                        (green - 0.25 * alpha).abs() < 0.001,
+                        "{name} green at {x},{y}"
+                    );
+                }
+            }
+            assert!(mixed, "{name} did not sample the alpha edge");
+        }
+    }
+}

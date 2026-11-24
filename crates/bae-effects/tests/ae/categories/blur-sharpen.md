@@ -29,3 +29,7 @@
 | 钝化蒙版 | 9 | 0.314 | 阈值从高频残差幅度中扣除；颜色模式在半透明边缘仍有差异，半径和颜色模式的内部精度尚未确定 |
 
 这些 golden 使用 8 bpc。浮点范围与预乘行为另由 RGBA16F / RGBA32F 的 GPU 像素测试覆盖。AE 自动化在启动时恢复了 `unknown-modal` 提示，随后成功输出全部文件。
+
+## 径向模糊和钝化蒙版复测
+
+径向模糊在相同种子下逐像素重现。改变种子会改变梳状图的结果，现有采样在缩放压力图上仍达到 167 / 32.051。钝化蒙版候选在主网格达到 4 / 0.743，在独立高增益、半透明探针上达到 12 / 1.696。两项保留原实现。数值依次为峰值和平均差，单位为 1/255。[径向模糊实验](https://github.com/FELIXDAD/betterAfterEffect/issues/267#issuecomment-7133686086) · [钝化蒙版实验](https://github.com/FELIXDAD/betterAfterEffect/issues/267#issuecomment-7134041541) · [网格复现方法](../calibration.md)

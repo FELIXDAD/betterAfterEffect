@@ -32,6 +32,12 @@ fn main() {
                 "coords",
                 "speckles",
                 "matte-edge",
+                "comb",
+                "shift",
+                "white",
+                "edge",
+                "ush",
+                "alpha",
             ] {
                 harness::write_png(
                     &root.join("inputs").join(format!("{name}.png")),
@@ -39,7 +45,7 @@ fn main() {
                 );
             }
             let cases = std::env::var_os("BAE_07_CASES").map_or_else(
-                || harness::CASES.to_owned(),
+                || serde_json::json!({"cases": harness::default_case_rows()}).to_string(),
                 |path| std::fs::read_to_string(path).unwrap(),
             );
             std::fs::write(root.join("cases.json"), cases).unwrap();
@@ -69,7 +75,13 @@ fn compare(root: &Path) {
     println!("| case | max Δ | mean Δ | px Δ>1 | px Δ>3 |");
     println!("|---|---:|---:|---:|---:|");
     for case in load_cases(root) {
-        let bae = harness::render(&gpu, &case);
+        let source = root.join("inputs").join(format!("{}.png", case.input));
+        let pixels = if source.exists() {
+            harness::read_png(&source, 8).expect("expected an RGBA calibration input")
+        } else {
+            harness::input(&case.input)
+        };
+        let bae = harness::render_pixels(&gpu, &case, &pixels);
         harness::write_png(&root.join("bae").join(format!("{}.png", case.name)), &bae);
         match harness::read_png(
             &root.join("ae").join(format!("{}.png", case.name)),
