@@ -1,0 +1,45 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "noise"
+name = "Noise"
+category = "Noise & Grain"
+implementation = "wgsl"
+ae_match_names = ["ADBE Noise2"]
+keywords = ["noise"]
+shader = "shaders/noise.wgsl"
+identity_when = "params.amount_of_noise == 0"
+flags = ["non-param-vary"]
+
+[[effect.param]]
+id = 1
+key = "amount_of_noise"
+type = "float"
+name = "Amount of Noise"
+default = 0
+range = [0, 100]
+
+[[effect.param]]
+id = 2
+key = "noise_type"
+type = "checkbox"
+name = "Noise Type"
+default = true
+label = "Use Color Noise"
+
+[[effect.param]]
+id = 3
+key = "clipping"
+type = "checkbox"
+name = "Clipping"
+default = true
+label = "Clip Result Values"

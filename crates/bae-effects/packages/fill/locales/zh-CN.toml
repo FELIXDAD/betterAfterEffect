@@ -1,0 +1,12 @@
+[effect.fill]
+name = "填充"
+keywords = ["填充", "颜色"]
+
+[effect.fill.params]
+fill_mask = "填充蒙版"
+all_masks = "所有蒙版"
+color = "颜色"
+invert = "反转"
+horizontal_feather = "水平羽化"
+vertical_feather = "垂直羽化"
+opacity = "不透明度"

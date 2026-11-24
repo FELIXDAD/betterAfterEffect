@@ -661,6 +661,9 @@ struct FrameInfo {
     layer_bounds: IRect,
     pixel_scale: f64,
     time: f32,
+    frame_index: i32,
+    frame_rate: f32,
+    time_step: f32,
     seed: u32,
     flags: u32,
 }
@@ -674,6 +677,9 @@ impl FrameInfo {
             layer_bounds: layer,
             pixel_scale,
             time: params.time.as_seconds() as f32,
+            frame_index: params.frame_rate.time_to_frame(params.time) as i32,
+            frame_rate: params.frame_rate.as_f64() as f32,
+            time_step: params.time_step.as_seconds() as f32,
             seed: h.finish() as u32,
             flags: frame_flags(params)
                 | match alpha {
@@ -709,6 +715,8 @@ impl FrameInfo {
         };
         f32s("downsample", &[scale as f32, scale as f32]);
         f32s("time", &[self.time]);
+        f32s("frame_rate", &[self.frame_rate]);
+        f32s("time_step", &[self.time_step]);
         f32s("pixel_aspect", &[1.0]);
         let mut u32s = |name: &str, v: u32| {
             if let Some(o) = layout.offset(name) {
@@ -718,6 +726,7 @@ impl FrameInfo {
         u32s("flags", self.flags);
         u32s("seed", self.seed);
         u32s("pass_index", pass);
+        u32s("frame_index", self.frame_index as u32);
         b
     }
 }
@@ -733,6 +742,8 @@ fn frame_flags(params: &EffectParams<'_>) -> u32 {
     }
     if params.float {
         flags |= wgsl::FRAME_FLOAT;
+    } else if params.sixteen_bpc {
+        flags |= wgsl::FRAME_16_BPC;
     }
     flags
 }

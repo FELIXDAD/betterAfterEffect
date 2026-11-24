@@ -258,7 +258,8 @@ pub(crate) fn execute(
                     .iter()
                     .filter_map(|(path, id)| Some((path.clone(), outputs[id.index()].clone()?)))
                     .collect();
-                let params = fx.frame.params(&fx.instance);
+                let mut params = fx.frame.params(&fx.instance);
+                params.sixteen_bpc = graph.depth == crate::BitDepth::Bpc16;
                 let mut alloc = PoolAllocator {
                     pool,
                     device,
