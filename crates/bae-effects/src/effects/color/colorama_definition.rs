@@ -214,7 +214,11 @@ pub(super) fn definition() -> (EffectDef, Vec<(u32, String)>) {
         2,
         "percent",
     );
-    b.build()
+    let (mut def, names) = b.build();
+    let preset = def.params.iter_mut().find(|p| p.id == 10).unwrap();
+    preset.flags.cannot_animate = true;
+    preset.flags.cannot_time_vary = true;
+    (def, names)
 }
 
 pub(crate) fn options_zh(id: u32) -> Option<&'static [&'static str]> {

@@ -200,6 +200,7 @@ choices = ["Relative", "Absolute"]
 [[effect.param]]
 id = 2
 key = "colors"
+flags = ["not-animatable", "cannot-time-vary"]
 name = "Colors:"
 type = "popup"
 default = 1
@@ -208,6 +209,7 @@ choices = ["Reds", "Yellows", "Greens", "Cyans", "Blues", "Magentas", "Whites", 
 [[effect.param]]
 id = 3
 key = "cyan"
+flags = ["not-animatable", "cannot-time-vary"]
 name = "Cyan"
 type = "float"
 default = 0
@@ -216,6 +218,7 @@ range = [-100, 100]
 [[effect.param]]
 id = 4
 key = "magenta"
+flags = ["not-animatable", "cannot-time-vary"]
 name = "Magenta"
 type = "float"
 default = 0
@@ -224,6 +227,7 @@ range = [-100, 100]
 [[effect.param]]
 id = 5
 key = "yellow"
+flags = ["not-animatable", "cannot-time-vary"]
 name = "Yellow"
 type = "float"
 default = 0
@@ -232,6 +236,7 @@ range = [-100, 100]
 [[effect.param]]
 id = 6
 key = "black"
+flags = ["not-animatable", "cannot-time-vary"]
 name = "Black"
 type = "float"
 default = 0

@@ -9,9 +9,11 @@ use common::*;
 fn ae_disk_ids_and_nested_groups() {
     let selective = builtin("ADBE SelectiveColor").def();
     assert_eq!(selective.params.len(), 62);
+    assert!((2..=6).all(|id| selective.param(id).unwrap().flags.cannot_time_vary));
     assert_eq!(selective.param(62).unwrap().kind, ParamKind::GroupEnd);
     let wheel = builtin("APC Colorama").def();
     assert_eq!(wheel.params[0].id, 3);
+    assert!(wheel.param(10).unwrap().flags.cannot_time_vary);
     assert_eq!(wheel.param(12).unwrap().kind, ParamKind::ArbitraryData);
     assert_eq!(wheel.param(38).unwrap().default, Some(Value::Float(1.)));
     assert_eq!(builtin("ADBE Apply Color LUT2").info.category, "Utility");
