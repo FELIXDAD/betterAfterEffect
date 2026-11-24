@@ -228,7 +228,7 @@ impl TimelinePanel {
             color::TEXT,
         );
         p.text(
-            pos2(l + cols.name + 16.0, cy),
+            pos2(l + cols.name + 2.0, cy),
             Align2::LEFT_CENTER,
             tr("Layer Name"),
             theme::small(),
