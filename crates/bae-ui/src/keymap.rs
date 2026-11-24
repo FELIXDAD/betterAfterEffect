@@ -87,7 +87,9 @@ impl Chord {
                 None => ("", s),
             },
         };
-        let key = Key::from_name(key).ok_or_else(|| ChordError(s.to_owned()))?;
+        let key = numpad_key(key)
+            .or_else(|| Key::from_name(key))
+            .ok_or_else(|| ChordError(s.to_owned()))?;
         let mut chord = Chord::key(key);
         for m in mods.split('+').filter(|m| !m.is_empty()) {
             match m.to_ascii_lowercase().as_str() {
@@ -173,9 +175,41 @@ fn is_navigation_key(key: Key) -> bool {
     )
 }
 
+/// AE's numpad keys (`PadMultiply`, `Pad0` …): egui has no numpad keys, so the
+/// shell turns numpad presses into these otherwise unused function keys. Name,
+/// key, label.
+pub const NUMPAD: [(&str, Key, &str); 15] = [
+    ("PadMultiply", Key::F21, "Num *"),
+    ("PadSlash", Key::F22, "Num /"),
+    ("PadPlus", Key::F23, "Num +"),
+    ("PadMinus", Key::F24, "Num -"),
+    ("PadDecimal", Key::F25, "Num ."),
+    ("Pad0", Key::F26, "Num 0"),
+    ("Pad1", Key::F27, "Num 1"),
+    ("Pad2", Key::F28, "Num 2"),
+    ("Pad3", Key::F29, "Num 3"),
+    ("Pad4", Key::F30, "Num 4"),
+    ("Pad5", Key::F31, "Num 5"),
+    ("Pad6", Key::F32, "Num 6"),
+    ("Pad7", Key::F33, "Num 7"),
+    ("Pad8", Key::F34, "Num 8"),
+    ("Pad9", Key::F35, "Num 9"),
+];
+
+fn numpad_key(name: &str) -> Option<Key> {
+    NUMPAD.iter().find(|(n, ..)| *n == name).map(|(_, k, _)| *k)
+}
+
+fn numpad_entry(key: Key) -> Option<&'static (&'static str, Key, &'static str)> {
+    NUMPAD.iter().find(|(_, k, _)| *k == key)
+}
+
 /// Key name for display. Arrow keys are `←→↑↓`, which the system UI fonts have (egui's
 /// `⏴⏵⏶⏷` are only in egui's bundled fonts, which BAE does not ship).
 fn key_label(key: Key) -> &'static str {
+    if let Some((_, _, label)) = numpad_entry(key) {
+        return crate::i18n::tr(label);
+    }
     match key {
         Key::ArrowLeft => "←",
         Key::ArrowRight => "→",
@@ -213,7 +247,7 @@ impl fmt::Display for Chord {
         if self.shift {
             f.write_str("Shift+")?;
         }
-        f.write_str(self.key.name())
+        f.write_str(numpad_entry(self.key).map_or(self.key.name(), |(name, ..)| name))
     }
 }
 
@@ -499,6 +533,18 @@ impl KeymapOverrides {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// AE's numpad keys parse, print back and display as `Num *` (#261).
+    #[test]
+    fn numpad_keys_parse_and_display() {
+        let c = Chord::parse("Alt+PadMultiply").unwrap();
+        assert_eq!(c.key, Key::F21);
+        assert!(c.alt);
+        assert_eq!(c.to_string(), "Alt+PadMultiply");
+        assert!(c.display().ends_with("Num *"));
+        assert_eq!(Chord::parse("Pad0").unwrap().to_string(), "Pad0");
+        assert!(Chord::parse("PadClear").is_err());
+    }
 
     #[test]
     fn chords_roundtrip() {
