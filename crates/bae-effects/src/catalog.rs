@@ -111,7 +111,14 @@ impl DefBuilder {
         }
     }
 
-    fn push(&mut self, id: u32, name: &str, zh: &str, kind: ParamKind, default: Option<Value>) {
+    pub(crate) fn push(
+        &mut self,
+        id: u32,
+        name: &str,
+        zh: &str,
+        kind: ParamKind,
+        default: Option<Value>,
+    ) {
         self.def.params.push(EffectParamDef {
             id,
             name: name.to_owned(),

@@ -439,3 +439,17 @@ fn effects_and_fx_switch_survive_save_and_reopen() {
     let l = ec.layers.iter().find(|l| l.path == other).unwrap();
     assert!(l.switches.effects, "missing attribute reads as on");
 }
+
+#[test]
+fn radial_blur_center_follows_source_dimensions_on_apply_and_reset() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let layer = fx.solid(&comp, [0.5; 3], [31, 13]);
+    let effect = fx.apply(&layer, "ADBE Radial Blur");
+    let center = |fx: &Fx| fx.stage.prim(&effect).unwrap().value("param:0002").cloned();
+    let expected = Some(bae_model::Value::Vec2([15.5, 6.5]));
+    assert_eq!(center(&fx), expected);
+    fx.param(&effect, 2, json!({"type":"vec2","value":[4.0,5.0]}));
+    fx.run("effect.reset", json!({"effects":[effect]}));
+    assert_eq!(center(&fx), expected);
+}
