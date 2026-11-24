@@ -1,3 +1,4 @@
+// CI timing test (one crate), not for merging.
 //! Theme tokens for the AE-style dark UI.
 //!
 //! Colors were measured from After Effects 2026 (default brightness) on macOS and are
