@@ -1039,9 +1039,106 @@ impl Command for ShiftLayers {
 
 // ---------------------------------------------------------------------------
 
+pub struct SlipLayers;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SlipLayersParams {
+    /// Layers of one comp with a time-based source (pre-comp, video or audio footage).
+    pub layers: Vec<PrimPath>,
+    /// Comp-time offset of the source (flicks; clamped so the In / Out span stays
+    /// inside the source).
+    pub delta: Time,
+    /// Keyframes that move with the source (AE: the selected ones); every other
+    /// keyframe of the layers keeps its comp time.
+    #[serde(default)]
+    pub keys: Vec<crate::keys::KeyRef>,
+}
+
+/// The slip offset `delta` clamped so `layer`'s In / Out span stays inside its source.
+pub fn slip_limit(stage: &bae_model::Stage, layer: &PrimPath, delta: Time) -> Time {
+    let Some((a, b)) = query::source_span(stage, layer) else {
+        return Time::ZERO;
+    };
+    let t = query::layer_timing(stage, layer);
+    let (lo, hi) = (t.in_point.min(t.out_point), t.in_point.max(t.out_point));
+    // The source may move right until its start reaches In, left until its end
+    // reaches Out.
+    let min = (hi - b).min(Time::ZERO);
+    let max = (lo - a).max(Time::ZERO);
+    delta.clamp(min, max)
+}
+
+impl Command for SlipLayers {
+    type Params = SlipLayersParams;
+    type Output = ();
+    const ID: &'static str = "layer.slip";
+    const TITLE: &'static str = "Slip Edit";
+    const DESCRIPTION: &'static str = "Slip edit: move which source frames play between a trimmed layer's fixed In and Out points (dragging the pale part of the layer bar). Listed keyframes move with the source, the others keep their comp time.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        ensure_unlocked(tx.stage(), &p.layers)?;
+        same_comp(tx.stage(), &p.layers)?;
+        for l in &p.layers {
+            if query::source_duration(tx.stage(), l).is_none() {
+                return Err(fail(format!("{l} has no time-based source to slip")));
+            }
+        }
+        for l in &p.layers {
+            let d = slip_limit(tx.stage(), l, p.delta);
+            if d == Time::ZERO {
+                continue;
+            }
+            let t = query::layer_timing(tx.stage(), l);
+            let factor = if t.stretch.abs() < 1.0 {
+                1.0
+            } else {
+                t.stretch / 100.0
+            };
+            // Layer-time shift that keeps a keyframe's comp time.
+            let shift = Time(-(d.0 as f64 / factor).round() as i64);
+            set(tx, l, "start_time", Value::Time(t.start_time + d))?;
+            let mut stack = vec![l.clone()];
+            while let Some(path) = stack.pop() {
+                let names: Vec<String> = tx
+                    .stage()
+                    .prim(&path)
+                    .map(|v| v.attr_names().into_iter().map(str::to_owned).collect())
+                    .unwrap_or_default();
+                for attr in names {
+                    let Some(spec) = query::attr_spec(tx.stage(), &path, &attr).cloned() else {
+                        continue;
+                    };
+                    if spec.keyframes.is_empty() {
+                        continue;
+                    }
+                    let mut out = spec.clone();
+                    out.keyframes = spec
+                        .keyframes
+                        .into_iter()
+                        .map(|(kt, k)| {
+                            let kept = p
+                                .keys
+                                .iter()
+                                .any(|r| r.path == path && r.attr == attr && r.time == kt);
+                            (if kept { kt } else { kt + shift }, k)
+                        })
+                        .collect();
+                    write_attr(tx, &path, &attr, out)?;
+                }
+                if path.name() != query::MARKERS {
+                    stack.extend(tx.stage().children(&path));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+
 /// Delete prims from every sublayer that has them. Layers parented to a deleted
 /// layer are unparented first, keeping their on-screen transform (at `time`).
-fn delete_prims(
+pub(crate) fn delete_prims(
     tx: &mut Transaction<'_>,
     paths: &[PrimPath],
     time: Time,

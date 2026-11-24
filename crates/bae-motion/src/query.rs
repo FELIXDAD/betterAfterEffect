@@ -214,6 +214,29 @@ pub fn layer_timing(stage: &Stage, layer: &PrimPath) -> LayerTiming {
     }
 }
 
+/// Duration of a layer's time-based source (a pre-comp, or footage with a duration),
+/// in source time; None for stills, solids, text, shapes and other layers without one
+/// (AE: they can be trimmed without limit and have no slip-edit bar).
+pub fn source_duration(stage: &Stage, layer: &PrimPath) -> Option<Time> {
+    let view = stage.prim(layer)?;
+    let source = view
+        .value("source")
+        .and_then(|v| v.as_prim_ref())
+        .cloned()?;
+    let src = stage.prim(&source)?;
+    let d = time(&src, "duration")?;
+    (d > Time::ZERO).then_some(d)
+}
+
+/// Comp-time span a layer's whole source covers (start, end), when it has one.
+pub fn source_span(stage: &Stage, layer: &PrimPath) -> Option<(Time, Time)> {
+    let d = source_duration(stage, layer)?;
+    let t = layer_timing(stage, layer);
+    let a = t.comp_time(Time::ZERO);
+    let b = t.comp_time(d);
+    Some((a.min(b), a.max(b)))
+}
+
 /// How keyframe times of the prim at `path` relate to comp time: the owning layer's
 /// timing for layers and the prims below them (masks, effects, shape contents), the
 /// identity for everything else (comp attributes are keyed in comp time).

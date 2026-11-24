@@ -1,0 +1,24 @@
+{
+  "projects_dir": "~/.claude/projects/-Users-a4-Documents-Orca-betterAfterEffect",
+  "state_dir": "~/.local/state/bae-wake-leaders",
+  "orca_bin": "orca",
+  "min_wake_interval_s": 1740,
+  "max_failures": 2,
+  "reset_grace_s": 120,
+  "idle_s": 90,
+  "verify_timeout_s": 150,
+  "fallback_window_s": 18600,
+  "codex_weekly_max_percent": 100,
+  "watch": [
+    {
+      "name": "ca3a6511",
+      "claude_session": "8e562540-abf8-4e46-8c36-a0bc08e760e0",
+      "orca_session": "ca3a6511-c6a8-4cd9-aca7-379637d84b6f"
+    },
+    {
+      "name": "09fe9cc0",
+      "claude_session": "2f5efdb3-f481-4946-a013-5dc9a146956f",
+      "orca_session": "09fe9cc0-76f2-4ae5-934c-b33f04bc0c0b"
+    }
+  ]
+}

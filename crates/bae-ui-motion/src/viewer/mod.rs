@@ -24,6 +24,7 @@ use crate::tools::{Tool, ViewRequest};
 
 mod bar;
 mod free_transform;
+mod motion_path;
 mod overlay;
 mod path_edit;
 mod pen_tool;
@@ -80,6 +81,8 @@ pub struct CompositionViewer {
     prefs: prefs::ViewerPrefs,
     /// Comp → screen mapping of the last frame.
     last_view: Option<View>,
+    /// Motion paths of the selected layers (C).
+    motion_path: motion_path::MotionPathState,
 }
 
 impl CompositionViewer {
@@ -716,8 +719,10 @@ impl Panel for CompositionViewer {
             effective,
             &painter,
         );
-        let select_cursor = select_tool::frame(
-            &mut self.select,
+        // Motion paths (C): drawn for the selected layers; a press on a keyframe
+        // square or handle is theirs, not the Selection tool's.
+        let path = motion_path::frame(
+            &mut self.motion_path,
             ui,
             &resp,
             cx,
@@ -727,7 +732,24 @@ impl Panel for CompositionViewer {
             &view,
             effective,
             &painter,
+            &self.prefs,
         );
+        let select_cursor = if path.owns {
+            path.cursor
+        } else {
+            path.cursor.or(select_tool::frame(
+                &mut self.select,
+                ui,
+                &resp,
+                cx,
+                &session,
+                &info,
+                &comp,
+                &view,
+                effective,
+                &painter,
+            ))
+        };
         if resp.hovered()
             && let Some(pos) = resp.hover_pos()
         {
