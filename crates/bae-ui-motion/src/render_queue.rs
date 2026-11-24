@@ -25,7 +25,7 @@ use bae_render::{
 use bae_ui::Accessible as _;
 use bae_ui::{Panel, PanelContext, TabInfo, tr};
 
-use crate::gpu_preview::PreviewSources;
+use crate::gpu_preview::{PreviewEffects, PreviewSources};
 
 /// Formats offered in the panel (movies come with 08's Media Foundation work
 /// on Windows; `bae render --format` has them on macOS).
@@ -627,6 +627,7 @@ pub fn start(
         .get::<PreviewSources>()
         .map(|s| provider_list(&s.0))
         .unwrap_or_default();
+    let effects = resources.get::<PreviewEffects>().map(|e| e.0.clone());
     if !queue.lock().begin() {
         return Ok(());
     }
@@ -640,7 +641,7 @@ pub fn start(
     let queue = queue.clone();
     std::thread::Builder::new()
         .name("bae-render-queue".into())
-        .spawn(move || run_worker(&queue, &snapshot, gpu, &providers))
+        .spawn(move || run_worker(&queue, &snapshot, gpu, &providers, effects.as_deref()))
         .map(|_| ())
         .map_err(|e| e.to_string())
 }
@@ -659,6 +660,7 @@ pub(crate) fn run_worker(
     snapshot: &StageSnapshot,
     gpu: Arc<GpuContext>,
     providers: &[Arc<dyn SourceProvider>],
+    effects: Option<&Registry<dyn bae_render::Effect>>,
 ) {
     let stage = snapshot.restore();
     let mut renderer = Renderer::with_config(
@@ -670,6 +672,9 @@ pub(crate) fn run_worker(
     );
     for provider in providers {
         renderer.providers_mut().register(provider.clone());
+    }
+    if let Some(effects) = effects {
+        renderer.sync_effects(effects);
     }
     let mut evaluator = AnimEvaluator::new(None);
     let comp_frames = |comp: &PrimPath| {
@@ -1704,7 +1709,7 @@ mod tests {
             .store(true, Ordering::Relaxed);
 
         let snapshot = StageSnapshot::take(&stage).unwrap();
-        run_worker(&queue, &snapshot, gpu, &[]);
+        run_worker(&queue, &snapshot, gpu, &[], None);
 
         let q = queue.lock();
         assert!(!q.is_running());

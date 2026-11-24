@@ -1,7 +1,12 @@
-// Builds every case of cases.json in After Effects and renders frame 0 of each to
-// PNG (comp.saveFrameToPng: RGBA, premultiplied). Run with tools/ae/aectl:
+// Builds every case of cases.json in After Effects and renders frame `frame`
+// (default 0) of each to PNG (comp.saveFrameToPng: RGBA, premultiplied). Run with
+// tools/ae/aectl:
 //
 //   tools/ae/aectl run crates/bae-render/tests/ae/render_cases.jsx
+//
+// Only some cases (comma-separated name prefixes; inner comps are always built):
+//
+//   tools/ae/aectl eval 'var BAE_AE_ONLY="threed_,mb_"; $.evalFile("<repo>/crates/bae-render/tests/ae/render_cases.jsx")'
 //
 // Inputs:  cases.json next to this script; footage in BAE_AE_ASSETS
 //          (default /private/tmp/bae-04-ae/assets, written by the ae_compare example).
@@ -12,6 +17,14 @@
     var here = File($.fileName).parent;
     var assets = (typeof BAE_AE_ASSETS !== "undefined") ? BAE_AE_ASSETS : "/private/tmp/bae-04-ae/assets";
     var outDir = (typeof BAE_AE_OUT !== "undefined") ? BAE_AE_OUT : "/private/tmp/bae-04-ae/ae";
+    var only = (typeof BAE_AE_ONLY !== "undefined" && BAE_AE_ONLY) ? BAE_AE_ONLY.split(",") : null;
+    function wanted(c) {
+        if (!only || c.inner) { return true; }
+        for (var q = 0; q < only.length; q++) {
+            if (c.name.indexOf(only[q]) === 0) { return true; }
+        }
+        return false;
+    }
     var f = new File(here.fsName + "/cases.json");
     f.encoding = "UTF-8";
     if (!f.open("r")) { throw new Error("cannot read " + f.fsName); }
@@ -78,17 +91,51 @@
         }
     }
 
+    // 3D layers and cameras take 3-component positions, scales and points.
+    function v3(v, z) {
+        return v.length >= 3 ? v : [v[0], v[1], z];
+    }
+    // Linear keys (temporal and spatial), like BAE's Keyframe::linear.
+    function setKeys(prop, keys, threeD) {
+        for (var n = 0; n < keys.length; n++) {
+            var val = keys[n][1];
+            prop.setValueAtTime(keys[n][0] / 30, (val instanceof Array && threeD) ? v3(val, 0) : val);
+        }
+        for (var m = 1; m <= prop.numKeys; m++) {
+            prop.setInterpolationTypeAtKey(m, KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR);
+            if (prop.isSpatial) {
+                prop.setSpatialAutoBezierAtKey(m, false);
+                prop.setSpatialContinuousAtKey(m, false);
+                // AE stores Position with three components even on 2D layers.
+                var zero = [];
+                for (var c = 0; c < prop.keyValue(m).length; c++) { zero.push(0); }
+                prop.setSpatialTangentsAtKey(m, zero, zero);
+            }
+        }
+    }
+
     var comps = {};
     function build(c) {
         var comp = proj.items.addComp(c.name, c.size[0], c.size[1], 1.0, 1.0, 30);
         comp.parentFolder = folder;
         comp.bgColor = [0, 0, 0];
         comp.resolutionFactor = [1, 1];
+        if (c.motion_blur) {
+            comp.motionBlur = true;
+            comp.shutterAngle = c.motion_blur.angle;
+            comp.shutterPhase = c.motion_blur.phase;
+            comp.motionBlurSamplesPerFrame = c.motion_blur.samples;
+        }
         var i, l, layer;
         // AE adds new layers on top: add bottom-first so layers[0] ends up as index 1.
         for (i = c.layers.length - 1; i >= 0; i--) {
             l = c.layers[i];
-            if (l.solid) {
+            if (l.camera) {
+                layer = comp.layers.addCamera(l.name, [c.size[0] / 2, c.size[1] / 2]);
+                if (l.camera.type === "one_node") { layer.autoOrient = AutoOrientType.NO_AUTO_ORIENT; }
+                layer.property("ADBE Camera Options Group").property("ADBE Camera Zoom").setValue(l.camera.zoom);
+                if (l.poi) { layer.property("ADBE Transform Group").property("ADBE Anchor Point").setValue(l.poi); }
+            } else if (l.solid) {
                 layer = comp.layers.addSolid([l.solid[0] / 255, l.solid[1] / 255, l.solid[2] / 255],
                     c.name + "_" + l.name, l.size[0], l.size[1], 1.0);
                 layer.source.parentFolder = folder;
@@ -98,12 +145,28 @@
                 layer = comp.layers.add(comps[l.comp]);
             }
             layer.name = l.name;
-            layer.quality = LayerQuality.BEST;
-            layer.property("ADBE Transform Group").property("ADBE Position").setValue(l.pos);
-            if (l.scale) { layer.property("ADBE Transform Group").property("ADBE Scale").setValue(l.scale); }
-            if (l.rot) { layer.property("ADBE Transform Group").property("ADBE Rotate Z").setValue(l.rot); }
+            var threeD = !!(l.three_d || l.camera);
+            if (!l.camera) { layer.quality = LayerQuality.BEST; }
+            if (l.three_d) { layer.threeDLayer = true; }
+            if (l.mb) { layer.motionBlur = true; }
+            var tg = layer.property("ADBE Transform Group");
+            var keys = l.keys || {};
+            if (keys.pos) {
+                setKeys(tg.property("ADBE Position"), keys.pos, threeD);
+            } else {
+                tg.property("ADBE Position").setValue(threeD ? v3(l.pos, 0) : l.pos);
+            }
+            if (l.scale) { tg.property("ADBE Scale").setValue(threeD ? v3(l.scale, 100) : l.scale); }
+            if (l.rot) { tg.property("ADBE Rotate Z").setValue(l.rot); }
+            if (keys.rot) { setKeys(tg.property("ADBE Rotate Z"), keys.rot, false); }
+            if (l.rot3) {
+                tg.property("ADBE Rotate X").setValue(l.rot3[0]);
+                tg.property("ADBE Rotate Y").setValue(l.rot3[1]);
+                tg.property("ADBE Rotate Z").setValue(l.rot3[2]);
+            }
+            if (l.orient) { tg.property("ADBE Orientation").setValue(l.orient); }
             if (l.opacity !== undefined) { layer.property("ADBE Transform Group").property("ADBE Opacity").setValue(l.opacity); }
-            if (l.mode) { layer.blendingMode = BlendingMode[l.mode.toUpperCase()]; }
+            if (l.mode) { layer.blendingMode = BlendingMode[l.mode === "silhouette_alpha" ? "SILHOUETE_ALPHA" : l.mode.toUpperCase()]; }
             if (l.preserve) { layer.preserveTransparency = true; }
             if (l.masks) { addMasks(layer, l.masks); }
         }
@@ -121,11 +184,26 @@
     var written = [];
     for (var k = 0; k < spec.cases.length; k++) {
         var c = spec.cases[k];
+        if (c.hsl_grid) {
+            c.layers = [];
+            for (var row = 0; row < spec.hsl_pairs.length; row++) {
+                var pair = spec.hsl_pairs[row];
+                for (var j = 0; j < 4; j++) {
+                    for (var col = 0; col < 4; col++) {
+                        var pos = [4 * (col + 4*j) + 2, 4*row + 2];
+                        var id = "" + row + j + col;
+                        c.layers.push({name:"s"+id, solid:pair[1], size:[4,4], pos:pos, opacity:(col+1)*25, mode:c.hsl_grid});
+                        c.layers.push({name:"b"+id, solid:pair[0], size:[4,4], pos:pos, opacity:(j+1)*25});
+                    }
+                }
+            }
+        }
+        if (!wanted(c)) { continue; }
         var comp = build(c);
         if (!c.inner) {
             var file = new File(outDir + "/" + c.name + ".png");
             if (file.exists) { file.remove(); }
-            comp.saveFrameToPng(0, file);
+            comp.saveFrameToPng((c.frame || 0) / 30, file);
             // The save is asynchronous; let it finish before queueing more work.
             for (var wait = 0; wait < 100 && !file.exists; wait++) { $.sleep(20); }
             written.push(c.name);

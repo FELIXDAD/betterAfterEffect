@@ -2,22 +2,27 @@
 //!
 //! `bae_anim::Evaluator` does the animation work (AE easing, spatial paths,
 //! parenting, layer time, time remapping, later expressions); this module maps
-//! its [`EvaluatedComp`] onto [`RenderComp`]: world matrices become 2D affines,
-//! sources are resolved (solid assets, footage files; nested comps arrive
-//! already evaluated at their mapped time), tokens become enums.
+//! its [`EvaluatedComp`] onto [`RenderComp`]: world matrices become 2D affines
+//! (and stay 4×4 for 3D layers), the active camera and enabled lights are
+//! collected, motion-blurred layers are sampled at 03's shutter times, sources
+//! are resolved (solid assets, footage files; nested comps arrive already
+//! evaluated at their mapped time), tokens become enums.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use std::hash::{Hash, Hasher};
 
-use bae_anim::{EvaluatedComp, EvaluatedLayer, EvaluatedPrim, Evaluator, LayerSource};
+use bae_anim::{
+    CameraState, EvaluatedComp, EvaluatedLayer, EvaluatedPrim, Evaluator, LayerSource, LightState,
+};
 use bae_model::{LayerKind, PrimPath, Stage, StageEvent, Time};
 use glam::{DAffine2, DMat4, DVec2};
 use rustc_hash::FxHasher;
 
 use crate::assets::AssetFiles;
 use crate::blend::{BlendMode, MaskMode, TrackMatteMode};
+use crate::camera::Camera;
 use crate::error::RenderError;
 use crate::eval::CompEvaluator;
 use crate::graph::MAX_DEPTH;
@@ -25,6 +30,8 @@ use crate::input::{
     CustomContent, FootageRef, LayerContent, RenderComp, RenderEffect, RenderLayer, RenderMask,
     TrackMatte, hash_value,
 };
+use crate::light::{Falloff, Light, LightKind, Material, ShadowMode};
+use crate::motion::{CompMotionBlur, LayerSample};
 use crate::request::RenderPurpose;
 
 /// [`CompEvaluator`] backed by `bae_anim::Evaluator` (keeps compiled comps across
@@ -115,12 +122,93 @@ impl AnimEvaluator {
             background: ec.bg_color.map(|v| v as f32),
             shutter: [ec.motion_blur.shutter_angle, ec.motion_blur.shutter_phase],
             layers: Vec::with_capacity(ec.layers.len()),
+            camera: active_camera(ec),
+            lights: ec
+                .layers
+                .iter()
+                .enumerate()
+                .filter(|(_, l)| l.switches.enabled && l.active)
+                .filter_map(|(i, l)| Some(light(i, l, l.light.as_ref()?)))
+                .collect(),
+            motion_blur: None,
         };
-        for layer in &ec.layers {
-            let out = self.layer(stage, ec, layer, depth)?;
+        let mut samples = match self.motion_samples(stage, ec)? {
+            Some((mb, samples)) => {
+                rc.motion_blur = Some(Arc::new(mb));
+                samples
+            }
+            None => Vec::new(),
+        };
+        for (i, layer) in ec.layers.iter().enumerate() {
+            let mut out = self.layer(stage, ec, layer, depth)?;
+            if let Some(s) = samples.get_mut(i) {
+                out.motion_samples = std::mem::take(s).into();
+            }
             rc.layers.push(out);
         }
         Ok(rc)
+    }
+
+    /// The comp evaluated at its motion-blur sample times (AE-ANI-103): 03 puts
+    /// the times on every blurred layer (both switches on); all layers of a comp
+    /// share them. Returns the comp's samples and, per layer, its placement at
+    /// each time (empty for layers that are not blurred).
+    #[allow(clippy::type_complexity)]
+    fn motion_samples(
+        &mut self,
+        stage: &Stage,
+        ec: &EvaluatedComp,
+    ) -> Result<Option<(CompMotionBlur, Vec<Vec<LayerSample>>)>, RenderError> {
+        let blurred = |l: &EvaluatedLayer| {
+            l.active
+                && !l.motion_blur_times.is_empty()
+                && !matches!(
+                    l.kind,
+                    LayerKind::Camera | LayerKind::Light | LayerKind::Audio
+                )
+        };
+        let Some(times) = ec
+            .layers
+            .iter()
+            .find(|l| blurred(l))
+            .map(|l| l.motion_blur_times.clone())
+        else {
+            return Ok(None);
+        };
+        let mut layers: Vec<Vec<LayerSample>> = vec![Vec::new(); ec.layers.len()];
+        let mut cameras = Vec::with_capacity(times.len());
+        for &t in &times {
+            // Transform-only sampling would be cheaper; 03 evaluates whole comps.
+            let at = self
+                .inner
+                .evaluate_comp(stage, &ec.path, t)
+                .map_err(|e| RenderError::Other(format!("{}: {e}", ec.path)))?;
+            if at.layers.len() != ec.layers.len() {
+                self.warn(format!(
+                    "{}: layers changed between motion-blur samples",
+                    ec.path
+                ));
+                return Ok(None);
+            }
+            cameras.push(active_camera(&at));
+            for (i, l) in ec.layers.iter().enumerate() {
+                if blurred(l) {
+                    let s = &at.layers[i];
+                    layers[i].push(LayerSample {
+                        transform: affine_2d(&s.world_matrix),
+                        matrix_3d: matrix_3d(s),
+                    });
+                }
+            }
+        }
+        Ok(Some((
+            CompMotionBlur {
+                times,
+                cameras,
+                adaptive_limit: ec.motion_blur.adaptive_limit,
+            },
+            layers,
+        )))
     }
 
     fn layer(
@@ -136,13 +224,13 @@ impl AnimEvaluator {
         out.active = l.active && guide_ok;
         out.visible = l.visible;
         out.adjustment = l.switches.adjustment || l.kind == LayerKind::Adjustment;
-        if l.switches.three_d {
-            self.warn(format!(
-                "{}: 3D layers are drawn flat (no camera projection yet)",
-                l.path
-            ));
-        }
         out.transform = affine_2d(&l.world_matrix);
+        out.matrix_3d = matrix_3d(l);
+        if out.matrix_3d.is_some()
+            && let Some(view) = stage.prim(&l.path)
+        {
+            out.material = material(&view, l.layer_time);
+        }
         out.opacity = l.opacity.clamp(0.0, 1.0) as f32;
         out.blend_mode = BlendMode::from_token(&l.blend_mode).unwrap_or_else(|| {
             self.warn(format!("{}: unknown blend mode `{}`", l.path, l.blend_mode));
@@ -166,9 +254,11 @@ impl AnimEvaluator {
                     expansion: m.expansion as f32,
                 })
                 .collect();
+            // The fx switch turns the whole effect stack off.
             out.effects = l
                 .effects
                 .iter()
+                .filter(|_| l.switches.effects)
                 .map(|e| RenderEffect {
                     path: e.path.clone(),
                     effect: e.match_name.clone(),
@@ -193,11 +283,7 @@ impl AnimEvaluator {
     ) -> Result<LayerContent, RenderError> {
         if matches!(
             l.kind,
-            LayerKind::Null
-                | LayerKind::Camera
-                | LayerKind::Light
-                | LayerKind::Audio
-                | LayerKind::Adjustment
+            LayerKind::Null | LayerKind::Camera | LayerKind::Light | LayerKind::Audio
         ) {
             return Ok(LayerContent::None);
         }
@@ -311,6 +397,73 @@ fn matte_mode(m: bae_anim::TrackMatte) -> Option<TrackMatteMode> {
         bae_anim::TrackMatte::AlphaInverted => Some(TrackMatteMode::AlphaInverted),
         bae_anim::TrackMatte::Luma => Some(TrackMatteMode::Luma),
         bae_anim::TrackMatte::LumaInverted => Some(TrackMatteMode::LumaInverted),
+    }
+}
+
+/// The layer's 4×4 world matrix when it is a 3D layer that draws (cameras and
+/// lights are 3D but have no pixels).
+fn matrix_3d(l: &EvaluatedLayer) -> Option<DMat4> {
+    (l.switches.three_d && !matches!(l.kind, LayerKind::Camera | LayerKind::Light))
+        .then_some(l.world_matrix)
+}
+
+/// The comp's active camera (03 picks it, AE-CMP-423).
+fn active_camera(ec: &EvaluatedComp) -> Option<Camera> {
+    let c: &CameraState = ec.layers.get(ec.camera?)?.camera.as_ref()?;
+    Some(Camera {
+        world: c.world_matrix,
+        zoom: c.zoom,
+        depth_of_field: c.depth_of_field,
+        focus_distance: c.focus_distance,
+        aperture: c.aperture,
+        blur_level: c.blur_level,
+    })
+}
+
+fn light(index: usize, l: &EvaluatedLayer, s: &LightState) -> Light {
+    use bae_anim::{LightFalloff, LightType};
+    Light {
+        kind: match s.light_type {
+            LightType::Parallel => LightKind::Parallel,
+            LightType::Spot => LightKind::Spot,
+            LightType::Point => LightKind::Point,
+            LightType::Ambient => LightKind::Ambient,
+            LightType::Environment => LightKind::Environment,
+        },
+        world: s.world_matrix,
+        point_of_interest: s.point_of_interest,
+        color: [s.color[0] as f32, s.color[1] as f32, s.color[2] as f32],
+        intensity: s.intensity as f32,
+        cone_angle: s.cone_angle as f32,
+        cone_feather: s.cone_feather as f32,
+        falloff: match s.falloff {
+            LightFalloff::None => Falloff::None,
+            LightFalloff::Smooth => Falloff::Smooth,
+            LightFalloff::InverseSquareClamped => Falloff::InverseSquareClamped,
+        },
+        radius: s.radius as f32,
+        falloff_distance: s.falloff_distance as f32,
+        casts_shadows: s.casts_shadows,
+        shadow_darkness: s.shadow_darkness as f32,
+        shadow_diffusion: s.shadow_diffusion as f32,
+        scope_below: l.switches.adjustment.then_some(index),
+    }
+}
+
+/// Material Options of a 3D layer at layer time `t` (03 does not evaluate
+/// them yet; read from the stage).
+fn material(view: &bae_model::PrimView<'_>, t: Time) -> Material {
+    let flag = |attr: &str, default: bool| {
+        crate::eval::sample(view, attr, t)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(default)
+    };
+    let mode = |on: bool| if on { ShadowMode::On } else { ShadowMode::Off };
+    Material {
+        casts_shadows: mode(flag("material:casts_shadows", false)),
+        accepts_shadows: mode(flag("material:accepts_shadows", true)),
+        accepts_lights: flag("material:accepts_lights", true),
+        ..Material::default()
     }
 }
 

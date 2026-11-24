@@ -22,6 +22,9 @@
 //!   definitions are `bae_model::EffectDef`.
 //! * [`graph`] – the node model and ROI negotiation.
 //! * [`FrameCache`] – RAM-preview cache with precise `StageEvent` invalidation.
+//! * [`camera`], [`three_d`], [`light`], [`motion`] – 3D layers seen through AE's
+//!   camera model (projection, 3D groups, depth order), lights (data), motion
+//!   blur samples.
 //!
 //! Pixel conventions: working buffers are premultiplied RGBA16F (RGBA32F
 //! optional) holding the working space's encoded values; AE's straight-alpha
@@ -33,6 +36,7 @@ pub mod anim;
 mod assets;
 pub mod blend;
 pub mod cache;
+pub mod camera;
 pub mod effect;
 mod error;
 pub mod eval;
@@ -44,19 +48,23 @@ pub mod geom;
 mod gpu;
 pub mod graph;
 pub mod input;
+pub mod light;
 pub mod mask;
 mod module;
+pub mod motion;
 pub mod png_out;
 pub mod pool;
 mod renderer;
 pub mod request;
 pub mod source;
 pub mod testing;
+pub mod three_d;
 
 pub use anim::AnimEvaluator;
 pub use assets::AssetFiles;
 pub use blend::{BlendMode, MaskMode, TrackMatteMode};
 pub use cache::{CacheStats, FrameCache, FrameKey};
+pub use camera::Camera;
 pub use effect::{Effect, EffectLibrary, EffectParams};
 pub use error::RenderError;
 pub use eval::{CompEvaluator, MockEvaluator};
@@ -72,7 +80,9 @@ pub use input::{
     CustomContent, Dependency, FootageRef, LayerContent, RenderComp, RenderEffect, RenderLayer,
     RenderMask, TrackMatte,
 };
+pub use light::{Light, LightKind, Material};
 pub use module::RenderModule;
+pub use motion::{CompMotionBlur, LayerSample};
 pub use pool::PoolStats;
 pub use renderer::{FrameStats, OutputAlpha, RenderedFrame, Renderer, RendererConfig};
 pub use request::{

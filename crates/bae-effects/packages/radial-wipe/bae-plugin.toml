@@ -1,0 +1,58 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "radial-wipe"
+name = "Radial Wipe"
+category = "Transition"
+implementation = "wgsl"
+ae_match_names = ["ADBE Radial Wipe"]
+keywords = ["radial", "wipe"]
+shader = "shaders/radial_wipe.wgsl"
+identity_when = "params.transition_completion == 0"
+
+[[effect.param]]
+id = 1
+key = "transition_completion"
+type = "float"
+name = "Transition Completion"
+default = 0
+range = [0, 100]
+
+[[effect.param]]
+id = 2
+key = "start_angle"
+type = "angle"
+name = "Start Angle"
+default = 0
+
+[[effect.param]]
+id = 3
+key = "wipe_center"
+type = "point"
+name = "Wipe Center"
+default = [0.5, 0.5]
+
+[[effect.param]]
+id = 4
+key = "wipe"
+type = "popup"
+name = "Wipe"
+default = 1
+choices = ["Clockwise", "Counterclockwise", "Both"]
+
+[[effect.param]]
+id = 5
+key = "feather"
+type = "float"
+name = "Feather"
+default = 0
+range = [0, 32000]

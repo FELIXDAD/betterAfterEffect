@@ -1,21 +1,32 @@
-# BAE continuous integration (workstream 01, ARCHITECTURE §11).
+# BAE continuous integration, full tier (workstream 01, ARCHITECTURE §11, docs/spec/ci.md).
 #
-# Every push to main/dev and every pull request runs, on macOS arm64 and Windows x64:
-# fmt (once), clippy, tests, the one-wgpu dependency check, the release size budget
-# (`cargo xtask size`), a headless smoke run and packaging (`cargo xtask dist`).
-# CI uses the default ./target directory (no CARGO_TARGET_DIR).
+# Runs on macOS arm64 and Windows x64: fmt (once), clippy, workspace tests (plus the D3D12
+# debug-layer pass on Windows and the UI crates one by one), the one-wgpu and one-font-stack
+# checks, the release size budget (`cargo xtask size`), a headless smoke run, packaging
+# (`cargo xtask dist`) and the macOS bundle signature.
+#
+# When: every push to main/dev, and on pull requests only once they carry the
+# `merge-ready` label (labeled with it, or a new push / update-branch while labeled). The
+# fast tier (ci-fast.yml) runs on every pull request push. The merge train
+# (tools/merge-train) requires `fast / <platform>` and `full / <platform>` to be green on
+# the PR head. CI uses the default ./target directory (no CARGO_TARGET_DIR).
 
-name: CI
+name: CI full
 
 on:
   push:
     branches: [main, dev]
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer full run on the same PR cancels the older one. Pull request runs that skip
+  # (no merge-ready label, or some other label added) go to their own group so they never
+  # cancel a full run in progress. main/dev runs are not cancelled: each finishes and
+  # saves the build cache the fast tier restores.
+  group: full-${{ github.ref }}-${{ (github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'merge-ready') && (github.event.action != 'labeled' || github.event.label.name == 'merge-ready'))) && 'run' || 'skip' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -26,8 +37,10 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
-  build:
-    name: ${{ matrix.name }}
+  full:
+    name: full / ${{ matrix.name }}
+    # Same condition as the concurrency group above.
+    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'merge-ready') && (github.event.action != 'labeled' || github.event.label.name == 'merge-ready'))
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
@@ -64,9 +77,12 @@ jobs:
           echo "host: $host"
           test "$host" = "${{ matrix.target }}"
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.3
         with:
-          key: ${{ matrix.target }}
+          # Shared with the fast tier (ci-fast.yml), which only restores it. `<target>-build`
+          # keeps the key of the earlier single-job CI (key <target>, job `build`), so the
+          # existing dev/main caches stay usable.
+          shared-key: ${{ matrix.target }}-build
           # Only main/dev populate the cache; pull requests restore from their base branch.
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
 
@@ -136,6 +152,26 @@ jobs:
 
       - name: Package
         run: cargo xtask dist --no-build
+
+      - name: Windows executable version
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+          $version = ($metadata.packages | Where-Object name -eq 'bae').version
+          $expected = ($version -replace '[-+].*$') + '.0'
+          $archive = Join-Path $metadata.target_directory "dist/BAE-$version-x86_64-windows.zip"
+          $check = Join-Path $env:RUNNER_TEMP 'version-check'
+          Expand-Archive -LiteralPath $archive -DestinationPath $check -Force
+          $info = (Get-Item -LiteralPath (Join-Path $check 'bae.exe')).VersionInfo
+          $file = [version]::new($info.FileMajorPart, $info.FileMinorPart, $info.FileBuildPart, $info.FilePrivatePart)
+          $product = [version]::new($info.ProductMajorPart, $info.ProductMinorPart, $info.ProductBuildPart, $info.ProductPrivatePart)
+          if ($info.FileVersion -cne $expected -or $info.ProductVersion -cne $expected -or
+              "$file" -ne $expected -or "$product" -ne $expected -or
+              $info.ProductName -cne 'BAE' -or $info.FileDescription -cne 'BAE') {
+            $info | Format-List *
+            throw "Expected BAE file and product versions $expected"
+          }
 
       - name: macOS bundle signature
         # Checks the zip as a user gets it: unpacked like Archive Utility does, with the

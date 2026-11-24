@@ -1,0 +1,84 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "dust-scratches"
+name = "Dust & Scratches"
+category = "Noise & Grain"
+implementation = "wgsl"
+ae_match_names = ["ADBE Dust & Scratches"]
+shader = "shaders/dust_scratches.wgsl"
+includes = ["shaders/rank.wgsl"]
+identity_when = "params.radius == 0"
+
+[effect.roi]
+read = "params.radius"
+
+[[effect.pass]]
+entry = "dust_scratches"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 1
+key = "radius"
+type = "int"
+name = "Radius"
+default = 1
+range = [0, 255]
+
+[[effect.param]]
+id = 2
+key = "threshold"
+type = "float"
+name = "Threshold"
+default = 0
+range = [0, 1]
+
+[[effect.param]]
+id = 3
+key = "operate_on_alpha_channel"
+type = "checkbox"
+name = "Operate On Alpha Channel"
+default = false
+
+[[effect]]
+id = "median"
+name = "Median"
+category = "Noise & Grain"
+implementation = "wgsl"
+ae_match_names = ["ADBE PS Median"]
+shader = "shaders/median.wgsl"
+includes = ["shaders/rank.wgsl"]
+identity_when = "params.radius == 0"
+
+[effect.roi]
+read = "params.radius"
+
+[[effect.pass]]
+entry = "median"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 1
+key = "radius"
+type = "int"
+name = "Radius"
+default = 0
+range = [0, 255]
+
+[[effect.param]]
+id = 2
+key = "operate_on_alpha_channel"
+type = "checkbox"
+name = "Operate On Alpha Channel"
+default = false

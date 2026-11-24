@@ -27,6 +27,8 @@ pub struct EffectParams<'a> {
     pub effect: &'a RenderEffect,
     /// Layer time of the frame.
     pub time: Time,
+    /// Time in the comp containing the layer.
+    pub comp_time: Time,
     /// Resolution scale (0.5 at half resolution): pixel-sized parameters such as a
     /// blur radius must be multiplied by it (AE `downsample_x/y`).
     pub scale: f64,
@@ -48,6 +50,8 @@ pub struct EffectParams<'a> {
     /// clamped like AE's integer buffers, and AE options such as Levels' "Off
     /// for 32 bpc Color" clip.
     pub float: bool,
+    /// 16-bpc integer project (AE uses 32768 for white).
+    pub sixteen_bpc: bool,
     /// Comp shutter angle in degrees (AE default 180).
     pub shutter_angle: f64,
     /// Comp shutter phase in degrees (AE default −90).
@@ -68,6 +72,7 @@ impl<'a> EffectParams<'a> {
         Self {
             effect,
             time: Time::ZERO,
+            comp_time: Time::ZERO,
             scale: 1.0,
             layer_bounds: IRect::EMPTY,
             frame_rate: FrameRate::FPS_30,
@@ -75,6 +80,7 @@ impl<'a> EffectParams<'a> {
             linear: false,
             purpose: RenderPurpose::Preview,
             float: false,
+            sixteen_bpc: false,
             shutter_angle: 180.0,
             shutter_phase: -90.0,
             seed: h.finish(),
@@ -134,7 +140,8 @@ impl EffectParams<'_> {
 pub struct LayerDependency {
     /// The layer.
     pub layer: PrimPath,
-    /// The comp time to sample it at.
+    /// The comp time to sample it at. The graph currently exposes the source
+    /// stage of the already evaluated frame.
     pub time: Time,
 }
 
@@ -142,6 +149,12 @@ pub struct LayerDependency {
 pub trait Effect: Send + Sync {
     /// The parameter definition (same object as in `bae_model::EffectRegistry`).
     fn def(&self) -> &EffectDef;
+
+    /// Whether this effect contributes a render node. Parameter-only controls
+    /// are registered so their definitions are available without encoding GPU work.
+    fn renders_pixels(&self) -> bool {
+        true
+    }
 
     /// Output bounds for input bounds (layer pixels at the request scale).
     /// Default: unchanged. A blur grows them by its radius.
@@ -178,10 +191,37 @@ impl fmt::Debug for dyn Effect {
     }
 }
 
+/// The id of effect `match_name` in the app registries
+/// (`Registry<bae_model::EffectDef>`, `Registry<dyn Effect>`): registry ids
+/// have no whitespace, AE matchNames do (`ADBE Gaussian Blur 2`), so
+/// whitespace becomes `%20` and `%` becomes `%25`. Names without either
+/// (plugin effects, `<plugin-id>/<effect>`) are their own id.
+pub fn registry_id(match_name: &str) -> std::borrow::Cow<'_, str> {
+    if !match_name.contains(|c: char| c == '%' || c.is_whitespace()) {
+        return std::borrow::Cow::Borrowed(match_name);
+    }
+    let mut out = String::with_capacity(match_name.len() + 8);
+    for c in match_name.chars() {
+        match c {
+            '%' => out.push_str("%25"),
+            c if c.is_whitespace() => {
+                let mut buf = [0u8; 4];
+                for b in c.encode_utf8(&mut buf).bytes() {
+                    out.push_str(&format!("%{b:02X}"));
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
 /// Effect implementations by effect ID (match name).
 #[derive(Default)]
 pub struct EffectLibrary {
     effects: FxHashMap<String, Arc<dyn Effect>>,
+    /// Generation of the app registry last synced from ([`Self::sync`]).
+    synced: Option<u64>,
 }
 
 impl EffectLibrary {
@@ -214,10 +254,48 @@ impl EffectLibrary {
     pub fn is_empty(&self) -> bool {
         self.effects.is_empty()
     }
+
+    /// Makes the library hold exactly the effects of the app's
+    /// `Registry<dyn Effect>` (built-in and plugin effects; keyed by their
+    /// match names), dropping effects registered by hand. Cheap when the
+    /// registry has not changed since the last call; returns whether the
+    /// library changed (callers drop cached frames then).
+    pub fn sync(&mut self, registry: &bae_app::Registry<dyn Effect>) -> bool {
+        let generation = registry.generation();
+        if self.synced == Some(generation) {
+            return false;
+        }
+        self.synced = Some(generation);
+        self.effects.clear();
+        for entry in registry.snapshot().iter() {
+            let effect = entry.item().clone();
+            self.effects.insert(effect.def().match_name.clone(), effect);
+        }
+        true
+    }
 }
 
 impl fmt::Debug for EffectLibrary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_set().entries(self.effects.keys()).finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registry_ids_have_no_whitespace() {
+        assert_eq!(
+            registry_id("bae.posterize/posterize"),
+            "bae.posterize/posterize"
+        );
+        assert_eq!(
+            registry_id("ADBE Gaussian Blur 2"),
+            "ADBE%20Gaussian%20Blur%202"
+        );
+        assert_eq!(registry_id("a%b c"), "a%25b%20c");
+        assert_ne!(registry_id("a b"), registry_id("a%20b"));
     }
 }

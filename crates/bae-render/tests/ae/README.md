@@ -41,3 +41,40 @@ cp /private/tmp/bae-04-ae/ae/*.png crates/bae-render/tests/ae/golden/
 | `mask_fill_rule` | 自相交路径（五角星）中间填不填：填 = 非零环绕，空 = 奇偶（AE-CMP-045） |
 | `mask_scaled_matte` | 放大 250% 的纯色上的蒙版边缘（BAE 按屏幕分辨率栅格化，边缘是锐的；AE 的纯色是栅格图层，可能是先栅格化再放大）；带羽化蒙版的图层当轨道遮罩 |
 
+
+## 图层混合模式（AE 26.2.1，2026-11-24）
+
+新增的 33 个 `blend_` 用例检查小图层的内外边界，在 80% 不透明度的底层上以 65% 不透明度叠加源层。两种溶解改用 100% 不透明度，以便与 AE 逐像素核对确定性端点；半透明像素的随机选择、跨帧及 ROI 一致性由 GPU/CPU 测试覆盖。
+
+`grid_` 用例读取 `cases.json` 的 `hsl_pairs`（底色、源色）。每行一对 RGB，每四列依次使用 25/50/75/100% 的底层不透明度，组内四列按同一顺序改变源层不透明度。四种模式共 384 格，8 bpc、每通道满值 255；Metal 上色相、饱和度、颜色、明度最大差为 2、3、1、2。单独的半透明样本中，色相和饱和度的最大差为 0 和 1。[饱和度校准跟踪 #257](https://github.com/FELIXDAD/betterAfterEffect/issues/257)
+
+## 3D 图层与运动模糊（AE 26.2.1，2026-11-24）
+
+`threed_` 和 `mb_` 开头的 17 个用例（`cases.json` 新增的键：`three_d`、三维 `pos`、`rot3`（X/Y/Z 旋转）、`orient`（方向）、摄像机图层 `camera: {type, zoom}` + `poi`、`mb`（图层运动模糊开关）、`keys`（`pos` / `rot` 的线性关键帧，按帧）、合成的 `motion_blur: {angle, phase, samples}`、渲染帧 `frame`）。只重渲这些用例：
+
+```sh
+tools/ae/aectl eval 'var BAE_AE_ONLY="threed_,mb_"; $.evalFile("<仓库>/crates/bae-render/tests/ae/render_cases.jsx")'
+```
+
+| 用例 | 最大差 | 说明 |
+|---|---:|---|
+| `threed_flat_z0` | 0 | 默认摄像机下 z = 0 的 3D 图层与 2D 逐像素相同（AE-CMP-400/403） |
+| `threed_depth`、`threed_group_split` | 1 | 组内按深度、不按图层顺序；2D 图层把组隔开后按图层顺序（AE-CMP-404/406） |
+| `threed_rot_y`、`threed_rot_orient` | 2、4 | 透视投影、X/Y/Z 旋转和方向的顺序（`Or · Rot`，AE-ANI-014） |
+| `threed_camera_two_node`、`threed_camera_one_node` | 2 | 双节点（瞄准目标点）和单节点摄像机，素材的透视采样 |
+| `threed_intersect` | 4 | 相交图层沿交线切开 |
+| `threed_precomp` | 16 | 3D 预合成与其他 3D 图层一起按深度排序；剩下的差在预合成内部白块的边缘 |
+| `threed_floor` | 25 | 只在地面两条斜边上：极度透视压缩的斜边，AE 的过渡比我们窄（总覆盖率相同，内部像素一致） |
+| `mb_translate`、`mb_angle_phase`、`mb_footage` | 1 | 2D 平移、360° / 0° 快门、素材 |
+| `mb_3d` | 3 | 3D 图层沿 z 运动（固定每帧样本数） |
+| `mb_rotate` | 5 | 2D 旋转（自适应样本数按角点的弧长计） |
+| `mb_camera` | 15 | 双节点摄像机绕目标点移动：图层几乎不动，差在上下边缘不到 0.1 像素的位置 |
+| `mb_off` | 0 | 合成开、图层关：不模糊 |
+
+实测得到、已经按此实现的结论（`docs/spec/` 里原来标 UNVERIFIED 的几处）：
+
+- **采样时间**（AE-ANI-103）：`t_k = t_open + dur · k / N`，第一个样本在快门打开时，最后一个在关闭前 `dur/N`；不是 `(k + ½)/N`。`mb_translate` 的拖尾两端各差 1/16 的台阶只有这样才对得上（误差 0–1）。改在 `bae_anim::MotionBlur::sample_times`。
+- **2D 图层的自适应样本数**（AE-ANI-104）：`N = clamp(floor(d / step) + 1, 每帧样本数, 自适应采样上限)`，`d` 是整个快门内角点的最大位移（像素），位移小于 32 像素时 `step = 1.3`，32 像素起 `step = 1.9`。用 30×30 纯色、每帧样本数 2、上限 256、位移 3–300 像素的 30 个合成逐一拟合（每个都只有一个 N 误差为 0–1），与图层大小、方向无关，上限生效。代码在 `motion::adaptive_samples`。
+- **相交的平局**（AE-CMP-404/405）：两个图层在视线方向上相差不到 1 像素时，图层顺序靠上的在前。45° 相交的切口因此向下面那个图层一侧移 1 像素（`three_d::TIE_DEPTH`）。
+- **3D 预合成**（AE-CMP-406）：未折叠的 3D 预合成**不**隔开 3D 组，和其他 3D 图层一起按深度排序（规格把它列为隔断，实测不是）。
+- **边缘**：采样纹理时不读内容以外的纹素（池里的纹理比内容大），四条边都只由覆盖率过渡决定；之前右边、下边会混进透明纹素，3D 预合成上差到 65。2D 的已有用例不受影响。

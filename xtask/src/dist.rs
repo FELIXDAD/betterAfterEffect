@@ -4,7 +4,7 @@
 //!   The bundle has the app icon (`assets/icons/app/bae.icns`) and declares the `.bae`
 //!   (project folder, shown as one document) and `.baez` (packed project) document types.
 //! - Windows: `BAE-<version>-<arch>-windows/` and a zip of its contents. `bae.exe` must carry
-//!   the app icon (linked in by `apps/bae/build.rs`); packaging fails when it does not.
+//!   the app icon and version information (linked in by `apps/bae/build.rs`).
 //!
 //! Sizes are compared with the `app-bundle` and `installer` budgets; they fail the task only
 //! once those budgets are marked `enforced` in `tools/size-budget/budget.toml`.
@@ -103,7 +103,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
     }
     let binary = ws.existing_release_binary(&target)?;
     if target.is_windows() {
-        check_exe_icon(&binary)?;
+        check_exe_resources(&binary)?;
     }
     let dist = ws.target_directory.join("dist");
     fs::create_dir_all(&dist).with_context(|| format!("failed to create {}", dist.display()))?;
@@ -245,15 +245,24 @@ fn package_windows(
     Ok((stage, zip))
 }
 
-/// `bae.exe` must carry the app icon (`RT_GROUP_ICON`, from `assets/icons/app/bae.res`
-/// through `apps/bae/build.rs`); otherwise Explorer and the taskbar show a blank one.
-fn check_exe_icon(exe: &Path) -> Result<()> {
+/// Verify the resources Explorer uses for the icon and file properties.
+fn check_exe_resources(exe: &Path) -> Result<()> {
+    const RT_VERSION: u16 = 16;
     let bytes = fs::read(exe).with_context(|| format!("failed to read {}", exe.display()))?;
-    if !icon::pe_has_group_icon(&bytes).with_context(|| format!("reading {}", exe.display()))? {
+    let has = |kind| {
+        icon::pe_has_resource(&bytes, kind).with_context(|| format!("reading {}", exe.display()))
+    };
+    if !has(icon::RT_GROUP_ICON)? {
         bail!(
             "{} has no icon resource; apps/bae/build.rs should link {}/bae.res",
             exe.display(),
             icon::ICON_DIR
+        );
+    }
+    if !has(RT_VERSION)? {
+        bail!(
+            "{} has no VERSIONINFO resource; rebuild bae with apps/bae/build.rs",
+            exe.display()
         );
     }
     Ok(())

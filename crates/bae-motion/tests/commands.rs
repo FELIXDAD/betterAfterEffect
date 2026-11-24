@@ -460,7 +460,10 @@ fn module_publishes_commands() {
     let reg = app.registry::<dyn DynCommand>();
     assert!(reg.contains("comp.create"));
     assert!(reg.contains("key.ease"));
-    assert_eq!(reg.len(), bae_motion::commands().len());
+    // Plus the effect commands, which read the app's effect definitions.
+    assert!(reg.contains("effect.apply"));
+    let effects = bae_motion::effect::effect_commands(Default::default()).len();
+    assert_eq!(reg.len(), bae_motion::commands().len() + effects);
     // Every command has a JSON schema with documented parameters.
     for c in bae_motion::commands() {
         assert!(c.info().params_schema.is_object(), "{}", c.info().id);

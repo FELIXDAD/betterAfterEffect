@@ -437,6 +437,11 @@ def evaluate_checks(sha):
             # The full tier is skipped until the label lands; a labelled run follows.
             details.append((name, "skipped", r["html_url"]))
             pending = True
+        elif r["conclusion"] == "cancelled":
+            # Not a test failure (concurrency, runner loss, outside cancel): process_head
+            # reruns the job; a second cancellation on the same head fails the PR.
+            details.append((name, "cancelled", r["html_url"]))
+            pending = True
         else:
             details.append((name, r["conclusion"], r["html_url"]))
             failed = True
@@ -519,13 +524,45 @@ def _is_worktree_of(path, repo):
     return common(path) == common(repo)
 
 
-def try_conflict_repair(pr):
-    """Merge dev into the PR head in the scratch worktree. If the only conflict is
-    Cargo.lock, take dev's lock, let cargo regenerate it, push. Returns (ok, message)."""
-    num, branch, head = pr["number"], pr["headRefName"], pr["headRefOid"]
-    if pr.get("isCrossRepository"):
-        return False, "PR 来自 fork，脚本不能推送"
-    fetch_pr_head(num)
+def rerun_cancelled(pr, ps, names):
+    """Rerun required jobs whose newest run on this head was cancelled. Returns a failure
+    reason once a check has been cancelled twice on the same head, else None."""
+    runs = check_runs(pr["headRefOid"])
+    seen = ps.setdefault("cancelled_runs", {})  # check name -> cancelled check-run ids
+    grace = CFG.get("cancel_grace_minutes", 2)
+    for name in names:
+        r = runs.get(name)
+        if not r or r["conclusion"] != "cancelled":
+            continue
+        ids = seen.setdefault(name, [])
+        if r["id"] in ids:
+            continue  # rerun already requested; waiting for the new run to show up
+        done = parse_ts(r.get("completed_at"))
+        if done and (now_utc() - done).total_seconds() < grace * 60:
+            continue  # a replacing run (e.g. after update-branch) may still appear
+        if len(ids) >= CFG.get("max_cancellations", 2) - 1:
+            ids.append(r["id"])
+            return "%s 在同一个 head %s 上被取消了 %d 次" % (name, pr["headRefOid"][:7], len(ids))
+        # A check run's id is its Actions job id.
+        if mutate("rerun cancelled job %s (%s) on #%d" % (r["id"], name, pr["number"])):
+            rc, out, err = sh(["gh", "api", "-X", "POST", "repos/%s/actions/jobs/%d/rerun"
+                               % (CFG["repo"], r["id"])], check=False)
+            if rc != 0:
+                # Usually: the workflow run still has other jobs running. Retry next pass.
+                if ps.get("rerun_error") != r["id"]:
+                    log("#%d rerun of %s (job %d) not possible yet: %s"
+                        % (pr["number"], name, r["id"], (err or out).strip()[:200]))
+                    ps["rerun_error"] = r["id"]
+                continue
+        ids.append(r["id"])
+        log("#%d %s was cancelled on %s; reran job %d (%d/%d)"
+            % (pr["number"], name, pr["headRefOid"][:7], r["id"], len(ids),
+               CFG.get("max_cancellations", 2)))
+    return None
+
+
+def scratch_at(commit):
+    """Reset the scratch worktree to `commit`; return a git runner bound to it."""
     work = expand(CFG["work_dir"])
     if os.path.exists(work) and not _is_worktree_of(work, repo_git_dir()):
         log("scratch dir %s is not a worktree of %s; recreating it" % (work, repo_git_dir()))
@@ -535,9 +572,56 @@ def try_conflict_repair(pr):
         git("worktree", "prune")
         git("worktree", "add", "--detach", work, "origin/" + CFG["base"])
     w = lambda *a, **k: git(*a, cwd=work, **k)  # noqa: E731
+    w("merge", "--abort", check=False)
     w("reset", "-q", "--hard")
     w("clean", "-qfd")
-    w("checkout", "-q", "--detach", head)
+    w("checkout", "-q", "--detach", commit)
+    return w
+
+
+def nudge_ci(pr, ps):
+    """Required checks never started on this head (e.g. it predates a CI change, or
+    the run was never triggered): make GitHub run CI on a new head. Behind dev →
+    update-branch; already contains dev → push an empty commit. Once per head."""
+    num, branch, head = pr["number"], pr["headRefName"], pr["headRefOid"]
+    ps["nudged_head"] = head
+    fetch_pr_head(num)
+    behind = sh(["git", "merge-base", "--is-ancestor", "origin/" + CFG["base"], head],
+                cwd=repo_git_dir(), check=False)[0] != 0
+    if behind:
+        if mutate("gh pr update-branch %d (required checks missing on %s)" % (num, head[:7])):
+            rc, out, err = sh(["gh", "pr", "update-branch", str(num), "--repo", CFG["repo"]],
+                              check=False)
+            if rc != 0:
+                log("#%d nudge: update-branch failed: %s" % (num, (err or out).strip()[:200]))
+                return
+            ps.update(updated_head=head, updated_at=now_utc().isoformat())
+        log("#%d nudge: required checks missing on %s; ran update-branch" % (num, head[:7]))
+        return
+    if pr.get("isCrossRepository"):
+        log("#%d nudge: checks missing but the PR is from a fork; waiting for the timeout" % num)
+        return
+    if not mutate("push an empty commit to %s to retrigger CI (checks missing on %s)"
+                  % (branch, head[:7])):
+        return
+    w = scratch_at(head)
+    w("commit", "-q", "--allow-empty", "-m",
+      "merge-train: retrigger CI (required checks missing on %s)" % head[:7])
+    rc, out, err = w("push", "origin", "HEAD:refs/heads/" + branch, check=False)
+    if rc != 0:
+        log("#%d nudge: push failed: %s" % (num, err.strip()[:200]))
+        return
+    log("#%d nudge: required checks missing on %s; pushed an empty commit" % (num, head[:7]))
+
+
+def try_conflict_repair(pr):
+    """Merge dev into the PR head in the scratch worktree. If the only conflict is
+    Cargo.lock, take dev's lock, let cargo regenerate it, push. Returns (ok, message)."""
+    num, branch, head = pr["number"], pr["headRefName"], pr["headRefOid"]
+    if pr.get("isCrossRepository"):
+        return False, "PR 来自 fork，脚本不能推送"
+    fetch_pr_head(num)
+    w = scratch_at(head)
     rc, out, err = w("merge", "--no-ff", "--no-commit", "origin/" + CFG["base"], check=False)
     conflicts = set(filter(None, w("diff", "--name-only", "--diff-filter=U").splitlines()))
     if rc != 0 and not conflicts:
@@ -551,7 +635,8 @@ def try_conflict_repair(pr):
     if "Cargo.lock" in conflicts:
         w("checkout", "origin/" + CFG["base"], "--", "Cargo.lock")
         env = dict(os.environ, CARGO_TARGET_DIR=expand(CFG["cargo_target_dir"]))
-        rc, out, err = sh(["cargo", "metadata", "--format-version", "1"], cwd=work, env=env, check=False)
+        rc, out, err = sh(["cargo", "metadata", "--format-version", "1"], cwd=expand(CFG["work_dir"]),
+                          env=env, check=False)
         if rc != 0:
             w("merge", "--abort", check=False)
             return False, "cargo metadata 重新生成 Cargo.lock 失败：%s" % err.strip()[-300:]
@@ -607,7 +692,8 @@ def process_head(pr, st):
     ps = pr_state(st, num)
     if ps.get("head") != pr["headRefOid"]:
         ps.update(head=pr["headRefOid"], since=now_utc().isoformat())
-        ps.pop("unknown_since", None)
+        for k in ("unknown_since", "cancelled_runs", "stuck_since"):
+            ps.pop(k, None)
     decision, detail, data = decide(pr, st)
     changed = (decision, detail) != (ps.get("decision"), ps.get("detail"))
     ps.update(decision=decision, detail=detail, checked=now_utc().isoformat())
@@ -630,6 +716,21 @@ def process_head(pr, st):
             fail_pr(pr, "CI 超过 %d 分钟没有结果（%s）" % (CFG["ci_timeout_minutes"], detail),
                     data.get("checks", ()))
             return True
+        cancelled = [n for n, x, _ in data.get("checks", ()) if x == "cancelled"]
+        if cancelled:
+            why = rerun_cancelled(pr, ps, cancelled)
+            if why:
+                fail_pr(pr, why, data.get("checks", ()))
+                return True
+        # Nothing queued or running, only missing/skipped: CI will never come by itself.
+        states = [st_ for _, st_, _ in data.get("checks", ()) if st_ != "success"]
+        if states and all(x in ("missing", "skipped") for x in states):
+            ps.setdefault("stuck_since", now_utc().isoformat())
+            stuck = (now_utc() - dt.datetime.fromisoformat(ps["stuck_since"])).total_seconds() / 60
+            if stuck >= CFG.get("missing_nudge_minutes", 10) and ps.get("nudged_head") != pr["headRefOid"]:
+                nudge_ci(pr, ps)
+        else:
+            ps.pop("stuck_since", None)
         return False
     if decision == "wait-mergeable":
         ps.setdefault("unknown_since", now_utc().isoformat())
@@ -830,13 +931,41 @@ def one_pass(st):
             git("update-ref", "-d", ref, check=False)
     if not q:
         return False
+    if st.get("head_pr") != q[0]["number"]:
+        st["head_pr"], st["head_since"] = q[0]["number"], now_utc().isoformat()
     if ARGS.dry_run:
         # Nothing is mutated, so the head would stay stuck: show a verdict for every PR.
         again = False
         for p in q:
             again = process_head(p, st) or again
         return False
-    return process_head(q[0], st)
+    if process_head(q[0], st):
+        return True
+    return skip_ahead(q, st)
+
+
+def skip_ahead(q, st):
+    """When the queue head has been waiting too long, merge the first later PR (in
+    label order) that is ready to merge right now. Later PRs are only merged, never
+    updated, repaired or failed here; the head keeps its place."""
+    waited = (now_utc() - dt.datetime.fromisoformat(st["head_since"])).total_seconds() / 60
+    if len(q) < 2 or waited < CFG.get("skip_ahead_after_minutes", 30):
+        return False
+    for p in q[1:]:
+        try:
+            decision, detail, _ = decide(p, st)
+        except Exception as e:  # noqa: BLE001 — one bad PR must not stop the look-ahead
+            decision, detail = "error", str(e)[:200]
+        ps = pr_state(st, p["number"])
+        if (decision, detail) != (ps.get("decision"), ps.get("detail")):
+            log("#%d (behind #%d) %s → %s: %s" % (p["number"], q[0]["number"],
+                                                  p["headRefOid"][:7], decision, detail))
+        ps.update(decision=decision, detail=detail, checked=now_utc().isoformat())
+        if decision == "merge":
+            log("#%d has waited %d min at the front; merging ready #%d ahead of it"
+                % (q[0]["number"], waited, p["number"]))
+            return do_merge(p, st)
+    return False
 
 
 def cmd_run():

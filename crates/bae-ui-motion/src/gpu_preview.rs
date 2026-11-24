@@ -30,6 +30,17 @@ impl std::fmt::Debug for PreviewSources {
     }
 }
 
+/// Effect implementations registered by other modules (07's built-ins, plugin
+/// effects), shared with the viewer and the render queue as an app resource.
+#[derive(Clone)]
+pub struct PreviewEffects(pub Arc<Registry<dyn bae_render::Effect>>);
+
+impl std::fmt::Debug for PreviewEffects {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PreviewEffects").finish_non_exhaustive()
+    }
+}
+
 /// What the viewer draws: an egui user texture covering `rect` (comp pixels).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct PreviewImage {
@@ -108,6 +119,14 @@ impl GpuPreview {
         self.last = None;
     }
 
+    fn sync_effects(&mut self, resources: &Resources) {
+        if let Some(PreviewEffects(registry)) = resources.get::<PreviewEffects>()
+            && self.renderer.sync_effects(registry)
+        {
+            self.last = None;
+        }
+    }
+
     /// Render `comp` (if it changed) and return the texture to draw. `None` until
     /// the shell has registered the texture with egui (the frame after the first
     /// publish) or when rendering failed.
@@ -119,6 +138,7 @@ impl GpuPreview {
         resolution: u32,
     ) -> Option<PreviewImage> {
         self.sync_sources(resources);
+        self.sync_effects(resources);
         let rc = match self.anim.convert(stage, comp, 0) {
             Ok(rc) => rc,
             Err(e) => {
@@ -130,10 +150,11 @@ impl GpuPreview {
         if self.last != Some(key) {
             let request = RenderRequest {
                 resolution: match resolution {
+                    0 | 1 => Resolution::Full,
                     2 => Resolution::Half,
                     3 => Resolution::Third,
                     4 => Resolution::Quarter,
-                    _ => Resolution::Full,
+                    n => Resolution::Custom(n),
                 },
                 purpose: RenderPurpose::Preview,
                 ..RenderRequest::full()
