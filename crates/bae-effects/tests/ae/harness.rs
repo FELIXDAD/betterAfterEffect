@@ -11,7 +11,8 @@ use bae_gpu::wgpu;
 use bae_model::{PrimPath, Value};
 use bae_render::{EffectParams, IRect, ImageAlpha, RenderEffect};
 
-pub const CASES: &str = include_str!("cases.json");
+use crate::categories::{self, Pixel, Probe};
+
 pub const SIZE: [u32; 2] = [256, 128];
 
 /// One comparison case.
@@ -29,17 +30,40 @@ pub struct Case {
     pub mean: f64,
 }
 
+fn case_rows(text: &str) -> Vec<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Manifest {
+        cases: Vec<serde_json::Value>,
+    }
+    serde_json::from_str::<Manifest>(text).unwrap().cases
+}
+
+pub fn default_case_rows() -> Vec<serde_json::Value> {
+    categories::manifests(|suite| suite.default_cases)
+        .into_iter()
+        .flat_map(case_rows)
+        .collect()
+}
+
 pub fn cases() -> Vec<Case> {
-    parse_cases(CASES)
+    parse_rows(&default_case_rows())
+}
+
+pub fn golden_cases() -> Vec<Case> {
+    let mut all = cases();
+    for manifest in categories::manifests(|suite| suite.golden_only) {
+        all.extend(parse_cases(manifest));
+    }
+    all
 }
 
 /// Cases of a `cases.json` text.
 pub fn parse_cases(text: &str) -> Vec<Case> {
-    let v: serde_json::Value = serde_json::from_str(text).unwrap();
-    v["cases"]
-        .as_array()
-        .unwrap()
-        .iter()
+    parse_rows(&case_rows(text))
+}
+
+fn parse_rows(rows: &[serde_json::Value]) -> Vec<Case> {
+    rows.iter()
         .map(|c| {
             let params = c["params"]
                 .as_object()
@@ -78,98 +102,68 @@ pub fn parse_cases(text: &str) -> Vec<Case> {
 
 /// Straight RGBA8 input images, generated (no binary files in the repository).
 pub fn input(name: &str) -> Vec<[u8; 4]> {
+    let pixel = probes()
+        .find(|(id, _)| *id == name)
+        .map_or(soft as Pixel, |(_, pixel)| pixel);
     let [w, h] = SIZE;
     let mut out = Vec::with_capacity((w * h) as usize);
     for y in 0..h {
         for x in 0..w {
-            let fx = x as f64 / (w - 1) as f64;
-            let fy = y as f64 / (h - 1) as f64;
-            let px = match name {
-                // Probes: a hard vertical edge (blur kernels) and grey ramps
-                // (tone curves; the lower half at half range).
-                "fine" => [
-                    (x % 16) as f64 * 16. / 255.,
-                    (y % 16) as f64 * 16. / 255.,
-                    ((x / 16 + y / 16) % 2) as f64 * 128. / 255.,
-                    1.,
-                ],
-                "coords" => [fx, y as f64 * 2.0 / 255.0, 0.25, 1.0],
-                "step" => {
-                    let v = if x >= w / 2 { 1.0 } else { 0.0 };
-                    [v, v, v, 1.0]
-                }
-                "line" => {
-                    let v = if x == w / 2 { 1.0 } else { 0.0 };
-                    [v, v, v, 1.0]
-                }
-                "lineg" => {
-                    // A white line on 50 % grey (negative kernel lobes show).
-                    let v = if x == w / 2 { 1.0 } else { 0.5 };
-                    [v, v, v, 1.0]
-                }
-                "ramp" => {
-                    let v = x as f64 / (w - 1) as f64;
-                    let v = if y < h / 2 { v } else { 0.5 * v };
-                    [v, v, v, 1.0]
-                }
-                "speckles" => {
-                    let levels = |n: u32| f64::from(n % 251) / 250.0;
-                    [
-                        levels(x * 17 + y * 53 + x * y),
-                        levels(x * 73 + y * 7),
-                        levels(x * 3 + y * 13),
-                        1.0,
-                    ]
-                }
-                "matte-edge" => {
-                    let edge = (fx * 2.0 + 0.2 * fy - 0.5).clamp(0.0, 1.0);
-                    let alpha = if y < h / 3 {
-                        f64::from(x > w / 2)
-                    } else if y < 2 * h / 3 {
-                        edge
-                    } else {
-                        f64::from((x / 5 + y / 7) % 3 != 0)
-                    };
-                    [0.2 + 0.75 * fx, 0.3 + 0.35 * fy, 0.8 - 0.6 * fx, alpha]
-                }
-                "chart" => {
-                    if y < h / 2 {
-                        // Hue ramp with a brightness ramp downwards.
-                        let hsv = hsv_to_rgb(fx, 1.0 - 0.5 * fy, 1.0);
-                        [hsv[0], hsv[1], hsv[2], 1.0]
-                    } else if x < w / 2 {
-                        // Grey ramp with hard 16 px blocks of white.
-                        let g = fx * 2.0;
-                        let block = (x / 16 + y / 16) % 5 == 0;
-                        let v = if block { 1.0 } else { g };
-                        [v, v, v, 1.0]
-                    } else {
-                        // Skin-ish, sky-ish and saturated patches.
-                        let patches = [
-                            [0.85, 0.62, 0.50],
-                            [0.35, 0.55, 0.85],
-                            [0.10, 0.65, 0.20],
-                            [0.95, 0.85, 0.10],
-                            [0.60, 0.10, 0.45],
-                            [0.05, 0.05, 0.05],
-                        ];
-                        let p = patches[((x - w / 2) / 22 + (y / 22)) as usize % patches.len()];
-                        [p[0], p[1], p[2], 1.0]
-                    }
-                }
-                _ => {
-                    // "soft": a coloured disc with a feathered alpha edge on transparency.
-                    let dx = x as f64 + 0.5 - w as f64 / 2.0;
-                    let dy = y as f64 + 0.5 - h as f64 / 2.0;
-                    let d = (dx * dx + dy * dy).sqrt();
-                    let a = ((52.0 - d) / 12.0).clamp(0.0, 1.0);
-                    [0.9 * fx + 0.1, 0.4, 1.0 - fy, a]
-                }
-            };
-            out.push(px.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8));
+            out.push(pixel(x, y).map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8));
         }
     }
     out
+}
+
+pub fn probes() -> impl Iterator<Item = Probe> {
+    [("chart", chart as Pixel), ("soft", soft as Pixel)]
+        .into_iter()
+        .chain(
+            categories::ALL
+                .iter()
+                .flat_map(|suite| suite.probes.iter().copied()),
+        )
+}
+
+fn chart(x: u32, y: u32) -> [f64; 4] {
+    let [w, h] = SIZE;
+    let fx = x as f64 / (w - 1) as f64;
+    let fy = y as f64 / (h - 1) as f64;
+    if y < h / 2 {
+        // Hue ramp with a brightness ramp downwards.
+        let hsv = hsv_to_rgb(fx, 1.0 - 0.5 * fy, 1.0);
+        [hsv[0], hsv[1], hsv[2], 1.0]
+    } else if x < w / 2 {
+        // Grey ramp with hard 16 px blocks of white.
+        let g = fx * 2.0;
+        let block = (x / 16 + y / 16).is_multiple_of(5);
+        let v = if block { 1.0 } else { g };
+        [v, v, v, 1.0]
+    } else {
+        // Skin-ish, sky-ish and saturated patches.
+        let patches = [
+            [0.85, 0.62, 0.50],
+            [0.35, 0.55, 0.85],
+            [0.10, 0.65, 0.20],
+            [0.95, 0.85, 0.10],
+            [0.60, 0.10, 0.45],
+            [0.05, 0.05, 0.05],
+        ];
+        let p = patches[((x - w / 2) / 22 + (y / 22)) as usize % patches.len()];
+        [p[0], p[1], p[2], 1.0]
+    }
+}
+
+fn soft(x: u32, y: u32) -> [f64; 4] {
+    let [w, h] = SIZE;
+    let fx = x as f64 / (w - 1) as f64;
+    let fy = y as f64 / (h - 1) as f64;
+    // "soft": a coloured disc with a feathered alpha edge on transparency.
+    let dx = x as f64 + 0.5 - w as f64 / 2.0;
+    let dy = y as f64 + 0.5 - h as f64 / 2.0;
+    let d = (dx * dx + dy * dy).sqrt();
+    let a = ((52.0 - d) / 12.0).clamp(0.0, 1.0);
+    [0.9 * fx + 0.1, 0.4, 1.0 - fy, a]
 }
 
 fn hsv_to_rgb(h: f64, s: f64, v: f64) -> [f64; 3] {
@@ -183,24 +177,21 @@ fn hsv_to_rgb(h: f64, s: f64, v: f64) -> [f64; 3] {
 /// Renders `case` with BAE (RGBA32F working buffer, effect at full resolution,
 /// output = the comp rect) and returns premultiplied RGBA8.
 pub fn render(gpu: &Arc<GpuContext>, case: &Case) -> Vec<[u8; 4]> {
+    render_pixels(gpu, case, &input(&case.input))
+}
+
+pub fn render_pixels(gpu: &Arc<GpuContext>, case: &Case, pixels: &[[u8; 4]]) -> Vec<[u8; 4]> {
     let fx =
         bae_effects::get(&case.effect).unwrap_or_else(|| panic!("no built-in {}", case.effect));
     let [w, h] = SIZE;
     let rect = IRect::from_size(w, h);
     // These channel effects can reveal the original RGB of transparent
     // texels. A straight source keeps that data available, as the AE input does.
-    let straight = matches!(
-        case.effect.as_str(),
-        "ADBE PS Median"
-            | "ADBE Dust & Scratches"
-            | "ADBE Linear Color Key2"
-            | "ADBE Invert"
-            | "ADBE Shift Channels"
-            | "ADBE Set Matte3"
-            | "ADBE Simple Choker"
-            | "ADBE Minimax"
-    );
-    let data: Vec<u8> = input(&case.input)
+    let straight = categories::ALL
+        .iter()
+        .any(|suite| suite.straight_inputs.contains(&case.effect.as_str()));
+    assert_eq!(pixels.len(), (w * h) as usize);
+    let data: Vec<u8> = pixels
         .iter()
         .flat_map(|p| {
             let a = f32::from(p[3]) / 255.0;

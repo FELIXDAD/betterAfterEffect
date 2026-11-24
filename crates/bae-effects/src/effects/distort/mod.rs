@@ -261,6 +261,19 @@ impl TargetEffect for Distortion {
         w.f32(52, params.scale as f32)
             .f32(56, params.time.as_seconds() as f32)
             .u32(60, u32::from(params.float));
+        if self.kind == Kind::Bulge {
+            let rx = p.f(1) * params.scale;
+            let ry = p.f(2) * params.scale;
+            if rx > 0. && ry > 0. {
+                // AE normalizes Y in X-radius units using double precision. At an
+                // exact ellipse boundary, express that rounding error in f32 ulps.
+                let aspect = (ry * rx.recip()).recip();
+                w.f32(
+                    48,
+                    (aspect.mul_add(ry, -rx) / ry * (1u32 << 29) as f64) as f32,
+                );
+            }
+        }
         for param in &self.def.params {
             let at = 64 + 16 * param.id as usize;
             if matches!(param.default, Some(Value::Vec2(_))) {
