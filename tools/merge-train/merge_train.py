@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -252,7 +253,7 @@ def mutate(desc):
 
 
 def repo_git_dir():
-    """A git checkout to run fetch/diff in: the runner worktree, else this checkout."""
+    """A git checkout to run fetch/diff in: the runner clone, else this checkout."""
     d = expand(CFG["runner_dir"])
     return d if os.path.isdir(os.path.join(d, ".git")) or os.path.isfile(
         os.path.join(d, ".git")) else os.path.dirname(os.path.dirname(HERE))
@@ -512,6 +513,12 @@ def fail_pr(pr, reason, details=(), worktrees=None):
         send(leader, subject, msg + ("\n负责 agent：%s" % (addr or "（Orca 里没找到这个分支）")))
 
 
+def _is_worktree_of(path, repo):
+    common = lambda d: os.path.realpath(os.path.join(d, sh(  # noqa: E731
+        ["git", "rev-parse", "--git-common-dir"], cwd=d, check=False)[1].strip() or "?"))
+    return common(path) == common(repo)
+
+
 def try_conflict_repair(pr):
     """Merge dev into the PR head in the scratch worktree. If the only conflict is
     Cargo.lock, take dev's lock, let cargo regenerate it, push. Returns (ok, message)."""
@@ -520,8 +527,12 @@ def try_conflict_repair(pr):
         return False, "PR 来自 fork，脚本不能推送"
     fetch_pr_head(num)
     work = expand(CFG["work_dir"])
+    if os.path.exists(work) and not _is_worktree_of(work, repo_git_dir()):
+        log("scratch dir %s is not a worktree of %s; recreating it" % (work, repo_git_dir()))
+        shutil.rmtree(work)
     if not os.path.exists(work):
         os.makedirs(os.path.dirname(work), exist_ok=True)
+        git("worktree", "prune")
         git("worktree", "add", "--detach", work, "origin/" + CFG["base"])
     w = lambda *a, **k: git(*a, cwd=work, **k)  # noqa: E731
     w("reset", "-q", "--hard")
@@ -532,6 +543,8 @@ def try_conflict_repair(pr):
     if rc != 0 and not conflicts:
         w("merge", "--abort", check=False)
         return False, "本地合并 dev 失败：%s" % (err or out).strip()[:200]
+    if rc == 0 and w("rev-parse", "-q", "--verify", "MERGE_HEAD", check=False)[0] != 0:
+        return True, "PR 已经包含最新的 dev，无需推送"
     if conflicts - {"Cargo.lock"}:
         w("merge", "--abort", check=False)
         return False, "和 dev 有冲突：" + ", ".join(sorted(conflicts)[:10])
@@ -782,8 +795,12 @@ def refresh_runner():
           check=False)[0] != 0:
         log("runner_ref %s has no merge_train.py; staying on the current checkout" % ref)
         return False
+    if sh(["git", "merge-base", "--is-ancestor", "HEAD", ref], cwd=runner, check=False)[0] != 0:
+        # Checked out at a commit runner_ref does not contain yet (install.sh --ref <branch>):
+        # stay there until it is merged, instead of jumping back to an older version.
+        return False
     if git("status", "--porcelain", cwd=runner).strip():
-        log("runner worktree has local changes; not updating it")
+        log("runner clone has local changes; not updating it")
         return False
     before = self_digest()
     git("checkout", "-q", "--detach", ref, cwd=runner)
