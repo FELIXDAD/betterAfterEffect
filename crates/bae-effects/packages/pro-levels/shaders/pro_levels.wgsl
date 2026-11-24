@@ -1,6 +1,11 @@
 // Levels (Individual Controls) (ADBE Pro Levels2, AE-FX-039): per-channel
 // levels first, then the RGB composite levels; alpha has its own levels.
 // Same mapping as Levels (AE-FX-038).
+// Clip popups: 1 On, 2 Off, 3 Off for 32 bpc Color (on in 8 / 16 bpc).
+fn levels_clips(option: u32) -> bool {
+    return option == 1u || (option == 3u && (frame.flags & BAE_FRAME_FLOAT) == 0u);
+}
+
 fn pl_map(x: f32, ib: f32, iw: f32, g: f32, ob: f32, ow: f32) -> f32 {
     var t: f32;
     if (iw == ib) {
@@ -8,12 +13,14 @@ fn pl_map(x: f32, ib: f32, iw: f32, g: f32, ob: f32, ow: f32) -> f32 {
     } else {
         t = (x - ib) / (iw - ib);
     }
-    t = pow(max(t, 0.0), 1.0 / max(g, 1e-4));
+    // Mirrored below input black (AE: with clipping off, values below input
+    // black keep falling instead of stopping at output black).
+    t = sign(t) * pow(abs(t), 1.0 / max(g, 1e-4));
     var y = ob + (ow - ob) * t;
-    if (params.clip_black == 1u) {
+    if (levels_clips(params.clip_black)) {
         y = max(y, min(ob, ow));
     }
-    if (params.clip_white == 1u) {
+    if (levels_clips(params.clip_white)) {
         y = min(y, max(ob, ow));
     }
     return y;

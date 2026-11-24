@@ -4,7 +4,7 @@
 //!   The bundle has the app icon (`assets/icons/app/bae.icns`) and declares the `.bae`
 //!   (project folder, shown as one document) and `.baez` (packed project) document types.
 //! - Windows: `BAE-<version>-<arch>-windows/` and a zip of its contents. `bae.exe` must carry
-//!   the app icon (linked in by `apps/bae/build.rs`); packaging fails when it does not.
+//!   the app icon and version information (linked in by `apps/bae/build.rs`).
 //!
 //! Sizes are compared with the `app-bundle` and `installer` budgets; they fail the task only
 //! once those budgets are marked `enforced` in `tools/size-budget/budget.toml`.
@@ -29,7 +29,36 @@ Usage: cargo xtask dist [--target <triple>] [--no-build]
 Builds `bae` in release mode and packages it into <target-dir>/dist/:
   macOS    BAE.app (ad-hoc signed, not notarized) and BAE-<version>-<arch>-macos.zip
   Windows  BAE-<version>-<arch>-windows.zip (bae.exe, LICENSE, README.md)
+Both include ThirdPartyNotices/ (licenses of bundled third-party assets).
 ";
+
+/// Licenses and notices of third-party assets compiled into `bae` (source in the
+/// repository, path inside `ThirdPartyNotices/`): Adobe's open-source Spectrum icons
+/// (Apache-2.0 section 4: ship the license and the copyright notice).
+const THIRD_PARTY_NOTICES: &[(&str, &str)] = &[
+    ("assets/icons/spectrum/LICENSE", "Spectrum-Icons/LICENSE"),
+    (
+        "assets/icons/spectrum/COPYRIGHT",
+        "Spectrum-Icons/COPYRIGHT",
+    ),
+    ("assets/icons/spectrum/NOTICE", "Spectrum-Icons/NOTICE"),
+    (
+        "assets/icons/spectrum/README.md",
+        "Spectrum-Icons/README.md",
+    ),
+];
+
+fn copy_third_party_notices(ws: &Workspace, dest: &Path) -> Result<()> {
+    for (from, to) in THIRD_PARTY_NOTICES {
+        let to = dest.join("ThirdPartyNotices").join(to);
+        if let Some(dir) = to.parent() {
+            fs::create_dir_all(dir)
+                .with_context(|| format!("failed to create {}", dir.display()))?;
+        }
+        copy_file(&ws.workspace_root.join(from), &to)?;
+    }
+    Ok(())
+}
 
 const BUNDLE_ID: &str = "io.github.felixdad.bae";
 const BUNDLE_NAME: &str = "BAE";
@@ -74,7 +103,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
     }
     let binary = ws.existing_release_binary(&target)?;
     if target.is_windows() {
-        check_exe_icon(&binary)?;
+        check_exe_resources(&binary)?;
     }
     let dist = ws.target_directory.join("dist");
     fs::create_dir_all(&dist).with_context(|| format!("failed to create {}", dist.display()))?;
@@ -181,6 +210,7 @@ fn package_macos(
         &ws.workspace_root.join("LICENSE"),
         &resources.join("LICENSE"),
     )?;
+    copy_third_party_notices(ws, &resources)?;
     if signing == Signing::AdHoc {
         sign_bundle_ad_hoc(&app)?;
     }
@@ -209,20 +239,30 @@ fn package_windows(
     for doc in ["LICENSE", "README.md"] {
         copy_file(&ws.workspace_root.join(doc), &stage.join(doc))?;
     }
+    copy_third_party_notices(ws, &stage)?;
     let zip = dist.join(format!("{name}.zip"));
     zip_dir(&stage, "", &zip, stamp)?;
     Ok((stage, zip))
 }
 
-/// `bae.exe` must carry the app icon (`RT_GROUP_ICON`, from `assets/icons/app/bae.res`
-/// through `apps/bae/build.rs`); otherwise Explorer and the taskbar show a blank one.
-fn check_exe_icon(exe: &Path) -> Result<()> {
+/// Verify the resources Explorer uses for the icon and file properties.
+fn check_exe_resources(exe: &Path) -> Result<()> {
+    const RT_VERSION: u16 = 16;
     let bytes = fs::read(exe).with_context(|| format!("failed to read {}", exe.display()))?;
-    if !icon::pe_has_group_icon(&bytes).with_context(|| format!("reading {}", exe.display()))? {
+    let has = |kind| {
+        icon::pe_has_resource(&bytes, kind).with_context(|| format!("reading {}", exe.display()))
+    };
+    if !has(icon::RT_GROUP_ICON)? {
         bail!(
             "{} has no icon resource; apps/bae/build.rs should link {}/bae.res",
             exe.display(),
             icon::ICON_DIR
+        );
+    }
+    if !has(RT_VERSION)? {
+        bail!(
+            "{} has no VERSIONINFO resource; rebuild bae with apps/bae/build.rs",
+            exe.display()
         );
     }
     Ok(())
@@ -785,6 +825,24 @@ mod tests {
                 file("BAE.app/Contents/MacOS/bae", 0o755),
                 dir("BAE.app/Contents/Resources/"),
                 file("BAE.app/Contents/Resources/LICENSE", 0o644),
+                dir("BAE.app/Contents/Resources/ThirdPartyNotices/"),
+                dir("BAE.app/Contents/Resources/ThirdPartyNotices/Spectrum-Icons/"),
+                file(
+                    "BAE.app/Contents/Resources/ThirdPartyNotices/Spectrum-Icons/COPYRIGHT",
+                    0o644
+                ),
+                file(
+                    "BAE.app/Contents/Resources/ThirdPartyNotices/Spectrum-Icons/LICENSE",
+                    0o644
+                ),
+                file(
+                    "BAE.app/Contents/Resources/ThirdPartyNotices/Spectrum-Icons/NOTICE",
+                    0o644
+                ),
+                file(
+                    "BAE.app/Contents/Resources/ThirdPartyNotices/Spectrum-Icons/README.md",
+                    0o644
+                ),
                 file("BAE.app/Contents/Resources/bae.icns", 0o644),
             ]
         );
@@ -855,6 +913,19 @@ mod tests {
         assert_eq!(file_name(&zip), "BAE-0.1.0-x86_64-windows.zip");
         let names: Vec<String> = zip_entries(&zip).into_iter().map(|e| e.0).collect();
         fs::remove_dir_all(&tmp).unwrap();
-        assert_eq!(names, ["LICENSE", "README.md", "bae.exe"]);
+        assert_eq!(
+            names,
+            [
+                "LICENSE",
+                "README.md",
+                "ThirdPartyNotices/",
+                "ThirdPartyNotices/Spectrum-Icons/",
+                "ThirdPartyNotices/Spectrum-Icons/COPYRIGHT",
+                "ThirdPartyNotices/Spectrum-Icons/LICENSE",
+                "ThirdPartyNotices/Spectrum-Icons/NOTICE",
+                "ThirdPartyNotices/Spectrum-Icons/README.md",
+                "bae.exe",
+            ]
+        );
     }
 }

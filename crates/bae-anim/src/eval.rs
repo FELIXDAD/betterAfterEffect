@@ -493,6 +493,9 @@ fn compile_layer(
         enabled: setting(v, lt, l::ENABLED)
             .and_then(|v| v.as_bool())
             .unwrap_or(true),
+        effects: setting(v, lt, l::EFFECTS_ENABLED)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
         solo: setting_bool(v, lt, l::SOLO),
         shy: setting_bool(v, lt, l::SHY),
         guide: setting_bool(v, lt, l::GUIDE),
@@ -757,7 +760,10 @@ fn compile_generic(stage: &Stage, path: &PrimPath, depth: usize) -> Option<Compi
     let v = stage.prim(path)?;
     let prim_type = v.prim_type().cloned();
     let mut names: Vec<&str> = v.attr_names();
-    if let Some(t) = &prim_type {
+    if let Some(t) = &prim_type
+        && t != &PrimType::TEXT_ANIMATOR
+    {
+        // Animator properties are optional: only authored ones affect the text.
         // Animatable schema attributes without an opinion still get their default, so
         // consumers see a complete set.
         for d in bae_model::schema::attr_defs(t) {

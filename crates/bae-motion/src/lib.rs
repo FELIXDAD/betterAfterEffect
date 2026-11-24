@@ -44,6 +44,12 @@
 //! | `path.delete_vertex` | Delete Vertex tool (every keyframe) |
 //! | `text.create` | typing new point or paragraph text with the Type tool |
 //! | `text.set_text` | editing a text layer's characters with the Type tool |
+//! | `effect.apply` | Effect menu; double-click or drag in Effects & Presets |
+//! | `effect.remove`, `effect.remove_all` | Delete with effects selected; Effect > Remove All |
+//! | `effect.reorder` | dragging effects in Effect Controls or the timeline |
+//! | `effect.set_enabled` | an effect's fx switch |
+//! | `effect.reset` | Reset in Effect Controls |
+//! | `effect.duplicate` | Edit > Duplicate with effects selected |
 //!
 //! **Times** are flicks (705,600,000 per second). Layer in/out points, split and work
 //! area times are comp times. Keyframe times are the stored keyframe times — layer
@@ -57,9 +63,11 @@
 pub mod camera;
 pub mod comp;
 pub mod dimensions;
+pub mod effect;
 pub mod import;
 pub mod keys;
 pub mod layer;
+pub mod markers;
 pub mod names;
 pub mod path;
 pub mod precompose;
@@ -89,8 +97,9 @@ pub use keys::{
 pub use layer::{
     CopiedLayer, CreateLayer, DeleteItems, DeleteLayers, DuplicateLayers, LAYER_SWITCH_ATTRS,
     LayerOutput, LayersOutput, PasteLayers, ReorderLayers, SetLayerAttr, SetParent, ShapePreset,
-    ShiftLayers, SplitLayers, TrimLayers, copy_layers,
+    ShiftLayers, SlipLayers, SplitLayers, TrimLayers, copy_layers,
 };
+pub use markers::{AddMarker, DeleteMarkers, EditMarker, MarkerFields, MarkerOutput, MoveMarkers};
 pub use path::{DeleteVertex, InsertVertex, SetVertices};
 pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
 pub use shape::{AddShape, CreateMask, Geometry, ShapeKind};
@@ -117,6 +126,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(SplitLayers),
         r.register(TrimLayers),
         r.register(ShiftLayers),
+        r.register(SlipLayers),
         r.register(DeleteLayers),
         r.register(DeleteItems),
         r.register(SetParent),
@@ -132,6 +142,10 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(PasteKeys),
         r.register(EditKeys),
         r.register(SeparateDimensions),
+        r.register(AddMarker),
+        r.register(EditMarker),
+        r.register(MoveMarkers),
+        r.register(DeleteMarkers),
         r.register(AddShape),
         r.register(CreateMask),
         r.register(SetVertices),
@@ -164,9 +178,10 @@ impl AppModule for MotionModule {
 
     fn build(&self, app: &mut AppBuilder) {
         let owner = app.current_owner();
+        let defs = app.registry::<bae_model::EffectDef>();
         let registry = app.registry::<dyn DynCommand>();
         registry.batch(|tx| {
-            for cmd in commands() {
+            for cmd in commands().into_iter().chain(effect::effect_commands(defs)) {
                 let id = cmd.info().id.clone();
                 if !tx.contains(&id) {
                     let _ = tx.register_arc(owner.clone(), id, cmd);

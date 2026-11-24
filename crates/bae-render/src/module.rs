@@ -41,7 +41,8 @@ use crate::source::SourceProvider;
 
 /// Registers `bae render`. Layer source providers come from the app's
 /// `Registry<dyn SourceProvider>` (register with
-/// `app.register_arc::<dyn bae_render::SourceProvider>(id, provider)`).
+/// `app.register_arc::<dyn bae_render::SourceProvider>(id, provider)`), effects
+/// from `Registry<dyn Effect>` (built-in effects and plugins).
 #[derive(Debug, Default)]
 pub struct RenderModule;
 
@@ -94,12 +95,16 @@ impl AppModule for RenderModule {
             // The app's wording for projects that do not open (same as
             // `bae export-json`).
             let open_error = ctx.app.resource::<cli::ProjectOpenError>().cloned();
+            // Effects (07's built-ins, plugin effects).
+            let mut effects = crate::EffectLibrary::new();
+            effects.sync(&ctx.app.registry::<dyn crate::Effect>());
             run(
                 ctx.matches,
                 move || GpuContext::new_headless(desc),
                 media,
                 encoders,
                 &providers,
+                effects,
                 open_error.as_ref(),
             )
         });
@@ -121,9 +126,9 @@ fn args(cmd: clap::Command) -> clap::Command {
         Arg::new("comp")
             .long("comp")
             .short('c')
-            .value_name("PATH")
+            .value_name("NAME|PATH")
             .required(true)
-            .help("Comp prim path (/comps/main) or name under /comps (main)"),
+            .help("Composition display name, internal prim name, or full prim path"),
     )
     .arg(
         Arg::new("frame")
@@ -232,13 +237,59 @@ fn args(cmd: clap::Command) -> clap::Command {
     )
 }
 
-fn comp_path(arg: &str) -> anyhow::Result<PrimPath> {
-    let s = if arg.starts_with('/') {
+fn resolve_comp(stage: &Stage, arg: &str) -> anyhow::Result<PrimPath> {
+    let absolute = arg.starts_with('/');
+    let internal = if absolute {
         arg.to_owned()
     } else {
         format!("/comps/{arg}")
     };
-    Ok(PrimPath::new(&s)?)
+    let internal = PrimPath::new(&internal)
+        .ok()
+        .filter(|p| stage.prim(p).is_some_and(|v| v.is_a(&PrimType::COMP)));
+    // A full path disambiguates even if it is also used as a display name.
+    if absolute && let Some(path) = internal {
+        return Ok(path);
+    }
+
+    let mut comps = Vec::new();
+    for path in stage.traverse() {
+        if let Some(view) = stage.prim(&path).filter(|v| v.is_a(&PrimType::COMP)) {
+            // Match the project panel (bae_motion::query::display_name).
+            let name = match view.value("name") {
+                Some(Value::String(name)) if !name.is_empty() => name.clone(),
+                _ => view.name().to_owned(),
+            };
+            comps.push((name, path));
+        }
+    }
+    let matches: Vec<_> = comps.iter().filter(|(name, _)| name == arg).collect();
+    match matches.as_slice() {
+        [(_, path)] => return Ok(path.clone()),
+        [] => {}
+        _ => {
+            let paths: Vec<_> = matches.iter().map(|(_, path)| path.as_str()).collect();
+            anyhow::bail!(
+                "composition name {arg:?} is ambiguous; use a full prim path: {}",
+                paths.join(", ")
+            );
+        }
+    }
+    if let Some(path) = internal {
+        return Ok(path);
+    }
+
+    let available: Vec<_> = comps
+        .iter()
+        .map(|(name, path)| format!("{name:?} ({path})"))
+        .collect();
+    if available.is_empty() {
+        anyhow::bail!("composition {arg:?} not found; the project has no compositions");
+    }
+    anyhow::bail!(
+        "composition {arg:?} not found; available compositions: {}",
+        available.join(", ")
+    );
 }
 
 fn parse_resolution(s: &str) -> anyhow::Result<Resolution> {
@@ -297,15 +348,17 @@ fn run(
     media: Option<MediaHandle>,
     encoders: Option<Encoders>,
     providers: &[std::sync::Arc<dyn SourceProvider>],
+    effects: crate::EffectLibrary,
     open_error: Option<&cli::ProjectOpenError>,
 ) -> anyhow::Result<ExitCode> {
     let entered = Instant::now();
     let project_path = m.get_one::<PathBuf>("project").expect("required");
-    let comp = comp_path(m.get_one::<String>("comp").expect("required"))?;
+    let comp_arg = m.get_one::<String>("comp").expect("required");
     let json = m.get_flag("json");
     let project = Project::open(project_path)
         .map_err(|error| cli::project_open_error(open_error, project_path, error.into()))?;
     let stage = &project.stage;
+    let comp = resolve_comp(stage, comp_arg)?;
     let (rate, duration) = comp_timing(stage, &comp)?;
 
     let frames: Vec<i64> = match (
@@ -397,6 +450,7 @@ fn run(
     }
     #[cfg(not(feature = "media"))]
     let _ = media;
+    *renderer.effects_mut() = effects;
     for provider in providers {
         renderer.providers_mut().register(provider.clone());
     }
@@ -589,7 +643,7 @@ mod tests {
             ])
             .unwrap();
         assert_eq!(
-            run(&m, test_gpu, None, None, &[], None).unwrap(),
+            run(&m, test_gpu, None, None, &[], Default::default(), None).unwrap(),
             ExitCode::SUCCESS
         );
         let (w, _, data) = crate::png_out::read_rgba8(&out).unwrap();
@@ -631,7 +685,7 @@ mod tests {
             ])
             .unwrap();
         assert_eq!(
-            run(&m, test_gpu, None, None, &[], None).unwrap(),
+            run(&m, test_gpu, None, None, &[], Default::default(), None).unwrap(),
             ExitCode::SUCCESS
         );
         for f in ["out_00.png", "out_01.png"] {
@@ -713,7 +767,7 @@ mod tests {
             purpose: RenderPurpose::Final,
             ..RenderRequest::default()
         };
-        let comp = comp_path("main").unwrap();
+        let comp = PrimPath::new("/comps/main").unwrap();
         frames
             .map(|f| {
                 let rc = eval
@@ -732,7 +786,7 @@ mod tests {
         let m = args(clap::Command::new("render"))
             .try_get_matches_from(std::iter::once("render").chain(argv.iter().copied()))
             .unwrap();
-        run(&m, test_gpu, None, None, &[], None)
+        run(&m, test_gpu, None, None, &[], Default::default(), None)
     }
 
     /// The context `bae render` runs get in tests: the process-wide test context,
@@ -1059,7 +1113,7 @@ mod tests {
         let gpu = bae_gpu::testing::shared_context().unwrap();
         let mut renderer = Renderer::new(gpu);
         let mut evaluator = AnimEvaluator::new(None);
-        let comp = comp_path("main").unwrap();
+        let comp = PrimPath::new("/comps/main").unwrap();
         let times: Vec<(Option<i64>, Time)> = (0..20)
             .map(|f| (Some(f), FrameRate::FPS_30.frame_to_time(f)))
             .collect();
@@ -1189,7 +1243,6 @@ mod tests {
             IRect::new(10, 20, 40, 60)
         );
         assert!(parse_roi("1,2,3").is_err());
-        assert_eq!(comp_path("main").unwrap().as_str(), "/comps/main");
         assert_eq!(parse_resolution("5").unwrap(), Resolution::Custom(5));
     }
 }

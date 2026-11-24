@@ -1598,8 +1598,7 @@ fn single_frame_renders_number_the_output_name() {
     let dir = tricky(tmp.path());
     let project = dir.join("单帧 工程.bae");
     make_project(&project);
-    // The comp's prim path (`--comp` does not take the display name: #214).
-    let comp = bae_motion::query::comps(&Project::open(&project).unwrap().stage)[0].to_string();
+    let comp = "主 合成";
     for ext in ["png", "tif", "exr"] {
         for (pattern, want) in [
             (format!("帧 a_####.{ext}"), ["帧 a_0005", "帧 a_0006"]),
@@ -1609,7 +1608,7 @@ fn single_frame_renders_number_the_output_name() {
                 let out = bae()
                     .args(["render"])
                     .arg(&project)
-                    .args(["--comp", &comp, "--frames", frames, "-o"])
+                    .args(["--comp", comp, "--frames", frames, "-o"])
                     .arg(dir.join(&pattern))
                     .output_within_limit()
                     .unwrap();

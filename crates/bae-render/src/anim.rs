@@ -166,9 +166,11 @@ impl AnimEvaluator {
                     expansion: m.expansion as f32,
                 })
                 .collect();
+            // The fx switch turns the whole effect stack off.
             out.effects = l
                 .effects
                 .iter()
+                .filter(|_| l.switches.effects)
                 .map(|e| RenderEffect {
                     path: e.path.clone(),
                     effect: e.match_name.clone(),
@@ -193,11 +195,7 @@ impl AnimEvaluator {
     ) -> Result<LayerContent, RenderError> {
         if matches!(
             l.kind,
-            LayerKind::Null
-                | LayerKind::Camera
-                | LayerKind::Light
-                | LayerKind::Audio
-                | LayerKind::Adjustment
+            LayerKind::Null | LayerKind::Camera | LayerKind::Light | LayerKind::Audio
         ) {
             return Ok(LayerContent::None);
         }

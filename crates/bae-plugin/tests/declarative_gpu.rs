@@ -138,6 +138,8 @@ fn run(
     let params = EffectParams {
         time: Time::from_seconds(1.0),
         scale,
+        // The CPU references are 32 bpc (no clamping of HDR values).
+        float: true,
         ..EffectParams::new(instance)
     };
     let mut encoder = gpu

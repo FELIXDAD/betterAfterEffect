@@ -63,6 +63,8 @@
 
 - [x] 应用图标和文档类型（#115，2026-11-21）：`cargo xtask icons` 从 `xtask/src/icon.rs` 的矢量定义（vello_cpu 渲染）生成 `assets/icons/app/` 下的 `bae.icns`、`bae.ico`、`bae.res`、`bae.svg`；`dist` 把 `bae.icns` 放进 `BAE.app`，Info.plist 声明 `.bae`（包）和 `.baez` 两种文档类型并导出 UTI；`apps/bae/build.rs` 把 `bae.res` 链接进 `bae.exe`，`dist` 在 Windows 上检查 exe 带图标。macOS 从访达双击打开工程：`shell::open_documents` 给 winit 的应用代理加上 `application:openURLs:`，走普通的 `file.open_project`。Windows 的双击打开要等安装器写文件关联。
 
+- [x] 命令行合成选择与 Windows 版本资源（#214、#217）：`bae render --comp` 支持界面显示名、内部名称和路径。重名时列出候选路径，找不到时列出工程里的合成。Windows 构建时按 Cargo 版本生成 `VERSIONINFO`，与图标一起链接；打包时检查资源类型，Windows CI 从发布 zip 解出 exe 并读取版本字段。
+
 后续（不阻塞合并）：
 
 - 浮动面板的原生多窗口（每个 egui 视口一个 winit 窗口和 surface，共用同一设备）；目前用 `set_embed_viewports(true)` 画在主窗口内。

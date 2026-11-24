@@ -19,17 +19,66 @@ use bae_gpu::GpuContext;
 use bae_model::{FrameRate, PrimPath, Stage, Sublayer, SublayerId, Time};
 use bae_motion::query::CompInfo;
 use bae_render::{
-    AnimEvaluator, ExportFormat, ExportJob, ExportSettings, RenderError, RenderPurpose,
-    RenderRequest, Renderer, RendererConfig, SourceProvider, export_frames,
+    AnimEvaluator, ExportAlpha, ExportFormat, ExportJob, ExportSettings, RenderError,
+    RenderPurpose, RenderRequest, Renderer, RendererConfig, SourceProvider, export_frames,
 };
 use bae_ui::Accessible as _;
 use bae_ui::{Panel, PanelContext, TabInfo, tr};
 
-use crate::gpu_preview::PreviewSources;
+use crate::gpu_preview::{PreviewEffects, PreviewSources};
 
 /// Formats offered in the panel (movies come with 08's Media Foundation work
 /// on Windows; `bae render --format` has them on macOS).
-pub const FORMATS: [ExportFormat; 3] = [ExportFormat::Png, ExportFormat::Tiff, ExportFormat::Exr];
+pub const FORMATS: [ExportFormat; 7] = [
+    ExportFormat::Png,
+    ExportFormat::Tiff,
+    ExportFormat::Exr,
+    ExportFormat::H264,
+    ExportFormat::Hevc,
+    ExportFormat::ProRes,
+    ExportFormat::ProRes4444,
+];
+
+/// Formats this build can write: image sequences everywhere, movies on macOS
+/// (AVFoundation). On Windows movies come with Media Foundation in a later
+/// version; the panel shows them disabled.
+pub fn format_available(format: ExportFormat) -> bool {
+    format.is_image() || cfg!(target_os = "macos")
+}
+
+/// The output's channels (AE output module "Channels").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Channels {
+    /// Color over the comp background, no alpha.
+    Rgb,
+    /// Color and straight alpha (EXR: premultiplied, as EXR requires).
+    RgbAlpha,
+}
+
+/// Whether `format` can carry an alpha channel.
+pub fn supports_alpha(format: ExportFormat) -> bool {
+    !matches!(format, ExportFormat::H264 | ExportFormat::ProRes)
+}
+
+/// The channels a new output module of `format` starts with: RGB, as AE's
+/// output module (transparent areas flattened over the comp background,
+/// black by default, #225); ProRes 4444 RGB + Alpha, as AE's "High Quality
+/// with Alpha" template.
+pub fn default_channels(format: ExportFormat) -> Channels {
+    match format {
+        ExportFormat::ProRes4444 => Channels::RgbAlpha,
+        _ => Channels::Rgb,
+    }
+}
+
+/// Target bit rate of a new H.264 / HEVC output module, in Mbps (AE's
+/// default "H.264 - Match Render Settings - 40 Mbps").
+pub const DEFAULT_BIT_RATE_MBPS: f64 = 40.0;
+
+/// Whether `format` has a target bit rate option.
+pub fn has_bit_rate(format: ExportFormat) -> bool {
+    matches!(format, ExportFormat::H264 | ExportFormat::Hevc)
+}
 
 /// State of a queued item.
 #[derive(Clone, Debug, PartialEq)]
@@ -80,6 +129,10 @@ pub struct QueueItem {
     pub format: ExportFormat,
     /// Output file; for sequences a pattern (`name_[####].png`).
     pub output: String,
+    /// Channels written.
+    pub channels: Channels,
+    /// H.264 / HEVC target bit rate in Mbps.
+    pub bit_rate_mbps: f64,
     /// First and last frame (comp frames, inclusive).
     pub start: i64,
     /// Last frame (inclusive).
@@ -95,18 +148,32 @@ impl QueueItem {
         (self.end - self.start + 1).max(0) as usize
     }
 
-    /// Switches the format and the output's extension with it.
+    /// Switches the format, the output's extension and its frame numbering
+    /// with it (a movie is one file, a sequence numbers its files), and the
+    /// channels to the format's default.
     pub fn set_format(&mut self, format: ExportFormat) {
+        let from = self.format;
         self.format = format;
+        self.channels = default_channels(format);
         let path = Path::new(&self.output);
-        if path.extension().is_some_and(|e| {
+        if !path.extension().is_some_and(|e| {
             ExportFormat::parse(&e.to_string_lossy().to_ascii_lowercase()).is_some()
         }) {
-            self.output = path
-                .with_extension(format.extension())
-                .to_string_lossy()
-                .into_owned();
+            return;
         }
+        let stem = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let stem = match (from.is_image(), format.is_image()) {
+            (true, false) => without_frame_run(&stem),
+            (false, true) if !stem.contains('#') => format!("{stem}_[####]"),
+            _ => stem,
+        };
+        self.output = path
+            .with_file_name(format!("{stem}.{}", format.extension()))
+            .to_string_lossy()
+            .into_owned();
     }
 }
 
@@ -160,6 +227,8 @@ impl RenderQueue {
             rate,
             format,
             output: output.to_string_lossy().into_owned(),
+            channels: default_channels(format),
+            bit_rate_mbps: DEFAULT_BIT_RATE_MBPS,
             start,
             end,
             status: ItemStatus::Queued,
@@ -174,6 +243,20 @@ impl RenderQueue {
         self.items
             .retain(|i| i.id != id || matches!(i.status, ItemStatus::Rendering { .. }));
         self.items.len() != before
+    }
+
+    /// Empties the queue for another project (AE: the render queue belongs to
+    /// the project). A running render is stopped; the worker finishes the
+    /// frame it is on and finds nothing left.
+    pub fn clear(&mut self) {
+        for item in &self.items {
+            item.cancel.store(true, Ordering::Relaxed);
+        }
+        self.items.clear();
+        self.batch.clear();
+        if let Some(ctx) = &self.repaint {
+            ctx.request_repaint();
+        }
     }
 
     /// Stops a rendering item; a queued one is canceled and leaves the
@@ -247,6 +330,8 @@ impl RenderQueue {
             rate: item.rate,
             format: item.format,
             output: PathBuf::from(&item.output),
+            channels: item.channels,
+            bit_rate_mbps: item.bit_rate_mbps,
             start: item.start,
             end: item.end,
             cancel: item.cancel.clone(),
@@ -328,6 +413,8 @@ pub(crate) struct Job {
     rate: FrameRate,
     format: ExportFormat,
     output: PathBuf,
+    channels: Channels,
+    bit_rate_mbps: f64,
     start: i64,
     end: i64,
     cancel: Arc<AtomicBool>,
@@ -365,6 +452,55 @@ impl StageSnapshot {
 }
 
 /// Renders one item; `progress` gets the frames done so far.
+/// The export settings of a job's output module.
+fn export_settings(job: &Job, output: PathBuf) -> ExportSettings {
+    let mut settings = ExportSettings::new(job.format, output);
+    settings.alpha = match job.channels {
+        Channels::RgbAlpha if supports_alpha(job.format) => ExportAlpha::Straight,
+        _ => ExportAlpha::Background,
+    };
+    if has_bit_rate(job.format) {
+        settings.bit_rate = Some((job.bit_rate_mbps.clamp(0.1, 800.0) * 1e6) as u64);
+    }
+    settings
+}
+
+/// A movie's file name stem from a sequence pattern's: the frame number run
+/// (`_[####]`, `####`) goes.
+fn without_frame_run(stem: &str) -> String {
+    let Some(start) = stem.find('#') else {
+        return stem.to_owned();
+    };
+    let end = start + stem[start..].chars().take_while(|&c| c == '#').count();
+    let (mut prefix, mut suffix) = (&stem[..start], &stem[end..]);
+    if prefix.ends_with('[') && suffix.starts_with(']') {
+        prefix = &prefix[..prefix.len() - 1];
+        suffix = &suffix[1..];
+    }
+    let prefix = if suffix.is_empty() {
+        prefix.trim_end_matches(['_', '-', ' ', '.'])
+    } else {
+        prefix
+    };
+    let joined = format!("{prefix}{suffix}");
+    if joined.is_empty() {
+        "output".into()
+    } else {
+        joined
+    }
+}
+
+/// The file an output folder gets: `name_[####].png` for a sequence,
+/// `name.mp4` for a movie.
+fn default_file_name(comp: &str, format: ExportFormat) -> String {
+    let name = sanitize(comp);
+    if format.is_image() {
+        format!("{name}_[####].{}", format.extension())
+    } else {
+        format!("{name}.{}", format.extension())
+    }
+}
+
 /// The part of `start..=end` a comp of `frames` frames renders: AE limits the
 /// range to the comp. `None` when nothing of it is inside.
 pub(crate) fn limited_range(start: i64, end: i64, frames: i64) -> Option<(i64, i64)> {
@@ -398,7 +534,7 @@ pub(crate) fn render_job(
     progress(0, total);
     // A `#` run in the name numbers the frames, one frame too (#207);
     // export_frames decides, like `bae render`.
-    let settings = ExportSettings::new(job.format, output);
+    let settings = export_settings(job, output);
     let request = RenderRequest {
         purpose: RenderPurpose::Final,
         ..RenderRequest::default()
@@ -451,8 +587,7 @@ fn output_path(output: &Path, format: ExportFormat, comp: &str) -> Result<PathBu
         ));
     }
     if text.ends_with(['/', '\\']) || output.is_dir() || output.file_name().is_none() {
-        let name = sanitize(comp);
-        return Ok(output.join(format!("{name}_[####].{}", format.extension())));
+        return Ok(output.join(default_file_name(comp, format)));
     }
     let known = output
         .extension()
@@ -492,6 +627,7 @@ pub fn start(
         .get::<PreviewSources>()
         .map(|s| provider_list(&s.0))
         .unwrap_or_default();
+    let effects = resources.get::<PreviewEffects>().map(|e| e.0.clone());
     if !queue.lock().begin() {
         return Ok(());
     }
@@ -505,7 +641,7 @@ pub fn start(
     let queue = queue.clone();
     std::thread::Builder::new()
         .name("bae-render-queue".into())
-        .spawn(move || run_worker(&queue, &snapshot, gpu, &providers))
+        .spawn(move || run_worker(&queue, &snapshot, gpu, &providers, effects.as_deref()))
         .map(|_| ())
         .map_err(|e| e.to_string())
 }
@@ -524,6 +660,7 @@ pub(crate) fn run_worker(
     snapshot: &StageSnapshot,
     gpu: Arc<GpuContext>,
     providers: &[Arc<dyn SourceProvider>],
+    effects: Option<&Registry<dyn bae_render::Effect>>,
 ) {
     let stage = snapshot.restore();
     let mut renderer = Renderer::with_config(
@@ -535,6 +672,9 @@ pub(crate) fn run_worker(
     );
     for provider in providers {
         renderer.providers_mut().register(provider.clone());
+    }
+    if let Some(effects) = effects {
+        renderer.sync_effects(effects);
     }
     let mut evaluator = AnimEvaluator::new(None);
     let comp_frames = |comp: &PrimPath| {
@@ -623,6 +763,16 @@ impl Panel for RenderQueuePanel {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, cx: &mut PanelContext<'_>) {
+        // Inset from the panel's edges like the other panels (#228).
+        let pad = bae_ui::theme::metrics::PANEL_PADDING as i8;
+        egui::Frame::new()
+            .inner_margin(egui::Margin::same(pad))
+            .show(ui, |ui| self.contents(ui, cx));
+    }
+}
+
+impl RenderQueuePanel {
+    fn contents(&mut self, ui: &mut egui::Ui, cx: &PanelContext<'_>) {
         let queue = shared(cx.resources);
         let (running, queued) = {
             let mut q = queue.lock();
@@ -800,23 +950,86 @@ fn item_ui(
             // (screen readers read "… · Format: PNG", issue #128).
             ui.label(tr("Format"));
             let mut format = item.format;
+            // As wide as the column allows; long names are shortened rather
+            // than widening a narrow panel.
+            let combo_w = ui.available_width().clamp(60.0, 220.0);
             egui::ComboBox::from_id_salt("format")
-                .selected_text(format_label(format))
+                .width(combo_w)
+                .truncate()
+                .selected_text(tr(format_label(format)))
                 .show_ui(ui, |ui| {
                     for f in FORMATS {
-                        ui.selectable_value(&mut format, f, format_label(f));
+                        let available = format_available(f);
+                        let r = ui.add_enabled(
+                            available,
+                            egui::Button::selectable(format == f, tr(format_label(f))),
+                        );
+                        if r.clicked() {
+                            format = f;
+                        }
+                        if !available {
+                            r.on_disabled_hover_text(tr(
+                                "Movies are not available on Windows yet; they come with Media Foundation in a later version.",
+                            ));
+                        }
                     }
                 })
                 .response
                 .labeled_value(
                     egui::WidgetType::ComboBox,
                     &name("Format"),
-                    format_label(item.format),
+                    tr(format_label(item.format)),
                 );
             if format != item.format {
                 item.set_format(format);
             }
             ui.end_row();
+            // AE: Channels RGB / RGB + Alpha (RGB + Alpha only where the
+            // codec has alpha).
+            ui.label(tr("Channels"));
+            let mut channels = item.channels;
+            egui::ComboBox::from_id_salt("channels")
+                .width(combo_w)
+                .truncate()
+                .selected_text(channels_label(channels))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut channels, Channels::Rgb, channels_label(Channels::Rgb));
+                    let alpha = supports_alpha(item.format);
+                    let r = ui.add_enabled(
+                        alpha,
+                        egui::Button::selectable(
+                            channels == Channels::RgbAlpha,
+                            channels_label(Channels::RgbAlpha),
+                        ),
+                    );
+                    if r.clicked() {
+                        channels = Channels::RgbAlpha;
+                    }
+                    if !alpha {
+                        r.on_disabled_hover_text(tr("This format has no alpha channel."));
+                    }
+                })
+                .response
+                .labeled_value(
+                    egui::WidgetType::ComboBox,
+                    &name("Channels"),
+                    channels_label(item.channels),
+                );
+            item.channels = channels;
+            ui.end_row();
+            if has_bit_rate(item.format) {
+                // AE's H.264 format options: VBR, target bitrate.
+                ui.label(tr("Target Bitrate"));
+                let value = format!("{} Mbps", item.bit_rate_mbps);
+                ui.add(
+                    egui::DragValue::new(&mut item.bit_rate_mbps)
+                        .range(1.0..=800.0)
+                        .speed(0.5)
+                        .suffix(" Mbps"),
+                )
+                .labeled_value(egui::WidgetType::DragValue, &name("Target Bitrate"), &value);
+                ui.end_row();
+            }
             ui.label(tr("Output To"));
             ui.vertical(|ui| {
                 let output = item.output.clone();
@@ -836,7 +1049,8 @@ fn item_ui(
             // otherwise (or a comp shortened later) is limited, or refused when
             // entirely outside, at render time.
             let last = last.unwrap_or(i64::MAX).max(0);
-            ui.horizontal(|ui| {
+            // Start – end wrap in a narrow panel instead of widening it.
+            ui.horizontal_wrapped(|ui| {
                 let start = item.start.to_string();
                 ui.add(
                     egui::DragValue::new(&mut item.start)
@@ -866,15 +1080,24 @@ fn item_ui(
     });
 }
 
+/// The format's name in AE's output module (translated with `tr`).
 fn format_label(format: ExportFormat) -> &'static str {
     match format {
-        ExportFormat::Png => "PNG",
-        ExportFormat::Tiff => "TIFF",
-        ExportFormat::Exr => "OpenEXR",
+        ExportFormat::Png => "PNG Sequence",
+        ExportFormat::Tiff => "TIFF Sequence",
+        ExportFormat::Exr => "OpenEXR Sequence",
         ExportFormat::H264 => "H.264",
         ExportFormat::Hevc => "HEVC",
-        ExportFormat::ProRes => "ProRes 422 HQ",
-        ExportFormat::ProRes4444 => "ProRes 4444",
+        ExportFormat::ProRes => "QuickTime (Apple ProRes 422 HQ)",
+        ExportFormat::ProRes4444 => "QuickTime (Apple ProRes 4444)",
+    }
+}
+
+/// AE's names for the channels (the same in its Chinese UI).
+fn channels_label(channels: Channels) -> &'static str {
+    match channels {
+        Channels::Rgb => "RGB",
+        Channels::RgbAlpha => "RGB + Alpha",
     }
 }
 
@@ -1208,6 +1431,194 @@ mod tests {
     }
 
     #[test]
+    fn clearing_for_another_project_stops_and_empties() {
+        let mut q = RenderQueue::default();
+        q.add(&comp_info("/comps/a", "A"), Path::new("/r"));
+        q.add(&comp_info("/comps/b", "B"), Path::new("/r"));
+        assert!(q.begin());
+        let job = q.take_next(&|_| Some(30)).unwrap();
+        q.clear();
+        assert!(q.items().is_empty());
+        assert!(job.cancel.load(Ordering::Relaxed), "the running item stops");
+        assert!(
+            q.take_next(&|_| Some(30)).is_none(),
+            "nothing left to render"
+        );
+    }
+
+    #[test]
+    fn movie_formats_channels_and_names() {
+        // Movies on macOS; on Windows they wait for Media Foundation.
+        for f in FORMATS {
+            assert_eq!(
+                format_available(f),
+                f.is_image() || cfg!(target_os = "macos"),
+                "{f:?}"
+            );
+        }
+        assert!(!supports_alpha(ExportFormat::H264) && !supports_alpha(ExportFormat::ProRes));
+        assert!(supports_alpha(ExportFormat::ProRes4444) && supports_alpha(ExportFormat::Png));
+        // A sequence pattern becomes one movie file and back; the channels
+        // follow the format's AE default.
+        let mut q = RenderQueue::default();
+        let id = q.add(&comp_info("/comps/main", "Main"), Path::new("/r"));
+        let item = q.item_mut(id).unwrap();
+        assert_eq!(item.bit_rate_mbps, DEFAULT_BIT_RATE_MBPS);
+        let steps = [
+            (ExportFormat::H264, "/r/Main/Main.mp4", Channels::Rgb),
+            (
+                ExportFormat::ProRes4444,
+                "/r/Main/Main.mov",
+                Channels::RgbAlpha,
+            ),
+            (ExportFormat::ProRes, "/r/Main/Main.mov", Channels::Rgb),
+            (ExportFormat::Tiff, "/r/Main/Main_[####].tif", Channels::Rgb),
+            (ExportFormat::Hevc, "/r/Main/Main.mp4", Channels::Rgb),
+        ];
+        for (format, output, channels) in steps {
+            item.set_format(format);
+            assert_eq!(
+                PathBuf::from(&item.output),
+                PathBuf::from(output),
+                "{format:?}"
+            );
+            assert_eq!(item.channels, channels, "{format:?}");
+        }
+        assert_eq!(without_frame_run("shot_####_v2"), "shot__v2");
+        assert_eq!(without_frame_run("f[###]"), "f");
+        assert_eq!(without_frame_run("####"), "output");
+        assert_eq!(
+            output_path(Path::new("/r/out/"), ExportFormat::ProRes4444, "Comp 1").unwrap(),
+            Path::new("/r/out/Comp 1.mov")
+        );
+    }
+
+    #[test]
+    fn output_module_maps_to_export_settings() {
+        let job = |format, channels| Job {
+            id: 0,
+            comp: PrimPath::new("/c").unwrap(),
+            rate: FrameRate::FPS_30,
+            format,
+            output: PathBuf::from("/r/x"),
+            channels,
+            bit_rate_mbps: 12.5,
+            start: 0,
+            end: 0,
+            cancel: Arc::default(),
+        };
+        let s = |format, channels| export_settings(&job(format, channels), PathBuf::from("/r/x"));
+        let png = s(ExportFormat::Png, Channels::RgbAlpha);
+        assert_eq!((png.alpha, png.bit_rate), (ExportAlpha::Straight, None));
+        assert_eq!(
+            s(ExportFormat::Png, Channels::Rgb).alpha,
+            ExportAlpha::Background
+        );
+        // H.264 has no alpha: RGB over the background whatever is asked.
+        let h264 = s(ExportFormat::H264, Channels::RgbAlpha);
+        assert_eq!(
+            (h264.alpha, h264.bit_rate),
+            (ExportAlpha::Background, Some(12_500_000))
+        );
+        let p4444 = s(ExportFormat::ProRes4444, Channels::RgbAlpha);
+        assert_eq!((p4444.alpha, p4444.bit_rate), (ExportAlpha::Straight, None));
+    }
+
+    /// The queue renders movies with bae-media's encoders (macOS).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn renders_h264_and_prores_4444_movies() {
+        let Some(gpu) = gpu() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let (stage, comp) = project();
+        let info = bae_motion::query::comp_info(&stage, &comp).unwrap();
+        let mut q = RenderQueue::default();
+        for format in [
+            ExportFormat::H264,
+            ExportFormat::ProRes4444,
+            ExportFormat::Hevc,
+        ] {
+            let id = q.add(&info, dir.path());
+            let item = q.item_mut(id).unwrap();
+            item.set_format(format);
+            item.output = dir
+                .path()
+                .join(format!("m_{}.{}", format.name(), format.extension()))
+                .to_string_lossy()
+                .into_owned();
+            (item.start, item.end) = (0, 9);
+        }
+        assert!(q.begin());
+        let mut renderer = Renderer::new(gpu);
+        let mut evaluator = AnimEvaluator::new(None);
+        let frames =
+            |c: &PrimPath| bae_motion::query::comp_info(&stage, c).map(|i| i.frame_count());
+        while let Some(job) = q.take_next(&frames) {
+            let status =
+                render_job(&mut renderer, &mut evaluator, &stage, &job, &mut |_, _| {}).unwrap();
+            assert!(
+                matches!(status, ItemStatus::Done { .. }),
+                "{:?}: {status:?}",
+                job.format
+            );
+        }
+        for (name, ext) in [("h264", "mp4"), ("prores4444", "mov"), ("hevc", "mp4")] {
+            let file = dir.path().join(format!("m_{name}.{ext}"));
+            let len = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
+            assert!(len > 0, "{} not written", file.display());
+        }
+    }
+
+    /// #225: a new PNG item writes RGB (opaque, transparent areas over the
+    /// comp background) like AE; RGB + Alpha keeps them transparent.
+    #[test]
+    fn png_defaults_to_rgb_and_rgb_alpha_keeps_transparency() {
+        let Some(gpu) = gpu() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let (stage, comp) = project();
+        let info = bae_motion::query::comp_info(&stage, &comp).unwrap();
+        let mut q = RenderQueue::default();
+        for (name, channels) in [("rgb", None), ("alpha", Some(Channels::RgbAlpha))] {
+            let id = q.add(&info, dir.path());
+            let item = q.item_mut(id).unwrap();
+            assert_eq!(
+                (item.format, item.channels),
+                (ExportFormat::Png, Channels::Rgb)
+            );
+            if let Some(c) = channels {
+                item.channels = c;
+            }
+            item.output = dir
+                .path()
+                .join(format!("{name}.png"))
+                .to_string_lossy()
+                .into_owned();
+            (item.start, item.end) = (0, 0);
+        }
+        assert!(q.begin());
+        let mut renderer = Renderer::new(gpu);
+        let mut evaluator = AnimEvaluator::new(None);
+        let frames =
+            |c: &PrimPath| bae_motion::query::comp_info(&stage, c).map(|i| i.frame_count());
+        while let Some(job) = q.take_next(&frames) {
+            render_job(&mut renderer, &mut evaluator, &stage, &job, &mut |_, _| {}).unwrap();
+        }
+        // The fixture's solid covers the top-left 10×10 of a 40×24 comp; the
+        // bottom-right corner is empty.
+        let corner = |file: &str| {
+            let (w, h, px) = bae_render::png_out::read_rgba8(&dir.path().join(file)).unwrap();
+            let i = (((h - 1) * w + (w - 1)) * 4) as usize;
+            px[i..i + 4].to_vec()
+        };
+        assert_eq!(corner("rgb.png"), [0, 0, 0, 255], "RGB: over black");
+        assert_eq!(corner("alpha.png")[3], 0, "RGB + Alpha: transparent");
+    }
+
+    #[test]
     fn start_needs_a_gpu() {
         let queue = SharedRenderQueue::default();
         queue
@@ -1298,7 +1709,7 @@ mod tests {
             .store(true, Ordering::Relaxed);
 
         let snapshot = StageSnapshot::take(&stage).unwrap();
-        run_worker(&queue, &snapshot, gpu, &[]);
+        run_worker(&queue, &snapshot, gpu, &[], None);
 
         let q = queue.lock();
         assert!(!q.is_running());

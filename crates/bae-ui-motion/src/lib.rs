@@ -45,7 +45,7 @@ use bae_app::{AppBuilder, AppModule};
 use bae_ui::{ActionHandler, ActionInfo, KeymapBindings, MenuItemSpec, PanelKind};
 
 pub use dialogs::{MotionDialogs, SharedDialogs};
-pub use gpu_preview::PreviewSources;
+pub use gpu_preview::{PreviewEffects, PreviewSources};
 pub use panels::{EffectControlsPanel, PreviewPanel, PropertiesPanel};
 pub use project::ProjectPanel;
 pub use render_queue::{RenderQueuePanel, SharedRenderQueue};
@@ -197,6 +197,9 @@ impl AppModule for MotionUiModule {
         // viewer's GPU preview.
         let sources = app.registry::<dyn bae_render::SourceProvider>();
         app.insert_resource(PreviewSources(sources));
+        // Effects (07's built-ins, plugins) for the viewer and the render queue.
+        let effects = app.registry::<dyn bae_render::Effect>();
+        app.insert_resource(PreviewEffects(effects));
     }
 }
 

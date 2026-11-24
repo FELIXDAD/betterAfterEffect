@@ -53,6 +53,8 @@ fn app_builder() -> AppBuilder {
         // `bae pack`: one self-contained .baez (bae-package).
         .add_module(pack_cli::PackCliModule)
         .add_module(bae_render::RenderModule)
+        // Built-in effects (07) in the effect registries renderers and the UI read.
+        .add_module(bae_effects::EffectsModule)
         // Motion commands (comp.create, layer.create, key.ease …) for menus and agents.
         .add_module(bae_motion::MotionModule)
         // Plugin host: `bae plugin check|list`; plugin effects in the app registries.

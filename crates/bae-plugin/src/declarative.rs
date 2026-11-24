@@ -615,6 +615,7 @@ struct FrameInfo {
     layer_bounds: IRect,
     time: f32,
     seed: u32,
+    flags: u32,
 }
 
 impl FrameInfo {
@@ -626,6 +627,7 @@ impl FrameInfo {
             layer_bounds: layer,
             time: params.time.as_seconds() as f32,
             seed: h.finish() as u32,
+            flags: frame_flags(params),
         }
     }
 
@@ -660,11 +662,26 @@ impl FrameInfo {
                 b[o as usize..o as usize + 4].copy_from_slice(&v.to_le_bytes());
             }
         };
-        u32s("flags", wgsl::FRAME_HIGH_QUALITY);
+        u32s("flags", self.flags);
         u32s("seed", self.seed);
         u32s("pass_index", pass);
         b
     }
+}
+
+/// `BaeFrame.flags` for `params`.
+fn frame_flags(params: &EffectParams<'_>) -> u32 {
+    let mut flags = wgsl::FRAME_HIGH_QUALITY;
+    if params.linear {
+        flags |= wgsl::FRAME_LINEAR;
+    }
+    if params.purpose == bae_render::RenderPurpose::Final {
+        flags |= wgsl::FRAME_FINAL;
+    }
+    if params.float {
+        flags |= wgsl::FRAME_FLOAT;
+    }
+    flags
 }
 
 fn put_i32s(b: &mut [u8], offset: usize, v: &[i32]) {

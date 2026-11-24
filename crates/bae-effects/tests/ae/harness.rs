@@ -21,12 +21,19 @@ pub struct Case {
     pub input: String,
     pub effect: String,
     pub params: Vec<(u32, Value)>,
-    /// Allowed per-channel difference (8-bit levels).
+    /// Allowed max per-channel difference (8-bit levels).
     pub tolerance: u8,
+    /// Allowed mean difference (8-bit levels).
+    pub mean: f64,
 }
 
 pub fn cases() -> Vec<Case> {
-    let v: serde_json::Value = serde_json::from_str(CASES).unwrap();
+    parse_cases(CASES)
+}
+
+/// Cases of a `cases.json` text.
+pub fn parse_cases(text: &str) -> Vec<Case> {
+    let v: serde_json::Value = serde_json::from_str(text).unwrap();
     v["cases"]
         .as_array()
         .unwrap()
@@ -54,6 +61,7 @@ pub fn cases() -> Vec<Case> {
                 effect: c["effect"].as_str().unwrap().to_owned(),
                 params,
                 tolerance: c["tolerance"].as_u64().unwrap_or(2) as u8,
+                mean: c["mean"].as_f64().unwrap_or(0.5),
             }
         })
         .collect()
@@ -68,6 +76,26 @@ pub fn input(name: &str) -> Vec<[u8; 4]> {
             let fx = x as f64 / (w - 1) as f64;
             let fy = y as f64 / (h - 1) as f64;
             let px = match name {
+                // Probes: a hard vertical edge (blur kernels) and grey ramps
+                // (tone curves; the lower half at half range).
+                "step" => {
+                    let v = if x >= w / 2 { 1.0 } else { 0.0 };
+                    [v, v, v, 1.0]
+                }
+                "line" => {
+                    let v = if x == w / 2 { 1.0 } else { 0.0 };
+                    [v, v, v, 1.0]
+                }
+                "lineg" => {
+                    // A white line on 50 % grey (negative kernel lobes show).
+                    let v = if x == w / 2 { 1.0 } else { 0.5 };
+                    [v, v, v, 1.0]
+                }
+                "ramp" => {
+                    let v = x as f64 / (w - 1) as f64;
+                    let v = if y < h / 2 { v } else { 0.5 * v };
+                    [v, v, v, 1.0]
+                }
                 "chart" => {
                     if y < h / 2 {
                         // Hue ramp with a brightness ramp downwards.
