@@ -5,8 +5,8 @@ mod common;
 use bae_effects::get;
 use bae_model::{PrimPath, Value};
 use bae_render::{
-    IRect, LayerContent, MaskMode, RenderComp, RenderLayer, RenderMask, RenderRequest, Renderer,
-    Resolution, fixture::rect_path,
+    IRect, LayerContent, MaskMode, OutputAlpha, RenderComp, RenderLayer, RenderMask, RenderRequest,
+    Renderer, Resolution, fixture::rect_path,
 };
 
 use common::{F16, F32, Pixels, assert_close, context, instance, run, run_depth};
@@ -322,6 +322,59 @@ fn fill_uses_one_mask_or_both_through_the_render_graph() {
         assert_eq!(alpha(14), 1.);
         let green = half::f16::from_le_bytes(raw.pixel(14, 4)[2..4].try_into().unwrap()).to_f32();
         assert_eq!(green, if all { 0. } else { 0.75 });
+    }
+}
+
+#[test]
+fn compound_blur_centers_or_stretches_a_smaller_control_layer() {
+    let Some(gpu) = context() else { return };
+    let mut comp = RenderComp::new(PrimPath::new("/comps/main").unwrap(), 256, 128);
+    let solid = |name: &str, width, height| {
+        RenderLayer::new(
+            PrimPath::new(&format!("/comps/main/layers/{name}")).unwrap(),
+            LayerContent::Solid {
+                color: [1.; 4],
+                width,
+                height,
+            },
+        )
+    };
+    let mut layer = solid("layer", 256, 128);
+    let mut control = solid("control", 63, 31);
+    control.visible = false;
+    layer.effects.push(instance(
+        "ADBE Compound Blur",
+        vec![
+            (1, Value::PrimRef(control.path.clone())),
+            (2, Value::Float(20.)),
+        ],
+    ));
+    comp.layers = vec![layer, control];
+    let mut renderer = Renderer::new(gpu);
+    bae_effects::register(
+        &mut bae_model::EffectRegistry::new(),
+        renderer.effects_mut(),
+    );
+    for resolution in [Resolution::Full, Resolution::Half] {
+        let request = RenderRequest {
+            resolution,
+            ..RenderRequest::full()
+        };
+        for (stretch, invert) in [(false, false), (true, false), (true, true)] {
+            let params = &mut comp.layers[0].effects[0].params;
+            params.truncate(2);
+            params.extend([(3, Value::Bool(stretch)), (4, Value::Bool(invert))]);
+            let frame = renderer.render_frame(&comp, &request).unwrap();
+            let output = renderer
+                .read_rgba8(&frame, OutputAlpha::Premultiplied)
+                .unwrap();
+            let edge = output.data[(output.width as usize / 2) * 4 + 3];
+            assert_eq!(
+                edge == 255,
+                !stretch,
+                "{resolution:?}, invert={invert}, alpha={edge}"
+            );
+        }
     }
 }
 

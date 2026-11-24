@@ -206,8 +206,7 @@ pub fn render(gpu: &Arc<GpuContext>, case: &Case) -> Vec<[u8; 4]> {
     render_pixels(gpu, case, &input(&case.input))
 }
 
-fn image(gpu: &GpuContext, pixels: &[[u8; 4]], straight: bool) -> GpuImage {
-    let [w, h] = SIZE;
+fn image(gpu: &GpuContext, [w, h]: [u32; 2], pixels: &[[u8; 4]], straight: bool) -> GpuImage {
     let rect = IRect::from_size(w, h);
     assert_eq!(pixels.len(), (w * h) as usize);
     let data: Vec<u8> = pixels
@@ -257,6 +256,15 @@ fn image(gpu: &GpuContext, pixels: &[[u8; 4]], straight: bool) -> GpuImage {
 }
 
 pub fn render_pixels(gpu: &Arc<GpuContext>, case: &Case, pixels: &[[u8; 4]]) -> Vec<[u8; 4]> {
+    render_with_maps(gpu, case, pixels, |probe| (SIZE, input(probe)))
+}
+
+pub fn render_with_maps(
+    gpu: &Arc<GpuContext>,
+    case: &Case,
+    pixels: &[[u8; 4]],
+    load: impl Fn(&str) -> PngImage,
+) -> Vec<[u8; 4]> {
     let fx =
         bae_effects::get(&case.effect).unwrap_or_else(|| panic!("no built-in {}", case.effect));
     let [w, h] = SIZE;
@@ -282,7 +290,7 @@ pub fn render_pixels(gpu: &Arc<GpuContext>, case: &Case, pixels: &[[u8; 4]]) -> 
             .collect::<Vec<_>>();
         &masked
     };
-    let source = image(gpu, pixels, straight);
+    let source = image(gpu, SIZE, pixels, straight);
     let inst = RenderEffect {
         path: PrimPath::new(&format!("{INPUT_LAYER}/effects/fx")).unwrap(),
         effect: case.effect.clone(),
@@ -307,8 +315,8 @@ pub fn render_pixels(gpu: &Arc<GpuContext>, case: &Case, pixels: &[[u8; 4]]) -> 
             .filter_map(|dep| {
                 let name = dep.layer.name();
                 let probe = case.layers.get(name)?;
-                let pixels = input(probe);
-                Some((dep, image(gpu, &pixels, true)))
+                let (size, pixels) = load(probe);
+                Some((dep, image(gpu, size, &pixels, true)))
             })
             .collect();
         let masks = effect
@@ -327,7 +335,7 @@ pub fn render_pixels(gpu: &Arc<GpuContext>, case: &Case, pixels: &[[u8; 4]]) -> 
                         (0..w).map(move |x| [if covered(rects, x, y) { 255 } else { 0 }; 4])
                     })
                     .collect();
-                (select, image(gpu, &pixels, false))
+                (select, image(gpu, SIZE, &pixels, false))
             })
             .collect();
         target.set_effect_inputs(layers, masks);
@@ -387,6 +395,12 @@ pub fn write_png(path: &std::path::Path, px: &[[u8; 4]]) {
 }
 
 pub fn read_png(path: &std::path::Path, bpc: u64) -> Option<Vec<[u8; 4]>> {
+    read_image(path, bpc).map(|(_, pixels)| pixels)
+}
+
+pub type PngImage = ([u32; 2], Vec<[u8; 4]>);
+
+pub fn read_image(path: &std::path::Path, bpc: u64) -> Option<PngImage> {
     let decoder = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).ok()?));
     let mut reader = decoder.read_info().ok()?;
     let mut buf = vec![0; reader.output_buffer_size()?];
@@ -395,7 +409,7 @@ pub fn read_png(path: &std::path::Path, bpc: u64) -> Option<Vec<[u8; 4]>> {
         return None;
     }
     let data = &buf[..info.buffer_size()];
-    match info.bit_depth {
+    let pixels = match info.bit_depth {
         png::BitDepth::Eight => Some(data.as_chunks::<4>().0.to_vec()),
         png::BitDepth::Sixteen => Some(
             data.as_chunks::<8>()
@@ -413,5 +427,6 @@ pub fn read_png(path: &std::path::Path, bpc: u64) -> Option<Vec<[u8; 4]>> {
                 .collect(),
         ),
         _ => None,
-    }
+    }?;
+    Some(([info.width, info.height], pixels))
 }

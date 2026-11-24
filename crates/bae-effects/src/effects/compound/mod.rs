@@ -1,4 +1,5 @@
 //! Effects that sample a second layer or a mask in the destination layer's space.
+mod blur_map;
 mod definitions;
 
 use bae_gpu::wgpu;
@@ -21,7 +22,7 @@ pub(crate) use definitions::{compound_blur, displacement, fill, gradient, textur
 
 const LABEL: &str = "bae.effects.compound";
 const SOURCE: &str = include_str!("compound.wgsl");
-const UNIFORM_SIZE: u32 = 176;
+const UNIFORM_SIZE: u32 = 144;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -98,15 +99,7 @@ impl Effect for Compound {
             Mode::Displacement => {
                 bounds_padding(roi, [v.f(3) * p.scale, v.f(5) * p.scale]).inflate(1)
             }
-            Mode::Blur => {
-                blur::plan_gaussian(
-                    IRect::EMPTY,
-                    [v.f(2).min(32.) * p.scale; 2],
-                    Edge::Transparent,
-                    roi,
-                )
-                .read
-            }
+            Mode::Blur => blur_map::input_roi(v.f(2), p.scale, roi),
             _ => roi,
         }
     }
@@ -217,14 +210,14 @@ impl TargetEffect for Compound {
                 data = [rgb[0] as f32, rgb[1] as f32, rgb[2] as f32, v.f(5) as f32];
             }
             Mode::Blur => {
-                let max_sigma = v.f(2) * p.scale;
-                if max_sigma <= 0. {
+                let radius = v.f(2);
+                if radius <= 0. {
                     return Ok(input.clone());
                 }
-                return pass.blur(target, input, &map, max_sigma, v.b(3), v.b(4));
+                return blur_map::encode(target, &pass, input, &map, v);
             }
         }
-        pass.dispatch(target, [input, &map, input], flags, data, secondary)
+        pass.dispatch(target, [input, &map], flags, data, secondary)
     }
 }
 
@@ -238,25 +231,25 @@ impl Pass {
     fn dispatch(
         &self,
         target: &mut dyn EffectTarget,
-        images: [&GpuImage; 3],
+        images: [&GpuImage; 2],
         flags: [u32; 4],
         data: [f32; 4],
         secondary: [f32; 4],
     ) -> Result<GpuImage, RenderError> {
         let rt = gpu::runtime(target.gpu());
         let kernel =
-            image_grid::kernel_with_inputs(&rt, target.format(), LABEL, SOURCE, UNIFORM_SIZE, 3)?;
+            image_grid::kernel_with_inputs(&rt, target.format(), LABEL, SOURCE, UNIFORM_SIZE, 2)?;
         let out = target.allocate(image_grid::pixel_rect(self.roi, self.grid), self.grid)?;
         let mut u = UniformWriter::with_size(UNIFORM_SIZE as usize);
         for (i, image) in images.into_iter().enumerate() {
             image_grid::image_coords(&mut u, i * 32, image, self.grid);
         }
-        u.i32s(96, &image_grid::rect4(self.roi))
-            .i32s(112, &image_grid::rect4(self.layer))
-            .f32s(144, &data)
-            .f32s(160, &secondary);
+        u.i32s(64, &image_grid::rect4(self.roi))
+            .i32s(80, &image_grid::rect4(self.layer))
+            .f32s(112, &data)
+            .f32s(128, &secondary);
         for (i, flag) in flags.into_iter().enumerate() {
-            u.u32(128 + 4 * i, flag);
+            u.u32(96 + 4 * i, flag);
         }
         let offset = gpu::push_uniform(&rt, &u);
         let group = rt.bind_group(
@@ -265,7 +258,6 @@ impl Pass {
                 Resource::Uniform,
                 Resource::View(&images[0].view),
                 Resource::View(&images[1].view),
-                Resource::View(&images[2].view),
                 Resource::View(&out.view),
             ],
         );
@@ -278,66 +270,9 @@ impl Pass {
         gpu::dispatch(&mut pass, &kernel, &group, &[offset], self.roi.size());
         Ok(out)
     }
-
-    fn blur(
-        &self,
-        target: &mut dyn EffectTarget,
-        source: &GpuImage,
-        map: &GpuImage,
-        max_sigma: f64,
-        stretch: bool,
-        invert: bool,
-    ) -> Result<GpuImage, RenderError> {
-        // Each pixel interpolates two adjacent levels of the Gaussian scale space.
-        let limit = 32. / self.grid;
-        let end = max_sigma.min(limit);
-        let mut levels = vec![0.];
-        let mut sigma = 1. / self.grid;
-        while sigma < end {
-            levels.push(sigma);
-            sigma *= 2.;
-        }
-        levels.push(end);
-        let mut accumulation = source.clone();
-        let inv_scale = self.grid / source.pixel_scale;
-        let blur_roi = image_grid::pixel_rect(self.roi, inv_scale);
-        for (i, &sigma) in levels.iter().enumerate() {
-            let prev = levels[i.saturating_sub(1)];
-            let next = levels.get(i + 1).copied().unwrap_or(sigma);
-            let blurred = if i == 0 {
-                source.clone()
-            } else {
-                blur::plan_gaussian(
-                    source.rect,
-                    [sigma * inv_scale; 2],
-                    Edge::Transparent,
-                    blur_roi,
-                )
-                .encode(target, source)?
-            };
-            accumulation = self.dispatch(
-                target,
-                [&blurred, map, &accumulation],
-                [
-                    Mode::Blur as u32,
-                    if stretch { 3 } else { 2 },
-                    u32::from(invert),
-                    i as u32,
-                ],
-                [prev as f32, sigma as f32, next as f32, max_sigma as f32],
-                [
-                    f32::from(i == levels.len() - 1),
-                    limit as f32,
-                    self.grid as f32,
-                    0.,
-                ],
-            )?;
-        }
-        Ok(accumulation)
-    }
 }
 
 pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
-    image_grid::kernel_with_inputs(rt, format, LABEL, SOURCE, UNIFORM_SIZE, 3)?;
-    Ok(())
+    image_grid::kernel_with_inputs(rt, format, LABEL, SOURCE, UNIFORM_SIZE, 2)?;
+    blur_map::prewarm(rt, format)
 }
