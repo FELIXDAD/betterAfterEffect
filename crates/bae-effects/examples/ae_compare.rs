@@ -33,6 +33,10 @@ fn main() {
                 "color-cast",
                 "rgb-cube",
                 "neutral-cast",
+                "neutral-flip",
+                "neutral-cool",
+                "neutral-warm",
+                "neutral-patch",
                 "speckles",
                 "matte-edge",
             ] {

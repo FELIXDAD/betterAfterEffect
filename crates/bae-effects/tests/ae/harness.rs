@@ -118,8 +118,9 @@ pub fn input(name: &str) -> Vec<[u8; 4]> {
                     let v = if y < h / 2 { v } else { 0.5 * v };
                     [v, v, v, 1.0]
                 }
-                "rgb-cube" | "neutral-cast" => {
-                    let n = y * w + x;
+                "rgb-cube" | "neutral-cast" | "neutral-flip" => {
+                    let row = if name == "neutral-flip" { h - 1 - y } else { y };
+                    let n = row * w + x;
                     let rgb = [n % 32, (n / 32) % 32, n / 1024].map(|k| f64::from(k) / 31.);
                     if name == "rgb-cube" {
                         [rgb[0], rgb[1], rgb[2], 1.]
@@ -130,6 +131,27 @@ pub fn input(name: &str) -> Vec<[u8; 4]> {
                             (20. + 190. * rgb[2]) / 255.,
                             1.,
                         ]
+                    }
+                }
+                "neutral-cool" | "neutral-warm" => {
+                    let n = (y / 8) * 32 + x / 8;
+                    let l = 55. + f64::from(n % 16) * 10.;
+                    let (cast, step) = if name == "neutral-cool" {
+                        ([-10., 3., 7.], 6.)
+                    } else {
+                        ([12., 8., -14.], 9.)
+                    };
+                    let channel = |i: usize, j: u32| {
+                        (l + cast[i] + (f64::from((n / j) % 5) - 2.) * step) / 255.
+                    };
+                    [channel(0, 16), channel(1, 8), channel(2, 5), 1.]
+                }
+                "neutral-patch" => {
+                    if y < 16 {
+                        let g = f64::from(x / 4 * 4) / 255.;
+                        [g, g, g, 1.]
+                    } else {
+                        [144. / 255., 112. / 255., 128. / 255., 1.]
                     }
                 }
                 "color-cast" => {

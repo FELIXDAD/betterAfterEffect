@@ -19,6 +19,8 @@ pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<
         "colorama",
         "auto_histogram",
         "auto_mapping",
+        "auto_midtones",
+        "auto_snap",
         "auto_apply",
         "apply_curves",
         "histogram",
@@ -42,14 +44,18 @@ fn kernel(
     };
     rt.kernel(&key, || {
         let (source, bytes, inputs) = match entry {
-            "auto_histogram" | "auto_mapping" | "auto_apply" => (
+            "auto_histogram" | "auto_mapping" | "auto_midtones" | "auto_snap" | "auto_apply" => (
                 concat!(
                     include_str!("../../shaders/channel_math.wgsl"),
                     include_str!("../../shaders/image_grid.wgsl"),
                     include_str!("auto.wgsl")
                 ),
                 80,
-                if entry == "auto_apply" { 2 } else { 1 },
+                if matches!(entry, "auto_histogram" | "auto_mapping") {
+                    1
+                } else {
+                    2
+                },
             ),
             "colorama" => (
                 concat!(

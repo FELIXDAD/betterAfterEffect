@@ -79,6 +79,60 @@ fn full_layer_histogram_is_stable_across_tiles() {
 }
 
 #[test]
+fn snap_neutral_uses_the_bottom_right_of_complete_areas() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(128, 64);
+    let fx = builtin("ADBE AutoColor");
+    for spacing in [4, 16] {
+        let input = Pixels::new(rect, |x, y| {
+            let rgb = if y < 6 {
+                [0, 0, 0]
+            } else if y < 12 {
+                [255, 255, 255]
+            } else if y >= 16 && x % spacing < 2 && y % spacing < 2 {
+                if x % spacing == 1 && y % spacing == 1 {
+                    [143, 114, 126]
+                } else {
+                    [130, 137, 117]
+                }
+            } else {
+                [240, 25, 235]
+            };
+            [
+                rgb[0] as f32 / 255.,
+                rgb[1] as f32 / 255.,
+                rgb[2] as f32 / 255.,
+                1.,
+            ]
+        });
+        let render = |snap| {
+            run(
+                &gpu,
+                Rgba32Float,
+                fx,
+                vec![
+                    (3, Value::Float(0.)),
+                    (4, Value::Float(0.)),
+                    (5, Value::Bool(snap)),
+                ],
+                &input,
+                rect,
+                1.,
+            )
+        };
+        let on = render(true);
+        if spacing == 16 {
+            assert_close(&on, &render(false), rect, 1e-6, "under one percent");
+        } else {
+            let [r, g, b, _] = on.get(1, 17);
+            assert!(r.max(g).max(b) - r.min(g).min(b) < 2. / 255.);
+            let [r, g, _, _] = on.get(0, 16);
+            assert!((r - g).abs() > 15. / 255.);
+        }
+    }
+}
+
+#[test]
 fn wheel_uses_custom_stops_and_phase_wraps() {
     let Some(gpu) = context() else { return };
     let rect = IRect::from_size(8, 4);

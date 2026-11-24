@@ -38,6 +38,12 @@ pub(super) fn at_size(out: &mut Vec<Case>, size: [u32; 2], tag: &str) {
                 size: HD,
             });
         }
+        out.push(Case {
+            name: "1080p color-3 auto color + snap".into(),
+            match_name: "ADBE AutoColor",
+            params: vec![(5, Value::Bool(true))],
+            size,
+        });
     }
 }
 
