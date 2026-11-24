@@ -184,6 +184,7 @@ fn registry() -> &'static Registry {
         categories::perspective::register(&mut r);
         categories::stylize::register(&mut r);
         categories::transition::register(&mut r);
+        categories::utility::register(&mut r);
         r.effects.sort_by(|a, b| {
             (a.info.category.as_str(), a.info.name.as_str())
                 .cmp(&(b.info.category.as_str(), b.info.name.as_str()))
@@ -252,9 +253,28 @@ fn rust_builtin(
             form: Form::Rust,
             obsolete: def.category == "Obsolete",
             param_names_zh: names_zh,
+            param_options_zh: rust_options_zh(def),
         },
         implementation: Implementation::Rust(fx),
     }
+}
+
+/// Chinese popup options of the Rust effects (AE 26 zh_CN): each effect
+/// module's `options_zh` table, then the blurs' Blur Dimensions popup.
+fn rust_options_zh(def: &EffectDef) -> Vec<(u32, Vec<String>)> {
+    const DIMENSIONS_ZH: &[&str] = &["水平和垂直", "水平", "垂直"];
+    def.params
+        .iter()
+        .filter_map(|p| {
+            let m = def.match_name.as_str();
+            let zh = catalog::options_zh(m, p.id)
+                .or_else(|| effects::options_zh(m, p.id))
+                .or_else(|| effects::spatial::options_zh(m, p.id))
+                .or_else(|| effects::distort::options_zh(m, p.id))
+                .or((p.name == "Blur Dimensions").then_some(DIMENSIONS_ZH))?;
+            Some((p.id, zh.iter().map(|s| (*s).to_owned()).collect()))
+        })
+        .collect()
 }
 
 fn declarative_info(fx: &DeclarativeEffect, zh: &toml::Table) -> EffectInfo {
@@ -301,5 +321,42 @@ fn declarative_info(fx: &DeclarativeEffect, zh: &toml::Table) -> EffectInfo {
         },
         obsolete: def.category == "Obsolete",
         param_names_zh,
+        param_options_zh: choices_zh(decl, entry),
     }
+}
+
+/// `[effect.<id>.choices]`: per parameter key either an array of options
+/// (`channel = ["RGB", "红色", …]`) or a table by 1-based index (`1 = "…"`),
+/// as option lists by parameter id.
+fn choices_zh(
+    decl: &bae_plugin::manifest::EffectDecl,
+    entry: Option<&toml::Table>,
+) -> Vec<(u32, Vec<String>)> {
+    let Some(choices) = entry
+        .and_then(|e| e.get("choices"))
+        .and_then(toml::Value::as_table)
+    else {
+        return Vec::new();
+    };
+    decl.params
+        .iter()
+        .filter_map(|p| match choices.get(&p.key)? {
+            toml::Value::Array(list) => Some((
+                p.id,
+                list.iter()
+                    .filter_map(toml::Value::as_str)
+                    .map(str::to_owned)
+                    .collect(),
+            )),
+            toml::Value::Table(table) => {
+                let mut items: Vec<(u32, String)> = table
+                    .iter()
+                    .filter_map(|(k, v)| Some((k.parse().ok()?, v.as_str()?.to_owned())))
+                    .collect();
+                items.sort_by_key(|(i, _)| *i);
+                Some((p.id, items.into_iter().map(|(_, s)| s).collect()))
+            }
+            _ => None,
+        })
+        .collect()
 }

@@ -40,3 +40,4 @@ cargo run -p bae-effects --example ae_compare -- golden            # 把 AE 输�
 - [透视](categories/perspective.md)
 - [风格化](categories/stylize.md)
 - [过渡](categories/transition.md)
+- [实用工具](categories/utility.md)

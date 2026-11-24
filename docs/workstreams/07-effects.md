@@ -53,6 +53,8 @@
 
 [第一阶段清单、基准和接入记录](07-effects/history.md)
 
+- 应用界面（G，#271）：效果菜单按 AE 目录列出 299 个效果（可用 / 置灰实时读效果注册表）、效果控件按参数定义画控件、效果和预设面板（搜索、分类、双击 / 拖放应用）、时间轴 fx 开关列。下拉中文选项走 `EffectInfo.param_options_zh`（包的 `choices` 表；Rust 效果的 `options_zh` 查表在 `rust_options_zh()` 接入）。
+
 - [模糊和锐化](../../crates/bae-effects/tests/ae/categories/blur-sharpen.md#工作流进度)
 - [通道](../../crates/bae-effects/tests/ae/categories/channel.md#工作流进度)
 - [颜色校正](../../crates/bae-effects/tests/ae/categories/color.md#工作流进度)
@@ -65,3 +67,9 @@
 - [透视](../../crates/bae-effects/tests/ae/categories/perspective.md#工作流进度)
 - [风格化](../../crates/bae-effects/tests/ae/categories/stylize.md#工作流进度)
 - [过渡](../../crates/bae-effects/tests/ae/categories/transition.md#工作流进度)
+
+### 颜色校正第三批（2026-11-24）
+
+完成应用颜色 LUT、色光、灰度系数 / 基值 / 增益、保留颜色、可选颜色、自动色阶、自动对比度、自动颜色、色调均化、广播颜色。四个整层直方图效果在 GPU 上归约。131 张 AE 26.2.1 参考图覆盖三个工程位深。自动颜色的“对齐中性中间调”经 2×2 色块和裁剪扫描校准，原近中性色卡平均差从 22.491 降至 2.297/255。其余误差见 #301 及效果库分类说明。
+
+LUT 字节和文件名随项目保存。效果面板的文件选择按钮交由 G 接入。三个自动校正效果的瞬时平滑和场景检测等待 #286 提供跨帧输入。

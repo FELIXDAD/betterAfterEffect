@@ -18,12 +18,22 @@ fn catalog_matches_ae_dump() {
         "ADBE Find Edges",
         "ADBE Mosaic",
         "ADBE Posterize",
+        "ADBE Threshold2",
+        "ADBE Threshold",
+        "ADBE Emboss",
+        "ADBE Color Emboss",
+        "ADBE Cartoonify",
+        "ADBE Roughen Edges",
+        "ADBE Tile",
+        "ADBE Strobe",
+        "ADBE Radial Shadow",
     ];
     let mut count = 0;
     for fixture in [
         include_str!("../../../docs/reference/ae/effects/blur-and-sharpen.json"),
         include_str!("../../../docs/reference/ae/effects/stylize.json"),
         include_str!("../../../docs/reference/ae/effects/perspective.json"),
+        include_str!("../../../docs/reference/ae/effects/obsolete-hidden.json"),
     ] {
         let data: serde_json::Value = serde_json::from_str(fixture).unwrap();
         for e in data["effects"].as_array().unwrap() {
@@ -39,6 +49,7 @@ fn catalog_matches_ae_dump() {
                 .unwrap()
                 .iter()
                 .filter(|p| p["matchName"] != "ADBE Effect Built In Params");
+            assert_eq!(b.def().params.len(), props.clone().count());
             for (idx, pr) in props.enumerate() {
                 let def = &b.def().params[idx];
                 assert_eq!(def.match_name.as_deref(), pr["matchName"].as_str());
@@ -79,12 +90,25 @@ fn catalog_matches_ae_dump() {
                     assert_eq!(valid_max, pr["maxValue"].as_f64().unwrap());
                 }
                 if let Some(options) = pr["dropdownOptions"].as_array() {
-                    assert_eq!(
-                        serde_json::json!(
-                            bae_effects::effects::spatial::options_zh(name, def.id).unwrap()
-                        ),
-                        serde_json::json!(options)
-                    );
+                    let bae_model::ParamKind::Popup { options: labels } = &def.kind else {
+                        panic!("{name}: parameter {} is not a popup", def.id);
+                    };
+                    assert_eq!(labels.len(), options.len());
+                    if let Some(zh) = bae_effects::effects::spatial::options_zh(name, def.id) {
+                        assert_eq!(serde_json::json!(zh), serde_json::json!(options));
+                    } else {
+                        let zh: toml::Table = include_str!("../packages/strobe/locales/zh-CN.toml")
+                            .parse()
+                            .unwrap();
+                        let table = zh["effect"]["strobe"]["choices"]
+                            [if def.id == 6 { "mode" } else { "operation" }]
+                        .as_table()
+                        .unwrap();
+                        assert_eq!(table.len(), options.len());
+                        for (index, expected) in options.iter().enumerate() {
+                            assert_eq!(table[&(index + 1).to_string()].as_str(), expected.as_str());
+                        }
+                    }
                 }
             }
         }
@@ -228,4 +252,203 @@ fn unsharp_retains_hdr_only_in_float_projects() {
         assert!(hdr.get(16, 4)[0] > 1.2);
         assert!((bounded.get(16, 4)[0] - 0.8).abs() < 0.001);
     }
+}
+
+#[test]
+fn threshold_and_emboss_preserve_premultiplied_alpha() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(8, 4);
+    let input = Pixels::new(rect, |x, _| {
+        let a = 0.5;
+        let v = if x < 4 { 0.125 } else { 0.375 };
+        [v, v, v, a]
+    });
+    for format in [F16, F32] {
+        let threshold = run(
+            &gpu,
+            format,
+            builtin("ADBE Threshold2"),
+            vec![],
+            &input,
+            rect,
+            1.,
+        );
+        let expected = Pixels::new(rect, |x, _| {
+            let v = if x < 4 { 0. } else { 0.5 };
+            [v, v, v, 0.5]
+        });
+        assert_close(&threshold, &expected, rect, 0.001, "threshold");
+        for name in ["ADBE Emboss", "ADBE Color Emboss"] {
+            let embossed = run(
+                &gpu,
+                format,
+                builtin(name),
+                vec![(1, Value::Float(90.))],
+                &input,
+                rect,
+                1.,
+            );
+            assert!(embossed.data.iter().all(|pixel| pixel[3] == 0.5));
+            assert_ne!(embossed.get(3, 1), embossed.get(1, 1));
+            let blended = run(
+                &gpu,
+                format,
+                builtin(name),
+                vec![(4, Value::Float(100.))],
+                &input,
+                rect,
+                1.,
+            );
+            assert_close(&blended, &input, rect, 0.001, "emboss blend");
+        }
+    }
+}
+
+#[test]
+fn motion_tile_can_repeat_mirror_and_extend_around_layer_center() {
+    let fx = builtin("ADBE Tile");
+    let rect = IRect::new(-2, 1, 2, 3);
+    let params = vec![(4, Value::Float(300.)), (6, Value::Bool(true))];
+    let inst = instance("ADBE Tile", params.clone());
+    let out = fx.effect().output_bounds(&EffectParams::new(&inst), rect);
+    assert_eq!(out, IRect::new(-6, 1, 6, 3));
+    let Some(gpu) = context() else { return };
+    let input = Pixels::new(rect, |x, y| [(x + 2) as f32 / 4., y as f32 / 4., 0., 1.]);
+    let expected = Pixels::new(out, |x, y| {
+        let x = (x + 2).rem_euclid(8);
+        input.get(x.min(7 - x) - 2, y)
+    });
+    let got = run(&gpu, F16, fx, params, &input, out, 1.);
+    assert_close(&got, &expected, out, 0.001, "mirrored tiles");
+}
+
+#[test]
+fn roughen_cycle_and_cartoon_use_the_same_pixels_in_cropped_roi() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::new(-10, 0, 80, 70);
+    let roi = IRect::new(13, 0, 42, 40);
+    let input = Pixels::new(rect, |x, y| {
+        if x < 14 || !(6..60).contains(&y) {
+            [0.; 4]
+        } else {
+            [0.2, 0.7, 0.3, 1.]
+        }
+    });
+    for (name, params) in [
+        (
+            "ADBE Roughen Edges",
+            vec![(9, Value::Float(75.)), (12, Value::Bool(true))],
+        ),
+        ("ADBE Cartoonify", vec![]),
+    ] {
+        let fx = builtin(name);
+        let inst = instance(name, params.clone());
+        let read = fx
+            .effect()
+            .input_roi(&EffectParams::new(&inst), roi)
+            .intersect(&rect);
+        let cropped = Pixels::new(read, |x, y| input.get(x, y));
+        let full = run(&gpu, F16, fx, params.clone(), &input, rect, 1.);
+        let tile = run(&gpu, F16, fx, params.clone(), &cropped, roi, 1.);
+        assert_close(&full, &tile, roi, 0.002, name);
+        if name == "ADBE Roughen Edges" {
+            let looped = run(
+                &gpu,
+                F16,
+                fx,
+                vec![(9, Value::Float(435.)), (12, Value::Bool(true))],
+                &input,
+                rect,
+                1.,
+            );
+            assert_close(&full, &looped, rect, 0.002, "roughen one revolution");
+            let later = run(
+                &gpu,
+                F16,
+                fx,
+                vec![(9, Value::Float(150.)), (12, Value::Bool(true))],
+                &input,
+                rect,
+                1.,
+            );
+            assert!(max_diff(&full, &later, rect).0 > 0.05);
+        }
+    }
+}
+
+#[test]
+fn strobe_respects_layer_time_and_scales_premultiplied_pixels() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(4, 4);
+    let input = Pixels::new(rect, |_, _| [0.125, 0.25, 0.375, 0.5]);
+    let image = input.upload(&gpu, F32);
+    let fx = builtin("ADBE Strobe");
+    let inst = instance(
+        "ADBE Strobe",
+        vec![(2, Value::Float(25.)), (6, Value::Int(2))],
+    );
+    let mut target = bae_effects::Standalone::new(gpu.clone(), F32);
+    for (time, factor) in [(0., 0.25), (0.499, 0.25), (0.5, 1.), (1.1, 0.25)] {
+        let params = EffectParams {
+            time: bae_model::Time::from_seconds(time),
+            ..EffectParams::new(&inst)
+        };
+        let output = fx.render(&mut target, &params, &image, rect).unwrap();
+        target.finish().unwrap();
+        let got = Pixels::download(&gpu, &output);
+        let want = input.map(|c| c.map(|v| v * factor));
+        assert_close(&got, &want, rect, 0.004, "strobe phase");
+    }
+
+    let random = instance(
+        "ADBE Strobe",
+        vec![
+            (3, Value::Float(0.25)),
+            (5, Value::Float(100.)),
+            (6, Value::Int(2)),
+        ],
+    );
+    let mut count = 0;
+    for frame in 0..30 {
+        let params = EffectParams {
+            time: bae_model::FrameRate::FPS_30.frame_to_time(frame),
+            ..EffectParams::new(&random)
+        };
+        let output = fx.render(&mut target, &params, &image, rect).unwrap();
+        target.finish().unwrap();
+        count += usize::from(Pixels::download(&gpu, &output).get(0, 0)[3] == 0.0);
+    }
+    assert!(
+        (1..30).contains(&count),
+        "phase jitter should vary between frames"
+    );
+}
+
+#[test]
+fn radial_shadow_resize_preserves_projection_outside_the_layer() {
+    let rect = IRect::from_size(10, 10);
+    let ray = IRect::new(16, 5, 17, 6);
+    let fx = builtin("ADBE Radial Shadow");
+    let mut params = vec![
+        (3, Value::Vec2([1., 1.])),
+        (4, Value::Float(50.)),
+        (8, Value::Bool(true)),
+    ];
+    let inst = instance("ADBE Radial Shadow", params.clone());
+    assert_eq!(
+        fx.effect().output_bounds(&EffectParams::new(&inst), rect),
+        rect
+    );
+    params.push((9, Value::Bool(true)));
+    let inst = instance("ADBE Radial Shadow", params.clone());
+    assert!(
+        fx.effect()
+            .output_bounds(&EffectParams::new(&inst), rect)
+            .contains(&ray)
+    );
+    let Some(gpu) = context() else { return };
+    let input = Pixels::new(rect, |_, _| [0.25, 0.5, 0.75, 1.]);
+    let got = run(&gpu, F32, fx, params, &input, ray, 1.);
+    let shadow = Pixels::new(ray, |_, _| [0., 0., 0., 127. / 255.]);
+    assert_close(&got, &shadow, ray, 0.001, "projected outside source bounds");
 }

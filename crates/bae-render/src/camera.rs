@@ -17,10 +17,11 @@
 //!
 //! Interface for the viewer (camera views, 3D axis handles) and the camera
 //! commands: [`Camera`] (a camera at one time, with [`Camera::project`],
-//! [`Camera::unproject`] and [`Camera::plane_homography`]), the lens functions
-//! ([`zoom_from_focal_length`], [`angle_of_view`] …, AE-CMP-418) and
-//! [`look_at`] (two-node cameras, AE-ANI-022). Everything here is plain `f64`
-//! math without GPU types.
+//! [`Camera::unproject`] and [`Camera::plane_homography`]), AE's orthographic
+//! views ([`OrthoView`], [`Camera::orthographic`]: Front, Left, Top, Back,
+//! Right, Bottom, AE-CMP-410), the lens functions ([`zoom_from_focal_length`],
+//! [`angle_of_view`] …, AE-CMP-418) and [`look_at`] (two-node cameras,
+//! AE-ANI-022). Everything here is plain `f64` math without GPU types.
 
 use glam::{DMat3, DMat4, DVec2, DVec3, DVec4};
 
@@ -63,6 +64,69 @@ pub struct Camera {
     pub aperture: f64,
     /// Blur level in percent.
     pub blur_level: f64,
+    /// Perspective (camera layers, the default camera, custom views) or
+    /// orthographic (AE's Front, Left, Top … views).
+    pub projection: Projection,
+}
+
+/// How a camera maps camera space onto the comp frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Projection {
+    /// Pinhole perspective with [`Camera::zoom`].
+    #[default]
+    Perspective,
+    /// Parallel projection: `scale` comp pixels per comp-space pixel (1 =
+    /// 100 %), independent of depth. Nothing is clipped by depth.
+    Orthographic {
+        /// Magnification.
+        scale: f64,
+    },
+}
+
+/// AE's orthographic 3D views (AE-CMP-410), as the viewer's 3D View menu lists
+/// them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum OrthoView {
+    /// 正面: looking along +z, like the default camera.
+    Front,
+    /// 左侧: from the left (−x) looking along +x; the scene's front (−z) is on
+    /// the right.
+    Left,
+    /// 顶部: from above (−y) looking down along +y; the scene's front is at the
+    /// bottom.
+    Top,
+    /// 背面: looking along −z (mirrored left-right).
+    Back,
+    /// 右侧: from the right looking along −x.
+    Right,
+    /// 底部: from below looking up along −y.
+    Bottom,
+}
+
+impl OrthoView {
+    /// Every view, in AE's menu order.
+    pub const ALL: [OrthoView; 6] = [
+        OrthoView::Front,
+        OrthoView::Left,
+        OrthoView::Top,
+        OrthoView::Back,
+        OrthoView::Right,
+        OrthoView::Bottom,
+    ];
+
+    /// The view's orientation: camera space → comp space rotation (the camera
+    /// looks along its local +z, local +y is screen-down).
+    pub fn rotation(self) -> DMat4 {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        match self {
+            OrthoView::Front => DMat4::IDENTITY,
+            OrthoView::Left => DMat4::from_rotation_y(FRAC_PI_2),
+            OrthoView::Top => DMat4::from_rotation_x(-FRAC_PI_2),
+            OrthoView::Back => DMat4::from_rotation_y(PI),
+            OrthoView::Right => DMat4::from_rotation_y(-FRAC_PI_2),
+            OrthoView::Bottom => DMat4::from_rotation_x(FRAC_PI_2),
+        }
+    }
 }
 
 impl Camera {
@@ -76,9 +140,23 @@ impl Camera {
             focus_distance: zoom,
             aperture: 0.0,
             blur_level: 100.0,
+            projection: Projection::Perspective,
         }
     }
 
+    /// An orthographic view (AE-CMP-410) centred on comp-space point `centre`
+    /// (it lands in the middle of the frame) at `scale` comp pixels per
+    /// comp-space pixel. `OrthoView::Front` with the comp centre and scale 1
+    /// shows z = 0 exactly like 2D. To pan, move `centre` (for example to the
+    /// [`Camera::unproject`] of the pixel that should be in the middle); to zoom,
+    /// change `scale`.
+    pub fn orthographic(view: OrthoView, centre: DVec3, scale: f64) -> Self {
+        let world = DMat4::from_translation(centre) * view.rotation();
+        Self {
+            projection: Projection::Orthographic { scale },
+            ..Self::new(world, 1.0)
+        }
+    }
     /// AE's default comp camera for a `width × height` comp (AE-CMP-403): a 50 mm
     /// lens on 36 mm film (`zoom = W · 50 / 36`) at `(W/2, H/2, −zoom)` looking
     /// along +z, so z = 0 maps 1:1 onto the comp.
@@ -123,13 +201,33 @@ impl Camera {
         self.world.z_axis.truncate().normalize_or(DVec3::Z)
     }
 
+    /// The point everything is seen from: the camera position, or for an
+    /// orthographic view a point far behind it along the viewing direction
+    /// (what depth sorting and lighting need).
+    pub fn eye(&self) -> DVec3 {
+        match self.projection {
+            Projection::Perspective => self.position(),
+            Projection::Orthographic { .. } => self.position() - self.direction() * 1e7,
+        }
+    }
+
+    /// Comp-space size of one comp pixel: `1 / zoom` per unit of distance
+    /// from a perspective camera, or (stored negative, a constant) `−1 / scale`
+    /// for an orthographic view.
+    pub fn world_per_pixel(&self) -> f64 {
+        match self.projection {
+            Projection::Perspective => 1.0 / self.zoom.max(1e-9),
+            Projection::Orthographic { scale } => -1.0 / scale.max(1e-9),
+        }
+    }
+
     /// Comp space → camera space.
     pub fn view(&self) -> DMat4 {
         self.world.inverse()
     }
 
-    /// The 3×3 matrix taking camera space to homogeneous comp pixels:
-    /// `(xc, yc, zc) ↦ (zoom·xc + W/2·zc, zoom·yc + H/2·zc, zc)`.
+    /// The 3×3 matrix taking camera space to homogeneous comp pixels of a
+    /// perspective camera: `(xc, yc, zc) ↦ (zoom·xc + W/2·zc, zoom·yc + H/2·zc, zc)`.
     pub fn intrinsics(&self, comp_size: DVec2) -> DMat3 {
         DMat3::from_cols(
             DVec3::new(self.zoom, 0.0, 0.0),
@@ -142,6 +240,9 @@ impl Camera {
     /// of the near plane.
     pub fn project(&self, point: DVec3, comp_size: DVec2) -> Option<DVec2> {
         let c = self.view().transform_point3(point);
+        if let Projection::Orthographic { scale } = self.projection {
+            return Some(comp_size / 2.0 + scale * c.truncate());
+        }
         if c.z < NEAR {
             return None;
         }
@@ -154,6 +255,10 @@ impl Camera {
     /// The comp-space point at comp pixel `pixel` and camera depth `depth` (the
     /// inverse of [`Camera::project`]; viewer tools use it to drag in 3D).
     pub fn unproject(&self, pixel: DVec2, depth: f64, comp_size: DVec2) -> DVec3 {
+        if let Projection::Orthographic { scale } = self.projection {
+            let c = (pixel - comp_size / 2.0) / scale;
+            return self.world.transform_point3(c.extend(depth));
+        }
         let xc = (pixel.x - comp_size.x / 2.0) * depth / self.zoom;
         let yc = (pixel.y - comp_size.y / 2.0) * depth / self.zoom;
         self.world.transform_point3(DVec3::new(xc, yc, depth))
@@ -162,9 +267,16 @@ impl Camera {
     /// The projective map of a planar layer: layer pixels `(x, y)` on the layer's
     /// z = 0 plane, placed by `layer_world` (layer space → comp space), to
     /// homogeneous comp pixels `(X, Y, w)` with comp position `(X/w, Y/w)` and
-    /// `w` = the point's camera-space depth.
+    /// `w` = the point's camera-space depth (`w ≡ 1` for orthographic views,
+    /// whose maps are affine).
     pub fn plane_homography(&self, layer_world: &DMat4, comp_size: DVec2) -> DMat3 {
         let m = self.view() * *layer_world;
+        if let Projection::Orthographic { scale } = self.projection {
+            let col = |v: DVec4, w: f64| (v.truncate().truncate() * scale).extend(w);
+            let mut origin = col(m.w_axis, 1.0);
+            origin += (comp_size / 2.0).extend(0.0);
+            return DMat3::from_cols(col(m.x_axis, 0.0), col(m.y_axis, 0.0), origin);
+        }
         let col = |v: DVec4| v.truncate();
         self.intrinsics(comp_size) * DMat3::from_cols(col(m.x_axis), col(m.y_axis), col(m.w_axis))
     }
@@ -388,6 +500,61 @@ mod tests {
         let expect =
             xyz_rotation(DVec3::new(10.0, 20.0, 30.0)) * xyz_rotation(DVec3::new(40.0, 50.0, 60.0));
         assert!(a.world.abs_diff_eq(expect, 1e-12));
+    }
+
+    #[test]
+    fn orthographic_views() {
+        let centre = DVec3::new(960.0, 540.0, 0.0);
+        // Front at 100 %: z does not matter, z = 0 layers map 1:1.
+        let front = Camera::orthographic(OrthoView::Front, centre, 1.0);
+        for z in [-5000.0, 0.0, 900.0] {
+            let p = front.project(DVec3::new(100.0, 50.0, z), SIZE).unwrap();
+            assert!((p - DVec2::new(100.0, 50.0)).length() < 1e-9, "{p}");
+        }
+        let layer = DMat4::from_translation(DVec3::new(10.0, 20.0, 300.0));
+        let h = front.plane_homography(&layer, SIZE);
+        assert!((map(&h, DVec2::new(5.0, 5.0)) - DVec2::new(15.0, 25.0)).length() < 1e-9);
+        assert_eq!(h.row(2), DVec3::new(0.0, 0.0, 1.0));
+        // Left: the scene's front (−z) is on the right, depth is screen x.
+        let left = Camera::orthographic(OrthoView::Left, centre, 0.5);
+        let near = left.project(DVec3::new(0.0, 540.0, -400.0), SIZE).unwrap();
+        assert!(
+            (near - DVec2::new(960.0 + 200.0, 540.0)).length() < 1e-9,
+            "{near}"
+        );
+        // Top: from above, the front is at the bottom; x stays x.
+        let top = Camera::orthographic(OrthoView::Top, centre, 1.0);
+        let p = top.project(DVec3::new(1060.0, 0.0, -300.0), SIZE).unwrap();
+        assert!(
+            (p - DVec2::new(1060.0, 540.0 + 300.0)).length() < 1e-9,
+            "{p}"
+        );
+        // Bottom: the front is at the top; Back and Right mirror Front and Left.
+        let bottom = Camera::orthographic(OrthoView::Bottom, centre, 1.0);
+        let p = bottom
+            .project(DVec3::new(960.0, 0.0, -300.0), SIZE)
+            .unwrap();
+        assert!(
+            (p - DVec2::new(960.0, 540.0 - 300.0)).length() < 1e-9,
+            "{p}"
+        );
+        let back = Camera::orthographic(OrthoView::Back, centre, 1.0);
+        let p = back.project(DVec3::new(1060.0, 540.0, 0.0), SIZE).unwrap();
+        assert!((p - DVec2::new(860.0, 540.0)).length() < 1e-9, "{p}");
+        let right = Camera::orthographic(OrthoView::Right, centre, 1.0);
+        let p = right.project(DVec3::new(0.0, 540.0, -400.0), SIZE).unwrap();
+        assert!(
+            (p - DVec2::new(960.0 - 400.0, 540.0)).length() < 1e-9,
+            "{p}"
+        );
+        // Round trip and a far eye behind the view.
+        for cam in OrthoView::ALL.map(|v| Camera::orthographic(v, centre, 2.0)) {
+            let q = DVec3::new(123.0, -45.0, 678.0);
+            let p = cam.project(q, SIZE).unwrap();
+            let depth = cam.view().transform_point3(q).z;
+            assert!((cam.unproject(p, depth, SIZE) - q).length() < 1e-6);
+            assert!(cam.direction().dot(cam.eye() - cam.position()) < -1e6);
+        }
     }
 
     #[test]
