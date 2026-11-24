@@ -1312,3 +1312,138 @@ fn cmd_modifier_c_and_v_run_their_commands_on_macos() {
     );
     no_failures(&h, "#220");
 }
+
+// ---------------------------------------------------------------------------
+// #222 retest: Cmd+Z in a text field never brings back IME composition text.
+
+/// An IME composition as macOS sends it (Enabled, Preedit steps, an empty
+/// Preedit, Commit), each step held for ~1.25 s of frames: egui's TextEdit
+/// takes an undo snapshot when an edit has lasted 1 s.
+fn compose_slowly(h: &mut Ui, preedit: &[&str], commit: &str) {
+    send(h, Event::Ime(egui::ImeEvent::Enabled));
+    for p in preedit {
+        send(
+            h,
+            Event::Ime(egui::ImeEvent::Preedit {
+                text: (*p).to_owned(),
+                active_range_chars: Some(0..p.chars().count()),
+            }),
+        );
+        for _ in 0..75 {
+            frame(h);
+        }
+    }
+    send(
+        h,
+        Event::Ime(egui::ImeEvent::Preedit {
+            text: String::new(),
+            active_range_chars: None,
+        }),
+    );
+    send(h, Event::Ime(egui::ImeEvent::Commit(commit.to_owned())));
+    settle(h);
+}
+
+/// The value of the focused text field (accessibility tree).
+fn focused_text(h: &Ui) -> Option<String> {
+    use egui_kittest::kittest::{AccessKitNode, NodeT as _};
+    fn walk(n: AccessKitNode<'_>) -> Option<String> {
+        if n.is_focused()
+            && matches!(
+                n.role(),
+                egui::accesskit::Role::TextInput | egui::accesskit::Role::MultilineTextInput
+            )
+        {
+            return Some(n.value().unwrap_or_default());
+        }
+        n.children().find_map(walk)
+    }
+    walk(h.root().accesskit_node())
+}
+
+/// In the focused field: “wqgt” composed slowly (preedit w'q'g't) and committed,
+/// replaced by a pasted “Dark”, then 你好 composed (preedit ni'hao) and “X”
+/// typed; Cmd+Z six times. Returns the problems.
+fn ime_undo_in_focused_field(h: &mut Ui, field: &str) -> Vec<String> {
+    let mut problems = Vec::new();
+    let undo_before = h.state().doc.undo_state().0;
+    key(h, Modifiers::COMMAND, Key::A);
+    key(h, Modifiers::NONE, Key::Backspace);
+    compose_slowly(h, &["w", "w'q", "w'q'g't"], "wqgt");
+    let committed = focused_text(h);
+    if committed.as_deref() != Some("wqgt") {
+        problems.push(format!(
+            "{field}: after the commit the field is {committed:?}"
+        ));
+    }
+    // A user pauses between steps (egui groups edits within 1 s into one undo step).
+    let pause = |h: &mut Ui| {
+        for _ in 0..75 {
+            frame(h);
+        }
+    };
+    pause(h);
+    key(h, Modifiers::COMMAND, Key::A);
+    send(h, Event::Paste("Dark".into()));
+    settle(h);
+    pause(h);
+    compose_slowly(h, &["n", "ni'h", "ni'hao"], "你好");
+    type_text(h, "X");
+    let mut seen = vec![focused_text(h).unwrap_or_default()];
+    for _ in 0..6 {
+        key(h, Modifiers::COMMAND, Key::Z);
+        seen.push(focused_text(h).unwrap_or_default());
+    }
+    println!("{field}: {seen:?}");
+    if seen.iter().any(|v| v.contains('\'')) {
+        problems.push(format!(
+            "{field}: Cmd+Z brought back composition text: {seen:?}"
+        ));
+    }
+    if !seen.iter().any(|v| v == "wqgt") {
+        problems.push(format!("{field}: Cmd+Z never got back to “wqgt”: {seen:?}"));
+    }
+    if h.state().doc.undo_state().0 != undo_before {
+        problems.push(format!("{field}: the project's undo changed"));
+    }
+    problems
+}
+
+#[test]
+fn undo_in_text_fields_skips_ime_composition() {
+    use egui_kittest::kittest::Queryable as _;
+    let mut problems = Vec::new();
+    // Project panel search.
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    let search = h
+        .root()
+        .query_all_by_role(egui::accesskit::Role::TextInput)
+        .next()
+        .expect("project search field")
+        .rect();
+    click_at(&mut h, search.center());
+    problems.extend(ime_undo_in_focused_field(&mut h, "project search"));
+    // Layer rename (Enter on the selected layer).
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    focus(&mut h, TIMELINE.0, TIMELINE.1);
+    let layer = h.state().layers()[0].clone();
+    select(&h, std::slice::from_ref(&layer));
+    key(&mut h, Modifiers::NONE, Key::Enter);
+    assert!(h.ctx.text_edit_focused(), "Enter did not start renaming");
+    problems.extend(ime_undo_in_focused_field(&mut h, "layer rename"));
+    key(&mut h, Modifiers::NONE, Key::Escape);
+    // Type tool: click in the viewer, then the text being typed.
+    let mut h = gui();
+    comp_with(&mut h, &[]);
+    key(&mut h, Modifiers::COMMAND, Key::T);
+    let c = canvas(&h);
+    click_at(&mut h, c.center());
+    if h.ctx.text_edit_focused() {
+        problems.extend(ime_undo_in_focused_field(&mut h, "type tool"));
+    } else {
+        problems.push("type tool: no focused text field after the click".into());
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
