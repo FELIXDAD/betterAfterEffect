@@ -31,6 +31,8 @@ vello = { workspace = true, optional = true }
 vello_cpu = { workspace = true, optional = true }
 
 [dev-dependencies]
+png.workspace = true
+serde_json.workspace = true
 # GPU tests always run with the `render` feature (`cargo test -p bae-text`).
 bae-text = { path = ".", features = ["render"] }
 bae-gpu.workspace = true

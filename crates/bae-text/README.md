@@ -22,6 +22,12 @@ TextDocument（bae-model，某一时刻的源文本）
 | `render::encode`（`render`） | 把 `TextLayout` 写进 `vello::Scene`，按字符交替画填充和描边（AE-TXT-017），仿粗体用轮廓扩张，仿斜体用斜切 |
 | `render::TextSource` / `TextProvider`（`render`） | bae-render 的 `LayerSource` / `SourceProvider`，provider ID 是 `TEXT_PROVIDER = "bae.text"`；数据可以是 `Arc<EvaluatedLayer>`（03 的求值结果）、`Arc<TextDocument>` 或 `Arc<TextLayout>`。绘制用 bae-vector 的共享 `VelloRenderer` |
 
+### 文字动画器
+
+用 `text.create_animator`（MCP 名称 `text_create_animator`）传入文字图层的 `layer` 和组名 `name`。命令返回组的路径，并创建覆盖全文的子选择器 `range`。用 `prim.create` 在组内追加 `TextSelector`，用 `attr.set`、`key.set`、`attr.set_expression` 编辑对应 Prim 的属性。
+
+支持正方形范围、相加模式及按字符、不含空格的字符、词或排版行计数。组上可添加 `animator:position`、`animator:scale`、`animator:rotation`、`animator:opacity`、`animator:fill_color`、`animator:tracking`。`TextProvider` 接收求值后的图层时会自动应用这些属性，`TextLayout.styles` 给出逐字符变换、颜色和不透明度。
+
 ### 已实现的 AE 行为
 
 - 点文本（AE-TXT-003）：图层原点在第一行基线起点；左对齐从 x = 0 开始，居中以 x = 0 为中心，右对齐在 x = 0 结束；只在回车（`\r`、`\n`、`\r\n`）和软回车（U+0003）处换行。
@@ -32,7 +38,7 @@ TextDocument（bae-model，某一时刻的源文本）
 
 ### 还没有
 
-逐字符样式（`TextDocument` 目前整段一种样式，见 bae-model 的说明）、段落缩进和段前段后距、文本框内边距和垂直对齐（AE 24.6+）、比例间距、上标下标、竖排、路径文字、文字动画器（下一阶段）、从文字创建形状。
+逐字符样式（`TextDocument` 目前整段一种样式，见 bae-model 的说明）、段落缩进和段前段后距、文本框内边距和垂直对齐（AE 24.6+）、比例间距、上标下标、竖排、路径文字、其他选择器形状及缓动、从文字创建形状。
 
 ## 已知问题
 

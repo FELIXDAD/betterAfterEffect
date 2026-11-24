@@ -16,11 +16,12 @@ const ROOT: &str = "/private/tmp/bae-07-ae";
 
 fn main() {
     let cmd = std::env::args().nth(1).unwrap_or_else(|| "compare".into());
-    let root = PathBuf::from(ROOT);
+    // BAE_07_ROOT: a probe directory with its own cases.json (compare only).
+    let root = std::env::var_os("BAE_07_ROOT").map_or_else(|| PathBuf::from(ROOT), PathBuf::from);
     match cmd.as_str() {
         "prepare" => {
             std::fs::create_dir_all(root.join("inputs")).unwrap();
-            for name in ["chart", "soft"] {
+            for name in ["chart", "soft", "step", "ramp", "line", "lineg"] {
                 harness::write_png(
                     &root.join("inputs").join(format!("{name}.png")),
                     &harness::input(name),
@@ -52,7 +53,11 @@ fn compare(root: &Path) {
     std::fs::create_dir_all(root.join("bae")).unwrap();
     println!("| case | max Δ | mean Δ | px Δ>1 | px Δ>3 |");
     println!("|---|---:|---:|---:|---:|");
-    for case in harness::cases() {
+    let cases = match std::fs::read_to_string(root.join("cases.json")) {
+        Ok(text) if std::env::var_os("BAE_07_ROOT").is_some() => harness::parse_cases(&text),
+        _ => harness::cases(),
+    };
+    for case in cases {
         let bae = harness::render(&gpu, &case);
         harness::write_png(&root.join("bae").join(format!("{}.png", case.name)), &bae);
         match harness::read_png(&root.join("ae").join(format!("{}.png", case.name))) {

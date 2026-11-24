@@ -481,3 +481,45 @@ fn keyboard_shortcuts_window_in_chinese_in_a_small_retina_window() {
     key(&mut h, Modifiers::NONE, Key::Escape);
     assert!(window(&h).is_none(), "Escape did not close it");
 }
+
+/// #228: the Render Queue's controls keep the panel padding from its left
+/// and right edges (the Output To field no longer touches the border).
+#[test]
+fn render_queue_content_is_inset_from_the_panel_edges() {
+    let pad = bae_ui::theme::metrics::PANEL_PADDING;
+    for size in [[1440.0, 880.0], [1920.0, 1009.0]] {
+        let mut h = gui_sized(Gui::new(), vec2(size[0], size[1]));
+        comp_with(&mut h, &["motion.layer.new.solid"]);
+        key(&mut h, Modifiers::COMMAND, Key::M);
+        settle(&mut h);
+        let area = panel_areas(&h.ctx)
+            .into_iter()
+            .find(|a| a.panel.as_str() == "render_queue")
+            .expect("render queue drawn");
+        let pane = find_pane(h.root().accesskit_node(), "render_queue").expect("pane");
+        let mut nodes = Vec::new();
+        widgets(pane, &mut nodes);
+        let ppp = h.ctx.pixels_per_point();
+        let mut touching = Vec::new();
+        for n in &nodes {
+            let r = rect_of(n, ppp);
+            if r.width() <= 0.0 {
+                continue;
+            }
+            if r.left() < area.rect.left() + pad - 0.5 || r.right() > area.rect.right() - pad + 0.5
+            {
+                touching.push(format!(
+                    "{:?} {:?} {r:?}",
+                    n.role(),
+                    n.label().unwrap_or_default()
+                ));
+            }
+        }
+        assert!(!nodes.is_empty());
+        assert!(
+            touching.is_empty(),
+            "{size:?}: panel {:?}, within {pad} pt of an edge: {touching:#?}",
+            area.rect
+        );
+    }
+}

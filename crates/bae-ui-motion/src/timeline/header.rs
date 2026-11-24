@@ -397,6 +397,13 @@ impl TimelinePanel {
         if ruler_resp.drag_stopped() {
             self.drag = None;
         }
+        // Comp markers between the work area bar and the ruler numbers (on top of the
+        // ruler, so they take the clicks).
+        let strip = Rect::from_min_max(
+            pos2(ruler.left(), wa.bottom() + 1.0),
+            pos2(ruler.right(), head.bottom()),
+        );
+        self.comp_markers_ui(ui, cx, session, info, axis, strip);
     }
 
     pub(super) fn footer(

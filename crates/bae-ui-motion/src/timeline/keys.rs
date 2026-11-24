@@ -1,7 +1,7 @@
 //! Keyframes in the layer-bar time graph: glyphs, selection, Cmd/Ctrl-click
 //! interpolation toggles and drags. A drag moves the selected keyframes by whole
-//! frames; Shift snaps the grabbed one to the CTI, other keyframes, In / Out points,
-//! the work area and the comp's ends (AE-ANI-070); Alt-dragging the first or last
+//! frames; Shift snaps the grabbed one to the CTI, other keyframes, markers, In /
+//! Out points, the work area and the comp's ends (AE-ANI-070); Alt-dragging the first or last
 //! selected keyframe scales the selection's timing about the other end (AE-ANI-071).
 
 use std::collections::HashSet;
@@ -279,6 +279,14 @@ impl TimelinePanel {
                 info.work_area.start,
                 info.work_area.end,
             ];
+            // Comp markers and the shown layers' markers.
+            let marker_times = |owner: &PrimPath| {
+                bae_motion::markers::markers_of(stage, owner)
+                    .into_iter()
+                    .map(|(m, t)| query::to_comp_time(stage, &m, t))
+                    .collect::<Vec<_>>()
+            };
+            targets.extend(marker_times(&info.path));
             let mut layers: Vec<&PrimPath> = Vec::new();
             for row in rows {
                 if !layers.contains(&&row.layer) {
@@ -286,6 +294,7 @@ impl TimelinePanel {
                     let t = query::layer_timing(stage, &row.layer);
                     targets.push(t.in_point);
                     targets.push(t.out_point);
+                    targets.extend(marker_times(&row.layer));
                 }
                 if let RowKind::Prop { path, attr, .. } = &row.kind
                     && let Some(spec) = query::attr_spec(stage, path, attr)

@@ -252,6 +252,9 @@ pub mod metrics {
     /// Header of a collapsed panel in a stacked frame.
     pub const STACK_HEADER_H: f32 = 24.0;
     pub const ROW_H: f32 = 17.0;
+    /// Inner margin of panels laid out as forms (Render Queue, …), the
+    /// inset of the Preview and Timeline controls.
+    pub const PANEL_PADDING: f32 = 8.0;
     /// AE uses Adobe Clean; SF at 11.5pt matches its text widths within ~1%.
     pub const FONT_SIZE: f32 = 11.5;
     pub const SMALL_FONT_SIZE: f32 = 10.5;

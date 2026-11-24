@@ -1,7 +1,7 @@
 //! The blur engine shared by the blur, glow, shadow and feather effects.
 //!
 //! **Gaussian** ([`plan_gaussian`], [`encode_gaussian`]): separable, with the
-//! kernel cut at 3σ like AE. Small σ (< 6 render px) runs two direct passes
+//! kernel cut at 3σ like AE (taps with |x| ≤ 3σ). Small σ (< 6 render px) runs two direct passes
 //! whose source lines are cached in workgroup memory. Larger σ blurs a
 //! block-averaged copy at 1/2ⁿ resolution (σ at the level stays in 3..6
 //! texels) and upsamples it bilinearly: the cost no longer depends on the
@@ -40,12 +40,13 @@ const MAX_TAPS: i32 = 24;
 /// Index of offset 0 in the symmetric weight table (`WPAD` in blur.wgsl).
 const WPAD: usize = 28;
 
-/// Kernel radius (taps per side) for σ, as AE: ceil(3σ).
+/// Kernel radius (taps per side) for σ, as AE: taps with |x| ≤ 3σ (AE 26
+/// impulse responses end there; σ < 1/3 leaves the image unchanged).
 pub fn radius(sigma: f64) -> i32 {
     if sigma <= 0.0 {
         0
     } else {
-        (3.0 * sigma).ceil() as i32
+        (3.0 * sigma + 1e-9).floor() as i32
     }
 }
 
@@ -118,6 +119,10 @@ struct Step {
     sigma: f32,
     frac: f32,
     seg: i32,
+    /// Power applied to the straight colour of what the step reads / writes
+    /// (1 = none; linear-light blurs).
+    load_gamma: f32,
+    store_gamma: f32,
     /// `conv_line` weights by |offset|, normalised (index 0..=radius).
     weights: Vec<f32>,
 }
@@ -144,6 +149,8 @@ impl Step {
             sigma: 1.0,
             frac: 0.0,
             seg: 1,
+            load_gamma: 1.0,
+            store_gamma: 1.0,
             weights: Vec::new(),
         }
     }
@@ -451,6 +458,21 @@ pub fn plan_box(input: IRect, r: [f64; 2], iterations: u32, edge: Edge, output: 
 }
 
 impl Plan {
+    /// Filters in linear light: what the plan reads from the input is raised
+    /// to `gamma` (straight colour), its output to `1 / gamma`. No extra passes.
+    #[must_use]
+    pub fn in_linear_light(mut self, gamma: f64) -> Self {
+        for s in &mut self.steps {
+            if s.src == 0 {
+                s.load_gamma = gamma as f32;
+            }
+            if s.dst.is_none() {
+                s.store_gamma = (1.0 / gamma) as f32;
+            }
+        }
+        self
+    }
+
     /// Records the plan: reads `input`, allocates the intermediates and the
     /// output (a working image covering `self.output`).
     pub fn encode(
@@ -490,7 +512,9 @@ impl Plan {
                 .i32(72, s.radius)
                 .f32(76, s.sigma.max(1e-6))
                 .f32(80, s.frac)
-                .i32(84, s.seg);
+                .i32(84, s.seg)
+                .f32(88, s.load_gamma)
+                .f32(92, s.store_gamma);
             // Symmetric, zero-padded layout (see `wsym` in blur.wgsl).
             for (d, x) in s.weights.iter().enumerate().take(WPAD + 1) {
                 w.f32(96 + 4 * (WPAD + d), *x);

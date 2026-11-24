@@ -1,0 +1,34 @@
+# Who leads which PRs. The merge train notifies the leader of a PR when it merges it,
+# when CI fails, and on conflicts; the owning agent is looked up in Orca by branch.
+# Rules are checked top to bottom; the first match wins. A rule matches when ALL of the
+# keys it sets match: `host` (Orca host the branch's worktree lives on: "local" or a
+# paired server name), `branch_prefix` (any of), `worktree_prefix` (Orca worktree
+# display name, any of), `label` (any of).
+
+default = "ca3a6511"
+# Told when dev CI goes red and the queue pauses.
+pause_notify = ["ca3a6511", "09fe9cc0"]
+
+[leaders.ca3a6511]
+address = "orca_session_id:ca3a6511-c6a8-4cd9-aca7-379637d84b6f"
+
+[leaders.09fe9cc0]
+address = "orca_session_id:09fe9cc0-76f2-4ae5-934c-b33f04bc0c0b"
+
+[leaders.milan]
+# 米兰 planner, reached through the paired server.
+address = "orca_session_id:83fb8048-90ac-480a-b85f-2408991ec53e"
+on = "米兰Mac"
+
+[[rules]]
+host = "米兰Mac"
+leader = "milan"
+
+[[rules]]
+branch_prefix = ["ui/", "ref/"]
+leader = "09fe9cc0"
+
+[[rules]]
+# 09fe9cc0's AE-parity group (tools, menus, timeline, dialogs, icons, AE reference runs).
+worktree_prefix = ["bae-12-", "bae-11-icons", "bae-ref-"]
+leader = "09fe9cc0"

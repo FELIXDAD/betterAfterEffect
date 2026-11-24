@@ -518,3 +518,39 @@ fn evaluated_comp_serializes_to_json() {
     assert_eq!(json["layers"][0]["kind"], "solid");
     assert_eq!(json["layers"][0]["source"]["kind"], "none");
 }
+
+#[test]
+fn text_animator_samples_only_authored_properties_and_samples_nested_selector() {
+    let mut stage = stage(|b| {
+        b.layer("/comps/main", "text", "text");
+    });
+    let registry = bae_model::CommandRegistry::with_builtins();
+    let layer = "/comps/main/layers/text";
+    let group = format!("{layer}/animators/title");
+    let mut command = |id, params| {
+        registry
+            .execute(&mut stage, &AuthorId::new("user:test").unwrap(), id, params)
+            .unwrap();
+    };
+    use serde_json::json;
+    command(
+        "text.create_animator",
+        json!({"layer":layer, "name":"title"}),
+    );
+    for (sec, opacity) in [(0.0, 20.0), (1.0, 80.0)] {
+        command(
+            "key.set",
+            json!({"path":group,"attr":"animator:opacity","time":secs(sec),"keyframe":Keyframe::linear(opacity)}),
+        );
+    }
+    command(
+        "attr.set_expression",
+        json!({"path":format!("{group}/range"),"attr":"end","source":"time * 100"}),
+    );
+    let result = evaluate_comp(&stage, &p("/comps/main"), secs(0.5)).unwrap();
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let animator = &result.layers[0].text_animators[0];
+    assert_eq!(animator.f64("animator:opacity"), Some(50.0));
+    assert!(animator.get("animator:fill_color").is_none());
+    assert_eq!(animator.children[0].f64("end"), Some(50.0));
+}

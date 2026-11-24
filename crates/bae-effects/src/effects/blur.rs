@@ -10,9 +10,56 @@ use crate::target::{EffectTarget, TargetEffect};
 
 const DIMENSIONS: [&str; 3] = ["Horizontal and Vertical", "Horizontal", "Vertical"];
 
-/// AE Blurriness → Gaussian standard deviation (lottie-web and Skottie use
-/// 0.3; AE's exact factor is UNVERIFIED until the AE reference renders).
-pub const BLURRINESS_TO_SIGMA: f64 = 0.3;
+/// Gaussian Blur: Blurriness → standard deviation. Fitted to AE 26 impulse
+/// responses (Blurriness 2–70, linear-light model): 0.2877 ± 0.002.
+pub const BLURRINESS_TO_SIGMA: f64 = 0.288;
+
+/// Gaussian Blur blurs in linear light in non-linear projects: AE 26's impulse
+/// responses only sum to 1 after raising them to 2.4 (pure power, like
+/// Exposure), and its step responses are skewed towards the dark side.
+pub const LINEAR_LIGHT_GAMMA: f64 = 2.4;
+
+/// Gaussian Blur (Legacy): (Blurriness, σ) measured from AE 26 impulse
+/// responses (8 bpc, horizontal); the kernel is a plain Gaussian with no
+/// linearization (max error ≤ 1.3 of 255 for Blurriness ≥ 2). σ is not
+/// proportional to Blurriness; beyond the table it grows at the last slope.
+const LEGACY_SIGMA: &[(f64, f64)] = &[
+    (0.0, 0.0),
+    (0.5, 0.623),
+    (1.0, 0.803),
+    (1.5, 1.019),
+    (2.0, 1.198),
+    (2.5, 1.419),
+    (3.0, 1.699),
+    (4.0, 2.155),
+    (5.0, 2.477),
+    (6.0, 2.891),
+    (7.0, 3.319),
+    (8.0, 3.572),
+    (10.0, 4.467),
+    (12.0, 5.205),
+    (15.0, 6.385),
+    (20.0, 8.366),
+    (25.0, 10.082),
+    (30.0, 12.116),
+    (40.0, 16.225),
+    (50.0, 19.402),
+    (70.0, 25.945),
+];
+
+/// σ of Gaussian Blur (Legacy) for `blurriness` (full-resolution pixels).
+pub fn legacy_sigma(blurriness: f64) -> f64 {
+    let b = blurriness.max(0.0);
+    let pairs = LEGACY_SIGMA.windows(2);
+    for w in pairs {
+        let ((b0, s0), (b1, s1)) = (w[0], w[1]);
+        if b <= b1 {
+            return s0 + (s1 - s0) * (b - b0) / (b1 - b0);
+        }
+    }
+    let (bl, sl) = LEGACY_SIGMA[LEGACY_SIGMA.len() - 1];
+    sl * b / bl
+}
 
 /// Per-axis factor of Blur Dimensions (1 both, 2 horizontal, 3 vertical).
 pub(crate) fn dimensions(popup: i64) -> [f64; 2] {
@@ -28,29 +75,31 @@ pub(crate) fn dimensions(popup: i64) -> [f64; 2] {
 pub struct GaussianBlur {
     def: EffectDef,
     pub(crate) names_zh: Vec<(u32, String)>,
+    legacy: bool,
 }
 
 impl GaussianBlur {
     /// The current effect (`ADBE Gaussian Blur 2`, AE 26 defaults).
     pub fn new() -> Self {
-        Self::build("ADBE Gaussian Blur 2", "Blur & Sharpen", 25.0, 3000.0, true)
+        Self::build("ADBE Gaussian Blur 2", "Blur & Sharpen", 25.0, true)
     }
 
     /// Gaussian Blur (Legacy) (`ADBE Gaussian Blur`), same kernel.
     pub fn legacy() -> Self {
-        let mut fx = Self::build("ADBE Gaussian Blur", "Obsolete", 0.0, 1000.0, false);
+        let mut fx = Self::build("ADBE Gaussian Blur", "Obsolete", 0.0, false);
         fx.def.name = "Gaussian Blur (Legacy)".into();
+        fx.legacy = true;
         fx
     }
 
-    fn build(match_name: &str, category: &str, blur: f64, max: f64, repeat: bool) -> Self {
+    fn build(match_name: &str, category: &str, blur: f64, repeat: bool) -> Self {
         let (def, names_zh) = DefBuilder::new(match_name, "Gaussian Blur", category)
             .slider(
                 1,
                 "Blurriness",
                 "模糊度",
                 blur,
-                [0.0, max],
+                [0.0, 30000.0],
                 [0.0, 50.0],
                 1,
                 "pixels",
@@ -58,12 +107,21 @@ impl GaussianBlur {
             .popup(2, "Blur Dimensions", "模糊方向", 1, &DIMENSIONS)
             .checkbox(3, "Repeat Edge Pixels", "重复边缘像素", repeat)
             .build();
-        Self { def, names_zh }
+        Self {
+            def,
+            names_zh,
+            legacy: false,
+        }
     }
 
     fn setup(&self, params: &EffectParams<'_>) -> ([f64; 2], Edge) {
         let p = Params::new(&self.def, params);
-        let s = BLURRINESS_TO_SIGMA * p.f(1).max(0.0) * params.scale;
+        let blurriness = p.f(1).max(0.0);
+        let s = if self.legacy {
+            legacy_sigma(blurriness)
+        } else {
+            BLURRINESS_TO_SIGMA * blurriness
+        } * params.scale;
         let [dx, dy] = dimensions(p.popup(2));
         let edge = if p.b(3) {
             Edge::Repeat
@@ -141,11 +199,17 @@ impl TargetEffect for GaussianBlur {
             edge,
         );
         let out = output_roi.intersect(&bounds);
-        if sigma == [0.0, 0.0] || out.is_empty() {
+        // σ < 1/3 has no taps besides the centre (AE leaves the layer as is).
+        let taps = [blur::radius(sigma[0]), blur::radius(sigma[1])];
+        if taps == [0, 0] || out.is_empty() {
             return Ok(input.clone());
         }
         let input = crate::common::premultiplied(target, input)?;
-        blur::plan_gaussian(input.rect, sigma, edge, out).encode(target, &input)
+        let mut plan = blur::plan_gaussian(input.rect, sigma, edge, out);
+        if !self.legacy && !params.linear {
+            plan = plan.in_linear_light(LINEAR_LIGHT_GAMMA);
+        }
+        plan.encode(target, &input)
     }
 }
 
@@ -157,31 +221,32 @@ pub struct BoxBlur {
 }
 
 impl BoxBlur {
-    /// Fast Box Blur (`ADBE Box Blur2`).
+    /// Fast Box Blur (`ADBE Box Blur2`; AE 26 defaults: 3 iterations, Repeat
+    /// Edge Pixels on).
     pub fn new() -> Self {
-        Self::build("ADBE Box Blur2", "Fast Box Blur", "Blur & Sharpen", 3)
+        Self::build("ADBE Box Blur2", "Fast Box Blur", "Blur & Sharpen", 3, true)
     }
 
     /// Box Blur (`ADBE Box Blur`, obsolete matchName, default 1 iteration).
     pub fn legacy() -> Self {
-        Self::build("ADBE Box Blur", "Box Blur", "Obsolete", 1)
+        Self::build("ADBE Box Blur", "Box Blur", "Obsolete", 1, false)
     }
 
-    fn build(match_name: &str, name: &str, category: &str, iterations: i64) -> Self {
+    fn build(match_name: &str, name: &str, category: &str, iterations: i64, repeat: bool) -> Self {
         let (def, names_zh) = DefBuilder::new(match_name, name, category)
             .slider(
                 1,
                 "Blur Radius",
                 "模糊半径",
                 0.0,
-                [0.0, 32767.0],
+                [0.0, 30000.0],
                 [0.0, 50.0],
                 1,
                 "pixels",
             )
             .int(2, "Iterations", "迭代", iterations, [1, 50])
             .popup(3, "Blur Dimensions", "模糊方向", 1, &DIMENSIONS)
-            .checkbox(4, "Repeat Edge Pixels", "重复边缘像素", false)
+            .checkbox(4, "Repeat Edge Pixels", "重复边缘像素", repeat)
             .build();
         Self { def, names_zh }
     }

@@ -22,6 +22,7 @@ use crate::geom::IRect;
 use crate::gpu::{BlendKind, DrawData, Pipelines, flags};
 use crate::graph::{CompositeNode, LayerOp, Node, NodeKind, OpInput, RenderGraph};
 
+pub(crate) mod adjust;
 mod masks;
 use crate::pool::TexturePool;
 use crate::source::{EncodeContext, GpuImage, ImageAllocator, ImageAlpha};
@@ -146,6 +147,7 @@ pub(crate) fn execute(
         buffer,
         draws_group,
         next_draw: 0,
+        depth: graph.depth,
         format,
         blendable,
         draw_calls: 0,
@@ -206,6 +208,26 @@ pub(crate) fn execute(
                 };
                 fx.effect.render(&mut ectx, &params, &input, node.rect)?
             }
+            NodeKind::Mix(mix) => {
+                let input = |id: crate::graph::NodeId| {
+                    outputs[id.index()]
+                        .clone()
+                        .ok_or_else(|| RenderError::Other("mix input missing".into()))
+                };
+                let images = [input(mix.base)?, input(mix.over)?, input(mix.coverage)?];
+                let target = pool.acquire(device, format, node_pixels(node), node.pixel_scale)?;
+                adjust::encode(
+                    &mut ctx.pipelines.adjust,
+                    device,
+                    gpu.queue(),
+                    &mut encoder,
+                    format,
+                    &target,
+                    [&images[0], &images[1], &images[2]],
+                );
+                ctx.passes += 1;
+                target
+            }
             NodeKind::Mask(_) => ctx.mask_outs[index]
                 .as_ref()
                 .map(|m| m.image.clone())
@@ -240,6 +262,7 @@ struct ExecCtx<'a> {
     buffer: &'a wgpu::Buffer,
     draws_group: &'a wgpu::BindGroup,
     next_draw: u32,
+    depth: crate::request::BitDepth,
     format: wgpu::TextureFormat,
     blendable: bool,
     draw_calls: usize,
@@ -294,8 +317,8 @@ impl ExecCtx<'_> {
             let mut kind =
                 BlendKind::for_mode(op.blend, c.clamp, op.preserve_transparency, self.blendable);
             let mut backdrop = kind == BlendKind::Replace;
-            if backdrop && !drawn_any && self.blendable {
-                // Over a transparent backdrop every mode reduces to Normal, and
+            if backdrop && !drawn_any && self.blendable && op.blend.source_over_empty() {
+                // These modes reduce to Normal on a transparent backdrop, and
                 // preserve-transparency shows nothing.
                 if op.preserve_transparency {
                     continue;
@@ -318,6 +341,14 @@ impl ExecCtx<'_> {
             }
             data.mode[0] = op.blend.index();
             data.mode[1] = fl;
+            data.mode[3] = op.dissolve_seed;
+            data.target[3] = match self.depth {
+                crate::request::BitDepth::Bpc8 => 255.0,
+                crate::request::BitDepth::Bpc16 => 32768.0,
+                crate::request::BitDepth::Float32 => 0.0,
+            };
+            data.fwd_x[3] = node.rect.x0 as f32;
+            data.fwd_y[3] = node.rect.y0 as f32;
             let src_view = match op.input {
                 OpInput::Image(id) => outputs[id.index()].as_ref().map(|i| &i.view),
                 OpInput::Solid { .. } => None,
@@ -345,13 +376,17 @@ impl ExecCtx<'_> {
                         .textures(device, src_view, matte_view, dst_view, mask_view),
                 )
             };
-            let bounds = IRect::new(
-                op.bounds.x0 - node.rect.x0,
-                op.bounds.y0 - node.rect.y0,
-                op.bounds.x1 - node.rect.x0,
-                op.bounds.y1 - node.rect.y0,
-            )
-            .intersect(&IRect::from_size(tsize[0], tsize[1]));
+            let bounds = if op.blend.is_stencil() {
+                IRect::from_size(tsize[0], tsize[1])
+            } else {
+                IRect::new(
+                    op.bounds.x0 - node.rect.x0,
+                    op.bounds.y0 - node.rect.y0,
+                    op.bounds.x1 - node.rect.x0,
+                    op.bounds.y1 - node.rect.y0,
+                )
+                .intersect(&IRect::from_size(tsize[0], tsize[1]))
+            };
             if bounds.is_empty() {
                 continue;
             }

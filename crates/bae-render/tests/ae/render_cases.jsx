@@ -103,7 +103,7 @@
             if (l.scale) { layer.property("ADBE Transform Group").property("ADBE Scale").setValue(l.scale); }
             if (l.rot) { layer.property("ADBE Transform Group").property("ADBE Rotate Z").setValue(l.rot); }
             if (l.opacity !== undefined) { layer.property("ADBE Transform Group").property("ADBE Opacity").setValue(l.opacity); }
-            if (l.mode) { layer.blendingMode = BlendingMode[l.mode.toUpperCase()]; }
+            if (l.mode) { layer.blendingMode = BlendingMode[l.mode === "silhouette_alpha" ? "SILHOUETE_ALPHA" : l.mode.toUpperCase()]; }
             if (l.preserve) { layer.preserveTransparency = true; }
             if (l.masks) { addMasks(layer, l.masks); }
         }
@@ -121,6 +121,20 @@
     var written = [];
     for (var k = 0; k < spec.cases.length; k++) {
         var c = spec.cases[k];
+        if (c.hsl_grid) {
+            c.layers = [];
+            for (var row = 0; row < spec.hsl_pairs.length; row++) {
+                var pair = spec.hsl_pairs[row];
+                for (var j = 0; j < 4; j++) {
+                    for (var col = 0; col < 4; col++) {
+                        var pos = [4 * (col + 4*j) + 2, 4*row + 2];
+                        var id = "" + row + j + col;
+                        c.layers.push({name:"s"+id, solid:pair[1], size:[4,4], pos:pos, opacity:(col+1)*25, mode:c.hsl_grid});
+                        c.layers.push({name:"b"+id, solid:pair[0], size:[4,4], pos:pos, opacity:(j+1)*25});
+                    }
+                }
+            }
+        }
         var comp = build(c);
         if (!c.inner) {
             var file = new File(outDir + "/" + c.name + ".png");

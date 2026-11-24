@@ -10,9 +10,6 @@ use std::fmt;
 
 /// An AE layer blending mode (all 38 entries of AE's menu, in menu order).
 ///
-/// Every mode can be represented; which ones the GPU compositor implements is
-/// reported by [`BlendMode::is_implemented`]. Unimplemented modes render as
-/// [`BlendMode::Normal`] and are logged once per frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum BlendMode {
@@ -191,24 +188,47 @@ impl BlendMode {
         BlendMode::ALL.into_iter().find(|m| m.token() == token)
     }
 
-    /// Whether the GPU compositor implements this mode (others fall back to Normal).
+    /// Whether the GPU compositor implements this menu entry.
     pub const fn is_implemented(self) -> bool {
-        matches!(
+        true
+    }
+
+    /// The mode used by the compositor.
+    pub const fn effective(self) -> BlendMode {
+        self
+    }
+
+    pub(crate) const fn is_stencil(self) -> bool {
+        matches!(self, Self::StencilAlpha | Self::StencilLuma)
+    }
+
+    pub(crate) const fn source_over_empty(self) -> bool {
+        !matches!(
             self,
-            BlendMode::Normal
-                | BlendMode::Add
-                | BlendMode::Multiply
-                | BlendMode::Screen
-                | BlendMode::Overlay
+            Self::Dissolve
+                | Self::DancingDissolve
+                | Self::StencilAlpha
+                | Self::StencilLuma
+                | Self::SilhouetteAlpha
+                | Self::SilhouetteLuma
+                | Self::LuminescentPremul
         )
     }
 
-    /// The mode the compositor actually uses for this one.
-    pub const fn effective(self) -> BlendMode {
-        if self.is_implemented() {
-            self
-        } else {
-            BlendMode::Normal
+    /// FNV-1a over the UTF-8 layer path, independent of the target architecture.
+    pub(crate) fn dissolve_seed(self, layer: &str, comp: &crate::input::RenderComp) -> u32 {
+        match self {
+            Self::Dissolve | Self::DancingDissolve => {
+                let seed = layer.bytes().fold(2166136261u32, |hash, byte| {
+                    (hash ^ u32::from(byte)).wrapping_mul(16777619)
+                });
+                if self == Self::DancingDissolve {
+                    seed ^ comp.frame_rate.time_to_frame(comp.time) as u32
+                } else {
+                    seed
+                }
+            }
+            _ => 0,
         }
     }
 
@@ -331,6 +351,8 @@ mod tests {
     #[test]
     fn tokens_round_trip() {
         for (i, mode) in BlendMode::ALL.into_iter().enumerate() {
+            assert!(mode.is_implemented());
+            assert_eq!(mode.effective(), mode);
             assert_eq!(mode.index() as usize, i, "{mode} index matches menu order");
             assert_eq!(BlendMode::from_token(mode.token()), Some(mode));
         }
@@ -339,7 +361,6 @@ mod tests {
             Some(BlendMode::SilhouetteAlpha)
         );
         assert_eq!(BlendMode::from_token("bogus"), None);
-        assert_eq!(BlendMode::HardMix.effective(), BlendMode::Normal);
         assert_eq!(BlendMode::Screen.effective(), BlendMode::Screen);
         for m in [
             TrackMatteMode::Alpha,

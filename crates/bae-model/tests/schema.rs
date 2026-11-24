@@ -260,3 +260,36 @@ fn text_documents_animate_and_round_trip() {
         Some(Time(352_800_000))
     );
 }
+
+#[test]
+fn creating_a_text_animator_is_one_undoable_command() {
+    let reg = CommandRegistry::with_builtins();
+    let mut s = base(&reg);
+    let layer = "/comps/main/layers/title";
+    let params = json!({"layer": layer, "name": "rise"});
+    assert!(exec(&reg, &mut s, "text.create_animator", params.clone()).is_err());
+    exec(
+        &reg,
+        &mut s,
+        "attr.set",
+        json!({"path": layer, "attr":"kind", "value":Value::Enum("text".into())}),
+    )
+    .unwrap();
+    exec(&reg, &mut s, "text.create_animator", params.clone()).unwrap();
+    let folder = p(layer).child("animators").unwrap();
+    let group = folder.child("rise").unwrap();
+    let selector = group.child("range").unwrap();
+    assert!(
+        s.require_prim(&selector)
+            .unwrap()
+            .is_a(&bae_model::PrimType::TEXT_SELECTOR)
+    );
+    assert!(exec(&reg, &mut s, "text.create_animator", params).is_err());
+    let author = AuthorId::new("agent:test").unwrap();
+    s.undo(&author).unwrap();
+    assert!(!s.has_prim(&folder));
+    s.redo(&author).unwrap();
+    assert!(s.has_prim(&selector));
+    let bad = json!({"path": group,"attr": "animator:position","value":Value::Float(10.0)});
+    assert!(exec(&reg, &mut s, "attr.set", bad).is_err());
+}

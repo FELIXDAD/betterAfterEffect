@@ -50,8 +50,8 @@ const OP_CLOSE: i16 = 4;
 
 /// Side of one atlas page in texels.
 const PAGE: usize = 512;
-/// Largest glyph cached in the atlas; bigger icons fall back to the painter.
-const MAX_PX: usize = 128;
+/// Largest glyph cached in the atlas (in pixels); bigger requests draw at this size.
+const MAX_PX: usize = 256;
 /// Glyphs smaller than this many pixels get the coverage boost.
 const BOOST_BELOW_PX: usize = 14;
 
@@ -428,21 +428,17 @@ fn atlas(ctx: &Context) -> Arc<Mutex<Atlas>> {
     })
 }
 
-/// Draws `icon` centered in `rect` from its fill-path data. Returns `false` when
-/// the icon has no data or is too large for the atlas (the caller then falls back
-/// to the painter drawing).
-pub(super) fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) -> bool {
+/// Draws `icon` centered in `rect` from its fill-path data (nothing if the data
+/// is missing, which only a broken build can cause).
+pub(super) fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
     let Some(Some(data)) = table().get(icon as usize) else {
-        return false;
+        return;
     };
     let ppp = painter.pixels_per_point();
     let side = rect.width().min(rect.height());
     let px = (side * ppp).round() as usize;
     if px == 0 {
-        return true;
-    }
-    if px > MAX_PX {
-        return false;
+        return;
     }
     // Snap to the pixel grid so each texel lands on exactly one screen pixel.
     let size = px as f32 / ppp;
@@ -453,14 +449,15 @@ pub(super) fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) -
     let ctx = painter.ctx();
     let atlas = atlas(ctx);
     let Ok(mut atlas) = atlas.lock() else {
-        return false;
+        return;
     };
     let tint_alpha = f32::from(color.a()) / 255.0;
     for (i, layer) in data.layers.iter().enumerate() {
         let key = Key {
             icon: icon as u16,
             layer: i as u8,
-            px: px as u16,
+            // Huge requests reuse the largest cached raster, scaled up.
+            px: px.min(MAX_PX) as u16,
         };
         let slot = atlas.slot(ctx, key, data);
         let base = match layer.color {
@@ -477,7 +474,6 @@ pub(super) fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) -
         mesh.add_rect_with_uv(quad, slot.uv, tint);
         painter.add(Shape::mesh(mesh));
     }
-    true
 }
 
 #[cfg(test)]
@@ -488,6 +484,16 @@ mod tests {
     fn blob_parses() {
         let table = parse(blob()).expect("assets/icons/icons.bin parses");
         assert_eq!(table.len(), Icon::ALL.len());
+        let missing: Vec<_> = Icon::ALL
+            .iter()
+            .zip(&table)
+            .filter(|(_, d)| d.is_none())
+            .map(|(i, _)| *i)
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "not in assets/icons/manifest.json: {missing:?}"
+        );
     }
 
     /// Paints every icon once at `ppp` and returns the frame output.
