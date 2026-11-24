@@ -1191,7 +1191,7 @@ impl ApplicationHandler<UserEvent> for Shell {
         // Numpad keys are their own keys in AE's shortcuts (#261).
         if let WindowEvent::KeyboardInput { event: key, .. } = &event
             && let winit::keyboard::PhysicalKey::Code(code) = key.physical_key
-            && let Some(pad) = numpad::key(code)
+            && let Some(pad) = numpad::key(code, &key.logical_key)
         {
             // egui-winit sends no event for numpad `*`: the modifiers held now.
             let modifiers = view.egui_ctx.input(|i| i.modifiers);

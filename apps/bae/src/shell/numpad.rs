@@ -6,8 +6,14 @@
 
 use winit::keyboard::KeyCode;
 
-/// The key standing for a numpad key, if AE's shortcuts use it.
-pub fn key(code: KeyCode) -> Option<egui::Key> {
+/// The key standing for a numpad press, if AE's shortcuts use it. Only presses
+/// that type a character: with NumLock off (Windows) numpad 4 / 6 / 8 / 2 / 7 /
+/// 1 / 9 / 3 / 0 / . are arrows, Home, End, Page Up / Down, Insert and Delete
+/// and stay those keys.
+pub fn key(code: KeyCode, logical: &winit::keyboard::Key) -> Option<egui::Key> {
+    if !matches!(logical, winit::keyboard::Key::Character(_)) {
+        return None;
+    }
     let name = match code {
         KeyCode::NumpadMultiply => "PadMultiply",
         KeyCode::NumpadDivide => "PadSlash",
@@ -68,7 +74,8 @@ mod tests {
     /// Numpad 1 is its own key (not the main 1) and still types "1".
     #[test]
     fn numpad_presses_become_their_own_keys() {
-        let pad1 = key(KeyCode::Numpad1).unwrap();
+        let ch = |c: &str| winit::keyboard::Key::Character(c.into());
+        let pad1 = key(KeyCode::Numpad1, &ch("1")).unwrap();
         assert_eq!(bae_ui::Chord::parse("Pad1").unwrap().key, pad1);
         let mut events = vec![
             egui::Event::Key {
@@ -87,7 +94,10 @@ mod tests {
             events[1],
             egui::Event::Key { key, modifiers, .. } if key == pad1 && modifiers.alt
         ));
-        assert!(key(KeyCode::Digit1).is_none());
-        assert!(key(KeyCode::NumpadMultiply).is_some());
+        assert!(key(KeyCode::Digit1, &ch("1")).is_none());
+        assert!(key(KeyCode::NumpadMultiply, &ch("*")).is_some());
+        // NumLock off: numpad 4 is the left arrow, not Pad4.
+        let left = winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowLeft);
+        assert!(key(KeyCode::Numpad4, &left).is_none());
     }
 }
