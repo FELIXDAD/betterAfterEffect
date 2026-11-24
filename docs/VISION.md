@@ -110,3 +110,5 @@
 | M2 交接与协同 | 导入/导回 AE 工程；打包时视频裁片；Agent 通过 MCP 操作；两人以上实时协同；历史与命名版本 |
 | M3 生态 | 插件 SDK 文档与示例完善；AE 插件兼容层原型（按验证结果选定范围） |
 | M4 大一统 | 分镜（Ai 式）与剪辑工作区（Premiere / 达芬奇 / Final Cut Pro 风格前端预设）在已预留的框架上实现 |
+
+<!-- CI timing test (docs only), not for merging. -->
