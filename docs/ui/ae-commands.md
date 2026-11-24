@@ -37,8 +37,8 @@
 ## 统计
 
 - 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 103，◐ 8，☐ 212，⏸ 217，Ⓐ 30
-- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 132 条。
-- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 121 条，macOS 123 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
+- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 152 条。
+- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 141 条，macOS 143 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
 
 ## 主菜单
 
@@ -836,26 +836,26 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 
 | AE 命令 | BAE 动作 id | 参数 | Windows | macOS | 作用范围 | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
-| `CompGotoMarker0` | `motion.timeline.go_to_comp_marker` | `{"number":0}` | 0 | 0 | timeline | C | ☐ |
-| `CompGotoMarker1` | `motion.timeline.go_to_comp_marker` | `{"number":1}` | 1 | 1 | timeline | C | ☐ |
-| `CompGotoMarker2` | `motion.timeline.go_to_comp_marker` | `{"number":2}` | 2 | 2 | timeline | C | ☐ |
-| `CompGotoMarker3` | `motion.timeline.go_to_comp_marker` | `{"number":3}` | 3 | 3 | timeline | C | ☐ |
-| `CompGotoMarker4` | `motion.timeline.go_to_comp_marker` | `{"number":4}` | 4 | 4 | timeline | C | ☐ |
-| `CompGotoMarker5` | `motion.timeline.go_to_comp_marker` | `{"number":5}` | 5 | 5 | timeline | C | ☐ |
-| `CompGotoMarker6` | `motion.timeline.go_to_comp_marker` | `{"number":6}` | 6 | 6 | timeline | C | ☐ |
-| `CompGotoMarker7` | `motion.timeline.go_to_comp_marker` | `{"number":7}` | 7 | 7 | timeline | C | ☐ |
-| `CompGotoMarker8` | `motion.timeline.go_to_comp_marker` | `{"number":8}` | 8 | 8 | timeline | C | ☐ |
-| `CompGotoMarker9` | `motion.timeline.go_to_comp_marker` | `{"number":9}` | 9 | 9 | timeline | C | ☐ |
-| `CompMarker0` | `motion.timeline.set_comp_marker` | `{"number":0}` | Shift+0 | Shift+0 | timeline | C | ☐ |
-| `CompMarker1` | `motion.timeline.set_comp_marker` | `{"number":1}` | Shift+1 | Shift+1 | timeline | C | ☐ |
-| `CompMarker2` | `motion.timeline.set_comp_marker` | `{"number":2}` | Shift+2 | Shift+2 | timeline | C | ☐ |
-| `CompMarker3` | `motion.timeline.set_comp_marker` | `{"number":3}` | Shift+3 | Shift+3 | timeline | C | ☐ |
-| `CompMarker4` | `motion.timeline.set_comp_marker` | `{"number":4}` | Shift+4 | Shift+4 | timeline | C | ☐ |
-| `CompMarker5` | `motion.timeline.set_comp_marker` | `{"number":5}` | Shift+5 | Shift+5 | timeline | C | ☐ |
-| `CompMarker6` | `motion.timeline.set_comp_marker` | `{"number":6}` | Shift+6 | Shift+6 | timeline | C | ☐ |
-| `CompMarker7` | `motion.timeline.set_comp_marker` | `{"number":7}` | Shift+7 | Shift+7 | timeline | C | ☐ |
-| `CompMarker8` | `motion.timeline.set_comp_marker` | `{"number":8}` | Shift+8 | Shift+8 | timeline | C | ☐ |
-| `CompMarker9` | `motion.timeline.set_comp_marker` | `{"number":9}` | Shift+9 | Shift+9 | timeline | C | ☐ |
+| `CompGotoMarker0` | `motion.timeline.go_to_comp_marker` | `{"number":0}` | 0 | 0 | timeline | C | ✅ |
+| `CompGotoMarker1` | `motion.timeline.go_to_comp_marker` | `{"number":1}` | 1 | 1 | timeline | C | ✅ |
+| `CompGotoMarker2` | `motion.timeline.go_to_comp_marker` | `{"number":2}` | 2 | 2 | timeline | C | ✅ |
+| `CompGotoMarker3` | `motion.timeline.go_to_comp_marker` | `{"number":3}` | 3 | 3 | timeline | C | ✅ |
+| `CompGotoMarker4` | `motion.timeline.go_to_comp_marker` | `{"number":4}` | 4 | 4 | timeline | C | ✅ |
+| `CompGotoMarker5` | `motion.timeline.go_to_comp_marker` | `{"number":5}` | 5 | 5 | timeline | C | ✅ |
+| `CompGotoMarker6` | `motion.timeline.go_to_comp_marker` | `{"number":6}` | 6 | 6 | timeline | C | ✅ |
+| `CompGotoMarker7` | `motion.timeline.go_to_comp_marker` | `{"number":7}` | 7 | 7 | timeline | C | ✅ |
+| `CompGotoMarker8` | `motion.timeline.go_to_comp_marker` | `{"number":8}` | 8 | 8 | timeline | C | ✅ |
+| `CompGotoMarker9` | `motion.timeline.go_to_comp_marker` | `{"number":9}` | 9 | 9 | timeline | C | ✅ |
+| `CompMarker0` | `motion.timeline.set_comp_marker` | `{"number":0}` | Shift+0 | Shift+0 | timeline | C | ✅ |
+| `CompMarker1` | `motion.timeline.set_comp_marker` | `{"number":1}` | Shift+1 | Shift+1 | timeline | C | ✅ |
+| `CompMarker2` | `motion.timeline.set_comp_marker` | `{"number":2}` | Shift+2 | Shift+2 | timeline | C | ✅ |
+| `CompMarker3` | `motion.timeline.set_comp_marker` | `{"number":3}` | Shift+3 | Shift+3 | timeline | C | ✅ |
+| `CompMarker4` | `motion.timeline.set_comp_marker` | `{"number":4}` | Shift+4 | Shift+4 | timeline | C | ✅ |
+| `CompMarker5` | `motion.timeline.set_comp_marker` | `{"number":5}` | Shift+5 | Shift+5 | timeline | C | ✅ |
+| `CompMarker6` | `motion.timeline.set_comp_marker` | `{"number":6}` | Shift+6 | Shift+6 | timeline | C | ✅ |
+| `CompMarker7` | `motion.timeline.set_comp_marker` | `{"number":7}` | Shift+7 | Shift+7 | timeline | C | ✅ |
+| `CompMarker8` | `motion.timeline.set_comp_marker` | `{"number":8}` | Shift+8 | Shift+8 | timeline | C | ✅ |
+| `CompMarker9` | `motion.timeline.set_comp_marker` | `{"number":9}` | Shift+9 | Shift+9 | timeline | C | ✅ |
 
 ### `CCompPaintCmd`
 
