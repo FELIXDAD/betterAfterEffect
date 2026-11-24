@@ -260,6 +260,9 @@ pub(crate) fn effect_nodes(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
                 .filter(|n| n.starts_with("param:"))
                 .collect();
             params.sort_unstable();
+            let match_name = query::static_value(&v, "match_name")
+                .and_then(|m| m.as_str().map(str::to_owned))
+                .unwrap_or_default();
             Some(Node::Group {
                 id: format!("{layer}#{e}"),
                 label: group_label(stage, &e),
@@ -268,7 +271,11 @@ pub(crate) fn effect_nodes(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
                     .map(|a| Node::Prop {
                         path: e.clone(),
                         attr: a.to_owned(),
-                        label: format!("{} {}", tr("Param"), a.trim_start_matches("param:")),
+                        label: bae_model::effect::param_id(a)
+                            .and_then(|id| crate::effects::param_label_of(&match_name, id))
+                            .unwrap_or_else(|| {
+                                format!("{} {}", tr("Param"), a.trim_start_matches("param:"))
+                            }),
                     })
                     .collect(),
             })

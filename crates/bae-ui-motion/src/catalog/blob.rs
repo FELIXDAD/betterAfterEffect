@@ -7,8 +7,9 @@
 //! a test fails while it is stale.
 //!
 //! Text format, one entry per line, fields separated by tabs:
-//! `@menu <title>` / `@app` / `@categories` / `@zh` / `@keys` / `@mackeys` start
-//! a section; a key is `context command keys action params owner status flags`, a
+//! `@menu <title>` / `@app` / `@categories` / `@zh` / `@keys` / `@mackeys` /
+//! `@effects` start a section; an effect is `category-index matchName name
+//! chinese-name`; a key is `context command keys action params owner status flags`, a
 //! macOS exception `context command keys`; in a menu,
 //! `I depth ae title action params owner status platform sorted` is an item,
 //! `S depth title platform` a submenu (its entries follow one level deeper),
@@ -17,7 +18,7 @@
 use std::io::Read as _;
 use std::sync::OnceLock;
 
-use super::{Item, Key, Node, Owner, Platform, Status, Submenu};
+use super::{AeEffect, Item, Key, Node, Owner, Platform, Status, Submenu};
 
 const BLOB: &[u8] = include_bytes!("catalog.bin");
 
@@ -29,6 +30,7 @@ pub(super) struct Tables {
     pub zh: &'static [(&'static str, &'static str)],
     pub keys: &'static [Key],
     pub mac_keys: &'static [(&'static str, &'static str, &'static str)],
+    pub effects: &'static [AeEffect],
 }
 
 pub(super) fn tables() -> &'static Tables {
@@ -114,6 +116,7 @@ fn decode(text: &'static str) -> Tables {
     let mut zh: Vec<(&'static str, &'static str)> = Vec::new();
     let mut keys: Vec<Key> = Vec::new();
     let mut mac_keys: Vec<(&'static str, &'static str, &'static str)> = Vec::new();
+    let mut effects: Vec<AeEffect> = Vec::new();
     #[derive(PartialEq)]
     enum Section {
         Menu(&'static str),
@@ -122,6 +125,7 @@ fn decode(text: &'static str) -> Tables {
         Zh,
         Keys,
         MacKeys,
+        Effects,
     }
     let mut section: Option<Section> = None;
     let mut frames = Frames::new();
@@ -142,6 +146,7 @@ fn decode(text: &'static str) -> Tables {
                 _ if head == "categories" => Section::Categories,
                 _ if head == "keys" => Section::Keys,
                 _ if head == "mackeys" => Section::MacKeys,
+                _ if head == "effects" => Section::Effects,
                 _ => Section::Zh,
             });
             continue;
@@ -167,6 +172,15 @@ fn decode(text: &'static str) -> Tables {
                         flags: f[7].parse().unwrap_or(0),
                     });
                 }
+            }
+            Some(Section::Effects) => {
+                let f: Vec<&'static str> = line.split('\t').collect();
+                effects.push(AeEffect {
+                    category: categories[f[0].parse::<usize>().unwrap_or(0)],
+                    match_name: f[1],
+                    name: f[2],
+                    name_zh: f[3],
+                });
             }
             Some(Section::MacKeys) => {
                 let f: Vec<&'static str> = line.split('\t').collect();
@@ -209,6 +223,7 @@ fn decode(text: &'static str) -> Tables {
         zh: leak(zh),
         keys: leak(keys),
         mac_keys: leak(mac_keys),
+        effects: leak(effects),
     }
 }
 
@@ -221,6 +236,7 @@ pub(super) fn encode(
     zh: &[(&str, &str)],
     keys: &[Key],
     mac_keys: &[(&str, &str, &str)],
+    effects: &[AeEffect],
 ) -> String {
     use std::fmt::Write as _;
     fn field(s: &str) -> &str {
@@ -300,6 +316,20 @@ pub(super) fn encode(
     for (ctx, cmd, keys) in mac_keys {
         let _ = writeln!(out, "{}\t{}\t{}", field(ctx), field(cmd), field(keys));
     }
+    out.push_str("@effects\n");
+    for e in effects {
+        let category = categories
+            .iter()
+            .position(|c| *c == e.category)
+            .expect("effect category is listed");
+        let _ = writeln!(
+            out,
+            "{category}\t{}\t{}\t{}",
+            field(e.match_name),
+            field(e.name),
+            field(e.name_zh)
+        );
+    }
     out
 }
 
@@ -314,6 +344,7 @@ fn catalog_bin_is_up_to_date() {
         MENU_ZH,
         KEYS,
         MAC_KEYS,
+        &super::source_effects(),
     );
     if std::env::var_os("BAE_UPDATE_DOCS").is_some() {
         use std::io::Write as _;
@@ -340,7 +371,8 @@ fn catalog_bin_is_up_to_date() {
             t.effect_categories,
             t.zh,
             t.keys,
-            t.mac_keys
+            t.mac_keys,
+            t.effects
         ),
         want
     );

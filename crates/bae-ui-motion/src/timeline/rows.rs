@@ -211,6 +211,10 @@ impl TimelinePanel {
                     if resp.clicked() {
                         select_layer(session, stage, layer, ui.input(|i| i.modifiers));
                     }
+                    // An effect dragged from Effects & Presets onto the layer.
+                    if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>() {
+                        crate::effects::apply(cx, std::slice::from_ref(layer), &fx.0);
+                    }
                     let locked = query::is_locked(stage, layer);
                     if resp.double_clicked() && !locked {
                         self.rename = Some((layer.clone(), name.clone()));
@@ -250,6 +254,20 @@ impl TimelinePanel {
                     let on = bool_attr(stage, layer, attr);
                     if switch(ui, sw(i), on, icon, rid(attr), &layer_ctx) {
                         cx.invoke_with("attr.set", json!({"path": layer, "attr": attr, "value": {"type": "bool", "value": !on}}));
+                    }
+                }
+                // Effect switch (fx): only on layers with effects, like AE.
+                if !bae_motion::effect::effects_of(stage, layer).is_empty() {
+                    let on = stage
+                        .prim(layer)
+                        .and_then(|v| query::static_value(&v, "effects_enabled"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+                    if switch(ui, sw(3), on, Icon::Fx, rid("effects_enabled"), &layer_ctx) {
+                        cx.invoke_with(
+                            "layer.set_attr",
+                            json!({"layers": [layer], "attr": "effects_enabled", "value": {"type": "bool", "value": !on}}),
+                        );
                     }
                 }
                 let draft = stage

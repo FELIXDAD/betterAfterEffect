@@ -106,6 +106,7 @@ pub const SWITCHES: &[(&str, &str)] = &[
     ("locked", "Lock"),
     ("audio_enabled", "Audio"),
     ("enabled", "Video"),
+    ("effects_enabled", "Effect"),
     ("solo", "Solo"),
     ("collapse_transformation", "Collapse"),
     ("motion_blur", "Motion Blur"),

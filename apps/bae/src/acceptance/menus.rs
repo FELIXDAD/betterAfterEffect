@@ -159,10 +159,10 @@ fn menu_enabled_state_follows_the_selection() {
     let mut h = gui();
     // Window items of implemented panels open them: always enabled (checked
     // below), not part of what the selection changes. Panels that are only
-    // placeholders so far (Effects & Presets, Info) are greyed, like every AE
+    // placeholders so far (Info) are greyed, like every AE
     // item whose command does not run yet.
     let window = |i: &MenuItemView| i.path.first().is_some_and(|p| p == "Window");
-    let placeholder = ["shell.window.effects", "shell.window.info"];
+    let placeholder = ["shell.window.info"];
     let ae_item = |i: &MenuItemView| AE_ITEMS.iter().any(|(id, ..)| *id == i.id);
     for i in h
         .state()
