@@ -36,6 +36,16 @@
 //! texels of that space. Layer-op transforms stay in full-resolution pixels; the
 //! executor combines them with the actual images' scale and placement.
 //!
+//! **3D layers and motion blur.** The stack is split into 3D groups
+//! ([`crate::three_d::segments`], AE-CMP-406); the layers of a group are drawn
+//! in the camera's depth order, cut at intersections
+//! ([`crate::three_d::depth_order`]). A 3D layer's op carries its homography
+//! through the camera ([`LayerOp::projection`]); bounds and ROI come from the
+//! part of the layer in front of the near plane that lands in the canvas. A
+//! motion-blurred layer's op carries its placement at every sample
+//! ([`LayerOp::motion`]; 2D layers get AE's adaptive count): its bounds are the
+//! union over the shutter, its content is rendered once.
+//!
 //! **Cache keys.** Each node carries `key`, a hash of (prim, time, every parameter
 //! that affects its pixels, rect, scale) – the `(Prim, time, parameter hash)` key
 //! of ARCHITECTURE §5. Identical subgraphs within a frame are shared.
@@ -44,10 +54,11 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use bae_model::{PrimPath, Time};
-use glam::DAffine2;
+use glam::{DAffine2, DVec2};
 use rustc_hash::{FxHashMap, FxHasher};
 
 use crate::blend::{BlendMode, TrackMatteMode};
+use crate::camera::NEAR;
 use crate::effect::{Effect, EffectLibrary, EffectParams};
 use crate::error::RenderError;
 use crate::geom::{IRect, Rect, is_invertible, scale_affine};
@@ -58,6 +69,8 @@ use crate::mask::MaskStack;
 pub use crate::mask::{Expansion, MaskEdge, MaskNode, MaskRaster};
 use crate::request::RenderRequest;
 use crate::source::{LayerSource, SourceRequest};
+pub use crate::three_d::Homography;
+use crate::three_d::{Plate, Segment, depth_order, points_bounds};
 
 /// Maximum nesting of comps (and of mattes of mattes).
 pub const MAX_DEPTH: usize = 64;
@@ -182,7 +195,12 @@ impl NodeKind {
                     }
                 }
             }
-            NodeKind::Effect(e) => f(e.input),
+            NodeKind::Effect(e) => {
+                f(e.input);
+                for (_, node) in &e.layers {
+                    f(*node);
+                }
+            }
             NodeKind::Mix(m) => {
                 f(m.base);
                 f(m.over);
@@ -220,7 +238,7 @@ pub struct CompositeNode {
 
 /// One layer drawn into a composite: transform, opacity, matte and blend fused
 /// into a single GPU draw.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LayerOp {
     /// The layer.
     pub layer: PrimPath,
@@ -244,6 +262,15 @@ pub struct LayerOp {
     pub bounds: IRect,
     /// The layer's content bounds in input-space pixels (anti-aliased edges).
     pub content: Rect,
+    /// 3D layers: input space pixels → composite space pixels as a homography
+    /// through the camera (`transform` then only approximates it).
+    pub projection: Option<Homography>,
+    /// Motion blur: input space pixels → composite space pixels at every
+    /// sample; the draw averages the layer over them.
+    pub motion: Option<Arc<[Homography]>>,
+    /// Pieces of 3D layers cut at intersections: half-planes `a·x + b·y + c ≥ 0`
+    /// in input space pixels.
+    pub clips: Vec<[f64; 3]>,
 }
 
 /// The pixels of a layer op.
@@ -318,6 +345,8 @@ pub struct EffectNode {
     pub frame: EffectFrame,
     /// Input node.
     pub input: NodeId,
+    /// Source-stage inputs keyed by the referenced layer.
+    pub layers: Vec<(PrimPath, NodeId)>,
 }
 
 /// The frame context of an effect call, stored per effect node (everything in
@@ -326,6 +355,8 @@ pub struct EffectNode {
 pub struct EffectFrame {
     /// Layer time.
     pub time: Time,
+    /// Comp time.
+    pub comp_time: Time,
     /// Resolution scale.
     pub scale: f64,
     /// Layer content bounds (layer pixels, full resolution, before effects).
@@ -349,6 +380,7 @@ impl EffectFrame {
     pub fn params<'a>(&self, instance: &'a RenderEffect) -> EffectParams<'a> {
         EffectParams {
             time: self.time,
+            comp_time: self.comp_time,
             scale: self.scale,
             layer_bounds: self.layer_bounds,
             frame_rate: self.frame_rate,
@@ -507,12 +539,17 @@ impl Builder<'_> {
         }
         let mut ops = Vec::new();
         if !rect.is_empty() {
-            // AE draws from the bottom of the stack (highest index) to the top.
-            for index in (0..comp.layers.len()).rev() {
+            // AE draws from the bottom of the stack (highest index) to the top;
+            // contiguous 3D layers form groups drawn in depth order.
+            for segment in crate::three_d::segments(&comp.layers) {
+                let index = match segment {
+                    Segment::Group(indices) => {
+                        self.group_3d(comp, &indices, rect, scale, depth, &mut ops)?;
+                        continue;
+                    }
+                    Segment::Layer(index) => index,
+                };
                 let layer = &comp.layers[index];
-                if !layer.visible || !layer.active {
-                    continue;
-                }
                 if layer.adjustment {
                     ops = self.adjustment(comp, index, rect, scale, depth, ops)?;
                     continue;
@@ -548,6 +585,54 @@ impl Builder<'_> {
         }))
     }
 
+    /// Plans the 3D group `indices` (bottom first) of `comp` into `ops`: every
+    /// layer seen through the camera, drawn back to front in depth order and cut
+    /// where layers intersect (AE-CMP-404/405). Coplanar layers keep the stacking
+    /// order.
+    fn group_3d(
+        &mut self,
+        comp: &RenderComp,
+        indices: &[usize],
+        canvas: IRect,
+        scale: f64,
+        depth: usize,
+        ops: &mut Vec<LayerOp>,
+    ) -> Result<(), RenderError> {
+        let mut planned: Vec<(usize, LayerOp)> = Vec::with_capacity(indices.len());
+        for &index in indices {
+            let layer = &comp.layers[index];
+            let mut visiting = vec![index];
+            match self.layer_op(comp, index, canvas, scale, depth, &mut visiting)? {
+                Some(op) => planned.push((index, op)),
+                None if layer.blend_mode.is_stencil()
+                    && !matches!(layer.content, LayerContent::None) =>
+                {
+                    ops.clear();
+                    planned.clear();
+                }
+                None => {}
+            }
+        }
+        if planned.len() <= 1 {
+            ops.extend(planned.into_iter().map(|(_, op)| op));
+            return Ok(());
+        }
+        let plates: Vec<Plate> = planned
+            .iter()
+            .map(|(index, op)| Plate {
+                matrix: comp.layers[*index].matrix_3d.unwrap_or_default(),
+                rect: op.content,
+            })
+            .collect();
+        let eye = comp.view_camera().position();
+        for fragment in depth_order(&plates, eye) {
+            let mut op = planned[fragment.item].1.clone();
+            op.clips = fragment.clips;
+            ops.push(op);
+        }
+        Ok(())
+    }
+
     /// Plans layer `index` of `comp` drawn into a composite covering `canvas`.
     /// `None` when nothing of it is visible there.
     fn layer_op(
@@ -560,7 +645,8 @@ impl Builder<'_> {
         visiting: &mut Vec<usize>,
     ) -> Result<Option<LayerOp>, RenderError> {
         let layer = &comp.layers[index];
-        if layer.opacity <= 0.0 || !is_invertible(&layer.transform) {
+        let flat = layer.matrix_3d.is_none() && layer.motion_samples.is_empty();
+        if layer.opacity <= 0.0 || (flat && !is_invertible(&layer.transform)) {
             return Ok(None);
         }
         let Some(content) = self.plan_content(layer, layer.time)? else {
@@ -571,10 +657,22 @@ impl Builder<'_> {
             Content::Source(src, _) => src.bounds().to_rect(),
             Content::Comp(c) => c.rect(),
         };
+        let placement = placement(comp, layer, &content_rect, scale);
+        if let Placement::General {
+            frame,
+            motion: None,
+            ..
+        } = &placement
+            && !frame.is_invertible()
+        {
+            // Seen exactly edge-on.
+            return Ok(None);
+        }
         // Effects: bounds forward (in layer texel units).
         let effects = self.plan_effects(layer);
         let frame = EffectFrame {
             time: layer.time,
+            comp_time: comp.time,
             scale: 1.0 / scale,
             layer_bounds: content_rect.round_out(),
             frame_rate: comp.frame_rate,
@@ -611,15 +709,53 @@ impl Builder<'_> {
         }
         // Destination bounds in composite units, grown by the edge ramp: one
         // target texel, or one layer texel when the layer is magnified.
-        let to_units = scale_affine(1.0 / scale) * layer.transform * scale_affine(scale);
-        let magnification = crate::geom::axis_scales(&to_units).max_element();
-        let margin = 1 + (magnification.min(1e4) / 2.0).ceil() as i32;
-        let bounds = layer_bounds
-            .to_rect()
-            .transformed_bounds(&to_units)
-            .round_out()
-            .inflate(margin)
-            .intersect(&canvas);
+        let (bounds, general_roi, magnification) = match &placement {
+            Placement::Affine(t) => {
+                let to_units = scale_affine(1.0 / scale) * *t * scale_affine(scale);
+                let magnification = crate::geom::axis_scales(&to_units).max_element();
+                let margin = 1 + (magnification.min(1e4) / 2.0).ceil() as i32;
+                let bounds = layer_bounds
+                    .to_rect()
+                    .transformed_bounds(&to_units)
+                    .round_out()
+                    .inflate(margin)
+                    .intersect(&canvas);
+                (bounds, None, magnification)
+            }
+            Placement::General {
+                frame,
+                motion,
+                three_d,
+            } => {
+                // The part of the layer in front of the camera that lands in
+                // the canvas, over every placement.
+                let near = if *three_d { NEAR } else { 0.0 };
+                let maps = motion.as_deref().unwrap_or(std::slice::from_ref(frame));
+                let (lb, cr) = (layer_bounds.to_rect(), canvas.to_rect());
+                let (mut dst, mut src, mut mag) = (None::<Rect>, None::<Rect>, 0.0f64);
+                for h in maps {
+                    let hu = h
+                        .followed_by(&scale_affine(1.0 / scale))
+                        .preceded_by(&scale_affine(scale));
+                    let poly = hu.visible(&lb, &cr, near);
+                    if poly.len() < 3 {
+                        continue;
+                    }
+                    dst = Some(rect_union(dst, hu.image_bounds(&poly)));
+                    src = Some(rect_union(src, points_bounds(&poly)));
+                    mag = mag.max(hu.max_scale(&poly));
+                }
+                let (Some(dst), Some(src)) = (dst, src) else {
+                    return Ok(None);
+                };
+                let margin = 1 + (mag.min(1e4) / 2.0).ceil() as i32;
+                (
+                    dst.round_out().inflate(margin).intersect(&canvas),
+                    Some(src.round_out().inflate(1).intersect(&layer_bounds)),
+                    mag,
+                )
+            }
+        };
         if bounds.is_empty() {
             return Ok(None);
         }
@@ -639,21 +775,45 @@ impl Builder<'_> {
 
         // Content ROI: the destination bounds mapped back into layer units, +1
         // texel for the bilinear footprint, then backwards through the effects.
-        let mut roi = bounds
-            .to_rect()
-            .transformed_bounds(&to_units.inverse())
-            .round_out()
-            .inflate(1)
-            .intersect(&layer_bounds);
+        let mut roi = match (general_roi, &placement) {
+            (Some(roi), _) => roi,
+            (None, Placement::Affine(t)) => {
+                let to_units = scale_affine(1.0 / scale) * *t * scale_affine(scale);
+                bounds
+                    .to_rect()
+                    .transformed_bounds(&to_units.inverse())
+                    .round_out()
+                    .inflate(1)
+                    .intersect(&layer_bounds)
+            }
+            (None, Placement::General { .. }) => unreachable!("general placements plan their ROI"),
+        };
+        if roi.is_empty() {
+            return Ok(None);
+        }
+        let mut rois = vec![roi; effects.len() + 1];
         for (i, (effect, instance)) in effects.iter().enumerate().rev() {
             let params = frame.params(instance);
             roi = effect.input_roi(&params, roi).intersect(&bounds_chain[i]);
+            rois[i] = roi;
         }
 
         let has_effects = !effects.is_empty();
+        let roi_px = Rect::new(
+            f64::from(roi.x0) * scale,
+            f64::from(roi.y0) * scale,
+            f64::from(roi.x1) * scale,
+            f64::from(roi.y1) * scale,
+        )
+        .round_out();
+        // Texels per layer pixel the content should be rendered at.
+        let density = match &placement {
+            Placement::Affine(t) => source_density(t, scale, roi_px),
+            Placement::General { .. } => clamp_density(magnification / scale, scale, roi_px),
+        };
         let mask = masks
             .as_ref()
-            .map(|stack| self.mask(layer, stack, roi, scale, has_effects, content_rect));
+            .map(|stack| self.mask(layer, stack, roi, scale, has_effects, content_rect, density));
 
         let mut input = match content {
             Content::Solid { color, rect } => OpInput::Solid { color, rect },
@@ -676,14 +836,6 @@ impl Builder<'_> {
                 }))
             }
             Content::Source(source, time) => {
-                let roi_px = Rect::new(
-                    f64::from(roi.x0) * scale,
-                    f64::from(roi.y0) * scale,
-                    f64::from(roi.x1) * scale,
-                    f64::from(roi.y1) * scale,
-                )
-                .round_out();
-                let density = source_density(&layer.transform, scale, roi_px);
                 let mut h = FxHasher::default();
                 "source".hash(&mut h);
                 layer.path.hash(&mut h);
@@ -722,7 +874,7 @@ impl Builder<'_> {
             let OpInput::Image(input_id) = input else {
                 unreachable!("solids with effects are planned as fills")
             };
-            let rect = bounds_chain[i + 1];
+            let rect = rois[i + 1];
             let mut h = FxHasher::default();
             "effect".hash(&mut h);
             self.nodes[input_id.index()].key.hash(&mut h);
@@ -734,6 +886,14 @@ impl Builder<'_> {
                 crate::input::hash_value(value, &mut h);
             }
             rect.hash(&mut h);
+            let layers = self.effect_inputs(
+                comp,
+                &*effect,
+                &frame.params(&instance),
+                scale,
+                depth,
+                &mut h,
+            )?;
             input = OpInput::Image(self.push(Node {
                 kind: NodeKind::Effect(EffectNode {
                     layer: layer.path.clone(),
@@ -741,6 +901,7 @@ impl Builder<'_> {
                     instance,
                     frame,
                     input: input_id,
+                    layers,
                 }),
                 rect,
                 pixel_scale: scale,
@@ -749,10 +910,22 @@ impl Builder<'_> {
             }));
         }
 
+        let (transform, projection, motion) = match placement {
+            Placement::Affine(t) => (t, None, None),
+            Placement::General {
+                frame,
+                motion,
+                three_d,
+            } => (
+                layer.transform,
+                three_d.then_some(frame),
+                motion.map(Arc::from),
+            ),
+        };
         Ok(Some(LayerOp {
             layer: layer.path.clone(),
             input,
-            transform: layer.transform,
+            transform,
             opacity: layer.opacity.clamp(0.0, 1.0),
             blend: layer.blend_mode,
             dissolve_seed: layer.blend_mode.dissolve_seed(layer.path.as_str(), comp),
@@ -761,6 +934,9 @@ impl Builder<'_> {
             mask: op_mask,
             bounds,
             content: content_px,
+            projection,
+            motion,
+            clips: Vec::new(),
         }))
     }
 
@@ -768,6 +944,7 @@ impl Builder<'_> {
     /// `scale`). With effects the mask is computed at the effects' resolution;
     /// otherwise at the layer's density on screen, so mask edges stay sharp when
     /// the layer is scaled up (and cheap when it is scaled down).
+    #[allow(clippy::too_many_arguments)]
     fn mask(
         &mut self,
         layer: &RenderLayer,
@@ -776,6 +953,7 @@ impl Builder<'_> {
         scale: f64,
         has_effects: bool,
         content: Rect,
+        density: f64,
     ) -> MaskRef {
         let roi_px = Rect::new(
             f64::from(roi.x0) * scale,
@@ -789,7 +967,6 @@ impl Builder<'_> {
         } else {
             // Whole texels per layer pixel (or layer pixels per texel), so mask
             // texel edges fall on the layer's pixel grid.
-            let density = source_density(&layer.transform, scale, roi_px);
             if density >= 1.0 {
                 1.0 / (density - 1e-6).ceil()
             } else {
@@ -861,6 +1038,9 @@ impl Builder<'_> {
             mask: Some(mask),
             bounds: roi,
             content,
+            projection: None,
+            motion: None,
+            clips: Vec::new(),
         };
         OpInput::Image(self.push(Node {
             kind: NodeKind::Composite(CompositeNode {
@@ -922,6 +1102,10 @@ impl Builder<'_> {
         }
         matte_layer.opacity.to_bits().hash(&mut h);
         matte_layer.track_matte.hash(&mut h);
+        if let Some(m) = &matte_layer.matrix_3d {
+            m.to_cols_array().map(f64::to_bits).hash(&mut h);
+        }
+        matte_layer.motion_samples.len().hash(&mut h);
         rect.hash(&mut h);
         scale.to_bits().hash(&mut h);
         Ok(Some(self.push(Node {
@@ -990,6 +1174,7 @@ impl Builder<'_> {
         let domain = units(&comp_px, scale);
         let frame = EffectFrame {
             time: layer.time,
+            comp_time: comp.time,
             scale: 1.0 / scale,
             layer_bounds: comp_px.round_out(),
             frame_rate: comp.frame_rate,
@@ -1042,6 +1227,14 @@ impl Builder<'_> {
                 crate::input::hash_value(value, &mut h);
             }
             rect.hash(&mut h);
+            let layers = self.effect_inputs(
+                comp,
+                &*effect,
+                &frame.params(&instance),
+                scale,
+                depth,
+                &mut h,
+            )?;
             over = self.push(Node {
                 kind: NodeKind::Effect(EffectNode {
                     layer: layer.path.clone(),
@@ -1049,6 +1242,7 @@ impl Builder<'_> {
                     instance,
                     frame,
                     input: over,
+                    layers,
                 }),
                 rect,
                 pixel_scale: scale,
@@ -1116,7 +1310,89 @@ impl Builder<'_> {
             mask: None,
             bounds: canvas,
             content: canvas_px,
+            projection: None,
+            motion: None,
+            clips: Vec::new(),
         }])
+    }
+
+    /// Plan source-stage checkouts at the evaluated frame time. A source
+    /// checkout bypasses the comp's layer visibility, transforms and effects.
+    fn effect_inputs(
+        &mut self,
+        comp: &RenderComp,
+        effect: &dyn Effect,
+        params: &EffectParams<'_>,
+        scale: f64,
+        depth: usize,
+        hash: &mut FxHasher,
+    ) -> Result<Vec<(PrimPath, NodeId)>, RenderError> {
+        let mut inputs = Vec::new();
+        for dep in effect.layer_dependencies(params) {
+            if dep.time != comp.time {
+                self.warn(format!(
+                    "{}: off-frame effect inputs are unavailable",
+                    dep.layer
+                ));
+                continue;
+            }
+            let Some(layer) = comp.layers.iter().find(|layer| layer.path == dep.layer) else {
+                continue;
+            };
+            let Some(content) = self.plan_content(layer, layer.time)? else {
+                continue;
+            };
+            let node = match content {
+                Content::Solid { color, rect } | Content::Fill { color, rect } => {
+                    let roi = units(&rect, scale);
+                    self.push(Node {
+                        kind: NodeKind::Fill(FillNode { color, rect }),
+                        rect: roi,
+                        pixel_scale: scale,
+                        key: hash_of(&(
+                            "fill",
+                            color.map(f32::to_bits),
+                            rect_bits(&rect),
+                            roi,
+                            scale.to_bits(),
+                        )),
+                        cacheable: false,
+                    })
+                }
+                Content::Source(source, time) => {
+                    let roi = source.bounds();
+                    let request = SourceRequest {
+                        roi,
+                        scale: 1.0 / scale,
+                        time,
+                    };
+                    self.push(Node {
+                        rect: units(&roi.to_rect(), scale),
+                        kind: NodeKind::Source(SourceNode {
+                            layer: layer.path.clone(),
+                            request,
+                            source: source.clone(),
+                        }),
+                        pixel_scale: scale,
+                        key: hash_of(&(
+                            "effect source",
+                            &layer.path,
+                            source.content_hash(time),
+                            roi,
+                            scale.to_bits(),
+                        )),
+                        cacheable: false,
+                    })
+                }
+                Content::Comp(comp) => {
+                    self.composite(&comp, units(&comp.rect(), scale), scale, depth + 1, true)?
+                }
+            };
+            dep.layer.hash(hash);
+            self.nodes[node.index()].key.hash(hash);
+            inputs.push((dep.layer, node));
+        }
+        Ok(inputs)
     }
 
     fn plan_content(
@@ -1125,10 +1401,13 @@ impl Builder<'_> {
         time: Time,
     ) -> Result<Option<Content>, RenderError> {
         let has_effects = self.skip_effects_of.as_ref() != Some(&layer.path)
-            && layer
-                .effects
-                .iter()
-                .any(|e| e.enabled && self.effects.get(&e.effect).is_some());
+            && layer.effects.iter().any(|e| {
+                e.enabled
+                    && self
+                        .effects
+                        .get(&e.effect)
+                        .is_some_and(|fx| fx.renders_pixels())
+            });
         Ok(match &layer.content {
             LayerContent::None => None,
             LayerContent::Solid {
@@ -1189,7 +1468,10 @@ impl Builder<'_> {
         }
         for instance in layer.effects.iter().filter(|e| e.enabled) {
             match self.effects.get(&instance.effect) {
-                Some(effect) => out.push((effect.clone(), instance.clone())),
+                Some(effect) if effect.renders_pixels() => {
+                    out.push((effect.clone(), instance.clone()))
+                }
+                Some(_) => {}
                 None => self.warn(format!(
                     "{}: effect `{}` is not available, skipped",
                     layer.path, instance.effect
@@ -1208,7 +1490,14 @@ fn covers(op: &LayerOp, canvas: IRect, scale: f64) -> bool {
     let OpInput::Solid { color, rect } = &op.input else {
         return false;
     };
-    if color[3] < 1.0 || op.opacity < 1.0 || op.mask.is_some() || op.matte.is_some() {
+    if color[3] < 1.0
+        || op.opacity < 1.0
+        || op.mask.is_some()
+        || op.matte.is_some()
+        || op.projection.is_some()
+        || op.motion.is_some()
+        || !op.clips.is_empty()
+    {
         return false;
     }
     let t = op.transform;
@@ -1229,13 +1518,110 @@ fn covers(op: &LayerOp, canvas: IRect, scale: f64) -> bool {
 /// Clamped to [1/64, 16] and to the GPU texture limit for `roi`.
 pub fn source_density(transform: &DAffine2, resolution_scale: f64, roi: IRect) -> f64 {
     let to_texels = scale_affine(1.0 / resolution_scale) * *transform;
-    let mut density = crate::geom::axis_scales(&to_texels).max_element();
+    clamp_density(
+        crate::geom::axis_scales(&to_texels).max_element(),
+        resolution_scale,
+        roi,
+    )
+}
+
+/// `density` (texels per layer pixel) made usable: finite, within [1/64, 16]
+/// and within the GPU texture limit for `roi` (layer pixels).
+fn clamp_density(mut density: f64, resolution_scale: f64, roi: IRect) -> f64 {
     if !density.is_finite() || density <= 0.0 {
         density = 1.0 / resolution_scale;
     }
     density = density.clamp(1.0 / 64.0, 16.0);
     let largest = f64::from(roi.width().max(roi.height()).max(1));
     density.min(8192.0 / largest)
+}
+
+/// How a layer lands in its composite (comp pixels).
+enum Placement {
+    /// One affine map: 2D layers, and 3D layers facing the camera squarely.
+    Affine(DAffine2),
+    /// Through the camera (`three_d`) and/or at several motion-blur samples.
+    General {
+        /// The placement at the frame time.
+        frame: Homography,
+        /// The placements at the shutter samples (the draw averages them).
+        motion: Option<Vec<Homography>>,
+        /// Seen through the camera: clipped at the near plane.
+        three_d: bool,
+    },
+}
+
+/// The placement of `layer` (content `content`, layer pixels) in `comp` at
+/// resolution `scale`: through the camera for 3D layers, and at every
+/// motion-blur sample unless the layer does not move during the shutter.
+fn placement(comp: &RenderComp, layer: &RenderLayer, content: &Rect, scale: f64) -> Placement {
+    let size = DVec2::new(f64::from(comp.width), f64::from(comp.height));
+    if let Some(m) = layer.matrix_3d {
+        let frame = Homography(comp.view_camera().plane_homography(&m, size));
+        let motion = (!layer.motion_samples.is_empty())
+            .then(|| {
+                layer
+                    .motion_samples
+                    .iter()
+                    .enumerate()
+                    .map(|(k, s)| {
+                        let m = s.matrix_3d.unwrap_or(m);
+                        Homography(comp.sample_camera(k).plane_homography(&m, size))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .filter(|hs| !all_equal(hs));
+        // A plane facing the camera squarely projects affinely: draw it like a
+        // 2D layer (pixel-identical to 2D at z = 0 through the default camera).
+        if motion.is_none()
+            && frame.0.row(2).z >= NEAR
+            && let Some(a) = frame.as_affine()
+        {
+            return Placement::Affine(a);
+        }
+        return Placement::General {
+            frame,
+            motion,
+            three_d: true,
+        };
+    }
+    if layer.motion_samples.len() > 1 && !crate::motion::is_static(&layer.motion_samples) {
+        let transforms: Vec<DAffine2> = layer.motion_samples.iter().map(|s| s.transform).collect();
+        let limit = comp.motion_blur.as_ref().map_or(128, |m| m.adaptive_limit);
+        let dense = crate::motion::adaptive_samples(&transforms, content, limit, scale);
+        return Placement::General {
+            frame: Homography::from_affine(&layer.transform),
+            motion: Some(dense.iter().map(Homography::from_affine).collect()),
+            three_d: false,
+        };
+    }
+    Placement::Affine(layer.transform)
+}
+
+/// Whether every homography of `hs` is the same map.
+fn all_equal(hs: &[Homography]) -> bool {
+    let Some(first) = hs.first() else {
+        return true;
+    };
+    let norm = first
+        .0
+        .to_cols_array()
+        .iter()
+        .fold(0.0f64, |a, v| a.max(v.abs()));
+    hs.iter()
+        .all(|h| h.0.abs_diff_eq(first.0, 1e-12 * norm.max(1.0)))
+}
+
+fn rect_union(a: Option<Rect>, b: Rect) -> Rect {
+    match a {
+        None => b,
+        Some(a) => Rect::new(
+            a.x0.min(b.x0),
+            a.y0.min(b.y0),
+            a.x1.max(b.x1),
+            a.y1.max(b.y1),
+        ),
+    }
 }
 
 fn rect_bits(r: &Rect) -> [u64; 4] {

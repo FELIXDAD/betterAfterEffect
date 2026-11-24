@@ -144,6 +144,26 @@ fn levels_then_exposure(fx: &mut Fx, layer: &PrimPath) -> (PrimPath, PrimPath) {
 }
 
 #[test]
+fn distort_point_defaults_use_the_source_on_apply_and_reset() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let layer = fx.solid(&comp, [0.5; 3], [31, 13]);
+    for (effect_name, id, expected) in [
+        ("ADBE Mirror", 1, [31., 6.5]),
+        ("ADBE Corner Pin", 4, [31., 13.]),
+        ("ADBE Geometry2", 2, [15.5, 6.5]),
+    ] {
+        let effect = fx.apply(&layer, effect_name);
+        let prop = format!("param:{id:04}");
+        let point = |fx: &Fx| fx.stage.prim(&effect).unwrap().value(&prop).cloned();
+        assert_eq!(point(&fx), Some(bae_model::Value::Vec2(expected)));
+        fx.param(&effect, id, json!({"type": "vec2", "value": [4., 5.]}));
+        fx.run("effect.reset", json!({"effects": [effect]}));
+        assert_eq!(point(&fx), Some(bae_model::Value::Vec2(expected)));
+    }
+}
+
+#[test]
 fn effects_render_top_to_bottom() {
     let mut fx = Fx::new();
     let comp = fx.comp();
@@ -438,4 +458,18 @@ fn effects_and_fx_switch_survive_save_and_reopen() {
     let ec = bae_anim::evaluate_comp(stage, &comp, Time::ZERO).unwrap();
     let l = ec.layers.iter().find(|l| l.path == other).unwrap();
     assert!(l.switches.effects, "missing attribute reads as on");
+}
+
+#[test]
+fn radial_blur_center_follows_source_dimensions_on_apply_and_reset() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let layer = fx.solid(&comp, [0.5; 3], [31, 13]);
+    let effect = fx.apply(&layer, "ADBE Radial Blur");
+    let center = |fx: &Fx| fx.stage.prim(&effect).unwrap().value("param:0002").cloned();
+    let expected = Some(bae_model::Value::Vec2([15.5, 6.5]));
+    assert_eq!(center(&fx), expected);
+    fx.param(&effect, 2, json!({"type":"vec2","value":[4.0,5.0]}));
+    fx.run("effect.reset", json!({"effects":[effect]}));
+    assert_eq!(center(&fx), expected);
 }

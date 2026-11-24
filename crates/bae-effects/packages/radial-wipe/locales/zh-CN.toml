@@ -1,0 +1,15 @@
+[effect.radial-wipe]
+name = "径向擦除"
+keywords = ["径向擦除"]
+
+[effect.radial-wipe.params]
+transition_completion = "过渡完成"
+start_angle = "起始角度"
+wipe_center = "擦除中心"
+wipe = "擦除"
+feather = "羽化"
+
+[effect.radial-wipe.choices.wipe]
+1 = "顺时针"
+2 = "逆时针"
+3 = "两者兼有"

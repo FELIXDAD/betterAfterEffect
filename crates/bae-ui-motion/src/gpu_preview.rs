@@ -150,10 +150,11 @@ impl GpuPreview {
         if self.last != Some(key) {
             let request = RenderRequest {
                 resolution: match resolution {
+                    0 | 1 => Resolution::Full,
                     2 => Resolution::Half,
                     3 => Resolution::Third,
                     4 => Resolution::Quarter,
-                    _ => Resolution::Full,
+                    n => Resolution::Custom(n),
                 },
                 purpose: RenderPurpose::Preview,
                 ..RenderRequest::full()
