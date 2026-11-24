@@ -146,14 +146,17 @@ fn echo_time(p: &EffectParams<'_>, v: Params<'_>, index: i32) -> Time {
 }
 
 fn displaced_steps(p: &EffectParams<'_>, v: Params<'_>) -> Vec<(Time, [u32; 2])> {
-    let fps = v.f(3).max(0.009995);
+    let interval = 1. / v.f(3).max(0.009995);
     let max = v.f(2);
     let mut steps: Vec<(Time, [u32; 2])> = Vec::new();
     // All pixels in one time bin can share the same upstream frame.
     let seconds = p.time.as_seconds();
     for level in 0..256 {
-        let dt = (2. * f64::from(level) / 255. - 1.) * max;
-        let sample = ((seconds + dt) * fps + 1e-9).floor() / fps;
+        let shifted = seconds + (f64::from(level) - 127.) * max / 128.;
+        let bucket = shifted - shifted.rem_euclid(interval);
+        // The sampled time has 16 fractional bits in seconds. Rounding can
+        // put it just before an input frame boundary.
+        let sample = (bucket * 65536.).round() / 65536.;
         let time = local_offset(p, sample - seconds);
         match steps.last_mut() {
             Some((last, range)) if *last == time => range[1] = level,

@@ -39,7 +39,7 @@ fn map_level(px: vec2f) -> u32 {
     let layer = vec2f(u.layer.zw - u.layer.xy);
     let pos = px - vec2f(u.layer.xy);
     let local = select(pos - (layer - size)*0.5, pos*size/layer, u.flags.w != 0u);
-    if any(local < vec2f(0)) || any(local >= size) { return 128u; }
+    if any(local < vec2f(0)) || any(local >= size) { return 127u; }
     let inset = vec2f(0.5 / map.scale);
     let c = fx_bilinear(map_tex, map, map.origin + clamp(local, inset, size-inset), true);
     return u32(round(saturate(fx_luma(c.rgb)) * 255.0));
