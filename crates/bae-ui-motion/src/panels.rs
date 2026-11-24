@@ -241,6 +241,7 @@ fn collect_props(nodes: &[Node], out: &mut Vec<(PrimPath, String, String)>) {
 pub struct EffectControlsPanel {
     eval: EvalCache,
     title: String,
+    controls: crate::effects::controls::ControlsState,
 }
 
 impl Panel for EffectControlsPanel {
@@ -275,6 +276,23 @@ impl Panel for EffectControlsPanel {
         let effects = props::effect_nodes(stage, &layer);
         if effects.is_empty() {
             common::empty_hint(ui, &self.title.clone(), tr("No effects applied"));
+            return;
+        }
+        // Controls from the effect definitions (07's built-ins, plugins).
+        if crate::effects::registries(cx.resources).is_some() {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    crate::effects::controls::show(
+                        ui,
+                        cx,
+                        &session,
+                        &mut self.eval,
+                        &mut self.controls,
+                        &layer,
+                        now,
+                    );
+                });
             return;
         }
         egui::ScrollArea::vertical()
