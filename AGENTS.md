@@ -34,6 +34,7 @@
 
 ## 同步进度
 
-- 在 Orca 工作区卡片上更新状态和备注：
+- 进度看置顶 issue「BAE 进度看板」（自动生成）；领导每一轮把“交接快照”写进看板正文。PR 审完由领导打 `merge-ready`，合并脚本执行（见 `docs/WORKSTREAMS.md`“协同流程”）。
+- 在 Orca 工作区卡片上更新状态和备注（看板会显示）：
   `orca worktree set --worktree active --workspace-status in-progress --comment "当前进度" --json`
 - 在任务书末尾的"进度"一节记录已完成、受阻和对其他工作流的请求。
