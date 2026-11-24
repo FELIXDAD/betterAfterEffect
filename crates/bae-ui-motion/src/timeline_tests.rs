@@ -1781,8 +1781,8 @@ fn hide_shy_layers_switch_hides_shy_layers_from_the_timeline() {
     let mut tl = h.bars();
     let drawn = |tl: &TimelinePanel| tl.last_modes.len();
     assert_eq!(drawn(&tl), 2);
-    // The comp switch left of the Graph Editor switch.
-    let sw = pos2(tl.last_axis.unwrap().left - 2.0 - 14.0 - 26.0, 22.0 + 17.0);
+    // The comp switch three left of the Graph Editor switch (AE order).
+    let sw = pos2(tl.last_axis.unwrap().left - 2.0 - 14.0 - 78.0, 22.0 + 17.0);
     let r = h.click(&mut tl, sw, Modifiers::NONE);
     h.apply(&r);
     h.frame(&mut tl, Vec::new(), Modifiers::NONE);
@@ -1973,4 +1973,59 @@ fn graph_editor_frame_cost() {
     measure(&mut h, &mut tl, "graph editor, pointer move", true, false);
     measure(&mut h, &mut tl, "graph editor, key drag", true, true);
     assert_eq!(tl.graph_editor().last.vaxes.len(), 183);
+}
+
+#[test]
+fn comp_switches_and_layer_switches_reach_the_render_request() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    h.keys(POS, &[(0.0, vec3(0.0, 0.0)), (1.0, vec3(600.0, 0.0))]);
+    let comp = h.comp.clone();
+    let mut tl = h.bars();
+    let request = |h: &H| {
+        let ec = bae_anim::evaluate_comp(&h.stage, &comp, Time::from_seconds(0.5)).unwrap();
+        bae_render::AnimEvaluator::new(None)
+            .convert(&h.stage, &ec, 0)
+            .unwrap()
+    };
+    // The layer's Motion Blur switch alone: no samples (AE needs both).
+    let r = h.action(
+        &mut tl,
+        Invocation::with_params(ids::LAYER_SWITCH, json!({"switch": "motion_blur"})),
+    );
+    h.apply(&r);
+    assert!(request(&h).motion_blur.is_none());
+    // Enable Motion Blur, the comp switch second from the Graph Editor switch.
+    let ge = pos2(tl.last_axis.unwrap().left - 2.0 - 14.0, 22.0 + 17.0);
+    let r = h.click(&mut tl, ge - vec2(26.0, 0.0), Modifiers::NONE);
+    h.apply(&r);
+    let rc = request(&h);
+    assert!(rc.motion_blur.is_some());
+    assert!(rc.layers.iter().any(|l| !l.motion_samples.is_empty()));
+    // Hide Shy Layers and Draft 3D are comp settings; Frame Blending is disabled.
+    for (dx, attr, on) in [
+        (52.0, "frame_blending", false),
+        (78.0, "hide_shy_layers", true),
+        (104.0, "draft_3d", true),
+    ] {
+        let r = h.click(&mut tl, ge - vec2(dx, 0.0), Modifiers::NONE);
+        h.apply(&r);
+        let v = query::static_value(&h.stage.prim(&comp).unwrap(), attr);
+        assert_eq!(v.and_then(|v| v.as_bool()).unwrap_or(false), on, "{attr}");
+    }
+    // 3D Layer: the layer gets its 3D matrix.
+    assert!(request(&h).layers.iter().all(|l| l.matrix_3d.is_none()));
+    let r = h.action(
+        &mut tl,
+        Invocation::with_params(ids::LAYER_SWITCH, json!({"switch": "three_d"})),
+    );
+    h.apply(&r);
+    assert!(request(&h).layers.iter().any(|l| l.matrix_3d.is_some()));
+    // Undo the comp switches one step at a time.
+    h.undo();
+    h.undo();
+    h.undo();
+    assert!(request(&h).motion_blur.is_some());
+    h.undo();
+    assert!(request(&h).motion_blur.is_none());
 }

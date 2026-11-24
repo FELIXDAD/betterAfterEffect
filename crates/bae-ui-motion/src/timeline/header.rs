@@ -190,34 +190,68 @@ impl TimelinePanel {
         }
         gresp.on_hover_text(tr("Graph Editor"));
 
-        // Hide Shy Layers (comp switch, saved in the comp).
-        let shy = ge.translate(vec2(-26.0, 0.0));
-        let on = bool_attr(cx.stage, &info.path, "hide_shy_layers");
-        let sresp = ui
-            .interact(shy, ui.id().with("hide_shy_switch"), Sense::click())
-            .labeled_toggle(egui::WidgetType::Button, tr("Hide Shy Layers"), on);
-        if on {
-            ui.painter().rect_filled(shy, 2.0, color::BUTTON_ON);
-        }
-        icons::paint(
-            ui.painter(),
-            shy.shrink(3.0),
-            Icon::Shy,
+        // The comp switches left of it, AE's order: Draft 3D, Hide Shy Layers,
+        // Frame Blending (not rendered yet: disabled), Motion Blur. Saved in the
+        // comp, as AE does.
+        for (i, (attr, icon, name, tip, enabled)) in [
+            (
+                "motion_blur",
+                Icon::MotionBlur,
+                "Enable Motion Blur",
+                "Enables Motion Blur for all layers with the Motion Blur switch set",
+                true,
+            ),
+            (
+                "frame_blending",
+                Icon::FrameBlend,
+                "Enable Frame Blending",
+                "Enables Frame Blending for all layers with the Frame Blend switch set",
+                false,
+            ),
+            (
+                "hide_shy_layers",
+                Icon::Shy,
+                "Hide Shy Layers",
+                "Hides all layers for which the Shy switch is set",
+                true,
+            ),
+            (
+                "draft_3d",
+                Icon::Cube,
+                "Draft 3D",
+                "Turn fast 3D previews on or off",
+                true,
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let r = ge.translate(vec2(-26.0 * (i as f32 + 1.0), 0.0));
+            let on = enabled && bool_attr(cx.stage, &info.path, attr);
+            let resp = ui
+                .interact(r, ui.id().with(("comp_switch", attr)), Sense::click())
+                .labeled_toggle(egui::WidgetType::Button, tr(name), on);
             if on {
+                ui.painter().rect_filled(r, 2.0, color::BUTTON_ON);
+            }
+            let c = if !enabled {
+                color::TEXT_DISABLED
+            } else if on {
                 color::ACCENT
-            } else if sresp.hovered() {
+            } else if resp.hovered() {
                 color::ICON
             } else {
                 color::ICON_DIM
-            },
-        );
-        if sresp.clicked() {
-            cx.invoke_with(
-                "attr.set",
-                json!({"path": info.path, "attr": "hide_shy_layers", "value": {"type": "bool", "value": !on}}),
-            );
+            };
+            icons::paint(ui.painter(), r.shrink(3.0), icon, c);
+            if enabled && resp.clicked() {
+                cx.invoke_with(
+                    "attr.set",
+                    json!({"path": info.path, "attr": attr, "value": {"type": "bool", "value": !on}}),
+                );
+            }
+            resp.on_hover_text(tr(tip));
         }
-        sresp.on_hover_text(tr("Hides all layers for which the Shy switch is set"));
 
         // Column headers.
         let p = ui.painter();

@@ -322,6 +322,18 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Set Track Matte", "设置轨道遮罩"),
     ("Track Matte", "轨道遮罩"),
     ("Hide Shy Layers", "隐藏消隐图层"),
+    ("Enable Motion Blur", "启用运动模糊"),
+    (
+        "Enables Motion Blur for all layers with the Motion Blur switch set",
+        "为设置了“运动模糊”开关的所有图层启用运动模糊",
+    ),
+    ("Enable Frame Blending", "启用帧混合"),
+    (
+        "Enables Frame Blending for all layers with the Frame Blend switch set",
+        "为设置了“帧混合”开关的所有图层启用帧混合",
+    ),
+    ("Draft 3D", "草图 3D"),
+    ("Turn fast 3D previews on or off", "打开或关闭快速 3D 预览"),
     (
         "Hides all layers for which the Shy switch is set",
         "隐藏为其设置了“消隐”开关的所有图层",
