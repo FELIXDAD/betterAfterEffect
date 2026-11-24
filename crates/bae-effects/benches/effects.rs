@@ -158,6 +158,23 @@ fn main() {
         });
     }
 
+    for radius in [20.0, 100.0, 1000.0] {
+        cases.push(Case {
+            name: format!("1080p minimax r{radius}"),
+            match_name: "ADBE Minimax",
+            params: vec![(2, Value::Float(radius)), (3, Value::Int(2))],
+            size: HD,
+        });
+    }
+    for choke in [10.5, -100.0] {
+        cases.push(Case {
+            name: format!("1080p simple choker {choke}"),
+            match_name: "ADBE Simple Choker",
+            params: vec![(2, Value::Float(choke))],
+            size: HD,
+        });
+    }
+
     let mut results = Vec::new();
     println!("{:<44} {:>10} {:>10}", "case", "ms/frame", "latency");
     for case in &cases {

@@ -74,3 +74,42 @@ cargo run -p bae-effects --example ae_compare -- golden            # 把 AE 输�
 | 色调分离 | 1 | 0.010 | 去预乘、等宽分箱、重新预乘。2、3、4、7、255 级的灰阶用例完全一致 |
 
 这些 golden 使用 8 bpc。浮点范围与预乘行为另由 RGBA16F / RGBA32F 的 GPU 像素测试覆盖。AE 自动化在启动时恢复了 `unknown-modal` 提示，随后成功输出全部文件。
+
+## 表达式控制、通道、遮罩和简单颜色（AE 26.2.1，macOS）
+
+`cases-controls-channel.json` 的 39 个用例由一次 `aectl run` 批量生成。AE 的启动提示框由 `aectl` 恢复后，批次正常完成。输入采用不透明色块与羽化 alpha 圆盘，PNG 输出是 8 bpc。对照按预乘 RGBA 比较，使用每像素四通道中的最大差，再计算整图平均。
+
+| 效果 | 最大差 / 平均差（8 位色阶） | 观察 |
+|---|---:|---|
+| 8 个表达式控制 | 0 / 0 | 像素不变。表达式命名、数字索引和图层对象另有宿主测试。 |
+| Invert | ≤1 / ≤0.775 | HLS 色相按半圈镜像，反转饱和度后限制最大色度，整数项目在混合前截断反转结果。 |
+| Shift Channels | ≤1 / ≤0.012 | 饱和度取 RGB 极差乘以同亮度可用的最大色度。 |
+| Set Matte | ≤1 / ≤0.033 | AE 用例取自身源，另有 GPU 测试覆盖隐藏图层作为源、居中和半分辨率。 |
+| Minimax | 0 / 0 | 测试覆盖最小、最大、先最小再最大，以及透明边缘。 |
+| Simple Choker | 2–6 / ≤0.062 | 高斯 alpha 后接阈值曲线，正负 4.5 的差集中在羽化边缘。 |
+| Black & White | 0–2 / ≤0.314 | 按原色与间色加权，染色按亮度补偿和色域裁剪。 |
+| Vibrance | 4 / 0.990，8 / 0.616 | 自然饱和度曲线和灰轴混合的近似有残差，集中在半饱和色与蓝紫色。 |
+| Photo Filter | 6 / 0.165（冷色 80，关闭保持发光度），87 / 7.483（默认暖色），108 / 13.103（冷色 80，开启保持发光度） | 关闭保持发光度时冷色预设拟合到 gamma 2.4 下的线性矩阵。开启时用原色、间色和中性灰拟合两档色温，饱和蓝紫与青色的 AE 色域映射仍有明显差异，其他预设和自定义颜色从这些基准插值。 |
+| Color Balance | ≤1 / ≤0.339 | 色块证实按通道码值独立调整，两种保持发光度状态分别拟合。仅验证了用例参数组合。 |
+
+Invert Alpha、Shift Channels 和 Set Matte 在 AE 中会重新显露直通素材全透明像素的 RGB。声明式像素效果可通过 `bae_input_straight` 从源纹理读取该值，已经预乘且丢失 RGB 的输入仍只能使用可恢复的信息。Black & White、Vibrance、Color Balance 在 32 bpc 工程中限制在 16 bpc 的归一化范围。GPU 测试覆盖 RGBA16F、RGBA32F 和整数/浮点语义。16/32 bpc 的 AE 误差未实测。
+
+重跑该批次时设置独立工作目录，再按已有步骤运行 `prepare`、`aectl run`、`compare` 和 `golden`。在跑 AE 前获取共享锁 `/private/tmp/bae-locks/ae.lock`，运行完释放。
+
+```sh
+export BAE_07_ROOT=/private/tmp/bae-controls-channel-ae
+export BAE_07_CASES="$PWD/crates/bae-effects/tests/ae/cases-controls-channel.json"
+cargo run -p bae-effects --example ae_compare -- prepare
+(
+    mkdir -p /private/tmp/bae-locks
+    mkdir /private/tmp/bae-locks/ae.lock || exit 1
+    trap 'rmdir /private/tmp/bae-locks/ae.lock' EXIT
+    cat > "$BAE_07_ROOT/run.jsx" <<EOF_JS
+var BAE_07_ROOT = "$BAE_07_ROOT";
+\$.evalFile("$PWD/crates/bae-effects/tests/ae/render_cases.jsx");
+EOF_JS
+    tools/ae/aectl run "$BAE_07_ROOT/run.jsx"
+)
+cargo run -p bae-effects --example ae_compare -- compare
+cargo run -p bae-effects --example ae_compare -- golden
+```

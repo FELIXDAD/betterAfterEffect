@@ -1,0 +1,7 @@
+[effect.vibrance]
+name = "自然饱和度"
+keywords = ["自然饱和度"]
+
+[effect.vibrance.params]
+vibrance = "自然饱和度"
+saturation = "饱和度"

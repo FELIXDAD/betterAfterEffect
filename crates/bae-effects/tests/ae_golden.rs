@@ -9,7 +9,8 @@ mod harness;
 #[test]
 fn matches_after_effects() {
     let golden = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ae/golden");
-    let cases = harness::cases();
+    let mut cases = harness::cases();
+    cases.extend(harness::parse_cases(include_str!("ae/cases-controls-channel.json")));
     let Some(gpu) = bae_gpu::testing::shared_context() else {
         return;
     };

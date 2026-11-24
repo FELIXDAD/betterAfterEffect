@@ -1,0 +1,108 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "color-balance"
+name = "Color Balance"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE Color Balance 2"]
+flags = ["pixel-independent"]
+shader = "shaders/color_balance.wgsl"
+includes = ["shaders/channel_math.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "shadow_red"
+type = "float"
+name = "Shadow Red Balance"
+default = 0
+range = [-100, 100]
+precision = 1
+
+[[effect.param]]
+id = 2
+key = "shadow_green"
+type = "float"
+name = "Shadow Green Balance"
+default = 0
+range = [-100, 100]
+precision = 1
+
+[[effect.param]]
+id = 3
+key = "shadow_blue"
+type = "float"
+name = "Shadow Blue Balance"
+default = 0
+range = [-100, 100]
+precision = 1
+
+[[effect.param]]
+id = 4
+key = "midtone_red"
+type = "float"
+name = "Midtone Red Balance"
+default = 0
+range = [-100, 100]
+precision = 1
+
+[[effect.param]]
+id = 5
+key = "midtone_green"
+type = "float"
+name = "Midtone Green Balance"
+default = 0
+range = [-100, 100]
+precision = 1
+
+[[effect.param]]
+id = 6
+key = "midtone_blue"
+type = "float"
+name = "Midtone Blue Balance"
+default = 0
+range = [-100, 100]
+precision = 1
+
+[[effect.param]]
+id = 7
+key = "highlight_red"
+type = "float"
+name = "Highlight Red Balance"
+default = 0
+range = [-100, 100]
+precision = 1
+
+[[effect.param]]
+id = 8
+key = "highlight_green"
+type = "float"
+name = "Highlight Green Balance"
+default = 0
+range = [-100, 100]
+precision = 1
+
+[[effect.param]]
+id = 9
+key = "highlight_blue"
+type = "float"
+name = "Highlight Blue Balance"
+default = 0
+range = [-100, 100]
+precision = 1
+
+[[effect.param]]
+id = 10
+key = "preserve"
+type = "checkbox"
+name = "Preserve Luminosity"
+default = false
