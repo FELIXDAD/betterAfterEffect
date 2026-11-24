@@ -1,0 +1,29 @@
+BAE includes icons from Adobe Spectrum, Adobe's open-source design system.
+
+Spectrum workflow icons
+  Package:   @adobe/spectrum-css-workflow-icons 1.5.4
+  Source:    https://registry.npmjs.org/@adobe/spectrum-css-workflow-icons/-/spectrum-css-workflow-icons-1.5.4.tgz
+             https://github.com/adobe/spectrum-css-workflow-icons
+  License:   Apache License, Version 2.0 (see LICENSE)
+  Copyright: (c) Copyright 2015-2022 Adobe. All rights reserved. (see COPYRIGHT)
+
+Spectrum UI icons
+  Package:   @adobe/react-spectrum-ui 1.2.1
+  Source:    https://registry.npmjs.org/@adobe/react-spectrum-ui/-/react-spectrum-ui-1.2.1.tgz
+             https://github.com/adobe/react-spectrum
+  License:   Apache License, Version 2.0 (see LICENSE)
+  Copyright: Copyright 2024 Adobe. All rights reserved.
+
+Modifications by BAE (Apache-2.0 section 4(b)):
+  - All icons are converted at build time into filled outlines and compressed
+    into the application binary; they are rasterized and tinted at run time.
+  - UI icons (ChevronDownMedium, ChevronLeftMedium, ChevronRightMedium,
+    CrossMedium): path data of the medium scale wrapped in an 18x18 SVG with
+    the glyph centered.
+  - PenAdd, PenDelete, PenConvert, MaskFeather (from VectorDraw), TypeVertical
+    (from Text), PuppetStarch, PuppetBend, PuppetAdvanced, PuppetOverlap (from
+    PinOn): the Spectrum glyph scaled to 75 % in the top-left corner and a small
+    badge drawn by BAE added in the bottom-right corner.
+
+This product is not affiliated with or endorsed by Adobe. "Adobe" and
+"Spectrum" are trademarks of Adobe; no trademark rights are granted.
