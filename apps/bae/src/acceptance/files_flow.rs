@@ -1462,3 +1462,46 @@ fn closing_the_project_empties_the_comp_and_timeline_tabs() {
         assert_eq!(tabs(&h, "Comp 1"), (true, true), "{away}: new comp");
     }
 }
+
+/// #231: the render queue belongs to the project. Closing it, starting a new
+/// one or opening another empties the queue; the next project's items are
+/// its own.
+#[test]
+fn render_queue_belongs_to_the_project() {
+    let tmp = tempfile::tempdir().unwrap();
+    let other = tricky_dir(tmp.path()).join("另一个 工程.bae");
+    {
+        let mut h = gui();
+        comp_with(&mut h, &["motion.layer.new.solid"]);
+        save_as(&mut h, other.clone());
+        no_surprises(&h);
+    }
+    let queued = |h: &Ui| h.state().render_queue().lock().items().len();
+    for away in [Away::Close, Away::New, Away::Open] {
+        let mut h = gui();
+        comp_with(&mut h, &["motion.layer.new.solid"]);
+        key(&mut h, Modifiers::COMMAND, Key::M);
+        assert_eq!(queued(&h), 1, "{away:?}: queued");
+        h.state_mut()
+            .dialogs
+            .answers
+            .push_back(UnsavedChoice::DontSave);
+        go_away(&mut h, away, &other);
+        assert_eq!(queued(&h), 0, "{away:?}: the old project's items stay");
+        // The new project queues its own comp as item 1.
+        if matches!(away, Away::Open) {
+            assert!(h.state().active_comp().is_some(), "opened comp");
+        } else {
+            comp_with(&mut h, &[]);
+        }
+        key(&mut h, Modifiers::COMMAND, Key::M);
+        let q = h.state().render_queue();
+        let q = q.lock();
+        assert_eq!(q.items().len(), 1, "{away:?}");
+        assert_eq!(
+            Some(&q.items()[0].comp),
+            h.state().active_comp().as_ref(),
+            "{away:?}"
+        );
+    }
+}
