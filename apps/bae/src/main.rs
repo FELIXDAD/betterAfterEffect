@@ -10,8 +10,9 @@
 // double-click); `bae_platform::console` re-attaches to a parent terminal.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
-// 0.0.1 acceptance suite (macOS run): see `acceptance/mod.rs`.
-#[cfg(all(test, target_os = "macos"))]
+// 0.0.1 acceptance suite (macOS run): see `acceptance/mod.rs`. The harness
+// builds everywhere: the AE shortcut sweep runs on both CI platforms.
+#[cfg(test)]
 mod acceptance;
 mod agent_feed;
 mod autosave;
