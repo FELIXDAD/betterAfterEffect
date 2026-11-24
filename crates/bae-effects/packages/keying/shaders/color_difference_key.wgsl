@@ -26,16 +26,13 @@ fn difference_view(c: vec4<f32>, view: u32) -> vec4<f32> {
         difference_levels(b,params.black_in_part_b,params.white_in_part_b,params.gamma_part_b))/255.0;
     let raw = ca + (1.0-ca)*cb;
     let matte = difference_levels(raw,params.black_in_matte,params.white_in_matte,params.gamma_matte);
+    if view == 8u { return c*matte; }
     var preview = matte;
-    switch view {
-        case 2u: { preview=a; }
-        case 3u: { preview=ca; }
-        case 4u: { preview=b; }
-        case 5u: { preview=cb; }
-        case 6u: { preview=raw; }
-        case 8u: { return c*matte; }
-        default: {}
-    }
+    if view==2u { preview=a; }
+    if view==3u { preview=ca; }
+    if view==4u { preview=b; }
+    if view==5u { preview=cb; }
+    if view==6u { preview=raw; }
     return vec4<f32>(vec3<f32>(preview),1.0);
 }
 
