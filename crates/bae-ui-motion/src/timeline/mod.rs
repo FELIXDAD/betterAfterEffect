@@ -47,10 +47,11 @@ pub(crate) use markers::parse_timecode;
 pub(crate) use menus::keys_with_labels;
 #[cfg(test)]
 pub(crate) use menus::{
-    LAYER_MENU, Related, catalog_entry, invert_layer_selection, rove_state, select_children,
-    select_label_group, select_related,
+    LAYER_MENU, Related, catalog_entry, rove_state, select_label_group, select_related,
 };
-pub(crate) use menus::{key_menu, keyframe_menu};
+pub(crate) use menus::{
+    catalog_node, catalog_nodes, invert_layer_selection, key_menu, keyframe_menu, select_children,
+};
 
 const ROW_H: f32 = 19.0;
 const TABS_H: f32 = 22.0;

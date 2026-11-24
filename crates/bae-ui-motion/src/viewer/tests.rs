@@ -25,6 +25,8 @@ struct H {
     time: f64,
     /// Modifiers egui last heard of.
     mods: Modifiers,
+    /// The accessibility tree of the last frame (menus are found by label).
+    access: Option<egui::accesskit::TreeUpdate>,
 }
 
 fn path(v: &serde_json::Value) -> PrimPath {
@@ -49,7 +51,9 @@ impl H {
             comp: PrimPath::new("/x").unwrap(),
             time: 0.0,
             mods: Modifiers::NONE,
+            access: None,
         };
+        h.ctx.enable_accesskit();
         h.comp = path(&h.run("comp.create", json!({"width": 640, "height": 360}))["path"]);
         h.session().lock().open_comp(&h.comp);
         h.frame(Vec::new(), Modifiers::NONE);
@@ -104,6 +108,7 @@ impl H {
             viewer.ui(ui, &mut cx);
         });
         out.textures_delta.clear();
+        self.access = out.platform_output.accesskit_update.take();
         requests
     }
 
@@ -1521,4 +1526,85 @@ fn tools_follow_the_preferences() {
     h.select(&[&solid]);
     let r = h.draw(Tool::Ellipse, (100.0, 50.0), (300.0, 150.0));
     assert_eq!(one(&r, "mask.create")["cycle_colors"], false);
+}
+
+// --- Context menus ------------------------------------------------------------
+
+impl H {
+    /// Center of the widget labeled `label` in the last frame.
+    fn labeled(&self, label: &str) -> Option<Pos2> {
+        let update = self.access.as_ref()?;
+        update.nodes.iter().find_map(|(_, n)| {
+            (n.label() == Some(label))
+                .then(|| n.bounds())
+                .flatten()
+                .map(|b| egui::pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32))
+        })
+    }
+
+    /// Right-click at comp `(x, y)`; the menu shows from the next frame.
+    fn right_click(&mut self, x: f64, y: f64) {
+        let p = self.screen(x, y);
+        self.move_to(p, Modifiers::NONE, Vec::new());
+        for pressed in [true, false] {
+            let events = vec![
+                Event::PointerMoved(p),
+                Event::PointerButton {
+                    pos: p,
+                    button: PointerButton::Secondary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                },
+            ];
+            self.frame(events, Modifiers::NONE);
+        }
+        self.frame(Vec::new(), Modifiers::NONE);
+    }
+
+    /// Click the menu entry labeled `label`.
+    fn choose(&mut self, label: &str) -> PanelRequests {
+        let p = self
+            .labeled(label)
+            .unwrap_or_else(|| panic!("no menu entry {label}"));
+        self.move_to(p, Modifiers::NONE, Vec::new());
+        let a = self.pointer_button(p, true, Modifiers::NONE);
+        let mut b = self.pointer_button(p, false, Modifiers::NONE);
+        b.invocations.splice(0..0, a.invocations);
+        b
+    }
+}
+
+#[test]
+fn right_click_opens_the_layer_or_the_composition_menu() {
+    let mut h = H::new();
+    let a = h.solid([200.0, 100.0], [320.0, 180.0]);
+    let b = h.solid([100.0, 100.0], [320.0, 180.0]);
+    // On a layer: it is selected, and the layer menu shows with Select ▸.
+    h.right_click(320.0, 180.0);
+    assert_eq!(h.session().lock().selected_layers, std::slice::from_ref(&b));
+    assert_eq!(
+        h.viewer.menu_layers,
+        [b.clone(), a.clone()],
+        "topmost first"
+    );
+    assert!(h.labeled("Pre-compose...").is_some());
+    assert!(h.labeled("Select ›").is_some(), "Select ▸");
+    assert!(h.labeled("Composition Settings...").is_none());
+    // A catalog item runs the catalog's action.
+    let Some(crate::catalog::Node::Item(pre)) = crate::context_menu::find("Layer/Pre-compose...")
+    else {
+        panic!("catalog")
+    };
+    let r = h.choose("Pre-compose...");
+    assert_eq!(r.invocations.len(), 1, "{:?}", r.invocations);
+    assert_eq!(r.invocations[0].id, pre.action);
+    // Invert Selection (the menu's own item).
+    h.right_click(320.0, 180.0);
+    h.choose("Invert Selection");
+    assert_eq!(h.session().lock().selected_layers, std::slice::from_ref(&a));
+    // Elsewhere: the composition menu.
+    h.right_click(20.0, 20.0);
+    assert!(h.viewer.menu_layers.is_empty());
+    assert!(h.labeled("Composition Settings...").is_some());
+    assert!(h.labeled("Pre-compose...").is_none());
 }
