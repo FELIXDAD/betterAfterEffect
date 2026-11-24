@@ -20,6 +20,7 @@ pub struct Case {
     pub name: String,
     pub input: String,
     pub effect: String,
+    pub time: f64,
     pub params: Vec<(u32, Value)>,
     /// Allowed max per-channel difference (8-bit levels).
     pub tolerance: u8,
@@ -64,6 +65,7 @@ pub fn parse_cases(text: &str) -> Vec<Case> {
                 name: c["name"].as_str().unwrap().to_owned(),
                 input: c["input"].as_str().unwrap().to_owned(),
                 effect: c["effect"].as_str().unwrap().to_owned(),
+                time: c["time"].as_f64().unwrap_or(0.0),
                 params,
                 tolerance: c["tolerance"].as_u64().unwrap_or(2) as u8,
                 mean: c["mean"].as_f64().unwrap_or(0.5),
@@ -83,6 +85,13 @@ pub fn input(name: &str) -> Vec<[u8; 4]> {
             let px = match name {
                 // Probes: a hard vertical edge (blur kernels) and grey ramps
                 // (tone curves; the lower half at half range).
+                "fine" => [
+                    (x % 16) as f64 * 16. / 255.,
+                    (y % 16) as f64 * 16. / 255.,
+                    ((x / 16 + y / 16) % 2) as f64 * 128. / 255.,
+                    1.,
+                ],
+                "coords" => [fx, y as f64 * 2.0 / 255.0, 0.25, 1.0],
                 "step" => {
                     let v = if x >= w / 2 { 1.0 } else { 0.0 };
                     [v, v, v, 1.0]
@@ -217,6 +226,7 @@ pub fn render(gpu: &Arc<GpuContext>, case: &Case) -> Vec<[u8; 4]> {
         params: case.params.clone(),
     };
     let p = EffectParams {
+        time: bae_model::Time::from_seconds(case.time),
         scale: 1.0,
         ..EffectParams::new(&inst)
     };

@@ -76,7 +76,7 @@
         if (out.exists) {
             out.remove();
         }
-        comp.saveFrameToPng(0, out);
+        comp.saveFrameToPng(c.time || 0, out);
         if (!waitFor(out.fsName)) {
             throw new Error(c.name + ": saveFrameToPng timed out");
         }

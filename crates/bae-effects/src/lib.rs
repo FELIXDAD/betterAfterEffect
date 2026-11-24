@@ -238,6 +238,7 @@ pub fn prewarm(gpu: &Arc<GpuContext>, format: wgpu::TextureFormat) -> Result<(),
     let rt = gpu::runtime(gpu);
     blur::prewarm(&rt, format)?;
     effects::spatial::prewarm(&rt, format)?;
+    effects::distort::prewarm(&rt, format)?;
 
     effects::prewarm(&rt, format)?;
     for b in builtins() {
@@ -310,6 +311,7 @@ fn load() -> Result<Vec<Builtin>, Vec<Diagnostic>> {
         ));
     }
     out.extend(effects::spatial::builtins());
+    out.extend(effects::distort::builtins());
 
     out.extend(effects::controls::builtins());
     out.push(effects::set_matte::builtin());
