@@ -133,8 +133,14 @@ impl Workspace {
             .resource::<Arc<bae_prefs::PrefsStore>>()
             .cloned()
             .unwrap_or_default();
+        let mut workbench = Workbench::new(app, state);
+        // Keyboard Shortcuts presets are files in the config folder (AE: aeks/).
+        workbench.set_shortcut_presets_dir(
+            app.resource::<bae_platform::AppDirs>()
+                .map(|d| d.config.join(bae_ui::workbench::SHORTCUT_PRESETS_FOLDER)),
+        );
         Self {
-            workbench: Workbench::new(app, state),
+            workbench,
             show_about: false,
             prefs,
             settings: bae_ui::settings::SettingsDialog::default()
@@ -201,6 +207,12 @@ impl Workspace {
                 }
             })
             .collect()
+    }
+
+    /// Where Keyboard Shortcuts keeps its presets (tests: a temporary folder).
+    #[cfg(test)]
+    pub fn set_shortcut_presets_dir(&mut self, dir: Option<std::path::PathBuf>) {
+        self.workbench.set_shortcut_presets_dir(dir);
     }
 
     /// Whether the state should be saved now (OK in Keyboard Shortcuts).

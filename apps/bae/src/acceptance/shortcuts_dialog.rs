@@ -266,3 +266,84 @@ fn the_keyboard_holds_modifiers_lists_keys_and_takes_dropped_commands() {
     let (_, shown) = row(&h, "Hand Tool").unwrap();
     assert!(shown.ends_with("F5"), "{shown}");
 }
+
+/// Presets like AE's: Save As names a new preset (a file in the presets folder
+/// on OK), Copy To Clipboard says so, Delete asks first.
+#[test]
+fn presets_save_as_copy_and_delete() {
+    let dir = std::env::temp_dir().join(format!("bae-shortcut-presets-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut h = gui_sized(Gui::new(), egui::vec2(1600.0, 1000.0));
+    h.state_mut()
+        .workspace
+        .set_shortcut_presets_dir(Some(dir.clone()));
+    key(&mut h, Modifiers::COMMAND | Modifiers::ALT, Key::Quote);
+    settle(&mut h);
+    let preset = |h: &Ui| {
+        h.query_all_by_role(Role::ComboBox)
+            .find(|n| n.accesskit_node().label().as_deref() == Some("Preset:"))
+            .and_then(|n| n.accesskit_node().value())
+            .unwrap_or_default()
+    };
+    assert_eq!(preset(&h), "Default.txt");
+
+    click_label(&mut h, "Copy To Clipboard");
+    assert!(find_text(&h, "Copied to clipboard").is_some(), "no notice");
+
+    // Save As: "Create Preset" with the name selected; typing replaces it.
+    click_label(&mut h, "Save As...");
+    assert!(
+        find_text(&h, "Create Preset").is_some(),
+        "{:?}",
+        painted_texts(&h)
+    );
+    type_text(&mut h, "Mine");
+    let save = h
+        .query_all_by_label("Save")
+        .find(|n| n.accesskit_node().role() == Role::Button)
+        .map(|n| n.rect())
+        .expect("Save");
+    click_at(&mut h, save.center());
+    settle(&mut h);
+    assert_eq!(preset(&h), "Mine.txt");
+    assert!(!dir.exists(), "written on OK only");
+    click_label(&mut h, "OK");
+    assert!(dir.join("Mine.txt").is_file(), "the preset file");
+
+    // Delete asks, then the built-in preset is selected; OK removes the file.
+    key(&mut h, Modifiers::COMMAND | Modifiers::ALT, Key::Quote);
+    settle(&mut h);
+    assert_eq!(preset(&h), "Mine.txt");
+    // The preset row's Delete (the Delete key cap has the same name).
+    let delete = h
+        .query_all_by_label("Delete")
+        .filter(|n| n.accesskit_node().role() == Role::Button)
+        .map(|n| n.rect())
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap();
+    click_at(&mut h, delete.center());
+    settle(&mut h);
+    assert!(
+        find_texts(&h, |t| t.starts_with("Are you sure you want to delete")).len() == 1,
+        "{:?}",
+        painted_texts(&h)
+    );
+    // The question's own window is the smaller one.
+    let question = h
+        .query_all_by_role(Role::Window)
+        .map(|n| n.rect())
+        .min_by(|a, b| a.area().total_cmp(&b.area()))
+        .unwrap();
+    let confirm = h
+        .query_all_by_label("Delete")
+        .filter(|n| n.accesskit_node().role() == Role::Button)
+        .map(|n| n.rect())
+        .find(|r| question.contains_rect(*r))
+        .expect("Delete in the question");
+    click_at(&mut h, confirm.center());
+    settle(&mut h);
+    assert_eq!(preset(&h), "Default.txt");
+    click_label(&mut h, "OK");
+    assert!(!dir.join("Mine.txt").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
