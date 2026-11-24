@@ -218,6 +218,6 @@ mod tests {
     fn splice_replaces_the_selection() {
         assert_eq!(splice("a + b", &(4..5), "c"), "a + c");
         assert_eq!(splice("a + ", &(4..4), "時間"), "a + 時間");
-        assert_eq!(splice("時間 b", &(4..3), "x"), "時間 x");
+        assert_eq!(splice("時間 b", &Range { start: 4, end: 3 }, "x"), "時間 x");
     }
 }
