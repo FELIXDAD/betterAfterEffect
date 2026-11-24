@@ -209,8 +209,9 @@ impl Workspace {
             .collect()
     }
 
-    /// Where Keyboard Shortcuts keeps its presets (tests: a temporary folder).
-    #[cfg(test)]
+    /// Where Keyboard Shortcuts keeps its presets (acceptance tests, macOS run:
+    /// a temporary folder).
+    #[cfg(all(test, target_os = "macos"))]
     pub fn set_shortcut_presets_dir(&mut self, dir: Option<std::path::PathBuf>) {
         self.workbench.set_shortcut_presets_dir(dir);
     }
