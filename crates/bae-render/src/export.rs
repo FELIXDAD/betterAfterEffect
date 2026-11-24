@@ -690,6 +690,9 @@ pub struct ExportSettings {
     pub threads: Option<usize>,
     /// Alpha.
     pub alpha: ExportAlpha,
+    /// Movies: average bit rate in bits per second (AE's H.264 "target
+    /// bitrate"); `None`: the encoder's default. Ignored for image sequences.
+    pub bit_rate: Option<u64>,
 }
 
 impl ExportSettings {
@@ -702,6 +705,7 @@ impl ExportSettings {
             bits: None,
             threads: None,
             alpha: ExportAlpha::default(),
+            bit_rate: None,
         }
     }
 
@@ -895,6 +899,9 @@ fn encode_settings(
         encode.alpha = AlphaMode::Premultiplied;
     }
     encode.threads = settings.threads;
+    if !format.is_image() {
+        encode.bit_rate = settings.bit_rate;
+    }
     encode.start_number = start_number;
     encode.validate().map_err(media_error)?;
     Ok(encode)
