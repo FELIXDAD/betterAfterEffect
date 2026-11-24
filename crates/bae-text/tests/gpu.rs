@@ -185,7 +185,19 @@ fn evaluated_text_layer_reaches_the_provider() {
         Value::TextDocument(Box::new(doc("你好 BAE"))),
     )
     .unwrap();
-    let stage = b.into_stage();
+    let mut stage = b.into_stage();
+    let registry = bae_model::CommandRegistry::with_builtins();
+    let author = bae_model::AuthorId::new("user:test").unwrap();
+    let group = registry
+        .execute(
+            &mut stage,
+            &author,
+            "text.create_animator",
+            serde_json::json!({"layer":layer, "name":"rise"}),
+        )
+        .unwrap()
+        .output;
+    registry.execute(&mut stage,&author,"attr.set",serde_json::json!({"path":group["path"], "attr":"animator:position","value":Value::Vec3([10.0,20.0,0.0])})).unwrap();
     let evaluated = evaluate_comp(&stage, &comp, Time::ZERO).unwrap();
     let l = evaluated.layer(&layer).unwrap();
     assert_eq!(l.text.as_ref().map(|d| d.text.as_str()), Some("你好 BAE"));
@@ -200,5 +212,9 @@ fn evaluated_text_layer_reaches_the_provider() {
     };
     let layout = provider.layout_of(&content).unwrap();
     assert_eq!(layout.chars.len(), 6);
+    let base = provider.layout(l.text.as_deref().unwrap());
+    let delta = kurbo::Vec2::new(10., 20.);
+    assert_eq!(layout.bounds(true), base.bounds(true).map(|r| r + delta));
+    assert_ne!(layout.content_hash(), base.content_hash());
     assert!(provider.source(&content).is_ok());
 }

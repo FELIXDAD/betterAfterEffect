@@ -23,12 +23,86 @@ use vello::peniko::{self, Color};
 use vello::{FontEmbolden, Glyph, NormalizedCoord};
 
 use crate::fonts::FontSystem;
-use crate::layout::{GlyphRun, PositionedGlyph, TextLayout, layout_text};
+use crate::layout::{GlyphRun, PositionedGlyph, TextLayout, TextPaint, layout_text};
 
 /// Appends `text` to `scene` with `transform` (layer space → target pixels).
 pub fn encode(scene: &mut vello::Scene, text: &TextLayout, transform: Affine) {
-    let fill = text.paint.fill.map(|c| peniko::Brush::Solid(Color::new(c)));
-    let stroke = text.paint.stroke.map(|s| {
+    encode_clipped(scene, text, transform, None);
+}
+
+fn encode_clipped(
+    scene: &mut vello::Scene,
+    text: &TextLayout,
+    transform: Affine,
+    mut viewport: Option<Rect>,
+) {
+    for run in &text.runs {
+        for_batches(text, run, transform, |glyphs, matrix, paint, opacity| {
+            if opacity < 1.0 {
+                let clip = viewport.get_or_insert_with(|| {
+                    transform
+                        .transform_rect_bbox(text.bounds(true).unwrap_or_default())
+                        .inflate(1.0, 1.0)
+                });
+                scene.push_layer(
+                    peniko::Fill::NonZero,
+                    peniko::Mix::Normal,
+                    opacity,
+                    Affine::IDENTITY,
+                    clip,
+                );
+            }
+            encode_batch(scene, run, matrix, glyphs, paint);
+            if opacity < 1.0 {
+                scene.pop_layer();
+            }
+        });
+    }
+}
+
+// Plain text stays batched by font run. Adjacent identical animator results can
+// also share a glyph draw, including clusters shaped into several glyphs.
+fn for_batches(
+    text: &TextLayout,
+    run: &GlyphRun,
+    transform: Affine,
+    mut visit: impl FnMut(&[PositionedGlyph], Affine, TextPaint, f32),
+) {
+    if text.styles.is_empty() {
+        visit(&run.glyphs, transform, text.paint, 1.0);
+        return;
+    }
+    for batch in run.glyphs.chunk_by(|a, b| {
+        a.char_index == b.char_index
+            || (text.styles[a.char_index].opacity == 1.0
+                && text.styles[a.char_index] == text.styles[b.char_index])
+    }) {
+        let style = text.styles[batch[0].char_index];
+        let mut paint = style.paint;
+        let mut opacity = style.opacity;
+        if batch.len() == 1 && (paint.fill.is_none() || paint.stroke.is_none()) {
+            // A single paint operation needs no intermediate layer.
+            if let Some(fill) = &mut paint.fill {
+                fill[3] *= opacity;
+            }
+            if let Some(stroke) = &mut paint.stroke {
+                stroke.color[3] *= opacity;
+            }
+            opacity = 1.0;
+        }
+        visit(batch, transform * style.transform, paint, opacity);
+    }
+}
+
+fn encode_batch(
+    scene: &mut vello::Scene,
+    run: &GlyphRun,
+    transform: Affine,
+    glyphs: &[PositionedGlyph],
+    paint: TextPaint,
+) {
+    let fill = paint.fill.map(|c| peniko::Brush::Solid(Color::new(c)));
+    let stroke = paint.stroke.map(|s| {
         let style = bae_vector::StrokeStyle {
             width: s.width,
             join: s.join,
@@ -38,28 +112,22 @@ pub fn encode(scene: &mut vello::Scene, text: &TextLayout, transform: Affine) {
         .to_kurbo();
         (style, peniko::Brush::Solid(Color::new(s.color)))
     });
-    for run in &text.runs {
-        match (&fill, &stroke) {
-            (None, None) => {}
-            (Some(f), None) => draw(scene, run, transform, &run.glyphs, Paint::Fill(f)),
-            (None, Some((style, brush))) => draw(
-                scene,
-                run,
-                transform,
-                &run.glyphs,
-                Paint::Stroke(style, brush),
-            ),
-            (Some(f), Some((style, brush))) => {
-                // Per character: a later character's paint covers an earlier one's.
-                for g in &run.glyphs {
-                    let one = std::slice::from_ref(g);
-                    if text.paint.stroke_over_fill {
-                        draw(scene, run, transform, one, Paint::Fill(f));
-                        draw(scene, run, transform, one, Paint::Stroke(style, brush));
-                    } else {
-                        draw(scene, run, transform, one, Paint::Stroke(style, brush));
-                        draw(scene, run, transform, one, Paint::Fill(f));
-                    }
+    match (&fill, &stroke) {
+        (None, None) => {}
+        (Some(f), None) => draw(scene, run, transform, glyphs, Paint::Fill(f)),
+        (None, Some((style, brush))) => {
+            draw(scene, run, transform, glyphs, Paint::Stroke(style, brush))
+        }
+        (Some(f), Some((style, brush))) => {
+            // Per character: a later character's paint covers an earlier one's.
+            for g in glyphs {
+                let one = std::slice::from_ref(g);
+                if paint.stroke_over_fill {
+                    draw(scene, run, transform, one, Paint::Fill(f));
+                    draw(scene, run, transform, one, Paint::Stroke(style, brush));
+                } else {
+                    draw(scene, run, transform, one, Paint::Stroke(style, brush));
+                    draw(scene, run, transform, one, Paint::Fill(f));
                 }
             }
         }
@@ -175,8 +243,8 @@ impl TextSource {
 }
 
 impl VectorDraw for TextLayout {
-    fn encode(&self, scene: &mut vello::Scene, transform: Affine, _viewport: Rect) {
-        encode(scene, self, transform);
+    fn encode(&self, scene: &mut vello::Scene, transform: Affine, viewport: Rect) {
+        encode_clipped(scene, self, transform, Some(viewport));
     }
 
     fn draw_cpu(&self, ctx: &mut vello_cpu::RenderContext, transform: Affine) {
@@ -188,49 +256,54 @@ impl VectorDraw for TextLayout {
 /// outlines from skrifa, filled and stroked as paths in the same per-character
 /// order. Colour (COLR/bitmap) glyphs are drawn as their outlines.
 pub fn draw_cpu(ctx: &mut vello_cpu::RenderContext, text: &TextLayout, transform: Affine) {
-    let fill = text
-        .paint
-        .fill
-        .map(|c| cpu_paint(peniko::Brush::Solid(Color::new(c))));
-    let stroke = text.paint.stroke.map(|s| {
-        let style = bae_vector::StrokeStyle {
-            width: s.width,
-            join: s.join,
-            miter_limit: s.miter_limit,
-            ..bae_vector::StrokeStyle::default()
-        }
-        .to_kurbo();
-        (style, cpu_paint(peniko::Brush::Solid(Color::new(s.color))))
-    });
-    if fill.is_none() && stroke.is_none() {
-        return;
-    }
-    ctx.set_transform(transform);
     ctx.set_fill_rule(peniko::Fill::NonZero);
     for run in &text.runs {
         let outlines = glyph_outlines(run);
-        for path in outlines.into_iter().flatten() {
-            let paint_fill = |ctx: &mut vello_cpu::RenderContext| {
-                if let Some(f) = &fill {
-                    ctx.set_paint(f.clone());
-                    ctx.fill_path(&path);
-                }
-            };
-            let paint_stroke = |ctx: &mut vello_cpu::RenderContext| {
-                if let Some((style, brush)) = &stroke {
-                    ctx.set_paint(brush.clone());
-                    ctx.set_stroke(style.clone());
-                    ctx.stroke_path(&path);
-                }
-            };
-            if text.paint.stroke_over_fill {
-                paint_fill(ctx);
-                paint_stroke(ctx);
-            } else {
-                paint_stroke(ctx);
-                paint_fill(ctx);
+        let mut paths = outlines.iter();
+        for_batches(text, run, transform, |glyphs, matrix, paint, opacity| {
+            if opacity < 1.0 {
+                ctx.push_layer(None, None, Some(opacity), None, None);
             }
-        }
+            ctx.set_transform(matrix);
+            let fill = paint
+                .fill
+                .map(|c| cpu_paint(peniko::Brush::Solid(Color::new(c))));
+            let stroke = paint.stroke.map(|s| {
+                let style = bae_vector::StrokeStyle {
+                    width: s.width,
+                    join: s.join,
+                    miter_limit: s.miter_limit,
+                    ..bae_vector::StrokeStyle::default()
+                }
+                .to_kurbo();
+                (style, cpu_paint(peniko::Brush::Solid(Color::new(s.color))))
+            });
+            for path in paths.by_ref().take(glyphs.len()).flatten() {
+                let paint_fill = |ctx: &mut vello_cpu::RenderContext| {
+                    if let Some(f) = &fill {
+                        ctx.set_paint(f.clone());
+                        ctx.fill_path(path);
+                    }
+                };
+                let paint_stroke = |ctx: &mut vello_cpu::RenderContext| {
+                    if let Some((style, brush)) = &stroke {
+                        ctx.set_paint(brush.clone());
+                        ctx.set_stroke(style.clone());
+                        ctx.stroke_path(path);
+                    }
+                };
+                if paint.stroke_over_fill {
+                    paint_fill(ctx);
+                    paint_stroke(ctx);
+                } else {
+                    paint_stroke(ctx);
+                    paint_fill(ctx);
+                }
+            }
+            if opacity < 1.0 {
+                ctx.pop_layer();
+            }
+        });
     }
 }
 
@@ -374,7 +447,14 @@ impl TextProvider {
         }
         if let Some(layer) = content.data.downcast_ref::<EvaluatedLayer>() {
             return Ok(Arc::new(match &layer.text {
-                Some(doc) => self.layout(doc),
+                Some(doc) => {
+                    let mut fonts = self.fonts.lock();
+                    crate::animator::layout_animated(
+                        fonts.get_or_insert_with(FontSystem::new),
+                        doc,
+                        &layer.text_animators,
+                    )
+                }
                 None => TextLayout::empty(crate::layout::TextPaint {
                     fill: None,
                     stroke: None,

@@ -209,6 +209,7 @@ const ZH: &[(&str, &str)] = &[
     ("After Effects", "After Effects"),
     // bae-model built-in command titles
     ("Create Prim", "创建节点"),
+    ("Create Text Animator", "创建文字动画器"),
     ("Delete Prim", "删除节点"),
     ("Move Prim", "移动节点"),
     ("Rename Prim", "重命名节点"),
