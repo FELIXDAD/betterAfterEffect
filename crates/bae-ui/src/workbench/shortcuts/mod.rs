@@ -17,6 +17,8 @@
 //! command had in the same scope moves, and the message bar says so, with a link
 //! to that command). Undo takes back the last change.
 
+mod keyboard;
+mod keys_ui;
 mod text;
 mod tree;
 
@@ -149,6 +151,15 @@ pub(super) struct Session {
     generation: u64,
     /// First frame: the window goes above everything.
     just_opened: bool,
+    /// The keyboard's keys, the modifier caps clicked, the key clicked and the
+    /// Key table row selected; what the keys show (cached).
+    caps: Vec<keyboard::KeyCap>,
+    latched: text::Mods,
+    key: Option<Key>,
+    key_row: Option<text::Mods>,
+    keys: keys_ui::KeyCache,
+    /// The tree node of every command row.
+    row_index: HashMap<RowKey, usize>,
 }
 
 impl Session {
@@ -426,6 +437,7 @@ impl Workbench {
             DEFAULT_PRESET
         };
         let chords = tree::chords_by_row(&keymap);
+        let row_index = tree.row_index();
         self.editor = ShortcutEditor {
             open: true,
             focus_search: true,
@@ -449,6 +461,12 @@ impl Workbench {
                 visible: None,
                 generation: 0,
                 just_opened: true,
+                caps: keyboard::layout(),
+                latched: text::Mods::NONE,
+                key: None,
+                key_row: None,
+                keys: keys_ui::KeyCache::default(),
+                row_index,
             }),
         };
     }
@@ -527,6 +545,21 @@ impl Workbench {
                     outcome = o;
                 }
             });
+        // The command being dragged follows the pointer.
+        if let Some(row) = egui::DragAndDrop::payload::<RowKey>(ctx)
+            && let Some(at) = ctx.pointer_latest_pos()
+            && let Some(&i) = s.row_index.get(&*row)
+        {
+            let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, id.with("drag")));
+            let galley = p.layout_no_wrap(
+                s.tree.nodes[i].title.clone(),
+                theme::body(),
+                color::TEXT_STRONG,
+            );
+            let r = Rect::from_min_size(at + vec2(12.0, 8.0), galley.size() + vec2(12.0, 6.0));
+            p.rect_filled(r, 3.0, palette::SELECTED_ROW);
+            p.galley(r.min + vec2(6.0, 3.0), galley, color::TEXT_STRONG);
+        }
         if std::mem::take(&mut s.just_opened) {
             ctx.move_to_top(egui::LayerId::new(egui::Order::Foreground, id));
         }
@@ -618,11 +651,18 @@ impl Workbench {
             s.focus = None;
             return;
         };
-        let own = s.chords_of(&row).to_vec();
         let replacing = match focus {
-            PillFocus::Pill(i) => own.get(i).copied(),
+            PillFocus::Pill(i) => s.chords_of(&row).get(i).copied(),
             PillFocus::New => None,
         };
+        self.assign_to(s, &row, replacing, chord);
+    }
+
+    /// Give `row` the shortcut `chord` (instead of `replacing`): a chord another
+    /// command has in the same scope moves, with AE's message.
+    fn assign_to(&mut self, s: &mut Session, row: &RowKey, replacing: Option<Chord>, chord: Chord) {
+        let row = row.clone();
+        let own = s.chords_of(&row).to_vec();
         if own.contains(&chord) {
             // Already this command's: nothing changes.
             s.focus = (!own.is_empty()).then_some(PillFocus::Pill(0));
@@ -766,26 +806,44 @@ impl Workbench {
                 s.choose_scope(scope);
             }
         });
-        ui.add_space(4.0);
-        // Search.
-        let before = self.editor.search.clone();
-        let search = crate::widgets::search_field(ui, &mut self.editor.search, 220.0);
-        if std::mem::take(&mut self.editor.focus_search) {
-            search.request_focus();
+        // The keyboard (AE: 385 of the dialog's 887 points) and its legend.
+        let width = ui.available_width();
+        let keyboard_h = (ui.available_height() * 0.5).clamp(90.0, keyboard::SIZE.y);
+        let held = ui.input(|i| i.modifiers);
+        if let Some(action) = self.keyboard_ui(ui, s, width, keyboard_h) {
+            self.keyboard_action(s, action, held);
         }
-        if search.gained_focus() {
-            s.focus = None;
-        }
-        if before != self.editor.search {
-            s.visible = None;
-        }
+        self.legend_ui(ui);
+
+        // Search, and "Key:" over the Key table.
+        let buttons_w = 96.0;
+        let tree_w = ((width - buttons_w - 24.0) * 0.575).max(240.0);
+        ui.horizontal(|ui| {
+            let before = self.editor.search.clone();
+            let search = crate::widgets::search_field(ui, &mut self.editor.search, 220.0);
+            if std::mem::take(&mut self.editor.focus_search) {
+                search.request_focus();
+            }
+            if search.gained_focus() {
+                s.focus = None;
+            }
+            if before != self.editor.search {
+                s.visible = None;
+            }
+            let x = ui.min_rect().left() + tree_w + 12.0;
+            let at = pos2(x, ui.min_rect().center().y);
+            ui.painter().text(
+                at,
+                Align2::LEFT_CENTER,
+                self.key_label(s),
+                theme::body(),
+                color::TEXT_STRONG,
+            );
+        });
 
         // The tree (left) and the Key table with Undo / Clear (right).
         let bottom_h = 30.0;
         let body_h = (ui.available_height() - bottom_h - 8.0).max(80.0);
-        let width = ui.available_width();
-        let buttons_w = 96.0;
-        let tree_w = ((width - buttons_w - 24.0) * 0.575).max(240.0);
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(vec2(tree_w, body_h), Layout::top_down(Align::Min), |ui| {
                 ui.set_min_size(vec2(tree_w, body_h));
@@ -795,7 +853,9 @@ impl Workbench {
             let table_w = (ui.available_width() - buttons_w - 12.0).max(120.0);
             ui.allocate_ui_with_layout(vec2(table_w, body_h), Layout::top_down(Align::Min), |ui| {
                 ui.set_min_size(vec2(table_w, body_h));
-                key_table_ui(ui, s);
+                if let Some((row, chord)) = self.key_table_ui(ui, s) {
+                    s.remove_chord(&row, chord);
+                }
             });
             ui.allocate_ui_with_layout(
                 vec2(buttons_w, body_h),
@@ -1008,7 +1068,13 @@ impl Workbench {
     fn tree_row(&self, ui: &mut Ui, s: &Session, i: usize, name_w: f32) -> Option<TreeClick> {
         let node = &s.tree.nodes[i];
         let width = ui.available_width();
-        let (rect, resp) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::click());
+        // A command can be dragged onto a key of the keyboard.
+        let sense = if node.is_group() {
+            Sense::click()
+        } else {
+            Sense::click_and_drag()
+        };
+        let (rect, resp) = ui.allocate_exact_size(vec2(width, ROW_H), sense);
         let indent = 6.0 + node.depth as f32 * 16.0;
         let font = theme::body();
         let Some(entry) = &node.entry else {
@@ -1039,6 +1105,7 @@ impl Workbench {
             return resp.clicked().then(|| TreeClick::Toggle(node.key.clone()));
         };
         let key = RowKey::of(entry);
+        resp.dnd_set_drag_payload(key.clone());
         let selected = s.selected.as_ref() == Some(&key);
         let chords = s.chords_of(&key);
         let cell = Rect::from_min_max(pos2(rect.left() + name_w, rect.top()), rect.max);
@@ -1124,63 +1191,6 @@ enum Outcome {
     None,
     Ok,
     Cancel,
-}
-
-/// The Key table: "Key:" and the commands of every modifier combination of the
-/// selected key (the visual keyboard selects keys).
-fn key_table_ui(ui: &mut Ui, _s: &Session) {
-    ui.spacing_mut().item_spacing.y = 0.0;
-    let width = ui.available_width();
-    let (r, _) = ui.allocate_exact_size(vec2(width, 18.0), Sense::hover());
-    ui.painter().text(
-        r.left_center(),
-        Align2::LEFT_CENTER,
-        tr("Key: ").trim_end(),
-        theme::body(),
-        color::TEXT_STRONG,
-    );
-    let (head, _) = ui.allocate_exact_size(vec2(width, 18.0), Sense::hover());
-    let mods_w = (width * 0.22).clamp(70.0, 130.0);
-    let p = ui.painter();
-    p.text(
-        pos2(head.left() + 16.0, head.center().y),
-        Align2::LEFT_CENTER,
-        tr("Modifiers"),
-        theme::body(),
-        color::TEXT,
-    );
-    p.text(
-        pos2(head.left() + mods_w + 8.0, head.center().y),
-        Align2::LEFT_CENTER,
-        tr("Command"),
-        theme::body(),
-        color::TEXT,
-    );
-    let list = Rect::from_min_size(ui.cursor().min, vec2(width, ui.available_height()));
-    ui.painter().rect_filled(list, 2.0, palette::LIST_BG);
-    let rows = text::Mods::table();
-    egui::ScrollArea::vertical()
-        .id_salt("shortcut_key_table")
-        .auto_shrink([false, false])
-        .show_rows(ui, ROW_H, rows.len(), |ui, range| {
-            for m in &rows[range] {
-                let (rect, _) =
-                    ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::hover());
-                let p = ui.painter();
-                p.hline(
-                    rect.x_range(),
-                    rect.bottom() - 0.5,
-                    Stroke::new(1.0, palette::ROW_LINE),
-                );
-                p.text(
-                    pos2(rect.left() + 16.0, rect.center().y),
-                    Align2::LEFT_CENTER,
-                    m.text(),
-                    theme::body(),
-                    color::TEXT,
-                );
-            }
-        });
 }
 
 /// A label right-aligned in a column of `width` ("Preset:").

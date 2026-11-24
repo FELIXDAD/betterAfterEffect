@@ -65,6 +65,7 @@ use crate::geom::{IRect, Rect, is_invertible, scale_affine};
 use crate::input::{
     CustomContent, FootageRef, LayerContent, RenderComp, RenderEffect, RenderLayer, RenderMask,
 };
+use crate::light::Lighting;
 use crate::mask::MaskStack;
 pub use crate::mask::{Expansion, MaskEdge, MaskNode, MaskRaster};
 use crate::request::RenderRequest;
@@ -275,8 +276,11 @@ pub struct LayerOp {
     /// sample; the draw averages the layer over them.
     pub motion: Option<Arc<[Homography]>>,
     /// Pieces of 3D layers cut at intersections: half-planes `a·x + b·y + c ≥ 0`
-    /// in input space pixels.
-    pub clips: Vec<[f64; 3]>,
+    /// in input space pixels, and how far coverage reaches past each
+    /// ([`crate::three_d::Fragment::clips`]).
+    pub clips: Vec<[f64; 4]>,
+    /// 3D layers lit by the comp's lights (AE-CMP-436).
+    pub lighting: Option<Arc<Lighting>>,
 }
 
 /// The pixels of a layer op.
@@ -652,18 +656,55 @@ impl Builder<'_, '_> {
             ops.extend(planned.into_iter().map(|(_, op)| op));
             return Ok(());
         }
-        let plates: Vec<Plate> = planned
-            .iter()
-            .map(|(index, op)| Plate {
-                matrix: comp.layers[*index].matrix_3d.unwrap_or_default(),
-                rect: op.content,
-            })
-            .collect();
-        let eye = comp.view_camera().position();
-        for fragment in depth_order(&plates, eye) {
-            let mut op = planned[fragment.item].1.clone();
-            op.clips = fragment.clips;
-            ops.push(op);
+        // Layers whose drawn areas do not overlap cannot hide each other: sort
+        // and cut only within clusters of overlapping layers (fewer cuts, and
+        // no cut where nothing is in front).
+        let n = planned.len();
+        let mut cluster: Vec<usize> = (0..n).collect();
+        fn root(c: &mut [usize], mut i: usize) -> usize {
+            while c[i] != i {
+                c[i] = c[c[i]];
+                i = c[i];
+            }
+            i
+        }
+        for i in 0..n {
+            for j in i + 1..n {
+                if !planned[i]
+                    .1
+                    .bounds
+                    .intersect(&planned[j].1.bounds)
+                    .is_empty()
+                {
+                    let (a, b) = (root(&mut cluster, i), root(&mut cluster, j));
+                    cluster[a.max(b)] = a.min(b);
+                }
+            }
+        }
+        let eye = comp.view_camera().eye();
+        for first in 0..n {
+            if root(&mut cluster, first) != first {
+                continue;
+            }
+            let members: Vec<usize> = (first..n)
+                .filter(|&i| root(&mut cluster, i) == first)
+                .collect();
+            if members.len() == 1 {
+                ops.push(planned[first].1.clone());
+                continue;
+            }
+            let plates: Vec<Plate> = members
+                .iter()
+                .map(|&i| Plate {
+                    matrix: comp.layers[planned[i].0].matrix_3d.unwrap_or_default(),
+                    rect: planned[i].1.content,
+                })
+                .collect();
+            for fragment in depth_order(&plates, eye) {
+                let mut op = planned[members[fragment.item]].1.clone();
+                op.clips = fragment.clips;
+                ops.push(op);
+            }
         }
         Ok(())
     }
@@ -931,6 +972,29 @@ impl Builder<'_, '_> {
         }
         self.resolving.pop();
 
+        // 3D layers that accept lights, reached by a light (AE-CMP-436): a
+        // light with its Adjustment Layer switch on lights only the layers
+        // below it (AE-CMP-435), and a layer no light reaches stays unlit
+        // (measured in AE 26.2.1).
+        let lighting = layer
+            .matrix_3d
+            .filter(|_| layer.material.accepts_lights)
+            .and_then(|matrix| {
+                let lights: Arc<[_]> = comp
+                    .lights
+                    .iter()
+                    .filter(|l| l.scope_below.is_none_or(|light| index > light))
+                    .copied()
+                    .collect();
+                (!lights.is_empty()).then(|| {
+                    Arc::new(Lighting {
+                        matrix,
+                        material: layer.material,
+                        lights,
+                        eye: comp.view_camera().eye(),
+                    })
+                })
+            });
         let (transform, projection, motion) = match placement {
             Placement::Affine(t) => (t, None, None),
             Placement::General {
@@ -958,6 +1022,7 @@ impl Builder<'_, '_> {
             projection,
             motion,
             clips: Vec::new(),
+            lighting,
         }))
     }
 
@@ -1062,6 +1127,7 @@ impl Builder<'_, '_> {
             projection: None,
             motion: None,
             clips: Vec::new(),
+            lighting: None,
         };
         OpInput::Image(self.push(Node {
             kind: NodeKind::Composite(CompositeNode {
@@ -1312,6 +1378,7 @@ impl Builder<'_, '_> {
             projection: None,
             motion: None,
             clips: Vec::new(),
+            lighting: None,
         }])
     }
 
@@ -1656,6 +1723,7 @@ fn covers(op: &LayerOp, canvas: IRect, scale: f64) -> bool {
         || op.matte.is_some()
         || op.projection.is_some()
         || op.motion.is_some()
+        || op.lighting.is_some()
         || !op.clips.is_empty()
     {
         return false;

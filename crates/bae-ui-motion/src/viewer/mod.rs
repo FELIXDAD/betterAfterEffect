@@ -25,6 +25,7 @@ use crate::tools::{Tool, ViewRequest};
 mod bar;
 pub(crate) mod errors;
 mod free_transform;
+mod menu;
 mod motion_path;
 mod overlay;
 mod path_edit;
@@ -78,6 +79,8 @@ pub struct CompositionViewer {
     select: select_tool::SelectState,
     /// Magnification of the last frame (arrow keys nudge by screen pixels).
     mag: f32,
+    /// Layers under the pointer when the context menu opened (topmost first).
+    menu_layers: Vec<PrimPath>,
     /// Pixel step the last frame rendered at (1 Full, 2 Half …).
     render_factor: u32,
     /// Type tool: text being typed or edited.
@@ -793,6 +796,8 @@ impl Panel for CompositionViewer {
                 }
             }
         }
+        menu::frame(&mut self.menu_layers, &resp, cx, &session, &comp, &view);
+
         // Items dropped from the project panel become layers.
         if let Some(item) = resp.dnd_release_payload::<ItemDrag>() {
             add_item_as_layer(cx, &session, &item.0, pointer.map(|p| view.to_comp(p)));

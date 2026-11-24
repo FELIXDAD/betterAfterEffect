@@ -390,3 +390,120 @@ impl Workbench {
         self.open_shortcut_editor();
     }
 }
+
+/// The keyboard: keys coloured by what they do with the shown modifiers, a
+/// modifier cap clicked holds it, a key clicked fills the Key table, a command
+/// dropped on a key gets that key with the modifiers shown.
+#[test]
+fn the_keyboard_shows_and_binds_keys() {
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    let mut wb = workbench();
+    wb.open_shortcut_editor();
+    let mut s = wb.editor.session.take().unwrap();
+    let none = egui::Modifiers::NONE;
+    // No modifier: U is an application key, J a panel key, B a panel key.
+    s.refresh_for_test(text::Mods::NONE);
+    let look = |s: &Session, k: Key| s.keys_for_test(k);
+    assert_eq!(
+        look(&s, Key::U).application.as_deref(),
+        Some("Reveal Keyframes")
+    );
+    assert!(look(&s, Key::J).application.is_none() && look(&s, Key::J).panel.is_some());
+    // ⌘ clicked: the ⌘ layer (Cmd+K is Composition Settings).
+    wb.keyboard_action(
+        &mut s,
+        keys_ui::KeyboardAction::ToggleModifier(keyboard::Modifier::Command),
+        none,
+    );
+    let cmd = s.shown_mods(none);
+    assert!(cmd.command);
+    s.refresh_for_test(cmd);
+    assert_eq!(
+        look(&s, Key::K).application.as_deref(),
+        Some("Composition Settings...")
+    );
+    assert!(look(&s, Key::U).application.is_none());
+    // A panel scope shows only that panel's keys.
+    s.choose_scope(
+        s.tree
+            .scopes
+            .iter()
+            .position(|x| x.title == "Timeline Panel"),
+    );
+    s.refresh_for_test(text::Mods::NONE);
+    assert!(look(&s, Key::U).panel.is_none() && look(&s, Key::U).application.is_none());
+    assert_eq!(
+        look(&s, Key::J).panel.as_deref(),
+        Some("Go to Previous Keyframe")
+    );
+    s.choose_scope(None);
+    // Clicking K lists its combinations; ⌘ is the selected row.
+    wb.keyboard_action(&mut s, keys_ui::KeyboardAction::SelectKey(Key::K), none);
+    assert_eq!(s.key, Some(Key::K));
+    assert_eq!(s.key_row, Some(cmd));
+    assert_eq!(wb.key_label(&s), "Key: K");
+    // Drop New Composition on ⌘J: bound, the key selected.
+    wb.keyboard_action(
+        &mut s,
+        keys_ui::KeyboardAction::Drop(row("comp.new", None), chord("Cmd+J")),
+        none,
+    );
+    assert_eq!(
+        s.chords_of(&row("comp.new", None)),
+        [chord("Cmd+N"), chord("Cmd+J")]
+    );
+    assert_eq!(s.key, Some(Key::J));
+    // Dropping a command on a key another command has moves it, with the message.
+    wb.keyboard_action(
+        &mut s,
+        keys_ui::KeyboardAction::Drop(row("comp.new", None), chord("Cmd+K")),
+        none,
+    );
+    assert!(s.chords_of(&row("comp.settings", None)).is_empty());
+    assert!(matches!(
+        s.message,
+        Message::Conflict {
+            kind: ConflictKind::Application,
+            ..
+        }
+    ));
+    // The tooltip names the scope, the command and its place in the tree.
+    let tip = s.tooltip_for_test(&chord("Cmd+K"));
+    assert_eq!(
+        tip,
+        [
+            "Application: New Composition... (Application \u{2192} Composition \u{2192} New Composition...)"
+        ]
+    );
+    // ⌘K is now New Composition's only: one command on K. J has two (the
+    // timeline's J and ⌘J).
+    let none_mods = egui::Modifiers::NONE;
+    wb.keyboard_action(
+        &mut s,
+        keys_ui::KeyboardAction::SelectKey(Key::K),
+        none_mods,
+    );
+    assert_eq!(wb.key_label(&s), "Key: K");
+    wb.keyboard_action(
+        &mut s,
+        keys_ui::KeyboardAction::SelectKey(Key::J),
+        none_mods,
+    );
+    assert_eq!(wb.key_label(&s), "Key: J (multiple commands assigned)");
+    wb.editor.session = Some(s);
+}
+
+impl Session {
+    fn refresh_for_test(&mut self, mods: text::Mods) {
+        self.keys = keys_ui::KeyCache::default();
+        self.refresh_looks(mods);
+    }
+
+    fn keys_for_test(&self, k: Key) -> keyboard::KeyLook {
+        self.keys.looks.get(&k).cloned().unwrap_or_default()
+    }
+
+    fn tooltip_for_test(&self, chord: &Chord) -> Vec<String> {
+        self.key_tooltip(chord)
+    }
+}
