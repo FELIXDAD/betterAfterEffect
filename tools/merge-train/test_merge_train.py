@@ -429,13 +429,14 @@ class CancelledTest(Base):
         return {self.NAME: {"id": cid, "name": self.NAME, "status": "completed",
                             "conclusion": "cancelled", "completed_at": done, "html_url": "u"}}
 
-    def rerun(self, ps, runs, rc=0):
+    def rerun(self, ps, runs, rc=0, infra=False):
         calls = []
 
         def fake_sh(cmd, **kw):
             calls.append(cmd)
             return (rc, "", "busy")
         with mock.patch.object(mt, "check_runs", return_value=runs), \
+                mock.patch.object(mt, "runner_not_acquired", return_value=infra), \
                 mock.patch.object(mt, "sh", side_effect=fake_sh):
             why = mt.rerun_cancelled(pr(), ps, [self.NAME])
         return why, calls
@@ -452,6 +453,25 @@ class CancelledTest(Base):
         why, calls = self.rerun(ps, self.runs(102))     # the rerun was cancelled too
         self.assertIn("2 次", why)
         self.assertEqual(calls, [])
+
+    def test_no_runner_cancels_are_rerun_without_counting(self):
+        ps = {}
+        for cid in (201, 202, 203):  # GitHub capacity: never counted toward the limit
+            why, calls = self.rerun(ps, self.runs(cid), infra=True)
+            self.assertIsNone(why)
+            self.assertEqual(len(calls), 1)
+        why, calls = self.rerun(ps, self.runs(203), infra=True)  # same run: wait
+        self.assertEqual(calls, [])
+        self.rerun(ps, self.runs(204))                             # a real cancel: rerun, 1/2
+        why, _ = self.rerun(ps, self.runs(205))                    # second real cancel: fail
+        self.assertIn("2 次", why)
+
+    def test_runner_not_acquired_reads_annotations(self):
+        notes = [{"message": "The job was not acquired by Runner of type hosted even after multiple attempts"}]
+        with mock.patch.object(mt, "gh_json", return_value=notes):
+            self.assertTrue(mt.runner_not_acquired(1))
+        with mock.patch.object(mt, "gh_json", return_value=[{"message": "Canceling since a higher priority waiting request exists"}]):
+            self.assertFalse(mt.runner_not_acquired(1))
 
     def test_fresh_cancel_waits_for_replacing_run(self):
         why, calls = self.rerun({}, self.runs(101, minutes_ago=0))
