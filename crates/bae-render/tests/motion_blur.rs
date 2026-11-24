@@ -89,20 +89,20 @@ fn horizontal_motion_averages_every_placement() {
     let mut r = Renderer::new(gpu);
     let mut comp = comp_with_samples(16);
     let mut layer = solid([20, 20]);
-    // 16 samples 2 px apart (shutter positions (k + ½)/16 of 32 px).
+    // 16 samples 2 px apart (shutter positions k/16 of 32 px).
     let at = |x: f64| DAffine2::from_translation(DVec2::new(x, 10.0));
     layer.transform = at(26.0);
     layer.motion_samples = (0..16)
         .map(|k| LayerSample {
-            transform: at(10.0 + 32.0 * (f64::from(k) + 0.5) / 16.0),
+            transform: at(10.0 + 32.0 * f64::from(k) / 16.0),
             matrix_3d: None,
         })
         .collect();
     comp.layers.push(layer);
     let img = render(&mut r, &comp);
-    // 2 px steps exceed AE's one sample per pixel of travel: the 2D layer is
-    // sampled 32 times, 1 px apart, over the same 32 px shutter travel.
-    let edges: Vec<f64> = (0..32).map(|j| 10.0 + f64::from(j) + 0.5).collect();
+    // 32 px of travel: AE samples a 2D layer every 1.9 px or closer, so 17
+    // placements at shutter positions j/17 instead of 16.
+    let edges: Vec<f64> = (0..17).map(|j| 10.0 + 32.0 * f64::from(j) / 17.0).collect();
     let mut worst = 0.0f64;
     for x in 0..100 {
         let a = f64::from(img.px(x, 20)[3]);
@@ -114,8 +114,8 @@ fn horizontal_motion_averages_every_placement() {
     // Smeared over the travel: partial coverage on both sides.
     assert!(img.px(15, 20)[3] > 0 && img.px(15, 20)[3] < 128);
     // The smear (32 px) is longer than the layer (20 px): no pixel is ever
-    // covered for the whole shutter, the plateau is 20/32.
-    assert_eq!(img.px(40, 20)[3], 159);
+    // covered for the whole shutter.
+    assert!(img.px(40, 20)[3] < 200);
 }
 
 #[test]
@@ -250,11 +250,15 @@ fn both_switches_gate_motion_blur() {
                 (26..=34).contains(&n),
                 "comp {comp_on} layer {layer_on}: {n}"
             );
-            // Centred on the frame-time position (phase −90°): x = 50 ± 10.
+            // Phase −90°: 16 samples from 7.5 px before the frame-time position
+            // (left edge 40) on, 15/16 px apart (AE's t_open + dur·k/N).
             assert_eq!(img.px(50, 20)[3], 255);
-            let left = f64::from(img.px(40, 20)[3]);
-            let right = f64::from(img.px(59, 20)[3]);
-            assert!((left - right).abs() <= 2.0, "{left} vs {right}");
+            let edges: Vec<f64> = (0..16).map(|k| 32.5 + 15.0 * f64::from(k) / 16.0).collect();
+            for x in [40, 59] {
+                let a = f64::from(img.px(x, 20)[3]);
+                let want = expected(x, &edges);
+                assert!((a - want).abs() <= 1.5, "x = {x}: {a} vs {want}");
+            }
         } else {
             assert_eq!(n, 0, "comp {comp_on} layer {layer_on}: sharp");
         }

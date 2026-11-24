@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn default_camera_is_identity_at_z0() {
         let cam = Camera::default_for(1920, 1080);
-        close(cam.zoom, 2666.666_666_666_667, 1e-9);
+        close(cam.zoom, 2_666.666_666_666_667, 1e-9);
         // A layer at z = 0 with an arbitrary 2D placement projects 1:1.
         let layer = DMat4::from_translation(DVec3::new(100.0, 50.0, 0.0))
             * DMat4::from_rotation_z(0.3)

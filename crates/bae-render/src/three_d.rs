@@ -2,9 +2,10 @@
 //! groups, projective layer geometry and per-pixel-exact depth order.
 //!
 //! * [`segments`] splits a comp's stack into what is composited by stacking order
-//!   and contiguous runs of 3D layers ("3D bins", AE-CMP-406): 2D layers,
-//!   adjustment layers and (non-collapsed) 3D pre-comps break a run; cameras,
-//!   lights and layers without pixels do not.
+//!   and contiguous runs of 3D layers ("3D bins", AE-CMP-406): 2D layers and
+//!   adjustment layers break a run; cameras, lights and layers without pixels do
+//!   not. A 3D pre-comp is one plane of the run (AE 26.2.1 sorts it by depth
+//!   with the other 3D layers).
 //! * [`Homography`] is a planar projective map (a 3D layer seen through a camera,
 //!   or a 2D affine), with the clipping and bounds the render graph needs for ROI
 //!   negotiation.
@@ -12,8 +13,9 @@
 //!   camera (AE-CMP-404) and splits layers that pass through each other along the
 //!   intersection line (AE-CMP-405), BSP style: every layer is a planar quad, so
 //!   the order is exact per pixel. Each [`Fragment`] is a layer drawn with up to
-//!   [`MAX_CLIPS`] half-planes in its own layer space. Coplanar layers keep the
-//!   stacking order (the higher layer in front).
+//!   [`MAX_CLIPS`] half-planes in its own layer space. Layers less than
+//!   [`TIE_DEPTH`] apart keep the stacking order (the higher layer in front),
+//!   which also moves intersection seams like AE does.
 
 use glam::{DAffine2, DMat3, DMat4, DVec2, DVec3};
 
@@ -46,22 +48,14 @@ pub fn segments(layers: &[RenderLayer]) -> Vec<Segment> {
         if !draws {
             continue;
         }
-        let three_d = layer.matrix_3d.is_some() && !layer.adjustment;
-        // A non-collapsed 3D pre-comp is a flat image placed in 3D: it is seen
-        // through the camera but does not intersect or sort with other layers.
-        let own_group = three_d && matches!(layer.content, LayerContent::Comp(_));
-        if three_d && !own_group {
+        if layer.matrix_3d.is_some() && !layer.adjustment {
             group.push(index);
             continue;
         }
         if !group.is_empty() {
             out.push(Segment::Group(std::mem::take(&mut group)));
         }
-        out.push(if own_group {
-            Segment::Group(vec![index])
-        } else {
-            Segment::Layer(index)
-        });
+        out.push(Segment::Layer(index));
     }
     if !group.is_empty() {
         out.push(Segment::Group(group));
@@ -267,6 +261,12 @@ pub struct Fragment {
 /// Distance below which a point counts as on a plane (comp pixels).
 const PLANE_EPS: f64 = 1e-4;
 
+/// Depth along the view ray (comp pixels) within which the layer higher in the
+/// stack wins over another layer's plane. Measured in AE 26.2.1: the seam of a
+/// layer crossing a camera-facing one at 45° sits one pixel into the lower
+/// layer's half.
+pub const TIE_DEPTH: f64 = 1.0;
+
 struct Poly {
     item: usize,
     points: Vec<DVec3>,
@@ -310,7 +310,7 @@ pub fn depth_order(plates: &[Plate], eye: DVec3) -> Vec<Fragment> {
             .collect();
     }
     let mut budget = plates.len() * 4 + 16;
-    let tree = build(polys, plates, &mut budget);
+    let tree = build(polys, plates, eye, &mut budget);
     let mut out = Vec::with_capacity(plates.len());
     emit(tree, eye, &mut out);
     out
@@ -329,7 +329,12 @@ fn plane_of(p: &Plate) -> Option<(DVec3, f64)> {
     Some((n, -n.dot(p.matrix.w_axis.truncate())))
 }
 
-fn build(mut polys: Vec<Poly>, plates: &[Plate], budget: &mut usize) -> Option<Box<Node>> {
+fn build(
+    mut polys: Vec<Poly>,
+    plates: &[Plate],
+    eye: DVec3,
+    budget: &mut usize,
+) -> Option<Box<Node>> {
     if polys.is_empty() {
         return None;
     }
@@ -343,7 +348,22 @@ fn build(mut polys: Vec<Poly>, plates: &[Plate], budget: &mut usize) -> Option<B
         back: None,
     };
     let (mut front, mut back) = (Vec::new(), Vec::new());
+    // Towards the eye: +1 or −1 (0 when the eye is on the plane).
+    let towards_eye = (normal.dot(eye) + offset).signum();
+    let root_item = node.on[0].item;
     for poly in polys {
+        // Ties go to the higher layer (the larger item): another layer's points
+        // within TIE_DEPTH (along the view ray) of this plane count as behind it
+        // when this layer is higher, as in front of it when that layer is higher.
+        let centre = poly.points.iter().sum::<DVec3>() / poly.points.len() as f64;
+        let along_ray = normal.dot((centre - eye).normalize_or_zero()).abs();
+        let tie = TIE_DEPTH * along_ray * towards_eye;
+        let bias = match poly.item.cmp(&root_item) {
+            std::cmp::Ordering::Less => -tie,
+            std::cmp::Ordering::Greater => tie,
+            std::cmp::Ordering::Equal => 0.0,
+        };
+        let offset = offset + bias;
         let d: Vec<f64> = poly
             .points
             .iter()
@@ -372,8 +392,8 @@ fn build(mut polys: Vec<Poly>, plates: &[Plate], budget: &mut usize) -> Option<B
             }
         }
     }
-    node.front = build(front, plates, budget);
-    node.back = build(back, plates, budget);
+    node.front = build(front, plates, eye, budget);
+    node.back = build(back, plates, eye, budget);
     Some(Box::new(node))
 }
 
@@ -518,7 +538,7 @@ mod tests {
     }
 
     #[test]
-    fn segments_isolate_3d_precomps() {
+    fn segments_sort_3d_precomps_with_other_layers() {
         let mut pre = three_d("pre");
         pre.content = LayerContent::Comp(std::sync::Arc::new(crate::RenderComp::new(
             PrimPath::new("/comps/inner").unwrap(),
@@ -526,14 +546,7 @@ mod tests {
             10,
         )));
         let layers = vec![three_d("a"), pre, three_d("b")];
-        assert_eq!(
-            segments(&layers),
-            vec![
-                Segment::Group(vec![2]),
-                Segment::Group(vec![1]),
-                Segment::Group(vec![0]),
-            ]
-        );
+        assert_eq!(segments(&layers), vec![Segment::Group(vec![2, 1, 0])]);
     }
 
     #[test]
@@ -614,13 +627,19 @@ mod tests {
         let plates = [plate(0.0, 0.0), plate(0.0, 45.0)];
         let order = depth_order(&plates, EYE);
         assert_eq!(order.len(), 3, "{order:?}");
-        // The turned plate is cut in two along x = 50 (its centre line).
+        // The turned plate is cut in two near its centre line x = 50: where it
+        // is less than TIE_DEPTH (in depth) behind the flat one it still wins
+        // (it is the higher layer), so the cut sits √2 · TIE_DEPTH to the left.
         let cut: Vec<&Fragment> = order.iter().filter(|f| f.item == 1).collect();
         assert_eq!(cut.len(), 2);
         for f in &cut {
             let [a, b, c] = f.clips[0];
             assert!((b.abs()) < 1e-9 && (a.abs() - 1.0).abs() < 1e-9);
-            assert!((c / a + 50.0).abs() < 1e-9, "{:?}", f.clips);
+            let x = -c / a;
+            assert!(
+                x < 50.0 - 0.9 * TIE_DEPTH && x > 50.0 - 1.5 * TIE_DEPTH,
+                "{x}"
+            );
         }
         // Back half (left side, x < 50, which is pushed away from the eye)
         // first, then the flat plate, then the front half.

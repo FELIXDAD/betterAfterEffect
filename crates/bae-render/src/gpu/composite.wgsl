@@ -307,15 +307,21 @@ fn layer_px(di: u32, p: vec2<f32>, ix: vec4<f32>, iy: vec4<f32>, iw: vec4<f32>, 
         // Minified layers average a grid of bilinear samples over the pixel's
         // footprint in the source (a box prefilter, like AE's downsampling);
         // others take one sample.
+        // Lookups stay half a texel inside the content, so texels beyond it
+        // (pooled textures are larger) never bleed in: edges come from the
+        // coverage ramp alone, alike on all four sides.
+        let lo = d.rect.xy + 0.5;
+        let hi = max(d.rect.zw - 0.5, lo);
         let n = u32(clamp(ceil(max(length(du_dx), length(du_dy))), 1.0, 4.0));
         if n == 1u {
-            src = textureSampleLevel(t_src, s_linear, u * d.src.xy, 0.0);
+            src = textureSampleLevel(t_src, s_linear, clamp(u, lo, hi) * d.src.xy, 0.0);
         } else {
             var acc = vec4<f32>(0.0);
             for (var j = 0u; j < n; j++) {
                 for (var i = 0u; i < n; i++) {
                     let o = (vec2<f32>(f32(i), f32(j)) + 0.5) / f32(n) - 0.5;
-                    acc += textureSampleLevel(t_src, s_linear, (u + o.x * du_dx + o.y * du_dy) * d.src.xy, 0.0);
+                    let us = clamp(u + o.x * du_dx + o.y * du_dy, lo, hi);
+                    acc += textureSampleLevel(t_src, s_linear, us * d.src.xy, 0.0);
                 }
             }
             src = acc / f32(n * n);
