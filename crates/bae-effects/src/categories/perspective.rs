@@ -8,4 +8,7 @@ pub(crate) fn register(registry: &mut Registry) {
         &[embedded!("bevel-alpha", ["shaders/bevel_alpha.wgsl"])],
     );
     registry.effects.push(spatial::definitions::perspective());
+    registry
+        .effects
+        .push(spatial::stylize::radial_shadow_builtin());
 }
