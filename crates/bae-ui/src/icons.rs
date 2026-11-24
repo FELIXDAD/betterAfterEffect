@@ -40,6 +40,8 @@ pub enum Icon {
     Solo,
     Tag,
     Shy,
+    /// The Shy switch of a shy layer (the figure ducked behind the bar).
+    ShyOn,
     Collapse,
     Quality,
     Fx,
@@ -160,6 +162,7 @@ impl Icon {
         Icon::Solo,
         Icon::Tag,
         Icon::Shy,
+        Icon::ShyOn,
         Icon::Collapse,
         Icon::Quality,
         Icon::Fx,
