@@ -5,3 +5,5 @@
 pub mod blur;
 
 pub use blur::{BoxBlur, GaussianBlur};
+
+pub mod spatial;

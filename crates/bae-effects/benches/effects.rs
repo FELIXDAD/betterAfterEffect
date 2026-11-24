@@ -139,6 +139,25 @@ fn main() {
         }
     }
 
+    for (effect, params) in [
+        ("ADBE Motion Blur", vec![(2, Value::Float(100.0))]),
+        ("ADBE Radial Blur", vec![(1, Value::Float(25.0))]),
+        (
+            "ADBE Unsharp Mask2",
+            vec![(1, Value::Float(100.0)), (2, Value::Float(50.0))],
+        ),
+        ("ADBE Glo2", vec![(3, Value::Float(100.0))]),
+        ("ADBE Drop Shadow", vec![(5, Value::Float(100.0))]),
+        ("ADBE Mosaic", vec![]),
+    ] {
+        cases.push(Case {
+            name: format!("1080p {effect}"),
+            match_name: effect,
+            params,
+            size: HD,
+        });
+    }
+
     let mut results = Vec::new();
     println!("{:<44} {:>10} {:>10}", "case", "ms/frame", "latency");
     for case in &cases {

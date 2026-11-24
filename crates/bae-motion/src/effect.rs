@@ -145,6 +145,32 @@ impl bae_model::Command for ApplyEffect {
     }
 }
 
+// The AE dump records the center of the reference layer. A newly applied or
+// reset Radial Blur starts at the center of the actual layer, in layer pixels.
+fn instance_default(
+    stage: &Stage,
+    layer: &PrimPath,
+    param: &bae_model::EffectParamDef,
+) -> Option<Value> {
+    if param.match_name.as_deref() == Some("ADBE Radial Blur-0002") {
+        let source_size = stage
+            .prim(layer)
+            .and_then(|v| {
+                crate::layer::source_size_and_duration(stage, v.value("source")?.as_prim_ref()?)
+            })
+            .map(|(size, _)| size)
+            .filter(|[w, h]| *w > 0. && *h > 0.);
+        let size = source_size.or_else(|| {
+            let comp = query::comp_info(stage, &query::owning_comp(stage, layer)?)?;
+            Some([f64::from(comp.width), f64::from(comp.height)])
+        });
+        if let Some(size) = size {
+            return Some(Value::Vec2(size.map(|n| 0.5 * n)));
+        }
+    }
+    param.default.clone()
+}
+
 fn add_instance(
     tx: &mut Transaction<'_>,
     layer: &PrimPath,
@@ -180,8 +206,8 @@ fn add_instance(
         if param.kind.value_type().is_none() {
             continue;
         }
-        if let Some(value) = &param.default {
-            set(tx, &path, &param_attr(param.id), value.clone())?;
+        if let Some(value) = instance_default(tx.stage(), layer, param) {
+            set(tx, &path, &param_attr(param.id), value)?;
         }
     }
     Ok(path)
@@ -373,7 +399,7 @@ impl bae_model::Command for ResetEffects {
             let def = find_def(&self.defs, &match_name)
                 .ok_or_else(|| fail(format!("unknown effect `{match_name}`")))?;
             for param in &def.params {
-                let Some(default) = param.default.clone() else {
+                let Some(default) = instance_default(tx.stage(), &layer, param) else {
                     continue;
                 };
                 let attr = param_attr(param.id);

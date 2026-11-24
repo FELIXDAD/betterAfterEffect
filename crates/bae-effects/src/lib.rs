@@ -84,6 +84,10 @@ const PACKAGES: &[Embedded] = &[
     embedded!("hue-saturation", ["shaders/hue_saturation.wgsl"]),
     embedded!("levels", ["shaders/levels.wgsl"]),
     embedded!("pro-levels", ["shaders/pro_levels.wgsl"]),
+    embedded!("posterize", ["shaders/posterize.wgsl"]),
+    embedded!("sharpen", ["shaders/sharpen.wgsl"]),
+    embedded!("find-edges", ["shaders/find_edges.wgsl"]),
+    embedded!("bevel-alpha", ["shaders/bevel_alpha.wgsl"]),
     embedded!("tint", ["shaders/tint.wgsl"]),
     embedded!("tritone", ["shaders/tritone.wgsl"]),
 ];
@@ -223,6 +227,7 @@ pub fn register(defs: &mut EffectRegistry, library: &mut EffectLibrary) -> usize
 pub fn prewarm(gpu: &Arc<GpuContext>, format: wgpu::TextureFormat) -> Result<(), RenderError> {
     let rt = gpu::runtime(gpu);
     blur::prewarm(&rt, format)?;
+    effects::spatial::prewarm(&rt, format)?;
     for b in builtins() {
         if let Implementation::Declarative(fx) = &b.implementation {
             fx.prewarm(gpu, format)?;
@@ -288,6 +293,7 @@ fn load() -> Result<Vec<Builtin>, Vec<Diagnostic>> {
             &["blur", "box", "legacy", "模糊", "方框"],
         ));
     }
+    out.extend(effects::spatial::builtins());
     out.sort_by(|a, b| {
         (a.info.category.as_str(), a.info.name.as_str())
             .cmp(&(b.info.category.as_str(), b.info.name.as_str()))

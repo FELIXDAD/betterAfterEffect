@@ -1,0 +1,7 @@
+[effect.find-edges]
+name = "查找边缘"
+keywords = ["查找边缘"]
+
+[effect.find-edges.params]
+invert = "反转"
+blend = "与原始图像混合"

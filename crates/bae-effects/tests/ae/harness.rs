@@ -48,7 +48,12 @@ pub fn parse_cases(text: &str) -> Vec<Case> {
                     let value = match v {
                         serde_json::Value::Array(a) => {
                             let n: Vec<f64> = a.iter().map(|x| x.as_f64().unwrap()).collect();
-                            Value::Color([n[0], n[1], n[2], n.get(3).copied().unwrap_or(1.0)])
+                            match n.as_slice() {
+                                [x, y] => Value::Vec2([*x, *y]),
+                                [r, g, b] => Value::Color([*r, *g, *b, 1.0]),
+                                [r, g, b, a] => Value::Color([*r, *g, *b, *a]),
+                                _ => panic!("invalid AE array parameter {id}: {n:?}"),
+                            }
                         }
                         other => Value::Float(other.as_f64().unwrap()),
                     };

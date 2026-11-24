@@ -185,6 +185,9 @@ impl DeclarativeEffect {
                 fx.def.plugin = None;
                 if let Some(ae) = e.decl.ae_match_names.first() {
                     fx.def.match_name = ae.clone();
+                    for param in &mut fx.def.params {
+                        param.match_name = Some(format!("{ae}-{:04}", param.id));
+                    }
                 }
                 Ok(Arc::new(fx))
             })

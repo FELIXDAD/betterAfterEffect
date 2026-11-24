@@ -9,14 +9,7 @@ mod harness;
 #[test]
 fn matches_after_effects() {
     let golden = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ae/golden");
-    let cases: Vec<_> = harness::cases()
-        .into_iter()
-        .filter(|c| golden.join(format!("{}.png", c.name)).exists())
-        .collect();
-    if cases.is_empty() {
-        eprintln!("no AE golden images yet ({}): skipped", golden.display());
-        return;
-    }
+    let cases = harness::cases();
     let Some(gpu) = bae_gpu::testing::shared_context() else {
         return;
     };

@@ -1,0 +1,6 @@
+[effect.sharpen]
+name = "锐化"
+keywords = ["锐化"]
+
+[effect.sharpen.params]
+amount = "锐化量"
