@@ -579,6 +579,11 @@ impl Shell {
                 // A save or another project restarts the auto-save interval.
                 self.autosave.reset();
             }
+            ids::MINIMIZE => {
+                if let Some(view) = &self.view {
+                    view.window.set_minimized(true);
+                }
+            }
             ids::HELP => tracing::info!("`{}` is not implemented yet", inv.id),
             _ => match self.document.run(&inv) {
                 Outcome::Changed => self.set_notice(String::new()),

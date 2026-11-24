@@ -154,7 +154,7 @@ fn layer_items_are_greyed_out_and_shortcuts_do_nothing_without_a_comp() {
         (cmd | Modifiers::ALT | Modifiers::SHIFT, Key::T),
         (cmd, Key::D),
         (cmd | Modifiers::SHIFT, Key::D),
-        (cmd, Key::M),
+        (cmd | Modifiers::CTRL, Key::M),
         (Modifiers::NONE, Key::F9),
     ] {
         key(&mut h, m, k);
@@ -169,7 +169,7 @@ fn layer_items_are_greyed_out_and_shortcuts_do_nothing_without_a_comp() {
     );
     assert!(
         h.state().render_queue().lock().items().is_empty(),
-        "Cmd+M queued without a comp"
+        "Ctrl+Cmd+M queued without a comp"
     );
     assert!(
         h.state()

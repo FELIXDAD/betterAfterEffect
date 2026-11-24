@@ -402,7 +402,7 @@ fn chinese_ui_names_new_items_in_chinese() {
         painted_texts(&h)
     );
 
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     settle(&mut h);
     check(&h, "render queue", &mut problems);
 
@@ -533,7 +533,7 @@ fn english_ui_names_new_items_in_english() {
         painted_texts(&h)
     );
     check(&h, "comp 1 expanded", &mut problems);
-    key(&mut h, Modifiers::COMMAND, Key::M);
+    key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
     settle(&mut h);
     check(&h, "render queue", &mut problems);
     let scopes = shortcut_scopes(&mut h);

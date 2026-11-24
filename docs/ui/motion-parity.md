@@ -152,7 +152,7 @@ AE 26 的全部菜单项和默认快捷键命令（669 条，32 个上下文）�
 | Cmd+Shift+D | 拆分图层 | ✅ |
 | Delete / Backspace | 删除选中的关键帧，否则删除图层 / 项目项 | ✅ |
 | F9 / Shift+F9 / Cmd+Shift+F9 | 缓动 / 缓入 / 缓出 | ✅ |
-| Cmd+Alt+H | 切换定格关键帧 | ✅ |
+| Cmd+Alt+H（macOS 上 Ctrl+Cmd+Alt+H，同 AE：Cmd+Alt+H 归系统的“隐藏其他”） | 切换定格关键帧 | ✅ |
 | Cmd+A / Cmd+Shift+A、F2 | 全选图层 / 取消选择 | ✅ |
 | U / UU | 显示有动画的属性 / 修改过的属性 | ✅ |
 | P S R T A（Shift 叠加） | 只显示位置、缩放、旋转、不透明度、锚点 | ✅ |
@@ -168,7 +168,7 @@ AE 26 的全部菜单项和默认快捷键命令（669 条，32 个上下文）�
 | `（反引号） | 最大化 / 恢复面板 | ✅ |
 | F1 | BAE 帮助 | ✅ |
 | F3、Cmd+Shift+T | 效果控件 | ✅ |
-| Cmd+M、Cmd+Shift+/ | 添加到渲染队列 | ✅ |
+| Cmd+M（macOS 上 Ctrl+Cmd+M，同 AE：Cmd+M 归系统的最小化）、Cmd+Shift+/ | 添加到渲染队列 | ✅ |
 | Shift+F10 / Shift+F11 | 切换到 默认 / 审阅 工作区（菜单上显示） | ✅ |
 | Shift+F3 | 切换图表编辑器（`motion.timeline.graph_editor`） | ✅ |
 | Cmd+Alt+K / Cmd+Shift+K | 关键帧插值 / 关键帧速度对话框 | ✅ |

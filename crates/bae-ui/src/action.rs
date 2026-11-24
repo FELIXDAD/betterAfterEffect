@@ -188,6 +188,9 @@ pub mod ids {
     pub const CLOSE_PANEL: &str = "window.close_panel";
     /// Maximize / restore the focused panel group (AE: `~`).
     pub const MAXIMIZE_FRAME: &str = "window.maximize_frame";
+    /// Minimize the main window (macOS ⌘M, a system shortcut AE keeps without a
+    /// menu item).
+    pub const MINIMIZE: &str = "window.minimize";
     /// Switch the UI language; params `{"id": "en" | "zh"}`.
     pub const SET_LANGUAGE: &str = "app.language";
     /// Open the help documentation.
@@ -214,6 +217,7 @@ pub(crate) const SHELL_ACTIONS: &[(&str, &str)] = &[
     (ids::OPEN_PANEL, "Open Panel"),
     (ids::CLOSE_PANEL, "Close Panel"),
     (ids::MAXIMIZE_FRAME, "Maximize Panel Group"),
+    (ids::MINIMIZE, "Minimize"),
     (ids::SET_LANGUAGE, "Language"),
     (ids::HELP, "BAE Help"),
 ];

@@ -200,7 +200,8 @@ fn every_ae_shortcut_command_is_mapped() {
 }
 
 /// On macOS every command has AE's macOS defaults (AE 26.2.1's own file): the
-/// Windows chord with Ctrl → ⌘ and Alt → Option, or the `MAC_KEYS` exception.
+/// Windows chord with Ctrl → ⌘ and Alt → Option, or the `MAC_KEYS` exception,
+/// as AE uses them with "Use System Shortcut Keys" on (see `Key::chords`).
 #[test]
 fn mac_chords_follow_the_mac_file() {
     let json: Value = serde_json::from_str(MAC_SHORTCUTS_JSON).unwrap();
@@ -215,7 +216,12 @@ fn mac_chords_follow_the_mac_file() {
                 .iter()
                 .map(|k| k.as_str().unwrap())
                 .collect();
-            let mut want: Vec<String> = mac_chords(&keys.join("|"));
+            let file = mac_chords(&keys.join("|"));
+            let mut want: Vec<String> = match ctx.as_str() {
+                "MacSysShortcutsAlt" => Vec::new(),
+                "MacSysShortcutsStd" => file,
+                _ => file.into_iter().map(mac_system_key).collect(),
+            };
             let Some(row) = KEYS
                 .iter()
                 .find(|k| k.context == ctx && k.command == command)
@@ -1095,4 +1101,20 @@ fn menu_items_show_the_chord_ae_shows() {
         }
     }
     assert!(errors.is_empty(), "{}", errors.join("\n"));
+}
+
+/// AE's macOS menu shows ⌃⌥⌘H, ⌃⌘H and ⌃⌘M for the commands whose file chords
+/// the system owns (Hide Others, Hide, Minimize); Windows keeps the file's.
+#[test]
+fn mac_system_chords_get_control() {
+    let row = |cmd: &str| KEYS.iter().find(|k| k.command == cmd).unwrap();
+    let hold = row("ToggleKeyframeHoldInterp");
+    assert_eq!(hold.chords(true), ["Ctrl+Cmd+Alt+H"]);
+    assert_eq!(hold.chords(false), ["Cmd+Alt+H"]);
+    assert_eq!(row("ReplaceFootage").chords(true), ["Ctrl+Cmd+H"]);
+    assert!(
+        row("AddCompToRenderQueue")
+            .chords(true)
+            .contains(&"Ctrl+Cmd+M".to_owned())
+    );
 }

@@ -1054,11 +1054,17 @@ fn add_to_render_queue_action() {
             .any(|(id, item)| id == "motion.composition.render_queue"
                 && item.action == crate::actions::ids::ADD_TO_RENDER_QUEUE)
     );
+    // On macOS ⌘M is the system's Minimize: AE uses ⌃⌘M.
+    let chord = if cfg!(target_os = "macos") {
+        "Ctrl+Cmd+M"
+    } else {
+        "Cmd+M"
+    };
     assert!(
         crate::actions::bindings()
             .bindings
             .iter()
-            .any(|b| b.chord == bae_ui::Chord::parse("Cmd+M").unwrap()
+            .any(|b| b.chord == bae_ui::Chord::parse(chord).unwrap()
                 && b.action == crate::actions::ids::ADD_TO_RENDER_QUEUE)
     );
 }

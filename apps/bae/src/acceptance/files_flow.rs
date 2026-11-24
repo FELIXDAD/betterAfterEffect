@@ -1480,7 +1480,7 @@ fn render_queue_belongs_to_the_project() {
     for away in [Away::Close, Away::New, Away::Open] {
         let mut h = gui();
         comp_with(&mut h, &["motion.layer.new.solid"]);
-        key(&mut h, Modifiers::COMMAND, Key::M);
+        key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
         assert_eq!(queued(&h), 1, "{away:?}: queued");
         h.state_mut()
             .dialogs
@@ -1494,7 +1494,7 @@ fn render_queue_belongs_to_the_project() {
         } else {
             comp_with(&mut h, &[]);
         }
-        key(&mut h, Modifiers::COMMAND, Key::M);
+        key(&mut h, Modifiers::COMMAND | Modifiers::CTRL, Key::M);
         let q = h.state().render_queue();
         let q = q.lock();
         assert_eq!(q.items().len(), 1, "{away:?}");
