@@ -412,6 +412,8 @@ pub static SCHEMAS: &[PrimSchema] = &[
             ),
             boolean("preserve_frame_rate", false),
             boolean("preserve_resolution", false),
+            boolean("hide_shy_layers", false)
+                .doc("Timeline: hide layers whose Shy switch is on (AE Hide Shy Layers)."),
             int("label", 15),
         ],
     },

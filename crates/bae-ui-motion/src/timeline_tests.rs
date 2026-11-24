@@ -1677,11 +1677,11 @@ fn blending_mode_menu_sets_and_steps_the_selected_layers() {
     assert_eq!(mode(&h, &a), Some(Value::Enum("luminescent_premul".into())));
 }
 
-fn modes_cell(tl: &TimelinePanel, l: &PrimPath) -> (Rect, Pos2) {
+fn modes_cell(tl: &TimelinePanel, l: &PrimPath) -> (Rect, Pos2, Pos2) {
     tl.last_modes
         .iter()
-        .find(|(p, _, _)| p == l)
-        .map(|(_, t, w)| (*t, *w))
+        .find(|(p, ..)| p == l)
+        .map(|(_, t, w, a)| (*t, *w, *a))
         .unwrap_or_else(|| panic!("modes of {l} not drawn"))
 }
 
@@ -1709,6 +1709,31 @@ fn f4_alternates_switches_and_modes() {
 }
 
 #[test]
+fn hide_shy_layers_switch_hides_shy_layers_from_the_timeline() {
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let shy = h.layer.clone();
+    let other = path(&h.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"]);
+    h.run(
+        "attr.set",
+        json!({"path": shy, "attr": "shy", "value": {"type": "bool", "value": true}}),
+    );
+    let mut tl = h.bars();
+    let drawn = |tl: &TimelinePanel| tl.last_modes.len();
+    assert_eq!(drawn(&tl), 2);
+    // The comp switch left of the Graph Editor switch.
+    let sw = pos2(tl.last_axis.unwrap().left - 2.0 - 14.0 - 26.0, 22.0 + 17.0);
+    let r = h.click(&mut tl, sw, Modifiers::NONE);
+    h.apply(&r);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    assert_eq!(tl.last_modes.len(), 1);
+    assert_eq!(tl.last_modes[0].0, other);
+    h.undo();
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    assert_eq!(drawn(&tl), 2);
+}
+
+#[test]
 fn modes_column_t_switch_and_track_matte_pick_whip() {
     let mut h = H::new();
     let comp = h.comp.clone();
@@ -1717,7 +1742,7 @@ fn modes_column_t_switch_and_track_matte_pick_whip() {
     let mut tl = h.bars();
     let attr = |h: &H, l: &PrimPath, a: &str| query::static_value(&h.stage.prim(l).unwrap(), a);
     // T: Preserve Underlying Transparency.
-    let (t, _) = modes_cell(&tl, &fill);
+    let (t, ..) = modes_cell(&tl, &fill);
     let r = h.click(&mut tl, t.center(), Modifiers::NONE);
     h.apply(&r);
     assert_eq!(
@@ -1727,8 +1752,8 @@ fn modes_column_t_switch_and_track_matte_pick_whip() {
     // Pick whip from the fill layer onto the other layer: an Alpha matte, and the
     // matte layer's Video goes off.
     h.frame(&mut tl, Vec::new(), Modifiers::NONE);
-    let (_, whip) = modes_cell(&tl, &fill);
-    let (mt, _) = modes_cell(&tl, &matte);
+    let (_, whip, _) = modes_cell(&tl, &fill);
+    let (mt, ..) = modes_cell(&tl, &matte);
     let target = pos2(500.0, mt.center().y);
     let r = h.drag(&mut tl, whip, target, Modifiers::NONE);
     assert_eq!(r.invocations[0].id, "layer.set_track_matte");
@@ -1764,6 +1789,26 @@ fn modes_column_t_switch_and_track_matte_pick_whip() {
     assert_eq!(
         attr(&h, &fill, "track_matte_layer"),
         Some(Value::PrimRef(matte.clone()))
+    );
+    // The Invert, then the Alpha / Luma toggle in the row.
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let (.., alpha_luma) = modes_cell(&tl, &fill);
+    let r = h.click(&mut tl, alpha_luma + vec2(17.0, 0.0), Modifiers::NONE);
+    h.apply(&r);
+    assert_eq!(
+        attr(&h, &fill, "track_matte"),
+        Some(Value::Enum("luma_inverted".into()))
+    );
+    let r = h.click(&mut tl, alpha_luma, Modifiers::NONE);
+    h.apply(&r);
+    assert_eq!(
+        attr(&h, &fill, "track_matte"),
+        Some(Value::Enum("alpha_inverted".into()))
+    );
+    h.undo();
+    assert_eq!(
+        attr(&h, &fill, "track_matte"),
+        Some(Value::Enum("luma_inverted".into()))
     );
     assert_eq!(
         crate::timeline::flip_matte("luma", false, true),

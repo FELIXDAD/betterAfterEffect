@@ -321,6 +321,11 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Show / Hide Parent Column", "显示/隐藏父级列"),
     ("Set Track Matte", "设置轨道遮罩"),
     ("Track Matte", "轨道遮罩"),
+    ("Hide Shy Layers", "隐藏消隐图层"),
+    (
+        "Hides all layers for which the Shy switch is set",
+        "隐藏为其设置了“消隐”开关的所有图层",
+    ),
     ("Previous Blending Mode", "上一混合模式"),
     ("Move Markers", "移动标记"),
     ("Delete Markers", "删除标记"),

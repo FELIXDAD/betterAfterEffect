@@ -245,7 +245,8 @@ pub struct TimelinePanel {
     pub(crate) last_keys: Vec<(KeyRef, Pos2)>,
     /// Each layer row's T box and Track Matte pick whip, for tests.
     #[cfg(test)]
-    pub(crate) last_modes: Vec<(PrimPath, Rect, Pos2)>,
+    /// Per layer: T switch, pick whip, Alpha / Luma toggle (Invert is 17 px right).
+    pub(crate) last_modes: Vec<(PrimPath, Rect, Pos2, Pos2)>,
     /// Where the last frame drew the markers (glyph centres), for tests.
     #[cfg(test)]
     pub(crate) last_markers: Vec<(PrimPath, Pos2)>,
@@ -383,7 +384,11 @@ impl TimelinePanel {
 
     fn rows(&self, stage: &Stage, comp: &PrimPath, s: &Session) -> Vec<Row> {
         let mut out = Vec::new();
+        let hide_shy = bool_attr(stage, comp, "hide_shy_layers");
         for layer in query::comp_layers(stage, comp) {
+            if hide_shy && bool_attr(stage, &layer, "shy") {
+                continue;
+            }
             out.push(Row {
                 kind: RowKind::Layer,
                 layer: layer.clone(),

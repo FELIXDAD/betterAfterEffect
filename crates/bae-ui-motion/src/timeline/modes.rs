@@ -198,8 +198,6 @@ impl TimelinePanel {
                 egui::WidgetType::Button,
                 &bae_ui::a11y::context(&[layer_ctx, tr("Track Matte Pick Whip")]),
             );
-        #[cfg(test)]
-        self.last_modes.push((layer.clone(), t, whip.center()));
         if wresp.drag_started() && !locked {
             self.drag = Some(Drag::MatteWhip {
                 layer: layer.clone(),
@@ -219,6 +217,9 @@ impl TimelinePanel {
             .map_or(0, |i| i + 1);
         let before = sel;
         let toggles_x = x0 + MODES_W - 36.0;
+        #[cfg(test)]
+        self.last_modes
+            .push((layer.clone(), t, whip.center(), pos2(toggles_x + 8.0, cy)));
         let dr = Rect::from_min_max(
             pos2(tx0 + 16.0, rect.top() + 1.0),
             pos2(toggles_x - 2.0, rect.bottom() - 1.0),

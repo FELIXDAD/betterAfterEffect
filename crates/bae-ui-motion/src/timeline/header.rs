@@ -190,6 +190,35 @@ impl TimelinePanel {
         }
         gresp.on_hover_text(tr("Graph Editor"));
 
+        // Hide Shy Layers (comp switch, saved in the comp).
+        let shy = ge.translate(vec2(-26.0, 0.0));
+        let on = bool_attr(cx.stage, &info.path, "hide_shy_layers");
+        let sresp = ui
+            .interact(shy, ui.id().with("hide_shy_switch"), Sense::click())
+            .labeled_toggle(egui::WidgetType::Button, tr("Hide Shy Layers"), on);
+        if on {
+            ui.painter().rect_filled(shy, 2.0, color::BUTTON_ON);
+        }
+        icons::paint(
+            ui.painter(),
+            shy.shrink(3.0),
+            Icon::Shy,
+            if on {
+                color::ACCENT
+            } else if sresp.hovered() {
+                color::ICON
+            } else {
+                color::ICON_DIM
+            },
+        );
+        if sresp.clicked() {
+            cx.invoke_with(
+                "attr.set",
+                json!({"path": info.path, "attr": "hide_shy_layers", "value": {"type": "bool", "value": !on}}),
+            );
+        }
+        sresp.on_hover_text(tr("Hides all layers for which the Shy switch is set"));
+
         // Column headers.
         let p = ui.painter();
         p.rect_filled(colrow, 0.0, color::PANEL);
