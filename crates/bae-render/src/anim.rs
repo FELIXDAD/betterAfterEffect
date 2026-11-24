@@ -417,6 +417,7 @@ fn active_camera(ec: &EvaluatedComp) -> Option<Camera> {
         focus_distance: c.focus_distance,
         aperture: c.aperture,
         blur_level: c.blur_level,
+        projection: crate::camera::Projection::Perspective,
     })
 }
 
@@ -458,12 +459,23 @@ fn material(view: &bae_model::PrimView<'_>, t: Time) -> Material {
             .and_then(|v| v.as_bool())
             .unwrap_or(default)
     };
+    let percent = |attr: &str, default: f32| {
+        crate::eval::sample(view, attr, t)
+            .and_then(|v| v.as_f64())
+            .map_or(default, |v| v.clamp(0.0, 100.0) as f32)
+    };
     let mode = |on: bool| if on { ShadowMode::On } else { ShadowMode::Off };
+    let d = Material::default();
     Material {
         casts_shadows: mode(flag("material:casts_shadows", false)),
+        light_transmission: percent("material:light_transmission", d.light_transmission),
         accepts_shadows: mode(flag("material:accepts_shadows", true)),
         accepts_lights: flag("material:accepts_lights", true),
-        ..Material::default()
+        ambient: percent("material:ambient", d.ambient),
+        diffuse: percent("material:diffuse", d.diffuse),
+        specular_intensity: percent("material:specular_intensity", d.specular_intensity),
+        specular_shininess: percent("material:specular_shininess", d.specular_shininess),
+        metal: percent("material:metal", d.metal),
     }
 }
 

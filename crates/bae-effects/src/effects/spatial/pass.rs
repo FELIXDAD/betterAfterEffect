@@ -19,6 +19,17 @@ const ENTRIES: &[&str] = &[
     "shadow",
     "glow_extract",
     "glow_composite",
+    "emboss",
+    "cartoon_smooth",
+    "cartoon_fill",
+    "cartoon_luma",
+    "cartoon_stroke",
+    "cartoon_finish",
+    "rough_output",
+    "tile_resize",
+    "motion_tile",
+    "radial_shadow_project",
+    "radial_shadow_over",
 ];
 
 fn pipeline(
@@ -34,7 +45,8 @@ fn pipeline(
     rt.kernel(&key, || {
         Ok(KernelSource {
             label: "bae.effects.spatial",
-            wgsl: SOURCE.replace("WORKING_FORMAT", blur::format_name(format)?),
+            wgsl: format!("{SOURCE}\n{}", include_str!("stylize/stylize.wgsl"))
+                .replace("WORKING_FORMAT", blur::format_name(format)?),
             entry,
             bindings: vec![
                 (0, Binding::Uniform(UNIFORM_SIZE)),
