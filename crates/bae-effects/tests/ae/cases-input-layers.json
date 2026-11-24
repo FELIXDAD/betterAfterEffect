@@ -1,0 +1,33 @@
+{
+  "cases": [
+    {"name":"inputs_matte_alpha","effect":"ADBE Set Matte3","input":"chart","layers":{"matte":"soft"},"params":{"1":{"layer":"matte"}}},
+    {"name":"inputs_matte_luma","effect":"ADBE Set Matte3","input":"bars","layers":{"matte":"chart"},"params":{"1":{"layer":"matte"},"2":5}},
+    {"name":"inputs_matte_invert","effect":"ADBE Set Matte3","input":"soft","layers":{"matte":"rectangle"},"params":{"1":{"layer":"matte"},"3":1}},
+    {"name":"inputs_wipe_ramp","effect":"ADBE Gradient Wipe","input":"bars","layers":{"map":"ramp"},"params":{"1":0.4,"3":{"layer":"map"}}},
+    {"name":"inputs_wipe_soft","effect":"ADBE Gradient Wipe","input":"soft","layers":{"map":"bars"},"params":{"1":0.55,"2":0.3,"3":{"layer":"map"},"5":1},"tolerance":4,"mean":0.500},
+    {"name":"inputs_wipe_16","effect":"ADBE Gradient Wipe","input":"bars","layers":{"map":"ramp"},"params":{"1":0.45,"2":0.4,"3":{"layer":"map"}},"bpc":16},
+    {"name":"inputs_wipe_32","effect":"ADBE Gradient Wipe","input":"bars","layers":{"map":"ramp"},"params":{"1":0.45,"2":0.4,"3":{"layer":"map"}},"bpc":32},
+    {"name":"inputs_displace_full","effect":"ADBE Displacement Map","input":"fine","layers":{"map":"white"},"params":{"1":{"layer":"map"},"2":9,"3":7,"4":9,"5":-4,"8":0}},
+    {"name":"inputs_displace_wrap","effect":"ADBE Displacement Map","input":"fine","layers":{"map":"white"},"params":{"1":{"layer":"map"},"2":1,"3":7,"4":1,"5":-4,"7":1,"8":0}},
+    {"name":"inputs_displace_half","effect":"ADBE Displacement Map","input":"soft","layers":{"map":"bars"},"params":{"1":{"layer":"map"},"2":10,"3":25,"4":11,"5":25}},
+    {"name":"inputs_displace_gradient","effect":"ADBE Displacement Map","input":"bars","layers":{"map":"ramp"},"params":{"1":{"layer":"map"},"2":5,"3":12,"4":5,"5":5}},
+    {"name":"inputs_displace_alpha","effect":"ADBE Displacement Map","input":"chart","layers":{"map":"soft"},"params":{"1":{"layer":"map"},"2":4,"3":8,"4":11}},
+    {"name":"inputs_displace_colors","effect":"ADBE Displacement Map","input":"bars","layers":{"map":"rgb-grid"},"params":{"1":{"layer":"map"},"2":1,"3":8,"4":2,"5":6}},
+    {"name":"inputs_compound_white","effect":"ADBE Compound Blur","input":"lineg","layers":{"map":"white"},"params":{"1":{"layer":"map"},"2":10},"tolerance":9,"mean":1.530},
+    {"name":"inputs_compound_black","effect":"ADBE Compound Blur","input":"step","layers":{"map":"white"},"params":{"1":{"layer":"map"},"2":40,"4":1}},
+    {"name":"inputs_compound_step","effect":"ADBE Compound Blur","input":"fine","layers":{"map":"step"},"params":{"1":{"layer":"map"},"2":15},"tolerance":15,"mean":1.734},
+    {"name":"inputs_compound_ramp","effect":"ADBE Compound Blur","input":"bars","layers":{"map":"ramp"},"params":{"1":{"layer":"map"},"2":12},"tolerance":32,"mean":7.488},
+    {"name":"inputs_compound_invert","effect":"ADBE Compound Blur","input":"soft","layers":{"map":"ramp"},"params":{"1":{"layer":"map"},"2":20,"4":1},"tolerance":13,"mean":2.299},
+    {"name":"inputs_compound_large","effect":"ADBE Compound Blur","input":"chart","layers":{"map":"ramp"},"params":{"1":{"layer":"map"},"2":300},"tolerance":29,"mean":5.782},
+    {"name":"inputs_texture_flat","effect":"ADBE Texturize","input":"chart","layers":{"map":"white"},"params":{"1":{"layer":"map"}}},
+    {"name":"inputs_texture_x","effect":"ADBE Texturize","input":"bars","layers":{"map":"ramp"},"params":{"1":{"layer":"map"},"2":0}},
+    {"name":"inputs_texture_y","effect":"ADBE Texturize","input":"bars","layers":{"map":"ramp"},"params":{"1":{"layer":"map"},"2":90}},
+    {"name":"inputs_texture_diag","effect":"ADBE Texturize","input":"soft","layers":{"map":"bars"},"params":{"1":{"layer":"map"},"2":135}},
+    {"name":"inputs_texture_edge","effect":"ADBE Texturize","input":"white","layers":{"map":"step"},"params":{"1":{"layer":"map"},"2":0,"3":0.5}},
+    {"name":"inputs_fill_one","effect":"ADBE Fill","input":"white","masks":[[24,15,92,66],[120,50,200,112]],"params":{"1":{"mask":1},"2":[0.8,0.2,0.6,1]}},
+    {"name":"inputs_fill_all","effect":"ADBE Fill","input":"white","masks":[[24,15,92,66],[120,50,200,112]],"params":{"7":1,"5":0.4}},
+    {"name":"inputs_fill_invert","effect":"ADBE Fill","input":"white","masks":[[24,15,92,66],[120,50,200,112]],"params":{"1":{"mask":2},"6":1}},
+    {"name":"inputs_fill_feather_x","effect":"ADBE Fill","input":"white","masks":[[24,15,92,66],[120,50,200,112]],"params":{"1":{"mask":1},"3":20},"tolerance":4,"mean":0.500},
+    {"name":"inputs_fill_feather_y","effect":"ADBE Fill","input":"white","masks":[[24,15,92,66],[120,50,200,112]],"params":{"1":{"mask":2},"4":20},"tolerance":4,"mean":0.500}
+  ]
+}

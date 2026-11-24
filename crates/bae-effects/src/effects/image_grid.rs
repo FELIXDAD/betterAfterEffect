@@ -62,6 +62,17 @@ pub(super) fn kernel(
     source: &str,
     uniform_size: u32,
 ) -> Result<Arc<Kernel>, RenderError> {
+    kernel_with_inputs(rt, format, label, source, uniform_size, 2)
+}
+
+pub(super) fn kernel_with_inputs(
+    rt: &Runtime,
+    format: wgpu::TextureFormat,
+    label: &'static str,
+    source: &str,
+    uniform_size: u32,
+    input_count: u32,
+) -> Result<Arc<Kernel>, RenderError> {
     let key = KernelKey {
         owner: Arc::from(label),
         entry: Arc::from("main"),
@@ -79,12 +90,10 @@ pub(super) fn kernel(
             .concat()
             .replace("WORKING_FORMAT", format_name),
             entry: "main",
-            bindings: vec![
-                (0, Binding::Uniform(uniform_size)),
-                (1, Binding::Texture),
-                (2, Binding::Texture),
-                (3, Binding::Storage(format)),
-            ],
+            bindings: std::iter::once((0, Binding::Uniform(uniform_size)))
+                .chain((1..=input_count).map(|slot| (slot, Binding::Texture)))
+                .chain(std::iter::once((input_count + 1, Binding::Storage(format))))
+                .collect(),
             workgroup: [8, 8, 1],
         })
     })

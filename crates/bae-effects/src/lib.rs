@@ -149,6 +149,10 @@ impl Effect for Forward {
         self.0.layer_dependencies(params)
     }
 
+    fn mask_dependencies(&self, params: &EffectParams<'_>) -> Vec<bae_render::effect::MaskSelect> {
+        self.0.mask_dependencies(params)
+    }
+
     fn render(
         &self,
         ctx: &mut bae_render::EncodeContext<'_>,

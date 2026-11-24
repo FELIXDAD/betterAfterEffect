@@ -3,10 +3,10 @@ use crate::Registry;
 use super::packages;
 
 pub(crate) fn register(registry: &mut Registry) {
+    registry.effects.push(crate::effects::compound::fill());
     packages(
         registry,
         &[
-            embedded!("fill", ["shaders/fill.wgsl"]),
             embedded!("gradient-ramp", ["shaders/gradient_ramp.wgsl"]),
             embedded!(
                 "procedural",

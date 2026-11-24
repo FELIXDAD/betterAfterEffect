@@ -10,6 +10,10 @@ use std::sync::Arc;
 pub(crate) fn register(registry: &mut Registry) {
     registry.prewarm.push(crate::blur::prewarm);
     registry.prewarm.push(spatial::prewarm);
+    registry.prewarm.push(crate::effects::compound::prewarm);
+    registry
+        .effects
+        .push(crate::effects::compound::compound_blur());
     packages(registry, &[embedded!("sharpen", ["shaders/sharpen.wgsl"])]);
     let blur = |fx: GaussianBlur| {
         let names = fx.names_zh.clone();

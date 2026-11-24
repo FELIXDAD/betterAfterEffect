@@ -5,7 +5,8 @@ mod common;
 use bae_effects::get;
 use bae_model::{PrimPath, Value};
 use bae_render::{
-    IRect, LayerContent, RenderComp, RenderLayer, RenderRequest, Renderer, Resolution,
+    IRect, LayerContent, MaskMode, RenderComp, RenderLayer, RenderMask, RenderRequest, Renderer,
+    Resolution, fixture::rect_path,
 };
 
 use common::{F16, F32, Pixels, assert_close, context, instance, run, run_depth};
@@ -202,7 +203,7 @@ fn choker_spreads_fractional_pixels_and_has_an_opaque_matte_view() {
 #[test]
 fn set_matte_checks_out_the_source_of_a_hidden_layer_in_layer_space() {
     let Some(gpu) = context() else { return };
-    let mut comp = RenderComp::new(PrimPath::new("/comps/main").unwrap(), 12, 8);
+    let mut comp = RenderComp::new(PrimPath::new("/comps/main").unwrap(), 24, 16);
     let solid = |name: &str, width, height, color| {
         RenderLayer::new(
             PrimPath::new(&format!("/comps/main/layers/{name}")).unwrap(),
@@ -213,14 +214,16 @@ fn set_matte_checks_out_the_source_of_a_hidden_layer_in_layer_space() {
             },
         )
     };
-    let mut layer = solid("a", 12, 8, [0.8, 0.2, 0.4, 0.5]);
-    let mut matte = solid("matte", 4, 4, [1.0, 1.0, 1.0, 0.5]);
+    let mut layer = solid("a", 24, 16, [0.8, 0.2, 0.4, 0.5]);
+    let mut matte = solid("matte", 12, 8, [1.0, 1.0, 1.0, 0.5]);
     matte.visible = false;
     matte.opacity = 0.0;
-    matte.effects.push(instance(
-        "ADBE Invert",
-        vec![(1, Value::Int(16)), (2, Value::Float(25.0))],
-    ));
+    matte
+        .masks
+        .push(rectangle_mask(&matte.path, "left", [0., 0., 6., 8.]));
+    matte
+        .effects
+        .push(instance("ADBE Fill", vec![(5, Value::Float(0.25))]));
     layer.effects.push(instance(
         "ADBE Set Matte3",
         vec![
@@ -236,21 +239,89 @@ fn set_matte_checks_out_the_source_of_a_hidden_layer_in_layer_space() {
     );
 
     for resolution in [Resolution::Full, Resolution::Half] {
+        for (stage, left, right) in [(1, 0.25, 0.25), (2, 0.25, 0.), (3, 0.0625, 0.)] {
+            comp.layers[0].effects[0].params.truncate(2);
+            comp.layers[0].effects[0]
+                .params
+                .push((0x10001, Value::Int(stage)));
+            let frame = renderer
+                .render_frame(
+                    &comp,
+                    &RenderRequest {
+                        resolution,
+                        ..RenderRequest::full()
+                    },
+                )
+                .unwrap();
+            let raw = bae_gpu::transfer::read_texture(&gpu, &frame.image.texture).unwrap();
+            let alpha =
+                |x, y| half::f16::from_le_bytes(raw.pixel(x, y)[6..8].try_into().unwrap()).to_f32();
+            let factor = resolution.factor();
+            let actual = [
+                alpha(8 / factor, 8 / factor),
+                alpha(16 / factor, 8 / factor),
+            ];
+            assert!(
+                (actual[0] - left).abs() < 0.002 && (actual[1] - right).abs() < 0.002,
+                "{resolution:?} stage {stage}: {actual:?}, expected {left}, {right}"
+            );
+            assert!(alpha(1 / factor, 8 / factor) < 0.002);
+        }
+    }
+}
+
+fn rectangle_mask(layer: &PrimPath, name: &str, rect: [f64; 4]) -> RenderMask {
+    RenderMask {
+        path: PrimPath::new(&format!("{layer}/masks/{name}")).unwrap(),
+        shape: rect_path(rect[0], rect[1], rect[2], rect[3]),
+        mode: MaskMode::Add,
+        inverted: false,
+        opacity: 1.,
+        feather: [0.; 2],
+        expansion: 0.,
+    }
+}
+
+#[test]
+fn fill_uses_one_mask_or_both_through_the_render_graph() {
+    let Some(gpu) = context() else { return };
+    let mut comp = RenderComp::new(PrimPath::new("/comps/main").unwrap(), 16, 8);
+    let mut layer = RenderLayer::new(
+        PrimPath::new("/comps/main/layers/a").unwrap(),
+        LayerContent::Solid {
+            color: [0.75, 0.75, 0.75, 1.],
+            width: 16,
+            height: 8,
+        },
+    );
+    layer.masks = vec![
+        rectangle_mask(&layer.path, "left", [0., 0., 4., 8.]),
+        rectangle_mask(&layer.path, "right", [12., 0., 16., 8.]),
+    ];
+    layer.effects = vec![instance(
+        "ADBE Fill",
+        vec![(1, Value::PrimRef(layer.masks[0].path.clone()))],
+    )];
+    comp.layers.push(layer);
+    let mut renderer = Renderer::new(gpu.clone());
+    bae_effects::register(
+        &mut bae_model::EffectRegistry::new(),
+        renderer.effects_mut(),
+    );
+    for all in [false, true] {
+        comp.layers[0].effects[0].params.truncate(1);
+        comp.layers[0].effects[0].params.push((7, Value::Bool(all)));
         let frame = renderer
-            .render_frame(
-                &comp,
-                &RenderRequest {
-                    resolution,
-                    ..RenderRequest::full()
-                },
-            )
+            .render_frame(&comp, &RenderRequest::full())
             .unwrap();
         let raw = bae_gpu::transfer::read_texture(&gpu, &frame.image.texture).unwrap();
         let alpha =
-            |x, y| half::f16::from_le_bytes(raw.pixel(x, y)[6..8].try_into().unwrap()).to_f32();
-        let factor = resolution.factor();
-        assert!((alpha(6 / factor, 4 / factor) - 0.25).abs() < 0.002);
-        assert!(alpha(1 / factor, 4 / factor) < 0.002);
+            |x| half::f16::from_le_bytes(raw.pixel(x, 4)[6..8].try_into().unwrap()).to_f32();
+        assert_eq!(alpha(2), 1.);
+        assert_eq!(alpha(8), 0.);
+        assert_eq!(alpha(14), 1.);
+        let green = half::f16::from_le_bytes(raw.pixel(14, 4)[2..4].try_into().unwrap()).to_f32();
+        assert_eq!(green, if all { 0. } else { 0.75 });
     }
 }
 
