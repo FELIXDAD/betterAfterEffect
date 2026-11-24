@@ -262,6 +262,18 @@ impl Renderer {
         comp: &RenderComp,
         request: &RenderRequest,
     ) -> Result<RenderedFrame, RenderError> {
+        self.render_frame_with(comp, request, None)
+    }
+
+    /// [`Renderer::render_frame`] with other frames of the comp for effects
+    /// that read them (`crate::eval::EvaluatorFrames`). Such frames are not
+    /// kept in the frame cache.
+    pub fn render_frame_with(
+        &mut self,
+        comp: &RenderComp,
+        request: &RenderRequest,
+        frames: Option<&mut dyn crate::graph::CompFrames>,
+    ) -> Result<RenderedFrame, RenderError> {
         let key = FrameKey {
             comp: comp.path.clone(),
             time: comp.time,
@@ -287,7 +299,7 @@ impl Renderer {
             providers: &self.providers,
             warnings: Vec::new(),
         };
-        let graph = graph::build(comp, request, &mut resolver, &self.effects)?;
+        let graph = graph::build_with(comp, request, &mut resolver, &self.effects, frames)?;
         let mut warnings = resolver.warnings;
         warnings.extend(graph.warnings.iter().cloned());
         let build = started.elapsed();
@@ -310,13 +322,15 @@ impl Renderer {
         self.pool.end_frame();
 
         let image = executed.image;
-        self.frames.insert(
-            key,
-            image.clone(),
-            image.byte_size(),
-            comp.dependencies(),
-            hash,
-        );
+        if !graph.time_dependent {
+            self.frames.insert(
+                key,
+                image.clone(),
+                image.byte_size(),
+                comp.dependencies(),
+                hash,
+            );
+        }
         for w in &warnings {
             tracing::debug!(comp = %comp.path, "{w}");
         }
