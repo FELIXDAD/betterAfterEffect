@@ -87,10 +87,12 @@ const AE_ITEMS: &[(&str, Option<&str>, &str)] = &[
     ("shell.window.composition", None, "合成"),
     ("shell.window.timeline", None, "时间轴"),
     ("shell.window.effect_controls", Some("F3"), "效果控件"),
-    ("shell.window.effects", Some("Cmd+5"), "效果和预设"),
+    // Effects & Presets and Info are placeholder panels so far: greyed, and
+    // AE's Cmd+5 / Cmd+2 bind once the panels are real (#shortcut sweep).
+    ("shell.window.effects", None, "效果和预设"),
     ("shell.window.preview", Some("Cmd+3"), "预览"),
     ("shell.window.properties", None, "属性"),
-    ("shell.window.info", Some("Cmd+2"), "信息"),
+    ("shell.window.info", None, "信息"),
     ("motion.window.render_queue", Some("Cmd+Alt+0"), "渲染队列"),
 ];
 
@@ -816,10 +818,12 @@ fn chinese_ui_names_every_command_and_panel() {
     let total = names.len();
     names.dedup();
     assert_eq!(names.len(), total, "shortcut rows share a name");
+    // Panels with a shortcut (placeholder panels get AE's Cmd+1 … only once
+    // they are real).
     for (id, zh) in [
-        ("character", "字符"),
-        ("paragraph", "段落"),
-        ("tools", "工具"),
+        ("project", "项目"),
+        ("preview", "预览"),
+        ("render_queue", "渲染队列"),
     ] {
         let row = rows
             .iter()

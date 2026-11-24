@@ -28,6 +28,7 @@ mod menus;
 mod release_001;
 mod render_queue;
 mod settings;
+mod shortcut_sweep;
 mod startup;
 mod stress;
 mod timeline;

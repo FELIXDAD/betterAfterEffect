@@ -535,7 +535,7 @@ pub const KEYS: &[Key] = &[
     k("CSwitchboard", "ShowHideBrushPal", "Ctrl+9", "window.panel", r#"{"id":"brushes","toggle":true}"#, E, Later, 0),
     k("CSwitchboard", "ShowHideCharPal", "Ctrl+6", "window.panel", r#"{"id":"character","toggle":true}"#, E, Todo, 0),
     k("CSwitchboard", "ShowHideFxPal", "Ctrl+5", "window.panel", r#"{"id":"effects","toggle":true}"#, E, Todo, 0),
-    k("CSwitchboard", "ShowHideInfo", "Ctrl+2", "window.panel", r#"{"id":"info","toggle":true}"#, E, Partial, 0),
+    k("CSwitchboard", "ShowHideInfo", "Ctrl+2", "window.panel", r#"{"id":"info","toggle":true}"#, E, Todo, 0),
     k("CSwitchboard", "ShowHidePaintPal", "Ctrl+8", "window.panel", r#"{"id":"paint","toggle":true}"#, E, Later, 0),
     k("CSwitchboard", "ShowHideParaPal", "Ctrl+7", "window.panel", r#"{"id":"paragraph","toggle":true}"#, E, Todo, 0),
     k("CSwitchboard", "ShowHideProject", "Ctrl+0", "window.panel", r#"{"id":"project","toggle":true}"#, B, Done, 0),
