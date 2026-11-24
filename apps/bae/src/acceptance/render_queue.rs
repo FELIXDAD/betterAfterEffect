@@ -967,7 +967,6 @@ fn set_channels(h: &Ui, index: usize, channels: bae_ui_motion::render_queue::Cha
 }
 
 #[test]
-#[ignore = "WIP: render queue retest paused (quota); waits need wait_item"]
 fn movies_from_the_render_queue_have_their_codec_frames_and_alpha() {
     use bae_ui_motion::render_queue::default_channels;
     let Some(mut h) = gpu_gui() else { return };
@@ -987,15 +986,23 @@ fn movies_from_the_render_queue_have_their_codec_frames_and_alpha() {
         configure(&h, i, format, &path, 0, 59);
         // The output module's defaults for the format (as AE's templates).
         set_channels(&h, i, default_channels(format));
+        settle(&mut h);
         render(&mut h);
-        wait_done(&mut h, Duration::from_secs(300));
-        let status = items(&h)[i].status.clone();
+        let status = wait_item(&mut h, i, Duration::from_secs(300));
+        // The file the item wrote (BAE gives the format its own extension).
+        let path = match &status {
+            ItemStatus::Done { first, .. } => first.clone(),
+            _ => path,
+        };
         assert!(
             matches!(status, ItemStatus::Done { .. }),
             "{codec}: {status:?}"
         );
         let (got, depth, frames, seconds) = movie_info(&path);
-        println!("{codec}: {got} depth {depth}, {frames} frames, {seconds:.3} s");
+        println!(
+            "{codec}: {} → {got} depth {depth}, {frames} frames, {seconds:.3} s",
+            path.file_name().unwrap().to_string_lossy()
+        );
         assert_eq!(got, codec);
         assert_eq!(frames, 60, "{codec}: frames");
         assert!((seconds - 2.0).abs() < 0.01, "{codec}: {seconds} s");
@@ -1004,7 +1011,6 @@ fn movies_from_the_render_queue_have_their_codec_frames_and_alpha() {
 }
 
 #[test]
-#[ignore = "WIP: render queue retest paused (quota); waits need wait_item"]
 fn stopping_a_movie_keeps_a_playable_file_of_the_rendered_frames() {
     let Some(mut h) = gpu_gui() else { return };
     let tmp = tempfile::tempdir().unwrap();
@@ -1012,6 +1018,7 @@ fn stopping_a_movie_keeps_a_playable_file_of_the_rendered_frames() {
     long_comp(&mut h);
     key(&mut h, Modifiers::COMMAND, Key::M);
     configure(&h, 0, ExportFormat::H264, &path, 0, 1799);
+    settle(&mut h);
     render(&mut h);
     let started = Instant::now();
     loop {
@@ -1120,7 +1127,6 @@ fn a_movie_on_a_full_disk_fails_cleanly() {
 }
 
 #[test]
-#[ignore = "WIP: render queue retest paused (quota); waits need wait_item"]
 fn closing_the_project_while_rendering_stops_and_empties_the_queue() {
     // #231: the Render Queue belongs to the project (AE).
     let Some(mut h) = gpu_gui() else { return };
@@ -1153,17 +1159,27 @@ fn closing_the_project_while_rendering_stops_and_empties_the_queue() {
         "queue after Close Project: {:?}",
         items(&h)
     );
-    // The worker stopped: no more frames appear.
-    let n = files_in(&out, "png").len();
-    for _ in 0..30 {
-        frame(&mut h);
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    let later = files_in(&out, "png").len();
-    assert!(
-        later <= n + 1,
-        "frames kept coming after Close Project: {n} → {later}"
+    // The worker stops after the frames already in flight: the count on disk
+    // settles quickly and stays far below the 1 800 frames of the range.
+    let count = |h: &mut Ui| {
+        for _ in 0..100 {
+            frame(h);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        files_in(&out, "png").len()
+    };
+    let at_close = files_in(&out, "png").len();
+    let watch: Vec<usize> = (0..10).map(|_| count(&mut h)).collect();
+    println!("frames on disk each second after Close Project: {at_close} {watch:?}");
+    let (one, two, three) = (watch[0], watch[8], watch[9]);
+    println!(
+        "frames on disk after Close Project: {at_close}, +1 s {one}, +2 s {two}, +3 s {three}"
     );
+    assert_eq!(
+        two, three,
+        "frames kept coming after Close Project: {at_close} → {one} → {two} → {three}"
+    );
+    assert!(three < 100, "{three} frames: the render did not stop");
     // The next project renders normally.
     comp_with(&mut h, &["motion.layer.new.solid"]);
     key(&mut h, Modifiers::COMMAND, Key::M);
@@ -1176,13 +1192,10 @@ fn closing_the_project_while_rendering_stops_and_empties_the_queue() {
         0,
         2,
     );
+    settle(&mut h);
     render(&mut h);
-    wait_done(&mut h, Duration::from_secs(120));
-    assert!(
-        matches!(items(&h)[0].status, ItemStatus::Done { .. }),
-        "{:?}",
-        items(&h)[0].status
-    );
+    let status = wait_item(&mut h, 0, Duration::from_secs(120));
+    assert!(matches!(status, ItemStatus::Done { .. }), "{status:?}");
 }
 
 #[test]
