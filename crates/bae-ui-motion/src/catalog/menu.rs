@@ -690,10 +690,10 @@ const LAYER: &[Node] = &[
     sub(
         "Markers",
         &[
-            it(23265281, "Add Marker", "motion.layer.add_marker", "", C, Todo),
+            it(23265281, "Add Marker", "motion.layer.add_marker", "", C, Done),
             it(23265282, "Update Markers From Source", "motion.layer.update_markers_from_source", "", C, Later),
             it(23265283, "Lock Markers", "motion.layer.lock_markers", "", C, Todo),
-            it(23265284, "Delete All Markers", "motion.layer.delete_all_markers", "", C, Todo),
+            it(23265284, "Delete All Markers", "motion.layer.delete_all_markers", "", C, Done),
         ],
     ),
     SEP,

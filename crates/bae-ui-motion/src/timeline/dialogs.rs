@@ -17,6 +17,7 @@ use super::*;
 pub enum KeyDialog {
     Interpolation(InterpolationDialog),
     Velocity(VelocityDialog),
+    Marker(Box<super::markers::MarkerDialog>),
 }
 
 /// What closing a dialog body asks for.
@@ -472,14 +473,18 @@ impl KeyDialog {
         match self {
             KeyDialog::Interpolation(_) => "Keyframe Interpolation",
             KeyDialog::Velocity(_) => "Keyframe Velocity",
+            KeyDialog::Marker(d) => d.title(),
         }
     }
 
-    fn edits(&self, stage: &Stage) -> Vec<KeyEdit> {
-        match self {
+    /// The command OK runs, if any.
+    fn command(&self, stage: &Stage) -> Option<(&'static str, serde_json::Value)> {
+        let edits = match self {
             KeyDialog::Interpolation(d) => interpolation_edits(stage, d),
             KeyDialog::Velocity(d) => velocity_edits(stage, d),
-        }
+            KeyDialog::Marker(d) => return Some(d.command(stage)),
+        };
+        (!edits.is_empty()).then(|| ("key.edit", json!({ "edits": edits })))
     }
 }
 
@@ -542,15 +547,15 @@ pub(super) fn show(ctx: &egui::Context, cx: &mut PanelContext<'_>, session: &Sha
             match &mut dialog {
                 KeyDialog::Interpolation(d) => interpolation_body(ui, stage, d),
                 KeyDialog::Velocity(d) => velocity_body(ui, d),
+                KeyDialog::Marker(d) => super::markers::marker_body(ui, d),
             }
             ui.add_space(10.0);
             close = buttons(ui);
         });
     match close {
         Some(Close::Ok) => {
-            let edits = dialog.edits(stage);
-            if !edits.is_empty() {
-                cx.invoke_with("key.edit", json!({ "edits": edits }));
+            if let Some((id, params)) = dialog.command(stage) {
+                cx.invoke_with(id, params);
             }
             session.lock().key_dialog = None;
         }

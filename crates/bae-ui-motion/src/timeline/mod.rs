@@ -14,6 +14,7 @@ mod drags;
 mod header;
 mod keys;
 mod layer_bar;
+mod markers;
 mod menus;
 mod rows;
 
@@ -40,6 +41,9 @@ use crate::session::{Session, SharedSession};
 pub(crate) use dialogs::{InterpolationDialog, KeyDialog, VelocityDialog};
 use header::comp_tabs;
 pub(crate) use keys::{click_conversion, clicked_set};
+pub(crate) use markers::MarkerDialog;
+#[cfg(test)]
+pub(crate) use markers::parse_timecode;
 pub(crate) use menus::keys_with_labels;
 #[cfg(test)]
 pub(crate) use menus::{
@@ -155,6 +159,18 @@ enum Drag {
     Reorder {
         layers: Vec<PrimPath>,
     },
+    /// A comp or layer marker.
+    Marker {
+        origin: f32,
+        marker: PrimPath,
+    },
+    /// A new comp marker dragged out of the marker bin.
+    MarkerFromBin,
+    /// Slip edit of a layer with a time-based source.
+    Slip {
+        origin: f32,
+        layer: PrimPath,
+    },
 }
 
 #[derive(Default)]
@@ -181,12 +197,25 @@ pub struct TimelinePanel {
     /// Modifiers held when the primary button last went down (AE decides drag
     /// modes such as Alt time-scaling at mouse-down).
     press_mods: egui::Modifiers,
+    /// The marker being dragged and its comp-time offset this frame.
+    marker_plan: Option<(PrimPath, Time)>,
+    /// The bar drag's offset this frame.
+    bar_plan: Option<layer_bar::BarPlan>,
     /// Last frame's time axis, for tests.
     #[cfg(test)]
     pub(crate) last_axis: Option<TimeAxis>,
     /// Where the last frame drew the layer-bar keyframes, for tests.
     #[cfg(test)]
     pub(crate) last_keys: Vec<(KeyRef, Pos2)>,
+    /// Where the last frame drew the markers (glyph centres), for tests.
+    #[cfg(test)]
+    pub(crate) last_markers: Vec<(PrimPath, Pos2)>,
+    /// The comp marker bin, for tests.
+    #[cfg(test)]
+    pub(crate) last_marker_bin: Option<Rect>,
+    /// Where the last frame drew the layer bars, for tests.
+    #[cfg(test)]
+    pub(crate) last_bars: Vec<(PrimPath, Rect)>,
 }
 
 /// Comp time ↔ x in the graph.
@@ -457,6 +486,8 @@ impl Panel for TimelinePanel {
         {
             self.last_axis = Some(axis);
             self.last_keys.clear();
+            self.last_markers.clear();
+            self.last_bars.clear();
         }
 
         let head = Rect::from_min_max(
@@ -477,6 +508,10 @@ impl Panel for TimelinePanel {
             pos2(full.right(), body.bottom()),
         );
 
+        let (pointer_x, shift) =
+            ui.input(|i| (i.pointer.interact_pos().map(|p| p.x), i.modifiers.shift));
+        self.marker_plan = self.plan_marker_drag(stage, &info, &axis, now, pointer_x, shift);
+        self.bar_plan = self.plan_bar_drag(stage, &info, &axis, now, pointer_x, shift);
         self.header(ui, cx, &session, &info, head, colrow, &cols, &axis, now);
 
         // Rows.
@@ -484,8 +519,6 @@ impl Panel for TimelinePanel {
             let s = session.lock();
             self.rows(stage, &info.path, &s)
         };
-        let (pointer_x, shift) =
-            ui.input(|i| (i.pointer.interact_pos().map(|p| p.x), i.modifiers.shift));
         if let Some(m) = ui.input(|i| i.pointer.primary_pressed().then_some(i.modifiers)) {
             self.press_mods = m;
         }

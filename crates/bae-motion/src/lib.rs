@@ -60,6 +60,7 @@ pub mod dimensions;
 pub mod import;
 pub mod keys;
 pub mod layer;
+pub mod markers;
 pub mod names;
 pub mod path;
 pub mod precompose;
@@ -89,8 +90,9 @@ pub use keys::{
 pub use layer::{
     CopiedLayer, CreateLayer, DeleteItems, DeleteLayers, DuplicateLayers, LAYER_SWITCH_ATTRS,
     LayerOutput, LayersOutput, PasteLayers, ReorderLayers, SetLayerAttr, SetParent, ShapePreset,
-    ShiftLayers, SplitLayers, TrimLayers, copy_layers,
+    ShiftLayers, SlipLayers, SplitLayers, TrimLayers, copy_layers,
 };
+pub use markers::{AddMarker, DeleteMarkers, EditMarker, MarkerFields, MarkerOutput, MoveMarkers};
 pub use path::{DeleteVertex, InsertVertex, SetVertices};
 pub use precompose::{Precompose, PrecomposeMode, PrecomposeOutput};
 pub use shape::{AddShape, CreateMask, Geometry, ShapeKind};
@@ -117,6 +119,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(SplitLayers),
         r.register(TrimLayers),
         r.register(ShiftLayers),
+        r.register(SlipLayers),
         r.register(DeleteLayers),
         r.register(DeleteItems),
         r.register(SetParent),
@@ -132,6 +135,10 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(PasteKeys),
         r.register(EditKeys),
         r.register(SeparateDimensions),
+        r.register(AddMarker),
+        r.register(EditMarker),
+        r.register(MoveMarkers),
+        r.register(DeleteMarkers),
         r.register(AddShape),
         r.register(CreateMask),
         r.register(SetVertices),
