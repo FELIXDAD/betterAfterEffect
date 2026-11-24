@@ -142,6 +142,11 @@
                 var lo = layer.property("ADBE Light Options Group");
                 lo.property("ADBE Light Intensity").setValue(lt.intensity !== undefined ? lt.intensity : 100);
                 lo.property("ADBE Light Color").setValue(lt.color || [1, 1, 1]);
+                if (lt.shadows) {
+                    lo.property("ADBE Casts Shadows").setValue(1);
+                    if (lt.dark !== undefined) { lo.property("ADBE Light Shadow Darkness").setValue(lt.dark); }
+                    if (lt.diff !== undefined) { lo.property("ADBE Light Shadow Diffusion").setValue(lt.diff); }
+                }
                 if (lt.cone !== undefined) { lo.property("ADBE Light Cone Angle").setValue(lt.cone); }
                 if (lt.feather !== undefined) { lo.property("ADBE Light Cone Feather 2").setValue(lt.feather); }
                 if (lt.falloff) {
@@ -189,6 +194,9 @@
                 if (l.mat.shin !== undefined) { mo.property("ADBE Shininess Coefficient").setValue(l.mat.shin); }
                 if (l.mat.metal !== undefined) { mo.property("ADBE Metal Coefficient").setValue(l.mat.metal); }
                 if (l.mat.accepts === false) { mo.property("ADBE Accepts Lights").setValue(0); }
+                if (l.mat.casts !== undefined) { mo.property("ADBE Casts Shadows").setValue(l.mat.casts ? 1 : 0); }
+                if (l.mat.accepts_shadows !== undefined) { mo.property("ADBE Accepts Shadows").setValue(l.mat.accepts_shadows ? 1 : 0); }
+                if (l.mat.trans !== undefined) { mo.property("ADBE Light Transmission").setValue(l.mat.trans); }
             }
             if (l.opacity !== undefined) { layer.property("ADBE Transform Group").property("ADBE Opacity").setValue(l.opacity); }
             if (l.mode) { layer.blendingMode = BlendingMode[l.mode === "silhouette_alpha" ? "SILHOUETE_ALPHA" : l.mode.toUpperCase()]; }

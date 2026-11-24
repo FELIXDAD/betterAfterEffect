@@ -241,6 +241,16 @@ fn main() {
         ];
         c
     };
+    // Every layer casts and receives shadows from the spot and point lights.
+    let shadows = |mut c: RenderComp| {
+        for l in &mut c.lights {
+            l.casts_shadows = l.kind != bae_render::light::LightKind::Ambient;
+        }
+        for l in &mut c.layers {
+            l.material.casts_shadows = bae_render::light::ShadowMode::On;
+        }
+        c
+    };
     let mut renderer = Renderer::with_config(
         gpu.clone(),
         RendererConfig {
@@ -283,6 +293,11 @@ fn main() {
         fps("still full", &|f| moving(f, false), &full),
         fps("mb_3d full", &|f| scene_3d(f, true), &full),
         fps("3d_lit full", &|f| lit(scene_3d(f, false)), &full),
+        fps(
+            "3d_shadows full",
+            &|f| shadows(lit(scene_3d(f, false))),
+            &full,
+        ),
     ];
     let report = serde_json::json!({
         "scenario": "three_d",

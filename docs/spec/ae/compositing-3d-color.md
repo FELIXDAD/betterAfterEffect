@@ -1792,6 +1792,7 @@
 - **Exact semantics:**
   - Requires: light Casts Shadows = on (Parallel, Spot, Point; never Ambient); caster Material Casts Shadows = On or Only; receiver Accepts Shadows = On or Only; caster and receiver in the same 3D group (AE-CMP-406).
   - Algorithm: shadow maps rendered from each shadow light (perspective for Spot, cube/omni for Point, orthographic for Parallel UNVERIFIED projection details) at the Shadow Map Resolution (AE-CMP-408); the map stores caster depth and transmitted colour.
+  - Measured in AE 26.2.1 by 04 (crates/bae-render/tests/ae/README.md): darkness, opacity and transmission act exactly as below with `casterCol` = the caster's own (unlit) colour and `blocked = alpha × opacity`; Shadow Diffusion behaves as a square area light of half-size = diffusion (linear penumbra of width `2 · diffusion · d(caster, receiver) / d(light, caster)`); at diffusion 0 the shadow-map edge is about one receiver pixel wide. Shadows remove the light's diffuse and specular terms, not ambient.
   - Shadow value per light at receiver point:
     ```
     occluded   = caster depth < receiver depth (with bias)
