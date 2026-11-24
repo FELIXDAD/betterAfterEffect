@@ -111,6 +111,10 @@ pub fn run_file_command(
     let outcome = files::run(doc, dialogs, inv);
     if outcome == Some(FileOutcome::Replaced) {
         restore(app, doc);
+        // The render queue belongs to the project (AE, #231).
+        if let Some(queue) = app.resource::<bae_ui_motion::SharedRenderQueue>() {
+            queue.lock().clear();
+        }
     }
     outcome
 }

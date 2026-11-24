@@ -22,6 +22,8 @@ pub(super) const ALLOWED: &[&str] = &[
     "HEVC",
     "ProRes",
     "HQ",
+    // AE's Chinese output module keeps "RGB + Alpha".
+    "Alpha",
     // Frame rate unit: AE zh_CN keeps it ("社交媒体纵向 HD • 1080x1920 • 30 fps",
     // docs/reference/ae/preferences.json); the timeline shows "(30.00 fps)".
     "fps",

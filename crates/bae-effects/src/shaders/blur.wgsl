@@ -6,6 +6,11 @@
 //
 // Addressing (`clamp_mode`): 0 = transparent outside `src_rect` (AE default),
 // 1 = clamp to `src_rect` (AE "Repeat Edge Pixels").
+//
+// Linear light (`load_gamma`, `store_gamma`; 1 = off): the first step raises
+// the straight colour of what it reads to `load_gamma`, the last step writes
+// its result raised to `store_gamma` (AE's Gaussian Blur blurs in linear light
+// in non-linear projects).
 
 @group(0) @binding(0) var<uniform> u: Params;
 @group(0) @binding(1) var src: texture_2d<f32>;
@@ -26,12 +31,26 @@ struct Params {
     // Box blur: fractional weight of the outermost taps, run length per thread.
     frac: f32,
     seg: i32,
-    _pad0: i32,
-    _pad1: i32,
+    load_gamma: f32,
+    store_gamma: f32,
     // conv_line: normalised weights by offset, symmetric and zero padded:
     // weights[WPAD + d] for d in -WPAD..=WPAD (0 where |d| > radius).
     // `weights` is read as a flat f32 table of 60 entries.
     weights: array<vec4<f32>, 15>,
+}
+
+// Premultiplied colour with its straight colour raised to `g` (sign kept).
+fn regamma(c: vec4<f32>, g: f32) -> vec4<f32> {
+    if (g == 1.0 || c.a <= 0.0) {
+        return c;
+    }
+    let s = c.rgb / c.a;
+    return vec4<f32>(sign(s) * pow(abs(s), vec3<f32>(g)) * c.a, c.a);
+}
+
+// Source texel `q` (texture coordinates), in the working light.
+fn texel(q: vec2<i32>) -> vec4<f32> {
+    return regamma(textureLoad(src, q, 0), u.load_gamma);
 }
 
 fn load_src(p: vec2<i32>) -> vec4<f32> {
@@ -41,11 +60,11 @@ fn load_src(p: vec2<i32>) -> vec4<f32> {
     } else if (any(p < u.src_rect.xy) || any(p >= u.src_rect.zw)) {
         return vec4<f32>(0.0);
     }
-    return textureLoad(src, q - u.src_origin, 0);
+    return texel(q - u.src_origin);
 }
 
 fn store_dst(p: vec2<i32>, c: vec4<f32>) {
-    textureStore(dst, p - u.dst_origin, c);
+    textureStore(dst, p - u.dst_origin, regamma(c, u.store_gamma));
 }
 
 fn axis_step() -> vec2<i32> {
@@ -158,17 +177,17 @@ fn downsample(@builtin(global_invocation_id) id: vec3<u32>) {
             for (var y = 0; y < u.factor.y; y = y + 1) {
                 for (var x = 0; x < u.factor.x; x = x + 4) {
                     let q = q0 + vec2<i32>(x, y);
-                    let a = textureLoad(src, q, 0);
-                    let b = textureLoad(src, q + vec2<i32>(1, 0), 0);
-                    let c = textureLoad(src, q + vec2<i32>(2, 0), 0);
-                    let d = textureLoad(src, q + vec2<i32>(3, 0), 0);
+                    let a = texel(q);
+                    let b = texel(q + vec2<i32>(1, 0));
+                    let c = texel(q + vec2<i32>(2, 0));
+                    let d = texel(q + vec2<i32>(3, 0));
                     acc = acc + ((a + b) + (c + d));
                 }
             }
         } else {
             for (var y = 0; y < u.factor.y; y = y + 1) {
                 for (var x = 0; x < u.factor.x; x = x + 1) {
-                    acc = acc + textureLoad(src, q0 + vec2<i32>(x, y), 0);
+                    acc = acc + texel(q0 + vec2<i32>(x, y));
                 }
             }
         }

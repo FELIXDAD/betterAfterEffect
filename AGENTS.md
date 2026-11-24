@@ -15,7 +15,7 @@
 - `bae-model`、`bae-anim`、`bae-sync` 和各领域命令 crate 不能依赖 GPU、窗口或平台 API。
 - 新增依赖前先看有没有已经在用的同类库；PR 里写明 release 体积增加了多少（`cargo xtask size` 的结果）。单个 PR 让可执行文件增加超过 0.3 MiB 时，还要写明理由和已经做过的去浪费措施（见 `docs/ARCHITECTURE.md` 第 11 节）。不允许引入 Chromium/WebView、Qt、静态链接的 FFmpeg、OpenColorIO、OpenUSD 这类大型运行时。
 - 代码、标识符、代码注释用英文。面向用户的文档用中文；界面文字走 i18n，中英文都要有。
-- 不复制 Adobe 的图标、图片、示例工程、SDK 代码或头文件。可以参考公开文档、脚本 API 文档和界面布局。
+- 不复制 Adobe 的图标、图片、示例工程、SDK 代码或头文件（无论来自 AE、Ai、Pr 安装包、Adobe 网站还是其他地方），不用 Adobe 的应用图标、启动画面和标志。唯一例外：Adobe 以 Apache-2.0 开源发布的 Spectrum 1 图标（`@adobe/spectrum-css-workflow-icons` 1.5.4、`@adobe/react-spectrum-ui` 1.2.1），只用 `tools/icons/fetch_spectrum.py` 获取，许可证文件见 `assets/icons/spectrum/`。许可证全文、版权声明和 NOTICE 随仓库提交，也随安装包发布。可以参考公开文档、脚本 API 文档和界面布局。
 - 不提交大于 1MB 的二进制文件。测试素材尽量用脚本生成。
 
 ## 分支与提交
@@ -34,6 +34,7 @@
 
 ## 同步进度
 
-- 在 Orca 工作区卡片上更新状态和备注：
+- 进度看置顶 issue「BAE 进度看板」（自动生成）；领导每一轮把“交接快照”写进看板正文。PR 审完由领导打 `merge-ready`，合并脚本执行（见 `docs/WORKSTREAMS.md`“协同流程”）。
+- 在 Orca 工作区卡片上更新状态和备注（看板会显示）：
   `orca worktree set --worktree active --workspace-status in-progress --comment "当前进度" --json`
 - 在任务书末尾的"进度"一节记录已完成、受阻和对其他工作流的请求。

@@ -589,6 +589,7 @@ impl Workbench {
     ) -> Vec<Invocation> {
         self.refresh_registries();
         crate::a11y::install(ui.ctx());
+        ime_undo_before(ui.ctx());
         // A modal dialog (the welcome / role picker, an external window such as
         // Preferences, a module dialog) owns the keyboard: no shortcuts and no
         // panel keys reach the project behind it.
@@ -659,6 +660,7 @@ impl Workbench {
         self.shortcut_window(ui.ctx());
         self.workspace_dialogs(ui.ctx());
         ime_follows_caret(ui.ctx());
+        ime_undo_after(ui.ctx());
         std::mem::take(&mut self.requests.invocations)
     }
 
@@ -976,6 +978,79 @@ impl Workbench {
     }
 }
 
+/// The undo history of the focused text field while an input method composes
+/// (#222): egui's `TextEdit` records undo points of the composition text
+/// (pinyin `w'q'g't` that was never entered), so Cmd/Ctrl+Z could bring it
+/// back. [`ime_undo_before`] keeps the history from before the composition,
+/// [`ime_undo_after`] puts it back after every frame of the composition, so
+/// undo only returns to text that was really entered. Every text field of the
+/// workbench (search, rename, dialog names) gets this.
+#[derive(Clone)]
+struct ImeUndoGuard {
+    field: egui::Id,
+    undoer: egui::util::undoer::Undoer<(egui::text::CCursorRange, String)>,
+}
+
+fn ime_guard_id() -> egui::Id {
+    egui::Id::new("bae.ime_undo_guard")
+}
+
+/// Whether this frame's input carries composition text (a non-empty preedit),
+/// and whether it ends a composition (commit, or an empty preedit).
+fn ime_events(ctx: &Context) -> (bool, bool) {
+    ctx.input(|i| {
+        let mut composing = false;
+        let mut ends = false;
+        for e in &i.events {
+            if let Event::Ime(ime) = e {
+                match ime {
+                    egui::ImeEvent::Preedit { text, .. } if !text.is_empty() => composing = true,
+                    egui::ImeEvent::Preedit { .. } | egui::ImeEvent::Commit(_) => ends = true,
+                    _ => {}
+                }
+            }
+        }
+        (composing, ends)
+    })
+}
+
+/// Before the panels draw: when a composition starts in the focused text field,
+/// remember its undo history.
+fn ime_undo_before(ctx: &Context) {
+    let (composing, _) = ime_events(ctx);
+    let guarded = ctx.data(|d| d.get_temp::<ImeUndoGuard>(ime_guard_id()).is_some());
+    if !composing || guarded {
+        return;
+    }
+    let Some(field) = ctx.memory(|m| m.focused()) else {
+        return;
+    };
+    if let Some(state) = egui::TextEdit::load_state(ctx, field) {
+        let guard = ImeUndoGuard {
+            field,
+            undoer: state.undoer(),
+        };
+        ctx.data_mut(|d| d.insert_temp(ime_guard_id(), guard));
+    }
+}
+
+/// After the panels drew: while composing (and on the frame that commits), put
+/// the remembered history back, dropping the undo points of composition text.
+fn ime_undo_after(ctx: &Context) {
+    let Some(guard) = ctx.data(|d| d.get_temp::<ImeUndoGuard>(ime_guard_id())) else {
+        return;
+    };
+    let (_, ends) = ime_events(ctx);
+    if let Some(mut state) = egui::TextEdit::load_state(ctx, guard.field) {
+        state.set_undoer(guard.undoer.clone());
+        state.store(ctx, guard.field);
+    }
+    let left = ctx.memory(|m| m.focused()) != Some(guard.field);
+    if ends || left {
+        ctx.data_mut(|d| d.remove::<ImeUndoGuard>(ime_guard_id()));
+    }
+}
+
 /// Anchor the IME candidate window at the text caret instead of the whole text
 /// field. egui-winit passes `IMEOutput::rect` to `Window::set_ime_cursor_area`, so
 /// with the field's rect the pinyin candidates open at the field's left edge; AE
@@ -1266,6 +1341,17 @@ mod tests {
         modifiers: Modifiers,
         events: Vec<Event>,
     ) -> Vec<Invocation> {
+        frame_full(ctx, wb, modifiers, None, events)
+    }
+
+    /// [`frame_mods`] at an input time (seconds).
+    fn frame_full(
+        ctx: &Context,
+        wb: &mut Workbench,
+        modifiers: Modifiers,
+        time: Option<f64>,
+        events: Vec<Event>,
+    ) -> Vec<Invocation> {
         let stage = Stage::new();
         let author = AuthorId::system();
         let resources = Resources::new();
@@ -1281,6 +1367,7 @@ mod tests {
         let input = RawInput {
             screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1400.0, 900.0))),
             events: all,
+            time,
             ..Default::default()
         };
         let mut out = Vec::new();
@@ -1326,6 +1413,92 @@ mod tests {
                 _ => {}
             }
         }
+    }
+
+    /// #222: Cmd/Ctrl+Z in a text field never brings back an input method's
+    /// composition text (pinyin `w'q'g't`), even when the composition lasted long
+    /// enough for egui to take an undo point; it returns to text really entered.
+    #[test]
+    fn undo_in_a_text_field_skips_ime_composition() {
+        use egui::ImeEvent;
+        let text = Arc::new(std::sync::Mutex::new(String::new()));
+        let focus = Arc::new(std::sync::Mutex::new(Some("field")));
+        let (kinds, presets, keymaps, actions) = registries();
+        let (t, f) = (text.clone(), focus.clone());
+        let clicks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        kinds
+            .replace(
+                Owner::module("test"),
+                "a",
+                Arc::new(PanelKind::new("A", move |_| {
+                    Box::new(Focusable {
+                        clicks: clicks.clone(),
+                        text: t.clone(),
+                        focus: f.clone(),
+                    })
+                })),
+            )
+            .unwrap();
+        let mut wb =
+            Workbench::with_registries(kinds, presets, keymaps, actions, WorkbenchState::default());
+        let ctx = crate::testing::ctx_with_fonts();
+        let none = Modifiers::NONE;
+        let mut time = 0.0;
+        let mut step = |wb: &mut Workbench, dt: f64, events: Vec<Event>| {
+            time += dt;
+            frame_full(&ctx, wb, none, Some(time), events);
+        };
+        step(&mut wb, 0.1, vec![]);
+        step(&mut wb, 0.1, vec![]);
+        step(&mut wb, 0.1, vec![]);
+        // Composing for two seconds: longer than egui's 1 s undo-point delay.
+        let preedit = |s: &str| {
+            Event::Ime(ImeEvent::Preedit {
+                text: s.to_owned(),
+                active_range_chars: None,
+            })
+        };
+        step(&mut wb, 0.1, vec![preedit("w")]);
+        step(&mut wb, 0.1, vec![preedit("w'q'g't")]);
+        for _ in 0..20 {
+            step(&mut wb, 0.1, vec![]);
+        }
+        assert_eq!(text.lock().unwrap().as_str(), "w'q'g't");
+        step(
+            &mut wb,
+            0.1,
+            vec![Event::Ime(ImeEvent::Commit("wqgt".into()))],
+        );
+        assert_eq!(text.lock().unwrap().as_str(), "wqgt");
+        for _ in 0..20 {
+            step(&mut wb, 0.1, vec![]);
+        }
+        // Replace the text, then undo until nothing changes: never the pinyin.
+        step(&mut wb, 0.1, vec![Event::Text("X".into())]);
+        for _ in 0..20 {
+            step(&mut wb, 0.1, vec![]);
+        }
+        let undo = Event::Key {
+            key: Key::Z,
+            physical_key: Some(Key::Z),
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::COMMAND,
+        };
+        let mut seen = vec![text.lock().unwrap().clone()];
+        for _ in 0..4 {
+            time += 0.1;
+            frame_full(
+                &ctx,
+                &mut wb,
+                Modifiers::COMMAND,
+                Some(time),
+                vec![undo.clone()],
+            );
+            seen.push(text.lock().unwrap().clone());
+        }
+        assert!(seen.iter().all(|s| s != "w'q'g't" && s != "w"), "{seen:?}");
+        assert!(seen.iter().any(|s| s == "wqgt"), "{seen:?}");
     }
 
     /// A toolbar that counts frames, remembers its state and sees the keymap.
