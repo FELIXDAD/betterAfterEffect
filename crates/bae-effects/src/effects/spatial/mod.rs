@@ -1,5 +1,6 @@
 //! Spatial filters which need reduced intermediate textures, a derived input,
 //! or access to the full source extent when rendering a tile.
+pub(crate) mod choker;
 mod definitions;
 mod pass;
 

@@ -1,11 +1,11 @@
 // Renders every case of cases.json in After Effects (run with tools/ae/aectl on
 // a machine that has AE):
 //
-//   tools/ae/aectl run crates/bae-effects/tests/ae/render_cases.jsx
+//   tools/ae/aectl lock -- tools/ae/aectl run crates/bae-effects/tests/ae/render_cases.jsx
 //
 // Inputs come from `cargo run -p bae-effects --example ae_compare -- prepare`
 // (/private/tmp/bae-07-ae/inputs/*.png); outputs go to /private/tmp/bae-07-ae/ae/.
-// 8 bpc project, no linearized working space, no colour management, frame 0,
+// Case-specific depth (8 bpc by default), no linearized working space, no colour management, frame 0,
 // layer quality Best. Parameters are set by matchName ("<effect>-NNNN").
 // No alert(): results are returned as a string.
 
@@ -59,6 +59,7 @@
     var done = [];
     for (var i = 0; i < cases.length; i++) {
         var c = cases[i];
+        app.project.bitsPerChannel = c.bpc || 8;
         var src = input(c.input);
         var comp = app.project.items.addComp(c.name, src.width, src.height, 1, 1, 30);
         var layer = comp.layers.add(src);

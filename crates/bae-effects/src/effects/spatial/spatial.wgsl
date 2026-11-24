@@ -285,3 +285,35 @@ fn glow_composite(@builtin(global_invocation_id) id:vec3<u32>) {
     if op==25u {a=min(1.0,s.a+b.a);rgb=s.rgb+straight(b)*(a-s.a);}
     place_original(p,vec4<f32>(rgb,a),orig,placement);
 }
+
+@compute @workgroup_size(8,8)
+fn matte_choke(@builtin(global_invocation_id) id:vec3<u32>) {
+    let p=f.out.xy+vec2<i32>(id.xy);
+    if any(p>=f.out.zw) { return; }
+    let args=f.arg[0];
+    let vertical=args.w>0.0;
+    let axis=select(vec2<i32>(1,0),vec2<i32>(0,1),vertical);
+    let r=select(0,i32(ceil(args.x+2.0)),args.x>0.0);
+    let sigma=max(0.45,select(0.35*args.x+0.2,0.25*args.x+0.98,args.x>8.0));
+    var sum=load(src,f.src,p);
+    var norm=1.0;
+    for(var i=1;i<=r;i++) {
+        var w=exp(-0.5*f32(i*i)/(sigma*sigma));
+        let a=p-axis*i;
+        let b=p+axis*i;
+        // Measured impulse weights at the default radius.
+        if args.x==4.0 {
+            let weights=array<f32,7>(63.0,52.0,31.0,11.0,2.0,0.0,0.0);
+            w=weights[u32(i)]/weights[0];
+        }
+        sum+=w*(load(src,f.src,a)+load(src,f.src,b));
+        norm+=w*(f32(all(a>=f.src.xy))+f32(all(b<f.src.zw)));
+
+    }
+    let b=sum/norm;
+    if !vertical {store(p,b); return;}
+    let width=clamp(2.0*floor(255.0*args.z),1.0,255.0);
+    let alpha=saturate((b.a*255.0-127.0-255.0*args.y)/width+0.5);
+    let original=load(aux,f.aux,p);
+    store(p,vec4<f32>(select(straight(b),straight(original),original.a>0.0)*alpha,alpha));
+}

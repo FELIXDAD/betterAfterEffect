@@ -19,6 +19,7 @@ pub const SIZE: [u32; 2] = [256, 128];
 pub struct Case {
     pub name: String,
     pub input: String,
+    pub bpc: u64,
     pub effect: String,
     pub params: Vec<(u32, Value)>,
     /// Allowed max per-channel difference (8-bit levels).
@@ -62,6 +63,7 @@ pub fn parse_cases(text: &str) -> Vec<Case> {
                 .collect();
             Case {
                 name: c["name"].as_str().unwrap().to_owned(),
+                bpc: c["bpc"].as_u64().unwrap_or(8),
                 input: c["input"].as_str().unwrap().to_owned(),
                 effect: c["effect"].as_str().unwrap().to_owned(),
                 params,
@@ -100,6 +102,26 @@ pub fn input(name: &str) -> Vec<[u8; 4]> {
                     let v = x as f64 / (w - 1) as f64;
                     let v = if y < h / 2 { v } else { 0.5 * v };
                     [v, v, v, 1.0]
+                }
+                "speckles" => {
+                    let levels = |n: u32| f64::from(n % 251) / 250.0;
+                    [
+                        levels(x * 17 + y * 53 + x * y),
+                        levels(x * 73 + y * 7),
+                        levels(x * 3 + y * 13),
+                        1.0,
+                    ]
+                }
+                "matte-edge" => {
+                    let edge = (fx * 2.0 + 0.2 * fy - 0.5).clamp(0.0, 1.0);
+                    let alpha = if y < h / 3 {
+                        f64::from(x > w / 2)
+                    } else if y < 2 * h / 3 {
+                        edge
+                    } else {
+                        f64::from((x / 5 + y / 7) % 3 != 0)
+                    };
+                    [0.2 + 0.75 * fx, 0.3 + 0.35 * fy, 0.8 - 0.6 * fx, alpha]
                 }
                 "chart" => {
                     if y < h / 2 {
@@ -218,6 +240,7 @@ pub fn render(gpu: &Arc<GpuContext>, case: &Case) -> Vec<[u8; 4]> {
     };
     let p = EffectParams {
         scale: 1.0,
+        float: case.bpc == 32,
         ..EffectParams::new(&inst)
     };
     let mut target = Standalone::new(gpu.clone(), wgpu::TextureFormat::Rgba32Float);
@@ -269,13 +292,32 @@ pub fn write_png(path: &std::path::Path, px: &[[u8; 4]]) {
     writer.write_image_data(px.as_flattened()).unwrap();
 }
 
-pub fn read_png(path: &std::path::Path) -> Option<Vec<[u8; 4]>> {
+pub fn read_png(path: &std::path::Path, bpc: u64) -> Option<Vec<[u8; 4]>> {
     let decoder = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).ok()?));
     let mut reader = decoder.read_info().ok()?;
     let mut buf = vec![0; reader.output_buffer_size()?];
     let info = reader.next_frame(&mut buf).ok()?;
-    if info.color_type != png::ColorType::Rgba || info.bit_depth != png::BitDepth::Eight {
+    if info.color_type != png::ColorType::Rgba {
         return None;
     }
-    Some(buf[..info.buffer_size()].as_chunks::<4>().0.to_vec())
+    let data = &buf[..info.buffer_size()];
+    match info.bit_depth {
+        png::BitDepth::Eight => Some(data.as_chunks::<4>().0.to_vec()),
+        png::BitDepth::Sixteen => Some(
+            data.as_chunks::<8>()
+                .0
+                .iter()
+                .map(|p| {
+                    std::array::from_fn(|i| {
+                        // AE 26 saveFrameToPng maps 32-bpc reference white
+                        // to 6553/65535. Alpha retains its full range.
+                        let value = u32::from(u16::from_be_bytes([p[2 * i], p[2 * i + 1]]));
+                        let scale = if bpc == 32 && i < 3 { 10 } else { 1 };
+                        ((value * scale + 128) / 257).min(255) as u8
+                    })
+                })
+                .collect(),
+        ),
+        _ => None,
+    }
 }

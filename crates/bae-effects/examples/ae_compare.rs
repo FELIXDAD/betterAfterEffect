@@ -2,7 +2,7 @@
 //!
 //! ```sh
 //! cargo run -p bae-effects --example ae_compare -- prepare   # inputs + cases → /private/tmp/bae-07-ae
-//! tools/ae/aectl run crates/bae-effects/tests/ae/render_cases.jsx   # on a machine with AE
+//! tools/ae/aectl lock -- tools/ae/aectl run crates/bae-effects/tests/ae/render_cases.jsx   # on a machine with AE
 //! cargo run -p bae-effects --example ae_compare -- compare   # BAE renders + table
 //! cargo run -p bae-effects --example ae_compare -- golden    # copy AE outputs into tests/ae/golden/
 //! ```
@@ -21,7 +21,16 @@ fn main() {
     match cmd.as_str() {
         "prepare" => {
             std::fs::create_dir_all(root.join("inputs")).unwrap();
-            for name in ["chart", "soft", "step", "ramp", "line", "lineg"] {
+            for name in [
+                "chart",
+                "soft",
+                "step",
+                "ramp",
+                "line",
+                "lineg",
+                "speckles",
+                "matte-edge",
+            ] {
                 harness::write_png(
                     &root.join("inputs").join(format!("{name}.png")),
                     &harness::input(name),
@@ -60,7 +69,10 @@ fn compare(root: &Path) {
     for case in load_cases(root) {
         let bae = harness::render(&gpu, &case);
         harness::write_png(&root.join("bae").join(format!("{}.png", case.name)), &bae);
-        match harness::read_png(&root.join("ae").join(format!("{}.png", case.name))) {
+        match harness::read_png(
+            &root.join("ae").join(format!("{}.png", case.name)),
+            case.bpc,
+        ) {
             Some(ae) => {
                 let (max, mean, o1, o3) = harness::diff(&bae, &ae);
                 println!(

@@ -9,6 +9,7 @@ use std::sync::Arc;
 const UNIFORM_SIZE: u32 = 160;
 const SOURCE: &str = include_str!("spatial.wgsl");
 const ENTRIES: &[&str] = &[
+    "matte_choke",
     "directional",
     "radial",
     "mosaic_rows",
@@ -62,9 +63,23 @@ pub(super) fn dispatch(
     coefficients: &[[f32; 4]],
     float: bool,
 ) -> Result<GpuImage, RenderError> {
+    let image = target.allocate(out, input.pixel_scale)?;
+    dispatch_to(target, entry, input, aux, &image, coefficients, float)?;
+    Ok(image)
+}
+
+pub(super) fn dispatch_to(
+    target: &mut dyn EffectTarget,
+    entry: &'static str,
+    input: &GpuImage,
+    aux: &GpuImage,
+    image: &GpuImage,
+    coefficients: &[[f32; 4]],
+    float: bool,
+) -> Result<(), RenderError> {
+    let out = image.rect;
     let rt = gpu::runtime(target.gpu());
     let kernel = pipeline(&rt, target.format(), entry)?;
-    let image = target.allocate(out, input.pixel_scale)?;
     let mut w = UniformWriter::with_size(UNIFORM_SIZE as usize);
     for (index, r) in [input.rect, aux.rect, out].iter().enumerate() {
         w.i32s(index * 16, &[r.x0, r.y0, r.x1, r.y1]);
@@ -93,5 +108,5 @@ pub(super) fn dispatch(
         });
     gpu::dispatch(&mut pass, &kernel, &group, &[offset], out.size());
     drop(pass);
-    Ok(image)
+    Ok(())
 }

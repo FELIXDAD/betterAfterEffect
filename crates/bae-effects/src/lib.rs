@@ -85,6 +85,33 @@ const PACKAGES: &[Embedded] = &[
     embedded!("photo-filter", ["shaders/photo_filter.wgsl"]),
     embedded!("shift-channels", ["shaders/shift_channels.wgsl"]),
     embedded!("vibrance", ["shaders/vibrance.wgsl"]),
+    embedded!(
+        "keying",
+        [
+            "shaders/color_difference_key.wgsl",
+            "shaders/color_range.wgsl",
+            "shaders/linear_color_key.wgsl",
+            "shaders/advanced_spill_suppressor.wgsl"
+        ]
+    ),
+    embedded!(
+        "rank-filters",
+        [
+            "shaders/dust_scratches.wgsl",
+            "shaders/rank.wgsl",
+            "shaders/median.wgsl"
+        ]
+    ),
+    embedded!(
+        "procedural",
+        [
+            "shaders/cell_pattern.wgsl",
+            "shaders/checkerboard.wgsl",
+            "shaders/blend.wgsl",
+            "shaders/circle.wgsl",
+            "shaders/ellipse.wgsl"
+        ]
+    ),
     embedded!("brightness-contrast", ["shaders/brightness_contrast.wgsl"]),
     embedded!("exposure", ["shaders/exposure.wgsl"]),
     embedded!("hue-saturation", ["shaders/hue_saturation.wgsl"]),
@@ -315,6 +342,7 @@ fn load() -> Result<Vec<Builtin>, Vec<Diagnostic>> {
     out.push(effects::set_matte::builtin());
     out.push(effects::morphology::minimax());
     out.push(effects::morphology::simple_choker());
+    out.push(effects::spatial::choker::builtin());
     out.sort_by(|a, b| {
         (a.info.category.as_str(), a.info.name.as_str())
             .cmp(&(b.info.category.as_str(), b.info.name.as_str()))
