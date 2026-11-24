@@ -1261,7 +1261,7 @@
 - **What it does:** Decides which 3D layer appears in front in a 3D group: by depth from the camera, not by Timeline stacking order.
 - **Exact semantics:**
   - Inside one 3D group (AE-CMP-406) the Classic 3D renderer composites layers by camera-space depth per pixel (it resolves intersections, AE-CMP-405), so the visible result equals: for every comp pixel, collect each layer fragment covering it with its camera-space depth `zc`, sort far→near, composite with each layer's opacity and blend mode.
-  - Ties (exactly coplanar layers, or equal depth at a pixel): the layer higher in the Timeline stacking order (lower index) is in front.
+  - Ties (exactly coplanar layers, or equal depth at a pixel): the layer higher in the Timeline stacking order (lower index) is in front. Measured in AE 26.2.1 by 04: "equal" means within about 1 px of depth along the view ray — the seam of a layer crossing a camera-facing one at 45° sits one pixel into the lower layer's half.
   - Non-intersecting whole-layer ordering, where AE needs one (e.g. for the CPU legacy path and for shadows): sort by camera-space distance of the layer's centre. UNVERIFIED: AE documentation never states whether layer centre or anchor point is used; community reports favour the layer bounding-box centre for Classic 3D. BAE decision: use per-pixel depth (exact) so the question only affects AE-incompatible corner cases.
   - Semi-transparent layers composite correctly in depth order (no order-dependent artefacts) because sorting is per fragment.
   - 2D layers inside the comp are never depth-sorted; they composite by stacking order and split 3D groups.
@@ -1304,7 +1304,7 @@
   - an adjustment layer (2D or 3D);
   - a 3D layer with a layer style applied;
   - a 3D precomp layer with an effect, a closed mask whose mode is not None, or a track matte;
-  - a 3D precomp layer without Collapse Transformations;
+  - ~~a 3D precomp layer without Collapse Transformations~~ — not a breaker: AE 26.2.1 depth-sorts a plain (non-collapsed, no effect/mask/matte) 3D precomp layer with the other 3D layers of its group (measured by 04, `threed_precomp` in crates/bae-render/tests/ae);
   - a collapsed 3D precomp that contains any 2D layer (its content becomes a flat image).
   - Collapsed precomp with all-3D content: its 3D layers join the outer group individually (they intersect and shadow outer layers); in exchange the precomp layer's own blend mode, quality and motion blur switches are ignored.
   - Lights are not limited by groups: a light lights 3D layers in every group of the comp (subject to the light's own Adjustment Layer scope, AE-CMP-435). Shadows and intersections never cross a group boundary.

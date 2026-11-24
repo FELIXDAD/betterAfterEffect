@@ -1,0 +1,57 @@
+[effect.shift-channels]
+name = "转换通道"
+keywords = ["转换通道"]
+
+[effect.shift-channels.params]
+alpha = "从 获取 Alpha"
+red = "从 获取红色"
+green = "从 获取绿色"
+blue = "从 获取蓝色"
+
+[effect.shift-channels.choices.alpha]
+1 = "Alpha"
+2 = "红色"
+3 = "绿色"
+4 = "蓝色"
+5 = "明亮度"
+6 = "色相"
+7 = "亮度"
+8 = "饱和度"
+9 = "完全打开"
+10 = "完全关闭"
+
+[effect.shift-channels.choices.red]
+1 = "Alpha"
+2 = "红色"
+3 = "绿色"
+4 = "蓝色"
+5 = "明亮度"
+6 = "色相"
+7 = "亮度"
+8 = "饱和度"
+9 = "完全打开"
+10 = "完全关闭"
+
+[effect.shift-channels.choices.green]
+1 = "Alpha"
+2 = "红色"
+3 = "绿色"
+4 = "蓝色"
+5 = "明亮度"
+6 = "色相"
+7 = "亮度"
+8 = "饱和度"
+9 = "完全打开"
+10 = "完全关闭"
+
+[effect.shift-channels.choices.blue]
+1 = "Alpha"
+2 = "红色"
+3 = "绿色"
+4 = "蓝色"
+5 = "明亮度"
+6 = "色相"
+7 = "亮度"
+8 = "饱和度"
+9 = "完全打开"
+10 = "完全关闭"

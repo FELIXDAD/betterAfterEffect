@@ -1,0 +1,25 @@
+[effect.invert]
+name = "反转"
+keywords = ["反转"]
+
+[effect.invert.params]
+channel = "通道"
+blend = "与原始图像混合"
+
+[effect.invert.choices.channel]
+1 = "RGB"
+2 = "红色"
+3 = "绿色"
+4 = "蓝色"
+5 = "(-"
+6 = "HLS"
+7 = "色相"
+8 = "亮度"
+9 = "饱和度"
+10 = "(-"
+11 = "YIQ"
+12 = "明亮度"
+13 = "相内彩色度"
+14 = "求积彩色度"
+15 = "(-"
+16 = "Alpha"

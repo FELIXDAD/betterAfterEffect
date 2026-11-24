@@ -200,9 +200,9 @@ pub struct TimelinePanel {
     /// and the language menu, which take its focus.
     expr_caret: Option<(PrimPath, String, String, std::ops::Range<usize>)>,
     /// [`Self::expr_caret`] as it was when the pick whip was pressed.
-    expr_press: Option<(String, std::ops::Range<usize>)>,
+    expr_press: Option<crate::expr::Selection>,
     /// The property whose language menu is open and its field's selection then.
-    lang_press: Option<(PrimPath, String, Option<(String, std::ops::Range<usize>)>)>,
+    lang_press: Option<(PrimPath, String, Option<crate::expr::Selection>)>,
     /// AE layer numbers (# column) of the shown comp, for accessibility names:
     /// two layers may share a name (issue #128).
     layer_numbers: HashMap<PrimPath, usize>,
@@ -356,7 +356,7 @@ fn label_of(stage: &Stage, path: &PrimPath) -> usize {
 impl TimelinePanel {
     /// The field selection the language menu will replace (tests).
     #[cfg(test)]
-    pub(crate) fn lang_insert(&self) -> Option<(String, std::ops::Range<usize>)> {
+    pub(crate) fn lang_insert(&self) -> Option<crate::expr::Selection> {
         self.lang_press.as_ref().and_then(|(.., i)| i.clone())
     }
 

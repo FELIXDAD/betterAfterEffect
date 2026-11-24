@@ -127,6 +127,7 @@ fn mosaic_cells(@builtin(global_invocation_id) id: vec3<u32>) {
 }
 
 fn cell_color(cell:vec2<i32>, grid:vec2<i32>, size:vec2<i32>) -> vec4<f32> {
+    if any(cell < vec2(0)) || any(cell >= grid) { return vec4(0.); }
     if f.arg[0].z != 0.0 {
         // AE Sharp Colors picks the last texel covered by the cell.
         let last = ((cell+1)*size-1)/grid;
@@ -142,10 +143,16 @@ fn mosaic_output(@builtin(global_invocation_id) id:vec3<u32>) {
     let size = f.src.zw-f.src.xy;
     let grid = vec2<i32>(f.arg[0].xy);
     let pos = p-f.src.xy;
-    let cell = pos*grid/size;
-    let next = min(cell+1,grid-1);
-    let frac = saturate(vec2<f32>(pos+1)-vec2<f32>((cell+1)*size)/vec2<f32>(grid));
+    // Best filters one destination pixel using the integer block width. The
+    // resulting footprint can cross the outside edge as well as an inner seam.
+    let block = vec2<f32>(size) / vec2<f32>(grid);
+    let center = (vec2<f32>(pos) + 0.5) / block;
+    let width = 1. / floor(block);
+    let cell = vec2<i32>(floor(center - 0.5 * width));
+    let next = cell + 1;
+    let frac = saturate((center + 0.5 * width - vec2<f32>(next)) / width);
     let a = cell_color(cell,grid,size);
+    if all(frac == vec2(0.)) { store(p, a); return; }
     let b = cell_color(vec2<i32>(next.x,cell.y),grid,size);
     let c = cell_color(vec2<i32>(cell.x,next.y),grid,size);
     let d = cell_color(next,grid,size);
@@ -284,4 +291,36 @@ fn glow_composite(@builtin(global_invocation_id) id:vec3<u32>) {
     if op==24u {rgb=s.rgb+b.rgb*(1.0-s.a);}
     if op==25u {a=min(1.0,s.a+b.a);rgb=s.rgb+straight(b)*(a-s.a);}
     place_original(p,vec4<f32>(rgb,a),orig,placement);
+}
+
+@compute @workgroup_size(8,8)
+fn matte_choke(@builtin(global_invocation_id) id:vec3<u32>) {
+    let p=f.out.xy+vec2<i32>(id.xy);
+    if any(p>=f.out.zw) { return; }
+    let args=f.arg[0];
+    let vertical=args.w>0.0;
+    let axis=select(vec2<i32>(1,0),vec2<i32>(0,1),vertical);
+    let r=select(0,i32(ceil(args.x+2.0)),args.x>0.0);
+    let sigma=max(0.45,select(0.35*args.x+0.2,0.25*args.x+0.98,args.x>8.0));
+    var sum=load(src,f.src,p);
+    var norm=1.0;
+    for(var i=1;i<=r;i++) {
+        var w=exp(-0.5*f32(i*i)/(sigma*sigma));
+        let a=p-axis*i;
+        let b=p+axis*i;
+        // Measured impulse weights at the default radius.
+        if args.x==4.0 {
+            let weights=array<f32,7>(63.0,52.0,31.0,11.0,2.0,0.0,0.0);
+            w=weights[u32(i)]/weights[0];
+        }
+        sum+=w*(load(src,f.src,a)+load(src,f.src,b));
+        norm+=w*(f32(all(a>=f.src.xy))+f32(all(b<f.src.zw)));
+
+    }
+    let b=sum/norm;
+    if !vertical {store(p,b); return;}
+    let width=clamp(2.0*floor(255.0*args.z),1.0,255.0);
+    let alpha=saturate((b.a*255.0-127.0-255.0*args.y)/width+0.5);
+    let original=load(aux,f.aux,p);
+    store(p,vec4<f32>(select(straight(b),straight(original),original.a>0.0)*alpha,alpha));
 }

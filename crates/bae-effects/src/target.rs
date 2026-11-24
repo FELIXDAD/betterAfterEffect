@@ -10,6 +10,7 @@
 use std::sync::Arc;
 
 use bae_gpu::{GpuContext, wgpu};
+use bae_model::PrimPath;
 use bae_render::{EffectParams, EncodeContext, GpuImage, IRect, ImageAlpha, RenderError};
 
 /// GPU access while an effect is encoded.
@@ -20,6 +21,11 @@ pub trait EffectTarget {
     fn format(&self) -> wgpu::TextureFormat;
     /// The frame's command encoder.
     fn encoder(&mut self) -> &mut wgpu::CommandEncoder;
+    /// Source-stage input requested by this effect, if available.
+    fn effect_input(&self, _layer: &PrimPath) -> Option<&GpuImage> {
+        None
+    }
+
     /// A working-format image covering `rect` (contents undefined), usable as a
     /// storage texture.
     fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError>;
@@ -36,6 +42,10 @@ impl EffectTarget for EncodeContext<'_> {
 
     fn encoder(&mut self) -> &mut wgpu::CommandEncoder {
         self.encoder
+    }
+
+    fn effect_input(&self, layer: &PrimPath) -> Option<&GpuImage> {
+        EncodeContext::effect_input(self, layer)
     }
 
     fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError> {

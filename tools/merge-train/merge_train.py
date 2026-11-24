@@ -437,6 +437,11 @@ def evaluate_checks(sha):
             # The full tier is skipped until the label lands; a labelled run follows.
             details.append((name, "skipped", r["html_url"]))
             pending = True
+        elif r["conclusion"] == "cancelled":
+            # Not a test failure (concurrency, runner loss, outside cancel): process_head
+            # reruns the job; a second cancellation on the same head fails the PR.
+            details.append((name, "cancelled", r["html_url"]))
+            pending = True
         else:
             details.append((name, r["conclusion"], r["html_url"]))
             failed = True
@@ -517,6 +522,43 @@ def _is_worktree_of(path, repo):
     common = lambda d: os.path.realpath(os.path.join(d, sh(  # noqa: E731
         ["git", "rev-parse", "--git-common-dir"], cwd=d, check=False)[1].strip() or "?"))
     return common(path) == common(repo)
+
+
+def rerun_cancelled(pr, ps, names):
+    """Rerun required jobs whose newest run on this head was cancelled. Returns a failure
+    reason once a check has been cancelled twice on the same head, else None."""
+    runs = check_runs(pr["headRefOid"])
+    seen = ps.setdefault("cancelled_runs", {})  # check name -> cancelled check-run ids
+    grace = CFG.get("cancel_grace_minutes", 2)
+    for name in names:
+        r = runs.get(name)
+        if not r or r["conclusion"] != "cancelled":
+            continue
+        ids = seen.setdefault(name, [])
+        if r["id"] in ids:
+            continue  # rerun already requested; waiting for the new run to show up
+        done = parse_ts(r.get("completed_at"))
+        if done and (now_utc() - done).total_seconds() < grace * 60:
+            continue  # a replacing run (e.g. after update-branch) may still appear
+        if len(ids) >= CFG.get("max_cancellations", 2) - 1:
+            ids.append(r["id"])
+            return "%s 在同一个 head %s 上被取消了 %d 次" % (name, pr["headRefOid"][:7], len(ids))
+        # A check run's id is its Actions job id.
+        if mutate("rerun cancelled job %s (%s) on #%d" % (r["id"], name, pr["number"])):
+            rc, out, err = sh(["gh", "api", "-X", "POST", "repos/%s/actions/jobs/%d/rerun"
+                               % (CFG["repo"], r["id"])], check=False)
+            if rc != 0:
+                # Usually: the workflow run still has other jobs running. Retry next pass.
+                if ps.get("rerun_error") != r["id"]:
+                    log("#%d rerun of %s (job %d) not possible yet: %s"
+                        % (pr["number"], name, r["id"], (err or out).strip()[:200]))
+                    ps["rerun_error"] = r["id"]
+                continue
+        ids.append(r["id"])
+        log("#%d %s was cancelled on %s; reran job %d (%d/%d)"
+            % (pr["number"], name, pr["headRefOid"][:7], r["id"], len(ids),
+               CFG.get("max_cancellations", 2)))
+    return None
 
 
 def scratch_at(commit):
@@ -650,7 +692,8 @@ def process_head(pr, st):
     ps = pr_state(st, num)
     if ps.get("head") != pr["headRefOid"]:
         ps.update(head=pr["headRefOid"], since=now_utc().isoformat())
-        ps.pop("unknown_since", None)
+        for k in ("unknown_since", "cancelled_runs", "stuck_since"):
+            ps.pop(k, None)
     decision, detail, data = decide(pr, st)
     changed = (decision, detail) != (ps.get("decision"), ps.get("detail"))
     ps.update(decision=decision, detail=detail, checked=now_utc().isoformat())
@@ -673,6 +716,12 @@ def process_head(pr, st):
             fail_pr(pr, "CI 超过 %d 分钟没有结果（%s）" % (CFG["ci_timeout_minutes"], detail),
                     data.get("checks", ()))
             return True
+        cancelled = [n for n, x, _ in data.get("checks", ()) if x == "cancelled"]
+        if cancelled:
+            why = rerun_cancelled(pr, ps, cancelled)
+            if why:
+                fail_pr(pr, why, data.get("checks", ()))
+                return True
         # Nothing queued or running, only missing/skipped: CI will never come by itself.
         states = [st_ for _, st_, _ in data.get("checks", ()) if st_ != "success"]
         if states and all(x in ("missing", "skipped") for x in states):

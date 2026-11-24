@@ -161,6 +161,10 @@ impl<'a> MockPass<'a> {
                 float(&view, "shutter_phase", time).unwrap_or(-90.0),
             ],
             layers: Vec::new(),
+            // The mock evaluator draws every layer flat and unblurred.
+            camera: None,
+            lights: Vec::new(),
+            motion_blur: None,
         };
 
         let layer_paths = layer_paths(stage, path);

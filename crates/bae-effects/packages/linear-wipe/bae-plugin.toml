@@ -1,0 +1,43 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "linear-wipe"
+name = "Linear Wipe"
+category = "Transition"
+implementation = "wgsl"
+ae_match_names = ["ADBE Linear Wipe"]
+keywords = ["linear", "wipe"]
+shader = "shaders/linear_wipe.wgsl"
+identity_when = "params.transition_completion == 0"
+
+[[effect.param]]
+id = 1
+key = "transition_completion"
+type = "float"
+name = "Transition Completion"
+default = 0
+range = [0, 100]
+
+[[effect.param]]
+id = 2
+key = "wipe_angle"
+type = "angle"
+name = "Wipe Angle"
+default = 90
+
+[[effect.param]]
+id = 3
+key = "feather"
+type = "float"
+name = "Feather"
+default = 0
+range = [0, 32000]

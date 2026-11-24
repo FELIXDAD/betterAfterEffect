@@ -765,7 +765,7 @@ impl TimelinePanel {
                     .take()
                     .filter(|(p, a, _)| p == path && a == attr)
                     .and_then(|(.., i)| i);
-                self.insert_expression(cx, path, attr, &expr, insert, item);
+                insert_expression(cx, path, attr, &expr, insert, item);
             }
             mresp.on_hover_text(mtip);
             #[cfg(test)]
@@ -855,32 +855,31 @@ impl TimelinePanel {
         }
     }
 
-    /// Insert `text` (the language menu) at the selection of the field being
-    /// edited, or replace the expression.
-    pub(super) fn insert_expression(
-        &mut self,
-        cx: &mut PanelContext<'_>,
-        path: &PrimPath,
-        attr: &str,
-        expr: &bae_model::Expression,
-        insert: Option<(String, std::ops::Range<usize>)>,
-        text: &str,
-    ) {
-        let source = match insert {
-            Some((buf, sel)) => crate::expr::splice(&buf, &sel, text),
-            None => text.to_owned(),
-        };
-        cx.invoke_with(
-            "attr.set_expression",
-            json!({"path": path, "attr": attr, "source": source, "enabled": expr.enabled}),
-        );
-    }
-
     /// The text and selection of `path.attr`'s field while it is being edited.
-    fn caret(&self, path: &PrimPath, attr: &str) -> Option<(String, std::ops::Range<usize>)> {
+    fn caret(&self, path: &PrimPath, attr: &str) -> Option<crate::expr::Selection> {
         self.expr_caret
             .as_ref()
             .filter(|(p, a, ..)| p == path && a == attr)
             .map(|(_, _, t, r)| (t.clone(), r.clone()))
     }
+}
+
+/// Insert `text` (the language menu) at the selection of the field being
+/// edited, or replace the expression.
+fn insert_expression(
+    cx: &mut PanelContext<'_>,
+    path: &PrimPath,
+    attr: &str,
+    expr: &bae_model::Expression,
+    insert: Option<crate::expr::Selection>,
+    text: &str,
+) {
+    let source = match insert {
+        Some((buf, sel)) => crate::expr::splice(&buf, &sel, text),
+        None => text.to_owned(),
+    };
+    cx.invoke_with(
+        "attr.set_expression",
+        json!({"path": path, "attr": attr, "source": source, "enabled": expr.enabled}),
+    );
 }

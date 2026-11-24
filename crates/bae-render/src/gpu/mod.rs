@@ -4,8 +4,10 @@
 
 use bae_gpu::wgpu;
 use bytemuck::{Pod, Zeroable};
-use glam::DAffine2;
+use glam::{DAffine2, DMat3, DVec2};
 use rustc_hash::FxHashMap;
+
+use crate::three_d::Homography;
 
 use crate::blend::{BlendMode, MaskMode};
 
@@ -102,7 +104,14 @@ pub(crate) mod flags {
     pub const CLAMP: u32 = 32;
     pub const OPAQUE: u32 = 64;
     pub const MASK: u32 = 128;
+    /// `fwd`/`inv` are full 3×3 homographies (3D layers).
+    pub const PROJECTIVE: u32 = 256;
+    /// Motion blur: average the samples `extra.y .. extra.y + extra.z`.
+    pub const MOTION: u32 = 512;
 }
+
+/// Most layer-space clip half-planes per draw (3D intersections).
+pub(crate) const MAX_CLIPS: usize = crate::three_d::MAX_CLIPS;
 
 /// One draw (layer op), laid out like `struct Draw` in `composite.wgsl`.
 #[repr(C)]
@@ -125,6 +134,60 @@ pub(crate) struct DrawData {
     pub mask_val: [f32; 4],
     /// The mask's region in its atlas page (uv min x, y, max x, y).
     pub mask_clip: [f32; 4],
+    /// Forward homography w row (input texel → target texel) and, in `w`, the
+    /// near-plane weight below which geometry is clipped.
+    pub fwd_w: [f32; 4],
+    /// Inverse homography w row.
+    pub inv_w: [f32; 4],
+    /// Half-planes `a·u + b·v + c ≥ 0` in input texels (`extra.x` of them).
+    pub clips: [[f32; 4]; MAX_CLIPS],
+    /// Clip count, first motion sample, sample count, unused.
+    pub extra: [u32; 4],
+}
+
+/// One motion-blur sample of a draw: target texel → input texel homography,
+/// laid out like `struct Sample` in `composite.wgsl`. `inv_w.w` is
+/// `1 / near` for 3D samples (pixels closer than the near plane are empty),
+/// 0 otherwise.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
+pub(crate) struct SampleData {
+    pub inv_x: [f32; 4],
+    pub inv_y: [f32; 4],
+    pub inv_w: [f32; 4],
+}
+
+impl SampleData {
+    /// The sample record for `to_target` (input texels → target texels): a 3D
+    /// placement clipped at `near`, or (`near = None`) an affine one.
+    pub fn new(to_target: &Homography, near: Option<f64>) -> Option<SampleData> {
+        let affine = match near {
+            Some(_) => None,
+            None => Some(to_target.as_affine()?),
+        };
+        let inv = to_target.inverse()?;
+        let r = |i: usize| inv.0.row(i).as_vec3().extend(0.0).to_array();
+        let inv_w = match (near, affine) {
+            (Some(n), _) => {
+                let mut w = r(2);
+                w[3] = (1.0 / n) as f32;
+                w
+            }
+            (None, Some(a)) => {
+                // Perpendicular edge scales, as in `DrawData::geometry`.
+                let det = a.matrix2.determinant().abs();
+                let kx = det / a.matrix2.y_axis.length();
+                let ky = det / a.matrix2.x_axis.length();
+                [kx as f32, ky as f32, 1.0, 0.0]
+            }
+            (None, None) => return None,
+        };
+        Some(SampleData {
+            inv_x: r(0),
+            inv_y: r(1),
+            inv_w,
+        })
+    }
 }
 
 impl DrawData {
@@ -167,8 +230,97 @@ impl DrawData {
             ],
             src: [0.0, 0.0, kx as f32, ky as f32],
             target: [target[0] as f32, target[1] as f32, 1.0, 0.0],
+            fwd_w: [0.0, 0.0, 1.0, 0.0],
+            inv_w: [0.0, 0.0, 1.0, 0.0],
             ..DrawData::default()
         })
+    }
+
+    /// Geometry of a projective draw: `h` maps input texels to homogeneous
+    /// target texels with `w` = camera depth; geometry closer than `near` is
+    /// clipped. `None` when degenerate.
+    pub fn projective(
+        h: &Homography,
+        rect: [f64; 4],
+        target: [u32; 2],
+        near: f64,
+    ) -> Option<DrawData> {
+        if !h.is_invertible() {
+            return None;
+        }
+        let inv = h.inverse()?;
+        let row = |m: &DMat3, i: usize| m.row(i).as_vec3().extend(0.0).to_array();
+        // Quad margin: one target pixel beyond the edges where the layer is
+        // smallest on screen (at least one input texel), from the local scales
+        // at the corners in front of the camera.
+        let corners = [
+            DVec2::new(rect[0], rect[1]),
+            DVec2::new(rect[2], rect[1]),
+            DVec2::new(rect[2], rect[3]),
+            DVec2::new(rect[0], rect[3]),
+        ];
+        let mut k = DVec2::splat(f64::INFINITY);
+        for c in corners {
+            if h.w(c) >= near {
+                k = k.min(h.axis_scales_at(c));
+            }
+        }
+        let limit = (rect[2] - rect[0]).max(rect[3] - rect[1]).max(1.0);
+        let margin = |k: f64| {
+            if k.is_finite() && k > 0.0 {
+                (1.0 / k).clamp(1.0, limit)
+            } else {
+                1.0
+            }
+        };
+        let (mx, my) = (margin(k.x), margin(k.y));
+        let mut fwd_w = row(&h.0, 2);
+        fwd_w[3] = near as f32;
+        Some(DrawData {
+            fwd_x: row(&h.0, 0),
+            fwd_y: row(&h.0, 1),
+            inv_x: row(&inv.0, 0),
+            inv_y: row(&inv.0, 1),
+            rect: rect.map(|v| v as f32),
+            quad: [
+                (rect[0] - mx) as f32,
+                (rect[1] - my) as f32,
+                (rect[2] + mx) as f32,
+                (rect[3] + my) as f32,
+            ],
+            target: [target[0] as f32, target[1] as f32, 1.0, 0.0],
+            mode: [0, flags::PROJECTIVE, 0, 0],
+            fwd_w,
+            inv_w: row(&inv.0, 2),
+            ..DrawData::default()
+        })
+    }
+
+    /// Geometry of a motion-blurred draw: the quad covers `bounds` (target
+    /// texels) directly; the samples map each pixel back into the input.
+    pub fn motion(bounds: [f64; 4], rect: [f64; 4], target: [u32; 2]) -> DrawData {
+        DrawData {
+            fwd_x: [1.0, 0.0, 0.0, 0.0],
+            fwd_y: [0.0, 1.0, 0.0, 0.0],
+            fwd_w: [0.0, 0.0, 1.0, 0.0],
+            inv_x: [1.0, 0.0, 0.0, 0.0],
+            inv_y: [0.0, 1.0, 0.0, 0.0],
+            inv_w: [0.0, 0.0, 1.0, 0.0],
+            rect: rect.map(|v| v as f32),
+            quad: bounds.map(|v| v as f32),
+            target: [target[0] as f32, target[1] as f32, 1.0, 0.0],
+            mode: [0, flags::MOTION, 0, 0],
+            ..DrawData::default()
+        }
+    }
+
+    /// Adds layer-space clip half-planes given in input texels.
+    pub fn set_clips(&mut self, clips: &[[f64; 3]]) {
+        let n = clips.len().min(MAX_CLIPS);
+        for (dst, c) in self.clips.iter_mut().zip(&clips[..n]) {
+            *dst = [c[0] as f32, c[1] as f32, c[2] as f32, 0.0];
+        }
+        self.extra[0] = n as u32;
     }
 }
 
@@ -231,7 +383,8 @@ pub(crate) struct Pipelines {
     layout: wgpu::PipelineLayout,
     pub draws_layout: wgpu::BindGroupLayout,
     pub textures_layout: wgpu::BindGroupLayout,
-    composite: FxHashMap<(wgpu::TextureFormat, BlendKind), wgpu::RenderPipeline>,
+    /// By target format, blend kind and motion blur (`fs_motion`).
+    composite: FxHashMap<(wgpu::TextureFormat, BlendKind, bool), wgpu::RenderPipeline>,
     pub sampler: wgpu::Sampler,
     pub dummy: wgpu::TextureView,
     pub empty_textures: wgpu::BindGroup,
@@ -254,18 +407,20 @@ impl Pipelines {
             label: Some("bae-render.composite"),
             source: wgpu::ShaderSource::Wgsl(wgsl!("composite.wgsl").into()),
         });
+        let storage = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        // Draw records and motion-blur samples.
         let draws_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("bae-render.draws"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
+            entries: &[storage(0), storage(1)],
         });
         let tex = |binding| wgpu::BindGroupLayoutEntry {
             binding,
@@ -424,42 +579,45 @@ impl Pipelines {
             .or_insert_with(|| output_pipeline(device, module, layout, format))
     }
 
-    /// The composite pipeline for a target format and blend kind (compiled on
-    /// first use).
+    /// The composite pipeline for a target format, blend kind and whether the
+    /// draws are motion-blurred (compiled on first use).
     pub fn composite(
         &mut self,
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
         kind: BlendKind,
+        motion: bool,
     ) -> &wgpu::RenderPipeline {
         let (module, layout) = (&self.module, &self.layout);
-        self.composite.entry((format, kind)).or_insert_with(|| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("bae-render.composite"),
-                layout: Some(layout),
-                vertex: wgpu::VertexState {
-                    module,
-                    entry_point: Some("vs_main"),
-                    compilation_options: Default::default(),
-                    buffers: &[],
-                },
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module,
-                    entry_point: Some("fs_main"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: kind.state(),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
+        self.composite
+            .entry((format, kind, motion))
+            .or_insert_with(|| {
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("bae-render.composite"),
+                    layout: Some(layout),
+                    vertex: wgpu::VertexState {
+                        module,
+                        entry_point: Some("vs_main"),
+                        compilation_options: Default::default(),
+                        buffers: &[],
+                    },
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState::default(),
+                    fragment: Some(wgpu::FragmentState {
+                        module,
+                        entry_point: Some(if motion { "fs_motion" } else { "fs_main" }),
+                        compilation_options: Default::default(),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format,
+                            blend: kind.state(),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                    }),
+                    multiview_mask: None,
+                    cache: None,
+                })
             })
-        })
     }
 
     /// A texture bind group (unused slots get the dummy texture).
@@ -747,8 +905,9 @@ mod tests {
 
     #[test]
     fn draw_record_matches_wgsl_layout() {
-        // 14 vec4s: the WGSL struct stride.
-        assert_eq!(std::mem::size_of::<DrawData>(), 224);
+        // 21 vec4s: the WGSL struct stride.
+        assert_eq!(std::mem::size_of::<DrawData>(), 336);
+        assert_eq!(std::mem::size_of::<SampleData>(), 48);
         assert_eq!(std::mem::size_of::<EdgeData>(), 32);
         assert_eq!(std::mem::size_of::<MaskPassData>(), 112);
     }

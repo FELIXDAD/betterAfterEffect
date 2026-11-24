@@ -11,6 +11,9 @@ use serde_json::json;
 
 use crate::common;
 
+/// An expression field's text and its selection (chars).
+pub(crate) type Selection = (String, Range<usize>);
+
 /// An expression pick whip being dragged. Also the egui drag-and-drop payload, so
 /// the Effect Controls take the drop too.
 #[derive(Clone, Debug)]
@@ -19,7 +22,7 @@ pub(crate) struct Whip {
     pub attr: String,
     /// The text being edited and its selection (chars) when the field was active:
     /// the reference replaces the selection. Otherwise it replaces the expression.
-    pub insert: Option<(String, Range<usize>)>,
+    pub insert: Option<Selection>,
 }
 
 fn js(s: &str) -> String {
