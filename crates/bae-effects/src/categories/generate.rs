@@ -10,7 +10,14 @@ pub(crate) fn register(registry: &mut Registry) {
             embedded!("gradient-ramp", ["shaders/gradient_ramp.wgsl"]),
             embedded!(
                 "procedural",
-                ["shaders/four_color_gradient.wgsl", "shaders/grid.wgsl"]
+                [
+                    "shaders/four_color_gradient.wgsl",
+                    "shaders/grid.wgsl",
+                    "shaders/cell_pattern.wgsl",
+                    "shaders/checkerboard.wgsl",
+                    "shaders/circle.wgsl",
+                    "shaders/ellipse.wgsl",
+                ]
             ),
         ],
     )

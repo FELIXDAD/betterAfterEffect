@@ -112,6 +112,26 @@ pub fn input(name: &str) -> Vec<[u8; 4]> {
                     let v = if y < h / 2 { v } else { 0.5 * v };
                     [v, v, v, 1.0]
                 }
+                "speckles" => {
+                    let levels = |n: u32| f64::from(n % 251) / 250.0;
+                    [
+                        levels(x * 17 + y * 53 + x * y),
+                        levels(x * 73 + y * 7),
+                        levels(x * 3 + y * 13),
+                        1.0,
+                    ]
+                }
+                "matte-edge" => {
+                    let edge = (fx * 2.0 + 0.2 * fy - 0.5).clamp(0.0, 1.0);
+                    let alpha = if y < h / 3 {
+                        f64::from(x > w / 2)
+                    } else if y < 2 * h / 3 {
+                        edge
+                    } else {
+                        f64::from((x / 5 + y / 7) % 3 != 0)
+                    };
+                    [0.2 + 0.75 * fx, 0.3 + 0.35 * fy, 0.8 - 0.6 * fx, alpha]
+                }
                 "chart" => {
                     if y < h / 2 {
                         // Hue ramp with a brightness ramp downwards.
@@ -171,7 +191,10 @@ pub fn render(gpu: &Arc<GpuContext>, case: &Case) -> Vec<[u8; 4]> {
     // texels. A straight source keeps that data available, as the AE input does.
     let straight = matches!(
         case.effect.as_str(),
-        "ADBE Invert"
+        "ADBE PS Median"
+            | "ADBE Dust & Scratches"
+            | "ADBE Linear Color Key2"
+            | "ADBE Invert"
             | "ADBE Shift Channels"
             | "ADBE Set Matte3"
             | "ADBE Simple Choker"

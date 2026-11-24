@@ -90,3 +90,85 @@ blending_mode = "混合模式"
 21 = "饱和度"
 22 = "颜色"
 23 = "发光度"
+
+[effect.cell-pattern]
+name = "单元格图案"
+keywords = ["单元格图案"]
+
+[effect.cell-pattern.params]
+cell_pattern = "单元格图案"
+invert = "反转"
+context_slider = "上下文滑块"
+overflow = "溢出"
+disperse = "分散"
+size = "大小"
+offset = "偏移"
+tiling_options = "平铺选项"
+enable_tiling = "启用平铺"
+horizontal_cells = "水平单元格"
+vertical_cells = "垂直单元格"
+evolution = "演化"
+evolution_options = "演化选项"
+cycle_evolution = "循环演化"
+cycle_in_revolutions = "循环（旋转次数）"
+random_seed = "随机植入"
+
+[effect.cell-pattern.choices]
+cell_pattern = ["气泡", "晶体", "印板", "静态板", "晶格化", "(-", "枕状", "晶体 HQ", "印板 HQ", "静态板 HQ", "晶格化 HQ", "混合晶体", "管状"]
+overflow = ["剪切", "柔和固定", "反绕"]
+
+[effect.checkerboard]
+name = "棋盘"
+keywords = ["棋盘"]
+
+[effect.checkerboard.params]
+anchor = "锚点"
+size_from = "大小依据"
+corner = "边角"
+width = "宽度"
+height = "高度"
+feather = "羽化"
+feather_width = "宽度"
+feather_height = "高度"
+color = "颜色"
+opacity = "不透明度"
+blending_mode = "混合模式"
+
+[effect.checkerboard.choices]
+size_from = ["边角点", "宽度滑块", "宽度和高度滑块"]
+blending_mode = ["无", "正常", "模板 Alpha", "(-", "相加", "相乘", "滤色", "叠加", "柔光", "强光", "(-", "颜色减淡", "颜色加深", "(-", "变暗", "变亮", "差值", "排除", "(-", "色相", "饱和度", "颜色", "发光度"]
+
+[effect.circle]
+name = "圆形"
+keywords = ["圆形"]
+
+[effect.circle.params]
+center = "中心"
+radius = "半径"
+edge = "边缘"
+context_slider = "上下文滑块"
+feather = "羽化"
+feather_outer_edge = "羽化外侧边缘"
+feather_inner_edge = "羽化内侧边缘"
+invert_circle = "反转圆形"
+color = "颜色"
+opacity = "不透明度"
+blending_mode = "混合模式"
+
+[effect.circle.choices]
+edge = ["无", "边缘半径", "厚度", "厚度 * 半径", "厚度和羽化 * 半径"]
+blending_mode = ["无", "正常", "模板 Alpha", "(-", "相加", "相乘", "滤色", "叠加", "柔光", "强光", "(-", "颜色减淡", "颜色加深", "(-", "变暗", "变亮", "差值", "排除", "(-", "色相", "饱和度", "颜色", "发光度"]
+
+[effect.ellipse]
+name = "椭圆"
+keywords = ["椭圆"]
+
+[effect.ellipse.params]
+center = "中心"
+width = "宽度"
+height = "高度"
+thickness = "厚度"
+softness = "柔和度"
+inside_color = "内部颜色"
+outside_color = "外部颜色"
+composite_on_original = "在原始图像上合成"

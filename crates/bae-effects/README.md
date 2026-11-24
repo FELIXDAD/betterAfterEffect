@@ -48,6 +48,10 @@ Rust 效果的 uniform 走一个环形缓冲 + 动态偏移，每帧不创建缓
 | `ADBE Glo2` / `ADBE Drop Shadow` | 发光 / 投影 | Rust |
 | `ADBE Bevel Alpha` / `ADBE Find Edges` | 斜面 Alpha / 查找边缘 | 声明式计算 |
 | `ADBE Mosaic` / `ADBE Posterize` | 马赛克 / 色调分离 | Rust / 声明式像素 |
+| `ADBE Linear Color Key2` / `ADBE Color Range` / `ADBE Color Difference Key` / `ADBE Spill2` | 线性颜色键 / 颜色范围 / 颜色差值键 / 高级溢出抑制器 | 声明式 |
+| `ADBE Matte Choker` | 遮罩阻塞工具 | Rust，两步迭代 |
+| `ADBE PS Median` / `ADBE Dust & Scratches` | 中间值 / 蒙尘与划痕 | 声明式计算 |
+| `ADBE Checkerboard` / `ADBE Circle` / `ADBE ELLIPSE` / `ADBE Cell Pattern` | 棋盘 / 圆形 / 椭圆 / 单元格图案 | 声明式 |
 
 其余效果的对照和计划见 `docs/interop/ae-effects.md`。
 

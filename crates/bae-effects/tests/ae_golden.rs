@@ -6,12 +6,17 @@
 #[path = "ae/harness.rs"]
 mod harness;
 
+use std::io::Write;
+
 #[test]
 fn matches_after_effects() {
     let golden = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ae/golden");
     let mut cases = harness::cases();
     cases.extend(harness::parse_cases(include_str!(
         "ae/cases-controls-channel.json"
+    )));
+    cases.extend(harness::parse_cases(include_str!(
+        "ae/cases-keying-matte.json"
     )));
     let Some(gpu) = bae_gpu::testing::shared_context() else {
         return;
@@ -24,7 +29,13 @@ fn matches_after_effects() {
     );
     let (extra_max, extra_mean) = if soft { (2, 0.5) } else { (0, 0.0) };
     let mut failures = Vec::new();
+    let ci = std::env::var_os("CI").is_some();
     for case in &cases {
+        // libtest buffers eprintln until the test returns. A driver failure
+        // can terminate the process before that output reaches the CI log.
+        if ci {
+            writeln!(std::io::stderr().lock(), "Rendering {}", case.name).unwrap();
+        }
         let ae = harness::read_png(&golden.join(format!("{}.png", case.name)), case.bpc).unwrap();
         let bae = harness::render(&gpu, case);
         let (max, mean, o1, o3) = harness::diff(&bae, &ae);

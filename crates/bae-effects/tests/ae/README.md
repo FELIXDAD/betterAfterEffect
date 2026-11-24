@@ -33,6 +33,7 @@ cargo run -p bae-effects --example ae_compare -- golden            # 把 AE 输�
 - [表达式控制](categories/controls.md)
 - [生成](categories/generate.md)
 - [遮罩](categories/matte.md)
+- [抠像](categories/keying.md)
 - [杂色和颗粒](categories/noise-grain.md)
 - [透视](categories/perspective.md)
 - [风格化](categories/stylize.md)

@@ -2,7 +2,7 @@
 //!
 //! ```sh
 //! cargo run -p bae-effects --example ae_compare -- prepare   # inputs + cases → /private/tmp/bae-07-ae
-//! tools/ae/aectl run crates/bae-effects/tests/ae/render_cases.jsx   # on a machine with AE
+//! tools/ae/aectl lock -- tools/ae/aectl run crates/bae-effects/tests/ae/render_cases.jsx   # on a machine with AE
 //! cargo run -p bae-effects --example ae_compare -- compare   # BAE renders + table
 //! cargo run -p bae-effects --example ae_compare -- golden    # copy AE outputs into tests/ae/golden/
 //! ```
@@ -22,7 +22,16 @@ fn main() {
         "prepare" => {
             std::fs::create_dir_all(root.join("inputs")).unwrap();
             for name in [
-                "fine", "coords", "chart", "soft", "step", "ramp", "line", "lineg",
+                "chart",
+                "soft",
+                "step",
+                "ramp",
+                "line",
+                "lineg",
+                "fine",
+                "coords",
+                "speckles",
+                "matte-edge",
             ] {
                 harness::write_png(
                     &root.join("inputs").join(format!("{name}.png")),

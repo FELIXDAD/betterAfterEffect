@@ -10,4 +10,10 @@ pub(super) fn register(out: &mut Vec<Case>) {
             size: HD,
         });
     }
+    out.push(Case {
+        name: "1080p keying-matte matte choker".into(),
+        match_name: "ADBE Matte Choker",
+        params: vec![],
+        size: HD,
+    });
 }
