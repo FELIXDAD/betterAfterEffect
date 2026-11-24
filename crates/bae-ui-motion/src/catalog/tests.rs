@@ -1096,3 +1096,65 @@ fn menu_items_show_the_chord_ae_shows() {
     }
     assert!(errors.is_empty(), "{}", errors.join("\n"));
 }
+
+const SHORTCUTS_JSON_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/ui/ae-shortcuts.json");
+
+/// The key table as JSON for test tools (`tools/qa/`): every AE default-shortcut
+/// command with its BAE action, both platforms' chords in BAE notation, scope,
+/// owner and status. Generated like `ae-commands.md`.
+fn render_shortcuts_json() -> String {
+    let rows: Vec<Value> = KEYS
+        .iter()
+        .map(|k| {
+            let bindable = |mac: bool| -> Vec<String> {
+                k.chords(mac)
+                    .into_iter()
+                    .filter(|c| bae_ui::Chord::parse(c).is_ok())
+                    .collect()
+            };
+            serde_json::json!({
+                "context": k.context,
+                "command": k.command,
+                "action": k.action,
+                "params": params(k.params),
+                "windows": bindable(false),
+                "mac": bindable(true),
+                "scope": k.scope(),
+                "owner": owner_name(k.owner),
+                "status": format!("{:?}", k.status),
+                "works": k.status.works(),
+                "native": k.flags & NATIVE != 0,
+                "bound_elsewhere": k.flags & BOUND_ELSEWHERE != 0,
+                "shadowed": k.flags & SHADOWED != 0,
+                "own_panel": in_own_panel(k),
+            })
+        })
+        .collect();
+    // One row per line: small, and diffs show which commands changed.
+    let mut s = String::from(
+        "{\"generated_by\": \"crates/bae-ui-motion/src/catalog (BAE_UPDATE_DOCS=1 cargo test -p bae-ui-motion catalog)\",\n\"rows\": [\n",
+    );
+    for (i, r) in rows.iter().enumerate() {
+        s.push_str(&r.to_string());
+        s.push_str(if i + 1 < rows.len() { ",\n" } else { "\n" });
+    }
+    s.push_str("]}\n");
+    s
+}
+
+/// `docs/ui/ae-shortcuts.json` is generated from the catalog.
+#[test]
+fn shortcuts_json_is_up_to_date() {
+    let json = render_shortcuts_json();
+    if std::env::var_os("BAE_UPDATE_DOCS").is_some() {
+        std::fs::write(SHORTCUTS_JSON_PATH, &json).unwrap();
+        return;
+    }
+    let current = std::fs::read_to_string(SHORTCUTS_JSON_PATH)
+        .unwrap_or_default()
+        .replace("\r\n", "\n");
+    assert!(
+        current == json,
+        "docs/ui/ae-shortcuts.json is stale: run BAE_UPDATE_DOCS=1 cargo test -p bae-ui-motion catalog"
+    );
+}

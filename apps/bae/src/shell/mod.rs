@@ -266,6 +266,7 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     }
 
     let mut shell = Shell {
+        action_log: crate::action_log::ActionLog::from_env(),
         app,
         proxy,
         smoke: global.smoke_test.map(SmokeTest::new),
@@ -322,6 +323,8 @@ impl SmokeTest {
 }
 
 struct Shell {
+    /// `BAE_ACTION_LOG`: every dispatched action, for test tools.
+    action_log: crate::action_log::ActionLog,
     /// Preferences and the generation last applied.
     prefs: Arc<bae_prefs::PrefsStore>,
     prefs_generation: u64,
@@ -551,6 +554,7 @@ impl Shell {
     /// panel and the workbench first, then the shell's own actions, then the
     /// document (undo/redo and `bae-model` commands).
     fn dispatch(&mut self, event_loop: &ActiveEventLoop, inv: Invocation) {
+        self.action_log.write(&inv);
         let Some(inv) = self
             .workspace
             .handle(inv, &self.document, self.app.resources())
