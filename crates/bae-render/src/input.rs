@@ -89,6 +89,9 @@ impl RenderComp {
         self.layers.len().hash(h);
         for layer in &self.layers {
             layer.hash_composite(h);
+            if layer.blend_mode == BlendMode::DancingDissolve {
+                self.frame_rate.time_to_frame(self.time).hash(h);
+            }
         }
     }
 

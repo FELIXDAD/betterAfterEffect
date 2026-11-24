@@ -71,12 +71,13 @@ impl NodeId {
 /// A built render graph.
 #[derive(Debug)]
 pub struct RenderGraph {
+    /// Project depth for blend functions with depth-specific arithmetic.
+    pub depth: crate::request::BitDepth,
     /// Nodes in execution order (inputs before their consumers).
     pub nodes: Vec<Node>,
     /// The node producing the requested frame.
     pub output: NodeId,
-    /// Things that could not be rendered faithfully (unimplemented blend modes,
-    /// missing footage or effects …), for logs and the UI.
+    /// Missing footage, effects and other rendering warnings for logs and the UI.
     pub warnings: Vec<String>,
 }
 
@@ -202,8 +203,10 @@ pub struct LayerOp {
     pub transform: DAffine2,
     /// Opacity `[0, 1]`.
     pub opacity: f32,
-    /// Blend mode (already mapped to an implemented one).
+    /// Layer blend mode.
     pub blend: BlendMode,
+    /// Stable per-layer dissolve seed, mixed with the comp frame for Dancing Dissolve.
+    pub dissolve_seed: u32,
     /// Only draw where the backdrop has alpha.
     pub preserve_transparency: bool,
     /// Track matte image (composite space, same units as the composite).
@@ -402,6 +405,7 @@ pub fn build(
     };
     let output = builder.composite(comp, rect, scale, 0, false)?;
     Ok(RenderGraph {
+        depth: request.depth,
         nodes: builder.nodes,
         output,
         warnings: builder.warnings,
@@ -488,6 +492,11 @@ impl Builder<'_> {
                 let mut visiting = vec![index];
                 if let Some(op) = self.layer_op(comp, index, rect, scale, depth, &mut visiting)? {
                     ops.push(op);
+                } else if layer.blend_mode.is_stencil()
+                    && !matches!(layer.content, LayerContent::None)
+                {
+                    // A stencil with no coverage clears the accumulated layers.
+                    ops.clear();
                 }
             }
         }
@@ -613,13 +622,6 @@ impl Builder<'_> {
             roi = effect.input_roi(&params, roi).intersect(&bounds_chain[i]);
         }
 
-        let blend = layer.blend_mode.effective();
-        if blend != layer.blend_mode {
-            self.warn(format!(
-                "{}: blend mode `{}` is not implemented yet, using normal",
-                layer.path, layer.blend_mode
-            ));
-        }
         let has_effects = !effects.is_empty();
         let mask = masks
             .as_ref()
@@ -724,7 +726,8 @@ impl Builder<'_> {
             input,
             transform: layer.transform,
             opacity: layer.opacity.clamp(0.0, 1.0),
-            blend,
+            blend: layer.blend_mode,
+            dissolve_seed: layer.blend_mode.dissolve_seed(layer.path.as_str(), comp),
             preserve_transparency: layer.preserve_transparency,
             matte,
             mask: op_mask,
@@ -824,6 +827,7 @@ impl Builder<'_> {
             transform: DAffine2::IDENTITY,
             opacity: 1.0,
             blend: BlendMode::Normal,
+            dissolve_seed: 0,
             preserve_transparency: false,
             matte: None,
             mask: Some(mask),
@@ -1192,7 +1196,7 @@ mod tests {
     }
 
     #[test]
-    fn unimplemented_modes_warn_and_fall_back() {
+    fn hard_mix_reaches_compositor() {
         let mut comp = RenderComp::new(p("/comps/main"), 100, 100);
         let mut l = solid("a", 10, 10, [1.0; 4], (0.0, 0.0));
         l.blend_mode = BlendMode::HardMix;
@@ -1201,8 +1205,8 @@ mod tests {
         let NodeKind::Composite(c) = &g.output_node().kind else {
             panic!()
         };
-        assert_eq!(c.ops[0].blend, BlendMode::Normal);
-        assert_eq!(g.warnings.len(), 1);
+        assert_eq!(c.ops[0].blend, BlendMode::HardMix);
+        assert!(g.warnings.is_empty());
     }
 
     #[test]
