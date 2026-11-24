@@ -53,6 +53,7 @@ Stage ──► CompEvaluator（AnimEvaluator = 03 的 bae-anim；MockEvaluator 
 - `Camera::project(point, comp_size)` / `Camera::unproject(pixel, depth, comp_size)`：合成空间的点 ↔ 合成像素（拖动 3D 手柄时用 `unproject` 把鼠标位置放回某个深度）。
 - `Camera::from_transform(parent, position, point_of_interest, orientation, rotation, zoom)`：按 AE 的摄像机变换建摄像机（双节点传目标点，单节点传 `None`），自定义视图（正面、左侧、顶部……）也用它。
 - `Camera::plane_homography(layer_world, comp_size)`：一个 3D 图层平面到合成像素的射影映射（`three_d::Homography`，可以 `map`、`inverse`），画图层外框、命中测试用。
+- 正交视图（AE 的正面、左侧、顶部、背面、右侧、底部，AE-CMP-410）：`Camera::orthographic(OrthoView::Top, centre, scale)`。`centre` 是落在画面中央的合成空间点，平移就改它（比如设成鼠标下那个像素的 `unproject`）；`scale` 是放大倍数（1 = 100%，正面 + 合成中心 + 1 时 z = 0 与 2D 一致）。没有透视，也不按深度裁剪，深度排序照常。查看器渲染某个视图时，把 `RenderComp::camera` 换成这个摄像机即可；`OrthoView::ALL` 是菜单顺序，`OrthoView::rotation()` 给出视图的朝向。`Camera::eye()` 是深度排序和打光用的观察点（正交视图在视线反方向很远处）。
 - 镜头换算（摄像机设置对话框，AE-CMP-418）：`zoom_from_focal_length`、`focal_length_from_zoom`、`angle_of_view`、`zoom_from_angle_of_view`、`FilmMeasure`、`PRESETS`、`default_zoom`。
 - `look_at`、`xyz_rotation`：双节点摄像机的瞄准旋转和 AE 的 X/Y/Z 旋转顺序（与 bae-anim 一致）。
 

@@ -624,7 +624,7 @@ impl Builder<'_> {
                 rect: op.content,
             })
             .collect();
-        let eye = comp.view_camera().position();
+        let eye = comp.view_camera().eye();
         for fragment in depth_order(&plates, eye) {
             let mut op = planned[fragment.item].1.clone();
             op.clips = fragment.clips;
