@@ -535,12 +535,13 @@ def rerun_cancelled(pr, ps, names):
         if not r or r["conclusion"] != "cancelled":
             continue
         ids = seen.setdefault(name, [])
-        if r["id"] in ids:
+        if r["id"] in ids or r["id"] in seen.get("_infra", []):
             continue  # rerun already requested; waiting for the new run to show up
         done = parse_ts(r.get("completed_at"))
         if done and (now_utc() - done).total_seconds() < grace * 60:
             continue  # a replacing run (e.g. after update-branch) may still appear
-        if len(ids) >= CFG.get("max_cancellations", 2) - 1:
+        infra = runner_not_acquired(r["id"])
+        if not infra and len(ids) >= CFG.get("max_cancellations", 2) - 1:
             ids.append(r["id"])
             return "%s 在同一个 head %s 上被取消了 %d 次" % (name, pr["headRefOid"][:7], len(ids))
         # A check run's id is its Actions job id.
@@ -554,11 +555,26 @@ def rerun_cancelled(pr, ps, names):
                         % (pr["number"], name, r["id"], (err or out).strip()[:200]))
                     ps["rerun_error"] = r["id"]
                 continue
+        if infra:
+            # GitHub had no runner (capacity); not counted, bounded by ci_timeout_minutes.
+            seen.setdefault("_infra", []).append(r["id"])
+            log("#%d %s got no runner on %s (GitHub capacity); reran job %d, not counted"
+                % (pr["number"], name, pr["headRefOid"][:7], r["id"]))
+            continue
         ids.append(r["id"])
         log("#%d %s was cancelled on %s; reran job %d (%d/%d)"
             % (pr["number"], name, pr["headRefOid"][:7], r["id"], len(ids),
                CFG.get("max_cancellations", 2)))
     return None
+
+
+def runner_not_acquired(check_run_id):
+    """True if GitHub cancelled the job because no hosted runner picked it up."""
+    try:
+        notes = gh_json(["api", "repos/%s/check-runs/%d/annotations" % (CFG["repo"], check_run_id)])
+    except (RuntimeError, ValueError):
+        return False
+    return any("not acquired by Runner" in (a.get("message") or "") for a in notes or [])
 
 
 def scratch_at(commit):

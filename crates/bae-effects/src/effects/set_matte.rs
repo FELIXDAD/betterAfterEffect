@@ -84,10 +84,7 @@ impl Effect for SetMatte {
     fn layer_dependencies(&self, params: &EffectParams<'_>) -> Vec<LayerDependency> {
         source_layer(params)
             .into_iter()
-            .map(|layer| LayerDependency {
-                layer,
-                time: params.comp_time,
-            })
+            .map(|layer| LayerDependency::source(layer, params.comp_time))
             .collect()
     }
 

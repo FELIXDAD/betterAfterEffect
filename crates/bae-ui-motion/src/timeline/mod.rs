@@ -52,18 +52,23 @@ pub(crate) use menus::{
 };
 pub(crate) use menus::{key_menu, keyframe_menu};
 
-const ROW_H: f32 = 19.0;
+/// Row height and switch cell width: AE 26's (17 and about 15 points).
+const ROW_H: f32 = 17.0;
 const TABS_H: f32 = 22.0;
 const HEAD_H: f32 = 34.0;
 const COLS_H: f32 = 20.0;
 const FOOT_H: f32 = 22.0;
-const SW: f32 = 18.0;
+const SW: f32 = 15.0;
+/// Left inset of the Parent & Link title and pick whip.
+const PARENT_PAD: f32 = 6.0;
 /// Left padding of the time graph so frame 0 is not on the edge.
 const PAD: f32 = 8.0;
 
 /// Outline column x offsets (relative to the panel's left edge).
 struct Cols {
     av: f32,
+    /// The layer's expand arrow (AE: between the A/V switches and the label).
+    twirl: f32,
     label: f32,
     index: f32,
     name: f32,
@@ -74,16 +79,21 @@ struct Cols {
 
 impl Cols {
     fn new(width: f32) -> Cols {
-        let av = 4.0;
-        let label = av + 4.0 * SW + 4.0;
+        // Positions measured on AE 26's Timeline (points from the panel's left).
+        let av = 5.0;
+        let twirl = av + 4.0 * SW + 4.0;
+        let label = twirl + 15.0;
         let index = label + 18.0;
-        let name = index + 26.0;
-        let name_w = 150.0_f32.max(width * 0.0);
+        let name = index + 28.0;
+        let name_w = 138.0_f32.max(width * 0.0);
         let switches = name + name_w;
-        let parent = switches + 7.0 * SW + 6.0;
-        let end = parent + 128.0;
+        // AE's eight switches: Shy, Collapse, Quality, fx, Frame Blending, Motion
+        // Blur, Adjustment Layer, 3D Layer.
+        let parent = switches + 8.0 * SW + 14.0;
+        let end = parent + 120.0;
         Cols {
             av,
+            twirl,
             label,
             index,
             name,
@@ -409,6 +419,11 @@ impl TimelinePanel {
     }
 
     #[cfg(test)]
+    pub(crate) fn expanded_layer(&self, layer: &PrimPath) -> bool {
+        self.expanded.contains(layer.as_str())
+    }
+
+    #[cfg(test)]
     pub(crate) fn start_rename(&mut self, layer: PrimPath, text: &str) {
         self.rename = Some((layer, text.to_owned()));
     }
@@ -573,6 +588,8 @@ impl Panel for TimelinePanel {
             .id_salt("timeline_rows")
             .auto_shrink([false, false])
             .show_rows(&mut child, ROW_H, rows.len(), |ui, range| {
+                // Rows touch, as in AE (a 1-point line between them).
+                ui.spacing_mut().item_spacing.y = 0.0;
                 for i in range {
                     let row = &rows[i];
                     let (rect, _) =

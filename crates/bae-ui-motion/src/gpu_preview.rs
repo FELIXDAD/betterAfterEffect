@@ -159,7 +159,15 @@ impl GpuPreview {
                 purpose: RenderPurpose::Preview,
                 ..RenderRequest::full()
             };
-            let frame = match self.renderer.render_frame(&rc, &request) {
+            // Effects reading other frames evaluate them like this one.
+            let mut frames = bae_render::eval::EvaluatorFrames {
+                stage,
+                evaluator: &mut self.anim,
+            };
+            let frame = match self
+                .renderer
+                .render_frame_with(&rc, &request, Some(&mut frames))
+            {
                 Ok(f) => f,
                 Err(e) => {
                     tracing_warn(&format!("preview: {e}"));

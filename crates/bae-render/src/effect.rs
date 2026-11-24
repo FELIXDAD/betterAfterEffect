@@ -135,14 +135,54 @@ impl EffectParams<'_> {
     }
 }
 
-/// A dependency of an effect on another layer's pixels (AE layer parameters).
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// A layer's pixels an effect reads (AE layer parameters; also the effect's
+/// own layer before its effect stack). The image is in that layer's own
+/// space: its transform, opacity, visibility and track matte do not apply.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LayerDependency {
-    /// The layer.
+    /// The layer (of the comp the effect's layer is in).
     pub layer: PrimPath,
-    /// The comp time to sample it at. The graph currently exposes the source
-    /// stage of the already evaluated frame.
+    /// The comp time to sample it at (another time: previous / next frames).
     pub time: Time,
+    /// How much of the layer: its source, with its masks, or with masks and
+    /// effects (AE's Source / Masks / Effects & Masks).
+    pub stage: LayerStage,
+}
+
+impl LayerDependency {
+    /// The source of `layer` at comp time `time` (AE's default).
+    pub fn source(layer: PrimPath, time: Time) -> Self {
+        Self {
+            layer,
+            time,
+            stage: LayerStage::Source,
+        }
+    }
+}
+
+/// How much of a referenced layer an effect reads (AE's layer popup).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum LayerStage {
+    /// The layer's source.
+    #[default]
+    Source,
+    /// The source with the layer's masks.
+    Masks,
+    /// The source with masks and effects. A reference back to a layer whose
+    /// effects are being resolved (A reads B, B reads A) uses `Masks` and
+    /// warns.
+    EffectsAndMasks,
+}
+
+/// Masks of the effect's own layer an effect reads (AE path parameters, Fill's
+/// All Masks): delivered as a layer-space image whose alpha is the coverage.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum MaskSelect {
+    /// One mask (a `Mask` prim of the layer), with its inversion, feather and
+    /// expansion; its mode is ignored.
+    One(PrimPath),
+    /// Every mask of the layer combined, as they cut the layer.
+    All,
 }
 
 /// GPU implementation of an effect.
@@ -169,6 +209,11 @@ pub trait Effect: Send + Sync {
 
     /// Other layers this instance reads (scheduled before it). Default: none.
     fn layer_dependencies(&self, _params: &EffectParams<'_>) -> Vec<LayerDependency> {
+        Vec::new()
+    }
+
+    /// Masks of its own layer this instance reads. Default: none.
+    fn mask_dependencies(&self, _params: &EffectParams<'_>) -> Vec<MaskSelect> {
         Vec::new()
     }
 
