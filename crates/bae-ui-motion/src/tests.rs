@@ -229,6 +229,31 @@ fn preview_observes_edits_without_a_shell_history_log() {
 }
 
 #[test]
+fn preview_follows_a_solid_color_change() {
+    let mut h = Harness::new();
+    let (comp, solid, _shape) = h.comp_with_layers();
+    let mut cache = crate::common::EvalCache::default();
+    let color = |h: &Harness, cache: &mut crate::common::EvalCache| {
+        let ec = cache
+            .get(&h.stage)
+            .evaluate_comp(&h.stage, &comp, Time::ZERO)
+            .unwrap();
+        let layer = ec.layers.iter().find(|l| l.path == solid).unwrap();
+        match &layer.source {
+            bae_anim::LayerSource::Asset { info, .. } => info.solid_color,
+            _ => None,
+        }
+    };
+    assert_eq!(color(&h, &mut cache), Some([1.0, 0.0, 0.0, 1.0]));
+    // Solid Settings writes only the solid item, not the layer or comp.
+    h.run(
+        "solid.set_settings",
+        json!({"target": solid, "color": [0.0, 0.0, 1.0, 1.0]}),
+    );
+    assert_eq!(color(&h, &mut cache), Some([0.0, 0.0, 1.0, 1.0]));
+}
+
+#[test]
 fn module_registers_panels_shortcuts_and_commands() {
     let mut b = AppBuilder::new();
     b.add_module(bae_ui::UiModule)

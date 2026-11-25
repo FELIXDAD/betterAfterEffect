@@ -37,6 +37,10 @@ struct UndoEntry {
     edits: Vec<Edit>,
 }
 
+/// Events and total changes kept for [`Stage::changes_since`].
+const JOURNAL_EVENTS: usize = 64;
+const JOURNAL_CHANGES: usize = 4096;
+
 /// An open project: a stack of sublayers composed strongest-first.
 ///
 /// For every prim path, each sublayer may hold a spec; for every attribute the
@@ -271,10 +275,18 @@ impl Stage {
         }
         self.expand_through_references(&mut event);
         if let Some(entries) = self.changes.get_mut() {
-            if entries.len() == 64 {
-                entries.pop_front();
+            // Bounded by events and by changes, so a bulk import or paste is not
+            // kept twice; consumers older than the journal rebuild.
+            if event.changes.len() > JOURNAL_CHANGES {
+                entries.clear();
+            } else {
+                entries.push_back((self.revision, event.clone()));
+                let mut total: usize = entries.iter().map(|(_, e)| e.changes.len()).sum();
+                while entries.len() > JOURNAL_EVENTS || total > JOURNAL_CHANGES {
+                    let (_, dropped) = entries.pop_front().expect("over the bound");
+                    total -= dropped.changes.len();
+                }
             }
-            entries.push_back((self.revision, event.clone()));
         }
         self.revision = NEXT_REVISION.fetch_add(1, Ordering::Relaxed);
         for (_, f) in &mut self.subscribers {
