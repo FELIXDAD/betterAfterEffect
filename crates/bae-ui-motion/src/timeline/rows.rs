@@ -263,9 +263,7 @@ impl TimelinePanel {
                     ] {
                         cell(sw(i), attr, icon, bool_attr(stage, layer, attr));
                     }
-                    if frame_mix_available()
-                        && let Some(mode) = footage_frame_blending(stage, layer)
-                    {
+                    if let Some(mode) = footage_frame_blending(stage, layer) {
                         let tip = match mode {
                             "pixel_motion" => "Pixel Motion",
                             "frame_mix" => "Frame Mix",
@@ -1037,7 +1035,7 @@ fn option_label(token: &str) -> &'static str {
 
 /// The media importer writes a frame rate only for moving footage. Still and audio layers
 /// have no temporal video samples to mix.
-fn footage_frame_blending<'a>(stage: &'a Stage, layer: &PrimPath) -> Option<&'a str> {
+pub(super) fn footage_frame_blending<'a>(stage: &'a Stage, layer: &PrimPath) -> Option<&'a str> {
     let view = stage.prim(layer)?;
     if view.value("kind")?.as_str()? != "footage" {
         return None;

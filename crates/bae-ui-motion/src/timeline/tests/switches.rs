@@ -394,15 +394,6 @@ fn footage_frame_mix_retains_the_layer_setting_when_the_comp_switch_is_off() {
             .is_empty()
     );
     let r = h.click(&mut tl, row, Modifiers::NONE);
-    if !bae_motion::layer::LAYER_SWITCH_ATTRS.contains(&"frame_blending") {
-        assert!(r.invocations.is_empty());
-        assert!(
-            h.click(&mut tl, master, Modifiers::NONE)
-                .invocations
-                .is_empty()
-        );
-        return;
-    }
     assert_eq!(r.invocations.len(), 1);
     h.apply(&r);
     for expected in [true, false, true] {
@@ -415,6 +406,16 @@ fn footage_frame_mix_retains_the_layer_setting_when_the_comp_switch_is_off() {
         assert_eq!(
             query::static_value(&h.stage.prim(&layer).unwrap(), "frame_blending"),
             Some(Value::Enum("frame_mix".into()))
+        );
+    }
+    // The layer switch cycles Frame Mix → Pixel Motion → Off (AE).
+    for expected in ["pixel_motion", "off", "frame_mix"] {
+        let r = h.click(&mut tl, row, Modifiers::NONE);
+        assert_eq!(r.invocations.len(), 1, "one edit per click");
+        h.apply(&r);
+        assert_eq!(
+            query::static_value(&h.stage.prim(&layer).unwrap(), "frame_blending"),
+            Some(Value::Enum(expected.into()))
         );
     }
 }

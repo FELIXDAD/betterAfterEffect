@@ -24,15 +24,42 @@ impl SwitchInput {
 pub(super) struct SwitchDrag {
     attr: &'static str,
     value: bool,
+    /// Frame Blending: the mode painted (`off`, `frame_mix`, `pixel_motion`).
+    mode: Option<&'static str>,
     previous: Pos2,
     changed: BTreeSet<PrimPath>,
 }
 
-fn set_switch(cx: &mut PanelContext<'_>, paths: impl serde::Serialize, attr: &str, on: bool) {
+/// AE's Frame Blending switch cycles Off → Frame Mix → Pixel Motion → Off.
+fn next_frame_blending(mode: &str) -> &'static str {
+    match mode {
+        "off" => "frame_mix",
+        "frame_mix" => "pixel_motion",
+        _ => "off",
+    }
+}
+
+fn frame_blending_of(stage: &Stage, layer: &PrimPath) -> &'static str {
+    match rows::footage_frame_blending(stage, layer) {
+        Some("frame_mix") => "frame_mix",
+        Some("pixel_motion") => "pixel_motion",
+        _ => "off",
+    }
+}
+
+fn set_switch(
+    cx: &mut PanelContext<'_>,
+    paths: impl serde::Serialize,
+    attr: &str,
+    on: bool,
+    mode: Option<&str>,
+) {
     use bae_model::Value;
     let value = match attr {
         "quality" => Value::Enum(if on { "best" } else { "draft" }.into()),
-        "frame_blending" => Value::Enum(if on { "frame_mix" } else { "off" }.into()),
+        "frame_blending" => {
+            Value::Enum(mode.unwrap_or(if on { "frame_mix" } else { "off" }).into())
+        }
         _ => Value::Bool(on),
     };
     cx.invoke_with(
@@ -63,9 +90,12 @@ impl TimelinePanel {
                 && resp.is_pointer_button_down_on()
                 && let Some(pos) = input.pos
             {
+                let mode = (attr == "frame_blending")
+                    .then(|| next_frame_blending(frame_blending_of(cx.stage, layer)));
                 self.switch_drag = Some(SwitchDrag {
                     attr,
-                    value: !on,
+                    value: mode.map_or(!on, |m| m != "off"),
+                    mode,
                     previous: pos,
                     changed: BTreeSet::new(),
                 });
@@ -81,7 +111,11 @@ impl TimelinePanel {
                             && cell.x_range().contains(drag.previous.x)
                             && cell.bottom() >= pos.y.min(drag.previous.y)
                             && cell.top() <= pos.y.max(drag.previous.y));
-                    if traversed && on != drag.value {
+                    let differs = match drag.mode {
+                        Some(mode) => frame_blending_of(cx.stage, layer) != mode,
+                        None => on != drag.value,
+                    };
+                    if traversed && differs {
                         drag.changed.insert(layer.clone());
                     }
                 }
@@ -90,7 +124,9 @@ impl TimelinePanel {
                 }
             } else if resp.clicked() && !input.release {
                 // Activation through the keyboard or accessibility tree has no pointer stroke.
-                set_switch(cx, [layer], attr, !on);
+                let mode = (attr == "frame_blending")
+                    .then(|| next_frame_blending(frame_blending_of(cx.stage, layer)));
+                set_switch(cx, [layer], attr, !on, mode);
             }
         }
         let resp = resp.labeled_toggle(
@@ -129,7 +165,7 @@ impl TimelinePanel {
             self.switch_drag = None;
         } else if input.release {
             if !drag.changed.is_empty() {
-                set_switch(cx, &drag.changed, drag.attr, drag.value);
+                set_switch(cx, &drag.changed, drag.attr, drag.value, drag.mode);
             }
             self.switch_drag = None;
         } else if let Some(pos) = input.pos {

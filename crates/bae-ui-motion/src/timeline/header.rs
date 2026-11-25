@@ -205,7 +205,7 @@ impl TimelinePanel {
                 Icon::FrameBlend,
                 "Enable Frame Blending",
                 "Enables Frame Blending for all layers with the Frame Blend switch set",
-                frame_mix_available(),
+                true,
             ),
             (
                 "hide_shy_layers",

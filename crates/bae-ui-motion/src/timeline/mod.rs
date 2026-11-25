@@ -844,10 +844,6 @@ impl Panel for TimelinePanel {
     }
 }
 
-fn frame_mix_available() -> bool {
-    bae_motion::layer::LAYER_SWITCH_ATTRS.contains(&"frame_blending")
-}
-
 fn row_key(row: &Row) -> String {
     match &row.kind {
         RowKind::Layer => "layer".into(),
