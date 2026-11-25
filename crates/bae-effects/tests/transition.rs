@@ -72,3 +72,31 @@ fn gradient_wipe_thresholds_follow_project_depth() {
         assert_eq!(Pixels::download(&gpu, &out).get(0, 0)[3], expected);
     }
 }
+
+#[test]
+fn cc_wipes_have_exact_source_and_reveal_endpoints() {
+    let Some(gpu) = context() else { return };
+    let r = IRect::from_size(32, 16);
+    let image = test_image(r);
+    let clear = Pixels::new(r, |_, _| [0.; 4]);
+    for (name, id, end, want) in [
+        ("CC Jaws", 1, 1., &clear),
+        ("CS LineSweep", 1, 100., &clear),
+        ("CC Twister", 2, 1., &image),
+        ("CC Glass Wipe", 1, 100., &image),
+        ("CC WarpoMatic", 1, 100., &image),
+    ] {
+        for (v, expected) in [(0., &image), (end, want)] {
+            let result = run(
+                &gpu,
+                F32,
+                builtin(name),
+                vec![(id, Value::Float(v))],
+                &image,
+                r,
+                1.,
+            );
+            assert_close(&result, expected, r, 0.0001, name);
+        }
+    }
+}
