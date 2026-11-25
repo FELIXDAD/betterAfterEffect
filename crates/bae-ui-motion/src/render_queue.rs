@@ -149,6 +149,11 @@ pub struct QueueItem {
     pub end: i64,
     /// Current state.
     pub status: ItemStatus,
+    /// The Render column's check box: unchecked items stay in the queue but
+    /// are not rendered (AE: Unqueued).
+    pub render: bool,
+    /// When its render started (AE's Started column).
+    pub started: Option<std::time::SystemTime>,
     cancel: Arc<AtomicBool>,
 }
 
@@ -242,6 +247,8 @@ impl RenderQueue {
             start,
             end,
             status: ItemStatus::Queued,
+            render: true,
+            started: None,
             cancel: Arc::new(AtomicBool::new(false)),
         });
         id
@@ -299,7 +306,7 @@ impl RenderQueue {
     pub fn queued(&self) -> usize {
         self.items
             .iter()
-            .filter(|i| i.status == ItemStatus::Queued)
+            .filter(|i| i.status == ItemStatus::Queued && i.render)
             .count()
     }
 
@@ -313,7 +320,7 @@ impl RenderQueue {
         self.batch = self
             .items
             .iter()
-            .filter(|i| i.status == ItemStatus::Queued)
+            .filter(|i| i.status == ItemStatus::Queued && i.render)
             .map(|i| i.id)
             .collect();
         true
@@ -334,6 +341,7 @@ impl RenderQueue {
             .and_then(|frames| limited_range(item.start, item.end, frames))
             .map_or(0, |(start, end)| (end - start + 1) as usize);
         item.status = ItemStatus::Rendering { done: 0, total };
+        item.started = Some(std::time::SystemTime::now());
         Some(Job {
             id: item.id,
             comp: item.comp.clone(),
@@ -874,8 +882,22 @@ fn item_ui(
     // Name, status and actions wrap in a narrow panel instead of running
     // off its edge.
     ui.horizontal_wrapped(|ui| {
+        // AE's Render column and the item's number.
+        ui.add_enabled_ui(!matches!(item.status, ItemStatus::Rendering { .. }), |ui| {
+            let mut render = item.render;
+            if bae_ui::widgets::checkbox(ui, &mut render, "")
+                .labeled_toggle(egui::WidgetType::Checkbox, &name("Render"), render)
+                .changed()
+            {
+                item.render = render;
+            }
+        });
+        ui.label(number.to_string());
         ui.strong(&item.comp_name);
         match &item.status {
+            ItemStatus::Queued if !item.render => {
+                ui.label(tr("Unqueued"));
+            }
             ItemStatus::Queued => {
                 ui.label(tr("Queued"));
             }
@@ -954,6 +976,40 @@ fn item_ui(
     if let ItemStatus::Failed(message) = &item.status {
         ui.colored_label(ui.visuals().error_fg_color, message);
     }
+    // AE's Render Time column (time so far while rendering).
+    if let Some(started) = item.started {
+        let time = match &item.status {
+            ItemStatus::Done { seconds, .. } => format!("{seconds:.1} s"),
+            _ => started
+                .elapsed()
+                .map_or_else(|_| String::new(), |d| format!("{:.1} s", d.as_secs_f64())),
+        };
+        ui.label(
+            egui::RichText::new(format!("{} {time}", tr("Render Time:")))
+                .color(bae_ui::theme::color::TEXT_DIM),
+        );
+    }
+    // Render Settings and Log (AE's templates; BAE renders at Best Settings).
+    ui.add_enabled_ui(false, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(tr("Render Settings:"));
+            let mut i = 0;
+            bae_ui::widgets::dropdown(ui, "render-settings", &mut i, &[tr("Best Settings")], 130.0)
+                .labeled_value(
+                    egui::WidgetType::ComboBox,
+                    &name("Render Settings"),
+                    tr("Best Settings"),
+                );
+            ui.add_space(12.0);
+            ui.label(tr("Log:"));
+            let mut j = 0;
+            bae_ui::widgets::dropdown(ui, "log", &mut j, &[tr("Errors Only")], 110.0).labeled_value(
+                egui::WidgetType::ComboBox,
+                &name("Log"),
+                tr("Errors Only"),
+            );
+        });
+    });
     ui.add_enabled_ui(editable, |ui| {
         egui::Grid::new("output").num_columns(2).show(ui, |ui| {
             // Fields are named after the label in front of them and the item
@@ -1127,6 +1183,15 @@ fn channels_label(channels: Channels) -> &'static str {
 /// Chinese strings of this module (keys are the English text, see
 /// `bae_ui::i18n`).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    // AE 26's Render Queue (渲染队列) terms.
+    ("Unqueued", "未加入队列"),
+    ("Render Time:", "渲染时间:"),
+    ("Render Settings", "渲染设置"),
+    ("Log", "日志"),
+    ("Render Settings:", "渲染设置:"),
+    ("Best Settings", "最佳设置"),
+    ("Log:", "日志:"),
+    ("Errors Only", "仅错误"),
     // Render Queue (AE 简体中文界面用词)
     ("Window", "窗口"),
     ("Render Queue", "渲染队列"),
@@ -1227,6 +1292,21 @@ mod tests {
             bg_color: [0.0, 0.0, 0.0, 1.0],
             display_start: Time::ZERO,
         }
+    }
+
+    #[test]
+    fn unchecked_items_are_not_rendered() {
+        let mut q = RenderQueue::default();
+        let dir = Path::new("/renders");
+        let a = q.add(&comp_info("/comps/a", "A"), dir);
+        let b = q.add(&comp_info("/comps/b", "B"), dir);
+        q.item_mut(a).unwrap().render = false;
+        assert_eq!(q.queued(), 1);
+        assert!(q.begin());
+        let job = q.take_next(&|_| Some(30)).unwrap();
+        assert_eq!(job.id, b, "A is unchecked (AE: Unqueued)");
+        assert!(q.items()[1].started.is_some());
+        assert!(q.take_next(&|_| Some(30)).is_none());
     }
 
     #[test]
