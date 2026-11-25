@@ -145,7 +145,8 @@ impl VideoCodec {
     pub fn supports_alpha(self) -> bool {
         match self {
             Self::H264 => false,
-            Self::Hevc | Self::Png | Self::Exr(_) | Self::Tiff(_) => true,
+            Self::Hevc => cfg!(target_vendor = "apple"),
+            Self::Png | Self::Exr(_) | Self::Tiff(_) => true,
             Self::ProRes(profile) => profile.supports_alpha(),
         }
     }

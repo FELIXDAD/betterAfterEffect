@@ -160,6 +160,14 @@
                 layer = comp.layers.addSolid([l.solid[0] / 255, l.solid[1] / 255, l.solid[2] / 255],
                     c.name + "_" + l.name, l.size[0], l.size[1], 1.0);
                 layer.source.parentFolder = folder;
+            } else if (l.sequence) {
+                var io = new ImportOptions(new File(assets + "/" + l.sequence));
+                io.sequence = true;
+                var seq = proj.importFile(io);
+                seq.parentFolder = folder;
+                seq.mainSource.conformFrameRate = l.seq_rate || 10;
+                seq.mainSource.alphaMode = AlphaMode.STRAIGHT;
+                layer = comp.layers.add(seq);
             } else if (l.footage) {
                 layer = comp.layers.add(importFootage(l.footage));
             } else if (l.comp) {
@@ -186,6 +194,32 @@
                 tg.property("ADBE Rotate Z").setValue(l.rot3[2]);
             }
             if (l.orient) { tg.property("ADBE Orientation").setValue(l.orient); }
+            if (l.stretch !== undefined) { layer.stretch = l.stretch; }
+            if (l.start_time !== undefined) { layer.startTime = l.start_time; }
+            if (l.remap) {
+                layer.timeRemapEnabled = true;
+                var tr = layer.property("ADBE Time Remapping");
+                // Time Remap cannot lose all its keys: add ours, then drop the
+                // two default ones (where ours are not).
+                var olds = [];
+                for (var ok = 1; ok <= tr.numKeys; ok++) { olds.push(tr.keyTime(ok)); }
+                var ours = [];
+                for (var rk = 0; rk < l.remap.length; rk++) {
+                    ours.push(l.remap[rk][0] / 30);
+                    tr.setValueAtTime(l.remap[rk][0] / 30, l.remap[rk][1]);
+                }
+                for (var od = olds.length - 1; od >= 0; od--) {
+                    var mine = false;
+                    for (var oc = 0; oc < ours.length; oc++) { if (Math.abs(ours[oc] - olds[od]) < 1e-6) { mine = true; } }
+                    if (!mine) { tr.removeKey(tr.nearestKeyIndex(olds[od])); }
+                }
+                for (var rm = 1; rm <= tr.numKeys; rm++) {
+                    var it = l.remap_hold ? KeyframeInterpolationType.HOLD : KeyframeInterpolationType.LINEAR;
+                    tr.setInterpolationTypeAtKey(rm, it, it);
+                }
+                // The layer may run past the source with remapping on.
+                layer.outPoint = comp.duration;
+            }
             if (l.mat) {
                 var mo = layer.property("ADBE Material Options Group");
                 if (l.mat.amb !== undefined) { mo.property("ADBE Ambient Coefficient").setValue(l.mat.amb); }

@@ -28,6 +28,17 @@ DYNAMIC_DEFAULT = {"max_disk_cache_size_gb": 100, "ram_reserved_for_other_apps_g
 DYNAMIC_MAX = 1024
 # English labels R1 recorded without Chinese text.
 EXTRA_ZH = {"Setup...": "设置..."}
+# BAE's own items (not in AE), first on their page: the UI language, switched
+# without a restart. The label names the setting in both languages so it can be
+# found whatever the current one is; languages are named in themselves.
+BAE_ITEMS = {
+    "appearance": (
+        'Item::P(choice("appearance.language", "Language / 语言", '
+        '&[Opt::new("system", "Follow System"), Opt::new("zh-CN", "简体中文"), Opt::new("en", "English")], '
+        '"system", Style::Dropdown))',
+        {"Language / 语言": "语言 / Language", "Follow System": "跟随系统", "简体中文": "简体中文", "English": "English"},
+    ),
+}
 
 zh = {}
 same = set()
@@ -235,6 +246,11 @@ def main():
             for o in pal:
                 tr(o["labelEn"], o["labelZh"])
         items = []
+        if pid in BAE_ITEMS:
+            extra, strings = BAE_ITEMS[pid]
+            items.append(extra)
+            for en, cn in strings.items():
+                tr(en, cn)
         for g in p["groups"]:
             tr(g["titleEn"], g["titleZh"])
             inner = group_items(pid, g)
