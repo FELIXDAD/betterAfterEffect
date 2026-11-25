@@ -145,6 +145,29 @@ impl TimelinePanel {
                     theme::small(),
                     color::TEXT,
                 );
+                // Label and # columns: a click selects the layer, a right-click
+                // opens the layer menu, as anywhere on the row in AE.
+                let lead = ui.interact(
+                    Rect::from_min_max(
+                        pos2(l + cols.label, rect.top()),
+                        pos2(l + cols.name, rect.bottom()),
+                    ),
+                    rid("lead"),
+                    Sense::click(),
+                );
+                if lead.clicked() {
+                    select_layer(session, stage, layer, ui.input(|i| i.modifiers));
+                }
+                let mut lead_menu = None;
+                crate::common::context_menu(&lead, &mut |ui| {
+                    if !session.lock().selected_layers.contains(layer) {
+                        select_layer(session, stage, layer, egui::Modifiers::NONE);
+                    }
+                    lead_menu = menus::layer_menu(ui, cx, session, layer);
+                });
+                if lead_menu == Some(menus::LayerMenuOut::Rename) {
+                    self.rename = Some((layer.clone(), query::display_name_of(stage, layer)));
+                }
                 // Twirl.
                 let tw = Rect::from_center_size(pos2(l + cols.twirl + 7.0, cy), vec2(12.0, 12.0));
                 let open = self.expanded.contains(layer.as_str())

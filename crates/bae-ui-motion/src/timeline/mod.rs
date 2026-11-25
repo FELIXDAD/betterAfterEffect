@@ -37,7 +37,7 @@ use crate::common::{self, EvalCache};
 use crate::graph::GraphEditor;
 use crate::project::ItemDrag;
 use crate::props::{self, Node};
-use crate::session::{Session, SharedSession};
+use crate::session::{Reveal, Session, SharedSession};
 
 pub(crate) use dialogs::{InterpolationDialog, KeyDialog, VelocityDialog};
 use header::comp_tabs;
@@ -423,6 +423,18 @@ impl TimelinePanel {
         }
     }
 
+    /// The group rows (ids) the outline shows for `comp`, for tests.
+    #[cfg(test)]
+    pub(crate) fn group_rows(&self, stage: &Stage, comp: &PrimPath, s: &Session) -> Vec<String> {
+        self.rows(stage, comp, s)
+            .into_iter()
+            .filter_map(|r| match r.kind {
+                RowKind::Group { id, .. } => Some(id),
+                _ => None,
+            })
+            .collect()
+    }
+
     fn rows(&self, stage: &Stage, comp: &PrimPath, s: &Session) -> Vec<Row> {
         let mut out = Vec::new();
         let hide_shy = bool_attr(stage, comp, "hide_shy_layers");
@@ -436,6 +448,29 @@ impl TimelinePanel {
                 depth: 0,
             });
             if let Some(r) = s.reveal.get(&layer) {
+                // E: the Effects group, open, its effects as twirled (AE shows
+                // them above the revealed transform properties).
+                if let Reveal::Attrs(v) = r
+                    && v.iter().any(|a| a == "effects")
+                    && let Some(Node::Group {
+                        id,
+                        label,
+                        children,
+                    }) = props::layer_tree(stage, &layer).into_iter().find(
+                        |n| matches!(n, Node::Group { id, .. } if id.ends_with("#effects")),
+                    )
+                {
+                    out.push(Row {
+                        kind: RowKind::Group {
+                            id,
+                            label,
+                            open: true,
+                        },
+                        layer: layer.clone(),
+                        depth: 1,
+                    });
+                    flatten_tree(&children, &layer, 2, &self.expanded, stage, &mut out);
+                }
                 for n in props::revealed(stage, &layer, r) {
                     if let Node::Prop { path, attr, label } = n {
                         push_prop(&path, &attr, &label, &layer, 1, stage, &mut out);
