@@ -12,6 +12,7 @@ use crate::session::SharedSession;
 use crate::{CompositionViewer, ProjectPanel, TimelinePanel};
 
 mod playback_4k;
+mod playback_worker;
 
 struct Harness {
     stage: Stage,
@@ -839,13 +840,13 @@ fn menu_items_grey_and_check_like_ae() {
         "motion.layer.arrange.front",
         "motion.animation.ease",
         "menu.edit.copy",
-        "menu.layer.transform.center_anchor_point_in_layer_content",
+        "menu.layer.time.time_reverse_layer",
         "menu.view.show_grid",
         "shell.file.save",
     ];
     let mut h = Harness::new();
     let handled: std::collections::HashSet<String> =
-        ["motion.layer.center_anchor_point_in_layer_content".to_owned()].into();
+        ["motion.layer.time_reverse_layer".to_owned()].into();
     let enabled = |h: &Harness, handled: Option<&std::collections::HashSet<String>>| {
         let mut cx = MenuContext::new(&h.stage, &h.resources, "motion");
         if let Some(a) = handled {
@@ -873,7 +874,7 @@ fn menu_items_grey_and_check_like_ae() {
             "shell.file.save"
         ]
     );
-    // A selected layer: layer commands too; Center Anchor Point once handled.
+    // A selected layer: layer commands too; Time-Reverse Layer once handled.
     h.session().lock().selected_layers = vec![solid.clone()];
     let layer_cmds = [
         "motion.composition.new",
@@ -886,10 +887,7 @@ fn menu_items_grey_and_check_like_ae() {
     ];
     assert_eq!(enabled(&h, None), layer_cmds);
     let mut with_fit = layer_cmds.to_vec();
-    with_fit.insert(
-        6,
-        "menu.layer.transform.center_anchor_point_in_layer_content",
-    );
+    with_fit.insert(6, "menu.layer.time.time_reverse_layer");
     assert_eq!(enabled(&h, Some(&handled)), with_fit);
     // Selected keyframes: the keyframe assistants.
     h.session().lock().selected_layers.clear();
@@ -1891,6 +1889,55 @@ impl bae_ui::files::FilePicker for Picker {
 }
 
 #[test]
+fn double_l_reveals_the_imported_audio_layer_waveform() {
+    let mut h = Harness::new();
+    let (comp, _, _) = h.comp_with_layers();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("tone.wav");
+    // One mono 16-bit PCM sample at 8 kHz.
+    std::fs::write(&file,b"RIFF\x26\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\x02\0\0\0\xff\x3f").unwrap();
+    let probed = crate::import::probe(std::slice::from_ref(&file), &Default::default());
+    h.run("item.import", json!({"files":probed.files}));
+    let asset = h
+        .stage
+        .children(&PrimPath::new(query::ASSETS_FOLDER).unwrap())
+        .into_iter()
+        .find(|p| query::display_name_of(&h.stage, p) == "tone.wav")
+        .unwrap();
+    let layer = PrimPath::new(
+        h.run(
+            "layer.create",
+            json!({"comp":comp,"kind":"footage","source":asset}),
+        )["path"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        bae_media::audio::layer_file(&h.stage, &layer)
+            .unwrap()
+            .canonicalize()
+            .unwrap(),
+        file.canonicalize().unwrap()
+    );
+    h.session().lock().selected_layers = vec![layer.clone()];
+    let mut panel = TimelinePanel::default();
+    for expected in ["audio:levels", "audio:waveform"] {
+        h.action(
+            &mut panel,
+            Invocation::with_params(
+                crate::actions::ids::REVEAL,
+                json!({"what":"audio:levels","add":false}),
+            ),
+        );
+        assert_eq!(
+            h.session().lock().reveal.get(&layer),
+            Some(&crate::session::Reveal::Attrs(vec![expected.into()]))
+        );
+    }
+}
+
+#[test]
 fn import_file_and_files_dropped_on_the_project_panel() {
     let dir = import_fixture("ui");
     let mut h = Harness::new();
@@ -2085,7 +2132,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     struct Center;
     impl bae_ui::ActionHandler for Center {
         fn actions(&self) -> Vec<String> {
-            vec!["motion.layer.center_anchor_point_in_layer_content".into()]
+            vec!["motion.layer.time_reverse_layer".into()]
         }
         fn handle(&self, _: &Invocation, _: &mut PanelContext<'_>) -> bool {
             true
@@ -2119,7 +2166,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     };
     let center = |v: &[(String, String, serde_json::Value)]| {
         v.iter()
-            .filter(|(_, a, _)| a == "motion.layer.center_anchor_point_in_layer_content")
+            .filter(|(_, a, _)| a == "motion.layer.time_reverse_layer")
             .map(|(c, ..)| c.clone())
             .collect::<Vec<_>>()
     };
@@ -2127,7 +2174,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     let with = bound(true);
     assert_eq!(
         center(&with),
-        [bae_ui::Chord::parse("Cmd+Alt+Home").unwrap().to_string()]
+        [bae_ui::Chord::parse("Cmd+Alt+R").unwrap().to_string()]
     );
     // motion.reveal runs ("animated"); its unimplemented variants stay unbound.
     assert!(
@@ -2457,4 +2504,65 @@ fn expression_errors_reach_the_session_banner_and_timeline() {
     );
     h.frame("composition", &mut viewer, Vec::new());
     assert!(h.session().lock().expr_errors.is_empty());
+}
+
+/// Layer ▸ Transform ▸ Opacity… / Rotation…: the value dialog shows the first
+/// selected layer's value and OK sets it on every selected layer in one step.
+#[test]
+fn transform_value_dialogs_set_every_selected_layer() {
+    let mut h = Harness::new();
+    let (_comp, solid, shape) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let open = |attr: &str| {
+        Invocation::with_params(
+            crate::actions::ids::TRANSFORM_DIALOG,
+            json!({ "attr": attr }),
+        )
+    };
+    h.session().lock().selected_layers = vec![solid.clone(), shape.clone()];
+    h.action(&mut viewer, open("opacity"));
+    assert!(h.dialogs().is_open(), "Opacity… opened no dialog");
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "attr.set_many");
+    let edits = r.invocations[0].params["edits"].as_array().unwrap().clone();
+    assert_eq!(edits.len(), 2);
+    assert!(edits.iter().all(|e| e["attr"] == "transform:opacity"));
+    // Orientation is for 3D layers only.
+    h.action(&mut viewer, open("orientation"));
+    assert!(!h.dialogs().is_open());
+}
+
+/// The Paint and Brushes panels edit the next stroke's settings; Clone Options
+/// show with the Clone Stamp, Erase with the Eraser.
+#[test]
+fn paint_and_brushes_panels_show_for_each_paint_tool() {
+    let mut h = Harness::new();
+    let (comp, _solid, _shape) = h.comp_with_layers();
+    h.session().lock().open_comp(&comp);
+    h.resources.insert(crate::tools::SharedTools::default());
+    let tools = h
+        .resources
+        .get::<crate::tools::SharedTools>()
+        .unwrap()
+        .clone();
+    for tool in [
+        crate::tools::Tool::Brush,
+        crate::tools::Tool::CloneStamp,
+        crate::tools::Tool::Eraser,
+    ] {
+        tools.lock().set(tool);
+        h.frame("paint", &mut crate::paint_panels::PaintPanel, Vec::new());
+        h.frame(
+            "brushes",
+            &mut crate::paint_panels::BrushesPanel,
+            Vec::new(),
+        );
+    }
+    let p = tools.lock().options.paint.clone();
+    assert_eq!(
+        (p.opacity, p.diameter, p.duration.as_str()),
+        (100.0, 21.0, "constant")
+    );
 }

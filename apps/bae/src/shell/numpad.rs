@@ -44,6 +44,21 @@ pub fn key(code: KeyCode, logical: &winit::keyboard::Key) -> Option<egui::Key> {
         .map(|(_, k, _)| *k)
 }
 
+/// The modifiers held now: the latest change egui-winit queued since the last
+/// frame (`pending`), else the last frame's (`last_frame`). A change can come
+/// in with the press itself before any frame ran (Alt held, then numpad `*`,
+/// right after startup on Windows, #537); the last frame's would miss it.
+pub fn current_modifiers(pending: &[egui::Event], last_frame: egui::Modifiers) -> egui::Modifiers {
+    pending
+        .iter()
+        .rev()
+        .find_map(|e| match e {
+            egui::Event::ModifiersChanged(m) => Some(*m),
+            _ => None,
+        })
+        .unwrap_or(last_frame)
+}
+
 /// Replaces the key events egui-winit added for one numpad press (`events[from..]`)
 /// with one event of `pad`, with their modifiers (or `modifiers` when there was
 /// none: numpad `*`).
@@ -76,6 +91,17 @@ pub fn rewrite(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Alt pressed after the last frame still counts for numpad `*` (#537).
+    #[test]
+    fn queued_modifier_changes_count() {
+        let pending = [
+            egui::Event::ModifiersChanged(egui::Modifiers::ALT),
+            egui::Event::Text("*".into()),
+        ];
+        assert!(current_modifiers(&pending, egui::Modifiers::NONE).alt);
+        assert!(!current_modifiers(&[], egui::Modifiers::NONE).alt);
+    }
 
     /// Numpad 1 is its own key (not the main 1) and still types "1".
     #[test]

@@ -256,25 +256,31 @@ impl GroupDrag {
         self.now != (self.position, self.scale, self.rotation)
     }
 
-    /// Show the drag: the group's Transform in `layer`'s evaluated contents.
+    /// Show the drag: the group's Transform in `layer`'s evaluated contents
+    /// (copied on write: the evaluator shares static contents).
     pub fn preview(&self, layer: &mut EvaluatedLayer) {
-        fn patch(items: &mut [EvaluatedPrim], d: &GroupDrag) -> bool {
-            for item in items {
-                if item.path == d.group {
-                    let (p, s, r) = d.now;
-                    item.attrs
-                        .insert("transform:position".into(), Value::Vec2(p.to_array()));
-                    item.attrs
-                        .insert("transform:scale".into(), Value::Vec2(s.to_array()));
-                    item.attrs
-                        .insert("transform:rotation".into(), Value::Float(r));
-                    return true;
-                }
-                if patch(&mut item.children, d) {
-                    return true;
-                }
+        fn holds(items: &[EvaluatedPrim], group: &PrimPath) -> bool {
+            items
+                .iter()
+                .any(|i| i.path == *group || holds(&i.children, group))
+        }
+        fn patch(items: &mut std::sync::Arc<[EvaluatedPrim]>, d: &GroupDrag) -> bool {
+            let Some(i) = items
+                .iter()
+                .position(|item| item.path == d.group || holds(&item.children, &d.group))
+            else {
+                return false;
+            };
+            let item = &mut std::sync::Arc::make_mut(items)[i];
+            if item.path != d.group {
+                return patch(&mut item.children, d);
             }
-            false
+            let (p, s, r) = d.now;
+            let attrs = std::sync::Arc::make_mut(&mut item.attrs);
+            attrs.insert("transform:position".into(), Value::Vec2(p.to_array()));
+            attrs.insert("transform:scale".into(), Value::Vec2(s.to_array()));
+            attrs.insert("transform:rotation".into(), Value::Float(r));
+            true
         }
         patch(&mut layer.contents, self);
     }

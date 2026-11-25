@@ -632,7 +632,7 @@ mod tests {
             path: bae_model::PrimPath::new("/s").unwrap(),
             prim_type: Some(PrimType::STAR),
             attrs: Default::default(),
-            children: Vec::new(),
+            children: Vec::new().into(),
         });
         assert_eq!(p.points.len(), 10);
         let pts: Vec<Pos2> = p

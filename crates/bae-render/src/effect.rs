@@ -19,12 +19,160 @@ use crate::input::{RenderEffect, RenderMask};
 use crate::request::RenderPurpose;
 use crate::source::{EncodeContext, GpuImage};
 
+/// A parameter lookup can borrow the evaluated values and shadow individual IDs.
+/// A shadow with no value hides that ID from the target effect.
+#[derive(Clone, Copy, Debug)]
+pub struct EffectValues<'a> {
+    source: &'a [(u32, Value)],
+    changes: &'a [(u32, Option<Value>)],
+}
+
+impl<'a> EffectValues<'a> {
+    /// Read the changed IDs first, then the borrowed source values.
+    pub fn new(source: &'a [(u32, Value)], changes: &'a [(u32, Option<Value>)]) -> Self {
+        Self { source, changes }
+    }
+
+    fn value(&self, id: u32) -> Option<&Value> {
+        if let Some((_, value)) = self.changes.iter().find(|(n, _)| *n == id) {
+            return value.as_ref();
+        }
+        self.source.iter().find(|(n, _)| *n == id).map(|(_, v)| v)
+    }
+}
+
+/// Composition projection and lighting for effects with an internal 3D scene.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EffectScene {
+    /// Layer plane to composition pixels (homogeneous coordinates).
+    pub projection: glam::DMat3,
+    /// First composition light, in layer units; RGB includes intensity.
+    pub light: Option<([f64; 3], [f32; 3])>,
+    /// Active composition camera for volumetric effects.
+    pub camera: Option<crate::camera::Camera>,
+    /// Composition size in pixels.
+    pub size: [u32; 2],
+    /// Layer placement used to map projected particles back to effect pixels.
+    pub placement: glam::DAffine2,
+    /// First enabled light whose scope includes this layer, in composition space.
+    pub layer_light: Option<crate::light::Light>,
+}
+
+/// Nonnegative animated scalar in layer seconds. Each knot carries the integral
+/// from zero, so a seek only searches authored curve intervals.
+#[derive(Debug, Clone, Default)]
+pub struct ScalarTrack {
+    knots: Vec<ScalarKnot>,
+    fingerprint: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ScalarKnot {
+    time: f64,
+    value: f64,
+    incoming: f64,
+    area: f64,
+    peak: f64,
+}
+
+impl ScalarTrack {
+    pub(crate) fn push(&mut self, time: Time, value: f64, incoming: f64) {
+        use std::hash::{Hash, Hasher};
+        let time = time.as_seconds();
+        let (value, incoming) = (value.max(0.), incoming.max(0.));
+        let area = self.knots.last().map_or(0., |p| {
+            p.area + (time - p.time) * (p.value + incoming) * 0.5
+        });
+        let peak = self
+            .knots
+            .last()
+            .map_or(value, |p| p.peak.max(value).max(incoming));
+        self.knots.push(ScalarKnot {
+            time,
+            value,
+            incoming,
+            area,
+            peak,
+        });
+        let mut h = rustc_hash::FxHasher::default();
+        (
+            self.fingerprint,
+            time.to_bits(),
+            value.to_bits(),
+            incoming.to_bits(),
+        )
+            .hash(&mut h);
+        self.fingerprint = h.finish();
+    }
+
+    pub(crate) fn fingerprint(&self) -> u64 {
+        self.fingerprint
+    }
+    pub(crate) fn len(&self) -> usize {
+        self.knots.len()
+    }
+
+    /// Largest value reached up to t, independent of any later samples.
+    pub fn maximum_through(&self, t: f64) -> f64 {
+        let n = self.knots.partition_point(|k| k.time <= t);
+        self.at(t)
+            .0
+            .max(n.checked_sub(1).map_or(0., |i| self.knots[i].peak))
+    }
+
+    /// Authored or sampled knot times strictly inside the interval.
+    pub fn breaks(&self, start: f64, end: f64) -> impl Iterator<Item = f64> + '_ {
+        let first = self.knots.partition_point(|k| k.time <= start);
+        self.knots[first..]
+            .iter()
+            .take_while(move |k| k.time < end)
+            .map(|k| k.time)
+    }
+
+    /// Left limit at a key. Hold interpolation can jump at the exact key.
+    pub fn incoming(&self, t: f64) -> f64 {
+        self.knots
+            .binary_search_by(|k| k.time.total_cmp(&t))
+            .map_or_else(|_| self.at(t).0, |i| self.knots[i].incoming)
+    }
+
+    /// Value and cumulative integral at a nonnegative layer time.
+    pub fn at(&self, t: f64) -> (f64, f64) {
+        let i = self.knots.partition_point(|k| k.time <= t);
+        let Some(a) = i.checked_sub(1).map(|i| self.knots[i]) else {
+            return (0., 0.);
+        };
+        let dt = t - a.time;
+        let end = self.knots.get(i).map_or(a.value, |b| {
+            a.value + (b.incoming - a.value) * dt / (b.time - a.time)
+        });
+        (end, a.area + dt * (a.value + end) * 0.5)
+    }
+}
+
+/// One evaluated set of controls in layer time.
+#[derive(Clone, Debug)]
+pub struct ParameterSample {
+    /// Layer time of the sample.
+    pub time: Time,
+    /// Sampled controls. An omitted control keeps its current instance value.
+    pub values: Vec<(u32, Value)>,
+}
+
 /// Evaluated parameters of one effect instance plus the frame context an
 /// effect needs (the equivalents of AE's `PF_InData`), with typed accessors.
 #[derive(Clone, Copy, Debug)]
 pub struct EffectParams<'a> {
     /// The instance (prim, effect ID, values).
     pub effect: &'a RenderEffect,
+    /// Values the implementation reads, after any effect alias translation.
+    pub translated_values: Option<&'a EffectValues<'a>>,
+    /// Prior values of animated controls requested by this effect.
+    pub parameter_samples: &'a [ParameterSample],
+    /// Cumulative scalar controls requested by the effect, in layer time.
+    pub tracks: &'a [(u32, Arc<ScalarTrack>)],
+    /// Composition scene requested by the effect.
+    pub scene: Option<&'a EffectScene>,
     /// Layer time of the frame.
     pub time: Time,
     /// Time in the comp containing the layer.
@@ -79,6 +227,10 @@ impl<'a> EffectParams<'a> {
         effect.path.hash(&mut h);
         Self {
             effect,
+            translated_values: None,
+            parameter_samples: &[],
+            tracks: &[],
+            scene: None,
             time: Time::ZERO,
             comp_time: Time::ZERO,
             layer_in: Time::ZERO,
@@ -103,7 +255,10 @@ impl<'a> EffectParams<'a> {
 impl EffectParams<'_> {
     /// Raw value of parameter `id`.
     pub fn value(&self, id: u32) -> Option<&Value> {
-        self.effect.param(id)
+        match self.translated_values {
+            Some(values) => values.value(id),
+            None => self.effect.param(id),
+        }
     }
 
     /// A slider / angle value.
@@ -220,6 +375,13 @@ pub trait Effect: Send + Sync {
         true
     }
 
+    /// An alias that renders through another effect with translated parameters
+    /// (obsolete AE identities). The planner calls this once per frame and plans
+    /// the returned effect and instance in its place. Default: not an alias.
+    fn resolve_alias(&self, _instance: &RenderEffect) -> Option<(Arc<dyn Effect>, RenderEffect)> {
+        None
+    }
+
     /// Output bounds for input bounds (layer pixels at the request scale).
     /// Default: unchanged. A blur grows them by its radius.
     fn output_bounds(&self, _params: &EffectParams<'_>, input: IRect) -> IRect {
@@ -229,6 +391,36 @@ pub trait Effect: Send + Sync {
     /// Input region needed to produce `output_roi`. Default: the same region.
     fn input_roi(&self, _params: &EffectParams<'_>, output_roi: IRect) -> IRect {
         output_roi
+    }
+
+    /// Part of the available input needed to produce the requested output.
+    fn required_input(&self, params: &EffectParams<'_>, output: IRect, available: IRect) -> IRect {
+        self.input_roi(params, output).intersect(&available)
+    }
+
+    /// Requests the composition camera and first light for its internal scene.
+    fn uses_scene(&self, _params: &EffectParams<'_>) -> bool {
+        false
+    }
+
+    /// A window of parameter values needed to simulate this frame.
+    fn parameter_times(&self, _params: &EffectParams<'_>) -> Vec<Time> {
+        Vec::new()
+    }
+
+    /// Controls to sample at parameter_times. Empty selects all authored controls.
+    fn parameter_ids(&self) -> &'static [u32] {
+        &[]
+    }
+
+    /// Animated scalars for which the effect needs a random-access integral.
+    fn integrated_parameters(&self) -> &'static [u32] {
+        &[]
+    }
+
+    /// Whether drawing this effect needs the whole output surface at once.
+    fn full_surface(&self) -> bool {
+        false
     }
 
     /// Other layers this instance reads (scheduled before it). Default: none.
