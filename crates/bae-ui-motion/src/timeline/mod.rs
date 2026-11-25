@@ -533,19 +533,9 @@ impl Panel for TimelinePanel {
     }
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
-        let cols = self.columns.layout();
-        let needed = cols.end + 200.0;
-        if needed > ui.available_width() {
-            egui::ScrollArea::horizontal()
-                .id_salt("timeline_columns_scroll")
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.set_width(needed);
-                    self.contents(ui, cx, &cols);
-                });
-        } else {
-            self.contents(ui, cx, &cols);
-        }
+        let full = ui.available_rect_before_wrap();
+        let cols = self.columns.layout(ui, full);
+        self.contents(ui, cx, &cols);
     }
 }
 impl TimelinePanel {
@@ -576,7 +566,7 @@ impl TimelinePanel {
         }
         let now = session.lock().time(&info.path);
         self.graph_mode = session.lock().graph_editor;
-        let graph_left = full.left() + cols.end + 2.0;
+        let graph_left = full.left() + cols.viewport + 2.0;
         let graph_w = (full.right() - graph_left).max(40.0);
         let axis = self.axis(&info, graph_left, graph_w);
         #[cfg(test)]
@@ -675,11 +665,16 @@ impl TimelinePanel {
             .show_rows(&mut child, ROW_H, rows.len(), |ui, range| {
                 // Rows touch, as in AE (a 1-point line between them).
                 ui.spacing_mut().item_spacing.y = 0.0;
+                let mut outline = ui.new_child(egui::UiBuilder::new().id_salt("outline_rows"));
+                let mut clip = ui.clip_rect();
+                clip.max.x = clip.max.x.min(graph_left - 2.0);
+                outline.set_clip_rect(clip);
                 for i in range {
                     let row = &rows[i];
                     let (rect, _) =
                         ui.allocate_exact_size(vec2(full.width(), ROW_H), Sense::hover());
                     self.row_ui(
+                        &mut outline,
                         ui,
                         cx,
                         &session,
@@ -734,6 +729,7 @@ impl TimelinePanel {
         p.vline(x, cti_body.y_range(), Stroke::new(1.0, color::ACCENT));
 
         self.footer(ui, foot, &info, &axis, now, graph_left);
+        self.columns.scrollbar(ui, foot, cols);
 
         // Keyframe dialogs (modal; Enter and Esc are theirs).
         let dialog_open = session.lock().key_dialog.is_some();

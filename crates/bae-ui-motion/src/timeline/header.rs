@@ -111,7 +111,7 @@ impl TimelinePanel {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn header(
         &mut self,
-        ui: &Ui,
+        ui: &mut Ui,
         cx: &mut PanelContext<'_>,
         session: &SharedSession,
         info: &CompInfo,
@@ -163,7 +163,7 @@ impl TimelinePanel {
 
         // Graph Editor switch (AE's comp button; Shift+F3).
         let ge = Rect::from_center_size(
-            pos2(head.left() + cols.end - 14.0, head.center().y),
+            pos2(head.left() + cols.viewport - 14.0, head.center().y),
             vec2(20.0, 20.0),
         );
         let on = session.lock().graph_editor;
@@ -254,6 +254,10 @@ impl TimelinePanel {
         }
 
         // Column headers (right-click: AE's Hide This / Columns ▸ menu).
+        let clip = ui.clip_rect();
+        let mut outline_clip = clip;
+        outline_clip.max.x = outline_clip.max.x.min(axis.left - 2.0);
+        ui.set_clip_rect(outline_clip);
         let p = ui.painter();
         p.rect_filled(colrow, 0.0, color::PANEL);
         p.hline(
@@ -377,6 +381,8 @@ impl TimelinePanel {
             }
         }
         self.columns.header_controls(ui, colrow, cols);
+
+        ui.set_clip_rect(clip);
 
         // Ruler and work area (right part of both header rows).
         let ruler = Rect::from_min_max(

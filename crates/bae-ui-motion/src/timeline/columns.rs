@@ -1,7 +1,6 @@
 //! Timeline columns, in AE's menu order. Headers, rows and drag handles use the same bounds.
 use super::*;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) enum Column {
@@ -61,12 +60,26 @@ impl Column {
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct Columns {
     pub(super) layer_names: bool,
-    shown: BTreeMap<Column, bool>,
-    widths: BTreeMap<Column, f32>,
+    shown: [bool; Column::ALL.len()],
+    widths: [f32; Column::ALL.len()],
+    split: Option<f32>,
+    offset: f32,
+}
+
+impl Default for Columns {
+    fn default() -> Self {
+        Self {
+            layer_names: false,
+            shown: Column::ALL.map(|c| matches!(c, Column::Av | Column::Label | Column::Index | Column::Name | Column::Switches | Column::Parent)),
+            widths: Column::ALL.map(|c| c.spec().1),
+            split: None,
+            offset: 0.0,
+        }
+    }
 }
 
 impl Columns {
@@ -81,51 +94,78 @@ impl Columns {
             ("parent", Column::Parent),
         ] {
             if let Some(visible) = state[key].as_bool() {
-                columns.shown.insert(column, visible);
+                columns.shown[column as usize] = visible;
             }
         }
         columns
     }
 
     pub(crate) fn visible(&self, c: Column) -> bool {
-        c == Column::Name
-            || self.shown.get(&c).copied().unwrap_or(matches!(
-                c,
-                Column::Av | Column::Label | Column::Index | Column::Switches | Column::Parent
-            ))
+        c == Column::Name || self.shown[c as usize]
     }
     pub(super) fn toggle(&mut self, c: Column) {
         if c != Column::Name {
-            self.shown.insert(c, !self.visible(c));
+            self.shown[c as usize] = !self.visible(c);
         }
     }
     pub(super) fn toggle_switches_modes(&mut self) {
         let switches = self.visible(Column::Switches);
         let modes = self.visible(Column::Modes);
-        self.shown.insert(Column::Switches, !switches || modes);
-        self.shown.insert(Column::Modes, switches && !modes);
+        self.shown[Column::Switches as usize] = !switches || modes;
+        self.shown[Column::Modes as usize] = switches && !modes;
     }
-    pub(super) fn layout(&self) -> Cols {
+    pub(super) fn layout(&mut self, ui: &Ui, full: Rect) -> Cols {
         let mut edges = [(0.0, 0.0); 14];
         let mut x = 5.0;
         for c in Column::ALL {
             if c == Column::Label {
                 x += 15.0;
             } // The disclosure triangle always has its own cell.
-            let (_, default, min) = c.spec();
             let width = if self.visible(c) {
-                self.widths
-                    .get(&c)
-                    .copied()
-                    .unwrap_or(default)
-                    .clamp(min, 640.0)
+                self.widths[c as usize].clamp(c.spec().2, 640.0)
             } else {
                 0.0
             };
             edges[c as usize] = (x, width);
             x += width;
         }
-        Cols { edges, end: x }
+        let bounds = (full.width() - 200.0).max(full.width() * 0.4);
+        let min = 120.0_f32.min(bounds);
+        let mut width = self.split.unwrap_or(x).clamp(min, bounds);
+        let divider = Rect::from_min_max(pos2(full.left() + width, full.top() + TABS_H), pos2(full.left() + width + 4.0, full.bottom()));
+        let handle = ui.interact(divider, ui.id().with("outline_split"), Sense::drag()).on_hover_cursor(CursorIcon::ResizeHorizontal);
+        if handle.dragged() {
+            width = (width + handle.drag_delta().x).clamp(min, bounds);
+            self.split = Some(width);
+        }
+        let left = Rect::from_min_max(full.min, pos2(full.left() + width, full.bottom()));
+        if ui.rect_contains_pointer(left) {
+            self.offset -= ui.input(|i| i.smooth_scroll_delta.x);
+        }
+        self.offset = self.offset.clamp(0.0, (x - width).max(0.0));
+        for edge in &mut edges { edge.0 -= self.offset; }
+        Cols { edges, end: x - self.offset, viewport: width, content: x }
+
+    }
+
+    pub(super) fn scrollbar(&mut self, ui: &Ui, foot: Rect, cols: &Cols) {
+        if cols.content <= cols.viewport { return; }
+        let track = Rect::from_min_max(
+            pos2(foot.left() + 4.0, foot.bottom() - 7.0),
+            pos2(foot.left() + cols.viewport - 4.0, foot.bottom() - 1.0),
+        );
+        let thumb_width = (track.width() * cols.viewport / cols.content).max(16.0).min(track.width());
+        let travel = track.width() - thumb_width;
+        if travel <= 0.0 { return; }
+        let max_offset = cols.content - cols.viewport;
+        let x = track.left() + travel * self.offset / max_offset;
+        let thumb = Rect::from_min_size(pos2(x, track.top()), vec2(thumb_width, track.height()));
+        let drag = ui.interact(thumb.expand2(vec2(0.0, 1.0)), ui.id().with("outline_scrollbar"), Sense::drag());
+        if drag.dragged() {
+            self.offset = (self.offset + drag.drag_delta().x * max_offset / travel).clamp(0.0, max_offset);
+        }
+        ui.painter().rect_filled(track, 2.0, color::SEPARATOR);
+        ui.painter().rect_filled(thumb, 2.0, color::ICON_DIM);
     }
 
     pub(super) fn header_controls(&mut self, ui: &Ui, row: Rect, cols: &Cols) {
@@ -174,13 +214,11 @@ impl Columns {
             crate::common::submenu(ui, tr("Columns"), &mut |ui| {
                 for c in Column::ALL {
                     let mut on = self.visible(c);
-                    if ui
-                        .add_enabled(
-                            c != Column::Name,
-                            egui::Checkbox::new(&mut on, tr(c.title())),
-                        )
-                        .changed()
-                    {
+                    let response = ui.add_enabled(
+                        c != Column::Name,
+                        egui::Checkbox::new(&mut on, tr(c.title())),
+                    );
+                    if response.changed() {
                         self.toggle(c);
                         ui.close();
                     }
@@ -201,7 +239,7 @@ impl Columns {
                 .on_hover_cursor(CursorIcon::ResizeHorizontal);
             if resp.dragged() {
                 let width = (cols.width(c) + resp.drag_delta().x).clamp(c.spec().2, 640.0);
-                self.widths.insert(c, width);
+                self.widths[c as usize] = width;
             }
         }
     }
@@ -210,6 +248,8 @@ impl Columns {
 pub(super) struct Cols {
     edges: [(f32, f32); 14],
     pub(super) end: f32,
+    pub(super) viewport: f32,
+    content: f32,
 }
 impl Cols {
     pub(super) fn x(&self, c: Column) -> f32 {
@@ -244,7 +284,7 @@ impl Cols {
                 Column::In => common::timecode(info, first),
                 Column::Out => common::timecode(info, (end - info.frame_duration()).max(first)),
                 Column::Duration => common::duration_code(info, end - first),
-                Column::Stretch => format!("{}%", timing.stretch),
+                Column::Stretch => format!("{:.1}%", timing.stretch),
                 _ => unreachable!(),
             };
             widgets::clipped_text(

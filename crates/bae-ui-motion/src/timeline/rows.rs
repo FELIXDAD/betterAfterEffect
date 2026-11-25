@@ -43,6 +43,7 @@ impl TimelinePanel {
     pub(super) fn row_ui(
         &mut self,
         ui: &mut Ui,
+        graph_ui: &mut Ui,
         cx: &mut PanelContext<'_>,
         session: &SharedSession,
         info: &CompInfo,
@@ -59,13 +60,13 @@ impl TimelinePanel {
         let cy = rect.center().y;
         let layer = &row.layer;
         let layer_selected = session.lock().selected_layers.contains(layer);
-        let outline = Rect::from_min_max(rect.min, pos2(l + cols.end, rect.bottom()));
+        let outline = Rect::from_min_max(rect.min, pos2(axis.left, rect.bottom()));
         let graph = Rect::from_min_max(
             pos2(axis.left, rect.top()),
             pos2(rect.right(), rect.bottom()),
         );
         {
-            let p = ui.painter();
+            let p = graph_ui.painter();
             let prop_selected = match &row.kind {
                 RowKind::Prop { path, attr, .. } => session
                     .lock()
@@ -140,10 +141,7 @@ impl TimelinePanel {
                     );
                 }
                 if cols.visible(Column::Index) {
-                    let index = comp_layers
-                        .iter()
-                        .position(|x| x == layer)
-                        .map_or(0, |i| i + 1);
+                    let index = self.layer_numbers[layer];
                     p.text(
                         pos2(l + cols.x(Column::Index) + 4.0, cy),
                         Align2::LEFT_CENTER,
@@ -190,19 +188,14 @@ impl TimelinePanel {
                     pos2(l + cols.right(Column::Name) - 2.0, rect.bottom()),
                 );
                 let name = query::display_name_of(stage, layer);
-                let source_name = if self.columns.layer_names {
-                    None
-                } else {
-                    stage
-                        .prim(layer)
-                        .and_then(|p| {
-                            p.value("source")
-                                .and_then(bae_model::Value::as_prim_ref)
-                                .cloned()
-                        })
-                        .map(|p| query::display_name_of(stage, &p))
+                let source_name = stage.prim(layer)
+                    .and_then(|p| p.value("source").and_then(bae_model::Value::as_prim_ref))
+                    .map(|p| query::display_name_of(stage, p));
+                let display_name = match source_name {
+                    Some(source) if !self.columns.layer_names => source,
+                    Some(source) if source == name => format!("[{source}]"),
+                    _ => name.clone(),
                 };
-                let display_name = source_name.as_deref().unwrap_or(&name);
                 if self.rename.as_ref().is_some_and(|(p, _)| p == layer) {
                     let mut done = None;
                     if let Some((_, buf)) = &mut self.rename {
@@ -219,7 +212,7 @@ impl TimelinePanel {
                     widgets::clipped_text(
                         ui.painter(),
                         pos2(name_rect.left(), cy),
-                        display_name,
+                        &display_name,
                         theme::body(),
                         color::TEXT_STRONG,
                         name_rect.width(),
@@ -463,8 +456,8 @@ impl TimelinePanel {
                 cols.extra_cells(ui, stage, info, layer, rect);
                 // Duration bar.
                 if !self.graph_mode {
-                    self.layer_bar(ui, cx, session, info, axis, layer, rect, layer_selected);
-                    self.layer_markers_ui(ui, cx, session, info, axis, layer, rect);
+                    self.layer_bar(graph_ui, cx, session, info, axis, layer, rect, layer_selected);
+                    self.layer_markers_ui(graph_ui, cx, session, info, axis, layer, rect);
                 }
             }
             RowKind::Group { id, label, open } => {
@@ -550,7 +543,7 @@ impl TimelinePanel {
             }
             RowKind::Prop { path, attr, label } => {
                 self.prop_row(
-                    ui, cx, session, info, cols, axis, row, rect, path, attr, label, now, key_rects,
+                    ui, graph_ui, cx, session, info, cols, axis, row, rect, path, attr, label, now, key_rects,
                 );
             }
             RowKind::Expression {
@@ -561,6 +554,7 @@ impl TimelinePanel {
             } => {
                 self.expression_row(
                     ui,
+                    graph_ui,
                     cx,
                     session,
                     cols,
@@ -579,6 +573,7 @@ impl TimelinePanel {
     pub(super) fn prop_row(
         &mut self,
         ui: &mut Ui,
+        graph_ui: &mut Ui,
         cx: &mut PanelContext<'_>,
         session: &SharedSession,
         info: &CompInfo,
@@ -861,7 +856,7 @@ impl TimelinePanel {
         // Keyframes (layer bar mode; the Graph Editor draws its own).
         if !self.graph_mode {
             self.key_track(
-                ui, cx, session, info, axis, rect, path, attr, &spec, &prop_name, key_rects,
+                graph_ui, cx, session, info, axis, rect, path, attr, &spec, &prop_name, key_rects,
             );
         }
     }
@@ -872,6 +867,7 @@ impl TimelinePanel {
     pub(super) fn expression_row(
         &mut self,
         ui: &mut Ui,
+        graph_ui: &mut Ui,
         cx: &mut PanelContext<'_>,
         session: &SharedSession,
         cols: &Cols,
@@ -1017,6 +1013,7 @@ impl TimelinePanel {
         if line + 1 < lines {
             return;
         }
+        let ui = graph_ui;
         // The field, in the graph area over the rows of all the lines.
         let field = Rect::from_min_max(
             pos2(axis.left + 4.0, rect.bottom() - lines as f32 * ROW_H + 1.0),
