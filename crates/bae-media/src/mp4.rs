@@ -127,12 +127,37 @@ fn is_sound(trak: &[u8]) -> bool {
     find_path(trak, &[b"mdia", b"hdlr"]).is_some_and(|hdlr| hdlr.get(8..12) == Some(b"soun"))
 }
 
-fn elst_trim(trak: &[u8], movie_timescale: u32, sample_rate: u32) -> Option<AudioTrim> {
-    let media_timescale = find_path(trak, &[b"mdia", b"mdhd"]).and_then(mvhd_timescale)?;
+/// Presentation start and duration of the first video track, in MF's 100 ns units. The
+/// presentation descriptor describes the whole movie, including longer audio.
+#[cfg(windows)]
+pub(crate) fn video_range(path: &Path) -> Option<(i64, i64)> {
+    let moov = read_moov(path)?;
+    let scale = mvhd_timescale(find(&moov, b"mvhd")?)?;
+    let (_, track) = children(&moov).find(|(kind, track)| {
+        kind == b"trak"
+            && find_path(track, &[b"mdia", b"hdlr"]).is_some_and(|h| h.get(8..12) == Some(b"vide"))
+    })?;
+    let header = find(track, b"tkhd")?;
+    let duration = if *header.first()? == 1 {
+        be_u64(header, 28)?
+    } else {
+        u64::from(be_u32(header, 20)?)
+    };
+    if duration == 0 || scale == 0 {
+        return None;
+    } // Fragmented movie.
+    let start = first_edit(track).map_or(0, |(start, _, _)| start);
+    let ticks = |t| i64::try_from(u128::from(t) * 10_000_000 / u128::from(scale)).ok();
+    Some((ticks(start)?, ticks(duration.checked_sub(start)?)?))
+}
+
+/// Movie start, duration and media start for the first nonempty edit.
+fn first_edit(trak: &[u8]) -> Option<(u64, u64, u64)> {
     let elst = find_path(trak, &[b"edts", b"elst"])?;
     let version = *elst.first()?;
     let count = be_u32(elst, 4)?;
     let mut at = 8;
+    let mut start = 0u64;
     for _ in 0..count {
         let (duration, media_time) = if version == 1 {
             let d = be_u64(elst, at)?;
@@ -145,19 +170,25 @@ fn elst_trim(trak: &[u8], movie_timescale: u32, sample_rate: u32) -> Option<Audi
             at += 12;
             (d, m)
         };
-        // -1 = empty edit (a delay before the track starts); skip it.
         if media_time < 0 {
+            start = start.checked_add(duration)?;
             continue;
         }
-        let to_frames = |value: u64, timescale: u32| {
-            (u128::from(value) * u128::from(sample_rate) / u128::from(timescale.max(1))) as u64
-        };
-        return Some(AudioTrim {
-            priming: to_frames(media_time as u64, media_timescale),
-            valid: (duration > 0).then(|| to_frames(duration, movie_timescale)),
-        });
+        return Some((start, duration, media_time as u64));
     }
     None
+}
+
+fn elst_trim(trak: &[u8], movie_timescale: u32, sample_rate: u32) -> Option<AudioTrim> {
+    let media_timescale = find_path(trak, &[b"mdia", b"mdhd"]).and_then(mvhd_timescale)?;
+    let (_, duration, media_time) = first_edit(trak)?;
+    let to_frames = |value: u64, timescale: u32| {
+        (u128::from(value) * u128::from(sample_rate) / u128::from(timescale.max(1))) as u64
+    };
+    Some(AudioTrim {
+        priming: to_frames(media_time, media_timescale),
+        valid: (duration > 0).then(|| to_frames(duration, movie_timescale)),
+    })
 }
 
 /// iTunes gapless info: `" 00000000 PRIMING PADDING SAMPLECOUNT ..."` (hex).

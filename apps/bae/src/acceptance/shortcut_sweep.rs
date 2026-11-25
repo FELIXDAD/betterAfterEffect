@@ -190,6 +190,7 @@ impl Report {
             "Windows"
         };
         let _ = writeln!(s, "# AE 快捷键扫描（{os}，CI）\n");
+        s.push_str(&catalog_counts());
         let _ = writeln!(s, "- 目录里 BAE 能绑定的 AE 快捷键：{} 条", self.total);
         let _ = writeln!(
             s,
@@ -218,6 +219,39 @@ impl Report {
         }
         s
     }
+}
+
+/// The catalog's counts by status (kept out of docs/ui/ae-commands.md, which
+/// every PR would otherwise change).
+fn catalog_counts() -> String {
+    use bae_ui_motion::catalog::{MAC_ONLY, Status};
+    let items = catalog::menu_items();
+    let fixed: Vec<_> = items
+        .iter()
+        .filter(|(_, it)| it.status != Status::Dynamic)
+        .collect();
+    let menu = |st: Status| fixed.iter().filter(|(_, it)| it.status == st).count();
+    let keys: Vec<&AeKey> = catalog::keys()
+        .iter()
+        .filter(|k| k.context != "Menu" && k.flags & MAC_ONLY == 0)
+        .collect();
+    let with_keys: Vec<&&AeKey> = keys
+        .iter()
+        .filter(|k| !k.keys.is_empty() && k.flags & NATIVE == 0)
+        .collect();
+    format!(
+        "- 目录的菜单项：{} 个固定项（含 macOS 应用菜单）：✅ {}，◐ {}，☐ {}，⏸ {}，Ⓐ {}\n\
+         - AE 默认快捷键文件：{} 条，有默认快捷键的 {} 条，其中动作已实现的 {} 条\n",
+        fixed.len(),
+        menu(Status::Done),
+        menu(Status::Partial),
+        menu(Status::Todo),
+        menu(Status::Later),
+        menu(Status::Adobe),
+        keys.len(),
+        with_keys.len(),
+        with_keys.iter().filter(|k| k.status.works()).count()
+    )
 }
 
 /// The whole sweep (one test: the report covers every row).
