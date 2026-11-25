@@ -5,7 +5,7 @@ use super::{Builtin, EffectInfo, Registry};
 use crate::params::Params;
 use bae_model::{EffectDef, EffectParamDef, ParamKind, Value};
 use bae_render::effect::{EffectValues, LayerDependency, MaskSelect};
-use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderError};
+use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderEffect, RenderError};
 use smallvec::SmallVec;
 use std::sync::Arc;
 
@@ -28,6 +28,23 @@ impl<'a> Translation<'a> {
             changes: values.into_iter().collect(),
         }
     }
+
+    /// The render plan owns its values. Skip hidden and replaced source values before cloning.
+    fn into_params(self) -> Vec<(u32, Value)> {
+        let mut params = Vec::with_capacity(self.source.len() + self.changes.len());
+        params.extend(
+            self.source
+                .iter()
+                .filter(|(id, _)| !self.changes.iter().any(|(changed, _)| changed == id))
+                .cloned(),
+        );
+        params.extend(
+            self.changes
+                .into_iter()
+                .filter_map(|(id, value)| value.map(|v| (id, v))),
+        );
+        params
+    }
 }
 
 type Map = for<'a> fn(Params<'a>) -> Translation<'a>;
@@ -40,6 +57,18 @@ pub(super) struct Alias {
 }
 
 impl Alias {
+    /// The target's instance: the old parameters translated (maps read only values).
+    fn mapped(&self, map: Map, p: &EffectParams<'_>) -> RenderEffect {
+        RenderEffect {
+            path: p.effect.path.clone(),
+            enabled: p.effect.enabled,
+            effect: self.target.def().match_name.clone(),
+            params: map(Params::new(&self.def, p)).into_params(),
+        }
+    }
+
+    /// Direct calls outside the render graph (which plans the target through
+    /// [`Effect::resolve_alias`] once per frame instead).
     pub(super) fn with_params<R>(
         &self,
         p: &EffectParams<'_>,
@@ -61,6 +90,13 @@ impl Effect for Alias {
     }
     fn renders_pixels(&self) -> bool {
         self.target.renders_pixels()
+    }
+    fn resolve_alias(&self, instance: &RenderEffect) -> Option<(Arc<dyn Effect>, RenderEffect)> {
+        let instance = match self.map {
+            Some(map) => self.mapped(map, &EffectParams::new(instance)),
+            None => instance.clone(),
+        };
+        Some((self.target.clone(), instance))
     }
     fn input_roi(&self, p: &EffectParams<'_>, roi: IRect) -> IRect {
         self.with_params(p, |p| self.target.input_roi(p, roi))
@@ -150,7 +186,6 @@ pub(super) fn register(r: &mut Registry) {
 mod tests {
     use super::*;
     use bae_model::PrimPath;
-    use bae_render::RenderEffect;
 
     #[test]
     fn legacy_levels_borrows_the_instance_and_unchanged_values() {
@@ -175,5 +210,10 @@ mod tests {
             assert!(p.value(2).is_none());
             assert_eq!((p.popup(8), p.popup(9)), (Some(2), Some(1)));
         });
+        let (_, planned) = fx.effect().resolve_alias(&instance).unwrap();
+        assert_eq!(planned.param(3), instance.param(3));
+        assert!(planned.param(2).is_none());
+        assert_eq!(planned.param(8), Some(&Value::Int(2)));
+        assert_eq!(planned.param(9), Some(&Value::Int(1)));
     }
 }
