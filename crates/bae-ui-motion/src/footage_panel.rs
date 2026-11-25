@@ -120,6 +120,8 @@ impl Gpu {
                     size: (w > 0 && h > 0).then_some([w, h]),
                     source_time: time,
                     sequence: (footage.kind == "sequence").then(|| footage.rate()),
+                    // The footage panel shows source frames as they are.
+                    blend: None,
                 }),
             ));
             let request = RenderRequest {
