@@ -85,6 +85,8 @@ impl EncoderFormat for MfWriterFormat {
 struct Writer {
     writer: IMFSinkWriter,
     stream: u32,
+    audio_stream: Option<u32>,
+    audio_frames: i64,
     settings: EncodeSettings,
     frames: u64,
     platform: Platform,
@@ -155,13 +157,18 @@ impl Writer {
             }
             let writer: IMFSinkWriter =
                 platform.open_url(&CLSID_MFSinkWriter, &settings.path, &attrs)?;
-            let start = || -> windows::core::Result<u32> {
+            let start = || -> windows::core::Result<(u32, Option<u32>)> {
                 let stream = writer.AddStream(&output)?;
                 writer.SetInputMediaType(stream, &input, &params)?;
+                let audio = settings
+                    .audio
+                    .as_ref()
+                    .map(|settings| add_audio(&platform, &writer, settings))
+                    .transpose()?;
                 writer.BeginWriting()?;
-                Ok(stream)
+                Ok((stream, audio))
             };
-            let stream = match start() {
+            let (stream, audio_stream) = match start() {
                 Ok(stream) => stream,
                 Err(error) => {
                     drop(writer);
@@ -172,11 +179,40 @@ impl Writer {
             Ok(Self {
                 writer,
                 stream,
+                audio_stream,
+                audio_frames: 0,
                 settings: settings.clone(),
                 frames: 0,
                 platform,
             })
         }
+    }
+}
+
+fn add_audio(
+    platform: &Platform,
+    writer: &IMFSinkWriter,
+    settings: &crate::export::AudioEncodeSettings,
+) -> windows::core::Result<u32> {
+    let pcm = platform.stream_type(&MFMediaType_Audio, &MFAudioFormat_PCM)?;
+    let aac = platform.stream_type(&MFMediaType_Audio, &MFAudioFormat_AAC)?;
+    let channels = u32::from(settings.channels);
+    // SAFETY: both live media types describe the stream supplied to this writer.
+    unsafe {
+        for ty in [&pcm, &aac] {
+            ty.SetUINT32(&MF_MT_AUDIO_NUM_CHANNELS, channels)?;
+            ty.SetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND, settings.sample_rate)?;
+            ty.SetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE, 16)?;
+        }
+        pcm.SetUINT32(&MF_MT_AUDIO_BLOCK_ALIGNMENT, channels * 2)?;
+        pcm.SetUINT32(
+            &MF_MT_AUDIO_AVG_BYTES_PER_SECOND,
+            settings.sample_rate * channels * 2,
+        )?;
+        aac.SetUINT32(&MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 24_000)?;
+        let stream = writer.AddStream(&aac)?;
+        writer.SetInputMediaType(stream, &pcm, None)?;
+        Ok(stream)
     }
 }
 
@@ -199,32 +235,44 @@ impl Encoder for Writer {
             ));
         }
         let frame = convert_frame_cow(frame, PixelFormat::Bgra8, AlphaMode::Opaque);
-        let len = u32::try_from(frame.data.len())
-            .map_err(|_| MediaError::Unsupported("MP4 frame exceeds UINT32".into()))?;
         let rate = self.settings.frame_rate;
         let pts = timestamp(self.frames as i64, rate);
-        // SAFETY: the allocated and locked buffer has exactly len writable bytes;
-        // the sample owns it while the asynchronous encoder consumes the frame.
-        unsafe {
-            let mut buffer = None;
-            (self.platform.buffer)(len, &mut buffer).ok()?;
-            let buffer = buffer.unwrap();
-            let mut dest = ptr::null_mut();
-            buffer.Lock(&mut dest, None, None)?;
-            ptr::copy_nonoverlapping(frame.data.as_ptr(), dest, len as usize);
-            buffer.Unlock()?;
-            buffer.SetCurrentLength(len)?;
-            let mut sample = None;
-            (self.platform.sample)(&mut sample).ok()?;
-            let sample = sample.unwrap();
-            sample.AddBuffer(&buffer)?;
-            sample.SetSampleTime(pts)?;
-            sample.SetSampleDuration(timestamp(self.frames as i64 + 1, rate) - pts)?;
-            self.writer.WriteSample(self.stream, &sample)?;
-        }
+        self.write_sample(
+            self.stream,
+            &frame.data,
+            pts,
+            timestamp(self.frames as i64 + 1, rate) - pts,
+        )?;
         self.frames += 1;
         Ok(())
     }
+
+    fn push_audio(&mut self, pcm: &crate::AudioBuffer) -> Result<(), MediaError> {
+        let (Some(stream), Some(settings)) = (self.audio_stream, &self.settings.audio) else {
+            return Err(MediaError::Unsupported("no audio stream".into()));
+        };
+        settings.validate_input(pcm)?;
+        if pcm.frames() == 0 {
+            return Ok(());
+        }
+        let bytes: Vec<u8> = pcm
+            .samples
+            .iter()
+            .flat_map(|v| ((v.clamp(-1.0, 1.0) * 32768.0).round() as i16).to_le_bytes())
+            .collect();
+        let at =
+            |sample: i64| ((i128::from(sample) * 10_000_000) / i128::from(pcm.sample_rate)) as i64;
+        let end = self.audio_frames + pcm.frames() as i64;
+        self.write_sample(
+            stream,
+            &bytes,
+            at(self.audio_frames),
+            at(end) - at(self.audio_frames),
+        )?;
+        self.audio_frames = end;
+        Ok(())
+    }
+
     fn finish(self: Box<Self>) -> Result<EncodeOutput, MediaError> {
         // SAFETY: all frames have been submitted to this synchronous sink.
         if let Err(error) = unsafe { self.writer.Finalize() } {
@@ -247,5 +295,38 @@ impl Encoder for Writer {
         let path = self.settings.path.clone();
         drop(self);
         let _ = std::fs::remove_file(path);
+    }
+}
+
+impl Writer {
+    fn write_sample(
+        &self,
+        stream: u32,
+        data: &[u8],
+        pts: i64,
+        duration: i64,
+    ) -> Result<(), MediaError> {
+        let len = u32::try_from(data.len())
+            .map_err(|_| MediaError::Unsupported("sample exceeds UINT32".into()))?;
+        // SAFETY: the allocated and locked buffer has exactly len writable bytes;
+        // the sample owns it while the asynchronous encoder consumes the frame.
+        unsafe {
+            let mut buffer = None;
+            (self.platform.buffer)(len, &mut buffer).ok()?;
+            let buffer = buffer.unwrap();
+            let mut dest = ptr::null_mut();
+            buffer.Lock(&mut dest, None, None)?;
+            ptr::copy_nonoverlapping(data.as_ptr(), dest, len as usize);
+            buffer.Unlock()?;
+            buffer.SetCurrentLength(len)?;
+            let mut sample = None;
+            (self.platform.sample)(&mut sample).ok()?;
+            let sample = sample.unwrap();
+            sample.AddBuffer(&buffer)?;
+            sample.SetSampleTime(pts)?;
+            sample.SetSampleDuration(duration)?;
+            self.writer.WriteSample(stream, &sample)?;
+        }
+        Ok(())
     }
 }

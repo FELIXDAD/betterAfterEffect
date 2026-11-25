@@ -174,11 +174,24 @@ pub(super) fn frame(
         )
     });
     let selected = session.lock().selected_layers.clone();
-    let paths: Vec<EditablePath> = if tool == Tool::Selection {
+    let mut paths: Vec<EditablePath> = if tool == Tool::Selection {
         overlay::editable_paths(stage, comp, &selected, None)
     } else {
         Vec::new()
     };
+    // A shape layer's path in Free Transform (double-clicked) stays editable.
+    let prefs = super::prefs::ViewerPrefs::current(cx.resources);
+    if state
+        .free
+        .as_ref()
+        .is_some_and(|f| !paths.iter().any(|p| p.prim == f.prim))
+    {
+        for p in overlay::editable_paths(stage, comp, &selected, Some(prefs)) {
+            if !paths.iter().any(|q| q.prim == p.prim) {
+                paths.push(p);
+            }
+        }
+    }
     if state
         .vertices
         .prim
@@ -234,6 +247,44 @@ pub(super) fn frame(
         };
         state.free = FreeTransform::new(&paths[pi], &sel);
         state.path_drag = None;
+    } else if tool == Tool::Selection
+        && resp.double_clicked()
+        && let Some(pos) = hover
+    {
+        // AE: double-clicking a text layer edits its text (Type tool); a shape
+        // layer, its path under the pointer (or its first) in Free Transform.
+        let under: Vec<PrimPath> = layers_at(stage, comp, view, pos).collect();
+        if let Some(layer) = under
+            .iter()
+            .find(|l| selected.contains(l))
+            .or(under.first())
+        {
+            match comp.layer(layer).map(|l| l.kind) {
+                Some(bae_model::LayerKind::Text) => {
+                    tools.lock().edit_text_request = Some(layer.clone());
+                }
+                Some(bae_model::LayerKind::Shape) => {
+                    let own = overlay::editable_paths(
+                        stage,
+                        comp,
+                        std::slice::from_ref(layer),
+                        Some(prefs),
+                    );
+                    let inside = own.iter().find(|p| {
+                        let pts: Vec<Pos2> = (0..p.path.vertices.len())
+                            .map(|i| p.screen(view, i))
+                            .collect();
+                        Rect::from_points(&pts).contains(pos)
+                    });
+                    if let Some(p) = inside.or(own.first()) {
+                        session.lock().selected_layers = vec![layer.clone()];
+                        state.free = FreeTransform::new(p, &[]);
+                        state.path_drag = None;
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     // What is under the pointer.

@@ -90,12 +90,16 @@ impl Effect for Read {
     }
 }
 
-/// Test effect: fills its output opaque white.
+/// Full-surface effect that draws white once its pipeline is ready.
 struct White(EffectDef);
 
 impl Effect for White {
     fn def(&self) -> &EffectDef {
         &self.0
+    }
+
+    fn full_surface(&self) -> bool {
+        true
     }
 
     fn render(
@@ -105,6 +109,9 @@ impl Effect for White {
         input: &GpuImage,
         roi: IRect,
     ) -> Result<GpuImage, RenderError> {
+        if bae_render::is_interactive_thread() {
+            return Err(bae_render::warming_up("test.white"));
+        }
         let s = input.pixel_scale;
         let px = |v: i32| (f64::from(v) * s).round() as i32;
         let out = ctx.allocate(
@@ -208,6 +215,34 @@ fn pixel(r: &mut Renderer, comp: &RenderComp, frames: Option<&mut dyn CompFrames
 }
 
 const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
+
+#[test]
+fn tiles_retry_a_full_surface_effect_after_warm_up() {
+    let Some(gpu) = gpu() else { return };
+    let mut renderer = renderer(gpu);
+    let comp = scene(
+        RED,
+        RenderEffect {
+            path: p("/comps/main/layers/b/effects/white"),
+            effect: "test.white".into(),
+            enabled: true,
+            params: Vec::new(),
+        },
+    );
+    let tile = RenderRequest {
+        roi: Some(IRect::new(0, 0, 32, 32)),
+        ..RenderRequest::default()
+    };
+    bae_render::set_interactive_thread(true);
+    let first = renderer.render_frame(&comp, &tile);
+    bae_render::set_interactive_thread(false);
+    assert!(first.unwrap().incomplete);
+    assert_eq!(renderer.frame_cache().stats().entries, 0);
+    let ready = renderer.render_frame(&comp, &tile).unwrap();
+    assert!(!ready.incomplete);
+    let image = renderer.read_rgba8(&ready, OutputAlpha::Straight).unwrap();
+    assert_eq!(&image.data[..4], &[255; 4]);
+}
 
 #[test]
 fn stages_follow_ae_layer_popup() {
