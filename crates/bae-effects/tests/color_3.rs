@@ -66,8 +66,10 @@ fn lumetri_input_and_creative_look_use_straight_color_in_order() {
     });
     let [first, look] = assets;
     let params = vec![
-        (125, Value::Bytes(first)),
-        (126, Value::Bytes(look)),
+        (127, Value::Int(2)),
+        (25, Value::Int(2)),
+        (125, Value::Bytes(first.clone())),
+        (126, Value::Bytes(look.clone())),
         (26, Value::Float(35.)),
     ];
     let got = run(
@@ -86,6 +88,24 @@ fn lumetri_input_and_creative_look_use_straight_color_in_order() {
         0.0001,
         "Lumetri LUT order and intensity",
     );
+    // A retained asset cannot silently substitute for a named vendor preset or None.
+    for choice in [1, 5, 69] {
+        let got = run(
+            &gpu,
+            Rgba32Float,
+            builtin("ADBE Lumetri"),
+            vec![
+                (128, Value::Int(choice)),
+                (126, Value::Bytes(look.clone())),
+                (5, Value::Int(1)),
+                (125, Value::Bytes(first.clone())),
+            ],
+            &input,
+            rect,
+            1.,
+        );
+        assert_close(&got, &input, rect, 0., "unavailable LUT bypass");
+    }
 }
 
 #[test]

@@ -8,6 +8,7 @@
 
 pub(crate) mod browser;
 pub(crate) mod controls;
+pub(crate) mod lut;
 
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -212,7 +213,12 @@ pub(crate) struct EffectActions;
 
 impl ActionHandler for EffectActions {
     fn actions(&self) -> Vec<String> {
-        vec![APPLY.into(), LAST_EFFECT.into(), REMOVE_ALL.into()]
+        vec![
+            APPLY.into(),
+            LAST_EFFECT.into(),
+            REMOVE_ALL.into(),
+            lut::BROWSE.into(),
+        ]
     }
 
     fn workspace(&self) -> Option<&str> {
@@ -222,6 +228,10 @@ impl ActionHandler for EffectActions {
     fn handle(&self, inv: &Invocation, cx: &mut PanelContext<'_>) -> bool {
         let layers = selected_layers(cx);
         match inv.id.as_str() {
+            lut::BROWSE => {
+                lut::browse(inv, cx);
+                true
+            }
             APPLY => {
                 if let Some(m) = inv.params.get("match_name").and_then(|v| v.as_str()) {
                     apply(cx, &layers, m);

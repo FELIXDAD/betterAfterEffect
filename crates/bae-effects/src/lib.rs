@@ -52,6 +52,7 @@ use bae_render::{Effect, EffectLibrary, EffectParams, GpuImage, IRect, RenderErr
 
 pub use catalog::{EffectInfo, Form, category_zh};
 pub use effects::blur::BLURRINESS_TO_SIGMA;
+pub use effects::color::lumetri::{LumetriLut, prepare_lumetri_lut};
 pub use module::EffectsModule;
 pub use target::{EffectTarget, IMAGE_USAGE, Standalone, TargetEffect};
 

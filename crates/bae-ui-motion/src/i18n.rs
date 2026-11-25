@@ -20,6 +20,9 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Change Layers", "更改图层"),
     ("Time Stretch", "时间伸缩"),
     // Effect Controls / Effects & Presets.
+    ("Browse...", "浏览..."),
+    ("Load your own LUT", "需要自行加载 LUT"),
+    ("Loading LUT…", "正在加载 LUT…"),
     ("Missing effect", "缺失效果"),
     ("BAE built-in effect", "BAE 内置效果"),
     ("Not available in BAE yet", "BAE 暂不支持"),

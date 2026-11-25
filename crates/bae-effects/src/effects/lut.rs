@@ -53,7 +53,7 @@ struct ApplyLut {
 pub(super) struct LutCache(Mutex<VecDeque<Arc<Prepared>>>);
 
 #[derive(Debug)]
-struct Prepared {
+pub(super) struct Prepared {
     device: wgpu::Device,
     format: wgpu::TextureFormat,
     data: Vec<u8>,
@@ -195,6 +195,31 @@ impl TargetEffect for ApplyLut {
 }
 
 impl LutCache {
+    /// Builds the file-dependent pipeline and textures outside the cache lock.
+    pub(super) fn prepare(
+        &self,
+        gpu: &Arc<GpuContext>,
+        format: wgpu::TextureFormat,
+        data: &[u8],
+    ) -> Result<Arc<Prepared>, RenderError> {
+        let matches =
+            |l: &&Arc<Prepared>| &l.device == gpu.device() && l.format == format && l.data == data;
+        if let Some(entry) = self.0.lock().iter().find(matches) {
+            return Ok(entry.clone());
+        }
+        let prepared = Arc::new(Prepared::new(gpu, format, data)?);
+        let mut cache = self.0.lock();
+        if let Some(entry) = cache.iter().find(matches) {
+            return Ok(entry.clone());
+        }
+        // Two project work formats for each of the two Lumetri slots.
+        if cache.len() == 4 {
+            cache.pop_front();
+        }
+        cache.push_back(prepared.clone());
+        Ok(prepared)
+    }
+
     pub(super) fn apply(
         &self,
         target: &mut dyn EffectTarget,
@@ -207,22 +232,7 @@ impl LutCache {
         if data.is_empty() || roi.is_empty() || intensity == 0. {
             return Ok(input.clone());
         }
-        let lut = {
-            let mut cache = self.0.lock();
-            if let Some(entry) = cache.iter().find(|l| {
-                &l.device == target.gpu().device() && l.format == target.format() && l.data == data
-            }) {
-                entry.clone()
-            } else {
-                let entry = Arc::new(Prepared::new(target.gpu(), target.format(), data)?);
-                // Keep adjacent looks in a stack resident across frames.
-                if cache.len() == 4 {
-                    cache.pop_front();
-                }
-                cache.push_back(entry.clone());
-                entry
-            }
-        };
+        let lut = self.prepare(target.gpu(), target.format(), data)?;
         let grid = image_grid::grid_scale(p, input);
         let out = target.allocate(image_grid::pixel_rect(roi, grid), grid)?;
         let rt = gpu::runtime(target.gpu());

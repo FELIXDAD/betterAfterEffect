@@ -68,6 +68,7 @@ pub enum Pending {
 
 #[derive(Debug, Default)]
 pub struct Session {
+    pub(crate) loading_lut: Option<crate::effects::lut::Load>,
     /// Comp shown in the viewer and timeline.
     pub active_comp: Option<PrimPath>,
     /// Comps opened in the timeline (tabs), in opening order.

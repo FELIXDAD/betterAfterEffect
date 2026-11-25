@@ -342,3 +342,69 @@ fn mask_params_pick_a_mask_of_the_layer() {
     fx.run("prim.delete", json!({"path": m1}));
     assert!(none(&drawn_texts(&fx, &mut panel)));
 }
+
+#[test]
+fn browse_lumetri_look_commits_both_ae_selectors_and_owned_cube_in_one_edit() {
+    use bae_ui::files::{FilePicker, OpenRequest, SharedFilePicker};
+    use std::{
+        path::PathBuf,
+        time::{Duration, Instant},
+    };
+    struct Picker(PathBuf);
+    impl FilePicker for Picker {
+        fn open(&self, req: &OpenRequest) -> Vec<PathBuf> {
+            assert_eq!(req.filters[0].1, ["cube"]);
+            vec![self.0.clone()]
+        }
+    }
+    let mut fx = Fx::new();
+    let layer = fx.comp_with_layer();
+    fx.run(
+        "effect.apply",
+        json!({"match_name":"ADBE Lumetri","layers":[layer]}),
+    );
+    let target = bae_motion::effect::effects_of(&fx.stage, &layer)
+        .pop()
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("user.cube");
+    std::fs::write(&file, "LUT_1D_SIZE 2\n0 0 0\n1 1 1\n").unwrap();
+    fx.resources.insert(SharedFilePicker::new(Picker(file)));
+    let r = fx.handle(Invocation::with_params(
+        lut::BROWSE,
+        json!({"path":target,"menu":25}),
+    ));
+    assert!(r.invocations.is_empty());
+    let start = Instant::now();
+    let mut requests = PanelRequests::default();
+    while requests.invocations.is_empty() {
+        assert!(start.elapsed() < Duration::from_secs(5));
+        let id = PanelId::new("effects");
+        let mut cx = PanelContext::new(
+            &id,
+            "Effects",
+            &fx.stage,
+            &fx.author,
+            &fx.resources,
+            &mut requests,
+        );
+        let mut output = fx.ctx.run_ui(RawInput::default(), |ui| {
+            lut::poll(ui.ctx(), &mut cx);
+        });
+        output.textures_delta.clear();
+        std::thread::yield_now();
+    }
+    assert_eq!(requests.invocations.len(), 1);
+    assert_eq!(requests.invocations[0].id, "attr.set_many");
+    fx.exec_all(requests);
+    let effect = fx.stage.prim(&target).unwrap();
+    for id in [25, 128] {
+        assert_eq!(
+            effect.value(&bae_model::effect::param_attr(id)),
+            Some(&Value::Int(2))
+        );
+    }
+    assert!(
+        matches!(effect.value("param:0126"),Some(Value::Bytes(data)) if data.starts_with(b"user.cube\0"))
+    );
+}
