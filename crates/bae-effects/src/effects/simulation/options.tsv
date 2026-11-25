@@ -1,0 +1,75 @@
+全部	All
+无	None
+独立	Independent
+列数受行数控制	Columns Follows Rows
+位置，旋转，缩放	Position, Rotation, Scale
+位置，缩放，旋转	Position, Scale, Rotation
+旋转，位置，缩放	Rotation, Position, Scale
+旋转，缩放，位置	Rotation, Scale, Position
+缩放，位置，旋转	Scale, Position, Rotation
+缩放，旋转，位置	Scale, Rotation, Position
+强度 1	Intensity 1
+红色 1	Red 1
+绿色 1	Green 1
+蓝色 1	Blue 1
+强度水平斜度 1	Intensity X Gradient 1
+强度垂直斜度 1	Intensity Y Gradient 1
+红色水平斜度 1	Red X Gradient 1
+红色垂直斜度 1	Red Y Gradient 1
+强度 2	Intensity 2
+红色 2	Red 2
+绿色 2	Green 2
+蓝色 2	Blue 2
+强度水平斜度 2	Intensity X Gradient 2
+强度垂直斜度 2	Intensity Y Gradient 2
+红色水平斜度 2	Red X Gradient 2
+红色垂直斜度 2	Red Y Gradient 2
+摄像机位置	Camera Position
+边角定位	Corner Pins
+合成摄像机	Comp Camera
+旋转 XYZ，位置	Rotate XYZ, Position
+旋转 XZY，位置	Rotate XZY, Position
+旋转 YXZ，位置	Rotate YXZ, Position
+旋转 YZX，位置	Rotate YZX, Position
+旋转 ZXY，位置	Rotate ZXY, Position
+旋转 ZYX，位置	Rotate ZYX, Position
+位置，旋转 XYZ	Position, Rotate XYZ
+位置，旋转 XZY	Position, Rotate XZY
+位置，旋转 YXZ	Position, Rotate YXZ
+位置，旋转 YZX	Position, Rotate YZX
+位置，旋转 ZXY	Position, Rotate ZXY
+位置，旋转 ZYX	Position, Rotate ZYX
+点光源	Point Source
+远光源	Distant Source
+首选合成灯光	Use First Comp Light
+已渲染	Rendered
+线框正视图 	Wireframe Front View
+线框	Wireframe
+线框正视图 + 作用力	Wireframe Front View + Forces
+线框 + 作用力	Wireframe + Forces
+图层	Layer
+块	Pieces
+自定义	Custom
+砖块	Bricks
+Carpenter 轮	Carpenter Wheel
+蛋	Eggs
+玻璃	Glass
+人字形 1	Herringbone 1
+人字形 2	Herringbone 2
+六边形	Hexagons
+八边形及正方形	Octagons & Squares
+覆盖正方形	Overlapping Squares
+厚木板	Planks
+拼图	Puzzle
+菱形	Diamonds
+正方形	Squares
+正方形及三角形	Squares & Triangles
+星形及三角形	Stars & Triangles
+三角形 1	Triangles 1
+三角形 2	Triangles 2
+自由	Free
+颜色	Color
+着色图层	Tinted Layer
+颜色 + 不透明度	Color + Opacity
+图层 + 不透明度	Layer + Opacity
+着色图层 + 不透明度	Tinted Layer + Opacity

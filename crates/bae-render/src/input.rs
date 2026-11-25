@@ -136,7 +136,12 @@ impl RenderComp {
         }
         // The camera only matters to 3D layers, the sample cameras only to
         // blurred 3D layers.
-        if any_3d {
+        if any_3d
+            || self
+                .layers
+                .iter()
+                .any(|layer| layer.effects.iter().any(|fx| fx.enabled))
+        {
             hash_camera(&self.camera, h);
             self.lights.len().hash(h);
             for l in &self.lights {
@@ -343,7 +348,7 @@ fn hash_mat4(m: &DMat4, h: &mut impl Hasher) {
     }
 }
 
-fn hash_light(l: &Light, h: &mut impl Hasher) {
+pub(crate) fn hash_light(l: &Light, h: &mut impl Hasher) {
     (l.kind, l.falloff, l.casts_shadows, l.scope_below).hash(h);
     hash_mat4(&l.world, h);
     l.point_of_interest.to_array().map(f64::to_bits).hash(h);
@@ -361,7 +366,7 @@ fn hash_light(l: &Light, h: &mut impl Hasher) {
     .hash(h);
 }
 
-fn hash_camera(c: &Option<Camera>, h: &mut impl Hasher) {
+pub(crate) fn hash_camera(c: &Option<Camera>, h: &mut impl Hasher) {
     c.is_some().hash(h);
     if let Some(c) = c {
         hash_mat4(&c.world, h);

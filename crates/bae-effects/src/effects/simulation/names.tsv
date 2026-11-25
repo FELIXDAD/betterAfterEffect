@@ -1,0 +1,77 @@
+位置	Position
+方向	Direction
+颜色	Color
+重力	Gravity
+行数和列数	Rows & Columns
+行数	Rows
+列数	Columns
+背面图层	Back Layer
+渐变图层 1	Gradient Layer 1
+渐变图层 2	Gradient Layer 2
+旋转顺序	Rotation Order
+变换顺序	Transform Order
+X 位置	X Position
+源	Source
+乘数	Multiplier
+偏移	Offset
+Y 位置	Y Position
+Z 位置	Z Position
+X 轴旋转	X Rotation
+Y 轴旋转	Y Rotation
+Z 轴旋转	Z Rotation
+X 轴缩放	X Scale
+Y 轴缩放	Y Scale
+摄像机系统	Camera System
+摄像机位置	Camera Position
+X、Y 位置	X,Y Position
+焦距	Focal Length
+边角定位	Corner Pins
+左上角	Upper Left
+右上角	Upper Right
+左下角	Lower Left
+右下角	Lower Right
+自动焦距	Auto Focal Length
+灯光	Lighting
+灯光类型	Light Type
+灯光强度	Light Intensity
+灯光颜色	Light Color
+灯光位置	Light Position
+灯光深度	Light Depth
+周围光	Ambient Light
+材质	Material
+漫反射	Diffuse Reflection
+镜面反射	Specular Reflection
+高光锐度	Highlight Sharpness
+强度	Intensity
+视图	View
+物理学	Physics
+粘度	Viscosity
+渲染	Render
+形状	Shape
+图案	Pattern
+自定义碎片图	Custom Shatter Map
+白色拼贴已修复	White Tiles Fixed
+重复	Repetitions
+源点	Origin
+凸出深度	Extrusion Depth
+作用力 1	Force 1
+深度	Depth
+半径	Radius
+作用力 2	Force 2
+渐变	Gradient
+碎片阈值	Shatter Threshold
+渐变图层	Gradient Layer
+反转渐变	Invert Gradient
+旋转速度	Rotation Speed
+倾覆轴	Tumble Axis
+随机性	Randomness
+大规模方差	Mass Variance
+重力方向	Gravity Direction
+重力倾向	Gravity Inclination
+纹理	Textures
+不透明度	Opacity
+正面模式	Front Mode
+正面图层	Front Layer
+侧面模式	Side Mode
+侧面图层	Side Layer
+背面模式	Back Mode

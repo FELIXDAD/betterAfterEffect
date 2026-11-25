@@ -49,6 +49,15 @@ pub struct EvaluatorFrames<'a> {
 }
 
 impl crate::graph::CompFrames for EvaluatorFrames<'_> {
+    fn animated_controls(&self, effect: &PrimPath, ids: &[u32]) -> bool {
+        self.stage.prim(effect).is_some_and(|fx| {
+            ids.iter().any(|id| {
+                fx.attr(&bae_model::effect::param_attr(*id))
+                    .is_some_and(|attr| attr.is_animated() || attr.expression.is_some())
+            })
+        })
+    }
+
     fn comp_at(&mut self, comp: &PrimPath, time: Time) -> Result<Option<RenderComp>, RenderError> {
         self.evaluator.evaluate(self.stage, comp, time).map(Some)
     }

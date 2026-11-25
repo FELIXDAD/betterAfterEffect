@@ -353,6 +353,10 @@ pub struct EffectNode {
     pub instance: RenderEffect,
     /// Frame context for [`EffectParams`] (time, scale, bounds, rate, shutter …).
     pub frame: EffectFrame,
+    /// Samples of animated parameters used by the simulation.
+    pub history: Box<[crate::effect::ParameterSample]>,
+    /// Scene inputs used by camera-aware effects.
+    pub scene: Option<Box<crate::effect::EffectScene>>,
     /// Input node.
     pub input: NodeId,
     /// Layer images the effect reads ([`Effect::layer_dependencies`]).
@@ -449,6 +453,11 @@ impl SourceResolver for NoSources {
 /// The comp evaluated at other times, for effects that read other frames
 /// ([`LayerDependency::time`]); `crate::eval::EvaluatorFrames` evaluates the stage.
 pub trait CompFrames {
+    /// Whether any requested effect control can change with time.
+    fn animated_controls(&self, _effect: &PrimPath, _ids: &[u32]) -> bool {
+        true
+    }
+
     /// `comp` evaluated at comp time `time` (`None`: not available).
     fn comp_at(&mut self, comp: &PrimPath, time: Time) -> Result<Option<RenderComp>, RenderError>;
 }
@@ -1411,6 +1420,7 @@ impl Builder<'_, '_> {
         self.nodes[input.index()].key.hash(&mut h);
         // Effects may vary with time on their own (noise evolution, wiggle).
         layer.time.hash(&mut h);
+        instance.path.hash(&mut h);
         crate::input::hash_value(&bae_model::Value::String(instance.effect.clone()), &mut h);
         for (id, value) in &instance.params {
             id.hash(&mut h);
@@ -1418,6 +1428,68 @@ impl Builder<'_, '_> {
         }
         rect.hash(&mut h);
         let params = frame.params(&instance);
+        let scene = (effect.uses_scene(&params)
+            && (comp.camera.is_some() || !comp.lights.is_empty()))
+        .then(|| {
+            let light = comp
+                .lights
+                .iter()
+                .find(|light| {
+                    light.scope_below.is_none_or(|index| {
+                        comp.layers
+                            .iter()
+                            .skip(index + 1)
+                            .any(|l| l.path == layer.path)
+                    })
+                })
+                .copied();
+            [comp.width, comp.height].hash(&mut h);
+            for v in layer.transform.to_cols_array() {
+                v.to_bits().hash(&mut h);
+            }
+            crate::input::hash_camera(&comp.camera, &mut h);
+            if let Some(light) = &light {
+                crate::input::hash_light(light, &mut h);
+            }
+            Box::new(crate::effect::EffectScene {
+                camera: comp.camera,
+                light,
+                size: [comp.width, comp.height],
+                placement: layer.transform,
+            })
+        });
+        let mut history = Vec::new();
+        if let Some(window) = effect.parameter_window(&params)
+            && let Some(frames) = self.frames.as_mut()
+            && frames.animated_controls(&instance.path, window.ids)
+        {
+            let count = window.samples.clamp(2, 64);
+            for index in 0..count {
+                let t = window.start
+                    + (window.end - window.start) * f64::from(index) / f64::from(count - 1);
+                let time = Time::from_seconds(t);
+                let requested = frame.comp_time
+                    + Time::from_seconds((t - frame.time.as_seconds()) * frame.layer_time_scale);
+                let other = frames.comp_at(&comp.path, requested)?;
+                let sample = other
+                    .as_ref()
+                    .and_then(|c| c.layers.iter().find(|l| l.path == layer.path))
+                    .and_then(|l| l.effects.iter().find(|fx| fx.path == instance.path));
+                let Some(sample) = sample else { continue };
+                let values = window
+                    .ids
+                    .iter()
+                    .filter_map(|id| sample.param(*id).map(|v| (*id, v.clone())))
+                    .collect::<Vec<_>>();
+                time.hash(&mut h);
+                for (id, v) in &values {
+                    id.hash(&mut h);
+                    crate::input::hash_value(v, &mut h);
+                }
+                history.push(crate::effect::ParameterSample { time, values });
+            }
+            self.time_dependent = true;
+        }
         let mut layers = Vec::new();
         for dep in effect.layer_dependencies(&params) {
             if let Some(node) = self.layer_input(comp, &dep, scale, depth)? {
@@ -1440,6 +1512,8 @@ impl Builder<'_, '_> {
                 effect,
                 instance,
                 frame,
+                history: history.into_boxed_slice(),
+                scene,
                 input,
                 layers,
                 masks,

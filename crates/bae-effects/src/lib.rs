@@ -142,6 +142,17 @@ impl Effect for Forward {
         self.0.input_roi(params, output_roi)
     }
 
+    fn uses_scene(&self, p: &EffectParams<'_>) -> bool {
+        self.0.uses_scene(p)
+    }
+
+    fn parameter_window(
+        &self,
+        p: &EffectParams<'_>,
+    ) -> Option<bae_render::effect::ParameterWindow> {
+        self.0.parameter_window(p)
+    }
+
     fn layer_dependencies(
         &self,
         params: &EffectParams<'_>,
@@ -186,6 +197,7 @@ fn registry() -> &'static Registry {
         categories::matte::register(&mut r);
         categories::noise_grain::register(&mut r);
         categories::perspective::register(&mut r);
+        categories::simulation::register(&mut r);
         categories::stylize::register(&mut r);
         categories::time::register(&mut r);
         categories::transition::register(&mut r);

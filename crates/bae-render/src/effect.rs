@@ -19,12 +19,51 @@ use crate::input::RenderEffect;
 use crate::request::RenderPurpose;
 use crate::source::{EncodeContext, GpuImage};
 
+/// Composition view and first enabled light for camera-aware effects.
+#[derive(Clone, Copy, Debug)]
+pub struct EffectScene {
+    /// Active camera (none uses the effect's camera).
+    pub camera: Option<crate::camera::Camera>,
+    /// First enabled light reaching this layer, in comp space.
+    pub light: Option<crate::light::Light>,
+    /// Size of the containing comp, in pixels.
+    pub size: [u32; 2],
+    /// Layer to comp coordinates.
+    pub placement: glam::DAffine2,
+}
+
+/// An effect's bounded request for earlier values of animated controls.
+#[derive(Clone, Copy, Debug)]
+pub struct ParameterWindow {
+    /// Controls to evaluate in layer time.
+    pub ids: &'static [u32],
+    /// Inclusive range in layer seconds.
+    pub start: f64,
+    /// End of the range in layer seconds.
+    pub end: f64,
+    /// Number of evenly spaced samples, including the endpoints.
+    pub samples: u32,
+}
+
+/// One evaluated set of controls in layer time.
+#[derive(Clone, Debug)]
+pub struct ParameterSample {
+    /// Layer time of the sample.
+    pub time: Time,
+    /// Requested controls authored on the instance.
+    pub values: Vec<(u32, Value)>,
+}
+
 /// Evaluated parameters of one effect instance plus the frame context an
 /// effect needs (the equivalents of AE's `PF_InData`), with typed accessors.
 #[derive(Clone, Copy, Debug)]
 pub struct EffectParams<'a> {
     /// The instance (prim, effect ID, values).
     pub effect: &'a RenderEffect,
+    /// Prior values of animated controls requested by this effect.
+    pub history: &'a [ParameterSample],
+    /// Scene camera and lighting for the effect.
+    pub scene: Option<&'a EffectScene>,
     /// Layer time of the frame.
     pub time: Time,
     /// Time in the comp containing the layer.
@@ -73,6 +112,8 @@ impl<'a> EffectParams<'a> {
         effect.path.hash(&mut h);
         Self {
             effect,
+            history: &[],
+            scene: None,
             time: Time::ZERO,
             comp_time: Time::ZERO,
             layer_time_scale: 1.0,
@@ -219,6 +260,16 @@ pub trait Effect: Send + Sync {
     /// Input region needed to produce `output_roi`. Default: the same region.
     fn input_roi(&self, _params: &EffectParams<'_>, output_roi: IRect) -> IRect {
         output_roi
+    }
+
+    /// Whether camera or light edits affect this effect's output.
+    fn uses_scene(&self, _params: &EffectParams<'_>) -> bool {
+        false
+    }
+
+    /// A window of parameter values needed to simulate this frame.
+    fn parameter_window(&self, _params: &EffectParams<'_>) -> Option<ParameterWindow> {
+        None
     }
 
     /// Other layers this instance reads (scheduled before it). Default: none.

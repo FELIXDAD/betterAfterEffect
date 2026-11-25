@@ -31,6 +31,7 @@ pub(super) mod keying;
 pub(super) mod matte;
 pub(super) mod noise_grain;
 pub(super) mod perspective;
+pub(super) mod simulation;
 pub(super) mod stylize;
 pub(super) mod time;
 pub(super) mod transition;

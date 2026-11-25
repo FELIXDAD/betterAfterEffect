@@ -66,6 +66,46 @@ fn pixels(renderer: &mut Renderer, scene: impl Fn(Time) -> RenderComp, t: f64) -
 }
 
 #[test]
+fn particles_keep_their_birth_position_on_an_animated_producer() {
+    let Some(mut renderer) = renderer() else {
+        return;
+    };
+    let scene = |time: Time| {
+        let mut comp = RenderComp::new(path("/comps/main"), 120, 8);
+        comp.time = time;
+        let mut layer = solid(CLIP, 120, [1.; 4]);
+        layer.time = time;
+        layer.effects.push(effect(
+            "particles",
+            "CC Particle Systems II",
+            vec![
+                (4, Value::Vec2([20. + time.as_seconds() * 60., 4.])),
+                (5, Value::Float(0.)),
+                (6, Value::Float(0.)),
+                (10, Value::Float(0.)),
+                (12, Value::Float(0.)),
+                (18, Value::Int(4)),
+                (19, Value::Float(1.)),
+                (20, Value::Float(1.)),
+            ],
+        ));
+        comp.layers.push(layer);
+        comp
+    };
+    let frame = pixels(&mut renderer, scene, 1.);
+    assert!(
+        frame
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .enumerate()
+            .any(|(i, c)| (28..35).contains(&(i % 120)) && c[3] > 32)
+    );
+    let _ = pixels(&mut renderer, scene, 2.4);
+    assert_eq!(frame, pixels(&mut renderer, scene, 1.));
+}
+
+#[test]
 fn posterize_freezes_earlier_effects_in_layer_time() {
     let Some(mut r) = renderer() else { return };
     let result = pixels(
