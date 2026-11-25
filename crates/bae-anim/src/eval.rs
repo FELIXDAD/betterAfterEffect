@@ -411,7 +411,8 @@ fn comp_layers(stage: &Stage, comp: &PrimPath) -> Vec<PrimPath> {
 }
 
 /// Timing of a layer prim (used by `evaluate_attribute` without compiling the comp).
-fn layer_timing(view: &PrimView<'_>, comp_duration: Time) -> LayerTiming {
+/// Shared layer source-time mapping and active interval for picture and sound.
+pub fn layer_timing(view: &PrimView<'_>, comp_duration: Time) -> LayerTiming {
     let t = &PrimType::LAYER;
     LayerTiming {
         start_time: setting_time(view, t, l::START_TIME).unwrap_or(Time::ZERO),

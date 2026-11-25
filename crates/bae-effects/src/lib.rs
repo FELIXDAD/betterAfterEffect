@@ -166,6 +166,17 @@ impl Effect for Forward {
         self.0.mask_dependencies(params)
     }
 
+    fn path_dependencies(
+        &self,
+        params: &EffectParams<'_>,
+    ) -> Option<bae_render::effect::MaskSelect> {
+        self.0.path_dependencies(params)
+    }
+
+    fn parameter_sample_times(&self, params: &EffectParams<'_>) -> Vec<bae_model::Time> {
+        self.0.parameter_sample_times(params)
+    }
+
     fn render(
         &self,
         ctx: &mut bae_render::EncodeContext<'_>,
@@ -294,6 +305,7 @@ fn rust_options_zh(def: &EffectDef) -> Vec<(u32, Vec<String>)> {
                 .or_else(|| effects::options_zh(m, p.id))
                 .or_else(|| effects::spatial::options_zh(m, p.id))
                 .or_else(|| effects::distort::options_zh(m, p.id))
+                .or_else(|| categories::generate::strokes::options_zh(m, p.id))
                 .or((p.name == "Blur Dimensions").then_some(DIMENSIONS_ZH))?;
             Some((p.id, zh.iter().map(|s| (*s).to_owned()).collect()))
         })
