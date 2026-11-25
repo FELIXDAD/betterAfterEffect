@@ -44,6 +44,7 @@ fn cc_kaleida() -> Builtin {
     let mut effect = rust_builtin(
         (
             Arc::new(Sampled {
+                mode: 0,
                 def,
                 label: "bae.effects/cc_kaleida",
                 shader: CC_KALEIDA,
@@ -156,6 +157,7 @@ fn cc_repetile() -> Builtin {
     let mut effect = rust_builtin(
         (
             Arc::new(Sampled {
+                mode: 0,
                 def,
                 label: "bae.effects/cc_repetile",
                 shader: CC_REPETILE,
@@ -338,6 +340,7 @@ fn cc_glass() -> Builtin {
     let mut effect = rust_builtin(
         (
             Arc::new(Sampled {
+                mode: 0,
                 def,
                 label: "bae.effects/cc_glass",
                 shader: CC_GLASS,

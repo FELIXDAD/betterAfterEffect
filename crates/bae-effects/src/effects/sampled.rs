@@ -18,6 +18,7 @@ pub(super) struct Sampled {
     pub def: EffectDef,
     pub label: &'static str,
     pub shader: &'static str,
+    pub mode: u32,
     pub inputs: &'static [(u32, bool)],
     pub bounds: Bounds,
 }
@@ -111,7 +112,8 @@ impl TargetEffect for Sampled {
             )
             .f32(192, p.scale as f32)
             .u32(196, u32::from(p.float))
-            .f32(200, p.time.as_seconds() as f32);
+            .f32(200, p.time.as_seconds() as f32)
+            .u32(204, self.mode);
         let params = Params::new(&self.def, p);
         for param in self.def.params.iter().filter(|param| param.id < 33) {
             let i = param.id;

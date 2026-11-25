@@ -1,6 +1,6 @@
 struct FxSettings {
     images:array<FxImage,5>, rect:vec4i, layer:vec4f,
-    scale:f32, hdr:u32, time:f32, padding:f32, values:array<vec4f,33>,
+    scale:f32, hdr:u32, time:f32, mode:u32, values:array<vec4f,33>,
 }
 @group(0) @binding(0) var<uniform> u:FxSettings;
 @group(0) @binding(1) var src:texture_2d<f32>;
