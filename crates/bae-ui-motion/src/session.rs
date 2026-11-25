@@ -125,6 +125,9 @@ pub struct Session {
     pub(crate) last_u: Option<Instant>,
     /// What the viewer reports to the Info panel.
     pub info: crate::ae_panels::info::Readout,
+    /// Timeline column toggles asked for while another panel had focus (F4
+    /// Switches / Modes, Shift+F4 Parent & Link): the Timeline applies them.
+    pub timeline_toggles: Vec<&'static str>,
     /// Expression errors of the active comp at the current time (the viewer's
     /// evaluation): the error banner and the timeline's warning icons.
     pub expr_errors: Vec<bae_anim::AttrError>,

@@ -624,3 +624,30 @@ fn locked_layers_are_skipped_by_clicks_ranges_select_all_and_delete() {
     }
     assert!(wrong.is_empty(), "locked layer: {wrong:?}");
 }
+
+/// F4 swaps the Switches and Modes columns and Shift+F4 shows or hides Parent
+/// & Link, whichever panel is in front (#459): keys through the app's keymap.
+#[test]
+fn f4_and_shift_f4_toggle_timeline_columns_from_any_panel() {
+    let mut h = comp_with_solid();
+    let has = |h: &Ui, t: &str| find_text(h, t).is_some();
+    assert!(!has(&h, "Mode"), "AE starts with Switches");
+    assert!(has(&h, "Parent & Link"));
+    key(&mut h, Modifiers::NONE, Key::F4);
+    settle(&mut h);
+    assert!(has(&h, "Mode"), "F4 shows Modes");
+    key(&mut h, Modifiers::SHIFT, Key::F4);
+    settle(&mut h);
+    assert!(!has(&h, "Parent & Link"), "Shift+F4 hides Parent & Link");
+    // With the Composition viewer in front.
+    h.state_mut().dispatch(Invocation::with_params(
+        bae_ui::action::ids::OPEN_PANEL,
+        serde_json::json!({ "id": "composition" }),
+    ));
+    settle(&mut h);
+    key(&mut h, Modifiers::NONE, Key::F4);
+    key(&mut h, Modifiers::SHIFT, Key::F4);
+    settle(&mut h);
+    assert!(!has(&h, "Mode"), "F4 from the viewer");
+    assert!(has(&h, "Parent & Link"), "Shift+F4 from the viewer");
+}

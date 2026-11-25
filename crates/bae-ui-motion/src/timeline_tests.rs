@@ -2156,6 +2156,20 @@ fn f4_alternates_switches_and_modes() {
     // With Modes hidden no Modes cells are drawn.
     h.frame(&mut tl, Vec::new(), Modifiers::NONE);
     assert!(tl.last_modes.is_empty());
+    // F4 / Shift+F4 pressed while another panel is in front reach the
+    // Timeline through the session (#459).
+    {
+        let session = h.session();
+        let mut s = session.lock();
+        s.timeline_toggles
+            .push(crate::actions::ids::TOGGLE_SWITCHES_MODES);
+        s.timeline_toggles
+            .push(crate::actions::ids::TOGGLE_PARENT_COLUMN);
+    }
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    assert_eq!(p(&tl), (false, true));
+    assert!(tl.panes().parent);
+    assert!(h.session().lock().timeline_toggles.is_empty());
 }
 
 #[test]

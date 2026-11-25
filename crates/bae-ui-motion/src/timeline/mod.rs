@@ -411,6 +411,17 @@ fn label_of(stage: &Stage, path: &PrimPath) -> usize {
 }
 
 impl TimelinePanel {
+    /// F4 (Switches / Modes columns) or Shift+F4 (Parent & Link column).
+    fn toggle_columns(&mut self, id: &str) {
+        match id {
+            actions::ids::TOGGLE_SWITCHES_MODES => self.panes.toggle_switches_modes(),
+            actions::ids::TOGGLE_PARENT_COLUMN => self.panes.parent = !self.panes.parent,
+            _ => {}
+        }
+    }
+}
+
+impl TimelinePanel {
     /// The field selection the language menu will replace (tests).
     #[cfg(test)]
     pub(crate) fn lang_insert(&self) -> Option<crate::expr::Selection> {
@@ -615,12 +626,8 @@ impl Panel for TimelinePanel {
                 }
                 true
             }
-            "motion.timeline.toggle_switches_modes" => {
-                self.panes.toggle_switches_modes();
-                true
-            }
-            "motion.timeline.toggle_parent_column" => {
-                self.panes.parent = !self.panes.parent;
+            id @ (actions::ids::TOGGLE_SWITCHES_MODES | actions::ids::TOGGLE_PARENT_COLUMN) => {
+                self.toggle_columns(id);
                 true
             }
             _ => actions::handle(action, cx, &session),
@@ -630,6 +637,11 @@ impl Panel for TimelinePanel {
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
+        // F4 / Shift+F4 pressed with another panel in front.
+        let toggles = std::mem::take(&mut session.lock().timeline_toggles);
+        for id in toggles {
+            self.toggle_columns(id);
+        }
         let stage = cx.stage;
         let renaming_before = self.rename.is_some();
         let full = ui.available_rect_before_wrap();

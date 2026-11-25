@@ -777,6 +777,17 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             crate::import::import_multiple(cx, session);
             return true;
         }
+        // F4 / Shift+F4 with another panel in front: the Timeline toggles its
+        // columns on its next frame (AE: they work whatever panel is active).
+        ids::TOGGLE_SWITCHES_MODES | ids::TOGGLE_PARENT_COLUMN => {
+            let id = if id == ids::TOGGLE_SWITCHES_MODES {
+                ids::TOGGLE_SWITCHES_MODES
+            } else {
+                ids::TOGGLE_PARENT_COLUMN
+            };
+            session.lock().timeline_toggles.push(id);
+            return true;
+        }
         ids::PRE_COMPOSE => {
             // The selected layers; locked ones cannot be pre-composed (AE).
             let layers: Vec<PrimPath> = session
