@@ -90,6 +90,34 @@ pub(super) fn frame(
     u
 }
 
+pub(super) fn composite_kernel(
+    rt: &gpu::Runtime,
+    format: bae_gpu::wgpu::TextureFormat,
+) -> Result<Arc<gpu::Kernel>, RenderError> {
+    rt.kernel(
+        &KernelKey {
+            owner: Arc::from("bae.effects/simulation"),
+            entry: Arc::from("composite"),
+            variant: gpu::format_key(format),
+        },
+        || {
+            Ok(KernelSource {
+                label: "bae.effects.particle_composite",
+                entry: "composite",
+                wgsl: include_str!("composite.wgsl")
+                    .replace("WORKING_FORMAT", crate::blur::format_name(format)?),
+                bindings: vec![
+                    (0, Binding::Uniform(128)),
+                    (1, Binding::Texture),
+                    (2, Binding::Texture),
+                    (3, Binding::Storage(format)),
+                ],
+                workgroup: [8, 8, 1],
+            })
+        },
+    )
+}
+
 pub(super) fn composite(
     kind: Kind,
     target: &mut dyn EffectTarget,
@@ -115,28 +143,7 @@ pub(super) fn composite(
     }
     let rt = gpu::runtime(target.gpu());
     let roi = overlay.rect;
-    let kernel = rt.kernel(
-        &KernelKey {
-            owner: Arc::from("bae.effects/simulation"),
-            entry: Arc::from("composite"),
-            variant: gpu::format_key(format),
-        },
-        || {
-            Ok(KernelSource {
-                label: "bae.effects.particle_composite",
-                entry: "composite",
-                wgsl: include_str!("composite.wgsl")
-                    .replace("WORKING_FORMAT", crate::blur::format_name(format)?),
-                bindings: vec![
-                    (0, Binding::Uniform(128)),
-                    (1, Binding::Texture),
-                    (2, Binding::Texture),
-                    (3, Binding::Storage(format)),
-                ],
-                workgroup: [8, 8, 1],
-            })
-        },
-    )?;
+    let kernel = composite_kernel(&rt, format)?;
     let mut u = UniformWriter::with_size(128);
     u.i32s(
         0,

@@ -1,7 +1,7 @@
 //! GPU particle simulation and layer-driven surface effects.
 mod catalog;
 mod engine;
-pub(crate) use engine::Engine;
+pub(crate) use engine::{Engine, prewarm};
 mod surface;
 
 use crate::{Builtin, EffectTarget, TargetEffect, common, gpu::UniformWriter, params::Params};

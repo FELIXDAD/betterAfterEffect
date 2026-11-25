@@ -1,7 +1,8 @@
 use crate::Registry;
-use crate::effects::simulation::{Kind, builtin};
+use crate::effects::simulation::{Kind, builtin, prewarm};
 
 pub(crate) fn register(registry: &mut Registry) {
+    registry.prewarm.push(prewarm);
     registry.effects.extend(
         [
             Kind::World,

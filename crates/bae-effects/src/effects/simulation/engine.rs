@@ -18,9 +18,7 @@ struct Checkpoint {
 
 pub(crate) struct Engine {
     checkpoint: wgpu::ComputePipeline,
-    module: wgpu::ShaderModule,
-    advance_layout: wgpu::PipelineLayout,
-    advance: [Option<wgpu::ComputePipeline>; 4],
+    advance: [wgpu::ComputePipeline; 4],
     draw: [wgpu::RenderPipeline; 5],
     checkpoints: VecDeque<Checkpoint>,
     scratch: Option<wgpu::Buffer>,
@@ -92,6 +90,16 @@ fn layout(
 }
 
 impl Engine {
+    fn get<'a>(
+        slot: &'a mut Option<Self>,
+        device: &wgpu::Device,
+    ) -> Result<&'a mut Self, RenderError> {
+        match slot {
+            Some(engine) => Ok(engine),
+            None => Ok(slot.insert(Self::new(device)?)),
+        }
+    }
+
     fn new(device: &wgpu::Device) -> Result<Self, RenderError> {
         use wgpu::ShaderStages as Stage;
         let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
@@ -133,6 +141,13 @@ impl Engine {
         ];
         entries.extend((5..=10).map(|n| (n, Stage::COMPUTE, tex)));
         let advance_layout = layout(device, &entries);
+        let advance = [
+            "advance_emitter",
+            "advance_weather",
+            "advance_drizzle",
+            "advance_tiles",
+        ]
+        .map(|entry| compute(device, &module, entry, Some(&advance_layout)));
         let draw_layout = layout(
             device,
             &[
@@ -220,9 +235,7 @@ impl Engine {
         }
         Ok(Self {
             checkpoint,
-            advance: Default::default(),
-            advance_layout,
-            module,
+            advance,
             draw,
             checkpoints: VecDeque::new(),
             scratch: None,
@@ -300,6 +313,12 @@ fn dispatch(
     pass.dispatch_workgroups(count.div_ceil(128), 1, 1);
 }
 
+pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
+    Engine::get(&mut rt.particles.lock(), &rt.device)?;
+    surface::composite_kernel(rt, format)?;
+    Ok(())
+}
+
 pub(super) fn render(
     kind: Kind,
     target: &mut dyn EffectTarget,
@@ -358,26 +377,8 @@ pub(super) fn render(
     .clamp(1, 5) as usize
         - 1;
     let mut slot = rt.particles.lock();
-    if slot.is_none() {
-        *slot = Some(Engine::new(&rt.device)?);
-    }
-    let engine = slot.as_mut().unwrap();
-    let advance = engine.advance[advance]
-        .get_or_insert_with(|| {
-            let entry = [
-                "advance_emitter",
-                "advance_weather",
-                "advance_drizzle",
-                "advance_tiles",
-            ][advance];
-            compute(
-                &rt.device,
-                &engine.module,
-                entry,
-                Some(&engine.advance_layout),
-            )
-        })
-        .clone();
+    let engine = Engine::get(&mut slot, &rt.device)?;
+    let advance = engine.advance[advance].clone();
     let frame = surface::frame(scene, input, roi, maps);
     let viewport_offset = rt.uniform(&frame.bytes);
     let viewport = wgpu::BindGroupEntry {
@@ -489,4 +490,22 @@ fn storage(device: &wgpu::Device, size: u64) -> wgpu::Buffer {
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::VERTEX,
         mapped_at_creation: false,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unified_warmup_prepares_particles_before_the_first_frame() {
+        let Some(gpu) = bae_gpu::testing::shared_context() else {
+            return;
+        };
+        let rt = gpu::runtime(&gpu);
+        crate::prewarm(&gpu, wgpu::TextureFormat::Rgba16Float).unwrap();
+        let particles = rt.particles.lock();
+        let engine = particles.as_ref().expect("registered particle warm-up");
+        assert!(engine.checkpoints.is_empty());
+        assert!(engine.scratch.is_none());
+    }
 }
