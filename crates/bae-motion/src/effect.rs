@@ -145,14 +145,17 @@ impl bae_model::Command for ApplyEffect {
     }
 }
 
-// Built-in AE point defaults were measured on a 640 × 360 reference layer.
-fn instance_default(
+/// The value a new (or reset) instance of `param` starts with on `layer`.
+/// Relative point defaults ([`bae_model::ParamFlags::relative_default`]) are
+/// scaled by the layer's source size (else the comp size); built-in AE point
+/// defaults measured on a 640 × 360 reference layer are scaled the same way.
+pub fn instance_default(
     stage: &Stage,
     layer: &PrimPath,
     def: &EffectDef,
     param: &bae_model::EffectParamDef,
 ) -> Option<Value> {
-    let relative = matches!(
+    let measured = matches!(
         param.match_name.as_deref(),
         Some(
             "ADBE Radial Blur-0002"
@@ -162,7 +165,14 @@ fn instance_default(
                 | "ADBE Radial Shadow-0003"
         )
     ) || (def.plugin.is_none() && def.category == "Distort");
-    if let (true, Some(Value::Vec2(reference))) = (relative, &param.default) {
+    let unit = if param.flags.relative_default {
+        [1.0, 1.0]
+    } else if measured {
+        [1.0 / 640.0, 1.0 / 360.0]
+    } else {
+        return param.default.clone();
+    };
+    let size = || -> Option<[f64; 2]> {
         let source_size = stage
             .prim(layer)
             .and_then(|v| {
@@ -170,18 +180,20 @@ fn instance_default(
             })
             .map(|(size, _)| size)
             .filter(|[w, h]| *w > 0. && *h > 0.);
-        let size = source_size.or_else(|| {
+        source_size.or_else(|| {
             let comp = query::comp_info(stage, &query::owning_comp(stage, layer)?)?;
             Some([f64::from(comp.width), f64::from(comp.height)])
-        });
-        if let Some(size) = size {
-            return Some(Value::Vec2([
-                size[0] * reference[0] / 640.,
-                size[1] * reference[1] / 360.,
-            ]));
+        })
+    };
+    let scale = |x: f64, y: f64, s: [f64; 2]| [x * s[0] * unit[0], y * s[1] * unit[1]];
+    match (&param.default, size()) {
+        (Some(Value::Vec2([x, y])), Some(s)) => Some(Value::Vec2(scale(*x, *y, s))),
+        (Some(Value::Vec3([x, y, z])), Some(s)) if param.flags.relative_default => {
+            let [x, y] = scale(*x, *y, s);
+            Some(Value::Vec3([x, y, *z]))
         }
+        _ => param.default.clone(),
     }
-    param.default.clone()
 }
 
 fn add_instance(

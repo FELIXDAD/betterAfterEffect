@@ -56,6 +56,7 @@
 - 应用界面（G，#271）：效果菜单按 AE 目录列出 299 个效果（可用 / 置灰实时读效果注册表）、效果控件按参数定义画控件、效果和预设面板（搜索、分类、双击 / 拖放应用）、时间轴 fx 开关列。下拉中文选项走 `EffectInfo.param_options_zh`（包的 `choices` 表；Rust 效果的 `options_zh` 查表在 `rust_options_zh()` 接入）。
 
 - [模糊和锐化](../../crates/bae-effects/tests/ae/categories/blur-sharpen.md#工作流进度)
+  - 镜头模糊支持深度图、光圈及高光。双向和智能模糊共用保边滤波，通道模糊复用高斯，两个 CC 径向效果与十字模糊复用现有径向和定向内核。CC Vector Blur 可使用图层生成方向场。
 - [通道](../../crates/bae-effects/tests/ae/categories/channel.md#工作流进度)
 - [颜色校正](../../crates/bae-effects/tests/ae/categories/color.md#工作流进度)
 - [表达式控制](../../crates/bae-effects/tests/ae/categories/controls.md#工作流进度)
@@ -74,4 +75,6 @@
 
 LUT 字节和文件名随项目保存。效果面板的文件选择按钮交由 G 接入。三个自动校正效果的瞬时平滑和场景检测等待 #286 提供跨帧输入。
 
-镜头模糊支持深度图、光圈及高光。双向和智能模糊共用保边滤波，通道模糊复用高斯，两个 CC 径向效果与十字模糊复用现有径向和定向内核。CC Vector Blur 可使用图层生成方向场。
+### Lumetri 颜色（2026-11-24）
+
+完成六个 GPU 分组、输入和创意 LUT 接口、主曲线与色相对饱和度曲线、三路色轮、HSL 辅助和晕影。AE 26.2.1 的逐组及串联对照见[颜色校正记录](../../crates/bae-effects/tests/ae/categories/color.md#lumetri-颜色)。输入 LUT 的文件选择器可复用效果面板工作流的 LUT 接口。
