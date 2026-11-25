@@ -32,14 +32,17 @@ pub mod dialogs;
 pub mod effects;
 mod expr;
 mod expr_menu;
+pub mod footage_panel;
 mod gpu_preview;
 mod graph;
 mod i18n;
 pub mod import;
 mod layer_panel;
 pub mod menus;
+mod paint_panels;
 mod panels;
 mod prefs;
+pub mod progress_metadata;
 mod project;
 mod props;
 mod render;
@@ -78,6 +81,9 @@ const MODULES: &[fn(&mut AppBuilder)] = &[
     render_queue::register,
     layer_panel::register,
     ae_panels::register,
+    footage_panel::register,
+    progress_metadata::register,
+    paint_panels::register,
     // Chinese strings only.
     actions::register,
     context_menu::register,
@@ -127,8 +133,18 @@ impl AppModule for MotionUiModule {
             .expect("motion session")
             .clone();
         app.insert_resource::<std::sync::Arc<dyn bae_script::ScriptView>>(std::sync::Arc::new(
-            session,
+            session.clone(),
         ));
+        if let Err(error) = std::thread::Builder::new()
+            .name("bae-audio-device".into())
+            .spawn(move || {
+                if let Err(error) = session.open_audio() {
+                    tracing::warn!(%error, "Audio output unavailable");
+                }
+            })
+        {
+            tracing::warn!(%error, "Could not start the audio device worker");
+        }
         if app.resource::<SharedTools>().is_none() {
             app.insert_resource(SharedTools::default());
         }

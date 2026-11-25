@@ -26,12 +26,14 @@ mod bar;
 mod effect_points;
 pub(crate) mod errors;
 mod free_transform;
+pub(crate) mod guides;
 mod menu;
 mod motion_path;
 mod overlay;
 mod path_edit;
 mod pen_tool;
 pub(crate) mod prefs;
+mod scene_icons;
 mod select_tool;
 mod shape_tool;
 #[cfg(test)]
@@ -57,9 +59,14 @@ pub struct CompositionViewer {
     /// Magnification (1 = 100%: one comp pixel per screen pixel); `None` = Fit.
     zoom: Option<f32>,
     pan: Vec2,
-    safe: bool,
-    grid: bool,
+    /// Title/action safe and grid from the saved panel state, given to the
+    /// session's view options on the first frame.
+    restore: Option<(bool, bool)>,
     checker: bool,
+    /// A guide being dragged out of a ruler or moved.
+    guide_drag: Option<guides::GuideDrag>,
+    /// The view options of the last frame (saved with the panel).
+    saved: guides::ViewOptions,
     locked: bool,
     /// Zoom step requested by a shortcut, applied in `ui` (needs the panel rect).
     pending_zoom: Option<bool>,
@@ -107,8 +114,8 @@ impl CompositionViewer {
     pub fn new(state: Option<&serde_json::Value>) -> Self {
         let mut v = CompositionViewer::default();
         if let Some(s) = state {
-            v.safe = s.get("safe").and_then(|v| v.as_bool()).unwrap_or(false);
-            v.grid = s.get("grid").and_then(|v| v.as_bool()).unwrap_or(false);
+            let b = |k: &str| s.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+            v.restore = Some((b("safe"), b("grid")));
             v.checker = s.get("checker").and_then(|v| v.as_bool()).unwrap_or(false);
         }
         v
@@ -243,24 +250,26 @@ fn apply_overrides(
         let three_d = layer.switches.three_d;
         let mut t: Transform = layer.transform;
         let mut touched = false;
-        // A scrubbed effect parameter of this layer (Effect Controls, timeline).
-        if let Some(s) = scrub.filter(|s| s.attr.starts_with("param:"))
-            && crate::effects::layer_of(&s.path).as_ref() == Some(&layer.path)
-            && let Some(e) = layer.effects.iter_mut().find(|e| e.path == s.path)
-        {
-            e.params.insert(
-                s.attr.trim_start_matches("param:").to_owned(),
-                s.value.clone(),
-            );
-        }
-        if let Some(s) = scrub.filter(|s| s.path == layer.path) {
+        let attr = scrub.map_or("", |s| s.attr.as_str());
+        for (path, value) in scrub.into_iter().flat_map(Scrub::targets) {
+            // A scrubbed effect parameter of this layer (Effect Controls, timeline).
+            if attr.starts_with("param:")
+                && crate::effects::layer_of(path).as_ref() == Some(&layer.path)
+                && let Some(e) = layer.effects.iter_mut().find(|e| e.path == *path)
+            {
+                e.params
+                    .insert(attr.trim_start_matches("param:").to_owned(), value.clone());
+            }
+            if *path != layer.path {
+                continue;
+            }
             touched = true;
             let v3 = |v: &Value| match v {
                 Value::Vec3(a) => Some(DVec3::from_array(*a)),
                 Value::Vec2(a) => Some(DVec3::new(a[0], a[1], 0.0)),
                 _ => None,
             };
-            match (s.attr.as_str(), &s.value) {
+            match (attr, value) {
                 ("transform:position", v) => t.position = v3(v).unwrap_or(t.position),
                 ("transform:anchor_point", v) => t.anchor_point = v3(v).unwrap_or(t.anchor_point),
                 ("transform:scale", v) => t.scale = v3(v).unwrap_or(t.scale),
@@ -346,7 +355,8 @@ impl Panel for CompositionViewer {
     }
 
     fn save_state(&self) -> Option<serde_json::Value> {
-        Some(json!({"safe": self.safe, "grid": self.grid, "checker": self.checker}))
+        let (safe, grid) = self.restore.unwrap_or((self.saved.safe, self.saved.grid));
+        Some(json!({"safe": safe, "grid": grid, "checker": self.checker}))
     }
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {
@@ -398,12 +408,19 @@ impl Panel for CompositionViewer {
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
+        if let Some((safe, grid)) = self.restore.take() {
+            let mut s = session.lock();
+            s.view_options.safe = safe;
+            s.view_options.grid = grid;
+        }
+        let opts = session.lock().view_options;
+        self.saved = opts;
         self.prefs = prefs::ViewerPrefs::current(cx.resources);
         let Some(info) = common::active_comp(cx.stage, &session) else {
             empty_viewer(ui, cx, &session);
             return;
         };
-        if session.lock().tick(&info) {
+        if session.lock().update_preview(cx, &info) {
             ui.ctx().request_repaint();
         }
         let time = session.lock().time(&info.path);
@@ -413,6 +430,8 @@ impl Panel for CompositionViewer {
         let bar_h = 28.0;
         let area = Rect::from_min_max(full.min, pos2(full.right(), full.bottom() - bar_h));
         let bar = Rect::from_min_max(pos2(full.left(), area.bottom()), full.max);
+        // View ▸ Show Rulers: along the top and left of the viewer.
+        let (rulers, area) = guides::layout(area, opts.rulers);
         let resp = ui
             .allocate_rect(area, Sense::click_and_drag())
             .labeled(egui::WidgetType::Image, tr("Composition"));
@@ -637,26 +656,44 @@ impl Panel for CompositionViewer {
             }
             vector = std::borrow::Cow::Owned(text_only);
         }
-        let mut shapes = Vec::new();
-        let to_screen = |p: DVec2| view.to_screen(p);
-        render::paint_comp(
-            &vector,
-            &clip,
-            &to_screen,
-            Affine::new(DMat4::IDENTITY),
-            1.0,
-            f64::from(view.scale),
-            &|s| egui::FontId::proportional(s),
-            &mut shapes,
-        );
-        clip.extend(shapes);
+        // Something is still warming up (an effect pipeline, the text
+        // renderer): the last complete frame stays (none yet: nothing, not the
+        // simplified drawing) with a small hint, like AE's render progress.
+        let preparing = self.gpu.as_ref().is_some_and(|g| g.preparing);
+        if !(preparing && !self.on_gpu) {
+            let mut shapes = Vec::new();
+            let to_screen = |p: DVec2| view.to_screen(p);
+            render::paint_comp(
+                &vector,
+                &clip,
+                &to_screen,
+                Affine::new(DMat4::IDENTITY),
+                1.0,
+                f64::from(view.scale),
+                &|s| egui::FontId::proportional(s),
+                &mut shapes,
+            );
+            clip.extend(shapes);
+        }
+        if preparing {
+            painter.text(
+                area.right_bottom() + vec2(-8.0, -8.0),
+                Align2::RIGHT_BOTTOM,
+                tr("Preparing…"),
+                theme::small(),
+                color::TEXT_DIM,
+            );
+        }
 
         // Preferences > Grids & Guides (bae-prefs, workstream D).
         let guides = bae_ui::settings::GridGuides::current(cx.resources);
-        if self.grid {
+        if opts.grid {
             guides.paint_grid(&clip, comp_rect, view.scale);
         }
-        if self.safe {
+        if opts.proportional {
+            guides::paint_proportional(&clip, comp_rect, guides.proportional, guides.grid_color);
+        }
+        if opts.safe {
             guides.paint_safe(
                 &painter,
                 comp_rect,
@@ -715,6 +752,19 @@ impl Panel for CompositionViewer {
         }
 
         overlay::masks(&painter, cx.stage, &comp, &view, &selected);
+        // Cameras and lights in the 3D views (not the camera looked through).
+        let through = match session.lock().views3d.get(&info.path).map(|v| v.current) {
+            None | Some(view3d::View3d::Active) => comp.camera.map(|i| comp.layers[i].path.clone()),
+            Some(_) => None,
+        };
+        scene_icons::paint(
+            &painter,
+            cx.stage,
+            &comp,
+            &view,
+            &selected,
+            through.as_ref(),
+        );
 
         // Interaction by tool. Space held over the viewer is the Hand tool until
         // released (AE-UI-307), except while drawing a shape (Space moves it).
@@ -836,9 +886,20 @@ impl Panel for CompositionViewer {
             &painter,
             &self.prefs,
         );
+        let guide_busy = guides::frame(
+            &mut self.guide_drag,
+            ui,
+            cx,
+            &info,
+            &view,
+            area,
+            rulers,
+            &opts,
+            effective == Tool::Selection && !path.owns && !points.owns,
+        );
         let select_cursor = if points.owns {
             points.cursor
-        } else if path.owns {
+        } else if path.owns || guide_busy {
             path.cursor
         } else {
             points.cursor.or(path.cursor).or(select_tool::frame(
@@ -992,6 +1053,13 @@ pub(crate) fn add_item_as_layer(
             .and_then(|v| query::static_value(&v, "kind"))
         {
             Some(Value::Enum(k)) if k == "solid" => LayerKind::Solid,
+            _ if stage.prim(item).is_some_and(|v| {
+                v.value("has_audio").and_then(Value::as_bool) == Some(true)
+                    && v.value("has_video").and_then(Value::as_bool) == Some(false)
+            }) =>
+            {
+                LayerKind::Audio
+            }
             _ => LayerKind::Footage,
         }
     };
