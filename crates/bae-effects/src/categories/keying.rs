@@ -2,6 +2,7 @@ use super::packages;
 use crate::Registry;
 
 pub(crate) fn register(registry: &mut Registry) {
+    registry.prewarm.push(crate::effects::keying::prewarm);
     registry.effects.push(crate::effects::keying::builtin(
         crate::effects::keying::Kind::Keylight,
     ));

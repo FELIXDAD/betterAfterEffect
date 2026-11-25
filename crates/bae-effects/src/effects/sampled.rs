@@ -20,6 +20,14 @@ pub(super) struct Shader {
 }
 
 impl Shader {
+    pub(super) fn kernel(
+        &self,
+        rt: &gpu::Runtime,
+        format: wgpu::TextureFormat,
+    ) -> Result<std::sync::Arc<gpu::Kernel>, RenderError> {
+        image_grid::kernel_with_inputs(rt, format, self.label, self.source, BYTES, 4)
+    }
+
     pub fn dispatch(
         &self,
         target: &mut dyn EffectTarget,
@@ -30,14 +38,7 @@ impl Shader {
         stage: [u32; 2],
     ) -> Result<GpuImage, RenderError> {
         let rt = gpu::runtime(target.gpu());
-        let kernel = image_grid::kernel_with_inputs(
-            &rt,
-            target.format(),
-            self.label,
-            self.source,
-            BYTES,
-            4,
-        )?;
+        let kernel = self.kernel(&rt, target.format())?;
         let grid = image_grid::grid_scale(v.p, input);
         let layer = if v.p.layer_bounds.is_empty() {
             image_grid::pixel_rect(input.rect, 1. / grid)
