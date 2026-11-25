@@ -10,6 +10,7 @@
 // No alert(): results are returned as a string.
 
 (function () {
+    #include "lumetri/custom.jsxinc"
     // A wrapper script may set BAE_07_ROOT (probe runs).
     var ROOT = (typeof BAE_07_ROOT !== "undefined") ? BAE_07_ROOT : "/private/tmp/bae-07-ae";
     var casesFile = new File(ROOT + "/cases.json");
@@ -93,6 +94,7 @@
         }
         var fx = layer.property("ADBE Effect Parade").addProperty(c.effect);
         for (var id in c.params) {
+            if (c.effect === "ADBE Lumetri" && Number(id) >= 1000) continue;
             var pad = ("0000" + id).slice(-4);
             var prop = fx.property(c.effect + "-" + pad);
             if (prop === null) {
@@ -114,6 +116,11 @@
         // Reuse the same image and LUT across depths. AE opens its picker on addProperty.
         var key = c.input + "/" + c.lut;
         var comp = c.lut && lutComps[key] ? lutComps[key] : makeComp(c);
+        if (c.points || c.wheels) {
+            comp = lumetriCustomComp(comp, c, ROOT);
+            footage = {};
+            lutComps = {};
+        }
         if (c.lut) lutComps[key] = comp;
         var out = new File(outDir.fsName + "/" + c.name + ".png");
         if (out.exists) {
