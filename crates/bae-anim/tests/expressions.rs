@@ -621,3 +621,39 @@ fn property_index_and_length_read_its_value() {
     assert!(ec.errors.is_empty(), "{:?}", ec.errors);
     assert_eq!(ec.layers[0].transform.rotation.z, 122.0);
 }
+
+/// footage(name), a footage layer's source, colorDepth / thisProject, NTSC and
+/// feet + frames timecode, and fromCompToSurface on a 2D layer.
+#[test]
+fn footage_project_and_timecodes() {
+    let s = stage(|b| {
+        b.prim("/project", PrimType::PROJECT)
+            .set("/project", "bit_depth", Value::Enum("32".into()))
+            .prim("/assets", PrimType::FOLDER)
+            .prim("/assets/clip", PrimType::ASSET)
+            .set("/assets/clip", "name", "Clip")
+            .set("/assets/clip", "kind", Value::Enum("footage".into()))
+            .set("/assets/clip", "width", 640.0)
+            .set("/assets/clip", "height", 360.0)
+            .set("/assets/clip", "duration", Value::Time(secs(4.0)));
+        let l = b.layer(MAIN, "Shot", "footage");
+        b.set(&l, "source", Value::AssetRef(p("/assets/clip")));
+        let t = b.layer(MAIN, "Info", "text");
+        b.expr(
+            &t,
+            "text:source",
+            Value::TextDocument(Box::new(TextDocument::new("x", "ArialMT", 50.0))),
+            r#"var s = thisComp.layer("Shot");
+               [s.source.width, footage("Clip").duration, footage("Clip").name, colorDepth,
+                thisProject.bitsPerChannel, timeToNTSCTimecode(61, true), timeToNTSCTimecode(1),
+                timeToFeetAndFrames(1, 30), thisComp.ntscDropFrame,
+                fromCompToSurface([10, 20])[0] == fromComp([10, 20])[0]].join("|")"#,
+        );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(
+        ec.layers[1].text.as_ref().unwrap().text,
+        "640|4|Clip|32|32|00;01;01;00|00:00:00:29|0001+14|false|true"
+    );
+}

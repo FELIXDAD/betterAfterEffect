@@ -145,9 +145,20 @@ thread_local! {
     static MEMO_POOL: RefCell<Memo> = RefCell::new(Memo::default());
 }
 
+/// Project settings and footage items for expressions (`colorDepth`,
+/// `thisProject`, `footage(name)`, a footage layer's `source`).
+#[derive(Debug, Default)]
+pub(crate) struct ProjectInfo {
+    pub(crate) bit_depth: u32,
+    pub(crate) linear_blending: bool,
+    /// Display name, path, facts.
+    pub(crate) assets: Vec<(String, PrimPath, crate::AssetInfo)>,
+}
+
 /// State of one top-level evaluation.
 pub(crate) struct Scope {
     comps: Vec<Arc<CompiledComp>>,
+    project: Arc<ProjectInfo>,
     by_path: HashMap<PrimPath, usize>,
     by_name: HashMap<String, usize>,
     memo: Memo,
@@ -180,6 +191,7 @@ impl Scope {
         }
         Scope {
             comps,
+            project: Arc::default(),
             by_path,
             by_name,
             memo: MEMO_POOL.with(|p| std::mem::take(&mut *p.borrow_mut())),
@@ -188,6 +200,11 @@ impl Scope {
             deps: BTreeSet::new(),
             deferred: false,
         }
+    }
+
+    pub(crate) fn with_project(mut self, project: Arc<ProjectInfo>) -> Scope {
+        self.project = project;
+        self
     }
 
     pub(crate) fn comp_id(&self, path: &PrimPath) -> Option<usize> {
@@ -243,6 +260,36 @@ pub(crate) fn with_scope<R>(scope: Scope, f: impl FnOnce() -> R) -> (R, Option<S
 /// Comp id of `path` in the active scope.
 pub(crate) fn scope_comp_id(path: &PrimPath) -> Option<usize> {
     SCOPE.with(|s| s.borrow().as_ref().and_then(|s| s.comp_id(path)))
+}
+
+fn scope_project() -> Arc<ProjectInfo> {
+    SCOPE.with(|s| {
+        s.borrow()
+            .as_ref()
+            .map(|s| s.project.clone())
+            .unwrap_or_default()
+    })
+}
+
+/// A footage item as expressions see it.
+fn footage_to_js<'js>(
+    ctx: &Ctx<'js>,
+    name: &str,
+    a: &crate::AssetInfo,
+) -> rquickjs::Result<Object<'js>> {
+    let o = Object::new(ctx.clone())?;
+    o.set("name", name)?;
+    o.set("width", a.width)?;
+    o.set("height", a.height)?;
+    o.set("pixelAspect", a.pixel_aspect)?;
+    o.set("duration", a.duration.map_or(0.0, |d| d.as_seconds()))?;
+    o.set(
+        "frameDuration",
+        a.frame_rate
+            .map_or(0.0, |r| r.frame_duration().as_seconds()),
+    )?;
+    o.set("ntscDropFrame", false)?;
+    Ok(o)
 }
 
 fn scope_comp(c: usize) -> Option<Arc<CompiledComp>> {
@@ -595,6 +642,13 @@ const LOCALS: &[(&str, &str)] = &[
     ("height", "thisLayer.height"),
     ("source", "thisLayer.source"),
     ("transform", "thisLayer.transform"),
+    ("colorDepth", "__h.projectInfo().bitsPerChannel"),
+    ("thisProject", "__project()"),
+    ("audioActive", "thisLayer.audioActive"),
+    (
+        "fromCompToSurface",
+        "thisLayer.fromCompToSurface.bind(thisLayer)",
+    ),
     ("anchorPoint", "thisLayer.anchorPoint"),
     ("position", "thisLayer.position"),
     ("scale", "thisLayer.scale"),
@@ -1149,6 +1203,12 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
             )?;
             o.set("pixelAspect", comp.pixel_aspect)?;
             o.set("numLayers", comp.layers.len() as i32)?;
+            // No drop-frame setting yet: AE's default for 29.97 and 59.94 fps.
+            let fps = comp.frame_rate.as_f64();
+            o.set(
+                "ntscDropFrame",
+                (fps - 29.97).abs() < 0.01 || (fps - 59.94).abs() < 0.01,
+            )?;
             o.set("displayStartTime", 0.0)?;
             o.set("bgColor", comp.bg_color.to_vec())?;
             o.set("shutterAngle", comp.motion_blur.shutter_angle)?;
@@ -1323,6 +1383,26 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                     p.get(2).copied().unwrap_or(0.0),
                 );
                 let r = match kind {
+                    // fromCompToSurface: the comp point seen through the active
+                    // camera, where its ray meets the layer's plane (2D layers:
+                    // fromComp).
+                    8 if comp.layers[li].switches.three_d => {
+                        let (view, zoom) = comp.camera_at(ct, c as usize, Some(&ctx));
+                        let (cx, cy) = (comp.width as f64 / 2.0, comp.height as f64 / 2.0);
+                        let to_world = view.inverse();
+                        let origin = to_world.transform_point3(glam::DVec3::ZERO);
+                        let dir =
+                            to_world.transform_vector3(glam::DVec3::new(v.x - cx, v.y - cy, zoom));
+                        let inv = m.inverse();
+                        let (o, d) = (inv.transform_point3(origin), inv.transform_vector3(dir));
+                        if d.z.abs() < 1e-12 {
+                            glam::DVec3::new(o.x, o.y, 0.0)
+                        } else {
+                            let s = -o.z / d.z;
+                            glam::DVec3::new(o.x + s * d.x, o.y + s * d.y, 0.0)
+                        }
+                    }
+                    8 => m.inverse().transform_point3(v),
                     // toComp of a 3D layer is in the comp's view: through the active
                     // camera (AE 26: matches the default camera's projection exactly).
                     0 if comp.layers[li].switches.three_d => {
@@ -1344,6 +1424,55 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 Ok::<_, rquickjs::Error>(r.to_array().to_vec())
             },
         )?,
+    )?;
+
+    h.set(
+        "projectInfo",
+        Function::new(ctx.clone(), |ctx: Ctx<'js>| {
+            let p = scope_project();
+            let o = Object::new(ctx.clone())?;
+            o.set(
+                "bitsPerChannel",
+                if p.bit_depth == 0 { 8 } else { p.bit_depth },
+            )?;
+            o.set("linearBlending", p.linear_blending)?;
+            // The project file is not part of the document (AE: "" until saved).
+            o.set("fullPath", "")?;
+            Ok::<_, rquickjs::Error>(o)
+        })?,
+    )?;
+
+    h.set(
+        "footage",
+        Function::new(ctx.clone(), |ctx: Ctx<'js>, name: String| {
+            let p = scope_project();
+            match p.assets.iter().find(|(n, ..)| *n == name) {
+                Some((n, _, a)) => Ok::<_, rquickjs::Error>(Some(footage_to_js(&ctx, n, a)?)),
+                None => Ok(None),
+            }
+        })?,
+    )?;
+
+    h.set(
+        "layerFootage",
+        Function::new(ctx.clone(), |ctx: Ctx<'js>, c: i32, l: i32| {
+            let comp = comp_or_throw(&ctx, c)?;
+            let li = layer_or_throw(&ctx, &comp, l)?;
+            let p = scope_project();
+            let found = match &comp.layers[li].source {
+                crate::eval::CompiledSource::Asset(path, info) => {
+                    Some(p.assets.iter().find(|(_, ap, _)| ap == path).map_or_else(
+                        || (path.name().to_owned(), info.clone()),
+                        |(n, _, a)| (n.clone(), a.clone()),
+                    ))
+                }
+                _ => None,
+            };
+            match found {
+                Some((n, a)) => Ok::<_, rquickjs::Error>(Some(footage_to_js(&ctx, &n, &a)?)),
+                None => Ok(None),
+            }
+        })?,
     )?;
 
     h.set(

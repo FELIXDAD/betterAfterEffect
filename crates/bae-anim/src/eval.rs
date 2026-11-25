@@ -797,6 +797,32 @@ fn compile_layer(
     })
 }
 
+/// The project's settings and footage items, as expressions read them.
+fn project_info(stage: &Stage) -> expr::ProjectInfo {
+    let mut info = expr::ProjectInfo {
+        bit_depth: 8,
+        ..Default::default()
+    };
+    for p in stage.traverse() {
+        let Some(v) = stage.prim(&p) else { continue };
+        if v.is_a(&PrimType::PROJECT) {
+            let pt = &PrimType::PROJECT;
+            info.bit_depth = setting_str(&v, pt, "bit_depth")
+                .and_then(|d| d.parse().ok())
+                .unwrap_or(16);
+            info.linear_blending = setting_bool(&v, pt, "blend_colors_using_gamma_1");
+        } else if v.is_a(&PrimType::ASSET) {
+            let name = v
+                .value(schema::layer::NAME)
+                .and_then(Value::as_str)
+                .unwrap_or(v.name())
+                .to_owned();
+            info.assets.push((name, p.clone(), asset_info(&v)));
+        }
+    }
+    info
+}
+
 fn asset_info(av: &PrimView<'_>) -> AssetInfo {
     let at = &PrimType::ASSET;
     let kind = setting_str(av, at, asset::KIND).unwrap_or_else(|| "footage".into());
@@ -1402,6 +1428,9 @@ const MAX_NESTING: usize = 64;
 #[derive(Debug, Default)]
 pub struct Evaluator {
     comps: HashMap<PrimPath, Arc<CompiledComp>>,
+    /// Project settings and items for expressions (`colorDepth`, `footage()`);
+    /// rebuilt after any edit.
+    project: Option<Arc<expr::ProjectInfo>>,
     /// Every comp of the stage (expressions can reach any comp); rebuilt after
     /// structural changes.
     comp_list: Option<Vec<PrimPath>>,
@@ -1490,7 +1519,11 @@ impl Evaluator {
                 comps.len() - 1
             }
         };
-        (expr::Scope::new(comps), id)
+        let project = self
+            .project
+            .get_or_insert_with(|| Arc::new(project_info(stage)))
+            .clone();
+        (expr::Scope::new(comps).with_project(project), id)
     }
 
     fn evaluate_with_expressions(
@@ -1631,12 +1664,14 @@ impl Evaluator {
         if structural {
             self.comp_list = None;
         }
+        self.project = None;
     }
 
     /// Drop every compiled comp.
     pub fn clear(&mut self) {
         self.comps.clear();
         self.comp_list = None;
+        self.project = None;
     }
 }
 
