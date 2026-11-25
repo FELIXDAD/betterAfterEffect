@@ -315,10 +315,10 @@
 | Transform ▸ Fit to Comp | 8912911 | `motion.layer.fit_to_comp` |  | Ctrl+Alt+F | Cmd+Opt+F | B | ✅ |
 | Transform ▸ Fit to Comp Width | 8912912 | `motion.layer.fit_to_comp_width` |  | Ctrl+Alt+Shift+H | Cmd+Opt+Shift+H | B | ✅ |
 | Transform ▸ Fit to Comp Height | 8912913 | `motion.layer.fit_to_comp_height` |  | Ctrl+Alt+Shift+G | Cmd+Opt+Shift+G | B | ✅ |
-| Transform ▸ Auto-Orient... | 8912915 | `motion.layer.auto_orient` |  | Ctrl+Alt+O | Cmd+Opt+O | E | ☐ |
+| Transform ▸ Auto-Orient... | 8912915 | `motion.layer.auto_orient` |  | Ctrl+Alt+O | Cmd+Opt+O | E | ✅ |
 | Time ▸ Enable Time Remapping | 1966081 | `motion.layer.enable_time_remapping` |  | Ctrl+Alt+T | Cmd+Opt+T | B | ☐ |
 | Time ▸ Time-Reverse Layer | 1966082 | `motion.layer.time_reverse_layer` |  | Ctrl+Alt+R | Cmd+Opt+R | B | ☐ |
-| Time ▸ Time Stretch... | 1966083 | `motion.layer.time_stretch` |  |  |  | E | ☐ |
+| Time ▸ Time Stretch... | 1966083 | `motion.layer.time_stretch` |  |  |  | E | ✅ |
 | Time ▸ Freeze Frame | 1966084 | `motion.layer.freeze_frame` |  |  |  | B | ☐ |
 | Time ▸ Freeze On Last Frame | 1966085 | `motion.layer.freeze_on_last_frame` |  |  |  | B | ☐ |
 | Time ▸ Align Video to Data | 1966086 | `motion.layer.align_video_to_data` |  |  |  | B | ⏸ |
