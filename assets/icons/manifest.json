@@ -104,6 +104,7 @@
     "PaneModes": "bae/PaneModes.svg",
     "PaneInOut": "bae/PaneInOut.svg",
     "PaneRenderTime": "bae/PaneRenderTime.svg",
+    "Alert": "spectrum/workflow/Alert.svg",
     "FirstFrame": "bae/FirstFrame.svg",
     "PrevFrame": "bae/PrevFrame.svg",
     "Play": "bae/Play.svg",

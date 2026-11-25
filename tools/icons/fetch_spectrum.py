@@ -45,7 +45,7 @@ UI_PKG = (
 
 # Spectrum 1 workflow icons used by bae-ui (file names in dist/18/).
 WORKFLOW = [
-    "BookmarkSingle", "Brush", "Camera", "ChevronDoubleRight", "CloneStamp", "Crosshairs", "Delete", "Dolly",
+    "Alert", "BookmarkSingle", "Brush", "Camera", "ChevronDoubleRight", "CloneStamp", "Crosshairs", "Delete", "Dolly",
     "Effects", "Ellipse", "Erase", "Exposure", "Filmroll", "FlashOn", "Folder", "Hand",
     "Home", "Label", "Link", "LockClosed", "LockOpen", "Move", "Orbit", "PinOn",
     "PlayCircle", "Polygon", "Rectangle", "RotateCW", "Sampler",
