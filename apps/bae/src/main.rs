@@ -38,6 +38,12 @@ use std::process::ExitCode;
 use bae_app::AppBuilder;
 
 fn main() -> ExitCode {
+    if std::env::args_os()
+        .skip(1)
+        .eq(["plugin", "runner"].map(std::ffi::OsString::from))
+    {
+        return bae_plugin::native::runner_main();
+    }
     startup::run(app_builder().build())
 }
 
