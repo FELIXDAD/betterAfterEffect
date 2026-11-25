@@ -1779,6 +1779,74 @@ fn import_fixture(tag: &str) -> std::path::PathBuf {
 }
 
 #[test]
+fn mix_reads_enabled_layers_with_stereo_decibel_levels() {
+    let mut h = Harness::new();
+    let (comp, _, _) = h.comp_with_layers();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("sample.wav");
+    std::fs::write(&file, b"RIFF\x26\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\x02\0\0\0\0\x40").unwrap();
+    h.run("item.import", json!({"files":[{"path":file,"name":"sample.wav",
+        "attrs":{"has_audio":{"type":"bool","value":true},"duration":{"type":"time","value":88200}}}]}));
+    let asset = h
+        .stage
+        .children(&PrimPath::new(query::ASSETS_FOLDER).unwrap())
+        .into_iter()
+        .find(|p| query::display_name_of(&h.stage, p) == "sample.wav")
+        .unwrap();
+    let mut tracks = Vec::new();
+    for (kind, muted) in [("audio", false), ("footage", false), ("footage", true)] {
+        let path = h.run(
+            "layer.create",
+            json!({"kind":kind,"comp":comp,"source":asset}),
+        )["path"]
+            .clone();
+        tracks.push(path.clone());
+        h.run(
+            "attr.set",
+            json!({"path":path,"attr":"audio_enabled","value":{"type":"bool","value":!muted}}),
+        );
+        h.run(
+            "attr.set_animated",
+            json!({"path":path,"attr":"audio:levels","animated":true,"time":0}),
+        );
+        h.run("attr.set_at",json!({"path":path,"attr":"audio:levels","time":0,"value":{"type":"vec2","value":[0.0,-6.0206]}}));
+    }
+    let mut mix = bae_media::mix::AudioMix::from_stage(&h.stage, &comp);
+    let mut block = [[0.0; 2]; 2];
+    mix.render(0, 8_000, &mut block).unwrap();
+    assert!(
+        (block[0][0] - 1.0).abs() < 1e-5 && (block[0][1] - 0.5).abs() < 1e-5,
+        "{block:?}"
+    );
+    assert_eq!(block[1], [0.0; 2]);
+
+    // Distinguish the two enabled sources, then toggle the switches independently.
+    h.run(
+        "attr.set_at",
+        json!({"path":tracks[1],"attr":"audio:levels","time":0,
+        "value":Value::Vec2([-6.0206,-12.0412])}),
+    );
+    let mut switch = |layer: usize, attr: &str, on: bool, expected: f32| {
+        h.run(
+            "attr.set",
+            json!({"path":tracks[layer],"attr":attr,"value":Value::Bool(on)}),
+        );
+        bae_media::mix::AudioMix::from_stage(&h.stage, &comp)
+            .render(0, 8000, &mut block)
+            .unwrap();
+        assert!(
+            (block[0][0] - expected).abs() < 1e-5,
+            "{attr}={on}: {block:?}"
+        );
+    };
+    switch(2, "solo", true, 0.75); // a muted solo does not suppress the mix
+    switch(0, "solo", true, 0.5);
+    switch(0, "enabled", false, 0.5); // eye does not mute sound
+    switch(0, "audio_enabled", false, 0.25); // last audible solo muted
+    switch(0, "audio_enabled", true, 0.5);
+}
+
+#[test]
 fn import_probes_files_sequences_and_folders() {
     let dir = import_fixture("probe");
     let defaults = crate::import::ImportDefaults::default();

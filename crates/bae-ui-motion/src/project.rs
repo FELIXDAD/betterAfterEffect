@@ -52,6 +52,13 @@ impl ItemDrag {
                 .and_then(|v| query::static_value(&v, "kind"))
             {
                 Some(Value::Enum(k)) if k == "solid" => LayerKind::Solid,
+                _ if stage.prim(item).is_some_and(|v| {
+                    v.value("has_audio").and_then(Value::as_bool) == Some(true)
+                        && v.value("has_video").and_then(Value::as_bool) == Some(false)
+                }) =>
+                {
+                    LayerKind::Audio
+                }
                 _ => LayerKind::Footage,
             }
         };

@@ -403,7 +403,7 @@ impl Panel for CompositionViewer {
             empty_viewer(ui, cx, &session);
             return;
         };
-        if session.lock().tick(&info) {
+        if session.lock().update_preview(cx, &info) {
             ui.ctx().request_repaint();
         }
         let time = session.lock().time(&info.path);
