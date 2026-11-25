@@ -1,6 +1,6 @@
 struct Settings {
     image: FxImage, origin: vec2i, size: vec2u, mode: u32, equalize: u32,
-    neutral: u32, amount: f32, black: f32, white: f32,
+    neutral: u32, amount: f32, black: f32, white: f32, endpoints: u32,
 }
 @group(0) @binding(0) var<uniform> u: Settings;
 @group(0) @binding(1) var dst: texture_storage_2d<WORKING_FORMAT, write>;
@@ -102,6 +102,14 @@ fn auto_mapping(@builtin(local_invocation_index) lane: u32) {
         let end = (hi.rgb - dark) / width;
         lo = vec4f(dark + width * min(start.r, min(start.g, start.b)), 0.);
         hi = vec4f(dark + width * max(end.r, max(end.g, end.b)), 255.);
+    }
+    if u.endpoints != 0u {
+        if lane == 0u {
+            let valid = hi > lo;
+            textureStore(dst, vec2u(0, 0), select(vec4f(0.0), lo / 255.0, valid));
+            textureStore(dst, vec2u(1, 0), select(vec4f(1.0), hi / 255.0, valid));
+        }
+        return;
     }
     if u.neutral != 0u && lane == 0u {
         textureStore(dst, vec2u(256, 0), lo / 255.);
@@ -222,7 +230,14 @@ fn mapped(x: f32, ch: u32) -> f32 {
 fn auto_apply(@builtin(global_invocation_id) id: vec3u) {
     if any(id.xy >= u.size) { return; }
     let c = saturate(fx_sample(src, u.image, vec2f(u.origin) + vec2f(id.xy) + 0.5, true));
-    var rgb = vec3f(mapped(c.r, 0u), mapped(c.g, 1u), mapped(c.b, 2u));
+    var rgb: vec3f;
+    if u.endpoints != 0u {
+        let low = textureLoad(mapping, vec2u(0, 0), 0).rgb;
+        let high = textureLoad(mapping, vec2u(1, 0), 0).rgb;
+        rgb = saturate((c.rgb - low) / max(high - low, vec3f(1. / 255.)));
+    } else {
+        rgb = vec3f(mapped(c.r, 0u), mapped(c.g, 1u), mapped(c.b, 2u));
+    }
     if u.mode == 3u && u.equalize == 2u {
         let bin = lightness_bin(vec3u(round(saturate(c.rgb)*255.)));
         let new_l = textureLoad(mapping, vec2u(bin, 0), 0).w;

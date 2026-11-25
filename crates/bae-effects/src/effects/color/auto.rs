@@ -1,9 +1,12 @@
-//! Frame-wide histogram corrections. Only the input ROI spans the whole layer.
+//! Frame-wide histogram corrections with optional temporal smoothing.
 use std::sync::Arc;
 
 use bae_model::EffectDef;
-use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderError};
+use bae_render::{
+    Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderError, effect::LayerDependency,
+};
 
+use super::temporal_stats::Smoothing;
 use crate::catalog::DefBuilder;
 use crate::effects::image_grid;
 use crate::gpu::UniformWriter;
@@ -125,13 +128,7 @@ pub(crate) fn builtins() -> Vec<Builtin> {
                 "percent",
             );
         }
-        let (mut def, names) = b.build();
-        if mode != Mode::Equalize {
-            // Temporal smoothing needs the pre-effect frames on either side.
-            for p in &mut def.params[..2] {
-                p.flags.disabled = true;
-            }
-        }
+        let (def, names) = b.build();
         rust_builtin(
             (Arc::new(Auto { def, mode }), names),
             id,
@@ -153,6 +150,14 @@ impl Effect for Auto {
             IRect::new(i32::MIN / 2, i32::MIN / 2, i32::MAX / 2, i32::MAX / 2)
         }
     }
+    fn layer_dependencies(&self, p: &EffectParams<'_>) -> Vec<LayerDependency> {
+        let v = Params::new(&self.def, p);
+        if self.mode == Mode::Equalize {
+            return Vec::new();
+        }
+        Smoothing::new(p, v.f(1), v.b(2)).dependencies()
+    }
+
     fn render(
         &self,
         ctx: &mut EncodeContext<'_>,
@@ -182,9 +187,9 @@ impl TargetEffect for Auto {
             return Ok(input.clone());
         }
         let grid = image_grid::grid_scale(p, input);
-        let bins = target.allocate(IRect::from_size(256, 256), 1.)?;
         let snap = self.mode == Mode::Color && v.b(5);
-        let mut map = target.allocate(IRect::from_size(if snap { 258 } else { 256 }, 1), 1.)?;
+        let temporal = self.mode != Mode::Equalize && v.f(1) > 0.;
+        let endpoints = temporal && !snap;
         let out = target.allocate(image_grid::pixel_rect(roi, grid), grid)?;
         let mut u = UniformWriter::with_size(80);
         image_grid::image_coords(&mut u, 0, input, grid);
@@ -196,31 +201,60 @@ impl TargetEffect for Auto {
             .u32(56, u32::from(snap))
             .f32(60, amount as f32)
             .f32(64, (v.f(3) / 100.) as f32)
-            .f32(68, (v.f(4) / 100.) as f32);
-        super::dispatch(target, "auto_histogram", &u, &[input], &bins, [128, 128])?;
-        super::dispatch(target, "auto_mapping", &u, &[&bins], &map, [8, 8])?;
-        if snap {
-            let midtones = target.allocate(IRect::from_size(32, 256), 1.)?;
-            let corrected = target.allocate(IRect::from_size(256, 1), 1.)?;
-            super::dispatch(
-                target,
-                "auto_midtones",
-                &u,
-                &[input, &map],
-                &midtones,
-                [128, 128],
-            )?;
-            super::dispatch(
-                target,
-                "auto_snap",
-                &u,
-                &[&map, &midtones],
-                &corrected,
-                [8, 8],
-            )?;
-            map = corrected;
+            .f32(68, (v.f(4) / 100.) as f32)
+            .u32(72, u32::from(endpoints));
+        let mut map = mapping(target, &u, input, snap, endpoints)?;
+        if temporal {
+            let smoothing = Smoothing::new(p, v.f(1), v.b(2));
+            map = smoothing.blend(target, input, map, |target, frame| {
+                image_grid::image_coords(&mut u, 0, frame, grid);
+                mapping(target, &u, frame, snap, endpoints)
+            })?;
+            image_grid::image_coords(&mut u, 0, input, grid);
         }
         super::dispatch(target, "auto_apply", &u, &[input, &map], &out, roi.size())?;
         Ok(out)
     }
+}
+
+fn mapping(
+    target: &mut dyn EffectTarget,
+    u: &UniformWriter,
+    input: &GpuImage,
+    snap: bool,
+    endpoints: bool,
+) -> Result<GpuImage, RenderError> {
+    let bins = target.allocate(IRect::from_size(256, 256), 1.)?;
+    let width = if endpoints {
+        2
+    } else if snap {
+        258
+    } else {
+        256
+    };
+    let mut map = target.allocate(IRect::from_size(width, 1), 1.)?;
+    super::dispatch(target, "auto_histogram", u, &[input], &bins, [128, 128])?;
+    super::dispatch(target, "auto_mapping", u, &[&bins], &map, [8, 8])?;
+    if snap {
+        let midtones = target.allocate(IRect::from_size(32, 256), 1.)?;
+        let corrected = target.allocate(IRect::from_size(256, 1), 1.)?;
+        super::dispatch(
+            target,
+            "auto_midtones",
+            u,
+            &[input, &map],
+            &midtones,
+            [128, 128],
+        )?;
+        super::dispatch(
+            target,
+            "auto_snap",
+            u,
+            &[&map, &midtones],
+            &corrected,
+            [8, 8],
+        )?;
+        map = corrected;
+    }
+    Ok(map)
 }
