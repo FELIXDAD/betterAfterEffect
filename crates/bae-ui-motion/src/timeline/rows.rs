@@ -58,7 +58,7 @@ impl TimelinePanel {
         let now = session.lock().time(&info.path);
         let l = rect.left();
         let cy = rect.center().y;
-        let layer = &row.layer;
+        let layer = &layers.paths[row.layer_index];
         let layer_selected = session.lock().selected_layers.contains(layer);
         let outline = Rect::from_min_max(rect.min, pos2(l + cols.end, rect.bottom()));
         let graph = Rect::from_min_max(
@@ -100,7 +100,10 @@ impl TimelinePanel {
         let base = ui.id().with((layer.as_str(), row.depth, row_key(row)));
         let rid = |s: &str| base.with(s);
         // Screen readers tell the rows' controls apart by layer (issue #128).
-        let layer_ctx = self.layer_ctx(stage, layer);
+        let layer_ctx = bae_ui::a11y::layer(
+            Some(row.layer_index + 1),
+            &query::display_name_of(stage, layer),
+        );
 
         match &row.kind {
             RowKind::Layer => {
@@ -135,7 +138,7 @@ impl TimelinePanel {
                     9.0,
                     theme::label_color(label_of(stage, layer)),
                 );
-                let index = layers.numbers[layer];
+                let index = row.layer_index + 1;
                 p.text(
                     pos2(l + cols.index + 4.0, cy),
                     Align2::LEFT_CENTER,
@@ -342,13 +345,7 @@ impl TimelinePanel {
                             origin: whip.center(),
                         });
                     }
-                    let parent = stage
-                        .prim(layer)
-                        .and_then(|v| v.value("parent").and_then(|v| v.as_prim_ref()).cloned());
-                    let mut sel = parent
-                        .as_ref()
-                        .and_then(|p| layers.numbers.get(p).copied())
-                        .unwrap_or(0);
+                    let mut sel = layers.parent_numbers[row.layer_index];
                     let before = sel;
                     let drop_rect = Rect::from_min_max(
                         pos2(whip.right() + 4.0, rect.top() + 1.0),
@@ -384,7 +381,17 @@ impl TimelinePanel {
                 }
                 // Duration bar.
                 if !self.graph_mode {
-                    self.layer_bar(ui, cx, session, info, axis, layer, rect, layer_selected);
+                    self.layer_bar(
+                        ui,
+                        cx,
+                        session,
+                        info,
+                        axis,
+                        layer,
+                        &layer_ctx,
+                        rect,
+                        layer_selected,
+                    );
                     self.layer_markers_ui(ui, cx, session, info, axis, layer, rect);
                 }
             }
@@ -471,7 +478,8 @@ impl TimelinePanel {
             }
             RowKind::Prop { path, attr, label } => {
                 self.prop_row(
-                    ui, cx, session, info, cols, axis, row, rect, path, attr, label, now, key_rects,
+                    ui, cx, session, info, cols, axis, row, layer, &layer_ctx, rect, path, attr,
+                    label, now, key_rects,
                 );
             }
             RowKind::Expression {
@@ -490,6 +498,8 @@ impl TimelinePanel {
                     path,
                     attr,
                     row.depth,
+                    layer,
+                    &layer_ctx,
                     (*line, *lines),
                 );
             }
@@ -506,6 +516,8 @@ impl TimelinePanel {
         cols: &Cols,
         axis: &TimeAxis,
         row: &Row,
+        layer: &PrimPath,
+        layer_ctx: &str,
         rect: Rect,
         path: &PrimPath,
         attr: &str,
@@ -524,13 +536,12 @@ impl TimelinePanel {
         let id = ui.id().with(("prop", path.as_str(), attr));
         // What screen readers call this property: layer, shape group (when the
         // property is not on the layer itself), property (issue #128).
-        let group = if *path == row.layer {
+        let group = if path == layer {
             String::new()
         } else {
             query::display_name_of(stage, path)
         };
-        let prop_name =
-            bae_ui::a11y::context(&[&self.layer_ctx(stage, &row.layer), &group, tr(label)]);
+        let prop_name = bae_ui::a11y::context(&[layer_ctx, &group, tr(label)]);
         // Keyframe navigator (A/V columns).
         if animated {
             let nav = Rect::from_min_size(
@@ -683,7 +694,7 @@ impl TimelinePanel {
             } else {
                 s.selected_props = vec![id_pair.clone()];
                 s.selected_keys = keys;
-                s.selected_layers = vec![row.layer.clone()];
+                s.selected_layers = vec![layer.clone()];
             }
         }
         // Value.
@@ -718,11 +729,7 @@ impl TimelinePanel {
                     .layout(egui::Layout::left_to_right(egui::Align::Center))
                     .id_salt(id.with("val")),
             );
-            let dims = if common::is_3d(stage, &row.layer) {
-                3
-            } else {
-                2
-            };
+            let dims = if common::is_3d(stage, layer) { 3 } else { 2 };
             // Choices (a text selector's Units, Based On, Mode, Shape): a dropdown.
             let options = match &value {
                 bae_model::Value::Enum(_) => stage
@@ -791,6 +798,8 @@ impl TimelinePanel {
         path: &PrimPath,
         attr: &str,
         depth: usize,
+        layer: &PrimPath,
+        layer_ctx: &str,
         (line, lines): (usize, usize),
     ) {
         let stage = cx.stage;
@@ -800,16 +809,9 @@ impl TimelinePanel {
         };
         let l = rect.left();
         let cy = rect.center().y;
-        let layer = query::owning_layer(stage, path);
-        let three_d = layer.as_ref().is_some_and(|l| common::is_3d(stage, l));
+        let three_d = common::is_3d(stage, layer);
         let prop = tr(&common::attr_label(None, attr, three_d)).to_owned();
-        let name = bae_ui::a11y::context(&[
-            &layer
-                .as_ref()
-                .map(|l| self.layer_ctx(stage, l))
-                .unwrap_or_default(),
-            &prop,
-        ]);
+        let name = bae_ui::a11y::context(&[layer_ctx, &prop]);
         let id = ui.id().with(("expr", path.as_str(), attr));
         let field_id = id.with("field");
         if line == 0 {
