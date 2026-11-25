@@ -2123,9 +2123,11 @@ impl Builder<'_, '_> {
         }
         for instance in layer.effects.iter().take(count).filter(|e| e.enabled) {
             match self.effects.get(&instance.effect) {
-                Some(effect) if effect.renders_pixels() => {
-                    out.push((effect.clone(), instance.clone()))
-                }
+                Some(effect) if effect.renders_pixels() => out.push(
+                    effect
+                        .resolve_alias(instance)
+                        .unwrap_or_else(|| (effect.clone(), instance.clone())),
+                ),
                 Some(_) => {}
                 None => self.warn(format!(
                     "{}: effect `{}` is not available, skipped",

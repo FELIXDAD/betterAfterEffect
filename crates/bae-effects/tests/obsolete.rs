@@ -211,3 +211,20 @@ fn cineon_legacy_modes_use_the_modern_conversion_directions() {
         assert_close(&a, &b, rect, 0.00001, "Cineon");
     }
 }
+
+#[test]
+fn the_planner_resolves_an_alias_to_its_target_once() {
+    let fx = get("ADBE Brightness & Contrast").unwrap().effect();
+    let old = common::instance("ADBE Brightness & Contrast", vec![(2, Value::Float(45.))]);
+    let (target, mapped) = fx.resolve_alias(&old).expect("alias");
+    assert_eq!(target.def().match_name, "ADBE Brightness & Contrast 2");
+    assert_eq!(mapped.effect, "ADBE Brightness & Contrast 2");
+    assert!(mapped.params.contains(&(3, Value::Bool(true))));
+    assert!(
+        get("ADBE Brightness & Contrast 2")
+            .unwrap()
+            .effect()
+            .resolve_alias(&old)
+            .is_none()
+    );
+}

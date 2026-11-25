@@ -48,12 +48,12 @@ fn three_d_views_switch_and_3d_layers_are_seen_through_their_camera() {
         tool_action(&h, ids::SHORTCUT, json!({"slot": slot}));
         assert_eq!(view(&h), v);
     }
-    // Esc in the Composition panel: the previous view; an open menu takes it
-    // first.
+    // Esc, whichever panel has focus (AE): the previous view; an open menu
+    // takes it first.
     assert!(
         crate::tools::bindings()
             .iter()
-            .any(|b| b.action == ids::LAST && b.when.as_deref() == Some("composition"))
+            .any(|b| b.action == ids::LAST && b.when.is_none())
     );
     h.right_click(100.0, 100.0);
     assert!(h.labeled("Composition Settings...").is_some());
