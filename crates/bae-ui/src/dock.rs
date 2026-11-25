@@ -157,6 +157,14 @@ impl Node {
         Node::Frame(Frame::new(tabs))
     }
 
+    /// Every frame of the tree, in order.
+    pub(crate) fn collect_frames<'a>(&'a self, out: &mut Vec<&'a Frame>) {
+        match self {
+            Node::Frame(f) => out.push(f),
+            Node::Split { children, .. } => children.iter().for_each(|c| c.collect_frames(out)),
+        }
+    }
+
     fn frames(&self, out: &mut Vec<FrameId>) {
         match self {
             Node::Frame(f) => out.push(f.id),
@@ -496,6 +504,9 @@ pub struct Dock {
     actions: Vec<Action>,
     next_id: u32,
     id: Id,
+    /// Where closed panels were (frame, tab index, the tabs beside them): AE
+    /// puts a reopened panel back in its place.
+    closed: std::collections::HashMap<PanelId, (FrameId, usize, Vec<PanelId>)>,
 }
 
 impl Dock {
@@ -530,6 +541,7 @@ impl Dock {
             actions: Vec::new(),
             next_id: next,
             id: Id::new("bae-dock"),
+            closed: std::collections::HashMap::new(),
         }
     }
 
@@ -609,6 +621,35 @@ impl Dock {
 
     /// Bring a panel to front, or add it to the focused frame if it is closed.
     pub fn open(&mut self, panel: PanelId) {
+        self.open_near(panel, &[]);
+    }
+
+    /// Open (or bring to front) `panel`. A closed panel goes back where it was
+    /// (its frame, else a frame holding a tab that was beside it), else into
+    /// the frame of the first of `near` that is open, else the focused frame.
+    pub fn open_near(&mut self, panel: PanelId, near: &[PanelId]) {
+        if self.frame_of(&panel).is_none() {
+            let (frame, index) = match self.closed.remove(&panel) {
+                Some((frame, index, beside)) => (
+                    self.layout
+                        .root
+                        .find(frame)
+                        .map(|f| f.id)
+                        .or_else(|| beside.iter().find_map(|b| self.layout.root.frame_of(b))),
+                    Some(index),
+                ),
+                None => (None, None),
+            };
+            let frame = frame.or_else(|| near.iter().find_map(|n| self.layout.root.frame_of(n)));
+            if let Some(f) = frame.and_then(|f| self.layout.root.find_mut(f)) {
+                let i = index.unwrap_or(f.tabs.len()).min(f.tabs.len());
+                f.tabs.insert(i, panel);
+                f.active = i;
+                f.collapsed = false;
+                self.focused = Some(f.id);
+                return;
+            }
+        }
         if let Some(fid) = self.frame_of(&panel) {
             if let Some(f) = self.frame_mut(fid)
                 && let Some(i) = f.tabs.iter().position(|t| *t == panel)
@@ -649,6 +690,16 @@ impl Dock {
     }
 
     pub fn close(&mut self, panel: &PanelId) {
+        if let Some(f) = self
+            .layout
+            .root
+            .frame_of(panel)
+            .and_then(|f| self.layout.root.find(f))
+        {
+            let index = f.tabs.iter().position(|t| t == panel).unwrap_or(0);
+            let beside = f.tabs.iter().filter(|t| *t != panel).cloned().collect();
+            self.closed.insert(panel.clone(), (f.id, index, beside));
+        }
         self.layout.root.take_panel(panel);
         for f in &mut self.layout.floating {
             if let Some(i) = f.frame.tabs.iter().position(|t| t == panel) {
@@ -2106,6 +2157,27 @@ mod tests {
         assert_eq!(dock.frame_of(&"preview".into()), Some(comp));
         assert_eq!(dock.frame(comp).unwrap().tabs.len(), 2);
         assert_eq!(dock.frame_ids().len(), 4);
+    }
+
+    #[test]
+    fn reopened_panels_go_back_where_they_were() {
+        let mut dock = Dock::new(ae_default());
+        let project = dock.frame_of(&"project".into()).unwrap();
+        let focus_elsewhere = dock.frame_of(&"timeline".into()).unwrap();
+        // Effect Controls (2nd tab next to Project) closed, the Timeline focused:
+        // F3 brings it back beside Project, not into the Timeline (AE).
+        dock.close(&"effect_controls".into());
+        dock.focused = Some(focus_elsewhere);
+        dock.open("effect_controls".into());
+        let f = dock.frame(project).unwrap();
+        assert_eq!(f.tabs[f.active], PanelId::from("effect_controls"));
+        assert_eq!(
+            f.tabs.iter().position(|t| t.kind() == "effect_controls"),
+            Some(1)
+        );
+        // A panel never opened goes into the frame of a panel it is placed near.
+        dock.open_near("render_queue".into(), &["timeline".into()]);
+        assert_eq!(dock.frame_of(&"render_queue".into()), Some(focus_elsewhere));
     }
 
     #[test]
