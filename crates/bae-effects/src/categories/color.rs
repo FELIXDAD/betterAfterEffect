@@ -4,10 +4,20 @@ use crate::{effects, rust_builtin};
 use std::sync::Arc;
 
 pub(crate) fn register(registry: &mut Registry) {
+    registry.effects.extend(effects::ocio::entries());
     registry.prewarm.push(effects::color::prewarm);
     packages(
         registry,
         &[
+            embedded!(
+                "color-finishing",
+                [
+                    "shaders/video_limiter.wgsl",
+                    "shaders/cc_toner.wgsl",
+                    "shaders/cc_color_offset.wgsl",
+                    "shaders/cc_kernel.wgsl"
+                ]
+            ),
             embedded!("black-white", ["shaders/black_white.wgsl"]),
             embedded!("brightness-contrast", ["shaders/brightness_contrast.wgsl"]),
             embedded!(

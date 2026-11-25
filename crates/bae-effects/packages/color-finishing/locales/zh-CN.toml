@@ -1,0 +1,64 @@
+[effect.video-limiter]
+name = "视频限幅器"
+keywords = ["视频限幅"]
+
+[effect.video-limiter.params]
+clip_level = "剪辑层级"
+compression_before_clipping = "剪切前压缩"
+gamut_warning = "色域警告"
+gamut_warning_color = "色域警告颜色"
+
+[effect.video-limiter.choices]
+clip_level = ["100 IRE（SMPTE 范围）", "103 IRE", "105 IRE（EBU R103 首选）", "109 IRE（SDI 限制）"]
+compression_before_clipping = ["无", "3%", "5%", "10%", "20%"]
+
+[effect.cc-toner]
+name = "CC Toner"
+keywords = ["色调"]
+
+[effect.cc-toner.params]
+tones = "Tones"
+highlights = "Highlights"
+brights = "Brights"
+midtones = "Midtones"
+darktones = "Darktones"
+shadows = "Shadows"
+blend_w_original = "Blend w. Original"
+
+[effect.cc-toner.choices]
+tones = ["Duotone", "Tritone", "Pentone", "(-", "Solid"]
+
+[effect.cc-color-offset]
+name = "CC Color Offset"
+keywords = ["颜色偏移"]
+
+[effect.cc-color-offset.params]
+red_phase = "Red Phase"
+green_phase = "Green Phase"
+blue_phase = "Blue Phase"
+overflow = "Overflow"
+
+[effect.cc-color-offset.choices]
+overflow = ["Wrap", "Solarize", "Polarize"]
+
+[effect.cc-kernel]
+name = "CC Kernel"
+keywords = ["卷积"]
+
+[effect.cc-kernel.params]
+line_1 = "Line 1"
+coefficient_2 = "1 - L1"
+coefficient_3 = "2 - L1"
+coefficient_4 = "3 - L1"
+line_2 = "Line 2"
+coefficient_7 = "1 - L2"
+coefficient_8 = "2 - L2"
+coefficient_9 = "3 - L2"
+line_3 = "Line 3"
+coefficient_12 = "1 - L3"
+coefficient_13 = "2 - L3"
+coefficient_14 = "3 - L3"
+divider = "Divider"
+absolute_values = "Absolute Values"
+blend_w_original = "Blend w. Original"
+

@@ -41,6 +41,14 @@ impl Embedded {
         let mut source = MemorySource::new(format!("builtin:{PLUGIN_ID}/{}", self.dir))
             .with_file("bae-plugin.toml", self.manifest)
             .with_file(
+                "shaders/tone_ramp.wgsl",
+                include_str!("../shaders/tone_ramp.wgsl"),
+            )
+            .with_file(
+                "shaders/signal_limit.wgsl",
+                include_str!("../shaders/signal_limit.wgsl"),
+            )
+            .with_file(
                 "shaders/channel_math.wgsl",
                 include_str!("../shaders/channel_math.wgsl"),
             )

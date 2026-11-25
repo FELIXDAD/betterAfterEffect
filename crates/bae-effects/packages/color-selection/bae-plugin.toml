@@ -18,6 +18,7 @@ implementation = "wgsl"
 ae_match_names = ["ADBE Broadcast Colors"]
 flags = ["pixel-independent"]
 shader = "shaders/broadcast_colors.wgsl"
+includes = ["shaders/signal_limit.wgsl"]
 
 [[effect.param]]
 id = 1

@@ -34,6 +34,7 @@ pub(crate) fn builtin() -> Builtin {
             Arc::new(ApplyLut {
                 def,
                 cache: Mutex::default(),
+                ocio: None,
             }),
             zh,
         ),
@@ -47,6 +48,7 @@ pub(crate) fn builtin() -> Builtin {
 struct ApplyLut {
     def: EffectDef,
     cache: Mutex<VecDeque<Arc<Prepared>>>,
+    ocio: Option<super::ocio::Operation>,
 }
 
 #[derive(Debug)]
@@ -54,6 +56,7 @@ struct Prepared {
     device: wgpu::Device,
     format: wgpu::TextureFormat,
     data: Vec<u8>,
+    selection: [i64; 4],
     kernel: Arc<Kernel>,
     values: Vec<u8>,
     views: Vec<wgpu::TextureView>,
@@ -64,10 +67,10 @@ impl Prepared {
         gpu: &Arc<GpuContext>,
         format: wgpu::TextureFormat,
         data: &[u8],
+        selection: [i64; 4],
+        transform: bae_color::ColorTransform,
     ) -> Result<Self, RenderError> {
-        let snippet = bae_color::lutfile::from_embedded(data)
-            .map_err(|e| RenderError::Other(e.to_string()))?
-            .to_wgsl("lut");
+        let snippet = transform.to_wgsl("lut");
         let values = snippet.params_bytes();
         let key = KernelKey {
             owner: format!("bae.effects/lut/{}", snippet.key).into(),
@@ -155,11 +158,20 @@ impl Prepared {
             device: gpu.device().clone(),
             format,
             data: data.into(),
+            selection,
             kernel,
             values,
             views,
         })
     }
+}
+
+pub(super) fn ocio_effect(def: EffectDef, op: super::ocio::Operation) -> Arc<dyn TargetEffect> {
+    Arc::new(ApplyLut {
+        def,
+        ocio: Some(op),
+        cache: Mutex::default(),
+    })
 }
 
 impl Effect for ApplyLut {
@@ -184,20 +196,43 @@ impl TargetEffect for ApplyLut {
         input: &GpuImage,
         roi: IRect,
     ) -> Result<GpuImage, RenderError> {
-        let Some(Value::Bytes(data)) = p.value(1) else {
-            return Ok(input.clone());
+        let id = self.ocio.as_ref().map_or(1, |op| op.data_id());
+        let data = match p.value(id) {
+            Some(Value::Bytes(bytes)) => bytes.as_slice(),
+            _ => &[],
         };
-        if data.is_empty() || roi.is_empty() {
+        if roi.is_empty() || data.is_empty() && id != 0 {
             return Ok(input.clone());
         }
+        let selection = self
+            .ocio
+            .as_ref()
+            .map_or([0; 4], |op| op.selection(&self.def, p));
         let lut = {
             let mut cache = self.cache.lock();
             if let Some(entry) = cache.iter().find(|l| {
-                &l.device == target.gpu().device() && l.format == target.format() && l.data == *data
+                &l.device == target.gpu().device()
+                    && l.format == target.format()
+                    && l.data == data
+                    && l.selection == selection
             }) {
                 entry.clone()
             } else {
-                let entry = Arc::new(Prepared::new(target.gpu(), target.format(), data)?);
+                let transform = match &self.ocio {
+                    Some(op) => op.transform(data, selection)?,
+                    None => bae_color::lutfile::from_embedded(data)
+                        .map_err(|e| RenderError::Other(e.to_string()))?,
+                };
+                if transform.is_identity() {
+                    return Ok(input.clone());
+                }
+                let entry = Arc::new(Prepared::new(
+                    target.gpu(),
+                    target.format(),
+                    data,
+                    selection,
+                    transform,
+                )?);
                 // Keep adjacent looks in a stack resident across frames.
                 if cache.len() == 4 {
                     cache.pop_front();

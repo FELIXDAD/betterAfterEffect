@@ -19,6 +19,7 @@ ae_match_names = ["ADBE Tritone"]
 keywords = ["tritone", "tint", "shadows", "midtones", "highlights"]
 flags = ["pixel-independent"]
 shader = "shaders/tritone.wgsl"
+includes = ["shaders/tone_ramp.wgsl"]
 identity_when = "params.blend >= 100"
 
 [[effect.param]]

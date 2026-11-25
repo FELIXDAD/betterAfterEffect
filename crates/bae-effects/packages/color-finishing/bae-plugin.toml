@@ -1,0 +1,288 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "video-limiter"
+name = "Video Limiter"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE DigitalVideoLimiter"]
+shader = "shaders/video_limiter.wgsl"
+includes = ["shaders/signal_limit.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "clip_level"
+type = "popup"
+name = "Clip Level"
+default = 2
+choices = ["100 IRE (SMPTE Range)", "103 IRE", "105 IRE (EBU R103 Preferred)", "109 IRE (SDI Limit)"]
+
+[[effect.param]]
+id = 2
+key = "compression_before_clipping"
+type = "popup"
+name = "Compression Before Clipping"
+default = 1
+choices = ["None", "3%", "5%", "10%", "20%"]
+
+[[effect.param]]
+id = 3
+key = "gamut_warning"
+type = "checkbox"
+name = "Gamut Warning"
+default = false
+
+[[effect.param]]
+id = 4
+key = "gamut_warning_color"
+type = "color"
+name = "Gamut Warning Color"
+default = [0.941176, 0.039216, 0.862745, 1]
+
+[[effect]]
+id = "cc-toner"
+name = "CC Toner"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["CC Toner"]
+shader = "shaders/cc_toner.wgsl"
+includes = ["shaders/tone_ramp.wgsl"]
+
+[[effect.param]]
+id = 5
+key = "tones"
+type = "popup"
+name = "Tones"
+default = 2
+choices = ["Duotone", "Tritone", "Pentone", "(-", "Solid"]
+
+[[effect.param]]
+id = 1
+key = "highlights"
+type = "color"
+name = "Highlights"
+default = [1, 1, 1, 1]
+
+[[effect.param]]
+id = 6
+key = "brights"
+type = "color"
+name = "Brights"
+default = [0.752941, 0.666667, 0.470588, 1]
+
+[[effect.param]]
+id = 2
+key = "midtones"
+type = "color"
+name = "Midtones"
+default = [0.501961, 0.392157, 0.27451, 1]
+
+[[effect.param]]
+id = 7
+key = "darktones"
+type = "color"
+name = "Darktones"
+default = [0.25098, 0.196078, 0.039216, 1]
+
+[[effect.param]]
+id = 3
+key = "shadows"
+type = "color"
+name = "Shadows"
+default = [0, 0, 0, 1]
+
+[[effect.param]]
+id = 4
+key = "blend_w_original"
+type = "float"
+name = "Blend w. Original"
+default = 0
+range = [0, 1]
+
+[[effect]]
+id = "cc-color-offset"
+name = "CC Color Offset"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["CC Color Offset"]
+shader = "shaders/cc_color_offset.wgsl"
+
+[[effect.param]]
+id = 1
+key = "red_phase"
+type = "angle"
+name = "Red Phase"
+default = 0
+
+[[effect.param]]
+id = 2
+key = "green_phase"
+type = "angle"
+name = "Green Phase"
+default = 0
+
+[[effect.param]]
+id = 3
+key = "blue_phase"
+type = "angle"
+name = "Blue Phase"
+default = 0
+
+[[effect.param]]
+id = 4
+key = "overflow"
+type = "popup"
+name = "Overflow"
+default = 2
+choices = ["Wrap", "Solarize", "Polarize"]
+
+[[effect]]
+id = "cc-kernel"
+name = "CC Kernel"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["CS Kernel"]
+shader = "shaders/cc_kernel.wgsl"
+
+[effect.roi]
+read = "1"
+
+[[effect.pass]]
+entry = "cc_kernel"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 1
+key = "line_1"
+type = "group"
+name = "Line 1"
+end_id = 5
+
+[[effect.param]]
+id = 2
+key = "coefficient_2"
+type = "float"
+name = "1 - L1"
+group = "line_1"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 3
+key = "coefficient_3"
+type = "float"
+name = "2 - L1"
+group = "line_1"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 4
+key = "coefficient_4"
+type = "float"
+name = "3 - L1"
+group = "line_1"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 6
+key = "line_2"
+type = "group"
+name = "Line 2"
+end_id = 10
+
+[[effect.param]]
+id = 7
+key = "coefficient_7"
+type = "float"
+name = "1 - L2"
+group = "line_2"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 8
+key = "coefficient_8"
+type = "float"
+name = "2 - L2"
+group = "line_2"
+default = 1
+range = [-100, 100]
+
+[[effect.param]]
+id = 9
+key = "coefficient_9"
+type = "float"
+name = "3 - L2"
+group = "line_2"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 11
+key = "line_3"
+type = "group"
+name = "Line 3"
+end_id = 15
+
+[[effect.param]]
+id = 12
+key = "coefficient_12"
+type = "float"
+name = "1 - L3"
+group = "line_3"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 13
+key = "coefficient_13"
+type = "float"
+name = "2 - L3"
+group = "line_3"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 14
+key = "coefficient_14"
+type = "float"
+name = "3 - L3"
+group = "line_3"
+default = 0
+range = [-100, 100]
+
+[[effect.param]]
+id = 16
+key = "divider"
+type = "float"
+name = "Divider"
+default = 1
+range = [0.01, 10000]
+
+[[effect.param]]
+id = 17
+key = "absolute_values"
+type = "checkbox"
+name = "Absolute Values"
+default = false
+
+[[effect.param]]
+id = 18
+key = "blend_w_original"
+type = "float"
+name = "Blend w. Original"
+default = 0
+range = [0, 100]
+
