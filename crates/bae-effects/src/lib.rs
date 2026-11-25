@@ -160,7 +160,7 @@ impl Effect for Forward {
         input: &GpuImage,
         output_roi: IRect,
     ) -> Result<GpuImage, RenderError> {
-        self.0.encode(ctx, params, input, output_roi)
+        target::encode_in_render_pixels(&*self.0, ctx, params, input, output_roi)
     }
 }
 

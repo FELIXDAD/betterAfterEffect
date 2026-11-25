@@ -223,6 +223,10 @@ impl Effect for Temporal {
 }
 
 impl TargetEffect for Temporal {
+    fn space_pixels(&self) -> bool {
+        true
+    }
+
     fn encode(
         &self,
         target: &mut dyn EffectTarget,

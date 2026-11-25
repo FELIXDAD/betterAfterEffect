@@ -90,6 +90,10 @@ impl Effect for SetMatte {
 }
 
 impl TargetEffect for SetMatte {
+    fn space_pixels(&self) -> bool {
+        true
+    }
+
     fn encode(
         &self,
         target: &mut dyn EffectTarget,

@@ -116,6 +116,10 @@ impl Effect for Compound {
 }
 
 impl TargetEffect for Compound {
+    fn space_pixels(&self) -> bool {
+        true
+    }
+
     fn encode(
         &self,
         target: &mut dyn EffectTarget,

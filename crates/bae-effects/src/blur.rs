@@ -358,7 +358,7 @@ pub(crate) fn half_level(
         output,
         read: r,
     }
-    .encode_steps(target, input, true)
+    .encode_steps(target, input)
 }
 
 fn plan_direct(input: IRect, sigma: [f64; 2], clamp: bool, output: IRect) -> Plan {
@@ -520,7 +520,7 @@ impl Plan {
         target: &mut dyn EffectTarget,
         input: &GpuImage,
     ) -> Result<GpuImage, RenderError> {
-        self.encode_steps(target, input, false)
+        self.encode_steps(target, input)
     }
 
     /// Encodes in the input texel grid and leaves the final bilinear upsample
@@ -533,13 +533,13 @@ impl Plan {
     ) -> Result<GpuImage, RenderError> {
         let last = self.steps.last().unwrap();
         if last.entry != "upsample" || last.factor[0] != last.factor[1] {
-            return self.encode_steps(target, input, true);
+            return self.encode_steps(target, input);
         }
         let step = self.steps.pop().unwrap();
         self.images.pop();
         self.output = step.src_rect;
         self.steps.last_mut().unwrap().dst = None;
-        let mut image = self.encode_steps(target, input, true)?;
+        let mut image = self.encode_steps(target, input)?;
         let [x, y] = step.base;
         let factor = step.factor[0];
         image.rect = IRect::new(
@@ -556,14 +556,16 @@ impl Plan {
         &self,
         target: &mut dyn EffectTarget,
         input: &GpuImage,
-        texel_grid: bool,
     ) -> Result<GpuImage, RenderError> {
         let rt = gpu::runtime(target.gpu());
         let format = target.format();
         let scale = input.pixel_scale;
+        // Intermediate rects are already in level texels: one texel each
+        // (a pixel scale of `k` would allocate 1/k of the texels and leave the
+        // rest of the level unwritten).
         let mut images = Vec::with_capacity(self.images.len());
-        for (rect, k) in &self.images {
-            images.push(target.allocate(*rect, if texel_grid { 1. } else { scale * k })?);
+        for (rect, _) in &self.images {
+            images.push(target.allocate(*rect, 1.0)?);
         }
         let output = target.allocate(self.output, scale)?;
         let mut prepared = Vec::with_capacity(self.steps.len());

@@ -70,10 +70,119 @@ impl EffectTarget for EncodeContext<'_> {
     }
 }
 
+/// The renderer's images cover *space* pixels (`rect`) at `pixel_scale`
+/// pixels per texel, while built-in effects work in *render* pixels (the
+/// request scale: `output_roi`, `output_bounds`, σ × `params.scale`). This
+/// runs `effect` with its input and the layer / mask images it requested
+/// expressed in render pixels (rect ÷ pixel scale, scale 1) and maps the result
+/// back, so reduced resolutions and lower-density layers place it right.
+pub(crate) fn encode_in_render_pixels(
+    effect: &dyn TargetEffect,
+    ctx: &mut EncodeContext<'_>,
+    params: &EffectParams<'_>,
+    input: &GpuImage,
+    output_roi: IRect,
+) -> Result<GpuImage, RenderError> {
+    let s = input.pixel_scale;
+    if s == 1.0 || effect.space_pixels() {
+        return effect.encode(ctx, params, input, output_roi);
+    }
+    let local = |image: &GpuImage| {
+        let mut out = image.clone();
+        let k = image.pixel_scale;
+        let [w, h] = image.texel_size();
+        let x0 = (f64::from(image.rect.x0) / k).round() as i32;
+        let y0 = (f64::from(image.rect.y0) / k).round() as i32;
+        out.rect = IRect::new(x0, y0, x0 + w as i32, y0 + h as i32);
+        out.pixel_scale = 1.0;
+        out
+    };
+    let layers = effect
+        .layer_dependencies(params)
+        .into_iter()
+        .filter_map(|d| {
+            let image = ctx.effect_layer(&d).map(local)?;
+            Some((d, image))
+        })
+        .collect();
+    let masks = effect
+        .mask_dependencies(params)
+        .into_iter()
+        .filter_map(|m| {
+            let image = ctx.effect_mask(&m).map(local)?;
+            Some((m, image))
+        })
+        .collect();
+    let mut target = RenderPixels { ctx, layers, masks };
+    let mut out = effect.encode(&mut target, params, &local(input), output_roi)?;
+    let px = |v: i32| (f64::from(v) * s).round() as i32;
+    out.rect = IRect::new(
+        px(out.rect.x0),
+        px(out.rect.y0),
+        px(out.rect.x1),
+        px(out.rect.y1),
+    );
+    out.pixel_scale *= s;
+    Ok(out)
+}
+
+/// The renderer's context with the requested inputs in render pixels.
+struct RenderPixels<'c, 'a> {
+    ctx: &'c mut EncodeContext<'a>,
+    layers: Vec<(LayerDependency, GpuImage)>,
+    masks: Vec<(MaskSelect, GpuImage)>,
+}
+
+impl EffectTarget for RenderPixels<'_, '_> {
+    fn gpu(&self) -> &Arc<GpuContext> {
+        self.ctx.gpu
+    }
+
+    fn format(&self) -> wgpu::TextureFormat {
+        self.ctx.format
+    }
+
+    fn encoder(&mut self) -> &mut wgpu::CommandEncoder {
+        self.ctx.encoder
+    }
+
+    fn effect_input(&self, layer: &PrimPath) -> Option<&GpuImage> {
+        self.layers
+            .iter()
+            .find(|(d, _)| d.layer == *layer)
+            .map(|(_, image)| image)
+    }
+
+    fn effect_layer(&self, dependency: &LayerDependency) -> Option<&GpuImage> {
+        self.layers
+            .iter()
+            .find(|(d, _)| d == dependency)
+            .map(|(_, image)| image)
+    }
+
+    fn effect_mask(&self, select: &MaskSelect) -> Option<&GpuImage> {
+        self.masks
+            .iter()
+            .find(|(m, _)| m == select)
+            .map(|(_, image)| image)
+    }
+
+    fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError> {
+        self.ctx.allocate(rect, pixel_scale)
+    }
+}
+
 /// An effect that can encode into any [`EffectTarget`]. Every built-in effect
 /// and [`crate::DeclarativeEffect`] implements it; `bae_render::Effect::render`
 /// forwards here.
 pub trait TargetEffect: bae_render::Effect {
+    /// The effect maps the renderer's space-pixel images itself
+    /// (`image_grid`); otherwise it works in render pixels and
+    /// [`encode_in_render_pixels`] converts for it.
+    fn space_pixels(&self) -> bool {
+        false
+    }
+
     /// Same contract as `bae_render::Effect::render`.
     fn encode(
         &self,

@@ -276,6 +276,10 @@ impl Effect for Morphology {
 }
 
 impl TargetEffect for Morphology {
+    fn space_pixels(&self) -> bool {
+        true
+    }
+
     fn encode(
         &self,
         target: &mut dyn EffectTarget,
