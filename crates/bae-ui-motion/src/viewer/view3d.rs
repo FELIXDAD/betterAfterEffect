@@ -284,6 +284,11 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>) -> bool {
     let Some(comp) = s.active_comp.clone() else {
         return true;
     };
+    // Esc first cancels the Timeline's open keyframe dialog (its own Esc).
+    if inv.id == ids::LAST && s.key_dialog.is_some() {
+        s.key_dialog = None;
+        return true;
+    }
     let shortcuts = s.view_shortcuts;
     let views = s.views3d.entry(comp.clone()).or_default();
     match inv.id.as_str() {
