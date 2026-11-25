@@ -479,7 +479,7 @@ impl TimelinePanel {
             });
             if let Some(r) = s.reveal.get(layer) {
                 if matches!(r, Reveal::Attrs(attrs) if attrs.iter().any(|a| a == "audio:waveform"))
-                    && crate::audio::layer_file(stage, layer).is_some()
+                    && bae_media::audio::layer_file(stage, layer).is_some()
                 {
                     out.push(Row {
                         kind: RowKind::Waveform,

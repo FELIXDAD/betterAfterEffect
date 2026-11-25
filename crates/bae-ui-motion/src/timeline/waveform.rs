@@ -119,10 +119,10 @@ impl Waveforms {
         axis: &TimeAxis,
         rect: Rect,
     ) {
-        let Some(file) = crate::audio::layer_file(stage, layer) else {
+        let Some(file) = bae_media::audio::layer_file(stage, layer) else {
             return;
         };
-        let levels = self.levels(ui.ctx(), file, Instant::now());
+        let levels = self.levels(ui.ctx(), file.to_owned(), Instant::now());
         let Some(fine) = levels.first() else { return };
         let timing = query::layer_timing(stage, layer);
         let start = rect

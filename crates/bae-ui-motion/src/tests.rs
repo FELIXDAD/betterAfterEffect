@@ -1848,7 +1848,7 @@ fn double_l_reveals_the_imported_audio_layer_waveform() {
     )
     .unwrap();
     assert_eq!(
-        crate::audio::layer_file(&h.stage, &layer)
+        bae_media::audio::layer_file(&h.stage, &layer)
             .unwrap()
             .canonicalize()
             .unwrap(),

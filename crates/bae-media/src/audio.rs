@@ -14,6 +14,21 @@ use crate::meta::AudioInfo;
 use crate::source::MediaError;
 use crate::time::Time;
 
+/// Return the file of an audio-bearing layer without cloning its asset data or opening it.
+pub fn layer_file<'a>(
+    stage: &'a bae_model::Stage,
+    layer: &bae_model::PrimPath,
+) -> Option<&'a std::path::Path> {
+    let source = stage.prim(layer)?.value("source")?.as_prim_ref()?;
+    let asset = stage.prim(source)?;
+    if !asset.value("has_audio")?.as_bool()? {
+        return None;
+    }
+    Some(std::path::Path::new(
+        asset.value("file:original")?.as_str()?,
+    ))
+}
+
 /// Decoded audio: interleaved 32-bit float samples in `-1..=1`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AudioBuffer {

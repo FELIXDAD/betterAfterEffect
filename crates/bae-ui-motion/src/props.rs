@@ -262,7 +262,7 @@ pub(crate) fn layer_tree(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
             children: effects,
         });
     }
-    if crate::audio::layer_file(stage, layer).is_some() {
+    if bae_media::audio::layer_file(stage, layer).is_some() {
         out.push(Node::Group {
             id: format!("{layer}#audio"),
             label: tr("Audio").to_owned(),
