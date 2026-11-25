@@ -719,8 +719,12 @@ impl Panel for TimelinePanel {
                     Sense::click_and_drag(),
                 )
                 .labeled(egui::WidgetType::Other, tr("Time Graph"));
+            // From where the button went down, not where the drag was recognised
+            // (a few points later), or a tight marquee misses keys there (#551).
             if bg.drag_started_by(egui::PointerButton::Primary)
-                && let Some(p) = bg.interact_pointer_pos()
+                && let Some(p) = ui
+                    .input(|i| i.pointer.press_origin())
+                    .or_else(|| bg.interact_pointer_pos())
             {
                 self.drag = Some(Drag::Marquee {
                     origin: p,

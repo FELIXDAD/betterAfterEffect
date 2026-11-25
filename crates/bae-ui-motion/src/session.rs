@@ -74,6 +74,10 @@ pub enum Pending {
         /// Their effects before the command.
         before: Vec<PrimPath>,
     },
+    /// Keep these keys selected although they do not exist yet: the selection
+    /// already names where a queued command (a keyframe drag) puts them, and
+    /// panels drawn before it runs must not drop them (#551).
+    Keys(Vec<KeyRef>),
 }
 
 #[derive(Debug, Default)]
@@ -281,6 +285,16 @@ impl Session {
     pub fn sync(&mut self, stage: &Stage) {
         let pending = std::mem::take(&mut self.pending);
         for (what, age) in pending {
+            if let Pending::Keys(keys) = &what {
+                let landed = keys.iter().all(|k| {
+                    query::attr_spec(stage, &k.path, &k.attr)
+                        .is_some_and(|s| s.keyframes.contains_key(&k.time))
+                });
+                if !landed && age < PENDING_FRAMES {
+                    self.pending.push((what, age + 1));
+                }
+                continue;
+            }
             if let Pending::NewEffects { layers, before } = &what {
                 let added: Vec<PrimPath> = layers
                     .iter()
@@ -309,7 +323,7 @@ impl Session {
             }
             let path = match &what {
                 Pending::Comp(p) | Pending::Layer(p) => p,
-                Pending::NewLayers { .. } | Pending::NewEffects { .. } => {
+                Pending::NewLayers { .. } | Pending::NewEffects { .. } | Pending::Keys(_) => {
                     unreachable!("handled above")
                 }
             };
@@ -323,7 +337,7 @@ impl Session {
                         self.selected_layers = vec![l];
                         self.selected_keys.clear();
                     }
-                    Pending::NewLayers { .. } | Pending::NewEffects { .. } => {}
+                    Pending::NewLayers { .. } | Pending::NewEffects { .. } | Pending::Keys(_) => {}
                 }
             } else if age < PENDING_FRAMES {
                 self.pending.push((what, age + 1));
@@ -335,7 +349,7 @@ impl Session {
             .iter()
             .filter_map(|(w, _)| match w {
                 Pending::Comp(p) | Pending::Layer(p) => Some(p.clone()),
-                Pending::NewLayers { .. } | Pending::NewEffects { .. } => None,
+                Pending::NewLayers { .. } | Pending::NewEffects { .. } | Pending::Keys(_) => None,
             })
             .collect();
         self.reserved
@@ -354,10 +368,24 @@ impl Session {
         self.selected_layers
             .retain(|l| stage.has_prim(l) && !query::is_locked(stage, l));
         self.selected_items.retain(|l| stage.has_prim(l));
-        self.selected_keys.retain(|k| {
-            query::attr_spec(stage, &k.path, &k.attr)
-                .is_some_and(|s| s.keyframes.contains_key(&k.time))
-        });
+        let expected: Vec<&KeyRef> = self
+            .pending
+            .iter()
+            .filter_map(|(w, _)| match w {
+                Pending::Keys(keys) => Some(keys.iter()),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        let selected = std::mem::take(&mut self.selected_keys);
+        self.selected_keys = selected
+            .into_iter()
+            .filter(|k| {
+                expected.contains(&k)
+                    || query::attr_spec(stage, &k.path, &k.attr)
+                        .is_some_and(|s| s.keyframes.contains_key(&k.time))
+            })
+            .collect();
         self.reveal.retain(|l, _| stage.has_prim(l));
         self.selected_props
             .retain(|(p, _)| stage.has_prim(p) && query::locked_layer_of(stage, p).is_none());

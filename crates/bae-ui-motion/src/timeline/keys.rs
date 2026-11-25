@@ -389,6 +389,8 @@ impl TimelinePanel {
                 .map(|k| KeyRef::new(k.path.clone(), k.attr.clone(), k.time + kd))
                 .collect()
         };
-        session.lock().selected_keys = moved;
+        let mut s = session.lock();
+        s.expect(crate::session::Pending::Keys(moved.clone()));
+        s.selected_keys = moved;
     }
 }
