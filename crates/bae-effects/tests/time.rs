@@ -191,3 +191,97 @@ fn scene_detection_stops_at_a_cut_in_both_directions() {
         assert!(delta(&gated) <= 1, "{name} excludes the other scene");
     }
 }
+
+#[test]
+fn wide_time_averages_frames_and_time_difference_compares_them() {
+    let Some(mut r) = renderer() else { return };
+    // Red before 1 s, blue from then on.
+    let scene = |match_name: &'static str, params: Vec<(u32, Value)>| {
+        move |time: Time| {
+            let mut comp = RenderComp::new(path("/comps/main"), 16, 8);
+            comp.time = time;
+            let color = if time.as_seconds() < 0.99 {
+                [1., 0., 0., 1.]
+            } else {
+                [0., 0., 1., 1.]
+            };
+            let mut layer = solid(CLIP, 16, color);
+            layer.time = time;
+            layer
+                .effects
+                .push(effect("time", match_name, params.clone()));
+            comp.layers.push(layer);
+            comp
+        }
+    };
+    // One frame back (red), now and one frame on (blue), a third each.
+    let wide = pixels(&mut r, scene("CC Wide Time", Vec::new()), 1.);
+    let near = |a: &[u8], b: [u8; 4]| a.iter().zip(b).all(|(a, b)| a.abs_diff(b) <= 2);
+    assert!(near(&wide[..4], [85, 0, 170, 255]), "{:?}", &wide[..4]);
+    // Blue now against red one frame earlier: 50 % grey ± the difference.
+    let difference = pixels(
+        &mut r,
+        scene("ADBE Difference", vec![(2, Value::Float(-1. / 30.))]),
+        1.,
+    );
+    assert!(
+        near(&difference[..4], [0, 128, 255, 255]),
+        "{:?}",
+        &difference[..4]
+    );
+}
+
+/// A white 8 × 8 square on black moving 8 px right per frame (x = 4 at
+/// frame 0), inside a pre-comp layer carrying `effect`.
+fn moving_square(effect: RenderEffect) -> impl Fn(Time) -> RenderComp {
+    move |time: Time| {
+        let frame = (time.as_seconds() * 30.).round();
+        let mut inner = RenderComp::new(path("/comps/inner"), 48, 8);
+        inner.time = time;
+        let mut square = solid("/comps/inner/layers/square", 8, [1.; 4]);
+        square.transform = glam::DAffine2::from_translation(glam::DVec2::new(4. + 8. * frame, 0.));
+        inner.layers = vec![
+            square,
+            solid("/comps/inner/layers/bg", 48, [0., 0., 0., 1.]),
+        ];
+        let mut comp = RenderComp::new(path("/comps/main"), 48, 8);
+        comp.time = time;
+        let mut layer = RenderLayer::new(path(CLIP), LayerContent::Comp(Arc::new(inner)));
+        layer.time = time;
+        layer.effects.push(effect.clone());
+        comp.layers.push(layer);
+        comp
+    }
+}
+
+#[test]
+fn pixel_motion_tweens_and_blurs_along_the_optical_flow() {
+    let Some(mut r) = renderer() else { return };
+    let red = |image: &[u8], x: usize| image[(4 * 48 + x) * 4];
+    // Timewarp at 50 % shows source frame 0.5 at comp frame 1: Pixel Motion
+    // puts the square half way ([8, 16)); Frame Mix leaves two half images.
+    let tween = |method: i64| {
+        effect(
+            "warp",
+            "ADBE Timewarp",
+            vec![(1, Value::Int(method)), (6, Value::Float(100.))],
+        )
+    };
+    let motion = pixels(&mut r, moving_square(tween(3)), 1. / 30.);
+    assert!(red(&motion, 14) > 200 && red(&motion, 6) < 55, "{motion:?}");
+    let mix = pixels(&mut r, moving_square(tween(2)), 1. / 30.);
+    assert!(red(&mix, 14).abs_diff(128) < 10, "{mix:?}");
+    // Pixel Motion Blur at 180°: ±2 px of the 8 px motion, smeared outwards
+    // past the square's edges; its middle and the far background stay.
+    let blur = pixels(
+        &mut r,
+        moving_square(effect(
+            "blur",
+            "ADBE OFMotionBlur",
+            vec![(4, Value::Float(100.))],
+        )),
+        1. / 30.,
+    );
+    assert!((20..235).contains(&red(&blur, 11)), "{blur:?}");
+    assert!(red(&blur, 16) > 240 && red(&blur, 2) < 15, "{blur:?}");
+}
