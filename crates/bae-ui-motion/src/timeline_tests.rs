@@ -2094,6 +2094,32 @@ fn outline_follows_ae_metrics() {
     assert_eq!(tl.last_bars.len(), rows);
 }
 
+#[test]
+fn double_clicking_a_layer_bar_opens_it_in_the_layer_panel() {
+    let mut h = H::new();
+    let layer = h.layer.clone();
+    let mut tl = h.bars();
+    let at = bar_rect(&tl, &layer).center();
+    h.click(&mut tl, at, Modifiers::NONE);
+    let r = h.click(&mut tl, at, Modifiers::NONE);
+    assert!(r.open.iter().any(|p| p.kind() == "layer"), "{:?}", r.open);
+    assert_eq!(h.session().lock().layer_panel.as_ref(), Some(&layer));
+    // The panel shows the layer alone, at its own size, from the origin.
+    let comp = bae_anim::evaluate_comp(&h.stage, &h.comp, Time::ZERO).unwrap();
+    let (one, min) = crate::layer_panel::alone(&comp, &layer, 0).unwrap();
+    let l = &one.layers[0];
+    assert_eq!(one.layers.len(), 1);
+    let (a, b) = crate::render::layer_bounds(l).unwrap();
+    assert_eq!(
+        l.world_matrix.transform_point3(a.extend(0.0)).truncate(),
+        a - min
+    );
+    assert_eq!(
+        (f64::from(one.width), f64::from(one.height)),
+        ((b - a).x.ceil(), (b - a).y.ceil())
+    );
+}
+
 /// F4: the Modes column instead of Switches (AE starts with Switches).
 fn show_modes(h: &mut H, tl: &mut TimelinePanel) {
     h.action(
