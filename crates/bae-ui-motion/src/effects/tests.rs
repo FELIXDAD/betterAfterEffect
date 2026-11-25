@@ -51,8 +51,10 @@ impl Fx {
             .output
     }
 
+    /// Runs the model commands of `r` (shell actions such as bringing Effect
+    /// Controls to the front are the workbench's).
     fn exec_all(&mut self, r: PanelRequests) {
-        for inv in r.invocations {
+        for inv in commands(r) {
             self.run(&inv.id, inv.params);
         }
     }
@@ -156,6 +158,14 @@ fn menu_follows_the_effect_registry() {
     assert!(!greyed.1.is_enabled(&cx));
 }
 
+/// The model commands among `r`'s invocations.
+fn commands(r: PanelRequests) -> Vec<Invocation> {
+    r.invocations
+        .into_iter()
+        .filter(|i| i.id != bae_ui::action::ids::OPEN_PANEL)
+        .collect()
+}
+
 #[test]
 fn apply_last_effect_and_remove_all() {
     let mut fx = Fx::new();
@@ -164,7 +174,20 @@ fn apply_last_effect_and_remove_all() {
         APPLY,
         json!({"match_name": "ADBE Tint"}),
     ));
-    assert_eq!(r.invocations.len(), 1, "one undo step");
+    // One undo step; AE also brings Effect Controls to the front.
+    assert!(
+        r.invocations
+            .iter()
+            .any(|i| i.id == bae_ui::action::ids::OPEN_PANEL && i.id_param() == Some("effect_controls"))
+    );
+    assert_eq!(
+        r.invocations
+            .iter()
+            .filter(|i| i.id != bae_ui::action::ids::OPEN_PANEL)
+            .count(),
+        1,
+        "one undo step"
+    );
     fx.exec_all(r);
     let r = fx.handle(Invocation::new(LAST_EFFECT));
     fx.exec_all(r);
