@@ -11,6 +11,7 @@ use serde_json::json;
 use crate::session::SharedSession;
 use crate::{CompositionViewer, ProjectPanel, TimelinePanel};
 
+mod layer_panel;
 mod playback_4k;
 
 struct Harness {
