@@ -2,7 +2,7 @@
 //! layers (a rectangle or a star with a fill), each spinning through the
 //! expression `time*1000`, played through the viewer's GPU preview path:
 //! `bae_anim::Evaluator` (expressions) → `AnimEvaluator::convert` →
-//! `Renderer::render_frame_with` + `output_texture`.
+//! `Renderer::render_frame_output` (frame + 8-bit conversion, one submit).
 //!
 //! Prints the time per frame of each stage and the sustained frame rate with
 //! the GPU included. `cargo bench -p bae-vector --bench shapes [-- <layers>…]`
@@ -216,12 +216,9 @@ fn bench(gpu: &Arc<GpuContext>, layers: usize, frames: usize) {
             stage: &stage,
             evaluator: &mut anim,
         };
-        let out = renderer
-            .render_frame_with(&rc, &request, Some(&mut frames))
+        let (out, _texture) = renderer
+            .render_frame_output(&rc, &request, Some(&mut frames), OutputAlpha::Premultiplied)
             .expect("render");
-        renderer
-            .output_texture(&out, OutputAlpha::Premultiplied)
-            .expect("output");
         times.render += t.elapsed();
         times.build += out.stats.build;
         times.encode += out.stats.encode;

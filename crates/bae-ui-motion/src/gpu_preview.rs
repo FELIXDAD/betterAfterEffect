@@ -179,21 +179,14 @@ impl GpuPreview {
                 stage,
                 evaluator: &mut self.anim,
             };
-            let frame = match self
-                .renderer
-                .render_frame_with(&rc, &request, Some(&mut frames))
-            {
+            // The frame and its 8-bit conversion in one GPU submission.
+            let (frame, texture) = match self.renderer.render_frame_output(
+                &rc,
+                &request,
+                Some(&mut frames),
+                OutputAlpha::Premultiplied,
+            ) {
                 Ok(f) => f,
-                Err(e) => {
-                    tracing_warn(&format!("preview: {e}"));
-                    return None;
-                }
-            };
-            let texture = match self
-                .renderer
-                .output_texture(&frame, OutputAlpha::Premultiplied)
-            {
-                Ok(t) => t,
                 Err(e) => {
                     tracing_warn(&format!("preview: {e}"));
                     return None;
