@@ -21,6 +21,7 @@ macro_rules! embedded {
     };
 }
 
+pub(super) mod audio;
 pub(super) mod blur_sharpen;
 pub(super) mod channel;
 pub(super) mod color;

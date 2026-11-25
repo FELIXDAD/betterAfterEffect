@@ -1,5 +1,5 @@
 //! Audio effects expose their controls in the effect stack; bae-media processes PCM.
-use crate::{Builtin, catalog::DefBuilder, effects::controls::Control, rust_builtin};
+use crate::{Builtin, catalog::DefBuilder, categories::controls::Control, rust_builtin};
 use std::sync::Arc;
 
 fn audio_control(slug: &str, zh: &str, builder: DefBuilder, static_params: &[u32]) -> Builtin {

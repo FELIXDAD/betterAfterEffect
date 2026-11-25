@@ -2,7 +2,6 @@
 //! the ones whose pass structure depends on parameters (blur pyramids,
 //! iterations) or that need resources declarative effects cannot declare.
 
-pub(crate) mod audio;
 pub mod blur;
 pub(crate) mod image_grid;
 pub(crate) mod layer_input;
