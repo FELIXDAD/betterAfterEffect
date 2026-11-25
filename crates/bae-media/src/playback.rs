@@ -305,5 +305,20 @@ mod tests {
         assert_eq!(monitor.clock.heard(2, 2_500_000, 1000), 0);
         assert_eq!(monitor.clock.heard(2, 4_000_000, 1000), 1);
         assert_eq!(monitor.clock.heard(2, 8_000_000, 1000), 3);
+
+        // The master fader changes the actual samples. Meters see each peak before clipping.
+        monitor.gain.store(2.0_f32.to_bits(), Ordering::Relaxed);
+        let mut chunk = writer.write_chunk(1).unwrap();
+        let block = &mut chunk.as_mut_slices().0[0];
+        block.epoch = 2;
+        block.len = 1;
+        block.samples[0] = [-0.75, 0.25];
+        chunk.commit_all();
+        let mut stereo = [0.0; 2];
+        sink.pull(&mut stereo, 2, 9_000_000);
+        assert_eq!(stereo, [-1.0, 0.5]);
+        let bits = monitor.peaks.load(Ordering::Relaxed);
+        assert_eq!(f32::from_bits(bits as u32), 1.5);
+        assert_eq!(f32::from_bits((bits >> 32) as u32), 0.5);
     }
 }
