@@ -209,6 +209,15 @@ impl Values {
         })
     }
 
+    /// Change the frame rate; drop-frame timecode only exists at 29.97 and
+    /// 59.94 fps, so other rates switch it off (AE locks Non-Drop Frame).
+    fn set_fps(&mut self, fps: f64) {
+        self.fps = fps;
+        if !fields::supports_drop_frame(fps) {
+            self.drop_frame = false;
+        }
+    }
+
     fn frames(&self, t: Time) -> i64 {
         (t.as_seconds() * self.fps).round() as i64
     }
@@ -225,6 +234,40 @@ impl Values {
 pub struct CompSettingsMemory {
     pub values: Option<Values>,
     pub lock_aspect: bool,
+    /// Presets saved with Save Custom Preset, in the order saved.
+    pub presets: Vec<UserPreset>,
+}
+
+/// A preset saved with Save Custom Preset (AE keeps them in its preferences).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct UserPreset {
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    pub pixel_aspect: f64,
+    pub fps: f64,
+}
+
+impl Default for UserPreset {
+    fn default() -> Self {
+        UserPreset {
+            name: String::new(),
+            width: 1920,
+            height: 1080,
+            pixel_aspect: 1.0,
+            fps: 30.0,
+        }
+    }
+}
+
+impl UserPreset {
+    fn matches(&self, v: &Values) -> bool {
+        self.width == v.width
+            && self.height == v.height
+            && (self.pixel_aspect - v.pixel_aspect).abs() < 1e-3
+            && (self.fps - v.fps).abs() < 1e-3
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -254,6 +297,14 @@ pub struct CompSettings {
     preview: bool,
     /// The name field got its initial focus (AE opens with the name selected).
     name_focused: bool,
+    /// Saved custom presets (written to the dialog memory when they change).
+    presets: Vec<UserPreset>,
+    presets_changed: bool,
+    /// The open Choose Name dialog of Save Custom Preset: the typed name and
+    /// whether its field got the initial focus.
+    naming: Option<(String, bool)>,
+    /// The open Custom Resolution dialog: horizontal and vertical steps.
+    custom_resolution: Option<[f64; 2]>,
 }
 
 impl CompSettings {
@@ -277,11 +328,19 @@ impl CompSettings {
             fps_text: None,
             preview: false,
             name_focused: false,
+            presets: memory.presets.clone(),
+            presets_changed: false,
+            naming: None,
+            custom_resolution: None,
         }
     }
 
     /// Composition Settings of an existing comp.
-    pub(crate) fn edit(stage: &Stage, comp: &PrimPath) -> Option<Self> {
+    pub(crate) fn edit(
+        stage: &Stage,
+        comp: &PrimPath,
+        memory: &CompSettingsMemory,
+    ) -> Option<Self> {
         let info = query::comp_info(stage, comp)?;
         let values = Values::of(stage, &info);
         let aspect = f64::from(values.width) / f64::from(values.height);
@@ -300,6 +359,10 @@ impl CompSettings {
             fps_text: None,
             preview: true,
             name_focused: false,
+            presets: memory.presets.clone(),
+            presets_changed: false,
+            naming: None,
+            custom_resolution: None,
         })
     }
 
@@ -317,6 +380,11 @@ impl CompSettings {
     ) -> bool {
         let id = Id::new("bae-ui-motion.comp-settings");
         let shown = dialog::window(ctx, id, tr("Composition Settings"), |ui| self.body(ui, id));
+        if std::mem::take(&mut self.presets_changed) {
+            let mut d = dialogs.lock();
+            d.comp.presets = self.presets.clone();
+            super::memory::save(&d);
+        }
         let outcome = match shown {
             Some(o) => o,
             None if dialog::closed_by_title_bar(ctx, id) => Outcome::Cancel,
@@ -421,6 +489,9 @@ impl CompSettings {
                     _ => self.renderer(ui),
                 }
             });
+        // Sub-dialogs first: they take Enter and Esc before this dialog.
+        self.choose_name(ui.ctx(), id);
+        self.custom_resolution(ui.ctx(), id);
         let mut out = Outcome::None;
         ui.horizontal(|ui| {
             // Live preview of edits is not implemented yet: shown like AE, off.
@@ -434,33 +505,143 @@ impl CompSettings {
         out
     }
 
+    /// Save Custom Preset's Choose Name dialog: OK saves the current size,
+    /// pixel aspect ratio and frame rate under the name (replacing a saved
+    /// preset of that name).
+    fn choose_name(&mut self, ctx: &egui::Context, id: Id) {
+        let Some((name, focused)) = &mut self.naming else {
+            return;
+        };
+        let sub = id.with("choose-name");
+        let shown = dialog::window(ctx, sub, tr("Choose Name"), |ui| {
+            ui.set_width(320.0);
+            ui.horizontal(|ui| {
+                ui.label(tr("Name:"));
+                fields::name_field(ui, sub.with("name"), name, 240.0, tr("Name"), focused);
+            });
+            ui.add_space(6.0);
+            dialog::buttons(ui, !name.trim().is_empty())
+        });
+        match shown {
+            Some(Outcome::Ok) => {
+                let name = name.trim().to_owned();
+                let v = &self.values;
+                let preset = UserPreset {
+                    name,
+                    width: v.width,
+                    height: v.height,
+                    pixel_aspect: v.pixel_aspect,
+                    fps: v.fps,
+                };
+                self.presets.retain(|p| p.name != preset.name);
+                self.presets.push(preset);
+                self.presets_changed = true;
+                self.naming = None;
+            }
+            Some(Outcome::Cancel) => self.naming = None,
+            None if dialog::closed_by_title_bar(ctx, sub) => self.naming = None,
+            _ => {}
+        }
+    }
+
+    /// Resolution ▸ Custom...: render every Nth pixel across and down.
+    fn custom_resolution(&mut self, ctx: &egui::Context, id: Id) {
+        let Some(steps) = &mut self.custom_resolution else {
+            return;
+        };
+        let sub = id.with("custom-resolution");
+        let shown = dialog::window(ctx, sub, tr("Custom Resolution"), |ui| {
+            for (i, (text, name)) in [
+                ("pixel(s) horizontally.", "Horizontal"),
+                ("pixel(s) vertically.", "Vertical"),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                ui.horizontal(|ui| {
+                    ui.label(tr("Render every"));
+                    fields::number(ui, &mut steps[i], 1.0..=99.0, 0, "", tr(name));
+                    ui.label(tr(text));
+                });
+            }
+            ui.add_space(6.0);
+            dialog::buttons(ui, true)
+        });
+        let steps = *steps;
+        match shown {
+            Some(Outcome::Ok) => {
+                self.values.resolution = steps.map(|s| s.round().clamp(1.0, 99.0) as u32);
+                self.custom_resolution = None;
+            }
+            Some(Outcome::Cancel) => self.custom_resolution = None,
+            None if dialog::closed_by_title_bar(ctx, sub) => self.custom_resolution = None,
+            _ => {}
+        }
+    }
+
     fn basic(&mut self, ui: &mut Ui, id: Id) {
         const LW: f32 = 128.0;
         let v = &mut self.values;
         // Preset
         dialog::row(ui, LW, tr("Preset:"), |ui| {
-            let current = v.preset();
-            let label = current.map_or_else(|| tr("Custom").to_owned(), preset_label);
-            let mut items: Vec<Option<String>> = vec![Some(tr("Custom").to_owned()), None];
+            let user = self.presets.iter().position(|p| p.matches(v));
+            let label = match (v.preset(), user) {
+                (Some(i), _) => preset_label(i),
+                (None, Some(u)) => self.presets[u].name.clone(),
+                (None, None) => tr("Custom").to_owned(),
+            };
+            // Custom, AE's presets (separators between groups), then the
+            // saved ones.
+            let mut items: Vec<Option<String>> = vec![Some(tr("Custom").to_owned())];
             items.extend(
                 PRESETS
                     .iter()
                     .enumerate()
                     .map(|(i, p)| p.map(|_| preset_label(i))),
             );
+            if !self.presets.is_empty() {
+                items.push(None);
+                items.extend(self.presets.iter().map(|p| Some(p.name.clone())));
+            }
+            let first_user = PRESETS.len() + 2;
             if let Some(picked) =
                 menu_field(ui, id.with("preset"), &label, &items, 300.0, tr("Preset"))
-                && picked >= 2
-                && let Some(Some((_, w, h, par, fps))) = PRESETS.get(picked - 2)
             {
-                v.width = *w;
-                v.height = *h;
-                v.pixel_aspect = *par;
-                v.fps = *fps;
-                self.fps_text = None;
+                let size = if let Some(Some((_, w, h, par, fps))) =
+                    picked.checked_sub(1).and_then(|i| PRESETS.get(i))
+                {
+                    Some((*w, *h, *par, *fps))
+                } else {
+                    picked
+                        .checked_sub(first_user)
+                        .and_then(|u| self.presets.get(u))
+                        .map(|p| (p.width, p.height, p.pixel_aspect, p.fps))
+                };
+                if let Some((w, h, par, fps)) = size {
+                    v.width = w;
+                    v.height = h;
+                    v.pixel_aspect = par;
+                    v.set_fps(fps);
+                    self.fps_text = None;
+                }
             }
-            // Saving and deleting presets are not implemented yet: greyed.
-            preset_buttons(ui);
+            // Save Custom Preset is always available; Delete only for a
+            // saved preset.
+            if icon_button(ui, bae_ui::Icon::Save, "Save Custom Preset", true).clicked() {
+                self.naming = Some((String::new(), false));
+            }
+            if icon_button(
+                ui,
+                bae_ui::Icon::Trash,
+                "Delete Custom Preset",
+                user.is_some(),
+            )
+            .clicked()
+                && let Some(u) = user
+            {
+                self.presets.remove(u);
+                self.presets_changed = true;
+            }
         });
         ui.add_space(4.0);
         // Width / height with the aspect lock.
@@ -550,10 +731,7 @@ impl CompSettings {
                 if let Ok(f) = text.trim().parse::<f64>()
                     && (1.0..=999.0).contains(&f)
                 {
-                    let (start, dur) = (v.start, v.duration);
-                    v.fps = f;
-                    v.start = start;
-                    v.duration = dur;
+                    v.set_fps(f);
                 }
                 self.fps_text = None;
             }
@@ -561,7 +739,7 @@ impl CompSettings {
                 FRAME_RATES.iter().map(|f| Some(fps_text(*f))).collect();
             if let Some(i) = menu_button(ui, id.with("fps-menu"), &items, tr("Frame Rate Presets"))
             {
-                v.fps = FRAME_RATES[i];
+                v.set_fps(FRAME_RATES[i]);
                 self.fps_text = None;
             }
             ui.label(tr("frames per second"));
@@ -581,43 +759,39 @@ impl CompSettings {
             });
         });
         dialog::row(ui, LW, tr("Resolution:"), |ui| {
+            let custom = RESOLUTIONS.len() - 1;
             let current = RESOLUTIONS
                 .iter()
                 .position(|(_, s)| *s != 0 && v.resolution == [*s, *s])
-                .unwrap_or(RESOLUTIONS.len() - 1);
+                .unwrap_or(custom);
             let items: Vec<Option<String>> = RESOLUTIONS
                 .iter()
                 .map(|(n, _)| Some(tr(n).to_owned()))
                 .collect();
-            let label = tr(RESOLUTIONS[current].0).to_owned();
-            if let Some(i) = menu_field(ui, id.with("res"), &label, &items, 110.0, tr("Resolution"))
+            let label = if current == custom {
+                tr("Custom")
+            } else {
+                tr(RESOLUTIONS[current].0)
+            };
+            if let Some(i) = menu_field(ui, id.with("res"), label, &items, 110.0, tr("Resolution"))
             {
-                let s = RESOLUTIONS[i].1;
-                if s != 0 {
-                    v.resolution = [s, s];
-                }
-            }
-            if current == RESOLUTIONS.len() - 1 {
-                let mut hstep = f64::from(v.resolution[0]);
-                let mut vstep = f64::from(v.resolution[1]);
-                if fields::number(ui, &mut hstep, 1.0..=99.0, 0, "", tr("Horizontal")).changed() {
-                    v.resolution[0] = hstep as u32;
-                }
-                if fields::number(ui, &mut vstep, 1.0..=99.0, 0, "", tr("Vertical")).changed() {
-                    v.resolution[1] = vstep as u32;
+                match RESOLUTIONS[i].1 {
+                    0 => {
+                        self.custom_resolution = Some(v.resolution.map(|s| f64::from(s.max(1))));
+                    }
+                    s => v.resolution = [s, s],
                 }
             }
             let (rw, rh) = (
                 v.width.div_ceil(v.resolution[0].max(1)),
                 v.height.div_ceil(v.resolution[1].max(1)),
             );
-            let mb = f64::from(rw) * f64::from(rh) * 4.0 / (1024.0 * 1024.0);
             ui.label(
                 egui::RichText::new(
-                    tr("{w} x {h}, {mb} MB per 8bpc frame")
+                    tr("{w} x {h}, {size} per 8bpc frame")
                         .replace("{w}", &rw.to_string())
                         .replace("{h}", &rh.to_string())
-                        .replace("{mb}", &format!("{mb:.1}")),
+                        .replace("{size}", &frame_size_text(rw, rh)),
                 )
                 .color(color::TEXT_DIM),
             );
@@ -627,9 +801,9 @@ impl CompSettings {
         let base = fields::timecode_base(v.fps);
         let fps = v.fps;
         let is_text = move |frames: i64| {
-            tr("is {tc} Base {n}")
-                .replace("{tc}", &fields::format_timecode(frames, fps, df))
-                .replace("{n}", &base.to_string())
+            tr("is {time}  Base {base}")
+                .replace("{time}", &fields::format_timecode(frames, fps, df))
+                .replace("{base}", &base.to_string())
         };
         dialog::row(ui, LW, tr("Start Timecode:"), |ui| {
             let mut f = v.frames(v.start);
@@ -751,12 +925,17 @@ impl CompSettings {
                 ui.add_space(16.0);
                 ui.label(tr("Adaptive Sample Limit:"));
                 let mut a = v.adaptive_limit as f64;
-                if fields::number(ui, &mut a, 16.0..=256.0, 0, "", tr("Adaptive Sample Limit"))
+                if fields::number(ui, &mut a, 64.0..=256.0, 0, "", tr("Adaptive Sample Limit"))
                     .changed()
                 {
                     v.adaptive_limit = a as i64;
                 }
             });
+            ui.add_space(4.0);
+            ui.add(
+                egui::Label::new(egui::RichText::new(tr(MOTION_BLUR_HELP)).color(color::TEXT_DIM))
+                    .wrap(),
+            );
         });
     }
 
@@ -789,14 +968,80 @@ impl CompSettings {
             });
         });
         ui.add_space(8.0);
-        let about = match v.renderer.as_str() {
-            "cinema_4d" => "Extruded text and shapes, reflections; slower than Classic 3D.",
-            "advanced_3d" => "GPU-accelerated 3D with lights, shadows and 3D models.",
-            _ => "Layers as planes in 3D space; supports all 2D features.",
+        let dim = |t: &str| egui::RichText::new(tr(t)).color(color::TEXT_DIM);
+        ui.add(egui::Label::new(dim(RENDERER_HELP)).wrap());
+        ui.add_space(6.0);
+        let (about, lists) = match v.renderer.as_str() {
+            "cinema_4d" => (ABOUT_C4D, Some((ENABLED_C4D, DISABLED_C4D))),
+            "advanced_3d" => (ABOUT_ADVANCED, Some((ENABLED_ADVANCED, DISABLED_ADVANCED))),
+            _ => (ABOUT_CLASSIC, None),
         };
-        ui.label(egui::RichText::new(tr(about)).color(color::TEXT_DIM));
+        ui.add(egui::Label::new(dim(about)).wrap());
+        // AE lists what the renderer adds and leaves out (not for Classic 3D).
+        if let Some((enabled, disabled)) = lists {
+            ui.add_space(8.0);
+            ui.columns(2, |cols| {
+                for (col, (title, text)) in cols
+                    .iter_mut()
+                    .zip([("Enabled", enabled), ("Disabled", disabled)])
+                {
+                    col.label(egui::RichText::new(tr(title)).color(color::TEXT_STRONG));
+                    col.add(egui::Label::new(dim(text)).wrap());
+                }
+            });
+        }
     }
 }
+
+/// The Advanced tab's note under Motion Blur (AE's text).
+pub(crate) const MOTION_BLUR_HELP: &str = "Samples Per Frame controls the number of motion blur samples for \
+Classic 3D layers, shape layers, and certain effects. 2D layer motion automatically uses more \
+samples per frame when needed, up to the Adaptive Sample Limit.";
+
+/// The 3D Renderer tab's texts (AE's).
+pub(crate) const RENDERER_HELP: &str = "The selected renderer determines the features that 3D layers in the \
+composition can use, and how they interact with 2D layers.";
+pub(crate) const ABOUT_CLASSIC: &str = "Classic 3D is the legacy After Effects renderer. Layers can be \
+placed as planes in 3D space.";
+pub(crate) const ABOUT_ADVANCED: &str = "The 3D renderer supports 3D models, environment lights, shadows, \
+and extrusion of text and shapes.";
+pub(crate) const ABOUT_C4D: &str = "The Cinema 4D renderer enables extruded text and shapes.";
+pub(crate) const ENABLED_ADVANCED: &str = "• 3D models and materials
+• Environment lights and shadows
+• Physically based rendering of 3D layers
+• Extruded and beveled 3D text and shapes
+• Footage overlays on text/shape bevels and sides
+• Bent footage layers
+• Accepts Shadows Only
+• Shadows from spot and parallel lights";
+pub(crate) const DISABLED_ADVANCED: &str =
+    "• Effects, blend modes, layer styles, track mattes, masks and \
+Preserve Underlying Transparency on:
+    • 3D models
+    • 3D text and shape layers
+    • Collapsed 3D precomp layers
+    • Continuously rasterized 3D layers
+• Motion blur and depth of field
+• Light transmission
+• Shadows from point and ambient lights";
+pub(crate) const ENABLED_C4D: &str = "• AE lights and shadows
+• Extruded and beveled 3D text and shapes
+• Footage overlays on text/shape bevels and sides
+• Bent footage layers
+• Environment layer (in reflections only)
+• Depth pass using 3D Channel effects (precomp required)";
+pub(crate) const DISABLED_C4D: &str = "• 3D models and materials
+• Environment lights
+• Physically based rendering of 3D layers
+• Effects, blend modes, layer styles, track mattes, masks and Preserve Underlying \
+Transparency on:
+    • 3D models
+    • 3D text and shape layers
+    • Collapsed 3D precomp layers
+    • Continuously rasterized 3D layers
+• Motion blur and depth of field
+• Light transmission
+• Accepts Shadows Only";
 
 /// Localized label of `PRESETS[i]`: "HD  •  1920x1080 • 29.97 fps".
 fn preset_label(i: usize) -> String {
@@ -806,7 +1051,9 @@ fn preset_label(i: usize) -> String {
     let size = if (par - 1.0).abs() < 1e-6 {
         format!("{w}x{h}")
     } else {
-        format!("{w}x{h} ({par:.2})")
+        // AE: "(1.33)", "(1.5)".
+        let par = format!("{par:.2}");
+        format!("{w}x{h} ({})", par.trim_end_matches('0'))
     };
     format!("{}  •  {size} • {} fps", tr(name), fps_text(*fps))
 }
@@ -817,17 +1064,28 @@ pub(crate) fn fps_text(fps: f64) -> String {
     s.trim_end_matches('0').trim_end_matches('.').to_owned()
 }
 
-/// "16:9 (1.78)": the frame aspect ratio of a size with a pixel aspect ratio.
-pub(crate) fn frame_aspect_text(width: u32, height: u32, pixel_aspect: f64) -> String {
-    let w = (f64::from(width) * pixel_aspect).round() as u64;
+/// The frame aspect ratio of a size with a pixel aspect ratio, reduced:
+/// (16, 9, "1.78"); 1828x1332 is (457, 333, "1.37") as in AE.
+pub(crate) fn frame_aspect(width: u32, height: u32, pixel_aspect: f64) -> (u64, u64, String) {
+    let w = ((f64::from(width) * pixel_aspect).round() as u64).max(1);
     let h = u64::from(height.max(1));
-    let g = gcd(w.max(1), h);
-    let (a, b) = (w / g, h / g);
-    let ratio = w as f64 / h as f64;
-    if a <= 99 && b <= 99 {
-        format!("{a}:{b} ({ratio:.2})")
+    let g = gcd(w, h);
+    (w / g, h / g, format!("{:.2}", w as f64 / h as f64))
+}
+
+/// "16:9 (1.78)": [`frame_aspect`] as AE shows it.
+pub(crate) fn frame_aspect_text(width: u32, height: u32, pixel_aspect: f64) -> String {
+    let (a, b, ratio) = frame_aspect(width, height, pixel_aspect);
+    format!("{a}:{b} ({ratio})")
+}
+
+/// The memory of one 8-bpc RGBA frame: "7.9 MB", or "39 KB" under a megabyte.
+fn frame_size_text(width: u32, height: u32) -> String {
+    let bytes = f64::from(width) * f64::from(height) * 4.0;
+    if bytes >= 1024.0 * 1024.0 {
+        format!("{:.1} MB", bytes / (1024.0 * 1024.0))
     } else {
-        format!("{ratio:.2}")
+        format!("{:.0} KB", (bytes / 1024.0).max(1.0))
     }
 }
 
@@ -858,6 +1116,26 @@ pub(crate) fn next_comp_name(
         .max()
         .unwrap_or(0);
     format!("{base} {}", max.max(reserved) + 1)
+}
+
+/// A preset button (floppy disk, trash can) named `label` for accessibility.
+fn icon_button(ui: &mut Ui, icon: bae_ui::Icon, label: &str, enabled: bool) -> egui::Response {
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, resp) = ui.allocate_exact_size(egui::Vec2::splat(18.0), sense);
+    let resp = resp.labeled(egui::WidgetType::Button, tr(label));
+    let fg = if !enabled {
+        color::TEXT_DISABLED
+    } else if resp.hovered() {
+        color::TEXT_STRONG
+    } else {
+        color::TEXT
+    };
+    bae_ui::icons::paint(ui.painter(), rect.shrink(2.0), icon, fg);
+    resp.on_hover_text(tr(label))
 }
 
 /// The greyed Save / Delete preset buttons (floppy disk, trash can).
@@ -1054,8 +1332,11 @@ pub(crate) const STRINGS: &[&str] = &[
     "Preset:",
     "Preset",
     "Custom",
-    "Save Preset",
-    "Delete Preset",
+    "Save Custom Preset",
+    "Delete Custom Preset",
+    "Choose Name",
+    "Name:",
+    "Name",
     "Width:",
     "Width",
     "Height:",
@@ -1079,10 +1360,14 @@ pub(crate) const STRINGS: &[&str] = &[
     "Third",
     "Quarter",
     "Custom...",
+    "Custom Resolution",
+    "Render every",
+    "pixel(s) horizontally.",
+    "pixel(s) vertically.",
     "Horizontal",
     "Vertical",
-    "{w} x {h}, {mb} MB per 8bpc frame",
-    "is {tc} Base {n}",
+    "{w} x {h}, {size} per 8bpc frame",
+    "is {time}  Base {base}",
     "Start Timecode:",
     "Start Timecode",
     "Duration:",
@@ -1121,9 +1406,17 @@ pub(crate) const STRINGS: &[&str] = &[
     "Advanced 3D",
     "Options...",
     "About...",
-    "Extruded text and shapes, reflections; slower than Classic 3D.",
-    "GPU-accelerated 3D with lights, shadows and 3D models.",
-    "Layers as planes in 3D space; supports all 2D features.",
+    MOTION_BLUR_HELP,
+    RENDERER_HELP,
+    ABOUT_CLASSIC,
+    ABOUT_ADVANCED,
+    ABOUT_C4D,
+    "Enabled",
+    "Disabled",
+    ENABLED_ADVANCED,
+    DISABLED_ADVANCED,
+    ENABLED_C4D,
+    DISABLED_C4D,
     "Square Pixels",
     "D1/DV NTSC (0.91)",
     "D1/DV NTSC Widescreen (1.21)",
@@ -1157,7 +1450,10 @@ mod tests {
         assert_eq!(frame_aspect_text(1920, 1080, 1.0), "16:9 (1.78)");
         assert_eq!(frame_aspect_text(1440, 1080, 4.0 / 3.0), "16:9 (1.78)");
         assert_eq!(frame_aspect_text(1080, 1080, 1.0), "1:1 (1.00)");
-        assert_eq!(frame_aspect_text(1828, 1332, 1.0), "1.37");
+        assert_eq!(frame_aspect_text(1828, 1332, 1.0), "457:333 (1.37)");
+        assert_eq!(frame_aspect_text(2048, 1556, 1.0), "512:389 (1.32)");
+        assert_eq!(frame_size_text(1920, 1080), "7.9 MB");
+        assert_eq!(frame_size_text(100, 100), "39 KB");
         let v = Values {
             fps: 29.97,
             ..Values::default()
@@ -1165,6 +1461,10 @@ mod tests {
         assert_eq!(v.preset(), Some(2));
         assert_eq!(preset_label(2), "HD  •  1920x1080 • 29.97 fps");
         assert_eq!(preset_label(17), "HDV  •  1440x1080 (1.33) • 25 fps");
+        assert_eq!(
+            preset_label(23),
+            "DVCPRO HD  •  1280x1080 (1.5) • 29.97 fps"
+        );
         // The default (1920x1080, 30 fps) is Social Media Landscape HD.
         assert_eq!(Values::default().preset(), Some(10));
     }
