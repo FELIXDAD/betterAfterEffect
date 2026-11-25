@@ -6,9 +6,10 @@ fn relative_point_defaults_follow_the_layer_on_apply_and_reset() {
     let comp = fx.comp();
     let layer = fx.solid(&comp, [1.0, 0.0, 0.0], [31, 13]);
     let before = fx.pixel(&comp, 32, 12);
-    // Declarative packages give point defaults as fractions of the layer.
     for (name, id, expected) in [
         ("ADBE Ramp", 1, [15.5, 0.0]),
+        ("ADBE Numbers2", 6, [15.5, 6.5]),
+        ("ADBE Timecode", 5, [3.1, 1.3]),
         ("ADBE Ramp", 3, [15.5, 13.0]),
         ("ADBE Radial Wipe", 3, [15.5, 6.5]),
     ] {

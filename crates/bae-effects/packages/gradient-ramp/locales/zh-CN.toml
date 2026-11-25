@@ -10,7 +10,7 @@ end_color = "结束颜色"
 ramp_shape = "渐变形状"
 ramp_scatter = "渐变散射"
 blend_with_original = "与原始图像混合"
-swap_colors = "交换颜色"
+swap_colors = ""
 
 [effect.gradient-ramp.choices.ramp_shape]
 1 = "线性渐变"
