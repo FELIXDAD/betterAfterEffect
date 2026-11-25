@@ -837,12 +837,13 @@ fn menu_items_grey_and_check_like_ae() {
         "motion.layer.arrange.front",
         "motion.animation.ease",
         "menu.edit.copy",
-        "menu.layer.transform.fit_to_comp",
+        "menu.layer.transform.center_anchor_point_in_layer_content",
         "menu.view.show_grid",
         "shell.file.save",
     ];
     let mut h = Harness::new();
-    let handled: std::collections::HashSet<String> = ["motion.layer.fit_to_comp".to_owned()].into();
+    let handled: std::collections::HashSet<String> =
+        ["motion.layer.center_anchor_point_in_layer_content".to_owned()].into();
     let enabled = |h: &Harness, handled: Option<&std::collections::HashSet<String>>| {
         let mut cx = MenuContext::new(&h.stage, &h.resources, "motion");
         if let Some(a) = handled {
@@ -870,7 +871,7 @@ fn menu_items_grey_and_check_like_ae() {
             "shell.file.save"
         ]
     );
-    // A selected layer: layer commands too; Fit to Comp once handled.
+    // A selected layer: layer commands too; Center Anchor Point once handled.
     h.session().lock().selected_layers = vec![solid.clone()];
     let layer_cmds = [
         "motion.composition.new",
@@ -883,7 +884,10 @@ fn menu_items_grey_and_check_like_ae() {
     ];
     assert_eq!(enabled(&h, None), layer_cmds);
     let mut with_fit = layer_cmds.to_vec();
-    with_fit.insert(6, "menu.layer.transform.fit_to_comp");
+    with_fit.insert(
+        6,
+        "menu.layer.transform.center_anchor_point_in_layer_content",
+    );
     assert_eq!(enabled(&h, Some(&handled)), with_fit);
     // Selected keyframes: the keyframe assistants.
     h.session().lock().selected_layers.clear();
@@ -2011,7 +2015,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     struct Center;
     impl bae_ui::ActionHandler for Center {
         fn actions(&self) -> Vec<String> {
-            vec!["motion.layer.center_in_view".into()]
+            vec!["motion.layer.center_anchor_point_in_layer_content".into()]
         }
         fn handle(&self, _: &Invocation, _: &mut PanelContext<'_>) -> bool {
             true
@@ -2045,7 +2049,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     };
     let center = |v: &[(String, String, serde_json::Value)]| {
         v.iter()
-            .filter(|(_, a, _)| a == "motion.layer.center_in_view")
+            .filter(|(_, a, _)| a == "motion.layer.center_anchor_point_in_layer_content")
             .map(|(c, ..)| c.clone())
             .collect::<Vec<_>>()
     };
@@ -2053,7 +2057,7 @@ fn ae_shortcuts_follow_other_modules_handlers() {
     let with = bound(true);
     assert_eq!(
         center(&with),
-        [bae_ui::Chord::parse("Cmd+Home").unwrap().to_string()]
+        [bae_ui::Chord::parse("Cmd+Alt+Home").unwrap().to_string()]
     );
     // motion.reveal runs ("animated"); its unimplemented variants stay unbound.
     assert!(
@@ -2062,6 +2066,60 @@ fn ae_shortcuts_follow_other_modules_handlers() {
             .any(|(_, a, p)| a == "motion.reveal" && p["what"] == "modified"),
         "variants of a working command wait for the catalog"
     );
+}
+
+/// Layer ▸ Transform: Fit to Comp fills the comp with the layer's content, Fit to
+/// Comp Width keeps the aspect, Flip negates the scale, Center In View puts the
+/// anchor point in the middle of the comp; each is one undo step.
+#[test]
+fn layer_transform_menu_commands() {
+    use crate::actions::ids;
+    use bae_anim::glam::{DVec2, DVec3};
+    let mut h = Harness::new();
+    let (comp, solid, shape) = h.comp_with_layers();
+    let mut tl = TimelinePanel::default();
+    let run = |h: &mut Harness, tl: &mut TimelinePanel, layer: &PrimPath, id: &str| {
+        h.session().lock().selected_layers = vec![layer.clone()];
+        let r = h.action(tl, Invocation::new(id));
+        h.apply(r);
+    };
+    // The layer's content box in the comp (min x, min y, max x, max y), its transform.
+    let world = |h: &Harness, layer: &PrimPath| {
+        let c = bae_anim::Evaluator::new()
+            .evaluate_comp(&h.stage, &comp, Time::ZERO)
+            .unwrap();
+        let l = c.layers.iter().find(|l| &l.path == layer).unwrap();
+        let (a, b) = crate::render::layer_bounds(l).unwrap();
+        let p = |v: DVec2| l.world_matrix.transform_point3(DVec3::new(v.x, v.y, 0.0));
+        let (a, b) = (p(a), p(b));
+        let r = |v: f64| (v * 1000.0).round() / 1000.0;
+        (
+            [
+                r(a.x.min(b.x)),
+                r(a.y.min(b.y)),
+                r(a.x.max(b.x)),
+                r(a.y.max(b.y)),
+            ],
+            l.transform,
+        )
+    };
+    run(&mut h, &mut tl, &shape, ids::FIT_TO_COMP);
+    assert_eq!(world(&h, &shape).0, [0.0, 0.0, 640.0, 360.0]);
+    h.stage.undo(&h.author).unwrap();
+    run(&mut h, &mut tl, &shape, ids::FIT_TO_COMP_WIDTH);
+    let (bounds, t) = world(&h, &shape);
+    assert_eq!((bounds[0], bounds[2]), (0.0, 640.0));
+    assert!((t.scale.x - t.scale.y).abs() < 1e-9, "keeps the aspect");
+    run(&mut h, &mut tl, &solid, ids::FLIP_HORIZONTAL);
+    assert_eq!(world(&h, &solid).1.scale.x, -100.0);
+    h.run(
+        "attr.set_at",
+        json!({"path": solid, "attr": "transform:position", "time": 0,
+               "value": {"type": "vec3", "value": [10.0, 20.0, 0.0]}}),
+    );
+    run(&mut h, &mut tl, &solid, ids::CENTER_IN_VIEW);
+    let p = world(&h, &solid).1.position;
+    assert_eq!((p.x, p.y), (320.0, 180.0));
 }
 
 /// Layer ▸ Switches, 3D Layer, Quality, Edit ▸ Label: each is one undo step on

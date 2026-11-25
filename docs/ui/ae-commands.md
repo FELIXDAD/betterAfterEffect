@@ -36,9 +36,9 @@
 
 ## 统计
 
-- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 155，◐ 8，☐ 169，⏸ 208，Ⓐ 30
-- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 156 条。
-- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 147 条，macOS 147 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
+- 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 161，◐ 8，☐ 163，⏸ 208，Ⓐ 30
+- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 160 条。
+- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 151 条，macOS 151 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
 
 ## 主菜单
 
@@ -312,13 +312,13 @@
 | Transform ▸ Orientation... | 8912902 | `motion.layer.transform_dialog` | `{"attr":"orientation"}` | Ctrl+Alt+Shift+R | Cmd+Opt+Shift+R | E | ☐ |
 | Transform ▸ Rotation... | 8912903 | `motion.layer.transform_dialog` | `{"attr":"rotation"}` | Ctrl+Shift+R | Cmd+Shift+R | E | ☐ |
 | Transform ▸ Opacity... | 8912904 | `motion.layer.transform_dialog` | `{"attr":"opacity"}` | Ctrl+Shift+O | Cmd+Shift+O | E | ☐ |
-| Transform ▸ Flip Horizontal | 8912906 | `motion.layer.flip_horizontal` |  |  |  | B | ☐ |
-| Transform ▸ Flip Vertical | 8912907 | `motion.layer.flip_vertical` |  |  |  | B | ☐ |
-| Transform ▸ Center In View | 8912908 | `motion.layer.center_in_view` |  | Ctrl+Home | Cmd+Home | B | ☐ |
+| Transform ▸ Flip Horizontal | 8912906 | `motion.layer.flip_horizontal` |  |  |  | B | ✅ |
+| Transform ▸ Flip Vertical | 8912907 | `motion.layer.flip_vertical` |  |  |  | B | ✅ |
+| Transform ▸ Center In View | 8912908 | `motion.layer.center_in_view` |  | Ctrl+Home | Cmd+Home | B | ✅ |
 | Transform ▸ Center Anchor Point in Layer Content | 8912909 | `motion.layer.center_anchor_point_in_layer_content` |  | Ctrl+Alt+Home | Cmd+Opt+Home | B | ☐ |
-| Transform ▸ Fit to Comp | 8912911 | `motion.layer.fit_to_comp` |  | Ctrl+Alt+F | Cmd+Opt+F | B | ☐ |
-| Transform ▸ Fit to Comp Width | 8912912 | `motion.layer.fit_to_comp_width` |  | Ctrl+Alt+Shift+H | Cmd+Opt+Shift+H | B | ☐ |
-| Transform ▸ Fit to Comp Height | 8912913 | `motion.layer.fit_to_comp_height` |  | Ctrl+Alt+Shift+G | Cmd+Opt+Shift+G | B | ☐ |
+| Transform ▸ Fit to Comp | 8912911 | `motion.layer.fit_to_comp` |  | Ctrl+Alt+F | Cmd+Opt+F | B | ✅ |
+| Transform ▸ Fit to Comp Width | 8912912 | `motion.layer.fit_to_comp_width` |  | Ctrl+Alt+Shift+H | Cmd+Opt+Shift+H | B | ✅ |
+| Transform ▸ Fit to Comp Height | 8912913 | `motion.layer.fit_to_comp_height` |  | Ctrl+Alt+Shift+G | Cmd+Opt+Shift+G | B | ✅ |
 | Transform ▸ Auto-Orient... | 8912915 | `motion.layer.auto_orient` |  | Ctrl+Alt+O | Cmd+Opt+O | E | ☐ |
 | Time ▸ Enable Time Remapping | 1966081 | `motion.layer.enable_time_remapping` |  | Ctrl+Alt+T | Cmd+Opt+T | B | ☐ |
 | Time ▸ Time-Reverse Layer | 1966082 | `motion.layer.time_reverse_layer` |  | Ctrl+Alt+R | Cmd+Opt+R | B | ☐ |

@@ -116,6 +116,17 @@ pub mod ids {
     /// Edit ▸ Label ▸ colour: params `{"label": 0..=16}`.
     pub const LABEL: &str = "motion.edit.label";
     pub const SELECT_LABEL_GROUP: &str = "motion.edit.select_label_group";
+    /// Layer ▸ Transform ▸ Flip Horizontal / Flip Vertical (Scale X / Y negated).
+    pub const FLIP_HORIZONTAL: &str = "motion.layer.flip_horizontal";
+    pub const FLIP_VERTICAL: &str = "motion.layer.flip_vertical";
+    /// Layer ▸ Transform ▸ Center In View (AE Ctrl+Home): the anchor point to the
+    /// middle of the comp.
+    pub const CENTER_IN_VIEW: &str = "motion.layer.center_in_view";
+    /// Layer ▸ Transform ▸ Fit to Comp (Ctrl+Alt+F), Fit to Comp Width
+    /// (Ctrl+Alt+Shift+H), Fit to Comp Height (Ctrl+Alt+Shift+G).
+    pub const FIT_TO_COMP: &str = "motion.layer.fit_to_comp";
+    pub const FIT_TO_COMP_WIDTH: &str = "motion.layer.fit_to_comp_width";
+    pub const FIT_TO_COMP_HEIGHT: &str = "motion.layer.fit_to_comp_height";
 }
 
 /// The layer switches the Layer menu toggles (`layer.set_attr` attributes) with
@@ -209,6 +220,12 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::HIDE_OTHER_VIDEO, "Hide Other Video"),
     (ids::QUALITY, "Quality"),
     (ids::LABEL, "Label"),
+    (ids::FLIP_HORIZONTAL, "Flip Horizontal"),
+    (ids::FLIP_VERTICAL, "Flip Vertical"),
+    (ids::CENTER_IN_VIEW, "Center In View"),
+    (ids::FIT_TO_COMP, "Fit to Comp"),
+    (ids::FIT_TO_COMP_WIDTH, "Fit to Comp Width"),
+    (ids::FIT_TO_COMP_HEIGHT, "Fit to Comp Height"),
     (ids::SELECT_LABEL_GROUP, "Select Label Group"),
     (ids::GRAPH_EDITOR, "Graph Editor"),
     (ids::KEY_INTERPOLATION, "Keyframe Interpolation"),
@@ -553,6 +570,90 @@ fn jump_to_key(
     if let Some(t) = pick {
         s.set_time(info, t);
     }
+}
+
+/// Layer ▸ Transform commands on `layers` at comp time `now`, as `attr.set_many`
+/// edits (a keyframe where the property is animated, like AE).
+fn transform_edits(
+    stage: &bae_model::Stage,
+    info: &CompInfo,
+    now: Time,
+    layers: &[PrimPath],
+    id: &str,
+) -> Vec<serde_json::Value> {
+    use bae_anim::Transform;
+    use bae_anim::glam::{DMat4, DVec3};
+    use bae_model::Value;
+    let Ok(comp) = bae_anim::Evaluator::new().evaluate_comp(stage, &info.path, now) else {
+        return Vec::new();
+    };
+    let center = DVec3::new(f64::from(info.width), f64::from(info.height), 0.0) / 2.0;
+    // Move Position so that `local` (layer space) lands on the comp's center.
+    let land = |t: &mut Transform, parent: DMat4, local: DVec3, three_d: bool| {
+        let d = center - (parent * t.matrix(three_d)).transform_point3(local);
+        t.position += parent
+            .inverse()
+            .transform_vector3(DVec3::new(d.x, d.y, 0.0));
+    };
+    let mut out = Vec::new();
+    for l in comp.layers.iter().filter(|l| layers.contains(&l.path)) {
+        let parent = l
+            .parent
+            .map_or(DMat4::IDENTITY, |i| comp.layers[i].world_matrix);
+        let three_d = l.switches.three_d;
+        let mut t = l.transform;
+        match id {
+            ids::FLIP_HORIZONTAL => t.scale.x = -t.scale.x,
+            ids::FLIP_VERTICAL => t.scale.y = -t.scale.y,
+            ids::CENTER_IN_VIEW => {
+                let anchor = t.anchor_point;
+                land(&mut t, parent, anchor, three_d);
+            }
+            _ => {
+                let Some((a, b)) = crate::render::layer_bounds(l) else {
+                    continue;
+                };
+                let size = b - a;
+                if size.x <= 0.0 || size.y <= 0.0 {
+                    continue;
+                }
+                let w = f64::from(info.width) / size.x * 100.0;
+                let h = f64::from(info.height) / size.y * 100.0;
+                let (sx, sy) = match id {
+                    ids::FIT_TO_COMP => (w, h),
+                    ids::FIT_TO_COMP_WIDTH => (w, w),
+                    _ => (h, h),
+                };
+                t.scale.x = sx.copysign(t.scale.x);
+                t.scale.y = sy.copysign(t.scale.y);
+                let c = (a + b) / 2.0;
+                land(&mut t, parent, DVec3::new(c.x, c.y, 0.0), three_d);
+            }
+        }
+        let time = query::to_key_time(stage, &l.path, now);
+        let mut push = |attr: &str, v: Value| {
+            out.push(json!({"path": l.path, "attr": attr, "time": time, "value": v}));
+        };
+        if t.scale != l.transform.scale {
+            let v = t.scale;
+            push("transform:scale", Value::Vec3([v.x, v.y, v.z]));
+        }
+        if t.position != l.transform.position {
+            let p = t.position;
+            let separate = stage
+                .prim(&l.path)
+                .and_then(|v| query::static_value(&v, "transform:separate_dimensions"))
+                .and_then(|v| v.as_bool())
+                == Some(true);
+            if separate {
+                push("transform:position_x", Value::Float(p.x));
+                push("transform:position_y", Value::Float(p.y));
+            } else {
+                push("transform:position", Value::Vec3([p.x, p.y, p.z]));
+            }
+        }
+    }
+    out
 }
 
 /// Handle a motion action. Returns `false` for ids it does not know.
@@ -1138,6 +1239,17 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
                     "layer.set_attr",
                     json!({"layers": targets, "attr": attr, "value": {"type": "bool", "value": on}}),
                 );
+            }
+        }
+        ids::FLIP_HORIZONTAL
+        | ids::FLIP_VERTICAL
+        | ids::CENTER_IN_VIEW
+        | ids::FIT_TO_COMP
+        | ids::FIT_TO_COMP_WIDTH
+        | ids::FIT_TO_COMP_HEIGHT => {
+            let edits = transform_edits(stage, &info, now, &layers, id);
+            if !edits.is_empty() {
+                cx.invoke_with("attr.set_many", json!({ "edits": edits }));
             }
         }
         ids::QUALITY => {
