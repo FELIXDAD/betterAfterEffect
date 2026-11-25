@@ -27,15 +27,17 @@ fn blob_height(p: vec2f) -> f32 {
 }
 fn blob(p: vec2f) -> vec4f {
     if !has(0u) { return warped(p); }
+    // The blob layer arrives blurred by Softness: 1 px central differences,
+    // with the slopes scaled to the softness radius for the relief.
     let radius = max(1.0, value(4u) * u.scale * 0.25);
-    let dx = vec2f(radius,0); let dy = dx.yx;
+    let dx = vec2f(1.0,0.0); let dy = dx.yx;
     let l = blob_height(p-dx); let r = blob_height(p+dx);
     let t = blob_height(p-dy); let b = blob_height(p+dy);
-    let h = (4.0*blob_height(p) + l+r+t+b)/8.0;
+    let h = blob_height(p);
     let cutoff = value(5u)*0.01;
     let edge = max(0.002, 0.25*(abs(l-r)+abs(t-b)));
     let coverage = smoothstep(cutoff-edge,cutoff+edge,h);
-    let normal = normalize(vec3f(l-r,t-b,0.35));
+    let normal = normalize(vec3f((l-r)*radius,(t-b)*radius,0.35));
     let angle = radians(value(13u));
     var light_xy = vec2f(sin(angle),-cos(angle));
     if value(10u)==2.0 { light_xy = (point(12u)-p)/max(1.0,0.25*length(vec2f(u.layer.zw-u.layer.xy))); }

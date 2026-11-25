@@ -4,12 +4,75 @@ use crate::{
     effects::sampled::{Sampled, Shader, unchanged},
     gpu, rust_builtin,
 };
-use crate::{effects::image_grid, params::Params};
+use crate::{EffectTarget, TargetEffect, common};
+use crate::{
+    effects::{image_grid, layer_input},
+    params::Params,
+};
 use bae_gpu::wgpu;
-use bae_model::{ParamKind, Value};
-use bae_render::IRect;
-use bae_render::RenderError;
+use bae_model::{EffectDef, ParamKind, Value};
+use bae_render::{
+    Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderComp, RenderEffect, RenderError,
+    RenderLayer, effect::LayerDependency,
+};
 use std::sync::Arc;
+
+/// Blobbylize blurs the blob layer by Softness first, then finds the normals and
+/// the Cut Away threshold on that smooth height field in one pass.
+struct Blobbylize(Sampled);
+
+impl Effect for Blobbylize {
+    fn def(&self) -> &EffectDef {
+        self.0.def()
+    }
+    fn prepare_scene(&self, instance: &mut RenderEffect, comp: &RenderComp, layer: &RenderLayer) {
+        self.0.prepare_scene(instance, comp, layer);
+    }
+    fn input_roi(&self, p: &EffectParams<'_>, roi: IRect) -> IRect {
+        self.0.input_roi(p, roi)
+    }
+    fn output_bounds(&self, p: &EffectParams<'_>, input: IRect) -> IRect {
+        self.0.output_bounds(p, input)
+    }
+    fn layer_dependencies(&self, p: &EffectParams<'_>) -> Vec<LayerDependency> {
+        self.0.layer_dependencies(p)
+    }
+    fn render(
+        &self,
+        ctx: &mut EncodeContext<'_>,
+        p: &EffectParams<'_>,
+        input: &GpuImage,
+        roi: IRect,
+    ) -> Result<GpuImage, RenderError> {
+        self.encode(ctx, p, input, roi)
+    }
+}
+
+impl TargetEffect for Blobbylize {
+    fn encode(
+        &self,
+        target: &mut dyn EffectTarget,
+        p: &EffectParams<'_>,
+        input: &GpuImage,
+        roi: IRect,
+    ) -> Result<GpuImage, RenderError> {
+        if roi.is_empty() {
+            return Ok(input.clone());
+        }
+        let s = &self.0;
+        let blob = layer_input::dependency(p, 2, true).and_then(|dep| {
+            target.effect_layer(&dep).cloned().or_else(|| {
+                (p.layer_bounds.is_empty() && p.value(2).is_none()).then(|| input.clone())
+            })
+        });
+        let v = Params::new(&s.def, p);
+        let blob = blob
+            .map(|b| common::blurred(target, &b, v.f(4) * 0.5))
+            .transpose()?;
+        s.shader
+            .dispatch(target, v, roi, input, [blob.as_ref()], [s.mode, 0])
+    }
+}
 
 fn layer(p: Params<'_>, roi: IRect) -> IRect {
     roi.union(&image_grid::layer_rect(p.p))
@@ -234,14 +297,14 @@ fn cc_blobbylize() -> Builtin {
     let (def, labels) = b.reference_points().build();
     rust_builtin(
         (
-            Arc::new(Sampled {
+            Arc::new(Blobbylize(Sampled {
                 def,
                 shader: &SHADER,
                 mode: 1,
                 inputs: &[(2, true)],
                 read: layer,
                 bounds: unchanged,
-            }),
+            })),
             labels,
         ),
         "cc-blobbylize",
