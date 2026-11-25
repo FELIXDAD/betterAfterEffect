@@ -131,6 +131,8 @@ pub(super) fn composite(
         Kind::Systems => (0., p.popup(28)),
         Kind::Snow => (p.f(26) as f32, if p.popup(25) == 2 { 5 } else { 1 }),
         Kind::Rain => (p.f(16) as f32, if p.popup(15) == 2 { 5 } else { 1 }),
+        Kind::Hair => (1., 1),
+        Kind::Mercury => (0., 4),
         Kind::Stars => (p.f(6) as f32, 1),
         Kind::Bubbles | Kind::Drizzle => (1., 1),
         _ => (0., 1),
@@ -156,6 +158,67 @@ pub(super) fn composite(
     u.u32(16, kind as u32)
         .u32(20, mode as u32)
         .f32(24, original);
+    if kind == Kind::Mercury {
+        let mut light = p
+            .value(18)
+            .and_then(|v| {
+                if let bae_model::Value::Color(c) = v {
+                    Some([c[0] as f32, c[1] as f32, c[2] as f32])
+                } else {
+                    None
+                }
+            })
+            .unwrap_or([1.; 3]);
+        let mut intensity = p.f(17) as f32 * 0.01;
+        let mut height = p.f(20) as f32 * 0.01;
+        let mut pos =
+            p.p.point(21)
+                .unwrap_or([scene.size[0] as f64 * 0.25, scene.size[1] as f64 * 0.25]);
+        let mut point = p.popup(19) == 2;
+        if p.popup(31) == 2
+            && let Some(view) = p.p.scene
+            && let Some(l) = view.light
+        {
+            light = l.color;
+            intensity = l.intensity * 0.01;
+            let xy = view
+                .placement
+                .inverse()
+                .transform_point2(l.position().truncate());
+            pos = xy.to_array();
+            height = (l.position().z.abs() as f32 / scene.size[0]).max(0.001);
+            point = true;
+        }
+        u.f32s(32, &[0., 0., intensity, height])
+            .f32s(
+                48,
+                &[
+                    p.f(25) as f32 * 0.01,
+                    p.f(26) as f32 * 0.01,
+                    p.f(27) as f32 * 0.01,
+                    p.f(28) as f32,
+                ],
+            )
+            .f32s(64, &light)
+            .f32s(
+                80,
+                &[
+                    (pos[0] * p.p.scale) as f32 - input.rect.x0 as f32,
+                    (pos[1] * p.p.scale) as f32 - input.rect.y0 as f32,
+                    (p.f(22) as f32).to_radians(),
+                    if point { 2. } else { 1. },
+                ],
+            )
+            .f32s(
+                96,
+                &[
+                    p.f(29) as f32 * 0.01,
+                    input.rect.width() as f32,
+                    input.rect.height() as f32,
+                    p.f(32) as f32 * 0.01,
+                ],
+            );
+    }
     if kind == Kind::Drizzle {
         let scale = p.p.scale as f32;
         u.f32s(

@@ -7,6 +7,44 @@ use bae_render::{EffectParams, IRect};
 use common::{Pixels, builtin, context, instance, test_image};
 
 #[test]
+fn playground_grid_emits_with_the_cannon_off() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(64, 48);
+    let input = test_image(rect).upload(&gpu, TextureFormat::Rgba16Float);
+    let mut target = Standalone::new(gpu.clone(), TextureFormat::Rgba16Float);
+    let emit = instance(
+        "ADBE Playgnd",
+        vec![
+            (103, Value::Float(0.)),
+            (132, Value::Float(32.)),
+            (133, Value::Float(24.)),
+            (134, Value::Float(2.)),
+            (135, Value::Float(2.)),
+            (
+                501,
+                Value::PrimRef(bae_model::PrimPath::new("/comps/main/layers/map").unwrap()),
+            ),
+            (502, Value::Int(3)),
+        ],
+    );
+    let params = EffectParams::new(&emit);
+    let fx = builtin(&emit.effect);
+    let dep = fx.effect().layer_dependencies(&params).pop().unwrap();
+    let map = Pixels::new(rect, |_, _| [0.75, 0., 0., 1.]).upload(&gpu, TextureFormat::Rgba16Float);
+    target.set_effect_inputs(vec![(dep, map)], vec![]);
+    let out = fx.render(&mut target, &params, &input, rect).unwrap();
+    target.finish().unwrap();
+    let pixels = Pixels::download(&gpu, &out);
+    for y in [18, 30] {
+        for x in [24, 40] {
+            assert!(pixels.get(x, y)[3] > 0.9);
+            assert!((pixels.get(x, y)[1] - 0.75).abs() < 0.01);
+        }
+    }
+    assert_eq!(pixels.get(32, 24), [0.; 4]);
+}
+
+#[test]
 fn particle_world_seek_reproduces_pixels_and_cropped_tiles() {
     let Some(gpu) = context() else { return };
     let rect = IRect::from_size(128, 96);

@@ -84,3 +84,5 @@ Particle World 和 Particle Systems II 共用 GPU 粒子引擎。出生率的时
 ### Lumetri 颜色（2026-11-24）
 
 完成六个 GPU 分组、输入和创意 LUT 接口、主曲线与色相对饱和度曲线、三路色轮、HSL 辅助和晕影。AE 26.2.1 的逐组及串联对照见[颜色校正记录](../../crates/bae-effects/tests/ae/categories/color.md#lumetri-颜色)。输入 LUT 的文件选择器可复用效果面板工作流的 LUT 接口。
+
+2026-11-26，粒子运动场、CC Ball Action、CC Mr. Mercury 和 CC Hair 共用 GPU 粒子引擎。粒子运动场支持发射、网格和图层爆炸；水银使用叠加密度场生成连成一体的液滴。RTX 5090 已验证网格发射位置、半浮点和全浮点输出。
