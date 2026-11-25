@@ -10,7 +10,7 @@ use crate::{Builtin, rust_builtin};
 
 const MENU_ITEMS: &[&str] = &["Item 1", "Item 2", "Item 3"];
 
-struct Control(EffectDef);
+pub(super) struct Control(pub(super) EffectDef);
 
 impl Effect for Control {
     fn def(&self) -> &EffectDef {

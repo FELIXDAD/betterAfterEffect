@@ -56,7 +56,7 @@ struct Prepared {
     device: wgpu::Device,
     format: wgpu::TextureFormat,
     data: Vec<u8>,
-    selection: [i64; 4],
+    selection: [i64; 9],
     kernel: Arc<Kernel>,
     values: Vec<u8>,
     views: Vec<wgpu::TextureView>,
@@ -67,7 +67,7 @@ impl Prepared {
         gpu: &Arc<GpuContext>,
         format: wgpu::TextureFormat,
         data: &[u8],
-        selection: [i64; 4],
+        selection: [i64; 9],
         transform: bae_color::ColorTransform,
     ) -> Result<Self, RenderError> {
         let snippet = transform.to_wgsl("lut");
@@ -207,7 +207,7 @@ impl TargetEffect for ApplyLut {
         let selection = self
             .ocio
             .as_ref()
-            .map_or([0; 4], |op| op.selection(&self.def, p));
+            .map_or([0; 9], |op| op.selection(&self.def, p));
         let lut = {
             let mut cache = self.cache.lock();
             if let Some(entry) = cache.iter().find(|l| {
