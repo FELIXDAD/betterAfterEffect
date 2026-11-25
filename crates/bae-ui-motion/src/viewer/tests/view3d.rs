@@ -98,3 +98,25 @@ fn cameras_and_lights_draw_in_the_3d_views() {
     let comp = bae_anim::evaluate_comp(&h.stage, &h.comp, bae_model::Time::ZERO).unwrap();
     assert_eq!(comp.camera.map(|i| &comp.layers[i].path), Some(&camera));
 }
+
+/// Reset 3D View in Active Camera resets the camera layer ("Reset Camera 1").
+#[test]
+fn reset_3d_view_in_active_camera_resets_the_camera_layer() {
+    let mut h = H::new();
+    let camera = h.layer("camera");
+    h.run(
+        "attr.set",
+        json!({"path": camera, "attr": "transform:position", "value": {"type": "vec3", "value": [10.0, 20.0, -300.0]}}),
+    );
+    let r = tool_action(&h, crate::viewer::view3d::ids::RESET, json!({}));
+    assert_eq!(r.invocations.len(), 1, "{:?}", r.invocations);
+    h.apply(&r);
+    let zoom = match h.value(&camera, "camera:zoom") {
+        Some(Value::Float(z)) => z,
+        other => panic!("{other:?}"),
+    };
+    assert!(close3(
+        h.v3(&camera, "transform:position"),
+        [320.0, 180.0, -zoom]
+    ));
+}
