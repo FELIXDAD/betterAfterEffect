@@ -300,7 +300,7 @@ fn param_row(
         .or_else(|| common::current_value(eval.get(cx.resources), stage, effect, &attr, now))
         .or_else(|| {
             let layer = super::layer_of(effect)?;
-            bae_motion::effect::instance_default(stage, &layer, def, param)
+            bae_motion::effect::instance_default(stage, &layer, param)
         });
     let key = format!("{effect}#{}", param.id);
     let twirl = matches!(param.kind, ParamKind::Slider { .. } | ParamKind::Angle);
