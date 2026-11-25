@@ -19,12 +19,23 @@ use crate::input::{RenderEffect, RenderMask};
 use crate::request::RenderPurpose;
 use crate::source::{EncodeContext, GpuImage};
 
+/// Composition projection and lighting for effects with an internal 3D scene.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EffectScene {
+    /// Layer plane to composition pixels (homogeneous coordinates).
+    pub projection: glam::DMat3,
+    /// First composition light, in layer units; RGB includes intensity.
+    pub light: Option<([f64; 3], [f32; 3])>,
+}
+
 /// Evaluated parameters of one effect instance plus the frame context an
 /// effect needs (the equivalents of AE's `PF_InData`), with typed accessors.
 #[derive(Clone, Copy, Debug)]
 pub struct EffectParams<'a> {
     /// The instance (prim, effect ID, values).
     pub effect: &'a RenderEffect,
+    /// Composition scene requested by the effect.
+    pub scene: Option<&'a EffectScene>,
     /// Layer time of the frame.
     pub time: Time,
     /// Time in the comp containing the layer.
@@ -79,6 +90,7 @@ impl<'a> EffectParams<'a> {
         effect.path.hash(&mut h);
         Self {
             effect,
+            scene: None,
             time: Time::ZERO,
             comp_time: Time::ZERO,
             layer_in: Time::ZERO,
@@ -229,6 +241,11 @@ pub trait Effect: Send + Sync {
     /// Input region needed to produce `output_roi`. Default: the same region.
     fn input_roi(&self, _params: &EffectParams<'_>, output_roi: IRect) -> IRect {
         output_roi
+    }
+
+    /// Requests the composition camera and first light for its internal scene.
+    fn uses_scene(&self, _params: &EffectParams<'_>) -> bool {
+        false
     }
 
     /// Other layers this instance reads (scheduled before it). Default: none.
