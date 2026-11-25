@@ -36,6 +36,7 @@ impl Lang {
 }
 
 static LANG: AtomicU8 = AtomicU8::new(0);
+static SYSTEM: AtomicU8 = AtomicU8::new(0);
 
 type Table = HashMap<&'static str, &'static str>;
 
@@ -55,6 +56,29 @@ pub fn lang() -> Lang {
     match LANG.load(Ordering::Relaxed) {
         1 => Lang::Zh,
         _ => Lang::En,
+    }
+}
+
+/// Records the system's UI language (what Preferences > Appearance > Language
+/// "Follow System" picks); the host detects it at startup.
+pub fn set_system_lang(lang: Lang) {
+    SYSTEM.store(lang as u8, Ordering::Relaxed);
+}
+
+pub fn system_lang() -> Lang {
+    match SYSTEM.load(Ordering::Relaxed) {
+        1 => Lang::Zh,
+        _ => Lang::En,
+    }
+}
+
+/// The language a Preferences > Appearance > Language value picks: `zh-CN`,
+/// `en`, otherwise (`system`) the system's.
+pub fn lang_for_setting(value: &str) -> Lang {
+    match value {
+        "zh-CN" => Lang::Zh,
+        "en" => Lang::En,
+        _ => system_lang(),
     }
 }
 

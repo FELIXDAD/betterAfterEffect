@@ -1,0 +1,23 @@
+# Test fixture (crates/bae-plugin/tests/native.rs): misbehaves on purpose.
+schema_version = 1
+
+[plugin]
+id = "com.example.crash"
+version = "0.1.0"
+api = "1.0"
+name = "Crash (test fixture)"
+
+[native]
+isolation = "out-of-process"
+
+[native.libraries]
+macos-aarch64 = "bin/macos-aarch64/libcrash.dylib"
+windows-x86_64 = "bin/windows-x86_64/crash.dll"
+linux-x86_64 = "bin/linux-x86_64/libcrash.so"
+
+[[effect]]
+id = "crash"
+name = "Crash"
+category = "Test"
+class = "filter"
+implementation = "native"
