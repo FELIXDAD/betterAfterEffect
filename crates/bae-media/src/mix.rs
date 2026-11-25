@@ -54,11 +54,15 @@ impl AudioMix {
                 .and_then(Value::as_bool)
                 .unwrap_or(default)
         };
-        let solo = layers.iter().any(|l| flag(l, "solo", false));
+        let audio_solo = layers.iter().any(|l| {
+            flag(l, "solo", false)
+                && flag(l, "audio_enabled", true)
+                && layer_file(stage, l).is_some()
+        });
         let tracks = layers
             .iter()
             .filter_map(|l| {
-                if !flag(l, "audio_enabled", true) || (solo && !flag(l, "solo", false)) {
+                if !flag(l, "audio_enabled", true) || (audio_solo && !flag(l, "solo", false)) {
                     return None;
                 }
                 let file = layer_file(stage, l)?;

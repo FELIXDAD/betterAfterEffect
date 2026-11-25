@@ -1777,12 +1777,14 @@ fn mix_reads_enabled_layers_with_stereo_decibel_levels() {
         .into_iter()
         .find(|p| query::display_name_of(&h.stage, p) == "sample.wav")
         .unwrap();
+    let mut tracks = Vec::new();
     for (kind, muted) in [("audio", false), ("footage", false), ("footage", true)] {
         let path = h.run(
             "layer.create",
             json!({"kind":kind,"comp":comp,"source":asset}),
         )["path"]
             .clone();
+        tracks.push(path.clone());
         h.run(
             "attr.set",
             json!({"path":path,"attr":"audio_enabled","value":{"type":"bool","value":!muted}}),
@@ -1824,14 +1826,9 @@ fn mix_reads_enabled_layers_with_stereo_decibel_levels() {
         );
     }
     bae_motion::effect::register_effect_commands(&mut h.reg, defs);
-    let tracks = h.stage.children(&comp.child("layers").unwrap());
-    let audible = tracks
-        .iter()
-        .find(|p| query::layer_kind(&h.stage, p).as_deref() == Some("audio"))
-        .unwrap();
     let effect = h.run(
         "effect.apply",
-        json!({"layers":[audible],"match_name":"ADBE Aud Stereo Mixer"}),
+        json!({"layers":[tracks[0]],"match_name":"ADBE Aud Stereo Mixer"}),
     )["effects"][0]
         .clone();
     h.run(
@@ -1855,6 +1852,31 @@ fn mix_reads_enabled_layers_with_stereo_decibel_levels() {
         json!({"path":effect,"attr":"enabled","value":{"type":"bool","value":false}}),
     );
     assert_eq!(read(&h), block[0]);
+
+    // Distinguish the two enabled sources, then toggle the switches independently.
+    h.run(
+        "attr.set_at",
+        json!({"path":tracks[1],"attr":"audio:levels","time":0,
+        "value":Value::Vec2([-6.0206,-12.0412])}),
+    );
+    let mut switch = |layer: usize, attr: &str, on: bool, expected: f32| {
+        h.run(
+            "attr.set",
+            json!({"path":tracks[layer],"attr":attr,"value":Value::Bool(on)}),
+        );
+        bae_media::mix::AudioMix::from_stage(&h.stage, &comp)
+            .render(0, 8000, &mut block)
+            .unwrap();
+        assert!(
+            (block[0][0] - expected).abs() < 1e-5,
+            "{attr}={on}: {block:?}"
+        );
+    };
+    switch(2, "solo", true, 0.75); // a muted solo does not suppress the mix
+    switch(0, "solo", true, 0.5);
+    switch(0, "enabled", false, 0.5); // eye does not mute sound
+    switch(0, "audio_enabled", false, 0.25); // last audible solo muted
+    switch(0, "audio_enabled", true, 0.5);
 }
 
 #[test]
