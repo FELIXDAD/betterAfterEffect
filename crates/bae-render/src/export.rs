@@ -34,6 +34,61 @@ use crate::renderer::{OUTPUT_PARAMS_SIZE, OutputAlpha, RenderedFrame, Renderer, 
 use crate::request::BitDepth;
 use crate::request::RenderRequest;
 
+#[cfg(feature = "media")]
+fn export_wav(
+    job: &ExportJob<'_>,
+    cancel: Option<&AtomicBool>,
+    on_frame: &mut dyn FnMut(&ExportedFrame),
+) -> Result<ExportReport, RenderError> {
+    use bae_media::audio::time_to_sample;
+    const RATE: u32 = 48_000;
+    let started = Instant::now();
+    let mut report = ExportReport::default();
+    let mut mix = bae_media::mix::AudioMix::from_stage(job.stage, job.comp);
+    let io_error =
+        |e: std::io::Error| RenderError::Other(format!("{}: {e}", job.settings.path.display()));
+    let mut wav = bae_media::wav::WavWriter::create(&job.settings.path, RATE).map_err(io_error)?;
+    let mut buffer = [[0.0; 2]; 512];
+    for (index, &(frame, time)) in job.times.iter().enumerate() {
+        if cancel.is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed)) {
+            report.stopped = true;
+            return Ok(report);
+        }
+        let mut start = time_to_sample(time, RATE);
+        let end = time_to_sample(time + job.rate.frame_duration(), RATE);
+        while start < end {
+            let count = (end - start).min(buffer.len() as i64) as usize;
+            mix.render(start, RATE, &mut buffer[..count])
+                .map_err(media_error)?;
+            wav.write(&buffer[..count]).map_err(io_error)?;
+            start += count as i64;
+        }
+        let entry = ExportedFrame {
+            index,
+            frame,
+            time,
+            file: job.settings.path.clone(),
+            width: 0,
+            height: 0,
+            eval: Duration::ZERO,
+            render: Duration::ZERO,
+            draws: 0,
+            draw_calls: 0,
+        };
+        on_frame(&entry);
+        report.frames.push(entry);
+    }
+    if cancel.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed)) {
+        report.stopped = true;
+        return Ok(report);
+    }
+    report.stats.bytes = wav.finish().map_err(io_error)?;
+    report.stats.files = 1;
+    report.stats.frames = report.frames.len();
+    report.stats.wall = started.elapsed();
+    Ok(report)
+}
+
 /// Staging buffers in flight by default: the GPU works on one frame while the
 /// previous one is mapped and the one before is copied out.
 pub const READBACK_DEPTH: usize = 3;
@@ -569,6 +624,8 @@ pub enum ExportFormat {
     Tiff,
     /// OpenEXR sequence (half or float, premultiplied).
     Exr,
+    /// Stereo 48 kHz PCM WAV.
+    Wav,
     /// H.264 movie (macOS).
     H264,
     /// HEVC movie (macOS).
@@ -581,12 +638,21 @@ pub enum ExportFormat {
 
 impl ExportFormat {
     /// Names accepted by [`Self::parse`] (`bae render --format`).
-    pub const NAMES: [&'static str; 7] =
-        ["png", "tiff", "exr", "h264", "hevc", "prores", "prores4444"];
+    pub const NAMES: [&'static str; 8] = [
+        "png",
+        "tiff",
+        "exr",
+        "h264",
+        "hevc",
+        "prores",
+        "prores4444",
+        "wav",
+    ];
 
     /// From a name in [`Self::NAMES`] or a file extension.
     pub fn parse(name: &str) -> Option<Self> {
         Some(match name {
+            "wav" => Self::Wav,
             "png" => Self::Png,
             "tiff" | "tif" => Self::Tiff,
             "exr" => Self::Exr,
@@ -607,6 +673,7 @@ impl ExportFormat {
     /// The name in [`Self::NAMES`].
     pub fn name(self) -> &'static str {
         match self {
+            Self::Wav => "wav",
             Self::Png => "png",
             Self::Tiff => "tiff",
             Self::Exr => "exr",
@@ -620,6 +687,7 @@ impl ExportFormat {
     /// File extension.
     pub fn extension(self) -> &'static str {
         match self {
+            Self::Wav => "wav",
             Self::Png => "png",
             Self::Tiff => "tif",
             Self::Exr => "exr",
@@ -713,6 +781,19 @@ impl ExportSettings {
     pub fn validate(&self, rate: FrameRate, request: &RenderRequest) -> Result<(), RenderError> {
         #[cfg(feature = "media")]
         {
+            if self.format == ExportFormat::Wav {
+                if self.bits.is_some_and(|b| b != 24)
+                    || self
+                        .compression
+                        .as_deref()
+                        .is_some_and(|c| !matches!(c, "none" | "default"))
+                {
+                    return Err(RenderError::Other(
+                        "WAV supports 24-bit uncompressed PCM".into(),
+                    ));
+                }
+                return Ok(());
+            }
             encode_settings(
                 self,
                 request.depth == BitDepth::Float32,
@@ -837,6 +918,7 @@ fn encode_settings(
     };
     let format = settings.format;
     let codec = match format {
+        ExportFormat::Wav => return Err(RenderError::Other("WAV uses the audio encoder".into())),
         ExportFormat::Png => VideoCodec::Png,
         ExportFormat::Tiff => VideoCodec::Tiff(match level {
             None | Some("none") => TiffCompression::None,
@@ -1419,6 +1501,11 @@ pub fn export_frames(
     on_frame: &mut dyn FnMut(&ExportedFrame),
 ) -> Result<ExportReport, RenderError> {
     let started = Instant::now();
+    #[cfg(feature = "media")]
+    if job.settings.format == ExportFormat::Wav {
+        job.settings.validate(job.rate, job.request)?;
+        return export_wav(job, cancel, on_frame);
+    }
     // More than one frame, or one comp frame whose image file name has a `#`
     // run (AE numbers it too, #207); otherwise a single still image.
     let sequence = job.times.len() > 1
