@@ -2,35 +2,6 @@ fn auto_point(i:u32)->vec2f {
     let uv=fract((f32(i)+0.5)*vec2f(0.618034,0.414214));
     return mix(vec2f(u.layer.xy),vec2f(u.layer.zw),0.1+0.8*uv);
 }
-fn patch_point(i:u32)->vec2f{
-    if value(selection_id())==2. {return u.values[first_point()+i].xy;}
-    return auto_point(i);
-}
-fn sampled_rgb(p:vec2f, compensation:bool)->vec3f {
-    if compensation{return src(p).rgb;}
-    if has(0u) {
-        let uv=(p-vec2f(u.layer.xy))/max(vec2f(u.layer.zw-u.layer.xy),vec2f(1.));
-        let at=u.images[1].origin+clamp(uv*vec2f(u.images[1].size),vec2f(0.5),vec2f(u.images[1].size)-0.5)/u.images[1].scale;
-        return aux_a(at).rgb;
-    }
-    return src(p).rgb;
-}
-fn profile(compensation:bool)->vec4f {
-    var variance=vec3f(0.);
-    let n=u32(value(count_id()));
-    for(var i=0u;i<n;i++){
-        var center=patch_point(i);
-        if compensation && value(selection_id())==2. {center=u.values[70u+i].xy;}let size=value(size_id())*u.scale;
-        for(var y=0;y<4;y++){for(var x=0;x<4;x++){
-            let q=center+((vec2f(f32(x),f32(y))+0.5)/4.-0.5)*size;
-            let signal=sampled_rgb(q,compensation);
-            // The second difference rejects linear gradients in the patch.
-            let local_mean=(sampled_rgb(q+vec2f(1.,0.),compensation)+sampled_rgb(q-vec2f(1.,0.),compensation)+sampled_rgb(q+vec2f(0.,1.),compensation)+sampled_rgb(q-vec2f(0.,1.),compensation))*0.25;
-            variance+=(signal-local_mean)*(signal-local_mean);
-        }}
-    }
-    return vec4f(sqrt(variance/max(1.,20.*f32(n))),1.);
-}
 fn difference(rgb:vec3f,reference:vec3f,mode:u32)->f32 {
     let d=abs(rgb-reference);
     switch mode {
@@ -79,7 +50,6 @@ fn sample_boxes(p:vec2f, base:u32)->bool {
     return false;
 }
 fn evaluate(p:vec2f)->vec4f {
-    if u.stage==1u{return profile(p.x>1.);}
     let c=src(p);
     let view=u32(value(view_id()));
     if view==mask_view(){return gray(retain(p));}

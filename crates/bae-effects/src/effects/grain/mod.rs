@@ -25,6 +25,17 @@ const REMOVE: Shader = Shader {
         include_str!("remove.wgsl")
     ),
 };
+const PROFILE: Shader = Shader {
+    label: "bae.effects.grain-patches",
+    source: concat!(
+        include_str!("../sampled.wgsl"),
+        include_str!("profile.wgsl")
+    ),
+};
+const REDUCE: Shader = Shader {
+    label: "bae.effects.grain-profile",
+    source: concat!(include_str!("../sampled.wgsl"), include_str!("reduce.wgsl")),
+};
 struct Grain {
     def: EffectDef,
     matching: bool,
@@ -108,14 +119,26 @@ impl TargetEffect for Grain {
             return Ok(input.clone());
         }
         let shader = if self.matching { &MATCH } else { &REMOVE };
-        // The ten patch locations reduce to one GPU texel per profile before the full-frame pass.
-        let stats = shader.dispatch(
+        let count = v
+            .f(if self.matching { 10 } else { 3 })
+            .round()
+            .clamp(1., 10.) as u32;
+        let profiles = 1 + u32::from(self.matching && v.f(118) > 0.);
+        let patches = PROFILE.dispatch(
             target,
             v,
-            IRect::from_size(1 + u32::from(self.matching && v.f(118) > 0.), 1),
+            IRect::from_size(16, count * profiles),
             input,
             [reference.as_ref(), None, None],
-            [1, 0],
+            [0, u32::from(self.matching)],
+        )?;
+        let stats = REDUCE.dispatch(
+            target,
+            v,
+            IRect::from_size(profiles, 1),
+            input,
+            [Some(&patches), None, None],
+            [0, count],
         )?;
         shader.dispatch(
             target,

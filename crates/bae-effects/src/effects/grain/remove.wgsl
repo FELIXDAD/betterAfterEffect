@@ -21,7 +21,8 @@ fn box_color_id()->u32 {return 57u;}
 fn candidate(q:vec2f,history:bool)->vec3f {
     let bounds=vec2f(u.layer.xy);let hi=vec2f(u.layer.zw)-0.5;
     let p=clamp(q,bounds+0.5,hi);
-    if history{return aux_c(p).rgb;}return src(p).rgb;
+    if history{return fx_sample(map_c,u.images[3],p,true).rgb;}
+    return fx_sample(input_tex,u.images[0],p,true).rgb;
 }
 fn process(p:vec2f,c:vec4f,sigma:vec3f)->vec3f {
     let noise=max(sigma,vec3f(0.002));
