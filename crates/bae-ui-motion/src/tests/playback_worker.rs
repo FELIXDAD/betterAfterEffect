@@ -370,6 +370,9 @@ fn measure_cadence(
         }
         next = index + 1;
     }
+    // The last scheduled frame is one interval before the window closes.
+    let end = start + Duration::from_secs(3 + u64::from(seconds));
+    std::thread::sleep(end.saturating_duration_since(Instant::now()));
     gpu.wait_idle().unwrap();
     samples.sort_unstable();
     let elapsed = (start.elapsed() - Duration::from_secs(3)).as_secs_f64();
