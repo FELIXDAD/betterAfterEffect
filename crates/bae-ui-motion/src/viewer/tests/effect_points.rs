@@ -43,4 +43,11 @@ fn effect_point_crosshairs_drag_with_the_selection_tool() {
     );
     h.stage.undo(&h.author).unwrap();
     assert!(close(vec2v(h.value(&fx, &start)), [100.0, 50.0]));
+    // View Options ▸ Effect Controls off: no crosshair to grab.
+    h.session().lock().layer_controls.effect_controls = false;
+    h.frame(Vec::new(), Modifiers::NONE);
+    h.drag_to((100.0, 50.0), (200.0, 80.0), Modifiers::NONE);
+    let r = h.release((200.0, 80.0), Modifiers::NONE);
+    h.apply(&r);
+    assert!(close(vec2v(h.value(&fx, &start)), [100.0, 50.0]));
 }
