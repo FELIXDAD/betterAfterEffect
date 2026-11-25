@@ -1,6 +1,6 @@
 # QA 工具：AE 快捷键扫描
 
-按 AE 命令目录（`crates/bae-ui-motion/src/catalog`，生成的 `docs/ui/ae-commands.md` 和 `docs/ui/ae-shortcuts.json`）逐条检查 BAE 的 AE 默认快捷键。分两层：
+按 AE 命令目录（`crates/bae-ui-motion/src/catalog`，见 `docs/ui/ae-commands.md`）逐条检查 BAE 的 AE 默认快捷键。分两层：
 
 | 层 | 在哪跑 | 做什么 |
 |---|---|---|
@@ -33,6 +33,14 @@ powershell -ExecutionPolicy Bypass -File tools\qa\shortcut_sweep_windows.ps1 `
 ```
 
 SendInput 发给前台窗口：脚本会把 BAE 放到前台，跑的时候不要动键盘鼠标。
+
+## 快捷键表
+
+两个真机脚本启动时从命令目录现场生成快捷键表（每条：AE 命令、BAE 动作、Windows / Mac 键、作用域、负责人、状态），不读仓库里的文件。要单独生成：
+
+```sh
+BAE_SHORTCUTS_JSON=$PWD/ae-shortcuts.json cargo test -p bae-ui-motion --lib shortcuts_json
+```
 
 ## 动作日志
 

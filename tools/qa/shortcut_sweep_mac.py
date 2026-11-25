@@ -2,8 +2,9 @@
 """AE shortcut sweep on a real Mac: presses every AE default shortcut BAE has
 implemented as a real key event and checks which action BAE ran.
 
-Rows come from docs/ui/ae-shortcuts.json (generated from the AE command catalog,
-crates/bae-ui-motion/src/catalog). BAE runs with `BAE_HOME` in a temporary
+Rows come from the AE command catalog (crates/bae-ui-motion/src/catalog): the
+script generates the key table when it starts (`BAE_SHORTCUTS_JSON=<file> cargo
+test -p bae-ui-motion shortcuts_json`), or reads `--table`. BAE runs with `BAE_HOME` in a temporary
 folder (the user's settings and projects are not touched) and
 `BAE_ACTION_LOG=<file>`, which makes it append every action it dispatches as a
 JSON line; after each key the script reads the new lines.
@@ -179,6 +180,17 @@ class Bae:
                 self.proc.kill()
 
 
+def generate_table():
+    """The catalog's key table, generated now (not kept in the repository)."""
+    path = os.path.join(tempfile.mkdtemp(prefix="bae-shortcuts-"), "ae-shortcuts.json")
+    env = dict(os.environ, BAE_SHORTCUTS_JSON=path)
+    subprocess.run(
+        ["cargo", "test", "-q", "-p", "bae-ui-motion", "--lib", "shortcuts_json"],
+        cwd=ROOT, env=env, check=True, stdout=subprocess.DEVNULL,
+    )
+    return path
+
+
 def rows(path):
     with open(path) as f:
         data = json.load(f)
@@ -193,7 +205,7 @@ def rows(path):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--bae", default=os.path.join(ROOT, "target/release/bae"))
-    ap.add_argument("--table", default=os.path.join(ROOT, "docs/ui/ae-shortcuts.json"))
+    ap.add_argument("--table", default=None, help="key table JSON (default: generate it from the catalog)")
     ap.add_argument("--report", default=None)
     ap.add_argument("--settle", type=float, default=0.6, help="seconds to wait after each key")
     ap.add_argument("--limit", type=int, default=0)
@@ -215,7 +227,7 @@ def main():
     with open(os.path.join(args.lock, "owner"), "w") as f:
         f.write(f"shortcut_sweep_mac pid {os.getpid()}\n")
 
-    all_rows = rows(args.table)
+    all_rows = rows(args.table or generate_table())
     working = [r for r in all_rows if r["works"]]
     passed, failed, skipped, not_covered = [], [], [], []
     bae = None
@@ -276,7 +288,7 @@ def main():
     lines = [
         f"# AE 快捷键真机扫描（macOS，{date}）",
         "",
-        f"工具：`tools/qa/shortcut_sweep_mac.py`（真实按键：`orca computer hotkey` / `press-key`，后台发给 BAE 进程；BAE 的动作日志 `BAE_ACTION_LOG`）；数据：`docs/ui/ae-shortcuts.json`。",
+        f"工具：`tools/qa/shortcut_sweep_mac.py`（真实按键：`orca computer hotkey` / `press-key`，后台发给 BAE 进程；BAE 的动作日志 `BAE_ACTION_LOG`）；数据：命令目录现场生成的快捷键表。",
         "",
         f"- AE 默认快捷键（BAE 能绑定的 Mac 键）：{len(all_rows)} 条命令",
         f"- 已实现：{len(working)} 条；真机按键测了 {len(passed) + len(failed)} 个键，通过 {len(passed)}，失败 {len(failed)}",

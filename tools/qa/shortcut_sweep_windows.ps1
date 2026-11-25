@@ -1,8 +1,9 @@
 # AE shortcut sweep on a real Windows PC: presses every AE default shortcut BAE
 # has implemented as a real key event (SendInput) and checks which action BAE ran.
 #
-# Rows come from docs/ui/ae-shortcuts.json (generated from the AE command
-# catalog). BAE runs with BAE_HOME in a temporary folder (the user's settings and
+# Rows come from the AE command catalog: the script generates the key table when
+# it starts (BAE_SHORTCUTS_JSON=<file> cargo test -p bae-ui-motion shortcuts_json),
+# or reads -Table. BAE runs with BAE_HOME in a temporary folder (the user's settings and
 # projects are not touched) and BAE_ACTION_LOG=<file>, which makes it append
 # every action it dispatches as a JSON line; after each key the script reads the
 # new lines. SendInput goes to the foreground window: the script brings BAE to
@@ -14,7 +15,7 @@
 
 param(
     [string]$Bae = "target\release\bae.exe",
-    [string]$Table = "docs\ui\ae-shortcuts.json",
+    [string]$Table = "",
     [string]$Report = "",
     [double]$Settle = 0.6,
     [int]$Limit = 0
@@ -91,6 +92,13 @@ function NewActions { $lines = @(Get-Content $log); $new = $lines[$script:read..
 foreach ($c in @("Cmd+N", "Cmd+Y")) { Press $c; Start-Sleep 1; Press "Enter"; Start-Sleep 1 }
 NewActions | Out-Null
 
+if (-not $Table) {
+    # The catalog's key table, generated now (not kept in the repository).
+    $Table = Join-Path ([IO.Path]::GetTempPath()) "bae-ae-shortcuts.json"
+    $env:BAE_SHORTCUTS_JSON = $Table
+    cargo test -q -p bae-ui-motion --lib shortcuts_json | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "generating the key table failed" }
+}
 $rows = (Get-Content $Table -Raw | ConvertFrom-Json).rows | Where-Object { -not $_.native -and -not $_.shadowed -and $_.own_panel -and $_.windows.Count -gt 0 }
 $working = @($rows | Where-Object { $_.works }); if ($Limit -gt 0) { $working = $working[0..($Limit - 1)] }
 $passed = @(); $failed = @(); $skipped = @(); $notCovered = @()
