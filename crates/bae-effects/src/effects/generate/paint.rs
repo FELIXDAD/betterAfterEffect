@@ -201,6 +201,7 @@ pub(super) fn kernel(
                 wgsl: [
                     image_grid::CHANNEL_MATH,
                     include_str!("../../shaders/image_grid.wgsl"),
+                    include_str!("dash.wgsl"),
                     include_str!("paint.wgsl"),
                 ]
                 .concat()

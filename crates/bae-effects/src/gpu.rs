@@ -32,6 +32,7 @@ pub(crate) enum Binding {
     /// A write-only storage texture.
     Storage(wgpu::TextureFormat),
     ReadBuffer,
+    ReadWriteBuffer,
 }
 
 /// A compute pipeline and its bind group layout.
@@ -81,6 +82,7 @@ pub(crate) fn format_key(format: wgpu::TextureFormat) -> u64 {
 }
 
 /// A resource bound to a kernel binding.
+#[derive(Clone, Copy)]
 pub(crate) enum Resource<'a> {
     /// Ring uniform (the dynamic offset is passed at dispatch).
     Uniform,
@@ -236,8 +238,10 @@ impl Runtime {
                         },
                         multisampled: false,
                     },
-                    Binding::ReadBuffer => wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    Binding::ReadBuffer | Binding::ReadWriteBuffer => wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage {
+                            read_only: matches!(kind, Binding::ReadBuffer),
+                        },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
