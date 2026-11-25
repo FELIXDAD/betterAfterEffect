@@ -8,9 +8,11 @@
 mod camera_settings;
 mod comp_settings;
 pub(crate) mod fields;
+mod go_to_time;
 mod light_settings;
 pub mod memory;
 mod precompose;
+mod project_settings;
 mod solid_settings;
 
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -42,6 +44,10 @@ pub enum Dialog {
     LightSettings(Box<LightSettings>),
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C).
     Precompose(Box<PrecomposeDialog>),
+    /// View > Go to Time (Alt+Shift+J).
+    GoToTime(Box<go_to_time::GoToTime>),
+    /// File > Project Settings (Cmd/Ctrl+Alt+Shift+K).
+    ProjectSettings(Box<project_settings::ProjectSettings>),
     /// An alert: a message and OK (import errors …).
     Alert { title: String, message: String },
 }
@@ -233,6 +239,28 @@ pub(crate) fn precompose(cx: &PanelContext<'_>, layers: Vec<PrimPath>) {
     }
 }
 
+/// Open Go to Time for the active comp.
+pub(crate) fn go_to_time(cx: &PanelContext<'_>, session: &SharedSession) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none()
+        && let Some(g) = go_to_time::GoToTime::new(cx.stage, session)
+    {
+        d.open = Some(Dialog::GoToTime(Box::new(g)));
+    }
+}
+
+/// Open Project Settings.
+pub(crate) fn project_settings(cx: &PanelContext<'_>) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none() {
+        d.open = Some(Dialog::ProjectSettings(Box::new(
+            project_settings::ProjectSettings::new(cx.stage),
+        )));
+    }
+}
+
 /// Open Camera Settings for a new camera in the active comp.
 pub(crate) fn new_camera(cx: &PanelContext<'_>, session: &SharedSession) {
     let dialogs = shared(cx.resources);
@@ -272,6 +300,8 @@ pub(crate) fn strings() -> Vec<&'static str> {
         camera_settings::STRINGS,
         light_settings::STRINGS,
         precompose::STRINGS,
+        go_to_time::STRINGS,
+        project_settings::STRINGS,
     ]
     .concat()
 }
@@ -298,6 +328,8 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::CameraSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::LightSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::Precompose(d) => d.ui(ctx, cx, &session, &dialogs),
+            Dialog::GoToTime(d) => d.ui(ctx, cx, &session),
+            Dialog::ProjectSettings(d) => d.ui(ctx, cx),
             Dialog::Alert { title, message } => alert_ui(ctx, title, message),
         };
         let mut lock = dialogs.lock();
