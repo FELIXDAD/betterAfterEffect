@@ -2,7 +2,7 @@
 import argparse
 import base64
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -96,6 +96,10 @@ def initialize():
         db.execute("""create table if not exists pulls(
             number integer primary key, item text, title text, state text, updated text)""")
         db.execute("create table if not exists github_prs(number integer primary key,status text,updated text)")
+        db.execute("""create table if not exists pr_activity(number integer primary key,
+            queued integer not null, committed_at text, author text)""")
+        db.execute("""create table if not exists doing_ping(item text primary key,
+            agent text not null, updated text not null)""")
         db.execute("""create table if not exists github_links(
             item text, number integer, primary key(item,number))""")
         db.execute("begin immediate")
@@ -223,13 +227,13 @@ def reconcile(db, issue, pulls, events):
             set merged=excluded.merged where merged!=excluded.merged""", (t["fix"], json.dumps(merged)))
 
 
-def milestone_status(prs, states):
+def milestone_status(prs, states, recent=False):
     if prs and all(states.get(n) == "done" for n in prs):
         return "done"
+    if recent or any(states.get(n) == "doing" for n in prs):
+        return "doing"
     if any(states.get(n) == "ready" for n in prs):
         return "ready"
-    if any(states.get(n) == "doing" for n in prs):
-        return "doing"
     return "todo"
 
 
@@ -284,6 +288,12 @@ def apply_github(data):
                 set status=excluded.status,updated=excluded.updated
                 where status!=excluded.status or updated!=excluded.updated""",
                        (pr["number"], pr["status"], pr["updated_at"]))
+            if "queued" in pr:
+                db.execute("""insert into pr_activity values(?,?,?,?) on conflict(number) do update
+                    set queued=excluded.queued,committed_at=excluded.committed_at,author=excluded.author
+                    where queued!=excluded.queued or committed_at is not excluded.committed_at
+                    or author is not excluded.author""",
+                           (pr["number"], bool(pr["queued"]), pr.get("committed_at"), pr.get("commit_author")))
         for issue in issues.values():
             if issue["parity"]:
                 reconcile(db, issue, pulls, issue["events"])
@@ -357,11 +367,40 @@ def snapshot():
         links = {}
         for link in db.execute("select * from github_links"):
             links.setdefault(link["item"], set()).add(link["number"])
+        clock = datetime.now(timezone.utc)
+        cutoff = (clock - timedelta(hours=2)).timestamp()
+        commits = {}
+        queue = 0
+        for r in db.execute("select * from pr_activity"):
+            queue += int(r["queued"] and states.get(r["number"]) in ("ready","doing"))
+            if r["committed_at"]:
+                epoch = datetime.fromisoformat(r["committed_at"].replace("Z","+00:00")).timestamp()
+                commits[r["number"]] = (epoch, r["committed_at"], r["author"], "commit")
+        reports = {}
+        for r in db.execute("""select a.item,a.updated,a.agent from activity a join
+                (select max(seq) seq from activity group by item) latest using(seq)
+                union all select item,updated,agent from doing_ping"""):
+            epoch = datetime.fromisoformat(r["updated"]).timestamp()
+            if r["item"] not in reports or epoch >= reports[r["item"]][0]:
+                reports[r["item"]] = (epoch, r["updated"], r["agent"], "report")
+        doing = dict(db.execute("""select item,max(updated) from (
+            select item,updated from activity where status='doing'
+            union all select item,updated from doing_ping) group by item"""))
         for item in items:
             item["prs"] = sorted(set(json.loads(item["prs"])) | links.get(item["id"], set()))
             if item["kind"] == "milestone":
                 item["repair_status"] = item["status"]
-                item["status"] = milestone_status(item["prs"], states)
+                history = [commits[n] for n in item["prs"] if n in commits]
+                recent = any(cutoff < entry[0] <= clock.timestamp() for entry in history)
+                if item["id"] in doing:
+                    recent |= cutoff < datetime.fromisoformat(doing[item["id"]]).timestamp() <= clock.timestamp()
+                if item["id"] in reports:
+                    history.append(reports[item["id"]])
+                latest = max(history, key=lambda e:e[0]) if history else None
+                item["last_activity"] = dict(time=latest[1], agent=latest[2], source=latest[3]) if latest else None
+                item["pr_counts"] = {key: sum(states.get(n)==key for n in item["prs"])
+                                     for key in ("done","ready","doing")}
+                item["status"] = milestone_status(item["prs"], states, recent)
                 item["updated"] = max([item["updated"]] + [updated[n] for n in item["prs"] if n in updated])
         agents = [dict(row) for row in db.execute(
             "select a.* from activity a join (select max(seq) seq from activity group by agent) b using(seq)")]
@@ -375,7 +414,7 @@ def snapshot():
             issue["tasks"] = list(parity_tasks(issue["number"], issue["title"]))
             for task in issue["tasks"]:
                 task["merged"] = merged.get(task["fix"], [])
-        return dict(milestone=BOARD["milestone"], items=items, agents=agents, activity=feed, parity=issues)
+        return dict(milestone=BOARD["milestone"], merge_queue=queue, items=items, agents=agents, activity=feed, parity=issues)
 
 
 def field(data, key, limit, required=False):
@@ -401,6 +440,13 @@ def report(data):
     with closing(connect()) as db, db:
         db.execute("begin immediate")
         row = db.execute("select * from items where id=?", (item,)).fetchone()
+        reported_status = status
+        ping_changed = False
+        if status == "doing" and (not row or row["kind"] == "milestone"):
+            ping_changed = bool(db.execute("""insert into doing_ping values(?,?,?) on conflict(item)
+                do update set agent=excluded.agent,updated=excluded.updated
+                where agent!=excluded.agent or updated!=excluded.updated""",
+                (item, agent, stamp)).rowcount)
         if row and re.fullmatch(r"ae-\d+(?:-\d+)?-fix", item):
             status = row["status"]
         if not row:
@@ -413,11 +459,11 @@ def report(data):
         if pr and int(pr) not in prs:
             prs.append(int(pr))
         elif row and (row["status"], row["agent"], row["note"]) == (status, agent, note):
-            return False
+            return ping_changed
         db.execute("update items set status=?,agent=?,note=?,updated=?,prs=? where id=?",
                    (status, agent, note, stamp, json.dumps(prs), item))
         db.execute("insert into activity(item,agent,status,note,updated) values(?,?,?,?,?)",
-                   (item, agent, status, note, stamp))
+                   (item, agent, reported_status, note, stamp))
     return True
 
 

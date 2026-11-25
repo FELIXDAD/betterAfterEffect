@@ -41,18 +41,38 @@ def timeline(number):
     return result
 
 
+def pull_records():
+    query = """query($endCursor:String) {
+      repository(owner:"FELIXDAD",name:"betterAfterEffects") {
+        pullRequests(first:50,after:$endCursor) {
+          pageInfo { hasNextPage endCursor }
+          nodes { number state isDraft title body mergedAt updatedAt mergeCommit { oid }
+            labels(first:100) { nodes { name } }
+            commits(last:1) { nodes { commit { committedDate author { name user { login } } } } }
+          }
+        }
+      }
+    }"""
+    raw = subprocess.check_output(["gh","api","graphql","--paginate","--slurp","-f","query="+query],
+                                  timeout=180)
+    for page in json.loads(raw):
+        for pr in page["data"]["repository"]["pullRequests"]["nodes"]:
+            opened = pr["state"] == "OPEN"
+            labels = {x["name"].lower() for x in pr["labels"]["nodes"]}
+            state = {"MERGED":"done", "CLOSED":"closed", "OPEN":"doing" if pr["isDraft"] else "ready"}[pr["state"]]
+            commits = pr["commits"]["nodes"]
+            commit = commits[-1]["commit"] if commits else {}
+            author = commit.get("author") or {}
+            yield dict(number=pr["number"], status=state, title=pr["title"], body=evidence(pr["body"]),
+                       merged_at=pr["mergedAt"], updated_at=pr["updatedAt"],
+                       merge_commit_sha=(pr["mergeCommit"] or {}).get("oid"),
+                       queued=opened and "merge-ready" in labels,
+                       committed_at=commit.get("committedDate"),
+                       commit_author=(author.get("user") or {}).get("login") or author.get("name"))
+
+
 def collect():
-    pulls = []
-    for pr in pages("pulls?state=all&per_page=100"):
-        state = "closed"
-        if pr["merged_at"]:
-            state = "done"
-        elif pr["state"] == "open":
-            labels = {x["name"].lower() for x in pr["labels"]}
-            state = "ready" if not pr["draft"] or labels & {"ready","merge-ready"} else "doing"
-        pulls.append(dict(number=pr["number"], status=state, title=pr["title"],
-                          body=evidence(pr["body"]), merged_at=pr["merged_at"],
-                          updated_at=pr["updated_at"], merge_commit_sha=pr["merge_commit_sha"]))
+    pulls = list(pull_records())
     issues = []
     cache = json.loads(CACHE.read_text()) if CACHE.exists() else {}
     for issue in pages("issues?state=all&per_page=100"):

@@ -83,5 +83,35 @@ class ParityTest(unittest.TestCase):
     def test_milestone_state_is_derived_from_all_linked_prs(self):
         states = {1:"done", 2:"done", 3:"doing", 4:"ready", 5:"closed"}
         for prs, expected in (([], "todo"), ([1,2], "done"), ([1,3], "doing"),
-                              ([3,4], "ready"), ([1,5], "todo"), ([999], "todo")):
+                              ([3,4], "doing"), ([1,5], "todo"), ([999], "todo")):
             self.assertEqual(server.milestone_status(prs, states), expected)
+
+    def test_recent_work_queue_and_last_activity(self):
+        from datetime import datetime, timedelta, timezone
+        with tempfile.TemporaryDirectory() as tmp, patch.object(server, "DB", Path(tmp) / "board.db"), patch.object(server, "effects", return_value=[]):
+            server.initialize()
+            clock = datetime.now(timezone.utc)
+            old = (clock-timedelta(hours=3)).isoformat()
+            fresh = (clock-timedelta(minutes=10)).isoformat()
+            pr = dict(number=324, status="ready", updated_at=fresh, committed_at=old,
+                      commit_author="developer", queued=True)
+            def sync():
+                server.apply_github(dict(pulls=[pr],issues=[]))
+                state = server.snapshot()
+                self.assertEqual(state["merge_queue"], int(pr["queued"] and pr["status"] in ("ready","doing")))
+                return next(x for x in state["items"] if x["id"] == "shape-ops")
+            self.assertEqual(sync()["status"], "ready")
+            pr["committed_at"] = fresh
+            item = sync()
+            self.assertEqual(item["status"], "doing")
+            self.assertEqual(item["last_activity"]["agent"], "developer")
+            self.assertEqual(item["pr_counts"], {"done":0,"ready":1,"doing":0})
+            pr["committed_at"] = old
+            server.report(dict(item="shape-ops",agent="worker",status="doing"))
+            item = sync()
+            self.assertEqual(item["last_activity"]["agent"], "worker")
+            self.assertEqual(item["status"], "doing")
+            pr.update(status="done", queued=False)
+            self.assertEqual(sync()["status"], "done")
+            server.report(dict(item="no-pr",agent="worker",status="doing"))
+            self.assertEqual(next(x for x in server.snapshot()["items"] if x["id"]=="no-pr")["status"], "doing")
