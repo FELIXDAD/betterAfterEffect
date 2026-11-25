@@ -27,6 +27,8 @@ pub(crate) mod ids {
     /// Esc.
     pub const LAST: &str = "motion.view.switch_to_last_3d_view";
     pub const RESET: &str = "motion.view.reset_3d_view";
+    /// `{"views": 1 | 2 | 4}`: View ▸ Switch View Layout.
+    pub const LAYOUT: &str = "motion.view.view_layout";
 }
 
 /// `(action id, English title)` for the action registry.
@@ -36,6 +38,7 @@ pub(crate) const ACTIONS: &[(&str, &str)] = &[
     (ids::ASSIGN, "Assign 3D View Shortcut"),
     (ids::LAST, "Switch to Last 3D View"),
     (ids::RESET, "Reset 3D View"),
+    (ids::LAYOUT, "Switch View Layout"),
 ];
 
 /// The 3D view shortcut commands, named as in AE's Keyboard Shortcuts.
@@ -189,14 +192,64 @@ const CUSTOM: [([f64; 3], f64); 3] = [
 /// One comp's 3D views.
 #[derive(Clone, Debug, Default)]
 pub struct Views {
+    /// The active view's 3D view.
     pub current: View3d,
     /// Where Esc goes back to.
     pub last: View3d,
     /// Cameras the camera tools moved (the others are [`ViewCamera::initial`]).
     cameras: HashMap<View3d, ViewCamera>,
+    /// The other views of the layout (View ▸ Switch View Layout), in order;
+    /// the active view is at `active`.
+    others: Vec<View3d>,
+    active: usize,
 }
 
 impl Views {
+    /// Views in the layout: 1, 2 or 4.
+    pub fn layout(&self) -> usize {
+        self.others.len() + 1
+    }
+
+    /// 1, 2 or 4 views. The active view keeps its 3D view and comes last;
+    /// the others start as AE's (Top; Top, Front, Right, 待核).
+    pub fn set_layout(&mut self, n: usize) {
+        use OrthoView::*;
+        let others: &[View3d] = match n {
+            2 => &[View3d::Ortho(Top)],
+            4 => &[
+                View3d::Ortho(Top),
+                View3d::Ortho(Front),
+                View3d::Ortho(Right),
+            ],
+            _ => &[],
+        };
+        self.others = others.to_vec();
+        self.active = others.len();
+    }
+
+    /// The 3D view of each view of the layout, in order.
+    pub fn panes(&self) -> Vec<View3d> {
+        let mut v = self.others.clone();
+        v.insert(self.active.min(v.len()), self.current);
+        v
+    }
+
+    /// Index of the active view.
+    pub fn active(&self) -> usize {
+        self.active
+    }
+
+    /// Make view `i` of the layout the active one (a click in it).
+    pub fn activate(&mut self, i: usize) {
+        let mut panes = self.panes();
+        if i >= panes.len() || i == self.active {
+            return;
+        }
+        self.current = panes.remove(i);
+        self.others = panes;
+        self.active = i;
+    }
+
     pub fn switch(&mut self, to: View3d) {
         if to != self.current {
             self.last = self.current;
@@ -219,8 +272,12 @@ impl Views {
     /// The camera the viewer shows the current view with; `None` for Active
     /// Camera (the comp's own).
     pub fn camera(&self, size: DVec2) -> Option<Camera> {
-        (self.current != View3d::Active)
-            .then(|| self.view_camera(self.current, size).camera(self.current))
+        self.camera_of(self.current, size)
+    }
+
+    /// The camera `view` shows the comp with; `None` for Active Camera.
+    pub fn camera_of(&self, view: View3d, size: DVec2) -> Option<Camera> {
+        (view != View3d::Active).then(|| self.view_camera(view, size).camera(view))
     }
 }
 
@@ -303,9 +360,27 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>) -> bool {
             let current = views.current;
             s.view_shortcuts.0[slot(inv)] = current;
         }
+        ids::LAYOUT => {
+            let n = inv
+                .params
+                .get("views")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(1);
+            views.set_layout(n as usize);
+        }
         _ => {}
     }
     true
+}
+
+/// The active comp's view layout: 1, 2 or 4 views.
+pub(crate) fn layout(resources: &bae_app::Resources) -> usize {
+    let session = common::session(resources);
+    let s = session.lock();
+    s.active_comp
+        .as_ref()
+        .and_then(|c| s.views3d.get(c))
+        .map_or(1, Views::layout)
 }
 
 /// Active Camera ▸ Reset: the comp's camera layer at `(W/2, H/2, −zoom)` aimed

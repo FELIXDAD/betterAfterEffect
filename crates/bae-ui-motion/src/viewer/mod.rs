@@ -29,6 +29,7 @@ pub(crate) mod errors;
 mod free_transform;
 pub(crate) mod guides;
 mod gizmo3d;
+mod layout;
 mod menu;
 mod motion_path;
 mod overlay;
@@ -74,6 +75,8 @@ pub struct CompositionViewer {
     pending_zoom: Option<bool>,
     gpu: Option<GpuPreview>,
     gpu_tried: bool,
+    /// GPU previews of the other views of the layout (by view index).
+    extra_gpu: Vec<Option<GpuPreview>>,
     /// The last frame came from the GPU compositor.
     on_gpu: bool,
     /// Space is held over the viewer (temporary Hand tool): whether the comp was
@@ -434,6 +437,16 @@ impl Panel for CompositionViewer {
         let bar_h = 28.0;
         let area = Rect::from_min_max(full.min, pos2(full.right(), full.bottom() - bar_h));
         let bar = Rect::from_min_max(pos2(full.left(), area.bottom()), full.max);
+        // View layout: the active view is the viewer, the others are drawn below.
+        let (panes, active) = session
+            .lock()
+            .views3d
+            .get(&info.path)
+            .map_or((vec![view3d::View3d::Active], 0), |v| {
+                (v.panes(), v.active())
+            });
+        let pane_rects = layout::rects(area, panes.len());
+        let area = pane_rects[active.min(pane_rects.len() - 1)];
         // View ▸ Show Rulers: along the top and left of the viewer.
         let (rulers, area) = guides::layout(area, opts.rulers);
         let resp = ui
@@ -992,6 +1005,7 @@ impl Panel for CompositionViewer {
         }
 
         self.banner.ui(ui, cx, &session, area);
+        self.other_views(ui, cx, &session, &info, &comp, &pane_rects, &panes, active);
         bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
         self.esc_taken = self.shape.is_some()
             || self.pen.busy()
