@@ -91,15 +91,16 @@ impl RenderEngine {
             stage,
             evaluator: &mut self.anim,
         };
-        let frame = self
-            .renderer
-            .render_frame_with(rc, &request, Some(&mut frames))?;
+        // The frame and its 8-bit conversion in one GPU submission.
+        let (frame, texture) = self.renderer.render_frame_output(
+            rc,
+            &request,
+            Some(&mut frames),
+            OutputAlpha::Premultiplied,
+        )?;
         if frame.incomplete {
             return Ok(None);
         }
-        let texture = self
-            .renderer
-            .output_texture(&frame, OutputAlpha::Premultiplied)?;
         Ok(Some((texture, frame.image.rect)))
     }
 }

@@ -153,6 +153,9 @@ pub(crate) struct Executed {
     pub incomplete: bool,
     /// CPU time encoding each node (by node index), when timed.
     pub node_times: Vec<std::time::Duration>,
+    /// The frame converted into a new RGBA8 texture (when asked for),
+    /// recorded in the frame's own submission.
+    pub output: Option<wgpu::Texture>,
 }
 
 struct PoolAllocator<'a> {
@@ -168,8 +171,10 @@ impl ImageAllocator for PoolAllocator<'_> {
     }
 }
 
-/// Executes `graph` and submits it. Returns the output node's image (and,
-/// when `timed`, the CPU time of every node).
+/// Executes `graph` and submits it once. Returns the output node's image,
+/// with `output` its conversion into a new RGBA8 texture recorded before the
+/// same submission (the viewer path: one submit per frame), and, when
+/// `timed`, the CPU time of every node.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn execute(
     gpu: &Arc<GpuContext>,
@@ -180,6 +185,7 @@ pub(crate) fn execute(
     graph: &RenderGraph,
     format: wgpu::TextureFormat,
     timed: bool,
+    output: Option<crate::OutputAlpha>,
 ) -> Result<Executed, RenderError> {
     let device = gpu.device();
     let total_draws: usize = graph
@@ -399,16 +405,56 @@ pub(crate) fn execute(
     }
     let draw_calls = ctx.draw_calls;
     let passes = ctx.passes;
-    gpu.queue().submit([encoder.finish()]);
     let image = outputs[graph.output.index()]
         .take()
         .ok_or_else(|| RenderError::Other("graph produced no output".into()))?;
+    let output = output.map(|alpha| {
+        let [w, h] = image.texel_size();
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("bae-render.output"),
+            size: wgpu::Extent3d {
+                width: w.max(1),
+                height: h.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("bae-render.output"),
+            size: crate::renderer::OUTPUT_PARAMS_SIZE,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        gpu.queue()
+            .write_buffer(&uniform, 0, &crate::renderer::output_params(alpha, false));
+        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        record_output_pass(
+            device,
+            ctx.pipelines,
+            &mut encoder,
+            &image,
+            &view,
+            wgpu::TextureFormat::Rgba8Unorm,
+            &uniform,
+        );
+        target
+    });
+    gpu.queue().submit([encoder.finish()]);
+    ctx.pipelines.end_frame();
     Ok(Executed {
         image,
         draw_calls,
         passes,
         incomplete,
         node_times,
+        output,
     })
 }
 
@@ -1048,4 +1094,51 @@ fn plan_op(
         data.mode[1] |= flags::MASK;
     }
     Ok(Some(data))
+}
+
+/// Records the output conversion of `image` into `target` (a `format` view).
+pub(crate) fn record_output_pass(
+    device: &wgpu::Device,
+    pipelines: &mut Pipelines,
+    encoder: &mut wgpu::CommandEncoder,
+    image: &GpuImage,
+    target: &wgpu::TextureView,
+    format: wgpu::TextureFormat,
+    uniform: &wgpu::Buffer,
+) {
+    let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bae-render.output"),
+        layout: &pipelines.output_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&image.view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: uniform.as_entire_binding(),
+            },
+        ],
+    });
+    let [w, h] = image.texel_size();
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("bae-render.output"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: target,
+            depth_slice: None,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: None,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    });
+    pass.set_pipeline(pipelines.output_for(device, format));
+    pass.set_bind_group(0, &group, &[]);
+    pass.set_scissor_rect(0, 0, w.max(1), h.max(1));
+    pass.draw(0..3, 0..1);
 }

@@ -653,7 +653,16 @@ impl Builder<'_, '_> {
         }
         let mut h = FxHasher::default();
         "composite".hash(&mut h);
-        comp.hash_content(&mut h);
+        if depth == 0 {
+            // The frame's own comp is the only root: its key only has to be
+            // unique in this graph, so the whole comp is not hashed per frame
+            // (1000 layers: ~6 % of render+submit). Nested comps hash their
+            // content so identical pre-comp instances share one node.
+            comp.path.hash(&mut h);
+            comp.time.hash(&mut h);
+        } else {
+            comp.hash_content(&mut h);
+        }
         rect.hash(&mut h);
         scale.to_bits().hash(&mut h);
         self.clamp.hash(&mut h);
@@ -2418,19 +2427,29 @@ mod tests {
 
     #[test]
     fn keys_are_stable_and_parameter_sensitive() {
-        let mut comp = RenderComp::new(p("/comps/main"), 100, 100);
-        comp.layers.push(solid("a", 10, 10, [1.0; 4], (0.0, 0.0)));
-        let k1 = build_default(&comp, &RenderRequest::full())
-            .output_node()
-            .key;
-        let k2 = build_default(&comp, &RenderRequest::full())
-            .output_node()
-            .key;
-        assert_eq!(k1, k2);
-        comp.layers[0].opacity = 0.5;
-        let k3 = build_default(&comp, &RenderRequest::full())
-            .output_node()
-            .key;
+        // A nested comp's node key follows its content (identical pre-comp
+        // instances share a node); the root's only has to be stable.
+        let mut inner = RenderComp::new(p("/comps/inner"), 50, 50);
+        inner.layers.push(solid("a", 10, 10, [1.0; 4], (0.0, 0.0)));
+        let nested_key = |inner: &RenderComp| {
+            let mut comp = RenderComp::new(p("/comps/main"), 100, 100);
+            comp.layers.push(RenderLayer::new(
+                p("/comps/main/layers/pre"),
+                LayerContent::Comp(Arc::new(inner.clone())),
+            ));
+            let g = build_default(&comp, &RenderRequest::full());
+            let nested = g
+                .nodes
+                .iter()
+                .find(|n| matches!(&n.kind, NodeKind::Composite(c) if c.prim == inner.path))
+                .map(|n| n.key);
+            (g.output_node().key, nested.expect("nested composite"))
+        };
+        let (root1, k1) = nested_key(&inner);
+        let (root2, k2) = nested_key(&inner);
+        assert_eq!((root1, k1), (root2, k2));
+        inner.layers[0].opacity = 0.5;
+        let (_, k3) = nested_key(&inner);
         assert_ne!(k1, k3);
     }
 }
