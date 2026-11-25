@@ -247,7 +247,7 @@ pub(crate) const fn layer_stage_id(layer_id: u32) -> u32 {
 /// in the same one-based order as the corresponding parameter definition.
 pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static str]> {
     Some(match (match_name, param_id) {
-        (_, 0x10001 | 0x10003) => &["源", "蒙版", "效果和蒙版"],
+        (_, 0x10001..=0x1ffff) => &["源", "蒙版", "效果和蒙版"],
         ("ADBE Echo", 5) => &[
             "相加",
             "最大值",
@@ -274,6 +274,16 @@ pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static 
         ("ADBE Displacement Map", 6) => &["中心图", "伸缩对应图以适合", "拼贴图"],
         ("ADBE Texturize", 4) => &["拼贴纹理", "居中纹理", "拉伸纹理以适合"],
         ("ADBE Dropdown Control", 1) => &["项目 1", "项目 2", "项目 3"],
+        (
+            "ADBE Camera Lens Blur"
+            | "ADBE Smart Blur"
+            | "ADBE Channel Blur"
+            | "CC Radial Blur"
+            | "CC Radial Fast Blur"
+            | "CC Vector Blur"
+            | "CS CrossBlur",
+            id,
+        ) => return crate::effects::spatial::optics::definitions::options(match_name, id),
         ("ADBE Minimax", 1) => &["最小值", "最大值", "先最小值再最大值", "先最大值再最小值"],
         ("ADBE Minimax", 3) => &["颜色", "Alpha 和颜色", "红色", "绿色", "蓝色", "Alpha"],
         ("ADBE Minimax", 4) => &["水平和垂直", "仅水平", "仅垂直"],

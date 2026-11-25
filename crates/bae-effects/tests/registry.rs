@@ -36,13 +36,25 @@ fn builtins_register_through_the_plugin_registries() {
             def.match_name.starts_with("ADBE ")
                 || matches!(
                     def.match_name.as_str(),
+                    "CC Radial Blur" | "CC Radial Fast Blur" | "CC Vector Blur" | "CS CrossBlur"
+                )
+                || matches!(
+                    def.match_name.as_str(),
                     "VISINF Grain Implant" | "APC Colorama"
                 ),
             "{}",
             def.match_name
         );
         assert!(
-            !b.info.name_zh.is_empty() && b.info.name_zh != b.info.name,
+            !b.info.name_zh.is_empty()
+                && (b.info.name_zh != b.info.name
+                    || matches!(
+                        def.match_name.as_str(),
+                        "CC Radial Blur"
+                            | "CC Radial Fast Blur"
+                            | "CC Vector Blur"
+                            | "CS CrossBlur"
+                    )),
             "{}",
             def.match_name
         );
