@@ -47,6 +47,7 @@ pub mod footage;
 mod frame_blend;
 pub mod geom;
 mod gpu;
+mod gpu_timer;
 pub mod graph;
 pub mod input;
 pub mod light;
