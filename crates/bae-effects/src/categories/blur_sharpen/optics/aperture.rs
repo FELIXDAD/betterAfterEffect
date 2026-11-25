@@ -3,7 +3,7 @@ use super::{Mode, Shader, image_grid};
 use crate::{EffectTarget, params::Params};
 use bae_render::{EffectParams, GpuImage, IRect, RenderError};
 
-const HALF_RADIUS: f64 = 16.;
+pub(super) const HALF_RADIUS: f64 = 16.;
 
 fn half_rect(r: IRect) -> IRect {
     IRect::new(
@@ -46,7 +46,7 @@ pub(super) fn render(
     };
     let (working, stage, out) = if wide {
         (
-            image_grid::half_level(target, &prepared, IRect::EMPTY, grid)?,
+            image_grid::half_level(target, &prepared, IRect::EMPTY, grid, !lens || v.b(21))?,
             Params::new(v.def, &low_params),
             half_rect(roi).inflate(1),
         )
@@ -75,7 +75,7 @@ pub(super) fn render(
             out,
             &working,
             [Some(input)],
-            [if map.is_some() { 1 } else { 2 }, 0],
+            [if map.is_some() { 1 } else { 2 }, u32::from(wide)],
         )?
     };
     if !wide {

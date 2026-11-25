@@ -49,11 +49,15 @@ fn gather(p: vec2f, mapped: bool) -> vec4f {
         let q = p + aperture_offset(vec2f(cos(angle),sin(angle)) * radial * mix(edge, 1., value(4)*0.01));
         let tap = packed(q);
         let coc = select(radius, radius*tap.a, mapped);
+        if mapped && coc == 0. { continue; }
         var w = saturate(coc-radius*radial+0.5) * radius*radius/max(1.,coc*coc);
         w *= 1. + 0.25*radial*radial*value(7)*0.01;
         sum += vec4f(tap.rgb, select(tap.a,coverage(q),mapped))*w;
         norm += w;
     }
+    // An in-focus cell receiving no scattered light can use the exact source pixel
+    // during reconstruction. Coverage in this intermediate is otherwise nonnegative.
+    if mapped && u.index == 1u && norm == 1. { return vec4f(0., 0., 0., -1.); }
     return finish(sum/norm);
 }
 fn axis(id: u32) -> vec2f {
@@ -81,6 +85,20 @@ fn rhombi(p: vec2f, first: bool) -> vec4f {
     }
     return sum/norm;
 }
+fn depth_resolve(p: vec2f) -> vec4f {
+    let sharp = finish(vec4f(fx_bilinear(map_b, u.images[2], border(p), false).rgb, src(border(p)).a));
+    let image = u.images[1];
+    let xy = (p - image.origin) * image.scale - 0.5;
+    let base = vec2i(floor(xy));
+    let f = fract(xy);
+    var sum = vec4f(0.);
+    for (var y = 0; y < 2; y++) { for (var x = 0; x < 2; x++) {
+        let tap = fx_load(map_a, image, base + vec2i(x,y), false);
+        let w = select(1.-f.x, f.x, x==1) * select(1.-f.y, f.y, y==1);
+        sum += w * select(tap, sharp, tap.a == -1.);
+    }}
+    return sum;
+}
 fn evaluate(p: vec2f) -> vec4f {
     switch u.stage {
         case 0u: { return prepare(p); }
@@ -88,10 +106,8 @@ fn evaluate(p: vec2f) -> vec4f {
         case 3u: { return rhombi(p,true); }
         case 4u: { return finish(rhombi(p,false)); }
         default: {
-            let blurred = fx_bilinear(map_a,u.images[1],p,false);
-            if !has(1u) { return blurred; }
-            let coc = fx_bilinear(map_b,u.images[2],p,false).a * value(1)*u.scale;
-            return mix(fx_bilinear(input_tex,u.images[0],p,false), blurred, smoothstep(0.,1.,coc));
+            if has(1u) { return depth_resolve(p); }
+            return fx_bilinear(map_a, u.images[1], p, false);
         }
     }
 }

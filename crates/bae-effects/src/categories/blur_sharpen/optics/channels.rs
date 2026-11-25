@@ -171,7 +171,7 @@ pub(super) fn render(
         uniforms.f32s(256 + i * 16, w);
     }
     let offset = gpu::push_uniform(&gpu::runtime(target.gpu()), &uniforms);
-    let mut pair = |[w, h]| -> Result<[GpuImage; 2], RenderError> {
+    let mut pair = |[w, h]: [u32; 2]| -> Result<[GpuImage; 2], RenderError> {
         let r = IRect::from_size(w, h);
         Ok([target.allocate(r, 1.)?, target.allocate(r, 1.)?])
     };

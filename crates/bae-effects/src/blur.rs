@@ -338,14 +338,6 @@ pub fn plan_gaussian(input: IRect, sigma: [f64; 2], edge: Edge, output: IRect) -
     }
 }
 
-/// A 2 × 2 area reduction aligned to the input texel grid.
-pub(crate) fn half_level(
-    target: &mut dyn EffectTarget,
-    input: &GpuImage,
-) -> Result<GpuImage, RenderError> {
-    reduce_level(target, input, [2, 2], false)
-}
-
 /// Box-average aligned source texels into the next Gaussian pyramid level.
 pub(crate) fn reduce_level(
     target: &mut dyn EffectTarget,
@@ -361,6 +353,9 @@ pub(crate) fn reduce_level(
         (r.x1 + x - 1).div_euclid(x),
         (r.y1 + y - 1).div_euclid(y),
     );
+    // Retain a fully extended edge texel beyond each partial box, so subsequent
+    // pyramid levels and convolutions repeat the true source edge.
+    let output = if repeat { output.inflate(1) } else { output };
     let mut step = Step::new("downsample", 0, None, r, output);
     step.factor = factor;
     step.clamp = repeat;

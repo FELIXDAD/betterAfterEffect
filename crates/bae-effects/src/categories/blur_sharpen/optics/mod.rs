@@ -176,7 +176,16 @@ impl Effect for Optics {
             };
             return roi.inflate((dx.hypot(dy) * travel).ceil() as i32 + 1);
         }
-        roi.inflate(self.radius(Params::new(&self.def, p)).ceil() as i32 + 2)
+        let v = Params::new(&self.def, p);
+        // A half-resolution neighborhood also reads the downsample and reconstruction footprints.
+        let padding = if matches!(self.mode, Mode::Lens | Mode::Bilateral | Mode::Smart)
+            && v.f(1) * p.scale >= aperture::HALF_RADIUS
+        {
+            6
+        } else {
+            2
+        };
+        roi.inflate(self.radius(v).ceil() as i32 + padding)
     }
     fn output_bounds(&self, p: &EffectParams<'_>, input: IRect) -> IRect {
         let v = Params::new(&self.def, p);

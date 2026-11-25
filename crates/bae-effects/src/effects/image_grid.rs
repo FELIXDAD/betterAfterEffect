@@ -105,6 +105,7 @@ pub(crate) fn half_level(
     source: &GpuImage,
     layer: IRect,
     grid: f64,
+    repeat: bool,
 ) -> Result<GpuImage, RenderError> {
     let scale = source.pixel_scale;
     let [x, y] = [source.rect.x0, source.rect.y0];
@@ -117,7 +118,7 @@ pub(crate) fn half_level(
     let mut texels = source.clone();
     texels.rect = IRect::new(lx, ly, lx + w as i32, ly + h as i32);
     texels.pixel_scale = 1.;
-    let mut base = crate::blur::half_level(target, &texels)?;
+    let mut base = crate::blur::reduce_level(target, &texels, [2, 2], repeat)?;
     let in_layer = |v: i32, offset: i32, origin: i32| {
         (f64::from(2 * v - offset) * scale + f64::from(origin)).round() as i32
     };

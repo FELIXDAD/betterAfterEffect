@@ -49,7 +49,7 @@ pub(super) fn encode(
     let kernel = image_grid::kernel_with_inputs(&rt, target.format(), LABEL, SOURCE, BYTES, 8)?;
     let out = target.allocate(image_grid::pixel_rect(pass.roi, pass.grid), pass.grid)?;
     let premult = crate::common::premultiplied(target, source)?;
-    let base = image_grid::half_level(target, &premult, pass.layer, pass.grid)?;
+    let base = image_grid::half_level(target, &premult, pass.layer, pass.grid, false)?;
     let mut levels = Vec::with_capacity(LEVELS);
     levels.push(source.clone());
     for index in 1..LEVELS {
