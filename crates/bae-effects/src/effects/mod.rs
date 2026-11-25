@@ -8,6 +8,7 @@ mod image_grid;
 mod layer_input;
 pub(crate) mod lut;
 pub(crate) mod morphology;
+mod sampled;
 pub(crate) mod set_matte;
 
 pub use blur::{BoxBlur, GaussianBlur};
