@@ -1,19 +1,116 @@
-//! Peak envelopes for visible sound layers. Decode one file at a time off the UI thread.
+//! Peak envelopes for visible sound layers. A single worker checks and decodes their sources.
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver};
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::time::{Duration, Instant};
 
 use super::*;
-use bae_media::{FileAudio, Waveform};
+use bae_media::{FileAudio, Waveform, source_id_for};
+
+const CHECK_INTERVAL: Duration = Duration::from_secs(2);
+const RETRY_INTERVAL: Duration = Duration::from_secs(5);
+
+struct Cached {
+    peaks: Option<(u64, Vec<Waveform>)>,
+    // None while a check is queued or running.
+    next_check: Option<Instant>,
+}
+
+enum PeakUpdate {
+    Unchanged,
+    Decoded(u64, Vec<Waveform>),
+    Unavailable,
+}
+
+fn check_file(path: &Path, previous: Option<u64>) -> PeakUpdate {
+    let id = source_id_for(path);
+    if previous == Some(id) {
+        return PeakUpdate::Unchanged;
+    }
+    let Ok(mut audio) = FileAudio::open(path) else {
+        return PeakUpdate::Unavailable;
+    };
+    let Ok(wave) = Waveform::from_source(&mut audio, 128) else {
+        return PeakUpdate::Unavailable;
+    };
+    let mut levels = vec![wave];
+    while levels.last().unwrap().buckets() > 2 {
+        levels.push(levels.last().unwrap().downsample(2));
+    }
+    PeakUpdate::Decoded(id, levels)
+}
+
+struct Worker {
+    requests: Sender<(PathBuf, Option<u64>)>,
+    results: Receiver<(PathBuf, PeakUpdate)>,
+}
+
+impl Worker {
+    fn start(ctx: egui::Context) -> Self {
+        let (requests, jobs) = mpsc::channel::<(PathBuf, Option<u64>)>();
+        let (complete, results) = mpsc::channel();
+        std::thread::spawn(move || {
+            for (path, previous) in jobs {
+                let update = check_file(&path, previous);
+                if complete.send((path, update)).is_err() {
+                    break;
+                }
+                ctx.request_repaint();
+            }
+        });
+        Self { requests, results }
+    }
+}
+
+impl Cached {
+    fn finish(&mut self, update: PeakUpdate, now: Instant) {
+        match update {
+            PeakUpdate::Unchanged => {}
+            PeakUpdate::Decoded(id, levels) => self.peaks = Some((id, levels)),
+            PeakUpdate::Unavailable => self.peaks = None,
+        }
+        let delay = if self.peaks.is_some() {
+            CHECK_INTERVAL
+        } else {
+            RETRY_INTERVAL
+        };
+        self.next_check = Some(now + delay);
+    }
+}
 
 #[derive(Default)]
 pub(super) struct Waveforms {
-    // A failed read is cached too, so a missing source isn't reopened every repaint.
-    files: HashMap<PathBuf, Vec<Waveform>>,
-    loading: Option<(PathBuf, Receiver<Vec<Waveform>>)>,
+    files: HashMap<PathBuf, Cached>,
+    worker: Option<Worker>,
 }
 
 impl Waveforms {
+    fn levels(&mut self, ctx: &egui::Context, file: PathBuf, now: Instant) -> &[Waveform] {
+        let worker = self
+            .worker
+            .get_or_insert_with(|| Worker::start(ctx.clone()));
+        for (path, result) in worker.results.try_iter() {
+            if let Some(entry) = self.files.get_mut(&path) {
+                entry.finish(result, now);
+            }
+        }
+        let entry = self.files.entry(file.clone()).or_insert(Cached {
+            peaks: None,
+            next_check: Some(now),
+        });
+        if let Some(due) = entry.next_check {
+            if now >= due {
+                let previous = entry.peaks.as_ref().map(|(id, _)| *id);
+                if worker.requests.send((file, previous)).is_ok() {
+                    entry.next_check = None;
+                }
+            } else {
+                ctx.request_repaint_after(due - now);
+            }
+        }
+        entry.peaks.as_ref().map_or(&[], |(_, levels)| levels)
+    }
+
     pub(super) fn draw(
         &mut self,
         ui: &Ui,
@@ -25,38 +122,7 @@ impl Waveforms {
         let Some(file) = crate::audio::layer_file(stage, layer) else {
             return;
         };
-        if let Some((_, rx)) = &self.loading {
-            let levels = match rx.try_recv() {
-                Ok(levels) => Some(levels),
-                Err(mpsc::TryRecvError::Disconnected) => Some(Vec::new()),
-                Err(mpsc::TryRecvError::Empty) => None,
-            };
-            if let Some(levels) = levels {
-                let (file, _) = self.loading.take().unwrap();
-                self.files.insert(file, levels);
-            }
-        }
-        let Some(levels) = self.files.get(&file) else {
-            if self.loading.is_none() {
-                let (tx, rx) = mpsc::channel();
-                self.loading = Some((file.clone(), rx));
-                let ctx = ui.ctx().clone();
-                std::thread::spawn(move || {
-                    let mut levels = Vec::new();
-                    if let Ok(mut audio) = FileAudio::open(&file)
-                        && let Ok(wave) = Waveform::from_source(&mut audio, 128)
-                    {
-                        levels.push(wave);
-                        while levels.last().is_some_and(|w| w.buckets() > 2) {
-                            levels.push(levels.last().unwrap().downsample(2));
-                        }
-                    }
-                    let _ = tx.send(levels);
-                    ctx.request_repaint();
-                });
-            }
-            return;
-        };
+        let levels = self.levels(ui.ctx(), file, Instant::now());
         let Some(fine) = levels.first() else { return };
         let timing = query::layer_timing(stage, layer);
         let start = rect
@@ -99,5 +165,58 @@ impl Waveforms {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn offline_and_replaced_wav_refresh_after_the_check_interval() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("clip.wav");
+        let write_wav = |sample: i16, seconds: u64| {
+            let mut wav = b"RIFF\x26\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\x02\0\0\0".to_vec();
+            wav.extend(sample.to_le_bytes());
+            std::fs::write(&file, wav).unwrap();
+            let modified = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(seconds);
+            std::fs::File::options()
+                .write(true)
+                .open(&file)
+                .unwrap()
+                .set_modified(modified)
+                .unwrap();
+        };
+        let ctx = egui::Context::default();
+        let mut waveforms = Waveforms::default();
+        let start = Instant::now();
+        let complete = |cache: &mut Waveforms, now| {
+            let (path, result) = cache
+                .worker
+                .as_ref()
+                .unwrap()
+                .results
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
+            cache.files.get_mut(&path).unwrap().finish(result, now);
+        };
+        assert!(waveforms.levels(&ctx, file.clone(), start).is_empty());
+        complete(&mut waveforms, start);
+        write_wav(8192, 100);
+        assert!(waveforms.levels(&ctx, file.clone(), start).is_empty());
+        assert!(waveforms.files[&file].next_check.is_some());
+        let restored = start + RETRY_INTERVAL;
+        waveforms.levels(&ctx, file.clone(), restored);
+        complete(&mut waveforms, restored);
+        assert_eq!(
+            waveforms.levels(&ctx, file.clone(), restored)[0].peaks[0][1],
+            0.25
+        );
+        write_wav(-16384, 200);
+        let replaced = restored + CHECK_INTERVAL;
+        waveforms.levels(&ctx, file.clone(), replaced);
+        complete(&mut waveforms, replaced);
+        assert_eq!(waveforms.levels(&ctx, file, replaced)[0].peaks[0][0], -0.5);
     }
 }
