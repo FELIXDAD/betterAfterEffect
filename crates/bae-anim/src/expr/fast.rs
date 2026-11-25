@@ -22,6 +22,8 @@ enum Node {
     Neg(Box<Node>),
     Bin(Op, Box<Node>, Box<Node>),
     Call(Fun, Vec<Node>),
+    /// `value[0]`, `[a, b][1]`.
+    Index(Box<Node>, Box<Node>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -149,7 +151,9 @@ fn lex(src: &str) -> Option<Vec<Tok>> {
             out.push(Tok::Num(src[start..i].parse().ok()?));
         } else if c.is_ascii_alphabetic() || c == '_' || c == '$' {
             let start = i;
-            while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_' || b[i] == b'.' || b[i] == b'$') {
+            while i < b.len()
+                && (b[i].is_ascii_alphanumeric() || b[i] == b'_' || b[i] == b'.' || b[i] == b'$')
+            {
                 i += 1;
             }
             out.push(Tok::Ident(src[start..i].to_owned()));
@@ -234,7 +238,15 @@ impl Parser<'_> {
         if self.eat('+') {
             return self.unary();
         }
-        self.primary()
+        let mut node = self.primary()?;
+        while self.eat('[') {
+            let index = self.expr()?;
+            if !self.eat(']') {
+                return None;
+            }
+            node = Node::Index(Box::new(node), Box::new(index));
+        }
+        Some(node)
     }
 
     fn list(&mut self, close: char) -> Option<Vec<Node>> {
@@ -357,7 +369,13 @@ fn bin(op: Op, a: V, b: V) -> Option<V> {
             let n = a.len().max(b.len());
             let at = |v: &[f64], i: usize| v.get(i).copied().unwrap_or(0.0);
             A((0..n)
-                .map(|i| if op == Op::Add { at(&a, i) + at(&b, i) } else { at(&a, i) - at(&b, i) })
+                .map(|i| {
+                    if op == Op::Add {
+                        at(&a, i) + at(&b, i)
+                    } else {
+                        at(&a, i) - at(&b, i)
+                    }
+                })
                 .collect())
         }
         // $bm_mul / $bm_div.
@@ -474,7 +492,10 @@ fn wiggle(env: &dyn Env, args: &[f64]) -> Option<V> {
     let w = |dim: usize| {
         let (mut s, mut a, mut f) = (0.0, 1.0, freq);
         for o in 0..(octaves.floor() as i64).max(1) {
-            s += noise1(hash(seed, (dim as u32).wrapping_mul(131).wrapping_add(o as u32)), t * f) * a;
+            s += noise1(
+                hash(seed, (dim as u32).wrapping_mul(131).wrapping_add(o as u32)),
+                t * f,
+            ) * a;
             a *= mult;
             f *= 2.0;
         }
@@ -499,7 +520,11 @@ fn looped(env: &dyn Env, out: bool, by_duration: bool, args: &[V]) -> Option<V> 
         Some(V::N(n)) => *n,
         Some(_) => return None,
     };
-    let (num_keys, duration) = if by_duration { (0.0, Some(n)) } else { (n, None) };
+    let (num_keys, duration) = if by_duration {
+        (0.0, Some(n))
+    } else {
+        (n, None)
+    };
     let ks = env.keys();
     let t = env.now();
     let pre = |t: f64| unwrap(env.pre(t));
@@ -535,9 +560,17 @@ fn looped(env: &dyn Env, out: bool, by_duration: bool, args: &[V]) -> Option<V> 
     if kind == "continue" {
         let vel = |at: f64| unwrap(env.pre_velocity(at));
         return if out {
-            bin(Op::Add, pre(last), bin(Op::Mul, vel(last - 0.001), V::N(t - last))?)
+            bin(
+                Op::Add,
+                pre(last),
+                bin(Op::Mul, vel(last - 0.001), V::N(t - last))?,
+            )
         } else {
-            bin(Op::Sub, pre(first), bin(Op::Mul, vel(first + 0.001), V::N(first - t))?)
+            bin(
+                Op::Sub,
+                pre(first),
+                bin(Op::Mul, vel(first + 0.001), V::N(first - t))?,
+            )
         };
     }
     let rel = if out { t - first } else { last - t };
@@ -574,6 +607,11 @@ fn eval(node: &Node, env: &dyn Env) -> Option<V> {
         ),
         Node::Neg(n) => V::N(-num(&eval(n, env)?)?),
         Node::Bin(op, a, b) => bin(*op, eval(a, env)?, eval(b, env)?)?,
+        // Out of range or on a number: `undefined` in JS, which reports it.
+        Node::Index(a, i) => match (eval(a, env)?, num(&eval(i, env)?)?) {
+            (V::A(a), i) if i >= 0.0 && i.fract() == 0.0 => V::N(*a.get(i as usize)?),
+            _ => return None,
+        },
         Node::Call(fun, args) => {
             let vals = args
                 .iter()
@@ -593,4 +631,175 @@ fn eval(node: &Node, env: &dyn Env) -> Option<V> {
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use bae_model::{
+        AttrSpec, AuthorId, Expression, Keyframe, Op, PrimPath, PrimType, Time, Value,
+    };
+
+    use super::Fast;
+
+    fn p(s: &str) -> PrimPath {
+        PrimPath::new(s).unwrap()
+    }
+
+    /// Every shape the fast path takes gives exactly what JavaScript gives, on
+    /// 2D and 3D layers, keyframed and static properties, inside and outside
+    /// the keyframes.
+    #[test]
+    fn fast_path_equals_javascript() {
+        const ROT: &str = "transform:rotation";
+        const POS: &str = "transform:position";
+        const OP: &str = "transform:opacity";
+        const SCALE: &str = "transform:scale";
+        let exprs: &[(&str, &str)] = &[
+            (ROT, "time*1000"),
+            (ROT, "value + time * 36"),
+            (ROT, "-value * 2 + 7 % 3"),
+            (POS, "value + [10, 20]"),
+            (POS, "[value[0], 100]"),
+            (POS, "wiggle(2, 30)"),
+            (ROT, "wiggle(3, 10, 3, 0.7)"),
+            (SCALE, "wiggle(1.5, 12)"),
+            (ROT, "loopOut()"),
+            (ROT, "loopOut('pingpong')"),
+            (POS, "loopOut('offset')"),
+            (POS, "loopOut('continue')"),
+            (ROT, "loopIn('cycle')"),
+            (ROT, "loopIn('continue')"),
+            (ROT, "loopOut('cycle', 1)"),
+            (ROT, "loopOutDuration('pingpong', 1.5)"),
+            (OP, "linear(time, 1, 3, 0, 150)"),
+            (POS, "ease(time, 0, 2, [0, 0], [300, 200])"),
+            (ROT, "easeIn(time, 0, 4, 10, 80)"),
+            (ROT, "easeOut(time, 4, 0, 10, 80)"),
+            (ROT, "Math.sin(time * 2) * 50 + value"),
+            (ROT, "Math.max(Math.abs(value), 30) + Math.floor(time)"),
+            (
+                ROT,
+                "radiansToDegrees(Math.atan2(1, 2)) + degreesToRadians(90)",
+            ),
+            (OP, "value * 2"),
+        ];
+        let mut stage = bae_model::Stage::new();
+        stage
+            .transact(&AuthorId::new("user:test").unwrap(), "build", |tx| {
+                let create = |tx: &mut bae_model::Transaction<'_>, path: &str, ty| {
+                    tx.apply(Op::CreatePrim {
+                        path: p(path),
+                        specifier: Default::default(),
+                        prim_type: Some(ty),
+                        index: None,
+                    })
+                };
+                let set = |tx: &mut bae_model::Transaction<'_>, path: &str, attr: &str, spec| {
+                    tx.apply(Op::SetAttr {
+                        path: p(path),
+                        attr: attr.into(),
+                        spec: Some(spec),
+                    })
+                };
+                create(tx, "/comps", PrimType::FOLDER)?;
+                create(tx, "/comps/main", PrimType::COMP)?;
+                set(
+                    tx,
+                    "/comps/main",
+                    "duration",
+                    AttrSpec::with_value(Value::Time(Time::from_seconds(10.0))),
+                )?;
+                create(tx, "/comps/main/layers", PrimType::FOLDER)?;
+                for three_d in [false, true] {
+                    for (i, (attr, src)) in exprs.iter().enumerate() {
+                        let l = format!("/comps/main/layers/l{i}_{three_d}");
+                        create(tx, &l, PrimType::LAYER)?;
+                        set(
+                            tx,
+                            &l,
+                            "kind",
+                            AttrSpec::with_value(Value::Enum("solid".into())),
+                        )?;
+                        set(
+                            tx,
+                            &l,
+                            "three_d",
+                            AttrSpec::with_value(Value::Bool(three_d)),
+                        )?;
+                        let mut rot = AttrSpec::default();
+                        let mut pos = AttrSpec::default();
+                        for (t, r, xy) in [
+                            (1.0, 0.0, [0.0, 0.0]),
+                            (2.0, 90.0, [100.0, 50.0]),
+                            (3.0, 45.0, [30.0, 80.0]),
+                        ] {
+                            rot.keyframes
+                                .insert(Time::from_seconds(t), Keyframe::linear(r));
+                            pos.keyframes.insert(
+                                Time::from_seconds(t),
+                                Keyframe::linear(Value::Vec3([xy[0], xy[1], 5.0])),
+                            );
+                        }
+                        let mut specs = vec![
+                            (ROT, rot),
+                            (POS, pos),
+                            (OP, AttrSpec::with_value(Value::Float(80.0))),
+                            (
+                                SCALE,
+                                AttrSpec::with_value(Value::Vec3([100.0, 90.0, 100.0])),
+                            ),
+                        ];
+                        for (a, spec) in &mut specs {
+                            if a == attr {
+                                spec.expression = Some(Expression::new(*src));
+                            }
+                        }
+                        for (a, spec) in specs {
+                            set(tx, &l, a, spec)?;
+                        }
+                    }
+                }
+                Ok::<_, bae_model::ModelError>(())
+            })
+            .unwrap();
+        for (_, src) in exprs {
+            assert!(Fast::compile(src).is_some(), "fast: {src}");
+        }
+        let run = |no_fast: bool, t: f64| {
+            super::super::NO_FAST.with(|c| c.set(no_fast));
+            super::super::FAST_HITS.with(|c| c.set(0));
+            let ec =
+                crate::evaluate_comp(&stage, &p("/comps/main"), Time::from_seconds(t)).unwrap();
+            super::super::NO_FAST.with(|c| c.set(false));
+            let hits = super::super::FAST_HITS.with(std::cell::Cell::get);
+            assert_eq!(
+                hits,
+                if no_fast { 0 } else { 2 * exprs.len() },
+                "fast hits at {t}"
+            );
+            assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+            ec
+        };
+        for t in [0.0, 0.4, 1.0, 1.37, 2.0, 2.5, 3.0, 3.9, 4.2, 5.75, 9.1] {
+            let (js, fast) = (run(true, t), run(false, t));
+            for (a, b) in js.layers.iter().zip(&fast.layers) {
+                let (x, y) = (&a.transform, &b.transform);
+                let close = |u: f64, v: f64| (u - v).abs() <= 1e-9 * (1.0 + u.abs());
+                let same = x
+                    .position
+                    .to_array()
+                    .iter()
+                    .zip(y.position.to_array())
+                    .all(|(u, v)| close(*u, v))
+                    && x.scale
+                        .to_array()
+                        .iter()
+                        .zip(y.scale.to_array())
+                        .all(|(u, v)| close(*u, v))
+                    && close(x.rotation.z, y.rotation.z)
+                    && close(x.opacity, y.opacity);
+                assert!(same, "{} at {t}: js {x:?} fast {y:?}", a.path);
+            }
+        }
+    }
 }

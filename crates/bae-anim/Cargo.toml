@@ -16,7 +16,8 @@ bae-model.workspace = true
 glam = { workspace = true, features = ["serde"] }
 serde.workspace = true
 thiserror.workspace = true
-rquickjs.workspace = true
+rquickjs = { workspace = true, features = ["parallel"] }
+rustc-hash.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

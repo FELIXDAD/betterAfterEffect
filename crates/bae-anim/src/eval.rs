@@ -45,6 +45,10 @@ pub(crate) struct ExprProp {
     pub attr: Arc<str>,
     /// Range the result is clamped to (Opacity), as after interpolation.
     pub clamp: Option<(f64, f64)>,
+    /// The source compiled for the Rust fast path, when it is one of its shapes.
+    pub fast: Option<crate::expr::fast::Fast>,
+    /// Random seed state after `prim` and `attr` (see `expr::seed_prefix`).
+    pub seed: u32,
 }
 
 /// Where and when a property is sampled.
@@ -106,6 +110,8 @@ impl Prop {
                     prim: prim.clone(),
                     attr: attr.into(),
                     clamp: schema::clamp_range(prim_type, attr),
+                    fast: crate::expr::fast::Fast::compile(&e.source),
+                    seed: crate::expr::seed_prefix(prim.as_str(), attr),
                 })))
             }
             _ => base,
@@ -239,6 +245,9 @@ pub(crate) struct CompiledComp {
     pub(crate) name: String,
     /// Some property of some layer has an enabled expression.
     pub(crate) has_expressions: bool,
+    /// Some of them need JavaScript (not the Rust fast path), so they are
+    /// warmed up before the pass (see `expr::warm_up`).
+    pub(crate) has_js_expressions: bool,
     pub(crate) width: u32,
     pub(crate) height: u32,
     pub(crate) pixel_aspect: f64,
@@ -474,6 +483,10 @@ fn compile_comp(stage: &Stage, path: &PrimPath) -> Result<CompiledComp, EvalErro
     }
 
     let has_expressions = layers.iter().any(CompiledLayer::has_expressions);
+    let has_js_expressions = has_expressions
+        && layers
+            .iter()
+            .any(|l| l.expr_props().iter().any(|e| e.fast.is_none()));
     Ok(CompiledComp {
         name: view
             .value(schema::layer::NAME)
@@ -481,6 +494,7 @@ fn compile_comp(stage: &Stage, path: &PrimPath) -> Result<CompiledComp, EvalErro
             .unwrap_or(view.name())
             .to_owned(),
         has_expressions,
+        has_js_expressions,
         path: path.clone(),
         width: int(c::WIDTH, 1920.0).max(0.0) as u32,
         height: int(c::HEIGHT, 1080.0).max(0.0) as u32,
@@ -845,13 +859,15 @@ impl CompiledComp {
             .iter()
             .any(|l| l.switches.solo && l.switches.enabled);
 
-        // Expressions: memoise them first so long chains stay shallow (see warm_up).
-        if js.is_some() && self.has_expressions {
+        // Expressions: memoise them first so long chains stay shallow (see
+        // warm_up). Fast-path ones read only their own property: no chains.
+        if js.is_some() && self.has_js_expressions {
             let props: Vec<(usize, &ExprProp)> = self
                 .layers
                 .iter()
                 .enumerate()
                 .flat_map(|(i, l)| l.expr_props().into_iter().map(move |e| (i, e)))
+                .filter(|(_, e)| e.fast.is_none())
                 .collect();
             let cx_of = |i: usize| Cx {
                 comp: comp_id,

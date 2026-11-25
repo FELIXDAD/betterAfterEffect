@@ -39,6 +39,7 @@ pub use evaluated::{
     EvaluatedMask, EvaluatedPrim, LayerSource, LayerSwitches, LightFalloff, LightState, LightType,
     TextPathOptions, TrackMatte,
 };
+pub use expr::prewarm as prewarm_expressions;
 pub use time::{LayerTiming, MotionBlur};
 pub use transform::{AutoOrientRotation, Transform};
 
