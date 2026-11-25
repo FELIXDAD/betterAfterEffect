@@ -35,6 +35,7 @@ mod graph;
 mod i18n;
 pub mod import;
 pub mod menus;
+mod paint_panels;
 mod panels;
 mod prefs;
 mod project;
@@ -91,7 +92,7 @@ impl AppModule for MotionUiModule {
         let _ = app.register_arc::<dyn bae_ui::DialogHost>("bae-ui-motion", dialogs);
         let owner = app.current_owner();
         let kinds = app.registry::<PanelKind>();
-        let panels: [(&str, PanelKind); 8] = [
+        let panels: [(&str, PanelKind); 10] = [
             (
                 "project",
                 PanelKind::new("Project", |_| Box::new(ProjectPanel::default())),
@@ -130,6 +131,14 @@ impl AppModule for MotionUiModule {
                 "render_queue",
                 PanelKind::new("Render Queue", |_| Box::new(RenderQueuePanel::default())),
             ),
+            (
+                "paint",
+                PanelKind::new("Paint", |_| Box::new(paint_panels::PaintPanel)),
+            ),
+            (
+                "brushes",
+                PanelKind::new("Brushes", |_| Box::new(paint_panels::BrushesPanel)),
+            ),
         ];
         kinds.batch(|tx| {
             for (id, kind) in panels {
@@ -146,6 +155,7 @@ impl AppModule for MotionUiModule {
             }
         });
         let _ = app.register::<KeymapBindings>("motion", actions::bindings());
+        let _ = app.register::<bae_ui::WorkspacePreset>("ae_paint", paint_panels::workspace());
         // Tools: the toolbar of the `ae` keymap, tool shortcuts and their handler.
         let _ = app.register::<KeymapBindings>("motion.tools", tools::keymap_bindings());
         actions.batch(|tx| {
