@@ -23,6 +23,7 @@ use egui::{CursorIcon, Painter, PointerButton, Pos2, Rect, Response, Ui};
 use serde_json::json;
 
 use super::free_transform::FreeTransform;
+use super::gizmo3d::{self, Gizmo};
 use super::overlay::{self, EditablePath};
 use super::path_edit::{self, PathDrag, VertexSelection};
 use super::transform::{self, Kind, TransformDrag};
@@ -37,6 +38,8 @@ enum Press {
     Free,
     Path(path_edit::Hit),
     Handle(PrimPath, transform::Handle),
+    /// A 3D layer's axis arrow or rotation ring (0 X, 1 Y, 2 Z).
+    Axis(PrimPath, usize),
     Anchor(PrimPath),
     Layer(PrimPath),
     Empty,
@@ -295,6 +298,12 @@ pub(super) fn frame(
             return Press::Path(h);
         }
         for l in comp.layers.iter().filter(|l| selected.contains(&l.path)) {
+            if matches!(tool, Tool::Selection | Tool::Rotation)
+                && let Some(g) = Gizmo::of(l, view)
+                && let Some(i) = g.hit(view, pos, tool == Tool::Rotation)
+            {
+                return Press::Axis(l.path.clone(), i);
+            }
             if tool == Tool::PanBehind
                 && transform::anchor_screen(l, view).distance(pos) <= transform::ANCHOR_PICK
             {
@@ -405,6 +414,45 @@ pub(super) fn frame(
                     ));
                 }
             }
+            Press::Axis(layer, axis) => {
+                if let Some(l) = comp.layer(&layer)
+                    && let Some(g) = Gizmo::of(l, view)
+                    && let Some((camera, size)) = view.camera
+                {
+                    let kind = if tool == Tool::Rotation {
+                        let center = view.project(g.origin, true).map_or(at, |c| view.to_comp(c));
+                        Kind::Spin {
+                            axis,
+                            center,
+                            start: at,
+                            last: 0.0,
+                            sign: gizmo3d::spin_sign(&camera, g.origin, g.axes[axis]),
+                            orientation: options.rotation_sets_orientation,
+                        }
+                    } else {
+                        let dir = g.axes[axis];
+                        Kind::Axis {
+                            axis,
+                            origin: g.origin,
+                            dir,
+                            camera: Box::new(camera),
+                            size,
+                            start: gizmo3d::along(&camera, size, at, g.origin, dir).unwrap_or(0.0),
+                        }
+                    };
+                    let mut layers = vec![layer.clone()];
+                    layers.extend(
+                        selected
+                            .iter()
+                            .filter(|p| **p != layer && comp.layer(p).is_some_and(render::is_3d))
+                            .cloned(),
+                    );
+                    state.drag = Some(primary_first(
+                        TransformDrag::new(stage, comp, &layers, kind),
+                        &layer,
+                    ));
+                }
+            }
             Press::Anchor(layer) => {
                 let anchor = comp
                     .layer(&layer)
@@ -436,14 +484,11 @@ pub(super) fn frame(
                     }
                     s.selected_layers.clone()
                 };
+                let grabbed = comp.layer(&layer);
                 let kind = match tool {
                     Tool::Rotation => {
-                        let center = comp
-                            .layer(&layer)
-                            .map(|l| {
-                                let a = l.world_matrix.transform_point3(l.transform.anchor_point);
-                                DVec2::new(a.x, a.y)
-                            })
+                        let center = grabbed
+                            .map(|l| view.to_comp(transform::anchor_screen(l, view)))
                             .unwrap_or(at);
                         Kind::Rotate {
                             center,
@@ -458,7 +503,17 @@ pub(super) fn frame(
                     },
                     _ => Kind::Move { start: at },
                 };
-                let drag = TransformDrag::new(stage, comp, &layers, kind);
+                // A 3D layer moves parallel to the view, at its depth.
+                let plane = grabbed.filter(|l| render::is_3d(l)).and_then(|l| {
+                    let (camera, size) = view.camera?;
+                    let a = l.world_matrix.transform_point3(l.transform.anchor_point);
+                    Some(transform::ViewPlane {
+                        camera,
+                        size,
+                        depth: camera.view().transform_point3(a).z,
+                    })
+                });
+                let drag = TransformDrag::new(stage, comp, &layers, kind).with_plane(plane);
                 let lines = super::guides::snap_lines(
                     stage,
                     info,
@@ -580,6 +635,29 @@ pub(super) fn frame(
     path_edit::paint(painter, view, &shown, &state.vertices);
     if let Some(d) = &state.drag {
         d.paint_guides(painter, view, info);
+    }
+    // The axis gizmo of the selected 3D layers (rings for the Rotation tool).
+    if matches!(tool, Tool::Selection | Tool::Rotation) {
+        let active = match (&state.drag, hover) {
+            (Some(d), _) => d
+                .axis()
+                .zip(d.edits.first())
+                .map(|(a, e)| (e.path.clone(), a)),
+            (None, Some(pos)) => match target(pos, state) {
+                Press::Axis(l, a) => Some((l, a)),
+                _ => None,
+            },
+            _ => None,
+        };
+        for l in comp.layers.iter().filter(|l| selected.contains(&l.path)) {
+            if let Some(g) = Gizmo::of(l, view) {
+                let on = active
+                    .as_ref()
+                    .filter(|(p, _)| *p == l.path)
+                    .map(|(_, a)| *a);
+                g.paint(painter, view, tool == Tool::Rotation, on);
+            }
+        }
     }
     let mut cursor = None;
     if let Some(f) = &state.free

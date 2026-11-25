@@ -27,6 +27,7 @@ mod effect_points;
 pub(crate) mod errors;
 mod free_transform;
 pub(crate) mod guides;
+mod gizmo3d;
 mod menu;
 mod motion_path;
 mod overlay;
