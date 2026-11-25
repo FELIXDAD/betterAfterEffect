@@ -1773,3 +1773,43 @@ fn three_d_views_switch_and_3d_layers_are_seen_through_their_camera() {
     tool_action(&h, ids::SHORTCUT, json!({"slot": "a"}));
     assert_eq!(view(&h), View3d::Custom(2));
 }
+
+#[test]
+fn view_layouts_show_more_views_and_a_click_makes_one_active() {
+    use super::view3d::{View3d, ids};
+    use bae_render::camera::OrthoView::*;
+    let mut h = H::new();
+    tool_action(&h, ids::LAYOUT, json!({"views": 4}));
+    let panes = |h: &H| {
+        let s = h.session();
+        let s = s.lock();
+        let v = s.views3d.get(&h.comp).unwrap();
+        (v.panes(), v.active())
+    };
+    assert_eq!(
+        panes(&h),
+        (
+            vec![
+                View3d::Ortho(Top),
+                View3d::Ortho(Front),
+                View3d::Ortho(Right),
+                View3d::Active
+            ],
+            3
+        )
+    );
+    h.frame(Vec::new(), Modifiers::NONE);
+    // The top left view (Top) becomes the active one; the order stays.
+    let at = Pos2::new(100.0, 100.0);
+    h.move_to(at, Modifiers::NONE, Vec::new());
+    h.pointer_button(at, true, Modifiers::NONE);
+    h.pointer_button(at, false, Modifiers::NONE);
+    let (p, active) = panes(&h);
+    assert_eq!((p[0], active), (View3d::Ortho(Top), 0));
+    assert_eq!(p[3], View3d::Active);
+    // The 3D view popup and the menu act on the active view.
+    tool_action(&h, ids::SWITCH, json!({"view": "custom_2"}));
+    assert_eq!(panes(&h).0[0], View3d::Custom(2));
+    tool_action(&h, ids::LAYOUT, json!({"views": 1}));
+    assert_eq!(panes(&h), (vec![View3d::Custom(2)], 0));
+}

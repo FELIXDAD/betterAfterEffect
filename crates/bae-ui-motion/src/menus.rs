@@ -435,6 +435,14 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
                 .map_or(u8::MAX, |i| i as u8 + 1);
             spec.checked_when(move |cx| Facts::of(cx).quality == code)
         }
+        crate::viewer::view3d::ids::LAYOUT => {
+            let n = item
+                .params
+                .trim_start_matches("{\"views\":")
+                .trim_end_matches('}');
+            let n: usize = n.parse().unwrap_or(1);
+            spec.checked_when(move |cx| crate::viewer::view3d::layout(cx.resources) == n)
+        }
         crate::viewer::view3d::ids::SWITCH => {
             let view = spec_param(item.params, "view").unwrap_or_default();
             spec.checked_when(move |cx| crate::viewer::view3d::current(cx.resources).key() == view)
