@@ -420,8 +420,15 @@ impl Session {
     }
 
     /// Count only frames submitted to the native presentation surface.
-    pub fn diagnostic_presentation(&self) -> (Option<(u64, Time)>, u64) {
-        (self.playback_stats.last_present, self.playback_stats.dropped)
+    pub fn diagnostic_sample(&self, now: Instant) -> (u64, Option<u64>) {
+        let pb = self.playback.as_ref().unwrap();
+        let first = pb.rate.time_to_frame(pb.range.start);
+        let last = pb.rate.time_to_frame(Time(pb.range.end.0 - 1));
+        let source = self.playback_stats.drawn.and_then(|t| {
+            let behind = (pb.frame - pb.rate.time_to_frame(t)).rem_euclid(last - first + 1);
+            pb.ordinal.checked_sub(behind as u64)
+        });
+        (pb.ordinal_at(now), source)
     }
 
     pub fn frame_presented(&mut self, now: Instant) {

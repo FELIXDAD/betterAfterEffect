@@ -186,6 +186,7 @@ impl ProjectPanel {
 
 impl Panel for ProjectPanel {
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        let _panel_profile = crate::playback_probe::scope(2);
         let panel_rect = ui.max_rect();
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);

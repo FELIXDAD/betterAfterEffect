@@ -410,6 +410,7 @@ impl Panel for CompositionViewer {
     }
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        let _panel_profile = crate::playback_probe::scope(1);
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
         self.prefs = prefs::ViewerPrefs::current(cx.resources);
@@ -560,6 +561,7 @@ impl Panel for CompositionViewer {
                     |pb| pb.range,
                 );
                 let looping = playback.is_some() && session.lock().loop_playback;
+                let _lookup = crate::playback_probe::scope(6);
                 if let Some((image, actual, errors)) = gpu.playback.poll(
                     cx.stage,
                     cx.resources,

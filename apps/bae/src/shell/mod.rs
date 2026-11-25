@@ -328,11 +328,34 @@ impl SmokeTest {
 #[derive(Default)]
 struct NativeProbe {
     start: Option<Instant>,
-    began: Option<Instant>,
-    last: Option<(u64, bae_model::Time)>,
-    first_dropped: u64,
-    fresh: usize,
-    submitted: usize,
+    finished: bool,
+    unique: std::collections::BTreeMap<u64, bool>,
+    timings: Vec<[Duration; 15]>,
+}
+impl NativeProbe {
+    fn record(&mut self, wall: u64, source: Option<u64>, times: [Duration; 15]) {
+        if (240..840).contains(&wall) {
+            self.timings.push(times);
+            if let Some(n) = source && (240..840).contains(&n) {
+                self.unique.entry(n).or_insert(wall == n);
+            }
+        }
+    }
+    fn print(&self) {
+        let on_time = self.unique.values().filter(|&&v| v).count();
+        println!("samples=600 presented={} distinct={} on_time={} late={} discarded={}",
+            self.timings.len(), self.unique.len(), on_time,self.unique.len()-on_time,600-self.unique.len());
+        let columns = ["cpu_frame", "timeline", "viewer", "project_panel", "other_ui", "native_menu",
+            "registry_platform", "surface_acquire", "egui_draw_submit", "surface_present", "input",
+            "timeline_rows", "layer_numbers", "visible_rows", "viewer_lookup"];
+        for (i, name) in columns.iter().enumerate() {
+            let mut v:Vec<_>=self.timings.iter().map(|t| t[i]).collect(); v.sort_unstable();
+            if !v.is_empty() {
+                let q=|pct:usize| v[(v.len()*pct).div_ceil(100)-1].as_secs_f64()*1000.;
+                println!("{name} p50_ms={:.4} p95_ms={:.4}",q(50),q(95));
+            }
+        }
+    }
 }
 struct Shell {
     native_probe: NativeProbe,
@@ -800,6 +823,7 @@ impl Shell {
         let Some(view) = self.view.as_mut() else {
             return;
         };
+        if self.native_probe.finished { return; }
         let frame_start = Instant::now();
         if self.native_probe.start.is_none() {
             let stage = self.document.stage();
@@ -835,10 +859,13 @@ impl Shell {
         let document = &self.document;
         let resources = self.app.resources();
         let mut invocations = Vec::new();
+        let _ = bae_ui_motion::playback_probe::take();
+        let ui_start=Instant::now();
         let output = view.egui_ctx.run_ui(input, |ui| {
             invocations = workspace.ui(ui, status, document, resources);
         });
-        if self.ui_passes < 5 || self.ui_passes % 120 == 0 { eprintln!("bench: workspace pass {}", self.ui_passes); }
+        let ui_end=Instant::now();
+        let panels=bae_ui_motion::playback_probe::take();
         self.ui_passes += 1;
         if let Some(menu) = &mut self.menu {
             let open = workspace.open_panels();
@@ -850,7 +877,7 @@ impl Shell {
             .with_open_panels(&open);
             menu.sync(workspace.keymap(), &cx, view.egui_ctx.text_edit_focused());
         }
-        if self.ui_passes <= 2 { eprintln!("bench: menu synced"); }
+        let menu_end=Instant::now();
         view.egui_state.handle_platform_output_with_event_loop(
             &view.window,
             event_loop,
@@ -920,10 +947,10 @@ impl Shell {
 
         let mut presented = false;
         let mut device_lost = false;
-        if self.ui_passes <= 2 { eprintln!("bench: acquiring {}x{}",width,height); }
+        let acquire_start=Instant::now();
         match view.surface.acquire() {
             Ok(Some(frame)) => {
-                if self.ui_passes <= 2 { eprintln!("bench: frame acquired"); }
+                let draw_start=Instant::now();
                 view.renderer.render(
                     &view.gpu,
                     &view.egui_ctx,
@@ -932,36 +959,34 @@ impl Shell {
                     [width, height],
                     background,
                 );
+                let present_start=Instant::now();
                 view.window.pre_present_notify();
                 let suboptimal = frame.is_suboptimal();
                 frame.present();
-                if self.ui_passes <= 2 { eprintln!("bench: frame presented"); }
                 if let Some(session) = session {
                     let now = Instant::now();
-                    let mut s = session.lock();
-                    s.frame_presented(now);
-                    let (last, dropped) = s.diagnostic_presentation();
+                    let mut session = session.lock();
+                    let (wall,source) = session.diagnostic_sample(now);
+                    session.frame_presented(now);
                     let probe = &mut self.native_probe;
-                    if now - probe.start.unwrap() >= Duration::from_secs(4) {
-                        if let Some(began) = probe.began {
-                            probe.submitted += 1;
-                            if last.is_some() && probe.last != last { probe.fresh += 1; }
-                            if now - began >= Duration::from_secs(10) {
-                                let elapsed = (now - began).as_secs_f64();
-                                let samples = registry.as_ref().unwrap().snapshot().into_iter()
-                                    .filter_map(|e| e.texture.map(|t| t.size)).collect::<Vec<_>>();
-                                let full = samples.iter().filter(|&&xy| xy == [3840,2160]).count();
-                                println!("native window={}x{} mode={:?} samples_4k={full} submitted={} fresh={} fresh_fps={:.3} missed={} elapsed_s={elapsed:.3}",
-                                    width,height,view.surface.config().present_mode,probe.submitted,probe.fresh,probe.fresh as f64/elapsed,dropped-probe.first_dropped);
-                                if full == 0 || probe.fresh == 0 || (width,height) != (3840,2160) { self.exit_code = ExitCode::FAILURE; }
-                                event_loop.exit();
-                            }
-                        } else {
-                            probe.began = Some(now);
-                            probe.first_dropped = dropped;
+                    probe.record(wall,source,[
+                        now-frame_start,panels[0],panels[1],panels[2],
+                        (ui_end-ui_start).saturating_sub(panels[0]+panels[1]+panels[2]),
+                        menu_end-ui_end,acquire_start-menu_end,draw_start-acquire_start,
+                        present_start-draw_start,now-present_start,ui_start-frame_start,
+                        panels[3],panels[4],panels[5],panels[6],
+                    ]);
+                    if wall >= 840 {
+                        let full=registry.as_ref().unwrap().snapshot().into_iter().filter_map(|e| e.texture)
+                            .filter(|t|t.size==[3840,2160]).count();
+                        println!("native window={}x{} mode={:?} rgba8_4k={full}",width,height,view.surface.config().present_mode);
+                        probe.print();
+                        probe.finished=true;
+                        if full == 0 || probe.unique.is_empty() || (width,height)!=(3840,2160) {
+                            self.exit_code=ExitCode::FAILURE;
                         }
+                        event_loop.exit();
                     }
-                    self.native_probe.last = last;
                 }
                 if suboptimal {
                     view.surface.handle_suboptimal();
@@ -1402,7 +1427,7 @@ impl ApplicationHandler<UserEvent> for Shell {
         // Windows can suppress RedrawRequested for a hidden window. Drive the
         // exact same redraw at composition deadlines while measuring it.
         if let Some(start) = self.native_probe.start && start.elapsed().as_secs() >= 22 {
-            eprintln!("bench: timed out, {} workspace passes, {} sampled presents", self.ui_passes,self.native_probe.submitted);
+            eprintln!("bench: timed out, {} workspace passes, {} sampled presents", self.ui_passes,self.native_probe.timings.len());
             self.exit_code = ExitCode::FAILURE;
             event_loop.exit();
             return;

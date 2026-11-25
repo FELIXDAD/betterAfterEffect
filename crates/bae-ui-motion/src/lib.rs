@@ -238,3 +238,18 @@ impl AppModule for MotionUiModule {
 mod tests;
 #[cfg(test)]
 mod timeline_tests;
+
+#[doc(hidden)]
+pub mod playback_probe {
+    use std::cell::Cell;
+    use std::time::{Instant,Duration};
+    thread_local! { static TIMES: Cell<[Duration; 7]> = const { Cell::new([Duration::ZERO; 7]) }; }
+    pub fn take() -> [Duration; 7] { TIMES.with(Cell::take) }
+    pub struct Scope(usize, Instant);
+    pub fn scope(id: usize) -> Scope { Scope(id, Instant::now()) }
+    impl Drop for Scope {
+        fn drop(&mut self) {
+            TIMES.with(|t| { let mut a=t.get(); a[self.0] += self.1.elapsed(); t.set(a); });
+        }
+    }
+}

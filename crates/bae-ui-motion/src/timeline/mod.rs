@@ -530,6 +530,7 @@ impl Panel for TimelinePanel {
     }
 
     fn ui(&mut self, ui: &mut Ui, cx: &mut PanelContext<'_>) {
+        let _panel_profile = crate::playback_probe::scope(0);
         let session = common::session(cx.resources);
         session.lock().sync(cx.stage);
         let stage = cx.stage;
@@ -593,6 +594,7 @@ impl Panel for TimelinePanel {
 
         // Rows.
         let rows = {
+            let _rows = crate::playback_probe::scope(3);
             let s = session.lock();
             self.rows(stage, &info.path, &s)
         };
@@ -600,6 +602,7 @@ impl Panel for TimelinePanel {
             self.press_mods = m;
         }
         self.key_plan = self.plan_key_drag(stage, &info, &axis, &rows, now, pointer_x, shift);
+        let numbers = crate::playback_probe::scope(4);
         let comp_layers = query::comp_layers(stage, &info.path);
         self.layer_numbers = comp_layers
             .iter()
@@ -607,6 +610,7 @@ impl Panel for TimelinePanel {
             .map(|(i, l)| (l.clone(), i + 1))
             .collect();
 
+        drop(numbers);
         // Background of the graph body: marquee selection and deselect (the Graph
         // Editor has its own).
         if !self.graph_mode {
@@ -650,6 +654,7 @@ impl Panel for TimelinePanel {
             .id_salt("timeline_rows")
             .auto_shrink([false, false])
             .show_rows(&mut child, ROW_H, rows.len(), |ui, range| {
+                let _visible = crate::playback_probe::scope(5);
                 // Rows touch, as in AE (a 1-point line between them).
                 ui.spacing_mut().item_spacing.y = 0.0;
                 for i in range {
