@@ -158,7 +158,12 @@ pub fn instance_default(
     let measured = matches!(
         param.match_name.as_deref(),
         Some("ADBE Radial Blur-0002" | "ADBE Tile-0001" | "ADBE Radial Shadow-0003")
-    ) || (def.plugin.is_none() && def.category == "Distort");
+    ) || (def.plugin.is_none()
+        && (def.category == "Distort"
+            || matches!(
+                def.match_name.as_str(),
+                "VISINF Grain Duplication" | "VISINF Grain Removal"
+            )));
     let unit = if param.flags.relative_default {
         [1.0, 1.0]
     } else if measured {
