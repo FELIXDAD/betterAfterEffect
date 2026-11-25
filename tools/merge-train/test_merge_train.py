@@ -206,6 +206,10 @@ class DecideTest(Base):
 
 class ProcessTest(Base):
     def test_merge_uses_squash_for_ref_and_notifies_leader(self):
+        # The repo turns per-merge messages off; this test covers the message itself.
+        patcher = mock.patch.dict(mt.CFG, {"notify": {"merged": True}})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         calls = []
 
         def fake_sh(cmd, **kw):

@@ -22,6 +22,7 @@
 //! without one (tests, headless hosts).
 
 pub mod actions;
+pub mod ae_panels;
 pub mod catalog;
 mod common;
 mod context_menu;
@@ -74,6 +75,7 @@ impl AppModule for MotionUiModule {
         bae_ui::i18n::register(i18n::ZH);
         bae_ui::i18n::register(tools::ZH);
         bae_ui::i18n::register(catalog::menu_zh());
+        bae_ui::i18n::register(ae_panels::ZH);
         effects::register_i18n();
         if app.resource::<SharedSession>().is_none() {
             app.insert_resource(SharedSession::default());
@@ -132,7 +134,7 @@ impl AppModule for MotionUiModule {
             ),
         ];
         kinds.batch(|tx| {
-            for (id, kind) in panels {
+            for (id, kind) in panels.into_iter().chain(ae_panels::panels()) {
                 // Replace the shell's placeholders if they were registered first.
                 let _ = tx.replace(owner.clone(), id, std::sync::Arc::new(kind));
             }

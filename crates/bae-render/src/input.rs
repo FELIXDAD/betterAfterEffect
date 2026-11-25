@@ -439,6 +439,7 @@ impl LayerContent {
                 f.asset.hash(h);
                 f.file.hash(h);
                 f.source_time.hash(h);
+                f.sequence.hash(h);
             }
             LayerContent::Comp(c) => c.hash_content(h),
             LayerContent::Custom(c) => {
@@ -462,6 +463,9 @@ pub struct FootageRef {
     pub size: Option<[u32; 2]>,
     /// Time inside the footage (after time remapping / stretch).
     pub source_time: Time,
+    /// Image sequences: the frame rate of the sequence (its numbered files are
+    /// frames from `file` on); `None` opens `file` alone (a still or a movie).
+    pub sequence: Option<FrameRate>,
 }
 
 /// Content drawn by a [`crate::source::SourceProvider`].
@@ -665,6 +669,7 @@ mod tests {
                 file: None,
                 size: None,
                 source_time: Time::ZERO,
+                sequence: None,
             }),
         ));
         let deps = comp.dependencies();

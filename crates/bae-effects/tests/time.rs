@@ -231,3 +231,42 @@ fn scene_detection_stops_at_a_cut_in_both_directions() {
         assert!(delta(&gated) <= 1, "{name} excludes the other scene");
     }
 }
+
+#[test]
+fn wide_time_averages_frames_and_time_difference_compares_them() {
+    let Some(mut r) = renderer() else { return };
+    // Red before 1 s, blue from then on.
+    let scene = |match_name: &'static str, params: Vec<(u32, Value)>| {
+        move |time: Time| {
+            let mut comp = RenderComp::new(path("/comps/main"), 16, 8);
+            comp.time = time;
+            let color = if time.as_seconds() < 0.99 {
+                [1., 0., 0., 1.]
+            } else {
+                [0., 0., 1., 1.]
+            };
+            let mut layer = solid(CLIP, 16, color);
+            layer.time = time;
+            layer
+                .effects
+                .push(effect("time", match_name, params.clone()));
+            comp.layers.push(layer);
+            comp
+        }
+    };
+    // One frame back (red), now and one frame on (blue), a third each.
+    let wide = pixels(&mut r, scene("CC Wide Time", Vec::new()), 1.);
+    let near = |a: &[u8], b: [u8; 4]| a.iter().zip(b).all(|(a, b)| a.abs_diff(b) <= 2);
+    assert!(near(&wide[..4], [85, 0, 170, 255]), "{:?}", &wide[..4]);
+    // Blue now against red one frame earlier: 50 % grey ± the difference.
+    let difference = pixels(
+        &mut r,
+        scene("ADBE Difference", vec![(2, Value::Float(-1. / 30.))]),
+        1.,
+    );
+    assert!(
+        near(&difference[..4], [0, 128, 255, 255]),
+        "{:?}",
+        &difference[..4]
+    );
+}
