@@ -6,4 +6,6 @@ pub(crate) fn register(registry: &mut Registry) {
     registry.effects.extend(effects::distort::warps::entries());
     registry.prewarm.push(effects::distort::warps::prewarm);
     registry.effects.push(effects::compound::displacement());
+    registry.effects.push(effects::liquify::liquify());
+    registry.prewarm.push(effects::liquify::prewarm);
 }

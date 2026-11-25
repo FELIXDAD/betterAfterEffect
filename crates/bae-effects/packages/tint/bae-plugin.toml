@@ -26,14 +26,14 @@ id = 1
 key = "map_black"
 type = "color"
 name = "Map Black To"
-default = [0.0, 0.0, 0.0, 1.0]
+default = [0.0, 0.0, 0.0, 0.0]
 
 [[effect.param]]
 id = 2
 key = "map_white"
 type = "color"
 name = "Map White To"
-default = [1.0, 1.0, 1.0, 1.0]
+default = [1.0, 1.0, 1.0, 0.0]
 
 [[effect.param]]
 id = 3

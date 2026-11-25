@@ -62,7 +62,7 @@ match_colors = ["使用 RGB", "使用色相", "使用色度"]
 key_operation = ["主色", "保持颜色"]
 
 [effect.advanced-spill-suppressor]
-name = "高级溢出抑制器"
+name = "Advanced Spill Suppressor"
 keywords = ["高级溢出抑制器"]
 
 [effect.advanced-spill-suppressor.params]
