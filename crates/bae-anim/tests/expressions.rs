@@ -622,6 +622,97 @@ fn property_index_and_length_read_its_value() {
     assert_eq!(ec.layers[0].transform.rotation.z, 122.0);
 }
 
+fn doc(text: &str) -> Value {
+    Value::TextDocument(Box::new(TextDocument::new(text, "ArialMT", 50.0)))
+}
+
+/// `text.sourceText` reads as a string with the property's methods; `value` on
+/// Source Text is the text; the AE 17.0+ style API reads and sets the style.
+#[test]
+fn source_text_strings_and_styles() {
+    let s = stage(|b| {
+        let a = b.layer(MAIN, "A", "text");
+        b.set(&a, "text:source", doc("Hello world"));
+        let c = b.layer(MAIN, "C", "text");
+        b.expr(
+            &c,
+            "text:source",
+            doc("x"),
+            r#"thisComp.layer("A").text.sourceText + "!""#,
+        );
+        let v = b.layer(MAIN, "V", "text");
+        b.expr(&v, "text:source", doc("Hi"), r#"value + " there""#);
+        let st = b.layer(MAIN, "S", "text");
+        b.expr(
+            &st,
+            "text:source",
+            doc("Styled"),
+            "text.sourceText.style.setFontSize(80).setFillColor([1, 0, 0]).setText(\"New\").setFauxBold(true)",
+        );
+        let n = b.layer(MAIN, "N", "null");
+        b.expr(
+            &n,
+            "transform:rotation",
+            0.0,
+            r#"var t = thisComp.layer("A").text.sourceText; t.length * 100 + t.split(" ").length * 10 + t.style.fontSize / 10"#,
+        );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    let text = |i: usize| ec.layers[i].text.as_ref().unwrap();
+    assert_eq!(text(1).text, "Hello world!");
+    assert_eq!(text(2).text, "Hi there");
+    let styled = text(3);
+    assert_eq!(styled.text, "New");
+    assert_eq!(styled.font_size, 80.0);
+    assert_eq!(styled.fill_color[..3], [1.0, 0.0, 0.0]);
+    assert!(styled.faux_bold);
+    // 11 characters, 2 words, 50 pt.
+    assert_eq!(ec.layers[4].transform.rotation.z, 1100.0 + 20.0 + 5.0);
+}
+
+/// `sourceRectAtTime`: the measured text through the registered measurer, a
+/// solid's own size, a null's 100 × 100.
+#[test]
+fn source_rect_at_time() {
+    struct Fixed;
+    impl bae_anim::SourceBounds for Fixed {
+        fn text(&self, doc: &TextDocument, extents: bool) -> Option<bae_anim::SourceRect> {
+            let pad = if extents { 1.0 } else { 0.0 };
+            Some([
+                -10.0 - pad,
+                -20.0 - pad,
+                doc.text.len() as f64 * 10.0 + 2.0 * pad,
+                30.0,
+            ])
+        }
+        fn shapes(&self, _: &[bae_anim::EvaluatedPrim], _: bool) -> Option<bae_anim::SourceRect> {
+            None
+        }
+    }
+    bae_anim::set_source_bounds(std::sync::Arc::new(Fixed));
+    let s = stage(|b| {
+        let t = b.layer(MAIN, "T", "text");
+        b.set(&t, "text:source", doc("Hello"));
+        let n = b.layer(MAIN, "N", "null");
+        b.expr(
+            &n,
+            "transform:position",
+            Value::Vec3([0.0; 3]),
+            r#"var r = thisComp.layer("T").sourceRectAtTime(time, true); [r.left + r.width, r.top + r.height]"#,
+        );
+        b.expr(&n, "transform:rotation", 0.0, "sourceRectAtTime().width");
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    let p = ec.layers[1].transform.position;
+    assert_eq!([p.x, p.y], [-11.0 + 52.0, -21.0 + 30.0]);
+    assert_eq!(
+        ec.layers[1].transform.rotation.z, 100.0,
+        "a null is 100 × 100"
+    );
+}
+
 /// `marker` / `thisComp.marker`: numKeys, key(index), key(comment), nearestKey and
 /// the MarkerKey fields; layer marker times are comp time (AE).
 #[test]
