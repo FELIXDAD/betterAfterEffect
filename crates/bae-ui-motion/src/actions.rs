@@ -248,6 +248,11 @@ const TRANSFORM_PROPERTIES: [(&str, &str, &str); 5] = [
 /// table rather than `json!` calls keeps the code small (parsed once at startup).
 const VARIANTS: &[(&str, &str, &str)] = &[
     (
+        ids::PLAY,
+        r#"{"preview":"numpad0"}"#,
+        "Play/Stop (Numpad 0)",
+    ),
+    (
         ids::BLENDING_MODE_STEP,
         r#"{"step":1}"#,
         "Next Blending Mode",
