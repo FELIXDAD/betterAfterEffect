@@ -54,7 +54,7 @@ struct ApplyLut {
 #[derive(Debug, Default)]
 pub(super) struct LutCache(Mutex<VecDeque<Arc<Prepared>>>);
 
-type Processor = (crate::categories::color::ocio::Operation, [i64; 4]);
+type Processor = (crate::categories::color::ocio::Operation, [i64; 9]);
 
 pub(super) enum LutSource<'a> {
     File(&'a [u8]),

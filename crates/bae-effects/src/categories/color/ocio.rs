@@ -28,6 +28,8 @@ pub(crate) enum Operation {
     Display,
     File,
     Look,
+    Cineon,
+    Profile,
 }
 impl Operation {
     pub(crate) fn data_id(self) -> u32 {
@@ -37,17 +39,35 @@ impl Operation {
             _ => 0,
         }
     }
-    pub(crate) fn selection(self, def: &EffectDef, p: &EffectParams<'_>) -> [i64; 4] {
+    pub(crate) fn selection(self, def: &EffectDef, p: &EffectParams<'_>) -> [i64; 9] {
         let params = Params::new(def, p);
-        [1, 2, 3, 4].map(|i| params.f(i) as i64)
+        std::array::from_fn(|i| {
+            if self == Self::Profile && i == 8 {
+                return i64::from(p.linear);
+            }
+            let v = params.f(i as u32 + 1);
+            if self == Self::Cineon {
+                v.to_bits() as i64
+            } else {
+                v as i64
+            }
+        })
     }
 
     pub(crate) fn transform(
         self,
         bytes: &[u8],
-        s: [i64; 4],
+        s: [i64; 9],
     ) -> Result<ColorTransform, RenderError> {
         let grade = (|| -> Result<ColorTransform, ColorError> {
+            if self == Self::Cineon {
+                return crate::categories::utility::aliases::cineon_processor(
+                    s.map(|v| f64::from_bits(v as u64)),
+                );
+            }
+            if self == Self::Profile {
+                return crate::categories::utility::aliases::profile_processor(s);
+            }
             if self == Self::Cdl {
                 return cdl(bytes, s[1], s[2] != 0);
             }
@@ -253,6 +273,7 @@ pub(crate) fn entries() -> Vec<Builtin> {
                     .checkbox(inv + 1, " ", " ", false);
                 inv + 2
             }
+            Operation::Cineon | Operation::Profile => unreachable!("registered as utility aliases"),
             Operation::Space | Operation::Look | Operation::Display => {
                 b = b.popup(1, "Input Color Space", "输入色彩空间", 1, &spaces);
                 match op {
