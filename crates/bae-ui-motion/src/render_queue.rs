@@ -1125,6 +1125,9 @@ fn channels_label(channels: Channels) -> &'static str {
 }
 
 #[cfg(test)]
+mod motion_blur_test;
+
+#[cfg(test)]
 mod tests {
     use bae_model::{Project, TimeRange, Value};
 

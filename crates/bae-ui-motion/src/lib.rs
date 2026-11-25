@@ -35,6 +35,7 @@ mod gpu_preview;
 mod graph;
 mod i18n;
 pub mod import;
+mod layer_panel;
 pub mod menus;
 mod panels;
 mod prefs;
@@ -93,7 +94,7 @@ impl AppModule for MotionUiModule {
         let _ = app.register_arc::<dyn bae_ui::DialogHost>("bae-ui-motion", dialogs);
         let owner = app.current_owner();
         let kinds = app.registry::<PanelKind>();
-        let panels: [(&str, PanelKind); 8] = [
+        let panels: [(&str, PanelKind); 9] = [
             (
                 "project",
                 PanelKind::new("Project", |_| Box::new(ProjectPanel::default())),
@@ -131,6 +132,12 @@ impl AppModule for MotionUiModule {
             (
                 "render_queue",
                 PanelKind::new("Render Queue", |_| Box::new(RenderQueuePanel::default())),
+            ),
+            (
+                "layer",
+                PanelKind::new("Layer", |spawn| {
+                    Box::new(layer_panel::LayerPanel::new(spawn.state))
+                }),
             ),
         ];
         kinds.batch(|tx| {
