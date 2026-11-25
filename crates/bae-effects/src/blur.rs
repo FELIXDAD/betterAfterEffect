@@ -343,15 +343,27 @@ pub(crate) fn half_level(
     target: &mut dyn EffectTarget,
     input: &GpuImage,
 ) -> Result<GpuImage, RenderError> {
+    reduce_level(target, input, [2, 2], false)
+}
+
+/// Box-average aligned source texels into the next Gaussian pyramid level.
+pub(crate) fn reduce_level(
+    target: &mut dyn EffectTarget,
+    input: &GpuImage,
+    factor: [i32; 2],
+    repeat: bool,
+) -> Result<GpuImage, RenderError> {
     let r = input.rect;
+    let [x, y] = factor;
     let output = IRect::new(
-        r.x0.div_euclid(2),
-        r.y0.div_euclid(2),
-        (r.x1 + 1).div_euclid(2),
-        (r.y1 + 1).div_euclid(2),
+        r.x0.div_euclid(x),
+        r.y0.div_euclid(y),
+        (r.x1 + x - 1).div_euclid(x),
+        (r.y1 + y - 1).div_euclid(y),
     );
     let mut step = Step::new("downsample", 0, None, r, output);
-    step.factor = [2, 2];
+    step.factor = factor;
+    step.clamp = repeat;
     Plan {
         images: Vec::new(),
         steps: vec![step],

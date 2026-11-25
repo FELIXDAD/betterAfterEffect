@@ -49,7 +49,7 @@ pub(super) fn encode(
     let kernel = image_grid::kernel_with_inputs(&rt, target.format(), LABEL, SOURCE, BYTES, 8)?;
     let out = target.allocate(image_grid::pixel_rect(pass.roi, pass.grid), pass.grid)?;
     let premult = crate::common::premultiplied(target, source)?;
-    let base = half_level(target, pass, &premult)?;
+    let base = image_grid::half_level(target, &premult, pass.layer, pass.grid)?;
     let mut levels = Vec::with_capacity(LEVELS);
     levels.push(source.clone());
     for index in 1..LEVELS {
@@ -125,36 +125,6 @@ fn make_level(
     );
     level.pixel_scale *= scale;
     Ok(level)
-}
-
-fn half_level(
-    target: &mut dyn EffectTarget,
-    pass: &Pass,
-    source: &GpuImage,
-) -> Result<GpuImage, RenderError> {
-    let scale = source.pixel_scale;
-    let [x, y] = [source.rect.x0, source.rect.y0];
-    let grid_offset = |origin: i32, bound: i32| {
-        ((f64::from(origin) - f64::from(bound) * pass.grid) / scale).round() as i32
-    };
-    let lx = grid_offset(x, pass.layer.x0);
-    let ly = grid_offset(y, pass.layer.y0);
-    let [w, h] = source.texel_size();
-    let mut texels = source.clone();
-    texels.rect = IRect::new(lx, ly, lx + w as i32, ly + h as i32);
-    texels.pixel_scale = 1.;
-    let mut base = blur::half_level(target, &texels)?;
-    let in_layer = |v: i32, offset: i32, origin: i32| {
-        (f64::from(2 * v - offset) * scale + f64::from(origin)).round() as i32
-    };
-    base.rect = IRect::new(
-        in_layer(base.rect.x0, lx, x),
-        in_layer(base.rect.y0, ly, y),
-        in_layer(base.rect.x1, lx, x),
-        in_layer(base.rect.y1, ly, y),
-    );
-    base.pixel_scale = 2. * scale;
-    Ok(base)
 }
 
 pub(super) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
