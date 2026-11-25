@@ -146,11 +146,26 @@ impl Session {
 
     /// Move the current time of `comp`, snapped to a frame and kept inside the comp.
     pub fn set_time(&mut self, info: &CompInfo, t: Time) {
+        let at = self.update_time(info, t);
+        if let Some(pb) = &mut self.playback
+            && pb.comp == info.path
+        {
+            if pb.range.contains(at) {
+                pb.from = at;
+                pb.started = Instant::now();
+            } else {
+                self.stop();
+            }
+        }
+    }
+
+    fn update_time(&mut self, info: &CompInfo, t: Time) -> Time {
         let last = info.duration - info.frame_duration();
-        let t = info
+        let at = info
             .frame_rate
             .snap(t.clamp(Time::ZERO, last.max(Time::ZERO)));
-        self.times.insert(info.path.clone(), t);
+        self.times.insert(info.path.clone(), at);
+        at
     }
 
     /// Make `comp` the active comp (opening a timeline tab for it).
@@ -320,11 +335,11 @@ impl Session {
                 t = pb.range.start + Time((t - pb.range.start).0.rem_euclid(span.0));
             } else {
                 self.playback = None;
-                self.set_time(info, pb.range.end - info.frame_duration());
+                self.update_time(info, pb.range.end - info.frame_duration());
                 return false;
             }
         }
-        self.set_time(info, t);
+        self.update_time(info, t);
         true
     }
 }
@@ -370,7 +385,11 @@ mod tests {
         assert!(s.is_playing());
         assert_eq!(s.time(&i.path), Time::from_seconds(1.0));
         assert!(s.tick(&i));
-        s.stop();
+        let seek = i.frame_rate.frame_to_time(42);
+        s.set_time(&i, seek);
+        assert_eq!(s.playback.as_ref().unwrap().from, seek);
+        s.set_time(&i, Time::ZERO);
+        assert!(!s.is_playing());
         assert!(!s.tick(&i));
     }
 }
