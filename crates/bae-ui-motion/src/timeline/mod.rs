@@ -3,7 +3,7 @@
 //! navigators, values and expressions, and the time graph (comp tabs, current time,
 //! ruler, work area, CTI, layer duration bars, keyframes).
 //!
-//! Every edit is a command: switches → `attr.set`, values → `attr.set_at`, stopwatch
+//! Every edit is a command: switches → `layer.set_attr`, values → `attr.set_at`, stopwatch
 //! → `attr.set_animated`, dragging bars → `layer.shift_time` / `layer.trim`, dragging
 //! keyframes → `key.move`, work area → `comp.set_work_area`, reordering →
 //! `layer.reorder`, parenting → `layer.set_parent`. Drags preview locally and run
@@ -18,8 +18,10 @@ mod markers;
 mod menus;
 mod modes;
 mod rows;
+mod switches;
 #[cfg(test)]
 mod tests;
+mod waveform;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -40,7 +42,7 @@ use crate::common::{self, EvalCache};
 use crate::graph::GraphEditor;
 use crate::project::ItemDrag;
 use crate::props::{self, Node};
-use crate::session::{Session, SharedSession};
+use crate::session::{Reveal, Session, SharedSession};
 
 pub(crate) use dialogs::{InterpolationDialog, KeyDialog, VelocityDialog};
 use header::comp_tabs;
@@ -140,6 +142,7 @@ impl Cols {
 #[derive(Clone, Debug)]
 enum RowKind {
     Layer,
+    Waveform,
     Group {
         id: String,
         label: String,
@@ -242,12 +245,14 @@ struct TimelineLayers {
 #[derive(Default)]
 pub struct TimelinePanel {
     eval: EvalCache,
-    expanded: HashSet<String>,
+    pub(crate) expanded: HashSet<String>,
+    waveforms: waveform::Waveforms,
     /// 0 = whole comp, 1 = a few frames.
     zoom: f32,
     /// Start of the visible range when zoomed (comp time).
     scroll: Time,
     drag: Option<Drag>,
+    switch_drag: Option<switches::SwitchDrag>,
     rename: Option<(PrimPath, String)>,
     /// Expression sources being edited, by `path.attr`.
     expr_edit: Option<(PrimPath, String, String)>,
@@ -299,6 +304,9 @@ pub struct TimelinePanel {
     /// Where the last frame drew the layer bars, for tests.
     #[cfg(test)]
     pub(crate) last_bars: Vec<(PrimPath, Rect)>,
+    /// Group rows: id, twirl arrow, name.
+    #[cfg(test)]
+    pub(crate) last_groups: Vec<(String, Pos2, Pos2)>,
 }
 
 /// Comp time ↔ x in the graph.
@@ -475,6 +483,15 @@ impl TimelinePanel {
                 depth: 0,
             });
             if let Some(r) = s.reveal.get(layer) {
+                if matches!(r, Reveal::Attrs(attrs) if attrs.iter().any(|a| a == "audio:waveform"))
+                    && bae_media::audio::layer_file(stage, layer).is_some()
+                {
+                    out.push(Row {
+                        kind: RowKind::Waveform,
+                        layer: layer.clone(),
+                        depth: 1,
+                    });
+                }
                 for n in props::revealed(stage, layer, r) {
                     if let Node::Prop { path, attr, label } = n {
                         push_prop(&path, &attr, &label, layer, 1, stage, &mut out);
@@ -669,6 +686,7 @@ impl Panel for TimelinePanel {
             self.last_expr.clear();
             self.last_lang.clear();
             self.last_bars.clear();
+            self.last_groups.clear();
         }
 
         let head = Rect::from_min_max(
@@ -732,6 +750,7 @@ impl Panel for TimelinePanel {
                 s.selected_keys.clear();
                 s.selected_layers.clear();
                 s.selected_props.clear();
+                s.selected_groups.clear();
             }
             // Right-click on empty space: AE 26's comp menu (New ▸, Composition
             // Settings, Preview ▸ …).
@@ -748,6 +767,7 @@ impl Panel for TimelinePanel {
         let mut layer_rows: Vec<(Rect, PrimPath)> = Vec::new();
         let mut prop_rows: Vec<(Rect, PrimPath, String)> = Vec::new();
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body));
+        let switch_input = ui.input(switches::SwitchInput::read);
         egui::ScrollArea::vertical()
             .id_salt("timeline_rows")
             .auto_shrink([false, false])
@@ -767,6 +787,7 @@ impl Panel for TimelinePanel {
                         &axis,
                         row,
                         rect,
+                        switch_input,
                         &layers,
                         &parent_items,
                         &mut key_rects,
@@ -780,6 +801,8 @@ impl Panel for TimelinePanel {
                     }
                 }
             });
+
+        self.finish_switch_drag(switch_input, cx);
 
         // Drags that span rows.
         self.finish_drags(
@@ -841,6 +864,7 @@ impl Panel for TimelinePanel {
 fn row_key(row: &Row) -> String {
     match &row.kind {
         RowKind::Layer => "layer".into(),
+        RowKind::Waveform => "waveform".into(),
         RowKind::Group { id, .. } => id.clone(),
         RowKind::Prop { path, attr, .. } => format!("{path}.{attr}"),
         RowKind::Expression {
@@ -895,6 +919,7 @@ fn select_layer(session: &SharedSession, stage: &Stage, layer: &PrimPath, mods: 
         s.selected_layers = vec![layer.clone()];
         s.selected_keys.clear();
         s.selected_props.clear();
+        s.selected_groups.clear();
     }
 }
 

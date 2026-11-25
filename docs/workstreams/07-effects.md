@@ -62,6 +62,7 @@
 - [扭曲](../../crates/bae-effects/tests/ae/categories/distort.md#工作流进度)
 - [生成](../../crates/bae-effects/tests/ae/categories/generate.md#工作流进度)
 - [抠像](../../crates/bae-effects/tests/ae/categories/keying.md#工作流进度)
+  - 本轮抠像接入 Keylight、Key Cleaner、提取和 Unmult。Keylight 在独立遮罩纹理上用最小/最大滤波和高斯模糊处理边缘与黑白噪点。Key Cleaner、柔和及实边遮罩共用可分离方框均值和 RGB 协方差引导滤波，支持前帧和边缘颜色净化。
 - [遮罩](../../crates/bae-effects/tests/ae/categories/matte.md#工作流进度)
 - [杂色和颗粒](../../crates/bae-effects/tests/ae/categories/noise-grain.md#工作流进度)
   - 杂色完成湍流杂色、匹配颗粒、移除颗粒、杂色 Alpha 和 HLS 两种模式。旧版中间值使用现有中间值内核。
@@ -81,6 +82,6 @@ LUT 字节和文件名随项目保存。效果面板的文件选择按钮交由 
 
 ### 路径生成效果（2026-11-24）
 
-实现描边（Stroke）、写入（Write-on）、涂写（Scribble）和勾画（Vegas）。渲染图提供按依赖选择的原始蒙版路径，以及在子帧时间求值的效果参数。写入的画笔位置在应用和重置时按图层大小居中。勾画支持蒙版及图像等高线，图像模式需要回读单通道阈值图再连接轮廓。
+实现描边（Stroke）、写入（Write-on）、涂写（Scribble）和勾画（Vegas）。渲染图提供按依赖选择的原始蒙版路径，以及在子帧时间求值的效果参数。写入的画笔位置在应用和重置时按图层大小居中。勾画支持蒙版及图像等高线，图像模式在 GPU 上连接等高线、计算弧长并绘制片段。
 
 27 张 AE 26.2.1 参考图已经用正式脚本重新生成，并核对了文件内容。具体精度与限制见[生成效果对照](../../crates/bae-effects/tests/ae/categories/generate.md#描边写入涂写和勾画)。

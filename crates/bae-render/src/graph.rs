@@ -54,7 +54,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use bae_model::{PrimPath, Time};
-use glam::{DAffine2, DVec2};
+use glam::{DAffine2, DMat4, DVec2};
 use rustc_hash::{FxHashMap, FxHasher};
 
 use crate::blend::{BlendMode, TrackMatteMode};
@@ -102,6 +102,8 @@ pub struct RenderGraph {
     /// An effect reads another time of the comp: the frame depends on more than
     /// its own evaluated comp (not frame-cached).
     pub time_dependent: bool,
+    /// A layer source was still warming up and is missing (not frame-cached).
+    pub incomplete: bool,
     /// The top-level layer each node was planned for, by node index (`None`:
     /// the comp itself). Per-layer render times add up their nodes.
     pub owners: Vec<Option<PrimPath>>,
@@ -355,6 +357,8 @@ pub struct EffectNode {
     pub effect: Arc<dyn Effect>,
     /// Evaluated parameters.
     pub instance: RenderEffect,
+    /// Composition scene when requested.
+    pub scene: Option<Box<crate::effect::EffectScene>>,
     /// Frame context for [`EffectParams`] (time, scale, bounds, rate, shutter …).
     pub frame: EffectFrame,
     /// Input node.
@@ -530,6 +534,7 @@ pub fn build_with(
         frames,
         resolving: Vec::new(),
         time_dependent: false,
+        incomplete: false,
         owner: None,
         owners: Vec::new(),
     };
@@ -540,6 +545,7 @@ pub fn build_with(
         output,
         warnings: builder.warnings,
         time_dependent: builder.time_dependent,
+        incomplete: builder.incomplete,
         owners: builder.owners,
     })
 }
@@ -572,6 +578,7 @@ struct Builder<'a, 'f> {
     /// Layers whose effects are being planned (cycle detection of layer inputs).
     resolving: Vec<PrimPath>,
     time_dependent: bool,
+    incomplete: bool,
     /// The top-level layer being planned (owner of the nodes pushed now).
     owner: Option<PrimPath>,
     owners: Vec<Option<PrimPath>>,
@@ -1634,6 +1641,34 @@ impl Builder<'_, '_> {
         }
         rect.hash(&mut h);
         let params = frame.params(&instance);
+        let scene = effect.uses_scene(&params).then(|| {
+            let world = layer.matrix_3d.unwrap_or_else(|| {
+                let m = layer.transform;
+                DMat4::from_cols(
+                    m.matrix2.x_axis.extend(0.).extend(0.),
+                    m.matrix2.y_axis.extend(0.).extend(0.),
+                    glam::DVec4::Z,
+                    m.translation.extend(0.).extend(1.),
+                )
+            });
+            let projection = comp
+                .view_camera()
+                .plane_homography(&world, DVec2::new(comp.width.into(), comp.height.into()));
+            let light = comp.lights.first().map(|light| {
+                let local = world
+                    .inverse()
+                    .transform_point3(light.position())
+                    .to_array();
+                let color = light.color.map(|v| v * light.intensity * 0.01);
+                (local, color)
+            });
+            projection.to_cols_array().map(f64::to_bits).hash(&mut h);
+            if let Some((position, color)) = light {
+                position.map(f64::to_bits).hash(&mut h);
+                color.map(f32::to_bits).hash(&mut h);
+            }
+            Box::new(crate::effect::EffectScene { projection, light })
+        });
         let mut layers = Vec::new();
         for dep in effect.layer_dependencies(&params) {
             if let Some(node) = self.layer_input(comp, &dep, scale, depth)? {
@@ -1686,6 +1721,7 @@ impl Builder<'_, '_> {
             .then(|| Box::new(EffectSamples { paths, history }));
         Ok(self.push(Node {
             kind: NodeKind::Effect(EffectNode {
+                scene,
                 layer: layer.path.clone(),
                 effect,
                 instance,
@@ -1951,6 +1987,11 @@ impl Builder<'_, '_> {
             }
             LayerContent::Custom(custom) => match self.sources.custom(custom) {
                 Ok(source) => Some(Content::Source(source, time)),
+                // Drawn again when it is ready (the frame is not kept).
+                Err(error) if error.is_warming_up() => {
+                    self.incomplete = true;
+                    None
+                }
                 Err(error) => {
                     self.warn(format!("{}: {error}", layer.path));
                     None

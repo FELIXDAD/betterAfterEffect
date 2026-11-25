@@ -57,8 +57,8 @@ fn prop_line(
             .lock()
             .scrub
             .as_ref()
-            .filter(|s| s.path == *path && s.attr == attr)
-            .map(|s| s.value.clone())
+            .and_then(|s| s.value_for(path, attr))
+            .cloned()
             .or_else(|| common::current_value(eval.get(cx.resources), stage, path, attr, now));
         if let Some(v) = value {
             let id = ui.id().with(("prop", path.as_str(), attr));
