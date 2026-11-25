@@ -137,6 +137,12 @@ fn three_d_axis_arrows_move_along_one_axis_and_rings_rotate() {
 /// Reset 3D View in Active Camera resets the camera layer ("Reset Camera 1").
 #[test]
 fn reset_3d_view_in_active_camera_resets_the_camera_layer() {
+}
+
+/// In a 3D view, a click on a camera selects it and a drag moves it in the
+/// view's plane (Top: x and z, not y).
+#[test]
+fn cameras_are_picked_and_dragged_in_3d_views() {
     let mut h = H::new();
     let camera = h.layer("camera");
     h.run(
@@ -182,4 +188,34 @@ fn three_d_scale_gizmo_scales_along_one_axis() {
     h.apply(&done);
     let s = h.v3(&l, "transform:scale");
     assert!((s[0] - 200.0).abs() < 1.0 && s[1] == 100.0, "{s:?}");
+
+        json!({"path": camera, "attr": "transform:position", "value": {"type": "vec3", "value": [200.0, 180.0, -100.0]}}),
+    );
+    tool_action(
+        &h,
+        crate::viewer::view3d::ids::SWITCH,
+        json!({"view": "top"}),
+    );
+    h.session().lock().selected_layers.clear();
+    h.frame(Vec::new(), Modifiers::NONE);
+    // Where Top shows the camera.
+    let at = {
+        let v = h.viewer.last_view.unwrap();
+        let p = v
+            .project(bae_anim::glam::DVec3::new(200.0, 180.0, -100.0), true)
+            .unwrap();
+        v.to_comp(p)
+    };
+    h.click(at.x, at.y, Modifiers::NONE);
+    assert_eq!(
+        h.session().lock().selected_layers,
+        std::slice::from_ref(&camera)
+    );
+    let r = h.drag((at.x, at.y), (at.x + 50.0, at.y), Modifiers::NONE);
+    h.apply(&r);
+    let p = h.v3(&camera, "transform:position");
+    assert!(
+        (p[0] - 250.0).abs() < 1.0 && (p[1] - 180.0).abs() < 1e-6,
+        "{p:?}"
+    );
 }

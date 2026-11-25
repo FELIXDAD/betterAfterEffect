@@ -93,12 +93,41 @@ pub(super) fn layers_at<'a>(
     let outer = Affine::new(DMat4::IDENTITY);
     comp.layers
         .iter()
-        .filter(|l| l.visible && !l.switches.guide || l.kind == bae_model::LayerKind::Null)
+        .filter(|l| {
+            l.visible && !l.switches.guide || l.kind == bae_model::LayerKind::Null || eye_layer(l)
+        })
         .filter(|l| !query::is_locked(stage, &l.path))
         .filter(move |l| {
             render::bounds_quad(l, view, &outer).is_some_and(|q| render::quad_contains(&q, pos))
+                || eye_near(l, view, pos)
         })
         .map(|l| l.path.clone())
+}
+
+/// Cameras and lights: picked by their position.
+fn eye_layer(l: &bae_anim::EvaluatedLayer) -> bool {
+    matches!(
+        l.kind,
+        bae_model::LayerKind::Camera | bae_model::LayerKind::Light
+    )
+}
+
+/// A camera or light whose position is near `pos` in a 3D view (not the
+/// camera the view looks through).
+fn eye_near(l: &bae_anim::EvaluatedLayer, view: &View, pos: Pos2) -> bool {
+    if !eye_layer(l) {
+        return false;
+    }
+    let m = l.camera.as_ref().map_or(l.world_matrix, |c| c.world_matrix);
+    let eye = m.w_axis.truncate();
+    if view
+        .camera
+        .is_some_and(|(c, _)| c.position().distance(eye) < 1e-6)
+    {
+        return false;
+    }
+    view.project(eye, true)
+        .is_some_and(|p| p.distance(pos) <= transform::ANCHOR_PICK)
 }
 
 /// Whether a convex quad and a rectangle overlap (separating axes).
@@ -519,15 +548,27 @@ pub(super) fn frame(
                     _ => Kind::Move { start: at },
                 };
                 // A 3D layer moves parallel to the view, at its depth.
-                let plane = grabbed.filter(|l| render::is_3d(l)).and_then(|l| {
-                    let (camera, size) = view.camera?;
-                    let a = l.world_matrix.transform_point3(l.transform.anchor_point);
-                    Some(transform::ViewPlane {
-                        camera,
-                        size,
-                        depth: camera.view().transform_point3(a).z,
+                let plane = grabbed
+                    .filter(|l| {
+                        render::is_3d(l)
+                            || matches!(
+                                l.kind,
+                                bae_model::LayerKind::Camera | bae_model::LayerKind::Light
+                            )
                     })
-                });
+                    .and_then(|l| {
+                        let (camera, size) = view.camera?;
+                        let a = match &l.camera {
+                            // A camera moves at its own depth (its anchor is the point of interest).
+                            Some(c) => c.world_matrix.w_axis.truncate(),
+                            None => l.world_matrix.transform_point3(l.transform.anchor_point),
+                        };
+                        Some(transform::ViewPlane {
+                            camera,
+                            size,
+                            depth: camera.view().transform_point3(a).z,
+                        })
+                    });
                 let drag = TransformDrag::new(stage, comp, &layers, kind).with_plane(plane);
                 let lines = super::guides::snap_lines(
                     stage,
