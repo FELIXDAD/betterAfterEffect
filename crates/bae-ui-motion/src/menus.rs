@@ -496,3 +496,26 @@ impl ActionHandler for MotionActions {
         actions::handle(inv, cx, &session)
     }
 }
+
+/// Chinese strings of this module (keys are the English text, see
+/// `bae_ui::i18n`).
+pub(crate) const ZH: &[(&str, &str)] = &[
+    // New layer menu
+    ("New", "新建"),
+    ("Text", "文本"),
+    ("Shape Layer", "形状图层"),
+    ("Null Object", "空对象"),
+    ("Null", "空"),
+    ("Camera", "摄像机"),
+    ("Light", "灯光"),
+    ("Adjustment Layer", "调整图层"),
+    ("Rectangle", "矩形"),
+    ("Ellipse", "椭圆"),
+    ("Star", "星形"),
+    ("Pre-comp", "预合成"),
+];
+
+/// Registers this module's Chinese strings (`MotionUiModule::build`).
+pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+}

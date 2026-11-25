@@ -1020,3 +1020,18 @@ fn empty_viewer(ui: &mut Ui, cx: &PanelContext<'_>, session: &SharedSession) {
         );
     });
 }
+
+mod zh;
+pub(crate) use zh::ZH;
+
+/// Registers this module's Chinese strings and panel (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "composition",
+        bae_ui::PanelKind::new("Composition", |spawn| {
+            Box::new(CompositionViewer::new(spawn.state))
+        }),
+    );
+}
