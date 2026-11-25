@@ -61,6 +61,7 @@ use crate::blend::{BlendMode, TrackMatteMode};
 use crate::camera::NEAR;
 use crate::effect::{Effect, EffectLibrary, EffectParams, LayerDependency, LayerStage, MaskSelect};
 use crate::error::RenderError;
+use crate::frame_blend;
 use crate::geom::{IRect, Rect, is_invertible, scale_affine};
 use crate::input::{
     CustomContent, FootageRef, LayerContent, RenderComp, RenderEffect, RenderLayer, RenderMask,
@@ -542,9 +543,17 @@ struct Builder<'a, 'f> {
 /// The content of a layer, planned: its bounds (in layer texel units) and how
 /// to produce it.
 enum Content {
-    Solid { color: [f32; 4], rect: Rect },
-    Fill { color: [f32; 4], rect: Rect },
+    Solid {
+        color: [f32; 4],
+        rect: Rect,
+    },
+    Fill {
+        color: [f32; 4],
+        rect: Rect,
+    },
     Source(Arc<dyn LayerSource>, Time),
+    /// Frame blending: source frames (start times) and their weights.
+    Mix(Arc<dyn LayerSource>, Vec<(Time, f32)>),
     Comp(Arc<RenderComp>),
 }
 
@@ -734,7 +743,7 @@ impl Builder<'_, '_> {
         };
         let content_rect = match &content {
             Content::Solid { rect, .. } | Content::Fill { rect, .. } => *rect,
-            Content::Source(src, _) => src.bounds().to_rect(),
+            Content::Source(src, _) | Content::Mix(src, _) => src.bounds().to_rect(),
             Content::Comp(c) => c.rect(),
         };
         let placement = placement(comp, layer, &content_rect, scale);
@@ -917,39 +926,14 @@ impl Builder<'_, '_> {
                 }))
             }
             Content::Source(source, time) => {
-                let mut h = FxHasher::default();
-                "source".hash(&mut h);
-                layer.path.hash(&mut h);
-                source.content_hash(time).hash(&mut h);
-                roi.hash(&mut h);
-                density.to_bits().hash(&mut h);
-                // Small sources are asked for whole: the request then stays the
-                // same while the layer turns or slides off screen, so a vector
-                // source can reuse the image it rasterized (the compositor uses
-                // only what it needs).
-                let bounds = source.bounds();
-                let texels =
-                    f64::from(bounds.width()) * f64::from(bounds.height()) * density * density;
-                let request = SourceRequest {
-                    roi: if !bounds.is_empty() && texels <= WHOLE_SOURCE_TEXELS {
-                        bounds
-                    } else {
-                        roi_px
-                    },
-                    scale: density,
-                    time,
-                };
-                OpInput::Image(self.push(Node {
-                    kind: NodeKind::Source(SourceNode {
-                        layer: layer.path.clone(),
-                        source,
-                        request,
+                OpInput::Image(self.source_node(layer, &source, time, roi, roi_px, density, scale))
+            }
+            Content::Mix(source, frames) => {
+                OpInput::Image(
+                    self.mix(layer, &frames, roi, scale, content_rect, |b, time| {
+                        b.source_node(layer, &source, time, roi, roi_px, density, scale)
                     }),
-                    rect: roi,
-                    pixel_scale: scale,
-                    key: h.finish(),
-                    cacheable: false,
-                }))
+                )
             }
             Content::Comp(nested) => {
                 OpInput::Image(self.composite(&nested, roi, scale, depth + 1, true)?)
@@ -1108,6 +1092,139 @@ impl Builder<'_, '_> {
 
     /// `input` with `mask` applied, as a layer-space image covering `roi` (the
     /// input of the layer's first effect).
+    /// The source's pixels at `time` over `roi_px` at `density` texels per
+    /// layer pixel.
+    #[allow(clippy::too_many_arguments)]
+    fn source_node(
+        &mut self,
+        layer: &RenderLayer,
+        source: &Arc<dyn LayerSource>,
+        time: Time,
+        roi: IRect,
+        roi_px: IRect,
+        density: f64,
+        scale: f64,
+    ) -> NodeId {
+        let mut h = FxHasher::default();
+        "source".hash(&mut h);
+        layer.path.hash(&mut h);
+        source.content_hash(time).hash(&mut h);
+        roi.hash(&mut h);
+        density.to_bits().hash(&mut h);
+        // Small sources are asked for whole: the request then stays the same
+        // while the layer turns or slides off screen, so a vector source can
+        // reuse the image it rasterized (the compositor uses only what it needs).
+        let bounds = source.bounds();
+        let texels = f64::from(bounds.width()) * f64::from(bounds.height()) * density * density;
+        let request = if !bounds.is_empty() && texels <= WHOLE_SOURCE_TEXELS {
+            bounds
+        } else {
+            roi_px
+        };
+        self.push(Node {
+            kind: NodeKind::Source(SourceNode {
+                layer: layer.path.clone(),
+                source: source.clone(),
+                request: SourceRequest {
+                    roi: request,
+                    scale: density,
+                    time,
+                },
+            }),
+            rect: roi,
+            pixel_scale: scale,
+            key: h.finish(),
+            cacheable: false,
+        })
+    }
+
+    /// The whole source at `time` as an effect input (`roi` in units of `scale`).
+    fn effect_source(
+        &mut self,
+        layer: &RenderLayer,
+        source: &Arc<dyn LayerSource>,
+        time: Time,
+        roi: IRect,
+        scale: f64,
+    ) -> NodeId {
+        let bounds = source.bounds();
+        self.push(Node {
+            rect: roi,
+            kind: NodeKind::Source(SourceNode {
+                layer: layer.path.clone(),
+                request: SourceRequest {
+                    roi: bounds,
+                    scale: 1.0 / scale,
+                    time,
+                },
+                source: source.clone(),
+            }),
+            pixel_scale: scale,
+            key: hash_of(&(
+                "effect source",
+                &layer.path,
+                source.content_hash(time),
+                bounds,
+                scale.to_bits(),
+            )),
+            cacheable: false,
+        })
+    }
+
+    /// Frame blending: the frames `node` makes for each time in `frames`, summed
+    /// with their weights (Alpha Add of premultiplied pixels, exact while the
+    /// weights sum to 1).
+    fn mix(
+        &mut self,
+        layer: &RenderLayer,
+        frames: &[(Time, f32)],
+        roi: IRect,
+        scale: f64,
+        content: Rect,
+        mut node: impl FnMut(&mut Self, Time) -> NodeId,
+    ) -> NodeId {
+        let mut h = FxHasher::default();
+        "mix".hash(&mut h);
+        let mut ops = Vec::with_capacity(frames.len());
+        for &(time, weight) in frames {
+            let id = node(self, time);
+            self.nodes[id.index()].key.hash(&mut h);
+            weight.to_bits().hash(&mut h);
+            ops.push(LayerOp {
+                layer: layer.path.clone(),
+                input: OpInput::Image(id),
+                transform: DAffine2::IDENTITY,
+                opacity: weight,
+                blend: BlendMode::AlphaAdd,
+                dissolve_seed: 0,
+                preserve_transparency: false,
+                matte: None,
+                mask: None,
+                bounds: roi,
+                content,
+                projection: None,
+                motion: None,
+                clips: Vec::new(),
+                lighting: None,
+            });
+        }
+        roi.hash(&mut h);
+        scale.to_bits().hash(&mut h);
+        self.clamp.hash(&mut h);
+        self.push(Node {
+            kind: NodeKind::Composite(CompositeNode {
+                prim: layer.path.clone(),
+                time: layer.time,
+                ops,
+                clamp: self.clamp,
+            }),
+            rect: roi,
+            pixel_scale: scale,
+            key: h.finish(),
+            cacheable: false,
+        })
+    }
+
     fn masked(
         &mut self,
         layer: &RenderLayer,
@@ -1522,7 +1639,7 @@ impl Builder<'_, '_> {
         };
         let content_rect = match &content {
             Content::Solid { rect, .. } | Content::Fill { rect, .. } => *rect,
-            Content::Source(src, _) => src.bounds().to_rect(),
+            Content::Source(src, _) | Content::Mix(src, _) => src.bounds().to_rect(),
             Content::Comp(c) => c.rect(),
         };
         let roi = units(&content_rect, scale);
@@ -1540,28 +1657,10 @@ impl Builder<'_, '_> {
                 )),
                 cacheable: false,
             }),
-            Content::Source(source, time) => {
-                let bounds = source.bounds();
-                self.push(Node {
-                    rect: roi,
-                    kind: NodeKind::Source(SourceNode {
-                        layer: layer.path.clone(),
-                        request: SourceRequest {
-                            roi: bounds,
-                            scale: 1.0 / scale,
-                            time,
-                        },
-                        source: source.clone(),
-                    }),
-                    pixel_scale: scale,
-                    key: hash_of(&(
-                        "effect source",
-                        &layer.path,
-                        source.content_hash(time),
-                        bounds,
-                        scale.to_bits(),
-                    )),
-                    cacheable: false,
+            Content::Source(source, time) => self.effect_source(layer, &source, time, roi, scale),
+            Content::Mix(source, frames) => {
+                self.mix(layer, &frames, roi, scale, content_rect, |b, time| {
+                    b.effect_source(layer, &source, time, roi, scale)
                 })
             }
             Content::Comp(nested) => self.composite(&nested, roi, scale, depth + 1, true)?,
@@ -1692,7 +1791,22 @@ impl Builder<'_, '_> {
                 })
             }
             LayerContent::Footage(footage) => match self.sources.footage(footage)? {
-                Some(source) => Some(Content::Source(source, footage.source_time)),
+                Some(source) => Some(match (footage.blend, source.frame_rate()) {
+                    (Some(blend), Some(rate)) => {
+                        if blend.pixel_motion {
+                            self.warn(format!(
+                                "{}: Pixel Motion frame blending is not available yet; Frame Mix is used",
+                                layer.path
+                            ));
+                        }
+                        let frames = frame_blend::weights(footage.source_time, blend.span, rate);
+                        match frames.as_slice() {
+                            [(time, _)] => Content::Source(source, *time),
+                            _ => Content::Mix(source, frames),
+                        }
+                    }
+                    _ => Content::Source(source, footage.source_time),
+                }),
                 None => {
                     self.warn(format!(
                         "{}: footage {} is missing",
