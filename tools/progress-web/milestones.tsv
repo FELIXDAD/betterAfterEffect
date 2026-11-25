@@ -26,3 +26,4 @@
 性能与发布	perf-4k	4K 实时、渲染 120 fps	doing	386,381,384,388
 性能与发布	cache	显存帧缓存（RAM 预览）	todo
 性能与发布	release	0.1.0 发布	todo
+面板 / 工作区	ae-panels-workspace	所有面板工作区、补齐 AE 26 的所有面板、窗口菜单逐项可用	todo		K

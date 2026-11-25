@@ -2,7 +2,11 @@
 
 看板使用 Python 3 标准库、SQLite 和浏览器原生 SSE。代码与 Rust 工作区独立。可用 Python 3.8 或更新版本。
 
+动态流返回最近 200 条记录，SQLite 保留完整历史。里程碑版本和分项 issue 定义在 board.json，能力清单及默认负责人在 milestones.tsv。
+
 ## 本机启动
+
+同步需要通过环境变量 GITHUB_TOKEN 或 GH_TOKEN 提供可读取本仓库 issue 和 PR 的 GitHub 令牌。本机若已登录 gh，可以在当前终端运行 `export GH_TOKEN="$(gh auth token)"`。
 
 在完整仓库里运行：
 
@@ -69,8 +73,8 @@ macOS/Linux 的 shell 脚本需要 Bash、Python 3、Git。Windows 脚本使用�
 ## AWS / systemd 部署
 
 1. 用 EC2 Instance Connect 或 SSM 连接选定的 Linux 实例。确认 8787 可用，且独立目录和同名服务未被其他应用使用。
-2. 将 server.py、index.html、legacy-effects.tsv 安装至 `/opt/bae-progress-web/`。在本机用 Python 的 SQLite backup API 制作一致性快照，连同 server.env 通过加密通道传至服务器。在服务停止时，将文件安装为 `/var/lib/bae-progress-web/board.sqlite3` 和 `server.env`，目录权限 0700，文件 0600；systemd 的 StateDirectory 会分配服务目录所有权。后续升级只更新代码，保留服务器数据库与凭证。
-3. 将 bae-progress-web.service 安装至 `/etc/systemd/system/`，运行 `sudo systemctl daemon-reload` 和 `sudo systemctl enable --now bae-progress-web`。通过 `systemctl is-enabled bae-progress-web`、`systemctl is-active bae-progress-web` 和实际带认证的状态请求核验。服务无需管理员权限。
+2. 将 server.py、index.html、board.json、milestones.tsv 和 legacy-effects.tsv 安装至 `/opt/bae-progress-web/`。在本机用 Python 的 SQLite backup API 制作一致性快照，连同 server.env 通过加密通道传至服务器。在服务停止时，将文件安装为 `/var/lib/bae-progress-web/board.sqlite3` 和 `server.env`，目录权限 0700，文件 0600；systemd 的 StateDirectory 会分配服务目录所有权。后续升级只更新代码，保留服务器数据库与凭证。
+3. 在服务器的 `/etc/bae-progress-web/github.env`（root 所有、0600）中设置 `GITHUB_TOKEN`，使用专供该服务的只读令牌。将 bae-progress-web.service 安装至 `/etc/systemd/system/`，运行 `sudo systemctl daemon-reload` 和 `sudo systemctl enable --now bae-progress-web`。通过 `systemctl is-enabled bae-progress-web`、`systemctl is-active bae-progress-web` 和实际带认证的状态请求核验。服务无需管理员权限。
 4. 有域名时在 HTTPS 入口转发到本服务，关闭 SSE 响应缓冲，保持长连接，服务单元默认仅监听 127.0.0.1。临时 IP 模式需单独调整监听地址，并按来源 IP 限制安全组 TCP 8787 的访问。HTTP Basic 和 Bearer 在 HTTP 链路上以明文传递。
 5. 将各汇报机 env 的 BAE_BOARD_URL 改为已验证的 AWS 地址。用两个浏览器窗口验证汇报动态与实时更新。
 
@@ -81,15 +85,11 @@ umask 077
 python3 -c 'import sqlite3, sys; from pathlib import Path; sqlite3.connect(Path.home()/".config/bae-board/board.sqlite3").backup(sqlite3.connect(sys.argv[1]))' /private/tmp/bae-board-deploy.sqlite3
 ```
 
-### 线上实例
-
-正式入口为 https://board.rimlight.studio/ ，运行在东京 Lightsail 实例 spectra。Nginx 使用独立虚拟主机转发到回环端口 8787；证书由 Certbot 的 webroot 流程续期，续期后平滑重载 Nginx。Mac 的 8787 是单独的本机原型，部署后所有 agent 统一向正式入口汇报。
-
 ### AE 交互对齐
 
 “AE 交互对齐”列出 issue、修复和验收三种独立状态。#400 共七项，编号顺序与正文和补充评论一致。第 N 项的修复 ID 是 `ae-400-N-fix`，验收 ID 是 `ae-400-N-verify`。七项修复计入里程碑，验收单独计数。
 
-看板服务启动时及此后每五分钟，通过公开 GitHub API 分页读取仓库中所有带 `ae-parity` 标签的开放和关闭 issue。以 issue 编号去重，#400 复用上述七项。新 issue 的修复和验收初始均为待办，例如第 401 号对应 `ae-401-fix`、`ae-401-verify`。每项按模块显示，可在 issue 正文单独写一行 `模块：时间轴` 覆盖按标签、标题和正文的自动归类。另有面板 / 工作区里程碑 `ae-panels-workspace`，由 K 跟进。
+看板服务启动时及此后每五分钟，通过带认证的 GitHub API 分页读取仓库中所有带 `ae-parity` 标签的开放和关闭 issue。以 issue 编号去重，#400 复用上述七项。新 issue 的修复和验收初始均为待办，例如第 401 号对应 `ae-401-fix`、`ae-401-verify`。每项按模块显示，可在 issue 正文单独写一行 `模块：时间轴` 覆盖按标签、标题和正文的自动归类。另有面板 / 工作区里程碑 `ae-panels-workspace`，由 K 跟进。
 
 普通 issue 开放时为待修，关闭时为已解决，重开后回到待修，之后合并的新修复可再次解决。PR 须由 GitHub 确认为 merged。匹配依据包括 PR 关闭引用（例如 `Fixes #401`）、关闭事件的合并提交、看板汇报时显式提交的 PR，或 issue 正文/维护者评论的独立行 `修复 PR: #456`。只开 PR 可以登记关联。人工关闭且无合并依据显示“已解决 · PR 暂无”。
 

@@ -15,9 +15,11 @@ import subprocess
 import threading
 import time
 import urllib.request
-import sys
+import logging
 
 HERE = Path(__file__).resolve().parent
+BOARD = json.loads((HERE / "board.json").read_text(encoding="utf-8"))
+ISSUE_GROUPS = {int(number): group for number, group in BOARD["issues"].items()}
 CONF = Path(os.getenv("BAE_BOARD_CONFIG", Path.home() / ".config/bae-board"))
 DB = Path(os.getenv("BAE_BOARD_DB", CONF / "board.sqlite3"))
 CHANGE = threading.Condition()
@@ -39,7 +41,7 @@ def credentials():
     if not secret.exists():
         private_file(secret, f"BAE_BOARD_PASSWORD={secrets.token_urlsafe(18)}\n"
                      f"BAE_BOARD_TOKEN={secrets.token_urlsafe(32)}\n")
-    config = dict(line.split("=", 1) for line in secret.read_text().splitlines())
+    config = dict(line.split("=", 1) for line in secret.read_text().splitlines() if line.strip())
     password, token = config["BAE_BOARD_PASSWORD"], config["BAE_BOARD_TOKEN"]
     if not password or not token:
         raise ValueError("Empty credentials")
@@ -98,37 +100,30 @@ def initialize():
             number integer primary key, item text, title text, state text, updated text)""")
         db.execute("begin immediate")
         if not db.execute("select 1 from items limit 1").fetchone():
-            seed_board(db)
+            db.executemany("insert into items(id,kind,module,name,status,tag,prs,updated) "
+                           "values(?,?,?,?,?,?,?,?)", [(*row, now()) for row in effects()])
+        register_milestones(db)
         register_legacy_effects(db)
         db.execute("""create table if not exists parity_issues(
             number integer primary key, title text not null, state text not null, updated text not null)""")
         db.execute("""create table if not exists parity_resolution(
             item text primary key, merged text not null)""")
-        db.execute("""insert into items(id,kind,module,name,status,agent,tag,prs,updated)
-            values('ae-panels-workspace','milestone','面板 / 工作区',
-            '所有面板工作区、补齐 AE 26 的所有面板、窗口菜单逐项可用','todo','K','','[]',?)
-            on conflict(id) do nothing""", (now(),))
-        if not db.execute("select 1 from parity_issues where number=400").fetchone():
-            save_issue(db, 400, "P0 易用性交互", "open", "")
-
-
-# The first four checks come from issue 400, the last three from its owner comment.
-INTERACTIONS = (
-    ("图层内容可选中及复制", "点名称选中行，小箭头展开。形状、效果、蒙版、文字动画器支持复制、粘贴和同层级副本。"),
-    ("查看器优先操作已选图层", "拖动、手柄、键盘微移作用于已选图层；取消选择后再按点击位置拾取最上层。"),
-    ("数值框全选、Tab 与方向键", "单击和 Tab / Shift+Tab 全选；上下键 ±1，Cmd/Ctrl ±0.1，Shift ±10；Enter 确认，Esc 取消。"),
-    ("多选同时修改", "对应属性值及 3D、运动模糊、隐藏、锁定等开关同步修改，一步撤销。"),
-    ("取消选择图层", "时间轴或查看器空白处、F2、Cmd+Shift+A 清空选择；随后形状工具可新建形状图层。"),
-    ("双击编辑形状", "选取工具双击查看器形状，进入路径编辑或自由变换。"),
-    ("系统核对交互细节", "按 AE 核查选择模型、工具与修饰键、新建规则、数值编辑和键盘操作；列出差异，逐批修复并提交 PR。"),
-)
+        for number, group in ISSUE_GROUPS.items():
+            row = db.execute("select * from parity_issues where number=?", (number,)).fetchone()
+            if row:
+                save_issue(db, number, row["title"], row["state"], row["updated"])
+            else:
+                save_issue(db, number, group["title"], "open", "")
 
 
 def parity_tasks(number, title):
-    checks = INTERACTIONS if number == 400 else [(title, "")]
-    for index, (name, detail) in enumerate(checks, 1):
-        prefix = f"ae-{number}-{index}" if number == 400 else f"ae-{number}"
-        yield dict(name=name, detail=detail, fix=prefix + "-fix", verify=prefix + "-verify")
+    group = ISSUE_GROUPS.get(number)
+    checks = group["tasks"] if group else [dict(name=title, detail="")]
+    for check in checks:
+        prefix = f"ae-{number}"
+        if group:
+            prefix += f"-{check['slot']}"
+        yield dict(check, fix=prefix + "-fix", verify=prefix + "-verify")
 
 
 def save_issue(db, number, title, state, updated):
@@ -138,14 +133,13 @@ def save_issue(db, number, title, state, updated):
         or parity_issues.state!=excluded.state or parity_issues.updated!=excluded.updated""",
                (number, title, state, updated))
     for task in parity_tasks(number, title):
-        for role, kind, module in (("fix", "milestone" if number == 400 else "repair", "交互对齐"),
+        for role, kind, module in (("fix", "milestone" if number in ISSUE_GROUPS else "repair", "交互对齐"),
                                    ("verify", "acceptance", "交互验收")):
             db.execute("""insert into items(id,kind,module,name,status,tag,prs,updated)
                 values(?,?,?,?,'todo','','[]',?) on conflict(id) do nothing""",
-                       (task[role], kind, module, task["name"], now()))
+                       (task[role], kind, task.get("module", module), task["name"], now()))
 
 
-MODULES_400 = ("时间轴", "查看器工具", "数值编辑", "时间轴", "选择与快捷键", "查看器工具", "交互核查")
 MODULE_RULES = (
     ("面板 / 工作区", r"面板|工作区|窗口菜单|panel|workspace"),
     ("数值编辑", r"数值|数字框|numeric|number field"),
@@ -173,11 +167,15 @@ def issue_module(issue):
 
 
 def github_pages(endpoint):
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if not token:
+        raise RuntimeError("GitHub sync requires GITHUB_TOKEN or GH_TOKEN")
     for page in range(1, 10001):
         separator = "&" if "?" in endpoint else "?"
         url = ("https://api.github.com/repos/FELIXDAD/betterAfterEffects/" +
                f"{endpoint}{separator}per_page=100&page={page}")
-        with urllib.request.urlopen(url, timeout=15) as response:
+        request = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
+        with urllib.request.urlopen(request, timeout=15) as response:
             batch = json.load(response)
         yield from batch
         if len(batch) < 100:
@@ -226,13 +224,13 @@ def reconcile(db, issue, pulls, events):
     notes = [issue.get("body") or ""] + [e.get("body") or "" for e in events if e["event"] == "commented"
         and e.get("author_association") in ("OWNER", "MEMBER", "COLLABORATOR")]
     merged_pulls = [p for p in pulls if p.get("merged_at")]
-    for index, t in enumerate(parity_tasks(n, issue["title"])):
-        module = MODULES_400[index] if n == 400 else issue_module(issue)
+    for t in parity_tasks(n, issue["title"]):
+        module = t.get("module") or issue_module(issue)
         db.execute("""update items set name=?,module=? where id in (?,?)
             and (name!=? or module!=?)""", (t["name"], module, t["fix"], t["verify"], t["name"], module))
         row = db.execute("select status,prs from items where id=?", (t["fix"],)).fetchone()
         refs = set(json.loads(row["prs"]))
-        link_prefix = re.escape(t["fix"]) + r"\s+" if n == 400 else ""
+        link_prefix = re.escape(t["fix"]) + r"\s+" if n in ISSUE_GROUPS else ""
         pr_reference = (r"(?im)^" + link_prefix + r"(?:修复\s*PR|Fix-PR)\s*[:：]\s*"
                         r"(?:#|https://github.com/FELIXDAD/betterAfterEffects/pull/)([1-9]\d*)\b")
         explicit = {int(value) for text in notes for value in re.findall(pr_reference, text)}
@@ -241,16 +239,16 @@ def reconcile(db, issue, pulls, events):
             msg = (pr.get("title") or "") + "\n" + (pr.get("body") or "")
             scoped = re.search(r"(?im)^(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?|board-item|修复)"
                                r"\s*[:：]?\s*`?" + re.escape(t["fix"]) + r"(?![\w-])", msg)
-            if n == 400:
-                scoped = scoped or re.search(rf"(?i)(?:fix(?:es|ed)?|修复)\s*#400\s*"
-                                             rf"(?:第\s*|[/.:：-]\s*){index+1}(?!\d)", msg)
-            closure = n != 400 and (re.search(closing_ref, msg, re.I) or
+            if n in ISSUE_GROUPS:
+                scoped = scoped or re.search(rf"(?i)(?:fix(?:es|ed)?|修复)\s*#{n}\s*"
+                                             rf"(?:第\s*|[/.:：-]\s*){t['slot']}(?!\d)", msg)
+            closure = n not in ISSUE_GROUPS and (re.search(closing_ref, msg, re.I) or
                                       (closing_sha and closing_sha == pr.get("merge_commit_sha")))
-            if pr["number"] in refs | explicit or (n != 400 and pr["number"] in linked) or scoped or closure:
+            if pr["number"] in refs | explicit or (n not in ISSUE_GROUPS and pr["number"] in linked) or scoped or closure:
                 matches.append(pr)
         merged = sorted(p["number"] for p in matches)
         # An aggregate issue closed by a PR still needs per-child evidence.
-        manual_close = issue["state"] == "closed" and (n != 400 or not closing_sha)
+        manual_close = issue["state"] == "closed" and (n not in ISSUE_GROUPS or not closing_sha)
         resolved = manual_close or any(p["merged_at"] > reopened for p in matches)
         status = "done" if resolved else "todo"
         prs = sorted(refs.union(merged))
@@ -276,8 +274,8 @@ def parity_loop():
     while True:
         try:
             sync_parity()
-        except (OSError, ValueError, KeyError, sqlite3.Error) as error:
-            print(f"GitHub issue sync failed: {error}", file=sys.stderr, flush=True)
+        except Exception:
+            logging.exception("GitHub issue sync failed; retrying in five minutes")
         time.sleep(300)
 
 
@@ -299,14 +297,15 @@ def register_legacy_effects(db):
         values(?,'effect','旧版效果',?,?,?,?,?,?) on conflict(id) do nothing""", rows)
 
 
-def seed_board(db):
-    rows = list(effects())
-    for line in (HERE / "milestones.tsv").read_text().splitlines():
-        module, item, name, status, *pr = line.split("\t")
-        prs = [int(n) for n in pr[0].split(",")] if pr else []
-        rows.append((item, "milestone", module, name, status, "", json.dumps(prs)))
-    db.executemany("insert into items(id,kind,module,name,status,tag,prs,updated) "
-                   "values(?,?,?,?,?,?,?,?)", [(*row, now()) for row in rows])
+def register_milestones(db):
+    rows = []
+    for line in (HERE / "milestones.tsv").read_text(encoding="utf-8").splitlines():
+        module, item, name, status, *extra = line.split("\t")
+        pr, agent = (extra + ["", ""])[:2]
+        prs = [int(n) for n in pr.split(",")] if pr else []
+        rows.append((item, module, name, status, json.dumps(prs), agent, now()))
+    db.executemany("""insert into items(id,kind,module,name,status,tag,prs,agent,updated)
+        values(?,'milestone',?,?,?,'',?,?,?) on conflict(id) do nothing""", rows)
 
 
 def import_github():
@@ -343,14 +342,14 @@ def snapshot():
         feed = [dict(row) for row in db.execute("""
             select seq,item,agent,status,note,updated,null as pr from activity
             union all select 0,'','GitHub',state,title,updated,number from pulls where item is null
-            order by updated desc, seq desc""")]
+            order by updated desc, seq desc, pr desc limit 200""")]
         issues = [dict(row) for row in db.execute("select * from parity_issues order by number")]
         merged = {row[0]: json.loads(row[1]) for row in db.execute("select item,merged from parity_resolution")}
         for issue in issues:
             issue["tasks"] = list(parity_tasks(issue["number"], issue["title"]))
             for task in issue["tasks"]:
                 task["merged"] = merged.get(task["fix"], [])
-        return dict(items=items, agents=agents, activity=feed, parity=issues)
+        return dict(milestone=BOARD["milestone"], items=items, agents=agents, activity=feed, parity=issues)
 
 
 def field(data, key, limit, required=False):
