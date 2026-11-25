@@ -30,6 +30,8 @@ pub trait Command: Send + Sync + 'static {
     const TITLE: &'static str;
     /// What it does, for agents and the command palette.
     const DESCRIPTION: &'static str;
+    /// Accepts raw filesystem paths or performs filesystem I/O.
+    const FILESYSTEM: bool = false;
 
     fn run(
         &self,
@@ -41,6 +43,10 @@ pub trait Command: Send + Sync + 'static {
 /// Type-erased command, implemented for every [`Command`] and directly by plugins.
 pub trait DynCommand: Send + Sync {
     fn info(&self) -> &CommandInfo;
+    /// Whether invocation requires authority over files outside the project model.
+    fn requires_filesystem(&self) -> bool {
+        false
+    }
     fn run_json(
         &self,
         tx: &mut Transaction<'_>,
@@ -90,6 +96,10 @@ struct Typed<C: Command> {
 impl<C: Command> DynCommand for Typed<C> {
     fn info(&self) -> &CommandInfo {
         &self.info
+    }
+
+    fn requires_filesystem(&self) -> bool {
+        C::FILESYSTEM
     }
 
     fn run_json(
