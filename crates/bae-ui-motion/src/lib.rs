@@ -22,6 +22,7 @@
 //! without one (tests, headless hosts).
 
 pub mod actions;
+mod assist;
 pub mod catalog;
 mod common;
 mod context_menu;
@@ -91,7 +92,7 @@ impl AppModule for MotionUiModule {
         let _ = app.register_arc::<dyn bae_ui::DialogHost>("bae-ui-motion", dialogs);
         let owner = app.current_owner();
         let kinds = app.registry::<PanelKind>();
-        let panels: [(&str, PanelKind); 8] = [
+        let panels: [(&str, PanelKind); 9] = [
             (
                 "project",
                 PanelKind::new("Project", |_| Box::new(ProjectPanel::default())),
@@ -129,6 +130,12 @@ impl AppModule for MotionUiModule {
             (
                 "render_queue",
                 PanelKind::new("Render Queue", |_| Box::new(RenderQueuePanel::default())),
+            ),
+            (
+                "mask_interpolation",
+                PanelKind::new("Mask Interpolation", |_| {
+                    Box::new(assist::mask_interpolation::MaskInterpolationPanel::default())
+                }),
             ),
         ];
         kinds.batch(|tx| {
