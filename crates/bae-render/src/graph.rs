@@ -964,7 +964,7 @@ impl Builder<'_, '_> {
         let mut rois = vec![roi; effects.len() + 1];
         for (i, (effect, instance)) in effects.iter().enumerate().rev() {
             let params = frame.params(instance);
-            roi = effect.input_roi(&params, roi).intersect(&bounds_chain[i]);
+            roi = effect.required_input(&params, roi, bounds_chain[i]);
             rois[i] = roi;
         }
 
@@ -1507,10 +1507,7 @@ impl Builder<'_, '_> {
         let mut rois = vec![canvas; effects.len() + 1];
         for i in (0..effects.len()).rev() {
             let params = frame.params(&effects[i].1);
-            rois[i] = effects[i]
-                .0
-                .input_roi(&params, rois[i + 1])
-                .intersect(&domain);
+            rois[i] = effects[i].0.required_input(&params, rois[i + 1], domain);
         }
         let base_rect = rois[0].union(&canvas).intersect(&domain);
 

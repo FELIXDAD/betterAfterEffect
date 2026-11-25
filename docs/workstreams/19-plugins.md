@@ -45,6 +45,7 @@
 
 - betterAfterEffects 脚本在同次运行里复用项目条目、合成图层和关键帧列表，按索引创建所取的对象。增删或移动图层、修改关键帧后，脚本持有的集合会反映新的顺序和值。
 - betterAfterEffects 的原生插件子进程直接进入渲染协议。Windows 用分页文件支持的内存映射，Unix 在创建共享内存后立即删除名字，通过描述符交给子进程。后续帧复用这段内存，容量不足时重新分配。
+- betterAfterEffects 原生渲染直接读写共享内存，复用上传缓冲。宿主按行转换像素，并复用输入范围一致的预渲染查询。声明可并发的效果可在两个 runner 中同时处理帧。
 - [x] 设计规格 `docs/spec/plugin-architecture.md`（v0.1，已对齐合并后的 `bae_render::Effect` 和 `bae_model::EffectDef`）
 - [x] C ABI 头文件 `sdk/c/bae_plugin.h` 雏形（ABI 0.1）+ 自检（`sdk/c/tests/check.sh`：结构体布局、常量、签名、C++17、迷你宿主跑通纯 C 示例）
 - [x] 清单格式与校验（`bae_plugin::manifest`，错误带行列号）；参数 → `bae_model::EffectDef`（`effect_def`）

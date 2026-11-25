@@ -243,6 +243,11 @@ pub trait Effect: Send + Sync {
         output_roi
     }
 
+    /// Part of the available input needed to produce the requested output.
+    fn required_input(&self, params: &EffectParams<'_>, output: IRect, available: IRect) -> IRect {
+        self.input_roi(params, output).intersect(&available)
+    }
+
     /// Requests the composition camera and first light for its internal scene.
     fn uses_scene(&self, _params: &EffectParams<'_>) -> bool {
         false

@@ -33,6 +33,7 @@ half.workspace = true
 libloading.workspace = true
 naga.workspace = true
 parking_lot.workspace = true
+rayon.workspace = true
 rustc-hash.workspace = true
 semver.workspace = true
 serde.workspace = true
