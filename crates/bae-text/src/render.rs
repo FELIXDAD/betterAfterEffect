@@ -450,11 +450,23 @@ impl TextProvider {
             return Ok(Arc::new(match &layer.text {
                 Some(doc) => {
                     let mut fonts = self.fonts.lock();
-                    crate::animator::layout_animated(
+                    let mut layout = crate::animator::layout_animated(
                         fonts.get_or_insert_with(FontSystem::new),
                         doc,
                         &layer.text_animators,
-                    )
+                    );
+                    // Text on a path (AE: Path Options with a mask chosen).
+                    if let Some(options) = &layer.text_path
+                        && let Some(mask) = layer.masks.iter().find(|m| m.path == options.mask)
+                    {
+                        crate::path::place_on_path(
+                            &mut layout,
+                            &mask.shape,
+                            options,
+                            &doc.justification,
+                        );
+                    }
+                    layout
                 }
                 None => TextLayout::empty(crate::layout::TextPaint {
                     fill: None,

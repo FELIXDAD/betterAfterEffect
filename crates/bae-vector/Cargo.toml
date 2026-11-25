@@ -19,6 +19,7 @@ render = ["dep:vello", "dep:vello_cpu", "dep:bae-render", "dep:bae-gpu", "dep:pa
 bae-model.workspace = true
 bae-anim.workspace = true
 kurbo.workspace = true
+linesweeper = "0.5"
 rustc-hash.workspace = true
 
 bae-gpu = { workspace = true, optional = true }
@@ -29,6 +30,7 @@ vello_cpu = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
+image = { workspace = true, features = ["png"] }
 # GPU tests always run with the `render` feature (`cargo test -p bae-vector`).
 bae-vector = { path = ".", features = ["render"] }
 bae-gpu.workspace = true

@@ -305,6 +305,16 @@ const LAYER: &[AttrDef] = &[
     prim_ref("text:path")
         .kinds(&["text"])
         .doc("Mask used as the text path."),
+    // AE's Path Options (Text > Path Options) of text on a path.
+    boolean("text:reverse_path", false).kinds(&["text"]),
+    boolean("text:perpendicular_to_path", true).kinds(&["text"]),
+    boolean("text:force_alignment", false).kinds(&["text"]),
+    float("text:first_margin", 0.0)
+        .kinds(&["text"])
+        .doc("Pixels along the path before the text."),
+    float("text:last_margin", 0.0)
+        .kinds(&["text"])
+        .doc("Pixels along the path after the text."),
     choice("camera:type", "two_node", &["one_node", "two_node"]).kinds(&["camera"]),
     float("camera:zoom", 1777.8)
         .kinds(&["camera"])
@@ -420,6 +430,9 @@ pub static SCHEMAS: &[PrimSchema] = &[
             ),
             boolean("preserve_frame_rate", false),
             boolean("preserve_resolution", false),
+            boolean("hide_shy_layers", false)
+                .doc("Timeline: hide layers whose Shy switch is on (AE Hide Shy Layers)."),
+            boolean("draft_3d", false).doc("AE Draft 3D: fast 3D previews."),
             int("label", 15),
         ],
     },
@@ -569,18 +582,35 @@ pub static SCHEMAS: &[PrimSchema] = &[
                 "simultaneously",
                 &["simultaneously", "individually"],
             ),
-            float("repeater:copies", 3.0),
+            float("repeater:copies", 1.0),
             float("repeater:offset", 0.0),
             choice("repeater:composite", "below", COMPOSITE),
-            vec2("repeater:position", [100.0, 0.0]),
+            vec2("repeater:position", [0.0, 0.0]),
             vec2("repeater:scale", [100.0, 100.0]),
             float("repeater:rotation", 0.0),
             float("repeater:start_opacity", 100.0),
             float("repeater:end_opacity", 100.0),
-            float("offset:amount", 0.0),
+            float("offset:amount", 10.0),
             float("round_corners:radius", 10.0),
-            float("twist:angle", 0.0),
-            float("pucker_bloat:amount", 0.0),
+            float("twist:angle", 10.0),
+            float("pucker_bloat:amount", 10.0),
+            float("offset:line_join", 1.0),
+            float("offset:miter_limit", 4.0),
+            float("offset:copies", 1.0),
+            float("offset:copy_offset", 1.0),
+            float("wiggle_paths:size", 10.0),
+            float("wiggle_paths:detail", 10.0),
+            float("wiggle_paths:points", 1.0),
+            float("wiggle_paths:frequency", 2.0),
+            float("wiggle_paths:correlation", 50.0),
+            float("wiggle_paths:temporal_phase", 0.0),
+            float("wiggle_paths:spatial_phase", 0.0),
+            float("wiggle_paths:seed", 0.0),
+            float("zig_zag:size", 5.0),
+            float("zig_zag:detail", 10.0),
+            float("zig_zag:points", 1.0),
+            vec2("twist:center", [0.0; 2]),
+            vec2("repeater:anchor_point", [0.0; 2]),
         ],
     },
     PrimSchema {

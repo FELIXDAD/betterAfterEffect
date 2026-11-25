@@ -616,7 +616,11 @@ class CrateRelationTest(Base):
         self.commit(repo, {"crates/render/src/layer.rs": "LayerDependency changed\n"}, "dev")
         run(repo, "git", "push", "-q", "origin", "dev")
         run(repo, "git", "fetch", "-q", "origin")
-        over = mt.overlap(pr_head)
+        # File-level only (the repo default since 2026-11-24): different files, no overlap.
+        with mock.patch.dict(mt.CFG["merge"], {"relate_crates": False}):
+            self.assertEqual(mt.overlap(pr_head), [])
+        with mock.patch.dict(mt.CFG["merge"], {"relate_crates": True}):
+            over = mt.overlap(pr_head)
         self.assertEqual(len(over), 1)
         self.assertIn("fx 依赖 render", over[0])
         # After update-branch the merge-base is dev's head: nothing to relate any more,
@@ -624,7 +628,8 @@ class CrateRelationTest(Base):
         run(repo, "git", "checkout", "-q", "feat")
         run(repo, "git", "merge", "-q", "--no-edit", "origin/dev")
         merged = run(repo, "git", "rev-parse", "HEAD")
-        with mock.patch.object(mt, "crate_graph", side_effect=RuntimeError("no cargo")):
+        with mock.patch.object(mt, "crate_graph", side_effect=RuntimeError("no cargo")), \
+                mock.patch.dict(mt.CFG["merge"], {"relate_crates": True}):
             self.assertEqual(mt.overlap(merged), [])
 
     def test_related_pr_does_not_skip_ahead(self):
