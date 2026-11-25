@@ -281,6 +281,8 @@ const LAYER: &[AttrDef] = &[
         .doc("AE 'Preserve Underlying Transparency' (T switch): draw only where layers below are opaque."),
     boolean("collapse_transformation", false).doc("Continuous rasterization for vectors."),
     boolean("motion_blur", false),
+    choice("frame_blending", "off", &["off", "frame_mix", "pixel_motion"])
+        .doc("AE Frame Blending switch; renders only when the comp switch is on too."),
     choice("quality", "best", &["best", "draft", "wireframe"]),
     choice("sampling", "bilinear", &["bilinear", "bicubic"]),
     boolean("guide", false),
@@ -411,6 +413,7 @@ pub static SCHEMAS: &[PrimSchema] = &[
             AttrDef::new("guides", ValueType::FloatList, DefaultValue::None, false)
                 .doc("Viewer guides: pairs of (0 horizontal / 1 vertical, comp pixels)."),
             boolean("motion_blur", false),
+            boolean("frame_blending", false).doc("AE Enable Frame Blending (comp switch)."),
             AttrDef::new(
                 "shutter_angle",
                 ValueType::Float,
