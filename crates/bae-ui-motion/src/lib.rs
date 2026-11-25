@@ -29,6 +29,8 @@ mod context_menu;
 pub mod demo;
 pub mod dialogs;
 pub mod effects;
+mod expr;
+mod expr_menu;
 mod gpu_preview;
 mod graph;
 mod i18n;
