@@ -305,6 +305,16 @@ const LAYER: &[AttrDef] = &[
     prim_ref("text:path")
         .kinds(&["text"])
         .doc("Mask used as the text path."),
+    // AE's Path Options (Text > Path Options) of text on a path.
+    boolean("text:reverse_path", false).kinds(&["text"]),
+    boolean("text:perpendicular_to_path", true).kinds(&["text"]),
+    boolean("text:force_alignment", false).kinds(&["text"]),
+    float("text:first_margin", 0.0)
+        .kinds(&["text"])
+        .doc("Pixels along the path before the text."),
+    float("text:last_margin", 0.0)
+        .kinds(&["text"])
+        .doc("Pixels along the path after the text."),
     choice("camera:type", "two_node", &["one_node", "two_node"]).kinds(&["camera"]),
     float("camera:zoom", 1777.8)
         .kinds(&["camera"])
@@ -641,6 +651,45 @@ pub static SCHEMAS: &[PrimSchema] = &[
             string("plugin:version"),
             AttrDef::new("state", ValueType::Bytes, DefaultValue::None, false)
                 .doc("Opaque per-instance plugin state (AE sequence data)."),
+        ],
+    },
+    PrimSchema {
+        prim_type: PrimType::PAINT_STROKE,
+        doc: "A paint stroke under a Paint effect (AE's Brush / Clone / Eraser strokes), \
+              in layer space; shown from `in_point` to `out_point` (layer time).",
+        attrs: &[
+            string("name"),
+            choice("tool", "brush", &["brush", "clone", "eraser"]).fixed(),
+            bezier("path").doc("The stroke's path (layer pixels)."),
+            float("start", 0.0).doc("Percent of the path drawn from."),
+            float("end", 100.0).doc("Percent of the path drawn to (Write On animates it)."),
+            color("color", [1.0, 1.0, 1.0, 1.0]),
+            float("diameter", 10.0),
+            float("angle", 0.0),
+            float("hardness", 100.0),
+            float("roundness", 100.0),
+            float("spacing", 25.0),
+            choice("channels", "rgba", &["rgba", "rgb", "alpha"]),
+            float("opacity", 100.0),
+            float("flow", 100.0),
+            choice("mode", "normal", BLEND_MODES),
+            choice(
+                "erase",
+                "layer_and_paint",
+                &["layer_and_paint", "paint", "last_stroke"],
+            )
+            .fixed(),
+            prim_ref("clone:source").doc("Clone Stamp: the source layer (none = this layer)."),
+            vec2("clone:position", [0.0, 0.0]).doc("Clone Stamp: where the source is sampled."),
+            time("clone:time", 0).doc("Clone Stamp: the source time (Lock Source Time)."),
+            time("clone:time_shift", 0).doc("Clone Stamp: source time offset."),
+            boolean("clone:lock_time", false).fixed(),
+            vec2("transform:anchor_point", [0.0, 0.0]),
+            vec2("transform:position", [0.0, 0.0]),
+            vec2("transform:scale", [100.0, 100.0]),
+            float("transform:rotation", 0.0),
+            time("in_point", 0).fixed(),
+            time("out_point", 0).fixed(),
         ],
     },
     PrimSchema {

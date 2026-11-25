@@ -146,10 +146,9 @@ fn parse_errors_have_locations() {
 #[test]
 fn validation_errors() {
     assert_error(&HEADER.replace("com.example.t", "Example"), "plugin id");
-    assert_error(
-        &HEADER.replace("\"0.1\"", "\"1.0\""),
-        "not supported by this host",
-    );
+    assert_error(&HEADER.replace("\"0.1\"", "\"1.1\""), "update BAE");
+    assert_error(&HEADER.replace("\"0.1\"", "\"0.2\""), "no longer supports");
+    assert!(PluginManifest::parse(&HEADER.replace("\"0.1\"", "\"1.0\"")).is_ok());
     assert_error(
         &effect_with("").replace("\"fx\"", "\"Fx\""),
         "must start with a lowercase",
