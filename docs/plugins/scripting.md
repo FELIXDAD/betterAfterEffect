@@ -188,7 +188,24 @@ BAE 可以运行 After Effects 风格的脚本：用 JavaScript 写，对象模�
 | `rename-layers.jsx` | 把选中图层（或全部图层）按顺序重命名 |
 | `align-to-grid.jsx` | 把图层位置对齐到 10 像素网格 |
 
-一个最小的例子：
+## 把脚本做成插件
+
+将 [align-to-grid 示例](../../plugins/examples/align-to-grid) 放入 betterAfterEffects 的用户插件目录。打开合成，选中图层，使用「图层 ▸ 变换 ▸ 将图层对齐到网格」或 `Ctrl+Alt+G` 对齐到 10 像素网格。「文件 ▸ 脚本 ▸ 列出未对齐网格的图层」会在日志中列出未对齐的图层数量。通过 MCP 调用同一自动化入口会得到图层名称列表。
+
+在 `[script]` 的 `entry` 中填写 ES 模块文件路径。模块可以从 `"bae"` 导入 `app`、`CompItem` 等脚本对象。`[[command]]` 和 `[[automation]]` 的 `entry` 分别填写导出的函数名。宿主在调用时把参数对象传给函数，并将其返回值转换成 JSON。命令的参数 Schema 来自清单指向的 JSON 文件，供 MCP 展示；导出函数负责检查传入值。
+
+| 声明 | 调用 ID | 示例 |
+| --- | --- | --- |
+| `[[command]]`，`implementation = "script"` | `plugin.<插件 ID>.<命令 ID>` | `plugin.com.example.align-to-grid.align-to-grid`，参数 `{"size":20,"layers":["/Comp1/layers/Layer1"]}`；路径填实际工程中的图层路径 |
+| `[[automation]]` | `script.<插件 ID>.<自动化 ID>` | `script.com.example.align-to-grid.report-off-grid`，参数 `{}` |
+
+MCP 工具名会把调用 ID 中的点换成下划线，例如 `plugin_com_example_align-to-grid_align-to-grid`。
+
+每次插件调用独占一个 QuickJS 运行时，执行时限 10 秒，堆上限由 `memory_limit_mb` 决定，默认 64 MiB。一次成功调用里的所有修改可以一次撤销。导出函数抛出错误时，命令返回错误，事务回滚。界面调用可读取当前合成、选区和时间。无界面调用请显式传入需要处理的图层。
+
+脚本默认可读工程。需要修改工程的插件在 `[permissions]` 声明 `project = "write"` 并安装在用户、系统或应用插件目录。工程目录及 `BAE_PLUGIN_PATH` 按工程作用域加载，只授予读取权限。`project = "none"` 仅允许计算、日志和提示。脚本插件可调用模型和动效命令，模块导入支持内置 `"bae"`。
+
+### 普通脚本示例
 
 ```js
 app.beginUndoGroup("Fade In");

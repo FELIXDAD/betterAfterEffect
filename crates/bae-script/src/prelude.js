@@ -589,6 +589,7 @@
     get numItems() { return H("items").length; },
     item: function (i) { return this.items[i]; },
     itemByID: function (id) { return mkItem(id); },
+    layerByPath: function (path) { return mkLayer(path); },
     get rootFolder() { return new FolderItem("/"); },
     get activeItem() {
       var c = H("context").activeComp;
@@ -655,13 +656,5 @@
       // Runs any registered BAE command (the same ones MCP tools and menus run).
       invoke: function (id, params) { return H("invoke", { id: String(id), params: params || {} }); },
     },
-  };
-  g.__json = function (v) {
-    try {
-      var s = JSON.stringify(v === undefined ? null : v);
-      return s === undefined ? "null" : s;
-    } catch (e) {
-      return "null";
-    }
   };
 })(globalThis);

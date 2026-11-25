@@ -192,17 +192,7 @@ pub struct Permissions {
     pub render: bool,
 }
 
-/// Project access level.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ProjectAccess {
-    /// No access.
-    None,
-    /// Read only.
-    Read,
-    /// Read and write (through commands).
-    Write,
-}
+pub use bae_script::ProjectAccess;
 
 /// One `[dependencies]` entry.
 #[derive(Clone, Debug, Deserialize)]
@@ -1083,6 +1073,9 @@ impl Validator {
         }
         for a in &m.automations {
             unique(self, "automation", &a.id);
+            if a.entry.trim().is_empty() {
+                self.err("automation scripts need an exported function name");
+            }
             if m.script.is_none() {
                 self.err("automation scripts need a [script] table with the entry module");
             }
@@ -1209,7 +1202,7 @@ impl Validator {
     fn command(&mut self, c: &CommandDecl) {
         match c.implementation.as_str() {
             "script" => {
-                if c.entry.is_none() {
+                if c.entry.as_deref().is_none_or(|name| name.trim().is_empty()) {
                     self.err("script commands need `entry` (the exported function)");
                 }
             }

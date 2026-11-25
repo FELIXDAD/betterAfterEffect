@@ -10,9 +10,7 @@
 //! of an unloaded plugin in open projects become placeholders
 //! (`EffectStatus::MissingPlugin`) without any document change (spec §20).
 //!
-//! Plugin API 0.1 loads declarative WGSL effects. Native and script
-//! contributions are validated and listed but not executed yet; they are
-//! reported as warnings.
+//! Script contributions are registered alongside the application's model commands.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -231,12 +229,30 @@ impl EffectRegistrar for AppEffectRegistries {
 #[derive(Debug, Default)]
 pub struct PluginHost {
     plugins: BTreeMap<String, LoadedPlugin>,
+    pub(crate) scripts: crate::scripts::ScriptCommands,
+    bindings: Option<Arc<dyn crate::scripts::ScriptBindings>>,
 }
 
 impl PluginHost {
     /// A host with no plugins.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Commands published by loaded script packages.
+    pub fn commands(&self) -> &Registry<dyn bae_model::DynCommand> {
+        &self.scripts.registry
+    }
+
+    pub(crate) fn with_scripts(
+        scripts: crate::scripts::ScriptCommands,
+        bindings: Option<Arc<dyn crate::scripts::ScriptBindings>>,
+    ) -> Self {
+        Self {
+            plugins: BTreeMap::new(),
+            scripts,
+            bindings,
+        }
     }
 
     /// Package roots under `dir`: `dir` itself if it holds a manifest, its
@@ -391,14 +407,19 @@ impl PluginHost {
                 );
             }
         }
-        if !package.manifest.commands.is_empty() || !package.manifest.automations.is_empty() {
-            warnings.push(Diagnostic::warning(
-                MANIFEST_FILE,
-                "script commands and automation scripts are validated but not run by plugin API 0.1 hosts yet",
-            ));
+        self.scripts
+            .install(&id, package.scripts.as_ref(), scope)
+            .map_err(|e| LoadError::Invalid(vec![e]))?;
+        self.remove_effects(&id, target);
+        if let Some(bindings) = &self.bindings {
+            bindings.update(
+                &id,
+                package
+                    .scripts
+                    .as_ref()
+                    .map_or(&[], |p| p.entries.as_slice()),
+            );
         }
-
-        self.unload(&id, target);
         for effect in &effects {
             target.register(&id, effect.def().clone(), effect.clone() as Arc<dyn Effect>);
         }
@@ -414,6 +435,19 @@ impl PluginHost {
     /// Unloads a plugin: removes its effect definitions and implementations.
     /// `None` if it was not loaded.
     pub fn unload(&mut self, id: &str, target: &mut dyn EffectRegistrar) -> Option<UnloadReport> {
+        let report = self.remove_effects(id, target)?;
+        self.commands().unregister_owner(&Owner::plugin(id));
+        if let Some(bindings) = &self.bindings {
+            bindings.update(id, &[]);
+        }
+        Some(report)
+    }
+
+    fn remove_effects(
+        &mut self,
+        id: &str,
+        target: &mut dyn EffectRegistrar,
+    ) -> Option<UnloadReport> {
         let plugin = self.plugins.remove(id)?;
         let names: Vec<String> = plugin
             .effects

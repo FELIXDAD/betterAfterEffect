@@ -5,7 +5,7 @@ use std::cell::Cell;
 use std::time::{Duration, Instant};
 
 use rquickjs::context::EvalOptions;
-use rquickjs::{CatchResultExt, CaughtError, Context, Ctx, Function, Runtime};
+use rquickjs::{CatchResultExt, CaughtError, Context, Ctx, Function, Module, Runtime};
 use serde_json::Value as Json;
 
 use crate::host::{self, RunState};
@@ -124,18 +124,73 @@ fn describe(e: CaughtError<'_>, timed_out: Option<Duration>) -> String {
     }
 }
 
-/// Evaluates `source` with the object model; returns the completion value as
-/// JSON, or the error that stopped it ("TypeError at line 3: …").
-pub(crate) fn execute(state: &mut RunState<'_, '_, '_>, source: &str) -> Result<Json, String> {
+pub(crate) enum Program<'a> {
+    File(&'a str),
+    Module(crate::ModuleEntry<'a>),
+}
+
+fn declare_module<'js>(ctx: &Ctx<'js>, source: &str) -> rquickjs::Result<Module<'js>> {
+    Module::declare(
+        ctx.clone(),
+        "bae",
+        "export const { app, bae, Item, FolderItem, AVItem, FootageItem, CompItem, Layer, AVLayer, TextLayer, ShapeLayer, CameraLayer, LightLayer, Property, PropertyGroup, TextDocument, KeyframeInterpolationType } = globalThis;",
+    )?;
+    Module::declare(ctx.clone(), SCRIPT_FILE, source)
+}
+
+/// Checks syntax and imports without executing the module's top-level code.
+pub fn check_module(source: &str, heap_bytes: usize) -> Result<(), String> {
     let rt = Runtime::new().map_err(|e| e.to_string())?;
-    rt.set_memory_limit(MEMORY_LIMIT);
+    rt.set_memory_limit(heap_bytes);
+    rt.set_max_stack_size(JS_STACK);
+    let context = Context::full(&rt).map_err(|e| e.to_string())?;
+    context.with(|ctx| {
+        declare_module(&ctx, source)
+            .map(drop)
+            .catch(&ctx)
+            .map_err(|e| describe(e, None))
+    })
+}
+
+impl Program<'_> {
+    fn eval<'js>(&self, ctx: &Ctx<'js>) -> rquickjs::Result<rquickjs::Value<'js>> {
+        match self {
+            Self::File(source) => {
+                let mut opts = EvalOptions::default();
+                opts.global = true;
+                opts.strict = false;
+                opts.filename = Some(SCRIPT_FILE.into());
+                ctx.eval_with_options(strip_directives(source), opts)
+            }
+            Self::Module(entry) => {
+                let (module, evaluated) = declare_module(ctx, entry.source)?.eval()?;
+                evaluated.finish::<()>()?;
+                let function: Function<'_> = module.get(entry.export)?;
+                let result = function.call((ctx.json_parse(entry.args.to_string())?,))?;
+                rquickjs::promise::MaybePromise::from_value(result).finish()
+            }
+        }
+    }
+}
+
+pub(crate) fn execute(
+    state: &mut RunState<'_, '_, '_>,
+    program: Program<'_>,
+) -> Result<Json, String> {
+    if !CURRENT.with(Cell::get).is_null() {
+        return Err("a script cannot run another script".into());
+    }
+    let rt = Runtime::new().map_err(|e| e.to_string())?;
+    rt.set_memory_limit(match &program {
+        Program::File(_) => MEMORY_LIMIT,
+        Program::Module(entry) => entry.heap_bytes,
+    });
     rt.set_max_stack_size(JS_STACK);
     let limit = state.env.time_limit.unwrap_or(crate::TIME_LIMIT);
     let deadline = Instant::now() + limit;
     rt.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
     let ctx = Context::full(&rt).map_err(|e| e.to_string())?;
     let _current = Current::set(state);
-    let source = strip_directives(source);
     ctx.with(|ctx| {
         install_host(&ctx).map_err(|e| e.to_string())?;
         let mut opts = EvalOptions::default();
@@ -145,16 +200,15 @@ pub(crate) fn execute(state: &mut RunState<'_, '_, '_>, source: &str) -> Result<
         ctx.eval_with_options::<(), _>(PRELUDE, opts)
             .catch(&ctx)
             .map_err(|e| format!("script prelude: {}", describe(e, None)))?;
-        let mut opts = EvalOptions::default();
-        opts.global = true;
-        opts.strict = false;
-        opts.filename = Some(SCRIPT_FILE.into());
-        let result = ctx
-            .eval_with_options::<rquickjs::Value<'_>, _>(source, opts)
+        let text = program
+            .eval(&ctx)
+            .and_then(|value| {
+                ctx.json_stringify(value)?
+                    .map(|s| s.to_string())
+                    .transpose()
+            })
             .catch(&ctx)
             .map_err(|e| describe(e, (Instant::now() >= deadline).then_some(limit)))?;
-        let json: Function<'_> = ctx.globals().get("__json").map_err(|e| e.to_string())?;
-        let text: String = json.call((result,)).unwrap_or_else(|_| "null".into());
-        Ok(serde_json::from_str(&text).unwrap_or(Json::Null))
+        serde_json::from_str(text.as_deref().unwrap_or("null")).map_err(|e| e.to_string())
     })
 }

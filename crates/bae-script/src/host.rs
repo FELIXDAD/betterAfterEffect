@@ -17,6 +17,7 @@ use crate::{ScriptEnv, ScriptReport};
 pub(crate) struct RunState<'a, 'e, 't> {
     pub tx: &'a mut Transaction<'t>,
     pub env: &'a ScriptEnv<'e>,
+    pub access: crate::ProjectAccess,
     /// Selected layers (`layer.selected = …` changes it for the rest of the run).
     pub selected: Vec<PrimPath>,
     pub report: ScriptReport,
@@ -256,6 +257,9 @@ impl RunState<'_, '_, '_> {
 
     /// Runs a registered command inside the script's transaction.
     pub fn invoke(&mut self, id: &str, params: Json) -> R {
+        if self.access != crate::ProjectAccess::Write {
+            return Err("this plugin requires project write permission".into());
+        }
         if id == crate::RUN_SCRIPT {
             return Err("a script cannot run another script".into());
         }
@@ -572,6 +576,9 @@ impl RunState<'_, '_, '_> {
 
 /// Answers one `__host(method, args)` call.
 pub(crate) fn call(s: &mut RunState<'_, '_, '_>, method: &str, args: &Json) -> R {
+    if s.access == crate::ProjectAccess::None && !matches!(method, "log" | "alert" | "undoGroup") {
+        return Err("this plugin has no project access".into());
+    }
     match method {
         "context" => Ok(json!({
             "activeComp": s.env.active_comp.as_ref().map(PrimPath::as_str),

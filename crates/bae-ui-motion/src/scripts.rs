@@ -19,6 +19,17 @@ use serde_json::json;
 
 use crate::common;
 
+impl bae_script::ScriptView for crate::SharedSession {
+    fn selection(&self) -> bae_script::ScriptSelection {
+        let session = self.lock();
+        bae_script::ScriptSelection {
+            comp: session.active_comp.clone(),
+            layers: session.selected_layers.clone(),
+            time: session.active_time(),
+        }
+    }
+}
+
 /// File ▸ Scripts ▸ Run Script File… (catalog action).
 pub const RUN_SCRIPT_FILE: &str = "motion.file.run_script_file";
 /// File ▸ Scripts ▸ Install Script File… (catalog action).

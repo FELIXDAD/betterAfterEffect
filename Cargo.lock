@@ -801,6 +801,7 @@ dependencies = [
  "bae-platform",
  "bae-plugin-sdk",
  "bae-render",
+ "bae-script",
  "clap",
  "half",
  "naga",

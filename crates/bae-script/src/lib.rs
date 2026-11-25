@@ -27,6 +27,8 @@ mod convert;
 mod engine;
 mod host;
 
+pub use engine::check_module;
+
 use std::sync::{Arc, Mutex};
 
 use bae_app::{AppBuilder, AppModule, Registry};
@@ -96,16 +98,74 @@ pub fn run_in(
     name: &str,
     source: &str,
 ) -> ScriptReport {
+    run_program(
+        tx,
+        env,
+        name,
+        engine::Program::File(source),
+        ProjectAccess::Write,
+    )
+}
+
+/// Project access granted to one script invocation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProjectAccess {
+    None,
+    Read,
+    Write,
+}
+
+/// The active composition, layer selection and playhead at invocation time.
+#[derive(Default)]
+pub struct ScriptSelection {
+    pub comp: Option<PrimPath>,
+    pub layers: Vec<PrimPath>,
+    pub time: Time,
+}
+
+/// Supplies view state without coupling the plugin host to a workspace.
+pub trait ScriptView: std::fmt::Debug + Send + Sync {
+    fn selection(&self) -> ScriptSelection;
+}
+
+/// An exported function of an installed ES module.
+pub struct ModuleEntry<'a> {
+    pub source: &'a str,
+    pub export: &'a str,
+    pub args: &'a serde_json::Value,
+    pub heap_bytes: usize,
+}
+
+/// Executes an exported function in the caller's transaction.
+pub fn run_entry(
+    tx: &mut Transaction<'_>,
+    env: &ScriptEnv<'_>,
+    name: &str,
+    entry: ModuleEntry<'_>,
+    access: ProjectAccess,
+) -> ScriptReport {
+    run_program(tx, env, name, engine::Program::Module(entry), access)
+}
+
+fn run_program(
+    tx: &mut Transaction<'_>,
+    env: &ScriptEnv<'_>,
+    name: &str,
+    program: engine::Program<'_>,
+    access: ProjectAccess,
+) -> ScriptReport {
     let mut state = host::RunState {
         tx,
         env,
+        access,
         selected: env.selected_layers.clone(),
         report: ScriptReport {
             name: name.to_owned(),
             ..ScriptReport::default()
         },
     };
-    match engine::execute(&mut state, source) {
+    match engine::execute(&mut state, program) {
         Ok(result) => state.report.result = result,
         Err(error) => state.report.error = Some(error),
     }
@@ -203,7 +263,7 @@ pub struct RunScriptParams {
 /// error does not fail the command, so changes made before it are kept.
 pub struct RunScript {
     /// Module commands (`bae-motion` …) published in the app.
-    app: Option<Arc<Registry<dyn DynCommand>>>,
+    app: std::sync::Weak<Registry<dyn DynCommand>>,
     /// Model commands and, without an app registry, the motion commands.
     builtins: CommandRegistry,
     defs: Arc<Registry<EffectDef>>,
@@ -219,7 +279,7 @@ impl RunScript {
         console: ScriptConsole,
     ) -> Self {
         RunScript {
-            app: Some(app),
+            app: Arc::downgrade(&app),
             builtins: CommandRegistry::with_builtins(),
             defs,
             console,
@@ -229,7 +289,7 @@ impl RunScript {
     /// `script.run` with the standard commands only ([`standard_commands`]).
     pub fn standalone(defs: Arc<Registry<EffectDef>>) -> Self {
         RunScript {
-            app: None,
+            app: std::sync::Weak::new(),
             builtins: standard_commands(defs.clone()),
             defs,
             console: ScriptConsole::default(),
@@ -244,7 +304,7 @@ impl RunScript {
 
     fn command(&self, id: &str) -> Option<Arc<dyn DynCommand>> {
         self.app
-            .as_ref()
+            .upgrade()
             .and_then(|r| r.get(id))
             .or_else(|| self.builtins.get(id).cloned())
     }

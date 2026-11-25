@@ -73,9 +73,15 @@
 2026-11-24，分支 `plugins/scripting`（Draft PR）。
 
 - **已完成**：`crates/bae-script`（无 GPU / 界面依赖）：AE 脚本 API 常用子集（`app.project`、items、`CompItem`、`layers.addSolid/addText/addNull/addShape/addCamera/addLight/add`、Layer 属性和顺序、`property()` / `setValue` / `setValueAtTime` / 关键帧 / 插值 / 表达式、效果组 `addProperty`、蒙版属性、`TextDocument`、`alert` / `$.writeln`、`bae.commands.invoke`）；命令 `script.run`（自动成为 MCP 工具）；文件 ▸ 脚本（运行脚本文件、安装脚本文件、脚本文件夹列表）；文档 `docs/plugins/scripting.md`；示例 `plugins/examples/scripts/`。`cargo test -p bae-script`（11 个）和 `bae-ui-motion` 的 `scripts` 测试通过，clippy 全工作区通过。
-- **待做（按顺序）**：① 跑 `cargo test -p bae-ui-motion -p bae` 全量和两平台 CI，补 PR 体积数据（`cargo xtask size` 和 dev 对比，预计很小：QuickJS 已链接，`bae-script` 已设 `opt-level = "s"`）；② 脚本插件：清单 `[[command]]` / `[[automation]]`（implementation = script）通过 `bae-script` 注册成命令，需要支持 ES 模块（预先 `Module::declare` 一个 `bae` 模块导出全局对象即可解析 `import { app } from "bae"`，不必开 rquickjs 的 loader feature），注册到 `Registry<dyn DynCommand>`（所有者 `Owner::Plugin`），`plugins/examples/align-to-grid` 的 `setValue` 注释要改成 AE 语义；③ 请 09fe9cc0 在下次重生成 catalog 时把“运行脚本文件…”“安装脚本文件…”的状态从 Later 改为 Done（现在靠 handler 点亮，功能不受影响）；④ 可选：Recent Script Files、`Property.value` 计算表达式、`app.project.selection`、文件读写（`bae.fs`，需权限）。
+- **后续**：命令目录可以把“运行脚本文件…”“安装脚本文件…”标为 Done。Recent Script Files、表达式求值、工程选区和文件读写留给后续脚本 API。
 - **关键设计**：一次运行 = 一个 `Stage` 事务 = 一个撤销步骤；所有修改都在同一事务里调用已注册命令（`cmd.run_json(tx, …)`，和 MCP 同一套）；读取走 `tx.stage()`，能看到本次运行自己的修改；出错时保留之前的修改并报告行号（AE 行为）；`script.run` 返回报告（log / alerts / error / result），界面在 `script.run` 后排一个 `motion.file.script_report` 动作，从 `ScriptConsole` 资源取报告弹窗；JS 对象模型写在 prelude 里，Rust 侧只有一个 `__host(method, json)`；每次运行一个独立 QuickJS 运行时（128 MiB、默认 30 s 中断）；经 `script.run` 时撤销名称是命令标题“运行脚本”，直接调 `bae_script::run` 时用第一个 `beginUndoGroup` 的名字。
 - **文件**：`crates/bae-script/src/{lib.rs（ScriptModule、RunScript、ScriptConsole、run/run_in）, engine.rs（运行时、限制、错误行号）, host.rs（__host 方法 → 读取 / 命令）, convert.rs（值 ⇄ AE 单位）, prelude.js（AE 对象模型）}`、`crates/bae-script/tests/scripts.rs`、`crates/bae-ui-motion/src/scripts.rs`（菜单和动作）、`apps/bae/src/main.rs`（加 `ScriptModule`）。
+
+### betterAfterEffects 脚本插件（2026-11-25，PR #329）
+
+- 清单里的脚本命令和自动化脚本均注册到应用命令表，所有者是插件 ID。菜单、快捷键和 MCP 使用同一条命令。重新加载会替换该插件的入口，卸载会移除它们。
+- 网格示例覆盖选区和显式图层路径、静态位置和带关键帧的位置。自动化入口报告偏离网格的图层。每次修改可一次撤销，插件入口出错会回滚本次事务。
+- 原生插件的进程策略见 ARCHITECTURE §14 与 D16。原生实现由 PR #332 交付。
 
 ## 请求（其他工作流在这里留言）
 

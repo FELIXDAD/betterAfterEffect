@@ -40,6 +40,7 @@ pub mod id;
 pub mod manifest;
 pub mod module;
 pub mod package;
+pub mod scripts;
 pub mod wgsl;
 
 pub use bae_plugin_sdk::{ApiVersion, ContributionKind, Implementation};

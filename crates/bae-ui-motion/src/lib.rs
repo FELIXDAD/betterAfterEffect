@@ -81,6 +81,13 @@ impl AppModule for MotionUiModule {
         if app.resource::<SharedSession>().is_none() {
             app.insert_resource(SharedSession::default());
         }
+        let session = app
+            .resource::<SharedSession>()
+            .expect("motion session")
+            .clone();
+        app.insert_resource::<std::sync::Arc<dyn bae_script::ScriptView>>(std::sync::Arc::new(
+            session,
+        ));
         if app.resource::<SharedTools>().is_none() {
             app.insert_resource(SharedTools::default());
         }

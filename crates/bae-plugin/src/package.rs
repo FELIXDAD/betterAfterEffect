@@ -127,6 +127,8 @@ pub struct Package {
     pub manifest: PluginManifest,
     /// Effects, in manifest order.
     pub effects: Vec<EffectPackage>,
+    /// Script module and the manifest entries it implements.
+    pub scripts: Option<crate::scripts::ScriptPackage>,
     /// Warnings (errors make [`Package::load`] fail).
     pub warnings: Vec<Diagnostic>,
     /// Where it was loaded from.
@@ -206,9 +208,12 @@ impl Package {
         if has_errors(&diags) {
             return Err(diags);
         }
+        let scripts =
+            crate::scripts::ScriptPackage::read(&manifest, source).map_err(|e| vec![e])?;
         Ok(Package {
             manifest,
             effects,
+            scripts,
             warnings: diags,
             location: source.describe(),
         })
