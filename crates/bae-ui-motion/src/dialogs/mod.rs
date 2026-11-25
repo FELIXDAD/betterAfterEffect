@@ -12,6 +12,7 @@ mod light_settings;
 pub mod memory;
 mod precompose;
 mod solid_settings;
+mod transform_value;
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -25,6 +26,7 @@ pub use comp_settings::{CompSettings, CompSettingsMemory};
 pub use light_settings::{LightSettings, LightSettingsMemory, LightValues};
 pub use precompose::{PrecomposeDialog, PrecomposeMemory};
 pub use solid_settings::{SolidSettings, SolidSettingsMemory, Units};
+pub use transform_value::{Kind as TransformKind, TransformValue};
 
 use crate::session::SharedSession;
 
@@ -42,6 +44,9 @@ pub enum Dialog {
     LightSettings(Box<LightSettings>),
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C).
     Precompose(Box<PrecomposeDialog>),
+    /// Layer ▸ Transform ▸ Position… and the other value dialogs, and a
+    /// keyframe's Edit Value….
+    TransformValue(Box<TransformValue>),
     /// An alert: a message and OK (import errors …).
     Alert { title: String, message: String },
 }
@@ -257,6 +262,26 @@ pub(crate) fn new_light(cx: &PanelContext<'_>, session: &SharedSession) {
     }
 }
 
+/// Open the value dialog of `kind` for `layers` at comp time `now`, or for one
+/// keyframe of `key_attr` (`layers`: its layer, `now`: its comp time).
+pub(crate) fn transform_value(
+    cx: &PanelContext<'_>,
+    comp: &PrimPath,
+    layers: &[PrimPath],
+    now: bae_model::Time,
+    kind: TransformKind,
+    key_attr: Option<&str>,
+) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_some() {
+        return;
+    }
+    if let Some(v) = TransformValue::new(cx.stage, comp, layers, now, kind, key_attr) {
+        d.open = Some(Dialog::TransformValue(Box::new(v)));
+    }
+}
+
 /// AE's initial New Solid color (tests).
 #[cfg(test)]
 pub(crate) fn solid_settings_default_color() -> [f64; 4] {
@@ -272,6 +297,7 @@ pub(crate) fn strings() -> Vec<&'static str> {
         camera_settings::STRINGS,
         light_settings::STRINGS,
         precompose::STRINGS,
+        transform_value::STRINGS,
     ]
     .concat()
 }
@@ -298,6 +324,7 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::CameraSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::LightSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::Precompose(d) => d.ui(ctx, cx, &session, &dialogs),
+            Dialog::TransformValue(d) => d.ui(ctx, cx),
             Dialog::Alert { title, message } => alert_ui(ctx, title, message),
         };
         let mut lock = dialogs.lock();
