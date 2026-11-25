@@ -34,6 +34,8 @@ fn builtins_register_through_the_plugin_registries() {
         assert!(def.plugin.is_none(), "{}", def.match_name);
         assert!(
             def.match_name.starts_with("ADBE ")
+                || def.match_name.starts_with("CC ")
+                || def.match_name.starts_with("CS ")
                 || matches!(
                     def.match_name.as_str(),
                     "VISINF Grain Implant" | "APC Colorama"
@@ -42,7 +44,8 @@ fn builtins_register_through_the_plugin_registries() {
             def.match_name
         );
         assert!(
-            !b.info.name_zh.is_empty() && b.info.name_zh != b.info.name,
+            !b.info.name_zh.is_empty()
+                && (b.info.name_zh != b.info.name || b.info.name.starts_with("CC ")),
             "{}",
             def.match_name
         );

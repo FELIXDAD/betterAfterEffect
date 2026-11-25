@@ -452,3 +452,23 @@ fn photo_filter_restores_luminosity_after_gamut_clipping() {
         assert_ne!(*original, got);
     }
 }
+
+#[test]
+fn channel_aliases_preserve_alpha_and_share_blend_operations() {
+    let Some(gpu) = context() else { return };
+    let r = IRect::from_size(4, 3);
+    let c = Pixels::new(r, |_, _| [0.125, 0.25, 0.375, 0.5]);
+    let render = |name: &str, params| run(&gpu, F32, get(name).unwrap(), params, &c, r, 1.);
+    let swap = render(
+        "ADBE Set Channels",
+        vec![(2, Value::Int(3)), (6, Value::Int(1))],
+    );
+    assert_eq!(swap.get(1, 1), [0.375, 0.25, 0.125, 0.5]);
+    let gain = render(
+        "ADBE Arithmetic",
+        vec![(1, Value::Int(4)), (2, Value::Float(51.))],
+    );
+    assert!((gain.get(1, 1)[0] - 0.225).abs() < 0.00001);
+    let opaque = render("ADBE Solid Composite", vec![]);
+    assert_eq!(opaque.get(1, 1), [0.625, 0.75, 0.875, 1.]);
+}

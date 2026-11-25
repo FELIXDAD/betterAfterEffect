@@ -8,6 +8,7 @@ mod image_grid;
 mod layer_input;
 pub(crate) mod lut;
 pub(crate) mod morphology;
+mod sampled;
 pub(crate) mod set_matte;
 
 pub use blur::{BoxBlur, GaussianBlur};
@@ -35,3 +36,5 @@ pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static 
         _ => None,
     }
 }
+
+pub(crate) mod channel_filters;
