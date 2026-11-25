@@ -1794,6 +1794,17 @@ impl Builder<'_, '_> {
                 Some(source) => Some(match (footage.blend, source.frame_rate()) {
                     (Some(blend), Some(rate)) => {
                         if blend.pixel_motion {
+                            if let Some(interpolator) = self.effects.frame_interpolator() {
+                                let time = footage.source_time;
+                                let source = frame_blend::pixel_motion(
+                                    source,
+                                    interpolator,
+                                    &layer.path,
+                                    time,
+                                    rate,
+                                );
+                                return Ok(Some(Content::Source(source, time)));
+                            }
                             self.warn(format!(
                                 "{}: Pixel Motion frame blending is not available yet; Frame Mix is used",
                                 layer.path
