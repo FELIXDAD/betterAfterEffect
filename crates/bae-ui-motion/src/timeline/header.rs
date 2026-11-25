@@ -399,11 +399,16 @@ impl TimelinePanel {
             && let Some(pos) = ruler_resp.interact_pointer_pos()
         {
             let mut s = session.lock();
-            s.stop();
-            s.set_time(info, axis.t(pos.x));
+            s.scrub_to(
+                cx.stage,
+                info,
+                axis.t(pos.x),
+                ui.input(|i| i.modifiers.command),
+            );
             self.drag = Some(Drag::Cti);
         }
         if ruler_resp.drag_stopped() {
+            session.lock().stop();
             self.drag = None;
         }
         // Comp markers between the work area bar and the ruler numbers (on top of the

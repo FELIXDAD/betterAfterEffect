@@ -3,8 +3,7 @@
 //!
 //! [`FileAudio`] decodes files with symphonia (WAV, AIFF, MP4 / QuickTime /
 //! M4A with AAC, MP3, FLAC); [`probe`] lists a file's audio streams without
-//! decoding. [`MemoryAudio`] serves generated audio and tests. Playback (cpal)
-//! comes later.
+//! decoding. [`MemoryAudio`] serves generated audio and tests. Native playback uses [`crate::playback`].
 //!
 //! 705,600,000 flicks per second is divisible by every common sample rate
 //! (8 k … 192 kHz, 44.1 k family included), so sample positions convert to

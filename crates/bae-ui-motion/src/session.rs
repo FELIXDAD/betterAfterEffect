@@ -86,6 +86,10 @@ pub struct Session {
     /// Project panel selection.
     pub selected_items: Vec<PrimPath>,
     pub playback: Option<Playback>,
+    pub(crate) output: Option<bae_media::playback::AudioOutput>,
+    audio_clock: bool,
+    last_scrub: Option<Time>,
+    mix_revision: Option<u64>,
     /// Loop playback (Preview panel).
     pub loop_playback: bool,
     /// The viewer's resolution is on Auto: it follows the magnification. The
@@ -254,6 +258,7 @@ impl Session {
             .is_some_and(|c| query::comp_info(stage, c).is_none())
         {
             self.active_comp = self.open_comps.last().cloned();
+            self.stop();
         }
         // AE: a locked layer cannot be selected, so locking one deselects it.
         self.selected_layers
@@ -292,8 +297,79 @@ impl Session {
         });
     }
 
+    fn start_sound(
+        &mut self,
+        stage: &Stage,
+        comp: &PrimPath,
+        from: Time,
+        range: TimeRange,
+        looping: bool,
+    ) -> bool {
+        let mix = bae_media::mix::AudioMix::from_stage(stage, comp);
+        if mix.is_empty() {
+            return false;
+        }
+        if self.output.is_none() {
+            match bae_media::playback::AudioOutput::open() {
+                Ok(output) => self.output = Some(output),
+                Err(error) => {
+                    tracing::warn!(%error, "Cannot open audio device");
+                    return false;
+                }
+            }
+        }
+        self.output
+            .as_mut()
+            .unwrap()
+            .start(mix, from, range, looping);
+        true
+    }
+
+    pub(crate) fn preview(&mut self, stage: &Stage, info: &CompInfo) {
+        self.play(info);
+        let pb = self.playback.as_ref().unwrap();
+        self.audio_clock =
+            self.start_sound(stage, &info.path, pb.from, pb.range, self.loop_playback);
+    }
+
+    pub(crate) fn scrub_to(&mut self, stage: &Stage, info: &CompInfo, time: Time, sound: bool) {
+        if self.is_playing() || !sound {
+            self.stop();
+        }
+        self.set_time(info, time);
+        let at = self.time(&info.path);
+        if sound && self.last_scrub != Some(at) {
+            let end = (at + Time::from_seconds(0.08)).min(info.duration);
+            self.start_sound(stage, &info.path, at, TimeRange::new(at, end), false);
+            self.last_scrub = Some(at);
+        }
+    }
+
     pub fn stop(&mut self) {
         self.playback = None;
+        self.last_scrub = None;
+        self.output = None;
+        self.audio_clock = false;
+        self.mix_revision = None;
+    }
+
+    pub(crate) fn update_preview(
+        &mut self,
+        cx: &bae_ui::PanelContext<'_>,
+        info: &CompInfo,
+    ) -> bool {
+        if self.is_playing() {
+            let revision = cx
+                .resources
+                .get::<Arc<bae_ui::history::HistoryLog>>()
+                .map(|h| h.last_seq());
+            if self.mix_revision.is_some() && self.mix_revision != revision {
+                self.stop();
+                self.preview(cx.stage, info);
+            }
+            self.mix_revision = revision;
+        }
+        self.tick(info)
     }
 
     /// Advance playback to the wall-clock time. Returns whether it is still playing
@@ -305,14 +381,26 @@ impl Session {
         if pb.comp != info.path {
             return true;
         }
-        let elapsed = Time::from_seconds(pb.started.elapsed().as_secs_f64());
+        let elapsed = if self.audio_clock {
+            let output = self.output.as_ref().unwrap();
+            output.set_loop(self.loop_playback);
+            if output.finished() {
+                let at = pb.from + output.elapsed();
+                self.stop();
+                self.set_time(info, at.min(pb.range.end - info.frame_duration()));
+                return false;
+            }
+            output.elapsed()
+        } else {
+            Time::from_seconds(pb.started.elapsed().as_secs_f64())
+        };
         let span = pb.range.duration();
         let mut t = pb.from + elapsed;
         if t >= pb.range.end {
             if self.loop_playback && span.0 > 0 {
                 t = pb.range.start + Time((t - pb.range.start).0.rem_euclid(span.0));
             } else {
-                self.playback = None;
+                self.stop();
                 self.set_time(info, pb.range.end - info.frame_duration());
                 return false;
             }

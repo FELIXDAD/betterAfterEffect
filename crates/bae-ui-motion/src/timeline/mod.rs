@@ -551,7 +551,7 @@ impl Panel for TimelinePanel {
             );
             return;
         };
-        if session.lock().tick(&info) {
+        if session.lock().update_preview(cx, &info) {
             ui.ctx().request_repaint();
         }
         let now = session.lock().time(&info.path);

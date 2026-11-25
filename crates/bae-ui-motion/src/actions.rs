@@ -682,7 +682,7 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             if s.is_playing() {
                 s.stop();
             } else {
-                s.play(&info);
+                s.preview(stage, &info);
             }
         }
         ids::GRAPH_EDITOR => s.graph_editor = !s.graph_editor,

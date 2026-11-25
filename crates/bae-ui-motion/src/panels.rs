@@ -350,7 +350,7 @@ impl Panel for PreviewPanel {
         session.lock().sync(cx.stage);
         let info = common::active_comp(cx.stage, &session);
         if let Some(info) = &info
-            && session.lock().tick(info)
+            && session.lock().update_preview(cx, info)
         {
             ui.ctx().request_repaint();
         }

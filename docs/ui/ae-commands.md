@@ -37,8 +37,8 @@
 ## 统计
 
 - 菜单项：570 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。✅ 155，◐ 8，☐ 169，⏸ 208，Ⓐ 30
-- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 156 条。
-- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 147 条，macOS 147 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
+- 快捷键命令：AE 默认快捷键文件 669 条（32 个上下文，552 个不同的命令），其中 612 条有默认快捷键；动作已实现的 157 条。
+- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows 148 条，macOS 148 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。
 
 ## 主菜单
 
@@ -941,7 +941,7 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `OpenMRUContext` | `motion.panel.activate_most_recent_viewer` |  | Shift+Esc | Shift+Esc |  | B | ⏸ |
 | `PreviewAudio` | `motion.comp.preview_audio` | `{"work_area":false}` | PadDecimal / PadComma / PadDelete | PadDecimal / PadComma / PadDelete / Control+. |  | B | ⏸ |
 | `PreviewAudioWorkArea` | `motion.comp.preview_audio` | `{"work_area":true}` | Alt+PadDecimal / Alt+PadComma / Alt+PadDelete | Opt+PadDecimal / Opt+PadComma / Opt+PadDelete / Control+Opt+. |  | B | ⏸ |
-| `PreviewNumpad0` | `motion.play` | `{"preview":"numpad0"}` | Pad0 / PadInsert | Pad0 / PadInsert / Control+0 |  | B | ☐ |
+| `PreviewNumpad0` | `motion.play` | `{"preview":"numpad0"}` | Pad0 / PadInsert | Pad0 / PadInsert / Control+0 |  | B | ✅ |
 | `PreviewNumpad0NFrames` | `motion.play` | `{"preview":"numpad0_n_frames"}` | Alt+Pad0 / Alt+PadInsert | Opt+Pad0 / Opt+PadInsert / Control+Opt+0 |  | B | ⏸ |
 | `PreviewShiftNumpad0` | `motion.play` | `{"preview":"shift_numpad0"}` | Shift+Pad0 / Shift+PadInsert | Shift+Pad0 / Shift+PadInsert / Control+Shift+0 |  | B | ☐ |
 | `ShowConsole` | `motion.window.console` |  | Ctrl+F12 | Cmd+F12 |  | B | ⏸ |

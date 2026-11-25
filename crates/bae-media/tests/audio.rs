@@ -45,6 +45,37 @@ fn write_wav(path: &Path, channels: u16, samples: &[f32]) {
     std::fs::write(path, out).unwrap();
 }
 
+/// Exercise the device clock without making an audible sound.
+#[test]
+fn native_output_loops_and_stops_at_the_sample_boundary() {
+    use bae_media::{mix::AudioMix, playback::AudioOutput};
+    use std::time::{Duration, Instant};
+    let mut output = match AudioOutput::open() {
+        Ok(output) => output,
+        Err(e) => {
+            eprintln!("Skipping output device: {e}");
+            return;
+        }
+    };
+    let end = Time::from_seconds(0.1);
+    let range = bae_model::TimeRange::new(Time::ZERO, end);
+    output.start(AudioMix::default(), Time::ZERO, range, true);
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while output.elapsed() <= end && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        output.elapsed() > end,
+        "device clock did not cross the loop point"
+    );
+    output.start(AudioMix::default(), Time::ZERO, range, false);
+    while !output.finished() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(output.finished());
+    assert!((output.elapsed() - end).as_seconds().abs() < 0.001);
+}
+
 /// What the 16-bit file actually stores.
 fn quantized(samples: &[f32]) -> Vec<f32> {
     samples
