@@ -462,7 +462,7 @@ pub(crate) const MENU_ZH: &[(&str, &str)] = &[
     ("Find Extensions on Exchange...", "在 Exchange 上查找扩展..."),
     ("Extensions", "扩展"),
     ("Lumetri Scopes", "Lumetri 范围"),
-    ("Review with Frame.io", "使用 Frame.io 审阅"),
+    ("Review with Frame.io", "使用 Frame.io 进行审核"),
     ("Metadata", "元数据"),
     ("Content-Aware Fill", "内容识别填充"),
     ("Motion Sketch", "动态草图"),
