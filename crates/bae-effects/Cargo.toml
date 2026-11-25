@@ -17,6 +17,7 @@ bae-gpu.workspace = true
 bae-model.workspace = true
 bae-plugin.workspace = true
 bae-render.workspace = true
+half.workspace = true
 parking_lot.workspace = true
 pollster.workspace = true
 rustc-hash.workspace = true
@@ -28,7 +29,6 @@ tracing.workspace = true
 [dev-dependencies]
 bae-anim.workspace = true
 bae-motion.workspace = true
-half.workspace = true
 png.workspace = true
 tempfile.workspace = true
 

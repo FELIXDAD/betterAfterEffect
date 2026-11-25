@@ -17,6 +17,7 @@ pub(crate) use curves::Curves;
 pub(crate) use shadow::ShadowHighlight;
 
 pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
+    lumetri::prewarm(rt, format)?;
     for entry in [
         "colorama",
         "auto_histogram",

@@ -1,9 +1,11 @@
 mod definition;
+mod menus;
 
 use crate::blur::{self, Edge};
 use crate::effects::{image_grid, lut::LutCache};
 use crate::gpu::{self, Resource, UniformWriter};
 use crate::{Builtin, EffectTarget, TargetEffect, params::Params, rust_builtin};
+use bae_gpu::wgpu;
 use bae_model::{EffectDef, Value};
 use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderError};
 use std::sync::Arc;
@@ -19,7 +21,7 @@ struct Lumetri {
 
 pub(crate) fn builtin() -> Builtin {
     let (def, names) = definition::definition();
-    rust_builtin(
+    let mut fx = rust_builtin(
         (
             Arc::new(Lumetri {
                 def,
@@ -30,7 +32,9 @@ pub(crate) fn builtin() -> Builtin {
         "lumetri-color",
         "Lumetri 颜色",
         &["grading", "调色"],
-    )
+    );
+    menus::localize(&mut fx);
+    fx
 }
 
 impl Effect for Lumetri {
@@ -133,7 +137,9 @@ fn color(v: Params<'_>, id: u32) -> [f32; 3] {
     }
 }
 
-const SPLIT_OFFSET: usize = HEADER + 5 * 256 * 4 + 512 + 4224 + 512;
+// Nine 256-sample curves fit alongside the grading tables in a 16 KiB uniform.
+const CURVE_BYTES: usize = 9 * 256 * 2;
+const SPLIT_OFFSET: usize = HEADER + CURVE_BYTES + 512 + 4224 + 512;
 const SPLIT_KNOTS: usize = 66;
 const SECONDARY_OFFSET: usize = SPLIT_OFFSET + SPLIT_KNOTS * 16;
 const CORRECTION_OFFSET: usize = SECONDARY_OFFSET + KNOTS * 4;
@@ -201,9 +207,27 @@ fn split_tone(v: Params<'_>, u: &mut UniformWriter) {
     }
 }
 
+// AE curve id, enable checkbox, first GPU table and channel count.
+const CURVES: [(u32, u32, usize, usize); 6] = [
+    (39, 118, 0, 4),
+    (42, 104, 4, 1),
+    (106, 105, 5, 1),
+    (108, 107, 6, 1),
+    (110, 109, 7, 1),
+    (112, 111, 8, 1),
+];
+
+fn write_curve(u: &mut UniformWriter, table: usize, k: usize, value: f64) {
+    let at = HEADER + 2 * (table * 256 + k);
+    u.bytes[at..at + 2].copy_from_slice(&half::f16::from_f64(value).to_le_bytes());
+}
+
 fn curves(v: Params<'_>, u: &mut UniformWriter) -> u32 {
     let mut mask = 0;
-    for (id, channels) in [(39, 4), (42, 1)] {
+    for (id, enabled, first, channels) in CURVES {
+        if !v.b(enabled) {
+            continue;
+        }
         let Some(Value::FloatList(values)) = v.value(id) else {
             continue;
         };
@@ -212,24 +236,21 @@ fn curves(v: Params<'_>, u: &mut UniformWriter) -> u32 {
                 .as_chunks::<3>()
                 .0
                 .iter()
-                .filter(|p| p[0] == ch as f64)
+                .filter(|p| p[0] == ch as f64 && p[1].is_finite() && p[2].is_finite())
                 .map(|p| [p[1], p[2]])
                 .collect::<Vec<_>>();
             if points.is_empty() {
                 continue;
             }
-            let table = if id == 42 { 4 } else { ch };
+            let table = first + ch;
             mask |= 1 << table;
-            if table == 4 {
-                hue_samples(u, &mut points);
+            if (4..=6).contains(&table) {
+                hue_samples(u, table, &mut points);
                 continue;
             }
             let samples = super::curves::samples(&mut points);
             for k in 0..256 {
-                u.f32(
-                    HEADER + (table * 256 + k) * 4,
-                    samples[(k * 1023 + 127) / 255] as f32,
-                );
+                write_curve(u, table, k, samples[(k * 1023 + 127) / 255]);
             }
         }
     }
@@ -238,7 +259,7 @@ fn curves(v: Params<'_>, u: &mut UniformWriter) -> u32 {
 
 // The hue axis wraps at red. A local extremum has a horizontal tangent;
 // adjacent monotone intervals share their harmonic-mean secant slope.
-fn hue_samples(u: &mut UniformWriter, points: &mut Vec<[f64; 2]>) {
+fn hue_samples(u: &mut UniformWriter, table: usize, points: &mut Vec<[f64; 2]>) {
     points.iter_mut().for_each(|p| p[0] = p[0].rem_euclid(1.));
     points.sort_by(|a, b| a[0].total_cmp(&b[0]));
     points.dedup_by(|a, b| a[0] == b[0]);
@@ -263,8 +284,43 @@ fn hue_samples(u: &mut UniformWriter, points: &mut Vec<[f64; 2]>) {
         let y = (1. - h) * points[i][1]
             + h * points[j][1]
             + dx * t * (1. - t) * ((1. - t) * slope(i) - t * slope(j));
-        u.f32(HEADER + 4 * (4 * 256 + k), y as f32);
+        write_curve(u, table, k, y);
     }
+}
+
+const BASIC_BYTES: usize = HEADER + 3 * KNOTS * 4;
+const GRADING_BYTES: usize = CHROMA_OFFSET + CHROMA_GRID;
+
+pub(super) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
+    kernel(rt, format, true)?;
+    kernel(rt, format, false)?;
+    Ok(())
+}
+
+fn kernel(
+    rt: &gpu::Runtime,
+    format: wgpu::TextureFormat,
+    basic: bool,
+) -> Result<Arc<gpu::Kernel>, RenderError> {
+    let (label, shader) = if basic {
+        (
+            "Lumetri Basic",
+            concat!(include_str!("shared.wgsl"), include_str!("basic.wgsl")),
+        )
+    } else {
+        (
+            "Lumetri Grading",
+            concat!(include_str!("shared.wgsl"), include_str!("grading.wgsl")),
+        )
+    };
+    image_grid::kernel_with_inputs(
+        rt,
+        format,
+        label,
+        shader,
+        if basic { BASIC_BYTES } else { GRADING_BYTES } as u32,
+        if basic { 1 } else { 2 },
+    )
 }
 
 fn render_pass(
@@ -279,25 +335,7 @@ fn render_pass(
     image_grid::image_coords(&mut u, 0, source, grid);
     u.i32s(32, &[roi.x0, roi.y0]);
     let rt = gpu::runtime(target.gpu());
-    let (label, shader) = if basic {
-        (
-            "Lumetri Basic",
-            concat!(include_str!("shared.wgsl"), include_str!("basic.wgsl")),
-        )
-    } else {
-        (
-            "Lumetri Grading",
-            concat!(include_str!("shared.wgsl"), include_str!("grading.wgsl")),
-        )
-    };
-    let kernel = image_grid::kernel_with_inputs(
-        &rt,
-        target.format(),
-        label,
-        shader,
-        u.bytes.len() as u32,
-        if basic { 1 } else { 2 },
-    )?;
+    let kernel = kernel(&rt, target.format(), basic)?;
     let out = target.allocate(image_grid::pixel_rect(roi, grid), grid)?;
     let mut resources = vec![Resource::Uniform, Resource::View(&source.view)];
     if !basic {
@@ -345,7 +383,7 @@ impl TargetEffect for Lumetri {
                 .any(|&id| v.f(id) != 0.)
                 || v.f(20) != 100.
             {
-                let mut u = UniformWriter::with_size(HEADER + 3 * KNOTS * 4);
+                let mut u = UniformWriter::with_size(BASIC_BYTES);
                 u.u32(40, u32::from(p.float))
                     .f32s(64, &white_balance(v.f(7), v.f(8)))
                     .f32(76, (v.f(20) * 0.01) as f32)
@@ -388,13 +426,13 @@ impl TargetEffect for Lumetri {
                 || color(v, 1016) != [0.5; 3]);
         let vignette = v.b(50) && v.f(51) != 0.;
         let has_curves = v.b(37)
-            && [39, 42]
-                .iter()
-                .any(|&id| matches!(v.value(id),Some(Value::FloatList(p)) if !p.is_empty()));
+            && CURVES.iter().any(|&(id, enabled, _, _)| {
+                v.b(enabled) && matches!(v.value(id),Some(Value::FloatList(p)) if !p.is_empty())
+            });
         if !creative && !wheels && !key && !vignette && !has_curves {
             return Ok(image);
         }
-        let mut u = UniformWriter::with_size(CHROMA_OFFSET + CHROMA_GRID);
+        let mut u = UniformWriter::with_size(GRADING_BYTES);
         let active = if has_curves { curves(v, &mut u) } else { 0 };
         if vignette {
             let row = (v.f(51) * 2. + 10.).clamp(0., 19.) as usize;
@@ -403,7 +441,7 @@ impl TargetEffect for Lumetri {
                 .copy_from_slice(&include_bytes!("vignette.bin")[row * 256..row * 256 + 512]);
         }
         if creative {
-            let at = HEADER + 5 * 256 * 4;
+            let at = HEADER + CURVE_BYTES;
             let row = (v.f(28) * 0.1).clamp(0., 14.) as usize;
             u.bytes[at..at + 512]
                 .copy_from_slice(&include_bytes!("film.bin")[row * 256..row * 256 + 512]);
