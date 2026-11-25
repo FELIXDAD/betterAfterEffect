@@ -252,7 +252,7 @@ impl Scene<'_> {
                 }
             }
         }
-        let samples = self.p.p.history;
+        let samples = self.p.p.parameter_samples;
         u.u32(history_offset, samples.len().min(64) as u32);
         if kind == Kind::Playground {
             for (offset, ids) in [(4, [502, 506, 510]), (8, [552, 556, 560])] {

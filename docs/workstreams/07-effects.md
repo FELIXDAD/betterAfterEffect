@@ -62,6 +62,7 @@
 - [扭曲](../../crates/bae-effects/tests/ae/categories/distort.md#工作流进度)
 - [生成](../../crates/bae-effects/tests/ae/categories/generate.md#工作流进度)
 - [抠像](../../crates/bae-effects/tests/ae/categories/keying.md#工作流进度)
+  - 本轮抠像接入 Keylight、Key Cleaner、提取和 Unmult。Keylight 在独立遮罩纹理上用最小/最大滤波和高斯模糊处理边缘与黑白噪点。Key Cleaner、柔和及实边遮罩共用可分离方框均值和 RGB 协方差引导滤波，支持前帧和边缘颜色净化。
 - [遮罩](../../crates/bae-effects/tests/ae/categories/matte.md#工作流进度)
 - [杂色和颗粒](../../crates/bae-effects/tests/ae/categories/noise-grain.md#工作流进度)
   - 杂色完成湍流杂色、匹配颗粒、移除颗粒、杂色 Alpha 和 HLS 两种模式。旧版中间值使用现有中间值内核。
@@ -85,4 +86,18 @@ Particle World 和 Particle Systems II 共用 GPU 粒子引擎。出生率的时
 
 完成六个 GPU 分组、输入和创意 LUT 接口、主曲线与色相对饱和度曲线、三路色轮、HSL 辅助和晕影。AE 26.2.1 的逐组及串联对照见[颜色校正记录](../../crates/bae-effects/tests/ae/categories/color.md#lumetri-颜色)。输入 LUT 的文件选择器可复用效果面板工作流的 LUT 接口。
 
+### 粒子模拟（2026-11-26）
+
 2026-11-26，粒子运动场、CC Ball Action、CC Mr. Mercury 和 CC Hair 共用 GPU 粒子引擎。粒子运动场支持发射、网格和图层爆炸；水银使用叠加密度场生成连成一体的液滴。RTX 5090 已验证网格发射位置、半浮点和全浮点输出。
+
+### 路径生成效果（2026-11-24）
+
+实现描边（Stroke）、写入（Write-on）、涂写（Scribble）和勾画（Vegas）。渲染图提供按依赖选择的原始蒙版路径，以及在子帧时间求值的效果参数。写入的画笔位置在应用和重置时按图层大小居中。勾画支持蒙版及图像等高线，图像模式在 GPU 上连接等高线、计算弧长并绘制片段。
+
+27 张 AE 26.2.1 参考图已经用正式脚本重新生成，并核对了文件内容。具体精度与限制见[生成效果对照](../../crates/bae-effects/tests/ae/categories/generate.md#描边写入涂写和勾画)。
+
+### 0.1.0 效果冲刺（2026-11-25）
+
+按本批标签提交了 44 个效果或别名。扭曲 11 个（#344）、颜色校正 9 个（#352）、实用工具别名 3 个（#358）、风格化 8 个（#361）、透视 4 个（#363）、通道 9 个（#365）。实用工具复用 #352 的颜色处理器，CC Vignette 复用 #331 的 Lumetri 晕影。液化随绘画批次交付。
+
+5090 已验证效果注册、GPU 管线预热和各组渲染用例。时间测试的红通道读回差异（127，预期 128）在 dev 基点 bb758f4c 同样出现，扭曲 PR 记录了已有遮罩效果的参考容差差异。

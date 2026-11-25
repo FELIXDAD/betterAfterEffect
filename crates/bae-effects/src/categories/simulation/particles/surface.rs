@@ -69,7 +69,7 @@ pub(super) fn frame(
             }
             u.f32(8, 1.);
         }
-        if let Some(light) = view.light {
+        if let Some(light) = view.layer_light {
             let xy = view
                 .placement
                 .inverse()
@@ -177,7 +177,7 @@ pub(super) fn composite(
         let mut point = p.popup(19) == 2;
         if p.popup(31) == 2
             && let Some(view) = p.p.scene
-            && let Some(l) = view.light
+            && let Some(l) = view.layer_light
         {
             light = l.color;
             intensity = l.intensity * 0.01;
@@ -270,7 +270,7 @@ pub(super) fn composite(
     if kind == Kind::Drizzle
         && p.popup(22) == 2
         && let Some(view) = p.p.scene
-        && let Some(light) = view.light
+        && let Some(light) = view.layer_light
     {
         let xy = view
             .placement
