@@ -23,6 +23,7 @@ use crate::tools::cursor::{self, Hover};
 use crate::tools::{Tool, ViewRequest};
 
 mod bar;
+mod camera_tool;
 pub(crate) mod errors;
 mod free_transform;
 mod menu;
@@ -97,6 +98,8 @@ pub struct CompositionViewer {
     esc_taken: bool,
     /// Esc to give back to the viewer's widgets this frame.
     escape: bool,
+    /// A camera tool drag.
+    camera_drag: Option<camera_tool::CameraDrag>,
 }
 
 impl CompositionViewer {
@@ -481,8 +484,11 @@ impl Panel for CompositionViewer {
                 self.pan += pan;
             }
         }
-        if resp.dragged_by(egui::PointerButton::Middle)
-            || resp.dragged_by(egui::PointerButton::Secondary)
+        // With a camera tool these drags pan and dolly the camera.
+        let camera_tool = crate::tools::shared(cx.resources).lock().current();
+        if (resp.dragged_by(egui::PointerButton::Middle)
+            || resp.dragged_by(egui::PointerButton::Secondary))
+            && !camera_tool.is_camera()
         {
             self.pan += resp.drag_delta();
         }
@@ -524,11 +530,29 @@ impl Panel for CompositionViewer {
         apply_overrides(&mut comp, scrub.as_ref(), self.select.drag.as_ref());
         // The 3D view: 3D layers are seen through its camera.
         let size = DVec2::new(f64::from(info.width), f64::from(info.height));
-        let view_camera = session
-            .lock()
-            .views3d
-            .get(&info.path)
-            .and_then(|v| v.camera(size));
+        if camera_tool.is_camera() || self.camera_drag.is_some() {
+            camera_tool::frame(
+                &mut self.camera_drag,
+                &resp,
+                ui,
+                cx,
+                &session,
+                &info.path,
+                &comp,
+                size,
+                &view,
+                camera_tool,
+                time,
+            );
+        }
+        let layer_camera = self.camera_drag.as_ref().and_then(|d| d.layer_camera());
+        let view_camera = layer_camera.or_else(|| {
+            session
+                .lock()
+                .views3d
+                .get(&info.path)
+                .and_then(|v| v.camera(size))
+        });
         let view = View {
             camera: Some((
                 view_camera.unwrap_or_else(|| view3d::active_camera(&comp, size)),

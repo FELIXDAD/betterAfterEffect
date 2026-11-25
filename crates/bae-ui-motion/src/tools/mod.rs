@@ -275,6 +275,7 @@ impl Tool {
             Group::Selection | Group::Hand | Group::Zoom | Group::Rotation | Group::PanBehind
         ) || self.is_shape()
             || self.is_pen()
+            || self.is_camera()
             // Vertical type needs a text direction in the model (not yet).
             || self == Tool::TypeHorizontal
     }

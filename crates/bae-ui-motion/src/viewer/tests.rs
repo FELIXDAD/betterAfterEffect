@@ -1773,3 +1773,71 @@ fn three_d_views_switch_and_3d_layers_are_seen_through_their_camera() {
     tool_action(&h, ids::SHORTCUT, json!({"slot": "a"}));
     assert_eq!(view(&h), View3d::Custom(2));
 }
+
+#[test]
+fn camera_tools_move_the_default_view_or_the_camera_layer() {
+    use super::view3d::{View3d, ViewCamera};
+    let mut h = H::new();
+    let current = |h: &H| {
+        let s = h.session();
+        let s = s.lock();
+        let v = s.views3d.get(&h.comp).cloned().unwrap_or_default();
+        (
+            v.current,
+            v.view_camera(v.current, bae_anim::glam::DVec2::new(640.0, 360.0)),
+        )
+    };
+    // No camera layer: Pan Under Cursor switches to Default and pans it (z = 0
+    // follows the pointer 1:1).
+    h.tools().lock().set(Tool::PanCursor);
+    h.frame(Vec::new(), Modifiers::NONE);
+    h.drag((300.0, 180.0), (350.0, 180.0), Modifiers::NONE);
+    let (view, cam) = current(&h);
+    assert_eq!(view, View3d::Default);
+    let ViewCamera::Perspective { position, .. } = cam else {
+        panic!("{cam:?}")
+    };
+    assert!((position.x - 270.0).abs() < 0.5, "{position:?}");
+    // A two-node camera layer in Active Camera: Orbit Around Camera POI moves
+    // Position around the point of interest, one attr.set_many.
+    let camera = path(&h.run("layer.create", json!({"comp": h.comp, "kind": "camera"}))["path"]);
+    let set = |h: &mut H, attr: &str, v: serde_json::Value| {
+        h.run(
+            "attr.set",
+            json!({"path": camera, "attr": attr, "value": v}),
+        );
+    };
+    set(
+        &mut h,
+        "auto_orient",
+        json!({"type": "enum", "value": "towards_point_of_interest"}),
+    );
+    set(
+        &mut h,
+        "transform:position",
+        json!({"type": "vec3", "value": [320.0, 180.0, -500.0]}),
+    );
+    set(
+        &mut h,
+        "transform:point_of_interest",
+        json!({"type": "vec3", "value": [320.0, 180.0, 0.0]}),
+    );
+    h.session()
+        .lock()
+        .views3d
+        .get_mut(&h.comp)
+        .unwrap()
+        .switch(View3d::Active);
+    h.tools().lock().set(Tool::OrbitPoi);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let r = h.drag((320.0, 180.0), (420.0, 180.0), Modifiers::NONE);
+    assert_eq!(r.invocations.len(), 1, "{:?}", r.invocations);
+    assert_eq!(r.invocations[0].id, "attr.set_many");
+    h.apply(&r);
+    let p = h.v3(&camera, "transform:position");
+    let d = (p[0] - 320.0).hypot(p[2]);
+    assert!(
+        p[0] != 320.0 && (d - 500.0).abs() < 1e-6 && p[1] == 180.0,
+        "{p:?}"
+    );
+}
