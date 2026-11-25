@@ -102,6 +102,9 @@ pub struct RenderGraph {
     /// An effect reads another time of the comp: the frame depends on more than
     /// its own evaluated comp (not frame-cached).
     pub time_dependent: bool,
+    /// The top-level layer each node was planned for, by node index (`None`:
+    /// the comp itself). Per-layer render times add up their nodes.
+    pub owners: Vec<Option<PrimPath>>,
 }
 
 impl RenderGraph {
@@ -499,6 +502,8 @@ pub fn build_with(
         frames,
         resolving: Vec::new(),
         time_dependent: false,
+        owner: None,
+        owners: Vec::new(),
     };
     let output = builder.composite(comp, rect, scale, 0, false)?;
     Ok(RenderGraph {
@@ -507,6 +512,7 @@ pub fn build_with(
         output,
         warnings: builder.warnings,
         time_dependent: builder.time_dependent,
+        owners: builder.owners,
     })
 }
 
@@ -538,6 +544,9 @@ struct Builder<'a, 'f> {
     /// Layers whose effects are being planned (cycle detection of layer inputs).
     resolving: Vec<PrimPath>,
     time_dependent: bool,
+    /// The top-level layer being planned (owner of the nodes pushed now).
+    owner: Option<PrimPath>,
+    owners: Vec<Option<PrimPath>>,
 }
 
 /// The content of a layer, planned: its bounds (in layer texel units) and how
@@ -565,7 +574,28 @@ impl Builder<'_, '_> {
         let id = NodeId(self.nodes.len() as u32);
         self.dedup.insert(node.key, id);
         self.nodes.push(node);
+        self.owners.push(self.owner.clone());
         id
+    }
+
+    /// Runs `plan` with the top-level layer `index` of `comp` as the owner of
+    /// the nodes it pushes (nested layers keep the outer owner).
+    fn owned<T>(
+        &mut self,
+        comp: &RenderComp,
+        index: usize,
+        depth: usize,
+        plan: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let top = depth == 0 && self.owner.is_none();
+        if top {
+            self.owner = Some(comp.layers[index].path.clone());
+        }
+        let out = plan(self);
+        if top {
+            self.owner = None;
+        }
+        out
     }
 
     fn warn(&mut self, message: String) {
@@ -725,6 +755,20 @@ impl Builder<'_, '_> {
     /// Plans layer `index` of `comp` drawn into a composite covering `canvas`.
     /// `None` when nothing of it is visible there.
     fn layer_op(
+        &mut self,
+        comp: &RenderComp,
+        index: usize,
+        canvas: IRect,
+        scale: f64,
+        depth: usize,
+        visiting: &mut Vec<usize>,
+    ) -> Result<Option<LayerOp>, RenderError> {
+        self.owned(comp, index, depth, |b| {
+            b.plan_layer(comp, index, canvas, scale, depth, visiting)
+        })
+    }
+
+    fn plan_layer(
         &mut self,
         comp: &RenderComp,
         index: usize,
@@ -1355,6 +1399,20 @@ impl Builder<'_, '_> {
     /// effects on the comp-sized composite below; outside the comp it is
     /// transparent). Without enabled effects the layer changes nothing.
     fn adjustment(
+        &mut self,
+        comp: &RenderComp,
+        index: usize,
+        canvas: IRect,
+        scale: f64,
+        depth: usize,
+        below: Vec<LayerOp>,
+    ) -> Result<Vec<LayerOp>, RenderError> {
+        self.owned(comp, index, depth, |b| {
+            b.plan_adjustment(comp, index, canvas, scale, depth, below)
+        })
+    }
+
+    fn plan_adjustment(
         &mut self,
         comp: &RenderComp,
         index: usize,
