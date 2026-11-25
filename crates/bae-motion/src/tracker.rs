@@ -172,6 +172,14 @@ impl Command for CreateTracker {
         };
         set(tx, &path, "name", format!("{label} {i}"))?;
         set(tx, &path, "origin", Value::Vec2(p.center))?;
+        let target = query::owning_comp(tx.stage(), &p.layer)
+            .and_then(|comp| {
+                query::comp_layers(tx.stage(), &comp)
+                    .into_iter()
+                    .find(|l| l != &p.layer && !query::is_locked(tx.stage(), l))
+            })
+            .unwrap_or_else(|| p.layer.clone());
+        set(tx, &path, "target", Value::PrimRef(target))?;
         if p.stabilize {
             set(tx, &path, "track_type", Value::Enum("stabilize".into()))?;
         }

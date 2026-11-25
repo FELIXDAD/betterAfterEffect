@@ -6,6 +6,7 @@
 pub(crate) const ZH: &[(&str, &str)] = &[
     // Titles of bae-motion's commands: Edit > Undo / Redo, History, Keyboard Shortcuts
     // (#136). The command crate stays UI-free; its titles are translated here.
+    ("Track Motion", "跟踪运动"),
     ("Apply Motion Tracker", "应用动态跟踪器"),
     ("Edit Motion Tracker", "编辑动态跟踪器"),
     ("Analyze Motion", "分析运动"),

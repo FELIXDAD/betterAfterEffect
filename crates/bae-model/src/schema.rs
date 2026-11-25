@@ -670,6 +670,8 @@ pub static SCHEMAS: &[PrimSchema] = &[
             boolean("rotation", false).fixed(),
             boolean("scale", false).fixed(),
             choice("channel", "luminance", &["rgb", "luminance", "saturation"]),
+            float("enhance_radius", 2.0).fixed(),
+            boolean("track_fields", false).fixed(),
             boolean("subpixel", true).fixed(),
             boolean("adapt", false).fixed(),
             choice("enhance", "none", &["none", "blur", "sharpen"]),
