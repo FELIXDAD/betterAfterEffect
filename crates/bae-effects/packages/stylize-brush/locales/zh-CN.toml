@@ -25,30 +25,3 @@ blend_with_original = "与原始图像混合"
 
 [effect.brush-strokes.choices]
 paint_surface = ["在原始图像上绘画", "在透明背景上绘画", "在白色上绘画", "在黑色上绘画"]
-
-[effect.cc-threshold]
-name = "CC Threshold"
-keywords = ["阈值"]
-
-[effect.cc-threshold.params]
-threshold = "Threshold"
-channel = "Channel"
-invert = "Invert"
-blend_w_original = "Blend w. Original"
-
-[effect.cc-threshold.choices]
-channel = ["Luminance", "RGB", "Saturation", "Alpha"]
-
-[effect.cc-threshold-rgb]
-name = "CC Threshold RGB"
-keywords = ["三通道阈值"]
-
-[effect.cc-threshold-rgb.params]
-red_threshold = "Red Threshold"
-green_threshold = "Green Threshold"
-blue_threshold = "Blue Threshold"
-invert_red_channel = "Invert Red Channel"
-invert_green_channel = "Invert Green Channel"
-invert_blue_channel = "Invert Blue Channel"
-blend_w_original = "Blend w. Original"
-

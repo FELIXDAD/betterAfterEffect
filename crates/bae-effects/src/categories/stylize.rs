@@ -17,16 +17,16 @@ pub(crate) fn register(registry: &mut Registry) {
             embedded!("posterize", ["shaders/posterize.wgsl"]),
             embedded!(
                 "threshold",
-                ["shaders/threshold.wgsl", "shaders/threshold_math.wgsl"]
-            ),
-            embedded!(
-                "stylize-brush",
                 [
-                    "shaders/scatter.wgsl",
-                    "shaders/brush_strokes.wgsl",
+                    "shaders/threshold.wgsl",
+                    "shaders/threshold_math.wgsl",
                     "shaders/cc_threshold.wgsl",
                     "shaders/cc_threshold_rgb.wgsl"
                 ]
+            ),
+            embedded!(
+                "stylize-brush",
+                ["shaders/scatter.wgsl", "shaders/brush_strokes.wgsl"]
             ),
             embedded!("strobe", ["shaders/strobe.wgsl"]),
         ],
