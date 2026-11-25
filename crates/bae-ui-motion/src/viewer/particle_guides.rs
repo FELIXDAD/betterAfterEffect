@@ -30,6 +30,7 @@ pub(super) fn paint(
     comp: &EvaluatedComp,
     view: &View,
     selected: &[PrimPath],
+    view_camera: Option<Camera>,
 ) {
     let mut timeline = Timeline { stage, eval, comp };
     for path in selected {
@@ -44,7 +45,7 @@ pub(super) fn paint(
             .iter()
             .filter(|fx| fx.enabled && fx.match_name == "CC Particle World")
         {
-            paint_effect(painter, &mut timeline, layer, fx, view);
+            paint_effect(painter, &mut timeline, layer, fx, view, view_camera);
         }
     }
 }
@@ -145,6 +146,7 @@ fn paint_effect(
     layer: &EvaluatedLayer,
     fx: &EvaluatedEffect,
     view: &View,
+    view_camera: Option<Camera>,
 ) {
     let def = bae_effects::get("CC Particle World").unwrap().def();
     let param = |id| match fx.param(id).or_else(|| def.param(id)?.default.as_ref()) {
@@ -159,10 +161,10 @@ fn paint_effect(
     if size.min_element() <= 0. {
         return;
     }
-    let camera = comp
-        .camera
-        .and_then(|i| comp.layers[i].camera)
-        .map(|c| Camera::new(c.world_matrix, c.zoom));
+    let camera = view_camera.or_else(|| {
+        let c = comp.layers.get(comp.camera?)?.camera?;
+        Some(Camera::new(c.world_matrix, c.zoom))
+    });
     let placement = affine_2d(&layer.world_matrix);
     if placement.matrix2.determinant() == 0. {
         return;
@@ -176,12 +178,11 @@ fn paint_effect(
     let projection = bae_effects::particle_world_projection(size, origin, Some(&scene), param)
         * DMat4::from_translation((size * 0.5).extend(0.))
         * DMat4::from_scale(DVec3::splat(size.x));
-    let layer_to_comp = if layer.switches.three_d {
-        camera
-            .unwrap_or_else(|| Camera::default_for(comp.width, comp.height))
-            .plane_homography(&layer.world_matrix, comp_size)
-    } else {
-        DMat3::from(placement)
+    let layer_to_comp = match view.camera {
+        Some((camera, viewport)) if layer.switches.three_d => {
+            camera.plane_homography(&layer.world_matrix, viewport)
+        }
+        _ => DMat3::from(placement),
     } * DMat3::from_translation(origin);
     let guides = Guides {
         painter,

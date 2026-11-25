@@ -435,6 +435,10 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
                 .map_or(u8::MAX, |i| i as u8 + 1);
             spec.checked_when(move |cx| Facts::of(cx).quality == code)
         }
+        crate::viewer::view3d::ids::SWITCH => {
+            let view = spec_param(item.params, "view").unwrap_or_default();
+            spec.checked_when(move |cx| crate::viewer::view3d::current(cx.resources).key() == view)
+        }
         bae_ui::action::ids::OPEN_PANEL => {
             let panel = id_param();
             spec.checked_when(move |cx| cx.panel_open(&panel))
