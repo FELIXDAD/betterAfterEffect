@@ -75,3 +75,85 @@ X、Y 位置	X,Y Position
 侧面模式	Side Mode
 侧面图层	Side Layer
 背面模式	Back Mode
+宽度	Width
+高度	Height
+底部	Bottom
+缩放	Zoom
+重复模式	Repeat Mode
+如果图层大小不同	If Layer Sizes Differ
+模糊	Blur
+水	Water
+水面	Water Surface
+波形高度	Wave Height
+平滑	Smoothing
+水深度	Water Depth
+折射率	Refractive Index
+表面颜色	Surface Color
+表面不透明度	Surface Opacity
+焦散强度	Caustics Strength
+天空	Sky
+融合	Convergence
+灯光高度	Light Height
+制作者	Producer
+产生点	Producer Point
+产生 X 大小	Producer X Size
+产生 Y 大小	Producer Y Size
+产生方向	Producer Orientation
+缩放产生点	Zoom Producer Point
+产生速率	Production Rate
+气泡	Bubbles
+大小	Size
+大小差异	Size Variance
+寿命	Lifespan
+气泡增长速度	Bubble Growth Speed
+初始速度	Initial Speed
+初始方向	Initial Direction
+风速	Wind Speed
+风向	Wind Direction
+湍流	Turbulence
+摇摆量	Wobble Amount
+排斥力	Repulsion
+弹跳速度	Pop Velocity
+粘性	Stickiness
+综合大小	Universe Size
+正在渲染	Rendering
+混合模式	Blend Mode
+气泡纹理	Bubble Texture
+气泡纹理分层	Bubble Texture Layer
+气泡方向	Bubble Orientation
+环境映射	Environment Map
+反射强度	Reflection Strength
+反射融合	Reflection Convergence
+流动映射	Flow Map
+流动映射黑白对比	Flow Map Steepness
+流动映射匹配	Flow Map Fits
+模拟品质	Simulation Quality
+随机植入	Random Seed
+线框控制	Wireframe Controls
+水平旋转	Horizontal Rotation
+垂直旋转	Vertical Rotation
+垂直缩放	Vertical Scale
+高度映射控制	Height Map Controls
+亮度	Brightness
+对比度	Contrast
+灰度系数调整	Gamma Adjustment
+渲染采光井作为	Render Dry Areas As
+透明度	Transparency
+模拟	Simulation
+网格分辨率	Grid Resolution
+网格分辨率降低采样	Downsample Grid Resolution
+波形速度	Wave Speed
+阻尼	Damping
+反射边缘	Reflect Edges
+预滚动（秒）	Pre-roll (seconds)
+地面	Ground
+陡度	Steepness
+波形强度	Wave Strength
+创建程序 1	Producer 1
+类型	Type
+高度/长度	Height/Length
+角度	Angle
+振幅	Amplitude
+频率	Frequency
+相位	Phase
+创建程序 2	Producer 2

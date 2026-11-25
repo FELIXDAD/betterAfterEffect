@@ -11,6 +11,8 @@ fn checkbox(effect: &str, id: u32) -> bool {
             | ("CSSnowfall", 15 | 26)
             | ("APC Shatter", 22 | 96 | 144)
             | ("APC CardDanceCam", 90)
+            | ("APC Foam", 12)
+            | ("APC Wave World", 92)
     )
 }
 
@@ -86,6 +88,9 @@ fn main() {
                 | "CC Pixel Polly"
                 | "APC Shatter"
                 | "APC CardDanceCam"
+                | "APC Foam"
+                | "APC Wave World"
+                | "APC Caustics"
         ) {
             continue;
         }

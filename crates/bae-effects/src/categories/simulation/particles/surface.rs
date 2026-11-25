@@ -131,6 +131,7 @@ pub(super) fn composite(
         Kind::Systems => (0., p.popup(28)),
         Kind::Snow => (p.f(26) as f32, if p.popup(25) == 2 { 5 } else { 1 }),
         Kind::Rain => (p.f(16) as f32, if p.popup(15) == 2 { 5 } else { 1 }),
+        Kind::Foam if p.popup(2) == 2 => (1., 1),
         Kind::Stars => (p.f(6) as f32, 1),
         Kind::Bubbles | Kind::Drizzle => (1., 1),
         _ => (0., 1),

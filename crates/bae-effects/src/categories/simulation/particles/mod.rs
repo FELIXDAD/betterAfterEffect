@@ -5,6 +5,7 @@ mod engine;
 pub(crate) use engine::{Engine, prewarm};
 mod scatter;
 mod surface;
+mod water;
 
 use crate::effects::layer_input;
 use crate::{Builtin, EffectTarget, TargetEffect, common, gpu::UniformWriter, params::Params};
@@ -27,6 +28,9 @@ pub(crate) enum Kind {
     Polly,
     Shatter,
     Cards,
+    Foam = 15,
+    Wave = 16,
+    Caustics = 17,
 }
 
 pub(crate) fn builtin(kind: Kind) -> Builtin {
@@ -48,12 +52,22 @@ fn max_lifetime(p: Params<'_>, id: u32) -> f64 {
 impl Simulation {
     fn sources(&self) -> &[u32] {
         match self.kind {
+            Kind::Foam => &[54, 58, 64],
+            Kind::Wave => &[36],
+            Kind::Caustics => &[2, 10, 70],
             Kind::Cards => &[10, 12, 8],
             Kind::Shatter => &[8, 20, 62, 70, 66],
             _ => &[],
         }
     }
     fn inputs(&self, p: &EffectParams<'_>) -> Vec<Option<LayerDependency>> {
+        if self.kind == Kind::Caustics {
+            return self
+                .sources()
+                .iter()
+                .map(|&id| water::dependency(p, id, id == 2))
+                .collect();
+        }
         if self.kind == Kind::World {
             let Some(texture) = layer_input::dependency(p, 45, false) else {
                 return vec![];
@@ -98,6 +112,7 @@ impl Effect for Simulation {
         let p = Params::new(&self.def, p);
         match self.kind {
             Kind::World => true,
+            Kind::Caustics => p.popup(38) == 3,
             Kind::Cards => p.popup(66) == 3 || p.popup(102) == 3,
             Kind::Shatter => p.popup(72) == 3 || p.popup(108) == 3,
             Kind::Drizzle => p.popup(22) == 2,
@@ -111,6 +126,7 @@ impl Effect for Simulation {
     fn integrated_parameters(&self) -> &'static [u32] {
         match self.kind {
             Kind::World => &[4, 5],
+            Kind::Foam => &[14, 20],
             Kind::Systems | Kind::Drizzle => &[1, 2],
             _ => &[],
         }
@@ -170,7 +186,7 @@ impl Scene<'_> {
         let history_offset = 32 + CONTROL_COUNT * 16;
         let mut u = UniformWriter::with_size(history_offset + 16 + 64 * 16);
         u.u32(0, kind as u32).u32(8, seed).f32s(16, &self.size);
-        for c in &self.p.def.params {
+        for c in self.p.def.params.iter().filter(|c| c.match_name.is_some()) {
             let offset = 32 + 16 * c.id as usize;
             match self.p.value(c.id) {
                 Some(Value::Vec2(pos)) => {
@@ -239,6 +255,7 @@ impl Scene<'_> {
         let n = match k {
             Kind::World | Kind::Systems | Kind::Drizzle | Kind::Scatter => 0.,
 
+            Kind::Wave | Kind::Foam | Kind::Caustics => 0.,
             Kind::Rain | Kind::Snow => f(1),
             Kind::Bubbles => f(1),
             Kind::Stars => tiles(f(4)),
@@ -275,6 +292,9 @@ impl TargetEffect for Simulation {
             return Ok(input.clone());
         }
         let p = Params::new(&self.def, params);
+        if matches!(self.kind, Kind::Wave | Kind::Caustics) {
+            return water::render(self.kind, target, p, input, roi);
+        }
         if self.kind == Kind::Scatter {
             return scatter::render(target, &p, input, roi);
         }

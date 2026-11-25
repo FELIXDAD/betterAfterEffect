@@ -96,6 +96,7 @@ impl Engine {
             include_str!("shared.wgsl"),
             include_str!("motion.wgsl"),
             include_str!("sprites.wgsl"),
+            include_str!("foam.wgsl"),
             include_str!("tiles.wgsl"),
             include_str!("draw.wgsl")
         );
@@ -272,6 +273,7 @@ pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<
     Engine::get(&mut rt.particles.lock(), &rt.device)?;
     surface::composite_kernel(rt, format)?;
     super::scatter::prewarm(rt, format)?;
+    super::water::prewarm(rt, format)?;
     Ok(())
 }
 
@@ -287,6 +289,7 @@ pub(super) fn render(
     let p = scene.p;
     let seed = p.p.seed as u32
         ^ match kind {
+            Kind::Foam => p.f(72) as u32,
             Kind::World => p.f(104) as u32,
             Kind::Systems => p.f(30) as u32,
             Kind::Rain => p.f(22) as u32,
@@ -296,10 +299,13 @@ pub(super) fn render(
     let advance = match kind {
         Kind::World | Kind::Systems => 0,
         Kind::Rain | Kind::Snow | Kind::Bubbles => 1,
-        Kind::Drizzle => 2,
+        Kind::Drizzle | Kind::Foam => 2,
         _ => 3,
     };
-    let batches = super::emission::batches(kind, scene);
+    let mut batches = super::emission::batches(kind, scene);
+    if kind == Kind::Foam && p.popup(50) == 2 {
+        batches.reverse();
+    }
     let blend = match kind {
         Kind::World => {
             if p.popup(39) == 4 {
@@ -364,7 +370,11 @@ pub(super) fn render(
         &engine.draw[blend].get_bind_group_layout(0),
         &entries,
     );
-    for (page_index, page) in emission::pages(&batches, max).enumerate() {
+    let group_size = if kind == Kind::Foam { 1 } else { usize::MAX };
+    let pages = batches
+        .chunks(group_size)
+        .flat_map(|group| emission::pages(group, max));
+    for (page_index, page) in pages.enumerate() {
         let count = page.count;
         let records = &page.intervals.bytes;
         let interval_count = records.len() / emission::INTERVAL_BYTES;
@@ -419,6 +429,13 @@ pub(super) fn render(
         pass.draw(0..4, 0..count);
     }
     drop(slot);
+    if kind == Kind::Foam
+        && p.popup(2) == 2
+        && let Some(map) = maps.get(2).and_then(Option::as_ref)
+    {
+        let background = super::water::flow_background(target, p, input, map, roi)?;
+        return surface::composite(kind, target, scene, &background, &overlay);
+    }
     surface::composite(kind, target, scene, input, &overlay)
 }
 fn storage(device: &wgpu::Device, size: u64) -> wgpu::Buffer {

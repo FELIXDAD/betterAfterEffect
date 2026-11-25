@@ -33,6 +33,7 @@ const SYSTEMS = 1u;
 const RAIN = 2u;
 const SNOW = 3u;
 const BUBBLES = 4u;
+const FOAM=15u;
 const DRIZZLE = 5u;
 const STARS = 6u;
 const POLLY = 8u;

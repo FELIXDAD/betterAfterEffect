@@ -82,6 +82,7 @@ pub(super) fn batches(kind: Kind, scene: &Scene<'_>) -> Vec<Batch> {
         Kind::World => (4, 5, 1000.),
         Kind::Systems => (1, 2, 1000.),
         Kind::Drizzle => (1, 2, 16.),
+        Kind::Foam => (14, 20, 18.),
         _ => {
             return vec![Batch {
                 count: scene.count(kind),
