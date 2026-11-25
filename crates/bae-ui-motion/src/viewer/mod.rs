@@ -610,7 +610,14 @@ impl Panel for CompositionViewer {
             self.gpu_tried = true;
             self.gpu = GpuPreview::new(cx.resources);
         }
-        let resolution = render_factor(cx.stage, &info.path, session.lock().auto_resolution, mag);
+        let resolution = {
+            let s = session.lock();
+            // Preview ▸ Resolution overrides the viewer's while playing.
+            match s.preview.resolution.filter(|_| s.is_playing()) {
+                Some(r) => r,
+                None => render_factor(cx.stage, &info.path, s.auto_resolution, mag),
+            }
+        };
         self.render_factor = resolution;
         let image = self
             .gpu

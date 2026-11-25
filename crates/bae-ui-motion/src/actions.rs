@@ -899,7 +899,7 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::PLAY => {
             if s.is_playing() {
-                s.stop();
+                s.stop_preview(&info);
             } else {
                 s.preview(cx, &info);
             }
