@@ -224,7 +224,7 @@ impl GpuPreview {
                 blur.cameras.fill(Some(camera));
             }
         }
-        let key = (rc.content_hash(), rc.time, resolution);
+        let key = (self.engine.renderer.content_hash(&rc), rc.time, resolution);
         if self.last != Some(key) {
             let rendered = match self.engine.render(stage, &rc, resolution) {
                 Ok(rendered) => rendered,

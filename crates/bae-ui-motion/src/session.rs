@@ -46,8 +46,50 @@ pub struct Playback {
     pub comp: PrimPath,
     started: Instant,
     from: Time,
-    /// Range played (the work area); playback loops or stops at its end.
+    /// Range played (Preview panel ▸ Range); playback loops or stops at its end.
     pub range: TimeRange,
+    /// The current time before playing (kept on stop when Move Time To
+    /// Preview Time is off).
+    before: Time,
+}
+
+/// Preview panel ▸ Range (AE's choices for the Spacebar shortcut).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PreviewRange {
+    WorkArea,
+    #[default]
+    WorkAreaExtended,
+    EntireDuration,
+}
+
+/// The Preview panel's playback options (AE: per shortcut; BAE: Spacebar's).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreviewOptions {
+    pub range: PreviewRange,
+    /// Play From: the current time (else the start of the range).
+    pub from_current: bool,
+    /// Frame Rate: `None` = Auto (the comp's).
+    pub fps: Option<f64>,
+    /// Frames skipped between the frames played.
+    pub skip: u32,
+    /// Resolution while playing: `None` = Auto (the viewer's), else 1 (Full),
+    /// 2 (Half), 3 (Third), 4 (Quarter).
+    pub resolution: Option<u32>,
+    /// On stop, the current time moves to the last frame played.
+    pub move_time: bool,
+}
+
+impl Default for PreviewOptions {
+    fn default() -> Self {
+        PreviewOptions {
+            range: PreviewRange::default(),
+            from_current: true,
+            fps: None,
+            skip: 0,
+            resolution: None,
+            move_time: true,
+        }
+    }
 }
 
 /// A value being dragged in a panel, previewed by the viewer before the command runs.
@@ -143,6 +185,8 @@ pub struct Session {
     mix_has_audio: bool,
     /// Loop playback (Preview panel).
     pub loop_playback: bool,
+    /// Preview panel options (range, play from, frame rate, skip …).
+    pub preview: PreviewOptions,
     /// The viewer's resolution is on Auto: it follows the magnification. The
     /// chosen resolution itself is the comp's (`resolution`, as in Composition
     /// Settings).
@@ -170,8 +214,12 @@ pub struct Session {
     reserved: Vec<(PrimPath, String)>,
     /// When U was last pressed (UU detection).
     pub(crate) last_u: Option<Instant>,
+    /// When L was last pressed to reveal the audio waveform on a second press.
+    pub(crate) last_l: Option<Instant>,
     /// What the viewer reports to the Info panel.
     pub info: crate::ae_panels::info::Readout,
+    /// The footage item the Footage panel shows.
+    pub footage_view: Option<PrimPath>,
     /// Expression errors of the active comp at the current time (the viewer's
     /// evaluation): the error banner and the timeline's warning icons.
     pub expr_errors: Vec<bae_anim::AttrError>,
@@ -279,10 +327,7 @@ impl Session {
     }
 
     fn update_time(&mut self, info: &CompInfo, t: Time) -> Time {
-        let last = info.duration - info.frame_duration();
-        let at = info
-            .frame_rate
-            .snap(t.clamp(Time::ZERO, last.max(Time::ZERO)));
+        let at = info.playhead_time(t);
         self.times.insert(info.path.clone(), at);
         at
     }
@@ -424,12 +469,35 @@ impl Session {
         self.playback.is_some()
     }
 
-    /// Start playing the active comp from the current time through the work area
-    /// (from the work area start when the current time is outside it).
+    /// The range Preview ▸ Range plays for the current time `now`.
+    pub fn preview_range(&self, info: &CompInfo, now: Time) -> TimeRange {
+        let wa = info.work_area;
+        match self.preview.range {
+            PreviewRange::WorkArea => wa,
+            // The work area, grown to take in the current time (AE).
+            PreviewRange::WorkAreaExtended => {
+                let end = (info.duration).max(info.frame_duration());
+                let start = wa.start.min(now);
+                let stop = if now >= wa.end {
+                    (now + info.frame_duration()).min(end)
+                } else {
+                    wa.end
+                };
+                TimeRange::new(start, stop)
+            }
+            PreviewRange::EntireDuration => TimeRange::new(Time::ZERO, info.duration),
+        }
+    }
+
+    /// Start playing the active comp (Preview panel options): from the current
+    /// time or the start of the range, through the range.
     pub fn play(&mut self, info: &CompInfo) {
-        let range = info.work_area;
         let now = self.time(&info.path);
-        let from = if range.contains(now) && now + info.frame_duration() < range.end {
+        let range = self.preview_range(info, now);
+        let from = if self.preview.from_current
+            && range.contains(now)
+            && now + info.frame_duration() < range.end
+        {
             now
         } else {
             range.start
@@ -440,6 +508,7 @@ impl Session {
             started: Instant::now(),
             from,
             range,
+            before: now,
         });
     }
 
@@ -481,7 +550,13 @@ impl Session {
         self.prepare_mix(cx, info);
         self.play(info);
         let pb = self.playback.as_ref().unwrap();
-        self.audio_clock = self.sound(pb.from, pb.range, self.loop_playback);
+        // Another preview frame rate plays at another speed: the sound does
+        // not drive the clock then (AE plays it only at the comp's rate).
+        let comp_rate = self
+            .preview
+            .fps
+            .is_none_or(|fps| (fps - info.frame_rate.as_f64()).abs() < 1e-3);
+        self.audio_clock = comp_rate && self.sound(pb.from, pb.range, self.loop_playback);
     }
 
     pub(crate) fn scrub_to(
@@ -533,6 +608,17 @@ impl Session {
         self.tick(info)
     }
 
+    /// Stop playing (Spacebar): the current time stays on the last frame shown,
+    /// or goes back when Move Time To Preview Time is off.
+    pub fn stop_preview(&mut self, info: &CompInfo) {
+        if let Some(pb) = self.playback.take()
+            && !self.preview.move_time
+            && pb.comp == info.path
+        {
+            self.set_time(info, pb.before);
+        }
+    }
+
     /// Advance playback to the wall-clock time. Returns whether it is still playing
     /// (the caller then requests a repaint).
     pub fn tick(&mut self, info: &CompInfo) -> bool {
@@ -560,10 +646,21 @@ impl Session {
             }
             output.elapsed()
         } else {
-            Time::from_seconds(pb.started.elapsed().as_secs_f64())
+            // Frame Rate: a lower rate plays slower, as in AE.
+            let speed = self
+                .preview
+                .fps
+                .map_or(1.0, |fps| fps / info.frame_rate.as_f64().max(1e-6));
+            Time::from_seconds(pb.started.elapsed().as_secs_f64() * speed)
         };
         let span = pb.range.duration();
         let mut t = pb.from + elapsed;
+        // Skip: only every (skip + 1)th frame is shown.
+        if self.preview.skip > 0 {
+            let step = i64::from(self.preview.skip) + 1;
+            let f = info.frame_rate.time_to_frame(t - pb.from);
+            t = pb.from + info.frame_rate.frame_to_time(f - f.rem_euclid(step));
+        }
         if t >= pb.range.end {
             if self.loop_playback && span.0 > 0 {
                 t = pb.range.start + Time((t - pb.range.start).0.rem_euclid(span.0));
@@ -599,6 +696,36 @@ mod tests {
     }
 
     #[test]
+    fn preview_range_play_from_and_stop_follow_the_preview_panel() {
+        let mut info = info();
+        info.work_area = TimeRange::new(Time::from_seconds(0.5), Time::from_seconds(1.0));
+        let mut s = Session::default();
+        let now = Time::from_seconds(1.5);
+        // AE's default: the work area grown to the current time.
+        let r = s.preview_range(&info, now);
+        assert_eq!(r.start, Time::from_seconds(0.5));
+        assert!(r.end > now);
+        s.preview.range = PreviewRange::WorkArea;
+        assert_eq!(s.preview_range(&info, now), info.work_area);
+        s.preview.range = PreviewRange::EntireDuration;
+        assert_eq!(s.preview_range(&info, now).end, info.duration);
+        // Play From: Start of Range.
+        s.preview.range = PreviewRange::WorkArea;
+        s.preview.from_current = false;
+        s.set_time(&info, Time::from_seconds(0.7));
+        s.play(&info);
+        assert_eq!(s.time(&info.path), Time::from_seconds(0.5));
+        // Move time to preview time off: Spacebar goes back to where it was.
+        s.preview.move_time = false;
+        s.stop_preview(&info);
+        assert!(!s.is_playing());
+        assert_eq!(
+            s.time(&info.path),
+            info.frame_rate.snap(Time::from_seconds(0.7))
+        );
+    }
+
+    #[test]
     fn time_is_snapped_and_clamped() {
         let mut s = Session::default();
         let i = info();
@@ -615,6 +742,7 @@ mod tests {
         let mut s = Session::default();
         let mut i = info();
         i.work_area = TimeRange::new(Time::from_seconds(1.0), Time::from_seconds(2.0));
+        s.preview.range = PreviewRange::WorkArea;
         s.play(&i);
         assert!(s.is_playing());
         assert_eq!(s.time(&i.path), Time::from_seconds(1.0));

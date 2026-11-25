@@ -1,0 +1,33 @@
+[effect.cc-color-offset]
+name = "CC Color Offset"
+keywords = ["颜色偏移"]
+
+[effect.cc-color-offset.params]
+red_phase = "Red Phase"
+green_phase = "Green Phase"
+blue_phase = "Blue Phase"
+overflow = "Overflow"
+
+[effect.cc-color-offset.choices]
+overflow = ["Wrap", "Solarize", "Polarize"]
+
+[effect.cc-kernel]
+name = "CC Kernel"
+keywords = ["卷积"]
+
+[effect.cc-kernel.params]
+line_1 = "Line 1"
+coefficient_2 = "1 - L1"
+coefficient_3 = "2 - L1"
+coefficient_4 = "3 - L1"
+line_2 = "Line 2"
+coefficient_7 = "1 - L2"
+coefficient_8 = "2 - L2"
+coefficient_9 = "3 - L2"
+line_3 = "Line 3"
+coefficient_12 = "1 - L3"
+coefficient_13 = "2 - L3"
+coefficient_14 = "3 - L3"
+divider = "Divider"
+absolute_values = "Absolute Values"
+blend_w_original = "Blend w. Original"
