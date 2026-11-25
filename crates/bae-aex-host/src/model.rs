@@ -252,6 +252,7 @@ pub fn param_def(p: &ParamDescriptor) -> ModelParam {
         cannot_time_vary: f.cannot_time_vary,
         collapsed: f.start_collapsed,
         custom_ui,
+        relative_default: false,
     };
     // Checkboxes, popups and references hold in BAE anyway; only numeric
     // params lose the hold-only behaviour.
