@@ -6,6 +6,39 @@ use bae_render::IRect;
 use common::*;
 
 #[test]
+fn matching_plate_clears_alpha_and_fade_only_cuts_along_the_wire() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::new(0, 0, 32, 24);
+    let input = Pixels::new(rect, |_, _| [0.25, 0.25, 0.25, 0.5]);
+    let matte = run(
+        &gpu,
+        Rgba16Float,
+        builtin("ADBE Difference Matte2"),
+        vec![(6, Value::Float(3.))],
+        &input,
+        rect,
+        1.,
+    );
+    assert_eq!(matte.get(16, 12), [0.; 4]);
+    let wire = run(
+        &gpu,
+        Rgba16Float,
+        builtin("CC Simple Wire Removal"),
+        vec![
+            (1, Value::Vec2([16.5, 4.5])),
+            (2, Value::Vec2([16.5, 20.5])),
+            (3, Value::Int(1)),
+            (4, Value::Float(4.)),
+        ],
+        &input,
+        rect,
+        1.,
+    );
+    assert_eq!(wire.get(16, 12), [0.; 4]);
+    assert_eq!(wire.get(8, 12), input.get(8, 12));
+}
+
+#[test]
 fn keying_definitions_match_the_ae_disk_ids() {
     let spill = builtin("ADBE Spill2").def();
     assert_eq!(

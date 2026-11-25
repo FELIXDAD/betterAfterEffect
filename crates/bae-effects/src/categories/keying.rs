@@ -1,7 +1,10 @@
 use super::packages;
 use crate::Registry;
+mod cleanup;
 
 pub(crate) fn register(registry: &mut Registry) {
+    registry.effects.extend(cleanup::builtins());
+    registry.prewarm.push(cleanup::prewarm);
     packages(
         registry,
         &[embedded!(
