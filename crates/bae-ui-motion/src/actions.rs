@@ -174,6 +174,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::PLAY, "Play/Stop"),
     (ids::GO_START, "Go to Start"),
     (ids::GO_END, "Go to End"),
+    ("motion.file.find", "Find"),
     (ids::STEP, "Next Frame"),
     (ids::PREV_KEY, "Go to Previous Keyframe"),
     (ids::NEXT_KEY, "Go to Next Keyframe"),

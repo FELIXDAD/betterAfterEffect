@@ -111,7 +111,7 @@ impl TimelinePanel {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn header(
         &mut self,
-        ui: &Ui,
+        ui: &mut Ui,
         cx: &mut PanelContext<'_>,
         session: &SharedSession,
         info: &CompInfo,
@@ -159,6 +159,19 @@ impl TimelinePanel {
                 s.stop();
                 s.set_time(info, now + Time(info.frame_duration().0 * frames));
             }
+        }
+
+        // Search field, between the current time and the comp switches.
+        let left = tc.right() + 12.0;
+        let right = (left + 170.0).min(head.left() + cols.end - 140.0);
+        if right - left > 60.0 {
+            self.search_ui(
+                ui,
+                Rect::from_min_max(
+                    pos2(left, head.center().y - 10.0),
+                    pos2(right, head.center().y + 10.0),
+                ),
+            );
         }
 
         // Graph Editor switch (AE's comp button; Shift+F3).

@@ -18,6 +18,7 @@ mod markers;
 mod menus;
 mod modes;
 mod rows;
+mod search;
 
 use std::collections::{HashMap, HashSet};
 
@@ -237,6 +238,10 @@ pub struct TimelinePanel {
     scroll: Time,
     drag: Option<Drag>,
     rename: Option<(PrimPath, String)>,
+    /// The search field's text: filters the outline (search.rs).
+    pub(crate) search: String,
+    /// Edit ▸ Find: focus the search field next frame.
+    focus_search: bool,
     /// Expression sources being edited, by `path.attr`.
     expr_edit: Option<(PrimPath, String, String)>,
     /// The field being edited: its text and selection (chars), for the pick whip
@@ -426,8 +431,21 @@ impl TimelinePanel {
     fn rows(&self, stage: &Stage, comp: &PrimPath, s: &Session) -> Vec<Row> {
         let mut out = Vec::new();
         let hide_shy = bool_attr(stage, comp, "hide_shy_layers");
+        let needle = self.search.trim().to_lowercase();
         for layer in query::comp_layers(stage, comp) {
             if hide_shy && bool_attr(stage, &layer, "shy") {
+                continue;
+            }
+            // Searching: matching layers, and the matching properties opened.
+            let found = (!needle.is_empty()).then(|| {
+                let name = query::display_name_of(stage, &layer).to_lowercase();
+                let props = search::matching(&props::layer_tree(stage, &layer), &needle);
+                (name.contains(&needle), props)
+            });
+            if found
+                .as_ref()
+                .is_some_and(|(name, props)| !name && props.is_empty())
+            {
                 continue;
             }
             out.push(Row {
@@ -435,6 +453,12 @@ impl TimelinePanel {
                 layer: layer.clone(),
                 depth: 0,
             });
+            if let Some((_, nodes)) = found.filter(|(_, props)| !props.is_empty()) {
+                let mut open = HashSet::new();
+                search::group_ids(&nodes, &mut open);
+                flatten_tree(&nodes, &layer, 1, &open, stage, &mut out);
+                continue;
+            }
             if let Some(r) = s.reveal.get(&layer) {
                 for n in props::revealed(stage, &layer, r) {
                     if let Node::Prop { path, attr, label } = n {
@@ -582,6 +606,11 @@ impl Panel for TimelinePanel {
             }
             "motion.timeline.toggle_parent_column" => {
                 self.panes.parent = !self.panes.parent;
+                true
+            }
+            // Edit ▸ Find (Ctrl+F): the search field.
+            "motion.file.find" => {
+                self.focus_search = true;
                 true
             }
             _ => actions::handle(action, cx, &session),
