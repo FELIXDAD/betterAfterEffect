@@ -204,8 +204,11 @@ function __hash(a, b) {
   h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
   return (h ^ (h >>> 16)) >>> 0;
 }
-var __rng = new __Rng(1), __rngBase = 1, __timeless = false;
-function __resetRandom(seed) { __rngBase = seed >>> 0; __timeless = false; __reseed(); }
+// The generator is seeded on the first random() of an evaluation (most
+// expressions draw none): null until then.
+var __rng = null, __rngBase = 1, __timeless = false;
+function __resetRandom(seed) { __rngBase = seed >>> 0; __timeless = false; __rng = null; }
+function __R() { if (__rng === null) __reseed(); return __rng; }
 function __reseed() {
   var tick = __timeless ? 0 : Math.floor(__now * 1000 + 1e-6);
   __rng = new __Rng(__hash(__rngBase, tick));
@@ -216,18 +219,18 @@ function seedRandom(seed, timeless) {
   __reseed();
 }
 function random(a, b) {
-  var r = __rng.next();
+  var r = __R().next();
   if (a === undefined) return r;
   if (b === undefined) {
-    if (__isArr(a)) return a.map(function (x) { return __rng.next() * x; });
+    if (__isArr(a)) return a.map(function (x) { return __R().next() * x; });
     return r * a;
   }
-  if (__isArr(a)) return a.map(function (x, i) { return x + __rng.next() * (b[i] - x); });
+  if (__isArr(a)) return a.map(function (x, i) { return x + __R().next() * (b[i] - x); });
   return a + r * (b - a);
 }
 function gaussRandom(a, b) {
   function g() {
-    var u = 1 - __rng.next(), v = __rng.next();
+    var u = 1 - __R().next(), v = __R().next();
     return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v) / 6 + 0.5;
   }
   if (a === undefined) return g();
@@ -279,8 +282,7 @@ function __call(fn, c, l, prim, attr, t, seed) {
   __env_c = c;
   __resetRandom(seed);
   try {
-    var env = { thisComp: new Comp(c), thisLayer: new Layer(c, l), thisProperty: __prop(c, l, prim, attr), time: t };
-    return __val(fn(env));
+    return __val(fn(c, l, prim, attr, t));
   } finally {
     __now = saveNow; __env_c = saveC; __rng = saveRng; __rngBase = saveBase; __timeless = saveTl;
   }
@@ -288,17 +290,7 @@ function __call(fn, c, l, prim, attr, t, seed) {
 
 // ---- object model ----
 function Property(c, l, p, a) { this.__c = c; this.__l = l; this.__p = p; this.__a = a; }
-// `transform.position[0]` and `.length` read the value, as in AE.
-var __propHandler = {
-  get: function (target, key, receiver) {
-    if (typeof key === "string" && (key === "length" || /^[0-9]+$/.test(key))) {
-      var v = target.value;
-      return __isArr(v) ? v[key] : (key === "length" ? 1 : undefined);
-    }
-    return Reflect.get(target, key, receiver);
-  },
-};
-function __prop(c, l, p, a) { return new Proxy(new Property(c, l, p, a), __propHandler); }
+function __prop(c, l, p, a) { return new Property(c, l, p, a); }
 // Time grid of AE's valueAtTime: 1/1024 of a frame (measured in AE 26 at 30 fps).
 function __tick() { return __h.compInfo(__env_c).frameDuration / 1024; }
 function __q(t) { var k = __tick(); return Math.round(t / k) * k; }
@@ -426,6 +418,17 @@ Property.prototype = {
   loopInDuration: function (type, duration) { return this.__loop(false, type, 0, duration || 0); },
   get propertyIndex() { return 1; },
 };
+// `transform.position[0]` and `.length` read the value, as in AE: getters on
+// the prototype (a Proxy would trap every method and field access).
+(function () {
+  function index(i) {
+    return function () { var v = this.value; return __isArr(v) ? v[i] : undefined; };
+  }
+  for (var i = 0; i < 16; i++) Object.defineProperty(Property.prototype, String(i), { get: index(i) });
+  Object.defineProperty(Property.prototype, "length", {
+    get: function () { var v = this.value; return __isArr(v) ? v.length : 1; },
+  });
+})();
 
 var __TRANSFORM = {
   anchorPoint: "transform:anchor_point", position: "transform:position", scale: "transform:scale",
@@ -485,6 +488,7 @@ Layer.prototype = {
   get opacity() { return this.transform.opacity; },
   get pointOfInterest() { return this.transform.pointOfInterest; },
   get timeRemap() { return __prop(this.__c, this.__l, "", "time_remap"); },
+  get marker() { return new MarkerProperty(this.__c, this.__l); },
   sourceTime: function (t) {
     if (t === undefined) t = __now;
     return (t - this.startTime) * 100 / this.stretch;
@@ -534,8 +538,54 @@ Layer.prototype = {
   fromWorldVec: function (p, t) { return this.__xf(7, p, t); },
 };
 
+// ---- markers (AE: thisLayer.marker, thisComp.marker, MarkerKey) ----
+function MarkerProperty(c, l) { this.__c = c; this.__l = l; this.__m = null; }
+MarkerProperty.prototype = {
+  get __keys() {
+    if (this.__m === null) {
+      this.__m = __h.markers(this.__c, this.__l).map(function (m, i) { return new MarkerKey(m, i + 1); });
+    }
+    return this.__m;
+  },
+  get numKeys() { return this.__keys.length; },
+  // key(index) or key(comment), as AE.
+  key: function (k) {
+    var ks = this.__keys;
+    if (typeof k === "string") {
+      for (var i = 0; i < ks.length; i++) if (ks[i].comment === k) return ks[i];
+      throw new Error("Marker key " + JSON.stringify(k) + " does not exist");
+    }
+    if (k < 1 || k > ks.length) throw new Error("Key index " + k + " out of range");
+    return ks[k - 1];
+  },
+  nearestKey: function (t) {
+    var ks = this.__keys, best = -1, bd = Infinity;
+    for (var i = 0; i < ks.length; i++) {
+      var d = Math.abs(ks[i].time - t);
+      if (d < bd) { bd = d; best = i; }
+    }
+    if (best < 0) throw new Error("property has no keyframes");
+    return ks[best];
+  },
+};
+function MarkerKey(m, index) {
+  this.time = m.time;
+  this.index = index;
+  this.duration = m.duration;
+  this.comment = m.comment;
+  this.value = m.comment;
+  this.chapter = m.chapter;
+  this.url = m.url;
+  this.frameTarget = m.frameTarget;
+  this.eventCuePoint = false;
+  this.cuePointName = m.cuePointName;
+  this.parameters = {};
+  this.protectedRegion = m.protectedRegion;
+}
+
 function Comp(c) { this.__c = c; this.__i = null; }
 Comp.prototype = {
+  get marker() { return new MarkerProperty(this.__c, -1); },
   get __info() { return this.__i || (this.__i = __h.compInfo(this.__c)); },
   get name() { return this.__info.name; },
   get width() { return this.__info.width; },

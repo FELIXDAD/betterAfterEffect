@@ -80,25 +80,14 @@ impl Shader {
                 Some(Value::Color(c)) => {
                     u.f32s(offset, &c.map(|x| x as f32));
                 }
-                Some(Value::Vec2(xy)) => {
-                    let point = if v.p.value(p.id).is_none()
-                        && (p.flags.reference_point_default || p.flags.relative_default)
-                    {
-                        let units = if p.flags.relative_default {
-                            [1., 1.]
-                        } else {
-                            [640., 360.]
-                        };
-                        [
-                            (f64::from(layer.x0) + xy[0] * f64::from(layer.width()) / units[0])
-                                as f32,
-                            (f64::from(layer.y0) + xy[1] * f64::from(layer.height()) / units[1])
-                                as f32,
-                        ]
-                    } else {
-                        xy.map(|x| (x * v.p.scale) as f32)
-                    };
-                    u.f32s(offset, &point);
+                Some(Value::Vec2(_)) => {
+                    if let Some(point) = v.render_point(
+                        p,
+                        [f64::from(layer.x0), f64::from(layer.y0)],
+                        layer.size().map(f64::from),
+                    ) {
+                        u.f32s(offset, &point.map(|v| v as f32));
+                    }
                 }
                 Some(Value::Int(_) | Value::Bool(_) | Value::Float(_)) => {
                     u.f32(offset, v.f(p.id) as f32);
