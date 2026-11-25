@@ -382,6 +382,17 @@ pub fn variants() -> Vec<(String, CommandVariant)> {
             format!("{name}: Add or Remove Keyframe"),
         );
     }
+    // E, Shift+E.
+    add(
+        ids::REVEAL,
+        json!({ "what": "effects", "add": false }),
+        "Show Effects".to_owned(),
+    );
+    add(
+        ids::REVEAL,
+        json!({ "what": "effects", "add": true }),
+        "Add Effects to Shown Properties".to_owned(),
+    );
     v
 }
 

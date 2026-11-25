@@ -2335,7 +2335,10 @@ fn e_reveals_the_effects_group_with_its_effects() {
     let mut h = H::new();
     let layer = h.layer.clone();
     let folder = layer.child("effects").unwrap();
-    h.run("prim.create", json!({"path": folder, "prim_type": "Folder"}));
+    h.run(
+        "prim.create",
+        json!({"path": folder, "prim_type": "Folder"}),
+    );
     let blur = folder.child("Gaussian_Blur").unwrap();
     h.run("prim.create", json!({"path": blur, "prim_type": "Effect"}));
     h.run(
@@ -2356,7 +2359,10 @@ fn e_reveals_the_effects_group_with_its_effects() {
     );
     assert!(r.invocations.is_empty());
     let shown = groups(&mut h, &mut tl);
-    assert_eq!(shown, [format!("{layer}#effects"), format!("{layer}#{blur}")]);
+    assert_eq!(
+        shown,
+        [format!("{layer}#effects"), format!("{layer}#{blur}")]
+    );
     // E again hides it.
     h.action(
         &mut tl,

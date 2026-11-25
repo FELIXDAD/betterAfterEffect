@@ -650,9 +650,24 @@ fn timeline_right_click_menus() {
     let row = layer_row(&h, "Dark Gray Solid 1");
     right_click(&mut h, pos2(row.x, row.y + 80.0));
     let texts = painted_texts(&h);
-    assert!(texts.iter().any(|t| t == "New"), "New menu under the layers: {texts:?}");
-    assert!(!texts.iter().any(|t| t == "Pre-compose..."), "no layer menu: {texts:?}");
-    send(&mut h, Event::Key { key: Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE });
+    assert!(
+        texts.iter().any(|t| t == "New"),
+        "New menu under the layers: {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|t| t == "Pre-compose..."),
+        "no layer menu: {texts:?}"
+    );
+    send(
+        &mut h,
+        Event::Key {
+            key: Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        },
+    );
     settle(&mut h);
     let number = find_texts(&h, |t| t == "1")
         .into_iter()
@@ -660,5 +675,8 @@ fn timeline_right_click_menus() {
         .expect("layer number");
     right_click(&mut h, number.center());
     let texts = painted_texts(&h);
-    assert!(texts.iter().any(|t| t == "Pre-compose..."), "layer menu on #: {texts:?}");
+    assert!(
+        texts.iter().any(|t| t == "Pre-compose..."),
+        "layer menu on #: {texts:?}"
+    );
 }

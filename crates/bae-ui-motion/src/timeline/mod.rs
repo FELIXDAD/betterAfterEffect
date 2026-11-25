@@ -456,9 +456,9 @@ impl TimelinePanel {
                         id,
                         label,
                         children,
-                    }) = props::layer_tree(stage, &layer).into_iter().find(
-                        |n| matches!(n, Node::Group { id, .. } if id.ends_with("#effects")),
-                    )
+                    }) = props::layer_tree(stage, &layer)
+                        .into_iter()
+                        .find(|n| matches!(n, Node::Group { id, .. } if id.ends_with("#effects")))
                 {
                     out.push(Row {
                         kind: RowKind::Group {

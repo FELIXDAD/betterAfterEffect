@@ -63,6 +63,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Best Quality", "最佳品质"),
     ("Draft Quality", "草图品质"),
     ("Wireframe Quality", "线框品质"),
+    ("Show Effects", "显示效果"),
+    ("Add Effects to Shown Properties", "将效果添加到显示的属性"),
     ("Show Position", "显示位置"),
     ("Add Position to Shown Properties", "将位置添加到显示的属性"),
     ("Position: Add or Remove Keyframe", "位置：添加或移除关键帧"),
