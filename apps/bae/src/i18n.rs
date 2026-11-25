@@ -151,6 +151,23 @@ const ZH: &[(&str, &str)] = &[
         "The last action failed: {reason}",
         "上一个操作失败：{reason}",
     ),
+    // Status bar: plugin problems (bae-plugin notices)
+    (
+        "Plugin {plugin} could not be loaded and is disabled: {detail}",
+        "插件 {plugin} 无法加载，已停用：{detail}",
+    ),
+    (
+        "Plugin {plugin} failed to render a frame: {detail}",
+        "插件 {plugin} 渲染一帧时出错：{detail}",
+    ),
+    (
+        "Plugin {plugin} crashed and will be restarted: {detail}",
+        "插件 {plugin} 崩溃，将自动重启：{detail}",
+    ),
+    (
+        "Plugin {plugin} stopped working and was disabled for this session: {detail}",
+        "插件 {plugin} 多次出错，本次运行中已停用：{detail}",
+    ),
     (
         "GPU-first motion graphics and compositing.",
         "以 GPU 为基础的动态图形与合成应用。",
@@ -242,6 +259,15 @@ mod tests {
                 "The last action failed: {reason}",
             ]
             .map(String::from),
+        );
+        strings.extend(
+            [
+                bae_plugin::NoticeKind::LoadFailed,
+                bae_plugin::NoticeKind::RenderFailed,
+                bae_plugin::NoticeKind::Crashed,
+                bae_plugin::NoticeKind::Disabled,
+            ]
+            .map(|kind| crate::ui::plugin_notice_template(kind).to_owned()),
         );
         let missing: Vec<_> = strings
             .iter()

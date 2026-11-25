@@ -23,7 +23,7 @@ schema_version = 1
 [plugin]
 id = "com.example.posterize"     # 反向域名，发布后不能改
 version = "1.0.0"                # 语义化版本
-api = "0.1"                      # 需要的最低插件 API 版本
+api = "1.0"                      # 需要的最低插件 API 版本
 name = "Posterize (example)"     # 默认（英文）名称；中文放在 locales/zh-CN.toml
 description = "Reduces each color channel to a number of levels."
 
@@ -110,7 +110,7 @@ bae plugin check path/to/com.example.posterize
 ```
 
 ```text
-path/to/com.example.posterize: ok — com.example.posterize 1.0.0 (API 0.1), effects: com.example.posterize/posterize
+path/to/com.example.posterize: ok — com.example.posterize 1.0.0 (API 1.0), effects: com.example.posterize/posterize
 ```
 
 它和宿主加载插件时做的检查完全一样：清单语法和取值、文件是否存在、把着色器和宿主生成的前导代码拼在一起用 naga 编译校验。出错时给出编译器风格的位置，编辑器可以直接跳转：
