@@ -166,6 +166,14 @@ impl ImageAllocator for PoolAllocator<'_> {
     }
 }
 
+/// Per-node timing of a frame (the Render Time column).
+pub(crate) struct Timing<'a> {
+    /// CPU time per node.
+    pub cpu: bool,
+    /// GPU timestamps per node, when the device supports them.
+    pub gpu: Option<&'a mut crate::gpu_timer::GpuTimer>,
+}
+
 /// Executes `graph` and submits it. Returns the output node's image (and,
 /// when `timed`, the CPU time of every node).
 #[allow(clippy::too_many_arguments)]
@@ -177,8 +185,13 @@ pub(crate) fn execute(
     mask_buffers: &mut MaskBuffers,
     graph: &RenderGraph,
     format: wgpu::TextureFormat,
-    timed: bool,
+    timing: Timing<'_>,
 ) -> Result<Executed, RenderError> {
+    let timed = timing.cpu;
+    let mut gpu_timer = timing.gpu;
+    let gpu_timed = gpu_timer
+        .as_deref_mut()
+        .is_some_and(|t| t.begin(graph.nodes.len()));
     let device = gpu.device();
     let total_draws: usize = graph
         .nodes
@@ -254,6 +267,9 @@ pub(crate) fn execute(
     let mut node_times = Vec::with_capacity(if timed { graph.nodes.len() } else { 0 });
     for (index, node) in graph.nodes.iter().enumerate() {
         let started = timed.then(std::time::Instant::now);
+        if gpu_timed && let Some(t) = gpu_timer.as_deref() {
+            t.write(&mut encoder, index);
+        }
         let image = match &node.kind {
             NodeKind::Composite(c) => {
                 let px = node_pixels(node);
@@ -377,7 +393,14 @@ pub(crate) fn execute(
     }
     let draw_calls = ctx.draw_calls;
     let passes = ctx.passes;
+    if gpu_timed && let Some(t) = gpu_timer.as_deref_mut() {
+        t.write(&mut encoder, graph.nodes.len());
+        t.finish(&mut encoder, graph.nodes.len() + 1, &graph.owners);
+    }
     gpu.queue().submit([encoder.finish()]);
+    if gpu_timed && let Some(t) = gpu_timer {
+        t.submitted();
+    }
     let image = outputs[graph.output.index()]
         .take()
         .ok_or_else(|| RenderError::Other("graph produced no output".into()))?;

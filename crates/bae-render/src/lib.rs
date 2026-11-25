@@ -46,6 +46,7 @@ pub mod fixture;
 pub mod footage;
 pub mod geom;
 mod gpu;
+mod gpu_timer;
 pub mod graph;
 pub mod input;
 pub mod light;
