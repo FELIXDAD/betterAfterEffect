@@ -23,6 +23,7 @@ use crate::tools::cursor::{self, Hover};
 use crate::tools::{Tool, ViewRequest};
 
 mod bar;
+mod effect_points;
 pub(crate) mod errors;
 mod free_transform;
 mod menu;
@@ -91,6 +92,8 @@ pub struct CompositionViewer {
     last_view: Option<View>,
     /// Motion paths of the selected layers (C).
     motion_path: motion_path::MotionPathState,
+    /// Point controls of the selected effects.
+    effect_points: effect_points::EffectPoints,
 }
 
 impl CompositionViewer {
@@ -745,6 +748,20 @@ impl Panel for CompositionViewer {
             effective,
             &painter,
         );
+        // Effect point controls: a press on a crosshair is theirs.
+        let points = effect_points::frame(
+            &mut self.effect_points,
+            ui,
+            &resp,
+            cx,
+            &session,
+            &comp,
+            &view,
+            effective,
+            &painter,
+            &self.prefs,
+            time,
+        );
         // Motion paths (C): drawn for the selected layers; a press on a keyframe
         // square or handle is theirs, not the Selection tool's.
         let path = motion_path::frame(
@@ -760,10 +777,12 @@ impl Panel for CompositionViewer {
             &painter,
             &self.prefs,
         );
-        let select_cursor = if path.owns {
+        let select_cursor = if points.owns {
+            points.cursor
+        } else if path.owns {
             path.cursor
         } else {
-            path.cursor.or(select_tool::frame(
+            points.cursor.or(path.cursor).or(select_tool::frame(
                 &mut self.select,
                 ui,
                 &resp,
