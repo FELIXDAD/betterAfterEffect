@@ -1,4 +1,4 @@
-# BAE (betterAfterEffect) Cargo workspace.
+# BAE (betterAfterEffects) Cargo workspace.
 #
 # This is a *virtual* workspace: there is no root package. Every crate lives in
 # `apps/*`, `crates/*`, `services/*`, `xtask` or `tools/*`, and new crates under
@@ -28,7 +28,7 @@ version = "0.0.1"
 edition = "2024"
 rust-version = "1.100"
 license = "Apache-2.0"
-repository = "https://github.com/FELIXDAD/betterAfterEffect"
+repository = "https://github.com/FELIXDAD/betterAfterEffects"
 publish = false
 
 [workspace.lints.cargo]
@@ -151,6 +151,7 @@ tiff = { version = "0.11.3", default-features = false, features = ["deflate", "j
 zune-jpeg = "0.5.15"
 symphonia = { version = "0.6.1", default-features = false }
 cpal = "0.18.2"
+rtrb = "0.4.1"
 
 # ---- platform bindings ----
 objc2 = "0.6.5"
