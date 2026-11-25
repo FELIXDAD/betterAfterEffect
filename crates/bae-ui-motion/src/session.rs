@@ -152,6 +152,9 @@ pub enum Pending {
 
 #[derive(Debug, Default)]
 pub struct Session {
+    /// Last UI frame in which a visible timeline requested per-layer CPU timings.
+    pub(crate) timing_column_frame: Option<u64>,
+    pub(crate) layer_times: HashMap<PrimPath, std::time::Duration>,
     /// Comp shown in the viewer and timeline.
     pub active_comp: Option<PrimPath>,
     /// Comps opened in the timeline (tabs), in opening order.
