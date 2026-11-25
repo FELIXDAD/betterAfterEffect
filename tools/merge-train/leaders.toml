@@ -5,9 +5,13 @@
 # paired server name), `branch_prefix` (any of), `worktree_prefix` (Orca worktree
 # display name, any of), `label` (any of).
 
-default = "ca3a6511"
+default = "032978cc"
 # Told when dev CI goes red and the queue pauses.
-pause_notify = ["ca3a6511", "09fe9cc0"]
+pause_notify = ["032978cc"]
+
+# Sole leader since 2026-11-24 (0.1.0 sprint); ca3a6511 and 09fe9cc0 stood down.
+[leaders.032978cc]
+address = "orca_session_id:032978cc-504f-4b7e-86aa-6cfb84184325"
 
 [leaders.ca3a6511]
 address = "orca_session_id:ca3a6511-c6a8-4cd9-aca7-379637d84b6f"
@@ -20,15 +24,4 @@ address = "orca_session_id:09fe9cc0-76f2-4ae5-934c-b33f04bc0c0b"
 address = "orca_session_id:83fb8048-90ac-480a-b85f-2408991ec53e"
 on = "米兰Mac"
 
-[[rules]]
-host = "米兰Mac"
-leader = "milan"
-
-[[rules]]
-branch_prefix = ["ui/", "ref/"]
-leader = "09fe9cc0"
-
-[[rules]]
-# 09fe9cc0's AE-parity group (tools, menus, timeline, dialogs, icons, AE reference runs).
-worktree_prefix = ["bae-12-", "bae-11-icons", "bae-ref-"]
-leader = "09fe9cc0"
+# No routing rules: every PR goes to the default leader (one leader since 2026-11-24).

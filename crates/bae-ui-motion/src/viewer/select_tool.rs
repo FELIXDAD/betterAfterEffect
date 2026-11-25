@@ -486,6 +486,14 @@ pub(super) fn frame(
         && let Some(pos) = pointer
     {
         d.update(view.to_comp(pos), shift, snap);
+        // AE's Info panel: the moved layer's position and how far it moved.
+        if matches!(d.kind, Kind::Move { .. })
+            && let Some(e) = d.edits.first()
+        {
+            let (p, p0) = (e.now.position, e.start.position);
+            session.lock().info.moved =
+                Some((e.path.clone(), [p.x, p.y], [p.x - p0.x, p.y - p0.y]));
+        }
     }
     if let Some(d) = state.path_drag.as_mut()
         && let Some(pos) = pointer

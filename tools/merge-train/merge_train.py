@@ -435,7 +435,8 @@ def check_runs(sha):
 
 def required_checks():
     c = CFG["checks"]
-    return list(c.get("fast", [])) + list(c.get("full", []))
+    full = list(c.get("full", [])) if c.get("pr_full", True) else []
+    return list(c.get("fast", [])) + full
 
 
 def evaluate_checks(sha):
@@ -491,6 +492,8 @@ def overlap(pr_sha):
                     & {f for f in devf if keep(f, CFG["merge"]["overlap_ignore_dev"])})
     if shared or not devf:
         return shared  # dev changed nothing since the merge-base: nothing to relate
+    if not CFG["merge"].get("relate_crates", True):
+        return []  # file-level only; dev's post-merge CI catches cross-file breaks
     rel = crate_relation(prf, devf)
     return ["crate " + rel] if rel else []
 
@@ -904,7 +907,8 @@ def do_merge(pr, st):
     st.get("prs", {}).pop(str(num), None)
     wt, _agent = find_owner(pr["headRefName"], orca_worktrees())
     leader = leader_for(pr, wt)
-    if leader:
+    # The board already lists merges; a message per merge only wakes the leader.
+    if leader and CFG.get("notify", {}).get("merged", True):
         line = "已合并 #%d %s → %s %s" % (num, pr["title"], CFG["base"], new)
         send(leader, line[:120], line + "\n" + pr["url"])
     return True
