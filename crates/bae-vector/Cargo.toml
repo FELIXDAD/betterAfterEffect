@@ -32,6 +32,8 @@ tracing = { workspace = true, optional = true }
 # GPU tests always run with the `render` feature (`cargo test -p bae-vector`).
 bae-vector = { path = ".", features = ["render"] }
 bae-gpu.workspace = true
+# The shapes benchmark's blur + glow scenario.
+bae-effects.workspace = true
 glam.workspace = true
 serde_json.workspace = true
 

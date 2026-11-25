@@ -7,7 +7,8 @@
 //! Prints the time per frame of each stage and the sustained frame rate with
 //! the GPU included. `cargo bench -p bae-vector --bench shapes [-- <layers>…]`
 //! (default 100 and 1000). `BAE_BENCH_FRAMES` (default 120), `BAE_BENCH_4K=1`
-//! (3840 × 2160 instead of 1920 × 1080).
+//! (3840 × 2160 instead of 1920 × 1080), `BAE_BENCH_FX=<n>` (the first n
+//! layers also get Gaussian Blur 20 and Glow with radius 30).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -45,6 +46,14 @@ fn set(stage: &mut Stage, registry: &CommandRegistry, prim: &str, attr: &str, va
         "attr.set",
         json!({"path": prim, "attr": attr, "value": value}),
     );
+}
+
+/// Layers with blur and glow (`BAE_BENCH_FX`).
+fn fx_layers() -> usize {
+    std::env::var("BAE_BENCH_FX")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0)
 }
 
 /// The comp and its N spinning shape layers.
@@ -119,6 +128,29 @@ fn project(layers: usize) -> (Stage, PrimPath) {
             "attr.set_expression",
             json!({"path": l, "attr": "transform:rotation", "source": "time*1000"}),
         );
+        if i < fx_layers() {
+            create(&mut stage, format!("{l}/effects"), "Folder");
+            for (name, match_name, id, value) in [
+                ("blur", "ADBE Gaussian Blur 2", 1, 20.0),
+                ("glow", "ADBE Glo2", 3, 30.0),
+            ] {
+                let fx = create(&mut stage, format!("{l}/effects/{name}"), "Effect");
+                set(
+                    &mut stage,
+                    &registry,
+                    &fx,
+                    "match_name",
+                    Value::String(match_name.into()),
+                );
+                set(
+                    &mut stage,
+                    &registry,
+                    &fx,
+                    &format!("param:{id:04}"),
+                    Value::Float(value),
+                );
+            }
+        }
     }
     (stage, comp)
 }
@@ -149,10 +181,25 @@ fn bench(gpu: &Arc<GpuContext>, layers: usize, frames: usize) {
     renderer
         .providers_mut()
         .register(Arc::new(ShapeProvider::new()));
+    bae_effects::register(
+        &mut bae_model::EffectRegistry::new(),
+        renderer.effects_mut(),
+    );
     let request = RenderRequest {
         purpose: RenderPurpose::Preview,
         ..RenderRequest::full()
     };
+    {
+        let ec = eval
+            .evaluate_comp(&stage, &comp, Time::ZERO)
+            .expect("evaluate");
+        let rc = anim.convert(&stage, &ec, 0).expect("convert");
+        let out = renderer.render_frame(&rc, &request).expect("render");
+        println!(
+            "  {layers:5} layers: {} nodes, {} draw calls, {} passes, warnings {:?}",
+            out.stats.nodes, out.stats.draw_calls, out.stats.passes, out.warnings
+        );
+    }
     let rate = FrameRate::FPS_30;
     let mut frame = |f: usize, times: &mut Times, wait: bool| {
         let time = rate.frame_to_time(f as i64);
@@ -230,9 +277,10 @@ fn main() {
         }
     };
     println!(
-        "shapes — {}×{}, spinning shape layers (time*1000) — {}",
+        "shapes — {}×{}, spinning shape layers (time*1000), {} with blur + glow — {}",
         size().0,
         size().1,
+        fx_layers(),
         gpu.summary()
     );
     for layers in counts {
