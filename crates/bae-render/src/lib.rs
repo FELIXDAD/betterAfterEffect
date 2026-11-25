@@ -92,3 +92,25 @@ pub use source::{
     EncodeContext, GpuImage, ImageAlpha, LayerSource, SourceProvider, SourceProviders,
     SourceRequest,
 };
+
+thread_local! {
+    static INTERACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Marks the calling thread as interactive (the UI thread) or not. On an
+/// interactive thread, first-use work that the warm-up (`bae_gpu::warm_up`)
+/// is still preparing is not waited for: the frame fails with
+/// [`warming_up`] and is drawn again once the warm-up is done.
+pub fn set_interactive_thread(on: bool) {
+    INTERACTIVE.with(|c| c.set(on));
+}
+
+/// Whether the calling thread is interactive ([`set_interactive_thread`]).
+pub fn is_interactive_thread() -> bool {
+    INTERACTIVE.with(|c| c.get())
+}
+
+/// The error for `what` still being prepared by the warm-up.
+pub fn warming_up(what: &str) -> RenderError {
+    RenderError::Other(format!("{what} is still warming up"))
+}

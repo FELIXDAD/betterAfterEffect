@@ -27,6 +27,25 @@ use crate::catalog::EffectInfo;
 #[derive(Debug, Default)]
 pub struct EffectsModule;
 
+/// Compiles the built-in effects' pipelines for the default working format
+/// during the app's warm-up, before the first effect is applied.
+struct WarmUp;
+
+impl bae_gpu::WarmUp for WarmUp {
+    fn name(&self) -> &str {
+        "effects"
+    }
+
+    fn priority(&self) -> u8 {
+        20
+    }
+
+    fn run(&self, gpu: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+        crate::prewarm(gpu, bae_render::WorkFormat::default().texture_format())
+            .map_err(|e| e.to_string())
+    }
+}
+
 impl AppModule for EffectsModule {
     fn name(&self) -> &str {
         "bae-effects"
@@ -57,6 +76,9 @@ impl AppModule for EffectsModule {
                 }
             }
         });
+        if let Err(e) = app.register_arc::<dyn bae_gpu::WarmUp>("bae.effects", Arc::new(WarmUp)) {
+            tracing::warn!("effects warm-up not registered: {e}");
+        }
         infos.batch(|tx| {
             for b in crate::builtins() {
                 let info: Arc<EffectInfo> = Arc::new(b.info.clone());

@@ -26,7 +26,7 @@ use bae_render::{
     SourceProvider, SourceRequest,
 };
 use kurbo::{Affine, Rect};
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex};
 use rustc_hash::FxHashMap;
 use vello::peniko::{self, Color, ColorStop, Extend, InterpolationAlphaSpace};
 
@@ -253,8 +253,20 @@ impl std::fmt::Debug for VelloRenderer {
 /// Renderers by GPU context, kept for the context's lifetime: Vello compiles
 /// its pipelines when a renderer is created, so letting it go between draws
 /// recompiled every shader for every shape layer of every frame.
-type SharedRenderers = Mutex<Vec<(Weak<GpuContext>, Arc<VelloRenderer>)>>;
+type SharedRenderers = Mutex<Vec<(Weak<GpuContext>, Slot)>>;
 static SHARED: SharedRenderers = Mutex::new(Vec::new());
+/// Signalled when a shared renderer finished building (or failed).
+static BUILT: Condvar = Condvar::new();
+
+/// A shared renderer, or one being built (by the warm-up, usually).
+enum Slot {
+    Building,
+    Ready(Arc<VelloRenderer>),
+}
+
+/// Threads Vello compiles its shaders on when the user is not waiting (the
+/// warm-up): few, so the UI keeps the CPU.
+const BACKGROUND_COMPILE_THREADS: usize = 2;
 
 fn vello_error(e: vello::Error) -> RenderError {
     RenderError::Other(format!("vello: {e}"))
@@ -270,6 +282,16 @@ impl VelloRenderer {
     /// A new renderer with an explicit backend. The GPU backend compiles Vello's
     /// pipelines (tens to hundreds of milliseconds).
     pub fn with_backend(gpu: &GpuContext, backend: VectorBackend) -> Result<Self, RenderError> {
+        Self::build(gpu, backend, None)
+    }
+
+    /// A renderer compiling Vello's shaders on `threads` threads (all cores when
+    /// `None`).
+    fn build(
+        gpu: &GpuContext,
+        backend: VectorBackend,
+        threads: Option<std::num::NonZeroUsize>,
+    ) -> Result<Self, RenderError> {
         let renderer = match backend {
             VectorBackend::Cpu => None,
             VectorBackend::Gpu => Some(Mutex::new(
@@ -278,7 +300,7 @@ impl VelloRenderer {
                     vello::RendererOptions {
                         use_cpu: false,
                         antialiasing_support: vello::AaSupport::area_only(),
-                        num_init_threads: None,
+                        num_init_threads: threads,
                         pipeline_cache: None,
                     },
                 )
@@ -289,17 +311,64 @@ impl VelloRenderer {
     }
 
     /// The renderer shared by everyone drawing on `gpu`; created on first use and
-    /// kept until the context is dropped.
+    /// kept until the context is dropped. While another thread (the warm-up)
+    /// builds it, an interactive thread (`bae_render::is_interactive_thread`)
+    /// gets a "warming up" error instead of waiting; others wait.
     pub fn shared(gpu: &Arc<GpuContext>) -> Result<Arc<Self>, RenderError> {
+        Self::get(gpu, None)
+    }
+
+    /// Builds the shared renderer ahead of its first use, compiling on a few
+    /// threads (the app's warm-up).
+    pub fn warm(gpu: &Arc<GpuContext>) -> Result<(), RenderError> {
+        Self::get(gpu, std::num::NonZeroUsize::new(BACKGROUND_COMPILE_THREADS)).map(drop)
+    }
+
+    fn get(
+        gpu: &Arc<GpuContext>,
+        threads: Option<std::num::NonZeroUsize>,
+    ) -> Result<Arc<Self>, RenderError> {
+        let interactive = bae_render::is_interactive_thread();
         let mut shared = SHARED.lock();
-        shared.retain(|(g, _)| g.strong_count() > 0);
-        if let Some((_, r)) = shared
-            .iter()
-            .find(|(g, _)| std::ptr::eq(g.as_ptr(), Arc::as_ptr(gpu)))
-        {
-            return Ok(r.clone());
+        loop {
+            shared.retain(|(g, _)| g.strong_count() > 0);
+            match shared
+                .iter()
+                .find(|(g, _)| std::ptr::eq(g.as_ptr(), Arc::as_ptr(gpu)))
+            {
+                Some((_, Slot::Ready(r))) => return Ok(r.clone()),
+                Some((_, Slot::Building)) if interactive => {
+                    return Err(bae_render::warming_up("the vector renderer"));
+                }
+                Some((_, Slot::Building)) => BUILT.wait(&mut shared),
+                None => break,
+            }
         }
-        let r = Arc::new(Self::new(gpu)?);
+        shared.push((Arc::downgrade(gpu), Slot::Building));
+        drop(shared);
+        if interactive {
+            // Not even started: build it in the background, never on the UI thread.
+            let background = gpu.clone();
+            let spawned = std::thread::Builder::new()
+                .name("bae-vector-build".into())
+                .spawn(move || {
+                    bae_gpu::warm_up::lower_priority();
+                    let threads = std::num::NonZeroUsize::new(BACKGROUND_COMPILE_THREADS);
+                    Self::finish(&background, Self::build_shared(&background, threads)).ok();
+                });
+            if spawned.is_err() {
+                return Self::finish(gpu, Self::build_shared(gpu, None));
+            }
+            return Err(bae_render::warming_up("the vector renderer"));
+        }
+        Self::finish(gpu, Self::build_shared(gpu, threads))
+    }
+
+    fn build_shared(
+        gpu: &GpuContext,
+        threads: Option<std::num::NonZeroUsize>,
+    ) -> Result<Arc<Self>, RenderError> {
+        let r = Arc::new(Self::build(gpu, VectorBackend::for_adapter(gpu), threads)?);
         if r.backend == VectorBackend::Cpu {
             tracing::warn!(
                 "vector shapes and text are rasterized on the CPU (adapter {:?} is {:?})",
@@ -307,8 +376,27 @@ impl VelloRenderer {
                 gpu.adapter_info().device_type
             );
         }
-        shared.push((Arc::downgrade(gpu), r.clone()));
         Ok(r)
+    }
+
+    /// Publishes the outcome of a build and wakes the threads waiting for it.
+    fn finish(
+        gpu: &Arc<GpuContext>,
+        built: Result<Arc<Self>, RenderError>,
+    ) -> Result<Arc<Self>, RenderError> {
+        let mut shared = SHARED.lock();
+        let at = shared
+            .iter()
+            .position(|(g, _)| std::ptr::eq(g.as_ptr(), Arc::as_ptr(gpu)));
+        match (&built, at) {
+            (Ok(r), Some(i)) => shared[i].1 = Slot::Ready(r.clone()),
+            (Err(_), Some(i)) => {
+                shared.remove(i);
+            }
+            (_, None) => {}
+        }
+        BUILT.notify_all();
+        built
     }
 
     /// The backend in use.
@@ -702,5 +790,24 @@ impl SourceProvider for ShapeProvider {
         let source = Arc::new(ShapeSource::new(self.scene_of(content)?));
         self.cache.lock().insert(content.hash, source.clone());
         Ok(source)
+    }
+}
+
+/// Builds the shared vector renderer during the app's warm-up
+/// (`bae_gpu::warm_up`), before the first shape or text layer is drawn.
+#[derive(Debug, Default)]
+pub struct VectorWarmUp;
+
+impl bae_gpu::WarmUp for VectorWarmUp {
+    fn name(&self) -> &str {
+        "vector renderer"
+    }
+
+    fn priority(&self) -> u8 {
+        0
+    }
+
+    fn run(&self, gpu: &Arc<GpuContext>) -> Result<(), String> {
+        VelloRenderer::warm(gpu).map_err(|e| e.to_string())
     }
 }

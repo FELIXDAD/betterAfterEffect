@@ -70,11 +70,24 @@ fn app_builder() -> AppBuilder {
     ) {
         tracing::warn!("shape layer source not registered: {error}");
     }
-    if let Err(error) = builder.register_arc::<dyn bae_render::SourceProvider>(
-        bae_text::TEXT_PROVIDER,
-        std::sync::Arc::new(bae_text::render::TextProvider::new()),
-    ) {
+    let text = std::sync::Arc::new(bae_text::render::TextProvider::new());
+    if let Err(error) = builder
+        .register_arc::<dyn bae_render::SourceProvider>(bae_text::TEXT_PROVIDER, text.clone())
+    {
         tracing::warn!("text layer source not registered: {error}");
+    }
+    // First-use work done in the background at startup (shell `warm_up`).
+    for (id, task) in [
+        (
+            "bae.vector.renderer",
+            std::sync::Arc::new(bae_vector::render::VectorWarmUp)
+                as std::sync::Arc<dyn bae_gpu::WarmUp>,
+        ),
+        ("bae.text.fonts", text),
+    ] {
+        if let Err(error) = builder.register_arc::<dyn bae_gpu::WarmUp>(id, task) {
+            tracing::warn!("warm-up task {id} not registered: {error}");
+        }
     }
     // Feature modules from other workstreams are added here.
     builder

@@ -200,6 +200,10 @@ impl Runtime {
         if let Some(k) = self.kernels.lock().get(key) {
             return Ok(k.clone());
         }
+        // The UI thread does not compile while the warm-up is still at it.
+        if bae_gpu::warm_up::is_running() && bae_render::is_interactive_thread() {
+            return Err(bae_render::warming_up("the effect pipelines"));
+        }
         let src = source()?;
         let kernel = Arc::new(self.build(&src)?);
         self.kernels.lock().insert(key.clone(), kernel.clone());
