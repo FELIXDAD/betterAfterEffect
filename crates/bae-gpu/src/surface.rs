@@ -15,8 +15,7 @@ pub enum PresentModePreference {
     /// The default: the shell redraws only on events, so frame rate is not the goal.
     #[default]
     Vsync,
-    /// VSync with the lowest latency the platform offers (`Mailbox` if available,
-    /// else `FifoRelaxed`, else `Fifo`). Good for playback and scrubbing.
+    /// Prefer mailbox presentation during playback, then immediate presentation.
     LowLatency,
     /// Uncapped (`Immediate`, else `Mailbox`, else `Fifo`). For benchmarks.
     NoVsync,
@@ -28,7 +27,7 @@ impl PresentModePreference {
         use wgpu::PresentMode as P;
         let order: &[P] = match self {
             Self::Vsync => &[P::FifoRelaxed, P::Fifo],
-            Self::LowLatency => &[P::Mailbox, P::FifoRelaxed, P::Fifo],
+            Self::LowLatency => &[P::Mailbox, P::Immediate, P::FifoRelaxed, P::Fifo],
             Self::NoVsync => &[P::Immediate, P::Mailbox, P::Fifo],
         };
         order
@@ -341,8 +340,16 @@ impl WindowSurface {
 
     /// Changes frame pacing.
     pub fn set_present_mode(&mut self, preference: PresentModePreference) {
+        if self.options.present_mode == preference {
+            return;
+        }
         self.options.present_mode = preference;
-        self.config.present_mode = preference.pick(&self.supported_present_modes);
+        let selected = preference.pick(&self.supported_present_modes);
+        if self.config.present_mode == selected {
+            return;
+        }
+        tracing::info!(mode = ?selected, "window presentation mode");
+        self.config.present_mode = selected;
         self.reconfigure_if_active();
     }
 
@@ -572,7 +579,7 @@ mod tests {
     fn present_mode_fallbacks() {
         let metal = [P::Fifo, P::Immediate];
         assert_eq!(PresentModePreference::Vsync.pick(&metal), P::Fifo);
-        assert_eq!(PresentModePreference::LowLatency.pick(&metal), P::Fifo);
+        assert_eq!(PresentModePreference::LowLatency.pick(&metal), P::Immediate);
         assert_eq!(PresentModePreference::NoVsync.pick(&metal), P::Immediate);
         let dx12 = [P::Fifo, P::FifoRelaxed, P::Mailbox, P::Immediate];
         assert_eq!(PresentModePreference::Vsync.pick(&dx12), P::FifoRelaxed);

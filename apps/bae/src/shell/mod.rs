@@ -876,6 +876,15 @@ impl Shell {
             textures_delta: output.textures_delta,
             pixels_per_point: output.pixels_per_point,
         };
+        let session = self.app.resource::<bae_ui_motion::SharedSession>();
+        if self.smoke.is_none() {
+            let playing = session.is_some_and(|s| s.lock().is_playing());
+            view.surface.set_present_mode(if playing {
+                PresentModePreference::LowLatency
+            } else {
+                PresentModePreference::Vsync
+            });
+        }
         let (width, height) = view.surface.size();
         let background = view.egui_ctx.global_style().visuals.panel_fill;
 
@@ -894,6 +903,9 @@ impl Shell {
                 view.window.pre_present_notify();
                 let suboptimal = frame.is_suboptimal();
                 frame.present();
+                if let Some(session) = session {
+                    session.lock().frame_presented(Instant::now());
+                }
                 if suboptimal {
                     view.surface.handle_suboptimal();
                 }
@@ -1372,6 +1384,17 @@ impl ApplicationHandler<UserEvent> for Shell {
         if let Some(at) = autosave_at {
             deadline = Some(deadline.map_or(at, |d| d.min(at)));
         }
+        if let Some(at) = self
+            .app
+            .resource::<bae_ui_motion::SharedSession>()
+            .and_then(|s| s.lock().playback_deadline())
+        {
+            if at <= now {
+                self.request_redraw();
+            } else {
+                deadline = Some(deadline.map_or(at, |d| d.min(at)));
+            }
+        }
         if let Some(at) = self.repaint_at {
             if at <= now {
                 self.repaint_at = None;
@@ -1390,4 +1413,90 @@ impl ApplicationHandler<UserEvent> for Shell {
         // Drop GPU objects while the window still exists.
         self.view = None;
     }
+}
+
+#[cfg(all(test, windows))]
+#[test]
+#[ignore = "4K native Windows surface benchmark"]
+fn playback_surface_4k() {
+    use bae_gpu::wgpu;
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+
+    struct Probe;
+    impl ApplicationHandler for Probe {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            let window = Arc::new(
+                event_loop
+                    .create_window(
+                        Window::default_attributes()
+                            .with_visible(false)
+                            .with_inner_size(winit::dpi::PhysicalSize::new(3840, 2160)),
+                    )
+                    .unwrap(),
+            );
+            let (gpu, surface) = GpuContext::new_with_surface(
+                GpuContextDescriptor {
+                    allow_software_fallback: false,
+                    ..Default::default()
+                },
+                window.clone(),
+            )
+            .unwrap();
+            let modes = surface.get_capabilities(gpu.adapter()).present_modes;
+            let mut surface =
+                WindowSurface::new(&gpu, surface, 3840, 2160, Default::default()).unwrap();
+            println!("adapter={} supported={modes:?}", gpu.summary());
+            for preference in [
+                PresentModePreference::Vsync,
+                PresentModePreference::LowLatency,
+            ] {
+                surface.set_present_mode(preference);
+                assert_eq!(surface.config().present_mode, preference.pick(&modes));
+                let start = Instant::now();
+                let mut count = 0u32;
+                for i in 0..120 {
+                    let Some(frame) = surface.acquire().unwrap() else {
+                        break;
+                    };
+                    let mut encoder = gpu.device().create_command_encoder(&Default::default());
+                    {
+                        let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: frame.view(),
+                                depth_slice: None,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                                        r: f64::from(i % 17) / 16.,
+                                        g: 0.25,
+                                        b: 0.5,
+                                        a: 1.,
+                                    }),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                            })],
+                            ..Default::default()
+                        });
+                    }
+                    gpu.queue().submit([encoder.finish()]);
+                    window.pre_present_notify();
+                    frame.present();
+                    count += 1;
+                }
+                gpu.wait_idle().unwrap();
+                println!(
+                    "3840x2160 mode={:?} submitted={} surface_fps={:.2}",
+                    surface.config().present_mode,
+                    count,
+                    f64::from(count) / start.elapsed().as_secs_f64()
+                );
+            }
+            event_loop.exit();
+        }
+
+        fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+    }
+
+    let event_loop = EventLoop::builder().with_any_thread(true).build().unwrap();
+    event_loop.run_app(&mut Probe).unwrap();
 }

@@ -551,9 +551,6 @@ impl Panel for TimelinePanel {
             );
             return;
         };
-        if session.lock().tick(&info) {
-            ui.ctx().request_repaint();
-        }
         let now = session.lock().time(&info.path);
         self.graph_mode = session.lock().graph_editor;
         let cols = Cols::new(full.width());

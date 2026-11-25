@@ -7,9 +7,9 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use bae_model::{PrimPath, Stage, Time, TimeRange, Value};
+use bae_model::{FrameRate, PrimPath, Stage, Time, TimeRange, Value};
 use bae_motion::KeyRef;
 use bae_motion::query::{self, CompInfo};
 
@@ -29,9 +29,36 @@ pub enum Reveal {
 pub struct Playback {
     pub comp: PrimPath,
     started: Instant,
-    from: Time,
+    from: i64,
+    rate: FrameRate,
+    ordinal: u64,
+    revision: Option<u64>,
     /// Range played (the work area); playback loops or stops at its end.
     pub range: TimeRange,
+}
+
+impl Playback {
+    fn ordinal_at(&self, now: Instant) -> u64 {
+        let nanos = now.saturating_duration_since(self.started).as_nanos();
+        (nanos * u128::from(self.rate.num) / (1_000_000_000 * u128::from(self.rate.den))) as u64
+    }
+
+    fn deadline(&self) -> Instant {
+        let nanos = ((u128::from(self.ordinal) + 1) * 1_000_000_000 * u128::from(self.rate.den))
+            .div_ceil(u128::from(self.rate.num));
+        self.started + Duration::from_nanos(nanos as u64)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PlaybackStats {
+    pub fps: f64,
+    pub dropped: u64,
+    matched: bool,
+    drawn: Option<Time>,
+    last_present: Option<(u64, Time)>,
+    sample: Option<Instant>,
+    frames: u32,
 }
 
 /// A value being dragged in a panel, previewed by the viewer before the command runs.
@@ -86,6 +113,7 @@ pub struct Session {
     /// Project panel selection.
     pub selected_items: Vec<PrimPath>,
     pub playback: Option<Playback>,
+    pub playback_stats: PlaybackStats,
     /// Loop playback (Preview panel).
     pub loop_playback: bool,
     /// The viewer's resolution is on Auto: it follows the magnification. The
@@ -284,49 +312,120 @@ impl Session {
         } else {
             range.start
         };
-        self.times.insert(info.path.clone(), from);
+        let started = Instant::now();
+        self.times
+            .insert(info.path.clone(), info.frame_rate.snap(from));
         self.playback = Some(Playback {
             comp: info.path.clone(),
-            started: Instant::now(),
-            from,
+            started,
+            from: info.frame_rate.time_to_frame(from),
+            rate: info.frame_rate,
+            ordinal: 0,
+            revision: None,
             range,
         });
+        self.playback_stats = PlaybackStats {
+            sample: Some(started),
+            ..Default::default()
+        };
     }
 
     pub fn stop(&mut self) {
         self.playback = None;
     }
 
-    /// Advance playback to the wall-clock time. Returns whether it is still playing
-    /// (the caller then requests a repaint).
-    pub fn tick(&mut self, info: &CompInfo) -> bool {
-        if self
-            .playback
-            .as_ref()
-            .is_some_and(|p| p.comp == info.path && p.range != info.work_area)
-        {
-            self.play(info);
-        }
-        let Some(pb) = self.playback.clone() else {
-            return false;
+    /// Edits to the work area or frame rate take effect without restarting the
+    /// UI clock on unrelated project changes.
+    pub fn sync_playback(&mut self, stage: &Stage) {
+        let Some(pb) = self.playback.as_mut() else {
+            return;
         };
-        if pb.comp != info.path {
-            return true;
+        if pb.revision == Some(stage.revision()) {
+            return;
         }
-        let elapsed = Time::from_seconds(pb.started.elapsed().as_secs_f64());
-        let span = pb.range.duration();
-        let mut t = pb.from + elapsed;
-        if t >= pb.range.end {
-            if self.loop_playback && span.0 > 0 {
-                t = pb.range.start + Time((t - pb.range.start).0.rem_euclid(span.0));
-            } else {
-                self.playback = None;
-                self.set_time(info, pb.range.end - info.frame_duration());
-                return false;
+        pb.revision = Some(stage.revision());
+        let Some(info) = query::comp_info(stage, &pb.comp) else {
+            self.stop();
+            return;
+        };
+        if pb.range != info.work_area || pb.rate != info.frame_rate {
+            self.play(&info);
+            if let Some(pb) = self.playback.as_mut() {
+                pb.revision = Some(stage.revision());
             }
         }
-        self.set_time(info, t);
-        true
+    }
+
+    pub fn playback_deadline(&self) -> Option<Instant> {
+        self.playback.as_ref().map(Playback::deadline)
+    }
+
+    /// Advance once before building the workspace. Ordinals count scheduled
+    /// frames across loops, even when the event loop wakes several frames late.
+    pub fn tick(&mut self, now: Instant) {
+        let Some(pb) = self.playback.as_mut() else {
+            return;
+        };
+        let ordinal = pb.ordinal_at(now);
+        let stats = &mut self.playback_stats;
+        stats.drawn = None;
+        if ordinal == pb.ordinal {
+            return;
+        }
+        let start = pb.rate.time_to_frame(pb.range.start);
+        let last = pb
+            .rate
+            .time_to_frame(Time(pb.range.end.0.saturating_sub(1)))
+            .max(start);
+        let frame = pb.from + ordinal as i64;
+        let steps = if self.loop_playback {
+            ordinal - pb.ordinal
+        } else {
+            (ordinal - pb.ordinal).min((last - pb.from + 1).max(0) as u64 - pb.ordinal)
+        };
+        stats.dropped += steps.saturating_sub(u64::from(stats.matched));
+        stats.matched = false;
+        pb.ordinal = ordinal;
+        let ended = !self.loop_playback && frame > last;
+        let frame = if ended {
+            last
+        } else {
+            start + (frame - start).rem_euclid(last - start + 1)
+        };
+        self.times
+            .insert(pb.comp.clone(), pb.rate.frame_to_time(frame));
+        if ended {
+            self.stop();
+        }
+    }
+
+    /// Called by the viewer for the actual texture used in this UI pass.
+    pub fn drew_preview(&mut self, actual: Time) {
+        self.playback_stats.drawn = Some(actual);
+    }
+
+    /// Count only frames submitted to the native presentation surface.
+    pub fn frame_presented(&mut self, now: Instant) {
+        let Some(pb) = &self.playback else { return };
+        let expected = self.times.get(&pb.comp).copied();
+        let stats = &mut self.playback_stats;
+        if let Some(time) = stats.drawn.take() {
+            let on_time = expected == Some(time) && pb.ordinal_at(now) == pb.ordinal;
+            stats.matched |= on_time;
+            let changed = stats
+                .last_present
+                .is_none_or(|(ordinal, prior)| prior != time || (on_time && ordinal != pb.ordinal));
+            if changed {
+                stats.frames += 1;
+                stats.last_present = Some((pb.ordinal, time));
+            }
+        }
+        let elapsed = now.duration_since(*stats.sample.get_or_insert(now));
+        if elapsed >= Duration::from_millis(500) {
+            stats.fps = f64::from(stats.frames) / elapsed.as_secs_f64();
+            stats.frames = 0;
+            stats.sample = Some(now);
+        }
     }
 }
 
@@ -363,6 +462,30 @@ mod tests {
     }
 
     #[test]
+    fn fractional_clock_counts_missed_frames_across_a_loop() {
+        let mut s = Session {
+            loop_playback: true,
+            ..Default::default()
+        };
+        let mut i = info();
+        i.frame_rate = FrameRate::FPS_59_94;
+        i.work_area = TimeRange::new(Time::ZERO, i.frame_rate.frame_to_time(3));
+        s.play(&i);
+        let start = s.playback.as_ref().unwrap().started;
+        let next = s.playback_deadline().unwrap();
+        s.tick(next - Duration::from_nanos(1));
+        assert_eq!(s.time(&i.path), Time::ZERO);
+        s.drew_preview(Time::ZERO);
+        s.frame_presented(next - Duration::from_nanos(1));
+        s.tick(start + Duration::from_millis(51));
+        assert_eq!(s.time(&i.path), Time::ZERO);
+        assert_eq!(s.playback_stats.dropped, 2);
+        s.tick(start + Duration::from_millis(68));
+        assert_eq!(s.time(&i.path), i.frame_rate.frame_to_time(1));
+        assert_eq!(s.playback_stats.dropped, 3);
+    }
+
+    #[test]
     fn playback_starts_in_work_area() {
         let mut s = Session::default();
         let mut i = info();
@@ -370,8 +493,8 @@ mod tests {
         s.play(&i);
         assert!(s.is_playing());
         assert_eq!(s.time(&i.path), Time::from_seconds(1.0));
-        assert!(s.tick(&i));
+        assert!(s.playback_deadline().is_some());
         s.stop();
-        assert!(!s.tick(&i));
+        assert!(s.playback_deadline().is_none());
     }
 }
