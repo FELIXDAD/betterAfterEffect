@@ -93,7 +93,7 @@ pub(crate) fn simple_choker() -> Builtin {
     )
 }
 
-pub(super) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
+pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
     image_grid::kernel(rt, format, LABEL, SOURCE, UNIFORM_SIZE)?;
     Ok(())
 }
@@ -288,12 +288,12 @@ impl TargetEffect for Morphology {
     }
 }
 
-pub(super) enum Extremum {
+pub(crate) enum Extremum {
     Min(i32),
     Max(i32),
 }
 impl Extremum {
-    pub(super) fn radius(&self) -> i32 {
+    pub(crate) fn radius(&self) -> i32 {
         match *self {
             Self::Min(r) | Self::Max(r) => r,
         }
@@ -301,7 +301,7 @@ impl Extremum {
 }
 
 /// Apply separable extrema to the alpha channel on the render grid.
-pub(super) fn filter_alpha(
+pub(crate) fn filter_alpha(
     target: &mut dyn EffectTarget,
     params: &EffectParams<'_>,
     input: &GpuImage,

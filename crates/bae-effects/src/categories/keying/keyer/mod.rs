@@ -1,5 +1,5 @@
 pub(crate) mod definitions;
-use super::{image_grid, sampled::Shader, temporal};
+use crate::effects::{image_grid, sampled::Shader, temporal};
 use crate::{Builtin, EffectTarget, TargetEffect, blur, params::Params, rust_builtin};
 use bae_model::{EffectDef, ParamKind, Time, Value};
 use bae_render::{
@@ -21,7 +21,7 @@ macro_rules! shader {
         Shader {
             label: concat!("bae.effects.keying.", $name),
             source: concat!(
-                include_str!("../sampled.wgsl"),
+                include_str!("../../../effects/sampled.wgsl"),
                 include_str!(concat!($name, ".wgsl"))
             ),
         }
