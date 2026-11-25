@@ -19,9 +19,9 @@ fn sprite(pos: vec2f, half: vec2f, angle: f32, style: f32, color: vec4f) -> Spri
     return Sprite(vec4f(pos, rot(vec2f(half.x, 0.), angle)), vec4f(rot(vec2f(0., half.y), angle), 0., 0.), vec4f(0., 0., style, 0.), color);
 }
 
-fn particle(id: u32, t: f32, s: State) -> Sprite {
+fn particle(id: u32, t: f32, s: State, lifespan: f32) -> Sprite {
     let world = cfg.kind == WORLD;
-    let age = clamp((t-s.birth) / life(), 0., 1.);
+    let age = clamp((t-s.birth) / max(.000001,lifespan), 0., 1.);
     let rv = s.variation;
     let q = noise3(hash(id));
     var pos = s.pos;
@@ -35,10 +35,7 @@ fn particle(id: u32, t: f32, s: State) -> Sprite {
         pos = vec3f(center + rot(pos.xy-center, angle), pos.z);
         vel = vec3f(rot(vel.xy, angle), vel.z);
     }
-    if (world && anim >= 13u) || (!world && anim == 2u) {
-        pos += sin(vec3f(t * 2.) + q * TAU + pos.yzx / w * 8.) * w * .07 * extra;
-    }
-    var visible = s.birth >= 0.;
+    var visible = s.birth >= 0. && t-s.birth < lifespan;
     if world {
         let floor_y = cfg.size.y * .5 + f(3) * w;
         let below = pos.y>floor_y;
@@ -46,20 +43,7 @@ fn particle(id: u32, t: f32, s: State) -> Sprite {
             visible = visible && !below;
         }
         if f(64) == 3. {
-            visible = visible && below;
-        }
-        if below && f(66)>1. {
-            let drop = pos.y-floor_y;
-            if f(66) == 4. {
-                let bounce = clamp((f(67) + (rv-.5) * f(68)) * .01, 0., 2.);
-                pos.y = floor_y-abs(sin(sqrt(drop / w) * 8.)) * min(drop, w * .18) * bounce;
-                pos.x += (rv-.5) * f(69) * drop * .01;
-            } else {
-                if f(66) == 3. {
-                    pos.x -= vel.x * min(age, sqrt(drop / w));
-                }
-                pos.y = floor_y;
-            }
+            visible = visible && (below || s.touched_floor);
         }
         if f(65) == 2. {
             pos.y = floor_y + abs(pos.y-floor_y);

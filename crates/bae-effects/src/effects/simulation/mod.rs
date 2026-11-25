@@ -1,5 +1,6 @@
 //! GPU particle simulation and layer-driven surface effects.
 mod catalog;
+mod emission;
 mod engine;
 pub(crate) mod projection;
 pub(crate) use engine::{Engine, prewarm};
@@ -106,31 +107,46 @@ impl Effect for Simulation {
             _ => false,
         }
     }
-    fn parameter_window(
-        &self,
-        params: &EffectParams<'_>,
-    ) -> Option<bae_render::effect::ParameterWindow> {
-        let (ids, life): (&'static [u32], u32) = match self.kind {
-            Kind::World => (&[7, 8, 9], 5),
-            Kind::Systems => (&[4], 2),
-            _ => return None,
-        };
-        let t = params.time.as_seconds();
-        if t <= 0. {
-            return None;
-        }
-        let fps = params.frame_rate.as_f64();
-        let block = 30. / fps;
-        let start = ((t / block).floor() * block - Params::new(&self.def, params).f(life)).max(0.);
-        Some(bae_render::effect::ParameterWindow {
-            ids,
-            start,
-            end: t,
-            samples: (((t - start) * fps).ceil() as u32)
-                .saturating_add(1)
-                .clamp(2, 64),
-        })
+    fn full_surface(&self) -> bool {
+        self.kind != Kind::Scatter
     }
+
+    fn integrated_parameters(&self) -> &'static [u32] {
+        match self.kind {
+            Kind::World => &[4, 5],
+            Kind::Systems | Kind::Drizzle => &[1, 2],
+            _ => &[],
+        }
+    }
+
+    fn parameter_ids(&self) -> &'static [u32] {
+        match self.kind {
+            Kind::World => &[7, 8, 9],
+            Kind::Systems => &[4],
+            _ => &[],
+        }
+    }
+
+    fn parameter_times(&self, p: &EffectParams<'_>) -> Vec<bae_model::Time> {
+        let life_id = match self.kind {
+            Kind::World => 5,
+            Kind::Systems => 2,
+            _ => return Vec::new(),
+        };
+        let t = p.time.as_seconds();
+        let life = p.tracks.iter().find(|(id, _)| *id == life_id).map_or_else(
+            || Params::new(&self.def, p).f(life_id),
+            |(_, v)| v.maximum_through(t),
+        );
+        let fps = p.frame_rate.as_f64();
+        let stride = ((life * fps / 61.).ceil().max(1.)) / fps;
+        let first = ((t - life).max(0.) / stride).floor() as i64;
+        let last = (t.max(0.) / stride).ceil() as i64;
+        (first..=last)
+            .map(|i| bae_model::Time::from_seconds(i as f64 * stride))
+            .collect()
+    }
+
     fn layer_dependencies(&self, p: &EffectParams<'_>) -> Vec<LayerDependency> {
         self.inputs(p).into_iter().flatten().collect()
     }
@@ -156,13 +172,10 @@ struct Scene<'a> {
 }
 
 impl Scene<'_> {
-    fn controls(&self, kind: Kind, total: u32, seed: u32) -> UniformWriter {
+    fn controls(&self, kind: Kind, seed: u32) -> UniformWriter {
         let history_offset = 32 + CONTROL_COUNT * 16;
         let mut u = UniformWriter::with_size(history_offset + 16 + 64 * 16);
-        u.u32(0, kind as u32)
-            .u32(28, total)
-            .u32(8, seed)
-            .f32s(16, &self.size);
+        u.u32(0, kind as u32).u32(8, seed).f32s(16, &self.size);
         for c in &self.p.def.params {
             let offset = 32 + 16 * c.id as usize;
             match self.p.value(c.id) {
@@ -230,13 +243,11 @@ impl Scene<'_> {
                 * (self.size[1] as f64 / spacing.max(1.)).ceil()
         };
         let n = match k {
-            Kind::World => f(4) * f(5) * 1000.,
-            Kind::Systems => f(1) * f(2) * 1000.,
+            Kind::World | Kind::Systems | Kind::Drizzle | Kind::Scatter => 0.,
 
             Kind::Rain | Kind::Snow => f(1),
             Kind::Bubbles => f(1),
             Kind::Stars => tiles(f(4)),
-            Kind::Scatter => unreachable!("Scatterize runs on the output pixel grid"),
             Kind::Polly => tiles(f(7)) * if f(8) <= 2. { 2. } else { 1. },
             Kind::Shatter => {
                 let spacing = self.size[0] as f64 / f(10).max(1.);
@@ -253,17 +264,8 @@ impl Scene<'_> {
                             .max(1.)
                     }
             }
-
-            Kind::Drizzle => f(1) * f(2) * 16.,
         };
-        // Keep the emitter density bounded for extreme birth rate/lifetime pairs.
-        // Rain and snow already expose two million particles in the reference.
-        let limit = if matches!(k, Kind::World | Kind::Systems | Kind::Drizzle) {
-            2_000_000.
-        } else {
-            u32::MAX as f64
-        };
-        n.ceil().clamp(0., limit) as u32
+        n.ceil() as u32
     }
 }
 

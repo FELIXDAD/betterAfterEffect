@@ -167,7 +167,16 @@ impl ImageAllocator for PoolAllocator<'_> {
     }
 }
 
+/// Share whole-surface effect outputs between ROI requests in the renderer's
+/// existing byte-limited frame cache. Entries are published after submission.
+pub(crate) struct TileCache<'a> {
+    pub frames: &'a mut crate::cache::FrameCache<GpuImage>,
+    pub request: u64,
+    pub comp: &'a crate::RenderComp,
+}
+
 /// Executes `graph` and submits it. Returns the output node's image.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn execute(
     gpu: &Arc<GpuContext>,
     pipelines: &mut Pipelines,
@@ -176,7 +185,9 @@ pub(crate) fn execute(
     mask_buffers: &mut MaskBuffers,
     graph: &RenderGraph,
     format: wgpu::TextureFormat,
+    mut tiles: Option<TileCache<'_>>,
 ) -> Result<Executed, RenderError> {
+    let mut surfaces = Vec::new();
     let device = gpu.device();
     let total_draws: usize = graph
         .nodes
@@ -250,8 +261,26 @@ pub(crate) fn execute(
     ctx.mask_outs = masks::encode(&mut ctx, &mut encoder, pool, mask_buffers, graph)?;
 
     for (index, node) in graph.nodes.iter().enumerate() {
-        let image = match &node.kind {
-            NodeKind::Composite(c) => {
+        let mut surface_key = tiles.as_ref().and_then(|cache| match &node.kind {
+            NodeKind::Effect(fx) if fx.effect.full_surface() => Some(crate::cache::FrameKey {
+                comp: fx.instance.path.clone(),
+                time: fx.frame.comp_time,
+                request: cache.request,
+            }),
+            _ => None,
+        });
+        let cached = surface_key.as_ref().and_then(|key| {
+            let frames = &mut tiles.as_mut()?.frames;
+            (frames.content_hash(key) == Some(node.key))
+                .then(|| frames.get(key).cloned())
+                .flatten()
+        });
+        let image = match (&node.kind, cached) {
+            (_, Some(image)) => {
+                surface_key = None;
+                image
+            }
+            (NodeKind::Composite(c), None) => {
                 let px = node_pixels(node);
                 let target = pool.acquire(device, format, px, node.pixel_scale)?;
                 let scratch_needed = c.ops.iter().any(|op| ctx.needs_backdrop(c, op));
@@ -281,12 +310,12 @@ pub(crate) fn execute(
                 )?;
                 target
             }
-            NodeKind::Fill(fill) => {
+            (NodeKind::Fill(fill), None) => {
                 let target = pool.acquire(device, format, node_pixels(node), node.pixel_scale)?;
                 ctx.fill(&mut encoder, node, fill.color, &fill.rect, &target)?;
                 target
             }
-            NodeKind::Source(src) => {
+            (NodeKind::Source(src), None) => {
                 let mut alloc = PoolAllocator { pool, device };
                 let mut ectx = EncodeContext {
                     gpu,
@@ -298,7 +327,7 @@ pub(crate) fn execute(
                 };
                 src.source.render(&mut ectx, &src.request)?
             }
-            NodeKind::Effect(fx) => {
+            (NodeKind::Effect(fx), None) => {
                 let input = outputs[fx.input.index()]
                     .clone()
                     .ok_or_else(|| RenderError::Other("effect input missing".into()))?;
@@ -314,6 +343,7 @@ pub(crate) fn execute(
                     .collect();
                 let mut params = fx.frame.params(&fx.instance);
                 params.history = &fx.history;
+                params.tracks = &fx.tracks;
                 params.scene = fx.scene.as_deref();
                 params.sixteen_bpc = graph.depth == crate::BitDepth::Bpc16;
                 let mut alloc = PoolAllocator { pool, device };
@@ -327,7 +357,7 @@ pub(crate) fn execute(
                 };
                 fx.effect.render(&mut ectx, &params, &input, node.rect)?
             }
-            NodeKind::Mix(mix) => {
+            (NodeKind::Mix(mix), None) => {
                 let input = |id: crate::graph::NodeId| {
                     outputs[id.index()]
                         .clone()
@@ -347,11 +377,14 @@ pub(crate) fn execute(
                 ctx.passes += 1;
                 target
             }
-            NodeKind::Mask(_) => ctx.mask_outs[index]
+            (NodeKind::Mask(_), None) => ctx.mask_outs[index]
                 .as_ref()
                 .map(|m| m.image.clone())
                 .ok_or_else(|| RenderError::Other("mask not encoded".into()))?,
         };
+        if let Some(key) = surface_key {
+            surfaces.push((key, node.key, image.clone()));
+        }
         outputs[index] = Some(image);
         // Free inputs whose last consumer this was.
         node.kind.for_each_input(|id| {
@@ -365,6 +398,14 @@ pub(crate) fn execute(
     let draw_calls = ctx.draw_calls;
     let passes = ctx.passes;
     gpu.queue().submit([encoder.finish()]);
+    if let Some(cache) = tiles {
+        for (key, hash, image) in surfaces {
+            let bytes = image.byte_size();
+            cache
+                .frames
+                .insert(key, image, bytes, cache.comp.dependencies(), hash);
+        }
+    }
     let image = outputs[graph.output.index()]
         .take()
         .ok_or_else(|| RenderError::Other("graph produced no output".into()))?;

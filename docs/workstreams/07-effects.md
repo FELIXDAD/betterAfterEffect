@@ -64,6 +64,7 @@
 - [抠像](../../crates/bae-effects/tests/ae/categories/keying.md#工作流进度)
 - [遮罩](../../crates/bae-effects/tests/ae/categories/matte.md#工作流进度)
 - [杂色和颗粒](../../crates/bae-effects/tests/ae/categories/noise-grain.md#工作流进度)
+  - 杂色完成湍流杂色、匹配颗粒、移除颗粒、杂色 Alpha 和 HLS 两种模式。旧版中间值使用现有中间值内核。
 - [透视](../../crates/bae-effects/tests/ae/categories/perspective.md#工作流进度)
 - [风格化](../../crates/bae-effects/tests/ae/categories/stylize.md#工作流进度)
 - [过渡](../../crates/bae-effects/tests/ae/categories/transition.md#工作流进度)
@@ -76,7 +77,7 @@ LUT 字节和文件名随项目保存。效果面板的文件选择按钮交由 
 
 ### 模拟（2026-11-25）
 
-Particle World 和 Particle Systems II 共用 GPU 粒子引擎。每 30 帧保存一个 GPU 检查点。动画发射器按粒子出生时间取位置，可继承发射速度。雨、雪、气泡、雨滴涟漪、星爆、散射、像素爆炸、碎片和卡片动画均已接入。拖动时间后再次渲染同一帧的像素一致。RTX 5090 D v2 上，1080p、5 万粒子的完整预览渲染连续 60 帧平均 4.040 毫秒，P95 为 10.269 毫秒。
+Particle World 和 Particle Systems II 共用 GPU 粒子引擎。出生率的时间积分决定每个粒子的出生编号和时间。停发后，已出生的粒子继续按出生时的寿命运动。常规运动按目标时刻直接求值，地面碰撞和分形力场从出生时刻按 1/60 秒积分。发射器的位置与继承速度从效果参数曲线取样，预览分块共用粒子图像。雨、雪、气泡、雨滴涟漪、星爆、散射、像素爆炸、碎片和卡片动画均已接入。
 
 发射器上限为 200 万粒子。动画粒子纹理的“出生”和“从头开始”模式按四个时间采样显示。“出生”按粒子出生时间选定纹理，在整个寿命内保持同一采样。选中效果所在图层时，合成查看器绘制位置、半径、前后运动路径、网格、地平线和轴框。
 

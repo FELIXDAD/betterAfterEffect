@@ -4,7 +4,16 @@ fn advance_emitter(@builtin(global_invocation_id) tid: vec3u) {
         return;
     }
     let id = frame.batch.x + tid.x;
-    sprites[tid.x] = particle(id, frame.timing.x, at_time(id, frame.timing.x));
+    let dt = birth_offset(tid.x);
+    let birth = frame.emission.x + dt;
+    let life = frame.lifespan.x + dt*frame.lifespan.y;
+    let age = max(0.,frame.timing.x-birth);
+    if age >= life {
+        sprites[tid.x] = Sprite();
+        return;
+    }
+    let hold = select(0., f(91) * .01 * life, cfg.kind == WORLD);
+    sprites[tid.x] = particle(id,frame.timing.x,at_age(id,birth,max(0.,age-hold)),life);
 }
 
 @compute @workgroup_size(128)
@@ -13,7 +22,7 @@ fn advance_weather(@builtin(global_invocation_id) tid: vec3u) {
         return;
     }
     let id = frame.batch.x + tid.x;
-    sprites[tid.x] = weather(id, frame.timing.x, at_time(id, frame.timing.x));
+    sprites[tid.x] = weather(id, frame.timing.x, integrate(spawn(id,0.),frame.timing.x));
 }
 
 @compute @workgroup_size(128)
@@ -23,8 +32,9 @@ fn advance_drizzle(@builtin(global_invocation_id) tid: vec3u) {
     }
     let id = frame.batch.x + tid.x;
     let t = frame.timing.x;
-    let s = at_time(id, t);
-    let age = clamp((t-s.birth) / life(), 0., 1.);
+    let dt = birth_offset(tid.x);
+    let s = spawn(id,frame.emission.x+dt);
+    let age = clamp((t-s.birth) / max(.000001,frame.lifespan.x+dt*frame.lifespan.y), 0., 1.);
     let r = max(1., age * f(6) * cfg.size.x * .001);
     sprites[tid.x] = sprite(s.pos.xy, vec2f(r), 0., 11., vec4f(age, f(3) / 360., 0., select(0., 1.-age, s.birth >= 0.)));
 }
