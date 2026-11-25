@@ -435,6 +435,18 @@ impl Panel for CompositionViewer {
                 self.display.shortcut(&action.params);
                 true
             }
+            display::FAST_PREVIEWS => {
+                // Draft 3D is the 3D renderer's switch (not here yet).
+                if let Some(f) = action
+                    .params
+                    .get("mode")
+                    .and_then(|m| m.as_str())
+                    .and_then(display::Fast::parse)
+                {
+                    self.display.fast = f;
+                }
+                true
+            }
             display::TAKE_SNAPSHOT | display::SHOW_SNAPSHOT | display::PURGE_SNAPSHOT => {
                 let slot = action
                     .params
@@ -698,16 +710,26 @@ impl Panel for CompositionViewer {
             self.gpu_tried = true;
             self.gpu = GpuPreview::new(cx.resources);
         }
-        let resolution = render_factor(cx.stage, &info.path, session.lock().auto_resolution, mag);
+        let mut resolution =
+            render_factor(cx.stage, &info.path, session.lock().auto_resolution, mag);
+        // Fast Previews while something is dragged.
+        let interacting = resp.dragged() || self.select.busy() || session.lock().scrub.is_some();
+        if interacting && self.display.fast == display::Fast::Adaptive {
+            resolution = resolution.max(4);
+        }
+        let wireframe = interacting && self.display.fast == display::Fast::Wireframe;
         self.render_factor = resolution;
         if let Some(g) = self.gpu.as_mut() {
             g.display = self.display.render();
             g.roi = self.display.roi();
         }
-        let image = self
-            .gpu
-            .as_mut()
-            .and_then(|g| g.frame(cx.resources, cx.stage, &comp, resolution, view_camera));
+        let image = if wireframe {
+            None
+        } else {
+            self.gpu
+                .as_mut()
+                .and_then(|g| g.frame(cx.resources, cx.stage, &comp, resolution, view_camera))
+        };
         // Show Snapshot while F5–F8 (or the bar button) is held.
         let keys = [egui::Key::F5, egui::Key::F6, egui::Key::F7, egui::Key::F8];
         if let Some(s) = self.snapshot_shown
@@ -760,6 +782,22 @@ impl Panel for CompositionViewer {
             }
             vector = std::borrow::Cow::Owned(text_only);
         }
+        if wireframe {
+            // Wireframe: the layers' outlines only.
+            let outer = Affine::new(DMat4::IDENTITY);
+            for l in comp.layers.iter().filter(|l| l.visible) {
+                if let Some(q) = render::bounds_quad(l, &view, &outer) {
+                    clip.add(egui::Shape::closed_line(
+                        q.to_vec(),
+                        Stroke::new(1.0, Color32::WHITE),
+                    ));
+                }
+            }
+            vector = std::borrow::Cow::Owned(EvaluatedComp {
+                layers: Vec::new(),
+                ..comp.clone()
+            });
+        }
         let mut shapes = Vec::new();
         let to_screen = |p: DVec2| view.to_screen(p);
         render::paint_comp(
@@ -803,6 +841,9 @@ impl Panel for CompositionViewer {
         // layer's label color).
         let selected = session.lock().selected_layers.clone();
         let outer = Affine::new(DMat4::IDENTITY);
+        // View ▸ Show Layer Controls off: the tools still work, unseen.
+        let hidden = painter.with_clip_rect(Rect::NOTHING);
+        let painter = if opts.layer_controls { painter } else { hidden };
         for l in comp.layers.iter().filter(|l| selected.contains(&l.path)) {
             let label = cx
                 .stage

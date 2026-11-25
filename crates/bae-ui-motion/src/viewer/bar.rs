@@ -159,6 +159,26 @@ pub(super) fn bottom_bar(
         }
     }
     if room(ui, 24.0) {
+        // Fast Previews.
+        if room(ui, 24.0) {
+            let d = &mut v.display;
+            let resp = icons::button(
+                ui,
+                Icon::FastPreview,
+                20.0,
+                d.fast != super::display::Fast::Off,
+            )
+            .labeled(egui::WidgetType::Button, tr("Fast Previews"))
+            .on_hover_text(tr("Fast Previews"));
+            common::popup_menu(&resp, &mut |ui| {
+                for (f, name) in super::display::Fast::ALL {
+                    if ui.radio(d.fast == f, tr(name)).clicked() {
+                        d.fast = f;
+                        ui.close();
+                    }
+                }
+            });
+        }
         // Show Channel and Colorize.
         let d = &mut v.display;
         let resp = icons::button(ui, Icon::Channels, 20.0, d.channel != 0)
