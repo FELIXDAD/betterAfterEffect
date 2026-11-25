@@ -253,7 +253,7 @@ fn main(@builtin(global_invocation_id) id:vec3u) {
             }
             if (u.curve_mask & 32u) != 0u {
                 let hsl = fx_hsl(encoded(light));
-                light = linear(fx_rgb(vec3f(fract(hsl.x + curve(5u,hsl.x)),hsl.yz)));
+                light = linear(fx_rgb(vec3f(fract(hsl.x + curve(5u,hue)),hsl.yz)));
             }
             if (u.curve_mask & 64u) != 0u {
                 light *= exp2(curve(6u,hue));
