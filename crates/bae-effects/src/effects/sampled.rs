@@ -1,5 +1,7 @@
 //! A layer-space compute pass for effects with auxiliary images. Each parameter
 //! occupies its AE disk-ID slot. This keeps the CPU and WGSL layouts identical.
+#[path = "sampled_lights.rs"]
+mod lights;
 use super::{image_grid, layer_input};
 use crate::{
     EffectTarget, TargetEffect,
@@ -106,6 +108,13 @@ impl Shader {
                 _ => {}
             }
         }
+        if let Some(Value::FloatList(profile)) = v.p.value(bae_render::effect::HISTORY_PARAM) {
+            let start = SLOTS - bae_render::effect::PROFILE_SAMPLES;
+            for (slot, &sample) in (start..SLOTS).zip(profile) {
+                u.f32(HEADER + slot * 16, sample as f32);
+            }
+        }
+        lights::write(v.p.effect, &mut u, HEADER);
         let offset = gpu::push_uniform(&rt, &u);
         let group = rt.bind_group(
             &kernel,
@@ -149,6 +158,14 @@ pub(crate) struct Sampled {
 impl Effect for Sampled {
     fn def(&self) -> &EffectDef {
         &self.def
+    }
+    fn prepare_scene(
+        &self,
+        instance: &mut bae_render::RenderEffect,
+        comp: &bae_render::RenderComp,
+        layer: &bae_render::RenderLayer,
+    ) {
+        lights::collect(&self.def, instance, comp, layer);
     }
     fn input_roi(&self, p: &EffectParams<'_>, roi: IRect) -> IRect {
         if roi.is_empty() {

@@ -284,3 +284,19 @@ fn editable_mesh_translates_pixels_and_other_warps_dispatch() {
         }
     }
 }
+
+#[test]
+fn split_can_open_each_side_independently() {
+    let Some(gpu) = context() else { return };
+    let r = IRect::from_size(64, 32);
+    let input = Pixels::new(r, |_, _| [1.0; 4]);
+    for (name, second, lower) in [("CC Split", 50.0, 0.0), ("CC Split 2", 0.0, 1.0)] {
+        let mut params = vec![(3, Value::Float(50.0))];
+        if name == "CC Split 2" {
+            params.push((4, Value::Float(second)));
+        }
+        let img = run(&gpu, F32, builtin(name), params, &input, r, 1.0);
+        assert_eq!(img.get(32, 14)[3], 0.0);
+        assert_eq!(img.get(32, 18)[3], lower);
+    }
+}

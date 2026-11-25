@@ -1,6 +1,9 @@
+mod cc;
+
 use crate::{Registry, effects};
 
 pub(crate) fn register(registry: &mut Registry) {
+    cc::register(registry);
     registry.prewarm.push(effects::distort::prewarm);
     registry.effects.extend(effects::distort::builtins());
     registry.effects.extend(effects::distort::warps::entries());

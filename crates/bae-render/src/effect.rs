@@ -7,6 +7,8 @@
 //! equivalent of AE SmartFX pre-render), then encodes GPU work. Effects whose
 //! definition says `thread_safe: false` are called one at a time.
 
+pub use bae_anim::effect_history::{HISTORY_PARAM, PROFILE_SAMPLES};
+
 use std::fmt;
 use std::sync::Arc;
 
@@ -203,6 +205,15 @@ pub enum MaskSelect {
 pub trait Effect: Send + Sync {
     /// The parameter definition (same object as in `bae_model::EffectRegistry`).
     fn def(&self) -> &EffectDef;
+
+    /// Attach derived scene inputs before the render node computes its cache key.
+    fn prepare_scene(
+        &self,
+        _instance: &mut RenderEffect,
+        _comp: &crate::RenderComp,
+        _layer: &crate::RenderLayer,
+    ) {
+    }
 
     /// Whether this effect contributes a render node. Parameter-only controls
     /// are registered so their definitions are available without encoding GPU work.

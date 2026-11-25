@@ -1585,13 +1585,14 @@ impl Builder<'_, '_> {
         comp: &RenderComp,
         layer: &RenderLayer,
         effect: Arc<dyn Effect>,
-        instance: RenderEffect,
+        mut instance: RenderEffect,
         frame: EffectFrame,
         input: NodeId,
         rect: IRect,
         scale: f64,
         depth: usize,
     ) -> Result<NodeId, RenderError> {
+        effect.prepare_scene(&mut instance, comp, layer);
         let mut h = FxHasher::default();
         "effect".hash(&mut h);
         self.nodes[input.index()].key.hash(&mut h);

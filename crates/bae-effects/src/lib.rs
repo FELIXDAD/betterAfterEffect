@@ -139,6 +139,15 @@ impl Builtin {
 struct Forward(Arc<dyn TargetEffect>);
 
 impl Effect for Forward {
+    fn prepare_scene(
+        &self,
+        instance: &mut bae_render::RenderEffect,
+        comp: &bae_render::RenderComp,
+        layer: &bae_render::RenderLayer,
+    ) {
+        self.0.prepare_scene(instance, comp, layer);
+    }
+
     fn def(&self) -> &EffectDef {
         self.0.def()
     }

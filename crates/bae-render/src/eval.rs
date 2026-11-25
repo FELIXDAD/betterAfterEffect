@@ -382,9 +382,25 @@ impl<'a> MockPass<'a> {
                         Some((id, sample(&fx, name, local)?))
                     })
                     .collect();
+                let effect = string(&fx, "match_name", local).unwrap_or_default();
+                if effect == "CC Ripple Pulse"
+                    && fx
+                        .attr("param:0002")
+                        .is_some_and(|p| !p.keyframes.is_empty())
+                {
+                    let span = sample(&fx, "param:0003", local)
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(1.0);
+                    let profile = bae_anim::effect_history::ripple_profile(local, span, |t| {
+                        sample(&fx, "param:0002", t)
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(100.0)
+                    });
+                    params.push((bae_anim::effect_history::HISTORY_PARAM, profile));
+                }
                 params.sort_by_key(|(id, _)| *id);
                 Some(RenderEffect {
-                    effect: string(&fx, "match_name", local).unwrap_or_default(),
+                    effect,
                     enabled: boolean(&fx, "enabled", local).unwrap_or(true),
                     params,
                     path,
