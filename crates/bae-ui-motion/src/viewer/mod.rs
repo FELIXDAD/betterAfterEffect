@@ -34,7 +34,7 @@ mod select_tool;
 mod shape_tool;
 #[cfg(test)]
 mod tests;
-mod transform;
+pub(crate) mod transform;
 mod type_tool;
 
 pub(crate) use transform::nudge_layers;
