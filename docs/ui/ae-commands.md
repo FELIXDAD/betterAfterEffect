@@ -64,8 +64,8 @@
 | Import ▸ From Libraries... | 9764867 | `motion.file.from_libraries` |  |  |  | B | Ⓐ |
 | Import ▸ Import Adobe Premiere Project... | 9764868 | `motion.file.import_adobe_premiere_project` |  |  |  | B | Ⓐ |
 | Import ▸ Vanishing Point (.vpe)... | 9764869 | `motion.file.vanishing_point_vpe` |  |  |  | B | Ⓐ |
-| Import ▸ Placeholder... | 9764870 | `motion.file.import_placeholder` |  |  |  | E | ☐ |
-| Import ▸ Solid... | 9764871 | `motion.file.import_solid` |  |  |  | E | ☐ |
+| Import ▸ Placeholder... | 9764870 | `motion.file.import_placeholder` |  |  |  | E | ✅ |
+| Import ▸ Solid... | 9764871 | `motion.file.import_solid` |  |  |  | E | ✅ |
 | Import Recent Footage ▸ (recent footage) |  | `motion.file.import_recent_footage` |  |  |  | E | ⋯ |
 | Export ▸ Maxon Cinema 4D Exporter... | 11665409 | `motion.file.maxon_cinema_4d_exporter` |  |  |  | B | Ⓐ |
 | Export ▸ Export Adobe Premiere Project... | 11665410 | `motion.file.export_adobe_premiere_project` |  |  |  | B | Ⓐ |

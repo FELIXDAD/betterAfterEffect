@@ -101,7 +101,7 @@ pub use comp::{
 };
 pub use dimensions::SeparateDimensions;
 pub use expressions::{BakeExpression, ExpressionEdit, SetExpressions};
-pub use import::{ImportFile, ImportItems, ImportOutput};
+pub use import::{ImportFile, ImportItems, ImportOutput, NewItem, NewItemKind};
 pub use keys::{
     CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, KeyEdit, KeyRef, KeysOutput, MoveKeys,
     PasteKeys, ReverseKeys, SetAnimated, SetAt, SetInterpolation, SetMany, ValueEdit,
@@ -136,6 +136,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(TrimCompToWorkArea),
         r.register(CreateFolder),
         r.register(ImportItems),
+        r.register(NewItem),
         r.register(CreateLayer),
         r.register(Precompose),
         r.register(SetSolidSettings),

@@ -11,6 +11,7 @@ pub(crate) mod fields;
 mod go_to_time;
 mod light_settings;
 pub mod memory;
+mod placeholder;
 mod precompose;
 mod project_settings;
 mod solid_settings;
@@ -48,6 +49,8 @@ pub enum Dialog {
     GoToTime(Box<go_to_time::GoToTime>),
     /// File > Project Settings (Cmd/Ctrl+Alt+Shift+K).
     ProjectSettings(Box<project_settings::ProjectSettings>),
+    /// File ▸ Import ▸ Placeholder….
+    NewPlaceholder(Box<placeholder::NewPlaceholder>),
     /// An alert: a message and OK (import errors …).
     Alert { title: String, message: String },
 }
@@ -162,6 +165,27 @@ pub(crate) fn new_solid(cx: &PanelContext<'_>, session: &SharedSession) {
     if let Some(s) = SolidSettings::new_solid(cx.stage, session, &d.solid) {
         d.open = Some(Dialog::SolidSettings(Box::new(s)));
     }
+}
+
+/// File ▸ Import ▸ Placeholder…: New Placeholder.
+pub(crate) fn import_placeholder(cx: &PanelContext<'_>) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none() {
+        d.open = Some(Dialog::NewPlaceholder(Box::default()));
+    }
+}
+
+/// File ▸ Import ▸ Solid…: Solid Settings for a new solid item.
+pub(crate) fn import_solid(cx: &PanelContext<'_>, session: &SharedSession) {
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_some() {
+        return;
+    }
+    remember(cx.resources, &mut d);
+    let s = SolidSettings::new_item(cx.stage, session, &d.solid);
+    d.open = Some(Dialog::SolidSettings(Box::new(s)));
 }
 
 /// Open the settings dialog of a layer or a solid item: Solid Settings
@@ -300,6 +324,7 @@ pub(crate) fn strings() -> Vec<&'static str> {
         camera_settings::STRINGS,
         light_settings::STRINGS,
         precompose::STRINGS,
+        placeholder::STRINGS,
         go_to_time::STRINGS,
         project_settings::STRINGS,
     ]
@@ -328,6 +353,7 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::CameraSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::LightSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::Precompose(d) => d.ui(ctx, cx, &session, &dialogs),
+            Dialog::NewPlaceholder(d) => d.ui(ctx, cx),
             Dialog::GoToTime(d) => d.ui(ctx, cx, &session),
             Dialog::ProjectSettings(d) => d.ui(ctx, cx),
             Dialog::Alert { title, message } => alert_ui(ctx, title, message),

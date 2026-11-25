@@ -22,6 +22,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Trim Layer", "修剪图层"),
     ("Change Layers", "更改图层"),
     ("Time Stretch", "时间伸缩"),
+    ("New Item", "新建项"),
     // Panel-scoped zoom shortcuts (timeline: = / -, viewer: . / , / ?)
     ("Zoom In Time", "放大时间"),
     ("Zoom Out Time", "缩小时间"),

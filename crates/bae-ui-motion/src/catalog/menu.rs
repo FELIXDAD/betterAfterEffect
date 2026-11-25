@@ -204,8 +204,8 @@ const FILE: &[Node] = &[
             it(9764867, "From Libraries...", "motion.file.from_libraries", "", B, Adobe),
             it(9764868, "Import Adobe Premiere Project...", "motion.file.import_adobe_premiere_project", "", B, Adobe),
             it(9764869, "Vanishing Point (.vpe)...", "motion.file.vanishing_point_vpe", "", B, Adobe),
-            it(9764870, "Placeholder...", "motion.file.import_placeholder", "", E, Todo),
-            it(9764871, "Solid...", "motion.file.import_solid", "", E, Todo),
+            it(9764870, "Placeholder...", "motion.file.import_placeholder", "", E, Done),
+            it(9764871, "Solid...", "motion.file.import_solid", "", E, Done),
         ],
     ),
     sub(

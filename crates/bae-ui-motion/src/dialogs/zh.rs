@@ -55,6 +55,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Solid Settings", "纯色设置"),
     ("Solid Settings...", "纯色设置..."),
     ("Solid...", "纯色..."),
+    ("Placeholder...", "占位符..."),
     ("Layer Settings", "图层设置"),
     ("Layer Settings...", "图层设置..."),
     ("Name:", "名称:"),
@@ -244,4 +245,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Cineon Full", "Cineon 完整"),
     ("Film (2K)", "胶片 (2K)"),
     ("Film (4K)", "胶片 (4K)"),
+    // File ▸ Import ▸ Placeholder… (AE 26's Chinese).
+    ("New Placeholder", "新占位符"),
+    ("Missing Name", "缺少名称"),
+    ("fps", "fps"),
 ];

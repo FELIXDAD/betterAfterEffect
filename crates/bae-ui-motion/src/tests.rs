@@ -2390,3 +2390,48 @@ fn expression_errors_reach_the_session_banner_and_timeline() {
     h.frame("composition", &mut viewer, Vec::new());
     assert!(h.session().lock().expr_errors.is_empty());
 }
+
+/// File ▸ Import ▸ Solid… and Placeholder…: items in the Project panel, no
+/// layer, one undo step each (AE).
+#[test]
+fn import_solid_and_placeholder_make_items() {
+    let mut h = Harness::new();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    let assets = |h: &Harness, kind: &str| -> Vec<PrimPath> {
+        h.stage
+            .traverse()
+            .into_iter()
+            .filter(|p| {
+                h.stage.prim(p).is_some_and(|v| {
+                    matches!(query::static_value(&v, "kind"), Some(Value::Enum(k)) if k == kind)
+                })
+            })
+            .collect()
+    };
+    // No comp open: Import ▸ Solid… still works.
+    h.action(
+        &mut viewer,
+        Invocation::new(crate::actions::ids::IMPORT_SOLID),
+    );
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "item.new");
+    h.apply(r);
+    assert_eq!(assets(&h, "solid").len(), 1);
+    h.action(
+        &mut viewer,
+        Invocation::new(crate::actions::ids::IMPORT_PLACEHOLDER),
+    );
+    let r = h.answer_dialog(egui::Key::Enter);
+    h.apply(r);
+    let p = assets(&h, "placeholder");
+    assert_eq!(p.len(), 1);
+    let v = h.stage.prim(&p[0]).unwrap();
+    assert_eq!(query::static_value(&v, "width"), Some(Value::Int(1920)));
+    assert_eq!(
+        query::static_value(&v, "duration"),
+        Some(Value::Time(Time::from_seconds(60.0)))
+    );
+    assert_eq!(query::display_name_of(&h.stage, &p[0]), "Missing Name");
+}

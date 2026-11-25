@@ -60,6 +60,9 @@ pub mod ids {
     pub const PROJECT_SETTINGS: &str = "motion.file.project_settings";
     /// File > Import > File (Cmd/Ctrl+I).
     pub const IMPORT_FILE: &str = "motion.file.import_file";
+    /// File > Import > Solid... / Placeholder...: a new solid or placeholder item.
+    pub const IMPORT_SOLID: &str = "motion.file.import_solid";
+    pub const IMPORT_PLACEHOLDER: &str = "motion.file.import_placeholder";
     /// File > Import > Multiple Files (Cmd/Ctrl+Alt+I).
     pub const IMPORT_MULTIPLE: &str = "motion.file.import_multiple_files";
     /// Params `{"to": "forward" | "backward" | "front" | "back"}`.
@@ -229,6 +232,8 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::LAYER_SETTINGS, "Layer Settings"),
     (ids::PRE_COMPOSE, "Pre-compose"),
     (ids::IMPORT_FILE, "Import File"),
+    (ids::IMPORT_SOLID, "Solid..."),
+    (ids::IMPORT_PLACEHOLDER, "Placeholder..."),
     (ids::IMPORT_MULTIPLE, "Import Multiple Files"),
     (ids::ORDER, "Bring Layer Forward"),
     (ids::TRIM_COMP, "Trim Comp to Work Area"),
@@ -743,6 +748,14 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::IMPORT_FILE => {
             crate::import::import_file(cx, session);
+            return true;
+        }
+        ids::IMPORT_SOLID => {
+            crate::dialogs::import_solid(cx, session);
+            return true;
+        }
+        ids::IMPORT_PLACEHOLDER => {
+            crate::dialogs::import_placeholder(cx);
             return true;
         }
         ids::ADD_EXPRESSION => {
