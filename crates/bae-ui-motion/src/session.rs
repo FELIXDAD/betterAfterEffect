@@ -92,6 +92,7 @@ pub struct Session {
     /// chosen resolution itself is the comp's (`resolution`, as in Composition
     /// Settings).
     pub auto_resolution: bool,
+    pub(crate) cached_preview: Option<(PrimPath, u64, Vec<TimeRange>)>,
     pub reveal: HashMap<PrimPath, Reveal>,
     pub scrub: Option<Scrub>,
     pub clipboard: Option<KeyClipboard>,

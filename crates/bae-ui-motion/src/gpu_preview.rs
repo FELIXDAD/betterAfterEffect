@@ -72,15 +72,18 @@ impl RenderEngine {
         stage: &Stage,
         rc: &bae_render::RenderComp,
         resolution: u32,
-    ) -> Result<(wgpu::Texture, IRect), bae_render::RenderError> {
+    ) -> Result<(wgpu::Texture, IRect, bool), bae_render::RenderError> {
         let request = RenderRequest {
             resolution: Resolution::Custom(resolution),
             purpose: RenderPurpose::Preview,
             ..RenderRequest::full()
         };
-        let mut frames = bae_render::eval::EvaluatorFrames {
-            stage,
-            evaluator: &mut self.anim,
+        let mut frames = SampledFrames {
+            sampled: false,
+            inner: bae_render::eval::EvaluatorFrames {
+                stage,
+                evaluator: &mut self.anim,
+            },
         };
         let frame = self
             .renderer
@@ -88,7 +91,23 @@ impl RenderEngine {
         let texture = self
             .renderer
             .output_texture(&frame, OutputAlpha::Premultiplied)?;
-        Ok((texture, frame.image.rect))
+        Ok((texture, frame.image.rect, frames.sampled))
+    }
+}
+
+struct SampledFrames<'a> {
+    inner: bae_render::eval::EvaluatorFrames<'a>,
+    sampled: bool,
+}
+
+impl bae_render::graph::CompFrames for SampledFrames<'_> {
+    fn comp_at(
+        &mut self,
+        path: &bae_model::PrimPath,
+        t: Time,
+    ) -> Result<Option<bae_render::RenderComp>, bae_render::RenderError> {
+        self.sampled = true;
+        self.inner.comp_at(path, t)
     }
 }
 
@@ -102,8 +121,6 @@ pub(crate) struct GpuPreview {
     /// `(content hash, time, resolution)` of the published frame.
     last: Option<(u64, Time, u32)>,
     rect: Option<IRect>,
-    /// Text layers have a source provider (otherwise the viewer draws them).
-    pub has_text: bool,
 }
 
 impl GpuPreview {
@@ -128,7 +145,6 @@ impl GpuPreview {
             sources_gen: None,
             last: None,
             rect: None,
-            has_text: false,
         }
     }
 
@@ -154,7 +170,6 @@ impl GpuPreview {
         for entry in registry.snapshot().iter() {
             providers.register(entry.item().clone());
         }
-        self.has_text = providers.get(bae_render::anim::TEXT_PROVIDER).is_some();
         self.last = None;
     }
 
@@ -187,7 +202,7 @@ impl GpuPreview {
         };
         let key = (rc.content_hash(), rc.time, resolution);
         if self.last != Some(key) {
-            let (texture, rect) = match self.engine.render(stage, &rc, resolution) {
+            let (texture, rect, _) = match self.engine.render(stage, &rc, resolution) {
                 Ok(frame) => frame,
                 Err(e) => {
                     tracing_warn(&format!("preview: {e}"));

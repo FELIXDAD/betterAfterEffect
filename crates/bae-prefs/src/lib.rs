@@ -248,6 +248,7 @@ impl Preferences {
 
 /// Keys features read (the schema has them all).
 pub mod keys {
+    pub const PREVIEW_CACHE_MIB: &str = "memory_cpu.preview_cache_mib";
     pub const LEVELS_OF_UNDO: &str = "general.levels_of_undo";
     // Appearance
     pub const PATH_POINT_SIZE: &str = "appearance.path_point_and_handle_size";

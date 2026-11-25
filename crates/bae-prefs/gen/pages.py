@@ -238,6 +238,10 @@ def main():
         for g in p["groups"]:
             tr(g["titleEn"], g["titleZh"])
             inner = group_items(pid, g)
+            if pid == "memory_cpu" and g["titleEn"] == "Memory":
+                label = "GPU Preview Cache (MiB)"
+                tr(label, "显存预览缓存（MiB）")
+                inner.append(f'Item::P(int("memory_cpu.preview_cache_mib", {s(label)}, 1024, 0, 32768))')
             sub = [c for c in g["controls"] if c.get("subgroupEn")]
             for c in sub:
                 tr(c["subgroupEn"], c.get("subgroupZh", ""))

@@ -41,7 +41,7 @@ pub(super) fn scene(count: usize, effects: bool) -> (Harness, PrimPath) {
         let layer = h.run(
             "layer.create",
             json!({"comp":comp,"name":format!("R{i:04}"),
-            "kind":"shape","shape":"rect","size":[72,36],"position":position}),
+            "kind":"shape","shape":"rect","position":position}),
         );
         let path = &layer["path"];
         h.run(
