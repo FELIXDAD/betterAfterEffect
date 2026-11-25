@@ -151,6 +151,8 @@ pub(crate) struct Executed {
     pub passes: usize,
     /// Something was still warming up and is missing from the image.
     pub incomplete: bool,
+    /// CPU time encoding each node (by node index), when timed.
+    pub node_times: Vec<std::time::Duration>,
 }
 
 struct PoolAllocator<'a> {
@@ -166,7 +168,9 @@ impl ImageAllocator for PoolAllocator<'_> {
     }
 }
 
-/// Executes `graph` and submits it. Returns the output node's image.
+/// Executes `graph` and submits it. Returns the output node's image (and,
+/// when `timed`, the CPU time of every node).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn execute(
     gpu: &Arc<GpuContext>,
     pipelines: &mut Pipelines,
@@ -175,6 +179,7 @@ pub(crate) fn execute(
     mask_buffers: &mut MaskBuffers,
     graph: &RenderGraph,
     format: wgpu::TextureFormat,
+    timed: bool,
 ) -> Result<Executed, RenderError> {
     let device = gpu.device();
     let total_draws: usize = graph
@@ -249,7 +254,9 @@ pub(crate) fn execute(
     ctx.mask_outs = masks::encode(&mut ctx, &mut encoder, pool, mask_buffers, graph)?;
 
     let mut incomplete = false;
+    let mut node_times = Vec::with_capacity(if timed { graph.nodes.len() } else { 0 });
     for (index, node) in graph.nodes.iter().enumerate() {
+        let started = timed.then(std::time::Instant::now);
         let image = match &node.kind {
             NodeKind::Composite(c) => {
                 let px = node_pixels(node);
@@ -378,6 +385,9 @@ pub(crate) fn execute(
                 .ok_or_else(|| RenderError::Other("mask not encoded".into()))?,
         };
         outputs[index] = Some(image);
+        if let Some(started) = started {
+            node_times.push(started.elapsed());
+        }
         // Free inputs whose last consumer this was.
         node.kind.for_each_input(|id| {
             let u = &mut uses[id.index()];
@@ -398,6 +408,7 @@ pub(crate) fn execute(
         draw_calls,
         passes,
         incomplete,
+        node_times,
     })
 }
 

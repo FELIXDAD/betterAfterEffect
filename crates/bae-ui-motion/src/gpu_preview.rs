@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use crate::common::StageChanges;
 use bae_anim::EvaluatedComp;
 use bae_app::{Registry, Resources};
 use bae_gpu::GpuContext;
@@ -54,6 +55,7 @@ pub(crate) struct GpuPreview {
     id: ViewportTextureId,
     renderer: Renderer,
     anim: AnimEvaluator,
+    changes: StageChanges,
     sources_gen: Option<u64>,
     /// `(content hash, time, resolution)` of the published frame.
     last: Option<(u64, Time, u32)>,
@@ -94,6 +96,7 @@ impl GpuPreview {
             id,
             renderer,
             anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
+            changes: StageChanges::default(),
             sources_gen: None,
             last: None,
             rect: None,
@@ -151,6 +154,10 @@ impl GpuPreview {
     ) -> Option<PreviewImage> {
         self.sync_sources(resources);
         self.sync_effects(resources);
+        if self.changes.changed(resources) {
+            self.anim.clear_compiled();
+            self.last = None;
+        }
         let mut rc = match self.anim.convert(stage, comp, 0) {
             Ok(rc) => rc,
             Err(e) => {
