@@ -941,6 +941,7 @@ dependencies = [
  "bae-prefs",
  "bae-render",
  "bae-ui",
+ "bae-vector",
  "egui",
  "flate2",
  "serde",

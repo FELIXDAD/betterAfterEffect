@@ -32,13 +32,23 @@ fn retain_pixel(p:vec2f)->f32 {
     }
     return keep;
 }
-fn retain(p:vec2f)->f32 {
-    let r=value(blur_id())*u.scale;
-    let amount=value(amount_id())*0.01;
-    if amount==0.{return 0.;}
-    var mask=retain_pixel(p);
-    if r>0.{mask=0.5*mask+0.125*(retain_pixel(p+vec2f(r,0.))+retain_pixel(p-vec2f(r,0.))+retain_pixel(p+vec2f(0.,r))+retain_pixel(p-vec2f(0.,r)));}
-    return amount*mask;
+fn retain(p: vec2f) -> f32 {
+    let radius = value(blur_id()) * u.scale;
+    let amount = value(amount_id()) * 0.01;
+    if amount == 0. { return 0.; }
+    // Keep one copy of the colour and mask lookup in the compiled shader.
+    // Five inline copies corrupt RGBA stores on the Windows FXC/WARP path.
+    let taps = select(1u, 5u, radius > 0.);
+    let center_weight = select(1., 0.5, radius > 0.);
+    let cross = array<vec2f, 5>(
+        vec2f(0.), vec2f(1., 0.), vec2f(-1., 0.), vec2f(0., 1.), vec2f(0., -1.),
+    );
+    var mask = 0.;
+    for (var i = 0u; i < taps; i++) {
+        let weight = select(0.125, center_weight, i == 0u);
+        mask += weight * retain_pixel(p + radius * cross[i]);
+    }
+    return amount * mask;
 }
 fn sample_boxes(p:vec2f, base:u32)->bool {
     for(var i=0u;i<u32(value(count_id()));i++){

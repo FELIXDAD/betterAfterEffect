@@ -20,10 +20,10 @@ use crate::workspace::WorkspacePreset;
 /// Id of the After Effects keymap.
 pub const AE_KEYMAP: &str = "ae";
 
-/// Motion: AE's Default workspace.
+/// AE's Default workspace (id `motion`).
 pub fn motion() -> WorkspacePreset {
     WorkspacePreset::new(
-        "Motion",
+        "Default",
         AE_KEYMAP,
         Node::row(vec![
             (
@@ -60,26 +60,39 @@ pub fn motion() -> WorkspacePreset {
     )
 }
 
-/// Review: a large viewer with the timeline below; preview and history at the side.
+/// AE's Review workspace: Project and Effect Controls, the viewer, the utility
+/// panels stacked at the right and the Timeline below (AE 26's layout).
 pub fn review() -> WorkspacePreset {
     WorkspacePreset::new(
         "Review",
         AE_KEYMAP,
-        Node::row(vec![
+        Node::column(vec![
             (
-                1406.0,
-                Node::column(vec![
-                    (760.0, Node::tabs(&["composition"])),
-                    (175.0, Node::tabs(&["timeline"])),
+                599.0,
+                Node::row(vec![
+                    (505.0, Node::tabs(&["project", "effect_controls"])),
+                    (1118.0, Node::tabs(&["composition"])),
+                    (
+                        99.0,
+                        Node::frame(
+                            Frame::new(&[
+                                "info",
+                                "audio",
+                                "preview",
+                                "effects",
+                                "align",
+                                "libraries",
+                                "character",
+                                "paragraph",
+                                "tracker",
+                                "content_aware_fill",
+                            ])
+                            .stacked(None),
+                        ),
+                    ),
                 ]),
             ),
-            (
-                316.0,
-                Node::column(vec![
-                    (52.0, Node::tabs(&["preview"])),
-                    (883.0, Node::tabs(&["history", "info"])),
-                ]),
-            ),
+            (336.0, Node::tabs(&["timeline"])),
         ]),
     )
     .order(1)
@@ -119,9 +132,6 @@ pub fn ae_keymap() -> Keymap {
     let panel = |chord: &str, id: &str| {
         Binding::new(chord, ids::OPEN_PANEL).params(json!({ "id": id, "toggle": true }))
     };
-    let workspace = |chord: &str, index: u32| {
-        Binding::new(chord, ids::SWITCH_WORKSPACE).params(json!({ "index": index }))
-    };
     Keymap::new(
         "After Effects",
         vec![
@@ -146,13 +156,12 @@ pub fn ae_keymap() -> Keymap {
             panel("Cmd+Alt+0", "render_queue"),
             panel("Cmd+3", "preview"),
             panel("F3", "effect_controls"),
-            // Window: workspaces (AE-UI-005). AE assigns Shift+F10 / F11 to the
-            // Default and Review workspaces (Window ▸ Assign Shortcut to
-            // Workspace), so the menu items show them; Shift+F12 (AE: Learn, which
-            // BAE does not have) switches to the third workspace.
+            // Window: workspaces (AE-UI-005). AE assigns Shift+F10 / F11 / F12 to
+            // the Default, Review and Learn workspaces (Window ▸ Assign Shortcut
+            // to Workspace), so the menu items show them.
             Binding::new("Shift+F10", ids::SWITCH_WORKSPACE).params(json!({ "id": "motion" })),
             Binding::new("Shift+F11", ids::SWITCH_WORKSPACE).params(json!({ "id": "review" })),
-            workspace("Shift+F12", 2),
+            Binding::new("Shift+F12", ids::SWITCH_WORKSPACE).params(json!({ "id": "ae_learn" })),
         ],
     )
 }
