@@ -7,7 +7,7 @@
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 "Inter",-apple-system,"PingFang SC",sans-serif}
 header{height:65px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 4vw}.brand{font-weight:720;letter-spacing:-.6px}.mark{display:inline-grid;place-items:center;background:var(--lime);color:#18220f;border-radius:6px;padding:1px 7px;margin-right:10px;font:900 20px/1.5 monospace}.live{color:var(--mute);font-size:.87rem}.online{color:var(--lime)}
 main{max-width:1440px;margin:auto;padding:34px 4vw 80px}.intro{display:flex;align-items:baseline;gap:14px}.version,code,.num,time,.pct{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}.version{font-size:.85rem;border:1px solid #46513e;color:var(--lime);padding:3px 8px;border-radius:5px}
-h1{font-size:clamp(1.8rem,3.4vw,3rem);letter-spacing:-2px;margin:0}h2{font-size:1.35rem;margin:0}h3{font-size:1rem;margin:0}.summary{margin:24px 0 18px;display:grid;grid-template-columns:2fr repeat(3,1fr);border:1px solid var(--line);border-radius:12px;background:var(--panel);overflow:hidden}.stat{padding:18px 24px;border-right:1px solid var(--line)}.stat:last-child{border:0}.label,small,time,code,.muted{color:var(--mute)}.label,small,time,code{font-size:.84rem}.num{font-size:clamp(1.8rem,3vw,2.7rem);line-height:1.3;letter-spacing:-2px}.track{display:flex;gap:2px;height:6px;margin-top:8px;border-radius:2px;overflow:hidden}.track i{display:block}.done{color:var(--lime)}.doing{color:var(--blue)}.todo{color:var(--todo)}.track .done{background:var(--lime)}.track .doing{background:var(--blue)}.track .todo{background:var(--todo)}
+h1{font-size:clamp(1.8rem,3.4vw,3rem);letter-spacing:-2px;margin:0}h2{font-size:1.35rem;margin:0}h3{font-size:1rem;margin:0}.summary{margin:24px 0 18px;display:grid;grid-template-columns:2fr repeat(4,1fr);border:1px solid var(--line);border-radius:12px;background:var(--panel);overflow:hidden}.stat{padding:18px 24px;border-right:1px solid var(--line)}.stat:last-child{border:0}.label,small,time,code,.muted{color:var(--mute)}.label,small,time,code{font-size:.84rem}.num{font-size:clamp(1.8rem,3vw,2.7rem);line-height:1.3;letter-spacing:-2px}.track{display:flex;gap:2px;height:6px;margin-top:8px;border-radius:2px;overflow:hidden}.track i{display:block}.done{color:var(--lime)}.doing{color:var(--blue)}.todo{color:var(--todo)}.track .done{background:var(--lime)}.ready{color:#e5ba76}.track .ready{background:#e5ba76}.track .doing{background:var(--blue)}.track .todo{background:var(--todo)}
 nav{display:flex;gap:20px;border-bottom:1px solid var(--line);margin-bottom:24px;overflow:auto}button,input{font:inherit}nav button{border:0;border-bottom:2px solid transparent;padding:14px 0;background:none;color:var(--mute);white-space:nowrap;cursor:pointer}nav button[aria-current=true]{color:var(--lime);border-color:var(--lime)}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:14px 0}input{border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:8px 12px;color:inherit;width:min(260px,48%)}[hidden]{display:none!important}
 article{border:1px solid var(--line);border-radius:10px;background:var(--panel);margin-bottom:14px;overflow:hidden}article h3{background:#1f2323;border-bottom:1px solid var(--line);padding:12px 16px;display:flex;justify-content:space-between;gap:10px}.pct{color:var(--lime);font-size:.87rem}.row{display:grid;grid-template-columns:minmax(240px,2.5fr) minmax(75px,.65fr) minmax(105px,1fr) minmax(84px,1fr) minmax(120px,.95fr);align-items:center;gap:14px;padding:11px 16px;border-bottom:1px solid var(--line);font-size:.92rem}.column-labels{color:var(--mute);font-size:.8rem}.row:last-child{border:0}.row>*,.event{overflow-wrap:anywhere}.row code{display:block;font-size:.78rem}.state{font-size:.86rem}.row a{color:var(--blue);font: .85rem monospace;margin-right:6px}.event{padding:13px 16px;border-bottom:1px solid var(--line)}.event p{margin:4px 0}.event time{float:right}.event:last-child{border:0}
 @media(max-width:800px){.column-labels{display:none}.summary{grid-template-columns:repeat(3,1fr)}.stat:first-child{grid-column:1/-1;border:0;border-bottom:1px solid var(--line)}.stat{padding:12px}.row{grid-template-columns:1fr auto;gap:5px 12px}.row time{grid-column:1/-1}.row .prs{text-align:right}main{padding-top:22px}nav{gap:16px}.event time{float:none;display:block}}
@@ -35,7 +35,7 @@ function groups(rows,fx){
   html+='<article><h3>'+esc(name)+'<span class="pct">'+done+' / '+group.length+' · '+percent(done,group.length)+'%</span></h3>';
   html+='<div class="row column-labels"><span>名称 / ID</span><span>状态</span><span>'+(fx?'评估标签':'负责 Agent')+'</span><span>关联 PR</span><span>更新时间</span></div>';
   for(const x of visible){const links=x.prs.map(n=>'<a href="https://github.com/FELIXDAD/betterAfterEffects/pull/'+n+'">#'+n+'</a>').join('');
-   html+='<div class="row"><span>'+esc(x.name)+'<code>'+esc(x.id)+'</code></span><span class="state '+x.status+'">'+(x.status==='done'?'✓ ':'● ')+(fx?fxStatuses:statuses)[x.status]+'</span><span class="muted">'+esc(fx?x.tag:x.agent||'待认领')+'</span><span class="prs">'+(links||'<small>—</small>')+'</span><time>'+stamp(x.updated)+'</time></div>';
+   html+='<div class="row"><span>'+esc(x.name)+'<code>'+esc(x.id)+'</code></span><span class="state '+x.status+'">'+(x.status==='done'?'✓ ':'● ')+(x.kind==='milestone'?{done:'完成',ready:'待合并',doing:'开发中',todo:'未开始'}:fx?fxStatuses:statuses)[x.status]+'</span><span class="muted">'+esc(fx?x.tag:x.agent||'待认领')+'</span><span class="prs">'+(links||'<small>—</small>')+'</span><time>'+stamp(x.updated)+'</time></div>';
   }html+='</article>';
  }return html||'<p class="muted">没有匹配项</p>';
 }
@@ -50,7 +50,7 @@ function parityView(){
  function progress(id,label,merged){
   const x=byId.get(id), fix=Array.isArray(merged);
   const links=(fix?merged:x.prs).map(n=>'<a class="doing" href="https://github.com/FELIXDAD/betterAfterEffects/pull/'+n+'">#'+n+'</a>').join(' ');
-  const state=fix?(x.status==='done'?'已解决':'待修'):statuses[x.status];
+  const state=fix?((x.repair_status||x.status)==='done'?'已解决':'待修'):statuses[x.status];
   return '<div>'+label+' · <span class="'+x.status+'">'+state+'</span> <code>'+esc(id)+'</code> '+esc(x.agent)+' '+(links||(fix?' · PR 暂无':''))+'</div>';
  }
  const sections=new Map();
@@ -67,10 +67,11 @@ function render(){
  if(!data)return;
  $('version').hidden=!data.milestone;
  $('version').textContent=data.milestone?'v'+data.milestone:'';
+ const milestoneStates={done:"完成",ready:"待合并",doing:"开发中",todo:"未开始"};
  const miles=data.items.filter(x=>x.kind==='milestone'),n=miles.length;
- const counts=Object.keys(statuses).map(s=>miles.filter(x=>x.status===s).length);
- const bar=Object.keys(statuses).map((s,i)=>'<i class="'+s+'" style="flex:'+counts[i]+'"></i>').join('');
- $('summary').innerHTML='<div class="stat"><div class="label">里程碑完成度</div><div class="num done">'+percent(counts[0],n)+'%</div><div class="track">'+bar+'</div></div>'+Object.keys(statuses).map((s,i)=>'<div class="stat"><div class="label"><span class="'+s+'">●</span> '+statuses[s]+'</div><div class="num">'+counts[i]+'</div></div>').join('');
+ const counts=Object.keys(milestoneStates).map(s=>miles.filter(x=>x.status===s).length);
+ const bar=Object.keys(milestoneStates).map((s,i)=>'<i class="'+s+'" style="flex:'+counts[i]+'"></i>').join('');
+ $('summary').innerHTML='<div class="stat"><div class="label">里程碑完成度</div><div class="num done">'+percent(counts[0],n)+'%</div><div class="track">'+bar+'</div></div>'+Object.keys(milestoneStates).map((s,i)=>'<div class="stat"><div class="label"><span class="'+s+'">●</span> '+milestoneStates[s]+'</div><div class="num">'+counts[i]+'</div></div>').join('');
  document.querySelectorAll('nav button').forEach((b,i)=>b.setAttribute('aria-current',i===tab));
  $('heading').textContent=tabs[tab];$('query').hidden=tab>1;
  if(tab===4)$('content').innerHTML=parityView();

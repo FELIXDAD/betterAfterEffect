@@ -13,9 +13,6 @@ import secrets
 import sqlite3
 import subprocess
 import threading
-import time
-import urllib.request
-import logging
 
 HERE = Path(__file__).resolve().parent
 BOARD = json.loads((HERE / "board.json").read_text(encoding="utf-8"))
@@ -98,6 +95,9 @@ def initialize():
             seq integer primary key, item text, agent text, status text, note text, updated text)""")
         db.execute("""create table if not exists pulls(
             number integer primary key, item text, title text, state text, updated text)""")
+        db.execute("create table if not exists github_prs(number integer primary key,status text,updated text)")
+        db.execute("""create table if not exists github_links(
+            item text, number integer, primary key(item,number))""")
         db.execute("begin immediate")
         if not db.execute("select 1 from items limit 1").fetchone():
             db.executemany("insert into items(id,kind,module,name,status,tag,prs,updated) "
@@ -166,44 +166,6 @@ def issue_module(issue):
     return "其他交互"
 
 
-def github_pages(endpoint):
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    if not token:
-        raise RuntimeError("GitHub sync requires GITHUB_TOKEN or GH_TOKEN")
-    for page in range(1, 10001):
-        separator = "&" if "?" in endpoint else "?"
-        url = ("https://api.github.com/repos/FELIXDAD/betterAfterEffects/" +
-               f"{endpoint}{separator}per_page=100&page={page}")
-        request = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
-        with urllib.request.urlopen(request, timeout=15) as response:
-            batch = json.load(response)
-        yield from batch
-        if len(batch) < 100:
-            return
-
-
-# Only advance these caches after fetching complete pages. A restart rebuilds them.
-PR_CACHE = {}
-TIMELINES = {}
-
-
-def github_evidence(issues):
-    cutoff = max((p["updated_at"] for p in PR_CACHE.values()), default="")
-    updates = {}
-    for pr in github_pages("pulls?state=all&sort=updated&direction=desc"):
-        if pr["updated_at"] < cutoff:
-            break
-        updates[pr["number"]] = {key: pr.get(key) for key in
-            ("number", "title", "body", "updated_at", "merged_at", "merge_commit_sha")}
-    PR_CACHE.update(updates)
-    for issue in issues:
-        n = issue["number"]
-        if n not in TIMELINES or TIMELINES[n][0] != issue["updated_at"]:
-            events = list(github_pages(f"issues/{n}/timeline"))
-            TIMELINES[n] = issue["updated_at"], events
-    return PR_CACHE.values(), {n: entry[1] for n, entry in TIMELINES.items()}
-
-
 def reconcile(db, issue, pulls, events):
     n = issue["number"]
     save_issue(db, n, issue["title"], issue["state"], issue["updated_at"])
@@ -239,6 +201,8 @@ def reconcile(db, issue, pulls, events):
             msg = (pr.get("title") or "") + "\n" + (pr.get("body") or "")
             scoped = re.search(r"(?im)^(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?|board-item|修复)"
                                r"\s*[:：]?\s*`?" + re.escape(t["fix"]) + r"(?![\w-])", msg)
+            if n in ISSUE_GROUPS and t["fix"] in issue_links(pr, {n: issue}, {}):
+                scoped = True
             if n in ISSUE_GROUPS:
                 scoped = scoped or re.search(rf"(?i)(?:fix(?:es|ed)?|修复)\s*#{n}\s*"
                                              rf"(?:第\s*|[/.:：-]\s*){t['slot']}(?!\d)", msg)
@@ -259,24 +223,76 @@ def reconcile(db, issue, pulls, events):
             set merged=excluded.merged where merged!=excluded.merged""", (t["fix"], json.dumps(merged)))
 
 
-def sync_parity():
-    issues = [i for i in github_pages("issues?state=all&labels=ae-parity") if "pull_request" not in i]
-    pulls, timelines = github_evidence(issues)
+def milestone_status(prs, states):
+    if prs and all(states.get(n) == "done" for n in prs):
+        return "done"
+    if any(states.get(n) == "ready" for n in prs):
+        return "ready"
+    if any(states.get(n) == "doing" for n in prs):
+        return "doing"
+    return "todo"
+
+
+CLOSES = re.compile(r"\b(?:fix(?:es|ed)?|clos(?:e|es|ed)|resolv(?:e|es|ed))\s*:?\s*"
+                    r"(?:#|FELIXDAD/betterAfterEffects#|https://github.com/FELIXDAD/betterAfterEffects/issues/)(\d+)\b", re.I)
+
+
+def issue_links(pr, issues, milestones):
+    text = pr.get("body") or ""
+    for match in CLOSES.finditer(text):
+        number = int(match[1])
+        issue = issues.get(number)
+        if not issue:
+            continue
+        if number in ISSUE_GROUPS:
+            # Aggregate references need an explicit child, e.g. Fixes #400（第 6 项）.
+            tail = text[match.end():].split("\n", 1)[0]
+            scope = re.match(r"\s*(?:[（(]([^）)]*)|(?:第|[/.:：-])\s*(\d+))", tail)
+            if scope:
+                slots = re.findall(r"第\s*(\d+)\s*项", scope[1] or "") or [scope[2]]
+                for t in parity_tasks(number, issue["title"]):
+                    if str(t["slot"]) in slots:
+                        yield t["fix"]
+            continue
+        module = issue_module(issue)
+        if issue["parity"]:
+            yield f"ae-{number}-fix"
+        explicit = re.search(r"(?im)^(?:能力\s*ID|board-item)\s*[:：]\s*([\w.-]+)", issue.get("body",""))
+        if explicit and explicit[1] in milestones:
+            yield explicit[1]
+        else:
+            targets = [item for item, area in milestones.items() if area == module]
+            target = BOARD.get("module_items", {}).get(module)
+            if target in milestones:
+                yield target
+            elif len(targets) == 1:
+                yield targets[0]
+    for item in re.findall(r"(?im)^(?:fixes|board-item|修复)\s*[:：]?\s*`?(ae-\d+-\d+-fix)\b", text):
+        if item in milestones:
+            yield item
+
+
+def apply_github(data):
+    pulls = data["pulls"]
+    issues = {i["number"]: i for i in data["issues"]}
     with closing(connect()) as db, db:
-        for issue in issues:
-            reconcile(db, issue, pulls, timelines[issue["number"]])
-        changed = db.total_changes
-    if changed:
-        notify_clients()
-
-
-def parity_loop():
-    while True:
-        try:
-            sync_parity()
-        except Exception:
-            logging.exception("GitHub issue sync failed; retrying in five minutes")
-        time.sleep(300)
+        db.execute("begin immediate")
+        for pr in pulls:
+            if type(pr["number"]) is not int or pr["status"] not in ("closed","done","ready","doing"):
+                raise ValueError("无效的 PR 状态")
+            db.execute("""insert into github_prs values(?,?,?) on conflict(number) do update
+                set status=excluded.status,updated=excluded.updated
+                where status!=excluded.status or updated!=excluded.updated""",
+                       (pr["number"], pr["status"], pr["updated_at"]))
+        for issue in issues.values():
+            if issue["parity"]:
+                reconcile(db, issue, pulls, issue["events"])
+        milestones = dict(db.execute("select id,module from items where kind='milestone'"))
+        links = {(item, p["number"]) for p in pulls for item in issue_links(p, issues, milestones)}
+        previous = {tuple(r) for r in db.execute("select item,number from github_links")}
+        db.executemany("insert into github_links values(?,?)", links - previous)
+        db.executemany("delete from github_links where item=? and number=?", previous - links)
+        return bool(db.total_changes)
 
 
 def notify_clients():
@@ -335,8 +351,18 @@ def snapshot():
     with closing(connect()) as db, db:
         db.execute("begin")
         items = [dict(row) for row in db.execute("select * from items order by rowid")]
+        pr_data = list(db.execute("select * from github_prs"))
+        states = {r["number"]: r["status"] for r in pr_data}
+        updated = {r["number"]: r["updated"] for r in pr_data}
+        links = {}
+        for link in db.execute("select * from github_links"):
+            links.setdefault(link["item"], set()).add(link["number"])
         for item in items:
-            item["prs"] = json.loads(item["prs"])
+            item["prs"] = sorted(set(json.loads(item["prs"])) | links.get(item["id"], set()))
+            if item["kind"] == "milestone":
+                item["repair_status"] = item["status"]
+                item["status"] = milestone_status(item["prs"], states)
+                item["updated"] = max([item["updated"]] + [updated[n] for n in item["prs"] if n in updated])
         agents = [dict(row) for row in db.execute(
             "select a.* from activity a join (select max(seq) seq from activity group by agent) b using(seq)")]
         feed = [dict(row) for row in db.execute("""
@@ -457,10 +483,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             size = int(self.headers.get("Content-Length", "0"))
-            if not 0 < size <= 16384:
+            if not 0 < size <= 2 * 1024 * 1024:
                 raise ValueError("请求长度无效")
-            changed = report(json.loads(self.rfile.read(size)))
-        except (ValueError, RecursionError) as error:
+            data = json.loads(self.rfile.read(size))
+            if isinstance(data, dict) and data.get("type") == "github-sync":
+                changed = apply_github(data)
+            elif size <= 16384:
+                changed = report(data)
+            else:
+                raise ValueError("汇报过长")
+        except (ValueError, KeyError, TypeError, RecursionError) as error:
             self.reply({"error": str(error)}, 400)
             return
         if changed:
@@ -480,6 +512,5 @@ if __name__ == "__main__":
     initialize()
     if args.github:
         import_github()
-    threading.Thread(target=parity_loop, daemon=True).start()
     print(f"http://{args.host}:{PORT}", flush=True)
     ThreadingHTTPServer((args.host, PORT), Handler).serve_forever()

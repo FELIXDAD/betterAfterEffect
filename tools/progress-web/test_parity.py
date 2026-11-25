@@ -16,9 +16,11 @@ class ParityTest(unittest.TestCase):
             scoped = dict(pr, number=421, body="Fixes: ae-400-3-fix", merged_at="2")
             events = {400: [], 405: []}
             def sync():
-                with patch.object(server, "github_pages", return_value=[issue, umbrella]), patch.object(
-                        server, "github_evidence", return_value=([pr, scoped], events)):
-                    server.sync_parity()
+                for record in (pr, scoped):
+                    record.update(status="done" if record["merged_at"] else "ready", updated_at="1")
+                for record in (issue, umbrella):
+                    record.update(parity=True, events=events[record["number"]])
+                server.apply_github(dict(pulls=[pr, scoped], issues=[issue, umbrella]))
                 return {x["id"]:x for x in server.snapshot()["items"]}
             rows = sync()
             self.assertEqual(rows["ae-405-fix"]["module"], "时间轴")
@@ -30,7 +32,7 @@ class ParityTest(unittest.TestCase):
             server.report(dict(item="ae-405-verify",agent="tester",status="doing"))
             issue["state"] = "closed"
             rows = sync()
-            self.assertEqual((rows["ae-405-fix"]["status"], rows["ae-405-fix"]["prs"]), ("done", []))
+            self.assertEqual((rows["ae-405-fix"]["status"], rows["ae-405-fix"]["prs"]), ("done", [420]))
             issue["state"] = "open"
             events[405].append(dict(event="reopened", created_at="3"))
             self.assertEqual(sync()["ae-405-fix"]["status"], "todo")
@@ -77,3 +79,9 @@ class ParityTest(unittest.TestCase):
                 server.reconcile(db, issue, [pr, pending], events)
                 self.assertEqual(db.execute("select status from items where id=?", (task["fix"],)).fetchone()[0], "done")
             self.assertEqual(server.snapshot()["parity"][-1]["tasks"][0]["merged"], [445,446])
+
+    def test_milestone_state_is_derived_from_all_linked_prs(self):
+        states = {1:"done", 2:"done", 3:"doing", 4:"ready", 5:"closed"}
+        for prs, expected in (([], "todo"), ([1,2], "done"), ([1,3], "doing"),
+                              ([3,4], "ready"), ([1,5], "todo"), ([999], "todo")):
+            self.assertEqual(server.milestone_status(prs, states), expected)
