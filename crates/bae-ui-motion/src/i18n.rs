@@ -452,6 +452,11 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ),
     ("Go to Previous Keyframe", "转到上一个关键帧"),
     ("Go to Next Keyframe", "转到下一个关键帧"),
+    ("Reveal Audio Levels", "显示音频电平"),
+    (
+        "Add Audio Levels to Revealed Properties",
+        "同时显示音频电平",
+    ),
     ("Reveal Animated Properties", "显示动画属性"),
     ("Reveal Modified Properties", "显示修改的属性"),
     // Timeline

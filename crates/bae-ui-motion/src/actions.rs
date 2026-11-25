@@ -272,6 +272,16 @@ const VARIANTS: &[(&str, &str, &str)] = &[
         r#"{"what":"animated","add":false}"#,
         "Reveal Animated Properties",
     ),
+    (
+        ids::REVEAL,
+        r#"{"what":"audio:levels","add":false}"#,
+        "Reveal Audio Levels",
+    ),
+    (
+        ids::REVEAL,
+        r#"{"what":"audio:levels","add":true}"#,
+        "Add Audio Levels to Revealed Properties",
+    ),
 ];
 
 /// Layer kinds by name, for both the UI action and the model command it runs.
