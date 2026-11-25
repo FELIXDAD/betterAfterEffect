@@ -103,15 +103,20 @@ fn selected_layer(stage: &Stage, session: &SharedSession) -> Option<PrimPath> {
 #[derive(Default)]
 pub struct PropertiesPanel {
     eval: EvalCache,
-    title: String,
 }
 
 impl Panel for PropertiesPanel {
-    fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
-        if self.title.is_empty() {
-            TabInfo::new(tr("Properties"))
-        } else {
-            TabInfo::new(format!("{}: {}", tr("Properties"), self.title))
+    fn tab(&self, cx: &PanelContext<'_>) -> TabInfo {
+        // From the selection now, not the last drawn frame: a collapsed panel
+        // in a stack is not drawn and kept the old layer's name (#465).
+        let session = common::session(cx.resources);
+        match selected_layer(cx.stage, &session) {
+            Some(layer) => TabInfo::new(format!(
+                "{}: {}",
+                tr("Properties"),
+                query::display_name_of(cx.stage, &layer)
+            )),
+            None => TabInfo::new(tr("Properties")),
         }
     }
 
@@ -125,7 +130,6 @@ impl Panel for PropertiesPanel {
         session.lock().sync(cx.stage);
         let stage = cx.stage;
         let Some(layer) = selected_layer(stage, &session) else {
-            self.title.clear();
             common::empty_hint(
                 ui,
                 tr("No layer selected"),
@@ -133,7 +137,6 @@ impl Panel for PropertiesPanel {
             );
             return;
         };
-        self.title = query::display_name_of(stage, &layer);
         let now = session.lock().active_time();
         let dims = if common::is_3d(stage, &layer) { 3 } else { 2 };
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
