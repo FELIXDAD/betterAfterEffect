@@ -47,14 +47,21 @@ function eventRow(a,agent){
 }
 function parityView(){
  const issueLink=n=>'<a class="doing" href="https://github.com/FELIXDAD/betterAfterEffects/issues/'+n+'">#'+n+'</a>';
- function progress(id,label){
-  const x=byId.get(id);
-  const links=x.prs.map(n=>'<a class="doing" href="https://github.com/FELIXDAD/betterAfterEffects/pull/'+n+'">#'+n+'</a>').join(' ');
-  return '<div>'+label+' · <span class="'+x.status+'">'+statuses[x.status]+'</span> <code>'+esc(id)+'</code> '+esc(x.agent)+' '+links+'</div>';
+ function progress(id,label,merged){
+  const x=byId.get(id), fix=Array.isArray(merged);
+  const links=(fix?merged:x.prs).map(n=>'<a class="doing" href="https://github.com/FELIXDAD/betterAfterEffects/pull/'+n+'">#'+n+'</a>').join(' ');
+  const state=fix?(x.status==='done'?'已解决':'待修'):statuses[x.status];
+  return '<div>'+label+' · <span class="'+x.status+'">'+state+'</span> <code>'+esc(id)+'</code> '+esc(x.agent)+' '+(links||(fix?' · PR 暂无':''))+'</div>';
  }
- return data.parity.map(issue=>'<article><h3><span>'+issueLink(issue.number)+' '+esc(issue.title)+'</span><small>'+(issue.state==='closed'?'Issue 已关闭':'Issue 开放')+'</small></h3>'+
- issue.tasks.map(t=>'<div class="event"><strong>'+esc(t.name)+'</strong><p class="muted">'+esc(t.detail)+'</p>'+
- progress(t.fix,'修复')+progress(t.verify,'验收')+'</div>').join('')+'</article>').join('');
+ const sections=new Map();
+ for(const issue of data.parity){
+  for(const t of issue.tasks){
+   const module=byId.get(t.fix).module;
+   if(!sections.has(module)) sections.set(module,[]);
+   sections.get(module).push('<div class="event">'+issueLink(issue.number)+' · <strong>'+esc(t.name)+'</strong> <small>'+(issue.state==='closed'?'Issue 已关闭':'Issue 开放')+'</small><p class="muted">'+esc(t.detail)+'</p>'+progress(t.fix,'修复',t.merged)+progress(t.verify,'实机验收')+'</div>');
+  }
+ }
+ return Array.from(sections,([module,rows])=>'<article><h3>'+esc(module)+'</h3>'+rows.join('')+'</article>').join('');
 }
 function render(){
  if(!data)return;

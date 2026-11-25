@@ -1,5 +1,3 @@
-import io
-import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -9,27 +7,73 @@ import server
 
 
 class ParityTest(unittest.TestCase):
-    def test_open_close_rename_and_repeat_preserve_manual_reports(self):
+    def test_fix_lifecycle_and_independent_acceptance(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(server, "DB", Path(tmp) / "board.db"):
             server.initialize()
-            issue = dict(number=401, title="发现交互差异", state="open", updated_at="2026-11-25T00:00:00Z")
+            issue = dict(number=405, title="时间轴滚动", state="open", updated_at="1")
             umbrella = dict(issue, number=400, title="用户反馈")
+            pr = dict(number=420, body="Fixes #405", title="patch", merged_at=None)
+            scoped = dict(pr, number=421, body="Fixes: ae-400-3-fix", merged_at="2")
+            events = {400: [], 405: []}
             def sync():
-                batch = json.dumps([issue, umbrella, dict(issue, number=402, pull_request={})]).encode()
-                with patch("urllib.request.urlopen", return_value=io.BytesIO(batch)):
+                with patch.object(server, "github_pages", return_value=[issue, umbrella]), patch.object(
+                        server, "github_evidence", return_value=([pr, scoped], events)):
                     server.sync_parity()
-            sync()
-            state = server.snapshot()
-            self.assertEqual([len(x["tasks"]) for x in state["parity"]], [7, 1])
-            def progress():
-                return {x["id"]:x["status"] for x in server.snapshot()["items"] if x["id"].startswith("ae-401")}
-            self.assertEqual(progress(), {"ae-401-fix":"todo", "ae-401-verify":"todo"})
-            server.report(dict(item="ae-401-verify", status="doing", agent="tester"))
-            issue.update(state="closed", title="更新标题")
-            sync()
-            self.assertEqual(progress(), {"ae-401-fix":"todo", "ae-401-verify":"doing"})
+                return {x["id"]:x for x in server.snapshot()["items"]}
+            rows = sync()
+            self.assertEqual(rows["ae-405-fix"]["module"], "时间轴")
+            self.assertEqual(rows["ae-405-fix"]["status"], "todo")
+            self.assertEqual([rows[f"ae-400-{i}-fix"]["prs"] for i in range(1,8)],
+                             [[], [], [421], [], [], [], []])
+            self.assertEqual([rows[f"ae-400-{i}-fix"]["status"] for i in range(1, 8)],
+                             ["todo", "todo", "done", "todo", "todo", "todo", "todo"])
+            server.report(dict(item="ae-405-verify",agent="tester",status="doing"))
+            issue["state"] = "closed"
+            rows = sync()
+            self.assertEqual((rows["ae-405-fix"]["status"], rows["ae-405-fix"]["prs"]), ("done", []))
+            issue["state"] = "open"
+            events[405].append(dict(event="reopened", created_at="3"))
+            self.assertEqual(sync()["ae-405-fix"]["status"], "todo")
+            pr["merged_at"] = "4"
+            rows = sync()
+            self.assertEqual((rows["ae-405-fix"]["status"], rows["ae-405-fix"]["prs"]), ("done", [420]))
+            events[405].append(dict(event="reopened", created_at="5"))
+            self.assertEqual(sync()["ae-405-fix"]["status"], "todo")
+            issue.update(body="模块：工作区\n修复 PR: #421")
+            scoped["merged_at"] = "6"
+            rows = sync()
+            self.assertEqual(rows["ae-405-fix"]["status"], "done")
+            self.assertEqual(rows["ae-405-fix"]["prs"], [420,421])
+            self.assertEqual(rows["ae-405-fix"]["module"], "工作区")
+            self.assertEqual(rows["ae-405-verify"]["status"], "doing")
             checked = server.snapshot()
-            self.assertEqual(checked["parity"][1]["title"], "更新标题")
             sync()
             server.initialize()
             self.assertEqual(checked, server.snapshot())
+
+
+    def test_close_event_sha_and_explicit_open_pr(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(server, "DB", Path(tmp) / "db"):
+            server.initialize()
+            issue = dict(number=444, title="工作区", state="closed", updated_at="1")
+            events = [dict(event="closed", created_at="1", commit_id="abc")]
+            pr = dict(number=445, merged_at="1", merge_commit_sha="abc")
+            with server.closing(server.connect()) as db, db:
+                server.reconcile(db, issue, [pr], events)
+            task = server.snapshot()["parity"][-1]["tasks"][0]
+            self.assertEqual(task["merged"], [445])
+            issue["state"] = "open"
+            events.append(dict(event="reopened", created_at="2"))
+            with server.closing(server.connect()) as db, db:
+                server.reconcile(db, issue, [pr], events)
+            server.report(dict(item=task["fix"], agent="developer", status="done", pr=446))
+            pending = dict(number=446, merged_at=None, merge_commit_sha=None)
+            with server.closing(server.connect()) as db, db:
+                server.reconcile(db, issue, [pr, pending], events)
+                self.assertEqual(db.execute("select status from items where id=?", (task["fix"],)).fetchone()[0], "todo")
+            self.assertEqual(server.snapshot()["parity"][-1]["tasks"][0]["merged"], [445])
+            pending["merged_at"] = "3"
+            with server.closing(server.connect()) as db, db:
+                server.reconcile(db, issue, [pr, pending], events)
+                self.assertEqual(db.execute("select status from items where id=?", (task["fix"],)).fetchone()[0], "done")
+            self.assertEqual(server.snapshot()["parity"][-1]["tasks"][0]["merged"], [445,446])

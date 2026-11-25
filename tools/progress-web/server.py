@@ -102,6 +102,12 @@ def initialize():
         register_legacy_effects(db)
         db.execute("""create table if not exists parity_issues(
             number integer primary key, title text not null, state text not null, updated text not null)""")
+        db.execute("""create table if not exists parity_resolution(
+            item text primary key, merged text not null)""")
+        db.execute("""insert into items(id,kind,module,name,status,agent,tag,prs,updated)
+            values('ae-panels-workspace','milestone','面板 / 工作区',
+            '所有面板工作区、补齐 AE 26 的所有面板、窗口菜单逐项可用','todo','K','','[]',?)
+            on conflict(id) do nothing""", (now(),))
         if not db.execute("select 1 from parity_issues where number=400").fetchone():
             save_issue(db, 400, "P0 易用性交互", "open", "")
 
@@ -139,19 +145,128 @@ def save_issue(db, number, title, state, updated):
                        (task[role], kind, module, task["name"], now()))
 
 
-def sync_parity():
-    issues = []
+MODULES_400 = ("时间轴", "查看器工具", "数值编辑", "时间轴", "选择与快捷键", "查看器工具", "交互核查")
+MODULE_RULES = (
+    ("面板 / 工作区", r"面板|工作区|窗口菜单|panel|workspace"),
+    ("数值编辑", r"数值|数字框|numeric|number field"),
+    ("时间轴", r"时间轴|时间线|关键帧|timeline|keyframe"),
+    ("查看器工具", r"查看器|钢笔|手柄|viewer|viewport"),
+    ("效果", r"效果|effect"),
+    ("文字", r"文字|文本|text"),
+    ("音频", r"音频|audio"),
+    ("媒体与导出", r"导入|导出|媒体|export|import"),
+    ("选择与快捷键", r"快捷键|键盘|多选|选择|shortcut|keyboard"),
+)
+
+
+def issue_module(issue):
+    labels = [x["name"] for x in issue.get("labels", [])]
+    body = issue.get("body") or ""
+    explicit = re.search(r"^(?:模块|module)\s*[:：]\s*(.{1,60})$", body, re.I | re.M)
+    if explicit:
+        return explicit[1].strip()
+    for text in [*labels, issue["title"], body]:
+        for name, pattern in MODULE_RULES:
+            if re.search(pattern, text, re.I):
+                return name
+    return "其他交互"
+
+
+def github_pages(endpoint):
     for page in range(1, 10001):
-        url = ("https://api.github.com/repos/FELIXDAD/betterAfterEffects/issues"
-               f"?state=all&labels=ae-parity&sort=created&direction=asc&per_page=100&page={page}")
+        separator = "&" if "?" in endpoint else "?"
+        url = ("https://api.github.com/repos/FELIXDAD/betterAfterEffects/" +
+               f"{endpoint}{separator}per_page=100&page={page}")
         with urllib.request.urlopen(url, timeout=15) as response:
             batch = json.load(response)
-        issues.extend(row for row in batch if "pull_request" not in row)
+        yield from batch
         if len(batch) < 100:
+            return
+
+
+# Only advance these caches after fetching complete pages. A restart rebuilds them.
+PR_CACHE = {}
+TIMELINES = {}
+
+
+def github_evidence(issues):
+    cutoff = max((p["updated_at"] for p in PR_CACHE.values()), default="")
+    updates = {}
+    for pr in github_pages("pulls?state=all&sort=updated&direction=desc"):
+        if pr["updated_at"] < cutoff:
             break
+        updates[pr["number"]] = {key: pr.get(key) for key in
+            ("number", "title", "body", "updated_at", "merged_at", "merge_commit_sha")}
+    PR_CACHE.update(updates)
+    for issue in issues:
+        n = issue["number"]
+        if n not in TIMELINES or TIMELINES[n][0] != issue["updated_at"]:
+            events = list(github_pages(f"issues/{n}/timeline"))
+            TIMELINES[n] = issue["updated_at"], events
+    return PR_CACHE.values(), {n: entry[1] for n, entry in TIMELINES.items()}
+
+
+def reconcile(db, issue, pulls, events):
+    n = issue["number"]
+    save_issue(db, n, issue["title"], issue["state"], issue["updated_at"])
+    reopened = max((e["created_at"] for e in events if e["event"] == "reopened"), default="")
+    closes = [e for e in events if e["event"] == "closed" and e["created_at"] >= reopened]
+    closing_sha = closes[-1].get("commit_id") if closes else None
+    closing_ref = (rf"\b(?:fix(?:es|ed)?|clos(?:e|es|ed)|resolv(?:e|es|ed))\s*:?\s*"
+                   rf"(?:#|FELIXDAD/betterAfterEffects#|https://github.com/FELIXDAD/betterAfterEffects/issues/){n}(?![\w/-])")
+    linked = set()
+    for event in events:
+        source = (event.get("source") or {}).get("issue") or {}
+        if event["event"] in ("connected", "disconnected") and source.get("pull_request"):
+            if source.get("repository_url", "").endswith("/FELIXDAD/betterAfterEffects"):
+                if event["event"] == "connected":
+                    linked.add(source["number"])
+                else:
+                    linked.discard(source["number"])
+    notes = [issue.get("body") or ""] + [e.get("body") or "" for e in events if e["event"] == "commented"
+        and e.get("author_association") in ("OWNER", "MEMBER", "COLLABORATOR")]
+    merged_pulls = [p for p in pulls if p.get("merged_at")]
+    for index, t in enumerate(parity_tasks(n, issue["title"])):
+        module = MODULES_400[index] if n == 400 else issue_module(issue)
+        db.execute("""update items set name=?,module=? where id in (?,?)
+            and (name!=? or module!=?)""", (t["name"], module, t["fix"], t["verify"], t["name"], module))
+        row = db.execute("select status,prs from items where id=?", (t["fix"],)).fetchone()
+        refs = set(json.loads(row["prs"]))
+        link_prefix = re.escape(t["fix"]) + r"\s+" if n == 400 else ""
+        pr_reference = (r"(?im)^" + link_prefix + r"(?:修复\s*PR|Fix-PR)\s*[:：]\s*"
+                        r"(?:#|https://github.com/FELIXDAD/betterAfterEffects/pull/)([1-9]\d*)\b")
+        explicit = {int(value) for text in notes for value in re.findall(pr_reference, text)}
+        matches = []
+        for pr in merged_pulls:
+            msg = (pr.get("title") or "") + "\n" + (pr.get("body") or "")
+            scoped = re.search(r"(?im)^(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?|board-item|修复)"
+                               r"\s*[:：]?\s*`?" + re.escape(t["fix"]) + r"(?![\w-])", msg)
+            if n == 400:
+                scoped = scoped or re.search(rf"(?i)(?:fix(?:es|ed)?|修复)\s*#400\s*"
+                                             rf"(?:第\s*|[/.:：-]\s*){index+1}(?!\d)", msg)
+            closure = n != 400 and (re.search(closing_ref, msg, re.I) or
+                                      (closing_sha and closing_sha == pr.get("merge_commit_sha")))
+            if pr["number"] in refs | explicit or (n != 400 and pr["number"] in linked) or scoped or closure:
+                matches.append(pr)
+        merged = sorted(p["number"] for p in matches)
+        # An aggregate issue closed by a PR still needs per-child evidence.
+        manual_close = issue["state"] == "closed" and (n != 400 or not closing_sha)
+        resolved = manual_close or any(p["merged_at"] > reopened for p in matches)
+        status = "done" if resolved else "todo"
+        prs = sorted(refs.union(merged))
+        if row["status"] != status or refs != set(prs):
+            db.execute("update items set status=?,prs=?,updated=? where id=?",
+                       (status, json.dumps(prs), now(), t["fix"]))
+        db.execute("""insert into parity_resolution values(?,?) on conflict(item) do update
+            set merged=excluded.merged where merged!=excluded.merged""", (t["fix"], json.dumps(merged)))
+
+
+def sync_parity():
+    issues = [i for i in github_pages("issues?state=all&labels=ae-parity") if "pull_request" not in i]
+    pulls, timelines = github_evidence(issues)
     with closing(connect()) as db, db:
         for issue in issues:
-            save_issue(db, issue["number"], issue["title"], issue["state"], issue["updated_at"])
+            reconcile(db, issue, pulls, timelines[issue["number"]])
         changed = db.total_changes
     if changed:
         notify_clients()
@@ -230,8 +345,11 @@ def snapshot():
             union all select 0,'','GitHub',state,title,updated,number from pulls where item is null
             order by updated desc, seq desc""")]
         issues = [dict(row) for row in db.execute("select * from parity_issues order by number")]
+        merged = {row[0]: json.loads(row[1]) for row in db.execute("select item,merged from parity_resolution")}
         for issue in issues:
             issue["tasks"] = list(parity_tasks(issue["number"], issue["title"]))
+            for task in issue["tasks"]:
+                task["merged"] = merged.get(task["fix"], [])
         return dict(items=items, agents=agents, activity=feed, parity=issues)
 
 
@@ -258,6 +376,8 @@ def report(data):
     with closing(connect()) as db, db:
         db.execute("begin immediate")
         row = db.execute("select * from items where id=?", (item,)).fetchone()
+        if row and re.fullmatch(r"ae-\d+(?:-\d+)?-fix", item):
+            status = row["status"]
         if not row:
             if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,119}", item):
                 raise ValueError("新增能力 ID 仅支持小写字母、数字、点、下划线和连字符")
