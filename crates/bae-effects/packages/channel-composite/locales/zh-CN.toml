@@ -1,0 +1,21 @@
+[effect.remove-color-matting]
+name = "移除颜色遮罩"
+keywords = ["移除颜色遮罩"]
+
+[effect.remove-color-matting.params]
+background_color = "背景颜色"
+clip = "剪切"
+
+[effect.solid-composite]
+name = "固态层合成"
+keywords = ["固态层合成"]
+
+[effect.solid-composite.params]
+source_opacity = "源不透明度"
+color = "颜色"
+opacity = "不透明度"
+blending_mode = "混合模式"
+
+[effect.solid-composite.choices]
+blending_mode = ["正常", "(-", "相加", "相乘", "滤色", "叠加", "柔光", "强光", "(-", "颜色减淡", "颜色加深", "(-", "变暗", "变亮", "差值", "排除", "(-", "色相", "饱和度", "颜色", "发光度"]
+

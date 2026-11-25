@@ -362,11 +362,32 @@ fn modes_cell(tl: &TimelinePanel, l: &PrimPath) -> (Rect, Pos2, Pos2) {
         .unwrap_or_else(|| panic!("modes of {l} not drawn"))
 }
 
+impl H {
+    /// A value edit of `attr` of `path` at time 0, the way the timeline and
+    /// Effect Controls make it.
+    fn edit(&self, path: &PrimPath, attr: &str, edit: crate::common::Edit) -> PanelRequests {
+        let mut requests = PanelRequests::default();
+        let id = PanelId::new("timeline");
+        let session = self.session();
+        let mut cx = PanelContext::new(
+            &id,
+            "timeline",
+            &self.stage,
+            &self.author,
+            &self.resources,
+            &mut requests,
+        );
+        crate::common::apply_edit(&mut cx, &session, path, attr, Time::ZERO, edit);
+        requests
+    }
+}
+
 mod expressions;
 mod graph;
 mod keyframes;
 mod layer_bars;
 mod layers;
 mod markers;
+mod multi_edit;
 mod outline;
 mod switches;

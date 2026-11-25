@@ -206,7 +206,7 @@ impl Workbench {
                             title: spec.title.clone(),
                             panel: None,
                         };
-                        b.row(e, tr(&spec.title).to_owned());
+                        b.row(e, spec.display_title().to_owned());
                     }
                     MenuEntry::Submenu { title, entries } => {
                         let key = format!("{key}/{title}");
