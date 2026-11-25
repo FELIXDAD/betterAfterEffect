@@ -1,5 +1,7 @@
 //! The stage: sublayers composed by strength, transactions, undo and events.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use rustc_hash::FxHashMap;
 
 use crate::error::{ModelError, Result};
@@ -39,6 +41,7 @@ struct UndoEntry {
 /// strongest sublayer with an opinion wins. A prim exists on the stage when at least
 /// one sublayer has a `def` spec for it and its parent exists.
 pub struct Stage {
+    revision: u64,
     pub(crate) sublayers: FxHashMap<SublayerId, Sublayer>,
     /// Strongest first.
     pub(crate) stack: Vec<SublayerId>,
@@ -72,7 +75,14 @@ impl Default for Stage {
     }
 }
 
+static NEXT_REVISION: AtomicU64 = AtomicU64::new(1);
+
 impl Stage {
+    /// Identifies this exact composed document state, including after project replacement.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
     /// A stage with one empty `root` sublayer as the edit target.
     pub fn new() -> Self {
         Self::from_sublayers(vec![Sublayer::new(SublayerId::root())]).expect("one sublayer")
@@ -95,6 +105,7 @@ impl Stage {
             map.insert(id, s);
         }
         Ok(Stage {
+            revision: NEXT_REVISION.fetch_add(1, Ordering::Relaxed),
             sublayers: map,
             stack,
             edit_target,
@@ -239,6 +250,7 @@ impl Stage {
         {
             self.ref_index = None;
         }
+        self.revision = NEXT_REVISION.fetch_add(1, Ordering::Relaxed);
         self.expand_through_references(&mut event);
         for (_, f) in &mut self.subscribers {
             f(&event);
