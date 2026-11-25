@@ -2423,3 +2423,65 @@ fn paint_and_brushes_panels_show_for_each_paint_tool() {
         (100.0, 21.0, "constant")
     );
 }
+
+/// A Brush drag in the Layer panel is one `paint.add_stroke` in layer pixels,
+/// with the Paint and Brushes panels' settings.
+#[test]
+fn brush_drag_in_the_layer_panel_paints_one_stroke() {
+    let mut h = Harness::new();
+    let (comp, solid, _shape) = h.comp_with_layers();
+    h.resources.insert(crate::tools::SharedTools::default());
+    let tools = h
+        .resources
+        .get::<crate::tools::SharedTools>()
+        .unwrap()
+        .clone();
+    tools.lock().set(crate::tools::Tool::Brush);
+    tools.lock().options.paint.diameter = 30.0;
+    {
+        let s = h.session();
+        let mut s = s.lock();
+        s.open_comp(&comp);
+        s.layer_panel = Some(solid.clone());
+    }
+    let mut panel = crate::layer_panel::LayerPanel::new(None);
+    h.frame("layer", &mut panel, Vec::new());
+    // The 640 × 360 solid at 100 %, centred in the 1280 × 750 picture area.
+    let at = |x: f32, y: f32| pos2(320.0 + x, 195.0 + y);
+    let mut r = PanelRequests::default();
+    for (i, (x, y)) in [
+        (10.0, 10.0),
+        (10.0, 10.0),
+        (40.0, 20.0),
+        (80.0, 30.0),
+        (80.0, 30.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut evs = Vec::new();
+        pointer(
+            &mut evs,
+            at(x, y),
+            match i {
+                1 => Some(true),
+                4 => Some(false),
+                _ => None,
+            },
+        );
+        r = h.frame("layer", &mut panel, evs);
+    }
+    let inv = r
+        .invocations
+        .iter()
+        .find(|i| i.id == "paint.add_stroke")
+        .expect("a stroke");
+    assert_eq!(inv.params["points"][0], json!([10.0, 10.0]));
+    assert_eq!(inv.params["diameter"], json!(30.0));
+    h.apply(r);
+    let effects = bae_motion::effect::effects_of(&h.stage, &solid);
+    assert_eq!(
+        bae_motion::paint::strokes_of(&h.stage, &effects[0]).len(),
+        1
+    );
+}
