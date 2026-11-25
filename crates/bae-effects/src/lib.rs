@@ -252,20 +252,51 @@ pub fn register(defs: &mut EffectRegistry, library: &mut EffectLibrary) -> usize
 
 /// Compiles every pipeline for working format `format` ahead of the first
 /// frame (call on a worker thread when a project opens).
+///
+/// Two low-priority workers share the work (most used categories first: the
+/// registration order); an item that fails is logged and skipped. The first
+/// error is returned at the end.
 pub fn prewarm(gpu: &Arc<GpuContext>, format: wgpu::TextureFormat) -> Result<(), RenderError> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
     let rt = gpu::runtime(gpu);
-    for warm in &registry().prewarm {
-        warm(&rt, format)?;
-    }
-    for b in builtins() {
-        if b.alias.is_none()
-            && let Implementation::Declarative(fx) = &b.implementation
-        {
-            fx.prewarm(gpu, format)?;
+    let modules = &registry().prewarm;
+    let declarative: Vec<_> = builtins()
+        .iter()
+        .filter(|b| b.alias.is_none())
+        .filter_map(|b| match &b.implementation {
+            Implementation::Declarative(fx) => Some(fx.clone()),
+            Implementation::Rust(_) => None,
+        })
+        .collect();
+    let total = modules.len() + declarative.len();
+    let next = AtomicUsize::new(0);
+    let first_error = parking_lot::Mutex::new(None);
+    std::thread::scope(|scope| {
+        for _ in 0..PREWARM_THREADS {
+            scope.spawn(|| {
+                bae_gpu::warm_up::lower_priority();
+                loop {
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    if i >= total {
+                        break;
+                    }
+                    let result = match modules.get(i) {
+                        Some(warm) => warm(&rt, format),
+                        None => declarative[i - modules.len()].prewarm(gpu, format),
+                    };
+                    if let Err(e) = result {
+                        tracing::warn!("effect prewarm: {e}");
+                        first_error.lock().get_or_insert(e);
+                    }
+                }
+            });
         }
-    }
-    Ok(())
+    });
+    first_error.into_inner().map_or(Ok(()), Err)
 }
+
+/// Workers compiling effect pipelines during the warm-up.
+const PREWARM_THREADS: usize = 2;
 
 /// Catalog entry of a Rust effect (implementation and Chinese param names).
 fn rust_builtin(
