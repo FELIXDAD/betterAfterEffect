@@ -392,6 +392,11 @@ impl TargetEffect for Liquify {
     }
 }
 
+/// Compile the kernel ahead of first use (the effects' background warm-up).
+pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
+    kernel(rt, format).map(|_| ())
+}
+
 fn kernel(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<Arc<Kernel>, RenderError> {
     rt.kernel(
         &KernelKey {
