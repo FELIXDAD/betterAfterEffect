@@ -116,7 +116,7 @@ fn bezier_warp() -> Builtin {
         Some(Value::Vec2([0.0, 119.988007])),
     );
     b = b.int(14, "Quality", "品质", 8, [1, 10]);
-    let (def, labels) = b.build();
+    let (def, labels) = b.reference_points().build();
     rust_builtin(
         (
             Arc::new(Warp {
@@ -224,7 +224,7 @@ fn magnify() -> Builtin {
         ],
     );
     b = b.checkbox(9, "Resize Layer", "调整图层大小", false);
-    let (def, labels) = b.build();
+    let (def, labels) = b.reference_points().build();
     let mut effect = rust_builtin(
         (
             Arc::new(Warp {
@@ -461,7 +461,7 @@ fn cc_power_pin() -> Builtin {
         "none",
     );
     b.push(13, "", "", ParamKind::GroupEnd, None);
-    let (def, labels) = b.build();
+    let (def, labels) = b.reference_points().build();
     rust_builtin(
         (
             Arc::new(super::super::Distortion {
@@ -536,7 +536,7 @@ fn cc_page_turn() -> Builtin {
         ParamKind::Color,
         Some(Value::Color([0.768627, 0.768627, 0.705882, 1.0])),
     );
-    let (def, labels) = b.build();
+    let (def, labels) = b.reference_points().build();
     let mut effect = rust_builtin(
         (
             Arc::new(Warp {
@@ -600,7 +600,7 @@ fn cc_lens() -> Builtin {
         2,
         "none",
     );
-    let (def, labels) = b.build();
+    let (def, labels) = b.reference_points().build();
     rust_builtin(
         (
             Arc::new(Warp {
@@ -649,7 +649,7 @@ fn cc_bend_it() -> Builtin {
         &["None", "Static", "Bend", "Mirror"],
     );
     b = b.popup(5, "Distort", "Distort", 1, &["Legal", "Extended"]);
-    let (def, labels) = b.build();
+    let (def, labels) = b.reference_points().build();
     let mut effect = rust_builtin(
         (
             Arc::new(Warp {
@@ -704,7 +704,7 @@ fn cc_tiler() -> Builtin {
         2,
         "percent",
     );
-    let (def, labels) = b.build();
+    let (def, labels) = b.reference_points().build();
     rust_builtin(
         (
             Arc::new(Warp {
