@@ -740,8 +740,8 @@ AE 快捷键文件里不在主菜单上的命令（菜单上的命令见上表�
 | `CompTimeZoomIn` | `timeline.zoom_in` |  | = | = |  | C | ✅ |
 | `CompTimeZoomOut` | `timeline.zoom_out` |  | - | - |  | C | ✅ |
 | `CompTimeZoomToggleFullCustom` | `motion.timeline.zoom_toggle_full` |  | Shift+; | Shift+; |  | C | ☐ |
-| `CompToggleEffects` | `motion.reveal` | `{"what":"effects","add":false}` | E | E |  | B | ☐ |
-| `CompToggleEffectsAddState` | `motion.reveal` | `{"what":"effects","add":true}` | Shift+E | Shift+E |  | B | ☐ |
+| `CompToggleEffects` | `motion.reveal` | `{"what":"effects","add":false}` | E | E |  | B | ✅ |
+| `CompToggleEffectsAddState` | `motion.reveal` | `{"what":"effects","add":true}` | Shift+E | Shift+E |  | B | ✅ |
 | `CompToggleMaskFeathers` | `motion.reveal` | `{"what":"mask_feather","add":false}` | F | F |  | B | ☐ |
 | `CompToggleMaskFeathersAddState` | `motion.reveal` | `{"what":"mask_feather","add":true}` | Shift+F | Shift+F |  | B | ☐ |
 | `CompToggleMaskFeathersAddStateNewKF` | `motion.toggle_key` | `{"attr":"mask_feather"}` | Alt+Shift+F | Opt+Shift+F |  | B | ☐ |

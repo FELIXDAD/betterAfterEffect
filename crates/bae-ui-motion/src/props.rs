@@ -368,7 +368,7 @@ pub(crate) fn effect_nodes(stage: &Stage, layer: &PrimPath) -> Vec<Node> {
                 .unwrap_or_default();
             Some(Node::Group {
                 id: format!("{layer}#{e}"),
-                label: group_label(stage, &e),
+                label: crate::effects::instance_name(stage, &e),
                 children: params
                     .into_iter()
                     .map(|a| Node::Prop {
