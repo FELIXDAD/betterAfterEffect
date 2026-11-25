@@ -633,19 +633,34 @@ impl Panel for CompositionViewer {
             }
             vector = std::borrow::Cow::Owned(text_only);
         }
-        let mut shapes = Vec::new();
-        let to_screen = |p: DVec2| view.to_screen(p);
-        render::paint_comp(
-            &vector,
-            &clip,
-            &to_screen,
-            Affine::new(DMat4::IDENTITY),
-            1.0,
-            f64::from(view.scale),
-            &|s| egui::FontId::proportional(s),
-            &mut shapes,
-        );
-        clip.extend(shapes);
+        // Something is still warming up (an effect pipeline, the text
+        // renderer): the last complete frame stays (none yet: nothing, not the
+        // simplified drawing) with a small hint, like AE's render progress.
+        let preparing = self.gpu.as_ref().is_some_and(|g| g.preparing);
+        if !(preparing && !self.on_gpu) {
+            let mut shapes = Vec::new();
+            let to_screen = |p: DVec2| view.to_screen(p);
+            render::paint_comp(
+                &vector,
+                &clip,
+                &to_screen,
+                Affine::new(DMat4::IDENTITY),
+                1.0,
+                f64::from(view.scale),
+                &|s| egui::FontId::proportional(s),
+                &mut shapes,
+            );
+            clip.extend(shapes);
+        }
+        if preparing {
+            painter.text(
+                area.right_bottom() + vec2(-8.0, -8.0),
+                Align2::RIGHT_BOTTOM,
+                tr("Preparing…"),
+                theme::small(),
+                color::TEXT_DIM,
+            );
+        }
 
         // Preferences > Grids & Guides (bae-prefs, workstream D).
         let guides = bae_ui::settings::GridGuides::current(cx.resources);
