@@ -37,7 +37,7 @@
 //! |---|---|---|
 //! | Still / sequence | PNG, JPEG, WebP, OpenEXR | pure Rust (`png`, `zune-jpeg`, `image-webp`, `exr`) |
 //! | Video (macOS) | H.264, HEVC, ProRes (QuickTime / MP4) | AVFoundation / VideoToolbox, IOSurface → Metal texture, zero copy ([`apple`]) |
-//! | Video (Windows) | H.264, HEVC | Media Foundation (placeholder; next PR) |
+//! | Video (Windows) | H.264, HEVC | Media Foundation / D3D11, one upload into wgpu |
 //!
 //! Export: [`export`] (encoders, async GPU readback, render loop, render
 //! queue); PNG / TIFF / OpenEXR sequence encoders built in. Audio: [`audio`]
@@ -106,6 +106,8 @@ pub fn builtin_encoders() -> Vec<Arc<dyn EncoderFormat>> {
     let mut encoders: Vec<Arc<dyn EncoderFormat>> = vec![Arc::new(export::ImageSequenceFormat)];
     #[cfg(target_vendor = "apple")]
     encoders.push(Arc::new(apple::AvWriterFormat));
+    #[cfg(windows)]
+    encoders.push(Arc::new(media_foundation::MfWriterFormat));
     encoders
 }
 
