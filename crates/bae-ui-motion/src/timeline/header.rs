@@ -111,7 +111,7 @@ impl TimelinePanel {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn header(
         &mut self,
-        ui: &Ui,
+        ui: &mut Ui,
         cx: &mut PanelContext<'_>,
         session: &SharedSession,
         info: &CompInfo,
@@ -166,10 +166,16 @@ impl TimelinePanel {
             pos2(head.left() + cols.end - 14.0, head.center().y),
             vec2(20.0, 20.0),
         );
-        let on = session.lock().graph_editor;
-        let gresp = ui
-            .interact(ge, ui.id().with("graph_editor_switch"), Sense::click())
-            .labeled_toggle(egui::WidgetType::Button, tr("Graph Editor"), on);
+        let gresp = ui.interact(ge, ui.id().with("graph_editor_switch"), Sense::click());
+        let on = {
+            let mut s = session.lock();
+            if gresp.clicked() {
+                s.graph_editor = !s.graph_editor;
+            }
+            s.graph_editor
+        };
+        self.graph_mode = on;
+        let gresp = gresp.labeled_toggle(egui::WidgetType::Button, tr("Graph Editor"), on);
         if on {
             ui.painter().rect_filled(ge, 2.0, color::BUTTON_ON);
         }
@@ -185,14 +191,10 @@ impl TimelinePanel {
                 color::ICON_DIM
             },
         );
-        if gresp.clicked() {
-            session.lock().graph_editor = !on;
-        }
         gresp.on_hover_text(tr("Graph Editor"));
 
         // The comp switches left of it, AE's order: Draft 3D, Hide Shy Layers,
-        // Frame Blending (not rendered yet: disabled), Motion Blur. Saved in the
-        // comp, as AE does.
+        // Frame Blending, Motion Blur.
         for (i, (attr, icon, name, tip, enabled)) in [
             (
                 "motion_blur",
@@ -206,7 +208,7 @@ impl TimelinePanel {
                 Icon::FrameBlend,
                 "Enable Frame Blending",
                 "Enables Frame Blending for all layers with the Frame Blend switch set",
-                false,
+                frame_mix_available(),
             ),
             (
                 "hide_shy_layers",
@@ -220,7 +222,7 @@ impl TimelinePanel {
                 Icon::Cube,
                 "Draft 3D",
                 "Turn fast 3D previews on or off",
-                true,
+                false,
             ),
         ]
         .into_iter()
@@ -228,8 +230,16 @@ impl TimelinePanel {
         {
             let r = ge.translate(vec2(-26.0 * (i as f32 + 1.0), 0.0));
             let on = enabled && bool_attr(cx.stage, &info.path, attr);
-            let resp = ui
-                .interact(r, ui.id().with(("comp_switch", attr)), Sense::click())
+            let mut cell = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(r)
+                    .id_salt(("comp_switch", attr)),
+            );
+            if !enabled {
+                cell.disable();
+            }
+            let resp = cell
+                .interact(r, cell.id().with("button"), Sense::click())
                 .labeled_toggle(egui::WidgetType::Button, tr(name), on);
             if on {
                 ui.painter().rect_filled(r, 2.0, color::BUTTON_ON);

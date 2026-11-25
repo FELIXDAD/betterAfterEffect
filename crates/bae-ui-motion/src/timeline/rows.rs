@@ -38,6 +38,63 @@ pub(super) fn switch(ui: &Ui, rect: Rect, on: bool, icon: Icon, id: Id, layer: &
     resp.clicked()
 }
 
+fn frame_mix_cell(
+    ui: &mut Ui,
+    cx: &mut PanelContext<'_>,
+    layer: &PrimPath,
+    label: &str,
+    rect: Rect,
+    id: Id,
+) {
+    let Some(view) = cx.stage.prim(layer) else {
+        return;
+    };
+    if view.value("kind").and_then(|v| v.as_str()) != Some("footage") {
+        return;
+    }
+    let asset = view
+        .value("source")
+        .and_then(|s| s.as_prim_ref())
+        .and_then(|p| cx.stage.prim(p));
+    let Some(asset) = asset else { return };
+    let kind = asset.value("kind").and_then(|v| v.as_str());
+    if !(kind == Some("sequence")
+        || (kind == Some("footage") && asset.value("frame_rate").is_some()))
+    {
+        return;
+    }
+    let mode = view
+        .value("frame_blending")
+        .and_then(|v| v.as_str())
+        .unwrap_or("off");
+    let on = mode != "off";
+    let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(rect).id_salt(id));
+    if query::is_locked(cx.stage, layer) {
+        cell.disable();
+    }
+    let name = tr(match mode {
+        "pixel_motion" => "Pixel Motion",
+        "frame_mix" => "Frame Mix",
+        _ => "Off",
+    });
+    let resp = cell.interact(rect, id, Sense::click()).labeled_value(
+        egui::WidgetType::Button,
+        &bae_ui::a11y::context(&[label, tr("Frame Blending")]),
+        name,
+    );
+    widgets::paint_switch(
+        ui.painter(),
+        rect.shrink2(vec2(1.0, 2.0)),
+        on,
+        Icon::FrameBlend,
+        resp.hovered(),
+    );
+    if resp.clicked() {
+        cx.invoke_with("layer.set_attr", json!({"layers":[layer],"attr":"frame_blending","value":{"type":"enum","value":if on {"off"} else {"frame_mix"}}}));
+    }
+    resp.on_hover_text(name);
+}
+
 impl TimelinePanel {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn row_ui(
@@ -246,6 +303,9 @@ impl TimelinePanel {
                             vec2(SW, ROW_H),
                         )
                     };
+                    if frame_mix_available() {
+                        frame_mix_cell(ui, cx, layer, &layer_ctx, sw(4), rid("frame_blending"));
+                    }
                     // Shy: no box, AE's figure peeking over the bar, or ducked behind it
                     // when the layer is shy.
                     let shy = bool_attr(stage, layer, "shy");

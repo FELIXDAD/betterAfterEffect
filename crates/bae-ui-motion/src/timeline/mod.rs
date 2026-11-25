@@ -614,7 +614,6 @@ impl Panel for TimelinePanel {
             ui.ctx().request_repaint();
         }
         let now = session.lock().time(&info.path);
-        self.graph_mode = session.lock().graph_editor;
         let cols = Cols::new(self.panes, full.width());
         let graph_left = full.left() + cols.end + 2.0;
         let graph_w = (full.right() - graph_left).max(40.0);
@@ -796,6 +795,10 @@ impl Panel for TimelinePanel {
             }
         }
     }
+}
+
+fn frame_mix_available() -> bool {
+    bae_motion::layer::LAYER_SWITCH_ATTRS.contains(&"frame_blending")
 }
 
 fn row_key(row: &Row) -> String {

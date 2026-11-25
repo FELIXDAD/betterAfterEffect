@@ -304,8 +304,7 @@ fn shift_f3_and_the_switch_toggle_the_graph_editor() {
     let sw = pos2(tl.last_axis.unwrap().left - 2.0 - 14.0, 22.0 + 17.0);
     h.click(&mut tl, sw, Modifiers::NONE);
     assert!(h.session().lock().graph_editor);
-    // The button bar is shown from the next frame.
-    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    // The graph and its button bar are visible on the release frame.
     assert!(!tl.graph_editor().last.buttons.is_empty());
 }
 
@@ -2247,6 +2246,75 @@ fn modes_column_t_switch_and_track_matte_pick_whip() {
 }
 
 #[test]
+fn footage_frame_mix_retains_the_layer_setting_when_the_comp_switch_is_off() {
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let imported = h.run(
+        "item.import",
+        json!({"files": [{
+            "path": file.path(),
+            "attrs": {
+                "kind": Value::Enum("sequence".into()),
+                "frame_rate": Value::FrameRate(bae_model::FrameRate::FPS_30),
+                "duration": Value::Time(Time::from_seconds(2.0))
+            }
+        }]}),
+    );
+    let asset = path(&imported["items"][0]);
+    let layer = path(
+        &h.run(
+            "layer.create",
+            json!({"comp": comp,"kind":"footage","source":asset}),
+        )["path"],
+    );
+    let mut tl = h.bars();
+    let y = |p: &PrimPath| {
+        tl.last_bars
+            .iter()
+            .find(|(path, _)| path == p)
+            .unwrap()
+            .1
+            .center()
+            .y
+    };
+    let right = tl.last_axis.unwrap().left - 2.0;
+    let x = right - 120.0 - 134.0 + 4.5 * 15.0;
+    let row = pos2(x, y(&layer));
+    let solid = pos2(x, y(&h.layer));
+    let master = pos2(right - 14.0 - 52.0, 39.0);
+    assert!(
+        h.click(&mut tl, solid, Modifiers::NONE)
+            .invocations
+            .is_empty()
+    );
+    let r = h.click(&mut tl, row, Modifiers::NONE);
+    if !bae_motion::layer::LAYER_SWITCH_ATTRS.contains(&"frame_blending") {
+        assert!(r.invocations.is_empty());
+        assert!(
+            h.click(&mut tl, master, Modifiers::NONE)
+                .invocations
+                .is_empty()
+        );
+        return;
+    }
+    assert_eq!(r.invocations.len(), 1);
+    h.apply(&r);
+    for expected in [true, false, true] {
+        let r = h.click(&mut tl, master, Modifiers::NONE);
+        h.apply(&r);
+        assert_eq!(
+            query::static_value(&h.stage.prim(&comp).unwrap(), "frame_blending"),
+            Some(Value::Bool(expected))
+        );
+        assert_eq!(
+            query::static_value(&h.stage.prim(&layer).unwrap(), "frame_blending"),
+            Some(Value::Enum("frame_mix".into()))
+        );
+    }
+}
+
+#[test]
 fn comp_switches_and_layer_switches_reach_the_render_request() {
     use crate::actions::ids;
     let mut h = H::new();
@@ -2273,11 +2341,12 @@ fn comp_switches_and_layer_switches_reach_the_render_request() {
     let rc = request(&h);
     assert!(rc.motion_blur.is_some());
     assert!(rc.layers.iter().any(|l| !l.motion_samples.is_empty()));
-    // Hide Shy Layers and Draft 3D are comp settings; Frame Blending is disabled.
+    // Draft 3D has no renderer. Frame Mix is available with its sampling backend.
+    let mix = bae_motion::layer::LAYER_SWITCH_ATTRS.contains(&"frame_blending");
     for (dx, attr, on) in [
-        (52.0, "frame_blending", false),
+        (52.0, "frame_blending", mix),
         (78.0, "hide_shy_layers", true),
-        (104.0, "draft_3d", true),
+        (104.0, "draft_3d", false),
     ] {
         let r = h.click(&mut tl, ge - vec2(dx, 0.0), Modifiers::NONE);
         h.apply(&r);
@@ -2292,10 +2361,12 @@ fn comp_switches_and_layer_switches_reach_the_render_request() {
     );
     h.apply(&r);
     assert!(request(&h).layers.iter().any(|l| l.matrix_3d.is_some()));
-    // Undo the comp switches one step at a time.
+    // Undo the 3D layer, Hide Shy and (when enabled) Frame Mix.
     h.undo();
     h.undo();
-    h.undo();
+    if mix {
+        h.undo();
+    }
     assert!(request(&h).motion_blur.is_some());
     h.undo();
     assert!(request(&h).motion_blur.is_none());
