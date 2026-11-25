@@ -249,24 +249,26 @@ fn apply_overrides(
         let three_d = layer.switches.three_d;
         let mut t: Transform = layer.transform;
         let mut touched = false;
-        // A scrubbed effect parameter of this layer (Effect Controls, timeline).
-        if let Some(s) = scrub.filter(|s| s.attr.starts_with("param:"))
-            && crate::effects::layer_of(&s.path).as_ref() == Some(&layer.path)
-            && let Some(e) = layer.effects.iter_mut().find(|e| e.path == s.path)
-        {
-            e.params.insert(
-                s.attr.trim_start_matches("param:").to_owned(),
-                s.value.clone(),
-            );
-        }
-        if let Some(s) = scrub.filter(|s| s.path == layer.path) {
+        let attr = scrub.map_or("", |s| s.attr.as_str());
+        for (path, value) in scrub.into_iter().flat_map(Scrub::targets) {
+            // A scrubbed effect parameter of this layer (Effect Controls, timeline).
+            if attr.starts_with("param:")
+                && crate::effects::layer_of(path).as_ref() == Some(&layer.path)
+                && let Some(e) = layer.effects.iter_mut().find(|e| e.path == *path)
+            {
+                e.params
+                    .insert(attr.trim_start_matches("param:").to_owned(), value.clone());
+            }
+            if *path != layer.path {
+                continue;
+            }
             touched = true;
             let v3 = |v: &Value| match v {
                 Value::Vec3(a) => Some(DVec3::from_array(*a)),
                 Value::Vec2(a) => Some(DVec3::new(a[0], a[1], 0.0)),
                 _ => None,
             };
-            match (s.attr.as_str(), &s.value) {
+            match (attr, value) {
                 ("transform:position", v) => t.position = v3(v).unwrap_or(t.position),
                 ("transform:anchor_point", v) => t.anchor_point = v3(v).unwrap_or(t.anchor_point),
                 ("transform:scale", v) => t.scale = v3(v).unwrap_or(t.scale),
@@ -417,7 +419,7 @@ impl Panel for CompositionViewer {
             empty_viewer(ui, cx, &session);
             return;
         };
-        if session.lock().tick(&info) {
+        if session.lock().update_preview(cx, &info) {
             ui.ctx().request_repaint();
         }
         let time = session.lock().time(&info.path);
@@ -1022,6 +1024,13 @@ pub(crate) fn add_item_as_layer(
             .and_then(|v| query::static_value(&v, "kind"))
         {
             Some(Value::Enum(k)) if k == "solid" => LayerKind::Solid,
+            _ if stage.prim(item).is_some_and(|v| {
+                v.value("has_audio").and_then(Value::as_bool) == Some(true)
+                    && v.value("has_video").and_then(Value::as_bool) == Some(false)
+            }) =>
+            {
+                LayerKind::Audio
+            }
             _ => LayerKind::Footage,
         }
     };
