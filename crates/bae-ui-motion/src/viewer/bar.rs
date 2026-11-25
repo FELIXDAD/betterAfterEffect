@@ -101,10 +101,11 @@ pub(super) fn bottom_bar(
         }
     }
 
+    let mut opts = session.lock().view_options;
     for (on, icon, tip) in [
         (&mut v.checker, Icon::TransparencyGrid, "Transparency Grid"),
-        (&mut v.safe, Icon::RegionOfInterest, "Title/Action Safe"),
-        (&mut v.grid, Icon::Guides, "Grid"),
+        (&mut opts.safe, Icon::RegionOfInterest, "Title/Action Safe"),
+        (&mut opts.grid, Icon::Guides, "Grid"),
     ] {
         if icons::button(ui, icon, 20.0, *on)
             .labeled_toggle(egui::WidgetType::Checkbox, tr(tip), *on)
@@ -114,6 +115,7 @@ pub(super) fn bottom_bar(
             *on = !*on;
         }
     }
+    session.lock().view_options = opts;
     // 3D View popup.
     let views = super::view3d::View3d::ALL;
     let labels: Vec<&str> = views.iter().map(|v| tr(v.title())).collect();
