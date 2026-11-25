@@ -238,8 +238,8 @@ impl Program<'_> {
             Self::Module(entry) => {
                 entry.module.load(ctx)?;
                 host.caller.load(ctx)?;
-                let caller: rquickjs::Object = Module::import(ctx, "bae-call")?.finish()?;
-                let entries: rquickjs::Object = caller.get("entries")?;
+                let caller: rquickjs::Object<'_> = Module::import(ctx, "bae-call")?.finish()?;
+                let entries: rquickjs::Object<'_> = caller.get("entries")?;
                 let function: Function<'_> = entries.get(entry.export)?;
                 let result = function.call((ctx.json_parse(entry.args.to_string())?,))?;
                 rquickjs::promise::MaybePromise::from_value(result).finish()

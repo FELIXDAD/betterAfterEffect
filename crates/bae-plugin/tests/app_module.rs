@@ -148,20 +148,58 @@ schema = "args.json"
 
 #[test]
 fn warm_up_prepares_installed_and_replaced_effects_before_first_render() {
+    use bae_model::PrimPath;
+    use bae_render::{
+        LayerContent, OutputAlpha, RenderComp, RenderEffect, RenderLayer, RenderRequest, Renderer,
+    };
+
     let Some(gpu) = bae_gpu::testing::shared_context() else {
         return;
     };
     let home = tempfile::tempdir().unwrap();
     let path = write_package(&home.path().join("fx"), "org.test.warm", "1.0.0");
+    std::fs::write(
+        path.join("fx.wgsl"),
+        "fn fx(c: vec4<f32>, px: BaePixel) -> vec4<f32> { return vec4<f32>(0.0,1.0,0.0,1.0); }",
+    )
+    .unwrap();
     let dirs = [bae_plugin::PluginDir::new(&path, Scope::User)];
     let mut builder = AppBuilder::new();
     builder.add_module(PluginModule);
     let app = builder.build();
     let runtime = app.resource::<std::sync::Arc<PluginRuntime>>().unwrap();
+    let mut comp = RenderComp::new(PrimPath::new("/comps/main").unwrap(), 2, 2);
+    let mut layer = RenderLayer::new(
+        PrimPath::new("/comps/main/layers/a").unwrap(),
+        LayerContent::Solid {
+            color: [1.0, 0.0, 0.0, 1.0],
+            width: 2,
+            height: 2,
+        },
+    );
+    layer.effects.push(RenderEffect {
+        path: PrimPath::new("/comps/main/layers/a/effects/fx").unwrap(),
+        effect: "org.test.warm/fx".into(),
+        enabled: true,
+        params: Vec::new(),
+    });
+    comp.layers.push(layer);
+    let mut renderer = Renderer::new(gpu.clone());
+    let pixel = |renderer: &mut Renderer| {
+        renderer.sync_effects(&runtime.registries().effects);
+        let frame = renderer
+            .render_frame(&comp, &RenderRequest::full())
+            .unwrap();
+        let image = renderer.read_rgba8(&frame, OutputAlpha::Straight).unwrap();
+        <[u8; 4]>::try_from(&image.data[..4]).unwrap()
+    };
+    assert_eq!(pixel(&mut renderer), [255, 0, 0, 255]);
+    assert!(!renderer.cached_frames(&comp.path).is_empty());
     runtime.warm_up(&dirs, &gpu);
     let effect = || runtime.with_host(|host| host.get("org.test.warm").unwrap().effects[0].clone());
     let first = effect();
     assert_eq!(first.compiled_formats(), 1);
+    assert_eq!(pixel(&mut renderer), [0, 255, 0, 255]);
     runtime
         .load(&DirSource::new(path.clone()), Scope::User)
         .unwrap();
@@ -170,6 +208,7 @@ fn warm_up_prepares_installed_and_replaced_effects_before_first_render() {
     assert_eq!(replaced.compiled_formats(), 1);
     runtime.unload("org.test.warm").unwrap();
     runtime.warm_up(&dirs, &gpu);
+    assert_eq!(pixel(&mut renderer), [255, 0, 0, 255]);
     assert!(runtime.with_host(|host| host.get("org.test.warm").is_none()));
 }
 
