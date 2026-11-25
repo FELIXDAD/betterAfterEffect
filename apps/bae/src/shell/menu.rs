@@ -388,7 +388,7 @@ fn predefined(spec: &MenuItemSpec) -> Option<PredefinedMenuItem> {
     if !cfg!(target_os = "macos") || spec.path.first().map(String::as_str) != Some(APP_MENU) {
         return None;
     }
-    let owned = native_text(tr(&spec.title));
+    let owned = native_text(spec.display_title());
     let text = Some(owned.as_str());
     Some(match spec.action.as_str() {
         ids::ABOUT => PredefinedMenuItem::about(text, Some(about_metadata())),
@@ -418,7 +418,7 @@ fn append_entries(
                 let item = if spec.is_checkable() {
                     let item = CheckMenuItem::with_id(
                         menu_id,
-                        native_text(tr(&spec.title)),
+                        native_text(spec.display_title()),
                         true,
                         false,
                         None,
@@ -426,7 +426,8 @@ fn append_entries(
                     menu.append(&item)?;
                     Native::Check(item)
                 } else {
-                    let item = MenuItem::with_id(menu_id, native_text(tr(&spec.title)), true, None);
+                    let item =
+                        MenuItem::with_id(menu_id, native_text(spec.display_title()), true, None);
                     menu.append(&item)?;
                     Native::Plain(item)
                 };

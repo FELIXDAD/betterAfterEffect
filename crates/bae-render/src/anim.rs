@@ -278,6 +278,7 @@ impl AnimEvaluator {
         let guide_ok = !l.switches.guide || (depth == 0 && self.purpose == RenderPurpose::Preview);
         let mut out = RenderLayer::new(l.path.clone(), LayerContent::None);
         out.time = l.layer_time;
+        out.in_point = l.timing.in_point.min(l.timing.out_point);
         out.active = l.active && guide_ok;
         out.visible = l.visible;
         out.adjustment = l.switches.adjustment || l.kind == LayerKind::Adjustment;
