@@ -519,6 +519,7 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
             (ids::NUDGE, "Nudge Layer Position"),
             (ids::RESOLUTION, "Resolution"),
             (ids::FREE_TRANSFORM, "Free Transform Points"),
+            (crate::viewer::ZOOM_100, "Zoom to 100%"),
         ])
         .chain(crate::viewer::view3d::ACTIONS.iter().copied())
 }
@@ -1050,6 +1051,10 @@ impl ActionHandler for ToolActions {
         if crate::viewer::view3d::handle(inv, cx) {
             return true;
         }
+        if inv.id == crate::viewer::ZOOM_100 {
+            shared(cx.resources).lock().view_request = Some(ViewRequest::Actual);
+            return true;
+        }
         if inv.id == ids::FREE_TRANSFORM {
             let tools = shared(cx.resources);
             let mut t = tools.lock();
@@ -1064,6 +1069,7 @@ impl ActionHandler for ToolActions {
 /// Chinese names of the tools and tool options (`docs/glossary.md`; names marked
 /// 待核 in the PR are best effort until R1 checks AE 26's Chinese UI).
 pub(crate) const ZH: &[(&str, &str)] = &[
+    ("Zoom to 100%", "缩放到 100%"),
     ("Orbit Around Scene Tool", "绕场景旋转工具"),
     ("Orbit Around Camera POI Tool", "绕摄像机目标点旋转工具"),
     ("Pan Camera POI Tool", "平移摄像机目标点工具"),
