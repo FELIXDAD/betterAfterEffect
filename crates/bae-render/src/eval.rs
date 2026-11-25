@@ -66,6 +66,9 @@ impl crate::graph::CompFrames for EvaluatorFrames<'_> {
         frame: &crate::graph::EffectFrame,
         times: &[Time],
     ) -> Vec<crate::effect::ParameterSample> {
+        if times.is_empty() {
+            return Vec::new();
+        }
         let Some(view) = self.stage.prim(&instance.path) else {
             return Vec::new();
         };
@@ -108,6 +111,21 @@ impl crate::graph::CompFrames for EvaluatorFrames<'_> {
         samples
     }
 
+    fn scalar_track(
+        &mut self,
+        effect: &PrimPath,
+        id: u32,
+        frame: &crate::graph::EffectFrame,
+    ) -> Option<Arc<crate::effect::ScalarTrack>> {
+        let name = bae_model::effect::param_attr(id);
+        let attr = self.stage.prim(effect)?.attr(&name)?;
+        if !attr.is_animated() && attr.expression.is_none() {
+            return None;
+        }
+        self.evaluator
+            .integral(self.stage, effect, &name, frame, attr)
+    }
+
     fn comp_at(&mut self, comp: &PrimPath, time: Time) -> Result<Option<RenderComp>, RenderError> {
         self.evaluator.evaluate(self.stage, comp, time).map(Some)
     }
@@ -138,6 +156,20 @@ pub trait CompEvaluator {
         bae_anim::Evaluator::new()
             .evaluate_attribute(stage, path, name, time)
             .ok()
+    }
+
+    /// Cumulative scalar samples for effects that integrate a parameter over time.
+    fn integral(
+        &mut self,
+        stage: &Stage,
+        path: &PrimPath,
+        name: &str,
+        frame: &crate::graph::EffectFrame,
+        attr: &AttrSpec,
+    ) -> Option<Arc<crate::effect::ScalarTrack>> {
+        crate::parameter_track::prepare(&mut Arc::default(), attr, frame, |t| {
+            self.attribute(stage, path, name, t)?.as_f64()
+        })
     }
 
     /// Drops whatever `event` makes stale. Default: nothing is cached.
@@ -279,6 +311,7 @@ impl<'a> MockPass<'a> {
             let mut out = RenderLayer::new(layer.path().clone(), LayerContent::None);
             out.time = local;
             out.time_scale = if stretch == 0.0 { 1.0 } else { stretch / 100.0 };
+            out.in_point = in_point;
             out.active = in_point <= time && time < out_point && solo_ok && guide_ok;
             out.visible = boolean(layer, "enabled", local).unwrap_or(true);
             out.adjustment =

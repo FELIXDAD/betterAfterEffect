@@ -33,12 +33,13 @@ mod transform;
 pub use bae_model::{Stage, Time, Value};
 pub use curve::{Curve, CurveKind};
 pub use error::EvalError;
-pub use eval::Evaluator;
+pub use eval::{Evaluator, layer_timing};
 pub use evaluated::{
     AssetInfo, AttrError, CameraState, EvaluatedComp, EvaluatedEffect, EvaluatedLayer,
     EvaluatedMask, EvaluatedPrim, FrameBlending, LayerSource, LayerSwitches, LightFalloff,
     LightState, LightType, TextPathOptions, TrackMatte,
 };
+pub use expr::prewarm as prewarm_expressions;
 pub use time::{LayerTiming, MotionBlur};
 pub use transform::{AutoOrientRotation, Transform};
 

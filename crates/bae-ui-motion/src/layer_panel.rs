@@ -83,7 +83,7 @@ pub(crate) fn alone(
     l.opacity = 1.0;
     l.visible = true;
     l.active = true;
-    l.blend_mode = "normal".to_owned();
+    l.blend_mode = "normal".into();
     l.track_matte = Default::default();
     l.track_matte_layer = None;
     l.switches.three_d = false;
@@ -337,4 +337,13 @@ fn time_ruler(
         s.stop();
         s.set_time(info, Time::from_seconds(f * total));
     }
+}
+
+/// Registers this module's panel (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    crate::register_panel(
+        app,
+        "layer",
+        bae_ui::PanelKind::new("Layer", |spawn| Box::new(LayerPanel::new(spawn.state))),
+    );
 }

@@ -64,9 +64,21 @@ pub enum RenderError {
     /// Something else (effect or source specific).
     #[error("{0}")]
     Other(String),
+    /// Something the app's warm-up is still preparing (a renderer, fonts, a
+    /// pipeline). The frame is drawn without it, marked incomplete, and drawn
+    /// again when it is ready.
+    #[error("{0} is still warming up")]
+    WarmingUp(String),
     /// An export was cancelled.
     #[error("export canceled")]
     Canceled,
+}
+
+impl RenderError {
+    /// Whether this is [`RenderError::WarmingUp`].
+    pub fn is_warming_up(&self) -> bool {
+        matches!(self, RenderError::WarmingUp(_))
+    }
 }
 
 impl fmt::Debug for RenderError {

@@ -37,9 +37,9 @@ fn kernel(
                 bindings: vec![
                     (0, Binding::Uniform(BYTES)),
                     (1, Binding::Texture),
-                    (2, Binding::StorageBuffer),
-                    (3, Binding::StorageBuffer),
-                    (4, Binding::StorageBuffer),
+                    (2, Binding::ReadWriteBuffer),
+                    (3, Binding::ReadWriteBuffer),
+                    (4, Binding::ReadWriteBuffer),
                     (5, Binding::Storage(format)),
                 ],
                 workgroup: [8, 8, 1],
@@ -47,7 +47,16 @@ fn kernel(
         },
     )
 }
+fn scratch_buffers(rt: &gpu::Runtime, bytes: u64, distance_bytes: u64) -> [wgpu::Buffer; 3] {
+    [
+        rt.scratch("Paint Bucket component roots", bytes),
+        rt.scratch("Paint Bucket distance A", distance_bytes),
+        rt.scratch("Paint Bucket distance B", distance_bytes),
+    ]
+}
+
 pub(super) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
+    scratch_buffers(rt, 4, 4);
     for entry in STAGES {
         kernel(rt, format, entry)?;
     }
@@ -97,7 +106,7 @@ impl TargetEffect for PaintBucket {
         let radius = (v.f(5) * p.scale) as f32;
         let distance = stroke > 1 && radius > 0.0 && !v.b(7);
         let scratch_size = if distance { bytes } else { 4 };
-        let [parents, mut from, mut to] = rt.bucket_buffers([bytes, scratch_size, scratch_size]);
+        let [parents, mut from, mut to] = scratch_buffers(&rt, bytes, scratch_size);
         let mut u = UniformWriter::with_size(BYTES as usize);
         image_grid::image_coords(&mut u, 0, input, grid);
         u.i32s(32, &image_grid::rect4(rect))
@@ -160,5 +169,24 @@ impl TargetEffect for PaintBucket {
         }
         run("paint", 0, &from, &to, roi.size())?;
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{gpu, scratch_buffers};
+    #[test]
+    fn scratch_buffers_grow_individually_and_are_reused() {
+        let Some(gpu) = bae_gpu::testing::shared_context() else {
+            return;
+        };
+        let rt = gpu::runtime(&gpu);
+        let small = scratch_buffers(&rt, 1024, 4);
+        assert_eq!(scratch_buffers(&rt, 512, 4), small);
+        let with_stroke = scratch_buffers(&rt, 1024, 1024);
+        assert_eq!(with_stroke[0], small[0]);
+        assert_ne!(with_stroke[1], small[1]);
+        assert_ne!(with_stroke[2], small[2]);
+        assert_eq!(scratch_buffers(&rt, 1024, 1024), with_stroke);
     }
 }
