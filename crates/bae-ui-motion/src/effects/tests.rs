@@ -175,11 +175,9 @@ fn apply_last_effect_and_remove_all() {
         json!({"match_name": "ADBE Tint"}),
     ));
     // One undo step; AE also brings Effect Controls to the front.
-    assert!(
-        r.invocations
-            .iter()
-            .any(|i| i.id == bae_ui::action::ids::OPEN_PANEL && i.id_param() == Some("effect_controls"))
-    );
+    assert!(r.invocations.iter().any(
+        |i| i.id == bae_ui::action::ids::OPEN_PANEL && i.id_param() == Some("effect_controls")
+    ));
     assert_eq!(
         r.invocations
             .iter()

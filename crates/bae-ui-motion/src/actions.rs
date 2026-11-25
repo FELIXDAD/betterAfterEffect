@@ -317,6 +317,17 @@ const VARIANTS: &[(&str, &str, &str)] = &[
         r#"{"what":"animated","add":false}"#,
         "Reveal Animated Properties",
     ),
+    // E / Shift+E (AE: the layer's Effects group).
+    (
+        ids::REVEAL,
+        r#"{"what":"effects","add":false}"#,
+        "Show Effects",
+    ),
+    (
+        ids::REVEAL,
+        r#"{"what":"effects","add":true}"#,
+        "Add Effects to Shown Properties",
+    ),
 ];
 
 /// Layer kinds by name, for both the UI action and the model command it runs.
@@ -1512,6 +1523,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Draft Quality", "草图品质"),
     ("Wireframe Quality", "线框品质"),
     ("Show Position", "显示位置"),
+    ("Show Effects", "显示效果"),
+    ("Add Effects to Shown Properties", "将效果添加到显示的属性"),
     ("Add Position to Shown Properties", "将位置添加到显示的属性"),
     ("Position: Add or Remove Keyframe", "位置：添加或移除关键帧"),
     ("Show Scale", "显示缩放"),

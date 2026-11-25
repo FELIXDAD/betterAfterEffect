@@ -282,13 +282,12 @@ pub struct EffectControlsPanel {
 
 impl Panel for EffectControlsPanel {
     fn tab(&self, _cx: &PanelContext<'_>) -> TabInfo {
-        // AE: "Effect Controls <layer>", "Effect Controls (none)".
-        let title = if self.title.is_empty() {
-            tr("(none)")
+        // AE: "Effect Controls <layer>".
+        if self.title.is_empty() {
+            TabInfo::new(tr("Effect Controls"))
         } else {
-            self.title.as_str()
-        };
-        TabInfo::new(format!("{} {title}", tr("Effect Controls")))
+            TabInfo::new(format!("{} {}", tr("Effect Controls"), self.title))
+        }
     }
 
     fn on_action(&mut self, action: &Invocation, cx: &mut PanelContext<'_>) -> bool {

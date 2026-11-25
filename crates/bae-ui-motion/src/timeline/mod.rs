@@ -484,13 +484,13 @@ impl TimelinePanel {
                 if matches!(r, crate::session::Reveal::Attrs(list) if list.iter().any(|a| a == "effects"))
                 {
                     let effects_id = format!("{layer}#effects");
-                    let group: Vec<Node> = props::layer_tree(stage, &layer)
+                    let group: Vec<Node> = props::layer_tree(stage, layer)
                         .into_iter()
                         .filter(|n| matches!(n, Node::Group { id, .. } if *id == effects_id))
                         .collect();
                     let mut open = self.expanded.clone();
                     open.insert(effects_id);
-                    flatten_tree(&group, &layer, 1, &open, stage, &mut out);
+                    flatten_tree(&group, layer, 1, &open, stage, &mut out);
                 }
             } else if self.expanded.contains(layer.as_str()) {
                 flatten_tree(
