@@ -7,10 +7,8 @@ use crate::{
     rust_builtin,
 };
 use bae_gpu::wgpu;
-use bae_model::Value;
 use bae_render::{
-    Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderComp, RenderEffect, RenderError,
-    RenderLayer, effect::LayerDependency,
+    Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderError, effect::LayerDependency,
 };
 use std::sync::Arc;
 
@@ -72,25 +70,15 @@ fn cc_environment() -> Builtin {
     )
 }
 
-const BASIS: u32 = u32::MAX - 2;
 struct Environment(bae_model::EffectDef);
 
 impl Effect for Environment {
     fn def(&self) -> &bae_model::EffectDef {
         &self.0
     }
-    fn prepare_scene(&self, instance: &mut RenderEffect, comp: &RenderComp, _: &RenderLayer) {
-        let camera = comp.view_camera();
-        let mut basis = Vec::with_capacity(12);
-        for v in [
-            camera.world.x_axis,
-            camera.world.y_axis,
-            camera.world.z_axis,
-        ] {
-            basis.extend(v.truncate().normalize_or_zero().to_array());
-            basis.push(camera.zoom);
-        }
-        instance.params.push((BASIS, Value::FloatList(basis)));
+    /// The comp camera turns the environment (and keys the frame cache).
+    fn uses_scene(&self, _: &EffectParams<'_>) -> bool {
+        true
     }
     fn layer_dependencies(&self, p: &EffectParams<'_>) -> Vec<LayerDependency> {
         layer_input::dependency(p, 1, true).into_iter().collect()
@@ -116,28 +104,32 @@ impl TargetEffect for Environment {
         if roi.is_empty() {
             return Ok(input.clone());
         }
-        let map = layer_input::dependency(p, 1, true)
-            .and_then(|d| target.effect_layer(&d).cloned())
-            .or_else(|| (p.layer_bounds.is_empty() && p.value(1).is_none()).then(|| input.clone()));
+        let map =
+            layer_input::dependency(p, 1, true).and_then(|d| target.effect_layer(&d).cloned());
+        // The comp camera's axes and zoom; without one, AE's default 50 mm view.
         let width = if p.layer_bounds.is_empty() {
             input.rect.width()
         } else {
             p.layer_bounds.width()
         };
-        let zoom = f64::from(width) * 50. / 36.;
         let mut rows = [
-            [1., 0., 0., zoom as f32],
+            [1., 0., 0., (f64::from(width) * 50. / 36.) as f32],
             [0., 1., 0., 0.],
             [0., 0., 1., 0.],
         ];
-        if let Some(Value::FloatList(data)) = p.value(BASIS) {
-            for (row, values) in rows.iter_mut().zip(data.as_chunks::<4>().0) {
-                for (out, &v) in row.iter_mut().zip(values) {
-                    *out = v as f32;
-                }
+        if let Some(camera) = p.scene.and_then(|s| s.camera) {
+            let axes = [
+                camera.world.x_axis,
+                camera.world.y_axis,
+                camera.world.z_axis,
+            ];
+            for (row, axis) in rows.iter_mut().zip(axes) {
+                let [x, y, z] = axis.truncate().normalize_or_zero().to_array();
+                *row = [x as f32, y as f32, z as f32, camera.zoom as f32];
             }
         }
-        SHADER.dispatch_with_uniforms(
+        SHADER.dispatch_at(
+            "main",
             target,
             Params::new(&self.0, p),
             roi,

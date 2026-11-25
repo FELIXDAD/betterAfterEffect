@@ -11,6 +11,7 @@ pub(crate) mod fields;
 mod light_settings;
 pub mod memory;
 mod precompose;
+mod render_output;
 mod solid_settings;
 
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -42,6 +43,10 @@ pub enum Dialog {
     LightSettings(Box<LightSettings>),
     /// Layer > Pre-compose (Cmd/Ctrl+Shift+C).
     Precompose(Box<PrecomposeDialog>),
+    /// A Render Queue item's Render Settings.
+    RenderSettings(Box<render_output::RenderSettings>),
+    /// A Render Queue item's Output Module Settings.
+    OutputModule(Box<render_output::OutputModule>),
     /// An alert: a message and OK (import errors …).
     Alert { title: String, message: String },
 }
@@ -233,6 +238,30 @@ pub(crate) fn precompose(cx: &PanelContext<'_>, layers: Vec<PrimPath>) {
     }
 }
 
+/// Open Render Settings for render queue item `item`.
+pub(crate) fn render_settings(cx: &PanelContext<'_>, item: u64) {
+    let queue = crate::render_queue::shared(cx.resources);
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none()
+        && let Some(r) = render_output::RenderSettings::new(cx.stage, &queue, item)
+    {
+        d.open = Some(Dialog::RenderSettings(Box::new(r)));
+    }
+}
+
+/// Open Output Module Settings for render queue item `item`.
+pub(crate) fn output_module(cx: &PanelContext<'_>, item: u64) {
+    let queue = crate::render_queue::shared(cx.resources);
+    let dialogs = shared(cx.resources);
+    let mut d = dialogs.lock();
+    if d.open.is_none()
+        && let Some(o) = render_output::OutputModule::new(&queue, item)
+    {
+        d.open = Some(Dialog::OutputModule(Box::new(o)));
+    }
+}
+
 /// Open Camera Settings for a new camera in the active comp.
 pub(crate) fn new_camera(cx: &PanelContext<'_>, session: &SharedSession) {
     let dialogs = shared(cx.resources);
@@ -272,6 +301,7 @@ pub(crate) fn strings() -> Vec<&'static str> {
         camera_settings::STRINGS,
         light_settings::STRINGS,
         precompose::STRINGS,
+        render_output::STRINGS,
     ]
     .concat()
 }
@@ -298,6 +328,8 @@ impl bae_ui::DialogHost for MotionDialogs {
             Dialog::CameraSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::LightSettings(d) => d.ui(ctx, cx, &session, &dialogs),
             Dialog::Precompose(d) => d.ui(ctx, cx, &session, &dialogs),
+            Dialog::RenderSettings(d) => d.ui(ctx, cx),
+            Dialog::OutputModule(d) => d.ui(ctx, cx),
             Dialog::Alert { title, message } => alert_ui(ctx, title, message),
         };
         let mut lock = dialogs.lock();
