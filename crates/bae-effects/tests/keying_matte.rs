@@ -105,6 +105,29 @@ fn median_selects_each_channel_across_workgroups() {
 }
 
 #[test]
+fn choker_full_gray_softness_preserves_clear_pixels_and_applies_choke() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(16, 16);
+    for (radius, choke, alpha, expected) in [(8., 0., 0., 0.), (0., 51., 0.5, 0.3)] {
+        let input = Pixels::new(rect, |_, _| [alpha; 4]);
+        let got = run(
+            &gpu,
+            Rgba32Float,
+            builtin("ADBE Matte Choker"),
+            vec![
+                (1, Value::Float(radius)),
+                (2, Value::Float(choke)),
+                (3, Value::Float(1.)),
+            ],
+            &input,
+            rect,
+            1.,
+        );
+        assert!((got.get(8, 8)[3] - expected).abs() < 1e-6);
+    }
+}
+
+#[test]
 fn choker_tile_and_cell_evolution_are_repeatable() {
     let Some(gpu) = context() else { return };
     let rect = IRect::new(-10, -6, 82, 44);
