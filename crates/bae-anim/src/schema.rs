@@ -19,6 +19,7 @@ pub mod comp {
     pub const DURATION: &str = "duration";
     pub const BG_COLOR: &str = "bg_color";
     pub const MOTION_BLUR: &str = "motion_blur";
+    pub const FRAME_BLENDING: &str = "frame_blending";
     pub const SHUTTER_ANGLE: &str = "shutter_angle";
     pub const SHUTTER_PHASE: &str = "shutter_phase";
     pub const MOTION_BLUR_SAMPLES: &str = "motion_blur_samples";
@@ -51,6 +52,7 @@ pub mod layer {
     pub const TRACK_MATTE: &str = "track_matte";
     pub const TRACK_MATTE_LAYER: &str = "track_matte_layer";
     pub const MOTION_BLUR: &str = "motion_blur";
+    pub const FRAME_BLENDING: &str = "frame_blending";
     pub const COLLAPSE_TRANSFORMATION: &str = "collapse_transformation";
     pub const QUALITY: &str = "quality";
     pub const TIME_REMAP_ENABLED: &str = "time_remap_enabled";
@@ -58,6 +60,11 @@ pub mod layer {
     pub const PRESERVE_TRANSPARENCY: &str = "preserve_transparency";
     pub const TEXT_SOURCE: &str = "text:source";
     pub const TEXT_PATH: &str = "text:path";
+    pub const TEXT_REVERSE_PATH: &str = "text:reverse_path";
+    pub const TEXT_PERPENDICULAR_TO_PATH: &str = "text:perpendicular_to_path";
+    pub const TEXT_FORCE_ALIGNMENT: &str = "text:force_alignment";
+    pub const TEXT_FIRST_MARGIN: &str = "text:first_margin";
+    pub const TEXT_LAST_MARGIN: &str = "text:last_margin";
     /// Child folders.
     pub const MASKS: &str = "masks";
     pub const EFFECTS: &str = "effects";
@@ -202,6 +209,7 @@ mod tests {
                 c::DURATION,
                 c::BG_COLOR,
                 c::MOTION_BLUR,
+                c::FRAME_BLENDING,
                 c::SHUTTER_ANGLE,
                 c::SHUTTER_PHASE,
                 c::MOTION_BLUR_SAMPLES,
@@ -233,6 +241,7 @@ mod tests {
                 l::TRACK_MATTE,
                 l::TRACK_MATTE_LAYER,
                 l::MOTION_BLUR,
+                l::FRAME_BLENDING,
                 l::COLLAPSE_TRANSFORMATION,
                 l::QUALITY,
                 l::TIME_REMAP_ENABLED,

@@ -250,6 +250,8 @@ impl Preferences {
 pub mod keys {
     pub const LEVELS_OF_UNDO: &str = "general.levels_of_undo";
     // Appearance
+    /// BAE: the UI language (`system`, `zh-CN`, `en`).
+    pub const LANGUAGE: &str = "appearance.language";
     pub const PATH_POINT_SIZE: &str = "appearance.path_point_and_handle_size";
     pub const COLOR_THEME: &str = "appearance.color_theme";
     pub const LABEL_HANDLES: &str = "appearance.use_label_color_for_handles_and_paths";

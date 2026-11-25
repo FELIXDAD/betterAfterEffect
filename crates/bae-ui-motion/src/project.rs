@@ -536,3 +536,58 @@ fn describe(stage: &Stage, path: &PrimPath, kind: ItemKind) -> (String, String, 
         }
     }
 }
+
+/// Chinese strings of this module (keys are the English text, see
+/// `bae_ui::i18n`).
+pub(crate) const ZH: &[(&str, &str)] = &[
+    // Project panel
+    ("Name", "名称"),
+    ("Type", "类型"),
+    ("Size", "大小"),
+    ("Duration", "持续时间"),
+    ("Frame Rate", "帧速率"),
+    ("Folder", "文件夹"),
+    ("Footage", "素材"),
+    ("Solid", "纯色"),
+    ("Placeholder", "占位符"),
+    ("New Composition", "新建合成"),
+    ("New Composition...", "新建合成..."),
+    ("Animation", "动画"),
+    ("Arrange", "排列"),
+    ("Edit", "编辑"),
+    ("New Folder", "新建文件夹"),
+    ("Open in Timeline", "在时间轴中打开"),
+    ("Rename", "重命名"),
+    ("Delete", "删除"),
+    ("Add to Composition", "添加到合成"),
+    ("items", "项"),
+    ("Comp", "合成"),
+    ("Untitled", "未命名"),
+    // Project panel menus (AE 26 zh_CN, MenuID 0238 / 0242 / 0244).
+    (
+        "New Adobe Photoshop File...",
+        "新建 Adobe Photoshop 文件...",
+    ),
+    (
+        "New Maxon Cinema 4D File...",
+        "新建 Maxon Cinema 4D 文件...",
+    ),
+    ("Reveal Project in Finder", "在 Finder 中显示项目"),
+    ("New Comp from Selection", "基于所选项新建合成"),
+    ("Replace with Precomp", "替换为预合成"),
+    ("Reveal in Composition", "在合成中显示"),
+    ("Solids Folder", "纯色文件夹"),
+    ("Hide This", "隐藏此项"),
+    ("Rename This...", "重命名此项..."),
+    ("Columns", "列数"),
+];
+
+/// Registers this module's Chinese strings and panel (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "project",
+        bae_ui::PanelKind::new("Project", |_| Box::new(ProjectPanel::default())),
+    );
+}

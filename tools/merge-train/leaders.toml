@@ -5,12 +5,9 @@
 # paired server name), `branch_prefix` (any of), `worktree_prefix` (Orca worktree
 # display name, any of), `label` (any of).
 
-default = "8bc63d58"
+default = "032978cc"
 # Told when dev CI goes red and the queue pauses.
-pause_notify = ["8bc63d58"]
-
-[leaders.8bc63d58]
-address = "orca_session_id:8bc63d58-7a6f-4b20-9cb3-0f16a9db3730"
+pause_notify = ["032978cc"]
 
 # Sole leader since 2026-11-24 (0.1.0 sprint); ca3a6511 and 09fe9cc0 stood down.
 [leaders.032978cc]

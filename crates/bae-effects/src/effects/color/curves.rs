@@ -32,7 +32,7 @@ impl Curves {
 
 // Natural cubic through ordered knots. The tridiagonal system has zero
 // second derivatives at both endpoints. Outside the knots the curve is flat.
-fn samples(points: &mut Vec<[f64; 2]>) -> [f64; 1024] {
+pub(super) fn samples(points: &mut Vec<[f64; 2]>) -> [f64; 1024] {
     points.sort_by(|a, b| a[0].total_cmp(&b[0]));
     points.dedup_by(|a, b| a[0] == b[0]);
     let n = points.len();
