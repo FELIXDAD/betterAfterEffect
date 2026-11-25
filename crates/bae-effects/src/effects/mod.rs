@@ -4,10 +4,12 @@
 
 pub mod blur;
 pub(crate) mod controls;
+pub(crate) mod grain;
 mod image_grid;
 mod layer_input;
 pub(crate) mod lut;
 pub(crate) mod morphology;
+mod sampled;
 pub(crate) mod set_matte;
 
 pub use blur::{BoxBlur, GaussianBlur};
@@ -17,6 +19,7 @@ pub(crate) mod compound;
 pub mod distort;
 pub mod spatial;
 pub(crate) mod temporal;
+pub(crate) mod text;
 
 pub(crate) fn prewarm(
     rt: &crate::gpu::Runtime,
@@ -30,6 +33,7 @@ pub(crate) fn prewarm(
 pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static str]> {
     match (match_name, param_id) {
         ("APC Colorama", id) => color::colorama_definition::options_zh(id),
+        ("ADBE Lumetri", 75) => Some(&["颜色/灰色", "颜色/黑色", "白色/黑色"]),
         ("ADBE Equalize", 1) => Some(&["RGB", "亮度", "Photoshop 样式"]),
         ("ADBE CurvesCustom", 2) => Some(&["RGB", "红色", "绿色", "蓝色", "Alpha"]),
         _ => None,

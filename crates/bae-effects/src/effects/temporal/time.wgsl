@@ -33,6 +33,30 @@ fn echo(color: vec4f, previous: vec4f) -> vec4f {
     }
 }
 
+// Time Difference: `a` (the layer) against `b` (the target), straight colour.
+fn difference(a: vec4f, b: vec4f) -> vec4f {
+    let ca = select(vec3f(0.0), a.rgb / a.a, a.a > 0.0);
+    let cb = select(vec3f(0.0), b.rgb / b.a, b.a > 0.0);
+    let d = (ca - cb) * u.data.x;
+    var rgb = saturate(select(0.5 + 0.5 * d, abs(d), u.flags.z != 0u));
+    var alpha = a.a;
+    switch u.flags.y {
+        case 2u: { alpha = b.a; }
+        case 3u: { alpha = 0.5 * (a.a + b.a); }
+        case 4u: { alpha = max(a.a, b.a); }
+        case 5u: { alpha = 1.0; }
+        case 7u: { alpha = fx_luma(rgb); }
+        case 8u: { alpha = max(rgb.r, max(rgb.g, rgb.b)); }
+        case 10u: { alpha = saturate(abs(a.a - b.a) * u.data.x); }
+        case 11u: {
+            rgb = vec3f(saturate(abs(a.a - b.a) * u.data.x));
+            alpha = 1.0;
+        }
+        default: {}
+    }
+    return vec4f(rgb * alpha, alpha);
+}
+
 fn map_level(px: vec2f) -> u32 {
     let map = u.map_image;
     let size = vec2f(map.size) / map.scale;
@@ -59,6 +83,9 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
         if level < u.flags.y || level > u.flags.z { return; }
     }
     var out = fx_sample(input_tex, u.input_image, px, false);
+    if u.flags.x == 4u {
+        out = difference(out, fx_sample(map_tex, u.map_image, px, false));
+    }
     if u.flags.x == 0u {
         let prev = fx_sample(prev_tex, u.previous, px, false);
         let v = echo(out, prev);
