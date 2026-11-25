@@ -106,6 +106,9 @@ pub struct Session {
     pub(crate) last_u: Option<Instant>,
     /// What the viewer reports to the Info panel.
     pub info: crate::ae_panels::info::Readout,
+    /// The Character panel's settings for new text (set while no text layer is
+    /// selected, as in AE; `None`: the defaults).
+    pub text_defaults: Option<bae_model::TextDocument>,
 }
 
 /// The session as an app resource (`Resources::get::<SharedSession>()`).

@@ -927,6 +927,7 @@ dependencies = [
  "bae-platform",
  "bae-prefs",
  "bae-render",
+ "bae-text",
  "bae-ui",
  "egui",
  "flate2",

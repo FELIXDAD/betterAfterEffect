@@ -198,3 +198,149 @@ impl Command for SetText {
         Ok(SetTextOutput { changed: true })
     }
 }
+
+/// Character / Paragraph panel changes to the style of text layers; every field
+/// left out stays as it is.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct TextStyleChange {
+    /// PostScript font name (`ArialMT`).
+    pub font: Option<String>,
+    pub font_size: Option<f64>,
+    /// Leading in pixels.
+    pub leading: Option<f64>,
+    /// `true`: Auto leading (120 % of the size).
+    pub auto_leading: Option<bool>,
+    /// Tracking in 1/1000 em.
+    pub tracking: Option<f64>,
+    pub baseline_shift: Option<f64>,
+    pub fill_color: Option<[f64; 4]>,
+    pub stroke_color: Option<[f64; 4]>,
+    /// `false`: no stroke color (AE: the swatch with the red slash).
+    pub stroke: Option<bool>,
+    pub stroke_width: Option<f64>,
+    pub stroke_over_fill: Option<bool>,
+    pub faux_bold: Option<bool>,
+    pub faux_italic: Option<bool>,
+    pub all_caps: Option<bool>,
+    pub small_caps: Option<bool>,
+    /// Paragraph alignment (`left`, `center`, `right`, `justify_last_left`, …).
+    pub justification: Option<String>,
+}
+
+impl TextStyleChange {
+    /// `doc` with the change applied.
+    pub fn apply(&self, doc: &mut TextDocument) {
+        if let Some(f) = &self.font {
+            doc.font = f.clone();
+        }
+        if let Some(v) = self.font_size {
+            doc.font_size = v.clamp(0.1, 1296.0);
+        }
+        if let Some(v) = self.leading {
+            doc.leading = Some(v.max(0.0));
+        }
+        if self.auto_leading == Some(true) {
+            doc.leading = None;
+        }
+        if let Some(v) = self.tracking {
+            doc.tracking = v;
+        }
+        if let Some(v) = self.baseline_shift {
+            doc.baseline_shift = v;
+        }
+        if let Some(c) = self.fill_color {
+            doc.fill_color = c;
+        }
+        if let Some(c) = self.stroke_color {
+            doc.stroke_color = Some(c);
+        }
+        if self.stroke == Some(false) {
+            doc.stroke_color = None;
+        }
+        if let Some(v) = self.stroke_width {
+            doc.stroke_width = v.max(0.0);
+        }
+        if let Some(v) = self.stroke_over_fill {
+            doc.stroke_over_fill = v;
+        }
+        if let Some(v) = self.faux_bold {
+            doc.faux_bold = v;
+        }
+        if let Some(v) = self.faux_italic {
+            doc.faux_italic = v;
+        }
+        if let Some(v) = self.all_caps {
+            doc.all_caps = v;
+        }
+        if let Some(v) = self.small_caps {
+            doc.small_caps = v;
+        }
+        if let Some(j) = &self.justification {
+            doc.justification = j.clone();
+        }
+    }
+}
+
+pub struct SetTextStyle;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SetTextStyleParams {
+    /// Text layers (others are ignored).
+    pub layers: Vec<PrimPath>,
+    /// Comp time of the change: a Source Text keyframe there when it is animated.
+    #[serde(default)]
+    pub time: Option<Time>,
+    pub style: TextStyleChange,
+}
+
+impl Command for SetTextStyle {
+    type Params = SetTextStyleParams;
+    type Output = ();
+    const ID: &'static str = "text.set_style";
+    const TITLE: &'static str = "Change Text Style";
+    const DESCRIPTION: &'static str = "Character and Paragraph panel settings (font, size, leading, tracking, colors, stroke, faux styles, caps, alignment) on whole text layers, one undo step; a Source Text keyframe at `time` when it is animated.";
+
+    fn run(&self, tx: &mut Transaction<'_>, p: Self::Params) -> Result<(), CommandError> {
+        let layers: Vec<PrimPath> = p
+            .layers
+            .into_iter()
+            .filter(|l| query::layer_kind(tx.stage(), l).as_deref() == Some("text"))
+            .collect();
+        ensure_unlocked(tx.stage(), layers.iter())?;
+        for layer in layers {
+            let time = query::to_key_time(tx.stage(), &layer, p.time.unwrap_or(Time::ZERO));
+            let spec = query::attr_spec(tx.stage(), &layer, SOURCE).cloned();
+            let current = spec.as_ref().and_then(|s| {
+                if s.is_animated() {
+                    s.keyframes
+                        .range(..=time)
+                        .next_back()
+                        .or_else(|| s.keyframes.iter().next())
+                        .map(|(_, k)| k.value.clone())
+                } else {
+                    s.value.clone()
+                }
+            });
+            let mut doc = match current {
+                Some(Value::TextDocument(d)) => *d,
+                _ => TextDocument::new("", DEFAULT_FONT, DEFAULT_SIZE),
+            };
+            let before = doc.clone();
+            p.style.apply(&mut doc);
+            if doc == before {
+                continue;
+            }
+            SetAt.run(
+                tx,
+                SetAtParams {
+                    path: layer,
+                    attr: SOURCE.into(),
+                    time,
+                    value: Value::TextDocument(Box::new(doc)),
+                },
+            )?;
+        }
+        Ok(())
+    }
+}

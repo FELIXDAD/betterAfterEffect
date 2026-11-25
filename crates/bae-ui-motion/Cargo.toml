@@ -28,6 +28,8 @@ bae-render = { workspace = true, default-features = false }
 # Probing files for File > Import (the app links bae-media through bae-render's
 # `media` feature already).
 bae-media.workspace = true
+# The installed font list of the Character panel (the app links bae-text already).
+bae-text.workspace = true
 egui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
