@@ -252,4 +252,5 @@ pub(crate) const ZH: &[(&str, &str)] = &[
         "从项目面板打开合成，或新建一个合成。",
     ),
     ("Composition Mini-Flowchart", "合成微型流程图"),
+    ("Select", "选择"),
 ];
