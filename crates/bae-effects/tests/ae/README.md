@@ -39,5 +39,6 @@ cargo run -p bae-effects --example ae_compare -- golden            # 把 AE 输�
 - [杂色和颗粒](categories/noise-grain.md)
 - [透视](categories/perspective.md)
 - [风格化](categories/stylize.md)
+- [时间与跨帧效果](categories/time.md)
 - [过渡](categories/transition.md)
 - [实用工具](categories/utility.md)
