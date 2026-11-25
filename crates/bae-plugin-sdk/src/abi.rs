@@ -883,7 +883,7 @@ pub struct BaeParamDefineSuite1 {
 }
 
 pub type BaeParallelFn =
-    unsafe extern "C" fn(user: *mut c_void, index: u32, thread_index: u32) -> BaeStatus;
+    Option<unsafe extern "C" fn(user: *mut c_void, index: u32, thread_index: u32) -> BaeStatus>;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]

@@ -40,6 +40,12 @@ pub struct CompInfo {
 }
 
 impl CompInfo {
+    /// The nearest frame at which the playhead can rest inside this composition.
+    pub fn playhead_time(&self, time: Time) -> Time {
+        let last = (self.duration - self.frame_duration()).max(Time::ZERO);
+        self.frame_rate.snap(time.clamp(Time::ZERO, last))
+    }
+
     /// Number of frames in the comp.
     pub fn frame_count(&self) -> i64 {
         self.frame_rate.time_to_frame(self.duration).max(1)

@@ -603,3 +603,74 @@ fn expression_controls_by_name_index_and_layer_reference() {
     let ec = eval(&s, 0.0);
     assert_eq!(ec.layers[0].transform.rotation.z, 42.5);
 }
+
+#[test]
+fn property_index_and_length_read_its_value() {
+    let s = stage(|b| {
+        let l = b.layer(MAIN, "A", "solid");
+        b.set(&l, "transform:position", Value::Vec3([10.0, 20.0, 0.0]));
+        // A 2D layer's Position has two components in expressions.
+        b.expr(
+            &l,
+            "transform:rotation",
+            0.0,
+            "transform.position[1] + transform.position.length + (transform.position[2] === undefined ? 100 : 0)",
+        );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(ec.layers[0].transform.rotation.z, 122.0);
+}
+
+/// `marker` / `thisComp.marker`: numKeys, key(index), key(comment), nearestKey and
+/// the MarkerKey fields; layer marker times are comp time (AE).
+#[test]
+fn markers_in_expressions() {
+    let s = stage(|b| {
+        b.prim(&format!("{MAIN}/markers"), PrimType::FOLDER)
+            .prim(&format!("{MAIN}/markers/m1"), PrimType::MARKER)
+            .set(
+                &format!("{MAIN}/markers/m1"),
+                "time",
+                Value::Time(secs(2.0)),
+            )
+            .set(&format!("{MAIN}/markers/m1"), "comment", "intro")
+            .set(
+                &format!("{MAIN}/markers/m1"),
+                "duration",
+                Value::Time(secs(0.5)),
+            );
+        let l = b.layer(MAIN, "A", "null");
+        b.set(&l, "start_time", Value::Time(secs(1.0)))
+            .prim(&format!("{l}/markers"), PrimType::FOLDER)
+            .prim(&format!("{l}/markers/a"), PrimType::MARKER)
+            .set(&format!("{l}/markers/a"), "time", Value::Time(secs(3.0)))
+            .set(&format!("{l}/markers/a"), "comment", "late")
+            .prim(&format!("{l}/markers/b"), PrimType::MARKER)
+            .set(&format!("{l}/markers/b"), "time", Value::Time(secs(0.5)))
+            .set(&format!("{l}/markers/b"), "chapter", "One")
+            .expr(
+                &l,
+                "transform:rotation",
+                0.0,
+                r#"marker.numKeys * 1000 + marker.key(1).time * 100 + marker.key("late").time * 10
+                   + thisComp.marker.key("intro").duration + marker.nearestKey(4).index / 10"#,
+            )
+            .expr(
+                &l,
+                "transform:opacity",
+                0.0,
+                r#"marker.key(1).chapter == "One" && thisComp.marker.numKeys == 1 ? 50 : 0"#,
+            );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    // 2 markers; b at layer 0.5 s = comp 1.5 s; "late" at comp 4 s; intro 0.5 s
+    // long; the nearest to 4 s is "late", index 2.
+    let r = ec.layers[0].transform.rotation.z;
+    assert!(
+        (r - (2000.0 + 150.0 + 40.0 + 0.5 + 0.2)).abs() < 1e-9,
+        "{r}"
+    );
+    assert_eq!(ec.layers[0].transform.opacity, 50.0);
+}

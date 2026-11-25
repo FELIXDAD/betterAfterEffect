@@ -10,7 +10,6 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Keyframe Fields (doubles rate)", "“关键帧”字段（双重比率）"),
     ("Use “Linear” Vertex Paths", "使用“线性”顶点路径"),
     ("Bending Resistance:", "抗弯强度:"),
-    ("Quality:", "品质:"),
     ("Add Mask Path Vertices", "添加蒙版路径顶点"),
     ("Pixels Between Vertices", "顶点之间的像素"),
     ("Total Vertices", "总顶点数"),
