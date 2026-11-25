@@ -12,7 +12,13 @@ struct Definition {
     reverse: bool,
     create: fn() -> Box<dyn Processor>,
 }
-const DEFINITIONS: &[Definition] = &[];
+mod delay;
+const DEFINITIONS: &[Definition] = &[Definition {
+    name: "ADBE Aud Delay",
+    defaults: &[500.0, 50.0, 50.0, 75.0, 75.0],
+    reverse: false,
+    create: || Box::new(delay::Main::default()),
+}];
 
 fn number(value: &Value) -> Option<f64> {
     value
