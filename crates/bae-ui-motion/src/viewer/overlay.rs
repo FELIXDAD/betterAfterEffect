@@ -159,6 +159,8 @@ fn shape_paths(
                 let gm = *m * crate::render::group_matrix(item);
                 shape_paths(&item.children, &gm, color, out);
             }
+            // A group's `contents` folder (or an untyped container).
+            Some(t) if *t == PrimType::FOLDER => shape_paths(&item.children, m, color, out),
             Some(_) => {}
             None => shape_paths(&item.children, m, color, out),
         }

@@ -1,0 +1,20 @@
+schema_version = 1
+
+[plugin]
+id = "com.example.composition-report"
+version = "0.1.0"
+api = "0.1"
+name = "Composition Summary"
+license = "Apache-2.0"
+
+[script]
+entry = "main.js"
+
+[permissions]
+project = "read"
+
+[[automation]]
+id = "summary"
+name = "Composition Summary"
+entry = "summary"
+menu = "File/Scripts"
