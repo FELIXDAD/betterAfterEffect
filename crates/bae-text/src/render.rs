@@ -15,10 +15,9 @@ use bae_render::{
     CustomContent, EncodeContext, GpuImage, IRect, LayerSource, RenderError, SourceProvider,
     SourceRequest,
 };
-use bae_vector::render::{VectorDraw, VelloRenderer, cpu_paint};
+use bae_vector::render::{RenderMemo, SourceCache, VectorDraw, VelloRenderer, cpu_paint};
 use kurbo::{Affine, BezPath, Diagonal2, Join, Rect};
 use parking_lot::Mutex;
-use rustc_hash::FxHashMap;
 use vello::peniko::{self, Color};
 use vello::{FontEmbolden, Glyph, NormalizedCoord};
 
@@ -197,6 +196,7 @@ pub struct TextSource {
     layout: Arc<TextLayout>,
     bounds: IRect,
     hash: u64,
+    memo: RenderMemo,
 }
 
 impl TextSource {
@@ -206,6 +206,7 @@ impl TextSource {
             bounds: pixel_bounds(&layout),
             hash: layout.content_hash(),
             layout,
+            memo: RenderMemo::default(),
         }
     }
 
@@ -222,7 +223,9 @@ impl TextSource {
         scale: f64,
     ) -> Result<GpuImage, RenderError> {
         let roi = roi.intersect(&self.bounds);
-        VelloRenderer::shared(gpu)?.render_region(gpu, roi, scale, self.layout.as_ref())
+        self.memo.get_or_render(gpu, roi, scale, || {
+            VelloRenderer::shared(gpu)?.render_region(gpu, roi, scale, self.layout.as_ref())
+        })
     }
 
     /// Renders `roi` at `scale` with a specific renderer (e.g. a forced backend).
@@ -411,10 +414,10 @@ impl LayerSource for TextSource {
 #[derive(Debug, Default)]
 pub struct TextProvider {
     fonts: Mutex<Option<FontSystem>>,
-    cache: Mutex<FxHashMap<u64, Arc<TextSource>>>,
+    /// The fonts are loaded (scanning the system fonts takes a while).
+    ready: std::sync::atomic::AtomicBool,
+    cache: Mutex<SourceCache<TextSource>>,
 }
-
-const CACHE_ENTRIES: usize = 512;
 
 impl TextProvider {
     /// A provider with the system fonts (scanned on first use).
@@ -426,8 +429,34 @@ impl TextProvider {
     pub fn with_fonts(fonts: FontSystem) -> Self {
         Self {
             fonts: Mutex::new(Some(fonts)),
+            ready: std::sync::atomic::AtomicBool::new(true),
             cache: Mutex::default(),
         }
+    }
+
+    /// Scans the system fonts now (the app's warm-up) instead of at the first
+    /// text layer.
+    pub fn load_fonts(&self) {
+        self.fonts.lock().get_or_insert_with(FontSystem::new);
+        self.ready.store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// The fonts for the render path. On an interactive thread it never waits
+    /// for the warm-up still scanning them (the frame is drawn again later).
+    fn render_fonts(&self) -> Result<parking_lot::MutexGuard<'_, Option<FontSystem>>, RenderError> {
+        if !self.ready.load(std::sync::atomic::Ordering::Acquire)
+            && bae_render::is_interactive_thread()
+            && bae_gpu::warm_up::is_running()
+        {
+            return match self.fonts.try_lock() {
+                Some(fonts) if fonts.is_some() => Ok(fonts),
+                _ => Err(bae_render::warming_up("the font list")),
+            };
+        }
+        let mut fonts = self.fonts.lock();
+        fonts.get_or_insert_with(FontSystem::new);
+        self.ready.store(true, std::sync::atomic::Ordering::Release);
+        Ok(fonts)
     }
 
     /// Lays out `doc` with the provider's fonts.
@@ -443,17 +472,33 @@ impl TextProvider {
             return Ok(Arc::new(layout.clone()));
         }
         if let Some(doc) = content.data.downcast_ref::<TextDocument>() {
-            return Ok(Arc::new(self.layout(doc)));
+            let mut fonts = self.render_fonts()?;
+            return Ok(Arc::new(layout_text(
+                fonts.get_or_insert_with(FontSystem::new),
+                doc,
+            )));
         }
         if let Some(layer) = content.data.downcast_ref::<EvaluatedLayer>() {
             return Ok(Arc::new(match &layer.text {
                 Some(doc) => {
-                    let mut fonts = self.fonts.lock();
-                    crate::animator::layout_animated(
+                    let mut fonts = self.render_fonts()?;
+                    let mut layout = crate::animator::layout_animated(
                         fonts.get_or_insert_with(FontSystem::new),
                         doc,
                         &layer.text_animators,
-                    )
+                    );
+                    // Text on a path (AE: Path Options with a mask chosen).
+                    if let Some(options) = &layer.text_path
+                        && let Some(mask) = layer.masks.iter().find(|m| m.path == options.mask)
+                    {
+                        crate::path::place_on_path(
+                            &mut layout,
+                            &mask.shape,
+                            options,
+                            &doc.justification,
+                        );
+                    }
+                    layout
                 }
                 None => TextLayout::empty(crate::layout::TextPaint {
                     fill: None,
@@ -475,15 +520,26 @@ impl SourceProvider for TextProvider {
     }
 
     fn source(&self, content: &CustomContent) -> Result<Arc<dyn LayerSource>, RenderError> {
-        if let Some(hit) = self.cache.lock().get(&content.hash) {
-            return Ok(hit.clone());
+        if let Some(hit) = self.cache.lock().get(content.hash) {
+            return Ok(hit);
         }
         let source = Arc::new(TextSource::new(self.layout_of(content)?));
-        let mut cache = self.cache.lock();
-        if cache.len() >= CACHE_ENTRIES {
-            cache.clear();
-        }
-        cache.insert(content.hash, source.clone());
+        self.cache.lock().insert(content.hash, source.clone());
         Ok(source)
+    }
+}
+
+impl bae_gpu::WarmUp for TextProvider {
+    fn name(&self) -> &str {
+        "fonts"
+    }
+
+    fn priority(&self) -> u8 {
+        10
+    }
+
+    fn run(&self, _gpu: &Arc<bae_gpu::GpuContext>) -> Result<(), String> {
+        self.load_fonts();
+        Ok(())
     }
 }

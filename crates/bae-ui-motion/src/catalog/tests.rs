@@ -439,7 +439,6 @@ fn invocation_keys(action: &str, p: &str) -> Vec<&'static Key> {
 
 fn render_doc() -> String {
     let mut s = String::new();
-    let items = menu_items();
     let _ = writeln!(s, "# AE 命令目录");
     let _ = writeln!(s);
     let _ = writeln!(
@@ -524,78 +523,11 @@ fn render_doc() -> String {
     );
     let _ = writeln!(s);
 
-    // Counts.
-    let fixed: Vec<_> = items
-        .iter()
-        .filter(|(_, it)| it.status != Status::Dynamic)
-        .collect();
-    let by_status: Vec<(&str, usize)> = [
-        Status::Done,
-        Status::Partial,
-        Status::Todo,
-        Status::Later,
-        Status::Adobe,
-    ]
-    .into_iter()
-    .map(|st| {
-        (
-            status_mark(st),
-            fixed.iter().filter(|(_, it)| it.status == st).count(),
-        )
-    })
-    .collect();
-    let keys: Vec<&Key> = KEYS
-        .iter()
-        .filter(|k| k.context != "Menu" && k.flags & MAC_ONLY == 0)
-        .collect();
-    let commands: HashSet<&str> = keys.iter().map(|k| k.command).collect();
-    let bound = keys
-        .iter()
-        .filter(|k| !k.keys.is_empty() && k.flags & NATIVE == 0)
-        .count();
-    let working = keys
-        .iter()
-        .filter(|k| !k.keys.is_empty() && k.flags & NATIVE == 0 && k.status.works())
-        .count();
-    let _ = writeln!(s, "## 统计");
-    let _ = writeln!(s);
     let _ = writeln!(
         s,
-        "- 菜单项：{} 个固定项（含 macOS 应用菜单），另有效果菜单按效果注册表列出各分类的效果。{}",
-        fixed.len(),
-        by_status
-            .iter()
-            .map(|(k, v)| format!("{k} {v}"))
-            .collect::<Vec<_>>()
-            .join("，")
-    );
-    // In the keymap: the command runs and BAE can bind one of its chords.
-    let active = |mac: bool| {
-        KEYS.iter()
-            .filter(|k| {
-                k.status.works()
-                    && k.flags & (NATIVE | BOUND_ELSEWHERE | SHADOWED) == 0
-                    && in_own_panel(k)
-                    && k.chords(mac)
-                        .iter()
-                        .any(|c| bae_ui::Chord::parse(c).is_ok())
-            })
-            .count()
-    };
-    let _ = writeln!(
-        s,
-        "- 快捷键命令：AE 默认快捷键文件 {} 条（{} 个上下文，{} 个不同的命令），其中 {} 条有默认快捷键；动作已实现的 {} 条。",
-        keys.len(),
-        keys.iter().map(|k| k.context).collect::<HashSet<_>>().len(),
-        commands.len(),
-        bound,
-        working
-    );
-    let _ = writeln!(
-        s,
-        "- 已生效（AE 键位表里绑定了 AE 的默认快捷键，按下就运行）：Windows {} 条，macOS {} 条。其余的命令由负责的 agent 实现后自动生效：启动时注册了处理器的 AE 命令会绑定上 AE 的默认快捷键，不用改目录（`actions::late_bindings`）。",
-        active(false),
-        active(true)
+        "各状态的数量（菜单项、快捷键）不写在这里，免得每个 PR 都改这一段：见 CI 每次运行上传的 \
+         `shortcut-sweep.md`（完整 CI 的运行页面 → Artifacts → `bae-<平台>`）。本地生成：\
+         `BAE_SHORTCUT_REPORT=shortcut-sweep.md cargo test -p bae --bin bae shortcut_sweep`。"
     );
     let _ = writeln!(s);
 
@@ -1015,11 +947,7 @@ fn mac_menu_bar_matches_ae_mac() {
 /// way by code point: a wrong translation of one of them shows up here.
 #[test]
 fn sorted_entries_follow_ae_chinese_order() {
-    let zh: BTreeMap<&str, &str> = MENU_ZH
-        .iter()
-        .copied()
-        .chain(crate::i18n::ZH.iter().copied())
-        .collect();
+    let zh: BTreeMap<&str, &str> = MENU_ZH.iter().copied().chain(crate::i18n::all()).collect();
     let zh_of = |t: &str| {
         zh.get(t)
             .copied()
@@ -1117,4 +1045,77 @@ fn mac_system_chords_get_control() {
             .chords(true)
             .contains(&"Ctrl+Cmd+M".to_owned())
     );
+}
+
+/// Menu items read like AE's Chinese menu: the `menus.json` label of the same
+/// command id, without the `(X)` access key, "After Effects" read as "BAE" and
+/// the Window panel entries without AE's ": （无）". Labels AE fills in at run
+/// time and the differences `zh.rs` explains are listed.
+#[test]
+fn menu_items_use_ae_chinese_labels() {
+    const DIFFERENT: &[&str] = &[
+        "(installed script)",
+        "(recent presets)",
+        "(script panel)",
+        "Undo",
+        "Redo",
+        "Reset to Saved Layout",
+        "Shift+F10",
+        "Shift+F11",
+        "Shift+F12",
+        "Anchor Point...",
+        "Solid...",
+    ];
+    fn collect(v: &Value, out: &mut BTreeMap<u32, String>) {
+        for i in v["items"].as_array().into_iter().flatten() {
+            if let (Some(id), Some(label)) = (i["commandId"].as_u64(), i["label"].as_str()) {
+                out.insert(id as u32, label.to_owned());
+            }
+            collect(i, out);
+        }
+    }
+    fn plain(label: &str) -> String {
+        let mut out = label.trim().replace("After Effects", "BAE");
+        while let Some(i) = out.find('(') {
+            let key = out.as_bytes().get(i + 1).copied().unwrap_or(0);
+            if !(key.is_ascii_uppercase() || key.is_ascii_digit())
+                || out.as_bytes().get(i + 2) != Some(&b')')
+            {
+                break;
+            }
+            out.replace_range(i..i + 3, "");
+        }
+        out.trim_end_matches(": （无）").to_owned()
+    }
+    let json: Value = serde_json::from_str(MENUS_JSON).unwrap();
+    let mut labels = BTreeMap::new();
+    for top in json["menus"].as_array().unwrap() {
+        collect(top, &mut labels);
+    }
+    let all = crate::i18n::all();
+    let zh: BTreeMap<&str, &str> = all
+        .iter()
+        .chain(crate::tools::ZH)
+        .chain(MENU_ZH)
+        .copied()
+        .collect();
+    let mut errors = Vec::new();
+    for (path, it) in menu_items() {
+        let Some(label) = labels.get(&it.ae) else {
+            continue;
+        };
+        let ours = zh
+            .get(it.title)
+            .copied()
+            .or_else(|| bae_ui::i18n::translation(it.title))
+            .unwrap_or(it.title);
+        if ours != plain(label) && !DIFFERENT.contains(&it.title) {
+            errors.push(format!(
+                "{} ▸ {}: {ours} vs AE {label}",
+                path.join(" ▸ "),
+                it.title
+            ));
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
 }

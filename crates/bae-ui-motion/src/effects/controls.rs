@@ -101,7 +101,11 @@ fn header(
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
     let name = query::display_name_of(stage, effect);
+    let session = common::session(cx.resources);
+    let selected = session.lock().selected_effects.contains(effect);
     ui.add_space(2.0);
+    // Selected effects are highlighted like AE's (their points show in the viewer).
+    let highlight = ui.painter().add(egui::Shape::Noop);
     let row = ui.horizontal(|ui| {
         ui.set_min_height(20.0);
         let mut open = !state.collapsed.contains(effect.as_str());
@@ -130,6 +134,17 @@ fn header(
             )
             .sense(Sense::click_and_drag()),
         );
+        if title.clicked() {
+            let toggle = ui.input(|i| i.modifiers.shift || i.modifiers.command);
+            let mut s = session.lock();
+            if !toggle {
+                s.selected_effects = vec![effect.clone()];
+            } else if let Some(i) = s.selected_effects.iter().position(|e| e == effect) {
+                s.selected_effects.remove(i);
+            } else {
+                s.selected_effects.push(effect.clone());
+            }
+        }
         // Drag an effect header onto another one to reorder (AE).
         title.dnd_set_drag_payload(EffectMove(effect.clone()));
         if let Some(moved) = title.dnd_release_payload::<EffectMove>()
@@ -176,6 +191,13 @@ fn header(
         });
     });
     let r = row.response.rect;
+    if selected {
+        let full = egui::Rect::from_x_y_ranges(ui.max_rect().x_range(), r.y_range());
+        ui.painter().set(
+            highlight,
+            egui::Shape::rect_filled(full, 0.0, color::ROW_SELECTED),
+        );
+    }
     ui.painter().hline(
         r.x_range(),
         r.bottom() + 1.0,
@@ -273,14 +295,18 @@ fn param_row(
         .lock()
         .scrub
         .as_ref()
-        .filter(|s| s.path == *effect && s.attr == attr)
-        .map(|s| s.value.clone())
+        .and_then(|s| s.value_for(effect, &attr))
+        .cloned()
         .or_else(|| common::current_value(eval.get(cx.resources), stage, effect, &attr, now))
-        .or_else(|| param.default.clone());
+        .or_else(|| {
+            let layer = super::layer_of(effect)?;
+            bae_motion::effect::instance_default(stage, &layer, param)
+        });
     let key = format!("{effect}#{}", param.id);
     let twirl = matches!(param.kind, ParamKind::Slider { .. } | ParamKind::Angle);
     let mut edit = Edit::None;
-    ui.horizontal(|ui| {
+    let expression = spec.expression.as_ref().is_some_and(|e| e.enabled);
+    let row = ui.horizontal(|ui| {
         ui.set_min_height(20.0);
         ui.add_space(indent(depth) - 16.0);
         if twirl {
@@ -320,16 +346,55 @@ fn param_row(
             color::TEXT,
             r.width(),
         );
+        if def.match_name.starts_with("ADBE OCIO ") {
+            if param.id==1 && matches!(param.kind,ParamKind::Button){
+                let is_cdl=def.match_name=="ADBE OCIO CDL Transform";
+                let data_id=if is_cdl{6}else{5};
+                let stored=common::current_value(eval.get(cx.resources),stage,effect,&param_attr(data_id),now);
+                let filename=stored.as_ref().and_then(|v|match v{Value::Bytes(data)=>data.split(|b|*b==0).next().and_then(|s|std::str::from_utf8(s).ok()),_=>None});
+                if ui.button(filename.unwrap_or(tr("Open..."))).clicked(){
+                    cx.invoke_with("motion.effect.open_color_file",json!({"path":effect,"time":query::to_key_time(stage,effect,now),"cdl":is_cdl}));
+                }
+                return;
+            }
+            if param.name=="Reset Controls" {
+                if ui.button(tr("Reset")).clicked(){reset(cx,effect,now);}
+                return;
+            }
+            if param.name=="Information"{
+                ui.label(if super::chinese(){"OCIO 配置"}else{"OCIO config"}).on_hover_text(std::env::var("OCIO").unwrap_or_else(|_|"BAE".to_owned()));
+                return;
+            }
+        }
         let disabled = param.flags.disabled;
         if disabled && matches!(param.kind, ParamKind::Layer | ParamKind::Path) {
             // Layer / mask inputs the renderer does not feed yet.
             ui.colored_label(color::TEXT_DISABLED, tr("Not available in BAE yet"));
         } else {
             ui.add_enabled_ui(!disabled, |ui| {
-                edit = value_control(ui, cx, effect, def, param, value.as_ref(), &label);
+                if def.match_name=="ADBE MESH WARP" && param.id==4 {
+                    let mut number=|id:u32|common::current_value(eval.get(cx.resources),stage,effect,&param_attr(id),now)
+                        .or_else(||def.param(id).and_then(|p|p.default.clone())).and_then(|v|v.as_f64()).unwrap_or(0.);
+                    edit=super::warp_grid::edit(ui,value.as_ref(),[number(2) as usize,number(1) as usize]);
+                    return;
+                }
+                edit = value_control(
+                    ui,
+                    cx,
+                    effect,
+                    def,
+                    param,
+                    value.as_ref(),
+                    &label,
+                    expression,
+                );
             });
         }
     });
+    // An expression pick whip dragged from the Timeline.
+    if let Some(whip) = row.response.dnd_release_payload::<crate::expr::Whip>() {
+        crate::expr::link(cx, eval.get(cx.resources), &whip, effect, Some(&attr), now);
+    }
     if twirl && state.open_params.contains(&key) {
         ui.horizontal(|ui| {
             ui.add_space(LABEL_WIDTH + 36.0);
@@ -341,7 +406,8 @@ fn param_row(
     common::apply_edit(cx, session, effect, &attr, now, edit);
 }
 
-/// The value column of one parameter.
+/// The value column of one parameter (red when an expression drives it).
+#[allow(clippy::too_many_arguments)]
 fn value_control(
     ui: &mut Ui,
     cx: &PanelContext<'_>,
@@ -350,6 +416,7 @@ fn value_control(
     param: &EffectParamDef,
     value: Option<&Value>,
     label: &str,
+    expression: bool,
 ) -> Edit {
     let id = ui.id().with(("fx-param", effect.as_str(), param.id));
     match &param.kind {
@@ -383,6 +450,7 @@ fn value_control(
                 *valid_min..=*valid_max,
                 suffix,
                 label,
+                expression,
             ) {
                 Num::None => Edit::None,
                 Num::Live(v) => Edit::Live(to_value(v)),
@@ -392,7 +460,7 @@ fn value_control(
         // AE angles: revolutions + degrees (0x+30.0°), like Rotation.
         ParamKind::Angle => {
             let v = value.cloned().unwrap_or(Value::Float(0.0));
-            common::value_editor(ui, id, "rotation", &v, 1, label)
+            common::value_editor(ui, id, "rotation", &v, 1, label, expression)
         }
         ParamKind::Checkbox => {
             let on = value.and_then(Value::as_bool).unwrap_or(false);
@@ -405,7 +473,13 @@ fn value_control(
         }
         ParamKind::Popup { .. } => {
             let options = super::option_labels(&def.match_name, param);
-            let current = popup_index(value).clamp(1, options.len().max(1) as i64);
+            let raw = popup_index(value);
+            let current = if def.match_name.starts_with("ADBE OCIO ") && raw > options.len() as i64
+            {
+                1
+            } else {
+                raw.clamp(1, options.len().max(1) as i64)
+            };
             let shown = options
                 .get(current as usize - 1)
                 .cloned()
@@ -443,12 +517,17 @@ fn value_control(
             } else {
                 2
             };
-            common::value_editor(ui, id, "param", &v, dims, label)
+            common::value_editor(ui, id, "param", &v, dims, label, expression)
         }
         ParamKind::Layer => layer_picker(ui, cx, effect, id, value),
         ParamKind::Path => mask_picker(ui, cx, effect, id, value),
         ParamKind::Button => {
-            ui.add_enabled(false, egui::Button::new(label));
+            let caption = if label.is_empty() {
+                tr(&param.name)
+            } else {
+                label
+            };
+            ui.add_enabled(false, egui::Button::new(caption));
             Edit::None
         }
         ParamKind::ArbitraryData | ParamKind::CurvePoints => {
@@ -611,6 +690,7 @@ enum Num {
 }
 
 /// A hot number clamped to the valid range; one command per drag.
+#[allow(clippy::too_many_arguments)]
 fn hot_number(
     ui: &mut Ui,
     id: egui::Id,
@@ -619,6 +699,7 @@ fn hot_number(
     range: std::ops::RangeInclusive<f64>,
     suffix: &str,
     name: &str,
+    expression: bool,
 ) -> Num {
     let key = id.with("scrub");
     let mut v = ui.data(|d| d.get_temp::<f64>(key)).unwrap_or(model);
@@ -627,6 +708,11 @@ fn hot_number(
         .push_id(id, |ui| {
             ui.add(
                 HotNumber::new(&mut v)
+                    .tint(if expression {
+                        common::EXPRESSION_VALUE
+                    } else {
+                        color::ACCENT
+                    })
                     .decimals(decimals)
                     .speed(speed)
                     .range(range)

@@ -28,6 +28,11 @@ pub trait PackageSource {
 
     /// Human-readable location for logs (`/path/to/pkg`, `builtin:bae.effects`).
     fn describe(&self) -> String;
+
+    /// The package directory on disk (native libraries load from it), if any.
+    fn root(&self) -> Option<&Path> {
+        None
+    }
 }
 
 /// A package directory on disk.
@@ -65,6 +70,10 @@ impl PackageSource for DirSource {
 
     fn describe(&self) -> String {
         self.root.display().to_string()
+    }
+
+    fn root(&self) -> Option<&Path> {
+        Some(&self.root)
     }
 }
 
@@ -127,10 +136,14 @@ pub struct Package {
     pub manifest: PluginManifest,
     /// Effects, in manifest order.
     pub effects: Vec<EffectPackage>,
+    /// Script module and the manifest entries it implements.
+    pub scripts: Option<crate::scripts::ScriptPackage>,
     /// Warnings (errors make [`Package::load`] fail).
     pub warnings: Vec<Diagnostic>,
     /// Where it was loaded from.
     pub location: String,
+    /// The package directory, for packages on disk.
+    pub root: Option<PathBuf>,
 }
 
 impl Package {
@@ -206,11 +219,15 @@ impl Package {
         if has_errors(&diags) {
             return Err(diags);
         }
+        let scripts =
+            crate::scripts::ScriptPackage::read(&manifest, source).map_err(|e| vec![e])?;
         Ok(Package {
             manifest,
             effects,
+            scripts,
             warnings: diags,
             location: source.describe(),
+            root: source.root().map(Path::to_owned),
         })
     }
 
@@ -238,7 +255,7 @@ pub fn read_shader_files(
             errors.push(
                 Diagnostic::error(
                     MANIFEST_FILE,
-                    format!("include `{path}`: WGSL modules exported by other plugins are not supported by plugin API 0.1 yet"),
+                    format!("include `{path}`: WGSL modules exported by other plugins are not supported by plugin API 1.0 yet"),
                 )
                 .in_context(format!("effect \"{}\"", decl.id)),
             );

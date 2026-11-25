@@ -194,7 +194,17 @@ impl EncodeContext<'_> {
     /// or overwrite all of `rect`). The texture comes from the renderer's pool
     /// and returns there when every clone of the image is dropped.
     pub fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError> {
-        self.allocator.allocate(rect, pixel_scale)
+        self.allocate_format(rect, pixel_scale, self.format)
+    }
+
+    /// A pooled intermediate with the attachment format required by the effect.
+    pub fn allocate_format(
+        &mut self,
+        rect: IRect,
+        pixel_scale: f64,
+        format: wgpu::TextureFormat,
+    ) -> Result<GpuImage, RenderError> {
+        self.allocator.allocate(rect, pixel_scale, format)
     }
 }
 
@@ -208,7 +218,12 @@ impl fmt::Debug for EncodeContext<'_> {
 
 /// Hands out pooled working images (implemented by the renderer).
 pub(crate) trait ImageAllocator {
-    fn allocate(&mut self, rect: IRect, pixel_scale: f64) -> Result<GpuImage, RenderError>;
+    fn allocate(
+        &mut self,
+        rect: IRect,
+        pixel_scale: f64,
+        format: wgpu::TextureFormat,
+    ) -> Result<GpuImage, RenderError>;
 }
 
 /// Pixels of a layer (footage, shapes, text, generators).
@@ -227,6 +242,12 @@ pub trait LayerSource: Send + Sync {
 
     /// Hash of everything that affects the pixels at `time` (cache key part).
     fn content_hash(&self, time: Time) -> u64;
+
+    /// Frame rate of a time-based source (footage), for frame blending; `None`
+    /// for stills and generated content.
+    fn frame_rate(&self) -> Option<bae_model::FrameRate> {
+        None
+    }
 
     /// Produces an image covering at least `request.roi`. Implementations either
     /// return a texture they own (decoded footage: zero copy) or draw into an

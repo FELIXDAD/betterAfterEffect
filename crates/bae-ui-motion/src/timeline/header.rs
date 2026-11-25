@@ -190,6 +190,69 @@ impl TimelinePanel {
         }
         gresp.on_hover_text(tr("Graph Editor"));
 
+        // The comp switches left of it, AE's order: Draft 3D, Hide Shy Layers,
+        // Frame Blending (not rendered yet: disabled), Motion Blur. Saved in the
+        // comp, as AE does.
+        for (i, (attr, icon, name, tip, enabled)) in [
+            (
+                "motion_blur",
+                Icon::MotionBlur,
+                "Enable Motion Blur",
+                "Enables Motion Blur for all layers with the Motion Blur switch set",
+                true,
+            ),
+            (
+                "frame_blending",
+                Icon::FrameBlend,
+                "Enable Frame Blending",
+                "Enables Frame Blending for all layers with the Frame Blend switch set",
+                false,
+            ),
+            (
+                "hide_shy_layers",
+                Icon::Shy,
+                "Hide Shy Layers",
+                "Hides all layers for which the Shy switch is set",
+                true,
+            ),
+            (
+                "draft_3d",
+                Icon::Cube,
+                "Draft 3D",
+                "Turn fast 3D previews on or off",
+                true,
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let r = ge.translate(vec2(-26.0 * (i as f32 + 1.0), 0.0));
+            let on = enabled && bool_attr(cx.stage, &info.path, attr);
+            let resp = ui
+                .interact(r, ui.id().with(("comp_switch", attr)), Sense::click())
+                .labeled_toggle(egui::WidgetType::Button, tr(name), on);
+            if on {
+                ui.painter().rect_filled(r, 2.0, color::BUTTON_ON);
+            }
+            let c = if !enabled {
+                color::TEXT_DISABLED
+            } else if on {
+                color::ACCENT
+            } else if resp.hovered() {
+                color::ICON
+            } else {
+                color::ICON_DIM
+            };
+            icons::paint(ui.painter(), r.shrink(3.0), icon, c);
+            if enabled && resp.clicked() {
+                cx.invoke_with(
+                    "attr.set",
+                    json!({"path": info.path, "attr": attr, "value": {"type": "bool", "value": !on}}),
+                );
+            }
+            resp.on_hover_text(tr(tip));
+        }
+
         // Column headers (right-click: AE's Hide This / Columns ▸ menu).
         let cresp = ui.interact(
             colrow,
@@ -242,7 +305,7 @@ impl TimelinePanel {
             theme::small(),
             color::TEXT,
         );
-        for (i, icon) in [
+        let switch_icons = [
             Icon::Shy,
             Icon::Collapse,
             Icon::Quality,
@@ -251,9 +314,11 @@ impl TimelinePanel {
             Icon::MotionBlur,
             Icon::Adjustment,
             Icon::Cube,
-        ]
-        .into_iter()
-        .enumerate()
+        ];
+        for (i, icon) in switch_icons
+            .into_iter()
+            .enumerate()
+            .filter(|_| cols.panes.switches)
         {
             icons::paint(
                 p,
@@ -265,13 +330,30 @@ impl TimelinePanel {
                 color::ICON_DIM,
             );
         }
-        p.text(
-            pos2(l + cols.parent + PARENT_PAD, cy),
-            Align2::LEFT_CENTER,
-            tr("Parent & Link"),
-            theme::small(),
-            color::TEXT,
-        );
+        if cols.panes.modes {
+            for (x, title) in [
+                (4.0, "Mode"),
+                (96.0 + 4.0 + 5.0, "T"),
+                (96.0 + SW + 8.0, "Track Matte"),
+            ] {
+                p.text(
+                    pos2(l + cols.modes + x, cy),
+                    Align2::LEFT_CENTER,
+                    tr(title),
+                    theme::small(),
+                    color::TEXT,
+                );
+            }
+        }
+        if cols.panes.parent {
+            p.text(
+                pos2(l + cols.parent + PARENT_PAD, cy),
+                Align2::LEFT_CENTER,
+                tr("Parent & Link"),
+                theme::small(),
+                color::TEXT,
+            );
+        }
 
         // Ruler and work area (right part of both header rows).
         let ruler = Rect::from_min_max(
@@ -398,12 +480,15 @@ impl TimelinePanel {
         if (ruler_resp.clicked() || ruler_resp.dragged())
             && let Some(pos) = ruler_resp.interact_pointer_pos()
         {
-            let mut s = session.lock();
-            s.stop();
-            s.set_time(info, axis.t(pos.x));
+            let sound = ui.input(|i| i.modifiers.command);
+            if sound {
+                session.retry_audio();
+            }
+            session.lock().scrub_to(cx, info, axis.t(pos.x), sound);
             self.drag = Some(Drag::Cti);
         }
         if ruler_resp.drag_stopped() {
+            session.lock().stop();
             self.drag = None;
         }
         // Comp markers between the work area bar and the ruler numbers (on top of the
@@ -425,6 +510,25 @@ impl TimelinePanel {
         graph_left: f32,
     ) {
         ui.painter().rect_filled(foot, 0.0, color::PANEL);
+        // Toggle Switches / Modes (AE's button under the outline; F4).
+        let b = Rect::from_min_size(foot.min + vec2(8.0, 3.0), vec2(150.0, foot.height() - 6.0));
+        let resp = ui
+            .interact(b, ui.id().with("toggle_switches_modes"), Sense::click())
+            .labeled(egui::WidgetType::Button, tr("Toggle Switches / Modes"));
+        ui.painter().text(
+            b.left_center(),
+            Align2::LEFT_CENTER,
+            tr("Toggle Switches / Modes"),
+            theme::small(),
+            if resp.hovered() {
+                color::TEXT_STRONG
+            } else {
+                color::TEXT_DIM
+            },
+        );
+        if resp.clicked() {
+            self.panes.toggle_switches_modes();
+        }
         ui.painter().hline(
             foot.x_range(),
             foot.top() + 0.5,

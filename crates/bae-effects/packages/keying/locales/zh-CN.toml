@@ -62,7 +62,7 @@ match_colors = ["使用 RGB", "使用色相", "使用色度"]
 key_operation = ["主色", "保持颜色"]
 
 [effect.advanced-spill-suppressor]
-name = "高级溢出抑制器"
+name = "Advanced Spill Suppressor"
 keywords = ["高级溢出抑制器"]
 
 [effect.advanced-spill-suppressor.params]
@@ -78,3 +78,33 @@ luma_correction = "亮度校正"
 
 [effect.advanced-spill-suppressor.choices]
 method = ["标准", "极致"]
+
+[effect.extract]
+name = "提取"
+keywords = ["抠像"]
+
+[effect.extract.params]
+histogram = "直方图"
+channel = "通道"
+black_point = "黑场"
+white_point = "白场"
+black_softness = "黑色柔和度"
+white_softness = "白色柔和度"
+invert = "反转"
+
+[effect.extract.choices]
+channel = ["明亮度", "红色", "绿色", "蓝色", "Alpha"]
+
+[effect.unmult]
+name = "Unmult"
+keywords = ["抠像"]
+
+[effect.unmult.params]
+background_color = "背景颜色"
+black_level = "黑色阶"
+softness = "柔和度"
+remove_color_matting = "移除颜色遮罩"
+clip_hdr_result = "剪切 HDR 结果"
+
+[effect.unmult.choices]
+background_color = ["黑色", "白色"]

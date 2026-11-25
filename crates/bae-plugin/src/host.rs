@@ -10,9 +10,8 @@
 //! of an unloaded plugin in open projects become placeholders
 //! (`EffectStatus::MissingPlugin`) without any document change (spec §20).
 //!
-//! Plugin API 0.1 loads declarative WGSL effects. Native and script
-//! contributions are validated and listed but not executed yet; they are
-//! reported as warnings.
+//! Declarative WGSL and native effects (C ABI 1.0, see [`crate::native`]) use the
+//! effect registries. Script entries use the application command registry.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -25,6 +24,7 @@ use bae_render::{Effect, EffectLibrary};
 use crate::declarative::DeclarativeEffect;
 use crate::diag::Diagnostic;
 use crate::manifest::{EffectImplementation, MANIFEST_FILE, PluginManifest};
+use crate::native::{NativeConfig, NativeEffect, NativePlugin, Notice, NoticeKind, Notices};
 use crate::package::{DirSource, Package, PackageSource};
 
 /// Where a plugin was found. Ties between equal versions go to the more
@@ -90,6 +90,10 @@ pub struct LoadedPlugin {
     pub scope: Scope,
     /// Declarative effects registered in the effect library.
     pub effects: Vec<Arc<DeclarativeEffect>>,
+    /// The native library (in or out of process), if the plugin has one.
+    pub native: Option<Arc<NativePlugin>>,
+    /// Native effects registered in the effect library.
+    pub native_effects: Vec<Arc<NativeEffect>>,
     /// Warnings at load (e.g. contributions this host does not run yet).
     pub warnings: Vec<Diagnostic>,
 }
@@ -231,12 +235,58 @@ impl EffectRegistrar for AppEffectRegistries {
 #[derive(Debug, Default)]
 pub struct PluginHost {
     plugins: BTreeMap<String, LoadedPlugin>,
+    pub(crate) scripts: crate::scripts::ScriptCommands,
+    bindings: Option<Arc<dyn crate::scripts::ScriptBindings>>,
+    native: NativeConfig,
+    notices: Notices,
 }
 
 impl PluginHost {
-    /// A host with no plugins.
+    /// A host with no plugins; native plugins configured from the environment
+    /// ([`NativeConfig::from_env`]).
     pub fn new() -> Self {
-        Self::default()
+        Self::with_config(NativeConfig::from_env())
+    }
+
+    /// A host with no plugins and the given native-plugin configuration.
+    pub fn with_config(native: NativeConfig) -> Self {
+        Self {
+            native,
+            ..Self::default()
+        }
+    }
+
+    /// How native plugins run.
+    pub fn native_config(&self) -> &NativeConfig {
+        &self.native
+    }
+
+    /// Changes how native plugins loaded from now on run.
+    pub fn set_native_config(&mut self, native: NativeConfig) {
+        self.native = native;
+    }
+
+    /// Plugin notices for the UI (load failures, crashes, disabled plugins).
+    pub fn notices(&self) -> &Notices {
+        &self.notices
+    }
+
+    /// Commands published by loaded script packages.
+    pub fn commands(&self) -> &Registry<dyn bae_model::DynCommand> {
+        &self.scripts.registry
+    }
+
+    pub(crate) fn with_scripts(
+        scripts: crate::scripts::ScriptCommands,
+        bindings: Option<Arc<dyn crate::scripts::ScriptBindings>>,
+    ) -> Self {
+        Self {
+            plugins: BTreeMap::new(),
+            scripts,
+            bindings,
+            native: NativeConfig::from_env(),
+            notices: Notices::default(),
+        }
     }
 
     /// Package roots under `dir`: `dir` itself if it holds a manifest, its
@@ -380,53 +430,131 @@ impl PluginHost {
         }
         let effects = DeclarativeEffect::from_package(&package).map_err(LoadError::Invalid)?;
         let mut warnings = package.warnings.clone();
-        for e in &package.effects {
-            if e.decl.implementation == EffectImplementation::Native {
-                warnings.push(
-                    Diagnostic::warning(
-                        MANIFEST_FILE,
-                        "native effects are listed but not executed by plugin API 0.1 hosts yet; instances show as placeholders",
-                    )
-                    .in_context(format!("effect \"{}\"", e.decl.id)),
-                );
+        let (native, native_effects) = match self.load_native(&package, scope) {
+            Ok(n) => n,
+            Err(diags) => {
+                self.notices.post(Notice {
+                    kind: NoticeKind::LoadFailed,
+                    plugin: id.clone(),
+                    detail: diags.first().map(|d| d.message.clone()).unwrap_or_default(),
+                });
+                return Err(LoadError::Invalid(diags));
+            }
+        };
+        if let Some(n) = &native {
+            for kind in &n.info().ignored {
+                warnings.push(Diagnostic::warning(
+                    MANIFEST_FILE,
+                    format!("native contribution {kind} is not run by this BAE yet"),
+                ));
             }
         }
-        if !package.manifest.commands.is_empty() || !package.manifest.automations.is_empty() {
-            warnings.push(Diagnostic::warning(
-                MANIFEST_FILE,
-                "script commands and automation scripts are validated but not run by plugin API 0.1 hosts yet",
-            ));
+        self.scripts
+            .install(&id, package.scripts.as_ref(), scope)
+            .map_err(|e| LoadError::Invalid(vec![e]))?;
+        self.remove_effects(&id, target);
+        if let Some(bindings) = &self.bindings {
+            bindings.update(
+                &id,
+                package
+                    .scripts
+                    .as_ref()
+                    .map_or(&[], |p| p.entries.as_slice()),
+            );
         }
-
-        self.unload(&id, target);
         for effect in &effects {
+            target.register(&id, effect.def().clone(), effect.clone() as Arc<dyn Effect>);
+        }
+        for effect in &native_effects {
             target.register(&id, effect.def().clone(), effect.clone() as Arc<dyn Effect>);
         }
         let plugin = LoadedPlugin {
             package,
             scope,
             effects,
+            native,
+            native_effects,
             warnings,
         };
         Ok(self.plugins.entry(id).insert_entry(plugin).into_mut())
     }
 
+    /// Loads the native library of a package with native effects.
+    #[allow(clippy::type_complexity)]
+    fn load_native(
+        &self,
+        package: &Package,
+        scope: Scope,
+    ) -> Result<(Option<Arc<NativePlugin>>, Vec<Arc<NativeEffect>>), Vec<Diagnostic>> {
+        let has_native = package
+            .effects
+            .iter()
+            .any(|e| e.decl.implementation == EffectImplementation::Native);
+        if !has_native {
+            return Ok((None, Vec::new()));
+        }
+        let root = package.root.as_deref().ok_or_else(|| {
+            vec![Diagnostic::error(
+                MANIFEST_FILE,
+                "native plugins load from a package directory",
+            )]
+        })?;
+        let plugin = crate::native::load_plugin(
+            &package.manifest,
+            root,
+            scope,
+            &self.native,
+            &self.notices,
+        )?;
+        let defs: Vec<_> = package
+            .effects
+            .iter()
+            .map(|e| (e.decl.clone(), e.def.clone()))
+            .collect();
+        let effects = crate::native::effects_of(&package.manifest, &plugin, &defs)?;
+        Ok((Some(plugin), effects))
+    }
+
     /// Unloads a plugin: removes its effect definitions and implementations.
     /// `None` if it was not loaded.
     pub fn unload(&mut self, id: &str, target: &mut dyn EffectRegistrar) -> Option<UnloadReport> {
+        let report = self.remove_effects(id, target)?;
+        self.commands().unregister_owner(&Owner::plugin(id));
+        if let Some(bindings) = &self.bindings {
+            bindings.update(id, &[]);
+        }
+        Some(report)
+    }
+
+    fn remove_effects(
+        &mut self,
+        id: &str,
+        target: &mut dyn EffectRegistrar,
+    ) -> Option<UnloadReport> {
         let plugin = self.plugins.remove(id)?;
         let names: Vec<String> = plugin
             .effects
             .iter()
             .map(|e| e.def().match_name.clone())
+            .chain(
+                plugin
+                    .native_effects
+                    .iter()
+                    .map(|e| e.def().match_name.clone()),
+            )
             .collect();
         let (definitions_removed, effects_removed) = target.unregister(id, &names);
+        // Our own handle is the only one left unless a graph still holds it.
         let effects_in_use = plugin
             .effects
             .iter()
-            // Our own handle is the only one left unless a graph still holds it.
             .filter(|e| Arc::strong_count(e) > 1)
-            .count();
+            .count()
+            + plugin
+                .native_effects
+                .iter()
+                .filter(|e| Arc::strong_count(e) > 1)
+                .count();
         Some(UnloadReport {
             definitions_removed,
             effects_removed,

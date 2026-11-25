@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use crate::common::StageChanges;
 use bae_anim::EvaluatedComp;
 use bae_app::{Registry, Resources};
 use bae_gpu::GpuContext;
@@ -48,18 +49,83 @@ pub(crate) struct PreviewImage {
     pub rect: IRect,
 }
 
+pub(super) struct RenderEngine {
+    pub(super) renderer: Renderer,
+    pub(super) anim: AnimEvaluator,
+}
+
+impl RenderEngine {
+    pub(super) fn new(gpu: Arc<GpuContext>, cache: u64) -> Self {
+        Self {
+            renderer: Renderer::with_config(
+                gpu,
+                RendererConfig {
+                    frame_cache_bytes: cache,
+                    pool_idle_bytes: 128 << 20,
+                },
+            ),
+            anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
+        }
+    }
+
+    /// The frame converted to an 8-bit texture and its rect, or `None` when
+    /// it is incomplete (something still warming up: not shown).
+    pub(super) fn render(
+        &mut self,
+        stage: &Stage,
+        rc: &bae_render::RenderComp,
+        resolution: u32,
+    ) -> Result<Option<(wgpu::Texture, IRect)>, bae_render::RenderError> {
+        let request = RenderRequest {
+            resolution: match resolution {
+                0 | 1 => Resolution::Full,
+                2 => Resolution::Half,
+                3 => Resolution::Third,
+                4 => Resolution::Quarter,
+                n => Resolution::Custom(n),
+            },
+            purpose: RenderPurpose::Preview,
+            ..RenderRequest::full()
+        };
+        let mut frames = bae_render::eval::EvaluatorFrames {
+            stage,
+            evaluator: &mut self.anim,
+        };
+        // The frame and its 8-bit conversion in one GPU submission.
+        let (frame, texture) = self.renderer.render_frame_output(
+            rc,
+            &request,
+            Some(&mut frames),
+            OutputAlpha::Premultiplied,
+        )?;
+        if frame.incomplete {
+            return Ok(None);
+        }
+        Ok(Some((texture, frame.image.rect)))
+    }
+}
+
 pub(crate) struct GpuPreview {
     gpu: Arc<GpuContext>,
     registry: Arc<ViewportTextureRegistry>,
     id: ViewportTextureId,
-    renderer: Renderer,
-    anim: AnimEvaluator,
+    engine: RenderEngine,
+    pub(super) playback: super::playback::PlaybackPreview,
+    changes: StageChanges,
     sources_gen: Option<u64>,
     /// `(content hash, time, resolution)` of the published frame.
     last: Option<(u64, Time, u32)>,
     rect: Option<IRect>,
+    /// The published frame (the Info panel reads pixels from it) and the last
+    /// pixel read: (texel, value).
+    texture: Option<wgpu::Texture>,
+    sampled: Option<((u32, u32, u64), [u8; 4])>,
     /// Text layers have a source provider (otherwise the viewer draws them).
     pub has_text: bool,
+    /// The newest frame was incomplete (something still warming up): the
+    /// viewer keeps showing the last complete frame with a "Preparing…" hint
+    /// until it is redrawn complete.
+    pub preparing: bool,
 }
 
 impl GpuPreview {
@@ -73,23 +139,22 @@ impl GpuPreview {
 
     pub fn with(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>) -> Self {
         let id = registry.create("motion composition viewer");
-        let renderer = Renderer::with_config(
-            gpu.clone(),
-            RendererConfig {
-                frame_cache_bytes: 512 << 20,
-                pool_idle_bytes: 128 << 20,
-            },
-        );
+        let engine = RenderEngine::new(gpu.clone(), 512 << 20);
+        let playback = super::playback::PlaybackPreview::new(gpu.clone(), registry.clone());
         GpuPreview {
             gpu,
             registry,
             id,
-            renderer,
-            anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
+            engine,
+            playback,
+            changes: StageChanges::default(),
             sources_gen: None,
             last: None,
             rect: None,
+            texture: None,
+            sampled: None,
             has_text: false,
+            preparing: false,
         }
     }
 
@@ -111,7 +176,7 @@ impl GpuPreview {
             return;
         }
         self.sources_gen = Some(generation);
-        let providers = self.renderer.providers_mut();
+        let providers = self.engine.renderer.providers_mut();
         for entry in registry.snapshot().iter() {
             providers.register(entry.item().clone());
         }
@@ -121,7 +186,7 @@ impl GpuPreview {
 
     fn sync_effects(&mut self, resources: &Resources) {
         if let Some(PreviewEffects(registry)) = resources.get::<PreviewEffects>()
-            && self.renderer.sync_effects(registry)
+            && self.engine.renderer.sync_effects(registry)
         {
             self.last = None;
         }
@@ -136,53 +201,48 @@ impl GpuPreview {
         stage: &Stage,
         comp: &EvaluatedComp,
         resolution: u32,
+        camera: Option<bae_render::Camera>,
     ) -> Option<PreviewImage> {
         self.sync_sources(resources);
         self.sync_effects(resources);
-        let rc = match self.anim.convert(stage, comp, 0) {
+        if self.changes.changed(resources) {
+            self.engine.anim.clear_compiled();
+            self.last = None;
+        }
+        let mut rc = match self.engine.anim.convert(stage, comp, 0) {
             Ok(rc) => rc,
             Err(e) => {
                 tracing_warn(&format!("preview: {e}"));
                 return None;
             }
         };
-        let key = (rc.content_hash(), rc.time, resolution);
+        // A 3D view other than Active Camera (the output never changes).
+        if let Some(camera) = camera {
+            rc.camera = Some(camera);
+            if let Some(blur) = &mut rc.motion_blur {
+                let blur = std::sync::Arc::make_mut(blur);
+                blur.cameras.fill(Some(camera));
+            }
+        }
+        let key = (self.engine.renderer.content_hash(&rc), rc.time, resolution);
         if self.last != Some(key) {
-            let request = RenderRequest {
-                resolution: match resolution {
-                    0 | 1 => Resolution::Full,
-                    2 => Resolution::Half,
-                    3 => Resolution::Third,
-                    4 => Resolution::Quarter,
-                    n => Resolution::Custom(n),
-                },
-                purpose: RenderPurpose::Preview,
-                ..RenderRequest::full()
-            };
-            // Effects reading other frames evaluate them like this one.
-            let mut frames = bae_render::eval::EvaluatorFrames {
-                stage,
-                evaluator: &mut self.anim,
-            };
-            let frame = match self
-                .renderer
-                .render_frame_with(&rc, &request, Some(&mut frames))
-            {
-                Ok(f) => f,
+            let rendered = match self.engine.render(stage, &rc, resolution) {
+                Ok(rendered) => rendered,
                 Err(e) => {
                     tracing_warn(&format!("preview: {e}"));
                     return None;
                 }
             };
-            let texture = match self
-                .renderer
-                .output_texture(&frame, OutputAlpha::Premultiplied)
-            {
-                Ok(t) => t,
-                Err(e) => {
-                    tracing_warn(&format!("preview: {e}"));
-                    return None;
-                }
+            // Like AE, an incomplete frame (an effect pipeline or the text
+            // renderer still warming up) is never shown: the last complete
+            // frame stays, and the frame is rendered again on the redraw the
+            // warm-up requests when it is ready.
+            self.preparing = rendered.is_none();
+            let Some((texture, rect)) = rendered else {
+                return Some(PreviewImage {
+                    handle: self.registry.display_handle(self.id)?,
+                    rect: self.rect?,
+                });
             };
             // Display-encoded 8-bit values, sampled as they are (egui blends in
             // gamma space, see docs/spec/app-shell.md §5).
@@ -194,7 +254,9 @@ impl GpuPreview {
                 return None;
             }
             self.last = Some(key);
-            self.rect = Some(frame.image.rect);
+            self.rect = Some(rect);
+            self.texture = Some(texture);
+            self.sampled = None;
         }
         Some(PreviewImage {
             handle: self.registry.display_handle(self.id)?,
@@ -202,9 +264,73 @@ impl GpuPreview {
         })
     }
 
+    /// Straight (unpremultiplied) 8-bit RGBA of the published frame at comp
+    /// point `p`, as shown (display-encoded); `None` outside the frame. Reads
+    /// one texel back from the GPU (blocking, only when the pointer moved to
+    /// another texel or the frame changed).
+    pub fn pixel(&mut self, p: [f64; 2]) -> Option<[u8; 4]> {
+        let (texture, rect) = (self.texture.as_ref()?, self.rect?);
+        let (w, h) = (texture.width(), texture.height());
+        let (rw, rh) = (f64::from(rect.x1 - rect.x0), f64::from(rect.y1 - rect.y0));
+        if rw <= 0.0 || rh <= 0.0 {
+            return None;
+        }
+        let u = (p[0] - f64::from(rect.x0)) / rw;
+        let v = (p[1] - f64::from(rect.y0)) / rh;
+        if !(0.0..1.0).contains(&u) || !(0.0..1.0).contains(&v) {
+            return None;
+        }
+        let texel = (
+            ((u * f64::from(w)) as u32).min(w - 1),
+            ((v * f64::from(h)) as u32).min(h - 1),
+            self.last.map_or(0, |k| k.0 ^ u64::from(k.2)),
+        );
+        if let Some((t, c)) = self.sampled
+            && t == texel
+        {
+            return Some(c);
+        }
+        let region = bae_gpu::transfer::TextureRegion {
+            mip_level: 0,
+            origin: wgpu::Origin3d {
+                x: texel.0,
+                y: texel.1,
+                z: 0,
+            },
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        };
+        let mut encoder =
+            self.gpu
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("bae-ui-motion.info-pixel"),
+                });
+        let readback =
+            bae_gpu::transfer::TextureReadback::record(&self.gpu, &mut encoder, texture, region)
+                .ok()?;
+        self.gpu.queue().submit([encoder.finish()]);
+        let image = readback.map().wait(&self.gpu).ok()?;
+        let px = image.pixel(0, 0);
+        let a = px[3];
+        let straight = |c: u8| {
+            if a == 0 {
+                0
+            } else {
+                ((u32::from(c) * 255 + u32::from(a) / 2) / u32::from(a)).min(255) as u8
+            }
+        };
+        let c = [straight(px[0]), straight(px[1]), straight(px[2]), a];
+        self.sampled = Some((texel, c));
+        Some(c)
+    }
+
     #[cfg(test)]
     pub fn renderer(&mut self) -> &mut Renderer {
-        &mut self.renderer
+        &mut self.engine.renderer
     }
 
     #[cfg(test)]

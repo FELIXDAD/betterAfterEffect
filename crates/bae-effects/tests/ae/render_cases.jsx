@@ -10,6 +10,7 @@
 // No alert(): results are returned as a string.
 
 (function () {
+    #include "lumetri/custom.jsxinc"
     // A wrapper script may set BAE_07_ROOT (probe runs).
     var ROOT = (typeof BAE_07_ROOT !== "undefined") ? BAE_07_ROOT : "/private/tmp/bae-07-ae";
     var casesFile = new File(ROOT + "/cases.json");
@@ -91,8 +92,24 @@
                 mask.maskMode = MaskMode.ADD;
             }
         }
+        if (c.paths) {
+            for (var i = 0; i < c.paths.length; i++) {
+                var path = c.paths[i];
+                var shape = new Shape();
+                shape.vertices = path.vertices;
+                var zero = [];
+                for (var j = 0; j < path.vertices.length; j++) zero.push([0, 0]);
+                shape.inTangents = path.inTangents || zero;
+                shape.outTangents = path.outTangents || zero;
+                shape.closed = path.closed !== false;
+                var mask = layer.property("ADBE Mask Parade").addProperty("ADBE Mask Atom");
+                mask.property("ADBE Mask Shape").setValue(shape);
+                mask.maskMode = MaskMode.NONE;
+            }
+        }
         var fx = layer.property("ADBE Effect Parade").addProperty(c.effect);
         for (var id in c.params) {
+            if (c.effect === "ADBE Lumetri" && Number(id) >= 1000) continue;
             var pad = ("0000" + id).slice(-4);
             var prop = fx.property(c.effect + "-" + pad);
             if (prop === null) {
@@ -102,6 +119,15 @@
             if (value.layer !== undefined) value = refs[value.layer].index;
             if (value.mask !== undefined) value = value.mask;
             prop.setValue(value);
+        }
+        if (c.keys) {
+            for (var id in c.keys) {
+                var prop = fx.property(c.effect + "-" + ("0000" + id).slice(-4));
+                for (var k = 0; k < c.keys[id].length; k++) {
+                    var key = c.keys[id][k];
+                    prop.setValueAtTime(key[0], key[1].length === 1 ? key[1][0] : key[1]);
+                }
+            }
         }
         return comp;
     }
@@ -114,6 +140,11 @@
         // Reuse the same image and LUT across depths. AE opens its picker on addProperty.
         var key = c.input + "/" + c.lut;
         var comp = c.lut && lutComps[key] ? lutComps[key] : makeComp(c);
+        if (c.points || c.wheels) {
+            comp = lumetriCustomComp(comp, c, ROOT);
+            footage = {};
+            lutComps = {};
+        }
         if (c.lut) lutComps[key] = comp;
         var out = new File(outDir.fsName + "/" + c.name + ".png");
         if (out.exists) {

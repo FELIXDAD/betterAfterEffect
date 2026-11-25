@@ -237,6 +237,7 @@ impl Gui {
         let prefs = self.prefs.clone();
         if prefs.generation() != self.prefs_generation {
             self.prefs_generation = prefs.generation();
+            crate::i18n::apply_setting(prefs.current().str(bae_prefs::keys::LANGUAGE));
             bae_ui::settings::apply(&prefs.current());
             self.doc.set_undo_limit(prefs.current().levels_of_undo());
         }
@@ -483,6 +484,16 @@ pub(crate) fn settle(h: &mut Ui) {
     for _ in 0..4 {
         frame(h);
     }
+}
+
+/// Brings `panel` to the front of its frame (as clicking its tab does): Add to
+/// Render Queue opens the Render Queue in front of the Timeline (AE).
+pub(crate) fn to_front(h: &mut Ui, panel: &str) {
+    h.state_mut().dispatch(Invocation::with_params(
+        bae_ui::action::ids::OPEN_PANEL,
+        serde_json::json!({ "id": panel }),
+    ));
+    settle(h);
 }
 
 /// One input event in its own frame, then the dispatch: what the shell does

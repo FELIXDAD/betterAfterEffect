@@ -13,6 +13,7 @@
 //! | [`package`] | loading and checking a package from disk or memory | §5.1, §5.4 |
 //! | [`declarative`] | `DeclarativeEffect`: declarative effects on the GPU via `bae_render::Effect` | §11 |
 //! | [`host`] | `PluginHost`: discovery, version selection, registration, runtime unload | §6, §7 |
+//! | [`native`] | native plugins (C ABI 1.0): loading, host suites, out-of-process runner, `NativeEffect` | §7.2, §8, §14, §15 |
 //! | [`module`] | `PluginModule` (app module, `bae plugin check\|list`), `load_installed` | §6 |
 //! | [`diag`] | diagnostics (`file:line:column: error: …`) | §16 |
 //!
@@ -39,7 +40,9 @@ pub mod host;
 pub mod id;
 pub mod manifest;
 pub mod module;
+pub mod native;
 pub mod package;
+pub mod scripts;
 pub mod wgsl;
 
 pub use bae_plugin_sdk::{ApiVersion, ContributionKind, Implementation};
@@ -51,4 +54,5 @@ pub use host::{
 };
 pub use manifest::{EffectDecl, ParamDecl, PluginManifest};
 pub use module::{PluginModule, PluginRuntime, load_installed};
+pub use native::{NativeConfig, NativeEffect, NativePlugin, Notice, NoticeKind, Notices};
 pub use package::{DirSource, EffectPackage, MemorySource, Package, PackageSource};

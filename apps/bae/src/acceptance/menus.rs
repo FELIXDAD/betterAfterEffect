@@ -34,13 +34,10 @@ const AE_ITEMS: &[(&str, Option<&str>, &str)] = &[
         "图层设置",
     ),
     ("motion.layer.pre_compose", Some("Cmd+Shift+C"), "预合成"),
-    // AE 26 shortens this item to “将合成裁剪到工作区”. BAE keeps the glossary
-    // terms (issue #109): Work Area = 工作区域 (工作区 is Workspace), Trim = 修剪
-    // (as in 将入点修剪到当前时间; 裁剪 is Crop).
     (
         "motion.composition.trim",
         Some("Cmd+Shift+X"),
-        "将合成修剪至工作区域",
+        "将合成裁剪到工作区",
     ),
     // ⌘M and ⌥⌘H belong to macOS (Minimize, Hide Others): AE adds Control.
     (
@@ -97,7 +94,7 @@ const AE_ITEMS: &[(&str, Option<&str>, &str)] = &[
     ("shell.window.effects", Some("Cmd+5"), "效果和预设"),
     ("shell.window.preview", Some("Cmd+3"), "预览"),
     ("shell.window.properties", None, "属性"),
-    ("shell.window.info", None, "信息"),
+    ("shell.window.info", Some("Cmd+2"), "信息"),
     ("motion.window.render_queue", Some("Cmd+Alt+0"), "渲染队列"),
 ];
 
@@ -166,10 +163,10 @@ fn menu_enabled_state_follows_the_selection() {
     let mut h = gui();
     // Window items of implemented panels open them: always enabled (checked
     // below), not part of what the selection changes. Panels that are only
-    // placeholders so far (Info) are greyed, like every AE
-    // item whose command does not run yet.
+    // placeholders are greyed, like every AE item whose command does not run
+    // yet (none of the AE items listed here any more).
     let window = |i: &MenuItemView| i.path.first().is_some_and(|p| p == "Window");
-    let placeholder = ["shell.window.info"];
+    let placeholder: [&str; 0] = [];
     let ae_item = |i: &MenuItemView| AE_ITEMS.iter().any(|(id, ..)| *id == i.id);
     for i in h
         .state()

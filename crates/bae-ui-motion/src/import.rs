@@ -115,9 +115,14 @@ fn probe_file(
         },
         sequence_frame_rate: bae_model::FrameRate::from_fps(defaults.sequence_fps),
     };
-    match formats().open(path, &options) {
-        Ok(source) => {
-            let info = source.info();
+    let info = match bae_media::audio::file_info(path) {
+        Some(info) => Ok(info),
+        None => formats()
+            .open(path, &options)
+            .map(|source| source.info().clone()),
+    };
+    match info {
+        Ok(info) => {
             // Several frames of one sequence picked: one item.
             if !seen.insert(info.path.clone()) {
                 return;
@@ -152,6 +157,11 @@ fn probe_file(
                 folder: folder.map(str::to_owned),
             });
         }
+        Err(bae_media::MediaError::HevcDecoderUnavailable) => out.failed.push(format!(
+            "{} — {}",
+            file_name(path),
+            tr("HEVC decoding is unsupported. Check that Windows HEVC Video Extensions are installed.")
+        )),
         Err(_) => out.failed.push(file_name(path)),
     }
 }
@@ -296,6 +306,27 @@ pub(crate) fn import_multiple(cx: &mut PanelContext<'_>, session: &SharedSession
         }
         import_paths(cx, &paths, folder.clone());
     }
+}
+
+/// Chinese strings of this module (keys are the English text, see
+/// `bae_ui::i18n`).
+pub(crate) const ZH: &[(&str, &str)] = &[
+    // File > Import and dropped files (`import`).
+    ("Import File", "导入文件"),
+    ("Import Multiple Files", "导入多个文件"),
+    ("File", "文件"),
+    ("File...", "文件..."),
+    ("Multiple Files...", "多个文件..."),
+    ("Import", "导入"),
+    (
+        "These files could not be imported because their format is not supported:",
+        "以下文件的格式不受支持，无法导入：",
+    ),
+];
+
+/// Registers this module's Chinese strings (`MotionUiModule::build`).
+pub(crate) fn register(_app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
 }
 
 #[cfg(test)]

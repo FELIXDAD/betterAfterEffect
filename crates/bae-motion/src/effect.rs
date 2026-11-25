@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use bae_app::Registry;
-use bae_model::effect::param_attr;
+use bae_model::effect::{PointDefaultSpace, param_attr};
 use bae_model::{
     AttrSpec, CommandError, CommandRegistry, DynCommand, EffectDef, Keyframe, Op, PrimPath,
     PrimType, Stage, Time, Transaction, Value,
@@ -145,18 +145,20 @@ impl bae_model::Command for ApplyEffect {
     }
 }
 
-// Built-in AE point defaults were measured on a 640 × 360 reference layer.
-fn instance_default(
+/// The value a new (or reset) instance of `param` starts with on `layer`.
+/// Relative point defaults ([`bae_model::ParamFlags::relative_default`]) are
+/// scaled by the layer's source size (else the comp size); built-in AE point
+/// defaults measured on a 640 × 360 reference layer are scaled the same way.
+pub fn instance_default(
     stage: &Stage,
     layer: &PrimPath,
-    def: &EffectDef,
     param: &bae_model::EffectParamDef,
 ) -> Option<Value> {
-    let relative = matches!(
-        param.match_name.as_deref(),
-        Some("ADBE Radial Blur-0002" | "ADBE Tile-0001" | "ADBE Radial Shadow-0003")
-    ) || (def.plugin.is_none() && def.category == "Distort");
-    if let (true, Some(Value::Vec2(reference))) = (relative, &param.default) {
+    let space = param.flags.point_default_space();
+    if space == PointDefaultSpace::Pixels {
+        return param.default.clone();
+    }
+    let size = || -> Option<[f64; 2]> {
         let source_size = stage
             .prim(layer)
             .and_then(|v| {
@@ -164,18 +166,19 @@ fn instance_default(
             })
             .map(|(size, _)| size)
             .filter(|[w, h]| *w > 0. && *h > 0.);
-        let size = source_size.or_else(|| {
+        source_size.or_else(|| {
             let comp = query::comp_info(stage, &query::owning_comp(stage, layer)?)?;
             Some([f64::from(comp.width), f64::from(comp.height)])
-        });
-        if let Some(size) = size {
-            return Some(Value::Vec2([
-                size[0] * reference[0] / 640.,
-                size[1] * reference[1] / 360.,
-            ]));
+        })
+    };
+    match (&param.default, size()) {
+        (Some(Value::Vec2(xy)), Some(s)) => Some(Value::Vec2(space.layer_pixels(*xy, s))),
+        (Some(Value::Vec3([x, y, z])), Some(s)) if space == PointDefaultSpace::LayerFraction => {
+            let [x, y] = space.layer_pixels([*x, *y], s);
+            Some(Value::Vec3([x, y, *z]))
         }
+        _ => param.default.clone(),
     }
-    param.default.clone()
 }
 
 fn add_instance(
@@ -213,7 +216,7 @@ fn add_instance(
         if param.kind.value_type().is_none() {
             continue;
         }
-        if let Some(value) = instance_default(tx.stage(), layer, def, param) {
+        if let Some(value) = instance_default(tx.stage(), layer, param) {
             set(tx, &path, &param_attr(param.id), value)?;
         }
     }
@@ -406,7 +409,7 @@ impl bae_model::Command for ResetEffects {
             let def = find_def(&self.defs, &match_name)
                 .ok_or_else(|| fail(format!("unknown effect `{match_name}`")))?;
             for param in &def.params {
-                let Some(default) = instance_default(tx.stage(), &layer, &def, param) else {
+                let Some(default) = instance_default(tx.stage(), &layer, param) else {
                     continue;
                 };
                 let attr = param_attr(param.id);

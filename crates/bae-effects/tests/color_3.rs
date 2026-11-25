@@ -48,6 +48,71 @@ fn embedded_luts_use_the_same_transform_as_bae_color() {
 }
 
 #[test]
+fn lumetri_input_and_creative_look_use_straight_color_in_order() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::new(-2, 7, 35, 27);
+    let input = test_image(rect);
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../bae-color/tests/data/ocio");
+    let assets = ["curve1d.cube", "look.spi3d"]
+        .map(|name| bae_color::lutfile::embed(&dir.join(name)).unwrap());
+    let [first, look] = assets
+        .each_ref()
+        .map(|b| bae_color::lutfile::from_embedded(b).unwrap());
+    let expected = input.map(|mut pixel| {
+        first.apply_premultiplied(std::slice::from_mut(&mut pixel));
+        let mut graded = pixel;
+        look.apply_premultiplied(std::slice::from_mut(&mut graded));
+        std::array::from_fn(|i| pixel[i] + 0.35 * (graded[i] - pixel[i]))
+    });
+    let [first, look] = assets;
+    let params = vec![
+        (125, Value::Bytes(first)),
+        (126, Value::Bytes(look)),
+        (26, Value::Float(35.)),
+    ];
+    let got = run(
+        &gpu,
+        Rgba32Float,
+        builtin("ADBE Lumetri"),
+        params,
+        &input,
+        rect,
+        1.,
+    );
+    assert_close(
+        &got,
+        &expected,
+        rect,
+        0.0001,
+        "Lumetri LUT order and intensity",
+    );
+}
+
+#[test]
+fn lumetri_mask_refinement_and_sharpen_match_full_frame_on_a_tile() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::new(-11, 6, 89, 58);
+    let roi = IRect::new(12, 17, 54, 35);
+    let input = test_image(rect);
+    let fx = builtin("ADBE Lumetri");
+    let params = vec![
+        (11, Value::Float(-0.5)),
+        (29, Value::Float(-67.)),
+        (70, Value::Color([0.4, 0.6, 0.5, 1.])),
+        (1007, Value::Float(80.)),
+        (1008, Value::Float(80.)),
+        (81, Value::Float(40.)),
+        (82, Value::Float(5.)),
+        (89, Value::Float(50.)),
+        (90, Value::Float(45.)),
+        (51, Value::Float(-2.)),
+    ];
+    let full = run(&gpu, Rgba32Float, fx, params.clone(), &input, rect, 1.);
+    let tile = run(&gpu, Rgba32Float, fx, params, &input, roi, 1.);
+    assert_close(&tile, &full, roi, 0.0001, "Lumetri tile");
+}
+
+#[test]
 fn full_layer_histogram_is_stable_across_tiles() {
     let Some(gpu) = context() else { return };
     let rect = IRect::new(-7, 3, 92, 54);
@@ -260,4 +325,34 @@ fn legacy_corrections_clip_straight_hdr_before_premultiplying() {
         1.,
     );
     assert_close(&actual, &white, rect, 1e-5, "broadcast white");
+}
+
+#[test]
+fn ocio_file_and_cdl_apply_embedded_grades_on_gpu() {
+    let Some(gpu) = context() else {
+        return;
+    };
+    let rect = IRect::from_size(4, 4);
+    let pixels = Pixels::new(rect, |_, _| [0.15, 0.1, 0.05, 0.5]);
+    let cdl =
+        b"test.cc\0<ColorCorrection><SOPNode><Slope>2 1 1</Slope></SOPNode></ColorCorrection>"
+            .to_vec();
+    let cube = b"test.cube\0LUT_1D_SIZE 2\n0 0 0\n2 1 1\n".to_vec();
+    for (name, id, bytes) in [
+        ("ADBE OCIO CDL Transform", 6, cdl),
+        ("ADBE OCIO FILE Transform", 5, cube),
+    ] {
+        let out = run(
+            &gpu,
+            F32,
+            builtin(name),
+            vec![(id, Value::Bytes(bytes))],
+            &pixels,
+            rect,
+            1.,
+        );
+        for (actual, expected) in out.get(2, 2).into_iter().zip([0.3, 0.1, 0.05, 0.5]) {
+            assert!((actual - expected).abs() < 0.0001, "{name}: {actual}");
+        }
+    }
 }

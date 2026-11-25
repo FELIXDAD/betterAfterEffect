@@ -17,6 +17,7 @@ bae-app.workspace = true
 bae-model.workspace = true
 bae-anim.workspace = true
 bae-motion.workspace = true
+bae-script.workspace = true
 bae-prefs.workspace = true
 bae-ui.workspace = true
 # Decompresses the embedded menu tables (catalog.bin); already in the app (zip, png).
@@ -33,7 +34,12 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 
+[build-dependencies]
+# build.rs deflates the catalog tables into $OUT_DIR/catalog.bin.
+flate2.workspace = true
+
 [dev-dependencies]
+bae-vector = { workspace = true, features = ["render"] }
 # Render queue tests write TIFF too (bae-media encoders).
 bae-render = { workspace = true, features = ["media"] }
 tempfile.workspace = true

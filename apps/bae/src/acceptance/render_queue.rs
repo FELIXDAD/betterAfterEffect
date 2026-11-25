@@ -820,6 +820,12 @@ fn switching_formats_back_and_forth_keeps_the_name_and_fixes_the_extension() {
         0,
     );
     settle(&mut h);
+    // The Render Queue shares the short Timeline frame (AE): maximize it (`)
+    // to see the whole item.
+    to_front(&mut h, "render_queue");
+    h.state_mut()
+        .dispatch(Invocation::new(bae_ui::action::ids::MAXIMIZE_FRAME));
+    settle(&mut h);
     assert!(
         find_text(&h, "The file will be saved as .tif to match the format.").is_some(),
         "no hint for the mismatched extension"

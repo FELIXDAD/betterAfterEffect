@@ -1,69 +1,14 @@
+use bae_model::{Time, Value};
+use bae_render::{LayerContent, RenderComp, RenderLayer};
 use std::sync::Arc;
-
-use bae_model::{PrimPath, Time, Value};
-use bae_render::{
-    LayerContent, OutputAlpha, RenderComp, RenderEffect, RenderError, RenderLayer, RenderRequest,
-    Renderer, graph::CompFrames,
-};
-
 #[path = "ae/categories/mod.rs"]
 mod categories;
 #[path = "ae/harness.rs"]
 mod harness;
 
-const CLIP: &str = "/comps/main/layers/clip";
-
-fn path(s: &str) -> PrimPath {
-    PrimPath::new(s).unwrap()
-}
-
-fn effect(name: &str, match_name: &str, params: Vec<(u32, Value)>) -> RenderEffect {
-    RenderEffect {
-        path: path(&format!("{CLIP}/effects/{name}")),
-        enabled: true,
-        effect: match_name.into(),
-        params,
-    }
-}
-
-fn solid(prim: &str, width: u32, color: [f32; 4]) -> RenderLayer {
-    RenderLayer::new(
-        path(prim),
-        LayerContent::Solid {
-            color,
-            width,
-            height: 8,
-        },
-    )
-}
-
-struct Frames<F>(F);
-impl<F: Fn(Time) -> RenderComp> CompFrames for Frames<F> {
-    fn comp_at(&mut self, _comp: &PrimPath, time: Time) -> Result<Option<RenderComp>, RenderError> {
-        Ok(Some((self.0)(time)))
-    }
-}
-
-fn renderer() -> Option<Renderer> {
-    let mut renderer = Renderer::new(bae_gpu::testing::shared_context()?);
-    bae_effects::register(
-        &mut bae_model::EffectRegistry::new(),
-        renderer.effects_mut(),
-    );
-    Some(renderer)
-}
-
-fn pixels(renderer: &mut Renderer, scene: impl Fn(Time) -> RenderComp, t: f64) -> Vec<u8> {
-    let t = Time::from_seconds(t);
-    let comp = scene(t);
-    let frame = renderer
-        .render_frame_with(&comp, &RenderRequest::default(), Some(&mut Frames(scene)))
-        .unwrap();
-    renderer
-        .read_rgba8(&frame, OutputAlpha::Premultiplied)
-        .unwrap()
-        .data
-}
+#[path = "common/time_scene.rs"]
+mod time_scene;
+use time_scene::*;
 
 #[test]
 fn posterize_freezes_earlier_effects_in_layer_time() {
@@ -190,4 +135,43 @@ fn scene_detection_stops_at_a_cut_in_both_directions() {
         assert!(delta(&crossed) > 2, "{name} includes the other scene");
         assert!(delta(&gated) <= 1, "{name} excludes the other scene");
     }
+}
+
+#[test]
+fn wide_time_averages_frames_and_time_difference_compares_them() {
+    let Some(mut r) = renderer() else { return };
+    // Red before 1 s, blue from then on.
+    let scene = |match_name: &'static str, params: Vec<(u32, Value)>| {
+        move |time: Time| {
+            let mut comp = RenderComp::new(path("/comps/main"), 16, 8);
+            comp.time = time;
+            let color = if time.as_seconds() < 0.99 {
+                [1., 0., 0., 1.]
+            } else {
+                [0., 0., 1., 1.]
+            };
+            let mut layer = solid(CLIP, 16, color);
+            layer.time = time;
+            layer
+                .effects
+                .push(effect("time", match_name, params.clone()));
+            comp.layers.push(layer);
+            comp
+        }
+    };
+    // One frame back (red), now and one frame on (blue), a third each.
+    let wide = pixels(&mut r, scene("CC Wide Time", Vec::new()), 1.);
+    let near = |a: &[u8], b: [u8; 4]| a.iter().zip(b).all(|(a, b)| a.abs_diff(b) <= 2);
+    assert!(near(&wide[..4], [85, 0, 170, 255]), "{:?}", &wide[..4]);
+    // Blue now against red one frame earlier: 50 % grey ± the difference.
+    let difference = pixels(
+        &mut r,
+        scene("ADBE Difference", vec![(2, Value::Float(-1. / 30.))]),
+        1.,
+    );
+    assert!(
+        near(&difference[..4], [0, 128, 255, 255]),
+        "{:?}",
+        &difference[..4]
+    );
 }

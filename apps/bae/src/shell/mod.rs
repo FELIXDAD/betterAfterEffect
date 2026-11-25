@@ -23,6 +23,7 @@ mod numpad;
 mod open_documents;
 #[cfg(any(windows, test))]
 mod save_guard;
+mod script_bindings;
 #[cfg(windows)]
 mod win_save;
 mod window_state;
@@ -69,6 +70,7 @@ impl AppModule for ShellModule {
     fn build(&self, app: &mut AppBuilder) {
         app.add_module(bae_gpu::GpuModule);
         app.add_module(bae_ui::UiModule);
+        script_bindings::install(app);
         // Agent panels: tool-call log and proposals (bae-agent, workstream 17).
         let audit = Arc::new(bae_agent::AuditLog::new());
         let feed: Arc<dyn bae_ui::agent::AgentFeed> =
@@ -113,8 +115,9 @@ pub fn file_menu_titles() -> Vec<String> {
 enum UserEvent {
     /// egui asked for a repaint after `delay`.
     Repaint { delay: Duration },
-    /// A native menu item was chosen.
-    Menu(muda::MenuEvent),
+    /// A native menu item was chosen; with the modifiers of the key press when
+    /// its key equivalent fired ([`menu::key_equivalent_modifiers`]).
+    Menu(muda::MenuEvent, Option<egui::Modifiers>),
     /// The GPU device was lost (not destroyed on purpose).
     DeviceLost,
     /// A screen reader or UI automation client asked for the accessibility
@@ -181,7 +184,8 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
     {
         let proxy = proxy.clone();
         muda::MenuEvent::set_event_handler(Some(move |event| {
-            let _ = proxy.send_event(UserEvent::Menu(event));
+            let keys = menu::key_equivalent_modifiers();
+            let _ = proxy.send_event(UserEvent::Menu(event, keys));
         }));
     }
     // After the event loop exists (it registers winit's app delegate class), before
@@ -258,6 +262,7 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         _ => bae_prefs::PrefsStore::default(),
     });
     app.insert_resource(prefs.clone());
+    crate::i18n::apply_setting(prefs.current().str(bae_prefs::keys::LANGUAGE));
     bae_ui::settings::apply(&prefs.current());
     document.set_undo_limit(prefs.current().levels_of_undo());
     let mut workspace = Workspace::new(&mut app, workbench_state);
@@ -291,6 +296,7 @@ pub fn run(mut app: App, global: &GlobalOptions) -> ExitCode {
         exit_code: ExitCode::SUCCESS,
         prefs_generation: prefs.generation(),
         prefs,
+        menu_lang: bae_ui::i18n::lang(),
         autosave: crate::autosave::AutoSave::default(),
     };
     if let Err(error) = event_loop.run_app(&mut shell) {
@@ -333,6 +339,8 @@ struct Shell {
     window_file: Option<SettingsFile<WindowState>>,
     window_state: WindowState,
     menu: Option<menu::AppMenu>,
+    /// The UI language the menu bar was built in.
+    menu_lang: bae_ui::Lang,
     workspace: Workspace,
     workbench_file: Option<SettingsFile<WorkbenchSettings>>,
     document: Document,
@@ -439,6 +447,26 @@ impl Shell {
             })
         };
         self.app.insert_resource(gpu.clone());
+        // The UI thread never waits for the warm-up (see `warm_up`).
+        bae_render::set_interactive_thread(true);
+        {
+            let tasks = self
+                .app
+                .get_registry::<dyn bae_gpu::WarmUp>()
+                .map(|r| r.snapshot().iter().map(|e| e.item().clone()).collect())
+                .unwrap_or_default();
+            // Frames drawn without something still warming up are incomplete
+            // (not remembered by the viewers): repaint when work finishes.
+            let proxy = std::sync::Mutex::new(self.proxy.clone());
+            bae_gpu::warm_up::set_redraw(move || {
+                if let Ok(proxy) = proxy.lock() {
+                    let _ = proxy.send_event(UserEvent::Repaint {
+                        delay: Duration::ZERO,
+                    });
+                }
+            });
+            bae_gpu::warm_up::spawn(gpu.clone(), tasks);
+        }
 
         let egui_ctx = egui::Context::default();
         bae_ui::theme::apply(&egui_ctx);
@@ -610,12 +638,50 @@ impl Shell {
         }
         self.prefs_generation = generation;
         let prefs = self.prefs.current();
+        crate::i18n::apply_setting(prefs.str(bae_prefs::keys::LANGUAGE));
         bae_ui::settings::apply(&prefs);
         self.document.set_undo_limit(prefs.levels_of_undo());
         if let Some(menu) = &mut self.menu {
             menu.set_undo_state(self.document.undo_state());
         }
         self.request_redraw();
+    }
+
+    /// The UI language changed (Preferences > Appearance > Language, also while
+    /// the window is open): what is not drawn from `tr` every frame follows, the
+    /// menu bar is rebuilt in it and new items are named in it.
+    fn sync_language(&mut self) {
+        let lang = bae_ui::i18n::lang();
+        if lang == self.menu_lang {
+            return;
+        }
+        self.menu_lang = lang;
+        bae_motion::names::set_chinese(lang == bae_ui::Lang::Zh);
+        if self.menu.is_some() {
+            self.build_menu();
+        }
+        self.request_redraw();
+    }
+
+    /// Builds the menu bar from the registered menus in the current language and
+    /// attaches it in place of the previous one.
+    fn build_menu(&mut self) {
+        let Some(view) = self.view.as_ref() else {
+            return;
+        };
+        if let Some(old) = self.menu.take() {
+            old.detach(&view.window);
+        }
+        let contributed = self.workspace.contributed_menus(&self.app);
+        let actions = self.workspace.handled_actions(&self.app);
+        match menu::AppMenu::new(&contributed, actions) {
+            Ok(mut menu) => {
+                menu.set_undo_state(self.document.undo_state());
+                menu.attach(&view.window);
+                self.menu = Some(menu);
+            }
+            Err(error) => tracing::warn!("native menu unavailable: {error}"),
+        }
     }
 
     /// Buttons of the Preferences window that need the system.
@@ -656,6 +722,18 @@ impl Shell {
             None => {}
         }
         self.autosave.deadline(&prefs)
+    }
+
+    /// Plugin problems (a plugin failed to load, crashed or was disabled) in
+    /// the status bar; the latest wins.
+    fn show_plugin_notices(&mut self) {
+        let notice = self
+            .app
+            .resource::<bae_plugin::PluginRuntime>()
+            .and_then(|r| r.take_notices().pop());
+        if let Some(notice) = notice {
+            self.set_notice(ui::plugin_notice(&notice));
+        }
     }
 
     /// Show `text` in the status bar (empty clears it).
@@ -788,6 +866,7 @@ impl Shell {
     }
 
     fn redraw(&mut self, event_loop: &ActiveEventLoop) {
+        self.show_plugin_notices();
         let Some(view) = self.view.as_mut() else {
             return;
         };
@@ -826,6 +905,7 @@ impl Shell {
             )
             .with_open_panels(&open);
             menu.sync(workspace.keymap(), &cx, view.egui_ctx.text_edit_focused());
+            menu.set_workspace_title(workspace.active_workspace_title());
         }
         view.egui_state.handle_platform_output_with_event_loop(
             &view.window,
@@ -1160,19 +1240,12 @@ impl ApplicationHandler<UserEvent> for Shell {
                 view.egui_state
                     .init_accesskit(event_loop, &view.window, self.proxy.clone());
                 view.window.set_visible(true);
-                if self.menu.is_none() {
-                    let contributed = self.workspace.contributed_menus(&self.app);
-                    let actions = self.workspace.handled_actions(&self.app);
-                    match menu::AppMenu::new(&contributed, actions) {
-                        Ok(menu) => {
-                            menu.attach(&view.window);
-                            self.menu = Some(menu);
-                        }
-                        Err(error) => tracing::warn!("native menu unavailable: {error}"),
-                    }
-                }
                 view.window.request_redraw();
                 self.view = Some(view);
+                if self.menu.is_none() {
+                    self.menu_lang = bae_ui::i18n::lang();
+                    self.build_menu();
+                }
                 if let Some(message) = self.startup_error.take() {
                     self.dialogs().error(&message);
                 }
@@ -1191,6 +1264,15 @@ impl ApplicationHandler<UserEvent> for Shell {
             self.redraw(event_loop);
             return;
         }
+        // egui reports keypad Enter as Enter; AE tells them apart.
+        if let WindowEvent::KeyboardInput { event: key, .. } = &event
+            && key.state.is_pressed()
+            && let winit::keyboard::PhysicalKey::Code(
+                code @ (winit::keyboard::KeyCode::Enter | winit::keyboard::KeyCode::NumpadEnter),
+            ) = key.physical_key
+        {
+            bae_ui::set_keypad_enter(code == winit::keyboard::KeyCode::NumpadEnter);
+        }
         let before = view.egui_state.egui_input().events.len();
         let response = view.egui_state.on_window_event(&view.window, &event);
         // Numpad keys are their own keys in AE's shortcuts (#261).
@@ -1199,7 +1281,10 @@ impl ApplicationHandler<UserEvent> for Shell {
             && let Some(pad) = numpad::key(code, &key.logical_key)
         {
             // egui-winit sends no event for numpad `*`: the modifiers held now.
-            let modifiers = view.egui_ctx.input(|i| i.modifiers);
+            let modifiers = numpad::current_modifiers(
+                &view.egui_state.egui_input().events,
+                view.egui_ctx.input(|i| i.modifiers),
+            );
             numpad::rewrite(
                 &mut view.egui_state.egui_input_mut().events,
                 before,
@@ -1242,8 +1327,18 @@ impl ApplicationHandler<UserEvent> for Shell {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::Repaint { delay } => self.schedule_repaint(delay),
-            UserEvent::Menu(event) => {
+            UserEvent::Menu(event, keys) => {
                 let id = event.id.as_ref();
+                // The key equivalent fired on a chord with more modifiers than
+                // its own (⌃⌥8 on the ⌃8 item): the UI's keymap gets that press.
+                let chord = self.menu.as_ref().and_then(|m| m.contributed_chord(id));
+                if let Some(press) = menu::key_press_for_ui(chord, keys)
+                    && let Some(view) = self.view.as_mut()
+                {
+                    view.egui_state.egui_input_mut().events.push(press);
+                    view.window.request_redraw();
+                    return;
+                }
                 let inv = self
                     .menu
                     .as_ref()
@@ -1324,6 +1419,7 @@ impl ApplicationHandler<UserEvent> for Shell {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.run_pending(event_loop);
         self.sync_prefs();
+        self.sync_language();
         self.run_settings_requests();
         // OK in Keyboard Shortcuts: save the shortcuts now, not only at exit.
         if self.workspace.take_save_request() {

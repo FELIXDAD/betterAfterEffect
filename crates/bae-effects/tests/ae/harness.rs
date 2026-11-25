@@ -8,8 +8,11 @@ use std::{collections::BTreeMap, sync::Arc};
 use bae_effects::Standalone;
 use bae_gpu::GpuContext;
 use bae_gpu::wgpu;
-use bae_model::{PrimPath, Time, Value};
-use bae_render::{EffectParams, GpuImage, IRect, ImageAlpha, RenderEffect, effect::MaskSelect};
+use bae_model::{BezierPath, PrimPath, Time, Value};
+use bae_render::{
+    EffectParams, GpuImage, IRect, ImageAlpha, RenderEffect, blend::MaskMode, effect::MaskSelect,
+    input::RenderMask,
+};
 
 use crate::categories::{self, Pixel, Probe};
 
@@ -28,6 +31,8 @@ pub struct Case {
     pub frames: Vec<String>,
     pub layers: BTreeMap<String, String>,
     pub masks: Vec<[u32; 4]>,
+    pub paths: Vec<BezierPath>,
+    pub keys: BTreeMap<u32, Vec<(f64, Vec<f64>)>>,
     /// Allowed max per-channel difference (8-bit levels).
     pub tolerance: u8,
     /// Allowed mean difference (8-bit levels).
@@ -101,6 +106,14 @@ fn parse_rows(rows: &[serde_json::Value]) -> Vec<Case> {
                     (id, value)
                 })
                 .collect();
+            if let Some(curves) = c["points"].as_object() {
+                for (id, points) in curves {
+                    params.push((
+                        id.parse().unwrap(),
+                        Value::FloatList(serde_json::from_value(points.clone()).unwrap()),
+                    ));
+                }
+            }
             if let Some(file) = c["lut"].as_str() {
                 let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("../bae-color/tests/data/ocio")
@@ -123,6 +136,31 @@ fn parse_rows(rows: &[serde_json::Value]) -> Vec<Case> {
                 masks: c
                     .get("masks")
                     .map_or_else(Vec::new, |v| serde_json::from_value(v.clone()).unwrap()),
+                paths: c["paths"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|path| {
+                        let vertices: Vec<[f64; 2]> =
+                            serde_json::from_value(path["vertices"].clone()).unwrap();
+                        let tangents = |key: &str| {
+                            path.get(key).map_or_else(
+                                || vec![[0.0; 2]; vertices.len()],
+                                |v| serde_json::from_value(v.clone()).unwrap(),
+                            )
+                        };
+                        BezierPath {
+                            in_tangents: tangents("inTangents"),
+                            out_tangents: tangents("outTangents"),
+                            closed: path["closed"].as_bool().unwrap_or(true),
+                            vertices,
+                            feather: Vec::new(),
+                        }
+                    })
+                    .collect(),
+                keys: c.get("keys").map_or_else(BTreeMap::new, |v| {
+                    serde_json::from_value(v.clone()).unwrap()
+                }),
                 tolerance: c["tolerance"].as_u64().unwrap_or(2) as u8,
                 mean: c["mean"].as_f64().unwrap_or(0.5),
             }
@@ -302,13 +340,50 @@ pub fn render_with_maps(
         &masked
     };
     let source = image(gpu, SIZE, pixels, straight);
-    let inst = RenderEffect {
-        path: PrimPath::new(&format!("{INPUT_LAYER}/effects/fx")).unwrap(),
-        effect: case.effect.clone(),
-        enabled: true,
-        params: case.params.clone(),
+    let mask_paths: Vec<_> = case
+        .paths
+        .iter()
+        .enumerate()
+        .map(|(i, shape)| RenderMask {
+            path: PrimPath::new(&format!("{INPUT_LAYER}/masks/{}", i + case.masks.len() + 1))
+                .unwrap(),
+            shape: shape.clone(),
+            mode: MaskMode::None,
+            inverted: false,
+            opacity: 1.,
+            feather: [0.; 2],
+            expansion: 0.,
+        })
+        .collect();
+    let sample = |time: Time| {
+        let mut params = case.params.clone();
+        for (&id, keys) in &case.keys {
+            let i = keys.partition_point(|(t, _)| *t < time.as_seconds());
+            let a = &keys[i.saturating_sub(1)];
+            let b = &keys[i.min(keys.len() - 1)];
+            let value = if a.0 == b.0 {
+                a.1.clone()
+            } else {
+                let f = (time.as_seconds() - a.0) / (b.0 - a.0);
+                a.1.iter().zip(&b.1).map(|(a, b)| a + (b - a) * f).collect()
+            };
+            let value = match value.as_slice() {
+                [x] => Value::Float(*x),
+                [x, y] => Value::Vec2([*x, *y]),
+                [r, g, b, a] => Value::Color([*r, *g, *b, *a]),
+                _ => unreachable!(),
+            };
+            params.push((id, value));
+        }
+        RenderEffect {
+            path: PrimPath::new(&format!("{INPUT_LAYER}/effects/fx")).unwrap(),
+            effect: case.effect.clone(),
+            enabled: true,
+            params,
+        }
     };
     let time = Time::from_seconds(case.time);
+    let inst = sample(time);
     let p = EffectParams {
         time,
         comp_time: time,
@@ -355,6 +430,25 @@ pub fn render_with_maps(
             .collect();
         target.set_effect_inputs(layers, masks);
     }
+    let history: Vec<_> = fx
+        .effect()
+        .parameter_sample_times(&p)
+        .into_iter()
+        .map(|time| (time, sample(time)))
+        .collect();
+    let selected: Vec<_> = match fx.effect().path_dependencies(&p) {
+        Some(MaskSelect::One(path)) => mask_paths
+            .into_iter()
+            .filter(|mask| mask.path == path)
+            .collect(),
+        Some(MaskSelect::All) => mask_paths,
+        None => Vec::new(),
+    };
+    let p = EffectParams {
+        history: &history,
+        mask_paths: &selected,
+        ..p
+    };
     let out = fx.render(&mut target, &p, &source, rect).unwrap();
     target.finish().unwrap();
     let back = bae_gpu::transfer::read_texture(gpu, &out.texture).unwrap();

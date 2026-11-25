@@ -48,6 +48,62 @@ pub const TEXT_EDIT_ACTIONS: &[&str] = &[
     "motion.select_all",
 ];
 
+/// The modifiers of the key press that fired a native key equivalent (`None`
+/// when the menu was used with the mouse). AppKit fires a key equivalent on extra
+/// modifiers too (the ⌃8 item on ⌃⌥8, issue #281): the shell then hands the press
+/// to the UI, whose keymap runs the command bound to the chord pressed.
+#[cfg(target_os = "macos")]
+pub fn key_equivalent_modifiers() -> Option<egui::Modifiers> {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    const KEY_DOWN: usize = 10; // NSEventTypeKeyDown
+    // NSEventModifierFlagShift, Control, Option, Command.
+    let (shift, ctrl, alt, cmd) = (1 << 17, 1 << 18, 1 << 19, 1 << 20);
+    // SAFETY: muda calls the menu event handler on the main thread, from the
+    // item's action; these are plain NSApplication / NSEvent getters.
+    let flags: usize = unsafe {
+        let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+        let event: *mut AnyObject = msg_send![app, currentEvent];
+        if event.is_null() {
+            return None;
+        }
+        let kind: usize = msg_send![event, type];
+        if kind != KEY_DOWN {
+            return None;
+        }
+        msg_send![event, modifierFlags]
+    };
+    Some(egui::Modifiers {
+        alt: flags & alt != 0,
+        ctrl: flags & ctrl != 0,
+        shift: flags & shift != 0,
+        mac_cmd: flags & cmd != 0,
+        command: flags & cmd != 0,
+    })
+}
+
+/// Windows menus match accelerators exactly.
+#[cfg(not(target_os = "macos"))]
+pub fn key_equivalent_modifiers() -> Option<egui::Modifiers> {
+    None
+}
+
+/// The key press to hand to the UI instead of running the item: its key
+/// equivalent (`chord`) fired on a press with other modifiers (`keys`).
+pub fn key_press_for_ui(
+    chord: Option<Chord>,
+    keys: Option<egui::Modifiers>,
+) -> Option<egui::Event> {
+    let (chord, mods) = (chord?, keys?);
+    (!chord.matches_modifiers(mods)).then_some(egui::Event::Key {
+        key: chord.key,
+        physical_key: Some(chord.key),
+        pressed: true,
+        repeat: false,
+        modifiers: mods,
+    })
+}
+
 /// BAE's own entries, beyond AE's menus: the History and Agent panels (a group
 /// after AE's panels in Window) and the Agent workspace (sorted among AE's
 /// workspaces in Window ▸ Workspace).
@@ -127,6 +183,8 @@ pub struct AppMenu {
     /// Registry ids of the Edit menu's Undo and Redo items.
     undo: Option<String>,
     redo: Option<String>,
+    /// Window ▸ Workspace ▸ Reset "<workspace>" to Saved Layout: id and text.
+    reset: Option<(String, String)>,
     /// Action ids modules handle (`bae_ui::menu::handled_actions`).
     actions: HashSet<String>,
     /// Counts [`AppMenu::sync`] calls (`MenuContext::generation`).
@@ -161,12 +219,14 @@ impl AppMenu {
         };
         let undo = find(ids::UNDO);
         let redo = find(ids::REDO);
+        let reset = find(ids::RESET_WORKSPACE).map(|id| (id, String::new()));
         let mut menu = Self {
             menu,
             undo_state: (Some(String::new()), None),
             contributed: items,
             undo,
             redo,
+            reset,
             actions,
             generation: 0,
         };
@@ -179,6 +239,12 @@ impl AppMenu {
     pub fn contributed_invocation(&self, menu_id: &str) -> Option<Invocation> {
         let id = menu_id.strip_prefix(CONTRIBUTED)?;
         self.contributed.get(id).map(|c| c.spec.invocation())
+    }
+
+    /// The shortcut shown on a contributed item (its native key equivalent).
+    pub fn contributed_chord(&self, menu_id: &str) -> Option<Chord> {
+        let id = menu_id.strip_prefix(CONTRIBUTED)?;
+        self.contributed.get(id).and_then(|c| c.chord)
     }
 
     /// Updates the items: enabled state, check marks, and the shortcut the
@@ -223,6 +289,21 @@ impl AppMenu {
         }
     }
 
+    /// Names the active workspace in Window ▸ Workspace ▸ Reset “<name>” to Saved
+    /// Layout, as AE does (`title`: its English title).
+    pub fn set_workspace_title(&mut self, title: &str) {
+        let Some((id, shown)) = &mut self.reset else {
+            return;
+        };
+        let text = tr("Reset “{name}” to Saved Layout").replace("{name}", tr(title));
+        if text != *shown {
+            if let Some(c) = self.contributed.get(id.as_str()) {
+                c.item.set_text(&native_text(&text));
+            }
+            *shown = text;
+        }
+    }
+
     /// Updates the Undo / Redo items (`Some(label)` = enabled, AE: "Undo <step>",
     /// "Can’t Undo" when there is nothing to undo).
     pub fn set_undo_state(&mut self, state: (Option<String>, Option<String>)) {
@@ -238,6 +319,32 @@ impl AppMenu {
             }
         }
         self.undo_state = state;
+    }
+
+    /// Takes the menu bar off before another one replaces it (a language change).
+    pub fn detach(&self, window: &winit::window::Window) {
+        #[cfg(target_os = "macos")]
+        {
+            let _ = window;
+            self.menu.remove_for_nsapp();
+        }
+        #[cfg(windows)]
+        {
+            use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            if let Ok(handle) = window.window_handle()
+                && let RawWindowHandle::Win32(win32) = handle.as_raw()
+            {
+                // SAFETY: `hwnd` is the live window this menu was attached to, on
+                // the thread that owns it.
+                if let Err(error) = unsafe { self.menu.remove_for_hwnd(win32.hwnd.get()) } {
+                    tracing::warn!("cannot remove the native menu: {error}");
+                }
+            }
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
+        {
+            let _ = window;
+        }
     }
 
     /// Attaches the menu bar: the global NSApp menu on macOS, the window's menu
@@ -281,7 +388,7 @@ fn predefined(spec: &MenuItemSpec) -> Option<PredefinedMenuItem> {
     if !cfg!(target_os = "macos") || spec.path.first().map(String::as_str) != Some(APP_MENU) {
         return None;
     }
-    let owned = native_text(tr(&spec.title));
+    let owned = native_text(spec.display_title());
     let text = Some(owned.as_str());
     Some(match spec.action.as_str() {
         ids::ABOUT => PredefinedMenuItem::about(text, Some(about_metadata())),
@@ -311,7 +418,7 @@ fn append_entries(
                 let item = if spec.is_checkable() {
                     let item = CheckMenuItem::with_id(
                         menu_id,
-                        native_text(tr(&spec.title)),
+                        native_text(spec.display_title()),
                         true,
                         false,
                         None,
@@ -319,7 +426,8 @@ fn append_entries(
                     menu.append(&item)?;
                     Native::Check(item)
                 } else {
-                    let item = MenuItem::with_id(menu_id, native_text(tr(&spec.title)), true, None);
+                    let item =
+                        MenuItem::with_id(menu_id, native_text(spec.display_title()), true, None);
                     menu.append(&item)?;
                     Native::Plain(item)
                 };
@@ -639,6 +747,30 @@ mod tests {
                 "{t}"
             );
         }
+    }
+
+    /// ⌃⌥8 fires the ⌃8 item (Add Marker) on macOS: the press goes to the UI,
+    /// whose keymap runs Add Marker with Dialog. The exact chord, a mouse click
+    /// and items without a shortcut run the item.
+    #[test]
+    fn a_key_equivalent_with_other_modifiers_goes_to_the_ui() {
+        let ctrl_8 = Chord::parse("Ctrl+8").ok();
+        let mods = |ctrl, alt| egui::Modifiers {
+            ctrl,
+            alt,
+            ..Default::default()
+        };
+        let press = key_press_for_ui(ctrl_8, Some(mods(true, true)));
+        assert!(matches!(
+            press,
+            Some(egui::Event::Key { key: egui::Key::Num8, pressed: true, modifiers, .. })
+                if modifiers == mods(true, true)
+        ));
+        if cfg!(target_os = "macos") {
+            assert!(key_press_for_ui(ctrl_8, Some(mods(true, false))).is_none());
+        }
+        assert!(key_press_for_ui(ctrl_8, None).is_none());
+        assert!(key_press_for_ui(None, Some(mods(true, true))).is_none());
     }
 
     #[test]

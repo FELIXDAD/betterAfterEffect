@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use bae_app::{Registry, Resources};
 use bae_gpu::GpuContext;
-use bae_model::{FrameRate, PrimPath, Stage, Sublayer, SublayerId, Time};
+use bae_model::{FrameRate, PrimPath, Stage, Time};
 use bae_motion::query::CompInfo;
 use bae_render::{
     AnimEvaluator, ExportAlpha, ExportFormat, ExportJob, ExportSettings, RenderError,
@@ -27,8 +27,7 @@ use bae_ui::{Panel, PanelContext, TabInfo, tr};
 
 use crate::gpu_preview::{PreviewEffects, PreviewSources};
 
-/// Formats offered in the panel (movies come with 08's Media Foundation work
-/// on Windows; `bae render --format` has them on macOS).
+/// Formats offered in the panel and by `bae render --format`.
 pub const FORMATS: [ExportFormat; 7] = [
     ExportFormat::Png,
     ExportFormat::Tiff,
@@ -39,10 +38,18 @@ pub const FORMATS: [ExportFormat; 7] = [
     ExportFormat::ProRes4444,
 ];
 
-/// Formats this build can write: image sequences everywhere, movies on macOS
-/// (AVFoundation). On Windows movies come with Media Foundation in a later
-/// version; the panel shows them disabled.
+/// Formats the host can encode.
 pub fn format_available(format: ExportFormat) -> bool {
+    #[cfg(windows)]
+    match format {
+        ExportFormat::H264 => {
+            return bae_media::media_foundation::encoder_available(bae_media::VideoCodec::H264);
+        }
+        ExportFormat::Hevc => {
+            return bae_media::media_foundation::encoder_available(bae_media::VideoCodec::Hevc);
+        }
+        _ => {}
+    }
     format.is_image() || cfg!(target_os = "macos")
 }
 
@@ -57,7 +64,10 @@ pub enum Channels {
 
 /// Whether `format` can carry an alpha channel.
 pub fn supports_alpha(format: ExportFormat) -> bool {
-    !matches!(format, ExportFormat::H264 | ExportFormat::ProRes)
+    match format {
+        ExportFormat::Hevc => bae_media::VideoCodec::Hevc.supports_alpha(),
+        _ => !matches!(format, ExportFormat::H264 | ExportFormat::ProRes),
+    }
 }
 
 /// The channels a new output module of `format` starts with: RGB, as AE's
@@ -139,6 +149,11 @@ pub struct QueueItem {
     pub end: i64,
     /// Current state.
     pub status: ItemStatus,
+    /// The Render column's check box: unchecked items stay in the queue but
+    /// are not rendered (AE: Unqueued).
+    pub render: bool,
+    /// When its render started (AE's Started column).
+    pub started: Option<std::time::SystemTime>,
     cancel: Arc<AtomicBool>,
 }
 
@@ -232,6 +247,8 @@ impl RenderQueue {
             start,
             end,
             status: ItemStatus::Queued,
+            render: true,
+            started: None,
             cancel: Arc::new(AtomicBool::new(false)),
         });
         id
@@ -289,7 +306,7 @@ impl RenderQueue {
     pub fn queued(&self) -> usize {
         self.items
             .iter()
-            .filter(|i| i.status == ItemStatus::Queued)
+            .filter(|i| i.status == ItemStatus::Queued && i.render)
             .count()
     }
 
@@ -303,7 +320,7 @@ impl RenderQueue {
         self.batch = self
             .items
             .iter()
-            .filter(|i| i.status == ItemStatus::Queued)
+            .filter(|i| i.status == ItemStatus::Queued && i.render)
             .map(|i| i.id)
             .collect();
         true
@@ -324,6 +341,7 @@ impl RenderQueue {
             .and_then(|frames| limited_range(item.start, item.end, frames))
             .map_or(0, |(start, end)| (end - start + 1) as usize);
         item.status = ItemStatus::Rendering { done: 0, total };
+        item.started = Some(std::time::SystemTime::now());
         Some(Job {
             id: item.id,
             comp: item.comp.clone(),
@@ -418,37 +436,6 @@ pub(crate) struct Job {
     start: i64,
     end: i64,
     cancel: Arc<AtomicBool>,
-}
-
-/// The project as of now, for the worker thread (sublayer snapshots, strongest
-/// first).
-pub(crate) struct StageSnapshot(Vec<(SublayerId, Vec<u8>)>);
-
-impl StageSnapshot {
-    pub(crate) fn take(stage: &Stage) -> Result<Self, String> {
-        stage
-            .layer_stack()
-            .iter()
-            .map(|id| {
-                let sublayer = stage
-                    .sublayer(id)
-                    .ok_or_else(|| format!("sublayer {id:?} missing"))?;
-                let bytes = sublayer.export_snapshot().map_err(|e| e.to_string())?;
-                Ok((id.clone(), bytes))
-            })
-            .collect::<Result<_, String>>()
-            .map(StageSnapshot)
-    }
-
-    pub(crate) fn restore(&self) -> Result<Stage, String> {
-        let sublayers = self
-            .0
-            .iter()
-            .map(|(id, bytes)| Sublayer::from_snapshot(id.clone(), bytes))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        Stage::from_sublayers(sublayers).map_err(|e| e.to_string())
-    }
 }
 
 /// Renders one item; `progress` gets the frames done so far.
@@ -631,13 +618,7 @@ pub fn start(
     if !queue.lock().begin() {
         return Ok(());
     }
-    let snapshot = match StageSnapshot::take(stage) {
-        Ok(snapshot) => snapshot,
-        Err(error) => {
-            queue.lock().running = false;
-            return Err(error);
-        }
-    };
+    let snapshot = crate::preview_snapshot::PreviewSnapshot::take(stage);
     let queue = queue.clone();
     std::thread::Builder::new()
         .name("bae-render-queue".into())
@@ -657,7 +638,7 @@ fn provider_list(registry: &Registry<dyn SourceProvider>) -> Vec<Arc<dyn SourceP
 /// The worker: renders queued items until none is left.
 pub(crate) fn run_worker(
     queue: &SharedRenderQueue,
-    snapshot: &StageSnapshot,
+    snapshot: &crate::preview_snapshot::PreviewSnapshot,
     gpu: Arc<GpuContext>,
     providers: &[Arc<dyn SourceProvider>],
     effects: Option<&Registry<dyn bae_render::Effect>>,
@@ -807,24 +788,26 @@ impl RenderQueuePanel {
         let mut remove = None;
         let mut cancel = None;
         let mut requeue = None;
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for (i, item) in q.items.iter_mut().enumerate() {
-                let last =
-                    bae_motion::query::comp_info(cx.stage, &item.comp).map(|c| c.frame_count() - 1);
-                ui.push_id(item.id, |ui| {
-                    item_ui(
-                        ui,
-                        i + 1,
-                        item,
-                        last,
-                        &mut remove,
-                        &mut cancel,
-                        &mut requeue,
-                    );
-                });
-                ui.separator();
-            }
-        });
+        let mut open = None;
+        // No scroll area of its own: the dock scrolls a panel that does not fit
+        // (AE opens the Render Queue in the short Timeline frame).
+        for (i, item) in q.items.iter_mut().enumerate() {
+            let last =
+                bae_motion::query::comp_info(cx.stage, &item.comp).map(|c| c.frame_count() - 1);
+            ui.push_id(item.id, |ui| {
+                item_ui(
+                    ui,
+                    i + 1,
+                    item,
+                    last,
+                    &mut remove,
+                    &mut cancel,
+                    &mut requeue,
+                    &mut open,
+                );
+            });
+            ui.separator();
+        }
         if let Some(id) = remove {
             q.remove(id);
         }
@@ -838,6 +821,13 @@ impl RenderQueuePanel {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(100));
         }
+        drop(q);
+        // The item's settings links (the dialogs read the queue themselves).
+        match open {
+            Some((id, true)) => crate::dialogs::render_settings(cx, id),
+            Some((id, false)) => crate::dialogs::output_module(cx, id),
+            None => {}
+        }
     }
 }
 
@@ -850,6 +840,7 @@ fn item_ui(
     remove: &mut Option<u64>,
     cancel: &mut Option<u64>,
     requeue: &mut Option<u64>,
+    open: &mut Option<(u64, bool)>,
 ) {
     let editable = matches!(
         item.status,
@@ -864,8 +855,22 @@ fn item_ui(
     // Name, status and actions wrap in a narrow panel instead of running
     // off its edge.
     ui.horizontal_wrapped(|ui| {
+        // AE's Render column and the item's number.
+        ui.add_enabled_ui(!matches!(item.status, ItemStatus::Rendering { .. }), |ui| {
+            let mut render = item.render;
+            if bae_ui::widgets::checkbox(ui, &mut render, "")
+                .labeled_toggle(egui::WidgetType::Checkbox, &name("Render"), render)
+                .changed()
+            {
+                item.render = render;
+            }
+        });
+        ui.label(number.to_string());
         ui.strong(&item.comp_name);
         match &item.status {
+            ItemStatus::Queued if !item.render => {
+                ui.label(tr("Unqueued"));
+            }
             ItemStatus::Queued => {
                 ui.label(tr("Queued"));
             }
@@ -944,6 +949,48 @@ fn item_ui(
     if let ItemStatus::Failed(message) = &item.status {
         ui.colored_label(ui.visuals().error_fg_color, message);
     }
+    // AE's Render Time column (time so far while rendering).
+    if let Some(started) = item.started {
+        let time = match &item.status {
+            ItemStatus::Done { seconds, .. } => format!("{seconds:.1} s"),
+            _ => started
+                .elapsed()
+                .map_or_else(|_| String::new(), |d| format!("{:.1} s", d.as_secs_f64())),
+        };
+        ui.label(
+            egui::RichText::new(format!("{} {time}", tr("Render Time:")))
+                .color(bae_ui::theme::color::TEXT_DIM),
+        );
+    }
+    // Render Settings and Log (AE's templates; BAE renders at Best Settings).
+    // AE's template links: Render Settings and Output Module open their
+    // dialogs; Log keeps AE's default.
+    ui.add_enabled_ui(editable, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(tr("Render Settings:"));
+            if bae_ui::widgets::link(ui, tr("Best Settings"))
+                .labeled(egui::WidgetType::Link, &name("Render Settings"))
+                .clicked()
+            {
+                *open = Some((item.id, true));
+            }
+            ui.add_space(12.0);
+            ui.add_enabled_ui(false, |ui| {
+                ui.label(tr("Log:"));
+                let mut j = 0;
+                bae_ui::widgets::dropdown(ui, "log", &mut j, &[tr("Errors Only")], 110.0)
+                    .labeled_value(egui::WidgetType::ComboBox, &name("Log"), tr("Errors Only"));
+            });
+            ui.add_space(12.0);
+            ui.label(tr("Output Module:"));
+            if bae_ui::widgets::link(ui, tr(format_label(item.format)))
+                .labeled(egui::WidgetType::Link, &name("Output Module"))
+                .clicked()
+            {
+                *open = Some((item.id, false));
+            }
+        });
+    });
     ui.add_enabled_ui(editable, |ui| {
         egui::Grid::new("output").num_columns(2).show(ui, |ui| {
             // Fields are named after the label in front of them and the item
@@ -968,9 +1015,14 @@ fn item_ui(
                             format = f;
                         }
                         if !available {
-                            r.on_disabled_hover_text(tr(
-                                "Movies are not available on Windows yet; they come with Media Foundation in a later version.",
-                            ));
+                            let reason = match f {
+                                ExportFormat::ProRes | ExportFormat::ProRes4444 => {
+                                    "ProRes export requires macOS."
+                                }
+                                ExportFormat::Hevc => "A hardware HEVC encoder is required.",
+                                _ => "The system H.264 encoder is unavailable.",
+                            };
+                            r.on_disabled_hover_text(tr(reason));
                         }
                     }
                 })
@@ -993,7 +1045,11 @@ fn item_ui(
                 .truncate()
                 .selected_text(channels_label(channels))
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut channels, Channels::Rgb, channels_label(Channels::Rgb));
+                    ui.selectable_value(
+                        &mut channels,
+                        Channels::Rgb,
+                        channels_label(Channels::Rgb),
+                    );
                     let alpha = supports_alpha(item.format);
                     let r = ui.add_enabled(
                         alpha,
@@ -1027,7 +1083,11 @@ fn item_ui(
                         .speed(0.5)
                         .suffix(" Mbps"),
                 )
-                .labeled_value(egui::WidgetType::DragValue, &name("Target Bitrate"), &value);
+                .labeled_value(
+                    egui::WidgetType::DragValue,
+                    &name("Target Bitrate"),
+                    &value,
+                );
                 ui.end_row();
             }
             ui.label(tr("Output To"));
@@ -1081,7 +1141,7 @@ fn item_ui(
 }
 
 /// The format's name in AE's output module (translated with `tr`).
-fn format_label(format: ExportFormat) -> &'static str {
+pub(crate) fn format_label(format: ExportFormat) -> &'static str {
     match format {
         ExportFormat::Png => "PNG Sequence",
         ExportFormat::Tiff => "TIFF Sequence",
@@ -1094,12 +1154,103 @@ fn format_label(format: ExportFormat) -> &'static str {
 }
 
 /// AE's names for the channels (the same in its Chinese UI).
-fn channels_label(channels: Channels) -> &'static str {
+pub(crate) fn channels_label(channels: Channels) -> &'static str {
     match channels {
         Channels::Rgb => "RGB",
         Channels::RgbAlpha => "RGB + Alpha",
     }
 }
+
+/// Chinese strings of this module (keys are the English text, see
+/// `bae_ui::i18n`).
+pub(crate) const ZH: &[(&str, &str)] = &[
+    // AE 26's Render Queue (渲染队列) terms.
+    ("Unqueued", "未加入队列"),
+    ("Render Time:", "渲染时间:"),
+    ("Render Settings", "渲染设置"),
+    ("Log", "日志"),
+    ("Output Module", "输出模块"),
+    ("Output Module:", "输出模块:"),
+    ("Render Settings:", "渲染设置:"),
+    ("Best Settings", "最佳设置"),
+    ("Log:", "日志:"),
+    ("Errors Only", "仅错误"),
+    // Render Queue (AE 简体中文界面用词)
+    ("Window", "窗口"),
+    ("Render Queue", "渲染队列"),
+    ("Add to Render Queue", "添加到渲染队列"),
+    ("Render", "渲染"),
+    ("Rendering", "正在渲染"),
+    ("Queued", "已加入队列"),
+    ("Done", "完成"),
+    ("Failed", "失败"),
+    (
+        "Stopped ({done}/{total} frames)",
+        "已停止（{done}/{total} 帧）",
+    ),
+    ("Stop", "停止"),
+    ("Render Again", "重新渲染"),
+    ("Format", "格式"),
+    ("Output To", "输出到"),
+    // Output module (AE 26 输出模块设置)
+    ("PNG Sequence", "PNG 序列"),
+    ("TIFF Sequence", "TIFF 序列"),
+    ("OpenEXR Sequence", "OpenEXR 序列"),
+    ("Channels", "通道"),
+    ("Target Bitrate", "目标比特率"),
+    (
+        "This format has no alpha channel.",
+        "此格式没有 Alpha 通道。",
+    ),
+    ("ProRes export requires macOS.", "ProRes 导出需要 macOS。"),
+    (
+        "HEVC decoding is unsupported. Check that Windows HEVC Video Extensions are installed.",
+        "系统不支持此 HEVC 视频。请检查是否已安装 Windows「HEVC 视频扩展」。",
+    ),
+    (
+        "A hardware HEVC encoder is required.",
+        "导出 HEVC 需要硬件编码器。",
+    ),
+    (
+        "The system H.264 encoder is unavailable.",
+        "系统 H.264 编码器不可用。",
+    ),
+    ("Frames", "帧"),
+    ("Show in Finder", "在访达中显示"),
+    ("Show in Explorer", "在资源管理器中显示"),
+    ("Show in Folder", "在文件夹中显示"),
+    ("Rendering needs a GPU.", "渲染需要 GPU。"),
+    (
+        "Choose where to render: Output To is empty.",
+        "请选择渲染输出位置：“输出到”为空。",
+    ),
+    (
+        "The frames are outside the composition (0–{last}).",
+        "帧范围超出了合成（0–{last}）。",
+    ),
+    ("The composition no longer exists.", "合成已不存在。"),
+    (
+        "The file will be saved as .{ext} to match the format.",
+        "文件会按格式保存为 .{ext}。",
+    ),
+    (
+        "Add a composition with Composition > Add to Render Queue.",
+        "用“合成 > 添加到渲染队列”添加合成。",
+    ),
+];
+
+/// Registers this module's Chinese strings and panel (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "render_queue",
+        bae_ui::PanelKind::new("Render Queue", |_| Box::new(RenderQueuePanel::default())),
+    );
+}
+
+#[cfg(test)]
+mod motion_blur_test;
 
 #[cfg(test)]
 mod tests {
@@ -1124,6 +1275,21 @@ mod tests {
             bg_color: [0.0, 0.0, 0.0, 1.0],
             display_start: Time::ZERO,
         }
+    }
+
+    #[test]
+    fn unchecked_items_are_not_rendered() {
+        let mut q = RenderQueue::default();
+        let dir = Path::new("/renders");
+        let a = q.add(&comp_info("/comps/a", "A"), dir);
+        let b = q.add(&comp_info("/comps/b", "B"), dir);
+        q.item_mut(a).unwrap().render = false;
+        assert_eq!(q.queued(), 1);
+        assert!(q.begin());
+        let job = q.take_next(&|_| Some(30)).unwrap();
+        assert_eq!(job.id, b, "A is unchecked (AE: Unqueued)");
+        assert!(q.items()[1].started.is_some());
+        assert!(q.take_next(&|_| Some(30)).is_none());
     }
 
     #[test]
@@ -1448,8 +1614,11 @@ mod tests {
 
     #[test]
     fn movie_formats_channels_and_names() {
-        // Movies on macOS; on Windows they wait for Media Foundation.
         for f in FORMATS {
+            #[cfg(windows)]
+            if matches!(f, ExportFormat::H264 | ExportFormat::Hevc) {
+                continue;
+            }
             assert_eq!(
                 format_available(f),
                 f.is_image() || cfg!(target_os = "macos"),
@@ -1524,22 +1693,34 @@ mod tests {
         assert_eq!((p4444.alpha, p4444.bit_rate), (ExportAlpha::Straight, None));
     }
 
-    /// The queue renders movies with bae-media's encoders (macOS).
-    #[cfg(target_os = "macos")]
+    /// The same queued jobs use the system encoders on both desktops.
+    #[cfg(any(target_os = "macos", windows))]
     #[test]
-    fn renders_h264_and_prores_4444_movies() {
+    fn renders_available_movies() {
         let Some(gpu) = gpu() else {
             return;
         };
         let dir = tempfile::tempdir().unwrap();
-        let (stage, comp) = project();
+        let mut scene = bae_render::fixture::SceneBuilder::new();
+        let comp = scene
+            .comp("main", 320, 240, FrameRate::FPS_30, Time::ONE_SECOND)
+            .unwrap();
+        let stage = Project::from_stage(scene.into_stage()).stage;
         let info = bae_motion::query::comp_info(&stage, &comp).unwrap();
         let mut q = RenderQueue::default();
-        for format in [
+        let formats: Vec<_> = [
             ExportFormat::H264,
             ExportFormat::ProRes4444,
             ExportFormat::Hevc,
-        ] {
+        ]
+        .into_iter()
+        .filter(|&format| format_available(format))
+        .collect();
+        if formats.is_empty() {
+            eprintln!("SKIP: no system movie encoder");
+            return;
+        }
+        for &format in &formats {
             let id = q.add(&info, dir.path());
             let item = q.item_mut(id).unwrap();
             item.set_format(format);
@@ -1564,8 +1745,10 @@ mod tests {
                 job.format
             );
         }
-        for (name, ext) in [("h264", "mp4"), ("prores4444", "mov"), ("hevc", "mp4")] {
-            let file = dir.path().join(format!("m_{name}.{ext}"));
+        for format in formats {
+            let file = dir
+                .path()
+                .join(format!("m_{}.{}", format.name(), format.extension()));
             let len = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
             assert!(len > 0, "{} not written", file.display());
         }
@@ -1708,7 +1891,7 @@ mod tests {
             .cancel
             .store(true, Ordering::Relaxed);
 
-        let snapshot = StageSnapshot::take(&stage).unwrap();
+        let snapshot = crate::preview_snapshot::PreviewSnapshot::take(&stage);
         run_worker(&queue, &snapshot, gpu, &[], None);
 
         let q = queue.lock();

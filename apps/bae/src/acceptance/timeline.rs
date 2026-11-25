@@ -497,6 +497,7 @@ fn enter_on_a_focused_button_does_not_start_a_rename() {
         h.state().render_queue().lock().items().is_empty(),
         "Enter did not press the button"
     );
+    to_front(&mut h, "timeline");
     assert!(
         rename_field_value(&h).is_none(),
         "Enter on a button also started a rename"
@@ -623,4 +624,80 @@ fn locked_layers_are_skipped_by_clicks_ranges_select_all_and_delete() {
         wrong.push("Bring to Front moves the locked layer");
     }
     assert!(wrong.is_empty(), "locked layer: {wrong:?}");
+}
+
+/// Home / End / PageUp / PageDown / Shift+PageDown with a timeline layer just
+/// clicked (the timeline focused) move the current time, as in AE (#468) —
+/// also when Windows reports them with the numpad's scan codes (NumLock off,
+/// or sent by automation): numpad 7 / 1 / 9 / 3, which are also the timeline's
+/// Go to Comp Marker keys.
+#[test]
+fn transport_keys_move_the_playhead_after_clicking_a_layer() {
+    let mut h = comp_with_solid();
+    // As the report: click the time ruler first, then a layer.
+    let head = header(&h);
+    let tick = find_texts(&h, |t| t == "2s")
+        .into_iter()
+        .find(|r| r.left() > head.right())
+        .unwrap_or_else(|| panic!("no ruler label in {:?}", painted_texts(&h)));
+    click_at(&mut h, tick.center());
+    settle(&mut h);
+    let start = h.state().now();
+    assert!(start > Time::ZERO, "the ruler click set the time");
+    let row = layer_row(&h, "Dark Gray Solid 1");
+    click_at(&mut h, row);
+    settle(&mut h);
+    for numpad in [false, true] {
+        let step = |h: &mut Ui, mods: Modifiers, k: Key| {
+            let physical = match (numpad, k) {
+                (true, Key::Home) => Key::Num7,
+                (true, Key::End) => Key::Num1,
+                (true, Key::PageUp) => Key::Num9,
+                (true, Key::PageDown) => Key::Num3,
+                _ => k,
+            };
+            let e = |pressed| Event::Key {
+                key: k,
+                physical_key: Some(physical),
+                pressed,
+                repeat: false,
+                modifiers: mods,
+            };
+            for ev in [
+                Event::ModifiersChanged(mods),
+                e(true),
+                e(false),
+                Event::ModifiersChanged(Modifiers::NONE),
+            ] {
+                send(h, ev);
+            }
+            settle(h);
+            h.state().now()
+        };
+        assert_eq!(
+            step(&mut h, Modifiers::NONE, Key::Home),
+            Time::ZERO,
+            "Home ({numpad})"
+        );
+        let one = step(&mut h, Modifiers::NONE, Key::PageDown);
+        assert!(
+            one > Time::ZERO,
+            "PageDown did not step from {start:?} ({numpad})"
+        );
+        let eleven = step(&mut h, Modifiers::SHIFT, Key::PageDown);
+        assert_eq!(
+            eleven.0,
+            one.0 * 11,
+            "Shift+PageDown steps 10 frames ({numpad})"
+        );
+        let ten = step(&mut h, Modifiers::NONE, Key::PageUp);
+        assert_eq!(ten.0, one.0 * 10, "PageUp steps back ({numpad})");
+        let end = step(&mut h, Modifiers::NONE, Key::End);
+        assert!(end > ten, "End goes to the last frame ({numpad})");
+    }
+    let comp = h.state().active_comp().expect("comp");
+    assert!(
+        bae_motion::markers::markers_of(h.state().stage(), &comp).is_empty(),
+        "Shift+PageDown set no comp marker"
+    );
 }

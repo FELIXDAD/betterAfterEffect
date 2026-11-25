@@ -12,7 +12,7 @@ use bae_ui::history::HistoryLog;
 use bae_ui::theme::{self, color};
 use bae_ui::widgets::{self, HotNumber};
 use bae_ui::{PanelContext, tr};
-use egui::{Id, Ui, vec2};
+use egui::{Color32, Id, Ui, vec2};
 use serde_json::json;
 
 use crate::session::{Pending, Scrub, SharedSession};
@@ -80,15 +80,27 @@ pub(crate) fn session(resources: &Resources) -> SharedSession {
 #[derive(Default)]
 pub(crate) struct EvalCache {
     eval: Evaluator,
+    changes: StageChanges,
+}
+
+/// Panels observe the same committed edits, undo/redo and project replacements.
+#[derive(Default)]
+pub(crate) struct StageChanges {
     seq: Option<u64>,
+}
+
+impl StageChanges {
+    pub(crate) fn changed(&mut self, resources: &Resources) -> bool {
+        let seq = resources.get::<Arc<HistoryLog>>().map(|h| h.last_seq());
+        let previous = std::mem::replace(&mut self.seq, seq);
+        seq.is_none() || seq != previous
+    }
 }
 
 impl EvalCache {
     pub(crate) fn get(&mut self, resources: &Resources) -> &mut Evaluator {
-        let seq = resources.get::<Arc<HistoryLog>>().map(|h| h.last_seq());
-        if seq.is_none() || seq != self.seq {
+        if self.changes.changed(resources) {
             self.eval.clear();
-            self.seq = seq;
         }
         &mut self.eval
     }
@@ -113,6 +125,7 @@ pub(crate) fn frame_of(info: &CompInfo, t: Time) -> i64 {
 /// English label of a property (displayed through `tr`).
 pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool) -> String {
     let fixed = match attr {
+        "audio:levels" => "Audio Levels",
         "transform:anchor_point" => "Anchor Point",
         "transform:position" => "Position",
         "transform:position_x" => "X Position",
@@ -129,6 +142,12 @@ pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool
         "transform:skew" => "Skew",
         "transform:skew_axis" => "Skew Axis",
         "text:source" => "Source Text",
+        "text:path" => "Path",
+        "text:reverse_path" => "Reverse Path",
+        "text:perpendicular_to_path" => "Perpendicular To Path",
+        "text:force_alignment" => "Force Alignment",
+        "text:first_margin" => "First Margin",
+        "text:last_margin" => "Last Margin",
         // Text animators (AE: Animator N > Range Selector N, properties).
         "animator:anchor_point" => "Anchor Point",
         "animator:position" => "Position",
@@ -233,13 +252,22 @@ enum Num {
 }
 
 /// A hot number whose scrubbed value is kept until the drag ends (one command per drag).
-fn number(ui: &mut Ui, id: Id, model: f64, attr: &str, suffix: &str, name: &str) -> Num {
+fn number(
+    ui: &mut Ui,
+    id: Id,
+    model: f64,
+    attr: &str,
+    suffix: &str,
+    name: &str,
+    tint: Color32,
+) -> Num {
     let key = id.with("scrub");
     let mut v = ui.data(|d| d.get_temp::<f64>(key)).unwrap_or(model);
     let resp = ui
         .push_id(id, |ui| {
             ui.add(
                 HotNumber::new(&mut v)
+                    .tint(tint)
                     .decimals(decimals(attr))
                     .speed(if attr.ends_with("opacity") { 1.0 } else { 0.5 })
                     .suffix(suffix)
@@ -261,6 +289,9 @@ fn number(ui: &mut Ui, id: Id, model: f64, attr: &str, suffix: &str, name: &str)
     Num::None
 }
 
+/// Values an enabled expression drives are red (AE).
+pub(crate) const EXPRESSION_VALUE: Color32 = Color32::from_rgb(0xe0, 0x5a, 0x5a);
+
 /// Editor for one property value (hot numbers, color swatch, checkbox, text).
 /// `dims` limits vector components (2 for 2D layers). `name` is what screen
 /// readers call the property ("Layer “Solid 1” · Position"); components get
@@ -272,7 +303,13 @@ pub(crate) fn value_editor(
     value: &Value,
     dims: usize,
     name: &str,
+    expression: bool,
 ) -> Edit {
+    let tint = if expression {
+        EXPRESSION_VALUE
+    } else {
+        color::ACCENT
+    };
     let axis = |i: usize| bae_ui::a11y::context(&[name, ["X", "Y", "Z"][i.min(2)]]);
     let mut out = Edit::None;
     let mut apply = |n: Num, f: &dyn Fn(f64) -> Value| match n {
@@ -293,6 +330,7 @@ pub(crate) fn value_editor(
                 "points",
                 "x+",
                 &bae_ui::a11y::context(&[name, tr("Revolutions")]),
+                tint,
             );
             apply(n, &|r| Value::Float(r.trunc() * 360.0 + deg));
             let n = number(
@@ -302,15 +340,16 @@ pub(crate) fn value_editor(
                 attr,
                 "°",
                 &bae_ui::a11y::context(&[name, tr("Degrees")]),
+                tint,
             );
             apply(n, &|d| Value::Float(revs * 360.0 + d));
         }
         Value::Float(v) => {
-            let n = number(ui, id, *v, attr, suffix(attr), name);
+            let n = number(ui, id, *v, attr, suffix(attr), name, tint);
             apply(n, &|x| Value::Float(x));
         }
         Value::Int(v) => {
-            let n = number(ui, id, *v as f64, "points", "", name);
+            let n = number(ui, id, *v as f64, "points", "", name, tint);
             apply(n, &|x| Value::Int(x.round() as i64));
         }
         Value::Vec2(v) | Value::Vec3([v @ .., _])
@@ -330,6 +369,7 @@ pub(crate) fn value_editor(
                     attr,
                     if i == 1 { suffix(attr) } else { "" },
                     &axis(i),
+                    tint,
                 );
                 apply(n, &|x| {
                     let mut w = v;
@@ -367,6 +407,7 @@ pub(crate) fn value_editor(
                     attr,
                     if i == 2 { suffix(attr) } else { "" },
                     &axis(i),
+                    tint,
                 );
                 apply(n, &|x| {
                     let mut w = v;
@@ -458,21 +499,218 @@ pub(crate) fn apply_edit(
     match edit {
         Edit::None => {}
         Edit::Live(value) => {
+            let peers = edit_peers(cx.stage, session, path, attr);
+            let peers = peer_values(cx.stage, path, attr, t, &value, &peers, true);
             session.lock().scrub = Some(Scrub {
                 path: path.clone(),
                 attr: attr.to_owned(),
                 value,
+                peers,
             });
         }
         Edit::Commit(value) => {
-            session.lock().scrub = None;
-            let key_time = query::to_key_time(cx.stage, path, t);
-            let value = serde_json::to_value(&value).unwrap_or_default();
-            cx.invoke_with(
-                "attr.set_at",
-                json!({"path": path, "attr": attr, "time": key_time, "value": value}),
+            // A drag moves the others by as much; a typed value sets them all.
+            let dragged = session
+                .lock()
+                .scrub
+                .take()
+                .is_some_and(|s| s.path == *path && s.attr == attr);
+            let peers = edit_peers(cx.stage, session, path, attr);
+            let peers = peer_values(cx.stage, path, attr, t, &value, &peers, dragged);
+            let edits: Vec<serde_json::Value> = std::iter::once((path.clone(), value))
+                .chain(peers)
+                .map(|(p, v)| {
+                    let time = query::to_key_time(cx.stage, &p, t);
+                    json!({"path": p, "attr": attr, "time": time, "value": v})
+                })
+                .collect();
+            if let [one] = &edits[..] {
+                cx.invoke_with("attr.set_at", one.clone());
+            } else {
+                // One undo step for all of them.
+                cx.invoke_with("attr.set_many", json!({ "edits": edits }));
+            }
+        }
+    }
+}
+
+/// The same property as `attr` of `path` elsewhere in the selection, which an
+/// edit of it changes too (AE): on the other selected layers when `path`'s
+/// layer is one of several selected, and the same property selected on other
+/// layers or effects. Locked layers are left alone.
+pub(crate) fn edit_peers(
+    stage: &Stage,
+    session: &SharedSession,
+    path: &PrimPath,
+    attr: &str,
+) -> Vec<PrimPath> {
+    let Some(layer) = query::owning_layer(stage, path) else {
+        return Vec::new();
+    };
+    let mut out: Vec<PrimPath> = Vec::new();
+    {
+        let s = session.lock();
+        if s.selected_layers.len() > 1 && s.selected_layers.contains(&layer) {
+            out.extend(
+                s.selected_layers
+                    .iter()
+                    .filter(|l| **l != layer)
+                    .filter_map(|l| counterpart(stage, &layer, path, l)),
             );
         }
+        if s.selected_props.iter().any(|(p, a)| p == path && a == attr) {
+            out.extend(
+                s.selected_props
+                    .iter()
+                    .filter(|(p, a)| a == attr && same_owner(stage, path, p))
+                    .map(|(p, _)| p.clone()),
+            );
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    // Text properties only on text layers.
+    let text = |p: &PrimPath| query::layer_kind(stage, p).as_deref() == Some("text");
+    out.retain(|p| {
+        p != path
+            && query::locked_layer_of(stage, p).is_none()
+            && (!attr.starts_with("text:") || text(p))
+            && seen.insert(p.clone())
+    });
+    out
+}
+
+fn match_name(stage: &Stage, path: &PrimPath) -> Option<String> {
+    let view = stage.prim(path)?;
+    query::static_value(&view, "match_name").and_then(|v| v.as_str().map(str::to_owned))
+}
+
+/// Whether `a` and `b` hold the same properties: the same prim type and the
+/// same effect.
+fn same_owner(stage: &Stage, a: &PrimPath, b: &PrimPath) -> bool {
+    let ty = |p: &PrimPath| stage.prim(p).and_then(|v| v.prim_type().cloned());
+    ty(a).is_some() && ty(a) == ty(b) && match_name(stage, a) == match_name(stage, b)
+}
+
+/// `path` (of `layer`) on `other`: the same prim below it, else (effects) the
+/// same instance of the same effect (the second Gaussian Blur → the second).
+fn counterpart(
+    stage: &Stage,
+    layer: &PrimPath,
+    path: &PrimPath,
+    other: &PrimPath,
+) -> Option<PrimPath> {
+    let rel = path.as_str().strip_prefix(layer.as_str())?;
+    if let Ok(p) = PrimPath::new(&format!("{other}{rel}"))
+        && stage.has_prim(&p)
+        && same_owner(stage, path, &p)
+    {
+        return Some(p);
+    }
+    let m = match_name(stage, path)?;
+    let same = |l: &PrimPath| {
+        bae_motion::effect::effects_of(stage, l)
+            .into_iter()
+            .filter(|e| match_name(stage, e).as_deref() == Some(m.as_str()))
+            .collect::<Vec<_>>()
+    };
+    let nth = same(layer).iter().position(|e| e == path)?;
+    same(other).into_iter().nth(nth)
+}
+
+/// The peers' new values for `value` of `path`: offset by the same amount
+/// (`relative`, a drag) or the same value; peers whose value has another type
+/// are left out.
+fn peer_values(
+    stage: &Stage,
+    path: &PrimPath,
+    attr: &str,
+    t: Time,
+    value: &Value,
+    peers: &[PrimPath],
+    relative: bool,
+) -> Vec<(PrimPath, Value)> {
+    let at = |p: &PrimPath| query::sample_attr(stage, p, attr, query::to_key_time(stage, p, t));
+    let from = at(path);
+    peers
+        .iter()
+        .filter_map(|p| {
+            let base = at(p)?;
+            if std::mem::discriminant(&base) != std::mem::discriminant(value) {
+                return None;
+            }
+            let v = match (relative, &from) {
+                (true, Some(from)) => offset(&base, from, value),
+                _ => value.clone(),
+            };
+            Some((p.clone(), v))
+        })
+        .collect()
+}
+
+/// `base` moved by `to - from` (numbers and vectors; other values become `to`).
+fn offset(base: &Value, from: &Value, to: &Value) -> Value {
+    match (base, from, to) {
+        (Value::Float(b), Value::Float(f), Value::Float(t)) => Value::Float(b + (t - f)),
+        (Value::Int(b), Value::Int(f), Value::Int(t)) => Value::Int(b + (t - f)),
+        (Value::Vec2(b), Value::Vec2(f), Value::Vec2(t)) => {
+            Value::Vec2(std::array::from_fn(|i| b[i] + (t[i] - f[i])))
+        }
+        (Value::Vec3(b), Value::Vec3(f), Value::Vec3(t)) => {
+            Value::Vec3(std::array::from_fn(|i| b[i] + (t[i] - f[i])))
+        }
+        _ => to.clone(),
+    }
+}
+
+/// The mask a text layer's characters follow (Path Options > Path), if it
+/// still exists.
+pub(crate) fn text_path_mask(stage: &Stage, layer: &PrimPath) -> Option<PrimPath> {
+    let view = stage.prim(layer)?;
+    let mask = view.value("text:path")?.as_prim_ref()?.clone();
+    stage.has_prim(&mask).then_some(mask)
+}
+
+/// The Path popup of Path Options: None or one of the layer's masks.
+pub(crate) fn text_path_picker(
+    ui: &mut Ui,
+    cx: &mut PanelContext<'_>,
+    layer: &PrimPath,
+    id: egui::Id,
+) {
+    let stage = cx.stage;
+    let current = text_path_mask(stage, layer);
+    let masks: Vec<PrimPath> = layer
+        .child("masks")
+        .ok()
+        .map(|m| {
+            stage
+                .children(&m)
+                .into_iter()
+                .filter(|m| stage.prim(m).is_some_and(|v| v.is_a(&PrimType::MASK)))
+                .collect()
+        })
+        .unwrap_or_default();
+    let name = |m: &PrimPath| query::display_name_of(stage, m);
+    let shown = current.as_ref().map_or_else(|| tr("None").to_owned(), name);
+    let mut chosen = None;
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(shown)
+        .width(140.0)
+        .show_ui(ui, |ui| {
+            if ui.selectable_label(current.is_none(), tr("None")).clicked() {
+                chosen = Some(None);
+            }
+            for m in &masks {
+                if ui
+                    .selectable_label(current.as_ref() == Some(m), name(m))
+                    .clicked()
+                {
+                    chosen = Some(Some(m.clone()));
+                }
+            }
+        });
+    if let Some(mask) = chosen.filter(|m| *m != current) {
+        cx.invoke_with("text.set_path", json!({"layer": layer, "mask": mask}));
     }
 }
 

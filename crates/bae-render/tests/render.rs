@@ -82,13 +82,9 @@ fn solids_are_pixel_exact_and_cover_their_rectangles() {
         &RenderRequest::full(),
         OutputAlpha::Premultiplied,
     );
-    assert!(
-        close(img.px(10, 6), [128, 0, 0, 128], 1),
-        "{:?}",
-        img.px(10, 6)
-    );
+    assert_eq!(img.px(10, 6), [128, 0, 0, 128]);
     assert_eq!(img.px(11, 6), [255, 0, 0, 255]);
-    assert!(close(img.px(30, 6), [128, 0, 0, 128], 1));
+    assert_eq!(img.px(30, 6), [128, 0, 0, 128]);
 }
 
 #[test]
@@ -417,6 +413,8 @@ fn footage_png_is_sampled_with_straight_alpha_premultiplied() {
             file: Some(path),
             size: None,
             source_time: Time::ZERO,
+            sequence: None,
+            blend: None,
         }),
     );
     l.transform = DAffine2::from_translation(DVec2::new(2.0, 1.0));
@@ -435,6 +433,59 @@ fn footage_png_is_sampled_with_straight_alpha_premultiplied() {
         img.px(5, 2)
     );
     assert_eq!(img.px(1, 1), [0, 0, 0, 0]);
+}
+
+#[cfg(feature = "media")]
+#[test]
+fn frame_mix_blends_neighbouring_sequence_frames() {
+    let Some(gpu) = gpu() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    // A 3-frame sequence: red, green, blue.
+    for (i, rgb) in [[255u8, 0, 0], [0, 255, 0], [0, 0, 255]].iter().enumerate() {
+        let data = [rgb[0], rgb[1], rgb[2], 255].repeat(4);
+        bae_render::png_out::write_rgba8(
+            &dir.path().join(format!("seq_{i:04}.png")),
+            &bae_gpu::transfer::ImageData {
+                width: 2,
+                height: 2,
+                format: bae_gpu::wgpu::TextureFormat::Rgba8Unorm,
+                bytes_per_row: 8,
+                data,
+            },
+        )
+        .unwrap();
+    }
+    let fps = bae_model::FrameRate::FPS_30;
+    let mut r = Renderer::new(gpu);
+    let mut comp = RenderComp::new(p("/comps/main"), 2, 2);
+    let footage = |blend| {
+        LayerContent::Footage(bae_render::FootageRef {
+            asset: p("/assets/seq"),
+            file: Some(dir.path().join("seq_0000.png")),
+            size: None,
+            source_time: fps.frame_to_time(1),
+            sequence: Some(fps),
+            blend,
+        })
+    };
+    comp.layers
+        .push(RenderLayer::new(p("/comps/main/layers/seq"), footage(None)));
+    let plain = render(&mut r, &comp, &RenderRequest::full(), OutputAlpha::Straight);
+    assert_eq!(plain.px(0, 0), [0, 255, 0, 255]);
+    comp.layers[0].content = footage(Some(bae_render::FrameBlend {
+        span: fps.frame_duration(),
+        pixel_motion: false,
+    }));
+    let frame = r.render_frame(&comp, &RenderRequest::full()).unwrap();
+    assert!(frame.warnings.is_empty(), "{:?}", frame.warnings);
+    let img = r.read_rgba8(&frame, OutputAlpha::Straight).unwrap();
+    let px = Image {
+        w: img.width,
+        data: img.data,
+    }
+    .px(1, 1);
+    // ~5.5 % red + 89 % green + 5.5 % blue, still opaque.
+    assert!(close(px, [14, 228, 14, 255], 4), "{px:?}");
 }
 
 #[test]

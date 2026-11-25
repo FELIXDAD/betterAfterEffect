@@ -520,6 +520,8 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
             (ids::RESOLUTION, "Resolution"),
             (ids::FREE_TRANSFORM, "Free Transform Points"),
         ])
+        .chain(crate::viewer::view3d::ACTIONS.iter().copied())
+        .chain(crate::viewer::guides::ACTIONS.iter().copied())
 }
 
 /// AE's resolution shortcuts: `(params, English title)` (AE's names).
@@ -551,8 +553,18 @@ pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
         let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
         (ids::RESOLUTION, params, *title)
     });
+    let views = crate::viewer::view3d::SHORTCUT_NAMES
+        .iter()
+        .map(|(slot, title)| {
+            (
+                crate::viewer::view3d::ids::SHORTCUT,
+                serde_json::json!({ "slot": slot }),
+                *title,
+            )
+        });
     nudges
         .chain(resolutions)
+        .chain(views)
         .map(|(id, params, title)| {
             (
                 format!("{id}/{params}"),
@@ -570,6 +582,10 @@ pub fn bindings() -> Vec<Binding> {
         .chain(NUDGES.iter().map(|(chord, dx, dy, _)| {
             Binding::new(chord, ids::NUDGE).params(nudge_params(*dx, *dy))
         }))
+        // Esc is Switch to Last 3D View whichever panel has focus (AE). Text
+        // fields and open menus keep their Esc (the workbench); the viewer
+        // passes it on to a drag or text it is editing.
+        .chain([Binding::new("Esc", crate::viewer::view3d::ids::LAST)])
         .collect()
 }
 
@@ -643,6 +659,74 @@ pub enum AxisMode {
     View,
 }
 
+/// Paint and Brushes panel settings for the next stroke (AE-UI-104); each
+/// stroke keeps its own copy.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PaintOptions {
+    pub foreground: [f64; 3],
+    pub background: [f64; 3],
+    /// Percent.
+    pub opacity: f64,
+    pub flow: f64,
+    /// A layer blend mode token.
+    pub mode: String,
+    /// `rgba`, `rgb` or `alpha`.
+    pub channels: String,
+    /// `constant`, `write_on`, `single_frame` or `custom`.
+    pub duration: String,
+    /// Custom duration in frames.
+    pub frames: u32,
+    /// Eraser: `layer_and_paint`, `paint` or `last_stroke`.
+    pub erase: String,
+    /// Clone Stamp: the source layer (none: the layer painted on).
+    pub clone_source: Option<bae_model::PrimPath>,
+    pub aligned: bool,
+    pub lock_source_time: bool,
+    /// Clone Stamp: source point minus the stroke's start (pixels).
+    pub clone_offset: [f64; 2],
+    /// Clone Stamp: source time shift in seconds.
+    pub clone_time_shift: f64,
+    /// Brush tip (Brushes panel): pixels, degrees, percents.
+    pub diameter: f64,
+    pub angle: f64,
+    pub roundness: f64,
+    pub hardness: f64,
+    pub spacing: f64,
+    /// Brush Dynamics of Size, Angle, Roundness, Opacity, Flow: 0 Off, 1 Pen
+    /// Pressure, 2 Pen Tilt, 3 Stylus Wheel.
+    pub dynamics: [u8; 5],
+    pub minimum_size: f64,
+}
+
+impl Default for PaintOptions {
+    fn default() -> Self {
+        PaintOptions {
+            foreground: [0.0, 0.0, 0.0],
+            background: [1.0, 1.0, 1.0],
+            opacity: 100.0,
+            flow: 100.0,
+            mode: "normal".to_owned(),
+            channels: "rgba".to_owned(),
+            duration: "constant".to_owned(),
+            frames: 1,
+            erase: "layer_and_paint".to_owned(),
+            clone_source: None,
+            aligned: true,
+            lock_source_time: false,
+            clone_offset: [0.0, 0.0],
+            clone_time_shift: 0.0,
+            diameter: 21.0,
+            angle: 0.0,
+            roundness: 100.0,
+            hardness: 100.0,
+            spacing: 25.0,
+            dynamics: [1, 0, 0, 0, 0],
+            minimum_size: 1.0,
+        }
+    }
+}
+
 /// Options of the tools, shown right of the tool buttons. First-run values follow
 /// the spec's best understanding of AE's (AE-SHP-057, 待核).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -669,6 +753,8 @@ pub struct ToolOptions {
     pub roundness: f64,
     /// Polygon and Star tools: last number of points.
     pub points: f64,
+    /// Paint and Brushes panels.
+    pub paint: PaintOptions,
     /// Puppet tools: show the mesh, expansion and density.
     pub puppet_show_mesh: bool,
     pub puppet_expansion: f64,
@@ -693,6 +779,7 @@ impl Default for ToolOptions {
             rotation_sets_orientation: true,
             roundness: 10.0,
             points: 5.0,
+            paint: PaintOptions::default(),
             puppet_show_mesh: false,
             puppet_expansion: 3.0,
             puppet_density: 10.0,
@@ -960,6 +1047,9 @@ impl ActionHandler for ToolActions {
             let mag = f64::from(shared(cx.resources).lock().magnification);
             let session = crate::common::session(cx.resources);
             return crate::viewer::nudge_layers(cx, &session, p("dx"), p("dy"), mag);
+        }
+        if crate::viewer::view3d::handle(inv, cx) || crate::viewer::guides::handle(inv, cx) {
+            return true;
         }
         if inv.id == ids::FREE_TRANSFORM {
             let tools = shared(cx.resources);
