@@ -79,7 +79,9 @@ impl TargetEffect for EyedropperFill {
         .f32s(96, &center)
         .f32(104, (v.f(2) / grid) as f32)
         .u32(108, v.popup(3) as u32);
-        let mean = SAMPLE.encode(target, p, [input, input], IRect::from_size(1, 1), u)?;
+        let pixel = IRect::from_size(1, 1);
+        let mean = target.allocate(pixel, 1.)?;
+        SAMPLE.encode_into(target, grid, [input, input], pixel, u, &mean)?;
         let mut u = UniformWriter::with_size(FILL.bytes as usize);
         u.f32(80, v.f(5) as f32)
             .u32(84, u32::from(v.b(4)))

@@ -215,6 +215,30 @@ fn eyedropper_fills_a_distant_tile_with_the_sample_disk_mean() {
 }
 
 #[test]
+fn eyedropper_reduces_to_one_texel_at_supersampled_resolution() {
+    let Some(gpu) = context() else { return };
+    let src = Pixels::new(IRect::from_size(8, 8), |_, _| [0.25, 0., 0., 1.]);
+    let input = src.upload(&gpu, F32);
+    let inst = instance("ADBE Eyedropper Fill", vec![]);
+    let params = bae_render::EffectParams {
+        scale: 4.,
+        layer_bounds: src.rect,
+        ..bae_render::EffectParams::new(&inst)
+    };
+    let mut target = bae_effects::Standalone::new(gpu.clone(), F32);
+    let out = builtin(&inst.effect)
+        .render(&mut target, &params, &input, IRect::from_size(32, 32))
+        .unwrap();
+    target.finish().unwrap();
+    assert!(
+        Pixels::download(&gpu, &out)
+            .data
+            .iter()
+            .all(|p| *p == [0.25, 0., 0., 1.])
+    );
+}
+
+#[test]
 fn paint_bucket_connectivity_and_jump_flood_stroke() {
     let Some(gpu) = context() else { return };
     let rect = IRect::from_size(17, 13);

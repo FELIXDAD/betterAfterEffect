@@ -53,16 +53,29 @@ impl Pass {
         p: &EffectParams<'_>,
         images: [&GpuImage; 2],
         roi: IRect,
-        mut u: UniformWriter,
+        u: UniformWriter,
     ) -> Result<GpuImage, RenderError> {
         let grid = image_grid::grid_scale(p, images[0]);
+        let out = target.allocate(image_grid::pixel_rect(roi, grid), grid)?;
+        self.encode_into(target, grid, images, roi, u, &out)?;
+        Ok(out)
+    }
+
+    fn encode_into(
+        &self,
+        target: &mut dyn EffectTarget,
+        grid: f64,
+        images: [&GpuImage; 2],
+        roi: IRect,
+        mut u: UniformWriter,
+        out: &GpuImage,
+    ) -> Result<(), RenderError> {
         for (i, image) in images.iter().enumerate() {
             image_grid::image_coords(&mut u, i * 32, image, grid);
         }
         u.i32s(64, &image_grid::rect4(roi));
         let rt = gpu::runtime(target.gpu());
         let kernel = self.kernel(&rt, target.format())?;
-        let out = target.allocate(image_grid::pixel_rect(roi, grid), grid)?;
         let group = rt.bind_group(
             &kernel,
             &[
@@ -85,7 +98,7 @@ impl Pass {
             &[gpu::push_uniform(&rt, &u)],
             roi.size(),
         );
-        Ok(out)
+        Ok(())
     }
 }
 pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
