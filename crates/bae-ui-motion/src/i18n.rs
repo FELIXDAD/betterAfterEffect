@@ -18,6 +18,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Move Layer in Time", "在时间上移动图层"),
     ("Trim Layer", "修剪图层"),
     ("Change Layers", "更改图层"),
+    ("Time Stretch", "时间伸缩"),
     // Effect Controls / Effects & Presets.
     ("Missing effect", "缺失效果"),
     ("BAE built-in effect", "BAE 内置效果"),
@@ -27,6 +28,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Search", "搜索"),
     // Effect commands (bae-motion `effect.*`).
     ("Apply Effect", "应用效果"),
+    ("Paint Stroke", "绘画描边"),
     ("Remove Effect", "移除效果"),
     ("Reorder Effects", "排列效果"),
     ("Effect On/Off", "效果开关"),
@@ -38,6 +40,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Delete Vertex", "删除顶点"),
     ("New Text", "新建文本"),
     ("Edit Text", "编辑文本"),
+    ("Change Path", "更改路径"),
     // Variants of motion actions and commands (`actions::variants`, #140): the
     // Keyboard Shortcuts window, Edit > Undo and History name each one.
     ("Back 10 Frames", "后退 10 帧"),
@@ -94,6 +97,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Parent Pick Whip", "父级关联器"),
     ("Keyframe", "关键帧"),
     ("Enable Expression", "启用表达式"),
+    ("Paste Reversed Keyframes", "粘贴反向关键帧"),
     ("Add Expression", "添加表达式"),
     ("Set Expressions", "设置多个表达式"),
     (
@@ -388,6 +392,32 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Delete All Markers", "删除所有标记"),
     ("Edit Marker", "编辑标记"),
     ("Slip Edit", "滑动编辑"),
+    ("Preserve Underlying Transparency", "保留基础透明度"),
+    ("Track Matte Pick Whip", "轨道遮罩关联器"),
+    ("Alpha / Luma Matte", "Alpha/亮度遮罩"),
+    ("Invert Matte", "反转遮罩"),
+    ("Toggle Switches / Modes", "切换开关/模式"),
+    ("Toggle Switches / Modes Columns", "切换开关/模式列"),
+    ("Show / Hide Parent Column", "显示/隐藏父级列"),
+    ("Set Track Matte", "设置轨道遮罩"),
+    ("Track Matte", "轨道遮罩"),
+    ("Hide Shy Layers", "隐藏消隐图层"),
+    ("Enable Motion Blur", "启用运动模糊"),
+    (
+        "Enables Motion Blur for all layers with the Motion Blur switch set",
+        "为设置了“运动模糊”开关的所有图层启用运动模糊",
+    ),
+    ("Enable Frame Blending", "启用帧混合"),
+    (
+        "Enables Frame Blending for all layers with the Frame Blend switch set",
+        "为设置了“帧混合”开关的所有图层启用帧混合",
+    ),
+    ("Draft 3D", "草图 3D"),
+    ("Turn fast 3D previews on or off", "打开或关闭快速 3D 预览"),
+    (
+        "Hides all layers for which the Shy switch is set",
+        "隐藏为其设置了“消隐”开关的所有图层",
+    ),
     // Text animators (#260).
     ("Animate Text", "动画文本"),
     ("Add Text Selector", "添加文本选择器"),
@@ -502,6 +532,12 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Opacity", "不透明度"),
     ("Point of Interest", "目标点"),
     ("Source Text", "源文本"),
+    ("Path Options", "路径选项"),
+    ("Reverse Path", "反转路径"),
+    ("Perpendicular To Path", "垂直于路径"),
+    ("Force Alignment", "强制对齐"),
+    ("First Margin", "首字边距"),
+    ("Last Margin", "末字边距"),
     ("Roundness", "圆度"),
     ("Points", "点"),
     ("Inner Radius", "内径"),
