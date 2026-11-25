@@ -138,7 +138,10 @@ fn builtin(slug: &str, zh: &str, builder: DefBuilder, fixed: &[u32]) -> Builtin 
     rust_builtin((Arc::new(Display(def)), names), slug, zh, &["audio", zh])
 }
 
+mod spectrum;
 mod waveform;
 pub(crate) fn register(registry: &mut crate::Registry) {
-    registry.effects.push(waveform::effect());
+    registry
+        .effects
+        .extend([waveform::effect(), spectrum::effect()]);
 }
