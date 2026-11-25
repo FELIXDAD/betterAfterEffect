@@ -2,6 +2,7 @@
 mod catalog;
 mod engine;
 pub(crate) use engine::{Engine, prewarm};
+mod scatter;
 mod surface;
 
 use crate::{Builtin, EffectTarget, TargetEffect, common, gpu::UniformWriter, params::Params};
@@ -144,13 +145,12 @@ struct Scene<'a> {
 }
 
 impl Scene<'_> {
-    fn controls(&self, kind: Kind, count: u32, seed: u32, anchor: f32) -> UniformWriter {
+    fn controls(&self, kind: Kind, total: u32, seed: u32) -> UniformWriter {
         let history_offset = 32 + CONTROL_COUNT * 16;
         let mut u = UniformWriter::with_size(history_offset + 16 + 64 * 16);
         u.u32(0, kind as u32)
-            .u32(4, count)
+            .u32(28, total)
             .u32(8, seed)
-            .f32(12, anchor)
             .f32s(16, &self.size);
         for c in &self.p.def.params {
             let offset = 32 + 16 * c.id as usize;
@@ -225,7 +225,7 @@ impl Scene<'_> {
             Kind::Rain | Kind::Snow => f(1),
             Kind::Bubbles => f(1),
             Kind::Stars => tiles(f(4)),
-            Kind::Scatter => tiles(1.),
+            Kind::Scatter => unreachable!("Scatterize runs on the output pixel grid"),
             Kind::Polly => tiles(f(7)) * if f(8) <= 2. { 2. } else { 1. },
             Kind::Shatter => {
                 let spacing = self.size[0] as f64 / f(10).max(1.);
@@ -267,6 +267,10 @@ impl TargetEffect for Simulation {
         if roi.is_empty() {
             return Ok(input.clone());
         }
+        let p = Params::new(&self.def, params);
+        if self.kind == Kind::Scatter {
+            return scatter::render(target, &p, input, roi);
+        }
         // Rasterize a guard band around a requested tile. The two-pixel grid
         // keeps fragment quads aligned with the full layer at tile edges.
         let align = |x: i32, base: i32| base + (x - base).div_euclid(2) * 2;
@@ -278,10 +282,6 @@ impl TargetEffect for Simulation {
         )
         .intersect(&input.rect);
         if out.is_empty() {
-            return Ok(input.clone());
-        }
-        let p = Params::new(&self.def, params);
-        if self.kind == Kind::Scatter && p.f(1) == 0. && p.f(2) == 0. && p.f(3) == 0. {
             return Ok(input.clone());
         }
         if self.kind == Kind::Polly && params.time.as_seconds() <= p.f(10) {

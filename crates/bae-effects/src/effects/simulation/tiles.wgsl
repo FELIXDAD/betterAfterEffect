@@ -212,12 +212,6 @@ fn tiles(id: u32, t: f32) -> Sprite {
         color = straight(source_at(origin));
         tex = 0.;
         color = vec4f(color.rgb * (1.-f(7) * .01 * (1.-phase)), color.a);
-    } else if cfg.kind == SCATTER {
-        let side = select(f(3), f(2), origin.x >= cfg.size.x * .5);
-        let radial = origin-cfg.size * .5;
-        pos = cfg.size * .5 + rot(radial, radians(side) * length(radial) / cfg.size.x)+ (q.xy * 2.-1.) * f(1);
-        color = straight(source_at(origin));
-        tex = 0.;
     } else if cfg.kind == POLLY {
         let dt = max(0., t-f(10));
         let radial = origin-pt(4);

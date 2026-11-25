@@ -1,26 +1,14 @@
 use super::{Kind, Scene, surface};
 use crate::{EffectTarget, gpu};
-use bae_gpu::wgpu::{self, util::DeviceExt};
+use bae_gpu::wgpu;
 use bae_render::{GpuImage, IRect, RenderError};
-use std::collections::VecDeque;
 
-const CHECKPOINT_FRAMES: f64 = 30.;
-const CACHE_BYTES: u64 = 64 << 20;
-const STATE_BYTES: u64 = 32;
 const SPRITE_BYTES: u64 = 64;
 const LABEL: &str = "bae.effects.particles";
 
-struct Checkpoint {
-    key: Vec<u8>,
-    config: wgpu::Buffer,
-    state: wgpu::Buffer,
-}
-
 pub(crate) struct Engine {
-    checkpoint: wgpu::ComputePipeline,
     advance: [wgpu::ComputePipeline; 4],
     draw: [wgpu::RenderPipeline; 5],
-    checkpoints: VecDeque<Checkpoint>,
     scratch: Option<wgpu::Buffer>,
 }
 
@@ -124,18 +112,19 @@ impl Engine {
             view_dimension: wgpu::TextureViewDimension::D2,
             multisampled: false,
         };
-        let uniform = buf(wgpu::BufferBindingType::Uniform);
+        let uniform = wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: true,
+            min_binding_size: None,
+        };
         let viewport = wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
             has_dynamic_offset: true,
-            min_binding_size: std::num::NonZeroU64::new(224),
+            min_binding_size: std::num::NonZeroU64::new(240),
         };
         let write = buf(wgpu::BufferBindingType::Storage { read_only: false });
-        let read = buf(wgpu::BufferBindingType::Storage { read_only: true });
-        let checkpoint = compute(device, &module, "checkpoint", None);
         let mut entries = vec![
             (0, Stage::COMPUTE, uniform),
-            (2, Stage::COMPUTE, read),
             (3, Stage::COMPUTE, write),
             (4, Stage::COMPUTE, viewport),
         ];
@@ -234,63 +223,10 @@ impl Engine {
             return Err(RenderError::Other(format!("{LABEL}: {err}")));
         }
         Ok(Self {
-            checkpoint,
             advance,
             draw,
-            checkpoints: VecDeque::new(),
             scratch: None,
         })
-    }
-
-    fn snapshot(
-        &mut self,
-        rt: &gpu::Runtime,
-        key: Vec<u8>,
-        count: u32,
-    ) -> (wgpu::Buffer, wgpu::Buffer) {
-        if let Some(i) = self.checkpoints.iter().position(|c| c.key == key) {
-            let c = self.checkpoints.remove(i).unwrap();
-            let buffers = (c.config.clone(), c.state.clone());
-            self.checkpoints.push_back(c);
-            return buffers;
-        }
-        let config = rt
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("particle controls"),
-                contents: &key,
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
-        let size = u64::from(count.max(1)) * STATE_BYTES;
-        let state = rt.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("particle checkpoint"),
-            size,
-            usage: wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: false,
-        });
-        let bind = group(
-            &rt.device,
-            &self.checkpoint.get_bind_group_layout(0),
-            &[buffer_entry(0, &config), buffer_entry(1, &state)],
-        );
-        // Publish only submitted, immutable checkpoints. Independently submitted
-        // preview/export encoders may consume the same snapshot in either order.
-        let mut encoder = rt.device.create_command_encoder(&Default::default());
-        dispatch(&mut encoder, &self.checkpoint, &bind, count, &[]);
-        rt.queue.submit([encoder.finish()]);
-        while !self.checkpoints.is_empty()
-            && (self.checkpoints.len() >= 16
-                || self.checkpoints.iter().map(|c| c.state.size()).sum::<u64>() + size
-                    > CACHE_BYTES)
-        {
-            self.checkpoints.pop_front();
-        }
-        self.checkpoints.push_back(Checkpoint {
-            key,
-            config: config.clone(),
-            state: state.clone(),
-        });
-        (config, state)
     }
 }
 
@@ -316,6 +252,7 @@ fn dispatch(
 pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
     Engine::get(&mut rt.particles.lock(), &rt.device)?;
     surface::composite_kernel(rt, format)?;
+    super::scatter::prewarm(rt, format)?;
     Ok(())
 }
 
@@ -329,9 +266,6 @@ pub(super) fn render(
 ) -> Result<GpuImage, RenderError> {
     let rt = gpu::runtime(target.gpu());
     let p = scene.p;
-    let time = p.p.time.as_seconds().max(0.);
-    let fps = p.p.frame_rate.as_f64();
-    let anchor = ((time * fps + 1e-8) / CHECKPOINT_FRAMES).floor() * CHECKPOINT_FRAMES / fps;
     let seed = p.p.seed as u32
         ^ match kind {
             Kind::World => p.f(104) as u32,
@@ -342,7 +276,7 @@ pub(super) fn render(
         };
     let max = (rt.device.limits().max_storage_buffer_binding_size / SPRITE_BYTES)
         .min(u64::from(rt.device.limits().max_compute_workgroups_per_dimension) * 128)
-        as u32;
+        .min(65536) as u32;
     let advance = match kind {
         Kind::World | Kind::Systems => 0,
         Kind::Rain | Kind::Snow | Kind::Bubbles => 1,
@@ -350,10 +284,6 @@ pub(super) fn render(
         _ => 3,
     };
     let total = scene.count(kind);
-    let stateful = matches!(
-        kind,
-        Kind::World | Kind::Systems | Kind::Rain | Kind::Snow | Kind::Bubbles | Kind::Drizzle
-    );
     let blend = match kind {
         Kind::World => {
             if p.popup(39) == 4 {
@@ -369,7 +299,6 @@ pub(super) fn render(
                 p.popup(28)
             }
         }
-        Kind::Scatter => p.popup(4),
         Kind::Rain if p.popup(15) == 2 => 5,
         Kind::Snow if p.popup(25) == 2 => 5,
         _ => 1,
@@ -379,8 +308,13 @@ pub(super) fn render(
     let mut slot = rt.particles.lock();
     let engine = Engine::get(&mut slot, &rt.device)?;
     let advance = engine.advance[advance].clone();
-    let frame = surface::frame(scene, input, roi, maps);
-    let viewport_offset = rt.uniform(&frame.bytes);
+    let mut frame = surface::frame(scene, input, roi, maps);
+    let controls = scene.controls(kind, total, seed);
+    let config_offset = rt.uniform(&controls.bytes);
+    let config = wgpu::BindGroupEntry {
+        binding: 0,
+        resource: rt.uniform_binding(controls.bytes.len() as u64),
+    };
     let viewport = wgpu::BindGroupEntry {
         binding: 4,
         resource: rt.uniform_binding(frame.bytes.len() as u64),
@@ -392,38 +326,15 @@ pub(super) fn render(
             &maps.get(i).and_then(Option::as_ref).unwrap_or(input).view,
         ));
     }
-    let overlay = if target.format() == wgpu::TextureFormat::Rgba16Float {
-        target.allocate(roi, input.pixel_scale)?
-    } else {
-        let texture = rt.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("particle blend target"),
-            size: wgpu::Extent3d {
-                width: roi.width(),
-                height: roi.height(),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let mut image = GpuImage::from_texture(texture, bae_render::ImageAlpha::Premultiplied);
-        image.rect = roi;
-        image.pixel_scale = input.pixel_scale;
-        image
-    };
+    let overlay =
+        target.allocate_format(roi, input.pixel_scale, wgpu::TextureFormat::Rgba16Float)?;
     // Split large image grids at the device storage-binding limit. The source
     // index is global, so fragments at the bottom of a 4K layer are retained.
     let mut start = 0;
     loop {
         let count = (total - start).min(max);
-        let mut controls =
-            scene.controls(kind, count, seed, if stateful { anchor as f32 } else { 0. });
-        controls.u32(24, start).u32(28, total);
-        let (config, state) =
-            engine.snapshot(&rt, controls.bytes, if stateful { count } else { 0 });
+        frame.u32(224, start).u32(228, count);
+        let offsets = [config_offset, rt.uniform(&frame.bytes)];
         let size = u64::from(count.max(1)) * SPRITE_BYTES;
         let scratch = engine
             .scratch
@@ -431,16 +342,11 @@ pub(super) fn render(
         if scratch.size() < size {
             *scratch = storage(&rt.device, size);
         }
-        let mut entries = vec![
-            buffer_entry(0, &config),
-            buffer_entry(2, &state),
-            buffer_entry(3, scratch),
-            viewport.clone(),
-        ];
+        let mut entries = vec![config.clone(), buffer_entry(3, scratch), viewport.clone()];
         entries.extend_from_slice(&textures);
         let bind = group(&rt.device, &advance.get_bind_group_layout(0), &entries);
-        dispatch(target.encoder(), &advance, &bind, count, &[viewport_offset]);
-        let mut entries = vec![buffer_entry(0, &config), viewport.clone()];
+        dispatch(target.encoder(), &advance, &bind, count, &offsets);
+        let mut entries = vec![config.clone(), viewport.clone()];
         entries.extend_from_slice(&textures);
         let bind = group(
             &rt.device,
@@ -470,7 +376,7 @@ pub(super) fn render(
                 multiview_mask: None,
             });
         pass.set_pipeline(&engine.draw[blend]);
-        pass.set_bind_group(0, &bind, &[viewport_offset]);
+        pass.set_bind_group(0, &bind, &offsets);
         pass.set_vertex_buffer(0, scratch.slice(..));
         pass.set_viewport(0., 0., roi.width() as f32, roi.height() as f32, 0., 1.);
         pass.draw(0..4, 0..count);
@@ -505,7 +411,6 @@ mod tests {
         crate::prewarm(&gpu, wgpu::TextureFormat::Rgba16Float).unwrap();
         let particles = rt.particles.lock();
         let engine = particles.as_ref().expect("registered particle warm-up");
-        assert!(engine.checkpoints.is_empty());
         assert!(engine.scratch.is_none());
     }
 }

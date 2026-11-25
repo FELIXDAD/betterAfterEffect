@@ -2,8 +2,6 @@ struct State {
     pos: vec3f, birth: f32, vel: vec3f, variation: f32
 }
 
-@group(0) @binding(1) var<storage, read_write> saved: array<State>;
-@group(0) @binding(2) var<storage, read> previous: array<State>;
 fn life() -> f32 {
     switch cfg.kind {
         case WORLD: {
@@ -145,20 +143,4 @@ fn at_time(id: u32, t: f32) -> State {
         birth = born(id, cycle, l);
     }
     return integrate(spawn(id, cycle, birth), motion_age(t,birth));
-}
-
-@compute @workgroup_size(128)
-fn checkpoint(@builtin(global_invocation_id) tid: vec3u) {
-    if tid.x<cfg.count {
-        saved[tid.x] = at_time(cfg.first + tid.x, cfg.anchor);
-    }
-}
-
-fn current(id: u32, t: f32) -> State {
-    let l = life();
-    if l>0. && birth_cycle(id, t, l) != birth_cycle(id, cfg.anchor, l) {
-        return at_time(id, t);
-    }
-    let s = previous[id-cfg.first];
-    return integrate(s, motion_age(t,s.birth) - motion_age(cfg.anchor,s.birth));
 }

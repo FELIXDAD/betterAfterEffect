@@ -1,7 +1,7 @@
 // Positions and velocities are in full-resolution layer pixels and seconds.
 struct Config {
-    kind: u32, count: u32, seed: u32, anchor: f32,
-    size: vec2f, first: u32, total: u32, control: array<vec4f, 145>,
+    kind: u32, padding0: u32, seed: u32, padding1: u32,
+    size: vec2f, padding2: u32, total: u32, control: array<vec4f, 145>,
     history: vec4u, trajectory: array<vec4f, 64>,
 }
 
@@ -11,7 +11,7 @@ struct Frame {
     projection: mat4x4f,
     light: vec4f,
     light_color: vec4f,
-    side_size: vec4f,
+    side_size: vec4f, batch: vec4u,
 }
 
 @group(0) @binding(0) var<uniform> cfg: Config;
@@ -29,7 +29,6 @@ const SNOW = 3u;
 const BUBBLES = 4u;
 const DRIZZLE = 5u;
 const STARS = 6u;
-const SCATTER = 7u;
 const POLLY = 8u;
 const SHATTER = 9u;
 const CARDS = 10u;
