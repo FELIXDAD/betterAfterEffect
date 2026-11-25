@@ -23,7 +23,7 @@ use egui::{CursorIcon, Painter, PointerButton, Pos2, Rect, Response, Ui};
 use serde_json::json;
 
 use super::free_transform::FreeTransform;
-use super::gizmo3d::{self, Gizmo};
+use super::gizmo3d::{self, Gizmo, Style};
 use super::overlay::{self, EditablePath};
 use super::path_edit::{self, PathDrag, VertexSelection};
 use super::transform::{self, Kind, TransformDrag};
@@ -240,6 +240,7 @@ pub(super) fn frame(
     }
 
     // What is under the pointer.
+    let style = gizmo_style(tool, options.gizmo);
     let target = |pos: Pos2, state: &SelectState| -> Press {
         if tool == Tool::Selection
             && let Some(h) = path_edit::hit(&paths, &state.vertices, view, pos)
@@ -247,9 +248,9 @@ pub(super) fn frame(
             return Press::Path(h);
         }
         for l in comp.layers.iter().filter(|l| selected.contains(&l.path)) {
-            if matches!(tool, Tool::Selection | Tool::Rotation)
-                && let Some(g) = Gizmo::of(l, view)
-                && let Some(i) = g.hit(view, pos, tool == Tool::Rotation)
+            if let Some(style) = style
+                && let Some(g) = Gizmo::of(l, view, gizmo_axes(style, options.axis_mode))
+                && let Some(i) = g.hit(view, pos, style)
             {
                 return Press::Axis(l.path.clone(), i);
             }
@@ -353,11 +354,12 @@ pub(super) fn frame(
                 }
             }
             Press::Axis(layer, axis) => {
-                if let Some(l) = comp.layer(&layer)
-                    && let Some(g) = Gizmo::of(l, view)
+                if let Some(style) = style
+                    && let Some(l) = comp.layer(&layer)
+                    && let Some(g) = Gizmo::of(l, view, gizmo_axes(style, options.axis_mode))
                     && let Some((camera, size)) = view.camera
                 {
-                    let kind = if tool == Tool::Rotation {
+                    let kind = if style == Style::Rings {
                         let center = view.project(g.origin, true).map_or(at, |c| view.to_comp(c));
                         Kind::Spin {
                             axis,
@@ -369,13 +371,26 @@ pub(super) fn frame(
                         }
                     } else {
                         let dir = g.axes[axis];
-                        Kind::Axis {
-                            axis,
-                            origin: g.origin,
-                            dir,
-                            camera: Box::new(camera),
-                            size,
-                            start: gizmo3d::along(&camera, size, at, g.origin, dir).unwrap_or(0.0),
+                        let start = gizmo3d::along(&camera, size, at, g.origin, dir).unwrap_or(0.0);
+                        let camera = Box::new(camera);
+                        if style == Style::Scale {
+                            Kind::AxisScale {
+                                axis,
+                                origin: g.origin,
+                                dir,
+                                camera,
+                                size,
+                                start,
+                            }
+                        } else {
+                            Kind::Axis {
+                                axis,
+                                origin: g.origin,
+                                dir,
+                                camera,
+                                size,
+                                start,
+                            }
                         }
                     };
                     let mut layers = vec![layer.clone()];
@@ -557,7 +572,7 @@ pub(super) fn frame(
         d.paint_guides(painter, view, info);
     }
     // The axis gizmo of the selected 3D layers (rings for the Rotation tool).
-    if matches!(tool, Tool::Selection | Tool::Rotation) {
+    if let Some(style) = style {
         let active = match (&state.drag, hover) {
             (Some(d), _) => d
                 .axis()
@@ -570,12 +585,12 @@ pub(super) fn frame(
             _ => None,
         };
         for l in comp.layers.iter().filter(|l| selected.contains(&l.path)) {
-            if let Some(g) = Gizmo::of(l, view) {
+            if let Some(g) = Gizmo::of(l, view, gizmo_axes(style, options.axis_mode)) {
                 let on = active
                     .as_ref()
                     .filter(|(p, _)| *p == l.path)
                     .map(|(_, a)| *a);
-                g.paint(painter, view, tool == Tool::Rotation, on);
+                g.paint(painter, view, style, on);
             }
         }
     }
@@ -600,6 +615,26 @@ pub(super) fn frame(
         }
     }
     cursor
+}
+
+/// The 3D gizmo of `tool` (the Selection tool's follows the 3D Gizmo mode).
+fn gizmo_style(tool: Tool, mode: crate::tools::GizmoMode) -> Option<Style> {
+    use crate::tools::GizmoMode;
+    match (tool, mode) {
+        (Tool::Rotation, _) | (Tool::Selection, GizmoMode::Rotation) => Some(Style::Rings),
+        (Tool::Selection, GizmoMode::Scale) => Some(Style::Scale),
+        (Tool::Selection, GizmoMode::Position) => Some(Style::Arrows),
+        _ => None,
+    }
+}
+
+/// Scaling is along the layer's own axes whatever the axis mode.
+fn gizmo_axes(style: Style, mode: crate::tools::AxisMode) -> crate::tools::AxisMode {
+    if style == Style::Scale {
+        crate::tools::AxisMode::Local
+    } else {
+        mode
+    }
 }
 
 /// Put the edit of `primary` first (scale and rotate measure on it).

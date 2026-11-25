@@ -1808,3 +1808,24 @@ fn three_d_axis_arrows_move_along_one_axis_and_rings_rotate() {
     let o = h.v3(&l, "transform:orientation");
     assert!((o[2] - 30.0).abs() < 1.0 && o[0].abs() < 1e-6, "{o:?}");
 }
+
+#[test]
+fn three_d_scale_gizmo_scales_along_one_axis() {
+    let mut h = H::new();
+    let l = h.solid([100.0, 100.0], [320.0, 180.0]);
+    h.run(
+        "attr.set",
+        json!({"path": l, "attr": "three_d", "value": {"type": "bool", "value": true}}),
+    );
+    h.select(&[&l]);
+    // 5: the 3D Gizmo's Scale mode.
+    tool_action(&h, "motion.tool.gizmo_scale", json!({}));
+    assert_eq!(h.tools().lock().options.gizmo, crate::tools::GizmoMode::Scale);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let r = 70.0 / f64::from(h.viewer.last_view.unwrap().scale);
+    // From the X square to twice as far from the anchor: Scale X doubles.
+    let done = h.drag((320.0 + r, 180.0), (320.0 + 2.0 * r, 200.0), Modifiers::NONE);
+    h.apply(&done);
+    let s = h.v3(&l, "transform:scale");
+    assert!((s[0] - 200.0).abs() < 1.0 && s[1] == 100.0, "{s:?}");
+}
