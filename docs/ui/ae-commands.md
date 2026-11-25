@@ -571,21 +571,21 @@
 
 | AE 菜单路径 | AE id | BAE 动作 id | 参数 | Windows | macOS | 负责 | 状态 |
 |---|---|---|---|---|---|---|---|
-| Workspace ▸ Animation | 9961473 | `workspace.switch` | `{"id":"ae_animation"}` |  |  | B | ☐ |
-| Workspace ▸ Essential Graphics | 9961474 | `workspace.switch` | `{"id":"ae_essential_graphics"}` |  |  | B | ☐ |
-| Workspace ▸ Learn | 9961475 | `workspace.switch` | `{"id":"ae_learn"}` | Shift+F12 | Shift+F12 | B | ☐ |
+| Workspace ▸ Animation | 9961473 | `workspace.switch` | `{"id":"ae_animation"}` |  |  | B | ✅ |
+| Workspace ▸ Essential Graphics | 9961474 | `workspace.switch` | `{"id":"ae_essential_graphics"}` |  |  | B | ✅ |
+| Workspace ▸ Learn | 9961475 | `workspace.switch` | `{"id":"ae_learn"}` | Shift+F12 | Shift+F12 | B | ✅ |
 | Workspace ▸ Review | 9961476 | `workspace.switch` | `{"id":"review"}` | Shift+F11 | Shift+F11 | B | ✅ |
-| Workspace ▸ Small Screen | 9961477 | `workspace.switch` | `{"id":"ae_small_screen"}` |  |  | B | ☐ |
-| Workspace ▸ Libraries | 9961478 | `workspace.switch` | `{"id":"ae_libraries"}` |  |  | B | ☐ |
-| Workspace ▸ All Panels | 9961479 | `workspace.switch` | `{"id":"ae_all_panels"}` |  |  | B | ☐ |
-| Workspace ▸ Effects | 9961480 | `workspace.switch` | `{"id":"ae_effects"}` |  |  | B | ☐ |
-| Workspace ▸ Text | 9961481 | `workspace.switch` | `{"id":"ae_text"}` |  |  | B | ☐ |
-| Workspace ▸ Standard | 9961482 | `workspace.switch` | `{"id":"ae_standard"}` |  |  | B | ☐ |
-| Workspace ▸ Undocked Panels | 9961483 | `workspace.switch` | `{"id":"ae_undocked_panels"}` |  |  | B | ☐ |
-| Workspace ▸ Minimal | 9961484 | `workspace.switch` | `{"id":"ae_minimal"}` |  |  | B | ☐ |
-| Workspace ▸ Paint | 9961485 | `workspace.switch` | `{"id":"ae_paint"}` |  |  | B | ☐ |
-| Workspace ▸ Motion Tracking | 9961486 | `workspace.switch` | `{"id":"ae_motion_tracking"}` |  |  | B | ☐ |
-| Workspace ▸ Color | 9961487 | `workspace.switch` | `{"id":"ae_color"}` |  |  | B | ☐ |
+| Workspace ▸ Small Screen | 9961477 | `workspace.switch` | `{"id":"ae_small_screen"}` |  |  | B | ✅ |
+| Workspace ▸ Libraries | 9961478 | `workspace.switch` | `{"id":"ae_libraries"}` |  |  | B | ✅ |
+| Workspace ▸ All Panels | 9961479 | `workspace.switch` | `{"id":"ae_all_panels"}` |  |  | B | ✅ |
+| Workspace ▸ Effects | 9961480 | `workspace.switch` | `{"id":"ae_effects"}` |  |  | B | ✅ |
+| Workspace ▸ Text | 9961481 | `workspace.switch` | `{"id":"ae_text"}` |  |  | B | ✅ |
+| Workspace ▸ Standard | 9961482 | `workspace.switch` | `{"id":"ae_standard"}` |  |  | B | ✅ |
+| Workspace ▸ Undocked Panels | 9961483 | `workspace.switch` | `{"id":"ae_undocked_panels"}` |  |  | B | ✅ |
+| Workspace ▸ Minimal | 9961484 | `workspace.switch` | `{"id":"ae_minimal"}` |  |  | B | ✅ |
+| Workspace ▸ Paint | 9961485 | `workspace.switch` | `{"id":"ae_paint"}` |  |  | B | ✅ |
+| Workspace ▸ Motion Tracking | 9961486 | `workspace.switch` | `{"id":"ae_motion_tracking"}` |  |  | B | ✅ |
+| Workspace ▸ Color | 9961487 | `workspace.switch` | `{"id":"ae_color"}` |  |  | B | ✅ |
 | Workspace ▸ Default | 9961488 | `workspace.switch` | `{"id":"motion"}` | Shift+F10 | Shift+F10 | B | ✅ |
 | Workspace ▸ Reset to Saved Layout | 9961490 | `workspace.reset` |  |  |  | B | ✅ |
 | Workspace ▸ Save Changes to this Workspace | 9961491 | `workspace.save` |  |  |  | B | ✅ |
