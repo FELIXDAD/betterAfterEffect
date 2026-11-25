@@ -1,0 +1,7 @@
+{
+  "type": "object",
+  "properties": {
+    "frames": { "type": "integer", "minimum": 1, "default": 12 }
+  },
+  "additionalProperties": false
+}

@@ -156,13 +156,9 @@ fn solids_are_pixel_exact_and_cover_their_rectangles() {
         &RenderRequest::full(),
         OutputAlpha::Premultiplied,
     );
-    assert!(
-        close(img.px(10, 6), [128, 0, 0, 128], 1),
-        "{:?}",
-        img.px(10, 6)
-    );
+    assert_eq!(img.px(10, 6), [128, 0, 0, 128]);
     assert_eq!(img.px(11, 6), [255, 0, 0, 255]);
-    assert!(close(img.px(30, 6), [128, 0, 0, 128], 1));
+    assert_eq!(img.px(30, 6), [128, 0, 0, 128]);
 }
 
 #[test]

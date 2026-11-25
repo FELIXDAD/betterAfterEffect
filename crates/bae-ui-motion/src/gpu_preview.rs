@@ -49,12 +49,69 @@ pub(crate) struct PreviewImage {
     pub rect: IRect,
 }
 
+pub(super) struct RenderEngine {
+    pub(super) renderer: Renderer,
+    pub(super) anim: AnimEvaluator,
+}
+
+impl RenderEngine {
+    pub(super) fn new(gpu: Arc<GpuContext>, cache: u64) -> Self {
+        Self {
+            renderer: Renderer::with_config(
+                gpu,
+                RendererConfig {
+                    frame_cache_bytes: cache,
+                    pool_idle_bytes: 128 << 20,
+                },
+            ),
+            anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
+        }
+    }
+
+    /// The frame converted to an 8-bit target (`reuse` when it has the
+    /// frame's size) and the frame's rect, `None` when the frame is incomplete
+    /// (something still warming up: not shown, and `reuse` comes back
+    /// untouched).
+    pub(super) fn render(
+        &mut self,
+        stage: &Stage,
+        rc: &bae_render::RenderComp,
+        resolution: u32,
+        reuse: Option<OutputTarget>,
+    ) -> Result<(OutputTarget, Option<IRect>), bae_render::RenderError> {
+        let request = RenderRequest {
+            resolution: match resolution {
+                0 | 1 => Resolution::Full,
+                2 => Resolution::Half,
+                3 => Resolution::Third,
+                4 => Resolution::Quarter,
+                n => Resolution::Custom(n),
+            },
+            purpose: RenderPurpose::Preview,
+            ..RenderRequest::full()
+        };
+        let mut frames = bae_render::eval::EvaluatorFrames {
+            stage,
+            evaluator: &mut self.anim,
+        };
+        // The frame and its 8-bit conversion in one GPU submission.
+        let (frame, target) = self.renderer.render_frame_output(
+            rc,
+            &request,
+            Some(&mut frames),
+            OutputAlpha::Premultiplied,
+            reuse,
+        )?;
+        Ok((target, (!frame.incomplete).then_some(frame.image.rect)))
+    }
+}
+
 pub(crate) struct GpuPreview {
     gpu: Arc<GpuContext>,
     registry: Arc<ViewportTextureRegistry>,
     id: ViewportTextureId,
-    renderer: Renderer,
-    anim: AnimEvaluator,
+    engine: RenderEngine,
+    pub(super) playback: super::playback::PlaybackPreview,
     changes: StageChanges,
     sources_gen: Option<u64>,
     /// `(content hash, time, resolution)` of the published frame.
@@ -66,6 +123,10 @@ pub(crate) struct GpuPreview {
     sampled: Option<((u32, u32, u64), [u8; 4])>,
     /// Text layers have a source provider (otherwise the viewer draws them).
     pub has_text: bool,
+    /// The newest frame was incomplete (something still warming up): the
+    /// viewer keeps showing the last complete frame with a "Preparing…" hint
+    /// until it is redrawn complete.
+    pub preparing: bool,
 }
 
 impl GpuPreview {
@@ -79,19 +140,14 @@ impl GpuPreview {
 
     pub fn with(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>) -> Self {
         let id = registry.create("motion composition viewer");
-        let renderer = Renderer::with_config(
-            gpu.clone(),
-            RendererConfig {
-                frame_cache_bytes: 512 << 20,
-                pool_idle_bytes: 128 << 20,
-            },
-        );
+        let engine = RenderEngine::new(gpu.clone(), 512 << 20);
+        let playback = super::playback::PlaybackPreview::new(gpu.clone(), registry.clone());
         GpuPreview {
             gpu,
             registry,
             id,
-            renderer,
-            anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
+            engine,
+            playback,
             changes: StageChanges::default(),
             sources_gen: None,
             last: None,
@@ -99,6 +155,7 @@ impl GpuPreview {
             target: None,
             sampled: None,
             has_text: false,
+            preparing: false,
         }
     }
 
@@ -120,7 +177,7 @@ impl GpuPreview {
             return;
         }
         self.sources_gen = Some(generation);
-        let providers = self.renderer.providers_mut();
+        let providers = self.engine.renderer.providers_mut();
         for entry in registry.snapshot().iter() {
             providers.register(entry.item().clone());
         }
@@ -130,7 +187,7 @@ impl GpuPreview {
 
     fn sync_effects(&mut self, resources: &Resources) {
         if let Some(PreviewEffects(registry)) = resources.get::<PreviewEffects>()
-            && self.renderer.sync_effects(registry)
+            && self.engine.renderer.sync_effects(registry)
         {
             self.last = None;
         }
@@ -150,10 +207,10 @@ impl GpuPreview {
         self.sync_sources(resources);
         self.sync_effects(resources);
         if self.changes.changed(resources) {
-            self.anim.clear_compiled();
+            self.engine.anim.clear_compiled();
             self.last = None;
         }
-        let mut rc = match self.anim.convert(stage, comp, 0) {
+        let mut rc = match self.engine.anim.convert(stage, comp, 0) {
             Ok(rc) => rc,
             Err(e) => {
                 tracing_warn(&format!("preview: {e}"));
@@ -168,37 +225,35 @@ impl GpuPreview {
                 blur.cameras.fill(Some(camera));
             }
         }
-        let key = (rc.content_hash(), rc.time, resolution);
+        let key = (self.engine.renderer.content_hash(&rc), rc.time, resolution);
         if self.last != Some(key) {
-            let request = RenderRequest {
-                resolution: match resolution {
-                    0 | 1 => Resolution::Full,
-                    2 => Resolution::Half,
-                    3 => Resolution::Third,
-                    4 => Resolution::Quarter,
-                    n => Resolution::Custom(n),
-                },
-                purpose: RenderPurpose::Preview,
-                ..RenderRequest::full()
-            };
-            // Effects reading other frames evaluate them like this one.
-            let mut frames = bae_render::eval::EvaluatorFrames {
-                stage,
-                evaluator: &mut self.anim,
-            };
             let old_size = self.target.as_ref().map(OutputTarget::size);
-            let (frame, target) = match self.renderer.render_frame_output(
-                &rc,
-                &request,
-                Some(&mut frames),
-                OutputAlpha::Premultiplied,
-                self.target.take(),
-            ) {
-                Ok(result) => result,
+            let rendered = match self
+                .engine
+                .render(stage, &rc, resolution, self.target.take())
+            {
+                Ok(rendered) => rendered,
                 Err(e) => {
                     tracing_warn(&format!("preview: {e}"));
                     return None;
                 }
+            };
+            // Like AE, an incomplete frame (an effect pipeline or the text
+            // renderer still warming up) is never shown: the last complete
+            // frame stays, and the frame is rendered again on the redraw the
+            // warm-up requests when it is ready.
+            let (target, rect) = rendered;
+            self.preparing = rect.is_none();
+            let Some(rect) = rect else {
+                // The published target (if any) still shows the last complete
+                // frame; a new one holds the incomplete frame and is dropped.
+                if old_size.is_some() {
+                    self.target = Some(target);
+                }
+                return Some(PreviewImage {
+                    handle: self.registry.display_handle(self.id)?,
+                    rect: self.rect?,
+                });
             };
             // Display-encoded 8-bit values, sampled as they are (egui blends in
             // gamma space, see docs/spec/app-shell.md §5).
@@ -216,7 +271,7 @@ impl GpuPreview {
                 return None;
             }
             self.last = Some(key);
-            self.rect = Some(frame.image.rect);
+            self.rect = Some(rect);
             self.target = Some(target);
             self.sampled = None;
         }
@@ -292,7 +347,7 @@ impl GpuPreview {
 
     #[cfg(test)]
     pub fn renderer(&mut self) -> &mut Renderer {
-        &mut self.renderer
+        &mut self.engine.renderer
     }
 
     #[cfg(test)]
