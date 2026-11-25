@@ -383,7 +383,7 @@ pub(super) fn render(
         &entries,
     );
     // These emitters consume one inline birth interval per draw, including animated rates.
-    let group_size = if matches!(kind, Kind::Mercury) {
+    let group_size = if matches!(kind, Kind::Mercury | Kind::Playground) {
         1
     } else {
         usize::MAX

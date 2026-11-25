@@ -124,3 +124,56 @@ fn stopped_emitter_keeps_birth_position_and_lifespan_on_seek() {
         .collect();
     assert_eq!(second, expected);
 }
+
+#[test]
+fn playground_keeps_fired_particles_after_the_rate_is_keyed_to_zero() {
+    use bae_model::{Keyframe, Value};
+    use bae_render::eval::EvaluatorFrames;
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let layer = fx.solid(&comp, [0.; 3], [64, 32]);
+    let cannon = fx.apply(&layer, "ADBE Playgnd");
+    // Particles stay where they are fired: no speed, spread or gravity.
+    fx.param(&cannon, 101, json!({"type":"vec2","value":[32.0, 16.0]}));
+    for (id, value) in [(106, 0.), (107, 0.), (108, 0.), (110, 4.), (331, 0.)] {
+        fx.param(&cannon, id, json!({"type":"float","value":value}));
+    }
+    // AE's usual way to stop firing: Particles Per Second keyed to 0.
+    for (time, rate) in [(0., 60.), (0.5, 0.)] {
+        fx.run(
+            "key.set",
+            json!({"path":cannon, "attr":"param:0103",
+            "time":Time::from_seconds(time).flicks(), "keyframe":Keyframe::hold(Value::Float(rate))}),
+        );
+    }
+    let Some(renderer) = fx.renderer.as_mut() else {
+        return;
+    };
+    let mut render = |t| {
+        let rc = fx
+            .eval
+            .evaluate(&fx.stage, &comp, Time::from_seconds(t))
+            .unwrap();
+        let mut samples = EvaluatorFrames {
+            stage: &fx.stage,
+            evaluator: &mut fx.eval,
+        };
+        let frame = renderer
+            .render_frame_with(&rc, &RenderRequest::full(), Some(&mut samples))
+            .unwrap();
+        renderer
+            .read_rgba8(&frame, OutputAlpha::Premultiplied)
+            .unwrap()
+            .data
+    };
+    let early = render(0.8);
+    assert!(
+        early.as_chunks::<4>().0.iter().any(|px| px[3] > 128),
+        "fired particles are gone"
+    );
+    assert_eq!(
+        render(1.2),
+        early,
+        "fired particles stay after the cannon stops"
+    );
+}

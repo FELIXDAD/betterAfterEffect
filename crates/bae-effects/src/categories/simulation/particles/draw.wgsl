@@ -176,5 +176,5 @@ fn advance_mercury(@builtin(global_invocation_id) tid:vec3u) {
 
 @compute @workgroup_size(128)
 fn advance_playground(@builtin(global_invocation_id) tid:vec3u) {
-    if tid.x < frame.count { sprites[tid.x] = playground(frame.first_interval.first_id + tid.x, frame.timing.x); }
+    if tid.x < frame.count { sprites[tid.x] = playground(birth_at(tid.x), frame.timing.x); }
 }

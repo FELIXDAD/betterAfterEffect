@@ -141,6 +141,7 @@ impl Effect for Simulation {
             Kind::World => &[4, 5],
             Kind::Mercury => &[6, 7],
             Kind::Systems | Kind::Drizzle => &[1, 2],
+            Kind::Playground => &[103],
             _ => &[],
         }
     }
@@ -289,6 +290,11 @@ impl Scene<'_> {
         u
     }
 
+    /// Slots per Particle Playground particle: Explode Particles splits each into five.
+    fn playground_children(&self) -> f64 {
+        if self.p.f(231) != 0. { 5. } else { 1. }
+    }
+
     fn count(&self, k: Kind) -> u32 {
         let f = |id| self.p.f(id);
         let tiles = |spacing: f64| {
@@ -301,15 +307,15 @@ impl Scene<'_> {
             Kind::Mercury => 0.,
             Kind::Ball => tiles(f(6) + 1.),
             Kind::Hair => 4. * (f(5) * self.size[0] as f64 * self.size[1] as f64 / 10000.).ceil(),
+            // The grid and the exploded layer; the cannon's births are intervals.
             Kind::Playground => {
-                let cannon = (f(103) * self.p.p.time.as_seconds().max(0.)).floor();
                 let grid = f(134).round() * f(135).round();
                 let explosion = if self.p.p.value(201).is_some() {
                     tiles((2. * f(202)).max(2.))
                 } else {
                     0.
                 };
-                ((cannon + grid + explosion) * if f(231) != 0. { 5. } else { 1. }).min(2_000_000.)
+                ((grid + explosion) * self.playground_children()).min(2_000_000.)
             }
             Kind::Rain | Kind::Snow => f(1),
             Kind::Bubbles => f(1),

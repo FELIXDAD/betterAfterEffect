@@ -68,7 +68,8 @@ fn apply_play_map(p:ptr<function,PlaygroundParticle>,source:u32,age:f32,transien
         map_channel(p,base,color[i],w,transient,age);
     }
 }
-fn playground(id:u32,t:f32)->Sprite{
+fn playground(b:Birth,t:f32)->Sprite{
+    let id=b.id;
     let children=select(1u,5u,f(P231)!=0.);
     let parent=id/children;
     let child=id%children;
@@ -90,8 +91,10 @@ fn playground(id:u32,t:f32)->Sprite{
         p.pos=(vec2f(f32(k%pieces.x),f32(k/pieces.x))+.5)*spacing;
         p.color=straight(map_at(map0,0u,p.pos/cfg.size));p.size=vec2f(f(P202));p.vel=q.xy*f(P204);
     }else{
-        age=t-(f32(parent-grid_count-fragment_count)+.5)/max(.00001,f(P103));
-        if age<0. || f(P103)<=0.{return Sprite();}
+        // Cannon births come from the integrated rate, so keying Particles Per
+        // Second (to 0 to stop firing) keeps the particles already fired.
+        age=t-b.time;
+        if age<0.{return Sprite();}
         p.pos+=vec2f(q.x*f(P102),0.);
         p.vel=dir(f(P105)+q.y*f(P106))*(f(P107)+q.z*f(P108));
     }
