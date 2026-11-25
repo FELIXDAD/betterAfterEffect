@@ -941,11 +941,7 @@ fn mac_menu_bar_matches_ae_mac() {
 /// way by code point: a wrong translation of one of them shows up here.
 #[test]
 fn sorted_entries_follow_ae_chinese_order() {
-    let zh: BTreeMap<&str, &str> = MENU_ZH
-        .iter()
-        .copied()
-        .chain(crate::i18n::ZH.iter().copied())
-        .collect();
+    let zh: BTreeMap<&str, &str> = MENU_ZH.iter().copied().chain(crate::i18n::all()).collect();
     let zh_of = |t: &str| {
         zh.get(t)
             .copied()
