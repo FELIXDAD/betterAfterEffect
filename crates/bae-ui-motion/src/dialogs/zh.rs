@@ -99,7 +99,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("White", "白色"),
     ("Dark Gray", "深灰色"),
     ("Medium Gray", "中灰色"),
-    ("Light Gray", "浅灰色"),
+    ("Light Gray", "淡灰色"),
     ("{gray}-{hue}", "{gray}-{hue}"),
     ("Dark {hue}", "深{hue}"),
     // Pre-compose (`dialogs::precompose`, docs/spec/ae AE-PRJ-401).
@@ -165,7 +165,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Diagonally", "对角"),
     ("Light Settings", "灯光设置"),
     ("Light Settings...", "灯光设置..."),
-    ("Light...", "灯光..."),
+    ("Light...", "灯光…"),
     ("Settings", "设置"),
     ("Light Type:", "灯光类型:"),
     ("Light Type", "灯光类型"),
