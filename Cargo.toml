@@ -1,4 +1,4 @@
-# BAE (betterAfterEffect) Cargo workspace.
+# BAE (betterAfterEffects) Cargo workspace.
 #
 # This is a *virtual* workspace: there is no root package. Every crate lives in
 # `apps/*`, `crates/*`, `services/*`, `xtask` or `tools/*`, and new crates under
@@ -28,7 +28,7 @@ version = "0.0.1"
 edition = "2024"
 rust-version = "1.100"
 license = "Apache-2.0"
-repository = "https://github.com/FELIXDAD/betterAfterEffect"
+repository = "https://github.com/FELIXDAD/betterAfterEffects"
 publish = false
 
 [workspace.lints.cargo]
@@ -173,7 +173,12 @@ directories = "6.0.0"
 notify = { version = "8.2.2", default-features = false, features = ["macos_fsevent"] }
 # WebSocket client for the sync hub (bae-sync `hub` feature). No TLS yet: LAN hub.
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
-libloading = "0.9.1"
+# Native plugins (bae-plugin). 0.8 (not 0.9): the version wgpu-hal already links on
+# Windows, so no second copy.
+libloading = "0.8.9"
+# Shared memory for out-of-process native plugins (bae-plugin); the version fontique
+# already links.
+memmap2 = "0.9.12"
 # Signal handling (SIGTERM from `docker stop` / systemd) in bae-hub on Unix. Already
 # in the graph through std-adjacent crates; this pin only makes it a direct dep.
 libc = "0.2.191"
@@ -200,6 +205,8 @@ rmcp = { version = "3.11.0", default-features = false }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 insta = { version = "1.49.0", features = ["json"] }
 tempfile = "3.27.0"
+# Compiles C test plugins (bae-plugin tests); the version build scripts already use.
+cc = "1.11.2"
 
 # ---------------------------------------------------------------------------
 # Patches

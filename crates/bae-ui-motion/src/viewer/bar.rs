@@ -114,6 +114,25 @@ pub(super) fn bottom_bar(
             *on = !*on;
         }
     }
+    // 3D View popup.
+    let views = super::view3d::View3d::ALL;
+    let labels: Vec<&str> = views.iter().map(|v| tr(v.title())).collect();
+    let current = session
+        .lock()
+        .views3d
+        .get(&info.path)
+        .map_or(super::view3d::View3d::Active, |v| v.current);
+    let mut i = views.iter().position(|v| *v == current).unwrap_or(0);
+    if widgets::dropdown(ui, "view3d", &mut i, &labels, 100.0)
+        .on_hover_text(tr("3D View Popup"))
+        .changed()
+    {
+        let mut s = session.lock();
+        s.views3d
+            .entry(info.path.clone())
+            .or_default()
+            .switch(views[i]);
+    }
     ui.label(
         egui::RichText::new(common::timecode(info, time))
             .font(theme::body())
