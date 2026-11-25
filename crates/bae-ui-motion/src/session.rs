@@ -64,6 +64,14 @@ pub enum Pending {
         /// Its layers before the command.
         before: Vec<PrimPath>,
     },
+    /// Select the effects a command adds to layers (Effect menu, Effects &
+    /// Presets): those not in `before`.
+    NewEffects {
+        /// The layers.
+        layers: Vec<PrimPath>,
+        /// Their effects before the command.
+        before: Vec<PrimPath>,
+    },
 }
 
 #[derive(Debug, Default)]
@@ -77,6 +85,9 @@ pub struct Session {
     pub selected_keys: Vec<KeyRef>,
     /// Properties selected in the timeline outline (`path`, `attr`).
     pub selected_props: Vec<(PrimPath, String)>,
+    /// Effects selected in Effect Controls: the viewer draws their point
+    /// controls (AE).
+    pub selected_effects: Vec<PrimPath>,
     /// The Graph Editor Set: properties whose graph switch is on (`path`, `attr`).
     pub graph_set: Vec<(PrimPath, String)>,
     /// The Timeline shows the Graph Editor instead of layer bars (Shift+F3).
@@ -208,6 +219,19 @@ impl Session {
     pub fn sync(&mut self, stage: &Stage) {
         let pending = std::mem::take(&mut self.pending);
         for (what, age) in pending {
+            if let Pending::NewEffects { layers, before } = &what {
+                let added: Vec<PrimPath> = layers
+                    .iter()
+                    .flat_map(|l| bae_motion::effect::effects_of(stage, l))
+                    .filter(|e| !before.contains(e))
+                    .collect();
+                if !added.is_empty() {
+                    self.selected_effects = added;
+                } else if age < PENDING_FRAMES {
+                    self.pending.push((what, age + 1));
+                }
+                continue;
+            }
             if let Pending::NewLayers { comp, before } = &what {
                 let added: Vec<PrimPath> = query::comp_layers(stage, comp)
                     .into_iter()
@@ -223,7 +247,9 @@ impl Session {
             }
             let path = match &what {
                 Pending::Comp(p) | Pending::Layer(p) => p,
-                Pending::NewLayers { .. } => unreachable!("handled above"),
+                Pending::NewLayers { .. } | Pending::NewEffects { .. } => {
+                    unreachable!("handled above")
+                }
             };
             if stage.has_prim(path) {
                 match what {
@@ -235,7 +261,7 @@ impl Session {
                         self.selected_layers = vec![l];
                         self.selected_keys.clear();
                     }
-                    Pending::NewLayers { .. } => {}
+                    Pending::NewLayers { .. } | Pending::NewEffects { .. } => {}
                 }
             } else if age < PENDING_FRAMES {
                 self.pending.push((what, age + 1));
@@ -247,7 +273,7 @@ impl Session {
             .iter()
             .filter_map(|(w, _)| match w {
                 Pending::Comp(p) | Pending::Layer(p) => Some(p.clone()),
-                Pending::NewLayers { .. } => None,
+                Pending::NewLayers { .. } | Pending::NewEffects { .. } => None,
             })
             .collect();
         self.reserved
@@ -273,6 +299,7 @@ impl Session {
         self.selected_props
             .retain(|(p, _)| stage.has_prim(p) && query::locked_layer_of(stage, p).is_none());
         self.graph_set.retain(|(p, _)| stage.has_prim(p));
+        self.selected_effects.retain(|e| stage.has_prim(e));
     }
 
     pub fn is_playing(&self) -> bool {
