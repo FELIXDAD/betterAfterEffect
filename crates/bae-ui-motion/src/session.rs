@@ -24,6 +24,17 @@ pub enum Reveal {
     Attrs(Vec<String>),
 }
 
+/// Window > Motion Sketch, armed by Start Capture.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SketchArm {
+    pub layer: PrimPath,
+    /// Capture speed, percent of real time.
+    pub speed: f64,
+    /// Smoothing: how far (pixels) the recorded path may stray from the kept
+    /// keyframes.
+    pub smoothing: f64,
+}
+
 /// Real-time playback of one comp.
 #[derive(Clone, Debug)]
 pub struct Playback {
@@ -104,6 +115,9 @@ pub struct Session {
     reserved: Vec<(PrimPath, String)>,
     /// When U was last pressed (UU detection).
     pub(crate) last_u: Option<Instant>,
+    /// Motion Sketch armed (Start Capture): the next drag in the Composition
+    /// panel records this layer's position.
+    pub motion_sketch: Option<SketchArm>,
     /// Expression errors of the active comp at the current time (the viewer's
     /// evaluation): the error banner and the timeline's warning icons.
     pub expr_errors: Vec<bae_anim::AttrError>,
