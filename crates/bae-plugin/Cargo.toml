@@ -33,6 +33,7 @@ half.workspace = true
 libloading.workspace = true
 naga.workspace = true
 parking_lot.workspace = true
+rayon.workspace = true
 rustc-hash.workspace = true
 semver.workspace = true
 serde.workspace = true
@@ -51,6 +52,7 @@ uuid.workspace = true
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_Console", "Win32_System_Memory"] }
 
 [dev-dependencies]
+bae-motion.workspace = true
 # Builds the C example and test plugins in tests/native.rs (already in the lockfile).
 cc.workspace = true
 tempfile.workspace = true

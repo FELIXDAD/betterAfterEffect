@@ -22,6 +22,9 @@ pub(crate) struct RunState<'a, 'e, 't> {
     pub selected: Vec<PrimPath>,
     /// Version of the project and selection visible to this run.
     pub generation: u32,
+    pub playheads: std::collections::BTreeMap<PrimPath, Time>,
+    pub evaluator: bae_anim::Evaluator,
+    pub output_bytes: usize,
     pub report: ScriptReport,
 }
 
@@ -276,7 +279,15 @@ impl RunState<'_, '_, '_> {
             return Err("a script cannot run another script".into());
         }
         let cmd = (self.env.commands)(id).ok_or_else(|| format!("unknown command `{id}`"))?;
+        // Script file grants are scoped handles. Raw-path commands cannot exercise
+        // one, even when the manifest requests filesystem access.
+        if cmd.requires_filesystem() {
+            return Err(format!(
+                "command `{id}` requires a host-granted file handle"
+            ));
+        }
         self.generation += 1;
+        self.evaluator.clear();
         cmd.run_json(self.tx, params).map_err(|e| e.to_string())
     }
 
@@ -284,8 +295,22 @@ impl RunState<'_, '_, '_> {
         query::to_key_time(self.stage(), path, flicks(comp_seconds))
     }
 
-    fn now(&self) -> f64 {
-        secs(self.env.time)
+    fn comp_time(&self, comp: &PrimPath) -> Time {
+        self.playheads.get(comp).copied().unwrap_or_else(|| {
+            if self.env.active_comp.as_ref() == Some(comp) {
+                self.env.time
+            } else if let Some(view) = self.env.view {
+                view.time(comp)
+            } else if self.env.active_comp.is_none() {
+                self.env.time
+            } else {
+                Time::ZERO
+            }
+        })
+    }
+
+    fn now(&self, path: &PrimPath) -> f64 {
+        query::owning_comp(self.stage(), path).map_or(0.0, |comp| secs(self.comp_time(&comp)))
     }
 
     /// The effect parameter definition behind `param:NNNN` on an effect prim.
@@ -344,7 +369,7 @@ impl RunState<'_, '_, '_> {
         let key = args.get("key").and_then(Json::as_bool).unwrap_or(false);
         let value = arg(args, "value")?;
         view(self.stage(), &path)?;
-        let t = seconds(args, "time").unwrap_or_else(|| self.now());
+        let t = seconds(args, "time").unwrap_or_else(|| self.now(&path));
         let kt = self.key_time(&path, t);
         let animated =
             query::attr_spec(self.stage(), &path, &attr).is_some_and(|s| s.is_animated());
@@ -378,7 +403,7 @@ impl RunState<'_, '_, '_> {
     fn add_key(&mut self, args: &Json) -> R {
         let path = path(args, "path")?;
         let attr = string(args, "attr")?;
-        let t = seconds(args, "time").unwrap_or_else(|| self.now());
+        let t = seconds(args, "time").unwrap_or_else(|| self.now(&path));
         let kt = self.key_time(&path, t);
         let animated =
             query::attr_spec(self.stage(), &path, &attr).is_some_and(|s| s.is_animated());
@@ -458,7 +483,7 @@ impl RunState<'_, '_, '_> {
                 )
             }
             "parent" | "parentJump" => {
-                let time = flicks(self.now());
+                let time = flicks(self.now(&path));
                 self.invoke(
                     "layer.set_parent",
                     json!({ "layers": [&path], "parent": value, "keep_transform": field == "parent", "time": time }),
@@ -530,6 +555,18 @@ impl RunState<'_, '_, '_> {
             }
             "pixelAspect" => params["pixel_aspect"] = value.clone(),
             "frameRate" => params["fps"] = value.clone(),
+            "time" => {
+                if self.access != crate::ProjectAccess::Write {
+                    return Err("moving the playhead requires project write permission".into());
+                }
+                let info = query::comp_info(self.stage(), &comp).ok_or("expected composition")?;
+                let time = info.playhead_time(flicks(value.as_f64().ok_or("expected seconds")?));
+                if let Some(view) = self.env.view {
+                    view.set_time(&info, time);
+                }
+                self.playheads.insert(comp, time);
+                return Ok(Json::Null);
+            }
             "duration" => {
                 params["duration"] = json!(flicks(value.as_f64().ok_or("expected seconds")?))
             }
@@ -590,26 +627,32 @@ impl RunState<'_, '_, '_> {
 
 /// Answers one `__host(method, args)` call.
 pub(crate) fn call(s: &mut RunState<'_, '_, '_>, method: &str, args: &Json) -> R {
-    if s.access == crate::ProjectAccess::None && !matches!(method, "log" | "alert" | "undoGroup") {
+    if s.access == crate::ProjectAccess::None
+        && !matches!(method, "log" | "alert" | "undoGroup" | "blendModes")
+    {
         return Err("this plugin has no project access".into());
     }
     match method {
+        "blendModes" => Ok(json!(bae_model::schema::BLEND_MODES)),
         "context" => Ok(json!({
             "activeComp": s.env.active_comp.as_ref().map(PrimPath::as_str),
             "selected": s.selected.iter().map(PrimPath::as_str).collect::<Vec<_>>(),
-            "time": s.now(),
             "version": env!("CARGO_PKG_VERSION"),
         })),
-        "log" => {
-            let text = string(args, "text").unwrap_or_default();
-            tracing::info!(target: "script", "{text}");
-            s.report.log.push(text);
-            Ok(Json::Null)
-        }
-        "alert" => {
-            s.report
-                .alerts
-                .push(string(args, "text").unwrap_or_default());
+        "log" | "alert" => {
+            const MAX_ENTRIES: usize = 256;
+            const MAX_BYTES: usize = 64 * 1024;
+            if s.report.log.len() + s.report.alerts.len() < MAX_ENTRIES && s.output_bytes < MAX_BYTES {
+                let text = args.get("text").and_then(Json::as_str).unwrap_or_default();
+                let text = &text[..text.floor_char_boundary((MAX_BYTES - s.output_bytes).min(text.len()))];
+                s.output_bytes += text.len();
+                if method == "alert" {
+                    s.report.alerts.push(text.to_owned());
+                } else {
+                    tracing::info!(target: "script", "{text}");
+                    s.report.log.push(text.to_owned());
+                }
+            }
             Ok(Json::Null)
         }
         "undoGroup" => {
@@ -625,9 +668,15 @@ pub(crate) fn call(s: &mut RunState<'_, '_, '_>, method: &str, args: &Json) -> R
         "sample" => {
             let p = path(args, "path")?;
             view(s.stage(), &p)?;
-            let t = seconds(args, "time").unwrap_or_else(|| s.now());
-            Ok(s.sample(&p, &string(args, "attr")?, t)
-                .map_or(Json::Null, |v| to_js(&v)))
+            let t = seconds(args, "time").unwrap_or_else(|| s.now(&p));
+            let attr = string(args, "attr")?;
+            let value = if args["preExpression"].as_bool() == Some(true) {
+                s.sample(&p, &attr, t)
+            } else {
+                s.evaluator.evaluate_attribute(s.tx.stage(), &p, &attr, flicks(t))
+                    .ok().or_else(|| s.effect_default(&p, &attr))
+            };
+            Ok(value.map_or(Json::Null, |v| to_js(&v)))
         }
         "effects" => Ok(Json::Array(children_of_type(
             s.stage(),
@@ -678,6 +727,7 @@ pub(crate) fn call(s: &mut RunState<'_, '_, '_>, method: &str, args: &Json) -> R
             )
         }
         "setLayer" => s.set_layer(args),
+        "compTime" => Ok(json!(secs(s.comp_time(&path(args, "path")?)))),
         "setComp" => s.set_comp(args),
         "rename" => s.invoke(
             "attr.set",
@@ -712,10 +762,11 @@ pub(crate) fn call(s: &mut RunState<'_, '_, '_>, method: &str, args: &Json) -> R
         }
         "deleteItem" => s.invoke("item.delete", json!({ "paths": [path(args, "path")?] })),
         "deleteLayer" => {
-            let time = flicks(s.now());
+            let layer = path(args, "path")?;
+            let time = flicks(s.now(&layer));
             s.invoke(
                 "layer.delete",
-                json!({ "layers": [path(args, "path")?], "time": time }),
+                json!({ "layers": [layer], "time": time }),
             )
         }
         "duplicateLayer" => {

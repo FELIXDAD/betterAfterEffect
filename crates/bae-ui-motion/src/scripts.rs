@@ -20,6 +20,14 @@ use serde_json::json;
 use crate::common;
 
 impl bae_script::ScriptView for crate::SharedSession {
+    fn time(&self, comp: &bae_model::PrimPath) -> bae_model::Time {
+        self.lock().time(comp)
+    }
+
+    fn set_time(&self, comp: &bae_motion::query::CompInfo, time: bae_model::Time) {
+        self.lock().set_time(comp, time);
+    }
+
     fn selection(&self) -> bae_script::ScriptSelection {
         let session = self.lock();
         bae_script::ScriptSelection {
