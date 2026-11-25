@@ -29,6 +29,30 @@ fn projection_silhouettes_and_spotlight() {
 }
 
 #[test]
+fn bevel_edges_light_angle_zero_is_up_and_turns_clockwise() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(40, 40);
+    let input = Pixels::new(rect, |_, _| [0.5, 0.5, 0.5, 1.]);
+    // AE's default -60°: the top and left edges are lit.
+    let out = run(
+        &gpu,
+        F32,
+        builtin("ADBE Bevel Edges"),
+        vec![],
+        &input,
+        rect,
+        1.,
+    );
+    let [left, right, top, bottom] =
+        [(0, 20), (39, 20), (20, 0), (20, 39)].map(|(x, y)| out.get(x, y)[0]);
+    assert!(left > 0.5 && top > 0.5, "lit: left {left}, top {top}");
+    assert!(
+        right < 0.5 && bottom < 0.5,
+        "shaded: right {right}, bottom {bottom}"
+    );
+}
+
+#[test]
 fn input_region_matches_the_sampling_operation() {
     let layer = IRect::new(-8, 4, 120, 68);
     let tile = IRect::new(10, 20, 14, 24);
