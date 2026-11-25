@@ -945,6 +945,13 @@ mod layer_list_tests {
         assert!(Arc::ptr_eq(&initial, &panel.layer_list(&stage, &comp)));
 
         let a = &initial.paths[1];
+        let b = &initial.paths[0];
+        run(
+            &mut stage,
+            "layer.set_parent",
+            json!({"layers":[b], "parent":a, "time":Time::ZERO}),
+        );
+        assert_eq!(panel.layer_list(&stage, &comp).parent_numbers, [2, 0]);
         run(
             &mut stage,
             "attr.set",
@@ -964,6 +971,7 @@ mod layer_list_tests {
         assert_eq!(rows[0].layer_index, 0);
         assert_eq!(&reordered.paths[rows[0].layer_index], a);
         assert_eq!(reordered.parent_labels, ["1. Renamed", "2. B"]);
+        assert_eq!(reordered.parent_numbers, [0, 1]);
         stage.undo(&author).unwrap();
         assert_eq!(
             panel.layer_list(&stage, &comp).parent_labels,
