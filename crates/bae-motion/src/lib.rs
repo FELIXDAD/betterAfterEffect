@@ -100,7 +100,7 @@ pub use comp::{
     TrimCompToWorkArea,
 };
 pub use dimensions::SeparateDimensions;
-pub use expressions::{ExpressionEdit, SetExpressions};
+pub use expressions::{BakeExpression, ExpressionEdit, SetExpressions};
 pub use import::{ImportFile, ImportItems, ImportOutput};
 pub use keys::{
     CopiedKey, DeleteKeys, EaseKeys, EaseMode, EditKeys, KeyEdit, KeyRef, KeysOutput, MoveKeys,
@@ -177,6 +177,7 @@ pub fn register_commands(r: &mut CommandRegistry) {
         r.register(SetProjectSettings),
         r.register(SetText),
         r.register(SetExpressions),
+        r.register(BakeExpression),
         r.register(AnimateText),
         r.register(AddTextSelector),
         r.register(RemoveTextAnimators),
