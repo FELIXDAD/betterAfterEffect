@@ -17,6 +17,7 @@ fn audio_control(slug: &str, zh: &str, builder: DefBuilder, static_params: &[u32
 mod delay;
 mod eq;
 mod filter;
+mod processing;
 mod reverb;
 mod reverse;
 mod stereo;
@@ -29,5 +30,11 @@ pub(crate) fn register(registry: &mut crate::Registry) {
         delay::effect(),
         reverb::effect(),
         eq::alias(),
+        processing::compressor(),
+        processing::gate(),
+        processing::distortion(),
+        processing::modulator(),
+        processing::tone(),
+        processing::flange_chorus(),
     ]);
 }
