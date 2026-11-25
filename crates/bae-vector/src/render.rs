@@ -250,7 +250,10 @@ impl std::fmt::Debug for VelloRenderer {
     }
 }
 
-type SharedRenderers = Mutex<Vec<(Weak<GpuContext>, Weak<VelloRenderer>)>>;
+/// Renderers by GPU context, kept for the context's lifetime: Vello compiles
+/// its pipelines when a renderer is created, so letting it go between draws
+/// recompiled every shader for every shape layer of every frame.
+type SharedRenderers = Mutex<Vec<(Weak<GpuContext>, Arc<VelloRenderer>)>>;
 static SHARED: SharedRenderers = Mutex::new(Vec::new());
 
 fn vello_error(e: vello::Error) -> RenderError {
@@ -286,16 +289,15 @@ impl VelloRenderer {
     }
 
     /// The renderer shared by everyone drawing on `gpu`; created on first use and
-    /// dropped when the last user lets go of it.
+    /// kept until the context is dropped.
     pub fn shared(gpu: &Arc<GpuContext>) -> Result<Arc<Self>, RenderError> {
         let mut shared = SHARED.lock();
-        shared.retain(|(g, r)| g.strong_count() > 0 && r.strong_count() > 0);
-        if let Some(r) = shared
+        shared.retain(|(g, _)| g.strong_count() > 0);
+        if let Some((_, r)) = shared
             .iter()
             .find(|(g, _)| std::ptr::eq(g.as_ptr(), Arc::as_ptr(gpu)))
-            .and_then(|(_, r)| r.upgrade())
         {
-            return Ok(r);
+            return Ok(r.clone());
         }
         let r = Arc::new(Self::new(gpu)?);
         if r.backend == VectorBackend::Cpu {
@@ -305,7 +307,7 @@ impl VelloRenderer {
                 gpu.adapter_info().device_type
             );
         }
-        shared.push((Arc::downgrade(gpu), Arc::downgrade(&r)));
+        shared.push((Arc::downgrade(gpu), r.clone()));
         Ok(r)
     }
 
@@ -490,6 +492,89 @@ pub struct ShapeSource {
     scene: Arc<VectorScene>,
     bounds: IRect,
     hash: u64,
+    memo: RenderMemo,
+}
+
+/// Layer sources by content hash. When it fills up it drops only the entries
+/// not used since the last sweep (second chance) and lets the limit follow the
+/// working set, so every layer still on screen keeps its source and the image
+/// it remembered, however many layers there are.
+#[derive(Debug)]
+pub struct SourceCache<T> {
+    map: FxHashMap<u64, (Arc<T>, bool)>,
+    limit: usize,
+}
+
+/// Entries a [`SourceCache`] holds before its first sweep.
+const CACHE_ENTRIES: usize = 512;
+
+impl<T> Default for SourceCache<T> {
+    fn default() -> Self {
+        Self {
+            map: FxHashMap::default(),
+            limit: CACHE_ENTRIES,
+        }
+    }
+}
+
+impl<T> SourceCache<T> {
+    /// The source for `hash`, marked as used.
+    pub fn get(&mut self, hash: u64) -> Option<Arc<T>> {
+        let (source, used) = self.map.get_mut(&hash)?;
+        *used = true;
+        Some(source.clone())
+    }
+
+    /// Adds `source` for `hash`, sweeping first when full.
+    pub fn insert(&mut self, hash: u64, source: Arc<T>) {
+        if self.map.len() >= self.limit {
+            self.map.retain(|_, (_, used)| std::mem::take(used));
+            self.limit = (2 * self.map.len()).max(CACHE_ENTRIES);
+        }
+        self.map.insert(hash, (source, true));
+    }
+}
+
+/// The last image a vector source rendered, reused while the request is the
+/// same: layers that only move, turn or fade are rasterized once, not every
+/// frame (the image is only ever read).
+#[derive(Debug, Default)]
+pub struct RenderMemo(Mutex<Option<MemoEntry>>);
+
+#[derive(Debug)]
+struct MemoEntry {
+    gpu: usize,
+    roi: IRect,
+    scale: u64,
+    image: GpuImage,
+}
+
+impl RenderMemo {
+    /// The image for `roi` at `scale` on `gpu`: the remembered one, or `render`'s.
+    pub fn get_or_render(
+        &self,
+        gpu: &Arc<GpuContext>,
+        roi: IRect,
+        scale: f64,
+        render: impl FnOnce() -> Result<GpuImage, RenderError>,
+    ) -> Result<GpuImage, RenderError> {
+        let gpu = Arc::as_ptr(gpu) as usize;
+        if let Some(e) = &*self.0.lock()
+            && e.gpu == gpu
+            && e.roi == roi
+            && e.scale == scale.to_bits()
+        {
+            return Ok(e.image.clone());
+        }
+        let image = render()?;
+        *self.0.lock() = Some(MemoEntry {
+            gpu,
+            roi,
+            scale: scale.to_bits(),
+            image: image.clone(),
+        });
+        Ok(image)
+    }
 }
 
 impl ShapeSource {
@@ -499,6 +584,7 @@ impl ShapeSource {
             bounds: pixel_bounds(&scene),
             hash: scene.content_hash(),
             scene,
+            memo: RenderMemo::default(),
         }
     }
 
@@ -515,7 +601,9 @@ impl ShapeSource {
         scale: f64,
     ) -> Result<GpuImage, RenderError> {
         let roi = roi.intersect(&self.bounds);
-        VelloRenderer::shared(gpu)?.render_region(gpu, roi, scale, self.scene.as_ref())
+        self.memo.get_or_render(gpu, roi, scale, || {
+            VelloRenderer::shared(gpu)?.render_region(gpu, roi, scale, self.scene.as_ref())
+        })
     }
 
     /// Renders `roi` at `scale` with a specific renderer (e.g. a forced backend).
@@ -561,12 +649,9 @@ impl LayerSource for ShapeSource {
 /// layer and frame is typical).
 #[derive(Debug, Default)]
 pub struct ShapeProvider {
-    cache: Mutex<FxHashMap<u64, Arc<ShapeSource>>>,
+    cache: Mutex<SourceCache<ShapeSource>>,
     warnings: Mutex<Vec<String>>,
 }
-
-/// Cached sources kept before the cache is cleared.
-const CACHE_ENTRIES: usize = 512;
 
 impl ShapeProvider {
     /// An empty provider.
@@ -611,15 +696,11 @@ impl SourceProvider for ShapeProvider {
     }
 
     fn source(&self, content: &CustomContent) -> Result<Arc<dyn LayerSource>, RenderError> {
-        if let Some(hit) = self.cache.lock().get(&content.hash) {
-            return Ok(hit.clone());
+        if let Some(hit) = self.cache.lock().get(content.hash) {
+            return Ok(hit);
         }
         let source = Arc::new(ShapeSource::new(self.scene_of(content)?));
-        let mut cache = self.cache.lock();
-        if cache.len() >= CACHE_ENTRIES {
-            cache.clear();
-        }
-        cache.insert(content.hash, source.clone());
+        self.cache.lock().insert(content.hash, source.clone());
         Ok(source)
     }
 }

@@ -72,6 +72,17 @@ pub fn prepare(dir: &Path) {
         [x as u8, y as u8, 255 - x as u8, 255]
     });
     write_label_png(&dir.join("label.png"), 64, 24, 0.1).expect("label");
+    // A 20-frame sequence (10 fps in the cases): each frame its own colour and a
+    // bar that moves 3 px per frame.
+    for k in 0..20u32 {
+        write_image(&dir.join(format!("seq_{k:04}.png")), 64, 32, |x, _| {
+            if (3 * k..3 * k + 4).contains(&x) {
+                [255, 255, 255, 255]
+            } else {
+                [(12 * k) as u8, (255 - 12 * k) as u8, 128, 255]
+            }
+        });
+    }
 }
 
 pub fn num(v: &Json) -> f64 {
@@ -214,6 +225,35 @@ pub fn build(assets: &Path) -> (SceneBuilder, Vec<(String, u8)>) {
                     b.layer(&comp, lname, "solid", Some(&asset)).expect("layer"),
                     Some([sw, sh]),
                 )
+            } else if let Some(file) = l["sequence"].as_str() {
+                let path = assets.join(file);
+                let (fw, fh, _) = read_rgba8(&path).expect("sequence frame");
+                let asset = b
+                    .footage_asset(&format!("{name}_seq"), &path, None, Some([fw, fh]))
+                    .expect("sequence");
+                let rate = l["seq_rate"].as_u64().unwrap_or(10) as u32;
+                b.set(&asset, "kind", Value::Enum("sequence".into()))
+                    .expect("kind");
+                b.set(
+                    &asset,
+                    "frame_rate",
+                    Value::FrameRate(FrameRate::new(rate, 1)),
+                )
+                .expect("rate");
+                let frames = l["seq_frames"].as_u64().unwrap_or(20) as i64;
+                b.set(
+                    &asset,
+                    "duration",
+                    Value::Time(Time::from_flicks(
+                        frames * FrameRate::new(rate, 1).frame_duration().flicks(),
+                    )),
+                )
+                .expect("duration");
+                (
+                    b.layer(&comp, lname, "footage", Some(&asset))
+                        .expect("layer"),
+                    Some([f64::from(fw), f64::from(fh)]),
+                )
             } else if let Some(file) = l["footage"].as_str() {
                 let path = assets.join(file);
                 let (fw, fh, _) = read_rgba8(&path).expect("footage");
@@ -273,6 +313,30 @@ pub fn build(assets: &Path) -> (SceneBuilder, Vec<(String, u8)>) {
                     ("transform:rotation", rz),
                 ] {
                     b.set(&layer, attr, Value::Float(v)).expect("rotation");
+                }
+            }
+            if let Some(st) = l["stretch"].as_f64() {
+                b.set(&layer, "stretch", Value::Float(st)).expect("stretch");
+            }
+            if let Some(st) = l["start_time"].as_f64() {
+                b.set(&layer, "start_time", Value::Time(Time::from_seconds(st)))
+                    .expect("start");
+            }
+            if let Some(keys) = l["remap"].as_array() {
+                // Keys at comp frames (start 0, stretch 100: comp time = layer
+                // time), values in seconds of source time.
+                b.set(&layer, "time_remap_enabled", Value::Bool(true))
+                    .expect("remap on");
+                let hold = l["remap_hold"].as_bool() == Some(true);
+                for k in keys {
+                    let t = frame_time(k[0].as_i64().expect("frame"));
+                    let v = Value::Time(Time::from_seconds(num(&k[1])));
+                    let key = if hold {
+                        bae_model::Keyframe::hold(v)
+                    } else {
+                        bae_model::Keyframe::linear(v)
+                    };
+                    b.key_with(&layer, "time_remap", t, key).expect("remap key");
                 }
             }
             if let Some(m) = l.get("mat").filter(|m| m.is_object()) {
