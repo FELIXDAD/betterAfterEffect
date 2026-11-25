@@ -23,6 +23,7 @@ use crate::tools::cursor::{self, Hover};
 use crate::tools::{Tool, ViewRequest};
 
 mod bar;
+mod effect_points;
 pub(crate) mod errors;
 mod free_transform;
 mod layout;
@@ -36,10 +37,11 @@ mod select_tool;
 mod shape_tool;
 #[cfg(test)]
 mod tests;
-mod transform;
+pub(crate) mod transform;
 mod type_tool;
 pub(crate) mod view3d;
 
+pub(crate) use overlay::{mask_color, path_shapes};
 pub(crate) use transform::nudge_layers;
 
 const MAGNIFICATIONS: [f32; 9] = [0.125, 0.25, 0.333, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0];
@@ -95,6 +97,8 @@ pub struct CompositionViewer {
     last_view: Option<View>,
     /// Motion paths of the selected layers (C).
     motion_path: motion_path::MotionPathState,
+    /// Point controls of the selected effects.
+    effect_points: effect_points::EffectPoints,
     /// Something in the viewer uses Esc (a drag, text, Free Transform, a
     /// menu): Esc goes to it instead of switching to the last 3D view.
     esc_taken: bool,
@@ -816,6 +820,20 @@ impl Panel for CompositionViewer {
             effective,
             &painter,
         );
+        // Effect point controls: a press on a crosshair is theirs.
+        let points = effect_points::frame(
+            &mut self.effect_points,
+            ui,
+            &resp,
+            cx,
+            &session,
+            &comp,
+            &view,
+            effective,
+            &painter,
+            &self.prefs,
+            time,
+        );
         // Motion paths (C): drawn for the selected layers; a press on a keyframe
         // square or handle is theirs, not the Selection tool's.
         let path = motion_path::frame(
@@ -831,10 +849,12 @@ impl Panel for CompositionViewer {
             &painter,
             &self.prefs,
         );
-        let select_cursor = if path.owns {
+        let select_cursor = if points.owns {
+            points.cursor
+        } else if path.owns {
             path.cursor
         } else {
-            path.cursor.or(select_tool::frame(
+            points.cursor.or(path.cursor).or(select_tool::frame(
                 &mut self.select,
                 ui,
                 &resp,
@@ -1013,4 +1033,19 @@ fn empty_viewer(ui: &mut Ui, cx: &PanelContext<'_>, session: &SharedSession) {
             .font(theme::small()),
         );
     });
+}
+
+mod zh;
+pub(crate) use zh::ZH;
+
+/// Registers this module's Chinese strings and panel (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "composition",
+        bae_ui::PanelKind::new("Composition", |spawn| {
+            Box::new(CompositionViewer::new(spawn.state))
+        }),
+    );
 }
