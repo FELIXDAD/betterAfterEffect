@@ -19,7 +19,7 @@ fn param(
 fn radial() -> DefBuilder {
     let mut b = DefBuilder::new("ADBE Radial Blur", "Radial Blur", "Blur & Sharpen");
     // Disk ID 5 is an unnamed, non-animatable NO_VALUE custom UI control.
-    b.push(5, "", "", ParamKind::ArbitraryData, None);
+    b.push(5, "", "", ParamKind::Button, None);
     b = b.slider(1, "Amount", "数量", 10., [0., 1000.], [0., 100.], 1, "none");
     param(
         b,

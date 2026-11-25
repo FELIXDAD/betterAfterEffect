@@ -468,7 +468,12 @@ fn value_control(
         ParamKind::Layer => layer_picker(ui, cx, effect, id, value),
         ParamKind::Path => mask_picker(ui, cx, effect, id, value),
         ParamKind::Button => {
-            ui.add_enabled(false, egui::Button::new(label));
+            let caption = if label.is_empty() {
+                tr(&param.name)
+            } else {
+                label
+            };
+            ui.add_enabled(false, egui::Button::new(caption));
             Edit::None
         }
         ParamKind::ArbitraryData | ParamKind::CurvePoints => {
