@@ -16,7 +16,6 @@ enum ControlKind {
     GroupStart,
     GroupEnd,
     Layer,
-    Mask,
     Color([f64; 4]),
     Point([f64; 2]),
     Popup(i64, &'static [(&'static str, &'static str)]),
@@ -67,7 +66,6 @@ pub(super) fn builtin(kind: Kind) -> Builtin {
             GroupStart => (ParamKind::GroupStart, None),
             GroupEnd => (ParamKind::GroupEnd, None),
             Layer => (ParamKind::Layer, None),
-            Mask => (ParamKind::Path, None),
             Color(v) => (ParamKind::Color, Some(Value::Color(v))),
             Point(v) => (ParamKind::Point, Some(Value::Vec2(v))),
             Popup(v, labels) => {

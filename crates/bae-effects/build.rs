@@ -21,7 +21,6 @@ fn control(effect: &str, id: u32, p: &Value, english: &HashMap<&str, &str>) -> S
         "NO_VALUE" if p["name"] == "" => "GroupEnd".into(),
         "NO_VALUE" => "GroupStart".into(),
         "LAYER_INDEX" => "Layer".into(),
-        "MASK_INDEX" => "Mask".into(),
         "COLOR" => format!(
             "Color({:?})",
             serde_json::from_value::<[f64; 4]>(v.clone()).unwrap()
