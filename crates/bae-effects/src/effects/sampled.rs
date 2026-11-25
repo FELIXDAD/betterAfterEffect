@@ -29,7 +29,17 @@ impl Shader {
         rt: &gpu::Runtime,
         format: wgpu::TextureFormat,
     ) -> Result<std::sync::Arc<gpu::Kernel>, RenderError> {
-        image_grid::kernel_with_inputs(rt, format, self.label, self.source, BYTES, 5)
+        self.kernel_at(rt, format, "main")
+    }
+
+    /// The kernel of another `@compute` entry point in the same source.
+    pub(crate) fn kernel_at(
+        &self,
+        rt: &gpu::Runtime,
+        format: wgpu::TextureFormat,
+        entry: &'static str,
+    ) -> Result<std::sync::Arc<gpu::Kernel>, RenderError> {
+        image_grid::kernel_at(rt, format, self.label, self.source, entry, BYTES, 5)
     }
 
     pub fn dispatch<const N: usize>(
@@ -41,12 +51,15 @@ impl Shader {
         aux: [Option<&GpuImage>; N],
         stage: [u32; 2],
     ) -> Result<GpuImage, RenderError> {
-        self.dispatch_with_uniforms(target, v, roi, input, aux, stage, |_, _| {})
+        self.dispatch_at("main", target, v, roi, input, aux, stage, |_, _| {})
     }
 
+    /// [`Self::dispatch`] through entry point `entry`; `extra` writes uniforms
+    /// past the parameter slots (given the header size).
     #[allow(clippy::too_many_arguments)]
-    pub fn dispatch_with_uniforms<const N: usize>(
+    pub fn dispatch_at<const N: usize>(
         &self,
+        entry: &'static str,
         target: &mut dyn EffectTarget,
         v: Params<'_>,
         roi: IRect,
@@ -57,7 +70,7 @@ impl Shader {
     ) -> Result<GpuImage, RenderError> {
         const { assert!(N <= 4) };
         let rt = gpu::runtime(target.gpu());
-        let kernel = self.kernel(&rt, target.format())?;
+        let kernel = self.kernel_at(&rt, target.format(), entry)?;
         let grid = image_grid::grid_scale(v.p, input);
         let layer = if v.p.layer_bounds.is_empty() {
             image_grid::pixel_rect(input.rect, 1. / grid)
@@ -96,25 +109,14 @@ impl Shader {
                 Some(Value::Color(c)) => {
                     u.f32s(offset, &c.map(|x| x as f32));
                 }
-                Some(Value::Vec2(xy)) => {
-                    let point = if v.p.value(p.id).is_none()
-                        && (p.flags.reference_point_default || p.flags.relative_default)
-                    {
-                        let units = if p.flags.relative_default {
-                            [1., 1.]
-                        } else {
-                            [640., 360.]
-                        };
-                        [
-                            (f64::from(layer.x0) + xy[0] * f64::from(layer.width()) / units[0])
-                                as f32,
-                            (f64::from(layer.y0) + xy[1] * f64::from(layer.height()) / units[1])
-                                as f32,
-                        ]
-                    } else {
-                        xy.map(|x| (x * v.p.scale) as f32)
-                    };
-                    u.f32s(offset, &point);
+                Some(Value::Vec2(_)) => {
+                    if let Some(point) = v.render_point(
+                        p,
+                        [f64::from(layer.x0), f64::from(layer.y0)],
+                        layer.size().map(f64::from),
+                    ) {
+                        u.f32s(offset, &point.map(|v| v as f32));
+                    }
                 }
                 Some(Value::Int(_) | Value::Bool(_) | Value::Float(_)) => {
                     u.f32(offset, v.f(p.id) as f32);
@@ -167,14 +169,6 @@ pub(crate) struct Sampled {
 impl Effect for Sampled {
     fn def(&self) -> &EffectDef {
         &self.def
-    }
-    fn prepare_scene(
-        &self,
-        instance: &mut bae_render::RenderEffect,
-        comp: &bae_render::RenderComp,
-        layer: &bae_render::RenderLayer,
-    ) {
-        lights::collect(&self.def, instance, comp, layer);
     }
     fn input_roi(&self, p: &EffectParams<'_>, roi: IRect) -> IRect {
         if roi.is_empty() {

@@ -7,6 +7,11 @@ fn complex_power(z:vec2f) -> vec2f {
     if params.equation==3u { return complex_mul(fourth,z); }
     return complex_mul(complex_mul(fourth,sq),z);
 }
+// Escape iterations per sample. The limit goes up to 1,000,000 and high quality
+// samples up to 16 x 16 per pixel: bounded so a large value cannot run into
+// the GPU watchdog (device loss).
+const ESCAPE_BUDGET: i32 = 65536;
+var<private> escape_budget: i32 = ESCAPE_BUDGET;
 fn fractal_sample(uv:vec2f,julia:bool,inverse:bool)->vec4f {
     let size=vec2f(frame.layer_bounds.max-frame.layer_bounds.min);
     let c0=vec2f(params.mandelbrot_x_real,params.mandelbrot_y_imaginary);
@@ -16,7 +21,7 @@ fn fractal_sample(uv:vec2f,julia:bool,inverse:bool)->vec4f {
     if inverse { q=vec2f(q.x,-q.y)/max(1e-30,dot(q,q))+vec2f(params.offset_after_inversion_x_real,params.offset_after_inversion_y_imaginary); }
     let c=select(q,c0,julia);
     var z=select(vec2f(0),q,julia);
-    let limit=select(params.mandelbrot_escape_limit,params.julia_escape_limit,julia);
+    let limit=min(select(params.mandelbrot_escape_limit,params.julia_escape_limit,julia),escape_budget);
     var i=0i;
     var interior=false;
     if !julia && params.equation==1u {
@@ -75,6 +80,7 @@ fn fractal(c:vec4f,px:BaePixel)->vec4f {
     }
     if oversample {
         let n = params.oversample_factor;
+        escape_budget = max(256, ESCAPE_BUDGET / max(1, n * n));
         color = vec4f(0);
         for (var y = 0i; y < n; y++) {
             for (var x = 0i; x < n; x++) {

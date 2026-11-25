@@ -261,6 +261,11 @@ impl Effect for GlueGun {
         lights::collect(&self.0, instance, comp, layer);
     }
 
+    /// AE Lights: comp lights shade the beads (and key the frame cache).
+    fn uses_scene(&self, p: &EffectParams<'_>) -> bool {
+        Params::new(&self.0, p).popup(28) == 2
+    }
+
     fn parameter_sample_times(&self, p: &EffectParams<'_>) -> Vec<Time> {
         let v = Params::new(&self.0, p);
         let density = v.f(3);
@@ -312,7 +317,8 @@ impl TargetEffect for GlueGun {
         if roi.is_empty() {
             return Ok(input.clone());
         }
-        SHADER.dispatch_with_uniforms(
+        SHADER.dispatch_at(
+            "main",
             target,
             Params::new(&self.0, p),
             roi,

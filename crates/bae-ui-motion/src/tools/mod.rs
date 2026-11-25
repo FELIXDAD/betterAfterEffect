@@ -521,6 +521,7 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
             (ids::FREE_TRANSFORM, "Free Transform Points"),
         ])
         .chain(crate::viewer::view3d::ACTIONS.iter().copied())
+        .chain(crate::viewer::guides::ACTIONS.iter().copied())
 }
 
 /// AE's resolution shortcuts: `(params, English title)` (AE's names).
@@ -581,9 +582,10 @@ pub fn bindings() -> Vec<Binding> {
         .chain(NUDGES.iter().map(|(chord, dx, dy, _)| {
             Binding::new(chord, ids::NUDGE).params(nudge_params(*dx, *dy))
         }))
-        // AE binds Esc everywhere; here only in the Composition panel, which
-        // passes it on to whatever there uses Esc (a drag, text, a menu).
-        .chain([Binding::new("Esc", crate::viewer::view3d::ids::LAST).when("composition")])
+        // Esc is Switch to Last 3D View whichever panel has focus (AE). Text
+        // fields and open menus keep their Esc (the workbench); the viewer
+        // passes it on to a drag or text it is editing.
+        .chain([Binding::new("Esc", crate::viewer::view3d::ids::LAST)])
         .collect()
 }
 
@@ -1046,7 +1048,7 @@ impl ActionHandler for ToolActions {
             let session = crate::common::session(cx.resources);
             return crate::viewer::nudge_layers(cx, &session, p("dx"), p("dy"), mag);
         }
-        if crate::viewer::view3d::handle(inv, cx) {
+        if crate::viewer::view3d::handle(inv, cx) || crate::viewer::guides::handle(inv, cx) {
             return true;
         }
         if inv.id == ids::FREE_TRANSFORM {
