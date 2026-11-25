@@ -154,7 +154,13 @@ fn instance_default(
 ) -> Option<Value> {
     let relative = matches!(
         param.match_name.as_deref(),
-        Some("ADBE Radial Blur-0002" | "ADBE Tile-0001" | "ADBE Radial Shadow-0003")
+        Some(
+            "ADBE Radial Blur-0002"
+                | "CC Radial Blur-0004"
+                | "CC Radial Fast Blur-0001"
+                | "ADBE Tile-0001"
+                | "ADBE Radial Shadow-0003"
+        )
     ) || (def.plugin.is_none() && def.category == "Distort");
     if let (true, Some(Value::Vec2(reference))) = (relative, &param.default) {
         let source_size = stage
