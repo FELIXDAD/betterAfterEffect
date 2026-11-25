@@ -424,7 +424,7 @@ impl Shell {
             present_mode: if self.smoke.is_some() {
                 PresentModePreference::NoVsync
             } else {
-                PresentModePreference::Vsync
+                PresentModePreference::LowLatency
             },
             ..SurfaceOptions::default()
         };
@@ -955,14 +955,6 @@ impl Shell {
             pixels_per_point: output.pixels_per_point,
         };
         let session = self.app.resource::<bae_ui_motion::SharedSession>();
-        if self.smoke.is_none() {
-            let playing = session.is_some_and(|s| s.lock().is_playing());
-            view.surface.set_present_mode(if playing {
-                PresentModePreference::LowLatency
-            } else {
-                PresentModePreference::Vsync
-            });
-        }
         let (width, height) = view.surface.size();
         let background = view.egui_ctx.global_style().visuals.panel_fill;
 
