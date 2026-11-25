@@ -320,6 +320,17 @@ pub(crate) struct CompiledPrim {
     pub(crate) children: Vec<CompiledPrim>,
 }
 
+/// A text layer's Path Options (AE: Text > Path Options), compiled.
+#[derive(Debug)]
+pub(crate) struct CompiledTextPath {
+    pub(crate) mask: PrimPath,
+    pub(crate) reverse: bool,
+    pub(crate) perpendicular: bool,
+    pub(crate) force_alignment: bool,
+    pub(crate) first_margin: Prop,
+    pub(crate) last_margin: Prop,
+}
+
 #[derive(Debug)]
 pub(crate) struct CompiledCamera {
     pub(crate) zoom: Prop,
@@ -364,6 +375,7 @@ pub(crate) struct CompiledLayer {
     pub(crate) contents: Vec<CompiledPrim>,
     pub(crate) text: Option<Prop>,
     pub(crate) text_animators: Vec<CompiledPrim>,
+    pub(crate) text_path: Option<CompiledTextPath>,
     pub(crate) camera: Option<CompiledCamera>,
     pub(crate) light: Option<CompiledLight>,
 }
@@ -705,6 +717,19 @@ fn compile_layer(
         .into_iter()
         .filter_map(|cp| compile_generic(stage, &cp, 0))
         .collect();
+    let text_path = (kind == LayerKind::Text)
+        .then(|| setting_ref(v, l::TEXT_PATH))
+        .flatten()
+        .map(|mask| CompiledTextPath {
+            mask,
+            reverse: setting_bool(v, lt, l::TEXT_REVERSE_PATH),
+            perpendicular: setting(v, lt, l::TEXT_PERPENDICULAR_TO_PATH)
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
+            force_alignment: setting_bool(v, lt, l::TEXT_FORCE_ALIGNMENT),
+            first_margin: p(l::TEXT_FIRST_MARGIN, Value::Float(0.0)),
+            last_margin: p(l::TEXT_LAST_MARGIN, Value::Float(0.0)),
+        });
 
     Ok(CompiledLayer {
         name: v
@@ -732,6 +757,7 @@ fn compile_layer(
         contents,
         text,
         text_animators,
+        text_path,
         camera,
         light,
         path: lpath,
@@ -917,6 +943,14 @@ impl CompiledComp {
                         .iter()
                         .map(|p| sample_generic(p, &cx))
                         .collect(),
+                    text_path: layer.text_path.as_ref().map(|t| crate::TextPathOptions {
+                        mask: t.mask.clone(),
+                        reverse: t.reverse,
+                        perpendicular: t.perpendicular,
+                        force_alignment: t.force_alignment,
+                        first_margin: t.first_margin.sample(&cx).as_f64().unwrap_or(0.0),
+                        last_margin: t.last_margin.sample(&cx).as_f64().unwrap_or(0.0),
+                    }),
                     camera: None,
                     light: None,
                     depends_on: Vec::new(),
@@ -1608,6 +1642,8 @@ impl CompiledLayer {
                 tr::POINT_OF_INTEREST => Some(&t.point_of_interest),
                 l::TIME_REMAP => self.time_remap.as_ref(),
                 l::TEXT_SOURCE => self.text.as_ref(),
+                l::TEXT_FIRST_MARGIN => self.text_path.as_ref().map(|t| &t.first_margin),
+                l::TEXT_LAST_MARGIN => self.text_path.as_ref().map(|t| &t.last_margin),
                 cam::ZOOM => self.camera.as_ref().map(|c| &c.zoom),
                 cam::FOCUS_DISTANCE => self.camera.as_ref().map(|c| &c.focus_distance),
                 cam::APERTURE => self.camera.as_ref().map(|c| &c.aperture),
@@ -1679,6 +1715,9 @@ impl CompiledLayer {
         }
         if let Some(c) = &self.camera {
             all.extend([&c.zoom, &c.focus_distance, &c.aperture, &c.blur_level]);
+        }
+        if let Some(t) = &self.text_path {
+            all.extend([&t.first_margin, &t.last_margin]);
         }
         if let Some(l) = &self.light {
             all.extend([

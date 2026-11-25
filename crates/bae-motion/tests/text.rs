@@ -160,3 +160,31 @@ fn set_text_keeps_the_style_and_keys_animated_text() {
             .is_err()
     );
 }
+
+#[test]
+fn text_follows_a_mask_path() {
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let layer = p(&fx.run(
+        "text.create",
+        json!({"comp": comp, "text": "Hi", "position": [10.0, 10.0]}),
+    )["path"]);
+    let mask = fx.run(
+        "mask.create",
+        json!({"layer": layer, "kind": "ellipse", "position": [0.0, 0.0], "size": [100.0, 100.0]}),
+    )["mask"]
+        .clone();
+    fx.run("text.set_path", json!({"layer": layer, "mask": mask}));
+    assert_eq!(fx.v3(&layer, "text:path"), Some(Value::PrimRef(p(&mask))));
+    fx.run("text.set_path", json!({"layer": layer, "mask": null}));
+    assert_eq!(fx.v3(&layer, "text:path"), None);
+    // Only the layer's own masks.
+    let other = p(&fx.run(
+        "text.create",
+        json!({"comp": comp, "text": "x", "position": [0.0, 0.0]}),
+    )["path"]);
+    assert!(
+        fx.try_run("text.set_path", json!({"layer": other, "mask": mask}))
+            .is_err()
+    );
+}

@@ -479,7 +479,7 @@
   ```
   - Luma weights 0.30 / 0.59 / 0.11 per PDF 1.7 and Photoshop; UNVERIFIED that AE uses exactly these (not Rec.709 0.2126/0.7152/0.0722).
   - 32 bpc: `ClipColor` forces results into [0, 1] in the PDF model; UNVERIFIED whether AE skips `ClipColor` for 32 bpc (if it does, overbright luminosity survives Color/Luminosity modes).
-- **AE 26.2.1 实测（8 bpc）：** 上述四个函数在半透明像素上的底色取自“底图覆盖源图”的结果。令 `ao = ab + as*(1-ab)`，若 `ao > 0`，则 `D = (cbp + csp*(1-ab))/ao`，最终预乘颜色为 `ao * lerp(D, B(D, Cs), as)`。整数位深在 alpha、预乘底色和直通底色处取整。用 6 对 RGB × 前后景各 4 档不透明度（25/50/75/100%）逐像素对比，色相、饱和度、颜色、明度的最大通道差分别为 2、3、1、2（满值 255）。这些数值只针对该 96 格网格。饱和度的整数取整仍待校准；16/32 bpc 已有 CPU/GPU 对照，尚无对应的 AE 位深实测。[校准记录 #257](https://github.com/FELIXDAD/betterAfterEffect/issues/257)
+- **AE 26.2.1 实测（8 bpc）：** 上述四个函数在半透明像素上的底色取自“底图覆盖源图”的结果。令 `ao = ab + as*(1-ab)`，若 `ao > 0`，则 `D = (cbp + csp*(1-ab))/ao`，最终预乘颜色为 `ao * lerp(D, B(D, Cs), as)`。整数位深在 alpha、预乘底色和直通底色处取整。用 6 对 RGB × 前后景各 4 档不透明度（25/50/75/100%）逐像素对比，色相、饱和度、颜色、明度的最大通道差分别为 2、3、1、2（满值 255）。这些数值只针对该 96 格网格。饱和度的整数取整仍待校准；16/32 bpc 已有 CPU/GPU 对照，尚无对应的 AE 位深实测。[校准记录 #257](https://github.com/FELIXDAD/betterAfterEffects/issues/257)
 - **Priority:** P1 — Color and Luminosity are commonly used for tinting/grading.
 - **Owner:** bae-render (+ bae-color)
 - **Notes:** Lottie `bm` 12 Hue, 13 Saturation, 14 Color, 15 Luminosity (lottie-web: CSS `hue`/`saturation`/`color`/`luminosity`, which are this W3C definition). Implementation hint: all four share one shader function set; avoid branches by sorting with `min/max`.

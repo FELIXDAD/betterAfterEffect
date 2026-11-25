@@ -37,7 +37,7 @@ pub use eval::Evaluator;
 pub use evaluated::{
     AssetInfo, AttrError, CameraState, EvaluatedComp, EvaluatedEffect, EvaluatedLayer,
     EvaluatedMask, EvaluatedPrim, FrameBlending, LayerSource, LayerSwitches, LightFalloff,
-    LightState, LightType, TrackMatte,
+    LightState, LightType, TextPathOptions, TrackMatte,
 };
 pub use time::{LayerTiming, MotionBlur};
 pub use transform::{AutoOrientRotation, Transform};

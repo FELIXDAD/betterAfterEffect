@@ -1111,12 +1111,22 @@ impl Builder<'_, '_> {
         source.content_hash(time).hash(&mut h);
         roi.hash(&mut h);
         density.to_bits().hash(&mut h);
+        // Small sources are asked for whole: the request then stays the same
+        // while the layer turns or slides off screen, so a vector source can
+        // reuse the image it rasterized (the compositor uses only what it needs).
+        let bounds = source.bounds();
+        let texels = f64::from(bounds.width()) * f64::from(bounds.height()) * density * density;
+        let request = if !bounds.is_empty() && texels <= WHOLE_SOURCE_TEXELS {
+            bounds
+        } else {
+            roi_px
+        };
         self.push(Node {
             kind: NodeKind::Source(SourceNode {
                 layer: layer.path.clone(),
                 source: source.clone(),
                 request: SourceRequest {
-                    roi: roi_px,
+                    roi: request,
                     scale: density,
                     time,
                 },
@@ -1898,13 +1908,18 @@ pub fn source_density(transform: &DAffine2, resolution_scale: f64, roi: IRect) -
     )
 }
 
+/// Sources up to this many texels are rendered whole (see the source node).
+const WHOLE_SOURCE_TEXELS: f64 = 2048.0 * 2048.0;
+
 /// `density` (texels per layer pixel) made usable: finite, within [1/64, 16]
-/// and within the GPU texture limit for `roi` (layer pixels).
+/// and within the GPU texture limit for `roi` (layer pixels). Snapped to
+/// 1/4096 so a layer that only turns asks for the same density every frame
+/// (and its source can reuse the image it rendered).
 fn clamp_density(mut density: f64, resolution_scale: f64, roi: IRect) -> f64 {
     if !density.is_finite() || density <= 0.0 {
         density = 1.0 / resolution_scale;
     }
-    density = density.clamp(1.0 / 64.0, 16.0);
+    density = ((density * 4096.0).round() / 4096.0).clamp(1.0 / 64.0, 16.0);
     let largest = f64::from(roi.width().max(roi.height()).max(1));
     density.min(8192.0 / largest)
 }

@@ -22,9 +22,9 @@
 //!
 //! `string` and `asset` are reserved until the document model has those
 //! parameter kinds. Relative point defaults (a fraction of the layer size)
-//! cannot be expressed as a static `EffectDef` default; they are `None` there
-//! and resolved by the effect implementation against the layer bounds
-//! ([`relative_point_default`]).
+//! keep the fraction as the `EffectDef` default with
+//! `ParamFlags::relative_default`; `effect.apply` scales it by the layer size
+//! ([`relative_point_default`] does the same for a known size).
 
 use bae_model::{EffectDef, EffectParamDef, ParamFlags, ParamKind, PluginRef, Value};
 
@@ -125,13 +125,10 @@ pub fn param_def(p: &ParamDecl) -> Option<EffectParamDef> {
             ParamKind::Color,
             Some(Value::Color([nums[0], nums[1], nums[2], nums[3]])),
         ),
-        ParamType::Point => (
-            ParamKind::Point,
-            (!p.is_relative_point()).then(|| Value::Vec2([nums[0], nums[1]])),
-        ),
+        ParamType::Point => (ParamKind::Point, Some(Value::Vec2([nums[0], nums[1]]))),
         ParamType::Point3d => (
             ParamKind::Point3d,
-            (!p.is_relative_point()).then(|| Value::Vec3([nums[0], nums[1], nums[2]])),
+            Some(Value::Vec3([nums[0], nums[1], nums[2]])),
         ),
         ParamType::Popup => (
             ParamKind::Popup {
@@ -160,6 +157,7 @@ pub fn param_def(p: &ParamDecl) -> Option<EffectParamDef> {
             cannot_time_vary: p.has_flag(ParamFlag::CannotTimeVary),
             collapsed: p.has_flag(ParamFlag::StartCollapsed) || p.collapsed == Some(true),
             custom_ui: false,
+            relative_default: p.is_relative_point(),
         },
     })
 }
