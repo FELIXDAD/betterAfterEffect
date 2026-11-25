@@ -113,6 +113,7 @@ pub(crate) fn frame_of(info: &CompInfo, t: Time) -> i64 {
 /// English label of a property (displayed through `tr`).
 pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool) -> String {
     let fixed = match attr {
+        "audio:levels" => "Audio Levels",
         "transform:anchor_point" => "Anchor Point",
         "transform:position" => "Position",
         "transform:position_x" => "X Position",

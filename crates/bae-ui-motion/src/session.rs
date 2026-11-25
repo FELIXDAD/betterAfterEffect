@@ -104,6 +104,7 @@ pub struct Session {
     reserved: Vec<(PrimPath, String)>,
     /// When U was last pressed (UU detection).
     pub(crate) last_u: Option<Instant>,
+    pub(crate) last_l: Option<Instant>,
     /// Expression errors of the active comp at the current time (the viewer's
     /// evaluation): the error banner and the timeline's warning icons.
     pub expr_errors: Vec<bae_anim::AttrError>,

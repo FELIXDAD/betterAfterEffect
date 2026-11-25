@@ -950,6 +950,17 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
             } else {
                 layers.clone()
             };
+            let what = if what == "audio:levels" && !add {
+                let previous = s.last_l.take();
+                if previous.is_some_and(|at| at.elapsed() < Duration::from_millis(450)) {
+                    "audio:waveform"
+                } else {
+                    s.last_l = Some(Instant::now());
+                    what
+                }
+            } else {
+                what
+            };
             let reveal = if what == "animated" {
                 let double = s
                     .last_u

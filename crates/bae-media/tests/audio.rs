@@ -69,6 +69,12 @@ fn wav_decodes_exactly_with_random_access() {
     write_wav(&path, 2, &source);
     let reference = quantized(&source);
 
+    let info = audio::file_info(&path).unwrap();
+    assert_eq!(info.kind, bae_media::MediaKind::Audio);
+    assert!(
+        info.asset_attributes()
+            .contains(&("duration", bae_model::Value::Time(Time::from_seconds(1.0))))
+    );
     let streams = audio::probe(&path);
     assert_eq!(streams.len(), 1);
     assert_eq!((streams[0].sample_rate, streams[0].channels), (RATE, 2));
