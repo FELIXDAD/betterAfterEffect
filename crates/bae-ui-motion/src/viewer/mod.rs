@@ -33,6 +33,7 @@ mod overlay;
 mod path_edit;
 mod pen_tool;
 pub(crate) mod prefs;
+mod scene_icons;
 mod select_tool;
 mod shape_tool;
 #[cfg(test)]
@@ -571,7 +572,14 @@ impl Panel for CompositionViewer {
             self.gpu_tried = true;
             self.gpu = GpuPreview::new(cx.resources);
         }
-        let resolution = render_factor(cx.stage, &info.path, session.lock().auto_resolution, mag);
+        let resolution = {
+            let s = session.lock();
+            // Preview ▸ Resolution overrides the viewer's while playing.
+            match s.preview.resolution.filter(|_| s.is_playing()) {
+                Some(r) => r,
+                None => render_factor(cx.stage, &info.path, s.auto_resolution, mag),
+            }
+        };
         self.render_factor = resolution;
         // Paint.
         let painter = ui.painter_at(area);
@@ -648,12 +656,12 @@ impl Panel for CompositionViewer {
                     match self.idle {
                         Some((at, since)) if at == time => {
                             if now.duration_since(since) >= IDLE_PREFETCH {
-                                let from = session.lock().play_start(&info);
+                                let (from, range) = session.lock().play_start(&info);
                                 let rate = info.frame_rate;
                                 let first = rate.time_to_frame(from);
                                 let times = (0..PREFETCH_FRAMES)
                                     .map(|k| rate.frame_to_time(first + k))
-                                    .filter(|t| *t != time && info.work_area.contains(*t))
+                                    .filter(|t| *t != time && range.contains(*t))
                                     .collect();
                                 gpu.playback.prefetch(times);
                             } else {
@@ -857,6 +865,19 @@ impl Panel for CompositionViewer {
         }
 
         overlay::masks(&painter, cx.stage, &comp, &view, &selected);
+        // Cameras and lights in the 3D views (not the camera looked through).
+        let through = match session.lock().views3d.get(&info.path).map(|v| v.current) {
+            None | Some(view3d::View3d::Active) => comp.camera.map(|i| comp.layers[i].path.clone()),
+            Some(_) => None,
+        };
+        scene_icons::paint(
+            &painter,
+            cx.stage,
+            &comp,
+            &view,
+            &selected,
+            through.as_ref(),
+        );
 
         // Interaction by tool. Space held over the viewer is the Hand tool until
         // released (AE-UI-307), except while drawing a shape (Space moves it).

@@ -40,6 +40,7 @@ use crate::request::RenderPurpose;
 #[derive(Debug)]
 pub struct AnimEvaluator {
     inner: Evaluator,
+    scalar_tracks: rustc_hash::FxHashMap<(PrimPath, String), Arc<crate::effect::ScalarTrack>>,
     assets: AssetFiles,
     purpose: RenderPurpose,
     warnings: Vec<String>,
@@ -56,6 +57,7 @@ impl AnimEvaluator {
     pub fn new(base_dir: Option<PathBuf>) -> Self {
         Self {
             inner: Evaluator::new(),
+            scalar_tracks: Default::default(),
             assets: AssetFiles::new(base_dir),
             purpose: RenderPurpose::Final,
             warnings: Vec::new(),
@@ -422,7 +424,38 @@ impl CompEvaluator for AnimEvaluator {
         self.eval(stage, comp, time, 0)
     }
 
+    fn attribute(
+        &mut self,
+        stage: &Stage,
+        path: &PrimPath,
+        name: &str,
+        time: Time,
+    ) -> Option<bae_model::Value> {
+        self.inner.evaluate_attribute(stage, path, name, time).ok()
+    }
+
+    fn integral(
+        &mut self,
+        stage: &Stage,
+        path: &PrimPath,
+        name: &str,
+        frame: &crate::graph::EffectFrame,
+        attr: &bae_model::AttrSpec,
+    ) -> Option<Arc<crate::effect::ScalarTrack>> {
+        let slot = self
+            .scalar_tracks
+            .entry((path.clone(), name.to_owned()))
+            .or_default();
+        crate::parameter_track::prepare(slot, attr, frame, |t| {
+            self.inner
+                .evaluate_attribute(stage, path, name, t)
+                .ok()?
+                .as_f64()
+        })
+    }
+
     fn invalidate(&mut self, event: &StageEvent) {
+        self.scalar_tracks.clear();
         self.inner.invalidate(event);
     }
 
@@ -489,7 +522,7 @@ fn hash_prims(prims: &[EvaluatedPrim], h: &mut FxHasher) {
         p.path.hash(h);
         p.prim_type.hash(h);
         p.attrs.len().hash(h);
-        for (name, value) in &p.attrs {
+        for (name, value) in p.attrs.iter() {
             name.hash(h);
             hash_value(value, h);
         }

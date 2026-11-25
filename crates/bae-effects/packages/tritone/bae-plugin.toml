@@ -19,6 +19,7 @@ ae_match_names = ["ADBE Tritone"]
 keywords = ["tritone", "tint", "shadows", "midtones", "highlights"]
 flags = ["pixel-independent"]
 shader = "shaders/tritone.wgsl"
+includes = ["shaders/tone_ramp.wgsl"]
 identity_when = "params.blend >= 100"
 
 [[effect.param]]
@@ -51,3 +52,63 @@ default = 0.0
 range = [0.0, 100.0]
 precision = 1
 display = "percent"
+
+[[effect]]
+id = "cc-toner"
+name = "CC Toner"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["CC Toner"]
+shader = "shaders/cc_toner.wgsl"
+includes = ["shaders/tone_ramp.wgsl"]
+
+[[effect.param]]
+id = 5
+key = "tones"
+type = "popup"
+name = "Tones"
+default = 2
+choices = ["Duotone", "Tritone", "Pentone", "(-", "Solid"]
+
+[[effect.param]]
+id = 1
+key = "highlights"
+type = "color"
+name = "Highlights"
+default = [1, 1, 1, 1]
+
+[[effect.param]]
+id = 6
+key = "brights"
+type = "color"
+name = "Brights"
+default = [0.752941, 0.666667, 0.470588, 1]
+
+[[effect.param]]
+id = 2
+key = "midtones"
+type = "color"
+name = "Midtones"
+default = [0.501961, 0.392157, 0.27451, 1]
+
+[[effect.param]]
+id = 7
+key = "darktones"
+type = "color"
+name = "Darktones"
+default = [0.25098, 0.196078, 0.039216, 1]
+
+[[effect.param]]
+id = 3
+key = "shadows"
+type = "color"
+name = "Shadows"
+default = [0, 0, 0, 1]
+
+[[effect.param]]
+id = 4
+key = "blend_w_original"
+type = "float"
+name = "Blend w. Original"
+default = 0
+range = [0, 1]
