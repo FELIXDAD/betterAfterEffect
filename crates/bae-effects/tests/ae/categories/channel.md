@@ -38,3 +38,9 @@ cargo run -p bae-effects --example ae_compare -- golden
 ## 工作流进度
 
 2026-11-24，`effects/controls-channel` 完成通道效果，与表达式控制、颜色校正和遮罩一起生成 39 个 AE 26.2.1 用例。Set Matte 支持当前帧的源阶段图层取样，界面上的源阶段切换由效果控件工作流接入。
+
+## 图层与蒙版输入复测
+
+`cases-input-layers.json` 包含设置遮罩、渐变擦除、置换图、复合模糊、纹理化和填充的 29 张 AE 26 对照图。主批次和追加探针均通过 `aectl lock --` 运行，退出码为 0。可在[公共流程](../README.md)的 `prepare` 命令中设置 `BAE_07_CASES=crates/bae-effects/tests/ae/cases-input-layers.json` 重跑。
+
+设置遮罩的 Alpha、明亮度和反转用例最大差为 1/255，最差平均差为 0.150/255。输入阶段菜单提供源、蒙版、效果和蒙版。此菜单使用宿主的辅助参数，原有 AE 参数 ID 和 matchName 保持一致。GPU 图测试覆盖隐藏图层的三个阶段、图层尺寸不等及半分辨率。

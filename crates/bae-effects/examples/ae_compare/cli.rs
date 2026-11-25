@@ -53,7 +53,10 @@ fn compare(root: &Path) {
         } else {
             harness::input(&case.input)
         };
-        let bae = harness::render_pixels(&gpu, &case, &pixels);
+        let bae = harness::render_with_maps(&gpu, &case, &pixels, |probe| {
+            let path = root.join("inputs").join(format!("{probe}.png"));
+            harness::read_image(&path, 8).unwrap_or_else(|| (harness::SIZE, harness::input(probe)))
+        });
         harness::write_png(&root.join("bae").join(format!("{}.png", case.name)), &bae);
         match harness::read_png(
             &root.join("ae").join(format!("{}.png", case.name)),
