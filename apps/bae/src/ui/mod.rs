@@ -9,9 +9,11 @@ pub use renderer::{UiOutput, UiRenderer};
 pub use workspace::ShortcutRow;
 #[cfg(test)]
 pub(crate) use workspace::gpu_kind as workspace_gpu_kind;
+#[cfg(test)]
+pub(crate) use workspace::plugin_notice_template;
 pub use workspace::{
     PlaceholderViewer, REVEAL_PREFERENCES, StatusInfo, Workspace, failure_notice, gpu_summary,
-    register_panels,
+    plugin_notice, register_panels,
 };
 
 use bae_gpu::viewport::{ViewportTextureId, ViewportTextureRegistry};
