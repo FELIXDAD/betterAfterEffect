@@ -160,6 +160,8 @@ struct Times {
     eval: Duration,
     convert: Duration,
     render: Duration,
+    build: Duration,
+    encode: Duration,
     wait: Duration,
 }
 
@@ -221,6 +223,8 @@ fn bench(gpu: &Arc<GpuContext>, layers: usize, frames: usize) {
             .output_texture(&out, OutputAlpha::Premultiplied)
             .expect("output");
         times.render += t.elapsed();
+        times.build += out.stats.build;
+        times.encode += out.stats.encode;
         if wait {
             let t = Instant::now();
             renderer.wait_idle().expect("idle");
@@ -243,10 +247,12 @@ fn bench(gpu: &Arc<GpuContext>, layers: usize, frames: usize) {
     renderer.wait_idle().expect("idle");
     let fps = frames as f64 / start.elapsed().as_secs_f64();
     println!(
-        "  {layers:5} layers: eval {:6.2} ms  convert {:6.2} ms  render+submit {:6.2} ms  gpu wait {:6.2} ms  |  sustained {fps:6.1} fps",
+        "  {layers:5} layers: eval {:6.2} ms  convert {:6.2} ms  render+submit {:6.2} ms (graph {:5.2}, encode {:5.2})  gpu wait {:6.2} ms  |  sustained {fps:6.1} fps",
         ms(times.eval, frames),
         ms(times.convert, frames),
         ms(times.render, frames),
+        ms(times.build, frames),
+        ms(times.encode, frames),
         ms(times.wait, frames),
     );
 }
