@@ -540,7 +540,14 @@ impl CompEvaluator for AnimEvaluator {
         self.inner.invalidate(event);
         #[cfg(feature = "media")]
         {
-            self.audio_windows = Default::default();
+            // Decoders are keyed by file: only asset or structural edits can strand them.
+            let files = event.changes.iter().any(|c| match c {
+                bae_model::Change::AttrChanged { attr, .. } => attr.starts_with("file:"),
+                _ => true,
+            });
+            if files {
+                self.audio_windows = Default::default();
+            }
             if let Some(preview) = &mut self.preview_audio {
                 preview.composition = None;
             }

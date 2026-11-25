@@ -8,12 +8,63 @@ use crate::{
     params::Params,
     rust_builtin,
 };
-use bae_gpu::wgpu::{self, util::DeviceExt};
+use bae_gpu::{GpuContext, wgpu};
 use bae_model::{EffectDef, Value};
 use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderError};
-use std::sync::Arc;
+use parking_lot::Mutex;
+use std::sync::{Arc, Weak};
 
 struct Display(EffectDef);
+
+/// Geometry buffers of one GPU context, reused across frames. Each draw takes
+/// the next one (grown when too small) and fills it with `queue.write_buffer`.
+/// Those writes all land before the next submission, so draws encoded into the
+/// same submission must not share a buffer.
+#[derive(Default)]
+struct GeometryPool {
+    buffers: [Option<wgpu::Buffer>; 4],
+    next: usize,
+    bytes: Vec<u8>,
+}
+
+static GEOMETRY: Mutex<Vec<(Weak<GpuContext>, GeometryPool)>> = Mutex::new(Vec::new());
+
+fn geometry_buffer(gpu: &Arc<GpuContext>, nodes: &[[f32; 12]]) -> wgpu::Buffer {
+    let mut pools = GEOMETRY.lock();
+    pools.retain(|(ctx, _)| ctx.strong_count() > 0);
+    let i = match pools
+        .iter()
+        .position(|(ctx, _)| std::ptr::eq(ctx.as_ptr(), Arc::as_ptr(gpu)))
+    {
+        Some(i) => i,
+        None => {
+            pools.push((Arc::downgrade(gpu), GeometryPool::default()));
+            pools.len() - 1
+        }
+    };
+    let pool = &mut pools[i].1;
+    pool.bytes.clear();
+    pool.bytes
+        .extend(nodes.iter().flatten().flat_map(|v| v.to_le_bytes()));
+    // A binding needs at least one node.
+    pool.bytes.resize(pool.bytes.len().max(48), 0);
+    let size = pool.bytes.len() as u64;
+    let slot = &mut pool.buffers[pool.next];
+    pool.next = (pool.next + 1) % 4;
+    let buffer = match slot {
+        Some(buffer) if buffer.size() >= size => buffer.clone(),
+        _ => slot
+            .insert(gpu.device().create_buffer(&wgpu::BufferDescriptor {
+                label: Some("audio display geometry"),
+                size: size.next_power_of_two(),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }))
+            .clone(),
+    };
+    gpu.queue().write_buffer(&buffer, 0, &pool.bytes);
+    buffer
+}
 
 fn draw_kernel(
     rt: &gpu::Runtime,
@@ -98,22 +149,7 @@ impl TargetEffect for Display {
             .u32(76, u32::from(spec && p.b(16)))
             .u32(80, nodes.len() as u32);
         let offset = gpu::push_uniform(&rt, &w);
-        let mut bytes: Vec<u8> = nodes
-            .iter()
-            .flatten()
-            .flat_map(|v| v.to_le_bytes())
-            .collect();
-        if bytes.is_empty() {
-            bytes.resize(48, 0);
-        }
-        let data = target
-            .gpu()
-            .device()
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("audio display geometry"),
-                contents: &bytes,
-                usage: wgpu::BufferUsages::STORAGE,
-            });
+        let data = geometry_buffer(target.gpu(), &nodes);
         let group = rt.bind_group(
             &kernel,
             &[

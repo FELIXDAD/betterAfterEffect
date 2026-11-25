@@ -106,7 +106,13 @@ pub fn waveform(pcm: &[f32], points: usize) -> Vec<f64> {
 
 /// FFT plans are private to the evaluator, so an export cannot hold up a preview.
 #[derive(Default)]
-pub struct SpectrumPlans(HashMap<usize, Fft>);
+pub struct SpectrumPlans {
+    plans: HashMap<usize, Fft>,
+    /// FFT input, reused across calls.
+    bins: Vec<Complex<f32>>,
+    /// Hann window of the last block width.
+    window: Vec<f32>,
+}
 
 impl SpectrumPlans {
     fn startup_plans() -> &'static parking_lot::Mutex<Option<Self>> {
@@ -133,7 +139,7 @@ impl SpectrumPlans {
             if warm_tables {
                 plan.fft_inplace(&mut vec![Complex::new(0.0, 0.0); size]);
             }
-            plans.0.insert(size, plan);
+            plans.plans.insert(size, plan);
         }
         plans
     }
@@ -156,20 +162,27 @@ impl SpectrumPlans {
             .max(bands * 2)
             .next_power_of_two()
             .clamp(64, 16384);
-        let fft = self.0.entry(fft_size).or_insert_with(|| Fft::new(fft_size));
-        let mut bins = vec![Complex::new(0.0, 0.0); fft_size];
+        let fft = self
+            .plans
+            .entry(fft_size)
+            .or_insert_with(|| Fft::new(fft_size));
+        let bins = &mut self.bins;
+        bins.resize(fft_size, Complex::new(0.0, 0.0));
         let width = pcm.len().min(fft_size);
-        let weights: Vec<f32> = (0..width)
-            .map(|i| 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / width.max(2) as f32).cos())
-            .collect();
+        if self.window.len() != width {
+            self.window = (0..width)
+                .map(|i| 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / width.max(2) as f32).cos())
+                .collect();
+        }
+        let weights = &self.window;
         let norm = 2.0 / weights.iter().sum::<f32>().max(1.0);
         let mut blocks = 0;
         for offset in (0..pcm.len()).step_by((width / 2).max(1)) {
             bins.fill(Complex::new(0.0, 0.0));
-            for ((z, &s), &w) in bins.iter_mut().zip(&pcm[offset..]).zip(&weights) {
+            for ((z, &s), &w) in bins.iter_mut().zip(&pcm[offset..]).zip(weights) {
                 z.re = s * w;
             }
-            fft.fft_inplace(&mut bins);
+            fft.fft_inplace(bins);
             for (i, output) in result.iter_mut().enumerate() {
                 let k = |f: f64| {
                     ((f / f64::from(RATE) * fft_size as f64).round() as usize).min(fft_size / 2)
@@ -205,7 +218,7 @@ impl SpectrumPlans {
 impl std::fmt::Debug for SpectrumPlans {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SpectrumPlans")
-            .field("plans", &self.0.len())
+            .field("plans", &self.plans.len())
             .finish()
     }
 }
