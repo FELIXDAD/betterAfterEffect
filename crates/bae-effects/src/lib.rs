@@ -51,8 +51,8 @@ use bae_plugin::manifest::{ParamType, ShaderStyle};
 use bae_render::{Effect, EffectLibrary, EffectParams, GpuImage, IRect, RenderError};
 
 pub use catalog::{EffectInfo, Form, category_zh};
+pub use categories::simulation::particle_world_projection;
 pub use effects::blur::BLURRINESS_TO_SIGMA;
-pub use effects::simulation::projection::particle_world_projection;
 pub use module::EffectsModule;
 pub use target::{EffectTarget, IMAGE_USAGE, Standalone, TargetEffect};
 

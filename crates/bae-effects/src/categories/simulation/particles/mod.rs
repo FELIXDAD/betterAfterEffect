@@ -7,6 +7,7 @@ pub(crate) use engine::{Engine, prewarm};
 mod scatter;
 mod surface;
 
+use crate::effects::layer_input;
 use crate::{Builtin, EffectTarget, TargetEffect, common, gpu::UniformWriter, params::Params};
 use bae_model::{EffectDef, Value};
 use bae_render::{
@@ -67,7 +68,7 @@ impl Simulation {
     }
     fn inputs(&self, p: &EffectParams<'_>) -> Vec<Option<LayerDependency>> {
         if self.kind == Kind::World {
-            let Some(texture) = super::layer_input::dependency(p, 45, false) else {
+            let Some(texture) = layer_input::dependency(p, 45, false) else {
                 return vec![];
             };
             let v = Params::new(&self.def, p);
@@ -87,7 +88,7 @@ impl Simulation {
         }
         self.sources()
             .iter()
-            .map(|id| super::layer_input::dependency(p, *id, false))
+            .map(|id| layer_input::dependency(p, *id, false))
             .collect()
     }
 }

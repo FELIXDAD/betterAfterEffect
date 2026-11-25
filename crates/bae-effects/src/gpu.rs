@@ -111,7 +111,7 @@ impl UniformRing {
 pub(crate) struct Runtime {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
-    pub particles: Mutex<Option<crate::effects::simulation::Engine>>,
+    pub particles: Mutex<Option<crate::categories::simulation::Engine>>,
     ring: UniformRing,
     placeholder: wgpu::TextureView,
     kernels: Mutex<FxHashMap<KernelKey, Arc<Kernel>>>,

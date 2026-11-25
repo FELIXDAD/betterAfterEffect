@@ -90,7 +90,7 @@ pub(super) fn builtin(kind: Kind) -> Builtin {
         };
         builder.push(c.id, c.en, c.zh, kind, value);
     }
-    let (mut def, names) = builder.build();
+    let (mut def, names) = builder.reference_points().build();
     for (param, control) in def.params.iter_mut().zip(controls) {
         param.flags.cannot_animate = !control.varies;
         param.flags.cannot_time_vary = !control.varies;

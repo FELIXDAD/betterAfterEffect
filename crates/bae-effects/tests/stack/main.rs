@@ -143,23 +143,27 @@ fn levels_then_exposure(fx: &mut Fx, layer: &PrimPath) -> (PrimPath, PrimPath) {
     (levels, exposure)
 }
 
-#[test]
-fn distort_point_defaults_use_the_source_on_apply_and_reset() {
+mod blur_sharpen;
+mod distort;
+mod noise_grain;
+mod perspective;
+mod relative_points;
+mod simulation;
+mod stylize;
+
+fn assert_reference_points(rows: &[(&str, u32, [f64; 2])]) {
     let mut fx = Fx::new();
     let comp = fx.comp();
     let layer = fx.solid(&comp, [0.5; 3], [31, 13]);
-    for (effect_name, id, expected) in [
-        ("ADBE Mirror", 1, [31., 6.5]),
-        ("ADBE Corner Pin", 4, [31., 13.]),
-        ("ADBE Geometry2", 2, [15.5, 6.5]),
-    ] {
-        let effect = fx.apply(&layer, effect_name);
-        let prop = format!("param:{id:04}");
-        let point = |fx: &Fx| fx.stage.prim(&effect).unwrap().value(&prop).cloned();
-        assert_eq!(point(&fx), Some(bae_model::Value::Vec2(expected)));
-        fx.param(&effect, id, json!({"type": "vec2", "value": [4., 5.]}));
-        fx.run("effect.reset", json!({"effects": [effect]}));
-        assert_eq!(point(&fx), Some(bae_model::Value::Vec2(expected)));
+    for &(name, id, expected) in rows {
+        let effect = fx.apply(&layer, name);
+        let attr = format!("param:{id:04}");
+        let point = |fx: &Fx| fx.stage.prim(&effect).unwrap().value(&attr).cloned();
+        let expected = Some(bae_model::Value::Vec2(expected));
+        assert_eq!(point(&fx), expected);
+        fx.param(&effect, id, json!({"type":"vec2","value":[4.0,5.0]}));
+        fx.run("effect.reset", json!({"effects":[effect]}));
+        assert_eq!(point(&fx), expected);
     }
 }
 
@@ -195,117 +199,8 @@ fn effects_render_top_to_bottom() {
     close(px, [e(l(0.2)), e(l(0.3)), e(l(0.1)), 1.0], 2, "after undo");
 }
 
-#[test]
-fn stopped_emitter_keeps_birth_position_and_lifespan_on_seek() {
-    use bae_model::{Keyframe, Value};
-    use bae_render::eval::EvaluatorFrames;
-    let mut fx = Fx::new();
-    let comp = fx.comp();
-    let layer = fx.solid(&comp, [1.; 3], [64, 32]);
-    let emitter = fx.apply(&layer, "CC Particle Systems II");
-    for (id, value) in [(5, 0.), (6, 0.), (10, 0.), (12, 0.), (19, 1.), (20, 1.)] {
-        fx.param(&emitter, id, json!({"type":"float","value":value}));
-    }
-    fx.param(&emitter, 18, json!({"type":"int","value":4}));
-    for (id, start, end, t, hold) in [
-        (1, Value::Float(1.), Value::Float(0.), 0.5, true),
-        (2, Value::Float(1.), Value::Float(0.06), 0.5, true),
-        (
-            4,
-            Value::Vec2([8., 16.]),
-            Value::Vec2([48., 16.]),
-            1.,
-            false,
-        ),
-    ] {
-        for (time, value) in [(0., start), (t, end)] {
-            let key = if hold {
-                Keyframe::hold(value)
-            } else {
-                Keyframe::linear(value)
-            };
-            fx.run(
-                "key.set",
-                json!({"path":emitter,"attr":format!("param:{id:04}"),
-                "time":Time::from_seconds(time).flicks(),"keyframe":key}),
-            );
-        }
-    }
-    let Some(renderer) = fx.renderer.as_mut() else {
-        return;
-    };
-    let mut render = |t, roi| {
-        let rc = fx
-            .eval
-            .evaluate(&fx.stage, &comp, Time::from_seconds(t))
-            .unwrap();
-        let mut samples = EvaluatorFrames {
-            stage: &fx.stage,
-            evaluator: &mut fx.eval,
-        };
-        let frame = renderer
-            .render_frame_with(
-                &rc,
-                &RenderRequest {
-                    roi,
-                    ..RenderRequest::full()
-                },
-                Some(&mut samples),
-            )
-            .unwrap();
-        let data = renderer
-            .read_rgba8(&frame, OutputAlpha::Premultiplied)
-            .unwrap()
-            .data;
-        (data, renderer.frame_cache().stats().hits)
-    };
-    let alive = render(0.8, None).0;
-    let visible: Vec<_> = alive
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .enumerate()
-        .filter(|(_, p)| p[3] > 32)
-        .map(|(i, _)| i % 64)
-        .collect();
-    assert!(
-        visible.iter().any(|&x| (12..19).contains(&x)),
-        "early births retain their producer position"
-    );
-    assert!(
-        visible.iter().all(|&x| x < 32),
-        "emission stops at the hold key"
-    );
-    assert!(
-        render(1.6, None)
-            .0
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .all(|p| p[3] == 0)
-    );
-    render(0.2, None);
-    assert_eq!(
-        alive,
-        render(0.8, None).0,
-        "direct seek and forward evaluation must agree"
-    );
-    let (_, hits) = render(0.8, Some(bae_render::IRect::new(0, 0, 20, 32)));
-    let (second, next_hits) = render(0.8, Some(bae_render::IRect::new(12, 0, 32, 32)));
-    assert!(
-        next_hits > hits,
-        "adjacent preview tiles share a particle surface"
-    );
-    let expected: Vec<_> = alive
-        .as_chunks::<256>()
-        .0
-        .iter()
-        .flat_map(|row| row[12 * 4..32 * 4].iter().copied())
-        .collect();
-    assert_eq!(second, expected);
-}
-
 /// Effect parameters animate through bae-anim: keyframes and expressions.
+
 #[test]
 fn parameters_follow_keyframes_and_expressions() {
     let mut fx = Fx::new();
@@ -493,6 +388,7 @@ fn adjustment_layer_coverage_and_opacity() {
 /// A blur on an adjustment layer over one untransformed layer equals the same
 /// blur on the layer itself: the adjusted result replaces what is below (no
 /// sharp copy shows through where the blur made pixels transparent).
+
 #[test]
 fn adjustment_blur_matches_layer_blur() {
     let blur = |on_adjustment: bool| -> Option<Vec<[u8; 4]>> {
@@ -572,6 +468,7 @@ fn effects_and_fx_switch_survive_save_and_reopen() {
 
 /// Every built-in effect: apply it, change a parameter, keyframe it, render,
 /// and undo back to no effects (one undo step per command).
+
 #[test]
 fn every_builtin_applies_animates_renders_and_undoes() {
     let mut fx = Fx::new();
@@ -617,62 +514,4 @@ fn every_builtin_applies_animates_renders_and_undoes() {
             def.match_name
         );
     }
-}
-
-#[test]
-fn spatial_point_defaults_follow_source_dimensions_on_apply_and_reset() {
-    let mut fx = Fx::new();
-    let comp = fx.comp();
-    let layer = fx.solid(&comp, [0.5; 3], [31, 13]);
-    for (name, id, expected) in [
-        ("ADBE Radial Blur", 2, [15.5, 6.5]),
-        ("VISINF Grain Duplication", 14, [15.5, 6.5]),
-        ("VISINF Grain Removal", 30, [15.5, 6.5]),
-        ("ADBE Tile", 1, [15.5, 6.5]),
-        ("ADBE Radial Shadow", 3, [7.75, 3.25]),
-    ] {
-        let effect = fx.apply(&layer, name);
-        let attr = format!("param:{id:04}");
-        let point = |fx: &Fx| fx.stage.prim(&effect).unwrap().value(&attr).cloned();
-        let expected = Some(bae_model::Value::Vec2(expected));
-        assert_eq!(point(&fx), expected);
-        fx.param(&effect, id, json!({"type":"vec2","value":[4.0,5.0]}));
-        fx.run("effect.reset", json!({"effects":[effect]}));
-        assert_eq!(point(&fx), expected);
-    }
-}
-
-#[test]
-fn relative_point_defaults_follow_the_layer_on_apply_and_reset() {
-    let mut fx = Fx::new();
-    let comp = fx.comp();
-    let layer = fx.solid(&comp, [1.0, 0.0, 0.0], [31, 13]);
-    let before = fx.pixel(&comp, 32, 12);
-    // Declarative packages give point defaults as fractions of the layer.
-    for (name, id, expected) in [
-        ("ADBE Ramp", 1, [15.5, 0.0]),
-        ("ADBE Ramp", 3, [15.5, 13.0]),
-        ("ADBE Radial Wipe", 3, [15.5, 6.5]),
-    ] {
-        let effect = fx.apply(&layer, name);
-        let attr = format!("param:{id:04}");
-        let point = |fx: &Fx| fx.stage.prim(&effect).unwrap().value(&attr).cloned();
-        let expected = Some(bae_model::Value::Vec2(expected));
-        assert_eq!(point(&fx), expected, "{name} {id}");
-        fx.param(&effect, id, json!({"type":"vec2","value":[4.0,5.0]}));
-        fx.run("effect.reset", json!({"effects":[effect]}));
-        assert_eq!(point(&fx), expected, "{name} {id}");
-        fx.run("effect.remove", json!({"effects":[effect]}));
-    }
-    // The written values render as the implicit defaults did.
-    let ramp = fx.apply(&layer, "ADBE Ramp");
-    let written = fx.pixel(&comp, 32, 12);
-    for id in [1, 3] {
-        fx.run(
-            "attr.clear",
-            json!({"path": ramp, "attr": format!("param:{id:04}")}),
-        );
-    }
-    assert_eq!(fx.pixel(&comp, 32, 12), written);
-    assert!(before.is_none() || written != before);
 }
