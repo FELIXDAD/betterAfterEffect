@@ -83,7 +83,6 @@ pub fn mac_keys() -> &'static [(&'static str, &'static str, &'static str)] {
 pub const SAME_IN_CHINESE: &[&str] = &[
     "Adobe Dynamic Link",
     "Maxon Cinema 4D Exporter...",
-    "3D...",
     "Shift+F10",
     "Shift+F11",
     "Shift+F12",
@@ -97,11 +96,11 @@ pub const SAME_IN_CHINESE: &[&str] = &[
     "HDTV (Rec. 709)",
     "SDTV NTSC",
     "SDTV PAL",
-    "Kodak 5218 to Kodak 2383",
     "Boris FX Mocha",
     "Cinema 4D",
     "Vanishing Point (.vpe)...",
     "Track in Boris FX Mocha",
+    "Paste Mocha Mask",
 ];
 
 impl Key {

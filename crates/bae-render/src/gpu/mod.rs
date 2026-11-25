@@ -413,7 +413,16 @@ pub(crate) struct Pipelines {
     masks: Option<MaskPipelines>,
     /// Adjustment layer mix pass, created on first use.
     pub adjust: Option<crate::exec::adjust::MixPipelines>,
+    /// Texture bind groups by the views they bind, with the frame they were
+    /// last used in: layer images that persist across frames (remembered
+    /// vector sources, cached pre-comps) rebind without a new bind group every
+    /// frame. Dropped two frames after their last use ([`Self::end_frame`]).
+    bind_groups: FxHashMap<TextureKey, (wgpu::BindGroup, u64)>,
+    frame: u64,
 }
+
+/// The views of a texture bind group (src, matte, dst, mask, shadow).
+type TextureKey = [Option<wgpu::TextureView>; 5];
 
 impl Pipelines {
     pub fn new(device: &wgpu::Device) -> Self {
@@ -580,7 +589,17 @@ impl Pipelines {
             outputs: FxHashMap::default(),
             masks: None,
             adjust: None,
+            bind_groups: FxHashMap::default(),
+            frame: 0,
         }
+    }
+
+    /// Ends a frame: forgets bind groups unused in the last two frames (they
+    /// hold their textures).
+    pub fn end_frame(&mut self) {
+        self.frame += 1;
+        let frame = self.frame;
+        self.bind_groups.retain(|_, (_, used)| frame - *used <= 2);
     }
 
     /// The output conversion pipeline rendering into `format`.
@@ -646,6 +665,26 @@ impl Pipelines {
     /// A texture bind group (unused slots get the dummy texture; `shadow` is
     /// the shadow atlas of lit layers).
     pub fn textures(
+        &mut self,
+        device: &wgpu::Device,
+        src: Option<&wgpu::TextureView>,
+        matte: Option<&wgpu::TextureView>,
+        dst: Option<&wgpu::TextureView>,
+        mask: Option<&wgpu::TextureView>,
+        shadow: Option<&wgpu::TextureView>,
+    ) -> wgpu::BindGroup {
+        let key: TextureKey = [src, matte, dst, mask, shadow].map(|v| v.cloned());
+        let frame = self.frame;
+        if let Some((group, used)) = self.bind_groups.get_mut(&key) {
+            *used = frame;
+            return group.clone();
+        }
+        let group = self.create_textures(device, src, matte, dst, mask, shadow);
+        self.bind_groups.insert(key, (group.clone(), frame));
+        group
+    }
+
+    fn create_textures(
         &self,
         device: &wgpu::Device,
         src: Option<&wgpu::TextureView>,

@@ -108,6 +108,9 @@ fn main() {
         }
         let (per_frame, latency) = measure(&gpu, case);
         println!("{:<44} {:>10.3} {:>10.3}", case.name, per_frame, latency);
+        if case.match_name == "CC Particle World" {
+            particle_preview(&gpu, case);
+        }
         if steps {
             profile_steps(&gpu, case);
         }
@@ -135,7 +138,12 @@ fn measure(gpu: &Arc<GpuContext>, case: &Case) -> (f64, f64) {
         enabled: true,
         params: case.params.clone(),
     };
-    let params = EffectParams {
+    let mut params = EffectParams {
+        time: if case.match_name == "CC Particle World" {
+            bae_model::Time::from_seconds(2.0)
+        } else {
+            bae_model::Time::ZERO
+        },
         scale: 1.0,
         ..EffectParams::new(&inst)
     };
@@ -144,6 +152,15 @@ fn measure(gpu: &Arc<GpuContext>, case: &Case) -> (f64, f64) {
     let roi = effect.output_bounds(&params, image.rect);
     let mut target = Standalone::new(gpu.clone(), wgpu::TextureFormat::Rgba16Float);
     effect_inputs(&mut target, &*effect, &params, &image);
+    if case.match_name == "CC Particle World" {
+        let start = Instant::now();
+        let _ = fx.render(&mut target, &params, &image, roi).unwrap();
+        target.finish().unwrap();
+        println!(
+            "first 50k particle frame after background warm-up: {:.3} ms",
+            start.elapsed().as_secs_f64() * 1000.
+        );
+    }
     // Warm up (pipelines, pool).
     for _ in 0..3 {
         let _ = fx.render(&mut target, &params, &image, roi).unwrap();
@@ -154,13 +171,64 @@ fn measure(gpu: &Arc<GpuContext>, case: &Case) -> (f64, f64) {
     target.finish().unwrap();
     let latency = t.elapsed().as_secs_f64() * 1e3;
     let t = Instant::now();
-    for _ in 0..ITER {
+    for frame in 0..ITER {
+        if case.match_name == "CC Particle World" {
+            params.time = params.frame_rate.frame_to_time(60 + i64::from(frame));
+        }
         let _ = fx.render(&mut target, &params, &image, roi).unwrap();
         target.submit();
     }
     target.finish().unwrap();
     let per_frame = t.elapsed().as_secs_f64() * 1e3 / f64::from(ITER);
     (per_frame, latency)
+}
+
+/// The normal preview graph, including the layer, effect, compositor and frame
+/// cache. Each sample advances the timeline and waits for the GPU to finish.
+fn particle_preview(gpu: &Arc<GpuContext>, case: &Case) {
+    use bae_render::{LayerContent, RenderComp, RenderLayer, RenderRequest, Renderer};
+    let mut renderer = Renderer::new(gpu.clone());
+    bae_effects::register(
+        &mut bae_model::EffectRegistry::new(),
+        renderer.effects_mut(),
+    );
+    let [width, height] = case.size;
+    let mut comp = RenderComp::new(PrimPath::new("/comps/bench").unwrap(), width, height);
+    let mut layer = RenderLayer::new(
+        PrimPath::new("/comps/bench/layers/a").unwrap(),
+        LayerContent::Solid {
+            color: [1.; 4],
+            width,
+            height,
+        },
+    );
+    layer.effects.push(RenderEffect {
+        path: PrimPath::new("/comps/bench/layers/a/effects/fx").unwrap(),
+        effect: case.match_name.into(),
+        enabled: true,
+        params: case.params.clone(),
+    });
+    comp.layers.push(layer);
+    let mut times = Vec::new();
+    for frame in 56..60 + ITER {
+        comp.time = comp.frame_rate.frame_to_time(i64::from(frame));
+        comp.layers[0].time = comp.time;
+        let start = Instant::now();
+        let _frame = renderer
+            .render_frame(&comp, &RenderRequest::default())
+            .unwrap();
+        gpu.wait_idle().unwrap();
+        if frame >= 60 {
+            times.push(start.elapsed().as_secs_f64() * 1000.);
+        }
+    }
+    times.sort_by(f64::total_cmp);
+    println!(
+        "1080p CC Particle World, 50000 live particles, {} advancing preview frames: mean {:.3} ms, p95 {:.3} ms",
+        ITER,
+        times.iter().sum::<f64>() / f64::from(ITER),
+        times[(times.len() * 95).div_ceil(100) - 1]
+    );
 }
 
 /// Prints the GPU time of every dispatch of one frame of `case`.
