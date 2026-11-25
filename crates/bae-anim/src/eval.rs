@@ -258,6 +258,8 @@ pub(crate) struct CompiledComp {
     pub(crate) motion_blur: MotionBlur,
     pub(crate) frame_blending: bool,
     pub(crate) layers: Vec<CompiledLayer>,
+    /// Comp markers, by time (expressions' `thisComp.marker`).
+    pub(crate) markers: Vec<CompiledMarker>,
     /// Prims whose changes invalidate this compiled comp (the comp and its sources).
     pub(crate) deps: Vec<PrimPath>,
 }
@@ -334,6 +336,58 @@ pub(crate) struct CompiledPrim {
     pub(crate) fixed: Option<EvaluatedPrim>,
 }
 
+/// A comp or layer marker as expressions read it (AE's MarkerKey). Times are
+/// in the owner's time base (comp time / layer time).
+#[derive(Debug, Clone)]
+pub(crate) struct CompiledMarker {
+    pub(crate) time: Time,
+    pub(crate) duration: Time,
+    pub(crate) comment: String,
+    pub(crate) chapter: String,
+    pub(crate) url: String,
+    pub(crate) frame_target: String,
+    pub(crate) cue_point_name: String,
+    pub(crate) protected_region: bool,
+}
+
+/// The markers of a comp or layer (`<owner>/markers/*`), by time.
+fn compile_markers(stage: &Stage, owner: &PrimPath) -> Vec<CompiledMarker> {
+    let Ok(folder) = owner.child("markers") else {
+        return Vec::new();
+    };
+    let mut out: Vec<CompiledMarker> = stage
+        .children(&folder)
+        .into_iter()
+        .filter_map(|p| {
+            let v = stage.prim(&p)?;
+            if v.prim_type() != Some(&PrimType::MARKER) {
+                return None;
+            }
+            let text = |a: &str| {
+                v.value(a)
+                    .and_then(|s| s.as_str().map(str::to_owned))
+                    .unwrap_or_default()
+            };
+            let time = |a: &str| v.value(a).and_then(|t| t.as_time()).unwrap_or(Time::ZERO);
+            Some(CompiledMarker {
+                time: time("time"),
+                duration: time("duration"),
+                comment: text("comment"),
+                chapter: text("chapter"),
+                url: text("url"),
+                frame_target: text("frame_target"),
+                cue_point_name: text("cue_point_name"),
+                protected_region: v
+                    .value("protected_region")
+                    .and_then(|b| b.as_bool())
+                    .unwrap_or(false),
+            })
+        })
+        .collect();
+    out.sort_by_key(|m| m.time);
+    out
+}
+
 /// A text layer's Path Options (AE: Text > Path Options), compiled.
 #[derive(Debug)]
 pub(crate) struct CompiledTextPath {
@@ -387,6 +441,8 @@ pub(crate) struct CompiledLayer {
     pub(crate) transform: CompiledTransform,
     pub(crate) masks: Vec<CompiledMask>,
     pub(crate) effects: Vec<CompiledEffect>,
+    /// Layer markers, by layer time (expressions' `thisLayer.marker`).
+    pub(crate) markers: Vec<CompiledMarker>,
     pub(crate) contents: Vec<CompiledPrim>,
     /// `contents` evaluated, when nothing in them animates.
     pub(crate) fixed_contents: Option<Arc<[EvaluatedPrim]>>,
@@ -431,7 +487,8 @@ fn comp_layers(stage: &Stage, comp: &PrimPath) -> Vec<PrimPath> {
 }
 
 /// Timing of a layer prim (used by `evaluate_attribute` without compiling the comp).
-fn layer_timing(view: &PrimView<'_>, comp_duration: Time) -> LayerTiming {
+/// Shared layer source-time mapping and active interval for picture and sound.
+pub fn layer_timing(view: &PrimView<'_>, comp_duration: Time) -> LayerTiming {
     let t = &PrimType::LAYER;
     LayerTiming {
         start_time: setting_time(view, t, l::START_TIME).unwrap_or(Time::ZERO),
@@ -517,6 +574,7 @@ fn compile_comp(stage: &Stage, path: &PrimPath) -> Result<CompiledComp, EvalErro
         bg_color,
         motion_blur,
         frame_blending: setting_bool(&view, ct, c::FRAME_BLENDING),
+        markers: compile_markers(stage, path),
         layers,
         deps,
     })
@@ -812,6 +870,7 @@ fn compile_layer(
         transform,
         masks,
         effects,
+        markers: compile_markers(stage, v.path()),
         fixed_contents: fixed_list(&contents),
         contents,
         text,
@@ -894,7 +953,7 @@ fn compile_generic(stage: &Stage, path: &PrimPath, depth: usize) -> Option<Compi
 }
 
 /// `prims` evaluated, shared as is when none of them animates.
-fn sample_prims(
+pub(crate) fn sample_prims(
     prims: &[CompiledPrim],
     fixed: Option<&Arc<[EvaluatedPrim]>>,
     cx: &Cx<'_, '_>,
@@ -926,10 +985,10 @@ impl CompiledComp {
         js: Option<&Ctx<'_>>,
     ) -> EvaluatedComp {
         let n = self.layers.len();
-        let has_solo = self
+        let video_solo = self
             .layers
             .iter()
-            .any(|l| l.switches.solo && l.switches.enabled);
+            .any(|l| l.switches.solo && l.switches.enabled && l.kind != LayerKind::Audio);
 
         // Expressions: memoise them first so long chains stay shallow (see
         // warm_up). Fast-path ones read only their own property: no chains.
@@ -977,7 +1036,7 @@ impl CompiledComp {
                 };
                 let active = layer.timing.is_active(time);
                 let visible =
-                    layer.switches.enabled && active && (!has_solo || layer.switches.solo);
+                    layer.switches.enabled && active && (!video_solo || layer.switches.solo);
                 let tf = sample_transform(layer, &cx);
                 EvaluatedLayer {
                     path: layer.path.clone(),

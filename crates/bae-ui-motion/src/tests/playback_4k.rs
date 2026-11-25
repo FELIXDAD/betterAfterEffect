@@ -12,7 +12,7 @@ use serde_json::json;
 use std::sync::Arc;
 use std::time::Instant;
 
-fn scene(count: usize, effects: bool) -> (Harness, PrimPath) {
+pub(super) fn scene(count: usize, effects: bool) -> (Harness, PrimPath) {
     let mut h = Harness::new();
     let mut modules = AppBuilder::new();
     modules.add_module(bae_effects::EffectsModule);
