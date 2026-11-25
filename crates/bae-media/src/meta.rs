@@ -560,6 +560,18 @@ impl MediaInfo {
                 attrs.push(("alpha_mode", Value::Enum(alpha.into())));
             }
         }
+        if self.video.is_none()
+            && let Some(track) = self.audio.first()
+            && let Some(frames) = track.frame_count
+        {
+            attrs.push((
+                "duration",
+                Value::Time(crate::audio::sample_to_time(
+                    frames as i64,
+                    track.sample_rate,
+                )),
+            ));
+        }
         if let Some(sequence) = &self.sequence {
             attrs.push(("sequence:first_frame", Value::Int(sequence.first)));
             attrs.push(("sequence:pattern", Value::String(sequence.pattern.clone())));

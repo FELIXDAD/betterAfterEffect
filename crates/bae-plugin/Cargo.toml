@@ -27,6 +27,7 @@ bae-model.workspace = true
 bae-platform.workspace = true
 bae-plugin-sdk.workspace = true
 bae-render.workspace = true
+bae-script.workspace = true
 clap.workspace = true
 half.workspace = true
 libloading.workspace = true
