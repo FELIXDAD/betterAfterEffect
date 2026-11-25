@@ -746,7 +746,9 @@ impl Panel for TimelinePanel {
             scrolled.inner_rect.top() + rows.len() as f32 * ROW_H - scrolled.state.offset.y;
         let outline_bg = Rect::from_min_max(
             pos2(body.left(), rows_bottom.max(body.top())),
-            pos2(graph_left, body.bottom()),
+            // The outline only, kept clear of egui's pointer slop (about 5 points)
+            // around the time graph, whose background owns presses near its edge.
+            pos2(body.left() + cols.end - 8.0, body.bottom()),
         );
         if outline_bg.height() > 0.0
             && ui
