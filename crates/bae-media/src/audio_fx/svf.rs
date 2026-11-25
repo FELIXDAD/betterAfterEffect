@@ -9,11 +9,14 @@ pub(super) struct Filter {
     z1: [f64; 2],
     z2: [f64; 2],
 }
+pub(super) fn warped_hz(hz: f64, rate: u32) -> f64 {
+    (std::f64::consts::PI * (hz / f64::from(rate)).clamp(1e-8, 0.499)).tan()
+}
 impl Filter {
     pub fn split(&mut self, input: [f32; 2], hz: f64, q: f64, rate: u32) -> [[f32; 2]; 3] {
         if self.last != (hz, q, rate) {
             self.last = (hz, q, rate);
-            let g = (std::f64::consts::PI * (hz / f64::from(rate)).clamp(1e-8, 0.499)).tan();
+            let g = warped_hz(hz, rate);
             self.damping = 1.0 / q;
             self.a1 = 1.0 / (1.0 + g * (g + self.damping));
             self.a2 = g * self.a1;

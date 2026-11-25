@@ -84,6 +84,7 @@ pub use source::{MediaError, MediaFormat, MediaFormats, MediaSource, OpenOptions
 pub use time::{FrameRate, Time, Timecode};
 
 pub use audio::{AudioBuffer, AudioSource, FileAudio, MemoryAudio, Waveform};
+pub use audio_fx::eq_band_response_db;
 pub use export::{
     CancelToken, EncodeOutput, EncodeSettings, EncodeStats, Encoder, EncoderFormat, ExrCompression,
     FrameProducer, FrameReadback, MediaEncoders, PngCompression, ProResProfile, ProducedFrame,

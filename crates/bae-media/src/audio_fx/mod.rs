@@ -14,6 +14,7 @@ struct Definition {
 }
 mod delay;
 mod eq;
+pub use eq::eq_band_response_db;
 mod filter;
 mod reverb;
 mod reverse;

@@ -7,7 +7,7 @@ pub(super) fn effect() -> Builtin {
             1,
             "Frequency Response",
             "网频响应",
-            bae_model::ParamKind::ArbitraryData,
+            bae_model::ParamKind::Display,
             None,
         );
         builder

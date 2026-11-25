@@ -264,6 +264,30 @@ fn params(
         if param.flags.hidden || hidden_from.is_some_and(|d| depth >= d) {
             continue;
         }
+        if def.match_name == "ADBE Param EQ" && param.kind == ParamKind::Display {
+            ui.label(super::param_label(&def.match_name, param));
+            let rate = session
+                .lock()
+                .output
+                .as_ref()
+                .map_or(48_000, |output| output.sample_rate());
+            super::eq_response::show(ui, rate, |id| {
+                common::current_value(
+                    eval.get(cx.resources),
+                    cx.stage,
+                    effect,
+                    &param_attr(id),
+                    now,
+                )
+                .or_else(|| def.param(id)?.default.clone())
+                .and_then(|v| {
+                    v.as_f64()
+                        .or_else(|| v.as_bool().map(|b| f64::from(u8::from(b))))
+                })
+                .unwrap_or_default()
+            });
+            continue;
+        }
         param_row(ui, cx, session, eval, state, effect, def, param, depth, now);
     }
 }
@@ -503,7 +527,7 @@ fn value_control(
             ui.colored_label(color::TEXT_DISABLED, "—");
             Edit::None
         }
-        ParamKind::GroupStart | ParamKind::GroupEnd => Edit::None,
+        ParamKind::GroupStart | ParamKind::GroupEnd | ParamKind::Display => Edit::None,
     }
 }
 

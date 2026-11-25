@@ -71,6 +71,8 @@ pub enum ParamKind {
     Path,
     /// A button (no value; clicking triggers the plugin).
     Button,
+    /// A read-only visualization derived from other parameters. Stores no value.
+    Display,
 }
 
 fn none_str() -> String {
@@ -78,7 +80,7 @@ fn none_str() -> String {
 }
 
 impl ParamKind {
-    /// Value type stored in the `param:NNNN` attribute; `None` for groups and buttons.
+    /// Value type stored in the `param:NNNN` attribute, if this control owns one.
     pub fn value_type(&self) -> Option<ValueType> {
         Some(match self {
             ParamKind::Slider { integer: true, .. } => ValueType::Int,
@@ -91,7 +93,10 @@ impl ParamKind {
             ParamKind::Layer | ParamKind::Path => ValueType::PrimRef,
             ParamKind::CurvePoints => ValueType::FloatList,
             ParamKind::ArbitraryData => ValueType::Bytes,
-            ParamKind::GroupStart | ParamKind::GroupEnd | ParamKind::Button => return None,
+            ParamKind::GroupStart
+            | ParamKind::GroupEnd
+            | ParamKind::Button
+            | ParamKind::Display => return None,
         })
     }
 }
