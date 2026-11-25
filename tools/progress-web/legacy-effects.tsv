@@ -1,0 +1,49 @@
+ADBE 3D Glasses	3D 眼镜（旧版）	todo	不做		本批跳过（旧版核查）
+ADBE Alpha Levels2	Alpha 色阶	todo	合并	393	等待效果组汇报
+ADBE Alpha Levels3	Alpha 色阶	todo	合并	393	等待效果组汇报
+ADBE Apply Color LUT	应用颜色 LUT	todo	后放		本批跳过（旧版核查）
+ADBE Box Blur	方框模糊	done	合并		已有实现（旧版核查）
+ADBE Brightness & Contrast	亮度和对比度	todo	合并	393	等待效果组汇报
+ADBE Cineon Converter	Cineon 转换器	todo	合并	396	等待效果组汇报
+ADBE Color Balance	颜色平衡	todo	后放		本批跳过（旧版核查）
+ADBE Easy Levels	色阶	todo	合并	393	等待效果组汇报
+ADBE Exposure	曝光度	todo	合并	393	等待效果组汇报
+ADBE Fast Blur	快速模糊（旧版）	todo	合并	394	等待效果组汇报
+ADBE FreePin3	操控	todo	后放		本批跳过（旧版核查）
+ADBE Geometry	变换	todo	合并	394	等待效果组汇报
+ADBE Noise	杂色	todo	合并	396	等待效果组汇报
+ADBE Noise Alpha	杂色 Alpha	todo	合并	396	等待效果组汇报
+ADBE Noise HLS	杂色 HLS	todo	合并	396	等待效果组汇报
+ADBE Noise HLS Auto	杂色 HLS 自动	todo	合并	396	等待效果组汇报
+ADBE PSL Bevel Emboss	Photoshop 斜面和浮雕	todo	后放		本批跳过（旧版核查）
+ADBE PSL Drop Shadow	Photoshop 投影	todo	后放		本批跳过（旧版核查）
+ADBE PSL Inner Glow	Photoshop 内发光	todo	后放		本批跳过（旧版核查）
+ADBE PSL Inner Shadow	Photoshop 内阴影	todo	后放		本批跳过（旧版核查）
+ADBE PSL Outer Glow	Photoshop 外发光	todo	后放		本批跳过（旧版核查）
+ADBE PSL Solid Fill	Photoshop 纯色填充	todo	合并	394	等待效果组汇报
+ADBE Paint	绘画	done	做	347	已有实现（旧版核查）
+ADBE Photo Filter	照片滤镜	todo	合并	393	等待效果组汇报
+ADBE Pro Levels	色阶（单独控件）	todo	合并	393	等待效果组汇报
+ADBE RefineMatte	调整遮罩	todo	后放		本批跳过（旧版核查）
+ADBE Samurai	Roto 笔刷和调整边缘	todo	后放		本批跳过（旧版核查）
+ADBE Set Matte2	设置遮罩	todo	合并	394	等待效果组汇报
+ADBE Three-Way Color Corrector	三向颜色校正器	todo	后放		本批跳过（旧版核查）
+ADBE Threshold	阈值	done	合并		已有实现（旧版核查）
+ADBE Unsharp Mask	钝化蒙版	todo	合并	394	等待效果组汇报
+CC Composite	CC Composite (obsolete)	todo	合并	396	等待效果组汇报
+CC PS Classic	CC PS Classic (obsolete)	todo	后放		本批跳过（旧版核查）
+CC PS LE Classic	CC PS LE Classic (obsolete)	todo	后放		本批跳过（旧版核查）
+CC Rain	CC Rain (obsolete)	todo	后放		本批跳过（旧版核查）
+CC Snow	CC Snow (obsolete)	todo	后放		本批跳过（旧版核查）
+CC Time Blend	CC Time Blend	todo	后放		本批跳过（旧版核查）
+CC Time Blend FX	CC Time Blend FX	todo	后放		本批跳过（旧版核查）
+ADBE Basic 3D	基本 3D	todo	后放		本批跳过（旧版核查）
+ADBE Basic Text2	基本文字	todo	后放		本批跳过（旧版核查）
+ADBE Color Key	颜色键	todo	后放		本批跳过（旧版核查）
+ADBE Gaussian Blur	高斯模糊（旧版）	done	合并		已有实现（旧版核查）
+ADBE Lightning	闪光	todo	后放		本批跳过（旧版核查）
+ADBE Luma Key	亮度键	todo	后放		本批跳过（旧版核查）
+ADBE Path Text	路径文本	todo	后放		本批跳过（旧版核查）
+ADBE Reduce Interlace Flicker	减少交错闪烁	todo	后放		本批跳过（旧版核查）
+ADBE Spill Suppressor	溢出抑制	todo	合并	394	等待效果组汇报
+ISL MochaShapeImporter	mocha shape	todo	不做		本批跳过（旧版核查）

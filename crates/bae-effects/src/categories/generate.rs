@@ -1,9 +1,10 @@
+mod native;
 use crate::Registry;
 
 use super::packages;
 
 pub(crate) fn register(registry: &mut Registry) {
-    use crate::effects::generate::*;
+    use self::native::*;
     registry.effects.extend([
         radio_waves(),
         paint_bucket(),

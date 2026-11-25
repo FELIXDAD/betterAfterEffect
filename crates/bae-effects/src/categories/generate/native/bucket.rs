@@ -23,8 +23,8 @@ fn kernel(
         || {
             let wgsl = [
                 image_grid::CHANNEL_MATH,
-                include_str!("../../shaders/image_grid.wgsl"),
-                include_str!("../../shaders/generated_blend.wgsl"),
+                include_str!("../../../shaders/image_grid.wgsl"),
+                include_str!("../../../shaders/generated_blend.wgsl"),
                 include_str!("bucket.wgsl"),
             ]
             .concat()

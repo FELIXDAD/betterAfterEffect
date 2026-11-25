@@ -297,7 +297,7 @@ pub(crate) fn radio_waves() -> Builtin {
         "none",
     );
     b.push(87, "", "", ParamKind::GroupEnd, None);
-    let (def, names) = b.build();
+    let (def, names) = b.reference_points().build();
     let mut fx = rust_builtin(
         (Arc::new(RadioWaves { def }), names),
         "radio-waves",
@@ -437,7 +437,7 @@ pub(crate) fn paint_bucket() -> Builtin {
             "Luminosity",
         ],
     );
-    let (def, names) = b.build();
+    let (def, names) = b.reference_points().build();
     let mut fx = rust_builtin(
         (Arc::new(PaintBucket { def }), names),
         "paint-bucket",
@@ -561,7 +561,7 @@ pub(crate) fn cc_light_rays() -> Builtin {
         2,
         &["None", "Add", "Lighten", "Screen"],
     );
-    let (def, names) = b.build();
+    let (def, names) = b.reference_points().build();
     let mut fx = rust_builtin(
         (Arc::new(LightRays { def, burst: false }), names),
         "cc-light-rays",
@@ -622,7 +622,7 @@ pub(crate) fn cc_light_burst_2_5() -> Builtin {
         ParamKind::Color,
         Some(Value::Color([1.0, 0.901961, 0.25098, 1.0])),
     );
-    let (def, names) = b.build();
+    let (def, names) = b.reference_points().build();
     let mut fx = rust_builtin(
         (Arc::new(LightRays { def, burst: true }), names),
         "cc-light-burst-2-5",

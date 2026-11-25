@@ -5,7 +5,7 @@ mod eyedropper;
 mod rays;
 mod waves;
 
-use super::{image_grid, layer_input};
+use crate::effects::{image_grid, layer_input};
 use crate::{
     EffectTarget, TargetEffect,
     gpu::{self, Resource, UniformWriter},

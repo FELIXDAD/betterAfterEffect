@@ -164,6 +164,16 @@ impl DefBuilder {
         self
     }
 
+    /// Marks captured point defaults measured on AE's 640 × 360 reference layer.
+    pub(crate) fn reference_points(mut self) -> Self {
+        for p in &mut self.def.params {
+            if matches!(p.kind, ParamKind::Point) {
+                p.flags.reference_point_default = true;
+            }
+        }
+        self
+    }
+
     /// Integer slider.
     pub fn int(mut self, id: u32, name: &str, zh: &str, default: i64, valid: [i64; 2]) -> Self {
         self.push(
@@ -309,6 +319,10 @@ pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static 
             "完全",
             "关闭",
         ],
-        _ => return crate::effects::grain::definitions::options(match_name, param_id),
+        _ => {
+            return crate::categories::noise_grain::grain::definitions::options(
+                match_name, param_id,
+            );
+        }
     })
 }
