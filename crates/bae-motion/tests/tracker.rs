@@ -82,3 +82,52 @@ fn stabilize_records_applies_and_undoes_one_operation_at_a_time() {
         2
     );
 }
+
+#[test]
+fn stabilization_keeps_both_attachment_points_fixed_in_comp_space() {
+    let mut registry = CommandRegistry::with_builtins();
+    bae_motion::register_commands(&mut registry);
+    bae_motion::effect::register_effect_commands(&mut registry, Default::default());
+    let author = AuthorId::new("user:tracker").unwrap();
+    let mut stage = Stage::new();
+    let mut run = |id: &str, params: Json| {
+        registry
+            .execute(&mut stage, &author, id, params)
+            .unwrap()
+            .output
+    };
+    let comp = run("comp.create", json!({"width":128,"height":128,"fps":30}))["path"].clone();
+    let layer = run("layer.create", json!({"comp":comp,"kind":"solid"}))["path"].clone();
+    let tracker = run(
+        "tracker.create",
+        json!({"layer":layer,"center":[10,10],"stabilize":true}),
+    );
+    run(
+        "tracker.configure",
+        json!({"tracker":tracker,"values":{"rotation":Value::Bool(true),"scale":Value::Bool(true)}}),
+    );
+    let points = [[[10., 10.], [20., 10.]], [[22., 16.], [22., 36.]]];
+    let frames: Vec<_> = points
+        .iter()
+        .enumerate()
+        .map(|(i, pair)| {
+            let samples: Vec<_> = pair
+                .iter()
+                .map(|p| json!({"center":p,"attach":p,"confidence":100}))
+                .collect();
+            json!({"time":100*i,"points":samples})
+        })
+        .collect();
+    run("tracker.record", json!({"tracker":tracker,"frames":frames}));
+    run("tracker.apply", json!({"tracker":tracker}));
+    let comp = PrimPath::new(comp.as_str().unwrap()).unwrap();
+    let layer = PrimPath::new(layer.as_str().unwrap()).unwrap();
+    let in_comp = |i: usize| {
+        let frame = bae_anim::evaluate_comp(&stage, &comp, Time(100 * i as i64)).unwrap();
+        let matrix = frame.layer(&layer).unwrap().world_matrix;
+        points[i].map(|p| matrix.transform_point3(bae_anim::glam::DVec2::from(p).extend(0.0)))
+    };
+    for (before, after) in in_comp(0).into_iter().zip(in_comp(1)) {
+        assert!((after - before).length() < 1e-8, "{before} -> {after}");
+    }
+}
