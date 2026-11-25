@@ -300,6 +300,13 @@ impl Session {
     /// Advance playback to the wall-clock time. Returns whether it is still playing
     /// (the caller then requests a repaint).
     pub fn tick(&mut self, info: &CompInfo) -> bool {
+        if self
+            .playback
+            .as_ref()
+            .is_some_and(|p| p.comp == info.path && p.range != info.work_area)
+        {
+            self.play(info);
+        }
         let Some(pb) = self.playback.clone() else {
             return false;
         };

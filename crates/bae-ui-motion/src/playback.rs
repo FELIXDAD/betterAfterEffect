@@ -81,6 +81,7 @@ struct Demand {
     times: Vec<Time>,
     range: TimeRange,
     looping: bool,
+    rate: FrameRate,
     repaint: egui::Context,
 }
 
@@ -266,13 +267,19 @@ impl PlaybackPreview {
                 times: Vec::with_capacity(DEPTH),
                 range,
                 looping,
+                rate,
                 repaint: repaint.clone(),
             });
         }
         let d = state.demand.as_mut().unwrap();
-        if d.times.first() != Some(&time) || d.range != range || d.looping != looping {
+        let discontinuity = d.times.first().is_some_and(|old| time < *old)
+            || d.range != range
+            || d.looping != looping
+            || d.rate != rate;
+        if discontinuity || d.times.first() != Some(&time) {
             d.range = range;
             d.looping = looping;
+            d.rate = rate;
             d.times.clear();
             let mut frame = rate.time_to_frame(time);
             for _ in 0..DEPTH {
@@ -291,6 +298,14 @@ impl PlaybackPreview {
                 frame += 1;
             }
             let times = d.times.clone();
+            if discontinuity {
+                // Jobs already encoded can finish, but cannot publish into the
+                // new epoch. Completed frames inside the new horizon are reusable.
+                state.epoch += 1;
+                state.queued.clear();
+                state.ready.retain(|slot| times.contains(&slot.time));
+                self.shown = None;
+            }
             state.failed.retain(|t| times.contains(t));
             self.shared.changed.notify_one();
         }
@@ -304,7 +319,12 @@ impl PlaybackPreview {
         } else if let Some(slot) = state
             .ready
             .iter()
-            .filter(|s| s.time <= time && s.image().is_some())
+            .filter(|s| {
+                range.contains(s.time)
+                    && s.time <= time
+                    && self.shown.as_ref().is_none_or(|shown| s.time >= shown.time)
+                    && s.image().is_some()
+            })
             .max_by_key(|s| s.time)
         {
             self.shown = Some(slot.clone());
