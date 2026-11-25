@@ -82,3 +82,36 @@ key = "operate_on_alpha_channel"
 type = "checkbox"
 name = "Operate On Alpha Channel"
 default = false
+
+[[effect]]
+id = "median-legacy"
+name = "Median (Legacy)"
+category = "Noise & Grain"
+implementation = "wgsl"
+ae_match_names = ["ADBE Median"]
+shader = "shaders/median.wgsl"
+includes = ["shaders/rank.wgsl"]
+identity_when = "params.radius == 0"
+
+[effect.roi]
+read = "params.radius"
+
+[[effect.pass]]
+entry = "median"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 1
+key = "radius"
+type = "int"
+name = "Radius"
+default = 0
+range = [0, 255]
+
+[[effect.param]]
+id = 2
+key = "operate_on_alpha_channel"
+type = "checkbox"
+name = "Operate On Alpha Channel"
+default = false
