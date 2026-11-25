@@ -3,8 +3,7 @@
 //!
 //! [`FileAudio`] decodes files with symphonia (WAV, AIFF, MP4 / QuickTime /
 //! M4A with AAC, MP3, FLAC); [`probe`] lists a file's audio streams without
-//! decoding. [`MemoryAudio`] serves generated audio and tests. Playback (cpal)
-//! comes later.
+//! decoding. [`MemoryAudio`] serves generated audio and tests. Native playback uses [`crate::playback`].
 //!
 //! 705,600,000 flicks per second is divisible by every common sample rate
 //! (8 k … 192 kHz, 44.1 k family included), so sample positions convert to
@@ -13,6 +12,21 @@
 use crate::meta::AudioInfo;
 use crate::source::MediaError;
 use crate::time::Time;
+
+/// Return the file of an audio-bearing layer without cloning its asset data or opening it.
+pub fn layer_file<'a>(
+    stage: &'a bae_model::Stage,
+    layer: &bae_model::PrimPath,
+) -> Option<&'a std::path::Path> {
+    let source = stage.prim(layer)?.value("source")?.as_prim_ref()?;
+    let asset = stage.prim(source)?;
+    if !asset.value("has_audio")?.as_bool()? {
+        return None;
+    }
+    Some(std::path::Path::new(
+        asset.value("file:original")?.as_str()?,
+    ))
+}
 
 /// Decoded audio: interleaved 32-bit float samples in `-1..=1`.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -371,12 +385,9 @@ impl FileAudio {
     }
 }
 
-impl AudioSource for FileAudio {
-    fn info(&self) -> &AudioInfo {
-        &self.info
-    }
-
-    fn read(&mut self, start: u64, count: u64) -> Result<AudioBuffer, MediaError> {
+impl FileAudio {
+    /// Borrow decoded PCM from the streaming window until the next read.
+    pub(crate) fn read_window(&mut self, start: u64, count: u64) -> Result<&[f32], MediaError> {
         let channels = self.channels();
         // Encoder padding past the valid length is not audio.
         let end = start
@@ -397,10 +408,20 @@ impl AudioSource for FileAudio {
         }
         let from = ((start.saturating_sub(self.start)) as usize * channels).min(self.window.len());
         let to = ((end.saturating_sub(self.start)) as usize * channels).min(self.window.len());
+        Ok(&self.window[from..to])
+    }
+}
+
+impl AudioSource for FileAudio {
+    fn info(&self) -> &AudioInfo {
+        &self.info
+    }
+
+    fn read(&mut self, start: u64, count: u64) -> Result<AudioBuffer, MediaError> {
         Ok(AudioBuffer {
             sample_rate: self.info.sample_rate,
             channels: self.info.channels,
-            samples: self.window[from..to].to_vec(),
+            samples: self.read_window(start, count)?.to_vec(),
         })
     }
 }

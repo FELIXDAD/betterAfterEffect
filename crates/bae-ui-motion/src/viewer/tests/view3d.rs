@@ -113,3 +113,25 @@ fn three_d_axis_arrows_move_along_one_axis_and_rings_rotate() {
     let o = h.v3(&l, "transform:orientation");
     assert!((o[2] - 30.0).abs() < 1.0 && o[0].abs() < 1e-6, "{o:?}");
 }
+
+/// Reset 3D View in Active Camera resets the camera layer ("Reset Camera 1").
+#[test]
+fn reset_3d_view_in_active_camera_resets_the_camera_layer() {
+    let mut h = H::new();
+    let camera = h.layer("camera");
+    h.run(
+        "attr.set",
+        json!({"path": camera, "attr": "transform:position", "value": {"type": "vec3", "value": [10.0, 20.0, -300.0]}}),
+    );
+    let r = tool_action(&h, crate::viewer::view3d::ids::RESET, json!({}));
+    assert_eq!(r.invocations.len(), 1, "{:?}", r.invocations);
+    h.apply(&r);
+    let zoom = match h.value(&camera, "camera:zoom") {
+        Some(Value::Float(z)) => z,
+        other => panic!("{other:?}"),
+    };
+    assert!(close3(
+        h.v3(&camera, "transform:position"),
+        [320.0, 180.0, -zoom]
+    ));
+}
