@@ -366,3 +366,45 @@ fn tools_without_viewer_actions_do_nothing_there() {
         assert_eq!(position(&h, &layer), before);
     }
 }
+
+/// Esc is Switch to Last 3D View whichever panel has focus (AE; #460): F11 →
+/// F12 → Esc goes back to Custom View 1. An open menu takes Esc first.
+#[test]
+fn esc_goes_back_to_the_last_3d_view_from_any_panel() {
+    let mut h = gui();
+    comp_with(&mut h, &["motion.layer.new.solid"]);
+    settle(&mut h);
+    let shows = |h: &Ui, view: &str| painted_texts(h).iter().any(|t| t == view);
+    key(&mut h, Modifiers::NONE, Key::F11);
+    key(&mut h, Modifiers::NONE, Key::F12);
+    assert!(shows(&h, "Active Camera"));
+    key(&mut h, Modifiers::NONE, Key::Escape);
+    assert!(shows(&h, "Custom View 1"), "Esc without the viewer focused");
+    // An open tool flyout closes on Esc; the view stays.
+    let group = button(&h, "Rectangle Tool");
+    send(&mut h, Event::PointerMoved(group.center()));
+    for pressed in [true, false] {
+        send(
+            &mut h,
+            Event::PointerButton {
+                pos: group.center(),
+                button: PointerButton::Secondary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            },
+        );
+    }
+    settle(&mut h);
+    assert!(
+        h.root().query_by_label("Star Tool").is_some(),
+        "flyout open"
+    );
+    key(&mut h, Modifiers::NONE, Key::Escape);
+    assert!(
+        h.root().query_by_label("Star Tool").is_none(),
+        "flyout closed"
+    );
+    assert!(shows(&h, "Custom View 1"), "the flyout took Esc");
+    key(&mut h, Modifiers::NONE, Key::Escape);
+    assert!(shows(&h, "Active Camera"));
+}

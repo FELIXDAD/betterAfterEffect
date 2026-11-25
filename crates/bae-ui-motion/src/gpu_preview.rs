@@ -66,6 +66,10 @@ pub(crate) struct GpuPreview {
     sampled: Option<((u32, u32, u64), [u8; 4])>,
     /// Text layers have a source provider (otherwise the viewer draws them).
     pub has_text: bool,
+    /// The newest frame was incomplete (something still warming up): the
+    /// viewer keeps showing the last complete frame with a "Preparing…" hint
+    /// until it is redrawn complete.
+    pub preparing: bool,
 }
 
 impl GpuPreview {
@@ -99,6 +103,7 @@ impl GpuPreview {
             texture: None,
             sampled: None,
             has_text: false,
+            preparing: false,
         }
     }
 
@@ -169,7 +174,7 @@ impl GpuPreview {
                 blur.cameras.fill(Some(camera));
             }
         }
-        let key = (rc.content_hash(), rc.time, resolution);
+        let key = (self.renderer.content_hash(&rc), rc.time, resolution);
         if self.last != Some(key) {
             let request = RenderRequest {
                 resolution: match resolution {
@@ -206,6 +211,17 @@ impl GpuPreview {
                 s.layer_times
                     .retain(|layer, _| !frame.comp.is_prefix_of(layer));
                 s.layer_times.extend(frame.layer_times.iter().cloned());
+            }
+            // Like AE, an incomplete frame (an effect pipeline or the text
+            // renderer still warming up) is never shown: the last complete
+            // frame stays, and the frame is rendered again on the redraw the
+            // warm-up requests when it is ready.
+            self.preparing = frame.incomplete;
+            if frame.incomplete {
+                return Some(PreviewImage {
+                    handle: self.registry.display_handle(self.id)?,
+                    rect: self.rect?,
+                });
             }
             let texture = match self
                 .renderer

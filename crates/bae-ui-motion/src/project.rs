@@ -298,6 +298,7 @@ impl Panel for ProjectPanel {
         let footer_h = 28.0;
         let list_h = (ui.available_height() - footer_h - ui.spacing().item_spacing.y).max(20.0);
         let mut open_comp: Option<PrimPath> = None;
+        let mut open_footage: Option<PrimPath> = None;
         // The Enter that commits a rename must not start a new one.
         let mut rename_finished = false;
         let mut menu_new_comp = false;
@@ -405,6 +406,8 @@ impl Panel for ProjectPanel {
                     if resp.double_clicked() {
                         match row.kind {
                             ItemKind::Comp => open_comp = Some(row.path.clone()),
+                            // AE: footage opens in the Footage panel.
+                            ItemKind::Footage => open_footage = Some(row.path.clone()),
                             ItemKind::Folder if !self.collapsed.remove(&row.path) => {
                                 self.collapsed.insert(row.path.clone());
                             }
@@ -497,6 +500,13 @@ impl Panel for ProjectPanel {
         if !delete.is_empty() {
             cx.invoke_with("item.delete", json!({"paths": delete}));
             session.lock().selected_items.clear();
+        }
+        if let Some(asset) = open_footage {
+            session.lock().footage_view = Some(asset);
+            cx.invoke_with(
+                bae_ui::action::ids::OPEN_PANEL,
+                serde_json::json!({"id": "footage"}),
+            );
         }
         if let Some(c) = open_comp {
             session.lock().open_comp(&c);
