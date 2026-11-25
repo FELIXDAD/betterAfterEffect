@@ -30,6 +30,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Search", "搜索"),
     // Effect commands (bae-motion `effect.*`).
     ("Apply Effect", "应用效果"),
+    ("Paint Stroke", "绘画描边"),
     ("Remove Effect", "移除效果"),
     ("Reorder Effects", "排列效果"),
     ("Effect On/Off", "效果开关"),
