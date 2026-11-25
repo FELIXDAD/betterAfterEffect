@@ -497,7 +497,7 @@ impl TimelinePanel {
                 {
                     out.push(Row {
                         kind: RowKind::Waveform,
-                        layer: layer.clone(),
+                        layer_index,
                         depth: 1,
                     });
                 }
