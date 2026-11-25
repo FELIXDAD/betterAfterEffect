@@ -524,6 +524,7 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
         .chain(crate::viewer::view3d::ACTIONS.iter().copied())
         .chain(crate::viewer::guides::ACTIONS.iter().copied())
         .chain(GIZMOS.iter().map(|(id, title, ..)| (*id, *title)))
+        .chain(crate::viewer::look_at_actions())
 }
 
 /// AE's resolution shortcuts: `(params, English title)` (AE's names).
@@ -1105,6 +1106,9 @@ impl ActionHandler for ToolActions {
                 GizmoMode::Rotation => GizmoMode::Position,
             });
             t.set(Tool::Selection);
+            return true;
+        }
+        if crate::viewer::look_at(inv, cx) {
             return true;
         }
         if inv.id == ids::FREE_TRANSFORM {

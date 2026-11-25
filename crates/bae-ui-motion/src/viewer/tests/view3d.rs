@@ -99,6 +99,28 @@ fn cameras_and_lights_draw_in_the_3d_views() {
     assert_eq!(comp.camera.map(|i| &comp.layers[i].path), Some(&camera));
 }
 
+/// Reset 3D View in Active Camera resets the camera layer ("Reset Camera 1").
+#[test]
+fn reset_3d_view_in_active_camera_resets_the_camera_layer() {
+    let mut h = H::new();
+    let camera = h.layer("camera");
+    h.run(
+        "attr.set",
+        json!({"path": camera, "attr": "transform:position", "value": {"type": "vec3", "value": [10.0, 20.0, -300.0]}}),
+    );
+    let r = tool_action(&h, crate::viewer::view3d::ids::RESET, json!({}));
+    assert_eq!(r.invocations.len(), 1, "{:?}", r.invocations);
+    h.apply(&r);
+    let zoom = match h.value(&camera, "camera:zoom") {
+        Some(Value::Float(z)) => z,
+        other => panic!("{other:?}"),
+    };
+    assert!(close3(
+        h.v3(&camera, "transform:position"),
+        [320.0, 180.0, -zoom]
+    ));
+}
+
 #[test]
 fn three_d_axis_arrows_move_along_one_axis_and_rings_rotate() {
     let mut h = H::new();
@@ -134,34 +156,6 @@ fn three_d_axis_arrows_move_along_one_axis_and_rings_rotate() {
     assert!((o[2] - 30.0).abs() < 1.0 && o[0].abs() < 1e-6, "{o:?}");
 }
 
-/// Reset 3D View in Active Camera resets the camera layer ("Reset Camera 1").
-#[test]
-fn reset_3d_view_in_active_camera_resets_the_camera_layer() {
-}
-
-/// In a 3D view, a click on a camera selects it and a drag moves it in the
-/// view's plane (Top: x and z, not y).
-#[test]
-fn cameras_are_picked_and_dragged_in_3d_views() {
-    let mut h = H::new();
-    let camera = h.layer("camera");
-    h.run(
-        "attr.set",
-        json!({"path": camera, "attr": "transform:position", "value": {"type": "vec3", "value": [10.0, 20.0, -300.0]}}),
-    );
-    let r = tool_action(&h, crate::viewer::view3d::ids::RESET, json!({}));
-    assert_eq!(r.invocations.len(), 1, "{:?}", r.invocations);
-    h.apply(&r);
-    let zoom = match h.value(&camera, "camera:zoom") {
-        Some(Value::Float(z)) => z,
-        other => panic!("{other:?}"),
-    };
-    assert!(close3(
-        h.v3(&camera, "transform:position"),
-        [320.0, 180.0, -zoom]
-    ));
-}
-
 #[test]
 fn three_d_scale_gizmo_scales_along_one_axis() {
     let mut h = H::new();
@@ -188,7 +182,16 @@ fn three_d_scale_gizmo_scales_along_one_axis() {
     h.apply(&done);
     let s = h.v3(&l, "transform:scale");
     assert!((s[0] - 200.0).abs() < 1.0 && s[1] == 100.0, "{s:?}");
+}
 
+/// In a 3D view, a click on a camera selects it and a drag moves it in the
+/// view's plane (Top: x and z, not y).
+#[test]
+fn cameras_are_picked_and_dragged_in_3d_views() {
+    let mut h = H::new();
+    let camera = h.layer("camera");
+    h.run(
+        "attr.set",
         json!({"path": camera, "attr": "transform:position", "value": {"type": "vec3", "value": [200.0, 180.0, -100.0]}}),
     );
     tool_action(
@@ -218,4 +221,112 @@ fn three_d_scale_gizmo_scales_along_one_axis() {
         (p[0] - 250.0).abs() < 1.0 && (p[1] - 180.0).abs() < 1e-6,
         "{p:?}"
     );
+}
+
+#[test]
+fn camera_tools_move_the_default_view_or_the_camera_layer() {
+    use crate::viewer::view3d::{View3d, ViewCamera};
+    let mut h = H::new();
+    let current = |h: &H| {
+        let s = h.session();
+        let s = s.lock();
+        let v = s.views3d.get(&h.comp).cloned().unwrap_or_default();
+        (
+            v.current,
+            v.view_camera(v.current, bae_anim::glam::DVec2::new(640.0, 360.0)),
+        )
+    };
+    // No camera layer: Pan Under Cursor switches to Default and pans it (z = 0
+    // follows the pointer 1:1).
+    h.tools().lock().set(Tool::PanCursor);
+    h.frame(Vec::new(), Modifiers::NONE);
+    h.drag((300.0, 180.0), (350.0, 180.0), Modifiers::NONE);
+    let (view, cam) = current(&h);
+    assert_eq!(view, View3d::Default);
+    let ViewCamera::Perspective { position, .. } = cam else {
+        panic!("{cam:?}")
+    };
+    assert!((position.x - 270.0).abs() < 0.5, "{position:?}");
+    // A two-node camera layer in Active Camera: Orbit Around Camera POI moves
+    // Position around the point of interest, one attr.set_many.
+    let camera = path(&h.run("layer.create", json!({"comp": h.comp, "kind": "camera"}))["path"]);
+    let set = |h: &mut H, attr: &str, v: serde_json::Value| {
+        h.run(
+            "attr.set",
+            json!({"path": camera, "attr": attr, "value": v}),
+        );
+    };
+    set(
+        &mut h,
+        "auto_orient",
+        json!({"type": "enum", "value": "towards_point_of_interest"}),
+    );
+    set(
+        &mut h,
+        "transform:position",
+        json!({"type": "vec3", "value": [320.0, 180.0, -500.0]}),
+    );
+    set(
+        &mut h,
+        "transform:point_of_interest",
+        json!({"type": "vec3", "value": [320.0, 180.0, 0.0]}),
+    );
+    h.session()
+        .lock()
+        .views3d
+        .get_mut(&h.comp)
+        .unwrap()
+        .switch(View3d::Active);
+    h.tools().lock().set(Tool::OrbitPoi);
+    h.frame(Vec::new(), Modifiers::NONE);
+    let r = h.drag((320.0, 180.0), (420.0, 180.0), Modifiers::NONE);
+    assert_eq!(r.invocations.len(), 1, "{:?}", r.invocations);
+    assert_eq!(r.invocations[0].id, "attr.set_many");
+    h.apply(&r);
+    let p = h.v3(&camera, "transform:position");
+    let d = (p[0] - 320.0).hypot(p[2]);
+    assert!(
+        p[0] != 320.0 && (d - 500.0).abs() < 1e-6 && p[1] == 180.0,
+        "{p:?}"
+    );
+}
+
+#[test]
+fn view_layouts_show_more_views_and_a_click_makes_one_active() {
+    use crate::viewer::view3d::{View3d, ids};
+    use bae_render::camera::OrthoView::*;
+    let mut h = H::new();
+    tool_action(&h, ids::LAYOUT, json!({"views": 4}));
+    let panes = |h: &H| {
+        let s = h.session();
+        let s = s.lock();
+        let v = s.views3d.get(&h.comp).unwrap();
+        (v.panes(), v.active())
+    };
+    assert_eq!(
+        panes(&h),
+        (
+            vec![
+                View3d::Ortho(Top),
+                View3d::Ortho(Front),
+                View3d::Ortho(Right),
+                View3d::Active
+            ],
+            3
+        )
+    );
+    h.frame(Vec::new(), Modifiers::NONE);
+    // The top left view (Top) becomes the active one; the order stays.
+    let at = Pos2::new(100.0, 100.0);
+    h.move_to(at, Modifiers::NONE, Vec::new());
+    h.pointer_button(at, true, Modifiers::NONE);
+    h.pointer_button(at, false, Modifiers::NONE);
+    let (p, active) = panes(&h);
+    assert_eq!((p[0], active), (View3d::Ortho(Top), 0));
+    assert_eq!(p[3], View3d::Active);
+    // The 3D view popup and the menu act on the active view.
+    tool_action(&h, ids::SWITCH, json!({"view": "custom_2"}));
+    assert_eq!(panes(&h).0[0], View3d::Custom(2));
+    tool_action(&h, ids::LAYOUT, json!({"views": 1}));
+    assert_eq!(panes(&h), (vec![View3d::Custom(2)], 0));
 }
