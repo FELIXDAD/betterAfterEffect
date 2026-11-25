@@ -3,7 +3,8 @@ name = "色阶"
 keywords = ["色阶", "灰度系数", "输入", "输出", "黑场", "白场"]
 
 [effect.levels.params]
-channel = "通道"
+channel = "通道:"
+histogram = "直方图"
 input_black = "输入黑色"
 input_white = "输入白色"
 gamma = "灰度系数"
@@ -20,11 +21,11 @@ clip_white = "剪切以输出白色"
 5 = "Alpha"
 
 [effect.levels.choices.clip_black]
-1 = "开"
-2 = "关"
-3 = "对 32 bpc 颜色关闭"
+1 = "打开"
+2 = "关闭"
+3 = "为 32 bpc 颜色关闭"
 
 [effect.levels.choices.clip_white]
-1 = "开"
-2 = "关"
-3 = "对 32 bpc 颜色关闭"
+1 = "打开"
+2 = "关闭"
+3 = "为 32 bpc 颜色关闭"

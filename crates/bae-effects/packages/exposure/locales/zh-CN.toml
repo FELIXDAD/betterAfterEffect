@@ -3,7 +3,7 @@ name = "曝光度"
 keywords = ["曝光度", "曝光", "档", "偏移", "灰度系数", "HDR"]
 
 [effect.exposure.params]
-channels = "通道"
+channels = "通道:"
 bypass_linear = "不使用线性光转换"
 master = "主"
 master_exposure = "曝光度"
@@ -23,5 +23,5 @@ blue_offset = "蓝色偏移"
 blue_gamma = "蓝色灰度系数校正"
 
 [effect.exposure.choices.channels]
-1 = "主"
+1 = "主要通道"
 2 = "单个通道"
