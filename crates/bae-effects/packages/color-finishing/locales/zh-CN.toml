@@ -1,33 +1,3 @@
-[effect.video-limiter]
-name = "视频限幅器"
-keywords = ["视频限幅"]
-
-[effect.video-limiter.params]
-clip_level = "剪辑层级"
-compression_before_clipping = "剪切前压缩"
-gamut_warning = "色域警告"
-gamut_warning_color = "色域警告颜色"
-
-[effect.video-limiter.choices]
-clip_level = ["100 IRE（SMPTE 范围）", "103 IRE", "105 IRE（EBU R103 首选）", "109 IRE（SDI 限制）"]
-compression_before_clipping = ["无", "3%", "5%", "10%", "20%"]
-
-[effect.cc-toner]
-name = "CC Toner"
-keywords = ["色调"]
-
-[effect.cc-toner.params]
-tones = "Tones"
-highlights = "Highlights"
-brights = "Brights"
-midtones = "Midtones"
-darktones = "Darktones"
-shadows = "Shadows"
-blend_w_original = "Blend w. Original"
-
-[effect.cc-toner.choices]
-tones = ["Duotone", "Tritone", "Pentone", "(-", "Solid"]
-
 [effect.cc-color-offset]
 name = "CC Color Offset"
 keywords = ["颜色偏移"]
@@ -61,4 +31,3 @@ coefficient_14 = "3 - L3"
 divider = "Divider"
 absolute_values = "Absolute Values"
 blend_w_original = "Blend w. Original"
-

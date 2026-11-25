@@ -24,6 +24,11 @@ const ZH: &[(&str, &str)] = &[
     ("Help", "帮助"),
     ("Quit BAE", "退出 BAE"),
     ("Window", "窗口"),
+    // Window ▸ Workspace (AE 26: 将“默认”重置为已保存的布局).
+    (
+        "Reset “{name}” to Saved Layout",
+        "将“{name}”重置为已保存的布局",
+    ),
     ("Workspace", "工作区"),
     ("Minimize", "最小化"),
     ("Full Screen", "全屏"),

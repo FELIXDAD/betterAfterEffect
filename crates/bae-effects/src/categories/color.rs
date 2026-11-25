@@ -13,12 +13,7 @@ pub(crate) fn register(registry: &mut Registry) {
         &[
             embedded!(
                 "color-finishing",
-                [
-                    "shaders/video_limiter.wgsl",
-                    "shaders/cc_toner.wgsl",
-                    "shaders/cc_color_offset.wgsl",
-                    "shaders/cc_kernel.wgsl"
-                ]
+                ["shaders/cc_color_offset.wgsl", "shaders/cc_kernel.wgsl"]
             ),
             embedded!("black-white", ["shaders/black_white.wgsl"]),
             embedded!("brightness-contrast", ["shaders/brightness_contrast.wgsl"]),
@@ -40,6 +35,8 @@ pub(crate) fn register(registry: &mut Registry) {
                     "shaders/leave_color.wgsl",
                     "shaders/broadcast_colors.wgsl",
                     "shaders/selective_color.wgsl",
+                    "shaders/video_limiter.wgsl",
+                    "shaders/signal_limit.wgsl"
                 ]
             ),
             embedded!("exposure", ["shaders/exposure.wgsl"]),
@@ -48,7 +45,14 @@ pub(crate) fn register(registry: &mut Registry) {
             embedded!("photo-filter", ["shaders/photo_filter.wgsl"]),
             embedded!("pro-levels", ["shaders/pro_levels.wgsl"]),
             embedded!("tint", ["shaders/tint.wgsl"]),
-            embedded!("tritone", ["shaders/tritone.wgsl"]),
+            embedded!(
+                "tritone",
+                [
+                    "shaders/tritone.wgsl",
+                    "shaders/cc_toner.wgsl",
+                    "shaders/tone_ramp.wgsl"
+                ]
+            ),
             embedded!("vibrance", ["shaders/vibrance.wgsl"]),
         ],
     );
