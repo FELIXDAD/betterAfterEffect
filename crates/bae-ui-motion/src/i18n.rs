@@ -5,8 +5,6 @@
 pub(crate) const ZH: &[(&str, &str)] = &[
     // Titles of bae-motion's commands: Edit > Undo / Redo, History, Keyboard Shortcuts
     // (#136). The command crate stays UI-free; its titles are translated here.
-    ("Waveform", "波形"),
-    ("Audio Levels", "音频电平"),
     ("Change Value", "更改值"),
     ("Change Values", "更改多个值"),
     ("Set Work Area", "设置工作区域"),
@@ -452,6 +450,8 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ),
     ("Go to Previous Keyframe", "转到上一个关键帧"),
     ("Go to Next Keyframe", "转到下一个关键帧"),
+    ("Waveform", "波形"),
+    ("Audio Levels", "音频电平"),
     ("Reveal Audio Levels", "显示音频电平"),
     (
         "Add Audio Levels to Revealed Properties",
