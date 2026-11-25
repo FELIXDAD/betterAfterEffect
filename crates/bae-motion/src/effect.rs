@@ -155,7 +155,11 @@ fn instance_default(
     let relative = matches!(
         param.match_name.as_deref(),
         Some("ADBE Radial Blur-0002" | "ADBE Tile-0001" | "ADBE Radial Shadow-0003")
-    ) || (def.plugin.is_none() && def.category == "Distort");
+    ) || (def.plugin.is_none() && def.category == "Distort")
+        || matches!(
+            param.match_name.as_deref(),
+            Some("CC Sphere-0007" | "CC Spotlight-0001" | "CC Spotlight-0002")
+        );
     if let (true, Some(Value::Vec2(reference))) = (relative, &param.default) {
         let source_size = stage
             .prim(layer)

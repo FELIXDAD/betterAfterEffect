@@ -518,6 +518,9 @@ fn spatial_point_defaults_follow_source_dimensions_on_apply_and_reset() {
         ("ADBE Radial Blur", 2, [15.5, 6.5]),
         ("ADBE Tile", 1, [15.5, 6.5]),
         ("ADBE Radial Shadow", 3, [7.75, 3.25]),
+        ("CC Sphere", 7, [15.5, 6.5]),
+        ("CC Spotlight", 1, [27.9, 1.3]),
+        ("CC Spotlight", 2, [15.5, 6.5]),
     ] {
         let effect = fx.apply(&layer, name);
         let attr = format!("param:{id:04}");
