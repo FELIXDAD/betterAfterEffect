@@ -31,6 +31,7 @@ pub(crate) enum Binding {
     Texture3d,
     /// A write-only storage texture.
     Storage(wgpu::TextureFormat),
+    ReadBuffer,
 }
 
 /// A compute pipeline and its bind group layout.
@@ -84,6 +85,7 @@ pub(crate) enum Resource<'a> {
     /// Ring uniform (the dynamic offset is passed at dispatch).
     Uniform,
     View(&'a wgpu::TextureView),
+    Buffer(&'a wgpu::Buffer),
 }
 
 /// Uniform ring: one buffer, slots handed out round-robin and written with
@@ -285,6 +287,11 @@ impl Runtime {
                         },
                         multisampled: false,
                     },
+                    Binding::ReadBuffer => wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
                     Binding::Storage(format) => wgpu::BindingType::StorageTexture {
                         access: wgpu::StorageTextureAccess::WriteOnly,
                         format,
@@ -347,6 +354,7 @@ impl Runtime {
                             size: NonZeroU64::new(u64::from(size)),
                         })
                     }
+                    (_, Resource::Buffer(b)) => b.as_entire_binding(),
                     (_, Resource::View(v)) => wgpu::BindingResource::TextureView(v),
                     (_, Resource::Uniform) => wgpu::BindingResource::TextureView(&self.placeholder),
                 },
