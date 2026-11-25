@@ -391,6 +391,19 @@ fn stopwatch_set_at_and_keyframe_assistants() {
         json!({"path": l, "attr": "transform:rotation", "time": 2 * SEC, "keys": copied}),
     );
     assert_eq!(fx.keys(&l, "transform:rotation"), vec![2 * SEC, 3 * SEC]);
+    // Paste Reversed Keyframes: the last copied value first.
+    fx.run(
+        "key.paste",
+        json!({"path": l, "attr": "transform:rotation", "time": 5 * SEC, "keys": copied, "reversed": true}),
+    );
+    let at = |fx: &Fx, t: i64| {
+        query::attr_spec(&fx.stage, &l, "transform:rotation")
+            .and_then(|s| s.keyframes.get(&Time(t)).map(|k| k.value.clone()))
+    };
+    assert_eq!(at(&fx, 5 * SEC), Some(Value::Float(90.0)));
+    assert_eq!(at(&fx, 6 * SEC), Some(Value::Float(10.0)));
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(fx.keys(&l, "transform:rotation"), vec![2 * SEC, 3 * SEC]);
 
     // Delete all: stopwatch off with the last deleted value.
     fx.run("key.delete", json!({"keys": [key(&l, "transform:rotation", 2 * SEC), key(&l, "transform:rotation", 3 * SEC)]}));
