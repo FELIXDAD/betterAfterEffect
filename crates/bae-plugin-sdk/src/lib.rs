@@ -13,9 +13,13 @@
 //! |---|---|---|
 //! | [`version`] | plugin API version, host/plugin negotiation | §6.6, §14 |
 //! | [`kind`] | contribution kinds and implementation forms | §3, §4 |
+//! | [`abi`] | `#[repr(C)]` mirror of `bae_plugin.h` (ABI 1.0) | §14 |
+//! | [`effect`] | writing native CPU effects in Rust: [`effect::CpuEffect`], [`export_plugin!`] | §8 |
 #![forbid(unsafe_op_in_unsafe_fn)]
 #![warn(missing_docs)]
 
+pub mod abi;
+pub mod effect;
 pub mod kind;
 pub mod version;
 

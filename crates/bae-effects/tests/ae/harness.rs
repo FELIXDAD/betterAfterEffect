@@ -106,6 +106,14 @@ fn parse_rows(rows: &[serde_json::Value]) -> Vec<Case> {
                     (id, value)
                 })
                 .collect();
+            if let Some(curves) = c["points"].as_object() {
+                for (id, points) in curves {
+                    params.push((
+                        id.parse().unwrap(),
+                        Value::FloatList(serde_json::from_value(points.clone()).unwrap()),
+                    ));
+                }
+            }
             if let Some(file) = c["lut"].as_str() {
                 let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("../bae-color/tests/data/ocio")
