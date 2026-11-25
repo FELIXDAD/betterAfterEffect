@@ -486,7 +486,7 @@ impl Panel for CharacterPanel {
 impl CharacterPanel {
     /// AE's fill and stroke swatches with the swap arrow; the Color Picker opens
     /// on a click. Returns the change it made.
-    fn swatches_ui(&mut self, ui: &mut Ui, id: Id, r: Rect, doc: &TextDocument) -> Option<Json> {
+    fn swatches_ui(&mut self, ui: &Ui, id: Id, r: Rect, doc: &TextDocument) -> Option<Json> {
         let fill_r = Rect::from_min_size(r.min, vec2(28.0, 28.0));
         let stroke_r = Rect::from_min_size(r.min + vec2(14.0, 14.0), vec2(28.0, 28.0));
         let swap_r = Rect::from_min_size(r.min + vec2(32.0, 0.0), vec2(12.0, 12.0));

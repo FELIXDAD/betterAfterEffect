@@ -344,3 +344,30 @@ impl Command for SetTextStyle {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod style_tests {
+    use super::*;
+
+    #[test]
+    fn style_changes_touch_only_what_they_name() {
+        let mut doc = TextDocument::new("Hi", "ArialMT", 72.0);
+        doc.leading = Some(80.0);
+        let change: TextStyleChange = serde_json::from_value(serde_json::json!({
+            "font_size": 120.0, "auto_leading": true, "stroke_color": [1.0, 0.0, 0.0, 1.0],
+            "stroke_width": 3.0, "faux_bold": true, "justification": "center"
+        }))
+        .unwrap();
+        change.apply(&mut doc);
+        assert_eq!(doc.font_size, 120.0);
+        assert_eq!(doc.leading, None, "Auto leading");
+        assert_eq!(doc.stroke_color, Some([1.0, 0.0, 0.0, 1.0]));
+        assert!(doc.faux_bold && !doc.faux_italic);
+        assert_eq!(doc.justification, "center");
+        assert_eq!((doc.font.as_str(), doc.text.as_str()), ("ArialMT", "Hi"));
+        let none: TextStyleChange =
+            serde_json::from_value(serde_json::json!({"stroke": false})).unwrap();
+        none.apply(&mut doc);
+        assert_eq!(doc.stroke_color, None);
+    }
+}

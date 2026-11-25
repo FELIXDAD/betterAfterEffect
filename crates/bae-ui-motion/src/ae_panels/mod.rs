@@ -139,4 +139,5 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Adobe Single-line Composer", "Adobe 单行书写器"),
     ("Adobe Every-line Composer", "Adobe 逐行书写器"),
     ("Reset Paragraph", "重置段落"),
+    ("Change Text Style", "更改文本样式"),
 ];
