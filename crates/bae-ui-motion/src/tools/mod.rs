@@ -520,6 +520,7 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
             (ids::RESOLUTION, "Resolution"),
             (ids::FREE_TRANSFORM, "Free Transform Points"),
         ])
+        .chain(crate::viewer::view3d::ACTIONS.iter().copied())
 }
 
 /// AE's resolution shortcuts: `(params, English title)` (AE's names).
@@ -551,8 +552,18 @@ pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
         let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
         (ids::RESOLUTION, params, *title)
     });
+    let views = crate::viewer::view3d::SHORTCUT_NAMES
+        .iter()
+        .map(|(slot, title)| {
+            (
+                crate::viewer::view3d::ids::SHORTCUT,
+                serde_json::json!({ "slot": slot }),
+                *title,
+            )
+        });
     nudges
         .chain(resolutions)
+        .chain(views)
         .map(|(id, params, title)| {
             (
                 format!("{id}/{params}"),
@@ -570,6 +581,9 @@ pub fn bindings() -> Vec<Binding> {
         .chain(NUDGES.iter().map(|(chord, dx, dy, _)| {
             Binding::new(chord, ids::NUDGE).params(nudge_params(*dx, *dy))
         }))
+        // AE binds Esc everywhere; here only in the Composition panel, which
+        // passes it on to whatever there uses Esc (a drag, text, a menu).
+        .chain([Binding::new("Esc", crate::viewer::view3d::ids::LAST).when("composition")])
         .collect()
 }
 
@@ -960,6 +974,9 @@ impl ActionHandler for ToolActions {
             let mag = f64::from(shared(cx.resources).lock().magnification);
             let session = crate::common::session(cx.resources);
             return crate::viewer::nudge_layers(cx, &session, p("dx"), p("dy"), mag);
+        }
+        if crate::viewer::view3d::handle(inv, cx) {
+            return true;
         }
         if inv.id == ids::FREE_TRANSFORM {
             let tools = shared(cx.resources);
