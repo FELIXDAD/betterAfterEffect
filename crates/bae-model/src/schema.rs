@@ -659,6 +659,48 @@ pub static SCHEMAS: &[PrimSchema] = &[
         ],
     },
     PrimSchema {
+        prim_type: PrimType::MOTION_TRACKER,
+        doc: "A motion tracker in a layer's trackers folder.",
+        attrs: &[
+            string("name"),
+            choice(
+                "track_type",
+                "transform",
+                &["transform", "stabilize", "parallel", "perspective"],
+            ),
+            boolean("position", true).fixed(),
+            boolean("rotation", false).fixed(),
+            boolean("scale", false).fixed(),
+            choice("channel", "luminance", &["rgb", "luminance", "saturation"]),
+            boolean("subpixel", true).fixed(),
+            boolean("adapt", false).fixed(),
+            choice("enhance", "none", &["none", "blur", "sharpen"]),
+            choice(
+                "low_confidence",
+                "continue",
+                &["continue", "stop", "extrapolate", "adapt"],
+            ),
+            float("threshold", 80.0).fixed(),
+            prim_ref("target"),
+            string("target_property"),
+            vec2("origin", [0.0; 2]).fixed(),
+        ],
+    },
+    PrimSchema {
+        prim_type: PrimType::TRACK_POINT,
+        doc: "A feature and its search window in source-layer pixels.",
+        attrs: &[
+            string("name"),
+            vec2("feature_center", [0.0; 2]),
+            vec2("feature_size", [16.0; 2]),
+            vec2("search_offset", [0.0; 2]),
+            vec2("search_size", [64.0; 2]),
+            float("confidence", 100.0),
+            vec2("attach_point", [0.0; 2]),
+            vec2("attach_offset", [0.0; 2]),
+        ],
+    },
+    PrimSchema {
         prim_type: PrimType::PAINT_STROKE,
         doc: "A paint stroke under a Paint effect (AE's Brush / Clone / Eraser strokes), \
               in layer space; shown from `in_point` to `out_point` (layer time).",
