@@ -381,6 +381,29 @@ fn transform_color(p: vec2<f32>) -> vec4<f32> {
 }
 
 fn corner_color(p: vec2<f32>) -> vec4<f32> {
+    if val(0) != 0. && val(6) == 0. {
+        // Non-perspective pins interpolate all four corners bilinearly.
+        let a = pt(2);
+        let dx = pt(3) - a;
+        let dy = pt(4) - a;
+        let twist = pt(5) - pt(3) - pt(4) + a;
+        let low = vec2(val(10), val(9)) * 0.01;
+        let span = 1. + low + vec2(val(11), val(12)) * 0.01;
+        var q = (p - u.layer.xy) / u.layer.zw;
+        if val(7) != 0. {
+            q = q * span - low;
+            return linear(a + dx*q.x + dy*q.y + twist*q.x*q.y, false);
+        }
+        for (var i=0; i<8; i++) {
+            let err = p - (a + dx*q.x + dy*q.y + twist*q.x*q.y);
+            let x = dx + twist*q.y;
+            let y = dy + twist*q.x;
+            let det = x.x*y.y - x.y*y.x;
+            if abs(det)<1e-7 || dot(err,err)<1e-6 {break;}
+            q += vec2(err.x*y.y - err.y*y.x, x.x*err.y - x.y*err.x)/det;
+        }
+        return linear(u.layer.xy + u.layer.zw*(q+low)/span,false);
+    }
     return projective(p, true);
 }
 

@@ -228,6 +228,12 @@ pub trait LayerSource: Send + Sync {
     /// Hash of everything that affects the pixels at `time` (cache key part).
     fn content_hash(&self, time: Time) -> u64;
 
+    /// Frame rate of a time-based source (footage), for frame blending; `None`
+    /// for stills and generated content.
+    fn frame_rate(&self) -> Option<bae_model::FrameRate> {
+        None
+    }
+
     /// Produces an image covering at least `request.roi`. Implementations either
     /// return a texture they own (decoded footage: zero copy) or draw into an
     /// image from [`EncodeContext::allocate`].

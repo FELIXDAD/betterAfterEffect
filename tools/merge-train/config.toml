@@ -7,7 +7,7 @@ base = "dev"
 # Orca repo name used to match worktrees in `orca worktree ps` (local and remote hosts).
 orca_repo = "betterAfterEffect"
 # Paired Orca servers whose worktrees are searched for PR owners and shown on the board.
-orca_environments = ["米兰Mac"]
+orca_environments = ["公司5090D2主机"]  # 米兰Mac retired 2026-11-23
 # Handle passed to `orca orchestration send --from` (the daemon runs outside any agent).
 orca_from = "merge-train"
 
@@ -75,3 +75,11 @@ relate_crates = false
 
 [board]
 title = "BAE 进度看板"
+
+[notify]
+# false: no message to the leader for each successful merge (the board lists them). CI
+# failures, conflicts and a red dev are still reported.
+merged = false
+# false: when the PR's owning agent is found in Orca it gets the bounce; the leader is told
+# only when no owner is found.
+bounce_leader = false
