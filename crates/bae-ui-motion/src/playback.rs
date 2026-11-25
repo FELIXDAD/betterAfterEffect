@@ -382,7 +382,6 @@ struct CompletedFrame {
 }
 
 struct Producer {
-    available: FreeTargets,
     stage: Stage,
     eval: Evaluator,
     engine: RenderEngine,
@@ -410,7 +409,6 @@ impl Producer {
         }) || stage.attached_projects().next().is_some();
         Ok(Self {
             stage,
-            available: FreeTargets::default(),
             dynamic,
             eval: Evaluator::new(),
             engine,
@@ -423,6 +421,7 @@ impl Producer {
         time: Time,
         registry: &Arc<ViewportTextureRegistry>,
         budget: u64,
+        free: &FreeTargets,
     ) -> Result<CompletedFrame, String> {
         let comp = self
             .eval
@@ -433,7 +432,7 @@ impl Producer {
             .anim
             .convert(&self.stage, &comp, 0)
             .map_err(|e| e.to_string())?;
-        let available = self.available.lock().unwrap().pop();
+        let available = free.lock().unwrap().pop();
         let (target, rect, temporal) = self
             .engine
             .render(&self.stage, &rc, self.scene.key.resolution, available)
@@ -441,7 +440,7 @@ impl Producer {
         let size = target.size();
         let view = target.view().clone();
         let slot = Arc::new(Slot {
-            available: self.available.clone(),
+            available: free.clone(),
             target: Some(target),
             registry: registry.clone(),
             id: registry.create("playback frame"),
@@ -475,6 +474,9 @@ impl Producer {
 }
 
 fn worker(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>, shared: Arc<Shared>) {
+    // Cached slots can survive an edit. Keep their spare targets with the
+    // worker so a new project revision can reuse the same bounded pool.
+    let free = FreeTargets::default();
     let mut producer: Option<Producer> = None;
     loop {
         let (epoch, scene, time, budget) = {
@@ -514,7 +516,10 @@ fn worker(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>, shared: 
             {
                 producer = Some(Producer::new(gpu.clone(), scene.clone())?);
             }
-            producer.as_mut().unwrap().render(time, &registry, budget)
+            producer
+                .as_mut()
+                .unwrap()
+                .render(time, &registry, budget, &free)
         })();
         match result {
             Ok(CompletedFrame {
