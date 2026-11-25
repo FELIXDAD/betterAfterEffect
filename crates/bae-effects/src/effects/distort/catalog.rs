@@ -314,7 +314,7 @@ pub(crate) fn entries() -> Vec<Builtin> {
     ]
     .into_iter()
     .map(|(kind, b, id, zh)| {
-        let (def, names) = b.build();
+        let (def, names) = b.reference_points().build();
         rust_builtin(
             (Arc::new(Distortion { kind, def }), names),
             id,

@@ -25,7 +25,7 @@ pub(super) const HANDLE_PICK: f32 = 5.0;
 pub(super) const ANCHOR_PICK: f32 = 8.0;
 
 /// One layer a drag changes.
-pub(super) struct LayerEdit {
+pub(crate) struct LayerEdit {
     pub path: PrimPath,
     pub start: Transform,
     pub now: Transform,
@@ -100,7 +100,7 @@ pub(super) fn anchor_screen(l: &EvaluatedLayer, view: &View) -> Pos2 {
 }
 
 /// What a drag does.
-pub(super) enum Kind {
+pub(crate) enum Kind {
     Move {
         start: DVec2,
     },
@@ -147,7 +147,7 @@ pub(super) enum Kind {
 /// The plane a 3D layer moves in when dragged: parallel to the view at the
 /// grabbed layer's depth.
 #[derive(Clone, Copy)]
-pub(super) struct ViewPlane {
+pub(crate) struct ViewPlane {
     pub camera: Camera,
     pub size: DVec2,
     pub depth: f64,
@@ -182,7 +182,7 @@ fn features(l: &EvaluatedLayer, out: &mut Vec<DVec2>) {
 }
 
 /// A drag of the selected layers.
-pub(super) struct TransformDrag {
+pub(crate) struct TransformDrag {
     pub edits: Vec<LayerEdit>,
     pub kind: Kind,
     snapping: Option<Snapping>,
@@ -271,7 +271,8 @@ impl TransformDrag {
                 let lock = shift && matches!(self.kind, Kind::Move { .. });
                 let axis = |mut d: DVec2| {
                     if lock {
-                        if (p - start).x.abs() > (p - start).y.abs() {
+                        // AE 26: |dx| ≥ |dy| locks horizontally (R1).
+                        if (p - start).x.abs() >= (p - start).y.abs() {
                             d.y = 0.0;
                         } else {
                             d.x = 0.0;
@@ -369,7 +370,20 @@ impl TransformDrag {
                 let d = DVec2::new(hp.x - a.x, hp.y - a.y);
                 let s0 = e0.start.scale;
                 let (mut rx, mut ry) = (1.0, 1.0);
-                if shift {
+                if shift && ax && ay {
+                    // A corner keeps the proportions with the larger of the two
+                    // ratios (AE 26: max(|sx|, |sy|), R1 transform-tools.md §1).
+                    let ratio = |q: f64, d: f64, s: f64| {
+                        if d.abs() > 1e-9 && s.abs() > 1e-9 {
+                            100.0 * q / d / s
+                        } else {
+                            1.0
+                        }
+                    };
+                    let (sx, sy) = (ratio(q.x, d.x, s0.x), ratio(q.y, d.y, s0.y));
+                    let m = if sx.abs() >= sy.abs() { sx } else { sy };
+                    (rx, ry) = (m, m);
+                } else if shift {
                     // Keep the proportions: the handle moves along its line
                     // through the anchor.
                     let dd = DVec2::new(
