@@ -306,3 +306,140 @@ fn evaluator_passes_lights_and_materials() {
         img.px(0, 0)
     );
 }
+
+/// A wide receiver at z = 0 and a solid caster in front of it, lit by a
+/// shadow-casting point light from the upper left.
+fn shadow_scene(diffusion: f32, darkness: f32, transmission: f32) -> RenderComp {
+    let mut comp = RenderComp::new(p("/comps/main"), 200, 200);
+    let mut lamp = light(
+        LightKind::Point,
+        DVec3::new(30.0, 30.0, -150.0),
+        DVec3::new(100.0, 100.0, 0.0),
+    );
+    lamp.casts_shadows = true;
+    lamp.shadow_diffusion = diffusion;
+    lamp.shadow_darkness = darkness;
+    comp.lights = vec![lamp];
+    let mut caster = RenderLayer::new(
+        p("/comps/main/layers/caster"),
+        LayerContent::Solid {
+            color: [1.0, 0.3, 0.2, 1.0],
+            width: 60,
+            height: 60,
+        },
+    );
+    caster.matrix_3d = Some(DMat4::from_translation(DVec3::new(70.0, 70.0, -60.0)));
+    caster.material.casts_shadows = bae_render::light::ShadowMode::On;
+    caster.material.light_transmission = transmission;
+    let mut receiver = plane(0.0);
+    receiver.material = Material {
+        ambient: 0.0,
+        diffuse: 100.0,
+        specular_intensity: 0.0,
+        ..Material::default()
+    };
+    comp.layers = vec![caster, receiver];
+    comp
+}
+
+/// Largest difference between the GPU and `shade_with_shadows` on receiver
+/// pixels the caster does not cover on screen.
+fn shadow_worst(img: &Image, comp: &RenderComp) -> u8 {
+    use bae_render::light::{CasterPixels, ShadowCaster, shade_with_shadows};
+    let caster = &comp.layers[0];
+    let receiver = &comp.layers[1];
+    let LayerContent::Solid { color, .. } = caster.content else {
+        unreachable!()
+    };
+    let casters = [ShadowCaster {
+        matrix: caster.matrix_3d.unwrap(),
+        rect: bae_render::Rect::from_size(60.0, 60.0),
+        opacity: 1.0,
+        transmission: caster.material.light_transmission,
+        pixels: CasterPixels::Solid(color),
+    }];
+    let cam = comp.view_camera();
+    let size = DVec2::splat(200.0);
+    let m = receiver.matrix_3d.unwrap();
+    let normal = m.x_axis.truncate().cross(m.y_axis.truncate());
+    let mut worst = 0;
+    for y in (2..198).step_by(2) {
+        for x in (2..198).step_by(2) {
+            let px = DVec2::new(f64::from(x) + 0.5, f64::from(y) + 0.5);
+            // Skip where the caster itself is seen (and its edges).
+            let near = cam.unproject(px, cam.zoom - 60.0, size);
+            if (near.x - 100.0).abs() < 33.0 && (near.y - 100.0).abs() < 33.0 {
+                continue;
+            }
+            let point = cam.unproject(px, cam.zoom, size);
+            let c = shade_with_shadows(
+                COLOR,
+                point,
+                normal,
+                cam.eye(),
+                &receiver.material,
+                &comp.lights,
+                &casters,
+                cam.world_per_pixel(),
+            );
+            let got = img.px(x, y);
+            for i in 0..3 {
+                let want = (c[i].min(1.0) * 255.0).round() as i32;
+                worst = worst.max((i32::from(got[i]) - want).unsigned_abs() as u8);
+            }
+        }
+    }
+    worst
+}
+
+#[test]
+fn shadows_match_the_reference_model() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    for (diffusion, darkness, transmission) in
+        [(0.0, 100.0, 0.0), (12.0, 70.0, 0.0), (30.0, 100.0, 60.0)]
+    {
+        let comp = shadow_scene(diffusion, darkness, transmission);
+        let img = render(&mut r, &comp);
+        let w = shadow_worst(&img, &comp);
+        assert!(
+            w <= 3,
+            "diffusion {diffusion}, darkness {darkness}, transmission {transmission}: {w}"
+        );
+    }
+    // Deep in the hard shadow: no light at all.
+    let img = render(&mut r, &shadow_scene(0.0, 100.0, 0.0));
+    assert_eq!(img.px(185, 185), [0, 0, 0, 255]);
+}
+
+#[test]
+fn shadow_switches() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    let shadowed = render(&mut r, &shadow_scene(0.0, 100.0, 0.0)).px(185, 185);
+    assert_eq!(shadowed, [0, 0, 0, 255]);
+    // Light does not cast, caster does not cast, receiver does not accept.
+    let mut c = shadow_scene(0.0, 100.0, 0.0);
+    c.lights[0].casts_shadows = false;
+    let lit = render(&mut r, &c).px(185, 185);
+    assert!(lit[0] > 100, "{lit:?}");
+    let mut c = shadow_scene(0.0, 100.0, 0.0);
+    c.layers[0].material.casts_shadows = bae_render::light::ShadowMode::Off;
+    assert_eq!(render(&mut r, &c).px(185, 185), lit);
+    let mut c = shadow_scene(0.0, 100.0, 0.0);
+    c.layers[1].material.accepts_shadows = bae_render::light::ShadowMode::Off;
+    assert_eq!(render(&mut r, &c).px(185, 185), lit);
+    // A 2D layer between them splits the 3D group: no shadow across groups.
+    let mut c = shadow_scene(0.0, 100.0, 0.0);
+    let mut flat = RenderLayer::new(
+        p("/comps/main/layers/flat"),
+        LayerContent::Solid {
+            color: [0.0, 1.0, 0.0, 1.0],
+            width: 4,
+            height: 4,
+        },
+    );
+    flat.transform = DAffine2::IDENTITY;
+    c.layers.insert(1, flat);
+    assert_eq!(render(&mut r, &c).px(185, 185), lit);
+}

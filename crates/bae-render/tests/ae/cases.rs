@@ -165,12 +165,18 @@ pub fn build(assets: &Path) -> (SceneBuilder, Vec<(String, u8)>) {
                     .map_or([1.0; 3], |c| [num(&c[0]), num(&c[1]), num(&c[2])]);
                 b.set(&layer, "light:color", Value::Color([c[0], c[1], c[2], 1.0]))
                     .expect("color");
+                if lt["shadows"].as_bool() == Some(true) {
+                    b.set(&layer, "light:casts_shadows", Value::Bool(true))
+                        .expect("shadows");
+                }
                 for (key, attr) in [
                     ("intensity", "light:intensity"),
                     ("cone", "light:cone_angle"),
                     ("feather", "light:cone_feather"),
                     ("radius", "light:radius"),
                     ("dist", "light:falloff_distance"),
+                    ("dark", "light:shadow_darkness"),
+                    ("diff", "light:shadow_diffusion"),
                 ] {
                     if let Some(v) = lt[key].as_f64() {
                         b.set(&layer, attr, Value::Float(v)).expect(key);
@@ -276,6 +282,7 @@ pub fn build(assets: &Path) -> (SceneBuilder, Vec<(String, u8)>) {
                     ("spec", "material:specular_intensity"),
                     ("shin", "material:specular_shininess"),
                     ("metal", "material:metal"),
+                    ("trans", "material:light_transmission"),
                 ] {
                     if let Some(v) = m[key].as_f64() {
                         b.set(&layer, attr, Value::Float(v)).expect(key);
@@ -284,6 +291,14 @@ pub fn build(assets: &Path) -> (SceneBuilder, Vec<(String, u8)>) {
                 if m["accepts"].as_bool() == Some(false) {
                     b.set(&layer, "material:accepts_lights", Value::Bool(false))
                         .expect("accepts");
+                }
+                if let Some(v) = m["casts"].as_bool() {
+                    b.set(&layer, "material:casts_shadows", Value::Bool(v))
+                        .expect("casts");
+                }
+                if let Some(v) = m["accepts_shadows"].as_bool() {
+                    b.set(&layer, "material:accepts_shadows", Value::Bool(v))
+                        .expect("accepts shadows");
                 }
             }
             if l["orient"].is_array() {

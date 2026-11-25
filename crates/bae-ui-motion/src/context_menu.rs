@@ -64,11 +64,37 @@ fn children(path: &str) -> &'static [Node] {
     }
 }
 
+/// Whether a catalog item runs: its command is done, or a module handles its
+/// action (as the menu bar decides, `catalog::live_by_handler`).
+pub(crate) fn runs(cx: &PanelContext<'_>, it: &catalog::Item) -> bool {
+    it.status.works()
+        || cx
+            .resources
+            .get::<HandledActions>()
+            .is_some_and(|h| catalog::live_by_handler(it.action, it.params, &h.0))
+}
+
+/// The actions the app's modules handle (`bae_ui::menu::handled_actions`), known
+/// once every module is built.
+#[derive(Clone, Debug, Default)]
+pub struct HandledActions(pub std::sync::Arc<std::collections::HashSet<String>>);
+
 /// Draw `entries` in an open menu. Returns the title of the [`Own`] item chosen.
 pub(crate) fn show(
     ui: &mut Ui,
     cx: &mut PanelContext<'_>,
     entries: &'static [Entry],
+) -> Option<&'static str> {
+    show_with(ui, cx, entries, &[])
+}
+
+/// [`show`], with the [`Own`] items titled in `off` greyed (where the panel
+/// cannot do them: Rename in the Composition panel).
+pub(crate) fn show_with(
+    ui: &mut Ui,
+    cx: &mut PanelContext<'_>,
+    entries: &'static [Entry],
+    off: &[&str],
 ) -> Option<&'static str> {
     let mut chosen = None;
     for e in entries {
@@ -82,7 +108,7 @@ pub(crate) fn show(
             As(title, path) => {
                 if let Some(Node::Item(it)) = find(path)
                     && ui
-                        .add_enabled(it.status.works(), egui::Button::new(tr(title)))
+                        .add_enabled(runs(cx, it), egui::Button::new(tr(title)))
                         .clicked()
                 {
                     let params = serde_json::from_str(it.params).unwrap_or(serde_json::json!({}));
@@ -93,11 +119,18 @@ pub(crate) fn show(
             Sep => {
                 ui.separator();
             }
+            // Filled from the project in AE (Reveal in Composition): greyed.
+            Sub(title, []) => {
+                ui.add_enabled(false, egui::Button::new(tr(title)));
+            }
             Sub(title, list) => common::submenu(ui, tr(title), &mut |ui| {
-                chosen = chosen.or(show(ui, cx, list));
+                chosen = chosen.or(show_with(ui, cx, list, off));
             }),
             Own(title) => {
-                if ui.button(tr(title)).clicked() {
+                if ui
+                    .add_enabled(!off.contains(&title), egui::Button::new(tr(title)))
+                    .clicked()
+                {
                     chosen = Some(title);
                     ui.close();
                 }
@@ -138,8 +171,9 @@ pub(crate) const VIEWER_BLANK: &[Entry] = &[
     Menu("Composition/Composition Mini-Flowchart"),
 ];
 
-/// Composition panel, right-click on a layer (AE adds Select ▸, the layers under
-/// the pointer, which the viewer appends).
+/// Right-click on a layer, in the Composition panel and the Timeline (AE 26 on
+/// the Mac shows the same menu in both). The Composition panel greys Rename and
+/// adds Select ▸, the layers under the pointer.
 pub(crate) const VIEWER_LAYER: &[Entry] = &[
     Menu("Layer/Mask"),
     Menu("Layer/Mask and Shape Path"),
@@ -184,10 +218,107 @@ pub(crate) const VIEWER_LAYER: &[Entry] = &[
     Sep,
     Own("Invert Selection"),
     Own("Select Children"),
-    Off("Rename"),
+    Own("Rename"),
     Off("Add to Essential Graphics"),
     Menu("Composition/Crop Comp to Selected Layer(s) Bounds"),
     Menu("Layer/Scene Edit Detection..."),
+];
+
+/// Composition panel or Timeline, the comp menu (AE 26: the Timeline's has Rename
+/// enabled; it renames the comp, not built in the Timeline yet).
+pub(crate) const TIMELINE_BLANK: &[Entry] = VIEWER_BLANK;
+
+/// Project panel, right-click on empty space.
+pub(crate) const PROJECT_BLANK: &[Entry] = &[
+    Menu("Composition/New Composition..."),
+    Menu("File/New/New Folder"),
+    As(
+        "New Adobe Photoshop File...",
+        "File/New/Adobe Photoshop File...",
+    ),
+    As(
+        "New Maxon Cinema 4D File...",
+        "File/New/Maxon Cinema 4D File...",
+    ),
+    Menu("File/Import"),
+    Menu("File/Import Recent Footage"),
+    Off("Reveal Project in Finder"),
+];
+
+/// Project panel, right-click on an item (comp, footage, folder: the same menu,
+/// AE greys what does not apply).
+pub(crate) const PROJECT_ITEM: &[Entry] = &[
+    Menu("Composition/Composition Settings..."),
+    Menu("Composition/Open in Essential Graphics"),
+    As("New Comp from Selection", "File/New Comp from Selection..."),
+    Off("Replace with Precomp"),
+    Menu("File/Create Proxy"),
+    Menu("File/Set Proxy"),
+    Menu("File/Import"),
+    Menu("File/Import Recent Footage"),
+    Menu("File/Interpret Footage"),
+    Menu("File/Replace Footage"),
+    Menu("File/Reload Footage"),
+    Menu("File/License..."),
+    Menu("File/Reveal in Explorer"),
+    Menu("File/Reveal in Bridge"),
+    Sub("Reveal in Composition", &[]),
+    Off("Solids Folder"),
+    Own("Rename"),
+];
+
+/// Project panel, right-click on the column headers.
+pub(crate) const PROJECT_HEADER: &[Entry] = &[
+    Off("Hide This"),
+    Off("Rename This..."),
+    Sep,
+    Sub(
+        "Columns",
+        &[
+            Off("Name"),
+            Off("Label"),
+            Off("Type"),
+            Off("Size"),
+            Off("Frame Rate"),
+            Off("Media Start"),
+            Off("Media End"),
+            Off("Media Duration"),
+            Off("In Point"),
+            Off("Out Point"),
+            Off("Duration"),
+            Off("Tape Name"),
+            Off("Comment"),
+            Off("File Path"),
+            Off("Date"),
+            Off("Video Info"),
+        ],
+    ),
+];
+
+/// Timeline, right-click on the column headers.
+pub(crate) const TIMELINE_HEADER: &[Entry] = &[
+    Off("Hide This"),
+    Off("Rename This..."),
+    Sep,
+    Sub(
+        "Columns",
+        &[
+            Off("A/V Features"),
+            Off("Label"),
+            Off("#"),
+            Off("Source Name"),
+            Off("Comment"),
+            Off("Switches"),
+            Off("Modes"),
+            Off("Parent & Link"),
+            Off("Keys"),
+            Off("Render Time"),
+            Off("In"),
+            Off("Out"),
+            Off("Duration"),
+            Off("Stretch"),
+        ],
+    ),
 ];
 
 #[cfg(test)]

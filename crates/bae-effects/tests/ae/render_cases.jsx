@@ -59,8 +59,28 @@
     function makeComp(c) {
         var src = input(c.input);
         var comp = app.project.items.addComp(c.name, src.width, src.height, 1, 1, 30);
+        var refs = {};
+        if (c.layers) {
+            for (var name in c.layers) {
+                refs[name] = comp.layers.add(input(c.layers[name]));
+                refs[name].enabled = false;
+            }
+        }
         var layer = comp.layers.add(src);
+        refs.input = layer;
         layer.quality = c.quality === "draft" ? LayerQuality.DRAFT : LayerQuality.BEST;
+        if (c.masks) {
+            for (var i = 0; i < c.masks.length; i++) {
+                var r = c.masks[i];
+                var shape = new Shape();
+                shape.vertices = [[r[0], r[1]], [r[2], r[1]], [r[2], r[3]], [r[0], r[3]]];
+                shape.inTangents = shape.outTangents = [[0, 0], [0, 0], [0, 0], [0, 0]];
+                shape.closed = true;
+                var mask = layer.property("ADBE Mask Parade").addProperty("ADBE Mask Atom");
+                mask.property("ADBE Mask Shape").setValue(shape);
+                mask.maskMode = MaskMode.ADD;
+            }
+        }
         var fx = layer.property("ADBE Effect Parade").addProperty(c.effect);
         for (var id in c.params) {
             var pad = ("0000" + id).slice(-4);
@@ -68,7 +88,10 @@
             if (prop === null) {
                 throw new Error(c.name + ": no parameter " + c.effect + "-" + pad);
             }
-            prop.setValue(c.params[id]);
+            var value = c.params[id];
+            if (value.layer !== undefined) value = refs[value.layer].index;
+            if (value.mask !== undefined) value = value.mask;
+            prop.setValue(value);
         }
         return comp;
     }
