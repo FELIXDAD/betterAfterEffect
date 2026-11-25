@@ -210,6 +210,13 @@ pub trait Effect: Send + Sync {
         true
     }
 
+    /// An alias that renders through another effect with translated parameters
+    /// (obsolete AE identities). The planner calls this once per frame and plans
+    /// the returned effect and instance in its place. Default: not an alias.
+    fn resolve_alias(&self, _instance: &RenderEffect) -> Option<(Arc<dyn Effect>, RenderEffect)> {
+        None
+    }
+
     /// Output bounds for input bounds (layer pixels at the request scale).
     /// Default: unchanged. A blur grows them by its radius.
     fn output_bounds(&self, _params: &EffectParams<'_>, input: IRect) -> IRect {
