@@ -147,6 +147,8 @@ pub struct Session {
     /// chosen resolution itself is the comp's (`resolution`, as in Composition
     /// Settings).
     pub auto_resolution: bool,
+    /// View ▸ rulers, guides, grid and safe areas (the viewer's options).
+    pub(crate) view_options: crate::viewer::guides::ViewOptions,
     /// Each comp's 3D views (View ▸ Switch 3D View).
     pub(crate) views3d: HashMap<PrimPath, crate::viewer::view3d::Views>,
     /// What F10, F11 and F12 switch to (View ▸ Assign 3D View Shortcut).

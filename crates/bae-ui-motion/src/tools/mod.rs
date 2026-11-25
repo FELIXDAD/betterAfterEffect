@@ -521,6 +521,7 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
             (ids::FREE_TRANSFORM, "Free Transform Points"),
         ])
         .chain(crate::viewer::view3d::ACTIONS.iter().copied())
+        .chain(crate::viewer::guides::ACTIONS.iter().copied())
 }
 
 /// AE's resolution shortcuts: `(params, English title)` (AE's names).
@@ -1046,7 +1047,7 @@ impl ActionHandler for ToolActions {
             let session = crate::common::session(cx.resources);
             return crate::viewer::nudge_layers(cx, &session, p("dx"), p("dy"), mag);
         }
-        if crate::viewer::view3d::handle(inv, cx) {
+        if crate::viewer::view3d::handle(inv, cx) || crate::viewer::guides::handle(inv, cx) {
             return true;
         }
         if inv.id == ids::FREE_TRANSFORM {
