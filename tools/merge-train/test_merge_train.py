@@ -97,7 +97,7 @@ class TomlTest(unittest.TestCase):
         self.assertTrue(cfg["checks"]["full"])
         leaders = mt.load_toml(os.path.join(HERE, "leaders.toml"))
         self.assertIn(leaders["default"], leaders["leaders"])
-        for rule in leaders["rules"]:
+        for rule in leaders.get("rules", []):
             self.assertIn(rule["leader"], leaders["leaders"])
 
 
@@ -206,6 +206,10 @@ class DecideTest(Base):
 
 class ProcessTest(Base):
     def test_merge_uses_squash_for_ref_and_notifies_leader(self):
+        # The repo turns per-merge messages off; this test covers the message itself.
+        patcher = mock.patch.dict(mt.CFG, {"notify": {"merged": True}})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         calls = []
 
         def fake_sh(cmd, **kw):
@@ -222,7 +226,7 @@ class ProcessTest(Base):
         merge = [c for c in calls if c[:3] == ["gh", "pr", "merge"]][0]
         self.assertIn("--squash", merge)
         self.assertIn("--match-head-commit", merge)
-        self.assertEqual(send.call_args[0][0], "09fe9cc0")
+        self.assertEqual(send.call_args[0][0], mt.LEADERS["default"])
         self.assertIn("#7", send.call_args[0][1])
         self.assertEqual(st["merged"][-1]["dev"], "abc1234")
 
@@ -231,6 +235,10 @@ class ProcessTest(Base):
         self.assertTrue(mt.squash_wanted(pr(labels=["reference-data"])))
 
     def test_ci_failure_drops_label_and_notifies(self):
+        # The repo sends bounces only to the owner when one is found; this test covers both.
+        patcher = mock.patch.dict(mt.CFG, {"notify": {"bounce_leader": True}})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         wt = [{"host": "local", "name": "bae-03", "branch": "core/x", "comment": "", "status": "",
                "last_activity": 0, "agents": [{"orcaSessionId": "aaaa", "address": "orca_session_id:aaaa",
                                                "updatedAt": 1}]}]
@@ -243,7 +251,7 @@ class ProcessTest(Base):
             mt.process_head(pr(), {})
         rl.assert_called_once_with(7, "merge-ready")
         self.assertIn("full / Windows x64：failure http://x", cm.call_args[0][1])
-        self.assertEqual([c[0][0] for c in send.call_args_list], ["orca_session_id:aaaa", "ca3a6511"])
+        self.assertEqual([c[0][0] for c in send.call_args_list], ["orca_session_id:aaaa", mt.LEADERS["default"]])
 
     def test_wait_mergeable_unknown_is_not_failure(self):
         with mock.patch.object(mt, "decide", return_value=("wait-mergeable", "UNKNOWN", {})), \
@@ -276,10 +284,12 @@ class ProcessTest(Base):
     def test_leader_rules(self):
         milan = {"host": "米兰Mac", "name": "bae-13-ui-design"}
         local12 = {"host": "local", "name": "bae-12-menus"}
-        self.assertEqual(mt.leader_for(pr(headRefName="ui/design"), milan), "milan")
-        self.assertEqual(mt.leader_for(pr(headRefName="fix/226"), local12), "09fe9cc0")
-        self.assertEqual(mt.leader_for(pr(headRefName="ui/x"), None), "09fe9cc0")
-        self.assertEqual(mt.leader_for(pr(headRefName="core/x"), None), "ca3a6511")
+        # One leader since 2026-11-24: no routing rules, everything goes to the default.
+        lead = mt.LEADERS["default"]
+        self.assertEqual(mt.leader_for(pr(headRefName="ui/design"), milan), lead)
+        self.assertEqual(mt.leader_for(pr(headRefName="fix/226"), local12), lead)
+        self.assertEqual(mt.leader_for(pr(headRefName="ui/x"), None), lead)
+        self.assertEqual(mt.leader_for(pr(headRefName="core/x"), None), lead)
 
 
 class ConflictRepairTest(Base):
@@ -352,10 +362,30 @@ class UnstickTest(Base):
     def test_missing_checks_nudge_once_after_delay(self):
         st = {}
         self.wait(pr(), st, self.MISSING, 3).assert_not_called()      # too early
-        self.wait(pr(), st, self.MISSING, 11).assert_called_once()     # nudge
+        with mock.patch.object(mt, "gh_json", return_value=[{"workflow_runs": []}]):
+            self.wait(pr(), st, self.MISSING, 11).assert_called_once()  # no fast run
         st["prs"]["7"]["nudged_head"] = "h1"
         self.wait(pr(), st, self.MISSING, 30).assert_not_called()     # once per head
         self.wait(pr(), {}, self.RUNNING, 60).assert_not_called()     # CI is running: wait
+
+    def test_274_fast_workflow_precedes_required_windows_job(self):
+        head = "67ca78203d05a0c638284313635554da28ba3cab"
+        p = pr(number=274, headRefOid=head, headRefName="media/windows-mf")
+        missing = ("pending", [("fast / Windows x64", "missing", "")])
+        endpoint = "repos/%s/actions/workflows/ci-fast.yml/runs?head_sha=%s&per_page=100" % (
+            mt.CFG["repo"], head)
+        for status in ("queued", "in_progress", "waiting", "pending", "requested", "completed"):
+            with self.subTest(status=status):
+                st = {}
+                pages = [{"workflow_runs": [{"status": status}]}]
+                with mock.patch.object(mt, "gh_json", return_value=pages) as api:
+                    nudge = self.wait(p, st, missing, 12)
+                if status == "completed":
+                    nudge.assert_called_once()
+                else:
+                    nudge.assert_not_called()
+                    self.assertNotIn("stuck_since", mt.pr_state(st, 274))
+                api.assert_called_once_with(["api", "--paginate", "--slurp", endpoint])
 
     def test_nudge_behind_runs_update_branch(self):
         repo = self.make_repo()
@@ -614,7 +644,11 @@ class CrateRelationTest(Base):
         self.commit(repo, {"crates/render/src/layer.rs": "LayerDependency changed\n"}, "dev")
         run(repo, "git", "push", "-q", "origin", "dev")
         run(repo, "git", "fetch", "-q", "origin")
-        over = mt.overlap(pr_head)
+        # File-level only (the repo default since 2026-11-24): different files, no overlap.
+        with mock.patch.dict(mt.CFG["merge"], {"relate_crates": False}):
+            self.assertEqual(mt.overlap(pr_head), [])
+        with mock.patch.dict(mt.CFG["merge"], {"relate_crates": True}):
+            over = mt.overlap(pr_head)
         self.assertEqual(len(over), 1)
         self.assertIn("fx 依赖 render", over[0])
         # After update-branch the merge-base is dev's head: nothing to relate any more,
@@ -622,7 +656,8 @@ class CrateRelationTest(Base):
         run(repo, "git", "checkout", "-q", "feat")
         run(repo, "git", "merge", "-q", "--no-edit", "origin/dev")
         merged = run(repo, "git", "rev-parse", "HEAD")
-        with mock.patch.object(mt, "crate_graph", side_effect=RuntimeError("no cargo")):
+        with mock.patch.object(mt, "crate_graph", side_effect=RuntimeError("no cargo")), \
+                mock.patch.dict(mt.CFG["merge"], {"relate_crates": True}):
             self.assertEqual(mt.overlap(merged), [])
 
     def test_related_pr_does_not_skip_ahead(self):

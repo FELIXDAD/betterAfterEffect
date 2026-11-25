@@ -21,9 +21,21 @@ pub(crate) struct View {
     pub scale: f32,
     /// Path point and handle size in points (Preferences > Appearance).
     pub point: f32,
+    /// The 3D view's camera and the comp size: 3D layers are seen through it
+    /// (`None`: x and y only).
+    pub camera: Option<(bae_render::Camera, DVec2)>,
 }
 
 impl View {
+    /// Screen position of comp-space point `p` of a layer, through the camera
+    /// for a 3D layer; `None` behind the camera.
+    pub fn project(self, p: DVec3, three_d: bool) -> Option<Pos2> {
+        match self.camera {
+            Some((camera, size)) if three_d => camera.project(p, size).map(|q| self.to_screen(q)),
+            _ => Some(self.to_screen(p.truncate())),
+        }
+    }
+
     pub fn to_screen(self, p: DVec2) -> Pos2 {
         pos2(
             self.origin.x + p.x as f32 * self.scale,
@@ -564,9 +576,19 @@ pub(crate) fn bounds_quad(
     outer: &Affine,
 ) -> Option<[Pos2; 4]> {
     let (min, max) = layer_bounds(layer)?;
-    let xf = outer.then(&layer.world_matrix);
     let c = [min, DVec2::new(max.x, min.y), max, DVec2::new(min.x, max.y)];
+    if is_3d(layer) {
+        let [a, b, c, d] =
+            c.map(|p| view.project(layer.world_matrix.transform_point3(p.extend(0.0)), true));
+        return Some([a?, b?, c?, d?]);
+    }
+    let xf = outer.then(&layer.world_matrix);
     Some(c.map(|p| view.to_screen(xf.apply(p))))
+}
+
+/// A 3D layer the camera sees (cameras and lights have no picture).
+pub(crate) fn is_3d(layer: &EvaluatedLayer) -> bool {
+    layer.switches.three_d && !matches!(layer.kind, LayerKind::Camera | LayerKind::Light)
 }
 
 /// Whether `p` lies inside the convex quad.

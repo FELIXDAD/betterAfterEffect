@@ -16,7 +16,8 @@ use crate::curve::Curve;
 use crate::error::EvalError;
 use crate::evaluated::{
     AssetInfo, CameraState, EvaluatedComp, EvaluatedEffect, EvaluatedLayer, EvaluatedMask,
-    EvaluatedPrim, LayerSource, LayerSwitches, LightFalloff, LightState, LightType, TrackMatte,
+    EvaluatedPrim, FrameBlending, LayerSource, LayerSwitches, LightFalloff, LightState, LightType,
+    TrackMatte,
 };
 use crate::expr;
 use crate::schema::{
@@ -246,6 +247,7 @@ pub(crate) struct CompiledComp {
     pub(crate) duration: Time,
     pub(crate) bg_color: [f64; 4],
     pub(crate) motion_blur: MotionBlur,
+    pub(crate) frame_blending: bool,
     pub(crate) layers: Vec<CompiledLayer>,
     /// Prims whose changes invalidate this compiled comp (the comp and its sources).
     pub(crate) deps: Vec<PrimPath>,
@@ -308,6 +310,8 @@ pub(crate) struct CompiledEffect {
     pub(crate) match_name: String,
     pub(crate) enabled: bool,
     pub(crate) params: Vec<(String, Prop)>,
+    /// Child prims (the Paint effect's strokes).
+    pub(crate) children: Vec<CompiledPrim>,
 }
 
 #[derive(Debug)]
@@ -316,6 +320,17 @@ pub(crate) struct CompiledPrim {
     pub(crate) prim_type: Option<PrimType>,
     pub(crate) attrs: Vec<(String, Prop)>,
     pub(crate) children: Vec<CompiledPrim>,
+}
+
+/// A text layer's Path Options (AE: Text > Path Options), compiled.
+#[derive(Debug)]
+pub(crate) struct CompiledTextPath {
+    pub(crate) mask: PrimPath,
+    pub(crate) reverse: bool,
+    pub(crate) perpendicular: bool,
+    pub(crate) force_alignment: bool,
+    pub(crate) first_margin: Prop,
+    pub(crate) last_margin: Prop,
 }
 
 #[derive(Debug)]
@@ -362,6 +377,7 @@ pub(crate) struct CompiledLayer {
     pub(crate) contents: Vec<CompiledPrim>,
     pub(crate) text: Option<Prop>,
     pub(crate) text_animators: Vec<CompiledPrim>,
+    pub(crate) text_path: Option<CompiledTextPath>,
     pub(crate) camera: Option<CompiledCamera>,
     pub(crate) light: Option<CompiledLight>,
 }
@@ -476,6 +492,7 @@ fn compile_comp(stage: &Stage, path: &PrimPath) -> Result<CompiledComp, EvalErro
         duration,
         bg_color,
         motion_blur,
+        frame_blending: setting_bool(&view, ct, c::FRAME_BLENDING),
         layers,
         deps,
     })
@@ -505,6 +522,11 @@ fn compile_layer(
         motion_blur: setting_bool(v, lt, l::MOTION_BLUR),
         collapse_transformation: setting_bool(v, lt, l::COLLAPSE_TRANSFORMATION),
         preserve_transparency: setting_bool(v, lt, l::PRESERVE_TRANSPARENCY),
+        frame_blending: match setting_str(v, lt, l::FRAME_BLENDING).as_deref() {
+            Some("frame_mix") => FrameBlending::FrameMix,
+            Some("pixel_motion") => FrameBlending::PixelMotion,
+            _ => FrameBlending::Off,
+        },
     };
 
     let source = match setting_ref(v, l::SOURCE) {
@@ -680,6 +702,11 @@ fn compile_layer(
                     .and_then(|v| v.as_bool())
                     .unwrap_or(true),
                 params,
+                children: stage
+                    .children(&ep)
+                    .into_iter()
+                    .filter_map(|cp| compile_generic(stage, &cp, 0))
+                    .collect(),
                 path: ep,
             })
         })
@@ -698,6 +725,19 @@ fn compile_layer(
         .into_iter()
         .filter_map(|cp| compile_generic(stage, &cp, 0))
         .collect();
+    let text_path = (kind == LayerKind::Text)
+        .then(|| setting_ref(v, l::TEXT_PATH))
+        .flatten()
+        .map(|mask| CompiledTextPath {
+            mask,
+            reverse: setting_bool(v, lt, l::TEXT_REVERSE_PATH),
+            perpendicular: setting(v, lt, l::TEXT_PERPENDICULAR_TO_PATH)
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
+            force_alignment: setting_bool(v, lt, l::TEXT_FORCE_ALIGNMENT),
+            first_margin: p(l::TEXT_FIRST_MARGIN, Value::Float(0.0)),
+            last_margin: p(l::TEXT_LAST_MARGIN, Value::Float(0.0)),
+        });
 
     Ok(CompiledLayer {
         name: v
@@ -725,6 +765,7 @@ fn compile_layer(
         contents,
         text,
         text_animators,
+        text_path,
         camera,
         light,
         path: lpath,
@@ -878,6 +919,10 @@ impl CompiledComp {
                     } else {
                         Vec::new()
                     },
+                    frame_blend_span: (self.frame_blending
+                        && layer.switches.frame_blending != FrameBlending::Off
+                        && matches!(layer.source, CompiledSource::Asset(..)))
+                    .then(|| source_span(layer, &cx, self.frame_rate.frame_duration())),
                     parent: layer.parent,
                     opacity: (tf.opacity / 100.0).clamp(0.0, 1.0),
                     local_matrix: DMat4::IDENTITY,
@@ -906,6 +951,14 @@ impl CompiledComp {
                         .iter()
                         .map(|p| sample_generic(p, &cx))
                         .collect(),
+                    text_path: layer.text_path.as_ref().map(|t| crate::TextPathOptions {
+                        mask: t.mask.clone(),
+                        reverse: t.reverse,
+                        perpendicular: t.perpendicular,
+                        force_alignment: t.force_alignment,
+                        first_margin: t.first_margin.sample(&cx).as_f64().unwrap_or(0.0),
+                        last_margin: t.last_margin.sample(&cx).as_f64().unwrap_or(0.0),
+                    }),
                     camera: None,
                     light: None,
                     depends_on: Vec::new(),
@@ -984,6 +1037,7 @@ impl CompiledComp {
             duration: self.duration,
             bg_color: self.bg_color,
             motion_blur: self.motion_blur,
+            frame_blending: self.frame_blending,
             layers: out,
             camera,
             errors: Vec::new(),
@@ -1191,6 +1245,22 @@ fn position_direction(layer: &CompiledLayer, cx: &Cx<'_, '_>, tick: Time) -> Opt
     (d.length_squared() > 0.0).then_some(d)
 }
 
+/// The source time one comp frame `frame` spans around now: the time remap's
+/// change over the frame centred here, or the frame scaled by the stretch.
+fn source_span(layer: &CompiledLayer, cx: &Cx<'_, '_>, frame: Time) -> Time {
+    let Some(p) = &layer.time_remap else {
+        let stretch = layer.timing.stretch.abs().max(1.0);
+        return Time((frame.0 as f64 * 100.0 / stretch).round() as i64);
+    };
+    let at =
+        |ct: Time| match p.sample(&cx.at_layer_time(layer.timing.layer_time(ct), &layer.timing)) {
+            Value::Time(t) => t,
+            other => Time::from_seconds(num(&other)),
+        };
+    let half = Time(frame.0 / 2);
+    Time((at(cx.ct + half) - at(cx.ct - half)).0.abs())
+}
+
 fn sample_source(layer: &CompiledLayer, cx: &Cx<'_, '_>) -> LayerSource {
     let source_time = match &layer.time_remap {
         Some(p) => match p.sample(cx) {
@@ -1247,6 +1317,7 @@ fn sample_effect(e: &CompiledEffect, cx: &Cx<'_, '_>) -> EvaluatedEffect {
             .iter()
             .map(|(id, p)| (id.clone(), p.sample(cx)))
             .collect(),
+        children: e.children.iter().map(|c| sample_generic(c, cx)).collect(),
     }
 }
 
@@ -1580,6 +1651,8 @@ impl CompiledLayer {
                 tr::POINT_OF_INTEREST => Some(&t.point_of_interest),
                 l::TIME_REMAP => self.time_remap.as_ref(),
                 l::TEXT_SOURCE => self.text.as_ref(),
+                l::TEXT_FIRST_MARGIN => self.text_path.as_ref().map(|t| &t.first_margin),
+                l::TEXT_LAST_MARGIN => self.text_path.as_ref().map(|t| &t.last_margin),
                 cam::ZOOM => self.camera.as_ref().map(|c| &c.zoom),
                 cam::FOCUS_DISTANCE => self.camera.as_ref().map(|c| &c.focus_distance),
                 cam::APERTURE => self.camera.as_ref().map(|c| &c.aperture),
@@ -1651,6 +1724,9 @@ impl CompiledLayer {
         }
         if let Some(c) = &self.camera {
             all.extend([&c.zoom, &c.focus_distance, &c.aperture, &c.blur_level]);
+        }
+        if let Some(t) = &self.text_path {
+            all.extend([&t.first_margin, &t.last_margin]);
         }
         if let Some(l) = &self.light {
             all.extend([

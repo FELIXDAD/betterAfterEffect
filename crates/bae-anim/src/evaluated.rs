@@ -31,6 +31,8 @@ pub struct EvaluatedComp {
     pub duration: Time,
     pub bg_color: [f64; 4],
     pub motion_blur: MotionBlur,
+    /// The comp's Enable Frame Blending switch.
+    pub frame_blending: bool,
     /// Layers in AE stacking order: `layers[0]` is the top layer (AE index 1). The
     /// renderer composites from the last to the first. Every layer is listed, including
     /// invisible ones (track mattes, parents, cameras), so indices are stable.
@@ -77,6 +79,10 @@ pub struct EvaluatedLayer {
     /// Comp times at which to sample this layer for motion blur (AE-ANI-103), in
     /// shutter order. Empty when motion blur is off for the comp or the layer.
     pub motion_blur_times: Vec<Time>,
+    /// Frame blending (AE-CMP-065): the source time one comp frame spans around
+    /// now (remapped or stretched speed × frame duration) when the comp and layer
+    /// switches are on and the layer shows footage; `None` otherwise.
+    pub frame_blend_span: Option<Time>,
     /// Index of the parent layer in [`EvaluatedComp::layers`].
     pub parent: Option<usize>,
     pub transform: Transform,
@@ -99,6 +105,8 @@ pub struct EvaluatedLayer {
     pub text: Option<Box<TextDocument>>,
     /// Text layers: animators with their selectors (`animators` folder), evaluated.
     pub text_animators: Vec<EvaluatedPrim>,
+    /// Text layers on a path (AE: Text > Path Options with a mask chosen).
+    pub text_path: Option<TextPathOptions>,
     pub camera: Option<CameraState>,
     pub light: Option<LightState>,
     /// Other layers this layer's expressions read at this time (`thisComp.layer(…)`,
@@ -122,6 +130,20 @@ pub struct LayerSwitches {
     pub collapse_transformation: bool,
     /// AE "Preserve Underlying Transparency" (T switch).
     pub preserve_transparency: bool,
+    /// The layer's Frame Blending switch (AE-CMP-065).
+    pub frame_blending: FrameBlending,
+}
+
+/// A layer's Frame Blending switch.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FrameBlending {
+    #[default]
+    Off,
+    /// Weighted mix of the neighbouring source frames.
+    FrameMix,
+    /// Optical-flow interpolation (AE Pixel Motion).
+    PixelMotion,
 }
 
 /// Where a layer's pixels come from.
@@ -205,6 +227,21 @@ pub struct EvaluatedMask {
     pub expansion: f64,
 }
 
+/// AE's Path Options of a text layer at one time: the mask the text runs along
+/// (one of [`EvaluatedLayer::masks`]) and how.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct TextPathOptions {
+    pub mask: PrimPath,
+    pub reverse: bool,
+    /// Characters turn with the path (AE default on).
+    pub perpendicular: bool,
+    /// The characters spread between the margins.
+    pub force_alignment: bool,
+    /// Pixels along the path.
+    pub first_margin: f64,
+    pub last_margin: f64,
+}
+
 /// An effect instance at one time.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct EvaluatedEffect {
@@ -213,6 +250,8 @@ pub struct EvaluatedEffect {
     pub enabled: bool,
     /// Every `param:NNNN` attribute, evaluated, keyed by its numeric ID (`"0001"`).
     pub params: BTreeMap<String, Value>,
+    /// Child prims, generically evaluated (the Paint effect's strokes).
+    pub children: Vec<EvaluatedPrim>,
 }
 
 impl EvaluatedEffect {
