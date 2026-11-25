@@ -38,6 +38,7 @@ mod common;
 pub mod effects;
 mod gpu;
 mod module;
+mod obsolete;
 mod params;
 pub mod profile;
 mod target;
@@ -51,6 +52,7 @@ use bae_plugin::manifest::{ParamType, ShaderStyle};
 use bae_render::{Effect, EffectLibrary, EffectParams, GpuImage, IRect, RenderError};
 
 pub use catalog::{EffectInfo, Form, category_zh};
+pub use categories::color::ocio::embed_color_file;
 pub use effects::blur::BLURRINESS_TO_SIGMA;
 pub use module::EffectsModule;
 pub use target::{EffectTarget, IMAGE_USAGE, Standalone, TargetEffect};
@@ -83,11 +85,15 @@ pub struct Builtin {
     pub info: EffectInfo,
     /// Implementation.
     pub implementation: Implementation,
+    alias: Option<Arc<obsolete::Alias>>,
 }
 
 impl Builtin {
     /// The effect as the render graph sees it.
     pub fn effect(&self) -> Arc<dyn Effect> {
+        if let Some(alias) = &self.alias {
+            return alias.clone();
+        }
         match &self.implementation {
             Implementation::Declarative(fx) => fx.clone(),
             Implementation::Rust(fx) => {
@@ -99,6 +105,9 @@ impl Builtin {
 
     /// The parameter definition.
     pub fn def(&self) -> &EffectDef {
+        if let Some(alias) = &self.alias {
+            return &alias.def;
+        }
         match &self.implementation {
             Implementation::Declarative(fx) => fx.def(),
             Implementation::Rust(fx) => fx.def(),
@@ -113,11 +122,16 @@ impl Builtin {
         input: &GpuImage,
         output_roi: IRect,
     ) -> Result<GpuImage, RenderError> {
-        match &self.implementation {
+        let mut render = |params: &EffectParams<'_>| match &self.implementation {
             Implementation::Declarative(fx) => {
                 target.render_declarative(fx, params, input, output_roi)
             }
             Implementation::Rust(fx) => fx.encode(target, params, input, output_roi),
+        };
+        if let Some(alias) = &self.alias {
+            alias.with_params(params, render)
+        } else {
+            render(params)
         }
     }
 }
@@ -142,6 +156,10 @@ impl Effect for Forward {
         self.0.input_roi(params, output_roi)
     }
 
+    fn uses_scene(&self, params: &EffectParams<'_>) -> bool {
+        self.0.uses_scene(params)
+    }
+
     fn layer_dependencies(
         &self,
         params: &EffectParams<'_>,
@@ -151,6 +169,17 @@ impl Effect for Forward {
 
     fn mask_dependencies(&self, params: &EffectParams<'_>) -> Vec<bae_render::effect::MaskSelect> {
         self.0.mask_dependencies(params)
+    }
+
+    fn path_dependencies(
+        &self,
+        params: &EffectParams<'_>,
+    ) -> Option<bae_render::effect::MaskSelect> {
+        self.0.path_dependencies(params)
+    }
+
+    fn parameter_sample_times(&self, params: &EffectParams<'_>) -> Vec<bae_model::Time> {
+        self.0.parameter_sample_times(params)
     }
 
     fn render(
@@ -191,6 +220,7 @@ fn registry() -> &'static Registry {
         categories::time::register(&mut r);
         categories::transition::register(&mut r);
         categories::utility::register(&mut r);
+        obsolete::register(&mut r);
         r.effects.sort_by(|a, b| {
             (a.info.category.as_str(), a.info.name.as_str())
                 .cmp(&(b.info.category.as_str(), b.info.name.as_str()))
@@ -227,18 +257,51 @@ pub fn register(defs: &mut EffectRegistry, library: &mut EffectLibrary) -> usize
 
 /// Compiles every pipeline for working format `format` ahead of the first
 /// frame (call on a worker thread when a project opens).
+///
+/// Two low-priority workers share the work (most used categories first: the
+/// registration order); an item that fails is logged and skipped. The first
+/// error is returned at the end.
 pub fn prewarm(gpu: &Arc<GpuContext>, format: wgpu::TextureFormat) -> Result<(), RenderError> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
     let rt = gpu::runtime(gpu);
-    for warm in &registry().prewarm {
-        warm(&rt, format)?;
-    }
-    for b in builtins() {
-        if let Implementation::Declarative(fx) = &b.implementation {
-            fx.prewarm(gpu, format)?;
+    let modules = &registry().prewarm;
+    let declarative: Vec<_> = builtins()
+        .iter()
+        .filter(|b| b.alias.is_none())
+        .filter_map(|b| match &b.implementation {
+            Implementation::Declarative(fx) => Some(fx.clone()),
+            Implementation::Rust(_) => None,
+        })
+        .collect();
+    let total = modules.len() + declarative.len();
+    let next = AtomicUsize::new(0);
+    let first_error = parking_lot::Mutex::new(None);
+    std::thread::scope(|scope| {
+        for _ in 0..PREWARM_THREADS {
+            scope.spawn(|| {
+                bae_gpu::warm_up::lower_priority();
+                loop {
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    if i >= total {
+                        break;
+                    }
+                    let result = match modules.get(i) {
+                        Some(warm) => warm(&rt, format),
+                        None => declarative[i - modules.len()].prewarm(gpu, format),
+                    };
+                    if let Err(e) = result {
+                        tracing::warn!("effect prewarm: {e}");
+                        first_error.lock().get_or_insert(e);
+                    }
+                }
+            });
         }
-    }
-    Ok(())
+    });
+    first_error.into_inner().map_or(Ok(()), Err)
 }
+
+/// Workers compiling effect pipelines during the warm-up.
+const PREWARM_THREADS: usize = 2;
 
 /// Catalog entry of a Rust effect (implementation and Chinese param names).
 fn rust_builtin(
@@ -262,6 +325,7 @@ fn rust_builtin(
             param_options_zh: rust_options_zh(def),
         },
         implementation: Implementation::Rust(fx),
+        alias: None,
     }
 }
 
@@ -277,6 +341,12 @@ fn rust_options_zh(def: &EffectDef) -> Vec<(u32, Vec<String>)> {
                 .or_else(|| effects::options_zh(m, p.id))
                 .or_else(|| effects::spatial::options_zh(m, p.id))
                 .or_else(|| effects::distort::options_zh(m, p.id))
+                .or_else(|| categories::generate::strokes::options_zh(m, p.id))
+                .or_else(|| {
+                    (m == effects::liquify::MATCH_NAME)
+                        .then(|| effects::liquify::options_zh(p.id))
+                        .flatten()
+                })
                 .or((p.name == "Blur Dimensions").then_some(DIMENSIONS_ZH))?;
             Some((p.id, zh.iter().map(|s| (*s).to_owned()).collect()))
         })

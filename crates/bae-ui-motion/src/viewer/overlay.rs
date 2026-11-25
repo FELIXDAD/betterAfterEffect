@@ -18,7 +18,7 @@ pub(super) fn to_screen(view: &View, m: &DMat4, p: [f64; 2]) -> Pos2 {
 }
 
 /// The segments of `path` (in the space `m` maps to comp space) as screen shapes.
-pub(super) fn path_shapes(path: &BezierPath, m: &DMat4, view: &View, stroke: Stroke) -> Vec<Shape> {
+pub(crate) fn path_shapes(path: &BezierPath, m: &DMat4, view: &View, stroke: Stroke) -> Vec<Shape> {
     let n = path.vertices.len();
     if n == 0 || !path.is_consistent() {
         return Vec::new();
@@ -45,7 +45,7 @@ pub(super) fn path_shapes(path: &BezierPath, m: &DMat4, view: &View, stroke: Str
 }
 
 /// A mask's outline color (its `color` attribute).
-pub(super) fn mask_color(stage: &Stage, mask: &PrimPath) -> Color32 {
+pub(crate) fn mask_color(stage: &Stage, mask: &PrimPath) -> Color32 {
     let c = stage
         .prim(mask)
         .and_then(|v| query::static_value(&v, "color"))
@@ -159,6 +159,8 @@ fn shape_paths(
                 let gm = *m * crate::render::group_matrix(item);
                 shape_paths(&item.children, &gm, color, out);
             }
+            // A group's `contents` folder (or an untyped container).
+            Some(t) if *t == PrimType::FOLDER => shape_paths(&item.children, m, color, out),
             Some(_) => {}
             None => shape_paths(&item.children, m, color, out),
         }

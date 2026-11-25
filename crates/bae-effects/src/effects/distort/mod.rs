@@ -1,6 +1,7 @@
 //! Inverse-mapped, single-layer distortions. Coordinates refer to pixel edges
 //! in layer space; only the output dispatch is restricted to the requested tile.
 mod catalog;
+pub(crate) mod warps;
 
 use crate::{Builtin, EffectTarget, TargetEffect, common, gpu, params::Params, rust_builtin};
 use bae_gpu::wgpu;
@@ -27,6 +28,7 @@ enum Kind {
     Spherize,
     Ripple,
     OpticsCompensation,
+    PowerPin,
 }
 
 struct Distortion {
@@ -77,10 +79,24 @@ fn square_to_quad([a, b, c, d]: [DVec2; 4]) -> DMat3 {
 impl Distortion {
     fn matrix(&self, p: Params<'_>, origin: DVec2, size: DVec2) -> DMat3 {
         let pt = |id| point(p, id, origin, size);
-        if self.kind == Kind::CornerPin {
-            return square_to_quad([pt(1), pt(2), pt(3), pt(4)])
-                * DMat3::from_scale(size.recip())
-                * DMat3::from_translation(-origin);
+        if matches!(self.kind, Kind::CornerPin | Kind::PowerPin) {
+            let power = self.kind == Kind::PowerPin;
+            let first = if power { 2 } else { 1 };
+            let pins = [first, first + 1, first + 2, first + 3].map(pt);
+            let mut quad = square_to_quad(pins);
+            if power {
+                let low = DVec2::new(p.f(10), p.f(9)) * 0.01;
+                let high = DVec2::new(p.f(11), p.f(12)) * 0.01;
+                quad = quad
+                    * DMat3::from_translation(-low)
+                    * DMat3::from_scale(DVec2::ONE + low + high);
+            }
+            let map = quad * DMat3::from_scale(size.recip()) * DMat3::from_translation(-origin);
+            return if power && p.b(7) && map.determinant() != 0. {
+                map.inverse()
+            } else {
+                map
+            };
         }
         let axis = p.f(6).to_radians();
         let shear = DMat3::from_cols(
@@ -109,7 +125,7 @@ impl Effect for Distortion {
         let p = Params::new(&self.def, params);
         let (origin, size) = layer(p, input);
         match self.kind {
-            Kind::CornerPin | Kind::Transform => {
+            Kind::CornerPin | Kind::PowerPin | Kind::Transform => {
                 let m = self.matrix(p, origin, size);
                 if m.determinant() == 0. {
                     return IRect::EMPTY;
@@ -187,7 +203,7 @@ impl Effect for Distortion {
 
 const UNIFORM_SIZE: usize = 352;
 // Indexed by Kind. Each entry compiles only the sampling functions it uses.
-const COLORS: [&str; 12] = [
+const COLORS: [&str; 13] = [
     "transform_color",
     "turbulent_color",
     "wave_color",
@@ -200,6 +216,7 @@ const COLORS: [&str; 12] = [
     "spherize_color",
     "ripple_color",
     "optics_color",
+    "corner_color",
 ];
 fn pipeline(
     rt: &gpu::Runtime,
@@ -274,6 +291,7 @@ impl TargetEffect for Distortion {
                 );
             }
         }
+        w.f32(64, f32::from(self.kind == Kind::PowerPin));
         for param in &self.def.params {
             let at = 64 + 16 * param.id as usize;
             if matches!(param.default, Some(Value::Vec2(_))) {
@@ -283,7 +301,10 @@ impl TargetEffect for Distortion {
                 w.f32(at, p.f(param.id) as f32);
             }
         }
-        if matches!(self.kind, Kind::Transform | Kind::CornerPin) {
+        if matches!(
+            self.kind,
+            Kind::Transform | Kind::CornerPin | Kind::PowerPin
+        ) {
             let m = self.matrix(p, origin, size);
             let inv = if m.determinant() == 0. {
                 DMat3::ZERO
