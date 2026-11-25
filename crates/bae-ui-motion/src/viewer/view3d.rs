@@ -258,7 +258,7 @@ fn slot(inv: &Invocation) -> usize {
 }
 
 /// Runs the 3D view commands on the active comp.
-pub(crate) fn handle(inv: &Invocation, cx: &PanelContext<'_>) -> bool {
+pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>) -> bool {
     if !ACTIONS.iter().any(|(id, _)| *id == inv.id) {
         return false;
     }
@@ -268,7 +268,7 @@ pub(crate) fn handle(inv: &Invocation, cx: &PanelContext<'_>) -> bool {
         return true;
     };
     let shortcuts = s.view_shortcuts;
-    let views = s.views3d.entry(comp).or_default();
+    let views = s.views3d.entry(comp.clone()).or_default();
     match inv.id.as_str() {
         ids::SWITCH => {
             if let Some(v) = inv
@@ -282,6 +282,14 @@ pub(crate) fn handle(inv: &Invocation, cx: &PanelContext<'_>) -> bool {
         }
         ids::SHORTCUT => views.switch(shortcuts.0[slot(inv)]),
         ids::LAST => views.switch(views.last),
+        ids::RESET if views.current == View3d::Active => {
+            // AE's "Reset Camera 1": the active camera layer back to the
+            // default camera's place, keeping its zoom.
+            let time = s.time(&comp);
+            drop(s);
+            reset_camera(cx, &comp, time);
+            return true;
+        }
         ids::RESET => {
             let current = views.current;
             views.cameras.remove(&current);
@@ -293,6 +301,35 @@ pub(crate) fn handle(inv: &Invocation, cx: &PanelContext<'_>) -> bool {
         _ => {}
     }
     true
+}
+
+/// Active Camera ▸ Reset: the comp's camera layer at `(W/2, H/2, −zoom)` aimed
+/// at the comp centre, no orientation or rotation (one undo step).
+fn reset_camera(cx: &mut PanelContext<'_>, comp: &bae_model::PrimPath, time: bae_model::Time) {
+    let Ok(ev) = bae_anim::evaluate_comp(cx.stage, comp, time) else {
+        return;
+    };
+    let Some((layer, zoom)) = ev
+        .camera
+        .and_then(|i| ev.layers.get(i))
+        .and_then(|l| Some((l.path.clone(), l.camera.as_ref()?.zoom)))
+    else {
+        return;
+    };
+    let (w, h) = (f64::from(ev.width) / 2.0, f64::from(ev.height) / 2.0);
+    let t = bae_motion::query::to_key_time(cx.stage, &layer, time);
+    let v3 = |v: [f64; 3]| serde_json::json!({"type": "vec3", "value": v});
+    let f = |v: f64| serde_json::json!({"type": "float", "value": v});
+    let edit = |attr: &str, value: serde_json::Value| serde_json::json!({"path": layer, "attr": attr, "time": t, "value": value});
+    let edits = vec![
+        edit("transform:position", v3([w, h, -zoom])),
+        edit("transform:point_of_interest", v3([w, h, 0.0])),
+        edit("transform:orientation", v3([0.0; 3])),
+        edit("transform:rotation_x", f(0.0)),
+        edit("transform:rotation_y", f(0.0)),
+        edit("transform:rotation", f(0.0)),
+    ];
+    cx.invoke_with("attr.set_many", serde_json::json!({ "edits": edits }));
 }
 
 /// The active comp's current 3D view (menus, the viewer's popup).
