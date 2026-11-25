@@ -124,19 +124,18 @@ impl RenderComp {
         self.height.hash(h);
         self.pixel_aspect.to_bits().hash(h);
         self.layers.len().hash(h);
-        let mut any_3d = false;
+        let mut uses_scene = false;
         let mut any_blur = false;
         for layer in &self.layers {
             layer.hash_composite(h);
             if layer.blend_mode == BlendMode::DancingDissolve {
                 self.frame_rate.time_to_frame(self.time).hash(h);
             }
-            any_3d |= layer.matrix_3d.is_some();
+            // A 2D effect can read the comp camera or illuminate its surface with comp lights.
+            uses_scene |= layer.matrix_3d.is_some() || layer.effects.iter().any(|e| e.enabled);
             any_blur |= !layer.motion_samples.is_empty();
         }
-        // The camera only matters to 3D layers, the sample cameras only to
-        // blurred 3D layers.
-        if any_3d {
+        if uses_scene {
             hash_camera(&self.camera, h);
             self.lights.len().hash(h);
             for l in &self.lights {

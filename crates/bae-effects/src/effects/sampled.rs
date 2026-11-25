@@ -39,6 +39,20 @@ impl Shader {
         aux: [Option<&GpuImage>; N],
         stage: [u32; 2],
     ) -> Result<GpuImage, RenderError> {
+        self.dispatch_with_uniforms(target, v, roi, input, aux, stage, |_, _| {})
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn dispatch_with_uniforms<const N: usize>(
+        &self,
+        target: &mut dyn EffectTarget,
+        v: Params<'_>,
+        roi: IRect,
+        input: &GpuImage,
+        aux: [Option<&GpuImage>; N],
+        stage: [u32; 2],
+        extra: impl FnOnce(&mut UniformWriter, usize),
+    ) -> Result<GpuImage, RenderError> {
         const { assert!(N <= 4) };
         let rt = gpu::runtime(target.gpu());
         let kernel = self.kernel(&rt, target.format())?;
@@ -106,6 +120,7 @@ impl Shader {
                 _ => {}
             }
         }
+        extra(&mut u, HEADER);
         let offset = gpu::push_uniform(&rt, &u);
         let group = rt.bind_group(
             &kernel,
