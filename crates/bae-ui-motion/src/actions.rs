@@ -899,7 +899,7 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         }
         ids::PLAY => {
             if s.is_playing() {
-                s.stop();
+                s.stop_preview(&info);
             } else {
                 s.preview(cx, &info);
             }
@@ -1689,7 +1689,7 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Move Out Point to Current Time", "将出点移到当前时间"),
     ("Set Work Area Start", "将工作区域开头设置为当前时间"),
     ("Set Work Area End", "将工作区域结尾设置为当前时间"),
-    ("Trim Comp to Work Area", "将合成修剪至工作区域"),
+    ("Trim Comp to Work Area", "将合成裁剪到工作区"),
     // Layer > Transform (AE 26's Chinese menu).
     ("Flip Horizontal", "水平翻转"),
     ("Flip Vertical", "垂直翻转"),

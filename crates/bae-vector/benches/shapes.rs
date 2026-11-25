@@ -189,6 +189,9 @@ fn bench(gpu: &Arc<GpuContext>, layers: usize, frames: usize) {
         purpose: RenderPurpose::Preview,
         ..RenderRequest::full()
     };
+    // `BAE_BENCH_LAYER_TIMES=1`: the Render Time column's per-layer timing on.
+    let layer_times = std::env::var_os("BAE_BENCH_LAYER_TIMES").is_some();
+    renderer.set_layer_times(layer_times);
     {
         let ec = eval
             .evaluate_comp(&stage, &comp, Time::ZERO)
@@ -242,6 +245,21 @@ fn bench(gpu: &Arc<GpuContext>, layers: usize, frames: usize) {
     }
     renderer.wait_idle().expect("idle");
     let fps = frames as f64 / start.elapsed().as_secs_f64();
+    if layer_times {
+        let ec = eval
+            .evaluate_comp(&stage, &comp, rate.frame_to_time(1))
+            .expect("evaluate");
+        let rc = anim.convert(&stage, &ec, 0).expect("convert");
+        let out = renderer.render_frame(&rc, &request).expect("render");
+        let total = |t: &[(PrimPath, Duration)]| t.iter().map(|(_, d)| *d).sum::<Duration>();
+        println!(
+            "  layer times: {} layers, CPU {:?}; GPU {} layers, {:?}",
+            out.layer_times.len(),
+            total(&out.layer_times),
+            out.layer_gpu_times.len(),
+            total(&out.layer_gpu_times),
+        );
+    }
     println!(
         "  {layers:5} layers: eval {:6.2} ms  convert {:6.2} ms  render+submit {:6.2} ms  gpu wait {:6.2} ms  |  sustained {fps:6.1} fps",
         ms(times.eval, frames),
