@@ -144,11 +144,15 @@ impl Panel for LayerPanel {
             return;
         };
         let time = session.lock().time(&info.path);
-        let Ok(comp) = self
-            .eval
-            .get(cx.resources)
-            .evaluate_comp(cx.stage, &info.path, time)
-        else {
+        let eval = self.eval.get(cx.resources);
+        if let Some(g) = &self.gpu
+            && !eval
+                .image_samples()
+                .is_some_and(|s| std::sync::Arc::ptr_eq(s, g.samples()))
+        {
+            eval.set_image_samples(Some(g.samples().clone()));
+        }
+        let Ok(comp) = eval.evaluate_comp(cx.stage, &info.path, time) else {
             return;
         };
         let Some(evaluated) = comp.layer(&layer) else {
@@ -218,6 +222,13 @@ impl LayerPanel {
             .gpu
             .as_mut()
             .and_then(|g| g.frame(cx.resources, cx.stage, one, 1, None));
+        if self
+            .gpu
+            .as_ref()
+            .is_some_and(GpuPreview::waiting_for_samples)
+        {
+            ui.ctx().request_repaint();
+        }
         if let Some(img) = image {
             let r = img.rect;
             let at = |x: i32, y: i32| view.to_screen(DVec2::new(f64::from(x), f64::from(y)));

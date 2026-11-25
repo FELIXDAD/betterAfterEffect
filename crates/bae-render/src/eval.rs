@@ -75,6 +75,10 @@ pub trait CompEvaluator {
     fn take_warnings(&mut self) -> Vec<String> {
         Vec::new()
     }
+
+    /// Serves `sampleImage` expressions from `samples` (filled by
+    /// [`crate::Renderer::read_samples`]). Default: no expressions.
+    fn set_image_samples(&mut self, _samples: Option<std::sync::Arc<bae_anim::ImageSamples>>) {}
 }
 
 /// Evaluates a [`Stage`] with static values and linear keyframes.

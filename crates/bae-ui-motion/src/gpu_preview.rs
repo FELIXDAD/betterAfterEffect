@@ -66,6 +66,11 @@ pub(crate) struct GpuPreview {
     sampled: Option<((u32, u32, u64), [u8; 4])>,
     /// Text layers have a source provider (otherwise the viewer draws them).
     pub has_text: bool,
+    /// Layer pixels for `sampleImage`, shared with the evaluator that evaluates
+    /// the comps this preview shows.
+    samples: Arc<bae_anim::ImageSamples>,
+    /// The last frame held the previous image back for missing samples.
+    waiting: bool,
 }
 
 impl GpuPreview {
@@ -86,12 +91,15 @@ impl GpuPreview {
                 pool_idle_bytes: 128 << 20,
             },
         );
+        let samples = Arc::new(bae_anim::ImageSamples::new());
+        let mut anim = AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview);
+        bae_render::CompEvaluator::set_image_samples(&mut anim, Some(samples.clone()));
         GpuPreview {
             gpu,
             registry,
             id,
             renderer,
-            anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
+            anim,
             changes: StageChanges::default(),
             sources_gen: None,
             last: None,
@@ -99,7 +107,21 @@ impl GpuPreview {
             texture: None,
             sampled: None,
             has_text: false,
+            samples,
+            waiting: false,
         }
+    }
+
+    /// The `sampleImage` cache: give it to the evaluator of the comps passed to
+    /// [`GpuPreview::frame`] ([`bae_anim::Evaluator::set_image_samples`]).
+    pub fn samples(&self) -> &Arc<bae_anim::ImageSamples> {
+        &self.samples
+    }
+
+    /// The last [`GpuPreview::frame`] kept the previous image while `sampleImage`
+    /// values were read back: repaint (evaluate again) soon.
+    pub fn waiting_for_samples(&self) -> bool {
+        self.waiting
     }
 
     /// Whether this preview still uses the app's current GPU context (the shell
@@ -168,19 +190,42 @@ impl GpuPreview {
                 blur.cameras.fill(Some(camera));
             }
         }
+        let request = RenderRequest {
+            resolution: match resolution {
+                0 | 1 => Resolution::Full,
+                2 => Resolution::Half,
+                3 => Resolution::Third,
+                4 => Resolution::Quarter,
+                n => Resolution::Custom(n),
+            },
+            purpose: RenderPurpose::Preview,
+            ..RenderRequest::full()
+        };
+        // sampleImage: the layers expressions sampled are drawn and read back
+        // without waiting. A frame evaluated before its samples arrived is not
+        // shown: the previous image stays up and the viewer evaluates again.
+        if self.samples.has_requests() {
+            let mut frames = bae_render::eval::EvaluatorFrames {
+                stage,
+                evaluator: &mut self.anim,
+            };
+            if let Err(e) =
+                self.renderer
+                    .read_samples(&self.samples, &rc, &request, Some(&mut frames))
+            {
+                tracing_warn(&format!("preview: sampleImage: {e}"));
+            }
+        }
+        let arrived = self.renderer.poll_samples(&self.samples);
+        self.waiting = arrived || self.samples.is_waiting();
+        if self.waiting && self.texture.is_some() {
+            return Some(PreviewImage {
+                handle: self.registry.display_handle(self.id)?,
+                rect: self.rect?,
+            });
+        }
         let key = (rc.content_hash(), rc.time, resolution);
         if self.last != Some(key) {
-            let request = RenderRequest {
-                resolution: match resolution {
-                    0 | 1 => Resolution::Full,
-                    2 => Resolution::Half,
-                    3 => Resolution::Third,
-                    4 => Resolution::Quarter,
-                    n => Resolution::Custom(n),
-                },
-                purpose: RenderPurpose::Preview,
-                ..RenderRequest::full()
-            };
             // Effects reading other frames evaluate them like this one.
             let mut frames = bae_render::eval::EvaluatorFrames {
                 stage,

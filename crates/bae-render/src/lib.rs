@@ -57,6 +57,7 @@ pub mod png_out;
 pub mod pool;
 mod renderer;
 pub mod request;
+mod sample;
 pub mod source;
 pub mod testing;
 pub mod three_d;

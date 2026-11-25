@@ -1389,29 +1389,26 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
     // sample that is not read back yet is transparent black (see `samples`).
     h.set(
         "sampleImage",
-        Function::new(
-            ctx.clone(),
-            |ctx: Ctx<'js>, c: i32, l: i32, a: Vec<f64>| {
-                let comp = comp_or_throw(&ctx, c)?;
-                let li = layer_or_throw(&ctx, &comp, l)?;
-                note_dependency(c as usize, li);
-                let arg = |i: usize, d: f64| a.get(i).copied().filter(|v| v.is_finite()).unwrap_or(d);
-                let tick = comp.frame_rate.frame_duration().as_seconds() / 1024.0;
-                let t = Time::from_seconds((arg(5, 0.0) / tick).round() * tick);
-                let key = crate::SampleKey::new(
-                    comp.path.clone(),
-                    comp.layers[li].path.clone(),
-                    t,
-                    [arg(0, 0.0), arg(1, 0.0)],
-                    [arg(2, 0.5), arg(3, 0.5)],
-                    arg(4, 1.0) != 0.0,
-                );
-                let rgba = scope_samples()
-                    .and_then(|s| s.get(&key))
-                    .unwrap_or_default();
-                Ok::<_, rquickjs::Error>(rgba.map(f64::from).to_vec())
-            },
-        )?,
+        Function::new(ctx.clone(), |ctx: Ctx<'js>, c: i32, l: i32, a: Vec<f64>| {
+            let comp = comp_or_throw(&ctx, c)?;
+            let li = layer_or_throw(&ctx, &comp, l)?;
+            note_dependency(c as usize, li);
+            let arg = |i: usize, d: f64| a.get(i).copied().filter(|v| v.is_finite()).unwrap_or(d);
+            let tick = comp.frame_rate.frame_duration().as_seconds() / 1024.0;
+            let t = Time::from_seconds((arg(5, 0.0) / tick).round() * tick);
+            let key = crate::SampleKey::new(
+                comp.path.clone(),
+                comp.layers[li].path.clone(),
+                t,
+                [arg(0, 0.0), arg(1, 0.0)],
+                [arg(2, 0.5), arg(3, 0.5)],
+                arg(4, 1.0) != 0.0,
+            );
+            let rgba = scope_samples()
+                .and_then(|s| s.get(&key))
+                .unwrap_or_default();
+            Ok::<_, rquickjs::Error>(rgba.map(f64::from).to_vec())
+        })?,
     )?;
 
     h.set(

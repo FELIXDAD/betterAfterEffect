@@ -497,8 +497,15 @@ impl Panel for CompositionViewer {
             crate::tools::shared(cx.resources).lock().magnification = mag;
         }
 
-        // Evaluate.
+        // Evaluate (sampleImage reads the pixels the GPU preview reads back).
         let eval = self.eval.get(cx.resources);
+        if let Some(g) = &self.gpu
+            && !eval
+                .image_samples()
+                .is_some_and(|s| std::sync::Arc::ptr_eq(s, g.samples()))
+        {
+            eval.set_image_samples(Some(g.samples().clone()));
+        }
         let mut comp = match eval.evaluate_comp(cx.stage, &info.path, time) {
             Ok(c) => c,
             Err(e) => {
@@ -598,6 +605,13 @@ impl Panel for CompositionViewer {
             .as_mut()
             .and_then(|g| g.frame(cx.resources, cx.stage, &comp, resolution, view_camera));
         self.on_gpu = image.is_some();
+        if self
+            .gpu
+            .as_ref()
+            .is_some_and(GpuPreview::waiting_for_samples)
+        {
+            ui.ctx().request_repaint();
+        }
         // The Info panel: the pointer in comp pixels and, while the panel shows
         // it, the color under it (one texel read back from the GPU frame).
         if let Some(h) = resp.hover_pos() {
