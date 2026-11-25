@@ -1,0 +1,83 @@
+use crate::harness;
+use std::path::{Path, PathBuf};
+
+const ROOT: &str = "/private/tmp/bae-07-ae";
+
+pub(super) fn run() {
+    let cmd = std::env::args().nth(1).unwrap_or_else(|| "compare".into());
+    // BAE_07_ROOT isolates concurrent runs. BAE_07_CASES selects a case list for prepare.
+    let root = std::env::var_os("BAE_07_ROOT").map_or_else(|| PathBuf::from(ROOT), PathBuf::from);
+    match cmd.as_str() {
+        "prepare" => {
+            std::fs::create_dir_all(root.join("inputs")).unwrap();
+            for (name, _) in harness::probes() {
+                harness::write_png(
+                    &root.join("inputs").join(format!("{name}.png")),
+                    &harness::input(name),
+                );
+            }
+            let cases = std::env::var_os("BAE_07_CASES").map_or_else(
+                || serde_json::json!({"cases": harness::default_case_rows()}).to_string(),
+                |path| std::fs::read_to_string(path).unwrap(),
+            );
+            std::fs::write(root.join("cases.json"), cases).unwrap();
+            println!("wrote {}/inputs and cases.json", root.display());
+        }
+        "compare" => compare(&root),
+        "golden" => {
+            let golden = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ae/golden");
+            std::fs::create_dir_all(&golden).unwrap();
+            for case in load_cases(&root) {
+                let src = root.join("ae").join(format!("{}.png", case.name));
+                if src.exists() {
+                    std::fs::copy(&src, golden.join(format!("{}.png", case.name))).unwrap();
+                }
+            }
+            println!("copied AE outputs into {}", golden.display());
+        }
+        other => eprintln!("unknown command {other} (prepare | compare | golden)"),
+    }
+}
+
+fn compare(root: &Path) {
+    let gpu =
+        bae_gpu::GpuContext::new_headless(bae_gpu::GpuContextDescriptor::default().with_env())
+            .unwrap();
+    std::fs::create_dir_all(root.join("bae")).unwrap();
+    println!("| case | max Δ | mean Δ | px Δ>1 | px Δ>3 |");
+    println!("|---|---:|---:|---:|---:|");
+    for case in load_cases(root) {
+        let source = root.join("inputs").join(format!("{}.png", case.input));
+        let pixels = if source.exists() {
+            harness::read_png(&source, 8).expect("expected an RGBA calibration input")
+        } else {
+            harness::input(&case.input)
+        };
+        let bae = harness::render_with_maps(&gpu, &case, &pixels, |probe| {
+            let path = root.join("inputs").join(format!("{probe}.png"));
+            harness::read_image(&path, 8).unwrap_or_else(|| (harness::SIZE, harness::input(probe)))
+        });
+        harness::write_png(&root.join("bae").join(format!("{}.png", case.name)), &bae);
+        match harness::read_png(
+            &root.join("ae").join(format!("{}.png", case.name)),
+            case.bpc,
+        ) {
+            Some(ae) => {
+                let (max, mean, o1, o3) = harness::diff(&bae, &ae);
+                println!(
+                    "| {} | {max} | {mean:.3} | {o1} / {} | {o3} |",
+                    case.name,
+                    ae.len()
+                );
+            }
+            None => println!("| {} | (no AE render) | | | |", case.name),
+        }
+    }
+}
+
+fn load_cases(root: &Path) -> Vec<harness::Case> {
+    match std::fs::read_to_string(root.join("cases.json")) {
+        Ok(text) if std::env::var_os("BAE_07_ROOT").is_some() => harness::parse_cases(&text),
+        _ => harness::cases(),
+    }
+}

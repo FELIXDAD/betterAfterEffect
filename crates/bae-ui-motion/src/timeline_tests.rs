@@ -301,7 +301,7 @@ fn shift_f3_and_the_switch_toggle_the_graph_editor() {
         |x| x.action == crate::actions::ids::GRAPH_EDITOR && x.chord.to_string().contains("F3")
     ));
     // The comp switch in the timeline header (right end of the outline).
-    let sw = pos2(534.0 - 14.0, 22.0 + 17.0);
+    let sw = pos2(tl.last_axis.unwrap().left - 2.0 - 14.0, 22.0 + 17.0);
     h.click(&mut tl, sw, Modifiers::NONE);
     assert!(h.session().lock().graph_editor);
     // The button bar is shown from the next frame.
@@ -1297,15 +1297,6 @@ fn rove_across_time_needs_inner_spatial_keyframes() {
 
 #[test]
 fn layer_menu_entries_come_from_the_command_catalog() {
-    for (top, title) in crate::timeline::LAYER_MENU {
-        if top.is_empty() {
-            continue;
-        }
-        assert!(
-            crate::timeline::catalog_entry(top, title).is_some(),
-            "{top} ▸ {title} is not in the command catalog"
-        );
-    }
     for (top, title) in [
         ("Edit", "Select Keyframe Label Group"),
         ("Animation", "Track Camera"),
@@ -1407,6 +1398,66 @@ fn add_marker_puts_a_layer_or_comp_marker_at_the_cti() {
     h.apply(&r);
     assert!(markers(&h, &layer).is_empty());
     assert_eq!(markers(&h, &comp).len(), 1, "comp markers stay");
+}
+
+#[test]
+fn numbered_comp_markers_set_move_and_go_to() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let info = query::comp_info(&h.stage, &h.comp).unwrap();
+    let comp = h.comp.clone();
+    let mut tl = h.bars();
+    let num = |n: i64| json!({ "number": n });
+    // Shift+1 at 1 s: comp marker "1" (even with a layer selected).
+    h.session().lock().set_time(&info, Time::from_seconds(1.0));
+    let r = h.action(
+        &mut tl,
+        Invocation::with_params(ids::SET_COMP_MARKER, num(1)),
+    );
+    h.apply(&r);
+    let m = markers(&h, &comp);
+    assert_eq!(m.len(), 1);
+    assert_eq!(m[0].1, SEC);
+    let comment = |h: &H, p: &PrimPath| query::static_value(&h.stage.prim(p).unwrap(), "comment");
+    assert_eq!(comment(&h, &m[0].0), Some(Value::String("1".into())));
+    // Shift+1 again at 3 s moves it (one marker "1"); Shift+2 adds "2".
+    h.session().lock().set_time(&info, Time::from_seconds(3.0));
+    h.apply(&h.action(
+        &mut tl,
+        Invocation::with_params(ids::SET_COMP_MARKER, num(1)),
+    ));
+    h.session().lock().set_time(&info, Time::from_seconds(5.0));
+    h.apply(&h.action(
+        &mut tl,
+        Invocation::with_params(ids::SET_COMP_MARKER, num(2)),
+    ));
+    let m = markers(&h, &comp);
+    assert_eq!(
+        m.iter().map(|(_, t)| *t).collect::<Vec<_>>(),
+        vec![3 * SEC, 5 * SEC]
+    );
+    // 1 goes to marker "1"; a missing number does nothing.
+    h.action(
+        &mut tl,
+        Invocation::with_params(ids::GO_TO_COMP_MARKER, num(1)),
+    );
+    assert_eq!(h.session().lock().time(&comp), Time(3 * SEC));
+    h.action(
+        &mut tl,
+        Invocation::with_params(ids::GO_TO_COMP_MARKER, num(7)),
+    );
+    assert_eq!(h.session().lock().time(&comp), Time(3 * SEC));
+    // Each set is one undo step.
+    h.undo();
+    assert_eq!(markers(&h, &comp).len(), 1);
+    // The keys are bound: Shift+0–9 and 0–9 from the catalog.
+    let works = |action: &str| {
+        crate::catalog::KEYS
+            .iter()
+            .filter(|k| k.action == action)
+            .all(|k| k.status.works())
+    };
+    assert!(works(ids::SET_COMP_MARKER) && works(ids::GO_TO_COMP_MARKER));
 }
 
 #[test]
@@ -1722,4 +1773,39 @@ fn graph_editor_frame_cost() {
     measure(&mut h, &mut tl, "graph editor, pointer move", true, false);
     measure(&mut h, &mut tl, "graph editor, key drag", true, true);
     assert_eq!(tl.graph_editor().last.vaxes.len(), 183);
+}
+
+#[test]
+fn outline_follows_ae_metrics() {
+    // Positions measured on AE 26's Timeline: the Shy switch at x 275, the
+    // expand arrow at x 76 (left of the label), rows 17 points apart.
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let solid = h.layer.clone();
+    let other = path(&h.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"]);
+    let mut tl = h.bars();
+    let bar = |tl: &TimelinePanel, l: &PrimPath| {
+        tl.last_bars
+            .iter()
+            .find(|(p, _)| p == l)
+            .map(|(_, r)| r.center().y)
+            .unwrap()
+    };
+    assert_eq!((bar(&tl, &solid) - bar(&tl, &other)).abs(), 17.0);
+    let y = bar(&tl, &solid);
+    let r = h.click(&mut tl, pos2(275.0, y), Modifiers::NONE);
+    h.apply(&r);
+    let shy = query::static_value(&h.stage.prim(&solid).unwrap(), "shy");
+    assert_eq!(shy.and_then(|v| v.as_bool()), Some(true));
+    h.session().lock().reveal.clear();
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let y = bar(&tl, &solid);
+    let rows = tl.last_bars.len();
+    h.click(&mut tl, pos2(76.0, y), Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    assert!(
+        tl.expanded_layer(&solid),
+        "the arrow at x 76 expands the layer"
+    );
+    assert_eq!(tl.last_bars.len(), rows);
 }

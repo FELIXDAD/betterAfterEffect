@@ -1,0 +1,10 @@
+[effect.block-dissolve]
+name = "块溶解"
+keywords = ["块溶解"]
+
+[effect.block-dissolve.params]
+transition_completion = "过渡完成"
+block_width = "块宽度"
+block_height = "块高度"
+feather = "羽化"
+soft_edges_best_quality = "柔化边缘（最佳品质）"

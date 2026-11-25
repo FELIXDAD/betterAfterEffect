@@ -1,0 +1,635 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "four-color-gradient"
+name = "4-Color Gradient"
+category = "Generate"
+implementation = "wgsl"
+ae_match_names = ["ADBE 4ColorGradient"]
+keywords = ["4-color", "gradient"]
+shader = "shaders/four_color_gradient.wgsl"
+includes = ["shaders/blend.wgsl"]
+
+[[effect.param]]
+id = 11
+key = "positions_colors"
+type = "group"
+name = "Positions & Colors"
+end_id = 12
+
+[[effect.param]]
+id = 1
+key = "point_1"
+type = "point"
+name = "Point 1"
+group = "positions_colors"
+default = [0.1, 0.1]
+
+[[effect.param]]
+id = 2
+key = "color_1"
+type = "color"
+name = "Color 1"
+group = "positions_colors"
+default = [1, 1, 0, 1]
+
+[[effect.param]]
+id = 3
+key = "point_2"
+type = "point"
+name = "Point 2"
+group = "positions_colors"
+default = [0.9, 0.1]
+
+[[effect.param]]
+id = 4
+key = "color_2"
+type = "color"
+name = "Color 2"
+group = "positions_colors"
+default = [0, 1, 0, 1]
+
+[[effect.param]]
+id = 5
+key = "point_3"
+type = "point"
+name = "Point 3"
+group = "positions_colors"
+default = [0.1, 0.9]
+
+[[effect.param]]
+id = 6
+key = "color_3"
+type = "color"
+name = "Color 3"
+group = "positions_colors"
+default = [1, 0, 1, 1]
+
+[[effect.param]]
+id = 7
+key = "point_4"
+type = "point"
+name = "Point 4"
+group = "positions_colors"
+default = [0.9, 0.9]
+
+[[effect.param]]
+id = 8
+key = "color_4"
+type = "color"
+name = "Color 4"
+group = "positions_colors"
+default = [0, 0, 1, 1]
+
+[[effect.param]]
+id = 9
+key = "blend"
+type = "float"
+name = "Blend"
+default = 100
+range = [5, 10000]
+
+[[effect.param]]
+id = 10
+key = "jitter"
+type = "float"
+name = "Jitter"
+default = 0
+range = [0, 500]
+
+[[effect.param]]
+id = 13
+key = "opacity"
+type = "float"
+name = "Opacity"
+default = 100
+range = [0, 100]
+
+[[effect.param]]
+id = 14
+key = "blending_mode"
+type = "popup"
+name = "Blending Mode"
+default = 1
+choices = ["None", "Normal", "(-", "Add", "Multiply", "Screen", "Overlay", "Soft Light", "Hard Light", "(-", "Color Dodge", "Color Burn", "(-", "Darken", "Lighten", "Difference", "Exclusion", "(-", "Hue", "Saturation", "Color", "Luminosity"]
+
+[[effect]]
+id = "grid"
+name = "Grid"
+category = "Generate"
+implementation = "wgsl"
+ae_match_names = ["ADBE Grid"]
+keywords = ["grid"]
+shader = "shaders/grid.wgsl"
+includes = ["shaders/blend.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "anchor"
+type = "point"
+name = "Anchor"
+default = [0.5, 0.5]
+
+[[effect.param]]
+id = 2
+key = "size_from"
+type = "popup"
+name = "Size From"
+default = 1
+choices = ["Corner Point", "Width Slider", "Width & Height Sliders"]
+
+[[effect.param]]
+id = 3
+key = "corner"
+type = "point"
+name = "Corner"
+default = [0.6, 0.6]
+
+[[effect.param]]
+id = 4
+key = "width"
+type = "float"
+name = "Width"
+default = 32
+range = [1, 4000]
+
+[[effect.param]]
+id = 5
+key = "height"
+type = "float"
+name = "Height"
+default = 24
+range = [1, 4000]
+
+[[effect.param]]
+id = 6
+key = "border"
+type = "float"
+name = "Border"
+default = 5
+range = [0, 2000]
+
+[[effect.param]]
+id = 7
+key = "feather"
+type = "group"
+name = "Feather"
+end_id = 10
+
+[[effect.param]]
+id = 8
+key = "feather_width"
+type = "float"
+name = "Width"
+group = "feather"
+default = 0
+range = [0, 400]
+
+[[effect.param]]
+id = 9
+key = "feather_height"
+type = "float"
+name = "Height"
+group = "feather"
+default = 0
+range = [0, 400]
+
+[[effect.param]]
+id = 11
+key = "invert_grid"
+type = "checkbox"
+name = "Invert Grid"
+default = false
+
+[[effect.param]]
+id = 12
+key = "color"
+type = "color"
+name = "Color"
+default = [1, 1, 1, 1]
+
+[[effect.param]]
+id = 13
+key = "opacity"
+type = "float"
+name = "Opacity"
+default = 100
+range = [0, 100]
+
+[[effect.param]]
+id = 14
+key = "blending_mode"
+type = "popup"
+name = "Blending Mode"
+default = 1
+choices = ["None", "Normal", "Stencil Alpha", "(-", "Add", "Multiply", "Screen", "Overlay", "Soft Light", "Hard Light", "(-", "Color Dodge", "Color Burn", "(-", "Darken", "Lighten", "Difference", "Exclusion", "(-", "Hue", "Saturation", "Color", "Luminosity"]
+
+[[effect]]
+id = "cell-pattern"
+name = "Cell Pattern"
+category = "Generate"
+implementation = "wgsl"
+ae_match_names = ["ADBE Cell Pattern"]
+shader = "shaders/cell_pattern.wgsl"
+
+[effect.roi]
+read = "(params.cell_pattern == 5 || params.cell_pattern == 11) * params.size * 2"
+
+[[effect.pass]]
+entry = "cell_pattern"
+reads = ["input"]
+writes = "output"
+
+[[effect.param]]
+id = 1
+key = "cell_pattern"
+type = "popup"
+name = "Cell Pattern"
+default = 1
+choices = ["Bubbles", "Crystals", "Plates", "Static Plates", "Crystallize", "(-", "Pillow", "Crystals HQ", "Plates HQ", "Static Plates HQ", "Crystallize HQ", "Mixed Crystals", "Tubular"]
+
+[[effect.param]]
+id = 2
+key = "invert"
+type = "checkbox"
+name = "Invert"
+default = false
+
+[[effect.param]]
+id = 3
+key = "context_slider"
+type = "float"
+name = "Context Slider"
+default = 100
+range = [0, 10000]
+
+[[effect.param]]
+id = 4
+key = "overflow"
+type = "popup"
+name = "Overflow"
+default = 1
+choices = ["Clip", "Soft Clamp", "Wrap Back"]
+
+[[effect.param]]
+id = 5
+key = "disperse"
+type = "float"
+name = "Disperse"
+default = 1
+range = [0, 1.5]
+
+[[effect.param]]
+id = 6
+key = "size"
+type = "float"
+name = "Size"
+default = 60
+range = [2, 2000]
+
+[[effect.param]]
+id = 7
+key = "offset"
+type = "point"
+name = "Offset"
+default = [0.5, 0.5]
+
+[[effect.param]]
+id = 8
+key = "tiling_options"
+type = "group"
+name = "Tiling Options"
+end_id = 12
+
+[[effect.param]]
+id = 9
+key = "enable_tiling"
+type = "checkbox"
+name = "Enable Tiling"
+group = "tiling_options"
+default = false
+
+[[effect.param]]
+id = 10
+key = "horizontal_cells"
+type = "int"
+name = "Horizontal Cells"
+group = "tiling_options"
+default = 4
+range = [1, 1000]
+
+[[effect.param]]
+id = 11
+key = "vertical_cells"
+type = "int"
+name = "Vertical Cells"
+group = "tiling_options"
+default = 4
+range = [1, 1000]
+
+[[effect.param]]
+id = 13
+key = "evolution"
+type = "angle"
+name = "Evolution"
+default = 0
+
+[[effect.param]]
+id = 14
+key = "evolution_options"
+type = "group"
+name = "Evolution Options"
+end_id = 18
+
+[[effect.param]]
+id = 15
+key = "cycle_evolution"
+type = "checkbox"
+name = "Cycle Evolution"
+group = "evolution_options"
+default = false
+
+[[effect.param]]
+id = 16
+key = "cycle_in_revolutions"
+type = "float"
+name = "Cycle (in Revolutions)"
+group = "evolution_options"
+default = 1
+range = [1, 88]
+
+[[effect.param]]
+id = 17
+key = "random_seed"
+type = "int"
+name = "Random Seed"
+group = "evolution_options"
+default = 0
+range = [0, 100000]
+
+[[effect]]
+id = "checkerboard"
+name = "Checkerboard"
+category = "Generate"
+implementation = "wgsl"
+ae_match_names = ["ADBE Checkerboard"]
+shader = "shaders/checkerboard.wgsl"
+includes = ["shaders/blend.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "anchor"
+type = "point"
+name = "Anchor"
+default = [0.5, 0.5]
+
+[[effect.param]]
+id = 2
+key = "size_from"
+type = "popup"
+name = "Size From"
+default = 2
+choices = ["Corner Point", "Width Slider", "Width & Height Sliders"]
+
+[[effect.param]]
+id = 3
+key = "corner"
+type = "point"
+name = "Corner"
+default = [0.58, 0.5800000000000001]
+
+[[effect.param]]
+id = 4
+key = "width"
+type = "float"
+name = "Width"
+default = 16
+range = [1, 4000]
+
+[[effect.param]]
+id = 5
+key = "height"
+type = "float"
+name = "Height"
+default = 8
+range = [1, 4000]
+
+[[effect.param]]
+id = 6
+key = "feather"
+type = "group"
+name = "Feather"
+end_id = 9
+
+[[effect.param]]
+id = 7
+key = "feather_width"
+type = "float"
+name = "Width"
+group = "feather"
+default = 0
+range = [0, 400]
+
+[[effect.param]]
+id = 8
+key = "feather_height"
+type = "float"
+name = "Height"
+group = "feather"
+default = 0
+range = [0, 400]
+
+[[effect.param]]
+id = 10
+key = "color"
+type = "color"
+name = "Color"
+default = [1, 1, 1, 1]
+
+[[effect.param]]
+id = 11
+key = "opacity"
+type = "float"
+name = "Opacity"
+default = 100
+range = [0, 100]
+
+[[effect.param]]
+id = 12
+key = "blending_mode"
+type = "popup"
+name = "Blending Mode"
+default = 1
+choices = ["None", "Normal", "Stencil Alpha", "(-", "Add", "Multiply", "Screen", "Overlay", "Soft Light", "Hard Light", "(-", "Color Dodge", "Color Burn", "(-", "Darken", "Lighten", "Difference", "Exclusion", "(-", "Hue", "Saturation", "Color", "Luminosity"]
+
+[[effect]]
+id = "circle"
+name = "Circle"
+category = "Generate"
+implementation = "wgsl"
+ae_match_names = ["ADBE Circle"]
+shader = "shaders/circle.wgsl"
+includes = ["shaders/blend.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "center"
+type = "point"
+name = "Center"
+default = [0.5, 0.5]
+
+[[effect.param]]
+id = 2
+key = "radius"
+type = "float"
+name = "Radius"
+default = 75
+range = [-10000, 10000]
+
+[[effect.param]]
+id = 3
+key = "edge"
+type = "popup"
+name = "Edge"
+default = 1
+choices = ["None", "Edge Radius", "Thickness", "Thickness * Radius", "Thickness & Feather * Radius"]
+
+[[effect.param]]
+id = 4
+key = "context_slider"
+type = "float"
+name = "Context Slider"
+default = 10
+range = [0, 10000]
+
+[[effect.param]]
+id = 5
+key = "feather"
+type = "group"
+name = "Feather"
+end_id = 8
+
+[[effect.param]]
+id = 6
+key = "feather_outer_edge"
+type = "float"
+name = "Feather Outer Edge"
+group = "feather"
+default = 0
+range = [0, 10000]
+
+[[effect.param]]
+id = 7
+key = "feather_inner_edge"
+type = "float"
+name = "Feather Inner Edge"
+group = "feather"
+default = 0
+range = [0, 10000]
+
+[[effect.param]]
+id = 9
+key = "invert_circle"
+type = "checkbox"
+name = "Invert Circle"
+default = false
+
+[[effect.param]]
+id = 10
+key = "color"
+type = "color"
+name = "Color"
+default = [1, 1, 1, 1]
+
+[[effect.param]]
+id = 11
+key = "opacity"
+type = "float"
+name = "Opacity"
+default = 100
+range = [0, 100]
+
+[[effect.param]]
+id = 12
+key = "blending_mode"
+type = "popup"
+name = "Blending Mode"
+default = 1
+choices = ["None", "Normal", "Stencil Alpha", "(-", "Add", "Multiply", "Screen", "Overlay", "Soft Light", "Hard Light", "(-", "Color Dodge", "Color Burn", "(-", "Darken", "Lighten", "Difference", "Exclusion", "(-", "Hue", "Saturation", "Color", "Luminosity"]
+
+[[effect]]
+id = "ellipse"
+name = "Ellipse"
+category = "Generate"
+implementation = "wgsl"
+ae_match_names = ["ADBE ELLIPSE"]
+shader = "shaders/ellipse.wgsl"
+
+[[effect.param]]
+id = 1
+key = "center"
+type = "point"
+name = "Center"
+default = [0.5, 0.5]
+
+[[effect.param]]
+id = 2
+key = "width"
+type = "float"
+name = "Width"
+default = 50
+range = [0, 2000]
+
+[[effect.param]]
+id = 3
+key = "height"
+type = "float"
+name = "Height"
+default = 50
+range = [0, 2000]
+
+[[effect.param]]
+id = 4
+key = "thickness"
+type = "float"
+name = "Thickness"
+default = 8
+range = [0, 1000]
+
+[[effect.param]]
+id = 5
+key = "softness"
+type = "float"
+name = "Softness"
+default = 0.5
+range = [0, 1]
+
+[[effect.param]]
+id = 6
+key = "inside_color"
+type = "color"
+name = "Inside Color"
+default = [1, 0.745098, 0.980392, 0.72549]
+
+[[effect.param]]
+id = 7
+key = "outside_color"
+type = "color"
+name = "Outside Color"
+default = [1, 0.098039, 0.098039, 0.588235]
+
+[[effect.param]]
+id = 8
+key = "composite_on_original"
+type = "checkbox"
+name = "Composite On Original"
+default = false

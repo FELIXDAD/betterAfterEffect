@@ -1,0 +1,495 @@
+//! 3D layers on the GPU (docs/spec/ae/compositing-3d-color.md AE-CMP-400 … 406):
+//! projection through AE's camera against a CPU ray-cast reference, depth order,
+//! group splitting by 2D layers, intersections, camera layers and near-plane
+//! clipping.
+
+use std::sync::Arc;
+
+use bae_gpu::GpuContext;
+use bae_model::{PrimPath, Time, Value};
+use bae_render::camera::Camera;
+use bae_render::fixture::SceneBuilder;
+use bae_render::{
+    AnimEvaluator, CompEvaluator, LayerContent, OutputAlpha, RenderComp, RenderLayer,
+    RenderRequest, Renderer,
+};
+use glam::{DAffine2, DMat4, DVec2, DVec3};
+
+fn gpu() -> Option<Arc<GpuContext>> {
+    bae_gpu::testing::shared_context()
+}
+
+fn p(s: &str) -> PrimPath {
+    PrimPath::new(s).unwrap()
+}
+
+struct Image {
+    w: u32,
+    h: u32,
+    data: Vec<u8>,
+}
+
+impl Image {
+    fn px(&self, x: u32, y: u32) -> [u8; 4] {
+        let i = ((y * self.w + x) * 4) as usize;
+        self.data[i..i + 4].try_into().unwrap()
+    }
+}
+
+fn render(r: &mut Renderer, comp: &RenderComp) -> Image {
+    let frame = r.render_frame(comp, &RenderRequest::full()).unwrap();
+    let img = r.read_rgba8(&frame, OutputAlpha::Straight).unwrap();
+    Image {
+        w: img.width,
+        h: img.height,
+        data: img.data,
+    }
+}
+
+const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
+const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
+const BLUE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+
+fn solid(name: &str, color: [f32; 4], size: [u32; 2]) -> RenderLayer {
+    RenderLayer::new(
+        p(&format!("/comps/main/layers/{name}")),
+        LayerContent::Solid {
+            color,
+            width: size[0],
+            height: size[1],
+        },
+    )
+}
+
+/// A 3D solid with its centre (anchor) at `centre`, rotated by `rotation`
+/// (degrees, AE's X/Y/Z Rotation order).
+fn solid_3d(
+    name: &str,
+    color: [f32; 4],
+    size: [u32; 2],
+    centre: DVec3,
+    rotation: DVec3,
+) -> RenderLayer {
+    let mut l = solid(name, color, size);
+    let half = DVec3::new(f64::from(size[0]) / 2.0, f64::from(size[1]) / 2.0, 0.0);
+    let m = DMat4::from_translation(centre)
+        * bae_render::camera::xyz_rotation(rotation)
+        * DMat4::from_translation(-half);
+    l.matrix_3d = Some(m);
+    l.transform = DAffine2::from_cols(
+        m.x_axis.truncate().truncate(),
+        m.y_axis.truncate().truncate(),
+        m.w_axis.truncate().truncate(),
+    );
+    l
+}
+
+/// CPU reference: whether the pixel centre (x + ½, y + ½) sees the layer, by
+/// casting the ray through the pixel onto the layer plane.
+fn sees(comp: &RenderComp, layer: &RenderLayer, x: f64, y: f64) -> bool {
+    let cam = comp.view_camera();
+    let size = DVec2::new(f64::from(comp.width), f64::from(comp.height));
+    let m = layer.matrix_3d.unwrap();
+    let origin = cam.position();
+    let dir = cam.unproject(DVec2::new(x, y), 1.0, size) - origin;
+    // Plane: m · (u, v, 0, 1).
+    let n = m.x_axis.truncate().cross(m.y_axis.truncate());
+    let p0 = m.w_axis.truncate();
+    let t = n.dot(p0 - origin) / n.dot(dir);
+    if t <= 0.0 {
+        return false;
+    }
+    let hit = origin + dir * t;
+    let local = m.inverse().transform_point3(hit);
+    let LayerContent::Solid { width, height, .. } = layer.content else {
+        unreachable!()
+    };
+    local.x >= 0.0 && local.y >= 0.0 && local.x < f64::from(width) && local.y < f64::from(height)
+}
+
+/// Compares every pixel whose 2-pixel footprint (3×3 samples around the
+/// centre) is fully in or fully out of the layer with the reference; edge
+/// pixels are skipped. Returns (checked, mismatches).
+fn compare_interior(
+    img: &Image,
+    comp: &RenderComp,
+    layer: &RenderLayer,
+    color: [u8; 4],
+) -> (u32, u32) {
+    let (mut checked, mut bad) = (0, 0);
+    for y in 0..img.h {
+        for x in 0..img.w {
+            let mut inside = 0;
+            for oy in [-0.5, 0.5, 1.5] {
+                for ox in [-0.5, 0.5, 1.5] {
+                    inside += u32::from(sees(comp, layer, f64::from(x) + ox, f64::from(y) + oy));
+                }
+            }
+            let expect = match inside {
+                9 => color,
+                0 => [0, 0, 0, 0],
+                _ => continue,
+            };
+            checked += 1;
+            let got = img.px(x, y);
+            if got.iter().zip(expect).any(|(a, b)| a.abs_diff(b) > 1) {
+                bad += 1;
+            }
+        }
+    }
+    (checked, bad)
+}
+
+#[test]
+fn flat_3d_layer_through_default_camera_equals_2d() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    let mut flat = RenderComp::new(p("/comps/main"), 96, 64);
+    let mut l = solid("a", [0.2, 0.6, 1.0, 0.8], [30, 17]);
+    l.transform = DAffine2::from_translation(DVec2::new(40.3, 20.6))
+        * DAffine2::from_angle(0.4)
+        * DAffine2::from_scale(DVec2::new(1.3, 0.7));
+    flat.layers.push(l.clone());
+    let mut three = flat.clone();
+    let t = l.transform;
+    three.layers[0].matrix_3d = Some(DMat4::from_cols(
+        t.matrix2.x_axis.extend(0.0).extend(0.0),
+        t.matrix2.y_axis.extend(0.0).extend(0.0),
+        DVec3::Z.extend(0.0),
+        t.translation.extend(0.0).extend(1.0),
+    ));
+    let a = render(&mut r, &flat);
+    let b = render(&mut r, &three);
+    assert_eq!(
+        a.data, b.data,
+        "AE-CMP-400: z = 0 through the default camera is 2D"
+    );
+}
+
+#[test]
+fn doubled_distance_halves_the_size() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    let mut comp = RenderComp::new(p("/comps/main"), 100, 100);
+    let zoom = Camera::default_for(100, 100).zoom;
+    comp.layers.push(solid_3d(
+        "a",
+        RED,
+        [40, 40],
+        DVec3::new(50.0, 50.0, zoom),
+        DVec3::ZERO,
+    ));
+    let img = render(&mut r, &comp);
+    // 40 px at twice the distance: 20 px centred, [40, 60).
+    assert_eq!(img.px(40, 40), [255, 0, 0, 255]);
+    assert_eq!(img.px(59, 59), [255, 0, 0, 255]);
+    assert_eq!(img.px(39, 50)[3], 0);
+    assert_eq!(img.px(60, 50)[3], 0);
+}
+
+#[test]
+fn rotated_layers_match_ray_cast_reference() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    for rotation in [
+        DVec3::new(0.0, 60.0, 0.0),
+        DVec3::new(-50.0, 0.0, 20.0),
+        DVec3::new(30.0, -40.0, 10.0),
+        // A floor seen from above the horizon (X rotation 85°).
+        DVec3::new(85.0, 0.0, 0.0),
+    ] {
+        let mut comp = RenderComp::new(p("/comps/main"), 160, 120);
+        let layer = solid_3d(
+            "a",
+            GREEN,
+            [100, 80],
+            DVec3::new(80.0, 60.0, 30.0),
+            rotation,
+        );
+        comp.layers.push(layer.clone());
+        let img = render(&mut r, &comp);
+        let (checked, bad) = compare_interior(&img, &comp, &layer, [0, 255, 0, 255]);
+        assert!(checked > 10_000, "{rotation}: {checked}");
+        assert_eq!(bad, 0, "{rotation}: {bad} of {checked} pixels differ");
+    }
+}
+
+#[test]
+fn depth_order_beats_stacking_order() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    let mut comp = RenderComp::new(p("/comps/main"), 100, 100);
+    // Top of the stack but farther away.
+    comp.layers.push(solid_3d(
+        "far",
+        RED,
+        [40, 40],
+        DVec3::new(45.0, 50.0, 100.0),
+        DVec3::ZERO,
+    ));
+    // Bottom of the stack, nearer.
+    comp.layers.push(solid_3d(
+        "near",
+        BLUE,
+        [40, 40],
+        DVec3::new(55.0, 50.0, -100.0),
+        DVec3::ZERO,
+    ));
+    let img = render(&mut r, &comp);
+    assert_eq!(img.px(50, 50), [0, 0, 255, 255], "nearer layer in front");
+
+    // A 2D layer between them splits the group: stacking order again.
+    comp.layers.insert(1, {
+        let mut l = solid("flat", GREEN, [4, 4]);
+        l.transform = DAffine2::from_translation(DVec2::new(0.0, 0.0));
+        l
+    });
+    let img = render(&mut r, &comp);
+    assert_eq!(
+        img.px(50, 50),
+        [255, 0, 0, 255],
+        "AE-CMP-406: groups composite by stack"
+    );
+    assert_eq!(img.px(1, 1), [0, 255, 0, 255]);
+}
+
+#[test]
+fn coplanar_layers_keep_stacking_order() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    let mut comp = RenderComp::new(p("/comps/main"), 64, 64);
+    let centre = DVec3::new(32.0, 32.0, 50.0);
+    let rot = DVec3::new(0.0, 30.0, 0.0);
+    comp.layers
+        .push(solid_3d("top", RED, [20, 20], centre, rot));
+    comp.layers
+        .push(solid_3d("bottom", BLUE, [40, 40], centre, rot));
+    let img = render(&mut r, &comp);
+    assert_eq!(img.px(32, 32), [255, 0, 0, 255]);
+}
+
+#[test]
+fn intersecting_layers_cut_each_other() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    let mut comp = RenderComp::new(p("/comps/main"), 120, 80);
+    let centre = DVec3::new(60.0, 40.0, 0.0);
+    // Flat red on top of the stack; green turned 45° about y through the same
+    // centre: its left half recedes behind the red, its right half comes forward.
+    comp.layers
+        .push(solid_3d("flat", RED, [80, 40], centre, DVec3::ZERO));
+    comp.layers.push(solid_3d(
+        "turned",
+        GREEN,
+        [80, 60],
+        centre,
+        DVec3::new(0.0, 45.0, 0.0),
+    ));
+    let img = render(&mut r, &comp);
+    assert_eq!(img.px(45, 40), [255, 0, 0, 255], "left: red in front");
+    assert_eq!(img.px(75, 40), [0, 255, 0, 255], "right: green in front");
+    // Above the red, the receding green shows on both sides.
+    assert_eq!(img.px(50, 15)[1], 255);
+    // The cut is anti-aliased without a seam: no transparent pixels on it.
+    for y in 25..55 {
+        assert_eq!(img.px(60, y)[3], 255, "seam at y = {y}");
+    }
+}
+
+#[test]
+fn camera_layer_moves_the_view() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    let mut comp = RenderComp::new(p("/comps/main"), 100, 100);
+    comp.layers.push(solid_3d(
+        "a",
+        RED,
+        [20, 20],
+        DVec3::new(50.0, 50.0, 0.0),
+        DVec3::ZERO,
+    ));
+    let zoom = Camera::default_for(100, 100).zoom;
+    // Same zoom, 30 px to the right: the layer appears 30 px to the left.
+    comp.camera = Some(Camera::new(
+        DMat4::from_translation(DVec3::new(80.0, 50.0, -zoom)),
+        zoom,
+    ));
+    let img = render(&mut r, &comp);
+    assert_eq!(img.px(10, 50), [255, 0, 0, 255]);
+    assert_eq!(img.px(29, 50), [255, 0, 0, 255]);
+    assert_eq!(img.px(31, 50)[3], 0);
+    // Rolled 90°: the 20×20 square stays put, a wide bar turns upright.
+    comp.layers[0] = solid_3d("a", RED, [60, 10], DVec3::new(50.0, 50.0, 0.0), DVec3::ZERO);
+    comp.camera = Some(Camera::from_transform(
+        DMat4::IDENTITY,
+        DVec3::new(50.0, 50.0, -zoom),
+        None,
+        DVec3::ZERO,
+        DVec3::new(0.0, 0.0, 90.0),
+        zoom,
+    ));
+    let img = render(&mut r, &comp);
+    assert_eq!(img.px(50, 25), [255, 0, 0, 255]);
+    assert_eq!(img.px(25, 50)[3], 0);
+}
+
+#[test]
+fn geometry_behind_the_camera_is_clipped() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    let mut comp = RenderComp::new(p("/comps/main"), 100, 100);
+    let zoom = Camera::default_for(100, 100).zoom;
+    // A long floor 30 px below the camera, from far behind it to far ahead.
+    let layer = solid_3d(
+        "floor",
+        GREEN,
+        [200, 20_000],
+        DVec3::new(50.0, 80.0, -zoom),
+        DVec3::new(90.0, 0.0, 0.0),
+    );
+    comp.layers.push(layer.clone());
+    let img = render(&mut r, &comp);
+    // Ground below the horizon (y = 50), sky above: no wrap-around.
+    assert_eq!(img.px(50, 95), [0, 255, 0, 255]);
+    for y in 0..48 {
+        assert_eq!(img.px(50, y)[3], 0, "sky at y = {y}");
+    }
+    let (checked, bad) = compare_interior(&img, &comp, &layer, [0, 255, 0, 255]);
+    assert!(checked > 5_000);
+    assert_eq!(bad, 0);
+}
+
+#[test]
+fn evaluator_feeds_3d_layers_and_the_camera() {
+    let Some(gpu) = gpu() else { return };
+    let mut b = SceneBuilder::new();
+    let comp = b
+        .comp(
+            "main",
+            100,
+            100,
+            bae_model::FrameRate::FPS_30,
+            Time::ONE_SECOND,
+        )
+        .unwrap();
+    let cam = b.layer(&comp, "cam", "camera", None).unwrap();
+    let zoom = Camera::default_for(100, 100).zoom;
+    b.set(&cam, "camera:zoom", Value::Float(zoom)).unwrap();
+    b.set(&cam, "camera:type", Value::Enum("one_node".into()))
+        .unwrap();
+    b.set(&cam, "transform:position", Value::Vec3([80.0, 50.0, -zoom]))
+        .unwrap();
+    let layer = b
+        .solid_layer(&comp, "a", [1.0, 0.0, 0.0, 1.0], [20, 20], [40.0, 40.0])
+        .unwrap();
+    b.set(&layer, "three_d", Value::Bool(true)).unwrap();
+    let stage = b.into_stage();
+    let mut eval = AnimEvaluator::new(None);
+    let rc = eval.evaluate(&stage, &comp, Time::ZERO).unwrap();
+    assert!(rc.camera.is_some(), "the camera layer is the active camera");
+    let a = rc.layers.iter().find(|l| l.path == layer).unwrap();
+    assert!(a.matrix_3d.is_some());
+    let mut r = Renderer::new(gpu);
+    let img = render(&mut r, &rc);
+    // Camera 30 px to the right: the square at [40, 60) shows at [10, 30).
+    assert_eq!(img.px(20, 50), [255, 0, 0, 255]);
+    assert_eq!(img.px(50, 50)[3], 0);
+}
+
+#[test]
+fn orthographic_views_draw_without_perspective() {
+    use bae_render::camera::OrthoView;
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    let mut comp = RenderComp::new(p("/comps/main"), 100, 100);
+    // Far behind the default camera (it would not be drawn in perspective),
+    // and a nearer layer that must cover it where they overlap.
+    comp.layers.push(solid_3d(
+        "far",
+        RED,
+        [40, 40],
+        DVec3::new(40.0, 50.0, 5000.0),
+        DVec3::ZERO,
+    ));
+    comp.layers.push(solid_3d(
+        "near",
+        BLUE,
+        [40, 40],
+        DVec3::new(60.0, 50.0, -5000.0),
+        DVec3::ZERO,
+    ));
+    let centre = DVec3::new(50.0, 50.0, 0.0);
+    comp.camera = Some(Camera::orthographic(OrthoView::Front, centre, 1.0));
+    let img = render(&mut r, &comp);
+    // 40 px squares at any depth, nearer (blue) in front.
+    assert_eq!(img.px(25, 50), [255, 0, 0, 255]);
+    assert_eq!(img.px(50, 50), [0, 0, 255, 255]);
+    assert_eq!(img.px(79, 50), [0, 0, 255, 255]);
+    assert_eq!(img.px(80, 50)[3], 0);
+    // From the top, a floor (X rotation 90°) is its full rectangle: 60 wide,
+    // 40 deep, the front edge (z = −20) at the bottom.
+    comp.layers = vec![solid_3d(
+        "floor",
+        GREEN,
+        [60, 40],
+        DVec3::new(50.0, 80.0, 0.0),
+        DVec3::new(90.0, 0.0, 0.0),
+    )];
+    comp.camera = Some(Camera::orthographic(OrthoView::Top, centre, 1.0));
+    let img = render(&mut r, &comp);
+    assert_eq!(img.px(20, 30), [0, 255, 0, 255]);
+    assert_eq!(img.px(79, 69), [0, 255, 0, 255]);
+    assert_eq!(img.px(19, 50)[3], 0);
+    assert_eq!(img.px(50, 70)[3], 0);
+    assert_eq!(img.px(50, 29)[3], 0);
+}
+
+#[test]
+fn cuts_leave_no_see_through_seams() {
+    let Some(gpu) = gpu() else { return };
+    let mut r = Renderer::new(gpu);
+    let mut comp = RenderComp::new(p("/comps/main"), 100, 100);
+    // A small layer turned 60° about y crosses a wide flat one; its plane cuts
+    // the flat layer along a line that runs on past the small layer, where
+    // nothing covers the flat layer. (The small layer is at the bottom of the
+    // stack, so its plane is the one that cuts.)
+    comp.layers.push(solid_3d(
+        "wide",
+        RED,
+        [80, 30],
+        DVec3::new(50.0, 50.0, 0.0),
+        DVec3::ZERO,
+    ));
+    comp.layers.push(solid_3d(
+        "small",
+        GREEN,
+        [10, 10],
+        DVec3::new(30.0, 50.0, 0.0),
+        DVec3::new(0.0, 60.0, 0.0),
+    ));
+    let img = render(&mut r, &comp);
+    for y in (36..44).chain(57..64) {
+        for x in 26..35 {
+            assert_eq!(img.px(x, y), [255, 0, 0, 255], "seam at ({x}, {y})");
+        }
+    }
+    // Layers that do not overlap on screen are not cut at all.
+    comp.layers[0] = solid_3d(
+        "wide",
+        RED,
+        [80, 30],
+        DVec3::new(50.0, 60.0, 0.0),
+        DVec3::ZERO,
+    );
+    comp.layers[1] = solid_3d(
+        "apart",
+        GREEN,
+        [20, 20],
+        DVec3::new(50.0, 15.0, 0.0),
+        DVec3::new(0.0, 60.0, 0.0),
+    );
+    let img = render(&mut r, &comp);
+    for x in 12..88 {
+        assert_eq!(img.px(x, 60), [255, 0, 0, 255], "x = {x}");
+    }
+}

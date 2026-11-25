@@ -50,6 +50,10 @@ required-features = ["media"]
 name = "masks"
 harness = false
 
+[[bench]]
+name = "three_d"
+harness = false
+
 [[test]]
 name = "ae_golden"
 required-features = ["media"]

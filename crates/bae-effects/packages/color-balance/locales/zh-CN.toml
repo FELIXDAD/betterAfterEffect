@@ -1,0 +1,15 @@
+[effect.color-balance]
+name = "颜色平衡"
+keywords = ["颜色平衡"]
+
+[effect.color-balance.params]
+shadow_red = "阴影红色平衡"
+shadow_green = "阴影绿色平衡"
+shadow_blue = "阴影蓝色平衡"
+midtone_red = "中间调红色平衡"
+midtone_green = "中间调绿色平衡"
+midtone_blue = "中间调蓝色平衡"
+highlight_red = "高光红色平衡"
+highlight_green = "高光绿色平衡"
+highlight_blue = "高光蓝色平衡"
+preserve = "保持发光度"

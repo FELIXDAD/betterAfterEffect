@@ -1,0 +1,46 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "threshold"
+name = "Threshold"
+category = "Stylize"
+implementation = "wgsl"
+ae_match_names = ["ADBE Threshold2"]
+keywords = ["threshold", "black and white"]
+shader = "shaders/threshold.wgsl"
+
+[[effect.param]]
+id = 1
+key = "level"
+type = "float"
+name = "Level"
+default = 0.5
+range = [-30000, 30000]
+slider = [0, 1]
+
+[[effect]]
+id = "threshold_legacy"
+name = "Threshold"
+category = "Obsolete"
+implementation = "wgsl"
+ae_match_names = ["ADBE Threshold"]
+keywords = ["threshold", "legacy"]
+shader = "shaders/threshold.wgsl"
+
+[[effect.param]]
+id = 1
+key = "level"
+type = "float"
+name = "Level"
+default = 127.5
+range = [-30000, 7650000]
+slider = [0, 255]

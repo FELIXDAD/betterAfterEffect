@@ -206,7 +206,10 @@ impl Panel for ProjectPanel {
         // Column headers.
         let width = ui.available_width();
         let cols = columns(width);
-        let (head, _) = ui.allocate_exact_size(vec2(width, 18.0), Sense::hover());
+        let (head, head_resp) = ui.allocate_exact_size(vec2(width, 18.0), Sense::click());
+        common::context_menu(&head_resp, &mut |ui| {
+            crate::context_menu::show(ui, cx, crate::context_menu::PROJECT_HEADER);
+        });
         {
             let p = ui.painter();
             p.rect_filled(head, 0.0, color::PANEL);
@@ -355,33 +358,18 @@ impl Panel for ProjectPanel {
                     if row.kind != ItemKind::Folder {
                         resp.dnd_set_drag_payload(ItemDrag(row.path.clone()));
                     }
-                    resp.context_menu(|ui| {
+                    // AE 26's item menu (the same for comps, footage and folders).
+                    common::context_menu(&resp, &mut |ui| {
                         {
                             let mut s = session.lock();
                             if !s.selected_items.contains(&row.path) {
                                 s.selected_items = vec![row.path.clone()];
                             }
                         }
-                        if row.kind == ItemKind::Comp && ui.button(tr("Open in Timeline")).clicked() {
-                            open_comp = Some(row.path.clone());
-                            ui.close();
-                        }
-                        if ui.button(tr("New Composition")).clicked() {
-                            menu_new_comp = true;
-                            ui.close();
-                        }
-                        if ui.button(tr("New Folder")).clicked() {
-                            menu_new_folder = true;
-                            ui.close();
-                        }
-                        ui.separator();
-                        if ui.button(tr("Rename")).clicked() {
+                        let chosen =
+                            crate::context_menu::show(ui, cx, crate::context_menu::PROJECT_ITEM);
+                        if chosen == Some("Rename") {
                             self.rename = Some((row.path.clone(), name.clone()));
-                            ui.close();
-                        }
-                        if ui.button(tr("Delete")).clicked() {
-                            delete = session.lock().selected_items.clone();
-                            ui.close();
                         }
                     });
                 }
@@ -394,15 +382,8 @@ impl Panel for ProjectPanel {
                     if resp.clicked() {
                         session.lock().selected_items.clear();
                     }
-                    resp.context_menu(|ui| {
-                        if ui.button(tr("New Composition")).clicked() {
-                            menu_new_comp = true;
-                            ui.close();
-                        }
-                        if ui.button(tr("New Folder")).clicked() {
-                            menu_new_folder = true;
-                            ui.close();
-                        }
+                    common::context_menu(&resp, &mut |ui| {
+                        crate::context_menu::show(ui, cx, crate::context_menu::PROJECT_BLANK);
                     });
                 }
             });

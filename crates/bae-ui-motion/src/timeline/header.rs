@@ -190,7 +190,15 @@ impl TimelinePanel {
         }
         gresp.on_hover_text(tr("Graph Editor"));
 
-        // Column headers.
+        // Column headers (right-click: AE's Hide This / Columns ▸ menu).
+        let cresp = ui.interact(
+            colrow,
+            ui.id().with("timeline_columns"),
+            egui::Sense::click(),
+        );
+        crate::common::context_menu(&cresp, &mut |ui| {
+            crate::context_menu::show(ui, cx, crate::context_menu::TIMELINE_HEADER);
+        });
         let p = ui.painter();
         p.rect_filled(colrow, 0.0, color::PANEL);
         p.hline(
@@ -228,7 +236,7 @@ impl TimelinePanel {
             color::TEXT,
         );
         p.text(
-            pos2(l + cols.name + 16.0, cy),
+            pos2(l + cols.name + 2.0, cy),
             Align2::LEFT_CENTER,
             tr("Layer Name"),
             theme::small(),
@@ -242,6 +250,7 @@ impl TimelinePanel {
             Icon::FrameBlend,
             Icon::MotionBlur,
             Icon::Adjustment,
+            Icon::Cube,
         ]
         .into_iter()
         .enumerate()
@@ -257,7 +266,7 @@ impl TimelinePanel {
             );
         }
         p.text(
-            pos2(l + cols.parent + 4.0, cy),
+            pos2(l + cols.parent + PARENT_PAD, cy),
             Align2::LEFT_CENTER,
             tr("Parent & Link"),
             theme::small(),

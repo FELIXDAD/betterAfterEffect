@@ -1,0 +1,354 @@
+{
+  "schemaVersion": "1.0",
+  "id": "keyboard-shortcuts",
+  "title": { "en": "Keyboard Shortcuts", "zh": "键盘快捷键", "dictKey": "$$$/dvaeve/ksv/kResDLGShortcutsDlgTitle" },
+  "triggers": [
+    { "menuEn": "Edit ▸ Keyboard Shortcuts", "menuZh": "编辑 ▸ 键盘快捷键", "shortcutMac": "Cmd+Option+'", "aeCommand": "CSwitchboard/OpenKeyboardShortcutsPanel" }
+  ],
+  "source": {
+    "application": "Adobe After Effects 26.2.1 (26.2.1x2)",
+    "platform": "macOS (arm64), main display 1920x1080 @1x",
+    "localeObserved": "en_US UI; Chinese strings from the bundled zh_CN dictionary (after_effects_zh_CN.dat, key per string)",
+    "date": "2026-11-24",
+    "method": "Live observation: CGEvent clicks / key presses, window captures (not committed), Copy To Clipboard text. Windows counterpart: ../../ui/dialogs/keyboard-shortcuts.json"
+  },
+  "window": {
+    "sizePt": { "w": 1520, "h": 887 },
+    "modal": true,
+    "titleBar": "macOS traffic lights (close, minimize, zoom) + title 'Keyboard Shortcuts'",
+    "background": "#272727",
+    "notesEn": "Opened centred over the main window. The app menu bar and panels are blocked while it is open."
+  },
+  "regionsPt": {
+    "presetRow": { "y": 52, "h": 25 },
+    "commandsRow": { "y": 88, "h": 25 },
+    "keyboard": { "x": 20, "y": 127, "w": 1480, "h": 385 },
+    "legend": { "y": 540, "h": 16 },
+    "search": { "x": 20, "y": 583, "w": 220, "h": 24 },
+    "keyLabel": { "x": 812, "y": 584 },
+    "commandTree": { "x": 20, "y": 630, "w": 780, "h": 191, "headerH": 18, "rowH": 33 },
+    "keyTable": { "x": 812, "y": 630, "w": 581, "h": 191, "rowH": 33 },
+    "undoClear": { "x": 1405, "w": 95, "undoY": 762, "clearY": 798, "h": 24 },
+    "messageBar": { "x": 20, "y": 832, "h": 28 },
+    "okCancel": { "cancel": { "x": 1366, "y": 838, "w": 58, "h": 23 }, "ok": { "x": 1432, "y": 838, "w": 53, "h": 23 } }
+  },
+  "colors": {
+    "notesEn": "sRGB sampled from window captures.",
+    "dialogBackground": "#272727",
+    "applicationShortcut": "#8765ce",
+    "panelShortcut": "#16be9e",
+    "unassignedKey": "#838383",
+    "modifierKey": "#636363",
+    "modifierPressed": "#0071ca",
+    "selectedKeyOutline": "#4ea9f6",
+    "listBackground": "#101010",
+    "listHeaderAndGroupRow": "#2d2d2d",
+    "selectedRow": "#303030",
+    "text": "#bebebe",
+    "keyCapText": "#ffffff",
+    "conflictLink": "#4ea9f6",
+    "toastBackground": "#009265"
+  },
+  "controls": [
+    {
+      "id": "preset",
+      "type": "dropdown",
+      "label": { "en": "Preset:", "zh": "预设:", "dictKey": "$$$/dvaeve/ksv/kResDLGShortcutsDialogKeyboardLayoutPresetPopupName" },
+      "rectPt": { "x": 88, "y": 52, "w": 258, "h": 25 },
+      "items": "every preset file in aeks/, shown with its file name and .txt extension, alphabetical, a check mark on the current one",
+      "observedItems": [
+        { "before": ["After Effects Default.txt"] },
+        { "afterEditingTheBuiltIn": ["After Effects Default.txt", "Custom.txt"] }
+      ],
+      "zhNames": { "After Effects Default.txt": "After Effects 默认值.txt (Windows R1)", "Custom.txt": "自定义.txt (Windows R1)" },
+      "tooltip": { "zh": "选择当前的键盘快捷键组", "dictKey": "$$$/exo/sharedui/ShortcutDialog/xml/SetPopupTooltip" }
+    },
+    {
+      "id": "save_as",
+      "type": "button",
+      "label": { "en": "Save As...", "zh": "另存为...", "dictKey": "$$$/dvaeve/ksv/kResDLGSaveAs" },
+      "rectPt": { "x": 368, "y": 53, "w": 78, "h": 23 },
+      "opens": {
+        "title": { "en": "Create Preset", "zh": "创建预设", "dictKey": "$$$/dvaui/ksv/CreatePreset" },
+        "sizePt": { "w": 354, "h": 240 },
+        "modal": true,
+        "content": [
+          "Heading 'Create Preset' with a rule under it",
+          "Label 'Preset Name:' (zh 预设名称 -, $$$/dvaui/ksv/KeyboardLayoutSetName) and a text field prefilled with the current preset name including .txt, all text selected",
+          "Buttons Cancel (secondary) and Save (blue, default) at the bottom right"
+        ],
+        "defaultNameForNewPreset": { "zh": "无标题自定义预设", "dictKey": "$$$/dvaui/ksv/DefaultFileName", "notesEn": "not observed in English (the current preset was Custom.txt)" },
+        "invalidName": { "zh": "您输入的键组名称无效。请选择另一个名称。", "dictKey": "$$$/dvaui/ksv/KeySetNameInvalid" },
+        "existingName": { "zh": "已存在名为“@0”的自定义快捷键集。是否要将其覆盖？", "dictKey": "$$$/dvaui/ksv/OverwriteExistingMsg" },
+        "observed": "opened and cancelled only"
+      },
+      "tooltip": { "zh": "以新名称保存当前的快捷键组", "dictKey": "$$$/exo/sharedui/ShortcutDialog/xml/SaveAsTooltip" }
+    },
+    {
+      "id": "delete_preset",
+      "type": "button",
+      "label": { "en": "Delete", "zh": "删除", "dictKey": "$$$/dvaeve/ksv/kResDLGDelete" },
+      "rectPt": { "x": 460, "y": 53, "w": 78, "h": 23 },
+      "enableRule": "disabled while the built-in After Effects Default.txt is selected; enabled for Custom.txt and saved presets",
+      "confirm": { "zh": "是否确定要删除键盘布局集“@0”？", "dictKey": "$$$/dvaui/ksv/VisualShortcuts/DeleteLayoutSet", "observed": false },
+      "tooltip": { "zh": "删除当前的键盘快捷键组", "dictKey": "$$$/exo/sharedui/ShortcutDialog/xml/DeleteTooltip" }
+    },
+    {
+      "id": "copy_to_clipboard",
+      "type": "button",
+      "label": { "en": "Copy To Clipboard", "zh": "复制到剪贴板", "dictKey": "$$$/dvaeve/ksv/kResDLGClipboard" },
+      "rectPt": { "x": 551, "y": 53, "w": 106, "h": 23 },
+      "effect": "copies the whole command tree of the current preset (independent of search, scope and expansion) as text, see clipboardFormat; shows a toast",
+      "toast": {
+        "en": "Copied to clipboard",
+        "zh": "复制到剪贴板",
+        "dictKey": "$$$/dvaui/ksv/CopiedToClipboardText",
+        "failure": { "zh": "复制到剪贴板失败", "dictKey": "$$$/dvaui/ksv/CopiedToClipboardFaliedText" },
+        "look": "green pill (white check-circle icon, text, a vertical divider and an × close button), 220x48 pt window, centred horizontally on the dialog just above the bottom bar (dialog-local y≈799), fades out after about 2 s"
+      },
+      "tooltip": { "zh": "将键盘快捷键的整个列表复制到操作系统剪贴板", "dictKey": "$$$/exo/sharedui/ShortcutDialog/xml/CopyToClipboardTT" }
+    },
+    {
+      "id": "keyboard_layout",
+      "type": "dropdown",
+      "label": { "en": "Keyboard Layout:", "zh": "键盘布局 -", "dictKey": "$$$/dvaeve/ksv/kResDLGShortcutDialogKeyboardLayoutLayoutPopupName" },
+      "rectPt": { "x": 1435, "y": 52, "w": 70, "h": 25 },
+      "itemsMacOrder": ["en", "sv", "ru", "pt", "nb", "ko", "de", "it", "es", "fr", "ja"],
+      "default": "en",
+      "notesEn": "Popup opens below the field with a check mark on the current item. Windows 26.0 lists the same 11 codes in another order. Only the key cap labels change."
+    },
+    {
+      "id": "command_scope",
+      "type": "dropdown",
+      "label": { "en": "Commands:", "zh": "命令:", "dictKey": "$$$/dvaeve/ksv/kResDLGShorcutsDialogCommandPanelPopupName" },
+      "rectPt": { "x": 88, "y": 88, "w": 258, "h": 25 },
+      "items": [
+        { "en": "Application", "zh": "应用程序", "dictKey": "$$$/AE/KSV/ShortcutApplicationMenuItem" },
+        { "separator": true },
+        { "en": "Character and Paragraph Panels", "zh": "字符和段落面板", "dictKey": "$$$/AE/KB/TextLayer" },
+        { "en": "Composition Panel", "zh": "合成面板", "dictKey": "$$$/AE/KB/Comp" },
+        { "en": "Effect Controls Panel", "zh": "效果控件面板", "dictKey": "$$$/AE/KB/Effects" },
+        { "en": "Flowchart Panel", "zh": "流程图面板", "dictKey": "$$$/AE/KB/Flowchart" },
+        { "en": "Layer Panel", "zh": "图层面板", "dictKey": "$$$/AE/KB/Layer" },
+        { "en": "Paint Panel", "zh": "绘画面板", "dictKey": "$$$/AE/KB/Paint" },
+        { "en": "Project Panel", "zh": "项目面板", "dictKey": "$$$/AE/KB/Project" },
+        { "en": "Render Queue Panel", "zh": "渲染队列面板", "dictKey": "$$$/AE/KB/RenderQueue" },
+        { "en": "Timeline Panel", "zh": "时间轴面板", "dictKey": "$$$/AE/KB/Timeline" },
+        { "en": "Tracker Panel", "zh": "跟踪器面板", "dictKey": "$$$/AE/KB/Tracker" },
+        { "en": "Viewer Panel", "zh": "查看器面板", "dictKey": "$$$/AE/KB/Viewer" }
+      ],
+      "notesEn": "Mac 26.2.1 lists 12 items (Windows 26.0 also had 'App'). Panels are alphabetical after a separator. Choosing a panel: the keyboard shows only that panel's shortcuts (solid green; everything else grey, no application colours) and the tree shows that panel's group expanded at the top. Choosing Application returns to the mixed colouring."
+    },
+    {
+      "id": "visual_keyboard",
+      "type": "custom_keyboard",
+      "layoutMac": {
+        "units": "pt, dialog-local; key height 60 unless given; pitch 65",
+        "rows": [
+          { "y": 127, "keys": [["F1",20,76],["F2",100,76],["F3",180,76],["F4",260,76],["F5",341,76],["F6",421,76],["F7",501,76],["F8",582,76],["F9",662,76],["F10",742,76],["F11",822,76],["F12",903,76]] },
+          { "y": 192, "keys": [["`",20,60],["1",85,60],["2",150,60],["3",215,60],["4",280,60],["5",345,60],["6",410,60],["7",475,60],["8",540,60],["9",605,60],["0",670,60],["-",735,60],["=",800,60],["Delete",865,114]] },
+          { "y": 257, "keys": [["Tab",20,114],["Q",139,60],["W",204,60],["E",269,60],["R",334,60],["T",399,60],["Y",464,60],["U",529,60],["I",594,60],["O",659,60],["P",724,60],["[",789,60],["]",854,60],["\\",919,60]] },
+          { "y": 322, "keys": [["Caps Lock",20,120],["A",144,60],["S",209,60],["D",274,60],["F",339,60],["G",404,60],["H",469,60],["J",534,60],["K",599,60],["L",664,60],[";",729,60],["'",794,60],["Return",859,120]] },
+          { "y": 387, "keys": [["⇧ Shift",20,153],["Z",177,60],["X",242,60],["C",307,60],["V",372,60],["B",437,60],["N",502,60],["M",567,60],[",",632,60],[".",697,60],["/",762,60],["⇧ Shift",827,152]] },
+          { "y": 452, "keys": [["⌃ Ctrl",20,90],["⌥ Opt",115,60],["⌘ Cmd",180,90],["Space",275,450],["⌘ Cmd",730,90],["⌥ Opt",825,60],["⌃ Ctrl",890,89]] }
+        ],
+        "navigation": [["Home",1081,192],["Page Up",1146,192],["Forward Delete",1016,257],["End",1081,257],["Page Down",1146,257],["Up",1081,387],["Left",1016,452],["Down",1081,452],["Right",1146,452]],
+        "numpad": [["= (Num)",1245,192],["/ (Num)",1310,192],["* (Num)",1375,192],["- (Num)",1440,192],["7 (Num)",1245,257],["8 (Num)",1310,257],["9 (Num)",1375,257],["+ (Num)",1440,257,60,125],["4 (Num)",1245,322],["5 (Num)",1310,322],["6 (Num)",1375,322],["1 (Num)",1245,387],["2 (Num)",1310,387],["3 (Num)",1375,387],["Enter (Num)",1440,387,60,125],["0 (Num)",1245,452,125,60],[". (Num)",1375,452]],
+        "notesEn": "No Esc, Help, Insert, F13+ or Clear key on the Mac keyboard drawing (Esc and Clear (Num) still appear in the command tree). Key names wrap (Forward / Delete, Page / Down, Enter / (Num))."
+      },
+      "keyCap": {
+        "keyName": "bottom-left, regular weight",
+        "commandName": "top-left, white, up to two lines, truncated with '...'",
+        "applicationScope": {
+          "appOnly": "solid purple, label = application command",
+          "panelOnly": "grey upper-left triangle, green lower-right triangle (diagonal from bottom-left to top-right), no label",
+          "both": "purple upper-left triangle, green lower-right triangle, label = application command",
+          "none": "solid grey, no label"
+        },
+        "panelScope": "keys bound in the chosen panel are solid green with the panel command's name; all others solid grey",
+        "modifierKeys": "Caps Lock, Shift, Ctrl, Opt, Cmd are darker grey (#636363); a pressed modifier (both copies) is blue (#0071ca)",
+        "selected": "blue 1-pt outline (#4ea9f6) on the clicked key"
+      },
+      "modifiers": {
+        "click": "clicking a modifier key cap toggles it (sticky); several combine (Cmd then Shift = ⇧⌘ layer). Click again to release.",
+        "hold": "holding the physical modifier shows the same layer while held (both copies blue) and returns when released",
+        "display": "with modifiers active every key shows the command bound to that modifier combination (colours as above)"
+      },
+      "hover": {
+        "tooltip": "one line per assignment: '<Scope>: <Command> (<Path> → … → <Command>)', e.g. 'Application: Show/Hide Properties with Keyframes (Double-Tap) (Application → Animation → Show/Hide Properties with Keyframes (Double-Tap))'; a key with an application and a panel command lists both ('Character and Paragraph Panels: Backspace (Previous Character) (Panels → Character and Paragraph Panels → Backspace (Previous Character))')",
+        "delay": "about 1 s"
+      },
+      "click": "selects the key (outline) and fills the Key table on the right",
+      "drop": "dragging a command row from the tree onto a key cap assigns that key with the active modifiers to the command (added to its existing shortcuts). Observed: Composition Settings dropped on F5 → F5 became purple/green with label 'Composition Settings', Key: F5 (multiple commands assigned) listed 'Show Snapshot 1' and 'Composition Settings' as pills; no conflict message because F5 had only a panel command."
+    },
+    {
+      "id": "legend",
+      "type": "legend",
+      "items": [
+        { "color": "#8765ce", "en": "Application shortcuts are active regardless of panel focus", "zh": "无论面板焦点如何，应用程序快捷键都处于活动状态", "dictKey": "$$$/VisualShortcutsDialog/legend/purple" },
+        { "color": "#16be9e", "en": "Panel shortcuts override application shortcuts when the panel has focus", "zh": "面板具有焦点时，面板快捷键会覆盖应用程序快捷键", "dictKey": "$$$/VisualShortcutsDialog/legend/green" },
+        { "color": "#0071ca", "en": "Modifier key pressed", "zh": "按下辅助按键", "dictKey": "$$$/VisualShortcutsDialog/legend/blue" }
+      ],
+      "notesEn": "14-pt squares with text, one line under the keyboard at x 33 / 368 / 775."
+    },
+    {
+      "id": "search",
+      "type": "search_field",
+      "notesEn": "Magnifier icon, no placeholder, focused when the dialog opens (blue ring). Typing filters the tree live; matching rows are shown with their groups expanded (search 'composition settings' → Application ▸ Composition ▸ Composition Settings ⌘+K). An × clear button appears while it has text. The keyboard does not change. Making a change in the tree cleared the search."
+    },
+    {
+      "id": "command_tree",
+      "type": "tree_table",
+      "columns": [
+        { "en": "Command", "zh": "命令", "dictKey": "$$$/dvaui/ksv/column/Command", "x": 36 },
+        { "en": "Shortcut", "zh": "快捷键", "dictKey": "$$$/dvaui/ksv/column/Shortcut", "x": 287 }
+      ],
+      "roots": [
+        { "en": "Application", "zh": "应用程序", "dictKey": "$$$/AE/KSV/ShortcutApplicationMenuItem" },
+        { "en": "Panels", "zh": "面板", "dictKey": "$$$/AE/KSV/Panels" }
+      ],
+      "structure": "Application: 27 tool commands first (no group), then one group per menu in menu order (File, Edit, Composition, Layer, Effect, Animation, View, Window; submenus are nested groups; no After Effects / Help menu groups), then ~55 commands that are in no menu (Cancel Preview, Help, Preferences, Quit, Switch to Workspace #1 …). Panels: one group per panel scope, alphabetical. See commandTreeGroups.",
+      "expansion": "chevron › / ⌄ left of each group; clicking the group row toggles it. Initially Application and Panels are expanded, their groups collapsed.",
+      "rowLook": "33-pt rows, black (#101010) background with 1-pt separators; group rows have the chevron; command rows are indented one step per level (≈ 23 pt).",
+      "shortcutCell": {
+        "unselectedRow": "plain text, chords joined by ', ' ('⌘+N, ⌘+K', 'Return, Enter (Num)')",
+        "selectedRow": "each chord is a pill: rounded outline, chord text, × button; the focused pill has a blue ring",
+        "firstClick": "clicking anywhere in the Shortcut cell selects the row and focuses its first pill (Clear becomes enabled)",
+        "secondClickOnEmptyArea": "adds an empty pill (only ×) with the blue ring, waiting for a key press",
+        "keyPress": "the pressed chord (with its modifiers) is assigned at once; the new pill appears after the existing ones; the ring moves back to the first pill",
+        "pillX": "removes that chord immediately"
+      },
+      "chordText": {
+        "mac": "modifiers in the order ⌃ ⌥ ⇧ ⌘, joined with '+', then the key: '⌃+⌥+⇧+⌘+J', '⇧+⌘+1', '⌥+* (Num)'",
+        "modifierStrings": { "mac": { "cmd": "⌘+", "ctrl": "⌃+", "opt": "⌥+", "shift": "⇧+" }, "win": { "ctrl": "Ctrl+", "alt": "Alt+", "shift": "Shift+" } },
+        "keyNamesEn": ["A–Z", "0–9", "` - = [ ] \\ ; ' , . /", "Space", "Tab", "Return", "Escape", "Delete (backspace)", "Forward Delete", "Home", "End", "Page Up", "Page Down", "Up", "Down", "Left", "Right", "F1–F12", "<key> (Num) for numpad keys: 0–9, . , * / + - =, Enter (Num), Clear (Num), Forward Delete (Num), Home (Num), End (Num), Page Up (Num), Page Down (Num)"],
+        "keyNamesZh": { "Space": "空格", "Tab": "Tab", "Return": "返回", "Enter": "输入", "Escape": "Esc", "Delete": "删除", "Forward Delete": "向前删除", "Home": "开头", "End": "结束", "Page Up": "页上移", "Page Down": "页下移", "Up": "向上", "Down": "向下", "Left": "向左", "Right": "向右", "Help": "帮助", "Caps Lock": "大写锁定", "Clear": "清除", "(Num)": "（数字）" },
+        "keyNamesZhDictKeys": "$$$/dvaui/ksv/*Key (SpaceKey, TabKey, ReturnKey, EnterKey, EscapeKey, DeleteKey, ForwardDeleteKey, HomeKey, EndKey, PageUpKey, PageDownKey, UpArrowKey, DownArrowKey, LeftArrowKey, RightArrowKey, HelpKey, CapsLockKey, ClearKey, Num)",
+        "modifierKeyCaps": { "mac": ["⌘ Cmd", "⌥ Opt", "⇧ Shift", "⌃ Ctrl"], "dictKeys": "$$$/dvaui/ksv/mac/CmdKeyName …" }
+      }
+    },
+    {
+      "id": "key_table",
+      "type": "table",
+      "label": { "en": "Key: <key>", "zh": "键: <key>", "dictKey": "$$$/dvaui/ksv/Key" },
+      "multipleSuffix": { "en": " (multiple commands assigned)", "zh": "（已分配多个命令）", "dictKey": "$$$/dvaui/ksv/MultipleCommandsAssigned", "rule": "shown when more than one command is bound to the key over all modifier rows" },
+      "columns": [
+        { "en": "Modifiers", "zh": "修饰符", "dictKey": "$$$/dvaui/ksv/column/Modifiers", "x": 828 },
+        { "en": "Command", "zh": "命令", "dictKey": "$$$/dvaui/ksv/column/Command", "x": 954 }
+      ],
+      "rowsMac": ["None", "⌘", "⌥", "⇧", "⌥+⌘", "⇧+⌘", "⌥+⇧", "⌥+⇧+⌘", "⌃", "⌃+⌘", "⌃+⌥", "⌃+⇧", "⌃+⌥+⌘", "⌃+⇧+⌘", "⌃+⌥+⇧", "⌃+⌥+⇧+⌘"],
+      "noneLabel": { "en": "None", "zh": "无", "dictKey": "$$$/dvaui/ksv/NoModifier" },
+      "commandCell": "every command bound to key+modifiers (application and panel), joined by ', '; the selected row shows them as pills with ×",
+      "example": "Key: K (multiple commands assigned) — None: Go to Next Keyframe; ⌘: Composition Settings; ⇧: Go to Next Keyframe on Selected Layers/Properties; ⌥+⌘: Keyframe Interpolation (Edit in Dialog Box); ⇧+⌘: Toggle All Caps for Selected Text, Keyframe Velocity (Edit in Dialog Box); ⌥+⇧+⌘: Toggle Small Caps for Selected Text, Project Settings",
+      "empty": "'Key:' with no key and empty command cells until a key is clicked; cleared again after some edits"
+    },
+    {
+      "id": "undo",
+      "type": "button",
+      "label": { "en": "Undo", "zh": "撤消", "dictKey": "$$$/dvaeve/ksv/kResDLGShortcutsDialogUndo" },
+      "tooltip": { "zh": "恢复最后一个已更改、添加或移除的快捷键", "dictKey": "$$$/exo/sharedui/ShortcutDialog/xml/UndoTT" },
+      "behavior": "enabled after a change; one level: undoes the last change completely (a conflicting assignment is undone together with the shortcut it took away), then disables itself. The preset name stays Custom.txt after undo."
+    },
+    {
+      "id": "clear",
+      "type": "button",
+      "label": { "en": "Clear", "zh": "清除", "dictKey": "$$$/dvaeve/ksv/kResDLGShortcutsDialogClear" },
+      "behavior": "enabled while a pill is focused (it removes that shortcut; not pressed in the test)"
+    },
+    {
+      "id": "message_bar",
+      "type": "status_line",
+      "default": { "icon": "circled i", "en": "Create new or edit existing shortcut by clicking in the \"Shortcut\" column", "zh": "通过单击“快捷键”列创建新快捷键或编辑现有快捷键", "dictKey": "$$$/dvaui/ksv/DefaultMessage" },
+      "conflicts": [
+        {
+          "case": "an application command takes a chord another application command had",
+          "icon": "yellow warning triangle",
+          "en": "The shortcut: ⌘+K is already in use by another Application command: Composition Settings. That command will no longer have a shortcut.",
+          "zh": "快捷键“@0”已被另一个应用程序命令“@1”使用。该命令将不再有快捷键。",
+          "dictKey": "$$$/AE/KSV/ApplicationReplaceShortcut",
+          "link": "the command name is a blue link (underlined on hover); clicking it selects that command's row in the tree",
+          "linkTooltip": { "zh": "选择包含与已添加或已更改快捷键发生冲突的快捷键（现已移除）的命令", "dictKey": "$$$/exo/sharedui/ShortcutDialog/xml/GotoConflictTT" }
+        },
+        { "case": "a panel command takes a chord another command of the same panel had", "zh": "快捷键“@0”已被此面板“@1”的另一个命令使用。该命令将不再有快捷键。", "dictKey": "$$$/AE/KSV/PanelReplaceShortcut", "observed": false },
+        { "case": "a panel command takes a chord an application command has (both stay; the panel one wins while the panel has focus)", "zh": "快捷键“@0”已被应用程序命令“@1”使用，切换到该面板时，该命令将被此面板命令覆盖。", "dictKey": "$$$/AE/KSV/OverrideShortcut", "observed": false },
+        { "case": "a reserved key", "zh": "该键不能重新分配。", "dictKey": "$$$/AE/KSV/KeyCantBeReassigned", "observed": false }
+      ],
+      "afterUndo": "the bar is empty"
+    },
+    {
+      "id": "buttons",
+      "type": "button_bar",
+      "items": [
+        { "id": "cancel", "en": "Cancel", "zh": "取消", "role": "reject" },
+        { "id": "ok", "en": "OK", "zh": "确定", "role": "accept", "look": "blue filled, default" }
+      ],
+      "keys": { "Escape": "closes like Cancel (observed with no pill focused)", "Return": "OK (default button) — not pressed, it would have saved" }
+    }
+  ],
+  "behaviorLog": [
+    "Open: preset After Effects Default.txt, Commands Application, search focused, Key: empty, Delete and Undo and Clear disabled.",
+    "Commands → Timeline Panel: keyboard solid green for timeline shortcuts (Zoom Out on -, Zoom In on =, Show/Hide … on E R T A S F, Go to Previous / Next Keyframe on J K, Set Work Area Start / End on B N, Open Composition on \\, Select Layer by Number on numpad 1–9, Open Layer Source in Layer Panel on Return / Enter (Num) …), everything else grey; tree shows Timeline Panel expanded.",
+    "Click K: outline on K; Key: K (multiple commands assigned) with 16 modifier rows.",
+    "Click ⌘ key cap: both ⌘ caps blue, every key shows its ⌘ command (Show/Hide Tools … on 1–0, Quit Q, Close Current … W, Composition Settings K, Undo Last Action Z …); then ⇧ too → ⇧⌘ layer. Clicking again releases.",
+    "Hold physical ⌥: ⌥ layer while held.",
+    "Click pill × on Composition Settings ⌘+K: shortcut removed, preset switches to Custom.txt (Delete enabled), search cleared, Undo enabled.",
+    "Undo: ⌘+K back as the focused pill, Undo disabled, preset stays Custom.txt.",
+    "New Composition: click Shortcut cell → ⌘+N pill focused; click the empty area again → empty pill; press ⌘K → pills ⌘+N, ⌘+K; Composition Settings loses ⌘+K; warning bar with link.",
+    "Click the link: Composition Settings row selected; New Composition row back to plain text '⌘+N, ⌘+K'.",
+    "Undo: New Composition ⌘+N only, Composition Settings ⌘+K again, bar empty.",
+    "Drag Composition Settings onto F5: F5 assigned (see visual_keyboard.drop).",
+    "Save As...: Create Preset dialog, cancelled.",
+    "Preset dropdown now lists After Effects Default.txt, ✓ Custom.txt.",
+    "Escape: dialog closes, changes discarded."
+  ],
+  "presetFiles": {
+    "folder": "~/Library/Preferences/Adobe/After Effects/26.2/aeks/",
+    "builtIn": "After Effects Default.txt (read-only in the dialog: Delete disabled)",
+    "format": "Text, CR line endings. Header comment block ('# Text File Version 1.1', '# After Effects Shortcut Preferences (modify at your own risk)', key identifier list), then sections [\"<context class>\"] with lines \"<CommandId>\" = \"(<chord>)(<chord>)\" (e.g. \"NewComp\" = \"(Cmd+N)\", empty \"()\" = no shortcut; modifiers Cmd, Option, Shift, macControl; keys like PadMultiply, FwdDel, PageUP, SingleQuote).",
+    "customWrittenAtOnce": "Editing the built-in preset makes AE create aeks/Custom.txt on disk immediately (before OK). Cancel / Escape does not remove it. AE also writes the full table there, normalised (in the incident the coordinator found 25 differences against the default, including duplicate chords dropped). The current preset is stored in Prefs.txt as 'Shortcut File Location' when AE quits.",
+    "incident": "2026-11-24: this observation created aeks/Custom.txt; the coordinator moved it out of aeks/. Do not edit anything in this dialog on a user's AE."
+  },
+  "clipboardFormat": {
+    "lineEnding": "\\r (CR), the text ends with an extra empty line (\\r\\r)",
+    "line": "<depth × \\t><Name>\\t<Shortcuts>\\t\\r — groups have an empty Shortcuts field ('Application\\t\\t\\r', '\\tFile\\t\\t\\r'); commands with no shortcut too ('\\t\\tClose Project\\t\\t\\r')",
+    "shortcuts": "chord texts as in the tree, joined by ', ' ('\\tAudio Preview (Here Forward)\\t⌃+., Forward Delete (Num), , (Num), . (Num)\\t\\r')",
+    "scope": "the whole tree (Application then Panels) in tree order, whatever the search, scope or expansion",
+    "sample": [
+      "Application\\t\\t",
+      "\\t3D Wireframe Gizmo\\t⇧+⌘+1\\t",
+      "\\t3D Position Gizmo\\t4\\t",
+      "\\tFile\\t\\t",
+      "\\t\\tNew\\t\\t",
+      "\\t\\t\\tNew Project\\t⌥+⌘+N\\t",
+      "\\t\\tOpen Project\\t⌘+O\\t",
+      "Panels\\t\\t",
+      "\\tTimeline Panel\\t\\t",
+      "\\t\\tOpen Layer Source in Layer Panel\\tReturn, Enter (Num)\\t"
+    ],
+    "size": "about 33.5 KB, 1011 lines"
+  },
+  "commandTreeGroups": {
+    "notesEn": "Group names and command counts from Copy To Clipboard (AE 26.2.1, default preset). Recent-file entries (user paths) omitted.",
+    "Application (690)": {
+      "(tools, 27)": [],
+      "File (116)": ["New (5)", "Open Recent (7)", "Save As (5)", "Import (7)", "Import Recent Footage (10)", "Export (4)", "Adobe Dynamic Link (2)", "Dependencies (7)", "Scripts (26) › Recent Script Files (10)", "Create Proxy (2)", "Set Proxy (2)", "Interpret Footage (4)", "Replace Footage (4)"],
+      "Edit (68)": ["Label (19)", "Select Keyframe Label Group (4)", "Purge (8)", "Team Project (5)", "Templates (2)", "AutoFill (1)"],
+      "Composition (26)": ["Preview (3)", "Save Frame As (3)", "Responsive Design — Time (3)"],
+      "Layer (211)": ["New (16)", "Mask (28) › Mode (7), Motion Blur (3), Feather Falloff (2)", "Mask and Shape Path (7)", "Quality (5)", "Switches (14)", "Transform (15)", "Time (6)", "Frame Blending (3)", "Markers (4)", "Blending Mode (38)", "Track Matte (15) › Matte with Layer Above (4), Matte with Layer Below (4)", "Arrange (4)", "Reveal (5)", "Create (10)", "Camera (9)", "Light (3)"],
+      "Effect (4)": [],
+      "Animation (69)": ["Recent Animation Presets (1)", "Keyframe Assistant (14)", "Animate Text (27) › Fill Color (5), Stroke Color (5)", "Add Text Selector (3)"],
+      "View (69)": ["Resolution (5)", "Simulate Output (10)", "Panel Background Color (7)", "Switch View Layout (4)", "Switch 3D View (12)", "Assign 3D View Shortcut (3)"],
+      "Window (36)": ["Workspace (5)", "Assign Shortcut to “Default” Workspace (3)"],
+      "(no menu, ~55)": []
+    },
+    "Panels (319)": ["Character and Paragraph Panels (59)", "Composition Panel (83)", "Effect Controls Panel (7)", "Flowchart Panel (1)", "Layer Panel (25)", "Paint Panel (29)", "Project Panel (1)", "Render Queue Panel (1)", "Timeline Panel (83)", "Tracker Panel (18)", "Viewer Panel (1)"]
+  },
+  "notObserved": [
+    "OK / Return (would save the user's preset)",
+    "Delete preset and its confirmation",
+    "Clear button",
+    "Panel conflict variants (zh text from the dictionary only)",
+    "Keyboard layouts other than en",
+    "Escape while a pill is waiting for a key"
+  ]
+}
