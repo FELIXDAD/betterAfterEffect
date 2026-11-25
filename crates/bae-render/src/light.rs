@@ -14,6 +14,15 @@
 //!
 //! Material percentages are fractions here (`shininess` is used as the exponent
 //! in percent: 5 % → 5). The result is never negative; 8/16 bpc clip it to 1.
+//!
+//! Shadows (AE-CMP-437, also measured): a light with Casts Shadows on scales its
+//! term at a point by `Π over casters (1 − darkness · a · (1 − transmission · C_c))`
+//! where `a` is the caster's coverage (alpha × opacity) between the point and the
+//! light and `C_c` its own (unlit) colour. Shadow Diffusion acts as a square light
+//! of that half-size: `a` is the caster's coverage averaged over the light's
+//! footprint on the caster plane, at least [`SHADOW_SOFTNESS`] receiver pixels
+//! (AE's shadow-map edge). Casters and receivers are the 3D layers of one 3D group
+//! with Casts / Accepts Shadows on.
 //! A comp without enabled lights, a 2D layer, Accepts Lights off, or a layer
 //! no light reaches (lights with the Adjustment Layer switch light only the
 //! layers below them): unlit.
@@ -21,7 +30,10 @@
 
 use std::sync::Arc;
 
-use glam::{DAffine2, DMat4, DVec3};
+use glam::{DAffine2, DMat4, DVec2, DVec3};
+
+use crate::geom::Rect;
+use crate::graph::NodeId;
 
 /// AE light type (AE-CMP-431).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -111,18 +123,69 @@ pub struct Lighting {
     pub lights: Arc<[Light]>,
     /// Where the layer is seen from ([`crate::camera::Camera::eye`]).
     pub eye: DVec3,
+    /// Comp-space size of one comp pixel at the layer: perspective cameras
+    /// `1 / zoom` (times the distance to the eye), orthographic views
+    /// `−1 / scale` (a constant, stored negative). Sizes the shadow edge.
+    pub world_per_pixel: f64,
+    /// The other layers of its 3D group that cast shadows on it (empty when it
+    /// does not accept shadows or no light casts shadows).
+    pub casters: Arc<[ShadowCaster]>,
 }
 
+/// A 3D layer casting shadows (Casts Shadows on, AE-CMP-440).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShadowCaster {
+    /// Layer pixels → comp space.
+    pub matrix: DMat4,
+    /// Its drawn rectangle in layer pixels.
+    pub rect: Rect,
+    /// Layer opacity, 0–1.
+    pub opacity: f32,
+    /// Light Transmission in percent.
+    pub transmission: f32,
+    /// What blocks the light.
+    pub pixels: CasterPixels,
+}
+
+/// A caster's pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CasterPixels {
+    /// A solid (straight RGBA).
+    Solid([f32; 4]),
+    /// The layer's image (its content after masks and effects).
+    Image(NodeId),
+}
+
+/// The shadow edge AE draws without diffusion, in receiver pixels (fitted to
+/// AE 26.2.1's shadow-map filtering at Comp Size resolution).
+pub const SHADOW_SOFTNESS: f64 = 1.0;
+
 /// GPU record of a [`Lighting`] (`struct` layout in `composite.wgsl`, as vec4s):
-/// header vec4s, then [`LIGHT_VEC4S`] per light.
+/// header vec4s, [`LIGHT_VEC4S`] per light, then [`CASTER_VEC4S`] per caster.
 pub(crate) const HEADER_VEC4S: usize = 7;
 /// Vec4s per light in a lighting record.
-pub(crate) const LIGHT_VEC4S: usize = 4;
+pub(crate) const LIGHT_VEC4S: usize = 5;
+/// Vec4s per shadow caster in a lighting record.
+pub(crate) const CASTER_VEC4S: usize = 8;
 
 impl Lighting {
+    /// Vec4s of the GPU record.
+    pub(crate) fn record_len(&self) -> usize {
+        HEADER_VEC4S + LIGHT_VEC4S * self.lights.len() + CASTER_VEC4S * self.casters.len()
+    }
+
     /// Appends the record for input texels `from_texel` (input texel → layer
-    /// pixel) to `out`; returns its offset (in vec4s).
-    pub(crate) fn pack(&self, from_texel: &DAffine2, out: &mut Vec<[f32; 4]>) -> u32 {
+    /// pixel) to `out`; returns its offset (in vec4s). `pixel_scale` is comp
+    /// pixels per target texel; `atlas` maps an image caster to its place in the
+    /// shadow atlas: layer px → uv (`x · [0].xy + [0].zw`) and the uv clip
+    /// rectangle `[1]` (`None`: the image is missing, the caster is skipped).
+    pub(crate) fn pack(
+        &self,
+        from_texel: &DAffine2,
+        pixel_scale: f64,
+        atlas: &dyn Fn(NodeId) -> Option<[[f32; 4]; 2]>,
+        out: &mut Vec<[f32; 4]>,
+    ) -> u32 {
         let first = out.len() as u32;
         let m = self.matrix;
         let s = from_texel.matrix2;
@@ -136,7 +199,7 @@ impl Lighting {
         out.push(v4(m.transform_point3(o.extend(0.0)), 0.0));
         let normal = x.cross(y).normalize_or_zero();
         out.push(v4(normal, self.lights.len() as f32));
-        out.push(v4(self.eye, 0.0));
+        out.push(v4(self.eye, (self.world_per_pixel * pixel_scale) as f32));
         let mat = &self.material;
         out.push([
             mat.ambient / 100.0,
@@ -144,6 +207,8 @@ impl Lighting {
             mat.specular_intensity / 100.0,
             mat.specular_shininess,
         ]);
+        // Casters are counted after packing (missing images are skipped).
+        let header = out.len();
         out.push([mat.metal / 100.0, 0.0, 0.0, 0.0]);
         for l in self.lights.iter() {
             let kind = match l.kind {
@@ -169,7 +234,57 @@ impl Lighting {
                 l.falloff_distance,
                 0.0,
             ]);
+            let darkness = if l.casts_shadows && !self.casters.is_empty() {
+                l.shadow_darkness.clamp(0.0, 100.0) / 100.0
+            } else {
+                0.0
+            };
+            out.push([darkness, l.shadow_diffusion.max(0.0), 0.0, 0.0]);
         }
+        let mut count = 0.0f32;
+        let block = (out.len() as u32 - first) as f32;
+        for c in self.casters.iter() {
+            let (color, kind, map) = match c.pixels {
+                CasterPixels::Solid(color) => (color, 0.0, [[0.0; 4]; 2]),
+                CasterPixels::Image(id) => match atlas(id) {
+                    Some(map) => ([0.0; 4], 1.0, map),
+                    None => continue,
+                },
+            };
+            let m = c.matrix;
+            let n = m.x_axis.truncate().cross(m.y_axis.truncate());
+            let Some(normal) = n.try_normalize() else {
+                continue;
+            };
+            let inv = m.inverse();
+            let row = |i: usize| {
+                let r = inv.row(i);
+                [r.x as f32, r.y as f32, r.z as f32, r.w as f32]
+            };
+            let offset = -normal.dot(m.w_axis.truncate());
+            out.push(v4(normal, offset as f32));
+            out.push(row(0));
+            out.push(row(1));
+            out.push([
+                c.rect.x0 as f32,
+                c.rect.y0 as f32,
+                c.rect.x1 as f32,
+                c.rect.y1 as f32,
+            ]);
+            out.push(color);
+            out.push(map[0]);
+            out.push(map[1]);
+            let px_per_world = 1.0 / m.x_axis.truncate().length().max(1e-12);
+            out.push([
+                c.opacity.clamp(0.0, 1.0),
+                c.transmission.clamp(0.0, 100.0) / 100.0,
+                px_per_world as f32,
+                kind,
+            ]);
+            count += 1.0;
+        }
+        out[header][1] = count;
+        out[header][2] = block;
         first
     }
 }
@@ -184,6 +299,27 @@ pub fn shade(
     material: &Material,
     lights: &[Light],
 ) -> [f32; 3] {
+    shade_with_shadows(color, point, normal, eye, material, lights, &[], 0.0)
+}
+
+/// [`shade`] with shadows from solid `casters` (image casters are skipped;
+/// `world_per_pixel` as [`Lighting::world_per_pixel`]).
+#[allow(clippy::too_many_arguments)]
+pub fn shade_with_shadows(
+    color: [f32; 3],
+    point: DVec3,
+    normal: DVec3,
+    eye: DVec3,
+    material: &Material,
+    lights: &[Light],
+    casters: &[ShadowCaster],
+    world_per_pixel: f64,
+) -> [f32; 3] {
+    let pixel = if world_per_pixel < 0.0 {
+        -world_per_pixel
+    } else {
+        world_per_pixel * (eye - point).length()
+    };
     let v = (eye - point).normalize_or_zero();
     let mut n = normal.normalize_or_zero();
     if n.dot(v) < 0.0 {
@@ -228,7 +364,10 @@ pub fn shade(
         if nl <= 0.0 {
             continue;
         }
-        let k = rgb * atten * spot;
+        let mut k = rgb * atten * spot;
+        if l.casts_shadows {
+            k *= shadow(point, l, casters, pixel);
+        }
         diff += k * nl;
         let h = (dir_l + v).normalize_or_zero();
         spec += k * n
@@ -248,6 +387,67 @@ pub fn shade(
         + f64::from(m.specular_intensity) / 100.0 * spec_color * spec;
     let out = out.max(DVec3::ZERO);
     [out.x as f32, out.y as f32, out.z as f32]
+}
+
+/// How much of light `l` reaches `point` past solid `casters` (per channel);
+/// `pixel` = comp-space size of a receiver pixel there.
+fn shadow(point: DVec3, l: &Light, casters: &[ShadowCaster], pixel: f64) -> DVec3 {
+    let darkness = f64::from(l.shadow_darkness.clamp(0.0, 100.0)) / 100.0;
+    let to = match l.kind {
+        LightKind::Parallel => -l.direction() * 1e6,
+        _ => l.position() - point,
+    };
+    let light_dist = (l.position() - point).length().max(1e-9);
+    let mut f = DVec3::ONE;
+    for c in casters {
+        let CasterPixels::Solid(color) = c.pixels else {
+            continue;
+        };
+        let m = c.matrix;
+        let Some(n) = m
+            .x_axis
+            .truncate()
+            .cross(m.y_axis.truncate())
+            .try_normalize()
+        else {
+            continue;
+        };
+        let denom = n.dot(to);
+        if denom.abs() < 1e-12 {
+            continue;
+        }
+        let t = n.dot(m.w_axis.truncate() - point) / denom;
+        if t <= 1e-6 || t >= 1.0 {
+            continue;
+        }
+        let hit = point + to * t;
+        let u = m.inverse().transform_point3(hit).truncate();
+        let frac = (t * to.length() / light_dist).clamp(0.0, 1.0);
+        // Parallel lights: an orthographic shadow map, the edge does not shrink.
+        let shrink = if l.kind == LightKind::Parallel {
+            1.0
+        } else {
+            1.0 - frac
+        };
+        let world = (f64::from(l.shadow_diffusion) * frac).max(SHADOW_SOFTNESS * pixel * shrink);
+        let s = (world / m.x_axis.truncate().length().max(1e-12)).max(1e-6);
+        let cover = box_overlap(u, s, &c.rect);
+        let a = cover * f64::from(color[3]) * f64::from(c.opacity);
+        let tr = f64::from(c.transmission) / 100.0;
+        let col = DVec3::new(
+            f64::from(color[0]),
+            f64::from(color[1]),
+            f64::from(color[2]),
+        );
+        f *= DVec3::ONE - darkness * a * (DVec3::ONE - tr * col);
+    }
+    f
+}
+
+/// Fraction of the square `[u − s, u + s]²` inside `rect`.
+fn box_overlap(u: DVec2, s: f64, rect: &Rect) -> f64 {
+    let span = |c: f64, lo: f64, hi: f64| ((c + s).min(hi) - (c - s).max(lo)).max(0.0) / (2.0 * s);
+    span(u.x, rect.x0, rect.x1) * span(u.y, rect.y0, rect.y1)
 }
 
 /// GLSL-style smoothstep (`e0 > e1` allowed: falls from 1 to 0).

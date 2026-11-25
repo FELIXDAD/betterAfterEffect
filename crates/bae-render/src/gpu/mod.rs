@@ -459,6 +459,7 @@ impl Pipelines {
                     count: None,
                 },
                 tex(4),
+                tex(5),
             ],
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -512,6 +513,10 @@ impl Pipelines {
                 },
                 wgpu::BindGroupEntry {
                     binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&dummy),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
                     resource: wgpu::BindingResource::TextureView(&dummy),
                 },
             ],
@@ -638,7 +643,8 @@ impl Pipelines {
             })
     }
 
-    /// A texture bind group (unused slots get the dummy texture).
+    /// A texture bind group (unused slots get the dummy texture; `shadow` is
+    /// the shadow atlas of lit layers).
     pub fn textures(
         &self,
         device: &wgpu::Device,
@@ -646,6 +652,7 @@ impl Pipelines {
         matte: Option<&wgpu::TextureView>,
         dst: Option<&wgpu::TextureView>,
         mask: Option<&wgpu::TextureView>,
+        shadow: Option<&wgpu::TextureView>,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bae-render.textures"),
@@ -670,6 +677,10 @@ impl Pipelines {
                 wgpu::BindGroupEntry {
                     binding: 4,
                     resource: wgpu::BindingResource::TextureView(mask.unwrap_or(&self.dummy)),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(shadow.unwrap_or(&self.dummy)),
                 },
             ],
         })

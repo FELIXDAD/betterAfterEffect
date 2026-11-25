@@ -39,6 +39,8 @@ use crate::{titlebar, widgets};
 
 pub use shortcuts::CommandEntry;
 pub(crate) use shortcuts::ZH as SHORTCUTS_ZH;
+/// Folder of the Keyboard Shortcuts presets in the config folder.
+pub use shortcuts::presets::FOLDER as SHORTCUT_PRESETS_FOLDER;
 
 /// Height of the status strip at the bottom of the window.
 pub const STATUS_H: f32 = 20.0;
@@ -59,6 +61,10 @@ pub struct WorkbenchState {
     pub panels: BTreeMap<String, serde_json::Value>,
     /// Shortcut customizations, by keymap id.
     pub keymaps: BTreeMap<String, KeymapOverrides>,
+    /// The Keyboard Shortcuts preset selected for each keymap (a file name such
+    /// as "Custom.txt"; the built-in preset when absent).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub shortcut_presets: BTreeMap<String, String>,
     /// Workspace bar order chosen in Edit Workspaces (ids; others follow).
     pub order: Vec<String>,
     /// Workspaces not shown in the bar (still in Window > Workspace).
@@ -152,6 +158,8 @@ pub struct Workbench {
     menus: Arc<Registry<crate::menu::MenuItemSpec>>,
     /// The state changed in a way the shell should save now (OK in Keyboard Shortcuts).
     save_requested: bool,
+    /// Folder of the Keyboard Shortcuts presets (`None`: kept in memory).
+    shortcut_presets_dir: Option<std::path::PathBuf>,
 }
 
 impl Workbench {
@@ -176,6 +184,13 @@ impl Workbench {
     pub fn with_menus(mut self, menus: Arc<Registry<crate::menu::MenuItemSpec>>) -> Self {
         self.menus = menus;
         self
+    }
+
+    /// Where the Keyboard Shortcuts dialog keeps its presets (the shell passes
+    /// `<config>/Keyboard Shortcuts`, [`SHORTCUT_PRESETS_FOLDER`]); without one
+    /// they live in memory.
+    pub fn set_shortcut_presets_dir(&mut self, dir: Option<std::path::PathBuf>) {
+        self.shortcut_presets_dir = dir;
     }
 
     /// Whether the state changed in a way to save now (not only at exit): the
@@ -322,6 +337,7 @@ impl Workbench {
             external_modal: false,
             menus: Arc::new(Registry::new()),
             save_requested: false,
+            shortcut_presets_dir: None,
         };
         wb.refresh_registries();
         let active = wb

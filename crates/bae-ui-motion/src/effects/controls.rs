@@ -296,7 +296,10 @@ fn param_row(
         } else {
             ui.add_space(16.0);
         }
-        let animatable = param.kind.value_type().is_some() && !param.flags.cannot_animate;
+        // AE's layer and mask popups have no stopwatch.
+        let animatable = param.kind.value_type().is_some()
+            && !param.flags.cannot_animate
+            && !matches!(param.kind, ParamKind::Layer | ParamKind::Path);
         if animatable {
             let mut on = spec.is_animated();
             if widgets::stopwatch_for(ui, &mut on, &label).clicked() {
@@ -460,11 +463,12 @@ fn value_control(
             common::value_editor(ui, id, "param", &v, dims, label, expression)
         }
         ParamKind::Layer => layer_picker(ui, cx, effect, id, value),
+        ParamKind::Path => mask_picker(ui, cx, effect, id, value),
         ParamKind::Button => {
             ui.add_enabled(false, egui::Button::new(label));
             Edit::None
         }
-        ParamKind::ArbitraryData | ParamKind::Path | ParamKind::CurvePoints => {
+        ParamKind::ArbitraryData | ParamKind::CurvePoints => {
             ui.colored_label(color::TEXT_DISABLED, "—");
             Edit::None
         }
@@ -553,16 +557,54 @@ fn layer_picker(
     id: egui::Id,
     value: Option<&Value>,
 ) -> Edit {
-    let current = match value {
-        Some(Value::PrimRef(p)) => Some(p.clone()),
-        _ => None,
-    };
     let layers = super::layer_of(effect)
         .and_then(|l| query::owning_comp(cx.stage, &l))
         .map(|comp| query::comp_layers(cx.stage, &comp))
         .unwrap_or_default();
     let name = |p: &PrimPath| query::display_name_of(cx.stage, p);
-    let shown = current.as_ref().map_or_else(|| tr("None").to_owned(), name);
+    let items: Vec<_> = layers
+        .iter()
+        .enumerate()
+        .map(|(i, l)| (l.clone(), format!("{}. {}", i + 1, name(l))))
+        .collect();
+    prim_picker(ui, cx, id, value, &items)
+}
+
+/// A Path parameter: "None" or a mask of the effect's layer (AE).
+fn mask_picker(
+    ui: &mut Ui,
+    cx: &PanelContext<'_>,
+    effect: &PrimPath,
+    id: egui::Id,
+    value: Option<&Value>,
+) -> Edit {
+    let items: Vec<_> = super::layer_masks(cx.stage, effect)
+        .into_iter()
+        .map(|m| {
+            let name = query::display_name_of(cx.stage, &m);
+            (m, name)
+        })
+        .collect();
+    prim_picker(ui, cx, id, value, &items)
+}
+
+/// "None" or one of `items` (prim, menu text). A reference to a prim that no
+/// longer exists shows as "None"; choosing "None" writes an empty string.
+fn prim_picker(
+    ui: &mut Ui,
+    cx: &PanelContext<'_>,
+    id: egui::Id,
+    value: Option<&Value>,
+    items: &[(PrimPath, String)],
+) -> Edit {
+    let current = match value {
+        Some(Value::PrimRef(p)) if cx.stage.prim(p).is_some() => Some(p),
+        _ => None,
+    };
+    let shown = current.map_or_else(
+        || tr("None").to_owned(),
+        |p| query::display_name_of(cx.stage, p),
+    );
     let mut out = Edit::None;
     egui::ComboBox::from_id_salt(id)
         .selected_text(shown)
@@ -570,13 +612,9 @@ fn layer_picker(
             if ui.selectable_label(current.is_none(), tr("None")).clicked() {
                 out = Edit::Commit(Value::String(String::new()));
             }
-            for (i, l) in layers.iter().enumerate() {
-                let text = format!("{}. {}", i + 1, name(l));
-                if ui
-                    .selectable_label(current.as_ref() == Some(l), text)
-                    .clicked()
-                {
-                    out = Edit::Commit(Value::PrimRef(l.clone()));
+            for (p, text) in items {
+                if ui.selectable_label(current == Some(p), text).clicked() {
+                    out = Edit::Commit(Value::PrimRef(p.clone()));
                 }
             }
         });

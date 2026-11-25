@@ -83,18 +83,27 @@ fn all_wipes_have_exact_endpoints() {
 }
 
 #[test]
-fn deferred_inputs_are_retained_and_disabled() {
+fn implemented_layer_and_mask_controls_are_enabled() {
     for (name, ids) in [
         ("ADBE Fill", &[1, 7, 3, 4][..]),
         ("ADBE Gradient Wipe", &[3, 4]),
-        ("VISINF Grain Implant", &[60, 61, 62, 63]),
     ] {
         for &id in ids {
             assert!(
-                builtin(name).def().param(id).unwrap().flags.disabled,
+                !builtin(name).def().param(id).unwrap().flags.disabled,
                 "{name} {id}"
             );
         }
+    }
+    for id in [60, 61, 62, 63] {
+        assert!(
+            builtin("VISINF Grain Implant")
+                .def()
+                .param(id)
+                .unwrap()
+                .flags
+                .disabled
+        );
     }
 }
 

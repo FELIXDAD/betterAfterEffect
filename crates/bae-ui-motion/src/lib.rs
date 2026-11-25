@@ -201,6 +201,9 @@ impl AppModule for MotionUiModule {
             .flat_map(|e| e.item().bindings.clone())
             .collect();
         let late = actions::late_bindings(&handled, &taken);
+        app.insert_resource(context_menu::HandledActions(std::sync::Arc::new(
+            handled.clone(),
+        )));
         if !late.is_empty() {
             let _ = app.register::<KeymapBindings>(
                 "motion.ae",
