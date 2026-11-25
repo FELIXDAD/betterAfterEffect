@@ -1,7 +1,7 @@
 # merge-train configuration. Read by merge_train.py on every start; the daemon restarts
 # itself when this file changes in the runner worktree.
 
-repo = "FELIXDAD/betterAfterEffect"
+repo = "FELIXDAD/betterAfterEffects"
 base = "dev"
 
 # Orca repo name used to match worktrees in `orca worktree ps` (local and remote hosts).
@@ -53,7 +53,7 @@ reference_data = "reference-data"    # squash-merged, like branches under ref/
 # cancelled or missing never pass. Defined by the CI-tier work (branch build/ci-tiers):
 # `fast` runs on every PR push; `full` runs on dev/main pushes and on PRs labelled
 # merge-ready (labeled/synchronize), so it reruns by itself after update-branch.
-fast = ["fast / macOS arm64", "fast / Windows x64"]
+fast = ["fast / Windows x64"]  # macOS runs only in the full tier
 full = ["full / macOS arm64", "full / Windows x64"]
 # Any other check run that concludes failure/timed_out on the head also blocks the merge.
 fail_on_other_failures = true

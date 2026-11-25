@@ -6,7 +6,7 @@
 
 | 检查名（GitHub check run 的 `name`） | 工作流 | 什么时候跑 |
 |---|---|---|
-| `fast / macOS arm64`、`fast / Windows x64` | `.github/workflows/ci-fast.yml` | PR 的 opened、synchronize（推送、update-branch）、reopened。加标签不触发 |
+| `fast / Windows x64`（macOS 只在 full 里跑） | `.github/workflows/ci-fast.yml` | PR 的 opened、synchronize（推送、update-branch）、reopened。加标签不触发 |
 | `full / macOS arm64`、`full / Windows x64` | `.github/workflows/ci.yml` | 推送到 dev 或 main；PR 带 `merge-ready` 标签时的 labeled（加的就是这个标签）、synchronize、opened、reopened |
 
 - 快检查每次都会出结论：没有改到任何 crate 的 PR（纯文档等）也会跑这个 job，只是跳过编译，结论是 success，不会是 skipped。
