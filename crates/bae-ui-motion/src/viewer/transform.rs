@@ -23,7 +23,7 @@ pub(super) const HANDLE_PICK: f32 = 5.0;
 pub(super) const ANCHOR_PICK: f32 = 8.0;
 
 /// One layer a drag changes.
-pub(super) struct LayerEdit {
+pub(crate) struct LayerEdit {
     pub path: PrimPath,
     pub start: Transform,
     pub now: Transform,
@@ -96,7 +96,7 @@ pub(super) fn anchor_screen(l: &EvaluatedLayer, view: &View) -> Pos2 {
 }
 
 /// What a drag does.
-pub(super) enum Kind {
+pub(crate) enum Kind {
     Move {
         start: DVec2,
     },
@@ -149,7 +149,7 @@ fn features(l: &EvaluatedLayer, out: &mut Vec<DVec2>) {
 }
 
 /// A drag of the selected layers.
-pub(super) struct TransformDrag {
+pub(crate) struct TransformDrag {
     pub edits: Vec<LayerEdit>,
     pub kind: Kind,
     snapping: Option<Snapping>,
