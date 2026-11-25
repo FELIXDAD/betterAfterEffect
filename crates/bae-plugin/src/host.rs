@@ -444,15 +444,17 @@ impl PluginHost {
         }
         let effects = DeclarativeEffect::from_package(&package).map_err(LoadError::Invalid)?;
         if let Some(gpu) = self.gpu.upgrade() {
+            let format = bae_render::WorkFormat::default().texture_format();
             for effect in &effects {
-                effect
-                    .prewarm(&gpu, bae_render::WorkFormat::default().texture_format())
-                    .map_err(|error| {
-                        LoadError::Invalid(vec![Diagnostic::error(
-                            MANIFEST_FILE,
-                            format!("{}: {error}", effect.def().match_name),
-                        )])
-                    })?;
+                if let Err(error) = effect.prewarm(&gpu, format) {
+                    if gpu.is_lost() {
+                        break; // Device recovery will prepare the published package.
+                    }
+                    return Err(LoadError::Invalid(vec![Diagnostic::error(
+                        MANIFEST_FILE,
+                        format!("{}: {error}", effect.def().match_name),
+                    )]));
+                }
             }
         }
         let mut warnings = package.warnings.clone();

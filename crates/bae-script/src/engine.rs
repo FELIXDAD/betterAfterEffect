@@ -147,24 +147,43 @@ impl CompiledModule {
     }
 }
 
-fn host_module() -> Result<&'static CompiledModule, String> {
-    static HOST: OnceLock<Result<CompiledModule, String>> = OnceLock::new();
+struct HostCode {
+    api: CompiledModule,
+    caller: CompiledModule,
+}
+
+fn host_code() -> Result<&'static HostCode, String> {
+    static HOST: OnceLock<Result<HostCode, String>> = OnceLock::new();
     HOST.get_or_init(|| {
         let rt = Runtime::new().map_err(|e| e.to_string())?;
         rt.set_memory_limit(MEMORY_LIMIT);
         rt.set_max_stack_size(JS_STACK);
         Context::full(&rt).map_err(|e| e.to_string())?.with(|ctx| {
-            let source = format!("{PRELUDE}\nexport const {{ app, bae, Item, FolderItem, AVItem, FootageItem, CompItem, Layer, AVLayer, TextLayer, ShapeLayer, CameraLayer, LightLayer, Property, PropertyGroup, TextDocument, KeyframeInterpolationType }} = globalThis;");
-            Module::declare(ctx.clone(), "bae", source)
-                .and_then(|m| CompiledModule::from_module(&m))
-                .catch(&ctx).map_err(|e| describe(e, None))
+            let compile = || -> rquickjs::Result<HostCode> {
+                let api = Module::declare(ctx.clone(), "bae", PRELUDE)?;
+                // The caller imports the actual plugin in each invocation's runtime.
+                // Wrapping its namespace also keeps an export named "then" callable.
+                Module::declare(ctx.clone(), SCRIPT_FILE, "")?;
+                let caller = Module::declare(
+                    ctx.clone(),
+                    "bae-call",
+                    "export * as entries from 'script';",
+                )?;
+                Ok(HostCode {
+                    api: CompiledModule::from_module(&api)?,
+                    caller: CompiledModule::from_module(&caller)?,
+                })
+            };
+            compile().catch(&ctx).map_err(|e| describe(e, None))
         })
-    }).as_ref().map_err(Clone::clone)
+    })
+    .as_ref()
+    .map_err(Clone::clone)
 }
 
 /// Prepares the shared AE scripting prelude for file scripts and installed plugins.
 pub fn prewarm() -> Result<(), String> {
-    host_module().map(|_| ())
+    host_code().map(|_| ())
 }
 
 /// Compiles the module and links all declared entries before the package is published.
@@ -173,7 +192,7 @@ pub fn prepare_module<'a>(
     heap_bytes: usize,
     exports: impl Iterator<Item = &'a str>,
 ) -> Result<CompiledModule, String> {
-    let host = host_module()?;
+    let host = host_code()?;
     let rt = Runtime::new().map_err(|e| e.to_string())?;
     rt.set_memory_limit(heap_bytes);
     rt.set_max_stack_size(JS_STACK);
@@ -186,7 +205,10 @@ pub fn prepare_module<'a>(
             write!(probe, "{} as entry{i},", Json::from(name)).unwrap();
         }
         write!(probe, "}} from '{SCRIPT_FILE}';").unwrap();
-        host.load(&ctx).catch(&ctx).map_err(|e| describe(e, None))?;
+        host.api
+            .load(&ctx)
+            .catch(&ctx)
+            .map_err(|e| describe(e, None))?;
         let compiled = Module::declare(ctx.clone(), SCRIPT_FILE, source)
             .and_then(|m| CompiledModule::from_module(&m))
             .catch(&ctx)
@@ -204,7 +226,7 @@ pub fn prepare_module<'a>(
 }
 
 impl Program<'_> {
-    fn eval<'js>(&self, ctx: &Ctx<'js>) -> rquickjs::Result<rquickjs::Value<'js>> {
+    fn eval<'js>(&self, ctx: &Ctx<'js>, host: &HostCode) -> rquickjs::Result<rquickjs::Value<'js>> {
         match self {
             Self::File(source) => {
                 let mut opts = EvalOptions::default();
@@ -214,13 +236,11 @@ impl Program<'_> {
                 ctx.eval_with_options(strip_directives(source), opts)
             }
             Self::Module(entry) => {
-                let module = entry.module.load(ctx)?;
-                // Declaring a static import resolves the bytecode's dependencies without
-                // treating an exported function named "then" as a promise callback.
-                Module::declare(ctx.clone(), "bae-call", "import 'script';")?;
-                let (module, evaluated) = module.eval()?;
-                evaluated.finish::<()>()?;
-                let function: Function<'_> = module.get(entry.export)?;
+                entry.module.load(ctx)?;
+                host.caller.load(ctx)?;
+                let caller: rquickjs::Object = Module::import(ctx, "bae-call")?.finish()?;
+                let entries: rquickjs::Object = caller.get("entries")?;
+                let function: Function<'_> = entries.get(entry.export)?;
                 let result = function.call((ctx.json_parse(entry.args.to_string())?,))?;
                 rquickjs::promise::MaybePromise::from_value(result).finish()
             }
@@ -248,13 +268,14 @@ pub(crate) fn execute(
     let _current = Current::set(state);
     ctx.with(|ctx| {
         install_host(&ctx).map_err(|e| e.to_string())?;
-        host_module()?
+        let host = host_code()?;
+        host.api
             .load(&ctx)
             .and_then(|m| m.eval()?.1.finish::<()>())
             .catch(&ctx)
             .map_err(|e| format!("script prelude: {}", describe(e, None)))?;
         let text = program
-            .eval(&ctx)
+            .eval(&ctx, host)
             .and_then(|value| {
                 ctx.json_stringify(value)?
                     .map(|s| s.to_string())

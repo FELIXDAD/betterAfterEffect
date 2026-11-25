@@ -1365,7 +1365,8 @@ impl ApplicationHandler<UserEvent> for Shell {
             }
             UserEvent::DeviceLost => self.recover_device(event_loop),
             UserEvent::PluginsReady => {
-                self.workspace.set_extra_commands(self.document.command_titles());
+                self.workspace
+                    .set_extra_commands(self.document.command_titles());
                 self.build_menu();
                 self.request_redraw();
             }

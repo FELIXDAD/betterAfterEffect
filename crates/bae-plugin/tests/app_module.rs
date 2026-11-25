@@ -105,7 +105,7 @@ entry = "run"
 schema = "args.json"
 "#)
         .with_file("args.json", schema)
-        .with_file("main.js", "import { app } from 'bae'; export function run() { app.project.items.addFolder('X'); }")
+        .with_file("main.js", "import { app } from 'bae'; export function run() { app.project.items.addFolder('X'); } export function then() { throw new Error('then invoked'); }")
     };
     let mut builder = AppBuilder::new();
     builder.add_module(PluginModule);

@@ -89,10 +89,13 @@ impl PluginRuntime {
     /// Loads installed plugins once and prepares their GPU pipelines on the shell worker.
     /// Device recovery reuses the loaded packages and warms their new device.
     pub fn warm_up(&self, dirs: &[PluginDir], gpu: &Arc<bae_gpu::GpuContext>) {
-        if let Err(error) = bae_script::prewarm() {
-            tracing::warn!("script warm-up: {error}");
-        }
-        let existing = self.host.lock().warm_device(gpu);
+        let existing = {
+            let mut host = self.host.lock();
+            if gpu.is_lost() {
+                return;
+            }
+            host.warm_device(gpu)
+        };
         let format = bae_render::WorkFormat::default().texture_format();
         for effect in existing {
             if let Err(error) = effect.prewarm(gpu, format) {
@@ -155,6 +158,9 @@ pub fn load_installed(app: &App) {
 }
 
 fn load_and_log(runtime: &PluginRuntime, dirs: &[PluginDir]) {
+    if let Err(error) = bae_script::prewarm() {
+        tracing::warn!("script warm-up: {error}");
+    }
     let loaded = runtime.load_dirs(dirs);
     for (path, diags) in runtime.problems() {
         for d in diags {

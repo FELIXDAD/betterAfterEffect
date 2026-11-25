@@ -658,3 +658,9 @@
     },
   };
 })(globalThis);
+
+export const {
+  app, bae, Item, FolderItem, AVItem, FootageItem, CompItem, Layer, AVLayer,
+  TextLayer, ShapeLayer, CameraLayer, LightLayer, Property, PropertyGroup,
+  TextDocument, KeyframeInterpolationType,
+} = globalThis;
