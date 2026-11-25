@@ -73,11 +73,19 @@ pub struct RenderedFrame {
     pub stats: FrameStats,
     /// Things that were not rendered faithfully.
     pub warnings: Vec<String>,
+    /// Something was still warming up and is missing (a vector or text layer,
+    /// an effect): the frame is not cached and should be drawn again when the
+    /// warm-up reports progress (`bae_gpu::warm_up::request_redraw`).
+    pub incomplete: bool,
     /// CPU time spent on each top-level layer of the comp, in drawing order,
     /// when [`Renderer::set_layer_times`] is on (AE's Render Time column);
     /// empty otherwise and for cached frames. Drawing the layer into the comp
     /// itself is not included (it is one batched pass for all layers).
     pub layer_times: Vec<(PrimPath, Duration)>,
+    /// GPU time per top-level layer, the newest measurement read back (from
+    /// a frame or two earlier), when the device has timestamp queries inside
+    /// encoders; empty otherwise.
+    pub layer_gpu_times: Vec<(PrimPath, Duration)>,
 }
 
 /// How [`Renderer::read_rgba8`] treats alpha.
@@ -123,6 +131,10 @@ pub struct Renderer {
     effects: EffectLibrary,
     /// Measure per-layer render times ([`RenderedFrame::layer_times`]).
     layer_times: bool,
+    /// Timestamp queries for per-layer GPU times (created when needed).
+    gpu_timer: Option<crate::gpu_timer::GpuTimer>,
+    /// The newest per-layer GPU times read back.
+    gpu_times: Vec<(PrimPath, Duration)>,
 }
 
 impl std::fmt::Debug for Renderer {
@@ -182,6 +194,8 @@ impl Renderer {
             providers: SourceProviders::new(),
             effects: EffectLibrary::new(),
             layer_times: false,
+            gpu_timer: None,
+            gpu_times: Vec::new(),
             gpu,
         }
     }
@@ -191,11 +205,26 @@ impl Renderer {
     /// every graph node.
     pub fn set_layer_times(&mut self, on: bool) {
         self.layer_times = on;
+        if on && self.gpu_timer.is_none() {
+            self.gpu_timer = crate::gpu_timer::GpuTimer::new(self.gpu.device());
+        }
+        if !on {
+            self.gpu_timer = None;
+            self.gpu_times.clear();
+        }
     }
 
     /// The shared GPU context.
     pub fn gpu(&self) -> &Arc<GpuContext> {
         &self.gpu
+    }
+
+    /// Hash the pixels with camera/light dependencies from the installed effects.
+    pub fn content_hash(&self, comp: &RenderComp) -> u64 {
+        use std::hash::Hasher;
+        let mut h = rustc_hash::FxHasher::default();
+        comp.hash_content(&mut h, Some(&self.effects));
+        h.finish()
     }
 
     /// Effect implementations (register built-in and plugin effects here).
@@ -294,7 +323,7 @@ impl Renderer {
             time: comp.time,
             request: request.fingerprint(),
         };
-        let hash = comp.content_hash();
+        let hash = self.content_hash(comp);
         if self.frames.content_hash(&key) == Some(hash)
             && let Some(image) = self.frames.get(&key)
         {
@@ -305,7 +334,9 @@ impl Renderer {
                 from_cache: true,
                 stats: FrameStats::default(),
                 warnings: Vec::new(),
+                incomplete: false,
                 layer_times: Vec::new(),
+                layer_gpu_times: Vec::new(),
             });
         }
 
@@ -325,6 +356,15 @@ impl Renderer {
             warnings.push("RGBA32F is not filterable/blendable on this GPU; using RGBA16F".into());
         }
         let encode_start = Instant::now();
+        let tiles = request.roi.map(|_| crate::exec::TileCache {
+            frames: &mut self.frames,
+            request: RenderRequest {
+                roi: None,
+                ..*request
+            }
+            .fingerprint(),
+            comp,
+        });
         let executed = execute(
             &self.gpu,
             &mut self.pipelines,
@@ -333,13 +373,24 @@ impl Renderer {
             &mut self.mask_buffers,
             &graph,
             format,
-            self.layer_times,
+            tiles,
+            crate::exec::Timing {
+                cpu: self.layer_times,
+                gpu: self.gpu_timer.as_mut(),
+            },
         )?;
+        if let Some(timer) = &mut self.gpu_timer {
+            let period = self.gpu.queue().get_timestamp_period();
+            if let Some(times) = timer.collect(self.gpu.device(), period) {
+                self.gpu_times = times;
+            }
+        }
         let encode = encode_start.elapsed();
         self.pool.end_frame();
 
         let image = executed.image;
-        if !graph.time_dependent {
+        let incomplete = graph.incomplete || executed.incomplete;
+        if !graph.time_dependent && !incomplete {
             self.frames.insert(
                 key,
                 image.clone(),
@@ -365,7 +416,9 @@ impl Renderer {
                 encode,
             },
             warnings,
+            incomplete,
             layer_times: layer_times(&graph, &executed.node_times),
+            layer_gpu_times: self.gpu_times.clone(),
         })
     }
 

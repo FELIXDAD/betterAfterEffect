@@ -11,7 +11,6 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Keyframe Fields (doubles rate)", "“关键帧”字段（双重比率）"),
     ("Use “Linear” Vertex Paths", "使用“线性”顶点路径"),
     ("Bending Resistance:", "抗弯强度:"),
-    ("Quality:", "品质:"),
     ("Add Mask Path Vertices", "添加蒙版路径顶点"),
     ("Pixels Between Vertices", "顶点之间的像素"),
     ("Total Vertices", "总顶点数"),
@@ -32,7 +31,6 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Show:", "显示:"),
     ("Wireframe", "线框"),
     ("Background", "背景"),
-    ("Start:", "开始:"),
     ("Click to start capture", "单击开始捕捉"),
     ("Start Capture", "开始捕捉"),
     (

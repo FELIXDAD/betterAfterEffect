@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use bae_app::Registry;
-use bae_model::effect::param_attr;
+use bae_model::effect::{PointDefaultSpace, param_attr};
 use bae_model::{
     AttrSpec, CommandError, CommandRegistry, DynCommand, EffectDef, Keyframe, Op, PrimPath,
     PrimType, Stage, Time, Transaction, Value,
@@ -154,13 +154,10 @@ pub fn instance_default(
     layer: &PrimPath,
     param: &bae_model::EffectParamDef,
 ) -> Option<Value> {
-    let unit = if param.flags.relative_default {
-        [1.0, 1.0]
-    } else if param.flags.reference_point_default {
-        [1.0 / 640.0, 1.0 / 360.0]
-    } else {
+    let space = param.flags.point_default_space();
+    if space == PointDefaultSpace::Pixels {
         return param.default.clone();
-    };
+    }
     let size = || -> Option<[f64; 2]> {
         let source_size = stage
             .prim(layer)
@@ -174,11 +171,10 @@ pub fn instance_default(
             Some([f64::from(comp.width), f64::from(comp.height)])
         })
     };
-    let scale = |x: f64, y: f64, s: [f64; 2]| [x * s[0] * unit[0], y * s[1] * unit[1]];
     match (&param.default, size()) {
-        (Some(Value::Vec2([x, y])), Some(s)) => Some(Value::Vec2(scale(*x, *y, s))),
-        (Some(Value::Vec3([x, y, z])), Some(s)) if param.flags.relative_default => {
-            let [x, y] = scale(*x, *y, s);
+        (Some(Value::Vec2(xy)), Some(s)) => Some(Value::Vec2(space.layer_pixels(*xy, s))),
+        (Some(Value::Vec3([x, y, z])), Some(s)) if space == PointDefaultSpace::LayerFraction => {
+            let [x, y] = space.layer_pixels([*x, *y], s);
             Some(Value::Vec3([x, y, *z]))
         }
         _ => param.default.clone(),
