@@ -58,8 +58,14 @@ impl TimelinePanel {
 
     /// The rows while searching: (layer, property attr or group id) for tests.
     #[cfg(test)]
-    pub(crate) fn search_rows(&self, stage: &Stage, comp: &PrimPath, s: &Session) -> Vec<String> {
-        self.rows(stage, comp, s)
+    pub(crate) fn search_rows(
+        &mut self,
+        stage: &Stage,
+        comp: &PrimPath,
+        s: &Session,
+    ) -> Vec<String> {
+        let layers = self.layer_list(stage, comp);
+        self.rows(stage, &layers, s)
             .into_iter()
             .map(|r| match r.kind {
                 RowKind::Layer => query::display_name_of(stage, &r.layer),

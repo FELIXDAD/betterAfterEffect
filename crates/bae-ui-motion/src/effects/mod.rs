@@ -8,6 +8,7 @@
 
 pub(crate) mod browser;
 pub(crate) mod controls;
+mod warp_grid;
 
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -180,6 +181,17 @@ pub(crate) fn apply(cx: &mut PanelContext<'_>, layers: &[PrimPath], match_name: 
     if layers.is_empty() {
         return;
     }
+    // AE selects the applied effect (its point controls show in the viewer).
+    let before = layers
+        .iter()
+        .flat_map(|l| bae_motion::effect::effects_of(cx.stage, l))
+        .collect();
+    common::session(cx.resources)
+        .lock()
+        .expect(crate::session::Pending::NewEffects {
+            layers: layers.to_vec(),
+            before,
+        });
     cx.invoke_with(
         "effect.apply",
         json!({"layers": layers, "match_name": match_name}),
@@ -320,4 +332,19 @@ mod directory_tests {
         }
         assert!(list.iter().all(|e| !e.name_zh.is_empty()));
     }
+}
+
+mod zh;
+pub(crate) use zh::ZH;
+
+/// Registers this module's Chinese strings and panel (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "effects",
+        bae_ui::PanelKind::new("Effects & Presets", |_| {
+            Box::new(browser::EffectsPanel::default())
+        }),
+    );
 }
