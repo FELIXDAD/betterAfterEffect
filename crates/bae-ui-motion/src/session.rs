@@ -26,6 +26,20 @@ pub enum Reveal {
     Props(Vec<(PrimPath, String)>),
 }
 
+/// The prim of a Timeline group row (`layer#/…/Rectangle_1`, `…#animator`), if
+/// it stands for one (not Contents, Transform …).
+pub fn group_prim(id: &str) -> Option<PrimPath> {
+    for suffix in ["#animator", "#selector"] {
+        if let Some(p) = id.strip_suffix(suffix) {
+            return PrimPath::new(p).ok();
+        }
+    }
+    let (_, rest) = id.split_once('#')?;
+    (rest.starts_with('/') && !rest.contains('#'))
+        .then(|| PrimPath::new(rest).ok())
+        .flatten()
+}
+
 /// Real-time playback of one comp.
 #[derive(Clone, Debug)]
 pub struct Playback {
@@ -87,6 +101,9 @@ pub struct Session {
     pub selected_keys: Vec<KeyRef>,
     /// Properties selected in the timeline outline (`path`, `attr`).
     pub selected_props: Vec<(PrimPath, String)>,
+    /// Selected group rows of the Timeline (their row ids, e.g. a shape group,
+    /// mask, effect or text animator; [`group_prim`] gives the prim).
+    pub selected_groups: Vec<String>,
     /// Effects selected in Effect Controls: the viewer draws their point
     /// controls (AE).
     pub selected_effects: Vec<PrimPath>,
@@ -127,6 +144,9 @@ pub struct Session {
     /// Layers on the clipboard (Edit > Copy with layers selected); the last
     /// copy wins over [`Session::clipboard`].
     pub layer_clipboard: Vec<bae_motion::CopiedLayer>,
+    /// Layer contents on the clipboard (Copy with groups selected); the last copy
+    /// wins over the other clipboards.
+    pub content_clipboard: Vec<bae_motion::CopiedContent>,
     pending: Vec<(Pending, u32)>,
     /// Names of items commands are about to create (path, name), so default
     /// names given in the same frame stay unique.
