@@ -1726,15 +1726,32 @@ fn panel_contents(ui: &mut Ui, rect: Rect, panel: &PanelId, host: &mut impl Pane
         node.set_author_id(format!("panel:{}", panel.as_str()));
     });
     let scroll_id = child.id().with("overflow-scroll");
-    let scrolling = child
+    // Scrolls along the axes that overflowed (both would give wrapping
+    // contents unlimited width: they would fit, stop scrolling and overflow
+    // again the next frame).
+    // While the panel keeps its size an axis that scrolls keeps scrolling:
+    // contents whose size depends on the scroll bars would otherwise flip.
+    let size = [rect.width().round() as i32, rect.height().round() as i32];
+    let (scrolling, scrolled_at) = child
         .ctx()
-        .data(|d| d.get_temp::<bool>(scroll_id))
-        .unwrap_or(false);
-    let content = if scrolling {
-        let out = egui::ScrollArea::both()
+        .data(|d| d.get_temp::<([bool; 2], [i32; 2])>(scroll_id))
+        .unwrap_or(([false, false], size));
+    let scrolling = if scrolled_at == size {
+        scrolling
+    } else {
+        [false, false]
+    };
+    let content = if scrolling != [false, false] {
+        let out = egui::ScrollArea::new(scrolling)
             .id_salt(scroll_id)
             .auto_shrink([false, false])
-            .show(&mut child, |ui| host.ui(ui, panel));
+            .show(&mut child, |ui| {
+                // A scroll view for screen readers (egui only names the bar).
+                ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
+                    node.set_role(egui::accesskit::Role::ScrollView);
+                });
+                host.ui(ui, panel)
+            });
         out.content_size
     } else {
         host.ui(&mut child, panel);
@@ -1745,12 +1762,17 @@ fn panel_contents(ui: &mut Ui, rect: Rect, panel: &PanelId, host: &mut impl Pane
         rect,
         content,
     };
-    let overflows = area.overflows();
-    if overflows != scrolling {
+    let axes = [
+        scrolling[0] || area.content.x > rect.width() + 0.5,
+        scrolling[1] || area.content.y > rect.height() + 0.5,
+    ];
+    if axes != scrolling || scrolled_at != size {
         child
             .ctx()
-            .data_mut(|d| d.insert_temp(scroll_id, overflows));
-        child.ctx().request_repaint();
+            .data_mut(|d| d.insert_temp(scroll_id, (axes, size)));
+        if axes != scrolling {
+            child.ctx().request_repaint();
+        }
     }
     record_panel_area(ui.ctx(), area);
 }

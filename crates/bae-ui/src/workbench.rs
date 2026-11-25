@@ -930,12 +930,12 @@ impl Workbench {
                 near.extend(f.tabs.iter().filter(|t| *t != id).cloned());
             }
         }
+        // AE 26's Default workspace reopens these there (its frames' ReanimTabs).
         let group: &[&str] = match id.kind() {
-            "render_queue" | "flowchart" => &["timeline"],
-            "footage" | "layer" | "lumetri_scopes" | "essential_graphics" => &["composition"],
-            "project" | "effect_controls" | "metadata" | "media_browser" => {
-                &["project", "effect_controls"]
-            }
+            "render_queue" => &["timeline"],
+            "flowchart" | "media_browser" | "metadata" | "footage" | "layer" | "lumetri_scopes"
+            | "essential_graphics" => &["composition"],
+            "project" | "effect_controls" => &["project", "effect_controls"],
             "composition" | "timeline" => &[],
             _ => &[
                 "effects",
