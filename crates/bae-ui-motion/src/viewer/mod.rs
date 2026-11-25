@@ -208,7 +208,7 @@ impl CompositionViewer {
     ) -> Option<EvaluatedComp> {
         let time = session.lock().time(&info.path);
         self.eval
-            .get(cx.resources)
+            .get(cx.stage)
             .evaluate_comp(cx.stage, &info.path, time)
             .ok()
     }
