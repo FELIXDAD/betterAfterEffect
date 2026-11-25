@@ -48,7 +48,10 @@ pub(crate) fn open(cx: &mut PanelContext<'_>, session: &SharedSession, layer: &P
         .and_then(|v| v.value("source").and_then(|s| s.as_prim_ref()).cloned())
         .filter(|s| query::comp_info(cx.stage, s).is_some());
     if let Some(comp) = source {
-        session.lock().open_comp(&comp);
+        match query::owning_comp(cx.stage, layer) {
+            Some(parent) => session.lock().open_from(&parent, &comp),
+            None => session.lock().open_comp(&comp),
+        }
         cx.open_panel("timeline");
         cx.open_panel("composition");
     } else {

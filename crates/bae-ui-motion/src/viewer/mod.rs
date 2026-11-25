@@ -30,6 +30,7 @@ mod free_transform;
 pub(crate) mod guides;
 mod menu;
 mod motion_path;
+mod navigator;
 mod overlay;
 mod path_edit;
 mod pen_tool;
@@ -523,13 +524,19 @@ impl Panel for CompositionViewer {
 
         let full = ui.available_rect_before_wrap();
         let bar_h = 28.0;
-        let area = Rect::from_min_max(full.min, pos2(full.right(), full.bottom() - bar_h));
+        // The Composition Navigator along the top.
+        let nav = Rect::from_min_max(full.min, pos2(full.right(), full.top() + navigator::HEIGHT));
+        let area = Rect::from_min_max(
+            pos2(full.left(), nav.bottom()),
+            pos2(full.right(), full.bottom() - bar_h),
+        );
         let bar = Rect::from_min_max(pos2(full.left(), area.bottom()), full.max);
         // View ▸ Show Rulers: along the top and left of the viewer.
         let (rulers, area) = guides::layout(area, opts.rulers);
         let resp = ui
             .allocate_rect(area, Sense::click_and_drag())
             .labeled(egui::WidgetType::Image, tr("Composition"));
+        navigator::bar(ui, cx, &session, nav);
         if std::mem::take(&mut self.escape) {
             ui.input_mut(|i| {
                 i.events.push(egui::Event::Key {
@@ -1215,6 +1222,7 @@ pub(crate) use zh::ZH;
 pub(crate) fn register(app: &mut bae_app::AppBuilder) {
     bae_ui::i18n::register(ZH);
     bae_ui::i18n::register(display::ZH);
+    bae_ui::i18n::register(navigator::ZH);
     crate::register_panel(
         app,
         "composition",

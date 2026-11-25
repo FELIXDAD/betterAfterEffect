@@ -449,6 +449,7 @@ mod effect_points;
 mod free_transform;
 mod guides;
 mod navigation;
+mod navigator;
 mod pen;
 mod resolution;
 mod selection;
