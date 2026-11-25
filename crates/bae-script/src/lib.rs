@@ -160,6 +160,7 @@ fn run_program(
         env,
         access,
         selected: env.selected_layers.clone(),
+        generation: 0,
         report: ScriptReport {
             name: name.to_owned(),
             ..ScriptReport::default()

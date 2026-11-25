@@ -70,7 +70,13 @@ fn install_host(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
             None => throw(&ctx, "no script is running"),
         }
     })?;
-    ctx.globals().set("__host", f)
+    ctx.globals().set("__host", f)?;
+    ctx.globals().set(
+        "__generation",
+        Function::new(ctx.clone(), || {
+            with_state(|s| s.generation).unwrap_or_default()
+        })?,
+    )
 }
 
 /// ExtendScript preprocessor lines (`#target aftereffects`, `#include`,

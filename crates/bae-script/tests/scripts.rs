@@ -92,6 +92,59 @@ impl Fx {
 }
 
 #[test]
+fn collection_loops_read_each_snapshot_once_and_refresh_after_edits() {
+    let mut fx = Fx::new();
+    fx.ok(r#"
+        var f = app.project.items.addFolder("Examples");
+        var c = f.items.addComp("Loop", 100, 100, 1, 4, 24);
+        for (var i = 0; i < 8; i++) c.layers.addNull();
+        var p = c.layer(1).position;
+        for (var k = 0; k < 8; k++) p.setValueAtTime(k / 4, [k, k]);
+        0
+    "#);
+    let out = fx.ok(r#"
+        var calls = {}, host = __host;
+        globalThis.__host = function(m, args) {
+            calls[m] = (calls[m] || 0) + 1;
+            return host(m, args);
+        };
+        var project = app.project, comp, folder;
+        for (var i = 1; i <= project.numItems; i++) {
+            var item = project.item(i);
+            if (item.name === "Loop") comp = item;
+            if (item.name === "Examples") folder = item;
+        }
+        var ids = [], roots = project.rootFolder.items;
+        for (var i = 1; i <= roots.length; i++) ids.push(roots[i].id);
+        var children = folder.items, layers = comp.layers, indices = 0;
+        for (var i = 1; i <= layers.length; i++) indices += layers[i].index;
+        var p = layers[1].position, total = 0;
+        for (var k = 1; k <= p.numKeys; k++) total += p.keyTime(k) + p.keyValue(k)[0];
+        p.keyValue(1)[0] = 99;
+        var initial = [calls.items, calls.item, calls.layer || 0, calls.prop,
+                       children.length, children[1].id === comp.id, indices, total, p.keyValue(1)[0]];
+        var held = layers[1], added = layers.addText("New");
+        var afterAdd = [layers.length, layers[1] instanceof TextLayer, held.index];
+        added.remove();
+        p.removeKey(1);
+        folder.items.addFolder("Nested");
+        [initial, afterAdd, layers.length, held.index, p.numKeys, p.keyValue(1)[0], children.length]
+    "#);
+    assert_eq!(
+        out,
+        norm(json!([
+            [1, 1, 0, 1, 1, true, 36, 35, 0],
+            [9, true, 2],
+            8,
+            1,
+            7,
+            1,
+            2
+        ]))
+    );
+}
+
+#[test]
 fn creates_comps_and_layers_like_ae() {
     let mut fx = Fx::new();
     let out = fx.ok(r#"

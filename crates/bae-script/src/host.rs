@@ -20,6 +20,8 @@ pub(crate) struct RunState<'a, 'e, 't> {
     pub access: crate::ProjectAccess,
     /// Selected layers (`layer.selected = …` changes it for the rest of the run).
     pub selected: Vec<PrimPath>,
+    /// Version of the project and selection visible to this run.
+    pub generation: u32,
     pub report: ScriptReport,
 }
 
@@ -78,16 +80,7 @@ fn view<'s>(stage: &'s Stage, path: &PrimPath) -> Result<PrimView<'s>, String> {
 /// Project panel item type (`comp`, `folder`, `footage`), `None` for everything
 /// else (layers, effects, the folders inside comps and layers).
 fn item_type(stage: &Stage, path: &PrimPath) -> Option<&'static str> {
-    let v = stage.prim(path)?;
-    let ty = if v.is_a(&PrimType::COMP) {
-        "comp"
-    } else if v.is_a(&PrimType::FOLDER) {
-        "folder"
-    } else if v.is_a(&PrimType::ASSET) {
-        "footage"
-    } else {
-        return None;
-    };
+    let ty = item_kind(&stage.prim(path)?)?;
     let mut up = path.parent();
     while let Some(p) = up {
         if stage
@@ -101,12 +94,45 @@ fn item_type(stage: &Stage, path: &PrimPath) -> Option<&'static str> {
     Some(ty)
 }
 
+fn item_kind(v: &PrimView<'_>) -> Option<&'static str> {
+    if v.is_a(&PrimType::COMP) {
+        Some("comp")
+    } else if v.is_a(&PrimType::FOLDER) {
+        Some("folder")
+    } else if v.is_a(&PrimType::ASSET) {
+        Some("footage")
+    } else {
+        None
+    }
+}
+
 fn items(stage: &Stage) -> Vec<Json> {
-    stage
-        .traverse()
+    let mut rows = Vec::new();
+    let mut stack: Vec<_> = stage
+        .children(&PrimPath::root())
         .into_iter()
-        .filter_map(|p| Some(json!({ "path": p.as_str(), "type": item_type(stage, &p)? })))
-        .collect()
+        .rev()
+        .map(|p| (p, None::<PrimPath>))
+        .collect();
+    while let Some((path, parent)) = stack.pop() {
+        let Some(v) = stage.prim(&path) else { continue };
+        let kind = item_kind(&v);
+        if let Some(kind) = kind {
+            rows.push(json!({ "path": path, "type": kind, "name": query::display_name(&v), "parent": parent }));
+        }
+        if kind == Some("comp") || v.is_a(&PrimType::LAYER) {
+            continue;
+        }
+        let folder = (kind == Some("folder")).then_some(&path);
+        stack.extend(
+            stage
+                .children(&path)
+                .into_iter()
+                .rev()
+                .map(|p| (p, folder.cloned())),
+        );
+    }
+    rows
 }
 
 fn parent_folder(stage: &Stage, path: &PrimPath) -> Json {
@@ -126,10 +152,10 @@ fn item(stage: &Stage, path: &PrimPath) -> R {
     match ty {
         "comp" => {
             let c = query::comp_info(stage, path).ok_or("not a comp")?;
-            let layers: Vec<String> = query::comp_layers(stage, path)
-                .iter()
-                .map(|l| l.as_str().to_owned())
-                .collect();
+            let layers: Vec<_> = query::comp_layers(stage, path).into_iter().map(|p| {
+                json!({ "path": p, "kind": query::layer_kind(stage, &p),
+                    "name": query::display_name(&stage.prim(&p).expect("comp_layers returned a layer")) })
+            }).collect();
             let o = json!({
                 "width": c.width,
                 "height": c.height,
@@ -145,15 +171,7 @@ fn item(stage: &Stage, path: &PrimPath) -> R {
             });
             merge(&mut out, o);
         }
-        "folder" => {
-            let children: Vec<Json> = stage
-                .children(path)
-                .iter()
-                .filter(|c| item_type(stage, c).is_some())
-                .map(|c| json!(c.as_str()))
-                .collect();
-            out["items"] = Json::Array(children);
-        }
+        "folder" => {}
         _ => {
             let num = |a: &str| query::static_value(&v, a).and_then(|x| x.as_f64());
             let duration = query::static_value(&v, "duration")
@@ -191,23 +209,18 @@ fn merge(out: &mut Json, more: Json) {
     }
 }
 
-fn layer(stage: &Stage, path: &PrimPath, selected: &[PrimPath]) -> R {
+fn layer(stage: &Stage, path: &PrimPath) -> R {
     let v = view(stage, path)?;
     if !v.is_a(&PrimType::LAYER) {
         return Err(format!("{path} is not a layer"));
     }
     let comp = query::owning_comp(stage, path).ok_or("the layer is not in a comp")?;
-    let index = query::comp_layers(stage, &comp)
-        .iter()
-        .position(|l| l == path)
-        .map_or(0, |i| i + 1);
     let t = query::layer_timing(stage, path);
     let enum_attr =
         |a: &str| query::static_value(&v, a).and_then(|x| x.as_str().map(str::to_owned));
     Ok(json!({
         "name": query::display_name(&v),
         "kind": query::layer_kind(stage, path),
-        "index": index,
         "comp": comp.as_str(),
         "inPoint": secs(t.in_point),
         "outPoint": secs(t.out_point),
@@ -225,7 +238,6 @@ fn layer(stage: &Stage, path: &PrimPath, selected: &[PrimPath]) -> R {
         "quality": enum_attr("quality"),
         "parent": prim_ref(&v, "parent"),
         "source": prim_ref(&v, "source"),
-        "selected": selected.contains(path),
     }))
 }
 
@@ -264,6 +276,7 @@ impl RunState<'_, '_, '_> {
             return Err("a script cannot run another script".into());
         }
         let cmd = (self.env.commands)(id).ok_or_else(|| format!("unknown command `{id}`"))?;
+        self.generation += 1;
         cmd.run_json(self.tx, params).map_err(|e| e.to_string())
     }
 
@@ -452,6 +465,7 @@ impl RunState<'_, '_, '_> {
                 )
             }
             "selected" => {
+                self.generation += 1;
                 self.selected.retain(|l| *l != path);
                 if value.as_bool() == Some(true) {
                     self.selected.push(path);
@@ -606,7 +620,7 @@ pub(crate) fn call(s: &mut RunState<'_, '_, '_>, method: &str, args: &Json) -> R
         }
         "items" => Ok(Json::Array(items(s.stage()))),
         "item" => item(s.stage(), &path(args, "path")?),
-        "layer" => layer(s.stage(), &path(args, "path")?, &s.selected),
+        "layer" => layer(s.stage(), &path(args, "path")?),
         "prop" => s.prop(&path(args, "path")?, &string(args, "attr")?),
         "sample" => {
             let p = path(args, "path")?;

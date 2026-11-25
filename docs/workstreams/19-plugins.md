@@ -43,6 +43,7 @@
 
 ## 进度
 
+- betterAfterEffects 脚本在同次运行里复用项目条目、合成图层和关键帧列表，按索引创建所取的对象。增删或移动图层、修改关键帧后，脚本持有的集合会反映新的顺序和值。
 - [x] 设计规格 `docs/spec/plugin-architecture.md`（v0.1，已对齐合并后的 `bae_render::Effect` 和 `bae_model::EffectDef`）
 - [x] C ABI 头文件 `sdk/c/bae_plugin.h` 雏形（ABI 0.1）+ 自检（`sdk/c/tests/check.sh`：结构体布局、常量、签名、C++17、迷你宿主跑通纯 C 示例）
 - [x] 清单格式与校验（`bae_plugin::manifest`，错误带行列号）；参数 → `bae_model::EffectDef`（`effect_def`）

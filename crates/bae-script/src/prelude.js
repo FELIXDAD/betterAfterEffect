@@ -1,6 +1,6 @@
 // BAE scripting: the After Effects scripting object model (app, Project, items,
 // layers, properties) over one host function, `__host(method, json) -> json`.
-// Reads always ask the host (scripts see their own changes); every change is a
+// Collections are read once per host generation. Every project change is a
 // registered BAE command run in the script's undo step. Indices are 1-based and
 // times are seconds of comp time, as in AE. Written from the public AE scripting
 // guide's object and method names; no Adobe code.
@@ -9,6 +9,69 @@
   var H = function (method, args) {
     return JSON.parse(__host(method, JSON.stringify(args === undefined ? null : args)));
   };
+  var version = -1, snapshot;
+  function reads() {
+    var current = __generation();
+    if (version !== current) {
+      version = current;
+      snapshot = {
+        items: new Map(), layers: new Map(), layerRows: new Map(), properties: new Map(),
+        folders: new Map(), itemRows: new Map()
+      };
+    }
+    return snapshot;
+  }
+  function projectItems() {
+    var cache = reads();
+    if (!cache.project) {
+      cache.project = H("items");
+      for (var row of cache.project) {
+        cache.itemRows.set(row.path, row);
+        var parent = row.parent || "/";
+        if (!cache.folders.has(parent)) cache.folders.set(parent, []);
+        cache.folders.get(parent).push(row);
+      }
+    }
+    return cache.project;
+  }
+  function folderItems(path) {
+    projectItems();
+    return snapshot.folders.get(path) || [];
+  }
+  function itemInfo(path) {
+    var cache = reads();
+    if (!cache.items.has(path)) {
+      var info = H("item", { path: path });
+      cache.items.set(path, info);
+      if (info.layers) info.layers.forEach(function (row, i) {
+        row.index = i + 1;
+        cache.layerRows.set(row.path, row);
+      });
+    }
+    return cache.items.get(path);
+  }
+  function layerInfo(path) {
+    var layers = reads().layers;
+    if (!layers.has(path)) layers.set(path, H("layer", { path: path }));
+    return layers.get(path);
+  }
+  function layerRow(path) {
+    var rows = reads().layerRows;
+    if (!rows.has(path)) itemInfo(layerInfo(path).comp);
+    return rows.get(path);
+  }
+  function propInfo(p) {
+    var props = reads().properties;
+    if (!props.has(p._p)) props.set(p._p, new Map());
+    var attrs = props.get(p._p);
+    if (!attrs.has(p._a)) attrs.set(p._a, H("prop", { path: p._p, attr: p._a }));
+    return attrs.get(p._a);
+  }
+  function selection() {
+    var cache = reads();
+    if (!cache.selected) cache.selected = new Set(H("context").selected);
+    return cache.selected;
+  }
   var hide = function (obj, key, value) {
     Object.defineProperty(obj, key, { value: value, enumerable: false, writable: true });
   };
@@ -52,7 +115,7 @@
   // ---- collections (1-based, like AE) ---------------------------------------
 
   // `list()` returns the current members; `extra` adds methods.
-  var collection = function (list, extra) {
+  var collection = function (list, make, extra) {
     var base = { get length() { return list().length; } };
     for (var k in extra) Object.defineProperty(base, k, Object.getOwnPropertyDescriptor(extra, k));
     return new Proxy(base, {
@@ -61,7 +124,7 @@
           var items = list();
           var i = Number(key);
           if (i < 1 || i > items.length) return undefined;
-          return items[i - 1];
+          return make(items[i - 1]);
         }
         return t[key];
       },
@@ -74,28 +137,30 @@
 
   var mkItem = function (path, type) {
     if (path === null || path === undefined) return null;
-    if (!type) type = H("item", { path: path }).type;
+    if (!type) type = (reads().itemRows.get(path) || itemInfo(path)).type;
     if (type === "comp") return new CompItem(path);
     if (type === "folder") return new FolderItem(path);
     return new FootageItem(path);
   };
 
+  function itemFromRow(row) { return mkItem(row.path, row.type); }
+
   function Item(path) { hide(this, "_p", path); }
   Item.prototype = {
     constructor: Item,
     _i: function () {
-      if (this._p === "/") return { type: "folder", name: "Root", parent: null, items: rootItems() };
-      return H("item", { path: this._p });
+      if (this._p === "/") return { type: "folder", name: "Root", parent: null, items: folderItems("/") };
+      return itemInfo(this._p);
     },
     get id() { return this._p; },
-    get name() { return this._i().name; },
+    get name() { return (reads().itemRows.get(this._p) || this._i()).name; },
     set name(v) {
       if (this instanceof CompItem) H("setComp", { path: this._p, field: "name", value: String(v) });
       else H("rename", { path: this._p, name: String(v) });
     },
-    get typeName() { return TYPE_NAMES[this._i().type]; },
+    get typeName() { return TYPE_NAMES[(reads().itemRows.get(this._p) || this._i()).type]; },
     get parentFolder() {
-      var p = this._i().parent;
+      var p = (reads().itemRows.get(this._p) || this._i()).parent;
       return p ? new FolderItem(p) : g.app.project.rootFolder;
     },
     get selected() { return false; },
@@ -113,10 +178,7 @@
     items: {
       get: function () {
         var self = this;
-        return collection(function () {
-          var paths = self._p === "/" ? rootItems() : self._i().items;
-          return paths.map(function (p) { return mkItem(p); });
-        }, {
+        return collection(function () { return folderItems(self._p); }, itemFromRow, {
           addComp: function (n, w, h, pa, d, fr) {
             return g.app.project.items.addComp(n, w, h, pa, d, fr, self._p === "/" ? null : self._p);
           },
@@ -129,12 +191,6 @@
     numItems: { get: function () { return this.items.length; } },
     item: { value: function (i) { return this.items[i]; } },
   });
-
-  var rootItems = function () {
-    return H("items").filter(function (it) {
-      return H("item", { path: it.path }).parent === null;
-    }).map(function (it) { return it.path; });
-  };
 
   function AVItem(path) { Item.call(this, path); }
   AVItem.prototype = Object.create(Item.prototype, {
@@ -155,7 +211,7 @@
     mainSource: {
       get: function () {
         var i = this._i();
-        return { color: i.color, isStill: i.duration === 0, file: this.file };
+        return { color: i.color && i.color.slice(), isStill: i.duration === 0, file: this.file };
       },
     },
   });
@@ -172,7 +228,7 @@
     duration: { get: function () { return this._i().duration; }, set: compSetter("duration") },
     frameRate: { get: function () { return this._i().frameRate; }, set: compSetter("frameRate") },
     frameDuration: { get: function () { return this._i().frameDuration; } },
-    bgColor: { get: function () { return this._i().bgColor; }, set: compSetter("bgColor") },
+    bgColor: { get: function () { return this._i().bgColor.slice(); }, set: compSetter("bgColor") },
     workAreaStart: { get: function () { return this._i().workAreaStart; } },
     workAreaDuration: { get: function () { return this._i().workAreaDuration; } },
     displayStartTime: { get: function () { return this._i().displayStartTime; } },
@@ -185,9 +241,7 @@
           args.comp = comp._p;
           return mkLayer(H("addLayer", args));
         };
-        return collection(function () {
-          return comp._i().layers.map(mkLayer);
-        }, {
+        return collection(function () { return comp._i().layers; }, layerFromRow, {
           addSolid: function (color, name, w, h, pa, d) {
             return add({ kind: "solid", color: color, name: name, width: w, height: h, pixelAspect: pa, duration: d });
           },
@@ -200,7 +254,7 @@
           addCamera: function (name) { return add({ kind: "camera", name: name }); },
           addLight: function (name) { return add({ kind: "light", name: name }); },
           add: function (item, d) {
-            var type = H("item", { path: item._p }).type;
+            var type = (reads().itemRows.get(item._p) || itemInfo(item._p)).type;
             return add({ kind: type === "comp" ? "pre_comp" : "footage", source: item._p, duration: d });
           },
           byName: function (n) { return comp.layer(n); },
@@ -210,20 +264,18 @@
     },
     layer: {
       value: function (which) {
-        var paths = this._i().layers;
-        if (typeof which === "number") return which >= 1 && which <= paths.length ? mkLayer(paths[which - 1]) : null;
-        for (var i = 0; i < paths.length; i++) {
-          if (H("layer", { path: paths[i] }).name === String(which)) return mkLayer(paths[i]);
-        }
-        return null;
+        var rows = this._i().layers;
+        var row = typeof which === "number" ? rows[which - 1] :
+          rows.find(function (r) { return r.name === String(which); });
+        return row ? layerFromRow(row) : null;
       },
     },
     selectedLayers: {
       get: function () {
         var comp = this._p;
-        return H("context").selected.filter(function (p) {
-          return H("layer", { path: p }).comp === comp;
-        }).map(mkLayer);
+        return Array.from(selection()).filter(function (p) {
+          return layerInfo(p).comp === comp;
+        }).map(function (p) { return mkLayer(p); });
       },
     },
     selectedProperties: { get: function () { return []; } },
@@ -239,7 +291,7 @@
     hide(this, "_m", matchName || name);
     hide(this, "_parent", parent || null);
   }
-  var keyTimes = function (p) { return H("prop", { path: p._p, attr: p._a }).keys; };
+  var keyTimes = function (p) { return propInfo(p).keys; };
   Property.prototype = {
     constructor: Property,
     get name() { return this._n; },
@@ -270,7 +322,7 @@
     keyValue: function (i) {
       var k = keyTimes(this)[i - 1];
       if (!k) throw new RangeError("keyframe index " + i + " is out of range");
-      return fromHost(k.value);
+      return fromHost(k.value !== null && typeof k.value === "object" ? JSON.parse(JSON.stringify(k.value)) : k.value);
     },
     addKey: function (t) { return H("addKey", { path: this._p, attr: this._a, time: t }); },
     removeKey: function (i) { H("removeKey", { path: this._p, attr: this._a, index: i }); },
@@ -289,11 +341,11 @@
         in: name(inType), out: name(outType === undefined ? inType : outType),
       });
     },
-    get expression() { return H("prop", { path: this._p, attr: this._a }).expression; },
+    get expression() { return propInfo(this).expression; },
     set expression(src) {
       H("setExpression", { path: this._p, attr: this._a, source: String(src), enabled: true });
     },
-    get expressionEnabled() { return H("prop", { path: this._p, attr: this._a }).expressionEnabled; },
+    get expressionEnabled() { return propInfo(this).expressionEnabled; },
     set expressionEnabled(on) {
       H("setExpression", { path: this._p, attr: this._a, source: this.expression, enabled: !!on });
     },
@@ -441,9 +493,10 @@
 
   // ---- layers ---------------------------------------------------------------
 
-  var mkLayer = function (path) {
+  function layerFromRow(row) { return mkLayer(row.path, row.kind); }
+  var mkLayer = function (path, kind) {
     if (path === null || path === undefined) return null;
-    var kind = H("layer", { path: path }).kind;
+    if (kind === undefined) kind = (reads().layerRows.get(path) || layerInfo(path)).kind;
     if (kind === "text") return new TextLayer(path);
     if (kind === "shape") return new ShapeLayer(path);
     if (kind === "camera") return new CameraLayer(path);
@@ -458,10 +511,10 @@
   function Layer(path) { hide(this, "_p", path); }
   Layer.prototype = {
     constructor: Layer,
-    _i: function () { return H("layer", { path: this._p }); },
-    get name() { return this._i().name; },
+    _i: function () { return layerInfo(this._p); },
+    get name() { return (reads().layerRows.get(this._p) || this._i()).name; },
     set name(v) { H("setLayer", { path: this._p, field: "name", value: String(v) }); },
-    get index() { return this._i().index; },
+    get index() { return layerRow(this._p).index; },
     get id() { return this._p; },
     get inPoint() { return this._i().inPoint; },
     set inPoint(v) { layerSetter("inPoint").call(this, v); },
@@ -480,7 +533,7 @@
     set locked(v) { layerSetter("locked").call(this, !!v); },
     get label() { return this._i().label; },
     set label(v) { layerSetter("label").call(this, v); },
-    get selected() { return this._i().selected; },
+    get selected() { return selection().has(this._p); },
     set selected(v) { layerSetter("selected").call(this, !!v); },
     get nullLayer() { return this._i().kind === "null"; },
     get hasVideo() { var k = this._i().kind; return k !== "null" && k !== "camera" && k !== "light" && k !== "audio"; },
@@ -573,9 +626,7 @@
 
   var project = {
     get items() {
-      return collection(function () {
-        return H("items").map(function (it) { return mkItem(it.path, it.type); });
-      }, {
+      return collection(projectItems, itemFromRow, {
         addComp: function (name, w, h, pa, d, fr, parent) {
           return new CompItem(H("addComp", {
             name: name, width: w, height: h, pixelAspect: pa, duration: d, frameRate: fr, parent: parent || null,
@@ -586,7 +637,7 @@
         },
       });
     },
-    get numItems() { return H("items").length; },
+    get numItems() { return projectItems().length; },
     item: function (i) { return this.items[i]; },
     itemByID: function (id) { return mkItem(id); },
     layerByPath: function (path) { return mkLayer(path); },
