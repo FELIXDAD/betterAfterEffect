@@ -104,6 +104,37 @@ impl CompositionViewer {
         v
     }
 
+    fn paint_guides(
+        &self,
+        cx: &PanelContext<'_>,
+        painter: &egui::Painter,
+        clip: &egui::Painter,
+        comp_rect: Rect,
+        view: &View,
+    ) {
+        // Preferences > Grids & Guides (bae-prefs, workstream D).
+        let guides = bae_ui::settings::GridGuides::current(cx.resources);
+        if self.grid {
+            guides.paint_grid(clip, comp_rect, view.scale);
+        }
+        if self.safe {
+            guides.paint_safe(
+                painter,
+                comp_rect,
+                Stroke::new(1.0, Color32::from_gray(150)),
+            );
+            let c = comp_rect.center();
+            painter.line_segment(
+                [c - vec2(8.0, 0.0), c + vec2(8.0, 0.0)],
+                Stroke::new(1.0, Color32::from_gray(150)),
+            );
+            painter.line_segment(
+                [c - vec2(0.0, 8.0), c + vec2(0.0, 8.0)],
+                Stroke::new(1.0, Color32::from_gray(150)),
+            );
+        }
+    }
+
     fn view(&self, area: Rect, info: &CompInfo, ppp: f32) -> (View, f32) {
         let (w, h) = (info.width as f32, info.height as f32);
         let fit = ((area.width() - 24.0) / w)
@@ -468,6 +499,78 @@ impl Panel for CompositionViewer {
             crate::tools::shared(cx.resources).lock().magnification = mag;
         }
 
+        // GPU preview through 04's compositor when the app has a GPU.
+        if self
+            .gpu
+            .as_ref()
+            .is_some_and(|g| !g.is_current(cx.resources))
+        {
+            self.gpu = None;
+            self.gpu_tried = false;
+        }
+        if self.gpu.is_none() && !self.gpu_tried {
+            self.gpu_tried = true;
+            self.gpu = GpuPreview::new(cx.resources);
+        }
+        let resolution = render_factor(cx.stage, &info.path, session.lock().auto_resolution, mag);
+        self.render_factor = resolution;
+        // Paint.
+        let painter = ui.painter_at(area);
+        painter.rect_filled(area, 0.0, Color32::from_gray(35));
+        let comp_rect = render::comp_rect(&view, info.width, info.height);
+        if self.checker {
+            checkerboard(&painter, comp_rect.intersect(area));
+        } else {
+            let c = info.bg_color;
+            painter.rect_filled(
+                comp_rect,
+                0.0,
+                Color32::from_rgb(
+                    (c[0] * 255.0) as u8,
+                    (c[1] * 255.0) as u8,
+                    (c[2] * 255.0) as u8,
+                ),
+            );
+        }
+        let clip = painter.with_clip_rect(comp_rect.intersect(area));
+        let playback = session.lock().playback.clone();
+        if let (Some(pb), Some(gpu)) = (playback, self.gpu.as_mut())
+            && pb.comp == info.path
+            && !resp.dragged()
+            && !resp.clicked()
+        {
+            let looping = session.lock().loop_playback;
+            let ready = gpu.playback.poll(
+                cx.stage,
+                cx.resources,
+                &info.path,
+                time,
+                info.frame_rate,
+                pb.range,
+                looping,
+                resolution,
+                ui.ctx(),
+            );
+            self.on_gpu = ready.is_some();
+            if let Some((image, _, errors)) = ready {
+                paint_image(&clip, &view, image);
+                let mut s = session.lock();
+                if s.expr_errors != errors {
+                    s.expr_errors = errors.to_vec();
+                }
+            }
+            self.paint_guides(cx, &painter, &clip, comp_rect, &view);
+            self.banner.ui(ui, cx, &session, area);
+            bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
+            return;
+        }
+        if let Some(gpu) = self.gpu.as_mut() {
+            gpu.playback.stop();
+        }
+        if resp.dragged() || resp.clicked() {
+            session.lock().stop();
+        }
+
         // Evaluate.
         let eval = self.eval.get(cx.resources);
         let mut comp = match eval.evaluate_comp(cx.stage, &info.path, time) {
@@ -515,40 +618,6 @@ impl Panel for CompositionViewer {
             select_tool::center_anchors(cx, &session, &info, &comp);
         }
 
-        // Paint.
-        let painter = ui.painter_at(area);
-        painter.rect_filled(area, 0.0, Color32::from_gray(35));
-        let comp_rect = render::comp_rect(&view, info.width, info.height);
-        if self.checker {
-            checkerboard(&painter, comp_rect.intersect(area));
-        } else {
-            let c = info.bg_color;
-            painter.rect_filled(
-                comp_rect,
-                0.0,
-                Color32::from_rgb(
-                    (c[0] * 255.0) as u8,
-                    (c[1] * 255.0) as u8,
-                    (c[2] * 255.0) as u8,
-                ),
-            );
-        }
-        let clip = painter.with_clip_rect(comp_rect.intersect(area));
-        // GPU preview through 04's compositor when the app has a GPU.
-        if self
-            .gpu
-            .as_ref()
-            .is_some_and(|g| !g.is_current(cx.resources))
-        {
-            self.gpu = None;
-            self.gpu_tried = false;
-        }
-        if self.gpu.is_none() && !self.gpu_tried {
-            self.gpu_tried = true;
-            self.gpu = GpuPreview::new(cx.resources);
-        }
-        let resolution = render_factor(cx.stage, &info.path, session.lock().auto_resolution, mag);
-        self.render_factor = resolution;
         let image = self
             .gpu
             .as_mut()
@@ -556,17 +625,7 @@ impl Panel for CompositionViewer {
         self.on_gpu = image.is_some();
         let mut vector = std::borrow::Cow::Borrowed(&comp);
         if let Some(img) = image {
-            let r = img.rect;
-            let rect = Rect::from_min_max(
-                view.to_screen(DVec2::new(f64::from(r.x0), f64::from(r.y0))),
-                view.to_screen(DVec2::new(f64::from(r.x1), f64::from(r.y1))),
-            );
-            clip.image(
-                egui::TextureId::User(img.handle),
-                rect,
-                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                Color32::WHITE,
-            );
+            paint_image(&clip, &view, img);
             // Until 05's text source is registered, text layers are drawn here.
             let has_text = self.gpu.as_ref().is_some_and(|g| g.has_text);
             let mut text_only = comp.clone();
@@ -591,27 +650,7 @@ impl Panel for CompositionViewer {
         );
         clip.extend(shapes);
 
-        // Preferences > Grids & Guides (bae-prefs, workstream D).
-        let guides = bae_ui::settings::GridGuides::current(cx.resources);
-        if self.grid {
-            guides.paint_grid(&clip, comp_rect, view.scale);
-        }
-        if self.safe {
-            guides.paint_safe(
-                &painter,
-                comp_rect,
-                Stroke::new(1.0, Color32::from_gray(150)),
-            );
-            let c = comp_rect.center();
-            painter.line_segment(
-                [c - vec2(8.0, 0.0), c + vec2(8.0, 0.0)],
-                Stroke::new(1.0, Color32::from_gray(150)),
-            );
-            painter.line_segment(
-                [c - vec2(0.0, 8.0), c + vec2(0.0, 8.0)],
-                Stroke::new(1.0, Color32::from_gray(150)),
-            );
-        }
+        self.paint_guides(cx, &painter, &clip, comp_rect, &view);
 
         // Selection: bounding boxes, handles, anchor points (AE draws them in the
         // layer's label color).
@@ -823,6 +862,20 @@ impl Panel for CompositionViewer {
         self.banner.ui(ui, cx, &session, area);
         bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);
     }
+}
+
+fn paint_image(clip: &egui::Painter, view: &View, img: crate::gpu_preview::PreviewImage) {
+    let r = img.rect;
+    let rect = Rect::from_min_max(
+        view.to_screen(DVec2::new(f64::from(r.x0), f64::from(r.y0))),
+        view.to_screen(DVec2::new(f64::from(r.x1), f64::from(r.y1))),
+    );
+    clip.image(
+        egui::TextureId::User(img.handle),
+        rect,
+        Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+        Color32::WHITE,
+    );
 }
 
 /// The comp's resolution as a pixel step (Composition Settings > Resolution:

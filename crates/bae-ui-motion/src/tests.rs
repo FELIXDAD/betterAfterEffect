@@ -12,6 +12,7 @@ use crate::session::SharedSession;
 use crate::{CompositionViewer, ProjectPanel, TimelinePanel};
 
 mod playback_4k;
+mod playback_worker;
 
 struct Harness {
     stage: Stage,

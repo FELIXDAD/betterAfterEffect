@@ -48,12 +48,56 @@ pub(crate) struct PreviewImage {
     pub rect: IRect,
 }
 
+pub(super) struct RenderEngine {
+    pub(super) renderer: Renderer,
+    pub(super) anim: AnimEvaluator,
+}
+
+impl RenderEngine {
+    pub(super) fn new(gpu: Arc<GpuContext>, cache: u64) -> Self {
+        Self {
+            renderer: Renderer::with_config(
+                gpu,
+                RendererConfig {
+                    frame_cache_bytes: cache,
+                    pool_idle_bytes: 128 << 20,
+                },
+            ),
+            anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
+        }
+    }
+
+    pub(super) fn render(
+        &mut self,
+        stage: &Stage,
+        rc: &bae_render::RenderComp,
+        resolution: u32,
+    ) -> Result<(wgpu::Texture, IRect), bae_render::RenderError> {
+        let request = RenderRequest {
+            resolution: Resolution::Custom(resolution),
+            purpose: RenderPurpose::Preview,
+            ..RenderRequest::full()
+        };
+        let mut frames = bae_render::eval::EvaluatorFrames {
+            stage,
+            evaluator: &mut self.anim,
+        };
+        let frame = self
+            .renderer
+            .render_frame_with(rc, &request, Some(&mut frames))?;
+        let texture = self
+            .renderer
+            .output_texture(&frame, OutputAlpha::Premultiplied)?;
+        Ok((texture, frame.image.rect))
+    }
+}
+
 pub(crate) struct GpuPreview {
     gpu: Arc<GpuContext>,
     registry: Arc<ViewportTextureRegistry>,
     id: ViewportTextureId,
-    renderer: Renderer,
-    anim: AnimEvaluator,
+    engine: RenderEngine,
+    pub(super) playback: super::playback::PlaybackPreview,
     sources_gen: Option<u64>,
     /// `(content hash, time, resolution)` of the published frame.
     last: Option<(u64, Time, u32)>,
@@ -73,19 +117,14 @@ impl GpuPreview {
 
     pub fn with(gpu: Arc<GpuContext>, registry: Arc<ViewportTextureRegistry>) -> Self {
         let id = registry.create("motion composition viewer");
-        let renderer = Renderer::with_config(
-            gpu.clone(),
-            RendererConfig {
-                frame_cache_bytes: 512 << 20,
-                pool_idle_bytes: 128 << 20,
-            },
-        );
+        let engine = RenderEngine::new(gpu.clone(), 512 << 20);
+        let playback = super::playback::PlaybackPreview::new(gpu.clone(), registry.clone());
         GpuPreview {
             gpu,
             registry,
             id,
-            renderer,
-            anim: AnimEvaluator::new(None).with_purpose(RenderPurpose::Preview),
+            engine,
+            playback,
             sources_gen: None,
             last: None,
             rect: None,
@@ -111,7 +150,7 @@ impl GpuPreview {
             return;
         }
         self.sources_gen = Some(generation);
-        let providers = self.renderer.providers_mut();
+        let providers = self.engine.renderer.providers_mut();
         for entry in registry.snapshot().iter() {
             providers.register(entry.item().clone());
         }
@@ -121,7 +160,7 @@ impl GpuPreview {
 
     fn sync_effects(&mut self, resources: &Resources) {
         if let Some(PreviewEffects(registry)) = resources.get::<PreviewEffects>()
-            && self.renderer.sync_effects(registry)
+            && self.engine.renderer.sync_effects(registry)
         {
             self.last = None;
         }
@@ -139,7 +178,7 @@ impl GpuPreview {
     ) -> Option<PreviewImage> {
         self.sync_sources(resources);
         self.sync_effects(resources);
-        let rc = match self.anim.convert(stage, comp, 0) {
+        let rc = match self.engine.anim.convert(stage, comp, 0) {
             Ok(rc) => rc,
             Err(e) => {
                 tracing_warn(&format!("preview: {e}"));
@@ -148,37 +187,8 @@ impl GpuPreview {
         };
         let key = (rc.content_hash(), rc.time, resolution);
         if self.last != Some(key) {
-            let request = RenderRequest {
-                resolution: match resolution {
-                    0 | 1 => Resolution::Full,
-                    2 => Resolution::Half,
-                    3 => Resolution::Third,
-                    4 => Resolution::Quarter,
-                    n => Resolution::Custom(n),
-                },
-                purpose: RenderPurpose::Preview,
-                ..RenderRequest::full()
-            };
-            // Effects reading other frames evaluate them like this one.
-            let mut frames = bae_render::eval::EvaluatorFrames {
-                stage,
-                evaluator: &mut self.anim,
-            };
-            let frame = match self
-                .renderer
-                .render_frame_with(&rc, &request, Some(&mut frames))
-            {
-                Ok(f) => f,
-                Err(e) => {
-                    tracing_warn(&format!("preview: {e}"));
-                    return None;
-                }
-            };
-            let texture = match self
-                .renderer
-                .output_texture(&frame, OutputAlpha::Premultiplied)
-            {
-                Ok(t) => t,
+            let (texture, rect) = match self.engine.render(stage, &rc, resolution) {
+                Ok(frame) => frame,
                 Err(e) => {
                     tracing_warn(&format!("preview: {e}"));
                     return None;
@@ -194,7 +204,7 @@ impl GpuPreview {
                 return None;
             }
             self.last = Some(key);
-            self.rect = Some(frame.image.rect);
+            self.rect = Some(rect);
         }
         Some(PreviewImage {
             handle: self.registry.display_handle(self.id)?,
@@ -204,7 +214,7 @@ impl GpuPreview {
 
     #[cfg(test)]
     pub fn renderer(&mut self) -> &mut Renderer {
-        &mut self.renderer
+        &mut self.engine.renderer
     }
 
     #[cfg(test)]
