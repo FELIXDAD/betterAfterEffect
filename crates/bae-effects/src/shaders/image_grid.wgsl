@@ -34,6 +34,7 @@ fn fx_bilinear(t: texture_2d<f32>, img: FxImage, p: vec2f, straight: bool) -> ve
     let texel = (p - img.origin) * img.scale - 0.5;
     let f = fract(texel);
     let q = vec2i(floor(texel));
+    if all(f == vec2f(0.0)) { return fx_load(t, img, q, straight); }
     return mix(
         mix(fx_load(t, img, q, straight), fx_load(t, img, q + vec2i(1, 0), straight), f.x),
         mix(fx_load(t, img, q + vec2i(0, 1), straight), fx_load(t, img, q + vec2i(1, 1), straight), f.x),
