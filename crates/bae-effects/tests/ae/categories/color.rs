@@ -2,7 +2,11 @@ use super::{CONTROLS_CHANNEL, ORIGINAL, Suite};
 
 pub(super) const SUITE: Suite = Suite {
     default_cases: &[ORIGINAL],
-    golden_only: &[CONTROLS_CHANNEL, include_str!("../cases-color-3.json")],
+    golden_only: &[
+        CONTROLS_CHANNEL,
+        include_str!("../cases-color-3.json"),
+        include_str!("../cases-lumetri.json"),
+    ],
     probes: &[
         ("ramp", ramp),
         ("rgb-cube", rgb_cube),
