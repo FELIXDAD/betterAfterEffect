@@ -595,6 +595,22 @@ impl Panel for CompositionViewer {
             .as_mut()
             .and_then(|g| g.frame(cx.resources, cx.stage, &comp, resolution, view_camera));
         self.on_gpu = image.is_some();
+        // The Info panel: the pointer in comp pixels and, while the panel shows
+        // it, the color under it (one texel read back from the GPU frame).
+        if let Some(h) = resp.hover_pos() {
+            let p = view.to_comp(h);
+            let mut s = session.lock();
+            s.info.pos = Some([p.x, p.y]);
+            let shown = ui
+                .ctx()
+                .cumulative_frame_nr()
+                .saturating_sub(s.info.shown_at)
+                < 3;
+            if shown && let Some(g) = self.gpu.as_mut() {
+                // Outside the rendered frame the comp is transparent (AE: A 0).
+                s.info.color = Some(g.pixel([p.x, p.y]).unwrap_or([0; 4]));
+            }
+        }
         let mut vector = std::borrow::Cow::Borrowed(&comp);
         if let Some(img) = image {
             let r = img.rect;

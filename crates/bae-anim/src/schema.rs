@@ -58,6 +58,11 @@ pub mod layer {
     pub const PRESERVE_TRANSPARENCY: &str = "preserve_transparency";
     pub const TEXT_SOURCE: &str = "text:source";
     pub const TEXT_PATH: &str = "text:path";
+    pub const TEXT_REVERSE_PATH: &str = "text:reverse_path";
+    pub const TEXT_PERPENDICULAR_TO_PATH: &str = "text:perpendicular_to_path";
+    pub const TEXT_FORCE_ALIGNMENT: &str = "text:force_alignment";
+    pub const TEXT_FIRST_MARGIN: &str = "text:first_margin";
+    pub const TEXT_LAST_MARGIN: &str = "text:last_margin";
     /// Child folders.
     pub const MASKS: &str = "masks";
     pub const EFFECTS: &str = "effects";

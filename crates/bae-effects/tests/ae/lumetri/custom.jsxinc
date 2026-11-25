@@ -1,0 +1,62 @@
+// JSX cannot set CUSTOM_VALUE. Edit only point/scalar slots in the AEPX that
+// this run just saved. Keep AE's own headers and all other properties intact.
+function lumetriCustomComp(comp, c, root) {
+    var source = File(root + "/lumetri-source.aepx");
+    app.project.save(source);
+    app.project.close(CloseOptions.DO_NOT_SAVE_CHANGES);
+    source.open("r");
+    var xml = source.read();
+    source.close();
+
+    function little(value, bytes) {
+        var s = "";
+        for (var i = 0; i < bytes; i++) {
+            s += ("0" + (value % 256).toString(16)).slice(-2);
+            value = Math.floor(value / 256);
+        }
+        return s;
+    }
+    function doubleLE(x) {
+        if (x === 0) return little(0, 8);
+        var e = Math.floor(Math.log(Math.abs(x)) / Math.LN2);
+        var m = (Math.abs(x) / Math.pow(2, e) - 1) * 4503599627370496;
+        return little(m, 6) + little(Math.floor(m / 281474976710656) +
+            16 * (e + 1023) + (x < 0 ? 32768 : 0), 2);
+    }
+    function patch(id, offset, hex) {
+        var name = "ADBE Lumetri-" + ("0000" + id).slice(-4);
+        var key = "";
+        for (var k = 0; k < name.length; k++) key += little(name.charCodeAt(k), 1);
+        var at = xml.lastIndexOf('<tdmn bdata="' + key);
+        if (at < 0) throw Error("missing " + name);
+        at = xml.indexOf('<aRbp bdata="', at) + '<aRbp bdata="'.length;
+        at += 2 * offset;
+        xml = xml.substring(0, at) + hex + xml.substring(at + hex.length);
+    }
+
+    for (var id in (c.points || {})) {
+        var values = c.points[id];
+        for (var ch = 0; ch < 4; ch++) {
+            var data = "", count = 0;
+            for (var i = 0; i < values.length; i += 3) {
+                if (values[i] !== ch) continue;
+                data += doubleLE(values[i+1]) + doubleLE(values[i+2]);
+                count++;
+            }
+            if (count) patch(id, 520*ch + 4, little(count, 4) + data);
+        }
+    }
+    for (var slot = 0; c.wheels && slot < c.wheels.length; slot++) {
+        var wheel = c.wheels[slot];
+        var data = "";
+        for (var i = 0; i < wheel.values.length; i++) data += doubleLE(wheel.values[i]);
+        patch(wheel.id, wheel.offset, data);
+    }
+    var output = File(root + "/lumetri-edited.aepx");
+    output.open("w"); output.write(xml); output.close();
+    var project = app.open(output);
+    for (var j = 1; j <= project.numItems; j++) {
+        if (project.item(j).name === c.name) return project.item(j);
+    }
+    throw Error("missing comp " + c.name);
+}

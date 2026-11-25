@@ -6,7 +6,7 @@ schema_version = 1
 [plugin]
 id = "com.example.invert-c"
 version = "0.1.0"                          # = INVERT_PLUGIN_VERSION in invert.c
-api = "0.1"                                # = INVERT_ABI_REQUIRED in invert.c (§6.6 rule 2)
+api = "1.0"                                # = INVERT_ABI_REQUIRED in invert.c (§6.6 rule 2)
 name = "Invert (C example)"
 description = "Inverts the color channels of a layer. Minimal native CPU effect written in plain C."
 authors = ["BAE contributors"]
