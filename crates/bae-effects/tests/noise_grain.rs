@@ -105,6 +105,54 @@ fn noise_variants_share_the_hls_phase_and_legacy_median() {
 }
 
 #[test]
+fn remove_grain_preserves_channels_and_filters_the_blend_mask() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(12, 12);
+    let input = Pixels::new(rect, |x, y| {
+        let red = if (x + y) % 2 == 0 { 0.25 } else { 0.75 };
+        [red, 0.5, 0.125, 1.]
+    });
+    let fx = builtin("VISINF Grain Removal");
+    // Disable texture reinjection so constant channels must stay constant.
+    let denoised = run(
+        &gpu,
+        F16,
+        fx,
+        vec![(62, Value::Float(0.))],
+        &input,
+        rect,
+        1.,
+    );
+    let [red, green, blue, alpha] = denoised.get(2, 2);
+    assert!(red > 0.25 && red < 0.5, "filtered red: {red}");
+    assert_eq!(alpha, 1.);
+    for (actual, expected) in [(green, 0.5), (blue, 0.125)] {
+        assert!(
+            (actual - expected).abs() <= expected * half::f16::EPSILON.to_f32(),
+            "expected {expected}, got {actual}"
+        );
+    }
+    for (radius, expected) in [(0., 1.), (1., 0.5)] {
+        let mask = run(
+            &gpu,
+            F16,
+            fx,
+            vec![
+                (15, Value::Int(3)),
+                (8, Value::Float(100.)),
+                (23, Value::Int(7)),
+                (9, Value::Color([0.25, 0., 0., 1.])),
+                (68, Value::Float(radius)),
+            ],
+            &input,
+            rect,
+            1.,
+        );
+        assert_eq!(mask.get(2, 2), [expected, expected, expected, 1.]);
+    }
+}
+
+#[test]
 fn match_grain_uses_the_selected_reference_on_the_gpu() {
     let Some(gpu) = context() else { return };
     let rect = IRect::from_size(20, 20);

@@ -44,6 +44,7 @@ mod exec;
 pub mod export;
 pub mod fixture;
 pub mod footage;
+mod frame_blend;
 pub mod geom;
 mod gpu;
 pub mod graph;
@@ -78,8 +79,8 @@ pub use geom::{IRect, Rect};
 pub use graph::EffectFrame;
 pub use graph::{RenderGraph, SourceResolver};
 pub use input::{
-    CustomContent, Dependency, FootageRef, LayerContent, RenderComp, RenderEffect, RenderLayer,
-    RenderMask, TrackMatte,
+    CustomContent, Dependency, FootageRef, FrameBlend, LayerContent, RenderComp, RenderEffect,
+    RenderLayer, RenderMask, TrackMatte,
 };
 pub use light::{Light, LightKind, Material};
 pub use module::RenderModule;

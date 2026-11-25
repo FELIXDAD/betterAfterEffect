@@ -149,6 +149,8 @@ pub(crate) struct Executed {
     pub image: GpuImage,
     pub draw_calls: usize,
     pub passes: usize,
+    /// CPU time encoding each node (by node index), when timed.
+    pub node_times: Vec<std::time::Duration>,
 }
 
 struct PoolAllocator<'a> {
@@ -175,7 +177,8 @@ pub(crate) struct TileCache<'a> {
     pub comp: &'a crate::RenderComp,
 }
 
-/// Executes `graph` and submits it. Returns the output node's image.
+/// Executes `graph` and submits it. Returns the output node's image (and,
+/// when `timed`, the CPU time of every node).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn execute(
     gpu: &Arc<GpuContext>,
@@ -186,6 +189,7 @@ pub(crate) fn execute(
     graph: &RenderGraph,
     format: wgpu::TextureFormat,
     mut tiles: Option<TileCache<'_>>,
+    timed: bool,
 ) -> Result<Executed, RenderError> {
     let mut surfaces = Vec::new();
     let device = gpu.device();
@@ -260,7 +264,9 @@ pub(crate) fn execute(
     // Every mask of the frame at once, in shared atlases (they have no inputs).
     ctx.mask_outs = masks::encode(&mut ctx, &mut encoder, pool, mask_buffers, graph)?;
 
+    let mut node_times = Vec::with_capacity(if timed { graph.nodes.len() } else { 0 });
     for (index, node) in graph.nodes.iter().enumerate() {
+        let started = timed.then(std::time::Instant::now);
         let mut surface_key = tiles.as_ref().and_then(|cache| match &node.kind {
             NodeKind::Effect(fx) if fx.effect.full_surface() => Some(crate::cache::FrameKey {
                 comp: fx.instance.path.clone(),
@@ -386,6 +392,9 @@ pub(crate) fn execute(
             surfaces.push((key, node.key, image.clone()));
         }
         outputs[index] = Some(image);
+        if let Some(started) = started {
+            node_times.push(started.elapsed());
+        }
         // Free inputs whose last consumer this was.
         node.kind.for_each_input(|id| {
             let u = &mut uses[id.index()];
@@ -413,6 +422,7 @@ pub(crate) fn execute(
         image,
         draw_calls,
         passes,
+        node_times,
     })
 }
 

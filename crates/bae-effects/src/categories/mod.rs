@@ -64,6 +64,7 @@ impl Embedded {
             out.push(Builtin {
                 info,
                 implementation: Implementation::Declarative(fx),
+                alias: None,
             });
         }
         Ok(())

@@ -107,11 +107,24 @@ fn integrate(s: State, dt: f32) -> State {
     return next;
 }
 
-// Invert the integral of r(t) = r0 + slope*t within this birth interval.
-fn birth_offset(index: u32) -> f32 {
-    let n = frame.emission.y + f32(index);
-    let r = frame.emission.z;
-    return 2. * n / max(1e-12, r + sqrt(max(0., r*r + 2.*frame.emission.w*n)));
+struct Birth { id: u32, time: f32, life: f32 }
+
+fn birth_at(slot: u32) -> Birth {
+    var span = frame.first_interval;
+    if frame.interval_count > 1u {
+        var lo = 0u;
+        var hi = frame.interval_count;
+        while lo + 1u < hi {
+            let mid = (lo + hi) / 2u;
+            if intervals[mid].slot <= slot { lo = mid; } else { hi = mid; }
+        }
+        span = intervals[lo];
+    }
+    let i = slot - span.slot;
+    // Invert the integral of r(t) = rate + slope*t within this interval.
+    let n = span.ordinal + f32(i);
+    let dt = 2.*n / max(1e-12, span.rate + sqrt(max(0., span.rate*span.rate + 2.*span.slope*n)));
+    return Birth(span.first_id+i, span.start+dt, span.life+dt*span.life_slope);
 }
 
 fn at_age(id: u32, birth: f32, age: f32) -> State {
