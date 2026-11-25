@@ -19,6 +19,10 @@ fn builtins_register_through_the_plugin_registries() {
     assert_eq!(library.len(), n);
     assert_eq!(defs.iter().count(), n);
     let mut ids = HashSet::new();
+    let simulation: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../docs/reference/ae/effects/simulation.json"
+    ))
+    .unwrap();
     for b in all {
         let def = b.def();
         assert_eq!(def.match_name, b.info.match_name);
@@ -34,11 +38,7 @@ fn builtins_register_through_the_plugin_registries() {
         assert!(def.plugin.is_none(), "{}", def.match_name);
         if b.info.category == "Simulation" {
             // Bundled CC effects keep their product names in the zh-CN host.
-            let reference: serde_json::Value = serde_json::from_str(include_str!(
-                "../../../docs/reference/ae/effects/simulation.json"
-            ))
-            .unwrap();
-            let entry = reference["effects"]
+            let entry = simulation["effects"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -46,8 +46,11 @@ fn builtins_register_through_the_plugin_registries() {
                 .unwrap();
             assert_eq!(entry["displayName"], b.info.name_zh);
         } else {
+            // CC effects keep their English names in AE's Chinese UI.
+            let cc = def.match_name.starts_with("CC ");
             assert!(
                 def.match_name.starts_with("ADBE ")
+                    || cc
                     || matches!(
                         def.match_name.as_str(),
                         "VISINF Grain Implant" | "APC Colorama"
@@ -56,7 +59,7 @@ fn builtins_register_through_the_plugin_registries() {
                 def.match_name
             );
             assert!(
-                !b.info.name_zh.is_empty() && b.info.name_zh != b.info.name,
+                !b.info.name_zh.is_empty() && (cc || b.info.name_zh != b.info.name),
                 "{}",
                 def.match_name
             );
@@ -161,6 +164,10 @@ fn builtin_defs_follow_the_ae_26_reference() {
         "ADBE Echo",
         "ADBE Posterize Time",
         "ADBE Time Displacement",
+        "ADBE Difference",
+        "CC Wide Time",
+        "CC Force Motion Blur",
+        "ADBE Timewarp",
         "ADBE AutoLevels",
         "ADBE AutoContrast",
         "ADBE AutoColor",
@@ -244,5 +251,5 @@ fn builtin_defs_follow_the_ae_26_reference() {
             count += 1;
         }
     }
-    assert_eq!(count, 29);
+    assert_eq!(count, 33);
 }

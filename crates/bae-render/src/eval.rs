@@ -369,6 +369,7 @@ impl<'a> MockPass<'a> {
                     file,
                     size: (w > 0 && h > 0).then_some([w, h]),
                     source_time: local,
+                    sequence: None,
                 }))
             }
             _ => Ok(LayerContent::None),

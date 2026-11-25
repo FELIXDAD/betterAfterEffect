@@ -87,8 +87,19 @@ impl SceneBuilder {
         time: Time,
         value: Value,
     ) -> Result<(), RenderError> {
-        let keyframe = serde_json::to_value(Keyframe::linear(value))
-            .map_err(|e| RenderError::Other(e.to_string()))?;
+        self.key_with(prim, attr, time, Keyframe::linear(value))
+    }
+
+    /// Sets `keyframe` at `time` (layer time for layer attributes).
+    pub fn key_with(
+        &mut self,
+        prim: &PrimPath,
+        attr: &str,
+        time: Time,
+        keyframe: Keyframe,
+    ) -> Result<(), RenderError> {
+        let keyframe =
+            serde_json::to_value(keyframe).map_err(|e| RenderError::Other(e.to_string()))?;
         self.run(
             "key.set",
             json!({"path": prim.as_str(), "attr": attr, "time": time.flicks(), "keyframe": keyframe}),

@@ -1,0 +1,13 @@
+# Simplified Chinese strings (docs/spec/plugin-architecture.md §5.3.9).
+[plugin]
+name = "双色调（Rust 示例）"
+description = "把图层亮度映射到两种颜色之间的渐变。用 bae-plugin-sdk 编写的 Rust 原生 CPU 效果。"
+
+[effect.duotone]
+name = "双色调"
+keywords = ["双色调", "渐变", "着色"]
+
+[effect.duotone.params]
+shadows = "暗部颜色"
+highlights = "亮部颜色"
+amount = "数量"
