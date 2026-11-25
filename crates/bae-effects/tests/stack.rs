@@ -517,6 +517,8 @@ fn spatial_point_defaults_follow_source_dimensions_on_apply_and_reset() {
     let layer = fx.solid(&comp, [0.5; 3], [31, 13]);
     for (name, id, expected) in [
         ("ADBE Radial Blur", 2, [15.5, 6.5]),
+        ("VISINF Grain Duplication", 14, [15.5, 6.5]),
+        ("VISINF Grain Removal", 30, [15.5, 6.5]),
         ("ADBE Tile", 1, [15.5, 6.5]),
         ("ADBE Radial Shadow", 3, [7.75, 3.25]),
     ] {

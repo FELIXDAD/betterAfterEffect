@@ -163,7 +163,12 @@ pub fn instance_default(
                 | "ADBE Radial Shadow-0003"
                 | "ADBE Write-on-0001"
         )
-    ) || (def.plugin.is_none() && def.category == "Distort");
+    ) || (def.plugin.is_none()
+        && (def.category == "Distort"
+            || matches!(
+                def.match_name.as_str(),
+                "VISINF Grain Duplication" | "VISINF Grain Removal"
+            )));
     let unit = if param.flags.relative_default {
         [1.0, 1.0]
     } else if measured {

@@ -636,6 +636,7 @@ dependencies = [
  "bae-motion",
  "bae-plugin",
  "bae-render",
+ "chrono",
  "glam",
  "half",
  "kurbo",

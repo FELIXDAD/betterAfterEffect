@@ -605,7 +605,8 @@ def fail_pr(pr, reason, details=(), worktrees=None):
     addr, on = owner_address(agent, wt)
     if addr:
         send(addr, subject, msg, priority="high", on=on)
-    if leader:
+    # With an owner found, the owner fixes it; the leader hears only about orphaned PRs.
+    if leader and (not addr or CFG.get("notify", {}).get("bounce_leader", True)):
         send(leader, subject, msg + ("\n负责 agent：%s" % (addr or "（Orca 里没找到这个分支）")))
 
 
