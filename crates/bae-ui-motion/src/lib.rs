@@ -74,6 +74,7 @@ impl AppModule for MotionUiModule {
         app.add_module(bae_motion::MotionModule);
         bae_ui::i18n::register(i18n::ZH);
         bae_ui::i18n::register(tools::ZH);
+        bae_ui::i18n::register(viewer::display::ZH);
         bae_ui::i18n::register(catalog::menu_zh());
         bae_ui::i18n::register(ae_panels::ZH);
         effects::register_i18n();

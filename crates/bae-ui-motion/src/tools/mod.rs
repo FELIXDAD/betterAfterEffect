@@ -522,6 +522,12 @@ pub fn actions() -> impl Iterator<Item = (&'static str, &'static str)> {
         ])
         .chain(crate::viewer::view3d::ACTIONS.iter().copied())
         .chain(crate::viewer::guides::ACTIONS.iter().copied())
+        .chain([
+            (crate::viewer::display::SHOW_CHANNEL, "Show Channel"),
+            (crate::viewer::display::TAKE_SNAPSHOT, "Take Snapshot"),
+            (crate::viewer::display::SHOW_SNAPSHOT, "Show Snapshot"),
+            (crate::viewer::display::PURGE_SNAPSHOT, "Purge Snapshot"),
+        ])
 }
 
 /// AE's resolution shortcuts: `(params, English title)` (AE's names).
@@ -553,6 +559,12 @@ pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
         let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
         (ids::RESOLUTION, params, *title)
     });
+    let channels = crate::viewer::display::CHANNEL_SHORTCUTS
+        .iter()
+        .map(|(p, title)| {
+            let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
+            (crate::viewer::display::SHOW_CHANNEL, params, *title)
+        });
     let views = crate::viewer::view3d::SHORTCUT_NAMES
         .iter()
         .map(|(slot, title)| {
@@ -565,10 +577,13 @@ pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
     nudges
         .chain(resolutions)
         .chain(views)
+        .chain(channels)
+        .map(|(id, params, title)| (id, params, title.to_owned()))
+        .chain(crate::viewer::display::snapshot_names())
         .map(|(id, params, title)| {
             (
                 format!("{id}/{params}"),
-                bae_ui::CommandVariant::new(id, params, title.to_owned()),
+                bae_ui::CommandVariant::new(id, params, title),
             )
         })
         .collect()

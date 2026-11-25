@@ -64,6 +64,14 @@ pub(crate) struct GpuPreview {
     sampled: Option<((u32, u32, u64), [u8; 4])>,
     /// Text layers have a source provider (otherwise the viewer draws them).
     pub has_text: bool,
+    /// How the viewer shows the frame (Show Channel, Exposure).
+    pub display: bae_render::Display,
+    /// Region of interest (comp pixels): only it is rendered.
+    pub roi: Option<IRect>,
+    /// The display and region of the published frame.
+    last_view: Option<(bae_render::Display, Option<IRect>)>,
+    /// Snapshots 1–4 (AE's Take Snapshot): a published frame.
+    snapshots: [Option<(wgpu::Texture, IRect)>; 4],
 }
 
 impl GpuPreview {
@@ -96,6 +104,10 @@ impl GpuPreview {
             texture: None,
             sampled: None,
             has_text: false,
+            display: bae_render::Display::default(),
+            roi: None,
+            last_view: None,
+            snapshots: Default::default(),
         }
     }
 
@@ -162,7 +174,9 @@ impl GpuPreview {
             }
         }
         let key = (rc.content_hash(), rc.time, resolution);
-        if self.last != Some(key) {
+        let view = (self.display, self.roi);
+        if self.last != Some(key) || self.last_view != Some(view) {
+            self.last_view = Some(view);
             let request = RenderRequest {
                 resolution: match resolution {
                     0 | 1 => Resolution::Full,
@@ -172,6 +186,7 @@ impl GpuPreview {
                     n => Resolution::Custom(n),
                 },
                 purpose: RenderPurpose::Preview,
+                roi: self.roi,
                 ..RenderRequest::full()
             };
             // Effects reading other frames evaluate them like this one.
@@ -189,10 +204,11 @@ impl GpuPreview {
                     return None;
                 }
             };
-            let texture = match self
-                .renderer
-                .output_texture(&frame, OutputAlpha::Premultiplied)
-            {
+            let texture = match self.renderer.output_texture_display(
+                &frame,
+                OutputAlpha::Premultiplied,
+                self.display,
+            ) {
                 Ok(t) => t,
                 Err(e) => {
                     tracing_warn(&format!("preview: {e}"));
@@ -216,6 +232,37 @@ impl GpuPreview {
         Some(PreviewImage {
             handle: self.registry.display_handle(self.id)?,
             rect: self.rect?,
+        })
+    }
+
+    /// Take Snapshot: keep the frame shown now in `slot` (0–3).
+    pub fn take_snapshot(&mut self, slot: usize) -> bool {
+        let (Some(t), Some(r)) = (self.texture.clone(), self.rect) else {
+            return false;
+        };
+        if let Some(s) = self.snapshots.get_mut(slot) {
+            *s = Some((t, r));
+        }
+        true
+    }
+
+    pub fn purge_snapshot(&mut self, slot: usize) {
+        if let Some(s) = self.snapshots.get_mut(slot) {
+            *s = None;
+        }
+    }
+
+    /// Show Snapshot: publish snapshot `slot` instead of the frame (the next
+    /// [`GpuPreview::frame`] publishes the frame again).
+    pub fn show_snapshot(&mut self, slot: usize) -> Option<PreviewImage> {
+        let (t, rect) = self.snapshots.get(slot)?.clone()?;
+        self.registry
+            .publish(self.id, &t, wgpu::FilterMode::Linear)
+            .ok()?;
+        self.last = None;
+        Some(PreviewImage {
+            handle: self.registry.display_handle(self.id)?,
+            rect,
         })
     }
 

@@ -4,10 +4,12 @@
 // (colour conversion is workstream 06).
 
 struct Params {
-    // Background (straight RGB) for mode 2.
+    // Background (straight RGB) for mode 2; w: a viewer's exposure in stops.
     bg: vec4<f32>,
     // x: 0 premultiplied, 1 straight alpha, 2 over the background (opaque).
     // y: 1 = float target: keep colour outside [0, alpha] (32-bpc super-whites).
+    // z: a viewer's channel (0 RGB, 1 red, 2 green, 3 blue, 4 alpha, 5 RGB
+    // straight); w: 1 = colorize the channel.
     mode: vec4<u32>,
 }
 
@@ -25,6 +27,27 @@ fn vs_full(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
 fn fs_out(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     var c = textureLoad(t_in, vec2<i32>(floor(pos.xy)), 0);
     c.a = clamp(c.a, 0.0, 1.0);
+    // Viewer display (AE Exposure, Show Channel): never in exports.
+    if params.bg.w != 0.0 {
+        c = vec4<f32>(c.rgb * exp2(params.bg.w), c.a);
+    }
+    let ch = params.mode.z;
+    if ch >= 1u && ch <= 3u {
+        let v = c[ch - 1u];
+        var tint = vec3<f32>(1.0);
+        if params.mode.w == 1u {
+            tint = vec3<f32>(f32(ch == 1u), f32(ch == 2u), f32(ch == 3u));
+        }
+        c = vec4<f32>(tint * v, 1.0);
+    } else if ch == 4u {
+        c = vec4<f32>(vec3<f32>(c.a), 1.0);
+    } else if ch == 5u {
+        if c.a > 0.0 {
+            c = vec4<f32>(c.rgb / c.a, 1.0);
+        } else {
+            c = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+        }
+    }
     if params.mode.y == 0u {
         c = vec4<f32>(clamp(c.rgb, vec3<f32>(0.0), vec3<f32>(c.a)), c.a);
     }

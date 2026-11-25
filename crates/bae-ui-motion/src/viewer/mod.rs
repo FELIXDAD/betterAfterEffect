@@ -23,6 +23,7 @@ use crate::tools::cursor::{self, Hover};
 use crate::tools::{Tool, ViewRequest};
 
 mod bar;
+pub(crate) mod display;
 pub(crate) mod errors;
 mod free_transform;
 pub(crate) mod guides;
@@ -62,6 +63,14 @@ pub struct CompositionViewer {
     checker: bool,
     /// A guide being dragged out of a ruler or moved.
     guide_drag: Option<guides::GuideDrag>,
+    /// Show Channel, Exposure, Region of Interest.
+    display: display::Display,
+    /// The region of interest being drawn: where the drag started (comp).
+    roi_draw: Option<DVec2>,
+    /// Show Snapshot: the slot shown while its key (or the button) is held.
+    snapshot_shown: Option<usize>,
+    /// The Show Snapshot button is held.
+    snapshot_button: bool,
     /// The view options of the last frame (saved with the panel).
     saved: guides::ViewOptions,
     locked: bool,
@@ -213,6 +222,61 @@ impl CompositionViewer {
             .get(cx.resources)
             .evaluate_comp(cx.stage, &info.path, time)
             .ok()
+    }
+
+    /// The region of interest being drawn. Returns true while it takes the
+    /// pointer.
+    fn roi_frame(
+        &mut self,
+        ui: &Ui,
+        resp: &egui::Response,
+        view: &View,
+        painter: &egui::Painter,
+        info: &CompInfo,
+    ) -> bool {
+        let waiting = self.display.roi_on && self.display.roi.is_none();
+        if !waiting && self.roi_draw.is_none() {
+            return false;
+        }
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        }
+        if resp.drag_started_by(egui::PointerButton::Primary)
+            && let Some(p) = ui.input(|i| i.pointer.press_origin())
+        {
+            self.roi_draw = Some(view.to_comp(p));
+        }
+        let Some(a) = self.roi_draw else {
+            return true;
+        };
+        let b = resp
+            .interact_pointer_pos()
+            .or(resp.hover_pos())
+            .map_or(a, |p| view.to_comp(p));
+        let (w, h) = (f64::from(info.width), f64::from(info.height));
+        let clamp = |p: DVec2| DVec2::new(p.x.clamp(0.0, w), p.y.clamp(0.0, h));
+        let (a, b) = (clamp(a), clamp(b));
+        let (lo, hi) = (a.min(b), a.max(b));
+        let screen = Rect::from_min_max(view.to_screen(lo), view.to_screen(hi));
+        painter.rect_stroke(
+            screen,
+            0.0,
+            Stroke::new(1.0, Color32::WHITE),
+            egui::StrokeKind::Middle,
+        );
+        if !ui.input(|i| i.pointer.primary_down()) {
+            self.roi_draw = None;
+            let r = bae_render::IRect::new(
+                lo.x.floor() as i32,
+                lo.y.floor() as i32,
+                hi.x.ceil() as i32,
+                hi.y.ceil() as i32,
+            );
+            if r.width() > 0 && r.height() > 0 {
+                self.display.roi = Some(r);
+            }
+        }
+        true
     }
 
     /// Zoom tool click: the next magnification step, keeping `at` in place.
@@ -367,6 +431,28 @@ impl Panel for CompositionViewer {
         }
         let session = common::session(cx.resources);
         match action.id.as_str() {
+            display::SHOW_CHANNEL => {
+                self.display.shortcut(&action.params);
+                true
+            }
+            display::TAKE_SNAPSHOT | display::SHOW_SNAPSHOT | display::PURGE_SNAPSHOT => {
+                let slot = action
+                    .params
+                    .get("slot")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(1);
+                let slot = (slot.clamp(1, 4) - 1) as usize;
+                if let Some(g) = self.gpu.as_mut() {
+                    match action.id.as_str() {
+                        display::TAKE_SNAPSHOT => {
+                            g.take_snapshot(slot);
+                        }
+                        display::PURGE_SNAPSHOT => g.purge_snapshot(slot),
+                        _ => self.snapshot_shown = Some(slot),
+                    }
+                }
+                true
+            }
             crate::tools::ids::NUDGE => {
                 let p = |k: &str| action.params.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let mag = f64::from(if self.mag > 0.0 { self.mag } else { 1.0 });
@@ -575,6 +661,15 @@ impl Panel for CompositionViewer {
         let painter = ui.painter_at(area);
         painter.rect_filled(area, 0.0, Color32::from_gray(35));
         let comp_rect = render::comp_rect(&view, info.width, info.height);
+        // Region of interest: only it shows the comp.
+        let comp_rect = match self.display.roi() {
+            Some(r) => Rect::from_min_max(
+                view.to_screen(DVec2::new(f64::from(r.x0), f64::from(r.y0))),
+                view.to_screen(DVec2::new(f64::from(r.x1), f64::from(r.y1))),
+            )
+            .intersect(comp_rect),
+            None => comp_rect,
+        };
         if self.checker {
             checkerboard(&painter, comp_rect.intersect(area));
         } else {
@@ -605,10 +700,26 @@ impl Panel for CompositionViewer {
         }
         let resolution = render_factor(cx.stage, &info.path, session.lock().auto_resolution, mag);
         self.render_factor = resolution;
+        if let Some(g) = self.gpu.as_mut() {
+            g.display = self.display.render();
+            g.roi = self.display.roi();
+        }
         let image = self
             .gpu
             .as_mut()
             .and_then(|g| g.frame(cx.resources, cx.stage, &comp, resolution, view_camera));
+        // Show Snapshot while F5–F8 (or the bar button) is held.
+        let keys = [egui::Key::F5, egui::Key::F6, egui::Key::F7, egui::Key::F8];
+        if let Some(s) = self.snapshot_shown
+            && !ui.input(|i| i.key_down(keys[s]))
+            && !self.snapshot_button
+        {
+            self.snapshot_shown = None;
+        }
+        let image = match (self.snapshot_shown, self.gpu.as_mut()) {
+            (Some(s), Some(g)) => g.show_snapshot(s).or(image),
+            _ => image,
+        };
         self.on_gpu = image.is_some();
         // The Info panel: the pointer in comp pixels and, while the panel shows
         // it, the color under it (one texel read back from the GPU frame).
@@ -747,10 +858,13 @@ impl Panel for CompositionViewer {
             let s = session.lock();
             self.space_hold = Some((s.is_playing(), s.time(&info.path)));
         }
-        let hand = tool == Tool::Hand || self.space_hold.is_some() || self.panning;
+        // Region of interest on without a region: a drag draws it, with any
+        // tool (the tools wait).
+        let roi_busy = self.roi_frame(ui, &resp, &view, &painter, &info);
+        let hand = !roi_busy && (tool == Tool::Hand || self.space_hold.is_some() || self.panning);
         // Cmd/Ctrl makes the pen tools the Selection tool while held (AE-SHP-044).
         let command = ui.input(|i| i.modifiers.command);
-        let effective = if hand {
+        let effective = if roi_busy || hand {
             Tool::Hand
         } else if tool.is_pen() && command && !self.pen.busy() {
             Tool::Selection
