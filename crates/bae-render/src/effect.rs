@@ -221,6 +221,11 @@ pub trait Effect: Send + Sync {
         output_roi
     }
 
+    /// Part of the available input needed to produce the requested output.
+    fn required_input(&self, params: &EffectParams<'_>, output: IRect, available: IRect) -> IRect {
+        self.input_roi(params, output).intersect(&available)
+    }
+
     /// Other layers this instance reads (scheduled before it). Default: none.
     fn layer_dependencies(&self, _params: &EffectParams<'_>) -> Vec<LayerDependency> {
         Vec::new()
