@@ -102,6 +102,8 @@ def initialize():
             agent text not null, updated text not null)""")
         db.execute("""create table if not exists github_links(
             item text, number integer, primary key(item,number))""")
+        db.execute("""create table if not exists github_records(kind text, number integer,
+            data text not null, primary key(kind,number))""")
         db.execute("begin immediate")
         if not db.execute("select 1 from items limit 1").fetchone():
             db.executemany("insert into items(id,kind,module,name,status,tag,prs,updated) "
@@ -228,7 +230,9 @@ def reconcile(db, issue, pulls, events):
 
 
 def milestone_status(prs, states, recent=False):
-    if prs and all(states.get(n) == "done" for n in prs):
+    # PRs closed without merging (e.g. superseded) neither complete nor block an item.
+    live = [states.get(n) for n in prs if states.get(n) != "closed"]
+    if "done" in live and all(state == "done" for state in live):
         return "done"
     if recent or any(states.get(n) == "doing" for n in prs):
         return "doing"
@@ -277,11 +281,10 @@ def issue_links(pr, issues, milestones):
 
 
 def apply_github(data):
-    pulls = data["pulls"]
-    issues = {i["number"]: i for i in data["issues"]}
+    """Merge a partial sync, then re-derive links and parity state from every stored record."""
     with closing(connect()) as db, db:
         db.execute("begin immediate")
-        for pr in pulls:
+        for pr in data["pulls"]:
             if type(pr["number"]) is not int or pr["status"] not in ("closed","done","ready","doing"):
                 raise ValueError("无效的 PR 状态")
             db.execute("""insert into github_prs values(?,?,?) on conflict(number) do update
@@ -294,6 +297,14 @@ def apply_github(data):
                     where queued!=excluded.queued or committed_at is not excluded.committed_at
                     or author is not excluded.author""",
                            (pr["number"], bool(pr["queued"]), pr.get("committed_at"), pr.get("commit_author")))
+        for kind in ("pulls", "issues"):
+            db.executemany("""insert into github_records values(?,?,?) on conflict(kind,number)
+                do update set data=excluded.data where data!=excluded.data""",
+                           [(kind, row["number"], json.dumps(row)) for row in data[kind]])
+        pulls = [json.loads(r[0]) for r in db.execute(
+            "select data from github_records where kind='pulls' order by number")]
+        issues = {r[0]: json.loads(r[1]) for r in db.execute(
+            "select number,data from github_records where kind='issues' order by number")}
         for issue in issues.values():
             if issue["parity"]:
                 reconcile(db, issue, pulls, issue["events"])

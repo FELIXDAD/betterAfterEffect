@@ -1,4 +1,5 @@
-"""Push one consistent GitHub snapshot using the Mac's gh login."""
+"""Push GitHub PRs and issues updated since the last sync, using the Mac's gh login."""
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -8,7 +9,20 @@ import urllib.request
 
 REPO = "FELIXDAD/betterAfterEffects"
 CONFIG = Path.home() / ".config/bae-board/env"
-CACHE = Path.home() / "Library/Caches/bae-progress-sync/timelines.json"
+# Last sync time per board URL. Delete the file to force a full resync.
+STATE = Path.home() / "Library/Caches/bae-progress-sync/watermarks.json"
+BATCH = 200
+PULLS = """query($endCursor:String) {
+  repository(owner:"FELIXDAD",name:"betterAfterEffects") {
+    pullRequests(first:50,after:$endCursor,orderBy:{field:UPDATED_AT,direction:DESC}) {
+      pageInfo { hasNextPage endCursor }
+      nodes { number state isDraft title body mergedAt updatedAt mergeCommit { oid }
+        labels(first:100) { nodes { name } }
+        commits(last:1) { nodes { commit { committedDate author { name user { login } } } } }
+      }
+    }
+  }
+}"""
 
 
 def pages(endpoint):
@@ -41,22 +55,16 @@ def timeline(number):
     return result
 
 
-def pull_records():
-    query = """query($endCursor:String) {
-      repository(owner:"FELIXDAD",name:"betterAfterEffects") {
-        pullRequests(first:50,after:$endCursor) {
-          pageInfo { hasNextPage endCursor }
-          nodes { number state isDraft title body mergedAt updatedAt mergeCommit { oid }
-            labels(first:100) { nodes { name } }
-            commits(last:1) { nodes { commit { committedDate author { name user { login } } } } }
-          }
-        }
-      }
-    }"""
-    raw = subprocess.check_output(["gh","api","graphql","--paginate","--slurp","-f","query="+query],
-                                  timeout=180)
-    for page in json.loads(raw):
-        for pr in page["data"]["repository"]["pullRequests"]["nodes"]:
+def pull_records(since):
+    cursor = None
+    while True:
+        args = ["gh", "api", "graphql", "-f", "query=" + PULLS]
+        if cursor:
+            args += ["-f", "endCursor=" + cursor]
+        page = json.loads(subprocess.check_output(args, timeout=180))["data"]["repository"]["pullRequests"]
+        for pr in page["nodes"]:
+            if since and pr["updatedAt"] < since:
+                return
             opened = pr["state"] == "OPEN"
             labels = {x["name"].lower() for x in pr["labels"]["nodes"]}
             state = {"MERGED":"done", "CLOSED":"closed", "OPEN":"doing" if pr["isDraft"] else "ready"}[pr["state"]]
@@ -69,13 +77,15 @@ def pull_records():
                        queued=opened and "merge-ready" in labels,
                        committed_at=commit.get("committedDate"),
                        commit_author=(author.get("user") or {}).get("login") or author.get("name"))
+        if not page["pageInfo"]["hasNextPage"]:
+            return
+        cursor = page["pageInfo"]["endCursor"]
 
 
-def collect():
-    pulls = list(pull_records())
+def collect(since):
+    pulls = list(pull_records(since))
     issues = []
-    cache = json.loads(CACHE.read_text()) if CACHE.exists() else {}
-    for issue in pages("issues?state=all&per_page=100"):
+    for issue in pages("issues?state=all&per_page=100" + (f"&since={since}" if since else "")):
         if "pull_request" in issue:
             continue
         parity = any(x["name"] == "ae-parity" for x in issue["labels"])
@@ -83,16 +93,20 @@ def collect():
         row.update(body=evidence(issue["body"]), parity=parity,
                    labels=[{"name":x["name"]} for x in issue["labels"]])
         if parity:
-            key = str(issue["number"])
-            if cache.get(key, {}).get("updated") != issue["updated_at"]:
-                cache[key] = dict(updated=issue["updated_at"], events=timeline(issue["number"]))
-            row["events"] = cache[key]["events"]
+            row["events"] = timeline(issue["number"])
         issues.append(row)
-    CACHE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = CACHE.with_suffix(f".{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(cache))
-    tmp.replace(CACHE)
-    return dict(type="github-sync", pulls=pulls, issues=issues)
+    return pulls, issues
+
+
+def batches(pulls, issues):
+    # The server merges partial updates. Pulls go first so a fresh server holds every PR
+    # before issues are reconciled, and each request stays well under its size limit.
+    rows = [("pulls", row) for row in pulls] + [("issues", row) for row in issues]
+    for start in range(0, len(rows), BATCH):
+        part = dict(type="github-sync", pulls=[], issues=[])
+        for kind, row in rows[start:start + BATCH]:
+            part[kind].append(row)
+        yield json.dumps(part, ensure_ascii=False, separators=(",",":")).encode()
 
 
 def push(url, token, data):
@@ -104,7 +118,21 @@ def push(url, token, data):
 
 if __name__ == "__main__":
     env = dict(line.split("=",1) for line in CONFIG.read_text().splitlines() if "=" in line)
-    data = json.dumps(collect(), ensure_ascii=False, separators=(",",":")).encode()
-    push(env["BAE_BOARD_URL"], env["BAE_BOARD_TOKEN"], data)
+    targets = [env["BAE_BOARD_URL"]]
     if os.environ.get("BAE_BOARD_LOCAL_MIRROR"):
-        push(os.environ["BAE_BOARD_LOCAL_MIRROR"], env["BAE_BOARD_TOKEN"], data)
+        targets.append(os.environ["BAE_BOARD_LOCAL_MIRROR"])
+    marks = json.loads(STATE.read_text()) if STATE.exists() else {}
+    # Overlap windows so clock skew and edits made while this run fetches are not missed.
+    started = (datetime.now(timezone.utc) - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    fetched = {}
+    for url in targets:
+        since = marks.get(url)
+        if since not in fetched:
+            fetched[since] = collect(since)
+        for data in batches(*fetched[since]):
+            push(url, env["BAE_BOARD_TOKEN"], data)
+        marks[url] = started
+        STATE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = STATE.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(marks))
+        tmp.replace(STATE)

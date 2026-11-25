@@ -82,9 +82,24 @@ class ParityTest(unittest.TestCase):
 
     def test_milestone_state_is_derived_from_all_linked_prs(self):
         states = {1:"done", 2:"done", 3:"doing", 4:"ready", 5:"closed"}
-        for prs, expected in (([], "todo"), ([1,2], "done"), ([1,3], "doing"),
-                              ([3,4], "doing"), ([1,5], "todo"), ([999], "todo")):
+        for prs, expected in (([], "todo"), ([1,2], "done"), ([1,3], "doing"), ([3,4], "doing"),
+                              ([1,5], "done"), ([5], "todo"), ([4,5], "ready"), ([1,999], "todo")):
             self.assertEqual(server.milestone_status(prs, states), expected)
+
+    def test_partial_sync_keeps_stored_records(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(server, "DB", Path(tmp) / "db"), patch.object(server, "effects", return_value=[]):
+            server.initialize()
+            issue = dict(number=600, title="layers", state="open", updated_at="1",
+                         body="能力 ID: layers", parity=False, labels=[])
+            superseded = dict(number=700, status="closed", updated_at="1", body="Fixes #600", merged_at=None)
+            replacement = dict(number=701, status="done", updated_at="2", body="Fixes #600", merged_at="2")
+            def layers():
+                return next(x for x in server.snapshot()["items"] if x["id"] == "layers")
+            server.apply_github(dict(pulls=[superseded], issues=[issue]))
+            self.assertEqual((layers()["prs"], layers()["status"]), ([700], "todo"))
+            # Later syncs carry only what changed; the issue and earlier links must survive.
+            server.apply_github(dict(pulls=[replacement], issues=[]))
+            self.assertEqual((layers()["prs"], layers()["status"]), ([700, 701], "done"))
 
     def test_recent_work_queue_and_last_activity(self):
         from datetime import datetime, timedelta, timezone

@@ -6,9 +6,9 @@
 
 ## 本机启动
 
-GitHub 同步在有 gh 登录的 Mac 上运行。执行 `./install-sync.sh` 后，launchd 每五分钟从 Application Support 运行独立脚本，通过 env 中的正式地址和写入 token 提交快照，并更新本机原型。可在同步机手动运行 `python3 sync.py`。日志位于 `~/Library/Logs/bae-progress-sync.log`。
+GitHub 同步在有 gh 登录的 Mac 上运行。执行 `./install-sync.sh` 后，launchd 每五分钟从 Application Support 运行独立脚本，只拉取上次同步以来更新的 PR 和 issue，分批通过 env 中的正式地址和写入 token 提交，并更新本机原型；服务器合并增量，不整体替换。各地址的上次同步时间记在 `~/Library/Caches/bae-progress-sync/watermarks.json`，删除该文件即全量重同步（服务器数据库重建后需要这样做）。可在同步机手动运行 `python3 sync.py`。日志位于 `~/Library/Logs/bae-progress-sync.log`。
 
-里程碑完成度只统计关联 PR 全部合并的能力。其余能力只要近两小时收到 doing 汇报、有开放 Draft，或关联 PR 的最近提交在两小时内，就显示“开发中”；其次有开放非 Draft 的 PR 显示“待合并”，其余显示“未开始”。重复 doing 可续期，动态流仍去重。每项列出三类 PR 数量以及最近的汇报者或提交者。合并队列按整个仓库开放且带 merge-ready 标签的 PR 去重统计。worker 报告保留在动态中。PR 正文的 Fixes #编号按 issue 和模块自动关联，也可在 issue 正文写 `能力 ID: text-path` 或用 report.sh 显式关联。
+关闭未合并的 PR（例如被替代）不参与判断。能力在关联 PR 中至少一个已合并、其余未关闭的 PR 也都已合并时计为完成。其余能力只要近两小时收到 doing 汇报、有开放 Draft，或关联 PR 的最近提交在两小时内，就显示“开发中”；其次有开放非 Draft 的 PR 显示“待合并”，其余显示“未开始”。重复 doing 可续期，动态流仍去重。每项列出三类 PR 数量以及最近的汇报者或提交者。合并队列按整个仓库开放且带 merge-ready 标签的 PR 去重统计。worker 报告保留在动态中。PR 正文的 Fixes #编号按 issue 和模块自动关联，也可在 issue 正文写 `能力 ID: text-path` 或用 report.sh 显式关联。
 
 在完整仓库里运行：
 
