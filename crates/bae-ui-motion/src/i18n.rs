@@ -195,6 +195,13 @@ pub(crate) const ZH: &[(&str, &str)] = &[
     ("Set Work Area Start", "将工作区域开头设置为当前时间"),
     ("Set Work Area End", "将工作区域结尾设置为当前时间"),
     ("Trim Comp to Work Area", "将合成修剪至工作区域"),
+    // Layer > Transform (AE 26's Chinese menu).
+    ("Flip Horizontal", "水平翻转"),
+    ("Flip Vertical", "垂直翻转"),
+    ("Center In View", "视点居中"),
+    ("Fit to Comp", "适合复合"),
+    ("Fit to Comp Width", "适合复合宽度"),
+    ("Fit to Comp Height", "适合复合高度"),
     // Render Queue (AE 简体中文界面用词)
     ("Window", "窗口"),
     ("Render Queue", "渲染队列"),
