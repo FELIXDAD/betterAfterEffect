@@ -233,7 +233,7 @@ fn main_controls_are_found_by_accessible_name() {
     }
     // Names shown in the UI: layers (timeline rows carry the layer number,
     // "Layer 1 “Text”", #128), comp tab, workspaces.
-    for label in ["Dark Gray Solid 1", "Text", "Comp 1", "Motion", "Review"] {
+    for label in ["Dark Gray Solid 1", "Text", "Comp 1", "Default", "Review"] {
         let quoted = format!("“{label}”");
         if !all.iter().any(|l| l == label || l.ends_with(&quoted)) {
             missing.push(label.to_owned());
