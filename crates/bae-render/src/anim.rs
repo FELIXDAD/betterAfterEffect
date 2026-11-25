@@ -38,6 +38,12 @@ use crate::request::RenderPurpose;
 #[cfg(feature = "media")]
 mod preview_audio;
 
+/// Prepare the audio spectrum's FFT alongside its GPU pipeline on the effects worker.
+pub fn prewarm_audio_analysis() {
+    #[cfg(feature = "media")]
+    bae_media::visual_audio::SpectrumPlans::prewarm();
+}
+
 /// [`CompEvaluator`] backed by `bae_anim::Evaluator` (keeps compiled comps across
 /// frames; forward [`StageEvent`]s to [`CompEvaluator::invalidate`]).
 #[derive(Debug)]
@@ -391,7 +397,7 @@ impl AnimEvaluator {
         let timing = bae_anim::layer_timing(&view, comp_duration);
         let count = (duration * f64::from(RATE)).round().max(1.0) as usize;
         let samples = if let Some(preview) = &mut self.preview_audio {
-            match preview.source(&asset, &mut self.spectrum_plans) {
+            match preview.source(&asset, timing.layer_time(ec.time), &mut self.spectrum_plans) {
                 Ok(Some(source)) => {
                     visual_audio::AudioWindows::read_source(source, timing, start, count, channel)
                         .map_err(|e| e.to_string())

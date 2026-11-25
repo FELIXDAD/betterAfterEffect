@@ -64,17 +64,18 @@ impl AudioWindows {
             if source.info().frame_count.is_some_and(|n| first >= n) {
                 continue;
             }
-            let pcm = source.read(first, x.max(y).floor() as u64 - first + 2)?;
-            let ch = usize::from(pcm.channels);
+            let ch = usize::from(source.info().channels);
+            let pcm = source.read_window(first, x.max(y).floor() as u64 - first + 2)?;
+            let frames = pcm.len() / ch;
             for j in a..=b {
                 let p = pos(j) - first as f64;
-                if !(0.0..pcm.frames() as f64).contains(&p) {
+                if !(0.0..frames as f64).contains(&p) {
                     continue;
                 }
                 let ix = p.floor() as usize;
                 let read = |row: usize| {
-                    let left = pcm.samples[row * ch];
-                    let right = pcm.samples[row * ch + 1.min(ch - 1)];
+                    let left = pcm[row * ch];
+                    let right = pcm[row * ch + 1.min(ch - 1)];
                     match channel {
                         2 => left,
                         3 => right,
@@ -82,7 +83,7 @@ impl AudioWindows {
                     }
                 };
                 let l = read(ix);
-                window[j - i] = l + (read((ix + 1).min(pcm.frames() - 1)) - l) * p.fract() as f32;
+                window[j - i] = l + (read((ix + 1).min(frames - 1)) - l) * p.fract() as f32;
             }
         }
         Ok(out)
@@ -108,12 +109,30 @@ pub fn waveform(pcm: &[f32], points: usize) -> Vec<f64> {
 pub struct SpectrumPlans(HashMap<usize, Fft>);
 
 impl SpectrumPlans {
-    /// Prepare both the permutation plans and Symphonia's lazy twiddle tables.
-    pub fn prewarm() -> Self {
+    fn startup_plans() -> &'static parking_lot::Mutex<Option<Self>> {
+        static PLANS: std::sync::OnceLock<parking_lot::Mutex<Option<SpectrumPlans>>> =
+            std::sync::OnceLock::new();
+        PLANS.get_or_init(|| parking_lot::Mutex::new(Some(Self::build(true))))
+    }
+
+    /// Called from the effects warm-up registry, once across devices and pixel formats.
+    pub fn prewarm() {
+        Self::startup_plans();
+    }
+
+    /// The first viewer takes the startup plans. Other viewers share the warm twiddle tables.
+    pub fn for_preview() -> Self {
+        let ready = Self::startup_plans().lock().take();
+        ready.unwrap_or_else(|| Self::build(false))
+    }
+
+    fn build(warm_tables: bool) -> Self {
         let mut plans = Self::default();
         for size in (6..=14).map(|power| 1 << power) {
             let mut plan = Fft::new(size);
-            plan.fft_inplace(&mut vec![Complex::new(0.0, 0.0); size]);
+            if warm_tables {
+                plan.fft_inplace(&mut vec![Complex::new(0.0, 0.0); size]);
+            }
             plans.0.insert(size, plan);
         }
         plans

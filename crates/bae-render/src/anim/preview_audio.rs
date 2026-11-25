@@ -3,13 +3,13 @@ use super::AssetFiles;
 use bae_anim::{EvaluatedComp, LayerSource};
 use bae_media::visual_audio::SpectrumPlans;
 use bae_media::{AudioSource, FileAudio};
-use bae_model::{AssetFile, PrimPath, Stage, Value};
+use bae_model::{AssetFile, PrimPath, Stage, Time, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
 type Prepared = Result<Option<FileAudio>, String>;
-type Job = (AssetFile, Sender<Prepared>);
+type Job = (AssetFile, Time, Sender<Prepared>);
 
 enum Source {
     Opening(Receiver<Prepared>),
@@ -45,14 +45,20 @@ impl PreviewAudio {
         if let Err(error) = std::thread::Builder::new()
             .name("bae-audio-visual-prep".into())
             .spawn(move || {
-                if plans_tx.send(SpectrumPlans::prewarm()).is_err() {
+                if plans_tx.send(SpectrumPlans::for_preview()).is_err() {
                     return;
                 }
-                for (asset, result) in receiver {
+                for (asset, at, result) in receiver {
                     let prepared = files.resolve_file(&asset).and_then(|file| {
                         file.map(|path| {
                             let mut source = FileAudio::open(&path).map_err(|e| e.to_string())?;
-                            source.read(0, 1).map_err(|e| e.to_string())?;
+                            // Cover the default centered analysis window around the playhead.
+                            let rate = source.info().sample_rate;
+                            let first =
+                                ((at.as_seconds() - 0.125).max(0.0) * f64::from(rate)) as u64;
+                            source
+                                .read(first, u64::from(rate / 4).max(1))
+                                .map_err(|e| e.to_string())?;
                             Ok(source)
                         })
                         .transpose()
@@ -87,12 +93,12 @@ impl PreviewAudio {
     fn collect(&mut self, stage: &Stage, comp: &EvaluatedComp, used: &mut HashSet<PrimPath>) {
         for layer in &comp.layers {
             match &layer.source {
-                LayerSource::Asset { asset, .. } if used.insert(asset.clone()) => {
+                LayerSource::Asset { asset, time, .. } if used.insert(asset.clone()) => {
                     if let Some(view) = stage.prim(asset)
                         && view.value("has_audio").and_then(Value::as_bool) == Some(true)
                         && let Some(file) = AssetFile::from_prim(&view)
                     {
-                        self.prepare(asset, file);
+                        self.prepare(asset, file, *time);
                     }
                 }
                 LayerSource::Comp {
@@ -103,7 +109,7 @@ impl PreviewAudio {
         }
     }
 
-    fn prepare(&mut self, asset: &PrimPath, file: AssetFile) {
+    fn prepare(&mut self, asset: &PrimPath, file: AssetFile, at: Time) {
         if self
             .sources
             .get(asset)
@@ -112,7 +118,7 @@ impl PreviewAudio {
             return;
         }
         let (tx, rx) = mpsc::channel();
-        let source = if self.jobs.send((file.clone(), tx)).is_ok() {
+        let source = if self.jobs.send((file.clone(), at, tx)).is_ok() {
             Source::Opening(rx)
         } else {
             Source::Ready(
@@ -126,6 +132,7 @@ impl PreviewAudio {
     pub(super) fn source(
         &mut self,
         view: &bae_model::PrimView<'_>,
+        at: Time,
         plans: &mut SpectrumPlans,
     ) -> Result<Option<&mut FileAudio>, String> {
         let asset = view.path();
@@ -135,7 +142,7 @@ impl PreviewAudio {
             .is_none_or(|(_, source)| source.needs_retry())
             && let Some(file) = AssetFile::from_prim(view)
         {
-            self.prepare(asset, file);
+            self.prepare(asset, file, at);
         }
         let Some((_, source)) = self.sources.get_mut(asset) else {
             return Ok(None);

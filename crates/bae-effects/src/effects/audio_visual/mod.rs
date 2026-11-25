@@ -149,9 +149,10 @@ fn builtin(slug: &str, zh: &str, builder: DefBuilder, fixed: &[u32]) -> Builtin 
 mod spectrum;
 mod waveform;
 pub(crate) fn register(registry: &mut crate::Registry) {
-    registry
-        .prewarm
-        .push(|rt, format| draw_kernel(rt, format).map(drop));
+    registry.prewarm.push(|rt, format| {
+        bae_render::anim::prewarm_audio_analysis();
+        draw_kernel(rt, format).map(drop)
+    });
     registry
         .effects
         .extend([waveform::effect(), spectrum::effect()]);
