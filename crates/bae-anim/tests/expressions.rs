@@ -621,3 +621,51 @@ fn property_index_and_length_read_its_value() {
     assert!(ec.errors.is_empty(), "{:?}", ec.errors);
     assert_eq!(ec.layers[0].transform.rotation.z, 122.0);
 }
+
+/// Camera, light and material options, AE property names and property groups.
+#[test]
+fn camera_light_material_and_property_names() {
+    let s = stage(|b| {
+        let cam = b.layer(MAIN, "Cam", "camera");
+        b.set(&cam, "camera:zoom", 1500.0)
+            .set(&cam, "camera:depth_of_field", true);
+        let light = b.layer(MAIN, "Key", "light");
+        b.set(&light, "light:intensity", 80.0)
+            .set(&light, "light:casts_shadows", true);
+        let solid = b.layer(MAIN, "Plate", "solid");
+        b.set(&solid, "three_d", true)
+            .set(&solid, "material:accepts_lights", false)
+            .prim(&format!("{solid}/masks"), PrimType::FOLDER)
+            .prim(&format!("{solid}/masks/m"), PrimType::MASK)
+            .set(&format!("{solid}/masks/m"), "name", "Mask 1")
+            .set(
+                &format!("{solid}/masks/m"),
+                "path",
+                Value::Bezier(bae_model::BezierPath {
+                    vertices: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]],
+                    in_tangents: vec![[0.0; 2]; 3],
+                    out_tangents: vec![[0.0; 2]; 3],
+                    closed: true,
+                    feather: Vec::new(),
+                }),
+            );
+        let t = b.layer(MAIN, "Names", "text");
+        b.expr(
+            &t,
+            "text:source",
+            Value::TextDocument(Box::new(TextDocument::new("x", "ArialMT", 50.0))),
+            r#"var c = thisComp.layer("Cam"), k = thisComp.layer("Key"), p = thisComp.layer("Plate");
+               [c.zoom.value, c.cameraOption.zoom.value, c.depthOfField.value, c.irisShape,
+                k.intensity.value, k.castsShadows.value, p.castsShadows.value, p.acceptsLights.value,
+                p.transform.position.name, p.transform.rotation.name, p.mask(1).maskPath.name,
+                p.transform.position.propertyGroup(1).name, p.transform.position.propertyGroup(2).name,
+                p.mask(1).maskPath.propertyGroup(1).name, p.mask(1).maskPath.propertyGroup(2).name].join("|")"#,
+        );
+    });
+    let ec = eval(&s, 0.0);
+    assert!(ec.errors.is_empty(), "{:?}", ec.errors);
+    assert_eq!(
+        ec.layers[3].text.as_ref().unwrap().text,
+        "1500|1500|1|1|80|1|0|0|Position|Z Rotation|Mask Path|Transform|Plate|Mask 1|Masks"
+    );
+}
