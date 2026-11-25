@@ -2415,3 +2415,32 @@ fn transform_value_dialogs_set_every_selected_layer() {
     h.action(&mut viewer, open("orientation"));
     assert!(!h.dialogs().is_open());
 }
+
+/// Layer ▸ Mask: New Mask fills the layer, Mask Feather… and Inverted change
+/// the masks of the selected layer, Remove All Masks deletes them.
+#[test]
+fn layer_mask_menu() {
+    use crate::masks::ids;
+    let mut h = Harness::new();
+    let (_comp, solid, _shape) = h.comp_with_layers();
+    let mut viewer = CompositionViewer::new(None);
+    h.frame("composition", &mut viewer, Vec::new());
+    h.session().lock().selected_layers = vec![solid.clone()];
+    let r = h.action(&mut viewer, Invocation::new(ids::NEW_MASK));
+    assert_eq!(r.invocations[0].id, "mask.create");
+    h.apply(r);
+    let masks = crate::masks::masks_of(&h.stage, &solid);
+    assert_eq!(masks.len(), 1);
+    h.action(&mut viewer, Invocation::new(ids::MASK_FEATHER));
+    assert!(h.dialogs().is_open(), "Mask Feather… opened no dialog");
+    let r = h.answer_dialog(egui::Key::Enter);
+    assert_eq!(r.invocations[0].id, "attr.set_many");
+    assert_eq!(r.invocations[0].params["edits"][0]["attr"], "feather");
+    let r = h.action(&mut viewer, Invocation::new(ids::MASK_INVERTED));
+    h.apply(r);
+    assert!(crate::masks::inverted(&h.stage, &masks[0]));
+    let r = h.action(&mut viewer, Invocation::new(ids::REMOVE_ALL_MASKS));
+    assert_eq!(r.invocations[0].id, "item.delete");
+    h.apply(r);
+    assert!(crate::masks::masks_of(&h.stage, &solid).is_empty());
+}

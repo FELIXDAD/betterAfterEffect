@@ -439,6 +439,27 @@ fn spec(path: &[&str], item: &'static Item, levels: Vec<MenuPos>) -> MenuItemSpe
             let view = spec_param(item.params, "view").unwrap_or_default();
             spec.checked_when(move |cx| crate::viewer::view3d::current(cx.resources).key() == view)
         }
+        crate::masks::ids::MASK_MODE => {
+            let mode = spec_param(item.params, "mode").unwrap_or_default();
+            spec.checked_when(move |cx| {
+                let session = common::session(cx.resources);
+                crate::masks::first_target(cx.stage, &session)
+                    .is_some_and(|m| crate::masks::mode(cx.stage, &m) == mode)
+            })
+        }
+        crate::masks::ids::MASK_INVERTED | crate::masks::ids::MASK_LOCKED => {
+            let locked = item.action == crate::masks::ids::MASK_LOCKED;
+            spec.checked_when(move |cx| {
+                let session = common::session(cx.resources);
+                crate::masks::first_target(cx.stage, &session).is_some_and(|m| {
+                    if locked {
+                        crate::masks::locked(cx.stage, &m)
+                    } else {
+                        crate::masks::inverted(cx.stage, &m)
+                    }
+                })
+            })
+        }
         bae_ui::action::ids::OPEN_PANEL => {
             let panel = id_param();
             spec.checked_when(move |cx| cx.panel_open(&panel))

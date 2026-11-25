@@ -37,6 +37,7 @@ mod graph;
 mod i18n;
 pub mod import;
 mod layer_panel;
+mod masks;
 pub mod menus;
 mod panels;
 mod prefs;
