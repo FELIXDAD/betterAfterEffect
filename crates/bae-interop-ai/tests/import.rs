@@ -350,7 +350,7 @@ fn artboard_becomes_a_comp_with_shape_and_text_layers() {
     let names: Vec<(&str, LayerKind)> = evaluated
         .layers
         .iter()
-        .map(|l| (l.name.as_str(), l.kind))
+        .map(|l| (&*l.name, l.kind))
         .collect();
     // Layers panel order is kept; the text inside the group sits above it.
     assert_eq!(
