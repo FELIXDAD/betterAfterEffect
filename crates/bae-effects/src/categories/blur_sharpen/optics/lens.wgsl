@@ -68,7 +68,8 @@ fn rhombi(p: vec2f, first: bool) -> vec4f {
     let along = axis(u.index);
     let b = axis(1u);
     let c = axis(2u);
-    let count = i32(clamp(ceil(value(1)*u.scale), 2., 32.));
+    // One sample per pixel of line length (the planner keeps it within 256).
+    let count = i32(clamp(ceil(value(1)*u.scale*max(value(5),1.)), 2., 256.));
     var sum = vec4f(0.);
     var norm = 0.;
     for (var i=0; i<count; i++) {

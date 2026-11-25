@@ -261,3 +261,29 @@ fn channel_blur_matches_independent_gaussians_with_partial_coverage() {
         "footage grid phase",
     );
 }
+
+#[test]
+fn smart_blur_edge_only_keeps_full_resolution_edges_at_wide_radii() {
+    let Some(gpu) = context() else { return };
+    let rect = IRect::from_size(40, 32);
+    let input = Pixels::new(rect, |x, y| {
+        if x == 17 || y == 9 {
+            [0.9, 0.2, 0.1, 1.]
+        } else {
+            [0.1, 0.3, 0.6, 1.]
+        }
+    });
+    let edges = |radius: f64| {
+        let params = vec![(1, Value::Float(radius)), (3, Value::Int(2))];
+        run(
+            &gpu,
+            F16,
+            builtin("ADBE Smart Blur"),
+            params,
+            &input,
+            rect,
+            1.,
+        )
+    };
+    assert_close(&edges(24.), &edges(15.), rect, 0.001, "edge only");
+}

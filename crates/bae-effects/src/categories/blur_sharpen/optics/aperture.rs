@@ -39,7 +39,10 @@ pub(super) fn render(
     } else {
         input.clone()
     };
-    let wide = radius >= HALF_RADIUS;
+    // Smart Blur's edge modes find edges at full resolution: a half-size grid
+    // loses thin lines and makes the edge width jump at the switch radius.
+    let edges = mode == Mode::Smart && v.popup(3) > 1;
+    let wide = radius >= HALF_RADIUS && !edges;
     let low_params = EffectParams {
         scale: v.p.scale * 0.5,
         ..*v.p
@@ -56,13 +59,15 @@ pub(super) fn render(
     let smart = u32::from(mode == Mode::Smart);
     let filtered = if !lens {
         shader.dispatch(target, stage, out, &working, [], [smart, 0])?
-    } else if map.is_none()
+    } else if wide
+        && map.is_none()
         && v.popup(3) == 4
         && v.f(4) == 0.
         && stage.f(1) * stage.p.scale * stage.f(5).max(1.) <= 256.
     {
         // A regular hexagon is the union of three equal parallelograms.
-        // AB and AC share the first line integral along A; BC uses B.
+        // AB and AC share the first line integral along A; BC uses B. Narrow
+        // radii use the cheaper disk taps below.
         let margin = (stage.f(1) * stage.p.scale * stage.f(5).max(1.)).ceil() as i32 + 1;
         let needed = out.inflate(margin);
         let a = shader.dispatch(target, stage, needed, &working, [], [3, 0])?;
