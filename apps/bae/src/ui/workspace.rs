@@ -367,6 +367,15 @@ impl Workspace {
         self.workbench.active_workspace()
     }
 
+    /// English title of the active workspace.
+    pub fn active_workspace_title(&self) -> &str {
+        let active = self.workbench.active_workspace();
+        self.workbench
+            .workspaces()
+            .find(|(id, _)| *id == active)
+            .map_or("", |(_, p)| p.title.as_str())
+    }
+
     /// Workspace ids and English titles in bar order (Window menu).
     pub fn workspaces(&self) -> Vec<(String, String)> {
         self.workbench
