@@ -242,9 +242,7 @@ impl Widget for HotNumber<'_> {
                 .margin(vec2(1.0, 0.0))
                 .text_color(color::TEXT_STRONG);
             // The open field keeps the number's name (screen readers, tests).
-            let mut resp = ui
-                .add(edit)
-                .labeled(egui::WidgetType::TextEdit, self.label);
+            let mut resp = ui.add(edit).labeled(egui::WidgetType::TextEdit, self.label);
             if entering {
                 resp.request_focus();
             }
