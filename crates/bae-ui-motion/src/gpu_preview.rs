@@ -68,14 +68,22 @@ impl RenderEngine {
         }
     }
 
+    /// The frame converted to an 8-bit texture and its rect, or `None` when
+    /// it is incomplete (something still warming up: not shown).
     pub(super) fn render(
         &mut self,
         stage: &Stage,
         rc: &bae_render::RenderComp,
         resolution: u32,
-    ) -> Result<(wgpu::Texture, IRect), bae_render::RenderError> {
+    ) -> Result<Option<(wgpu::Texture, IRect)>, bae_render::RenderError> {
         let request = RenderRequest {
-            resolution: Resolution::Custom(resolution),
+            resolution: match resolution {
+                0 | 1 => Resolution::Full,
+                2 => Resolution::Half,
+                3 => Resolution::Third,
+                4 => Resolution::Quarter,
+                n => Resolution::Custom(n),
+            },
             purpose: RenderPurpose::Preview,
             ..RenderRequest::full()
         };
@@ -86,10 +94,13 @@ impl RenderEngine {
         let frame = self
             .renderer
             .render_frame_with(rc, &request, Some(&mut frames))?;
+        if frame.incomplete {
+            return Ok(None);
+        }
         let texture = self
             .renderer
             .output_texture(&frame, OutputAlpha::Premultiplied)?;
-        Ok((texture, frame.image.rect))
+        Ok(Some((texture, frame.image.rect)))
     }
 }
 
@@ -110,6 +121,10 @@ pub(crate) struct GpuPreview {
     sampled: Option<((u32, u32, u64), [u8; 4])>,
     /// Text layers have a source provider (otherwise the viewer draws them).
     pub has_text: bool,
+    /// The newest frame was incomplete (something still warming up): the
+    /// viewer keeps showing the last complete frame with a "Preparing…" hint
+    /// until it is redrawn complete.
+    pub preparing: bool,
 }
 
 impl GpuPreview {
@@ -138,6 +153,7 @@ impl GpuPreview {
             texture: None,
             sampled: None,
             has_text: false,
+            preparing: false,
         }
     }
 
@@ -209,12 +225,23 @@ impl GpuPreview {
         }
         let key = (rc.content_hash(), rc.time, resolution);
         if self.last != Some(key) {
-            let (texture, rect) = match self.engine.render(stage, &rc, resolution) {
-                Ok(frame) => frame,
+            let rendered = match self.engine.render(stage, &rc, resolution) {
+                Ok(rendered) => rendered,
                 Err(e) => {
                     tracing_warn(&format!("preview: {e}"));
                     return None;
                 }
+            };
+            // Like AE, an incomplete frame (an effect pipeline or the text
+            // renderer still warming up) is never shown: the last complete
+            // frame stays, and the frame is rendered again on the redraw the
+            // warm-up requests when it is ready.
+            self.preparing = rendered.is_none();
+            let Some((texture, rect)) = rendered else {
+                return Some(PreviewImage {
+                    handle: self.registry.display_handle(self.id)?,
+                    rect: self.rect?,
+                });
             };
             // Display-encoded 8-bit values, sampled as they are (egui blends in
             // gamma space, see docs/spec/app-shell.md §5).

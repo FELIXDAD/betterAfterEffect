@@ -284,7 +284,9 @@ impl Producer {
         let (texture, rect) = self
             .engine
             .render(&self.stage, &rc, self.scene.key.resolution)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?
+            // Not an interactive thread: it waits for the warm-up instead.
+            .ok_or("incomplete frame")?;
         let slot = Arc::new(Slot {
             registry: registry.clone(),
             id: registry.create("playback frame"),
