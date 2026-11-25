@@ -15,11 +15,30 @@ fn layer(p: Params<'_>, roi: IRect) -> IRect {
     roi.union(&image_grid::layer_rect(p.p))
 }
 
-static SHADER: Shader = Shader {
-    label: "bae.effects.transition.cc",
+static GLASS_WIPE: Shader = Shader {
+    label: "bae.effects.transition.glass_wipe",
     source: concat!(
         include_str!("../../effects/sampled.wgsl"),
-        include_str!("cc.wgsl")
+        include_str!("sampling.wgsl"),
+        include_str!("glass_wipe.wgsl")
+    ),
+};
+
+static TWISTER: Shader = Shader {
+    label: "bae.effects.transition.twister",
+    source: concat!(
+        include_str!("../../effects/sampled.wgsl"),
+        include_str!("sampling.wgsl"),
+        include_str!("twister.wgsl")
+    ),
+};
+
+static WARPOMATIC: Shader = Shader {
+    label: "bae.effects.transition.warpomatic",
+    source: concat!(
+        include_str!("../../effects/sampled.wgsl"),
+        include_str!("sampling.wgsl"),
+        include_str!("warpomatic.wgsl")
     ),
 };
 
@@ -31,7 +50,9 @@ pub(super) fn register(registry: &mut Registry) {
 }
 
 fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
-    SHADER.kernel(rt, format)?;
+    for shader in [&GLASS_WIPE, &TWISTER, &WARPOMATIC] {
+        shader.kernel(rt, format)?;
+    }
     Ok(())
 }
 
@@ -78,7 +99,7 @@ fn cc_glass_wipe() -> Builtin {
         (
             Arc::new(Sampled {
                 def,
-                shader: &SHADER,
+                shader: &GLASS_WIPE,
                 mode: 0,
                 inputs: &[(2, true), (3, true)],
                 read: layer,
@@ -125,7 +146,7 @@ fn cc_twister() -> Builtin {
         (
             Arc::new(Sampled {
                 def,
-                shader: &SHADER,
+                shader: &TWISTER,
                 mode: 1,
                 inputs: &[(1, true)],
                 read: layer,
@@ -208,7 +229,7 @@ fn cc_warpomatic() -> Builtin {
         (
             Arc::new(Sampled {
                 def,
-                shader: &SHADER,
+                shader: &WARPOMATIC,
                 mode: 2,
                 inputs: &[(2, true)],
                 read: layer,

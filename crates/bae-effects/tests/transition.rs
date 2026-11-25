@@ -96,7 +96,50 @@ fn cc_wipes_have_exact_source_and_reveal_endpoints() {
                 r,
                 1.,
             );
-            assert_close(&result, expected, r, 0.0001, name);
+            assert_close(&result, expected, r, 0.0001, &format!("{name} at {v}"));
         }
     }
+}
+
+#[test]
+fn glass_refracts_between_two_distinct_layers() {
+    use bae_effects::Standalone;
+    use bae_model::PrimPath;
+    use bae_render::{EffectParams, effect::LayerDependency};
+    let Some(gpu) = context() else { return };
+    let r = IRect::from_size(8, 8);
+    let first = Pixels::new(r, |_, _| [1., 0., 0., 1.]).upload(&gpu, F32);
+    let second = Pixels::new(r, |_, _| [0., 1., 0., 1.]).upload(&gpu, F32);
+    let gradient = Pixels::new(r, |_, _| [0.5, 0.5, 0.5, 1.]).upload(&gpu, F32);
+    let reveal = PrimPath::new("/comps/main/layers/b").unwrap();
+    let control = PrimPath::new("/comps/main/layers/c").unwrap();
+    let inst = instance(
+        "CC Glass Wipe",
+        vec![
+            (1, Value::Float(50.)),
+            (2, Value::PrimRef(reveal.clone())),
+            (3, Value::PrimRef(control.clone())),
+        ],
+    );
+    let p = EffectParams {
+        layer_bounds: r,
+        ..EffectParams::new(&inst)
+    };
+    let mut target = Standalone::new(gpu.clone(), F32);
+    target.set_effect_inputs(
+        vec![
+            (LayerDependency::source(reveal, p.comp_time), second),
+            (LayerDependency::source(control, p.comp_time), gradient),
+        ],
+        vec![],
+    );
+    let out = builtin("CC Glass Wipe")
+        .render(&mut target, &p, &first, r)
+        .unwrap();
+    target.finish().unwrap();
+    let pixel = Pixels::download(&gpu, &out).get(4, 4);
+    assert!(
+        (pixel[0] - 0.5).abs() < 0.01 && (pixel[1] - 0.5).abs() < 0.01,
+        "{pixel:?}"
+    );
 }
