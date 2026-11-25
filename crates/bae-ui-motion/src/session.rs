@@ -29,7 +29,7 @@ pub enum Reveal {
 pub struct Playback {
     pub comp: PrimPath,
     started: Instant,
-    from: i64,
+    frame: i64,
     rate: FrameRate,
     ordinal: u64,
     revision: Option<u64>,
@@ -51,7 +51,7 @@ impl Playback {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct PlaybackStats {
+pub(crate) struct PlaybackStats {
     pub fps: f64,
     pub dropped: u64,
     matched: bool,
@@ -113,7 +113,7 @@ pub struct Session {
     /// Project panel selection.
     pub selected_items: Vec<PrimPath>,
     pub playback: Option<Playback>,
-    pub playback_stats: PlaybackStats,
+    pub(crate) playback_stats: PlaybackStats,
     /// Loop playback (Preview panel).
     pub loop_playback: bool,
     /// The viewer's resolution is on Auto: it follows the magnification. The
@@ -180,6 +180,20 @@ impl Session {
             .frame_rate
             .snap(t.clamp(Time::ZERO, last.max(Time::ZERO)));
         self.times.insert(info.path.clone(), t);
+        if let Some(pb) = &mut self.playback
+            && pb.comp == info.path
+        {
+            if pb.range.contains(t) {
+                pb.frame = pb.rate.time_to_frame(t);
+                pb.started = Instant::now();
+                pb.ordinal = 0;
+                self.playback_stats.drawn = None;
+                self.playback_stats.matched = false;
+                self.playback_stats.last_present = None;
+            } else {
+                self.stop();
+            }
+        }
     }
 
     /// Make `comp` the active comp (opening a timeline tab for it).
@@ -318,7 +332,7 @@ impl Session {
         self.playback = Some(Playback {
             comp: info.path.clone(),
             started,
-            from: info.frame_rate.time_to_frame(from),
+            frame: info.frame_rate.time_to_frame(from),
             rate: info.frame_rate,
             ordinal: 0,
             revision: None,
@@ -377,30 +391,31 @@ impl Session {
             .rate
             .time_to_frame(Time(pb.range.end.0.saturating_sub(1)))
             .max(start);
-        let frame = pb.from + ordinal as i64;
+        let delta = ordinal - pb.ordinal;
+        let until_end = (last - pb.frame + 1) as u64;
         let steps = if self.loop_playback {
-            ordinal - pb.ordinal
+            delta
         } else {
-            (ordinal - pb.ordinal).min((last - pb.from + 1).max(0) as u64 - pb.ordinal)
+            delta.min(until_end)
         };
         stats.dropped += steps.saturating_sub(u64::from(stats.matched));
         stats.matched = false;
         pb.ordinal = ordinal;
-        let ended = !self.loop_playback && frame > last;
-        let frame = if ended {
+        let ended = !self.loop_playback && delta >= until_end;
+        pb.frame = if ended {
             last
         } else {
-            start + (frame - start).rem_euclid(last - start + 1)
+            start + (pb.frame - start + delta as i64).rem_euclid(last - start + 1)
         };
         self.times
-            .insert(pb.comp.clone(), pb.rate.frame_to_time(frame));
+            .insert(pb.comp.clone(), pb.rate.frame_to_time(pb.frame));
         if ended {
             self.stop();
         }
     }
 
     /// Called by the viewer for the actual texture used in this UI pass.
-    pub fn drew_preview(&mut self, actual: Time) {
+    pub(crate) fn drew_preview(&mut self, actual: Time) {
         self.playback_stats.drawn = Some(actual);
     }
 
@@ -477,12 +492,22 @@ mod tests {
         assert_eq!(s.time(&i.path), Time::ZERO);
         s.drew_preview(Time::ZERO);
         s.frame_presented(next - Duration::from_nanos(1));
+        s.drew_preview(Time::ZERO);
+        s.frame_presented(next - Duration::from_nanos(1));
+        assert_eq!(
+            s.playback_stats.frames, 1,
+            "repeated presents hold one composition frame"
+        );
         s.tick(start + Duration::from_millis(51));
         assert_eq!(s.time(&i.path), Time::ZERO);
         assert_eq!(s.playback_stats.dropped, 2);
         s.tick(start + Duration::from_millis(68));
         assert_eq!(s.time(&i.path), i.frame_rate.frame_to_time(1));
         assert_eq!(s.playback_stats.dropped, 3);
+        s.loop_playback = false;
+        s.tick(start + Duration::from_millis(115));
+        assert!(!s.is_playing());
+        assert_eq!(s.time(&i.path), i.frame_rate.frame_to_time(2));
     }
 
     #[test]
@@ -494,7 +519,9 @@ mod tests {
         assert!(s.is_playing());
         assert_eq!(s.time(&i.path), Time::from_seconds(1.0));
         assert!(s.playback_deadline().is_some());
-        s.stop();
+        s.set_time(&i, i.frame_rate.frame_to_time(42));
+        assert_eq!(s.playback.as_ref().unwrap().frame, 42);
+        s.set_time(&i, Time::ZERO);
         assert!(s.playback_deadline().is_none());
     }
 }

@@ -1442,6 +1442,14 @@ fn playback_surface_4k() {
                 window.clone(),
             )
             .unwrap();
+            if let Some(monitor) = window.current_monitor() {
+                println!(
+                    "window monitor {:?} {:?} {:?} mHz",
+                    monitor.name(),
+                    monitor.size(),
+                    monitor.refresh_rate_millihertz()
+                );
+            }
             let modes = surface.get_capabilities(gpu.adapter()).present_modes;
             let mut surface =
                 WindowSurface::new(&gpu, surface, 3840, 2160, Default::default()).unwrap();
