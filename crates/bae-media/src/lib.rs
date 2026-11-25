@@ -56,8 +56,10 @@ mod library;
 #[cfg(windows)]
 pub mod media_foundation;
 mod meta;
+pub mod mix;
 mod module;
 mod mp4;
+pub mod playback;
 pub mod sequence;
 mod source;
 pub mod still;

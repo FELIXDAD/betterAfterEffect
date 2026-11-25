@@ -18,20 +18,26 @@ pub(super) struct Alias {
 }
 
 impl Alias {
+    /// The target's instance: the old parameters translated (maps read only values).
+    fn mapped(&self, map: Map, p: &EffectParams<'_>) -> RenderEffect {
+        RenderEffect {
+            path: p.effect.path.clone(),
+            enabled: p.effect.enabled,
+            effect: self.target.def().match_name.clone(),
+            params: map(Params::new(&self.def, p)),
+        }
+    }
+
+    /// Direct calls outside the render graph (which plans the target through
+    /// [`Effect::resolve_alias`] once per frame instead).
     pub(super) fn with_params<R>(
         &self,
         p: &EffectParams<'_>,
         f: impl FnOnce(&EffectParams<'_>) -> R,
     ) -> R {
         let Some(map) = self.map else { return f(p) };
-        let mapped = RenderEffect {
-            path: p.effect.path.clone(),
-            enabled: p.effect.enabled,
-            effect: self.target.def().match_name.clone(),
-            params: map(Params::new(&self.def, p)),
-        };
         f(&EffectParams {
-            effect: &mapped,
+            effect: &self.mapped(map, p),
             ..*p
         })
     }
@@ -43,6 +49,13 @@ impl Effect for Alias {
     }
     fn renders_pixels(&self) -> bool {
         self.target.renders_pixels()
+    }
+    fn resolve_alias(&self, instance: &RenderEffect) -> Option<(Arc<dyn Effect>, RenderEffect)> {
+        let instance = match self.map {
+            Some(map) => self.mapped(map, &EffectParams::new(instance)),
+            None => instance.clone(),
+        };
+        Some((self.target.clone(), instance))
     }
     fn input_roi(&self, p: &EffectParams<'_>, roi: IRect) -> IRect {
         self.with_params(p, |p| self.target.input_roi(p, roi))

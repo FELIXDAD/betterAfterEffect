@@ -1,0 +1,73 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "remove-color-matting"
+name = "Remove Color Matting"
+category = "Channel"
+implementation = "wgsl"
+ae_match_names = ["ADBE Remove Color Matting"]
+shader = "shaders/remove_color_matting.wgsl"
+
+[[effect.param]]
+id = 1
+key = "background_color"
+type = "color"
+name = "Background Color"
+default = [0, 0, 0, 0]
+
+[[effect.param]]
+id = 2
+key = "clip"
+type = "checkbox"
+name = "Clip"
+default = true
+
+[[effect]]
+id = "solid-composite"
+name = "Solid Composite"
+category = "Channel"
+implementation = "wgsl"
+ae_match_names = ["ADBE Solid Composite"]
+shader = "shaders/solid_composite.wgsl"
+includes = ["shaders/blend.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "source_opacity"
+type = "float"
+name = "Source Opacity"
+default = 100
+range = [0, 100]
+
+[[effect.param]]
+id = 2
+key = "color"
+type = "color"
+name = "Color"
+default = [1, 1, 1, 1]
+
+[[effect.param]]
+id = 3
+key = "opacity"
+type = "float"
+name = "Opacity"
+default = 100
+range = [0, 100]
+
+[[effect.param]]
+id = 4
+key = "blending_mode"
+type = "popup"
+name = "Blending Mode"
+default = 1
+choices = ["Normal", "(-", "Add", "Multiply", "Screen", "Overlay", "Soft Light", "Hard Light", "(-", "Color Dodge", "Color Burn", "(-", "Darken", "Lighten", "Difference", "Exclusion", "(-", "Hue", "Saturation", "Color", "Luminosity"]
+
