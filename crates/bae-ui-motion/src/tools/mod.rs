@@ -552,8 +552,18 @@ pub fn variants() -> Vec<(String, bae_ui::CommandVariant)> {
         let params: serde_json::Value = serde_json::from_str(p).expect("JSON");
         (ids::RESOLUTION, params, *title)
     });
+    let views = crate::viewer::view3d::SHORTCUT_NAMES
+        .iter()
+        .map(|(slot, title)| {
+            (
+                crate::viewer::view3d::ids::SHORTCUT,
+                serde_json::json!({ "slot": slot }),
+                *title,
+            )
+        });
     nudges
         .chain(resolutions)
+        .chain(views)
         .map(|(id, params, title)| {
             (
                 format!("{id}/{params}"),

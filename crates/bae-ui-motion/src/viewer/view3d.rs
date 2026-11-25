@@ -38,6 +38,13 @@ pub(crate) const ACTIONS: &[(&str, &str)] = &[
     (ids::RESET, "Reset 3D View"),
 ];
 
+/// The 3D view shortcut commands, named as in AE's Keyboard Shortcuts.
+pub(crate) const SHORTCUT_NAMES: &[(&str, &str)] = &[
+    ("a", "Switch to 3D View A"),
+    ("b", "Switch to 3D View B"),
+    ("c", "Switch to 3D View C"),
+];
+
 /// One of AE's 3D views.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum View3d {
