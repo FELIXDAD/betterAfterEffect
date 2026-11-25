@@ -18,6 +18,8 @@ mod markers;
 mod menus;
 mod modes;
 mod rows;
+#[cfg(test)]
+mod tests;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -960,4 +962,17 @@ mod layer_list_tests {
         assert_eq!(create_comp(&mut other), comp);
         assert!(panel.layer_list(&other, &comp).paths.is_empty());
     }
+}
+
+mod zh;
+pub(crate) use zh::ZH;
+
+/// Registers this module's Chinese strings and panel (`MotionUiModule::build`).
+pub(crate) fn register(app: &mut bae_app::AppBuilder) {
+    bae_ui::i18n::register(ZH);
+    crate::register_panel(
+        app,
+        "timeline",
+        bae_ui::PanelKind::new("Timeline", |_| Box::new(TimelinePanel::default())),
+    );
 }
