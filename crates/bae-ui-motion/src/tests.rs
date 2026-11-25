@@ -199,7 +199,7 @@ fn preview_observes_edits_without_a_shell_history_log() {
     let mut changes = crate::common::StageChanges::default();
     assert!(changes.sync(&h.stage, |_| panic!("new evaluator already has no plans")));
     assert!(!changes.sync(&h.stage, |_| panic!("steady frame invalidated")));
-    h.run("comp.create", json!({"name": "Main"}));
+    let comp = h.run("comp.create", json!({"name": "Main"}));
     let mut edits = Vec::new();
     changes.sync(&h.stage, |event| edits.push(event.unwrap().origin));
     h.stage.undo(&h.author).unwrap();
@@ -213,6 +213,16 @@ fn preview_observes_edits_without_a_shell_history_log() {
             bae_model::EventOrigin::Redo
         ]
     );
+    // An inactive panel can miss the entire retained history.
+    for i in 0..65 {
+        h.run(
+            "attr.set",
+            json!({"path":comp["path"],"attr":"name","value":Value::String(i.to_string())}),
+        );
+    }
+    let mut missed = false;
+    changes.sync(&h.stage, |event| missed = event.is_none());
+    assert!(missed);
     let mut reset = false;
     changes.sync(&Stage::new(), |event| reset = event.is_none());
     assert!(reset);
