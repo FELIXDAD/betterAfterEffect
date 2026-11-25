@@ -32,8 +32,11 @@ fn builtins_register_through_the_plugin_registries() {
         assert!(b.info.full_id.starts_with("bae.effects/"));
         // Built-ins are not plugin effects: never removed, never "missing".
         assert!(def.plugin.is_none(), "{}", def.match_name);
+        // CC effects keep their English names in AE's Chinese UI.
+        let cc = def.match_name.starts_with("CC ");
         assert!(
             def.match_name.starts_with("ADBE ")
+                || cc
                 || matches!(
                     def.match_name.as_str(),
                     "VISINF Grain Implant" | "APC Colorama"
@@ -42,7 +45,7 @@ fn builtins_register_through_the_plugin_registries() {
             def.match_name
         );
         assert!(
-            !b.info.name_zh.is_empty() && b.info.name_zh != b.info.name,
+            !b.info.name_zh.is_empty() && (cc || b.info.name_zh != b.info.name),
             "{}",
             def.match_name
         );
@@ -146,6 +149,10 @@ fn builtin_defs_follow_the_ae_26_reference() {
         "ADBE Echo",
         "ADBE Posterize Time",
         "ADBE Time Displacement",
+        "ADBE Difference",
+        "CC Wide Time",
+        "CC Force Motion Blur",
+        "ADBE Timewarp",
         "ADBE AutoLevels",
         "ADBE AutoContrast",
         "ADBE AutoColor",
@@ -229,5 +236,5 @@ fn builtin_defs_follow_the_ae_26_reference() {
             count += 1;
         }
     }
-    assert_eq!(count, 29);
+    assert_eq!(count, 33);
 }

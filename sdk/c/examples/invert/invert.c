@@ -29,8 +29,11 @@
 /* Must equal [plugin] id / version in bae-plugin.toml (checked by the host). */
 #define INVERT_PLUGIN_ID "com.example.invert-c"
 #define INVERT_PLUGIN_VERSION "0.1.0"
-/* Lowest host API this plugin runs on. Must equal `api` in bae-plugin.toml. */
-#define INVERT_ABI_REQUIRED BAE_MAKE_VERSION(0, 1)
+/* Lowest host API this plugin runs on. Must equal `api` in bae-plugin.toml.
+   (Overridable so the host tests can build a 0.1 pre-release variant.) */
+#ifndef INVERT_ABI_REQUIRED
+#define INVERT_ABI_REQUIRED BAE_MAKE_VERSION(1, 0)
+#endif
 
 #define INVERT_EFFECT_ID "invert"
 #define INVERT_PARAM_AMOUNT 1u /* stable param id: never reuse or retype */

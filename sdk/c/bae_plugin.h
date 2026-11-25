@@ -1,13 +1,21 @@
 /*
  * bae_plugin.h - BAE native plugin C ABI.
  *
- * Status: DRAFT v0.1 (design phase). ABI major 0 carries no stability promise;
- * the first frozen ABI is 1.0 (milestone M1). See docs/spec/plugin-architecture.md.
+ * Status: ABI 1.0, stable since milestone M1 (see docs/spec/plugin-architecture.md
+ * section 14.5). Within major 1 only additive changes are made: plugins built
+ * against 1.0 keep running on every 1.x host. Plugins built against the 0.1
+ * pre-release are still accepted (identical layout).
  *
- * This header is hand-written for the design phase. It will later be generated
- * by cbindgen from `bae_plugin_sdk::abi` (crates/bae-plugin-sdk/src/abi.rs);
- * until then this file is authoritative and the Rust mirror is checked against
- * it by a layout test.
+ * Served by BAE 1.0 hosts: the entry point and exports, effects
+ * (BaeEffectVTable1: global_setup, define_params, pre_render, render_cpu,
+ * release_frame_data, global_setdown) and the suites bae.core,
+ * bae.param.define and bae.render. Every other suite (get_suite returns NULL
+ * for it today) and the other contribution kinds are PROVISIONAL: their
+ * layouts are frozen only when a host first serves them, under the same
+ * name and version or a new version if they had to change.
+ *
+ * This header is hand-written. The Rust mirror (crates/bae-plugin-sdk/src/abi.rs)
+ * is checked against it by layout and constant-drift tests.
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -53,8 +61,8 @@ extern "C" {
 /* 1. Versioning                                                           */
 /* ======================================================================= */
 
-#define BAE_ABI_VERSION_MAJOR 0u
-#define BAE_ABI_VERSION_MINOR 1u
+#define BAE_ABI_VERSION_MAJOR 1u
+#define BAE_ABI_VERSION_MINOR 0u
 
 /* A version is packed as (major << 16) | minor. */
 #define BAE_MAKE_VERSION(major, minor) \
@@ -79,8 +87,14 @@ extern "C" {
 
 #if defined(__cplusplus)
 #define BAE_STATIC_ASSERT(cond, msg) static_assert(cond, msg)
-#else
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 #define BAE_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
+#else
+/* Pre-C11 compilers (MSVC without /std:c11): a negative array size fails. */
+#define BAE_STATIC_ASSERT_CAT2(a, b) a##b
+#define BAE_STATIC_ASSERT_CAT(a, b) BAE_STATIC_ASSERT_CAT2(a, b)
+#define BAE_STATIC_ASSERT(cond, msg) \
+    typedef char BAE_STATIC_ASSERT_CAT(bae_static_assert_, __LINE__)[(cond) ? 1 : -1]
 #endif
 
 /* ======================================================================= */

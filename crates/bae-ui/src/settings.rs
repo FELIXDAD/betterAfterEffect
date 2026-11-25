@@ -302,6 +302,9 @@ pub struct SettingsDialog {
     /// Buttons the host implements (others are drawn disabled); `choose` stands
     /// for every Choose… button.
     host_buttons: Vec<String>,
+    /// The UI language when the window opened and the Language value shown: a
+    /// new choice switches the UI at once, Cancel switches it back.
+    lang_at_open: Option<(crate::i18n::Lang, String)>,
 }
 
 impl SettingsDialog {
@@ -320,6 +323,10 @@ impl SettingsDialog {
             .unwrap_or(0);
         self.draft = current.clone();
         self.open = true;
+        self.lang_at_open = Some((
+            crate::i18n::lang(),
+            current.str(bae_prefs::keys::LANGUAGE).to_owned(),
+        ));
     }
 
     pub fn is_open(&self) -> bool {
@@ -378,10 +385,27 @@ impl SettingsDialog {
         } else if enter || (!typing && ctx.input(|i| i.key_pressed(Key::Enter))) {
             outcome = Outcome::Ok(self.draft.clone());
         }
+        self.preview_language(outcome == Outcome::Cancel);
         if outcome != Outcome::None {
             self.open = false;
         }
         outcome
+    }
+
+    /// Shows the UI in the Language chosen in the draft right away (no restart);
+    /// `cancel` goes back to the language the window opened with.
+    fn preview_language(&mut self, cancel: bool) {
+        use crate::i18n;
+        let Some((before, shown)) = &mut self.lang_at_open else {
+            return;
+        };
+        let value = self.draft.str(bae_prefs::keys::LANGUAGE);
+        if cancel {
+            i18n::set_lang(*before);
+        } else if value != shown.as_str() {
+            *shown = value.to_owned();
+            i18n::set_lang(i18n::lang_for_setting(value));
+        }
     }
 
     /// Page list | current page | OK, Cancel, Previous, Next at the top right.

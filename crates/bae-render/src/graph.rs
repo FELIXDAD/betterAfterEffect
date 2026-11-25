@@ -101,6 +101,9 @@ pub struct RenderGraph {
     /// An effect reads another time of the comp: the frame depends on more than
     /// its own evaluated comp (not frame-cached).
     pub time_dependent: bool,
+    /// The top-level layer each node was planned for, by node index (`None`:
+    /// the comp itself). Per-layer render times add up their nodes.
+    pub owners: Vec<Option<PrimPath>>,
 }
 
 impl RenderGraph {
@@ -498,6 +501,8 @@ pub fn build_with(
         frames,
         resolving: Vec::new(),
         time_dependent: false,
+        owner: None,
+        owners: Vec::new(),
     };
     let output = builder.composite(comp, rect, scale, 0, false)?;
     Ok(RenderGraph {
@@ -506,6 +511,7 @@ pub fn build_with(
         output,
         warnings: builder.warnings,
         time_dependent: builder.time_dependent,
+        owners: builder.owners,
     })
 }
 
@@ -537,6 +543,9 @@ struct Builder<'a, 'f> {
     /// Layers whose effects are being planned (cycle detection of layer inputs).
     resolving: Vec<PrimPath>,
     time_dependent: bool,
+    /// The top-level layer being planned (owner of the nodes pushed now).
+    owner: Option<PrimPath>,
+    owners: Vec<Option<PrimPath>>,
 }
 
 /// The content of a layer, planned: its bounds (in layer texel units) and how
@@ -556,7 +565,28 @@ impl Builder<'_, '_> {
         let id = NodeId(self.nodes.len() as u32);
         self.dedup.insert(node.key, id);
         self.nodes.push(node);
+        self.owners.push(self.owner.clone());
         id
+    }
+
+    /// Runs `plan` with the top-level layer `index` of `comp` as the owner of
+    /// the nodes it pushes (nested layers keep the outer owner).
+    fn owned<T>(
+        &mut self,
+        comp: &RenderComp,
+        index: usize,
+        depth: usize,
+        plan: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let top = depth == 0 && self.owner.is_none();
+        if top {
+            self.owner = Some(comp.layers[index].path.clone());
+        }
+        let out = plan(self);
+        if top {
+            self.owner = None;
+        }
+        out
     }
 
     fn warn(&mut self, message: String) {
@@ -716,6 +746,20 @@ impl Builder<'_, '_> {
     /// Plans layer `index` of `comp` drawn into a composite covering `canvas`.
     /// `None` when nothing of it is visible there.
     fn layer_op(
+        &mut self,
+        comp: &RenderComp,
+        index: usize,
+        canvas: IRect,
+        scale: f64,
+        depth: usize,
+        visiting: &mut Vec<usize>,
+    ) -> Result<Option<LayerOp>, RenderError> {
+        self.owned(comp, index, depth, |b| {
+            b.plan_layer(comp, index, canvas, scale, depth, visiting)
+        })
+    }
+
+    fn plan_layer(
         &mut self,
         comp: &RenderComp,
         index: usize,
@@ -923,8 +967,19 @@ impl Builder<'_, '_> {
                 source.content_hash(time).hash(&mut h);
                 roi.hash(&mut h);
                 density.to_bits().hash(&mut h);
+                // Small sources are asked for whole: the request then stays the
+                // same while the layer turns or slides off screen, so a vector
+                // source can reuse the image it rasterized (the compositor uses
+                // only what it needs).
+                let bounds = source.bounds();
+                let texels =
+                    f64::from(bounds.width()) * f64::from(bounds.height()) * density * density;
                 let request = SourceRequest {
-                    roi: roi_px,
+                    roi: if !bounds.is_empty() && texels <= WHOLE_SOURCE_TEXELS {
+                        bounds
+                    } else {
+                        roi_px
+                    },
                     scale: density,
                     time,
                 };
@@ -1227,6 +1282,20 @@ impl Builder<'_, '_> {
     /// effects on the comp-sized composite below; outside the comp it is
     /// transparent). Without enabled effects the layer changes nothing.
     fn adjustment(
+        &mut self,
+        comp: &RenderComp,
+        index: usize,
+        canvas: IRect,
+        scale: f64,
+        depth: usize,
+        below: Vec<LayerOp>,
+    ) -> Result<Vec<LayerOp>, RenderError> {
+        self.owned(comp, index, depth, |b| {
+            b.plan_adjustment(comp, index, canvas, scale, depth, below)
+        })
+    }
+
+    fn plan_adjustment(
         &mut self,
         comp: &RenderComp,
         index: usize,
@@ -1783,13 +1852,18 @@ pub fn source_density(transform: &DAffine2, resolution_scale: f64, roi: IRect) -
     )
 }
 
+/// Sources up to this many texels are rendered whole (see the source node).
+const WHOLE_SOURCE_TEXELS: f64 = 2048.0 * 2048.0;
+
 /// `density` (texels per layer pixel) made usable: finite, within [1/64, 16]
-/// and within the GPU texture limit for `roi` (layer pixels).
+/// and within the GPU texture limit for `roi` (layer pixels). Snapped to
+/// 1/4096 so a layer that only turns asks for the same density every frame
+/// (and its source can reuse the image it rendered).
 fn clamp_density(mut density: f64, resolution_scale: f64, roi: IRect) -> f64 {
     if !density.is_finite() || density <= 0.0 {
         density = 1.0 / resolution_scale;
     }
-    density = density.clamp(1.0 / 64.0, 16.0);
+    density = ((density * 4096.0).round() / 4096.0).clamp(1.0 / 64.0, 16.0);
     let largest = f64::from(roi.width().max(roi.height()).max(1));
     density.min(8192.0 / largest)
 }
