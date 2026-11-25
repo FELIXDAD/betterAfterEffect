@@ -1,0 +1,194 @@
+schema_version = 1
+
+[plugin]
+id = "bae.effects"
+version = "0.1.0"
+api = "0.1"
+name = "BAE built-in effects"
+description = "After Effects compatible built-in effects (workstream 07)."
+authors = ["BAE"]
+license = "Apache-2.0"
+
+[[effect]]
+id = "noise-alpha"
+name = "Noise Alpha"
+category = "Noise & Grain"
+implementation = "wgsl"
+ae_match_names = ["ADBE Noise Alpha2"]
+shader = "shaders/noise_alpha.wgsl"
+
+[[effect.param]]
+id = 1
+key = "noise"
+type = "popup"
+name = "Noise"
+default = 1
+choices = ["Uniform Random", "Squared Random", "(-", "Uniform Animation", "Squared Animation"]
+
+[[effect.param]]
+id = 2
+key = "amount"
+type = "float"
+name = "Amount"
+default = 0
+range = [0, 10000]
+
+[[effect.param]]
+id = 3
+key = "original_alpha"
+type = "popup"
+name = "Original Alpha"
+default = 2
+choices = ["Add", "Clamp", "Scale", "Edges"]
+
+[[effect.param]]
+id = 4
+key = "overflow"
+type = "popup"
+name = "Overflow"
+default = 2
+choices = ["Clip", "Wrap Back", "Wrap"]
+
+[[effect.param]]
+id = 5
+key = "phase"
+type = "angle"
+name = "Noise Phase"
+default = 0
+
+[[effect.param]]
+id = 6
+key = "noise_options_animation"
+type = "group"
+name = "Noise Options (Animation)"
+end_id = 9
+
+[[effect.param]]
+id = 7
+key = "cycle"
+type = "checkbox"
+name = "Cycle Noise"
+group = "noise_options_animation"
+default = false
+
+[[effect.param]]
+id = 8
+key = "turns"
+type = "float"
+name = "Cycle (in Revolutions)"
+group = "noise_options_animation"
+default = 1
+range = [1, 88]
+
+[[effect]]
+id = "noise-hls"
+name = "Noise HLS"
+category = "Noise & Grain"
+implementation = "wgsl"
+ae_match_names = ["ADBE Noise HLS2"]
+shader = "shaders/noise_hls.wgsl"
+includes = ["shaders/channel_math.wgsl", "shaders/hls.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "noise"
+type = "popup"
+name = "Noise"
+default = 1
+choices = ["Uniform", "Squared", "Grain"]
+
+[[effect.param]]
+id = 2
+key = "hue"
+type = "float"
+name = "Hue"
+default = 0
+range = [0, 1000]
+
+[[effect.param]]
+id = 3
+key = "lightness"
+type = "float"
+name = "Lightness"
+default = 0
+range = [0, 1000]
+
+[[effect.param]]
+id = 4
+key = "saturation"
+type = "float"
+name = "Saturation"
+default = 0
+range = [0, 1000]
+
+[[effect.param]]
+id = 5
+key = "grain_size"
+type = "float"
+name = "Grain Size"
+default = 1
+range = [0, 10]
+
+[[effect.param]]
+id = 6
+key = "phase"
+type = "angle"
+name = "Noise Phase"
+default = 0
+
+[[effect]]
+id = "noise-hls-auto"
+name = "Noise HLS Auto"
+category = "Noise & Grain"
+implementation = "wgsl"
+ae_match_names = ["ADBE Noise HLS Auto2"]
+shader = "shaders/noise_hls_auto.wgsl"
+includes = ["shaders/channel_math.wgsl", "shaders/hls.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "noise"
+type = "popup"
+name = "Noise"
+default = 1
+choices = ["Uniform", "Squared", "Grain"]
+
+[[effect.param]]
+id = 2
+key = "hue"
+type = "float"
+name = "Hue"
+default = 0
+range = [0, 1000]
+
+[[effect.param]]
+id = 3
+key = "lightness"
+type = "float"
+name = "Lightness"
+default = 0
+range = [0, 1000]
+
+[[effect.param]]
+id = 4
+key = "saturation"
+type = "float"
+name = "Saturation"
+default = 0
+range = [0, 1000]
+
+[[effect.param]]
+id = 5
+key = "grain_size"
+type = "float"
+name = "Grain Size"
+default = 1
+range = [0, 10]
+
+[[effect.param]]
+id = 6
+key = "speed"
+type = "float"
+name = "Noise Animation Speed"
+default = 24
+range = [0, 200]

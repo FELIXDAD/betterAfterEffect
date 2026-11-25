@@ -161,7 +161,7 @@ fn menus_match_ae() {
 
 #[test]
 fn every_title_has_chinese() {
-    bae_ui::i18n::register(crate::i18n::ZH);
+    bae_ui::i18n::register(&crate::i18n::all());
     bae_ui::i18n::register(crate::tools::ZH);
     bae_ui::i18n::register(crate::catalog::menu_zh());
     let mut missing = Vec::new();
