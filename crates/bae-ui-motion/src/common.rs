@@ -130,6 +130,12 @@ pub(crate) fn attr_label(prim_type: Option<&PrimType>, attr: &str, three_d: bool
         "transform:skew" => "Skew",
         "transform:skew_axis" => "Skew Axis",
         "text:source" => "Source Text",
+        "text:path" => "Path",
+        "text:reverse_path" => "Reverse Path",
+        "text:perpendicular_to_path" => "Perpendicular To Path",
+        "text:force_alignment" => "Force Alignment",
+        "text:first_margin" => "First Margin",
+        "text:last_margin" => "Last Margin",
         // Text animators (AE: Animator N > Range Selector N, properties).
         "animator:anchor_point" => "Anchor Point",
         "animator:position" => "Position",
@@ -496,6 +502,58 @@ pub(crate) fn apply_edit(
                 json!({"path": path, "attr": attr, "time": key_time, "value": value}),
             );
         }
+    }
+}
+
+/// The mask a text layer's characters follow (Path Options > Path), if it
+/// still exists.
+pub(crate) fn text_path_mask(stage: &Stage, layer: &PrimPath) -> Option<PrimPath> {
+    let view = stage.prim(layer)?;
+    let mask = view.value("text:path")?.as_prim_ref()?.clone();
+    stage.has_prim(&mask).then_some(mask)
+}
+
+/// The Path popup of Path Options: None or one of the layer's masks.
+pub(crate) fn text_path_picker(
+    ui: &mut Ui,
+    cx: &mut PanelContext<'_>,
+    layer: &PrimPath,
+    id: egui::Id,
+) {
+    let stage = cx.stage;
+    let current = text_path_mask(stage, layer);
+    let masks: Vec<PrimPath> = layer
+        .child("masks")
+        .ok()
+        .map(|m| {
+            stage
+                .children(&m)
+                .into_iter()
+                .filter(|m| stage.prim(m).is_some_and(|v| v.is_a(&PrimType::MASK)))
+                .collect()
+        })
+        .unwrap_or_default();
+    let name = |m: &PrimPath| query::display_name_of(stage, m);
+    let shown = current.as_ref().map_or_else(|| tr("None").to_owned(), name);
+    let mut chosen = None;
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(shown)
+        .width(140.0)
+        .show_ui(ui, |ui| {
+            if ui.selectable_label(current.is_none(), tr("None")).clicked() {
+                chosen = Some(None);
+            }
+            for m in &masks {
+                if ui
+                    .selectable_label(current.as_ref() == Some(m), name(m))
+                    .clicked()
+                {
+                    chosen = Some(Some(m.clone()));
+                }
+            }
+        });
+    if let Some(mask) = chosen.filter(|m| *m != current) {
+        cx.invoke_with("text.set_path", json!({"layer": layer, "mask": mask}));
     }
 }
 
