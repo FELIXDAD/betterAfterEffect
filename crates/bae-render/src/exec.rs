@@ -151,7 +151,7 @@ pub(crate) struct Executed {
     pub passes: usize,
     /// The frame converted into a new RGBA8 texture (when asked for),
     /// recorded in the frame's own submission.
-    pub output: Option<wgpu::Texture>,
+    pub output: Option<crate::OutputTarget>,
 }
 
 struct PoolAllocator<'a> {
@@ -179,7 +179,7 @@ pub(crate) fn execute(
     mask_buffers: &mut MaskBuffers,
     graph: &RenderGraph,
     format: wgpu::TextureFormat,
-    output: Option<crate::OutputAlpha>,
+    output: Option<crate::renderer::DisplayOutput>,
 ) -> Result<Executed, RenderError> {
     let device = gpu.device();
     let total_draws: usize = graph
@@ -377,44 +377,7 @@ pub(crate) fn execute(
     let image = outputs[graph.output.index()]
         .take()
         .ok_or_else(|| RenderError::Other("graph produced no output".into()))?;
-    let output = output.map(|alpha| {
-        let [w, h] = image.texel_size();
-        let target = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("bae-render.output"),
-            size: wgpu::Extent3d {
-                width: w.max(1),
-                height: h.max(1),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("bae-render.output"),
-            size: crate::renderer::OUTPUT_PARAMS_SIZE,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        gpu.queue()
-            .write_buffer(&uniform, 0, &crate::renderer::output_params(alpha, false));
-        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-        record_output_pass(
-            device,
-            ctx.pipelines,
-            &mut encoder,
-            &image,
-            &view,
-            wgpu::TextureFormat::Rgba8Unorm,
-            &uniform,
-        );
-        target
-    });
+    let output = output.map(|out| out.record(device, ctx.pipelines, &mut encoder, &image));
     gpu.queue().submit([encoder.finish()]);
     ctx.pipelines.end_frame();
     Ok(Executed {

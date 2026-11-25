@@ -15,8 +15,8 @@ use bae_gpu::viewport::{ViewportTextureId, ViewportTextureRegistry};
 use bae_gpu::wgpu;
 use bae_model::{Stage, Time};
 use bae_render::{
-    AnimEvaluator, IRect, OutputAlpha, RenderPurpose, RenderRequest, Renderer, RendererConfig,
-    Resolution, SourceProvider,
+    AnimEvaluator, IRect, OutputAlpha, OutputTarget, RenderPurpose, RenderRequest, Renderer,
+    RendererConfig, Resolution, SourceProvider,
 };
 
 /// Layer source providers registered by other modules (05's shape layers, plugin
@@ -60,7 +60,7 @@ pub(crate) struct GpuPreview {
     rect: Option<IRect>,
     /// The published frame (the Info panel reads pixels from it) and the last
     /// pixel read: (texel, value).
-    texture: Option<wgpu::Texture>,
+    target: Option<OutputTarget>,
     sampled: Option<((u32, u32, u64), [u8; 4])>,
     /// Text layers have a source provider (otherwise the viewer draws them).
     pub has_text: bool,
@@ -93,7 +93,7 @@ impl GpuPreview {
             sources_gen: None,
             last: None,
             rect: None,
-            texture: None,
+            target: None,
             sampled: None,
             has_text: false,
         }
@@ -179,14 +179,15 @@ impl GpuPreview {
                 stage,
                 evaluator: &mut self.anim,
             };
-            // The frame and its 8-bit conversion in one GPU submission.
-            let (frame, texture) = match self.renderer.render_frame_output(
+            let old_size = self.target.as_ref().map(OutputTarget::size);
+            let (frame, target) = match self.renderer.render_frame_output(
                 &rc,
                 &request,
                 Some(&mut frames),
                 OutputAlpha::Premultiplied,
+                self.target.take(),
             ) {
-                Ok(f) => f,
+                Ok(result) => result,
                 Err(e) => {
                     tracing_warn(&format!("preview: {e}"));
                     return None;
@@ -194,16 +195,22 @@ impl GpuPreview {
             };
             // Display-encoded 8-bit values, sampled as they are (egui blends in
             // gamma space, see docs/spec/app-shell.md §5).
-            if let Err(e) = self
-                .registry
-                .publish(self.id, &texture, wgpu::FilterMode::Linear)
+            // Egui keeps the same view until the render dimensions change.
+            if old_size != Some(target.size())
+                && let Err(e) = self.registry.publish_view(
+                    self.id,
+                    target.view().clone(),
+                    target.size(),
+                    target.view().texture().format(),
+                    wgpu::FilterMode::Linear,
+                )
             {
                 tracing_warn(&format!("preview: {e}"));
                 return None;
             }
             self.last = Some(key);
             self.rect = Some(frame.image.rect);
-            self.texture = Some(texture);
+            self.target = Some(target);
             self.sampled = None;
         }
         Some(PreviewImage {
@@ -217,7 +224,7 @@ impl GpuPreview {
     /// one texel back from the GPU (blocking, only when the pointer moved to
     /// another texel or the frame changed).
     pub fn pixel(&mut self, p: [f64; 2]) -> Option<[u8; 4]> {
-        let (texture, rect) = (self.texture.as_ref()?, self.rect?);
+        let (texture, rect) = (self.target.as_ref()?.view().texture(), self.rect?);
         let (w, h) = (texture.width(), texture.height());
         let (rw, rh) = (f64::from(rect.x1 - rect.x0), f64::from(rect.y1 - rect.y0));
         if rw <= 0.0 || rh <= 0.0 {

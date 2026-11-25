@@ -84,7 +84,9 @@ pub use light::{Light, LightKind, Material};
 pub use module::RenderModule;
 pub use motion::{CompMotionBlur, LayerSample};
 pub use pool::PoolStats;
-pub use renderer::{FrameStats, OutputAlpha, RenderedFrame, Renderer, RendererConfig};
+pub use renderer::{
+    FrameStats, OutputAlpha, OutputTarget, RenderedFrame, Renderer, RendererConfig,
+};
 pub use request::{
     BitDepth, BlendSpace, ColorContext, RenderPurpose, RenderRequest, Resolution, WorkFormat,
 };

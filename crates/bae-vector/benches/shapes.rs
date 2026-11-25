@@ -8,7 +8,8 @@
 //! the GPU included. `cargo bench -p bae-vector --bench shapes [-- <layers>…]`
 //! (default 100 and 1000). `BAE_BENCH_FRAMES` (default 120), `BAE_BENCH_4K=1`
 //! (3840 × 2160 instead of 1920 × 1080), `BAE_BENCH_FX=<n>` (the first n
-//! layers also get Gaussian Blur 20 and Glow with radius 30).
+//! layers also get Gaussian Blur 20 and Glow with radius 30). Set
+//! `BAE_BENCH_NO_FRAME_CACHE=1` for the playback worker cache configuration.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -176,7 +177,11 @@ fn bench(gpu: &Arc<GpuContext>, layers: usize, frames: usize) {
     let mut renderer = Renderer::with_config(
         gpu.clone(),
         RendererConfig {
-            frame_cache_bytes: 512 << 20,
+            frame_cache_bytes: if std::env::var_os("BAE_BENCH_NO_FRAME_CACHE").is_some() {
+                0
+            } else {
+                512 << 20
+            },
             pool_idle_bytes: 128 << 20,
         },
     );
@@ -203,6 +208,7 @@ fn bench(gpu: &Arc<GpuContext>, layers: usize, frames: usize) {
         );
     }
     let rate = FrameRate::FPS_30;
+    let mut target = None;
     let mut frame = |f: usize, times: &mut Times, wait: bool| {
         let time = rate.frame_to_time(f as i64);
         let t = Instant::now();
@@ -216,9 +222,16 @@ fn bench(gpu: &Arc<GpuContext>, layers: usize, frames: usize) {
             stage: &stage,
             evaluator: &mut anim,
         };
-        let (out, _texture) = renderer
-            .render_frame_output(&rc, &request, Some(&mut frames), OutputAlpha::Premultiplied)
+        let (out, texture) = renderer
+            .render_frame_output(
+                &rc,
+                &request,
+                Some(&mut frames),
+                OutputAlpha::Premultiplied,
+                target.take(),
+            )
             .expect("render");
+        target = Some(texture);
         times.render += t.elapsed();
         times.build += out.stats.build;
         times.encode += out.stats.encode;

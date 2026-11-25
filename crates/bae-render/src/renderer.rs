@@ -105,12 +105,80 @@ pub(crate) fn output_params(alpha: OutputAlpha, float: bool) -> [u8; OUTPUT_PARA
     params
 }
 
+/// Exact-sized display output. Keep the view with the texture so repeated
+/// presentations never sample the padding of a working texture.
+pub struct OutputTarget(wgpu::TextureView);
+
+impl OutputTarget {
+    /// The persistent sampled view used by the viewer registration.
+    pub fn view(&self) -> &wgpu::TextureView {
+        &self.0
+    }
+
+    /// Exact pixel dimensions of this RGBA8 display target.
+    pub fn size(&self) -> [u32; 2] {
+        [self.0.texture().width(), self.0.texture().height()]
+    }
+}
+
+pub(crate) struct DisplayOutput {
+    available: Option<OutputTarget>,
+    uniform: wgpu::Buffer,
+}
+
+impl DisplayOutput {
+    pub(crate) fn record(
+        self,
+        device: &wgpu::Device,
+        pipelines: &mut Pipelines,
+        encoder: &mut wgpu::CommandEncoder,
+        image: &GpuImage,
+    ) -> OutputTarget {
+        let [w, h] = image.texel_size();
+        let target = self
+            .available
+            .filter(|t| t.size() == [w.max(1), h.max(1)])
+            .unwrap_or_else(|| {
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("bae-render.output"),
+                    size: wgpu::Extent3d {
+                        width: w.max(1),
+                        height: h.max(1),
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::COPY_SRC
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                });
+                let view = texture.create_view(&Default::default());
+                OutputTarget(view)
+            });
+        crate::exec::record_output_pass(
+            device,
+            pipelines,
+            encoder,
+            image,
+            target.view(),
+            wgpu::TextureFormat::Rgba8Unorm,
+            &self.uniform,
+        );
+        target
+    }
+}
+
 /// The GPU compositor.
 pub struct Renderer {
     gpu: Arc<GpuContext>,
     pipelines: Pipelines,
     pool: TexturePool,
     draws: DrawBuffer,
+    output_uniform: Option<(OutputAlpha, wgpu::Buffer)>,
+    readback_target: Option<OutputTarget>,
     mask_buffers: MaskBuffers,
     frames: FrameCache<GpuImage>,
     footage: FootageCache,
@@ -169,6 +237,8 @@ impl Renderer {
             pipelines,
             pool: TexturePool::new(config.pool_idle_bytes),
             draws: DrawBuffer::default(),
+            output_uniform: None,
+            readback_target: None,
             mask_buffers: MaskBuffers::default(),
             frames: FrameCache::new(config.frame_cache_bytes),
             footage: FootageCache::new(gpu.clone()),
@@ -285,14 +355,11 @@ impl Renderer {
         request: &RenderRequest,
         frames: Option<&mut dyn crate::graph::CompFrames>,
         alpha: OutputAlpha,
-    ) -> Result<(RenderedFrame, wgpu::Texture), RenderError> {
-        let (frame, output) = self.render(comp, request, frames, Some(alpha))?;
-        let texture = match output {
-            Some(texture) => texture,
-            // From the frame cache: only the conversion is submitted.
-            None => self.output_texture(&frame, alpha)?,
-        };
-        Ok((frame, texture))
+        available: Option<OutputTarget>,
+    ) -> Result<(RenderedFrame, OutputTarget), RenderError> {
+        let output = self.display_output(alpha, available);
+        let (frame, target) = self.render(comp, request, frames, Some(output))?;
+        Ok((frame, target.expect("display output requested")))
     }
 
     fn render(
@@ -300,27 +367,34 @@ impl Renderer {
         comp: &RenderComp,
         request: &RenderRequest,
         frames: Option<&mut dyn crate::graph::CompFrames>,
-        output: Option<OutputAlpha>,
-    ) -> Result<(RenderedFrame, Option<wgpu::Texture>), RenderError> {
-        let key = FrameKey {
-            comp: comp.path.clone(),
-            time: comp.time,
-            request: request.fingerprint(),
-        };
-        let hash = comp.content_hash();
-        if self.frames.content_hash(&key) == Some(hash)
-            && let Some(image) = self.frames.get(&key)
+        output: Option<DisplayOutput>,
+    ) -> Result<(RenderedFrame, Option<OutputTarget>), RenderError> {
+        let lookup = (self.frames.stats().budget > 0).then(|| {
+            (
+                FrameKey {
+                    comp: comp.path.clone(),
+                    time: comp.time,
+                    request: request.fingerprint(),
+                },
+                comp.content_hash(),
+            )
+        });
+        if let Some((key, hash)) = &lookup
+            && self.frames.content_hash(key) == Some(*hash)
+            && let Some(image) = self.frames.get(key)
         {
+            let image = image.clone();
+            let output = output.map(|out| self.submit_output(&image, out));
             return Ok((
                 RenderedFrame {
-                    image: image.clone(),
+                    image,
                     comp: comp.path.clone(),
                     time: comp.time,
                     from_cache: true,
                     stats: FrameStats::default(),
                     warnings: Vec::new(),
                 },
-                None,
+                output,
             ));
         }
 
@@ -355,7 +429,10 @@ impl Renderer {
 
         let output = executed.output;
         let image = executed.image;
-        if !graph.time_dependent {
+        if !graph.time_dependent
+            && image.byte_size() <= self.frames.stats().budget
+            && let Some((key, hash)) = lookup
+        {
             self.frames.insert(
                 key,
                 image.clone(),
@@ -398,59 +475,61 @@ impl Renderer {
         frame: &RenderedFrame,
         alpha: OutputAlpha,
     ) -> Result<ImageData, RenderError> {
-        let target = self.output_texture(frame, alpha)?;
-        Ok(bae_gpu::transfer::read_texture(&self.gpu, &target)?)
+        let available = self.readback_target.take();
+        let target = self.output_texture(frame, alpha, available)?;
+        let pixels = bae_gpu::transfer::read_texture(&self.gpu, target.view().texture());
+        self.readback_target = Some(target);
+        Ok(pixels?)
     }
 
-    /// Converts a frame to an 8-bit RGBA texture on the GPU, without reading it
-    /// back (what [`Renderer::read_rgba8`] reads): `Rgba8Unorm`, usable as a copy
-    /// source and as a sampled texture, e.g. published to the viewport registry for
-    /// a viewer. The work is submitted; the texture is ready for later commands.
+    /// Converts to RGBA8. Return the display target here only after its consumers have released it.
     pub fn output_texture(
         &mut self,
         frame: &RenderedFrame,
         alpha: OutputAlpha,
-    ) -> Result<wgpu::Texture, RenderError> {
+        available: Option<OutputTarget>,
+    ) -> Result<OutputTarget, RenderError> {
+        let out = self.display_output(alpha, available);
+        Ok(self.submit_output(&frame.image, out))
+    }
+
+    fn submit_output(&mut self, image: &GpuImage, output: DisplayOutput) -> OutputTarget {
         let device = self.gpu.device();
-        let [w, h] = frame.image.texel_size();
-        let target = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("bae-render.output"),
-            size: wgpu::Extent3d {
-                width: w.max(1),
-                height: h.max(1),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("bae-render.output"),
-            size: OUTPUT_PARAMS_SIZE,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        self.gpu
-            .queue()
-            .write_buffer(&uniform, 0, &output_params(alpha, false));
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("bae-render.output"),
         });
-        self.record_output(
-            &mut encoder,
-            frame,
-            &view,
-            wgpu::TextureFormat::Rgba8Unorm,
-            &uniform,
-        );
+        let target = output.record(device, &mut self.pipelines, &mut encoder, image);
         self.gpu.queue().submit([encoder.finish()]);
-        Ok(target)
+        target
+    }
+
+    fn display_output(
+        &mut self,
+        alpha: OutputAlpha,
+        available: Option<OutputTarget>,
+    ) -> DisplayOutput {
+        let device = self.gpu.device();
+        let (previous, uniform) = self.output_uniform.get_or_insert_with(|| {
+            use wgpu::util::DeviceExt;
+            (
+                alpha,
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("bae-render.output"),
+                    contents: &output_params(alpha, false),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                }),
+            )
+        });
+        if *previous != alpha {
+            self.gpu
+                .queue()
+                .write_buffer(uniform, 0, &output_params(alpha, false));
+            *previous = alpha;
+        }
+        DisplayOutput {
+            available,
+            uniform: uniform.clone(),
+        }
     }
 
     /// Records the output conversion of `frame` into `target` (a `format`
