@@ -4,11 +4,33 @@ mod color;
 use super::{Builtin, EffectInfo, Registry};
 use crate::params::Params;
 use bae_model::{EffectDef, EffectParamDef, ParamKind, Value};
-use bae_render::effect::{LayerDependency, MaskSelect};
-use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderEffect, RenderError};
+use bae_render::effect::{EffectValues, LayerDependency, MaskSelect};
+use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderError};
+use smallvec::SmallVec;
 use std::sync::Arc;
 
-type Map = fn(Params<'_>) -> Vec<(u32, Value)>;
+struct Translation<'a> {
+    source: &'a [(u32, Value)],
+    changes: SmallVec<[(u32, Option<Value>); 8]>,
+}
+
+impl<'a> Translation<'a> {
+    fn replace<const N: usize>(values: [(u32, Value); N]) -> Self {
+        Self {
+            source: &[],
+            changes: values.into_iter().map(|(id, v)| (id, Some(v))).collect(),
+        }
+    }
+
+    fn patch<const N: usize>(p: Params<'a>, values: [(u32, Option<Value>); N]) -> Self {
+        Self {
+            source: &p.p.effect.params,
+            changes: values.into_iter().collect(),
+        }
+    }
+}
+
+type Map = for<'a> fn(Params<'a>) -> Translation<'a>;
 
 #[derive(Debug)]
 pub(super) struct Alias {
@@ -24,14 +46,10 @@ impl Alias {
         f: impl FnOnce(&EffectParams<'_>) -> R,
     ) -> R {
         let Some(map) = self.map else { return f(p) };
-        let mapped = RenderEffect {
-            path: p.effect.path.clone(),
-            enabled: p.effect.enabled,
-            effect: self.target.def().match_name.clone(),
-            params: map(Params::new(&self.def, p)),
-        };
+        let mapped = map(Params::new(&self.def, p));
+        let values = EffectValues::new(mapped.source, &mapped.changes);
         f(&EffectParams {
-            effect: &mapped,
+            translated_values: Some(&values),
             ..*p
         })
     }
@@ -120,18 +138,42 @@ impl Definition {
     }
 }
 
-fn assign(params: &mut Vec<(u32, Value)>, id: u32, value: Value) {
-    if let Some((_, old)) = params.iter_mut().find(|(i, _)| *i == id) {
-        *old = value;
-    } else {
-        params.push((id, value));
-    }
-}
-
 pub(super) fn register(r: &mut Registry) {
     let mut aliases = Vec::new();
     for target in &r.effects {
         color::register(target, &mut aliases);
     }
     r.effects.extend(aliases);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bae_model::PrimPath;
+    use bae_render::RenderEffect;
+
+    #[test]
+    fn legacy_levels_borrows_the_instance_and_unchanged_values() {
+        let fx = crate::get("ADBE Easy Levels").unwrap();
+        let instance = RenderEffect {
+            path: PrimPath::new("/comps/main/layers/a/effects/levels").unwrap(),
+            effect: fx.info.match_name.clone(),
+            enabled: true,
+            params: vec![
+                (2, Value::Bytes(vec![0; 1024])),
+                (3, Value::Float(0.2)),
+                (8, Value::Bool(false)),
+            ],
+        };
+        let params = EffectParams::new(&instance);
+        fx.alias.as_ref().unwrap().with_params(&params, |p| {
+            assert!(std::ptr::eq(p.effect, &instance));
+            assert!(std::ptr::eq(
+                p.value(3).unwrap(),
+                instance.param(3).unwrap()
+            ));
+            assert!(p.value(2).is_none());
+            assert_eq!((p.popup(8), p.popup(9)), (Some(2), Some(1)));
+        });
+    }
 }

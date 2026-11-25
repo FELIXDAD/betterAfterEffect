@@ -19,12 +19,36 @@ use crate::input::RenderEffect;
 use crate::request::RenderPurpose;
 use crate::source::{EncodeContext, GpuImage};
 
+/// A parameter lookup can borrow the evaluated values and shadow individual IDs.
+/// A shadow with no value hides that ID from the target effect.
+#[derive(Clone, Copy, Debug)]
+pub struct EffectValues<'a> {
+    source: &'a [(u32, Value)],
+    changes: &'a [(u32, Option<Value>)],
+}
+
+impl<'a> EffectValues<'a> {
+    /// Read the changed IDs first, then the borrowed source values.
+    pub fn new(source: &'a [(u32, Value)], changes: &'a [(u32, Option<Value>)]) -> Self {
+        Self { source, changes }
+    }
+
+    fn value(&self, id: u32) -> Option<&Value> {
+        if let Some((_, value)) = self.changes.iter().find(|(n, _)| *n == id) {
+            return value.as_ref();
+        }
+        self.source.iter().find(|(n, _)| *n == id).map(|(_, v)| v)
+    }
+}
+
 /// Evaluated parameters of one effect instance plus the frame context an
 /// effect needs (the equivalents of AE's `PF_InData`), with typed accessors.
 #[derive(Clone, Copy, Debug)]
 pub struct EffectParams<'a> {
     /// The instance (prim, effect ID, values).
     pub effect: &'a RenderEffect,
+    /// Values the implementation reads, after any effect alias translation.
+    pub translated_values: Option<&'a EffectValues<'a>>,
     /// Layer time of the frame.
     pub time: Time,
     /// Time in the comp containing the layer.
@@ -73,6 +97,7 @@ impl<'a> EffectParams<'a> {
         effect.path.hash(&mut h);
         Self {
             effect,
+            translated_values: None,
             time: Time::ZERO,
             comp_time: Time::ZERO,
             layer_time_scale: 1.0,
@@ -94,7 +119,10 @@ impl<'a> EffectParams<'a> {
 impl EffectParams<'_> {
     /// Raw value of parameter `id`.
     pub fn value(&self, id: u32) -> Option<&Value> {
-        self.effect.param(id)
+        match self.translated_values {
+            Some(values) => values.value(id),
+            None => self.effect.param(id),
+        }
     }
 
     /// A slider / angle value.
