@@ -115,14 +115,14 @@ fn probe_file(
         },
         sequence_frame_rate: bae_model::FrameRate::from_fps(defaults.sequence_fps),
     };
-    let info = bae_media::audio::file_info(path).or_else(|| {
-        formats()
+    let info = match bae_media::audio::file_info(path) {
+        Some(info) => Ok(info),
+        None => formats()
             .open(path, &options)
-            .ok()
-            .map(|source| source.info().clone())
-    });
+            .map(|source| source.info().clone()),
+    };
     match info {
-        Some(info) => {
+        Ok(info) => {
             // Several frames of one sequence picked: one item.
             if !seen.insert(info.path.clone()) {
                 return;
@@ -157,7 +157,12 @@ fn probe_file(
                 folder: folder.map(str::to_owned),
             });
         }
-        None => out.failed.push(file_name(path)),
+        Err(bae_media::MediaError::HevcDecoderUnavailable) => out.failed.push(format!(
+            "{} — {}",
+            file_name(path),
+            tr("HEVC decoding is unsupported. Check that Windows HEVC Video Extensions are installed.")
+        )),
+        Err(_) => out.failed.push(file_name(path)),
     }
 }
 
