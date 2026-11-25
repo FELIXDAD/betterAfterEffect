@@ -115,9 +115,14 @@ fn probe_file(
         },
         sequence_frame_rate: bae_model::FrameRate::from_fps(defaults.sequence_fps),
     };
-    match formats().open(path, &options) {
-        Ok(source) => {
-            let info = source.info();
+    let info = match bae_media::audio::file_info(path) {
+        Some(info) => Ok(info),
+        None => formats()
+            .open(path, &options)
+            .map(|source| source.info().clone()),
+    };
+    match info {
+        Ok(info) => {
             // Several frames of one sequence picked: one item.
             if !seen.insert(info.path.clone()) {
                 return;
