@@ -106,13 +106,16 @@ pub(super) fn wrong_language(h: &Ui, zh: bool, extra_ok: &[String]) -> Vec<Strin
         .into_iter()
         // File paths (the render queue's output) are the file system's.
         .filter(|t| !(t.starts_with('/') || t.starts_with('~') || t.get(1..3) == Some(":\\")))
+        // The language picker (Preferences > Appearance) names each language in
+        // itself and the setting in both, to be found whatever the UI shows.
+        .filter(|t| !matches!(t.as_str(), "简体中文" | "English"))
+        .filter(|t| !t.starts_with("Language / 语言") && !t.starts_with("语言 / Language"))
         .filter_map(|t| {
             if zh {
                 let words = latin_words(&t, extra_ok);
                 (!words.is_empty()).then(|| format!("“{t}”: {}", words.join(", ")))
             } else {
-                // The language picker names Chinese in Chinese.
-                (t.chars().any(is_cjk) && t != "简体中文").then(|| format!("“{t}”"))
+                (t.chars().any(is_cjk)).then(|| format!("“{t}”"))
             }
         })
         .collect()

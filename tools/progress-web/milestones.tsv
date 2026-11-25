@@ -1,0 +1,29 @@
+合成与图层	layers	合成与 10 种图层	done
+合成与图层	blend	38 种混合模式	done
+合成与图层	matte	轨道遮罩	done
+合成与图层	mblur	运动模糊	done
+动画与表达式	keys	关键帧 / 缓动 / 图表编辑器	done
+动画与表达式	expr-ui	表达式界面	doing	310,336
+动画与表达式	expr-perf	表达式快速路径和并行求值	doing	390
+动画与表达式	kf-assist	摇摆器 / 平滑器 / 动态草图	doing	355,379
+动画与表达式	time	时间重映射 / 冻结帧 / 帧混合 / 时间效果	doing	337,338,339,348
+矢量与文字	mask-feather	可变宽度蒙版羽化	doing	343
+矢量与文字	mask-interp	蒙版插值	doing	350
+矢量与文字	shape-ops	形状操作器	doing	324
+矢量与文字	text-panels	字符 / 段落 / 对齐 / 信息面板	doing	321,325
+矢量与文字	text-path	路径文字	doing	345
+界面与工具	lang	首选项里即时切换语言	doing	385
+界面与工具	3d-ui	3D 视图 / 摄像机工具 / 手柄	doing	323,327,330,334
+界面与工具	paint	绘画工具 / 图层面板 / 液化	doing	341,347,357,370
+效果与模拟	particles	GPU 粒子 + 模拟效果	doing	360
+效果与模拟	fx-a	常用效果 A 档	doing
+效果与模拟	lumetri	Lumetri 颜色	doing	331
+效果与模拟	stroke	描边 / 写入 / 涂写 / 勾画	doing	328
+媒体与扩展	audio	音频播放 / 面板 / 导出 / 效果	doing	340,353
+媒体与扩展	plugins	插件 v1：原生插件 + 脚本	doing	332,329
+媒体与扩展	win-video	Windows 视频读写	doing	274
+性能与发布	pack	工程打包	done
+性能与发布	perf-4k	4K 实时、渲染 120 fps	doing	386,381,384,388
+性能与发布	cache	显存帧缓存（RAM 预览）	todo
+性能与发布	release	0.1.0 发布	todo
+面板 / 工作区	ae-panels-workspace	所有面板工作区、补齐 AE 26 的所有面板、窗口菜单逐项可用	todo		K
