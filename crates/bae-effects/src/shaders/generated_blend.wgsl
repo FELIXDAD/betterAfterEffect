@@ -59,6 +59,12 @@ fn generated_blend(c: vec4<f32>, color: vec3<f32>, alpha: f32, mode: u32) -> vec
         case 20u: { overlap = set_lum(set_sat(base, sat(color)), lum(base)); }
         case 21u: { overlap = set_lum(color, lum(base)); }
         case 22u: { overlap = set_lum(base, lum(color)); }
+        case 23u: {overlap=base+color-1.;}
+        case 24u: {overlap=min(vec3f(1.),base+color);}
+        case 25u: {overlap=base+2.*color-1.;}
+        case 26u: {overlap=select(dodge(base,2.*color-1.),burn(base,2.*color),color<=vec3f(.5));}
+        case 27u: {overlap=select(max(base,2.*color-1.),min(base,2.*color),color<=vec3f(.5));}
+        case 28u: {overlap=step(vec3f(1.),base+color);}
         default: {}
     }
     return vec4<f32>((1.0 - alpha) * c.rgb + alpha * mix(color, overlap, c.a), alpha + (1.0 - alpha) * c.a);
