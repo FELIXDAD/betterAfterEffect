@@ -26,6 +26,7 @@ mod bar;
 mod effect_points;
 pub(crate) mod errors;
 mod free_transform;
+mod look_at;
 mod menu;
 mod motion_path;
 mod overlay;
@@ -356,6 +357,18 @@ impl Panel for CompositionViewer {
         }
         if view3d::handle(action, cx) {
             return true;
+        }
+        // With a camera tool, F is Look at Selected Layers (AE's camera tool
+        // shortcut; elsewhere F reveals Mask Feather).
+        if action.id == "motion.reveal"
+            && action.params.get("what").and_then(|v| v.as_str()) == Some("mask_feather")
+            && matches!(
+                crate::tools::shared(cx.resources).lock().current().group(),
+                crate::tools::Group::Orbit | crate::tools::Group::Pan | crate::tools::Group::Dolly
+            )
+        {
+            let look = Invocation::new(look_at::ids::SELECTED);
+            return look_at::handle(&look, cx);
         }
         // While a shape is being drawn the keys belong to the drag: Space moves
         // the shape (not playback), arrows and Page Up / Down change it.
@@ -907,6 +920,19 @@ impl Panel for CompositionViewer {
             || ui.ctx().text_edit_focused()
             || egui::Popup::is_any_open(ui.ctx());
     }
+}
+
+/// View ▸ Look at Selected / All Layers (see [`look_at`]).
+pub(crate) fn look_at(inv: &bae_ui::Invocation, cx: &mut PanelContext<'_>) -> bool {
+    look_at::handle(inv, cx)
+}
+
+pub(crate) fn look_at_actions() -> impl Iterator<Item = (&'static str, &'static str)> {
+    look_at::ACTIONS.iter().copied()
+}
+
+pub(crate) fn look_at_enabled(resources: &bae_app::Resources, all: bool) -> bool {
+    look_at::enabled(resources, all)
 }
 
 /// The comp's resolution as a pixel step (Composition Settings > Resolution:

@@ -204,6 +204,11 @@ impl Views {
         }
     }
 
+    /// A camera tool moved `view`'s camera.
+    pub fn set_camera(&mut self, view: View3d, camera: ViewCamera) {
+        self.cameras.insert(view, camera);
+    }
+
     pub fn view_camera(&self, view: View3d, size: DVec2) -> ViewCamera {
         self.cameras
             .get(&view)
