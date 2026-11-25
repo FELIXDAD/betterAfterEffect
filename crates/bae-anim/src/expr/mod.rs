@@ -23,6 +23,7 @@ use rquickjs::{Array, CatchResultExt, CaughtError, Context, Ctx, Function, Objec
 
 use crate::eval::{CompiledComp, Cx, ExprProp, num};
 use crate::evaluated::AttrError;
+use crate::reads::{ExprRead, ReadKind};
 use crate::schema::transform as tr;
 
 const PRELUDE: &str = include_str!("prelude.js");
@@ -149,6 +150,8 @@ thread_local! {
 /// `thisProject`, `footage(name)`, a footage layer's `source`).
 #[derive(Debug, Default)]
 pub(crate) struct ProjectInfo {
+    /// The `Project` prim, when there is one.
+    pub(crate) path: Option<PrimPath>,
     pub(crate) bit_depth: u32,
     pub(crate) linear_blending: bool,
     /// Display name, path, facts.
@@ -167,6 +170,8 @@ pub(crate) struct Scope {
     errors: Vec<(usize, AttrError)>,
     /// (comp id, layer) → layers it read through expressions.
     deps: BTreeSet<((usize, usize), (usize, usize))>,
+    /// Every read, when tracing ([`crate::Evaluator::evaluate_attribute_traced`]).
+    reads: Option<BTreeSet<ExprRead>>,
     /// Set when an evaluation hit [`MAX_DEPTH`]: everything above it on the stack is
     /// incomplete (not memoised, errors not recorded) and is retried by the caller's
     /// warm-up passes ([`warm_up`]).
@@ -198,8 +203,15 @@ impl Scope {
             stack: Vec::new(),
             errors: Vec::new(),
             deps: BTreeSet::new(),
+            reads: None,
             deferred: false,
         }
+    }
+
+    /// Records every read for [`ScopeResult::reads`].
+    pub(crate) fn traced(mut self) -> Scope {
+        self.reads = Some(BTreeSet::new());
+        self
     }
 
     pub(crate) fn with_project(mut self, project: Arc<ProjectInfo>) -> Scope {
@@ -217,6 +229,8 @@ pub(crate) struct ScopeResult {
     pub errors: Vec<(usize, AttrError)>,
     pub deps: BTreeSet<((usize, usize), (usize, usize))>,
     pub comps: Vec<Arc<CompiledComp>>,
+    /// Sorted reads of a traced scope.
+    pub reads: Vec<ExprRead>,
 }
 
 /// Install `scope` for the duration of `f` (no-op nesting: an active scope is reused).
@@ -251,6 +265,7 @@ pub(crate) fn with_scope<R>(scope: Scope, f: impl FnOnce() -> R) -> (R, Option<S
                 errors: s.errors,
                 deps: s.deps,
                 comps: s.comps,
+                reads: s.reads.map(|r| r.into_iter().collect()).unwrap_or_default(),
             }
         });
     drop(reset);
@@ -429,6 +444,7 @@ struct FastEnv<'a, 'b, 'js> {
 
 impl FastEnv<'_, '_, '_> {
     fn sample(&self, ct: Time) -> Vec<f64> {
+        self.note(Some(ct));
         let cx = Cx {
             ct,
             lt: self.layer.timing.layer_time(ct),
@@ -444,6 +460,11 @@ impl FastEnv<'_, '_, '_> {
     fn grid(&self, t: f64) -> f64 {
         (t / self.tick).round() * self.tick
     }
+
+    /// The property read its own value (at `ct`) or keyframes (`None`).
+    fn note(&self, ct: Option<Time>) {
+        note_read(|| ExprRead::attr(self.e.prim.clone(), &self.e.attr, ct));
+    }
 }
 
 impl fast::Env for FastEnv<'_, '_, '_> {
@@ -456,6 +477,7 @@ impl fast::Env for FastEnv<'_, '_, '_> {
     }
 
     fn keys(&self) -> Vec<(f64, Vec<f64>)> {
+        self.note(None);
         self.e.base.curve().map_or_else(Vec::new, |c| {
             c.keys()
                 .map(|(t, v)| (self.layer.timing.comp_time(t).as_seconds(), components(v)))
@@ -972,6 +994,25 @@ fn note_dependency(c: usize, l: usize) {
     });
 }
 
+/// Record a read of a traced scope (no-op otherwise).
+pub(crate) fn note_read(read: impl FnOnce() -> ExprRead) {
+    SCOPE.with(|s| {
+        if let Some(s) = s.borrow_mut().as_mut()
+            && let Some(reads) = &mut s.reads
+        {
+            reads.insert(read());
+        }
+    });
+}
+
+/// The prim of a property reference (empty: the layer itself).
+fn prim_path(prim: &str, layer: &crate::eval::CompiledLayer) -> PrimPath {
+    if prim.is_empty() {
+        return layer.path.clone();
+    }
+    PrimPath::new(prim).unwrap_or_else(|_| layer.path.clone())
+}
+
 /// Prim path of a property reference: empty means the layer itself.
 fn own<'a>(prim: &'a str, layer: &'a crate::eval::CompiledLayer) -> &'a str {
     if prim.is_empty() {
@@ -1014,6 +1055,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 // AE's valueAtTime works on a grid of 1/1024 frame.
                 let tick = comp.frame_rate.frame_duration().as_seconds() / 1024.0;
                 let ct = Time::from_seconds((t / tick).round() * tick);
+                note_read(|| ExprRead::attr(prim_path(&prim, layer), &attr, Some(ct)));
                 let cx = Cx {
                     comp: c as usize,
                     layer: li,
@@ -1056,6 +1098,9 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 let tick = comp.frame_rate.frame_duration().as_seconds() / 1024.0;
                 let q = (t / tick).round() * tick;
                 let (t0, t1) = (Time::from_seconds(q), Time::from_seconds(q + tick));
+                for t in [t0, t1] {
+                    note_read(|| ExprRead::attr(prim_path(&prim, layer), &attr, Some(t)));
+                }
                 let at = |ct: Time| {
                     let cx = Cx {
                         comp: c as usize,
@@ -1092,6 +1137,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 let comp = comp_or_throw(&ctx, c)?;
                 let li = layer_or_throw(&ctx, &comp, l)?;
                 let layer = &comp.layers[li];
+                note_read(|| ExprRead::attr(prim_path(&prim, layer), &attr, None));
                 let mut out = Vec::new();
                 if let Some(curve) = layer
                     .find_prop(own(&prim, layer), &attr)
@@ -1168,6 +1214,14 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
             let comp = comp_or_throw(&ctx, c)?;
             let li = layer_or_throw(&ctx, &comp, l)?;
             let layer = &comp.layers[li];
+            note_read(|| ExprRead::prim(layer.path.clone(), ReadKind::Prim, None));
+            match &layer.source {
+                crate::eval::CompiledSource::Asset(p, _)
+                | crate::eval::CompiledSource::Comp { path: p, .. } => {
+                    note_read(|| ExprRead::prim(p.clone(), ReadKind::Prim, None));
+                }
+                crate::eval::CompiledSource::None => {}
+            }
             let o = Object::new(ctx.clone())?;
             o.set("path", layer.path.as_str())?;
             o.set("name", &*layer.name)?;
@@ -1197,6 +1251,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
         "compInfo",
         Function::new(ctx.clone(), |ctx: Ctx<'js>, c: i32| {
             let comp = comp_or_throw(&ctx, c)?;
+            note_read(|| ExprRead::prim(comp.path.clone(), ReadKind::Prim, None));
             let o = Object::new(ctx.clone())?;
             o.set("name", comp.name.as_str())?;
             o.set("width", comp.width)?;
@@ -1263,6 +1318,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                 let Some(e) = found else {
                     return Ok::<_, rquickjs::Error>(None);
                 };
+                note_read(|| ExprRead::attr(e.path.clone(), "enabled", None));
                 let info = Object::new(ctx.clone())?;
                 info.set("path", e.path.as_str())?;
                 info.set("active", e.enabled)?;
@@ -1327,6 +1383,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
                     return Ok::<_, rquickjs::Error>(li as i32);
                 };
                 let ct = Time::from_seconds(t);
+                note_read(|| ExprRead::attr(prim_path(&prim, layer), &attr, Some(ct)));
                 let cx = Cx {
                     comp: c as usize,
                     layer: li,
@@ -1435,6 +1492,9 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
         "projectInfo",
         Function::new(ctx.clone(), |ctx: Ctx<'js>| {
             let p = scope_project();
+            if let Some(path) = &p.path {
+                note_read(|| ExprRead::prim(path.clone(), ReadKind::Prim, None));
+            }
             let o = Object::new(ctx.clone())?;
             o.set(
                 "bitsPerChannel",
@@ -1452,7 +1512,10 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
         Function::new(ctx.clone(), |ctx: Ctx<'js>, name: String| {
             let p = scope_project();
             match p.assets.iter().find(|(n, ..)| *n == name) {
-                Some((n, _, a)) => Ok::<_, rquickjs::Error>(Some(footage_to_js(&ctx, n, a)?)),
+                Some((n, path, a)) => {
+                    note_read(|| ExprRead::prim(path.clone(), ReadKind::Prim, None));
+                    Ok::<_, rquickjs::Error>(Some(footage_to_js(&ctx, n, a)?))
+                }
                 None => Ok(None),
             }
         })?,
@@ -1466,6 +1529,7 @@ fn install_host<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<()> {
             let p = scope_project();
             let found = match &comp.layers[li].source {
                 crate::eval::CompiledSource::Asset(path, info) => {
+                    note_read(|| ExprRead::prim(path.clone(), ReadKind::Prim, None));
                     Some(p.assets.iter().find(|(_, ap, _)| ap == path).map_or_else(
                         || (path.name().to_owned(), info.clone()),
                         |(n, _, a)| (n.clone(), a.clone()),
