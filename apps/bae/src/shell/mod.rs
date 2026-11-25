@@ -1186,6 +1186,15 @@ impl ApplicationHandler<UserEvent> for Shell {
             self.redraw(event_loop);
             return;
         }
+        // egui reports keypad Enter as Enter; AE tells them apart.
+        if let WindowEvent::KeyboardInput { event: key, .. } = &event
+            && key.state.is_pressed()
+            && let winit::keyboard::PhysicalKey::Code(
+                code @ (winit::keyboard::KeyCode::Enter | winit::keyboard::KeyCode::NumpadEnter),
+            ) = key.physical_key
+        {
+            bae_ui::set_keypad_enter(code == winit::keyboard::KeyCode::NumpadEnter);
+        }
         let before = view.egui_state.egui_input().events.len();
         let response = view.egui_state.on_window_event(&view.window, &event);
         // Numpad keys are their own keys in AE's shortcuts (#261).

@@ -29,6 +29,7 @@ pub struct HotNumber<'a> {
     font: FontId,
     /// Accessibility name (the property, e.g. "Position X").
     label: &'a str,
+    tint: Color32,
 }
 
 impl<'a> HotNumber<'a> {
@@ -42,7 +43,14 @@ impl<'a> HotNumber<'a> {
             width: None,
             font: theme::body(),
             label: "",
+            tint: color::ACCENT,
         }
+    }
+
+    /// Color of the number (AE: blue; red when an expression drives it).
+    pub fn tint(mut self, tint: Color32) -> Self {
+        self.tint = tint;
+        self
     }
 
     /// What the number is, for screen readers (the property name, translated).
@@ -152,7 +160,7 @@ impl Widget for HotNumber<'_> {
             }
             painter.layout_job(job)
         };
-        let galley = layout(color::ACCENT);
+        let galley = layout(self.tint);
         let width = self
             .width
             .unwrap_or(0.0)
@@ -199,7 +207,7 @@ impl Widget for HotNumber<'_> {
         ui.data_mut(|d| d.insert_temp(id, state));
 
         if ui.is_rect_visible(rect) {
-            let galley = if resp_hover {
+            let galley = if resp_hover && self.tint == color::ACCENT {
                 layout(color::ACCENT_HOVER)
             } else {
                 galley

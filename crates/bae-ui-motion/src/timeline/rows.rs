@@ -465,8 +465,24 @@ impl TimelinePanel {
                     ui, cx, session, info, cols, axis, row, rect, path, attr, label, now, key_rects,
                 );
             }
-            RowKind::Expression { path, attr } => {
-                self.expression_row(ui, cx, cols, axis, rect, path, attr, row.depth);
+            RowKind::Expression {
+                path,
+                attr,
+                line,
+                lines,
+            } => {
+                self.expression_row(
+                    ui,
+                    cx,
+                    session,
+                    cols,
+                    axis,
+                    rect,
+                    path,
+                    attr,
+                    row.depth,
+                    (*line, *lines),
+                );
             }
         }
     }
@@ -565,7 +581,7 @@ impl TimelinePanel {
                 let source = if spec.expression.is_some() {
                     None
                 } else {
-                    Some(default_expression(attr))
+                    Some(crate::expr::default_expression(stage, path, attr))
                 };
                 cx.invoke_with(
                     "attr.set_expression",
@@ -695,6 +711,7 @@ impl TimelinePanel {
                     .unwrap_or_default(),
                 _ => &[],
             };
+            let expression = spec.expression.as_ref().is_some_and(|e| e.enabled);
             let edit = if let (bae_model::Value::Enum(cur), false) = (&value, options.is_empty()) {
                 let names: Vec<&str> = options.iter().map(|o| option_label(o)).collect();
                 let mut sel = options.iter().position(|o| o == cur).unwrap_or(0);
@@ -707,7 +724,15 @@ impl TimelinePanel {
                     common::Edit::None
                 }
             } else {
-                common::value_editor(&mut child, id.with("ed"), attr, &value, dims, &prop_name)
+                common::value_editor(
+                    &mut child,
+                    id.with("ed"),
+                    attr,
+                    &value,
+                    dims,
+                    &prop_name,
+                    expression,
+                )
             };
             common::apply_edit(cx, session, path, attr, now, edit);
         }
@@ -719,17 +744,21 @@ impl TimelinePanel {
         }
     }
 
+    /// An expression row: line 0 has "Expression: <property>", the Enable switch
+    /// and the pick whip; the last line draws the field over all the lines.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn expression_row(
         &mut self,
         ui: &mut Ui,
         cx: &mut PanelContext<'_>,
+        session: &SharedSession,
         cols: &Cols,
         axis: &TimeAxis,
         rect: Rect,
         path: &PrimPath,
         attr: &str,
         depth: usize,
+        (line, lines): (usize, usize),
     ) {
         let stage = cx.stage;
         let Some(expr) = query::attr_spec(stage, path, attr).and_then(|s| s.expression.clone())
@@ -737,86 +766,184 @@ impl TimelinePanel {
             return;
         };
         let l = rect.left();
-        let x = l + cols.name + depth as f32 * 14.0;
         let cy = rect.center().y;
-        // "=" enable switch.
-        let eq = Rect::from_center_size(pos2(x + 6.0, cy), vec2(14.0, 14.0));
-        let resp = ui
-            .interact(
-                eq,
-                ui.id().with(("expr_on", path.as_str(), attr)),
-                Sense::click(),
-            )
-            .labeled(
-                egui::WidgetType::Checkbox,
-                &bae_ui::a11y::context(&[
-                    &query::owning_layer(cx.stage, path)
-                        .map(|l| self.layer_ctx(cx.stage, &l))
-                        .unwrap_or_default(),
-                    tr(&common::attr_label(None, attr, false)),
-                    tr("Enable Expression"),
-                ]),
+        let layer = query::owning_layer(stage, path);
+        let three_d = layer.as_ref().is_some_and(|l| common::is_3d(stage, l));
+        let prop = tr(&common::attr_label(None, attr, three_d)).to_owned();
+        let name = bae_ui::a11y::context(&[
+            &layer
+                .as_ref()
+                .map(|l| self.layer_ctx(stage, l))
+                .unwrap_or_default(),
+            &prop,
+        ]);
+        let id = ui.id().with(("expr", path.as_str(), attr));
+        let field_id = id.with("field");
+        if line == 0 {
+            let x = l + cols.name + depth as f32 * 14.0;
+            widgets::clipped_text(
+                ui.painter(),
+                pos2(x + 4.0, cy),
+                &format!("{} {prop}", tr("Expression:")),
+                theme::body(),
+                color::TEXT,
+                (l + cols.switches - x - 8.0).max(0.0),
             );
-        ui.painter().text(
-            eq.center(),
-            Align2::CENTER_CENTER,
-            "=",
-            theme::body(),
-            if expr.enabled {
-                color::ACCENT
-            } else {
-                color::TEXT_DIM
-            },
-        );
-        if resp.clicked() {
-            cx.invoke_with("attr.set_expression", json!({"path": path, "attr": attr, "source": expr.source, "enabled": !expr.enabled}));
+            // Switches column: Enable Expression (= / ≠), pick whip.
+            let ix = l + cols.switches;
+            let eq = Rect::from_center_size(pos2(ix + SW / 2.0, cy), vec2(16.0, 16.0));
+            let resp = ui
+                .interact(eq, id.with("on"), Sense::click())
+                .labeled_toggle(
+                    egui::WidgetType::Checkbox,
+                    &bae_ui::a11y::context(&[&name, tr("Enable Expression")]),
+                    expr.enabled,
+                );
+            ui.painter().text(
+                eq.center(),
+                Align2::CENTER_CENTER,
+                if expr.enabled { "=" } else { "≠" },
+                theme::body(),
+                if expr.enabled {
+                    color::ACCENT
+                } else {
+                    color::TEXT_DIM
+                },
+            );
+            if resp.clicked() {
+                cx.invoke_with(
+                    "attr.set_expression",
+                    json!({"path": path, "attr": attr, "source": expr.source, "enabled": !expr.enabled}),
+                );
+            }
+            resp.on_hover_text(tr("Enable Expression"));
+            let whip = Rect::from_center_size(pos2(ix + SW * 1.5 + 2.0, cy), vec2(14.0, 14.0));
+            icons::paint(ui.painter(), whip, Icon::Pickwhip, color::ICON);
+            let tip = tr("Expression pick whip (insert reference to target)");
+            let wresp = ui.interact(whip, id.with("whip"), Sense::drag()).labeled(
+                egui::WidgetType::Button,
+                &bae_ui::a11y::context(&[&name, tip]),
+            );
+            #[cfg(test)]
+            self.last_expr
+                .push((path.clone(), attr.to_owned(), eq.center(), whip.center()));
+            if ui.input(|i| i.pointer.primary_pressed()) && wresp.contains_pointer() {
+                // The field loses focus on this press: keep its selection.
+                self.expr_press = self.caret(path, attr);
+            }
+            if wresp.drag_started() {
+                let w = crate::expr::Whip {
+                    path: path.clone(),
+                    attr: attr.to_owned(),
+                    insert: self.expr_press.take(),
+                };
+                egui::DragAndDrop::set_payload(ui.ctx(), w.clone());
+                self.drag = Some(Drag::ExprWhip {
+                    whip: w,
+                    origin: whip.center(),
+                });
+            }
+            wresp.on_hover_text(tip);
+            // Expression language menu.
+            let mr = Rect::from_center_size(pos2(ix + SW * 2.5 + 4.0, cy), vec2(16.0, 16.0));
+            icons::paint(ui.painter(), mr, Icon::PlayCircle, color::ICON);
+            let mtip = tr("Expression language menu");
+            let mresp = ui.interact(mr, id.with("lang"), Sense::click()).labeled(
+                egui::WidgetType::Button,
+                &bae_ui::a11y::context(&[&name, mtip]),
+            );
+            if ui.input(|i| i.pointer.primary_pressed()) && mresp.contains_pointer() {
+                self.lang_press = Some((path.clone(), attr.to_owned(), self.caret(path, attr)));
+            }
+            let mut chosen = None;
+            common::popup_menu(&mresp, &mut |ui| crate::expr_menu::ui(ui, &mut chosen));
+            if let Some(item) = chosen {
+                let insert = self
+                    .lang_press
+                    .take()
+                    .filter(|(p, a, _)| p == path && a == attr)
+                    .and_then(|(.., i)| i);
+                insert_expression(cx, path, attr, &expr, insert, item);
+            }
+            mresp.on_hover_text(mtip);
+            #[cfg(test)]
+            self.last_lang
+                .push((path.clone(), attr.to_owned(), mr.center()));
+            // An error in this expression (the viewer's evaluation).
+            let error = session
+                .lock()
+                .expr_errors
+                .iter()
+                .find(|e| e.prim == *path && e.attr == attr)
+                .cloned();
+            if let Some(e) = error {
+                let wr = Rect::from_center_size(pos2(ix + SW * 3.5 + 6.0, cy), vec2(14.0, 14.0));
+                icons::paint(ui.painter(), wr, Icon::Alert, crate::viewer::errors::YELLOW);
+                let what =
+                    tr("Indicates there is an error in the expression applied to this property.");
+                ui.interact(wr, id.with("error"), Sense::hover())
+                    .labeled(
+                        egui::WidgetType::Label,
+                        &bae_ui::a11y::context(&[&name, what]),
+                    )
+                    .on_hover_text(format!(
+                        "{what}\n{}",
+                        crate::viewer::errors::describe(stage, &e)
+                    ));
+            }
         }
-        ui.painter().text(
-            pos2(x + 18.0, cy),
-            Align2::LEFT_CENTER,
-            tr("Expression"),
-            theme::small(),
-            color::TEXT_DIM,
-        );
-        // Source field in the graph area.
+        if line + 1 < lines {
+            return;
+        }
+        // The field, in the graph area over the rows of all the lines.
         let field = Rect::from_min_max(
-            pos2(axis.left + 4.0, rect.top() + 1.0),
+            pos2(axis.left + 4.0, rect.bottom() - lines as f32 * ROW_H + 1.0),
             pos2(rect.right() - 4.0, rect.bottom() - 1.0),
         );
-        let editing = self
-            .expr_edit
-            .as_ref()
-            .is_some_and(|(p, a, _)| p == path && a == attr);
-        let mut buf = if editing {
-            self.expr_edit
-                .as_ref()
-                .map(|e| e.2.clone())
-                .unwrap_or_default()
-        } else {
-            expr.source.clone()
+        let mut buf = match &self.expr_edit {
+            Some((p, a, b)) if p == path && a == attr => b.clone(),
+            _ => expr.source.clone(),
         };
-        let name = bae_ui::a11y::context(&[
-            &query::owning_layer(cx.stage, path)
-                .map(|l| self.layer_ctx(cx.stage, &l))
-                .unwrap_or_default(),
-            tr(&common::attr_label(None, attr, false)),
-            tr("Expression"),
-        ]);
+        // Keypad Enter ends editing (Return adds a line).
+        let keypad = ui.memory(|m| m.has_focus(field_id))
+            && bae_ui::keypad_enter()
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
         let (font, text, bg) = crate::common::expression_style(cx.resources);
-        let r = ui
-            .put(
-                field,
-                egui::TextEdit::singleline(&mut buf)
+        let shown = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(field), |ui| {
+                egui::TextEdit::multiline(&mut buf)
+                    .id(field_id)
                     .font(font)
                     .text_color(text)
-                    .background_color(bg),
-            )
-            .labeled(egui::WidgetType::TextEdit, &name);
-        if r.changed() || r.has_focus() {
+                    .background_color(bg)
+                    .desired_width(field.width())
+                    .desired_rows(lines)
+                    .min_size(field.size())
+                    .show(ui)
+            })
+            .inner;
+        let r = shown.response.response.labeled(
+            egui::WidgetType::TextEdit,
+            &bae_ui::a11y::context(&[&name, tr("Expression")]),
+        );
+        if r.has_focus() {
+            if let Some(c) = shown.cursor_range {
+                let (a, b): (usize, usize) = (c.primary.index.into(), c.secondary.index.into());
+                self.expr_caret = Some((
+                    path.clone(),
+                    attr.to_owned(),
+                    buf.clone(),
+                    a.min(b)..a.max(b),
+                ));
+            }
             self.expr_edit = Some((path.clone(), attr.to_owned(), buf.clone()));
         }
-        if r.lost_focus() {
+        if keypad {
+            r.surrender_focus();
+        }
+        if r.lost_focus() || keypad {
             self.expr_edit = None;
+            self.expr_caret = None;
             if buf != expr.source {
                 cx.invoke_with(
                     "attr.set_expression",
@@ -825,18 +952,34 @@ impl TimelinePanel {
             }
         }
     }
+
+    /// The text and selection of `path.attr`'s field while it is being edited.
+    fn caret(&self, path: &PrimPath, attr: &str) -> Option<crate::expr::Selection> {
+        self.expr_caret
+            .as_ref()
+            .filter(|(p, a, ..)| p == path && a == attr)
+            .map(|(_, _, t, r)| (t.clone(), r.clone()))
+    }
 }
 
-/// AE's default expression text: the property's script name.
-pub(super) fn default_expression(attr: &str) -> String {
-    match attr {
-        "transform:anchor_point" => "transform.anchorPoint".into(),
-        "transform:position" => "transform.position".into(),
-        "transform:scale" => "transform.scale".into(),
-        "transform:rotation" => "transform.rotation".into(),
-        "transform:opacity" => "transform.opacity".into(),
-        other => format!("value // {other}"),
-    }
+/// Insert `text` (the language menu) at the selection of the field being
+/// edited, or replace the expression.
+fn insert_expression(
+    cx: &mut PanelContext<'_>,
+    path: &PrimPath,
+    attr: &str,
+    expr: &bae_model::Expression,
+    insert: Option<crate::expr::Selection>,
+    text: &str,
+) {
+    let source = match insert {
+        Some((buf, sel)) => crate::expr::splice(&buf, &sel, text),
+        None => text.to_owned(),
+    };
+    cx.invoke_with(
+        "attr.set_expression",
+        json!({"path": path, "attr": attr, "source": source, "enabled": expr.enabled}),
+    );
 }
 
 /// The name of a choice token in the UI language. A table of its own: some of
