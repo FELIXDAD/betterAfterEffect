@@ -319,6 +319,11 @@ fn shape_items(items: &[EvaluatedPrim], m: &DMat4, opacity: f64) -> (Vec<Poly>, 
     (paths, draws)
 }
 
+/// The paths of shape contents, in their space.
+pub(crate) fn shape_paths(items: &[EvaluatedPrim]) -> Vec<Poly> {
+    shape_items(items, &DMat4::IDENTITY, 1.0).0
+}
+
 /// Draws of a shape layer's contents in layer space, front first.
 pub(crate) fn shape_draws(layer: &EvaluatedLayer) -> Vec<Draw> {
     shape_items(&layer.contents, &DMat4::IDENTITY, 1.0).1

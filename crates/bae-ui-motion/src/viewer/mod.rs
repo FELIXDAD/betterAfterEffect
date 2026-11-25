@@ -25,6 +25,7 @@ use crate::tools::{Tool, ViewRequest};
 mod bar;
 pub(crate) mod errors;
 mod free_transform;
+mod group_edit;
 mod menu;
 mod motion_path;
 mod overlay;
@@ -522,6 +523,12 @@ impl Panel for CompositionViewer {
         }
         let scrub = session.lock().scrub.clone();
         apply_overrides(&mut comp, scrub.as_ref(), self.select.drag.as_ref());
+        // A shape group being dragged.
+        if let Some(d) = &self.select.group_drag
+            && let Some(l) = comp.layers.iter_mut().find(|l| l.path == d.layer)
+        {
+            d.preview(l);
+        }
         // The 3D view: 3D layers are seen through its camera.
         let size = DVec2::new(f64::from(info.width), f64::from(info.height));
         let view_camera = session

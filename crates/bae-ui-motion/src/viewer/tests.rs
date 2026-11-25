@@ -1814,3 +1814,35 @@ fn double_clicking_shape_and_text_layers_edits_them() {
     assert_eq!(h.tools().lock().current(), Tool::TypeHorizontal);
     assert_eq!(h.viewer.type_tool.edited_layer(), Some(&text));
 }
+
+/// #400: double-clicking a parametric shape selects its group (AE): its box
+/// moves the group, not the layer.
+#[test]
+fn double_clicking_a_parametric_shape_selects_its_group() {
+    let mut h = H::new();
+    let r = h.draw(Tool::Rectangle, (200.0, 100.0), (300.0, 200.0));
+    h.apply(&r);
+    let layer = query::comp_layers(&h.stage, &h.comp)[0].clone();
+    let group = h.contents(&layer)[0].clone();
+    let before = vec2v(h.value(&group, "transform:position"));
+    let layer_pos = h.v3(&layer, "transform:position");
+    h.session().lock().selected_layers.clear();
+    h.tools().lock().set(Tool::Selection);
+    h.frame(Vec::new(), Modifiers::NONE);
+    h.click(250.0, 150.0, Modifiers::NONE);
+    h.click(250.0, 150.0, Modifiers::NONE);
+    assert_eq!(h.viewer.select.group.as_ref(), Some(&group));
+    let r = h.drag((250.0, 150.0), (280.0, 160.0), Modifiers::NONE);
+    assert_eq!(r.invocations.len(), 1, "{:?}", r.invocations);
+    h.apply(&r);
+    let after = vec2v(h.value(&group, "transform:position"));
+    assert!(
+        close(after, [before[0] + 30.0, before[1] + 10.0]),
+        "{before:?} → {after:?}"
+    );
+    assert_eq!(
+        h.v3(&layer, "transform:position"),
+        layer_pos,
+        "the layer stays"
+    );
+}
