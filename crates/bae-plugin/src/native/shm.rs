@@ -183,8 +183,8 @@ mod platform {
     impl Shm {
         pub(crate) fn create(len: usize) -> io::Result<Self> {
             let name = format!(r"Local\betterAfterEffects-{}", uuid::Uuid::new_v4());
-            // SAFETY: a pagefile-backed section, default security, live UTF-16 name.
             let wide_name = wide(&name);
+            // SAFETY: a pagefile-backed section, default security, live UTF-16 name.
             let raw = unsafe {
                 CreateFileMappingW(
                     INVALID_HANDLE_VALUE,
@@ -200,6 +200,7 @@ mod platform {
             }
             // SAFETY: successful CreateFileMappingW gives us an owned handle.
             let section = unsafe { OwnedHandle::from_raw_handle(raw) };
+            // SAFETY: reads this thread's result from CreateFileMappingW.
             if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
                 return Err(io::ErrorKind::AlreadyExists.into());
             }
@@ -219,8 +220,8 @@ mod platform {
 
     impl ShmSpec {
         pub(crate) fn open(&self) -> io::Result<Mapping> {
-            // SAFETY: the name is NUL-terminated and valid for the call.
             let wide_name = wide(&self.name);
+            // SAFETY: the name is NUL-terminated and valid for the call.
             let raw = unsafe { OpenFileMappingW(FILE_MAP_WRITE, 0, wide_name.as_ptr()) };
             if raw.is_null() {
                 return Err(io::Error::last_os_error());
