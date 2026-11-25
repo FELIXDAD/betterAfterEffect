@@ -21,6 +21,14 @@ pub(super) fn at_size(out: &mut Vec<Case>, size: [u32; 2], tag: &str) {
 }
 
 pub(super) fn spatial(out: &mut Vec<Case>) {
+    for radius in [20., 400.] {
+        out.push(Case {
+            name: format!("1080p compound blur {radius}"),
+            match_name: "ADBE Compound Blur",
+            params: vec![(2, Value::Float(radius))],
+            size: HD,
+        });
+    }
     for (effect, params) in [
         ("ADBE Motion Blur", vec![(2, Value::Float(100.0))]),
         ("ADBE Radial Blur", vec![(1, Value::Float(25.0))]),

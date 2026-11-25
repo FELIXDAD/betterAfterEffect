@@ -77,12 +77,22 @@ pub(super) fn hit_layer(
     view: &View,
     pos: Pos2,
 ) -> Option<PrimPath> {
+    layers_at(stage, comp, view, pos).next()
+}
+
+/// The unlocked layers under `pos`, topmost first.
+pub(super) fn layers_at<'a>(
+    stage: &'a bae_model::Stage,
+    comp: &'a EvaluatedComp,
+    view: &'a View,
+    pos: Pos2,
+) -> impl Iterator<Item = PrimPath> + 'a {
     let outer = Affine::new(DMat4::IDENTITY);
     comp.layers
         .iter()
         .filter(|l| l.visible && !l.switches.guide || l.kind == bae_model::LayerKind::Null)
         .filter(|l| !query::is_locked(stage, &l.path))
-        .find(|l| {
+        .filter(move |l| {
             render::bounds_quad(l, view, &outer).is_some_and(|q| render::quad_contains(&q, pos))
         })
         .map(|l| l.path.clone())

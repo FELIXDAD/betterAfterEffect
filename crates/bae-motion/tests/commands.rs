@@ -1896,3 +1896,63 @@ fn set_track_matte_sets_type_source_and_hides_the_matte() {
         .is_err()
     );
 }
+
+#[test]
+fn text_animators_animate_add_selector_and_remove() {
+    use bae_motion::text_animators::{animators_of, selectors_of};
+    let mut fx = Fx::new();
+    let comp = fx.comp();
+    let text = fx.layer(&comp, "text", json!({"text": "Hello"}));
+    // Animate Text > Position: a new animator with a Range Selector and Position.
+    let out = fx.run(
+        "text.animate",
+        json!({"layers": [text], "property": "position"}),
+    );
+    let a1 = p(out["animators"][0].as_str().unwrap());
+    assert_eq!(animators_of(&fx.stage, &text), vec![a1.clone()]);
+    assert_eq!(selectors_of(&fx.stage, &a1).len(), 1);
+    assert!(query::attr_spec(&fx.stage, &a1, "animator:position").is_some());
+    assert!(
+        query::attr_spec(&fx.stage, &a1, "animator:scale").is_none(),
+        "only what was added"
+    );
+    // Again: a second animator. Fill Color comes in red (AE).
+    fx.run(
+        "text.animate",
+        json!({"layers": [text], "property": "fill_rgb"}),
+    );
+    let all = animators_of(&fx.stage, &text);
+    assert_eq!(all.len(), 2);
+    assert_eq!(
+        fx.value(&all[1], "animator:fill_color"),
+        Some(Value::Color([1.0, 0.0, 0.0, 1.0]))
+    );
+    // The first animator's Add menu: Scale; Add > Selector > Range.
+    fx.run("text.animate", json!({"animator": a1, "property": "scale"}));
+    assert!(query::attr_spec(&fx.stage, &a1, "animator:scale").is_some());
+    fx.run("text.add_selector", json!({"animator": a1}));
+    assert_eq!(selectors_of(&fx.stage, &a1).len(), 2);
+    assert!(
+        fx.try_run(
+            "text.add_selector",
+            json!({"animator": a1, "selector": "wiggly"})
+        )
+        .is_err()
+    );
+    // Remove All Text Animators; each command is one undo step.
+    fx.run("text.remove_animators", json!({"layers": [text]}));
+    assert!(animators_of(&fx.stage, &text).is_empty());
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(animators_of(&fx.stage, &text).len(), 2);
+    fx.stage.undo(&fx.author).unwrap();
+    assert_eq!(selectors_of(&fx.stage, &a1).len(), 1);
+    // Not a text layer.
+    let solid = fx.layer(&comp, "solid", json!({}));
+    assert!(
+        fx.try_run(
+            "text.animate",
+            json!({"layers": [solid], "property": "position"})
+        )
+        .is_err()
+    );
+}

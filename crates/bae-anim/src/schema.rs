@@ -22,6 +22,8 @@ pub mod comp {
     pub const SHUTTER_ANGLE: &str = "shutter_angle";
     pub const SHUTTER_PHASE: &str = "shutter_phase";
     pub const MOTION_BLUR_SAMPLES: &str = "motion_blur_samples";
+    /// Adaptive Sample Limit: the most samples a 2D layer gets (16–256).
+    pub const MOTION_BLUR_ADAPTIVE_LIMIT: &str = "motion_blur_adaptive_limit";
     pub const PRESERVE_FRAME_RATE: &str = "preserve_frame_rate";
     /// Child folder holding the layers; first child = AE layer 1 (top).
     pub const LAYERS: &str = "layers";
@@ -203,6 +205,7 @@ mod tests {
                 c::SHUTTER_ANGLE,
                 c::SHUTTER_PHASE,
                 c::MOTION_BLUR_SAMPLES,
+                c::MOTION_BLUR_ADAPTIVE_LIMIT,
                 c::PRESERVE_FRAME_RATE,
             ],
         );

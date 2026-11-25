@@ -32,7 +32,9 @@ pub(super) mod matte;
 pub(super) mod noise_grain;
 pub(super) mod perspective;
 pub(super) mod stylize;
+pub(super) mod time;
 pub(super) mod transition;
+pub(super) mod utility;
 
 impl Embedded {
     fn register(&self, out: &mut Vec<Builtin>) -> Result<(), Vec<Diagnostic>> {

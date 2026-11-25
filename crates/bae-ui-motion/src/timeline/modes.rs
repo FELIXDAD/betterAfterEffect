@@ -19,11 +19,12 @@ pub(crate) struct Panes {
     pub parent: bool,
 }
 
+/// AE's Timeline starts with Switches and Parent & Link; F4 swaps in Modes.
 impl Default for Panes {
     fn default() -> Self {
         Panes {
             switches: true,
-            modes: true,
+            modes: false,
             parent: true,
         }
     }

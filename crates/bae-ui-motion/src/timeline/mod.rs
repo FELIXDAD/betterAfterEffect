@@ -47,26 +47,30 @@ pub(crate) use markers::MarkerDialog;
 pub(crate) use markers::parse_timecode;
 pub(crate) use menus::keys_with_labels;
 #[cfg(test)]
+pub(crate) use menus::{Related, catalog_entry, rove_state, select_label_group, select_related};
 pub(crate) use menus::{
-    LAYER_MENU, Related, catalog_entry, invert_layer_selection, rove_state, select_children,
-    select_label_group, select_related,
+    catalog_node, catalog_nodes, invert_layer_selection, key_menu, keyframe_menu, select_children,
 };
-pub(crate) use menus::{key_menu, keyframe_menu};
 #[cfg(test)]
 pub(crate) use modes::{Panes, flip_matte};
 
-const ROW_H: f32 = 19.0;
+/// Row height and switch cell width: AE 26's (17 and about 15 points).
+const ROW_H: f32 = 17.0;
 const TABS_H: f32 = 22.0;
 const HEAD_H: f32 = 34.0;
 const COLS_H: f32 = 20.0;
 const FOOT_H: f32 = 22.0;
-const SW: f32 = 18.0;
+const SW: f32 = 15.0;
+/// Left inset of the Parent & Link title and pick whip.
+const PARENT_PAD: f32 = 6.0;
 /// Left padding of the time graph so frame 0 is not on the edge.
 const PAD: f32 = 8.0;
 
 /// Outline column x offsets (relative to the panel's left edge).
 struct Cols {
     av: f32,
+    /// The layer's expand arrow (AE: between the A/V switches and the label).
+    twirl: f32,
     label: f32,
     index: f32,
     name: f32,
@@ -100,17 +104,22 @@ impl Cols {
     }
 
     fn layout(panes: modes::Panes) -> Cols {
-        let av = 4.0;
-        let label = av + 4.0 * SW + 4.0;
+        // Positions measured on AE 26's Timeline (points from the panel's left).
+        let av = 5.0;
+        let twirl = av + 4.0 * SW + 4.0;
+        let label = twirl + 15.0;
         let index = label + 18.0;
-        let name = index + 26.0;
-        let switches = name + 150.0;
+        let name = index + 28.0;
+        let switches = name + 138.0;
         let shown = |on: bool, w: f32| if on { w } else { 0.0 };
-        let modes = switches + shown(panes.switches, 8.0 * SW + 6.0);
+        // AE's eight switches: Shy, Collapse, Quality, fx, Frame Blending, Motion
+        // Blur, Adjustment Layer, 3D Layer.
+        let modes = switches + shown(panes.switches, 8.0 * SW + 14.0);
         let parent = modes + shown(panes.modes, modes::MODES_W);
-        let end = parent + shown(panes.parent, 128.0);
+        let end = parent + shown(panes.parent, 120.0);
         Cols {
             av,
+            twirl,
             label,
             index,
             name,
@@ -453,6 +462,11 @@ impl TimelinePanel {
     }
 
     #[cfg(test)]
+    pub(crate) fn expanded_layer(&self, layer: &PrimPath) -> bool {
+        self.expanded.contains(layer.as_str())
+    }
+
+    #[cfg(test)]
     pub(crate) fn start_rename(&mut self, layer: PrimPath, text: &str) {
         self.rename = Some((layer, text.to_owned()));
     }
@@ -614,11 +628,10 @@ impl Panel for TimelinePanel {
                 s.selected_layers.clear();
                 s.selected_props.clear();
             }
-            // Right-click on empty space: New ▸ (as Layer ▸ New).
+            // Right-click on empty space: AE 26's comp menu (New ▸, Composition
+            // Settings, Preview ▸ …).
             crate::common::context_menu(&bg, &mut |ui| {
-                if let Some(n) = menus::catalog_entry("Layer", "New") {
-                    menus::catalog_node(ui, cx, n);
-                }
+                crate::context_menu::show(ui, cx, crate::context_menu::TIMELINE_BLANK);
             });
             // Dropped project items.
             if let Some(item) = bg.dnd_release_payload::<ItemDrag>() {
@@ -633,6 +646,8 @@ impl Panel for TimelinePanel {
             .id_salt("timeline_rows")
             .auto_shrink([false, false])
             .show_rows(&mut child, ROW_H, rows.len(), |ui, range| {
+                // Rows touch, as in AE (a 1-point line between them).
+                ui.spacing_mut().item_spacing.y = 0.0;
                 for i in range {
                     let row = &rows[i];
                     let (rect, _) =

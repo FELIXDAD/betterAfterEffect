@@ -3,17 +3,18 @@
 
 #![allow(dead_code)]
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use bae_effects::Standalone;
 use bae_gpu::GpuContext;
 use bae_gpu::wgpu;
-use bae_model::{PrimPath, Value};
-use bae_render::{EffectParams, IRect, ImageAlpha, RenderEffect};
+use bae_model::{PrimPath, Time, Value};
+use bae_render::{EffectParams, GpuImage, IRect, ImageAlpha, RenderEffect, effect::MaskSelect};
 
 use crate::categories::{self, Pixel, Probe};
 
 pub const SIZE: [u32; 2] = [256, 128];
+const INPUT_LAYER: &str = "/comps/ae/layers/input";
 
 /// One comparison case.
 #[derive(Clone, Debug)]
@@ -24,6 +25,9 @@ pub struct Case {
     pub effect: String,
     pub time: f64,
     pub params: Vec<(u32, Value)>,
+    pub frames: Vec<String>,
+    pub layers: BTreeMap<String, String>,
+    pub masks: Vec<[u32; 4]>,
     /// Allowed max per-channel difference (8-bit levels).
     pub tolerance: u8,
     /// Allowed mean difference (8-bit levels).
@@ -65,7 +69,7 @@ pub fn parse_cases(text: &str) -> Vec<Case> {
 fn parse_rows(rows: &[serde_json::Value]) -> Vec<Case> {
     rows.iter()
         .map(|c| {
-            let params = c["params"]
+            let mut params: Vec<_> = c["params"]
                 .as_object()
                 .unwrap()
                 .iter()
@@ -81,11 +85,28 @@ fn parse_rows(rows: &[serde_json::Value]) -> Vec<Case> {
                                 _ => panic!("invalid AE array parameter {id}: {n:?}"),
                             }
                         }
+                        serde_json::Value::Object(reference) => {
+                            let path = if let Some(layer) = reference.get("layer") {
+                                format!("/comps/ae/layers/{}", layer.as_str().unwrap())
+                            } else {
+                                format!(
+                                    "{INPUT_LAYER}/masks/{}",
+                                    reference["mask"].as_u64().unwrap()
+                                )
+                            };
+                            Value::PrimRef(PrimPath::new(&path).unwrap())
+                        }
                         other => Value::Float(other.as_f64().unwrap()),
                     };
                     (id, value)
                 })
                 .collect();
+            if let Some(file) = c["lut"].as_str() {
+                let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../bae-color/tests/data/ocio")
+                    .join(file);
+                params.push((1, Value::Bytes(bae_color::lutfile::embed(&path).unwrap())));
+            }
             Case {
                 name: c["name"].as_str().unwrap().to_owned(),
                 bpc: c["bpc"].as_u64().unwrap_or(8),
@@ -93,6 +114,15 @@ fn parse_rows(rows: &[serde_json::Value]) -> Vec<Case> {
                 effect: c["effect"].as_str().unwrap().to_owned(),
                 time: c["time"].as_f64().unwrap_or(0.0),
                 params,
+                frames: c
+                    .get("frames")
+                    .map_or_else(Vec::new, |v| serde_json::from_value(v.clone()).unwrap()),
+                layers: c.get("layers").map_or_else(BTreeMap::new, |v| {
+                    serde_json::from_value(v.clone()).unwrap()
+                }),
+                masks: c
+                    .get("masks")
+                    .map_or_else(Vec::new, |v| serde_json::from_value(v.clone()).unwrap()),
                 tolerance: c["tolerance"].as_u64().unwrap_or(2) as u8,
                 mean: c["mean"].as_f64().unwrap_or(0.5),
             }
@@ -180,16 +210,8 @@ pub fn render(gpu: &Arc<GpuContext>, case: &Case) -> Vec<[u8; 4]> {
     render_pixels(gpu, case, &input(&case.input))
 }
 
-pub fn render_pixels(gpu: &Arc<GpuContext>, case: &Case, pixels: &[[u8; 4]]) -> Vec<[u8; 4]> {
-    let fx =
-        bae_effects::get(&case.effect).unwrap_or_else(|| panic!("no built-in {}", case.effect));
-    let [w, h] = SIZE;
+fn image(gpu: &GpuContext, [w, h]: [u32; 2], pixels: &[[u8; 4]], straight: bool) -> GpuImage {
     let rect = IRect::from_size(w, h);
-    // These channel effects can reveal the original RGB of transparent
-    // texels. A straight source keeps that data available, as the AE input does.
-    let straight = categories::ALL
-        .iter()
-        .any(|suite| suite.straight_inputs.contains(&case.effect.as_str()));
     assert_eq!(pixels.len(), (w * h) as usize);
     let data: Vec<u8> = pixels
         .iter()
@@ -226,7 +248,7 @@ pub fn render_pixels(gpu: &Arc<GpuContext>, case: &Case, pixels: &[[u8; 4]]) -> 
         &data,
     )
     .unwrap();
-    let image = Standalone::image(
+    Standalone::image(
         texture,
         rect,
         if straight {
@@ -234,22 +256,106 @@ pub fn render_pixels(gpu: &Arc<GpuContext>, case: &Case, pixels: &[[u8; 4]]) -> 
         } else {
             ImageAlpha::Premultiplied
         },
-    );
+    )
+}
+
+pub fn render_pixels(gpu: &Arc<GpuContext>, case: &Case, pixels: &[[u8; 4]]) -> Vec<[u8; 4]> {
+    render_with_maps(gpu, case, pixels, |probe| (SIZE, input(probe)))
+}
+
+pub fn render_with_maps(
+    gpu: &Arc<GpuContext>,
+    case: &Case,
+    pixels: &[[u8; 4]],
+    load: impl Fn(&str) -> PngImage,
+) -> Vec<[u8; 4]> {
+    let fx =
+        bae_effects::get(&case.effect).unwrap_or_else(|| panic!("no built-in {}", case.effect));
+    let [w, h] = SIZE;
+    let rect = IRect::from_size(w, h);
+    // Keep RGB under transparent texels for effects that can reveal it.
+    let straight = categories::ALL
+        .iter()
+        .any(|suite| suite.straight_inputs.contains(&case.effect.as_str()));
+    let timeline;
+    let pixels = if case.frames.is_empty() {
+        pixels
+    } else {
+        timeline = load(frame_input(case, Time::from_seconds(case.time)).unwrap()).1;
+        &timeline
+    };
+    let masked;
+    let pixels = if case.masks.is_empty() {
+        pixels
+    } else {
+        masked = pixels
+            .iter()
+            .enumerate()
+            .map(|(i, &p)| {
+                if covered(&case.masks, i as u32 % w, i as u32 / w) {
+                    p
+                } else {
+                    [0; 4]
+                }
+            })
+            .collect::<Vec<_>>();
+        &masked
+    };
+    let source = image(gpu, SIZE, pixels, straight);
     let inst = RenderEffect {
-        path: PrimPath::new("/comps/ae/layers/input/effects/fx").unwrap(),
+        path: PrimPath::new(&format!("{INPUT_LAYER}/effects/fx")).unwrap(),
         effect: case.effect.clone(),
         enabled: true,
         params: case.params.clone(),
     };
+    let time = Time::from_seconds(case.time);
     let p = EffectParams {
-        time: bae_model::Time::from_seconds(case.time),
+        time,
+        comp_time: time,
         scale: 1.0,
         float: case.bpc == 32,
         sixteen_bpc: case.bpc == 16,
         ..EffectParams::new(&inst)
     };
     let mut target = Standalone::new(gpu.clone(), wgpu::TextureFormat::Rgba32Float);
-    let out = fx.render(&mut target, &p, &image, rect).unwrap();
+    if !case.layers.is_empty() || !case.masks.is_empty() || !case.frames.is_empty() {
+        let effect = fx.effect();
+        let layers = effect
+            .layer_dependencies(&p)
+            .into_iter()
+            .filter_map(|dep| {
+                let name = dep.layer.name();
+                let probe = if dep.layer.as_str() == INPUT_LAYER && !case.frames.is_empty() {
+                    frame_input(case, dep.time)?
+                } else {
+                    case.layers.get(name)?.as_str()
+                };
+                let (size, pixels) = load(probe);
+                Some((dep, image(gpu, size, &pixels, true)))
+            })
+            .collect();
+        let masks = effect
+            .mask_dependencies(&p)
+            .into_iter()
+            .map(|select| {
+                let rects = match &select {
+                    MaskSelect::All => case.masks.as_slice(),
+                    MaskSelect::One(path) => {
+                        let i = path.name().parse::<usize>().unwrap() - 1;
+                        &case.masks[i..=i]
+                    }
+                };
+                let pixels: Vec<_> = (0..h)
+                    .flat_map(|y| {
+                        (0..w).map(move |x| [if covered(rects, x, y) { 255 } else { 0 }; 4])
+                    })
+                    .collect();
+                (select, image(gpu, SIZE, &pixels, false))
+            })
+            .collect();
+        target.set_effect_inputs(layers, masks);
+    }
+    let out = fx.render(&mut target, &p, &source, rect).unwrap();
     target.finish().unwrap();
     let back = bae_gpu::transfer::read_texture(gpu, &out.texture).unwrap();
     let mut px = vec![[0u8; 4]; (w * h) as usize];
@@ -271,6 +377,19 @@ pub fn render_pixels(gpu: &Arc<GpuContext>, case: &Case, pixels: &[[u8; 4]]) -> 
         }
     }
     px
+}
+
+fn frame_input(case: &Case, time: Time) -> Option<&str> {
+    let index = bae_model::FrameRate::FPS_30.time_to_frame(time);
+    case.frames
+        .get(usize::try_from(index).ok()?)
+        .map(String::as_str)
+}
+
+fn covered(rects: &[[u32; 4]], x: u32, y: u32) -> bool {
+    rects
+        .iter()
+        .any(|&[x0, y0, x1, y1]| (x0..x1).contains(&x) && (y0..y1).contains(&y))
 }
 
 /// Max and mean absolute difference, and pixels differing by more than 1 / 3.
@@ -298,6 +417,12 @@ pub fn write_png(path: &std::path::Path, px: &[[u8; 4]]) {
 }
 
 pub fn read_png(path: &std::path::Path, bpc: u64) -> Option<Vec<[u8; 4]>> {
+    read_image(path, bpc).map(|(_, pixels)| pixels)
+}
+
+pub type PngImage = ([u32; 2], Vec<[u8; 4]>);
+
+pub fn read_image(path: &std::path::Path, bpc: u64) -> Option<PngImage> {
     let decoder = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).ok()?));
     let mut reader = decoder.read_info().ok()?;
     let mut buf = vec![0; reader.output_buffer_size()?];
@@ -306,7 +431,7 @@ pub fn read_png(path: &std::path::Path, bpc: u64) -> Option<Vec<[u8; 4]>> {
         return None;
     }
     let data = &buf[..info.buffer_size()];
-    match info.bit_depth {
+    let pixels = match info.bit_depth {
         png::BitDepth::Eight => Some(data.as_chunks::<4>().0.to_vec()),
         png::BitDepth::Sixteen => Some(
             data.as_chunks::<8>()
@@ -324,5 +449,6 @@ pub fn read_png(path: &std::path::Path, bpc: u64) -> Option<Vec<[u8; 4]>> {
                 .collect(),
         ),
         _ => None,
-    }
+    }?;
+    Some(([info.width, info.height], pixels))
 }

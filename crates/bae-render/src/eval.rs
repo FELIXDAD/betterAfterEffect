@@ -39,6 +39,21 @@ use crate::input::{
 };
 use crate::request::RenderPurpose;
 
+/// Other frames of a comp for effects that read them, from an evaluator and
+/// the stage ([`crate::Renderer::render_frame_with`]).
+pub struct EvaluatorFrames<'a> {
+    /// The stage.
+    pub stage: &'a Stage,
+    /// The evaluator.
+    pub evaluator: &'a mut dyn CompEvaluator,
+}
+
+impl crate::graph::CompFrames for EvaluatorFrames<'_> {
+    fn comp_at(&mut self, comp: &PrimPath, time: Time) -> Result<Option<RenderComp>, RenderError> {
+        self.evaluator.evaluate(self.stage, comp, time).map(Some)
+    }
+}
+
 /// Produces evaluated comps. Implemented by [`MockEvaluator`] and by
 /// [`crate::anim::AnimEvaluator`] (the adapter over 03's `bae-anim`).
 ///
@@ -191,6 +206,7 @@ impl<'a> MockPass<'a> {
 
             let mut out = RenderLayer::new(layer.path().clone(), LayerContent::None);
             out.time = local;
+            out.time_scale = if stretch == 0.0 { 1.0 } else { stretch / 100.0 };
             out.active = in_point <= time && time < out_point && solo_ok && guide_ok;
             out.visible = boolean(layer, "enabled", local).unwrap_or(true);
             out.adjustment =

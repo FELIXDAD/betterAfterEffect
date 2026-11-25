@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use bae_gpu::wgpu;
-use bae_model::{EffectDef, PrimPath, Value};
+use bae_model::EffectDef;
 use bae_render::effect::LayerDependency;
 use bae_render::{Effect, EffectParams, EncodeContext, GpuImage, IRect, RenderError};
 
@@ -13,7 +13,7 @@ use crate::params::Params;
 use crate::target::{EffectTarget, TargetEffect};
 use crate::{Builtin, rust_builtin};
 
-use super::image_grid;
+use super::{image_grid, layer_input};
 
 const MATCH_NAME: &str = "ADBE Set Matte3";
 const LABEL: &str = "bae.effects.set_matte";
@@ -25,6 +25,7 @@ struct SetMatte(EffectDef);
 pub(crate) fn builtin() -> Builtin {
     let (def, zh) = DefBuilder::new(MATCH_NAME, "Set Matte", "Channel")
         .layer(1, "Take Matte From Layer", "从图层获取遮罩")
+        .layer_stage(1)
         .popup(
             2,
             "Use For Matte",
@@ -61,16 +62,6 @@ pub(crate) fn builtin() -> Builtin {
     )
 }
 
-fn source_layer(params: &EffectParams<'_>) -> Option<PrimPath> {
-    match params.value(1) {
-        Some(Value::PrimRef(layer)) => Some(layer.clone()),
-        // A new effect defaults to its own layer; sample the source before
-        // effects. Some standalone fixtures don't have a separate source.
-        None => params.effect.path.parent()?.parent(),
-        _ => None,
-    }
-}
-
 pub(super) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
     image_grid::kernel(rt, format, LABEL, SOURCE, UNIFORM_SIZE)?;
     Ok(())
@@ -82,12 +73,8 @@ impl Effect for SetMatte {
     }
 
     fn layer_dependencies(&self, params: &EffectParams<'_>) -> Vec<LayerDependency> {
-        source_layer(params)
+        layer_input::dependency(params, 1, true)
             .into_iter()
-            .map(|layer| LayerDependency {
-                layer,
-                time: params.comp_time,
-            })
             .collect()
     }
 
@@ -110,10 +97,10 @@ impl TargetEffect for SetMatte {
         input: &GpuImage,
         roi: IRect,
     ) -> Result<GpuImage, RenderError> {
-        let Some(layer) = source_layer(params) else {
+        let Some(dependency) = layer_input::dependency(params, 1, true) else {
             return Ok(input.clone());
         };
-        let matte = match target.effect_input(&layer) {
+        let matte = match target.effect_layer(&dependency) {
             Some(image) => image,
             None if params.layer_bounds.is_empty() && params.value(1).is_none() => input,
             None => return Ok(input.clone()),

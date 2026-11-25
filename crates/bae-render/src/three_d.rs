@@ -269,8 +269,12 @@ pub struct Fragment {
     /// Index into the plates given to [`depth_order`].
     pub item: usize,
     /// Half-planes `a·x + b·y + c ≥ 0` in the layer's space (`(a, b)` unit
-    /// length, so the value is a distance in layer pixels) the piece is cut to.
-    pub clips: Vec<[f64; 3]>,
+    /// length, so the value is a distance in layer pixels) the piece is cut to,
+    /// and in `[3]` how far (target pixels) its coverage reaches past the cut:
+    /// the piece drawn first reaches one pixel under the piece drawn over it,
+    /// which alone anti-aliases the cut, so a cut never leaves a see-through
+    /// seam.
+    pub clips: Vec<[f64; 4]>,
 }
 
 /// Distance below which a point counts as on a plane (comp pixels).
@@ -285,7 +289,7 @@ pub const TIE_DEPTH: f64 = 1.0;
 struct Poly {
     item: usize,
     points: Vec<DVec3>,
-    clips: Vec<[f64; 3]>,
+    clips: Vec<[f64; 4]>,
 }
 
 struct Node {
@@ -401,7 +405,7 @@ fn build(
                     continue;
                 }
                 *budget -= 1;
-                let (f, b) = split(poly, &d, normal, offset, plates);
+                let (f, b) = split(poly, &d, normal, offset, plates, towards_eye);
                 front.extend(f);
                 back.extend(b);
             }
@@ -413,13 +417,16 @@ fn build(
 }
 
 /// Splits `poly` (signed distances `d` to the plane) into its front and back
-/// pieces, each with the plane's trace as a new half-plane in layer space.
+/// pieces, each with the plane's trace as a new half-plane in layer space. The
+/// piece on the far side from the eye (`towards_eye`: the eye's side) is drawn
+/// first and reaches under the cut.
 fn split(
     poly: Poly,
     d: &[f64],
     normal: DVec3,
     offset: f64,
     plates: &[Plate],
+    towards_eye: f64,
 ) -> (Option<Poly>, Option<Poly>) {
     let m = plates[poly.item].matrix;
     // The plane's trace on the layer: n · (M · (x, y, 0, 1)) + offset.
@@ -460,7 +467,12 @@ fn split(
     let piece = |points: Vec<DVec3>, sign: f64| {
         (points.len() >= 3).then(|| {
             let mut clips = poly.clips.clone();
-            clips.push((line * sign).to_array());
+            let first = sign * towards_eye < 0.0;
+            clips.push(
+                (line * sign)
+                    .extend(if first { 1.0 } else { 0.0 })
+                    .to_array(),
+            );
             Poly {
                 item: poly.item,
                 points,
@@ -663,7 +675,7 @@ mod tests {
         let cut: Vec<&Fragment> = order.iter().filter(|f| f.item == 1).collect();
         assert_eq!(cut.len(), 2);
         for f in &cut {
-            let [a, b, c] = f.clips[0];
+            let [a, b, c, _] = f.clips[0];
             assert!((b.abs()) < 1e-9 && (a.abs() - 1.0).abs() < 1e-9);
             let x = -c / a;
             assert!(

@@ -1297,15 +1297,6 @@ fn rove_across_time_needs_inner_spatial_keyframes() {
 
 #[test]
 fn layer_menu_entries_come_from_the_command_catalog() {
-    for (top, title) in crate::timeline::LAYER_MENU {
-        if top.is_empty() {
-            continue;
-        }
-        assert!(
-            crate::timeline::catalog_entry(top, title).is_some(),
-            "{top} ▸ {title} is not in the command catalog"
-        );
-    }
     for (top, title) in [
         ("Edit", "Select Keyframe Label Group"),
         ("Animation", "Track Camera"),
@@ -1690,6 +1681,79 @@ fn dragging_the_pale_source_bar_slip_edits() {
 }
 
 #[test]
+fn animate_text_adds_an_animator_that_the_timeline_shows() {
+    use crate::actions::ids;
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let text = path(
+        &h.run(
+            "layer.create",
+            json!({"comp": comp, "kind": "text", "text": "Hi"}),
+        )["path"],
+    );
+    h.session().lock().selected_layers = vec![text.clone()];
+    let mut tl = h.bars();
+    h.session().lock().selected_layers = vec![text.clone()];
+    // Animation > Animate Text > Position: one command, one undo step.
+    let r = h.action(
+        &mut tl,
+        Invocation::with_params(ids::ANIMATE_TEXT, json!({"property": "position"})),
+    );
+    assert_eq!(r.invocations.len(), 1);
+    assert_eq!(r.invocations[0].id, "text.animate");
+    h.apply(&r);
+    // Text > Animator 1 > Range Selector 1 (Start, End, Offset, Advanced), Position.
+    fn labels(nodes: &[crate::props::Node], out: &mut Vec<String>) {
+        for n in nodes {
+            match n {
+                crate::props::Node::Group {
+                    label, children, ..
+                } => {
+                    out.push(label.clone());
+                    labels(children, out);
+                }
+                crate::props::Node::Prop { label, .. } => out.push(label.clone()),
+            }
+        }
+    }
+    let mut got = Vec::new();
+    labels(&crate::props::layer_tree(&h.stage, &text), &mut got);
+    for want in [
+        "Animator 1",
+        "Range Selector 1",
+        "Start",
+        "Advanced",
+        "Based On",
+        "Ease Low",
+        "Position",
+    ] {
+        assert!(got.iter().any(|g| g == want), "{want} in {got:?}");
+    }
+    assert!(
+        !got.iter().any(|g| g == "Fill Color"),
+        "only what was added"
+    );
+    // Add Text Selector and Remove All Text Animators act on the selected text layer.
+    h.apply(&h.action(&mut tl, Invocation::new(ids::ADD_TEXT_SELECTOR)));
+    let a = bae_motion::text_animators::animators_of(&h.stage, &text);
+    assert_eq!(
+        bae_motion::text_animators::selectors_of(&h.stage, &a[0]).len(),
+        2
+    );
+    h.apply(&h.action(&mut tl, Invocation::new(ids::REMOVE_ALL_TEXT_ANIMATORS)));
+    assert!(bae_motion::text_animators::animators_of(&h.stage, &text).is_empty());
+    // The catalog greys what does not render yet.
+    let animate = |p: &str| {
+        crate::catalog::menu_items()
+            .into_iter()
+            .find(|(_, it)| it.action == ids::ANIMATE_TEXT && it.params.contains(p))
+            .map(|(_, it)| it.status.works())
+    };
+    assert_eq!(animate("\"position\""), Some(true));
+    assert_eq!(animate("\"skew\""), Some(false));
+}
+
+#[test]
 fn blending_mode_menu_sets_and_steps_the_selected_layers() {
     use crate::actions::ids;
     let mut h = H::new();
@@ -1737,6 +1801,15 @@ fn blending_mode_menu_sets_and_steps_the_selected_layers() {
     assert_eq!(mode(&h, &a), Some(Value::Enum("luminescent_premul".into())));
 }
 
+/// F4: the Modes column instead of Switches (AE starts with Switches).
+fn show_modes(h: &mut H, tl: &mut TimelinePanel) {
+    h.action(
+        tl,
+        Invocation::new(crate::actions::ids::TOGGLE_SWITCHES_MODES),
+    );
+    h.frame(tl, Vec::new(), Modifiers::NONE);
+}
+
 fn modes_cell(tl: &TimelinePanel, l: &PrimPath) -> (Rect, Pos2, Pos2) {
     tl.last_modes
         .iter()
@@ -1750,10 +1823,8 @@ fn f4_alternates_switches_and_modes() {
     let mut h = H::new();
     let mut tl = h.bars();
     let p = |tl: &TimelinePanel| (tl.panes().switches, tl.panes().modes);
-    assert_eq!(p(&tl), (true, true), "both by default");
+    assert_eq!(p(&tl), (true, false), "AE starts with Switches");
     let f4 = || Invocation::new(crate::actions::ids::TOGGLE_SWITCHES_MODES);
-    h.action(&mut tl, f4());
-    assert_eq!(p(&tl), (true, false));
     h.action(&mut tl, f4());
     assert_eq!(p(&tl), (false, true));
     h.action(&mut tl, f4());
@@ -1779,6 +1850,7 @@ fn hide_shy_layers_switch_hides_shy_layers_from_the_timeline() {
         json!({"path": shy, "attr": "shy", "value": {"type": "bool", "value": true}}),
     );
     let mut tl = h.bars();
+    show_modes(&mut h, &mut tl);
     let drawn = |tl: &TimelinePanel| tl.last_modes.len();
     assert_eq!(drawn(&tl), 2);
     // The comp switch three left of the Graph Editor switch (AE order).
@@ -1800,6 +1872,7 @@ fn modes_column_t_switch_and_track_matte_pick_whip() {
     let fill = h.layer.clone();
     let matte = path(&h.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"]);
     let mut tl = h.bars();
+    show_modes(&mut h, &mut tl);
     let attr = |h: &H, l: &PrimPath, a: &str| query::static_value(&h.stage.prim(l).unwrap(), a);
     // T: Preserve Underlying Transparency.
     let (t, ..) = modes_cell(&tl, &fill);
@@ -2028,4 +2101,39 @@ fn comp_switches_and_layer_switches_reach_the_render_request() {
     assert!(request(&h).motion_blur.is_some());
     h.undo();
     assert!(request(&h).motion_blur.is_none());
+}
+
+#[test]
+fn outline_follows_ae_metrics() {
+    // Positions measured on AE 26's Timeline: the Shy switch at x 275, the
+    // expand arrow at x 76 (left of the label), rows 17 points apart.
+    let mut h = H::new();
+    let comp = h.comp.clone();
+    let solid = h.layer.clone();
+    let other = path(&h.run("layer.create", json!({"comp": comp, "kind": "solid"}))["path"]);
+    let mut tl = h.bars();
+    let bar = |tl: &TimelinePanel, l: &PrimPath| {
+        tl.last_bars
+            .iter()
+            .find(|(p, _)| p == l)
+            .map(|(_, r)| r.center().y)
+            .unwrap()
+    };
+    assert_eq!((bar(&tl, &solid) - bar(&tl, &other)).abs(), 17.0);
+    let y = bar(&tl, &solid);
+    let r = h.click(&mut tl, pos2(275.0, y), Modifiers::NONE);
+    h.apply(&r);
+    let shy = query::static_value(&h.stage.prim(&solid).unwrap(), "shy");
+    assert_eq!(shy.and_then(|v| v.as_bool()), Some(true));
+    h.session().lock().reveal.clear();
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    let y = bar(&tl, &solid);
+    let rows = tl.last_bars.len();
+    h.click(&mut tl, pos2(76.0, y), Modifiers::NONE);
+    h.frame(&mut tl, Vec::new(), Modifiers::NONE);
+    assert!(
+        tl.expanded_layer(&solid),
+        "the arrow at x 76 expands the layer"
+    );
+    assert_eq!(tl.last_bars.len(), rows);
 }

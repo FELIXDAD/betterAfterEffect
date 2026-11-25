@@ -130,7 +130,8 @@ fn every_command_panel_and_action_has_a_chinese_name() {
             Some(zh)
                 if zh == en
                     && !SAME_IN_CHINESE.contains(&en.as_str())
-                    && !bae_ui_motion::catalog::SAME_IN_CHINESE.contains(&en.as_str()) =>
+                    && !bae_ui_motion::catalog::SAME_IN_CHINESE.contains(&en.as_str())
+                    && !bae_ui_motion::effects::same_in_chinese(en) =>
             {
                 untranslated.push(format!("{source}: {en:?}"));
             }

@@ -3,6 +3,7 @@
 pub(crate) mod choker;
 pub(crate) mod definitions;
 mod pass;
+pub(crate) mod stylize;
 
 use pass::dispatch;
 pub(crate) use pass::prewarm;
@@ -392,6 +393,6 @@ pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static 
         ("ADBE Glo2", 7) => &["原始颜色", "A 和 B 颜色", "任意映射"],
         ("ADBE Glo2", 8) => &["锯齿 A>B", "锯齿 B>A", "三角形 A>B>A", "三角形 B>A>B"],
         ("ADBE Glo2", 14) => &["水平和垂直", "水平", "垂直"],
-        _ => return None,
+        _ => return stylize::options_zh(match_name, param_id),
     })
 }

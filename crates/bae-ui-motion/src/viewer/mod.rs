@@ -24,6 +24,7 @@ use crate::tools::{Tool, ViewRequest};
 
 mod bar;
 mod free_transform;
+mod menu;
 mod motion_path;
 mod overlay;
 mod path_edit;
@@ -75,6 +76,8 @@ pub struct CompositionViewer {
     select: select_tool::SelectState,
     /// Magnification of the last frame (arrow keys nudge by screen pixels).
     mag: f32,
+    /// Layers under the pointer when the context menu opened (topmost first).
+    menu_layers: Vec<PrimPath>,
     /// Pixel step the last frame rendered at (1 Full, 2 Half …).
     render_factor: u32,
     /// Type tool: text being typed or edited.
@@ -226,6 +229,16 @@ fn apply_overrides(
         let three_d = layer.switches.three_d;
         let mut t: Transform = layer.transform;
         let mut touched = false;
+        // A scrubbed effect parameter of this layer (Effect Controls, timeline).
+        if let Some(s) = scrub.filter(|s| s.attr.starts_with("param:"))
+            && crate::effects::layer_of(&s.path).as_ref() == Some(&layer.path)
+            && let Some(e) = layer.effects.iter_mut().find(|e| e.path == s.path)
+        {
+            e.params.insert(
+                s.attr.trim_start_matches("param:").to_owned(),
+                s.value.clone(),
+            );
+        }
         if let Some(s) = scrub.filter(|s| s.path == layer.path) {
             touched = true;
             let v3 = |v: &Value| match v {
@@ -783,9 +796,18 @@ impl Panel for CompositionViewer {
                 }
             }
         }
+        menu::frame(&mut self.menu_layers, &resp, cx, &session, &comp, &view);
+
         // Items dropped from the project panel become layers.
         if let Some(item) = resp.dnd_release_payload::<ItemDrag>() {
             add_item_as_layer(cx, &session, &item.0, pointer.map(|p| view.to_comp(p)));
+        }
+        // An effect dropped on a layer (Effects & Presets) is applied to it.
+        if let Some(fx) = resp.dnd_release_payload::<crate::effects::EffectDrag>()
+            && let Some(p) = pointer
+            && let Some(layer) = select_tool::hit_layer(cx.stage, &comp, &view, p)
+        {
+            crate::effects::apply(cx, &[layer], &fx.0);
         }
 
         bar::bottom_bar(ui, cx, bar, self, &info, time, mag, &session);

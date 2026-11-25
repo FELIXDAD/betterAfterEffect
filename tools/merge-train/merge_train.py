@@ -230,6 +230,25 @@ def pause_file():
     return os.path.join(state_dir(), "PAUSED")
 
 
+def auto_pause_file():
+    """Exists while the queue is paused by a red dev commit (holds that commit). A manual
+    pause (`pause`, or the label put on by a person) has no such marker."""
+    return os.path.join(state_dir(), "AUTO_PAUSED")
+
+
+def auto_paused_sha():
+    try:
+        with open(auto_pause_file(), encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def clear_auto_pause():
+    if os.path.exists(auto_pause_file()):
+        os.remove(auto_pause_file())
+
+
 def red_ack_get():
     """dev commit whose red CI was already handled (paused once, or resumed past)."""
     try:
@@ -468,9 +487,78 @@ def overlap(pr_sha):
     def keep(path, ignore):
         return not any(path == i or (i.endswith("/") and path.startswith(i)) for i in ignore)
 
-    prf = {f for f in prf if keep(f, CFG["merge"]["overlap_ignore_pr"])}
-    devf = {f for f in devf if keep(f, CFG["merge"]["overlap_ignore_dev"])}
-    return sorted(prf & devf)
+    shared = sorted({f for f in prf if keep(f, CFG["merge"]["overlap_ignore_pr"])}
+                    & {f for f in devf if keep(f, CFG["merge"]["overlap_ignore_dev"])})
+    if shared or not devf:
+        return shared  # dev changed nothing since the merge-base: nothing to relate
+    rel = crate_relation(prf, devf)
+    return ["crate " + rel] if rel else []
+
+
+_GRAPH = {}
+
+
+def crate_graph():
+    """Workspace crates of the dev checkout, via tools/ci/affected.py: (members dir→name,
+    deps name→set, member glob roots, exact members, string-literal refs). Cached per
+    dev commit; the runner clone is checked out at origin/dev."""
+    root = repo_git_dir()
+    key = git("rev-parse", "HEAD", cwd=root).strip()
+    if key in _GRAPH:
+        return _GRAPH[key]
+    sys.path.insert(0, os.path.join(root, "tools", "ci"))
+    try:
+        import affected  # noqa: PLC0415 — lives in the checked-out repo, not next to us
+    finally:
+        sys.path.pop(0)
+    from pathlib import Path  # noqa: PLC0415
+    r = Path(root)
+    members, deps = affected.workspace(r)
+    glob_roots, exact = affected.member_globs((r / "Cargo.toml").read_text(encoding="utf-8"))
+    tops = {d.split("/")[0] for d in members}
+    outside = sorted(p.name for p in r.iterdir()
+                     if not p.name.startswith(".") and p.name not in tops and p.name != "target")
+    if "tools" not in outside and (r / "tools").is_dir():
+        outside.append("tools")
+    refs = affected.source_references(r, members, outside)
+    _GRAPH.clear()
+    _GRAPH[key] = (affected, members, deps, glob_roots, exact, refs)
+    return _GRAPH[key]
+
+
+ALL_CRATES = "*"
+
+
+def crates_of(files, graph):
+    """Workspace crates a set of changed files touches (directly). Files that only
+    affect tooling (.github/, Cargo.lock, docs/tools nobody's code reads) touch none;
+    root manifests, toolchain, vendor/ or xtask/ touch every crate (ALL_CRATES)."""
+    affected, members, _deps, glob_roots, exact, refs = graph
+    files = [f for f in files if not f.startswith(".github/") and f != "Cargo.lock"]
+    mode, direct, _ = affected.classify(files, members, glob_roots, exact, refs)
+    return {ALL_CRATES} if mode == "full" else set(direct)
+
+
+def crate_relation(files_a, files_b):
+    """A short description if the crates the two file sets touch are the same or depend
+    on each other (either direction, transitively), else ''. Unknown → treated as related."""
+    try:
+        graph = crate_graph()
+        a, b = crates_of(files_a, graph), crates_of(files_b, graph)
+    except Exception as e:  # noqa: BLE001 — be safe: an unknown relation means update first
+        return "关系算不出来（%s）" % str(e)[:120]
+    if not a or not b:
+        return ""
+    if ALL_CRATES in a or ALL_CRATES in b:
+        return "改到工作区根配置（影响所有 crate）"
+    affected, deps = graph[0], graph[2]
+    same = sorted(a & b)
+    if same:
+        return "同一个 crate：" + ", ".join(same[:3])
+    down_a, down_b = affected.downstream(a, deps), affected.downstream(b, deps)
+    pairs = ["%s 依赖 %s" % (x, y) for x in sorted(a) for y in sorted(b) if x in down_b and x != y]
+    pairs += ["%s 依赖 %s" % (y, x) for x in sorted(a) for y in sorted(b) if y in down_a and x != y]
+    return ("有依赖：" + ", ".join(pairs[:3])) if pairs else ""
 
 
 def fetch_pr_head(num):
@@ -535,12 +623,13 @@ def rerun_cancelled(pr, ps, names):
         if not r or r["conclusion"] != "cancelled":
             continue
         ids = seen.setdefault(name, [])
-        if r["id"] in ids:
+        if r["id"] in ids or r["id"] in seen.get("_infra", []):
             continue  # rerun already requested; waiting for the new run to show up
         done = parse_ts(r.get("completed_at"))
         if done and (now_utc() - done).total_seconds() < grace * 60:
             continue  # a replacing run (e.g. after update-branch) may still appear
-        if len(ids) >= CFG.get("max_cancellations", 2) - 1:
+        infra = runner_not_acquired(r["id"])
+        if not infra and len(ids) >= CFG.get("max_cancellations", 2) - 1:
             ids.append(r["id"])
             return "%s 在同一个 head %s 上被取消了 %d 次" % (name, pr["headRefOid"][:7], len(ids))
         # A check run's id is its Actions job id.
@@ -554,11 +643,26 @@ def rerun_cancelled(pr, ps, names):
                         % (pr["number"], name, r["id"], (err or out).strip()[:200]))
                     ps["rerun_error"] = r["id"]
                 continue
+        if infra:
+            # GitHub had no runner (capacity); not counted, bounded by ci_timeout_minutes.
+            seen.setdefault("_infra", []).append(r["id"])
+            log("#%d %s got no runner on %s (GitHub capacity); reran job %d, not counted"
+                % (pr["number"], name, pr["headRefOid"][:7], r["id"]))
+            continue
         ids.append(r["id"])
         log("#%d %s was cancelled on %s; reran job %d (%d/%d)"
             % (pr["number"], name, pr["headRefOid"][:7], r["id"], len(ids),
                CFG.get("max_cancellations", 2)))
     return None
+
+
+def runner_not_acquired(check_run_id):
+    """True if GitHub cancelled the job because no hosted runner picked it up."""
+    try:
+        notes = gh_json(["api", "repos/%s/check-runs/%d/annotations" % (CFG["repo"], check_run_id)])
+    except (RuntimeError, ValueError):
+        return False
+    return any("not acquired by Runner" in (a.get("message") or "") for a in notes or [])
 
 
 def scratch_at(commit):
@@ -675,7 +779,7 @@ def decide(pr, st):
     over = overlap(pr["headRefOid"])
     data["overlap"] = over
     if over:
-        return "update", "和更新的 dev 改了同样的文件：" + ", ".join(over[:5]), data
+        return "update", "和更新的 dev 改了同样的文件或有依赖的 crate：" + ", ".join(over[:5]), data
     if pr["mergeable"] != "MERGEABLE":
         return "wait-mergeable", "GitHub mergeable=%s" % pr["mergeable"], data
     return "merge", "CI 全绿，无重叠，MERGEABLE", data
@@ -845,12 +949,69 @@ def set_paused(st, reason):
             CFG["labels"]["paused"]], check=False)
 
 
+def rerun_dev_cancelled(st, sha, latest):
+    """dev runs are never cancelled by concurrency, so a cancelled required job there
+    (usually: no runner acquired) leaves dev with no CI signal at all. Rerun it, as often
+    as needed, until it has a real result."""
+    done_ids = st.setdefault("dev_reruns", [])
+    for name in CFG["checks"]["full"]:
+        r = latest.get(name)
+        if not r or r["status"] != "completed" or r["conclusion"] != "cancelled" or r["id"] in done_ids:
+            continue
+        ended = parse_ts(r.get("completed_at"))
+        if ended and (now_utc() - ended).total_seconds() < CFG.get("cancel_grace_minutes", 2) * 60:
+            continue
+        if not mutate("rerun cancelled dev job %d (%s) on %s" % (r["id"], name, sha[:7])):
+            continue
+        rc, out, err = sh(["gh", "api", "-X", "POST", "repos/%s/actions/jobs/%d/rerun"
+                           % (CFG["repo"], r["id"])], check=False)
+        if rc != 0:
+            if st.get("dev_rerun_error") != r["id"]:
+                log("dev %s: rerun of %s (job %d) not possible yet: %s"
+                    % (sha[:7], name, r["id"], (err or out).strip()[:200]))
+                st["dev_rerun_error"] = r["id"]
+            continue
+        done_ids.append(r["id"])
+        st["dev_reruns"] = done_ids[-50:]
+        log("dev %s: %s was cancelled; reran job %d" % (sha[:7], name, r["id"]))
+
+
+def auto_resume_if_green(st, sha, latest):
+    """Lift a pause the train put on itself for a red dev commit once the newest dev
+    commit's full checks are all green. Manual pauses are left alone."""
+    red = auto_paused_sha()
+    if not red:
+        return False
+    full = CFG["checks"]["full"]
+    if not all(n in latest and latest[n]["status"] == "completed"
+               and latest[n]["conclusion"] == "success" for n in full):
+        return False
+    line = "merge-train 自动恢复：dev %s 的全量 CI 全绿（暂停原因是 dev %s 红了）" % (sha[:7], red[:7])
+    log(line)
+    if not mutate("auto-resume the queue and notify %s" % LEADERS.get("pause_notify")):
+        return True
+    if os.path.exists(pause_file()):
+        os.remove(pause_file())
+    num = board_issue_number(st)
+    if num:
+        sh(["gh", "issue", "edit", str(num), "--repo", CFG["repo"], "--remove-label",
+            CFG["labels"]["paused"]], check=False)
+    clear_auto_pause()
+    st.pop("paused", None)
+    for leader in LEADERS.get("pause_notify", []):
+        send(leader, line[:120], line)
+    return True
+
+
 def check_dev_red(st):
-    """Pause the queue when the newest dev commit's required full checks failed."""
+    """Pause the queue when the newest dev commit's required full checks failed; lift
+    that pause by itself once the newest dev commit is green again."""
     sha = git("rev-parse", "origin/" + CFG["base"]).strip()
+    latest = check_runs(sha)
+    rerun_dev_cancelled(st, sha, latest)
+    auto_resume_if_green(st, sha, latest)
     if red_ack_get() == sha:
         return False
-    latest = check_runs(sha)
     bad = [(n, latest[n]["conclusion"], latest[n]["html_url"]) for n in CFG["checks"]["full"]
            if n in latest and latest[n]["status"] == "completed"
            and latest[n]["conclusion"] in ("failure", "timed_out", "startup_failure")]
@@ -860,10 +1021,11 @@ def check_dev_red(st):
     log("PAUSE: " + reason)
     if mutate("pause the queue and notify %s" % LEADERS.get("pause_notify")):
         red_ack_set(sha)  # pause once per red commit
-        set_paused(st, reason + "（恢复：python3 tools/merge-train/merge_train.py resume）")
+        set_paused(st, reason + "（dev 最新提交全量变绿后自动恢复；也可手动 merge_train.py resume）")
+        with open(auto_pause_file(), "w", encoding="utf-8") as f:
+            f.write(sha + "\n")
         body = reason + "\n" + "\n".join("- %s %s" % (n, u) for n, _, u in bad) + \
-            "\n合并队列已暂停。修好 dev 后运行 `merge_train.py resume`，或去掉看板 issue 上的 %s 标签并删除暂停文件。" \
-            % CFG["labels"]["paused"]
+            "\n合并队列已暂停。dev 最新提交的全量 CI 全绿后会自动恢复并通知；也可以手动运行 `merge_train.py resume`。"
         for leader in LEADERS.get("pause_notify", []):
             send(leader, "merge-train 暂停：" + reason[:80], body, msg_type="escalation",
                  priority="high")
@@ -944,13 +1106,34 @@ def one_pass(st):
     return skip_ahead(q, st)
 
 
+def changed_files(sha):
+    """Files a PR head changed since its merge-base with dev."""
+    mb = git("merge-base", "origin/" + CFG["base"], sha).strip()
+    return set(filter(None, git("diff", "--name-only", mb, sha).splitlines()))
+
+
+def head_conflict(head_files, files):
+    """Why a later PR must not skip ahead of the head: shared files (Cargo.lock and
+    docs/ excluded) or crates that are the same or depend on each other. '' if none."""
+    ignore = CFG["merge"]["overlap_ignore_dev"]
+    keep = lambda f: not any(f == i or (i.endswith("/") and f.startswith(i)) for i in ignore)  # noqa: E731
+    shared = sorted(f for f in head_files & files if keep(f))
+    if shared:
+        return ", ".join(shared[:5])
+    rel = crate_relation(head_files, files)
+    return ("crate " + rel) if rel else ""
+
+
 def skip_ahead(q, st):
     """When the queue head has been waiting too long, merge the first later PR (in
-    label order) that is ready to merge right now. Later PRs are only merged, never
-    updated, repaired or failed here; the head keeps its place."""
+    label order) that is ready to merge right now and touches none of the head's files.
+    A PR that overlaps the head would push it into another update-branch and full CI
+    run (starving it), so it keeps waiting behind the head. Later PRs are only merged,
+    never updated, repaired or failed here; the head keeps its place."""
     waited = (now_utc() - dt.datetime.fromisoformat(st["head_since"])).total_seconds() / 60
     if len(q) < 2 or waited < CFG.get("skip_ahead_after_minutes", 30):
         return False
+    head_files = None
     for p in q[1:]:
         try:
             decision, detail, _ = decide(p, st)
@@ -960,6 +1143,19 @@ def skip_ahead(q, st):
         if (decision, detail) != (ps.get("decision"), ps.get("detail")):
             log("#%d (behind #%d) %s → %s: %s" % (p["number"], q[0]["number"],
                                                   p["headRefOid"][:7], decision, detail))
+        if decision == "merge":
+            try:
+                if head_files is None:
+                    fetch_pr_head(q[0]["number"])
+                    head_files = changed_files(q[0]["headRefOid"])
+                why = head_conflict(head_files, changed_files(p["headRefOid"]))
+            except Exception as e:  # noqa: BLE001 — unknown overlap: do not jump the queue
+                why = "?（%s）" % str(e)[:80]
+            if why:
+                decision, detail = "wait-head", "已就绪，但和队首 #%d 改了同样的文件或有依赖的 crate，不插队：%s" % (
+                    q[0]["number"], why)
+                if detail != ps.get("detail"):
+                    log("#%d %s" % (p["number"], detail))
         ps.update(decision=decision, detail=detail, checked=now_utc().isoformat())
         if decision == "merge":
             log("#%d has waited %d min at the front; merging ready #%d ahead of it"
@@ -1212,6 +1408,7 @@ def cmd_setup():
 
 def cmd_pause():
     st = load_state()
+    clear_auto_pause()  # a person paused it: only a person resumes it
     reason = "手动暂停 %s%s" % (dt.datetime.now().strftime("%m-%d %H:%M"),
                               "：" + ARGS.reason if ARGS.reason else "")
     set_paused(st, reason)
@@ -1222,6 +1419,7 @@ def cmd_pause():
 
 def cmd_resume():
     st = load_state()
+    clear_auto_pause()
     if os.path.exists(pause_file()):
         os.remove(pause_file())
     num = board_issue_number(st)

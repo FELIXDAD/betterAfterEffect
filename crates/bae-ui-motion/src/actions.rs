@@ -77,6 +77,12 @@ pub mod ids {
     /// Layer > Markers > Add Marker (AE numpad *, Mac Control+8): a layer marker at
     /// the current time on each selected layer, or a comp marker when none is.
     pub const ADD_MARKER: &str = "motion.layer.add_marker";
+    /// Animation > Animate Text > … (params `{"property": "position"}`): a new
+    /// animator on each selected text layer.
+    pub const ANIMATE_TEXT: &str = "motion.anim.animate_text";
+    /// Animation > Add Text Selector > Range: to the last animator.
+    pub const ADD_TEXT_SELECTOR: &str = "motion.anim.add_text_selector";
+    pub const REMOVE_ALL_TEXT_ANIMATORS: &str = "motion.anim.remove_all_text_animators";
     /// Numbered comp marker N at the current time (AE Shift+0–9 on the main
     /// keyboard; params `{"number": n}`): the comp marker whose comment is "N",
     /// moved here when it exists, else added.
@@ -121,6 +127,7 @@ pub const SWITCHES: &[(&str, &str)] = &[
     ("locked", "Lock"),
     ("audio_enabled", "Audio"),
     ("enabled", "Video"),
+    ("effects_enabled", "Effect"),
     ("solo", "Solo"),
     ("collapse_transformation", "Collapse"),
     ("motion_blur", "Motion Blur"),
@@ -216,6 +223,9 @@ pub const ACTIONS: &[(&str, &str)] = &[
     (ids::KEY_VELOCITY, "Keyframe Velocity"),
     (ids::SELECT_KEY_LABEL_GROUP, "Select Keyframe Label Group"),
     (ids::ADD_MARKER, "Add Marker"),
+    (ids::ANIMATE_TEXT, "Animate Text"),
+    (ids::ADD_TEXT_SELECTOR, "Add Text Selector"),
+    (ids::REMOVE_ALL_TEXT_ANIMATORS, "Remove All Text Animators"),
     (ids::SET_COMP_MARKER, "Set Composition Marker"),
     (ids::GO_TO_COMP_MARKER, "Go to Composition Marker"),
     (ids::ADD_MARKER_DIALOG, "Add Marker with Dialog"),
@@ -810,6 +820,37 @@ pub(crate) fn handle(inv: &Invocation, cx: &mut PanelContext<'_>, session: &Shar
         ids::KEY_VELOCITY if !keys.is_empty() => {
             s.key_dialog = crate::timeline::VelocityDialog::new(stage, keys)
                 .map(crate::timeline::KeyDialog::Velocity);
+        }
+        ids::ANIMATE_TEXT | ids::ADD_TEXT_SELECTOR | ids::REMOVE_ALL_TEXT_ANIMATORS => {
+            let texts: Vec<PrimPath> = layers
+                .iter()
+                .filter(|l| query::layer_kind(stage, l).as_deref() == Some("text"))
+                .cloned()
+                .collect();
+            if texts.is_empty() {
+                return true;
+            }
+            match id {
+                ids::ANIMATE_TEXT => {
+                    let property = inv
+                        .params
+                        .get("property")
+                        .cloned()
+                        .unwrap_or(json!("position"));
+                    cx.invoke_with(
+                        "text.animate",
+                        json!({"layers": texts, "property": property}),
+                    );
+                }
+                ids::ADD_TEXT_SELECTOR => {
+                    if let Some(a) =
+                        bae_motion::text_animators::animators_of(stage, &texts[0]).last()
+                    {
+                        cx.invoke_with("text.add_selector", json!({ "animator": a }));
+                    }
+                }
+                _ => cx.invoke_with("text.remove_animators", json!({ "layers": texts })),
+            }
         }
         ids::SET_COMP_MARKER | ids::GO_TO_COMP_MARKER => {
             let n = inv

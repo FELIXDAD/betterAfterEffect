@@ -198,6 +198,59 @@ fn main() {
         c
     };
 
+    // Spot, point and parallel lights plus ambient over the 3D scene.
+    let lit = |mut c: RenderComp| {
+        use bae_render::light::{Falloff, Light, LightKind};
+        let at = |kind, p: DVec3, aim: DVec3, intensity| Light {
+            kind,
+            world: DMat4::from_translation(p) * bae_render::camera::look_at(aim - p),
+            point_of_interest: aim,
+            color: [1.0, 0.95, 0.9],
+            intensity,
+            cone_angle: 60.0,
+            cone_feather: 50.0,
+            falloff: Falloff::Smooth,
+            radius: 800.0,
+            falloff_distance: 1500.0,
+            casts_shadows: false,
+            shadow_darkness: 100.0,
+            shadow_diffusion: 0.0,
+            scope_below: None,
+        };
+        let centre = DVec3::new(960.0, 540.0, 600.0);
+        c.lights = vec![
+            at(
+                LightKind::Spot,
+                DVec3::new(300.0, 100.0, -800.0),
+                centre,
+                120.0,
+            ),
+            at(
+                LightKind::Point,
+                DVec3::new(1600.0, 300.0, -300.0),
+                centre,
+                70.0,
+            ),
+            at(
+                LightKind::Parallel,
+                DVec3::new(0.0, 0.0, -500.0),
+                centre,
+                40.0,
+            ),
+            at(LightKind::Ambient, DVec3::ZERO, centre, 20.0),
+        ];
+        c
+    };
+    // Every layer casts and receives shadows from the spot and point lights.
+    let shadows = |mut c: RenderComp| {
+        for l in &mut c.lights {
+            l.casts_shadows = l.kind != bae_render::light::LightKind::Ambient;
+        }
+        for l in &mut c.layers {
+            l.material.casts_shadows = bae_render::light::ShadowMode::On;
+        }
+        c
+    };
     let mut renderer = Renderer::with_config(
         gpu.clone(),
         RendererConfig {
@@ -239,6 +292,12 @@ fn main() {
         fps("mb_2d full", &|f| moving(f, true), &full),
         fps("still full", &|f| moving(f, false), &full),
         fps("mb_3d full", &|f| scene_3d(f, true), &full),
+        fps("3d_lit full", &|f| lit(scene_3d(f, false)), &full),
+        fps(
+            "3d_shadows full",
+            &|f| shadows(lit(scene_3d(f, false))),
+            &full,
+        ),
     ];
     let report = serde_json::json!({
         "scenario": "three_d",

@@ -1,6 +1,11 @@
 //! Per-channel curves and spatial tone correction.
+pub(crate) mod auto;
+pub(crate) mod colorama;
+pub(crate) mod colorama_definition;
+mod colorama_palettes;
 mod curves;
 mod shadow;
+mod temporal_stats;
 
 use crate::gpu::{self, Binding, KernelKey, KernelSource, Resource, UniformWriter};
 use crate::target::EffectTarget;
@@ -12,10 +17,18 @@ pub(crate) use shadow::ShadowHighlight;
 
 pub(crate) fn prewarm(rt: &gpu::Runtime, format: wgpu::TextureFormat) -> Result<(), RenderError> {
     for entry in [
+        "colorama",
+        "auto_histogram",
+        "auto_mapping",
+        "auto_midtones",
+        "auto_snap",
+        "auto_apply",
         "apply_curves",
         "histogram",
         "percentiles",
         "shadow_highlight",
+        "scene_compare",
+        "mix_temporal_stats",
     ] {
         kernel(rt, format, entry)?;
     }
@@ -34,9 +47,32 @@ fn kernel(
     };
     rt.kernel(&key, || {
         let (source, bytes, inputs) = match entry {
+            "auto_histogram" | "auto_mapping" | "auto_midtones" | "auto_snap" | "auto_apply" => (
+                concat!(
+                    include_str!("../../shaders/channel_math.wgsl"),
+                    include_str!("../../shaders/image_grid.wgsl"),
+                    include_str!("auto.wgsl")
+                ),
+                80,
+                if matches!(entry, "auto_histogram" | "auto_mapping") {
+                    1
+                } else {
+                    2
+                },
+            ),
+            "colorama" => (
+                concat!(
+                    include_str!("../../shaders/channel_math.wgsl"),
+                    include_str!("../../shaders/image_grid.wgsl"),
+                    include_str!("colorama.wgsl")
+                ),
+                colorama::BYTES,
+                3,
+            ),
             "apply_curves" => (include_str!("curves.wgsl"), curves::UNIFORM_BYTES, 1),
             "histogram" | "percentiles" => (include_str!("shadow.wgsl"), shadow::UNIFORM_BYTES, 1),
             "shadow_highlight" => (include_str!("shadow.wgsl"), shadow::UNIFORM_BYTES, 4),
+            "scene_compare" | "mix_temporal_stats" => (include_str!("temporal_stats.wgsl"), 16, 3),
             _ => unreachable!(),
         };
         let mut bindings = vec![

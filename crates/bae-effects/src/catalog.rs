@@ -38,6 +38,8 @@ pub struct EffectInfo {
     pub obsolete: bool,
     /// Chinese parameter names by parameter id.
     pub param_names_zh: Vec<(u32, String)>,
+    /// Chinese popup options by parameter id (in option order).
+    pub param_options_zh: Vec<(u32, Vec<String>)>,
 }
 
 impl EffectInfo {
@@ -216,15 +218,61 @@ impl DefBuilder {
         self
     }
 
+    /// The host's second menu for an image layer parameter. It has no AE disk ID.
+    pub(crate) fn layer_stage(mut self, layer_id: u32) -> Self {
+        self = self.popup(
+            layer_stage_id(layer_id),
+            "Input Stage",
+            "输入阶段",
+            1,
+            &["Source", "Masks", "Effects & Masks"],
+        );
+        let stage = self.def.params.last_mut().unwrap();
+        stage.match_name = None;
+        stage.flags.cannot_animate = true;
+        stage.flags.cannot_time_vary = true;
+        self
+    }
+
     pub fn build(self) -> (EffectDef, Vec<(u32, String)>) {
         (self.def, self.zh)
     }
+}
+
+pub(crate) const fn layer_stage_id(layer_id: u32) -> u32 {
+    0x10000 + layer_id
 }
 
 /// Chinese popup labels for Rust effects in the controls and channel group,
 /// in the same one-based order as the corresponding parameter definition.
 pub fn options_zh(match_name: &str, param_id: u32) -> Option<&'static [&'static str]> {
     Some(match (match_name, param_id) {
+        (_, 0x10001 | 0x10003) => &["源", "蒙版", "效果和蒙版"],
+        ("ADBE Echo", 5) => &[
+            "相加",
+            "最大值",
+            "最小值",
+            "滤色",
+            "从后至前组合",
+            "从前至后组合",
+            "混合",
+        ],
+        ("ADBE Gradient Wipe", 4) => &["拼贴渐变", "中心渐变", "伸缩渐变以适合"],
+        ("ADBE Displacement Map", 2 | 4) => &[
+            "红色",
+            "绿色",
+            "蓝色",
+            "Alpha",
+            "明亮度",
+            "色相",
+            "亮度",
+            "饱和度",
+            "完全",
+            "一半",
+            "关闭",
+        ],
+        ("ADBE Displacement Map", 6) => &["中心图", "伸缩对应图以适合", "拼贴图"],
+        ("ADBE Texturize", 4) => &["拼贴纹理", "居中纹理", "拉伸纹理以适合"],
         ("ADBE Dropdown Control", 1) => &["项目 1", "项目 2", "项目 3"],
         ("ADBE Minimax", 1) => &["最小值", "最大值", "先最小值再最大值", "先最大值再最小值"],
         ("ADBE Minimax", 3) => &["颜色", "Alpha 和颜色", "红色", "绿色", "蓝色", "Alpha"],

@@ -8,6 +8,7 @@ mod matte;
 mod noise_grain;
 mod perspective;
 mod stylize;
+mod time;
 
 const HD: [u32; 2] = [1920, 1080];
 
@@ -27,5 +28,6 @@ pub(super) fn all() -> Vec<Case> {
     matte::register(&mut cases);
     color::shadow_highlight(&mut cases);
     distort::register(&mut cases);
+    time::register(&mut cases);
     cases
 }
