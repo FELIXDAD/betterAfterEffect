@@ -645,3 +645,42 @@ type = "float"
 default = 0
 range = [-100, 100]
 group = "blacks"
+
+[[effect]]
+id = "video-limiter"
+name = "Video Limiter"
+category = "Color Correction"
+implementation = "wgsl"
+ae_match_names = ["ADBE DigitalVideoLimiter"]
+shader = "shaders/video_limiter.wgsl"
+includes = ["shaders/signal_limit.wgsl"]
+
+[[effect.param]]
+id = 1
+key = "clip_level"
+type = "popup"
+name = "Clip Level"
+default = 2
+choices = ["100 IRE (SMPTE Range)", "103 IRE", "105 IRE (EBU R103 Preferred)", "109 IRE (SDI Limit)"]
+
+[[effect.param]]
+id = 2
+key = "compression_before_clipping"
+type = "popup"
+name = "Compression Before Clipping"
+default = 1
+choices = ["None", "3%", "5%", "10%", "20%"]
+
+[[effect.param]]
+id = 3
+key = "gamut_warning"
+type = "checkbox"
+name = "Gamut Warning"
+default = false
+
+[[effect.param]]
+id = 4
+key = "gamut_warning_color"
+type = "color"
+name = "Gamut Warning Color"
+default = [0.941176, 0.039216, 0.862745, 1]
