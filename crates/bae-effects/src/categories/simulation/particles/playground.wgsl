@@ -95,6 +95,7 @@ fn playground(b:Birth,t:f32)->Sprite{
         // Second (to 0 to stop firing) keeps the particles already fired.
         age=t-b.time;
         if age<0.{return Sprite();}
+        p.pos=emitter_at(b.time,p.pos);
         p.pos+=vec2f(q.x*f(P102),0.);
         p.vel=dir(f(P105)+q.y*f(P106))*(f(P107)+q.z*f(P108));
     }

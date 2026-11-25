@@ -88,7 +88,7 @@ fn mercury(b:Birth,t:f32)->Sprite{
     }
     let drag=max(0.,f(9));
     let travel=select(age,(1.-exp(-drag*age))/max(.0001,drag),drag>.0001);
-    let center=pt(3)+randoms.xy*vec2f(f(1),f(2))+v*f(5)*cfg.size.x*.22*travel+vec2f(0.,.14*cfg.size.x*f(8)*age*travel);
+    let center=emitter_at(b.time,pt(3))+randoms.xy*vec2f(f(1),f(2))+v*f(5)*cfg.size.x*.22*travel+vec2f(0.,.14*cfg.size.x*f(8)*age*travel);
     var envelope=1.;
     switch u32(f(13)){case 1u:{envelope=1.-phase;}case 2u:{envelope=phase;}case 3u:{envelope=sin(3.14159*phase);}case 4u:{envelope=pow(1.-phase,2.);}default:{}}
     let r=mix(f(14),f(15),phase)*cfg.size.x*.06;

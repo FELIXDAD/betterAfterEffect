@@ -150,18 +150,23 @@ impl Effect for Simulation {
         match self.kind {
             Kind::World => &[7, 8, 9],
             Kind::Systems => &[4],
+            Kind::Mercury => &[3],
+            Kind::Playground => &[101],
             _ => &[],
         }
     }
 
     fn parameter_times(&self, p: &EffectParams<'_>) -> Vec<bae_model::Time> {
-        let life_id = match self.kind {
-            Kind::World => 5,
-            Kind::Systems => 2,
+        let t = p.time.as_seconds();
+        let v = Params::new(&self.def, p);
+        let life = match self.kind {
+            Kind::World => max_lifetime(v, 5),
+            Kind::Systems => max_lifetime(v, 2),
+            Kind::Mercury => max_lifetime(v, 7),
+            // The cannon keeps every particle: the whole emission so far.
+            Kind::Playground => t.max(0.),
             _ => return Vec::new(),
         };
-        let t = p.time.as_seconds();
-        let life = max_lifetime(Params::new(&self.def, p), life_id);
         let fps = p.frame_rate.as_f64();
         let stride = ((life * fps / 61.).ceil().max(1.)) / fps;
         let first = ((t - life).max(0.) / stride).floor() as i64;
@@ -268,7 +273,11 @@ impl Scene<'_> {
                     self.size[1] * 0.5 + component(8),
                     component(9),
                 ]
-            } else if let Some(Value::Vec2(xy)) = value(4) {
+            } else if let Some(Value::Vec2(xy)) = value(match kind {
+                Kind::Mercury => 3,
+                Kind::Playground => 101,
+                _ => 4,
+            }) {
                 [
                     xy[0] as f32 - self.origin[0],
                     xy[1] as f32 - self.origin[1],
