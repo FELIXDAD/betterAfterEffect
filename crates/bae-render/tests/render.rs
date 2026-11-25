@@ -92,7 +92,8 @@ fn output_targets_reuse_only_the_returned_storage() {
         .unwrap();
     assert_eq!(spare.view().texture(), &storage);
     assert_ne!(target.view().texture(), &storage);
-    let pixels = |texture| bae_gpu::transfer::read_texture(&gpu, texture).unwrap();
+    let pixels =
+        |texture: &bae_gpu::wgpu::Texture| bae_gpu::transfer::read_texture(&gpu, texture).unwrap();
     assert_eq!(
         pixels(target.view().texture()).pixel(0, 0),
         [255, 0, 0, 255]
