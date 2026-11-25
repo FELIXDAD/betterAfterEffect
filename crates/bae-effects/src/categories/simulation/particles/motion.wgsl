@@ -127,7 +127,7 @@ fn birth_at(slot: u32) -> Birth {
     return Birth(span.first_id+i, span.start+dt, span.life+dt*span.life_slope);
 }
 
-fn at_age(id: u32, birth: f32, age: f32) -> State {
+fn at_age(id: u32, birth: f32, age: f32, life: f32) -> State {
     var s = spawn(id,birth);
     let action = u32(f(66));
     let collide = cfg.kind == WORLD && action > 1u;
@@ -137,12 +137,15 @@ fn at_age(id: u32, birth: f32, age: f32) -> State {
     let floor_y = cfg.size.y * .5 + f(3)*cfg.size.x;
     let bounce = clamp((f(67)+(s.variation-.5)*f(68))*.01,0.,2.);
     let scatter = (s.variation-.5)*f(69)*.01;
-    // Collision and noise forces use a fixed grid anchored at birth.
-    for (var step = 0u; f32(step)/60. < age; step++) {
-        let dt = min(1./60., age-f32(step)/60.);
+    // A birth-anchored grid keeps seeks deterministic at every lifespan.
+    let step_size = max(1./60., life/1024.);
+    let steps = min(1024u, u32(ceil(age/step_size)));
+    for (var step = 0u; step < steps; step++) {
+        let elapsed = f32(step)*step_size;
+        let dt = min(step_size, age-elapsed);
         if turbulent {
             let strength = select(f(15),f(19),cfg.kind==WORLD)*cfg.size.x*0.07;
-            let field = sin(s.pos.yzx * (8./cfg.size.x) + phase + vec3f(f32(step)/30.));
+            let field = sin(s.pos.yzx * (8./cfg.size.x) + phase + vec3f(2.*elapsed));
             s.vel += field*strength*dt;
         }
         var next = integrate(s,dt);
