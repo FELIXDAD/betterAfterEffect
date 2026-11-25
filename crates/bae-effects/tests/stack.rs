@@ -261,7 +261,9 @@ fn stopped_emitter_keeps_birth_position_and_lifespan_on_seek() {
     };
     let alive = render(0.8, None).0;
     let visible: Vec<_> = alive
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .enumerate()
         .filter(|(_, p)| p[3] > 32)
         .map(|(i, _)| i % 64)
@@ -274,7 +276,14 @@ fn stopped_emitter_keeps_birth_position_and_lifespan_on_seek() {
         visible.iter().all(|&x| x < 32),
         "emission stops at the hold key"
     );
-    assert!(render(1.6, None).0.chunks_exact(4).all(|p| p[3] == 0));
+    assert!(
+        render(1.6, None)
+            .0
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|p| p[3] == 0)
+    );
     render(0.2, None);
     assert_eq!(
         alive,
@@ -288,7 +297,9 @@ fn stopped_emitter_keeps_birth_position_and_lifespan_on_seek() {
         "adjacent preview tiles share a particle surface"
     );
     let expected: Vec<_> = alive
-        .chunks_exact(64 * 4)
+        .as_chunks::<256>()
+        .0
+        .iter()
         .flat_map(|row| row[12 * 4..32 * 4].iter().copied())
         .collect();
     assert_eq!(second, expected);

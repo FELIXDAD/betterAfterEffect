@@ -37,6 +37,13 @@ struct Simulation {
     kind: Kind,
 }
 
+fn max_lifetime(p: Params<'_>, id: u32) -> f64 {
+    p.p.tracks.iter().find(|(n, _)| *n == id).map_or_else(
+        || p.f(id),
+        |(_, curve)| curve.maximum_through(p.p.time.as_seconds()),
+    )
+}
+
 impl Simulation {
     fn sources(&self) -> &[u32] {
         match self.kind {
@@ -55,7 +62,7 @@ impl Simulation {
                 return vec![Some(texture)];
             }
             let t = p.time.as_seconds();
-            let duration = v.f(5);
+            let duration = max_lifetime(v, 5);
             let start = if v.popup(47) == 1 { t - duration } else { 0. };
             return (0..4)
                 .map(|i| {
@@ -123,10 +130,7 @@ impl Effect for Simulation {
             _ => return Vec::new(),
         };
         let t = p.time.as_seconds();
-        let life = p.tracks.iter().find(|(id, _)| *id == life_id).map_or_else(
-            || Params::new(&self.def, p).f(life_id),
-            |(_, v)| v.maximum_through(t),
-        );
+        let life = max_lifetime(Params::new(&self.def, p), life_id);
         let fps = p.frame_rate.as_f64();
         let stride = ((life * fps / 61.).ceil().max(1.)) / fps;
         let first = ((t - life).max(0.) / stride).floor() as i64;

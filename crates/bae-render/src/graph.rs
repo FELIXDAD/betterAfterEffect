@@ -1531,6 +1531,11 @@ impl Builder<'_, '_> {
             }
             self.time_dependent |= !history.is_empty() || !tracks.is_empty();
         }
+        let params = EffectParams {
+            history: &history,
+            tracks: &tracks,
+            ..params
+        };
         let mut layers = Vec::new();
         for dep in effect.layer_dependencies(&params) {
             if let Some(node) = self.layer_input(comp, &dep, scale, depth)? {
