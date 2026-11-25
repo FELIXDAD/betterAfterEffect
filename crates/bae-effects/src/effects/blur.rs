@@ -224,15 +224,15 @@ impl BoxBlur {
     /// Fast Box Blur (`ADBE Box Blur2`; AE 26 defaults: 3 iterations, Repeat
     /// Edge Pixels on).
     pub fn new() -> Self {
-        Self::build("ADBE Box Blur2", "Fast Box Blur", "Blur & Sharpen", 3, true)
+        Self::build("ADBE Box Blur2", "Fast Box Blur", "Blur & Sharpen")
     }
 
-    /// Box Blur (`ADBE Box Blur`, obsolete matchName, default 1 iteration).
+    /// Box Blur (`ADBE Box Blur`, obsolete matchName).
     pub fn legacy() -> Self {
-        Self::build("ADBE Box Blur", "Box Blur", "Obsolete", 1, false)
+        Self::build("ADBE Box Blur", "Box Blur", "Obsolete")
     }
 
-    fn build(match_name: &str, name: &str, category: &str, iterations: i64, repeat: bool) -> Self {
+    fn build(match_name: &str, name: &str, category: &str) -> Self {
         let (def, names_zh) = DefBuilder::new(match_name, name, category)
             .slider(
                 1,
@@ -244,9 +244,9 @@ impl BoxBlur {
                 1,
                 "pixels",
             )
-            .int(2, "Iterations", "迭代", iterations, [1, 50])
+            .int(2, "Iterations", "迭代", 3, [1, 50])
             .popup(3, "Blur Dimensions", "模糊方向", 1, &DIMENSIONS)
-            .checkbox(4, "Repeat Edge Pixels", "重复边缘像素", repeat)
+            .checkbox(4, "Repeat Edge Pixels", "重复边缘像素", true)
             .build();
         Self { def, names_zh }
     }
