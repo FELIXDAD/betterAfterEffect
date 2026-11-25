@@ -34,6 +34,7 @@ impl TimelinePanel {
         axis: &TimeAxis,
         row: &Row,
         rect: Rect,
+        switch_input: switches::SwitchInput,
         comp_layers: &[PrimPath],
         key_rects: &mut Vec<(Rect, KeyRef)>,
     ) {
@@ -110,6 +111,7 @@ impl TimelinePanel {
                     let on = bool_attr(stage, layer, attr);
                     self.switch_cell(
                         ui,
+                        switch_input,
                         cx,
                         av(i),
                         rid(attr),
@@ -242,6 +244,7 @@ impl TimelinePanel {
                     let mut cell = |rect: Rect, attr, icon, on| {
                         self.switch_cell(
                             ui,
+                            switch_input,
                             cx,
                             rect,
                             rid(attr),

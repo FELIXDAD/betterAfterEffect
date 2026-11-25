@@ -711,6 +711,7 @@ impl Panel for TimelinePanel {
         let mut layer_rows: Vec<(Rect, PrimPath)> = Vec::new();
         let mut prop_rows: Vec<(Rect, PrimPath, String)> = Vec::new();
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body));
+        let switch_input = ui.input(switches::SwitchInput::read);
         egui::ScrollArea::vertical()
             .id_salt("timeline_rows")
             .auto_shrink([false, false])
@@ -730,6 +731,7 @@ impl Panel for TimelinePanel {
                         &axis,
                         row,
                         rect,
+                        switch_input,
                         &comp_layers,
                         &mut key_rects,
                     );
@@ -743,7 +745,7 @@ impl Panel for TimelinePanel {
                 }
             });
 
-        self.finish_switch_drag(ui, cx);
+        self.finish_switch_drag(switch_input, cx);
 
         // Drags that span rows.
         self.finish_drags(
