@@ -170,8 +170,8 @@ fn args(cmd: clap::Command) -> clap::Command {
             .value_name("FORMAT")
             .value_parser(ExportFormat::NAMES)
             .help(
-                "png | tiff | exr image sequences, or h264 | hevc | prores (422 HQ) | \
-                 prores4444 movies (macOS). Default: from the -o extension, else png",
+                "png | tiff | exr image sequences, h264 | hevc movies, or prores (422 HQ) | \
+                 prores4444 on macOS. Default: from the -o extension, else png",
             ),
     )
     .arg(

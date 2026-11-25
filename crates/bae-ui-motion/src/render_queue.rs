@@ -27,8 +27,7 @@ use bae_ui::{Panel, PanelContext, TabInfo, tr};
 
 use crate::gpu_preview::{PreviewEffects, PreviewSources};
 
-/// Formats offered in the panel (movies come with 08's Media Foundation work
-/// on Windows; `bae render --format` has them on macOS).
+/// Formats offered in the panel and by `bae render --format`.
 pub const FORMATS: [ExportFormat; 7] = [
     ExportFormat::Png,
     ExportFormat::Tiff,
@@ -39,10 +38,18 @@ pub const FORMATS: [ExportFormat; 7] = [
     ExportFormat::ProRes4444,
 ];
 
-/// Formats this build can write: image sequences everywhere, movies on macOS
-/// (AVFoundation). On Windows movies come with Media Foundation in a later
-/// version; the panel shows them disabled.
+/// Formats the host can encode.
 pub fn format_available(format: ExportFormat) -> bool {
+    #[cfg(windows)]
+    match format {
+        ExportFormat::H264 => {
+            return bae_media::media_foundation::encoder_available(bae_media::VideoCodec::H264);
+        }
+        ExportFormat::Hevc => {
+            return bae_media::media_foundation::encoder_available(bae_media::VideoCodec::Hevc);
+        }
+        _ => {}
+    }
     format.is_image() || cfg!(target_os = "macos")
 }
 
@@ -57,7 +64,10 @@ pub enum Channels {
 
 /// Whether `format` can carry an alpha channel.
 pub fn supports_alpha(format: ExportFormat) -> bool {
-    !matches!(format, ExportFormat::H264 | ExportFormat::ProRes)
+    match format {
+        ExportFormat::Hevc => bae_media::VideoCodec::Hevc.supports_alpha(),
+        _ => !matches!(format, ExportFormat::H264 | ExportFormat::ProRes),
+    }
 }
 
 /// The channels a new output module of `format` starts with: RGB, as AE's
@@ -968,9 +978,14 @@ fn item_ui(
                             format = f;
                         }
                         if !available {
-                            r.on_disabled_hover_text(tr(
-                                "Movies are not available on Windows yet; they come with Media Foundation in a later version.",
-                            ));
+                            let reason = match f {
+                                ExportFormat::ProRes | ExportFormat::ProRes4444 => {
+                                    "ProRes export requires macOS."
+                                }
+                                ExportFormat::Hevc => "A hardware HEVC encoder is required.",
+                                _ => "The system H.264 encoder is unavailable.",
+                            };
+                            r.on_disabled_hover_text(tr(reason));
                         }
                     }
                 })
@@ -993,7 +1008,11 @@ fn item_ui(
                 .truncate()
                 .selected_text(channels_label(channels))
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut channels, Channels::Rgb, channels_label(Channels::Rgb));
+                    ui.selectable_value(
+                        &mut channels,
+                        Channels::Rgb,
+                        channels_label(Channels::Rgb),
+                    );
                     let alpha = supports_alpha(item.format);
                     let r = ui.add_enabled(
                         alpha,
@@ -1027,7 +1046,11 @@ fn item_ui(
                         .speed(0.5)
                         .suffix(" Mbps"),
                 )
-                .labeled_value(egui::WidgetType::DragValue, &name("Target Bitrate"), &value);
+                .labeled_value(
+                    egui::WidgetType::DragValue,
+                    &name("Target Bitrate"),
+                    &value,
+                );
                 ui.end_row();
             }
             ui.label(tr("Output To"));
@@ -1448,8 +1471,11 @@ mod tests {
 
     #[test]
     fn movie_formats_channels_and_names() {
-        // Movies on macOS; on Windows they wait for Media Foundation.
         for f in FORMATS {
+            #[cfg(windows)]
+            if matches!(f, ExportFormat::H264 | ExportFormat::Hevc) {
+                continue;
+            }
             assert_eq!(
                 format_available(f),
                 f.is_image() || cfg!(target_os = "macos"),
@@ -1524,22 +1550,34 @@ mod tests {
         assert_eq!((p4444.alpha, p4444.bit_rate), (ExportAlpha::Straight, None));
     }
 
-    /// The queue renders movies with bae-media's encoders (macOS).
-    #[cfg(target_os = "macos")]
+    /// The same queued jobs use the system encoders on both desktops.
+    #[cfg(any(target_os = "macos", windows))]
     #[test]
-    fn renders_h264_and_prores_4444_movies() {
+    fn renders_available_movies() {
         let Some(gpu) = gpu() else {
             return;
         };
         let dir = tempfile::tempdir().unwrap();
-        let (stage, comp) = project();
+        let mut scene = bae_render::fixture::SceneBuilder::new();
+        let comp = scene
+            .comp("main", 320, 240, FrameRate::FPS_30, Time::ONE_SECOND)
+            .unwrap();
+        let stage = Project::from_stage(scene.into_stage()).stage;
         let info = bae_motion::query::comp_info(&stage, &comp).unwrap();
         let mut q = RenderQueue::default();
-        for format in [
+        let formats: Vec<_> = [
             ExportFormat::H264,
             ExportFormat::ProRes4444,
             ExportFormat::Hevc,
-        ] {
+        ]
+        .into_iter()
+        .filter(|&format| format_available(format))
+        .collect();
+        if formats.is_empty() {
+            eprintln!("SKIP: no system movie encoder");
+            return;
+        }
+        for &format in &formats {
             let id = q.add(&info, dir.path());
             let item = q.item_mut(id).unwrap();
             item.set_format(format);
@@ -1564,8 +1602,10 @@ mod tests {
                 job.format
             );
         }
-        for (name, ext) in [("h264", "mp4"), ("prores4444", "mov"), ("hevc", "mp4")] {
-            let file = dir.path().join(format!("m_{name}.{ext}"));
+        for format in formats {
+            let file = dir
+                .path()
+                .join(format!("m_{}.{}", format.name(), format.extension()));
             let len = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
             assert!(len > 0, "{} not written", file.display());
         }
