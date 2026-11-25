@@ -461,6 +461,7 @@ mod tests {
             let elsewhere = matches!(
                 id,
                 "info"
+                    | "audio"
                     | "character"
                     | "align"
                     | "paragraph"
