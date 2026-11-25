@@ -35,5 +35,9 @@ bae-gpu.workspace = true
 glam.workspace = true
 serde_json.workspace = true
 
+[[bench]]
+name = "shapes"
+harness = false
+
 [lints]
 workspace = true
