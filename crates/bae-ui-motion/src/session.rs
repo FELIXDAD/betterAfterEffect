@@ -86,8 +86,6 @@ pub struct Session {
     /// opened through (double-clicking pre-comp layers), the containing comp
     /// first.
     pub(crate) comp_flow: Vec<PrimPath>,
-    /// The Composition Mini-Flowchart is open (Tab).
-    pub(crate) mini_flowchart: bool,
     times: HashMap<PrimPath, Time>,
     pub selected_layers: Vec<PrimPath>,
     pub selected_keys: Vec<KeyRef>,

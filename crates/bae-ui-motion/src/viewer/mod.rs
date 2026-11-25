@@ -537,7 +537,6 @@ impl Panel for CompositionViewer {
             .allocate_rect(area, Sense::click_and_drag())
             .labeled(egui::WidgetType::Image, tr("Composition"));
         navigator::bar(ui, cx, &session, nav);
-        navigator::mini_flowchart(ui, cx, &session, nav);
         if std::mem::take(&mut self.escape) {
             ui.input_mut(|i| {
                 i.events.push(egui::Event::Key {
@@ -1102,15 +1101,6 @@ impl Panel for CompositionViewer {
             || ui.ctx().text_edit_focused()
             || egui::Popup::is_any_open(ui.ctx());
     }
-}
-
-/// Composition ▸ Composition Mini-Flowchart (see [`navigator`]).
-pub(crate) fn navigator_actions() -> impl Iterator<Item = (&'static str, &'static str)> {
-    navigator::ACTIONS.iter().copied()
-}
-
-pub(crate) fn navigator_handle(inv: &bae_ui::Invocation, cx: &PanelContext<'_>) -> bool {
-    navigator::handle(inv, cx)
 }
 
 /// The comp's resolution as a pixel step (Composition Settings > Resolution:
