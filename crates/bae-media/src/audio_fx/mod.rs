@@ -12,7 +12,24 @@ struct Definition {
     reverse: bool,
     create: fn() -> Box<dyn Processor>,
 }
-const DEFINITIONS: &[Definition] = &[];
+mod eq;
+mod svf;
+const DEFINITIONS: &[Definition] = &[
+    Definition {
+        name: "ADBE Param EQ",
+        defaults: &[
+            0.0, 1.0, 1000.0, 20.0, 50.0, 0.0, 5000.0, 20.0, 50.0, 0.0, 10000.0, 20.0, 50.0,
+        ],
+        reverse: false,
+        create: || Box::new(eq::Main::default()),
+    },
+    Definition {
+        name: "ADBE Aud BT",
+        defaults: &[0.0, 0.0],
+        reverse: false,
+        create: || Box::new(eq::Shelves::default()),
+    },
+];
 
 fn number(value: &Value) -> Option<f64> {
     value
