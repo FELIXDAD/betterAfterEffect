@@ -16,6 +16,10 @@
 //!   `a == h` or `a` is listed in [`HostApiSupport::compatible_0x_minors`]
 //!   (older 0.x minors this host explicitly still serves). 0.x minors may break
 //!   the ABI, so nothing is accepted implicitly.
+//! * **Pre-releases of 1.0.** A stable host may also list 0.x minors in
+//!   [`HostApiSupport::compatible_0x_minors`]: pre-release APIs whose layout is
+//!   identical to the stable one. They are presented their own version (0.1
+//!   plugins see `BaeHost.abi_version` = 0.1). BAE 1.0 lists 0.1.
 //! * The host presents to each plugin the **highest version of the plugin's
 //!   required major** it implements ([`HostApiSupport::check`] returns it); that
 //!   is the value of `BaeHost.abi_version` the plugin sees.
@@ -37,7 +41,7 @@ pub struct ApiVersion {
 
 impl ApiVersion {
     /// The API version this SDK was built against (`BAE_ABI_VERSION_MAJOR/MINOR`).
-    pub const CURRENT: ApiVersion = ApiVersion::new(0, 1);
+    pub const CURRENT: ApiVersion = ApiVersion::new(1, 0);
 
     /// Creates a version.
     pub const fn new(major: u16, minor: u16) -> Self {
@@ -170,17 +174,19 @@ pub struct HostApiSupport {
     /// newest minor of that major the shim implements (e.g. `[ApiVersion::new(1, 7)]`
     /// on a 2.x host). Must all have `major < current.major` and `major >= 1`.
     pub older_majors: &'static [ApiVersion],
-    /// Only for an unstable `current` (major 0): older 0.x minors this host
-    /// still serves unchanged. Ignored for stable majors.
+    /// Older 0.x minors this host still serves unchanged: for an unstable
+    /// `current`, minors below it; for a stable `current`, pre-release minors
+    /// whose layout is identical to the stable API (presented as themselves).
     pub compatible_0x_minors: &'static [u16],
 }
 
 impl HostApiSupport {
-    /// What this SDK version, used as a host, supports: exactly [`ApiVersion::CURRENT`].
+    /// What this SDK version, used as a host, supports: [`ApiVersion::CURRENT`]
+    /// and the layout-identical 0.1 pre-release.
     pub const SDK_DEFAULT: HostApiSupport = HostApiSupport {
         current: ApiVersion::CURRENT,
         older_majors: &[],
-        compatible_0x_minors: &[],
+        compatible_0x_minors: &[1],
     };
 
     /// Checks a plugin's required API version (spec §6.6 rule 1).
@@ -214,8 +220,12 @@ impl HostApiSupport {
         }
         // required.major < host.major
         if required.is_unstable() {
-            // 0.x plugins never run on a stable host.
-            return Err(ApiMismatch::MajorUnsupported { required, host });
+            // 0.x plugins run on a stable host only as listed pre-releases.
+            return if self.compatible_0x_minors.contains(&required.minor) {
+                Ok(required)
+            } else {
+                Err(ApiMismatch::MajorUnsupported { required, host })
+            };
         }
         match self
             .older_majors
@@ -386,7 +396,7 @@ mod tests {
                 host: v(3, 0)
             })
         );
-        // 0.x plugins never run on stable hosts.
+        // 0.x plugins never run on stable hosts that do not list them.
         assert!(matches!(
             host.check(v(0, 1)),
             Err(ApiMismatch::MajorUnsupported { .. })
@@ -454,6 +464,22 @@ mod tests {
     }
 
     #[test]
+    fn stable_host_serves_listed_pre_releases_as_themselves() {
+        let host = HostApiSupport::SDK_DEFAULT;
+        assert_eq!(ApiVersion::CURRENT, v(1, 0));
+        assert_eq!(host.check(v(0, 1)), Ok(v(0, 1)));
+        assert!(plugin_accepts_host(v(0, 1), host.check(v(0, 1)).unwrap()));
+        assert!(matches!(
+            host.check(v(0, 2)),
+            Err(ApiMismatch::MajorUnsupported { .. })
+        ));
+        assert!(matches!(
+            host.check(v(1, 1)),
+            Err(ApiMismatch::HostTooOld { .. })
+        ));
+    }
+
+    #[test]
     fn binary_check() {
         let host = HostApiSupport::SDK_DEFAULT;
         let api = ApiVersion::CURRENT;
@@ -479,7 +505,7 @@ mod tests {
 
     #[test]
     fn error_messages_are_actionable() {
-        let e = HostApiSupport::SDK_DEFAULT.check(v(0, 99)).unwrap_err();
+        let e = HostApiSupport::SDK_DEFAULT.check(v(1, 99)).unwrap_err();
         assert!(e.to_string().contains("update BAE"), "{e}");
     }
 }
